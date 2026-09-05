@@ -88,6 +88,11 @@ NODE_BIN="$STAGE/runtime/node/bin/node"
   -e 'import("./infra/inventree/http.mjs").then(()=>console.log("PASS  setup script imports resolve")).catch((e)=>{console.error("FAIL  "+e.message);process.exit(1)})' )
 bash -n "$STAGE/install.sh" && echo "PASS  install.sh parses"
 
+say "Installer logic self-tests"
+bash installer/selftest-header.sh | tail -1
+bash installer/selftest-env.sh | tail -1
+bash installer/selftest-distro.sh | tail -1
+
 say "Booting the packaged app with the bundled Node"
 # This is the check that matters: the standalone bundle has to serve pages using
 # only what is inside the payload. It runs without InvenTree on purpose.

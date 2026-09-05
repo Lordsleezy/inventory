@@ -18,9 +18,12 @@ Fresh Zorin, nothing installed. Get the installer from the
 
 ```bash
 cd ~/Downloads
-chmod +x floor-*-linux-x64.run
-sudo ./floor-*-linux-x64.run
+sudo bash floor-1.0.2-linux-x64.run
 ```
+
+Run it with `sudo bash`, not `sudo ./file`. Browsers save downloads without the
+execute bit, and on some setups `chmod +x` in `~/Downloads` does not stick — `bash`
+does not care either way.
 
 It asks once for an InvenTree admin password and once for a Floor unlock PIN, then
 does the rest: InvenTree on SQLite, config, probe, bootstrap, desktop launcher, and
@@ -28,6 +31,11 @@ starting on boot. When it prints `PASS Floor is installed and running`, open the
 icon in the applications menu and sign in with your PIN.
 
 Needs internet while it runs, and takes several minutes — almost all of it InvenTree.
+
+Works on Zorin 17 and 18, Ubuntu 20.04/22.04/24.04, and the Ubuntu-based
+derivatives (Mint, Pop!_OS, elementary). It reads the Ubuntu base out of
+`/etc/os-release` rather than the distro's own name, which is what upstream's
+installer gets wrong on anything that is not literally Ubuntu.
 
 ### What is in the file, and what is not
 
@@ -46,14 +54,17 @@ Floor itself needs is in the file.
 Download the newer `.run` and run the same command:
 
 ```bash
-sudo ./floor-<new-version>-linux-x64.run
+sudo bash floor-<new-version>-linux-x64.run
 ```
 
 It detects the existing install and replaces only the program files. Your inventory,
 SQLite database, `config/floor.json`, photos, password, and PIN are all kept. To force
 it, add `--update`; it will refuse rather than do a fresh install.
 
-To change just the unlock PIN: `sudo ./floor-<version>-linux-x64.run --reconfigure`.
+To change just the unlock PIN: `sudo bash floor-<version>-linux-x64.run --reconfigure`.
+
+Re-running after a failed install is safe. It skips whatever already succeeded,
+clears a half-configured apt state, and never re-asks for secrets it already has.
 
 ### Where things live after install
 

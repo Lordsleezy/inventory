@@ -9,6 +9,7 @@ VERSION="$(cat "$PAYLOAD/VERSION" 2>/dev/null || echo unknown)"
 PREFIX=/opt/floor          # program files, replaced wholesale on update
 STATE=/var/lib/floor       # config + inventory data, never touched by an update
 SECRETS=/etc/floor         # password, PIN, session secret
+ENVFILE=/etc/floor/floor.env
 INVENTREE_DATA=/opt/inventree/data
 
 MODE=install
@@ -32,7 +33,7 @@ die() {
 }
 
 if [ "$(id -u)" -ne 0 ]; then
-  die "run this with sudo" "sudo ./floor-${VERSION}-linux-x64.run"
+  die "run this with sudo" "sudo bash floor-${VERSION}-linux-x64.run"
 fi
 
 # The desktop user, not root. Floor runs as them so photos and data stay theirs.
@@ -56,13 +57,20 @@ if [ "$MODE" = update ] && [ -z "$EXISTING" ]; then
       "Run it without --update to do a first install."
 fi
 if [ -n "$EXISTING" ] && [ "$MODE" = install ]; then
-  MODE=update
+  # Program files present but no secrets means a previous run got partway and
+  # stopped. That is a resume, not an update, and it still needs to ask.
+  if [ -f "$ENVFILE" ]; then
+    MODE=update
+  else
+    MODE=resume
+  fi
 fi
 
 echo "Floor $VERSION  (linux-x64)"
 case "$MODE" in
   update)      echo "Updating existing install $EXISTING. Inventory, config, and photos are kept." ;;
-  reconfigure) echo "Reconfiguring $EXISTING. Inventory and photos are kept, secrets are re-asked." ;;
+  resume)      echo "Picking up an install that did not finish. Nothing was lost." ;;
+  reconfigure) echo "Reconfiguring $EXISTING. Inventory and photos are kept." ;;
   *)           echo "Fresh install. Runs as user: $TARGET_USER" ;;
 esac
 echo "Program files: $PREFIX   Your data: $STATE"
@@ -76,11 +84,7 @@ fi
 # shellcheck disable=SC1091
 . /etc/os-release
 CODENAME="${UBUNTU_CODENAME:-${VERSION_CODENAME:-unknown}}"
-pass "${NAME:-Linux} ${VERSION_ID:-} (ubuntu base: $CODENAME)"
-case "$CODENAME" in
-  jammy|noble) ;;
-  *) warn "InvenTree's installer officially supports jammy and noble. $CODENAME may not work." ;;
-esac
+pass "${NAME:-Linux} ${VERSION_ID:-} (base: $CODENAME)"
 
 if ! command -v systemctl >/dev/null 2>&1; then
   die "no systemd on this machine" "Floor needs systemd to start on boot."
@@ -152,8 +156,6 @@ fi
 pass "inventory data stays in $STATE/data"
 
 # ---------------------------------------------------------------- secrets
-ENVFILE="$SECRETS/floor.env"
-
 # Values are single-quoted in the env file so that both systemd and `.` in bash
 # read them literally. Rejecting these five characters means we never have to
 # escape anything, which is the part that silently breaks logins later.
@@ -263,12 +265,95 @@ fi
 # ---------------------------------------------------------------- InvenTree
 step "InvenTree (system of record)"
 
+# InvenTree is published through packager.io, whose apt repo is keyed on the
+# Ubuntu (or Debian) version underneath. We add that repo ourselves rather than
+# running get.inventree.org, because that script decides what is supported from
+# the NAME field of /etc/os-release and rejects anything that is not literally
+# "Ubuntu" or "Debian". Zorin, Mint, Pop!_OS and elementary all fail its check
+# even though the base they are built on is fully supported and the repo it
+# would have used is the correct one.
+PKG_REPO_BASE=https://dl.packager.io/srv/deb/inventree/InvenTree/stable
+PKG_KEY_URL=https://dl.packager.io/srv/inventree/InvenTree/key
+PKG_KEYRING=/etc/apt/trusted.gpg.d/pkgr-inventree.gpg
+
+resolve_packager_target() {
+  PKG_OS=""
+  PKG_VER=""
+
+  # Derivatives carry the base they were built from. This is the case that
+  # broke on Zorin 18: UBUNTU_CODENAME=noble, but NAME="Zorin OS".
+  case "${UBUNTU_CODENAME:-}" in
+    focal) PKG_OS=ubuntu; PKG_VER=20.04 ;;
+    jammy) PKG_OS=ubuntu; PKG_VER=22.04 ;;
+    noble) PKG_OS=ubuntu; PKG_VER=24.04 ;;
+  esac
+
+  # Plain Ubuntu of any version, including ones released after this build.
+  if [ -z "$PKG_OS" ] && [ "${ID:-}" = "ubuntu" ] && [ -n "${VERSION_ID:-}" ]; then
+    PKG_OS=ubuntu
+    PKG_VER="$VERSION_ID"
+  fi
+
+  if [ -z "$PKG_OS" ]; then
+    case "${VERSION_CODENAME:-}" in
+      bookworm) PKG_OS=debian; PKG_VER=12 ;;
+      bullseye) PKG_OS=debian; PKG_VER=11 ;;
+      buster)   PKG_OS=debian; PKG_VER=10 ;;
+    esac
+  fi
+
+  if [ -z "$PKG_OS" ] && { [ "${ID:-}" = "debian" ] || [ "${ID:-}" = "raspbian" ]; }; then
+    PKG_OS=debian
+    PKG_VER="${VERSION_ID%%.*}"
+  fi
+}
+
 install_inventree() {
   cat <<'NOTE'
 InvenTree is a Python/Django application. It is NOT bundled in this installer -
 it is downloaded and built now, which needs internet and takes several minutes.
 Everything else Floor needs is already on this machine.
 NOTE
+
+  resolve_packager_target
+
+  if [ -z "$PKG_OS" ] || [ -z "$PKG_VER" ]; then
+    die "cannot work out which InvenTree package this machine needs" \
+        "This is ${NAME:-unknown} ${VERSION_ID:-} and it does not declare a" \
+        "recognised Ubuntu or Debian base." \
+        "Report these two lines and we will add it:" \
+        "  ID=${ID:-} VERSION_ID=${VERSION_ID:-}" \
+        "  UBUNTU_CODENAME=${UBUNTU_CODENAME:-none} VERSION_CODENAME=${VERSION_CODENAME:-none}"
+  fi
+
+  echo "Base detected: $PKG_OS $PKG_VER (from ${NAME:-unknown} ${VERSION_ID:-})"
+
+  # Confirm the repo really serves this base before we add it, so a bad guess
+  # fails here with a clear reason instead of as a confusing apt error later.
+  if ! curl -fsS --max-time 20 -o /dev/null \
+        "$PKG_REPO_BASE/$PKG_OS/dists/$PKG_VER/Release"; then
+    die "InvenTree does not publish packages for $PKG_OS $PKG_VER" \
+        "Checked: $PKG_REPO_BASE/$PKG_OS/dists/$PKG_VER/Release" \
+        "If the network is fine, this base genuinely is not built yet." \
+        "Do not install Docker as a workaround."
+  fi
+  pass "InvenTree publishes packages for $PKG_OS $PKG_VER"
+
+  for pkg in gpg apt-transport-https; do
+    if ! dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q "ok installed"; then
+      apt-get install -y -qq "$pkg"
+    fi
+  done
+
+  curl -fsSL "$PKG_KEY_URL" | gpg --dearmor --yes -o "$PKG_KEYRING" \
+    || die "could not fetch the InvenTree signing key" \
+           "Check the network and run this installer again."
+  chmod 0644 "$PKG_KEYRING"
+
+  printf 'deb [signed-by=%s] %s/%s %s main\n' \
+    "$PKG_KEYRING" "$PKG_REPO_BASE" "$PKG_OS" "$PKG_VER" \
+    > /etc/apt/sources.list.d/inventree.list
+  pass "added the InvenTree apt source"
 
   export INVENTREE_ADMIN_USER=admin
   export INVENTREE_ADMIN_PASSWORD="$ADMIN_PASSWORD"
@@ -277,14 +362,17 @@ NOTE
   export INVENTREE_DB_NAME="$INVENTREE_DATA/inventree.sqlite3"
   export SETUP_NO_CALLS=true
 
-  curl -fsSL -o /tmp/inventree-install.sh https://get.inventree.org \
-    || die "could not download the InvenTree installer" \
-           "Check the network and run this installer again. Nothing is half-installed."
+  # A previous attempt may have died mid-configure. Clear that first so this
+  # run is not fighting a half-unpacked package.
+  dpkg --configure -a >/dev/null 2>&1 || true
+  apt-get -f install -y -qq >/dev/null 2>&1 || true
 
-  if ! bash /tmp/inventree-install.sh; then
-    die "the InvenTree installer failed" \
+  apt-get update -qq || warn "apt-get update reported errors, continuing"
+
+  if ! apt-get install -y inventree; then
+    die "installing the inventree package failed" \
         "Read the last 50 lines above. Do not install Docker as a workaround." \
-        "Re-running this installer is safe."
+        "Re-running this installer is safe - it picks up where this stopped."
   fi
 }
 

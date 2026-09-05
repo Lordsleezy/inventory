@@ -9,12 +9,15 @@ usage() {
   cat <<USAGE
 Floor $VERSION installer (Linux x64)
 
-  sudo ./floor-$VERSION-linux-x64.run              install, or update an existing install
-  sudo ./floor-$VERSION-linux-x64.run --update     update only, refuse a fresh install
-  sudo ./floor-$VERSION-linux-x64.run --reconfigure
-                                                   keep data, ask for the password and PIN again
-  ./floor-$VERSION-linux-x64.run --version
-  ./floor-$VERSION-linux-x64.run --extract DIR     unpack without installing
+  sudo bash floor-$VERSION-linux-x64.run              install, or update an existing install
+  sudo bash floor-$VERSION-linux-x64.run --update     update only, refuse a fresh install
+  sudo bash floor-$VERSION-linux-x64.run --reconfigure
+                                                      keep data, choose a new unlock PIN
+  bash floor-$VERSION-linux-x64.run --version
+  bash floor-$VERSION-linux-x64.run --extract DIR     unpack without installing
+
+Use "sudo bash", not "sudo ./file". Browsers save downloads without the
+execute bit and bash does not need it.
 
 Your inventory, config, and photos live outside the program directory and are
 never touched by an update.

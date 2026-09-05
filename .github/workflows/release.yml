@@ -82,15 +82,23 @@ jobs:
             echo "Download \`floor-${VERSION}-linux-x64.run\`, then on the machine:"
             echo
             echo '```bash'
-            echo "chmod +x floor-${VERSION}-linux-x64.run"
-            echo "sudo ./floor-${VERSION}-linux-x64.run"
+            echo "cd ~/Downloads"
+            echo "sudo bash floor-${VERSION}-linux-x64.run"
             echo '```'
+            echo
+            echo "Use \`sudo bash\`, not \`sudo ./file\` — browsers save downloads without"
+            echo "the execute bit."
             echo
             echo "It asks once for an InvenTree admin password and once for a Floor"
             echo "unlock PIN, then does everything else and starts Floor on boot."
             echo
             echo "**Already running Floor?** The same command updates in place and keeps"
             echo "your inventory, config, photos, and PIN."
+            echo
+            echo "### Supported"
+            echo "Zorin 17 and 18, Ubuntu 20.04/22.04/24.04, and Ubuntu-based derivatives"
+            echo "(Mint, Pop!_OS, elementary). The Ubuntu base is read from"
+            echo "\`/etc/os-release\`, not the distro's own name."
             echo
             echo "### Bundled, no download needed"
             echo "- Node $(node -p 'process.versions.node') runtime (the system Node is never touched)"

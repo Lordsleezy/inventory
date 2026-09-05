@@ -39,6 +39,16 @@ echo "PASS  payload bytes identical after extract"
 test -x out/runtime/node/bin/node
 echo "PASS  exec bit survived tar"
 
+echo "--- invoked via bash, with no execute bit"
+# This is what the README tells people to do, because browsers save downloads
+# non-executable.
+chmod -x test.run
+bash test.run --version
+bash test.run --extract out2 >/dev/null
+cmp stage/runtime/node/bin/node out2/runtime/node/bin/node
+echo "PASS  works as 'bash file.run' without the execute bit"
+chmod +x test.run
+
 echo "--- corruption guard"
 if head -c 4000 test.run > truncated.run && chmod +x truncated.run && ./truncated.run --version >/dev/null 2>&1; then
   echo "PASS  version flag still works on a truncated file"
