@@ -10,7 +10,101 @@ Do not commit `.env.local`, `config/floor.json`, `config/staff.json`, or any `*.
 
 ---
 
-## Install on a fresh Zorin machine
+## Install (download one file)
+
+Fresh Zorin, nothing installed. Get the installer from the
+[latest release](https://github.com/Lordsleezy/inventory/releases/latest) — one file,
+`floor-<version>-linux-x64.run`. Then:
+
+```bash
+cd ~/Downloads
+chmod +x floor-*-linux-x64.run
+sudo ./floor-*-linux-x64.run
+```
+
+It asks once for an InvenTree admin password and once for a Floor unlock PIN, then
+does the rest: InvenTree on SQLite, config, probe, bootstrap, desktop launcher, and
+starting on boot. When it prints `PASS Floor is installed and running`, open the Floor
+icon in the applications menu and sign in with your PIN.
+
+Needs internet while it runs, and takes several minutes — almost all of it InvenTree.
+
+### What is in the file, and what is not
+
+| Bundled in the installer | Fetched while installing |
+|---|---|
+| Node runtime (your system Node is never touched) | **InvenTree** — a Python/Django stack, from get.inventree.org |
+| Electron desktop shell | `curl` and `tar`, only if missing |
+| Floor and every npm dependency, prebuilt for x64 | |
+
+InvenTree is genuinely not bundled and cannot honestly be made so: it is a Python
+application that compiles a virtualenv against the machine it lands on. Everything
+Floor itself needs is in the file.
+
+### Update without losing anything
+
+Download the newer `.run` and run the same command:
+
+```bash
+sudo ./floor-<new-version>-linux-x64.run
+```
+
+It detects the existing install and replaces only the program files. Your inventory,
+SQLite database, `config/floor.json`, photos, password, and PIN are all kept. To force
+it, add `--update`; it will refuse rather than do a fresh install.
+
+To change just the unlock PIN: `sudo ./floor-<version>-linux-x64.run --reconfigure`.
+
+### Where things live after install
+
+| | |
+|---|---|
+| Your data (config, SKU ledger, photos) | `/var/lib/floor` |
+| Inventory database | `/opt/inventree/data/inventree.sqlite3` |
+| Secrets, root-owned | `/etc/floor/floor.env` |
+| Program files, replaced on update | `/opt/floor` |
+| Backup everything | `sudo floor-backup` |
+| Health check | `sudo floor-probe` |
+| Logs | `journalctl -u floor-adapter -f` |
+
+### If it fails
+
+The installer stops at the first failure and prints what to do. It is safe to fix the
+problem and run it again — nothing is left half-installed.
+
+---
+
+## Build the installer
+
+Releases are cut by CI, because the artifact is linux-x64 and has to be built and
+tested on linux-x64:
+
+```bash
+npm version patch
+git push && git push --tags
+```
+
+The tag triggers `.github/workflows/release.yml`, which runs the tests, builds
+`floor-<version>-linux-x64.run`, and publishes it as a release with a SHA-256.
+
+To build one by hand on a Linux x64 box:
+
+```bash
+npm ci
+installer/make-run.sh          # -> build/floor-<version>-linux-x64.run
+```
+
+`installer/make-run.sh` refuses to run anywhere else, since a cross-built artifact
+would not be trustworthy. Two checks run without any special machine:
+
+```bash
+bash installer/selftest-header.sh   # payload offset and round trip
+bash installer/selftest-env.sh      # secret quoting
+```
+
+---
+
+## Install from source (developers)
 
 Nothing else installed. Internet once, for packages. After that it can stay unplugged.
 

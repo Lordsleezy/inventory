@@ -1,0 +1,115 @@
+name: release
+
+# Cutting a new installer:
+#   npm version patch -m "Floor %s"   (or edit package.json)
+#   git push && git push --tags
+# The tag is what triggers this. Or run it by hand from the Actions tab.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to build (no leading v). Defaults to package.json."
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  installer:
+    # Jammy matches Zorin 17's Ubuntu base, so anything native we touch links
+    # against a glibc no newer than the Surface has.
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Confirm the runner is x64
+        run: |
+          test "$(uname -m)" = "x86_64" || { echo "runner is not x64"; exit 1; }
+          echo "PASS  $(uname -m)"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.18.0"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Resolve version
+        id: v
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          elif [ -n "${{ inputs.version }}" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION="$(node -p "require('./package.json').version")"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "PASS  building $VERSION"
+
+      - name: Build the installer
+        run: |
+          chmod +x installer/make-run.sh
+          installer/make-run.sh "${{ steps.v.outputs.version }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: floor-${{ steps.v.outputs.version }}-linux-x64
+          path: |
+            build/floor-*.run
+            build/floor-*.run.sha256
+          retention-days: 30
+
+      - name: Publish the release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          RUN="build/floor-${VERSION}-linux-x64.run"
+          {
+            echo "## Floor ${VERSION} — Linux x64"
+            echo
+            echo "Download \`floor-${VERSION}-linux-x64.run\`, then on the machine:"
+            echo
+            echo '```bash'
+            echo "chmod +x floor-${VERSION}-linux-x64.run"
+            echo "sudo ./floor-${VERSION}-linux-x64.run"
+            echo '```'
+            echo
+            echo "It asks once for an InvenTree admin password and once for a Floor"
+            echo "unlock PIN, then does everything else and starts Floor on boot."
+            echo
+            echo "**Already running Floor?** The same command updates in place and keeps"
+            echo "your inventory, config, photos, and PIN."
+            echo
+            echo "### Bundled, no download needed"
+            echo "- Node $(node -p 'process.versions.node') runtime (the system Node is never touched)"
+            echo "- Electron desktop shell"
+            echo "- Floor itself and all of its npm dependencies, prebuilt"
+            echo
+            echo "### Fetched during install (needs internet, takes a few minutes)"
+            echo "- **InvenTree** — a Python/Django stack installed from get.inventree.org."
+            echo "  It genuinely cannot be bundled in this file. Everything else can."
+            echo "- \`curl\` and \`tar\`, only if the machine somehow lacks them."
+            echo
+            echo "### Checksum"
+            echo '```'
+            cat "${RUN}.sha256"
+            echo '```'
+          } > notes.md
+
+          gh release create "v${VERSION}" \
+            "$RUN" "${RUN}.sha256" \
+            --title "Floor ${VERSION}" \
+            --notes-file notes.md \
+            --latest

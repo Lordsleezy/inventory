@@ -1,5 +1,5 @@
 import { TOKEN_PATH } from "./token.ts";
-import { normalizeList, recordId } from "./list.ts";
+import { normalizeList, recordId, type Page } from "./list.ts";
 
 export { TOKEN_PATH } from "./token.ts";
 export { normalizeList, recordId } from "./list.ts";
@@ -138,14 +138,15 @@ export class InventreeClient {
   async listAll<T>(path: string): Promise<T[]> {
     const items: T[] = [];
     let next: string | null = path.includes("?") ? `${path}&limit=200` : `${path}?limit=200`;
-    while (next) {
-      const page = normalizeList<T>(await this.get<unknown>(next));
+    while (next !== null) {
+      const page: Page<T> = normalizeList<T>(await this.get<unknown>(next));
       items.push(...page.items);
-      next = page.next;
-      if (next && next.startsWith("http")) {
-        const url = new URL(next);
-        next = url.pathname + url.search;
+      let following: string | null = page.next;
+      if (following !== null && following.startsWith("http")) {
+        const url = new URL(following);
+        following = url.pathname + url.search;
       }
+      next = following;
     }
     return items;
   }

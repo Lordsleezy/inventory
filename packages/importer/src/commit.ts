@@ -1,4 +1,10 @@
-import { centsToMoneyString, lookupSku, usedSkuMessage, type SkuLedgerEntry } from "@floor/domain";
+import {
+  centsToMoneyString,
+  lookupSku,
+  usedSkuMessage,
+  type SkuLedgerEntry,
+  type Unit,
+} from "@floor/domain";
 import {
   InventreeClient,
   inspectUnit,
@@ -22,7 +28,7 @@ export async function commitImportRows(
   skuStart: number,
   actor: string,
   occupied: SkuLedgerEntry[] = [],
-  onIssued?: (unit: { sku: string; brand: string; model: string; title: string; state: string }) => void,
+  onIssued?: (unit: Pick<Unit, "sku" | "brand" | "model" | "title" | "state">) => void,
 ): Promise<ImportResult[]> {
   const out: ImportResult[] = [];
   let allocated = skuStart;

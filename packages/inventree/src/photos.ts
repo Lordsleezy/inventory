@@ -23,7 +23,7 @@ export async function listStockAttachments(client: InventreeClient, stockId: num
 
 export async function attachStockPhoto(
   client: InventreeClient,
-  input: { sku: string; filename: string; bytes: Uint8Array; actor: string },
+  input: { sku: string; filename: string; bytes: Uint8Array<ArrayBuffer>; actor: string },
 ) {
   const parsed = parsePhotoFilename(input.filename);
   if (!parsed || parsed.sku !== input.sku) {

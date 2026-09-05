@@ -1,1 +1,13 @@
+* text=auto eol=lf
+
 *.sh text eol=lf
+*.mjs text eol=lf
+*.cjs text eol=lf
+*.yml text eol=lf
+*.service text eol=lf
+*.desktop text eol=lf
+
+*.run binary
+*.jpg binary
+*.png binary
+*.webp binary

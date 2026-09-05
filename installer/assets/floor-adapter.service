@@ -1,0 +1,23 @@
+[Unit]
+Description=Floor adapter (inventory, register, listing station)
+Documentation=https://github.com/Lordsleezy/inventory
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=@USER@
+Group=@GROUP@
+WorkingDirectory=/opt/floor/app
+EnvironmentFile=/etc/floor/floor.env
+Environment=NODE_ENV=production
+Environment=PORT=3000
+Environment=HOSTNAME=127.0.0.1
+ExecStart=/opt/floor/runtime/node/bin/node apps/adapter/server.js
+Restart=on-failure
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

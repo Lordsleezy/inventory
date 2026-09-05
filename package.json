@@ -1,5 +1,6 @@
 {
   "name": "liquidation-os",
+  "version": "1.0.0",
   "private": true,
   "license": "UNLICENSED",
   "workspaces": [
@@ -12,6 +13,8 @@
     "inventree:bootstrap": "node --experimental-strip-types infra/inventree/bootstrap.mjs",
     "inventree:probe": "node --experimental-strip-types infra/inventree/probe.mjs",
     "staff:provision": "node infra/inventree/provision-staff.mjs",
+    "build": "npm run build -w @floor/adapter",
+    "installer": "installer/make-run.sh",
     "adapter": "npm run dev -w @floor/adapter",
     "photos:watch": "node scripts/photo-watch.mjs",
     "desktop": "npm start -w @floor/desktop"

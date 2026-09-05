@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Floor
+Comment=Inventory, register, and listing station
+Exec=/opt/floor/bin/floor-desktop
+Icon=/opt/floor/desktop/icon.png
+Terminal=false
+Categories=Office;
+StartupNotify=true
+X-GNOME-Autostart-enabled=true
