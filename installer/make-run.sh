@@ -88,6 +88,59 @@ NODE_BIN="$STAGE/runtime/node/bin/node"
   -e 'import("./infra/inventree/http.mjs").then(()=>console.log("PASS  setup script imports resolve")).catch((e)=>{console.error("FAIL  "+e.message);process.exit(1)})' )
 bash -n "$STAGE/install.sh" && echo "PASS  install.sh parses"
 
+say "Booting the packaged app with the bundled Node"
+# This is the check that matters: the standalone bundle has to serve pages using
+# only what is inside the payload. It runs without InvenTree on purpose.
+BOOTROOT="$(mktemp -d)"
+mkdir -p "$BOOTROOT/config" "$BOOTROOT/data"
+cp config/floor.example.json "$BOOTROOT/config/floor.example.json"
+(
+  cd "$STAGE/app"
+  FLOOR_ROOT="$BOOTROOT" INVENTREE_URL="http://127.0.0.1:1" \
+  FLOOR_SESSION_SECRET=buildcheck FLOOR_DEV_PIN=0000 \
+  NODE_ENV=production PORT=3111 HOSTNAME=127.0.0.1 \
+    "$STAGE/runtime/node/bin/node" apps/adapter/server.js > "$BOOTROOT/boot.log" 2>&1 &
+  echo $! > "$BOOTROOT/pid"
+)
+BOOTPID="$(cat "$BOOTROOT/pid")"
+cleanup_boot() { kill "$BOOTPID" 2>/dev/null || true; rm -rf "$BOOTROOT"; }
+trap cleanup_boot EXIT
+
+LOGIN_CODE=000
+for _ in $(seq 1 40); do
+  LOGIN_CODE="$(curl -s -o /dev/null -m 2 -w '%{http_code}' http://127.0.0.1:3111/login || true)"
+  [ "$LOGIN_CODE" != "000" ] && break
+  sleep 1
+done
+
+if [ "$LOGIN_CODE" != "200" ]; then
+  echo "FAIL  the packaged app did not serve /login (got $LOGIN_CODE)" >&2
+  cat "$BOOTROOT/boot.log" >&2
+  exit 1
+fi
+echo "PASS  /login served 200 by the bundled Node"
+
+# 401 is correct here and is exactly why the installer's readiness check must
+# not use curl -f.
+HEALTH_CODE="$(curl -s -o /dev/null -m 5 -w '%{http_code}' http://127.0.0.1:3111/api/health || true)"
+if [ "$HEALTH_CODE" != "401" ]; then
+  echo "FAIL  /api/health answered $HEALTH_CODE, expected 401 when signed out" >&2
+  cat "$BOOTROOT/boot.log" >&2
+  exit 1
+fi
+echo "PASS  /api/health answered 401 signed out"
+
+STATIC_CODE="$(curl -s -o /dev/null -m 5 -w '%{http_code}' \
+  "http://127.0.0.1:3111/_next/static/chunks/$(ls "$STAGE/app/apps/adapter/.next/static/chunks" | grep -m1 '\.js$')" || true)"
+if [ "$STATIC_CODE" != "200" ]; then
+  echo "FAIL  static assets are not being served (got $STATIC_CODE)" >&2
+  exit 1
+fi
+echo "PASS  static assets served"
+
+cleanup_boot
+trap - EXIT
+
 say "Packing"
 tar czf build/payload.tar.gz --owner=0 --group=0 -C "$STAGE" .
 sed "s/@@VERSION@@/$VERSION/g" installer/header.sh > build/header.gen.sh

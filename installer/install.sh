@@ -418,7 +418,10 @@ write_bin floor-desktop <<EOF
 # Wait for the adapter, then open the Floor shell.
 set -euo pipefail
 for i in \$(seq 1 60); do
-  if curl -fsS --max-time 2 http://127.0.0.1:3000/api/health >/dev/null 2>&1; then
+  # Any HTTP status means it is serving. /login answers 200; the API answers
+  # 401 until you sign in, so "did it reply at all" is the right question.
+  CODE="\$(curl -s -o /dev/null -m 2 -w '%{http_code}' http://127.0.0.1:3000/login || true)"
+  if [ -n "\$CODE" ] && [ "\$CODE" != "000" ]; then
     break
   fi
   sleep 1
@@ -488,7 +491,10 @@ systemctl restart floor-adapter
 
 READY=""
 for i in $(seq 1 45); do
-  if curl -fsS --max-time 2 http://127.0.0.1:3000/api/health >/dev/null 2>&1; then
+  # Any HTTP status counts. /api/health deliberately answers 401 until someone
+  # signs in, so a 2xx-only check would fail here on a perfectly good install.
+  CODE="$(curl -s -o /dev/null -m 2 -w '%{http_code}' http://127.0.0.1:3000/login || true)"
+  if [ -n "$CODE" ] && [ "$CODE" != "000" ]; then
     READY=yes
     break
   fi
