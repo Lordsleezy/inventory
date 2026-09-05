@@ -1,0 +1,51 @@
+# WINDOWS DEV ONLY. Do not run this on the Surface / Zorin machine.
+# Production is the official InvenTree .deb installer + SQLite.
+# This file exists so the Windows workstation can run InvenTree without
+# installing the Linux package. It is not a deployment path.
+services:
+  inventree:
+    image: inventree/inventree:stable
+    container_name: floor-inventree
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8000:8000"
+    env_file: .env
+    environment:
+      INVENTREE_DB_ENGINE: sqlite3
+      INVENTREE_DB_NAME: /home/inventree/data/inventree.sqlite3
+      INVENTREE_DB_WAL_MODE: "True"
+      INVENTREE_DB_TIMEOUT: "30"
+      INVENTREE_PLUGINS_ENABLED: "False"
+      INVENTREE_SITE_URL: http://127.0.0.1:8000
+      INVENTREE_TRUSTED_ORIGINS: http://127.0.0.1:8000,http://127.0.0.1:3000
+      INVENTREE_ALLOWED_HOSTS: 127.0.0.1,localhost
+      INVENTREE_GUNICORN_WORKERS: "1"
+      INVENTREE_CACHE_HOST: ""
+    volumes:
+      - ../../data/inventree:/home/inventree/data
+    mem_limit: 1g
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/api/"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+
+  inventree-worker:
+    image: inventree/inventree:stable
+    container_name: floor-inventree-worker
+    restart: unless-stopped
+    command: invoke worker
+    env_file: .env
+    environment:
+      INVENTREE_DB_ENGINE: sqlite3
+      INVENTREE_DB_NAME: /home/inventree/data/inventree.sqlite3
+      INVENTREE_DB_WAL_MODE: "True"
+      INVENTREE_DB_TIMEOUT: "30"
+      INVENTREE_PLUGINS_ENABLED: "False"
+      INVENTREE_CACHE_HOST: ""
+    volumes:
+      - ../../data/inventree:/home/inventree/data
+    depends_on:
+      inventree:
+        condition: service_healthy
+    mem_limit: 512m

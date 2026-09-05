@@ -1,0 +1,16 @@
+{
+  "staff": [
+    {
+      "username": "admin",
+      "displayName": "Admin",
+      "role": "admin",
+      "pin": "replace-at-provision"
+    },
+    {
+      "username": "alex",
+      "displayName": "Alex",
+      "role": "staff",
+      "pin": "replace-at-provision"
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "name": "@floor/desktop",
+  "private": true,
+  "license": "UNLICENSED",
+  "main": "main.mjs",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^37.4.0"
+  }
+}

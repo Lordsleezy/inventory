@@ -1,0 +1,18 @@
+{
+  "storeName": "Floor",
+  "skuStart": 11111,
+  "taxRateBps": 0,
+  "retailStaleDays": 60,
+  "photoDropPath": "",
+  "conditions": ["Excellent", "Good", "Fair", "Defective"],
+  "testStatuses": ["untested", "passed", "failed", "partial"],
+  "paymentMethods": ["cash", "card", "other"],
+  "locations": ["Receiving", "Floor", "Back"],
+  "channels": [
+    { "id": "ebay", "label": "eBay", "enabled": true },
+    { "id": "facebook", "label": "Facebook", "enabled": true },
+    { "id": "tiktok", "label": "TikTok", "enabled": true },
+    { "id": "amazon", "label": "Amazon", "enabled": false }
+  ],
+  "marketplace": { "unrestricted": true }
+}

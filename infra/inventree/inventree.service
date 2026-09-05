@@ -1,0 +1,13 @@
+[Unit]
+Description=InvenTree web (WSL verification)
+After=network.target
+
+[Service]
+User=inventree
+WorkingDirectory=/home/inventree/src
+ExecStart=/home/inventree/env/bin/invoke dev.gunicorn -a 127.0.0.1:8000 -w 1
+EnvironmentFile=/home/inventree/inventree.env.systemd
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

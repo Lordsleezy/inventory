@@ -1,0 +1,13 @@
+[Unit]
+Description=InvenTree worker (WSL verification)
+After=network.target
+
+[Service]
+User=inventree
+WorkingDirectory=/home/inventree/src
+ExecStart=/home/inventree/env/bin/invoke worker
+EnvironmentFile=/home/inventree/inventree.env.systemd
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

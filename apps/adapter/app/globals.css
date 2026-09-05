@@ -1,0 +1,20 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body {
+  min-height: 100%;
+  background: #101010;
+  color: #f4f0e6;
+  font-family: ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+a:focus-visible {
+  outline: 3px solid #f5c518;
+  outline-offset: 2px;
+}

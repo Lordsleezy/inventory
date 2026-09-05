@@ -1,0 +1,13 @@
+{
+  "name": "@floor/inventree",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@floor/domain": "*",
+    "zod": "^3.24.2"
+  }
+}

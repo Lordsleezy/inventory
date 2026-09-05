@@ -1,0 +1,22 @@
+{
+  "name": "liquidation-os",
+  "private": true,
+  "license": "UNLICENSED",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "test": "node --experimental-strip-types --test packages/domain/src/*.test.ts packages/inventree/src/*.test.ts packages/auth/src/*.test.ts packages/importer/src/*.test.ts infra/inventree/settings.test.mjs",
+    "inventree:up": "echo Windows-dev only. Do not use on Zorin. && docker compose -f infra/inventree/docker-compose.yml up -d",
+    "inventree:bootstrap": "node --experimental-strip-types infra/inventree/bootstrap.mjs",
+    "inventree:probe": "node --experimental-strip-types infra/inventree/probe.mjs",
+    "staff:provision": "node infra/inventree/provision-staff.mjs",
+    "adapter": "npm run dev -w @floor/adapter",
+    "photos:watch": "node scripts/photo-watch.mjs",
+    "desktop": "npm start -w @floor/desktop"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
