@@ -62,7 +62,7 @@ else
 fi
 mkdir -p "$STAGE/desktop"
 cp apps/desktop/main.mjs apps/desktop/marketplace.mjs apps/desktop/preload.cjs \
-   apps/desktop/package.json "$STAGE/desktop/"
+   apps/desktop/package.json apps/desktop/icon.png "$STAGE/desktop/"
 
 say "Staging the setup scripts"
 # probe.mjs and bootstrap.mjs import ../../packages/inventree/src/*.ts by
@@ -73,7 +73,8 @@ find "$STAGE/packages" -name node_modules -maxdepth 2 -type d -prune -exec rm -r
 mkdir -p "$STAGE/config" "$STAGE/assets"
 cp config/floor.example.json "$STAGE/config/floor.example.json"
 cp config/staff.example.json "$STAGE/config/staff.example.json"
-cp installer/assets/floor-adapter.service installer/assets/floor.desktop "$STAGE/assets/"
+cp installer/assets/floor-adapter.service installer/assets/floor.desktop \
+   installer/assets/icon.png "$STAGE/assets/"
 cp installer/install.sh "$STAGE/install.sh"
 chmod +x "$STAGE/install.sh"
 printf '%s\n' "$VERSION" > "$STAGE/VERSION"

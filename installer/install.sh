@@ -376,8 +376,64 @@ NOTE
   fi
 }
 
+# `command -v inventree` is not enough: a half-configured apt package leaves the
+# binary on PATH while STATIC_ROOT is unset and /api/ returns 502 forever.
+repair_inventree_package() {
+  local status
+  status="$(dpkg-query -W -f='${Status}' inventree 2>/dev/null || true)"
+  if printf '%s' "$status" | grep -q 'half-configured\|half-installed\|triggers-pending'; then
+    warn "InvenTree package was left half-configured; finishing dpkg configure"
+    dpkg --configure -a || true
+    apt-get -f install -y -qq || true
+  fi
+}
+
+# Packager gunicorn.conf.py hardcodes cpu*2+1 workers. On an 8GB Surface that
+# is too many. Make INVENTREE_GUNICORN_WORKERS actually stick.
+patch_inventree_gunicorn_workers() {
+  local guni=/opt/inventree/src/backend/InvenTree/gunicorn.conf.py
+  [ -f "$guni" ] || return 0
+  if grep -q 'INVENTREE_GUNICORN_WORKERS' "$guni" 2>/dev/null; then
+    return 0
+  fi
+  [ -f "$guni.floor-bak" ] || cp -a "$guni" "$guni.floor-bak"
+  {
+    echo 'import os'
+    echo 'workers = int(os.environ.get("INVENTREE_GUNICORN_WORKERS", "1"))'
+    # Keep any non-worker settings from the packager file.
+    grep -Ev '^(workers[[:space:]]*=|import os|import multiprocessing)' "$guni.floor-bak" || true
+  } > "$guni"
+  pass "gunicorn workers honor INVENTREE_GUNICORN_WORKERS"
+}
+
+# Token endpoint 500s when Django User exists without users.UserProfile.
+ensure_inventree_admin_profile() {
+  set -a
+  # shellcheck disable=SC1091
+  [ -f /etc/default/inventree ] && . /etc/default/inventree
+  if [ -d /etc/inventree/conf.d ]; then
+    for f in /etc/inventree/conf.d/*; do
+      [ -f "$f" ] && . "$f"
+    done
+  fi
+  set +a
+  if [ ! -x /opt/inventree/env/bin/python ] || [ ! -f /opt/inventree/src/backend/InvenTree/manage.py ]; then
+    return 0
+  fi
+  sudo -u inventree -E env HOME="${HOME:-/home/inventree}" \
+    /opt/inventree/env/bin/python /opt/inventree/src/backend/InvenTree/manage.py shell <<'PY' >/dev/null
+from django.contrib.auth import get_user_model
+from users.models import UserProfile
+User = get_user_model()
+u = User.objects.filter(username="admin").first()
+if u is not None:
+    UserProfile.objects.get_or_create(user=u)
+PY
+}
+
 if command -v inventree >/dev/null 2>&1; then
-  pass "InvenTree already installed, leaving it alone"
+  repair_inventree_package
+  pass "InvenTree package present"
 else
   install_inventree
 fi
@@ -385,12 +441,19 @@ fi
 # Force SQLite and keep the process small. Idempotent.
 inventree config:set INVENTREE_DB_ENGINE=sqlite3 >/dev/null 2>&1 || true
 inventree config:set INVENTREE_DB_NAME="$INVENTREE_DATA/inventree.sqlite3" >/dev/null 2>&1 || true
+inventree config:set INVENTREE_STATIC_ROOT="$INVENTREE_DATA/static" >/dev/null 2>&1 || true
+inventree config:set INVENTREE_MEDIA_ROOT="$INVENTREE_DATA/media" >/dev/null 2>&1 || true
+inventree config:set INVENTREE_BACKUP_DIR="$INVENTREE_DATA/backup" >/dev/null 2>&1 || true
 inventree config:set INVENTREE_DB_WAL_MODE=True >/dev/null 2>&1 || true
 inventree config:set INVENTREE_DB_TIMEOUT=30 >/dev/null 2>&1 || true
 inventree config:set INVENTREE_PLUGINS_ENABLED=False >/dev/null 2>&1 || true
 inventree config:set INVENTREE_GUNICORN_WORKERS=1 >/dev/null 2>&1 || true
+inventree config:set INVENTREE_SITE_URL=http://127.0.0.1 >/dev/null 2>&1 || true
+patch_inventree_gunicorn_workers
 inventree scale worker=1 >/dev/null 2>&1 || true
 inventree restart >/dev/null 2>&1 || true
+systemctl reset-failed inventree-web-1 inventree-worker-1 >/dev/null 2>&1 || true
+systemctl restart inventree-web-1 inventree-worker-1 >/dev/null 2>&1 || true
 
 step "Proving the database is SQLite, not Postgres"
 
@@ -449,6 +512,23 @@ if [ -z "$API_URL" ]; then
 fi
 pass "API at $API_URL"
 
+# Prove plugins stayed off (packager.io defaults them on).
+PLUGINS_JSON="$(curl -fsS --max-time 5 "$API_URL/api/" 2>/dev/null || true)"
+if printf '%s' "$PLUGINS_JSON" | grep -q '"plugins_enabled"[[:space:]]*:[[:space:]]*true'; then
+  warn "plugins were still enabled; forcing off and restarting InvenTree"
+  inventree config:set INVENTREE_PLUGINS_ENABLED=False >/dev/null 2>&1 || true
+  inventree restart >/dev/null 2>&1 || true
+  sleep 3
+  PLUGINS_JSON="$(curl -fsS --max-time 5 "$API_URL/api/" 2>/dev/null || true)"
+fi
+if printf '%s' "$PLUGINS_JSON" | grep -q '"plugins_enabled"[[:space:]]*:[[:space:]]*false'; then
+  pass "InvenTree plugins disabled"
+else
+  warn "could not confirm plugins_enabled=false from $API_URL/api/"
+fi
+
+ensure_inventree_admin_profile || warn "could not ensure admin UserProfile (probe may fail)"
+
 # ---------------------------------------------------------------- write config
 step "Writing configuration"
 
@@ -503,21 +583,15 @@ EOF
 
 write_bin floor-desktop <<EOF
 #!/usr/bin/env bash
-# Wait for the adapter, then open the Floor shell.
+# Open the Floor Electron shell immediately. The window waits for the adapter
+# internally so a menu click never sits with no UI, then fails silently.
 set -euo pipefail
-for i in \$(seq 1 60); do
-  # Any HTTP status means it is serving. /login answers 200; the API answers
-  # 401 until you sign in, so "did it reply at all" is the right question.
-  CODE="\$(curl -s -o /dev/null -m 2 -w '%{http_code}' http://127.0.0.1:3000/login || true)"
-  if [ -n "\$CODE" ] && [ "\$CODE" != "000" ]; then
-    break
-  fi
-  sleep 1
-done
-if [ -x $PREFIX/runtime/electron/electron ]; then
-  exec $PREFIX/runtime/electron/electron $PREFIX/desktop "\$@"
+if [ ! -x $PREFIX/runtime/electron/electron ]; then
+  echo "FAIL  Floor Electron runtime is missing at $PREFIX/runtime/electron/electron" >&2
+  exit 1
 fi
-exec xdg-open http://127.0.0.1:3000
+export ELECTRON_OZONE_PLATFORM_HINT="\${ELECTRON_OZONE_PLATFORM_HINT:-auto}"
+exec $PREFIX/runtime/electron/electron $PREFIX/desktop "\$@"
 EOF
 
 write_bin floor-backup <<EOF
@@ -527,12 +601,23 @@ set -euo pipefail
 DEST="\${1:-\$HOME/floor-backup-\$(date +%F-%H%M)}"
 mkdir -p "\$DEST"
 systemctl stop floor-adapter || true
-inventree stop || true
+# Packager inventree CLI has restart, not stop/start.
+systemctl stop inventree-web-1 inventree-worker-1 || true
 cp -a $INVENTREE_DATA "\$DEST/inventree-data"
 cp -a $STATE "\$DEST/floor-state"
 cp -a $ENVFILE "\$DEST/floor.env"
-inventree start || true
+systemctl start inventree-web-1 inventree-worker-1 || true
+for i in \$(seq 1 30); do
+  CODE="\$(curl -s -o /dev/null -m 2 -w '%{http_code}' http://127.0.0.1/api/ || true)"
+  if [ "\$CODE" = "200" ]; then break; fi
+  sleep 1
+done
 systemctl start floor-adapter || true
+for i in \$(seq 1 30); do
+  CODE="\$(curl -s -o /dev/null -m 2 -w '%{http_code}' http://127.0.0.1:3000/login || true)"
+  if [ -n "\$CODE" ] && [ "\$CODE" != "000" ] && [ "\$CODE" != "500" ]; then break; fi
+  sleep 1
+done
 echo "PASS  backup at \$DEST"
 EOF
 
@@ -565,24 +650,44 @@ chown -R "$TARGET_USER":"$TARGET_GROUP" "$STATE"
 # ---------------------------------------------------------------- services
 step "Starting Floor on boot"
 
+# Icon ships next to the Electron main process so the .desktop Icon= path works.
+if [ -f "$PAYLOAD/desktop/icon.png" ]; then
+  install -m 0644 "$PAYLOAD/desktop/icon.png" "$PREFIX/desktop/icon.png"
+elif [ -f "$PAYLOAD/assets/icon.png" ]; then
+  install -m 0644 "$PAYLOAD/assets/icon.png" "$PREFIX/desktop/icon.png"
+fi
+
 sed -e "s/@USER@/$TARGET_USER/g" -e "s/@GROUP@/$TARGET_GROUP/g" \
   "$PAYLOAD/assets/floor-adapter.service" > /etc/systemd/system/floor-adapter.service
 chmod 0644 /etc/systemd/system/floor-adapter.service
 
 install -m 0644 "$PAYLOAD/assets/floor.desktop" /usr/share/applications/floor.desktop
-install -d -m 0755 /etc/xdg/autostart
-install -m 0644 "$PAYLOAD/assets/floor.desktop" /etc/xdg/autostart/floor.desktop
+# Services start on boot; the window itself is click-to-open, not autostart.
+rm -f /etc/xdg/autostart/floor.desktop
+# Named icon theme entry so Favorites / the dock resolve Floor reliably.
+if [ -f "$PREFIX/desktop/icon.png" ]; then
+  install -d -m 0755 /usr/share/icons/hicolor/512x512/apps
+  install -m 0644 "$PREFIX/desktop/icon.png" /usr/share/icons/hicolor/512x512/apps/floor.png
+fi
+# Desktop databases so the app appears in the menu without a full re-login.
+if command -v update-desktop-database >/dev/null 2>&1; then
+  update-desktop-database /usr/share/applications >/dev/null 2>&1 || true
+fi
+if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+  gtk-update-icon-cache -f /usr/share/icons/hicolor >/dev/null 2>&1 || true
+fi
 
 systemctl daemon-reload
+systemctl enable inventree >/dev/null 2>&1 || true
 systemctl enable floor-adapter >/dev/null 2>&1
 systemctl restart floor-adapter
 
 READY=""
 for i in $(seq 1 45); do
-  # Any HTTP status counts. /api/health deliberately answers 401 until someone
-  # signs in, so a 2xx-only check would fail here on a perfectly good install.
+  # Any non-5xx HTTP status counts. /api/health deliberately answers 401 until
+  # someone signs in, so a 2xx-only check would fail here on a good install.
   CODE="$(curl -s -o /dev/null -m 2 -w '%{http_code}' http://127.0.0.1:3000/login || true)"
-  if [ -n "$CODE" ] && [ "$CODE" != "000" ]; then
+  if [ -n "$CODE" ] && [ "$CODE" != "000" ] && [ "$CODE" != "500" ]; then
     READY=yes
     break
   fi
@@ -595,8 +700,16 @@ if [ -z "$READY" ]; then
       "  journalctl -u floor-adapter -n 50 --no-pager" \
       "Then: sudo systemctl restart floor-adapter"
 fi
+
+# Hard gate: never print PASS unless the pieces a clerk actually needs exist.
+[ -f "$ENVFILE" ] || die "missing $ENVFILE after install"
+[ -x "$PREFIX/bin/floor-desktop" ] || die "missing floor-desktop launcher"
+[ -f /etc/systemd/system/floor-adapter.service ] || die "missing floor-adapter.service"
+[ -f /usr/share/applications/floor.desktop ] || die "missing Floor desktop entry"
+[ -x "$PREFIX/runtime/electron/electron" ] || die "missing Electron runtime"
 pass "adapter answering on http://127.0.0.1:3000"
-pass "enabled at boot (floor-adapter.service)"
+pass "enabled at boot (inventree + floor-adapter)"
+pass "Floor desktop entry installed"
 
 # ---------------------------------------------------------------- done
 cat <<DONE
@@ -604,10 +717,9 @@ cat <<DONE
 =====================================================================
 PASS  Floor $VERSION is installed and running.
 
-  Open it          the Floor icon in your applications menu,
-                   or http://127.0.0.1:3000 in Firefox
+  Open it          click Floor in the applications menu (Electron, full screen)
   Sign in          Admin, then the PIN you just chose
-  Starts on boot   yes, no terminal needed
+  Starts on boot   InvenTree, then the adapter — Floor is ready to click
 
   Your data        $STATE          (inventory, config, photos)
   Database         $INVENTREE_DATA/inventree.sqlite3
