@@ -2,77 +2,81 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
-import type { Unit } from "@floor/domain";
+import { useEffect, useMemo, useState } from "react";
+import { filterUnits, formatUsd, matchesInventoryQuery, displayAskCents, type Unit } from "@floor/domain";
 import { Shell } from "@/components/shell";
-import { SkuKeypad } from "@/components/sku-keypad";
-import { UnitPreview } from "@/components/unit-preview";
-import { EmptyValue, Money } from "@/components/empty-value";
+import { EmptyValue } from "@/components/empty-value";
 
-type Queue = "" | "inspect" | "price" | "unlisted" | "error" | "voided" | "nophoto";
+type Queue = "" | "inspect" | "price" | "unlisted" | "error" | "voided" | "nophoto" | "sold";
 
-let cachedUnits: Unit[] = [];
+function listPrice(cents: number | null): string {
+  if (cents == null || cents === 0) return "";
+  return formatUsd(cents);
+}
+
+function applySearch(value: string, setQ: (next: string) => void) {
+  setQ(value);
+}
 
 export default function InventoryPage() {
   const router = useRouter();
   const [q, setQ] = useState("");
   const [queue, setQueue] = useState<Queue>("");
-  const [units, setUnits] = useState<Unit[]>(cachedUnits);
+  const [brand, setBrand] = useState("");
+  const [allUnits, setAllUnits] = useState<Unit[]>([]);
+  const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
-  const [sku, setSku] = useState("");
-  const [lookup, setLookup] = useState<Unit | null>(null);
-  const [missing, setMissing] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   useEffect(() => {
-    const params = new URLSearchParams();
-    if (q) params.set("q", q);
-    if (queue) params.set("queue", queue);
-    const ac = new AbortController();
-    fetch(`/api/units?${params}`, { signal: ac.signal })
+    let cancelled = false;
+    setLoading(true);
+    fetch("/api/units?includeVoided=1")
       .then(async (res) => {
         if (res.status === 401) {
           router.replace("/login");
           return;
         }
         const data = await res.json();
+        if (cancelled) return;
         if (!res.ok) {
           setLoadError(data.error ?? "Could not load inventory");
+          setLoading(false);
           return;
         }
-        const next = data.units ?? [];
-        cachedUnits = next;
-        setUnits(next);
+        setAllUnits(data.units ?? []);
         setLoadError("");
-      })
-      .catch((err) => {
-        if (err instanceof DOMException && err.name === "AbortError") return;
-        setLoadError("Could not load inventory");
-      });
-    return () => ac.abort();
-  }, [q, queue, router]);
-
-  useEffect(() => {
-    if (sku.length !== 5) {
-      setLookup(null);
-      setMissing(false);
-      return;
-    }
-    fetch(`/api/units/${sku}`)
-      .then(async (res) => {
-        const data = await res.json();
-        if (res.status === 404) {
-          setLookup(null);
-          setMissing(true);
-          return;
-        }
-        setMissing(false);
-        setLookup(data.unit ?? null);
+        setLoading(false);
       })
       .catch(() => {
-        setLookup(null);
-        setMissing(true);
+        if (!cancelled) {
+          setLoadError("Could not load inventory");
+          setLoading(false);
+        }
       });
-  }, [sku]);
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
+
+  const brands = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const unit of allUnits) {
+      const label = unit.brand.trim();
+      if (!label) continue;
+      const key = label.toLowerCase();
+      if (!seen.has(key)) seen.set(key, label);
+    }
+    return [...seen.entries()].sort((a, b) => a[1].localeCompare(b[1]));
+  }, [allUnits]);
+
+  const units = useMemo(() => {
+    const queued = filterUnits(allUnits, { queue: queue || undefined });
+    return queued.filter((unit) => {
+      if (brand && unit.brand.trim().toLowerCase() !== brand) return false;
+      return matchesInventoryQuery(unit, q);
+    });
+  }, [allUnits, q, queue, brand]);
 
   const chips: { id: Queue; label: string }[] = [
     { id: "", label: "All" },
@@ -82,85 +86,134 @@ export default function InventoryPage() {
     { id: "error", label: "Record error" },
     { id: "nophoto", label: "No photo" },
     { id: "voided", label: "Voided" },
+    { id: "sold", label: "Sold" },
   ];
+  const activeChip = chips.find((chip) => chip.id === queue) ?? chips[0];
 
   return (
     <Shell>
-      <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
-        <section>
-          <SkuKeypad
-            value={sku}
-            onChange={setSku}
-            onEnter={() => {
-              if (lookup) router.push(`/inventory/${lookup.sku}`);
-            }}
-            onClear={() => {
-              setLookup(null);
-              setMissing(false);
-            }}
-          />
-          <div className="mt-3">
-            <UnitPreview unit={lookup} missing={missing} />
-            {lookup ? (
-              <Link
-                href={`/inventory/${lookup.sku}`}
-                className="mt-2 flex min-h-touch items-center justify-center rounded-lg bg-floor-accent text-lg font-black text-black"
-              >
-                Open {lookup.sku}
-              </Link>
-            ) : null}
-          </div>
-        </section>
-        <section>
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Search SKU, brand, model, location…"
-            className="min-h-touch w-full rounded-lg border border-floor-line bg-floor-panel px-3 text-lg"
-          />
-          <div className="mt-2 flex flex-wrap gap-2">
-            {chips.map((chip) => (
+      <input
+        value={q}
+        onChange={(e) => applySearch(e.target.value, setQ)}
+        onInput={(e) => applySearch(e.currentTarget.value, setQ)}
+        placeholder="Search SKU, brand, model, title"
+        autoComplete="off"
+        autoCorrect="off"
+        autoCapitalize="off"
+        spellCheck={false}
+        enterKeyHint="search"
+        className="field text-title"
+        aria-label="Search inventory"
+      />
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => {
+            setQueue("");
+            setBrand("");
+          }}
+          className={`min-h-touch px-1 text-body ${
+            queue === "" && !brand ? "text-floor-text" : "text-floor-mute"
+          }`}
+        >
+          All
+        </button>
+        <button
+          type="button"
+          onClick={() => setFiltersOpen((open) => !open)}
+          className={`min-h-touch px-1 text-body ${
+            queue || brand ? "text-floor-text" : "text-floor-mute"
+          }`}
+        >
+          {filtersOpen
+            ? "Filter · hide"
+            : brand
+              ? `Filter · ${brands.find(([key]) => key === brand)?.[1] ?? brand}`
+              : queue
+                ? `Filter · ${activeChip.label}`
+                : "Filter"}
+        </button>
+      </div>
+      {filtersOpen ? (
+        <div className="mt-2">
+          <p className="text-quiet text-floor-mute">Brands</p>
+          <div className="mt-1 flex flex-wrap gap-1">
+            {brands.map(([key, label]) => (
               <button
-                key={chip.id || "all"}
+                key={key}
                 type="button"
-                onClick={() => setQueue(chip.id)}
-                className={`min-h-touch rounded-lg px-3 font-bold ${
-                  queue === chip.id ? "bg-floor-accent text-black" : "bg-floor-panel text-floor-text"
+                onClick={() => {
+                  setBrand(key === brand ? "" : key);
+                  setQueue("");
+                }}
+                className={`min-h-touch px-2 text-body ${
+                  brand === key ? "text-floor-text" : "text-floor-mute"
                 }`}
               >
-                {chip.label}
+                {label}
               </button>
             ))}
           </div>
-          <p className="mt-2 text-sm text-floor-mute">{units.length} items</p>
-          {loadError ? <p className="mt-1 font-bold text-floor-danger">{loadError}</p> : null}
-          <Link href="/photos" className="mt-1 inline-flex min-h-touch items-center font-bold text-floor-accent">
-            Unmatched photos
-          </Link>
-          <div className="mt-2 grid gap-2">
-            {units.map((unit) => (
-              <Link
-                key={unit.sku}
-                href={`/inventory/${unit.sku}`}
-                className="min-h-touch rounded-xl border border-floor-line bg-floor-panel p-3"
-              >
-                <div className="flex items-baseline justify-between gap-3">
-                  <span className="text-3xl font-black tracking-widest text-floor-accent">{unit.sku}</span>
-                  <Money cents={unit.askCents} />
-                </div>
-                <p className="text-lg font-semibold">
-                  <EmptyValue>{[unit.brand, unit.model].filter(Boolean).join(" ")}</EmptyValue>
-                </p>
-                <p className="text-sm text-floor-mute">
-                  <EmptyValue>{unit.condition}</EmptyValue>
-                  {unit.location ? ` · ${unit.location}` : ""}
-                  {unit.recordError ? ` · ${unit.recordError}` : ""}
-                </p>
-              </Link>
-            ))}
+          <p className="mt-3 text-quiet text-floor-mute">Status</p>
+          <div className="mt-1 flex flex-wrap gap-1">
+            {chips
+              .filter((chip) => chip.id)
+              .map((chip) => (
+                <button
+                  key={chip.id}
+                  type="button"
+                  onClick={() => {
+                    setQueue(chip.id);
+                    setBrand("");
+                    setFiltersOpen(false);
+                  }}
+                  className={`min-h-touch px-2 text-body ${
+                    queue === chip.id ? "text-floor-text" : "text-floor-mute"
+                  }`}
+                >
+                  {chip.label}
+                </button>
+              ))}
           </div>
-        </section>
-      </div>
+        </div>
+      ) : null}
+      <p className="mt-4 text-quiet text-floor-mute">
+        {loading ? "Loading…" : `${units.length} ${units.length === 1 ? "item" : "items"}`}
+        {loadError ? ` · ${loadError}` : ""}
+      </p>
+      {loadError ? <p className="mt-1 text-body text-floor-danger">{loadError}</p> : null}
+      <ul className="mt-2">
+        {units.map((unit) => {
+          const title = unit.title || [unit.brand, unit.model].filter(Boolean).join(" ");
+          const price = listPrice(displayAskCents(unit));
+          return (
+            <li key={unit.sku} className="border-b border-floor-line">
+              <Link href={`/inventory/${unit.sku}`} className="flex min-h-touch items-baseline gap-3 py-3">
+                <span className="min-w-[3.25rem] shrink-0 text-quiet tabular-nums text-floor-mute">
+                  {unit.sku}
+                </span>
+                <span className="min-w-0 flex-1 text-title">
+                  {title || price ? (
+                    <>
+                      {title || null}
+                      {title && price ? " " : null}
+                      {price ? <span className="text-floor-mute">{price}</span> : null}
+                      {unit.state === "sold" ? <span className="text-quiet text-floor-mute"> sold</span> : null}
+                    </>
+                  ) : (
+                    <EmptyValue />
+                  )}
+                </span>
+              </Link>
+            </li>
+          );
+        })}
+      </ul>
+      <p className="mt-6">
+        <Link href="/photos" className="btn-text px-0">
+          Unmatched photos
+        </Link>
+      </p>
     </Shell>
   );
 }

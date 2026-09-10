@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { discountOffRetail, isRetailStale, type FloorConfig, type Unit } from "@floor/domain";
+import { discountOffRetail, displayAskCents, isRetailStale, type FloorConfig, type Unit } from "@floor/domain";
 import { Shell } from "@/components/shell";
 import { SkuKeypad } from "@/components/sku-keypad";
 import { UnitPreview } from "@/components/unit-preview";
@@ -9,7 +9,7 @@ import { EmptyValue, Money } from "@/components/empty-value";
 import { MoneyField } from "@/components/money-field";
 
 function centsToField(cents: number | null): string {
-  if (cents === null) return "";
+  if (cents === null || cents === 0) return "";
   return (cents / 100).toFixed(2);
 }
 
@@ -58,7 +58,7 @@ export default function PricePage() {
         setRetail(centsToField(next.retail.cents));
         setRetailer(next.retail.retailer ?? "");
         setCapturedOn(next.retail.capturedOn ?? "");
-        setAsk(centsToField(next.askCents));
+        setAsk(centsToField(displayAskCents(next)));
         setFloor(centsToField(next.floorCents));
       })
       .catch(() => setMissing(true));
@@ -125,11 +125,11 @@ export default function PricePage() {
                 />
               </label>
               {stale ? <p className="font-black text-floor-danger">Retail reference is stale (over 60 days)</p> : null}
-              <MoneyField label="Ask" value={ask} onChange={setAsk} />
+              <MoneyField label="Price" value={ask} onChange={setAsk} />
               {role === "admin" ? <MoneyField label="Floor" value={floor} onChange={setFloor} adminOnly /> : null}
               <p className="text-xl font-bold">{off === null ? <EmptyValue /> : `${off}% off retail`}</p>
               <p>
-                Current ask: <Money cents={unit.askCents} />
+                Current price: <Money cents={displayAskCents(unit)} />
               </p>
               {error ? <p className="font-bold text-floor-danger">{error}</p> : null}
               {saved ? <p className="text-floor-ok">Saved {saved}</p> : null}

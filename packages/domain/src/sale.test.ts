@@ -70,6 +70,7 @@ test("sale history search matches sku, date, and customer", () => {
       skus: ["11119"],
       lineSummary: "11119 Dryer",
       totalCents: 12000,
+      receiptFile: null,
     },
   ];
   assert.equal(filterSaleHistory(rows, "11119").length, 1);

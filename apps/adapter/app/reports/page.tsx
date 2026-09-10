@@ -1,10 +1,10 @@
 "use client";
 
 import { Suspense, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { formatUsd, type SaleHistoryRow } from "@floor/domain";
 import { Shell } from "@/components/shell";
+import { SaleReceiptUpload } from "@/components/sale-receipt-upload";
 
 function SalesHistory() {
   const params = useSearchParams();
@@ -34,36 +34,36 @@ function SalesHistory() {
 
   return (
     <Shell>
-      <h1 className="mb-3 text-2xl font-black">Sales history</h1>
       <input
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         placeholder="Search SKU, date, or customer"
-        className="mb-4 min-h-touch w-full max-w-xl rounded-lg border border-floor-line bg-floor-panel px-3 text-lg"
+        className="field mb-4 max-w-xl"
       />
-      {error ? <p className="font-bold text-floor-danger">{error}</p> : null}
-      {!rows.length && !error ? <p className="text-floor-mute">No completed sales match.</p> : null}
-      <div className="grid gap-3">
+      {error ? <p className="text-body text-floor-danger">{error}</p> : null}
+      {!rows.length && !error ? <p className="text-quiet text-floor-mute">No completed sales match.</p> : null}
+      <ul>
         {rows.map((row) => (
-          <article key={row.id} className="rounded-xl border border-floor-line bg-floor-panel p-4">
+          <li key={row.id} className="border-b border-floor-line py-3">
             <div className="flex flex-wrap items-baseline justify-between gap-2">
-              <p className="text-xl font-black">{row.reference}</p>
-              <p className="font-black">{formatUsd(row.totalCents)}</p>
+              <p className="text-title">{row.reference}</p>
+              <p className="tabular-nums">{formatUsd(row.totalCents)}</p>
             </div>
-            <p className="text-floor-mute">
+            <p className="text-quiet text-floor-mute">
               {row.soldOn ? row.soldOn.slice(0, 10) : ""} · {row.channel}
               {row.customerName ? ` · ${row.customerName}` : ""}
             </p>
-            <p className="mt-2">{row.lineSummary}</p>
-            <Link
-              href={`/receipt?sale=${row.id}`}
-              className="mt-3 inline-flex min-h-touch items-center font-bold text-floor-accent"
-            >
-              View / reprint receipt
-            </Link>
-          </article>
+            <p className="mt-1 text-body">{row.lineSummary}</p>
+            <SaleReceiptUpload
+              saleId={row.id}
+              file={row.receiptFile}
+              onChange={(receiptFile) => {
+                setSales((rows) => rows.map((sale) => (sale.id === row.id ? { ...sale, receiptFile } : sale)));
+              }}
+            />
+          </li>
         ))}
-      </div>
+      </ul>
     </Shell>
   );
 }

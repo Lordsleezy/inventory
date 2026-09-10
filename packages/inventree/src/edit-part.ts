@@ -62,7 +62,7 @@ export async function updatePartFields(client: InventreeClient, input: PartEditI
   await client.patch(`/api/part/${partId}/`, {
     name: [brand, model].filter(Boolean).join(" ") || model,
     IPN: model,
-    description: title || model,
+    description: title,
     ...(categoryId ? { category: categoryId } : {}),
   });
   await client.patch(partMetadataPath(partId), {

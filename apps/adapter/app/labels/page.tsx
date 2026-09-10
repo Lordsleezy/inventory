@@ -3,7 +3,7 @@
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import type { Unit } from "@floor/domain";
-import { formatUsd } from "@floor/domain";
+import { displayAskCents, formatUsd } from "@floor/domain";
 
 function LabelSheet() {
   const params = useSearchParams();
@@ -43,7 +43,7 @@ function LabelSheet() {
               {[unit.brand, unit.model].filter(Boolean).join(" ")}
               {unit.condition ? ` · ${unit.condition}` : ""}
             </div>
-            <div className="label-price">{formatUsd(unit.askCents)}</div>
+            <div className="label-price">{formatUsd(displayAskCents(unit))}</div>
             <svg className="label-barcode" data-sku={unit.sku} width="220" height="48">
               <text x="0" y="36" fontFamily="monospace" fontSize="18">
                 *{unit.sku}*

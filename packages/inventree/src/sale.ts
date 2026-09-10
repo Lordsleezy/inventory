@@ -8,6 +8,7 @@ import {
   saleTotals,
   withSaleTotals,
   saleHistoryFromReceipt,
+  snapshotReceiptLine,
   type Cents,
   type FloorSale,
   type RestockState,
@@ -16,14 +17,17 @@ import {
   type SaleLine,
   type SalePayment,
   type SaleReceipt,
+  type SaleReceiptFileRecord,
   type SaleStatus,
+  parseReceiptFileRecord,
+  publicReceiptFile,
 } from "@floor/domain";
 import { InventreeClient, InventreeError } from "./client.ts";
 import { recordId } from "./list.ts";
 import { floorLog } from "./log.ts";
 import { emptyEnvelope, META_KEY } from "./metadata.ts";
 import { salesOrderMetadataPath, stockMetadataPath } from "./paths.ts";
-import { statusForFloorState } from "./status.ts";
+import { statusCodeOf, statusForFloorState } from "./status.ts";
 import { readEnvelope, type InventreeStock } from "./map-unit.ts";
 import { loadUnitBySku } from "./units.ts";
 
@@ -36,7 +40,7 @@ type SoRecord = {
   pk?: number;
   id?: number;
   reference?: string;
-  status?: number;
+  status?: unknown;
   status_text?: string;
   customer?: number;
   description?: string;
@@ -85,6 +89,7 @@ type SoMeta = {
   parkedAt: string | null;
   actor: string | null;
   receipt: SaleReceipt | null;
+  receiptFile: SaleReceiptFileRecord | null;
 };
 
 function fail(message: string, status: number): never {
@@ -112,6 +117,7 @@ function emptyMeta(taxRateBps: number): SoMeta {
     parkedAt: null,
     actor: null,
     receipt: null,
+    receiptFile: null,
   };
 }
 
@@ -134,14 +140,16 @@ function parseMeta(raw: unknown, taxRateBps: number): SoMeta {
     parkedAt: typeof row.parkedAt === "string" ? row.parkedAt : null,
     actor: typeof row.actor === "string" ? row.actor : null,
     receipt: row.receipt && typeof row.receipt === "object" ? (row.receipt as SaleReceipt) : null,
+    receiptFile: parseReceiptFileRecord(row.receiptFile),
   };
 }
 
-function soStatus(status: number | undefined, parked: boolean): SaleStatus {
-  if (status === COMPLETED_SO_STATUS) return "completed";
-  if (status === CANCELLED_SO_STATUS) return "cancelled";
+function soStatus(status: unknown, parked: boolean): SaleStatus {
+  const code = statusCodeOf(status);
+  if (code === COMPLETED_SO_STATUS) return "completed";
+  if (code === CANCELLED_SO_STATUS) return "cancelled";
   if (parked) return "parked";
-  if (status === undefined || OPEN_SO_STATUS.has(status)) return "open";
+  if (code === null || OPEN_SO_STATUS.has(code)) return "open";
   return "open";
 }
 
@@ -248,6 +256,10 @@ async function buildLines(client: InventreeClient, soId: number): Promise<SaleLi
       stockId: alloc.item,
       lineId: recordId(line),
       title: unit ? [unit.brand, unit.model].filter(Boolean).join(" ") || unit.title : "",
+      brand: unit?.brand ?? "",
+      model: unit?.model ?? "",
+      description: unit?.title ?? "",
+      condition: unit?.condition ?? null,
       askCents: unit?.askCents ?? null,
       floorCents: unit?.floorCents ?? null,
       priceCents: dollarsToCents(line.sale_price),
@@ -267,7 +279,7 @@ export async function loadSale(
   return withSaleTotals({
     id: recordId(so),
     reference: so.reference ?? `SO-${soId}`,
-    status: soStatus(typeof so.status === "number" ? so.status : undefined, meta.parked),
+    status: soStatus(so.status, meta.parked),
     customer: meta.customer,
     lines,
     saleDiscountCents: meta.saleDiscountCents,
@@ -275,12 +287,16 @@ export async function loadSale(
     payments: meta.payments,
     parkedAt: meta.parkedAt,
     receipt: meta.receipt,
+    receiptFile: publicReceiptFile(meta.receiptFile),
   });
 }
 
 export async function listOpenSales(client: InventreeClient, taxRateBps: number): Promise<FloorSale[]> {
   const rows = await client.listAll<SoRecord>("/api/order/so/");
-  const open = rows.filter((row) => typeof row.status === "number" && OPEN_SO_STATUS.has(row.status));
+  const open = rows.filter((row) => {
+    const code = statusCodeOf(row.status);
+    return code !== null && OPEN_SO_STATUS.has(code);
+  });
   const sales: FloorSale[] = [];
   for (const row of open) {
     sales.push(await loadSale(client, recordId(row), taxRateBps));
@@ -487,12 +503,14 @@ export async function completeSale(
     role: "admin" | "staff";
     confirmBelowFloor: boolean;
     actor: string;
+    channel?: string;
   },
 ): Promise<FloorSale> {
   const sale = await loadSale(client, input.soId, input.taxRateBps);
   assertOpen(sale);
   if (sale.lines.length === 0) fail("Nothing to complete", 400);
   if (!input.paymentMethod.trim()) fail("Choose a payment method", 400);
+  const channel = (input.channel ?? "floor").trim() || "floor";
   for (const line of sale.lines) {
     assertFloor(line.priceCents, line.floorCents, input.role, input.confirmBelowFloor);
   }
@@ -528,14 +546,9 @@ export async function completeSale(
     saleId: input.soId,
     reference: sale.reference,
     soldOn,
-    channel: "floor",
+    channel,
     customer: meta.customer,
-    lines: sale.lines.map((line) => ({
-      sku: line.sku,
-      title: line.title,
-      priceCents: line.priceCents,
-      channel: "floor",
-    })),
+    lines: sale.lines.map((line) => snapshotReceiptLine(line, channel)),
     saleDiscountCents: sale.saleDiscountCents,
     taxRateBps: sale.taxRateBps,
     subtotalCents: totals.subtotalCents,
@@ -552,7 +565,7 @@ export async function completeSale(
       ...current.value,
       sale: {
         priceCents: line.priceCents,
-        channel: "floor",
+        channel,
         soldOn,
         salesOrderId: String(input.soId),
       },
@@ -567,8 +580,67 @@ export async function completeSale(
     actor: input.actor,
     totalCents: totals.totalCents,
     method: input.paymentMethod,
+    channel,
   });
   return loadSale(client, input.soId, input.taxRateBps);
+}
+
+export async function quickSell(
+  client: InventreeClient,
+  input: {
+    sku: string;
+    channel: string;
+    proceedsCents: Cents;
+    role: "admin" | "staff";
+    confirmBelowFloor: boolean;
+    actor: string;
+  },
+): Promise<{ sale: FloorSale; unit: NonNullable<Awaited<ReturnType<typeof loadUnitBySku>>> }> {
+  const channel = input.channel.trim();
+  if (!channel) fail("Pick a channel", 400);
+  if (!Number.isInteger(input.proceedsCents) || input.proceedsCents < 0) {
+    fail("Enter what you actually got", 400);
+  }
+  const unit = await loadUnitBySku(client, input.sku);
+  if (!unit) fail("No item with that SKU", 404);
+  const reason = cannotSellReason(unit);
+  if (reason) fail(reason, 409);
+  assertFloor(input.proceedsCents, unit.floorCents, input.role, input.confirmBelowFloor);
+  const sale = await createSale(client, {
+    customer: { name: null, phone: null, email: null },
+    taxRateBps: 0,
+    actor: input.actor,
+  });
+  try {
+    await addSaleItem(client, {
+      soId: sale.id,
+      sku: input.sku,
+      priceCents: input.proceedsCents,
+      taxRateBps: 0,
+      role: input.role,
+      confirmBelowFloor: input.confirmBelowFloor,
+      actor: input.actor,
+    });
+    const completed = await completeSale(client, {
+      soId: sale.id,
+      taxRateBps: 0,
+      paymentMethod: channel,
+      channel,
+      role: input.role,
+      confirmBelowFloor: input.confirmBelowFloor,
+      actor: input.actor,
+    });
+    const sold = await loadUnitBySku(client, input.sku);
+    if (!sold) fail("Sale completed but the item could not be reloaded", 500);
+    return { sale: completed, unit: sold };
+  } catch (err) {
+    try {
+      await cancelSale(client, { soId: sale.id, taxRateBps: 0, actor: input.actor });
+    } catch {
+      /* lock from allocate-serials must not be left as an open sale if we can help it */
+    }
+    throw err;
+  }
 }
 
 export async function findSaleForSku(
@@ -654,37 +726,72 @@ export async function listCompletedSales(
   taxRateBps: number,
 ): Promise<SaleHistoryRow[]> {
   const rows = await client.listAll<SoRecord>("/api/order/so/");
-  const completed = rows.filter((row) => row.status === COMPLETED_SO_STATUS);
+  const completed = rows.filter((row) => statusCodeOf(row.status) === COMPLETED_SO_STATUS);
   const out: SaleHistoryRow[] = [];
   for (const row of completed) {
     const sale = await loadSale(client, recordId(row), taxRateBps);
     if (sale.receipt) {
-      out.push(saleHistoryFromReceipt(sale.receipt));
+      out.push(saleHistoryFromReceipt(sale.receipt, sale.receiptFile));
       continue;
     }
     out.push(
-      saleHistoryFromReceipt({
-        saleId: sale.id,
-        reference: sale.reference,
-        soldOn: sale.payments[0]?.at ?? "",
-        channel: "floor",
-        customer: sale.customer,
-        lines: sale.lines.map((line) => ({
-          sku: line.sku,
-          title: line.title,
-          priceCents: line.priceCents,
+      saleHistoryFromReceipt(
+        {
+          saleId: sale.id,
+          reference: sale.reference,
+          soldOn: sale.payments[0]?.at ?? "",
           channel: "floor",
-        })),
-        saleDiscountCents: sale.saleDiscountCents,
-        taxRateBps: sale.taxRateBps,
-        subtotalCents: sale.subtotalCents,
-        taxCents: sale.taxCents,
-        totalCents: sale.totalCents,
-        payments: sale.payments,
-      }),
+          customer: sale.customer,
+          lines: sale.lines.map((line) => snapshotReceiptLine(line, "floor")),
+          saleDiscountCents: sale.saleDiscountCents,
+          taxRateBps: sale.taxRateBps,
+          subtotalCents: sale.subtotalCents,
+          taxCents: sale.taxCents,
+          totalCents: sale.totalCents,
+          payments: sale.payments,
+        },
+        sale.receiptFile,
+      ),
     );
   }
   out.sort((a, b) => (a.soldOn < b.soldOn ? 1 : a.soldOn > b.soldOn ? -1 : 0));
   return out;
+}
+
+export async function loadSaleReceiptFile(
+  client: InventreeClient,
+  soId: number,
+  taxRateBps: number,
+): Promise<SaleReceiptFileRecord | null> {
+  const meta = await readSoMeta(client, soId, taxRateBps);
+  return meta.receiptFile;
+}
+
+export async function setSaleReceiptFile(
+  client: InventreeClient,
+  input: { soId: number; taxRateBps: number; file: SaleReceiptFileRecord; actor: string },
+): Promise<SaleReceiptFileRecord | null> {
+  const meta = await readSoMeta(client, input.soId, input.taxRateBps);
+  const previous = meta.receiptFile;
+  meta.receiptFile = input.file;
+  await writeSoMeta(client, input.soId, meta);
+  floorLog("receipt_upload", {
+    so: input.soId,
+    file: input.file.filename,
+    actor: input.actor,
+  });
+  return previous;
+}
+
+export async function clearSaleReceiptFile(
+  client: InventreeClient,
+  input: { soId: number; taxRateBps: number; actor: string },
+): Promise<SaleReceiptFileRecord | null> {
+  const meta = await readSoMeta(client, input.soId, input.taxRateBps);
+  const previous = meta.receiptFile;
+  meta.receiptFile = null;
+  await writeSoMeta(client, input.soId, meta);
+  floorLog("receipt_delete", { so: input.soId, actor: input.actor });
+  return previous;
 }
 

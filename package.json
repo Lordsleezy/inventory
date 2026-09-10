@@ -1,6 +1,6 @@
 {
   "name": "liquidation-os",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "private": true,
   "license": "UNLICENSED",
   "workspaces": [
@@ -15,6 +15,7 @@
     "staff:provision": "node infra/inventree/provision-staff.mjs",
     "build": "npm run build -w @floor/adapter",
     "installer": "installer/make-run.sh",
+    "installer:windows": "installer/make-windows.sh",
     "adapter": "npm run dev -w @floor/adapter",
     "photos:watch": "node scripts/photo-watch.mjs",
     "desktop": "npm start -w @floor/desktop"

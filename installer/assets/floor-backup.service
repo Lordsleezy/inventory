@@ -1,0 +1,12 @@
+[Unit]
+Description=Floor cold backup
+Documentation=https://github.com/Lordsleezy/inventory
+After=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/floor/backup.env
+Environment=FLOOR_BACKUP_REASON=scheduled
+ExecStart=/opt/floor/bin/floor-backup
+Nice=10
+IOSchedulingClass=idle

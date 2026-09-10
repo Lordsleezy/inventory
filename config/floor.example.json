@@ -1,5 +1,8 @@
 {
-  "storeName": "Floor",
+  "storeName": "Open Box Industries",
+  "storeAddress": "3121 Penryn Rd, Penryn, CA 95663",
+  "storeEmail": "",
+  "returnPolicy": "All items are used or open-box and sold as-is. Please inspect the appliance before you leave. Returns are accepted within 7 days with this receipt if the item is in the same condition as sold. No warranty is expressed or implied unless stated in writing on this receipt.",
   "skuStart": 11111,
   "taxRateBps": 0,
   "retailStaleDays": 60,

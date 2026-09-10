@@ -3,19 +3,44 @@
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import type { FloorConfig, Unit } from "@floor/domain";
+import {
+  discountOffRetail,
+  displayAskCents,
+  formatUsd,
+  isRetailStale,
+  type FloorConfig,
+  type Unit,
+} from "@floor/domain";
 import { Shell } from "@/components/shell";
+import { UnitPhotos } from "@/components/unit-photos";
+import { QuickSell } from "@/components/quick-sell";
+import { EmptyValue } from "@/components/empty-value";
 
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
+function Row({
+  label,
+  children,
+  align = "center",
+}: {
+  label: string;
+  children: React.ReactNode;
+  align?: "center" | "start";
+}) {
   return (
-    <div className="grid grid-cols-[140px_1fr] gap-2 border-b border-floor-line py-3 text-lg">
-      <div className="text-floor-mute">{label}</div>
-      <div className="min-h-6">{children}</div>
+    <div
+      className={`grid grid-cols-[6.5rem_1fr] gap-3 border-b border-floor-line py-2 ${
+        align === "start" ? "items-start" : "items-center"
+      }`}
+    >
+      <div className="text-quiet text-floor-mute">{label}</div>
+      <div className="min-h-touch">{children}</div>
     </div>
   );
 }
 
-const fieldClass = "min-h-touch w-full rounded-lg border border-floor-line bg-black px-3 text-lg";
+function centsToField(cents: number | null): string {
+  if (cents === null || cents === 0) return "";
+  return (cents / 100).toFixed(2);
+}
 
 export default function UnitDetailPage() {
   const { sku } = useParams<{ sku: string }>();
@@ -50,27 +75,30 @@ export default function UnitDetailPage() {
       .catch(() => setError("Not found"));
   }, [sku, router]);
 
+  const identity = unit ? unit.title || [unit.brand, unit.model].filter(Boolean).join(" ") : "";
+  const price = unit ? displayAskCents(unit) : null;
+
   return (
     <Shell>
-      <Link href="/inventory" className="inline-flex min-h-touch items-center font-bold text-floor-accent">
-        ← Inventory
+      <Link href="/inventory" className="btn-text px-0">
+        Inventory
       </Link>
-      {error ? <p className="mt-4 text-2xl font-black text-floor-danger">{error}</p> : null}
+      {error ? <p className="mt-4 text-title text-floor-danger">{error}</p> : null}
       {unit ? (
-        <article className="mt-4 rounded-xl border border-floor-line bg-floor-panel p-4">
-          {unit.recordError ? <p className="mb-3 text-floor-danger">{unit.recordError}</p> : null}
-          {unit.state === "sold" && unit.sale?.salesOrderId ? (
-            <p className="mb-3">
-              <Link href={`/receipt?sale=${unit.sale.salesOrderId}`} className="font-bold text-floor-accent">
-                Receipt
-              </Link>
-              {" · "}
-              <Link href={`/reports?sku=${unit.sku}`} className="font-bold text-floor-accent">
-                Sales history
-              </Link>
-            </p>
-          ) : null}
-          <UnitEditor unit={unit} onSaved={setUnit} onSkuChanged={(next) => router.replace(`/inventory/${next}`)} />
+        <article className="mt-3">
+          {unit.recordError ? <p className="mb-3 text-body text-floor-danger">{unit.recordError}</p> : null}
+          <p className="text-quiet tabular-nums tracking-wide text-floor-mute">{unit.sku}</p>
+          <p className="mt-1 text-title">
+            <EmptyValue>{identity}</EmptyValue>
+            {price ? <span className="text-floor-mute"> {formatUsd(price)}</span> : null}
+          </p>
+          <p className="mt-1 text-quiet text-floor-mute">
+            {unit.state}
+            {unit.condition ? ` · ${unit.condition}` : ""}
+          </p>
+          <UnitPhotos sku={unit.sku} unit={unit} onUnit={setUnit} />
+          <UnitEditor unit={unit} onSaved={setUnit} onSkuChanged={(next) => router.replace(`/inventory/${next}`)} role={role} />
+          <QuickSell unit={unit} onSold={setUnit} />
           {role === "admin" ? <DeleteButton sku={unit.sku} /> : null}
         </article>
       ) : null}
@@ -82,10 +110,12 @@ function UnitEditor({
   unit,
   onSaved,
   onSkuChanged,
+  role,
 }: {
   unit: Unit;
   onSaved: (unit: Unit) => void;
   onSkuChanged: (sku: string) => void;
+  role: string;
 }) {
   const [config, setConfig] = useState<FloorConfig | null>(null);
   const [sku, setSku] = useState(unit.sku);
@@ -98,9 +128,15 @@ function UnitEditor({
   const [testStatus, setTestStatus] = useState(unit.testStatus ?? "untested");
   const [defectNotes, setDefectNotes] = useState(unit.defectNotes ?? "");
   const [mfrSerial, setMfrSerial] = useState(unit.mfrSerial ?? "");
-  const [location, setLocation] = useState(unit.location ?? "");
+  const [msrp, setMsrp] = useState(centsToField(unit.msrpCents));
+  const [retail, setRetail] = useState(centsToField(unit.retail.cents));
+  const [retailer, setRetailer] = useState(unit.retail.retailer ?? "");
+  const [capturedOn, setCapturedOn] = useState(unit.retail.capturedOn ?? "");
+  const [ask, setAsk] = useState(centsToField(displayAskCents(unit)));
+  const [floor, setFloor] = useState(centsToField(unit.floorCents));
   const [error, setError] = useState("");
   const [saved, setSaved] = useState("");
+  const [more, setMore] = useState(false);
 
   useEffect(() => {
     fetch("/api/config")
@@ -119,8 +155,21 @@ function UnitEditor({
     setTestStatus(unit.testStatus ?? "untested");
     setDefectNotes(unit.defectNotes ?? "");
     setMfrSerial(unit.mfrSerial ?? "");
-    setLocation(unit.location ?? "");
+    setMsrp(centsToField(unit.msrpCents));
+    setRetail(centsToField(unit.retail.cents));
+    setRetailer(unit.retail.retailer ?? "");
+    setCapturedOn(unit.retail.capturedOn ?? "");
+    setAsk(centsToField(displayAskCents(unit)));
+    setFloor(centsToField(unit.floorCents));
   }, [unit]);
+
+  const askCents = ask === "" ? null : Math.round(Number(ask) * 100);
+  const retailCents = retail === "" ? null : Math.round(Number(retail) * 100);
+  const off = discountOffRetail(
+    Number.isFinite(askCents) ? askCents : null,
+    Number.isFinite(retailCents) ? retailCents : null,
+  );
+  const stale = isRetailStale(capturedOn || null, config?.retailStaleDays ?? 60);
 
   async function patch(body: Record<string, unknown>) {
     setError("");
@@ -177,7 +226,6 @@ function UnitEditor({
     testStatus?: string;
     defectNotes?: string;
     mfrSerial?: string;
-    location?: string;
   }) {
     await patch({
       op: "inspect",
@@ -185,12 +233,18 @@ function UnitEditor({
       testStatus: next?.testStatus ?? testStatus,
       defectNotes: next?.defectNotes ?? defectNotes,
       mfrSerial: next?.mfrSerial ?? mfrSerial,
-      location: next?.location ?? location,
     });
   }
 
+  async function savePrice() {
+    const nextAsk = ask === "" ? null : Math.round(Number(ask) * 100);
+    const shown = displayAskCents(unit);
+    const askPayload = unit.askCents == null && nextAsk === shown ? "" : ask;
+    await patch({ op: "price", msrp, retail, retailer, capturedOn, ask: askPayload, floor });
+  }
+
   return (
-    <div>
+    <div className="mt-6">
       <Row label="SKU">
         <input
           value={sku}
@@ -198,27 +252,22 @@ function UnitEditor({
           onBlur={() => void saveSku()}
           inputMode="numeric"
           maxLength={5}
-          className={`${fieldClass} tracking-widest font-black text-floor-accent`}
+          className="field tracking-widest"
         />
       </Row>
-      <p className="my-2 rounded-lg border border-floor-line bg-black/40 px-3 py-2 text-sm text-floor-mute">
-        Brand, model, title, category, and UPC are shared by every unit of this model
-        {unit.sharedModelCount > 1 ? ` (${unit.sharedModelCount} units)` : ""}. Changing them here changes all of them.
-      </p>
       <Row label="Brand">
-        <input value={brand} onChange={(e) => setBrand(e.target.value)} onBlur={() => void savePart()} className={fieldClass} />
+        <input value={brand} onChange={(e) => setBrand(e.target.value)} onBlur={() => void savePart()} className="field" />
       </Row>
       <Row label="Model">
-        <input value={model} onChange={(e) => setModel(e.target.value)} onBlur={() => void savePart()} className={fieldClass} />
+        <input value={model} onChange={(e) => setModel(e.target.value)} onBlur={() => void savePart()} className="field" />
       </Row>
-      <Row label="Title">
-        <input value={title} onChange={(e) => setTitle(e.target.value)} onBlur={() => void savePart()} className={fieldClass} />
-      </Row>
-      <Row label="Category">
-        <input value={category} onChange={(e) => setCategory(e.target.value)} onBlur={() => void savePart()} className={fieldClass} />
-      </Row>
-      <Row label="UPC">
-        <input value={upc} onChange={(e) => setUpc(e.target.value)} onBlur={() => void savePart()} className={fieldClass} />
+      <Row label="Description" align="start">
+        <textarea
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          onBlur={() => void savePart()}
+          className="field min-h-24 py-2"
+        />
       </Row>
       <Row label="Condition">
         <select
@@ -227,7 +276,7 @@ function UnitEditor({
             setCondition(e.target.value);
             void saveInspect({ condition: e.target.value });
           }}
-          className={fieldClass}
+          className="field"
         >
           <option value=""></option>
           {(config?.conditions ?? []).map((row) => (
@@ -237,38 +286,104 @@ function UnitEditor({
           ))}
         </select>
       </Row>
-      <Row label="Test">
-        <select
-          value={testStatus}
-          onChange={(e) => {
-            setTestStatus(e.target.value);
-            void saveInspect({ testStatus: e.target.value });
-          }}
-          className={fieldClass}
-        >
-          {(config?.testStatuses ?? ["untested"]).map((row) => (
-            <option key={row} value={row}>
-              {row}
-            </option>
-          ))}
-        </select>
+      <Row label="Price">
+        <span className="flex items-center gap-1">
+          <span className="text-floor-mute">$</span>
+          <input
+            inputMode="decimal"
+            value={ask}
+            onChange={(e) => setAsk(e.target.value.replace(/[^0-9.]/g, ""))}
+            onBlur={() => void savePrice()}
+            className="field tabular-nums"
+          />
+        </span>
       </Row>
-      <Row label="Location">
-        <input value={location} onChange={(e) => setLocation(e.target.value)} onBlur={() => void saveInspect()} className={fieldClass} />
+      <Row label="MSRP">
+        <span className="flex items-center gap-1">
+          <span className="text-floor-mute">$</span>
+          <input
+            inputMode="decimal"
+            value={msrp}
+            onChange={(e) => setMsrp(e.target.value.replace(/[^0-9.]/g, ""))}
+            onBlur={() => void savePrice()}
+            className="field tabular-nums"
+          />
+        </span>
       </Row>
-      <Row label="Mfr serial">
-        <input value={mfrSerial} onChange={(e) => setMfrSerial(e.target.value)} onBlur={() => void saveInspect()} className={fieldClass} />
-      </Row>
-      <Row label="Defects">
-        <textarea
-          value={defectNotes}
-          onChange={(e) => setDefectNotes(e.target.value)}
-          onBlur={() => void saveInspect()}
-          className="min-h-24 w-full rounded-lg border border-floor-line bg-black px-3 py-2 text-lg"
-        />
-      </Row>
-      {error ? <p className="mt-3 font-bold text-floor-danger">{error}</p> : null}
-      {saved ? <p className="mt-3 text-floor-ok">{saved}</p> : null}
+      {off !== null ? <p className="py-2 text-quiet text-floor-mute">{off}% off retail</p> : null}
+      {stale ? <p className="py-2 text-quiet text-floor-danger">Retail reference is stale</p> : null}
+      <button type="button" onClick={() => setMore((value) => !value)} className="btn-text mt-3 px-0">
+        {more ? "Less" : "More"}
+      </button>
+      {more ? (
+        <div className="mt-2">
+          <p className="my-3 text-quiet text-floor-mute">
+            Brand, model, description, category, and UPC are shared by every unit of this model
+            {unit.sharedModelCount > 1 ? ` (${unit.sharedModelCount} units)` : ""}.
+          </p>
+          <Row label="Category">
+            <input value={category} onChange={(e) => setCategory(e.target.value)} onBlur={() => void savePart()} className="field" />
+          </Row>
+          <Row label="UPC">
+            <input value={upc} onChange={(e) => setUpc(e.target.value)} onBlur={() => void savePart()} className="field" />
+          </Row>
+          <Row label="Test">
+            <select
+              value={testStatus}
+              onChange={(e) => {
+                setTestStatus(e.target.value);
+                void saveInspect({ testStatus: e.target.value });
+              }}
+              className="field"
+            >
+              {(config?.testStatuses ?? ["untested"]).map((row) => (
+                <option key={row} value={row}>
+                  {row}
+                </option>
+              ))}
+            </select>
+          </Row>
+          <Row label="Mfr serial">
+            <input value={mfrSerial} onChange={(e) => setMfrSerial(e.target.value)} onBlur={() => void saveInspect()} className="field" />
+          </Row>
+          <Row label="Defects">
+            <textarea
+              value={defectNotes}
+              onChange={(e) => setDefectNotes(e.target.value)}
+              onBlur={() => void saveInspect()}
+              className="field min-h-24 py-2"
+            />
+          </Row>
+          <Row label="Retail ref">
+            <input
+              inputMode="decimal"
+              value={retail}
+              onChange={(e) => setRetail(e.target.value.replace(/[^0-9.]/g, ""))}
+              onBlur={() => void savePrice()}
+              className="field tabular-nums"
+            />
+          </Row>
+          <Row label="Retailer">
+            <input value={retailer} onChange={(e) => setRetailer(e.target.value)} onBlur={() => void savePrice()} className="field" />
+          </Row>
+          <Row label="Captured">
+            <input type="date" value={capturedOn} onChange={(e) => setCapturedOn(e.target.value)} onBlur={() => void savePrice()} className="field" />
+          </Row>
+          {role === "admin" ? (
+            <Row label="Floor">
+              <input
+                inputMode="decimal"
+                value={floor}
+                onChange={(e) => setFloor(e.target.value.replace(/[^0-9.]/g, ""))}
+                onBlur={() => void savePrice()}
+                className="field tabular-nums"
+              />
+            </Row>
+          ) : null}
+        </div>
+      ) : null}
+      {error ? <p className="mt-3 text-body text-floor-danger">{error}</p> : null}
+      {saved ? <p className="mt-3 text-quiet text-floor-ok">{saved}</p> : null}
     </div>
   );
 }
@@ -291,11 +406,11 @@ function DeleteButton({ sku }: { sku: string }) {
   }
 
   return (
-    <div className="mt-6 border-t border-floor-line pt-4">
-      <button type="button" onClick={() => void del()} className="min-h-touch rounded-lg bg-floor-danger px-4 font-black text-black">
-        Delete
+    <div className="mt-10">
+      <button type="button" onClick={() => void del()} className="btn-text px-0 text-floor-danger">
+        Delete unit
       </button>
-      {error ? <p className="mt-2 font-bold text-floor-danger">{error}</p> : null}
+      {error ? <p className="mt-2 text-body text-floor-danger">{error}</p> : null}
     </div>
   );
 }

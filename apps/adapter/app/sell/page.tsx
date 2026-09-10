@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
+  displayAskCents,
   formatUsd,
   type FloorConfig,
   type FloorSale,
@@ -15,7 +16,7 @@ import { Money } from "@/components/empty-value";
 import { MoneyField } from "@/components/money-field";
 
 function centsField(cents: number | null): string {
-  if (cents === null) return "";
+  if (cents === null || cents === 0) return "";
   return (cents / 100).toFixed(2);
 }
 
@@ -77,7 +78,7 @@ export default function SellPage() {
         const next = data.unit as Unit;
         setMissing(false);
         setUnit(next);
-        setPrice(centsField(next.askCents));
+        setPrice(centsField(displayAskCents(next)));
       })
       .catch(() => setMissing(true));
   }, [sku]);
@@ -156,11 +157,11 @@ export default function SellPage() {
       confirmBelowFloor: confirmFloor,
     });
     if (!data?.sale) return;
-    const id = data.sale.id;
     setSale(null);
     setMethod("");
     await refreshParked();
-    router.push(`/receipt?sale=${id}`);
+    const soldSku = data.sale.lines?.[0]?.sku;
+    router.push(soldSku ? `/reports?sku=${soldSku}` : "/reports");
   }
 
   async function cancel() {

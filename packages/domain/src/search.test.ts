@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { filterUnits } from "./search.ts";
+import { filterUnits, matchesInventoryQuery } from "./search.ts";
 import type { Unit } from "./unit.ts";
 
 const listings: Unit["listings"] = [
@@ -52,6 +52,21 @@ test("search matches sku and model, ignores non-SKU rows", () => {
   assert.equal(filterUnits(units, { q: "lrflc" }).map((u) => u.sku).join(), "11113");
 });
 
+test("search matches sku, brand, model, and title as case-insensitive partials", () => {
+  const units = [
+    unit({ sku: "11126", brand: "Bosch", model: "b36cl80ens/47", title: "Bosch 20 cu ft counter depth 4 door fridge" }),
+    unit({ sku: "11119", brand: "LG", model: "LCFS22EXS", title: "LG 22 cu ft french door refrigerator" }),
+    unit({ sku: "11116", brand: "Midea", model: "MRT21D3BST", title: "Midea 21 cu. ft. Garage Ready Top Freezer" }),
+  ];
+  assert.deepEqual(filterUnits(units, { q: "LG" }).map((u) => u.sku), ["11119"]);
+  assert.deepEqual(filterUnits(units, { q: "bosch" }).map((u) => u.sku), ["11126"]);
+  assert.deepEqual(filterUnits(units, { q: "111" }).map((u) => u.sku), ["11126", "11119", "11116"]);
+  assert.deepEqual(filterUnits(units, { q: "lcfs" }).map((u) => u.sku), ["11119"]);
+  assert.equal(matchesInventoryQuery(units[1], "lg"), true);
+  assert.equal(matchesInventoryQuery(units[0], "BOSCH"), true);
+  assert.equal(matchesInventoryQuery(units[0], "111"), true);
+});
+
 test("inspect queue is missing condition", () => {
   const units = [
     unit({ sku: "11111", condition: null }),
@@ -64,6 +79,7 @@ test("price queue is missing ask", () => {
   const units = [
     unit({ sku: "11112", condition: "Good", askCents: null }),
     unit({ sku: "11113", condition: "Excellent", askCents: 145000 }),
+    unit({ sku: "11116", askCents: null, location: "999" }),
   ];
   assert.deepEqual(filterUnits(units, { queue: "price" }).map((u) => u.sku), ["11112"]);
 });
@@ -74,8 +90,9 @@ test("unlisted queue is priced and not listed", () => {
     unit({ sku: "11113", askCents: 145000 }),
     unit({ sku: "11114", askCents: 99000, listings: listed }),
     unit({ sku: "11112", askCents: null }),
+    unit({ sku: "11116", askCents: null, location: "999" }),
   ];
-  assert.deepEqual(filterUnits(units, { queue: "unlisted" }).map((u) => u.sku), ["11113"]);
+  assert.deepEqual(filterUnits(units, { queue: "unlisted" }).map((u) => u.sku), ["11113", "11116"]);
 });
 
 test("error queue is recordError set", () => {
@@ -94,4 +111,13 @@ test("voided units are excluded unless the voided queue is asked", () => {
   assert.deepEqual(filterUnits(units, {}).map((u) => u.sku), ["11111"]);
   assert.deepEqual(filterUnits(units, { queue: "voided" }).map((u) => u.sku), ["11112"]);
   assert.deepEqual(filterUnits(units, { includeVoided: true }).map((u) => u.sku), ["11111", "11112"]);
+});
+
+test("sold units are excluded from All and listed on the sold queue", () => {
+  const units = [
+    unit({ sku: "11111", state: "available" }),
+    unit({ sku: "11112", state: "sold" }),
+  ];
+  assert.deepEqual(filterUnits(units, {}).map((u) => u.sku), ["11111"]);
+  assert.deepEqual(filterUnits(units, { queue: "sold" }).map((u) => u.sku), ["11112"]);
 });

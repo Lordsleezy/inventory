@@ -35,15 +35,18 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ sku: string }
       const condition = body.condition == null || body.condition === "" ? null : String(body.condition);
       const testStatus = String(body.testStatus ?? "untested");
       assertInspectFields(loadFloorConfig(), { condition, testStatus });
-      const unit = await inspectUnit(client, {
+      const inspect: Parameters<typeof inspectUnit>[1] = {
         sku,
         condition,
         testStatus,
         defectNotes: body.defectNotes ? String(body.defectNotes) : null,
         mfrSerial: body.mfrSerial ? String(body.mfrSerial) : null,
-        location: body.location ? String(body.location) : null,
         actor: session.displayName,
-      });
+      };
+      if ("location" in body) {
+        inspect.location = body.location ? String(body.location) : null;
+      }
+      const unit = await inspectUnit(client, inspect);
       return NextResponse.json({ unit: redactUnit(unit, session.role) });
     }
     if (body.op === "part") {

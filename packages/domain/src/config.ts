@@ -10,6 +10,9 @@ export type MarketplaceConfig = {
 
 export type FloorConfig = {
   storeName: string;
+  storeAddress: string;
+  storeEmail: string;
+  returnPolicy: string;
   skuStart: number;
   taxRateBps: number;
   retailStaleDays: number;
@@ -22,8 +25,14 @@ export type FloorConfig = {
   marketplace: MarketplaceConfig;
 };
 
+export const DEFAULT_RETURN_POLICY =
+  "All items are used or open-box and sold as-is. Please inspect the appliance before you leave. Returns are accepted within 7 days with this receipt if the item is in the same condition as sold. No warranty is expressed or implied unless stated in writing on this receipt.";
+
 export const DEFAULT_FLOOR_CONFIG: FloorConfig = {
-  storeName: "Floor",
+  storeName: "Open Box Industries",
+  storeAddress: "3121 Penryn Rd, Penryn, CA 95663",
+  storeEmail: "",
+  returnPolicy: DEFAULT_RETURN_POLICY,
   skuStart: 11111,
   taxRateBps: 0,
   retailStaleDays: 60,
@@ -64,6 +73,9 @@ export function parseFloorConfig(raw: unknown): FloorConfig {
       : {};
   return {
     storeName: String(row.storeName ?? DEFAULT_FLOOR_CONFIG.storeName),
+    storeAddress: String(row.storeAddress ?? DEFAULT_FLOOR_CONFIG.storeAddress),
+    storeEmail: String(row.storeEmail ?? DEFAULT_FLOOR_CONFIG.storeEmail).trim(),
+    returnPolicy: String(row.returnPolicy ?? DEFAULT_FLOOR_CONFIG.returnPolicy).trim() || DEFAULT_RETURN_POLICY,
     skuStart,
     taxRateBps,
     retailStaleDays: Number(row.retailStaleDays ?? 60) || 60,

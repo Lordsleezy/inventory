@@ -11,7 +11,7 @@ export type InspectInput = {
   testStatus: string;
   defectNotes: string | null;
   mfrSerial: string | null;
-  location: string | null;
+  location?: string | null;
   actor: string;
 };
 
@@ -49,18 +49,17 @@ export async function inspectUnit(client: InventreeClient, input: InspectInput) 
     defectNotes: input.defectNotes,
     mfrSerial: input.mfrSerial,
   };
-  const locationId = await findOrCreateLocation(client, input.location);
   const audit = [
     `Inspect ${input.sku} by ${input.actor}`,
     `condition=${input.condition ?? ""}`,
     `test=${input.testStatus}`,
-    `location=${input.location ?? ""}`,
     `mfrSerial=${input.mfrSerial ?? ""}`,
   ].join(" | ");
-  await client.patch(`/api/stock/${id}/`, {
-    ...(locationId ? { location: locationId } : {}),
-    notes: audit,
-  });
+  const patch: Record<string, unknown> = { notes: audit };
+  if (input.location !== undefined) {
+    patch.location = await findOrCreateLocation(client, input.location);
+  }
+  await client.patch(`/api/stock/${id}/`, patch);
   await client.patch(stockMetadataPath(id), { metadata: { [META_KEY]: next } });
   try {
     await client.post("/api/stock/test/", {

@@ -74,7 +74,11 @@ mkdir -p "$STAGE/config" "$STAGE/assets"
 cp config/floor.example.json "$STAGE/config/floor.example.json"
 cp config/staff.example.json "$STAGE/config/staff.example.json"
 cp installer/assets/floor-adapter.service installer/assets/floor.desktop \
-   installer/assets/icon.png "$STAGE/assets/"
+   installer/assets/icon.png \
+   installer/assets/floor-backup.sh installer/assets/floor-restore.sh \
+   installer/assets/floor-backup.service installer/assets/floor-backup.timer \
+   installer/assets/backup.env \
+   "$STAGE/assets/"
 cp installer/install.sh "$STAGE/install.sh"
 chmod +x "$STAGE/install.sh"
 printf '%s\n' "$VERSION" > "$STAGE/VERSION"
@@ -88,6 +92,8 @@ NODE_BIN="$STAGE/runtime/node/bin/node"
   "./runtime/node/bin/node" --experimental-strip-types \
   -e 'import("./infra/inventree/http.mjs").then(()=>console.log("PASS  setup script imports resolve")).catch((e)=>{console.error("FAIL  "+e.message);process.exit(1)})' )
 bash -n "$STAGE/install.sh" && echo "PASS  install.sh parses"
+bash -n "$STAGE/assets/floor-backup.sh" && echo "PASS  floor-backup.sh parses"
+bash -n "$STAGE/assets/floor-restore.sh" && echo "PASS  floor-restore.sh parses"
 
 say "Installer logic self-tests"
 bash installer/selftest-header.sh | tail -1

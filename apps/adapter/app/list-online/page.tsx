@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { formatUsd, hasPhotos, type FloorConfig, type ListingState, type Unit } from "@floor/domain";
+import { displayAskCents, formatUsd, hasPhotos, type FloorConfig, type ListingState, type Unit } from "@floor/domain";
 import { Shell } from "@/components/shell";
 import { SkuKeypad } from "@/components/sku-keypad";
 import { UnitPreview } from "@/components/unit-preview";
@@ -27,7 +27,7 @@ function listingText(unit: Unit) {
     unit.title,
     unit.condition ? `Condition: ${unit.condition}` : "",
     `SKU ${unit.sku}`,
-    formatUsd(unit.askCents),
+    formatUsd(displayAskCents(unit)),
   ]
     .filter(Boolean)
     .join("\n");

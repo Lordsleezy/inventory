@@ -39,7 +39,7 @@ export function SkuKeypad({ value, onChange, onEnter, onClear, maxLength = 5 }: 
   const keysGrid = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "clr", "0", "go"];
 
   return (
-    <div className="rounded-xl border border-floor-line bg-floor-panel p-3">
+    <div className="rounded-xl border border-floor-line bg-floor-panel p-3" data-floor-osk="off">
       <input
         ref={hidden}
         value={value}

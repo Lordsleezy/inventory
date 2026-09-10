@@ -1,4 +1,5 @@
 import type { Unit } from "@floor/domain";
+import { displayAskCents } from "@floor/domain";
 import { EmptyValue, Money } from "./empty-value";
 
 export function UnitPreview({ unit, missing }: { unit: Unit | null; missing: boolean }) {
@@ -20,15 +21,13 @@ export function UnitPreview({ unit, missing }: { unit: Unit | null; missing: boo
     <div className="rounded-xl border-2 border-floor-accent bg-floor-panel p-4">
       <p className="text-4xl font-black tracking-widest text-floor-accent">{unit.sku}</p>
       <p className="mt-1 text-xl font-bold">
-        <EmptyValue>{[unit.brand, unit.model].filter(Boolean).join(" ")}</EmptyValue>
+        <EmptyValue>{unit.title || [unit.brand, unit.model].filter(Boolean).join(" ")}</EmptyValue>
       </p>
       <p className="text-floor-mute">
         <EmptyValue>{unit.condition}</EmptyValue>
-        {unit.condition ? " · " : ""}
-        <EmptyValue>{unit.location}</EmptyValue>
       </p>
       <p className="mt-2 text-2xl">
-        <Money cents={unit.askCents} />
+        <Money cents={displayAskCents(unit)} />
       </p>
       {unit.recordError ? <p className="mt-2 text-floor-danger">{unit.recordError}</p> : null}
     </div>

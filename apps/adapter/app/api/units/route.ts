@@ -57,6 +57,14 @@ export async function POST(req: Request) {
       typeof body.acquisition === "string" || typeof body.acquisition === "number"
         ? moneyStringToCents(body.acquisition as string)
         : null;
+    const ask =
+      typeof body.ask === "string" || typeof body.ask === "number"
+        ? moneyStringToCents(body.ask as string)
+        : null;
+    const msrp =
+      typeof body.msrp === "string" || typeof body.msrp === "number"
+        ? moneyStringToCents(body.msrp as string)
+        : null;
     const client = inventreeClient(session);
     const requested = body.sku ? String(body.sku).trim() : "";
     if (requested) {
@@ -72,6 +80,9 @@ export async function POST(req: Request) {
       category: String(body.category ?? ""),
       lot: body.lot ? String(body.lot) : null,
       acquisitionCostCents: acquisition,
+      askCents: ask,
+      msrpCents: msrp,
+      location: body.location ? String(body.location) : "Receiving",
       skuStart: loadFloorConfig().skuStart,
       sku: requested || undefined,
       occupied: Object.values(loadSkuLedger().entries),

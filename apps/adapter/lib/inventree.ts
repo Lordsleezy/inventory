@@ -1,9 +1,11 @@
-import { join } from "node:path";
+import { resolve } from "node:path";
 import { InventreeClient, fetchToken } from "@floor/inventree";
 import type { FloorSession } from "./session";
 
 export function floorRoot() {
-  return process.env.FLOOR_ROOT || join(process.cwd(), "..", "..");
+  const fromEnv = process.env.FLOOR_ROOT?.trim();
+  if (fromEnv) return resolve(fromEnv);
+  return resolve(process.cwd(), "..", "..");
 }
 
 export function inventreeUrl() {

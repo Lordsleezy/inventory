@@ -49,8 +49,8 @@ export default function LoginPage() {
 
   return (
     <div className="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-6 bg-floor-bg p-4 text-floor-text">
-      <h1 className="text-center text-4xl font-black text-floor-accent">FLOOR</h1>
-      <div className="grid gap-2">
+      <h1 className="text-center text-quiet tracking-[0.18em] text-floor-mute">FLOOR</h1>
+      <div className="grid gap-1">
         {staff.map((row) => (
           <button
             key={row.username}
@@ -60,10 +60,8 @@ export default function LoginPage() {
               setPin("");
               setError("");
             }}
-            className={`min-h-14 rounded-xl border text-xl font-bold ${
-              username === row.username
-                ? "border-floor-accent bg-floor-accent text-black"
-                : "border-floor-line bg-floor-panel"
+            className={`min-h-touch px-2 text-left text-title ${
+              username === row.username ? "text-floor-accent" : "text-floor-text"
             }`}
           >
             {row.displayName}
@@ -77,7 +75,7 @@ export default function LoginPage() {
         onEnter={() => void submit(pin)}
         onClear={() => setError("")}
       />
-      {error ? <p className="text-center text-xl font-bold text-floor-danger">{error}</p> : null}
+      {error ? <p className="text-center text-body text-floor-danger">{error}</p> : null}
     </div>
   );
 }

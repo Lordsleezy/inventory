@@ -8,6 +8,7 @@ const nextConfig: NextConfig = {
   output: "standalone",
   outputFileTracingRoot: repoRoot,
   transpilePackages: ["@floor/domain", "@floor/inventree", "@floor/auth", "@floor/importer"],
+  serverExternalPackages: ["pdf-lib"],
   allowedDevOrigins: ["127.0.0.1"],
 };
 

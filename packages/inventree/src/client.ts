@@ -117,6 +117,28 @@ export class InventreeClient {
     return this.request<T>("DELETE", path);
   }
 
+  async getRaw(path: string): Promise<{ bytes: Uint8Array; contentType: string }> {
+    const url = path.startsWith("http") ? path : `${this.options.baseUrl.replace(/\/$/, "")}${path}`;
+    const headers: Record<string, string> = {
+      Referer: `${this.options.baseUrl.replace(/\/$/, "")}/`,
+      Origin: this.options.baseUrl.replace(/\/$/, ""),
+      ...this.authHeaders(),
+    };
+    if (this.csrfToken) {
+      headers["X-CSRFToken"] = this.csrfToken;
+      headers.Cookie = `csrftoken=${this.csrfToken}`;
+    }
+    const res = await fetch(url, { method: "GET", headers });
+    this.captureCsrf(res);
+    if (!res.ok) {
+      throw new InventreeError("GET", path, res.status, await res.text());
+    }
+    return {
+      bytes: new Uint8Array(await res.arrayBuffer()),
+      contentType: res.headers.get("content-type") || "application/octet-stream",
+    };
+  }
+
   async postForm<T>(path: string, form: FormData): Promise<T> {
     const url = `${this.options.baseUrl.replace(/\/$/, "")}${path}`;
     const headers: Record<string, string> = {

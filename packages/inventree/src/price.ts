@@ -24,7 +24,14 @@ export async function priceUnit(client: InventreeClient, input: PriceInput) {
   );
   const stock = stocks.find((row) => row.serial === input.sku);
   if (!stock) throw Object.assign(new Error("No item with that SKU"), { status: 404 });
-  const current = readEnvelope(stock);
+  let metadata: Record<string, unknown> | null = (stock.metadata as Record<string, unknown> | undefined) ?? null;
+  try {
+    const wrapped = await client.get<{ metadata?: Record<string, unknown> }>(stockMetadataPath(recordId(stock)));
+    metadata = wrapped.metadata ?? wrapped;
+  } catch {
+    /* keep list payload */
+  }
+  const current = readEnvelope({ ...stock, metadata });
   const next = {
     ...emptyEnvelope(),
     ...current.value,

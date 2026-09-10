@@ -43,6 +43,7 @@ export const LrosEnvelope = z.object({
     .nullable()
     .optional(),
   primaryAttachmentId: z.number().int().nullable().optional(),
+  photoOrder: z.array(z.number().int()).optional(),
 });
 
 export type LrosEnvelope = z.infer<typeof LrosEnvelope>;

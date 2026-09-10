@@ -58,15 +58,18 @@ jobs:
 
       - name: Build the installer
         run: |
-          chmod +x installer/make-run.sh
+          chmod +x installer/make-run.sh installer/make-windows.sh
           installer/make-run.sh "${{ steps.v.outputs.version }}"
+          installer/make-windows.sh "${{ steps.v.outputs.version }}"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: floor-${{ steps.v.outputs.version }}-linux-x64
+          name: floor-${{ steps.v.outputs.version }}
           path: |
             build/floor-*.run
             build/floor-*.run.sha256
+            build/floor-*-windows.zip
+            build/floor-*-windows.zip.sha256
           retention-days: 30
 
       - name: Publish the release
@@ -76,48 +79,42 @@ jobs:
           VERSION: ${{ steps.v.outputs.version }}
         run: |
           RUN="build/floor-${VERSION}-linux-x64.run"
+          WIN="build/floor-${VERSION}-windows.zip"
           {
-            echo "## Floor ${VERSION} — Linux x64"
+            echo "## Floor ${VERSION}"
             echo
-            echo "Download \`floor-${VERSION}-linux-x64.run\`, then on the machine:"
+            echo "### Linux x64 (Zorin tablet)"
+            echo
+            echo "Download \`floor-${VERSION}-linux-x64.run\`, then:"
             echo
             echo '```bash'
             echo "cd ~/Downloads"
             echo "sudo bash floor-${VERSION}-linux-x64.run"
             echo '```'
             echo
-            echo "Use \`sudo bash\`, not \`sudo ./file\` — browsers save downloads without"
-            echo "the execute bit."
+            echo "Use \`sudo bash\`, not \`sudo ./file\`. Inventory and PIN stay outside the program directory on update."
             echo
-            echo "It asks once for an InvenTree admin password and once for a Floor"
-            echo "unlock PIN, then does everything else and starts Floor on boot."
+            echo "### Windows ARM64 and x64"
             echo
-            echo "**Already running Floor?** The same command updates in place and keeps"
-            echo "your inventory, config, photos, and PIN."
+            echo "Download \`floor-${VERSION}-windows.zip\`, unzip, then in that folder:"
             echo
-            echo "### Supported"
-            echo "Zorin 17 and 18, Ubuntu 20.04/22.04/24.04, and Ubuntu-based derivatives"
-            echo "(Mint, Pop!_OS, elementary). The Ubuntu base is read from"
-            echo "\`/etc/os-release\`, not the distro's own name."
+            echo '```powershell'
+            echo "Set-ExecutionPolicy -Scope Process Bypass"
+            echo ".\Install-Floor.ps1"
+            echo '```'
             echo
-            echo "### Bundled, no download needed"
-            echo "- Node $(node -p 'process.versions.node') runtime (the system Node is never touched)"
-            echo "- Electron desktop shell"
-            echo "- Floor itself and all of its npm dependencies, prebuilt"
+            echo "Needs Docker Desktop. On ARM64 use the ARM64 Docker build; InvenTree's image is linux/arm64. Later starts: \`.\Start-Floor.ps1\`. Read \`README.md\` inside the zip."
             echo
-            echo "### Fetched during install (needs internet, takes a few minutes)"
-            echo "- **InvenTree** — a Python/Django stack installed from get.inventree.org."
-            echo "  It genuinely cannot be bundled in this file. Everything else can."
-            echo "- \`curl\` and \`tar\`, only if the machine somehow lacks them."
-            echo
-            echo "### Checksum"
+            echo "### Checksums"
             echo '```'
             cat "${RUN}.sha256"
+            cat "${WIN}.sha256"
             echo '```'
           } > notes.md
 
           gh release create "v${VERSION}" \
             "$RUN" "${RUN}.sha256" \
+            "$WIN" "${WIN}.sha256" \
             --title "Floor ${VERSION}" \
             --notes-file notes.md \
             --latest

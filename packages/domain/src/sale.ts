@@ -1,4 +1,5 @@
 import type { Cents } from "./money.ts";
+import type { SaleReceiptFile } from "./receipt-file.ts";
 import type { Unit } from "./unit.ts";
 
 export type SaleStatus = "open" | "parked" | "completed" | "cancelled";
@@ -21,6 +22,10 @@ export type SaleLine = {
   stockId: number;
   lineId: number;
   title: string;
+  brand: string;
+  model: string;
+  description: string;
+  condition: string | null;
   askCents: Cents | null;
   floorCents: Cents | null;
   priceCents: Cents;
@@ -29,6 +34,10 @@ export type SaleLine = {
 export type SaleReceiptLine = {
   sku: string;
   title: string;
+  brand?: string;
+  model?: string;
+  description?: string;
+  condition?: string | null;
   priceCents: Cents;
   channel: string;
 };
@@ -62,6 +71,7 @@ export type FloorSale = {
   payments: SalePayment[];
   parkedAt: string | null;
   receipt: SaleReceipt | null;
+  receiptFile: SaleReceiptFile | null;
 };
 
 export type SaleHistoryRow = {
@@ -74,9 +84,29 @@ export type SaleHistoryRow = {
   skus: string[];
   lineSummary: string;
   totalCents: Cents;
+  receiptFile: SaleReceiptFile | null;
 };
 
-export function saleHistoryFromReceipt(receipt: SaleReceipt): SaleHistoryRow {
+export function snapshotReceiptLine(
+  line: Pick<SaleLine, "sku" | "title" | "brand" | "model" | "description" | "condition" | "priceCents">,
+  channel: string,
+): SaleReceiptLine {
+  return {
+    sku: line.sku,
+    title: line.title,
+    brand: line.brand,
+    model: line.model,
+    description: line.description,
+    condition: line.condition,
+    priceCents: line.priceCents,
+    channel,
+  };
+}
+
+export function saleHistoryFromReceipt(
+  receipt: SaleReceipt,
+  receiptFile: SaleReceiptFile | null = null,
+): SaleHistoryRow {
   return {
     id: receipt.saleId,
     reference: receipt.reference,
@@ -87,6 +117,7 @@ export function saleHistoryFromReceipt(receipt: SaleReceipt): SaleHistoryRow {
     skus: receipt.lines.map((line) => line.sku),
     lineSummary: receipt.lines.map((line) => `${line.sku} ${line.title}`.trim()).join(", "),
     totalCents: receipt.totalCents,
+    receiptFile,
   };
 }
 
@@ -104,12 +135,7 @@ export function receiptFromSale(sale: FloorSale): SaleReceipt {
     soldOn,
     channel: "floor",
     customer: sale.customer,
-    lines: sale.lines.map((line) => ({
-      sku: line.sku,
-      title: line.title,
-      priceCents: line.priceCents,
-      channel: "floor",
-    })),
+    lines: sale.lines.map((line) => snapshotReceiptLine(line, "floor")),
     saleDiscountCents: sale.saleDiscountCents,
     taxRateBps: sale.taxRateBps,
     subtotalCents: totals.subtotalCents,
@@ -189,5 +215,5 @@ export function withSaleTotals(
     saleDiscountCents: sale.saleDiscountCents,
     taxRateBps: sale.taxRateBps,
   });
-  return { ...sale, receipt: sale.receipt ?? null, ...totals };
+  return { ...sale, receipt: sale.receipt ?? null, receiptFile: sale.receiptFile ?? null, ...totals };
 }

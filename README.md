@@ -581,9 +581,18 @@ Use Ubuntu-22.04 WSL to run the same probe/bootstrap scripts before the Surface 
 
 ---
 
-## Windows workstation only
+## Windows ARM64 and x64
 
-Do not do this on the Surface. The compose file is so the Windows PC can talk to a local InvenTree without the Linux package. It is not a deployment path, and it is not how M1 is proven.
+Do not do this on the live Zorin tablet. Shop Windows PCs (including Surface ARM64) use the zip from GitHub Releases: `floor-*-windows.zip`. Unzip, then:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\Install-Floor.ps1
+```
+
+That script matches `installer/windows/README.md`. It starts InvenTree with `infra/inventree/docker-compose.yml` (official `inventree/inventree:stable`, linux/arm64 on ARM machines) and the packaged adapter with a bundled Node (`runtime/node-win-arm64` or `node-win-x64`). Data lives in `state\` (`FLOOR_ROOT`). Later starts: `.\Start-Floor.ps1`.
+
+Developers working from a git checkout can still use compose by hand:
 
 ```powershell
 cd infra\inventree

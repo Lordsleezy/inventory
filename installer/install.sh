@@ -91,7 +91,7 @@ if ! command -v systemctl >/dev/null 2>&1; then
 fi
 
 MISSING=""
-for tool in curl tar; do
+for tool in curl tar sqlite3; do
   command -v "$tool" >/dev/null 2>&1 || MISSING="$MISSING $tool"
 done
 if [ -n "$MISSING" ]; then
@@ -100,7 +100,22 @@ if [ -n "$MISSING" ]; then
   # shellcheck disable=SC2086
   apt-get install -y -qq $MISSING ca-certificates
 fi
-pass "curl and tar present"
+pass "curl, tar, and sqlite3 present"
+
+# Cold copy before anything in /opt/floor or live data is replaced.
+if [ -f "$INVENTREE_DATA/inventree.sqlite3" ] && [ "$MODE" != "install" ]; then
+  step "Backing up before changing anything"
+  if [ -f "$PAYLOAD/assets/floor-backup.sh" ]; then
+    FLOOR_BACKUP_REASON=pre-update bash "$PAYLOAD/assets/floor-backup.sh" \
+      || die "pre-update backup failed" "Refusing to change Floor until a backup succeeds."
+  elif [ -x "$PREFIX/bin/floor-backup" ]; then
+    FLOOR_BACKUP_REASON=pre-update "$PREFIX/bin/floor-backup" \
+      || die "pre-update backup failed" "Refusing to change Floor until a backup succeeds."
+  else
+    die "no backup script available" "Cannot update without taking a backup first."
+  fi
+  pass "pre-update backup written to /var/backups/floor"
+fi
 
 # ---------------------------------------------------------------- program files
 step "Installing program files"
@@ -594,37 +609,20 @@ export ELECTRON_OZONE_PLATFORM_HINT="\${ELECTRON_OZONE_PLATFORM_HINT:-auto}"
 exec $PREFIX/runtime/electron/electron $PREFIX/desktop "\$@"
 EOF
 
-write_bin floor-backup <<EOF
-#!/usr/bin/env bash
-# Cold copy of everything that matters. Run as root.
-set -euo pipefail
-DEST="\${1:-\$HOME/floor-backup-\$(date +%F-%H%M)}"
-mkdir -p "\$DEST"
-systemctl stop floor-adapter || true
-# Packager inventree CLI has restart, not stop/start.
-systemctl stop inventree-web-1 inventree-worker-1 || true
-cp -a $INVENTREE_DATA "\$DEST/inventree-data"
-cp -a $STATE "\$DEST/floor-state"
-cp -a $ENVFILE "\$DEST/floor.env"
-systemctl start inventree-web-1 inventree-worker-1 || true
-for i in \$(seq 1 30); do
-  CODE="\$(curl -s -o /dev/null -m 2 -w '%{http_code}' http://127.0.0.1/api/ || true)"
-  if [ "\$CODE" = "200" ]; then break; fi
-  sleep 1
-done
-systemctl start floor-adapter || true
-for i in \$(seq 1 30); do
-  CODE="\$(curl -s -o /dev/null -m 2 -w '%{http_code}' http://127.0.0.1:3000/login || true)"
-  if [ -n "\$CODE" ] && [ "\$CODE" != "000" ] && [ "\$CODE" != "500" ]; then break; fi
-  sleep 1
-done
-echo "PASS  backup at \$DEST"
-EOF
+[ -f "$PAYLOAD/assets/floor-backup.sh" ] || die "installer is missing floor-backup.sh"
+[ -f "$PAYLOAD/assets/floor-restore.sh" ] || die "installer is missing floor-restore.sh"
+install -m 0755 "$PAYLOAD/assets/floor-backup.sh" "$PREFIX/bin/floor-backup"
+install -m 0755 "$PAYLOAD/assets/floor-restore.sh" "$PREFIX/bin/floor-restore"
+if [ ! -f /etc/floor/backup.env ]; then
+  install -m 0644 "$PAYLOAD/assets/backup.env" /etc/floor/backup.env
+fi
+install -m 0644 "$PAYLOAD/assets/floor-backup.service" /etc/systemd/system/floor-backup.service
+install -m 0644 "$PAYLOAD/assets/floor-backup.timer" /etc/systemd/system/floor-backup.timer
 
-for cmd in floor-probe floor-bootstrap floor-desktop floor-backup; do
+for cmd in floor-probe floor-bootstrap floor-desktop floor-backup floor-restore; do
   ln -sf "$PREFIX/bin/$cmd" "/usr/local/bin/$cmd"
 done
-pass "floor-probe, floor-bootstrap, floor-desktop, floor-backup"
+pass "floor-probe, floor-bootstrap, floor-desktop, floor-backup, floor-restore"
 
 # ---------------------------------------------------------------- prove it
 step "Probing InvenTree"
@@ -680,6 +678,7 @@ fi
 systemctl daemon-reload
 systemctl enable inventree >/dev/null 2>&1 || true
 systemctl enable floor-adapter >/dev/null 2>&1
+systemctl enable --now floor-backup.timer >/dev/null 2>&1
 systemctl restart floor-adapter
 
 READY=""
@@ -707,9 +706,18 @@ fi
 [ -f /etc/systemd/system/floor-adapter.service ] || die "missing floor-adapter.service"
 [ -f /usr/share/applications/floor.desktop ] || die "missing Floor desktop entry"
 [ -x "$PREFIX/runtime/electron/electron" ] || die "missing Electron runtime"
+[ -x "$PREFIX/bin/floor-backup" ] || die "missing floor-backup"
+[ -f /etc/systemd/system/floor-backup.timer ] || die "missing floor-backup.timer"
+systemctl is-enabled --quiet floor-backup.timer || die "floor-backup.timer is not enabled"
 pass "adapter answering on http://127.0.0.1:3000"
 pass "enabled at boot (inventree + floor-adapter)"
 pass "Floor desktop entry installed"
+pass "daily backup timer enabled (copies in /var/backups/floor)"
+
+if [ "$MODE" = install ] || [ "$MODE" = resume ]; then
+  FLOOR_BACKUP_REASON=install "$PREFIX/bin/floor-backup" \
+    || warn "initial backup did not run; daily timer will retry"
+fi
 
 # ---------------------------------------------------------------- done
 cat <<DONE
@@ -724,8 +732,10 @@ PASS  Floor $VERSION is installed and running.
   Your data        $STATE          (inventory, config, photos)
   Database         $INVENTREE_DATA/inventree.sqlite3
   Secrets          $ENVFILE
+  Backups          /var/backups/floor   (daily, and before every update)
 
-  Backup           sudo floor-backup
+  Extra backup     sudo floor-backup
+  Restore check    sudo floor-restore <archive> /var/tmp/floor-restore-proof
   Check health     sudo floor-probe
   Logs             journalctl -u floor-adapter -f
 

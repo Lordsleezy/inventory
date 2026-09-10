@@ -19,17 +19,20 @@ export function MoneyField({ label, value, onChange, adminOnly }: Props) {
         {label}
         {adminOnly ? " (admin)" : ""}
       </span>
-      <input
-        inputMode="decimal"
-        value={text}
-        placeholder=""
-        onChange={(e) => {
-          const next = e.target.value.replace(/[^0-9.]/g, "");
-          setText(next);
-          onChange(next);
-        }}
-        className="min-h-touch rounded-lg border border-floor-line bg-black px-3 text-xl tabular-nums"
-      />
+      <span className="flex items-center gap-1">
+        <span className="text-floor-mute">$</span>
+        <input
+          inputMode="decimal"
+          value={text}
+          placeholder=""
+          onChange={(e) => {
+            const next = e.target.value.replace(/[^0-9.]/g, "");
+            setText(next);
+            onChange(next);
+          }}
+          className="field tabular-nums"
+        />
+      </span>
     </label>
   );
 }

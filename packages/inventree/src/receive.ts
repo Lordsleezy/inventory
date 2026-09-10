@@ -14,6 +14,9 @@ export type ReceiveInput = {
   category: string;
   lot: string | null;
   acquisitionCostCents: Cents | null;
+  askCents?: Cents | null;
+  msrpCents?: Cents | null;
+  location?: string | null;
   skuStart: number;
   sku?: string;
   copyFromSku?: string;
@@ -69,6 +72,17 @@ export async function descriptiveHintForModel(client: InventreeClient, model: st
     title: unit.title,
     category: unit.category,
   };
+}
+
+async function findOrCreateLocation(client: InventreeClient, name: string | null): Promise<number | null> {
+  if (!name?.trim()) return null;
+  const rows = await client.listAll<{ pk?: number; id?: number; name?: string }>(
+    `/api/stock/location/?search=${encodeURIComponent(name.trim())}`,
+  );
+  const exact = rows.find((row) => row.name === name.trim());
+  if (exact) return recordId(exact);
+  const made = await client.post<{ pk?: number; id?: number }>("/api/stock/location/", { name: name.trim() });
+  return recordId(made);
 }
 
 export async function receiveUnit(client: InventreeClient, input: ReceiveInput) {
@@ -127,8 +141,12 @@ export async function receiveUnit(client: InventreeClient, input: ReceiveInput) 
   }
 
   const stockId = recordId(createdStock(created));
+  const locationId = await findOrCreateLocation(client, input.location ?? null);
+  if (locationId) {
+    await client.patch(`/api/stock/${stockId}/`, { location: locationId });
+  }
   await client.patch(stockMetadataPath(stockId), {
-    metadata: { [META_KEY]: emptyEnvelope() },
+    metadata: { [META_KEY]: { ...emptyEnvelope(), askCents: input.askCents ?? null, msrpCents: input.msrpCents ?? null } },
   });
   const unit = await loadUnitBySku(client, sku);
   if (!unit) throw new Error(`Received ${sku} but could not read it back`);

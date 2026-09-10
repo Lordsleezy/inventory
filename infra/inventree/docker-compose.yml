@@ -1,7 +1,9 @@
-# WINDOWS DEV ONLY. Do not run this on the Surface / Zorin machine.
-# Production is the official InvenTree .deb installer + SQLite.
-# This file exists so the Windows workstation can run InvenTree without
-# installing the Linux package. It is not a deployment path.
+# Windows (including ARM64) and Linux-dev only. Do not run this on the
+# live Zorin tablet — that machine uses the official InvenTree .deb.
+# inventree/inventree:stable publishes linux/amd64 and linux/arm64, so
+# Docker Desktop on Windows ARM64 pulls a native ARM image.
+# Data directory: set INVENTREE_DATA, or it defaults to ../../data/inventree
+# relative to this file (repo layout). The Windows zip sets INVENTREE_DATA.
 services:
   inventree:
     image: inventree/inventree:stable
@@ -22,7 +24,7 @@ services:
       INVENTREE_GUNICORN_WORKERS: "1"
       INVENTREE_CACHE_HOST: ""
     volumes:
-      - ../../data/inventree:/home/inventree/data
+      - ${INVENTREE_DATA:-../../data/inventree}:/home/inventree/data
     mem_limit: 1g
     healthcheck:
       test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/api/"]
@@ -44,7 +46,7 @@ services:
       INVENTREE_PLUGINS_ENABLED: "False"
       INVENTREE_CACHE_HOST: ""
     volumes:
-      - ../../data/inventree:/home/inventree/data
+      - ${INVENTREE_DATA:-../../data/inventree}:/home/inventree/data
     depends_on:
       inventree:
         condition: service_healthy
