@@ -1,7 +1,17 @@
-# iOS IPA for Floor. The app is a WKWebView pointed at the live Surface adapter.
-# Set FLOOR_PUBLIC_URL in Codemagic environment (e.g. http://100.x.y.z:3000).
-# Signing: upload CM_CERTIFICATE, CM_CERTIFICATE_PASSWORD, CM_PROVISIONING_PROFILE
-# in the Codemagic UI. Team ID 4SRR4NV35F. Bundle ID com.openboxindustries.floor.
+# Standalone Floor iOS IPA. UI is bundled in the app (apps/adapter/www).
+# The Surface is JSON API + InvenTree only — not a website the WebView loads.
+#
+# Signing — set these in the Codemagic UI. Do not commit certs, PIN, or floor.env.
+#   CM_CERTIFICATE              — distribution (or development) .p12, base64
+#   CM_CERTIFICATE_PASSWORD     — p12 password
+#   CM_PROVISIONING_PROFILE     — profile for com.openboxindustries.floor, base64
+# Optional:
+#   FLOOR_API_URL               — default API origin baked into www/config.json
+#                                 (e.g. http://192.168.68.51:3000). Phone can still
+#                                 change it. Never put this in capacitor server.url.
+#
+# Team ID 4SRR4NV35F. Bundle ID com.openboxindustries.floor.
+# Trigger: tag ios-* or a manual run.
 
 workflows:
   ios-capacitor:
@@ -20,6 +30,7 @@ workflows:
         XCODE_SCHEME: "App"
         BUNDLE_ID: "com.openboxindustries.floor"
         APPLE_TEAM_ID: "4SRR4NV35F"
+        FLOOR_API_URL: "http://192.168.68.51:3000"
       xcode: latest
       node: 22.18.0
       ios_signing:
@@ -29,21 +40,22 @@ workflows:
       - name: npm
         script: |
           npm ci
+      - name: Bundle phone UI
+        script: |
+          npm run build -w @floor/mobile
+          test -f apps/adapter/www/index.html
+          if grep -E '^[[:space:]]*server:' apps/adapter/capacitor.config.ts; then
+            echo "Capacitor must not load a remote host; remove the server block" >&2
+            exit 1
+          fi
       - name: Capacitor iOS project
         script: |
           cd apps/adapter
-          npm install --no-save @capacitor/core @capacitor/cli @capacitor/ios @capacitor/camera
           if [ ! -d ios ]; then
             npx cap add ios
           fi
           npx cap sync ios
-      - name: Set team and bundle
-        script: |
-          PLIST="apps/adapter/ios/App/App/Info.plist"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier com.openboxindustries.floor" \
-            apps/adapter/ios/App/App.xcodeproj/project.pbxproj 2>/dev/null || true
-          sed -i '' "s/DEVELOPMENT_TEAM = .*;/DEVELOPMENT_TEAM = 4SRR4NV35F;/g" \
-            apps/adapter/ios/App/App.xcodeproj/project.pbxproj || true
+          bash ../../scripts/ios-prepare.sh
       - name: Build IPA
         script: |
           xcode-project build-ipa \

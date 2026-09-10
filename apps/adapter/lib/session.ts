@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 
 export type FloorRole = "admin" | "staff";
 
@@ -37,7 +37,14 @@ export function decodeSession(raw: string | undefined): FloorSession | null {
 
 export async function getSession(): Promise<FloorSession | null> {
   const jar = await cookies();
-  return decodeSession(jar.get("floor_session")?.value);
+  const fromCookie = decodeSession(jar.get("floor_session")?.value);
+  if (fromCookie) return fromCookie;
+  const h = await headers();
+  const auth = h.get("authorization");
+  if (auth && /^bearer\s+/i.test(auth)) {
+    return decodeSession(auth.replace(/^bearer\s+/i, "").trim());
+  }
+  return decodeSession(h.get("x-floor-session") ?? undefined);
 }
 
 export function sessionCookieOptions(maxAge = 60 * 60 * 12) {

@@ -17,6 +17,7 @@
     "installer": "installer/make-run.sh",
     "installer:windows": "installer/make-windows.sh",
     "adapter": "npm run dev -w @floor/adapter",
+    "mobile": "npm run build -w @floor/mobile",
     "photos:watch": "node scripts/photo-watch.mjs",
     "desktop": "npm start -w @floor/desktop"
   },

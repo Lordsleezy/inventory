@@ -21,5 +21,8 @@ config/floor.json
 apps/desktop/release/
 apps/adapter/ios/
 apps/adapter/android/
+apps/adapter/www/
+apps/mobile/ios/
+apps/mobile/android/
 .DS_Store
 Thumbs.db

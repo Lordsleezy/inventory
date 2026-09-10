@@ -85,7 +85,7 @@ jobs:
             echo "sudo bash floor-${VERSION}-linux-x64.run"
             echo '```'
             echo
-            echo "Phone access is the live adapter over Tailscale/LAN (PWA or Capacitor)."
+            echo "iPhone: standalone ipa via Codemagic (bundled UI). Surface stays API/DB."
             echo "See docs/PHONE.md. Windows packages are not published."
             echo
             echo "### Checksum"

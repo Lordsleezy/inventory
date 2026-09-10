@@ -13,11 +13,13 @@ export async function POST(req: Request) {
   }
   try {
     const session = await loginWithPin(body.username, body.pin);
+    const token = encodeSession(session);
     const res = NextResponse.json({
       displayName: session.displayName,
       role: session.role,
+      token,
     });
-    res.cookies.set("floor_session", encodeSession(session), sessionCookieOptions());
+    res.cookies.set("floor_session", token, sessionCookieOptions());
     return res;
   } catch (err) {
     const status = (err as { status?: number }).status ?? 500;
