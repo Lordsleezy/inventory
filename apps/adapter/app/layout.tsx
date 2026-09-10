@@ -11,6 +11,9 @@ export const metadata: Metadata = {
     title: "Floor",
     statusBarStyle: "black-translucent",
   },
+  other: {
+    "apple-mobile-web-app-capable": "yes",
+  },
   icons: {
     icon: [{ url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" }],
     apple: [{ url: "/icons/apple-touch-icon.png", sizes: "180x180" }],
