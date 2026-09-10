@@ -10,10 +10,13 @@
     "cap:sync": "npm run cap:www && npx cap sync ios"
   },
   "dependencies": {
+    "@capacitor-community/sqlite": "^8.1.1",
     "@capacitor/camera": "^8.2.4",
     "@capacitor/cli": "^8.5.1",
     "@capacitor/core": "^8.5.1",
+    "@capacitor/filesystem": "^8.1.3",
     "@capacitor/ios": "^8.5.1",
+    "@capacitor/share": "^8.0.1",
     "@floor/auth": "*",
     "@floor/domain": "*",
     "@floor/importer": "*",

@@ -1,188 +1,111 @@
-import { displayAskCents, filterUnits, formatUsd, matchesInventoryQuery, type Unit } from "@floor/domain";
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { apiJson } from "../api";
-import { Shell } from "../components/Shell";
+import { Link } from "react-router-dom";
+import { formatCents, listUnits, type Unit, type UnitState } from "@floor/store";
+import { useDb } from "../store";
+import { Notice, Spinner } from "../components/ui";
 
-type Queue = "" | "inspect" | "price" | "unlisted" | "error" | "voided" | "nophoto" | "sold";
-
-function listPrice(cents: number | null): string {
-  if (cents == null || cents === 0) return "";
-  return formatUsd(cents);
-}
+const FILTERS: { key: string; label: string; states?: UnitState[] }[] = [
+  { key: "stock", label: "In stock", states: ["available", "reserved", "repair"] },
+  { key: "sold", label: "Sold", states: ["sold"] },
+  { key: "other", label: "Out", states: ["voided", "scrapped", "lost"] },
+  { key: "all", label: "All" },
+];
 
 export function InventoryScreen() {
-  const navigate = useNavigate();
-  const [q, setQ] = useState("");
-  const [queue, setQueue] = useState<Queue>("");
-  const [brand, setBrand] = useState("");
-  const [allUnits, setAllUnits] = useState<Unit[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState("");
-  const [filtersOpen, setFiltersOpen] = useState(false);
+  const db = useDb();
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState("stock");
+  const [units, setUnits] = useState<Unit[] | null>(null);
+  const [error, setError] = useState("");
+
+  const states = useMemo(() => FILTERS.find((f) => f.key === filter)?.states, [filter]);
 
   useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    void apiJson<{ units?: Unit[]; error?: string }>("/api/units?includeVoided=1").then(({ ok, status, data }) => {
-      if (cancelled) return;
-      if (status === 401) {
-        navigate("/login", { replace: true });
-        return;
-      }
-      if (!ok) {
-        setLoadError(data.error ?? "Could not load inventory");
-        setLoading(false);
-        return;
-      }
-      setAllUnits(data.units ?? []);
-      setLoadError("");
-      setLoading(false);
-    });
+    let live = true;
+    // Searching runs against the local file, so there is no debounce to hide
+    // network latency — there is no network.
+    void listUnits(db, { query, states })
+      .then((rows) => live && setUnits(rows))
+      .catch((err) => live && setError(err.message));
     return () => {
-      cancelled = true;
+      live = false;
     };
-  }, [navigate]);
-
-  const brands = useMemo(() => {
-    const seen = new Map<string, string>();
-    for (const unit of allUnits) {
-      const label = unit.brand.trim();
-      if (!label) continue;
-      const key = label.toLowerCase();
-      if (!seen.has(key)) seen.set(key, label);
-    }
-    return [...seen.entries()].sort((a, b) => a[1].localeCompare(b[1]));
-  }, [allUnits]);
-
-  const units = useMemo(() => {
-    const queued = filterUnits(allUnits, { queue: queue || undefined });
-    return queued.filter((unit) => {
-      if (brand && unit.brand.trim().toLowerCase() !== brand) return false;
-      return matchesInventoryQuery(unit, q);
-    });
-  }, [allUnits, q, queue, brand]);
-
-  const chips: { id: Queue; label: string }[] = [
-    { id: "", label: "All" },
-    { id: "inspect", label: "Need inspect" },
-    { id: "price", label: "Need price" },
-    { id: "unlisted", label: "Priced, not listed" },
-    { id: "error", label: "Record error" },
-    { id: "nophoto", label: "No photo" },
-    { id: "voided", label: "Voided" },
-    { id: "sold", label: "Sold" },
-  ];
-  const activeChip = chips.find((chip) => chip.id === queue) ?? chips[0];
+  }, [db, query, states]);
 
   return (
-    <Shell>
-      <input
-        value={q}
-        onChange={(e) => setQ(e.target.value)}
-        placeholder="Search SKU, brand, model, title"
-        autoComplete="off"
-        autoCorrect="off"
-        autoCapitalize="off"
-        spellCheck={false}
-        enterKeyHint="search"
-        className="field min-w-0 text-title"
-        aria-label="Search inventory"
-      />
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          onClick={() => {
-            setQueue("");
-            setBrand("");
-          }}
-          className={`min-h-touch px-1 text-body ${queue === "" && !brand ? "text-floor-text" : "text-floor-mute"}`}
-        >
-          All
-        </button>
-        <button
-          type="button"
-          onClick={() => setFiltersOpen((open) => !open)}
-          className={`min-h-touch px-1 text-body ${queue || brand ? "text-floor-text" : "text-floor-mute"}`}
-        >
-          {filtersOpen
-            ? "Filter · hide"
-            : brand
-              ? `Filter · ${brands.find(([key]) => key === brand)?.[1] ?? brand}`
-              : queue
-                ? `Filter · ${activeChip.label}`
-                : "Filter"}
-        </button>
+    <section>
+      <div className="flex items-center gap-2">
+        <input
+          className="field"
+          value={query}
+          placeholder="SKU, brand or model"
+          inputMode="search"
+          autoCorrect="off"
+          autoCapitalize="none"
+          onChange={(e) => setQuery(e.target.value)}
+        />
+        <Link to="/receive" className="btn-accent shrink-0">
+          Receive
+        </Link>
       </div>
-      {filtersOpen ? (
-        <div className="mt-2">
-          <p className="text-quiet text-floor-mute">Brands</p>
-          <div className="mt-1 flex flex-wrap gap-1">
-            {brands.map(([key, label]) => (
-              <button
-                key={key}
-                type="button"
-                onClick={() => {
-                  setBrand(key === brand ? "" : key);
-                  setQueue("");
-                }}
-                className={`min-h-touch px-2 text-body ${brand === key ? "text-floor-text" : "text-floor-mute"}`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          <p className="mt-3 text-quiet text-floor-mute">Status</p>
-          <div className="mt-1 flex flex-wrap gap-1">
-            {chips
-              .filter((chip) => chip.id)
-              .map((chip) => (
-                <button
-                  key={chip.id}
-                  type="button"
-                  onClick={() => {
-                    setQueue(chip.id);
-                    setBrand("");
-                    setFiltersOpen(false);
-                  }}
-                  className={`min-h-touch px-2 text-body ${queue === chip.id ? "text-floor-text" : "text-floor-mute"}`}
-                >
-                  {chip.label}
-                </button>
-              ))}
-          </div>
-        </div>
+
+      <div className="mt-3 flex flex-wrap gap-3">
+        {FILTERS.map((item) => (
+          <button
+            key={item.key}
+            type="button"
+            onClick={() => setFilter(item.key)}
+            className={`min-h-touch text-quiet ${filter === item.key ? "text-floor-accent" : "text-floor-mute"}`}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+
+      <Notice tone="error">{error}</Notice>
+
+      {units === null ? <Spinner label="Reading" /> : null}
+
+      {units?.length === 0 ? (
+        <p className="py-6 text-quiet text-floor-mute">
+          {query
+            ? `Nothing matches “${query}”.`
+            : filter === "stock"
+              ? "Nothing in stock."
+              : "Nothing here yet."}
+        </p>
       ) : null}
-      <p className="mt-4 text-quiet text-floor-mute">
-        {loading ? "Loading…" : `${units.length} ${units.length === 1 ? "item" : "items"}`}
-        {loadError ? ` · ${loadError}` : ""}
-      </p>
-      {loadError ? <p className="mt-1 text-body text-floor-danger">{loadError}</p> : null}
-      <ul className="mt-2">
-        {units.map((unit) => {
-          const title = unit.title || [unit.brand, unit.model].filter(Boolean).join(" ");
-          const price = listPrice(displayAskCents(unit));
-          return (
-            <li key={unit.sku} className="border-b border-floor-line">
-              <Link to={`/inventory/${unit.sku}`} className="flex min-h-touch items-baseline gap-3 py-3">
-                <span className="w-14 shrink-0 text-quiet tabular-nums text-floor-mute">{unit.sku}</span>
-                <span className="min-w-0 flex-1 break-words text-title">
-                  {title || price ? (
-                    <>
-                      {title || null}
-                      {title && price ? " " : null}
-                      {price ? <span className="text-floor-mute">{price}</span> : null}
-                      {unit.state === "sold" ? <span className="text-quiet text-floor-mute"> sold</span> : null}
-                    </>
-                  ) : (
-                    "—"
-                  )}
+
+      <ul>
+        {units?.map((unit) => (
+          <li key={unit.sku} className="border-b border-floor-line">
+            <Link to={`/inventory/${unit.sku}`} className="flex min-h-touch items-center gap-3 py-3">
+              <span className="w-14 shrink-0 font-mono text-body text-floor-mute">{unit.sku}</span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-body">
+                  {[unit.brand, unit.model].filter(Boolean).join(" ") || unit.title || "Untitled"}
                 </span>
-              </Link>
-            </li>
-          );
-        })}
+                <span className="block truncate text-quiet text-floor-mute">
+                  {[unit.condition, unit.location].filter(Boolean).join(" · ") || "—"}
+                </span>
+              </span>
+              <span className="shrink-0 text-right">
+                {/* An unpriced unit shows nothing at all, not $0.00. */}
+                <span className="block text-body">{formatCents(unit.askCents) || "—"}</span>
+                {unit.state !== "available" ? (
+                  <span className="block text-quiet text-floor-mute">{unit.state}</span>
+                ) : null}
+              </span>
+            </Link>
+          </li>
+        ))}
       </ul>
-    </Shell>
+
+      {units?.length ? (
+        <p className="py-4 text-quiet text-floor-mute">
+          {units.length} {units.length === 1 ? "unit" : "units"}
+        </p>
+      ) : null}
+    </section>
   );
 }

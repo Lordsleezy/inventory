@@ -1,63 +1,77 @@
-import { formatUsd, type SaleHistoryRow } from "@floor/domain";
 import { useEffect, useState } from "react";
-import { useSearchParams } from "react-router-dom";
-import { apiJson } from "../api";
-import { ReceiptUpload } from "../components/Receipt";
-import { Shell } from "../components/Shell";
+import { Link } from "react-router-dom";
+import { formatCentsTotal, reports, type Reports } from "@floor/store";
+import { useDb } from "../store";
+import { Label, Notice, Spinner } from "../components/ui";
 
 export function ReportsScreen() {
-  const [params] = useSearchParams();
-  const initial = params.get("sku") ?? params.get("q") ?? "";
-  const [query, setQuery] = useState(initial);
-  const [sales, setSales] = useState<SaleHistoryRow[]>([]);
+  const db = useDb();
+  const [data, setData] = useState<Reports | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    const q = new URLSearchParams();
-    q.set("history", "1");
-    if (query.trim()) q.set("q", query.trim());
-    void apiJson<{ sales?: SaleHistoryRow[]; error?: string }>(`/api/sales?${q}`).then(({ ok, data }) => {
-      if (!ok) {
-        setError(data.error ?? "Could not load sales");
-        return;
-      }
-      setError("");
-      setSales(data.sales ?? []);
-    });
-  }, [query]);
+    let live = true;
+    void reports(db)
+      .then((out) => live && setData(out))
+      .catch((err) => live && setError(err.message));
+    return () => {
+      live = false;
+    };
+  }, [db]);
+
+  if (error) return <Notice tone="error">{error}</Notice>;
+  if (!data) return <Spinner label="Counting" />;
 
   return (
-    <Shell>
-      <input
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        placeholder="Search SKU, date, or customer"
-        className="field mb-4"
-      />
-      {error ? <p className="text-body text-floor-danger">{error}</p> : null}
-      {!sales.length && !error ? <p className="text-quiet text-floor-mute">No completed sales match.</p> : null}
-      <ul>
-        {sales.map((row) => (
-          <li key={row.id} className="border-b border-floor-line py-3">
-            <div className="flex flex-wrap items-baseline justify-between gap-2">
-              <p className="text-title">{row.reference}</p>
-              <p className="tabular-nums">{formatUsd(row.totalCents)}</p>
-            </div>
-            <p className="text-quiet text-floor-mute">
-              {row.soldOn ? row.soldOn.slice(0, 10) : ""} · {row.channel}
-              {row.customerName ? ` · ${row.customerName}` : ""}
-            </p>
-            <p className="mt-1 text-body">{row.lineSummary}</p>
-            <ReceiptUpload
-              saleId={row.id}
-              file={row.receiptFile}
-              onChange={(receiptFile) => {
-                setSales((rows) => rows.map((sale) => (sale.id === row.id ? { ...sale, receiptFile } : sale)));
-              }}
-            />
-          </li>
-        ))}
-      </ul>
-    </Shell>
+    <section>
+      <h1 className="text-title">Reports</h1>
+
+      <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-5">
+        <Stat label="Units in stock" value={String(data.inStock)} />
+        <Stat label="Sold this week" value={String(data.soldThisWeek)} />
+        <Stat label="Money tied up" value={formatCentsTotal(data.moneyTiedUpCents)} hint="what you paid" />
+        <Stat label="Asking value" value={formatCentsTotal(data.askValueCents)} hint="priced units only" />
+        <Stat label="Took this week" value={formatCentsTotal(data.soldThisWeekCents)} />
+      </div>
+
+      <div className="mt-8">
+        <Label>Aging</Label>
+        <ul className="mt-2">
+          {data.agingBuckets.map((bucket) => (
+            <li key={bucket.label} className="flex items-center gap-3 border-b border-floor-line py-2">
+              <span className="w-24 shrink-0 text-quiet text-floor-mute">{bucket.label}</span>
+              <span className="min-w-0 flex-1">
+                <span
+                  className="block h-1 bg-floor-accent"
+                  style={{
+                    width: `${data.inStock ? Math.round((bucket.count / data.inStock) * 100) : 0}%`,
+                  }}
+                />
+              </span>
+              <span className="w-8 shrink-0 text-right text-body">{bucket.count}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+        <p className="mt-6 text-quiet text-floor-mute">
+          Money tied up counts only units still in stock, and only what you recorded paying. Units
+          with no cost entered contribute nothing.
+        </p>
+
+      <Link to="/backup" className="btn-text mt-4 px-0">
+        Export and back up
+      </Link>
+    </section>
+  );
+}
+
+function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
+  return (
+    <div>
+      <Label>{label}</Label>
+      <p className="text-title">{value}</p>
+      {hint ? <p className="text-quiet text-floor-mute">{hint}</p> : null}
+    </div>
   );
 }

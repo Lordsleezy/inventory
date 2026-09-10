@@ -22,6 +22,7 @@ apps/desktop/release/
 apps/adapter/ios/
 apps/adapter/android/
 apps/adapter/www/
+apps/mobile/public/assets/*.wasm
 apps/mobile/ios/
 apps/mobile/android/
 .DS_Store

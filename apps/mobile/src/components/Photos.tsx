@@ -1,212 +1,117 @@
-import type { Unit } from "@floor/domain";
-import { useEffect, useRef, useState } from "react";
-import { apiBlobUrl, apiJson, forgetBlobUrl } from "../api";
-import { pickNativePhotos } from "../native-photo";
+import { useCallback, useEffect, useState } from "react";
+import { addPhoto, listPhotos, removePhoto } from "@floor/store";
+import { useDb } from "../store";
+import { capturePhoto, deletePhotoFile, photoSrc } from "../photos";
+import { Label, Notice } from "./ui";
 
-type Photo = { pk: number; filename: string };
+type Shown = { id: number; path: string; src: string; isPrimary: boolean };
 
-function PhotoImg({ sku, id, alt, className }: { sku: string; id: number; alt: string; className?: string }) {
-  const [src, setSrc] = useState("");
-  useEffect(() => {
-    let cancelled = false;
-    const path = `/api/units/${sku}/photos/${id}`;
-    void apiBlobUrl(path)
-      .then((url) => {
-        if (!cancelled) setSrc(url);
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [sku, id]);
-  if (!src) return <div className={`bg-floor-panel ${className ?? ""}`} />;
-  return <img src={src} alt={alt} className={className} />;
-}
-
-export function Photos({
-  sku,
-  unit,
-  onUnit,
-}: {
-  sku: string;
-  unit: Unit;
-  onUnit: (unit: Unit) => void;
-}) {
-  const [photos, setPhotos] = useState<Photo[]>([]);
+export function Photos({ sku, disabled }: { sku: string; disabled?: boolean }) {
+  const db = useDb();
+  const [shown, setShown] = useState<Shown[]>([]);
+  const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [loaded, setLoaded] = useState(false);
-  const [open, setOpen] = useState<number | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+
+  const refresh = useCallback(async () => {
+    const rows = await listPhotos(db, sku);
+    const out: Shown[] = [];
+    for (const row of rows) {
+      try {
+        out.push({
+          id: row.id,
+          path: row.path,
+          src: await photoSrc(row.path),
+          isPrimary: Number(row.is_primary) === 1,
+        });
+      } catch {
+        // The row survives a missing file so a restore can flag what is gone.
+        out.push({ id: row.id, path: row.path, src: "", isPrimary: false });
+      }
+    }
+    setShown(out);
+  }, [db, sku]);
 
   useEffect(() => {
-    let cancelled = false;
-    void apiJson<{ photos?: Photo[]; unit?: Unit; error?: string }>(`/api/units/${sku}/photos`).then(
-      ({ ok, data }) => {
-        if (cancelled) return;
-        if (!ok) {
-          setError(data.error ?? "Could not load photos");
-          return;
-        }
-        setError("");
-        setPhotos(data.photos ?? []);
-        if (data.unit) onUnit(data.unit);
-        setLoaded(true);
-      },
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, [sku, onUnit]);
+    void refresh();
+  }, [refresh]);
 
-  async function upload(files: FileList | File[] | null) {
-    if (!files || files.length === 0) return;
-    setBusy(true);
+  async function add(source: "camera" | "library") {
     setError("");
-    const form = new FormData();
-    for (const file of Array.from(files)) form.append("photos", file);
-    const { ok, data } = await apiJson<{ photos?: Photo[]; unit?: Unit; error?: string }>(
-      `/api/units/${sku}/photos`,
-      { method: "POST", body: form },
-    );
-    setBusy(false);
-    if (inputRef.current) inputRef.current.value = "";
-    if (!ok) {
-      setError(data.error ?? "Upload failed");
-      return;
+    setBusy(source === "camera" ? "Opening camera" : "Opening library");
+    try {
+      const path = await capturePhoto(sku, source);
+      await addPhoto(db, sku, path);
+      await refresh();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      // A cancelled picker is not worth an error message.
+      if (!/cancel/i.test(message)) setError(message);
+    } finally {
+      setBusy("");
     }
-    for (const photo of data.photos ?? []) forgetBlobUrl(`/api/units/${sku}/photos/${photo.pk}`);
-    setPhotos(data.photos ?? []);
-    if (data.unit) onUnit(data.unit);
   }
 
-  async function setPrimary(attachmentId: number) {
-    setBusy(true);
-    const { ok, data } = await apiJson<{ photos?: Photo[]; unit?: Unit; error?: string }>(
-      `/api/units/${sku}/photos`,
-      { method: "POST", body: JSON.stringify({ attachmentId }) },
-    );
-    setBusy(false);
-    if (!ok) {
-      setError(data.error ?? "Could not set primary");
-      return;
+  async function drop(photo: Shown) {
+    setError("");
+    try {
+      await removePhoto(db, photo.id);
+      await deletePhotoFile(photo.path);
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
     }
-    setPhotos(data.photos ?? []);
-    if (data.unit) onUnit(data.unit);
   }
-
-  async function remove(attachmentId: number) {
-    if (!window.confirm("Delete this photo?")) return;
-    setBusy(true);
-    const { ok, data } = await apiJson<{ photos?: Photo[]; unit?: Unit; error?: string }>(
-      `/api/units/${sku}/photos`,
-      { method: "DELETE", body: JSON.stringify({ attachmentId }) },
-    );
-    setBusy(false);
-    if (!ok) {
-      setError(data.error ?? "Could not delete");
-      return;
-    }
-    forgetBlobUrl(`/api/units/${sku}/photos/${attachmentId}`);
-    setPhotos(data.photos ?? []);
-    if (data.unit) onUnit(data.unit);
-    setOpen(null);
-  }
-
-  const current = open != null ? photos[open] : null;
 
   return (
-    <section className="mt-5">
-      <div className="mb-2 flex items-center gap-3">
-        <p className="text-quiet text-floor-mute">Photos</p>
-        <button
-          type="button"
-          className="btn-text px-0"
-          onClick={() => {
-            void pickNativePhotos().then((files) => {
-              if (files) void upload(files);
-              else inputRef.current?.click();
-            });
-          }}
-        >
-          Library
-        </button>
-        <label className="btn-text cursor-pointer px-0">
-          Camera
-          <input
-            type="file"
-            accept="image/*"
-            capture="environment"
-            className="sr-only"
-            onChange={(e) => void upload(e.target.files)}
-          />
-        </label>
-        {busy ? <span className="text-quiet text-floor-mute">Working…</span> : null}
-      </div>
-      <input
-        ref={inputRef}
-        type="file"
-        accept="image/*"
-        multiple
-        className="sr-only"
-        onChange={(e) => void upload(e.target.files)}
-      />
-      {error ? <p className="mb-2 text-body text-floor-danger">{error}</p> : null}
-      {photos.length === 0 ? (
-        <p className="text-quiet text-floor-mute">{loaded ? "No photos yet." : "Loading photos…"}</p>
-      ) : (
-        <ul className="flex flex-wrap gap-2">
-          {photos.map((photo, index) => {
-            const primary = unit.primaryAttachmentId === photo.pk;
-            return (
-              <li key={photo.pk}>
+    <div className="border-b border-floor-line py-3">
+      <Label>Photos</Label>
+
+      {shown.length > 0 ? (
+        <ul className="mt-2 flex gap-2 overflow-x-auto pb-1">
+          {shown.map((photo) => (
+            <li key={photo.id} className="relative shrink-0">
+              {photo.src ? (
+                <img
+                  src={photo.src}
+                  alt=""
+                  className="h-28 w-28 rounded-sm object-cover"
+                  loading="lazy"
+                />
+              ) : (
+                <span className="flex h-28 w-28 items-center justify-center rounded-sm border border-floor-line text-center text-quiet text-floor-danger">
+                  file missing
+                </span>
+              )}
+              {!disabled ? (
                 <button
                   type="button"
-                  onClick={() => setOpen(index)}
-                  className={`block size-24 overflow-hidden ${primary ? "ring-1 ring-floor-accent" : ""}`}
+                  aria-label="Remove photo"
+                  onClick={() => void drop(photo)}
+                  className="absolute right-1 top-1 h-7 w-7 rounded-full bg-black/70 text-body text-floor-text"
                 >
-                  <PhotoImg sku={sku} id={photo.pk} alt={photo.filename} className="size-full object-cover" />
+                  ×
                 </button>
-              </li>
-            );
-          })}
+              ) : null}
+            </li>
+          ))}
         </ul>
+      ) : (
+        <p className="mt-1 text-quiet text-floor-mute">No photos yet.</p>
       )}
-      {current ? (
-        <div
-          className="fixed inset-0 z-50 flex flex-col bg-black/90 p-4"
-          role="dialog"
-          aria-modal="true"
-          onClick={() => setOpen(null)}
-        >
-          <button type="button" className="btn-text self-end text-floor-text" onClick={() => setOpen(null)}>
-            Close
+
+      {!disabled ? (
+        <div className="mt-2 flex items-center gap-4">
+          <button type="button" className="btn-text px-0" disabled={!!busy} onClick={() => void add("camera")}>
+            Camera
           </button>
-          <PhotoImg
-            sku={sku}
-            id={current.pk}
-            alt={current.filename}
-            className="mx-auto max-h-[70vh] max-w-full object-contain"
-          />
-          <div className="mt-4 flex flex-wrap justify-center gap-2" onClick={(e) => e.stopPropagation()}>
-            {unit.primaryAttachmentId === current.pk ? (
-              <span className="inline-flex min-h-touch items-center px-2 text-quiet text-floor-accent">Primary</span>
-            ) : (
-              <button type="button" disabled={busy} onClick={() => void setPrimary(current.pk)} className="btn-text">
-                Set primary
-              </button>
-            )}
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => void remove(current.pk)}
-              className="btn-text text-floor-danger"
-            >
-              Delete
-            </button>
-          </div>
+          <button type="button" className="btn-text px-0" disabled={!!busy} onClick={() => void add("library")}>
+            Camera roll
+          </button>
+          {busy ? <span className="text-quiet text-floor-mute">{busy}…</span> : null}
         </div>
       ) : null}
-    </section>
+
+      <Notice tone="error">{error}</Notice>
+    </div>
   );
 }

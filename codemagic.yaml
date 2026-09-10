@@ -1,15 +1,11 @@
-# Standalone Floor iOS IPA. UI is bundled in the app (apps/adapter/www).
-# The Surface is JSON API + InvenTree only — not a website the WebView loads.
+# Standalone Floor iOS IPA. Everything runs on the phone — no Surface, no API.
 #
-# Signing — set these in the Codemagic UI. Do not commit certs, PIN, or floor.env.
-#   CM_CERTIFICATE              — distribution (or development) .p12, base64
+# Signing — set these in the Codemagic UI. Do not commit certs.
+#   CM_CERTIFICATE              — distribution .p12, base64
 #   CM_CERTIFICATE_PASSWORD     — p12 password
 #   CM_PROVISIONING_PROFILE     — profile for com.openboxindustries.floor, base64
-# Optional:
-#   FLOOR_API_URL               — default API origin baked into www/config.json
-#                                 (e.g. http://192.168.68.51:3000). Phone can still
-#                                 change it. Never put this in capacitor server.url.
 #
+# Preferred: Codemagic ↔ Apple Developer Portal integration (automatic signing).
 # Team ID 4SRR4NV35F. Bundle ID com.openboxindustries.floor.
 # Trigger: tag ios-* or a manual run.
 
@@ -30,7 +26,6 @@ workflows:
         XCODE_SCHEME: "App"
         BUNDLE_ID: "com.openboxindustries.floor"
         APPLE_TEAM_ID: "4SRR4NV35F"
-        FLOOR_API_URL: "http://192.168.68.51:3000"
       xcode: latest
       node: 22.18.0
       ios_signing:
@@ -40,6 +35,7 @@ workflows:
       - name: npm
         script: |
           npm ci
+          npm run test:store
       - name: Bundle phone UI
         script: |
           npm run build -w @floor/mobile
@@ -70,3 +66,6 @@ workflows:
         notify:
           success: false
           failure: true
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true

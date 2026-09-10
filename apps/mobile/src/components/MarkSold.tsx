@@ -1,132 +1,144 @@
-import { cannotSellReason, type FloorConfig, type Unit } from "@floor/domain";
-import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
-import { apiJson } from "../api";
-import { ReceiptUpload } from "./Receipt";
+import { useState } from "react";
+import { centsToInput, formatCents, parseMoneyToCents, sellUnit, type Unit } from "@floor/store";
+import { useStore } from "../store";
+import { Label, Notice } from "./ui";
 
-export function MarkSold({ unit, onSold }: { unit: Unit; onSold: (unit: Unit) => void }) {
-  const [config, setConfig] = useState<FloorConfig | null>(null);
-  const [role, setRole] = useState("staff");
-  const [channel, setChannel] = useState("");
-  const [proceeds, setProceeds] = useState("");
-  const [confirmFloor, setConfirmFloor] = useState(false);
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [saleId, setSaleId] = useState<number | null>(null);
+/**
+ * Mark a unit sold.
+ *
+ * This does not check first whether the unit is already sold. It asks the
+ * database to record the sale and reports whatever the database says, because
+ * the database is the only thing that can answer that question correctly.
+ */
+export function MarkSold({ unit, onSold }: { unit: Unit; onSold: () => Promise<void> | void }) {
+  const { db, settings } = useStore();
   const [open, setOpen] = useState(false);
-  const blocked = cannotSellReason(unit);
+  const [channel, setChannel] = useState(settings.channels[0] ?? "floor");
+  const [price, setPrice] = useState(centsToInput(unit.askCents));
+  const [method, setMethod] = useState(settings.paymentMethods[0] ?? "");
+  const [customer, setCustomer] = useState("");
+  const [phone, setPhone] = useState("");
+  const [note, setNote] = useState("");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    void apiJson<{ config?: FloorConfig; role?: string }>("/api/config").then(({ data }) => {
-      setConfig(data.config ?? null);
-      if (data.role) setRole(data.role);
-      const first = (data.config?.channels ?? []).find((row) => row.enabled);
-      if (first) setChannel((current) => current || first.id);
-    });
-  }, []);
-
-  if (unit.state === "sold" || saleId) {
-    const id = saleId ?? (unit.sale?.salesOrderId ? Number(unit.sale.salesOrderId) : null);
-    return (
-      <section className="mt-8">
-        <p className="text-title">Sold</p>
-        {id ? (
-          <div className="mt-2">
-            <ReceiptUpload saleId={id} />
-            <p className="mt-1">
-              <Link to={`/reports?sku=${unit.sku}`} className="btn-text px-0">
-                Sales history
-              </Link>
-            </p>
-          </div>
-        ) : null}
-      </section>
-    );
-  }
-
-  if (blocked) {
-    return (
-      <section className="mt-8">
-        <p className="text-quiet text-floor-mute">Cannot mark sold — {blocked}</p>
-      </section>
-    );
-  }
-
-  const channels = [
-    ...(config?.channels ?? []).filter((row) => row.enabled),
-    { id: "other", label: "Other", enabled: true },
-  ];
-
-  async function sell() {
+  async function submit() {
     setError("");
-    setBusy(true);
-    const { ok, data } = await apiJson<{ error?: string; sale?: { id?: number }; unit?: Unit }>(
-      `/api/units/${unit.sku}/sell`,
-      {
-        method: "POST",
-        body: JSON.stringify({ channel, proceeds, confirmBelowFloor: confirmFloor }),
-      },
-    );
-    setBusy(false);
-    if (!ok) {
-      setError(data.error ?? "Could not mark sold");
+    const cents = parseMoneyToCents(price);
+    if (cents === undefined) {
+      setError("Check the amount. It should look like 19.99.");
       return;
     }
-    setSaleId(data.sale?.id ?? null);
-    if (data.unit) onSold(data.unit);
+    if (cents === null) {
+      setError("Enter what you actually got for it.");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      await sellUnit(db, {
+        sku: unit.sku,
+        priceCents: cents,
+        channel,
+        paymentMethod: method || null,
+        customerName: customer.trim() || null,
+        customerPhone: phone.trim() || null,
+        note: note.trim() || null,
+      });
+      setOpen(false);
+      await onSold();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      // Refresh regardless: if this failed because it sold elsewhere, the
+      // screen should stop showing a Sell button.
+      await onSold();
+    } finally {
+      setSaving(false);
+    }
   }
 
   if (!open) {
     return (
-      <section className="mt-8">
-        <button type="button" onClick={() => setOpen(true)} className="btn-text px-0">
-          Mark sold
-        </button>
-      </section>
+      <button type="button" className="btn-accent mt-3" onClick={() => setOpen(true)}>
+        Mark sold
+      </button>
     );
   }
 
   return (
-    <section className="mt-8">
-      <button type="button" onClick={() => setOpen(false)} className="btn-text px-0">
-        Mark sold · hide
-      </button>
-      <div className="mt-3 flex flex-wrap gap-1">
-        {channels.map((row) => (
-          <button
-            key={row.id}
-            type="button"
-            onClick={() => setChannel(row.id)}
-            className={`min-h-touch px-2 text-body ${channel === row.id ? "text-floor-accent" : "text-floor-mute"}`}
-          >
-            {row.label}
-          </button>
-        ))}
-      </div>
-      <label className="mt-3 block text-quiet text-floor-mute">
-        What you actually got
+    <div className="mt-3 border border-floor-line p-3">
+      <p className="text-body">
+        Sell {unit.sku}
+        {unit.askCents !== null ? (
+          <span className="text-floor-mute"> · asking {formatCents(unit.askCents)}</span>
+        ) : null}
+      </p>
+
+      <label className="block py-2">
+        <Label>Channel</Label>
+        <select className="field mt-1" value={channel} onChange={(e) => setChannel(e.target.value)}>
+          {settings.channels.map((option) => (
+            <option key={option} value={option}>
+              {option}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <label className="block py-2">
+        <Label>Actual price</Label>
         <input
-          value={proceeds}
-          onChange={(e) => setProceeds(e.target.value)}
-          inputMode="decimal"
           className="field mt-1"
+          value={price}
+          inputMode="decimal"
+          placeholder="—"
+          autoFocus
+          onChange={(e) => setPrice(e.target.value)}
         />
       </label>
-      {unit.floorCents != null && role === "admin" ? (
-        <label className="mt-3 flex min-h-touch items-center gap-2 text-body">
-          <input type="checkbox" checked={confirmFloor} onChange={(e) => setConfirmFloor(e.target.checked)} />
-          Confirm below floor
-        </label>
-      ) : null}
-      {error ? <p className="mt-2 text-body text-floor-danger">{error}</p> : null}
-      <button
-        type="button"
-        disabled={busy || !channel || !proceeds}
-        onClick={() => void sell()}
-        className="btn-accent mt-3 disabled:opacity-40"
-      >
-        {busy ? "Saving…" : "Mark sold"}
-      </button>
-    </section>
+
+      <label className="block py-2">
+        <Label>Payment</Label>
+        <select className="field mt-1" value={method} onChange={(e) => setMethod(e.target.value)}>
+          <option value="">—</option>
+          {settings.paymentMethods.map((option) => (
+            <option key={option} value={option}>
+              {option}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <label className="block py-2">
+        <Label>Customer (optional)</Label>
+        <input className="field mt-1" value={customer} onChange={(e) => setCustomer(e.target.value)} />
+      </label>
+
+      <label className="block py-2">
+        <Label>Phone (optional)</Label>
+        <input
+          className="field mt-1"
+          value={phone}
+          inputMode="tel"
+          onChange={(e) => setPhone(e.target.value)}
+        />
+      </label>
+
+      <label className="block py-2">
+        <Label>Note (optional)</Label>
+        <input className="field mt-1" value={note} onChange={(e) => setNote(e.target.value)} />
+      </label>
+
+      <Notice tone="error">{error}</Notice>
+
+      <div className="mt-2 flex items-center gap-4">
+        <button type="button" className="btn-accent" disabled={saving} onClick={() => void submit()}>
+          {saving ? "Recording…" : "Record sale"}
+        </button>
+        <button type="button" className="btn-text px-0" disabled={saving} onClick={() => setOpen(false)}>
+          Cancel
+        </button>
+      </div>
+    </div>
   );
 }

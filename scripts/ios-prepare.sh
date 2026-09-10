@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Run on macOS / Codemagic after `npx cap add ios` + `npx cap sync ios`.
 # Team 4SRR4NV35F. Bundle com.openboxindustries.floor.
-# ATS allows HTTP to the Surface API only — the UI is already in the ipa.
+# The app is standalone: inventory lives in a SQLite file in Documents.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -30,14 +30,13 @@ else
 fi
 
 if [ -x /usr/libexec/PlistBuddy ]; then
-  /usr/libexec/PlistBuddy -c "Delete :NSAppTransportSecurity" "$PLIST" 2>/dev/null || true
-  /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" "$PLIST"
-  /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsLocalNetworking bool true" "$PLIST"
-  /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsArbitraryLoads bool true" "$PLIST"
-  for key in NSCameraUsageDescription NSPhotoLibraryUsageDescription NSPhotoLibraryAddUsageDescription; do
+  for key in NSCameraUsageDescription NSPhotoLibraryUsageDescription NSPhotoLibraryAddUsageDescription UIFileSharingEnabled LSSupportsOpeningDocumentsInPlace; do
     /usr/libexec/PlistBuddy -c "Delete :$key" "$PLIST" 2>/dev/null || true
   done
   /usr/libexec/PlistBuddy -c "Add :NSCameraUsageDescription string Floor adds unit photos from the camera." "$PLIST"
   /usr/libexec/PlistBuddy -c "Add :NSPhotoLibraryUsageDescription string Floor adds unit photos from your library." "$PLIST"
   /usr/libexec/PlistBuddy -c "Add :NSPhotoLibraryAddUsageDescription string Floor can save a copy of a unit photo." "$PLIST"
+  # Backup files written to Documents show up in the Files app under Floor.
+  /usr/libexec/PlistBuddy -c "Add :UIFileSharingEnabled bool true" "$PLIST"
+  /usr/libexec/PlistBuddy -c "Add :LSSupportsOpeningDocumentsInPlace bool true" "$PLIST"
 fi

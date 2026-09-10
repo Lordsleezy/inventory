@@ -1,9 +1,8 @@
 import type { CapacitorConfig } from "@capacitor/cli";
 
 /**
- * Standalone iOS product: UI is bundled in `www` (Vite build from apps/mobile).
- * Do not point Capacitor at a remote host — that would load the Surface Next
- * site in a WebView. Live stock JSON uses FLOOR_API_URL inside the bundled app.
+ * Standalone iOS product. Everything runs on the phone — no Surface, no
+ * InvenTree, no server.url. Do not point Capacitor at a remote host.
  */
 const config: CapacitorConfig = {
   appId: "com.openboxindustries.floor",
@@ -17,6 +16,10 @@ const config: CapacitorConfig = {
   plugins: {
     Camera: {
       presentationStyle: "popover",
+    },
+    CapacitorSQLite: {
+      iosDatabaseLocation: "Documents",
+      iosIsEncryption: false,
     },
   },
 };

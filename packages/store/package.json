@@ -1,0 +1,11 @@
+{
+  "name": "@floor/store",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./node": "./src/driver-node.ts",
+    "./capacitor": "./src/driver-capacitor.ts"
+  }
+}

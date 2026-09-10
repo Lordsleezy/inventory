@@ -8,7 +8,8 @@
     "apps/*"
   ],
   "scripts": {
-    "test": "node --experimental-strip-types --test packages/domain/src/*.test.ts packages/inventree/src/*.test.ts packages/auth/src/*.test.ts packages/importer/src/*.test.ts infra/inventree/settings.test.mjs",
+    "test": "node --experimental-strip-types --test packages/domain/src/*.test.ts packages/inventree/src/*.test.ts packages/auth/src/*.test.ts packages/importer/src/*.test.ts packages/store/src/*.test.ts infra/inventree/settings.test.mjs",
+    "test:store": "node --experimental-strip-types --test packages/store/src/*.test.ts",
     "inventree:up": "echo Windows-dev only. Do not use on Zorin. && docker compose -f infra/inventree/docker-compose.yml up -d",
     "inventree:bootstrap": "node --experimental-strip-types infra/inventree/bootstrap.mjs",
     "inventree:probe": "node --experimental-strip-types infra/inventree/probe.mjs",
