@@ -19,5 +19,7 @@ media/
 config/staff.json
 config/floor.json
 apps/desktop/release/
+apps/adapter/ios/
+apps/adapter/android/
 .DS_Store
 Thumbs.db

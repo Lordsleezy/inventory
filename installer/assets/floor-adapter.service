@@ -13,7 +13,7 @@ WorkingDirectory=/opt/floor/app
 EnvironmentFile=/etc/floor/floor.env
 Environment=NODE_ENV=production
 Environment=PORT=3000
-Environment=HOSTNAME=127.0.0.1
+Environment=HOSTNAME=0.0.0.0
 # Next instrumentation talks to InvenTree on :80 (nginx). Wait until that answers.
 ExecStartPre=/bin/bash -c 'for i in $(seq 1 90); do c=$(curl -s -o /dev/null -m 2 -w "%{http_code}" http://127.0.0.1/api/ || true); [ "$c" = "200" ] && exit 0; sleep 1; done; echo "InvenTree API not ready on http://127.0.0.1/api/"; exit 1'
 ExecStart=/opt/floor/runtime/node/bin/node apps/adapter/server.js

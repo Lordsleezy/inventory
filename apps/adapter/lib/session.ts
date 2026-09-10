@@ -40,6 +40,16 @@ export async function getSession(): Promise<FloorSession | null> {
   return decodeSession(jar.get("floor_session")?.value);
 }
 
+export function sessionCookieOptions(maxAge = 60 * 60 * 12) {
+  return {
+    httpOnly: true,
+    sameSite: "lax" as const,
+    secure: false,
+    path: "/",
+    maxAge,
+  };
+}
+
 export async function requireSession(): Promise<FloorSession> {
   const session = await getSession();
   if (!session) {

@@ -27,7 +27,7 @@ function Row({
 }) {
   return (
     <div
-      className={`grid grid-cols-[6.5rem_1fr] gap-3 border-b border-floor-line py-2 ${
+      className={`grid grid-cols-[5.5rem_minmax(0,1fr)] gap-3 border-b border-floor-line py-2 ${
         align === "start" ? "items-start" : "items-center"
       }`}
     >

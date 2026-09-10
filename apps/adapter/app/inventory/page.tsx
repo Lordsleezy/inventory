@@ -102,7 +102,7 @@ export default function InventoryPage() {
         autoCapitalize="off"
         spellCheck={false}
         enterKeyHint="search"
-        className="field text-title"
+        className="field min-w-0 text-title"
         aria-label="Search inventory"
       />
       <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -189,10 +189,10 @@ export default function InventoryPage() {
           return (
             <li key={unit.sku} className="border-b border-floor-line">
               <Link href={`/inventory/${unit.sku}`} className="flex min-h-touch items-baseline gap-3 py-3">
-                <span className="min-w-[3.25rem] shrink-0 text-quiet tabular-nums text-floor-mute">
+                <span className="w-14 shrink-0 text-quiet tabular-nums text-floor-mute">
                   {unit.sku}
                 </span>
-                <span className="min-w-0 flex-1 text-title">
+                <span className="min-w-0 flex-1 break-words text-title">
                   {title || price ? (
                     <>
                       {title || null}

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { Unit } from "@floor/domain";
+import { pickNativePhotos } from "@/lib/native-photo";
 
 type Photo = { pk: number; filename: string };
 
@@ -44,7 +45,7 @@ export function UnitPhotos({
     };
   }, [sku]);
 
-  async function upload(files: FileList | null) {
+  async function upload(files: FileList | File[] | null) {
     if (!files || files.length === 0) return;
     setBusy(true);
     setError("");
@@ -127,13 +128,35 @@ export function UnitPhotos({
     <section className="mt-5">
       <div className="mb-2 flex items-center gap-3">
         <p className="text-quiet text-floor-mute">Photos</p>
-        <label className="btn-text cursor-pointer px-0">
+        <button
+          type="button"
+          className="btn-text px-0"
+          onClick={() => {
+            void pickNativePhotos().then((files) => {
+              if (files) void upload(files);
+              else inputRef.current?.click();
+            });
+          }}
+        >
           Add
+        </button>
+        <label className="btn-text cursor-pointer px-0">
+          Library
           <input
             ref={inputRef}
             type="file"
             accept="image/*"
             multiple
+            className="sr-only"
+            onChange={(e) => void upload(e.target.files)}
+          />
+        </label>
+        <label className="btn-text cursor-pointer px-0">
+          Camera
+          <input
+            type="file"
+            accept="image/*"
+            capture="environment"
             className="sr-only"
             onChange={(e) => void upload(e.target.files)}
           />

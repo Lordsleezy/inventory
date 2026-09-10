@@ -3,11 +3,16 @@
   "private": true,
   "license": "UNLICENSED",
   "scripts": {
-    "dev": "next dev --hostname 127.0.0.1 --port 3000",
+    "dev": "next dev --hostname 0.0.0.0 --port 3000",
     "build": "next build",
-    "start": "next start --hostname 127.0.0.1 --port 3000"
+    "start": "next start --hostname 0.0.0.0 --port 3000",
+    "cap:sync": "npx cap sync ios"
   },
   "dependencies": {
+    "@capacitor/camera": "^8.2.4",
+    "@capacitor/cli": "^8.5.1",
+    "@capacitor/core": "^8.5.1",
+    "@capacitor/ios": "^8.5.1",
     "@floor/auth": "*",
     "@floor/domain": "*",
     "@floor/importer": "*",

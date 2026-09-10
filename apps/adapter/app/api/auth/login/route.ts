@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { loginWithPin, listStaffTiles } from "@/lib/staff";
-import { encodeSession } from "@/lib/session";
+import { encodeSession, sessionCookieOptions } from "@/lib/session";
 
 export async function GET() {
   return NextResponse.json({ staff: listStaffTiles() });
@@ -17,12 +17,7 @@ export async function POST(req: Request) {
       displayName: session.displayName,
       role: session.role,
     });
-    res.cookies.set("floor_session", encodeSession(session), {
-      httpOnly: true,
-      sameSite: "lax",
-      path: "/",
-      maxAge: 60 * 60 * 12,
-    });
+    res.cookies.set("floor_session", encodeSession(session), sessionCookieOptions());
     return res;
   } catch (err) {
     const status = (err as { status?: number }).status ?? 500;

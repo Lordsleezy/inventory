@@ -4,6 +4,7 @@ name: release
 #   npm version patch -m "Floor %s"   (or edit package.json)
 #   git push && git push --tags
 # The tag is what triggers this. Or run it by hand from the Actions tab.
+# Windows packages are not published.
 
 on:
   push:
@@ -20,8 +21,6 @@ permissions:
 
 jobs:
   installer:
-    # Jammy matches Zorin 17's Ubuntu base, so anything native we touch links
-    # against a glibc no newer than the Surface has.
     runs-on: ubuntu-22.04
 
     steps:
@@ -58,18 +57,15 @@ jobs:
 
       - name: Build the installer
         run: |
-          chmod +x installer/make-run.sh installer/make-windows.sh
+          chmod +x installer/make-run.sh
           installer/make-run.sh "${{ steps.v.outputs.version }}"
-          installer/make-windows.sh "${{ steps.v.outputs.version }}"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: floor-${{ steps.v.outputs.version }}
+          name: floor-${{ steps.v.outputs.version }}-linux-x64
           path: |
             build/floor-*.run
             build/floor-*.run.sha256
-            build/floor-*-windows.zip
-            build/floor-*-windows.zip.sha256
           retention-days: 30
 
       - name: Publish the release
@@ -79,11 +75,8 @@ jobs:
           VERSION: ${{ steps.v.outputs.version }}
         run: |
           RUN="build/floor-${VERSION}-linux-x64.run"
-          WIN="build/floor-${VERSION}-windows.zip"
           {
-            echo "## Floor ${VERSION}"
-            echo
-            echo "### Linux x64 (Zorin tablet)"
+            echo "## Floor ${VERSION} — Linux x64"
             echo
             echo "Download \`floor-${VERSION}-linux-x64.run\`, then:"
             echo
@@ -92,29 +85,17 @@ jobs:
             echo "sudo bash floor-${VERSION}-linux-x64.run"
             echo '```'
             echo
-            echo "Use \`sudo bash\`, not \`sudo ./file\`. Inventory and PIN stay outside the program directory on update."
+            echo "Phone access is the live adapter over Tailscale/LAN (PWA or Capacitor)."
+            echo "See docs/PHONE.md. Windows packages are not published."
             echo
-            echo "### Windows ARM64 and x64"
-            echo
-            echo "Download \`floor-${VERSION}-windows.zip\`, unzip, then in that folder:"
-            echo
-            echo '```powershell'
-            echo "Set-ExecutionPolicy -Scope Process Bypass"
-            echo ".\Install-Floor.ps1"
-            echo '```'
-            echo
-            echo "Needs Docker Desktop. On ARM64 use the ARM64 Docker build; InvenTree's image is linux/arm64. Later starts: \`.\Start-Floor.ps1\`. Read \`README.md\` inside the zip."
-            echo
-            echo "### Checksums"
+            echo "### Checksum"
             echo '```'
             cat "${RUN}.sha256"
-            cat "${WIN}.sha256"
             echo '```'
           } > notes.md
 
           gh release create "v${VERSION}" \
             "$RUN" "${RUN}.sha256" \
-            "$WIN" "${WIN}.sha256" \
             --title "Floor ${VERSION}" \
             --notes-file notes.md \
             --latest

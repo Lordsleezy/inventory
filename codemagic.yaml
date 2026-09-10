@@ -1,0 +1,60 @@
+# iOS IPA for Floor. The app is a WKWebView pointed at the live Surface adapter.
+# Set FLOOR_PUBLIC_URL in Codemagic environment (e.g. http://100.x.y.z:3000).
+# Signing: upload CM_CERTIFICATE, CM_CERTIFICATE_PASSWORD, CM_PROVISIONING_PROFILE
+# in the Codemagic UI. Team ID 4SRR4NV35F. Bundle ID com.openboxindustries.floor.
+
+workflows:
+  ios-capacitor:
+    name: Floor iOS
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    triggering:
+      events:
+        - tag
+      tag_patterns:
+        - pattern: ios-*
+          include: true
+    environment:
+      vars:
+        XCODE_WORKSPACE: "apps/adapter/ios/App/App.xcworkspace"
+        XCODE_SCHEME: "App"
+        BUNDLE_ID: "com.openboxindustries.floor"
+        APPLE_TEAM_ID: "4SRR4NV35F"
+      xcode: latest
+      node: 22.18.0
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.openboxindustries.floor
+    scripts:
+      - name: npm
+        script: |
+          npm ci
+      - name: Capacitor iOS project
+        script: |
+          cd apps/adapter
+          npm install --no-save @capacitor/core @capacitor/cli @capacitor/ios @capacitor/camera
+          if [ ! -d ios ]; then
+            npx cap add ios
+          fi
+          npx cap sync ios
+      - name: Set team and bundle
+        script: |
+          PLIST="apps/adapter/ios/App/App/Info.plist"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier com.openboxindustries.floor" \
+            apps/adapter/ios/App/App.xcodeproj/project.pbxproj 2>/dev/null || true
+          sed -i '' "s/DEVELOPMENT_TEAM = .*;/DEVELOPMENT_TEAM = 4SRR4NV35F;/g" \
+            apps/adapter/ios/App/App.xcodeproj/project.pbxproj || true
+      - name: Build IPA
+        script: |
+          xcode-project build-ipa \
+            --workspace "$XCODE_WORKSPACE" \
+            --scheme "$XCODE_SCHEME"
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+    publishing:
+      email:
+        recipients: []
+        notify:
+          success: false
+          failure: true

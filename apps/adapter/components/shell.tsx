@@ -41,10 +41,10 @@ export function Shell({ children }: { children: ReactNode }) {
   return (
     <div className="min-h-screen bg-floor-bg text-floor-text">
       <HealthBanner />
-      <header className="px-4 pt-3 pb-2">
-        <div className="flex items-center gap-3">
+      <header className="px-3 pt-3 pb-2 sm:px-4">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <p className="text-quiet tracking-[0.18em] text-floor-mute">FLOOR</p>
-          <nav className="flex min-w-0 flex-1 items-center gap-1">
+          <nav className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
             {TABS.map((item) => {
               const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
               return (
@@ -74,7 +74,7 @@ export function Shell({ children }: { children: ReactNode }) {
           </button>
         </div>
       </header>
-      <main className="px-4 pb-8 pt-2">{children}</main>
+      <main className="min-w-0 px-3 pb-8 pt-2 sm:px-4">{children}</main>
       <OnScreenKeyboard />
     </div>
   );
