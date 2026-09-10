@@ -6,6 +6,8 @@
 #   CM_PROVISIONING_PROFILE     — profile for com.openboxindustries.floor, base64
 #
 # Preferred: Codemagic ↔ Apple Developer Portal integration (automatic signing).
+# Name the App Store Connect API key "Floor" in Codemagic
+# (Teams → Integrations → Developer Portal → Manage keys).
 # Team ID 4SRR4NV35F. Bundle ID com.openboxindustries.floor.
 # Trigger: tag ios-* or a manual run.
 
@@ -14,6 +16,8 @@ workflows:
     name: Floor iOS
     instance_type: mac_mini_m2
     max_build_duration: 60
+    integrations:
+      app_store_connect: Floor
     triggering:
       events:
         - tag
