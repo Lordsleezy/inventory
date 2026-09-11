@@ -7,8 +7,8 @@
 # uploaded under Codemagic → Code signing identities, which is why the
 # previous builds failed with "No matching profiles found" even though
 # Apple can list the Distribution cert, but Codemagic cannot use it without
-# the matching private key. Set CERTIFICATE_PRIVATE_KEY as a secret in
-# Codemagic → Environment variables (the RSA PEM, including BEGIN/END lines).
+# the matching private key. Set CERTIFICATE_PRIVATE_KEY as an ungrouped
+# secret in Codemagic → Environment variables (full RSA PEM).
 
 workflows:
   ios-capacitor:
@@ -24,8 +24,6 @@ workflows:
         - pattern: ios-*
           include: true
     environment:
-      groups:
-        - code-signing
       vars:
         XCODE_WORKSPACE: "apps/adapter/ios/App/App.xcworkspace"
         XCODE_SCHEME: "App"
@@ -64,8 +62,8 @@ workflows:
           echo "CERTIFICATE_PRIVATE_KEY length: ${#CERTIFICATE_PRIVATE_KEY}"
           if [ -z "$CERTIFICATE_PRIVATE_KEY" ]; then
             echo "CERTIFICATE_PRIVATE_KEY is empty in this build." >&2
-            echo "It must live in a Codemagic variable group named exactly: code-signing" >&2
-            echo "Then start a new build of latest master so that group is imported." >&2
+            echo "Add it as an ungrouped secret on the Floor app in Codemagic → Environment variables." >&2
+            echo "Name it exactly CERTIFICATE_PRIVATE_KEY, paste the full PEM, then start a new build." >&2
             exit 1
           fi
           app-store-connect fetch-signing-files "$BUNDLE_ID" \
