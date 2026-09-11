@@ -1,13 +1,5 @@
-# Standalone Floor iOS IPA. Everything runs on the phone — no Surface, no API.
-#
-# Signing — set these in the Codemagic UI. Do not commit certs.
-#   CM_CERTIFICATE              — distribution .p12, base64
-#   CM_CERTIFICATE_PASSWORD     — p12 password
-#   CM_PROVISIONING_PROFILE     — profile for com.openboxindustries.floor, base64
-#
-# Preferred: Codemagic ↔ Apple Developer Portal integration (automatic signing).
-# Name the App Store Connect API key "Floor" in Codemagic
-# (Teams → Integrations → Developer Portal → Manage keys).
+# Signing uses the Apple Developer Portal API key named Forge-Lite
+# (Teams → Integrations → Developer Portal). Do not commit certs.
 # Team ID 4SRR4NV35F. Bundle ID com.openboxindustries.floor.
 # Trigger: tag ios-* or a manual run.
 
@@ -17,7 +9,7 @@ workflows:
     instance_type: mac_mini_m2
     max_build_duration: 60
     integrations:
-      app_store_connect: Floor
+      app_store_connect: Forge-Lite
     triggering:
       events:
         - tag
@@ -56,6 +48,8 @@ workflows:
           fi
           npx cap sync ios
           bash ../../scripts/ios-prepare.sh
+      - name: Use signing profiles
+        script: xcode-project use-profiles
       - name: Build IPA
         script: |
           xcode-project build-ipa \
