@@ -24,6 +24,8 @@ workflows:
         - pattern: ios-*
           include: true
     environment:
+      groups:
+        - code-signing
       vars:
         XCODE_WORKSPACE: "apps/adapter/ios/App/App.xcworkspace"
         XCODE_SCHEME: "App"
@@ -58,7 +60,7 @@ workflows:
       - name: Fetch signing files from Apple
         script: |
           if [ -z "$CERTIFICATE_PRIVATE_KEY" ]; then
-            echo "Add CERTIFICATE_PRIVATE_KEY as a secret in Codemagic → Environment variables, then rebuild." >&2
+            echo "CERTIFICATE_PRIVATE_KEY is empty. In Codemagic: Settings → Environment variables → group code-signing → add secret CERTIFICATE_PRIVATE_KEY, then start a new build." >&2
             exit 1
           fi
           app-store-connect fetch-signing-files "$BUNDLE_ID" \
