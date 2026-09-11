@@ -2,6 +2,12 @@
 # (Teams → Integrations → Developer Portal). Do not commit certs.
 # Team ID 4SRR4NV35F. Bundle ID com.openboxindustries.floor.
 # Trigger: tag ios-* or a manual run.
+#
+# ios_signing is intentionally omitted. That block only matches profiles
+# uploaded under Codemagic → Code signing identities, which is why the
+# previous builds failed with "No matching profiles found" even though
+# the App Store profile exists on Apple. Signing files are fetched from
+# Apple with Forge-Lite during the build.
 
 workflows:
   ios-capacitor:
@@ -22,11 +28,9 @@ workflows:
         XCODE_SCHEME: "App"
         BUNDLE_ID: "com.openboxindustries.floor"
         APPLE_TEAM_ID: "4SRR4NV35F"
+        APP_STORE_CONNECT_TEAM_ID: "4SRR4NV35F"
       xcode: latest
       node: 22.18.0
-      ios_signing:
-        distribution_type: app_store
-        bundle_identifier: com.openboxindustries.floor
     scripts:
       - name: npm
         script: |
@@ -48,6 +52,16 @@ workflows:
           fi
           npx cap sync ios
           bash ../../scripts/ios-prepare.sh
+      - name: Set up keychain
+        script: keychain initialize
+      - name: Fetch signing files from Apple
+        script: |
+          app-store-connect fetch-signing-files "$BUNDLE_ID" \
+            --platform IOS \
+            --type IOS_APP_STORE \
+            --create
+      - name: Add certificates to keychain
+        script: keychain add-certificates
       - name: Use signing profiles
         script: xcode-project use-profiles
       - name: Build IPA
