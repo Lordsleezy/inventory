@@ -6,8 +6,9 @@
 # ios_signing is intentionally omitted. That block only matches profiles
 # uploaded under Codemagic → Code signing identities, which is why the
 # previous builds failed with "No matching profiles found" even though
-# the App Store profile exists on Apple. Signing files are fetched from
-# Apple with Forge-Lite during the build.
+# Apple can list the Distribution cert, but Codemagic cannot use it without
+# the matching private key. Set CERTIFICATE_PRIVATE_KEY as a secret in
+# Codemagic → Environment variables (the RSA PEM, including BEGIN/END lines).
 
 workflows:
   ios-capacitor:
@@ -56,6 +57,10 @@ workflows:
         script: keychain initialize
       - name: Fetch signing files from Apple
         script: |
+          if [ -z "$CERTIFICATE_PRIVATE_KEY" ]; then
+            echo "Add CERTIFICATE_PRIVATE_KEY as a secret in Codemagic → Environment variables, then rebuild." >&2
+            exit 1
+          fi
           app-store-connect fetch-signing-files "$BUNDLE_ID" \
             --platform IOS \
             --type IOS_APP_STORE \
