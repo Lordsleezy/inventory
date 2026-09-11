@@ -59,8 +59,13 @@ workflows:
         script: keychain initialize
       - name: Fetch signing files from Apple
         script: |
+          echo "Signing-related environment variable names:"
+          env | awk -F= '{print $1}' | grep -Ei 'CERT|SIGN|KEY_ID|ISSUER|BUNDLE|APPLE' | sort || true
+          echo "CERTIFICATE_PRIVATE_KEY length: ${#CERTIFICATE_PRIVATE_KEY}"
           if [ -z "$CERTIFICATE_PRIVATE_KEY" ]; then
-            echo "CERTIFICATE_PRIVATE_KEY is empty. In Codemagic: Settings → Environment variables → group code-signing → add secret CERTIFICATE_PRIVATE_KEY, then start a new build." >&2
+            echo "CERTIFICATE_PRIVATE_KEY is empty in this build." >&2
+            echo "It must live in a Codemagic variable group named exactly: code-signing" >&2
+            echo "Then start a new build of latest master so that group is imported." >&2
             exit 1
           fi
           app-store-connect fetch-signing-files "$BUNDLE_ID" \
