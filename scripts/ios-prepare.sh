@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Run on macOS / Codemagic after `npx cap add ios` + `npx cap sync ios`.
+# Run on macOS / Codemagic after `npx cap sync ios`.
+# Capacitor 8 SPM uses App.xcodeproj (no CocoaPods workspace).
 # Team 4SRR4NV35F. Bundle com.openboxindustries.floor.
 # The app is standalone: inventory lives in a SQLite file in Documents.
 set -euo pipefail

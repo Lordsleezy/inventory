@@ -27,7 +27,7 @@ workflows:
       groups:
         - appstore
       vars:
-        XCODE_WORKSPACE: "apps/adapter/ios/App/App.xcworkspace"
+        XCODE_PROJECT: "apps/adapter/ios/App/App.xcodeproj"
         XCODE_SCHEME: "App"
         BUNDLE_ID: "com.openboxindustries.floor"
         APPLE_TEAM_ID: "4SRR4NV35F"
@@ -55,6 +55,11 @@ workflows:
           fi
           npx cap sync ios
           bash ../../scripts/ios-prepare.sh
+          if [ -f ios/App/Podfile ]; then
+            (cd ios/App && pod install)
+          fi
+          cd ../..
+          test -d "$XCODE_PROJECT"
       - name: Set up keychain
         script: keychain initialize
       - name: Fetch signing files from Apple
@@ -75,11 +80,12 @@ workflows:
       - name: Add certificates to keychain
         script: keychain add-certificates
       - name: Use signing profiles
-        script: xcode-project use-profiles
+        script: xcode-project use-profiles --project "$XCODE_PROJECT"
       - name: Build IPA
         script: |
+          test -d "$XCODE_PROJECT"
           xcode-project build-ipa \
-            --workspace "$XCODE_WORKSPACE" \
+            --project "$XCODE_PROJECT" \
             --scheme "$XCODE_SCHEME"
     artifacts:
       - build/ios/ipa/*.ipa

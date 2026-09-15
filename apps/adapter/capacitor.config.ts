@@ -9,7 +9,7 @@ const config: CapacitorConfig = {
   appName: "Floor",
   webDir: "www",
   ios: {
-    scheme: "Floor",
+    scheme: "App",
     contentInset: "automatic",
     limitsNavigationsToAppBoundDomains: false,
   },
