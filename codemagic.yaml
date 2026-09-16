@@ -32,6 +32,9 @@ workflows:
         BUNDLE_ID: "com.openboxindustries.floor"
         APPLE_TEAM_ID: "4SRR4NV35F"
         APP_STORE_CONNECT_TEAM_ID: "4SRR4NV35F"
+        # Numeric Apple ID from App Store Connect → Floor → App Information → Apple ID.
+        # Also set this in the Codemagic group appstore if you prefer not to keep it here.
+        # APP_STORE_APP_ID: "1234567890"
         # Also required in group appstore (public, baked into the IPA):
         # VITE_SUPABASE_URL=https://zoukmsmbztcuyoslvikp.supabase.co
         # VITE_SUPABASE_ANON_KEY, VITE_FUNCTIONS_URL
@@ -86,22 +89,25 @@ workflows:
         script: xcode-project use-profiles --project "$XCODE_PROJECT"
       - name: Increment CFBundleVersion
         script: |
-          # Marketing version (CFBundleShortVersionString) stays as-is.
-          # CFBundleVersion must be unique on App Store Connect for each upload.
-          LATEST=$(app-store-connect get-latest-testflight-build-number \
-            --platform IOS \
-            "$BUNDLE_ID" | tail -n1 | tr -d '[:space:]')
-          if ! echo "$LATEST" | grep -Eq '^[0-9]+$'; then
-            echo "No TestFlight build number yet (got '${LATEST:-empty}'); starting at 0."
-            LATEST=0
-          fi
-          NEXT=$((LATEST + 1))
-          echo "Latest TestFlight CFBundleVersion=$LATEST; using $NEXT"
-          (
-            cd apps/adapter/ios/App
-            agvtool new-version -all "$NEXT"
-            agvtool what-version
-          )
+          set -eo pipefail
+          PLIST="apps/adapter/ios/App/App/Info.plist"
+          PBX="apps/adapter/ios/App/App.xcodeproj/project.pbxproj"
+          IOS_APP="apps/adapter/ios/App"
+          test -f "$PLIST"
+          test -f "$PBX"
+          LATEST=$(app-store-connect get-latest-testflight-build-number "${APP_STORE_APP_ID:-}" 2>/dev/null || echo 0)
+          LATEST=$(printf '%s' "$LATEST" | tr -dc '0-9')
+          LATEST=${LATEST:-0}
+          NEW=$((LATEST + 1))
+          # fallback so it's always higher even if the lookup fails
+          if [ "$NEW" -le 1 ]; then NEW=$(date +%Y%m%d%H%M); fi
+          (cd "$IOS_APP" && agvtool new-version -all "$NEW")
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $NEW" "$PLIST"
+          sed -i.bak "s/CURRENT_PROJECT_VERSION = [0-9]*;/CURRENT_PROJECT_VERSION = $NEW;/g" "$PBX"
+          rm -f "$PBX.bak"
+          echo "Build number set to $NEW"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$PLIST"
+          grep CURRENT_PROJECT_VERSION "$PBX"
       - name: Build IPA
         script: |
           test -d "$XCODE_PROJECT"
