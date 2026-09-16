@@ -3,7 +3,7 @@ import { importPhoneBackup } from "@floor/cloud";
 
 const file = process.argv[2];
 if (!file) {
-  console.error("Usage: set STORE_ID=<uuid from Setup> && node --experimental-strip-types scripts/import-phone-backup.mjs path/to/floor-backup-full.json");
+  console.error("Usage: set STORE_ID=<uuid from Setup> && set SUPABASE_URL=https://zoukmsmbztcuyoslvikp.supabase.co && node --experimental-strip-types scripts/import-phone-backup.mjs path/to/floor-backup-full.json");
   process.exit(1);
 }
 if (!process.env.STORE_ID) {

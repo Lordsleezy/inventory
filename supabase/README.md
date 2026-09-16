@@ -1,6 +1,9 @@
 # Supabase
 
-Apply `migrations/` in order (0001 → 0009).
+Project **floor**: `https://zoukmsmbztcuyoslvikp.supabase.co`
+
+GitHub (`Lordsleezy/inventory`, `master`, working directory `.`) deploys
+`migrations/` to production in order (0001 → 0009).
 
 ## After migrate
 

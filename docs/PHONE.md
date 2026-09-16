@@ -1,8 +1,8 @@
 # Floor on iPhone
 
-Supabase holds inventory. The phone is a Capacitor 8 client. **Offline selling
-and receiving are blocked.** The cache never stores acquisition cost or floor
-price.
+Supabase project **floor** (`https://zoukmsmbztcuyoslvikp.supabase.co`) holds
+inventory. The phone is a Capacitor 8 client. **Offline selling and receiving
+are blocked.** The cache never stores acquisition cost or floor price.
 
 ## Roles
 
@@ -30,7 +30,7 @@ Push notifications: not in this IPA (no entitlements). Settings shows “Push no
 ## Netlify env
 
 ```
-SUPABASE_URL
+SUPABASE_URL=https://zoukmsmbztcuyoslvikp.supabase.co
 SUPABASE_SERVICE_ROLE
 CONNECTIONS_KEY          # 32-byte hex
 RESEND_API_KEY

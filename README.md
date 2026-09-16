@@ -32,13 +32,14 @@ The Surface / InvenTree stack is under `legacy/` and is not the product.
 
 ## First store (your phone)
 
-1. Apply migrations 0001–0009 in the Supabase SQL editor (in order).
+1. Push to `master` applies `supabase/migrations` 0001–0009 on project **floor**
+   (`https://zoukmsmbztcuyoslvikp.supabase.co`). Confirm under Database → Migrations.
 2. Auth → Email on. Install a TestFlight build that includes this code.
 3. **Sign up in the app** (Create a store). Copy **STORE_ID** from Setup.
 4. Import the phone backup. Refuses if that store already has units:
 
 ```bash
-set SUPABASE_URL=https://YOURPROJECT.supabase.co
+set SUPABASE_URL=https://zoukmsmbztcuyoslvikp.supabase.co
 set SUPABASE_SERVICE_ROLE=...
 set STORE_ID=the-uuid-from-setup
 node --experimental-strip-types scripts/import-phone-backup.mjs path\to\floor-backup-full.json
@@ -87,5 +88,6 @@ git push origin ios-cloud-1
 
 Or start a build of `master` from the Codemagic dashboard.
 
-`appstore` group must include `CERTIFICATE_PRIVATE_KEY`, `VITE_SUPABASE_URL`,
-`VITE_SUPABASE_ANON_KEY`, `VITE_FUNCTIONS_URL`.
+`appstore` group must include `CERTIFICATE_PRIVATE_KEY`, `VITE_SUPABASE_URL`
+(`https://zoukmsmbztcuyoslvikp.supabase.co`), `VITE_SUPABASE_ANON_KEY`,
+`VITE_FUNCTIONS_URL`.
