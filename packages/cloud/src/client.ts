@@ -16,12 +16,17 @@ let client: SupabaseClient | null = null;
 
 export function floorCloud(): SupabaseClient {
   if (client) return client;
-  const url = (import.meta as ImportMeta & { env?: Record<string, string> }).env?.VITE_SUPABASE_URL
-    ?? process.env.VITE_SUPABASE_URL
-    ?? process.env.SUPABASE_URL;
-  const anon = (import.meta as ImportMeta & { env?: Record<string, string> }).env?.VITE_SUPABASE_ANON_KEY
-    ?? process.env.VITE_SUPABASE_ANON_KEY
-    ?? process.env.SUPABASE_ANON_KEY;
+  // Vite only inlines the exact identifiers import.meta.env.VITE_*. Do not
+  // optional-chain or index — this file lives outside apps/mobile, so define
+  // in vite.config.ts is what actually bakes the Codemagic values in.
+  const url =
+    import.meta.env.VITE_SUPABASE_URL ||
+    process.env.VITE_SUPABASE_URL ||
+    process.env.SUPABASE_URL;
+  const anon =
+    import.meta.env.VITE_SUPABASE_ANON_KEY ||
+    process.env.VITE_SUPABASE_ANON_KEY ||
+    process.env.SUPABASE_ANON_KEY;
   if (!url || !anon) {
     throw new Error("Supabase URL / anon key missing from this build");
   }

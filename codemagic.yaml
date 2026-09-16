@@ -45,6 +45,24 @@ workflows:
         script: |
           npm ci
           npm run test:store
+      - name: Require VITE env
+        script: |
+          set -e
+          missing=0
+          for v in VITE_SUPABASE_URL VITE_SUPABASE_ANON_KEY VITE_FUNCTIONS_URL; do
+            eval "val=\${$v-}"
+            if [ -n "$val" ]; then
+              echo "$v is set"
+            else
+              echo "$v is EMPTY" >&2
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "Those VITE_* vars must be in the Codemagic group named appstore (this workflow already imports it)." >&2
+            echo "App settings → Environment variables → group appstore. Rebuild latest master after saving." >&2
+            exit 1
+          fi
       - name: Bundle phone UI
         script: |
           npm run build -w @floor/mobile
@@ -53,6 +71,11 @@ workflows:
             echo "Capacitor must not load a remote host; remove the server block" >&2
             exit 1
           fi
+          if ! grep -Rql --include='*.js' 'zoukmsmbztcuyoslvikp' apps/adapter/www; then
+            echo "Built www/ did not inline VITE_SUPABASE_URL; cap sync would ship an empty client." >&2
+            exit 1
+          fi
+          echo "www/ is ready for cap sync (webDir=www)"
       - name: Capacitor iOS project
         script: |
           cd apps/adapter
