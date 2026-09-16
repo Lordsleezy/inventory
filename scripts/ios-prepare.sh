@@ -2,7 +2,7 @@
 # Run on macOS / Codemagic after `npx cap sync ios`.
 # Capacitor 8 SPM uses App.xcodeproj (no CocoaPods workspace).
 # Team 4SRR4NV35F. Bundle com.openboxindustries.floor.
-# The app is standalone: inventory lives in a SQLite file in Documents.
+# Do not enable UIFileSharingEnabled — the live store is not a Files-app share.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -37,7 +37,10 @@ if [ -x /usr/libexec/PlistBuddy ]; then
   /usr/libexec/PlistBuddy -c "Add :NSCameraUsageDescription string Floor adds unit photos from the camera." "$PLIST"
   /usr/libexec/PlistBuddy -c "Add :NSPhotoLibraryUsageDescription string Floor adds unit photos from your library." "$PLIST"
   /usr/libexec/PlistBuddy -c "Add :NSPhotoLibraryAddUsageDescription string Floor can save a copy of a unit photo." "$PLIST"
-  # Backup files written to Documents show up in the Files app under Floor.
-  /usr/libexec/PlistBuddy -c "Add :UIFileSharingEnabled bool true" "$PLIST"
-  /usr/libexec/PlistBuddy -c "Add :LSSupportsOpeningDocumentsInPlace bool true" "$PLIST"
+  /usr/libexec/PlistBuddy -c "Delete :CFBundleURLTypes" "$PLIST" 2>/dev/null || true
+  /usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes array" "$PLIST"
+  /usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:0 dict" "$PLIST"
+  /usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:0:CFBundleURLName string floor" "$PLIST"
+  /usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:0:CFBundleURLSchemes array" "$PLIST"
+  /usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:0:CFBundleURLSchemes:0 string floor" "$PLIST"
 fi

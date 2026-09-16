@@ -8,21 +8,15 @@
     "apps/*"
   ],
   "scripts": {
-    "test": "node --experimental-strip-types --test packages/domain/src/*.test.ts packages/inventree/src/*.test.ts packages/auth/src/*.test.ts packages/importer/src/*.test.ts packages/store/src/*.test.ts infra/inventree/settings.test.mjs",
+    "test": "node --experimental-strip-types --test packages/store/src/*.test.ts packages/cloud/src/*.test.ts packages/payments/src/*.test.ts packages/channels/src/*.test.ts",
     "test:store": "node --experimental-strip-types --test packages/store/src/*.test.ts",
-    "inventree:up": "echo Windows-dev only. Do not use on Zorin. && docker compose -f infra/inventree/docker-compose.yml up -d",
-    "inventree:bootstrap": "node --experimental-strip-types infra/inventree/bootstrap.mjs",
-    "inventree:probe": "node --experimental-strip-types infra/inventree/probe.mjs",
-    "staff:provision": "node infra/inventree/provision-staff.mjs",
-    "build": "npm run build -w @floor/adapter",
-    "installer": "installer/make-run.sh",
-    "installer:windows": "installer/make-windows.sh",
-    "adapter": "npm run dev -w @floor/adapter",
-    "mobile": "npm run build -w @floor/mobile",
-    "photos:watch": "node scripts/photo-watch.mjs",
-    "desktop": "npm start -w @floor/desktop"
+    "import:phone": "node --experimental-strip-types scripts/import-phone-backup.mjs",
+    "mobile": "npm run build -w @floor/mobile"
   },
   "engines": {
     "node": ">=22"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.57.4"
   }
 }

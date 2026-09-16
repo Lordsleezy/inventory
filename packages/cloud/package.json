@@ -1,0 +1,13 @@
+{
+  "name": "@floor/cloud",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@floor/store": "*",
+    "@supabase/supabase-js": "^2.57.4"
+  }
+}

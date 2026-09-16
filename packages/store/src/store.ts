@@ -64,6 +64,7 @@ export type FloorEvent = {
 export type Settings = {
   storeName: string;
   skuStart: number;
+  skuDigits: number;
   taxRateBps: number;
   currency: string;
   categories: string[];
@@ -97,12 +98,15 @@ export type EditableField = keyof typeof EDITABLE_FIELDS;
 
 const now = () => new Date().toISOString();
 
-export function isSku(value: string): boolean {
-  return /^\d{5}$/.test(value);
+export const DEFAULT_SKU_DIGITS = 5;
+
+export function isSku(value: string, digits = DEFAULT_SKU_DIGITS): boolean {
+  if (!Number.isInteger(digits) || digits < 1) return false;
+  return new RegExp(`^\\d{${digits}}$`).test(value);
 }
 
-export function padSku(n: number): string {
-  return String(n).padStart(5, "0");
+export function padSku(n: number, digits = DEFAULT_SKU_DIGITS): string {
+  return String(n).padStart(digits, "0");
 }
 
 // ---------------------------------------------------------------- lifecycle
@@ -157,13 +161,15 @@ export async function saveSetting(db: Db, key: string, value: unknown): Promise<
 /** One past the highest number ever issued. Deleting never lowers this. */
 export async function nextSku(db: Db): Promise<string> {
   const settings = await loadSettings(db);
+  const digits = settings.skuDigits || 5;
   const rows = await db.all<{ top: string | null }>(
     "SELECT MAX(CAST(sku AS INTEGER)) AS top FROM sku_ledger",
   );
   const top = Number(rows[0]?.top ?? 0);
   const next = Math.max(top + 1, settings.skuStart);
-  if (next > 99999) throw new FloorError("SKU numbers are exhausted (99999).", "invalid");
-  return padSku(next);
+  const ceiling = 10 ** digits - 1;
+  if (next > ceiling) throw new FloorError(`SKU numbers are exhausted (${ceiling}).`, "invalid");
+  return padSku(next, digits);
 }
 
 export async function skuLedgerEntry(db: Db, sku: string) {
@@ -291,7 +297,8 @@ export type ReceiveInput = {
 
 export async function receiveUnit(db: Db, input: ReceiveInput): Promise<Unit> {
   const sku = input.sku ?? (await nextSku(db));
-  if (!isSku(sku)) throw new FloorError("A SKU is five digits.", "invalid");
+  const digits = (await loadSettings(db)).skuDigits || 5;
+  if (!isSku(sku, digits)) throw new FloorError(`A SKU is ${digits} digits.`, "invalid");
 
   const label = [input.brand, input.model].filter(Boolean).join(" ") || input.title || "";
   const stamp = now();

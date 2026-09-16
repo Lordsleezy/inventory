@@ -1,19 +1,13 @@
 name: release
 
-# Cutting a new installer:
-#   npm version patch -m "Floor %s"   (or edit package.json)
-#   git push && git push --tags
-# The tag is what triggers this. Or run it by hand from the Actions tab.
-# Windows packages are not published.
+# Legacy Surface Linux installer. Not the iPhone / TestFlight product.
+# Left dispatch-only so it cannot fire on ordinary tags.
 
 on:
-  push:
-    tags:
-      - "v*"
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to build (no leading v). Defaults to package.json."
+        description: "Legacy installer version (no leading v)."
         required: false
 
 permissions:
@@ -21,6 +15,7 @@ permissions:
 
 jobs:
   installer:
+    if: false
     runs-on: ubuntu-22.04
 
     steps:

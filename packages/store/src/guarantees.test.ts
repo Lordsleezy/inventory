@@ -202,7 +202,7 @@ test("SKUs are five digits and issued in sequence", async () => {
   assert.equal(await nextSku(db), "20501", "sequence follows the highest ever issued");
 
   const bad = await rejects(() => receiveUnit(db, { sku: "123", brand: "D" }));
-  assert.match(bad.message, /five digits/);
+  assert.match(bad.message, /digits/);
   await db.close();
 });
 

@@ -18,6 +18,8 @@ attachments/
 media/
 config/staff.json
 config/floor.json
+legacy/config/staff.json
+legacy/config/floor.json
 apps/desktop/release/
 apps/adapter/android/
 apps/adapter/www/

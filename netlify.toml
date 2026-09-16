@@ -1,0 +1,16 @@
+[build]
+  command = "npm install --prefix netlify --omit=dev"
+  publish = "netlify/public"
+  functions = "netlify/functions"
+
+[functions]
+  node_bundler = "esbuild"
+  directory = "netlify/functions"
+
+[functions."dispatch-alerts"]
+  schedule = "*/5 * * * *"
+
+[[redirects]]
+  from = "/"
+  to = "/index.html"
+  status = 200

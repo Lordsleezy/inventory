@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { nextSku, parseMoneyToCents, receiveUnit } from "@floor/store";
+import { parseMoneyToCents } from "@floor/store";
+import { floorCloud, OfflineError } from "@floor/cloud";
 import { useStore } from "../store";
 import { Label, Notice } from "../components/ui";
 
@@ -12,7 +13,8 @@ import { Label, Notice } from "../components/ui";
  * ledger when it is saved, so a spent number is refused rather than reused.
  */
 export function ReceiveScreen() {
-  const { db, settings } = useStore();
+  const { settings, online, session, hydrate } = useStore();
+  const manager = session.role !== "staff";
   const navigate = useNavigate();
 
   const [sku, setSku] = useState("");
@@ -25,6 +27,7 @@ export function ReceiveScreen() {
   const [testStatus, setTestStatus] = useState(settings.testStatuses[0] ?? "");
   const [location, setLocation] = useState(settings.locations[0] ?? "");
   const [cost, setCost] = useState("");
+  const [floor, setFloor] = useState("");
   const [msrp, setMsrp] = useState("");
   const [ask, setAsk] = useState("");
   const [notes, setNotes] = useState("");
@@ -32,17 +35,25 @@ export function ReceiveScreen() {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    void nextSku(db).then((next) => {
-      setSuggested(next);
-      setSku((current) => current || next);
-    });
-  }, [db]);
+    void (async () => {
+      try {
+        const { data, error: rpcErr } = await floorCloud().rpc("next_sku");
+        if (rpcErr) throw rpcErr;
+        const next = String(data ?? "");
+        setSuggested(next);
+        setSku((current) => current || next);
+      } catch {
+        /* next SKU stays blank until they type one */
+      }
+    })();
+  }, []);
 
   async function save(andAnother: boolean) {
     setError("");
 
     const money = {
       cost: parseMoneyToCents(cost),
+      floor: parseMoneyToCents(floor),
       MSRP: parseMoneyToCents(msrp),
       ask: parseMoneyToCents(ask),
     };
@@ -53,40 +64,51 @@ export function ReceiveScreen() {
       }
     }
 
+    if (!online) {
+      setError("Connect to the internet to add units.");
+      return;
+    }
+
     setSaving(true);
     try {
-      const unit = await receiveUnit(db, {
-        sku: sku.trim(),
-        brand: brand.trim(),
-        model: model.trim(),
-        title: title.trim(),
-        category: category || null,
-        condition: condition || null,
-        testStatus: testStatus || null,
-        location: location || null,
-        defectNotes: notes.trim() || null,
-        acquisitionCostCents: money.cost ?? null,
-        msrpCents: money.MSRP ?? null,
-        askCents: money.ask ?? null,
+      const { data, error: rpcErr } = await floorCloud().rpc("receive_unit", {
+        p_sku: sku.trim(),
+        p_brand: brand.trim(),
+        p_model: model.trim(),
+        p_title: title.trim(),
+        p_category: category || null,
+        p_condition: condition || null,
+        p_test_status: testStatus || null,
+        p_location: location || null,
+        p_ask_cents: money.ask ?? null,
+        p_msrp_cents: money.MSRP ?? null,
+        p_cost_cents: manager ? money.cost ?? null : null,
+        p_floor_cents: manager ? money.floor ?? null : null,
+        p_notes: notes.trim() || null,
       });
+      if (rpcErr) throw rpcErr;
+      const savedSku = (data as { sku?: string } | null)?.sku ?? sku.trim();
+      await hydrate();
 
       if (!andAnother) {
-        navigate(`/inventory/${unit.sku}`, { replace: true });
+        navigate(`/inventory/${savedSku}`, { replace: true });
         return;
       }
 
-      // Keep the lot-level fields, clear the per-unit ones.
-      const next = await nextSku(db);
-      setSuggested(next);
-      setSku(next);
+      const next = await floorCloud().rpc("next_sku");
+      const nextSku = String(next.data ?? "");
+      setSuggested(nextSku);
+      setSku(nextSku);
       setModel("");
       setTitle("");
       setNotes("");
       setAsk("");
       setCost("");
+      setFloor("");
       setMsrp("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      const message = err instanceof OfflineError ? err.message : err instanceof Error ? err.message : String(err);
+      setError(message);
     } finally {
       setSaving(false);
     }
@@ -140,8 +162,9 @@ export function ReceiveScreen() {
       />
       <Picker label="Location" value={location} options={settings.locations} onChange={setLocation} />
 
-      <div className="grid grid-cols-3 gap-3">
-        <Money label="Cost" value={cost} onChange={setCost} />
+      <div className="grid grid-cols-2 gap-3">
+        {manager ? <Money label="Cost" value={cost} onChange={setCost} /> : null}
+        {manager ? <Money label="Floor" value={floor} onChange={setFloor} /> : null}
         <Money label="MSRP" value={msrp} onChange={setMsrp} />
         <Money label="Ask" value={ask} onChange={setAsk} />
       </div>
@@ -159,10 +182,10 @@ export function ReceiveScreen() {
       <Notice tone="error">{error}</Notice>
 
       <div className="mt-4 flex items-center gap-4">
-        <button type="button" className="btn-accent" disabled={saving} onClick={() => void save(false)}>
+        <button type="button" className="btn-accent" disabled={saving || !online} onClick={() => void save(false)}>
           {saving ? "Saving…" : "Save"}
         </button>
-        <button type="button" className="btn-text px-0" disabled={saving} onClick={() => void save(true)}>
+        <button type="button" className="btn-text px-0" disabled={saving || !online} onClick={() => void save(true)}>
           Save and add another
         </button>
       </div>

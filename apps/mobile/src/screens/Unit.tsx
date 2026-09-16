@@ -2,33 +2,31 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   buildReceipt,
-  deleteUnit,
   formatCents,
   loadUnit,
   receiptHtml,
   saleForSku,
-  setUnitState,
   unitHistory,
-  updateUnit,
   type EditableField,
   type FloorEvent,
   type Sale,
   type Unit,
   type UnitState,
-  voidSale,
 } from "@floor/store";
-import { MarkSold } from "../components/MarkSold";
+import { floorCloud } from "@floor/cloud";
 import { Photos } from "../components/Photos";
 import { DangerButton, Label, MoneyField, Notice, SelectField, Spinner, TextField } from "../components/ui";
 import { openHtml } from "../files";
 import { useStore } from "../store";
+import { askManagerPin } from "../pin";
 
 const MOVABLE_STATES: UnitState[] = ["available", "reserved", "repair", "scrapped", "lost"];
 
 export function UnitScreen() {
   const { sku = "" } = useParams();
   const navigate = useNavigate();
-  const { db, settings } = useStore();
+  const { db, settings, online, session, hydrate } = useStore();
+  const manager = session.role !== "staff";
 
   const [unit, setUnit] = useState<Unit | null | undefined>(undefined);
   const [sale, setSale] = useState<Sale | null>(null);
@@ -52,8 +50,18 @@ export function UnitScreen() {
 
   async function edit(field: EditableField, value: string | number | null) {
     setError("");
+    if (!online) {
+      setError("Connect to the internet to edit.");
+      return;
+    }
     try {
-      await updateUnit(db, sku, { [field]: value });
+      const { error: rpcErr } = await floorCloud().rpc("update_unit_field", {
+        p_sku: sku,
+        p_field: field,
+        p_value: value == null ? "" : String(value),
+      });
+      if (rpcErr) throw rpcErr;
+      await hydrate();
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -63,8 +71,14 @@ export function UnitScreen() {
 
   async function move(state: UnitState) {
     setError("");
+    if (!online) {
+      setError("Connect to the internet to change inventory.");
+      return;
+    }
     try {
-      await setUnitState(db, sku, state);
+      const { error: rpcErr } = await floorCloud().rpc("set_unit_state", { p_sku: sku, p_state: state });
+      if (rpcErr) throw rpcErr;
+      await hydrate();
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -75,7 +89,15 @@ export function UnitScreen() {
     if (!sale) return;
     setError("");
     try {
-      await voidSale(db, sale.id, reason);
+      let approvalId: string | null = null;
+      if (!manager) approvalId = await askManagerPin("void_sale", sku);
+      const { error: rpcErr } = await floorCloud().rpc("void_sale", {
+        p_sale_id: sale.id,
+        p_reason: reason,
+        p_approval_id: approvalId,
+      });
+      if (rpcErr) throw rpcErr;
+      await hydrate();
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -91,7 +113,14 @@ export function UnitScreen() {
   async function remove() {
     setError("");
     try {
-      await deleteUnit(db, sku);
+      let approvalId: string | null = null;
+      if (!manager) approvalId = await askManagerPin("delete_unit", sku);
+      const { error: rpcErr } = await floorCloud().rpc("delete_unit", {
+        p_sku: sku,
+        p_approval_id: approvalId,
+      });
+      if (rpcErr) throw rpcErr;
+      await hydrate();
       navigate("/inventory", { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -142,8 +171,12 @@ export function UnitScreen() {
             <VoidSale onVoid={undoSale} />
           </div>
         </div>
+      ) : online ? (
+        <Link to={`/checkout/${unit.sku}`} className="btn-accent mt-3 inline-block">
+          Sell
+        </Link>
       ) : (
-        <MarkSold unit={unit} onSold={refresh} />
+        <p className="mt-3 text-quiet text-floor-danger">Connect to the internet to sell.</p>
       )}
 
       <Photos sku={unit.sku} />
@@ -178,11 +211,16 @@ export function UnitScreen() {
       />
 
       <div className="grid grid-cols-2 gap-x-4">
-        <MoneyField label="Cost" cents={unit.acquisitionCostCents} onCommit={(v) => edit("acquisition_cost_cents", v)} />
+        {manager ? (
+          <MoneyField label="Cost" cents={unit.acquisitionCostCents} onCommit={(v) => edit("acquisition_cost_cents", v)} />
+        ) : null}
         <MoneyField label="MSRP" cents={unit.msrpCents} onCommit={(v) => edit("msrp_cents", v)} />
         <MoneyField label="Ask" cents={unit.askCents} onCommit={(v) => edit("ask_cents", v)} />
-        <MoneyField label="Floor" cents={unit.floorCents} onCommit={(v) => edit("floor_cents", v)} />
+        {manager ? (
+          <MoneyField label="Floor" cents={unit.floorCents} onCommit={(v) => edit("floor_cents", v)} />
+        ) : null}
       </div>
+      <MarkListed sku={unit.sku} channels={settings.channels} online={online} />
 
       <TextField label="Manufacturer serial" value={unit.mfrSerial} onCommit={(v) => edit("mfr_serial", v)} />
       <TextField label="UPC" value={unit.upc} onCommit={(v) => edit("upc", v)} inputMode="numeric" />
@@ -219,6 +257,32 @@ export function UnitScreen() {
         Deleting removes the record. SKU {unit.sku} is never issued again, and its history stays.
       </p>
     </section>
+  );
+}
+
+function MarkListed({ sku, channels, online }: { sku: string; channels: string[]; online: boolean }) {
+  const [channel, setChannel] = useState(channels.find((c) => c !== "floor") ?? "ebay");
+  const [msg, setMsg] = useState("");
+  async function mark() {
+    setMsg("");
+    const { error } = await floorCloud().rpc("mark_listed", { p_sku: sku, p_channel: channel, p_listing_id: null });
+    setMsg(error ? error.message : `Listed on ${channel}`);
+  }
+  return (
+    <div className="border-b border-floor-line py-3">
+      <Label>Mark as listed on</Label>
+      <div className="mt-2 flex items-center gap-2">
+        <select className="field" value={channel} onChange={(e) => setChannel(e.target.value)}>
+          {channels.filter((c) => c !== "floor").map((c) => (
+            <option key={c} value={c}>{c}</option>
+          ))}
+        </select>
+        <button type="button" className="btn-text px-0" disabled={!online} onClick={() => void mark()}>
+          Save
+        </button>
+      </div>
+      {msg ? <p className="text-quiet mt-1">{msg}</p> : null}
+    </div>
   );
 }
 

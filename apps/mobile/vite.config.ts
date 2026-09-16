@@ -33,6 +33,9 @@ export default defineConfig({
         find: "@floor/store/capacitor",
         replacement: path.resolve(repo, "packages/store/src/driver-capacitor.ts"),
       },
+      { find: "@floor/cloud", replacement: path.resolve(repo, "packages/cloud/src/index.ts") },
+      { find: "@floor/payments", replacement: path.resolve(repo, "packages/payments/src/index.ts") },
+      { find: "@floor/channels", replacement: path.resolve(repo, "packages/channels/src/index.ts") },
       { find: "@floor/store", replacement: path.resolve(repo, "packages/store/src/index.ts") },
       {
         find: "sql.js/dist/sql-wasm.js",

@@ -32,6 +32,8 @@ workflows:
         BUNDLE_ID: "com.openboxindustries.floor"
         APPLE_TEAM_ID: "4SRR4NV35F"
         APP_STORE_CONNECT_TEAM_ID: "4SRR4NV35F"
+        # Also required in group appstore (public, baked into the IPA):
+        # VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY, VITE_FUNCTIONS_URL
       xcode: latest
       node: 22.18.0
     scripts:

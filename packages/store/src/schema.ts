@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS meta (
 -- A row here means the number is spent, whatever happened to the thing.
 CREATE TABLE IF NOT EXISTS sku_ledger (
   sku       TEXT PRIMARY KEY
-            CHECK (sku GLOB '[0-9][0-9][0-9][0-9][0-9]'),
+            CHECK (sku GLOB '[0-9]*'),
   issued_at TEXT NOT NULL,
   label     TEXT NOT NULL DEFAULT '',
   fate      TEXT NOT NULL DEFAULT 'issued'
@@ -225,6 +225,7 @@ CREATE TABLE IF NOT EXISTS settings (
 export const DEFAULT_SETTINGS: Record<string, unknown> = {
   storeName: "Floor",
   skuStart: 10000,
+  skuDigits: 5,
   taxRateBps: 0,
   currency: "USD",
   categories: ["Uncategorized"],
