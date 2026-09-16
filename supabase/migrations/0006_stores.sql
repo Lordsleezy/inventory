@@ -230,10 +230,11 @@ select
 from public.units u
 where u.store_id is not distinct from public.current_store_id();
 
+-- CREATE OR REPLACE VIEW cannot rename or reorder columns. 0003/0005 defined
+-- sku … photo_paths. store_id is appended so an upgrade from 0005 applies.
 create or replace view public.public_items
 with (security_invoker = false) as
 select
-  u.store_id,
   u.sku,
   u.brand,
   u.model,
@@ -253,7 +254,7 @@ select
   (
     select p.path
       from public.photos p
-     where p.store_id = u.store_id and p.sku = u.sku
+     where p.store_id is not distinct from u.store_id and p.sku = u.sku
      order by p.is_primary desc, p.created_at asc
      limit 1
   ) as primary_photo_path,
@@ -261,10 +262,11 @@ select
     (
       select json_agg(p.path order by p.is_primary desc, p.created_at)
         from public.photos p
-       where p.store_id = u.store_id and p.sku = u.sku
+       where p.store_id is not distinct from u.store_id and p.sku = u.sku
     ),
     '[]'::json
-  ) as photo_paths
+  ) as photo_paths,
+  u.store_id
 from public.units u
 where u.show_on_website
   and u.state in ('available', 'reserved')

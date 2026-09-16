@@ -9,6 +9,7 @@
   ],
   "scripts": {
     "test": "node --experimental-strip-types --test packages/store/src/*.test.ts packages/cloud/src/*.test.ts packages/payments/src/*.test.ts packages/channels/src/*.test.ts",
+    "test:migrations": "node --experimental-strip-types scripts/test-migrations.mjs",
     "test:store": "node --experimental-strip-types --test packages/store/src/*.test.ts",
     "import:phone": "node --experimental-strip-types scripts/import-phone-backup.mjs",
     "mobile": "npm run build -w @floor/mobile"
@@ -18,5 +19,8 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8"
   }
 }
