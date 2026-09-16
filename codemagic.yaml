@@ -84,6 +84,24 @@ workflows:
         script: keychain add-certificates
       - name: Use signing profiles
         script: xcode-project use-profiles --project "$XCODE_PROJECT"
+      - name: Increment CFBundleVersion
+        script: |
+          # Marketing version (CFBundleShortVersionString) stays as-is.
+          # CFBundleVersion must be unique on App Store Connect for each upload.
+          LATEST=$(app-store-connect get-latest-testflight-build-number \
+            --platform IOS \
+            "$BUNDLE_ID" | tail -n1 | tr -d '[:space:]')
+          if ! echo "$LATEST" | grep -Eq '^[0-9]+$'; then
+            echo "No TestFlight build number yet (got '${LATEST:-empty}'); starting at 0."
+            LATEST=0
+          fi
+          NEXT=$((LATEST + 1))
+          echo "Latest TestFlight CFBundleVersion=$LATEST; using $NEXT"
+          (
+            cd apps/adapter/ios/App
+            agvtool new-version -all "$NEXT"
+            agvtool what-version
+          )
       - name: Build IPA
         script: |
           test -d "$XCODE_PROJECT"
