@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Floor — email confirmed</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 28rem; margin: 3rem auto; padding: 0 1rem; line-height: 1.45; }
+      a { display: inline-block; margin-top: 1rem; }
+      .err { color: #b42318; }
+    </style>
+  </head>
+  <body>
+    <h1>Email confirmed</h1>
+    <p id="msg">Open Floor and sign in. If you do not have a store yet, the app will ask you to create one.</p>
+    <p id="err" class="err" hidden></p>
+    <p>
+      <a href="floor://auth/confirmed">Open Floor</a>
+    </p>
+    <script>
+      const params = new URLSearchParams(location.search + location.hash.replace(/^#/, "&"));
+      const error = params.get("error_description") || params.get("error");
+      if (error) {
+        document.getElementById("msg").textContent = "That confirmation link did not work.";
+        const el = document.getElementById("err");
+        el.hidden = false;
+        el.textContent = error;
+      }
+    </script>
+  </body>
+</html>

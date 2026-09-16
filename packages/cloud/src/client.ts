@@ -55,22 +55,52 @@ export type StaffSession = {
   notifyPush: boolean;
 };
 
-export async function loadStaffSession(): Promise<StaffSession | null> {
+export type AuthState =
+  | { kind: "signed_out" }
+  | { kind: "needs_store"; userId: string; email: string }
+  | { kind: "ready"; session: StaffSession };
+
+export async function loadAuthState(): Promise<AuthState> {
   const sb = floorCloud();
-  const { data: session } = await sb.auth.getSession();
-  if (!session.session) return null;
+  const { data: session, error: sessionError } = await sb.auth.getSession();
+  if (sessionError) throw sessionError;
+  if (!session.session) return { kind: "signed_out" };
   const { data, error } = await sb
     .from("staff")
     .select("store_id, role, display_name, notify_email, notify_push")
     .eq("user_id", session.session.user.id)
     .maybeSingle();
-  if (error || !data?.store_id) return null;
+  if (error) throw error;
+  if (!data?.store_id) {
+    return {
+      kind: "needs_store",
+      userId: session.session.user.id,
+      email: session.session.user.email ?? "",
+    };
+  }
   return {
-    userId: session.session.user.id,
-    storeId: data.store_id,
-    role: data.role as StaffSession["role"],
-    displayName: data.display_name,
-    notifyEmail: data.notify_email,
-    notifyPush: data.notify_push,
+    kind: "ready",
+    session: {
+      userId: session.session.user.id,
+      storeId: data.store_id,
+      role: data.role as StaffSession["role"],
+      displayName: data.display_name,
+      notifyEmail: data.notify_email,
+      notifyPush: data.notify_push,
+    },
   };
+}
+
+export async function loadStaffSession(): Promise<StaffSession | null> {
+  const state = await loadAuthState();
+  return state.kind === "ready" ? state.session : null;
+}
+
+export function authErrorMessage(err: unknown): string {
+  if (err && typeof err === "object" && "message" in err) {
+    const message = String((err as { message: unknown }).message ?? "").trim();
+    if (message) return message;
+  }
+  const text = String(err ?? "").trim();
+  return text || "Something went wrong";
 }

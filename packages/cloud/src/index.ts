@@ -1,6 +1,14 @@
 export { importPhoneBackup, createServiceClient, requiredStoreId, type ImportResult } from "./import-backup.ts";
 export { DEFAULT_SKU_DIGITS, isSku, padSku, skuCeiling, storagePathForPhoto } from "./sku.ts";
-export { floorCloud, loadStaffSession, resetFloorCloud, type StaffSession } from "./client.ts";
+export {
+  floorCloud,
+  loadAuthState,
+  loadStaffSession,
+  resetFloorCloud,
+  authErrorMessage,
+  type AuthState,
+  type StaffSession,
+} from "./client.ts";
 export { assertOnline, OfflineError } from "./online.ts";
 export {
   reserveUnit,

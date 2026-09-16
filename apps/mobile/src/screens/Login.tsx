@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { floorCloud } from "@floor/cloud";
+import { authErrorMessage, floorCloud } from "@floor/cloud";
 import { Label, Notice } from "../components/ui";
 
 export function LoginScreen() {
@@ -14,10 +14,8 @@ export function LoginScreen() {
     try {
       const { error: authError } = await floorCloud().auth.signInWithPassword({ email, password });
       if (authError) throw authError;
-      location.hash = "#/";
-      location.reload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(authErrorMessage(err));
     } finally {
       setBusy(false);
     }

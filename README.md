@@ -34,8 +34,11 @@ The Surface / InvenTree stack is under `legacy/` and is not the product.
 
 1. Push to `master` applies `supabase/migrations` 0001–0009 on project **floor**
    (`https://zoukmsmbztcuyoslvikp.supabase.co`). Confirm under Database → Migrations.
-2. Auth → Email on. Install a TestFlight build that includes this code.
-3. **Sign up in the app** (Create a store). Copy **STORE_ID** from Setup.
+2. Auth → Email on. Site URL `https://inventoryobi.netlify.app`. Redirect URLs
+   must include `https://inventoryobi.netlify.app/auth/confirmed`. Install a
+   TestFlight build that includes this code.
+3. **Sign up in the app**. If confirm-email is on, check your inbox, then sign in.
+   A signed-in account with no store lands on **Create your store**. Copy **STORE_ID** from Setup.
 4. Import the phone backup. Refuses if that store already has units:
 
 ```bash
