@@ -19,7 +19,7 @@ import { DangerButton, Label, MoneyField, Notice, SelectField, Spinner, TextFiel
 import { openHtml } from "../files";
 import { useStore } from "../store";
 import { askManagerPin } from "../pin";
-import { friendlyRpc, needsManagerPin } from "../rpc";
+import { friendlyRpc, needsManagerPin, needsVoidFirst } from "../rpc";
 
 const MOVABLE_STATES: UnitState[] = ["available", "reserved", "repair", "scrapped", "lost"];
 
@@ -33,6 +33,7 @@ export function UnitScreen() {
   const [sale, setSale] = useState<Sale | null>(null);
   const [history, setHistory] = useState<FloorEvent[]>([]);
   const [error, setError] = useState("");
+  const [askVoidForDelete, setAskVoidForDelete] = useState(false);
 
   const refresh = useCallback(async () => {
     const [found, currentSale, rows] = await Promise.all([
@@ -76,12 +77,19 @@ export function UnitScreen() {
       await hydrate();
       await refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(friendlyRpc(err));
     }
   }
 
-  async function undoSale(reason: string) {
-    if (!sale) return;
+  async function undoSale(reason: string, thenDelete = false): Promise<boolean> {
+    if (!reason.trim()) {
+      setError("Enter a reason to void.");
+      return false;
+    }
+    if (!sale || sale.voidedAt) {
+      setError("No live sale to void.");
+      return false;
+    }
     setError("");
     try {
       await ensureOnline();
@@ -102,8 +110,11 @@ export function UnitScreen() {
       }
       await hydrate();
       await refresh();
+      if (thenDelete) await remove(true);
+      return true;
     } catch (err) {
       setError(friendlyRpc(err));
+      return false;
     }
   }
 
@@ -113,8 +124,13 @@ export function UnitScreen() {
     await openHtml(`receipt-${receipt.receiptNo}.html`, receiptHtml(receipt));
   }
 
-  async function remove() {
+  async function remove(afterVoid = false) {
     setError("");
+    if (!afterVoid && sale && !sale.voidedAt) {
+      setError("This item has a sale. Void the sale first to delete it.");
+      setAskVoidForDelete(true);
+      return;
+    }
     try {
       await ensureOnline();
       const run = async (approvalId: string | null) => {
@@ -127,10 +143,16 @@ export function UnitScreen() {
       try {
         await run(null);
       } catch (err) {
+        if (needsVoidFirst(err) && !afterVoid) {
+          setError("This item has a sale. Void the sale first to delete it.");
+          setAskVoidForDelete(true);
+          return;
+        }
         if (!needsManagerPin(err)) throw err;
         const approvalId = await askManagerPin("delete_unit", sku);
         await run(approvalId);
       }
+      setAskVoidForDelete(false);
       try {
         await hydrate();
       } catch {
@@ -138,6 +160,11 @@ export function UnitScreen() {
       }
       navigate("/inventory", { replace: true });
     } catch (err) {
+      if (needsVoidFirst(err) && !afterVoid) {
+        setError("This item has a sale. Void the sale first to delete it.");
+        setAskVoidForDelete(true);
+        return;
+      }
       setError(friendlyRpc(err));
       await refresh();
     }
@@ -257,16 +284,51 @@ export function UnitScreen() {
 
       <History rows={history} />
 
-      <div className="mt-6 flex flex-wrap items-center gap-6">
+      <div className="mt-6">
         {!sold && unit.state !== "voided" ? (
-          <DangerButton idle="Void this unit" confirm="Void it" onConfirm={() => move("voided")} />
+          <DangerButton
+            idle="Void this unit"
+            confirm="Void it"
+            onConfirm={() => move("voided")}
+            onError={(err) => setError(friendlyRpc(err))}
+          />
         ) : null}
-        <DangerButton
-          idle="Delete permanently"
-          confirm="Delete forever"
-          onConfirm={remove}
-          disabled={sold}
-        />
+
+        {sold && sale && !sale.voidedAt ? (
+          <div className="mt-4 border border-floor-line p-3">
+            <p className="text-body">This item has a sale. Void the sale first to delete it.</p>
+            <p className="mt-1 text-quiet text-floor-mute">
+              {askVoidForDelete
+                ? "Void the sale, then this item will be deleted. The receipt stays in Reports, marked VOID."
+                : "The receipt stays in Reports, marked VOID. After voiding you can delete this item."}
+            </p>
+            <div className="mt-3">
+              <VoidSale onVoid={(reason) => undoSale(reason, askVoidForDelete)} />
+            </div>
+          </div>
+        ) : null}
+
+        <div className="mt-4">
+          {sold && sale && !sale.voidedAt ? (
+            <button
+              type="button"
+              className="btn-text px-0 text-floor-danger"
+              onClick={() => {
+                setError("This item has a sale. Void the sale first to delete it.");
+                setAskVoidForDelete(true);
+              }}
+            >
+              Delete permanently
+            </button>
+          ) : (
+            <DangerButton
+              idle="Delete permanently"
+              confirm="Delete forever"
+              onConfirm={() => remove()}
+              onError={(err) => setError(friendlyRpc(err))}
+            />
+          )}
+        </div>
       </div>
       <p className="mt-2 text-quiet text-floor-mute">
         Deleting removes the record. SKU {unit.sku} is never issued again, and its history stays.
@@ -301,9 +363,11 @@ function MarkListed({ sku, channels, online }: { sku: string; channels: string[]
   );
 }
 
-function VoidSale({ onVoid }: { onVoid: (reason: string) => Promise<void> }) {
+function VoidSale({ onVoid }: { onVoid: (reason: string) => Promise<boolean> }) {
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [localError, setLocalError] = useState("");
 
   if (!open) {
     return (
@@ -314,25 +378,41 @@ function VoidSale({ onVoid }: { onVoid: (reason: string) => Promise<void> }) {
   }
 
   return (
-    <span className="flex w-full flex-wrap items-center gap-2">
-      <input
-        className="field flex-1"
-        value={reason}
-        placeholder="Reason for the void"
-        autoFocus
-        onChange={(e) => setReason(e.target.value)}
-      />
-      <button
-        type="button"
-        className="min-h-touch bg-floor-danger px-3 text-body font-medium text-black"
-        disabled={!reason.trim()}
-        onClick={() => void onVoid(reason).then(() => setOpen(false))}
-      >
-        Void
-      </button>
-      <button type="button" className="btn-text px-0" onClick={() => setOpen(false)}>
-        Cancel
-      </button>
+    <span className="flex w-full flex-col gap-2">
+      {localError ? <Notice tone="error">{localError}</Notice> : null}
+      <span className="flex w-full flex-wrap items-center gap-2">
+        <input
+          className="field flex-1"
+          value={reason}
+          placeholder="Reason for the void"
+          autoFocus
+          onChange={(e) => setReason(e.target.value)}
+        />
+        <button
+          type="button"
+          className="min-h-touch bg-floor-danger px-3 text-body font-medium text-black"
+          disabled={busy}
+          onClick={() => {
+            if (!reason.trim()) {
+              setLocalError("Enter a reason to void.");
+              return;
+            }
+            setLocalError("");
+            setBusy(true);
+            void onVoid(reason)
+              .then((ok) => {
+                if (ok) setOpen(false);
+              })
+              .catch((err) => setLocalError(err instanceof Error ? err.message : String(err)))
+              .finally(() => setBusy(false));
+          }}
+        >
+          {busy ? "Working…" : "Void"}
+        </button>
+        <button type="button" className="btn-text px-0" disabled={busy} onClick={() => setOpen(false)}>
+          Cancel
+        </button>
+      </span>
     </span>
   );
 }

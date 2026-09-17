@@ -170,11 +170,13 @@ export function DangerButton({
   confirm,
   onConfirm,
   disabled,
+  onError,
 }: {
   idle: string;
   confirm: string;
   onConfirm: () => Promise<void> | void;
   disabled?: boolean;
+  onError?: (err: unknown) => void;
 }) {
   const [armed, setArmed] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -200,7 +202,9 @@ export function DangerButton({
         onClick={() => {
           setBusy(true);
           void Promise.resolve(onConfirm())
-            .catch(() => {})
+            .catch((err) => {
+              onError?.(err);
+            })
             .finally(() => {
               setBusy(false);
               setArmed(false);
