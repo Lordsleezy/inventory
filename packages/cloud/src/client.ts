@@ -96,11 +96,58 @@ export async function loadStaffSession(): Promise<StaffSession | null> {
   return state.kind === "ready" ? state.session : null;
 }
 
-export function authErrorMessage(err: unknown): string {
-  if (err && typeof err === "object" && "message" in err) {
-    const message = String((err as { message: unknown }).message ?? "").trim();
-    if (message) return message;
+function asPlainText(value: unknown, depth = 0): string {
+  if (value == null) return "";
+  if (typeof value === "string") {
+    const t = value.trim();
+    return t === "[object Object]" ? "" : t;
   }
-  const text = String(err ?? "").trim();
-  return text || "Something went wrong";
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (depth > 5) return "";
+  if (value instanceof Error) return asPlainText(value.message, depth + 1);
+  if (typeof value === "object") {
+    const o = value as Record<string, unknown>;
+    for (const key of ["message", "details", "hint", "error_description", "error"]) {
+      const t = asPlainText(o[key], depth + 1);
+      if (t) return t;
+    }
+    try {
+      const json = JSON.stringify(value);
+      if (json && json !== "{}" && json !== "[]" && json !== "null") return json;
+    } catch {
+      /* ignore */
+    }
+  }
+  return "";
+}
+
+function skuFromText(text: string): string | null {
+  const keyed = text.match(/\(sku\)=\((\d+)\)/i);
+  if (keyed) return keyed[1];
+  const labeled = text.match(/\bSKU\s+(\d+)\b/i);
+  if (labeled) return labeled[1];
+  return null;
+}
+
+/** Never returns "[object Object]". Unwraps PostgREST / Postgres errors. */
+export function authErrorMessage(err: unknown): string {
+  let search = asPlainText(err);
+  if (err && typeof err === "object") {
+    const o = err as Record<string, unknown>;
+    const joined = ["message", "details", "hint"]
+      .map((key) => asPlainText(o[key]))
+      .filter(Boolean)
+      .join(" ");
+    if (joined) search = joined;
+  }
+  const text = search && search !== "[object Object]" ? search : "Something went wrong";
+  if (/duplicate key|unique constraint|sku_ledger_pkey|units_sku/i.test(text)) {
+    const sku = skuFromText(text);
+    if (sku) return `SKU ${sku} was used before and can't be reused.`;
+    return "That SKU was used before and can't be reused.";
+  }
+  if (/invalid_sku/i.test(text)) return "SKU must be digits.";
+  if (/no_store/i.test(text)) return "This account is not attached to a store yet.";
+  const display = asPlainText(err);
+  return display && display !== "[object Object]" ? display : text;
 }

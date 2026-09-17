@@ -1,16 +1,17 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { parseMoneyToCents } from "@floor/store";
-import { floorCloud, OfflineError } from "@floor/cloud";
+import { floorCloud } from "@floor/cloud";
 import { useStore } from "../store";
 import { Label, Notice } from "../components/ui";
+import { friendlyRpc } from "../rpc";
 
 /**
  * Receive one physical unit.
  *
  * The SKU is offered but editable, because sometimes a label has already been
- * written by hand. Either way the number is checked against the permanent
- * ledger when it is saved, so a spent number is refused rather than reused.
+ * written by hand. Numbers that were sold (even if later voided) stay locked.
+ * A deleted SKU with no sale history can be reused.
  */
 export function ReceiveScreen() {
   const { settings, online, session, hydrate, ensureOnline } = useStore();
@@ -32,6 +33,8 @@ export function ReceiveScreen() {
   const [ask, setAsk] = useState("");
   const [notes, setNotes] = useState("");
   const [error, setError] = useState("");
+  const [skuHint, setSkuHint] = useState("");
+  const [skuStatus, setSkuStatus] = useState("empty");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -47,6 +50,34 @@ export function ReceiveScreen() {
       }
     })();
   }, []);
+
+  useEffect(() => {
+    const trimmed = sku.trim();
+    if (!trimmed) {
+      setSkuHint("");
+      setSkuStatus("empty");
+      return;
+    }
+    let live = true;
+    const timer = setTimeout(() => {
+      void (async () => {
+        const { data, error: rpcErr } = await floorCloud().rpc("sku_status", { p_sku: trimmed });
+        if (!live) return;
+        if (rpcErr) {
+          setSkuHint(friendlyRpc(rpcErr));
+          setSkuStatus("error");
+          return;
+        }
+        const row = (data ?? {}) as { status?: string; message?: string };
+        setSkuStatus(row.status ?? "free");
+        setSkuHint(row.message ?? "");
+      })();
+    }, 250);
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+  }, [sku]);
 
   async function save(andAnother: boolean) {
     setError("");
@@ -103,8 +134,7 @@ export function ReceiveScreen() {
       setFloor("");
       setMsrp("");
     } catch (err) {
-      const message = err instanceof OfflineError ? err.message : err instanceof Error ? err.message : String(err);
-      setError(message);
+      setError(friendlyRpc(err));
     } finally {
       setSaving(false);
     }
@@ -130,6 +160,11 @@ export function ReceiveScreen() {
           <button type="button" className="btn-text px-0" onClick={() => setSku(suggested)}>
             Use next number {suggested}
           </button>
+        ) : null}
+        {skuHint ? (
+          <p className={`mt-1 text-quiet ${skuStatus === "reusable" ? "text-floor-mute" : "text-floor-danger"}`}>
+            {skuHint}
+          </p>
         ) : null}
       </label>
 
@@ -178,10 +213,20 @@ export function ReceiveScreen() {
       <Notice tone="error">{error}</Notice>
 
       <div className="mt-4 flex items-center gap-4">
-        <button type="button" className="btn-accent" disabled={saving || !online} onClick={() => void save(false)}>
+        <button
+          type="button"
+          className="btn-accent"
+          disabled={saving || !online || skuStatus === "taken" || skuStatus === "locked"}
+          onClick={() => void save(false)}
+        >
           {saving ? "Saving…" : "Save"}
         </button>
-        <button type="button" className="btn-text px-0" disabled={saving || !online} onClick={() => void save(true)}>
+        <button
+          type="button"
+          className="btn-text px-0"
+          disabled={saving || !online || skuStatus === "taken" || skuStatus === "locked"}
+          onClick={() => void save(true)}
+        >
           Save and add another
         </button>
       </div>

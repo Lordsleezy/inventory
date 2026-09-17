@@ -214,7 +214,7 @@ export function StoreProvider({ session, children }: { session: StaffSession; ch
         setDb(opened);
         setSettings(loaded);
       } catch (err) {
-        if (live) setError(err instanceof Error ? err.message : String(err));
+        if (live) setError(authErrorMessage(err));
       }
     })();
     return () => {

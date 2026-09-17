@@ -6,6 +6,7 @@ import { cashProvider, stubCardProvider } from "@floor/payments";
 import { useStore } from "../store";
 import { Label, Notice } from "../components/ui";
 import { askManagerPin } from "../pin";
+import { friendlyRpc } from "../rpc";
 
 export function CheckoutScreen() {
   const { sku = "" } = useParams();
@@ -101,7 +102,7 @@ export function CheckoutScreen() {
       await finish("cash", charged.paymentId);
     } catch (err) {
       if (err instanceof SellError && err.code === "double_sell") setLoud(err.message);
-      else setError(err instanceof Error ? err.message : String(err));
+      else setError(friendlyRpc(err));
       if (reservationId) await releaseReservation(reservationId);
       setReservationId(null);
     } finally {
@@ -129,7 +130,7 @@ export function CheckoutScreen() {
       await finish("card", charged.paymentId);
     } catch (err) {
       if (err instanceof SellError && err.code === "double_sell") setLoud(err.message);
-      else setError(err instanceof Error ? err.message : String(err));
+      else setError(friendlyRpc(err));
       if (reservationId) await releaseReservation(reservationId);
       setReservationId(null);
     } finally {
@@ -191,7 +192,7 @@ export function CheckoutScreen() {
       ) : (
         <button type="button" className="btn-accent mt-4" disabled={busy || !online} onClick={() => void finish("external", `ext_${Date.now()}`).catch((err) => {
           if (err instanceof SellError && err.code === "double_sell") setLoud(err.message);
-          else setError(err instanceof Error ? err.message : String(err));
+          else setError(friendlyRpc(err));
         })}>
           Record sale
         </button>

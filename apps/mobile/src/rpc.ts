@@ -1,8 +1,7 @@
+import { authErrorMessage } from "@floor/cloud";
+
 export function rpcMessage(err: unknown): string {
-  if (err && typeof err === "object" && "message" in err) {
-    return String((err as { message: unknown }).message);
-  }
-  return err instanceof Error ? err.message : String(err);
+  return authErrorMessage(err);
 }
 
 export function needsManagerPin(err: unknown): boolean {
@@ -15,6 +14,7 @@ export function needsVoidFirst(err: unknown): boolean {
 
 export function friendlyRpc(err: unknown): string {
   const msg = rpcMessage(err);
+  if (!msg || msg === "[object Object]") return "Something went wrong";
   if (/manager_approval_required/i.test(msg)) return "A manager PIN is required.";
   if (/void_the_sale_first/i.test(msg)) return "This item has a sale. Void the sale first to delete it.";
   if (/sale_not_voidable/i.test(msg)) return "That sale cannot be voided.";

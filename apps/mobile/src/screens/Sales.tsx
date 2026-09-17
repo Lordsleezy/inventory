@@ -12,6 +12,7 @@ import { Link } from "react-router-dom";
 import { openHtml, saveAndShare, stampedName } from "../files";
 import { useStore } from "../store";
 import { Notice, Spinner } from "../components/ui";
+import { friendlyRpc } from "../rpc";
 
 export function SalesScreen() {
   const { db, settings, cacheEpoch } = useStore();
@@ -25,7 +26,7 @@ export function SalesScreen() {
     let live = true;
     void salesHistory(db, { query, includeVoided })
       .then((rows) => live && setSales(rows))
-      .catch((err) => live && setError(err.message));
+      .catch((err) => live && setError(friendlyRpc(err)));
     return () => {
       live = false;
     };
@@ -48,7 +49,7 @@ export function SalesScreen() {
       );
       setSaved(`Saved ${file.filename} to ${file.where}.`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(friendlyRpc(err));
     }
   }
 

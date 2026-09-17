@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 import { floorCloud } from "@floor/cloud";
 import { Label, Notice } from "./components/ui";
+import { friendlyRpc } from "./rpc";
 
 type PinRequest = {
   action: string;
@@ -46,16 +47,11 @@ export function PinProvider({ children }: { children: ReactNode }) {
         p_sku: req.sku,
         p_pin: pin,
       });
-      if (rpcErr) {
-        if (/pin_locked/i.test(rpcErr.message)) throw new Error("PIN locked after 5 tries. Wait a few minutes.");
-        if (/pin_wrong/i.test(rpcErr.message)) throw new Error("Wrong PIN.");
-        if (/pin_not_set/i.test(rpcErr.message)) throw new Error("Set a manager PIN in Setup first.");
-        throw new Error(rpcErr.message);
-      }
+      if (rpcErr) throw new Error(friendlyRpc(rpcErr));
       req.resolve(String(data));
       setReq(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(friendlyRpc(err));
     } finally {
       setBusy(false);
     }

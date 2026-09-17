@@ -3,6 +3,7 @@ import { floorCloud } from "@floor/cloud";
 import { MANUAL_INSTRUCTIONS } from "@floor/channels";
 import { useStore } from "../store";
 import { Notice } from "../components/ui";
+import { friendlyRpc } from "../rpc";
 
 type Task = {
   id: number;
@@ -36,11 +37,11 @@ export function DelistScreen() {
     try {
       await ensureOnline();
       const { error: rpcErr } = await floorCloud().rpc("complete_delist_task", { p_id: id });
-      if (rpcErr) setError(rpcErr.message);
+      if (rpcErr) setError(friendlyRpc(rpcErr));
       await load();
       await hydrate();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(friendlyRpc(err));
     }
   }
 

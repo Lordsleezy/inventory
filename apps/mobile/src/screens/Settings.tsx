@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { floorCloud } from "@floor/cloud";
 import { useStore } from "../store";
 import { Label, Notice } from "../components/ui";
+import { friendlyRpc } from "../rpc";
 
 export function SettingsScreen() {
   const { settings, setSetting, session, online, connectionType, supabaseReach, functionsReach } = useStore();
@@ -20,7 +21,7 @@ export function SettingsScreen() {
   async function savePin() {
     setError("");
     const { error: rpcErr } = await floorCloud().rpc("set_manager_pin", { p_pin: pin });
-    if (rpcErr) setError(rpcErr.message);
+    if (rpcErr) setError(friendlyRpc(rpcErr));
     else setPin("");
   }
 
@@ -30,7 +31,7 @@ export function SettingsScreen() {
       p_email: inviteEmail,
       p_role: "staff",
     });
-    if (rpcErr) setError(rpcErr.message);
+    if (rpcErr) setError(friendlyRpc(rpcErr));
     else setInviteEmail("");
   }
 

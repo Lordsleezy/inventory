@@ -5,6 +5,7 @@ import { floorCloud } from "@floor/cloud";
 import { useStore } from "../store";
 import { authHeader, functionsUrl } from "../functions";
 import { Notice } from "../components/ui";
+import { friendlyRpc } from "../rpc";
 
 type Conn = {
   provider: string;
@@ -25,7 +26,7 @@ export function ConnectionsScreen() {
 
   async function load() {
     const { data, error: rpcErr } = await floorCloud().rpc("my_connection_status");
-    if (rpcErr) setError(rpcErr.message);
+    if (rpcErr) setError(friendlyRpc(rpcErr));
     else setRows((data ?? []) as Conn[]);
   }
 
@@ -60,13 +61,13 @@ export function ConnectionsScreen() {
       }
       await Browser.open({ url: body.url });
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(friendlyRpc(err));
     }
   }
 
   async function disconnect(provider: string) {
     const { error: rpcErr } = await floorCloud().rpc("disconnect_provider", { p_provider: provider });
-    if (rpcErr) setError(rpcErr.message);
+    if (rpcErr) setError(friendlyRpc(rpcErr));
     await load();
     await hydrate();
   }

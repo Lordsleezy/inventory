@@ -13,6 +13,7 @@ import { readPickedTextFile, saveAndShare, stampedName } from "../files";
 import { readPhotoBase64, writePhotoBase64 } from "../photos";
 import { useStore } from "../store";
 import { DangerButton, Label, Notice } from "../components/ui";
+import { friendlyRpc } from "../rpc";
 
 export function BackupScreen() {
   const { db, reloadSettings } = useStore();
@@ -27,7 +28,7 @@ export function BackupScreen() {
     try {
       setNote(await fn());
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(friendlyRpc(err));
     } finally {
       setBusy("");
     }
@@ -87,7 +88,7 @@ export function BackupScreen() {
       parsed = assertRestorable(JSON.parse(picked.text));
     } catch (err) {
       throw new Error(
-        `${picked.name} could not be read: ${err instanceof Error ? err.message : String(err)}`,
+        `${picked.name} could not be read: ${friendlyRpc(err)}`,
       );
     }
 

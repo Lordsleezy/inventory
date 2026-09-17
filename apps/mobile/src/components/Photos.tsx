@@ -4,6 +4,7 @@ import { floorCloud, storagePathForPhoto } from "@floor/cloud";
 import { useStore } from "../store";
 import { capturePhoto, photoSrc, readPhotoBase64 } from "../photos";
 import { Label, Notice } from "./ui";
+import { friendlyRpc } from "../rpc";
 
 type Shown = { id: number; path: string; src: string; isPrimary: boolean };
 
@@ -68,7 +69,7 @@ export function Photos({ sku, disabled }: { sku: string; disabled?: boolean }) {
       await hydrate();
       await refresh();
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = friendlyRpc(err);
       if (!/cancel/i.test(message)) setError(message);
     } finally {
       setBusy("");

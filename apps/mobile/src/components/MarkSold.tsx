@@ -2,6 +2,7 @@ import { useState } from "react";
 import { centsToInput, formatCents, parseMoneyToCents, sellUnit, type Unit } from "@floor/store";
 import { useStore } from "../store";
 import { Label, Notice } from "./ui";
+import { friendlyRpc } from "../rpc";
 
 /**
  * Mark a unit sold.
@@ -48,7 +49,7 @@ export function MarkSold({ unit, onSold }: { unit: Unit; onSold: () => Promise<v
       setOpen(false);
       await onSold();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(friendlyRpc(err));
       // Refresh regardless: if this failed because it sold elsewhere, the
       // screen should stop showing a Sell button.
       await onSold();

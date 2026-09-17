@@ -3,6 +3,7 @@ import { Link, useLocation } from "react-router-dom";
 import { formatCents, listUnits, type Unit, type UnitState } from "@floor/store";
 import { useDb, useStore } from "../store";
 import { Notice, Spinner } from "../components/ui";
+import { friendlyRpc } from "../rpc";
 
 const FILTERS: { key: string; label: string; states?: UnitState[] }[] = [
   { key: "stock", label: "In stock", states: ["available", "reserved", "repair"] },
@@ -31,7 +32,7 @@ export function InventoryScreen() {
     // network latency — there is no network.
     void listUnits(db, { query, states })
       .then((rows) => live && setUnits(rows))
-      .catch((err) => live && setError(err.message));
+      .catch((err) => live && setError(friendlyRpc(err)));
     return () => {
       live = false;
     };

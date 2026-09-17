@@ -3,7 +3,7 @@
  *
  *   node --experimental-strip-types scripts/test-migrations.mjs
  *
- * Covers a fresh 0001→0009 run and an upgrade that already has 0005.
+ * Covers a fresh 0001→latest run and an upgrade that already has 0005.
  */
 import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
@@ -90,12 +90,16 @@ const rest = all.filter((f) => f.name > "0005_private_photos.sql");
     `select 1 from information_schema.views where table_schema = 'public' and table_name = 'sale_receipts'`,
   );
   assert.equal(receipts.rows.length, 1, "sale_receipts exists");
+  const skuStatus = await db.query(
+    `select 1 from information_schema.routines where routine_schema = 'public' and routine_name = 'sku_status'`,
+  );
+  assert.equal(skuStatus.rows.length, 1, "sku_status exists");
   const conn = await db.query(
     `select 1 from information_schema.views where table_schema = 'public' and table_name = 'connection_status'`,
   );
   assert.equal(conn.rows.length, 1, "connection_status exists");
   await db.query(`select public.anon_can_read_unit_photo('not-a-path')`);
-  console.log("fresh 0001→0010 ok");
+  console.log("fresh 0001→0011 ok");
 }
 
 {
@@ -108,5 +112,5 @@ const rest = all.filter((f) => f.name > "0005_private_photos.sql");
   const cols = await publicItemColumns(db);
   assert.deepEqual(cols, expected, `upgrade 0005→0010 columns: ${cols.join(",")}`);
   await db.query(`select public.anon_can_read_unit_photo('not-a-path')`);
-  console.log("upgrade 0005→0010 ok");
+  console.log("upgrade 0005→0011 ok");
 }

@@ -47,7 +47,7 @@ export function UnitScreen() {
   }, [db, sku]);
 
   useEffect(() => {
-    void refresh().catch((err) => setError(err.message));
+    void refresh().catch((err) => setError(friendlyRpc(err)));
   }, [refresh, cacheEpoch]);
 
   async function edit(field: EditableField, value: string | number | null) {
@@ -63,7 +63,7 @@ export function UnitScreen() {
       await hydrate();
       await refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(friendlyRpc(err));
       await refresh();
     }
   }
@@ -403,7 +403,7 @@ function VoidSale({ onVoid }: { onVoid: (reason: string) => Promise<boolean> }) 
               .then((ok) => {
                 if (ok) setOpen(false);
               })
-              .catch((err) => setLocalError(err instanceof Error ? err.message : String(err)))
+              .catch((err) => setLocalError(friendlyRpc(err)))
               .finally(() => setBusy(false));
           }}
         >
@@ -424,7 +424,7 @@ function describe(row: FloorEvent): string {
     return money ? formatCents(Number(value)) : value;
   };
 
-  if (row.kind === "received") return `Received${row.note ? ` · ${row.note}` : ""}`;
+  if (row.kind === "sku_reused") return `SKU reused${row.note ? ` · ${row.note}` : ""}`;
   if (row.kind === "sold") return `Sold for ${formatCents(Number(row.newValue))}${row.note ? ` · ${row.note}` : ""}`;
   if (row.kind === "sale_void") return `Sale ${row.oldValue} voided · ${row.note ?? ""}`;
   if (row.kind === "deleted") return `Deleted${row.oldValue ? ` · ${row.oldValue}` : ""}`;

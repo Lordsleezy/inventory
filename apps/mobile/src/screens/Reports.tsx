@@ -5,6 +5,7 @@ import { floorCloud } from "@floor/cloud";
 import { useStore } from "../store";
 import { Label, Notice, Spinner } from "../components/ui";
 import { openHtml } from "../files";
+import { friendlyRpc } from "../rpc";
 
 type SaleReceiptRow = {
   id: number;
@@ -88,7 +89,7 @@ export function ReportsScreen() {
           })),
         );
       }
-    })().catch((err) => live && setError(err instanceof Error ? err.message : String(err)));
+    })().catch((err) => live && setError(friendlyRpc(err)));
     return () => {
       live = false;
     };
@@ -223,7 +224,7 @@ function ReceiptDetail({ receipt }: { receipt: Receipt }) {
     try {
       await openHtml(`receipt-${receipt.receiptNo}.html`, receiptHtml(receipt));
     } catch (err) {
-      setShareError(err instanceof Error ? err.message : String(err));
+      setShareError(friendlyRpc(err));
     }
   }
 
