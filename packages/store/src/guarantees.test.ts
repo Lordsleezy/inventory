@@ -371,6 +371,17 @@ test("search matches SKU, brand and model", async () => {
   await db.close();
 });
 
+test("inventory can filter by category", async () => {
+  const db = await fresh();
+  await receiveUnit(db, { brand: "A", category: "Appliances" });
+  await receiveUnit(db, { brand: "B", category: "Furniture" });
+  await receiveUnit(db, { brand: "C", category: "Appliances" });
+  assert.equal((await listUnits(db, { category: "Appliances" })).length, 2);
+  assert.equal((await listUnits(db, { category: "Furniture" })).length, 1);
+  assert.equal((await listUnits(db, { category: "Missing" })).length, 0);
+  await db.close();
+});
+
 test("reports count stock, money tied up, sold this week and aging", async () => {
   const db = await fresh();
   const at = new Date("2026-03-01T12:00:00.000Z");

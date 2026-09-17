@@ -14,9 +14,10 @@ const FILTERS: { key: string; label: string; states?: UnitState[] }[] = [
 
 export function InventoryScreen() {
   const db = useDb();
-  const { online, cacheEpoch } = useStore();
+  const { online, cacheEpoch, settings } = useStore();
   const location = useLocation();
   const [query, setQuery] = useState("");
+  const [category, setCategory] = useState("");
   const [filter, setFilter] = useState(() => {
     const tab = (location.state as { filter?: string } | null)?.filter;
     return tab && FILTERS.some((f) => f.key === tab) ? tab : "stock";
@@ -30,13 +31,13 @@ export function InventoryScreen() {
     let live = true;
     // Searching runs against the local file, so there is no debounce to hide
     // network latency — there is no network.
-    void listUnits(db, { query, states })
+    void listUnits(db, { query, states, category: category || undefined })
       .then((rows) => live && setUnits(rows))
       .catch((err) => live && setError(friendlyRpc(err)));
     return () => {
       live = false;
     };
-  }, [db, query, states, cacheEpoch]);
+  }, [db, query, states, category, cacheEpoch]);
 
   return (
     <section>
@@ -68,6 +69,20 @@ export function InventoryScreen() {
         ))}
       </div>
 
+      <select
+        className="field mt-2"
+        value={category}
+        onChange={(e) => setCategory(e.target.value)}
+        aria-label="Filter by category"
+      >
+        <option value="">All categories</option>
+        {settings.categories.map((name) => (
+          <option key={name} value={name}>
+            {name}
+          </option>
+        ))}
+      </select>
+
       <Notice tone="error">{error}</Notice>
 
       {units === null ? <Spinner label="Reading" /> : null}
@@ -92,7 +107,7 @@ export function InventoryScreen() {
                   {[unit.brand, unit.model].filter(Boolean).join(" ") || unit.title || "Untitled"}
                 </span>
                 <span className="block truncate text-quiet text-floor-mute">
-                  {[unit.condition, unit.location].filter(Boolean).join(" · ") || "—"}
+                  {[unit.category, unit.condition, unit.location].filter(Boolean).join(" · ") || "—"}
                 </span>
               </span>
               <span className="shrink-0 text-right">

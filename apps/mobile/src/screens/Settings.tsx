@@ -50,6 +50,10 @@ export function SettingsScreen() {
         Import the phone backup against this STORE_ID after signup. Import refuses if this store already has units.
       </p>
 
+      <Link to="/settings/categories" className="btn-accent mt-4 inline-block">
+        Categories
+      </Link>
+
       <label className="mt-4 flex items-center gap-2">
         <input
           type="checkbox"

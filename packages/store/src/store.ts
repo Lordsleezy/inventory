@@ -374,7 +374,7 @@ export async function loadUnit(db: Db, sku: string): Promise<Unit | null> {
 
 export async function listUnits(
   db: Db,
-  opts: { query?: string; states?: UnitState[]; limit?: number } = {},
+  opts: { query?: string; states?: UnitState[]; category?: string; limit?: number } = {},
 ): Promise<Unit[]> {
   const where: string[] = [];
   const params: SqlValue[] = [];
@@ -388,6 +388,11 @@ export async function listUnits(
   if (opts.states?.length) {
     where.push(`state IN (${opts.states.map(() => "?").join(",")})`);
     params.push(...opts.states);
+  }
+  const category = (opts.category ?? "").trim();
+  if (category) {
+    where.push("category = ?");
+    params.push(category);
   }
 
   const sql = `SELECT * FROM units ${where.length ? `WHERE ${where.join(" AND ")}` : ""}

@@ -13,6 +13,7 @@ import { ReceiveScreen } from "./screens/Receive";
 import { ReportsScreen } from "./screens/Reports";
 import { SalesScreen } from "./screens/Sales";
 import { SettingsScreen } from "./screens/Settings";
+import { CategoriesScreen } from "./screens/Categories";
 import { UnitScreen } from "./screens/Unit";
 import { LoginScreen } from "./screens/Login";
 import { SignupScreen } from "./screens/Signup";
@@ -98,6 +99,7 @@ export function App() {
           <Route path="/incidents" element={<IncidentsScreen />} />
           <Route path="/connections" element={<ConnectionsScreen />} />
           <Route path="/settings" element={<SettingsScreen />} />
+          <Route path="/settings/categories" element={<CategoriesScreen />} />
           <Route path="*" element={<Navigate to="/inventory" replace />} />
         </Routes>
       </Shell>
