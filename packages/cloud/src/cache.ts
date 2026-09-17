@@ -1,4 +1,4 @@
-import { SCHEMA, type Db } from "@floor/store";
+import type { Db } from "@floor/store";
 import { stripCostFromUnit } from "./sell.ts";
 
 const COST_SQL = `UPDATE units SET acquisition_cost_cents = NULL, floor_cents = NULL`;
@@ -34,8 +34,9 @@ export async function resetCacheReplica(db: Db): Promise<void> {
   await db.run("DELETE FROM sku_ledger");
 }
 
-export async function relockCacheReplica(db: Db): Promise<void> {
-  await db.exec(SCHEMA);
+export async function relockCacheReplica(_db: Db): Promise<void> {
+  // Phone SQLite is a disposable mirror of Supabase. Recreating SCHEMA would
+  // restore append-only triggers that block the next hydrate.
 }
 
 /** Map a cloud row into cache columns. Staff never get cost or floor. */

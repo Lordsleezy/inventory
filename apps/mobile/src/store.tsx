@@ -2,16 +2,12 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import { Capacitor } from "@capacitor/core";
 import { initDb, loadSettings, type Db, type Settings } from "@floor/store";
 import {
-  assertCacheHasNoCost,
   authErrorMessage,
-  cacheUnitRow,
+  applyCachePayload,
   checkConnectivity,
   floorCloud,
   loadStaffSession,
   OfflineError,
-  relockCacheReplica,
-  resetCacheReplica,
-  wipeCostFromCache,
   type Connectivity,
   type StaffSession,
 } from "@floor/cloud";
@@ -104,92 +100,28 @@ async function settingsFromCloud(session: StaffSession): Promise<Partial<Setting
 async function hydrateCache(db: Db, session: StaffSession): Promise<{ delist: number; incidents: number }> {
   const sb = floorCloud();
   const staffView = session.role === "staff";
-  const units = staffView
-    ? await sb.from("units_pos").select("*")
-    : await sb.from("units").select("*");
-  if (units.error) throw new Error(units.error.message);
-
-  await resetCacheReplica(db);
-
-  for (const raw of units.data ?? []) {
-    const row = cacheUnitRow(raw as Record<string, unknown>, { includeCost: !staffView });
-    const issuedAt = String(row.received_at ?? new Date().toISOString());
-    await db.run(`INSERT INTO sku_ledger (sku, issued_at, label, fate) VALUES (?,?,?,?)`, [
-      String(row.sku),
-      issuedAt,
-      "",
-      row.state === "sold" ? "sold" : "issued",
-    ]);
-    await db.run(
-      `INSERT INTO units (
-        sku, brand, model, title, category, condition, test_status, location, mfr_serial,
-        defect_notes, upc, lot, acquisition_cost_cents, msrp_cents, ask_cents, floor_cents,
-        state, received_at, updated_at
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      [
-        String(row.sku),
-        String(row.brand ?? ""),
-        String(row.model ?? ""),
-        String(row.title ?? ""),
-        row.category == null ? null : String(row.category),
-        row.condition == null ? null : String(row.condition),
-        row.test_status == null ? null : String(row.test_status),
-        row.location == null ? null : String(row.location),
-        row.mfr_serial == null ? null : String(row.mfr_serial),
-        row.defect_notes == null ? null : String(row.defect_notes),
-        row.upc == null ? null : String(row.upc),
-        row.lot == null ? null : String(row.lot),
-        row.acquisition_cost_cents == null ? null : Number(row.acquisition_cost_cents),
-        row.msrp_cents == null ? null : Number(row.msrp_cents),
-        row.ask_cents == null ? null : Number(row.ask_cents),
-        row.floor_cents == null ? null : Number(row.floor_cents),
-        String(row.state ?? "available"),
-        issuedAt,
-        String(row.updated_at ?? issuedAt),
-      ],
-    );
+  const [ledger, units, sales, photos, events, delist, incidents] = await Promise.all([
+    sb.from("sku_ledger").select("sku, issued_at, label, fate"),
+    staffView ? sb.from("units_pos").select("*") : sb.from("units").select("*"),
+    staffView ? sb.from("sales").select("*").eq("actor_id", session.userId) : sb.from("sales").select("*"),
+    sb.from("photos").select("*"),
+    sb.from("events").select("id, at, sku, kind, field, old_value, new_value, actor, note"),
+    sb.from("delist_tasks").select("id", { count: "exact", head: true }).is("completed_at", null),
+    sb.from("incidents").select("id", { count: "exact", head: true }).is("resolved_at", null),
+  ]);
+  for (const result of [ledger, units, sales, photos, events]) {
+    if (result.error) throw new Error(result.error.message);
   }
 
-  if (staffView) {
-    await wipeCostFromCache(db);
-    await assertCacheHasNoCost(db);
-  }
+  await applyCachePayload(db, {
+    includeCost: !staffView,
+    ledger: (ledger.data ?? []) as Array<Record<string, unknown>>,
+    units: (units.data ?? []) as Array<Record<string, unknown>>,
+    sales: (sales.data ?? []) as Array<Record<string, unknown>>,
+    photos: (photos.data ?? []) as Array<Record<string, unknown>>,
+    events: (events.data ?? []) as Array<Record<string, unknown>>,
+  });
 
-  const salesQuery = staffView
-    ? sb.from("sales").select("*").eq("actor_id", session.userId)
-    : sb.from("sales").select("*");
-  const sales = await salesQuery;
-  for (const s of sales.data ?? []) {
-    await db.run(
-      `INSERT INTO sales (id, sku, price_cents, channel, payment_method, customer_name, customer_phone, customer_email, note, sold_at, receipt_no, voided_at, void_reason)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      [
-        s.id, s.sku, s.price_cents, s.channel, s.payment_method, s.customer_name, s.customer_phone,
-        s.customer_email, s.note, s.sold_at, s.receipt_no, s.voided_at, s.void_reason,
-      ],
-    );
-  }
-
-  const photos = await sb.from("photos").select("*");
-  for (const p of photos.data ?? []) {
-    await db.run(
-      `INSERT INTO photos (id, sku, path, created_at, is_primary) VALUES (?,?,?,?,?)`,
-      [p.id, p.sku, p.path, p.created_at, p.is_primary ? 1 : 0],
-    );
-  }
-
-  const events = await sb.from("events").select("id, at, sku, kind, field, old_value, new_value, actor, note");
-  for (const e of events.data ?? []) {
-    await db.run(
-      `INSERT INTO events (id, at, sku, kind, field, old_value, new_value, actor, note) VALUES (?,?,?,?,?,?,?,?,?)`,
-      [e.id, e.at, e.sku, e.kind, e.field, e.old_value, e.new_value, e.actor ?? "floor", e.note],
-    );
-  }
-
-  await relockCacheReplica(db);
-
-  const delist = await sb.from("delist_tasks").select("id", { count: "exact", head: true }).is("completed_at", null);
-  const incidents = await sb.from("incidents").select("id", { count: "exact", head: true }).is("resolved_at", null);
   return { delist: delist.count ?? 0, incidents: incidents.count ?? 0 };
 }
 

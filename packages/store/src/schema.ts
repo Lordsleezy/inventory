@@ -18,7 +18,7 @@
  * `settings`, so a pallet of power tools needs no schema change.
  */
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 /** Run on every connection, before anything else. */
 export const PRAGMAS = [
@@ -173,11 +173,11 @@ BEGIN
   SELECT RAISE(ABORT, 'void the sale before deleting this unit');
 END;
 
--- Append-only audit. Keyed by SKU, not by row id, so it outlives the unit.
+-- Append-only audit. Store-level rows have no SKU; do not FK them to sku_ledger.
 CREATE TABLE IF NOT EXISTS events (
   id        INTEGER PRIMARY KEY,
   at        TEXT NOT NULL,
-  sku       TEXT REFERENCES sku_ledger(sku),
+  sku       TEXT,
   kind      TEXT NOT NULL,
   field     TEXT,
   old_value TEXT,

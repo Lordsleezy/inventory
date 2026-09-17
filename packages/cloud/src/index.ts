@@ -37,4 +37,5 @@ export {
   resetCacheReplica,
   relockCacheReplica,
 } from "./cache.ts";
+export { applyCachePayload, digitSku, type CachePayload } from "./hydrate.ts";
 export { PIN_MAX_FAILURES, PIN_LOCK_MINUTES, nextPinState, pinIsLocked } from "./pin.ts";
