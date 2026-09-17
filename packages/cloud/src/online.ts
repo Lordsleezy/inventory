@@ -55,25 +55,33 @@ export async function probeSupabase(): Promise<ReachCheck> {
 export async function probeFunctions(functionsUrl?: string): Promise<ReachCheck> {
   const base = (functionsUrl || "").trim().replace(/\/$/, "");
   if (!base) return { ok: false, detail: "VITE_FUNCTIONS_URL not set" };
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 2500);
   try {
-    const res = await fetch(base, { method: "GET", redirect: "follow" });
+    const res = await fetch(base, { method: "GET", redirect: "follow", signal: ac.signal });
     if (!res.ok) return { ok: false, detail: `HTTP ${res.status}` };
     return { ok: true, detail: "ok" };
   } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") return { ok: false, detail: "timed out" };
     return { ok: false, detail: authErrorMessage(err) };
+  } finally {
+    clearTimeout(timer);
   }
 }
 
 export async function checkConnectivity(functionsUrl?: string): Promise<Connectivity> {
   const net = await readDeviceNetwork();
-  const supabase = net.connected
-    ? await probeSupabase()
-    : { ok: false, detail: "device offline" };
-  const functions = net.connected
-    ? await probeFunctions(functionsUrl)
-    : { ok: false, detail: "device offline" };
+  if (!net.connected) {
+    return {
+      connected: false,
+      connectionType: net.connectionType,
+      supabase: { ok: false, detail: "device offline" },
+      functions: { ok: false, detail: "device offline" },
+    };
+  }
+  const [supabase, functions] = await Promise.all([probeSupabase(), probeFunctions(functionsUrl)]);
   return {
-    connected: net.connected,
+    connected: true,
     connectionType: net.connectionType,
     supabase,
     functions,

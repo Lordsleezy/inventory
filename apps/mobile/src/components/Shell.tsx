@@ -2,14 +2,13 @@ import { NavLink } from "react-router-dom";
 import { useStore } from "../store";
 
 export function Shell({ children }: { children: React.ReactNode }) {
-  const { session, online, cloudError, delistCount, incidentCount } = useStore();
-  const isStaff = session.role === "staff";
+  const { online, cloudError, delistCount, incidentCount } = useStore();
 
   const tabs = [
     { to: "/inventory", label: "Inventory" },
     { to: "/sales", label: "Sales" },
     { to: "/delist", label: `Delist${delistCount ? ` (${delistCount})` : ""}` },
-    ...(isStaff ? [] : [{ to: "/reports", label: "Reports" }]),
+    { to: "/reports", label: "Reports" },
     { to: "/settings", label: "Setup" },
   ];
 

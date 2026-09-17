@@ -10,7 +10,7 @@ import { askManagerPin } from "../pin";
 export function CheckoutScreen() {
   const { sku = "" } = useParams();
   const navigate = useNavigate();
-  const { db, settings, online, cardPayments, ensureOnline } = useStore();
+  const { db, settings, online, cardPayments, ensureOnline, hydrate } = useStore();
   const [unit, setUnit] = useState<Unit | null>(null);
   const [channel, setChannel] = useState("floor");
   const [price, setPrice] = useState("");
@@ -49,6 +49,7 @@ export function CheckoutScreen() {
   }
 
   async function finish(method: string, paymentId: string | null) {
+    await ensureOnline();
     if (cents == null || cents === undefined) throw new Error("Enter the price.");
     let approvalId: string | null = null;
     let hold = reservationId;
@@ -81,7 +82,12 @@ export function CheckoutScreen() {
         throw err;
       }
     }
-    navigate(`/inventory/${sku}`, { replace: true });
+    try {
+      await hydrate();
+    } catch {
+      // Sale is already saved in the cloud; the next successful hydrate will catch up.
+    }
+    navigate("/inventory", { replace: true, state: { filter: "sold" } });
   }
 
   async function payCash() {

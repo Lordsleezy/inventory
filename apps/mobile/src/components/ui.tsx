@@ -177,11 +177,12 @@ export function DangerButton({
   disabled?: boolean;
 }) {
   const [armed, setArmed] = useState(false);
+  const [busy, setBusy] = useState(false);
   useEffect(() => {
-    if (!armed) return;
+    if (!armed || busy) return;
     const timer = setTimeout(() => setArmed(false), 6000);
     return () => clearTimeout(timer);
-  }, [armed]);
+  }, [armed, busy]);
 
   if (!armed) {
     return (
@@ -195,10 +196,18 @@ export function DangerButton({
       <button
         type="button"
         className="min-h-touch bg-floor-danger px-3 text-body font-medium text-black"
-        disabled={disabled}
-        onClick={() => void onConfirm()}
+        disabled={disabled || busy}
+        onClick={() => {
+          setBusy(true);
+          void Promise.resolve(onConfirm())
+            .catch(() => {})
+            .finally(() => {
+              setBusy(false);
+              setArmed(false);
+            });
+        }}
       >
-        {confirm}
+        {busy ? "Working…" : confirm}
       </button>
       <button type="button" className="btn-text px-0" onClick={() => setArmed(false)}>
         Cancel

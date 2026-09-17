@@ -6,6 +6,8 @@ export type Receipt = {
   soldAt: string;
   storeName: string;
   channel: string;
+  paymentMethod: string | null;
+  actor: string | null;
   customerName: string | null;
   customerPhone: string | null;
   sku: string;
@@ -18,12 +20,14 @@ export type Receipt = {
 };
 
 export function buildReceipt(sale: Sale, unit: Unit | null, settings: Settings): Receipt {
-  const taxCents = Math.round((sale.priceCents * settings.taxRateBps) / 10000);
+  const taxCents = sale.taxCents || Math.round((sale.priceCents * settings.taxRateBps) / 10000);
   return {
     receiptNo: sale.receiptNo,
     soldAt: sale.soldAt,
     storeName: settings.storeName,
     channel: sale.channel,
+    paymentMethod: sale.paymentMethod,
+    actor: sale.actor,
     customerName: sale.customerName,
     customerPhone: sale.customerPhone,
     sku: sale.sku,
@@ -49,6 +53,8 @@ export function receiptHtml(receipt: Receipt): string {
   ];
   if (receipt.condition) rows.push(["Condition", receipt.condition]);
   rows.push(["Channel", receipt.channel]);
+  if (receipt.paymentMethod) rows.push(["Payment", receipt.paymentMethod]);
+  if (receipt.actor) rows.push(["Rang up by", receipt.actor]);
   if (receipt.customerName) rows.push(["Customer", receipt.customerName]);
   if (receipt.customerPhone) rows.push(["Phone", receipt.customerPhone]);
 

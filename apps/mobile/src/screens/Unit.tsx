@@ -19,13 +19,14 @@ import { DangerButton, Label, MoneyField, Notice, SelectField, Spinner, TextFiel
 import { openHtml } from "../files";
 import { useStore } from "../store";
 import { askManagerPin } from "../pin";
+import { friendlyRpc, needsManagerPin } from "../rpc";
 
 const MOVABLE_STATES: UnitState[] = ["available", "reserved", "repair", "scrapped", "lost"];
 
 export function UnitScreen() {
   const { sku = "" } = useParams();
   const navigate = useNavigate();
-  const { db, settings, online, session, hydrate, ensureOnline } = useStore();
+  const { db, settings, online, session, hydrate, ensureOnline, cacheEpoch } = useStore();
   const manager = session.role !== "staff";
 
   const [unit, setUnit] = useState<Unit | null | undefined>(undefined);
@@ -46,7 +47,7 @@ export function UnitScreen() {
 
   useEffect(() => {
     void refresh().catch((err) => setError(err.message));
-  }, [refresh]);
+  }, [refresh, cacheEpoch]);
 
   async function edit(field: EditableField, value: string | number | null) {
     setError("");
@@ -83,18 +84,26 @@ export function UnitScreen() {
     if (!sale) return;
     setError("");
     try {
-      let approvalId: string | null = null;
-      if (!manager) approvalId = await askManagerPin("void_sale", sku);
-      const { error: rpcErr } = await floorCloud().rpc("void_sale", {
-        p_sale_id: sale.id,
-        p_reason: reason,
-        p_approval_id: approvalId,
-      });
-      if (rpcErr) throw rpcErr;
+      await ensureOnline();
+      const run = async (approvalId: string | null) => {
+        const { error: rpcErr } = await floorCloud().rpc("void_sale", {
+          p_sale_id: sale.id,
+          p_reason: reason,
+          p_approval_id: approvalId,
+        });
+        if (rpcErr) throw rpcErr;
+      };
+      try {
+        await run(null);
+      } catch (err) {
+        if (!needsManagerPin(err)) throw err;
+        const approvalId = await askManagerPin("void_sale", sku);
+        await run(approvalId);
+      }
       await hydrate();
       await refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(friendlyRpc(err));
     }
   }
 
@@ -107,17 +116,29 @@ export function UnitScreen() {
   async function remove() {
     setError("");
     try {
-      let approvalId: string | null = null;
-      if (!manager) approvalId = await askManagerPin("delete_unit", sku);
-      const { error: rpcErr } = await floorCloud().rpc("delete_unit", {
-        p_sku: sku,
-        p_approval_id: approvalId,
-      });
-      if (rpcErr) throw rpcErr;
-      await hydrate();
+      await ensureOnline();
+      const run = async (approvalId: string | null) => {
+        const { error: rpcErr } = await floorCloud().rpc("delete_unit", {
+          p_sku: sku,
+          p_approval_id: approvalId,
+        });
+        if (rpcErr) throw rpcErr;
+      };
+      try {
+        await run(null);
+      } catch (err) {
+        if (!needsManagerPin(err)) throw err;
+        const approvalId = await askManagerPin("delete_unit", sku);
+        await run(approvalId);
+      }
+      try {
+        await hydrate();
+      } catch {
+        // Deletion already succeeded in the cloud.
+      }
       navigate("/inventory", { replace: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(friendlyRpc(err));
       await refresh();
     }
   }

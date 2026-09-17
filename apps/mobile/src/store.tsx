@@ -4,10 +4,12 @@ import { initDb, loadSettings, type Db, type Settings } from "@floor/store";
 import {
   authErrorMessage,
   applyCachePayload,
-  checkConnectivity,
   floorCloud,
   loadStaffSession,
   OfflineError,
+  probeFunctions,
+  probeSupabase,
+  readDeviceNetwork,
   type Connectivity,
   type StaffSession,
 } from "@floor/cloud";
@@ -29,6 +31,7 @@ type StoreValue = {
   delistCount: number;
   incidentCount: number;
   cardPayments: boolean;
+  cacheEpoch: number;
   hydrate: () => Promise<void>;
   refreshConnectivity: () => Promise<Connectivity>;
   ensureOnline: () => Promise<void>;
@@ -103,7 +106,7 @@ async function hydrateCache(db: Db, session: StaffSession): Promise<{ delist: nu
   const [ledger, units, sales, photos, events, delist, incidents] = await Promise.all([
     sb.from("sku_ledger").select("sku, issued_at, label, fate"),
     staffView ? sb.from("units_pos").select("*") : sb.from("units").select("*"),
-    staffView ? sb.from("sales").select("*").eq("actor_id", session.userId) : sb.from("sales").select("*"),
+    sb.from("sales").select("*"),
     sb.from("photos").select("*"),
     sb.from("events").select("id, at, sku, kind, field, old_value, new_value, actor, note"),
     sb.from("delist_tasks").select("id", { count: "exact", head: true }).is("completed_at", null),
@@ -136,16 +139,35 @@ export function StoreProvider({ session, children }: { session: StaffSession; ch
   const [delistCount, setDelistCount] = useState(0);
   const [incidentCount, setIncidentCount] = useState(0);
   const [cardPayments, setCardPayments] = useState(false);
+  const [cacheEpoch, setCacheEpoch] = useState(0);
   const [error, setError] = useState("");
 
   const refreshConnectivity = useCallback(async () => {
-    const status = await checkConnectivity(functionsUrl);
-    setOnline(status.connected);
-    setConnectionType(status.connectionType);
-    setSupabaseReach(status.supabase.ok ? "ok" : status.supabase.detail);
-    setFunctionsReach(status.functions.ok ? "ok" : status.functions.detail);
-    setCloudError(status.connected && !status.supabase.ok ? status.supabase.detail : "");
-    return status;
+    const net = await readDeviceNetwork();
+    setOnline(net.connected);
+    setConnectionType(net.connectionType);
+    if (!net.connected) {
+      setSupabaseReach("device offline");
+      setFunctionsReach("device offline");
+      return {
+        connected: false,
+        connectionType: net.connectionType,
+        supabase: { ok: false, detail: "device offline" },
+        functions: { ok: false, detail: "device offline" },
+      } satisfies Connectivity;
+    }
+    const supabase = await probeSupabase();
+    setSupabaseReach(supabase.ok ? "ok" : supabase.detail);
+    setCloudError(supabase.ok ? "" : supabase.detail);
+    void probeFunctions(functionsUrl).then((functions) => {
+      setFunctionsReach(functions.ok ? "ok" : functions.detail);
+    });
+    return {
+      connected: true,
+      connectionType: net.connectionType,
+      supabase,
+      functions: { ok: true, detail: "checking" },
+    } satisfies Connectivity;
   }, []);
 
   const ensureOnline = useCallback(async () => {
@@ -166,9 +188,15 @@ export function StoreProvider({ session, children }: { session: StaffSession; ch
       ]);
       setSettings((prev) => ({ ...(prev as Settings), ...cloudSettings }));
       setCardPayments(cloudSettings.cardPayments);
-      const counts = await hydrateCache(db, session);
+      const counts = await Promise.race([
+        hydrateCache(db, session),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("Cache refresh timed out. Check your connection and try again.")), 20_000),
+        ),
+      ]);
       setDelistCount(counts.delist);
       setIncidentCount(counts.incidents);
+      setCacheEpoch((n) => n + 1);
       if (!status.supabase.ok) setCloudError(status.supabase.detail);
       else setCloudError("");
     } catch (err) {
@@ -218,6 +246,7 @@ export function StoreProvider({ session, children }: { session: StaffSession; ch
       delistCount,
       incidentCount,
       cardPayments,
+      cacheEpoch,
       hydrate,
       refreshConnectivity,
       ensureOnline,
@@ -242,6 +271,7 @@ export function StoreProvider({ session, children }: { session: StaffSession; ch
     delistCount,
     incidentCount,
     cardPayments,
+    cacheEpoch,
     hydrate,
     refreshConnectivity,
     ensureOnline,

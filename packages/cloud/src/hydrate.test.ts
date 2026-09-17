@@ -151,3 +151,63 @@ test("staff hydrate strips cost even when the payload includes it", async () => 
   assert.equal(Number(rows[0]?.n), 0);
   await db.close();
 });
+
+test("hydrate preserves cloud sale ids so void can target the live row", async () => {
+  const db = await fresh();
+  await applyCachePayload(db, stockedStore);
+  const sales = await db.all<{ id: number }>("SELECT id FROM sales");
+  assert.equal(Number(sales[0]?.id), 9);
+  await db.close();
+});
+
+test("hydrate sold then voided then deleted without FK or unique errors", async () => {
+  const db = await fresh();
+  await applyCachePayload(db, stockedStore);
+
+  const voided: CachePayload = {
+    ...stockedStore,
+    ledger: [
+      { sku: "10421", issued_at: "2026-09-01T00:00:00.000Z", label: "", fate: "issued" },
+      { sku: "10422", issued_at: "2026-09-02T00:00:00.000Z", label: "", fate: "issued" },
+    ],
+    units: [stockedStore.units[0]!, { ...stockedStore.units[1]!, state: "available" }],
+    sales: [
+      {
+        ...stockedStore.sales[0],
+        voided_at: "2026-09-04T00:00:00.000Z",
+        void_reason: "customer changed mind",
+      },
+    ],
+    events: [
+      ...stockedStore.events,
+      { id: 5, at: "2026-09-04T00:00:00.000Z", sku: "10422", kind: "sale_void", actor: "Pat" },
+    ],
+  };
+  await applyCachePayload(db, voided);
+  const afterVoid = await db.all<{ state: string }>("SELECT state FROM units WHERE sku = '10422'");
+  const voidSale = await db.all<{ voided_at: string | null }>("SELECT voided_at FROM sales WHERE id = 9");
+  assert.equal(afterVoid[0]?.state, "available");
+  assert.ok(voidSale[0]?.voided_at);
+
+  const deleted: CachePayload = {
+    includeCost: true,
+    ledger: [
+      { sku: "10421", issued_at: "2026-09-01T00:00:00.000Z", label: "", fate: "issued" },
+      { sku: "10422", issued_at: "2026-09-02T00:00:00.000Z", label: "", fate: "hard-deleted" },
+    ],
+    units: [stockedStore.units[0]!],
+    sales: voided.sales,
+    photos: stockedStore.photos,
+    events: [
+      ...voided.events!,
+      { id: 6, at: "2026-09-05T00:00:00.000Z", sku: "10422", kind: "deleted", actor: "Pat" },
+    ],
+  };
+  await applyCachePayload(db, deleted);
+  await applyCachePayload(db, deleted);
+  const gone = await db.all<{ n: number }>("SELECT COUNT(*) AS n FROM units WHERE sku = '10422'");
+  const fate = await db.all<{ fate: string }>("SELECT fate FROM sku_ledger WHERE sku = '10422'");
+  assert.equal(Number(gone[0]?.n), 0);
+  assert.equal(fate[0]?.fate, "hard-deleted");
+  await db.close();
+});

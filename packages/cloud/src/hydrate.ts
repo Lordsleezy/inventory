@@ -39,14 +39,31 @@ function fateOf(value: unknown, fallback: string): string {
   return FATES.has(s) ? s : fallback;
 }
 
+const KNOWN_TRIGGERS = [
+  "sku_ledger_no_delete",
+  "sku_ledger_no_rewrite",
+  "sales_unit_must_be_sellable",
+  "sales_no_delete",
+  "sales_immutable",
+  "sales_no_unvoid",
+  "units_sold_needs_a_sale",
+  "units_sold_stays_sold",
+  "units_no_delete_while_sold",
+  "events_no_update",
+  "events_no_delete",
+];
+
 export async function dropCacheTriggers(db: Db): Promise<void> {
-  const triggers = await db.all<{ name: string }>(
+  const names = new Set(KNOWN_TRIGGERS);
+  const listed = await db.all<{ name?: string; Name?: string }>(
     "SELECT name FROM sqlite_master WHERE type = 'trigger'",
   );
-  for (const trigger of triggers) {
-    const name = String(trigger.name ?? "").replace(/"/g, '""');
-    if (!name) continue;
-    await db.exec(`DROP TRIGGER IF EXISTS "${name}"`);
+  for (const row of listed) {
+    const n = String(row.name ?? row.Name ?? "");
+    if (n) names.add(n);
+  }
+  for (const name of names) {
+    await db.exec(`DROP TRIGGER IF EXISTS "${name.replace(/"/g, '""')}"`);
   }
 }
 
@@ -127,6 +144,13 @@ async function applyOnce(db: Db, payload: CachePayload): Promise<void> {
       await clearReplica(db);
 
       const ledger = collectLedger(payload);
+      const liveSold = new Set(
+        payload.sales
+          .filter((s) => s.voided_at == null || s.voided_at === "")
+          .map((s) => digitSku(s.sku))
+          .filter((s): s is string => Boolean(s)),
+      );
+
       for (const [sku, row] of ledger) {
         await db.run(`INSERT INTO sku_ledger (sku, issued_at, label, fate) VALUES (?,?,?,?)`, [
           sku,
@@ -141,6 +165,8 @@ async function applyOnce(db: Db, payload: CachePayload): Promise<void> {
         const sku = digitSku(row.sku);
         if (!sku || !ledger.has(sku)) continue;
         const issuedAt = text(row.received_at, new Date().toISOString());
+        const actualState = text(row.state, "available");
+        const insertState = liveSold.has(sku) ? "available" : actualState;
         await db.run(
           `INSERT INTO units (
             sku, brand, model, title, category, condition, test_status, location, mfr_serial,
@@ -164,7 +190,7 @@ async function applyOnce(db: Db, payload: CachePayload): Promise<void> {
             intOrNull(row.msrp_cents),
             intOrNull(row.ask_cents),
             intOrNull(row.floor_cents),
-            text(row.state, "available"),
+            insertState,
             issuedAt,
             text(row.updated_at, issuedAt),
           ],
@@ -180,11 +206,13 @@ async function applyOnce(db: Db, payload: CachePayload): Promise<void> {
         const sku = digitSku(s.sku);
         if (!sku || !ledger.has(sku)) continue;
         await db.run(
-          `INSERT INTO sales (sku, price_cents, channel, payment_method, customer_name, customer_phone, customer_email, note, sold_at, receipt_no, voided_at, void_reason)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+          `INSERT INTO sales (id, sku, price_cents, tax_cents, channel, payment_method, customer_name, customer_phone, customer_email, note, sold_at, receipt_no, voided_at, void_reason, actor)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
           [
+            intOrNull(s.id),
             sku,
             Number(s.price_cents ?? 0),
+            intOrNull(s.tax_cents) ?? 0,
             text(s.channel, "floor"),
             nullable(s.payment_method),
             nullable(s.customer_name),
@@ -195,8 +223,13 @@ async function applyOnce(db: Db, payload: CachePayload): Promise<void> {
             text(s.receipt_no, `r-${sku}`),
             nullable(s.voided_at),
             nullable(s.void_reason),
+            nullable(s.actor ?? s.actor_name),
           ],
         );
+      }
+
+      for (const sku of liveSold) {
+        await db.run("UPDATE units SET state = 'sold' WHERE sku = ?", [sku]);
       }
 
       for (const p of payload.photos) {
@@ -239,7 +272,11 @@ async function applyOnce(db: Db, payload: CachePayload): Promise<void> {
 export async function applyCachePayload(db: Db, payload: CachePayload): Promise<void> {
   try {
     await applyOnce(db, payload);
-  } catch {
-    await applyOnce(db, payload);
+  } catch (first) {
+    try {
+      await applyOnce(db, payload);
+    } catch (second) {
+      throw second instanceof Error ? second : first;
+    }
   }
 }

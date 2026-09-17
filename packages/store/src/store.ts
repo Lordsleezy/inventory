@@ -37,6 +37,7 @@ export type Sale = {
   id: number;
   sku: string;
   priceCents: number;
+  taxCents: number;
   channel: string;
   paymentMethod: string | null;
   customerName: string | null;
@@ -47,6 +48,7 @@ export type Sale = {
   receiptNo: string;
   voidedAt: string | null;
   voidReason: string | null;
+  actor: string | null;
 };
 
 export type FloorEvent = {
@@ -111,6 +113,17 @@ export function padSku(n: number, digits = DEFAULT_SKU_DIGITS): string {
 
 // ---------------------------------------------------------------- lifecycle
 
+async function migrateSalesColumns(db: Db): Promise<void> {
+  const cols = await db.all<{ name?: string; Name?: string }>("PRAGMA table_info(sales)");
+  const names = new Set(cols.map((c) => String(c.name ?? c.Name ?? "")));
+  if (!names.has("tax_cents")) {
+    await db.exec("ALTER TABLE sales ADD COLUMN tax_cents INTEGER NOT NULL DEFAULT 0");
+  }
+  if (!names.has("actor")) {
+    await db.exec("ALTER TABLE sales ADD COLUMN actor TEXT");
+  }
+}
+
 export async function initDb(db: Db): Promise<void> {
   for (const pragma of PRAGMAS) {
     // Some platforms refuse individual pragmas. None of the guarantees rest on
@@ -122,6 +135,7 @@ export async function initDb(db: Db): Promise<void> {
     }
   }
   await db.exec(SCHEMA);
+  await migrateSalesColumns(db);
   await db.run("INSERT OR IGNORE INTO meta(key, value) VALUES ('schema_version', ?)", [
     String(SCHEMA_VERSION),
   ]);
@@ -212,6 +226,7 @@ function toSale(row: Record<string, SqlValue>): Sale {
     id: Number(row.id),
     sku: String(row.sku),
     priceCents: Number(row.price_cents),
+    taxCents: row.tax_cents == null ? 0 : Number(row.tax_cents),
     channel: String(row.channel),
     paymentMethod: (row.payment_method as string) ?? null,
     customerName: (row.customer_name as string) ?? null,
@@ -222,6 +237,7 @@ function toSale(row: Record<string, SqlValue>): Sale {
     receiptNo: String(row.receipt_no),
     voidedAt: (row.voided_at as string) ?? null,
     voidReason: (row.void_reason as string) ?? null,
+    actor: (row.actor as string) ?? null,
   };
 }
 

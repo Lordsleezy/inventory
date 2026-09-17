@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { formatCents, listUnits, type Unit, type UnitState } from "@floor/store";
 import { useDb, useStore } from "../store";
 import { Notice, Spinner } from "../components/ui";
@@ -13,9 +13,13 @@ const FILTERS: { key: string; label: string; states?: UnitState[] }[] = [
 
 export function InventoryScreen() {
   const db = useDb();
-  const { online } = useStore();
+  const { online, cacheEpoch } = useStore();
+  const location = useLocation();
   const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState("stock");
+  const [filter, setFilter] = useState(() => {
+    const tab = (location.state as { filter?: string } | null)?.filter;
+    return tab && FILTERS.some((f) => f.key === tab) ? tab : "stock";
+  });
   const [units, setUnits] = useState<Unit[] | null>(null);
   const [error, setError] = useState("");
 
@@ -31,7 +35,7 @@ export function InventoryScreen() {
     return () => {
       live = false;
     };
-  }, [db, query, states]);
+  }, [db, query, states, cacheEpoch]);
 
   return (
     <section>

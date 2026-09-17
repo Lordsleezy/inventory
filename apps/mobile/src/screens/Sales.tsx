@@ -14,7 +14,7 @@ import { useStore } from "../store";
 import { Notice, Spinner } from "../components/ui";
 
 export function SalesScreen() {
-  const { db, settings } = useStore();
+  const { db, settings, cacheEpoch } = useStore();
   const [query, setQuery] = useState("");
   const [includeVoided, setIncludeVoided] = useState(false);
   const [sales, setSales] = useState<Sale[] | null>(null);
@@ -29,7 +29,7 @@ export function SalesScreen() {
     return () => {
       live = false;
     };
-  }, [db, query, includeVoided]);
+  }, [db, query, includeVoided, cacheEpoch]);
 
   async function receiptFor(sale: Sale) {
     const unit = await loadUnit(db, sale.sku);

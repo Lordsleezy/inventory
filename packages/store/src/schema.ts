@@ -18,7 +18,7 @@
  * `settings`, so a pallet of power tools needs no schema change.
  */
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 /** Run on every connection, before anything else. */
 export const PRAGMAS = [
@@ -92,6 +92,7 @@ CREATE TABLE IF NOT EXISTS sales (
   id             INTEGER PRIMARY KEY,
   sku            TEXT NOT NULL REFERENCES sku_ledger(sku),
   price_cents    INTEGER NOT NULL CHECK (price_cents >= 0),
+  tax_cents      INTEGER NOT NULL DEFAULT 0 CHECK (tax_cents >= 0),
   channel        TEXT NOT NULL,
   payment_method TEXT,
   customer_name  TEXT,
@@ -101,7 +102,8 @@ CREATE TABLE IF NOT EXISTS sales (
   sold_at        TEXT NOT NULL,
   receipt_no     TEXT NOT NULL UNIQUE,
   voided_at      TEXT,
-  void_reason    TEXT
+  void_reason    TEXT,
+  actor          TEXT
 );
 
 -- ===========================================================================

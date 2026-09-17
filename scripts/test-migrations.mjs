@@ -81,17 +81,21 @@ const rest = all.filter((f) => f.name > "0005_private_photos.sql");
   const db = await boot();
   await apply(db, all);
   const cols = await publicItemColumns(db);
-  assert.deepEqual(cols, expected, `fresh 0001→0009 columns: ${cols.join(",")}`);
+  assert.deepEqual(cols, expected, `fresh 0001→0010 columns: ${cols.join(",")}`);
   const pos = await db.query(
     `select 1 from information_schema.views where table_schema = 'public' and table_name = 'units_pos'`,
   );
   assert.equal(pos.rows.length, 1, "units_pos exists");
+  const receipts = await db.query(
+    `select 1 from information_schema.views where table_schema = 'public' and table_name = 'sale_receipts'`,
+  );
+  assert.equal(receipts.rows.length, 1, "sale_receipts exists");
   const conn = await db.query(
     `select 1 from information_schema.views where table_schema = 'public' and table_name = 'connection_status'`,
   );
   assert.equal(conn.rows.length, 1, "connection_status exists");
   await db.query(`select public.anon_can_read_unit_photo('not-a-path')`);
-  console.log("fresh 0001→0009 ok");
+  console.log("fresh 0001→0010 ok");
 }
 
 {
@@ -102,7 +106,7 @@ const rest = all.filter((f) => f.name > "0005_private_photos.sql");
   assert.equal(before.includes("store_id"), false, "0005 public_items has no store_id");
   await apply(db, rest);
   const cols = await publicItemColumns(db);
-  assert.deepEqual(cols, expected, `upgrade 0005→0009 columns: ${cols.join(",")}`);
+  assert.deepEqual(cols, expected, `upgrade 0005→0010 columns: ${cols.join(",")}`);
   await db.query(`select public.anon_can_read_unit_photo('not-a-path')`);
-  console.log("upgrade 0005→0009 ok");
+  console.log("upgrade 0005→0010 ok");
 }
