@@ -13,7 +13,7 @@ import { Label, Notice } from "../components/ui";
  * ledger when it is saved, so a spent number is refused rather than reused.
  */
 export function ReceiveScreen() {
-  const { settings, online, session, hydrate } = useStore();
+  const { settings, online, session, hydrate, ensureOnline } = useStore();
   const manager = session.role !== "staff";
   const navigate = useNavigate();
 
@@ -64,13 +64,9 @@ export function ReceiveScreen() {
       }
     }
 
-    if (!online) {
-      setError("Connect to the internet to add units.");
-      return;
-    }
-
     setSaving(true);
     try {
+      await ensureOnline();
       const { data, error: rpcErr } = await floorCloud().rpc("receive_unit", {
         p_sku: sku.trim(),
         p_brand: brand.trim(),

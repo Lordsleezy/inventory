@@ -10,7 +10,7 @@ import { askManagerPin } from "../pin";
 export function CheckoutScreen() {
   const { sku = "" } = useParams();
   const navigate = useNavigate();
-  const { db, settings, online, cardPayments } = useStore();
+  const { db, settings, online, cardPayments, ensureOnline } = useStore();
   const [unit, setUnit] = useState<Unit | null>(null);
   const [channel, setChannel] = useState("floor");
   const [price, setPrice] = useState("");
@@ -87,12 +87,9 @@ export function CheckoutScreen() {
   async function payCash() {
     setError("");
     setLoud("");
-    if (!online) {
-      setError("Connect to the internet to sell.");
-      return;
-    }
     setBusy(true);
     try {
+      await ensureOnline();
       const charged = await cashProvider.charge({ amountCents: total, currency: "USD" });
       if (!charged.ok) throw new Error("Cash charge failed");
       await finish("cash", charged.paymentId);
@@ -114,6 +111,7 @@ export function CheckoutScreen() {
     }
     setBusy(true);
     try {
+      await ensureOnline();
       const provider = stubCardProvider(cardOutcome);
       const charged = await provider.charge({ amountCents: total, currency: "USD" });
       if (!charged.ok) {

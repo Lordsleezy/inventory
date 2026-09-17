@@ -2,7 +2,7 @@ import { NavLink } from "react-router-dom";
 import { useStore } from "../store";
 
 export function Shell({ children }: { children: React.ReactNode }) {
-  const { session, online, delistCount, incidentCount } = useStore();
+  const { session, online, cloudError, delistCount, incidentCount } = useStore();
   const isStaff = session.role === "staff";
 
   const tabs = [
@@ -35,6 +35,8 @@ export function Shell({ children }: { children: React.ReactNode }) {
         <p className="mb-3 border border-floor-line p-2 text-quiet text-floor-danger">
           Offline — browsing only. Connect to the internet to sell or add units.
         </p>
+      ) : cloudError ? (
+        <p className="mb-3 border border-floor-line p-2 text-quiet text-floor-danger">{cloudError}</p>
       ) : null}
       {incidentCount > 0 ? (
         <NavLink to="/incidents" className="mb-3 block border border-floor-danger p-3 text-body text-floor-danger">

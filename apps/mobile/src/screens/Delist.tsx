@@ -13,7 +13,7 @@ type Task = {
 };
 
 export function DelistScreen() {
-  const { hydrate, online } = useStore();
+  const { hydrate, online, ensureOnline } = useStore();
   const [rows, setRows] = useState<Task[]>([]);
   const [error, setError] = useState("");
 
@@ -33,10 +33,15 @@ export function DelistScreen() {
 
   async function done(id: number) {
     setError("");
-    const { error: rpcErr } = await floorCloud().rpc("complete_delist_task", { p_id: id });
-    if (rpcErr) setError(rpcErr.message);
-    await load();
-    await hydrate();
+    try {
+      await ensureOnline();
+      const { error: rpcErr } = await floorCloud().rpc("complete_delist_task", { p_id: id });
+      if (rpcErr) setError(rpcErr.message);
+      await load();
+      await hydrate();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
   }
 
   return (

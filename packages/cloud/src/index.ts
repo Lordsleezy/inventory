@@ -9,7 +9,18 @@ export {
   type AuthState,
   type StaffSession,
 } from "./client.ts";
-export { assertOnline, OfflineError } from "./online.ts";
+export {
+  assertOnline,
+  checkConnectivity,
+  probeFunctions,
+  probeSupabase,
+  readDeviceNetwork,
+  setDeviceNetworkGetter,
+  OfflineError,
+  type Connectivity,
+  type DeviceNetwork,
+  type ReachCheck,
+} from "./online.ts";
 export {
   reserveUnit,
   finalizeSale,

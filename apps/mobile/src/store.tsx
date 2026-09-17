@@ -1,27 +1,41 @@
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { Capacitor } from "@capacitor/core";
 import { initDb, loadSettings, type Db, type Settings } from "@floor/store";
 import {
   assertCacheHasNoCost,
-  assertOnline,
+  authErrorMessage,
   cacheUnitRow,
+  checkConnectivity,
   floorCloud,
   loadStaffSession,
+  OfflineError,
   relockCacheReplica,
   resetCacheReplica,
   wipeCostFromCache,
+  type Connectivity,
   type StaffSession,
 } from "@floor/cloud";
+import { installDeviceNetwork, listenConnectivity } from "./connectivity";
+
+installDeviceNetwork();
+
+const functionsUrl = import.meta.env.VITE_FUNCTIONS_URL;
 
 type StoreValue = {
   db: Db;
   settings: Settings;
   session: StaffSession;
   online: boolean;
+  connectionType: string;
+  supabaseReach: string;
+  functionsReach: string;
+  cloudError: string;
   delistCount: number;
   incidentCount: number;
   cardPayments: boolean;
   hydrate: () => Promise<void>;
+  refreshConnectivity: () => Promise<Connectivity>;
+  ensureOnline: () => Promise<void>;
   setSetting: (key: string, value: unknown) => Promise<void>;
   reloadSettings: () => Promise<void>;
 };
@@ -183,16 +197,36 @@ export function StoreProvider({ session, children }: { session: StaffSession; ch
   const [db, setDb] = useState<Db | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [online, setOnline] = useState(true);
+  const [connectionType, setConnectionType] = useState("unknown");
+  const [supabaseReach, setSupabaseReach] = useState("…");
+  const [functionsReach, setFunctionsReach] = useState("…");
+  const [cloudError, setCloudError] = useState("");
   const [delistCount, setDelistCount] = useState(0);
   const [incidentCount, setIncidentCount] = useState(0);
   const [cardPayments, setCardPayments] = useState(false);
   const [error, setError] = useState("");
 
-  async function hydrate() {
+  const refreshConnectivity = useCallback(async () => {
+    const status = await checkConnectivity(functionsUrl);
+    setOnline(status.connected);
+    setConnectionType(status.connectionType);
+    setSupabaseReach(status.supabase.ok ? "ok" : status.supabase.detail);
+    setFunctionsReach(status.functions.ok ? "ok" : status.functions.detail);
+    setCloudError(status.connected && !status.supabase.ok ? status.supabase.detail : "");
+    return status;
+  }, []);
+
+  const ensureOnline = useCallback(async () => {
+    const status = await refreshConnectivity();
+    if (!status.connected) throw new OfflineError();
+    if (!status.supabase.ok) throw new Error(status.supabase.detail);
+  }, [refreshConnectivity]);
+
+  const hydrate = useCallback(async () => {
     if (!db) return;
+    const status = await refreshConnectivity();
+    if (!status.connected) return;
     try {
-      await assertOnline();
-      setOnline(true);
       const cloudSettings = await settingsFromCloud(session);
       await db.run("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", [
         "storeName",
@@ -203,10 +237,12 @@ export function StoreProvider({ session, children }: { session: StaffSession; ch
       const counts = await hydrateCache(db, session);
       setDelistCount(counts.delist);
       setIncidentCount(counts.incidents);
-    } catch {
-      setOnline(false);
+      if (!status.supabase.ok) setCloudError(status.supabase.detail);
+      else setCloudError("");
+    } catch (err) {
+      setCloudError(authErrorMessage(err));
     }
-  }
+  }, [db, session, refreshConnectivity]);
 
   useEffect(() => {
     let live = true;
@@ -228,8 +264,13 @@ export function StoreProvider({ session, children }: { session: StaffSession; ch
 
   useEffect(() => {
     if (db) void hydrate();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [db, session.storeId]);
+  }, [db, session.storeId, hydrate]);
+
+  useEffect(() => {
+    return listenConnectivity(() => {
+      void hydrate();
+    });
+  }, [hydrate]);
 
   const value = useMemo<StoreValue | null>(() => {
     if (!db || !settings) return null;
@@ -238,12 +279,18 @@ export function StoreProvider({ session, children }: { session: StaffSession; ch
       settings,
       session,
       online,
+      connectionType,
+      supabaseReach,
+      functionsReach,
+      cloudError,
       delistCount,
       incidentCount,
       cardPayments,
       hydrate,
+      refreshConnectivity,
+      ensureOnline,
       async setSetting(key, next) {
-        await assertOnline();
+        await ensureOnline();
         await floorCloud().rpc("set_store_setting", { p_key: key, p_value: next });
         await hydrate();
       },
@@ -251,7 +298,22 @@ export function StoreProvider({ session, children }: { session: StaffSession; ch
         await hydrate();
       },
     };
-  }, [db, settings, session, online, delistCount, incidentCount, cardPayments]);
+  }, [
+    db,
+    settings,
+    session,
+    online,
+    connectionType,
+    supabaseReach,
+    functionsReach,
+    cloudError,
+    delistCount,
+    incidentCount,
+    cardPayments,
+    hydrate,
+    refreshConnectivity,
+    ensureOnline,
+  ]);
 
   if (error) {
     return (

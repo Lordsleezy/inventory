@@ -25,7 +25,7 @@ const MOVABLE_STATES: UnitState[] = ["available", "reserved", "repair", "scrappe
 export function UnitScreen() {
   const { sku = "" } = useParams();
   const navigate = useNavigate();
-  const { db, settings, online, session, hydrate } = useStore();
+  const { db, settings, online, session, hydrate, ensureOnline } = useStore();
   const manager = session.role !== "staff";
 
   const [unit, setUnit] = useState<Unit | null | undefined>(undefined);
@@ -50,11 +50,8 @@ export function UnitScreen() {
 
   async function edit(field: EditableField, value: string | number | null) {
     setError("");
-    if (!online) {
-      setError("Connect to the internet to edit.");
-      return;
-    }
     try {
+      await ensureOnline();
       const { error: rpcErr } = await floorCloud().rpc("update_unit_field", {
         p_sku: sku,
         p_field: field,
@@ -71,11 +68,8 @@ export function UnitScreen() {
 
   async function move(state: UnitState) {
     setError("");
-    if (!online) {
-      setError("Connect to the internet to change inventory.");
-      return;
-    }
     try {
+      await ensureOnline();
       const { error: rpcErr } = await floorCloud().rpc("set_unit_state", { p_sku: sku, p_state: state });
       if (rpcErr) throw rpcErr;
       await hydrate();

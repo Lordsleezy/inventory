@@ -5,7 +5,7 @@ import { useStore } from "../store";
 import { Label, Notice } from "../components/ui";
 
 export function SettingsScreen() {
-  const { settings, setSetting, session, online } = useStore();
+  const { settings, setSetting, session, online, connectionType, supabaseReach, functionsReach } = useStore();
   const [error, setError] = useState("");
   const [pin, setPin] = useState("");
   const [inviteEmail, setInviteEmail] = useState("");
@@ -42,6 +42,9 @@ export function SettingsScreen() {
         Signed in as {session.displayName} ({session.role})
       </p>
       <p className="font-mono text-quiet">STORE_ID {session.storeId}</p>
+      <p className="mt-2 font-mono text-quiet text-floor-mute">
+        net {online ? "up" : "down"}/{connectionType} · supabase {supabaseReach} · functions {functionsReach}
+      </p>
       <p className="text-quiet text-floor-mute">
         Import the phone backup against this STORE_ID after signup. Import refuses if this store already has units.
       </p>
