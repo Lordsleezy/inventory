@@ -1,78 +1,55 @@
-# Listing export (PC)
+# Listing export and photo round-trip (PC)
 
-Pulls this store’s units and photos out of Supabase so you can prep Facebook Marketplace and other channel listings on a computer. Sold units are skipped unless you ask for them.
+The service role key stays in gitignored `.env.local`. It is never committed and never sent to a review page.
 
-The service role key stays in your environment. It is never committed.
+## Desktop layout
 
-## What you get
-
-A timestamped folder under `exports/` (gitignored), for example `exports/listings-20260917-1910/`:
+Export writes unzipped files to `Desktop\floor-photos`:
 
 ```
-README.txt
 listings.csv
 listings.xlsx
+manifest.json
+README.txt
 missing-photos.txt          (only if a download failed)
-photos/
-  11203-whirlpool-wrs325/
-    11203-01.jpg            (primary first)
-    11203-02.jpg
+11203-whirlpool-wrs325/
+  11203-01.jpg              (primary first)
+  11203-02.jpg
 ```
 
-Each spreadsheet row is one unit:
+Devin (or anyone) reads those folders and writes edited copies to `Desktop\floor-photos-clean` using the **same folder and file names**.
 
-| Column | Content |
-|---|---|
-| sku | SKU |
-| brand, model, title | As entered on the phone |
-| category, condition, test_status, defect_notes | As entered |
-| ask_price, msrp | Dollar strings like `$449.00`, blank if unpriced |
-| listed_on | Channels currently marked listed (not floor) |
-| photo_folder | Folder name under `photos/` |
-| photo_files | `11203-01.jpg; 11203-02.jpg` |
-| listing_title | Ready to paste as the Marketplace title |
-| listing_description | Ready to paste as the body (includes defects, ask, SKU) |
+`manifest.json` maps each `folder` + `file` to the Supabase `photos` row (`id`, `storagePath`, `isPrimary`). Upload-back only touches files that match the manifest.
 
-Photo folders are `{sku}-{brand}-{model}` in lowercase, e.g. `11203-whirlpool-wrs325`. The primary photo is always `01`.
+## Credentials
 
-## Run it (Windows PowerShell)
+Paste the service role into:
 
-From the repo root. Copy **STORE_ID** from Setup in the app. The service role is in Supabase → Project Settings → API (secret). Do not paste it into git.
+`C:\Users\pgg12\Desktop\everything\liquidation-os\.env.local`
 
-```powershell
-cd C:\Users\pgg12\Desktop\everything\liquidation-os
-$env:SUPABASE_URL = "https://zoukmsmbztcuyoslvikp.supabase.co"
-$env:SUPABASE_SERVICE_ROLE = "paste-service-role-here"
-$env:STORE_ID = "paste-store-uuid-from-setup"
+```
+SUPABASE_URL=https://zoukmsmbztcuyoslvikp.supabase.co
+SUPABASE_SERVICE_ROLE=
+STORE_ID=
+```
+
+`STORE_ID` is the uuid from Setup in the app. `.env.local` is gitignored.
+
+## Export
+
+```
 npm run export:listings
 ```
 
-Include sold units:
+Sold units are skipped unless you pass `--sold`. Optional: `--only 11203,10421` or `--out D:\somewhere`.
 
-```powershell
-npm run export:listings -- --sold
-```
+## Upload clean photos
 
-Write somewhere else:
+1. Preview a few before/after pairs (localhost; no key in the page): `npm run photos:preview` → `http://127.0.0.1:8788/`
+2. After a go-ahead: `npm run photos:upload`
 
-```powershell
-npm run export:listings -- --out D:\listings\this-week
-```
+Upload copies the current live object to `{store_id}/archive/{sku}/...` (not anon-readable), writes a **new versioned** live key `{store_id}/{sku}/{file}-v2.jpg` (cache-safe), keeps order and primary, and points `photos.path` at the new key. `photos.original_path` is the archive. Missing or renamed clean files are skipped and listed. Extra files not in the manifest are not uploaded.
 
-Equivalent without npm:
+## Optional local rembg pass
 
-```powershell
-node --experimental-strip-types scripts/export-listings.mjs
-node --experimental-strip-types scripts/export-listings.mjs --sold
-```
-
-You can also put `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE`, and `STORE_ID` in a local `.env` file and load them yourself. `.env` is gitignored. Do not commit it.
-
-## Using the files
-
-1. Open `listings.xlsx` (or the CSV) in Excel.
-2. For each row, copy `listing_title` and `listing_description` into the channel.
-3. Attach images from that row’s `photo_folder`, starting with `01`.
-4. If `missing-photos.txt` exists, those SKUs need a reshoot or a storage check (`npm run` is not required; use `scripts/verify-photos.mjs`).
-
-Cleanup of dirt / white backgrounds is a separate pass. It is not part of this export. Cleaned files, when you approve that work, will go in a `clean/` subfolder and will not overwrite these originals.
+`npm run photos:clean` still exists for a rembg+Sharp pass inside an export folder. Cutout can swap to Photoroom Basic ($0.02/image). Clipdrop Cleanup is 1 credit/image (~$0.02–$0.05 after 100 free) and is skipped without `CLIPDROP_API_KEY`.

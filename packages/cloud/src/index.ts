@@ -51,4 +51,24 @@ export {
   type ExportUnit,
   type SpreadsheetRow,
 } from "./listing-export.ts";
+export {
+  CLIPDROP_CLEANUP_COST,
+  approveAllClean,
+  archiveStoragePath,
+  brightnessGain,
+  dirtMaskPngPrep,
+  folderMatchesSku,
+  inspectCutout,
+  nextVersionedFilename,
+  nextVersionedStoragePath,
+  parseOnlyFlag,
+  planCleanImport,
+  skuAllowed,
+  stainScore,
+  uploadAction,
+  whiteBalanceRgba,
+  type CutoutFlags,
+  type PhotoChoice,
+  type ReviewDecision,
+} from "./photo-clean.ts";
 export { PIN_MAX_FAILURES, PIN_LOCK_MINUTES, nextPinState, pinIsLocked } from "./pin.ts";

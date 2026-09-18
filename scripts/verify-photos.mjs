@@ -6,6 +6,7 @@
  *   set STORE_ID=...
  *   node --experimental-strip-types scripts/verify-photos.mjs
  */
+import "./load-env.mjs";
 import { createServiceClient } from "@floor/cloud";
 
 const storeId = process.env.STORE_ID;

@@ -7,15 +7,20 @@
  *   npm run export:listings
  *
  * Sold units are skipped. Pass --sold to include them.
- * Optional: --out path\to\folder
+ * Default output: Desktop\\floor-photos (unzipped SKU folders + spreadsheet + manifest.json).
+ * Optional: --out path\\to\\folder
+ * Optional: --only 11203,10421
  */
+import "./load-env.mjs";
 import { mkdir, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import {
   createServiceClient,
+  parseOnlyFlag,
   photoFileName,
   photoFolderName,
-  requiredStoreId,
+  skuAllowed,
   spreadsheetRow,
   toCsv,
   toXlsx,
@@ -26,12 +31,6 @@ const PAGE = 1000;
 const includeSold = process.argv.includes("--sold") || process.env.INCLUDE_SOLD === "1";
 const outFlag = process.argv.findIndex((a) => a === "--out");
 const outArg = outFlag >= 0 ? process.argv[outFlag + 1] : "";
-
-function stampFolder(): string {
-  const d = new Date();
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `listings-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`;
-}
 
 async function allRows(fetchPage) {
   const rows = [];
@@ -77,8 +76,22 @@ function isJpeg(bytes) {
   return bytes.length > 3 && bytes[0] === 0xff && bytes[1] === 0xd8;
 }
 
-const storeId = requiredStoreId();
+async function resolveStoreId(client) {
+  const id = process.env.STORE_ID?.trim();
+  if (id) return id;
+  const { data, error } = await client.from("stores").select("id");
+  if (error) throw new Error(error.message);
+  const rows = data ?? [];
+  if (rows.length === 1) return rows[0].id;
+  if (!rows.length) {
+    throw new Error("No stores found. Create one in the app, then paste STORE_ID into .env.local.");
+  }
+  throw new Error("Several stores exist. Paste STORE_ID from Setup into .env.local.");
+}
+
 const client = createServiceClient();
+const storeId = await resolveStoreId(client);
+const only = parseOnlyFlag(process.argv);
 
 async function fetchUnits(from, to) {
   let q = client
@@ -92,12 +105,12 @@ async function fetchUnits(from, to) {
   return q.range(from, to);
 }
 
-const units = (await allRows(fetchUnits)).map(toUnit);
+const units = (await allRows(fetchUnits)).map(toUnit).filter((u) => skuAllowed(u.sku, only));
 
 const photos = await allRows((from, to) =>
   client
     .from("photos")
-    .select("id, sku, path, is_primary, created_at")
+    .select("id, sku, path, original_path, is_primary, created_at")
     .eq("store_id", storeId)
     .order("id", { ascending: true })
     .range(from, to),
@@ -128,12 +141,14 @@ for (const row of photos) {
   photosBySku.set(sku, list);
 }
 
-const root = path.resolve(outArg || path.join("exports", stampFolder()));
-const photosRoot = path.join(root, "photos");
+const desktopPhotos = path.join(os.homedir(), "Desktop", "floor-photos");
+const root = path.resolve(outArg || desktopPhotos);
+const photosRoot = root;
 await mkdir(photosRoot, { recursive: true });
 
 const rows = [];
 const missing = [];
+const manifestPhotos = [];
 
 for (const unit of units) {
   const folder = photoFolderName(unit.sku, unit.brand, unit.model);
@@ -161,6 +176,15 @@ for (const unit of units) {
     }
     await writeFile(dest, buf);
     names.push(destName);
+    manifestPhotos.push({
+      id: shot.id,
+      sku: unit.sku,
+      folder,
+      file: destName,
+      storagePath,
+      originalPath: text(shot.original_path) || storagePath,
+      isPrimary: shot.is_primary === true || shot.is_primary === 1,
+    });
     n += 1;
   }
   rows.push(
@@ -175,14 +199,20 @@ for (const unit of units) {
 
 await writeFile(path.join(root, "listings.csv"), toCsv(rows), "utf8");
 await writeFile(path.join(root, "listings.xlsx"), toXlsx(rows));
+await writeFile(
+  path.join(root, "manifest.json"),
+  JSON.stringify({ storeId, photos: manifestPhotos }, null, 2),
+  "utf8",
+);
 if (missing.length) await writeFile(path.join(root, "missing-photos.txt"), missing.join("\n") + "\n", "utf8");
 
 const readme = `Floor listing export
 Store: ${storeId}
 When: ${new Date().toISOString()}
 Units: ${rows.length} (${includeSold ? "including sold" : "sold skipped"})
-Photos folder: photos/
+Photos folder: this folder (SKU folders next to the spreadsheet)
 Spreadsheet: listings.csv and listings.xlsx
+Manifest: manifest.json
 
 listing_title and listing_description are ready to paste into Facebook Marketplace and similar.
 Primary photo is 01 in each SKU folder.
@@ -196,6 +226,7 @@ console.log(
       storeId,
       out: root,
       units: rows.length,
+      only,
       includeSold,
       photosMissing: missing.length,
     },

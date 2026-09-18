@@ -12,13 +12,18 @@
     "test:migrations": "node --experimental-strip-types scripts/test-migrations.mjs",
     "test:store": "node --experimental-strip-types --test packages/store/src/*.test.ts",
     "export:listings": "node --experimental-strip-types scripts/export-listings.mjs",
+    "photos:clean": "node --experimental-strip-types scripts/clean-photos.mjs",
+    "photos:review": "node --experimental-strip-types scripts/clean-photos.mjs --review",
+    "photos:preview": "node --experimental-strip-types scripts/upload-clean-photos.mjs",
+    "photos:upload": "node --experimental-strip-types scripts/upload-clean-photos.mjs --go",
     "mobile": "npm run build -w @floor/mobile"
   },
   "engines": {
     "node": ">=22"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.57.4"
+    "@supabase/supabase-js": "^2.57.4",
+    "sharp": "^0.34.4"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.8"
