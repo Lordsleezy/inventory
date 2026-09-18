@@ -16,6 +16,7 @@
     "photos:review": "node --experimental-strip-types scripts/clean-photos.mjs --review",
     "photos:preview": "node --experimental-strip-types scripts/upload-clean-photos.mjs",
     "photos:upload": "node --experimental-strip-types scripts/upload-clean-photos.mjs --go",
+    "photos:web-backfill": "node --experimental-strip-types scripts/backfill-web-photos.mjs",
     "mobile": "npm run build -w @floor/mobile"
   },
   "engines": {

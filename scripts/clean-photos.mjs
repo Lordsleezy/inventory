@@ -31,6 +31,7 @@ import {
   whiteBalanceRgba,
 } from "@floor/cloud";
 import sharp from "sharp";
+import { removeWebDerivatives, syncWebDerivatives } from "./web-derivatives.mjs";
 
 const argv = process.argv.slice(2);
 const reviewOnly = argv.includes("--review");
@@ -471,12 +472,14 @@ async function replaceLive(client, item, localFile) {
     cacheControl: "3600",
   });
   if (upLive.error) throw new Error(`live ${nextLive}: ${upLive.error.message}`);
+  await syncWebDerivatives(client, nextLive, bytes);
   const { error } = await client
     .from("photos")
     .update({ original_path: archive, path: nextLive })
     .eq("id", item.id);
   if (error) throw new Error(error.message);
   if (live !== nextLive && live !== archive) {
+    await removeWebDerivatives(client, live).catch(() => undefined);
     await client.storage.from("unit-photos").remove([live]);
   }
 }
@@ -493,9 +496,11 @@ async function restoreLive(client, item) {
     cacheControl: "3600",
   });
   if (up.error) throw new Error(up.error.message);
+  await syncWebDerivatives(client, nextLive, buf);
   const { error } = await client.from("photos").update({ path: nextLive }).eq("id", item.id);
   if (error) throw new Error(error.message);
   if (item.storagePath !== nextLive) {
+    await removeWebDerivatives(client, item.storagePath).catch(() => undefined);
     await client.storage.from("unit-photos").remove([item.storagePath]);
   }
   await writeFile(path.join(photosRoot, item.folder, item.file), buf);

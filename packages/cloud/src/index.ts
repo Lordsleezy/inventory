@@ -1,6 +1,14 @@
 export { importPhoneBackup, createServiceClient, requiredStoreId, type ImportResult } from "./import-backup.ts";
 export { DEFAULT_SKU_DIGITS, isSku, padSku, skuCeiling, storagePathForPhoto } from "./sku.ts";
 export {
+  WEB_CACHE_CONTROL,
+  WEB_DETAIL_PX,
+  WEB_THUMB_PX,
+  isWebDerivativePath,
+  webDerivativePath,
+  webDerivativePaths,
+} from "./web-photos.ts";
+export {
   floorCloud,
   loadAuthState,
   loadStaffSession,

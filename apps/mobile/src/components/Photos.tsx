@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { listPhotos } from "@floor/store";
-import { floorCloud, storagePathForPhoto } from "@floor/cloud";
+import { floorCloud, storagePathForPhoto, webDerivativePaths } from "@floor/cloud";
+import { uploadWebDerivatives, WEB_CACHE_CONTROL } from "../web-photo";
 import { useStore } from "../store";
 import { capturePhoto, deletePhotoFile, photoSrc, readPhotoBase64 } from "../photos";
 import { Label, Notice } from "./ui";
@@ -66,6 +67,18 @@ export function Photos({ sku, disabled }: { sku: string; disabled?: boolean }) {
         upsert: true,
       });
       if (up.error) throw up.error;
+      try {
+        await uploadWebDerivatives(async (webPath, bytes, contentType) => {
+          const webUp = await floorCloud().storage.from("unit-photos").upload(webPath, bytes, {
+            contentType,
+            upsert: true,
+            cacheControl: WEB_CACHE_CONTROL,
+          });
+          if (webUp.error) throw webUp.error;
+        }, path, raw);
+      } catch {
+        // Shop falls back to the original until a backfill runs.
+      }
       const { error: rpcErr } = await floorCloud().rpc("add_unit_photo", { p_sku: sku, p_path: path });
       if (rpcErr) throw rpcErr;
       await hydrate();
@@ -85,7 +98,7 @@ export function Photos({ sku, disabled }: { sku: string; disabled?: boolean }) {
     const { error: rpcErr } = await floorCloud().rpc("delete_unit_photo", { p_id: id });
     if (rpcErr) throw rpcErr;
     if (photo?.path && isCloudPath(photo.path)) {
-      await floorCloud().storage.from("unit-photos").remove([photo.path]);
+      await floorCloud().storage.from("unit-photos").remove([photo.path, ...webDerivativePaths(photo.path)]);
     } else if (photo?.path) {
       await deletePhotoFile(photo.path);
     }

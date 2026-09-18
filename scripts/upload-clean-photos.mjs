@@ -16,6 +16,7 @@ import {
   nextVersionedStoragePath,
   planCleanImport,
 } from "@floor/cloud";
+import { removeWebDerivatives, syncWebDerivatives } from "./web-derivatives.mjs";
 
 const go = process.argv.includes("--go");
 const port = Number(process.env.PHOTO_PREVIEW_PORT || 8788);
@@ -211,7 +212,9 @@ async function uploadAll() {
         .eq("id", item.id)
         .eq("store_id", storeId);
       if (error) throw new Error(error.message);
+      await syncWebDerivatives(client, nextLive, cleanBytes);
       if (live !== nextLive && live !== archive) {
+        await removeWebDerivatives(client, live).catch(() => undefined);
         await client.storage.from("unit-photos").remove([live]);
       }
       replacedBySku[item.sku] = (replacedBySku[item.sku] || 0) + 1;
