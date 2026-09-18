@@ -67,8 +67,8 @@ workflows:
         script: |
           npm run build -w @floor/mobile
           test -f apps/adapter/www/index.html
-          if grep -E '^[[:space:]]*server:' apps/adapter/capacitor.config.ts; then
-            echo "Capacitor must not load a remote host; remove the server block" >&2
+          if grep -E 'url:[[:space:]]*["'\'']https?://' apps/adapter/capacitor.config.ts; then
+            echo "Capacitor must not set server.url to a remote host" >&2
             exit 1
           fi
           if ! grep -Rql --include='*.js' 'zoukmsmbztcuyoslvikp' apps/adapter/www; then

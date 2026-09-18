@@ -219,7 +219,7 @@ export async function handler(event) {
     return page(400, {
       title: "Could not connect",
       message: "eBay came back without a code or state.",
-      detail: "Close this window and return to Floor, then Connect again after the ios-ebay-connect-2 update. That build stays in Floor instead of the Safari sheet.",
+      detail: "Close this and tap Back to Floor. Then update Floor in TestFlight (ios-ebay-connect-4) so Connect stays inside the app.",
       href: deepLink({ ok: "0" }),
     });
   }
