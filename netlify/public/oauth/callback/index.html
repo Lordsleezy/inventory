@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Floor — connecting</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 28rem; margin: 3rem auto; padding: 0 1rem; line-height: 1.45; background: #0c0b0a; color: #f4efe8; }
+      a.btn { display: inline-block; margin-top: 1.25rem; padding: 0.7rem 1.1rem; background: #d4a574; color: #1a1410; text-decoration: none; border-radius: 12px; font-weight: 600; }
+      .quiet { color: #c9bba8; }
+    </style>
+  </head>
+  <body>
+    <h1>Connecting…</h1>
+    <p class="quiet" id="msg">Sending you back to Floor.</p>
+    <p><a class="btn" href="floor://connections">Back to Floor</a></p>
+    <script>
+      function parseHref(href) {
+        const url = new URL(href);
+        const search = Object.fromEntries(url.searchParams.entries());
+        let code = String(search.code || search.isAuthToken || search.ebaytkn || "");
+        let state = String(search.state || "");
+        let error = String(search.error_description || search.error || "");
+        const hash = (url.hash || "").replace(/^#/, "");
+        if (hash) {
+          const amp = hash.indexOf("&");
+          if (code && amp >= 0) {
+            code = code + "#" + hash.slice(0, amp);
+            const extra = new URLSearchParams(hash.slice(amp + 1));
+            state = extra.get("state") || state;
+            error = extra.get("error_description") || extra.get("error") || error;
+          } else {
+            const extra = new URLSearchParams(hash);
+            if (extra.get("code")) code = extra.get("code");
+            if (extra.get("state")) state = extra.get("state");
+            error = extra.get("error_description") || extra.get("error") || error;
+          }
+        }
+        return { code, state, error };
+      }
+      const parsed = parseHref(location.href);
+      const next = new URL("/.netlify/functions/oauth-callback", location.origin);
+      if (parsed.error) next.searchParams.set("error", parsed.error);
+      if (parsed.code) next.searchParams.set("code", parsed.code);
+      if (parsed.state) next.searchParams.set("state", parsed.state);
+      next.searchParams.set("recovered", "1");
+      if (parsed.code && parsed.state) {
+        location.replace(next.toString());
+      } else if (parsed.error) {
+        document.getElementById("msg").textContent = "The platform refused access: " + parsed.error;
+      } else {
+        document.getElementById("msg").textContent =
+          "eBay came back without a code or state. Close this window and tap Connect again in Floor.";
+      }
+    </script>
+  </body>
+</html>

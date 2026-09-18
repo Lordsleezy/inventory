@@ -5,11 +5,108 @@ import {
   requireEnv,
 } from "../lib/server.mjs";
 import { exchangeEbayCode, subscribeNotifications } from "../lib/ebay.mjs";
+import { paramsFromNetlifyEvent } from "../lib/oauth-params.mjs";
 
 function deepLink(query) {
   const base = process.env.APP_DEEP_LINK || "floor://connections";
   const qs = new URLSearchParams(query).toString();
   return `${base}?${qs}`;
+}
+
+function esc(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function page(status, { title, message, detail, href }) {
+  const link = href || deepLink({ ok: "0" });
+  return html(
+    status,
+    `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${esc(title)}</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 28rem; margin: 3rem auto; padding: 0 1rem; line-height: 1.45; background: #0c0b0a; color: #f4efe8; }
+      .quiet { color: #c9bba8; }
+      a.btn { display: inline-block; margin-top: 1.25rem; padding: 0.7rem 1.1rem; background: #d4a574; color: #1a1410; text-decoration: none; border-radius: 12px; font-weight: 600; }
+    </style>
+  </head>
+  <body>
+    <h1>${esc(title)}</h1>
+    <p>${esc(message)}</p>
+    ${detail ? `<p class="quiet">${esc(detail)}</p>` : ""}
+    <p><a class="btn" href="${esc(link)}">Back to Floor</a></p>
+  </body>
+</html>`,
+  );
+}
+
+function recoveryPage() {
+  return html(
+    200,
+    `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Floor — finishing connect</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 28rem; margin: 3rem auto; padding: 0 1rem; line-height: 1.45; background: #0c0b0a; color: #f4efe8; }
+      .quiet { color: #c9bba8; }
+      a.btn { display: inline-block; margin-top: 1.25rem; padding: 0.7rem 1.1rem; background: #d4a574; color: #1a1410; text-decoration: none; border-radius: 12px; font-weight: 600; }
+    </style>
+  </head>
+  <body>
+    <h1>Finishing connect…</h1>
+    <p class="quiet" id="msg">eBay hid part of the callback in the URL. Putting it back together.</p>
+    <p><a class="btn" href="${esc(deepLink({ ok: "0" }))}">Back to Floor</a></p>
+    <script>
+      function parseHref(href) {
+        const url = new URL(href);
+        const search = Object.fromEntries(url.searchParams.entries());
+        let code = String(search.code || search.isAuthToken || search.ebaytkn || "");
+        let state = String(search.state || "");
+        let error = String(search.error_description || search.error || "");
+        const hash = (url.hash || "").replace(/^#/, "");
+        if (hash) {
+          const amp = hash.indexOf("&");
+          if (code && amp >= 0) {
+            code = code + "#" + hash.slice(0, amp);
+            const extra = new URLSearchParams(hash.slice(amp + 1));
+            state = extra.get("state") || state;
+            error = extra.get("error_description") || extra.get("error") || error;
+          } else {
+            const extra = new URLSearchParams(hash);
+            if (extra.get("code")) code = extra.get("code");
+            if (extra.get("state")) state = extra.get("state");
+            error = extra.get("error_description") || extra.get("error") || error;
+          }
+        }
+        return { code, state, error };
+      }
+      const parsed = parseHref(location.href);
+      const next = new URL(location.pathname, location.origin);
+      if (parsed.error) next.searchParams.set("error", parsed.error);
+      if (parsed.code) next.searchParams.set("code", parsed.code);
+      if (parsed.state) next.searchParams.set("state", parsed.state);
+      next.searchParams.set("recovered", "1");
+      if (parsed.code && parsed.state) {
+        location.replace(next.toString());
+      } else {
+        document.getElementById("msg").textContent = parsed.error
+          ? ("The platform refused access: " + parsed.error)
+          : "eBay came back without a code or state. Close this window and tap Connect again in Floor.";
+      }
+    </script>
+  </body>
+</html>`,
+  );
 }
 
 async function exchangeSquare(code) {
@@ -55,19 +152,44 @@ async function exchangeAmazon(code) {
 }
 
 export async function handler(event) {
-  const params = event.queryStringParameters || {};
+  const params = paramsFromNetlifyEvent(event);
   const nonce = params.state;
   const code = params.code;
   const err = params.error;
-  const sb = serviceClient();
+
+  console.log(
+    "oauth-callback",
+    JSON.stringify({
+      method: event.httpMethod,
+      path: event.path,
+      rawQuery: event.rawQuery || event.rawQueryString || null,
+      queryKeys: Object.keys(event.queryStringParameters || {}),
+      hasCode: Boolean(code),
+      codeLen: code.length,
+      hasState: Boolean(nonce),
+      recovered: params.recovered,
+    }),
+  );
 
   if (err) {
-    return html(400, `<p>The platform refused access: ${err}</p><p><a href="${deepLink({ ok: "0" })}">Back to Floor</a></p>`);
-  }
-  if (!nonce || !code) {
-    return html(400, `<p>Missing OAuth state or code.</p>`);
+    return page(400, {
+      title: "Could not connect",
+      message: `The platform refused access: ${err}`,
+      href: deepLink({ ok: "0", error: err }),
+    });
   }
 
+  if (!nonce || !code) {
+    if (!params.recovered) return recoveryPage();
+    return page(400, {
+      title: "Could not connect",
+      message: "eBay came back without a code or state.",
+      detail: "Close this window and tap Connect again in Floor. If it keeps failing, the RuName Auth Accepted URL must be this callback.",
+      href: deepLink({ ok: "0" }),
+    });
+  }
+
+  const sb = serviceClient();
   const { data: state, error } = await sb
     .from("oauth_states")
     .select("*")
@@ -76,7 +198,11 @@ export async function handler(event) {
     .gt("expires_at", new Date().toISOString())
     .maybeSingle();
   if (error || !state) {
-    return html(400, `<p>This sign-in expired or was already used. Start Connect again from Floor.</p>`);
+    return page(400, {
+      title: "Could not connect",
+      message: "This sign-in expired or was already used. Start Connect again from Floor.",
+      href: deepLink({ ok: "0" }),
+    });
   }
 
   await sb.from("oauth_states").update({ consumed_at: new Date().toISOString() }).eq("id", state.id);
@@ -138,10 +264,16 @@ export async function handler(event) {
       }
     }
     const href = deepLink({ provider: state.provider, ok: "1", ...extra });
-    return html(
-      200,
-      `<p>Connected ${state.provider}. Return to Floor.</p><p><a href="${href}">Open Floor</a></p><script>location.href=${JSON.stringify(href)}</script>`,
+    const result = page(200, {
+      title: "Connected",
+      message: `${state.provider} is connected. Return to Floor.`,
+      href,
+    });
+    result.body = result.body.replace(
+      "</body>",
+      `<script>location.href=${JSON.stringify(href)}</script></body>`,
     );
+    return result;
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     await sb.from("connections").upsert({
@@ -151,9 +283,11 @@ export async function handler(event) {
       last_error: message,
       updated_at: new Date().toISOString(),
     });
-    return html(
-      400,
-      `<p>Could not finish connecting: ${message}</p><p>If the platform said you are not the account owner, sign in as the owner of that Square / eBay / Amazon account and try again.</p><p><a href="${deepLink({ ok: "0", error: message })}">Back to Floor</a></p>`,
-    );
+    return page(400, {
+      title: "Could not connect",
+      message: `Could not finish connecting: ${message}`,
+      detail: "If the platform said you are not the account owner, sign in as that account owner and try again.",
+      href: deepLink({ ok: "0", error: message }),
+    });
   }
 }

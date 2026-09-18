@@ -83,6 +83,8 @@ Create it once:
 
 `https://<your-functions-site>/.netlify/functions/oauth-callback`
 
+eBay’s Auth Accepted URL can stay that function URL. eBay authorization codes contain `#`, which browsers treat as a fragment; the callback page reassembles `code` and `state` before exchanging the token. Optional public URL: `https://<your-functions-site>/oauth/callback`.
+
 Functions live in **`netlify/functions/`**. Shared helpers live in **`netlify/lib/`**. The static publish folder is **`netlify/public/`** (a placeholder page, not a store site). `dispatch-alerts` also runs on a 5-minute schedule.
 
 ---

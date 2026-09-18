@@ -13,6 +13,15 @@
 [functions."ebay-sync"]
   schedule = "*/5 * * * *"
 
+[build.processing.html]
+  pretty_urls = false
+
+[[redirects]]
+  from = "/.netlify/functions/oauth-callback/"
+  to = "/.netlify/functions/oauth-callback"
+  status = 200
+  force = true
+
 [[redirects]]
   from = "/"
   to = "/index.html"

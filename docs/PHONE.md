@@ -35,7 +35,7 @@ SUPABASE_SERVICE_ROLE
 CONNECTIONS_KEY          # 32-byte hex
 RESEND_API_KEY
 RESEND_FROM              # e.g. Floor <alerts@yourdomain>
-OAUTH_REDIRECT_URI       # https://<site>/.netlify/functions/oauth-callback
+OAUTH_REDIRECT_URI       # https://<site>/.netlify/functions/oauth-callback (Square/Amazon). eBay uses EBAY_RU_NAME; Auth Accepted URL can be this same callback.
 APP_DEEP_LINK            # floor://connections
 ALERT_WEBHOOK_SECRET
 SQUARE_APPLICATION_ID
