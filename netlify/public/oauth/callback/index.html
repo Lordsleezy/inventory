@@ -15,6 +15,11 @@
     <p class="quiet" id="msg">Sending you back to Floor.</p>
     <p><a class="btn" href="floor://connections">Back to Floor</a></p>
     <script>
+      function looksLikeEbayCodePart(value) {
+        const s = String(value || "");
+        if (!s || s.includes("=")) return false;
+        return /^(?:v\^|[riIpft]\^)/.test(s);
+      }
       function parseHref(href) {
         const url = new URL(href);
         const search = Object.fromEntries(url.searchParams.entries());
@@ -22,31 +27,49 @@
         let state = String(search.state || "");
         let error = String(search.error_description || search.error || "");
         const hash = (url.hash || "").replace(/^#/, "");
-        if (hash) {
-          const amp = hash.indexOf("&");
-          if (code && amp >= 0) {
-            code = code + "#" + hash.slice(0, amp);
-            const extra = new URLSearchParams(hash.slice(amp + 1));
-            state = extra.get("state") || state;
-            error = extra.get("error_description") || extra.get("error") || error;
-          } else {
-            const extra = new URLSearchParams(hash);
-            if (extra.get("code")) code = extra.get("code");
-            if (extra.get("state")) state = extra.get("state");
-            error = extra.get("error_description") || extra.get("error") || error;
-          }
+        if (!hash) return { code, state, error };
+        if (/^(?:code|state|error|error_description)=/.test(hash)) {
+          const extra = new URLSearchParams(hash);
+          return {
+            code: extra.get("code") || code,
+            state: extra.get("state") || state,
+            error: extra.get("error_description") || extra.get("error") || error,
+          };
         }
+        const amp = hash.indexOf("&");
+        const before = amp >= 0 ? hash.slice(0, amp) : hash;
+        const extra = amp >= 0 ? new URLSearchParams(hash.slice(amp + 1)) : new URLSearchParams();
+        state = extra.get("state") || state;
+        error = extra.get("error_description") || extra.get("error") || error;
+        if (code && (amp >= 0 || looksLikeEbayCodePart(before))) code = code + "#" + before;
+        else if (!code && looksLikeEbayCodePart(before)) code = before.indexOf("v^") === 0 ? before : "v^1.1#" + before;
         return { code, state, error };
       }
+      function postRecovered(parsed) {
+        const form = document.createElement("form");
+        form.method = "POST";
+        form.action = "/.netlify/functions/oauth-callback";
+        const fields = {
+          recovered: "1",
+          code: parsed.code,
+          state: parsed.state,
+          error: parsed.error,
+          href: location.href,
+        };
+        Object.keys(fields).forEach(function (key) {
+          if (!fields[key]) return;
+          const input = document.createElement("input");
+          input.type = "hidden";
+          input.name = key;
+          input.value = fields[key];
+          form.appendChild(input);
+        });
+        document.body.appendChild(form);
+        form.submit();
+      }
       const parsed = parseHref(location.href);
-      const next = new URL("/.netlify/functions/oauth-callback", location.origin);
-      if (parsed.error) next.searchParams.set("error", parsed.error);
-      if (parsed.code) next.searchParams.set("code", parsed.code);
-      if (parsed.state) next.searchParams.set("state", parsed.state);
-      next.searchParams.set("recovered", "1");
-      if (parsed.code && parsed.state) {
-        location.replace(next.toString());
-      } else if (parsed.error) {
+      if (parsed.code && parsed.state) postRecovered(parsed);
+      else if (parsed.error) {
         document.getElementById("msg").textContent = "The platform refused access: " + parsed.error;
       } else {
         document.getElementById("msg").textContent =

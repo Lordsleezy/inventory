@@ -59,6 +59,11 @@ export function ConnectionsScreen() {
         setError(body.message || body.error || `Connect failed (${res.status})`);
         return;
       }
+      try {
+        await Browser.close();
+      } catch {
+        /* no leftover in-app browser */
+      }
       await Browser.open({ url: body.url });
     } catch (err) {
       setError(friendlyRpc(err));
