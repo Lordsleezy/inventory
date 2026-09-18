@@ -24,5 +24,8 @@ export function friendlyRpc(err: unknown): string {
   if (/pin_not_set/i.test(msg)) return "Set a manager PIN in Setup first.";
   if (/use_category_rpc/i.test(msg)) return "Change categories in Setup → Categories.";
   if (/use_pin_rpc/i.test(msg)) return "Change the PIN with Save PIN.";
+  if (/^invalid$/i.test(msg) || msg === "ebay_list_failed") {
+    return "eBay rejected the listing. The next attempt will show eBay’s actual reason.";
+  }
   return msg;
 }

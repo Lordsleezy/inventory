@@ -1,8 +1,11 @@
 import { createHash } from "node:crypto";
 import { decryptSecret, encryptSecret, requireEnv, serviceClient } from "./server.mjs";
 import { EBAY_OAUTH_SCOPES, ebayCondition, ebayHosts, ebayRuName } from "./ebay-env.mjs";
+import { formatEbayError, locationKey } from "./ebay-errors.mjs";
+import { publicPhotoUrl } from "./ebay-photos.mjs";
+import { composeChannelDescription, parseListingSpecs } from "./listing-copy.mjs";
 
-export { EBAY_OAUTH_SCOPES, ebayHosts, ebayRuName };
+export { EBAY_OAUTH_SCOPES, ebayHosts, ebayRuName, formatEbayError };
 
 export function marketplaceId() {
   return process.env.EBAY_MARKETPLACE_ID || "EBAY_US";
@@ -109,22 +112,14 @@ export async function ebayFetch(storeId, method, path, body) {
     json = { raw: text };
   }
   if (!res.ok) {
-    const msg =
-      json?.errors?.[0]?.message ||
-      json?.error_description ||
-      json?.error ||
-      text ||
-      `ebay ${res.status}`;
+    const msg = formatEbayError(json, text || `eBay HTTP ${res.status}`);
+    console.log("ebay_api_error", JSON.stringify({ method, path, status: res.status, body: json }));
     const err = new Error(msg);
     err.status = res.status;
     err.body = json;
     throw err;
   }
   return json;
-}
-
-function locationKey(storeId) {
-  return `floor-${String(storeId).replace(/-/g, "").slice(0, 12)}`;
 }
 
 async function ensureLocation(storeId) {
@@ -135,20 +130,24 @@ async function ensureLocation(storeId) {
   } catch (err) {
     if (err.status !== 404) throw err;
   }
-  await ebayFetch(storeId, "POST", `/sell/inventory/v1/location/${key}`, {
-    name: "Floor warehouse",
-    merchantLocationStatus: "ENABLED",
-    locationTypes: ["WAREHOUSE"],
-    location: {
-      address: {
-        addressLine1: process.env.EBAY_LOCATION_LINE1 || "2051 Challenge Way",
-        city: process.env.EBAY_LOCATION_CITY || "Roseville",
-        stateOrProvince: process.env.EBAY_LOCATION_REGION || "CA",
-        postalCode: process.env.EBAY_LOCATION_POSTAL || "95678",
-        country: process.env.EBAY_LOCATION_COUNTRY || "US",
+  try {
+    await ebayFetch(storeId, "POST", `/sell/inventory/v1/location/${key}`, {
+      name: "Floor warehouse",
+      merchantLocationStatus: "ENABLED",
+      locationTypes: ["WAREHOUSE"],
+      location: {
+        address: {
+          addressLine1: process.env.EBAY_LOCATION_LINE1 || "2051 Challenge Way",
+          city: process.env.EBAY_LOCATION_CITY || "Roseville",
+          stateOrProvince: process.env.EBAY_LOCATION_REGION || "CA",
+          postalCode: process.env.EBAY_LOCATION_POSTAL || "95678",
+          country: process.env.EBAY_LOCATION_COUNTRY || "US",
+        },
       },
-    },
-  });
+    });
+  } catch (err) {
+    if (!/already exists|duplicate/i.test(err.message)) throw err;
+  }
   return key;
 }
 
@@ -173,8 +172,6 @@ async function ensurePolicies(storeId) {
       name: "Floor payments",
       marketplaceId: market,
       categoryTypes: [{ name: "ALL_EXCLUDING_MOTORS_VEHICLES", default: true }],
-      paymentMethods: [{ paymentMethodType: "PERSONAL_CHECK" }],
-      immediatePay: false,
     });
     payment = created.paymentPolicyId || created.id;
   }
@@ -192,26 +189,12 @@ async function ensurePolicies(storeId) {
   }
   if (!fulfillment) {
     const created = await ebayFetch(storeId, "POST", "/sell/account/v1/fulfillment_policy", {
-      name: "Floor shipping",
+      name: "Floor local pickup",
       marketplaceId: market,
       categoryTypes: [{ name: "ALL_EXCLUDING_MOTORS_VEHICLES", default: true }],
-      handlingTime: { value: 3, unit: "DAY" },
-      shippingOptions: [
-        {
-          optionType: "DOMESTIC",
-          costType: "FLAT_RATE",
-          shippingServices: [
-            {
-              sortOrder: 1,
-              shippingCarrierCode: "USPS",
-              shippingServiceCode: "USPSGround",
-              shippingCost: { value: "15.00", currency: "USD" },
-              freeShipping: false,
-              buyerResponsibleForShipping: false,
-            },
-          ],
-        },
-      ],
+      handlingTime: { value: 2, unit: "DAY" },
+      // Appliances: local pickup. Small goods (laptops) need a shipping policy later, per unit or category.
+      localPickup: true,
     });
     fulfillment = created.fulfillmentPolicyId || created.id;
   }
@@ -262,6 +245,31 @@ async function categoryId(storeId, query) {
   }
 }
 
+async function catalogEpid(storeId, unit) {
+  const brand = String(unit.brand || "").trim();
+  const specs = parseListingSpecs(unit.listing_specs);
+  const mpn = String(specs?.matched_model || unit.model || "").trim();
+  if (!brand || !mpn) return null;
+  try {
+    const q = encodeURIComponent(`${brand} ${mpn}`);
+    const data = await ebayFetch(
+      storeId,
+      "GET",
+      `/commerce/catalog/v1_beta/product_summary/search?q=${q}&limit=8`,
+    );
+    const rows = data?.productSummaries || [];
+    const needle = mpn.replace(/[^a-z0-9]/gi, "").toUpperCase();
+    const hit =
+      rows.find((row) => String(row.mpn || "").replace(/[^a-z0-9]/gi, "").toUpperCase() === needle) ||
+      rows.find((row) => String(row.mpn || "").replace(/[^a-z0-9]/gi, "").toUpperCase().includes(needle)) ||
+      rows[0];
+    const epid = hit?.epid || hit?.product?.epid;
+    return epid ? String(epid) : null;
+  } catch {
+    return null;
+  }
+}
+
 async function photoUrls(storeId, sku) {
   const sb = serviceClient();
   const { data } = await sb
@@ -270,17 +278,111 @@ async function photoUrls(storeId, sku) {
     .eq("store_id", storeId)
     .eq("sku", sku)
     .order("is_primary", { ascending: false });
-  const keys = (data ?? []).map((row) => row.path).filter(Boolean);
+  const keys = (data ?? [])
+    .map((row) => row.path)
+    .filter((path) => path && !String(path).includes("/official-"));
   if (!keys.length) throw new Error(`SKU ${sku} has no photos. Add at least one before listing on eBay.`);
-  const signed = await sb.storage.from("unit-photos").createSignedUrls(keys.slice(0, 12), 60 * 60 * 24 * 7);
-  if (signed.error) throw new Error(signed.error.message);
-  const urls = (signed.data ?? []).map((row) => row.signedUrl).filter(Boolean);
-  if (!urls.length) throw new Error(`Could not sign photos for SKU ${sku}.`);
-  return urls;
+  return keys.slice(0, 12).map((path) => publicPhotoUrl(path));
 }
 
 function money(cents) {
   return (Number(cents) / 100).toFixed(2);
+}
+
+async function categoryTreeId() {
+  const market = marketplaceId();
+  const { api } = ebayHosts(process.env.EBAY_ENV);
+  const token = await applicationToken();
+  const treeRes = await fetch(
+    `${api}/commerce/taxonomy/v1/get_default_category_tree_id?marketplace_id=${market}`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+  const tree = await treeRes.json();
+  return { api, token, treeId: tree?.categoryTreeId || "0" };
+}
+
+function aspectName(aspect) {
+  return String(aspect?.localizedAspectName || aspect?.aspectName || "").trim();
+}
+
+function pickAspectValue(aspect, candidates) {
+  const allowed = (aspect?.aspectValues || []).map((v) => v.localizedValue || v.value).filter(Boolean);
+  for (const c of candidates) {
+    const want = String(c || "").trim();
+    if (!want) continue;
+    const hit = allowed.find((v) => String(v).toLowerCase() === want.toLowerCase());
+    if (hit) return hit;
+    if (!allowed.length) return want;
+  }
+  if (aspect?.aspectConstraint?.aspectRequired && allowed[0]) return allowed[0];
+  return candidates.find((c) => String(c || "").trim()) || "";
+}
+
+async function itemAspects(category, unit) {
+  const specs = parseListingSpecs(unit.listing_specs) || {};
+  const brand = String(unit.brand || "").trim();
+  const model = String(specs.matched_model || unit.model || "").trim();
+  const type = String(unit.category || specs.configuration || "").trim();
+  const color = String(specs.finish || "").trim();
+  const aspects = {};
+  try {
+    const { api, token, treeId } = await categoryTreeId();
+    const res = await fetch(
+      `${api}/commerce/taxonomy/v1/category_tree/${treeId}/get_item_aspects_for_category?category_id=${encodeURIComponent(category)}`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+    const json = await res.json();
+    const rows = json?.aspects || [];
+    for (const aspect of rows) {
+      const name = aspectName(aspect);
+      if (!name) continue;
+      const required = Boolean(aspect?.aspectConstraint?.aspectRequired);
+      const lower = name.toLowerCase();
+      let value = "";
+      if (lower === "brand") value = pickAspectValue(aspect, [brand]);
+      else if (lower === "mpn" || lower === "manufacturer part number") value = pickAspectValue(aspect, [model]);
+      else if (lower === "model") value = pickAspectValue(aspect, [model]);
+      else if (lower === "type") value = pickAspectValue(aspect, [type, "Refrigerator"]);
+      else if (lower === "color" || lower === "colour") value = pickAspectValue(aspect, [color]);
+      else if (required) value = pickAspectValue(aspect, [type, brand, model]);
+      if (value) aspects[name] = [String(value)];
+      else if (required && (lower === "brand" || lower === "mpn")) {
+        throw new Error(
+          `eBay requires item specific “${name}”. Add brand and model on this unit, then tap E again.`,
+        );
+      }
+    }
+  } catch (err) {
+    if (err instanceof Error && /requires item specific/i.test(err.message)) throw err;
+  }
+  if (brand && !aspects.Brand) aspects.Brand = [brand];
+  if (model && !aspects.MPN) aspects.MPN = [model];
+  if (type && !aspects.Type) aspects.Type = [type];
+  return aspects;
+}
+
+function packageSize(unit) {
+  const specs = parseListingSpecs(unit.listing_specs) || {};
+  const width = Number(specs.width_in);
+  const height = Number(specs.height_in);
+  const depth = Number(specs.depth_in);
+  const weight = Number(specs.weight_lb || specs.weight_lbs);
+  const hasDims = width > 0 && height > 0 && depth > 0;
+  if (!hasDims && !(weight > 0)) return undefined;
+  const pkg = {};
+  if (hasDims) {
+    pkg.dimensions = {
+      length: String(depth),
+      width: String(width),
+      height: String(height),
+      unit: "INCH",
+    };
+  }
+  pkg.weight = {
+    value: String(weight > 0 ? weight : 120),
+    unit: "POUND",
+  };
+  return pkg;
 }
 
 function listingCopy(unit) {
@@ -289,19 +391,18 @@ function listingCopy(unit) {
   let title = titleBits.join(" — ");
   title += ` | SKU ${unit.sku}`;
   if (title.length > 80) title = title.slice(0, 77) + "...";
-  const lines = [
-    name,
-    "",
-    unit.category ? `Category: ${unit.category}` : "",
-    unit.condition ? `Condition: ${unit.condition}` : "",
-    unit.test_status ? `Test status: ${unit.test_status}` : "",
-    `SKU: ${unit.sku}`,
-    "",
-    (unit.defect_notes || "").trim() ? `Notes:\n${unit.defect_notes}` : "",
-    "",
-    "Sold as-is. Local pickup unless arranged.",
-  ].filter((line) => line !== "");
-  return { title, description: lines.join("\n") };
+  const description = composeChannelDescription({
+    listingBody: unit.listing_body,
+    brand: unit.brand,
+    model: unit.model,
+    title: unit.title,
+    specs: parseListingSpecs(unit.listing_specs),
+    condition: unit.condition,
+    testStatus: unit.test_status,
+    defectNotes: unit.defect_notes,
+    sku: unit.sku,
+  });
+  return { title, description };
 }
 
 export async function listSku(storeId, sku) {
@@ -316,21 +417,27 @@ export async function listSku(storeId, sku) {
     throw new Error(`SKU ${sku} needs a price before it can go on eBay.`);
   }
   const images = await photoUrls(storeId, sku);
+  const epid = await catalogEpid(storeId, unit);
   const loc = await ensureLocation(storeId);
   const policies = await ensurePolicies(storeId);
   const copy = listingCopy(unit);
   const cat = await categoryId(storeId, [unit.brand, unit.model, unit.title, unit.category].filter(Boolean).join(" "));
+  const aspects = await itemAspects(cat, unit);
+  const pkg = packageSize(unit);
 
-  await ebayFetch(storeId, "PUT", `/sell/inventory/v1/inventory_item/${sku}`, {
+  await ebayFetch(storeId, "PUT", `/sell/inventory/v1/inventory_item/${encodeURIComponent(sku)}`, {
     availability: { shipToLocationAvailability: { quantity: 1 } },
     condition: ebayCondition(unit.condition),
     conditionDescription: unit.defect_notes || undefined,
+    packageWeightAndSize: pkg,
     product: {
       title: copy.title,
       description: copy.description,
       imageUrls: images,
       brand: unit.brand || undefined,
       mpn: unit.model || undefined,
+      aspects,
+      ...(epid ? { epid } : {}),
     },
   });
 
@@ -349,6 +456,7 @@ export async function listSku(storeId, sku) {
       returnPolicyId: policies.returnP,
     },
     merchantLocationKey: loc,
+    listingDuration: "GTC",
     pricingSummary: { price: { value: money(unit.ask_cents), currency: "USD" } },
   };
   if (offerId) {

@@ -26,7 +26,11 @@ export async function applyChannelListing(channel: string, skus: string[], liste
     if (res.status === 409 && body.error === "ebay_not_connected") {
       /* fall through and mark locally */
     } else if (!res.ok) {
-      throw new Error(body.message || body.error || "eBay listing failed");
+      const detail = String(body.message || "").trim();
+      if (detail && !/^invalid$/i.test(detail) && detail !== "ebay_list_failed") {
+        throw new Error(detail);
+      }
+      throw new Error("eBay rejected the listing. Open the unit and try again after the latest functions deploy.");
     } else {
       return;
     }
