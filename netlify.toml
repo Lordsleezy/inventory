@@ -17,6 +17,12 @@
   pretty_urls = false
 
 [[redirects]]
+  from = "/oauth/go"
+  to = "/.netlify/functions/oauth-go"
+  status = 200
+  force = true
+
+[[redirects]]
   from = "/.netlify/functions/oauth-callback/"
   to = "/.netlify/functions/oauth-callback"
   status = 200

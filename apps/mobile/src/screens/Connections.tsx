@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { Browser } from "@capacitor/browser";
 import { App as CapApp } from "@capacitor/app";
+import { openConnectUrl } from "../oauth-browser";
 import { floorCloud } from "@floor/cloud";
 import { useStore } from "../store";
 import { authHeader, functionsUrl } from "../functions";
@@ -59,13 +59,14 @@ export function ConnectionsScreen() {
         setError(body.message || body.error || `Connect failed (${res.status})`);
         return;
       }
-      try {
-        await Browser.close();
-      } catch {
-        /* no leftover in-app browser */
+      const mode = await openConnectUrl(body.url);
+      if (mode === "native") {
+        await load();
+        await hydrate();
       }
-      await Browser.open({ url: body.url });
     } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (message === "cancelled" || /cancelled/i.test(message)) return;
       setError(friendlyRpc(err));
     }
   }

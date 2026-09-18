@@ -120,11 +120,10 @@ function recoveryPage() {
         form.submit();
       }
       const parsed = parseHref(location.href);
-      if (parsed.code && parsed.state) postRecovered(parsed);
-      else {
-        document.getElementById("msg").textContent = parsed.error
-          ? ("The platform refused access: " + parsed.error)
-          : "eBay came back without a code or state. Close this window and tap Connect again in Floor.";
+      if (parsed.error && !parsed.code) {
+        document.getElementById("msg").textContent = "The platform refused access: " + parsed.error;
+      } else {
+        postRecovered(parsed);
       }
     </script>
   </body>

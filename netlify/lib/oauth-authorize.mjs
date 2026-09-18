@@ -42,5 +42,5 @@ export function publicOrigin(event) {
 }
 
 export function hopUrl(event, nonce) {
-  return `${publicOrigin(event)}/.netlify/functions/oauth-go?n=${encodeURIComponent(nonce)}`;
+  return `${publicOrigin(event)}/oauth/go?n=${encodeURIComponent(nonce)}`;
 }

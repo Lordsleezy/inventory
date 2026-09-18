@@ -100,7 +100,7 @@ git tag ios-cloud-1
 git push origin ios-cloud-1
 ```
 
-Or start a build of `master` from the Codemagic dashboard.
+Or start a build of `master` from the Codemagic dashboard. eBay Connect on iPhone needs a build that includes the in-app WebView (`openAuth`); the old Capacitor Browser sheet drops eBay’s `#` code.
 
 `appstore` group must include `CERTIFICATE_PRIVATE_KEY`, `VITE_SUPABASE_URL`
 (`https://zoukmsmbztcuyoslvikp.supabase.co`), `VITE_SUPABASE_ANON_KEY`,
