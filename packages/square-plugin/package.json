@@ -6,6 +6,7 @@
   "type": "module",
   "main": "src/index.ts",
   "exports": { ".": "./src/index.ts" },
+  "keywords": ["capacitor", "plugin"],
   "capacitor": {
     "ios": { "src": "ios" }
   },

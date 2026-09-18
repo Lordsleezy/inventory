@@ -59,11 +59,7 @@ export function ConnectionsScreen() {
         setError(body.message || body.error || `Connect failed (${res.status})`);
         return;
       }
-      const mode = await openConnectUrl(body.url);
-      if (mode === "native") {
-        await load();
-        await hydrate();
-      }
+      await openConnectUrl(body.url);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       if (message === "cancelled" || /cancelled/i.test(message)) return;

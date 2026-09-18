@@ -218,8 +218,8 @@ export async function handler(event) {
     if (!params.recovered) return recoveryPage();
     return page(400, {
       title: "Could not connect",
-      message: "This iPhone build dropped eBay’s sign-in code.",
-      detail: "Install the TestFlight update from the ios-ebay-connect-1 build, then Connect again. The in-app browser on this version cannot keep eBay’s code.",
+      message: "eBay came back without a code or state.",
+      detail: "Close this window and return to Floor, then Connect again after the ios-ebay-connect-2 update. That build stays in Floor instead of the Safari sheet.",
       href: deepLink({ ok: "0" }),
     });
   }
