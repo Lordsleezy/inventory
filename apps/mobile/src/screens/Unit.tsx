@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   buildReceipt,
   formatCents,
+  listedChannelsBySku,
   loadUnit,
   receiptHtml,
   saleForSku,
@@ -20,6 +21,7 @@ import { openHtml } from "../files";
 import { useStore } from "../store";
 import { askManagerPin } from "../pin";
 import { friendlyRpc, needsManagerPin, needsVoidFirst } from "../rpc";
+import { ChannelMarks, ChannelToggleRow } from "../listingMarks";
 
 const MOVABLE_STATES: UnitState[] = ["available", "reserved", "repair", "scrapped", "lost"];
 
@@ -338,27 +340,53 @@ export function UnitScreen() {
 }
 
 function MarkListed({ sku, channels, online }: { sku: string; channels: string[]; online: boolean }) {
-  const [channel, setChannel] = useState(channels.find((c) => c !== "floor") ?? "ebay");
-  const [msg, setMsg] = useState("");
-  async function mark() {
-    setMsg("");
-    const { error } = await floorCloud().rpc("mark_listed", { p_sku: sku, p_channel: channel, p_listing_id: null });
-    setMsg(error ? error.message : `Listed on ${channel}`);
+  const { db, hydrate, ensureOnline, cacheEpoch } = useStore();
+  const [listed, setListed] = useState<string[]>([]);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    void listedChannelsBySku(db, [sku])
+      .then((map) => setListed(map.get(sku) ?? []))
+      .catch((err) => setError(friendlyRpc(err)));
+  }, [db, sku, cacheEpoch]);
+
+  async function toggle(channel: string, next: boolean) {
+    setError("");
+    try {
+      await ensureOnline();
+      const { error: rpcErr } = await floorCloud().rpc("set_listing", {
+        p_sku: sku,
+        p_channel: channel,
+        p_listed: next,
+      });
+      if (rpcErr) throw rpcErr;
+      await hydrate();
+    } catch (err) {
+      setError(friendlyRpc(err));
+    }
   }
+
   return (
     <div className="border-b border-floor-line py-3">
-      <Label>Mark as listed on</Label>
-      <div className="mt-2 flex items-center gap-2">
-        <select className="field" value={channel} onChange={(e) => setChannel(e.target.value)}>
-          {channels.filter((c) => c !== "floor").map((c) => (
-            <option key={c} value={c}>{c}</option>
-          ))}
-        </select>
-        <button type="button" className="btn-text px-0" disabled={!online} onClick={() => void mark()}>
-          Save
-        </button>
-      </div>
-      {msg ? <p className="text-quiet mt-1">{msg}</p> : null}
+      <Label>Listed on</Label>
+      <p className="mt-1 text-quiet text-floor-mute">
+        F Facebook (blue), E eBay (green), A Amazon (orange), other letters (white). Filled means listed.
+        Tap to turn a channel on or off.
+      </p>
+      {listed.length ? (
+        <div className="mt-2">
+          <ChannelMarks channels={listed} />
+        </div>
+      ) : (
+        <p className="mt-2 text-quiet text-floor-mute">Not listed anywhere.</p>
+      )}
+      <ChannelToggleRow
+        options={channels}
+        listed={listed}
+        disabled={!online}
+        onToggle={(channel, next) => void toggle(channel, next)}
+      />
+      <Notice tone="error">{error}</Notice>
     </div>
   );
 }

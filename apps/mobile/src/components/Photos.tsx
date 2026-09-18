@@ -2,8 +2,9 @@ import { useCallback, useEffect, useState } from "react";
 import { listPhotos } from "@floor/store";
 import { floorCloud, storagePathForPhoto } from "@floor/cloud";
 import { useStore } from "../store";
-import { capturePhoto, photoSrc, readPhotoBase64 } from "../photos";
+import { capturePhoto, deletePhotoFile, photoSrc, readPhotoBase64 } from "../photos";
 import { Label, Notice } from "./ui";
+import { PhotoViewer } from "./PhotoViewer";
 import { friendlyRpc } from "../rpc";
 
 type Shown = { id: number; path: string; src: string; isPrimary: boolean };
@@ -13,10 +14,11 @@ function isCloudPath(path: string): boolean {
 }
 
 export function Photos({ sku, disabled }: { sku: string; disabled?: boolean }) {
-  const { db, session, online, hydrate } = useStore();
+  const { db, session, online, hydrate, cacheEpoch, ensureOnline } = useStore();
   const [shown, setShown] = useState<Shown[]>([]);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
+  const [open, setOpen] = useState<number | null>(null);
 
   const refresh = useCallback(async () => {
     const rows = await listPhotos(db, sku);
@@ -31,13 +33,13 @@ export function Photos({ sku, disabled }: { sku: string; disabled?: boolean }) {
           src = await photoSrc(row.path);
         }
         out.push({
-          id: row.id,
+          id: Number(row.id),
           path: row.path,
           src,
           isPrimary: Number(row.is_primary) === 1,
         });
       } catch {
-        out.push({ id: row.id, path: row.path, src: "", isPrimary: false });
+        out.push({ id: Number(row.id), path: row.path, src: "", isPrimary: false });
       }
     }
     setShown(out);
@@ -45,7 +47,7 @@ export function Photos({ sku, disabled }: { sku: string; disabled?: boolean }) {
 
   useEffect(() => {
     void refresh();
-  }, [refresh]);
+  }, [refresh, cacheEpoch]);
 
   async function add(source: "camera" | "library") {
     setError("");
@@ -76,20 +78,55 @@ export function Photos({ sku, disabled }: { sku: string; disabled?: boolean }) {
     }
   }
 
+  async function remove(id: number) {
+    setError("");
+    await ensureOnline();
+    const photo = shown.find((p) => p.id === id);
+    const { error: rpcErr } = await floorCloud().rpc("delete_unit_photo", { p_id: id });
+    if (rpcErr) throw rpcErr;
+    if (photo?.path && isCloudPath(photo.path)) {
+      await floorCloud().storage.from("unit-photos").remove([photo.path]);
+    } else if (photo?.path) {
+      await deletePhotoFile(photo.path);
+    }
+    const nextIndex = shown.findIndex((p) => p.id === id);
+    await hydrate();
+    await refresh();
+    const remaining = shown.filter((p) => p.id !== id);
+    if (!remaining.length) setOpen(null);
+    else setOpen(Math.min(nextIndex, remaining.length - 1));
+  }
+
+  async function makePrimary(id: number) {
+    setError("");
+    await ensureOnline();
+    const { error: rpcErr } = await floorCloud().rpc("set_primary_photo", { p_id: id });
+    if (rpcErr) throw rpcErr;
+    await hydrate();
+    await refresh();
+  }
+
   return (
     <div className="border-b border-floor-line py-3">
       <Label>Photos</Label>
       {shown.length > 0 ? (
         <ul className="mt-2 flex gap-2 overflow-x-auto pb-1">
-          {shown.map((photo) => (
+          {shown.map((photo, i) => (
             <li key={photo.id} className="relative shrink-0">
-              {photo.src ? (
-                <img src={photo.src} alt="" className="h-28 w-28 rounded-sm object-cover" loading="lazy" />
-              ) : (
-                <span className="flex h-28 w-28 items-center justify-center rounded-sm border border-floor-line text-center text-quiet text-floor-danger">
-                  file missing
+              <button type="button" className="block" onClick={() => setOpen(i)} aria-label="Open photo">
+                {photo.src ? (
+                  <img src={photo.src} alt="" className="h-28 w-28 rounded-sm object-cover" loading="lazy" />
+                ) : (
+                  <span className="flex h-28 w-28 items-center justify-center rounded-sm border border-floor-line text-center text-quiet text-floor-danger">
+                    file missing
+                  </span>
+                )}
+              </button>
+              {photo.isPrimary ? (
+                <span className="absolute bottom-1 left-1 bg-black/70 px-1 text-[10px] uppercase tracking-wide text-floor-text">
+                  Primary
                 </span>
-              )}
+              ) : null}
             </li>
           ))}
         </ul>
@@ -108,6 +145,33 @@ export function Photos({ sku, disabled }: { sku: string; disabled?: boolean }) {
         </div>
       ) : null}
       <Notice tone="error">{error}</Notice>
+      {open != null && shown[open] ? (
+        <PhotoViewer
+          key={shown.map((p) => p.id).join("-")}
+          photos={shown}
+          start={open}
+          canEdit={!disabled && online}
+          onClose={() => setOpen(null)}
+          onDelete={async (id) => {
+            try {
+              await remove(id);
+            } catch (err) {
+              const message = friendlyRpc(err);
+              setError(message);
+              throw new Error(message);
+            }
+          }}
+          onPrimary={async (id) => {
+            try {
+              await makePrimary(id);
+            } catch (err) {
+              const message = friendlyRpc(err);
+              setError(message);
+              throw new Error(message);
+            }
+          }}
+        />
+      ) : null}
     </div>
   );
 }

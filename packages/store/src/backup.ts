@@ -9,7 +9,7 @@ import { SCHEMA, SCHEMA_VERSION } from "./schema.ts";
  * so a restore can tell whether any image is missing.
  */
 
-const TABLES = ["meta", "settings", "sku_ledger", "units", "sales", "events", "photos"] as const;
+const TABLES = ["meta", "settings", "sku_ledger", "units", "sales", "events", "photos", "listings"] as const;
 
 export type Snapshot = {
   format: "floor-backup";

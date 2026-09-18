@@ -89,6 +89,10 @@ const stockedStore: CachePayload = {
       is_primary: true,
     },
   ],
+  listings: [
+    { sku: "10421", channel: "facebook", status: "listed", listed_at: "2026-09-01T00:00:00.000Z" },
+    { sku: "10421", channel: "ebay", status: "delisted", delisted_at: "2026-09-02T00:00:00.000Z" },
+  ],
   events: [
     { id: 1, at: "2026-09-01T00:00:00.000Z", sku: null, kind: "store_created", actor: "Pat" },
     { id: 2, at: "2026-09-01T00:01:00.000Z", sku: "10421", kind: "received", actor: "Pat" },
@@ -124,9 +128,9 @@ test("hydrate of a stocked store inserts ledger then units, sales, photos, event
     "SELECT sku, state, acquisition_cost_cents FROM units ORDER BY sku",
   );
   const sales = await db.all<{ sku: string; receipt_no: string }>("SELECT sku, receipt_no FROM sales");
-  const photos = await db.all<{ sku: string }>("SELECT sku FROM photos");
-  const events = await db.all<{ sku: string | null; kind: string }>(
-    "SELECT sku, kind FROM events ORDER BY id",
+  const photos = await db.all<{ sku: string; id: number }>("SELECT sku, id FROM photos");
+  const listed = await db.all<{ sku: string; channel: string; status: string }>(
+    "SELECT sku, channel, status FROM listings ORDER BY channel",
   );
 
   assert.deepEqual(ledger.map((r) => r.sku), ["10421", "10422"]);
@@ -135,6 +139,12 @@ test("hydrate of a stocked store inserts ledger then units, sales, photos, event
   assert.equal(units[1]?.state, "sold");
   assert.equal(sales[0]?.receipt_no, "R-10422");
   assert.equal(photos.length, 1);
+  assert.equal(Number(photos[0]?.id), 3);
+  assert.equal(listed.length, 2);
+  assert.equal(listed.find((r) => r.channel === "facebook")?.status, "listed");
+  const events = await db.all<{ sku: string | null; kind: string }>(
+    "SELECT sku, kind FROM events ORDER BY id",
+  );
   assert.equal(events.length, 4);
   assert.equal(events.find((e) => e.kind === "store_created")?.sku, null);
   assert.equal(events.find((e) => e.kind === "staff_invited")?.sku, null);
@@ -198,6 +208,7 @@ test("hydrate sold then voided then deleted without FK or unique errors", async 
     units: [stockedStore.units[0]!],
     sales: voided.sales,
     photos: stockedStore.photos,
+    listings: stockedStore.listings,
     events: [
       ...voided.events!,
       { id: 6, at: "2026-09-05T00:00:00.000Z", sku: "10422", kind: "deleted", actor: "Pat" },

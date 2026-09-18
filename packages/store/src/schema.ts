@@ -18,7 +18,7 @@
  * `settings`, so a pallet of power tools needs no schema change.
  */
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 /** Run on every connection, before anything else. */
 export const PRAGMAS = [
@@ -212,6 +212,19 @@ CREATE TABLE IF NOT EXISTS photos (
 );
 
 CREATE INDEX IF NOT EXISTS ix_photos_sku ON photos(sku);
+
+-- Mirror of cloud listings for this store. Hydrate replaces the rows.
+CREATE TABLE IF NOT EXISTS listings (
+  sku         TEXT NOT NULL REFERENCES sku_ledger(sku),
+  channel     TEXT NOT NULL,
+  status      TEXT NOT NULL,
+  listing_id  TEXT,
+  listed_at   TEXT,
+  delisted_at TEXT,
+  PRIMARY KEY (sku, channel)
+);
+
+CREATE INDEX IF NOT EXISTS ix_listings_status ON listings(status);
 
 -- Everything the business calls things. No vocabulary is compiled in.
 CREATE TABLE IF NOT EXISTS settings (

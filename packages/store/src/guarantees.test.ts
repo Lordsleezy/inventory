@@ -5,6 +5,7 @@ import { openNodeDb } from "./driver-node.ts";
 import { exportSnapshot, restoreSnapshot } from "./backup.ts";
 import { FloorError, type Db } from "./db.ts";
 import {
+  countNeedsWork,
   deleteUnit,
   initDb,
   listUnits,
@@ -379,6 +380,31 @@ test("inventory can filter by category", async () => {
   assert.equal((await listUnits(db, { category: "Appliances" })).length, 2);
   assert.equal((await listUnits(db, { category: "Furniture" })).length, 1);
   assert.equal((await listUnits(db, { category: "Missing" })).length, 0);
+  await db.close();
+});
+
+test("needs-work filter uses condition and test status", async () => {
+  const db = await fresh();
+  await receiveUnit(db, { brand: "A", condition: "For parts" });
+  await receiveUnit(db, { brand: "B", testStatus: "failed" });
+  await receiveUnit(db, { brand: "C", testStatus: "passed", condition: "Excellent" });
+  await receiveUnit(db, { brand: "D", testStatus: "partial" });
+  assert.equal((await listUnits(db, { needsWork: true })).length, 3);
+  assert.equal(await countNeedsWork(db), 3);
+  await db.close();
+});
+
+test("inventory can filter by listing channel", async () => {
+  const db = await fresh();
+  const a = await receiveUnit(db, { brand: "A" });
+  await receiveUnit(db, { brand: "B" });
+  await db.run(
+    "INSERT INTO listings (sku, channel, status, listed_at) VALUES (?, ?, 'listed', ?)",
+    [a.sku, "facebook", new Date().toISOString()],
+  );
+  assert.equal((await listUnits(db, { listed: "facebook" })).length, 1);
+  assert.equal((await listUnits(db, { listed: "none" })).length, 1);
+  assert.equal((await listUnits(db, { listed: "ebay" })).length, 0);
   await db.close();
 });
 

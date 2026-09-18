@@ -28,6 +28,7 @@ export async function resetCacheReplica(db: Db): Promise<void> {
     await db.exec(`DROP TRIGGER IF EXISTS ${trigger.name}`);
   }
   await db.run("DELETE FROM photos");
+  await db.run("DELETE FROM listings");
   await db.run("DELETE FROM events");
   await db.run("DELETE FROM sales");
   await db.run("DELETE FROM units");

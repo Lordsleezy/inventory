@@ -372,9 +372,30 @@ export async function loadUnit(db: Db, sku: string): Promise<Unit | null> {
   return rows[0] ? toUnit(rows[0]) : null;
 }
 
+/** Failed/partial tests or For parts — existing fields, not a new column. */
+export const NEEDS_WORK_SQL = `(
+  lower(trim(coalesce(test_status, ''))) IN ('failed', 'partial')
+  OR lower(trim(coalesce(condition, ''))) = 'for parts'
+)`;
+
+export type ListingFilter = "facebook" | "ebay" | "amazon" | "elsewhere" | "none";
+
+export function unitNeedsWork(unit: Pick<Unit, "condition" | "testStatus">): boolean {
+  const test = (unit.testStatus ?? "").trim().toLowerCase();
+  const cond = (unit.condition ?? "").trim().toLowerCase();
+  return test === "failed" || test === "partial" || cond === "for parts";
+}
+
 export async function listUnits(
   db: Db,
-  opts: { query?: string; states?: UnitState[]; category?: string; limit?: number } = {},
+  opts: {
+    query?: string;
+    states?: UnitState[];
+    category?: string;
+    needsWork?: boolean;
+    listed?: ListingFilter;
+    limit?: number;
+  } = {},
 ): Promise<Unit[]> {
   const where: string[] = [];
   const params: SqlValue[] = [];
@@ -393,6 +414,28 @@ export async function listUnits(
   if (category) {
     where.push("category = ?");
     params.push(category);
+  }
+  if (opts.needsWork) {
+    where.push(NEEDS_WORK_SQL);
+  }
+  if (opts.listed === "none") {
+    where.push(
+      `sku NOT IN (SELECT sku FROM listings WHERE status = 'listed' AND lower(channel) <> 'floor')`,
+    );
+  } else if (opts.listed === "facebook") {
+    where.push(
+      `sku IN (SELECT sku FROM listings WHERE status = 'listed' AND (lower(channel) IN ('facebook','fb') OR lower(channel) LIKE '%facebook%'))`,
+    );
+  } else if (opts.listed === "ebay") {
+    where.push(`sku IN (SELECT sku FROM listings WHERE status = 'listed' AND lower(channel) = 'ebay')`);
+  } else if (opts.listed === "amazon") {
+    where.push(`sku IN (SELECT sku FROM listings WHERE status = 'listed' AND lower(channel) = 'amazon')`);
+  } else if (opts.listed === "elsewhere") {
+    where.push(
+      `sku IN (SELECT sku FROM listings WHERE status = 'listed'
+        AND lower(channel) NOT IN ('floor','facebook','fb','ebay','amazon')
+        AND lower(channel) NOT LIKE '%facebook%')`,
+    );
   }
 
   const sql = `SELECT * FROM units ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
@@ -701,6 +744,39 @@ export async function removePhoto(db: Db, id: number): Promise<void> {
     await db.run("DELETE FROM photos WHERE id = ?", [id]);
     await record(db, { sku: rows[0].sku, kind: "photo_removed", oldValue: rows[0].path });
   });
+}
+
+export async function countNeedsWork(db: Db, states: UnitState[] = ["available", "reserved", "repair"]): Promise<number> {
+  const marks = states.map(() => "?").join(",");
+  const rows = await db.all<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM units WHERE state IN (${marks}) AND ${NEEDS_WORK_SQL}`,
+    states,
+  );
+  return Number(rows[0]?.n ?? 0);
+}
+
+export async function listedChannelsBySku(db: Db, skus?: string[]): Promise<Map<string, string[]>> {
+  const map = new Map<string, string[]>();
+  const rows =
+    skus && skus.length
+      ? await db.all<{ sku: string; channel: string }>(
+          `SELECT sku, channel FROM listings
+            WHERE status = 'listed' AND lower(channel) <> 'floor'
+              AND sku IN (${skus.map(() => "?").join(",")})
+            ORDER BY channel`,
+          skus,
+        )
+      : await db.all<{ sku: string; channel: string }>(
+          `SELECT sku, channel FROM listings
+            WHERE status = 'listed' AND lower(channel) <> 'floor'
+            ORDER BY channel`,
+        );
+  for (const row of rows) {
+    const list = map.get(row.sku) ?? [];
+    list.push(row.channel);
+    map.set(row.sku, list);
+  }
+  return map;
 }
 
 // ---------------------------------------------------------------- reports

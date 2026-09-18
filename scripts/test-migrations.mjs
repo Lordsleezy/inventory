@@ -106,8 +106,16 @@ const rest = all.filter((f) => f.name > "0005_private_photos.sql");
     `select 1 from information_schema.routines where routine_schema = 'public' and routine_name = 'add_category'`,
   );
   assert.equal(addCat.rows.length, 1, "add_category exists");
+  const setListing = await db.query(
+    `select 1 from information_schema.routines where routine_schema = 'public' and routine_name = 'set_listing'`,
+  );
+  assert.equal(setListing.rows.length, 1, "set_listing exists");
+  const delPhoto = await db.query(
+    `select 1 from information_schema.routines where routine_schema = 'public' and routine_name = 'delete_unit_photo'`,
+  );
+  assert.equal(delPhoto.rows.length, 1, "delete_unit_photo exists");
   await db.query(`select public.anon_can_read_unit_photo('not-a-path')`);
-  console.log("fresh 0001→0012 ok");
+  console.log("fresh 0001→0013 ok");
 }
 
 {
@@ -118,7 +126,7 @@ const rest = all.filter((f) => f.name > "0005_private_photos.sql");
   assert.equal(before.includes("store_id"), false, "0005 public_items has no store_id");
   await apply(db, rest);
   const cols = await publicItemColumns(db);
-  assert.deepEqual(cols, expected, `upgrade 0005→0012 columns: ${cols.join(",")}`);
+  assert.deepEqual(cols, expected, `upgrade 0005→0013 columns: ${cols.join(",")}`);
   await db.query(`select public.anon_can_read_unit_photo('not-a-path')`);
-  console.log("upgrade 0005→0012 ok");
+  console.log("upgrade 0005→0013 ok");
 }

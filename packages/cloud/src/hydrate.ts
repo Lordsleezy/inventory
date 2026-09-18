@@ -10,6 +10,7 @@ export type CachePayload = {
   sales: Array<Record<string, unknown>>;
   photos: Array<Record<string, unknown>>;
   events: Array<Record<string, unknown>>;
+  listings?: Array<Record<string, unknown>>;
 };
 
 export function digitSku(value: unknown): string | null {
@@ -70,6 +71,7 @@ export async function dropCacheTriggers(db: Db): Promise<void> {
 async function clearReplica(db: Db): Promise<void> {
   // Children first. Triggers are already gone so append-only rules cannot block this.
   await db.run("DELETE FROM photos");
+  await db.run("DELETE FROM listings");
   await db.run("DELETE FROM events");
   await db.run("DELETE FROM sales");
   await db.run("DELETE FROM units");
@@ -235,13 +237,40 @@ async function applyOnce(db: Db, payload: CachePayload): Promise<void> {
       for (const p of payload.photos) {
         const sku = digitSku(p.sku);
         if (!sku || !ledger.has(sku)) continue;
-        await db.run(
-          `INSERT INTO photos (sku, path, created_at, is_primary) VALUES (?,?,?,?)`,
-          [
+        const photoId = intOrNull(p.id);
+        const primary = p.is_primary === true || p.is_primary === 1 || p.is_primary === "1" ? 1 : 0;
+        if (photoId != null) {
+          await db.run(`INSERT INTO photos (id, sku, path, created_at, is_primary) VALUES (?,?,?,?,?)`, [
+            photoId,
             sku,
             text(p.path),
             text(p.created_at, new Date().toISOString()),
-            p.is_primary === true || p.is_primary === 1 || p.is_primary === "1" ? 1 : 0,
+            primary,
+          ]);
+        } else {
+          await db.run(`INSERT INTO photos (sku, path, created_at, is_primary) VALUES (?,?,?,?)`, [
+            sku,
+            text(p.path),
+            text(p.created_at, new Date().toISOString()),
+            primary,
+          ]);
+        }
+      }
+
+      for (const l of payload.listings ?? []) {
+        const sku = digitSku(l.sku);
+        if (!sku || !ledger.has(sku)) continue;
+        const channel = text(l.channel).trim();
+        if (!channel) continue;
+        await db.run(
+          `INSERT INTO listings (sku, channel, status, listing_id, listed_at, delisted_at) VALUES (?,?,?,?,?,?)`,
+          [
+            sku,
+            channel,
+            text(l.status, "not_listed"),
+            nullable(l.listing_id),
+            nullable(l.listed_at),
+            nullable(l.delisted_at),
           ],
         );
       }

@@ -1,43 +1,129 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { formatCents, listUnits, type Unit, type UnitState } from "@floor/store";
+import {
+  countNeedsWork,
+  formatCents,
+  listedChannelsBySku,
+  listUnits,
+  type ListingFilter,
+  type Unit,
+  type UnitState,
+} from "@floor/store";
+import { floorCloud } from "@floor/cloud";
 import { useDb, useStore } from "../store";
 import { Notice, Spinner } from "../components/ui";
+import { ChannelMarks, ChannelToggleRow, normalizeChannel } from "../listingMarks";
 import { friendlyRpc } from "../rpc";
 
-const FILTERS: { key: string; label: string; states?: UnitState[] }[] = [
-  { key: "stock", label: "In stock", states: ["available", "reserved", "repair"] },
+const STOCK: UnitState[] = ["available", "reserved", "repair"];
+
+const FILTERS: {
+  key: string;
+  label: string;
+  states?: UnitState[];
+  needsWork?: boolean;
+}[] = [
+  { key: "stock", label: "In stock", states: STOCK },
+  { key: "work", label: "Needs work", states: STOCK, needsWork: true },
   { key: "sold", label: "Sold", states: ["sold"] },
   { key: "other", label: "Out", states: ["voided", "scrapped", "lost"] },
   { key: "all", label: "All" },
 ];
 
+const LISTED_FILTERS: { key: "" | ListingFilter; label: string }[] = [
+  { key: "", label: "Any listing" },
+  { key: "facebook", label: "Listed on Facebook" },
+  { key: "ebay", label: "Listed on eBay" },
+  { key: "amazon", label: "Listed on Amazon" },
+  { key: "elsewhere", label: "Listed elsewhere" },
+  { key: "none", label: "Not listed anywhere" },
+];
+
 export function InventoryScreen() {
   const db = useDb();
-  const { online, cacheEpoch, settings } = useStore();
+  const { online, cacheEpoch, settings, hydrate, ensureOnline } = useStore();
   const location = useLocation();
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("");
+  const [listed, setListed] = useState<"" | ListingFilter>("");
   const [filter, setFilter] = useState(() => {
     const tab = (location.state as { filter?: string } | null)?.filter;
     return tab && FILTERS.some((f) => f.key === tab) ? tab : "stock";
   });
   const [units, setUnits] = useState<Unit[] | null>(null);
+  const [listedMap, setListedMap] = useState<Map<string, string[]>>(new Map());
+  const [workCount, setWorkCount] = useState(0);
   const [error, setError] = useState("");
+  const [selecting, setSelecting] = useState(false);
+  const [picked, setPicked] = useState<string[]>([]);
 
-  const states = useMemo(() => FILTERS.find((f) => f.key === filter)?.states, [filter]);
+  const tab = FILTERS.find((f) => f.key === filter);
+  const states = tab?.states;
 
   useEffect(() => {
     let live = true;
-    // Searching runs against the local file, so there is no debounce to hide
-    // network latency — there is no network.
-    void listUnits(db, { query, states, category: category || undefined })
-      .then((rows) => live && setUnits(rows))
+    void Promise.all([
+      listUnits(db, {
+        query,
+        states,
+        category: category || undefined,
+        needsWork: tab?.needsWork,
+        listed: listed || undefined,
+      }),
+      listedChannelsBySku(db),
+      countNeedsWork(db),
+    ])
+      .then(([rows, map, count]) => {
+        if (!live) return;
+        setUnits(rows);
+        setListedMap(map);
+        setWorkCount(count);
+      })
       .catch((err) => live && setError(friendlyRpc(err)));
     return () => {
       live = false;
     };
-  }, [db, query, states, category, cacheEpoch]);
+  }, [db, query, states, category, listed, tab?.needsWork, cacheEpoch]);
+
+  const channelOptions = useMemo(() => {
+    const fromSettings = settings.channels.filter((c) => c !== "floor");
+    for (const extra of ["facebook", "ebay", "amazon"]) {
+      if (!fromSettings.some((c) => normalizeChannel(c) === extra)) fromSettings.push(extra);
+    }
+    return fromSettings;
+  }, [settings.channels]);
+
+  function togglePick(sku: string) {
+    setPicked((prev) => (prev.includes(sku) ? prev.filter((s) => s !== sku) : [...prev, sku]));
+  }
+
+  async function applyListing(channel: string, next: boolean) {
+    setError("");
+    if (!picked.length) {
+      setError("Select one or more units first.");
+      return;
+    }
+    try {
+      await ensureOnline();
+      const { error: rpcErr } = await floorCloud().rpc("set_listings", {
+        p_skus: picked,
+        p_channel: channel,
+        p_listed: next,
+      });
+      if (rpcErr) throw rpcErr;
+      await hydrate();
+    } catch (err) {
+      setError(friendlyRpc(err));
+    }
+  }
+
+  function channelNext(channel: string): boolean {
+    const key = normalizeChannel(channel);
+    if (!picked.length) return true;
+    return !picked.every((sku) =>
+      (listedMap.get(sku) ?? []).some((c) => normalizeChannel(c) === key),
+    );
+  }
 
   return (
     <section>
@@ -65,6 +151,9 @@ export function InventoryScreen() {
             className={`min-h-touch text-quiet ${filter === item.key ? "text-floor-accent" : "text-floor-mute"}`}
           >
             {item.label}
+            {item.key === "work" && workCount > 0 ? (
+              <span className="ml-1 text-floor-accent">({workCount})</span>
+            ) : null}
           </button>
         ))}
       </div>
@@ -83,6 +172,54 @@ export function InventoryScreen() {
         ))}
       </select>
 
+      <select
+        className="field mt-2"
+        value={listed}
+        onChange={(e) => setListed(e.target.value as "" | ListingFilter)}
+        aria-label="Filter by listing"
+      >
+        {LISTED_FILTERS.map((item) => (
+          <option key={item.key || "any"} value={item.key}>
+            {item.label}
+          </option>
+        ))}
+      </select>
+
+      <div className="mt-2 flex items-center gap-3">
+        <button
+          type="button"
+          className="btn-text px-0"
+          onClick={() => {
+            setSelecting((on) => !on);
+            setPicked([]);
+          }}
+        >
+          {selecting ? "Done" : "Select"}
+        </button>
+        {selecting ? (
+          <span className="text-quiet text-floor-mute">{picked.length} selected</span>
+        ) : null}
+      </div>
+
+      {selecting ? (
+        <div className="mt-1">
+          <p className="text-quiet text-floor-mute">
+            F Facebook, E eBay, A Amazon, other letters elsewhere. Filled means listed. Tap a letter to
+            mark or unmark the selected units.
+          </p>
+          <ChannelToggleRow
+            options={channelOptions}
+            listed={
+              picked.length
+                ? channelOptions.filter((ch) => !channelNext(ch))
+                : []
+            }
+            disabled={!online}
+            onToggle={(channel, next) => void applyListing(channel, next)}
+          />
+        </div>
+      ) : null}
+
       <Notice tone="error">{error}</Notice>
 
       {units === null ? <Spinner label="Reading" /> : null}
@@ -91,35 +228,59 @@ export function InventoryScreen() {
         <p className="py-6 text-quiet text-floor-mute">
           {query
             ? `Nothing matches “${query}”.`
-            : filter === "stock"
-              ? "Nothing in stock."
-              : "Nothing here yet."}
+            : filter === "work"
+              ? "Nothing needs work."
+              : filter === "stock"
+                ? "Nothing in stock."
+                : "Nothing here yet."}
         </p>
       ) : null}
 
       <ul>
-        {units?.map((unit) => (
-          <li key={unit.sku} className="border-b border-floor-line">
-            <Link to={`/inventory/${unit.sku}`} className="flex min-h-touch items-center gap-3 py-3">
-              <span className="w-14 shrink-0 font-mono text-body text-floor-mute">{unit.sku}</span>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-body">
-                  {[unit.brand, unit.model].filter(Boolean).join(" ") || unit.title || "Untitled"}
-                </span>
-                <span className="block truncate text-quiet text-floor-mute">
-                  {[unit.category, unit.condition, unit.location].filter(Boolean).join(" · ") || "—"}
-                </span>
-              </span>
-              <span className="shrink-0 text-right">
-                {/* An unpriced unit shows nothing at all, not $0.00. */}
-                <span className="block text-body">{formatCents(unit.askCents) || "—"}</span>
-                {unit.state !== "available" ? (
-                  <span className="block text-quiet text-floor-mute">{unit.state}</span>
+        {units?.map((unit) => {
+          const channels = listedMap.get(unit.sku) ?? [];
+          return (
+            <li key={unit.sku} className="border-b border-floor-line">
+              <div className="flex min-h-touch items-center gap-3 py-3">
+                {selecting ? (
+                  <input
+                    type="checkbox"
+                    className="shrink-0"
+                    checked={picked.includes(unit.sku)}
+                    onChange={() => togglePick(unit.sku)}
+                    aria-label={`Select ${unit.sku}`}
+                  />
                 ) : null}
-              </span>
-            </Link>
-          </li>
-        ))}
+                <Link
+                  to={selecting ? "#" : `/inventory/${unit.sku}`}
+                  onClick={(e) => {
+                    if (!selecting) return;
+                    e.preventDefault();
+                    togglePick(unit.sku);
+                  }}
+                  className="flex min-w-0 flex-1 items-center gap-3"
+                >
+                  <span className="w-14 shrink-0 font-mono text-body text-floor-mute">{unit.sku}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-body">
+                      {[unit.brand, unit.model].filter(Boolean).join(" ") || unit.title || "Untitled"}
+                    </span>
+                    <span className="block truncate text-quiet text-floor-mute">
+                      {[unit.category, unit.condition, unit.location].filter(Boolean).join(" · ") || "—"}
+                    </span>
+                    <ChannelMarks channels={channels} />
+                  </span>
+                  <span className="shrink-0 text-right">
+                    <span className="block text-body">{formatCents(unit.askCents) || "—"}</span>
+                    {unit.state !== "available" ? (
+                      <span className="block text-quiet text-floor-mute">{unit.state}</span>
+                    ) : null}
+                  </span>
+                </Link>
+              </div>
+            </li>
+          );
+        })}
       </ul>
 
       {units?.length ? (

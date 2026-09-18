@@ -103,16 +103,17 @@ async function settingsFromCloud(session: StaffSession): Promise<Partial<Setting
 async function hydrateCache(db: Db, session: StaffSession): Promise<{ delist: number; incidents: number }> {
   const sb = floorCloud();
   const staffView = session.role === "staff";
-  const [ledger, units, sales, photos, events, delist, incidents] = await Promise.all([
+  const [ledger, units, sales, photos, events, listings, delist, incidents] = await Promise.all([
     sb.from("sku_ledger").select("sku, issued_at, label, fate"),
     staffView ? sb.from("units_pos").select("*") : sb.from("units").select("*"),
     sb.from("sales").select("*"),
     sb.from("photos").select("*"),
     sb.from("events").select("id, at, sku, kind, field, old_value, new_value, actor, note"),
+    sb.from("listings").select("sku, channel, status, listing_id, listed_at, delisted_at"),
     sb.from("delist_tasks").select("id", { count: "exact", head: true }).is("completed_at", null),
     sb.from("incidents").select("id", { count: "exact", head: true }).is("resolved_at", null),
   ]);
-  for (const result of [ledger, units, sales, photos, events]) {
+  for (const result of [ledger, units, sales, photos, events, listings]) {
     if (result.error) throw new Error(result.error.message);
   }
 
@@ -123,6 +124,7 @@ async function hydrateCache(db: Db, session: StaffSession): Promise<{ delist: nu
     sales: (sales.data ?? []) as Array<Record<string, unknown>>,
     photos: (photos.data ?? []) as Array<Record<string, unknown>>,
     events: (events.data ?? []) as Array<Record<string, unknown>>,
+    listings: (listings.data ?? []) as Array<Record<string, unknown>>,
   });
 
   return { delist: delist.count ?? 0, incidents: incidents.count ?? 0 };
