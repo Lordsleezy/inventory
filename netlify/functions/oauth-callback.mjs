@@ -218,8 +218,8 @@ export async function handler(event) {
     if (!params.recovered) return recoveryPage();
     return page(400, {
       title: "Could not connect",
-      message: "eBay came back without a code or state.",
-      detail: "Close this window and tap Connect again in Floor. If it keeps failing, the RuName Auth Accepted URL must be this callback.",
+      message: "This iPhone build dropped eBay’s sign-in code.",
+      detail: "Install the TestFlight update from the ios-ebay-connect-1 build, then Connect again. The in-app browser on this version cannot keep eBay’s code.",
       href: deepLink({ ok: "0" }),
     });
   }
