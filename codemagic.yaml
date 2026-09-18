@@ -134,6 +134,7 @@ workflows:
       - name: Build IPA
         script: |
           test -d "$XCODE_PROJECT"
+          xcodebuild -project "$XCODE_PROJECT" -list
           xcode-project build-ipa \
             --project "$XCODE_PROJECT" \
             --scheme "$XCODE_SCHEME"
