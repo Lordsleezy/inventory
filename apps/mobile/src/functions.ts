@@ -11,3 +11,30 @@ export async function authHeader(): Promise<Record<string, string>> {
   if (!token) throw new Error("not_signed_in");
   return { Authorization: `Bearer ${token}` };
 }
+
+export async function applyChannelListing(channel: string, skus: string[], listed: boolean): Promise<void> {
+  const { floorCloud } = await import("@floor/cloud");
+  const key = channel.trim().toLowerCase();
+  if (key === "ebay") {
+    const headers = await authHeader();
+    const res = await fetch(functionsUrl(listed ? "ebay-list" : "ebay-withdraw"), {
+      method: "POST",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify(skus.length === 1 ? { sku: skus[0] } : { skus }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (res.status === 409 && body.error === "ebay_not_connected") {
+      /* fall through and mark locally */
+    } else if (!res.ok) {
+      throw new Error(body.message || body.error || "eBay listing failed");
+    } else {
+      return;
+    }
+  }
+  const { error } = await floorCloud().rpc(skus.length === 1 ? "set_listing" : "set_listings", {
+    ...(skus.length === 1 ? { p_sku: skus[0] } : { p_skus: skus }),
+    p_channel: channel,
+    p_listed: listed,
+  });
+  if (error) throw error;
+}

@@ -19,6 +19,7 @@ import { Photos } from "../components/Photos";
 import { DangerButton, Label, MoneyField, Notice, SelectField, Spinner, TextField } from "../components/ui";
 import { openHtml } from "../files";
 import { useStore } from "../store";
+import { applyChannelListing } from "../functions";
 import { askManagerPin } from "../pin";
 import { friendlyRpc, needsManagerPin, needsVoidFirst } from "../rpc";
 import { ChannelMarks, ChannelToggleRow } from "../listingMarks";
@@ -354,12 +355,7 @@ function MarkListed({ sku, channels, online }: { sku: string; channels: string[]
     setError("");
     try {
       await ensureOnline();
-      const { error: rpcErr } = await floorCloud().rpc("set_listing", {
-        p_sku: sku,
-        p_channel: channel,
-        p_listed: next,
-      });
-      if (rpcErr) throw rpcErr;
+      await applyChannelListing(channel, [sku], next);
       await hydrate();
     } catch (err) {
       setError(friendlyRpc(err));

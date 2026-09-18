@@ -41,9 +41,13 @@ ALERT_WEBHOOK_SECRET
 SQUARE_APPLICATION_ID
 SQUARE_APPLICATION_SECRET
 SQUARE_ENV=sandbox
-EBAY_CLIENT_ID
-EBAY_CLIENT_SECRET
-EBAY_ENV=sandbox
+EBAY_CLIENT_ID           # App ID (Client ID) from the sandbox keyset
+EBAY_DEV_ID              # Dev ID (stored; Inventory REST uses App ID + Cert ID)
+EBAY_CLIENT_SECRET       # Cert ID (Client Secret) from the sandbox keyset
+EBAY_RU_NAME             # RuName from User Tokens → Get a Token from eBay via Your Application
+EBAY_ENV=sandbox         # never production until we switch
+EBAY_NOTIFICATION_TOKEN  # 32–80 random chars you invent (same value in Netlify)
+EBAY_NOTIFICATION_ENDPOINT  # https://<functions-site>/.netlify/functions/ebay-notify
 AMAZON_APPLICATION_ID
 AMAZON_LWA_CLIENT_ID
 AMAZON_LWA_CLIENT_SECRET

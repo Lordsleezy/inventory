@@ -1,19 +1,15 @@
 import { randomBytes } from "node:crypto";
 import { ownerFromEvent, json, corsHeaders, serviceClient, requireEnv } from "../lib/server.mjs";
+import { EBAY_OAUTH_SCOPES, ebayHosts, ebayRuName } from "../lib/ebay-env.mjs";
 
 const SCOPES = {
   square: "MERCHANT_PROFILE_READ PAYMENTS_WRITE PAYMENTS_WRITE_IN_PERSON",
-  ebay: [
-    "https://api.ebay.com/oauth/api_scope/sell.inventory",
-    "https://api.ebay.com/oauth/api_scope/sell.fulfillment",
-    "https://api.ebay.com/oauth/api_scope/sell.account",
-    "https://api.ebay.com/oauth/api_scope/sell.marketing",
-  ].join(" "),
+  ebay: EBAY_OAUTH_SCOPES,
 };
 
 function authorizeUrl(provider, nonce) {
-  const redirectUri = requireEnv("OAUTH_REDIRECT_URI");
   if (provider === "square") {
+    const redirectUri = requireEnv("OAUTH_REDIRECT_URI");
     const host =
       process.env.SQUARE_ENV === "production"
         ? "https://connect.squareup.com"
@@ -22,10 +18,10 @@ function authorizeUrl(provider, nonce) {
     return `${host}/oauth2/authorize?client_id=${encodeURIComponent(id)}&scope=${encodeURIComponent(SCOPES.square)}&session=false&state=${nonce}&redirect_uri=${encodeURIComponent(redirectUri)}`;
   }
   if (provider === "ebay") {
-    const host =
-      process.env.EBAY_ENV === "production" ? "https://auth.ebay.com" : "https://auth.sandbox.ebay.com";
+    const { auth } = ebayHosts(process.env.EBAY_ENV);
     const id = requireEnv("EBAY_CLIENT_ID");
-    return `${host}/oauth2/authorize?client_id=${encodeURIComponent(id)}&response_type=code&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(SCOPES.ebay)}&state=${nonce}`;
+    const ruName = ebayRuName(process.env.EBAY_RU_NAME);
+    return `${auth}/oauth2/authorize?client_id=${encodeURIComponent(id)}&response_type=code&redirect_uri=${encodeURIComponent(ruName)}&scope=${encodeURIComponent(SCOPES.ebay)}&state=${nonce}`;
   }
   if (provider === "amazon") {
     const appId = requireEnv("AMAZON_APPLICATION_ID");

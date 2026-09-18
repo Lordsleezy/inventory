@@ -109,7 +109,7 @@ export function ConnectionsScreen() {
         locations={locations}
         onPick={pickLocation}
       />
-      <Card title="eBay" row={by("ebay")} onConnect={() => void connectFetch("ebay")} onDisconnect={() => void disconnect("ebay")} />
+      <Card title="eBay" row={by("ebay")} extra="Sandbox until EBAY_ENV is production" onConnect={() => void connectFetch("ebay")} onDisconnect={() => void disconnect("ebay")} />
       <div className="border-b border-floor-line py-3">
         <p className="text-body">Amazon</p>
         <label className="mt-2 flex items-center gap-2 text-quiet">

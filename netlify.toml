@@ -10,6 +10,9 @@
 [functions."dispatch-alerts"]
   schedule = "*/5 * * * *"
 
+[functions."ebay-sync"]
+  schedule = "*/5 * * * *"
+
 [[redirects]]
   from = "/"
   to = "/index.html"

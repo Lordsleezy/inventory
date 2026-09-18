@@ -9,7 +9,7 @@ import {
   type Unit,
   type UnitState,
 } from "@floor/store";
-import { floorCloud } from "@floor/cloud";
+import { applyChannelListing } from "../functions";
 import { useDb, useStore } from "../store";
 import { Notice, Spinner } from "../components/ui";
 import { ChannelMarks, ChannelToggleRow, normalizeChannel } from "../listingMarks";
@@ -105,12 +105,7 @@ export function InventoryScreen() {
     }
     try {
       await ensureOnline();
-      const { error: rpcErr } = await floorCloud().rpc("set_listings", {
-        p_skus: picked,
-        p_channel: channel,
-        p_listed: next,
-      });
-      if (rpcErr) throw rpcErr;
+      await applyChannelListing(channel, picked, next);
       await hydrate();
     } catch (err) {
       setError(friendlyRpc(err));

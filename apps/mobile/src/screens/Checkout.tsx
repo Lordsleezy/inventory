@@ -88,6 +88,17 @@ export function CheckoutScreen() {
     } catch {
       // Sale is already saved in the cloud; the next successful hydrate will catch up.
     }
+    try {
+      const { authHeader, functionsUrl } = await import("../functions");
+      const headers = await authHeader();
+      await fetch(functionsUrl("ebay-withdraw"), {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({ afterSale: true, sku }),
+      });
+    } catch {
+      /* ebay-sync will end the listing within 5 minutes */
+    }
     navigate("/inventory", { replace: true, state: { filter: "sold" } });
   }
 

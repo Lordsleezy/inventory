@@ -4,6 +4,7 @@ import {
   html,
   requireEnv,
 } from "../lib/server.mjs";
+import { exchangeEbayCode, subscribeNotifications } from "../lib/ebay.mjs";
 
 function deepLink(query) {
   const base = process.env.APP_DEEP_LINK || "floor://connections";
@@ -32,22 +33,7 @@ async function exchangeSquare(code) {
 }
 
 async function exchangeEbay(code) {
-  const host =
-    process.env.EBAY_ENV === "production" ? "https://api.ebay.com" : "https://api.sandbox.ebay.com";
-  const basic = Buffer.from(`${requireEnv("EBAY_CLIENT_ID")}:${requireEnv("EBAY_CLIENT_SECRET")}`).toString("base64");
-  const body = new URLSearchParams({
-    grant_type: "authorization_code",
-    code,
-    redirect_uri: requireEnv("OAUTH_REDIRECT_URI"),
-  });
-  const res = await fetch(`${host}/identity/v1/oauth2/token`, {
-    method: "POST",
-    headers: { Authorization: `Basic ${basic}`, "Content-Type": "application/x-www-form-urlencoded" },
-    body,
-  });
-  const json = await res.json();
-  if (!res.ok) throw new Error(json.error_description || json.error || "ebay_token_failed");
-  return json;
+  return exchangeEbayCode(code);
 }
 
 async function exchangeAmazon(code) {
@@ -144,6 +130,13 @@ export async function handler(event) {
     }
 
     const extra = state.provider === "square" ? { needs_location: "1" } : {};
+    if (state.provider === "ebay") {
+      try {
+        await subscribeNotifications(state.store_id);
+      } catch {
+        /* listing still works; polling will pick up sandbox sales */
+      }
+    }
     const href = deepLink({ provider: state.provider, ok: "1", ...extra });
     return html(
       200,
