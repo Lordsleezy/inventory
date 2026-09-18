@@ -24,7 +24,6 @@ import {
   spreadsheetRow,
   toCsv,
   toXlsx,
-  type ExportUnit,
 } from "@floor/cloud";
 
 const PAGE = 1000;
@@ -55,7 +54,7 @@ function intish(v) {
   return Number.isFinite(n) ? n : null;
 }
 
-function toUnit(row): ExportUnit {
+function toUnit(row) {
   return {
     sku: text(row.sku),
     brand: text(row.brand),
