@@ -49,6 +49,15 @@ node --experimental-strip-types scripts/import-phone-backup.mjs path\to\floor-ba
 node --experimental-strip-types scripts/verify-photos.mjs
 ```
 
+Export units and photos for Facebook / channel listing prep (sold skipped unless `--sold`). Writes a gitignored folder under `exports/`. Full steps: `docs/EXPORT.md`.
+
+```bash
+set SUPABASE_URL=https://zoukmsmbztcuyoslvikp.supabase.co
+set SUPABASE_SERVICE_ROLE=...
+set STORE_ID=the-uuid-from-setup
+node --experimental-strip-types scripts/export-listings.mjs
+```
+
 5. Set a manager PIN in Setup.
 
 ---

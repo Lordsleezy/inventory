@@ -10,6 +10,7 @@ logs/
 .env.*
 !.env.example
 !**/.env.example
+exports/
 data/
 *.sqlite
 *.sqlite3

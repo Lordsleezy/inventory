@@ -11,7 +11,7 @@
     "test": "node --experimental-strip-types --test packages/store/src/*.test.ts packages/cloud/src/*.test.ts packages/payments/src/*.test.ts packages/channels/src/*.test.ts",
     "test:migrations": "node --experimental-strip-types scripts/test-migrations.mjs",
     "test:store": "node --experimental-strip-types --test packages/store/src/*.test.ts",
-    "import:phone": "node --experimental-strip-types scripts/import-phone-backup.mjs",
+    "export:listings": "node --experimental-strip-types scripts/export-listings.mjs",
     "mobile": "npm run build -w @floor/mobile"
   },
   "engines": {
