@@ -120,28 +120,39 @@ export function mapFloorCondition(floorGrade, allowed) {
   return null;
 }
 
-export function conditionEnumForId(conditionId) {
-  const id = String(conditionId || "");
-  if (id === "1000") return "NEW";
-  if (id === "1500") return "NEW_OTHER";
-  if (id === "1750") return "NEW_WITH_DEFECTS";
-  if (id === "2000") return "CERTIFIED_REFURBISHED";
-  if (id === "2010") return "EXCELLENT_REFURBISHED";
-  if (id === "2020") return "VERY_GOOD_REFURBISHED";
-  if (id === "2030") return "GOOD_REFURBISHED";
-  if (id === "2500") return "SELLER_REFURBISHED";
-  if (id === "2750") return "LIKE_NEW";
-  if (id === "3000") return "USED_EXCELLENT";
-  if (id === "4000") return "USED_VERY_GOOD";
-  if (id === "5000") return "USED_GOOD";
-  if (id === "6000") return "USED_ACCEPTABLE";
-  if (id === "7000") return "FOR_PARTS_OR_NOT_WORKING";
+/**
+ * Inventory API wants ConditionEnum, not a raw ID. The same ID (3000) is
+ * USED on appliances and USED_EXCELLENT on graded categories — use eBay's
+ * name for this category, never a global ID table.
+ */
+export function inventoryConditionEnum(mapped) {
+  const n = normalizeConditionName(mapped?.name);
+  if (!n) return "";
+  if (n === "new") return "NEW";
+  if (n.includes("open box") || n === "new other" || n.includes("without tag")) return "NEW_OTHER";
+  if (n === "like new") return "LIKE_NEW";
+  if (n.includes("new with defect")) return "NEW_WITH_DEFECTS";
+  if (n.includes("certified refurb")) return "CERTIFIED_REFURBISHED";
+  if (n.includes("excellent refurb")) return "EXCELLENT_REFURBISHED";
+  if (n.includes("very good refurb")) return "VERY_GOOD_REFURBISHED";
+  if (n.includes("good refurb")) return "GOOD_REFURBISHED";
+  if (n.includes("seller refurb")) return "SELLER_REFURBISHED";
+  if (n.includes("for parts") || n.includes("not working")) return "FOR_PARTS_OR_NOT_WORKING";
+  if (n.includes("pre owned excellent")) return "PRE_OWNED_EXCELLENT";
+  if (n.includes("pre owned fair")) return "PRE_OWNED_FAIR";
+  if (n === "used") return "USED";
+  if (n.includes("excellent")) return "USED_EXCELLENT";
+  if (n.includes("very good")) return "USED_VERY_GOOD";
+  if (n === "used good" || n === "good") return "USED_GOOD";
+  if (n.includes("acceptable") || n.includes("fair")) return "USED_ACCEPTABLE";
+  if (n.includes("used")) return "USED";
   return "";
 }
 
 export function listingConditionPayload(mapped) {
-  if (!mapped?.conditionId) return null;
-  return { conditionId: String(mapped.conditionId) };
+  const condition = inventoryConditionEnum(mapped);
+  if (!condition) return null;
+  return { condition };
 }
 
 export function gradeMapForCategory(allowed) {

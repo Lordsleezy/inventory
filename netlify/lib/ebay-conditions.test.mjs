@@ -53,9 +53,15 @@ test("For parts is unmapped when the category has no parts condition", () => {
   assert.equal(mapFloorCondition("Excellent", allowed).conditionId, "3000");
 });
 
-test("listing payload sends the category condition id, not a global enum", () => {
+test("listing payload sends USED for appliance Used, not USED_EXCELLENT", () => {
   const mapped = mapFloorCondition("Excellent", APPLIANCE);
-  assert.deepEqual(listingConditionPayload(mapped), { conditionId: "3000" });
+  assert.equal(mapped.conditionId, "3000");
+  assert.equal(mapped.name, "Used");
+  assert.deepEqual(listingConditionPayload(mapped), { condition: "USED" });
+  assert.deepEqual(listingConditionPayload(mapFloorCondition("Open box", APPLIANCE)), { condition: "NEW_OTHER" });
+  assert.deepEqual(listingConditionPayload(mapFloorCondition("For parts", APPLIANCE)), {
+    condition: "FOR_PARTS_OR_NOT_WORKING",
+  });
 });
 
 test("grade map reports closest Used for mid grades on appliances", () => {

@@ -336,7 +336,8 @@ export async function prepareUnitCondition({ unit, liveCheck = false }) {
     }
   }
   const mapped = mapFloorCondition(unit.condition, stored);
-  if (!mapped) {
+  const payload = listingConditionPayload(mapped);
+  if (!mapped || !payload) {
     const allowed = stored.map((row) => `${row.name} (${row.conditionId})`).join(", ") || "none";
     const err = new Error(
       `eBay category ${floor.name} has no honest match for Floor grade “${unit.condition || "(blank)"}”. Allowed: ${allowed}. The unit grade was not changed.`,
@@ -350,7 +351,7 @@ export async function prepareUnitCondition({ unit, liveCheck = false }) {
     refreshed,
     allowed: stored,
     mapped,
-    payload: listingConditionPayload(mapped),
+    payload,
   };
 }
 
