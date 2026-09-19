@@ -47,3 +47,28 @@ test("decodes HTML entities and does not repeat the same eBay sentence", () => {
   assert.doesNotMatch(msg, /&apos;/i);
   assert.equal((msg.match(/opted into business policies/gi) || []).length, 1);
 });
+
+test("keeps errorId, longMessage, parameters, and warnings for publish failures", () => {
+  const msg = formatEbayError({
+    errors: [
+      {
+        errorId: 25713,
+        message: "This Offer is not available.",
+        longMessage: "This Offer is not available.",
+        parameters: [{ name: "additionalInfo", value: "Merchant location is disabled" }],
+      },
+    ],
+    warnings: [
+      {
+        errorId: 25002,
+        message: "Invalid",
+        longMessage: "A user error has occurred. Invalid data.",
+        parameters: [{ name: "0", value: "Brand" }],
+      },
+    ],
+  });
+  assert.match(msg, /25713/);
+  assert.match(msg, /additionalInfo=Merchant location is disabled/);
+  assert.match(msg, /Brand/);
+  assert.match(msg, /warning/i);
+});

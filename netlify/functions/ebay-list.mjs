@@ -17,7 +17,18 @@ export async function handler(event) {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     const code = err && err.code === "ebay_not_connected" ? 409 : 400;
-    console.log("ebay-list", JSON.stringify({ error: message }));
-    return json(code, { error: message === "ebay_not_connected" ? "ebay_not_connected" : "ebay_list_failed", message });
+    console.log(
+      "ebay-list",
+      JSON.stringify({
+        error: message,
+        status: err?.status || null,
+        ebay: err?.body || null,
+      }),
+    );
+    return json(code, {
+      error: message === "ebay_not_connected" ? "ebay_not_connected" : "ebay_list_failed",
+      message,
+      ebay: err?.body || null,
+    });
   }
 }

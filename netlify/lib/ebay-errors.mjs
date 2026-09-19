@@ -18,57 +18,55 @@ function normalizeEbayText(value) {
     .trim();
 }
 
-export function uniqueEbaySentences(parts) {
-  const out = [];
-  for (const raw of parts) {
-    const text = decodeEbayText(raw).replace(/\s+/g, " ").trim();
-    if (!text) continue;
-    const key = normalizeEbayText(text);
-    if (!key) continue;
-    const idx = out.findIndex((existing) => {
-      const other = normalizeEbayText(existing);
-      return other === key || other.includes(key) || key.includes(other);
-    });
-    if (idx < 0) {
-      out.push(text);
-      continue;
-    }
-    if (text.length > out[idx].length) out[idx] = text;
-  }
-  return out.join(" ");
-}
-
-export function formatEbayError(json, fallback = "eBay rejected the listing.") {
-  const errors = Array.isArray(json?.errors) ? json.errors : [];
-  const warnings = Array.isArray(json?.warnings) ? json.warnings : [];
-  const rows = errors.length ? errors : warnings;
-  if (!rows.length) {
-    const raw = json?.error_description || json?.error || json?.message || fallback;
-    return uniqueEbaySentences([expandBareInvalid(String(raw || fallback))]);
-  }
-  return uniqueEbaySentences(rows.map(describeEbayError));
+function paramPairs(err) {
+  if (!Array.isArray(err?.parameters)) return [];
+  return err.parameters
+    .map((p) => {
+      const name = decodeEbayText(p?.name ?? "").trim();
+      const value = decodeEbayText(p?.value ?? "").trim();
+      if (name && value) return `${name}=${value}`;
+      return value || name;
+    })
+    .filter(Boolean);
 }
 
 function describeEbayError(err) {
-  const params = Array.isArray(err?.parameters)
-    ? err.parameters
-        .map((p) => {
-          const name = String(p?.name ?? "").trim();
-          const value = String(p?.value ?? "").trim();
-          if (name && value && name !== value) return `${name}: ${value}`;
-          return value || name;
-        })
-        .filter(Boolean)
-        .join(", ")
-    : "";
-  const long = decodeEbayText(err?.longMessage || "").trim();
+  const kind = err?.kind || "error";
+  const id = err?.errorId != null && err.errorId !== "" ? `errorId ${err.errorId}` : "";
   const short = decodeEbayText(err?.message || "").trim();
-  const text = long && short && normalizeEbayText(long).includes(normalizeEbayText(short)) ? long : long || short;
-  const hint = hintFor(text, params, err?.errorId);
+  const long = decodeEbayText(err?.longMessage || "").trim();
+  const params = paramPairs(err);
+  const refs = [...(err?.inputRefIds || []), ...(err?.outputRefIds || [])].map((r) => decodeEbayText(r)).filter(Boolean);
+  const text = long && short && normalizeEbayText(long).includes(normalizeEbayText(short)) ? long : [short, long].filter(Boolean).join(" ");
   const core = expandBareInvalid(text || "eBay rejected this field");
-  const field = params ? ` Field: ${params}.` : "";
-  const how = hint ? ` ${hint}` : "";
-  return uniqueEbaySentences([`${core}.${field}${how}`.replace(/\.\./g, ".").trim()]);
+  const extra = [
+    id,
+    kind === "warning" ? "warning" : "",
+    params.length ? `parameters: ${params.join("; ")}` : "",
+    refs.length ? `refs: ${refs.join(", ")}` : "",
+    hintFor(`${text} ${params.join(" ")}`, params.join(" "), err?.errorId),
+  ].filter(Boolean);
+  return `${core}. ${extra.join(" | ")}`.replace(/\s+\./g, ".").replace(/\.\./g, ".").trim();
+}
+
+export function formatEbayError(json, fallback = "eBay rejected the listing.") {
+  const errors = Array.isArray(json?.errors) ? json.errors.map((row) => ({ kind: "error", ...row })) : [];
+  const warnings = Array.isArray(json?.warnings) ? json.warnings.map((row) => ({ kind: "warning", ...row })) : [];
+  const rows = [...errors, ...warnings];
+  if (!rows.length) {
+    const raw = json?.error_description || json?.error || json?.message || json?.raw || fallback;
+    return decodeEbayText(expandBareInvalid(String(raw || fallback)));
+  }
+  const seen = new Set();
+  const lines = [];
+  for (const row of rows) {
+    const line = describeEbayError(row);
+    const key = normalizeEbayText(line);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    lines.push(line);
+  }
+  return lines.join(" ");
 }
 
 function expandBareInvalid(text) {
@@ -90,7 +88,7 @@ function hintFor(text, params, errorId) {
   if (/merchantlocation|location.?key|inventory location/.test(blob)) {
     return "Fix: Floor will recreate the warehouse location with an alphanumeric key.";
   }
-  if (/condition/.test(blob)) {
+  if (/\bcondition\b/.test(blob) && /invalid|required/.test(blob)) {
     return "Fix: Set condition on the unit to New, Open box, Excellent, Very good, Good, Fair, or For parts.";
   }
   if (/aspect|item specific|brand|mpn|manufacturer/.test(blob)) {
@@ -99,10 +97,10 @@ function hintFor(text, params, errorId) {
   if (/weight|dimension|package|shipping package/.test(blob)) {
     return "Fix: Add width, height, and depth on the unit so eBay has package size for a large appliance.";
   }
-  if (/category/.test(blob)) {
+  if (/category/.test(blob) && /invalid|required/.test(blob)) {
     return "Fix: Use a clearer brand/model/title so Floor can pick the right eBay category.";
   }
-  if (/sku/.test(blob)) {
+  if (/\bsku\b/.test(blob) && /invalid|exist|duplicate/.test(blob)) {
     return "Fix: Use the Floor SKU as-is; if eBay still rejects it, the SKU may already exist in this sandbox seller account.";
   }
   return "";

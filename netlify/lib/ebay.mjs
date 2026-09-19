@@ -123,36 +123,99 @@ export async function ebayFetch(storeId, method, path, body) {
     const err = new Error(msg);
     err.status = res.status;
     err.body = json;
+    err.path = path;
     throw err;
   }
   return json;
 }
 
+async function quietGet(storeId, path) {
+  try {
+    return await ebayFetch(storeId, "GET", path);
+  } catch (err) {
+    return { _error: err instanceof Error ? err.message : String(err), _status: err.status || null, _body: err.body || null };
+  }
+}
+
+async function inspectOfferChain(storeId, sku, offerId, loc, policies) {
+  const [location, item, offer, payment, returns, fulfillment] = await Promise.all([
+    quietGet(storeId, `/sell/inventory/v1/location/${loc}`),
+    quietGet(storeId, `/sell/inventory/v1/inventory_item/${encodeURIComponent(sku)}`),
+    offerId ? quietGet(storeId, `/sell/inventory/v1/offer/${offerId}`) : Promise.resolve(null),
+    quietGet(storeId, `/sell/account/v1/payment_policy/${policies.payment}`),
+    quietGet(storeId, `/sell/account/v1/return_policy/${policies.returnP}`),
+    quietGet(storeId, `/sell/account/v1/fulfillment_policy/${policies.fulfillment}`),
+  ]);
+  const snapshot = {
+    locationKey: loc,
+    locationStatus: location?.merchantLocationStatus,
+    locationTypes: location?.locationTypes,
+    sku: item?.sku || sku,
+    condition: item?.condition,
+    quantity: item?.availability?.shipToLocationAvailability?.quantity,
+    distributions: item?.availability?.shipToLocationAvailability?.availabilityDistributions,
+    pickup: item?.availability?.pickupAtLocationAvailability,
+    package: item?.packageWeightAndSize,
+    aspects: item?.product?.aspects,
+    offerId,
+    offerStatus: offer?.status,
+    offerCategory: offer?.categoryId,
+    offerLocation: offer?.merchantLocationKey,
+    offerPolicies: offer?.listingPolicies,
+    paymentPolicy: payment?.paymentPolicyId || payment?._error,
+    returnPolicy: returns?.returnPolicyId || returns?._error,
+    fulfillmentPolicy: fulfillment?.fulfillmentPolicyId || fulfillment?._error,
+    fulfillmentPickup: fulfillment?.localPickup,
+    fulfillmentShipping: fulfillment?.shippingOptions,
+    offerErrors: offer?.errors || offer?.warnings,
+    locationError: location?._error,
+    itemError: item?._error,
+  };
+  console.log("ebay_offer_chain", JSON.stringify(snapshot));
+  return `chain: ${JSON.stringify(snapshot)}`;
+}
+
 async function ensureLocation(storeId) {
   const key = locationKey(storeId);
+  const body = {
+    name: "Floor warehouse",
+    merchantLocationStatus: "ENABLED",
+    locationTypes: ["WAREHOUSE"],
+    location: {
+      address: {
+        addressLine1: process.env.EBAY_LOCATION_LINE1 || "2051 Challenge Way",
+        city: process.env.EBAY_LOCATION_CITY || "Roseville",
+        stateOrProvince: process.env.EBAY_LOCATION_REGION || "CA",
+        postalCode: process.env.EBAY_LOCATION_POSTAL || "95678",
+        country: process.env.EBAY_LOCATION_COUNTRY || "US",
+      },
+    },
+  };
+  let existing = null;
   try {
-    await ebayFetch(storeId, "GET", `/sell/inventory/v1/location/${key}`);
-    return key;
+    existing = await ebayFetch(storeId, "GET", `/sell/inventory/v1/location/${key}`);
   } catch (err) {
     if (err.status !== 404) throw err;
   }
+  if (!existing) {
+    try {
+      await ebayFetch(storeId, "POST", `/sell/inventory/v1/location/${key}`, body);
+    } catch (err) {
+      if (!/already exists|duplicate/i.test(err.message)) throw err;
+    }
+  }
   try {
-    await ebayFetch(storeId, "POST", `/sell/inventory/v1/location/${key}`, {
-      name: "Floor warehouse",
-      merchantLocationStatus: "ENABLED",
-      locationTypes: ["WAREHOUSE"],
-      location: {
-        address: {
-          addressLine1: process.env.EBAY_LOCATION_LINE1 || "2051 Challenge Way",
-          city: process.env.EBAY_LOCATION_CITY || "Roseville",
-          stateOrProvince: process.env.EBAY_LOCATION_REGION || "CA",
-          postalCode: process.env.EBAY_LOCATION_POSTAL || "95678",
-          country: process.env.EBAY_LOCATION_COUNTRY || "US",
-        },
-      },
-    });
+    await ebayFetch(storeId, "POST", `/sell/inventory/v1/location/${key}/enable`);
   } catch (err) {
-    if (!/already exists|duplicate/i.test(err.message)) throw err;
+    if (!/already|enabled/i.test(err.message)) {
+      console.log("ebay_location_enable", err instanceof Error ? err.message : String(err));
+    }
+  }
+  const ready = await ebayFetch(storeId, "GET", `/sell/inventory/v1/location/${key}`);
+  if (String(ready?.merchantLocationStatus || "").toUpperCase() !== "ENABLED") {
+    throw new Error(
+      `eBay merchant location ${key} is ${ready?.merchantLocationStatus || "missing"}, not ENABLED. ${formatEbayError(ready)}`,
+    );
   }
   return key;
 }
@@ -488,21 +551,18 @@ function packageSize(unit) {
   const depth = Number(specs.depth_in);
   const weight = Number(specs.weight_lb || specs.weight_lbs);
   const hasDims = width > 0 && height > 0 && depth > 0;
-  if (!hasDims && !(weight > 0)) return undefined;
-  const pkg = {};
-  if (hasDims) {
-    pkg.dimensions = {
-      length: String(depth),
-      width: String(width),
-      height: String(height),
+  return {
+    dimensions: {
+      length: String(hasDims ? depth : 32),
+      width: String(hasDims ? width : 32),
+      height: String(hasDims ? height : 70),
       unit: "INCH",
-    };
-  }
-  pkg.weight = {
-    value: String(weight > 0 ? weight : 120),
-    unit: "POUND",
+    },
+    weight: {
+      value: String(weight > 0 ? weight : 300),
+      unit: "POUND",
+    },
   };
-  return pkg;
 }
 
 function listingCopy(unit) {
@@ -546,7 +606,12 @@ export async function listSku(storeId, sku) {
   const policies = await ensurePolicies(storeId);
 
   await ebayFetch(storeId, "PUT", `/sell/inventory/v1/inventory_item/${encodeURIComponent(sku)}`, {
-    availability: { shipToLocationAvailability: { quantity: 1 } },
+    availability: {
+      shipToLocationAvailability: {
+        quantity: 1,
+        availabilityDistributions: [{ merchantLocationKey: loc, quantity: 1 }],
+      },
+    },
     condition: ebayCondition(unit.condition),
     conditionDescription: unit.defect_notes || undefined,
     packageWeightAndSize: pkg,
@@ -585,7 +650,22 @@ export async function listSku(storeId, sku) {
     const created = await ebayFetch(storeId, "POST", "/sell/inventory/v1/offer", offerBody);
     offerId = created.offerId;
   }
-  const published = await ebayFetch(storeId, "POST", `/sell/inventory/v1/offer/${offerId}/publish`);
+  let published;
+  const currentOffer = await quietGet(storeId, `/sell/inventory/v1/offer/${offerId}`);
+  if (String(currentOffer?.status || "").toUpperCase() === "PUBLISHED" && (currentOffer?.listing?.listingId || currentOffer?.listingId)) {
+    published = currentOffer;
+  } else {
+    try {
+      published = await ebayFetch(storeId, "POST", `/sell/inventory/v1/offer/${offerId}/publish`);
+    } catch (err) {
+      const chain = await inspectOfferChain(storeId, sku, offerId, loc, policies);
+      const detail = formatEbayError(err.body, err instanceof Error ? err.message : String(err));
+      const wrapped = new Error(`${detail} ${chain}`.trim());
+      wrapped.status = err.status;
+      wrapped.body = err.body;
+      throw wrapped;
+    }
+  }
   const listingId = published.listingId || published.listing?.listingId || null;
   await sb.from("listings").upsert(
     {
