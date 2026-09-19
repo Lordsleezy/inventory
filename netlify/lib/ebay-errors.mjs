@@ -47,8 +47,8 @@ function hintFor(text, params, errorId) {
   if (/image|photo|picture/.test(blob)) {
     return "Fix: Floor must send photos as public HTTPS URLs eBay can download (not private signed links).";
   }
-  if (/payment.?policy|return.?policy|fulfillment.?policy|business policy/.test(blob)) {
-    return "Fix: Open sandbox Seller Hub → Account → Business policies and add payment, return, and shipping, then try again.";
+  if (/payment.?policy|return.?policy|fulfillment.?policy|business policy|opt.?in|seller program/.test(blob)) {
+    return "Fix: Floor will opt this seller into business policies through the Account API and create payment, return, and local-pickup policies. Sandbox Seller Hub has no Business policies screen.";
   }
   if (/merchantlocation|location.?key|inventory location/.test(blob)) {
     return "Fix: Floor will recreate the warehouse location with an alphanumeric key.";

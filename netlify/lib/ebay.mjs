@@ -4,6 +4,7 @@ import { EBAY_OAUTH_SCOPES, ebayCondition, ebayHosts, ebayRuName } from "./ebay-
 import { formatEbayError, locationKey } from "./ebay-errors.mjs";
 import { publicPhotoUrl } from "./ebay-photos.mjs";
 import { composeChannelDescription, parseListingSpecs } from "./listing-copy.mjs";
+import { addFixedPriceItem } from "./ebay-trading.mjs";
 
 export { EBAY_OAUTH_SCOPES, ebayHosts, ebayRuName, formatEbayError };
 
@@ -101,6 +102,7 @@ export async function ebayFetch(storeId, method, path, body) {
       Accept: "application/json",
       "Content-Language": "en-US",
       "Accept-Language": "en-US",
+      "X-EBAY-C-MARKETPLACE-ID": marketplaceId(),
     },
     body: body == null ? undefined : JSON.stringify(body),
   });
@@ -153,57 +155,102 @@ async function ensureLocation(storeId) {
 
 async function firstPolicy(storeId, kind) {
   const market = marketplaceId();
-  const json = await ebayFetch(storeId, "GET", `/sell/account/v1/${kind}_policy?marketplace_id=${market}`);
-  const list = json?.[`${kind}Policies`] || json?.policies || [];
-  if (list[0]?.[`${kind}PolicyId`] || list[0]?.policyId) {
-    return list[0][`${kind}PolicyId`] || list[0].policyId;
+  try {
+    const json = await ebayFetch(storeId, "GET", `/sell/account/v1/${kind}_policy?marketplace_id=${market}`);
+    const list = json?.[`${kind}Policies`] || json?.policies || [];
+    if (list[0]?.[`${kind}PolicyId`] || list[0]?.policyId) {
+      return list[0][`${kind}PolicyId`] || list[0].policyId;
+    }
+  } catch (err) {
+    console.log("ebay_list_policy", JSON.stringify({ kind, error: err instanceof Error ? err.message : String(err) }));
   }
   return null;
 }
 
+function hasSellingPolicyProgram(json) {
+  const programs = json?.programs || [];
+  return programs.some((p) => String(p.programType || p.program || p) === "SELLING_POLICY_MANAGEMENT");
+}
+
+async function optInToSellingPolicies(storeId) {
+  try {
+    const current = await ebayFetch(storeId, "GET", "/sell/account/v1/program/get_opted_in_programs");
+    if (hasSellingPolicyProgram(current)) return true;
+  } catch (err) {
+    console.log("ebay_list_programs", err instanceof Error ? err.message : String(err));
+  }
+  try {
+    await ebayFetch(storeId, "POST", "/sell/account/v1/program/opt_in", {
+      programType: "SELLING_POLICY_MANAGEMENT",
+    });
+    return true;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.log("ebay_list_opt_in", message);
+    if (/already opted|already enrolled|duplicate/i.test(message)) return true;
+    return false;
+  }
+}
+
 async function ensurePolicies(storeId) {
   const market = marketplaceId();
+  await optInToSellingPolicies(storeId);
   let fulfillment = await firstPolicy(storeId, "fulfillment");
   let payment = await firstPolicy(storeId, "payment");
   let returnP = await firstPolicy(storeId, "return");
 
   if (!payment) {
-    const created = await ebayFetch(storeId, "POST", "/sell/account/v1/payment_policy", {
-      name: "Floor payments",
-      marketplaceId: market,
-      categoryTypes: [{ name: "ALL_EXCLUDING_MOTORS_VEHICLES", default: true }],
-    });
-    payment = created.paymentPolicyId || created.id;
+    try {
+      const created = await ebayFetch(storeId, "POST", "/sell/account/v1/payment_policy", {
+        name: "Floor payments",
+        marketplaceId: market,
+        categoryTypes: [{ name: "ALL_EXCLUDING_MOTORS_VEHICLES", default: true }],
+        immediatePay: true,
+      });
+      payment = created.paymentPolicyId || created.id;
+    } catch (err) {
+      console.log("ebay_list_create_payment", err instanceof Error ? err.message : String(err));
+    }
   }
   if (!returnP) {
-    const created = await ebayFetch(storeId, "POST", "/sell/account/v1/return_policy", {
-      name: "Floor returns",
-      marketplaceId: market,
-      categoryTypes: [{ name: "ALL_EXCLUDING_MOTORS_VEHICLES", default: true }],
-      returnsAccepted: true,
-      returnPeriod: { value: 30, unit: "DAY" },
-      refundMethod: "MONEY_BACK",
-      returnShippingCostPayer: "BUYER",
-    });
-    returnP = created.returnPolicyId || created.id;
+    try {
+      const created = await ebayFetch(storeId, "POST", "/sell/account/v1/return_policy", {
+        name: "Floor returns",
+        marketplaceId: market,
+        categoryTypes: [{ name: "ALL_EXCLUDING_MOTORS_VEHICLES", default: true }],
+        returnsAccepted: true,
+        returnPeriod: { value: 30, unit: "DAY" },
+        refundMethod: "MONEY_BACK",
+        returnShippingCostPayer: "BUYER",
+      });
+      returnP = created.returnPolicyId || created.id;
+    } catch (err) {
+      console.log("ebay_list_create_return", err instanceof Error ? err.message : String(err));
+    }
   }
   if (!fulfillment) {
-    const created = await ebayFetch(storeId, "POST", "/sell/account/v1/fulfillment_policy", {
-      name: "Floor local pickup",
-      marketplaceId: market,
-      categoryTypes: [{ name: "ALL_EXCLUDING_MOTORS_VEHICLES", default: true }],
-      handlingTime: { value: 2, unit: "DAY" },
-      // Appliances: local pickup. Small goods (laptops) need a shipping policy later, per unit or category.
-      localPickup: true,
-    });
-    fulfillment = created.fulfillmentPolicyId || created.id;
+    try {
+      const created = await ebayFetch(storeId, "POST", "/sell/account/v1/fulfillment_policy", {
+        name: "Floor local pickup",
+        marketplaceId: market,
+        categoryTypes: [{ name: "ALL_EXCLUDING_MOTORS_VEHICLES", default: true }],
+        handlingTime: { value: 2, unit: "DAY" },
+        // Appliances: local pickup. Small goods (laptops) need a shipping policy later, per unit or category.
+        localPickup: true,
+        freightShipping: false,
+        pickupDropOff: false,
+      });
+      fulfillment = created.fulfillmentPolicyId || created.id;
+    } catch (err) {
+      console.log("ebay_list_create_fulfillment", err instanceof Error ? err.message : String(err));
+    }
   }
-  if (!payment || !returnP || !fulfillment) {
-    throw new Error(
-      "eBay needs payment, return, and shipping business policies. Open sandbox Seller Hub → Account → Business policies, then try listing again.",
-    );
+  if (payment && returnP && fulfillment) {
+    return { payment, returnP, fulfillment };
   }
-  return { payment, returnP, fulfillment };
+  throw new Error(
+    "eBay would not create business policies on this seller (sandbox has no Seller Hub policies screen). Floor will list with inline local pickup instead.",
+  );
 }
 
 async function applicationToken() {
@@ -419,68 +466,130 @@ export async function listSku(storeId, sku) {
   const images = await photoUrls(storeId, sku);
   const epid = await catalogEpid(storeId, unit);
   const loc = await ensureLocation(storeId);
-  const policies = await ensurePolicies(storeId);
   const copy = listingCopy(unit);
   const cat = await categoryId(storeId, [unit.brand, unit.model, unit.title, unit.category].filter(Boolean).join(" "));
   const aspects = await itemAspects(cat, unit);
   const pkg = packageSize(unit);
+  const notes = [];
 
-  await ebayFetch(storeId, "PUT", `/sell/inventory/v1/inventory_item/${encodeURIComponent(sku)}`, {
-    availability: { shipToLocationAvailability: { quantity: 1 } },
-    condition: ebayCondition(unit.condition),
-    conditionDescription: unit.defect_notes || undefined,
-    packageWeightAndSize: pkg,
-    product: {
+  let policies = null;
+  try {
+    policies = await ensurePolicies(storeId);
+  } catch (err) {
+    notes.push(err instanceof Error ? err.message : String(err));
+  }
+
+  if (policies) {
+    try {
+      await ebayFetch(storeId, "PUT", `/sell/inventory/v1/inventory_item/${encodeURIComponent(sku)}`, {
+        availability: { shipToLocationAvailability: { quantity: 1 } },
+        condition: ebayCondition(unit.condition),
+        conditionDescription: unit.defect_notes || undefined,
+        packageWeightAndSize: pkg,
+        product: {
+          title: copy.title,
+          description: copy.description,
+          imageUrls: images,
+          brand: unit.brand || undefined,
+          mpn: unit.model || undefined,
+          aspects,
+          ...(epid ? { epid } : {}),
+        },
+      });
+
+      const offers = await ebayFetch(storeId, "GET", `/sell/inventory/v1/offer?sku=${encodeURIComponent(sku)}`);
+      let offerId = offers?.offers?.[0]?.offerId;
+      const offerBody = {
+        sku,
+        marketplaceId: marketplaceId(),
+        format: "FIXED_PRICE",
+        availableQuantity: 1,
+        categoryId: cat,
+        listingDescription: copy.description,
+        listingPolicies: {
+          fulfillmentPolicyId: policies.fulfillment,
+          paymentPolicyId: policies.payment,
+          returnPolicyId: policies.returnP,
+        },
+        merchantLocationKey: loc,
+        listingDuration: "GTC",
+        pricingSummary: { price: { value: money(unit.ask_cents), currency: "USD" } },
+      };
+      if (offerId) {
+        await ebayFetch(storeId, "PUT", `/sell/inventory/v1/offer/${offerId}`, offerBody);
+      } else {
+        const created = await ebayFetch(storeId, "POST", "/sell/inventory/v1/offer", offerBody);
+        offerId = created.offerId;
+      }
+      const published = await ebayFetch(storeId, "POST", `/sell/inventory/v1/offer/${offerId}/publish`);
+      const listingId = published.listingId || published.listing?.listingId || null;
+      await sb.from("listings").upsert(
+        {
+          store_id: storeId,
+          sku,
+          channel: "ebay",
+          status: "listed",
+          listing_id: listingId,
+          offer_id: offerId,
+          listed_at: new Date().toISOString(),
+          delisted_at: null,
+        },
+        { onConflict: "store_id,sku,channel" },
+      );
+      return { sku, offerId, listingId };
+    } catch (err) {
+      notes.push(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  try {
+    const traded = await addFixedPriceItem(await userToken(storeId), {
+      sku,
       title: copy.title,
       description: copy.description,
+      categoryId: cat,
+      price: money(unit.ask_cents),
+      condition: ebayCondition(unit.condition),
+      conditionDescription: unit.defect_notes || "",
       imageUrls: images,
-      brand: unit.brand || undefined,
-      mpn: unit.model || undefined,
       aspects,
-      ...(epid ? { epid } : {}),
-    },
-  });
-
-  const offers = await ebayFetch(storeId, "GET", `/sell/inventory/v1/offer?sku=${encodeURIComponent(sku)}`);
-  let offerId = offers?.offers?.[0]?.offerId;
-  const offerBody = {
-    sku,
-    marketplaceId: marketplaceId(),
-    format: "FIXED_PRICE",
-    availableQuantity: 1,
-    categoryId: cat,
-    listingDescription: copy.description,
-    listingPolicies: {
-      fulfillmentPolicyId: policies.fulfillment,
-      paymentPolicyId: policies.payment,
-      returnPolicyId: policies.returnP,
-    },
-    merchantLocationKey: loc,
-    listingDuration: "GTC",
-    pricingSummary: { price: { value: money(unit.ask_cents), currency: "USD" } },
-  };
-  if (offerId) {
-    await ebayFetch(storeId, "PUT", `/sell/inventory/v1/offer/${offerId}`, offerBody);
-  } else {
-    const created = await ebayFetch(storeId, "POST", "/sell/inventory/v1/offer", offerBody);
-    offerId = created.offerId;
-  }
-  const published = await ebayFetch(storeId, "POST", `/sell/inventory/v1/offer/${offerId}/publish`);
-  const listingId = published.listingId || published.listing?.listingId || null;
-  await sb.from("listings").upsert(
-    {
-      store_id: storeId,
+      city: process.env.EBAY_LOCATION_CITY || "Roseville",
+      postalCode: process.env.EBAY_LOCATION_POSTAL || "95678",
+    });
+    await sb.from("listings").upsert(
+      {
+        store_id: storeId,
+        sku,
+        channel: "ebay",
+        status: "listed",
+        listing_id: traded.listingId,
+        offer_id: null,
+        listed_at: new Date().toISOString(),
+        delisted_at: null,
+      },
+      { onConflict: "store_id,sku,channel" },
+    );
+    console.log(
+      "ebay-list",
+      JSON.stringify({
+        sku,
+        via: "trading_inline",
+        note: "Listed without business policy IDs (inline local pickup / return / payment).",
+        prior: notes,
+      }),
+    );
+    return {
       sku,
-      channel: "ebay",
-      status: "listed",
-      listing_id: listingId,
-      offer_id: offerId,
-      listed_at: new Date().toISOString(),
-      delisted_at: null,
-    },
-    { onConflict: "store_id,sku,channel" },
-  );
-  return { sku, offerId, listingId };
+      listingId: traded.listingId,
+      offerId: null,
+      via: "trading_inline",
+      warning:
+        "Sandbox has no Seller Hub business policies, so Floor listed this SKU with inline local pickup, 30-day returns, and managed payments instead of policy IDs.",
+    };
+  } catch (err) {
+    notes.push(err instanceof Error ? err.message : String(err));
+    throw new Error(notes.filter(Boolean).join(" "));
+  }
 }
 
 export async function withdrawSku(storeId, sku) {
