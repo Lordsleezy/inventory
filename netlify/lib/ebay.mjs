@@ -990,6 +990,7 @@ export async function ingestEbayOrder(storeId, order) {
     p_payment_id: `ebay:${orderId}`,
     p_note: "eBay order",
     p_tax_cents: 0,
+    p_approval_id: null,
   });
   if (error) {
     if (/unit_not_sellable|duplicate key|23505/i.test(error.message)) {
@@ -1017,12 +1018,16 @@ export async function ingestEbayOrder(storeId, order) {
   return { sku, orderId, saleId: sale?.id };
 }
 
+function fulfillmentOrdersPath() {
+  const end = new Date();
+  const start = new Date(end.getTime() - 7 * 24 * 3600 * 1000);
+  const iso = (d) => d.toISOString().replace(/\.\d{3}Z$/, ".000Z");
+  const filter = encodeURIComponent(`creationdate:[${iso(start)}..${iso(end)}]`);
+  return `/sell/fulfillment/v1/order?limit=50&filter=${filter}`;
+}
+
 export async function pollEbayOrders(storeId) {
-  const json = await ebayFetch(
-    storeId,
-    "GET",
-    "/sell/fulfillment/v1/order?limit=50&filter=orderfulfillmentstatus:%7BNOT_STARTED%7CIN_PROGRESS%7D",
-  );
+  const json = await ebayFetch(storeId, "GET", fulfillmentOrdersPath());
   const results = [];
   for (const order of json?.orders ?? []) {
     try {
