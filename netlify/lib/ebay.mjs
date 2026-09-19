@@ -4,7 +4,7 @@ import { EBAY_OAUTH_SCOPES, ebayCondition, ebayHosts, ebayRuName } from "./ebay-
 import { formatEbayError, locationKey } from "./ebay-errors.mjs";
 import { publicPhotoUrl } from "./ebay-photos.mjs";
 import { composeChannelDescription, parseListingSpecs } from "./listing-copy.mjs";
-import { aspectsFromTaxonomy } from "./ebay-aspects.mjs";
+import { aspectsFromTaxonomy, parseMeasure, specInches } from "./ebay-aspects.mjs";
 import {
   compactShippingCatalog,
   getShippingServiceDetails,
@@ -566,8 +566,14 @@ async function categoryTreeId() {
   return { api, token, treeId: tree?.categoryTreeId || "0" };
 }
 
+function listingMeasures(unit) {
+  const specs = { ...(parseListingSpecs(unit.listing_specs) || {}) };
+  if (unit.listing_body) specs.listing_body = unit.listing_body;
+  return specs;
+}
+
 async function itemAspects(category, unit) {
-  const specs = parseListingSpecs(unit.listing_specs) || {};
+  const specs = listingMeasures(unit);
   const { api, token, treeId } = await categoryTreeId();
   const res = await fetch(
     `${api}/commerce/taxonomy/v1/category_tree/${treeId}/get_item_aspects_for_category?category_id=${encodeURIComponent(category)}`,
@@ -584,17 +590,16 @@ async function itemAspects(category, unit) {
 }
 
 function packageSize(unit) {
-  const specs = parseListingSpecs(unit.listing_specs) || {};
-  const width = Number(specs.width_in);
-  const height = Number(specs.height_in);
-  const depth = Number(specs.depth_in);
-  const weight = Number(specs.weight_lb || specs.weight_lbs);
-  const hasDims = width > 0 && height > 0 && depth > 0;
+  const specs = listingMeasures(unit);
+  const width = specInches(specs, "width") || parseMeasure(specs.width_in);
+  const height = specInches(specs, "height") || parseMeasure(specs.height_in);
+  const depth = specInches(specs, "depth") || parseMeasure(specs.depth_in);
+  const weight = parseMeasure(specs.weight_lb || specs.weight_lbs);
   return {
     dimensions: {
-      length: String(hasDims ? depth : 32),
-      width: String(hasDims ? width : 32),
-      height: String(hasDims ? height : 70),
+      length: String(depth || 32),
+      width: String(width || 32),
+      height: String(height || 70),
       unit: "INCH",
     },
     weight: {

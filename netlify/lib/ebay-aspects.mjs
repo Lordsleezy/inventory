@@ -25,15 +25,15 @@ function parseMeasureRange(label) {
   const t = String(label || "").toLowerCase();
   const nums = [...String(label || "").matchAll(/(\d+(?:\.\d+)?)/g)].map((m) => parseFloat(m[1]));
   if (!nums.length) return null;
-  if (/more than|greater than|over|or more|and up|and above/.test(t)) {
-    const inclusive = /or more|and up|and above/.test(t);
-    return { min: nums[0], max: Infinity, inclusiveMin: inclusive, inclusiveMax: true };
+  if (/more than|greater than|over|or more|and up|and above|at least/.test(t)) {
+    const inclusive = /or more|and up|and above|at least/.test(t);
+    return { min: nums[0], max: Infinity, inclusiveMin: inclusive, inclusiveMax: true, unit: labelUnit(t) };
   }
   if (/less than|under/.test(t)) {
-    return { min: 0, max: nums[0], inclusiveMin: true, inclusiveMax: false };
+    return { min: 0, max: nums[0], inclusiveMin: true, inclusiveMax: false, unit: labelUnit(t) };
   }
-  if (/up to|or less/.test(t)) {
-    return { min: 0, max: nums[0], inclusiveMin: true, inclusiveMax: true };
+  if (/up to|or less|and under/.test(t)) {
+    return { min: 0, max: nums[0], inclusiveMin: true, inclusiveMax: true, unit: labelUnit(t) };
   }
   if (nums.length >= 2) {
     return {
@@ -41,33 +41,87 @@ function parseMeasureRange(label) {
       max: Math.max(nums[0], nums[1]),
       inclusiveMin: true,
       inclusiveMax: true,
+      unit: labelUnit(t),
     };
   }
-  return null;
+  return {
+    min: nums[0],
+    max: nums[0],
+    inclusiveMin: true,
+    inclusiveMax: true,
+    unit: labelUnit(t),
+    exact: true,
+  };
+}
+
+function labelUnit(label) {
+  const t = String(label || "").toLowerCase();
+  if (/\bcm\b|centimet/.test(t) && !/\bin(?:ch)?\b/.test(t)) return "cm";
+  return "in";
 }
 
 function inRange(range, value) {
+  if (range.exact || range.min === range.max) {
+    const slop = range.unit === "cm" ? 1.5 : 0.51;
+    return Math.abs(value - range.min) <= slop;
+  }
   const ge = range.inclusiveMin ? value >= range.min : value > range.min;
   const le = range.max === Infinity ? true : range.inclusiveMax ? value <= range.max : value < range.max;
   return ge && le;
 }
 
 export function matchMeasureBucket(allowed, raw) {
-  const value = parseMeasure(raw);
-  if (value == null) return "";
+  const inches = parseMeasure(raw);
+  if (inches == null) return "";
   const hits = [];
   for (const label of allowed || []) {
     const range = parseMeasureRange(label);
-    if (range && inRange(range, value)) hits.push({ label, range });
+    if (!range) continue;
+    const value = range.unit === "cm" ? inches * 2.54 : inches;
+    if (inRange(range, value)) hits.push({ label, range });
   }
   if (!hits.length) return "";
   hits.sort((a, b) => {
+    const aInch = a.range.unit === "in" ? 0 : 1;
+    const bInch = b.range.unit === "in" ? 0 : 1;
+    if (aInch !== bInch) return aInch - bInch;
     const aSpan = a.range.max === Infinity ? Number.POSITIVE_INFINITY : a.range.max - a.range.min;
     const bSpan = b.range.max === Infinity ? Number.POSITIVE_INFINITY : b.range.max - b.range.min;
     if (aSpan !== bSpan) return aSpan - bSpan;
     return b.range.min - a.range.min;
   });
   return hits[0].label;
+}
+
+export function specInches(specs, kind) {
+  const keys =
+    kind === "height"
+      ? ["height_in", "height", "product_height_in", "cabinet_height_in"]
+      : kind === "depth"
+        ? ["depth_in", "depth", "depth_without_handles_in", "depth_without_doors_in", "product_depth_in"]
+        : ["width_in", "width", "cabinet_width_in", "product_width_in", "w_in"];
+  for (const key of keys) {
+    const n = parseMeasure(specs?.[key]);
+    if (n) return n;
+  }
+  const nested = specs?.dimensions || specs?.size || {};
+  const nestedKeys = kind === "height" ? ["height", "h"] : kind === "depth" ? ["depth", "length", "d"] : ["width", "w"];
+  for (const key of nestedKeys) {
+    const n = parseMeasure(nested?.[key]);
+    if (n) return n;
+  }
+  const blob = Object.values(specs || {})
+    .filter((v) => typeof v === "string")
+    .join(" | ");
+  const sized = blob.match(
+    /(\d+(?:\.\d+)?)\s*"?\s*W\s*[×x]\s*(\d+(?:\.\d+)?)\s*"?\s*H(?:\s*[×x]\s*(\d+(?:\.\d+)?))?/i,
+  );
+  if (sized) {
+    const pick = kind === "width" ? sized[1] : kind === "height" ? sized[2] : sized[3];
+    const n = parseMeasure(pick);
+    if (n) return n;
+  }
+  return null;
 }
 
 export function matchAllowedValue(allowed, candidates) {
@@ -142,9 +196,9 @@ function candidatesForAspect(name, unit, specs) {
   if (lower === "type") return [appliance, layout];
   if (lower === "color" || lower === "colour") return [finish];
   if (lower === "installation") return [install, "Freestanding"];
-  if (/height/.test(lower)) return [specs?.height_in];
-  if (/width/.test(lower)) return [specs?.width_in];
-  if (/depth|length/.test(lower) && !/wave|band/.test(lower)) return [specs?.depth_in, specs?.depth_without_handles_in];
+  if (/height/.test(lower)) return [specInches(specs, "height"), specs?.height_in];
+  if (/width/.test(lower)) return [specInches(specs, "width"), specs?.width_in];
+  if (/depth|length/.test(lower) && !/wave|band/.test(lower)) return [specInches(specs, "depth"), specs?.depth_in];
   if (/capacity/.test(lower)) return [specs?.capacity_cu_ft];
   if (/voltage/.test(lower)) return [specs?.voltage];
   if (/energy/.test(lower)) return [specs?.energy];
@@ -167,8 +221,15 @@ export function aspectsFromTaxonomy(rows, unit, specs) {
     if (lower === "model") {
       value = model;
     } else if (/height|width|depth|length|capacity/.test(lower) && allowed.length) {
-      const measure = /capacity/.test(lower) ? specs?.capacity_cu_ft : candidatesForAspect(name, unit, specs)[0];
-      value = matchMeasureBucket(allowed, measure) || pickAspectValue(aspect, candidatesForAspect(name, unit, specs));
+      const kind = /capacity/.test(lower)
+        ? "capacity"
+        : /height/.test(lower)
+          ? "height"
+          : /depth|length/.test(lower)
+            ? "depth"
+            : "width";
+      const measure = kind === "capacity" ? specs?.capacity_cu_ft : specInches(specs, kind);
+      value = matchMeasureBucket(allowed, measure);
     } else if (looksLikeCatalogModels(allowed) && /model|mpn/.test(lower)) {
       value = model;
     } else {

@@ -83,3 +83,36 @@ test("maps real inches onto eBay height/width buckets", () => {
   assert.equal(aspects.Installation[0], "Freestanding");
   assert.equal(missing.length, 0);
 });
+
+test("maps quoted spec inches and mixed-case / cm width buckets", () => {
+  const widthBuckets = ["54 cm", "More Than 40 in", "More than 55 in", "More than 25 in"];
+  assert.equal(matchMeasureBucket(widthBuckets, '32"'), "More than 25 in");
+  assert.equal(matchMeasureBucket(widthBuckets, "35.75"), "More than 25 in");
+  assert.equal(matchMeasureBucket(["54 cm", "32 in", "36 in"], 32), "32 in");
+  const { aspects, missing } = aspectsFromTaxonomy(
+    [
+      {
+        localizedAspectName: "Item Width",
+        aspectConstraint: { aspectRequired: true },
+        aspectValues: widthBuckets.map((value) => ({ localizedValue: value })),
+      },
+    ],
+    { brand: "LG", model: "LTCS20020V", category: "Refrigerator" },
+    { width_in: '32"' },
+  );
+  assert.equal(aspects["Item Width"][0], "More than 25 in");
+  assert.equal(missing.length, 0);
+  const fromJob = aspectsFromTaxonomy(
+    [
+      {
+        localizedAspectName: "Item Width",
+        aspectConstraint: { aspectRequired: true },
+        aspectValues: widthBuckets.map((value) => ({ localizedValue: value })),
+      },
+    ],
+    { brand: "LG", model: "LTCS20020V", category: "Refrigerator" },
+    { listing_body: '35.75" W × 69.88" H × 32.38" D' },
+  );
+  assert.equal(fromJob.aspects["Item Width"][0], "More than 25 in");
+  assert.equal(fromJob.missing.length, 0);
+});
