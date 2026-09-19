@@ -53,20 +53,27 @@ export function formatEbayError(json, fallback = "eBay rejected the listing.") {
   const errors = Array.isArray(json?.errors) ? json.errors.map((row) => ({ kind: "error", ...row })) : [];
   const warnings = Array.isArray(json?.warnings) ? json.warnings.map((row) => ({ kind: "warning", ...row })) : [];
   const rows = [...errors, ...warnings];
+  let summary;
   if (!rows.length) {
     const raw = json?.error_description || json?.error || json?.message || json?.raw || fallback;
-    return decodeEbayText(expandBareInvalid(String(raw || fallback)));
+    summary = decodeEbayText(expandBareInvalid(String(raw || fallback)));
+  } else {
+    const seen = new Set();
+    const lines = [];
+    for (const row of rows) {
+      const line = describeEbayError(row);
+      const key = normalizeEbayText(line);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      lines.push(line);
+    }
+    summary = lines.join(" ");
   }
-  const seen = new Set();
-  const lines = [];
-  for (const row of rows) {
-    const line = describeEbayError(row);
-    const key = normalizeEbayText(line);
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
-    lines.push(line);
+  const dump = json && typeof json === "object" ? JSON.stringify(json) : "";
+  if (dump && dump !== "{}" && dump !== "null") {
+    return `${summary} ebay_raw=${dump.slice(0, 8000)}`;
   }
-  return lines.join(" ");
+  return summary;
 }
 
 function expandBareInvalid(text) {
@@ -84,6 +91,9 @@ function hintFor(text, params, errorId) {
   const blob = `${text} ${params} ${errorId}`.toLowerCase();
   if (/image|photo|picture/.test(blob)) {
     return "Fix: Floor must send photos as public HTTPS URLs eBay can download (not private signed links).";
+  }
+  if (/25713|offer is not available/.test(blob)) {
+    return "Fix: Floor will delete stale unpublished offers for this SKU and publish a new offer.";
   }
   if (/merchantlocation|location.?key|inventory location/.test(blob)) {
     return "Fix: Floor will recreate the warehouse location with an alphanumeric key.";

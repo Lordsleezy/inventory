@@ -118,12 +118,22 @@ export async function ebayFetch(storeId, method, path, body) {
     json = { raw: text };
   }
   if (!res.ok) {
+    const payload = {
+      method,
+      path,
+      status: res.status,
+      errors: json?.errors ?? null,
+      warnings: json?.warnings ?? null,
+      body: json,
+      raw: text?.slice?.(0, 8000) || text || null,
+    };
+    console.log("ebay_api_error_full", JSON.stringify(payload));
     const msg = formatEbayError(json, text || `eBay HTTP ${res.status}`);
-    console.log("ebay_api_error", JSON.stringify({ method, path, status: res.status, body: json }));
     const err = new Error(msg);
     err.status = res.status;
     err.body = json;
     err.path = path;
+    err.raw = text;
     throw err;
   }
   return json;
@@ -173,6 +183,56 @@ async function inspectOfferChain(storeId, sku, offerId, loc, policies) {
   };
   console.log("ebay_offer_chain", JSON.stringify(snapshot));
   return `chain: ${JSON.stringify(snapshot)}`;
+}
+
+async function listOffersForSku(storeId, sku) {
+  const market = marketplaceId();
+  try {
+    const json = await ebayFetch(
+      storeId,
+      "GET",
+      `/sell/inventory/v1/offer?sku=${encodeURIComponent(sku)}&marketplace_id=${market}&limit=100`,
+    );
+    return json?.offers || [];
+  } catch (err) {
+    if (err.status === 404) return [];
+    throw err;
+  }
+}
+
+async function deleteOffer(storeId, offerId) {
+  try {
+    await ebayFetch(storeId, "DELETE", `/sell/inventory/v1/offer/${offerId}`);
+  } catch (err) {
+    if (err.status === 404 || /25713|not available|not found/i.test(err.message)) return;
+    throw err;
+  }
+}
+
+async function resetUnpublishedOffers(storeId, sku) {
+  const offers = await listOffersForSku(storeId, sku);
+  console.log(
+    "ebay_existing_offers",
+    JSON.stringify(
+      offers.map((row) => ({
+        offerId: row.offerId,
+        status: row.status,
+        listingId: row.listing?.listingId || row.listingId || null,
+        location: row.merchantLocationKey,
+        policies: row.listingPolicies,
+      })),
+    ),
+  );
+  const live = offers.find(
+    (row) =>
+      String(row.status || "").toUpperCase() === "PUBLISHED" && (row.listing?.listingId || row.listingId),
+  );
+  if (live) return live;
+  for (const row of offers) {
+    console.log("ebay_delete_stale_offer", JSON.stringify({ offerId: row.offerId, status: row.status }));
+    await deleteOffer(storeId, row.offerId);
+  }
+  return null;
 }
 
 async function ensureLocation(storeId) {
@@ -605,6 +665,7 @@ export async function listSku(storeId, sku) {
   const pkg = packageSize(unit);
   const policies = await ensurePolicies(storeId);
 
+  const live = await resetUnpublishedOffers(storeId, sku);
   await ebayFetch(storeId, "PUT", `/sell/inventory/v1/inventory_item/${encodeURIComponent(sku)}`, {
     availability: {
       shipToLocationAvailability: {
@@ -626,8 +687,6 @@ export async function listSku(storeId, sku) {
     },
   });
 
-  const offers = await ebayFetch(storeId, "GET", `/sell/inventory/v1/offer?sku=${encodeURIComponent(sku)}`);
-  let offerId = offers?.offers?.[0]?.offerId;
   const offerBody = {
     sku,
     marketplaceId: marketplaceId(),
@@ -644,26 +703,33 @@ export async function listSku(storeId, sku) {
     listingDuration: "GTC",
     pricingSummary: { price: { value: money(unit.ask_cents), currency: "USD" } },
   };
-  if (offerId) {
-    await ebayFetch(storeId, "PUT", `/sell/inventory/v1/offer/${offerId}`, offerBody);
+
+  let offerId = live?.offerId || null;
+  let published = live;
+  if (live?.listing?.listingId || live?.listingId) {
+    published = live;
   } else {
     const created = await ebayFetch(storeId, "POST", "/sell/inventory/v1/offer", offerBody);
     offerId = created.offerId;
-  }
-  let published;
-  const currentOffer = await quietGet(storeId, `/sell/inventory/v1/offer/${offerId}`);
-  if (String(currentOffer?.status || "").toUpperCase() === "PUBLISHED" && (currentOffer?.listing?.listingId || currentOffer?.listingId)) {
-    published = currentOffer;
-  } else {
     try {
       published = await ebayFetch(storeId, "POST", `/sell/inventory/v1/offer/${offerId}/publish`);
     } catch (err) {
-      const chain = await inspectOfferChain(storeId, sku, offerId, loc, policies);
-      const detail = formatEbayError(err.body, err instanceof Error ? err.message : String(err));
-      const wrapped = new Error(`${detail} ${chain}`.trim());
-      wrapped.status = err.status;
-      wrapped.body = err.body;
-      throw wrapped;
+      const first = formatEbayError(err.body, err instanceof Error ? err.message : String(err));
+      console.log("ebay_publish_retry", JSON.stringify({ offerId, error: first, ebay: err.body }));
+      await deleteOffer(storeId, offerId);
+      const retry = await ebayFetch(storeId, "POST", "/sell/inventory/v1/offer", offerBody);
+      offerId = retry.offerId;
+      try {
+        published = await ebayFetch(storeId, "POST", `/sell/inventory/v1/offer/${offerId}/publish`);
+      } catch (again) {
+        const chain = await inspectOfferChain(storeId, sku, offerId, loc, policies);
+        const detail = formatEbayError(again.body, again instanceof Error ? again.message : String(again));
+        const wrapped = new Error(`${detail} ${chain}`.trim());
+        wrapped.status = again.status;
+        wrapped.body = again.body;
+        wrapped.raw = again.raw;
+        throw wrapped;
+      }
     }
   }
   const listingId = published.listingId || published.listing?.listingId || null;

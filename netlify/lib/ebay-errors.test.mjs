@@ -44,8 +44,8 @@ test("decodes HTML entities and does not repeat the same eBay sentence", () => {
     ],
   });
   assert.match(msg, /seller's policy IDs/i);
-  assert.doesNotMatch(msg, /&apos;/i);
-  assert.equal((msg.match(/opted into business policies/gi) || []).length, 1);
+  assert.doesNotMatch(msg.split(" ebay_raw=")[0], /&apos;/i);
+  assert.equal((msg.split(" ebay_raw=")[0].match(/opted into business policies/gi) || []).length, 1);
 });
 
 test("keeps errorId, longMessage, parameters, and warnings for publish failures", () => {

@@ -22,7 +22,9 @@ export async function handler(event) {
       JSON.stringify({
         error: message,
         status: err?.status || null,
+        path: err?.path || null,
         ebay: err?.body || null,
+        raw: err?.raw || null,
       }),
     );
     return json(code, {
