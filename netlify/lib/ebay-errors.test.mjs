@@ -44,8 +44,9 @@ test("decodes HTML entities and does not repeat the same eBay sentence", () => {
     ],
   });
   assert.match(msg, /seller's policy IDs/i);
-  assert.doesNotMatch(msg.split(" ebay_raw=")[0], /&apos;/i);
-  assert.equal((msg.split(" ebay_raw=")[0].match(/opted into business policies/gi) || []).length, 1);
+  assert.doesNotMatch(msg, /&apos;/i);
+  assert.doesNotMatch(msg, /ebay_raw=/);
+  assert.equal((msg.match(/opted into business policies/gi) || []).length, 1);
 });
 
 test("keeps errorId, longMessage, parameters, and warnings for publish failures", () => {
@@ -71,4 +72,5 @@ test("keeps errorId, longMessage, parameters, and warnings for publish failures"
   assert.match(msg, /additionalInfo=Merchant location is disabled/);
   assert.match(msg, /Brand/);
   assert.match(msg, /warning/i);
+  assert.doesNotMatch(msg, /ebay_raw=/);
 });

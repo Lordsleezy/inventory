@@ -69,10 +69,6 @@ export function formatEbayError(json, fallback = "eBay rejected the listing.") {
     }
     summary = lines.join(" ");
   }
-  const dump = json && typeof json === "object" ? JSON.stringify(json) : "";
-  if (dump && dump !== "{}" && dump !== "null") {
-    return `${summary} ebay_raw=${dump.slice(0, 8000)}`;
-  }
   return summary;
 }
 
@@ -91,6 +87,9 @@ function hintFor(text, params, errorId) {
   const blob = `${text} ${params} ${errorId}`.toLowerCase();
   if (/image|photo|picture/.test(blob)) {
     return "Fix: Floor must send photos as public HTTPS URLs eBay can download (not private signed links).";
+  }
+  if (/25008|immediate pay|local pickup only/.test(blob)) {
+    return "Fix: Floor will turn immediate payment off on the pickup payment policy.";
   }
   if (/25713|offer is not available/.test(blob)) {
     return "Fix: Floor will delete stale unpublished offers for this SKU and publish a new offer.";

@@ -30,7 +30,6 @@ export async function handler(event) {
     return json(code, {
       error: message === "ebay_not_connected" ? "ebay_not_connected" : "ebay_list_failed",
       message,
-      ebay: err?.body || null,
     });
   }
 }

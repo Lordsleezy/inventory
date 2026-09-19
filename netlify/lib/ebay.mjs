@@ -4,6 +4,7 @@ import { EBAY_OAUTH_SCOPES, ebayCondition, ebayHosts, ebayRuName } from "./ebay-
 import { formatEbayError, locationKey } from "./ebay-errors.mjs";
 import { publicPhotoUrl } from "./ebay-photos.mjs";
 import { composeChannelDescription, parseListingSpecs } from "./listing-copy.mjs";
+import { aspectsFromTaxonomy } from "./ebay-aspects.mjs";
 import {
   compactShippingCatalog,
   getShippingServiceDetails,
@@ -410,6 +411,33 @@ async function createFulfillmentPolicy(storeId, market, existing) {
   return saveFulfillmentPolicy(storeId, id, shippingPolicyBody(market, name, pick));
 }
 
+async function ensurePaymentPolicy(storeId, market, existing) {
+  let id = policyIdOf(existing, "payment");
+  let current = existing;
+  if (id) {
+    try {
+      current = await ebayFetch(storeId, "GET", `/sell/account/v1/payment_policy/${id}`);
+    } catch {
+      current = existing;
+    }
+  }
+  if (id && current?.immediatePay === false) return String(id);
+  const body = {
+    name: current?.name || "Floor payments",
+    marketplaceId: current?.marketplaceId || market,
+    categoryTypes: current?.categoryTypes?.length
+      ? current.categoryTypes
+      : [{ name: "ALL_EXCLUDING_MOTORS_VEHICLES", default: true }],
+    immediatePay: false,
+  };
+  if (id) {
+    const updated = await ebayFetch(storeId, "PUT", `/sell/account/v1/payment_policy/${id}`, body);
+    return String(updated.paymentPolicyId || updated.id || id);
+  }
+  const created = await ebayFetch(storeId, "POST", "/sell/account/v1/payment_policy", body);
+  return String(created.paymentPolicyId || created.id);
+}
+
 async function ensurePolicies(storeId) {
   const market = marketplaceId();
   await optInToSellingPolicies(storeId);
@@ -417,19 +445,8 @@ async function ensurePolicies(storeId) {
   const returns = await listPolicies(storeId, "return");
   const fulfillments = await listPolicies(storeId, "fulfillment");
 
-  let payment = policyIdOf(payments[0], "payment");
   let returnP = policyIdOf(returns[0], "return");
-  let fulfillment = null;
-
-  if (!payment) {
-    const created = await ebayFetch(storeId, "POST", "/sell/account/v1/payment_policy", {
-      name: "Floor payments",
-      marketplaceId: market,
-      categoryTypes: [{ name: "ALL_EXCLUDING_MOTORS_VEHICLES", default: true }],
-      immediatePay: true,
-    });
-    payment = created.paymentPolicyId || created.id;
-  }
+  const payment = await ensurePaymentPolicy(storeId, market, payments[0]);
   if (!returnP) {
     const created = await ebayFetch(storeId, "POST", "/sell/account/v1/return_policy", {
       name: "Floor returns",
@@ -442,7 +459,7 @@ async function ensurePolicies(storeId) {
     });
     returnP = created.returnPolicyId || created.id;
   }
-  fulfillment = await createFulfillmentPolicy(storeId, market, fulfillments[0]);
+  const fulfillment = await createFulfillmentPolicy(storeId, market, fulfillments[0]);
   if (!payment || !returnP || !fulfillment) {
     throw new Error("eBay did not return payment, return, and fulfillment policy IDs after create.");
   }
@@ -465,7 +482,7 @@ async function applicationToken() {
   return json.access_token;
 }
 
-async function categoryId(storeId, query) {
+async function categoryId(storeId, query, hint) {
   const market = marketplaceId();
   try {
     const { api } = ebayHosts(process.env.EBAY_ENV);
@@ -476,15 +493,20 @@ async function categoryId(storeId, query) {
     );
     const tree = await treeRes.json();
     const treeId = tree?.categoryTreeId;
-    if (!treeId) return "58058";
+    if (!treeId) return "20713";
     const sugRes = await fetch(
-      `${api}/commerce/taxonomy/v1/category_tree/${treeId}/get_category_suggestions?q=${encodeURIComponent(query || "appliance")}`,
+      `${api}/commerce/taxonomy/v1/category_tree/${treeId}/get_category_suggestions?q=${encodeURIComponent(query || hint || "refrigerator")}`,
       { headers: { Authorization: `Bearer ${token}` } },
     );
     const sug = await sugRes.json();
-    return sug?.categorySuggestions?.[0]?.category?.categoryId || "58058";
+    const rows = sug?.categorySuggestions || [];
+    const needle = String(hint || "").toLowerCase();
+    const named = needle
+      ? rows.find((row) => String(row?.category?.categoryName || "").toLowerCase().includes(needle))
+      : null;
+    return named?.category?.categoryId || rows[0]?.category?.categoryId || "20713";
   } catch {
-    return "58058";
+    return "20713";
   }
 }
 
@@ -544,63 +566,20 @@ async function categoryTreeId() {
   return { api, token, treeId: tree?.categoryTreeId || "0" };
 }
 
-function aspectName(aspect) {
-  return String(aspect?.localizedAspectName || aspect?.aspectName || "").trim();
-}
-
-function pickAspectValue(aspect, candidates) {
-  const allowed = (aspect?.aspectValues || []).map((v) => v.localizedValue || v.value).filter(Boolean);
-  for (const c of candidates) {
-    const want = String(c || "").trim();
-    if (!want) continue;
-    const hit = allowed.find((v) => String(v).toLowerCase() === want.toLowerCase());
-    if (hit) return hit;
-    if (!allowed.length) return want;
-  }
-  if (aspect?.aspectConstraint?.aspectRequired && allowed[0]) return allowed[0];
-  return candidates.find((c) => String(c || "").trim()) || "";
-}
-
 async function itemAspects(category, unit) {
   const specs = parseListingSpecs(unit.listing_specs) || {};
-  const brand = String(unit.brand || "").trim();
-  const model = String(specs.matched_model || unit.model || "").trim();
-  const type = String(unit.category || specs.configuration || "").trim();
-  const color = String(specs.finish || "").trim();
-  const aspects = {};
-  try {
-    const { api, token, treeId } = await categoryTreeId();
-    const res = await fetch(
-      `${api}/commerce/taxonomy/v1/category_tree/${treeId}/get_item_aspects_for_category?category_id=${encodeURIComponent(category)}`,
-      { headers: { Authorization: `Bearer ${token}` } },
+  const { api, token, treeId } = await categoryTreeId();
+  const res = await fetch(
+    `${api}/commerce/taxonomy/v1/category_tree/${treeId}/get_item_aspects_for_category?category_id=${encodeURIComponent(category)}`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+  const json = await res.json();
+  const { aspects, missing } = aspectsFromTaxonomy(json?.aspects || [], unit, specs);
+  if (missing.length) {
+    throw new Error(
+      `eBay needs item specifics we don't have a valid value for: ${missing.join("; ")}. Set those on the unit, then tap E again.`,
     );
-    const json = await res.json();
-    const rows = json?.aspects || [];
-    for (const aspect of rows) {
-      const name = aspectName(aspect);
-      if (!name) continue;
-      const required = Boolean(aspect?.aspectConstraint?.aspectRequired);
-      const lower = name.toLowerCase();
-      let value = "";
-      if (lower === "brand") value = pickAspectValue(aspect, [brand]);
-      else if (lower === "mpn" || lower === "manufacturer part number") value = pickAspectValue(aspect, [model]);
-      else if (lower === "model") value = pickAspectValue(aspect, [model]);
-      else if (lower === "type") value = pickAspectValue(aspect, [type, "Refrigerator"]);
-      else if (lower === "color" || lower === "colour") value = pickAspectValue(aspect, [color]);
-      else if (required) value = pickAspectValue(aspect, [type, brand, model]);
-      if (value) aspects[name] = [String(value)];
-      else if (required && (lower === "brand" || lower === "mpn")) {
-        throw new Error(
-          `eBay requires item specific “${name}”. Add brand and model on this unit, then tap E again.`,
-        );
-      }
-    }
-  } catch (err) {
-    if (err instanceof Error && /requires item specific/i.test(err.message)) throw err;
   }
-  if (brand && !aspects.Brand) aspects.Brand = [brand];
-  if (model && !aspects.MPN) aspects.MPN = [model];
-  if (type && !aspects.Type) aspects.Type = [type];
   return aspects;
 }
 
@@ -660,7 +639,11 @@ export async function listSku(storeId, sku) {
   const epid = await catalogEpid(storeId, unit);
   const loc = await ensureLocation(storeId);
   const copy = listingCopy(unit);
-  const cat = await categoryId(storeId, [unit.brand, unit.model, unit.title, unit.category].filter(Boolean).join(" "));
+  const cat = await categoryId(
+    storeId,
+    [unit.brand, unit.category || "refrigerator"].filter(Boolean).join(" "),
+    unit.category,
+  );
   const aspects = await itemAspects(cat, unit);
   const pkg = packageSize(unit);
   const policies = await ensurePolicies(storeId);
@@ -722,13 +705,8 @@ export async function listSku(storeId, sku) {
       try {
         published = await ebayFetch(storeId, "POST", `/sell/inventory/v1/offer/${offerId}/publish`);
       } catch (again) {
-        const chain = await inspectOfferChain(storeId, sku, offerId, loc, policies);
-        const detail = formatEbayError(again.body, again instanceof Error ? again.message : String(again));
-        const wrapped = new Error(`${detail} ${chain}`.trim());
-        wrapped.status = again.status;
-        wrapped.body = again.body;
-        wrapped.raw = again.raw;
-        throw wrapped;
+        await inspectOfferChain(storeId, sku, offerId, loc, policies);
+        throw again;
       }
     }
   }
