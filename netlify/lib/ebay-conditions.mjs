@@ -121,11 +121,32 @@ export function mapFloorCondition(floorGrade, allowed) {
 }
 
 /**
- * Inventory API wants ConditionEnum, not a raw ID. The same ID (3000) is
- * USED on appliances and USED_EXCELLENT on graded categories — use eBay's
- * name for this category, never a global ID table.
+ * Inventory ConditionEnum is not the category's display name.
+ * Appliances show "Used" (ID 3000) in Seller Hub, but the serializer only
+ * accepts USED_EXCELLENT for that ID — "USED" returns error 2004.
  */
+const ENUM_BY_ID = {
+  1000: "NEW",
+  1500: "NEW_OTHER",
+  1750: "NEW_WITH_DEFECTS",
+  2000: "CERTIFIED_REFURBISHED",
+  2010: "EXCELLENT_REFURBISHED",
+  2020: "VERY_GOOD_REFURBISHED",
+  2030: "GOOD_REFURBISHED",
+  2500: "SELLER_REFURBISHED",
+  2750: "LIKE_NEW",
+  3000: "USED_EXCELLENT",
+  4000: "USED_VERY_GOOD",
+  5000: "USED_GOOD",
+  6000: "USED_ACCEPTABLE",
+  7000: "FOR_PARTS_OR_NOT_WORKING",
+  2990: "PRE_OWNED_EXCELLENT",
+  3010: "PRE_OWNED_FAIR",
+};
+
 export function inventoryConditionEnum(mapped) {
+  const id = String(mapped?.conditionId || "");
+  if (ENUM_BY_ID[id]) return ENUM_BY_ID[id];
   const n = normalizeConditionName(mapped?.name);
   if (!n) return "";
   if (n === "new") return "NEW";
@@ -138,21 +159,18 @@ export function inventoryConditionEnum(mapped) {
   if (n.includes("good refurb")) return "GOOD_REFURBISHED";
   if (n.includes("seller refurb")) return "SELLER_REFURBISHED";
   if (n.includes("for parts") || n.includes("not working")) return "FOR_PARTS_OR_NOT_WORKING";
-  if (n.includes("pre owned excellent")) return "PRE_OWNED_EXCELLENT";
-  if (n.includes("pre owned fair")) return "PRE_OWNED_FAIR";
-  if (n === "used") return "USED";
+  if (n === "used") return "USED_EXCELLENT";
   if (n.includes("excellent")) return "USED_EXCELLENT";
   if (n.includes("very good")) return "USED_VERY_GOOD";
   if (n === "used good" || n === "good") return "USED_GOOD";
   if (n.includes("acceptable") || n.includes("fair")) return "USED_ACCEPTABLE";
-  if (n.includes("used")) return "USED";
   return "";
 }
 
 export function listingConditionPayload(mapped) {
   const condition = inventoryConditionEnum(mapped);
-  if (!condition) return null;
-  return { condition };
+  if (!condition || !mapped?.conditionId) return null;
+  return { condition, conditionId: String(mapped.conditionId) };
 }
 
 export function gradeMapForCategory(allowed) {

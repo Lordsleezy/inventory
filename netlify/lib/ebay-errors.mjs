@@ -97,8 +97,8 @@ function hintFor(text, params, errorId) {
   if (/merchantlocation|location.?key|inventory location/.test(blob)) {
     return "Fix: Floor will recreate the warehouse location with an alphanumeric key.";
   }
-  if (/\bcondition\b/.test(blob) && /invalid|required/.test(blob)) {
-    return "Fix: Set condition on the unit to New, Open box, Excellent, Very good, Good, Fair, or For parts.";
+  if (/\bcondition\b/.test(blob) && /invalid|required|serialize/.test(blob)) {
+    return "Fix: Floor will map this unit’s grade onto an eBay condition this category accepts. Do not change the Floor grade.";
   }
   if (/aspect|item specific|brand|mpn|manufacturer/.test(blob)) {
     return "Fix: Fill brand and model on the unit (and type/category if you have it).";
