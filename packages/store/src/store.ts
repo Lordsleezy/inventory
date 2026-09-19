@@ -792,6 +792,20 @@ export async function countNeedsWork(db: Db, states: UnitState[] = ["available",
   return Number(rows[0]?.n ?? 0);
 }
 
+export async function listedEbayItem(
+  db: Db,
+  sku: string,
+): Promise<{ listingId: string } | null> {
+  const rows = await db.all<{ listing_id: string | null; status: string }>(
+    `SELECT listing_id, status FROM listings
+      WHERE sku = ? AND lower(channel) = 'ebay' AND status = 'listed'
+      LIMIT 1`,
+    [sku],
+  );
+  const listingId = String(rows[0]?.listing_id || "").trim();
+  return listingId ? { listingId } : null;
+}
+
 export async function listedChannelsBySku(db: Db, skus?: string[]): Promise<Map<string, string[]>> {
   const map = new Map<string, string[]>();
   const rows =

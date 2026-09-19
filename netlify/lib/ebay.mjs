@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { decryptSecret, encryptSecret, requireEnv, serviceClient } from "./server.mjs";
-import { EBAY_OAUTH_SCOPES, ebayHosts, ebayRuName } from "./ebay-env.mjs";
+import { EBAY_OAUTH_SCOPES, ebayHosts, ebayItemViewUrl, ebayRuName } from "./ebay-env.mjs";
 import { formatEbayError, locationKey } from "./ebay-errors.mjs";
 import { publicPhotoUrl } from "./ebay-photos.mjs";
 import { composeChannelDescription, parseListingSpecs } from "./listing-copy.mjs";
@@ -13,7 +13,7 @@ import {
   pickApplianceShipping,
 } from "./ebay-trading.mjs";
 
-export { EBAY_OAUTH_SCOPES, ebayHosts, ebayRuName, formatEbayError };
+export { EBAY_OAUTH_SCOPES, ebayHosts, ebayItemViewUrl, ebayRuName, formatEbayError };
 
 export function marketplaceId() {
   return process.env.EBAY_MARKETPLACE_ID || "EBAY_US";
@@ -234,6 +234,63 @@ async function listOffersForSku(storeId, sku) {
     if (err.status === 404) return [];
     throw err;
   }
+}
+
+function flattenAspects(aspects) {
+  const out = {};
+  if (!aspects || typeof aspects !== "object") return out;
+  for (const [name, value] of Object.entries(aspects)) {
+    out[name] = Array.isArray(value) ? value.join(", ") : value == null ? "" : String(value);
+  }
+  return out;
+}
+
+/** Live GET of what eBay has for a SKU (inventory item + offer). */
+export async function inspectLiveSku(storeId, sku) {
+  const sb = serviceClient();
+  const { data: row } = await sb
+    .from("listings")
+    .select("listing_id, offer_id, status")
+    .eq("store_id", storeId)
+    .eq("sku", sku)
+    .eq("channel", "ebay")
+    .maybeSingle();
+  const item = await quietGet(storeId, `/sell/inventory/v1/inventory_item/${encodeURIComponent(sku)}`);
+  let offers = [];
+  let offerError = null;
+  try {
+    offers = await listOffersForSku(storeId, sku);
+  } catch (err) {
+    offerError = err instanceof Error ? err.message : String(err);
+  }
+  if (row?.offer_id && !offers.some((o) => String(o.offerId) === String(row.offer_id))) {
+    const one = await quietGet(storeId, `/sell/inventory/v1/offer/${row.offer_id}`);
+    if (one && !one._error) offers = [one, ...offers];
+    else if (one?._error) offerError = offerError || one._error;
+  }
+  const live =
+    offers.find((o) => String(o.status || "").toUpperCase() === "PUBLISHED") || offers[0] || null;
+  const listingId =
+    live?.listing?.listingId || live?.listingId || row?.listing_id || null;
+  const product = item?.product || {};
+  return {
+    sku,
+    listingId,
+    offerId: live?.offerId || row?.offer_id || null,
+    floorStatus: row?.status || null,
+    offerStatus: live?.status || null,
+    title: product.title || null,
+    price: live?.pricingSummary?.price || null,
+    quantity: live?.availableQuantity ?? null,
+    condition: item?.condition || null,
+    conditionDescription: item?.conditionDescription || null,
+    categoryId: live?.categoryId || null,
+    photos: product.imageUrls || [],
+    aspects: flattenAspects(product.aspects),
+    viewUrl: ebayItemViewUrl(listingId),
+    itemError: item?._error || null,
+    offerError,
+  };
 }
 
 async function deleteOffer(storeId, offerId) {
@@ -784,7 +841,7 @@ export async function listSku(storeId, sku) {
     },
     { onConflict: "store_id,sku,channel" },
   );
-  return { sku, offerId, listingId };
+  return { sku, offerId, listingId, viewUrl: ebayItemViewUrl(listingId) };
 }
 
 export async function withdrawSku(storeId, sku) {
@@ -830,6 +887,50 @@ export async function withdrawSku(storeId, sku) {
     .eq("channel", "ebay")
     .is("completed_at", null);
   return { sku, offerId };
+}
+
+/** Clear Floor's E when eBay already ended the offer (Seller Hub / API withdraw). */
+export async function reconcileListedOffers(storeId) {
+  const sb = serviceClient();
+  const { data, error } = await sb
+    .from("listings")
+    .select("sku, offer_id, listing_id")
+    .eq("store_id", storeId)
+    .eq("channel", "ebay")
+    .eq("status", "listed");
+  if (error) throw new Error(error.message);
+  const results = [];
+  for (const row of data ?? []) {
+    let offers = [];
+    try {
+      offers = await listOffersForSku(storeId, row.sku);
+    } catch (err) {
+      results.push({ sku: row.sku, error: err instanceof Error ? err.message : String(err) });
+      continue;
+    }
+    const live = offers.find(
+      (o) =>
+        String(o.status || "").toUpperCase() === "PUBLISHED" && (o.listing?.listingId || o.listingId),
+    );
+    if (live) {
+      results.push({ sku: row.sku, listed: true });
+      continue;
+    }
+    await sb.from("listings").upsert(
+      {
+        store_id: storeId,
+        sku: row.sku,
+        channel: "ebay",
+        status: "delisted",
+        listing_id: row.listing_id ?? null,
+        offer_id: row.offer_id ?? null,
+        delisted_at: new Date().toISOString(),
+      },
+      { onConflict: "store_id,sku,channel" },
+    );
+    results.push({ sku: row.sku, cleared: true });
+  }
+  return results;
 }
 
 export async function withdrawOpenEbayTasks() {

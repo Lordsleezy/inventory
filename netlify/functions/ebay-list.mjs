@@ -1,9 +1,22 @@
 import { staffFromEvent, json, corsHeaders } from "../lib/server.mjs";
-import { listSku } from "../lib/ebay.mjs";
+import { inspectLiveSku, listSku } from "../lib/ebay.mjs";
 import { wrapHandler, setTrace } from "../lib/floor-log.mjs";
 
 async function handle(event) {
   if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: corsHeaders(), body: "" };
+  if (event.httpMethod === "GET") {
+    try {
+      const { staff } = await staffFromEvent(event);
+      setTrace({ storeId: staff.store_id });
+      const sku = String(event.queryStringParameters?.sku || "").trim();
+      if (!sku) return json(400, { error: "sku_required" });
+      return json(200, { ok: true, listing: await inspectLiveSku(staff.store_id, sku) });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      const code = err && err.code === "ebay_not_connected" ? 409 : 400;
+      return json(code, { error: "ebay_inspect_failed", message });
+    }
+  }
   if (event.httpMethod !== "POST") return json(405, { error: "post_only" });
   try {
     const { staff } = await staffFromEvent(event);

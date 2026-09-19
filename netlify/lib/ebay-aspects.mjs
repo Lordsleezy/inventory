@@ -124,6 +124,93 @@ export function specInches(specs, kind) {
   return null;
 }
 
+export function installKind(raw) {
+  const t = norm(raw);
+  if (!t) return "";
+  if (/built in|builtin|undercounter/.test(t)) return "built-in";
+  if (/free stand|freestanding/.test(t)) return "freestanding";
+  return "";
+}
+
+export function typeConflictsInstall(typeLabel, kind) {
+  if (!kind) return false;
+  const t = norm(typeLabel);
+  const built = /\bbuilt in\b|\bbuiltin\b/.test(t);
+  const free = /\bfree stand|\bfreestanding\b/.test(t);
+  if (kind === "freestanding" && built) return true;
+  if (kind === "built-in" && free) return true;
+  return false;
+}
+
+function allowedMatchingInstall(allowed, kind) {
+  const list = (allowed || []).map((v) => String(v || "").trim()).filter(Boolean);
+  if (!kind) return list;
+  const filtered = list.filter((label) => !typeConflictsInstall(label, kind));
+  return filtered.length ? filtered : list;
+}
+
+function matchTypeLayout(list, layout) {
+  const n = norm(layout);
+  if (!n) return "";
+  const exact = list.find((a) => norm(a) === n);
+  if (exact) return exact;
+  const phrase = list.filter((a) => {
+    const an = norm(a);
+    return an.includes(n) || n.includes(an);
+  });
+  if (phrase.length === 1) return phrase[0];
+  const toks = n.split(/\s+/).filter((t) => t.length >= 3);
+  if (!toks.length) return "";
+  const hits = list.filter((a) => toks.every((t) => norm(a).includes(t)));
+  if (hits.length === 1) return hits[0];
+  return "";
+}
+
+function typeHitFitsAppliance(hit, appliance) {
+  const a = norm(appliance);
+  if (!a) return true;
+  const h = norm(hit);
+  const appToks = a.split(/\s+/).filter((t) => t.length >= 4);
+  if (!appToks.length) return true;
+  return appToks.some((t) => h.includes(t));
+}
+
+function looksLikeLayout(want) {
+  return /freezer|french|side|door|compact|bottom|chest|upright|top load|front load|over under/.test(norm(want));
+}
+
+export function pickTypeValue(allowed, unit, specs, extras = {}) {
+  const install = String(specs?.installation || extras.categoryDefaults?.Installation || "").trim();
+  const kind = installKind(install) || (extras.standalone === false ? "" : "freestanding");
+  const list = allowedMatchingInstall(allowed, kind);
+  const layout = String(specs?.configuration || "").trim();
+  const appliance = String(unit?.category || unit?.title || "").trim();
+  if (layout) {
+    const hit = matchTypeLayout(list, layout);
+    if (hit) {
+      if (
+        !(
+          appliance &&
+          norm(hit) === norm(layout) &&
+          !typeHitFitsAppliance(hit, appliance) &&
+          !looksLikeLayout(layout)
+        )
+      ) {
+        return hit;
+      }
+    }
+  }
+  if (kind === "freestanding") {
+    const free = matchAllowedValue(list, ["Freestanding Refrigerator", "Freestanding"]);
+    if (free) return free;
+  }
+  if (kind === "built-in") {
+    const built = matchTypeLayout(list, "Built-in") || matchAllowedValue(list, ["Built-in", "Built-In"]);
+    if (built) return built;
+  }
+  return matchAllowedValue(list, [appliance]);
+}
+
 export function matchAllowedValue(allowed, candidates) {
   const list = (allowed || []).map((v) => String(v || "").trim()).filter(Boolean);
   const wants = candidateParts(...(candidates || []));
@@ -254,7 +341,7 @@ function candidatesForAspect(name, unit, specs, extras = {}) {
   if (lower === "brand") return [brand];
   if (lower === "mpn" || lower === "manufacturer part number") return [model];
   if (lower === "model") return [model];
-  if (lower === "type") return [appliance, layout];
+  if (lower === "type") return [layout, appliance];
   if (lower === "color" || lower === "colour") return finishColorCandidates(finish);
   if (lower === "condition") return [condition];
   if (lower === "installation") {
@@ -303,24 +390,29 @@ export function fillAspects(defs, unit, specs, extras = {}) {
     let value = "";
     let source = "";
     const override = coerceValue(def, overrides[name]);
-    if (override) {
+    const kind = installKind(specs?.installation || categoryDefaults.Installation) ||
+      (extras.standalone === false ? "" : "freestanding");
+    if (override && !(lower === "type" && typeConflictsInstall(override, kind))) {
       value = override;
       source = "set";
+    } else if (lower === "type") {
+      value = pickTypeValue(def.allowed, unit, specs, { ...extras, categoryDefaults });
+      source = value ? "unit" : "";
     } else if (lower === "model" || (def.catalog && /model|mpn/.test(lower))) {
       value = model;
       source = value ? "unit" : "";
     } else if (itemMeasureKind(lower)) {
-      const kind = itemMeasureKind(lower);
+      const measureKind = itemMeasureKind(lower);
       const measure =
-        kind === "capacity"
+        measureKind === "capacity"
           ? parseMeasure(specs?.capacity_cu_ft)
-          : kind === "weight"
+          : measureKind === "weight"
             ? parseMeasure(specs?.weight_lb || specs?.weight_lbs || specs?.weight)
-            : specInches(specs, kind);
+            : specInches(specs, measureKind);
       value = (def.allowed || []).length ? matchMeasureBucket(def.allowed, measure) : "";
       if (!value && measure != null && !def.selectionOnly) {
-        const unit = kind === "capacity" ? "cu ft" : kind === "weight" ? "lb" : "in";
-        value = `${measure} ${unit}`;
+        const unitLabel = measureKind === "capacity" ? "cu ft" : measureKind === "weight" ? "lb" : "in";
+        value = `${measure} ${unitLabel}`;
       }
       source = value ? "unit" : "";
     } else if (refuseGuess(lower) || (lower === "energy star" && euEnergyScale(def.allowed))) {
@@ -333,14 +425,14 @@ export function fillAspects(defs, unit, specs, extras = {}) {
     const skipGuessed = refuseGuess(lower) || (lower === "energy star" && euEnergyScale(def.allowed));
     if (!value && !skipGuessed) {
       const rememberedValue = coerceValue(def, remembered[name]);
-      if (rememberedValue) {
+      if (rememberedValue && !(lower === "type" && typeConflictsInstall(rememberedValue, kind))) {
         value = rememberedValue;
         source = "remembered";
       }
     }
     if (!value && !skipGuessed) {
       const defaultValue = coerceValue(def, categoryDefaults[name]);
-      if (defaultValue) {
+      if (defaultValue && !(lower === "type" && typeConflictsInstall(defaultValue, kind))) {
         value = defaultValue;
         source = "default";
       }

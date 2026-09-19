@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { matchAllowedValue, matchMeasureBucket, pickAspectValue, aspectsFromTaxonomy, fillAspects } from "./ebay-aspects.mjs";
+import { matchAllowedValue, matchMeasureBucket, pickAspectValue, pickTypeValue, aspectsFromTaxonomy, fillAspects } from "./ebay-aspects.mjs";
 
 test("Type maps refrigerator to an allowed appliance type, not Air Filter", () => {
   const allowed = ["Air Filter", "Compact Refrigerator", "Refrigerator", "Wine Fridge"];
@@ -187,5 +187,68 @@ test("does not stuff Freestanding or cabinet width into EU / unrelated aspects",
   assert.equal(aspects["Open Door Width"], undefined);
   assert.equal(aspects["Bottle Capacity"], undefined);
   assert.equal(aspects["Energy Star"], undefined);
+});
+
+const FRIDGE_TYPES = [
+  "Bottom Freezer",
+  "Built-in Bottom Freezer Refrigerator",
+  "Built-in Top Freezer Refrigerator",
+  "European Side-by-Side Refrigerator",
+  "Freestanding Refrigerator",
+  "French Door Refrigerator",
+  "Side-by-Side Refrigerator",
+];
+
+test("freestanding top-freezer Type is not the built-in variant", () => {
+  assert.equal(
+    pickTypeValue(FRIDGE_TYPES, { category: "Refrigerator" }, { configuration: "Top Freezer", installation: "Freestanding" }, {
+      standalone: true,
+      categoryDefaults: { Installation: "Freestanding" },
+    }),
+    "Freestanding Refrigerator",
+  );
+  const { aspects } = fillAspects(
+    [
+      { name: "Type", required: true, allowed: FRIDGE_TYPES },
+      { name: "Installation", required: true, allowed: ["Built-In", "Freestanding"] },
+    ],
+    { brand: "LG", model: "LTCS20020V", category: "Refrigerator" },
+    { configuration: "Top Freezer", installation: "Freestanding" },
+    { categoryDefaults: { Installation: "Freestanding" }, standalone: true },
+  );
+  assert.equal(aspects.Type[0], "Freestanding Refrigerator");
+  assert.equal(aspects.Installation[0], "Freestanding");
+});
+
+test("built-in install can still pick a built-in Type", () => {
+  assert.equal(
+    pickTypeValue(FRIDGE_TYPES, { category: "Refrigerator" }, { configuration: "Top Freezer", installation: "Built-In" }, {
+      standalone: true,
+    }),
+    "Built-in Top Freezer Refrigerator",
+  );
+});
+
+test("French door stays French door, not a built-in type", () => {
+  assert.equal(
+    pickTypeValue(FRIDGE_TYPES, { category: "Refrigerator" }, { configuration: "French door", installation: "Freestanding" }, {
+      standalone: true,
+    }),
+    "French Door Refrigerator",
+  );
+});
+
+test("remembered built-in Type is ignored on a freestanding unit", () => {
+  const { aspects } = fillAspects(
+    [{ name: "Type", required: true, allowed: FRIDGE_TYPES }],
+    { category: "Refrigerator" },
+    { configuration: "Top Freezer", installation: "Freestanding" },
+    {
+      remembered: { Type: "Built-in Top Freezer Refrigerator" },
+      categoryDefaults: { Installation: "Freestanding" },
+      standalone: true,
+    },
+  );
+  assert.equal(aspects.Type[0], "Freestanding Refrigerator");
 });
 

@@ -3,12 +3,23 @@
 export function ebayHosts(env: string | undefined = process.env.EBAY_ENV): {
   auth: string;
   api: string;
+  www: string;
 } {
   const live = env === "production";
   return {
     auth: live ? "https://auth.ebay.com" : "https://auth.sandbox.ebay.com",
     api: live ? "https://api.ebay.com" : "https://api.sandbox.ebay.com",
+    www: live ? "https://www.ebay.com" : "https://www.sandbox.ebay.com",
   };
+}
+
+export function ebayItemViewUrl(
+  listingId: string | null | undefined,
+  env: string | undefined = process.env.EBAY_ENV,
+): string | null {
+  const id = String(listingId ?? "").trim();
+  if (!id) return null;
+  return `${ebayHosts(env).www}/itm/${encodeURIComponent(id)}`;
 }
 
 /** eBay OAuth redirect_uri is the RuName, never the https callback URL. */

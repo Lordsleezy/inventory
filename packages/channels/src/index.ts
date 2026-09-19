@@ -20,5 +20,6 @@ export {
   EBAY_OAUTH_SCOPES,
   ebayCondition,
   ebayHosts,
+  ebayItemViewUrl,
   ebayRuName,
 } from "./ebay.ts";

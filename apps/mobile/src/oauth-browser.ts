@@ -15,3 +15,11 @@ export async function openConnectUrl(url: string): Promise<"assign" | "browser">
   await Browser.open({ url });
   return "browser";
 }
+
+export async function openExternalUrl(url: string): Promise<void> {
+  try {
+    await Browser.open({ url });
+  } catch {
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
+}

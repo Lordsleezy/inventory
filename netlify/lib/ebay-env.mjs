@@ -3,7 +3,14 @@ export function ebayHosts(env = process.env.EBAY_ENV) {
   return {
     auth: live ? "https://auth.ebay.com" : "https://auth.sandbox.ebay.com",
     api: live ? "https://api.ebay.com" : "https://api.sandbox.ebay.com",
+    www: live ? "https://www.ebay.com" : "https://www.sandbox.ebay.com",
   };
+}
+
+export function ebayItemViewUrl(listingId, env = process.env.EBAY_ENV) {
+  const id = String(listingId ?? "").trim();
+  if (!id) return null;
+  return `${ebayHosts(env).www}/itm/${encodeURIComponent(id)}`;
 }
 
 export function ebayRuName(ruName = process.env.EBAY_RU_NAME) {

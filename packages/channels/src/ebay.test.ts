@@ -1,11 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ebayCondition, ebayHosts, ebayRuName } from "./ebay.ts";
+import { ebayCondition, ebayHosts, ebayItemViewUrl, ebayRuName } from "./ebay.ts";
 
 test("sandbox is the default eBay host until EBAY_ENV is production", () => {
   assert.equal(ebayHosts(undefined).api, "https://api.sandbox.ebay.com");
   assert.equal(ebayHosts("sandbox").auth, "https://auth.sandbox.ebay.com");
   assert.equal(ebayHosts("production").api, "https://api.ebay.com");
+  assert.equal(ebayItemViewUrl("110590742623"), "https://www.sandbox.ebay.com/itm/110590742623");
+  assert.equal(
+    ebayItemViewUrl("110590742623", "production"),
+    "https://www.ebay.com/itm/110590742623",
+  );
 });
 
 test("eBay OAuth uses the RuName, not the https callback", () => {

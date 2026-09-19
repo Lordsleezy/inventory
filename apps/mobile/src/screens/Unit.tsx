@@ -4,6 +4,7 @@ import {
   buildReceipt,
   formatCents,
   listedChannelsBySku,
+  listedEbayItem,
   loadUnit,
   parseListingSpecs,
   specInchesValue,
@@ -25,7 +26,9 @@ import { DangerButton, Label, MoneyField, Notice, SelectField, Spinner, TextFiel
 import { openHtml } from "../files";
 import { useStore } from "../store";
 import { applyChannelListing } from "../functions";
+import { openExternalUrl } from "../oauth-browser";
 import { askManagerPin } from "../pin";
+import { ebayItemViewUrl } from "@floor/channels";
 import { friendlyRpc, needsManagerPin, needsVoidFirst } from "../rpc";
 import { ChannelMarks, ChannelToggleRow } from "../listingMarks";
 
@@ -431,11 +434,15 @@ export function UnitScreen() {
 function MarkListed({ sku, channels, online }: { sku: string; channels: string[]; online: boolean }) {
   const { db, hydrate, ensureOnline, cacheEpoch } = useStore();
   const [listed, setListed] = useState<string[]>([]);
+  const [ebayUrl, setEbayUrl] = useState<string | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    void listedChannelsBySku(db, [sku])
-      .then((map) => setListed(map.get(sku) ?? []))
+    void Promise.all([listedChannelsBySku(db, [sku]), listedEbayItem(db, sku)])
+      .then(([map, ebay]) => {
+        setListed(map.get(sku) ?? []);
+        setEbayUrl(ebay ? ebayItemViewUrl(ebay.listingId, import.meta.env.VITE_EBAY_ENV) : null);
+      })
       .catch((err) => setError(friendlyRpc(err)));
   }, [db, sku, cacheEpoch]);
 
@@ -470,6 +477,15 @@ function MarkListed({ sku, channels, online }: { sku: string; channels: string[]
         disabled={!online}
         onToggle={(channel, next) => void toggle(channel, next)}
       />
+      {ebayUrl ? (
+        <button
+          type="button"
+          className="btn-text mt-2 px-0"
+          onClick={() => void openExternalUrl(ebayUrl)}
+        >
+          View on eBay
+        </button>
+      ) : null}
       <Notice tone="error">{error}</Notice>
     </div>
   );
