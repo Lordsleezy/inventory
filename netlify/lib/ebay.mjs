@@ -4,7 +4,8 @@ import { EBAY_OAUTH_SCOPES, ebayCondition, ebayHosts, ebayRuName } from "./ebay-
 import { formatEbayError, locationKey } from "./ebay-errors.mjs";
 import { publicPhotoUrl } from "./ebay-photos.mjs";
 import { composeChannelDescription, parseListingSpecs } from "./listing-copy.mjs";
-import { aspectsFromTaxonomy, parseMeasure, specInches } from "./ebay-aspects.mjs";
+import { parseMeasure, specInches } from "./ebay-aspects.mjs";
+import { listingMeasures, prepareUnitAspects } from "./ebay-catalog.mjs";
 import {
   compactShippingCatalog,
   getShippingServiceDetails,
@@ -566,27 +567,18 @@ async function categoryTreeId() {
   return { api, token, treeId: tree?.categoryTreeId || "0" };
 }
 
-function listingMeasures(unit) {
-  const specs = { ...(parseListingSpecs(unit.listing_specs) || {}) };
-  if (unit.listing_body) specs.listing_body = unit.listing_body;
-  return specs;
-}
-
-async function itemAspects(category, unit) {
-  const specs = listingMeasures(unit);
-  const { api, token, treeId } = await categoryTreeId();
-  const res = await fetch(
-    `${api}/commerce/taxonomy/v1/category_tree/${treeId}/get_item_aspects_for_category?category_id=${encodeURIComponent(category)}`,
-    { headers: { Authorization: `Bearer ${token}` } },
-  );
-  const json = await res.json();
-  const { aspects, missing } = aspectsFromTaxonomy(json?.aspects || [], unit, specs);
-  if (missing.length) {
-    throw new Error(
-      `eBay needs item specifics we don't have a valid value for: ${missing.join("; ")}. Fill width, height, depth, model, or installation on this unit, then tap E again.`,
+async function itemAspects(storeId, unit) {
+  const prepared = await prepareUnitAspects({ storeId, unit, liveCheck: true });
+  if (!prepared.ready) {
+    const err = new Error(
+      `eBay still needs: ${prepared.missingRequired.join("; ")}. Set them on the unit’s eBay details, then tap E again.`,
     );
+    err.code = "ebay_aspects_missing";
+    err.missing = prepared.missingRequired;
+    err.refreshed = prepared.refreshed;
+    throw err;
   }
-  return aspects;
+  return { aspects: prepared.aspects, categoryId: prepared.floor.ebayCategoryId, floor: prepared.floor };
 }
 
 function packageSize(unit) {
@@ -644,12 +636,7 @@ export async function listSku(storeId, sku) {
   const epid = await catalogEpid(storeId, unit);
   const loc = await ensureLocation(storeId);
   const copy = listingCopy(unit);
-  const cat = await categoryId(
-    storeId,
-    [unit.brand, unit.category || "refrigerator"].filter(Boolean).join(" "),
-    unit.category,
-  );
-  const aspects = await itemAspects(cat, unit);
+  const { aspects, categoryId: cat } = await itemAspects(storeId, unit);
   const pkg = packageSize(unit);
   const policies = await ensurePolicies(storeId);
 

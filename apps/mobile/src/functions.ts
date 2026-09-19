@@ -26,7 +26,8 @@ export async function applyChannelListing(channel: string, skus: string[], liste
     if (res.status === 409 && body.error === "ebay_not_connected") {
       /* fall through and mark locally */
     } else if (!res.ok) {
-      const detail = String(body.message || "").trim();
+      const missing = Array.isArray(body.missing) ? body.missing.filter(Boolean).join("; ") : "";
+      const detail = String(body.message || missing || "").trim();
       if (detail && !/^invalid$/i.test(detail) && detail !== "ebay_list_failed") {
         throw new Error(detail);
       }

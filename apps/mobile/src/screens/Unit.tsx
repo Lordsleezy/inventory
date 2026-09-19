@@ -17,6 +17,7 @@ import {
   type UnitState,
 } from "@floor/store";
 import { floorCloud } from "@floor/cloud";
+import { EbayDetails } from "../components/EbayDetails";
 import { ManufacturerPhotos } from "../components/ManufacturerPhotos";
 import { Photos } from "../components/Photos";
 import { DangerButton, Label, MoneyField, Notice, SelectField, Spinner, TextField } from "../components/ui";
@@ -278,15 +279,10 @@ export function UnitScreen() {
           onCommit={(v) => editSpec("depth_in", v ?? "")}
         />
       </div>
-      <SelectField
-        label="Installation"
-        value={String(parseListingSpecs(unit.listingSpecs)?.installation ?? "")}
-        options={["Freestanding", "Built-In", "Undercounter", "Slide-In"]}
-        onCommit={(v) => editSpec("installation", v ?? "")}
-      />
       <p className="text-quiet text-floor-mute">
-        eBay pickup listings use these. Empty installation means Freestanding. Model lookup fills width/height/depth when we have them.
+        Width, height, and depth fill eBay size buckets. Model lookup fills them when we have the specs.
       </p>
+      <EbayDetails sku={unit.sku} category={unit.category} cacheKey={`${unit.listingSpecs || ""}:${unit.brand}:${unit.model}`} />
       <TextField label="Description" value={unit.title} onCommit={(v) => edit("title", v ?? "")} />
       <TextField
         label="Listing description"

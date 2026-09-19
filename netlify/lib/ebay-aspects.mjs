@@ -174,7 +174,7 @@ function allowedList(aspect) {
   return (aspect?.aspectValues || []).map((v) => v.localizedValue || v.value).filter(Boolean);
 }
 
-function looksLikeCatalogModels(allowed) {
+export function looksLikeCatalogModels(allowed) {
   if ((allowed || []).length < 4) return false;
   const models = allowed.filter(
     (a) => /[a-z].*\d|\d.*[a-z]/i.test(a) && !/in\b|inch|more than|less than|cu\s*ft/i.test(a),
@@ -182,7 +182,37 @@ function looksLikeCatalogModels(allowed) {
   return models.length / allowed.length > 0.5;
 }
 
-function candidatesForAspect(name, unit, specs) {
+export function unitSpecificAspect(name) {
+  const lower = String(name || "").toLowerCase();
+  return /model|mpn|manufacturer part|item width|item height|item length|item depth|capacity/.test(lower);
+}
+
+export function normalizeTaxonomyAspects(rows) {
+  return (rows || [])
+    .map((aspect, sortIndex) => {
+      const name = String(aspect?.localizedAspectName || aspect?.aspectName || "").trim();
+      const constraint = aspect?.aspectConstraint || {};
+      const usage = String(constraint.aspectUsage || "").toUpperCase();
+      const required = Boolean(constraint.aspectRequired) || usage === "REQUIRED";
+      const recommended = !required && (usage === "RECOMMENDED" || Boolean(constraint.aspectRecommended));
+      const allowed = allowedList(aspect);
+      const mode = String(constraint.aspectMode || "").toUpperCase();
+      const catalog = looksLikeCatalogModels(allowed);
+      const selectionOnly = mode !== "FREE_TEXT" && allowed.length > 0 && !catalog;
+      return {
+        name,
+        required,
+        recommended,
+        allowed,
+        selectionOnly,
+        catalog,
+        sortIndex,
+      };
+    })
+    .filter((row) => row.name);
+}
+
+function candidatesForAspect(name, unit, specs, extras = {}) {
   const lower = name.toLowerCase();
   const brand = String(unit.brand || "").trim();
   const model = String(specs?.matched_model || unit.model || "").trim();
@@ -190,12 +220,17 @@ function candidatesForAspect(name, unit, specs) {
   const layout = String(specs?.configuration || "").trim();
   const finish = String(specs?.finish || "").trim();
   const install = String(specs?.installation || "").trim();
+  const condition = String(unit.condition || "").trim();
   if (lower === "brand") return [brand];
   if (lower === "mpn" || lower === "manufacturer part number") return [model];
   if (lower === "model") return [model];
   if (lower === "type") return [appliance, layout];
   if (lower === "color" || lower === "colour") return [finish];
-  if (lower === "installation") return [install, "Freestanding"];
+  if (lower === "condition") return [condition];
+  if (lower === "installation") {
+    const fallback = extras.standalone === false ? "" : extras.categoryDefaults?.Installation || "Freestanding";
+    return [install, fallback];
+  }
   if (/height/.test(lower)) return [specInches(specs, "height"), specs?.height_in];
   if (/width/.test(lower)) return [specInches(specs, "width"), specs?.width_in];
   if (/depth|length/.test(lower) && !/wave|band/.test(lower)) return [specInches(specs, "depth"), specs?.depth_in];
@@ -204,23 +239,45 @@ function candidatesForAspect(name, unit, specs) {
   if (/energy/.test(lower)) return [specs?.energy];
   if (/ice/.test(lower)) return [specs?.ice_maker];
   if (/water/.test(lower)) return [specs?.water_dispenser];
-  return [install, appliance, layout, finish, brand, model];
+  return [install, appliance, layout, finish, brand, model, condition];
 }
 
-export function aspectsFromTaxonomy(rows, unit, specs) {
+function coerceValue(def, raw) {
+  const allowed = def.allowed || [];
+  if (!raw && raw !== 0) return "";
+  if (allowed.length && !def.catalog) {
+    if (/height|width|depth|length|capacity/.test(String(def.name || "").toLowerCase())) {
+      return matchMeasureBucket(allowed, raw) || matchAllowedValue(allowed, [raw]);
+    }
+    return matchAllowedValue(allowed, [raw]);
+  }
+  return String(raw).trim();
+}
+
+export function fillAspects(defs, unit, specs, extras = {}) {
   const model = String(specs?.matched_model || unit.model || "").trim();
+  const overrides = specs?.ebay_aspects && typeof specs.ebay_aspects === "object" ? specs.ebay_aspects : {};
+  const remembered = extras.remembered && typeof extras.remembered === "object" ? extras.remembered : {};
+  const categoryDefaults = extras.categoryDefaults && typeof extras.categoryDefaults === "object" ? extras.categoryDefaults : {};
   const aspects = {};
+  const filled = [];
   const missing = [];
-  for (const aspect of rows || []) {
-    const name = String(aspect?.localizedAspectName || aspect?.aspectName || "").trim();
+  const missingRecommended = [];
+  for (const def of defs || []) {
+    const name = def.name;
     if (!name) continue;
-    const required = Boolean(aspect?.aspectConstraint?.aspectRequired);
     const lower = name.toLowerCase();
-    const allowed = allowedList(aspect);
+    const fakeAspect = { localizedAspectName: name, aspectValues: (def.allowed || []).map((value) => ({ localizedValue: value })) };
     let value = "";
-    if (lower === "model") {
+    let source = "";
+    const override = coerceValue(def, overrides[name]);
+    if (override) {
+      value = override;
+      source = "set";
+    } else if (lower === "model" || (def.catalog && /model|mpn/.test(lower))) {
       value = model;
-    } else if (/height|width|depth|length|capacity/.test(lower) && allowed.length) {
+      source = value ? "unit" : "";
+    } else if (/height|width|depth|length|capacity/.test(lower) && (def.allowed || []).length) {
       const kind = /capacity/.test(lower)
         ? "capacity"
         : /height/.test(lower)
@@ -229,33 +286,63 @@ export function aspectsFromTaxonomy(rows, unit, specs) {
             ? "depth"
             : "width";
       const measure = kind === "capacity" ? specs?.capacity_cu_ft : specInches(specs, kind);
-      value = matchMeasureBucket(allowed, measure);
-    } else if (looksLikeCatalogModels(allowed) && /model|mpn/.test(lower)) {
-      value = model;
+      value = matchMeasureBucket(def.allowed, measure);
+      source = value ? "unit" : "";
     } else {
-      value = pickAspectValue(aspect, candidatesForAspect(name, unit, specs));
+      value = pickAspectValue(fakeAspect, candidatesForAspect(name, unit, specs, { ...extras, categoryDefaults }));
+      source = value ? "unit" : "";
     }
+    if (!value) {
+      const rememberedValue = coerceValue(def, remembered[name]);
+      if (rememberedValue) {
+        value = rememberedValue;
+        source = "remembered";
+      }
+    }
+    if (!value) {
+      const defaultValue = coerceValue(def, categoryDefaults[name]);
+      if (defaultValue) {
+        value = defaultValue;
+        source = "default";
+      }
+    }
+    const row = {
+      name,
+      required: Boolean(def.required),
+      recommended: Boolean(def.recommended),
+      allowed: def.allowed || [],
+      selectionOnly: Boolean(def.selectionOnly),
+      catalog: Boolean(def.catalog),
+      value,
+      source,
+    };
+    filled.push(row);
     if (value) aspects[name] = [String(value)];
-    else if (required) {
-      const examples = allowed.slice(0, 8);
-      const field =
-        /height/.test(lower)
-          ? "height"
-          : /width/.test(lower)
-            ? "width"
-            : /depth|length/.test(lower)
-              ? "depth"
-              : /install/.test(lower)
-                ? "installation"
-                : /model/.test(lower)
-                  ? "model"
-                  : "";
-      missing.push(
-        examples.length
-          ? `${name} (set ${field || "it"} on the unit; eBay examples: ${examples.join(", ")})`
-          : `${name} (set ${field || "it"} on the unit screen)`,
-      );
+    else if (def.required) {
+      const examples = (def.allowed || []).slice(0, 8);
+      missing.push(examples.length ? `${name} (eBay: ${examples.join(", ")})` : name);
+    } else if (def.recommended) {
+      missingRecommended.push(name);
     }
   }
-  return { aspects, missing };
+  return { aspects, missing, missingRecommended, filled };
+}
+
+export function aspectsNeedRefresh(stored, live) {
+  const req = (rows) =>
+    (rows || [])
+      .filter((row) => row.required)
+      .map((row) => row.name)
+      .sort();
+  if (req(stored).join("\0") !== req(live).join("\0")) return true;
+  for (const def of (live || []).filter((row) => row.required)) {
+    const prev = (stored || []).find((row) => row.name === def.name);
+    if (!prev) return true;
+    if ((prev.allowed || []).join("\0") !== (def.allowed || []).join("\0")) return true;
+  }
+  return false;
+}
+
+export function aspectsFromTaxonomy(rows, unit, specs, extras = {}) {
+  return fillAspects(normalizeTaxonomyAspects(rows), unit, specs, extras);
 }

@@ -28,8 +28,15 @@ export async function handler(event) {
       }),
     );
     return json(code, {
-      error: message === "ebay_not_connected" ? "ebay_not_connected" : "ebay_list_failed",
+      error:
+        message === "ebay_not_connected"
+          ? "ebay_not_connected"
+          : err?.code === "ebay_aspects_missing"
+            ? "ebay_aspects_missing"
+            : "ebay_list_failed",
       message,
+      missing: err?.missing || undefined,
+      refreshed: err?.refreshed || undefined,
     });
   }
 }

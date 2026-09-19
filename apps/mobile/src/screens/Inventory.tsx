@@ -11,6 +11,7 @@ import {
 } from "@floor/store";
 import { applyChannelListing } from "../functions";
 import { useDb, useStore } from "../store";
+import { EbayBulkEdit } from "../components/EbayDetails";
 import { Notice, Spinner } from "../components/ui";
 import { ChannelMarks, ChannelToggleRow, normalizeChannel } from "../listingMarks";
 import { friendlyRpc } from "../rpc";
@@ -211,6 +212,13 @@ export function InventoryScreen() {
             }
             disabled={!online}
             onToggle={(channel, next) => void applyListing(channel, next)}
+          />
+          <EbayBulkEdit
+            skus={picked}
+            categoryHint={(() => {
+              const cats = [...new Set(picked.map((sku) => units?.find((u) => u.sku === sku)?.category || "").filter(Boolean))];
+              return cats.length === 1 ? cats[0] : "";
+            })()}
           />
         </div>
       ) : null}
