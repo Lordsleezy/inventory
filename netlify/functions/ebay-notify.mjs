@@ -1,5 +1,5 @@
 import { json, corsHeaders, requireEnv } from "../lib/server.mjs";
-import { ingestEbayOrder, notificationChallenge, pollAllStores, withdrawOpenEbayTasks } from "../lib/ebay.mjs";
+import { notificationChallenge, pollAllStores, withdrawOpenEbayTasks } from "../lib/ebay.mjs";
 import { wrapHandler } from "../lib/floor-log.mjs";
 
 function endpointUrl(event) {
@@ -21,22 +21,9 @@ async function handle(event) {
     if (topic === "MARKETPLACE_ACCOUNT_DELETION") {
       return json(200, { ok: true });
     }
-    const order = body.notification?.data || body.data || body;
-    const storeHint = body.notification?.payload?.storeId;
-    if (order?.orderId) {
-      const results = await pollAllStores();
-      if (storeHint) {
-        try {
-          await ingestEbayOrder(storeHint, order);
-        } catch {
-          /* pollAllStores is the backup */
-        }
-      }
-      return json(200, { ok: true, polled: results.length });
-    }
-    await pollAllStores();
+    const results = await pollAllStores();
     await withdrawOpenEbayTasks();
-    return json(200, { ok: true });
+    return json(200, { ok: true, polled: results.length });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return json(400, { error: message });

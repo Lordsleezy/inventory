@@ -9,8 +9,11 @@ import { listingMeasures, prepareUnitAspects, prepareUnitCondition } from "./eba
 import { floorLog, redact, setTrace } from "./floor-log.mjs";
 import {
   compactShippingCatalog,
+  getSellerOrders,
   getShippingServiceDetails,
   pickApplianceShipping,
+  tradingOrderIsSale,
+  tradingOrderToIngest,
 } from "./ebay-trading.mjs";
 
 export { EBAY_OAUTH_SCOPES, ebayHosts, ebayItemViewUrl, ebayRuName, formatEbayError };
@@ -1015,6 +1018,7 @@ export async function ingestEbayOrder(storeId, order) {
     },
     { onConflict: "store_id,sku,channel" },
   );
+  await withdrawSku(storeId, sku).catch(() => undefined);
   return { sku, orderId, saleId: sale?.id };
 }
 
@@ -1026,17 +1030,107 @@ function fulfillmentOrdersPath() {
   return `/sell/fulfillment/v1/order?limit=50&filter=${filter}`;
 }
 
-export async function pollEbayOrders(storeId) {
-  const json = await ebayFetch(storeId, "GET", fulfillmentOrdersPath());
-  const results = [];
-  for (const order of json?.orders ?? []) {
+async function listedSoldBySku(storeId) {
+  const sb = serviceClient();
+  const { data, error } = await sb
+    .from("listings")
+    .select("sku, listing_id, offer_id")
+    .eq("store_id", storeId)
+    .eq("channel", "ebay")
+    .eq("status", "listed");
+  if (error) throw new Error(error.message);
+  const soldQty = {};
+  const extras = [];
+  for (const row of data ?? []) {
+    let offers = [];
     try {
-      results.push(await ingestEbayOrder(storeId, order));
-    } catch (err) {
-      results.push({ orderId: order.orderId, error: err instanceof Error ? err.message : String(err) });
+      offers = await listOffersForSku(storeId, row.sku);
+    } catch {
+      offers = [];
+    }
+    const live =
+      offers.find((o) => String(o.offerId) === String(row.offer_id)) ||
+      offers.find((o) => String(o.status || "").toUpperCase() === "PUBLISHED") ||
+      offers[0];
+    const soldQuantity = Number(live?.listing?.soldQuantity || 0);
+    soldQty[row.sku] = soldQuantity;
+    if (soldQuantity >= 1) {
+      extras.push({
+        sku: row.sku,
+        listingId: live?.listing?.listingId || live?.listingId || row.listing_id,
+        price: live?.pricingSummary?.price?.value || "0",
+        soldQuantity,
+      });
     }
   }
-  return results;
+  return { soldQty, extras };
+}
+
+async function ingestFrom(storeId, order, source, bag) {
+  const sku = orderSku(order);
+  const orderId = order?.orderId;
+  if (!orderId || !sku) return;
+  if (bag.skus.has(sku) || bag.orders.has(orderId)) return;
+  try {
+    const row = await ingestEbayOrder(storeId, order);
+    bag.results.push({ ...row, source });
+    bag.orders.add(orderId);
+    if (row?.sku) bag.skus.add(row.sku);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (/unit_not_sellable|duplicate key|23505/i.test(message)) {
+      bag.skus.add(sku);
+      bag.results.push({ sku, orderId, source, skipped: true, reason: "already_sold" });
+      return;
+    }
+    bag.results.push({ orderId, sku, source, error: message });
+  }
+}
+
+export async function pollEbayOrders(storeId) {
+  const bag = { results: [], skus: new Set(), orders: new Set() };
+  try {
+    const json = await ebayFetch(storeId, "GET", fulfillmentOrdersPath());
+    for (const order of json?.orders ?? []) {
+      await ingestFrom(storeId, order, "fulfillment", bag);
+    }
+  } catch (err) {
+    bag.results.push({ source: "fulfillment", error: err instanceof Error ? err.message : String(err) });
+  }
+
+  let soldQty = {};
+  let extras = [];
+  try {
+    const listed = await listedSoldBySku(storeId);
+    soldQty = listed.soldQty;
+    extras = listed.extras;
+  } catch (err) {
+    bag.results.push({ source: "sold_quantity", error: err instanceof Error ? err.message : String(err) });
+  }
+
+  try {
+    const trading = await getSellerOrders(await userToken(storeId));
+    for (const order of trading) {
+      if (!tradingOrderIsSale(order, soldQty)) continue;
+      await ingestFrom(storeId, tradingOrderToIngest(order), "trading", bag);
+    }
+  } catch (err) {
+    bag.results.push({ source: "trading", error: err instanceof Error ? err.message : String(err) });
+  }
+
+  for (const row of extras) {
+    await ingestFrom(
+      storeId,
+      {
+        orderId: `ebay-sold:${row.listingId || row.sku}`,
+        lineItems: [{ sku: row.sku, total: { value: String(row.price) } }],
+        pricingSummary: { total: { value: String(row.price) } },
+      },
+      "sold_quantity",
+      bag,
+    );
+  }
+  return bag.results;
 }
 
 export async function pollAllStores() {
@@ -1072,13 +1166,20 @@ export async function subscribeNotifications(storeId) {
     destinationId = created.destinationId;
   }
   const subs = await ebayFetch(storeId, "GET", "/commerce/notification/v1/subscription");
-  const have = (subs?.subscriptions ?? []).some((s) => s.topicId === "ORDER_CONFIRMATION");
-  if (!have && destinationId) {
-    await ebayFetch(storeId, "POST", "/commerce/notification/v1/subscription", {
-      topicId: "ORDER_CONFIRMATION",
-      status: "ENABLED",
-      destinationId,
-    });
+  const have = new Set((subs?.subscriptions ?? []).map((s) => s.topicId));
+  if (destinationId) {
+    for (const topicId of ["MARKETPLACE_ACCOUNT_DELETION", "ORDER_CONFIRMATION"]) {
+      if (have.has(topicId)) continue;
+      try {
+        await ebayFetch(storeId, "POST", "/commerce/notification/v1/subscription", {
+          topicId,
+          status: "ENABLED",
+          destinationId,
+        });
+      } catch (err) {
+        console.log("ebay_notify_subscribe", topicId, err instanceof Error ? err.message : String(err));
+      }
+    }
   }
   return { destinationId };
 }

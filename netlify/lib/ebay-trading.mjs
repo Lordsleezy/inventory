@@ -88,6 +88,84 @@ export function compactShippingCatalog(services) {
   }));
 }
 
+export function parseTradingOrders(xml) {
+  return xmlBlocks(xml, "Order").map((block) => {
+    const checkout = xmlBlocks(block, "CheckoutStatus")[0] || "";
+    const txn = xmlBlocks(block, "Transaction")[0] || "";
+    const item = xmlBlocks(txn, "Item")[0] || xmlBlocks(block, "Item")[0] || "";
+    return {
+      orderId: xmlTag(block, "OrderID"),
+      orderStatus: xmlTag(block, "OrderStatus"),
+      cancelStatus: xmlTag(block, "CancelStatus"),
+      amountPaid: xmlTag(block, "AmountPaid"),
+      paidTime: xmlTag(block, "PaidTime"),
+      checkoutStatus: xmlTag(checkout, "Status"),
+      paymentMethod: xmlTag(checkout, "PaymentMethod"),
+      sku: xmlTag(item, "SKU") || xmlTag(txn, "SKU") || xmlTag(block, "SKU"),
+      itemId: xmlTag(item, "ItemID"),
+      quantityPurchased: Number(xmlTag(txn, "QuantityPurchased") || xmlTag(block, "QuantityPurchased") || 0),
+      transactionPrice: xmlTag(txn, "TransactionPrice"),
+      total: xmlTag(block, "Total"),
+    };
+  });
+}
+
+export function tradingOrderIsSale(order, soldQtyBySku = {}) {
+  if (!order?.orderId || !order.sku) return false;
+  const cancel = String(order.cancelStatus || "").replace(/_/g, "").toLowerCase();
+  if (/^(cancelled|canceled|cancelpending|cancelrequested)$/.test(cancel)) return false;
+  if (Number(order.quantityPurchased) < 1) return false;
+  const paid =
+    Number(order.amountPaid) > 0 ||
+    Boolean(order.paidTime) ||
+    /^complete$/i.test(String(order.checkoutStatus || ""));
+  if (paid) return true;
+  return Number(soldQtyBySku[order.sku] || 0) >= 1;
+}
+
+export function tradingOrderToIngest(order) {
+  const paid = Number(order.amountPaid);
+  const value =
+    Number.isFinite(paid) && paid > 0
+      ? String(order.amountPaid)
+      : String(order.total || order.transactionPrice || "0");
+  return {
+    orderId: order.orderId,
+    lineItems: [{ sku: order.sku, total: { value } }],
+    pricingSummary: { total: { value } },
+  };
+}
+
+export async function getSellerOrders(token, days = 7) {
+  const { api } = ebayHosts(process.env.EBAY_ENV);
+  const body = `<?xml version="1.0" encoding="utf-8"?>
+<GetOrdersRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <ErrorLanguage>en_US</ErrorLanguage>
+  <NumberOfDays>${Number(days) || 7}</NumberOfDays>
+  <OrderStatus>All</OrderStatus>
+  <Pagination><EntriesPerPage>100</EntriesPerPage><PageNumber>1</PageNumber></Pagination>
+</GetOrdersRequest>`;
+  const res = await fetch(`${api}/ws/api.dll`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "text/xml",
+      "X-EBAY-API-COMPATIBILITY-LEVEL": "1315",
+      "X-EBAY-API-CALL-NAME": "GetOrders",
+      "X-EBAY-API-SITEID": "0",
+      "X-EBAY-API-IAF-TOKEN": token,
+    },
+    body,
+  });
+  const xml = await res.text();
+  const ack = xmlTag(xml, "Ack");
+  if (!/success|warning/i.test(ack)) {
+    const longs = xmlAll(xml, "LongMessage");
+    const shorts = xmlAll(xml, "ShortMessage");
+    throw new Error([...longs, ...shorts].filter(Boolean).join(" ") || xml.slice(0, 400) || `GetOrders HTTP ${res.status}`);
+  }
+  return parseTradingOrders(xml);
+}
+
 export async function getShippingServiceDetails(token) {
   const { api } = ebayHosts(process.env.EBAY_ENV);
   const body = `<?xml version="1.0" encoding="utf-8"?>
