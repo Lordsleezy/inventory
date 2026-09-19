@@ -7,6 +7,12 @@ import {
   unitSpecificAspect,
 } from "./ebay-aspects.mjs";
 import { parseListingSpecs } from "./listing-copy.mjs";
+import {
+  conditionsNeedRefresh,
+  listingConditionPayload,
+  mapFloorCondition,
+  parseItemConditions,
+} from "./ebay-conditions.mjs";
 
 /** Floor categories we list. Ask before adding others. Leaf eBay US IDs from the June 2026 tree. */
 export const FLOOR_EBAY_CATEGORIES = [
@@ -251,6 +257,101 @@ export async function refreshCategoryAspects(ebayCategoryId) {
   const live = await fetchLiveAspects(ebayCategoryId);
   await saveStoredAspects(ebayCategoryId, live);
   return live;
+}
+
+export async function loadStoredConditions(ebayCategoryId) {
+  const sb = serviceClient();
+  const { data, error } = await sb
+    .from("ebay_category_conditions")
+    .select("condition_id, ebay_name, sort_index")
+    .eq("ebay_category_id", String(ebayCategoryId))
+    .order("sort_index");
+  if (error) throw new Error(error.message);
+  return (data || []).map((row) => ({
+    conditionId: String(row.condition_id),
+    name: String(row.ebay_name || ""),
+  }));
+}
+
+export async function saveStoredConditions(ebayCategoryId, allowed) {
+  const sb = serviceClient();
+  const id = String(ebayCategoryId);
+  await sb.from("ebay_category_conditions").delete().eq("ebay_category_id", id);
+  const rows = (allowed || []).map((row, i) => ({
+    ebay_category_id: id,
+    condition_id: String(row.conditionId),
+    ebay_name: String(row.name || ""),
+    sort_index: i,
+    updated_at: new Date().toISOString(),
+  }));
+  if (rows.length) {
+    const { error } = await sb.from("ebay_category_conditions").insert(rows);
+    if (error) throw new Error(error.message);
+  }
+  return allowed;
+}
+
+export async function fetchLiveConditions(ebayCategoryId) {
+  const market = process.env.EBAY_MARKETPLACE_ID || "EBAY_US";
+  const { api, token } = await applicationToken();
+  const filter = `categoryIds:{${ebayCategoryId}}`;
+  const res = await fetch(
+    `${api}/sell/metadata/v1/marketplace/${market}/get_item_condition_policies?filter=${encodeURIComponent(filter)}`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.errors?.[0]?.message || json.error_description || "ebay_conditions_failed");
+  const policy = (json.itemConditionPolicies || []).find((row) => String(row.categoryId) === String(ebayCategoryId));
+  return parseItemConditions(policy);
+}
+
+export async function refreshCategoryConditions(ebayCategoryId) {
+  const live = await fetchLiveConditions(ebayCategoryId);
+  await saveStoredConditions(ebayCategoryId, live);
+  return live;
+}
+
+export async function prepareUnitCondition({ unit, liveCheck = false }) {
+  const floor = resolveFloorCategory(unit.category);
+  if (!floor) {
+    const err = new Error(
+      unit.category
+        ? `“${unit.category}” is not one of Floor’s eBay categories. Ask before adding others.`
+        : "This unit needs a Floor category mapped to eBay (refrigerators, washers, TVs, …).",
+    );
+    err.code = "ebay_category_unmapped";
+    throw err;
+  }
+  let stored = await loadStoredConditions(floor.ebayCategoryId);
+  let refreshed = false;
+  if (!stored.length) {
+    stored = await refreshCategoryConditions(floor.ebayCategoryId);
+    refreshed = true;
+  }
+  if (liveCheck) {
+    const live = await fetchLiveConditions(floor.ebayCategoryId);
+    if (conditionsNeedRefresh(stored, live)) {
+      stored = await saveStoredConditions(floor.ebayCategoryId, live);
+      refreshed = true;
+    }
+  }
+  const mapped = mapFloorCondition(unit.condition, stored);
+  if (!mapped) {
+    const allowed = stored.map((row) => `${row.name} (${row.conditionId})`).join(", ") || "none";
+    const err = new Error(
+      `eBay category ${floor.name} has no honest match for Floor grade “${unit.condition || "(blank)"}”. Allowed: ${allowed}. The unit grade was not changed.`,
+    );
+    err.code = "ebay_condition_unmapped";
+    err.allowed = stored;
+    throw err;
+  }
+  return {
+    floor,
+    refreshed,
+    allowed: stored,
+    mapped,
+    payload: listingConditionPayload(mapped),
+  };
 }
 
 function visibleDefs(defs) {

@@ -7,6 +7,7 @@ import {
   rememberAspectDefault,
   resolveFloorCategory,
   refreshCategoryAspects,
+  refreshCategoryConditions,
 } from "../lib/ebay-catalog.mjs";
 import { parseListingSpecs } from "../lib/listing-copy.mjs";
 import { unitSpecificAspect } from "../lib/ebay-aspects.mjs";
@@ -73,6 +74,7 @@ export async function handler(event) {
       const floor = resolveFloorCategory(body.slug || body.category) || FLOOR_EBAY_CATEGORIES.find((c) => c.ebayCategoryId === String(body.ebayCategoryId));
       if (!floor) return json(400, { error: "unmapped_category" });
       await refreshCategoryAspects(floor.ebayCategoryId);
+      await refreshCategoryConditions(floor.ebayCategoryId);
       return json(200, { ok: true, category: floor });
     }
     const aspectName = String(body.aspect || body.name || "").trim();

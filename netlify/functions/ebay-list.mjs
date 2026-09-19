@@ -33,7 +33,9 @@ export async function handler(event) {
           ? "ebay_not_connected"
           : err?.code === "ebay_aspects_missing"
             ? "ebay_aspects_missing"
-            : "ebay_list_failed",
+            : err?.code === "ebay_condition_unmapped"
+              ? "ebay_condition_unmapped"
+              : "ebay_list_failed",
       message,
       missing: err?.missing || undefined,
       refreshed: err?.refreshed || undefined,

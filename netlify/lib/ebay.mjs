@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto";
 import { decryptSecret, encryptSecret, requireEnv, serviceClient } from "./server.mjs";
-import { EBAY_OAUTH_SCOPES, ebayCondition, ebayHosts, ebayRuName } from "./ebay-env.mjs";
+import { EBAY_OAUTH_SCOPES, ebayHosts, ebayRuName } from "./ebay-env.mjs";
 import { formatEbayError, locationKey } from "./ebay-errors.mjs";
 import { publicPhotoUrl } from "./ebay-photos.mjs";
 import { composeChannelDescription, parseListingSpecs } from "./listing-copy.mjs";
 import { parseMeasure, specInches } from "./ebay-aspects.mjs";
-import { listingMeasures, prepareUnitAspects } from "./ebay-catalog.mjs";
+import { listingMeasures, prepareUnitAspects, prepareUnitCondition } from "./ebay-catalog.mjs";
 import {
   compactShippingCatalog,
   getShippingServiceDetails,
@@ -637,6 +637,7 @@ export async function listSku(storeId, sku) {
   const loc = await ensureLocation(storeId);
   const copy = listingCopy(unit);
   const { aspects, categoryId: cat } = await itemAspects(storeId, unit);
+  const condition = await prepareUnitCondition({ unit, liveCheck: true });
   const pkg = packageSize(unit);
   const policies = await ensurePolicies(storeId);
 
@@ -648,7 +649,7 @@ export async function listSku(storeId, sku) {
         availabilityDistributions: [{ merchantLocationKey: loc, quantity: 1 }],
       },
     },
-    condition: ebayCondition(unit.condition),
+    ...condition.payload,
     conditionDescription: unit.defect_notes || undefined,
     packageWeightAndSize: pkg,
     product: {

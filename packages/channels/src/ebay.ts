@@ -21,6 +21,7 @@ export function ebayRuName(ruName: string | undefined): string {
   return value;
 }
 
+/** Listing uses per-category condition IDs. This enum is not sent to Inventory. */
 export function ebayCondition(floor: string | null | undefined): string {
   const c = String(floor ?? "")
     .trim()

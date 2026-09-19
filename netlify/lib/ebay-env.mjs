@@ -15,6 +15,7 @@ export function ebayRuName(ruName = process.env.EBAY_RU_NAME) {
   return value;
 }
 
+/** Listing uses category condition IDs from ebay-conditions.mjs, not this enum. */
 export function ebayCondition(floor) {
   const c = String(floor ?? "")
     .trim()
