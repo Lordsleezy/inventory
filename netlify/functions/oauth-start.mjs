@@ -1,8 +1,9 @@
 import { randomBytes } from "node:crypto";
 import { ownerFromEvent, json, corsHeaders, serviceClient } from "../lib/server.mjs";
 import { hopUrl } from "../lib/oauth-authorize.mjs";
+import { wrapHandler } from "../lib/floor-log.mjs";
 
-export async function handler(event) {
+async function handle(event) {
   if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: corsHeaders(), body: "" };
   try {
     const provider = event.queryStringParameters?.provider;
@@ -35,3 +36,5 @@ export async function handler(event) {
     return json(401, { error: message });
   }
 }
+
+export const handler = wrapHandler("oauth-start", handle);

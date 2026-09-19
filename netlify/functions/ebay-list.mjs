@@ -1,11 +1,13 @@
 import { staffFromEvent, json, corsHeaders } from "../lib/server.mjs";
 import { listSku } from "../lib/ebay.mjs";
+import { wrapHandler, setTrace } from "../lib/floor-log.mjs";
 
-export async function handler(event) {
+async function handle(event) {
   if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: corsHeaders(), body: "" };
   if (event.httpMethod !== "POST") return json(405, { error: "post_only" });
   try {
     const { staff } = await staffFromEvent(event);
+    setTrace({ storeId: staff.store_id });
     const body = JSON.parse(event.body || "{}");
     const skus = Array.isArray(body.skus) ? body.skus : body.sku ? [body.sku] : [];
     if (!skus.length) return json(400, { error: "sku_required" });
@@ -42,3 +44,6 @@ export async function handler(event) {
     });
   }
 }
+
+export const handler = wrapHandler("ebay-list", handle);
+

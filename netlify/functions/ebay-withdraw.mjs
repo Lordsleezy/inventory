@@ -1,7 +1,8 @@
 import { staffFromEvent, json, corsHeaders } from "../lib/server.mjs";
 import { withdrawOpenEbayTasks, withdrawSku } from "../lib/ebay.mjs";
+import { wrapHandler } from "../lib/floor-log.mjs";
 
-export async function handler(event) {
+async function handle(event) {
   if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: corsHeaders(), body: "" };
   if (event.httpMethod !== "POST") return json(405, { error: "post_only" });
   try {
@@ -26,3 +27,5 @@ export async function handler(event) {
     return json(code, { error: message === "ebay_not_connected" ? "ebay_not_connected" : "ebay_withdraw_failed", message });
   }
 }
+
+export const handler = wrapHandler("ebay-withdraw", handle);

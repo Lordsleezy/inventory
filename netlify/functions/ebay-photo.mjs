@@ -1,7 +1,8 @@
 import { serviceClient } from "../lib/server.mjs";
 import { verifyPhotoPath } from "../lib/ebay-photos.mjs";
+import { wrapHandler } from "../lib/floor-log.mjs";
 
-export async function handler(event) {
+async function handle(event) {
   const path = event.queryStringParameters?.p || "";
   const sig = event.queryStringParameters?.sig || "";
   if (!verifyPhotoPath(path, sig)) {
@@ -25,3 +26,5 @@ export async function handler(event) {
     isBase64Encoded: true,
   };
 }
+
+export const handler = wrapHandler("ebay-photo", handle);

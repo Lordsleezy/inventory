@@ -1,5 +1,6 @@
 import { serviceClient, json, corsHeaders } from "../lib/server.mjs";
 import { withdrawOpenEbayTasks } from "../lib/ebay.mjs";
+import { wrapHandler } from "../lib/floor-log.mjs";
 
 async function sendResend({ to, subject, text }) {
   const key = process.env.RESEND_API_KEY;
@@ -31,7 +32,7 @@ function saleText(sku, payload) {
   return `SKU ${sku} sold on ${channel}.`;
 }
 
-export async function handler(event) {
+async function handle(event) {
   if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: corsHeaders(), body: "" };
   const secret = process.env.ALERT_WEBHOOK_SECRET;
   if (secret) {
@@ -97,3 +98,5 @@ export async function handler(event) {
 
   return json(200, { processed: results.length, results });
 }
+
+export const handler = wrapHandler("dispatch-alerts", handle);

@@ -1,11 +1,12 @@
 import { json, corsHeaders, requireEnv } from "../lib/server.mjs";
 import { ingestEbayOrder, notificationChallenge, pollAllStores, withdrawOpenEbayTasks } from "../lib/ebay.mjs";
+import { wrapHandler } from "../lib/floor-log.mjs";
 
 function endpointUrl(event) {
   return process.env.EBAY_NOTIFICATION_ENDPOINT || `https://${event.headers.host}/.netlify/functions/ebay-notify`;
 }
 
-export async function handler(event) {
+async function handle(event) {
   if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: corsHeaders(), body: "" };
   if (event.httpMethod === "GET") {
     const challenge = event.queryStringParameters?.challenge_code;
@@ -41,3 +42,5 @@ export async function handler(event) {
     return json(400, { error: message });
   }
 }
+
+export const handler = wrapHandler("ebay-notify", handle);

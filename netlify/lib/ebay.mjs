@@ -6,6 +6,7 @@ import { publicPhotoUrl } from "./ebay-photos.mjs";
 import { composeChannelDescription, parseListingSpecs } from "./listing-copy.mjs";
 import { parseMeasure, specInches } from "./ebay-aspects.mjs";
 import { listingMeasures, prepareUnitAspects, prepareUnitCondition } from "./ebay-catalog.mjs";
+import { floorLog, redact, setTrace } from "./floor-log.mjs";
 import {
   compactShippingCatalog,
   getShippingServiceDetails,
@@ -100,6 +101,15 @@ export async function userToken(storeId) {
 export async function ebayFetch(storeId, method, path, body) {
   const { api } = ebayHosts(process.env.EBAY_ENV);
   const token = await userToken(storeId);
+  const mutate = method !== "GET";
+  if (mutate) {
+    await floorLog({
+      storeId,
+      event: "ebay.request",
+      message: `${method} ${path}`,
+      detail: { method, path, body: redact(body) },
+    });
+  }
   const res = await fetch(`${api}${path}`, {
     method,
     headers: {
@@ -130,6 +140,13 @@ export async function ebayFetch(storeId, method, path, body) {
       raw: text?.slice?.(0, 8000) || text || null,
     };
     console.log("ebay_api_error_full", JSON.stringify(payload));
+    await floorLog({
+      storeId,
+      level: "error",
+      event: "ebay.error",
+      message: `${method} ${path} ${res.status}`,
+      detail: payload,
+    });
     const msg = formatEbayError(json, text || `eBay HTTP ${res.status}`);
     const err = new Error(msg);
     err.status = res.status;
@@ -137,6 +154,14 @@ export async function ebayFetch(storeId, method, path, body) {
     err.path = path;
     err.raw = text;
     throw err;
+  }
+  if (mutate) {
+    await floorLog({
+      storeId,
+      event: "ebay.response",
+      message: `${method} ${path} ${res.status}`,
+      detail: { method, path, status: res.status, body: redact(json) },
+    });
   }
   return json;
 }
@@ -164,6 +189,7 @@ async function inspectOfferChain(storeId, sku, offerId, loc, policies) {
     locationTypes: location?.locationTypes,
     sku: item?.sku || sku,
     condition: item?.condition,
+    conditionId: item?.conditionId ?? null,
     quantity: item?.availability?.shipToLocationAvailability?.quantity,
     distributions: item?.availability?.shipToLocationAvailability?.availabilityDistributions,
     pickup: item?.availability?.pickupAtLocationAvailability,
@@ -184,6 +210,14 @@ async function inspectOfferChain(storeId, sku, offerId, loc, policies) {
     itemError: item?._error,
   };
   console.log("ebay_offer_chain", JSON.stringify(snapshot));
+  await floorLog({
+    storeId,
+    sku,
+    level: "error",
+    event: "ebay.offer_chain",
+    message: `inspect ${sku}`,
+    detail: snapshot,
+  });
   return `chain: ${JSON.stringify(snapshot)}`;
 }
 
@@ -622,6 +656,7 @@ function listingCopy(unit) {
 }
 
 export async function listSku(storeId, sku) {
+  setTrace({ storeId, sku, source: "ebay-list" });
   const sb = serviceClient();
   const { data: unit, error } = await sb.from("units").select("*").eq("store_id", storeId).eq("sku", sku).maybeSingle();
   if (error) throw new Error(error.message);
@@ -640,6 +675,26 @@ export async function listSku(storeId, sku) {
   const condition = await prepareUnitCondition({ unit, liveCheck: true });
   const pkg = packageSize(unit);
   const policies = await ensurePolicies(storeId);
+
+  await floorLog({
+    storeId,
+    sku,
+    event: "list.plan",
+    message: `list ${sku}`,
+    detail: {
+      floorGrade: unit.condition,
+      category: unit.category,
+      categoryId: cat,
+      mapped: condition.mapped,
+      payload: condition.payload,
+      allowed: condition.allowed,
+      epid,
+      location: loc,
+      policies,
+      aspectKeys: Object.keys(aspects || {}),
+      askCents: unit.ask_cents,
+    },
+  });
 
   const live = await resetUnpublishedOffers(storeId, sku);
   await ebayFetch(storeId, "PUT", `/sell/inventory/v1/inventory_item/${encodeURIComponent(sku)}`, {
@@ -660,6 +715,18 @@ export async function listSku(storeId, sku) {
       mpn: unit.model || undefined,
       aspects,
       ...(epid ? { epid } : {}),
+    },
+  });
+  const storedItem = await quietGet(storeId, `/sell/inventory/v1/inventory_item/${encodeURIComponent(sku)}`);
+  await floorLog({
+    storeId,
+    sku,
+    event: "list.inventory_stored",
+    detail: {
+      condition: storedItem?.condition ?? null,
+      conditionId: storedItem?.conditionId ?? storedItem?.conditionDescriptors ?? null,
+      conditionDescription: storedItem?.conditionDescription ?? null,
+      error: storedItem?._error ?? null,
     },
   });
 

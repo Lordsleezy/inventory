@@ -6,6 +6,7 @@ import {
 } from "../lib/server.mjs";
 import { exchangeEbayCode, subscribeNotifications } from "../lib/ebay.mjs";
 import { paramsFromNetlifyEvent } from "../lib/oauth-params.mjs";
+import { wrapHandler } from "../lib/floor-log.mjs";
 
 function deepLink(query) {
   const base = process.env.APP_DEEP_LINK || "floor://connections";
@@ -173,7 +174,7 @@ async function exchangeAmazon(code) {
   return json;
 }
 
-export async function handler(event) {
+async function handle(event) {
   const params = paramsFromNetlifyEvent(event);
   let nonce = params.state;
   const code = params.code;
@@ -325,3 +326,5 @@ export async function handler(event) {
     });
   }
 }
+
+export const handler = wrapHandler("oauth-callback", handle);

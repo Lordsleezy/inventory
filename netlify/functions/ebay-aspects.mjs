@@ -11,6 +11,7 @@ import {
 } from "../lib/ebay-catalog.mjs";
 import { parseListingSpecs } from "../lib/listing-copy.mjs";
 import { unitSpecificAspect } from "../lib/ebay-aspects.mjs";
+import { wrapHandler } from "../lib/floor-log.mjs";
 
 async function loadUnit(storeId, sku) {
   const sb = serviceClient();
@@ -30,7 +31,7 @@ async function saveSpecs(storeId, sku, specs) {
   if (error) throw new Error(error.message);
 }
 
-export async function handler(event) {
+async function handle(event) {
   if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: corsHeaders(), body: "" };
   try {
     const { staff } = await staffFromEvent(event);
@@ -100,3 +101,5 @@ export async function handler(event) {
     return json(code, { error: err?.code || "ebay_aspects_failed", message });
   }
 }
+
+export const handler = wrapHandler("ebay-aspects", handle);

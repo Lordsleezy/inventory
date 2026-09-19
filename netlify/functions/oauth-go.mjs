@@ -1,5 +1,6 @@
 import { html, serviceClient } from "../lib/server.mjs";
 import { authorizeUrl } from "../lib/oauth-authorize.mjs";
+import { wrapHandler } from "../lib/floor-log.mjs";
 
 function fail(message) {
   return html(
@@ -24,7 +25,7 @@ function fail(message) {
   );
 }
 
-export async function handler(event) {
+async function handle(event) {
   const nonce = String(event.queryStringParameters?.n || "").trim();
   if (!nonce) return fail("This connect link is missing. Close this window and tap Connect again in Floor.");
   const sb = serviceClient();
@@ -64,3 +65,5 @@ export async function handler(event) {
 </html>`,
   );
 }
+
+export const handler = wrapHandler("oauth-go", handle);

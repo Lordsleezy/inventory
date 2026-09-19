@@ -1,6 +1,7 @@
 import { ownerFromEvent, serviceClient, decryptSecret, json, corsHeaders, requireEnv } from "../lib/server.mjs";
+import { wrapHandler } from "../lib/floor-log.mjs";
 
-export async function handler(event) {
+async function handle(event) {
   if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: corsHeaders(), body: "" };
   try {
     const { staff } = await ownerFromEvent(event);
@@ -29,3 +30,5 @@ export async function handler(event) {
     return json(401, { error: err instanceof Error ? err.message : String(err) });
   }
 }
+
+export const handler = wrapHandler("square-locations", handle);

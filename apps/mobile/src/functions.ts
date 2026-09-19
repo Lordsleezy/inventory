@@ -27,7 +27,9 @@ export async function applyChannelListing(channel: string, skus: string[], liste
       /* fall through and mark locally */
     } else if (!res.ok) {
       const missing = Array.isArray(body.missing) ? body.missing.filter(Boolean).join("; ") : "";
-      const detail = String(body.message || missing || "").trim();
+      const detail = [String(body.message || missing || "").trim(), body.traceId ? `trace ${body.traceId}` : ""]
+        .filter(Boolean)
+        .join(" — ");
       if (detail && !/^invalid$/i.test(detail) && detail !== "ebay_list_failed") {
         throw new Error(detail);
       }
