@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { matchAllowedValue, matchMeasureBucket, pickAspectValue, aspectsFromTaxonomy } from "./ebay-aspects.mjs";
+import { matchAllowedValue, matchMeasureBucket, pickAspectValue, aspectsFromTaxonomy, fillAspects } from "./ebay-aspects.mjs";
 
 test("Type maps refrigerator to an allowed appliance type, not Air Filter", () => {
   const allowed = ["Air Filter", "Compact Refrigerator", "Refrigerator", "Wine Fridge"];
@@ -162,3 +162,30 @@ test("PrintProof stainless maps to Silver because eBay Color has no Stainless St
   );
   assert.equal(filled.aspects.Color[0], "Silver");
 });
+
+test("does not stuff Freestanding or cabinet width into EU / unrelated aspects", () => {
+  const { aspects } = fillAspects(
+    [
+      { name: "Installation", required: true, allowed: ["Built-In", "Freestanding"] },
+      { name: "EPREL Registration Number", recommended: true, allowed: [] },
+      { name: "California Prop 65 Warning", recommended: true, allowed: [] },
+      { name: "Unit Quantity", recommended: true, allowed: [] },
+      { name: "Open Door Width", recommended: true, allowed: ["35.1-40 in", "More Than 40 in"] },
+      { name: "Bottle Capacity", recommended: true, allowed: [] },
+      { name: "Energy Star", recommended: true, allowed: ["1 Star", "2 Stars", "A+++", "A++"] },
+      { name: "Item Width", required: true, allowed: ["Less Than 25 in", "More Than 40 in"], selectionOnly: false },
+    ],
+    { brand: "LG", model: "LRYXC2606S", category: "Refrigerator" },
+    { width_in: "35.75", installation: "Freestanding", capacity_cu_ft: "25.5" },
+    { categoryDefaults: { Installation: "Freestanding" }, standalone: true },
+  );
+  assert.equal(aspects.Installation[0], "Freestanding");
+  assert.equal(aspects["Item Width"][0], "35.75 in");
+  assert.equal(aspects["EPREL Registration Number"], undefined);
+  assert.equal(aspects["California Prop 65 Warning"], undefined);
+  assert.equal(aspects["Unit Quantity"], undefined);
+  assert.equal(aspects["Open Door Width"], undefined);
+  assert.equal(aspects["Bottle Capacity"], undefined);
+  assert.equal(aspects["Energy Star"], undefined);
+});
+

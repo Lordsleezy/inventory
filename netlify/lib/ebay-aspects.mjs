@@ -184,7 +184,24 @@ export function looksLikeCatalogModels(allowed) {
 
 export function unitSpecificAspect(name) {
   const lower = String(name || "").toLowerCase();
-  return /model|mpn|manufacturer part|item width|item height|item length|item depth|item weight|capacity/.test(lower);
+  return /model|mpn|manufacturer part|item width|item height|item length|item depth|item weight|^capacity$|total capacity/.test(lower);
+}
+
+function itemMeasureKind(lower) {
+  if (lower === "item height" || lower === "height") return "height";
+  if (lower === "item width" || lower === "width") return "width";
+  if (lower === "item depth" || lower === "item length" || lower === "depth") return "depth";
+  if (lower === "item weight" || lower === "weight") return "weight";
+  if (lower === "capacity" || lower === "total capacity" || lower === "refrigerator capacity") return "capacity";
+  return "";
+}
+
+function refuseGuess(lower) {
+  return /eprel|ec range|prop 65|unit quantity|open door width|bottle capacity/.test(lower);
+}
+
+function euEnergyScale(allowed) {
+  return (allowed || []).some((a) => /^\d+\s*stars?$/i.test(String(a)) || /^[A-G]\++$/.test(String(a).trim()) || String(a).includes("A+++"));
 }
 
 export function normalizeTaxonomyAspects(rows) {
@@ -244,18 +261,17 @@ function candidatesForAspect(name, unit, specs, extras = {}) {
     const fallback = extras.standalone === false ? "" : extras.categoryDefaults?.Installation || "Freestanding";
     return [install, fallback];
   }
-  if (/height/.test(lower)) return [specInches(specs, "height"), specs?.height_in];
-  if (/width/.test(lower)) return [specInches(specs, "width"), specs?.width_in];
-  if (/depth/.test(lower) || (/length/.test(lower) && !/cable|cord|wave|band/.test(lower))) {
-    return [specInches(specs, "depth"), specs?.depth_in];
-  }
-  if (/weight/.test(lower)) return [parseMeasure(specs?.weight_lb || specs?.weight_lbs || specs?.weight), specs?.weight_lb];
-  if (/capacity/.test(lower)) return [specs?.capacity_cu_ft];
+  const measure = itemMeasureKind(lower);
+  if (measure === "height") return [specInches(specs, "height"), specs?.height_in];
+  if (measure === "width") return [specInches(specs, "width"), specs?.width_in];
+  if (measure === "depth") return [specInches(specs, "depth"), specs?.depth_in];
+  if (measure === "weight") return [parseMeasure(specs?.weight_lb || specs?.weight_lbs || specs?.weight), specs?.weight_lb];
+  if (measure === "capacity") return [specs?.capacity_cu_ft];
   if (/voltage/.test(lower)) return [specs?.voltage];
-  if (/energy/.test(lower)) return [specs?.energy];
+  if (lower === "energy star" || lower === "energy") return [specs?.energy];
   if (/ice/.test(lower)) return [specs?.ice_maker];
-  if (/water/.test(lower)) return [specs?.water_dispenser];
-  return [install, appliance, layout, finish, brand, model, condition];
+  if (/water/.test(lower) && /dispenser|filter/.test(lower)) return [specs?.water_dispenser];
+  return [];
 }
 
 function coerceValue(def, raw) {
@@ -293,19 +309,8 @@ export function fillAspects(defs, unit, specs, extras = {}) {
     } else if (lower === "model" || (def.catalog && /model|mpn/.test(lower))) {
       value = model;
       source = value ? "unit" : "";
-    } else if (
-      /height|width|depth|capacity|weight/.test(lower) ||
-      (/length/.test(lower) && !/cable|cord/.test(lower))
-    ) {
-      const kind = /capacity/.test(lower)
-        ? "capacity"
-        : /weight/.test(lower)
-          ? "weight"
-          : /height/.test(lower)
-            ? "height"
-            : /depth/.test(lower) || (/length/.test(lower) && !/cable|cord/.test(lower))
-              ? "depth"
-              : "width";
+    } else if (itemMeasureKind(lower)) {
+      const kind = itemMeasureKind(lower);
       const measure =
         kind === "capacity"
           ? parseMeasure(specs?.capacity_cu_ft)
@@ -318,23 +323,31 @@ export function fillAspects(defs, unit, specs, extras = {}) {
         value = `${measure} ${unit}`;
       }
       source = value ? "unit" : "";
+    } else if (refuseGuess(lower) || (lower === "energy star" && euEnergyScale(def.allowed))) {
+      value = "";
+      source = "";
     } else {
       value = pickAspectValue(fakeAspect, candidatesForAspect(name, unit, specs, { ...extras, categoryDefaults }));
       source = value ? "unit" : "";
     }
-    if (!value) {
+    const skipGuessed = refuseGuess(lower) || (lower === "energy star" && euEnergyScale(def.allowed));
+    if (!value && !skipGuessed) {
       const rememberedValue = coerceValue(def, remembered[name]);
       if (rememberedValue) {
         value = rememberedValue;
         source = "remembered";
       }
     }
-    if (!value) {
+    if (!value && !skipGuessed) {
       const defaultValue = coerceValue(def, categoryDefaults[name]);
       if (defaultValue) {
         value = defaultValue;
         source = "default";
       }
+    }
+    if (/eprel/.test(lower) && value && !/^\d{1,19}$/.test(String(value).replace(/\s/g, ""))) {
+      value = "";
+      source = "";
     }
     const row = {
       name,
