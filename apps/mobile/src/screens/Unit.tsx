@@ -5,7 +5,9 @@ import {
   formatCents,
   listedChannelsBySku,
   loadUnit,
+  parseListingSpecs,
   receiptHtml,
+  regenerateListingBody,
   saleForSku,
   unitHistory,
   type EditableField,
@@ -15,6 +17,7 @@ import {
   type UnitState,
 } from "@floor/store";
 import { floorCloud } from "@floor/cloud";
+import { ManufacturerPhotos } from "../components/ManufacturerPhotos";
 import { Photos } from "../components/Photos";
 import { DangerButton, Label, MoneyField, Notice, SelectField, Spinner, TextField } from "../components/ui";
 import { openHtml } from "../files";
@@ -69,6 +72,13 @@ export function UnitScreen() {
       setError(friendlyRpc(err));
       await refresh();
     }
+  }
+
+  async function editSpec(key: string, value: string) {
+    const specs: Record<string, unknown> = { ...(parseListingSpecs(unit?.listingSpecs) || {}) };
+    if (value.trim()) specs[key] = value.trim();
+    else delete specs[key];
+    await edit("listing_specs", JSON.stringify(specs));
   }
 
   async function move(state: UnitState) {
@@ -224,11 +234,86 @@ export function UnitScreen() {
         <p className="mt-3 text-quiet text-floor-danger">Connect to the internet to sell.</p>
       )}
 
+      <ManufacturerPhotos
+        sku={unit.sku}
+        brand={unit.brand}
+        model={unit.model}
+        listingSpecs={unit.listingSpecs}
+      />
       <Photos sku={unit.sku} />
+
+      <div className="border-b border-floor-line py-3">
+        <label className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={unit.showOnWebsite}
+            onChange={(e) => void edit("show_on_website", e.target.checked ? "true" : "false")}
+          />
+          <span className="text-body">List on website</span>
+        </label>
+        <p className="mt-1 text-quiet text-floor-mute">
+          Needs at least one unit photo or the shop will hide it. New receives start unchecked.
+        </p>
+      </div>
 
       <TextField label="Brand" value={unit.brand} onCommit={(v) => edit("brand", v ?? "")} />
       <TextField label="Model" value={unit.model} onCommit={(v) => edit("model", v ?? "")} />
+      <div className="grid grid-cols-3 gap-x-4">
+        <TextField
+          label="Width (in)"
+          value={String(parseListingSpecs(unit.listingSpecs)?.width_in ?? "")}
+          inputMode="numeric"
+          onCommit={(v) => editSpec("width_in", v ?? "")}
+        />
+        <TextField
+          label="Height (in)"
+          value={String(parseListingSpecs(unit.listingSpecs)?.height_in ?? "")}
+          inputMode="numeric"
+          onCommit={(v) => editSpec("height_in", v ?? "")}
+        />
+        <TextField
+          label="Depth (in)"
+          value={String(parseListingSpecs(unit.listingSpecs)?.depth_in ?? "")}
+          inputMode="numeric"
+          onCommit={(v) => editSpec("depth_in", v ?? "")}
+        />
+      </div>
+      <SelectField
+        label="Installation"
+        value={String(parseListingSpecs(unit.listingSpecs)?.installation ?? "")}
+        options={["Freestanding", "Built-In", "Undercounter", "Slide-In"]}
+        onCommit={(v) => editSpec("installation", v ?? "")}
+      />
+      <p className="text-quiet text-floor-mute">
+        eBay pickup listings use these. Empty installation means Freestanding. Model lookup fills width/height/depth when we have them.
+      </p>
       <TextField label="Description" value={unit.title} onCommit={(v) => edit("title", v ?? "")} />
+      <TextField
+        label="Listing description"
+        value={unit.listingBody ?? ""}
+        multiline
+        onCommit={(v) => edit("listing_body", v ?? "")}
+      />
+      <button
+        type="button"
+        className="btn-text px-0 py-2"
+        onClick={() => {
+          const specs = parseListingSpecs(unit.listingSpecs);
+          if (!specs) {
+            setError("No structured specs on this unit yet. Look the model up first.");
+            return;
+          }
+          void edit("listing_body", regenerateListingBody({ brand: unit.brand, model: unit.model, specs }));
+        }}
+      >
+        Regenerate description
+      </button>
+      <TextField
+        label="Listing specs (JSON)"
+        value={unit.listingSpecs ?? ""}
+        multiline
+        onCommit={(v) => edit("listing_specs", v ?? "")}
+      />
 
       <SelectField
         label="Category"
@@ -454,6 +539,7 @@ function describe(row: FloorEvent): string {
   if (row.kind === "deleted") return `Deleted${row.oldValue ? ` · ${row.oldValue}` : ""}`;
   if (row.kind === "photo") return "Photo added";
   if (row.kind === "photo_removed") return "Photo removed";
+  if (row.kind === "manufacturer_photo_removed") return "Manufacturer photo removed";
   if (row.kind === "state") return `State ${row.oldValue} → ${row.newValue}${row.note ? ` · ${row.note}` : ""}`;
   return `${row.field ?? "Changed"} ${show(row.oldValue)} → ${show(row.newValue)}`;
 }

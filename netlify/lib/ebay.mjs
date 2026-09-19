@@ -577,7 +577,7 @@ async function itemAspects(category, unit) {
   const { aspects, missing } = aspectsFromTaxonomy(json?.aspects || [], unit, specs);
   if (missing.length) {
     throw new Error(
-      `eBay needs item specifics we don't have a valid value for: ${missing.join("; ")}. Set those on the unit, then tap E again.`,
+      `eBay needs item specifics we don't have a valid value for: ${missing.join("; ")}. Fill width, height, depth, model, or installation on this unit, then tap E again.`,
     );
   }
   return aspects;
