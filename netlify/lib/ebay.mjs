@@ -4,6 +4,11 @@ import { EBAY_OAUTH_SCOPES, ebayCondition, ebayHosts, ebayRuName } from "./ebay-
 import { formatEbayError, locationKey } from "./ebay-errors.mjs";
 import { publicPhotoUrl } from "./ebay-photos.mjs";
 import { composeChannelDescription, parseListingSpecs } from "./listing-copy.mjs";
+import {
+  compactShippingCatalog,
+  getShippingServiceDetails,
+  pickApplianceShipping,
+} from "./ebay-trading.mjs";
 
 export { EBAY_OAUTH_SCOPES, ebayHosts, ebayRuName, formatEbayError };
 
@@ -189,37 +194,46 @@ async function optInToSellingPolicies(storeId) {
   }
 }
 
-function hasDomesticShippingService(policy) {
-  const options = policy?.shippingOptions || [];
-  const services = options.flatMap((opt) => opt?.shippingServices || []);
-  return services.some((svc) => {
-    const code = String(svc?.shippingServiceCode || "").toLowerCase();
-    return code && !/pickup/.test(code);
-  });
+function isPickupOnlyPolicy(policy) {
+  if (!policy?.localPickup) return false;
+  const services = (policy.shippingOptions || []).flatMap((opt) => opt?.shippingServices || []);
+  return services.length === 0 && !policy.freightShipping;
 }
 
-function fulfillmentPolicyBody(market, name = "Floor pickup") {
+function pickupOnlyBody(market, name = "Floor pickup") {
+  // Account API: pickup-only is valid (no shippingOptions / handlingTime). Flat-rate codes are for shipped items.
   return {
     name,
     marketplaceId: market,
     categoryTypes: [{ name: "ALL_EXCLUDING_MOTORS_VEHICLES", default: true }],
-    handlingTime: { value: 2, unit: "DAY" },
-    // Pickup is the real method. eBay still requires one domestic service that is not pickup.
     localPickup: true,
     freightShipping: false,
     pickupDropOff: false,
     globalShipping: false,
+  };
+}
+
+function shippingPolicyBody(market, name, service) {
+  const flat = (service.serviceTypes || []).some((t) => /^flat$/i.test(t));
+  return {
+    ...pickupOnlyBody(market, name),
+    handlingTime: { value: 2, unit: "DAY" },
     shippingOptions: [
       {
         optionType: "DOMESTIC",
-        costType: "FLAT_RATE",
+        costType: flat ? "FLAT_RATE" : "CALCULATED",
         shippingServices: [
           {
             sortOrder: 1,
-            shippingServiceCode: "LocalDelivery",
+            shippingServiceCode: service.shippingService,
+            ...(service.shippingCarrier ? { shippingCarrierCode: service.shippingCarrier } : {}),
             freeShipping: true,
-            shippingCost: { value: "0.0", currency: "USD" },
-            additionalShippingCost: { value: "0.0", currency: "USD" },
+            ...(flat
+              ? {
+                  shippingCost: { value: "0.0", currency: "USD" },
+                  additionalShippingCost: { value: "0.0", currency: "USD" },
+                }
+              : {}),
             buyerResponsibleForShipping: false,
             buyerResponsibleForPickup: false,
           },
@@ -229,34 +243,48 @@ function fulfillmentPolicyBody(market, name = "Floor pickup") {
   };
 }
 
+async function saveFulfillmentPolicy(storeId, id, body) {
+  if (id) {
+    const updated = await ebayFetch(storeId, "PUT", `/sell/account/v1/fulfillment_policy/${id}`, body);
+    return updated.fulfillmentPolicyId || updated.id || id;
+  }
+  const created = await ebayFetch(storeId, "POST", "/sell/account/v1/fulfillment_policy", body);
+  return created.fulfillmentPolicyId || created.id;
+}
+
 async function createFulfillmentPolicy(storeId, market, existing) {
   const name = existing?.name || "Floor pickup";
-  if (existing && policyIdOf(existing, "fulfillment") && hasDomesticShippingService(existing)) {
-    return policyIdOf(existing, "fulfillment");
-  }
   const id = existing ? policyIdOf(existing, "fulfillment") : null;
-  const codes = [
-    { shippingServiceCode: "LocalDelivery" },
-    { shippingServiceCode: "Freight" },
-  ];
-  let lastErr = null;
-  for (const extra of codes) {
-    const body = fulfillmentPolicyBody(market, name);
-    body.shippingOptions[0].shippingServices[0].shippingServiceCode = extra.shippingServiceCode;
-    try {
-      if (id) {
-        const updated = await ebayFetch(storeId, "PUT", `/sell/account/v1/fulfillment_policy/${id}`, body);
-        return updated.fulfillmentPolicyId || updated.id || id;
-      }
-      const created = await ebayFetch(storeId, "POST", "/sell/account/v1/fulfillment_policy", body);
-      return created.fulfillmentPolicyId || created.id;
-    } catch (err) {
-      lastErr = err;
-      const message = err instanceof Error ? err.message : String(err);
-      if (!/shipping service|shippingservice|freight|local.?delivery/i.test(message)) throw err;
-    }
+  if (existing && id && isPickupOnlyPolicy(existing)) {
+    console.log("ebay_fulfillment_policy", JSON.stringify({ mode: "pickup_only", reused: true }));
+    return id;
   }
-  throw lastErr || new Error("eBay would not create a fulfillment policy.");
+
+  try {
+    const saved = await saveFulfillmentPolicy(storeId, id, pickupOnlyBody(market, name));
+    console.log("ebay_fulfillment_policy", JSON.stringify({ mode: "pickup_only", reused: false }));
+    return saved;
+  } catch (pickupErr) {
+    const pickupMsg = pickupErr instanceof Error ? pickupErr.message : String(pickupErr);
+    console.log("ebay_fulfillment_pickup_only", pickupMsg);
+    if (!/shipping service|shippingservice|domestic|freight|fulfillment|handling/i.test(pickupMsg)) throw pickupErr;
+  }
+
+  const catalog = await getShippingServiceDetails(await userToken(storeId));
+  const pick = pickApplianceShipping(catalog);
+  console.log(
+    "ebay_shipping_services",
+    JSON.stringify({
+      picked: pick,
+      services: compactShippingCatalog(catalog),
+    }),
+  );
+  if (!pick) {
+    throw new Error(
+      "Pickup-only fulfillment was rejected and eBay returned no valid freight/local-delivery shipping service for US. See ebay_shipping_services in function logs.",
+    );
+  }
+  return saveFulfillmentPolicy(storeId, id, shippingPolicyBody(market, name, pick));
 }
 
 async function ensurePolicies(storeId) {
