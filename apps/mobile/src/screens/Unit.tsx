@@ -6,6 +6,7 @@ import {
   listedChannelsBySku,
   loadUnit,
   parseListingSpecs,
+  specInchesValue,
   receiptHtml,
   regenerateListingBody,
   saleForSku,
@@ -262,25 +263,31 @@ export function UnitScreen() {
       <div className="grid grid-cols-3 gap-x-4">
         <TextField
           label="Width (in)"
-          value={String(parseListingSpecs(unit.listingSpecs)?.width_in ?? "")}
-          inputMode="numeric"
+          value={specInchesValue(parseListingSpecs(unit.listingSpecs)?.width_in)}
+          inputMode="decimal"
           onCommit={(v) => editSpec("width_in", v ?? "")}
         />
         <TextField
           label="Height (in)"
-          value={String(parseListingSpecs(unit.listingSpecs)?.height_in ?? "")}
-          inputMode="numeric"
+          value={specInchesValue(parseListingSpecs(unit.listingSpecs)?.height_in)}
+          inputMode="decimal"
           onCommit={(v) => editSpec("height_in", v ?? "")}
         />
         <TextField
           label="Depth (in)"
-          value={String(parseListingSpecs(unit.listingSpecs)?.depth_in ?? "")}
-          inputMode="numeric"
+          value={specInchesValue(parseListingSpecs(unit.listingSpecs)?.depth_in)}
+          inputMode="decimal"
           onCommit={(v) => editSpec("depth_in", v ?? "")}
         />
       </div>
+      <TextField
+        label="Weight (lb)"
+        value={specInchesValue(parseListingSpecs(unit.listingSpecs)?.weight_lb)}
+        inputMode="decimal"
+        onCommit={(v) => editSpec("weight_lb", v ?? "")}
+      />
       <p className="text-quiet text-floor-mute">
-        Width, height, and depth fill eBay size buckets. Model lookup fills them when we have the specs.
+        Width, height, depth, and weight fill eBay size/weight fields from the model specs.
       </p>
       <EbayDetails sku={unit.sku} category={unit.category} cacheKey={`${unit.listingSpecs || ""}:${unit.brand}:${unit.model}`} />
       <TextField label="Description" value={unit.title} onCommit={(v) => edit("title", v ?? "")} />

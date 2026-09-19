@@ -31,6 +31,9 @@ export type Unit = {
   state: UnitState;
   receivedAt: string;
   updatedAt: string;
+  listingBody: string | null;
+  listingSpecs: string | null;
+  showOnWebsite: boolean;
 };
 
 export type Sale = {
@@ -94,6 +97,9 @@ export const EDITABLE_FIELDS = {
   msrp_cents: "MSRP",
   ask_cents: "ask",
   floor_cents: "floor",
+  listing_body: "listing description",
+  listing_specs: "listing specs",
+  show_on_website: "list on website",
 } as const;
 
 export type EditableField = keyof typeof EDITABLE_FIELDS;
@@ -112,6 +118,20 @@ export function padSku(n: number, digits = DEFAULT_SKU_DIGITS): string {
 }
 
 // ---------------------------------------------------------------- lifecycle
+
+async function migrateUnitListingColumns(db: Db): Promise<void> {
+  const cols = await db.all<{ name?: string; Name?: string }>("PRAGMA table_info(units)");
+  const names = new Set(cols.map((c) => String(c.name ?? c.Name ?? "")));
+  if (!names.has("listing_body")) {
+    await db.exec("ALTER TABLE units ADD COLUMN listing_body TEXT");
+  }
+  if (!names.has("listing_specs")) {
+    await db.exec("ALTER TABLE units ADD COLUMN listing_specs TEXT");
+  }
+  if (!names.has("show_on_website")) {
+    await db.exec("ALTER TABLE units ADD COLUMN show_on_website INTEGER NOT NULL DEFAULT 0");
+  }
+}
 
 async function migrateSalesColumns(db: Db): Promise<void> {
   const cols = await db.all<{ name?: string; Name?: string }>("PRAGMA table_info(sales)");
@@ -136,6 +156,7 @@ export async function initDb(db: Db): Promise<void> {
   }
   await db.exec(SCHEMA);
   await migrateSalesColumns(db);
+  await migrateUnitListingColumns(db);
   await db.run("INSERT OR IGNORE INTO meta(key, value) VALUES ('schema_version', ?)", [
     String(SCHEMA_VERSION),
   ]);
@@ -196,6 +217,16 @@ export async function skuLedgerEntry(db: Db, sku: string) {
 
 // ---------------------------------------------------------------- mapping
 
+function specText(raw: unknown): string | null {
+  if (raw == null || raw === "") return null;
+  if (typeof raw === "string") return raw;
+  try {
+    return JSON.stringify(raw);
+  } catch {
+    return null;
+  }
+}
+
 function toUnit(row: Record<string, SqlValue>): Unit {
   return {
     id: Number(row.id),
@@ -218,6 +249,9 @@ function toUnit(row: Record<string, SqlValue>): Unit {
     state: String(row.state) as UnitState,
     receivedAt: String(row.received_at),
     updatedAt: String(row.updated_at),
+    listingBody: specText(row.listing_body) ?? ((row.listing_body as string) || null),
+    listingSpecs: specText(row.listing_specs),
+    showOnWebsite: Number(row.show_on_website) === 1,
   };
 }
 
@@ -476,6 +510,9 @@ export async function updateUnit(
     msrp_cents: raw.msrpCents,
     ask_cents: raw.askCents,
     floor_cents: raw.floorCents,
+    listing_body: raw.listingBody,
+    listing_specs: raw.listingSpecs,
+    show_on_website: raw.showOnWebsite ? 1 : 0,
   };
 
   const changes = (Object.keys(patch) as EditableField[]).filter((key) => {

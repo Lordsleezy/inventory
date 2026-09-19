@@ -116,3 +116,49 @@ test("maps quoted spec inches and mixed-case / cm width buckets", () => {
   assert.equal(fromJob.aspects["Item Width"][0], "More than 25 in");
   assert.equal(fromJob.missing.length, 0);
 });
+
+test("writes exact inches when eBay width buckets skip the 30-inch range", () => {
+  const fridgeWidth = ["Less Than 10 in", "Less Than 25 in", "More Than 40 in", "More than 55 in", "54 cm"];
+  const { aspects, missing } = aspectsFromTaxonomy(
+    [
+      {
+        localizedAspectName: "Item Width",
+        aspectConstraint: { aspectRequired: true, aspectMode: "FREE_TEXT" },
+        aspectValues: fridgeWidth.map((value) => ({ localizedValue: value })),
+      },
+      {
+        localizedAspectName: "Item Height",
+        aspectConstraint: { aspectRequired: true, aspectMode: "FREE_TEXT" },
+        aspectValues: ["Less Than 50 in", "More Than 50 in", "More than 65 in"].map((value) => ({
+          localizedValue: value,
+        })),
+      },
+    ],
+    { brand: "Midea", model: "MRT21D3BST", category: "Refrigerator" },
+    { width_in: '29.7"', height_in: '66.6"', weight_lb: 158.7 },
+  );
+  assert.equal(aspects["Item Width"][0], "29.7 in");
+  assert.equal(aspects["Item Height"][0], "More than 65 in");
+  assert.equal(missing.length, 0);
+});
+
+test("PrintProof stainless maps to Silver because eBay Color has no Stainless Steel", () => {
+  const aspect = {
+    localizedAspectName: "Color",
+    aspectConstraint: { aspectRequired: true },
+    aspectValues: ["Black", "Silver", "White"].map((value) => ({ localizedValue: value })),
+  };
+  assert.equal(pickAspectValue(aspect, ["Silver", "PrintProof stainless, pocket handles"]), "Silver");
+  const filled = aspectsFromTaxonomy(
+    [
+      {
+        localizedAspectName: "Color",
+        aspectConstraint: { aspectRequired: true },
+        aspectValues: ["Black", "Silver", "White"].map((value) => ({ localizedValue: value })),
+      },
+    ],
+    { brand: "LG", model: "LRYXC2606S", category: "Refrigerator" },
+    { finish: "PrintProof stainless, pocket handles" },
+  );
+  assert.equal(filled.aspects.Color[0], "Silver");
+});

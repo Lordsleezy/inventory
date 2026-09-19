@@ -184,7 +184,7 @@ export function looksLikeCatalogModels(allowed) {
 
 export function unitSpecificAspect(name) {
   const lower = String(name || "").toLowerCase();
-  return /model|mpn|manufacturer part|item width|item height|item length|item depth|capacity/.test(lower);
+  return /model|mpn|manufacturer part|item width|item height|item length|item depth|item weight|capacity/.test(lower);
 }
 
 export function normalizeTaxonomyAspects(rows) {
@@ -212,6 +212,19 @@ export function normalizeTaxonomyAspects(rows) {
     .filter((row) => row.name);
 }
 
+function finishColorCandidates(finish) {
+  const t = String(finish || "").toLowerCase();
+  const out = [];
+  if (/stainless|silver/.test(t)) out.push("Silver");
+  if (/\bwhite\b/.test(t)) out.push("White");
+  if (/\bblack\b/.test(t)) out.push("Black");
+  if (/\bgray\b|\bgrey\b/.test(t)) out.push("Gray");
+  if (/\bbeige\b|\bbiscuit\b|\balmond\b/.test(t)) out.push("Beige");
+  if (/\bbrown\b|\bbronze\b/.test(t)) out.push("Brown");
+  if (finish) out.push(finish);
+  return out;
+}
+
 function candidatesForAspect(name, unit, specs, extras = {}) {
   const lower = name.toLowerCase();
   const brand = String(unit.brand || "").trim();
@@ -225,7 +238,7 @@ function candidatesForAspect(name, unit, specs, extras = {}) {
   if (lower === "mpn" || lower === "manufacturer part number") return [model];
   if (lower === "model") return [model];
   if (lower === "type") return [appliance, layout];
-  if (lower === "color" || lower === "colour") return [finish];
+  if (lower === "color" || lower === "colour") return finishColorCandidates(finish);
   if (lower === "condition") return [condition];
   if (lower === "installation") {
     const fallback = extras.standalone === false ? "" : extras.categoryDefaults?.Installation || "Freestanding";
@@ -233,7 +246,10 @@ function candidatesForAspect(name, unit, specs, extras = {}) {
   }
   if (/height/.test(lower)) return [specInches(specs, "height"), specs?.height_in];
   if (/width/.test(lower)) return [specInches(specs, "width"), specs?.width_in];
-  if (/depth|length/.test(lower) && !/wave|band/.test(lower)) return [specInches(specs, "depth"), specs?.depth_in];
+  if (/depth/.test(lower) || (/length/.test(lower) && !/cable|cord|wave|band/.test(lower))) {
+    return [specInches(specs, "depth"), specs?.depth_in];
+  }
+  if (/weight/.test(lower)) return [parseMeasure(specs?.weight_lb || specs?.weight_lbs || specs?.weight), specs?.weight_lb];
   if (/capacity/.test(lower)) return [specs?.capacity_cu_ft];
   if (/voltage/.test(lower)) return [specs?.voltage];
   if (/energy/.test(lower)) return [specs?.energy];
@@ -246,7 +262,7 @@ function coerceValue(def, raw) {
   const allowed = def.allowed || [];
   if (!raw && raw !== 0) return "";
   if (allowed.length && !def.catalog) {
-    if (/height|width|depth|length|capacity/.test(String(def.name || "").toLowerCase())) {
+    if (/height|width|depth|length|capacity|weight/.test(String(def.name || "").toLowerCase())) {
       return matchMeasureBucket(allowed, raw) || matchAllowedValue(allowed, [raw]);
     }
     return matchAllowedValue(allowed, [raw]);
@@ -277,16 +293,30 @@ export function fillAspects(defs, unit, specs, extras = {}) {
     } else if (lower === "model" || (def.catalog && /model|mpn/.test(lower))) {
       value = model;
       source = value ? "unit" : "";
-    } else if (/height|width|depth|length|capacity/.test(lower) && (def.allowed || []).length) {
+    } else if (
+      /height|width|depth|capacity|weight/.test(lower) ||
+      (/length/.test(lower) && !/cable|cord/.test(lower))
+    ) {
       const kind = /capacity/.test(lower)
         ? "capacity"
-        : /height/.test(lower)
-          ? "height"
-          : /depth|length/.test(lower)
-            ? "depth"
-            : "width";
-      const measure = kind === "capacity" ? specs?.capacity_cu_ft : specInches(specs, kind);
-      value = matchMeasureBucket(def.allowed, measure);
+        : /weight/.test(lower)
+          ? "weight"
+          : /height/.test(lower)
+            ? "height"
+            : /depth/.test(lower) || (/length/.test(lower) && !/cable|cord/.test(lower))
+              ? "depth"
+              : "width";
+      const measure =
+        kind === "capacity"
+          ? parseMeasure(specs?.capacity_cu_ft)
+          : kind === "weight"
+            ? parseMeasure(specs?.weight_lb || specs?.weight_lbs || specs?.weight)
+            : specInches(specs, kind);
+      value = (def.allowed || []).length ? matchMeasureBucket(def.allowed, measure) : "";
+      if (!value && measure != null && !def.selectionOnly) {
+        const unit = kind === "capacity" ? "cu ft" : kind === "weight" ? "lb" : "in";
+        value = `${measure} ${unit}`;
+      }
       source = value ? "unit" : "";
     } else {
       value = pickAspectValue(fakeAspect, candidatesForAspect(name, unit, specs, { ...extras, categoryDefaults }));

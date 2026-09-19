@@ -17,8 +17,14 @@ export type ListingSpecs = {
   catalog_msrp?: string | null;
   installation?: string | null;
   voltage?: string | null;
+  weight_lb?: number | string | null;
   ebay_aspects?: Record<string, string> | null;
 };
+
+export function specInchesValue(raw: unknown): string {
+  const n = parseFloat(String(raw ?? "").replace(/[^0-9.]/g, ""));
+  return Number.isFinite(n) && n > 0 ? String(n) : "";
+}
 
 export function parseListingSpecs(raw: unknown): ListingSpecs | null {
   if (raw == null || raw === "") return null;

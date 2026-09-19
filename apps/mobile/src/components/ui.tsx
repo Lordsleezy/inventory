@@ -33,7 +33,7 @@ export function TextField({
   onCommit: (next: string | null) => Promise<void> | void;
   placeholder?: string;
   multiline?: boolean;
-  inputMode?: "text" | "numeric" | "tel" | "email";
+  inputMode?: "text" | "numeric" | "decimal" | "tel" | "email";
   disabled?: boolean;
 }) {
   const [draft, setDraft] = useState(value ?? "");

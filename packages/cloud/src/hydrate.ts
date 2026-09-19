@@ -29,6 +29,16 @@ function nullable(value: unknown): string | null {
   return String(value);
 }
 
+function nullableJson(value: unknown): string | null {
+  if (value == null || value === "") return null;
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return null;
+  }
+}
+
 function intOrNull(value: unknown): number | null {
   if (value == null || value === "") return null;
   const n = Number(value);
@@ -173,8 +183,8 @@ async function applyOnce(db: Db, payload: CachePayload): Promise<void> {
           `INSERT INTO units (
             sku, brand, model, title, category, condition, test_status, location, mfr_serial,
             defect_notes, upc, lot, acquisition_cost_cents, msrp_cents, ask_cents, floor_cents,
-            state, received_at, updated_at
-          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+            state, received_at, updated_at, listing_body, listing_specs, show_on_website
+          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
           [
             sku,
             text(row.brand),
@@ -195,6 +205,9 @@ async function applyOnce(db: Db, payload: CachePayload): Promise<void> {
             insertState,
             issuedAt,
             text(row.updated_at, issuedAt),
+            nullable(row.listing_body),
+            nullableJson(row.listing_specs),
+            row.show_on_website === true || row.show_on_website === 1 || row.show_on_website === "1" ? 1 : 0,
           ],
         );
       }
