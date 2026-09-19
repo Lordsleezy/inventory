@@ -29,3 +29,21 @@ test("photo errors tell you eBay could not download the files", () => {
   });
   assert.match(msg, /public HTTPS/i);
 });
+
+test("decodes HTML entities and does not repeat the same eBay sentence", () => {
+  const msg = formatEbayError({
+    errors: [
+      {
+        message: "Seller has opted into business policies. Please use the seller&apos;s policy IDs.",
+        longMessage: "Seller has opted into business policies. Please use the seller&apos;s policy IDs.",
+      },
+      {
+        message: "Seller has opted into business policies. Please use the seller&apos;s policy IDs.",
+        longMessage: "Seller has opted into business policies. Please use the seller&apos;s policy IDs.",
+      },
+    ],
+  });
+  assert.match(msg, /seller's policy IDs/i);
+  assert.doesNotMatch(msg, /&apos;/i);
+  assert.equal((msg.match(/opted into business policies/gi) || []).length, 1);
+});

@@ -1,14 +1,52 @@
 /** Turn eBay REST error JSON into a shop-floor sentence (never a bare "invalid"). */
 
+export function decodeEbayText(value) {
+  return String(value ?? "")
+    .replace(/&apos;/gi, "'")
+    .replace(/&#0*39;/g, "'")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#0*34;/g, '"')
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">");
+}
+
+function normalizeEbayText(value) {
+  return decodeEbayText(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+export function uniqueEbaySentences(parts) {
+  const out = [];
+  for (const raw of parts) {
+    const text = decodeEbayText(raw).replace(/\s+/g, " ").trim();
+    if (!text) continue;
+    const key = normalizeEbayText(text);
+    if (!key) continue;
+    const idx = out.findIndex((existing) => {
+      const other = normalizeEbayText(existing);
+      return other === key || other.includes(key) || key.includes(other);
+    });
+    if (idx < 0) {
+      out.push(text);
+      continue;
+    }
+    if (text.length > out[idx].length) out[idx] = text;
+  }
+  return out.join(" ");
+}
+
 export function formatEbayError(json, fallback = "eBay rejected the listing.") {
   const errors = Array.isArray(json?.errors) ? json.errors : [];
   const warnings = Array.isArray(json?.warnings) ? json.warnings : [];
   const rows = errors.length ? errors : warnings;
   if (!rows.length) {
     const raw = json?.error_description || json?.error || json?.message || fallback;
-    return expandBareInvalid(String(raw || fallback));
+    return uniqueEbaySentences([expandBareInvalid(String(raw || fallback))]);
   }
-  return rows.map(describeEbayError).filter(Boolean).join(" ");
+  return uniqueEbaySentences(rows.map(describeEbayError));
 }
 
 function describeEbayError(err) {
@@ -23,16 +61,18 @@ function describeEbayError(err) {
         .filter(Boolean)
         .join(", ")
     : "";
-  const text = String(err?.longMessage || err?.message || "").trim();
+  const long = decodeEbayText(err?.longMessage || "").trim();
+  const short = decodeEbayText(err?.message || "").trim();
+  const text = long && short && normalizeEbayText(long).includes(normalizeEbayText(short)) ? long : long || short;
   const hint = hintFor(text, params, err?.errorId);
   const core = expandBareInvalid(text || "eBay rejected this field");
   const field = params ? ` Field: ${params}.` : "";
   const how = hint ? ` ${hint}` : "";
-  return `${core}.${field}${how}`.replace(/\.\./g, ".").trim();
+  return uniqueEbaySentences([`${core}.${field}${how}`.replace(/\.\./g, ".").trim()]);
 }
 
 function expandBareInvalid(text) {
-  const t = String(text || "").trim();
+  const t = decodeEbayText(text).trim();
   if (!t || /^invalid\.?$/i.test(t) || /^invalid data\.?$/i.test(t)) {
     return "eBay rejected the listing as invalid";
   }
@@ -46,9 +86,6 @@ function hintFor(text, params, errorId) {
   const blob = `${text} ${params} ${errorId}`.toLowerCase();
   if (/image|photo|picture/.test(blob)) {
     return "Fix: Floor must send photos as public HTTPS URLs eBay can download (not private signed links).";
-  }
-  if (/payment.?policy|return.?policy|fulfillment.?policy|business policy|opt.?in|seller program/.test(blob)) {
-    return "Fix: Floor will opt this seller into business policies through the Account API and create payment, return, and local-pickup policies. Sandbox Seller Hub has no Business policies screen.";
   }
   if (/merchantlocation|location.?key|inventory location/.test(blob)) {
     return "Fix: Floor will recreate the warehouse location with an alphanumeric key.";
