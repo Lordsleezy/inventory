@@ -11,6 +11,11 @@ create table if not exists public.pos_devices (
   created_at timestamptz not null default now()
 );
 
+-- When an older pos_register table already existed, CREATE IF NOT EXISTS is a no-op.
+alter table public.pos_devices add column if not exists label text;
+alter table public.pos_devices add column if not exists pair_code text;
+alter table public.pos_devices add column if not exists last_seen timestamptz;
+
 create unique index if not exists ux_pos_devices_pair_code
   on public.pos_devices (pair_code)
   where pair_code is not null;
