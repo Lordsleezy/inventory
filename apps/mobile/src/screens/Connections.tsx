@@ -22,12 +22,24 @@ export function ConnectionsScreen() {
   const [rows, setRows] = useState<Conn[]>([]);
   const [locations, setLocations] = useState<{ id: string; name: string }[]>([]);
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
   const [amazonPro, setAmazonPro] = useState(false);
 
   async function load() {
-    const { data, error: rpcErr } = await floorCloud().rpc("my_connection_status");
-    if (rpcErr) setError(friendlyRpc(rpcErr));
-    else setRows((data ?? []) as Conn[]);
+    setLoading(true);
+    setError("");
+    try {
+      const { data, error: rpcErr } = await floorCloud().rpc("my_connection_status");
+      if (rpcErr) {
+        setError(`Connections load failed: ${friendlyRpc(rpcErr)}. Pull to retry or check Supabase.`);
+        return;
+      }
+      setRows((data ?? []) as Conn[]);
+    } catch (err) {
+      setError(`Connections load failed: ${friendlyRpc(err)}`);
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -56,40 +68,63 @@ export function ConnectionsScreen() {
         return;
       }
       if (!res.ok || !body.url) {
-        setError(body.message || body.error || `Connect failed (${res.status})`);
+        setError(
+          `Connect ${provider} failed (HTTP ${res.status}): ${body.message || body.error || "no authorize URL"}. Check Netlify functions.`,
+        );
         return;
       }
       await openConnectUrl(body.url);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       if (message === "cancelled" || /cancelled/i.test(message)) return;
-      setError(friendlyRpc(err));
+      setError(`Connect ${provider} failed: ${friendlyRpc(err)}`);
     }
   }
 
   async function disconnect(provider: string) {
     const { error: rpcErr } = await floorCloud().rpc("disconnect_provider", { p_provider: provider });
-    if (rpcErr) setError(friendlyRpc(rpcErr));
+    if (rpcErr) setError(`Disconnect failed: ${friendlyRpc(rpcErr)}`);
     await load();
     await hydrate();
   }
 
   async function loadLocations() {
-    const headers = await authHeader();
-    const res = await fetch(functionsUrl("square-locations"), { headers });
-    const body = await res.json();
-    if (!res.ok) setError(body.error || "locations failed");
-    else setLocations(body.locations || []);
+    setError("");
+    try {
+      const headers = await authHeader();
+      const res = await fetch(functionsUrl("square-locations"), { headers });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(`Square locations failed (HTTP ${res.status}): ${body.error || body.message || "unknown"}`);
+        return;
+      }
+      setLocations(body.locations || []);
+      if (!(body.locations || []).length) {
+        setError("Square returned no locations for this account.");
+      }
+    } catch (err) {
+      setError(`Square locations failed: ${friendlyRpc(err)}`);
+    }
   }
 
   async function pickLocation(id: string, name: string) {
-    const headers = await authHeader();
-    await fetch(functionsUrl("square-set-location"), {
-      method: "POST",
-      headers: { ...headers, "Content-Type": "application/json" },
-      body: JSON.stringify({ locationId: id, name }),
-    });
-    await load();
+    setError("");
+    try {
+      const headers = await authHeader();
+      const res = await fetch(functionsUrl("square-set-location"), {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({ locationId: id, name }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(`Set Square location failed (HTTP ${res.status}): ${body.error || "unknown"}`);
+        return;
+      }
+      await load();
+    } catch (err) {
+      setError(`Set Square location failed: ${friendlyRpc(err)}`);
+    }
   }
 
   const by = (p: string) => rows.find((r) => r.provider === p);
@@ -101,6 +136,12 @@ export function ConnectionsScreen() {
         Square turns on card payments. It does not change eBay/Amazon/website modes.
       </p>
       <Notice tone="error">{error}</Notice>
+      {error ? (
+        <button type="button" className="btn-text mb-2 px-0" onClick={() => void load()}>
+          Retry load
+        </button>
+      ) : null}
+      {loading ? <p className="text-quiet">Loading connections…</p> : null}
       <Card
         title="Square"
         row={by("square")}
@@ -196,4 +237,3 @@ function Card({
     </div>
   );
 }
-

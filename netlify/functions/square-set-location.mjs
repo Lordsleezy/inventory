@@ -7,6 +7,7 @@ async function handle(event) {
   try {
     const { staff } = await ownerFromEvent(event);
     const body = JSON.parse(event.body || "{}");
+    if (!body.locationId) return json(400, { error: "locationId_required" });
     const sb = serviceClient();
     const { error } = await sb
       .from("connections")
@@ -18,6 +19,15 @@ async function handle(event) {
       .eq("store_id", staff.store_id)
       .eq("provider", "square");
     if (error) return json(500, { error: error.message });
+    // Keep register / mobile-auth path in sync when square_connections already has tokens.
+    await sb
+      .from("square_connections")
+      .update({
+        location_id: body.locationId,
+        location_name: body.name || null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("store_id", staff.store_id);
     return json(200, { ok: true });
   } catch (err) {
     return json(401, { error: err instanceof Error ? err.message : String(err) });

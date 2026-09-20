@@ -26,12 +26,14 @@ export function squareClient(accessToken) {
 
 export async function exchangeSquareCode(code) {
   const client = new Client({ environment: env() });
+  const redirectUri = process.env.SQUARE_REDIRECT_URL || process.env.OAUTH_REDIRECT_URI;
+  if (!redirectUri) throw new Error("SQUARE_REDIRECT_URL (or OAUTH_REDIRECT_URI) is not set");
   const { result } = await client.oAuthApi.obtainToken({
     clientId: process.env.SQUARE_APPLICATION_ID,
     clientSecret: process.env.SQUARE_APPLICATION_SECRET,
     code,
     grantType: "authorization_code",
-    redirectUri: process.env.SQUARE_REDIRECT_URL,
+    redirectUri,
   });
   return result;
 }
@@ -58,11 +60,42 @@ export async function getStoreSquareAccess(storeId) {
   const { data: row } = await sb.from("square_connections").select("*").eq("store_id", storeId).maybeSingle();
 
   if (!row?.access_token_enc) {
+    // Phone Connections OAuth historically wrote only to `connections`.
+    const { data: legacy } = await sb
+      .from("connections")
+      .select("token_ciphertext, refresh_ciphertext, expires_at, location_id, status")
+      .eq("store_id", storeId)
+      .eq("provider", "square")
+      .maybeSingle();
+    if (legacy?.token_ciphertext && legacy.status === "connected") {
+      const accessToken = decryptSecret(legacy.token_ciphertext);
+      const refreshToken = legacy.refresh_ciphertext ? decryptSecret(legacy.refresh_ciphertext) : null;
+      try {
+        await upsertEncryptedSquareTokens(
+          storeId,
+          {
+            accessToken,
+            refreshToken: refreshToken || undefined,
+            expiresAt: legacy.expires_at,
+          },
+          { location_id: legacy.location_id || process.env.SQUARE_SANDBOX_LOCATION_ID || null },
+        );
+      } catch {
+        /* still return the decrypted token */
+      }
+      return {
+        accessToken,
+        locationId: legacy.location_id || process.env.SQUARE_SANDBOX_LOCATION_ID || null,
+        merchantId: null,
+        sandbox: (process.env.SQUARE_ENVIRONMENT || "sandbox") !== "production",
+        source: "connections_mirrored",
+      };
+    }
     if ((process.env.SQUARE_ENVIRONMENT || "sandbox") !== "production" && process.env.SQUARE_SANDBOX_ACCESS_TOKEN) {
       return {
         accessToken: process.env.SQUARE_SANDBOX_ACCESS_TOKEN,
-        locationId: process.env.SQUARE_SANDBOX_LOCATION_ID || row?.location_id || null,
-        merchantId: row?.merchant_id || null,
+        locationId: process.env.SQUARE_SANDBOX_LOCATION_ID || null,
+        merchantId: null,
         sandbox: true,
         source: "env_sandbox_token",
       };

@@ -40,10 +40,10 @@ MockReaderUI is **not** linked (breaks App Store upload). Sandbox mock charges u
 ## First Codemagic / TestFlight checklist
 
 1. Ensure Codemagic group **appstore** has `SQUARE_APPLICATION_ID` (sandbox Application ID).
-2. Push / build branch `square-v1` — workflow resolves SPM and builds IPA for TestFlight.
+2. Tag `ios-*` (or push `master`) — CapApp-SPM resolves Square via FloorSquare `Package.swift`.
 3. Build log must show Square package resolve (`mobile-payments-sdk-ios` / `SquareMobilePaymentsSDK`) and IPA upload.
-4. On device: Payment device → Authorize Square → take a sandbox payment (mock path OK until a reader / Mock Reader UI is added separately for Debug).
-5. Watch Netlify logs for `square-oauth-callback`, `square-mobile-auth`, `square-refund-payment`.
+4. On device: Payment device shows a **large pair code** (not dots). Connections → Connect Square should return to Floor with a success page (not a blank WebView).
+5. Watch Netlify logs for `square-oauth-callback`, `oauth-callback`, `square-mobile-auth`, `square-refund-payment`.
 
 ## Before production
 

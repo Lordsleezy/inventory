@@ -1,6 +1,10 @@
 -- POS card handoff: phone reader devices + pending charges.
 -- Square Terminal remains a stub (settings.terminalDeviceId only).
 
+-- Ensure columns exist when card_charges was created by an earlier partial deploy.
+alter table public.card_charges add column if not exists ticket_id uuid;
+alter table public.card_charges add column if not exists reservation_id uuid;
+
 create table if not exists public.pos_devices (
   id         uuid primary key default gen_random_uuid(),
   store_id   uuid not null references public.stores (id) on delete cascade,
@@ -41,10 +45,12 @@ create index if not exists ix_card_charges_device_pending
 alter table public.pos_devices enable row level security;
 alter table public.card_charges enable row level security;
 
+drop policy if exists pos_devices_staff on public.pos_devices;
 create policy pos_devices_staff on public.pos_devices for all to authenticated
   using (public.is_store_staff(store_id))
   with check (public.is_store_staff(store_id));
 
+drop policy if exists card_charges_staff on public.card_charges;
 create policy card_charges_staff on public.card_charges for all to authenticated
   using (public.is_store_staff(store_id))
   with check (public.is_store_staff(store_id));

@@ -5,6 +5,7 @@ import {
   requireEnv,
 } from "../lib/server.mjs";
 import { exchangeEbayCode, subscribeNotifications } from "../lib/ebay.mjs";
+import { upsertEncryptedSquareTokens } from "../lib/square.mjs";
 import { paramsFromNetlifyEvent } from "../lib/oauth-params.mjs";
 import { wrapHandler } from "../lib/floor-log.mjs";
 
@@ -134,13 +135,18 @@ function recoveryPage() {
 
 async function exchangeSquare(code) {
   const host =
-    process.env.SQUARE_ENV === "production" ? "https://connect.squareup.com" : "https://connect.squareupsandbox.com";
+    (process.env.SQUARE_ENVIRONMENT || process.env.SQUARE_ENV) === "production"
+      ? "https://connect.squareup.com"
+      : "https://connect.squareupsandbox.com";
+  const redirect =
+    process.env.OAUTH_REDIRECT_URI || process.env.SQUARE_REDIRECT_URL;
+  if (!redirect) throw new Error("OAUTH_REDIRECT_URI (or SQUARE_REDIRECT_URL) is not set");
   const body = new URLSearchParams({
     client_id: requireEnv("SQUARE_APPLICATION_ID"),
     client_secret: requireEnv("SQUARE_APPLICATION_SECRET"),
     code,
     grant_type: "authorization_code",
-    redirect_uri: requireEnv("OAUTH_REDIRECT_URI"),
+    redirect_uri: redirect,
   });
   const res = await fetch(`${host}/oauth2/token`, {
     method: "POST",
@@ -278,6 +284,17 @@ async function handle(event) {
         },
         { onConflict: "store_id,key" },
       );
+      // Mirror into square_connections so register / mobile-auth / refund share one store.
+      try {
+        await upsertEncryptedSquareTokens(state.store_id, {
+          accessToken: access,
+          refreshToken: refresh || undefined,
+          expiresAt: row.expires_at,
+          merchantId: tokens.merchant_id || tokens.merchantId || null,
+        });
+      } catch (mirrorErr) {
+        console.error("square_connections mirror failed", mirrorErr);
+      }
     } else {
       await sb.from("channel_config").upsert(
         {

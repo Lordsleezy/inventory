@@ -76,8 +76,13 @@ export function SettingsScreen() {
     setError("");
     try {
       const res = await callFunction("square-connect-start", { method: "POST", body: "{}" });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error || "connect_failed");
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(
+          `Connect Square failed (HTTP ${res.status}): ${body.error || body.message || "unknown"}. Is Netlify redeployed with SQUARE_* env vars?`,
+        );
+      }
+      if (!body.url) throw new Error("Connect Square returned no authorize URL");
       window.open(body.url, "_blank", "noopener,noreferrer");
       setMsg("Complete Square authorize in the browser, then click Refresh status.");
     } catch (err) {
@@ -89,8 +94,12 @@ export function SettingsScreen() {
     setError("");
     try {
       const res = await callFunction("square-list-locations", { method: "GET" });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error || "locations_failed");
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(
+          `List locations failed (HTTP ${res.status}): ${body.error || body.message || "unknown"}`,
+        );
+      }
       setLocations(body.locations || []);
       setMsg(`Loaded ${(body.locations || []).length} Square location(s).`);
     } catch (err) {
