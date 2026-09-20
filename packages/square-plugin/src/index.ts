@@ -1,8 +1,9 @@
 import { registerPlugin } from "@capacitor/core";
 
 export interface FloorSquarePlugin {
-  authorize(options: { accessToken: string; locationId: string }): Promise<{ ok: boolean }>;
+  authorize(options: { accessToken: string; locationId: string; mock?: boolean }): Promise<{ ok: boolean; reason?: string }>;
   charge(options: { amountCents: number }): Promise<{ ok: boolean; paymentId?: string; reason?: string }>;
+  startPairing?(): Promise<{ ok: boolean; mock?: boolean }>;
   openAuth(options: { url: string }): Promise<{ ok: boolean }>;
 }
 

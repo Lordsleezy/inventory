@@ -1,0 +1,17 @@
+# Local/CI Postgres + pgTAP for register SQL tests (not the live Floor project).
+services:
+  db:
+    build: .
+    ports:
+      - "54322:5432"
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_DB: postgres
+    volumes:
+      - ./init-pgtap.sql:/docker-entrypoint-initdb.d/01-pgtap.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 2s
+      timeout: 5s
+      retries: 30

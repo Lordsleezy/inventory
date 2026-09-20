@@ -1,9 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
-  finalizeSale,
   floorCloud,
-  releaseReservation,
-  reserveUnit,
+  loadStoreTaxRateBps,
   stripCostFromUnit,
   type StaffSession,
 } from "@floor/cloud";
@@ -13,25 +11,24 @@ import {
   incidentsList,
   loadPosSettings,
   outboxPending,
-  outboxUpdate,
   savePosSettings,
   type CachedUnit,
   type PosSettings,
 } from "./local";
 import { syncOutboxRow } from "./outbox";
-import { printReceipt } from "./print-receipt";
-import { finalizeCapturedCharge, replayCapturedCharges } from "./card-device";
-import { callFunction } from "./functions";
+import { finalizeSale, releaseReservation, reserveUnit } from "@floor/cloud";
 
 type PosValue = {
   session: StaffSession;
   online: boolean;
   settings: PosSettings;
+  taxRateBps: number | null;
   pendingOutbox: number;
   incidents: { id: string; sku: string; message: string; createdAt: string }[];
   isAdmin: boolean;
   refreshUnits: () => Promise<void>;
   refreshLocal: () => Promise<void>;
+  refreshTax: () => Promise<void>;
   saveSettings: (next: PosSettings) => Promise<void>;
   syncOutbox: () => Promise<void>;
 };
@@ -47,6 +44,7 @@ export function usePos(): PosValue {
 export function PosProvider({ session, children }: { session: StaffSession; children: ReactNode }) {
   const [online, setOnline] = useState(typeof navigator === "undefined" ? true : navigator.onLine);
   const [settings, setSettings] = useState<PosSettings | null>(null);
+  const [taxRateBps, setTaxRateBps] = useState<number | null>(null);
   const [pendingOutbox, setPendingOutbox] = useState(0);
   const [incidents, setIncidents] = useState<PosValue["incidents"]>([]);
   const isAdmin = session.role === "owner" || session.role === "manager";
@@ -55,6 +53,14 @@ export function PosProvider({ session, children }: { session: StaffSession; chil
     setSettings(await loadPosSettings());
     setPendingOutbox((await outboxPending()).length);
     setIncidents(await incidentsList());
+  }, []);
+
+  const refreshTax = useCallback(async () => {
+    try {
+      setTaxRateBps(await loadStoreTaxRateBps());
+    } catch {
+      /* keep last */
+    }
   }, []);
 
   const refreshUnits = useCallback(async () => {
@@ -81,21 +87,13 @@ export function PosProvider({ session, children }: { session: StaffSession; chil
       };
     });
     await cacheReplaceUnits(units);
-    const { data: tax } = await sb
-      .from("store_settings")
-      .select("key, value")
-      .eq("store_id", session.storeId)
-      .eq("key", "taxRateBps")
-      .maybeSingle();
-    const current = await loadPosSettings();
-    const raw = tax?.value;
-    const parsed = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw) : Number.NaN;
-    const bps = Number.isFinite(parsed) ? parsed : current.taxRateBps;
-    await savePosSettings({ ...current, taxRateBps: bps });
-  }, [session.storeId]);
+    await refreshTax();
+  }, [refreshTax]);
 
   const syncOutboxNow = useCallback(async () => {
+    // Legacy outbox retained for old rows only — new sales never enqueue.
     if (!navigator.onLine) return;
+    const { outboxUpdate } = await import("./local");
     const rows = await outboxPending();
     for (const row of rows) {
       const result = await syncOutboxRow(row, {
@@ -116,48 +114,9 @@ export function PosProvider({ session, children }: { session: StaffSession; chil
     await refreshLocal();
   }, [refreshLocal]);
 
-  const recoverCaptured = useCallback(async () => {
-    if (!navigator.onLine) return;
-    const rows = await replayCapturedCharges();
-    const current = await loadPosSettings();
-    for (const row of rows) {
-      try {
-        const sale = (await finalizeCapturedCharge(row.id)) as { receipt_no?: string };
-        await printReceipt(
-          {
-            receiptNo: sale?.receipt_no || "SALE",
-            soldAt: new Date().toLocaleString(),
-            clerkName: session.displayName,
-            sku: row.sku,
-            title: "Item",
-            condition: null,
-            priceCents: 0,
-            taxCents: 0,
-            totalCents: 0,
-            tender: "CARD",
-          },
-          current,
-        );
-      } catch (err) {
-        const text = err instanceof Error ? err.message : String(err);
-        if (/unit_not_sellable|double_sell|23505/i.test(text)) {
-          await callFunction("square-refund", {
-            method: "POST",
-            body: JSON.stringify({ paymentId: row.paymentId, sku: row.sku, chargeId: row.id }),
-          });
-          await incidentInsert(
-            crypto.randomUUID(),
-            row.sku,
-            "INCIDENT — card charged but unit is not ours. Refund sent. Do not retry.",
-          );
-        }
-      }
-    }
-    await refreshLocal();
-  }, [refreshLocal, session.displayName]);
-
   useEffect(() => {
     void refreshLocal();
+    void refreshTax();
     const on = () => setOnline(true);
     const off = () => setOnline(false);
     window.addEventListener("online", on);
@@ -166,16 +125,15 @@ export function PosProvider({ session, children }: { session: StaffSession; chil
       window.removeEventListener("online", on);
       window.removeEventListener("offline", off);
     };
-  }, [refreshLocal]);
+  }, [refreshLocal, refreshTax]);
 
   useEffect(() => {
     if (!online) return;
     void refreshUnits()
       .then(() => refreshLocal())
       .then(() => syncOutboxNow())
-      .then(() => recoverCaptured())
       .catch(() => {});
-  }, [online, refreshUnits, refreshLocal, syncOutboxNow, recoverCaptured]);
+  }, [online, refreshUnits, refreshLocal, syncOutboxNow]);
 
   const saveSettings = useCallback(async (next: PosSettings) => {
     await savePosSettings(next);
@@ -188,15 +146,30 @@ export function PosProvider({ session, children }: { session: StaffSession; chil
       session,
       online,
       settings,
+      taxRateBps,
       pendingOutbox,
       incidents,
       isAdmin,
       refreshUnits,
       refreshLocal,
+      refreshTax,
       saveSettings,
       syncOutbox: syncOutboxNow,
     };
-  }, [session, online, settings, pendingOutbox, incidents, isAdmin, refreshUnits, refreshLocal, saveSettings, syncOutboxNow]);
+  }, [
+    session,
+    online,
+    settings,
+    taxRateBps,
+    pendingOutbox,
+    incidents,
+    isAdmin,
+    refreshUnits,
+    refreshLocal,
+    refreshTax,
+    saveSettings,
+    syncOutboxNow,
+  ]);
 
   if (!value) return <p className="page">Loading register…</p>;
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

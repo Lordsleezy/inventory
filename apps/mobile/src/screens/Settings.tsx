@@ -111,6 +111,9 @@ export function SettingsScreen() {
           <Link to="/connections" className="btn-accent mt-4 inline-block">
             Connections
           </Link>
+          <Link to="/payment-device" className="btn-accent mt-4 ml-3 inline-block">
+            Payment device
+          </Link>
           <label className="block py-3">
             <Label>Manager PIN (voids, below-floor, deletes)</Label>
             <input className="field mt-1" type="password" value={pin} onChange={(e) => setPin(e.target.value)} />

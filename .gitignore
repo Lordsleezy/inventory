@@ -29,3 +29,6 @@ apps/mobile/ios/
 apps/mobile/android/
 .DS_Store
 Thumbs.db
+apps/pos/packaging/bin/
+apps/pos/src-tauri/target/
+apps/pos/src-tauri/gen/

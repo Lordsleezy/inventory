@@ -6,6 +6,8 @@ export type SellErrorCode =
   | "below_floor"
   | "reservation_expired"
   | "not_sellable"
+  | "tax_rate_required"
+  | "override_reason_required"
   | "offline"
   | "unknown";
 
@@ -27,8 +29,17 @@ export function mapSellError(err: { code?: string; message?: string } | null | u
   if (/below_floor/i.test(message)) {
     return new SellError("below_floor", "That price is below floor. A manager PIN is required.");
   }
+  if (/tax_rate_required/i.test(message)) {
+    return new SellError("tax_rate_required", "Set your tax rate in Settings before ringing up sales.");
+  }
+  if (/override_reason_required/i.test(message)) {
+    return new SellError("override_reason_required", "Enter a reason when the price differs from ask.");
+  }
   if (/reservation_expired/i.test(message)) {
     return new SellError("reservation_expired", "The hold expired. Start checkout again.");
+  }
+  if (/unit_not_sellable|sku_not_in_store|duplicate_sku/i.test(message)) {
+    return new SellError("not_sellable", message);
   }
   return new SellError("unknown", message);
 }

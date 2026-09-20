@@ -1,0 +1,67 @@
+name: sql-tests
+
+# PGlite migration suite + Postgres/pgTAP register tests.
+on:
+  push:
+    branches: [register-v1, master]
+  pull_request:
+    branches: [master, register-v1]
+  workflow_dispatch:
+
+concurrency:
+  group: sql-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pglite:
+    name: PGlite migrations + ticket tax
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.18.0"
+          cache: npm
+
+      - name: Install npm workspaces
+        run: npm ci
+
+      - name: PGlite apply all migrations
+        run: npm run test:migrations
+
+      - name: PGlite ticket tax / finalize helpers
+        run: npm run test:ticket-tax
+
+  pgtap:
+    name: Postgres pgTAP
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install psql client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Build and start Postgres + pgTAP
+        run: |
+          docker compose -f supabase/tests/pgtap/docker-compose.yml up -d --build
+          for i in $(seq 1 60); do
+            if docker compose -f supabase/tests/pgtap/docker-compose.yml exec -T db \
+              pg_isready -U postgres -d postgres >/dev/null 2>&1; then
+              echo "db ready"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "db failed to become ready" >&2
+          docker compose -f supabase/tests/pgtap/docker-compose.yml logs
+          exit 1
+
+      - name: Apply migrations and run pgTAP
+        env:
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:54322/postgres
+        run: bash supabase/tests/pgtap/run.sh
+
+      - name: Stop compose
+        if: always()
+        run: docker compose -f supabase/tests/pgtap/docker-compose.yml down -v

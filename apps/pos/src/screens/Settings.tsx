@@ -4,21 +4,24 @@ import { callFunction } from "../functions";
 import { hasAdminPin, kioskPower, setAdminPin, verifyAdminPin } from "../local";
 import { DEFAULT_LEGAL, type PaperKind } from "../receipt";
 import { pairReader, unpairReader } from "../card-device";
+import { setStoreTaxRateBps } from "@floor/cloud";
 
 export function SettingsScreen() {
-  const { settings, saveSettings, isAdmin, session } = usePos();
+  const { settings, saveSettings, isAdmin, session, taxRateBps, refreshTax } = usePos();
   const [paperKind, setPaperKind] = useState<PaperKind>(settings.paperKind);
   const [chars, setChars] = useState(settings.charsPerLine?.toString() ?? "");
   const [printerPath, setPrinterPath] = useState(settings.printerPath);
   const [reviewUrl, setReviewUrl] = useState(settings.reviewUrl);
   const [receiptLegal, setReceiptLegal] = useState(settings.receiptLegal || DEFAULT_LEGAL);
   const [terminalDeviceId, setTerminalDeviceId] = useState(settings.terminalDeviceId);
+  const [taxPct, setTaxPct] = useState(taxRateBps != null ? (taxRateBps / 100).toFixed(2) : "");
   const [pairCode, setPairCode] = useState("");
   const [pin, setPin] = useState("");
   const [msg, setMsg] = useState("");
   const [error, setError] = useState("");
 
   async function save() {
+    setError("");
     await saveSettings({
       ...settings,
       paperKind,
@@ -28,6 +31,17 @@ export function SettingsScreen() {
       receiptLegal,
       terminalDeviceId,
     });
+    const pct = Number(taxPct);
+    if (Number.isFinite(pct) && pct >= 0) {
+      const bps = Math.round(pct * 100);
+      try {
+        await setStoreTaxRateBps(bps);
+        await refreshTax();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+        return;
+      }
+    }
     setMsg("Saved.");
   }
 
@@ -65,9 +79,19 @@ export function SettingsScreen() {
   return (
     <section className="page grid">
       <h1>Settings</h1>
-      <p className="muted">Signed in as {session.displayName}. This machine does not receive inventory.</p>
+      <p className="muted">Signed in as {session.displayName}.</p>
       {error ? <p className="error">{error}</p> : null}
       {msg ? <p>{msg}</p> : null}
+      <label>
+        Sales tax rate (%)
+        <input
+          value={taxPct}
+          onChange={(e) => setTaxPct(e.target.value)}
+          placeholder="e.g. 7.25"
+          disabled={!isAdmin}
+        />
+      </label>
+      <p className="muted">Required before checkout. Stored in store_settings (tax added on top of prices).</p>
       <label>
         Paper
         <select value={paperKind} onChange={(e) => setPaperKind(e.target.value as PaperKind)}>
@@ -111,7 +135,6 @@ export function SettingsScreen() {
       {isAdmin ? (
         <div className="card grid">
           <strong>Square Terminal (later)</strong>
-          <p className="muted">Same send-charge slot. Leave blank until a Terminal is on the counter.</p>
           <input value={terminalDeviceId} onChange={(e) => setTerminalDeviceId(e.target.value)} />
           <button
             type="button"
