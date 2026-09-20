@@ -34,6 +34,7 @@ export type ReceiptPayload = {
   tender: string;
   reviewUrl?: string | null;
   legal?: string | null;
+  lines?: { sku: string; title: string; condition: string | null; priceCents: number; taxCents: number }[];
 };
 
 export function wrapLine(text: string, width: number): string[] {
@@ -72,6 +73,20 @@ function pair(label: string, value: string, width: number): string {
 
 export function receiptText(payload: ReceiptPayload, width: number): string {
   const legal = (payload.legal || DEFAULT_LEGAL).trim();
+  const itemLines =
+    payload.lines && payload.lines.length
+      ? payload.lines.flatMap((l) => [
+          pair("SKU", l.sku, width),
+          ...wrapLine(l.title, width),
+          l.condition ? pair("Cond", l.condition, width) : "",
+          pair("Price", formatCents(l.priceCents) || "$0.00", width),
+        ])
+      : [
+          pair("SKU", payload.sku, width),
+          ...wrapLine(payload.title, width),
+          payload.condition ? pair("Cond", payload.condition, width) : "",
+          pair("Price", formatCents(payload.priceCents) || "$0.00", width),
+        ];
   const lines = [
     STORE_NAME,
     ...wrapLine(STORE_ADDRESS, width),
@@ -81,10 +96,7 @@ export function receiptText(payload: ReceiptPayload, width: number): string {
     pair("Receipt", payload.receiptNo, width),
     pair("Clerk", payload.clerkName, width),
     "-".repeat(Math.min(width, 42)),
-    pair("SKU", payload.sku, width),
-    ...wrapLine(payload.title, width),
-    payload.condition ? pair("Cond", payload.condition, width) : "",
-    pair("Price", formatCents(payload.priceCents) || "$0.00", width),
+    ...itemLines,
     pair("Tax", formatCents(payload.taxCents) || "$0.00", width),
     pair("TOTAL", formatCentsTotal(payload.totalCents), width),
     pair("Tender", payload.tender, width),

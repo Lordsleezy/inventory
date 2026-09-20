@@ -39,6 +39,17 @@ export {
   type SellErrorCode,
 } from "./sell.ts";
 export {
+  allocateLineTaxes,
+  loadStoreTaxRateBps,
+  setStoreTaxRateBps,
+  finalizeTicket,
+  voidTicket,
+  approveWithPin,
+  type TicketLineInput,
+  type TicketLineResult,
+  type TicketSummary,
+} from "./ticket.ts";
+export {
   cacheUnitRow,
   wipeCostFromCache,
   assertCacheHasNoCost,

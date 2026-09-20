@@ -9,11 +9,17 @@ import {
 } from "@floor/cloud";
 import { hasAdminPin, verifyAdminPin } from "./local";
 import { BrowseScreen } from "./screens/Browse";
-import { CheckoutScreen } from "./screens/Checkout";
+import { CartScreen } from "./screens/Cart";
+import { TenderScreen } from "./screens/Tender";
+import { DoneScreen } from "./screens/Done";
 import { LoginScreen } from "./screens/Login";
 import { ReceiptsScreen } from "./screens/Receipts";
 import { SettingsScreen } from "./screens/Settings";
+import { InventoryScreen } from "./screens/Inventory";
+import { UnitDetailScreen } from "./screens/UnitDetail";
+import { ReceiveScreen } from "./screens/Receive";
 import { PosProvider, usePos } from "./pos-context";
+import { CartProvider, useCart } from "./cart";
 
 setDeviceNetworkGetter(async () => ({
   connected: typeof navigator === "undefined" ? true : navigator.onLine,
@@ -68,28 +74,35 @@ export function App() {
 
   return (
     <PosProvider session={session}>
-      <Shell />
+      <CartProvider>
+        <Shell />
+      </CartProvider>
     </PosProvider>
   );
 }
 
 function Shell() {
-  const { online, session, pendingOutbox, incidents } = usePos();
+  const { online, session, pendingOutbox, incidents, isAdmin, taxRateBps } = usePos();
+  const { lines } = useCart();
   const navigate = useNavigate();
-  const isAdmin = session.role === "owner" || session.role === "manager";
 
   return (
     <div className="shell">
-      {!online ? <div className="offline">OFFLINE — cash only</div> : null}
+      {!online ? <div className="offline">OFFLINE — reconnect before selling</div> : null}
+      {taxRateBps == null ? (
+        <div className="offline">TAX RATE NOT SET — open Settings (admin) before checkout</div>
+      ) : null}
       {incidents.length ? (
-        <div className="offline">INCIDENT — cash taken on {incidents[0].sku}. Open Receipts.</div>
+        <div className="offline">INCIDENT — {incidents[0].sku}. Open Receipts.</div>
       ) : null}
       <header className="top">
         <strong>Floor register</strong>
         <nav className="nav">
-          <Link to="/">Search</Link>
+          <Link to="/">Sell</Link>
+          <Link to="/cart">Cart{lines.length ? ` (${lines.length})` : ""}</Link>
+          <Link to="/inventory">Inventory</Link>
           <Link to="/receipts">Receipts{pendingOutbox ? ` (${pendingOutbox})` : ""}</Link>
-          <Link to="/settings">Settings</Link>
+          {isAdmin ? <Link to="/settings">Settings</Link> : null}
         </nav>
         <span className="muted">
           {session.displayName} · {isAdmin ? "admin" : "clerk"}
@@ -113,9 +126,14 @@ function Shell() {
       <main>
         <Routes>
           <Route path="/" element={<BrowseScreen />} />
-          <Route path="/checkout/:sku" element={<CheckoutScreen />} />
+          <Route path="/cart" element={<CartScreen />} />
+          <Route path="/tender" element={<TenderScreen />} />
+          <Route path="/done/:ticketId" element={<DoneScreen />} />
+          <Route path="/inventory" element={<InventoryScreen />} />
+          <Route path="/inventory/receive" element={<ReceiveScreen />} />
+          <Route path="/inventory/:sku" element={<UnitDetailScreen />} />
           <Route path="/receipts" element={<ReceiptsScreen />} />
-          <Route path="/settings" element={<SettingsScreen />} />
+          <Route path="/settings" element={isAdmin ? <SettingsScreen /> : <Navigate to="/" replace />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
