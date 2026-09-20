@@ -68,9 +68,9 @@ fn open_db(app: &AppHandle) -> Result<(), String> {
   Ok(())
 }
 
-fn with_db<T>(f: impl FnOnce(&Connection) -> Result<T, String>) -> Result<T, String> {
-  let guard = DB.lock().map_err(|e| e.to_string())?;
-  let conn = guard.as_ref().ok_or_else(|| "db not open".to_string())?;
+fn with_db<T>(f: impl FnOnce(&mut Connection) -> Result<T, String>) -> Result<T, String> {
+  let mut guard = DB.lock().map_err(|e| e.to_string())?;
+  let conn = guard.as_mut().ok_or_else(|| "db not open".to_string())?;
   f(conn)
 }
 
