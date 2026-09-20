@@ -82,9 +82,10 @@ public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin {
             return
         }
         DispatchQueue.main.async {
+            let cents = UInt(max(amount, 0))
             let params = PaymentParameters(
                 paymentAttemptID: UUID().uuidString,
-                amountMoney: Money(amount: amount, currency: .USD),
+                amountMoney: Money(amount: cents, currency: .USD),
                 processingMode: .onlineOnly
             )
             let prompt = PromptParameters(mode: .default, additionalMethods: .all)
