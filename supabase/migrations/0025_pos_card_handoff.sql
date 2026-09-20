@@ -62,7 +62,13 @@ create table if not exists public.square_connections (
 );
 
 alter table public.square_connections enable row level security;
--- No authenticated policies: service_role / Netlify only.
+alter table public.square_connections force row level security;
+-- No policies for anon/authenticated: tokens are service_role / Netlify only.
+revoke all on table public.square_connections from public, anon, authenticated;
+grant all on table public.square_connections to service_role;
+-- Defense in depth: even if a future policy is added, never expose ciphertext columns
+-- via a security_invoker view. There is intentionally no square_connections status view
+-- that includes access_token_enc / refresh_token_enc.
 
 create or replace function public.pair_pos_reader(p_pair_code text)
 returns uuid
