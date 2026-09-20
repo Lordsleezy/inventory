@@ -1,4 +1,5 @@
-const HEARTBEAT_MS = 20_000;
+/** Must stay aligned with create_register_charge reader_offline window (45s). */
+const HEARTBEAT_MS = 45_000;
 
 export function readerIsFresh(lastSeen: string | null | undefined, now = Date.now()): boolean {
   if (!lastSeen) return false;

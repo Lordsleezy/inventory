@@ -14,6 +14,8 @@ type ReceiptRow = {
   tax_cents: number;
   total_cents: number;
   payment_method: string | null;
+  card_brand: string | null;
+  card_last4: string | null;
   actor_name: string | null;
   title: string | null;
   condition: string | null;
@@ -37,7 +39,7 @@ export function ReceiptsScreen() {
       let query = sb
         .from("sale_receipts")
         .select(
-          "id, sku, receipt_no, ticket_id, sold_at, price_cents, tax_cents, total_cents, payment_method, actor_name, title, condition, voided_at",
+          "id, sku, receipt_no, ticket_id, sold_at, price_cents, tax_cents, total_cents, payment_method, card_brand, card_last4, actor_name, title, condition, voided_at",
         )
         .order("sold_at", { ascending: false })
         .limit(80);
@@ -62,7 +64,11 @@ export function ReceiptsScreen() {
       priceCents: row.price_cents,
       taxCents: row.tax_cents,
       totalCents: row.total_cents,
-      tender: (row.payment_method || "").toUpperCase(),
+      tender:
+        (row.payment_method || "").toUpperCase() +
+        (row.card_brand || row.card_last4
+          ? ` · ${[row.card_brand, row.card_last4 ? `•••• ${row.card_last4}` : null].filter(Boolean).join(" ")}`
+          : ""),
       reviewUrl: settings.reviewUrl || null,
     };
     await printReceipt(payload, settings);

@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { usePos } from "../pos-context";
 import { callFunction } from "../functions";
 import { hasAdminPin, kioskPower, setAdminPin, verifyAdminPin } from "../local";
 import { DEFAULT_LEGAL, type PaperKind } from "../receipt";
 import { pairReader, unpairReader } from "../card-device";
-import { setStoreTaxRateBps } from "@floor/cloud";
+import { floorCloud, setStoreTaxRateBps } from "@floor/cloud";
 
 export function SettingsScreen() {
   const { settings, saveSettings, isAdmin, session, taxRateBps, refreshTax } = usePos();
@@ -19,6 +19,23 @@ export function SettingsScreen() {
   const [pin, setPin] = useState("");
   const [msg, setMsg] = useState("");
   const [error, setError] = useState("");
+  const [squareStatus, setSquareStatus] = useState<{
+    connected: boolean;
+    location_id?: string | null;
+    location_name?: string | null;
+    sandbox?: boolean;
+  } | null>(null);
+  const [locations, setLocations] = useState<{ id: string; name?: string }[]>([]);
+
+  async function refreshSquare() {
+    const { data } = await floorCloud().rpc("my_square_connection_status");
+    setSquareStatus((data as typeof squareStatus) ?? { connected: false });
+  }
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    void refreshSquare().catch(() => setSquareStatus({ connected: false }));
+  }, [isAdmin]);
 
   async function save() {
     setError("");
@@ -52,6 +69,48 @@ export function SettingsScreen() {
       setMsg(`Paired phone reader ${id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Pairing failed. Open Payment device on the phone.");
+    }
+  }
+
+  async function connectSquare() {
+    setError("");
+    try {
+      const res = await callFunction("square-connect-start", { method: "POST", body: "{}" });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || "connect_failed");
+      window.open(body.url, "_blank", "noopener,noreferrer");
+      setMsg("Complete Square authorize in the browser, then click Refresh status.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function loadLocations() {
+    setError("");
+    try {
+      const res = await callFunction("square-list-locations", { method: "GET" });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || "locations_failed");
+      setLocations(body.locations || []);
+      setMsg(`Loaded ${(body.locations || []).length} Square location(s).`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function pickLocation(id: string, name?: string) {
+    setError("");
+    try {
+      const res = await callFunction("square-set-store-location", {
+        method: "POST",
+        body: JSON.stringify({ locationId: id, locationName: name || null }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || "set_location_failed");
+      await refreshSquare();
+      setMsg(`Square location set to ${name || id}.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
     }
   }
 
@@ -119,6 +178,42 @@ export function SettingsScreen() {
       <button type="button" className="primary" onClick={() => void save()}>
         Save
       </button>
+      {isAdmin ? (
+        <div className="card grid">
+          <strong>Connect Square (sandbox)</strong>
+          <p className="muted">
+            {squareStatus?.connected
+              ? `Connected${squareStatus.sandbox ? " (sandbox)" : ""}${
+                  squareStatus.location_name || squareStatus.location_id
+                    ? ` · location ${squareStatus.location_name || squareStatus.location_id}`
+                    : " · pick a location"
+                }`
+              : "Not connected — authorize Floor POS in Square, then pick a location."}
+          </p>
+          <div className="row">
+            <button type="button" onClick={() => void connectSquare()}>
+              Connect Square
+            </button>
+            <button type="button" onClick={() => void refreshSquare().then(() => setMsg("Square status refreshed."))}>
+              Refresh status
+            </button>
+            <button type="button" onClick={() => void loadLocations()}>
+              List locations
+            </button>
+          </div>
+          {locations.length ? (
+            <ul>
+              {locations.map((l) => (
+                <li key={l.id}>
+                  <button type="button" onClick={() => void pickLocation(l.id, l.name)}>
+                    Use {l.name || l.id}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
       {isAdmin ? (
         <div className="card grid">
           <strong>Pair phone reader</strong>

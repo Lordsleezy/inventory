@@ -65,6 +65,19 @@ export function UnitDetailScreen() {
         if (upErr) throw upErr;
         const { error: rpcErr } = await floorCloud().rpc("add_unit_photo", { p_sku: sku, p_path: path });
         if (rpcErr) throw rpcErr;
+        try {
+          const { uploadWebDerivatives, WEB_CACHE_CONTROL } = await import("../web-photo");
+          await uploadWebDerivatives(async (derivPath, bytes, contentType) => {
+            const { error: dErr } = await floorCloud().storage.from("unit-photos").upload(derivPath, bytes, {
+              contentType,
+              upsert: true,
+              cacheControl: WEB_CACHE_CONTROL,
+            });
+            if (dErr) throw dErr;
+          }, path, buf);
+        } catch {
+          /* original still uploaded; website may regenerate later */
+        }
       }
       setMsg("Photos uploaded.");
       await load();

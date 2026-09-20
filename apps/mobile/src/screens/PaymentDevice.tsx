@@ -3,20 +3,62 @@ import { floorCloud, authErrorMessage } from "@floor/cloud";
 import { useStore } from "../store";
 import { Label, Notice } from "../components/ui";
 import { FloorSquare } from "@floor/square-plugin";
+import { functionsUrl } from "../functions";
 
 /**
  * Phone acts as the card reader for the register.
- * Shows a pair code, heartbeats, and accepts pending card_charges.
+ * Pair code, heartbeat, accept pending card_charges via Square Mobile Payments SDK.
  */
 export function PaymentDeviceScreen() {
   const { session, online, ensureOnline } = useStore();
   const [deviceId, setDeviceId] = useState<string | null>(null);
   const [pairCode, setPairCode] = useState("");
+  const [authorized, setAuthorized] = useState(false);
   const [pending, setPending] = useState<
     { id: string; sku: string; title: string | null; amount_cents: number; tax_cents: number }[]
   >([]);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
+
+  async function authHeaders(): Promise<HeadersInit> {
+    const { data } = await floorCloud().auth.getSession();
+    const token = data.session?.access_token;
+    if (!token) throw new Error("not_signed_in");
+    return { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+  }
+
+  async function authorizeSdk() {
+    await ensureOnline();
+    const res = await fetch(functionsUrl("square-mobile-auth"), { headers: await authHeaders() });
+    const body = await res.json();
+    if (!res.ok) {
+      // Sandbox without OAuth: allow mock reader path.
+      if (body.error === "square_not_connected" || body.error === "square_location_required") {
+        const mock = await FloorSquare.authorize({
+          accessToken: "sandbox",
+          locationId: "sandbox",
+          mock: true,
+        });
+        setAuthorized(mock.ok);
+        setStatus(mock.ok ? "Mock reader ready (Square not connected — sandbox stub)." : "Authorize failed");
+        return;
+      }
+      throw new Error(body.error || "auth_failed");
+    }
+    const result = await FloorSquare.authorize({
+      accessToken: body.accessToken,
+      locationId: body.locationId,
+      mock: !!body.sandbox && !body.accessToken,
+    });
+    if (!result.ok) throw new Error(result.reason || "authorize_failed");
+    setAuthorized(true);
+    setStatus(result.mock ? "Mock reader authorized" : "Square reader authorized");
+    try {
+      await FloorSquare.startPairing?.();
+    } catch {
+      /* optional */
+    }
+  }
 
   async function ensureDevice() {
     await ensureOnline();
@@ -68,8 +110,11 @@ export function PaymentDeviceScreen() {
     setStatus("Charging…");
     try {
       await ensureOnline();
-      // Mobile Payments SDK via plugin (sandbox / mock reader on simulator).
-      const result = await FloorSquare.charge({ amountCents: charge.amount_cents });
+      if (!authorized) await authorizeSdk();
+      const result = await FloorSquare.charge({
+        amountCents: charge.amount_cents,
+        mock: !authorized,
+      });
       if (!result.ok || !result.paymentId) {
         await floorCloud()
           .from("card_charges")
@@ -79,15 +124,14 @@ export function PaymentDeviceScreen() {
         setStatus("");
         return;
       }
-      await floorCloud()
-        .from("card_charges")
-        .update({
-          status: "captured",
-          payment_id: result.paymentId,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", charge.id);
-      setStatus("Captured — register will finalize.");
+      const { error: capErr } = await floorCloud().rpc("capture_register_charge", {
+        p_charge_id: charge.id,
+        p_payment_id: result.paymentId,
+        p_card_brand: result.cardBrand ?? null,
+        p_card_last4: result.cardLast4 ?? null,
+      });
+      if (capErr) throw capErr;
+      setStatus("Captured — register will finalize the ticket.");
       if (deviceId) await loadPending(deviceId);
     } catch (err) {
       setError(authErrorMessage(err));
@@ -98,26 +142,34 @@ export function PaymentDeviceScreen() {
   return (
     <div className="p-4">
       <h1 className="text-title">Payment device</h1>
-      <p className="mt-1 text-quiet text-floor-mute">
-        Store {session.storeId.slice(0, 8)}… · Show this code on the register Settings → Pair.
+      <p className="text-quiet mt-1">
+        Keep this screen open while the register charges cards. Pair code:{" "}
+        <strong className="font-mono tracking-widest">{pairCode || "…"}</strong>
       </p>
-      <p className="mt-4 text-center text-3xl font-bold tracking-widest">{pairCode || "……"}</p>
-      <Notice tone="error">{error}</Notice>
-      {status ? <p className="mt-2 text-quiet">{status}</p> : null}
-      <Label>Pending charges</Label>
+      {!session ? <Notice>Sign in required.</Notice> : null}
+      {error ? <Notice tone="bad">{error}</Notice> : null}
+      {status ? <p className="text-quiet mt-2">{status}</p> : null}
+      <div className="mt-4 flex gap-2">
+        <button type="button" className="btn" onClick={() => void authorizeSdk()}>
+          Authorize Square
+        </button>
+      </div>
+      <Label className="mt-6">Pending charges</Label>
+      {!pending.length ? <p className="text-quiet">None — waiting for the register.</p> : null}
       <ul className="mt-2 space-y-2">
         {pending.map((c) => (
-          <li key={c.id} className="border border-floor-line p-3">
+          <li key={c.id} className="flex items-center justify-between gap-2 rounded-lg border border-line p-3">
             <div>
-              SKU {c.sku} · {c.title || "Item"}
+              <div className="font-medium">{c.title || c.sku}</div>
+              <div className="text-quiet text-sm">
+                ${(c.amount_cents / 100).toFixed(2)} · tax ${(c.tax_cents / 100).toFixed(2)}
+              </div>
             </div>
-            <div className="text-quiet">${(c.amount_cents / 100).toFixed(2)} (tax-included total)</div>
-            <button type="button" className="btn-accent mt-2" onClick={() => void takePayment(c)}>
-              Charge card
+            <button type="button" className="btn btn-primary" onClick={() => void takePayment(c)}>
+              Take payment
             </button>
           </li>
         ))}
-        {!pending.length ? <li className="text-quiet text-floor-mute">No pending charges.</li> : null}
       </ul>
     </div>
   );

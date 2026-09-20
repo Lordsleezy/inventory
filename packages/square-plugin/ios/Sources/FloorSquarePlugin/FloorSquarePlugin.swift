@@ -7,9 +7,8 @@ import UIKit
 import SquareMobilePaymentsSDK
 #endif
 
-/// Capacitor bridge for Square Mobile Payments SDK.
-/// Pattern: Square Donut Counter sample (authorize → pair → take payment).
-/// See docs/SQUARE.md for Codemagic / SPM setup.
+/// Capacitor bridge for Square Mobile Payments SDK (Donut Counter pattern).
+/// SquareMobilePaymentsSDK is a Package.swift dependency — Codemagic links it via CapApp-SPM.
 @objc(FloorSquarePlugin)
 public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin {
     public let identifier = "FloorSquarePlugin"
@@ -21,33 +20,85 @@ public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "startPairing", returnType: CAPPluginReturnPromise)
     ]
 
+    private var paymentDelegate: FloorPaymentDelegate?
+
     @objc func authorize(_ call: CAPPluginCall) {
+        let mock = call.getBool("mock") ?? false
         #if canImport(SquareMobilePaymentsSDK)
-        call.resolve(["ok": true])
-        #else
-        let mock = call.getBool("mock") ?? true
-        if mock {
-            call.resolve(["ok": true])
-        } else {
-            call.resolve(["ok": false, "reason": "square_sdk_not_linked"])
+        guard let token = call.getString("accessToken"),
+              let locationId = call.getString("locationId"),
+              !token.isEmpty, !locationId.isEmpty else {
+            call.resolve(["ok": false, "reason": "missing_credentials"])
+            return
         }
+        if mock {
+            call.resolve(["ok": true, "mock": true, "sdkLinked": true])
+            return
+        }
+        DispatchQueue.main.async {
+            MobilePaymentsSDK.shared.authorizationManager.authorize(
+                withAccessToken: token,
+                locationID: locationId
+            ) { error in
+                if let error {
+                    call.resolve(["ok": false, "reason": error.localizedDescription, "sdkLinked": true])
+                } else {
+                    call.resolve(["ok": true, "sdkLinked": true])
+                }
+            }
+        }
+        #else
+        call.resolve(["ok": false, "reason": "square_sdk_not_linked"])
         #endif
     }
 
     @objc func startPairing(_ call: CAPPluginCall) {
         #if canImport(SquareMobilePaymentsSDK)
-        call.resolve(["ok": true])
+        // Reader pairing happens through Square's payment / settings UI after authorize.
+        // Keep this a no-op success so the phone can show its pair code for the register.
+        call.resolve(["ok": true, "sdkLinked": true])
         #else
-        call.resolve(["ok": true, "mock": true])
+        call.resolve(["ok": false, "reason": "square_sdk_not_linked"])
         #endif
     }
 
     @objc func charge(_ call: CAPPluginCall) {
         let amount = call.getInt("amountCents") ?? 0
+        let mock = call.getBool("mock") ?? false
         #if canImport(SquareMobilePaymentsSDK)
-        call.resolve(["ok": true, "paymentId": "sq_mock_\(amount)_\(Int(Date().timeIntervalSince1970))"])
+        if mock {
+            call.resolve([
+                "ok": true,
+                "paymentId": "sq_mock_\(amount)_\(Int(Date().timeIntervalSince1970))",
+                "cardBrand": "VISA",
+                "cardLast4": "1111",
+                "mock": true,
+                "sdkLinked": true
+            ])
+            return
+        }
+        guard let presenter = self.bridge?.viewController else {
+            call.resolve(["ok": false, "reason": "no_view", "sdkLinked": true])
+            return
+        }
+        DispatchQueue.main.async {
+            let params = PaymentParameters(
+                paymentAttemptID: UUID().uuidString,
+                amountMoney: Money(amount: amount, currency: .USD),
+                processingMode: .onlineOnly
+            )
+            let prompt = PromptParameters(mode: .default, additionalMethods: .all)
+            let delegate = FloorPaymentDelegate(call: call)
+            self.paymentDelegate = delegate
+            MobilePaymentsSDK.shared.paymentManager.startPayment(
+                params,
+                promptParameters: prompt,
+                from: presenter,
+                delegate: delegate
+            )
+        }
         #else
-        call.resolve(["ok": true, "paymentId": "stub_\(amount)_\(Int(Date().timeIntervalSince1970))"])
+        call.resolve(["ok": false, "reason": "square_sdk_not_linked"])
         #endif
     }
 
@@ -68,6 +119,43 @@ public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 }
+
+#if canImport(SquareMobilePaymentsSDK)
+final class FloorPaymentDelegate: NSObject, PaymentManagerDelegate {
+    private let call: CAPPluginCall
+    private var finished = false
+
+    init(call: CAPPluginCall) {
+        self.call = call
+    }
+
+    func paymentManager(_ paymentManager: PaymentManager, didFinish payment: Payment) {
+        guard !finished else { return }
+        finished = true
+        var paymentId = UUID().uuidString
+        if let online = payment as? OnlinePayment, let id = online.id {
+            paymentId = id
+        }
+        call.resolve([
+            "ok": true,
+            "paymentId": paymentId,
+            "sdkLinked": true
+        ])
+    }
+
+    func paymentManager(_ paymentManager: PaymentManager, didFail payment: Payment, withError error: Error) {
+        guard !finished else { return }
+        finished = true
+        call.resolve(["ok": false, "reason": error.localizedDescription, "sdkLinked": true])
+    }
+
+    func paymentManager(_ paymentManager: PaymentManager, didCancel payment: Payment) {
+        guard !finished else { return }
+        finished = true
+        call.resolve(["ok": false, "reason": "canceled", "sdkLinked": true])
+    }
+}
+#endif
 
 final class FloorAuthViewController: UIViewController, WKNavigationDelegate {
     private let startURL: URL
