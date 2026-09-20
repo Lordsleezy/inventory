@@ -18,8 +18,9 @@ begin
     (v_staff, v_store, 'Staff', 'staff'),
     (v_mgr, v_store, 'Manager', 'manager');
   perform public.seed_store_settings(v_store, 'Test Store');
-  update public.store_settings set value = '725'::jsonb
-   where store_id = v_store and key = 'taxRateBps';
+  insert into public.store_settings (store_id, key, value)
+  values (v_store, 'taxRateBps', '725'::jsonb)
+  on conflict (store_id, key) do update set value = excluded.value;
 
   insert into public.sku_ledger (sku, issued_at, store_id) values
     ('90001', now(), v_store),
