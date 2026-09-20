@@ -16,7 +16,7 @@ let package = Package(
         .package(name: "CapacitorCamera", path: "../../../../../node_modules/@capacitor/camera"),
         .package(name: "CapacitorFilesystem", path: "../../../../../node_modules/@capacitor/filesystem"),
         .package(name: "CapacitorShare", path: "../../../../../node_modules/@capacitor/share"),
-        .package(name: "FloorSquarePlugin", path: "../../../../../node_modules/@floor/square-plugin")
+        .package(name: "FloorSquarePlugin", path: "../../../../../node_modules/@floor/square-plugin"),
     ],
     targets: [
         .target(
@@ -28,7 +28,7 @@ let package = Package(
                 .product(name: "CapacitorCamera", package: "CapacitorCamera"),
                 .product(name: "CapacitorFilesystem", package: "CapacitorFilesystem"),
                 .product(name: "CapacitorShare", package: "CapacitorShare"),
-                .product(name: "FloorSquarePlugin", package: "FloorSquarePlugin")
+                .product(name: "FloorSquarePlugin", package: "FloorSquarePlugin"),
             ]
         )
     ]

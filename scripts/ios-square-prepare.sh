@@ -81,42 +81,11 @@ if [ -x /usr/libexec/PlistBuddy ]; then
 fi
 
 # Cap sync should pull FloorSquarePlugin from packages/square-plugin/Package.swift.
-# If CapApp-SPM is stale or skipped the local package, inject it (idempotent).
-if [ -f "$SPM" ] && ! grep -q "FloorSquarePlugin" "$SPM"; then
-  echo "cap sync omitted FloorSquarePlugin; injecting into CapApp-SPM"
-  python3 - "$SPM" <<'PY'
-from pathlib import Path
-import sys
-p = Path(sys.argv[1])
-text = p.read_text()
-if "FloorSquarePlugin" in text:
-    raise SystemExit(0)
-dep = '        .package(name: "FloorSquarePlugin", path: "../../../../../node_modules/@floor/square-plugin")'
-prod = '                .product(name: "FloorSquarePlugin", package: "FloorSquarePlugin")'
-# Attach after the last .package( / .product( line inside dependencies / target deps.
-import re
-m = list(re.finditer(r'^\s*\.package\([^\n]+$', text, re.M))
-if not m:
-    raise SystemExit("no .package entries in CapApp-SPM")
-last = m[-1]
-text = text[: last.end()] + ",\n" + dep + text[last.end() :]
-m2 = list(re.finditer(r'^\s*\.product\(name: "Cordova"[^\n]+$', text, re.M))
-if not m2:
-    m2 = list(re.finditer(r'^\s*\.product\([^\n]+$', text, re.M))
-if not m2:
-    raise SystemExit("no .product entries in CapApp-SPM")
-last2 = m2[-1]
-text = text[: last2.end()] + ",\n" + prod + text[last2.end() :]
-# Bump platform if still v15 (Square needs 16+)
-text = text.replace(".iOS(.v15)", ".iOS(.v16)")
-p.write_text(text)
-print("injected FloorSquarePlugin into CapApp-SPM")
-PY
-fi
-
+# Ensure CapApp-SPM lists it with valid Swift commas (idempotent; never ,, / missing commas).
 if [ -f "$SPM" ]; then
+  python3 "$ROOT/scripts/ensure_capapp_spm_floor_square.py" "$SPM"
   grep -q "FloorSquarePlugin" "$SPM" || {
-    echo "FloorSquarePlugin still missing from CapApp-SPM after inject" >&2
+    echo "FloorSquarePlugin still missing from CapApp-SPM after ensure" >&2
     exit 1
   }
   grep -q "mobile-payments-sdk-ios\|SquareMobilePaymentsSDK" \
@@ -124,11 +93,6 @@ if [ -f "$SPM" ]; then
     echo "packages/square-plugin/Package.swift missing SquareMobilePaymentsSDK dependency" >&2
     exit 1
   }
-  # CapApp-SPM platform must be ≥ 16 for Square's binary target.
-  if grep -q '\.iOS(\.v15)' "$SPM"; then
-    sed_inplace 's/\.iOS(\.v15)/.iOS(.v16)/g' "$SPM"
-    echo "bumped CapApp-SPM platform to iOS 16"
-  fi
 fi
 
 if [ -f "$CFG" ] && ! grep -q "FloorSquarePlugin" "$CFG"; then
