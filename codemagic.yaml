@@ -20,8 +20,12 @@ workflows:
     triggering:
       events:
         - tag
+        - push
       tag_patterns:
         - pattern: ios-*
+          include: true
+      branch_patterns:
+        - pattern: square-v1
           include: true
     environment:
       groups:
@@ -38,6 +42,7 @@ workflows:
         # Also required in group appstore (public, baked into the IPA):
         # VITE_SUPABASE_URL=https://zoukmsmbztcuyoslvikp.supabase.co
         # VITE_SUPABASE_ANON_KEY, VITE_FUNCTIONS_URL
+        # Optional (public): SQUARE_APPLICATION_ID for Mobile Payments SDK
       xcode: latest
       node: 22.18.0
     scripts:
@@ -84,6 +89,7 @@ workflows:
           fi
           npx cap sync ios
           bash ../../scripts/ios-prepare.sh
+          bash ../../scripts/ios-square-prepare.sh
           if [ -f ios/App/Podfile ]; then
             (cd ios/App && pod install)
           fi
