@@ -1,6 +1,6 @@
 -- pgTAP: multi-line card charges share finalize_ticket with cash.
 begin;
-select plan(14);
+select plan(15);
 
 -- Seed store, staff, tax, two available units.
 do $$
@@ -255,11 +255,11 @@ begin
   perform public.capture_register_charge((v_charge->>'id')::uuid, 'pay_race', 'MC', '4444');
   update public.units set state = 'sold'
    where sku = '90031' and store_id = current_setting('test.store_id')::uuid;
-  begin
-    perform public.finalize_register_charge((v_charge->>'id')::uuid);
-  exception when others then
-    null;
-  end;
+  perform set_config(
+    'test.race_result',
+    (public.finalize_register_charge((v_charge->>'id')::uuid))::text,
+    true
+  );
   perform set_config('test.race_charge', v_charge->>'id', true);
 end;
 $$;
@@ -268,6 +268,11 @@ select is(
   (select status from public.card_charges where id = current_setting('test.race_charge')::uuid),
   'finalize_failed',
   'unit sold mid-payment marks finalize_failed'
+);
+
+select ok(
+  current_setting('test.race_result')::jsonb->>'needs_refund' = 'true',
+  'mid-payment failure returns needs_refund without raising'
 );
 
 -- Tokens still unreadable by staff/manager

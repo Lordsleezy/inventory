@@ -163,29 +163,32 @@ export function TenderScreen() {
 
       setPhase("finalizing");
       setWaitHint("Card captured — recording the sale…");
-      try {
-        const summary = (await finalizeCapturedCharge(chargeId)) as TicketSummary;
-        await afterSale(summary, null);
-      } catch (finErr) {
-        // Unit sold elsewhere mid-payment, floor rules, etc. — refund Square.
-        const reason =
-          finErr instanceof SellError ? finErr.code : finErr instanceof Error ? finErr.message : "finalize_failed";
+      const summary = (await finalizeCapturedCharge(chargeId)) as TicketSummary & {
+        ok?: boolean;
+        error?: string;
+        needs_refund?: boolean;
+        payment_id?: string;
+        amount_cents?: number;
+      };
+      if (summary && summary.ok === false) {
         try {
           await refundFailedCharge({
             chargeId,
-            paymentId,
-            amountCents: created.amountCents,
-            reason: String(reason),
+            paymentId: summary.payment_id || paymentId,
+            amountCents: summary.amount_cents || created.amountCents,
+            reason: String(summary.error || "finalize_failed"),
           });
           setLoud(
-            `Sale could not finish (${String(reason)}). The card payment was refunded. Inventory was not marked sold.`,
+            `Sale could not finish (${summary.error || "error"}). The card payment was refunded. Inventory was not marked sold.`,
           );
         } catch (refundErr) {
           setLoud(
             `Sale failed after card capture, and automatic refund failed. Check Square Dashboard for payment ${paymentId}. ${authErrorMessage(refundErr)}`,
           );
         }
+        return;
       }
+      await afterSale(summary as TicketSummary, null);
     } catch (err) {
       const code = (err as Error & { code?: string }).code || (err instanceof SellError ? err.code : "");
       if (code === "reader_not_paired" || (err instanceof Error && /reader_not_paired/i.test(err.message))) {

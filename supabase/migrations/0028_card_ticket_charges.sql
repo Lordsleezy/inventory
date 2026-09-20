@@ -392,7 +392,15 @@ begin
            error = left(v_err, 500),
            updated_at = now()
      where id = p_charge_id;
-    raise exception '%', v_err using errcode = 'P0001';
+    -- Return (do not RAISE): raising would roll back the status update.
+    return jsonb_build_object(
+      'ok', false,
+      'error', v_err,
+      'charge_id', p_charge_id,
+      'payment_id', v_charge.payment_id,
+      'amount_cents', v_charge.amount_cents,
+      'needs_refund', true
+    );
   end if;
 
   -- Stamp card brand/last4 onto sales for this ticket.
