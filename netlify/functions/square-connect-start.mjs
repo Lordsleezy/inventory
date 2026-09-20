@@ -1,4 +1,4 @@
-import { json, corsHeaders, staffFromEvent, ownerFromEvent } from "../lib/server.mjs";
+import { json, corsHeaders, staffFromEvent } from "../lib/server.mjs";
 import { wrapHandler } from "../lib/floor-log.mjs";
 
 /**

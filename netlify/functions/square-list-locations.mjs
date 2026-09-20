@@ -1,5 +1,5 @@
-import { json, corsHeaders, staffFromEvent, serviceClient } from "../lib/server.mjs";
-import { getStoreSquareAccess, upsertEncryptedSquareTokens, squareClient } from "../lib/square.mjs";
+import { json, corsHeaders, staffFromEvent } from "../lib/server.mjs";
+import { getStoreSquareAccess, squareClient } from "../lib/square.mjs";
 import { wrapHandler } from "../lib/floor-log.mjs";
 
 /** List Square locations for the connected store (or sandbox test token). */

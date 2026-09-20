@@ -119,14 +119,14 @@ export async function upsertEncryptedSquareTokens(storeId, tokens, extras = {}) 
 export async function refundSquarePayment(storeId, paymentId, amountCents, reason) {
   const { accessToken } = await getStoreSquareAccess(storeId);
   const client = squareClient(accessToken);
-  const { result } = await client.refundsApi.refundPayment({
+  const body = {
     idempotencyKey: `refund_${paymentId}_${amountCents || "full"}`,
     paymentId,
-    amountMoney:
-      amountCents != null
-        ? { amount: BigInt(amountCents), currency: "USD" }
-        : undefined,
     reason: reason || "Ticket could not finalize",
-  });
+  };
+  if (amountCents != null) {
+    body.amountMoney = { amount: BigInt(amountCents), currency: "USD" };
+  }
+  const { result } = await client.refundsApi.refundPayment(body);
   return result;
 }
