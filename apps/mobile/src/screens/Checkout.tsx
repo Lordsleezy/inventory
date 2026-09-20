@@ -2,11 +2,13 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { centsToInput, formatCents, formatCentsTotal, loadUnit, parseMoneyToCents, type Unit } from "@floor/store";
 import { finalizeSale, releaseReservation, reserveUnit, SellError } from "@floor/cloud";
-import { cashProvider, stubCardProvider } from "@floor/payments";
+import { cashProvider } from "@floor/payments";
+import { FloorSquare } from "@floor/square-plugin";
 import { useStore } from "../store";
 import { Label, Notice } from "../components/ui";
 import { askManagerPin } from "../pin";
 import { friendlyRpc } from "../rpc";
+import { authHeader, functionsUrl } from "../functions";
 
 export function CheckoutScreen() {
   const { sku = "" } = useParams();
@@ -16,7 +18,6 @@ export function CheckoutScreen() {
   const [channel, setChannel] = useState("floor");
   const [price, setPrice] = useState("");
   const [elsewhere, setElsewhere] = useState(false);
-  const [cardOutcome, setCardOutcome] = useState<"success" | "decline" | "timeout">("success");
   const [error, setError] = useState("");
   const [loud, setLoud] = useState("");
   const [busy, setBusy] = useState(false);
@@ -124,16 +125,28 @@ export function CheckoutScreen() {
   async function payCard() {
     setError("");
     setLoud("");
-    if (!cardPayments) {
-      setError("Connect Square in Setup → Connections to take cards. Until then, use the stub below only for testing.");
-    }
     setBusy(true);
     try {
       await ensureOnline();
-      const provider = stubCardProvider(cardOutcome);
-      const charged = await provider.charge({ amountCents: total, currency: "USD" });
-      if (!charged.ok) {
-        setError(charged.reason === "timeout" ? "Card timed out." : "Card declined.");
+      const headers = await authHeader();
+      const authRes = await fetch(functionsUrl("square-mobile-auth"), { headers });
+      const authBody = await authRes.json();
+      const useMock = !authRes.ok;
+      if (useMock && cardPayments) {
+        setError(authBody.error || "Square auth failed. Connect Square or use mock.");
+      }
+      const authorized = await FloorSquare.authorize({
+        accessToken: authBody.accessToken || "sandbox",
+        locationId: authBody.locationId || "sandbox",
+        mock: useMock,
+      });
+      if (!authorized.ok) {
+        setError(authorized.reason || "Could not authorize Square reader.");
+        return;
+      }
+      const charged = await FloorSquare.charge({ amountCents: total, mock: useMock || !!authorized.mock });
+      if (!charged.ok || !charged.paymentId) {
+        setError(charged.reason === "canceled" ? "Card canceled." : charged.reason || "Card declined.");
         if (reservationId) await releaseReservation(reservationId);
         setReservationId(null);
         return;
@@ -189,12 +202,10 @@ export function CheckoutScreen() {
             Cash
           </button>
           <div className="border border-floor-line p-3">
-            <p className="text-quiet">Card {cardPayments ? "(Square connected — stub until the reader plugin ships)" : "(stub)"}</p>
-            <select className="field mt-2" value={cardOutcome} onChange={(e) => setCardOutcome(e.target.value as typeof cardOutcome)}>
-              <option value="success">Simulate success</option>
-              <option value="decline">Simulate decline</option>
-              <option value="timeout">Simulate timeout</option>
-            </select>
+            <p className="text-quiet">
+              Card via Square Mobile Payments SDK
+              {cardPayments ? "" : " (mock reader until Square is connected)"}
+            </p>
             <button type="button" className="btn-accent mt-2" disabled={busy || !online} onClick={() => void payCard()}>
               Charge card
             </button>
