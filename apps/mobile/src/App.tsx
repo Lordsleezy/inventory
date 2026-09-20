@@ -23,6 +23,7 @@ import { DelistScreen } from "./screens/Delist";
 import { IncidentsScreen } from "./screens/Incidents";
 import { ConnectionsScreen } from "./screens/Connections";
 import { PaymentDeviceScreen } from "./screens/PaymentDevice";
+import { ReaderProvider } from "./reader-host";
 import { StoreProvider } from "./store";
 import { PinProvider } from "./pin";
 
@@ -87,24 +88,26 @@ export function App() {
   return (
     <StoreProvider session={auth.session}>
       <PinProvider>
-      <Shell>
-        <Routes>
-          <Route path="/inventory" element={<InventoryScreen />} />
-          <Route path="/inventory/:sku" element={<UnitScreen />} />
-          <Route path="/checkout/:sku" element={<CheckoutScreen />} />
-          <Route path="/receive" element={<ReceiveScreen />} />
-          <Route path="/sales" element={<SalesScreen />} />
-          <Route path="/reports" element={<ReportsScreen />} />
-          <Route path="/reports/:receiptNo" element={<ReportsScreen />} />
-          <Route path="/delist" element={<DelistScreen />} />
-          <Route path="/incidents" element={<IncidentsScreen />} />
-          <Route path="/connections" element={<ConnectionsScreen />} />
-          <Route path="/payment-device" element={<PaymentDeviceScreen />} />
-          <Route path="/settings" element={<SettingsScreen />} />
-          <Route path="/settings/categories" element={<CategoriesScreen />} />
-          <Route path="*" element={<Navigate to="/inventory" replace />} />
-        </Routes>
-      </Shell>
+        <ReaderProvider>
+          <Shell>
+            <Routes>
+              <Route path="/inventory" element={<InventoryScreen />} />
+              <Route path="/inventory/:sku" element={<UnitScreen />} />
+              <Route path="/checkout/:sku" element={<CheckoutScreen />} />
+              <Route path="/receive" element={<ReceiveScreen />} />
+              <Route path="/sales" element={<SalesScreen />} />
+              <Route path="/reports" element={<ReportsScreen />} />
+              <Route path="/reports/:receiptNo" element={<ReportsScreen />} />
+              <Route path="/delist" element={<DelistScreen />} />
+              <Route path="/incidents" element={<IncidentsScreen />} />
+              <Route path="/connections" element={<ConnectionsScreen />} />
+              <Route path="/payment-device" element={<PaymentDeviceScreen />} />
+              <Route path="/settings" element={<SettingsScreen />} />
+              <Route path="/settings/categories" element={<CategoriesScreen />} />
+              <Route path="*" element={<Navigate to="/inventory" replace />} />
+            </Routes>
+          </Shell>
+        </ReaderProvider>
       </PinProvider>
     </StoreProvider>
   );

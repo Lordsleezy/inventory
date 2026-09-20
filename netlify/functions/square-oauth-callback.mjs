@@ -1,5 +1,5 @@
 import { exchangeSquareCode, upsertEncryptedSquareTokens } from "../lib/square.mjs";
-import { html } from "../lib/server.mjs";
+import { html, serviceClient } from "../lib/server.mjs";
 import { wrapHandler } from "../lib/floor-log.mjs";
 
 function deepLink(query) {
@@ -64,11 +64,28 @@ async function handle(event) {
       });
     }
     const tokens = await exchangeSquareCode(code);
-    await upsertEncryptedSquareTokens(state, tokens);
-    const href = deepLink({ square: "1", ok: "1" });
+    await upsertEncryptedSquareTokens(state, {
+      accessToken: tokens.accessToken || tokens.access_token,
+      refreshToken: tokens.refreshToken || tokens.refresh_token,
+      expiresAt: tokens.expiresAt
+        || (tokens.expires_in
+          ? new Date(Date.now() + Number(tokens.expires_in) * 1000).toISOString()
+          : undefined),
+      merchantId: tokens.merchantId || tokens.merchant_id || null,
+    });
+    try {
+      const sb = serviceClient();
+      await sb.from("store_settings").upsert(
+        { store_id: state, key: "card_payments_enabled", value: true },
+        { onConflict: "store_id,key" },
+      );
+    } catch (settingsErr) {
+      console.error("card_payments_enabled upsert failed", settingsErr);
+    }
+    const href = deepLink({ square: "1", ok: "1", needs_location: "1" });
     return page(200, {
       title: "Square connected",
-      message: "Tokens are stored encrypted on the server. Returning to Floor…",
+      message: "Tokens are stored encrypted on the server. Pick a Square location in Settings, then Refresh status.",
       detail: "If this window stays open, tap Back to Floor.",
       href,
     });

@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { formatCentsTotal, parseMoneyToCents } from "@floor/store";
 import {
@@ -6,6 +6,7 @@ import {
   approveWithPin,
   authErrorMessage,
   finalizeTicket,
+  floorCloud,
   SellError,
   type TicketSummary,
 } from "@floor/cloud";
@@ -23,7 +24,7 @@ import {
   waitForCharge,
 } from "../card-device";
 
-type Phase = "idle" | "waiting_phone" | "finalizing";
+type Phase = "idle" | "waiting_phone" | "finalizing" | "recovering";
 
 export function TenderScreen() {
   const { lines, clear } = useCart();
@@ -38,6 +39,13 @@ export function TenderScreen() {
   const [error, setError] = useState("");
   const [loud, setLoud] = useState("");
   const [waitHint, setWaitHint] = useState("");
+  const [orphan, setOrphan] = useState<{
+    id: string;
+    payment_id: string | null;
+    amount_cents: number;
+    status: string;
+    error: string | null;
+  } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const chargeIdRef = useRef<string | null>(null);
 
@@ -52,6 +60,70 @@ export function TenderScreen() {
   const receivedCents = parseMoneyToCents(received);
   const change =
     typeof receivedCents === "number" && tender === "cash" ? receivedCents - total : null;
+
+  useEffect(() => {
+    let stop = false;
+    void (async () => {
+      const { data } = await floorCloud()
+        .from("card_charges")
+        .select("id, payment_id, amount_cents, status, error")
+        .in("status", ["captured", "finalize_failed"])
+        .order("created_at", { ascending: false })
+        .limit(1);
+      if (!stop && data?.[0]) setOrphan(data[0] as NonNullable<typeof orphan>);
+    })();
+    return () => {
+      stop = true;
+    };
+  }, []);
+
+  async function recoverOrphan(action: "finalize" | "refund") {
+    if (!orphan) return;
+    setBusy(true);
+    setPhase("recovering");
+    setError("");
+    setLoud("");
+    try {
+      if (action === "finalize") {
+        const summary = (await finalizeCapturedCharge(orphan.id)) as TicketSummary & {
+          ok?: boolean;
+          error?: string;
+          needs_refund?: boolean;
+          payment_id?: string;
+          amount_cents?: number;
+          ticket_id?: string;
+        };
+        if (summary && summary.ok === false) {
+          setLoud(`Finalize still failing: ${summary.error || "unknown"}. Refund if the card was charged.`);
+          return;
+        }
+        setOrphan(null);
+        if (summary?.ticket_id) {
+          sessionStorage.setItem(
+            `floor_ticket_${summary.ticket_id}`,
+            JSON.stringify({ summary, changeCents: null, clerkName: session.displayName, titles: {} }),
+          );
+          navigate(`/done/${summary.ticket_id}`, { replace: true });
+        } else {
+          setLoud("Recovered — sale finalized.");
+        }
+        return;
+      }
+      await refundFailedCharge({
+        chargeId: orphan.id,
+        paymentId: orphan.payment_id,
+        amountCents: orphan.amount_cents,
+        reason: orphan.error || "manual_recovery_refund",
+      });
+      setOrphan(null);
+      setLoud("Refunded the orphaned card capture. Inventory was not sold.");
+    } catch (err) {
+      setError(authErrorMessage(err));
+    } finally {
+      setBusy(false);
+      setPhase("idle");
+    }
+  }
 
   function ticketLines(approvals: Record<string, string | null>) {
     return lines.map((l) => ({
@@ -254,8 +326,28 @@ export function TenderScreen() {
 
   if (!lines.length) {
     return (
-      <section className="page">
+      <section className="page grid">
         <p className="muted">Cart is empty.</p>
+        {orphan ? (
+          <div className="card grid">
+            <strong>Unfinished card charge</strong>
+            <p className="muted">
+              Status {orphan.status} · {formatCentsTotal(orphan.amount_cents)}
+              {orphan.payment_id ? ` · payment ${orphan.payment_id}` : ""}.
+              The phone may have charged the card before the sale finished.
+            </p>
+            {loud ? <div className="incident">{loud}</div> : null}
+            {error ? <p className="error">{error}</p> : null}
+            <div className="row">
+              <button type="button" className="primary" disabled={busy} onClick={() => void recoverOrphan("finalize")}>
+                Finalize sale
+              </button>
+              <button type="button" className="danger" disabled={busy} onClick={() => void recoverOrphan("refund")}>
+                Refund card
+              </button>
+            </div>
+          </div>
+        ) : null}
         <button type="button" onClick={() => navigate("/")}>
           Search
         </button>
@@ -271,6 +363,22 @@ export function TenderScreen() {
       <h1>Payment</h1>
       {loud ? <div className="incident">{loud}</div> : null}
       {error ? <p className="error">{error}</p> : null}
+      {orphan ? (
+        <div className="card grid">
+          <strong>Unfinished card charge</strong>
+          <p className="muted">
+            Status {orphan.status} · {formatCentsTotal(orphan.amount_cents)}. Finish or refund before a new sale.
+          </p>
+          <div className="row">
+            <button type="button" className="primary" disabled={busy} onClick={() => void recoverOrphan("finalize")}>
+              Finalize sale
+            </button>
+            <button type="button" className="danger" disabled={busy} onClick={() => void recoverOrphan("refund")}>
+              Refund card
+            </button>
+          </div>
+        </div>
+      ) : null}
       <div className="card">
         <div className="row">
           <span>Subtotal</span>

@@ -7,6 +7,13 @@ export type ChargeResult = {
   cardLast4?: string;
   reason?: string;
   mock?: boolean;
+  authState?: string;
+};
+
+export type AuthStateResult = {
+  state: string;
+  sdkInitialized: boolean;
+  sdkLinked: boolean;
 };
 
 export interface FloorSquarePlugin {
@@ -14,31 +21,34 @@ export interface FloorSquarePlugin {
     accessToken: string;
     locationId: string;
     mock?: boolean;
-  }): Promise<{ ok: boolean; reason?: string; mock?: boolean }>;
-  charge(options: { amountCents: number; mock?: boolean }): Promise<ChargeResult>;
+  }): Promise<{ ok: boolean; reason?: string; mock?: boolean; already?: boolean }>;
+  charge(options: {
+    amountCents: number;
+    mock?: boolean;
+    referenceId?: string;
+  }): Promise<ChargeResult>;
+  preparePermissions?(): Promise<{ ok: boolean; reason?: string; location?: boolean; bluetooth?: boolean }>;
+  authState?(): Promise<AuthStateResult>;
   startPairing?(): Promise<{ ok: boolean; mock?: boolean }>;
   openAuth(options: { url: string }): Promise<{ ok: boolean }>;
 }
 
 const FloorSquare = registerPlugin<FloorSquarePlugin>("FloorSquare", {
   web: {
-    async authorize(options) {
-      if (options.mock) return { ok: true, mock: true };
+    async authorize(options: { mock?: boolean }) {
+      if (options.mock) return { ok: false, reason: "mock_authorize_disabled" };
       return { ok: false, reason: "not_native" };
     },
-    async charge(options) {
-      if (options.mock) {
-        return {
-          ok: true,
-          paymentId: `web_mock_${options.amountCents}_${Date.now()}`,
-          cardBrand: "VISA",
-          cardLast4: "1111",
-          mock: true,
-        };
-      }
-      return { ok: false, reason: "not_linked" };
+    async charge() {
+      return { ok: false, reason: "not_native" };
     },
-    async openAuth(options) {
+    async preparePermissions() {
+      return { ok: true, location: true, bluetooth: true };
+    },
+    async authState() {
+      return { state: "notLinked", sdkInitialized: false, sdkLinked: false };
+    },
+    async openAuth(options: { url: string }) {
       window.location.assign(options.url);
       return { ok: true };
     },

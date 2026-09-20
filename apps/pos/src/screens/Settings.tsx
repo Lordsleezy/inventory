@@ -195,9 +195,9 @@ export function SettingsScreen() {
               ? `Connected${squareStatus.sandbox ? " (sandbox)" : ""}${
                   squareStatus.location_name || squareStatus.location_id
                     ? ` · location ${squareStatus.location_name || squareStatus.location_id}`
-                    : " · pick a location"
+                    : " · pick a location (required before phone can charge)"
                 }`
-              : "Not connected — authorize Floor POS in Square, then pick a location."}
+              : "Not connected — tap Connect Square, finish authorize in the browser, then Refresh status and pick a location. Phone charges will fail until this shows Connected."}
           </p>
           <div className="row">
             <button type="button" onClick={() => void connectSquare()}>

@@ -66,5 +66,13 @@
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Floor uses Bluetooth to talk to Square readers and compatible accessories.</string>
+	<key>NSBluetoothPeripheralUsageDescription</key>
+	<string>Floor uses Bluetooth to talk to Square readers and compatible accessories.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Square needs to know where transactions take place to reduce risk and minimize payment disputes.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Some Square readers use the microphone to communicate payment card data.</string>
 </dict>
 </plist>
