@@ -1,6 +1,6 @@
 #!/bin/bash
-# Ubuntu 24.04 kiosk: greetd autologin -> Cage -> Floor POS.
-# Run as root after installing the floor-pos .deb.
+# Ubuntu kiosk: greetd autologin -> Cage -> Floor POS.
+# Run as root after installing the floor-pos .deb (or placing /usr/bin/floor-pos).
 set -euo pipefail
 
 if [[ ${EUID} -ne 0 ]]; then
@@ -16,13 +16,35 @@ passwd -l floor-kiosk || true
 apt-get update
 apt-get install -y greetd cage unattended-upgrades cups printer-driver-all
 
+install -d /etc/floor-pos
+if [[ ! -f /etc/floor-pos/webkit.env ]]; then
+  cat >/etc/floor-pos/webkit.env <<'EOF'
+# Uncomment if WebKitGTK flickers on nouveau:
+# WEBKIT_DISABLE_DMABUF_RENDERER=1
+# WEBKIT_DISABLE_COMPOSITING_MODE=1
+EOF
+fi
+
+cat >/usr/bin/floor-pos-kiosk <<'EOF'
+#!/bin/bash
+set -euo pipefail
+if [[ -f /etc/floor-pos/webkit.env ]]; then
+  # shellcheck disable=SC1091
+  set -a
+  source /etc/floor-pos/webkit.env
+  set +a
+fi
+exec /usr/bin/floor-pos "$@"
+EOF
+chmod 0755 /usr/bin/floor-pos-kiosk
+
 install -d /etc/greetd
 cat >/etc/greetd/config.toml <<'EOF'
 [terminal]
 vt = 1
 
 [default_session]
-command = "cage -s -- /usr/bin/floor-pos"
+command = "cage -s -- /usr/bin/floor-pos-kiosk"
 user = "floor-kiosk"
 EOF
 
@@ -46,4 +68,5 @@ EOF
 systemctl enable getty@tty2.service
 
 echo "Kiosk users: floor-kiosk (autologin Cage), floor-admin (Ctrl+Alt+F2)."
+echo "Optional WebKit env: /etc/floor-pos/webkit.env"
 echo "Set a password for floor-admin, then reboot."
