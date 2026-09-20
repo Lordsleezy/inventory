@@ -123,10 +123,11 @@ export function wrapHandler(source, fn) {
         }
         return res;
       } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
         await floorLog({
           level: "error",
           event: "fn.crash",
-          message: err instanceof Error ? err.message : String(err),
+          message,
           detail: {
             name: err?.name || null,
             code: err?.code || null,
@@ -136,6 +137,19 @@ export function wrapHandler(source, fn) {
             stack: String(err?.stack || "").slice(0, 4000),
           },
         });
+        const authStatus =
+          message === "not_signed_in" || message === "not_staff"
+            ? 401
+            : message === "not_owner" || message === "not_manager"
+              ? 403
+              : null;
+        if (authStatus) {
+          return {
+            statusCode: authStatus,
+            headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+            body: JSON.stringify({ error: message, traceId }),
+          };
+        }
         throw err;
       }
     });
