@@ -4,13 +4,11 @@ import WebKit
 import UIKit
 import CoreLocation
 import CoreBluetooth
-
-#if canImport(SquareMobilePaymentsSDK)
 import SquareMobilePaymentsSDK
-#endif
 
 /// Capacitor bridge for Square Mobile Payments SDK.
-/// Hard rules: never startPayment unless SDK is initialized + authorized + location allowed.
+/// Hard-imports SquareMobilePaymentsSDK — if SPM did not link it, this file fails to compile
+/// (preferred over a silent #if canImport stub that ships a broken TestFlight build).
 @objc(FloorSquarePlugin)
 public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManagerDelegate, CBCentralManagerDelegate {
     public let identifier = "FloorSquarePlugin"
@@ -33,9 +31,38 @@ public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManagerDe
     private var bluetoothResolved = false
     private var locationOk = false
     private var bluetoothOk = false
+    private static var didInitializeSdk = false
+
+    public override func load() {
+        Self.initializeSdkIfNeeded()
+    }
+
+    private static func initializeSdkIfNeeded() {
+        guard !didInitializeSdk else { return }
+        let appId = (Bundle.main.object(forInfoDictionaryKey: "SquareApplicationID") as? String) ?? ""
+        guard !appId.isEmpty, appId != "REPLACE_ME" else {
+            NSLog("FloorSquare: SquareApplicationID missing/REPLACE_ME — MobilePaymentsSDK.initialize skipped")
+            return
+        }
+        MobilePaymentsSDK.initialize(squareApplicationID: appId)
+        didInitializeSdk = true
+        NSLog("FloorSquare: MobilePaymentsSDK.initialize completed")
+    }
+
+    private func squareAppId() -> String {
+        (Bundle.main.object(forInfoDictionaryKey: "SquareApplicationID") as? String) ?? ""
+    }
+
+    private func sdkReadyMessage() -> String? {
+        Self.initializeSdkIfNeeded()
+        let appId = squareAppId()
+        if appId.isEmpty || appId == "REPLACE_ME" {
+            return "This build is missing SquareApplicationID — Codemagic must set SQUARE_APPLICATION_ID before archive. Install a build that baked the Square app id."
+        }
+        return nil
+    }
 
     @objc func authState(_ call: CAPPluginCall) {
-        #if canImport(SquareMobilePaymentsSDK)
         let state: String
         switch MobilePaymentsSDK.shared.authorizationManager.state {
         case .authorized: state = "authorized"
@@ -43,12 +70,14 @@ public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManagerDe
         case .notAuthorized: state = "notAuthorized"
         @unknown default: state = "unknown"
         }
-        let appId = Bundle.main.object(forInfoDictionaryKey: "SquareApplicationID") as? String ?? ""
+        let appId = squareAppId()
         let initialized = !appId.isEmpty && appId != "REPLACE_ME"
-        call.resolve(["state": state, "sdkInitialized": initialized, "sdkLinked": true])
-        #else
-        call.resolve(["state": "notLinked", "sdkInitialized": false, "sdkLinked": false])
-        #endif
+        call.resolve([
+            "state": state,
+            "sdkInitialized": initialized,
+            "sdkLinked": true,
+            "squareApplicationIdSet": initialized
+        ])
     }
 
     @objc func preparePermissions(_ call: CAPPluginCall) {
@@ -73,7 +102,6 @@ public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManagerDe
                 self.locationResolved = true
             }
 
-            // Creating CBCentralManager triggers the Bluetooth permission prompt on iOS 13+.
             self.bluetoothManager = CBCentralManager(delegate: self, queue: .main, options: [
                 CBCentralManagerOptionShowPowerAlertKey: false
             ])
@@ -98,7 +126,6 @@ public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManagerDe
     public func centralManagerDidUpdateState(_ central: CBCentralManager) {
         switch central.state {
         case .poweredOn, .poweredOff, .resetting, .unauthorized, .unsupported, .unknown:
-            // poweredOff is still OK for Tap to Pay; unauthorized means permission denied.
             bluetoothOk = central.state != .unauthorized && central.state != .unsupported
             bluetoothResolved = true
         @unknown default:
@@ -112,7 +139,13 @@ public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManagerDe
         guard let call = permissionCall, locationResolved, bluetoothResolved else { return }
         permissionCall = nil
         if !locationOk {
-            call.resolve(["ok": false, "reason": "location_permission_required", "location": false, "bluetooth": bluetoothOk])
+            call.resolve([
+                "ok": false,
+                "reason": "location_permission_required",
+                "message": "Allow Location for Floor — Square requires it before any card charge.",
+                "location": false,
+                "bluetooth": bluetoothOk
+            ])
             return
         }
         call.resolve(["ok": true, "location": true, "bluetooth": bluetoothOk])
@@ -120,20 +153,23 @@ public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManagerDe
 
     @objc func authorize(_ call: CAPPluginCall) {
         let mock = call.getBool("mock") ?? false
-        #if canImport(SquareMobilePaymentsSDK)
         guard let token = call.getString("accessToken"),
               let locationId = call.getString("locationId"),
               !token.isEmpty, !locationId.isEmpty else {
-            call.resolve(["ok": false, "reason": "missing_credentials"])
+            call.resolve(["ok": false, "reason": "missing_credentials", "message": "Missing Square access token or location id from the server."])
             return
         }
         if mock {
-            call.resolve(["ok": false, "reason": "mock_authorize_disabled", "sdkLinked": true])
+            call.resolve([
+                "ok": false,
+                "reason": "mock_authorize_disabled",
+                "message": "Mock authorize is disabled for register charges. Connect Square on the register and pick a location.",
+                "sdkLinked": true
+            ])
             return
         }
-        let appId = Bundle.main.object(forInfoDictionaryKey: "SquareApplicationID") as? String ?? ""
-        if appId.isEmpty || appId == "REPLACE_ME" {
-            call.resolve(["ok": false, "reason": "sdk_not_initialized", "sdkLinked": true])
+        if let msg = sdkReadyMessage() {
+            call.resolve(["ok": false, "reason": "sdk_not_initialized", "message": msg, "sdkLinked": true])
             return
         }
         DispatchQueue.main.async {
@@ -144,42 +180,42 @@ public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManagerDe
             }
             auth.authorize(withAccessToken: token, locationID: locationId) { error in
                 if let error {
-                    call.resolve(["ok": false, "reason": error.localizedDescription, "sdkLinked": true])
+                    call.resolve([
+                        "ok": false,
+                        "reason": error.localizedDescription,
+                        "message": "Square authorize failed: \(error.localizedDescription)",
+                        "sdkLinked": true
+                    ])
                 } else {
                     call.resolve(["ok": true, "sdkLinked": true])
                 }
             }
         }
-        #else
-        call.resolve(["ok": false, "reason": "square_sdk_not_linked"])
-        #endif
     }
 
     @objc func startPairing(_ call: CAPPluginCall) {
-        #if canImport(SquareMobilePaymentsSDK)
         call.resolve(["ok": true, "sdkLinked": true])
-        #else
-        call.resolve(["ok": false, "reason": "square_sdk_not_linked"])
-        #endif
     }
 
     @objc func charge(_ call: CAPPluginCall) {
         let amount = call.getInt("amountCents") ?? 0
         let mock = call.getBool("mock") ?? false
         let referenceId = call.getString("referenceId")
-        #if canImport(SquareMobilePaymentsSDK)
         if mock {
-            // Register path must never mock — refuse rather than fake a capture.
-            call.resolve(["ok": false, "reason": "mock_charge_disabled", "sdkLinked": true])
+            call.resolve([
+                "ok": false,
+                "reason": "mock_charge_disabled",
+                "message": "Mock card charge is disabled. This build must use the real Square SDK.",
+                "sdkLinked": true
+            ])
             return
         }
-        let appId = Bundle.main.object(forInfoDictionaryKey: "SquareApplicationID") as? String ?? ""
-        if appId.isEmpty || appId == "REPLACE_ME" {
-            call.resolve(["ok": false, "reason": "sdk_not_initialized", "sdkLinked": true])
+        if let msg = sdkReadyMessage() {
+            call.resolve(["ok": false, "reason": "sdk_not_initialized", "message": msg, "sdkLinked": true])
             return
         }
         guard let presenter = self.bridge?.viewController else {
-            call.resolve(["ok": false, "reason": "no_view", "sdkLinked": true])
+            call.resolve(["ok": false, "reason": "no_view", "message": "No iOS view controller available to present Square payment UI.", "sdkLinked": true])
             return
         }
         DispatchQueue.main.async {
@@ -188,6 +224,7 @@ public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManagerDe
                 call.resolve([
                     "ok": false,
                     "reason": "not_authorized",
+                    "message": "Square SDK is not authorized yet. Tap Authorize Square (or Charge card again) after Connect Square + location on the register.",
                     "authState": String(describing: authState),
                     "sdkLinked": true
                 ])
@@ -195,11 +232,21 @@ public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManagerDe
             }
             let loc = CLLocationManager.authorizationStatus()
             guard loc == .authorizedAlways || loc == .authorizedWhenInUse else {
-                call.resolve(["ok": false, "reason": "location_permission_required", "sdkLinked": true])
+                call.resolve([
+                    "ok": false,
+                    "reason": "location_permission_required",
+                    "message": "Allow Location for Floor, then try Take payment again.",
+                    "sdkLinked": true
+                ])
                 return
             }
             if self.paymentDelegate != nil {
-                call.resolve(["ok": false, "reason": "payment_already_in_progress", "sdkLinked": true])
+                call.resolve([
+                    "ok": false,
+                    "reason": "payment_already_in_progress",
+                    "message": "A Square payment is already in progress.",
+                    "sdkLinked": true
+                ])
                 return
             }
             let cents = UInt(max(amount, 0))
@@ -224,9 +271,6 @@ public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManagerDe
                 delegate: delegate
             )
         }
-        #else
-        call.resolve(["ok": false, "reason": "square_sdk_not_linked"])
-        #endif
     }
 
     @objc func openAuth(_ call: CAPPluginCall) {
@@ -247,7 +291,6 @@ public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManagerDe
     }
 }
 
-#if canImport(SquareMobilePaymentsSDK)
 final class FloorPaymentDelegate: NSObject, PaymentManagerDelegate {
     private let call: CAPPluginCall
     private let onDone: () -> Void
@@ -276,18 +319,22 @@ final class FloorPaymentDelegate: NSObject, PaymentManagerDelegate {
     func paymentManager(_ paymentManager: PaymentManager, didFail payment: Payment, withError error: Error) {
         guard !finished else { return }
         finished = true
-        call.resolve(["ok": false, "reason": error.localizedDescription, "sdkLinked": true])
+        call.resolve([
+            "ok": false,
+            "reason": error.localizedDescription,
+            "message": "Square payment failed: \(error.localizedDescription)",
+            "sdkLinked": true
+        ])
         onDone()
     }
 
     func paymentManager(_ paymentManager: PaymentManager, didCancel payment: Payment) {
         guard !finished else { return }
         finished = true
-        call.resolve(["ok": false, "reason": "canceled", "sdkLinked": true])
+        call.resolve(["ok": false, "reason": "canceled", "message": "Card payment canceled.", "sdkLinked": true])
         onDone()
     }
 }
-#endif
 
 final class FloorAuthViewController: UIViewController, WKNavigationDelegate {
     private let startURL: URL

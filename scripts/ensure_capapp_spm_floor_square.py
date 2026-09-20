@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Ensure CapApp-SPM/Package.swift lists FloorSquarePlugin with valid Swift commas.
+"""Ensure CapApp-SPM/Package.swift links FloorSquarePlugin AND SquareMobilePaymentsSDK.
 
-Idempotent: safe to re-run. Repairs mangled injects (double commas, missing commas).
-Exits non-zero if the result is not valid Package.swift.
+Cap sync regenerates CapApp-SPM; transitive Square via FloorSquare alone is not enough —
+the XCFramework must be a direct CapApp-SPM product so Xcode embeds it in the app binary.
+
+Idempotent. Exits non-zero if the result is invalid.
 """
 from __future__ import annotations
 
@@ -12,19 +14,24 @@ import subprocess
 import sys
 from pathlib import Path
 
-DEP_LINE = (
+FLOOR_DEP = (
     '.package(name: "FloorSquarePlugin", '
     'path: "../../../../../node_modules/@floor/square-plugin")'
 )
-PROD_LINE = '.product(name: "FloorSquarePlugin", package: "FloorSquarePlugin")'
+FLOOR_PROD = '.product(name: "FloorSquarePlugin", package: "FloorSquarePlugin")'
+SQUARE_DEP = (
+    '.package(url: "https://github.com/square/mobile-payments-sdk-ios", exact: "2.6.0")'
+)
+SQUARE_PROD = (
+    '.product(name: "SquareMobilePaymentsSDK", package: "mobile-payments-sdk-ios")'
+)
 
 
 def find_array_after(src: str, needle: str, start: int = 0) -> tuple[int, int]:
-    """Return (inner_start, inner_end) for the `[...]` that follows `needle` at/after start."""
     m = re.search(re.escape(needle) + r"\s*\[", src[start:])
     if not m:
         raise SystemExit(f"CapApp-SPM missing `{needle}: [` block")
-    abs_bracket = start + m.end() - 1  # index of '['
+    abs_bracket = start + m.end() - 1
     i = abs_bracket + 1
     depth = 1
     while i < len(src) and depth:
@@ -40,8 +47,6 @@ def find_array_after(src: str, needle: str, start: int = 0) -> tuple[int, int]:
 
 
 def split_entries(inner: str) -> list[str]:
-    """Split array body into top-level call entries; strip trailing commas."""
-    # Repair ,, before parsing so entry boundaries stay correct.
     inner = re.sub(r",\s*,+", ",", inner)
     entries: list[str] = []
     buf: list[str] = []
@@ -54,8 +59,7 @@ def split_entries(inner: str) -> list[str]:
         buf.append(line.rstrip())
         if depth_paren == 0 and re.search(r"\)\s*,?\s*$", stripped):
             entry = "\n".join(buf).rstrip().rstrip(",").rstrip()
-            # Drop empty / orphan commas
-            if entry.strip() and not entry.strip() == ",":
+            if entry.strip() and entry.strip() != ",":
                 entries.append(entry)
             buf = []
     if buf:
@@ -73,7 +77,6 @@ def sibling_indent(entries: list[str], default: str) -> str:
 
 
 def close_whitespace(src: str, inner_end: int, default: str) -> str:
-    """Whitespace immediately before the array's closing `]` (newline + indent)."""
     j = inner_end
     while j > 0 and src[j - 1] in " \t":
         j -= 1
@@ -82,23 +85,21 @@ def close_whitespace(src: str, inner_end: int, default: str) -> str:
     return default
 
 
-def ensure_in_array(
+def ensure_entries(
     src: str,
     *,
     needle: str,
-    ensure_expr: str,
-    name_token: str,
-    start: int = 0,
+    start: int,
     default_indent: str,
     default_close: str,
-) -> tuple[str, int]:
-    """Rewrite one array so it contains exactly one ensure_expr line mentioning name_token."""
+    required: list[tuple[str, str]],
+) -> str:
+    """required: list of (name_token, expr) that must appear exactly once each."""
     inner_start, inner_end = find_array_after(src, needle, start)
     entries = split_entries(src[inner_start:inner_end])
-    kept = [e for e in entries if name_token not in e]
+    tokens = [t for t, _ in required]
+    kept = [e for e in entries if not any(t in e for t in tokens)]
     indent = sibling_indent(kept, default_indent)
-    ensure_full = indent + ensure_expr.strip()
-    # Dedupe normalized entries, then append FloorSquare once at end.
     dedup: list[str] = []
     seen: set[str] = set()
     for e in kept:
@@ -107,11 +108,12 @@ def ensure_in_array(
             continue
         seen.add(key)
         dedup.append(e)
-    dedup.append(ensure_full)
+    for _, expr in required:
+        dedup.append(indent + expr.strip())
     body = ",\n".join(dedup) + ","
     close_ws = close_whitespace(src, inner_end, default_close)
     new_inner = "\n" + body + close_ws
-    return src[:inner_start] + new_inner + src[inner_end:], inner_end
+    return src[:inner_start] + new_inner + src[inner_end:]
 
 
 def scrub_double_commas(src: str) -> str:
@@ -122,31 +124,33 @@ def scrub_double_commas(src: str) -> str:
     return src
 
 
-def ensure_floor_square(src: str) -> str:
+def ensure_floor_and_square(src: str) -> str:
     src = src.replace(".iOS(.v15)", ".iOS(.v16)")
     src = scrub_double_commas(src)
-    # Package-level dependencies: [ ... ]
-    src, _ = ensure_in_array(
+    src = ensure_entries(
         src,
         needle="dependencies:",
-        ensure_expr=DEP_LINE,
-        name_token="FloorSquarePlugin",
         start=0,
         default_indent="        ",
         default_close="\n    ",
+        required=[
+            ("FloorSquarePlugin", FLOOR_DEP),
+            ("mobile-payments-sdk-ios", SQUARE_DEP),
+        ],
     )
-    # CapApp-SPM target product dependencies.
     tm = re.search(r'\.target\(\s*name:\s*"CapApp-SPM"\s*,', src, re.S)
     if not tm:
         raise SystemExit('CapApp-SPM missing .target(name: "CapApp-SPM"')
-    src, _ = ensure_in_array(
+    src = ensure_entries(
         src,
         needle="dependencies:",
-        ensure_expr=PROD_LINE,
-        name_token="FloorSquarePlugin",
         start=tm.start(),
         default_indent="                ",
         default_close="\n            ",
+        required=[
+            ("FloorSquarePlugin", FLOOR_PROD),
+            ("SquareMobilePaymentsSDK", SQUARE_PROD),
+        ],
     )
     return scrub_double_commas(src)
 
@@ -165,9 +169,16 @@ def validate_package_swift(path: Path, src: str) -> None:
                     raise SystemExit(f"{path}: unbalanced {open_c}{close_c}")
         if depth != 0:
             raise SystemExit(f"{path}: unbalanced {open_c}{close_c}")
+    if "FloorSquarePlugin" not in src:
+        raise SystemExit(f"{path}: missing FloorSquarePlugin")
+    if "SquareMobilePaymentsSDK" not in src:
+        raise SystemExit(f"{path}: missing SquareMobilePaymentsSDK product")
+    if "mobile-payments-sdk-ios" not in src:
+        raise SystemExit(f"{path}: missing mobile-payments-sdk-ios package URL")
     if src.count("FloorSquarePlugin") < 2:
-        raise SystemExit(f"{path}: FloorSquarePlugin must appear in dependencies and products")
-    # Between two adjacent .product / .package lines there must be a comma on the prior line.
+        raise SystemExit(f"{path}: FloorSquarePlugin must appear in package deps and target products")
+    if src.count("SquareMobilePaymentsSDK") < 1:
+        raise SystemExit(f"{path}: SquareMobilePaymentsSDK product missing")
     lines = [ln.rstrip() for ln in src.splitlines()]
     for i, ln in enumerate(lines[:-1]):
         cur = ln.strip()
@@ -186,7 +197,10 @@ def validate_package_swift(path: Path, src: str) -> None:
             sys.stderr.write(proc.stdout)
             sys.stderr.write(proc.stderr)
             raise SystemExit(f"{path}: swift package dump-package failed")
-        print("PASS  swift package dump-package")
+        dump = proc.stdout
+        if "SquareMobilePaymentsSDK" not in dump and "mobile-payments-sdk-ios" not in dump:
+            raise SystemExit(f"{path}: dump-package did not mention Square SDK")
+        print("PASS  swift package dump-package (includes Square)")
     else:
         print("PASS  Package.swift structural check (swift not installed here)")
 
@@ -204,12 +218,12 @@ def main() -> int:
     if args.check_only:
         validate_package_swift(path, original)
         return 0
-    updated = ensure_floor_square(original)
+    updated = ensure_floor_and_square(original)
     if updated != original:
         path.write_text(updated)
-        print("CapApp-SPM Package.swift ensured FloorSquarePlugin (idempotent)")
+        print("CapApp-SPM Package.swift ensured FloorSquarePlugin + SquareMobilePaymentsSDK")
     else:
-        print("CapApp-SPM Package.swift already lists FloorSquarePlugin")
+        print("CapApp-SPM Package.swift already lists FloorSquare + Square")
     validate_package_swift(path, path.read_text())
     return 0
 

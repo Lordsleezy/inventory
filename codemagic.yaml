@@ -98,13 +98,20 @@ workflows:
           fi
           cd ../..
           test -d "$XCODE_PROJECT"
-          # Prove CapApp-SPM pulled FloorSquare + Square SDK (no manual Xcode SPM step).
+          # Prove CapApp-SPM pulled FloorSquare + Square SDK as a *direct* product
+          # (transitive-only does not reliably embed the XCFramework in the IPA).
           grep -q FloorSquarePlugin apps/adapter/ios/App/CapApp-SPM/Package.swift
+          grep -q SquareMobilePaymentsSDK apps/adapter/ios/App/CapApp-SPM/Package.swift
+          grep -q mobile-payments-sdk-ios apps/adapter/ios/App/CapApp-SPM/Package.swift
           grep -q mobile-payments-sdk-ios packages/square-plugin/Package.swift
           grep -q SquareMobilePaymentsSDK packages/square-plugin/Package.swift
           grep -q FloorSquarePlugin apps/adapter/ios/App/App/capacitor.config.json \
             || grep -q FloorSquarePlugin apps/adapter/ios/App/CapApp-SPM/Package.swift
-          echo "PASS  FloorSquarePlugin + SquareMobilePaymentsSDK declared for SPM"
+          if [ -z "${SQUARE_APPLICATION_ID:-}" ] || [ "${SQUARE_APPLICATION_ID}" = "REPLACE_ME" ]; then
+            echo "SQUARE_APPLICATION_ID must be set in Codemagic group appstore" >&2
+            exit 1
+          fi
+          echo "PASS  CapApp-SPM declares FloorSquarePlugin + SquareMobilePaymentsSDK; SQUARE_APPLICATION_ID set"
       - name: Resolve Swift packages (prove SDK links)
         script: |
           set -euo pipefail
@@ -173,6 +180,16 @@ workflows:
           xcode-project build-ipa \
             --project "$XCODE_PROJECT" \
             --scheme "$XCODE_SCHEME"
+      - name: Verify Square SDK is inside the IPA
+        script: |
+          set -euo pipefail
+          # Manifest checks already ran; this fails the build if the XCFramework
+          # did not actually land in the app binary (the ios-square-6 failure mode).
+          IPA="$(ls -1t build/ios/ipa/*.ipa 2>/dev/null | head -1 || true)"
+          if [ -z "$IPA" ]; then
+            IPA="$(find . -path '*/build/ios/ipa/*.ipa' -o -path '*/ios/ipa/*.ipa' 2>/dev/null | head -1 || true)"
+          fi
+          bash scripts/verify-ios-square-ipa.sh "$IPA"
     artifacts:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log

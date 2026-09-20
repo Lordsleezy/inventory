@@ -6,6 +6,7 @@ export type ChargeResult = {
   cardBrand?: string;
   cardLast4?: string;
   reason?: string;
+  message?: string;
   mock?: boolean;
   authState?: string;
 };
@@ -14,6 +15,7 @@ export type AuthStateResult = {
   state: string;
   sdkInitialized: boolean;
   sdkLinked: boolean;
+  squareApplicationIdSet?: boolean;
 };
 
 export interface FloorSquarePlugin {
@@ -21,13 +23,19 @@ export interface FloorSquarePlugin {
     accessToken: string;
     locationId: string;
     mock?: boolean;
-  }): Promise<{ ok: boolean; reason?: string; mock?: boolean; already?: boolean }>;
+  }): Promise<{ ok: boolean; reason?: string; message?: string; mock?: boolean; already?: boolean }>;
   charge(options: {
     amountCents: number;
     mock?: boolean;
     referenceId?: string;
   }): Promise<ChargeResult>;
-  preparePermissions?(): Promise<{ ok: boolean; reason?: string; location?: boolean; bluetooth?: boolean }>;
+  preparePermissions?(): Promise<{
+    ok: boolean;
+    reason?: string;
+    message?: string;
+    location?: boolean;
+    bluetooth?: boolean;
+  }>;
   authState?(): Promise<AuthStateResult>;
   startPairing?(): Promise<{ ok: boolean; mock?: boolean }>;
   openAuth(options: { url: string }): Promise<{ ok: boolean }>;

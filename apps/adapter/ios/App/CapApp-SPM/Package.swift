@@ -17,6 +17,7 @@ let package = Package(
         .package(name: "CapacitorFilesystem", path: "../../../../../node_modules/@capacitor/filesystem"),
         .package(name: "CapacitorShare", path: "../../../../../node_modules/@capacitor/share"),
         .package(name: "FloorSquarePlugin", path: "../../../../../node_modules/@floor/square-plugin"),
+        .package(url: "https://github.com/square/mobile-payments-sdk-ios", exact: "2.6.0"),
     ],
     targets: [
         .target(
@@ -29,6 +30,7 @@ let package = Package(
                 .product(name: "CapacitorFilesystem", package: "CapacitorFilesystem"),
                 .product(name: "CapacitorShare", package: "CapacitorShare"),
                 .product(name: "FloorSquarePlugin", package: "FloorSquarePlugin"),
+                .product(name: "SquareMobilePaymentsSDK", package: "mobile-payments-sdk-ios"),
             ]
         )
     ]

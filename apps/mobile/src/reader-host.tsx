@@ -51,6 +51,35 @@ async function authHeaders(): Promise<HeadersInit> {
   return { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
 }
 
+/** Map native/plugin reason codes to actionable copy. */
+export function squareSdkErrorMessage(result: {
+  reason?: string;
+  message?: string;
+}): string {
+  if (result.message && result.message.trim()) return result.message.trim();
+  const reason = (result.reason || "").trim();
+  switch (reason) {
+    case "sdk_not_initialized":
+    case "sdk_not_installed":
+    case "square_sdk_not_linked":
+    case "sdk_not_in_build":
+      return "This build does not include a working Square Mobile Payments SDK (framework missing or SquareApplicationID not baked in). Install a newer TestFlight build.";
+    case "not_authorized":
+      return "Square SDK is not authorized yet. Connect Square + pick a location on the register, then try again.";
+    case "location_permission_required":
+      return "Allow Location for Floor — Square requires it before any card charge.";
+    case "mock_authorize_disabled":
+    case "mock_charge_disabled":
+      return "Live Square is required for register card charges. Connect Square on the register and pick a location.";
+    case "missing_credentials":
+      return "Server did not return Square credentials. Connect Square on the register and pick a location.";
+    case "canceled":
+      return "Card payment canceled.";
+    default:
+      return reason || "Square payment failed";
+  }
+}
+
 /**
  * Keeps the phone registered as the register's card reader for the whole app
  * session — heartbeat + pending-charge poll + capture recovery, not just one screen.
@@ -99,11 +128,7 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
     await ensureOnline();
     const perms = await FloorSquare.preparePermissions?.();
     if (perms && !perms.ok) {
-      throw new Error(
-        perms.reason === "location_permission_required"
-          ? "Allow Location for Floor (required by Square before any card charge)."
-          : `Permissions required: ${perms.reason || "unknown"}`,
-      );
+      throw new Error(squareSdkErrorMessage(perms));
     }
     const res = await fetch(functionsUrl("square-mobile-auth"), { headers: await authHeaders() });
     const body = await res.json().catch(() => ({}));
@@ -129,7 +154,7 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
       mock: false,
     });
     if (!result.ok) {
-      throw new Error(result.reason || "authorize_failed");
+      throw new Error(squareSdkErrorMessage(result));
     }
     setAuthorized(true);
     authorizedRef.current = true;
@@ -204,11 +229,7 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
         }
         const perms = await FloorSquare.preparePermissions?.();
         if (perms && !perms.ok) {
-          throw new Error(
-            perms.reason === "location_permission_required"
-              ? "Allow Location for Floor, then try Take payment again."
-              : `Permissions: ${perms.reason || "denied"}`,
-          );
+          throw new Error(squareSdkErrorMessage(perms));
         }
         const result = await FloorSquare.charge({
           amountCents: charge.amount_cents,
@@ -224,7 +245,7 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
               updated_at: new Date().toISOString(),
             })
             .eq("id", charge.id);
-          setError(result.reason || "Card declined");
+          setError(squareSdkErrorMessage(result));
           setStatus("");
           return;
         }

@@ -75,17 +75,26 @@ if [ -x /usr/libexec/PlistBuddy ]; then
     /usr/libexec/PlistBuddy -c "Add :SquareApplicationID string $APP_ID" "$PLIST"
     echo "SquareApplicationID set from SQUARE_APPLICATION_ID"
   else
-    /usr/libexec/PlistBuddy -c "Add :SquareApplicationID string REPLACE_ME" "$PLIST"
-    echo "WARN: SQUARE_APPLICATION_ID unset — AppDelegate will skip MobilePaymentsSDK.initialize"
+    echo "FAIL: SQUARE_APPLICATION_ID unset — refusing to bake REPLACE_ME (Take payment would fail at runtime)" >&2
+    exit 1
   fi
 fi
 
 # Cap sync should pull FloorSquarePlugin from packages/square-plugin/Package.swift.
-# Ensure CapApp-SPM lists it with valid Swift commas (idempotent; never ,, / missing commas).
+# Ensure CapApp-SPM lists FloorSquarePlugin AND SquareMobilePaymentsSDK as a direct
+# product (XCFramework must be embedded in the app binary — transitive-only is not enough).
 if [ -f "$SPM" ]; then
   python3 "$ROOT/scripts/ensure_capapp_spm_floor_square.py" "$SPM"
   grep -q "FloorSquarePlugin" "$SPM" || {
     echo "FloorSquarePlugin still missing from CapApp-SPM after ensure" >&2
+    exit 1
+  }
+  grep -q "SquareMobilePaymentsSDK" "$SPM" || {
+    echo "SquareMobilePaymentsSDK still missing from CapApp-SPM after ensure" >&2
+    exit 1
+  }
+  grep -q "mobile-payments-sdk-ios" "$SPM" || {
+    echo "mobile-payments-sdk-ios package URL missing from CapApp-SPM after ensure" >&2
     exit 1
   }
   grep -q "mobile-payments-sdk-ios\|SquareMobilePaymentsSDK" \
@@ -94,6 +103,18 @@ if [ -f "$SPM" ]; then
     exit 1
   }
 fi
+
+# Fail early if Codemagic forgot SQUARE_APPLICATION_ID (public; baked into Info.plist).
+if [ -z "${SQUARE_APPLICATION_ID:-}" ]; then
+  echo "FAIL  SQUARE_APPLICATION_ID is empty — MobilePaymentsSDK.initialize will be skipped and Take payment will fail." >&2
+  echo "Set SQUARE_APPLICATION_ID in Codemagic group appstore (sandbox Application ID)." >&2
+  exit 1
+fi
+if [ "${SQUARE_APPLICATION_ID}" = "REPLACE_ME" ]; then
+  echo "FAIL  SQUARE_APPLICATION_ID is REPLACE_ME" >&2
+  exit 1
+fi
+echo "SQUARE_APPLICATION_ID is set (${#SQUARE_APPLICATION_ID} chars)"
 
 if [ -f "$CFG" ] && ! grep -q "FloorSquarePlugin" "$CFG"; then
   python3 - "$CFG" <<'PY'

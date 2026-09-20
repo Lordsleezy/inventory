@@ -1,24 +1,14 @@
 import UIKit
 import Capacitor
 
-#if canImport(SquareMobilePaymentsSDK)
-import SquareMobilePaymentsSDK
-#endif
-
 @UIApplicationMain
 class AppDelegate: UIResponder, UIApplicationDelegate {
 
     var window: UIWindow?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        #if canImport(SquareMobilePaymentsSDK)
-        // Info.plist SquareApplicationID is set by scripts/ios-square-prepare.sh from SQUARE_APPLICATION_ID.
-        if let appId = Bundle.main.object(forInfoDictionaryKey: "SquareApplicationID") as? String,
-           !appId.isEmpty,
-           appId != "REPLACE_ME" {
-            MobilePaymentsSDK.initialize(squareApplicationID: appId)
-        }
-        #endif
+        // Square MobilePaymentsSDK.initialize runs in FloorSquarePlugin.load() once CapApp-SPM
+        // has linked SquareMobilePaymentsSDK into the process.
         return true
     }
 

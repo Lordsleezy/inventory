@@ -19,17 +19,20 @@ Also: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE`.
 `packages/square-plugin/Package.swift` depends on
 `https://github.com/square/mobile-payments-sdk-ios` exact **2.6.0** (`SquareMobilePaymentsSDK`).
 
-`npx cap sync ios` regenerates `CapApp-SPM` and pulls `FloorSquarePlugin` (and thus Square) into the app.
-`scripts/ios-square-prepare.sh` then:
+`npx cap sync ios` regenerates `CapApp-SPM`. `scripts/ios-square-prepare.sh` then:
 
 - bumps deployment target to iOS 16
 - disables User Script Sandboxing
 - adds Square’s `SquareMobilePaymentsSDK.framework/setup` run-script phase
 - writes Bluetooth / location / microphone plist keys
-- sets `SquareApplicationID` from `SQUARE_APPLICATION_ID`
-- verifies / injects `FloorSquarePlugin` into CapApp-SPM if sync skipped it
+- sets `SquareApplicationID` from `SQUARE_APPLICATION_ID` (**required** — prepare fails if unset)
+- injects **both** `FloorSquarePlugin` and a **direct** `SquareMobilePaymentsSDK` product into CapApp-SPM
+  (transitive-only linkage does not reliably embed the XCFramework in the IPA)
 
-MockReaderUI is **not** linked (breaks App Store upload). Sandbox mock charges use the plugin’s `mock: true` path when needed.
+Codemagic also runs `scripts/verify-ios-square-ipa.sh` against the built IPA and **fails the build**
+if `SquareMobilePaymentsSDK` is missing from the app bundle or `SquareApplicationID` is `REPLACE_ME`.
+
+MockReaderUI is **not** linked (breaks App Store upload).
 
 ## Register: Connect Square
 
