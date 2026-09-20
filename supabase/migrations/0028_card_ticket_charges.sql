@@ -342,6 +342,8 @@ declare
   v_charge public.card_charges;
   v_summary jsonb;
   v_ticket uuid;
+  v_err text;
+  v_failed boolean := false;
 begin
   perform public.assert_staff_or_service();
   if v_store is null then
@@ -380,13 +382,18 @@ begin
     );
   exception
     when others then
-      update public.card_charges
-         set status = 'finalize_failed',
-             error = left(SQLERRM, 500),
-             updated_at = now()
-       where id = p_charge_id;
-      raise;
+      v_err := SQLERRM;
+      v_failed := true;
   end;
+
+  if v_failed then
+    update public.card_charges
+       set status = 'finalize_failed',
+           error = left(v_err, 500),
+           updated_at = now()
+     where id = p_charge_id;
+    raise exception '%', v_err using errcode = 'P0001';
+  end if;
 
   -- Stamp card brand/last4 onto sales for this ticket.
   update public.sales
