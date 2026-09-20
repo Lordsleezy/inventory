@@ -2,9 +2,9 @@
 begin;
 select plan(8);
 
-select has_table('public', 'square_connections');
-select has_table('public', 'pos_devices');
-select has_table('public', 'card_charges');
+select has_table('public', 'square_connections', 'square_connections exists');
+select has_table('public', 'pos_devices', 'pos_devices exists');
+select has_table('public', 'card_charges', 'card_charges exists');
 
 select ok(
   not has_table_privilege('authenticated', 'public.square_connections', 'select'),

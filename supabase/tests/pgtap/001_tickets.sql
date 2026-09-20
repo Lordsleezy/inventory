@@ -15,7 +15,8 @@ select is(
 );
 
 select ok(
-  pg_get_viewdef('public.units_pos'::regclass, true) like '%store_id = public.current_store_id()%',
+  pg_get_viewdef('public.units_pos'::regclass, true)
+    ~* 'store_id[[:space:]]*=[[:space:]]*(public\.)?current_store_id\(\)',
   'units_pos scoped with = current_store_id()'
 );
 
@@ -33,9 +34,9 @@ select ok(
   'store_tax_rate_bps not executable by authenticated'
 );
 
-select has_column('public', 'sales', 'ticket_id');
-select has_column('public', 'sales', 'list_price_cents');
-select has_column('public', 'approvals', 'ticket_id');
+select has_column('public', 'sales', 'ticket_id', 'sales.ticket_id exists');
+select has_column('public', 'sales', 'list_price_cents', 'sales.list_price_cents exists');
+select has_column('public', 'approvals', 'ticket_id', 'approvals.ticket_id exists');
 
 select ok(
   exists (

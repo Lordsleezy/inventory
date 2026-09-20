@@ -29,8 +29,21 @@ done
 
 echo "Running pgTAP"
 shopt -s nullglob
+failed=0
 for t in "$ROOT"/supabase/tests/pgtap/[0-9]*.sql; do
   echo "  $(basename "$t")"
-  psql "$DB_URL" -v ON_ERROR_STOP=1 -f "$t"
+  out="$(psql "$DB_URL" -v ON_ERROR_STOP=1 -f "$t" 2>&1)" || {
+    echo "$out"
+    echo "psql failed on $(basename "$t")" >&2
+    exit 1
+  }
+  echo "$out"
+  if echo "$out" | grep -E '^not ok |Looks like you failed'; then
+    echo "pgTAP failures in $(basename "$t")" >&2
+    failed=1
+  fi
 done
+if [ "$failed" -ne 0 ]; then
+  exit 1
+fi
 echo "PASS"
