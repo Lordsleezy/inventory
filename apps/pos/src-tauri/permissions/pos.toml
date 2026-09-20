@@ -1,0 +1,58 @@
+# Tauri 2 ACL: allow every register command from the kiosk window.
+"$schema" = "https://schema.tauri.app/config/2/acl"
+
+[[permission]]
+identifier = "allow-cache-replace-units"
+commands.allow = ["cache_replace_units"]
+
+[[permission]]
+identifier = "allow-search-units"
+commands.allow = ["search_units"]
+
+[[permission]]
+identifier = "allow-outbox-insert"
+commands.allow = ["outbox_insert"]
+
+[[permission]]
+identifier = "allow-outbox-pending"
+commands.allow = ["outbox_pending"]
+
+[[permission]]
+identifier = "allow-outbox-update"
+commands.allow = ["outbox_update"]
+
+[[permission]]
+identifier = "allow-incident-insert"
+commands.allow = ["incident_insert"]
+
+[[permission]]
+identifier = "allow-incidents-list"
+commands.allow = ["incidents_list"]
+
+[[permission]]
+identifier = "allow-settings-get"
+commands.allow = ["settings_get"]
+
+[[permission]]
+identifier = "allow-settings-set"
+commands.allow = ["settings_set"]
+
+[[permission]]
+identifier = "allow-print-bytes"
+commands.allow = ["print_bytes"]
+
+[[permission]]
+identifier = "allow-kiosk-power"
+commands.allow = ["kiosk_power"]
+
+[[permission]]
+identifier = "allow-set-admin-pin"
+commands.allow = ["set_admin_pin"]
+
+[[permission]]
+identifier = "allow-verify-admin-pin"
+commands.allow = ["verify_admin_pin"]
+
+[[permission]]
+identifier = "allow-has-admin-pin"
+commands.allow = ["has_admin_pin"]

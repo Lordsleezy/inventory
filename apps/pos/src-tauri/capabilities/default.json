@@ -1,0 +1,22 @@
+{
+  "identifier": "default",
+  "description": "Floor register kiosk",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "allow-cache-replace-units",
+    "allow-search-units",
+    "allow-outbox-insert",
+    "allow-outbox-pending",
+    "allow-outbox-update",
+    "allow-incident-insert",
+    "allow-incidents-list",
+    "allow-settings-get",
+    "allow-settings-set",
+    "allow-print-bytes",
+    "allow-kiosk-power",
+    "allow-set-admin-pin",
+    "allow-verify-admin-pin",
+    "allow-has-admin-pin"
+  ]
+}

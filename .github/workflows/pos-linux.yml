@@ -1,0 +1,155 @@
+name: pos-linux
+
+# Floor register .deb for the Ubuntu iMac (amd64). Manual or pos-v* tags.
+# Not the iPhone / Codemagic product. Not the legacy Surface installer.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "POS version with no leading v (default: apps/pos package.json)."
+        required: false
+        default: ""
+  push:
+    tags:
+      - "pos-v*"
+
+permissions:
+  contents: write
+
+env:
+  VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+  VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+  VITE_FUNCTIONS_URL: ${{ secrets.VITE_FUNCTIONS_URL }}
+
+jobs:
+  deb:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Confirm the runner is x86_64
+        run: |
+          test "$(uname -m)" = "x86_64" || { echo "runner is not x86_64"; exit 1; }
+          echo "PASS  $(uname -m)"
+
+      - name: Require baked-in Vite secrets (anon only)
+        run: |
+          missing=0
+          for k in VITE_SUPABASE_URL VITE_SUPABASE_ANON_KEY VITE_FUNCTIONS_URL; do
+            if [ -z "${!k}" ]; then
+              echo "Missing GitHub Actions secret: $k"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "Add them at Settings → Secrets and variables → Actions. Never add SUPABASE_SERVICE_ROLE."
+            exit 1
+          fi
+          echo "PASS  Vite secrets present"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.18.0"
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: apps/pos/src-tauri
+
+      - name: Install Tauri Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libssl-dev \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libxdo-dev \
+            patchelf
+
+      - name: Install npm workspaces
+        run: npm ci
+
+      - name: Resolve version
+        id: v
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            VERSION="${GITHUB_REF_NAME#pos-v}"
+            VERSION="${VERSION#v}"
+          elif [ -n "${{ inputs.version }}" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION="$(node -p "require('./apps/pos/package.json').version")"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=pos-v$VERSION" >> "$GITHUB_OUTPUT"
+          echo "PASS  building $VERSION"
+
+      - name: Build Tauri Linux amd64
+        run: npm run tauri:build -w @floor/pos
+
+      - name: Package floor-pos .deb
+        run: |
+          chmod +x apps/pos/packaging/build-deb.sh apps/pos/packaging/install-kiosk.sh
+          bash apps/pos/packaging/build-deb.sh "${{ steps.v.outputs.version }}"
+          test -f "apps/pos/packaging/floor-pos_${{ steps.v.outputs.version }}_amd64.deb"
+          sha256sum "apps/pos/packaging/floor-pos_${{ steps.v.outputs.version }}_amd64.deb" \
+            | tee "apps/pos/packaging/floor-pos_${{ steps.v.outputs.version }}_amd64.deb.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: floor-pos-${{ steps.v.outputs.version }}-linux-amd64
+          path: |
+            apps/pos/packaging/floor-pos_${{ steps.v.outputs.version }}_amd64.deb
+            apps/pos/packaging/floor-pos_${{ steps.v.outputs.version }}_amd64.deb.sha256
+            apps/pos/packaging/install-kiosk.sh
+          retention-days: 30
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.v.outputs.version }}
+          TAG: ${{ steps.v.outputs.tag }}
+        run: |
+          DEB="apps/pos/packaging/floor-pos_${VERSION}_amd64.deb"
+          SUM="${DEB}.sha256"
+          KIOSK="apps/pos/packaging/install-kiosk.sh"
+          {
+            echo "## Floor POS ${VERSION} — Linux amd64"
+            echo
+            echo "Register kiosk for the Ubuntu iMac. Phone / TestFlight is Codemagic, not this file."
+            echo
+            echo "Download \`floor-pos_${VERSION}_amd64.deb\`, then:"
+            echo
+            echo '```bash'
+            echo "sudo apt install ./floor-pos_${VERSION}_amd64.deb"
+            echo "sudo /usr/share/floor-pos/install-kiosk.sh"
+            echo "sudo passwd floor-admin"
+            echo "sudo reboot"
+            echo '```'
+            echo
+            echo "After reboot: greetd autologins \`floor-kiosk\` into Cage. Admin TTY is Ctrl+Alt+F2 as \`floor-admin\`."
+            echo
+            echo "### Checksum"
+            echo '```'
+            cat "$SUM"
+            echo '```'
+          } > notes.md
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$DEB" "$SUM" "$KIOSK" --clobber
+            gh release edit "$TAG" --title "Floor POS ${VERSION}" --notes-file notes.md
+          else
+            gh release create "$TAG" "$DEB" "$SUM" "$KIOSK" \
+              --title "Floor POS ${VERSION}" \
+              --notes-file notes.md
+          fi

@@ -1,0 +1,69 @@
+:root {
+  color: #f4f1ea;
+  background: #1a1714;
+  font-family: "Segoe UI", system-ui, sans-serif;
+  font-size: 18px;
+}
+* { box-sizing: border-box; }
+html, body, #root { margin: 0; min-height: 100%; }
+button, input, select {
+  font: inherit;
+  border-radius: 10px;
+  border: 1px solid #3d372f;
+  background: #2a251f;
+  color: inherit;
+  padding: 0.7rem 0.9rem;
+}
+button { cursor: pointer; }
+button.primary { background: #c45c26; border-color: #c45c26; color: #fff; font-weight: 700; }
+button.danger { background: #8b1e1e; border-color: #8b1e1e; color: #fff; font-weight: 700; }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+.shell { display: grid; grid-template-rows: auto 1fr auto; min-height: 100vh; }
+.top {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  background: #11100e;
+  border-bottom: 2px solid #c45c26;
+}
+.offline {
+  background: #7a1b1b;
+  color: #fff;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-align: center;
+  padding: 0.5rem;
+}
+.nav { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.nav a, .nav button { text-decoration: none; color: inherit; }
+.page { padding: 1rem; max-width: 1100px; margin: 0 auto; width: 100%; }
+.grid { display: grid; gap: 0.6rem; }
+.card {
+  background: #241f1a;
+  border: 1px solid #3d372f;
+  border-radius: 12px;
+  padding: 0.9rem;
+}
+.row { display: flex; gap: 0.75rem; align-items: center; justify-content: space-between; }
+.search { width: 100%; font-size: 1.2rem; }
+.price { font-size: 1.6rem; font-weight: 800; }
+.muted { color: #b7aea2; font-size: 0.95rem; }
+.error { color: #ffb4a8; font-weight: 700; }
+.incident {
+  background: #4a0d0d;
+  border: 3px solid #ff4d4d;
+  color: #fff;
+  padding: 1.2rem;
+  border-radius: 12px;
+}
+.modal {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.72);
+  display: grid; place-items: center;
+  padding: 1rem;
+  z-index: 20;
+}
+.modal .card { max-width: 640px; width: 100%; }
+label { display: grid; gap: 0.3rem; }
