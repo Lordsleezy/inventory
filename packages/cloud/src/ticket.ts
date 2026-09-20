@@ -27,6 +27,8 @@ export type TicketSummary = {
   tax_cents: number;
   total_cents: number;
   payment_method?: string | null;
+  card_brand?: string | null;
+  card_last4?: string | null;
 };
 
 /** Client preview only — server recomputes in finalize_ticket. */

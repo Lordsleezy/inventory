@@ -5,13 +5,11 @@ import { mapChargeStatus, readerIsFresh, type ChargeResult } from "./card-status
 export type { ChargeResult };
 export { mapChargeStatus, readerIsFresh };
 
-export type ChargeRequest = {
-  reservationId: string;
-  amountCents: number;
-  taxCents: number;
+export type TicketLineForCharge = {
   sku: string;
-  title: string;
-  actorId: string;
+  priceCents: number;
+  overrideReason?: string | null;
+  approvalId?: string | null;
 };
 
 export type CardDeviceKind = "phone_reader" | "square_terminal";
@@ -19,7 +17,13 @@ export type CardDeviceKind = "phone_reader" | "square_terminal";
 export async function loadPairedReader(): Promise<{ id: string; lastSeen: string; kind: string } | null> {
   const sb = floorCloud();
   const { data: setting } = await sb.from("store_settings").select("value").eq("key", "pos_reader_device_id").maybeSingle();
-  const id = typeof setting?.value === "string" ? setting.value.replace(/"/g, "") : setting?.value ? String(setting.value) : "";
+  const raw = setting?.value;
+  const id =
+    typeof raw === "string"
+      ? raw.replace(/^"|"$/g, "")
+      : raw != null
+        ? String(raw).replace(/^"|"$/g, "")
+        : "";
   if (!id) return null;
   const { data } = await sb.from("pos_devices").select("id, last_seen, kind").eq("id", id).maybeSingle();
   if (!data) return null;
@@ -40,106 +44,128 @@ export async function unpairReader(): Promise<void> {
   await sb.from("store_settings").delete().eq("store_id", staff.store_id).eq("key", "pos_reader_device_id");
 }
 
-export async function extendHold(reservationId: string): Promise<void> {
-  await floorCloud().rpc("extend_reservation", { p_id: reservationId, p_seconds: 600 });
-}
+export type CreatedCharge = {
+  id: string;
+  ticketId: string;
+  amountCents: number;
+  taxCents: number;
+  status: string;
+  summary?: unknown;
+};
 
-export async function sendCharge(kind: CardDeviceKind, req: ChargeRequest): Promise<ChargeResult> {
-  if (kind === "square_terminal") return sendTerminalCharge(req);
-  return sendPhoneCharge(req);
-}
-
-async function sendPhoneCharge(req: ChargeRequest): Promise<ChargeResult> {
+/** Server computes tax-included total from lines. */
+export async function createTicketCharge(
+  ticketId: string,
+  lines: TicketLineForCharge[],
+): Promise<CreatedCharge> {
   const reader = await loadPairedReader();
-  if (!reader || !readerIsFresh(reader.lastSeen)) return { ok: false, reason: "not_paired" };
-  const sb = floorCloud();
-  const { data, error } = await sb
-    .from("card_charges")
-    .insert({
-      device_id: reader.id,
-      store_id: (await storeId()) ?? undefined,
-      reservation_id: req.reservationId,
-      sku: req.sku,
-      title: req.title,
-      amount_cents: req.amountCents,
-      tax_cents: req.taxCents,
-      actor_id: req.actorId,
-      status: "pending",
-    })
-    .select("id")
-    .single();
-  if (error || !data) return { ok: false, reason: "offline" };
-  await extendHold(req.reservationId).catch(() => {});
-  return waitForCharge(data.id);
+  if (!reader) {
+    const err = new Error("reader_not_paired");
+    (err as Error & { code: string }).code = "reader_not_paired";
+    throw err;
+  }
+  if (!readerIsFresh(reader.lastSeen)) {
+    const err = new Error("reader_offline");
+    (err as Error & { code: string }).code = "reader_offline";
+    throw err;
+  }
+  const { data, error } = await floorCloud().rpc("create_register_charge", {
+    p_ticket_id: ticketId,
+    p_device_id: reader.id,
+    p_lines: lines.map((l) => ({
+      sku: l.sku,
+      price_cents: l.priceCents,
+      override_reason: l.overrideReason ?? null,
+      approval_id: l.approvalId ?? null,
+    })),
+  });
+  if (error) throw error;
+  const row = data as {
+    id: string;
+    ticket_id: string;
+    amount_cents: number;
+    tax_cents: number;
+    status: string;
+    summary?: unknown;
+  };
+  return {
+    id: row.id,
+    ticketId: row.ticket_id,
+    amountCents: row.amount_cents,
+    taxCents: row.tax_cents,
+    status: row.status,
+    summary: row.summary,
+  };
 }
 
-async function storeId(): Promise<string | null> {
-  const sb = floorCloud();
-  const { data: session } = await sb.auth.getSession();
-  const { data } = await sb.from("staff").select("store_id").eq("user_id", session.session?.user.id ?? "").maybeSingle();
-  return data?.store_id ?? null;
-}
-
-export async function waitForCharge(chargeId: string, timeoutMs = 120_000): Promise<ChargeResult> {
+export async function waitForCharge(
+  chargeId: string,
+  opts?: { timeoutMs?: number; signal?: AbortSignal },
+): Promise<ChargeResult & { chargeId: string; cardBrand?: string | null; cardLast4?: string | null }> {
+  const timeoutMs = opts?.timeoutMs ?? 180_000;
   const started = Date.now();
   const sb = floorCloud();
   while (Date.now() - started < timeoutMs) {
+    if (opts?.signal?.aborted) return { ok: false, reason: "canceled", chargeId };
     const { data } = await sb
       .from("card_charges")
-      .select("status, payment_id, error")
+      .select("status, payment_id, error, card_brand, card_last4")
       .eq("id", chargeId)
       .maybeSingle();
     const status = data?.status;
     if (status === "captured" && data?.payment_id) {
-      return { ok: true, paymentId: data.payment_id, chargeId };
+      return {
+        ok: true,
+        paymentId: data.payment_id,
+        chargeId,
+        cardBrand: data.card_brand,
+        cardLast4: data.card_last4,
+      };
     }
     if (status === "finalized" && data?.payment_id) {
-      return { ok: true, paymentId: data.payment_id, chargeId };
+      return {
+        ok: true,
+        paymentId: data.payment_id,
+        chargeId,
+        cardBrand: data.card_brand,
+        cardLast4: data.card_last4,
+      };
     }
-    if (status === "failed") return { ok: false, reason: "declined" };
-    if (status === "canceled") return { ok: false, reason: "canceled" };
+    if (status === "failed") return { ok: false, reason: "declined", chargeId };
+    if (status === "canceled") return { ok: false, reason: "canceled", chargeId };
     await new Promise((r) => setTimeout(r, 800));
   }
-  return { ok: false, reason: "timeout" };
-}
-
-async function sendTerminalCharge(req: ChargeRequest): Promise<ChargeResult> {
-  const created = await callFunction("square-terminal-checkout", {
-    method: "POST",
-    body: JSON.stringify({
-      reservationId: req.reservationId,
-      amountCents: req.amountCents,
-      sku: req.sku,
-    }),
-  });
-  const body = await created.json();
-  if (!created.ok) return { ok: false, reason: "offline" };
-  const started = Date.now();
-  while (Date.now() - started < 120_000) {
-    const res = await callFunction(`square-terminal-checkout?id=${encodeURIComponent(body.id)}`, { method: "GET" });
-    const row = await res.json();
-    const status = String(row.status || "").toUpperCase();
-    if (status === "COMPLETED" && row.paymentId) return { ok: true, paymentId: String(row.paymentId), chargeId: body.id };
-    if (status === "CANCELED" || status === "CANCEL_REQUESTED") return { ok: false, reason: "canceled" };
-    await new Promise((r) => setTimeout(r, 1500));
-  }
-  return { ok: false, reason: "timeout" };
+  return { ok: false, reason: "timeout", chargeId };
 }
 
 export async function cancelCharge(chargeId: string): Promise<void> {
-  await floorCloud().from("card_charges").update({ status: "canceled", updated_at: new Date().toISOString() }).eq("id", chargeId).eq("status", "pending");
-}
-
-export async function replayCapturedCharges(): Promise<{ id: string; sku: string; paymentId: string }[]> {
-  const sb = floorCloud();
-  const { data } = await sb.from("card_charges").select("id, sku, payment_id").eq("status", "captured");
-  return (data ?? [])
-    .filter((row) => row.payment_id)
-    .map((row) => ({ id: row.id, sku: row.sku, paymentId: String(row.payment_id) }));
+  await floorCloud().rpc("cancel_register_charge", { p_charge_id: chargeId });
 }
 
 export async function finalizeCapturedCharge(chargeId: string) {
   const { data, error } = await floorCloud().rpc("finalize_register_charge", { p_charge_id: chargeId });
   if (error) throw error;
-  return data as { receipt_no?: string; sku?: string };
+  return data;
+}
+
+/** Refund Square payment after capture when ticket cannot finalize. */
+export async function refundFailedCharge(args: {
+  chargeId: string;
+  paymentId?: string | null;
+  amountCents?: number;
+  reason: string;
+}): Promise<void> {
+  await callFunction("square-refund-payment", {
+    method: "POST",
+    body: JSON.stringify({
+      chargeId: args.chargeId,
+      paymentId: args.paymentId,
+      amountCents: args.amountCents,
+      reason: args.reason,
+    }),
+  });
+}
+
+export async function sendTerminalCharge(): Promise<ChargeResult> {
+  return { ok: false, reason: "offline" };
 }

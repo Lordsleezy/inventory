@@ -76,6 +76,14 @@ export function DoneScreen() {
             <span>{formatCentsTotal(changeCents)}</span>
           </div>
         ) : null}
+        {summary.payment_method === "card" && (summary.card_brand || summary.card_last4) ? (
+          <div className="row">
+            <span>Card</span>
+            <span>
+              {[summary.card_brand, summary.card_last4 ? `•••• ${summary.card_last4}` : null].filter(Boolean).join(" ")}
+            </span>
+          </div>
+        ) : null}
       </div>
       {msg ? <p>{msg}</p> : null}
       <div className="row">
