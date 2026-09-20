@@ -132,12 +132,15 @@ jobs:
             echo
             echo '```bash'
             echo "sudo apt install ./floor-pos_${VERSION}_amd64.deb"
+            echo "# Pre-kiosk desktop: Floor appears in the app grid (webkit.env via floor-pos-kiosk)."
+            echo "# Full kiosk (greetd + Cage) when ready:"
             echo "sudo /usr/share/floor-pos/install-kiosk.sh"
             echo "sudo passwd floor-admin"
             echo "sudo reboot"
             echo '```'
             echo
-            echo "After reboot: greetd autologins \`floor-kiosk\` into Cage. Admin TTY is Ctrl+Alt+F2 as \`floor-admin\`."
+            echo "After kiosk reboot: greetd autologins \`floor-kiosk\` into Cage. Admin TTY is Ctrl+Alt+F2 as \`floor-admin\`."
+            echo "Desktop launcher and kiosk mode can coexist until you switch the machine over."
             echo
             echo "### Checksum"
             echo '```'

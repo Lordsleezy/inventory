@@ -25,7 +25,13 @@ if [[ ! -f /etc/floor-pos/webkit.env ]]; then
 EOF
 fi
 
-cat >/usr/bin/floor-pos-kiosk <<'EOF'
+# Same wrapper the desktop .desktop entry uses. Prefer the packaged file when
+# present (repo or /usr/share/floor-pos); otherwise write the known script.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [[ -f "${SCRIPT_DIR}/floor-pos-kiosk" ]]; then
+  install -m 0755 "${SCRIPT_DIR}/floor-pos-kiosk" /usr/bin/floor-pos-kiosk
+else
+  cat >/usr/bin/floor-pos-kiosk <<'EOF'
 #!/bin/bash
 set -euo pipefail
 if [[ -f /etc/floor-pos/webkit.env ]]; then
@@ -36,7 +42,8 @@ if [[ -f /etc/floor-pos/webkit.env ]]; then
 fi
 exec /usr/bin/floor-pos "$@"
 EOF
-chmod 0755 /usr/bin/floor-pos-kiosk
+  chmod 0755 /usr/bin/floor-pos-kiosk
+fi
 
 install -d /etc/greetd
 cat >/etc/greetd/config.toml <<'EOF'

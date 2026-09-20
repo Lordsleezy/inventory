@@ -24,6 +24,16 @@ npm run tauri:dev -w @floor/pos      # or: npm run tauri:build -w @floor/pos
 Release binary: `apps/pos/src-tauri/target/release/floor-pos` (gitignored).
 CI can produce a `.deb` via `.github/workflows/pos-linux.yml`.
 
+## Desktop launcher (pre-kiosk)
+
+While the iMac still boots to a normal Ubuntu desktop, install a **Floor** app-grid / dock launcher that runs the same `floor-pos-kiosk` wrapper (so `/etc/floor-pos/webkit.env` is sourced):
+
+```bash
+bash apps/pos/packaging/install-desktop.sh
+```
+
+Re-run after each `npm run tauri:build -w @floor/pos` to refresh the binary. The `.deb` installs the same `.desktop` + hicolor icons system-wide. This does **not** enable greetd/Cage; use `install-kiosk.sh` only when you are ready for full kiosk mode.
+
 ## First run
 
 1. Sign in as owner/manager.

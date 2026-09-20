@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Floor
+GenericName=Register
+Comment=Floor store register
+Exec=/usr/bin/floor-pos-kiosk
+TryExec=/usr/bin/floor-pos
+Icon=floor-pos
+Terminal=false
+Categories=Office;Finance;
+Keywords=floor;pos;register;inventory;retail;
+StartupNotify=true
+StartupWMClass=floor-pos
+X-GNOME-Autostart-enabled=false

@@ -2,14 +2,20 @@
 # Build a .deb with dpkg-deb after `npm run tauri:build -w @floor/pos` on amd64/Linux.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-STAGE="${ROOT}/packaging/deb-stage"
+PACK="${ROOT}/packaging"
+STAGE="${PACK}/deb-stage"
 VER="${1:-0.1.0}"
+ICONS="${ROOT}/src-tauri/icons"
 rm -rf "${STAGE}"
 install -d "${STAGE}/DEBIAN" \
   "${STAGE}/usr/bin" \
   "${STAGE}/usr/share/applications" \
-  "${STAGE}/lib/systemd/user" \
   "${STAGE}/usr/share/floor-pos" \
+  "${STAGE}/usr/share/icons/hicolor/32x32/apps" \
+  "${STAGE}/usr/share/icons/hicolor/128x128/apps" \
+  "${STAGE}/usr/share/icons/hicolor/256x256/apps" \
+  "${STAGE}/usr/share/icons/hicolor/512x512/apps" \
+  "${STAGE}/lib/systemd/user" \
   "${STAGE}/etc/floor-pos"
 
 BIN="$(ls -1 "${ROOT}/src-tauri/target/release/floor-pos" "${ROOT}/src-tauri/target/release/floor-pos.exe" 2>/dev/null | head -n1 || true)"
@@ -18,33 +24,28 @@ if [[ -z "${BIN}" ]]; then
   exit 1
 fi
 install -m 0755 "${BIN}" "${STAGE}/usr/bin/floor-pos"
-install -m 0755 "${ROOT}/packaging/install-kiosk.sh" "${STAGE}/usr/share/floor-pos/install-kiosk.sh"
+install -m 0755 "${PACK}/floor-pos-kiosk" "${STAGE}/usr/bin/floor-pos-kiosk"
+install -m 0755 "${PACK}/floor-pos-kiosk" "${STAGE}/usr/share/floor-pos/floor-pos-kiosk"
+install -m 0755 "${PACK}/install-kiosk.sh" "${STAGE}/usr/share/floor-pos/install-kiosk.sh"
+install -m 0755 "${PACK}/install-desktop.sh" "${STAGE}/usr/share/floor-pos/install-desktop.sh"
+install -m 0644 "${PACK}/floor-pos.desktop" "${STAGE}/usr/share/applications/floor-pos.desktop"
+install -m 0644 "${PACK}/floor-pos.desktop" "${STAGE}/usr/share/floor-pos/floor-pos.desktop"
 
-cat >"${STAGE}/usr/bin/floor-pos-kiosk" <<'EOF'
-#!/bin/bash
-set -euo pipefail
-if [[ -f /etc/floor-pos/webkit.env ]]; then
-  # shellcheck disable=SC1091
-  set -a
-  source /etc/floor-pos/webkit.env
-  set +a
-fi
-exec /usr/bin/floor-pos "$@"
-EOF
-chmod 0755 "${STAGE}/usr/bin/floor-pos-kiosk"
+install -d "${STAGE}/usr/share/floor-pos/icons"
+install -m 0644 "${ICONS}/32x32.png" "${STAGE}/usr/share/icons/hicolor/32x32/apps/floor-pos.png"
+install -m 0644 "${ICONS}/128x128.png" "${STAGE}/usr/share/icons/hicolor/128x128/apps/floor-pos.png"
+install -m 0644 "${ICONS}/128x128@2x.png" "${STAGE}/usr/share/icons/hicolor/256x256/apps/floor-pos.png"
+install -m 0644 "${ICONS}/icon.png" "${STAGE}/usr/share/icons/hicolor/512x512/apps/floor-pos.png"
+# Copy for install-desktop.sh when run from /usr/share/floor-pos after the .deb.
+install -m 0644 "${ICONS}/32x32.png" "${STAGE}/usr/share/floor-pos/icons/32x32.png"
+install -m 0644 "${ICONS}/128x128.png" "${STAGE}/usr/share/floor-pos/icons/128x128.png"
+install -m 0644 "${ICONS}/128x128@2x.png" "${STAGE}/usr/share/floor-pos/icons/128x128@2x.png"
+install -m 0644 "${ICONS}/icon.png" "${STAGE}/usr/share/floor-pos/icons/icon.png"
 
 cat >"${STAGE}/etc/floor-pos/webkit.env" <<'EOF'
 # Uncomment if WebKitGTK flickers on nouveau:
 # WEBKIT_DISABLE_DMABUF_RENDERER=1
 # WEBKIT_DISABLE_COMPOSITING_MODE=1
-EOF
-
-cat >"${STAGE}/usr/share/applications/floor-pos.desktop" <<'EOF'
-[Desktop Entry]
-Name=Floor Register
-Exec=/usr/bin/floor-pos-kiosk
-Type=Application
-X-GNOME-Autostart-enabled=false
 EOF
 
 cat >"${STAGE}/lib/systemd/user/floor-pos.service" <<'EOF'
@@ -71,6 +72,7 @@ Depends: cage, greetd
 Maintainer: Floor <pos@localhost>
 Description: Floor Linux register kiosk
  Register POS for Open Box Industries / Floor.
+ Includes a desktop launcher (Floor) for pre-kiosk Ubuntu sessions.
 EOF
 
 cat >"${STAGE}/DEBIAN/postinst" <<'EOF'
@@ -85,9 +87,11 @@ if [[ ! -f /etc/floor-pos/webkit.env ]]; then
 # WEBKIT_DISABLE_COMPOSITING_MODE=1
 ENV
 fi
-echo "Install kiosk OS bits with: sudo /usr/share/floor-pos/install-kiosk.sh"
+gtk-update-icon-cache -f /usr/share/icons/hicolor 2>/dev/null || true
+update-desktop-database /usr/share/applications 2>/dev/null || true
+echo "Desktop launcher: Floor (app grid). Kiosk OS bits: sudo /usr/share/floor-pos/install-kiosk.sh"
 EOF
 chmod 0755 "${STAGE}/DEBIAN/postinst"
 
-dpkg-deb --build "${STAGE}" "${ROOT}/packaging/floor-pos_${VER}_amd64.deb"
-echo "Wrote ${ROOT}/packaging/floor-pos_${VER}_amd64.deb"
+dpkg-deb --build "${STAGE}" "${PACK}/floor-pos_${VER}_amd64.deb"
+echo "Wrote ${PACK}/floor-pos_${VER}_amd64.deb"
