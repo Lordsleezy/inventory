@@ -4,7 +4,7 @@ import PackageDescription
 // DO NOT MODIFY THIS FILE - managed by Capacitor CLI commands
 let package = Package(
     name: "CapApp-SPM",
-    platforms: [.iOS(.v15)],
+    platforms: [.iOS(.v16)],
     products: [
         .library(
             name: "CapApp-SPM",
@@ -15,7 +15,8 @@ let package = Package(
         .package(name: "CapacitorCommunitySqlite", path: "../../../../../node_modules/@capacitor-community/sqlite"),
         .package(name: "CapacitorCamera", path: "../../../../../node_modules/@capacitor/camera"),
         .package(name: "CapacitorFilesystem", path: "../../../../../node_modules/@capacitor/filesystem"),
-        .package(name: "CapacitorShare", path: "../../../../../node_modules/@capacitor/share")
+        .package(name: "CapacitorShare", path: "../../../../../node_modules/@capacitor/share"),
+        .package(name: "FloorSquarePlugin", path: "../../../../../node_modules/@floor/square-plugin")
     ],
     targets: [
         .target(
@@ -26,7 +27,8 @@ let package = Package(
                 .product(name: "CapacitorCommunitySqlite", package: "CapacitorCommunitySqlite"),
                 .product(name: "CapacitorCamera", package: "CapacitorCamera"),
                 .product(name: "CapacitorFilesystem", package: "CapacitorFilesystem"),
-                .product(name: "CapacitorShare", package: "CapacitorShare")
+                .product(name: "CapacitorShare", package: "CapacitorShare"),
+                .product(name: "FloorSquarePlugin", package: "FloorSquarePlugin")
             ]
         )
     ]

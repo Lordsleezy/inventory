@@ -4,52 +4,53 @@
 
 | Variable | Where |
 |----------|--------|
-| `SQUARE_APPLICATION_ID` | Netlify (already set) |
-| `SQUARE_APPLICATION_SECRET` | Netlify (already set) |
-| `SQUARE_ENVIRONMENT` | `sandbox` (already set) |
-| `SQUARE_REDIRECT_URL` | `https://<site>/.netlify/functions/square-oauth-callback` — must match Square console |
-| `CONNECTIONS_KEY` | Netlify (already set) — encrypts tokens in `square_connections` |
-| `SQUARE_SANDBOX_ACCESS_TOKEN` | Optional: Default Test Account token from Square console (sandbox API without OAuth) |
-| `SQUARE_SANDBOX_LOCATION_ID` | Optional: sandbox Location ID for the test account |
+| `SQUARE_APPLICATION_ID` | Netlify + Codemagic group **appstore** (public; used to initialize the iOS SDK) |
+| `SQUARE_APPLICATION_SECRET` | Netlify only |
+| `SQUARE_ENVIRONMENT` | `sandbox` |
+| `SQUARE_REDIRECT_URL` | `https://<site>/.netlify/functions/square-oauth-callback` |
+| `CONNECTIONS_KEY` | Netlify — encrypts tokens in `square_connections` |
+| `SQUARE_SANDBOX_ACCESS_TOKEN` | Optional Default Test Account token |
+| `SQUARE_SANDBOX_LOCATION_ID` | Optional sandbox Location ID |
 
 Also: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE`.
 
+## How the iOS SDK is linked (no manual Xcode)
+
+`packages/square-plugin/Package.swift` depends on
+`https://github.com/square/mobile-payments-sdk-ios` exact **2.6.0** (`SquareMobilePaymentsSDK`).
+
+`npx cap sync ios` regenerates `CapApp-SPM` and pulls `FloorSquarePlugin` (and thus Square) into the app.
+`scripts/ios-square-prepare.sh` then:
+
+- bumps deployment target to iOS 16
+- disables User Script Sandboxing
+- adds Square’s `SquareMobilePaymentsSDK.framework/setup` run-script phase
+- writes Bluetooth / location / microphone plist keys
+- sets `SquareApplicationID` from `SQUARE_APPLICATION_ID`
+- verifies / injects `FloorSquarePlugin` into CapApp-SPM if sync skipped it
+
+MockReaderUI is **not** linked (breaks App Store upload). Sandbox mock charges use the plugin’s `mock: true` path when needed.
+
 ## Register: Connect Square
 
-1. Settings → **Connect Square** (opens OAuth; state = store_id).
-2. **Refresh status** → **List locations** → pick location.
-3. Open phone **Payment device**, note pair code → register **Pair**.
-4. Cart → Card → Charge on phone.
+1. Settings → **Connect Square** → authorize → **List locations** → pick location.
+2. Phone **Payment device** → pair code → register **Pair**.
+3. Cart → Card → Charge on phone.
 
-## Sandbox end-to-end test (mock reader)
+## First Codemagic / TestFlight checklist
 
-1. Deploy Netlify from `square-v1` (or set env and run functions locally).
-2. Apply migration `0028` on Floor (via merge later — or `supabase db push` only if you intend to).
-3. Set tax rate 7.25% in Settings.
-4. On phone (TestFlight or simulator): Payment device → Authorize Square (mock if not connected).
-5. Register: pair phone; add 2 available SKUs to cart; **Card** → **Charge card on phone**.
-6. Phone: **Take payment** (mock returns VISA •••• 1111).
-7. Register should leave waiting state → Done → print; receipt shows card brand/last4.
-8. Failure drills: Cancel while waiting; decline on phone; sell one SKU elsewhere mid-wait then confirm refund attempt.
-
-## First Codemagic / TestFlight build checklist
-
-1. Start a **manual** Codemagic build of branch `square-v1` (or push to `square-v1` — workflow includes that branch).
-2. In Xcode (or via package UI on the Mac mini): add SPM `https://github.com/square/mobile-payments-sdk-ios` and link **SquareMobilePaymentsSDK** to App. The prepare script only adds Bluetooth/location plist keys.
-3. Confirm build log shows `FloorSquarePlugin.swift` compiling with `canImport(SquareMobilePaymentsSDK)` true (not only the stub path).
-4. Install TestFlight build → Settings → Payment device → Authorize → pair code visible.
-5. Confirm Bluetooth permission prompt appears when pairing a reader.
-6. Sandbox: enable **Mock Reader** in Square Dashboard / SDK sample flow if using hardware simulation.
-7. Watch Netlify logs for `square-oauth-callback`, `square-mobile-auth`, `square-refund-payment`.
+1. Ensure Codemagic group **appstore** has `SQUARE_APPLICATION_ID` (sandbox Application ID).
+2. Push / build branch `square-v1` — workflow resolves SPM and builds IPA for TestFlight.
+3. Build log must show Square package resolve (`mobile-payments-sdk-ios` / `SquareMobilePaymentsSDK`) and IPA upload.
+4. On device: Payment device → Authorize Square → take a sandbox payment (mock path OK until a reader / Mock Reader UI is added separately for Debug).
+5. Watch Netlify logs for `square-oauth-callback`, `square-mobile-auth`, `square-refund-payment`.
 
 ## Before production
 
-- Switch `SQUARE_ENVIRONMENT=production`, production Application ID/Secret, production redirect URL.
-- Complete OAuth with the live merchant (do not use sandbox test token).
-- Square app signature / Mobile Payments production credentials as required by Square.
-- Encrypt path already uses `CONNECTIONS_KEY` — rotate if it was ever logged.
-- Turn off mock charges (`mock: false`) once the real SDK is linked and authorized.
+- `SQUARE_ENVIRONMENT=production` + production Application ID/Secret + redirect.
+- Live OAuth; Square application signature (bundle ID + team ID).
+- Do not ship sandbox test tokens.
 
 ## License
 
-`square/mobile-payments-sdk-react-native` sample patterns are Apache 2.0 — keep NOTICE when vendoring bridge code.
+Donut Counter / Mobile Payments sample patterns — keep NOTICE when vendoring bridge code.

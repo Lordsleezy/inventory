@@ -42,7 +42,8 @@ workflows:
         # Also required in group appstore (public, baked into the IPA):
         # VITE_SUPABASE_URL=https://zoukmsmbztcuyoslvikp.supabase.co
         # VITE_SUPABASE_ANON_KEY, VITE_FUNCTIONS_URL
-        # Optional (public): SQUARE_APPLICATION_ID for Mobile Payments SDK
+        # Required for MobilePaymentsSDK.initialize (public Square Application ID):
+        # SQUARE_APPLICATION_ID
       xcode: latest
       node: 22.18.0
     scripts:
@@ -89,12 +90,40 @@ workflows:
           fi
           npx cap sync ios
           bash ../../scripts/ios-prepare.sh
+          # SQUARE_APPLICATION_ID from Codemagic group appstore (public Square app id).
+          export SQUARE_APPLICATION_ID="${SQUARE_APPLICATION_ID:-}"
           bash ../../scripts/ios-square-prepare.sh
           if [ -f ios/App/Podfile ]; then
             (cd ios/App && pod install)
           fi
           cd ../..
           test -d "$XCODE_PROJECT"
+          # Prove CapApp-SPM pulled FloorSquare + Square SDK (no manual Xcode SPM step).
+          grep -q FloorSquarePlugin apps/adapter/ios/App/CapApp-SPM/Package.swift
+          grep -q mobile-payments-sdk-ios packages/square-plugin/Package.swift
+          grep -q SquareMobilePaymentsSDK packages/square-plugin/Package.swift
+          grep -q FloorSquarePlugin apps/adapter/ios/App/App/capacitor.config.json \
+            || grep -q FloorSquarePlugin apps/adapter/ios/App/CapApp-SPM/Package.swift
+          echo "PASS  FloorSquarePlugin + SquareMobilePaymentsSDK declared for SPM"
+      - name: Resolve Swift packages (prove SDK links)
+        script: |
+          set -euo pipefail
+          xcodebuild -resolvePackageDependencies \
+            -project "$XCODE_PROJECT" \
+            -scheme "$XCODE_SCHEME" \
+            | tee /tmp/spm-resolve.log
+          # Resolved package graph must include Square's Mobile Payments SDK.
+          if ! grep -Eiq 'mobile-payments-sdk-ios|SquareMobilePaymentsSDK' /tmp/spm-resolve.log \
+            && ! find ~/Library/Developer/Xcode/DerivedData -name 'SquareMobilePaymentsSDK*' 2>/dev/null | head -1 | grep -q .; then
+            # xcodebuild -resolvePackageDependencies output varies; also check Package.resolved if present
+            if ! find apps/adapter/ios -name 'Package.resolved' -print0 | xargs -0 grep -l mobile-payments-sdk-ios 2>/dev/null | head -1 | grep -q .; then
+              echo "Square Mobile Payments SDK did not resolve into the Xcode package graph" >&2
+              echo "--- spm-resolve.log (tail) ---" >&2
+              tail -80 /tmp/spm-resolve.log >&2 || true
+              exit 1
+            fi
+          fi
+          echo "PASS  Square Mobile Payments SDK resolved"
       - name: Set up keychain
         script: keychain initialize
       - name: Fetch signing files from Apple
