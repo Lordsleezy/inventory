@@ -1,0 +1,10 @@
+# Optional Postgres + pgTAP for register SQL tests (not the live Floor project).
+services:
+  db:
+    image: supabase/postgres:15.8.1.060
+    ports:
+      - "54322:5432"
+    environment:
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - ./init-pgtap.sql:/docker-entrypoint-initdb.d/01-pgtap.sql:ro

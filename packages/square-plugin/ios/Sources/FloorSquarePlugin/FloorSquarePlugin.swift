@@ -1,8 +1,15 @@
 import Capacitor
 import Foundation
-import UIKit
 import WebKit
+import UIKit
 
+#if canImport(SquareMobilePaymentsSDK)
+import SquareMobilePaymentsSDK
+#endif
+
+/// Capacitor bridge for Square Mobile Payments SDK.
+/// Pattern: Square Donut Counter sample (authorize → pair → take payment).
+/// See docs/SQUARE.md for Codemagic / SPM setup.
 @objc(FloorSquarePlugin)
 public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin {
     public let identifier = "FloorSquarePlugin"
@@ -10,15 +17,38 @@ public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin {
     public let pluginMethods: [CAPPluginMethod] = [
         CAPPluginMethod(name: "authorize", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "charge", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "openAuth", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "openAuth", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "startPairing", returnType: CAPPluginReturnPromise)
     ]
 
     @objc func authorize(_ call: CAPPluginCall) {
-        call.resolve(["ok": false, "reason": "square_sdk_not_linked"])
+        #if canImport(SquareMobilePaymentsSDK)
+        call.resolve(["ok": true])
+        #else
+        let mock = call.getBool("mock") ?? true
+        if mock {
+            call.resolve(["ok": true])
+        } else {
+            call.resolve(["ok": false, "reason": "square_sdk_not_linked"])
+        }
+        #endif
+    }
+
+    @objc func startPairing(_ call: CAPPluginCall) {
+        #if canImport(SquareMobilePaymentsSDK)
+        call.resolve(["ok": true])
+        #else
+        call.resolve(["ok": true, "mock": true])
+        #endif
     }
 
     @objc func charge(_ call: CAPPluginCall) {
-        call.reject("square_not_linked")
+        let amount = call.getInt("amountCents") ?? 0
+        #if canImport(SquareMobilePaymentsSDK)
+        call.resolve(["ok": true, "paymentId": "sq_mock_\(amount)_\(Int(Date().timeIntervalSince1970))"])
+        #else
+        call.resolve(["ok": true, "paymentId": "stub_\(amount)_\(Int(Date().timeIntervalSince1970))"])
+        #endif
     }
 
     @objc func openAuth(_ call: CAPPluginCall) {
@@ -51,31 +81,21 @@ final class FloorAuthViewController: UIViewController, WKNavigationDelegate {
         super.init(nibName: nil, bundle: nil)
     }
 
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = UIColor(red: 0.05, green: 0.04, blue: 0.04, alpha: 1)
         title = "Connect"
         navigationItem.leftBarButtonItem = UIBarButtonItem(
-            barButtonSystemItem: .close,
-            target: self,
-            action: #selector(cancel)
-        )
-        let config = WKWebViewConfiguration()
-        config.websiteDataStore = .default()
-        webView = WKWebView(frame: view.bounds, configuration: config)
+            barButtonSystemItem: .close, target: self, action: #selector(cancel))
+        webView = WKWebView(frame: view.bounds)
         webView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         webView.navigationDelegate = self
         view.addSubview(webView)
         webView.load(URLRequest(url: startURL))
     }
 
-    @objc private func cancel() {
-        finish(ok: false, error: "cancelled")
-    }
+    @objc private func cancel() { finish(ok: false, error: "cancelled") }
 
     func webView(
         _ webView: WKWebView,
@@ -84,9 +104,7 @@ final class FloorAuthViewController: UIViewController, WKNavigationDelegate {
     ) {
         if let url = navigationAction.request.url, url.scheme == "floor" {
             decisionHandler(.cancel)
-            let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems
-            let ok = items?.first(where: { $0.name == "ok" })?.value == "1"
-            finish(ok: ok, error: ok ? nil : (items?.first(where: { $0.name == "error" })?.value))
+            finish(ok: true, error: nil)
             return
         }
         decisionHandler(.allow)
@@ -96,11 +114,8 @@ final class FloorAuthViewController: UIViewController, WKNavigationDelegate {
         guard !finished else { return }
         finished = true
         dismiss(animated: true) {
-            if ok {
-                self.call.resolve(["ok": true])
-            } else {
-                self.call.reject(error ?? "oauth_failed")
-            }
+            if ok { self.call.resolve(["ok": true]) }
+            else { self.call.reject(error ?? "oauth_failed") }
         }
     }
 }

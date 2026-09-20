@@ -22,6 +22,7 @@ import { CheckoutScreen } from "./screens/Checkout";
 import { DelistScreen } from "./screens/Delist";
 import { IncidentsScreen } from "./screens/Incidents";
 import { ConnectionsScreen } from "./screens/Connections";
+import { PaymentDeviceScreen } from "./screens/PaymentDevice";
 import { StoreProvider } from "./store";
 import { PinProvider } from "./pin";
 
@@ -98,6 +99,7 @@ export function App() {
           <Route path="/delist" element={<DelistScreen />} />
           <Route path="/incidents" element={<IncidentsScreen />} />
           <Route path="/connections" element={<ConnectionsScreen />} />
+          <Route path="/payment-device" element={<PaymentDeviceScreen />} />
           <Route path="/settings" element={<SettingsScreen />} />
           <Route path="/settings/categories" element={<CategoriesScreen />} />
           <Route path="*" element={<Navigate to="/inventory" replace />} />
