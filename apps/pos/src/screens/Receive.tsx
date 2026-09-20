@@ -4,8 +4,21 @@ import { parseMoneyToCents } from "@floor/store";
 import { authErrorMessage, floorCloud } from "@floor/cloud";
 import { usePos } from "../pos-context";
 
+function jsonStringList(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map(String).filter(Boolean);
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      if (Array.isArray(parsed)) return parsed.map(String).filter(Boolean);
+    } catch {
+      /* ignore */
+    }
+  }
+  return [];
+}
+
 export function ReceiveScreen() {
-  const { isAdmin, online, refreshUnits } = usePos();
+  const { isAdmin, online, refreshUnits, session } = usePos();
   const navigate = useNavigate();
   const [sku, setSku] = useState("");
   const [brand, setBrand] = useState("");
@@ -19,13 +32,27 @@ export function ReceiveScreen() {
   const [notes, setNotes] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [categories, setCategories] = useState<string[]>([]);
+  const [conditions, setConditions] = useState<string[]>([]);
 
   useEffect(() => {
     if (!isAdmin) return;
     void floorCloud()
       .rpc("next_sku")
       .then(({ data }) => setSku(String(data ?? "")));
-  }, [isAdmin]);
+    void floorCloud()
+      .from("store_settings")
+      .select("key, value")
+      .eq("store_id", session.storeId)
+      .in("key", ["categories", "conditions"])
+      .then(({ data }) => {
+        for (const row of data ?? []) {
+          const list = jsonStringList(row.value);
+          if (row.key === "categories") setCategories(list);
+          if (row.key === "conditions") setConditions(list);
+        }
+      });
+  }, [isAdmin, session.storeId]);
 
   if (!isAdmin) {
     return (
@@ -100,11 +127,38 @@ export function ReceiveScreen() {
       </label>
       <label>
         Category
-        <input value={category} onChange={(e) => setCategory(e.target.value)} />
+        {categories.length ? (
+          <select value={category} onChange={(e) => setCategory(e.target.value)}>
+            <option value="">Select…</option>
+            {categories.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <input value={category} onChange={(e) => setCategory(e.target.value)} list="recv-categories" />
+        )}
+        <datalist id="recv-categories">
+          {categories.map((c) => (
+            <option key={c} value={c} />
+          ))}
+        </datalist>
       </label>
       <label>
         Condition
-        <input value={condition} onChange={(e) => setCondition(e.target.value)} />
+        {conditions.length ? (
+          <select value={condition} onChange={(e) => setCondition(e.target.value)}>
+            <option value="">Select…</option>
+            {conditions.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <input value={condition} onChange={(e) => setCondition(e.target.value)} />
+        )}
       </label>
       <label>
         Ask
