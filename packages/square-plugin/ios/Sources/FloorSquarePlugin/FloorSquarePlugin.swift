@@ -229,27 +229,17 @@ public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManagerDe
                 self.resolve(call, ["ok": true, "sdkLinked": true, "already": true])
                 return
             }
-            let exception = FloorCatchException {
-                auth.authorize(withAccessToken: token, locationID: locationId) { error in
-                    if let error {
-                        self.resolve(call, [
-                            "ok": false,
-                            "reason": error.localizedDescription,
-                            "message": "Square authorize failed: \(error.localizedDescription)",
-                            "sdkLinked": true
-                        ])
-                    } else {
-                        self.resolve(call, ["ok": true, "sdkLinked": true])
-                    }
+            auth.authorize(withAccessToken: token, locationID: locationId) { error in
+                if let error {
+                    self.resolve(call, [
+                        "ok": false,
+                        "reason": error.localizedDescription,
+                        "message": "Square authorize failed: \(error.localizedDescription)",
+                        "sdkLinked": true
+                    ])
+                } else {
+                    self.resolve(call, ["ok": true, "sdkLinked": true])
                 }
-            }
-            if let exception {
-                self.resolve(call, [
-                    "ok": false,
-                    "reason": "authorize_exception",
-                    "message": "Square authorize crashed: \(exception.name.rawValue) — \(exception.reason ?? "")",
-                    "sdkLinked": true
-                ])
             }
         }
     }
@@ -364,24 +354,12 @@ public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManagerDe
             }
             self.paymentDelegate = delegate
 
-            let exception = FloorCatchException {
-                self.paymentHandle = MobilePaymentsSDK.shared.paymentManager.startPayment(
-                    params,
-                    promptParameters: prompt,
-                    from: presenter,
-                    delegate: delegate
-                )
-            }
-            if let exception {
-                self.paymentDelegate = nil
-                self.paymentHandle = nil
-                self.resolve(call, [
-                    "ok": false,
-                    "reason": "start_payment_exception",
-                    "message": "Square startPayment crashed: \(exception.name.rawValue) — \(exception.reason ?? "no reason"). This was caught so the app stays open; check sandbox mock reader / permissions.",
-                    "sdkLinked": true
-                ])
-            }
+            self.paymentHandle = MobilePaymentsSDK.shared.paymentManager.startPayment(
+                params,
+                promptParameters: prompt,
+                from: presenter,
+                delegate: delegate
+            )
         }
     }
 
