@@ -83,31 +83,46 @@ app-store-connect fetch-signing-files "$BUNDLE_ID" \
 if [ -n "${IOS_DEVICE_UDID:-}" ]; then
   WANT="$(printf '%s' "$IOS_DEVICE_UDID" | tr -d ' \t\r\n-' | tr '[:lower:]' '[:upper:]')"
   FOUND=0
+  # Codemagic CLI saves profiles under Xcode UserData, not ~/Library/MobileDevice.
   while IFS= read -r prov; do
     [ -f "$prov" ] || continue
     DECODED="$(mktemp)"
     if security cms -D -i "$prov" >"$DECODED" 2>/dev/null \
       || openssl smime -inform DER -verify -noverify -in "$prov" >"$DECODED" 2>/dev/null; then
-      if FLOOR_WANT="$WANT" python3 - "$DECODED" <<'PY'
+      if FLOOR_WANT="$WANT" FLOOR_PROV="$prov" python3 - "$DECODED" <<'PY'
 import plistlib, os, re, sys
 want = os.environ["FLOOR_WANT"]
 p = plistlib.load(open(sys.argv[1], "rb"))
 devs = p.get("ProvisionedDevices") or []
 def norm(s): return re.sub(r"[^0-9A-Fa-f]", "", s or "").upper()
-ok = any(norm(d) == want for d in devs)
-print("profile", p.get("Name"), "devices", len(devs), "udid_match", ok)
+norms = [norm(d) for d in devs]
+ok = want in norms
+print("profile", p.get("Name"), "path", os.environ.get("FLOOR_PROV"))
 print("get-task-allow", (p.get("Entitlements") or {}).get("get-task-allow"))
+print("devices", len(devs))
+for d in devs:
+    print("  ", d, "norm=", norm(d), "match=" + str(norm(d) == want))
+print("want_norm", want, "udid_match", ok)
 sys.exit(0 if ok else 1)
 PY
       then
         FOUND=1
+        rm -f "$DECODED"
+        break
       fi
     fi
     rm -f "$DECODED"
-  done < <(find ~/Library/MobileDevice/Provisioning\ Profiles /Users/builder/Library/MobileDevice/Provisioning\ Profiles . -name '*.mobileprovision' 2>/dev/null | head -40)
+  done < <(find \
+    "/Users/builder/Library/Developer/Xcode/UserData/Provisioning Profiles" \
+    "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles" \
+    "$HOME/Library/MobileDevice/Provisioning Profiles" \
+    /Users/builder/Library/MobileDevice/Provisioning\ Profiles \
+    . \
+    -name '*.mobileprovision' 2>/dev/null | head -80)
 
   if [ "$FOUND" -ne 1 ]; then
-    echo "FAIL  refreshed Ad Hoc profile does not include IOS_DEVICE_UDID=$IOS_DEVICE_UDID" >&2
+    echo "FAIL  refreshed Ad Hoc profile does not include IOS_DEVICE_UDID (normalized check)." >&2
+    echo "Want (normalized): $WANT" >&2
     echo "Enable the device in Apple Developer → Devices and re-run." >&2
     exit 1
   fi
