@@ -2,19 +2,17 @@
 # Publish an over-the-air (Safari) install page for an ad-hoc IPA built on Codemagic.
 #
 # Creates a public Codemagic URL for the IPA, writes a proper iOS manifest.plist,
-# hosts a tiny HTTPS install page (Netlify alias deploy preferred; GitHub gist fallback),
+# hosts a tiny HTTPS install page via Netlify REST API (never netlify-cli in the monorepo),
 # emails the link when RESEND_* is set, and prints a banner with the Safari URL + QR.
 #
 # Required env (Codemagic group appstore):
 #   CODEMAGIC_TOKEN  — Codemagic → User settings → Integrations → Codemagic API
 # Optional:
-#   NETLIFY_AUTH_TOKEN + NETLIFY_SITE_ID — host install page at https://ota-<tag>--<site>.netlify.app
+#   NETLIFY_AUTH_TOKEN + NETLIFY_SITE_ID — HTTPS install page (required for itms-services)
 #   GITHUB_TOKEN — gist fallback for the manifest if Netlify is unset
 #   RESEND_API_KEY + RESEND_FROM + OTA_EMAIL_TO — email the install link
-#   BUNDLE_ID, CM_TAG / CM_BRANCH
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUNDLE_ID="${BUNDLE_ID:-com.openboxindustries.floor}"
 APP_NAME="${OTA_APP_NAME:-Floor}"
 TAG="${CM_TAG:-${CM_BRANCH:-adhoc}}"
@@ -26,37 +24,58 @@ if [ -z "${CODEMAGIC_TOKEN:-}" ] && [ -n "${CM_API_TOKEN:-}" ]; then
 fi
 if [ -z "${CODEMAGIC_TOKEN:-}" ]; then
   echo "FAIL  CODEMAGIC_TOKEN is unset — cannot mint a public IPA URL for OTA install." >&2
-  echo "Codemagic → User settings → Integrations → Codemagic API → copy token" >&2
-  echo "→ add CODEMAGIC_TOKEN to the Codemagic variable group named appstore." >&2
   exit 1
 fi
 
-# Prefer CM_ARTIFACT_LINKS; if empty (or no .ipa entry), fall back to local IPA path + Builds API.
-if [ -z "${CM_ARTIFACT_LINKS:-}" ] || [ "${CM_ARTIFACT_LINKS}" = "[]" ]; then
-  echo "WARN  CM_ARTIFACT_LINKS empty — will resolve IPA via build dir / Builds API"
-  CM_ARTIFACT_LINKS="${CM_ARTIFACT_LINKS:-[]}"
-  export CM_ARTIFACT_LINKS
+export CM_ARTIFACT_LINKS="${CM_ARTIFACT_LINKS:-[]}"
+if [ "$CM_ARTIFACT_LINKS" = "[]" ]; then
+  echo "WARN  CM_ARTIFACT_LINKS empty — will resolve IPA via Builds API"
 fi
 
 python3 - "$BUNDLE_ID" "$APP_NAME" "$TAG_SAFE" "$EXPIRE_DAYS" <<'PY'
-import json, os, sys, urllib.parse, urllib.request, ssl, time, subprocess, tempfile, textwrap
+import io
+import json
+import os
+import sys
+import tempfile
+import textwrap
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+import zipfile
 from pathlib import Path
 
 bundle_id, app_name, tag_safe, expire_days = sys.argv[1:5]
-token = os.environ["CODEMAGIC_TOKEN"]
+cm_token = os.environ["CODEMAGIC_TOKEN"]
 
-def http_json(method, url, data=None, headers=None):
+
+def cm_json(method: str, url: str, data=None):
     body = None if data is None else json.dumps(data).encode()
-    hdrs = {"x-auth-token": token, "Content-Type": "application/json", "User-Agent": "floor-ota"}
-    if headers:
-        hdrs.update(headers)
-    req = urllib.request.Request(url, data=body, headers=hdrs, method=method)
+    req = urllib.request.Request(
+        url,
+        data=body,
+        method=method,
+        headers={
+            "x-auth-token": cm_token,
+            "Content-Type": "application/json",
+            "User-Agent": "floor-ota",
+        },
+    )
     with urllib.request.urlopen(req, timeout=90) as resp:
         raw = resp.read()
-        if not raw:
-            return {}
-        return json.loads(raw.decode())
+        return json.loads(raw.decode()) if raw else {}
 
+
+def ensure_https(url: str) -> str:
+    if url.startswith("http://"):
+        url = "https://" + url[len("http://") :]
+    if not url.startswith("https://"):
+        raise SystemExit(f"OTA URL must be HTTPS for itms-services, got: {url}")
+    return url
+
+
+# --- Resolve IPA artefact URL ---
 links = []
 try:
     links = json.loads(os.environ.get("CM_ARTIFACT_LINKS") or "[]")
@@ -72,15 +91,13 @@ for art in links:
         ipa = art
         break
 
-# Fallback: Codemagic Builds API for this build id
 if not ipa or not ipa.get("url"):
     build_id = os.environ.get("CM_BUILD_ID") or os.environ.get("FCI_BUILD_ID") or ""
     if build_id:
         try:
-            info = http_json("GET", f"https://api.codemagic.io/builds/{build_id}")
+            info = cm_json("GET", f"https://api.codemagic.io/builds/{build_id}")
             build = info.get("build") or info
-            arts = build.get("artefacts") or build.get("artifacts") or []
-            for art in arts:
+            for art in build.get("artefacts") or build.get("artifacts") or []:
                 name = (art.get("name") or art.get("filename") or "")
                 url = art.get("url") or ""
                 if str(name).lower().endswith(".ipa") or "/ipa" in str(url).lower():
@@ -91,38 +108,23 @@ if not ipa or not ipa.get("url"):
             print("WARN  Builds API artefact lookup failed:", e, file=sys.stderr)
 
 if not ipa or not ipa.get("url"):
-    # Last resort: find a local .ipa (won't have a public URL — fail clearly)
-    local = list(Path(".").rglob("*.ipa"))[:5]
     raise SystemExit(
         "No .ipa artefact URL available for OTA. "
-        f"CM_ARTIFACT_LINKS={os.environ.get('CM_ARTIFACT_LINKS','')[:200]!r} "
-        f"local_ipas={[str(p) for p in local]}"
+        f"CM_ARTIFACT_LINKS={os.environ.get('CM_ARTIFACT_LINKS', '')[:200]!r}"
     )
 
 auth_url = ipa["url"].rstrip("/")
-# Codemagic artifact URL shape: https://api.codemagic.io/artifacts/<...>/<file>
-# Public URL: POST {artifactUrl}/public-url
 expires_at = int(time.time()) + int(expire_days) * 86400
-req = urllib.request.Request(
-    auth_url + "/public-url",
-    data=json.dumps({"expiresAt": expires_at}).encode(),
-    headers={
-        "Content-Type": "application/json",
-        "x-auth-token": token,
-    },
-    method="POST",
-)
-with urllib.request.urlopen(req, timeout=60) as resp:
-    pub = json.load(resp)
+pub = cm_json("POST", auth_url + "/public-url", {"expiresAt": expires_at})
 ipa_public = pub["url"]
 print(f"PASS  public IPA URL (expires ~{expire_days}d)")
 
 version = os.environ.get("CFBundleShortVersionString") or os.environ.get("MARKETING_VERSION") or "1.0"
 build = os.environ.get("CFBundleVersion") or str(int(time.time()))
-# Prefer values from the built Info if present on disk
 for candidate in Path(".").rglob("Payload/*.app/Info.plist"):
     try:
         import plistlib
+
         data = plistlib.loads(candidate.read_bytes())
         version = str(data.get("CFBundleShortVersionString") or version)
         build = str(data.get("CFBundleVersion") or build)
@@ -163,20 +165,14 @@ manifest = f"""<?xml version="1.0" encoding="UTF-8"?>
 </plist>
 """
 
-tmpdir = Path(tempfile.mkdtemp(prefix="floor-ota-"))
+tmpdir = Path(tempfile.mkdtemp(prefix="floor-ota-", dir="/tmp"))
 (tmpdir / "manifest.plist").write_text(manifest)
-print(f"Wrote {tmpdir / 'manifest.plist'}")
+(tmpdir / "_headers").write_text(
+    "/*\n  X-Frame-Options: DENY\n/manifest.plist\n  Content-Type: application/xml\n"
+)
 
-manifest_url = None
-install_page_url = None
-
-netlify_token = os.environ.get("NETLIFY_AUTH_TOKEN") or os.environ.get("NETLIFY_TOKEN")
-netlify_site = os.environ.get("NETLIFY_SITE_ID") or os.environ.get("NETLIFY_SITE")
-if netlify_token and netlify_site:
-    # Placeholder install page — rewritten after we know the public site URL is awkward;
-    # use relative manifest + absolute itms link built after deploy via second write.
-    # First deploy with a bootstrap page; Netlify alias gives a stable host.
-    bootstrap = textwrap.dedent(f"""\
+bootstrap = textwrap.dedent(
+    f"""\
     <!DOCTYPE html>
     <html lang="en">
     <head>
@@ -206,54 +202,81 @@ if netlify_token and netlify_site:
       </script>
     </body>
     </html>
-    """)
-    (tmpdir / "index.html").write_text(bootstrap)
-    alias = f"ota-{tag_safe}"[:60].rstrip("-")
-    env = os.environ.copy()
-    env["NETLIFY_AUTH_TOKEN"] = netlify_token
-    cmd = [
-        "npx", "--yes", "netlify-cli@17", "deploy",
-        "--dir", str(tmpdir),
-        "--alias", alias,
-        "--site", netlify_site,
-        "--json",
-    ]
-    print("Deploying OTA page to Netlify alias", alias)
-    proc = subprocess.run(cmd, capture_output=True, text=True, env=env)
-    if proc.returncode != 0:
-        sys.stderr.write(proc.stdout)
-        sys.stderr.write(proc.stderr)
-        raise SystemExit("netlify deploy failed")
-    # netlify --json prints deploy metadata; find deploy URL
-    out = proc.stdout.strip().splitlines()
-    meta = None
-    for line in reversed(out):
-        line = line.strip()
-        if line.startswith("{"):
-            try:
-                meta = json.loads(line)
-                break
-            except json.JSONDecodeError:
-                continue
-    if not meta:
-        # sometimes the whole stdout is JSON
-        try:
-            meta = json.loads(proc.stdout)
-        except json.JSONDecodeError as e:
-            sys.stderr.write(proc.stdout)
-            raise SystemExit(f"could not parse netlify JSON: {e}") from e
-    install_page_url = meta.get("deploy_url") or meta.get("url") or meta.get("ssl_url")
-    if not install_page_url:
-        raise SystemExit(f"netlify deploy returned no URL: {meta}")
+    """
+)
+(tmpdir / "index.html").write_text(bootstrap)
+
+manifest_url = None
+install_page_url = None
+alias = f"ota-{tag_safe}"[:60].rstrip("-")
+
+netlify_token = os.environ.get("NETLIFY_AUTH_TOKEN") or os.environ.get("NETLIFY_TOKEN")
+netlify_site = os.environ.get("NETLIFY_SITE_ID") or os.environ.get("NETLIFY_SITE")
+
+if netlify_token and netlify_site:
+    # Zip deploy via REST API — never call netlify-cli inside the monorepo
+    # (it detects workspace packages and refuses without --filter).
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for p in sorted(tmpdir.iterdir()):
+            if p.is_file():
+                zf.write(p, arcname=p.name)
+    zip_bytes = buf.getvalue()
+    deploy_endpoint = (
+        f"https://api.netlify.com/api/v1/sites/{urllib.parse.quote(netlify_site)}/deploys"
+        f"?title={urllib.parse.quote('floor-ota-' + alias)}"
+        f"&branch={urllib.parse.quote(alias)}"
+    )
+    print("Deploying OTA zip to Netlify site", netlify_site, "branch", alias)
+    req = urllib.request.Request(
+        deploy_endpoint,
+        data=zip_bytes,
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {netlify_token}",
+            "Content-Type": "application/zip",
+            "User-Agent": "floor-ota",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            meta = json.load(resp)
+    except urllib.error.HTTPError as e:
+        err = e.read().decode("utf-8", "replace")
+        raise SystemExit(f"netlify zip deploy HTTP {e.code}: {err[:800]}") from e
+
+    deploy_id = meta.get("id") or ""
+    for _ in range(40):
+        state = (meta.get("state") or "").lower()
+        if state in ("ready", "current"):
+            break
+        if state in ("error", "failed"):
+            raise SystemExit(f"netlify deploy error: {meta}")
+        time.sleep(2)
+        with urllib.request.urlopen(
+            urllib.request.Request(
+                f"https://api.netlify.com/api/v1/deploys/{deploy_id}",
+                headers={"Authorization": f"Bearer {netlify_token}", "User-Agent": "floor-ota"},
+            ),
+            timeout=30,
+        ) as resp:
+            meta = json.load(resp)
+
+    install_page_url = ensure_https(
+        meta.get("deploy_ssl_url")
+        or meta.get("ssl_url")
+        or meta.get("deploy_url")
+        or meta.get("url")
+        or ""
+    )
     manifest_url = install_page_url.rstrip("/") + "/manifest.plist"
     print(f"PASS  Netlify OTA page: {install_page_url}")
+    print(f"PASS  manifest: {manifest_url}")
 else:
-    print("WARN  NETLIFY_AUTH_TOKEN / NETLIFY_SITE_ID unset — trying GitHub gist for manifest")
+    print("WARN  NETLIFY_AUTH_TOKEN / NETLIFY_SITE_ID unset — gist fallback")
     gh = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
     if not gh:
-        raise SystemExit(
-            "Need NETLIFY_AUTH_TOKEN+NETLIFY_SITE_ID or GITHUB_TOKEN to host the OTA manifest over HTTPS"
-        )
+        raise SystemExit("Need NETLIFY_AUTH_TOKEN+NETLIFY_SITE_ID (preferred) or GITHUB_TOKEN")
     body = {
         "description": f"Floor iOS OTA manifest {tag_safe}",
         "public": True,
@@ -273,18 +296,17 @@ else:
     with urllib.request.urlopen(req, timeout=60) as resp:
         gist = json.load(resp)
     raw = gist["files"]["manifest.plist"]["raw_url"]
-    # Prefer the immutable raw URL without query if present
     manifest_url = raw.split("?")[0] if "gist.githubusercontent.com" in raw else raw
-    itms = "itms-services://?action=download-manifest&url=" + urllib.parse.quote(manifest_url, safe="")
-    # Minimal public HTML via another gist file rendered through htmlpreview / direct itms in email
-    install_page_url = itms
+    install_page_url = "itms-services://?action=download-manifest&url=" + urllib.parse.quote(
+        manifest_url, safe=""
+    )
     print(f"PASS  gist manifest: {manifest_url}")
-    print("NOTE  Open the itms-services link in Safari (QR below encodes it).")
 
 itms = "itms-services://?action=download-manifest&url=" + urllib.parse.quote(manifest_url, safe="")
-# Prefer HTTPS install page when we have one (Safari-friendly); else raw itms
 share_url = install_page_url if install_page_url.startswith("http") else itms
-qr = "https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=" + urllib.parse.quote(share_url, safe="")
+qr = "https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=" + urllib.parse.quote(
+    share_url, safe=""
+)
 
 banner = f"""
 ================================================================================
@@ -293,13 +315,10 @@ FLOOR AD-HOC OTA INSTALL
 1. On your iPhone, open Safari (not Chrome / not in-app browsers).
 2. Go to:
    {share_url}
-3. Or scan this QR (open the image URL on any screen, point phone camera):
+3. Or scan this QR:
    {qr}
 4. Tap Install → Trust the developer cert if Settings prompts
    (General → VPN & Device Management).
-
-Your phone UDID must be on the Ad Hoc profile (see docs/SQUARE.md).
-IPA public URL expires in ~{expire_days} days.
 ================================================================================
 """
 print(banner)
@@ -307,7 +326,7 @@ Path("/tmp/floor-ota-install-url.txt").write_text(share_url + "\n")
 Path("/tmp/floor-ota-itms-url.txt").write_text(itms + "\n")
 Path("/tmp/floor-ota-qr-url.txt").write_text(qr + "\n")
 
-# Publish URL onto the git tag as a GitHub Release so we can fetch it without Codemagic login.
+# Publish onto GitHub release for the tag when possible.
 tag = os.environ.get("CM_TAG") or ""
 gh_token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN") or ""
 if tag and gh_token:
@@ -317,7 +336,7 @@ if tag and gh_token:
         f"{share_url}\n\n"
         f"QR: {qr}\n"
     )
-    # Create or update release
+
     def gh_api(method, url, data=None):
         body = None if data is None else json.dumps(data).encode()
         req = urllib.request.Request(
@@ -332,43 +351,27 @@ if tag and gh_token:
             },
         )
         with urllib.request.urlopen(req, timeout=60) as resp:
-            return json.load(resp) if resp.headers.get("Content-Type", "").startswith("application/json") else {}
+            raw = resp.read()
+            return json.loads(raw.decode()) if raw else {}
 
     repo = os.environ.get("CM_REPO_SLUG") or os.environ.get("GITHUB_REPOSITORY") or "Lordsleezy/inventory"
     api = f"https://api.github.com/repos/{repo}"
     try:
         try:
             rel = gh_api("GET", f"{api}/releases/tags/{tag}")
+            gh_api("PATCH", f"{api}/releases/{rel['id']}", {"body": notes, "name": tag, "prerelease": True})
+            print("PASS  updated GitHub release notes with OTA URL")
         except Exception:
             rel = gh_api(
                 "POST",
                 f"{api}/releases",
-                {
-                    "tag_name": tag,
-                    "name": tag,
-                    "body": notes,
-                    "draft": False,
-                    "prerelease": True,
-                },
+                {"tag_name": tag, "name": tag, "body": notes, "draft": False, "prerelease": True},
             )
             print("PASS  created GitHub release", tag)
-        else:
-            gh_api(
-                "PATCH",
-                f"{api}/releases/{rel['id']}",
-                {"body": notes, "name": tag, "prerelease": True},
-            )
-            print("PASS  updated GitHub release notes with OTA URL")
-        # Upload install-url.txt asset
-        upload_url = (rel.get("upload_url") if isinstance(rel, dict) else None) or ""
-        if not upload_url:
-            rel = gh_api("GET", f"{api}/releases/tags/{tag}")
-            upload_url = rel.get("upload_url", "")
-        upload_url = upload_url.split("{")[0] + "?name=floor-ota-install-url.txt"
-        data = share_url.encode()
+        upload_url = (rel.get("upload_url") or "").split("{")[0] + "?name=floor-ota-install-url.txt"
         req = urllib.request.Request(
             upload_url,
-            data=data,
+            data=share_url.encode(),
             method="POST",
             headers={
                 "Authorization": f"Bearer {gh_token}",
@@ -379,15 +382,11 @@ if tag and gh_token:
         )
         try:
             with urllib.request.urlopen(req, timeout=60) as resp:
-                print("PASS  uploaded floor-ota-install-url.txt to release", resp.status)
+                print("PASS  uploaded floor-ota-install-url.txt", resp.status)
         except Exception as e:
-            # Replace existing asset if present
             print("WARN  release asset upload:", e, file=sys.stderr)
     except Exception as e:
         print("WARN  GitHub release publish failed:", e, file=sys.stderr)
-else:
-    print("HINT  Set GITHUB_TOKEN (or rely on Codemagic GitHub integration) to publish OTA URL on the tag release.")
-
 
 # Email via Resend when configured
 resend_key = os.environ.get("RESEND_API_KEY")
@@ -398,21 +397,16 @@ if resend_key and resend_from:
         "from": resend_from,
         "to": [resend_to],
         "subject": f"Floor iOS install ({tag_safe})",
-        "html": f"""
-          <p><strong>Install Floor</strong> (ad-hoc sandbox build <code>{tag_safe}</code>)</p>
-          <p>On your <strong>iPhone in Safari</strong> open:</p>
-          <p><a href="{share_url}">{share_url}</a></p>
-          <p><img src="{qr}" alt="QR" width="240" height="240"/></p>
-          <p>Must use Safari. Trust the developer certificate if iOS asks.</p>
-        """,
+        "html": (
+            f"<p><strong>Install Floor</strong> (ad-hoc <code>{tag_safe}</code>)</p>"
+            f"<p>On iPhone <strong>Safari</strong>: <a href=\"{share_url}\">{share_url}</a></p>"
+            f"<p><img src=\"{qr}\" alt=\"QR\" width=\"240\" height=\"240\"/></p>"
+        ),
     }
     req = urllib.request.Request(
         "https://api.resend.com/emails",
         data=json.dumps(mail).encode(),
-        headers={
-            "Authorization": f"Bearer {resend_key}",
-            "Content-Type": "application/json",
-        },
+        headers={"Authorization": f"Bearer {resend_key}", "Content-Type": "application/json"},
         method="POST",
     )
     try:
@@ -420,6 +414,4 @@ if resend_key and resend_from:
             print("PASS  emailed install link via Resend →", resend_to, resp.status)
     except Exception as e:
         print("WARN  Resend email failed:", e, file=sys.stderr)
-else:
-    print("HINT  Set RESEND_API_KEY + RESEND_FROM in Codemagic appstore to email the link automatically.")
 PY
