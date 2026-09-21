@@ -525,23 +525,30 @@ final class FloorPaymentDelegate: NSObject, PaymentManagerDelegate {
     }
 
     func paymentManager(_ paymentManager: PaymentManager, didFail payment: Payment, withError error: Error) {
-        var fields = [
-            "ok": false as Any,
-            "sdkLinked": true as Any
-        ]
         let ns = error as NSError
-        var codeName = ns.domain
+        var codeName = "NSError"
         var debug = error.localizedDescription
         if let pay = PaymentError(rawValue: ns.code) {
             codeName = String(describing: pay)
-            debug = pay.debugInfo.isEmpty ? debug : pay.debugInfo
         }
-        NSLog("FloorSquare payment failed: code=\(ns.code) name=\(codeName) debug=\(debug)")
-        fields["reason"] = codeName
-        fields["code"] = ns.code
-        fields["message"] = "Square payment failed [\(codeName)]: \(debug)"
-        fields["localizedDescription"] = error.localizedDescription
-        finish(fields)
+        if let info = ns.userInfo["SQErrorDebugCode"] as? String, !info.isEmpty {
+            debug = info
+            codeName = info
+        } else if let info = ns.userInfo["debugCode"] as? String, !info.isEmpty {
+            debug = info
+            codeName = info
+        } else if let info = ns.userInfo[NSLocalizedFailureReasonErrorKey] as? String, !info.isEmpty {
+            debug = info
+        }
+        NSLog("FloorSquare payment failed: code=\(ns.code) name=\(codeName) debug=\(debug) userInfo=\(ns.userInfo)")
+        finish([
+            "ok": false,
+            "reason": codeName,
+            "code": ns.code,
+            "message": "Square payment failed [\(codeName)]: \(debug)",
+            "localizedDescription": error.localizedDescription,
+            "sdkLinked": true
+        ])
     }
 
     func paymentManager(_ paymentManager: PaymentManager, didCancel payment: Payment) {
