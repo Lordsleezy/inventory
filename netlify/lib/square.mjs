@@ -11,7 +11,7 @@
  *   SQUARE_SANDBOX_ACCESS_TOKEN  (Default Test Account token from Square console)
  *   SQUARE_SANDBOX_LOCATION_ID
  */
-import { Client, Environment } from "square";
+import { Client, Environment } from "square/legacy";
 import { decryptSecret, encryptSecret, serviceClient } from "./server.mjs";
 
 function env() {
