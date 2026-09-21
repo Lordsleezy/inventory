@@ -83,19 +83,26 @@ public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManagerDe
         }
     }
 
-    /// Prefer Square's AuthorizationError / PaymentError debug codes over generic "contact the developer".
+    /// Prefer Square's AuthorizationError / PaymentError enum names over generic "contact the developer".
     private func squareErrorFields(_ error: Error, prefix: String) -> [String: Any] {
         let ns = error as NSError
-        var codeName = ns.domain
+        var codeName = "NSError"
         var debug = error.localizedDescription
         if let auth = AuthorizationError(rawValue: ns.code) {
             codeName = String(describing: auth)
-            debug = auth.debugInfo.isEmpty ? debug : auth.debugInfo
         } else if let pay = PaymentError(rawValue: ns.code) {
             codeName = String(describing: pay)
-            debug = pay.debugInfo.isEmpty ? debug : pay.debugInfo
         }
-        NSLog("FloorSquare \(prefix): code=\(ns.code) name=\(codeName) debug=\(debug) desc=\(error.localizedDescription)")
+        if let info = ns.userInfo["SQErrorDebugCode"] as? String, !info.isEmpty {
+            debug = info
+            codeName = info
+        } else if let info = ns.userInfo["debugCode"] as? String, !info.isEmpty {
+            debug = info
+            codeName = info
+        } else if let info = ns.userInfo[NSLocalizedFailureReasonErrorKey] as? String, !info.isEmpty {
+            debug = info
+        }
+        NSLog("FloorSquare \(prefix): code=\(ns.code) name=\(codeName) debug=\(debug) userInfo=\(ns.userInfo)")
         return [
             "reason": codeName,
             "code": ns.code,
@@ -314,11 +321,11 @@ public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManagerDe
             if auth.state == .authorized, currentLocation != locationId {
                 NSLog("FloorSquare authorize: deauthorize old location=\(currentLocation ?? "nil") → \(locationId)")
                 auth.deauthorize {
-                    auth.authorize(withAccessToken: token, locationID: locationId, completionHandler: finishAuthorize)
+                    auth.authorize(withAccessToken: token, locationID: locationId, completion: finishAuthorize)
                 }
                 return
             }
-            auth.authorize(withAccessToken: token, locationID: locationId, completionHandler: finishAuthorize)
+            auth.authorize(withAccessToken: token, locationID: locationId, completion: finishAuthorize)
         }
     }
 
