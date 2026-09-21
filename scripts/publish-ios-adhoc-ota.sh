@@ -263,6 +263,88 @@ Path("/tmp/floor-ota-install-url.txt").write_text(share_url + "\n")
 Path("/tmp/floor-ota-itms-url.txt").write_text(itms + "\n")
 Path("/tmp/floor-ota-qr-url.txt").write_text(qr + "\n")
 
+# Publish URL onto the git tag as a GitHub Release so we can fetch it without Codemagic login.
+tag = os.environ.get("CM_TAG") or ""
+gh_token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN") or ""
+if tag and gh_token:
+    notes = (
+        f"Ad-hoc sandbox build with MockReaderUI.\n\n"
+        f"**OTA install (open in Safari on a registered iPhone):**\n"
+        f"{share_url}\n\n"
+        f"QR: {qr}\n"
+    )
+    # Create or update release
+    def gh_api(method, url, data=None):
+        body = None if data is None else json.dumps(data).encode()
+        req = urllib.request.Request(
+            url,
+            data=body,
+            method=method,
+            headers={
+                "Authorization": f"Bearer {gh_token}",
+                "Accept": "application/vnd.github+json",
+                "Content-Type": "application/json",
+                "User-Agent": "floor-ota",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            return json.load(resp) if resp.headers.get("Content-Type", "").startswith("application/json") else {}
+
+    repo = os.environ.get("CM_REPO_SLUG") or os.environ.get("GITHUB_REPOSITORY") or "Lordsleezy/inventory"
+    api = f"https://api.github.com/repos/{repo}"
+    try:
+        try:
+            rel = gh_api("GET", f"{api}/releases/tags/{tag}")
+        except Exception:
+            rel = gh_api(
+                "POST",
+                f"{api}/releases",
+                {
+                    "tag_name": tag,
+                    "name": tag,
+                    "body": notes,
+                    "draft": False,
+                    "prerelease": True,
+                },
+            )
+            print("PASS  created GitHub release", tag)
+        else:
+            gh_api(
+                "PATCH",
+                f"{api}/releases/{rel['id']}",
+                {"body": notes, "name": tag, "prerelease": True},
+            )
+            print("PASS  updated GitHub release notes with OTA URL")
+        # Upload install-url.txt asset
+        upload_url = (rel.get("upload_url") if isinstance(rel, dict) else None) or ""
+        if not upload_url:
+            rel = gh_api("GET", f"{api}/releases/tags/{tag}")
+            upload_url = rel.get("upload_url", "")
+        upload_url = upload_url.split("{")[0] + "?name=floor-ota-install-url.txt"
+        data = share_url.encode()
+        req = urllib.request.Request(
+            upload_url,
+            data=data,
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {gh_token}",
+                "Content-Type": "text/plain",
+                "Accept": "application/vnd.github+json",
+                "User-Agent": "floor-ota",
+            },
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                print("PASS  uploaded floor-ota-install-url.txt to release", resp.status)
+        except Exception as e:
+            # Replace existing asset if present
+            print("WARN  release asset upload:", e, file=sys.stderr)
+    except Exception as e:
+        print("WARN  GitHub release publish failed:", e, file=sys.stderr)
+else:
+    print("HINT  Set GITHUB_TOKEN (or rely on Codemagic GitHub integration) to publish OTA URL on the tag release.")
+
+
 # Email via Resend when configured
 resend_key = os.environ.get("RESEND_API_KEY")
 resend_from = os.environ.get("RESEND_FROM")

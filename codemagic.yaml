@@ -3,9 +3,13 @@
 # Team ID 4SRR4NV35F. Bundle ID com.openboxindustries.floor.
 #
 # Two iOS paths (Square MockReaderUI cannot go to App Store Connect):
-#   ios-square-*  → ad-hoc IPA WITH MockReaderUI (sandbox card testing). No TestFlight.
-#   ios-*         → App Store IPA WITHOUT MockReaderUI → TestFlight.
-# Trigger: tag matching the patterns below, or push square-v1 (TestFlight path).
+#   ios-square-*  → workflow ios-square-sandbox (ad-hoc + MockReaderUI + OTA). No TestFlight.
+#   ios-* (other) → workflow ios-capacitor (App Store, no MockReaderUI) → TestFlight.
+#
+# Codemagic tag_patterns: first pattern applies first; on conflict the LATTER wins.
+# So excludes for ios-square-* must come AFTER the broader ios-* include.
+# Tag builds only (no push) — master pushes were picking up the TestFlight workflow
+# with MockReaderUI and failing ASC post-processing.
 
 workflows:
   ios-capacitor:
@@ -17,16 +21,14 @@ workflows:
     triggering:
       events:
         - tag
-        - push
       tag_patterns:
-        # ios-square-* is handled by ios-square-sandbox (MockReader / ad-hoc).
-        - pattern: ios-square-*
+        - pattern: "*"
           include: false
         - pattern: ios-*
           include: true
-      branch_patterns:
-        - pattern: square-v1
-          include: true
+        # Latter prevails — do NOT send ios-square-* to TestFlight / ASC.
+        - pattern: ios-square-*
+          include: false
     environment:
       groups:
         - appstore
@@ -41,6 +43,18 @@ workflows:
       xcode: latest
       node: 22.18.0
     scripts:
+      - name: Refuse ios-square tags (wrong workflow)
+        script: |
+          set -euo pipefail
+          echo "CM_TAG=${CM_TAG:-} CM_BRANCH=${CM_BRANCH:-} CM_WORKFLOW=${CM_WORKFLOW_NAME:-}"
+          if [[ "${CM_TAG:-}" == ios-square-* ]]; then
+            echo "FAIL  ios-square-* must use workflow ios-square-sandbox, not TestFlight" >&2
+            exit 1
+          fi
+          if [[ -z "${CM_TAG:-}" ]]; then
+            echo "FAIL  TestFlight workflow is tag-only (ios-*, excluding ios-square-*)" >&2
+            exit 1
+          fi
       - name: npm
         script: |
           npm ci
@@ -196,7 +210,7 @@ workflows:
         submit_to_testflight: true
 
   # Sandbox card testing: MockReaderUI is required (physical readers unsupported in Square
-  # sandbox) but ASC rejects its bundle id. Ship ad-hoc; install from Codemagic artifacts.
+  # sandbox) but ASC rejects its bundle id. Ship ad-hoc; Safari OTA install (no Mac).
   ios-square-sandbox:
     name: Floor iOS Square sandbox (ad-hoc)
     instance_type: mac_mini_m2
@@ -207,6 +221,8 @@ workflows:
       events:
         - tag
       tag_patterns:
+        - pattern: "*"
+          include: false
         - pattern: ios-square-*
           include: true
     environment:
@@ -222,6 +238,14 @@ workflows:
       xcode: latest
       node: 22.18.0
     scripts:
+      - name: Require ios-square tag
+        script: |
+          set -euo pipefail
+          echo "CM_TAG=${CM_TAG:-} CM_BRANCH=${CM_BRANCH:-} CM_WORKFLOW=${CM_WORKFLOW_NAME:-}"
+          if [[ "${CM_TAG:-}" != ios-square-* ]]; then
+            echo "FAIL  this workflow only builds ios-square-* tags (got: '${CM_TAG:-}')" >&2
+            exit 1
+          fi
       - name: npm
         script: |
           npm ci

@@ -44,8 +44,12 @@ in a Release archive that goes to ASC. The plugin uses `#if canImport(MockReader
 | `ios-square-*` | **Floor iOS Square sandbox (ad-hoc)** | yes | Ad Hoc | Safari OTA link (no Mac) |
 | `ios-*` (not square) | **Floor iOS (TestFlight)** | no | App Store | TestFlight |
 
-Sandbox card charges **require** MockReaderUI (physical readers unsupported in Square sandbox).
-That build cannot upload to TestFlight — install via the OTA link instead.
+Both workflows are **tag-only** (no branch push). Codemagic tag pattern matching uses
+**latter-wins**: TestFlight includes `ios-*` then excludes `ios-square-*` so sandbox tags
+never hit App Store Connect.
+
+If tags do not start builds: Codemagic → App settings → **Webhooks** → Update webhook, and
+ensure GitHub sends **Branch or tag creation** / push tag events.
 
 ### One-time setup (Codemagic group **appstore**)
 
