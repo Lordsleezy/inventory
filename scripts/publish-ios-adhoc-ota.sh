@@ -31,9 +31,11 @@ if [ -z "${CODEMAGIC_TOKEN:-}" ]; then
   exit 1
 fi
 
-if [ -z "${CM_ARTIFACT_LINKS:-}" ]; then
-  echo "FAIL  CM_ARTIFACT_LINKS is empty (publishing scripts only)." >&2
-  exit 1
+# Prefer CM_ARTIFACT_LINKS; if empty (or no .ipa entry), fall back to local IPA path + Builds API.
+if [ -z "${CM_ARTIFACT_LINKS:-}" ] || [ "${CM_ARTIFACT_LINKS}" = "[]" ]; then
+  echo "WARN  CM_ARTIFACT_LINKS empty — will resolve IPA via build dir / Builds API"
+  CM_ARTIFACT_LINKS="${CM_ARTIFACT_LINKS:-[]}"
+  export CM_ARTIFACT_LINKS
 fi
 
 python3 - "$BUNDLE_ID" "$APP_NAME" "$TAG_SAFE" "$EXPIRE_DAYS" <<'PY'
@@ -42,7 +44,24 @@ from pathlib import Path
 
 bundle_id, app_name, tag_safe, expire_days = sys.argv[1:5]
 token = os.environ["CODEMAGIC_TOKEN"]
-links = json.loads(os.environ["CM_ARTIFACT_LINKS"])
+
+def http_json(method, url, data=None, headers=None):
+    body = None if data is None else json.dumps(data).encode()
+    hdrs = {"x-auth-token": token, "Content-Type": "application/json", "User-Agent": "floor-ota"}
+    if headers:
+        hdrs.update(headers)
+    req = urllib.request.Request(url, data=body, headers=hdrs, method=method)
+    with urllib.request.urlopen(req, timeout=90) as resp:
+        raw = resp.read()
+        if not raw:
+            return {}
+        return json.loads(raw.decode())
+
+links = []
+try:
+    links = json.loads(os.environ.get("CM_ARTIFACT_LINKS") or "[]")
+except json.JSONDecodeError:
+    links = []
 
 ipa = None
 for art in links:
@@ -52,8 +71,33 @@ for art in links:
     if name.lower().endswith(".ipa") or typ == "ipa" or "/ipa" in url.lower():
         ipa = art
         break
+
+# Fallback: Codemagic Builds API for this build id
 if not ipa or not ipa.get("url"):
-    raise SystemExit(f"No .ipa in CM_ARTIFACT_LINKS: {json.dumps(links)[:800]}")
+    build_id = os.environ.get("CM_BUILD_ID") or os.environ.get("FCI_BUILD_ID") or ""
+    if build_id:
+        try:
+            info = http_json("GET", f"https://api.codemagic.io/builds/{build_id}")
+            build = info.get("build") or info
+            arts = build.get("artefacts") or build.get("artifacts") or []
+            for art in arts:
+                name = (art.get("name") or art.get("filename") or "")
+                url = art.get("url") or ""
+                if str(name).lower().endswith(".ipa") or "/ipa" in str(url).lower():
+                    ipa = {"name": name, "url": url, "type": "ipa"}
+                    print("PASS  resolved IPA via Builds API", name)
+                    break
+        except Exception as e:
+            print("WARN  Builds API artefact lookup failed:", e, file=sys.stderr)
+
+if not ipa or not ipa.get("url"):
+    # Last resort: find a local .ipa (won't have a public URL — fail clearly)
+    local = list(Path(".").rglob("*.ipa"))[:5]
+    raise SystemExit(
+        "No .ipa artefact URL available for OTA. "
+        f"CM_ARTIFACT_LINKS={os.environ.get('CM_ARTIFACT_LINKS','')[:200]!r} "
+        f"local_ipas={[str(p) for p in local]}"
+    )
 
 auth_url = ipa["url"].rstrip("/")
 # Codemagic artifact URL shape: https://api.codemagic.io/artifacts/<...>/<file>

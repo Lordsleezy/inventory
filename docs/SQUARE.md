@@ -48,8 +48,25 @@ Both workflows are **tag-only** (no branch push). Codemagic tag pattern matching
 **latter-wins**: TestFlight includes `ios-*` then excludes `ios-square-*` so sandbox tags
 never hit App Store Connect.
 
-If tags do not start builds: Codemagic → App settings → **Webhooks** → Update webhook, and
-ensure GitHub sends **Branch or tag creation** / push tag events.
+### Codemagic API (so the agent can start/read builds)
+
+One-time on the machine that runs Cursor:
+
+1. Codemagic → **User settings → Integrations → Codemagic API** → Show → copy token  
+2. Open the Floor app → copy **app id** from the URL `https://codemagic.io/app/<APP_ID>/…`  
+3. Save (never commit):
+
+```bash
+mkdir -p ~/.config/floor
+cat > ~/.config/floor/codemagic.env <<'EOF'
+export CODEMAGIC_TOKEN='…'
+export CODEMAGIC_APP_ID='…'
+EOF
+chmod 600 ~/.config/floor/codemagic.env
+```
+
+4. Then: `scripts/codemagic-build.sh start ios-square-sandbox ios-square-N`  
+   API-started builds ignore yaml tag filters — pass the workflow id explicitly.
 
 ### One-time setup (Codemagic group **appstore**)
 
