@@ -303,6 +303,11 @@ workflows:
           echo "PASS  Square Mobile Payments SDK resolved"
       - name: Set up keychain
         script: keychain initialize
+      - name: Register iPhone UDID on Apple team
+        script: |
+          # IOS_DEVICE_UDID in Codemagic group appstore — get it on the phone via
+          # Safari → https://udid.tech (or Codemagic → Team → iOS test devices email/QR).
+          bash scripts/register-ios-device.sh
       - name: Fetch ad-hoc signing files from Apple
         script: |
           echo "CERTIFICATE_PRIVATE_KEY length: ${#CERTIFICATE_PRIVATE_KEY}"
@@ -310,8 +315,8 @@ workflows:
             echo "CERTIFICATE_PRIVATE_KEY is empty — set it in Codemagic group appstore" >&2
             exit 1
           fi
-          # Ad-hoc so the IPA installs without App Store Connect (MockReaderUI cannot upload).
-          # Your iPhone UDID must be registered under Certificates, Identifiers & Profiles → Devices.
+          # Ad-hoc profile includes all devices currently on the team (after register step).
+          # MockReaderUI cannot upload to App Store Connect — OTA install only.
           app-store-connect fetch-signing-files "$BUNDLE_ID" \
             --platform IOS \
             --type IOS_APP_ADHOC \
@@ -351,17 +356,10 @@ workflows:
             IPA="$(find . -path '*/build/ios/ipa/*.ipa' -o -path '*/ios/ipa/*.ipa' 2>/dev/null | head -1 || true)"
           fi
           bash scripts/verify-ios-square-ipa.sh "$IPA"
-          echo ""
-          echo "=== INSTALL (ad-hoc sandbox) ==="
-          echo "1. Codemagic → this build → Artifacts → download the .ipa"
-          echo "2. On a Mac: Apple Configurator 2 → select your iPhone → Add → the .ipa"
-          echo "   Or Xcode → Window → Devices and Simulators → install the .ipa"
-          echo "3. Phone UDID must be on the Ad Hoc profile (Apple Developer → Devices)."
-          echo "4. On device: trust the developer cert if prompted (Settings → General → VPN & Device Management)."
-          echo "MockReaderUI is in this IPA — use the floating mock reader before Take payment."
     artifacts:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
+      - /tmp/floor-ota-*.txt
     publishing:
       email:
         recipients:
@@ -370,3 +368,17 @@ workflows:
           success: true
           failure: true
       # Intentionally no app_store_connect — MockReaderUI makes ASC upload fail.
+      scripts:
+        - name: Publish Safari OTA install link
+          script: |
+            set -euo pipefail
+            bash scripts/publish-ios-adhoc-ota.sh
+            echo ""
+            echo "=== HOW TO GET THE LINK ==="
+            echo "1. Open this Codemagic build → scroll the log for FLOOR AD-HOC OTA INSTALL"
+            echo "2. Or open /tmp/floor-ota-install-url.txt in Artifacts"
+            echo "3. If RESEND_* is set, check email for the same Safari URL + QR"
+            echo "4. On iPhone: open the URL in Safari → Install → trust developer cert if asked"
+            if [ -f /tmp/floor-ota-install-url.txt ]; then
+              echo "INSTALL_URL=$(cat /tmp/floor-ota-install-url.txt)"
+            fi

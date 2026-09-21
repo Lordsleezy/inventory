@@ -21,8 +21,8 @@ Sign up in the app creates the store. Invite others from Setup.
 ## Build the IPA
 
 1. App ID `com.openboxindustries.floor`, team `4SRR4NV35F`.
-2. **Sandbox Square card testing:** tag `ios-square-*` → Codemagic workflow **Floor iOS Square sandbox (ad-hoc)** → download the `.ipa` from Artifacts → install with Apple Configurator / Xcode Devices (phone UDID must be registered). See `docs/SQUARE.md`.
-3. **TestFlight (no MockReaderUI):** tag `ios-*` that is **not** `ios-square-*` → workflow **Floor iOS (TestFlight)**.
+2. **Sandbox Square card testing:** tag `ios-square-*` → Codemagic **Floor iOS Square sandbox (ad-hoc)** → open the Safari OTA link from the build log (`FLOOR AD-HOC OTA INSTALL`) or Artifacts `floor-ota-install-url.txt`. Set `CODEMAGIC_TOKEN` + `IOS_DEVICE_UDID` (+ Netlify OTA vars) in group **appstore**. See `docs/SQUARE.md`.
+3. **TestFlight (no MockReaderUI):** tag `ios-*` that is **not** `ios-square-*` → workflow **Floor iOS (TestFlight)**. Use this path for a real Square Reader in production.
 4. Push notifications: not in this IPA (no entitlements). Settings shows “Push not set up.” Resend email works once Netlify env is set.
 
 ## Netlify env

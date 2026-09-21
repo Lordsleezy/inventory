@@ -41,27 +41,45 @@ in a Release archive that goes to ASC. The plugin uses `#if canImport(MockReader
 
 | Tag | Workflow | MockReaderUI | Signing | Install |
 |-----|----------|--------------|---------|---------|
-| `ios-square-*` | **Floor iOS Square sandbox (ad-hoc)** | yes | Ad Hoc | Codemagic artifact → Apple Configurator / Xcode Devices |
+| `ios-square-*` | **Floor iOS Square sandbox (ad-hoc)** | yes | Ad Hoc | Safari OTA link (no Mac) |
 | `ios-*` (not square) | **Floor iOS (TestFlight)** | no | App Store | TestFlight |
 
 Sandbox card charges **require** MockReaderUI (physical readers unsupported in Square sandbox).
-That build cannot upload to TestFlight — install the ad-hoc IPA instead.
+That build cannot upload to TestFlight — install via the OTA link instead.
 
-### Install ad-hoc (`ios-square-*`)
+### One-time setup (Codemagic group **appstore**)
 
-1. Register your iPhone UDID in [Apple Developer → Devices](https://developer.apple.com/account/resources/devices/list) (once).
-2. Tag `ios-square-N` → wait for Codemagic **Floor iOS Square sandbox (ad-hoc)** to finish.
-3. Codemagic → build → **Artifacts** → download `.ipa`.
-4. Mac: **Apple Configurator 2** → select phone → Add → the IPA  
-   or **Xcode → Window → Devices and Simulators** → install the IPA.
-5. On phone, trust the developer cert if prompted (Settings → General → VPN & Device Management).
-6. Authorize Square → tap the floating mock reader → add contactless → Take payment.
+| Variable | Why |
+|----------|-----|
+| `CODEMAGIC_TOKEN` | **Required for OTA.** Codemagic → User settings → Integrations → Codemagic API → copy token |
+| `IOS_DEVICE_UDID` | **Required for Ad Hoc.** Your iPhone UDID so the provisioning profile includes the phone |
+| `NETLIFY_AUTH_TOKEN` + `NETLIFY_SITE_ID` | **Preferred.** Hosts the Safari install page (alias `ota-<tag>`) |
+| `GITHUB_TOKEN` | Fallback host for the OTA manifest if Netlify vars are missing |
+| `RESEND_API_KEY` + `RESEND_FROM` | Optional — emails you the install URL + QR |
+
+### Get your UDID (no Mac)
+
+1. On the iPhone, open **Safari** → [https://udid.tech](https://udid.tech) → install the temporary profile → copy the UDID.
+2. Paste it into Codemagic group **appstore** as `IOS_DEVICE_UDID`.
+3. Or: Codemagic → **Team settings → iOS test devices** → create a tester group → email yourself the registration link (QR on phone).
+
+Each `ios-square-*` build runs `scripts/register-ios-device.sh` then recreates the Ad Hoc profile so your UDID is covered.
+
+### Install ad-hoc from the phone (`ios-square-*`)
+
+1. Tag `ios-square-N` → wait for **Floor iOS Square sandbox (ad-hoc)**.
+2. Get the install URL (any of these):
+   - Codemagic build log → search **`FLOOR AD-HOC OTA INSTALL`**
+   - Build **Artifacts** → `floor-ota-install-url.txt`
+   - Email (if Resend vars are set)
+3. On the iPhone open that URL in **Safari** (not Chrome) → **Install**.
+4. If prompted: Settings → General → VPN & Device Management → trust the developer cert.
+5. Authorize Square → tap the floating mock reader → add contactless → Take payment.
 
 ### TestFlight (`ios-*` without `square`)
 
-Production-shaped binary (no MockReaderUI). Fine for UI / pairing plumbing; sandbox Take
-payment will refuse until you use an `ios-square-*` ad-hoc build (or a physical reader in
-production with a production Application ID).
+Production-shaped binary (no MockReaderUI). Fine for UI / pairing; sandbox Take payment will
+refuse until you use an `ios-square-*` OTA build (or a physical reader in production).
 
 ## Register: Connect Square
 
@@ -69,11 +87,32 @@ production with a production Application ID).
 2. Phone **Payment device** → pair code → register **Pair**.
 3. Cart → Card → Charge on phone.
 
-## Before production
+## Switching to production (real Square Reader / free-processing window)
+
+Sandbox cannot use physical readers. If you have a Cube and free processing, going live is
+usually simpler than fighting MockReaderUI + Ad Hoc forever.
+
+| Step | What |
+|------|------|
+| 1. Square Developer Console | Toggle to **Production**. Copy **Production** Application ID + Application Secret. |
+| 2. App signature (required for MPSDK ≥ 2.1) | Console → your app → **Mobile Payments SDK** → Add signature: bundle ID `com.openboxindustries.floor`, team ID `4SRR4NV35F`. |
+| 3. OAuth redirect | Same redirect URL works if already registered for production; confirm Production redirect allow-list includes `https://<site>/.netlify/functions/square-oauth-callback`. |
+| 4. Netlify env | `SQUARE_ENVIRONMENT=production`, `SQUARE_APPLICATION_ID=<prod>`, `SQUARE_APPLICATION_SECRET=<prod>`, clear/ignore sandbox token vars. Redeploy Netlify. |
+| 5. Codemagic | Set `SQUARE_APPLICATION_ID` in group **appstore** to the **production** Application ID (baked into the IPA). |
+| 6. Build | Tag an `ios-*` **TestFlight** build (no MockReaderUI) — e.g. `ios-11`. Install from TestFlight. |
+| 7. Re-Connect Square | In the app: disconnect/reconnect **Connect Square** so OAuth stores a **production** token + pick a **production** location. Sandbox tokens will not authorize production SDK. |
+| 8. Pair the Cube | Payment device → Square settings → pair the physical reader (Bluetooth + location on). |
+| 9. Charge | Cart → Card → Take payment with a real card. Free-processing window still settles as live payments — use a real card you control and refund if needed. |
+
+You do **not** need MockReaderUI or Ad Hoc once production Application ID is in the IPA and
+OAuth is production. Keep `FLOOR_INCLUDE_MOCK_READER` unset for TestFlight / App Store.
+
+## Before production (checklist)
 
 - `SQUARE_ENVIRONMENT=production` + production Application ID/Secret + redirect.
-- Live OAuth; Square application signature (bundle ID + team ID).
-- Ship TestFlight / App Store builds **without** MockReaderUI (`FLOOR_INCLUDE_MOCK_READER` unset).
+- Mobile Payments SDK application signature (bundle ID + team ID).
+- Re-do Connect Square; pick production location.
+- Ship TestFlight builds **without** MockReaderUI.
 - Do not ship sandbox test tokens.
 
 ## License
