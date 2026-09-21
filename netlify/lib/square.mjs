@@ -83,9 +83,10 @@ export async function getStoreSquareAccess(storeId) {
       } catch {
         /* still return the decrypted token */
       }
-      return {
+  return {
         accessToken,
         locationId: legacy.location_id || process.env.SQUARE_SANDBOX_LOCATION_ID || null,
+        locationName: null,
         merchantId: null,
         sandbox: (process.env.SQUARE_ENVIRONMENT || "sandbox") !== "production",
         source: "connections_mirrored",
@@ -95,6 +96,7 @@ export async function getStoreSquareAccess(storeId) {
       return {
         accessToken: process.env.SQUARE_SANDBOX_ACCESS_TOKEN,
         locationId: process.env.SQUARE_SANDBOX_LOCATION_ID || null,
+        locationName: null,
         merchantId: null,
         sandbox: true,
         source: "env_sandbox_token",
@@ -127,6 +129,7 @@ export async function getStoreSquareAccess(storeId) {
   return {
     accessToken: access,
     locationId: row.location_id || process.env.SQUARE_SANDBOX_LOCATION_ID || null,
+    locationName: row.location_name || null,
     merchantId: row.merchant_id,
     sandbox: row.sandbox,
     source: "square_connections",

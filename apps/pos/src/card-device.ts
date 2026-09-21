@@ -14,7 +14,13 @@ export type TicketLineForCharge = {
 
 export type CardDeviceKind = "phone_reader" | "square_terminal";
 
-export async function loadPairedReader(): Promise<{ id: string; lastSeen: string; kind: string } | null> {
+export async function loadPairedReader(): Promise<{
+  id: string;
+  lastSeen: string;
+  kind: string;
+  squareAuthorized: boolean;
+  squareLocationId: string | null;
+} | null> {
   const sb = floorCloud();
   const { data: setting } = await sb.from("store_settings").select("value").eq("key", "pos_reader_device_id").maybeSingle();
   const raw = setting?.value;
@@ -25,9 +31,19 @@ export async function loadPairedReader(): Promise<{ id: string; lastSeen: string
         ? String(raw).replace(/^"|"$/g, "")
         : "";
   if (!id) return null;
-  const { data } = await sb.from("pos_devices").select("id, last_seen, kind").eq("id", id).maybeSingle();
+  const { data } = await sb
+    .from("pos_devices")
+    .select("id, last_seen, kind, square_authorized, square_location_id")
+    .eq("id", id)
+    .maybeSingle();
   if (!data) return null;
-  return { id: data.id, lastSeen: data.last_seen, kind: data.kind };
+  return {
+    id: data.id,
+    lastSeen: data.last_seen,
+    kind: data.kind,
+    squareAuthorized: Boolean(data.square_authorized),
+    squareLocationId: data.square_location_id ?? null,
+  };
 }
 
 export async function pairReader(code: string): Promise<string> {
@@ -69,6 +85,11 @@ export async function createTicketCharge(
     (err as Error & { code: string }).code = "reader_offline";
     throw err;
   }
+  if (!reader.squareAuthorized) {
+    const err = new Error("reader_not_authorized");
+    (err as Error & { code: string }).code = "reader_not_authorized";
+    throw err;
+  }
   const { data, error } = await floorCloud().rpc("create_register_charge", {
     p_ticket_id: ticketId,
     p_device_id: reader.id,
@@ -101,7 +122,10 @@ export async function createTicketCharge(
 export async function waitForCharge(
   chargeId: string,
   opts?: { timeoutMs?: number; signal?: AbortSignal },
-): Promise<ChargeResult & { chargeId: string; cardBrand?: string | null; cardLast4?: string | null }> {
+): Promise<
+  | { ok: true; paymentId: string; chargeId: string; cardBrand?: string | null; cardLast4?: string | null }
+  | { ok: false; reason: "canceled" | "timeout" | "failed"; chargeId: string; error?: string }
+> {
   const timeoutMs = opts?.timeoutMs ?? 180_000;
   const started = Date.now();
   const sb = floorCloud();
@@ -131,7 +155,15 @@ export async function waitForCharge(
         cardLast4: data.card_last4,
       };
     }
-    if (status === "failed") return { ok: false, reason: "declined", chargeId };
+    if (status === "failed") {
+      const detail = (data?.error || "").trim();
+      return {
+        ok: false,
+        reason: "failed",
+        chargeId,
+        error: detail || "Card payment failed on the phone.",
+      };
+    }
     if (status === "canceled") return { ok: false, reason: "canceled", chargeId };
     await new Promise((r) => setTimeout(r, 800));
   }

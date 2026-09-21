@@ -11,6 +11,6 @@ test("reader heartbeat is stale after 20 seconds", () => {
 
 test("captured with payment id is success; decline and cancel are not retried as success", () => {
   assert.equal(mapChargeStatus("captured", "sq_1").ok, true);
-  assert.deepEqual(mapChargeStatus("failed", null), { ok: false, reason: "declined" });
+  assert.deepEqual(mapChargeStatus("failed", null), { ok: false, reason: "failed" });
   assert.deepEqual(mapChargeStatus("canceled", null), { ok: false, reason: "canceled" });
 });

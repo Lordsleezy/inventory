@@ -25,6 +25,10 @@ type ReaderContextValue = {
   deviceId: string | null;
   pairCode: string;
   authorized: boolean;
+  locationId: string | null;
+  locationName: string | null;
+  sandbox: boolean | null;
+  authorizing: boolean;
   pending: PendingCharge[];
   error: string;
   status: string;
@@ -51,38 +55,52 @@ async function authHeaders(): Promise<HeadersInit> {
   return { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
 }
 
-/** Map native/plugin reason codes to actionable copy. */
+/** Map native/plugin reason codes to actionable copy. Always keep Square's code/message visible. */
 export function squareSdkErrorMessage(result: {
   reason?: string;
   message?: string;
+  code?: number;
+  localizedDescription?: string;
 }): string {
-  if (result.message && result.message.trim()) return result.message.trim();
   const reason = (result.reason || "").trim();
+  const detail = (result.message || result.localizedDescription || "").trim();
+  const codeBit = result.code != null ? ` (code ${result.code})` : "";
   switch (reason) {
     case "sdk_not_initialized":
     case "sdk_not_installed":
     case "square_sdk_not_linked":
     case "sdk_not_in_build":
-      return "This build does not include a working Square Mobile Payments SDK (framework missing or SquareApplicationID not baked in). Install a newer TestFlight build.";
+      return detail || "This build does not include a working Square Mobile Payments SDK (framework missing or SquareApplicationID not baked in).";
     case "sandbox_mock_reader_required":
-      return "Sandbox needs Square’s floating Mock Reader before charging (physical readers don’t work in sandbox). Tap the mock reader after it appears, add a contactless reader, then Charge again.";
+      return (
+        detail ||
+        "Sandbox needs Square’s floating Mock Reader before charging (physical readers don’t work in sandbox). Tap the mock reader after it appears, add a contactless reader, then Charge again."
+      );
     case "start_payment_exception":
     case "authorize_exception":
-      return result.message || "Square threw an exception that was caught — the app stayed open. Try Authorize again, allow Location, and use the mock reader in sandbox.";
+      return detail || "Square threw an exception. Try Authorize again, allow Location, and use the mock reader in sandbox.";
     case "not_authorized":
-      return "Square SDK is not authorized yet. Connect Square + pick a location on the register, then try again.";
+      return detail || "Square SDK is not authorized yet. Connect Square + pick a location on the register, then Authorize on this phone.";
     case "location_permission_required":
-      return "Allow Location for Floor — Square requires it before any card charge.";
+      return detail || "Allow Location for Floor — Square requires it before any card charge.";
     case "mock_authorize_disabled":
     case "mock_charge_disabled":
-      return "Live Square is required for register card charges. Connect Square on the register and pick a location.";
+      return detail || "Live Square is required for register card charges. Connect Square on the register and pick a location.";
     case "missing_credentials":
-      return "Server did not return Square credentials. Connect Square on the register and pick a location.";
+      return detail || "Server did not return Square credentials. Connect Square on the register and pick a location.";
     case "canceled":
       return "Card payment canceled.";
+    case "app_id_mismatch":
+      return detail || "This IPA’s Square Application ID does not match the server’s sandbox/production app.";
     default:
-      return reason || "Square payment failed";
+      if (detail) return detail;
+      if (reason) return `Square error${codeBit}: ${reason}`;
+      return `Square payment failed${codeBit}`;
   }
+}
+
+function isTransientReaderError(msg: string): boolean {
+  return /offline|register_pos_reader|Pending charges query|not_signed_in|Device offline/i.test(msg);
 }
 
 /**
@@ -94,12 +112,17 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
   const [deviceId, setDeviceId] = useState<string | null>(null);
   const [pairCode, setPairCode] = useState("");
   const [authorized, setAuthorized] = useState(false);
+  const [locationId, setLocationId] = useState<string | null>(null);
+  const [locationName, setLocationName] = useState<string | null>(null);
+  const [sandbox, setSandbox] = useState<boolean | null>(null);
+  const [authorizing, setAuthorizing] = useState(false);
   const [pending, setPending] = useState<PendingCharge[]>([]);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
   const [chargingId, setChargingId] = useState<string | null>(null);
   const deviceIdRef = useRef<string | null>(null);
   const authorizedRef = useRef(false);
+  const locationIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     deviceIdRef.current = deviceId;
@@ -107,6 +130,24 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     authorizedRef.current = authorized;
   }, [authorized]);
+  useEffect(() => {
+    locationIdRef.current = locationId;
+  }, [locationId]);
+
+  const reportAuthHeartbeat = useCallback(
+    async (id: string, isAuthorized: boolean, loc: string | null) => {
+      const { error: hbErr } = await floorCloud().rpc("heartbeat_pos_device", {
+        p_device_id: id,
+        p_square_authorized: isAuthorized,
+        p_square_location_id: loc,
+      });
+      if (hbErr) {
+        // Fall back to last-seen-only heartbeat so pairing stays fresh even if migration lags.
+        await floorCloud().rpc("heartbeat_pos_device", { p_device_id: id });
+      }
+    },
+    [],
+  );
 
   const flushPendingCapture = useCallback(async () => {
     const saved = await loadPendingCapture();
@@ -139,57 +180,141 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const authorizeSdk = useCallback(async () => {
+    setAuthorizing(true);
     setError("");
-    await ensureOnline();
-    const perms = await FloorSquare.preparePermissions?.();
-    if (perms && !perms.ok) {
-      throw new Error(squareSdkErrorMessage(perms));
-    }
-    const res = await fetch(functionsUrl("square-mobile-auth"), { headers: await authHeaders() });
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      if (body.error === "square_not_connected") {
-        throw new Error(
-          "Square is not connected on the register. Open Register → Settings → Connect Square, then pick a location.",
-        );
-      }
-      if (body.error === "square_location_required") {
-        throw new Error(
-          "Square is connected but no location is selected. On the register: Settings → List locations → pick one.",
-        );
-      }
-      throw new Error(`square-mobile-auth HTTP ${res.status}: ${body.error || body.message || "unknown"}`);
-    }
-    if (!body.accessToken || !body.locationId) {
-      throw new Error("square-mobile-auth returned no access token or location");
-    }
-    const result = await FloorSquare.authorize({
-      accessToken: body.accessToken,
-      locationId: body.locationId,
-      mock: false,
-    });
-    if (!result.ok) {
-      throw new Error(squareSdkErrorMessage(result));
-    }
-    setAuthorized(true);
-    authorizedRef.current = true;
-    setStatus(result.already ? "Square already authorized" : "Square reader authorized");
-    // Sandbox: surface mock reader early so the seller can "pair" it before Charge.
+    setStatus("Requesting Location / Bluetooth, then authorizing Square…");
     try {
-      await FloorSquare.startPairing?.();
-      setStatus((s) => `${s}. If you see a floating mock reader, tap it and add Contactless & chip.`);
-    } catch {
-      /* optional */
+      await ensureOnline();
+      const perms = await FloorSquare.preparePermissions?.();
+      if (perms && !perms.ok) {
+        throw new Error(squareSdkErrorMessage(perms));
+      }
+      setStatus("Fetching Square credentials from the store…");
+      const res = await fetch(functionsUrl("square-mobile-auth"), { headers: await authHeaders() });
+      const body = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        message?: string;
+        accessToken?: string;
+        locationId?: string;
+        locationName?: string | null;
+        sandbox?: boolean;
+        applicationId?: string | null;
+      };
+      if (!res.ok) {
+        if (body.error === "square_not_connected") {
+          throw new Error(
+            "Square is not connected on the register. Open Register → Settings → Connect Square, then pick a location.",
+          );
+        }
+        if (body.error === "square_location_required") {
+          throw new Error(
+            "Square is connected but no location is selected. On the register: Settings → List locations → pick one.",
+          );
+        }
+        throw new Error(`square-mobile-auth HTTP ${res.status}: ${body.error || body.message || "unknown"}`);
+      }
+      if (!body.accessToken || !body.locationId) {
+        throw new Error("square-mobile-auth returned no access token or location");
+      }
+
+      const stateBefore = await FloorSquare.authState?.();
+      const bakedAppId = (stateBefore?.squareApplicationId || "").trim();
+      const serverAppId = (body.applicationId || "").trim();
+      if (bakedAppId && serverAppId && bakedAppId !== serverAppId) {
+        throw new Error(
+          squareSdkErrorMessage({
+            reason: "app_id_mismatch",
+            message: `Square Application ID mismatch — IPA has ${bakedAppId}, server has ${serverAppId}. Rebuild the phone app with the same SQUARE_APPLICATION_ID as Netlify.`,
+          }),
+        );
+      }
+
+      setStatus(
+        `Authorizing Square SDK… location ${body.locationId}${body.sandbox ? " (sandbox)" : ""}${
+          serverAppId ? ` · app ${serverAppId.slice(0, 12)}…` : ""
+        }`,
+      );
+      console.info("[floor-square] authorize", {
+        locationId: body.locationId,
+        locationName: body.locationName,
+        sandbox: body.sandbox,
+        applicationId: serverAppId || null,
+        bakedAppId: bakedAppId || null,
+        tokenLen: body.accessToken.length,
+      });
+
+      const result = await FloorSquare.authorize({
+        accessToken: body.accessToken,
+        locationId: body.locationId,
+        mock: false,
+      });
+      console.info("[floor-square] authorize result", result);
+      if (!result.ok) {
+        throw new Error(squareSdkErrorMessage(result));
+      }
+
+      setAuthorized(true);
+      authorizedRef.current = true;
+      setLocationId(body.locationId);
+      locationIdRef.current = body.locationId;
+      setLocationName(body.locationName ?? null);
+      setSandbox(body.sandbox ?? null);
+
+      const locLabel = body.locationName
+        ? `${body.locationName} (${body.locationId})`
+        : body.locationId;
+      let nextStatus = result.already
+        ? `Square already authorized · ${locLabel}`
+        : `Square authorized · ${locLabel}`;
+      if (body.sandbox) nextStatus += " · sandbox";
+
+      const mock = await FloorSquare.presentMockReader?.();
+      console.info("[floor-square] presentMockReader", mock);
+      if (mock && !mock.ok && !mock.skipped) {
+        nextStatus += `. Mock reader failed: ${squareSdkErrorMessage(mock)}`;
+        setError(squareSdkErrorMessage(mock));
+      } else if (mock?.mockReaderPresented || (body.sandbox && mock?.ok)) {
+        nextStatus +=
+          ". Tap the floating Mock Reader → add Contactless & chip, then you’re ready for Card on the register.";
+      } else if (body.sandbox) {
+        nextStatus += ". Sandbox: open Mock Reader if it didn’t appear (re-authorize).";
+      }
+      setStatus(nextStatus);
+
+      if (deviceIdRef.current) {
+        await reportAuthHeartbeat(deviceIdRef.current, true, body.locationId);
+      }
+    } catch (err) {
+      const msg = authErrorMessage(err);
+      console.error("[floor-square] authorize failed", err);
+      setAuthorized(false);
+      authorizedRef.current = false;
+      setError(msg);
+      setStatus("");
+      if (deviceIdRef.current) {
+        await reportAuthHeartbeat(deviceIdRef.current, false, null).catch(() => {});
+      }
+      throw err instanceof Error ? err : new Error(msg);
+    } finally {
+      setAuthorizing(false);
     }
-  }, [ensureOnline]);
+  }, [ensureOnline, reportAuthHeartbeat]);
 
   const ensureDevice = useCallback(async () => {
     await ensureOnline();
     const sb = floorCloud();
+    const tryHeartbeat = async (id: string) => {
+      const { error: hbErr } = await sb.rpc("heartbeat_pos_device", {
+        p_device_id: id,
+        p_square_authorized: authorizedRef.current,
+        p_square_location_id: locationIdRef.current,
+      });
+      if (!hbErr) return true;
+      const { error: hb2 } = await sb.rpc("heartbeat_pos_device", { p_device_id: id });
+      return !hb2;
+    };
     if (deviceIdRef.current) {
-      const { error: hbErr } = await sb.rpc("heartbeat_pos_device", { p_device_id: deviceIdRef.current });
-      if (!hbErr) return deviceIdRef.current;
-      // Stored id may be gone — fall through to re-register.
+      if (await tryHeartbeat(deviceIdRef.current)) return deviceIdRef.current;
       await clearReaderIdentity();
       deviceIdRef.current = null;
       setDeviceId(null);
@@ -197,8 +322,7 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
     }
     const stored = await loadReaderIdentity();
     if (stored) {
-      const { error: hbErr } = await sb.rpc("heartbeat_pos_device", { p_device_id: stored.deviceId });
-      if (!hbErr) {
+      if (await tryHeartbeat(stored.deviceId)) {
         deviceIdRef.current = stored.deviceId;
         setDeviceId(stored.deviceId);
         setPairCode(stored.pairCode);
@@ -216,6 +340,7 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
     deviceIdRef.current = row.id;
     setDeviceId(row.id);
     setPairCode(row.pair_code);
+    await tryHeartbeat(row.id);
     return row.id;
   }, [ensureOnline]);
 
@@ -269,7 +394,7 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
             .from("card_charges")
             .update({
               status: "failed",
-              error: result.reason || "declined",
+              error: result.message || result.reason || "declined",
               updated_at: new Date().toISOString(),
             })
             .eq("id", charge.id);
@@ -333,7 +458,9 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
         const id = await ensureDevice();
         if (stop) return;
         await loadPending(id);
-        if (!stop) setError("");
+        if (!stop) {
+          setError((prev) => (prev && !isTransientReaderError(prev) ? prev : ""));
+        }
       } catch (err) {
         if (!stop) setError(authErrorMessage(err));
       }
@@ -351,6 +478,10 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
       deviceId,
       pairCode,
       authorized,
+      locationId,
+      locationName,
+      sandbox,
+      authorizing,
       pending,
       error,
       status,
@@ -365,6 +496,10 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
       deviceId,
       pairCode,
       authorized,
+      locationId,
+      locationName,
+      sandbox,
+      authorizing,
       pending,
       error,
       status,

@@ -24,6 +24,7 @@ public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManagerDe
         CAPPluginMethod(name: "charge", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "openAuth", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "startPairing", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "presentMockReader", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "preparePermissions", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "authState", returnType: CAPPluginReturnPromise)
     ]
@@ -82,6 +83,28 @@ public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManagerDe
         }
     }
 
+    /// Prefer Square's AuthorizationError / PaymentError debug codes over generic "contact the developer".
+    private func squareErrorFields(_ error: Error, prefix: String) -> [String: Any] {
+        let ns = error as NSError
+        var codeName = ns.domain
+        var debug = error.localizedDescription
+        if let auth = AuthorizationError(rawValue: ns.code) {
+            codeName = String(describing: auth)
+            debug = auth.debugInfo.isEmpty ? debug : auth.debugInfo
+        } else if let pay = PaymentError(rawValue: ns.code) {
+            codeName = String(describing: pay)
+            debug = pay.debugInfo.isEmpty ? debug : pay.debugInfo
+        }
+        NSLog("FloorSquare \(prefix): code=\(ns.code) name=\(codeName) debug=\(debug) desc=\(error.localizedDescription)")
+        return [
+            "reason": codeName,
+            "code": ns.code,
+            "message": "\(prefix) [\(codeName)]: \(debug)",
+            "localizedDescription": error.localizedDescription,
+            "sdkLinked": true
+        ]
+    }
+
     private func presenterController() -> UIViewController? {
         guard let root = self.bridge?.viewController else { return nil }
         if let existing = squarePresenter, existing.parent === root { return existing }
@@ -125,12 +148,22 @@ public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManagerDe
         }
         let appId = squareAppId()
         let initialized = !appId.isEmpty && appId != "REPLACE_ME"
+        let locationId = MobilePaymentsSDK.shared.authorizationManager.location?.id
         resolve(call, [
             "state": state,
             "sdkInitialized": initialized,
             "sdkLinked": true,
             "squareApplicationIdSet": initialized,
-            "sandbox": isSandbox()
+            "squareApplicationId": appId,
+            "locationId": locationId as Any,
+            "sandbox": isSandbox(),
+            "mockReaderLinked": {
+#if canImport(MockReaderUI)
+                return true
+#else
+                return false
+#endif
+            }()
         ])
     }
 
@@ -160,6 +193,20 @@ public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManagerDe
                 CBCentralManagerOptionShowPowerAlertKey: false
             ])
             self.finishPermissionsIfReady()
+
+            // Never hang Authorize forever if a permission callback is dropped.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 20) { [weak self] in
+                guard let self, let pending = self.permissionCall, pending === call else { return }
+                if !self.locationResolved {
+                    self.locationOk = false
+                    self.locationResolved = true
+                }
+                if !self.bluetoothResolved {
+                    self.bluetoothOk = true
+                    self.bluetoothResolved = true
+                }
+                self.finishPermissionsIfReady()
+            }
         }
     }
 
@@ -226,24 +273,81 @@ public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManagerDe
             resolve(call, ["ok": false, "reason": "sdk_not_initialized", "message": msg, "sdkLinked": true])
             return
         }
+        let appId = squareAppId()
+        NSLog("FloorSquare authorize: appId=\(appId) locationId=\(locationId) tokenLen=\(token.count) sandbox=\(isSandbox())")
         DispatchQueue.main.async {
             let auth = MobilePaymentsSDK.shared.authorizationManager
-            if auth.state == .authorized {
-                self.resolve(call, ["ok": true, "sdkLinked": true, "already": true])
+            let currentLocation = auth.location?.id as String?
+            if auth.state == .authorized, currentLocation == locationId {
+                NSLog("FloorSquare authorize: already authorized location=\(locationId)")
+                self.resolve(call, [
+                    "ok": true,
+                    "sdkLinked": true,
+                    "already": true,
+                    "locationId": locationId,
+                    "squareApplicationId": appId,
+                    "sandbox": self.isSandbox()
+                ])
                 return
             }
-            auth.authorize(withAccessToken: token, locationID: locationId) { error in
+            let finishAuthorize: (Error?) -> Void = { error in
                 if let error {
-                    self.resolve(call, [
-                        "ok": false,
-                        "reason": error.localizedDescription,
-                        "message": "Square authorize failed: \(error.localizedDescription)",
-                        "sdkLinked": true
-                    ])
+                    var fields = self.squareErrorFields(error, prefix: "Square authorize failed")
+                    fields["ok"] = false
+                    fields["locationId"] = locationId
+                    fields["squareApplicationId"] = appId
+                    fields["sandbox"] = self.isSandbox()
+                    self.resolve(call, fields)
                 } else {
-                    self.resolve(call, ["ok": true, "sdkLinked": true])
+                    let state = MobilePaymentsSDK.shared.authorizationManager.state
+                    NSLog("FloorSquare authorize: success state=\(String(describing: state)) location=\(locationId)")
+                    self.resolve(call, [
+                        "ok": true,
+                        "sdkLinked": true,
+                        "locationId": locationId,
+                        "squareApplicationId": appId,
+                        "sandbox": self.isSandbox(),
+                        "authState": String(describing: state)
+                    ])
                 }
             }
+            if auth.state == .authorized, currentLocation != locationId {
+                NSLog("FloorSquare authorize: deauthorize old location=\(currentLocation ?? "nil") → \(locationId)")
+                auth.deauthorize {
+                    auth.authorize(withAccessToken: token, locationID: locationId, completionHandler: finishAuthorize)
+                }
+                return
+            }
+            auth.authorize(withAccessToken: token, locationID: locationId, completionHandler: finishAuthorize)
+        }
+    }
+
+    @objc func presentMockReader(_ call: CAPPluginCall) {
+        DispatchQueue.main.async {
+            guard let presenter = self.presenterController() else {
+                self.resolve(call, ["ok": false, "reason": "no_view", "message": "No view to present Mock Reader."])
+                return
+            }
+            if !self.isSandbox() {
+                self.resolve(call, [
+                    "ok": true,
+                    "skipped": true,
+                    "message": "Mock Reader is sandbox-only; production uses a physical Square Reader.",
+                    "sandbox": false
+                ])
+                return
+            }
+            if let mockErr = self.ensureSandboxMockReader(from: presenter) {
+                self.resolve(call, [
+                    "ok": false,
+                    "reason": "sandbox_mock_reader_required",
+                    "message": mockErr,
+                    "sdkLinked": true,
+                    "sandbox": true
+                ])
+                return
+            }
+            self.resolve(call, ["ok": true, "sdkLinked": true, "sandbox": true, "mockReaderPresented": true])
         }
     }
 
@@ -259,11 +363,9 @@ public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManagerDe
             }
             MobilePaymentsSDK.shared.settingsManager.presentSettings(with: presenter) { error in
                 if let error {
-                    self.resolve(call, [
-                        "ok": false,
-                        "reason": error.localizedDescription,
-                        "message": "Square settings failed: \(error.localizedDescription)"
-                    ])
+                    var fields = self.squareErrorFields(error, prefix: "Square settings failed")
+                    fields["ok"] = false
+                    self.resolve(call, fields)
                 } else {
                     self.resolve(call, ["ok": true, "sdkLinked": true])
                 }
@@ -416,12 +518,23 @@ final class FloorPaymentDelegate: NSObject, PaymentManagerDelegate {
     }
 
     func paymentManager(_ paymentManager: PaymentManager, didFail payment: Payment, withError error: Error) {
-        finish([
-            "ok": false,
-            "reason": error.localizedDescription,
-            "message": "Square payment failed: \(error.localizedDescription)",
-            "sdkLinked": true
-        ])
+        var fields = [
+            "ok": false as Any,
+            "sdkLinked": true as Any
+        ]
+        let ns = error as NSError
+        var codeName = ns.domain
+        var debug = error.localizedDescription
+        if let pay = PaymentError(rawValue: ns.code) {
+            codeName = String(describing: pay)
+            debug = pay.debugInfo.isEmpty ? debug : pay.debugInfo
+        }
+        NSLog("FloorSquare payment failed: code=\(ns.code) name=\(codeName) debug=\(debug)")
+        fields["reason"] = codeName
+        fields["code"] = ns.code
+        fields["message"] = "Square payment failed [\(codeName)]: \(debug)"
+        fields["localizedDescription"] = error.localizedDescription
+        finish(fields)
     }
 
     func paymentManager(_ paymentManager: PaymentManager, didCancel payment: Payment) {

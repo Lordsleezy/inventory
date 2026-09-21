@@ -221,13 +221,17 @@ export function TenderScreen() {
       if (!paid.ok) {
         if (paid.reason === "canceled") {
           setError("Card payment canceled.");
-        } else if (paid.reason === "declined") {
-          setError("Card declined. Nothing was sold.");
+        } else if (paid.reason === "failed") {
+          setError(
+            paid.error
+              ? `Card failed on phone: ${paid.error}`
+              : "Card declined. Nothing was sold.",
+          );
         } else if (paid.reason === "timeout") {
           await cancelCharge(chargeId).catch(() => {});
           setError("Timed out waiting for the phone. Nothing was sold.");
         } else {
-          setError("Card payment failed. Nothing was sold.");
+          setError(paid.error || "Card payment failed. Nothing was sold.");
         }
         return;
       }
@@ -267,6 +271,13 @@ export function TenderScreen() {
         setError("Pair a phone reader in Settings before taking cards.");
       } else if (code === "reader_offline" || (err instanceof Error && /reader_offline/i.test(err.message))) {
         setError("Phone reader is offline. Open Payment device on the phone and try again.");
+      } else if (
+        code === "reader_not_authorized" ||
+        (err instanceof Error && /reader_not_authorized/i.test(err.message))
+      ) {
+        setError(
+          "Phone isn’t ready for cards — open Payment device on the phone and tap Authorize Square (then add the mock reader in sandbox).",
+        );
       } else {
         handleSaleError(err);
       }

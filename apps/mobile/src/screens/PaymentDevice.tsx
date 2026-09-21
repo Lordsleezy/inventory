@@ -10,6 +10,10 @@ export function PaymentDeviceScreen() {
   const {
     pairCode,
     authorized,
+    locationId,
+    locationName,
+    sandbox,
+    authorizing,
     pending,
     error,
     status,
@@ -20,6 +24,9 @@ export function PaymentDeviceScreen() {
   } = useReader();
 
   const storeLabel = session?.storeId ? session.storeId.slice(0, 8) : "—";
+  const locationLabel = locationName
+    ? `${locationName} (${locationId})`
+    : locationId || "—";
 
   return (
     <div className="p-4 pb-28">
@@ -43,12 +50,31 @@ export function PaymentDeviceScreen() {
           <p className="text-quiet mt-2">Enter this code once on the register. It persists until you reset pairing.</p>
         )}
       </div>
+      <div className="mt-4 rounded-xl border border-floor-line bg-floor-panel px-4 py-4">
+        <p className="text-quiet tracking-wide text-floor-mute">Square</p>
+        {authorized ? (
+          <p className="text-body mt-1">
+            Authorized{sandbox ? " (sandbox)" : ""} · {locationLabel}
+          </p>
+        ) : (
+          <p className="text-body mt-1">Not authorized — register Card will refuse until this succeeds.</p>
+        )}
+      </div>
       {!session ? <Notice tone="error">Sign in required.</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
       {status ? <p className="text-quiet mt-2">{status}</p> : null}
       <div className="mt-4 flex flex-wrap gap-2">
-        <button type="button" className="btn-accent" onClick={() => void authorizeSdk()}>
-          {authorized ? "Re-authorize Square" : "Authorize Square"}
+        <button
+          type="button"
+          className="btn-accent"
+          disabled={authorizing || !session}
+          onClick={() => {
+            void authorizeSdk().catch(() => {
+              /* authorizeSdk already setError */
+            });
+          }}
+        >
+          {authorizing ? "Authorizing…" : authorized ? "Re-authorize Square" : "Authorize Square"}
         </button>
         <button type="button" className="btn-text" onClick={() => void resetPairing()}>
           Reset pairing

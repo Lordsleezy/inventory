@@ -8,13 +8,18 @@ export function readerIsFresh(lastSeen: string | null | undefined, now = Date.no
 
 export type ChargeResult =
   | { ok: true; paymentId: string; chargeId: string }
-  | { ok: false; reason: "declined" | "canceled" | "timeout" | "offline" | "not_paired" };
+  | {
+      ok: false;
+      reason: "canceled" | "timeout" | "offline" | "not_paired" | "failed";
+      chargeId?: string;
+      error?: string;
+    };
 
-export function mapChargeStatus(status: string, paymentId: string | null): ChargeResult {
+export function mapChargeStatus(status: string, paymentId: string | null, error?: string | null): ChargeResult {
   if ((status === "captured" || status === "finalized") && paymentId) {
     return { ok: true, paymentId, chargeId: "" };
   }
-  if (status === "failed") return { ok: false, reason: "declined" };
+  if (status === "failed") return { ok: false, reason: "failed", error: error || undefined };
   if (status === "canceled") return { ok: false, reason: "canceled" };
   return { ok: false, reason: "timeout" };
 }

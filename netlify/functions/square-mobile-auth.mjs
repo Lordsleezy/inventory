@@ -16,6 +16,7 @@ async function handle(event) {
   return json(200, {
     accessToken: access.accessToken,
     locationId: access.locationId,
+    locationName: access.locationName || null,
     sandbox: access.sandbox,
     applicationId: process.env.SQUARE_APPLICATION_ID || null,
   });

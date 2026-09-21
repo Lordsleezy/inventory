@@ -7,6 +7,8 @@ export type ChargeResult = {
   cardLast4?: string;
   reason?: string;
   message?: string;
+  code?: number;
+  localizedDescription?: string;
   mock?: boolean;
   authState?: string;
 };
@@ -16,6 +18,24 @@ export type AuthStateResult = {
   sdkInitialized: boolean;
   sdkLinked: boolean;
   squareApplicationIdSet?: boolean;
+  squareApplicationId?: string;
+  locationId?: string | null;
+  sandbox?: boolean;
+  mockReaderLinked?: boolean;
+};
+
+export type AuthorizeResult = {
+  ok: boolean;
+  reason?: string;
+  message?: string;
+  code?: number;
+  localizedDescription?: string;
+  mock?: boolean;
+  already?: boolean;
+  locationId?: string;
+  squareApplicationId?: string;
+  sandbox?: boolean;
+  authState?: string;
 };
 
 export interface FloorSquarePlugin {
@@ -23,7 +43,7 @@ export interface FloorSquarePlugin {
     accessToken: string;
     locationId: string;
     mock?: boolean;
-  }): Promise<{ ok: boolean; reason?: string; message?: string; mock?: boolean; already?: boolean }>;
+  }): Promise<AuthorizeResult>;
   charge(options: {
     amountCents: number;
     mock?: boolean;
@@ -37,7 +57,15 @@ export interface FloorSquarePlugin {
     bluetooth?: boolean;
   }>;
   authState?(): Promise<AuthStateResult>;
-  startPairing?(): Promise<{ ok: boolean; mock?: boolean }>;
+  startPairing?(): Promise<{ ok: boolean; mock?: boolean; message?: string; reason?: string }>;
+  presentMockReader?(): Promise<{
+    ok: boolean;
+    skipped?: boolean;
+    mockReaderPresented?: boolean;
+    message?: string;
+    reason?: string;
+    sandbox?: boolean;
+  }>;
   openAuth(options: { url: string }): Promise<{ ok: boolean }>;
 }
 
@@ -55,6 +83,9 @@ const FloorSquare = registerPlugin<FloorSquarePlugin>("FloorSquare", {
     },
     async authState() {
       return { state: "notLinked", sdkInitialized: false, sdkLinked: false };
+    },
+    async presentMockReader() {
+      return { ok: false, reason: "not_native", message: "Mock Reader requires the native iOS build." };
     },
     async openAuth(options: { url: string }) {
       window.location.assign(options.url);
