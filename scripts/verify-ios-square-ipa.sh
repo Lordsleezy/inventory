@@ -65,6 +65,19 @@ if [ "$FOUND" -ne 1 ]; then
   exit 1
 fi
 
+# Sandbox charges require MockReaderUI (physical readers unsupported in sandbox).
+if ! find "$APP" -iname '*MockReaderUI*' 2>/dev/null | grep -q .; then
+  if command -v otool >/dev/null 2>&1 && [ -f "$BIN" ] && otool -L "$BIN" 2>/dev/null | grep -qi 'MockReaderUI'; then
+    echo "PASS  MockReaderUI linked (otool)"
+  else
+    echo "FAIL  MockReaderUI is NOT in the app bundle — sandbox Take payment will crash/fail." >&2
+    echo "CapApp-SPM and FloorSquarePlugin must link .product(name: \"MockReaderUI\", ...)." >&2
+    exit 1
+  fi
+else
+  echo "PASS  MockReaderUI present in IPA"
+fi
+
 # SquareApplicationID must be baked (public app id) or initialize() is skipped.
 APP_ID="$(/usr/libexec/PlistBuddy -c 'Print :SquareApplicationID' "$APP/Info.plist" 2>/dev/null || true)"
 if [ -z "$APP_ID" ] || [ "$APP_ID" = "REPLACE_ME" ]; then

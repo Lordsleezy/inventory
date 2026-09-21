@@ -93,8 +93,16 @@ if [ -f "$SPM" ]; then
     echo "SquareMobilePaymentsSDK still missing from CapApp-SPM after ensure" >&2
     exit 1
   }
+  grep -q "MockReaderUI" "$SPM" || {
+    echo "MockReaderUI still missing from CapApp-SPM after ensure (required for sandbox charges)" >&2
+    exit 1
+  }
   grep -q "mobile-payments-sdk-ios" "$SPM" || {
     echo "mobile-payments-sdk-ios package URL missing from CapApp-SPM after ensure" >&2
+    exit 1
+  }
+  grep -q "MockReaderUI" "$ROOT/packages/square-plugin/Package.swift" || {
+    echo "packages/square-plugin/Package.swift missing MockReaderUI product" >&2
     exit 1
   }
   grep -q "mobile-payments-sdk-ios\|SquareMobilePaymentsSDK" \

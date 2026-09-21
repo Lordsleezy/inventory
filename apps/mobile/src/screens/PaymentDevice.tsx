@@ -28,6 +28,10 @@ export function PaymentDeviceScreen() {
         This phone stays paired across restarts. Incoming charges also pop up on other screens. Store{" "}
         {storeLabel}…
       </p>
+      <p className="text-quiet mt-2">
+        Sandbox: after Authorize, tap the floating mock reader and add Contactless &amp; chip before Take payment.
+        Physical Square readers do not work in sandbox.
+      </p>
       <div className="mt-4 rounded-xl border border-floor-line bg-floor-panel px-4 py-5 text-center">
         <p className="text-quiet tracking-wide text-floor-mute">Pair code</p>
         <p className="mt-2 font-mono text-4xl font-bold tracking-[0.35em] text-floor-text">

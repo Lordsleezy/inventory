@@ -25,6 +25,9 @@ SQUARE_DEP = (
 SQUARE_PROD = (
     '.product(name: "SquareMobilePaymentsSDK", package: "mobile-payments-sdk-ios")'
 )
+MOCK_PROD = (
+    '.product(name: "MockReaderUI", package: "mobile-payments-sdk-ios")'
+)
 
 
 def find_array_after(src: str, needle: str, start: int = 0) -> tuple[int, int]:
@@ -150,6 +153,7 @@ def ensure_floor_and_square(src: str) -> str:
         required=[
             ("FloorSquarePlugin", FLOOR_PROD),
             ("SquareMobilePaymentsSDK", SQUARE_PROD),
+            ("MockReaderUI", MOCK_PROD),
         ],
     )
     return scrub_double_commas(src)
@@ -173,12 +177,12 @@ def validate_package_swift(path: Path, src: str) -> None:
         raise SystemExit(f"{path}: missing FloorSquarePlugin")
     if "SquareMobilePaymentsSDK" not in src:
         raise SystemExit(f"{path}: missing SquareMobilePaymentsSDK product")
+    if "MockReaderUI" not in src:
+        raise SystemExit(f"{path}: missing MockReaderUI product (required for sandbox charges)")
     if "mobile-payments-sdk-ios" not in src:
         raise SystemExit(f"{path}: missing mobile-payments-sdk-ios package URL")
     if src.count("FloorSquarePlugin") < 2:
         raise SystemExit(f"{path}: FloorSquarePlugin must appear in package deps and target products")
-    if src.count("SquareMobilePaymentsSDK") < 1:
-        raise SystemExit(f"{path}: SquareMobilePaymentsSDK product missing")
     lines = [ln.rstrip() for ln in src.splitlines()]
     for i, ln in enumerate(lines[:-1]):
         cur = ln.strip()

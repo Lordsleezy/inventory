@@ -5,10 +5,19 @@ import UIKit
 import CoreLocation
 import CoreBluetooth
 import SquareMobilePaymentsSDK
+import MockReaderUI
 
 /// Capacitor bridge for Square Mobile Payments SDK.
-/// Hard-imports SquareMobilePaymentsSDK — if SPM did not link it, this file fails to compile
-/// (preferred over a silent #if canImport stub that ships a broken TestFlight build).
+///
+/// Crash context (ios-square-7): Take payment killed the process immediately. ASC crash
+/// reports were not reachable from this environment (App Store Connect login failed; no
+/// Apple API key in the workspace). Square’s own docs state the matching failure mode:
+/// “Physical card readers aren't supported in the Square Sandbox. To take test payments,
+/// you must simulate a virtual reader with the Mock Reader UI.” We never presented
+/// MockReaderUI before startPayment — that is the confirmed gap vs Donut Counter.
+/// Guards below refuse startPayment when sandbox has no mock reader, catch NSExceptions,
+/// and always resolve the Capacitor call on the main queue so the UI gets an error instead
+/// of an uncaught exception kill.
 @objc(FloorSquarePlugin)
 public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManagerDelegate, CBCentralManagerDelegate {
     public let identifier = "FloorSquarePlugin"
@@ -23,7 +32,7 @@ public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManagerDe
     ]
 
     private var paymentDelegate: FloorPaymentDelegate?
-    private var paymentHandle: Any?
+    private var paymentHandle: PaymentHandle?
     private var locationManager: CLLocationManager?
     private var bluetoothManager: CBCentralManager?
     private var permissionCall: CAPPluginCall?
@@ -32,6 +41,8 @@ public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManagerDe
     private var locationOk = false
     private var bluetoothOk = false
     private static var didInitializeSdk = false
+    private var mockReaderUI: MockReaderUI?
+    private var squarePresenter: UIViewController?
 
     public override func load() {
         Self.initializeSdkIfNeeded()
@@ -57,9 +68,48 @@ public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManagerDe
         Self.initializeSdkIfNeeded()
         let appId = squareAppId()
         if appId.isEmpty || appId == "REPLACE_ME" {
-            return "This build is missing SquareApplicationID — Codemagic must set SQUARE_APPLICATION_ID before archive. Install a build that baked the Square app id."
+            return "This build is missing SquareApplicationID — Codemagic must set SQUARE_APPLICATION_ID before archive."
         }
         return nil
+    }
+
+    private func isSandbox() -> Bool {
+        MobilePaymentsSDK.shared.settingsManager.sdkSettings.environment == .sandbox
+    }
+
+    private func resolve(_ call: CAPPluginCall, _ payload: [String: Any]) {
+        DispatchQueue.main.async {
+            call.resolve(payload)
+        }
+    }
+
+    private func presenterController() -> UIViewController? {
+        guard let root = self.bridge?.viewController else { return nil }
+        if let existing = squarePresenter, existing.parent === root { return existing }
+        let host = UIViewController()
+        host.view.backgroundColor = .clear
+        host.view.isUserInteractionEnabled = false
+        root.addChild(host)
+        host.view.frame = root.view.bounds
+        host.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        root.view.insertSubview(host.view, at: 0)
+        host.didMove(toParent: root)
+        squarePresenter = host
+        return host
+    }
+
+    /// Sandbox cannot talk to physical readers — present MockReaderUI (Square Donut Counter pattern).
+    private func ensureSandboxMockReader(from presenter: UIViewController) -> String? {
+        guard isSandbox() else { return nil }
+        do {
+            if mockReaderUI == nil {
+                mockReaderUI = try MockReaderUI(for: MobilePaymentsSDK.shared)
+            }
+            try mockReaderUI?.present()
+            return nil
+        } catch {
+            return "Sandbox requires Square’s Mock Reader UI before charging (physical readers do not work in sandbox). Mock reader failed: \(error.localizedDescription)"
+        }
     }
 
     @objc func authState(_ call: CAPPluginCall) {
@@ -72,11 +122,12 @@ public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManagerDe
         }
         let appId = squareAppId()
         let initialized = !appId.isEmpty && appId != "REPLACE_ME"
-        call.resolve([
+        resolve(call, [
             "state": state,
             "sdkInitialized": initialized,
             "sdkLinked": true,
-            "squareApplicationIdSet": initialized
+            "squareApplicationIdSet": initialized,
+            "sandbox": isSandbox()
         ])
     }
 
@@ -139,7 +190,7 @@ public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManagerDe
         guard let call = permissionCall, locationResolved, bluetoothResolved else { return }
         permissionCall = nil
         if !locationOk {
-            call.resolve([
+            resolve(call, [
                 "ok": false,
                 "reason": "location_permission_required",
                 "message": "Allow Location for Floor — Square requires it before any card charge.",
@@ -148,7 +199,7 @@ public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManagerDe
             ])
             return
         }
-        call.resolve(["ok": true, "location": true, "bluetooth": bluetoothOk])
+        resolve(call, ["ok": true, "location": true, "bluetooth": bluetoothOk])
     }
 
     @objc func authorize(_ call: CAPPluginCall) {
@@ -156,11 +207,11 @@ public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManagerDe
         guard let token = call.getString("accessToken"),
               let locationId = call.getString("locationId"),
               !token.isEmpty, !locationId.isEmpty else {
-            call.resolve(["ok": false, "reason": "missing_credentials", "message": "Missing Square access token or location id from the server."])
+            resolve(call, ["ok": false, "reason": "missing_credentials", "message": "Missing Square access token or location id from the server."])
             return
         }
         if mock {
-            call.resolve([
+            resolve(call, [
                 "ok": false,
                 "reason": "mock_authorize_disabled",
                 "message": "Mock authorize is disabled for register charges. Connect Square on the register and pick a location.",
@@ -169,32 +220,62 @@ public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManagerDe
             return
         }
         if let msg = sdkReadyMessage() {
-            call.resolve(["ok": false, "reason": "sdk_not_initialized", "message": msg, "sdkLinked": true])
+            resolve(call, ["ok": false, "reason": "sdk_not_initialized", "message": msg, "sdkLinked": true])
             return
         }
         DispatchQueue.main.async {
             let auth = MobilePaymentsSDK.shared.authorizationManager
             if auth.state == .authorized {
-                call.resolve(["ok": true, "sdkLinked": true, "already": true])
+                self.resolve(call, ["ok": true, "sdkLinked": true, "already": true])
                 return
             }
-            auth.authorize(withAccessToken: token, locationID: locationId) { error in
-                if let error {
-                    call.resolve([
-                        "ok": false,
-                        "reason": error.localizedDescription,
-                        "message": "Square authorize failed: \(error.localizedDescription)",
-                        "sdkLinked": true
-                    ])
-                } else {
-                    call.resolve(["ok": true, "sdkLinked": true])
+            let exception = FloorCatchException {
+                auth.authorize(withAccessToken: token, locationID: locationId) { error in
+                    if let error {
+                        self.resolve(call, [
+                            "ok": false,
+                            "reason": error.localizedDescription,
+                            "message": "Square authorize failed: \(error.localizedDescription)",
+                            "sdkLinked": true
+                        ])
+                    } else {
+                        self.resolve(call, ["ok": true, "sdkLinked": true])
+                    }
                 }
+            }
+            if let exception {
+                self.resolve(call, [
+                    "ok": false,
+                    "reason": "authorize_exception",
+                    "message": "Square authorize crashed: \(exception.name.rawValue) — \(exception.reason ?? "")",
+                    "sdkLinked": true
+                ])
             }
         }
     }
 
     @objc func startPairing(_ call: CAPPluginCall) {
-        call.resolve(["ok": true, "sdkLinked": true])
+        DispatchQueue.main.async {
+            guard let presenter = self.presenterController() else {
+                self.resolve(call, ["ok": false, "reason": "no_view", "message": "No view to present Square settings."])
+                return
+            }
+            if let mockErr = self.ensureSandboxMockReader(from: presenter) {
+                // Still open settings so production readers can pair.
+                NSLog("FloorSquare startPairing mock reader: \(mockErr)")
+            }
+            MobilePaymentsSDK.shared.settingsManager.presentSettings(with: presenter) { error in
+                if let error {
+                    self.resolve(call, [
+                        "ok": false,
+                        "reason": error.localizedDescription,
+                        "message": "Square settings failed: \(error.localizedDescription)"
+                    ])
+                } else {
+                    self.resolve(call, ["ok": true, "sdkLinked": true])
+                }
+            }
+        }
     }
 
     @objc func charge(_ call: CAPPluginCall) {
@@ -202,7 +283,7 @@ public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManagerDe
         let mock = call.getBool("mock") ?? false
         let referenceId = call.getString("referenceId")
         if mock {
-            call.resolve([
+            resolve(call, [
                 "ok": false,
                 "reason": "mock_charge_disabled",
                 "message": "Mock card charge is disabled. This build must use the real Square SDK.",
@@ -211,20 +292,16 @@ public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManagerDe
             return
         }
         if let msg = sdkReadyMessage() {
-            call.resolve(["ok": false, "reason": "sdk_not_initialized", "message": msg, "sdkLinked": true])
-            return
-        }
-        guard let presenter = self.bridge?.viewController else {
-            call.resolve(["ok": false, "reason": "no_view", "message": "No iOS view controller available to present Square payment UI.", "sdkLinked": true])
+            resolve(call, ["ok": false, "reason": "sdk_not_initialized", "message": msg, "sdkLinked": true])
             return
         }
         DispatchQueue.main.async {
             let authState = MobilePaymentsSDK.shared.authorizationManager.state
             guard authState == .authorized else {
-                call.resolve([
+                self.resolve(call, [
                     "ok": false,
                     "reason": "not_authorized",
-                    "message": "Square SDK is not authorized yet. Tap Authorize Square (or Charge card again) after Connect Square + location on the register.",
+                    "message": "Square SDK is not authorized yet. Tap Authorize Square after Connect Square + location on the register.",
                     "authState": String(describing: authState),
                     "sdkLinked": true
                 ])
@@ -232,7 +309,7 @@ public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManagerDe
             }
             let loc = CLLocationManager.authorizationStatus()
             guard loc == .authorizedAlways || loc == .authorizedWhenInUse else {
-                call.resolve([
+                self.resolve(call, [
                     "ok": false,
                     "reason": "location_permission_required",
                     "message": "Allow Location for Floor, then try Take payment again.",
@@ -241,7 +318,7 @@ public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManagerDe
                 return
             }
             if self.paymentDelegate != nil {
-                call.resolve([
+                self.resolve(call, [
                     "ok": false,
                     "reason": "payment_already_in_progress",
                     "message": "A Square payment is already in progress.",
@@ -249,11 +326,33 @@ public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManagerDe
                 ])
                 return
             }
+            guard let presenter = self.presenterController() else {
+                self.resolve(call, [
+                    "ok": false,
+                    "reason": "no_view",
+                    "message": "No iOS view controller available to present Square payment UI.",
+                    "sdkLinked": true
+                ])
+                return
+            }
+
+            // Sandbox: physical readers unsupported — must show MockReaderUI first (Square docs).
+            if let mockErr = self.ensureSandboxMockReader(from: presenter) {
+                self.resolve(call, [
+                    "ok": false,
+                    "reason": "sandbox_mock_reader_required",
+                    "message": mockErr,
+                    "sdkLinked": true
+                ])
+                return
+            }
+
             let cents = UInt(max(amount, 0))
             let params = PaymentParameters(
                 paymentAttemptID: UUID().uuidString,
                 amountMoney: Money(amount: cents, currency: .USD),
-                processingMode: .onlineOnly
+                // Sandbox only supports onlineOnly (Donut Counter).
+                processingMode: self.isSandbox() ? .onlineOnly : .autoDetect
             )
             if let referenceId, !referenceId.isEmpty {
                 params.referenceID = referenceId
@@ -264,12 +363,25 @@ public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManagerDe
                 self?.paymentHandle = nil
             }
             self.paymentDelegate = delegate
-            self.paymentHandle = MobilePaymentsSDK.shared.paymentManager.startPayment(
-                params,
-                promptParameters: prompt,
-                from: presenter,
-                delegate: delegate
-            )
+
+            let exception = FloorCatchException {
+                self.paymentHandle = MobilePaymentsSDK.shared.paymentManager.startPayment(
+                    params,
+                    promptParameters: prompt,
+                    from: presenter,
+                    delegate: delegate
+                )
+            }
+            if let exception {
+                self.paymentDelegate = nil
+                self.paymentHandle = nil
+                self.resolve(call, [
+                    "ok": false,
+                    "reason": "start_payment_exception",
+                    "message": "Square startPayment crashed: \(exception.name.rawValue) — \(exception.reason ?? "no reason"). This was caught so the app stays open; check sandbox mock reader / permissions.",
+                    "sdkLinked": true
+                ])
+            }
         }
     }
 
@@ -301,38 +413,38 @@ final class FloorPaymentDelegate: NSObject, PaymentManagerDelegate {
         self.onDone = onDone
     }
 
-    func paymentManager(_ paymentManager: PaymentManager, didFinish payment: Payment) {
+    private func finish(_ payload: [String: Any]) {
         guard !finished else { return }
         finished = true
+        DispatchQueue.main.async {
+            self.call.resolve(payload)
+            self.onDone()
+        }
+    }
+
+    func paymentManager(_ paymentManager: PaymentManager, didFinish payment: Payment) {
         var paymentId = UUID().uuidString
         if let online = payment as? OnlinePayment, let id = online.id {
             paymentId = id
         }
-        call.resolve([
+        finish([
             "ok": true,
             "paymentId": paymentId,
             "sdkLinked": true
         ])
-        onDone()
     }
 
     func paymentManager(_ paymentManager: PaymentManager, didFail payment: Payment, withError error: Error) {
-        guard !finished else { return }
-        finished = true
-        call.resolve([
+        finish([
             "ok": false,
             "reason": error.localizedDescription,
             "message": "Square payment failed: \(error.localizedDescription)",
             "sdkLinked": true
         ])
-        onDone()
     }
 
     func paymentManager(_ paymentManager: PaymentManager, didCancel payment: Payment) {
-        guard !finished else { return }
-        finished = true
-        call.resolve(["ok": false, "reason": "canceled", "message": "Card payment canceled.", "sdkLinked": true])
-        onDone()
+        finish(["ok": false, "reason": "canceled", "message": "Card payment canceled.", "sdkLinked": true])
     }
 }
 

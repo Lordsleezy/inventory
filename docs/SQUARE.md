@@ -28,11 +28,12 @@ Also: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE`.
 - sets `SquareApplicationID` from `SQUARE_APPLICATION_ID` (**required** — prepare fails if unset)
 - injects **both** `FloorSquarePlugin` and a **direct** `SquareMobilePaymentsSDK` product into CapApp-SPM
   (transitive-only linkage does not reliably embed the XCFramework in the IPA)
+- also injects **MockReaderUI** (required for sandbox — physical readers are unsupported there)
 
 Codemagic also runs `scripts/verify-ios-square-ipa.sh` against the built IPA and **fails the build**
-if `SquareMobilePaymentsSDK` is missing from the app bundle or `SquareApplicationID` is `REPLACE_ME`.
+if `SquareMobilePaymentsSDK` / `MockReaderUI` is missing from the app bundle or `SquareApplicationID` is `REPLACE_ME`.
 
-MockReaderUI is **not** linked (breaks App Store upload).
+Sandbox charges: after Authorize, the floating mock reader must be tapped to add a contactless reader before Take payment.
 
 ## Register: Connect Square
 

@@ -102,7 +102,9 @@ workflows:
           # (transitive-only does not reliably embed the XCFramework in the IPA).
           grep -q FloorSquarePlugin apps/adapter/ios/App/CapApp-SPM/Package.swift
           grep -q SquareMobilePaymentsSDK apps/adapter/ios/App/CapApp-SPM/Package.swift
+          grep -q MockReaderUI apps/adapter/ios/App/CapApp-SPM/Package.swift
           grep -q mobile-payments-sdk-ios apps/adapter/ios/App/CapApp-SPM/Package.swift
+          grep -q MockReaderUI packages/square-plugin/Package.swift
           grep -q mobile-payments-sdk-ios packages/square-plugin/Package.swift
           grep -q SquareMobilePaymentsSDK packages/square-plugin/Package.swift
           grep -q FloorSquarePlugin apps/adapter/ios/App/App/capacitor.config.json \
@@ -111,7 +113,7 @@ workflows:
             echo "SQUARE_APPLICATION_ID must be set in Codemagic group appstore" >&2
             exit 1
           fi
-          echo "PASS  CapApp-SPM declares FloorSquarePlugin + SquareMobilePaymentsSDK; SQUARE_APPLICATION_ID set"
+          echo "PASS  CapApp-SPM declares FloorSquare + SquareMobilePaymentsSDK + MockReaderUI; SQUARE_APPLICATION_ID set"
       - name: Resolve Swift packages (prove SDK links)
         script: |
           set -euo pipefail

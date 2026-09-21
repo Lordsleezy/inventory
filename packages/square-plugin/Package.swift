@@ -9,7 +9,6 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/ionic-team/capacitor-swift-pm.git", from: "8.0.0"),
-        // Square Mobile Payments SDK — resolved by CapApp-SPM via this plugin; no manual Xcode SPM step.
         .package(url: "https://github.com/square/mobile-payments-sdk-ios", exact: "2.6.0")
     ],
     targets: [
@@ -18,9 +17,13 @@ let package = Package(
             dependencies: [
                 .product(name: "Capacitor", package: "capacitor-swift-pm"),
                 .product(name: "Cordova", package: "capacitor-swift-pm"),
-                .product(name: "SquareMobilePaymentsSDK", package: "mobile-payments-sdk-ios")
+                .product(name: "SquareMobilePaymentsSDK", package: "mobile-payments-sdk-ios"),
+                // Sandbox cannot use physical readers — MockReaderUI is required for TestFlight sandbox charges.
+                // Square: safe to ship; do not present it when environment == .production.
+                .product(name: "MockReaderUI", package: "mobile-payments-sdk-ios")
             ],
-            path: "ios/Sources/FloorSquarePlugin"
+            path: "ios/Sources/FloorSquarePlugin",
+            publicHeadersPath: "include"
         )
     ]
 )

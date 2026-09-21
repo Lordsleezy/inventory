@@ -31,6 +31,7 @@ let package = Package(
                 .product(name: "CapacitorShare", package: "CapacitorShare"),
                 .product(name: "FloorSquarePlugin", package: "FloorSquarePlugin"),
                 .product(name: "SquareMobilePaymentsSDK", package: "mobile-payments-sdk-ios"),
+                .product(name: "MockReaderUI", package: "mobile-payments-sdk-ios"),
             ]
         )
     ]

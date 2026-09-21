@@ -64,6 +64,11 @@ export function squareSdkErrorMessage(result: {
     case "square_sdk_not_linked":
     case "sdk_not_in_build":
       return "This build does not include a working Square Mobile Payments SDK (framework missing or SquareApplicationID not baked in). Install a newer TestFlight build.";
+    case "sandbox_mock_reader_required":
+      return "Sandbox needs Square’s floating Mock Reader before charging (physical readers don’t work in sandbox). Tap the mock reader after it appears, add a contactless reader, then Charge again.";
+    case "start_payment_exception":
+    case "authorize_exception":
+      return result.message || "Square threw an exception that was caught — the app stayed open. Try Authorize again, allow Location, and use the mock reader in sandbox.";
     case "not_authorized":
       return "Square SDK is not authorized yet. Connect Square + pick a location on the register, then try again.";
     case "location_permission_required":
@@ -106,6 +111,16 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
   const flushPendingCapture = useCallback(async () => {
     const saved = await loadPendingCapture();
     if (!saved) return;
+    if (saved.phase === "sdk_presented" && !saved.paymentId) {
+      setStatus(
+        "Last card attempt may have opened Square but never finished. Check Square Dashboard for a charge; the register may still be waiting or timed out.",
+      );
+      // Do not clear — user/register recovery decides. Drop after 30 minutes.
+      const age = Date.now() - Date.parse(saved.savedAt || "") ;
+      if (Number.isFinite(age) && age > 30 * 60_000) await clearPendingCapture();
+      return;
+    }
+    if (!saved.paymentId) return;
     setStatus("Recovering a card capture that did not finish…");
     const { error: capErr } = await floorCloud().rpc("capture_register_charge", {
       p_charge_id: saved.chargeId,
@@ -115,7 +130,7 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
     });
     if (capErr) {
       setError(
-        `Card may already be charged (${saved.paymentId}). Capture retry failed: ${authErrorMessage(capErr)}. Keep the app open — register should still finalize if it sees captured.`,
+        `Card may already be charged (${saved.paymentId}). Capture retry failed: ${authErrorMessage(capErr)}. Keep the app open — register Tender can Finalize or Refund an orphaned capture.`,
       );
       return;
     }
@@ -159,6 +174,13 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
     setAuthorized(true);
     authorizedRef.current = true;
     setStatus(result.already ? "Square already authorized" : "Square reader authorized");
+    // Sandbox: surface mock reader early so the seller can "pair" it before Charge.
+    try {
+      await FloorSquare.startPairing?.();
+      setStatus((s) => `${s}. If you see a floating mock reader, tap it and add Contactless & chip.`);
+    } catch {
+      /* optional */
+    }
   }, [ensureOnline]);
 
   const ensureDevice = useCallback(async () => {
@@ -231,12 +253,18 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
         if (perms && !perms.ok) {
           throw new Error(squareSdkErrorMessage(perms));
         }
+        await savePendingCapture({
+          chargeId: charge.id,
+          phase: "sdk_presented",
+          savedAt: new Date().toISOString(),
+        });
         const result = await FloorSquare.charge({
           amountCents: charge.amount_cents,
           mock: false,
           referenceId: charge.id,
         });
         if (!result.ok || !result.paymentId) {
+          await clearPendingCapture();
           await floorCloud()
             .from("card_charges")
             .update({
@@ -254,6 +282,7 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
           paymentId: result.paymentId,
           cardBrand: result.cardBrand ?? null,
           cardLast4: result.cardLast4 ?? null,
+          phase: "captured",
           savedAt: new Date().toISOString(),
         });
         const { error: capErr } = await floorCloud().rpc("capture_register_charge", {

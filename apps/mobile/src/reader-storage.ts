@@ -6,9 +6,11 @@ const PENDING_CAPTURE_KEY = "floor.reader.pendingCapture";
 
 export type PendingCapture = {
   chargeId: string;
-  paymentId: string;
+  paymentId?: string;
   cardBrand?: string | null;
   cardLast4?: string | null;
+  /** sdk_presented = Square UI opened; captured = paymentId known, capture RPC may be pending */
+  phase: "sdk_presented" | "captured";
   savedAt: string;
 };
 
