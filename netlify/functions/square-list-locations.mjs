@@ -13,6 +13,7 @@ async function handle(event) {
     id: l.id,
     name: l.name,
     status: l.status,
+    country: l.country || null,
   }));
   return json(200, { locations, current_location_id: access.locationId, source: access.source });
 }

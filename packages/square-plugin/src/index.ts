@@ -54,7 +54,11 @@ export interface FloorSquarePlugin {
     reason?: string;
     message?: string;
     location?: boolean;
+    locationFix?: boolean;
     bluetooth?: boolean;
+    latitude?: number;
+    longitude?: number;
+    accuracyMeters?: number;
   }>;
   authState?(): Promise<AuthStateResult>;
   startPairing?(): Promise<{ ok: boolean; mock?: boolean; message?: string; reason?: string }>;

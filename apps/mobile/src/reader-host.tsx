@@ -83,6 +83,17 @@ export function squareSdkErrorMessage(result: {
       return detail || "Square SDK is not authorized yet. Connect Square + pick a location on the register, then Authorize on this phone.";
     case "location_permission_required":
       return detail || "Allow Location for Floor — Square requires it before any card charge.";
+    case "location_fix_required":
+      return (
+        detail ||
+        "Location permission is on, but Floor still needs a GPS fix before Square authorize. Enable Precise Location and try again."
+      );
+    case "unsupportedCountry":
+    case "authorization_unsupported_country":
+      return (
+        detail ||
+        "Square rejected authorize as unsupported country. Confirm: (1) IPA and Netlify share the same sandbox Application ID, (2) the selected Square location is a US/CA/GB/AU sandbox location, (3) Precise Location is on and a GPS fix completed before authorize."
+      );
     case "mock_authorize_disabled":
     case "mock_charge_disabled":
       return detail || "Live Square is required for register card charges. Connect Square on the register and pick a location.";
@@ -197,6 +208,7 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
         accessToken?: string;
         locationId?: string;
         locationName?: string | null;
+        locationCountry?: string | null;
         sandbox?: boolean;
         applicationId?: string | null;
       };
@@ -211,7 +223,15 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
             "Square is connected but no location is selected. On the register: Settings → List locations → pick one.",
           );
         }
-        throw new Error(`square-mobile-auth HTTP ${res.status}: ${body.error || body.message || "unknown"}`);
+        if (body.error === "square_location_unsupported_country") {
+          throw new Error(body.message || "Square location country is not supported by Mobile Payments SDK.");
+        }
+        if (body.error === "square_app_id_environment_mismatch") {
+          throw new Error(body.message || "Square Application ID environment mismatch between IPA and server.");
+        }
+        throw new Error(
+          body.message || `square-mobile-auth HTTP ${res.status}: ${body.error || "unknown"}`,
+        );
       }
       if (!body.accessToken || !body.locationId) {
         throw new Error("square-mobile-auth returned no access token or location");
@@ -230,17 +250,19 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
       }
 
       setStatus(
-        `Authorizing Square SDK… location ${body.locationId}${body.sandbox ? " (sandbox)" : ""}${
-          serverAppId ? ` · app ${serverAppId.slice(0, 12)}…` : ""
-        }`,
+        `Authorizing Square SDK… ${body.locationName || body.locationId}${
+          body.locationCountry ? ` · ${body.locationCountry}` : ""
+        }${body.sandbox ? " (sandbox)" : ""}${serverAppId ? ` · app ${serverAppId.slice(0, 14)}…` : ""}`,
       );
       console.info("[floor-square] authorize", {
         locationId: body.locationId,
         locationName: body.locationName,
+        locationCountry: body.locationCountry,
         sandbox: body.sandbox,
         applicationId: serverAppId || null,
         bakedAppId: bakedAppId || null,
         tokenLen: body.accessToken.length,
+        locationFix: perms,
       });
 
       const result = await FloorSquare.authorize({

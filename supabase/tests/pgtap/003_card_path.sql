@@ -33,8 +33,12 @@ begin
     ('90002', 'B', '2', 'Unit B', 379, 100, 'available', v_store, now(), now()),
     ('90003', 'C', '3', 'Unit C', 2000, 1000, 'available', v_store, now(), now());
 
-  insert into public.pos_devices (id, store_id, kind, label, pair_code, last_seen)
-  values (gen_random_uuid(), v_store, 'phone_reader', 'Test phone', 'TEST01', now())
+  insert into public.pos_devices (
+    id, store_id, kind, label, pair_code, last_seen, square_authorized, square_location_id
+  )
+  values (
+    gen_random_uuid(), v_store, 'phone_reader', 'Test phone', 'TEST01', now(), true, 'SANDBOX_LOC'
+  )
   returning id into v_device;
 
   insert into public.square_connections (

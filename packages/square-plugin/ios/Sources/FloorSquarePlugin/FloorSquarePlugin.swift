@@ -31,13 +31,18 @@ public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManagerDe
 
     private var paymentDelegate: FloorPaymentDelegate?
     private var paymentHandle: PaymentHandle?
-    private var locationManager: CLLocationManager?
-    private var bluetoothManager: CBCentralManager?
-    private var permissionCall: CAPPluginCall?
-    private var locationResolved = false
-    private var bluetoothResolved = false
-    private var locationOk = false
-    private var bluetoothOk = false
+  private var locationManager: CLLocationManager?
+  private var bluetoothManager: CBCentralManager?
+  private var permissionCall: CAPPluginCall?
+  private var locationAuthResolved = false
+  private var locationFixResolved = false
+  private var bluetoothResolved = false
+  private var locationOk = false
+  private var locationFixOk = false
+  private var bluetoothOk = false
+  private var lastFixLat: Double?
+  private var lastFixLon: Double?
+  private var lastFixAccuracy: Double?
     private static var didInitializeSdk = false
 #if canImport(MockReaderUI)
     private var mockReaderUI: MockReaderUI?
@@ -90,6 +95,9 @@ public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManagerDe
         var debug = error.localizedDescription
         if let auth = AuthorizationError(rawValue: ns.code) {
             codeName = String(describing: auth)
+            if auth == .unsupportedCountry {
+                debug = "authorization_unsupported_country — seller location or Application ID environment is wrong, or the phone GPS country could not be read as US/CA/GB/AU. Confirm sandbox Application ID matches Netlify, location country is US, Precise Location is on, and a GPS fix completed."
+            }
         } else if let pay = PaymentError(rawValue: ns.code) {
             codeName = String(describing: pay)
         }
@@ -177,23 +185,33 @@ public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManagerDe
     @objc func preparePermissions(_ call: CAPPluginCall) {
         DispatchQueue.main.async {
             self.permissionCall = call
-            self.locationResolved = false
+            self.locationAuthResolved = false
+            self.locationFixResolved = false
             self.bluetoothResolved = false
             self.locationOk = false
+            self.locationFixOk = false
             self.bluetoothOk = false
+            self.lastFixLat = nil
+            self.lastFixLon = nil
+            self.lastFixAccuracy = nil
 
             let lm = CLLocationManager()
             self.locationManager = lm
             lm.delegate = self
+            lm.desiredAccuracy = kCLLocationAccuracyHundredMeters
             switch lm.authorizationStatus {
             case .authorizedAlways, .authorizedWhenInUse:
                 self.locationOk = true
-                self.locationResolved = true
+                self.locationAuthResolved = true
+                // Square uses the device GPS country for authorize — permission alone is not enough.
+                lm.requestLocation()
             case .notDetermined:
                 lm.requestWhenInUseAuthorization()
             default:
                 self.locationOk = false
-                self.locationResolved = true
+                self.locationAuthResolved = true
+                self.locationFixResolved = true
+                self.locationFixOk = false
             }
 
             self.bluetoothManager = CBCentralManager(delegate: self, queue: .main, options: [
@@ -201,12 +219,17 @@ public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManagerDe
             ])
             self.finishPermissionsIfReady()
 
-            // Never hang Authorize forever if a permission callback is dropped.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 20) { [weak self] in
+            // Never hang Authorize forever if a permission/fix callback is dropped.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 25) { [weak self] in
                 guard let self, let pending = self.permissionCall, pending === call else { return }
-                if !self.locationResolved {
+                if !self.locationAuthResolved {
                     self.locationOk = false
-                    self.locationResolved = true
+                    self.locationAuthResolved = true
+                    self.locationFixResolved = true
+                    self.locationFixOk = false
+                } else if self.locationOk && !self.locationFixResolved {
+                    self.locationFixResolved = true
+                    self.locationFixOk = false
                 }
                 if !self.bluetoothResolved {
                     self.bluetoothOk = true
@@ -221,13 +244,35 @@ public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManagerDe
         switch manager.authorizationStatus {
         case .authorizedAlways, .authorizedWhenInUse:
             locationOk = true
-            locationResolved = true
+            locationAuthResolved = true
+            manager.desiredAccuracy = kCLLocationAccuracyHundredMeters
+            manager.requestLocation()
         case .notDetermined:
             break
         default:
             locationOk = false
-            locationResolved = true
+            locationAuthResolved = true
+            locationFixResolved = true
+            locationFixOk = false
+            finishPermissionsIfReady()
         }
+    }
+
+    public func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        guard let loc = locations.last else { return }
+        lastFixLat = loc.coordinate.latitude
+        lastFixLon = loc.coordinate.longitude
+        lastFixAccuracy = loc.horizontalAccuracy
+        locationFixOk = loc.horizontalAccuracy >= 0
+        locationFixResolved = true
+        NSLog("FloorSquare location fix: lat=\(loc.coordinate.latitude) lon=\(loc.coordinate.longitude) acc=\(loc.horizontalAccuracy)")
+        finishPermissionsIfReady()
+    }
+
+    public func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        NSLog("FloorSquare location fix failed: \(error.localizedDescription)")
+        locationFixOk = false
+        locationFixResolved = true
         finishPermissionsIfReady()
     }
 
@@ -244,7 +289,8 @@ public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManagerDe
     }
 
     private func finishPermissionsIfReady() {
-        guard let call = permissionCall, locationResolved, bluetoothResolved else { return }
+        guard let call = permissionCall, locationAuthResolved, bluetoothResolved else { return }
+        if locationOk && !locationFixResolved { return }
         permissionCall = nil
         if !locationOk {
             resolve(call, [
@@ -256,7 +302,27 @@ public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManagerDe
             ])
             return
         }
-        resolve(call, ["ok": true, "location": true, "bluetooth": bluetoothOk])
+        if !locationFixOk {
+            resolve(call, [
+                "ok": false,
+                "reason": "location_fix_required",
+                "message": "Location permission is on, but iOS has not given Floor a GPS fix yet. Turn on Precise Location, wait outdoors/near a window a few seconds, then Authorize again.",
+                "location": true,
+                "locationFix": false,
+                "bluetooth": bluetoothOk
+            ])
+            return
+        }
+        var payload: [String: Any] = [
+            "ok": true,
+            "location": true,
+            "locationFix": true,
+            "bluetooth": bluetoothOk
+        ]
+        if let lat = lastFixLat { payload["latitude"] = lat }
+        if let lon = lastFixLon { payload["longitude"] = lon }
+        if let acc = lastFixAccuracy { payload["accuracyMeters"] = acc }
+        resolve(call, payload)
     }
 
     @objc func authorize(_ call: CAPPluginCall) {
