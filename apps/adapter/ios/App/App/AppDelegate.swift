@@ -1,15 +1,30 @@
 import UIKit
 import Capacitor
+import SquareMobilePaymentsSDK
 
 @UIApplicationMain
 class AppDelegate: UIResponder, UIApplicationDelegate {
 
     var window: UIWindow?
+    private static var didInitSquare = false
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        // Square MobilePaymentsSDK.initialize runs in FloorSquarePlugin.load() once CapApp-SPM
-        // has linked SquareMobilePaymentsSDK into the process.
+        // Square docs: initialize in didFinishLaunchingWithOptions with launchOptions + Application ID.
+        // FloorSquarePlugin.load() is a fallback if CapApp-SPM loads before this runs.
+        Self.bootstrapSquare(launchOptions: launchOptions)
         return true
+    }
+
+    static func bootstrapSquare(launchOptions: [UIApplication.LaunchOptionsKey: Any]?) {
+        guard !didInitSquare else { return }
+        let appId = (Bundle.main.object(forInfoDictionaryKey: "SquareApplicationID") as? String) ?? ""
+        guard !appId.isEmpty, appId != "REPLACE_ME" else {
+            NSLog("FloorSquare AppDelegate: SquareApplicationID missing — skip initialize")
+            return
+        }
+        MobilePaymentsSDK.initialize(applicationLaunchOptions: launchOptions, squareApplicationID: appId)
+        didInitSquare = true
+        NSLog("FloorSquare AppDelegate: MobilePaymentsSDK.initialize appIdPrefix=%@", String(appId.prefix(24)))
     }
 
     func applicationWillResignActive(_ application: UIApplication) {

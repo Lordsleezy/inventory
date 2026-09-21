@@ -43,6 +43,7 @@ public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManagerDe
   private var lastFixLat: Double?
   private var lastFixLon: Double?
   private var lastFixAccuracy: Double?
+  private var lastFixCountry: String?
     private static var didInitializeSdk = false
 #if canImport(MockReaderUI)
     private var mockReaderUI: MockReaderUI?
@@ -50,7 +51,13 @@ public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManagerDe
     private var squarePresenter: UIViewController?
 
     public override func load() {
-        Self.initializeSdkIfNeeded()
+        // AppDelegate bootstraps with applicationLaunchOptions (Square's required path).
+        // Cap plugins load after didFinishLaunching — do not initialize a second time.
+        let appId = squareAppId()
+        if !appId.isEmpty && appId != "REPLACE_ME" {
+            Self.didInitializeSdk = true
+            NSLog("FloorSquare plugin: AppDelegate should have initialized appIdPrefix=%@", String(appId.prefix(24)))
+        }
     }
 
     private static func initializeSdkIfNeeded() {
@@ -60,9 +67,10 @@ public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManagerDe
             NSLog("FloorSquare: SquareApplicationID missing/REPLACE_ME — MobilePaymentsSDK.initialize skipped")
             return
         }
-        MobilePaymentsSDK.initialize(squareApplicationID: appId)
+        // Fallback when AppDelegate did not run (rare). Prefer launchOptions path in AppDelegate.
+        MobilePaymentsSDK.initialize(applicationLaunchOptions: nil, squareApplicationID: appId)
         didInitializeSdk = true
-        NSLog("FloorSquare: MobilePaymentsSDK.initialize completed")
+        NSLog("FloorSquare plugin: MobilePaymentsSDK.initialize fallback appIdPrefix=%@", String(appId.prefix(24)))
     }
 
     private func squareAppId() -> String {
@@ -194,6 +202,7 @@ public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManagerDe
             self.lastFixLat = nil
             self.lastFixLon = nil
             self.lastFixAccuracy = nil
+            self.lastFixCountry = nil
 
             let lm = CLLocationManager()
             self.locationManager = lm
@@ -264,9 +273,20 @@ public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManagerDe
         lastFixLon = loc.coordinate.longitude
         lastFixAccuracy = loc.horizontalAccuracy
         locationFixOk = loc.horizontalAccuracy >= 0
-        locationFixResolved = true
         NSLog("FloorSquare location fix: lat=\(loc.coordinate.latitude) lon=\(loc.coordinate.longitude) acc=\(loc.horizontalAccuracy)")
-        finishPermissionsIfReady()
+        // Reverse-geocode so we can show device ISO country before authorize (Square error 13).
+        CLGeocoder().reverseGeocodeLocation(loc) { [weak self] placemarks, error in
+            guard let self else { return }
+            if let err = error {
+                NSLog("FloorSquare reverse geocode failed: \(err.localizedDescription)")
+                self.lastFixCountry = nil
+            } else {
+                self.lastFixCountry = placemarks?.first?.isoCountryCode
+                NSLog("FloorSquare device country=\(self.lastFixCountry ?? "nil")")
+            }
+            self.locationFixResolved = true
+            self.finishPermissionsIfReady()
+        }
     }
 
     public func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
@@ -322,6 +342,8 @@ public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManagerDe
         if let lat = lastFixLat { payload["latitude"] = lat }
         if let lon = lastFixLon { payload["longitude"] = lon }
         if let acc = lastFixAccuracy { payload["accuracyMeters"] = acc }
+        if let country = lastFixCountry { payload["deviceCountry"] = country }
+        if let localeRegion = Locale.current.regionCode { payload["localeRegion"] = localeRegion }
         resolve(call, payload)
     }
 

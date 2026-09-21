@@ -14,6 +14,7 @@ export function PaymentDeviceScreen() {
     locationName,
     sandbox,
     authorizing,
+    authDiag,
     pending,
     error,
     status,
@@ -60,9 +61,14 @@ export function PaymentDeviceScreen() {
           <p className="text-body mt-1">Not authorized — register Card will refuse until this succeeds.</p>
         )}
       </div>
+      {authDiag ? (
+        <pre className="text-quiet mt-3 overflow-x-auto whitespace-pre-wrap rounded-lg border border-floor-line bg-floor-panel p-3 text-left text-xs leading-5">
+          {authDiag}
+        </pre>
+      ) : null}
       {!session ? <Notice tone="error">Sign in required.</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
-      {status ? <p className="text-quiet mt-2">{status}</p> : null}
+      {status ? <p className="text-quiet mt-2 whitespace-pre-wrap">{status}</p> : null}
       <div className="mt-4 flex flex-wrap gap-2">
         <button
           type="button"

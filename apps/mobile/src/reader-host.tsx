@@ -29,6 +29,7 @@ type ReaderContextValue = {
   locationName: string | null;
   sandbox: boolean | null;
   authorizing: boolean;
+  authDiag: string;
   pending: PendingCharge[];
   error: string;
   status: string;
@@ -114,6 +115,10 @@ function isTransientReaderError(msg: string): boolean {
   return /offline|register_pos_reader|Pending charges query|not_signed_in|Device offline/i.test(msg);
 }
 
+function logSquareDiag(msg: string) {
+  console.log("[floor-square]", msg);
+}
+
 /**
  * Keeps the phone registered as the register's card reader for the whole app
  * session — heartbeat + pending-charge poll + capture recovery, not just one screen.
@@ -127,6 +132,7 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
   const [locationName, setLocationName] = useState<string | null>(null);
   const [sandbox, setSandbox] = useState<boolean | null>(null);
   const [authorizing, setAuthorizing] = useState(false);
+  const [authDiag, setAuthDiag] = useState("");
   const [pending, setPending] = useState<PendingCharge[]>([]);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
@@ -193,6 +199,7 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
   const authorizeSdk = useCallback(async () => {
     setAuthorizing(true);
     setError("");
+    setAuthDiag("");
     setStatus("Requesting Location / Bluetooth, then authorizing Square…");
     try {
       await ensureOnline();
@@ -209,8 +216,11 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
         locationId?: string;
         locationName?: string | null;
         locationCountry?: string | null;
+        merchantId?: string | null;
+        merchantCountry?: string | null;
         sandbox?: boolean;
         applicationId?: string | null;
+        source?: string | null;
         verificationError?: string | null;
       };
       if (!res.ok) {
@@ -227,11 +237,8 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
         if (body.error === "square_location_unsupported_country") {
           throw new Error(body.message || "Square location country is not supported by Mobile Payments SDK.");
         }
-        if (body.error === "square_app_id_environment_mismatch") {
-          throw new Error(body.message || "Square Application ID environment mismatch between IPA and server.");
-        }
-        if (body.error === "square_location_lookup_failed") {
-          throw new Error(body.message || "Could not verify Square location with the store token.");
+        if (body.error === "square_app_id_environment_mismatch" || body.error === "square_application_id_missing") {
+          throw new Error(body.message || "Square Application ID mismatch / missing on Netlify.");
         }
         throw new Error(
           body.message || `square-mobile-auth HTTP ${res.status}: ${body.error || "unknown"}`,
@@ -244,36 +251,60 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
       const stateBefore = await FloorSquare.authState?.();
       const bakedAppId = (stateBefore?.squareApplicationId || "").trim();
       const serverAppId = (body.applicationId || "").trim();
+      const deviceCountry = (perms as { deviceCountry?: string } | undefined)?.deviceCountry || "—";
+      const localeRegion = (perms as { localeRegion?: string } | undefined)?.localeRegion || "—";
+      const lat = (perms as { latitude?: number } | undefined)?.latitude;
+      const lon = (perms as { longitude?: number } | undefined)?.longitude;
+      const sourceLabel =
+        body.source === "env_sandbox_token"
+          ? "SQUARE_SANDBOX_ACCESS_TOKEN (Netlify env)"
+          : body.source === "square_connections"
+            ? "OAuth square_connections"
+            : body.source === "connections_mirrored"
+              ? "legacy connections (mirrored)"
+              : body.source || "unknown";
+
+      const diagLines = [
+        `IPA SquareApplicationID: ${bakedAppId ? `${bakedAppId.slice(0, 20)}… (${bakedAppId.startsWith("sandbox-") ? "sandbox" : "production"})` : "(missing)"}`,
+        `SDK environment: ${stateBefore?.sandbox ? "sandbox" : stateBefore?.sandbox === false ? "production" : "unknown"}`,
+        `Netlify SQUARE_APPLICATION_ID: ${serverAppId ? `${serverAppId.slice(0, 20)}…` : "(UNSET — will cause error 13)"}`,
+        `Token source: ${sourceLabel}`,
+        `Token env: ${body.sandbox ? "sandbox" : "production"}`,
+        `Location ID: ${body.locationId}${body.locationName ? ` (${body.locationName})` : ""}`,
+        `Location country: ${body.locationCountry || "—"}`,
+        `Merchant country: ${body.merchantCountry || "—"}`,
+        `Device GPS country: ${deviceCountry}`,
+        `Locale region: ${localeRegion}`,
+        `GPS: ${lat != null && lon != null ? `${lat.toFixed(4)}, ${lon.toFixed(4)}` : "—"}`,
+      ];
+      const diag = diagLines.join("\n");
+      setAuthDiag(diag);
+      console.info("[floor-square] authorize diagnostics\n" + diag);
+      logSquareDiag(diag);
+
+      if (!serverAppId) {
+        throw new Error(
+          "Netlify SQUARE_APPLICATION_ID is unset. Set it to the IPA’s sandbox Application ID (same as Codemagic). Square iOS error 13 is almost always an Application ID mismatch.",
+        );
+      }
       if (bakedAppId && serverAppId && bakedAppId !== serverAppId) {
         throw new Error(
           squareSdkErrorMessage({
             reason: "app_id_mismatch",
-            message: `Square Application ID mismatch — IPA has ${bakedAppId}, server has ${serverAppId}. Rebuild the phone app with the same SQUARE_APPLICATION_ID as Netlify.`,
+            message: `Square Application ID mismatch — IPA has ${bakedAppId}, Netlify has ${serverAppId}. Rebuild Codemagic with the Netlify sandbox Application ID (or update Netlify to match the IPA).`,
           }),
         );
       }
 
       if (body.verificationError) {
-        // Token/location lookup failed (often 401) — still attempt SDK authorize, but keep the warning visible.
-        setError(body.verificationError);
+        setStatus(`Warning: ${body.verificationError}`);
       }
 
       setStatus(
         `Authorizing Square SDK… ${body.locationName || body.locationId}${
           body.locationCountry ? ` · ${body.locationCountry}` : ""
-        }${body.sandbox ? " (sandbox)" : ""}${serverAppId ? ` · app ${serverAppId.slice(0, 14)}…` : ""}`,
+        }${body.sandbox ? " (sandbox)" : ""}`,
       );
-      console.info("[floor-square] authorize", {
-        locationId: body.locationId,
-        locationName: body.locationName,
-        locationCountry: body.locationCountry,
-        sandbox: body.sandbox,
-        applicationId: serverAppId || null,
-        bakedAppId: bakedAppId || null,
-        tokenLen: body.accessToken.length,
-        verificationError: body.verificationError || null,
-        locationFix: perms,
-      });
 
       const result = await FloorSquare.authorize({
         accessToken: body.accessToken,
@@ -282,7 +313,8 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
       });
       console.info("[floor-square] authorize result", result);
       if (!result.ok) {
-        throw new Error(squareSdkErrorMessage(result));
+        const msg = squareSdkErrorMessage(result);
+        throw new Error(`${msg}\n\nDiagnostics:\n${diag}`);
       }
 
       setAuthorized(true);
@@ -514,6 +546,7 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
       locationName,
       sandbox,
       authorizing,
+      authDiag,
       pending,
       error,
       status,
@@ -532,6 +565,7 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
       locationName,
       sandbox,
       authorizing,
+      authDiag,
       pending,
       error,
       status,

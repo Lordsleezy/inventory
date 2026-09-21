@@ -2,18 +2,18 @@ import { json, corsHeaders, staffFromEvent } from "../lib/server.mjs";
 import {
   getStoreSquareAccess,
   resolveSquareLocation,
+  squareClient,
   squareHttpErrorMessage,
 } from "../lib/square.mjs";
 import { wrapHandler } from "../lib/floor-log.mjs";
+import { Environment } from "square/legacy";
 
 /** Countries where Mobile Payments SDK can authorize (sandbox + production). */
 const MPSDK_COUNTRIES = new Set(["US", "CA", "GB", "AU"]);
 
 /**
  * Mint credentials for the phone Mobile Payments SDK (authorize).
- * Returns access token + location — phone must not persist them beyond the session.
- * Validates the Square location country when the token can call Locations API.
- * Location lookup failures do not block minting — the SDK authorize result is authoritative.
+ * Returns access token + location + diagnostics for the phone UI.
  */
 async function handle(event) {
   if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: corsHeaders(), body: "" };
@@ -24,10 +24,20 @@ async function handle(event) {
   }
 
   const applicationId = process.env.SQUARE_APPLICATION_ID || null;
+  if (!applicationId) {
+    return json(500, {
+      error: "square_application_id_missing",
+      message:
+        "Netlify SQUARE_APPLICATION_ID is unset. Set it to the same sandbox Application ID baked into the IPA (Codemagic appstore group). Mismatch is the #1 cause of authorization_unsupported_country on iOS.",
+    });
+  }
+
   const envSandbox = (process.env.SQUARE_ENVIRONMENT || "sandbox").toLowerCase() !== "production";
   let locationName = access.locationName || null;
   let locationCountry = null;
   let locationStatus = null;
+  let merchantId = access.merchantId || null;
+  let merchantCountry = null;
   let verificationError = null;
   let tokenSandbox = access.sandbox ?? envSandbox;
 
@@ -38,6 +48,7 @@ async function handle(event) {
       locationName = loc.name || locationName;
       locationCountry = loc.country || null;
       locationStatus = loc.status || null;
+      merchantId = loc.merchantId || merchantId;
     }
     tokenSandbox = verified.sandbox;
     if (verified.flipped) {
@@ -45,38 +56,51 @@ async function handle(event) {
         `SQUARE_ENVIRONMENT is ${envSandbox ? "sandbox" : "production"} but this access token only works against ` +
         `${verified.sandbox ? "sandbox" : "production"}. Update Netlify SQUARE_ENVIRONMENT (and Application ID) to match.`;
     }
+
+    // Merchant country (Square forum: confirm seller country independently of location).
+    try {
+      const env = tokenSandbox ? Environment.Sandbox : Environment.Production;
+      const client = squareClient(access.accessToken, env);
+      const { result } = await client.merchantsApi.retrieveMerchant(merchantId || "me");
+      const merchant = result.merchant;
+      if (merchant) {
+        merchantId = merchant.id || merchantId;
+        merchantCountry = merchant.country || null;
+      }
+    } catch {
+      /* optional diagnostic */
+    }
   } catch (err) {
     verificationError = squareHttpErrorMessage(err, access.locationId);
-    // Soft-fail: still mint credentials so the phone can attempt SDK authorize.
-    // Hard-fail only for clear country mismatches when we successfully read the location.
   }
 
   if (locationCountry && !MPSDK_COUNTRIES.has(locationCountry)) {
     return json(409, {
       error: "square_location_unsupported_country",
-      message: `Square location ${access.locationId} is in ${locationCountry}. Mobile Payments SDK only supports US, CA, GB, AU. Pick a US sandbox location (Developer Console → Sandbox → Locations).`,
+      message: `Square location ${access.locationId} is in ${locationCountry}. Mobile Payments SDK only supports US, CA, GB, AU.`,
       locationId: access.locationId,
       locationName,
       locationCountry,
+      merchantCountry,
       applicationId,
       sandbox: tokenSandbox,
+      source: access.source || null,
     });
   }
 
-  // Sandbox Application IDs are sandbox-sq0idb-…; production are sq0idp-…
-  if (applicationId) {
-    const idIsSandbox = applicationId.startsWith("sandbox-");
-    if (idIsSandbox !== Boolean(tokenSandbox)) {
-      return json(409, {
-        error: "square_app_id_environment_mismatch",
-        message: `SQUARE_APPLICATION_ID looks ${idIsSandbox ? "sandbox" : "production"} but the access token is ${tokenSandbox ? "sandbox" : "production"}. Codemagic (IPA) and Netlify must use the same Square Application ID / environment.`,
-        applicationId,
-        sandbox: tokenSandbox,
-        locationId: access.locationId,
-        locationCountry,
-        verificationError,
-      });
-    }
+  const idIsSandbox = applicationId.startsWith("sandbox-");
+  if (idIsSandbox !== Boolean(tokenSandbox)) {
+    return json(409, {
+      error: "square_app_id_environment_mismatch",
+      message: `SQUARE_APPLICATION_ID looks ${idIsSandbox ? "sandbox" : "production"} but the access token is ${tokenSandbox ? "sandbox" : "production"}. Codemagic IPA and Netlify must use the same Application ID.`,
+      applicationId,
+      sandbox: tokenSandbox,
+      locationId: access.locationId,
+      locationCountry,
+      merchantCountry,
+      source: access.source || null,
+      verificationError,
+    });
   }
 
   return json(200, {
@@ -85,6 +109,8 @@ async function handle(event) {
     locationName,
     locationCountry,
     locationStatus,
+    merchantId,
+    merchantCountry,
     sandbox: tokenSandbox,
     applicationId,
     source: access.source || null,
