@@ -17,10 +17,11 @@ let package = Package(
             dependencies: [
                 .product(name: "Capacitor", package: "capacitor-swift-pm"),
                 .product(name: "Cordova", package: "capacitor-swift-pm"),
-                .product(name: "SquareMobilePaymentsSDK", package: "mobile-payments-sdk-ios"),
-                // Sandbox cannot use physical readers — MockReaderUI is required for TestFlight sandbox charges.
-                // Pure Swift product from Square's SPM package (not Obj-C in this target).
-                .product(name: "MockReaderUI", package: "mobile-payments-sdk-ios")
+                .product(name: "SquareMobilePaymentsSDK", package: "mobile-payments-sdk-ios")
+                // MockReaderUI is NOT a plugin dependency. Square packages it as APPL
+                // (bundle id com.squareup.readersdk.mockreaderui), which App Store Connect
+                // rejects. CapApp-SPM optionally links it for ad-hoc sandbox builds only;
+                // Swift uses #if canImport(MockReaderUI). See docs/SQUARE.md.
             ],
             path: "ios/Sources/FloorSquarePlugin"
         )

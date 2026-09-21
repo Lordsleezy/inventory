@@ -21,11 +21,9 @@ Sign up in the app creates the store. Invite others from Setup.
 ## Build the IPA
 
 1. App ID `com.openboxindustries.floor`, team `4SRR4NV35F`.
-2. Codemagic → `Lordsleezy/inventory` → **ios-capacitor**.
-3. Tag `ios-*` or start `master`.
-4. Install the new TestFlight build.
-
-Push notifications: not in this IPA (no entitlements). Settings shows “Push not set up.” Resend email works once Netlify env is set.
+2. **Sandbox Square card testing:** tag `ios-square-*` → Codemagic workflow **Floor iOS Square sandbox (ad-hoc)** → download the `.ipa` from Artifacts → install with Apple Configurator / Xcode Devices (phone UDID must be registered). See `docs/SQUARE.md`.
+3. **TestFlight (no MockReaderUI):** tag `ios-*` that is **not** `ios-square-*` → workflow **Floor iOS (TestFlight)**.
+4. Push notifications: not in this IPA (no entitlements). Settings shows “Push not set up.” Resend email works once Netlify env is set.
 
 ## Netlify env
 

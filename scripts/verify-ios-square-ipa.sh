@@ -65,17 +65,30 @@ if [ "$FOUND" -ne 1 ]; then
   exit 1
 fi
 
-# Sandbox charges require MockReaderUI (physical readers unsupported in sandbox).
-if ! find "$APP" -iname '*MockReaderUI*' 2>/dev/null | grep -q .; then
-  if command -v otool >/dev/null 2>&1 && [ -f "$BIN" ] && otool -L "$BIN" 2>/dev/null | grep -qi 'MockReaderUI'; then
-    echo "PASS  MockReaderUI linked (otool)"
-  else
-    echo "FAIL  MockReaderUI is NOT in the app bundle — sandbox Take payment will crash/fail." >&2
-    echo "CapApp-SPM and FloorSquarePlugin must link .product(name: \"MockReaderUI\", ...)." >&2
+# MockReaderUI: required for ad-hoc sandbox (FLOOR_INCLUDE_MOCK_READER=1); forbidden otherwise.
+# Square packages it as APPL / com.squareup.readersdk.mockreaderui — ASC rejects the upload.
+INCLUDE_MOCK="${FLOOR_INCLUDE_MOCK_READER:-0}"
+MOCK_PRESENT=0
+if find "$APP" -iname '*MockReaderUI*' 2>/dev/null | grep -q .; then
+  MOCK_PRESENT=1
+elif command -v otool >/dev/null 2>&1 && [ -f "$BIN" ] && otool -L "$BIN" 2>/dev/null | grep -qi 'MockReaderUI'; then
+  MOCK_PRESENT=1
+fi
+
+if [ "$INCLUDE_MOCK" = "1" ] || [ "$INCLUDE_MOCK" = "true" ]; then
+  if [ "$MOCK_PRESENT" -ne 1 ]; then
+    echo "FAIL  MockReaderUI is NOT in the app bundle — sandbox Take payment needs it." >&2
+    echo "CapApp-SPM must link .product(name: \"MockReaderUI\", ...) when FLOOR_INCLUDE_MOCK_READER=1." >&2
     exit 1
   fi
+  echo "PASS  MockReaderUI present in IPA (ad-hoc sandbox build)"
 else
-  echo "PASS  MockReaderUI present in IPA"
+  if [ "$MOCK_PRESENT" -eq 1 ]; then
+    echo "FAIL  MockReaderUI is in the IPA — App Store Connect will reject upload" >&2
+    echo "(bundle id com.squareup.readersdk.mockreaderui). Rebuild with FLOOR_INCLUDE_MOCK_READER unset." >&2
+    exit 1
+  fi
+  echo "PASS  MockReaderUI absent (App Store / TestFlight safe)"
 fi
 
 # SquareApplicationID must be baked (public app id) or initialize() is skipped.

@@ -5,19 +5,16 @@ import UIKit
 import CoreLocation
 import CoreBluetooth
 import SquareMobilePaymentsSDK
+#if canImport(MockReaderUI)
 import MockReaderUI
+#endif
 
 /// Capacitor bridge for Square Mobile Payments SDK.
 ///
-/// Crash context (ios-square-7): Take payment killed the process immediately. ASC crash
-/// reports were not reachable from this environment (App Store Connect login failed; no
-/// Apple API key in the workspace). Square’s own docs state the matching failure mode:
-/// “Physical card readers aren't supported in the Square Sandbox. To take test payments,
-/// you must simulate a virtual reader with the Mock Reader UI.” We never presented
-/// MockReaderUI before startPayment — that is the confirmed gap vs Donut Counter.
-/// Guards below refuse startPayment when sandbox has no mock reader, catch NSExceptions,
-/// and always resolve the Capacitor call on the main queue so the UI gets an error instead
-/// of an uncaught exception kill.
+/// MockReaderUI is optional (linked only by CapApp-SPM for ad-hoc sandbox builds).
+/// Square ships it as CFBundlePackageType=APPL with bundle id
+/// com.squareup.readersdk.mockreaderui — App Store Connect rejects any IPA that embeds it.
+/// Production / TestFlight builds omit the product; `#if canImport` keeps this file compiling.
 @objc(FloorSquarePlugin)
 public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManagerDelegate, CBCentralManagerDelegate {
     public let identifier = "FloorSquarePlugin"
@@ -41,7 +38,9 @@ public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManagerDe
     private var locationOk = false
     private var bluetoothOk = false
     private static var didInitializeSdk = false
+#if canImport(MockReaderUI)
     private var mockReaderUI: MockReaderUI?
+#endif
     private var squarePresenter: UIViewController?
 
     public override func load() {
@@ -98,9 +97,10 @@ public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManagerDe
         return host
     }
 
-    /// Sandbox cannot talk to physical readers — present MockReaderUI (Square Donut Counter pattern).
+    /// Sandbox cannot talk to physical readers — present MockReaderUI when linked (ad-hoc builds).
     private func ensureSandboxMockReader(from presenter: UIViewController) -> String? {
         guard isSandbox() else { return nil }
+#if canImport(MockReaderUI)
         do {
             if mockReaderUI == nil {
                 mockReaderUI = try MockReaderUI(for: MobilePaymentsSDK.shared)
@@ -110,6 +110,9 @@ public class FloorSquarePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManagerDe
         } catch {
             return "Sandbox requires Square’s Mock Reader UI before charging (physical readers do not work in sandbox). Mock reader failed: \(error.localizedDescription)"
         }
+#else
+        return "This build has no MockReaderUI (App Store / TestFlight cannot embed it). Install an ios-square-* ad-hoc build to take sandbox card payments."
+#endif
     }
 
     @objc func authState(_ call: CAPPluginCall) {

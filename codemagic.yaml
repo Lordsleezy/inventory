@@ -1,18 +1,15 @@
 # Signing uses the Apple Developer Portal API key named Forge-Lite
 # (Teams → Integrations → Developer Portal). Do not commit certs.
 # Team ID 4SRR4NV35F. Bundle ID com.openboxindustries.floor.
-# Trigger: tag ios-* or a manual run.
 #
-# ios_signing is intentionally omitted. That block only matches profiles
-# uploaded under Codemagic → Code signing identities, which is why the
-# previous builds failed with "No matching profiles found" even though
-# Apple can list the Distribution cert, but Codemagic cannot use it without
-# the matching private key. CERTIFICATE_PRIVATE_KEY lives in the Codemagic
-# variable group named appstore (full RSA PEM).
+# Two iOS paths (Square MockReaderUI cannot go to App Store Connect):
+#   ios-square-*  → ad-hoc IPA WITH MockReaderUI (sandbox card testing). No TestFlight.
+#   ios-*         → App Store IPA WITHOUT MockReaderUI → TestFlight.
+# Trigger: tag matching the patterns below, or push square-v1 (TestFlight path).
 
 workflows:
   ios-capacitor:
-    name: Floor iOS
+    name: Floor iOS (TestFlight)
     instance_type: mac_mini_m2
     max_build_duration: 60
     integrations:
@@ -22,6 +19,9 @@ workflows:
         - tag
         - push
       tag_patterns:
+        # ios-square-* is handled by ios-square-sandbox (MockReader / ad-hoc).
+        - pattern: ios-square-*
+          include: false
         - pattern: ios-*
           include: true
       branch_patterns:
@@ -36,14 +36,8 @@ workflows:
         BUNDLE_ID: "com.openboxindustries.floor"
         APPLE_TEAM_ID: "4SRR4NV35F"
         APP_STORE_CONNECT_TEAM_ID: "4SRR4NV35F"
-        # Numeric Apple ID from App Store Connect → Floor → App Information → Apple ID.
-        # Also set this in the Codemagic group appstore if you prefer not to keep it here.
-        # APP_STORE_APP_ID: "1234567890"
-        # Also required in group appstore (public, baked into the IPA):
-        # VITE_SUPABASE_URL=https://zoukmsmbztcuyoslvikp.supabase.co
-        # VITE_SUPABASE_ANON_KEY, VITE_FUNCTIONS_URL
-        # Required for MobilePaymentsSDK.initialize (public Square Application ID):
-        # SQUARE_APPLICATION_ID
+        # TestFlight / App Store must NOT embed MockReaderUI.
+        FLOOR_INCLUDE_MOCK_READER: "0"
       xcode: latest
       node: 22.18.0
     scripts:
@@ -90,21 +84,25 @@ workflows:
           fi
           npx cap sync ios
           bash ../../scripts/ios-prepare.sh
-          # SQUARE_APPLICATION_ID from Codemagic group appstore (public Square app id).
           export SQUARE_APPLICATION_ID="${SQUARE_APPLICATION_ID:-}"
+          export FLOOR_INCLUDE_MOCK_READER=0
           bash ../../scripts/ios-square-prepare.sh
           if [ -f ios/App/Podfile ]; then
             (cd ios/App && pod install)
           fi
           cd ../..
           test -d "$XCODE_PROJECT"
-          # Prove CapApp-SPM pulled FloorSquare + Square SDK as a *direct* product
-          # (transitive-only does not reliably embed the XCFramework in the IPA).
           grep -q FloorSquarePlugin apps/adapter/ios/App/CapApp-SPM/Package.swift
           grep -q SquareMobilePaymentsSDK apps/adapter/ios/App/CapApp-SPM/Package.swift
-          grep -q MockReaderUI apps/adapter/ios/App/CapApp-SPM/Package.swift
           grep -q mobile-payments-sdk-ios apps/adapter/ios/App/CapApp-SPM/Package.swift
-          grep -q MockReaderUI packages/square-plugin/Package.swift
+          if grep -q 'product(name: "MockReaderUI"' apps/adapter/ios/App/CapApp-SPM/Package.swift; then
+            echo "FAIL  MockReaderUI must not be in CapApp-SPM for TestFlight" >&2
+            exit 1
+          fi
+          if grep -q 'product(name: "MockReaderUI"' packages/square-plugin/Package.swift; then
+            echo "FAIL  plugin Package.swift must not link MockReaderUI" >&2
+            exit 1
+          fi
           grep -q mobile-payments-sdk-ios packages/square-plugin/Package.swift
           grep -q SquareMobilePaymentsSDK packages/square-plugin/Package.swift
           grep -q FloorSquarePlugin apps/adapter/ios/App/App/capacitor.config.json \
@@ -113,7 +111,7 @@ workflows:
             echo "SQUARE_APPLICATION_ID must be set in Codemagic group appstore" >&2
             exit 1
           fi
-          echo "PASS  CapApp-SPM declares FloorSquare + SquareMobilePaymentsSDK + MockReaderUI; SQUARE_APPLICATION_ID set"
+          echo "PASS  CapApp-SPM declares FloorSquare + SquareMobilePaymentsSDK (no MockReaderUI); SQUARE_APPLICATION_ID set"
       - name: Resolve Swift packages (prove SDK links)
         script: |
           set -euo pipefail
@@ -121,10 +119,8 @@ workflows:
             -project "$XCODE_PROJECT" \
             -scheme "$XCODE_SCHEME" \
             | tee /tmp/spm-resolve.log
-          # Resolved package graph must include Square's Mobile Payments SDK.
           if ! grep -Eiq 'mobile-payments-sdk-ios|SquareMobilePaymentsSDK' /tmp/spm-resolve.log \
             && ! find ~/Library/Developer/Xcode/DerivedData -name 'SquareMobilePaymentsSDK*' 2>/dev/null | head -1 | grep -q .; then
-            # xcodebuild -resolvePackageDependencies output varies; also check Package.resolved if present
             if ! find apps/adapter/ios -name 'Package.resolved' -print0 | xargs -0 grep -l mobile-payments-sdk-ios 2>/dev/null | head -1 | grep -q .; then
               echo "Square Mobile Payments SDK did not resolve into the Xcode package graph" >&2
               echo "--- spm-resolve.log (tail) ---" >&2
@@ -137,13 +133,10 @@ workflows:
         script: keychain initialize
       - name: Fetch signing files from Apple
         script: |
-          echo "Signing-related environment variable names:"
-          env | awk -F= '{print $1}' | grep -Ei 'CERT|SIGN|KEY_ID|ISSUER|BUNDLE|APPLE' | sort || true
           echo "CERTIFICATE_PRIVATE_KEY length: ${#CERTIFICATE_PRIVATE_KEY}"
           if [ -z "$CERTIFICATE_PRIVATE_KEY" ]; then
             echo "CERTIFICATE_PRIVATE_KEY is empty in this build." >&2
             echo "It must live in the Codemagic variable group named exactly: appstore" >&2
-            echo "Then start a new build of latest master so that group is imported." >&2
             exit 1
           fi
           app-store-connect fetch-signing-files "$BUNDLE_ID" \
@@ -166,15 +159,12 @@ workflows:
           LATEST=$(printf '%s' "$LATEST" | tr -dc '0-9')
           LATEST=${LATEST:-0}
           NEW=$((LATEST + 1))
-          # fallback so it's always higher even if the lookup fails
           if [ "$NEW" -le 1 ]; then NEW=$(date +%Y%m%d%H%M); fi
           (cd "$IOS_APP" && agvtool new-version -all "$NEW")
           /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $NEW" "$PLIST"
           sed -i.bak "s/CURRENT_PROJECT_VERSION = [0-9]*;/CURRENT_PROJECT_VERSION = $NEW;/g" "$PBX"
           rm -f "$PBX.bak"
           echo "Build number set to $NEW"
-          /usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$PLIST"
-          grep CURRENT_PROJECT_VERSION "$PBX"
       - name: Build IPA
         script: |
           test -d "$XCODE_PROJECT"
@@ -185,8 +175,7 @@ workflows:
       - name: Verify Square SDK is inside the IPA
         script: |
           set -euo pipefail
-          # Manifest checks already ran; this fails the build if the XCFramework
-          # did not actually land in the app binary (the ios-square-6 failure mode).
+          export FLOOR_INCLUDE_MOCK_READER=0
           IPA="$(ls -1t build/ios/ipa/*.ipa 2>/dev/null | head -1 || true)"
           if [ -z "$IPA" ]; then
             IPA="$(find . -path '*/build/ios/ipa/*.ipa' -o -path '*/ios/ipa/*.ipa' 2>/dev/null | head -1 || true)"
@@ -198,10 +187,186 @@ workflows:
     publishing:
       email:
         recipients:
-          -  pgg124@gmail.com
+          - pgg124@gmail.com
         notify:
           success: true
           failure: true
       app_store_connect:
         auth: integration
         submit_to_testflight: true
+
+  # Sandbox card testing: MockReaderUI is required (physical readers unsupported in Square
+  # sandbox) but ASC rejects its bundle id. Ship ad-hoc; install from Codemagic artifacts.
+  ios-square-sandbox:
+    name: Floor iOS Square sandbox (ad-hoc)
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    integrations:
+      app_store_connect: Forge-Lite
+    triggering:
+      events:
+        - tag
+      tag_patterns:
+        - pattern: ios-square-*
+          include: true
+    environment:
+      groups:
+        - appstore
+      vars:
+        XCODE_PROJECT: "apps/adapter/ios/App/App.xcodeproj"
+        XCODE_SCHEME: "App"
+        BUNDLE_ID: "com.openboxindustries.floor"
+        APPLE_TEAM_ID: "4SRR4NV35F"
+        APP_STORE_CONNECT_TEAM_ID: "4SRR4NV35F"
+        FLOOR_INCLUDE_MOCK_READER: "1"
+      xcode: latest
+      node: 22.18.0
+    scripts:
+      - name: npm
+        script: |
+          npm ci
+          npm run test:store
+      - name: Require VITE env
+        script: |
+          set -e
+          missing=0
+          for v in VITE_SUPABASE_URL VITE_SUPABASE_ANON_KEY VITE_FUNCTIONS_URL; do
+            eval "val=\${$v-}"
+            if [ -n "$val" ]; then
+              echo "$v is set"
+            else
+              echo "$v is EMPTY" >&2
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "Those VITE_* vars must be in the Codemagic group named appstore." >&2
+            exit 1
+          fi
+      - name: Bundle phone UI
+        script: |
+          npm run build -w @floor/mobile
+          test -f apps/adapter/www/index.html
+          if grep -E 'url:[[:space:]]*["'\'']https?://' apps/adapter/capacitor.config.ts; then
+            echo "Capacitor must not set server.url to a remote host" >&2
+            exit 1
+          fi
+          if ! grep -Rql --include='*.js' 'zoukmsmbztcuyoslvikp' apps/adapter/www; then
+            echo "Built www/ did not inline VITE_SUPABASE_URL; cap sync would ship an empty client." >&2
+            exit 1
+          fi
+          echo "www/ is ready for cap sync (webDir=www)"
+      - name: Capacitor iOS project (with MockReaderUI)
+        script: |
+          cd apps/adapter
+          if [ ! -d ios ]; then
+            npx cap add ios
+          fi
+          npx cap sync ios
+          bash ../../scripts/ios-prepare.sh
+          export SQUARE_APPLICATION_ID="${SQUARE_APPLICATION_ID:-}"
+          export FLOOR_INCLUDE_MOCK_READER=1
+          bash ../../scripts/ios-square-prepare.sh
+          if [ -f ios/App/Podfile ]; then
+            (cd ios/App && pod install)
+          fi
+          cd ../..
+          test -d "$XCODE_PROJECT"
+          grep -q FloorSquarePlugin apps/adapter/ios/App/CapApp-SPM/Package.swift
+          grep -q SquareMobilePaymentsSDK apps/adapter/ios/App/CapApp-SPM/Package.swift
+          grep -q MockReaderUI apps/adapter/ios/App/CapApp-SPM/Package.swift
+          grep -q mobile-payments-sdk-ios apps/adapter/ios/App/CapApp-SPM/Package.swift
+          if grep -q 'product(name: "MockReaderUI"' packages/square-plugin/Package.swift; then
+            echo "FAIL  plugin Package.swift must not link MockReaderUI (host CapApp-SPM only)" >&2
+            exit 1
+          fi
+          if [ -z "${SQUARE_APPLICATION_ID:-}" ] || [ "${SQUARE_APPLICATION_ID}" = "REPLACE_ME" ]; then
+            echo "SQUARE_APPLICATION_ID must be set in Codemagic group appstore" >&2
+            exit 1
+          fi
+          echo "PASS  CapApp-SPM declares FloorSquare + Square + MockReaderUI (ad-hoc sandbox)"
+      - name: Resolve Swift packages (prove SDK links)
+        script: |
+          set -euo pipefail
+          xcodebuild -resolvePackageDependencies \
+            -project "$XCODE_PROJECT" \
+            -scheme "$XCODE_SCHEME" \
+            | tee /tmp/spm-resolve.log
+          if ! grep -Eiq 'mobile-payments-sdk-ios|SquareMobilePaymentsSDK' /tmp/spm-resolve.log \
+            && ! find ~/Library/Developer/Xcode/DerivedData -name 'SquareMobilePaymentsSDK*' 2>/dev/null | head -1 | grep -q .; then
+            if ! find apps/adapter/ios -name 'Package.resolved' -print0 | xargs -0 grep -l mobile-payments-sdk-ios 2>/dev/null | head -1 | grep -q .; then
+              echo "Square Mobile Payments SDK did not resolve into the Xcode package graph" >&2
+              tail -80 /tmp/spm-resolve.log >&2 || true
+              exit 1
+            fi
+          fi
+          echo "PASS  Square Mobile Payments SDK resolved"
+      - name: Set up keychain
+        script: keychain initialize
+      - name: Fetch ad-hoc signing files from Apple
+        script: |
+          echo "CERTIFICATE_PRIVATE_KEY length: ${#CERTIFICATE_PRIVATE_KEY}"
+          if [ -z "$CERTIFICATE_PRIVATE_KEY" ]; then
+            echo "CERTIFICATE_PRIVATE_KEY is empty — set it in Codemagic group appstore" >&2
+            exit 1
+          fi
+          # Ad-hoc so the IPA installs without App Store Connect (MockReaderUI cannot upload).
+          # Your iPhone UDID must be registered under Certificates, Identifiers & Profiles → Devices.
+          app-store-connect fetch-signing-files "$BUNDLE_ID" \
+            --platform IOS \
+            --type IOS_APP_ADHOC \
+            --create
+      - name: Add certificates to keychain
+        script: keychain add-certificates
+      - name: Use signing profiles
+        script: xcode-project use-profiles --project "$XCODE_PROJECT"
+      - name: Increment CFBundleVersion
+        script: |
+          set -eo pipefail
+          PLIST="apps/adapter/ios/App/App/Info.plist"
+          PBX="apps/adapter/ios/App/App.xcodeproj/project.pbxproj"
+          IOS_APP="apps/adapter/ios/App"
+          test -f "$PLIST"
+          test -f "$PBX"
+          # Ad-hoc builds are not in TestFlight; use timestamp so versions stay unique.
+          NEW=$(date +%Y%m%d%H%M)
+          (cd "$IOS_APP" && agvtool new-version -all "$NEW")
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $NEW" "$PLIST"
+          sed -i.bak "s/CURRENT_PROJECT_VERSION = [0-9]*;/CURRENT_PROJECT_VERSION = $NEW;/g" "$PBX"
+          rm -f "$PBX.bak"
+          echo "Ad-hoc build number set to $NEW"
+      - name: Build IPA
+        script: |
+          test -d "$XCODE_PROJECT"
+          xcodebuild -project "$XCODE_PROJECT" -list
+          xcode-project build-ipa \
+            --project "$XCODE_PROJECT" \
+            --scheme "$XCODE_SCHEME"
+      - name: Verify Square SDK + MockReaderUI in IPA
+        script: |
+          set -euo pipefail
+          export FLOOR_INCLUDE_MOCK_READER=1
+          IPA="$(ls -1t build/ios/ipa/*.ipa 2>/dev/null | head -1 || true)"
+          if [ -z "$IPA" ]; then
+            IPA="$(find . -path '*/build/ios/ipa/*.ipa' -o -path '*/ios/ipa/*.ipa' 2>/dev/null | head -1 || true)"
+          fi
+          bash scripts/verify-ios-square-ipa.sh "$IPA"
+          echo ""
+          echo "=== INSTALL (ad-hoc sandbox) ==="
+          echo "1. Codemagic → this build → Artifacts → download the .ipa"
+          echo "2. On a Mac: Apple Configurator 2 → select your iPhone → Add → the .ipa"
+          echo "   Or Xcode → Window → Devices and Simulators → install the .ipa"
+          echo "3. Phone UDID must be on the Ad Hoc profile (Apple Developer → Devices)."
+          echo "4. On device: trust the developer cert if prompted (Settings → General → VPN & Device Management)."
+          echo "MockReaderUI is in this IPA — use the floating mock reader before Take payment."
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+    publishing:
+      email:
+        recipients:
+          - pgg124@gmail.com
+        notify:
+          success: true
+          failure: true
+      # Intentionally no app_store_connect — MockReaderUI makes ASC upload fail.

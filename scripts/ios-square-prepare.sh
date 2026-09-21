@@ -83,8 +83,19 @@ fi
 # Cap sync should pull FloorSquarePlugin from packages/square-plugin/Package.swift.
 # Ensure CapApp-SPM lists FloorSquarePlugin AND SquareMobilePaymentsSDK as a direct
 # product (XCFramework must be embedded in the app binary — transitive-only is not enough).
+# MockReaderUI only when FLOOR_INCLUDE_MOCK_READER=1 (ios-square ad-hoc sandbox builds).
+INCLUDE_MOCK="${FLOOR_INCLUDE_MOCK_READER:-0}"
+ENSURE_ARGS=()
+if [ "$INCLUDE_MOCK" = "1" ] || [ "$INCLUDE_MOCK" = "true" ]; then
+  ENSURE_ARGS+=(--with-mock-reader)
+  echo "FLOOR_INCLUDE_MOCK_READER=1 — CapApp-SPM will link MockReaderUI (ad-hoc sandbox only)"
+else
+  ENSURE_ARGS+=(--without-mock-reader)
+  echo "FLOOR_INCLUDE_MOCK_READER unset — CapApp-SPM omits MockReaderUI (App Store safe)"
+fi
+
 if [ -f "$SPM" ]; then
-  python3 "$ROOT/scripts/ensure_capapp_spm_floor_square.py" "$SPM"
+  python3 "$ROOT/scripts/ensure_capapp_spm_floor_square.py" "$SPM" "${ENSURE_ARGS[@]}"
   grep -q "FloorSquarePlugin" "$SPM" || {
     echo "FloorSquarePlugin still missing from CapApp-SPM after ensure" >&2
     exit 1
@@ -93,18 +104,26 @@ if [ -f "$SPM" ]; then
     echo "SquareMobilePaymentsSDK still missing from CapApp-SPM after ensure" >&2
     exit 1
   }
-  grep -q "MockReaderUI" "$SPM" || {
-    echo "MockReaderUI still missing from CapApp-SPM after ensure (required for sandbox charges)" >&2
-    exit 1
-  }
+  if [ "$INCLUDE_MOCK" = "1" ] || [ "$INCLUDE_MOCK" = "true" ]; then
+    grep -q "MockReaderUI" "$SPM" || {
+      echo "MockReaderUI still missing from CapApp-SPM after ensure (required for sandbox ad-hoc)" >&2
+      exit 1
+    }
+  else
+    if grep -q "MockReaderUI" "$SPM"; then
+      echo "MockReaderUI must not appear in CapApp-SPM for App Store / TestFlight builds" >&2
+      exit 1
+    fi
+  fi
   grep -q "mobile-payments-sdk-ios" "$SPM" || {
     echo "mobile-payments-sdk-ios package URL missing from CapApp-SPM after ensure" >&2
     exit 1
   }
-  grep -q "MockReaderUI" "$ROOT/packages/square-plugin/Package.swift" || {
-    echo "packages/square-plugin/Package.swift missing MockReaderUI product" >&2
+  # Plugin Package.swift must NOT declare MockReaderUI (Square SPM guidance — host app only).
+  if grep -q 'product(name: "MockReaderUI"' "$ROOT/packages/square-plugin/Package.swift"; then
+    echo "packages/square-plugin/Package.swift must not link MockReaderUI — use CapApp-SPM + canImport" >&2
     exit 1
-  }
+  fi
   grep -q "mobile-payments-sdk-ios\|SquareMobilePaymentsSDK" \
     "$ROOT/packages/square-plugin/Package.swift" || {
     echo "packages/square-plugin/Package.swift missing SquareMobilePaymentsSDK dependency" >&2

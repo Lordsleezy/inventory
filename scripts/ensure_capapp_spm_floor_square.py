@@ -4,11 +4,16 @@
 Cap sync regenerates CapApp-SPM; transitive Square via FloorSquare alone is not enough —
 the XCFramework must be a direct CapApp-SPM product so Xcode embeds it in the app binary.
 
+MockReaderUI is optional (--with-mock-reader / FLOOR_INCLUDE_MOCK_READER=1). Square ships it
+as an APPL bundle (com.squareup.readersdk.mockreaderui); App Store Connect rejects IPAs that
+embed it. Only ad-hoc sandbox builds should include it.
+
 Idempotent. Exits non-zero if the result is invalid.
 """
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import subprocess
 import sys
@@ -96,12 +101,14 @@ def ensure_entries(
     default_indent: str,
     default_close: str,
     required: list[tuple[str, str]],
+    forbidden_tokens: list[str] | None = None,
 ) -> str:
     """required: list of (name_token, expr) that must appear exactly once each."""
     inner_start, inner_end = find_array_after(src, needle, start)
     entries = split_entries(src[inner_start:inner_end])
     tokens = [t for t, _ in required]
-    kept = [e for e in entries if not any(t in e for t in tokens)]
+    drop = set(tokens) | set(forbidden_tokens or [])
+    kept = [e for e in entries if not any(t in e for t in drop)]
     indent = sibling_indent(kept, default_indent)
     dedup: list[str] = []
     seen: set[str] = set()
@@ -127,7 +134,7 @@ def scrub_double_commas(src: str) -> str:
     return src
 
 
-def ensure_floor_and_square(src: str) -> str:
+def ensure_floor_and_square(src: str, *, with_mock_reader: bool) -> str:
     src = src.replace(".iOS(.v15)", ".iOS(.v16)")
     src = scrub_double_commas(src)
     src = ensure_entries(
@@ -144,22 +151,28 @@ def ensure_floor_and_square(src: str) -> str:
     tm = re.search(r'\.target\(\s*name:\s*"CapApp-SPM"\s*,', src, re.S)
     if not tm:
         raise SystemExit('CapApp-SPM missing .target(name: "CapApp-SPM"')
+    products: list[tuple[str, str]] = [
+        ("FloorSquarePlugin", FLOOR_PROD),
+        ("SquareMobilePaymentsSDK", SQUARE_PROD),
+    ]
+    forbidden: list[str] = []
+    if with_mock_reader:
+        products.append(("MockReaderUI", MOCK_PROD))
+    else:
+        forbidden.append("MockReaderUI")
     src = ensure_entries(
         src,
         needle="dependencies:",
         start=tm.start(),
         default_indent="                ",
         default_close="\n            ",
-        required=[
-            ("FloorSquarePlugin", FLOOR_PROD),
-            ("SquareMobilePaymentsSDK", SQUARE_PROD),
-            ("MockReaderUI", MOCK_PROD),
-        ],
+        required=products,
+        forbidden_tokens=forbidden,
     )
     return scrub_double_commas(src)
 
 
-def validate_package_swift(path: Path, src: str) -> None:
+def validate_package_swift(path: Path, src: str, *, with_mock_reader: bool) -> None:
     if re.search(r",\s*,", src):
         raise SystemExit(f"{path}: double comma in Package.swift")
     for open_c, close_c in (("(", ")"), ("[", "]"), ("{", "}")):
@@ -177,10 +190,16 @@ def validate_package_swift(path: Path, src: str) -> None:
         raise SystemExit(f"{path}: missing FloorSquarePlugin")
     if "SquareMobilePaymentsSDK" not in src:
         raise SystemExit(f"{path}: missing SquareMobilePaymentsSDK product")
-    if "MockReaderUI" not in src:
-        raise SystemExit(f"{path}: missing MockReaderUI product (required for sandbox charges)")
     if "mobile-payments-sdk-ios" not in src:
         raise SystemExit(f"{path}: missing mobile-payments-sdk-ios package URL")
+    if with_mock_reader:
+        if "MockReaderUI" not in src:
+            raise SystemExit(f"{path}: missing MockReaderUI product (FLOOR_INCLUDE_MOCK_READER=1)")
+    elif "MockReaderUI" in src:
+        raise SystemExit(
+            f"{path}: MockReaderUI must not be linked for App Store / TestFlight builds "
+            "(set FLOOR_INCLUDE_MOCK_READER=1 only for ios-square ad-hoc)"
+        )
     if src.count("FloorSquarePlugin") < 2:
         raise SystemExit(f"{path}: FloorSquarePlugin must appear in package deps and target products")
     lines = [ln.rstrip() for ln in src.splitlines()]
@@ -209,26 +228,52 @@ def validate_package_swift(path: Path, src: str) -> None:
         print("PASS  Package.swift structural check (swift not installed here)")
 
 
+def env_wants_mock_reader() -> bool:
+    raw = os.environ.get("FLOOR_INCLUDE_MOCK_READER", "").strip().lower()
+    return raw in ("1", "true", "yes", "on")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("package_swift", type=Path)
     ap.add_argument("--check-only", action="store_true")
+    ap.add_argument(
+        "--with-mock-reader",
+        action="store_true",
+        default=None,
+        help="Link MockReaderUI (ad-hoc sandbox). Overrides FLOOR_INCLUDE_MOCK_READER when set.",
+    )
+    ap.add_argument(
+        "--without-mock-reader",
+        action="store_true",
+        help="Omit MockReaderUI (TestFlight / App Store).",
+    )
     args = ap.parse_args()
+    if args.with_mock_reader and args.without_mock_reader:
+        raise SystemExit("pass only one of --with-mock-reader / --without-mock-reader")
+    if args.without_mock_reader:
+        with_mock = False
+    elif args.with_mock_reader:
+        with_mock = True
+    else:
+        with_mock = env_wants_mock_reader()
+
     path: Path = args.package_swift
     if not path.is_file():
         print(f"skip: {path} missing", file=sys.stderr)
         return 0
     original = path.read_text()
     if args.check_only:
-        validate_package_swift(path, original)
+        validate_package_swift(path, original, with_mock_reader=with_mock)
         return 0
-    updated = ensure_floor_and_square(original)
+    updated = ensure_floor_and_square(original, with_mock_reader=with_mock)
     if updated != original:
         path.write_text(updated)
-        print("CapApp-SPM Package.swift ensured FloorSquarePlugin + SquareMobilePaymentsSDK")
+        mock_msg = "+ MockReaderUI" if with_mock else "(no MockReaderUI)"
+        print(f"CapApp-SPM Package.swift ensured FloorSquarePlugin + SquareMobilePaymentsSDK {mock_msg}")
     else:
         print("CapApp-SPM Package.swift already lists FloorSquare + Square")
-    validate_package_swift(path, path.read_text())
+    validate_package_swift(path, path.read_text(), with_mock_reader=with_mock)
     return 0
 
 
