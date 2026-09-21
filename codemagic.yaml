@@ -329,22 +329,16 @@ workflows:
         script: keychain initialize
       - name: Register iPhone UDID on Apple team
         script: |
-          # IOS_DEVICE_UDID in Codemagic group appstore — get it on the phone via
-          # Safari → https://udid.tech (or Codemagic → Team → iOS test devices email/QR).
           bash scripts/register-ios-device.sh
-      - name: Fetch ad-hoc signing files from Apple
+      - name: Refresh Ad Hoc profile (include all devices)
         script: |
           echo "CERTIFICATE_PRIVATE_KEY length: ${#CERTIFICATE_PRIVATE_KEY}"
           if [ -z "$CERTIFICATE_PRIVATE_KEY" ]; then
             echo "CERTIFICATE_PRIVATE_KEY is empty — set it in Codemagic group appstore" >&2
             exit 1
           fi
-          # Ad-hoc profile includes all devices currently on the team (after register step).
-          # MockReaderUI cannot upload to App Store Connect — OTA install only.
-          app-store-connect fetch-signing-files "$BUNDLE_ID" \
-            --platform IOS \
-            --type IOS_APP_ADHOC \
-            --create
+          # Delete stale Ad Hoc profiles then recreate so newly registered UDIDs are included.
+          bash scripts/refresh-ios-adhoc-profile.sh
       - name: Add certificates to keychain
         script: keychain add-certificates
       - name: Use signing profiles
