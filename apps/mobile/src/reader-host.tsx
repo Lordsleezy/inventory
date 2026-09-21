@@ -211,6 +211,7 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
         locationCountry?: string | null;
         sandbox?: boolean;
         applicationId?: string | null;
+        verificationError?: string | null;
       };
       if (!res.ok) {
         if (body.error === "square_not_connected") {
@@ -228,6 +229,9 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
         }
         if (body.error === "square_app_id_environment_mismatch") {
           throw new Error(body.message || "Square Application ID environment mismatch between IPA and server.");
+        }
+        if (body.error === "square_location_lookup_failed") {
+          throw new Error(body.message || "Could not verify Square location with the store token.");
         }
         throw new Error(
           body.message || `square-mobile-auth HTTP ${res.status}: ${body.error || "unknown"}`,
@@ -249,6 +253,11 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
         );
       }
 
+      if (body.verificationError) {
+        // Token/location lookup failed (often 401) — still attempt SDK authorize, but keep the warning visible.
+        setError(body.verificationError);
+      }
+
       setStatus(
         `Authorizing Square SDK… ${body.locationName || body.locationId}${
           body.locationCountry ? ` · ${body.locationCountry}` : ""
@@ -262,6 +271,7 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
         applicationId: serverAppId || null,
         bakedAppId: bakedAppId || null,
         tokenLen: body.accessToken.length,
+        verificationError: body.verificationError || null,
         locationFix: perms,
       });
 

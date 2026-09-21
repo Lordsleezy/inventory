@@ -20,8 +20,72 @@ function env() {
     : Environment.Sandbox;
 }
 
-export function squareClient(accessToken) {
-  return new Client({ accessToken, environment: env() });
+export function squareClient(accessToken, environment = env()) {
+  return new Client({
+    // Prefer bearerAuthCredentials — accessToken alone is deprecated in square-legacy.
+    bearerAuthCredentials: { accessToken },
+    environment,
+  });
+}
+
+/**
+ * Retrieve a location, retrying the opposite Square environment on 401/403.
+ * Catches sandbox token + production SQUARE_ENVIRONMENT (and the reverse).
+ */
+export async function resolveSquareLocation(accessToken, locationId) {
+  const primary = env();
+  const secondary = primary === Environment.Sandbox ? Environment.Production : Environment.Sandbox;
+  let lastErr = null;
+
+  for (const environment of [primary, secondary]) {
+    try {
+      const client = squareClient(accessToken, environment);
+      const { result } = await client.locationsApi.retrieveLocation(locationId);
+      return {
+        location: result.location || null,
+        environment,
+        sandbox: environment === Environment.Sandbox,
+        flipped: environment !== primary,
+      };
+    } catch (err) {
+      lastErr = err;
+      const status = err?.statusCode;
+      if (status !== 401 && status !== 403) break;
+    }
+  }
+
+  // Last resort: list locations on primary and match by id (some tokens can list but not retrieve).
+  try {
+    const client = squareClient(accessToken, primary);
+    const { result } = await client.locationsApi.listLocations();
+    const location = (result.locations || []).find((l) => l.id === locationId) || null;
+    if (location) {
+      return { location, environment: primary, sandbox: primary === Environment.Sandbox, flipped: false };
+    }
+    const ids = (result.locations || []).map((l) => l.id).filter(Boolean);
+    const err = new Error(
+      `Square location ${locationId} not in this account. Available: ${ids.slice(0, 8).join(", ") || "(none)"}`,
+    );
+    err.statusCode = 404;
+    throw err;
+  } catch (err) {
+    if (err?.statusCode === 404 && err.message?.includes("not in this account")) throw err;
+    throw lastErr || err;
+  }
+}
+
+export function squareHttpErrorMessage(err, locationId) {
+  const status = err?.statusCode;
+  const detail = err instanceof Error ? err.message : String(err);
+  if (status === 401 || status === 403) {
+    return (
+      `Square rejected the access token (HTTP ${status}) for location ${locationId}. ` +
+      `In Netlify, set SQUARE_SANDBOX_ACCESS_TOKEN to a fresh Sandbox Access Token from ` +
+      `Developer Console → Sandbox → Credentials, and SQUARE_SANDBOX_LOCATION_ID to that account’s Location ID. ` +
+      `SQUARE_ENVIRONMENT must be sandbox. Also Connect Square on the register if you use OAuth.`
+    );
+  }
+  return `Could not verify Square location ${locationId}: ${detail}`;
 }
 
 export async function exchangeSquareCode(code) {
