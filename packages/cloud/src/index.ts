@@ -14,6 +14,7 @@ export {
   loadStaffSession,
   resetFloorCloud,
   authErrorMessage,
+  isNetworkAuthFailure,
   type AuthState,
   type StaffSession,
 } from "./client.ts";
@@ -40,7 +41,11 @@ export {
 } from "./sell.ts";
 export {
   allocateLineTaxes,
+  applyTicketDiscount,
+  prorateCents,
   loadStoreTaxRateBps,
+  loadStoreSetting,
+  setStoreSetting,
   setStoreTaxRateBps,
   finalizeTicket,
   voidTicket,
@@ -49,6 +54,14 @@ export {
   type TicketLineResult,
   type TicketSummary,
 } from "./ticket.ts";
+export {
+  lookupCustomerByPhone,
+  upsertCustomer,
+  customerPointsHistory,
+  customerPointsBalance,
+  type Customer,
+  type PointsLedgerRow,
+} from "./customers.ts";
 export {
   cacheUnitRow,
   wipeCostFromCache,

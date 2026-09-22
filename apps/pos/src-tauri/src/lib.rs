@@ -342,6 +342,160 @@ fn settings_set(settings: PosSettings) -> Result<(), String> {
   })
 }
 
+fn cups_default_printer() -> Option<String> {
+  let out = Command::new("lpstat").arg("-d").output().ok()?;
+  let text = String::from_utf8_lossy(&out.stdout);
+  for line in text.lines() {
+    if let Some(rest) = line.strip_prefix("system default destination:") {
+      let name = rest.trim();
+      if !name.is_empty() {
+        return Some(name.to_string());
+      }
+    }
+  }
+  None
+}
+
+fn cups_has_any_printer() -> bool {
+  let out = match Command::new("lpstat").arg("-p").output() {
+    Ok(o) => o,
+    Err(_) => return false,
+  };
+  if !out.status.success() && out.stdout.is_empty() {
+    return false;
+  }
+  let text = String::from_utf8_lossy(&out.stdout);
+  text.lines().any(|l| l.starts_with("printer "))
+}
+
+fn cups_printer_offline(queue: &str) -> Option<bool> {
+  let out = Command::new("lpstat").args(["-p", queue]).output().ok()?;
+  let text = String::from_utf8_lossy(&out.stdout);
+  let lower = text.to_lowercase();
+  if lower.contains("is idle") || lower.contains("is printing") || lower.contains("enabled") {
+    if lower.contains("disabled") || lower.contains("offline") || lower.contains("paused") {
+      return Some(true);
+    }
+    return Some(false);
+  }
+  if lower.contains("disabled") || lower.contains("offline") || lower.contains("paused") {
+    return Some(true);
+  }
+  if text.trim().is_empty() {
+    let a = Command::new("lpstat").arg("-a").output().ok()?;
+    let atext = String::from_utf8_lossy(&a.stdout);
+    if !atext.lines().any(|l| l.starts_with(queue) || l.starts_with(&format!("{queue} "))) {
+      return None;
+    }
+  }
+  None
+}
+
+fn list_cups_printers() -> Vec<serde_json::Value> {
+  let out = match Command::new("lpstat").arg("-p").output() {
+    Ok(o) => o,
+    Err(_) => return vec![],
+  };
+  let text = String::from_utf8_lossy(&out.stdout);
+  let mut printers = Vec::new();
+  for line in text.lines() {
+    let Some(rest) = line.strip_prefix("printer ") else {
+      continue;
+    };
+    let name = rest.split_whitespace().next().unwrap_or("").to_string();
+    if name.is_empty() {
+      continue;
+    }
+    let lower = line.to_lowercase();
+    let status = if lower.contains("disabled") || lower.contains("offline") {
+      "offline"
+    } else if lower.contains("idle") {
+      "idle"
+    } else if lower.contains("printing") {
+      "printing"
+    } else {
+      "unknown"
+    };
+    printers.push(serde_json::json!({ "name": name, "status": status }));
+  }
+  printers
+}
+
+fn pdf_escape(s: &str) -> String {
+  s.chars()
+    .map(|c| match c {
+      '\\' => "\\\\".to_string(),
+      '(' => "\\(".to_string(),
+      ')' => "\\)".to_string(),
+      c if c.is_control() || c as u32 > 127 => format!("\\{:03o}", (c as u32).min(255)),
+      c => c.to_string(),
+    })
+    .collect()
+}
+
+fn build_simple_pdf(text: &str) -> Vec<u8> {
+  let lines: Vec<&str> = text.lines().collect();
+  let mut content = String::from("BT\n/F1 10 Tf\n36 762 Td\n14 TL\n");
+  for (i, line) in lines.iter().enumerate() {
+    let escaped = pdf_escape(line);
+    if i == 0 {
+      content.push_str(&format!("({escaped}) Tj\n"));
+    } else {
+      content.push_str(&format!("T* ({escaped}) Tj\n"));
+    }
+  }
+  content.push_str("ET\n");
+  let stream = content.into_bytes();
+  let mut pdf = Vec::new();
+  let mut offsets: Vec<usize> = Vec::new();
+  fn push_obj(pdf: &mut Vec<u8>, offsets: &mut Vec<usize>, body: &[u8]) {
+    offsets.push(pdf.len());
+    pdf.extend_from_slice(body);
+  }
+  pdf.extend_from_slice(b"%PDF-1.4\n");
+  push_obj(
+    &mut pdf,
+    &mut offsets,
+    b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
+  );
+  push_obj(
+    &mut pdf,
+    &mut offsets,
+    b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
+  );
+  push_obj(
+    &mut pdf,
+    &mut offsets,
+    b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n",
+  );
+  let stream_obj = format!(
+    "4 0 obj\n<< /Length {} >>\nstream\n{}endstream\nendobj\n",
+    stream.len(),
+    String::from_utf8_lossy(&stream)
+  );
+  push_obj(&mut pdf, &mut offsets, stream_obj.as_bytes());
+  push_obj(
+    &mut pdf,
+    &mut offsets,
+    b"5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>\nendobj\n",
+  );
+  let xref_at = pdf.len();
+  pdf.extend_from_slice(format!("xref\n0 {}\n", offsets.len() + 1).as_bytes());
+  pdf.extend_from_slice(b"0000000000 65535 f \n");
+  for off in &offsets {
+    pdf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
+  }
+  pdf.extend_from_slice(
+    format!(
+      "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n",
+      offsets.len() + 1,
+      xref_at
+    )
+    .as_bytes(),
+  );
+  pdf
+}
+
 #[tauri::command]
 fn print_bytes(data: Vec<u8>, printer_path: String, raw: Option<bool>) -> Result<serde_json::Value, String> {
   let path = Path::new(&printer_path);
@@ -351,34 +505,111 @@ fn print_bytes(data: Vec<u8>, printer_path: String, raw: Option<bool>) -> Result
       .open(path)
       .map_err(|e| e.to_string())?;
     file.write_all(&data).map_err(|e| e.to_string())?;
-    return Ok(serde_json::json!({ "printed": true, "detail": printer_path }));
+    return Ok(serde_json::json!({
+      "printed": true,
+      "detail": format!("Printed to {printer_path}")
+    }));
   }
+
+  let queue = if printer_path.is_empty() {
+    match cups_default_printer() {
+      Some(q) => q,
+      None => {
+        if !cups_has_any_printer() {
+          return Ok(serde_json::json!({
+            "printed": false,
+            "code": "no_printer",
+            "detail": "no printer configured"
+          }));
+        }
+        return Ok(serde_json::json!({
+          "printed": false,
+          "code": "no_printer",
+          "detail": "no printer configured"
+        }));
+      }
+    }
+  } else {
+    printer_path.clone()
+  };
+
+  if cups_printer_offline(&queue) == Some(true) {
+    return Ok(serde_json::json!({
+      "printed": false,
+      "code": "printer_offline",
+      "detail": format!("printer {queue} is offline")
+    }));
+  }
+
   let use_raw = raw.unwrap_or(false);
   let mut cmd = Command::new("lp");
   if use_raw {
     cmd.args(["-o", "raw"]);
   }
-  if !printer_path.is_empty() {
-    cmd.args(["-d", &printer_path]);
-  }
-  let status = cmd.arg("-").stdin(std::process::Stdio::piped()).spawn();
-  match status {
+  cmd.args(["-d", &queue]);
+  cmd.arg("-").stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
+  match cmd.spawn() {
     Ok(mut child) => {
-      if let Some(stdin) = child.stdin.as_mut() {
+      if let Some(stdin) = child.stdin.take() {
+        let mut stdin = stdin;
         stdin.write_all(&data).map_err(|e| e.to_string())?;
       }
-      let ok = child.wait().map_err(|e| e.to_string())?.success();
-      Ok(serde_json::json!({ "printed": ok, "detail": "cups lp" }))
-    }
-    Err(err) => {
-      let fallback = PathBuf::from("/tmp/floor-last-receipt.bin");
-      fs::write(&fallback, &data).map_err(|e| e.to_string())?;
+      let output = child.wait_with_output().map_err(|e| e.to_string())?;
+      if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let detail = if stderr.is_empty() {
+          format!("printer error: lp exited {}", output.status)
+        } else {
+          format!("printer error: {stderr}")
+        };
+        return Ok(serde_json::json!({
+          "printed": false,
+          "detail": detail
+        }));
+      }
       Ok(serde_json::json!({
-        "printed": false,
-        "detail": format!("no printer ({err}); wrote {}", fallback.display())
+        "printed": true,
+        "detail": format!("Printed to {queue}")
       }))
     }
+    Err(err) => Ok(serde_json::json!({
+      "printed": false,
+      "code": "no_printer",
+      "detail": format!("no printer configured ({err})")
+    })),
   }
+}
+
+#[tauri::command]
+fn list_printers() -> Result<serde_json::Value, String> {
+  let printers = list_cups_printers();
+  let default = cups_default_printer();
+  Ok(serde_json::json!({
+    "printers": printers,
+    "default": default,
+  }))
+}
+
+#[tauri::command]
+fn save_receipt_pdf(text: String, path: Option<String>) -> Result<serde_json::Value, String> {
+  let ts = std::time::SystemTime::now()
+    .duration_since(std::time::UNIX_EPOCH)
+    .map(|d| d.as_secs())
+    .unwrap_or(0);
+  let dest = path
+    .filter(|p| !p.trim().is_empty())
+    .unwrap_or_else(|| format!("/tmp/floor-receipt-{ts}.pdf"));
+  let dest_path = PathBuf::from(&dest);
+  if dest.ends_with(".txt") {
+    fs::write(&dest_path, text.as_bytes()).map_err(|e| e.to_string())?;
+  } else {
+    let pdf = build_simple_pdf(&text);
+    fs::write(&dest_path, pdf).map_err(|e| e.to_string())?;
+  }
+  Ok(serde_json::json!({
+    "ok": true,
+    "path": dest_path.display().to_string(),
+  }))
 }
 
 #[tauri::command]
@@ -451,6 +682,8 @@ pub fn run() {
       settings_get,
       settings_set,
       print_bytes,
+      list_printers,
+      save_receipt_pdf,
       kiosk_power,
       set_admin_pin,
       verify_admin_pin,

@@ -3,13 +3,16 @@ import { useNavigate, useParams } from "react-router-dom";
 import { formatCentsTotal } from "@floor/store";
 import type { TicketSummary } from "@floor/cloud";
 import { usePos } from "../pos-context";
-import { printTicketReceipt } from "./Tender";
+import { printTicketReceipt, ticketReceiptPayload } from "../sale-flow";
+import { saveReceiptFile } from "../print-receipt";
+import { callFunction } from "../functions";
 
 type Stored = {
   summary: TicketSummary;
   changeCents: number | null;
   clerkName: string;
   titles: Record<string, { title: string; condition: string | null }>;
+  customerEmail?: string | null;
 };
 
 export function DoneScreen() {
@@ -18,6 +21,9 @@ export function DoneScreen() {
   const navigate = useNavigate();
   const [stored, setStored] = useState<Stored | null>(null);
   const [msg, setMsg] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [offerSave, setOfferSave] = useState(false);
 
   useEffect(() => {
     const raw = sessionStorage.getItem(`floor_ticket_${ticketId}`);
@@ -40,7 +46,81 @@ export function DoneScreen() {
     );
   }
 
-  const { summary, changeCents, clerkName, titles } = stored;
+  const { summary, changeCents, clerkName, titles, customerEmail } = stored;
+  const meta = {
+    clerkName,
+    changeCents,
+    titles,
+    reviewUrl: settings.reviewUrl || null,
+    legal: settings.receiptLegal,
+  };
+
+  async function onPrint() {
+    setBusy(true);
+    setMsg("");
+    setError("");
+    setOfferSave(false);
+    try {
+      const result = await printTicketReceipt(summary, meta, settings);
+      if (result.printed) {
+        setMsg(result.detail || "Printed.");
+        return;
+      }
+      setError(result.detail || "Print did not complete.");
+      if (result.code === "no_printer") setOfferSave(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onSaveFile() {
+    setBusy(true);
+    setMsg("");
+    setError("");
+    try {
+      const saved = await saveReceiptFile(ticketReceiptPayload(summary, meta), settings);
+      setMsg(`Saved receipt to ${saved.path}`);
+      setOfferSave(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onEmail() {
+    const prefill = customerEmail || "";
+    const address = window.prompt("Email receipt to:", prefill);
+    if (!address?.trim()) return;
+    setBusy(true);
+    setMsg("");
+    setError("");
+    try {
+      const res = await callFunction("email-receipt", {
+        method: "POST",
+        body: JSON.stringify({
+          ticketId: summary.ticket_id,
+          toEmail: address.trim(),
+          email: address.trim(),
+        }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(body.error || body.message || `email-receipt HTTP ${res.status}`);
+      }
+      setMsg(`Receipt emailed to ${address.trim()}.`);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? `Email failed: ${err.message}. (Netlify function email-receipt may not be deployed yet.)`
+          : String(err),
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <section className="page grid">
@@ -62,6 +142,12 @@ export function DoneScreen() {
           <span>Subtotal</span>
           <span>{formatCentsTotal(summary.subtotal_cents)}</span>
         </div>
+        {summary.discount_cents ? (
+          <div className="row">
+            <span>Discount</span>
+            <span>−{formatCentsTotal(summary.discount_cents)}</span>
+          </div>
+        ) : null}
         <div className="row">
           <span>Tax</span>
           <span>{formatCentsTotal(summary.tax_cents)}</span>
@@ -76,34 +162,41 @@ export function DoneScreen() {
             <span>{formatCentsTotal(changeCents)}</span>
           </div>
         ) : null}
-        {summary.payment_method === "card" && (summary.card_brand || summary.card_last4) ? (
-          <div className="row">
-            <span>Card</span>
-            <span>
-              {[summary.card_brand, summary.card_last4 ? `•••• ${summary.card_last4}` : null].filter(Boolean).join(" ")}
-            </span>
+        {summary.points_earned ? (
+          <div className="row muted">
+            <span>Points earned</span>
+            <span>{summary.points_earned}</span>
           </div>
+        ) : null}
+        {summary.payment_method === "card" || summary.payment_method === "split" ? (
+          summary.card_brand || summary.card_last4 ? (
+            <div className="row">
+              <span>Card</span>
+              <span>
+                {[summary.card_brand, summary.card_last4 ? `•••• ${summary.card_last4}` : null]
+                  .filter(Boolean)
+                  .join(" ")}
+              </span>
+            </div>
+          ) : null
         ) : null}
       </div>
       {msg ? <p>{msg}</p> : null}
-      <div className="row">
-        <button
-          type="button"
-          className="primary"
-          onClick={() =>
-            void printTicketReceipt(summary, {
-              clerkName,
-              changeCents,
-              titles,
-              reviewUrl: settings.reviewUrl || null,
-              legal: settings.receiptLegal,
-            }, settings).then(() => setMsg("Sent to printer."))
-          }
-        >
-          Print receipt
+      {error ? <p className="error">{error}</p> : null}
+      <div className="row" style={{ flexWrap: "wrap" }}>
+        <button type="button" className="primary" disabled={busy} onClick={() => void onPrint()}>
+          Print
         </button>
-        <button type="button" onClick={() => navigate("/", { replace: true })}>
-          Skip / new sale
+        {offerSave ? (
+          <button type="button" disabled={busy} onClick={() => void onSaveFile()}>
+            Save as PDF/file
+          </button>
+        ) : null}
+        <button type="button" disabled={busy} onClick={() => void onEmail()}>
+          Email
+        </button>
+        <button type="button" disabled={busy} onClick={() => navigate("/", { replace: true })}>
+          No receipt
         </button>
       </div>
       <button type="button" onClick={() => navigate("/receipts")}>

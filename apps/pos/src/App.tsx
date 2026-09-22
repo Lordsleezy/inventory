@@ -1,16 +1,15 @@
 import { useEffect, useState } from "react";
-import { Link, Navigate, Route, Routes, useNavigate } from "react-router-dom";
+import { Link, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import {
   authErrorMessage,
   floorCloud,
+  isNetworkAuthFailure,
   loadAuthState,
   setDeviceNetworkGetter,
   type StaffSession,
 } from "@floor/cloud";
 import { hasAdminPin, verifyAdminPin } from "./local";
-import { BrowseScreen } from "./screens/Browse";
-import { CartScreen } from "./screens/Cart";
-import { TenderScreen } from "./screens/Tender";
+import { RegisterScreen } from "./screens/Register";
 import { DoneScreen } from "./screens/Done";
 import { LoginScreen } from "./screens/Login";
 import { ReceiptsScreen } from "./screens/Receipts";
@@ -18,6 +17,7 @@ import { SettingsScreen } from "./screens/Settings";
 import { InventoryScreen } from "./screens/Inventory";
 import { UnitDetailScreen } from "./screens/UnitDetail";
 import { ReceiveScreen } from "./screens/Receive";
+import { ReceiptDesignerScreen } from "./screens/ReceiptDesigner";
 import { PosProvider, usePos } from "./pos-context";
 import { CartProvider, useCart } from "./cart";
 
@@ -34,6 +34,7 @@ export function App() {
   const [session, setSession] = useState<StaffSession | null>(null);
   const [booting, setBooting] = useState(true);
   const [error, setError] = useState("");
+  const [networkHint, setNetworkHint] = useState(false);
 
   useEffect(() => {
     if (!hasCloudEnv()) {
@@ -54,8 +55,10 @@ export function App() {
       const state = await loadAuthState();
       setSession(state.kind === "ready" ? state.session : null);
       setError(state.kind === "needs_store" ? "This account is not attached to a store." : "");
+      setNetworkHint(false);
     } catch (err) {
       setError(authErrorMessage(err));
+      setNetworkHint(isNetworkAuthFailure(err));
       setSession(null);
     } finally {
       setBooting(false);
@@ -65,8 +68,13 @@ export function App() {
   if (booting) return <p className="page">Starting register…</p>;
   if (!session) {
     return (
-      <div className="page">
-        {error ? <p className="error">{error}</p> : null}
+      <div className="login-shell">
+        {error ? <p className="error" style={{ textAlign: "center" }}>{error}</p> : null}
+        {networkHint ? (
+          <p className="muted" style={{ textAlign: "center", maxWidth: 420 }}>
+            If Wi‑Fi looks fine, open a browser on this Mac and load the Supabase host, then try again.
+          </p>
+        ) : null}
         {hasCloudEnv() ? <LoginScreen /> : null}
       </div>
     );
@@ -81,62 +89,93 @@ export function App() {
   );
 }
 
+function LiveClock() {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  return <span>{now.toLocaleString()}</span>;
+}
+
 function Shell() {
-  const { online, session, pendingOutbox, incidents, isAdmin, taxRateBps } = usePos();
-  const { lines } = useCart();
+  const { online, session, pendingOutbox, incidents, isAdmin, taxRateBps, rewards } = usePos();
+  const { ticketId, lines } = useCart();
   const navigate = useNavigate();
+  const location = useLocation();
+  const onRegister = location.pathname === "/";
+
+  async function switchClerk() {
+    if (await hasAdminPin()) {
+      const pin = window.prompt("Admin PIN");
+      if (!pin || !(await verifyAdminPin(pin))) return;
+    }
+    await floorCloud().auth.signOut();
+    navigate("/");
+  }
 
   return (
     <div className="shell">
       {!online ? <div className="offline">OFFLINE — reconnect before selling</div> : null}
       {taxRateBps == null ? (
-        <div className="offline">TAX RATE NOT SET — open Settings (admin) before checkout</div>
+        <div className="offline warn">TAX RATE NOT SET — open Settings (admin) before checkout</div>
       ) : null}
       {incidents.length ? (
-        <div className="offline">INCIDENT — {incidents[0].sku}. Open Receipts.</div>
+        <div className="offline">INCIDENT — {incidents[0].sku}. Open Reports.</div>
       ) : null}
       <header className="top">
-        <strong>Floor register</strong>
-        <nav className="nav">
-          <Link to="/">Sell</Link>
-          <Link to="/cart">Cart{lines.length ? ` (${lines.length})` : ""}</Link>
-          <Link to="/inventory">Inventory</Link>
-          <Link to="/receipts">Receipts{pendingOutbox ? ` (${pendingOutbox})` : ""}</Link>
-          {isAdmin ? <Link to="/settings">Settings</Link> : null}
-        </nav>
-        <span className="muted">
-          {session.displayName} · {isAdmin ? "admin" : "clerk"}
-        </span>
-        <button
-          type="button"
-          onClick={() => {
-            void (async () => {
-              if (await hasAdminPin()) {
-                const pin = window.prompt("Admin PIN");
-                if (!pin || !(await verifyAdminPin(pin))) return;
-              }
-              await floorCloud().auth.signOut();
-              navigate("/");
-            })();
-          }}
-        >
-          Switch clerk
-        </button>
+        <div className="top-brand">{rewards.storeDisplayName || "Floor"}</div>
+        <div className="top-meta">
+          {onRegister ? (
+            <span>
+              Order #{ticketId.slice(0, 8)}
+              {lines.length ? ` · ${lines.length} line${lines.length === 1 ? "" : "s"}` : ""}
+            </span>
+          ) : (
+            <span className="muted">{location.pathname}</span>
+          )}
+          <LiveClock />
+        </div>
+        <details className="clerk-menu">
+          <summary>
+            {session.displayName} ▾
+          </summary>
+          <div className="clerk-menu-panel">
+            <button type="button" onClick={() => void switchClerk()}>
+              Switch clerk
+            </button>
+            {isAdmin ? (
+              <button type="button" onClick={() => navigate("/settings")}>
+                Settings
+              </button>
+            ) : null}
+          </div>
+        </details>
       </header>
       <main>
         <Routes>
-          <Route path="/" element={<BrowseScreen />} />
-          <Route path="/cart" element={<CartScreen />} />
-          <Route path="/tender" element={<TenderScreen />} />
+          <Route path="/" element={<RegisterScreen />} />
+          <Route path="/cart" element={<Navigate to="/" replace />} />
+          <Route path="/tender" element={<Navigate to="/" replace />} />
           <Route path="/done/:ticketId" element={<DoneScreen />} />
           <Route path="/inventory" element={<InventoryScreen />} />
           <Route path="/inventory/receive" element={<ReceiveScreen />} />
           <Route path="/inventory/:sku" element={<UnitDetailScreen />} />
           <Route path="/receipts" element={<ReceiptsScreen />} />
           <Route path="/settings" element={isAdmin ? <SettingsScreen /> : <Navigate to="/" replace />} />
+          <Route
+            path="/settings/receipt"
+            element={isAdmin ? <ReceiptDesignerScreen /> : <Navigate to="/" replace />}
+          />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
+      <nav className="bottom-nav">
+        {isAdmin ? <Link to="/settings">Settings</Link> : null}
+        <Link to="/receipts">Reports{pendingOutbox ? ` (${pendingOutbox})` : ""}</Link>
+        <Link to="/inventory">Inventory</Link>
+        {!onRegister ? <Link to="/">Register</Link> : null}
+      </nav>
     </div>
   );
 }
