@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { floorCloud, approveWithPin, authErrorMessage, voidTicket } from "@floor/cloud";
 import { usePos } from "../pos-context";
-import { printReceipt } from "../print-receipt";
+import { printReceipt, saveReceiptFile } from "../print-receipt";
 import { type ReceiptPayload } from "../receipt";
+import { callFunction } from "../functions";
 
 type ReceiptRow = {
   id: string;
@@ -20,15 +21,59 @@ type ReceiptRow = {
   title: string | null;
   condition: string | null;
   voided_at: string | null;
+  list_price_cents?: number | null;
 };
+
+function rowPayload(row: ReceiptRow, settings: { reviewUrl: string }): ReceiptPayload {
+  return {
+    receiptNo: row.receipt_no,
+    soldAt: new Date(row.sold_at).toLocaleString(),
+    clerkName: row.actor_name || "",
+    sku: row.sku,
+    title: row.title || "Item",
+    condition: row.condition,
+    priceCents: row.price_cents,
+    taxCents: row.tax_cents,
+    totalCents: row.total_cents,
+    tender:
+      (row.payment_method || "").toUpperCase() +
+      (row.card_brand || row.card_last4
+        ? ` · ${[row.card_brand, row.card_last4 ? `•••• ${row.card_last4}` : null].filter(Boolean).join(" ")}`
+        : ""),
+    tenderDetails: {
+      method: (row.payment_method || "cash").toUpperCase(),
+      cardBrand: row.card_brand,
+      cardLast4: row.card_last4,
+    },
+    discountCents:
+      row.list_price_cents != null && row.list_price_cents > row.price_cents
+        ? row.list_price_cents - row.price_cents
+        : null,
+    reviewUrl: settings.reviewUrl || null,
+    lines: [
+      {
+        sku: row.sku,
+        title: row.title || "Item",
+        condition: row.condition,
+        priceCents: row.price_cents,
+        taxCents: row.tax_cents,
+        listPriceCents: row.list_price_cents ?? null,
+      },
+    ],
+  };
+}
 
 export function ReceiptsScreen() {
   const { online, settings, incidents, isAdmin, syncOutbox, pendingOutbox } = usePos();
   const [q, setQ] = useState("");
   const [rows, setRows] = useState<ReceiptRow[]>([]);
   const [error, setError] = useState("");
+  const [msg, setMsg] = useState("");
   const [pin, setPin] = useState("");
   const [voidTicketId, setVoidTicketId] = useState<string | null>(null);
+  const [saveFor, setSaveFor] = useState<string | null>(null);
+  const [emailFor, setEmailFor] = useState<string | null>(null);
+  const [email, setEmail] = useState("");
 
   useEffect(() => {
     if (!online) return;
@@ -39,7 +84,7 @@ export function ReceiptsScreen() {
       let query = sb
         .from("sale_receipts")
         .select(
-          "id, sku, receipt_no, ticket_id, sold_at, price_cents, tax_cents, total_cents, payment_method, card_brand, card_last4, actor_name, title, condition, voided_at",
+          "id, sku, receipt_no, ticket_id, sold_at, price_cents, tax_cents, total_cents, payment_method, card_brand, card_last4, actor_name, title, condition, voided_at, list_price_cents",
         )
         .order("sold_at", { ascending: false })
         .limit(80);
@@ -54,24 +99,50 @@ export function ReceiptsScreen() {
   }, [q, online]);
 
   async function reprint(row: ReceiptRow) {
-    const payload: ReceiptPayload = {
-      receiptNo: row.receipt_no,
-      soldAt: new Date(row.sold_at).toLocaleString(),
-      clerkName: row.actor_name || "",
-      sku: row.sku,
-      title: row.title || "Item",
-      condition: row.condition,
-      priceCents: row.price_cents,
-      taxCents: row.tax_cents,
-      totalCents: row.total_cents,
-      tender:
-        (row.payment_method || "").toUpperCase() +
-        (row.card_brand || row.card_last4
-          ? ` · ${[row.card_brand, row.card_last4 ? `•••• ${row.card_last4}` : null].filter(Boolean).join(" ")}`
-          : ""),
-      reviewUrl: settings.reviewUrl || null,
-    };
-    await printReceipt(payload, settings);
+    setError("");
+    setMsg("");
+    setSaveFor(null);
+    const payload = rowPayload(row, settings);
+    const result = await printReceipt(payload, settings);
+    if (result.printed) {
+      setMsg(result.detail || "Sent to printer.");
+      return;
+    }
+    setError(result.detail || "Print failed.");
+    if (result.code === "no_printer") setSaveFor(row.id);
+  }
+
+  async function saveFile(row: ReceiptRow) {
+    try {
+      const saved = await saveReceiptFile(rowPayload(row, settings), settings);
+      setMsg(`Saved receipt to ${saved.path}`);
+      setSaveFor(null);
+      setError("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function sendEmail(row: ReceiptRow) {
+    const to = email.trim();
+    if (!to || !row.ticket_id) {
+      setError("Email needs a ticket and address.");
+      return;
+    }
+    try {
+      const res = await callFunction("email-receipt", {
+        method: "POST",
+        body: JSON.stringify({ ticketId: row.ticket_id, toEmail: to }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || `Email failed (${res.status})`);
+      setMsg(`Receipt emailed to ${to}`);
+      setEmailFor(null);
+      setEmail("");
+      setError("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
   }
 
   async function confirmVoid() {
@@ -85,7 +156,6 @@ export function ReceiptsScreen() {
       setVoidTicketId(null);
       setPin("");
       setError("");
-      // reload
       setQ((q) => q + "");
     } catch (err) {
       setError(authErrorMessage(err));
@@ -118,6 +188,7 @@ export function ReceiptsScreen() {
       ) : null}
       <input className="search" placeholder="Receipt # or SKU" value={q} onChange={(e) => setQ(e.target.value)} />
       {error ? <p className="error">{error}</p> : null}
+      {msg ? <p>{msg}</p> : null}
       <div className="grid" style={{ marginTop: "1rem" }}>
         {rows.map((row) => (
           <div className="card row" key={row.id}>
@@ -130,10 +201,43 @@ export function ReceiptsScreen() {
                 SKU {row.sku} · {row.title}
               </div>
               <div className="muted">{new Date(row.sold_at).toLocaleString()}</div>
+              {saveFor === row.id ? (
+                <button type="button" onClick={() => void saveFile(row)}>
+                  Save as PDF/file
+                </button>
+              ) : null}
+              {emailFor === row.id ? (
+                <div className="row" style={{ marginTop: "0.5rem" }}>
+                  <input
+                    type="email"
+                    placeholder="Customer email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                  />
+                  <button type="button" onClick={() => void sendEmail(row)}>
+                    Send
+                  </button>
+                  <button type="button" onClick={() => setEmailFor(null)}>
+                    Cancel
+                  </button>
+                </div>
+              ) : null}
             </div>
-            <button type="button" disabled={Boolean(row.voided_at)} onClick={() => void reprint(row)}>
-              Reprint
-            </button>
+            <div className="grid">
+              <button type="button" disabled={Boolean(row.voided_at)} onClick={() => void reprint(row)}>
+                Reprint
+              </button>
+              <button
+                type="button"
+                disabled={Boolean(row.voided_at) || !row.ticket_id}
+                onClick={() => {
+                  setEmailFor(row.id);
+                  setEmail("");
+                }}
+              >
+                Email
+              </button>
+            </div>
           </div>
         ))}
       </div>

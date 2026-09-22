@@ -129,6 +129,44 @@ function skuFromText(text: string): string | null {
   return null;
 }
 
+function bakedSupabaseHost(): string {
+  // Exact import.meta.env.VITE_* so Vite inlines the build-time URL.
+  let url = "";
+  try {
+    url = String(import.meta.env.VITE_SUPABASE_URL || "");
+  } catch {
+    /* node tests / non-vite */
+  }
+  if (!url) {
+    url = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "";
+  }
+  try {
+    return url ? new URL(url).host : "";
+  } catch {
+    return "";
+  }
+}
+
+function isNetworkFailureText(text: string): boolean {
+  return /load failed|failed to fetch|networkerror|network request failed|fetch failed|net::err_/i.test(
+    text,
+  );
+}
+
+/** True when the underlying error looks like a WebKit/browser network failure. */
+export function isNetworkAuthFailure(err: unknown): boolean {
+  let search = asPlainText(err);
+  if (err && typeof err === "object") {
+    const o = err as Record<string, unknown>;
+    const joined = ["message", "details", "hint", "name"]
+      .map((key) => asPlainText(o[key]))
+      .filter(Boolean)
+      .join(" ");
+    if (joined) search = `${search} ${joined}`.trim();
+  }
+  return isNetworkFailureText(search);
+}
+
 /** Never returns "[object Object]". Unwraps PostgREST / Postgres errors. */
 export function authErrorMessage(err: unknown): string {
   let search = asPlainText(err);
@@ -148,6 +186,11 @@ export function authErrorMessage(err: unknown): string {
   }
   if (/invalid_sku/i.test(text)) return "SKU must be digits.";
   if (/no_store/i.test(text)) return "This account is not attached to a store yet.";
+  if (isNetworkFailureText(text) || isNetworkAuthFailure(err)) {
+    const host = bakedSupabaseHost();
+    const where = host ? ` (${host})` : "";
+    return `Can't reach Floor cloud${where}. Check Wi‑Fi, confirm this register can reach Supabase, and rebuild the app if the cloud URL was wrong at build time.`;
+  }
   const display = asPlainText(err);
   return display && display !== "[object Object]" ? display : text;
 }

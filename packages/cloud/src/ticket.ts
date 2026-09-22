@@ -4,7 +4,9 @@ import { mapSellError, SellError } from "./sell.ts";
 
 export type TicketLineInput = {
   sku: string;
+  /** Unit price in cents. */
   priceCents: number;
+  qty?: number;
   overrideReason?: string | null;
   approvalId?: string | null;
 };
@@ -18,6 +20,9 @@ export type TicketLineResult = {
   list_price_cents: number | null;
   override_reason: string | null;
   payment_method?: string | null;
+  card_brand?: string | null;
+  card_last4?: string | null;
+  qty?: number;
 };
 
 export type TicketSummary = {
@@ -29,6 +34,22 @@ export type TicketSummary = {
   payment_method?: string | null;
   card_brand?: string | null;
   card_last4?: string | null;
+  discount_bps?: number;
+  discount_cents?: number;
+  signup_discount_cents?: number;
+  points_redeemed?: number;
+  points_earned?: number;
+  customer_id?: string | null;
+  customer?: {
+    id: string;
+    phone: string;
+    name: string | null;
+    email: string | null;
+  } | null;
+  cash_cents?: number;
+  card_cents?: number;
+  amount_tendered_cents?: number | null;
+  note?: string | null;
 };
 
 /** Client preview only — server recomputes in finalize_ticket. */
@@ -51,6 +72,44 @@ export function allocateLineTaxes(prices: number[], bps: number): number[] {
   return lines;
 }
 
+/** Prorate a cent amount across line prices; floor shares, remainder on last. */
+export function prorateCents(prices: number[], total: number): number[] {
+  if (!prices.length) return [];
+  const sum = prices.reduce((a, b) => a + b, 0);
+  if (sum <= 0) return prices.map(() => 0);
+  const out: number[] = [];
+  let acc = 0;
+  for (let i = 0; i < prices.length; i++) {
+    if (i === prices.length - 1) {
+      out.push(total - acc);
+    } else {
+      const share = Math.floor((prices[i] * total) / sum);
+      out.push(share);
+      acc += share;
+    }
+  }
+  return out;
+}
+
+/**
+ * Preview ticket % discount on line prices (before signup/redeem).
+ * Returns discounted line totals plus the total discount cents.
+ */
+export function applyTicketDiscount(
+  prices: number[],
+  discountBps: number,
+): { discounted: number[]; discountCents: number } {
+  if (!prices.length) return { discounted: [], discountCents: 0 };
+  const bps = Math.max(0, Math.min(10_000, Math.trunc(discountBps) || 0));
+  const raw = prices.reduce((a, b) => a + b, 0);
+  const discountCents = Math.round((raw * bps) / 10_000);
+  const shares = prorateCents(prices, discountCents);
+  return {
+    discounted: prices.map((p, i) => Math.max(0, p - shares[i])),
+    discountCents,
+  };
+}
+
 export async function loadStoreTaxRateBps(): Promise<number | null> {
   await assertOnline();
   const sb = floorCloud();
@@ -71,10 +130,31 @@ export async function loadStoreTaxRateBps(): Promise<number | null> {
 }
 
 export async function setStoreTaxRateBps(bps: number): Promise<void> {
+  await setStoreSetting("taxRateBps", bps);
+}
+
+export async function loadStoreSetting(key: string): Promise<unknown | null> {
+  await assertOnline();
+  const sb = floorCloud();
+  const { data: session } = await sb.auth.getSession();
+  const uid = session.session?.user.id;
+  if (!uid) return null;
+  const { data: staff } = await sb.from("staff").select("store_id").eq("user_id", uid).maybeSingle();
+  if (!staff?.store_id) return null;
+  const { data } = await sb
+    .from("store_settings")
+    .select("value")
+    .eq("store_id", staff.store_id)
+    .eq("key", key)
+    .maybeSingle();
+  return data?.value ?? null;
+}
+
+export async function setStoreSetting(key: string, value: unknown): Promise<void> {
   await assertOnline();
   const { error } = await floorCloud().rpc("set_store_setting", {
-    p_key: "taxRateBps",
-    p_value: bps,
+    p_key: key,
+    p_value: value,
   });
   if (error) throw error;
 }
@@ -86,6 +166,13 @@ export async function finalizeTicket(args: {
   paymentId?: string | null;
   amountTenderedCents?: number | null;
   channel?: string;
+  discountBps?: number;
+  discountApprovalId?: string | null;
+  customerId?: string | null;
+  redeemPoints?: number;
+  cashCents?: number | null;
+  cardCents?: number | null;
+  note?: string | null;
 }): Promise<TicketSummary> {
   await assertOnline();
   const { data, error } = await floorCloud().rpc("finalize_ticket", {
@@ -93,6 +180,7 @@ export async function finalizeTicket(args: {
     p_lines: args.lines.map((l) => ({
       sku: l.sku,
       price_cents: l.priceCents,
+      qty: l.qty ?? 1,
       override_reason: l.overrideReason ?? null,
       approval_id: l.approvalId ?? null,
     })),
@@ -100,6 +188,13 @@ export async function finalizeTicket(args: {
     p_payment_id: args.paymentId ?? null,
     p_amount_tendered_cents: args.amountTenderedCents ?? null,
     p_channel: args.channel ?? "floor",
+    p_discount_bps: args.discountBps ?? 0,
+    p_discount_approval_id: args.discountApprovalId ?? null,
+    p_customer_id: args.customerId ?? null,
+    p_redeem_points: args.redeemPoints ?? 0,
+    p_cash_cents: args.cashCents ?? null,
+    p_card_cents: args.cardCents ?? null,
+    p_note: args.note ?? null,
   });
   if (error) throw mapSellError(error);
   return data as TicketSummary;

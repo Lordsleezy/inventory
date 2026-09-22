@@ -70,3 +70,23 @@ test("ESC/POS bytes include QR and cut on roll", () => {
   const withQr = escPosBytes({ ...payload, reviewUrl: "https://g.page/r/review" }, "roll80");
   assert.match(Buffer.from(withQr).toString("latin1"), /Scan to review/);
 });
+
+test("branding overrides store name and shows discount/points/tender", () => {
+  const text = receiptText(
+    {
+      ...payload,
+      discountCents: 200,
+      pointsEarned: 5,
+      pointsRedeemed: 1,
+      pointsBalance: 40,
+      tenderDetails: { method: "CARD", cardBrand: "Visa", cardLast4: "4242" },
+      branding: { storeName: "Acme Resale", showTax: true },
+    },
+    48,
+  );
+  assert.match(text, /Acme Resale/);
+  assert.match(text, /Discount/);
+  assert.match(text, /Pts earned/);
+  assert.match(text, /Visa/);
+  assert.equal(text.split("\n")[0], "Acme Resale");
+});

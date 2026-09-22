@@ -10,6 +10,8 @@ export type CachedUnit = {
   condition: string | null;
   askCents: number | null;
   state: string;
+  qtyOnHand?: number;
+  photoUrl?: string | null;
 };
 
 export type PosSettings = {
@@ -20,6 +22,27 @@ export type PosSettings = {
   receiptLegal: string;
   terminalDeviceId: string;
   taxRateBps: number;
+};
+
+export type PrintResult = {
+  printed: boolean;
+  detail: string;
+  code?: string;
+};
+
+export type PrinterInfo = {
+  name: string;
+  status: string;
+};
+
+export type ListPrintersResult = {
+  printers: PrinterInfo[];
+  default: string | null;
+};
+
+export type SaveReceiptResult = {
+  ok: boolean;
+  path: string;
 };
 
 const DEFAULTS: PosSettings = {
@@ -38,6 +61,7 @@ type Memory = {
   incidents: { id: string; sku: string; message: string; createdAt: string }[];
   settings: PosSettings;
   pin: string;
+  lastSavedReceipt: string | null;
 };
 
 const memory: Memory = {
@@ -46,6 +70,7 @@ const memory: Memory = {
   incidents: [],
   settings: { ...DEFAULTS },
   pin: "",
+  lastSavedReceipt: null,
 };
 
 function isTauri(): boolean {
@@ -105,7 +130,20 @@ function memoryInvoke<T>(cmd: string, args: Record<string, unknown> = {}): T {
       memory.settings = { ...memory.settings, ...(args.settings as Partial<PosSettings>) };
       return undefined as T;
     case "print_bytes":
-      return { printed: false, detail: "browser preview — no printer" } as T;
+      return {
+        printed: false,
+        code: "no_printer",
+        detail: "no printer configured",
+      } as T;
+    case "list_printers":
+      return { printers: [], default: null } as T;
+    case "save_receipt_pdf": {
+      const ts = Date.now();
+      const path =
+        (typeof args.path === "string" && args.path.trim()) || `/tmp/floor-receipt-${ts}.pdf`;
+      memory.lastSavedReceipt = path;
+      return { ok: true, path } as T;
+    }
     case "kiosk_power":
       return { ok: false, detail: "not a kiosk session" } as T;
     case "verify_admin_pin":
@@ -133,6 +171,8 @@ function stripCost(unit: CachedUnit): CachedUnit {
     condition: unit.condition,
     askCents: unit.askCents,
     state: unit.state,
+    qtyOnHand: unit.qtyOnHand ?? 1,
+    photoUrl: unit.photoUrl ?? null,
   };
 }
 
@@ -178,12 +218,16 @@ export async function savePosSettings(settings: PosSettings): Promise<void> {
   await invoke("settings_set", { settings });
 }
 
-export async function printBytes(
-  data: Uint8Array,
-  printerPath: string,
-  raw = false,
-): Promise<{ printed: boolean; detail: string }> {
+export async function printBytes(data: Uint8Array, printerPath: string, raw = false): Promise<PrintResult> {
   return invoke("print_bytes", { data: Array.from(data), printerPath, raw });
+}
+
+export async function listPrinters(): Promise<ListPrintersResult> {
+  return invoke("list_printers");
+}
+
+export async function saveReceiptPdf(text: string, path?: string | null): Promise<SaveReceiptResult> {
+  return invoke("save_receipt_pdf", { text, path: path ?? null });
 }
 
 export async function kioskPower(action: "poweroff" | "reboot"): Promise<{ ok: boolean; detail: string }> {

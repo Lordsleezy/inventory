@@ -8,6 +8,7 @@ export { mapChargeStatus, readerIsFresh };
 export type TicketLineForCharge = {
   sku: string;
   priceCents: number;
+  qty?: number;
   overrideReason?: string | null;
   approvalId?: string | null;
 };
@@ -69,10 +70,23 @@ export type CreatedCharge = {
   summary?: unknown;
 };
 
-/** Server computes tax-included total from lines. */
+export type CreateChargeOpts = {
+  /** When set, charge only this amount (split payment card portion). */
+  chargeCents?: number | null;
+  discountBps?: number;
+  discountApprovalId?: string | null;
+  customerId?: string | null;
+  redeemPoints?: number;
+  cashCents?: number | null;
+  cardCents?: number | null;
+  note?: string | null;
+};
+
+/** Server computes tax-included total from lines (or uses chargeCents override). */
 export async function createTicketCharge(
   ticketId: string,
   lines: TicketLineForCharge[],
+  opts: CreateChargeOpts = {},
 ): Promise<CreatedCharge> {
   const reader = await loadPairedReader();
   if (!reader) {
@@ -90,16 +104,27 @@ export async function createTicketCharge(
     (err as Error & { code: string }).code = "reader_not_authorized";
     throw err;
   }
-  const { data, error } = await floorCloud().rpc("create_register_charge", {
+  const payload: Record<string, unknown> = {
     p_ticket_id: ticketId,
     p_device_id: reader.id,
     p_lines: lines.map((l) => ({
       sku: l.sku,
       price_cents: l.priceCents,
+      qty: l.qty ?? 1,
       override_reason: l.overrideReason ?? null,
       approval_id: l.approvalId ?? null,
     })),
-  });
+  };
+  if (opts.chargeCents != null) payload.p_charge_cents = opts.chargeCents;
+  if (opts.discountBps != null) payload.p_discount_bps = opts.discountBps;
+  if (opts.discountApprovalId != null) payload.p_discount_approval_id = opts.discountApprovalId;
+  if (opts.customerId != null) payload.p_customer_id = opts.customerId;
+  if (opts.redeemPoints != null) payload.p_redeem_points = opts.redeemPoints;
+  if (opts.cashCents != null) payload.p_cash_cents = opts.cashCents;
+  if (opts.cardCents != null) payload.p_card_cents = opts.cardCents;
+  if (opts.note != null) payload.p_note = opts.note;
+
+  const { data, error } = await floorCloud().rpc("create_register_charge", payload);
   if (error) throw error;
   const row = data as {
     id: string;
