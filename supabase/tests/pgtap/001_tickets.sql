@@ -25,7 +25,11 @@ select ok(
   'sale_receipts exposes ticket_id'
 );
 
-select has_function('public', 'finalize_ticket', array['uuid', 'jsonb', 'text', 'text', 'int', 'text']);
+select has_function(
+  'public',
+  'finalize_ticket',
+  array['uuid', 'jsonb', 'text', 'text', 'int', 'text', 'int', 'uuid', 'uuid', 'int', 'int', 'int', 'text']
+);
 select has_function('public', 'void_ticket', array['uuid', 'text', 'uuid']);
 select has_function('public', 'store_tax_rate_bps', array[]::text[]);
 
