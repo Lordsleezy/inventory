@@ -42,6 +42,14 @@ identifier = "allow-print-bytes"
 commands.allow = ["print_bytes"]
 
 [[permission]]
+identifier = "allow-list-printers"
+commands.allow = ["list_printers"]
+
+[[permission]]
+identifier = "allow-save-receipt-pdf"
+commands.allow = ["save_receipt_pdf"]
+
+[[permission]]
 identifier = "allow-kiosk-power"
 commands.allow = ["kiosk_power"]
 

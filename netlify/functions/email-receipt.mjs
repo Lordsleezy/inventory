@@ -153,9 +153,9 @@ async function handle(event) {
   const storeId = ctx.staff.store_id;
 
   const { data: sales, error: salesErr } = await sb
-    .from("sale_receipts")
+    .from("sales")
     .select(
-      "id, sku, receipt_no, ticket_id, sold_at, price_cents, tax_cents, total_cents, payment_method, card_brand, card_last4, actor_name, title, condition, list_price_cents",
+      "id, sku, receipt_no, ticket_id, sold_at, price_cents, tax_cents, list_price_cents, payment_method, card_brand, card_last4, actor_id, voided_at",
     )
     .eq("store_id", storeId)
     .eq("ticket_id", ticketId)
@@ -164,6 +164,30 @@ async function handle(event) {
 
   if (salesErr) return json(500, { error: salesErr.message });
   if (!sales?.length) return json(404, { error: "ticket_not_found" });
+
+  const skus = [...new Set(sales.map((s) => s.sku))];
+  const actorIds = [...new Set(sales.map((s) => s.actor_id).filter(Boolean))];
+  const [{ data: units }, { data: staffRows }] = await Promise.all([
+    sb.from("units").select("sku, title, brand, model, condition").eq("store_id", storeId).in("sku", skus),
+    actorIds.length
+      ? sb.from("staff").select("user_id, display_name").eq("store_id", storeId).in("user_id", actorIds)
+      : Promise.resolve({ data: [] }),
+  ]);
+  const unitBySku = Object.fromEntries((units ?? []).map((u) => [u.sku, u]));
+  const staffById = Object.fromEntries((staffRows ?? []).map((s) => [s.user_id, s]));
+
+  const enriched = sales.map((s) => {
+    const u = unitBySku[s.sku];
+    const title =
+      [u?.brand, u?.model].filter(Boolean).join(" ") || u?.title || "Item";
+    return {
+      ...s,
+      title,
+      condition: u?.condition ?? null,
+      actor_name: staffById[s.actor_id]?.display_name ?? null,
+      total_cents: (s.price_cents || 0) + (s.tax_cents || 0),
+    };
+  });
 
   const { data: settingsRows } = await sb
     .from("store_settings")
@@ -182,9 +206,9 @@ async function handle(event) {
   }
 
   const branding = mergeBranding(brandingStored, body.branding, displayName);
-  const text = buildReceiptText(sales, branding, ctx.staff.display_name);
-  const html = buildReceiptHtml(sales, branding, ctx.staff.display_name);
-  const receiptNo = sales[0]?.receipt_no || ticketId.slice(0, 8);
+  const text = buildReceiptText(enriched, branding, ctx.staff.display_name);
+  const html = buildReceiptHtml(enriched, branding, ctx.staff.display_name);
+  const receiptNo = enriched[0]?.receipt_no || ticketId.slice(0, 8);
 
   const result = await sendResend({
     to: toEmail,

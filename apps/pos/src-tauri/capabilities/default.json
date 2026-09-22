@@ -14,6 +14,8 @@
     "allow-settings-get",
     "allow-settings-set",
     "allow-print-bytes",
+    "allow-list-printers",
+    "allow-save-receipt-pdf",
     "allow-kiosk-power",
     "allow-set-admin-pin",
     "allow-verify-admin-pin",
