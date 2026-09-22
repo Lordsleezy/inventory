@@ -305,7 +305,11 @@ select throws_ok(
 );
 reset role;
 
-select has_function('public', 'create_register_charge', array['uuid', 'uuid', 'jsonb']);
+select has_function(
+  'public',
+  'create_register_charge',
+  array['uuid', 'uuid', 'jsonb', 'int', 'int', 'uuid', 'uuid', 'int', 'int', 'int', 'text', 'text']
+);
 select has_function('public', 'capture_register_charge', array['uuid', 'text', 'text', 'text']);
 
 select * from finish();
