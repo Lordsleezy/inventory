@@ -920,7 +920,13 @@ fn external_url_allowed(url: &str) -> bool {
 
 /// Tauri webview can't open external URLs itself — launch the desktop browser.
 #[tauri::command]
-fn open_external(url: String) -> Result<(), String> {
+async fn open_external(url: String) -> Result<(), String> {
+  tauri::async_runtime::spawn_blocking(move || launch_external(url))
+    .await
+    .map_err(|e| format!("Could not open the browser: {e}"))?
+}
+
+fn launch_external(url: String) -> Result<(), String> {
   if !external_url_allowed(&url) {
     return Err(format!("blocked_url: {url}"));
   }

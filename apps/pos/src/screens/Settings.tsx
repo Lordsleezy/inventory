@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { setStoreSetting, setStoreTaxRateBps, floorCloud } from "@floor/cloud";
 import { usePos } from "../pos-context";
 import { callFunction } from "../functions";
+import { withTimeout } from "../with-timeout";
 import {
   hasAdminPin,
   kioskPower,
@@ -286,8 +287,11 @@ export function SettingsScreen() {
     setSquareBusy("connect");
     setSquareNote(null);
     try {
-      const res = await callFunction("square-connect-start", { method: "POST", body: "{}" });
-      const body = await res.json().catch(() => ({}));
+      const { res, body } = await withTimeout((async () => {
+        const res = await callFunction("square-connect-start", { method: "POST", body: "{}" });
+        const body = await res.json().catch(() => ({}));
+        return { res, body };
+      })(), "Connect Square timed out. Check the internet connection and try again.");
       if (!res.ok) {
         throw new Error(
           `Connect Square failed (HTTP ${res.status}): ${body.error || body.message || "unknown"}. Is Netlify redeployed with SQUARE_* env vars?`,
@@ -297,7 +301,7 @@ export function SettingsScreen() {
       setAuthorizeUrl(body.url);
       startSquarePoll();
       try {
-        await openExternal(body.url);
+        await withTimeout(openExternal(body.url), "The browser launcher did not respond within 20 seconds");
         setSquareNote({
           ok: true,
           text: "Square opened in your browser. Log in and tap Allow — this screen updates automatically.",
@@ -539,7 +543,7 @@ export function SettingsScreen() {
               : "Not connected — tap Connect Square, finish authorize in the browser, then Refresh status and pick a location. Phone charges will fail until this shows Connected."}
           </p>
           {squareNote ? <p className={squareNote.ok ? undefined : "error"}>{squareNote.text}</p> : null}
-          {authorizeUrl && !squareStatus?.connected ? (
+          {authorizeUrl ? (
             <>
               <code style={{ wordBreak: "break-all", userSelect: "text" }}>{authorizeUrl}</code>
               <div className="row">
