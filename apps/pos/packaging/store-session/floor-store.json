@@ -1,0 +1,14 @@
+{
+  "parentMode": "user",
+  "hasOverview": false,
+  "hasRunDialog": false,
+  "hasWorkspaces": false,
+  "hasWmMenus": false,
+  "hasNotifications": false,
+  "allowSettings": false,
+  "allowScreencast": false,
+  "showCalendarEvents": false,
+  "showWelcomeDialog": false,
+  "enabledExtensions": ["floor-store@floor.local"],
+  "panel": {"left": [], "center": [], "right": []}
+}

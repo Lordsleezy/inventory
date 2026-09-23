@@ -27,6 +27,11 @@ jobs:
       - name: Install npm workspaces
         run: npm ci
 
+      - name: Unit tests and register build
+        run: |
+          npm test
+          npm run build -w @floor/pos
+
       - name: PGlite apply all migrations
         run: npm run test:migrations
 

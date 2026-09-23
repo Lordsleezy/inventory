@@ -49,6 +49,7 @@ export {
   setStoreSetting,
   setStoreTaxRateBps,
   finalizeTicket,
+  quoteTicketTotals,
   voidTicket,
   approveWithPin,
   type TicketLineInput,

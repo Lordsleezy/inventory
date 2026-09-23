@@ -8,6 +8,8 @@ import {
   authErrorMessage,
   cardFeeCents,
   finalizeTicket,
+  quoteTicketTotals,
+  type TicketQuote,
   lookupCustomerByPhone,
   SellError,
   upsertCustomer,
@@ -19,12 +21,16 @@ import { usePos } from "../pos-context";
 import { searchUnits, type CachedUnit } from "../local";
 import { unitThumbUrl } from "../unit-photo";
 import {
-  cancelCharge,
-  recoverOrphanCharge,
-  runCardChargeFlow,
   withdrawListingsAfterSale,
   type SalePhase,
 } from "../sale-flow";
+
+type ManualPayment = {
+  quote: TicketQuote;
+  args: Parameters<typeof finalizeTicket>[0];
+  titles: Record<string, { title: string; condition: string | null }>;
+  customerEmail: string | null;
+};
 
 type PinKind = "below_floor" | "ticket_discount";
 
@@ -53,8 +59,12 @@ export function RegisterScreen() {
   const [error, setError] = useState("");
   const [loud, setLoud] = useState("");
   const [busy, setBusy] = useState(false);
-  const [phase, setPhase] = useState<SalePhase>("idle");
-  const [waitHint, setWaitHint] = useState("");
+  const manualKey = `floor_manual_${session.storeId}_${session.userId}`;
+  const [manual, setManual] = useState<ManualPayment | null>(() => {
+    try { return JSON.parse(localStorage.getItem(manualKey) || "null"); } catch { return null; }
+  });
+  const [phase, setPhase] = useState<SalePhase>(manual ? "manual_card" : "idle");
+  const confirming = useRef(false);
   const [cashDigits, setCashDigits] = useState("");
   const [discountPct, setDiscountPct] = useState(0);
   const [discountApprovalId, setDiscountApprovalId] = useState<string | null>(null);
@@ -76,8 +86,6 @@ export function RegisterScreen() {
   const [pin, setPin] = useState("");
   const [pendingAction, setPendingAction] = useState<"cash" | "card" | "split" | null>(null);
   const [thumbs, setThumbs] = useState<Record<string, string | null>>({});
-  const abortRef = useRef<AbortController | null>(null);
-  const chargeIdRef = useRef<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -89,27 +97,6 @@ export function RegisterScreen() {
     }, 60);
     return () => clearTimeout(t);
   }, [q]);
-
-  // Crash/restart recovery: a card captured on the phone but never finalized
-  // gets finalized here, or auto-refunded when the unit already sold.
-  useEffect(() => {
-    if (!online) return;
-    let alive = true;
-    void recoverOrphanCharge().then((res) => {
-      if (!alive) return;
-      if (res.kind === "finalized") {
-        setLoud("Recovered a card payment left over from a crash — the sale is now recorded.");
-      } else if (res.kind === "refunded") {
-        setLoud(`Refunded ${formatCentsTotal(res.amountCents)} left over from an unfinished card sale.`);
-      } else if (res.kind === "needs_attention") {
-        setLoud(res.message);
-      }
-    });
-    return () => {
-      alive = false;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [online]);
 
   useEffect(() => {
     for (const line of lines) {
@@ -194,8 +181,8 @@ export function RegisterScreen() {
     return null;
   }
 
-  async function afterSale(summary: TicketSummary, changeCents: number | null) {
-    await withdrawListingsAfterSale(lines.map((l) => l.sku));
+  async function afterSale(summary: TicketSummary, changeCents: number | null, saved?: ManualPayment) {
+    await withdrawListingsAfterSale(summary.lines.map((l) => l.sku));
     try {
       await refreshUnits();
     } catch {
@@ -207,8 +194,8 @@ export function RegisterScreen() {
         summary,
         changeCents,
         clerkName: session.displayName,
-        titles: Object.fromEntries(lines.map((l) => [l.sku, { title: l.title, condition: l.condition }])),
-        customerEmail: customer?.email ?? null,
+        titles: saved?.titles ?? Object.fromEntries(lines.map((l) => [l.sku, { title: l.title, condition: l.condition }])),
+        customerEmail: saved?.customerEmail ?? customer?.email ?? null,
       }),
     );
     clear();
@@ -232,20 +219,6 @@ export function RegisterScreen() {
     } else {
       setError(authErrorMessage(err));
     }
-  }
-
-  function mapCardError(err: unknown): string {
-    const code = (err as Error & { code?: string }).code || (err instanceof SellError ? err.code : "");
-    if (code === "reader_not_paired" || (err instanceof Error && /reader_not_paired/i.test(err.message))) {
-      return "Pair a phone reader in Settings before taking cards.";
-    }
-    if (code === "reader_offline" || (err instanceof Error && /reader_offline/i.test(err.message))) {
-      return "Phone reader is offline. Open Payment device on the phone and try again.";
-    }
-    if (code === "reader_not_authorized" || (err instanceof Error && /reader_not_authorized/i.test(err.message))) {
-      return "Phone isn’t ready for cards — open Payment device on the phone and tap Authorize Square.";
-    }
-    return authErrorMessage(err);
   }
 
   async function runCash(approvals: Record<string, string | null>) {
@@ -283,53 +256,53 @@ export function RegisterScreen() {
     }
   }
 
-  async function runCard(approvals: Record<string, string | null>, split?: { cashCents: number; cardCents: number }) {
+  async function runCard(approvals: Record<string, string | null>, split?: { cashCents: number }) {
     setBusy(true);
+    setPhase("quoting");
     setError("");
-    setLoud("");
-    setWaitHint("");
-    const abort = new AbortController();
-    abortRef.current = abort;
     try {
-      setPhase("waiting_phone");
-      // cardCents is the PRE-FEE card portion; the server adds the card fee.
-      const cardCents = split?.cardCents ?? total;
-      const cashCents = split?.cashCents ?? 0;
-      const result = await runCardChargeFlow({
-        ticketId,
-        lines: ticketLines(approvals),
-        signal: abort.signal,
-        onHint: setWaitHint,
-        chargeOpts: {
-          paymentMethod: split ? "split" : "card",
-          chargeCents: split ? cardCents + cardFeeCents(cardCents, cardFeeBps) : null,
-          discountBps,
-          discountApprovalId,
-          customerId: customer?.id ?? null,
-          redeemPoints,
-          cashCents: split ? cashCents : null,
-          cardCents: split ? cardCents : null,
-          note: note.trim() || null,
-        },
-      });
-      if (!result.ok) {
-        if (result.loud) setLoud(result.loud);
-        if (result.error) setError(result.error);
-        return;
-      }
-      // If finalize_register_charge already finalized, use that summary.
-      await afterSale(result.summary, null);
+      const args = {
+        ticketId, lines: ticketLines(approvals), paymentMethod: split ? "split" : "card",
+        // Explicit local confirmation reference, never a Square payment ID.
+        paymentId: `manual:${ticketId}`, discountBps, discountApprovalId,
+        customerId: customer?.id ?? null, redeemPoints,
+        cashCents: split?.cashCents ?? 0, note: note.trim() || null,
+      };
+      const quote = await quoteTicketTotals(args);
+      if (quote.card_charge_cents <= 0) throw new Error("Cash covers the total. Use Cash instead.");
+      const payment = { quote, args: { ...args, cardCents: quote.card_base_cents },
+        titles: Object.fromEntries(lines.map(l => [l.sku, { title: l.title, condition: l.condition }])),
+        customerEmail: customer?.email ?? null };
+      localStorage.setItem(manualKey, JSON.stringify(payment));
+      setManual(payment);
+      setPhase("manual_card");
     } catch (err) {
-      setError(mapCardError(err));
-      const id = chargeIdRef.current;
-      if (id) await cancelCharge(id).catch(() => {});
-    } finally {
-      abortRef.current = null;
-      chargeIdRef.current = null;
-      setBusy(false);
+      setPendingAction(split ? "split" : "card");
+      handleSaleError(err);
       setPhase("idle");
-      setWaitHint("");
-    }
+    } finally { setBusy(false); }
+  }
+
+  async function completeManualCard() {
+    if (!manual || confirming.current) return;
+    confirming.current = true;
+    setBusy(true);
+    setPhase("finalizing");
+    setError("");
+    try {
+      const summary = await finalizeTicket(manual.args);
+      if (summary.total_cents !== manual.quote.total_cents) {
+        window.alert(`Sale recorded for ${formatCentsTotal(summary.total_cents)}; the quoted total was ${formatCentsTotal(manual.quote.total_cents)}. Reconcile the difference in Square before continuing.`);
+      }
+      await afterSale(summary, null, manual);
+      localStorage.removeItem(manualKey);
+      setManual(null);
+      setPhase("idle");
+    } catch (err) {
+      if (err instanceof SellError && err.code === "below_floor") handleSaleError(err);
+      setError(`Sale not confirmed: ${authErrorMessage(err)}. Do not charge again. Retry to record this same ticket; if abandoning it, refund ${formatCentsTotal(manual.quote.card_charge_cents)} in the Square app.`);
+      setPhase("manual_card");
+    } finally { confirming.current = false; setBusy(false); }
   }
 
   async function startPay(kind: "cash" | "card" | "split", approvals: Record<string, string | null> = {}) {
@@ -353,7 +326,7 @@ export function RegisterScreen() {
   async function submitPin() {
     if (!pinKind || !pinSku || !pin) return;
     try {
-      const id = await approveWithPin(pinKind, pinSku, pin, ticketId);
+      const id = await approveWithPin(pinKind, pinSku, pin, manual?.args.ticketId ?? ticketId);
       if (pinKind === "ticket_discount") {
         setDiscountApprovalId(id);
         setPinKind(null);
@@ -361,26 +334,24 @@ export function RegisterScreen() {
         setPin("");
         const action = pendingAction;
         setPendingAction(null);
-        if (action) await startPay(action, {});
+        if (action) setError("Discount approved. Select the payment method again.");
         return;
       }
       setPinKind(null);
       setPinSku(null);
       setPin("");
-      await startPay(pendingAction ?? "cash", { [pinSku]: id });
+      updateLine(pinSku, { approvalId: id });
+      if (manual) {
+        const approved = { ...manual, args: { ...manual.args, lines: manual.args.lines.map(line => line.sku === pinSku ? { ...line, approvalId: id } : line) } };
+        localStorage.setItem(manualKey, JSON.stringify(approved));
+        setManual(approved);
+        setError("Approved. Click Card paid — complete sale again. Do not charge again.");
+      } else {
+        await startPay(pendingAction ?? "cash", { [pinSku]: id });
+      }
     } catch (err) {
       setError(authErrorMessage(err));
     }
-  }
-
-  async function cancelWaiting() {
-    abortRef.current?.abort();
-    const id = chargeIdRef.current;
-    if (id) await cancelCharge(id).catch(() => {});
-    setPhase("idle");
-    setBusy(false);
-    setWaitHint("");
-    setError("Canceled. Nothing was sold.");
   }
 
   function addFromSearch(unit: CachedUnit) {
@@ -464,9 +435,8 @@ export function RegisterScreen() {
       setError("Cash covers the full total — use Cash instead.");
       return;
     }
-    const cardCents = total - cashCents;
     setSplitOpen(false);
-    await runCard({}, { cashCents, cardCents });
+    await runCard({}, { cashCents });
   }
 
   const editLine = lines.find((l) => l.sku === editSku) ?? null;
@@ -674,17 +644,7 @@ export function RegisterScreen() {
             </div>
           ) : null}
 
-          {phase === "waiting_phone" || phase === "finalizing" ? (
-            <div className="card grid">
-              <strong>{phase === "finalizing" ? "Recording sale…" : "Waiting on phone"}</strong>
-              <p>{waitHint}</p>
-              {phase === "waiting_phone" ? (
-                <button type="button" className="danger" onClick={() => void cancelWaiting()}>
-                  Cancel card payment
-                </button>
-              ) : null}
-            </div>
-          ) : (
+          {phase !== "idle" ? <p>{phase === "quoting" ? "Getting exact total…" : "Confirm payment below."}</p> : (
             <div className="pay-stack">
               <button type="button" className="cash" disabled={busy || !lines.length} onClick={() => void startPay("cash")}>
                 CASH
@@ -763,6 +723,23 @@ export function RegisterScreen() {
           </div>
         </div>
       </aside>
+
+      {manual ? (
+        <div className="modal" role="dialog" aria-modal="true" aria-label="Manual card payment">
+          <div className="card grid">
+            <h2>Charge in the Square app</h2>
+            <strong style={{ fontSize: "3.5rem" }}>{formatCentsTotal(manual.quote.card_charge_cents)}</strong>
+            <p>Tax {formatCentsTotal(manual.quote.tax_cents)} · Card fee {formatCentsTotal(manual.quote.card_fee_cents)} (included)</p>
+            {manual.args.paymentMethod === "split" ? <p>Collect {formatCentsTotal(manual.args.cashCents!)} cash in the drawer.</p> : null}
+            <p>Charge the exact amount above on your phone. Confirm only after Square says paid.</p>
+            {error ? <p className="error">{error}</p> : null}
+            <button className="primary" disabled={busy} onClick={() => void completeManualCard()}>{busy ? "Recording sale…" : "Card paid — complete sale"}</button>
+            <button disabled={busy} onClick={() => {
+              if (window.confirm("Leave this payment? If already charged, refund it in the Square app before starting another sale.")) { localStorage.removeItem(manualKey); setManual(null); setPhase("idle"); }
+            }}>Back</button>
+          </div>
+        </div>
+      ) : null}
 
       {discountOpen ? (
         <div className="modal">
@@ -886,7 +863,7 @@ export function RegisterScreen() {
                 Cancel
               </button>
               <button type="button" className="primary" onClick={() => void confirmSplit()}>
-                Charge card portion
+                Continue to card amount
               </button>
             </div>
           </div>

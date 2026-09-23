@@ -3,6 +3,7 @@ import { floorCloud, approveWithPin, authErrorMessage, voidTicket } from "@floor
 import { usePos } from "../pos-context";
 import { loadReceiptBranding, printReceipt, saveReceiptFile } from "../print-receipt";
 import { type ReceiptBranding, type ReceiptPayload } from "../receipt";
+import { manualRefundMessage } from "../manual-card";
 import { callFunction } from "../functions";
 
 type ReceiptRow = {
@@ -186,70 +187,22 @@ export function ReceiptsScreen() {
       if (!isAdmin) {
         approval = await approveWithPin("void_ticket", rows.find((r) => r.ticket_id === voidTicketId)?.sku || "", pin, voidTicketId);
       }
-      const ticketRows = rows.filter((r) => r.ticket_id === voidTicketId && !r.voided_at);
-      const method = ticketRows[0]?.payment_method;
-      const paymentId = ticketRows.find((r) => r.payment_id)?.payment_id;
-      await voidTicket(voidTicketId, "void last ticket", approval);
-
-      // A card sale keeps the customer's money unless we refund it. For split,
-      // refund only the card portion — cash comes back out of the drawer.
-      if (paymentId && (method === "card" || method === "split")) {
-        // Full card tickets refund the whole captured payment (fee included).
-        // Split refunds only the card portion: card base + card fee; the cash
-        // side comes back out of the drawer.
-        let cardCents: number | null = null;
-        if (method === "split") {
-          const sb = floorCloud();
-          const full = await sb
-            .from("ticket_extras")
-            .select("card_cents, card_fee_cents")
-            .eq("ticket_id", voidTicketId);
-          let extras: { card_cents: number | null; card_fee_cents?: number | null } | undefined;
-          if (full.error && /card_fee_cents/i.test(full.error.message)) {
-            // pre-card-fee schema has no card_fee_cents column
-            const basic = await sb
-              .from("ticket_extras")
-              .select("card_cents")
-              .eq("ticket_id", voidTicketId);
-            extras = basic.data?.[0];
-          } else {
-            extras = full.data?.[0];
-          }
-          if (extras?.card_cents != null) {
-            cardCents = extras.card_cents + (extras.card_fee_cents ?? 0);
-          } else {
-            // Never guess the card portion — a null amount refunds everything.
-            setError(
-              `Ticket voided, but the card portion couldn't be determined. Refund payment ${paymentId} in Square Dashboard.`,
-            );
-            setVoidTicketId(null);
-            setPin("");
-            setQ((q) => q + "");
-            return;
-          }
-        }
-        try {
-          const res = await callFunction("square-refund-payment", {
-            method: "POST",
-            body: JSON.stringify({
-              paymentId,
-              amountCents: cardCents,
-              reason: "ticket_voided",
-            }),
-          });
-          const body = await res.json().catch(() => ({}));
-          if (!res.ok) throw new Error(body.error || `refund failed (${res.status})`);
-          setMsg(`Voided and refunded the card${method === "split" ? " portion" : ""}.`);
-        } catch (refundErr) {
-          setError(
-            `Ticket voided, but the card refund failed. Refund payment ${paymentId} in Square Dashboard. ${
-              refundErr instanceof Error ? refundErr.message : String(refundErr)
-            }`,
-          );
-        }
-      } else {
-        setMsg("Ticket voided.");
+      // Fetch the whole ticket, independent of search results or pagination.
+      const { data: sales, error: salesError } = await floorCloud().from("sales")
+        .select("payment_method").eq("ticket_id", voidTicketId);
+      if (salesError) throw salesError;
+      const method = sales?.[0]?.payment_method;
+      if (!method) throw new Error("Ticket not found.");
+      let message = "Ticket voided.";
+      if (method === "card" || method === "split") {
+        const { data: extras, error: extrasError } = await floorCloud().from("ticket_extras")
+          .select("card_cents, cash_cents").eq("ticket_id", voidTicketId).single();
+        if (extrasError) throw extrasError;
+        message = manualRefundMessage(method, extras.card_cents, extras.cash_cents);
       }
+      await voidTicket(voidTicketId, "void last ticket", approval);
+      setMsg(message);
+      setRows(current => current.map(row => row.ticket_id === voidTicketId ? { ...row, voided_at: new Date().toISOString() } : row));
       setVoidTicketId(null);
       setPin("");
       setQ((q) => q + "");

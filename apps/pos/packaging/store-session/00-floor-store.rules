@@ -1,0 +1,11 @@
+// Scoped to the employee account; prime keeps its existing authority.
+polkit.addRule(function(action, subject) {
+    if (subject.user !== "store") return;
+    // Ordinary desktop operations needed by the two allowed apps.
+    if (action.id === "org.freedesktop.RealtimeKit1.acquire-real-time" ||
+        action.id === "org.freedesktop.RealtimeKit1.acquire-high-priority" ||
+        action.id === "org.freedesktop.portal.Flatpak" ||
+        action.id === "org.freedesktop.login1.inhibit-block-idle") return;
+    // No power, switching, settings changes, package installs, or elevation.
+    return polkit.Result.NO;
+});
