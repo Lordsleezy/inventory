@@ -133,21 +133,28 @@ export function CheckoutScreen() {
       await ensureOnline();
       const headers = await authHeader();
       const authRes = await fetch(functionsUrl("square-mobile-auth"), { headers });
-      const authBody = await authRes.json();
-      const useMock = !authRes.ok;
-      if (useMock && cardPayments) {
-        setError(authBody.error || "Square auth failed. Connect Square or use mock.");
+      const authBody = await authRes.json().catch(() => ({}));
+      if (!authRes.ok) {
+        if (authBody.error === "square_not_connected") {
+          throw new Error("Square is not connected. On the register: Settings → Connect Square, then pick a location.");
+        }
+        if (authBody.error === "square_location_required") {
+          throw new Error("Square is connected but no location is picked. On the register: Settings → List locations → pick one.");
+        }
+        throw new Error(
+          authBody.message || `Square auth failed (HTTP ${authRes.status}): ${authBody.error || "unknown"}`,
+        );
       }
       const authorized = await FloorSquare.authorize({
-        accessToken: authBody.accessToken || "sandbox",
-        locationId: authBody.locationId || "sandbox",
-        mock: useMock,
+        accessToken: authBody.accessToken,
+        locationId: authBody.locationId,
+        mock: false,
       });
       if (!authorized.ok) {
         setError(authorized.reason || "Could not authorize Square reader.");
         return;
       }
-      const charged = await FloorSquare.charge({ amountCents: cardTotal, mock: useMock || !!authorized.mock });
+      const charged = await FloorSquare.charge({ amountCents: cardTotal, mock: false });
       if (!charged.ok || !charged.paymentId) {
         setError(charged.reason === "canceled" ? "Card canceled." : charged.reason || "Card declined.");
         if (reservationId) await releaseReservation(reservationId);

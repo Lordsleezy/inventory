@@ -78,11 +78,17 @@ export function squareHttpErrorMessage(err, locationId) {
   const status = err?.statusCode;
   const detail = err instanceof Error ? err.message : String(err);
   if (status === 401 || status === 403) {
+    const environment = (process.env.SQUARE_ENVIRONMENT || "sandbox").toLowerCase() === "production"
+      ? "production"
+      : "sandbox";
+    const base =
+      `Square rejected the access token (HTTP ${status}) for location ${locationId} in ${environment}. ` +
+      `Reconnect Square on the register (Settings → Connect Square).`;
+    if (environment === "production") return base;
     return (
-      `Square rejected the access token (HTTP ${status}) for location ${locationId}. ` +
-      `In Netlify, set SQUARE_SANDBOX_ACCESS_TOKEN to a fresh Sandbox Access Token from ` +
-      `Developer Console → Sandbox → Credentials, and SQUARE_SANDBOX_LOCATION_ID to that account’s Location ID. ` +
-      `SQUARE_ENVIRONMENT must be sandbox. Also Connect Square on the register if you use OAuth.`
+      `${base} ` +
+      `If you use a Netlify env token, set SQUARE_SANDBOX_ACCESS_TOKEN to a fresh Sandbox Access Token from ` +
+      `Developer Console → Sandbox → Credentials, and SQUARE_SANDBOX_LOCATION_ID to that account’s Location ID.`
     );
   }
   return `Could not verify Square location ${locationId}: ${detail}`;

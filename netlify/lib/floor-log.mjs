@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { serviceClient } from "./server.mjs";
 
 const traces = new AsyncLocalStorage();
-const SECRET = /(authorization|access_token|refresh_token|id_token|client_secret|secret|password|ciphertext|connections_key|api[_-]?key|cookie|set-cookie|^bearer$)/i;
+const SECRET = /(authorization|access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|secret|password|ciphertext|connections[_-]?key|api[_-]?key|cookie|set-cookie|^bearer$|^token$)/i;
 
 export function redact(value, depth = 0) {
   if (value == null) return value;

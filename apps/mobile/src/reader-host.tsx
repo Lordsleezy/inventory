@@ -94,7 +94,7 @@ export function squareSdkErrorMessage(result: {
     case "authorization_unsupported_country":
       return (
         detail ||
-        "Square rejected authorize as unsupported country. Confirm: (1) IPA and Netlify share the same sandbox Application ID, (2) the selected Square location is a US/CA/GB/AU sandbox location, (3) Precise Location is on and a GPS fix completed before authorize."
+        "Square rejected authorize as unsupported country. Confirm: (1) IPA and Netlify share the same Application ID, (2) the selected Square location is a US/CA/GB/AU location, (3) Precise Location is on and a GPS fix completed before authorize."
       );
     case "mock_authorize_disabled":
     case "mock_charge_disabled":
@@ -285,14 +285,14 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
 
       if (!serverAppId) {
         throw new Error(
-          "Netlify SQUARE_APPLICATION_ID is unset. Set it to the IPA’s sandbox Application ID (same as Codemagic). Square iOS error 13 is almost always an Application ID mismatch.",
+          "Netlify SQUARE_APPLICATION_ID is unset. Set it to the iOS build's Application ID (same as Codemagic). Square iOS error 13 is almost always an Application ID mismatch.",
         );
       }
       if (bakedAppId && serverAppId && bakedAppId !== serverAppId) {
         throw new Error(
           squareSdkErrorMessage({
             reason: "app_id_mismatch",
-            message: `Square Application ID mismatch — IPA has ${bakedAppId}, Netlify has ${serverAppId}. Rebuild Codemagic with the Netlify sandbox Application ID (or update Netlify to match the IPA).`,
+            message: `Square Application ID mismatch — IPA has ${bakedAppId}, Netlify has ${serverAppId}. Set Codemagic appstore SQUARE_APPLICATION_ID to match Netlify and rebuild, or update Netlify.`,
           }),
         );
       }

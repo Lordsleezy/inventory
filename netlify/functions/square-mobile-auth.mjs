@@ -28,7 +28,7 @@ async function handle(event) {
     return json(500, {
       error: "square_application_id_missing",
       message:
-        "Netlify SQUARE_APPLICATION_ID is unset. Set it to the same sandbox Application ID baked into the IPA (Codemagic appstore group). Mismatch is the #1 cause of authorization_unsupported_country on iOS.",
+        "Netlify SQUARE_APPLICATION_ID is unset. Set it to the same Application ID baked into the iOS build (Codemagic appstore group). Mismatch is the #1 cause of authorization_unsupported_country on iOS.",
     });
   }
 

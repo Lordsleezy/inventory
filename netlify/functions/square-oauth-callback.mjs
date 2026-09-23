@@ -37,7 +37,6 @@ function page(status, { title, message, detail, href }) {
     <p>${esc(message)}</p>
     ${detail ? `<p class="quiet">${esc(detail)}</p>` : ""}
     <p><a class="btn" href="${esc(link)}">Back to Floor</a></p>
-    <script>setTimeout(function(){ location.href=${JSON.stringify(link)}; }, 400);</script>
   </body>
 </html>`,
   );
@@ -85,8 +84,7 @@ async function handle(event) {
     const href = deepLink({ square: "1", ok: "1", needs_location: "1" });
     return page(200, {
       title: "Square connected",
-      message: "Tokens are stored encrypted on the server. Pick a Square location in Settings, then Refresh status.",
-      detail: "If this window stays open, tap Back to Floor.",
+      message: "Square is connected for this store. Close this tab and return to the register — it will show Connected within a few seconds, then pick a location.",
       href,
     });
   } catch (e) {
