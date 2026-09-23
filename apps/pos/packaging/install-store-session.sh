@@ -120,6 +120,36 @@ for dir in snap .mozilla Downloads Documents Desktop Pictures .config/gtk-3.0 .c
 done
 systemctl daemon-reload
 bash "$PACK/install-desktop.sh" --system
+# Store launches need an account marker so the register clears auth at each OS login.
+cat >/usr/local/bin/floor-pos-store <<'SCRIPT'
+#!/bin/bash
+set -euo pipefail
+export FLOOR_OS_ACCOUNT=store
+if [[ -f /etc/floor-pos/webkit.env ]]; then
+  set -a
+  source /etc/floor-pos/webkit.env
+  set +a
+fi
+exec /usr/bin/floor-pos "$@"
+SCRIPT
+chmod 755 /usr/local/bin/floor-pos-store
+# Override the shared launcher only for Store; prime keeps the normal launcher.
+install -d -o root -g root -m755 /home/store/.local/share/applications
+cat >/home/store/.local/share/applications/floor-pos.desktop <<'CONF'
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Floor
+GenericName=Register
+Exec=/usr/local/bin/floor-pos-store
+TryExec=/usr/local/bin/floor-pos-store
+Icon=floor-pos
+Terminal=false
+StartupNotify=true
+StartupWMClass=floor-pos
+CONF
+chown root:root /home/store/.local/share/applications/floor-pos.desktop
+chmod 644 /home/store/.local/share/applications/floor-pos.desktop
 # Existing prime shortcuts must also start the new system-wide binary.
 if [[ -f /home/prime/.local/share/applications/floor-pos.desktop ]]; then
   install -o prime -g prime -m644 /usr/share/applications/floor-pos.desktop /home/prime/.local/share/applications/floor-pos.desktop
