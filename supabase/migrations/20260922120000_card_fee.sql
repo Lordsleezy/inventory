@@ -923,9 +923,9 @@ begin
       raise exception 'invalid_charge_cents' using errcode = '22023';
     end if;
     if p_charge_cents is distinct from v_amount then
-      raise exception 'charge_amount_mismatch'
-        using errcode = 'P0001',
-              message = format('charge_amount_mismatch expected %s got %s', v_amount, p_charge_cents);
+      raise exception using
+        errcode = 'P0001',
+        message = format('charge_amount_mismatch expected %s got %s', v_amount, p_charge_cents);
     end if;
   end if;
 
@@ -1038,8 +1038,9 @@ begin
       v_expected := coalesce((v_summary->>'card_cents')::int, 0);
     end if;
     if v_expected is distinct from v_charge.amount_cents then
-      raise exception 'charge_amount_mismatch expected % charged %', v_expected, v_charge.amount_cents
-        using errcode = 'P0001';
+      raise exception using
+        errcode = 'P0001',
+        message = format('charge_amount_mismatch expected %s charged %s', v_expected, v_charge.amount_cents);
     end if;
   exception
     when others then
