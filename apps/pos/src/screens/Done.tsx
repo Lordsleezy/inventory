@@ -152,10 +152,25 @@ export function DoneScreen() {
           <span>Tax</span>
           <span>{formatCentsTotal(summary.tax_cents)}</span>
         </div>
+        {summary.card_fee_cents ? (
+          <div className="row">
+            <span>Card fee</span>
+            <span>{formatCentsTotal(summary.card_fee_cents)}</span>
+          </div>
+        ) : null}
         <div className="row price">
           <span>Total</span>
           <span>{formatCentsTotal(summary.total_cents)}</span>
         </div>
+        {summary.payment_method === "split" ? (
+          <div className="row muted">
+            <span>Tender</span>
+            <span>
+              cash {formatCentsTotal(summary.cash_cents ?? 0)} · card{" "}
+              {formatCentsTotal(summary.card_cents ?? 0)}
+            </span>
+          </div>
+        ) : null}
         {changeCents != null ? (
           <div className="row">
             <span>Change</span>

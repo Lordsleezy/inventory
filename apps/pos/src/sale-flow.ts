@@ -8,6 +8,7 @@ import {
   cancelCharge,
   createTicketCharge,
   finalizeCapturedCharge,
+  loadOrphanCharge,
   refundFailedCharge,
   waitForCharge,
   type CreateChargeOpts,
@@ -42,7 +43,9 @@ export function ticketReceiptPayload(
     if (list != null && list > l.price_cents) return sum + (list - l.price_cents);
     return sum;
   }, 0);
-  const discountCents = summary.discount_cents ?? (lineDiscount > 0 ? lineDiscount : null);
+  const discountCents =
+    (summary.discount_cents ?? 0) + (summary.signup_discount_cents ?? 0) ||
+    (lineDiscount > 0 ? lineDiscount : null);
   return {
     receiptNo: first?.receipt_no || summary.ticket_id.slice(0, 8),
     soldAt: new Date().toLocaleString(),
@@ -55,6 +58,8 @@ export function ticketReceiptPayload(
     priceCents: summary.subtotal_cents,
     taxCents: summary.tax_cents,
     totalCents: summary.total_cents,
+    subtotalCents: summary.subtotal_cents,
+    cardFeeCents: summary.card_fee_cents ?? null,
     tender: tenderLabel,
     tenderDetails: {
       method,
@@ -62,10 +67,17 @@ export function ticketReceiptPayload(
       cardLast4: summary.card_last4 ?? null,
       cashTenderedCents: meta.cashTenderedCents ?? summary.cash_cents ?? null,
       changeCents: meta.changeCents,
+      cashCents: method === "SPLIT" ? (summary.cash_cents ?? null) : null,
+      cardCents:
+        method === "SPLIT" || method === "CARD" ? (summary.card_cents ?? null) : null,
     },
     discountCents: discountCents && discountCents > 0 ? discountCents : null,
     pointsEarned: summary.points_earned ?? null,
     pointsRedeemed: summary.points_redeemed ?? null,
+    pointsBalance:
+      summary.points_balance ??
+      summary.customer?.points_balance ??
+      null,
     reviewUrl: meta.reviewUrl,
     legal: meta.legal,
     branding: meta.branding,
@@ -189,3 +201,68 @@ export async function runCardChargeFlow(args: {
 }
 
 export { cancelCharge, refundFailedCharge, finalizeCapturedCharge };
+
+/**
+ * Crash/restart recovery: a charge that captured on the phone but never
+ * finalized is either finished (sale recorded) or refunded in full so the
+ * register never silently keeps a card charge without a sale.
+ */
+export async function recoverOrphanCharge(): Promise<
+  | { kind: "none" }
+  | { kind: "finalized"; summary: TicketSummary }
+  | { kind: "refunded"; amountCents: number }
+  | { kind: "needs_attention"; message: string }
+> {
+  const orphan = await loadOrphanCharge().catch(() => null);
+  if (!orphan) return { kind: "none" };
+  if (orphan.status === "finalize_failed") {
+    try {
+      await refundFailedCharge({
+        chargeId: orphan.id,
+        paymentId: orphan.paymentId,
+        amountCents: orphan.amountCents,
+        reason: "finalize_failed_recovery",
+      });
+      return { kind: "refunded", amountCents: orphan.amountCents };
+    } catch (err) {
+      return {
+        kind: "needs_attention",
+        message: `Card charge ${orphan.id.slice(0, 8)} needs a refund. Check Square Dashboard for payment ${orphan.paymentId ?? "?"}. ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      };
+    }
+  }
+  try {
+    const summary = (await finalizeCapturedCharge(orphan.id)) as TicketSummary & {
+      ok?: boolean;
+      error?: string;
+      payment_id?: string;
+      amount_cents?: number;
+    };
+    if (summary && summary.ok === false) {
+      try {
+        await refundFailedCharge({
+          chargeId: orphan.id,
+          paymentId: summary.payment_id || orphan.paymentId,
+          amountCents: summary.amount_cents || orphan.amountCents,
+          reason: String(summary.error || "finalize_failed_recovery"),
+        });
+        return { kind: "refunded", amountCents: orphan.amountCents };
+      } catch (refundErr) {
+        return {
+          kind: "needs_attention",
+          message: `Captured charge could not finalize or refund. Payment ${orphan.paymentId ?? "?"}. ${
+            refundErr instanceof Error ? refundErr.message : String(refundErr)
+          }`,
+        };
+      }
+    }
+    return { kind: "finalized", summary: summary as TicketSummary };
+  } catch (err) {
+    return {
+      kind: "needs_attention",
+      message: `Could not finish captured charge: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+}

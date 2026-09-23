@@ -78,6 +78,8 @@ export type Settings = {
   locations: string[];
   channels: string[];
   paymentMethods: string[];
+  /** Card surcharge in basis points (0 disables). Server recomputes. */
+  cardFeeBps: number;
 };
 
 /** Columns a person can edit, and the audit label for each. */

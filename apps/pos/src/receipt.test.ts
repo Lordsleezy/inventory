@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   DEFAULT_LEGAL,
-  STORE_ADDRESS,
   charsPerLine,
   escPosBytes,
   letterBytes,
@@ -10,6 +9,8 @@ import {
   receiptText,
   wrapLine,
 } from "./receipt.ts";
+
+const TEST_ADDRESS = "3121 Penryn Rd, Penryn, CA 95663";
 
 const payload = {
   receiptNo: "HOLD-1",
@@ -33,7 +34,7 @@ test("letter is the wide default; rolls stay narrow", () => {
 
 test("letter receipt is a full page with 7-day exchange legal", () => {
   const width = charsPerLine("letter");
-  const text = receiptText(payload, width);
+  const text = receiptText({ ...payload, branding: { address: TEST_ADDRESS } }, width);
   assert.match(text, /3121 Penryn Rd/);
   assert.match(text, /11116/);
   assert.match(text, /7-DAY EXCHANGE ONLY/);
@@ -41,7 +42,6 @@ test("letter receipt is a full page with 7-day exchange legal", () => {
   assert.match(text, /PROVISIONAL/);
   for (const line of text.split("\n")) assert.ok(line.length <= width, line);
   assert.ok(DEFAULT_LEGAL.includes("store credit"));
-  assert.ok(STORE_ADDRESS.includes("Penryn"));
   const page = letterBytes(payload);
   assert.equal(page[page.length - 1], 0x0c);
 });

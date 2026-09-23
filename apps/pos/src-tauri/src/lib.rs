@@ -433,7 +433,22 @@ fn pdf_escape(s: &str) -> String {
     .collect()
 }
 
-fn build_simple_pdf(text: &str) -> Vec<u8> {
+/// Render a QR code (as a dark-module matrix) for embedding in the PDF.
+fn qr_modules(url: &str) -> Option<Vec<Vec<bool>>> {
+  let code = qrcode::QrCode::new(url.as_bytes()).ok()?;
+  let w = code.width();
+  let mut rows = Vec::with_capacity(w);
+  for y in 0..w {
+    let mut row = Vec::with_capacity(w);
+    for x in 0..w {
+      row.push(code[(x, y)] == qrcode::Color::Dark);
+    }
+    rows.push(row);
+  }
+  Some(rows)
+}
+
+fn build_simple_pdf(text: &str, qr_url: Option<&str>) -> Vec<u8> {
   let lines: Vec<&str> = text.lines().collect();
   let mut content = String::from("BT\n/F1 10 Tf\n36 762 Td\n14 TL\n");
   for (i, line) in lines.iter().enumerate() {
@@ -445,6 +460,32 @@ fn build_simple_pdf(text: &str) -> Vec<u8> {
     }
   }
   content.push_str("ET\n");
+
+  // Draw the review QR as filled squares centered below the text block.
+  if let Some(url) = qr_url.filter(|u| !u.trim().is_empty()) {
+    if let Some(modules) = qr_modules(url.trim()) {
+      let n = modules.len();
+      let quiet = 2usize;
+      let total = n + quiet * 2;
+      // ~110pt QR on a letter page.
+      let size = 110.0f64;
+      let module = size / total as f64;
+      let x0 = (612.0 - size) / 2.0;
+      let text_bottom = 762.0 - 14.0 * lines.len() as f64;
+      let y_top = (text_bottom - 24.0).max(150.0).min(700.0);
+      content.push_str("0 0 0 rg\n");
+      for (row, r) in modules.iter().enumerate() {
+        for (col, dark) in r.iter().enumerate() {
+          if !dark {
+            continue;
+          }
+          let x = x0 + (col + quiet) as f64 * module;
+          let y = y_top - (row + quiet + 1) as f64 * module;
+          content.push_str(&format!("{x:.2} {y:.2} {module:.2} {module:.2} re f\n"));
+        }
+      }
+    }
+  }
   let stream = content.into_bytes();
   let mut pdf = Vec::new();
   let mut offsets: Vec<usize> = Vec::new();
@@ -591,7 +632,11 @@ fn list_printers() -> Result<serde_json::Value, String> {
 }
 
 #[tauri::command]
-fn save_receipt_pdf(text: String, path: Option<String>) -> Result<serde_json::Value, String> {
+fn save_receipt_pdf(
+  text: String,
+  path: Option<String>,
+  qr_url: Option<String>,
+) -> Result<serde_json::Value, String> {
   let ts = std::time::SystemTime::now()
     .duration_since(std::time::UNIX_EPOCH)
     .map(|d| d.as_secs())
@@ -603,13 +648,52 @@ fn save_receipt_pdf(text: String, path: Option<String>) -> Result<serde_json::Va
   if dest.ends_with(".txt") {
     fs::write(&dest_path, text.as_bytes()).map_err(|e| e.to_string())?;
   } else {
-    let pdf = build_simple_pdf(&text);
+    let pdf = build_simple_pdf(&text, qr_url.as_deref());
     fs::write(&dest_path, pdf).map_err(|e| e.to_string())?;
   }
   Ok(serde_json::json!({
     "ok": true,
     "path": dest_path.display().to_string(),
   }))
+}
+
+/// PDF bytes for a letter-size receipt, with the review QR drawn in.
+/// Printed through `print_bytes` (non-raw) so CUPS rasterizes it.
+#[tauri::command]
+fn receipt_pdf(text: String, qr_url: Option<String>) -> Result<Vec<u8>, String> {
+  Ok(build_simple_pdf(&text, qr_url.as_deref()))
+}
+
+/// Guess the receipt layout for a CUPS queue from its PPD page sizes:
+/// narrow roll printers (≤ ~90mm widths, no Letter/A4) get ESC/POS roll
+/// output; anything that takes letter/A4 pages gets the full-page layout.
+#[tauri::command]
+fn printer_paper_hint(name: String) -> Result<serde_json::Value, String> {
+  if name.trim().is_empty() {
+    return Ok(serde_json::json!({ "hint": "letter" }));
+  }
+  let out = Command::new("lpoptions")
+    .args(["-p", &name, "-l"])
+    .output()
+    .map_err(|e| e.to_string())?;
+  if !out.status.success() {
+    return Ok(serde_json::json!({ "hint": "letter", "detail": "no ppd" }));
+  }
+  let text = String::from_utf8_lossy(&out.stdout).to_lowercase();
+  let page_line = text
+    .lines()
+    .find(|l| l.starts_with("pagesize"))
+    .unwrap_or("");
+  let has_sheet = ["letter", "legal", "a4", "a3", "tabloid", "ansic", "archa", "superb"]
+    .iter()
+    .any(|t| page_line.contains(t));
+  if has_sheet {
+    return Ok(serde_json::json!({ "hint": "letter" }));
+  }
+  if page_line.contains("58") {
+    return Ok(serde_json::json!({ "hint": "roll58" }));
+  }
+  Ok(serde_json::json!({ "hint": "roll80" }))
 }
 
 #[tauri::command]
@@ -684,6 +768,8 @@ pub fn run() {
       print_bytes,
       list_printers,
       save_receipt_pdf,
+      receipt_pdf,
+      printer_paper_hint,
       kiosk_power,
       set_admin_pin,
       verify_admin_pin,

@@ -1,11 +1,9 @@
 import { formatCents, formatCentsTotal } from "@floor/store";
 
 export const STORE_NAME = "Floor";
-export const STORE_ADDRESS = "3121 Penryn Rd, Penryn, CA 95663";
-export const STORE_PHONE = "(279) 977-0722";
 
 export const DEFAULT_LEGAL =
-  "7-DAY EXCHANGE ONLY. No returns and no refunds. With this receipt, you may exchange the item or take store credit within 7 days of sale. Goods are sold AS-IS, WHERE-IS, with all faults, whether or not noted at sale. Floor is not the manufacturer and does not provide manufacturer warranty service unless a remaining OEM warranty still applies to that serial. Keep this receipt.";
+  "7-DAY EXCHANGE ONLY. No returns and no refunds. With this receipt, you may exchange the item or take store credit within 7 days of sale. Goods are sold AS-IS, WHERE-IS, with all faults, whether or not noted at sale. The seller is not the manufacturer and does not provide manufacturer warranty service unless a remaining OEM warranty still applies to that serial. Keep this receipt.";
 
 export type PaperKind = "letter" | "roll58" | "roll80";
 
@@ -46,8 +44,8 @@ export const DEFAULT_BRANDING: Required<
 > &
   ReceiptBranding = {
   storeName: STORE_NAME,
-  address: STORE_ADDRESS,
-  phone: STORE_PHONE,
+  address: "",
+  phone: "",
   logoUrl: null,
   headerMessage: null,
   footerMessage: null,
@@ -93,6 +91,9 @@ export type ReceiptTender = {
   cardLast4?: string | null;
   cashTenderedCents?: number | null;
   changeCents?: number | null;
+  /** Split tender: cash portion and charged card portion (incl. card fee). */
+  cashCents?: number | null;
+  cardCents?: number | null;
 };
 
 export type ReceiptPayload = {
@@ -106,6 +107,8 @@ export type ReceiptPayload = {
   priceCents: number;
   taxCents: number;
   totalCents: number;
+  subtotalCents?: number | null;
+  cardFeeCents?: number | null;
   /** Legacy single-line tender label; preferred: tenderDetails */
   tender: string;
   tenderDetails?: ReceiptTender | null;
@@ -157,9 +160,22 @@ function formatTender(payload: ReceiptPayload, branding: ReceiptBranding): strin
   if (!branding.showTenderDetails) return payload.tender;
   const t = payload.tenderDetails;
   if (!t) return payload.tender;
+  if ((t.method || "").toUpperCase() === "SPLIT") {
+    const parts: string[] = ["SPLIT"];
+    if (t.cashCents != null) parts.push(`cash ${formatCentsTotal(t.cashCents)}`);
+    const cardLabel = [t.cardBrand, t.cardLast4 ? `•••• ${t.cardLast4}` : null]
+      .filter(Boolean)
+      .join(" ") || "card";
+    if (t.cardCents != null) parts.push(`${cardLabel} ${formatCentsTotal(t.cardCents)}`);
+    else parts.push(cardLabel);
+    return parts.join(" · ");
+  }
   const bits: string[] = [(t.method || "CASH").toUpperCase()];
   if (t.cardBrand || t.cardLast4) {
     bits.push([t.cardBrand, t.cardLast4 ? `•••• ${t.cardLast4}` : null].filter(Boolean).join(" "));
+  }
+  if (t.cardCents != null && (t.method || "").toUpperCase() === "CARD") {
+    bits.push(formatCentsTotal(t.cardCents));
   }
   if (t.cashTenderedCents != null) bits.push(`tendered ${formatCentsTotal(t.cashTenderedCents)}`);
   if (t.changeCents != null) bits.push(`change ${formatCentsTotal(t.changeCents)}`);
@@ -175,8 +191,8 @@ export function receiptText(payload: ReceiptPayload, width: number, brandingInpu
   if (payload.reviewUrl) branding.reviewUrl = payload.reviewUrl;
   const legal = (branding.legal || DEFAULT_LEGAL).trim();
   const storeName = (branding.storeName || STORE_NAME).trim() || STORE_NAME;
-  const address = (branding.address || STORE_ADDRESS).trim();
-  const phone = (branding.phone || STORE_PHONE).trim();
+  const address = (branding.address || "").trim();
+  const phone = (branding.phone || "").trim();
 
   const itemLines =
     payload.lines && payload.lines.length
@@ -212,10 +228,16 @@ export function receiptText(payload: ReceiptPayload, width: number, brandingInpu
           return sum;
         }, 0) || 0;
 
+  const subtotal =
+    payload.subtotalCents ??
+    (payload.lines && payload.lines.length
+      ? payload.lines.reduce((sum, l) => sum + l.priceCents, 0)
+      : payload.priceCents);
+
   const lines = [
     storeName,
-    ...wrapLine(address, width),
-    phone,
+    ...(address ? wrapLine(address, width) : []),
+    phone || "",
     branding.headerMessage ? wrapLine(branding.headerMessage, width).join("\n") : "",
     "-".repeat(Math.min(width, 42)),
     pair("Date", payload.soldAt, width),
@@ -226,7 +248,11 @@ export function receiptText(payload: ReceiptPayload, width: number, brandingInpu
     branding.showDiscount !== false && discount > 0
       ? pair("Discount", `-${formatCents(discount) || "$0.00"}`, width)
       : "",
+    pair("Subtotal", formatCents(subtotal) || "$0.00", width),
     branding.showTax !== false ? pair("Tax", formatCents(payload.taxCents) || "$0.00", width) : "",
+    payload.cardFeeCents != null && payload.cardFeeCents > 0
+      ? pair("Card fee", formatCents(payload.cardFeeCents) || "$0.00", width)
+      : "",
     pair("TOTAL", formatCentsTotal(payload.totalCents), width),
     pair("Tender", formatTender(payload, branding), width),
     branding.showPoints !== false && payload.pointsEarned != null
@@ -336,25 +362,46 @@ export function receiptHtmlEmail(payload: ReceiptPayload, brandingInput?: Receip
   const itemRows = lines
     .map(
       (l) =>
-        `<tr><td>${escape(l.title)}${branding.showSku !== false ? `<div style="color:#666;font-size:12px">${escape(l.sku)}</div>` : ""}</td><td style="text-align:right">${escape(formatCents(l.priceCents) || "$0.00")}</td></tr>`,
+        `<tr><td>${escape(l.title)}${branding.showSku !== false ? `<div style="color:#666;font-size:12px">${escape(l.sku)}</div>` : ""}${branding.showCondition !== false && l.condition ? `<div style="color:#666;font-size:12px">${escape(l.condition)}</div>` : ""}</td><td style="text-align:right">${escape(formatCents(l.priceCents) || "$0.00")}</td></tr>`,
     )
     .join("");
+  const subtotal =
+    payload.subtotalCents ??
+    (payload.lines && payload.lines.length
+      ? payload.lines.reduce((sum, l) => sum + l.priceCents, 0)
+      : payload.priceCents);
+  const discount =
+    payload.discountCents != null && payload.discountCents > 0 ? payload.discountCents : 0;
   const logo = branding.logoUrl
     ? `<img src="${escape(branding.logoUrl)}" alt="" style="max-height:64px;margin-bottom:8px" />`
     : "";
+  const contactBits = [branding.address, branding.phone].filter(Boolean).map((t) => escape(String(t)));
+  const review = payload.reviewUrl || branding.reviewUrl;
+  const money = (label: string, cents: number | null | undefined, strong = false) =>
+    cents == null
+      ? ""
+      : `<div style="display:flex;justify-content:space-between;${strong ? "font-weight:700;font-size:18px" : ""}"><span>${escape(label)}</span><span>${escape(strong ? formatCentsTotal(cents) : formatCents(cents) || "$0.00")}</span></div>`;
   return `<!doctype html><html><body style="font:14px/1.5 system-ui,sans-serif;color:#111;max-width:480px;margin:0 auto;padding:24px">
 ${logo}
 <h1 style="margin:0;font-size:22px">${storeName}</h1>
-<p style="color:#555;margin:4px 0 16px">${escape(branding.address || "")}<br/>${escape(branding.phone || "")}</p>
+${contactBits.length ? `<p style="color:#555;margin:4px 0 16px">${contactBits.join("<br/>")}</p>` : ""}
 ${branding.headerMessage ? `<p>${escape(branding.headerMessage)}</p>` : ""}
-<p style="color:#666;font-size:12px">Receipt ${escape(payload.receiptNo)} · ${escape(payload.soldAt)}</p>
+<p style="color:#666;font-size:12px">Receipt ${escape(payload.receiptNo)} · ${escape(payload.soldAt)}${branding.showClerk !== false && payload.clerkName ? ` · ${escape(payload.clerkName)}` : ""}</p>
 <table style="width:100%;border-collapse:collapse">${itemRows}</table>
 <div style="border-top:1px solid #ccc;margin-top:12px;padding-top:12px">
-${branding.showTax !== false ? `<div style="display:flex;justify-content:space-between"><span>Tax</span><span>${escape(formatCents(payload.taxCents) || "$0.00")}</span></div>` : ""}
-<div style="display:flex;justify-content:space-between;font-weight:700;font-size:18px"><span>Total</span><span>${escape(formatCentsTotal(payload.totalCents))}</span></div>
+${discount > 0 && branding.showDiscount !== false ? money("Discount", -discount) : ""}
+${money("Subtotal", subtotal)}
+${branding.showTax !== false ? money("Sales tax", payload.taxCents) : ""}
+${payload.cardFeeCents ? money("Card fee", payload.cardFeeCents) : ""}
+${money("Total", payload.totalCents, true)}
 <div style="display:flex;justify-content:space-between"><span>Tender</span><span>${escape(formatTender(payload, branding))}</span></div>
+${branding.showPoints !== false && payload.pointsEarned != null ? `<div style="display:flex;justify-content:space-between"><span>Points earned</span><span>${payload.pointsEarned}</span></div>` : ""}
+${branding.showPoints !== false && payload.pointsRedeemed ? `<div style="display:flex;justify-content:space-between"><span>Points used</span><span>${payload.pointsRedeemed}</span></div>` : ""}
+${branding.showPoints !== false && payload.pointsBalance != null ? `<div style="display:flex;justify-content:space-between"><span>Points balance</span><span>${payload.pointsBalance}</span></div>` : ""}
 </div>
+${review ? `<p style="margin-top:16px"><a href="${escape(review)}">Leave us a Google review</a></p>` : ""}
 <p style="color:#555;font-size:12px;margin-top:20px">${escape((branding.legal || DEFAULT_LEGAL).trim())}</p>
+${branding.returnPolicy ? `<p style="color:#555;font-size:12px">${escape(branding.returnPolicy)}</p>` : ""}
 ${branding.footerMessage ? `<p style="color:#555">${escape(branding.footerMessage)}</p>` : ""}
 </body></html>`;
 }

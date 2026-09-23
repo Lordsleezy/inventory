@@ -95,8 +95,9 @@ async function settingsFromCloud(session: StaffSession): Promise<Partial<Setting
     testStatuses: readList("testStatuses", ["untested", "passed", "failed", "partial"]),
     locations: readList("locations", ["Floor", "Back room", "Repair bench"]),
     channels: readList("channels", ["floor", "ebay", "facebook", "offerup", "amazon", "tiktok", "website"]),
-    paymentMethods: readList("paymentMethods", ["cash", "card", "other"]),
+    paymentMethods: readList("paymentMethods", ["cash", "card", "split", "other"]),
     cardPayments: map.get("card_payments_enabled") === true || map.get("card_payments_enabled") === "true",
+    cardFeeBps: num("card_fee_bps", 250),
   };
 }
 

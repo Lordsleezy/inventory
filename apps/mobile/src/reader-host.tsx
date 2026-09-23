@@ -19,6 +19,7 @@ export type PendingCharge = {
   title: string | null;
   amount_cents: number;
   tax_cents: number;
+  card_fee_cents?: number;
 };
 
 type ReaderContextValue = {
@@ -411,7 +412,7 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
   const loadPending = useCallback(async (id: string) => {
     const { data, error: qErr } = await floorCloud()
       .from("card_charges")
-      .select("id, sku, title, amount_cents, tax_cents")
+      .select("id, sku, title, amount_cents, tax_cents, card_fee_cents")
       .eq("device_id", id)
       .eq("status", "pending")
       .order("created_at", { ascending: true });
@@ -600,6 +601,9 @@ function ReaderChargeOverlay() {
             <p className="text-body truncate">{top.title || top.sku}</p>
             <p className="text-quiet text-sm">
               Card charge ${(top.amount_cents / 100).toFixed(2)}
+              {top.card_fee_cents
+                ? ` (incl. $${(top.card_fee_cents / 100).toFixed(2)} card fee)`
+                : ""}
               {pending.length > 1 ? ` · +${pending.length - 1} more` : ""}
             </p>
           </div>

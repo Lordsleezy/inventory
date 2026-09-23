@@ -43,6 +43,7 @@ export {
   allocateLineTaxes,
   applyTicketDiscount,
   prorateCents,
+  cardFeeCents,
   loadStoreTaxRateBps,
   loadStoreSetting,
   setStoreSetting,
@@ -53,6 +54,7 @@ export {
   type TicketLineInput,
   type TicketLineResult,
   type TicketSummary,
+  type TicketQuote,
 } from "./ticket.ts";
 export {
   lookupCustomerByPhone,

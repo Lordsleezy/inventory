@@ -248,5 +248,6 @@ export const DEFAULT_SETTINGS: Record<string, unknown> = {
   testStatuses: ["untested", "passed", "failed", "partial"],
   locations: ["Floor", "Back room", "Repair bench"],
   channels: ["floor", "ebay", "facebook", "offerup", "wholesale"],
-  paymentMethods: ["cash", "card", "other"],
+  paymentMethods: ["cash", "card", "split", "other"],
+  cardFeeBps: 250,
 };

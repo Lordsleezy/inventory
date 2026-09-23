@@ -71,7 +71,9 @@ export type CreatedCharge = {
 };
 
 export type CreateChargeOpts = {
-  /** When set, charge only this amount (split payment card portion). */
+  /** "split" when cash covers part of the ticket; fee applies to card portion. */
+  paymentMethod?: "card" | "split";
+  /** When set, must equal the server-computed card charge (fee included). */
   chargeCents?: number | null;
   discountBps?: number;
   discountApprovalId?: string | null;
@@ -115,6 +117,7 @@ export async function createTicketCharge(
       approval_id: l.approvalId ?? null,
     })),
   };
+  if (opts.paymentMethod != null) payload.p_payment_method = opts.paymentMethod;
   if (opts.chargeCents != null) payload.p_charge_cents = opts.chargeCents;
   if (opts.discountBps != null) payload.p_discount_bps = opts.discountBps;
   if (opts.discountApprovalId != null) payload.p_discount_approval_id = opts.discountApprovalId;
@@ -221,6 +224,35 @@ export async function refundFailedCharge(args: {
       reason: args.reason,
     }),
   });
+}
+
+/**
+ * Most recent charge that took the card but never finalized (app killed,
+ * register restarted, or finalization failed). Used for crash recovery.
+ */
+export async function loadOrphanCharge(): Promise<{
+  id: string;
+  ticketId: string | null;
+  amountCents: number;
+  status: string;
+  paymentId: string | null;
+} | null> {
+  const sb = floorCloud();
+  const { data } = await sb
+    .from("card_charges")
+    .select("id, ticket_id, amount_cents, status, payment_id, created_at")
+    .in("status", ["captured", "finalize_failed"])
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!data?.id) return null;
+  return {
+    id: data.id,
+    ticketId: data.ticket_id ?? null,
+    amountCents: data.amount_cents,
+    status: data.status,
+    paymentId: data.payment_id ?? null,
+  };
 }
 
 export async function sendTerminalCharge(): Promise<ChargeResult> {

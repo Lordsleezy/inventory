@@ -41,6 +41,9 @@ export function CheckoutScreen() {
   const tax =
     typeof cents === "number" ? Math.round((cents * settings.taxRateBps) / 10_000) : 0;
   const total = typeof cents === "number" ? cents + tax : 0;
+  // Client preview only — finalize_sale recomputes the fee server-side.
+  const cardFee = Math.round((total * (settings.cardFeeBps || 0)) / 10_000);
+  const cardTotal = total + cardFee;
   const remain = holdUntil ? Math.max(0, Math.ceil((holdUntil - now) / 1000)) : 0;
 
   async function startHold() {
@@ -144,14 +147,40 @@ export function CheckoutScreen() {
         setError(authorized.reason || "Could not authorize Square reader.");
         return;
       }
-      const charged = await FloorSquare.charge({ amountCents: total, mock: useMock || !!authorized.mock });
+      const charged = await FloorSquare.charge({ amountCents: cardTotal, mock: useMock || !!authorized.mock });
       if (!charged.ok || !charged.paymentId) {
         setError(charged.reason === "canceled" ? "Card canceled." : charged.reason || "Card declined.");
         if (reservationId) await releaseReservation(reservationId);
         setReservationId(null);
         return;
       }
-      await finish("card", charged.paymentId);
+      try {
+        await finish("card", charged.paymentId);
+      } catch (err) {
+        // Card was charged but the sale did not record — refund in full.
+        try {
+          const headers = await authHeader();
+          await fetch(functionsUrl("square-refund-payment"), {
+            method: "POST",
+            headers: { ...headers, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              paymentId: charged.paymentId,
+              amountCents: cardTotal,
+              reason: "phone_finalize_failed",
+            }),
+          });
+          setLoud(
+            `Card was charged but the sale could not be recorded (${friendlyRpc(err)}). The payment was refunded.`,
+          );
+        } catch {
+          setLoud(
+            `Card was charged but the sale failed and the automatic refund did not go through. Refund payment ${charged.paymentId} in Square Dashboard. (${friendlyRpc(err)})`,
+          );
+        }
+        if (reservationId) await releaseReservation(reservationId);
+        setReservationId(null);
+        return;
+      }
     } catch (err) {
       if (err instanceof SellError && err.code === "double_sell") setLoud(err.message);
       else setError(friendlyRpc(err));
@@ -195,6 +224,11 @@ export function CheckoutScreen() {
         Tax {formatCents(tax) || "$0.00"} · Total {formatCentsTotal(total)}
         {remain ? ` · hold ${remain}s` : ""}
       </p>
+      {cardFee > 0 ? (
+        <p className="text-quiet text-floor-mute">
+          Card fee {formatCents(cardFee)} · Card total {formatCentsTotal(cardTotal)}
+        </p>
+      ) : null}
 
       {!elsewhere ? (
         <div className="mt-4 flex flex-col gap-2">

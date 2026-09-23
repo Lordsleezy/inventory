@@ -137,6 +137,10 @@ function memoryInvoke<T>(cmd: string, args: Record<string, unknown> = {}): T {
       } as T;
     case "list_printers":
       return { printers: [], default: null } as T;
+    case "printer_paper_hint":
+      return { hint: "letter" } as T;
+    case "receipt_pdf":
+      return Array.from(new TextEncoder().encode(String(args.text || ""))) as T;
     case "save_receipt_pdf": {
       const ts = Date.now();
       const path =
@@ -222,12 +226,32 @@ export async function printBytes(data: Uint8Array, printerPath: string, raw = fa
   return invoke("print_bytes", { data: Array.from(data), printerPath, raw });
 }
 
+/** Letter-size receipt as a real PDF (with review QR) for CUPS raster printers. */
+export async function receiptPdfBytes(text: string, qrUrl?: string | null): Promise<Uint8Array> {
+  const bytes = await invoke<number[]>("receipt_pdf", { text, qrUrl: qrUrl ?? null });
+  return new Uint8Array(bytes);
+}
+
+export async function printerPaperHint(name: string): Promise<PaperKind> {
+  try {
+    const res = await invoke<{ hint?: string }>("printer_paper_hint", { name });
+    if (res.hint === "roll58" || res.hint === "roll80" || res.hint === "letter") return res.hint;
+  } catch {
+    /* not a CUPS printer */
+  }
+  return "letter";
+}
+
 export async function listPrinters(): Promise<ListPrintersResult> {
   return invoke("list_printers");
 }
 
-export async function saveReceiptPdf(text: string, path?: string | null): Promise<SaveReceiptResult> {
-  return invoke("save_receipt_pdf", { text, path: path ?? null });
+export async function saveReceiptPdf(
+  text: string,
+  path?: string | null,
+  qrUrl?: string | null,
+): Promise<SaveReceiptResult> {
+  return invoke("save_receipt_pdf", { text, path: path ?? null, qrUrl: qrUrl ?? null });
 }
 
 export async function kioskPower(action: "poweroff" | "reboot"): Promise<{ ok: boolean; detail: string }> {

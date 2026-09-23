@@ -6,8 +6,8 @@ import {
   applyTicketDiscount,
   approveWithPin,
   authErrorMessage,
+  cardFeeCents,
   finalizeTicket,
-  floorCloud,
   lookupCustomerByPhone,
   SellError,
   upsertCustomer,
@@ -18,7 +18,13 @@ import { useCart, type CartLine } from "../cart";
 import { usePos } from "../pos-context";
 import { searchUnits, type CachedUnit } from "../local";
 import { unitThumbUrl } from "../unit-photo";
-import { cancelCharge, runCardChargeFlow, withdrawListingsAfterSale, type SalePhase } from "../sale-flow";
+import {
+  cancelCharge,
+  recoverOrphanCharge,
+  runCardChargeFlow,
+  withdrawListingsAfterSale,
+  type SalePhase,
+} from "../sale-flow";
 
 type PinKind = "below_floor" | "ticket_discount";
 
@@ -84,6 +90,27 @@ export function RegisterScreen() {
     return () => clearTimeout(t);
   }, [q]);
 
+  // Crash/restart recovery: a card captured on the phone but never finalized
+  // gets finalized here, or auto-refunded when the unit already sold.
+  useEffect(() => {
+    if (!online) return;
+    let alive = true;
+    void recoverOrphanCharge().then((res) => {
+      if (!alive) return;
+      if (res.kind === "finalized") {
+        setLoud("Recovered a card payment left over from a crash — the sale is now recorded.");
+      } else if (res.kind === "refunded") {
+        setLoud(`Refunded ${formatCentsTotal(res.amountCents)} left over from an unfinished card sale.`);
+      } else if (res.kind === "needs_attention") {
+        setLoud(res.message);
+      }
+    });
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [online]);
+
   useEffect(() => {
     for (const line of lines) {
       if (line.sku in thumbs) continue;
@@ -135,6 +162,9 @@ export function RegisterScreen() {
   const rawSubtotal = extendedPrices.reduce((a, b) => a + b, 0);
   const tax = taxes.reduce((a, b) => a + b, 0);
   const total = taxableSubtotal + tax;
+  const cardFeeBps = rewards.cardFeeBps;
+  const cardFeePreview = cardFeeCents(total, cardFeeBps);
+  const cardTotal = total + cardFeePreview;
   const itemCount = lines.reduce((a, l) => a + (l.qty || 1), 0);
   const cashTendered = cashDigits ? Number(cashDigits) : null;
   const change =
@@ -262,6 +292,7 @@ export function RegisterScreen() {
     abortRef.current = abort;
     try {
       setPhase("waiting_phone");
+      // cardCents is the PRE-FEE card portion; the server adds the card fee.
       const cardCents = split?.cardCents ?? total;
       const cashCents = split?.cashCents ?? 0;
       const result = await runCardChargeFlow({
@@ -270,13 +301,14 @@ export function RegisterScreen() {
         signal: abort.signal,
         onHint: setWaitHint,
         chargeOpts: {
-          chargeCents: split ? cardCents : null,
+          paymentMethod: split ? "split" : "card",
+          chargeCents: split ? cardCents + cardFeeCents(cardCents, cardFeeBps) : null,
           discountBps,
           discountApprovalId,
           customerId: customer?.id ?? null,
           redeemPoints,
-          cashCents: split ? cashCents : 0,
-          cardCents: split ? cardCents : total,
+          cashCents: split ? cashCents : null,
+          cardCents: split ? cardCents : null,
           note: note.trim() || null,
         },
       });
@@ -625,10 +657,22 @@ export function RegisterScreen() {
             <span>Tax {taxRateBps != null ? `(${(taxRateBps / 100).toFixed(2)}%)` : ""}</span>
             <span>{formatCentsTotal(tax)}</span>
           </div>
+          {cardFeeBps > 0 && lines.length ? (
+            <div className="summary-row muted">
+              <span>Card fee ({(cardFeeBps / 100).toFixed(2)}% — card only)</span>
+              <span>{formatCentsTotal(cardFeePreview)}</span>
+            </div>
+          ) : null}
           <div className="summary-row checkout-total">
             <span>TOTAL</span>
             <span>{formatCentsTotal(total)}</span>
           </div>
+          {cardFeeBps > 0 && lines.length ? (
+            <div className="summary-row muted">
+              <span>Card total</span>
+              <span>{formatCentsTotal(cardTotal)}</span>
+            </div>
+          ) : null}
 
           {phase === "waiting_phone" || phase === "finalizing" ? (
             <div className="card grid">
@@ -811,12 +855,31 @@ export function RegisterScreen() {
               />
             </label>
             {typeof parseMoneyToCents(splitCashDraft) === "number" ? (
-              <p>
-                Card portion{" "}
-                <strong>
+              <>
+                <p className="muted">
+                  Card portion{" "}
                   {formatCentsTotal(Math.max(0, total - (parseMoneyToCents(splitCashDraft) as number)))}
-                </strong>
-              </p>
+                  {cardFeeBps > 0
+                    ? ` + card fee ${formatCentsTotal(
+                        cardFeeCents(
+                          Math.max(0, total - (parseMoneyToCents(splitCashDraft) as number)),
+                          cardFeeBps,
+                        ),
+                      )}`
+                    : ""}
+                </p>
+                <p>
+                  Card charge{" "}
+                  <strong>
+                    {formatCentsTotal(
+                      (() => {
+                        const base = Math.max(0, total - (parseMoneyToCents(splitCashDraft) as number));
+                        return base + cardFeeCents(base, cardFeeBps);
+                      })(),
+                    )}
+                  </strong>
+                </p>
+              </>
             ) : null}
             <div className="row">
               <button type="button" onClick={() => setSplitOpen(false)}>
@@ -891,13 +954,3 @@ export function RegisterScreen() {
   );
 }
 
-// Keep orphan recovery reachable from empty cart paths if needed later
-export async function loadOrphanCharge() {
-  const { data } = await floorCloud()
-    .from("card_charges")
-    .select("id, payment_id, amount_cents, status, error")
-    .in("status", ["captured", "finalize_failed"])
-    .order("created_at", { ascending: false })
-    .limit(1);
-  return data?.[0] ?? null;
-}

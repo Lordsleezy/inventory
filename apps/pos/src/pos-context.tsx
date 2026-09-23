@@ -26,6 +26,7 @@ export type StoreRewardsSettings = {
   rewardsPointValueCents: number;
   rewardsSignupDiscountBps: number;
   storeDisplayName: string;
+  cardFeeBps: number;
 };
 
 const DEFAULT_REWARDS: StoreRewardsSettings = {
@@ -35,6 +36,7 @@ const DEFAULT_REWARDS: StoreRewardsSettings = {
   rewardsPointValueCents: 1,
   rewardsSignupDiscountBps: 500,
   storeDisplayName: "Floor",
+  cardFeeBps: 250,
 };
 
 type PosValue = {
@@ -110,14 +112,16 @@ export function PosProvider({ session, children }: { session: StaffSession; chil
 
   const refreshRewards = useCallback(async () => {
     try {
-      const [maxDisc, enabled, perDollar, pointValue, signupBps, displayName] = await Promise.all([
-        loadStoreSetting("clerk_max_discount_bps"),
-        loadStoreSetting("rewards_enabled"),
-        loadStoreSetting("rewards_points_per_dollar"),
-        loadStoreSetting("rewards_point_value_cents"),
-        loadStoreSetting("rewards_signup_discount_bps"),
-        loadStoreSetting("display_name"),
-      ]);
+      const [maxDisc, enabled, perDollar, pointValue, signupBps, displayName, cardFee] =
+        await Promise.all([
+          loadStoreSetting("clerk_max_discount_bps"),
+          loadStoreSetting("rewards_enabled"),
+          loadStoreSetting("rewards_points_per_dollar"),
+          loadStoreSetting("rewards_point_value_cents"),
+          loadStoreSetting("rewards_signup_discount_bps"),
+          loadStoreSetting("display_name"),
+          loadStoreSetting("card_fee_bps"),
+        ]);
       setRewards({
         clerkMaxDiscountBps: numSetting(maxDisc, DEFAULT_REWARDS.clerkMaxDiscountBps),
         rewardsEnabled: boolSetting(enabled, DEFAULT_REWARDS.rewardsEnabled),
@@ -125,6 +129,7 @@ export function PosProvider({ session, children }: { session: StaffSession; chil
         rewardsPointValueCents: numSetting(pointValue, DEFAULT_REWARDS.rewardsPointValueCents),
         rewardsSignupDiscountBps: numSetting(signupBps, DEFAULT_REWARDS.rewardsSignupDiscountBps),
         storeDisplayName: textSetting(displayName, DEFAULT_REWARDS.storeDisplayName),
+        cardFeeBps: numSetting(cardFee, DEFAULT_REWARDS.cardFeeBps),
       });
     } catch {
       /* keep defaults until RPC/settings land */

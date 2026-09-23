@@ -17,6 +17,7 @@ export type TicketLineResult = {
   receipt_no: string;
   price_cents: number;
   tax_cents: number;
+  card_fee_cents?: number;
   list_price_cents: number | null;
   override_reason: string | null;
   payment_method?: string | null;
@@ -30,6 +31,8 @@ export type TicketSummary = {
   lines: TicketLineResult[];
   subtotal_cents: number;
   tax_cents: number;
+  card_fee_bps?: number;
+  card_fee_cents?: number;
   total_cents: number;
   payment_method?: string | null;
   card_brand?: string | null;
@@ -39,18 +42,71 @@ export type TicketSummary = {
   signup_discount_cents?: number;
   points_redeemed?: number;
   points_earned?: number;
+  points_balance?: number | null;
   customer_id?: string | null;
   customer?: {
     id: string;
     phone: string;
     name: string | null;
     email: string | null;
+    points_balance?: number | null;
   } | null;
   cash_cents?: number;
   card_cents?: number;
   amount_tendered_cents?: number | null;
   note?: string | null;
 };
+
+/** Server-side quote incl. card fee; mirrors quote_ticket_totals. */
+export type TicketQuote = {
+  raw_subtotal_cents: number;
+  discount_bps: number;
+  discount_cents: number;
+  signup_discount_cents: number;
+  redeem_cents: number;
+  subtotal_cents: number;
+  tax_cents: number;
+  pre_fee_total_cents: number;
+  card_fee_bps: number;
+  card_base_cents: number;
+  card_fee_cents: number;
+  card_charge_cents: number;
+  total_cents: number;
+};
+
+/** Client preview only — server recomputes. Round-half-up like SQL round(). */
+export function cardFeeCents(cardBaseCents: number, feeBps: number): number {
+  const base = Math.max(0, Math.trunc(cardBaseCents) || 0);
+  const bps = Math.max(0, Math.trunc(feeBps) || 0);
+  return Math.round((base * bps) / 10_000);
+}
+
+export async function quoteTicketTotals(args: {
+  lines: TicketLineInput[];
+  discountBps?: number;
+  customerId?: string | null;
+  redeemPoints?: number;
+  channel?: string;
+  paymentMethod?: string;
+  cashCents?: number | null;
+}): Promise<TicketQuote> {
+  await assertOnline();
+  const { data, error } = await floorCloud().rpc("quote_ticket_totals", {
+    p_lines: args.lines.map((l) => ({
+      sku: l.sku,
+      price_cents: l.priceCents,
+      qty: l.qty ?? 1,
+    })),
+    p_discount_bps: args.discountBps ?? 0,
+    p_customer_id: args.customerId ?? null,
+    p_redeem_points: args.redeemPoints ?? 0,
+    p_channel: args.channel ?? "floor",
+    p_payment_method: args.paymentMethod ?? "cash",
+    p_cash_cents: args.cashCents ?? null,
+  });
+  if (error) throw mapSellError(error);
+  return data as TicketQuote;
+}
 
 /** Client preview only — server recomputes in finalize_ticket. */
 export function allocateLineTaxes(prices: number[], bps: number): number[] {
@@ -131,6 +187,12 @@ export async function loadStoreTaxRateBps(): Promise<number | null> {
 
 export async function setStoreTaxRateBps(bps: number): Promise<void> {
   await setStoreSetting("taxRateBps", bps);
+}
+
+export async function loadStoreCardFeeBps(): Promise<number> {
+  const raw = await loadStoreSetting("card_fee_bps");
+  const n = typeof raw === "number" ? raw : Number(String(raw ?? "").replace(/"/g, ""));
+  return Number.isFinite(n) && n >= 0 ? n : 250;
 }
 
 export async function loadStoreSetting(key: string): Promise<unknown | null> {
