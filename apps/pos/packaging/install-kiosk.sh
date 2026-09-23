@@ -33,14 +33,24 @@ if [[ -f "${SCRIPT_DIR}/floor-pos-kiosk" ]]; then
 else
   cat >/usr/bin/floor-pos-kiosk <<'EOF'
 #!/bin/bash
-set -euo pipefail
+set -uo pipefail
 if [[ -f /etc/floor-pos/webkit.env ]]; then
   # shellcheck disable=SC1091
   set -a
   source /etc/floor-pos/webkit.env
   set +a
 fi
-exec /usr/bin/floor-pos "$@"
+if [[ "${1:-}" == "--loop" ]]; then
+  shift
+  while true; do
+    /usr/bin/floor-pos "$@"
+    code=$?
+    echo "floor-pos exited (code ${code}); relaunching in 2s" >&2
+    sleep 2
+  done
+else
+  exec /usr/bin/floor-pos "$@"
+fi
 EOF
   chmod 0755 /usr/bin/floor-pos-kiosk
 fi
@@ -51,7 +61,7 @@ cat >/etc/greetd/config.toml <<'EOF'
 vt = 1
 
 [default_session]
-command = "cage -s -- /usr/bin/floor-pos-kiosk"
+command = "cage -s -- /usr/bin/floor-pos-kiosk --loop"
 user = "floor-kiosk"
 EOF
 

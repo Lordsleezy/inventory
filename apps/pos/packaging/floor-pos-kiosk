@@ -1,11 +1,23 @@
 #!/bin/bash
 # Launch Floor Register, sourcing optional WebKit workarounds.
 # Used by Cage (greetd kiosk) and by the desktop .desktop entry.
-set -euo pipefail
+# --loop: keep relaunching after a crash or exit (kiosk mode).
+set -uo pipefail
 if [[ -f /etc/floor-pos/webkit.env ]]; then
   # shellcheck disable=SC1091
   set -a
   source /etc/floor-pos/webkit.env
   set +a
 fi
-exec /usr/bin/floor-pos "$@"
+
+if [[ "${1:-}" == "--loop" ]]; then
+  shift
+  while true; do
+    /usr/bin/floor-pos "$@"
+    code=$?
+    echo "floor-pos exited (code ${code}); relaunching in 2s" >&2
+    sleep 2
+  done
+else
+  exec /usr/bin/floor-pos "$@"
+fi

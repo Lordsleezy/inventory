@@ -15,6 +15,8 @@ type ReceiptRow = {
   tax_cents: number;
   total_cents: number;
   payment_method: string | null;
+  payment_id?: string | null;
+  card_fee_cents?: number;
   card_brand: string | null;
   card_last4: string | null;
   actor_name: string | null;
@@ -81,20 +83,28 @@ export function ReceiptsScreen() {
     return () => clearTimeout(t);
     async function load() {
       const sb = floorCloud();
-      let query = sb
-        .from("sale_receipts")
-        .select(
-          "id, sku, receipt_no, ticket_id, sold_at, price_cents, tax_cents, total_cents, payment_method, card_brand, card_last4, actor_name, title, condition, voided_at, list_price_cents",
-        )
-        .order("sold_at", { ascending: false })
-        .limit(80);
       const text = q.trim();
-      if (text) {
-        query = query.or(`receipt_no.ilike.%${text}%,sku.eq.${text}`);
+      const buildQuery = (cols: string) => {
+        let query = sb
+          .from("sale_receipts")
+          .select(cols)
+          .order("sold_at", { ascending: false })
+          .limit(80);
+        if (text) query = query.or(`receipt_no.ilike.%${text}%,sku.eq.${text}`);
+        return query;
+      };
+      // card_fee_cents only exists after the card-fee migration lands; retry
+      // without it so the screen still works against an older schema.
+      let { data, error: err } = await buildQuery(
+        "id, sku, receipt_no, ticket_id, sold_at, price_cents, tax_cents, card_fee_cents, total_cents, payment_method, payment_id, card_brand, card_last4, actor_name, title, condition, voided_at, list_price_cents",
+      );
+      if (err && /card_fee_cents/i.test(err.message)) {
+        ({ data, error: err } = await buildQuery(
+          "id, sku, receipt_no, ticket_id, sold_at, price_cents, tax_cents, total_cents, payment_method, payment_id, card_brand, card_last4, actor_name, title, condition, voided_at, list_price_cents",
+        ));
       }
-      const { data, error: err } = await query;
       if (err) setError(err.message);
-      else setRows((data ?? []) as ReceiptRow[]);
+      else setRows((data ?? []) as unknown as ReceiptRow[]);
     }
   }, [q, online]);
 
@@ -147,15 +157,79 @@ export function ReceiptsScreen() {
 
   async function confirmVoid() {
     if (!voidTicketId) return;
+    setError("");
+    setMsg("");
     try {
       let approval: string | null = null;
       if (!isAdmin) {
         approval = await approveWithPin("void_ticket", rows.find((r) => r.ticket_id === voidTicketId)?.sku || "", pin, voidTicketId);
       }
+      const ticketRows = rows.filter((r) => r.ticket_id === voidTicketId && !r.voided_at);
+      const method = ticketRows[0]?.payment_method;
+      const paymentId = ticketRows.find((r) => r.payment_id)?.payment_id;
       await voidTicket(voidTicketId, "void last ticket", approval);
+
+      // A card sale keeps the customer's money unless we refund it. For split,
+      // refund only the card portion — cash comes back out of the drawer.
+      if (paymentId && (method === "card" || method === "split")) {
+        // Full card tickets refund the whole captured payment (fee included).
+        // Split refunds only the card portion: card base + card fee; the cash
+        // side comes back out of the drawer.
+        let cardCents: number | null = null;
+        if (method === "split") {
+          const sb = floorCloud();
+          const full = await sb
+            .from("ticket_extras")
+            .select("card_cents, card_fee_cents")
+            .eq("ticket_id", voidTicketId);
+          let extras: { card_cents: number | null; card_fee_cents?: number | null } | undefined;
+          if (full.error && /card_fee_cents/i.test(full.error.message)) {
+            // pre-card-fee schema has no card_fee_cents column
+            const basic = await sb
+              .from("ticket_extras")
+              .select("card_cents")
+              .eq("ticket_id", voidTicketId);
+            extras = basic.data?.[0];
+          } else {
+            extras = full.data?.[0];
+          }
+          if (extras?.card_cents != null) {
+            cardCents = extras.card_cents + (extras.card_fee_cents ?? 0);
+          } else {
+            // Never guess the card portion — a null amount refunds everything.
+            setError(
+              `Ticket voided, but the card portion couldn't be determined. Refund payment ${paymentId} in Square Dashboard.`,
+            );
+            setVoidTicketId(null);
+            setPin("");
+            setQ((q) => q + "");
+            return;
+          }
+        }
+        try {
+          const res = await callFunction("square-refund-payment", {
+            method: "POST",
+            body: JSON.stringify({
+              paymentId,
+              amountCents: cardCents,
+              reason: "ticket_voided",
+            }),
+          });
+          const body = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(body.error || `refund failed (${res.status})`);
+          setMsg(`Voided and refunded the card${method === "split" ? " portion" : ""}.`);
+        } catch (refundErr) {
+          setError(
+            `Ticket voided, but the card refund failed. Refund payment ${paymentId} in Square Dashboard. ${
+              refundErr instanceof Error ? refundErr.message : String(refundErr)
+            }`,
+          );
+        }
+      } else {
+        setMsg("Ticket voided.");
+      }
       setVoidTicketId(null);
       setPin("");
-      setError("");
       setQ((q) => q + "");
     } catch (err) {
       setError(authErrorMessage(err));

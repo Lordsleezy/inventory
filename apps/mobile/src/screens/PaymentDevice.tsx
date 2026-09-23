@@ -1,3 +1,5 @@
+import { useState } from "react";
+import { FloorSquare } from "@floor/square-plugin";
 import { useReader } from "../reader-host";
 import { useStore } from "../store";
 import { Label, Notice } from "../components/ui";
@@ -7,6 +9,7 @@ import { Label, Notice } from "../components/ui";
  */
 export function PaymentDeviceScreen() {
   const { session } = useStore();
+  const [pairingMsg, setPairingMsg] = useState("");
   const {
     pairCode,
     authorized,
@@ -85,6 +88,34 @@ export function PaymentDeviceScreen() {
         <button type="button" className="btn-text" onClick={() => void resetPairing()}>
           Reset pairing
         </button>
+      </div>
+      <div className="mt-4 rounded-xl border border-floor-line bg-floor-panel px-4 py-4">
+        <p className="text-quiet tracking-wide text-floor-mute">Card reader</p>
+        <p className="text-quiet mt-1">
+          Pair the Square reader, check its battery, or reconnect after a drop from Square&apos;s own
+          settings sheet.
+        </p>
+        <button
+          type="button"
+          className="btn-accent mt-3"
+          disabled={!authorized}
+          onClick={() => {
+            setPairingMsg("");
+            void FloorSquare.startPairing?.()
+              .then((r) => {
+                if (r && r.ok === false) setPairingMsg(r.message || r.reason || "Could not open reader settings.");
+              })
+              .catch((err) =>
+                setPairingMsg(err instanceof Error ? err.message : "Could not open reader settings."),
+              );
+          }}
+        >
+          Pair / manage card reader
+        </button>
+        {!authorized ? (
+          <p className="text-quiet mt-2">Authorize Square first — the reader sheet needs it.</p>
+        ) : null}
+        {pairingMsg ? <p className="mt-2 text-sm text-floor-danger">{pairingMsg}</p> : null}
       </div>
       <div className="mt-6">
         <Label>Pending charges</Label>
