@@ -295,7 +295,7 @@ export function SettingsScreen() {
 
       <div className="card grid">
         <strong>Receipts</strong>
-        <Link to="/settings/receipt">Open receipt designer →</Link>
+        <Link to="/setup/receipt">Open receipt designer →</Link>
         <label>
           Paper
           <select value={paperKind} onChange={(e) => setPaperKind(e.target.value as PaperKind)}>

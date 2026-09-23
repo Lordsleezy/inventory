@@ -6,6 +6,7 @@ import { Label, Notice } from "../components/ui";
 
 /**
  * Pair-code / authorize controls. Heartbeat + pending charges run app-wide via ReaderProvider.
+ * Rendered inside the Square screen.
  */
 export function PaymentDeviceScreen() {
   const { session } = useStore();
@@ -33,8 +34,8 @@ export function PaymentDeviceScreen() {
     : locationId || "—";
 
   return (
-    <div className="p-4 pb-28">
-      <h1 className="text-title">Payment device</h1>
+    <div>
+      <h2 className="text-title">This phone as a reader</h2>
       <p className="text-quiet mt-1">
         This phone stays paired across restarts. Incoming charges also pop up on other screens. Store{" "}
         {storeLabel}…

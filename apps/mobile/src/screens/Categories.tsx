@@ -96,7 +96,7 @@ export function CategoriesScreen() {
   return (
     <section>
       <p className="text-quiet">
-        <Link to="/settings" className="text-floor-accent">
+        <Link to="/setup" className="text-floor-accent">
           Setup
         </Link>
         <span className="text-floor-mute"> / Categories</span>

@@ -13,6 +13,9 @@ import { ReceiveScreen } from "./screens/Receive";
 import { ReportsScreen } from "./screens/Reports";
 import { SalesScreen } from "./screens/Sales";
 import { SettingsScreen } from "./screens/Settings";
+import { SetupScreen } from "./screens/Setup";
+import { EmployeesScreen } from "./screens/Employees";
+import { SquareScreen } from "./screens/Square";
 import { CategoriesScreen } from "./screens/Categories";
 import { UnitScreen } from "./screens/Unit";
 import { LoginScreen } from "./screens/Login";
@@ -22,7 +25,6 @@ import { CheckoutScreen } from "./screens/Checkout";
 import { DelistScreen } from "./screens/Delist";
 import { IncidentsScreen } from "./screens/Incidents";
 import { ConnectionsScreen } from "./screens/Connections";
-import { PaymentDeviceScreen } from "./screens/PaymentDevice";
 import { ReaderProvider } from "./reader-host";
 import { StoreProvider } from "./store";
 import { PinProvider } from "./pin";
@@ -97,13 +99,15 @@ export function App() {
               <Route path="/receive" element={<ReceiveScreen />} />
               <Route path="/sales" element={<SalesScreen />} />
               <Route path="/reports" element={<ReportsScreen />} />
-              <Route path="/reports/:receiptNo" element={<ReportsScreen />} />
               <Route path="/delist" element={<DelistScreen />} />
               <Route path="/incidents" element={<IncidentsScreen />} />
+              <Route path="/employees" element={<EmployeesScreen />} />
+              <Route path="/square" element={<SquareScreen />} />
               <Route path="/connections" element={<ConnectionsScreen />} />
-              <Route path="/payment-device" element={<PaymentDeviceScreen />} />
+              <Route path="/payment-device" element={<Navigate to="/square" replace />} />
+              <Route path="/setup" element={<SetupScreen />} />
+              <Route path="/setup/categories" element={<CategoriesScreen />} />
               <Route path="/settings" element={<SettingsScreen />} />
-              <Route path="/settings/categories" element={<CategoriesScreen />} />
               <Route path="*" element={<Navigate to="/inventory" replace />} />
             </Routes>
           </Shell>

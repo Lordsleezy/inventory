@@ -414,6 +414,18 @@ export const NEEDS_WORK_SQL = `(
   OR lower(trim(coalesce(condition, ''))) = 'for parts'
 )`;
 
+/** Sellable states — the intake pipeline. Terminal states can't be unfinished. */
+const LIVE_STATES_SQL = `state IN ('available','reserved','repair')`;
+
+/** Unfinished = a live unit missing photos and/or a price. */
+export const UNFINISHED_SQL = `(
+  ${LIVE_STATES_SQL}
+  AND (
+    ask_cents IS NULL
+    OR NOT EXISTS (SELECT 1 FROM photos p WHERE p.sku = units.sku)
+  )
+)`;
+
 export type ListingFilter = "facebook" | "ebay" | "amazon" | "elsewhere" | "none";
 
 export function unitNeedsWork(unit: Pick<Unit, "condition" | "testStatus">): boolean {
@@ -429,6 +441,7 @@ export async function listUnits(
     states?: UnitState[];
     category?: string;
     needsWork?: boolean;
+    unfinished?: boolean;
     listed?: ListingFilter;
     limit?: number;
   } = {},
@@ -453,6 +466,9 @@ export async function listUnits(
   }
   if (opts.needsWork) {
     where.push(NEEDS_WORK_SQL);
+  }
+  if (opts.unfinished) {
+    where.push(UNFINISHED_SQL);
   }
   if (opts.listed === "none") {
     where.push(
@@ -790,6 +806,13 @@ export async function countNeedsWork(db: Db, states: UnitState[] = ["available",
   const rows = await db.all<{ n: number }>(
     `SELECT COUNT(*) AS n FROM units WHERE state IN (${marks}) AND ${NEEDS_WORK_SQL}`,
     states,
+  );
+  return Number(rows[0]?.n ?? 0);
+}
+
+export async function countUnfinished(db: Db): Promise<number> {
+  const rows = await db.all<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM units WHERE ${UNFINISHED_SQL}`,
   );
   return Number(rows[0]?.n ?? 0);
 }

@@ -64,8 +64,9 @@ export async function staffFromEvent(event) {
   const sb = serviceClient();
   const { data, error } = await sb.auth.getUser(token);
   if (error || !data.user) throw new Error("not_signed_in");
-  const staff = await sb.from("staff").select("user_id, store_id, role, display_name").eq("user_id", data.user.id).maybeSingle();
+  const staff = await sb.from("staff").select("user_id, store_id, role, display_name, deactivated_at").eq("user_id", data.user.id).maybeSingle();
   if (staff.error || !staff.data) throw new Error("not_staff");
+  if (staff.data.deactivated_at) throw new Error("not_staff");
   return { user: data.user, staff: staff.data, token };
 }
 

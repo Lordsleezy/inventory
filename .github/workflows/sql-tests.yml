@@ -3,9 +3,9 @@ name: sql-tests
 # PGlite migration suite + Postgres/pgTAP register tests.
 on:
   push:
-    branches: [register-v1, square-v1, master]
+    branches: [register-v1, square-v1, app-nav-v1, master]
   pull_request:
-    branches: [master, register-v1, square-v1]
+    branches: [master, register-v1, square-v1, app-nav-v1]
   workflow_dispatch:
 
 concurrency:

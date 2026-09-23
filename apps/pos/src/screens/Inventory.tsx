@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { formatCents } from "@floor/store";
 import { floorCloud } from "@floor/cloud";
@@ -17,67 +17,64 @@ type Row = {
   floor_cents?: number | null;
 };
 
+const LIVE = new Set(["available", "reserved", "repair"]);
+
 export function InventoryScreen() {
   const { session, isAdmin, online } = usePos();
   const [q, setQ] = useState("");
+  const [filter, setFilter] = useState<"all" | "unfinished">("all");
   const [rows, setRows] = useState<Row[]>([]);
+  const [photoSkus, setPhotoSkus] = useState<Set<string>>(new Set());
   const [error, setError] = useState("");
   const navigate = useNavigate();
 
   async function load() {
     setError("");
     const sb = floorCloud();
-    if (isAdmin) {
-      const { data, error: err } = await sb
-        .from("units")
-        .select("sku, title, brand, model, category, condition, ask_cents, state, acquisition_cost_cents, floor_cents")
-        .order("sku", { ascending: false })
-        .limit(500);
-      if (err) {
-        setError(err.message);
-        return;
-      }
-      let list = (data ?? []) as Row[];
-      const text = q.trim().toLowerCase();
-      if (text) {
-        list = list.filter(
-          (u) =>
-            u.sku.includes(text) ||
-            (u.title || "").toLowerCase().includes(text) ||
-            (u.brand || "").toLowerCase().includes(text) ||
-            (u.model || "").toLowerCase().includes(text),
-        );
-      }
-      setRows(list);
-      return;
-    }
+    const cols = isAdmin
+      ? "sku, title, brand, model, category, condition, ask_cents, state, acquisition_cost_cents, floor_cents"
+      : "sku, title, brand, model, category, condition, ask_cents, state";
     const { data, error: err } = await sb
-      .from("units_pos")
-      .select("sku, title, brand, model, category, condition, ask_cents, state")
+      .from(isAdmin ? "units" : "units_pos")
+      .select(cols)
       .order("sku", { ascending: false })
       .limit(500);
     if (err) {
       setError(err.message);
       return;
     }
-    let list = (data ?? []) as Row[];
-    const text = q.trim().toLowerCase();
-    if (text) {
-      list = list.filter(
-        (u) =>
-          u.sku.includes(text) ||
-          (u.title || "").toLowerCase().includes(text) ||
-          (u.brand || "").toLowerCase().includes(text) ||
-          (u.model || "").toLowerCase().includes(text),
-      );
-    }
+    const list = (data ?? []) as unknown as Row[];
+    const { data: photoRows } = await sb
+      .from("photos")
+      .select("sku")
+      .in("sku", list.map((u) => u.sku))
+      .limit(5000);
+    setPhotoSkus(new Set(((photoRows ?? []) as { sku: string }[]).map((p) => p.sku)));
     setRows(list);
   }
 
   useEffect(() => {
     const t = setTimeout(() => void load(), 120);
     return () => clearTimeout(t);
-  }, [q, isAdmin]);
+  }, [isAdmin]);
+
+  const unfinished = useMemo(
+    () => rows.filter((u) => LIVE.has(u.state) && (u.ask_cents == null || !photoSkus.has(u.sku))),
+    [rows, photoSkus],
+  );
+
+  const shown = useMemo(() => {
+    const text = q.trim().toLowerCase();
+    const base = filter === "unfinished" ? unfinished : rows;
+    if (!text) return base;
+    return base.filter(
+      (u) =>
+        u.sku.includes(text) ||
+        (u.title || "").toLowerCase().includes(text) ||
+        (u.brand || "").toLowerCase().includes(text) ||
+        (u.model || "").toLowerCase().includes(text),
+    );
+  }, [rows, unfinished, filter, q]);
 
   return (
     <section className="page">
@@ -92,9 +89,21 @@ export function InventoryScreen() {
         )}
       </div>
       <input className="search" placeholder="Search SKU, title, brand…" value={q} onChange={(e) => setQ(e.target.value)} />
+      <div className="row" style={{ marginTop: "0.5rem", gap: "1rem" }}>
+        <button type="button" className={filter === "all" ? "primary" : ""} onClick={() => setFilter("all")}>
+          All
+        </button>
+        <button
+          type="button"
+          className={filter === "unfinished" ? "primary" : ""}
+          onClick={() => setFilter("unfinished")}
+        >
+          Unfinished ({unfinished.length})
+        </button>
+      </div>
       {error ? <p className="error">{error}</p> : null}
       <div className="grid" style={{ marginTop: "1rem" }}>
-        {rows.map((u) => (
+        {shown.map((u) => (
           <Link key={u.sku} className="card row" to={`/inventory/${u.sku}`} style={{ textDecoration: "none", color: "inherit" }}>
             <span>
               <strong>{u.sku}</strong>
@@ -112,7 +121,7 @@ export function InventoryScreen() {
             <span className="price">{formatCents(u.ask_cents) || "—"}</span>
           </Link>
         ))}
-        {!rows.length ? <p className="muted">No units.</p> : null}
+        {!shown.length ? <p className="muted">{filter === "unfinished" ? "Nothing unfinished." : "No units."}</p> : null}
       </div>
       <p className="muted">Signed in as {session.displayName}.</p>
     </section>

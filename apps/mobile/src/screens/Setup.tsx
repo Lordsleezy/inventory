@@ -1,0 +1,108 @@
+import { useState } from "react";
+import { Link } from "react-router-dom";
+import { floorCloud } from "@floor/cloud";
+import { useStore } from "../store";
+import { Label, Notice } from "../components/ui";
+import { friendlyRpc } from "../rpc";
+
+export function SetupScreen() {
+  const { settings, setSetting, session, online, connectionType, supabaseReach, functionsReach } = useStore();
+  const [error, setError] = useState("");
+  const [pin, setPin] = useState("");
+  const [inviteEmail, setInviteEmail] = useState("");
+  const owner = session.role === "owner";
+
+  async function savePin() {
+    setError("");
+    const { error: rpcErr } = await floorCloud().rpc("set_manager_pin", { p_pin: pin });
+    if (rpcErr) setError(friendlyRpc(rpcErr));
+    else setPin("");
+  }
+
+  async function invite() {
+    setError("");
+    const { error: rpcErr } = await floorCloud().rpc("invite_staff", {
+      p_email: inviteEmail,
+      p_role: "staff",
+    });
+    if (rpcErr) setError(friendlyRpc(rpcErr));
+    else setInviteEmail("");
+  }
+
+  return (
+    <section>
+      <h1 className="text-title">Setup</h1>
+      <Notice tone="error">{error}</Notice>
+      <p className="mt-2 text-quiet text-floor-mute">
+        Signed in as {session.displayName} ({session.role})
+      </p>
+      <p className="font-mono text-quiet">STORE_ID {session.storeId}</p>
+      <p className="mt-2 font-mono text-quiet text-floor-mute">
+        net {online ? "up" : "down"}/{connectionType} · supabase {supabaseReach} · functions {functionsReach}
+      </p>
+      <p className="text-quiet text-floor-mute">
+        Import the phone backup against this STORE_ID after signup. Import refuses if this store already has units.
+      </p>
+
+      <Link to="/setup/categories" className="btn-accent mt-4 inline-block">
+        Categories
+      </Link>
+
+      <label className="block py-3">
+        <Label>Business name (receipts)</Label>
+        <input
+          className="field mt-1"
+          defaultValue={settings.storeName}
+          disabled={!online}
+          onBlur={(e) => void setSetting("display_name", e.target.value.trim() || "Store")}
+        />
+      </label>
+      <label className="block py-3">
+        <Label>Sales tax percent</Label>
+        <input
+          className="field mt-1"
+          defaultValue={(settings.taxRateBps / 100).toString()}
+          inputMode="decimal"
+          disabled={!online}
+          onBlur={(e) => {
+            const percent = Number(e.target.value);
+            if (!Number.isFinite(percent) || percent < 0 || percent > 100) {
+              setError("Tax percent should be a number between 0 and 100.");
+              return;
+            }
+            setError("");
+            void setSetting("taxRateBps", Math.round(percent * 100));
+          }}
+        />
+      </label>
+
+      {owner ? (
+        <>
+          <Link to="/connections" className="btn-accent mt-4 inline-block">
+            Connections
+          </Link>
+          <Link to="/square" className="btn-accent mt-4 ml-3 inline-block">
+            Square / payments
+          </Link>
+          <label className="block py-3">
+            <Label>Manager PIN (voids, below-floor, deletes)</Label>
+            <input className="field mt-1" type="password" value={pin} onChange={(e) => setPin(e.target.value)} />
+            <button type="button" className="btn-text px-0 mt-1" onClick={() => void savePin()}>
+              Save PIN
+            </button>
+          </label>
+          <label className="block py-3">
+            <Label>Invite staff email</Label>
+            <input className="field mt-1" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} />
+            <button type="button" className="btn-text px-0 mt-1" onClick={() => void invite()}>
+              Invite
+            </button>
+          </label>
+          <p className="text-quiet text-floor-mute">
+            Manage accounts — create, reset passwords, deactivate — under Employees.
+          </p>
+        </>
+      ) : null}
+    </section>
+  );
+}

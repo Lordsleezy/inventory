@@ -1,13 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import {
-  countNeedsWork,
+  countUnfinished,
   formatCents,
   listedChannelsBySku,
   listUnits,
   type ListingFilter,
   type Unit,
-  type UnitState,
 } from "@floor/store";
 import { applyChannelListing } from "../functions";
 import { useDb, useStore } from "../store";
@@ -16,19 +15,13 @@ import { Notice, Spinner } from "../components/ui";
 import { ChannelMarks, ChannelToggleRow, normalizeChannel } from "../listingMarks";
 import { friendlyRpc } from "../rpc";
 
-const STOCK: UnitState[] = ["available", "reserved", "repair"];
-
 const FILTERS: {
   key: string;
   label: string;
-  states?: UnitState[];
-  needsWork?: boolean;
+  unfinished?: boolean;
 }[] = [
-  { key: "stock", label: "In stock", states: STOCK },
-  { key: "work", label: "Needs work", states: STOCK, needsWork: true },
-  { key: "sold", label: "Sold", states: ["sold"] },
-  { key: "other", label: "Out", states: ["voided", "scrapped", "lost"] },
   { key: "all", label: "All" },
+  { key: "unfinished", label: "Unfinished" },
 ];
 
 const LISTED_FILTERS: { key: "" | ListingFilter; label: string }[] = [
@@ -49,42 +42,40 @@ export function InventoryScreen() {
   const [listed, setListed] = useState<"" | ListingFilter>("");
   const [filter, setFilter] = useState(() => {
     const tab = (location.state as { filter?: string } | null)?.filter;
-    return tab && FILTERS.some((f) => f.key === tab) ? tab : "stock";
+    return tab && FILTERS.some((f) => f.key === tab) ? tab : "all";
   });
   const [units, setUnits] = useState<Unit[] | null>(null);
   const [listedMap, setListedMap] = useState<Map<string, string[]>>(new Map());
-  const [workCount, setWorkCount] = useState(0);
+  const [unfinCount, setUnfinCount] = useState(0);
   const [error, setError] = useState("");
   const [selecting, setSelecting] = useState(false);
   const [picked, setPicked] = useState<string[]>([]);
 
   const tab = FILTERS.find((f) => f.key === filter);
-  const states = tab?.states;
 
   useEffect(() => {
     let live = true;
     void Promise.all([
       listUnits(db, {
         query,
-        states,
         category: category || undefined,
-        needsWork: tab?.needsWork,
+        unfinished: tab?.unfinished,
         listed: listed || undefined,
       }),
       listedChannelsBySku(db),
-      countNeedsWork(db),
+      countUnfinished(db),
     ])
       .then(([rows, map, count]) => {
         if (!live) return;
         setUnits(rows);
         setListedMap(map);
-        setWorkCount(count);
+        setUnfinCount(count);
       })
       .catch((err) => live && setError(friendlyRpc(err)));
     return () => {
       live = false;
     };
-  }, [db, query, states, category, listed, tab?.needsWork, cacheEpoch]);
+  }, [db, query, category, listed, tab?.unfinished, cacheEpoch]);
 
   const channelOptions = useMemo(() => {
     const fromSettings = settings.channels.filter((c) => c !== "floor");
@@ -147,8 +138,8 @@ export function InventoryScreen() {
             className={`min-h-touch text-quiet ${filter === item.key ? "text-floor-accent" : "text-floor-mute"}`}
           >
             {item.label}
-            {item.key === "work" && workCount > 0 ? (
-              <span className="ml-1 text-floor-accent">({workCount})</span>
+            {item.key === "unfinished" ? (
+              <span className="ml-1 text-floor-accent">({unfinCount})</span>
             ) : null}
           </button>
         ))}
@@ -231,11 +222,9 @@ export function InventoryScreen() {
         <p className="py-6 text-quiet text-floor-mute">
           {query
             ? `Nothing matches “${query}”.`
-            : filter === "work"
-              ? "Nothing needs work."
-              : filter === "stock"
-                ? "Nothing in stock."
-                : "Nothing here yet."}
+            : filter === "unfinished"
+              ? "Nothing unfinished — every live unit has photos and a price."
+              : "Nothing here yet."}
         </p>
       ) : null}
 

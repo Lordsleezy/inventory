@@ -13,7 +13,10 @@ import { RegisterScreen } from "./screens/Register";
 import { DoneScreen } from "./screens/Done";
 import { LoginScreen } from "./screens/Login";
 import { ReceiptsScreen } from "./screens/Receipts";
+import { ReportsScreen } from "./screens/Reports";
+import { EmployeesScreen } from "./screens/Employees";
 import { SettingsScreen } from "./screens/Settings";
+import { AccountScreen } from "./screens/Account";
 import { InventoryScreen } from "./screens/Inventory";
 import { UnitDetailScreen } from "./screens/UnitDetail";
 import { ReceiveScreen } from "./screens/Receive";
@@ -121,7 +124,7 @@ function Shell() {
         <div className="offline warn">TAX RATE NOT SET — open Settings (admin) before checkout</div>
       ) : null}
       {incidents.length ? (
-        <div className="offline">INCIDENT — {incidents[0].sku}. Open Reports.</div>
+        <div className="offline">INCIDENT — {incidents[0].sku}. Open Receipts.</div>
       ) : null}
       <header className="top">
         <div className="top-brand">{rewards.storeDisplayName || "Floor"}</div>
@@ -144,9 +147,12 @@ function Shell() {
             <button type="button" onClick={() => void switchClerk()}>
               Switch clerk
             </button>
+            <button type="button" onClick={() => navigate("/settings")}>
+              Settings
+            </button>
             {isAdmin ? (
-              <button type="button" onClick={() => navigate("/settings")}>
-                Settings
+              <button type="button" onClick={() => navigate("/setup")}>
+                Setup
               </button>
             ) : null}
           </div>
@@ -162,19 +168,25 @@ function Shell() {
           <Route path="/inventory/receive" element={<ReceiveScreen />} />
           <Route path="/inventory/:sku" element={<UnitDetailScreen />} />
           <Route path="/receipts" element={<ReceiptsScreen />} />
-          <Route path="/settings" element={isAdmin ? <SettingsScreen /> : <Navigate to="/" replace />} />
+          <Route path="/reports" element={isAdmin ? <ReportsScreen /> : <Navigate to="/" replace />} />
+          <Route path="/employees" element={isAdmin ? <EmployeesScreen /> : <Navigate to="/" replace />} />
+          <Route path="/setup" element={isAdmin ? <SettingsScreen /> : <Navigate to="/" replace />} />
           <Route
-            path="/settings/receipt"
+            path="/setup/receipt"
             element={isAdmin ? <ReceiptDesignerScreen /> : <Navigate to="/" replace />}
           />
+          <Route path="/settings" element={<AccountScreen />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
       <nav className="bottom-nav">
-        {isAdmin ? <Link to="/settings">Settings</Link> : null}
-        <Link to="/receipts">Reports{pendingOutbox ? ` (${pendingOutbox})` : ""}</Link>
+        {isAdmin ? <Link to="/setup">Setup</Link> : null}
+        {isAdmin ? <Link to="/employees">Employees</Link> : null}
+        {isAdmin ? <Link to="/reports">Reports</Link> : null}
+        <Link to="/receipts">Receipts{pendingOutbox ? ` (${pendingOutbox})` : ""}</Link>
         <Link to="/inventory">Inventory</Link>
         {!onRegister ? <Link to="/">Register</Link> : null}
+        <Link to="/settings">Settings</Link>
       </nav>
     </div>
   );

@@ -69,6 +69,7 @@ export async function loadAuthState(): Promise<AuthState> {
     .from("staff")
     .select("store_id, role, display_name, notify_email, notify_push")
     .eq("user_id", session.session.user.id)
+    .is("deactivated_at", null)
     .maybeSingle();
   if (error) throw error;
   if (!data?.store_id) {

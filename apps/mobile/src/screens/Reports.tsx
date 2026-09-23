@@ -1,182 +1,125 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
-import { formatCents, formatCentsTotal, receiptHtml, type Receipt } from "@floor/store";
+import { formatCentsTotal } from "@floor/store";
 import { floorCloud } from "@floor/cloud";
 import { useStore } from "../store";
 import { Label, Notice, Spinner } from "../components/ui";
-import { openHtml } from "../files";
 import { friendlyRpc } from "../rpc";
 
-type SaleReceiptRow = {
-  id: number;
-  sku: string;
-  receipt_no: string;
-  sold_at: string;
-  price_cents: number;
-  tax_cents: number;
-  total_cents: number;
-  payment_method: string | null;
-  channel: string;
-  voided_at: string | null;
-  actor_name: string | null;
-  title: string | null;
-  condition: string | null;
+type Report = {
+  totals: {
+    sales: number;
+    units_sold: number;
+    merchandise_cents: number;
+    tax_cents: number;
+    card_fee_cents: number;
+    collected_cents: number;
+    markdown_cents: number;
+    gross_profit_cents: number;
+    uncosted_sales: number;
+    voided_sales: number;
+    voided_cents: number;
+    ticket_discount_cents: number;
+    signup_discount_cents: number;
+  };
+  by_day: { day: string; sales: number; revenue_cents: number; tax_cents: number; profit_cents: number }[];
+  by_channel: { channel: string; sales: number; revenue_cents: number; profit_cents: number }[];
+  by_payment: { method: string; sales: number; collected_cents: number }[];
+  inventory: {
+    units_in_stock: number;
+    cost_cents: number;
+    ask_cents: number;
+    unpriced: number;
+    missing_photos: number;
+  };
 };
 
-function toReceipt(row: SaleReceiptRow, storeName: string): Receipt {
-  return {
-    receiptNo: row.receipt_no,
-    soldAt: row.sold_at,
-    storeName,
-    channel: row.channel || "floor",
-    paymentMethod: row.payment_method,
-    actor: row.actor_name,
-    customerName: null,
-    customerPhone: null,
-    sku: row.sku,
-    description: row.title || "Item",
-    condition: row.condition,
-    priceCents: Number(row.price_cents ?? 0),
-    taxCents: Number(row.tax_cents ?? 0),
-    totalCents: Number(row.total_cents ?? Number(row.price_cents ?? 0) + Number(row.tax_cents ?? 0)),
-    voidedAt: row.voided_at,
-  };
+type Bucket = { label: string; sales: number; revenue_cents: number; profit_cents: number };
+
+function isoWeek(day: string): string {
+  const d = new Date(`${day}T00:00:00Z`);
+  const dow = (d.getUTCDay() + 6) % 7;
+  d.setUTCDate(d.getUTCDate() - dow + 3);
+  const firstThursday = new Date(Date.UTC(d.getUTCFullYear(), 0, 4));
+  const fdow = (firstThursday.getUTCDay() + 6) % 7;
+  firstThursday.setUTCDate(firstThursday.getUTCDate() - fdow + 3);
+  const week = 1 + Math.round((d.getTime() - firstThursday.getTime()) / (7 * 86400_000));
+  return `${d.getUTCFullYear()} W${String(week).padStart(2, "0")}`;
+}
+
+function rollup(days: Report["by_day"], period: "day" | "week" | "month"): Bucket[] {
+  const key = (day: string) =>
+    period === "day" ? day : period === "week" ? isoWeek(day) : day.slice(0, 7);
+  const map = new Map<string, Bucket>();
+  for (const d of days) {
+    const k = key(d.day);
+    const b = map.get(k) ?? { label: k, sales: 0, revenue_cents: 0, profit_cents: 0 };
+    b.sales += d.sales;
+    b.revenue_cents += d.revenue_cents;
+    b.profit_cents += d.profit_cents;
+    map.set(k, b);
+  }
+  return [...map.values()].sort((a, b) => b.label.localeCompare(a.label));
 }
 
 export function ReportsScreen() {
-  const { receiptNo } = useParams();
-  const { session, settings } = useStore();
-  const manager = session.role !== "staff";
-  const [rows, setRows] = useState<SaleReceiptRow[] | null>(null);
-  const [query, setQuery] = useState("");
+  const { session } = useStore();
+  const [report, setReport] = useState<Report | null>(null);
+  const [error, setError] = useState("");
+  const [period, setPeriod] = useState<"day" | "week" | "month">("day");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
-  const [error, setError] = useState("");
-  const [totals, setTotals] = useState<{ inStock: number; soldThisWeek: number; moneyTiedUpCents: number; askValueCents: number; soldThisWeekCents: number } | null>(null);
 
   useEffect(() => {
+    if (session.role === "staff") return;
     let live = true;
+    setReport(null);
     void (async () => {
-      const receipts = await floorCloud()
-        .from("sale_receipts")
-        .select("id, sku, receipt_no, sold_at, price_cents, tax_cents, total_cents, payment_method, channel, voided_at, actor_name, title, condition")
-        .order("sold_at", { ascending: false });
-      if (!receipts.error) {
-        if (live) setRows((receipts.data ?? []) as SaleReceiptRow[]);
-        return;
-      }
-      const sales = await floorCloud()
-        .from("sales")
-        .select("id, sku, receipt_no, sold_at, price_cents, tax_cents, payment_method, channel, voided_at")
-        .order("sold_at", { ascending: false });
-      if (sales.error) throw sales.error;
-      if (live) {
-        setRows(
-          (sales.data ?? []).map((s) => ({
-            id: s.id,
-            sku: s.sku,
-            receipt_no: s.receipt_no,
-            sold_at: s.sold_at,
-            price_cents: s.price_cents,
-            tax_cents: s.tax_cents ?? 0,
-            total_cents: (s.price_cents ?? 0) + (s.tax_cents ?? 0),
-            payment_method: s.payment_method,
-            channel: s.channel,
-            voided_at: s.voided_at,
-            actor_name: null,
-            title: null,
-            condition: null,
-          })),
-        );
-      }
-    })().catch((err) => live && setError(friendlyRpc(err)));
-    return () => {
-      live = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!manager) return;
-    let live = true;
-    void (async () => {
-      const units = await floorCloud().from("units").select("state, acquisition_cost_cents, ask_cents");
-      const sales = await floorCloud().from("sales").select("price_cents, sold_at, voided_at").is("voided_at", null);
-      if (units.error) throw units.error;
-      if (sales.error) throw sales.error;
-      const week = Date.now() - 7 * 24 * 3600 * 1000;
-      const stock = (units.data ?? []).filter((u) => ["available", "reserved", "repair"].includes(u.state));
-      const weekSales = (sales.data ?? []).filter((s) => new Date(s.sold_at).getTime() >= week);
-      if (live) {
-        setTotals({
-          inStock: stock.length,
-          soldThisWeek: weekSales.length,
-          moneyTiedUpCents: stock.reduce((n, u) => n + (u.acquisition_cost_cents ?? 0), 0),
-          askValueCents: stock.reduce((n, u) => n + (u.ask_cents ?? 0), 0),
-          soldThisWeekCents: weekSales.reduce((n, s) => n + (s.price_cents ?? 0), 0),
+      try {
+        const { data, error: rpcErr } = await floorCloud().rpc("store_report", {
+          p_from: fromDate ? `${fromDate}T00:00:00Z` : null,
+          p_to: toDate ? `${toDate}T23:59:59.999Z` : null,
         });
+        if (!live) return;
+        if (rpcErr) setError(friendlyRpc(rpcErr));
+        else {
+          setError("");
+          setReport(data as Report);
+        }
+      } catch (err) {
+        if (live) setError(friendlyRpc(err));
       }
-    })().catch(() => {});
+    })();
     return () => {
       live = false;
     };
-  }, [manager]);
+  }, [session.role, fromDate, toDate]);
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return (rows ?? []).filter((row) => {
-      if (q && !row.receipt_no.toLowerCase().includes(q) && !row.sku.toLowerCase().includes(q)) return false;
-      const t = new Date(row.sold_at).getTime();
-      if (fromDate) {
-        const start = new Date(`${fromDate}T00:00:00`).getTime();
-        if (t < start) return false;
-      }
-      if (toDate) {
-        const end = new Date(`${toDate}T23:59:59.999`).getTime();
-        if (t > end) return false;
-      }
-      return true;
-    });
-  }, [rows, query, fromDate, toDate]);
+  const buckets = useMemo(
+    () => (report ? rollup(report.by_day, period) : []),
+    [report, period],
+  );
 
-  if (error) return <Notice tone="error">{error}</Notice>;
-  if (!rows) return <Spinner label="Loading receipts" />;
-
-  if (receiptNo) {
-    const row = rows.find((r) => r.receipt_no === decodeURIComponent(receiptNo));
-    if (!row) {
-      return (
-        <section>
-          <p className="text-body">No receipt {decodeURIComponent(receiptNo)}.</p>
-          <Link to="/reports" className="btn-text px-0">Back to receipts</Link>
-        </section>
-      );
-    }
-    return <ReceiptDetail receipt={toReceipt(row, settings.storeName)} />;
+  if (session.role === "staff") {
+    return <p className="text-quiet text-floor-mute">Reports are for store admins.</p>;
   }
+  if (error) {
+    return (
+      <section>
+        <h1 className="text-title">Reports</h1>
+        <Notice tone="error">{error}</Notice>
+      </section>
+    );
+  }
+  if (!report) return <Spinner label="Building report" />;
+
+  const t = report.totals;
+  const inv = report.inventory;
+  const margin = t.merchandise_cents ? Math.round((t.gross_profit_cents / t.merchandise_cents) * 100) : 0;
 
   return (
     <section>
       <h1 className="text-title">Reports</h1>
 
-      {manager && totals ? (
-        <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-5">
-          <Stat label="Units in stock" value={String(totals.inStock)} />
-          <Stat label="Sold this week" value={String(totals.soldThisWeek)} />
-          <Stat label="Money tied up" value={formatCentsTotal(totals.moneyTiedUpCents)} hint="what you paid" />
-          <Stat label="Asking value" value={formatCentsTotal(totals.askValueCents)} hint="priced units only" />
-          <Stat label="Took this week" value={formatCentsTotal(totals.soldThisWeekCents)} />
-        </div>
-      ) : null}
-
-      <h2 className="mt-8 text-title">Receipts</h2>
-      <input
-        className="field mt-3"
-        value={query}
-        placeholder="Receipt number or SKU"
-        inputMode="search"
-        autoCapitalize="none"
-        onChange={(e) => setQuery(e.target.value)}
-      />
       <div className="mt-2 grid grid-cols-2 gap-2">
         <label className="block">
           <Label>From</Label>
@@ -187,80 +130,111 @@ export function ReportsScreen() {
           <input className="field mt-1" type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} />
         </label>
       </div>
+      {!fromDate && !toDate ? (
+        <p className="mt-1 text-quiet text-floor-mute">All time. Pick dates to scope the numbers.</p>
+      ) : null}
 
-      {filtered.length === 0 ? (
-        <p className="py-6 text-quiet text-floor-mute">No receipts match.</p>
+      <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-5">
+        <Stat label="Revenue" value={formatCentsTotal(t.merchandise_cents)} hint={`${t.sales} sales · ${t.units_sold} units`} />
+        <Stat label="Gross profit" value={formatCentsTotal(t.gross_profit_cents)} hint={`${margin}% margin`} />
+        <Stat label="Sales tax collected" value={formatCentsTotal(t.tax_cents)} />
+        <Stat label="Card fees collected" value={formatCentsTotal(t.card_fee_cents)} />
+        <Stat label="Total collected" value={formatCentsTotal(t.collected_cents)} hint="merch + tax + fees" />
+        <Stat
+          label="Discounts given"
+          value={formatCentsTotal(t.markdown_cents + t.ticket_discount_cents + t.signup_discount_cents)}
+          hint="markdowns + ticket discounts"
+        />
+      </div>
+      {t.uncosted_sales > 0 ? (
+        <p className="mt-2 text-quiet text-floor-mute">
+          {t.uncosted_sales} {t.uncosted_sales === 1 ? "sale has" : "sales have"} no acquisition cost — profit is
+          overstated for those.
+        </p>
+      ) : null}
+      {t.voided_sales > 0 ? (
+        <p className="mt-1 text-quiet text-floor-mute">
+          {t.voided_sales} voided {t.voided_sales === 1 ? "sale" : "sales"} ({formatCentsTotal(t.voided_cents)})
+          excluded above.
+        </p>
+      ) : null}
+
+      <h2 className="mt-8 text-title">Sales over time</h2>
+      <div className="mt-2 flex gap-3">
+        {(["day", "week", "month"] as const).map((p) => (
+          <button
+            key={p}
+            type="button"
+            className={`min-h-touch text-quiet ${period === p ? "text-floor-accent" : "text-floor-mute"}`}
+            onClick={() => setPeriod(p)}
+          >
+            {p === "day" ? "By day" : p === "week" ? "By week" : "By month"}
+          </button>
+        ))}
+      </div>
+      {buckets.length === 0 ? (
+        <p className="py-4 text-quiet text-floor-mute">No sales in this window.</p>
       ) : (
-        <ul className="mt-3">
-          {filtered.map((row) => (
-            <li key={row.id} className="border-b border-floor-line">
-              <Link to={`/reports/${encodeURIComponent(row.receipt_no)}`} className="flex min-h-touch items-baseline justify-between gap-3 py-3">
-                <span>
-                  <span className="font-mono">{row.receipt_no}</span>
-                  {row.voided_at ? <span className="ml-2 text-floor-danger">VOID</span> : null}
-                  <span className="mt-1 block text-quiet text-floor-mute">
-                    {row.sku} · {row.title || "Item"}
-                  </span>
+        <ul className="mt-2">
+          {buckets.slice(0, 31).map((b) => (
+            <li key={b.label} className="flex items-baseline justify-between gap-3 border-b border-floor-line py-2">
+              <span className="text-body">{b.label}</span>
+              <span className="shrink-0 text-right">
+                <span className="block">{formatCentsTotal(b.revenue_cents)}</span>
+                <span className="text-quiet text-floor-mute">
+                  {b.sales} · profit {formatCentsTotal(b.profit_cents)}
                 </span>
-                <span className="shrink-0 text-right">
-                  <span className="block">{formatCents(row.total_cents)}</span>
-                  <span className="text-quiet text-floor-mute">{new Date(row.sold_at).toLocaleString("en-US")}</span>
-                </span>
-              </Link>
+              </span>
             </li>
           ))}
         </ul>
       )}
+
+      <h2 className="mt-8 text-title">Sales by channel</h2>
+      {report.by_channel.length === 0 ? (
+        <p className="py-4 text-quiet text-floor-mute">No sales yet.</p>
+      ) : (
+        <ul className="mt-2">
+          {report.by_channel.map((c) => (
+            <li key={c.channel} className="flex items-baseline justify-between gap-3 border-b border-floor-line py-2">
+              <span className="text-body">{c.channel}</span>
+              <span className="shrink-0 text-right">
+                <span className="block">{formatCentsTotal(c.revenue_cents)}</span>
+                <span className="text-quiet text-floor-mute">
+                  {c.sales} · profit {formatCentsTotal(c.profit_cents)}
+                </span>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {report.by_payment.length ? (
+        <>
+          <h2 className="mt-8 text-title">Collected by payment method</h2>
+          <ul className="mt-2">
+            {report.by_payment.map((p) => (
+              <li key={p.method} className="flex items-baseline justify-between gap-3 border-b border-floor-line py-2">
+                <span className="text-body">{p.method}</span>
+                <span className="shrink-0 text-right">
+                  <span className="block">{formatCentsTotal(p.collected_cents)}</span>
+                  <span className="text-quiet text-floor-mute">{p.sales} sales</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : null}
+
+      <h2 className="mt-8 text-title">Inventory</h2>
+      <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-5">
+        <Stat label="Units in stock" value={String(inv.units_in_stock)} />
+        <Stat label="Value at cost" value={formatCentsTotal(inv.cost_cents)} hint="what you paid" />
+        <Stat label="Asking value" value={formatCentsTotal(inv.ask_cents)} hint="if everything sells at ask" />
+        <Stat label="Unpriced units" value={String(inv.unpriced)} />
+        <Stat label="Missing photos" value={String(inv.missing_photos)} />
+      </div>
     </section>
-  );
-}
-
-function ReceiptDetail({ receipt }: { receipt: Receipt }) {
-  const navigate = useNavigate();
-  const [shareError, setShareError] = useState("");
-
-  async function share() {
-    setShareError("");
-    try {
-      await openHtml(`receipt-${receipt.receiptNo}.html`, receiptHtml(receipt));
-    } catch (err) {
-      setShareError(friendlyRpc(err));
-    }
-  }
-
-  return (
-    <section>
-      <button type="button" className="btn-text px-0" onClick={() => navigate("/reports")}>
-        All receipts
-      </button>
-      {receipt.voidedAt ? <p className="mt-3 border border-floor-danger p-2 text-body text-floor-danger">VOID</p> : null}
-      <h1 className="mt-3 font-mono text-title">{receipt.receiptNo}</h1>
-      <Notice tone="error">{shareError}</Notice>
-      <dl className="mt-4">
-        <Row label="Date / time" value={new Date(receipt.soldAt).toLocaleString("en-US")} />
-        <Row label="SKU" value={receipt.sku} />
-        <Row label="Title" value={receipt.description} />
-        <Row label="Condition" value={receipt.condition || "—"} />
-        <Row label="Price" value={formatCents(receipt.priceCents) || "$0.00"} />
-        <Row label="Tax" value={formatCents(receipt.taxCents) || "$0.00"} />
-        <Row label="Total" value={formatCentsTotal(receipt.totalCents)} />
-        <Row label="Payment" value={receipt.paymentMethod || "—"} />
-        <Row label="Channel" value={receipt.channel} />
-        <Row label="Rang up by" value={receipt.actor || "—"} />
-      </dl>
-      <button type="button" className="btn-accent mt-6" onClick={() => void share()}>
-        Share / print
-      </button>
-    </section>
-  );
-}
-
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex justify-between gap-3 border-b border-floor-line py-2">
-      <dt className="text-quiet text-floor-mute">{label}</dt>
-      <dd className="text-right">{value}</dd>
-    </div>
   );
 }
 
