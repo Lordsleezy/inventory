@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import {
@@ -8,7 +9,6 @@ import {
   setDeviceNetworkGetter,
   type StaffSession,
 } from "@floor/cloud";
-import { hasAdminPin, verifyAdminPin } from "./local";
 import { RegisterScreen } from "./screens/Register";
 import { DoneScreen } from "./screens/Done";
 import { LoginScreen } from "./screens/Login";
@@ -38,20 +38,43 @@ export function App() {
   const [booting, setBooting] = useState(true);
   const [error, setError] = useState("");
   const [networkHint, setNetworkHint] = useState(false);
+  const [storeOsAccount, setStoreOsAccount] = useState(false);
 
   useEffect(() => {
-    if (!hasCloudEnv()) {
+    let alive = true;
+    let unsubscribe = () => {};
+    void (async () => {
+      if (!hasCloudEnv()) {
+        setBooting(false);
+        setError("This register build is missing VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY.");
+        return;
+      }
+      const storeAccount = await invoke<boolean>("is_store_os_account").catch(() => false);
+      if (!alive) return;
+      setStoreOsAccount(storeAccount);
+      const sb = floorCloud();
+      if (storeAccount) await sb.auth.signOut({ scope: "local" });
+      const { data } = sb.auth.onAuthStateChange(() => { void refresh(); });
+      unsubscribe = () => data.subscription.unsubscribe();
+      await refresh();
+    })().catch((err) => {
+      if (!alive) return;
+      setError(authErrorMessage(err));
+      setNetworkHint(isNetworkAuthFailure(err));
       setBooting(false);
-      setError("This register build is missing VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY.");
-      return;
-    }
-    const sb = floorCloud();
-    const { data } = sb.auth.onAuthStateChange(() => {
-      void refresh();
     });
-    void refresh();
-    return () => data.subscription.unsubscribe();
+    return () => { alive = false; unsubscribe(); };
   }, []);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "F11" || storeOsAccount) return;
+      event.preventDefault();
+      void invoke("toggle_fullscreen");
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [storeOsAccount]);
 
   async function refresh() {
     try {
@@ -108,12 +131,8 @@ function Shell() {
   const location = useLocation();
   const onRegister = location.pathname === "/";
 
-  async function switchClerk() {
-    if (await hasAdminPin()) {
-      const pin = window.prompt("Admin PIN");
-      if (!pin || !(await verifyAdminPin(pin))) return;
-    }
-    await floorCloud().auth.signOut();
+  async function signOut() {
+    await floorCloud().auth.signOut({ scope: "local" });
     navigate("/");
   }
 
@@ -144,8 +163,8 @@ function Shell() {
             {session.displayName} ▾
           </summary>
           <div className="clerk-menu-panel">
-            <button type="button" onClick={() => void switchClerk()}>
-              Switch clerk
+            <button type="button" onClick={() => void signOut()}>
+              Sign out
             </button>
             <button type="button" onClick={() => navigate("/settings")}>
               Settings

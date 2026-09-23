@@ -1,3 +1,4 @@
+export { employeeSignInEmail } from "./employee-login.ts";
 export { importPhoneBackup, createServiceClient, requiredStoreId, type ImportResult } from "./import-backup.ts";
 export { DEFAULT_SKU_DIGITS, isSku, padSku, skuCeiling, storagePathForPhoto } from "./sku.ts";
 export {

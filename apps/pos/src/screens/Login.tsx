@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { authErrorMessage, floorCloud, isNetworkAuthFailure } from "@floor/cloud";
+import { authErrorMessage, employeeSignInEmail, floorCloud, isNetworkAuthFailure } from "@floor/cloud";
 
 export function LoginScreen() {
-  const [email, setEmail] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [networkHint, setNetworkHint] = useState(false);
@@ -13,6 +13,8 @@ export function LoginScreen() {
     setNetworkHint(false);
     setBusy(true);
     try {
+      const email = employeeSignInEmail(identifier);
+      if (!email) throw new Error("Enter a valid email or username.");
       const { error: authError } = await floorCloud().auth.signInWithPassword({ email, password });
       if (authError) throw authError;
     } catch (err) {
@@ -26,15 +28,15 @@ export function LoginScreen() {
   return (
     <section className="login-card">
       <h1>Floor</h1>
-      <p className="muted">Sign in with your staff email. This register does not receive inventory.</p>
+      <p className="muted">Sign in with your staff email or username.</p>
       {error ? <p className="error">{error}</p> : null}
       {networkHint ? (
         <p className="muted">If Wi‑Fi looks fine, open a browser on this Mac and load the Supabase host, then try again.</p>
       ) : null}
       <div className="grid" style={{ marginTop: "1rem" }}>
         <label>
-          Email
-          <input value={email} autoCapitalize="none" onChange={(e) => setEmail(e.target.value)} />
+          Email or username
+          <input value={identifier} autoCapitalize="none" onChange={(e) => setIdentifier(e.target.value)} />
         </label>
         <label>
           Password

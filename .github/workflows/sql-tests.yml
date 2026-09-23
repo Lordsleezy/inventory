@@ -31,6 +31,7 @@ jobs:
         run: |
           npm test
           npm run build -w @floor/pos
+          npm run build -w @floor/mobile
 
       - name: PGlite apply all migrations
         run: npm run test:migrations

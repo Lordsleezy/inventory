@@ -998,10 +998,25 @@ fn has_admin_pin() -> Result<bool, String> {
   })
 }
 
+
+#[tauri::command]
+fn is_store_os_account() -> bool {
+  std::env::var("FLOOR_OS_ACCOUNT").as_deref() == Ok("store")
+}
+
+#[tauri::command]
+fn toggle_fullscreen(window: tauri::WebviewWindow) -> Result<(), String> {
+  let fullscreen = window.is_fullscreen().map_err(|e| e.to_string())?;
+  window.set_fullscreen(!fullscreen).map_err(|e| e.to_string())
+}
+
 pub fn run() {
   tauri::Builder::default()
     .setup(|app| {
       open_db(app.handle()).map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
+      if let Some(window) = app.get_webview_window("main") {
+        let _ = window.maximize();
+      }
       Ok(())
     })
     .invoke_handler(tauri::generate_handler![
@@ -1023,7 +1038,9 @@ pub fn run() {
       set_admin_pin,
       verify_admin_pin,
       has_admin_pin,
-      open_external
+      open_external,
+      is_store_os_account,
+      toggle_fullscreen
     ])
     .run(tauri::generate_context!())
     .expect("error while running Floor POS");

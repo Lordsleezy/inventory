@@ -8,6 +8,10 @@ id -nG prime | tr ' ' '\n' | grep -qx sudo
 systemctl is-active --quiet gdm3
 runuser -u prime -- test -x /usr/bin/floor-pos
 runuser -u store -- test -x /usr/bin/floor-pos
+test -x /usr/local/bin/floor-pos-store
+grep -qx 'Exec=/usr/local/bin/floor-pos-store' /home/store/.config/autostart/floor-pos.desktop
+grep -qx 'Exec=/usr/local/bin/floor-pos-store' /home/store/.local/share/applications/floor-pos.desktop
+readlink -f /home/prime/.local/bin/floor-pos | grep -qx /usr/bin/floor-pos
 runuser -u store -- test -x /snap/bin/firefox
 for bin in /usr/bin/ptyxis /usr/bin/gnome-terminal /usr/bin/nautilus /usr/bin/gnome-control-center; do
   [[ ! -e $bin ]] || ! runuser -u store -- test -x "$bin"

@@ -24,6 +24,8 @@
     "allow-has-admin-pin",
     "allow-receipt-pdf",
     "allow-printer-paper-hint",
-    "allow-open-external"
+    "allow-open-external",
+    "allow-is-store-os-account",
+    "allow-toggle-fullscreen"
   ]
 }

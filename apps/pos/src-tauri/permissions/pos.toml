@@ -76,3 +76,11 @@ commands.allow = ["printer_paper_hint"]
 [[permission]]
 identifier = "allow-open-external"
 commands.allow = ["open_external"]
+
+[[permission]]
+identifier = "allow-is-store-os-account"
+commands.allow = ["is_store_os_account"]
+
+[[permission]]
+identifier = "allow-toggle-fullscreen"
+commands.allow = ["toggle_fullscreen"]

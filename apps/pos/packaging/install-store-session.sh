@@ -72,7 +72,7 @@ cat >/home/store/.config/autostart/floor-pos.desktop <<'CONF'
 [Desktop Entry]
 Type=Application
 Name=Floor
-Exec=/usr/bin/floor-pos-kiosk
+Exec=/usr/local/bin/floor-pos-store
 OnlyShowIn=GNOME;
 X-GNOME-Autostart-enabled=true
 CONF
