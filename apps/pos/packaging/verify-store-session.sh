@@ -8,7 +8,8 @@ id -nG prime | tr ' ' '\n' | grep -qx sudo
 systemctl is-active --quiet gdm3
 runuser -u prime -- test -x /usr/bin/floor-pos
 runuser -u store -- test -x /usr/bin/floor-pos
-for bin in /usr/bin/gnome-terminal /usr/bin/nautilus /usr/bin/gnome-control-center; do
+runuser -u store -- test -x /snap/bin/firefox
+for bin in /usr/bin/ptyxis /usr/bin/gnome-terminal /usr/bin/nautilus /usr/bin/gnome-control-center; do
   [[ ! -e $bin ]] || ! runuser -u store -- test -x "$bin"
 done
 runuser -u store -- env DCONF_PROFILE=floor-store /usr/bin/python3 - <<'PY'
@@ -16,7 +17,7 @@ from gi.repository import Gio, GLib
 from pathlib import Path
 settings=None
 count=0
-for line in Path('/etc/dconf/db/floor-store.d/00-lockdown').read_text().splitlines():
+for line in Path('/etc/dconf/db/floor_store.d/00-lockdown').read_text().splitlines():
     if line.startswith('['):
         settings=Gio.Settings.new(line[1:-1].replace('/','.'))
     elif '=' in line:

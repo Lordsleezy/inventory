@@ -11,18 +11,20 @@ if ! getent passwd store >/dev/null; then
   passwd -d store
 fi
 [[ $(id -nG store) == store ]] || { echo 'store must have no supplementary groups.' >&2; exit 1; }
-install -d /etc/dconf/profile /etc/dconf/db/floor-store.d/locks
-printf 'user-db:user\nsystem-db:floor-store\n' >/etc/dconf/profile/floor-store
-install -m644 "$SRC/00-lockdown" /etc/dconf/db/floor-store.d/00-lockdown
+install -d /etc/dconf/profile /etc/dconf/db/floor_store.d/locks
+printf 'user-db:user\nsystem-db:floor_store\n' >/etc/dconf/profile/floor-store
+install -m644 "$SRC/00-lockdown" /etc/dconf/db/floor_store.d/00-lockdown
 python3 - <<'PY'
 from pathlib import Path
 section=''
 locks=[]
-for line in Path('/etc/dconf/db/floor-store.d/00-lockdown').read_text().splitlines():
+for line in Path('/etc/dconf/db/floor_store.d/00-lockdown').read_text().splitlines():
     if line.startswith('['): section=line[1:-1]
     elif '=' in line: locks.append('/'+section+'/'+line.split('=',1)[0])
-Path('/etc/dconf/db/floor-store.d/locks/00-lockdown').write_text('\n'.join(locks)+'\n')
+Path('/etc/dconf/db/floor_store.d/locks/00-lockdown').write_text('\n'.join(locks)+'\n')
 PY
+# Remove the earlier hyphenated database name (invalid for dconf notifications).
+rm -rf /etc/dconf/db/floor-store.d /etc/dconf/db/floor-store
 dconf update
 install -d /usr/share/gnome-shell/extensions/floor-store@floor.local
 install -m644 "$SRC/metadata.json" "$SRC/extension.js" /usr/share/gnome-shell/extensions/floor-store@floor.local/
@@ -78,8 +80,19 @@ CONF
 install -d -o store -g store -m700 /home/store/.config/dconf /home/store/.config/com.floor.register
 install -d -o root -g root -m755 /home/store/.local /home/store/.local/share /home/store/.local/share/applications /home/store/.local/share/gnome-shell
 install -d -o store -g store -m700 /home/store/.local/share/com.floor.register /home/store/.cache
+# GNOME needs writable state directories. Sticky root ownership protects the
+# root-owned launcher subdirectories while allowing normal per-user state files.
+for dir in .config .local/share .local/share/gnome-shell; do
+  chown root:store "/home/store/$dir"
+  chmod 1770 "/home/store/$dir"
+done
+for dir in .config/environment.d .config/systemd .config/gnome-session .local/share/gnome-shell/extensions .local/share/flatpak; do
+  install -d -o root -g root -m755 "/home/store/$dir"
+done
 # Account-specific execute denials also stop launching these via browser file dialogs.
-for bin in gnome-terminal gnome-terminal-server kgx xterm uxterm x-terminal-emulator gnome-console nautilus gnome-control-center gnome-software snap-store gnome-extensions gnome-extensions-app dconf-editor; do
+# Snap launchers share /usr/bin/snap; never deny that binary (Firefox uses it).
+setfacl -x u:store /usr/bin/snap 2>/dev/null || true
+for bin in ptyxis gnome-terminal gnome-terminal-server kgx xterm uxterm x-terminal-emulator gnome-console nautilus gnome-control-center gnome-software gnome-extensions gnome-extensions-app dconf-editor; do
   target=$(command -v "$bin" || true)
   [[ -z $target ]] || setfacl -m u:store:--- "$(readlink -f "$target")"
 done

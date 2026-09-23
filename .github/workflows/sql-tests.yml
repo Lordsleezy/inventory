@@ -45,7 +45,14 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install psql client
-        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client dconf-cli
+
+      - name: Validate employee desktop configuration
+        run: |
+          mkdir /tmp/floor-dconf-check
+          cp apps/pos/packaging/store-session/00-lockdown /tmp/floor-dconf-check/
+          dconf compile /tmp/floor-dconf-compiled /tmp/floor-dconf-check
+          bash -n apps/pos/packaging/install-store-session.sh apps/pos/packaging/verify-store-session.sh
 
       - name: Build and start Postgres + pgTAP
         run: |
