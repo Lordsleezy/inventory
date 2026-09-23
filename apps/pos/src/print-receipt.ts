@@ -5,6 +5,7 @@ import {
   type PosSettings,
   type PrintResult,
 } from "./local";
+import { loadStoreSetting } from "@floor/cloud";
 import {
   charsPerLine,
   receiptPrintJob,
@@ -12,6 +13,13 @@ import {
   type ReceiptBranding,
   type ReceiptPayload,
 } from "./receipt";
+
+/** Store-wide receipt branding saved by the receipt designer. */
+export async function loadReceiptBranding(): Promise<ReceiptBranding | null> {
+  const raw = await loadStoreSetting("receipt_branding");
+  if (!raw) return null;
+  return typeof raw === "string" ? (JSON.parse(raw) as ReceiptBranding) : (raw as ReceiptBranding);
+}
 
 function resolvePayload(
   payload: ReceiptPayload,
@@ -37,7 +45,8 @@ export async function printReceipt(
     // real barcode on raster printers (e.g. the Rongta F11).
     const width = charsPerLine("letter", settings.charsPerLine);
     const text = receiptText(resolved, width, branding);
-    const pdf = await receiptPdfBytes(text + "\n", resolved.reviewUrl ?? null);
+    const review = resolved.reviewUrl || branding?.reviewUrl || resolved.branding?.reviewUrl || null;
+    const pdf = await receiptPdfBytes(text + "\n", review);
     return printBytes(pdf, settings.printerPath, false);
   }
   const job = receiptPrintJob(resolved, settings.paperKind, settings.charsPerLine, branding);
@@ -57,5 +66,6 @@ export async function saveReceiptFile(
     settings.charsPerLine,
   );
   const text = receiptText(resolved, width, branding);
-  return saveReceiptPdf(text, path, resolved.reviewUrl ?? null);
+  const review = resolved.reviewUrl || branding?.reviewUrl || resolved.branding?.reviewUrl || null;
+  return saveReceiptPdf(text, path, review);
 }

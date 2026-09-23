@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { floorCloud, approveWithPin, authErrorMessage, voidTicket } from "@floor/cloud";
 import { usePos } from "../pos-context";
-import { printReceipt, saveReceiptFile } from "../print-receipt";
-import { type ReceiptPayload } from "../receipt";
+import { loadReceiptBranding, printReceipt, saveReceiptFile } from "../print-receipt";
+import { type ReceiptBranding, type ReceiptPayload } from "../receipt";
 import { callFunction } from "../functions";
 
 type ReceiptRow = {
@@ -76,6 +76,20 @@ export function ReceiptsScreen() {
   const [saveFor, setSaveFor] = useState<string | null>(null);
   const [emailFor, setEmailFor] = useState<string | null>(null);
   const [email, setEmail] = useState("");
+  const [branding, setBranding] = useState<ReceiptBranding | null>(null);
+  const [printingId, setPrintingId] = useState<string | null>(null);
+  const [rowStatus, setRowStatus] = useState<Record<string, { msg?: string; error?: string }>>({});
+
+  useEffect(() => {
+    if (!online) return;
+    void loadReceiptBranding()
+      .then(setBranding)
+      .catch(() => setBranding(null));
+  }, [online]);
+
+  function setRowResult(id: string, result: { msg?: string; error?: string }) {
+    setRowStatus((prev) => ({ ...prev, [id]: result }));
+  }
 
   useEffect(() => {
     if (!online) return;
@@ -112,31 +126,39 @@ export function ReceiptsScreen() {
     setError("");
     setMsg("");
     setSaveFor(null);
-    const payload = rowPayload(row, settings);
-    const result = await printReceipt(payload, settings);
-    if (result.printed) {
-      setMsg(result.detail || "Sent to printer.");
-      return;
+    setPrintingId(row.id);
+    setRowResult(row.id, { msg: "Printing…" });
+    try {
+      const payload = rowPayload(row, settings);
+      const result = await printReceipt(payload, settings, branding);
+      if (result.printed) {
+        setRowResult(row.id, { msg: result.detail || "Sent to printer." });
+        return;
+      }
+      setRowResult(row.id, { error: result.detail || "Print failed." });
+      if (result.code === "no_printer") setSaveFor(row.id);
+    } catch (err) {
+      setRowResult(row.id, { error: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setPrintingId(null);
     }
-    setError(result.detail || "Print failed.");
-    if (result.code === "no_printer") setSaveFor(row.id);
   }
 
   async function saveFile(row: ReceiptRow) {
     try {
-      const saved = await saveReceiptFile(rowPayload(row, settings), settings);
-      setMsg(`Saved receipt to ${saved.path}`);
+      const saved = await saveReceiptFile(rowPayload(row, settings), settings, branding);
+      setRowResult(row.id, { msg: `Saved receipt to ${saved.path}` });
       setSaveFor(null);
       setError("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setRowResult(row.id, { error: err instanceof Error ? err.message : String(err) });
     }
   }
 
   async function sendEmail(row: ReceiptRow) {
     const to = email.trim();
     if (!to || !row.ticket_id) {
-      setError("Email needs a ticket and address.");
+      setRowResult(row.id, { error: "Email needs a ticket and address." });
       return;
     }
     try {
@@ -146,12 +168,12 @@ export function ReceiptsScreen() {
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body.error || `Email failed (${res.status})`);
-      setMsg(`Receipt emailed to ${to}`);
+      setRowResult(row.id, { msg: `Receipt emailed to ${to}` });
       setEmailFor(null);
       setEmail("");
       setError("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setRowResult(row.id, { error: err instanceof Error ? err.message : String(err) });
     }
   }
 
@@ -275,6 +297,8 @@ export function ReceiptsScreen() {
                 SKU {row.sku} · {row.title}
               </div>
               <div className="muted">{new Date(row.sold_at).toLocaleString()}</div>
+              {rowStatus[row.id]?.error ? <p className="error">{rowStatus[row.id].error}</p> : null}
+              {!rowStatus[row.id]?.error && rowStatus[row.id]?.msg ? <p>{rowStatus[row.id].msg}</p> : null}
               {saveFor === row.id ? (
                 <button type="button" onClick={() => void saveFile(row)}>
                   Save as PDF/file
@@ -298,8 +322,12 @@ export function ReceiptsScreen() {
               ) : null}
             </div>
             <div className="grid">
-              <button type="button" disabled={Boolean(row.voided_at)} onClick={() => void reprint(row)}>
-                Reprint
+              <button
+                type="button"
+                disabled={Boolean(row.voided_at) || printingId === row.id}
+                onClick={() => void reprint(row)}
+              >
+                {printingId === row.id ? "Printing…" : "Reprint"}
               </button>
               <button
                 type="button"

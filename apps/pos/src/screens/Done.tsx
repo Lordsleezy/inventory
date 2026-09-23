@@ -4,7 +4,8 @@ import { formatCentsTotal } from "@floor/store";
 import type { TicketSummary } from "@floor/cloud";
 import { usePos } from "../pos-context";
 import { printTicketReceipt, ticketReceiptPayload } from "../sale-flow";
-import { saveReceiptFile } from "../print-receipt";
+import { loadReceiptBranding, saveReceiptFile } from "../print-receipt";
+import type { ReceiptBranding } from "../receipt";
 import { callFunction } from "../functions";
 
 type Stored = {
@@ -17,8 +18,9 @@ type Stored = {
 
 export function DoneScreen() {
   const { ticketId = "" } = useParams();
-  const { settings } = usePos();
+  const { settings, online } = usePos();
   const navigate = useNavigate();
+  const [branding, setBranding] = useState<ReceiptBranding | null>(null);
   const [stored, setStored] = useState<Stored | null>(null);
   const [msg, setMsg] = useState("");
   const [error, setError] = useState("");
@@ -34,6 +36,13 @@ export function DoneScreen() {
       setStored(null);
     }
   }, [ticketId]);
+
+  useEffect(() => {
+    if (!online) return;
+    void loadReceiptBranding()
+      .then(setBranding)
+      .catch(() => setBranding(null));
+  }, [online]);
 
   if (!stored) {
     return (
@@ -53,6 +62,7 @@ export function DoneScreen() {
     titles,
     reviewUrl: settings.reviewUrl || null,
     legal: settings.receiptLegal,
+    branding,
   };
 
   async function onPrint() {
@@ -80,7 +90,7 @@ export function DoneScreen() {
     setMsg("");
     setError("");
     try {
-      const saved = await saveReceiptFile(ticketReceiptPayload(summary, meta), settings);
+      const saved = await saveReceiptFile(ticketReceiptPayload(summary, meta), settings, branding);
       setMsg(`Saved receipt to ${saved.path}`);
       setOfferSave(false);
     } catch (err) {
