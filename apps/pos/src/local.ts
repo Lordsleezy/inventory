@@ -148,6 +148,8 @@ function memoryInvoke<T>(cmd: string, args: Record<string, unknown> = {}): T {
       memory.lastSavedReceipt = path;
       return { ok: true, path } as T;
     }
+    case "open_external":
+      return undefined as T;
     case "kiosk_power":
       return { ok: false, detail: "not a kiosk session" } as T;
     case "verify_admin_pin":
@@ -252,6 +254,11 @@ export async function saveReceiptPdf(
   qrUrl?: string | null,
 ): Promise<SaveReceiptResult> {
   return invoke("save_receipt_pdf", { text, path: path ?? null, qrUrl: qrUrl ?? null });
+}
+
+/** Open an https URL in the desktop browser (allowlisted hosts only). */
+export async function openExternal(url: string): Promise<void> {
+  await invoke("open_external", { url });
 }
 
 export async function kioskPower(action: "poweroff" | "reboot"): Promise<{ ok: boolean; detail: string }> {

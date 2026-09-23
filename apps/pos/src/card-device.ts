@@ -57,8 +57,9 @@ export async function unpairReader(): Promise<void> {
   const sb = floorCloud();
   const { data: session } = await sb.auth.getSession();
   const { data: staff } = await sb.from("staff").select("store_id").eq("user_id", session.session?.user.id ?? "").maybeSingle();
-  if (!staff?.store_id) return;
-  await sb.from("store_settings").delete().eq("store_id", staff.store_id).eq("key", "pos_reader_device_id");
+  if (!staff?.store_id) throw new Error("Not signed in as staff on this register.");
+  const { error } = await sb.from("store_settings").delete().eq("store_id", staff.store_id).eq("key", "pos_reader_device_id");
+  if (error) throw error;
 }
 
 export type CreatedCharge = {

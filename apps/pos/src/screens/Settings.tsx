@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { setStoreSetting, setStoreTaxRateBps, floorCloud } from "@floor/cloud";
 import { usePos } from "../pos-context";
@@ -8,13 +8,30 @@ import {
   kioskPower,
   listPrinters,
   printerPaperHint,
+  openExternal,
   setAdminPin,
   verifyAdminPin,
   type PrinterInfo,
 } from "../local";
 import { printReceipt } from "../print-receipt";
 import { DEFAULT_LEGAL, type PaperKind } from "../receipt";
-import { pairReader, unpairReader } from "../card-device";
+import { loadPairedReader, pairReader, unpairReader } from "../card-device";
+
+type SquareStatus = {
+  connected: boolean;
+  location_id?: string | null;
+  location_name?: string | null;
+  sandbox?: boolean;
+};
+
+/** rpc throws PostgrestError (not an Error) — pull .message off plain objects too. */
+function errText(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (err && typeof err === "object" && "message" in err) {
+    return String((err as { message: unknown }).message);
+  }
+  return String(err);
+}
 
 export function SettingsScreen() {
   const { settings, saveSettings, isAdmin, session, taxRateBps, refreshTax, refreshRewards, rewards } =
@@ -37,22 +54,88 @@ export function SettingsScreen() {
   const [printers, setPrinters] = useState<PrinterInfo[]>([]);
   const [printerDefault, setPrinterDefault] = useState<string | null>(null);
   const [printBusy, setPrintBusy] = useState(false);
-  const [squareStatus, setSquareStatus] = useState<{
-    connected: boolean;
-    location_id?: string | null;
-    location_name?: string | null;
-    sandbox?: boolean;
-  } | null>(null);
+  const [printStatus, setPrintStatus] = useState<{ ok: boolean; text: string } | null>(null);
+  const [squareStatus, setSquareStatus] = useState<SquareStatus | null>(null);
   const [locations, setLocations] = useState<{ id: string; name?: string }[]>([]);
+  const [squareBusy, setSquareBusy] = useState<string | null>(null);
+  const [squareNote, setSquareNote] = useState<{ ok: boolean; text: string } | null>(null);
+  const [authorizeUrl, setAuthorizeUrl] = useState("");
+  const [pairedReader, setPairedReader] = useState<{
+    id: string;
+    lastSeen: string;
+    squareAuthorized: boolean;
+  } | null>(null);
+  const [pairNote, setPairNote] = useState<{ ok: boolean; text: string } | null>(null);
+  const [terminalNote, setTerminalNote] = useState<{ ok: boolean; text: string } | null>(null);
+  const squarePoll = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  async function refreshSquare() {
-    const { data } = await floorCloud().rpc("my_square_connection_status");
-    setSquareStatus((data as typeof squareStatus) ?? { connected: false });
+  function stopSquarePoll() {
+    if (squarePoll.current) {
+      clearInterval(squarePoll.current);
+      squarePoll.current = null;
+    }
+  }
+
+  useEffect(() => () => stopSquarePoll(), []);
+
+  async function refreshSquare(): Promise<SquareStatus> {
+    const { data, error } = await floorCloud().rpc("my_square_connection_status");
+    if (error) throw error;
+    const status = (data as SquareStatus | null) ?? { connected: false };
+    setSquareStatus(status);
+    return status;
+  }
+
+  // After connect-start, watch for the OAuth callback to land (10 min cap).
+  function startSquarePoll() {
+    stopSquarePoll();
+    const deadline = Date.now() + 10 * 60_000;
+    squarePoll.current = setInterval(() => {
+      void refreshSquare()
+        .then((status) => {
+          if (status?.connected) {
+            stopSquarePoll();
+            setAuthorizeUrl("");
+            setSquareNote({
+              ok: true,
+              text: `Square connected (${status.sandbox ? "sandbox" : "production"}). Pick a location below.`,
+            });
+            void loadLocations();
+          } else if (Date.now() > deadline) {
+            stopSquarePoll();
+          }
+        })
+        .catch(() => {
+          /* transient — keep polling */
+        });
+    }, 3000);
+  }
+
+  async function refreshPairedReader() {
+    try {
+      setPairedReader(await loadPairedReader());
+    } catch {
+      /* keep the last known state */
+    }
   }
 
   useEffect(() => {
     if (!isAdmin) return;
-    void refreshSquare().catch(() => setSquareStatus({ connected: false }));
+    void refreshPairedReader();
+    const t = setInterval(() => void refreshPairedReader(), 5000);
+    return () => clearInterval(t);
+  }, [isAdmin]);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    void refreshSquare()
+      .then((status) => {
+        if (status?.connected && !status.location_id) void loadLocations();
+      })
+      .catch((err) => {
+        setSquareStatus({ connected: false });
+        setSquareNote({ ok: false, text: `Square status check failed: ${errText(err)}` });
+      });
   }, [isAdmin]);
 
   useEffect(() => {
@@ -82,8 +165,7 @@ export function SettingsScreen() {
 
   async function testPrint() {
     setPrintBusy(true);
-    setError("");
-    setMsg("");
+    setPrintStatus(null);
     try {
       const result = await printReceipt(
         {
@@ -105,10 +187,13 @@ export function SettingsScreen() {
         },
         { ...settings, paperKind, printerPath, reviewUrl, receiptLegal },
       );
-      if (result.printed) setMsg(result.detail || "Test receipt sent to printer.");
-      else setError(result.detail || "Test print failed.");
+      setPrintStatus(
+        result.printed
+          ? { ok: true, text: result.detail || "Test receipt sent to printer." }
+          : { ok: false, text: result.detail || "Test print failed." },
+      );
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setPrintStatus({ ok: false, text: `Test print failed: ${err instanceof Error ? err.message : String(err)}` });
     } finally {
       setPrintBusy(false);
     }
@@ -166,17 +251,40 @@ export function SettingsScreen() {
   }
 
   async function pairPhone() {
-    setError("");
+    setPairNote(null);
+    if (!pairCode.trim()) {
+      setPairNote({ ok: false, text: "Enter the code shown on the phone (Floor → Payment device)." });
+      return;
+    }
+    setSquareBusy("pair");
     try {
       const id = await pairReader(pairCode);
-      setMsg(`Paired phone reader ${id}`);
+      setPairNote({ ok: true, text: `Paired phone reader ${String(id).slice(0, 8)}.` });
+      await refreshPairedReader();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Pairing failed. Open Payment device on the phone.");
+      setPairNote({ ok: false, text: `${errText(err)} — open Payment device on the phone for a fresh code.` });
+    } finally {
+      setSquareBusy(null);
+    }
+  }
+
+  async function unpair() {
+    setPairNote(null);
+    setSquareBusy("unpair");
+    try {
+      await unpairReader();
+      setPairNote({ ok: true, text: "Unpaired." });
+      await refreshPairedReader();
+    } catch (err) {
+      setPairNote({ ok: false, text: errText(err) });
+    } finally {
+      setSquareBusy(null);
     }
   }
 
   async function connectSquare() {
-    setError("");
+    setSquareBusy("connect");
+    setSquareNote(null);
     try {
       const res = await callFunction("square-connect-start", { method: "POST", body: "{}" });
       const body = await res.json().catch(() => ({}));
@@ -186,15 +294,55 @@ export function SettingsScreen() {
         );
       }
       if (!body.url) throw new Error("Connect Square returned no authorize URL");
-      window.open(body.url, "_blank", "noopener,noreferrer");
-      setMsg("Complete Square authorize in the browser, then click Refresh status.");
+      setAuthorizeUrl(body.url);
+      startSquarePoll();
+      try {
+        await openExternal(body.url);
+        setSquareNote({
+          ok: true,
+          text: "Square opened in your browser. Log in and tap Allow — this screen updates automatically.",
+        });
+      } catch (err) {
+        setSquareNote({
+          ok: false,
+          text: `Couldn't open the browser: ${errText(err)}. Copy the link below into a browser (on any device) to finish.`,
+        });
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setSquareNote({ ok: false, text: errText(err) });
+    } finally {
+      setSquareBusy(null);
+    }
+  }
+
+  async function refreshSquareClicked() {
+    setSquareBusy("refresh");
+    setSquareNote(null);
+    try {
+      const status = await refreshSquare();
+      setSquareNote({
+        ok: true,
+        text: status?.connected ? "Square status: connected." : "Square status: not connected yet.",
+      });
+    } catch (err) {
+      setSquareNote({ ok: false, text: errText(err) });
+    } finally {
+      setSquareBusy(null);
+    }
+  }
+
+  async function copyAuthorizeUrl() {
+    try {
+      await navigator.clipboard.writeText(authorizeUrl);
+      setSquareNote({ ok: true, text: "Authorize link copied — paste it into a browser on any device." });
+    } catch (err) {
+      setSquareNote({ ok: false, text: `Copy failed: ${errText(err)}` });
     }
   }
 
   async function loadLocations() {
-    setError("");
+    setSquareBusy("locations");
+    setSquareNote(null);
     try {
       const res = await callFunction("square-list-locations", { method: "GET" });
       const body = await res.json().catch(() => ({}));
@@ -203,26 +351,58 @@ export function SettingsScreen() {
           `List locations failed (HTTP ${res.status}): ${body.error || body.message || "unknown"}`,
         );
       }
-      setLocations(body.locations || []);
-      setMsg(`Loaded ${(body.locations || []).length} Square location(s).`);
+      const list = body.locations || [];
+      setLocations(list);
+      setSquareNote(
+        list.length
+          ? { ok: true, text: `Loaded ${list.length} Square location(s).` }
+          : { ok: false, text: "Square returned no locations for this account." },
+      );
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setSquareNote({ ok: false, text: errText(err) });
+    } finally {
+      setSquareBusy(null);
     }
   }
 
   async function pickLocation(id: string, name?: string) {
-    setError("");
+    setSquareNote(null);
     try {
       const res = await callFunction("square-set-store-location", {
         method: "POST",
         body: JSON.stringify({ locationId: id, locationName: name || null }),
       });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error || "set_location_failed");
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(
+          `Set location failed (HTTP ${res.status}): ${body.error || body.message || "unknown"}`,
+        );
+      }
       await refreshSquare();
-      setMsg(`Square location set to ${name || id}.`);
+      setSquareNote({ ok: true, text: `Square location set to ${name || id}.` });
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setSquareNote({ ok: false, text: errText(err) });
+    }
+  }
+
+  async function terminalCode() {
+    setSquareBusy("terminal");
+    setTerminalNote(null);
+    try {
+      const res = await callFunction("square-device-code", {
+        method: "POST",
+        body: JSON.stringify({ name: "Floor iMac" }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(`(HTTP ${res.status}): ${body.error || body.message || "unknown"}`);
+      setTerminalNote({
+        ok: true,
+        text: body.code ? `Terminal pairing code: ${body.code}` : JSON.stringify(body),
+      });
+    } catch (err) {
+      setTerminalNote({ ok: false, text: errText(err) });
+    } finally {
+      setSquareBusy(null);
     }
   }
 
@@ -332,6 +512,7 @@ export function SettingsScreen() {
             {printBusy ? "Printing…" : "Print test receipt"}
           </button>
         </div>
+        {printStatus ? <p className={printStatus.ok ? undefined : "error"}>{printStatus.text}</p> : null}
         <label>
           Google review URL
           <input value={reviewUrl} onChange={(e) => setReviewUrl(e.target.value)} disabled={!isAdmin} />
@@ -357,15 +538,26 @@ export function SettingsScreen() {
                 }`
               : "Not connected — tap Connect Square, finish authorize in the browser, then Refresh status and pick a location. Phone charges will fail until this shows Connected."}
           </p>
+          {squareNote ? <p className={squareNote.ok ? undefined : "error"}>{squareNote.text}</p> : null}
+          {authorizeUrl && !squareStatus?.connected ? (
+            <>
+              <code style={{ wordBreak: "break-all", userSelect: "text" }}>{authorizeUrl}</code>
+              <div className="row">
+                <button type="button" onClick={() => void copyAuthorizeUrl()}>
+                  Copy link
+                </button>
+              </div>
+            </>
+          ) : null}
           <div className="row">
-            <button type="button" onClick={() => void connectSquare()}>
-              Connect Square
+            <button type="button" disabled={!!squareBusy} onClick={() => void connectSquare()}>
+              {squareBusy === "connect" ? "Opening Square…" : "Connect Square"}
             </button>
-            <button type="button" onClick={() => void refreshSquare().then(() => setMsg("Square status refreshed."))}>
-              Refresh status
+            <button type="button" disabled={!!squareBusy} onClick={() => void refreshSquareClicked()}>
+              {squareBusy === "refresh" ? "Refreshing…" : "Refresh status"}
             </button>
-            <button type="button" onClick={() => void loadLocations()}>
-              List locations
+            <button type="button" disabled={!!squareBusy} onClick={() => void loadLocations()}>
+              {squareBusy === "locations" ? "Loading…" : "List locations"}
             </button>
           </div>
           {locations.length ? (
@@ -384,28 +576,32 @@ export function SettingsScreen() {
       {isAdmin ? (
         <div className="card grid">
           <strong>Pair phone reader</strong>
+          <p className="muted">
+            {pairedReader
+              ? `Paired: ${pairedReader.id.slice(0, 8)} · Square authorized: ${pairedReader.squareAuthorized ? "yes" : "no"} · last seen ${new Date(pairedReader.lastSeen).toLocaleString()}`
+              : "No phone paired."}
+          </p>
           <p className="muted">Type the 6-digit code from Floor → Payment device.</p>
           <input value={pairCode} onChange={(e) => setPairCode(e.target.value.toUpperCase())} placeholder="ABC123" />
-          <button type="button" onClick={() => void pairPhone()}>
-            Pair
-          </button>
-          <button type="button" onClick={() => void unpairReader().then(() => setMsg("Unpaired."))}>
-            Unpair
-          </button>
+          <div className="row">
+            <button type="button" disabled={!!squareBusy} onClick={() => void pairPhone()}>
+              {squareBusy === "pair" ? "Pairing…" : "Pair"}
+            </button>
+            <button type="button" disabled={!!squareBusy || !pairedReader} onClick={() => void unpair()}>
+              {squareBusy === "unpair" ? "Unpairing…" : "Unpair"}
+            </button>
+          </div>
+          {pairNote ? <p className={pairNote.ok ? undefined : "error"}>{pairNote.text}</p> : null}
         </div>
       ) : null}
       {isAdmin ? (
         <div className="card grid">
           <strong>Square Terminal (later)</strong>
           <input value={terminalDeviceId} onChange={(e) => setTerminalDeviceId(e.target.value)} />
-          <button
-            type="button"
-            onClick={() =>
-              void callFunction("square-device-code", { method: "POST", body: JSON.stringify({ name: "Floor iMac" }) })
-            }
-          >
-            Get Terminal pairing code
+          <button type="button" disabled={!!squareBusy} onClick={() => void terminalCode()}>
+            {squareBusy === "terminal" ? "Loading…" : "Get Terminal pairing code"}
           </button>
+          {terminalNote ? <p className={terminalNote.ok ? undefined : "error"}>{terminalNote.text}</p> : null}
         </div>
       ) : null}
       <div className="card grid">

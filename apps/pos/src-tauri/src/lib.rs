@@ -898,6 +898,47 @@ fn printer_paper_hint(name: String) -> Result<serde_json::Value, String> {
   Ok(serde_json::json!({ "hint": "roll80" }))
 }
 
+/// Only allow http(s) URLs on hosts we actually want to hand to the browser:
+/// the Square OAuth authorize pages and our own Netlify site. Everything else
+/// (javascript:, file:, userinfo/port tricks, lookalike hosts) is refused.
+fn external_url_allowed(url: &str) -> bool {
+  let Some(rest) = url.strip_prefix("https://") else {
+    return false;
+  };
+  let host = rest
+    .split(|c| c == '/' || c == '?' || c == '#')
+    .next()
+    .unwrap_or("");
+  if host.is_empty() || host.contains('@') || host.contains(':') {
+    return false;
+  }
+  matches!(
+    host,
+    "connect.squareup.com" | "connect.squareupsandbox.com" | "squareup.com" | "inventoryobi.netlify.app"
+  )
+}
+
+/// Tauri webview can't open external URLs itself — launch the desktop browser.
+#[tauri::command]
+fn open_external(url: String) -> Result<(), String> {
+  if !external_url_allowed(&url) {
+    return Err(format!("blocked_url: {url}"));
+  }
+  let out = Command::new("xdg-open")
+    .arg(&url)
+    .output()
+    .map_err(|e| format!("Could not open the browser (xdg-open: {e})"))?;
+  if !out.status.success() {
+    let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+    return Err(if stderr.is_empty() {
+      format!("Could not open the browser (xdg-open exit code {})", out.status)
+    } else {
+      format!("Could not open the browser: {stderr}")
+    });
+  }
+  Ok(())
+}
+
 #[tauri::command]
 fn kiosk_power(action: String) -> Result<serde_json::Value, String> {
   if action != "poweroff" && action != "reboot" {
@@ -975,7 +1016,8 @@ pub fn run() {
       kiosk_power,
       set_admin_pin,
       verify_admin_pin,
-      has_admin_pin
+      has_admin_pin,
+      open_external
     ])
     .run(tauri::generate_context!())
     .expect("error while running Floor POS");
@@ -984,6 +1026,59 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  /// Every command registered in generate_handler! must be allowed by the
+  /// kiosk capability, or Tauri rejects the call at runtime (receipt_pdf and
+  /// printer_paper_hint once shipped unlisted and every letter print failed).
+  #[test]
+  fn every_registered_command_is_allowed_by_acl() {
+    let src = include_str!("lib.rs");
+    let start = src.find("generate_handler![").expect("handler list") + "generate_handler![".len();
+    let end = start + src[start..].find(']').expect("handler list end");
+    let commands: Vec<&str> = src[start..end]
+      .split(',')
+      .map(|s| s.trim())
+      .filter(|s| !s.is_empty())
+      .collect();
+    assert!(commands.len() > 10, "{commands:?}");
+    let perms = include_str!("../permissions/pos.toml");
+    let caps = include_str!("../capabilities/default.json");
+    for cmd in commands {
+      let ident = format!("allow-{}", cmd.replace('_', "-"));
+      assert!(
+        perms.contains(&format!("commands.allow = [\"{cmd}\"]")),
+        "{cmd} missing from permissions/pos.toml"
+      );
+      assert!(
+        caps.contains(&format!("\"{ident}\"")),
+        "{ident} missing from capabilities/default.json"
+      );
+    }
+  }
+
+  #[test]
+  fn external_url_allowed_accepts_square_authorize_urls() {
+    assert!(external_url_allowed(
+      "https://connect.squareup.com/oauth2/authorize?client_id=sq0idp-abc&scope=MERCHANT_PROFILE_READ+PAYMENTS_WRITE&session=false&redirect_uri=https%3A%2F%2Finventoryobi.netlify.app%2F.netlify%2Ffunctions%2Fsquare-oauth-callback"
+    ));
+    assert!(external_url_allowed(
+      "https://connect.squareupsandbox.com/oauth2/authorize?client_id=sandbox-sq0idb-abc&scope=MERCHANT_PROFILE_READ"
+    ));
+    assert!(external_url_allowed("https://squareup.com/login"));
+    assert!(external_url_allowed("https://inventoryobi.netlify.app/.netlify/functions/x"));
+  }
+
+  #[test]
+  fn external_url_allowed_rejects_non_allowlisted() {
+    assert!(!external_url_allowed("http://connect.squareup.com/oauth2/authorize"));
+    assert!(!external_url_allowed("javascript:alert(1)"));
+    assert!(!external_url_allowed("https://connect.squareup.com.evil.com/"));
+    assert!(!external_url_allowed("https://evil.com@connect.squareup.com/"));
+    assert!(!external_url_allowed("https://connect.squareup.com:444/"));
+    assert!(!external_url_allowed("file:///etc/passwd"));
+    assert!(!external_url_allowed("https://"));
+    assert!(!external_url_allowed(""));
+  }
 
   #[test]
   fn parses_lp_job_id() {

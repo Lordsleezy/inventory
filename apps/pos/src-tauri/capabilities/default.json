@@ -1,7 +1,9 @@
 {
   "identifier": "default",
   "description": "Floor register kiosk",
-  "windows": ["main"],
+  "windows": [
+    "main"
+  ],
   "permissions": [
     "core:default",
     "allow-cache-replace-units",
@@ -19,6 +21,9 @@
     "allow-kiosk-power",
     "allow-set-admin-pin",
     "allow-verify-admin-pin",
-    "allow-has-admin-pin"
+    "allow-has-admin-pin",
+    "allow-receipt-pdf",
+    "allow-printer-paper-hint",
+    "allow-open-external"
   ]
 }

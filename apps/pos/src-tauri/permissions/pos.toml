@@ -64,3 +64,15 @@ commands.allow = ["verify_admin_pin"]
 [[permission]]
 identifier = "allow-has-admin-pin"
 commands.allow = ["has_admin_pin"]
+
+[[permission]]
+identifier = "allow-receipt-pdf"
+commands.allow = ["receipt_pdf"]
+
+[[permission]]
+identifier = "allow-printer-paper-hint"
+commands.allow = ["printer_paper_hint"]
+
+[[permission]]
+identifier = "allow-open-external"
+commands.allow = ["open_external"]
