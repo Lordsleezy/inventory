@@ -13,6 +13,7 @@
  */
 import { Client, Environment } from "square/legacy";
 import { decryptSecret, encryptSecret, serviceClient } from "./server.mjs";
+import { squareOAuthFailure } from "./square-oauth-error.mjs";
 
 function env() {
   return (process.env.SQUARE_ENVIRONMENT || "sandbox").toLowerCase() === "production"
@@ -96,16 +97,24 @@ export function squareHttpErrorMessage(err, locationId) {
 
 export async function exchangeSquareCode(code) {
   const client = new Client({ environment: env() });
-  const redirectUri = process.env.SQUARE_REDIRECT_URL || process.env.OAUTH_REDIRECT_URI;
-  if (!redirectUri) throw new Error("SQUARE_REDIRECT_URL (or OAUTH_REDIRECT_URI) is not set");
-  const { result } = await client.oAuthApi.obtainToken({
-    clientId: process.env.SQUARE_APPLICATION_ID,
-    clientSecret: process.env.SQUARE_APPLICATION_SECRET,
-    code,
-    grantType: "authorization_code",
-    redirectUri,
-  });
-  return result;
+  const redirectUri = process.env.SQUARE_REDIRECT_URL;
+  if (!redirectUri) throw new Error("SQUARE_REDIRECT_URL is not set");
+  if (!process.env.SQUARE_APPLICATION_ID || !process.env.SQUARE_APPLICATION_SECRET) {
+    throw new Error("SQUARE_APPLICATION_ID or SQUARE_APPLICATION_SECRET is not set");
+  }
+  try {
+    const { result } = await client.oAuthApi.obtainToken({
+      clientId: process.env.SQUARE_APPLICATION_ID,
+      clientSecret: process.env.SQUARE_APPLICATION_SECRET,
+      code,
+      grantType: "authorization_code",
+      redirectUri,
+    });
+    return result;
+  } catch (err) {
+    const host = env() === Environment.Production ? "https://connect.squareup.com" : "https://connect.squareupsandbox.com";
+    throw squareOAuthFailure(err, `${host}/oauth2/token`, [code, process.env.SQUARE_APPLICATION_SECRET]);
+  }
 }
 
 export async function refreshSquareToken(refreshToken) {
@@ -209,7 +218,7 @@ export async function getStoreSquareAccess(storeId) {
 export async function upsertEncryptedSquareTokens(storeId, tokens, extras = {}) {
   const sb = serviceClient();
   const expires = tokens.expiresAt ? new Date(tokens.expiresAt) : new Date(Date.now() + 30 * 864e5);
-  await sb.from("square_connections").upsert({
+  const { error, status } = await sb.from("square_connections").upsert({
     store_id: storeId,
     merchant_id: tokens.merchantId || extras.merchant_id || null,
     location_id: extras.location_id ?? null,
@@ -220,6 +229,11 @@ export async function upsertEncryptedSquareTokens(storeId, tokens, extras = {}) 
     sandbox: (process.env.SQUARE_ENVIRONMENT || "sandbox") !== "production",
     updated_at: new Date().toISOString(),
   });
+  if (error) {
+    const url = `${new URL(process.env.SUPABASE_URL).origin}/rest/v1/square_connections`;
+    console.error("square_oauth_token_save_failed", { url, status, body: { code: error.code, message: error.message } });
+    throw new Error(`Supabase token save (HTTP ${status}): ${error.message}`);
+  }
 }
 
 export async function refundSquarePayment(storeId, paymentId, amountCents, reason) {

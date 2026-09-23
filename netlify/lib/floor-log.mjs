@@ -87,7 +87,10 @@ function requestSummary(event) {
   return {
     method: event?.httpMethod || null,
     path: event?.path || null,
-    query: redact(event?.queryStringParameters || {}),
+    query: redact({
+      ...event?.queryStringParameters,
+      ...(event?.queryStringParameters?.code ? { code: "[redacted]" } : {}),
+    }),
     body: redact(parseJson(event?.body)),
     contentType: headers["content-type"] || headers["Content-Type"] || null,
   };
