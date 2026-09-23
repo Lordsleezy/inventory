@@ -4,7 +4,8 @@
 -- web-checkout Netlify function) holds STORE_WEB_REWARDS_KEY and calls these
 -- RPCs as service_role. Service role has no staff row, so current_store_id()
 -- honors a transaction-local GUC for service_role only — authenticated staff
--- sessions are unaffected and cannot set it.
+-- sessions are unaffected and cannot set it. Deactivated staff still resolve
+-- to no store (admin_app_nav); this is the final definition, keep both rules.
 --
 -- Web flow: web_reserve_unit → Square payment (function) → web_finalize_ticket.
 -- All money math still lives in quote_ticket_totals / finalize_ticket.
@@ -17,7 +18,8 @@ security definer
 set search_path = public
 as $$
   select coalesce(
-    (select store_id from public.staff where user_id = auth.uid()),
+    (select store_id from public.staff
+      where user_id = auth.uid() and deactivated_at is null),
     case
       when auth.role() = 'service_role'
         then nullif(current_setting('floor.store_id', true), '')::uuid
