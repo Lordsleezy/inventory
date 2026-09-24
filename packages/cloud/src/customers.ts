@@ -11,7 +11,25 @@ export type Customer = {
   marketing_opt_in: boolean;
   first_purchase_discount_used: boolean;
   created_at: string;
+  signup_code?: string | null;
   balance: number;
+  credit_cents?: number;
+};
+
+export type CustomerListRow = {
+  id: string;
+  phone: string;
+  name: string | null;
+  email: string | null;
+  marketing_opt_in: boolean;
+  unsubscribed: boolean;
+  first_purchase_discount_used: boolean;
+  signup_code: string | null;
+  created_at: string;
+  points: number;
+  credit_cents: number;
+  spend_cents: number;
+  last_visit: string | null;
 };
 
 export type PointsLedgerRow = {
@@ -71,4 +89,46 @@ export async function customerPointsHistory(
   });
   if (error) throw mapSellError(error);
   return (data as PointsLedgerRow[]) ?? [];
+}
+
+export async function listCustomers(q?: string | null, limit = 200): Promise<CustomerListRow[]> {
+  await assertOnline();
+  const { data, error } = await floorCloud().rpc("list_customers", {
+    p_q: q || null,
+    p_limit: limit,
+  });
+  if (error) throw mapSellError(error);
+  return (data as CustomerListRow[]) ?? [];
+}
+
+export async function adjustCustomerPoints(args: {
+  customerId: string;
+  delta: number;
+  note?: string | null;
+}): Promise<Customer> {
+  await assertOnline();
+  const { data, error } = await floorCloud().rpc("adjust_customer_points", {
+    p_customer_id: args.customerId,
+    p_delta: args.delta,
+    p_note: args.note ?? null,
+  });
+  if (error) throw mapSellError(error);
+  return data as Customer;
+}
+
+export async function queueLoyaltyCampaign(args: {
+  subject: string;
+  body: string;
+  minSpendCents?: number;
+  days?: number | null;
+}): Promise<{ campaign_id: string; queued: number }> {
+  await assertOnline();
+  const { data, error } = await floorCloud().rpc("queue_loyalty_campaign", {
+    p_subject: args.subject,
+    p_body: args.body,
+    p_min_spend_cents: args.minSpendCents ?? 0,
+    p_days: args.days ?? null,
+  });
+  if (error) throw mapSellError(error);
+  return data as { campaign_id: string; queued: number };
 }

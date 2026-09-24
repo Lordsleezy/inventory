@@ -10,7 +10,7 @@
 [functions."dispatch-alerts"]
   schedule = "*/5 * * * *"
 
-[functions."ebay-sync"]
+[functions."loyalty-email"]
   schedule = "*/5 * * * *"
 
 [build.processing.html]

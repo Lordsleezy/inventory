@@ -187,10 +187,25 @@ export function DoneScreen() {
             <span>{formatCentsTotal(changeCents)}</span>
           </div>
         ) : null}
+        {summary.signup_discount_cents ? (
+          <div className="row muted">
+            <span>New-customer 5%</span>
+            <span>−{formatCentsTotal(summary.signup_discount_cents)}</span>
+          </div>
+        ) : null}
+        {summary.points_redeemed ? (
+          <div className="row muted">
+            <span>Store credit</span>
+            <span>−{formatCentsTotal(summary.points_redeemed)}</span>
+          </div>
+        ) : null}
         {summary.points_earned ? (
           <div className="row muted">
             <span>Points earned</span>
-            <span>{summary.points_earned}</span>
+            <span>
+              {summary.points_earned}
+              {summary.points_balance != null ? ` · balance ${summary.points_balance}` : ""}
+            </span>
           </div>
         ) : null}
         {summary.payment_method === "card" || summary.payment_method === "split" ? (

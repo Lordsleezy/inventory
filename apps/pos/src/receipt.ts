@@ -259,7 +259,7 @@ export function receiptText(payload: ReceiptPayload, width: number, brandingInpu
       ? pair("Pts earned", String(payload.pointsEarned), width)
       : "",
     branding.showPoints !== false && payload.pointsRedeemed != null
-      ? pair("Pts used", String(payload.pointsRedeemed), width)
+      ? pair("Store cr.", formatCentsTotal(payload.pointsRedeemed), width)
       : "",
     branding.showPoints !== false && payload.pointsBalance != null
       ? pair("Pts bal", String(payload.pointsBalance), width)
@@ -396,7 +396,7 @@ ${payload.cardFeeCents ? money("Card fee", payload.cardFeeCents) : ""}
 ${money("Total", payload.totalCents, true)}
 <div style="display:flex;justify-content:space-between"><span>Tender</span><span>${escape(formatTender(payload, branding))}</span></div>
 ${branding.showPoints !== false && payload.pointsEarned != null ? `<div style="display:flex;justify-content:space-between"><span>Points earned</span><span>${payload.pointsEarned}</span></div>` : ""}
-${branding.showPoints !== false && payload.pointsRedeemed ? `<div style="display:flex;justify-content:space-between"><span>Points used</span><span>${payload.pointsRedeemed}</span></div>` : ""}
+${branding.showPoints !== false && payload.pointsRedeemed ? `<div style="display:flex;justify-content:space-between"><span>Store credit</span><span>−${formatCentsTotal(payload.pointsRedeemed)}</span></div>` : ""}
 ${branding.showPoints !== false && payload.pointsBalance != null ? `<div style="display:flex;justify-content:space-between"><span>Points balance</span><span>${payload.pointsBalance}</span></div>` : ""}
 </div>
 ${review ? `<p style="margin-top:16px"><a href="${escape(review)}">Leave us a Google review</a></p>` : ""}

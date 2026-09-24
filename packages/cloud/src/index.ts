@@ -63,7 +63,11 @@ export {
   upsertCustomer,
   customerPointsHistory,
   customerPointsBalance,
+  listCustomers,
+  adjustCustomerPoints,
+  queueLoyaltyCampaign,
   type Customer,
+  type CustomerListRow,
   type PointsLedgerRow,
 } from "./customers.ts";
 export {

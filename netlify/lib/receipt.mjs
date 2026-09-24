@@ -107,7 +107,9 @@ export function buildReceiptText(sales, extras, branding, clerkName) {
   lines.push(`TOTAL     ${money(total)}`);
   lines.push(`Tender    ${tenderLabel(first, extras)}`);
   if (branding.showPoints !== false && extras?.points_earned) lines.push(`Pts earned ${extras.points_earned}`);
-  if (branding.showPoints !== false && extras?.points_redeemed) lines.push(`Pts used   ${extras.points_redeemed}`);
+  if (branding.showPoints !== false && extras?.points_redeemed) {
+    lines.push(`Store cr. -${money(extras.points_redeemed)}`);
+  }
   lines.push("--------------------------------");
   lines.push(branding.legal || "");
   if (branding.returnPolicy) lines.push(branding.returnPolicy);
@@ -158,7 +160,7 @@ ${cardFee > 0 ? row("Card fee", cardFee) : ""}
 <div style="display:flex;justify-content:space-between;font-weight:700;font-size:18px"><span>Total</span><span>${escape(money(total))}</span></div>
 <div style="display:flex;justify-content:space-between"><span>Tender</span><span>${escape(tenderLabel(first, extras))}</span></div>
 ${branding.showPoints !== false && extras?.points_earned ? `<div style="display:flex;justify-content:space-between"><span>Points earned</span><span>${extras.points_earned}</span></div>` : ""}
-${branding.showPoints !== false && extras?.points_redeemed ? `<div style="display:flex;justify-content:space-between"><span>Points used</span><span>${extras.points_redeemed}</span></div>` : ""}
+${branding.showPoints !== false && extras?.points_redeemed ? `<div style="display:flex;justify-content:space-between"><span>Store credit</span><span>-${escape(money(extras.points_redeemed))}</span></div>` : ""}
 </div>
 ${branding.reviewUrl ? `<p style="margin-top:16px"><a href="${escape(branding.reviewUrl)}">Leave us a Google review</a></p>` : ""}
 <p style="color:#555;font-size:12px;margin-top:20px">${escape(branding.legal || "")}</p>
@@ -167,13 +169,14 @@ ${branding.footerMessage ? `<p style="color:#555">${escape(branding.footerMessag
 </body></html>`;
 }
 
-export async function sendResend({ to, subject, text, html }) {
+export async function sendResend({ to, subject, text, html, headers }) {
   const key = process.env.RESEND_API_KEY;
   const from = process.env.RESEND_FROM;
   if (!key || !from || !to)
     return { skipped: true, reason: !key || !from ? "missing_resend_env" : "missing_to" };
   const body = { from, to: [to], subject, text };
   if (html) body.html = html;
+  if (headers) body.headers = headers;
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },

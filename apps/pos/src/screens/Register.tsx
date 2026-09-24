@@ -24,6 +24,7 @@ import {
   withdrawListingsAfterSale,
   type SalePhase,
 } from "../sale-flow";
+import { callFunction } from "../functions";
 
 type ManualPayment = {
   quote: TicketQuote;
@@ -123,9 +124,16 @@ export function RegisterScreen() {
   }, [customer, discounted.join(","), rewards.rewardsSignupDiscountBps]);
 
   const customerBalance = customer?.balance ?? 0;
+  const creditAvailable =
+    customer?.credit_cents ?? customerBalance * rewards.rewardsPointValueCents;
   const redeemCents = Math.min(
     redeemPoints * rewards.rewardsPointValueCents,
     Math.max(0, discounted.reduce((a, b) => a + b, 0) - signupPreviewCents),
+  );
+  const earnPreview = Math.floor(
+    (Math.max(0, discounted.reduce((a, b) => a + b, 0) - signupPreviewCents - redeemCents) *
+      rewards.rewardsPointsPerDollar) /
+      100,
   );
 
   const taxableSubtotal = Math.max(
@@ -401,14 +409,24 @@ export function RegisterScreen() {
   async function createCustomer() {
     setError("");
     try {
+      const name = signupName.trim();
+      const email = signupEmail.trim();
+      if (!name || !email.includes("@")) {
+        setError("Name and email — that’s it.");
+        return;
+      }
       const created = await upsertCustomer({
         phone: customerPhone,
-        name: signupName.trim() || null,
-        email: signupEmail.trim() || null,
+        name,
+        email,
         marketingOptIn: signupMarketing,
       });
       setCustomer(created);
       setSignupOpen(false);
+      void callFunction("loyalty-email", {
+        method: "POST",
+        body: JSON.stringify({ action: "drain" }),
+      }).catch(() => {});
     } catch (err) {
       setError(authErrorMessage(err));
     }
@@ -619,8 +637,14 @@ export function RegisterScreen() {
           ) : null}
           {redeemCents ? (
             <div className="summary-row muted">
-              <span>Points redeem</span>
+              <span>Store credit</span>
               <span>−{formatCentsTotal(redeemCents)}</span>
+            </div>
+          ) : null}
+          {customer && lines.length ? (
+            <div className="summary-row muted">
+              <span>Points this sale</span>
+              <span>+{earnPreview}</span>
             </div>
           ) : null}
           <div className="summary-row">
@@ -665,6 +689,12 @@ export function RegisterScreen() {
                 placeholder="Phone"
                 value={customerPhone}
                 onChange={(e) => setCustomerPhone(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void lookupCustomer();
+                  }
+                }}
                 inputMode="tel"
                 style={{ flex: 1 }}
               />
@@ -675,25 +705,46 @@ export function RegisterScreen() {
             {customer ? (
               <div className="muted">
                 {customer.name || "Customer"} · {customer.phone}
-                {customerBalance ? ` · ${customerBalance} pts` : ""}
+                <div>
+                  {customerBalance} pts · {formatCentsTotal(creditAvailable)} store credit
+                  {!customer.first_purchase_discount_used
+                    ? ` · 5% new (${customer.signup_code || "on account"})`
+                    : ""}
+                </div>
                 <button type="button" className="ghost" onClick={() => { setCustomer(null); setRedeemPoints(0); }}>
                   Clear
                 </button>
               </div>
             ) : null}
             {customer && customerBalance > 0 ? (
-              <label>
-                Redeem points
-                <input
-                  type="number"
-                  min={0}
-                  max={customerBalance}
-                  value={redeemPoints || ""}
-                  onChange={(e) =>
-                    setRedeemPoints(Math.max(0, Math.min(customerBalance, Number(e.target.value) || 0)))
-                  }
-                />
-              </label>
+              <div className="row" style={{ gap: "0.4rem", alignItems: "center" }}>
+                <label style={{ flex: 1 }}>
+                  Apply credit (points)
+                  <input
+                    type="number"
+                    min={0}
+                    max={customerBalance}
+                    value={redeemPoints || ""}
+                    onChange={(e) =>
+                      setRedeemPoints(Math.max(0, Math.min(customerBalance, Number(e.target.value) || 0)))
+                    }
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const maxBySub = rewards.rewardsPointValueCents
+                      ? Math.floor(
+                          Math.max(0, discounted.reduce((a, b) => a + b, 0) - signupPreviewCents) /
+                            rewards.rewardsPointValueCents,
+                        )
+                      : 0;
+                    setRedeemPoints(Math.min(customerBalance, maxBySub));
+                  }}
+                >
+                  Apply all
+                </button>
+              </div>
             ) : null}
           </div>
 
@@ -874,7 +925,7 @@ export function RegisterScreen() {
         <div className="modal">
           <div className="card grid">
             <h2>New customer</h2>
-            <p className="muted">Phone {customerPhone}</p>
+            <p className="muted">Phone {customerPhone}. Name and email only — we never text this number.</p>
             <label>
               Name
               <input value={signupName} onChange={(e) => setSignupName(e.target.value)} autoFocus />
@@ -885,7 +936,7 @@ export function RegisterScreen() {
             </label>
             <label style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
               <input type="checkbox" checked={signupMarketing} onChange={(e) => setSignupMarketing(e.target.checked)} />
-              Marketing opt-in
+              Email store news (optional). We will not text you.
             </label>
             <div className="row">
               <button type="button" onClick={() => setSignupOpen(false)}>

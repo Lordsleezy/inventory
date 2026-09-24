@@ -10,6 +10,7 @@ import {
   type StaffSession,
 } from "@floor/cloud";
 import { RegisterScreen } from "./screens/Register";
+import { CustomersScreen } from "./screens/Customers";
 import { DoneScreen } from "./screens/Done";
 import { LoginScreen } from "./screens/Login";
 import { ReceiptsScreen } from "./screens/Receipts";
@@ -187,6 +188,7 @@ function Shell() {
           <Route path="/inventory/receive" element={<ReceiveScreen />} />
           <Route path="/inventory/:sku" element={<UnitDetailScreen />} />
           <Route path="/receipts" element={<ReceiptsScreen />} />
+          <Route path="/customers" element={isAdmin ? <CustomersScreen /> : <Navigate to="/" replace />} />
           <Route path="/reports" element={isAdmin ? <ReportsScreen /> : <Navigate to="/" replace />} />
           <Route path="/employees" element={isAdmin ? <EmployeesScreen /> : <Navigate to="/" replace />} />
           <Route path="/setup" element={isAdmin ? <SettingsScreen /> : <Navigate to="/" replace />} />
@@ -201,6 +203,7 @@ function Shell() {
       <nav className="bottom-nav">
         {isAdmin ? <Link to="/setup">Setup</Link> : null}
         {isAdmin ? <Link to="/employees">Employees</Link> : null}
+        {isAdmin ? <Link to="/customers">Customers</Link> : null}
         {isAdmin ? <Link to="/reports">Reports</Link> : null}
         <Link to="/receipts">Receipts{pendingOutbox ? ` (${pendingOutbox})` : ""}</Link>
         <Link to="/inventory">Inventory</Link>

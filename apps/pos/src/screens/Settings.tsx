@@ -203,7 +203,9 @@ export function SettingsScreen() {
           Point value (cents each)
           <input value={pointValueCents} onChange={(e) => setPointValueCents(e.target.value)} disabled={!isAdmin} />
         </label>
-        <p className="muted">Default: 1 pt / $1 and 1¢ per point (100 pts = $1).</p>
+        <p className="muted">
+          Default: 1 point per dollar, 100 points = $1 store credit (1% back). On a $2,400 fridge that is $24.
+        </p>
       </div>
 
       <div className="card grid">

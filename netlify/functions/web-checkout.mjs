@@ -22,6 +22,7 @@ import { serviceClient, json, corsHeaders } from "../lib/server.mjs";
 import { wrapHandler } from "../lib/floor-log.mjs";
 import { getStoreSquareAccess, squareClient, refundSquarePayment } from "../lib/square.mjs";
 import { buildReceiptHtml, buildReceiptText, mergeBranding, sendResend } from "../lib/receipt.mjs";
+import { drainLoyaltyEmail } from "./loyalty-email.mjs";
 
 function rewardsKey() {
   return process.env.STORE_WEB_REWARDS_KEY || process.env.CONNECTIONS_KEY || "";
@@ -96,6 +97,7 @@ async function handleBegin(sb, body) {
       p_phone: phone,
       p_name: body.name || null,
       p_email: body.email || null,
+      p_marketing_opt_in: Boolean(body.marketing_opt_in),
     });
     if (custErr) return json(500, { error: custErr.message }, cors);
     customer = cust;
@@ -128,10 +130,12 @@ async function handleBegin(sb, body) {
       quote: {
         subtotal_cents: quote.subtotal_cents,
         discount_cents: (quote.discount_cents || 0) + (quote.signup_discount_cents || 0),
+        signup_discount_cents: quote.signup_discount_cents || 0,
         redeem_cents: quote.redeem_cents || 0,
         tax_cents: quote.tax_cents,
         card_fee_cents: quote.card_fee_cents || 0,
         total_cents: quote.total_cents,
+        earn_points_preview: Math.floor(Number(quote.subtotal_cents || 0) / 100),
       },
       square: cfg,
       store_name: branding.storeName,
@@ -210,6 +214,7 @@ async function handlePay(sb, body) {
       p_phone: phone,
       p_name: body.name || null,
       p_email: body.email || null,
+      p_marketing_opt_in: Boolean(body.marketing_opt_in),
     });
     customer = cust;
   }
@@ -313,6 +318,7 @@ async function handlePay(sb, body) {
       /* receipt email is best-effort */
     }
   }
+  void drainLoyaltyEmail().catch(() => {});
 
   return json(200, { ok: true, summary, emailed }, cors);
 }
