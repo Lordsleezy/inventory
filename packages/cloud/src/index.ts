@@ -60,14 +60,19 @@ export {
 } from "./ticket.ts";
 export {
   lookupCustomerByPhone,
+  searchCustomersByPhone,
   upsertCustomer,
   customerPointsHistory,
   customerPointsBalance,
+  loadCustomerProfile,
   listCustomers,
   adjustCustomerPoints,
   queueLoyaltyCampaign,
   type Customer,
   type CustomerListRow,
+  type CustomerProfile,
+  type CustomerPurchase,
+  type CustomerPurchaseLine,
   type PointsLedgerRow,
 } from "./customers.ts";
 export {

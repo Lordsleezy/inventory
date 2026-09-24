@@ -10,9 +10,7 @@ import {
   finalizeTicket,
   quoteTicketTotals,
   type TicketQuote,
-  lookupCustomerByPhone,
   SellError,
-  upsertCustomer,
   type Customer,
   type TicketSummary,
 } from "@floor/cloud";
@@ -24,7 +22,7 @@ import {
   withdrawListingsAfterSale,
   type SalePhase,
 } from "../sale-flow";
-import { callFunction } from "../functions";
+import { CustomerAttach } from "./CustomerAttach";
 
 type ManualPayment = {
   quote: TicketQuote;
@@ -79,12 +77,7 @@ export function RegisterScreen() {
   const [editSku, setEditSku] = useState<string | null>(null);
   const [splitOpen, setSplitOpen] = useState(false);
   const [splitCashDraft, setSplitCashDraft] = useState("");
-  const [customerPhone, setCustomerPhone] = useState("");
   const [customer, setCustomer] = useState<Customer | null>(null);
-  const [signupOpen, setSignupOpen] = useState(false);
-  const [signupName, setSignupName] = useState("");
-  const [signupEmail, setSignupEmail] = useState("");
-  const [signupMarketing, setSignupMarketing] = useState(false);
   const [redeemPoints, setRedeemPoints] = useState(0);
   const [pinKind, setPinKind] = useState<PinKind | null>(null);
   const [pinSku, setPinSku] = useState<string | null>(null);
@@ -128,7 +121,6 @@ export function RegisterScreen() {
   }, [customer, discounted.join(","), rewards.rewardsSignupDiscountBps]);
 
   const customerBalance = customer?.balance ?? 0;
-  const creditAvailable = customer?.credit_cents ?? customerBalance * rewards.rewardsPointValueCents * 10;
   const redeemCents = Math.min(
     Math.round(redeemPoints * 10) * rewards.rewardsPointValueCents,
     Math.max(0, discounted.reduce((a, b) => a + b, 0) - signupPreviewCents),
@@ -214,7 +206,6 @@ export function RegisterScreen() {
     setDiscountPct(0);
     setDiscountApprovalId(null);
     setCustomer(null);
-    setCustomerPhone("");
     setRedeemPoints(0);
     navigate(`/done/${summary.ticket_id}`, { replace: true });
   }
@@ -389,50 +380,6 @@ export function RegisterScreen() {
       if (prev.length >= 8) return prev;
       return prev + d;
     });
-  }
-
-  async function lookupCustomer() {
-    setError("");
-    try {
-      const found = await lookupCustomerByPhone(customerPhone);
-      if (found) {
-        setCustomer(found);
-        setRedeemPoints(0);
-      } else {
-        setCustomer(null);
-        setSignupOpen(true);
-        setSignupName("");
-        setSignupEmail("");
-      }
-    } catch (err) {
-      setError(authErrorMessage(err));
-    }
-  }
-
-  async function createCustomer() {
-    setError("");
-    try {
-      const name = signupName.trim();
-      const email = signupEmail.trim();
-      if (!name || !email.includes("@")) {
-        setError("Name and email — that’s it.");
-        return;
-      }
-      const created = await upsertCustomer({
-        phone: customerPhone,
-        name,
-        email,
-        marketingOptIn: signupMarketing,
-      });
-      setCustomer(created);
-      setSignupOpen(false);
-      void callFunction("loyalty-email", {
-        method: "POST",
-        body: JSON.stringify({ action: "drain" }),
-      }).catch(() => {});
-    } catch (err) {
-      setError(authErrorMessage(err));
-    }
   }
 
   function applyDiscountDraft() {
@@ -685,41 +632,20 @@ export function RegisterScreen() {
             </div>
           )}
 
-          <div className="customer-block">
-            <strong>Customer</strong>
-            <div className="row" style={{ gap: "0.4rem" }}>
-              <input
-                placeholder="Phone"
-                value={customerPhone}
-                onChange={(e) => setCustomerPhone(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    void lookupCustomer();
-                  }
-                }}
-                inputMode="tel"
-                style={{ flex: 1 }}
-              />
-              <button type="button" onClick={() => void lookupCustomer()}>
-                Find
-              </button>
-            </div>
-            {customer ? (
-              <div className="muted">
-                {customer.name || "Customer"} · {customer.phone}
-                <div>
-                  {formatPoints(customerBalance)} points · {formatCentsTotal(creditAvailable)} available credit
-                  {!customer.first_purchase_discount_used
-                    ? ` · 5% new (${customer.signup_code || "on account"})`
-                    : ""}
-                </div>
-                <button type="button" className="ghost" onClick={() => { setCustomer(null); setRedeemPoints(0); }}>
-                  Clear
-                </button>
-              </div>
-            ) : null}
-            {customer && customerBalance > 0 ? (
+          <CustomerAttach
+            customer={customer}
+            disabled={phase !== "idle"}
+            onAttach={(c) => {
+              setCustomer(c);
+              setRedeemPoints(0);
+              setError("");
+            }}
+            onClear={() => {
+              setCustomer(null);
+              setRedeemPoints(0);
+            }}
+          />
+          {customer && customerBalance > 0 ? (
               <div className="row" style={{ gap: "0.4rem", alignItems: "center" }}>
                 <label style={{ flex: 1 }}>
                   Apply credit (points; 100 points = $10)
@@ -750,7 +676,6 @@ export function RegisterScreen() {
                 </button>
               </div>
             ) : null}
-          </div>
 
           <div>
             <div className="summary-row">
@@ -919,35 +844,6 @@ export function RegisterScreen() {
               </button>
               <button type="button" className="primary" onClick={() => void confirmSplit()}>
                 Continue to card amount
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {signupOpen ? (
-        <div className="modal">
-          <div className="card grid">
-            <h2>New customer</h2>
-            <p className="muted">Phone {customerPhone}. Name and email only — we never text this number.</p>
-            <label>
-              Name
-              <input value={signupName} onChange={(e) => setSignupName(e.target.value)} autoFocus />
-            </label>
-            <label>
-              Email
-              <input value={signupEmail} onChange={(e) => setSignupEmail(e.target.value)} />
-            </label>
-            <label style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
-              <input type="checkbox" checked={signupMarketing} onChange={(e) => setSignupMarketing(e.target.checked)} />
-              Email store news (optional). We will not text you.
-            </label>
-            <div className="row">
-              <button type="button" onClick={() => setSignupOpen(false)}>
-                Cancel
-              </button>
-              <button type="button" className="primary" onClick={() => void createCustomer()}>
-                Save customer
               </button>
             </div>
           </div>

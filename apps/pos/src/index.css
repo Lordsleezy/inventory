@@ -284,6 +284,97 @@ label { display: grid; gap: 0.3rem; }
   display: grid;
   gap: 0.45rem;
 }
+.register {
+  position: relative;
+}
+.register-customer-chip {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.75rem;
+  z-index: 8;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.45rem 0.85rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: 0 4px 14px rgba(26, 29, 38, 0.08);
+  font-weight: 600;
+}
+.register-customer-chip-name {
+  max-width: 14rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.customer-typeahead {
+  position: relative;
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+.customer-typeahead input { flex: 1; }
+.customer-dropdown {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 20;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 10px 28px rgba(26, 29, 38, 0.14);
+  max-height: 280px;
+  overflow: auto;
+  display: grid;
+}
+.customer-dropdown-hit {
+  display: grid;
+  gap: 0.15rem;
+  text-align: left;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0.7rem 0.85rem;
+  border-bottom: 1px solid var(--border);
+}
+.customer-dropdown-hit:last-child { border-bottom: 0; }
+.customer-dropdown-hit:hover { background: #f0f3f8; }
+.customer-dropdown-hit.create { background: #f7fafc; }
+.customer-dropdown-empty { padding: 0.7rem 0.85rem; }
+.customer-profile-modal {
+  max-width: 720px;
+  max-height: min(88vh, 900px);
+  overflow: auto;
+}
+.customer-profile-meta {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem 1rem;
+}
+.customer-history-list {
+  display: grid;
+  gap: 0.65rem;
+  max-height: 280px;
+  overflow: auto;
+}
+.customer-history-ticket {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.65rem 0.75rem;
+  background: #fafbfc;
+}
+.customer-history-ticket.voided { opacity: 0.65; }
+.customer-history-ticket ul {
+  margin: 0.35rem 0 0;
+  padding-left: 1.1rem;
+}
+.customer-points-row {
+  border-bottom: 1px solid var(--border);
+  padding: 0.35rem 0;
+  font-size: 0.95rem;
+}
 .login-shell {
   min-height: 100vh;
   display: grid;

@@ -61,6 +61,82 @@ export async function lookupCustomerByPhone(phone: string): Promise<Customer | n
   return data ? customerView(data as Customer) : null;
 }
 
+/** Partial phone prefix search for register typeahead (min 3 digits server-side). */
+export async function searchCustomersByPhone(phone: string, limit = 8): Promise<Customer[]> {
+  await assertOnline();
+  const digits = phone.replace(/\D/g, "");
+  if (digits.length < 3) return [];
+  const { data, error } = await floorCloud().rpc("search_customers_by_phone", {
+    p_phone: digits,
+    p_limit: limit,
+  });
+  if (error) throw mapSellError(error);
+  return ((data as Customer[]) ?? []).map((row) => customerView(row));
+}
+
+export type CustomerPurchaseLine = {
+  sku: string;
+  qty: number;
+  price_cents: number;
+  tax_cents: number;
+  title: string;
+  receipt_no: string | null;
+};
+
+export type CustomerPurchase = {
+  ticket_id: string;
+  sold_at: string;
+  channel: string;
+  payment_method: string | null;
+  subtotal_cents: number;
+  tax_cents: number;
+  total_cents: number;
+  discount_cents: number;
+  signup_discount_cents: number;
+  points_earned: number;
+  points_redeemed: number;
+  voided: boolean;
+  lines: CustomerPurchaseLine[];
+};
+
+export type CustomerProfile = {
+  customer: Customer;
+  purchases: CustomerPurchase[];
+  points: PointsLedgerRow[];
+};
+
+export async function loadCustomerProfile(
+  customerId: string,
+  historyLimit = 50,
+  pointsLimit = 50,
+): Promise<CustomerProfile> {
+  await assertOnline();
+  const { data, error } = await floorCloud().rpc("customer_profile", {
+    p_customer_id: customerId,
+    p_history_limit: historyLimit,
+    p_points_limit: pointsLimit,
+  });
+  if (error) throw mapSellError(error);
+  const raw = data as {
+    customer: Customer;
+    purchases: CustomerPurchase[];
+    points: PointsLedgerRow[];
+  };
+  return {
+    customer: customerView(raw.customer),
+    purchases: (raw.purchases ?? []).map((p) => ({
+      ...p,
+      points_earned: customerPoints(p.points_earned),
+      points_redeemed: customerPoints(p.points_redeemed),
+    })),
+    points: (raw.points ?? []).map((row) => ({
+      ...row,
+      delta: customerPoints(row.delta),
+      balance_after: customerPoints(row.balance_after),
+    })),
+  };
+}
+
 export async function upsertCustomer(args: {
   phone: string;
   name?: string | null;
