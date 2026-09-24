@@ -264,6 +264,9 @@ export function receiptText(payload: ReceiptPayload, width: number, brandingInpu
     branding.showPoints !== false && payload.pointsBalance != null
       ? pair("Pts bal", String(payload.pointsBalance), width)
       : "",
+    branding.showPoints !== false
+      ? wrapLine("Every $100 spent = 10 points. Every 100 points = $10 off.", width).join("\n")
+      : "",
     payload.provisional ? wrapLine("PROVISIONAL — not a final sale until synced.", width).join("\n") : "",
     "-".repeat(Math.min(width, 42)),
     ...wrapLine(legal, width),
@@ -398,6 +401,7 @@ ${money("Total", payload.totalCents, true)}
 ${branding.showPoints !== false && payload.pointsEarned != null ? `<div style="display:flex;justify-content:space-between"><span>Points earned</span><span>${payload.pointsEarned}</span></div>` : ""}
 ${branding.showPoints !== false && payload.pointsRedeemed ? `<div style="display:flex;justify-content:space-between"><span>Store credit</span><span>−${formatCentsTotal(payload.pointsRedeemed)}</span></div>` : ""}
 ${branding.showPoints !== false && payload.pointsBalance != null ? `<div style="display:flex;justify-content:space-between"><span>Points balance</span><span>${payload.pointsBalance}</span></div>` : ""}
+${branding.showPoints !== false ? '<p style="font-size:11px;color:#555">Every $100 spent = 10 points. Every 100 points = $10 off.</p>' : ""}
 </div>
 ${review ? `<p style="margin-top:16px"><a href="${escape(review)}">Leave us a Google review</a></p>` : ""}
 <p style="color:#555;font-size:12px;margin-top:20px">${escape((branding.legal || DEFAULT_LEGAL).trim())}</p>

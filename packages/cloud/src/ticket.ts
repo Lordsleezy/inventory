@@ -99,7 +99,7 @@ export async function quoteTicketTotals(args: {
     })),
     p_discount_bps: args.discountBps ?? 0,
     p_customer_id: args.customerId ?? null,
-    p_redeem_points: args.redeemPoints ?? 0,
+    p_redeem_points: Math.round((args.redeemPoints ?? 0) * 10),
     p_channel: args.channel ?? "floor",
     p_payment_method: args.paymentMethod ?? "cash",
     p_cash_cents: args.cashCents ?? null,
@@ -253,13 +253,21 @@ export async function finalizeTicket(args: {
     p_discount_bps: args.discountBps ?? 0,
     p_discount_approval_id: args.discountApprovalId ?? null,
     p_customer_id: args.customerId ?? null,
-    p_redeem_points: args.redeemPoints ?? 0,
+    p_redeem_points: Math.round((args.redeemPoints ?? 0) * 10),
     p_cash_cents: args.cashCents ?? null,
     p_card_cents: args.cardCents ?? null,
     p_note: args.note ?? null,
   });
   if (error) throw mapSellError(error);
-  return data as TicketSummary;
+  const summary = data as TicketSummary;
+  return {
+    ...summary,
+    points_earned: (summary.points_earned ?? 0) / 10,
+    points_balance: summary.points_balance == null ? null : summary.points_balance / 10,
+    customer: summary.customer
+      ? { ...summary.customer, points_balance: (summary.customer.points_balance ?? 0) / 10 }
+      : summary.customer,
+  };
 }
 
 export async function voidTicket(ticketId: string, reason: string, approvalId?: string | null): Promise<void> {

@@ -11,6 +11,11 @@ export function money(cents) {
   return `${sign}$${Math.floor(abs / 100).toLocaleString("en-US")}.${String(abs % 100).padStart(2, "0")}`;
 }
 
+function customerPoints(rawPoints) {
+  const points = (Number(rawPoints) || 0) / 10;
+  return Number.isInteger(points) ? String(points) : points.toFixed(1);
+}
+
 export function defaultBranding(storeName) {
   return {
     storeName: storeName || "Floor",
@@ -159,8 +164,9 @@ ${branding.showTax !== false ? row("Sales tax", tax) : ""}
 ${cardFee > 0 ? row("Card fee", cardFee) : ""}
 <div style="display:flex;justify-content:space-between;font-weight:700;font-size:18px"><span>Total</span><span>${escape(money(total))}</span></div>
 <div style="display:flex;justify-content:space-between"><span>Tender</span><span>${escape(tenderLabel(first, extras))}</span></div>
-${branding.showPoints !== false && extras?.points_earned ? `<div style="display:flex;justify-content:space-between"><span>Points earned</span><span>${extras.points_earned}</span></div>` : ""}
+${branding.showPoints !== false && extras?.points_earned ? `<div style="display:flex;justify-content:space-between"><span>Points earned</span><span>${customerPoints(extras.points_earned)}</span></div>` : ""}
 ${branding.showPoints !== false && extras?.points_redeemed ? `<div style="display:flex;justify-content:space-between"><span>Store credit</span><span>-${escape(money(extras.points_redeemed))}</span></div>` : ""}
+${branding.showPoints !== false ? '<p style="font-size:11px;color:#555">Every $100 spent = 10 points. Every 100 points = $10 off.</p>' : ""}
 </div>
 ${branding.reviewUrl ? `<p style="margin-top:16px"><a href="${escape(branding.reviewUrl)}">Leave us a Google review</a></p>` : ""}
 <p style="color:#555;font-size:12px;margin-top:20px">${escape(branding.legal || "")}</p>

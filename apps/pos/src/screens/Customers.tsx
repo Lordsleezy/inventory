@@ -55,7 +55,7 @@ export function CustomersScreen() {
     setError("");
     setMsg("");
     try {
-      await adjustCustomerPoints({ customerId: selected.id, delta: Math.trunc(n), note });
+      await adjustCustomerPoints({ customerId: selected.id, delta: Math.round(n * 10) / 10, note });
       setMsg("Balance updated.");
       setDelta("");
       await load();
@@ -163,10 +163,10 @@ export function CustomersScreen() {
 
       <div className="card grid">
         <strong>Adjust points {selected ? `· ${selected.name || selected.phone}` : ""}</strong>
-        <p className="muted">Positive adds credit. Negative removes it. 100 points = $1.</p>
+        <p className="muted">Every $100 spent = 10 points. Every 100 points = $10 off. Positive adjustments add points.</p>
         <label>
           Points (+/−)
-          <input value={delta} onChange={(e) => setDelta(e.target.value)} inputMode="numeric" disabled={!selected} />
+          <input value={delta} onChange={(e) => setDelta(e.target.value)} inputMode="decimal" step="0.1" disabled={!selected} />
         </label>
         <label>
           Note

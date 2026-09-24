@@ -29,19 +29,21 @@ function render(row, storeName) {
   const name = row.name ? String(row.name).split(" ")[0] : "there";
   const unsub = row.unsub_token;
   const credit = money(row.credit_cents);
-  const points = Number(row.points) || 0;
+  const points = (Number(row.points) || 0) / 10;
+  const pointsLabel = Number.isInteger(points) ? String(points) : points.toFixed(1);
   if (row.kind === "welcome") {
     const code = row.signup_code || "on your account";
     const subject = `Welcome to ${storeName} rewards — 5% off your first purchase`;
-    const text = `Hi ${name},\n\nYou're in. Give us your phone at the register or checkout online and your 5% new-customer discount is applied once, automatically.\n\nYour code: ${code}\n(That's just a reminder — the phone number is what we look up. We never text it.)\n\nYou earn 1 point per dollar on in-store and website purchases. 100 points = $1 store credit, only at this store.\n${footerText(unsub)}`;
-    const html = `<p>Hi ${escape(name)},</p><p>You're in. Give us your phone at the register or checkout on our website and your <strong>5% new-customer discount</strong> is applied once, automatically.</p><p>Your code: <strong>${escape(code)}</strong><br/>That's a reminder only — we look you up by phone. We never text that number.</p><p>You earn 1 point per dollar in store and on the website. 100 points = $1 store credit, only here.</p><p style="color:#666;font-size:12px">We do not text you.<br/><a href="${escape(unsubUrl(unsub))}">Unsubscribe from store emails</a></p>`;
+    const text = `Hi ${name},\n\nYou're in. Give us your phone at the register or checkout online and your 5% new-customer discount is applied once, automatically.\n\nYour code: ${code}\n(That's just a reminder — the phone number is what we look up. We never text it.)\n\nEvery $100 spent = 10 points. Every 100 points = $10 off at this store.\n${footerText(unsub)}`;
+    const html = `<p>Hi ${escape(name)},</p><p>You're in. Give us your phone at the register or checkout on our website and your <strong>5% new-customer discount</strong> is applied once, automatically.</p><p>Your code: <strong>${escape(code)}</strong><br/>That's a reminder only — we look you up by phone. We never text that number.</p><p>Every $100 spent = 10 points. Every 100 points = $10 off at this store.</p><p style="color:#666;font-size:12px">We do not text you.<br/><a href="${escape(unsubUrl(unsub))}">Unsubscribe from store emails</a></p>`;
     return { subject, text, html, headers: listUnsub(unsub) };
   }
   if (row.kind === "points") {
-    const earned = Number(row.payload?.earned) || 0;
-    const subject = `Your ${storeName} rewards balance: ${points} pts (${credit})`;
-    const text = `Hi ${name},\n\nYou just earned ${earned} point${earned === 1 ? "" : "s"} on a purchase.\nBalance: ${points} points = ${credit} store credit.\nUse it in the store or at checkout on our website with the same phone number.\n${footerText(unsub)}`;
-    const html = `<p>Hi ${escape(name)},</p><p>You just earned <strong>${earned}</strong> point${earned === 1 ? "" : "s"}.</p><p>Balance: <strong>${points} points</strong> = <strong>${escape(credit)}</strong> store credit.</p><p>Same phone number in the store and on the website.</p><p style="color:#666;font-size:12px"><a href="${escape(unsubUrl(unsub))}">Unsubscribe from store emails</a></p>`;
+    const earned = (Number(row.payload?.earned) || 0) / 10;
+    const earnedLabel = Number.isInteger(earned) ? String(earned) : earned.toFixed(1);
+    const subject = `Your ${storeName} rewards balance: ${pointsLabel} pts (${credit})`;
+    const text = `Hi ${name},\n\nYou just earned ${earnedLabel} point${earned === 1 ? "" : "s"} on a purchase.\nBalance: ${pointsLabel} points = ${credit} store credit.\nEvery $100 spent = 10 points. Every 100 points = $10 off.\nUse it in the store or at checkout on our website with the same phone number.\n${footerText(unsub)}`;
+    const html = `<p>Hi ${escape(name)},</p><p>You just earned <strong>${earnedLabel}</strong> point${earned === 1 ? "" : "s"}.</p><p>Balance: <strong>${pointsLabel} points</strong> = <strong>${escape(credit)}</strong> store credit.</p><p>Every $100 spent = 10 points. Every 100 points = $10 off.</p><p>Same phone number in the store and on the website.</p><p style="color:#666;font-size:12px"><a href="${escape(unsubUrl(unsub))}">Unsubscribe from store emails</a></p>`;
     return { subject, text, html, headers: listUnsub(unsub) };
   }
   const subject = row.subject || storeName;

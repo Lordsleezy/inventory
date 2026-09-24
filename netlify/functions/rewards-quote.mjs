@@ -122,7 +122,7 @@ export async function handler(event) {
     const pointsPerDollar = settingInt(rows, "rewards_points_per_dollar", 1);
     const taxBps = settingInt(rows, "taxRateBps", 0);
     const discountBps = Math.max(0, Math.min(10000, Number(body.discount_bps) || 0));
-    const redeemWanted = Math.max(0, Math.trunc(Number(body.redeem_points) || 0));
+    const redeemWanted = Math.max(0, Math.round((Number(body.redeem_points) || 0) * 10));
 
     let rawSub = 0;
     if (Array.isArray(body.lines) && body.lines.length) {
@@ -156,7 +156,7 @@ export async function handler(event) {
 
     const subtotal = remaining;
     const tax = taxBps > 0 ? Math.round((subtotal * taxBps) / 10000) : 0;
-    const earnPreview = Math.floor((subtotal * pointsPerDollar) / 100);
+    const earnPreview = Math.floor((subtotal * pointsPerDollar) / 100) / 10;
 
     return {
       statusCode: 200,
@@ -171,7 +171,8 @@ export async function handler(event) {
               name: customer.name,
               email: customer.email,
               first_purchase_discount_used: customer.first_purchase_discount_used,
-              balance,
+              balance: balance / 10,
+              credit_cents: balance * pointValue,
             }
           : null,
         quote: {
@@ -179,15 +180,15 @@ export async function handler(event) {
           discount_bps: discountBps,
           discount_cents: ticketDiscount,
           signup_discount_cents: signupCents,
-          redeem_points: redeemPoints,
+          redeem_points: redeemPoints / 10,
           redeem_cents: redeemCents,
-          max_redeem_points: maxRedeemPoints,
+          max_redeem_points: maxRedeemPoints / 10,
           subtotal_cents: subtotal,
           tax_cents: tax,
           total_cents: subtotal + tax,
           earn_points_preview: earnPreview,
-          point_value_cents: pointValue,
-          points_per_dollar: pointsPerDollar,
+          point_value_cents: pointValue * 10,
+          points_per_100_dollars: pointsPerDollar * 10,
         },
       }),
     };

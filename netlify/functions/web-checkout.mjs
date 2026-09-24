@@ -88,16 +88,14 @@ async function handleBegin(sb, body) {
   const sku = String(body.sku || "").trim();
   if (!sku) return json(400, { error: "sku_required" }, cors);
 
-  // Rewards customer: create on first checkout so points can be earned.
+  // A rewards account is created only after an explicit signup, not just from
+  // the contact details a buyer enters for checkout.
   let customer = null;
   const phone = digitsOnly(body.phone);
   if (phone) {
-    const { data: cust, error: custErr } = await sb.rpc("web_upsert_customer", {
+    const { data: cust, error: custErr } = await sb.rpc("web_lookup_customer", {
       p_store: storeId,
       p_phone: phone,
-      p_name: body.name || null,
-      p_email: body.email || null,
-      p_marketing_opt_in: Boolean(body.marketing_opt_in),
     });
     if (custErr) return json(500, { error: custErr.message }, cors);
     customer = cust;

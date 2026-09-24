@@ -1,7 +1,8 @@
 # Store web rewards (quote API)
 
-Website checkout is not built yet. This documents how **openbox-store-web** (or any
-public storefront) should call Floor for loyalty preview before wire-up.
+The public storefront uses Floor's shared loyalty records for signup, checkout
+quotes, and member lookup. This endpoint remains available for server-side quote
+previews.
 
 ## Endpoint
 
@@ -40,8 +41,8 @@ server (SSR / edge) only.
 - Prefer `lines` (unit `price_cents` × `qty`). If lines are unknown yet, pass
   `subtotal_cents` instead for a rough preview.
 - `discount_bps` is an optional clerk/ticket % discount (0–10000).
-- `redeem_points` is what the shopper wants to redeem; the response clamps to
-  balance and remaining subtotal.
+- `redeem_points` uses customer-facing points; the response clamps to the
+  available balance and remaining subtotal.
 
 ## Response (200)
 
@@ -55,7 +56,8 @@ server (SSR / edge) only.
     "name": "Ada",
     "email": null,
     "first_purchase_discount_used": false,
-    "balance": 120
+    "balance": 12,
+    "credit_cents": 120
   },
   "quote": {
     "raw_subtotal_cents": 2999,
@@ -64,20 +66,20 @@ server (SSR / edge) only.
     "signup_discount_cents": 150,
     "redeem_points": 0,
     "redeem_cents": 0,
-    "max_redeem_points": 120,
+    "max_redeem_points": 12,
     "subtotal_cents": 2849,
     "tax_cents": 207,
     "total_cents": 3056,
-    "earn_points_preview": 28,
-    "point_value_cents": 1,
-    "points_per_dollar": 1
+    "earn_points_preview": 2.8,
+    "point_value_cents": 10,
+    "points_per_100_dollars": 10
   }
 }
 ```
 
 If the phone is unknown, `customer` is `null` but `quote` still reflects ticket
-discount + tax on the cart (no signup/redeem). Create the customer on the POS
-or via a future signup RPC before checkout can earn points.
+discount + tax on the cart (no signup/redeem). The shopper can join at `/rewards`
+or inline at checkout; checkout only attaches an existing member account.
 
 If rewards are disabled for the store: `{ "ok": true, "enabled": false, "customer": null }`.
 
@@ -85,11 +87,12 @@ If rewards are disabled for the store: `{ "ok": true, "enabled": false, "custome
 
 1. Ticket `%` discount on raw subtotal  
 2. Signup 5% (default) on remaining, once per customer  
-3. Points redeem (each point = `rewards_point_value_cents`, default 1¢)  
+3. Points redeem (every 100 points = $10 off)
 4. Tax on the after-discount subtotal  
 
-Earn uses `floor(subtotal_cents * rewards_points_per_dollar / 100)` after discounts.
-Marketplace channels (eBay/Amazon/etc.) never earn or redeem — website + floor only.
+Customer-facing earn rate: every $100 spent = 10 points. The quote endpoint
+returns fractional points to tenths for smaller orders. Marketplace channels
+(eBay/Amazon/etc.) never earn or redeem — website + floor only.
 
 ## Env checklist (Netlify)
 
@@ -97,11 +100,6 @@ Marketplace channels (eBay/Amazon/etc.) never earn or redeem — website + floor
 - `SUPABASE_SERVICE_ROLE`
 - `STORE_WEB_REWARDS_KEY` (or reuse `CONNECTIONS_KEY`)
 
-## Not included yet
-
-- Placing an order / calling `finalize_ticket` from the website  
-- Customer self-signup UI  
-- Receipt email  
-
-Wire checkout later to the same discount math (or call a staff/service
-`finalize_ticket` with `p_channel = 'website'`).
+The website signup proxy and checkout API call the same store-scoped customer
+records as the register. Its server-only shared key is `STORE_WEB_KEY` on the
+storefront and `STORE_WEB_REWARDS_KEY` (or `CONNECTIONS_KEY`) on Floor.

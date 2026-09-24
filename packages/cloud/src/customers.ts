@@ -43,13 +43,22 @@ export type PointsLedgerRow = {
   created_at: string;
 };
 
+// Database ledger units are one tenth of a customer-facing point. Keeping the
+// legacy ledger denomination preserves every member's existing dollar value.
+const customerPoints = (value: unknown): number => (Number(value) || 0) / 10;
+
+function customerView<T extends Customer | CustomerListRow>(row: T): T {
+  if ("balance" in row) return { ...row, balance: customerPoints(row.balance) };
+  return { ...row, points: customerPoints(row.points) };
+}
+
 export async function lookupCustomerByPhone(phone: string): Promise<Customer | null> {
   await assertOnline();
   const { data, error } = await floorCloud().rpc("lookup_customer_by_phone", {
     p_phone: phone,
   });
   if (error) throw mapSellError(error);
-  return (data as Customer | null) ?? null;
+  return data ? customerView(data as Customer) : null;
 }
 
 export async function upsertCustomer(args: {
@@ -66,7 +75,7 @@ export async function upsertCustomer(args: {
     p_marketing_opt_in: args.marketingOptIn ?? false,
   });
   if (error) throw mapSellError(error);
-  return data as Customer;
+  return customerView(data as Customer);
 }
 
 export async function customerPointsBalance(customerId: string): Promise<number> {
@@ -75,7 +84,7 @@ export async function customerPointsBalance(customerId: string): Promise<number>
     p_customer_id: customerId,
   });
   if (error) throw mapSellError(error);
-  return Number(data ?? 0);
+  return customerPoints(data);
 }
 
 export async function customerPointsHistory(
@@ -88,7 +97,11 @@ export async function customerPointsHistory(
     p_limit: limit,
   });
   if (error) throw mapSellError(error);
-  return (data as PointsLedgerRow[]) ?? [];
+  return ((data as PointsLedgerRow[]) ?? []).map((row) => ({
+    ...row,
+    delta: customerPoints(row.delta),
+    balance_after: customerPoints(row.balance_after),
+  }));
 }
 
 export async function listCustomers(q?: string | null, limit = 200): Promise<CustomerListRow[]> {
@@ -98,7 +111,7 @@ export async function listCustomers(q?: string | null, limit = 200): Promise<Cus
     p_limit: limit,
   });
   if (error) throw mapSellError(error);
-  return (data as CustomerListRow[]) ?? [];
+  return ((data as CustomerListRow[]) ?? []).map((row) => customerView(row));
 }
 
 export async function adjustCustomerPoints(args: {
@@ -109,11 +122,11 @@ export async function adjustCustomerPoints(args: {
   await assertOnline();
   const { data, error } = await floorCloud().rpc("adjust_customer_points", {
     p_customer_id: args.customerId,
-    p_delta: args.delta,
+    p_delta: Math.round(args.delta * 10),
     p_note: args.note ?? null,
   });
   if (error) throw mapSellError(error);
-  return data as Customer;
+  return customerView(data as Customer);
 }
 
 export async function queueLoyaltyCampaign(args: {

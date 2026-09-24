@@ -35,6 +35,10 @@ type ManualPayment = {
 
 type PinKind = "below_floor" | "ticket_discount";
 
+function formatPoints(points: number): string {
+  return Number((Number(points) || 0).toFixed(1)).toString();
+}
+
 function lineExtendedPrice(line: CartLine): number {
   return line.priceCents * (line.qty || 1);
 }
@@ -124,17 +128,16 @@ export function RegisterScreen() {
   }, [customer, discounted.join(","), rewards.rewardsSignupDiscountBps]);
 
   const customerBalance = customer?.balance ?? 0;
-  const creditAvailable =
-    customer?.credit_cents ?? customerBalance * rewards.rewardsPointValueCents;
+  const creditAvailable = customer?.credit_cents ?? customerBalance * rewards.rewardsPointValueCents * 10;
   const redeemCents = Math.min(
-    redeemPoints * rewards.rewardsPointValueCents,
+    Math.round(redeemPoints * 10) * rewards.rewardsPointValueCents,
     Math.max(0, discounted.reduce((a, b) => a + b, 0) - signupPreviewCents),
   );
   const earnPreview = Math.floor(
     (Math.max(0, discounted.reduce((a, b) => a + b, 0) - signupPreviewCents - redeemCents) *
       rewards.rewardsPointsPerDollar) /
       100,
-  );
+  ) / 10;
 
   const taxableSubtotal = Math.max(
     0,
@@ -644,7 +647,7 @@ export function RegisterScreen() {
           {customer && lines.length ? (
             <div className="summary-row muted">
               <span>Points this sale</span>
-              <span>+{earnPreview}</span>
+              <span>+{formatPoints(earnPreview)}</span>
             </div>
           ) : null}
           <div className="summary-row">
@@ -706,7 +709,7 @@ export function RegisterScreen() {
               <div className="muted">
                 {customer.name || "Customer"} · {customer.phone}
                 <div>
-                  {customerBalance} pts · {formatCentsTotal(creditAvailable)} store credit
+                  {formatPoints(customerBalance)} points · {formatCentsTotal(creditAvailable)} available credit
                   {!customer.first_purchase_discount_used
                     ? ` · 5% new (${customer.signup_code || "on account"})`
                     : ""}
@@ -719,14 +722,15 @@ export function RegisterScreen() {
             {customer && customerBalance > 0 ? (
               <div className="row" style={{ gap: "0.4rem", alignItems: "center" }}>
                 <label style={{ flex: 1 }}>
-                  Apply credit (points)
+                  Apply credit (points; 100 points = $10)
                   <input
                     type="number"
                     min={0}
+                    step={0.1}
                     max={customerBalance}
                     value={redeemPoints || ""}
                     onChange={(e) =>
-                      setRedeemPoints(Math.max(0, Math.min(customerBalance, Number(e.target.value) || 0)))
+                      setRedeemPoints(Math.round(Math.max(0, Math.min(customerBalance, Number(e.target.value) || 0)) * 10) / 10)
                     }
                   />
                 </label>
@@ -737,7 +741,7 @@ export function RegisterScreen() {
                       ? Math.floor(
                           Math.max(0, discounted.reduce((a, b) => a + b, 0) - signupPreviewCents) /
                             rewards.rewardsPointValueCents,
-                        )
+                        ) / 10
                       : 0;
                     setRedeemPoints(Math.min(customerBalance, maxBySub));
                   }}
@@ -981,4 +985,3 @@ export function RegisterScreen() {
     </section>
   );
 }
-

@@ -23,8 +23,6 @@ export function SettingsScreen() {
   const [taxPct, setTaxPct] = useState(taxRateBps != null ? (taxRateBps / 100).toFixed(2) : "");
   const [cardFeePct, setCardFeePct] = useState((rewards.cardFeeBps / 100).toFixed(2));
   const [maxDiscPct, setMaxDiscPct] = useState((rewards.clerkMaxDiscountBps / 100).toFixed(0));
-  const [pointsPerDollar, setPointsPerDollar] = useState(String(rewards.rewardsPointsPerDollar));
-  const [pointValueCents, setPointValueCents] = useState(String(rewards.rewardsPointValueCents));
   const [pin, setPin] = useState("");
   const [msg, setMsg] = useState("");
   const [error, setError] = useState("");
@@ -34,8 +32,6 @@ export function SettingsScreen() {
   const [printStatus, setPrintStatus] = useState<{ ok: boolean; text: string } | null>(null);
   useEffect(() => {
     setMaxDiscPct((rewards.clerkMaxDiscountBps / 100).toFixed(0));
-    setPointsPerDollar(String(rewards.rewardsPointsPerDollar));
-    setPointValueCents(String(rewards.rewardsPointValueCents));
     setCardFeePct((rewards.cardFeeBps / 100).toFixed(2));
   }, [rewards]);
 
@@ -120,14 +116,6 @@ export function SettingsScreen() {
       if (Number.isFinite(maxBps) && maxBps >= 0) {
         await setStoreSetting("clerk_max_discount_bps", maxBps);
       }
-      const ppd = Number(pointsPerDollar);
-      if (Number.isFinite(ppd) && ppd >= 0) {
-        await setStoreSetting("rewards_points_per_dollar", ppd);
-      }
-      const pvc = Number(pointValueCents);
-      if (Number.isFinite(pvc) && pvc >= 0) {
-        await setStoreSetting("rewards_point_value_cents", pvc);
-      }
       const feePct = Number(cardFeePct);
       if (Number.isFinite(feePct) && feePct >= 0 && feePct <= 100) {
         await setStoreSetting("card_fee_bps", Math.round(feePct * 100));
@@ -195,17 +183,7 @@ export function SettingsScreen() {
           Max clerk discount (%)
           <input value={maxDiscPct} onChange={(e) => setMaxDiscPct(e.target.value)} disabled={!isAdmin} />
         </label>
-        <label>
-          Rewards earn rate (points per dollar)
-          <input value={pointsPerDollar} onChange={(e) => setPointsPerDollar(e.target.value)} disabled={!isAdmin} />
-        </label>
-        <label>
-          Point value (cents each)
-          <input value={pointValueCents} onChange={(e) => setPointValueCents(e.target.value)} disabled={!isAdmin} />
-        </label>
-        <p className="muted">
-          Default: 1 point per dollar, 100 points = $1 store credit (1% back). On a $2,400 fridge that is $24.
-        </p>
+        <p className="muted">Every $100 spent = 10 points. Every 100 points = $10 off.</p>
       </div>
 
       <div className="card grid">
