@@ -15,7 +15,6 @@ import { SalesScreen } from "./screens/Sales";
 import { SettingsScreen } from "./screens/Settings";
 import { SetupScreen } from "./screens/Setup";
 import { EmployeesScreen } from "./screens/Employees";
-import { SquareScreen } from "./screens/Square";
 import { CategoriesScreen } from "./screens/Categories";
 import { UnitScreen } from "./screens/Unit";
 import { LoginScreen } from "./screens/Login";
@@ -23,11 +22,18 @@ import { SignupScreen } from "./screens/Signup";
 import { CreateStoreScreen } from "./screens/CreateStore";
 import { CheckoutScreen } from "./screens/Checkout";
 import { DelistScreen } from "./screens/Delist";
+import { ShipmentsScreen } from "./screens/Shipments";
 import { IncidentsScreen } from "./screens/Incidents";
 import { ConnectionsScreen } from "./screens/Connections";
 import { ReaderProvider } from "./reader-host";
-import { StoreProvider } from "./store";
 import { PinProvider } from "./pin";
+import { StoreProvider, useStore } from "./store";
+
+function AdminOnly({ children }: { children: React.ReactNode }) {
+  const { session } = useStore();
+  if (session.role === "staff") return <Navigate to="/inventory" replace />;
+  return children;
+}
 
 export function App() {
   const [auth, setAuth] = useState<AuthState | undefined>(undefined);
@@ -98,15 +104,50 @@ export function App() {
               <Route path="/checkout/:sku" element={<CheckoutScreen />} />
               <Route path="/receive" element={<ReceiveScreen />} />
               <Route path="/sales" element={<SalesScreen />} />
-              <Route path="/reports" element={<ReportsScreen />} />
-              <Route path="/delist" element={<DelistScreen />} />
+              <Route path="/shipments" element={<ShipmentsScreen />} />
+              <Route
+                path="/reports"
+                element={
+                  <AdminOnly>
+                    <ReportsScreen />
+                  </AdminOnly>
+                }
+              />
+              <Route
+                path="/delist"
+                element={
+                  <AdminOnly>
+                    <DelistScreen />
+                  </AdminOnly>
+                }
+              />
               <Route path="/incidents" element={<IncidentsScreen />} />
-              <Route path="/employees" element={<EmployeesScreen />} />
-              <Route path="/square" element={<SquareScreen />} />
+              <Route
+                path="/employees"
+                element={
+                  <AdminOnly>
+                    <EmployeesScreen />
+                  </AdminOnly>
+                }
+              />
               <Route path="/connections" element={<ConnectionsScreen />} />
-              <Route path="/payment-device" element={<Navigate to="/square" replace />} />
-              <Route path="/setup" element={<SetupScreen />} />
-              <Route path="/setup/categories" element={<CategoriesScreen />} />
+              <Route path="/payment-device" element={<Navigate to="/settings" replace />} />
+              <Route
+                path="/setup"
+                element={
+                  <AdminOnly>
+                    <SetupScreen />
+                  </AdminOnly>
+                }
+              />
+              <Route
+                path="/setup/categories"
+                element={
+                  <AdminOnly>
+                    <CategoriesScreen />
+                  </AdminOnly>
+                }
+              />
               <Route path="/settings" element={<SettingsScreen />} />
               <Route path="*" element={<Navigate to="/inventory" replace />} />
             </Routes>

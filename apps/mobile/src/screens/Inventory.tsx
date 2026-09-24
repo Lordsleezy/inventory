@@ -2,12 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import {
   countUnfinished,
-  countMissingWebsiteWeight,
   formatCents,
   listedChannelsBySku,
   listUnits,
-  needsWebsiteWeight,
-  type ListingFilter,
   type Unit,
 } from "@floor/store";
 import { applyChannelListing } from "../functions";
@@ -21,29 +18,18 @@ const FILTERS: {
   key: string;
   label: string;
   unfinished?: boolean;
-  missingWeight?: boolean;
 }[] = [
   { key: "all", label: "All" },
-  { key: "unfinished", label: "Unfinished" },
-  { key: "weight", label: "Need weight", missingWeight: true },
-];
-
-const LISTED_FILTERS: { key: "" | ListingFilter; label: string }[] = [
-  { key: "", label: "Any listing" },
-  { key: "facebook", label: "Listed on Facebook" },
-  { key: "ebay", label: "Listed on eBay" },
-  { key: "amazon", label: "Listed on Amazon" },
-  { key: "elsewhere", label: "Listed elsewhere" },
-  { key: "none", label: "Not listed anywhere" },
+  { key: "unfinished", label: "Unfinished", unfinished: true },
 ];
 
 export function InventoryScreen() {
   const db = useDb();
-  const { online, cacheEpoch, settings, hydrate, ensureOnline } = useStore();
+  const { online, cacheEpoch, settings, hydrate, ensureOnline, session } = useStore();
+  const admin = session.role !== "staff";
   const location = useLocation();
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("");
-  const [listed, setListed] = useState<"" | ListingFilter>("");
   const [filter, setFilter] = useState(() => {
     const tab = (location.state as { filter?: string } | null)?.filter;
     return tab && FILTERS.some((f) => f.key === tab) ? tab : "all";
@@ -51,7 +37,6 @@ export function InventoryScreen() {
   const [units, setUnits] = useState<Unit[] | null>(null);
   const [listedMap, setListedMap] = useState<Map<string, string[]>>(new Map());
   const [unfinCount, setUnfinCount] = useState(0);
-  const [weightCount, setWeightCount] = useState(0);
   const [error, setError] = useState("");
   const [selecting, setSelecting] = useState(false);
   const [picked, setPicked] = useState<string[]>([]);
@@ -65,25 +50,21 @@ export function InventoryScreen() {
         query,
         category: category || undefined,
         unfinished: tab?.unfinished,
-        listed: listed || undefined,
-        states: tab?.missingWeight ? ["available", "reserved", "repair"] : undefined,
       }),
       listedChannelsBySku(db),
       countUnfinished(db),
-      countMissingWebsiteWeight(db),
     ])
-      .then(([rows, map, unfin, weight]) => {
+      .then(([rows, map, unfin]) => {
         if (!live) return;
-        setUnits(tab?.missingWeight ? rows.filter((unit) => needsWebsiteWeight(unit)) : rows);
+        setUnits(rows);
         setListedMap(map);
         setUnfinCount(unfin);
-        setWeightCount(weight);
       })
       .catch((err) => live && setError(friendlyRpc(err)));
     return () => {
       live = false;
     };
-  }, [db, query, category, listed, tab?.unfinished, tab?.missingWeight, cacheEpoch]);
+  }, [db, query, category, tab?.unfinished, cacheEpoch]);
 
   const channelOptions = useMemo(() => {
     const fromSettings = settings.channels.filter((c) => c !== "floor");
@@ -149,9 +130,6 @@ export function InventoryScreen() {
             {item.key === "unfinished" ? (
               <span className="ml-1 text-floor-accent">({unfinCount})</span>
             ) : null}
-            {item.key === "weight" && weightCount > 0 ? (
-              <span className="ml-1 text-floor-accent">({weightCount})</span>
-            ) : null}
           </button>
         ))}
       </div>
@@ -170,30 +148,8 @@ export function InventoryScreen() {
         ))}
       </select>
 
-      <select
-        className="field mt-2"
-        value={listed}
-        onChange={(e) => setListed(e.target.value as "" | ListingFilter)}
-        aria-label="Filter by listing"
-      >
-        {LISTED_FILTERS.map((item) => (
-          <option key={item.key || "any"} value={item.key}>
-            {item.label}
-          </option>
-        ))}
-      </select>
-
-      {weightCount > 0 && filter !== "weight" ? (
-        <button
-          type="button"
-          className="mt-3 text-left text-quiet text-floor-accent"
-          onClick={() => setFilter("weight")}
-        >
-          {weightCount} website {weightCount === 1 ? "listing needs" : "listings need"} a weight before
-          Buy can show.
-        </button>
-      ) : null}
-
+      {admin ? (
+        <>
       <div className="mt-2 flex items-center gap-3">
         <button
           type="button"
@@ -234,6 +190,8 @@ export function InventoryScreen() {
             })()}
           />
         </div>
+      ) : null}
+        </>
       ) : null}
 
       <Notice tone="error">{error}</Notice>

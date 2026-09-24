@@ -16,16 +16,16 @@ export function Shell({ children }: { children: React.ReactNode }) {
 
   const items: Item[] = [
     { to: "/inventory", label: "Inventory" },
+    { to: "/shipments", label: "Shipments" },
     { to: "/sales", label: "Sales" },
-    { to: "/delist", label: `Delist${delistCount ? ` (${delistCount})` : ""}` },
     ...(admin
       ? [
+          { to: "/delist", label: `Delist${delistCount ? ` (${delistCount})` : ""}` },
           { to: "/reports", label: "Reports" },
           { to: "/employees", label: "Employees" },
+          { to: "/setup", label: "Setup" },
         ]
       : []),
-    { to: "/square", label: "Square" },
-    ...(admin ? [{ to: "/setup", label: "Setup" }] : []),
     { to: "/settings", label: "Settings" },
   ];
 

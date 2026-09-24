@@ -320,7 +320,61 @@ async function handlePay(sb, body) {
   }
   void drainLoyaltyEmail().catch(() => {});
 
+  try {
+    const buyer = {
+      name: body.name || null,
+      email: toEmail || body.email || null,
+      phone: body.phone || null,
+      line1: body.line1 || null,
+      line2: body.line2 || null,
+      city: body.city || null,
+      region: body.region || null,
+      postal: body.postal || null,
+      country: body.country || "US",
+    };
+    await sb.rpc("record_paid_web_order", {
+      p_store: storeId,
+      p_sku: sku,
+      p_reservation_id: reservationId,
+      p_sale_id: saleId,
+      p_payment_id: payment.id,
+      p_buyer: buyer,
+      p_item_cents: Number(quote?.item_cents ?? unit.ask_cents ?? 0),
+      p_shipping_cents: Number(quote?.shipping_cents ?? 0),
+      p_tax_cents: Number(quote?.tax_cents ?? 0),
+      p_total_cents: Number(quote?.total_cents ?? chargeCents),
+    });
+    const addr = [buyer.line1, buyer.city, buyer.region, buyer.postal].filter(Boolean).join(", ");
+    await emailStoreOwners(
+      sb,
+      storeId,
+      `New web order — SKU ${sku}`,
+      `Paid online order for SKU ${sku}.\nBuyer: ${buyer.name || "—"}\n${buyer.email || ""}\nShip to: ${addr || "no address"}\nTotal: ${(chargeCents / 100).toFixed(2)}`,
+    );
+  } catch {
+    /* packing row + owner email are best-effort after a successful sale */
+  }
+
   return json(200, { ok: true, summary, emailed }, cors);
+}
+
+async function emailStoreOwners(sb, storeId, subject, text) {
+  const extra = process.env.FLOOR_OWNER_EMAIL || process.env.RESEND_NOTIFY_TO;
+  const { data: people } = await sb
+    .from("staff")
+    .select("user_id, role")
+    .eq("store_id", storeId);
+  const emails = new Set();
+  if (extra && String(extra).includes("@")) emails.add(String(extra).trim());
+  for (const person of people ?? []) {
+    if (person.role === "staff") continue;
+    const { data: user } = await sb.auth.admin.getUserById(person.user_id);
+    const email = user?.user?.email;
+    if (email) emails.add(email);
+  }
+  for (const to of emails) {
+    await sendResend({ to, subject, text });
+  }
 }
 
 async function handleRelease(sb, body) {

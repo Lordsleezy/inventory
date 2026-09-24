@@ -65,9 +65,22 @@ async function handle(event) {
       } else if (alert.kind === "sale_delist") {
         text = saleText(alert.sku, payload);
         subject = `SKU ${alert.sku} sold on ${payload.channel || "a channel"}`;
+      } else if (alert.kind === "web_order") {
+        subject = `New web order — SKU ${alert.sku}`;
+        text = `Paid online order for SKU ${alert.sku}. ${payload.buyer_name || ""} ${payload.ship_line1 || ""} ${payload.ship_city || ""} ${payload.ship_postal || ""}`.trim();
+      } else if (alert.kind === "web_shipped") {
+        subject = `Your order shipped (SKU ${alert.sku})`;
+        text = `SKU ${alert.sku} is on the way. Tracking number: ${payload.tracking || ""}.`;
       } else {
         text = `SKU ${alert.sku} still needs delisting on ${payload.channel}.`;
         subject = `Delist reminder: SKU ${alert.sku}`;
+      }
+
+      if (alert.kind === "web_shipped" && payload.buyer_email) {
+        await sendResend({ to: payload.buyer_email, subject, text });
+        await sb.rpc("mark_alert_sent", { p_id: alert.id, p_error: null });
+        results.push({ id: alert.id, ok: true, buyer: true });
+        continue;
       }
 
       const recipients = users.filter((u) => {
@@ -75,6 +88,7 @@ async function handle(event) {
         if (alert.kind === "sale_delist" || alert.kind === "delist_nag") {
           return u.delist_duty || u.role === "owner";
         }
+        if (alert.kind === "web_order") return u.role !== "staff" && u.notify_email;
         return false;
       });
 
