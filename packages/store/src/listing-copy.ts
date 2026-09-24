@@ -134,3 +134,13 @@ export function composeChannelDescription(input: {
   parts.push(floorFacts(input));
   return parts.join("\n").trim();
 }
+
+export function listingWeightLb(specs: unknown): number | null {
+  const parsed = parseListingSpecs(specs);
+  const n = parseFloat(String(parsed?.weight_lb ?? "").replace(/[^0-9.]/g, ""));
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+export function needsWebsiteWeight(unit: { showOnWebsite: boolean; listingSpecs?: unknown }): boolean {
+  return Boolean(unit.showOnWebsite) && listingWeightLb(unit.listingSpecs) == null;
+}

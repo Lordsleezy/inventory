@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { authErrorMessage, employeeSignInEmail, floorCloud, isNetworkAuthFailure } from "@floor/cloud";
+import { authErrorMessage, floorCloud, isNetworkAuthFailure, staffSignInAttempts } from "@floor/cloud";
 
 export function LoginScreen() {
   const [identifier, setIdentifier] = useState("");
@@ -13,10 +13,15 @@ export function LoginScreen() {
     setNetworkHint(false);
     setBusy(true);
     try {
-      const email = employeeSignInEmail(identifier);
-      if (!email) throw new Error("Enter a valid email or username.");
-      const { error: authError } = await floorCloud().auth.signInWithPassword({ email, password });
-      if (authError) throw authError;
+      const attempts = staffSignInAttempts(identifier, password);
+      if (!attempts.length) throw new Error("Enter a valid email, username, or clock number.");
+      let last: unknown = new Error("Could not sign in.");
+      for (const attempt of attempts) {
+        const { error: authError } = await floorCloud().auth.signInWithPassword(attempt);
+        if (!authError) return;
+        last = authError;
+      }
+      throw last;
     } catch (err) {
       setError(authErrorMessage(err));
       setNetworkHint(isNetworkAuthFailure(err));
@@ -28,18 +33,18 @@ export function LoginScreen() {
   return (
     <section className="login-card">
       <h1>Floor</h1>
-      <p className="muted">Sign in with your staff email or username.</p>
+      <p className="muted">Clock number and PIN — same logins as the phone.</p>
       {error ? <p className="error">{error}</p> : null}
       {networkHint ? (
         <p className="muted">If Wi‑Fi looks fine, open a browser on this Mac and load the Supabase host, then try again.</p>
       ) : null}
       <div className="grid" style={{ marginTop: "1rem" }}>
         <label>
-          Email or username
+          Clock number, username, or email
           <input value={identifier} autoCapitalize="none" onChange={(e) => setIdentifier(e.target.value)} />
         </label>
         <label>
-          Password
+          PIN or password
           <input
             type="password"
             value={password}

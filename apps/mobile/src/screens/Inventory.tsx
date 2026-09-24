@@ -2,9 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import {
   countUnfinished,
+  countMissingWebsiteWeight,
   formatCents,
   listedChannelsBySku,
   listUnits,
+  needsWebsiteWeight,
   type ListingFilter,
   type Unit,
 } from "@floor/store";
@@ -19,9 +21,11 @@ const FILTERS: {
   key: string;
   label: string;
   unfinished?: boolean;
+  missingWeight?: boolean;
 }[] = [
   { key: "all", label: "All" },
   { key: "unfinished", label: "Unfinished" },
+  { key: "weight", label: "Need weight", missingWeight: true },
 ];
 
 const LISTED_FILTERS: { key: "" | ListingFilter; label: string }[] = [
@@ -47,6 +51,7 @@ export function InventoryScreen() {
   const [units, setUnits] = useState<Unit[] | null>(null);
   const [listedMap, setListedMap] = useState<Map<string, string[]>>(new Map());
   const [unfinCount, setUnfinCount] = useState(0);
+  const [weightCount, setWeightCount] = useState(0);
   const [error, setError] = useState("");
   const [selecting, setSelecting] = useState(false);
   const [picked, setPicked] = useState<string[]>([]);
@@ -61,21 +66,24 @@ export function InventoryScreen() {
         category: category || undefined,
         unfinished: tab?.unfinished,
         listed: listed || undefined,
+        states: tab?.missingWeight ? ["available", "reserved", "repair"] : undefined,
       }),
       listedChannelsBySku(db),
       countUnfinished(db),
+      countMissingWebsiteWeight(db),
     ])
-      .then(([rows, map, count]) => {
+      .then(([rows, map, unfin, weight]) => {
         if (!live) return;
-        setUnits(rows);
+        setUnits(tab?.missingWeight ? rows.filter((unit) => needsWebsiteWeight(unit)) : rows);
         setListedMap(map);
-        setUnfinCount(count);
+        setUnfinCount(unfin);
+        setWeightCount(weight);
       })
       .catch((err) => live && setError(friendlyRpc(err)));
     return () => {
       live = false;
     };
-  }, [db, query, category, listed, tab?.unfinished, cacheEpoch]);
+  }, [db, query, category, listed, tab?.unfinished, tab?.missingWeight, cacheEpoch]);
 
   const channelOptions = useMemo(() => {
     const fromSettings = settings.channels.filter((c) => c !== "floor");
@@ -141,6 +149,9 @@ export function InventoryScreen() {
             {item.key === "unfinished" ? (
               <span className="ml-1 text-floor-accent">({unfinCount})</span>
             ) : null}
+            {item.key === "weight" && weightCount > 0 ? (
+              <span className="ml-1 text-floor-accent">({weightCount})</span>
+            ) : null}
           </button>
         ))}
       </div>
@@ -171,6 +182,17 @@ export function InventoryScreen() {
           </option>
         ))}
       </select>
+
+      {weightCount > 0 && filter !== "weight" ? (
+        <button
+          type="button"
+          className="mt-3 text-left text-quiet text-floor-accent"
+          onClick={() => setFilter("weight")}
+        >
+          {weightCount} website {weightCount === 1 ? "listing needs" : "listings need"} a weight before
+          Buy can show.
+        </button>
+      ) : null}
 
       <div className="mt-2 flex items-center gap-3">
         <button

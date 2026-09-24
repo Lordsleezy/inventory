@@ -1,5 +1,6 @@
 import { DEFAULT_SETTINGS, PRAGMAS, SCHEMA, SCHEMA_VERSION } from "./schema.ts";
 import { FloorError, translateDbError, type Db, type SqlValue } from "./db.ts";
+import { needsWebsiteWeight } from "./listing-copy.ts";
 
 export type UnitState =
   | "available"
@@ -815,6 +816,11 @@ export async function countUnfinished(db: Db): Promise<number> {
     `SELECT COUNT(*) AS n FROM units WHERE ${UNFINISHED_SQL}`,
   );
   return Number(rows[0]?.n ?? 0);
+}
+
+export async function countMissingWebsiteWeight(db: Db): Promise<number> {
+  const rows = await listUnits(db, { states: ["available", "reserved", "repair"] });
+  return rows.filter((unit) => needsWebsiteWeight(unit)).length;
 }
 
 export async function listedEbayItem(

@@ -5,6 +5,7 @@ import {
   formatCents,
   listedChannelsBySku,
   listedEbayItem,
+  listingWeightLb,
   loadUnit,
   parseListingSpecs,
   specInchesValue,
@@ -259,6 +260,11 @@ export function UnitScreen() {
         <p className="mt-1 text-quiet text-floor-mute">
           Needs at least one unit photo or the shop will hide it. New receives start unchecked.
         </p>
+        {unit.showOnWebsite && listingWeightLb(unit.listingSpecs) == null ? (
+          <p className="mt-1 text-quiet text-floor-accent">
+            No Buy button until this unit has a weight. Over 30 lb is not shippable.
+          </p>
+        ) : null}
       </div>
 
       <TextField label="Brand" value={unit.brand} onCommit={(v) => edit("brand", v ?? "")} />
