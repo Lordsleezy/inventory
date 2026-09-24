@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { centsToInput, formatCents, formatCentsTotal, loadUnit, parseMoneyToCents, type Unit } from "@floor/store";
 import { finalizeSale, releaseReservation, reserveUnit, SellError } from "@floor/cloud";
-import { cashProvider, stubCardProvider } from "@floor/payments";
+import { cashProvider } from "@floor/payments";
 import { useStore } from "../store";
 import { Label, Notice } from "../components/ui";
 import { askManagerPin } from "../pin";
@@ -11,12 +11,11 @@ import { friendlyRpc } from "../rpc";
 export function CheckoutScreen() {
   const { sku = "" } = useParams();
   const navigate = useNavigate();
-  const { db, settings, online, cardPayments, ensureOnline, hydrate } = useStore();
+  const { db, settings, online, ensureOnline, hydrate } = useStore();
   const [unit, setUnit] = useState<Unit | null>(null);
   const [channel, setChannel] = useState("floor");
   const [price, setPrice] = useState("");
   const [elsewhere, setElsewhere] = useState(false);
-  const [cardOutcome, setCardOutcome] = useState<"success" | "decline" | "timeout">("success");
   const [error, setError] = useState("");
   const [loud, setLoud] = useState("");
   const [busy, setBusy] = useState(false);
@@ -121,34 +120,6 @@ export function CheckoutScreen() {
     }
   }
 
-  async function payCard() {
-    setError("");
-    setLoud("");
-    if (!cardPayments) {
-      setError("Connect Square in Setup → Connections to take cards. Until then, use the stub below only for testing.");
-    }
-    setBusy(true);
-    try {
-      await ensureOnline();
-      const provider = stubCardProvider(cardOutcome);
-      const charged = await provider.charge({ amountCents: total, currency: "USD" });
-      if (!charged.ok) {
-        setError(charged.reason === "timeout" ? "Card timed out." : "Card declined.");
-        if (reservationId) await releaseReservation(reservationId);
-        setReservationId(null);
-        return;
-      }
-      await finish("card", charged.paymentId);
-    } catch (err) {
-      if (err instanceof SellError && err.code === "double_sell") setLoud(err.message);
-      else setError(friendlyRpc(err));
-      if (reservationId) await releaseReservation(reservationId);
-      setReservationId(null);
-    } finally {
-      setBusy(false);
-    }
-  }
-
   if (!unit) return <p className="text-quiet">No unit.</p>;
 
   return (
@@ -188,17 +159,7 @@ export function CheckoutScreen() {
           <button type="button" className="btn-accent" disabled={busy || !online} onClick={() => void payCash()}>
             Cash
           </button>
-          <div className="border border-floor-line p-3">
-            <p className="text-quiet">Card {cardPayments ? "(Square connected — stub until the reader plugin ships)" : "(stub)"}</p>
-            <select className="field mt-2" value={cardOutcome} onChange={(e) => setCardOutcome(e.target.value as typeof cardOutcome)}>
-              <option value="success">Simulate success</option>
-              <option value="decline">Simulate decline</option>
-              <option value="timeout">Simulate timeout</option>
-            </select>
-            <button type="button" className="btn-accent mt-2" disabled={busy || !online} onClick={() => void payCard()}>
-              Charge card
-            </button>
-          </div>
+          <p className="text-quiet">Floor card sales run on the iMac register. Open Reader to take the tap/dip.</p>
         </div>
       ) : (
         <button type="button" className="btn-accent mt-4" disabled={busy || !online} onClick={() => void finish("external", `ext_${Date.now()}`).catch((err) => {

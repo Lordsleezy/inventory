@@ -62,8 +62,8 @@ export function PosProvider({ session, children }: { session: StaffSession; chil
     const sb = floorCloud();
     const { data, error } = await sb
       .from("units_pos")
-      .select("sku, title, brand, model, category, condition, ask_cents, state")
-      .eq("state", "available")
+      .select("sku, title, brand, model, category, condition, ask_cents, state, hold_channel")
+      .in("state", ["available", "reserved"])
       .order("sku", { ascending: false })
       .limit(2000);
     if (error) throw error;
@@ -78,6 +78,7 @@ export function PosProvider({ session, children }: { session: StaffSession; chil
         condition: clean.condition ? String(clean.condition) : null,
         askCents: typeof clean.ask_cents === "number" ? clean.ask_cents : null,
         state: String(clean.state ?? "available"),
+        holdChannel: clean.hold_channel ? String(clean.hold_channel) : null,
       };
     });
     await cacheReplaceUnits(units);

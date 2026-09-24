@@ -1,26 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import {
-  buildReceipt,
-  formatCents,
-  listedChannelsBySku,
-  listedEbayItem,
-  loadUnit,
-  parseListingSpecs,
-  specInchesValue,
-  receiptHtml,
-  regenerateListingBody,
-  saleForSku,
-  unitHistory,
-  type EditableField,
-  type FloorEvent,
-  type Sale,
-  type Unit,
-  type UnitState,
-} from "@floor/store";
-import { floorCloud } from "@floor/cloud";
-import { EbayDetails } from "../components/EbayDetails";
-import { ManufacturerPhotos } from "../components/ManufacturerPhotos";
+import { buildReceipt, centsToInput, formatCents, listedChannelsBySku, listedEbayItem, listingWeightLb, loadUnit, parseListingSpecs, parseMoneyToCents, specInchesValue, receiptHtml, saleForSku, unitHistory, type EditableField, type FloorEvent, type Sale, type Unit, type UnitState } from "@floor/store";
+import { finalizeSale, floorCloud } from "@floor/cloud";
 import { Photos } from "../components/Photos";
 import { DangerButton, Label, MoneyField, Notice, SelectField, Spinner, TextField } from "../components/ui";
 import { openHtml } from "../files";
@@ -31,14 +12,13 @@ import { askManagerPin } from "../pin";
 import { ebayItemViewUrl } from "@floor/channels";
 import { friendlyRpc, needsManagerPin, needsVoidFirst } from "../rpc";
 import { ChannelMarks, ChannelToggleRow } from "../listingMarks";
-
-const MOVABLE_STATES: UnitState[] = ["available", "reserved", "repair", "scrapped", "lost"];
+import { showAdminUi } from "../flavor";
 
 export function UnitScreen() {
   const { sku = "" } = useParams();
   const navigate = useNavigate();
   const { db, settings, online, session, hydrate, ensureOnline, cacheEpoch } = useStore();
-  const manager = session.role !== "staff";
+  const admin = showAdminUi(session.role);
 
   const [unit, setUnit] = useState<Unit | null | undefined>(undefined);
   const [sale, setSale] = useState<Sale | null>(null);
@@ -231,36 +211,11 @@ export function UnitScreen() {
             <VoidSale onVoid={undoSale} />
           </div>
         </div>
-      ) : online ? (
-        <Link to={`/checkout/${unit.sku}`} className="btn-accent mt-3 inline-block">
-          Sell
-        </Link>
-      ) : (
-        <p className="mt-3 text-quiet text-floor-danger">Connect to the internet to sell.</p>
-      )}
+      ) : null}
 
-      <ManufacturerPhotos
-        sku={unit.sku}
-        brand={unit.brand}
-        model={unit.model}
-        listingSpecs={unit.listingSpecs}
-      />
       <Photos sku={unit.sku} />
 
-      <div className="border-b border-floor-line py-3">
-        <label className="flex items-center gap-2">
-          <input
-            type="checkbox"
-            checked={unit.showOnWebsite}
-            onChange={(e) => void edit("show_on_website", e.target.checked ? "true" : "false")}
-          />
-          <span className="text-body">List on website</span>
-        </label>
-        <p className="mt-1 text-quiet text-floor-mute">
-          Needs at least one unit photo or the shop will hide it. New receives start unchecked.
-        </p>
-      </div>
-
+      <TextField label="Name" value={unit.title} onCommit={(v) => edit("title", v ?? "")} />
       <TextField label="Brand" value={unit.brand} onCommit={(v) => edit("brand", v ?? "")} />
       <TextField label="Model" value={unit.model} onCommit={(v) => edit("model", v ?? "")} />
       <div className="grid grid-cols-3 gap-x-4">
@@ -289,36 +244,32 @@ export function UnitScreen() {
         inputMode="decimal"
         onCommit={(v) => editSpec("weight_lb", v ?? "")}
       />
-      <p className="text-quiet text-floor-mute">
-        Width, height, depth, and weight fill eBay size/weight fields from the model specs.
-      </p>
-      <EbayDetails sku={unit.sku} category={unit.category} cacheKey={`${unit.listingSpecs || ""}:${unit.brand}:${unit.model}`} />
-      <TextField label="Description" value={unit.title} onCommit={(v) => edit("title", v ?? "")} />
+      <label className="flex items-center gap-2 border-b border-floor-line py-3">
+        <input
+          type="checkbox"
+          checked={unit.shippable}
+          onChange={(e) => void edit("shippable", e.target.checked ? "true" : "false")}
+        />
+        <span className="text-body">Shippable</span>
+      </label>
+      {unit.shippable && listingWeightLb(unit.listingSpecs) == null ? (
+        <p className="text-quiet text-floor-accent">
+          No Buy button on the website until this unit has a weight. Over 30 lb is not shippable.
+        </p>
+      ) : null}
+      {unit.shippable ? (
+        <MoneyField
+          label="Shipping override (blank uses weight tiers: $20 / $32 / $50)"
+          cents={unit.shippingCents}
+          onCommit={(v) => edit("shipping_cents", v)}
+        />
+      ) : null}
+      {admin ? <EbayFacebook sku={unit.sku} online={online} /> : null}
       <TextField
-        label="Listing description"
+        label="Description"
         value={unit.listingBody ?? ""}
         multiline
         onCommit={(v) => edit("listing_body", v ?? "")}
-      />
-      <button
-        type="button"
-        className="btn-text px-0 py-2"
-        onClick={() => {
-          const specs = parseListingSpecs(unit.listingSpecs);
-          if (!specs) {
-            setError("No structured specs on this unit yet. Look the model up first.");
-            return;
-          }
-          void edit("listing_body", regenerateListingBody({ brand: unit.brand, model: unit.model, specs }));
-        }}
-      >
-        Regenerate description
-      </button>
-      <TextField
-        label="Listing specs (JSON)"
-        value={unit.listingSpecs ?? ""}
-        multiline
-        onCommit={(v) => edit("listing_specs", v ?? "")}
       />
 
       <SelectField
@@ -339,47 +290,31 @@ export function UnitScreen() {
         options={settings.testStatuses}
         onCommit={(v) => edit("test_status", v)}
       />
-      <SelectField
-        label="Location"
-        value={unit.location}
-        options={settings.locations}
-        onCommit={(v) => edit("location", v)}
-      />
+      <TextField label="Defects" value={unit.defectNotes} multiline onCommit={(v) => edit("defect_notes", v)} />
 
       <div className="grid grid-cols-2 gap-x-4">
-        {manager ? (
+        {admin ? (
           <MoneyField label="Cost" cents={unit.acquisitionCostCents} onCommit={(v) => edit("acquisition_cost_cents", v)} />
         ) : null}
-        <MoneyField label="MSRP" cents={unit.msrpCents} onCommit={(v) => edit("msrp_cents", v)} />
-        <MoneyField label="Ask" cents={unit.askCents} onCommit={(v) => edit("ask_cents", v)} />
-        {manager ? (
-          <MoneyField label="Floor" cents={unit.floorCents} onCommit={(v) => edit("floor_cents", v)} />
-        ) : null}
+        <MoneyField label="Asking price" cents={unit.askCents} onCommit={(v) => edit("ask_cents", v)} />
       </div>
-      <MarkListed sku={unit.sku} channels={settings.channels} online={online} />
-
-      <TextField label="Manufacturer serial" value={unit.mfrSerial} onCommit={(v) => edit("mfr_serial", v)} />
-      <TextField label="UPC" value={unit.upc} onCommit={(v) => edit("upc", v)} inputMode="numeric" />
-      <TextField label="Lot" value={unit.lot} onCommit={(v) => edit("lot", v)} />
-      <TextField label="Defects and notes" value={unit.defectNotes} multiline onCommit={(v) => edit("defect_notes", v)} />
-
-      {!sold ? (
-        <div className="border-b border-floor-line py-3">
-          <Label>Move to</Label>
-          <div className="mt-2 flex flex-wrap gap-3">
-            {MOVABLE_STATES.filter((state) => state !== unit.state).map((state) => (
-              <button key={state} type="button" className="btn-text px-0" onClick={() => void move(state)}>
-                {state}
-              </button>
-            ))}
-          </div>
-        </div>
-      ) : null}
 
       <History rows={history} />
 
       <div className="mt-6">
-        {!sold && unit.state !== "voided" ? (
+        {!sold && online ? (
+          <SoldButton
+            sku={sku}
+            askCents={unit.askCents}
+            channels={settings.channels}
+            onSold={async () => {
+              await hydrate();
+              await refresh();
+            }}
+          />
+        ) : null}
+
+        {admin && !sold && unit.state !== "voided" ? (
           <DangerButton
             idle="Void this unit"
             confirm="Void it"
@@ -388,7 +323,7 @@ export function UnitScreen() {
           />
         ) : null}
 
-        {sold && sale && !sale.voidedAt ? (
+        {admin && sold && sale && !sale.voidedAt ? (
           <div className="mt-4 border border-floor-line p-3">
             <p className="text-body">This item has a sale. Void the sale first to delete it.</p>
             <p className="mt-1 text-quiet text-floor-mute">
@@ -402,36 +337,136 @@ export function UnitScreen() {
           </div>
         ) : null}
 
-        <div className="mt-4">
-          {sold && sale && !sale.voidedAt ? (
-            <button
-              type="button"
-              className="btn-text px-0 text-floor-danger"
-              onClick={() => {
-                setError("This item has a sale. Void the sale first to delete it.");
-                setAskVoidForDelete(true);
-              }}
-            >
-              Delete permanently
-            </button>
-          ) : (
-            <DangerButton
-              idle="Delete permanently"
-              confirm="Delete forever"
-              onConfirm={() => remove()}
-              onError={(err) => setError(friendlyRpc(err))}
-            />
-          )}
-        </div>
+        {admin ? (
+          <div className="mt-4">
+            {sold && sale && !sale.voidedAt ? (
+              <button
+                type="button"
+                className="btn-text px-0 text-floor-danger"
+                onClick={() => {
+                  setError("This item has a sale. Void the sale first to delete it.");
+                  setAskVoidForDelete(true);
+                }}
+              >
+                Delete permanently
+              </button>
+            ) : (
+              <DangerButton
+                idle="Delete permanently"
+                confirm="Delete forever"
+                onConfirm={() => remove()}
+                onError={(err) => setError(friendlyRpc(err))}
+              />
+            )}
+          </div>
+        ) : null}
       </div>
-      <p className="mt-2 text-quiet text-floor-mute">
-        Deleting removes the record. SKU {unit.sku} is never issued again, and its history stays.
-      </p>
+      {admin ? (
+        <p className="mt-2 text-quiet text-floor-mute">
+          Deleting removes the record. SKU {unit.sku} is never issued again, and its history stays.
+        </p>
+      ) : null}
     </section>
   );
 }
 
-function MarkListed({ sku, channels, online }: { sku: string; channels: string[]; online: boolean }) {
+function SoldButton({
+  sku,
+  askCents,
+  channels,
+  onSold,
+}: {
+  sku: string;
+  askCents: number | null;
+  channels: string[];
+  onSold: () => Promise<void>;
+}) {
+  const { ensureOnline } = useStore();
+  const [open, setOpen] = useState(false);
+  const [channel, setChannel] = useState("facebook");
+  const [price, setPrice] = useState(centsToInput(askCents));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  if (!open) {
+    return (
+      <button type="button" className="btn-accent mb-4" onClick={() => setOpen(true)}>
+        Sold
+      </button>
+    );
+  }
+
+  return (
+    <div className="mb-4 border border-floor-line p-3">
+      <p className="text-body">Where did it sell, and for how much?</p>
+      <p className="mt-1 text-quiet text-floor-mute">
+        Use this when the card reader is down or it sold on Facebook. Website and register sales record themselves.
+      </p>
+      <Notice tone="error">{error}</Notice>
+      <label className="mt-2 block">
+        <Label>Channel</Label>
+        <select className="field mt-1" value={channel} onChange={(e) => setChannel(e.target.value)}>
+          {channels.filter((c) => c !== "website").map((c) => (
+            <option key={c} value={c}>
+              {c}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="mt-2 block">
+        <Label>Price</Label>
+        <input className="field mt-1" value={price} inputMode="decimal" onChange={(e) => setPrice(e.target.value)} />
+      </label>
+      <div className="mt-3 flex gap-3">
+        <button
+          type="button"
+          className="btn-accent"
+          disabled={busy}
+          onClick={() => {
+            const cents = parseMoneyToCents(price);
+            if (cents == null) {
+              setError("Enter the price.");
+              return;
+            }
+            setBusy(true);
+            void (async () => {
+              await ensureOnline();
+              await finalizeSale({
+                sku,
+                channel,
+                priceCents: cents,
+                paymentMethod: "external",
+                taxCents: 0,
+              });
+              try {
+                const { authHeader, functionsUrl } = await import("../functions");
+                const headers = await authHeader();
+                await fetch(functionsUrl("ebay-withdraw"), {
+                  method: "POST",
+                  headers: { ...headers, "Content-Type": "application/json" },
+                  body: JSON.stringify({ afterSale: true, sku }),
+                });
+              } catch {
+                /* ebay-sync */
+              }
+              await onSold();
+              setOpen(false);
+            })()
+              .catch((err) => setError(friendlyRpc(err)))
+              .finally(() => setBusy(false));
+          }}
+        >
+          {busy ? "Saving…" : "Record sale"}
+        </button>
+        <button type="button" className="btn-text px-0" onClick={() => setOpen(false)}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function EbayFacebook({ sku, online }: { sku: string; online: boolean }) {
   const { db, hydrate, ensureOnline, cacheEpoch } = useStore();
   const [listed, setListed] = useState<string[]>([]);
   const [ebayUrl, setEbayUrl] = useState<string | null>(null);
@@ -459,10 +494,9 @@ function MarkListed({ sku, channels, online }: { sku: string; channels: string[]
 
   return (
     <div className="border-b border-floor-line py-3">
-      <Label>Listed on</Label>
+      <Label>Listings</Label>
       <p className="mt-1 text-quiet text-floor-mute">
-        F Facebook (blue), E eBay (green), A Amazon (orange), other letters (white). Filled means listed.
-        Tap to turn a channel on or off.
+        List on eBay uses the connected sandbox SDK. Listed on Facebook is a manual tick after you post it.
       </p>
       {listed.length ? (
         <div className="mt-2">
@@ -472,7 +506,7 @@ function MarkListed({ sku, channels, online }: { sku: string; channels: string[]
         <p className="mt-2 text-quiet text-floor-mute">Not listed anywhere.</p>
       )}
       <ChannelToggleRow
-        options={channels}
+        options={["ebay", "facebook"]}
         listed={listed}
         disabled={!online}
         onToggle={(channel, next) => void toggle(channel, next)}

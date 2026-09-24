@@ -4,14 +4,14 @@ import { floorCloud } from "@floor/cloud";
 import { useStore } from "../store";
 import { Label, Notice } from "../components/ui";
 import { friendlyRpc } from "../rpc";
+import { showAdminUi } from "../flavor";
 
 export function SettingsScreen() {
   const { settings, setSetting, session, online, connectionType, supabaseReach, functionsReach } = useStore();
   const [error, setError] = useState("");
   const [pin, setPin] = useState("");
-  const [inviteEmail, setInviteEmail] = useState("");
-  const manager = session.role !== "staff";
-  const owner = session.role === "owner";
+  const admin = showAdminUi(session.role);
+  const owner = admin && session.role === "owner";
 
   async function signOut() {
     await floorCloud().auth.signOut();
@@ -23,16 +23,6 @@ export function SettingsScreen() {
     const { error: rpcErr } = await floorCloud().rpc("set_manager_pin", { p_pin: pin });
     if (rpcErr) setError(friendlyRpc(rpcErr));
     else setPin("");
-  }
-
-  async function invite() {
-    setError("");
-    const { error: rpcErr } = await floorCloud().rpc("invite_staff", {
-      p_email: inviteEmail,
-      p_role: "staff",
-    });
-    if (rpcErr) setError(friendlyRpc(rpcErr));
-    else setInviteEmail("");
   }
 
   return (
@@ -50,9 +40,16 @@ export function SettingsScreen() {
         Import the phone backup against this STORE_ID after signup. Import refuses if this store already has units.
       </p>
 
-      <Link to="/settings/categories" className="btn-accent mt-4 inline-block">
-        Categories
-      </Link>
+      {admin ? (
+        <>
+          <Link to="/employees" className="btn-accent mt-4 inline-block">
+            Employees
+          </Link>
+          <Link to="/settings/categories" className="btn-accent mt-4 ml-3 inline-block">
+            Categories
+          </Link>
+        </>
+      ) : null}
 
       <label className="mt-4 flex items-center gap-2">
         <input
@@ -72,7 +69,7 @@ export function SettingsScreen() {
       </label>
       <p className="text-quiet text-floor-mute">Push not set up. Email still works today. Apple setup is later.</p>
 
-      {manager ? (
+      {admin ? (
         <>
           <label className="block py-3">
             <Label>Business name (receipts)</Label>
@@ -116,13 +113,6 @@ export function SettingsScreen() {
             <input className="field mt-1" type="password" value={pin} onChange={(e) => setPin(e.target.value)} />
             <button type="button" className="btn-text px-0 mt-1" onClick={() => void savePin()}>
               Save PIN
-            </button>
-          </label>
-          <label className="block py-3">
-            <Label>Invite staff email</Label>
-            <input className="field mt-1" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} />
-            <button type="button" className="btn-text px-0 mt-1" onClick={() => void invite()}>
-              Invite
             </button>
           </label>
         </>

@@ -5,6 +5,7 @@ import { floorCloud } from "@floor/cloud";
 import { useStore } from "../store";
 import { Label, Notice } from "../components/ui";
 import { friendlyRpc } from "../rpc";
+import { showAdminUi } from "../flavor";
 
 /**
  * Receive one physical unit.
@@ -15,7 +16,7 @@ import { friendlyRpc } from "../rpc";
  */
 export function ReceiveScreen() {
   const { settings, online, session, hydrate, ensureOnline } = useStore();
-  const manager = session.role !== "staff";
+  const manager = showAdminUi(session.role);
   const navigate = useNavigate();
 
   const [sku, setSku] = useState("");
@@ -32,6 +33,7 @@ export function ReceiveScreen() {
   const [msrp, setMsrp] = useState("");
   const [ask, setAsk] = useState("");
   const [notes, setNotes] = useState("");
+  const [shippable, setShippable] = useState(false);
   const [error, setError] = useState("");
   const [skuHint, setSkuHint] = useState("");
   const [skuStatus, setSkuStatus] = useState("empty");
@@ -115,6 +117,13 @@ export function ReceiveScreen() {
       });
       if (rpcErr) throw rpcErr;
       const savedSku = (data as { sku?: string } | null)?.sku ?? sku.trim();
+      if (shippable) {
+        await floorCloud().rpc("update_unit_field", {
+          p_sku: savedSku,
+          p_field: "shippable",
+          p_value: "true",
+        });
+      }
       await hydrate();
 
       if (!andAnother) {
@@ -185,12 +194,11 @@ export function ReceiveScreen() {
 
       <Picker label="Category" value={category} options={settings.categories} onChange={setCategory} />
       <Picker label="Condition" value={condition} options={settings.conditions} onChange={setCondition} />
-      <Picker
-        label="Test status"
-        value={testStatus}
-        options={settings.testStatuses}
-        onChange={setTestStatus}
-      />
+      <Picker label="Test status" value={testStatus} options={settings.testStatuses} onChange={setTestStatus} />
+      <label className="flex items-center gap-2 py-3">
+        <input type="checkbox" checked={shippable} onChange={(e) => setShippable(e.target.checked)} />
+        <span className="text-body">Shippable</span>
+      </label>
       <Picker label="Location" value={location} options={settings.locations} onChange={setLocation} />
 
       <div className="grid grid-cols-2 gap-3">

@@ -13,6 +13,7 @@ import { CheckoutScreen } from "./screens/Checkout";
 import { LoginScreen } from "./screens/Login";
 import { ReceiptsScreen } from "./screens/Receipts";
 import { SettingsScreen } from "./screens/Settings";
+import { EmployeesScreen } from "./screens/Employees";
 import { PosProvider, usePos } from "./pos-context";
 
 setDeviceNetworkGetter(async () => ({
@@ -89,6 +90,7 @@ function Shell() {
         <nav className="nav">
           <Link to="/">Search</Link>
           <Link to="/receipts">Receipts{pendingOutbox ? ` (${pendingOutbox})` : ""}</Link>
+          {isAdmin ? <Link to="/employees">Employees</Link> : null}
           <Link to="/settings">Settings</Link>
         </nav>
         <span className="muted">
@@ -115,6 +117,7 @@ function Shell() {
           <Route path="/" element={<BrowseScreen />} />
           <Route path="/checkout/:sku" element={<CheckoutScreen />} />
           <Route path="/receipts" element={<ReceiptsScreen />} />
+          <Route path="/employees" element={<EmployeesScreen />} />
           <Route path="/settings" element={<SettingsScreen />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

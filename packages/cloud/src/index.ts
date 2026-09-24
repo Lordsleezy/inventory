@@ -80,3 +80,11 @@ export {
   type ReviewDecision,
 } from "./photo-clean.ts";
 export { PIN_MAX_FAILURES, PIN_LOCK_MINUTES, nextPinState, pinIsLocked } from "./pin.ts";
+export {
+  STAFF_CLOCK_DOMAIN,
+  clockLoginEmail,
+  loginEmailFromIdentifier,
+  authSecretFromLogin,
+  clockRuleError,
+  pinRuleError,
+} from "./staff-login.ts";

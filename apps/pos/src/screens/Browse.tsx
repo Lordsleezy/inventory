@@ -53,7 +53,9 @@ export function BrowseScreen() {
               <strong>{u.sku}</strong>
               <div>{[u.brand, u.model].filter(Boolean).join(" ") || u.title}</div>
               <div className="muted">
-                {u.category || "—"} · {u.condition || "—"}
+                {u.holdChannel === "website"
+                  ? "Held by an online order"
+                  : `${u.category || "—"} · ${u.condition || "—"}`}
               </div>
             </span>
             <span className="price">{formatCents(u.askCents) || "—"}</span>

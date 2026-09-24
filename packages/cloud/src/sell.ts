@@ -5,6 +5,7 @@ export type SellErrorCode =
   | "double_sell"
   | "below_floor"
   | "reservation_expired"
+  | "held_by_online_order"
   | "not_sellable"
   | "offline"
   | "unknown";
@@ -21,6 +22,9 @@ export class SellError extends Error {
 export function mapSellError(err: { code?: string; message?: string } | null | undefined): SellError {
   const message = err?.message ?? "Sale failed";
   const pg = err?.code ?? "";
+  if (/held_by_online_order/i.test(message)) {
+    return new SellError("held_by_online_order", "Held by an online order.");
+  }
   if (pg === "23505" || /unit_not_sellable|duplicate key|double_sell/i.test(message)) {
     return new SellError("double_sell", "DOUBLE SALE — this SKU already has a live sale. Do not take money.");
   }

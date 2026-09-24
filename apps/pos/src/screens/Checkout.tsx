@@ -160,7 +160,8 @@ export function CheckoutScreen() {
       await afterSale(sku);
       navigate("/", { replace: true });
     } catch (err) {
-      if (err instanceof SellError && err.code === "double_sell") setLoud(err.message);
+      if (err instanceof SellError && err.code === "held_by_online_order") setLoud(err.message);
+      else if (err instanceof SellError && err.code === "double_sell") setLoud(err.message);
       else setError(authErrorMessage(err));
       if (hold) await releaseReservation(hold);
     } finally {
@@ -242,7 +243,8 @@ export function CheckoutScreen() {
       await afterSale(sku);
       navigate("/", { replace: true });
     } catch (err) {
-      if (err instanceof SellError && err.code === "double_sell") setLoud(err.message);
+      if (err instanceof SellError && err.code === "held_by_online_order") setLoud(err.message);
+      else if (err instanceof SellError && err.code === "double_sell") setLoud(err.message);
       else setError(authErrorMessage(err));
       if (hold) await releaseReservation(hold);
     } finally {
@@ -287,6 +289,9 @@ export function CheckoutScreen() {
       <p>{title || "Item"}</p>
       <p className="muted">{unit?.condition || ""}</p>
       {loud ? <div className="incident">{loud}</div> : null}
+      {unit?.holdChannel === "website" ? (
+        <p className="incident">Held by an online order.</p>
+      ) : null}
       {error ? <p className="error">{error}</p> : null}
       {cardStatus ? <p>{cardStatus}</p> : null}
       <label>
@@ -298,10 +303,10 @@ export function CheckoutScreen() {
         Tax {settings.taxRateBps / 100}% · {typeof cents === "number" ? formatCentsTotal(tax) : "$0.00"}
       </p>
       <div className="row" style={{ marginTop: "1rem" }}>
-        <button type="button" className="primary" disabled={busy} onClick={() => void payCash()}>
+        <button type="button" className="primary" disabled={busy || unit?.holdChannel === "website"} onClick={() => void payCash()}>
           Cash
         </button>
-        <button type="button" disabled={busy || !cardReady} onClick={() => void payCard()}>
+        <button type="button" disabled={busy || !cardReady || unit?.holdChannel === "website"} onClick={() => void payCard()}>
           Card{!cardReady ? " (needs paired phone + online)" : ""}
         </button>
       </div>

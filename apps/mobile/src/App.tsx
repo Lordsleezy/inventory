@@ -13,6 +13,7 @@ import { ReceiveScreen } from "./screens/Receive";
 import { ReportsScreen } from "./screens/Reports";
 import { SalesScreen } from "./screens/Sales";
 import { SettingsScreen } from "./screens/Settings";
+import { EmployeesScreen } from "./screens/Employees";
 import { CategoriesScreen } from "./screens/Categories";
 import { UnitScreen } from "./screens/Unit";
 import { LoginScreen } from "./screens/Login";
@@ -20,10 +21,13 @@ import { SignupScreen } from "./screens/Signup";
 import { CreateStoreScreen } from "./screens/CreateStore";
 import { CheckoutScreen } from "./screens/Checkout";
 import { DelistScreen } from "./screens/Delist";
+import { ShipmentsScreen } from "./screens/Shipments";
 import { IncidentsScreen } from "./screens/Incidents";
 import { ConnectionsScreen } from "./screens/Connections";
+import { ReaderScreen } from "./screens/Reader";
 import { StoreProvider } from "./store";
 import { PinProvider } from "./pin";
+import { isStaffApp, showAdminUi } from "./flavor";
 
 export function App() {
   const [auth, setAuth] = useState<AuthState | undefined>(undefined);
@@ -73,7 +77,7 @@ export function App() {
     return (
       <Routes>
         <Route path="/login" element={<LoginScreen />} />
-        <Route path="/signup" element={<SignupScreen />} />
+        {isStaffApp() ? null : <Route path="/signup" element={<SignupScreen />} />}
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
     );
@@ -93,13 +97,25 @@ export function App() {
           <Route path="/checkout/:sku" element={<CheckoutScreen />} />
           <Route path="/receive" element={<ReceiveScreen />} />
           <Route path="/sales" element={<SalesScreen />} />
-          <Route path="/reports" element={<ReportsScreen />} />
-          <Route path="/reports/:receiptNo" element={<ReportsScreen />} />
-          <Route path="/delist" element={<DelistScreen />} />
+          <Route path="/reader" element={<ReaderScreen />} />
+          {showAdminUi(auth.session.role) ? (
+            <>
+              <Route path="/reports" element={<ReportsScreen />} />
+              <Route path="/reports/:receiptNo" element={<ReportsScreen />} />
+              <Route path="/delist" element={<DelistScreen />} />
+              <Route path="/connections" element={<ConnectionsScreen />} />
+              <Route path="/settings/categories" element={<CategoriesScreen />} />
+              <Route path="/employees" element={<EmployeesScreen />} />
+            </>
+          ) : null}
+          <Route path="/shipments" element={<ShipmentsScreen />} />
           <Route path="/incidents" element={<IncidentsScreen />} />
-          <Route path="/connections" element={<ConnectionsScreen />} />
-          <Route path="/settings" element={<SettingsScreen />} />
-          <Route path="/settings/categories" element={<CategoriesScreen />} />
+          {showAdminUi(auth.session.role) ? (
+            <Route path="/settings" element={<SettingsScreen />} />
+          ) : (
+            <Route path="/settings" element={<Navigate to="/inventory" replace />} />
+          )}
+          {showAdminUi(auth.session.role) ? null : <Route path="/employees" element={<Navigate to="/inventory" replace />} />}
           <Route path="*" element={<Navigate to="/inventory" replace />} />
         </Routes>
       </Shell>

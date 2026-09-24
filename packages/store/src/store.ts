@@ -1,5 +1,6 @@
 import { DEFAULT_SETTINGS, PRAGMAS, SCHEMA, SCHEMA_VERSION } from "./schema.ts";
 import { FloorError, translateDbError, type Db, type SqlValue } from "./db.ts";
+import { needsShipWeight } from "./listing-copy.ts";
 
 export type UnitState =
   | "available"
@@ -34,6 +35,8 @@ export type Unit = {
   listingBody: string | null;
   listingSpecs: string | null;
   showOnWebsite: boolean;
+  shippable: boolean;
+  shippingCents: number | null;
 };
 
 export type Sale = {
@@ -100,6 +103,8 @@ export const EDITABLE_FIELDS = {
   listing_body: "listing description",
   listing_specs: "listing specs",
   show_on_website: "list on website",
+  shippable: "shippable",
+  shipping_cents: "shipping",
 } as const;
 
 export type EditableField = keyof typeof EDITABLE_FIELDS;
@@ -130,6 +135,12 @@ async function migrateUnitListingColumns(db: Db): Promise<void> {
   }
   if (!names.has("show_on_website")) {
     await db.exec("ALTER TABLE units ADD COLUMN show_on_website INTEGER NOT NULL DEFAULT 0");
+  }
+  if (!names.has("shippable")) {
+    await db.exec("ALTER TABLE units ADD COLUMN shippable INTEGER NOT NULL DEFAULT 0");
+  }
+  if (!names.has("shipping_cents")) {
+    await db.exec("ALTER TABLE units ADD COLUMN shipping_cents INTEGER");
   }
 }
 
@@ -252,6 +263,8 @@ function toUnit(row: Record<string, SqlValue>): Unit {
     listingBody: specText(row.listing_body) ?? ((row.listing_body as string) || null),
     listingSpecs: specText(row.listing_specs),
     showOnWebsite: Number(row.show_on_website) === 1,
+    shippable: Number(row.shippable) === 1,
+    shippingCents: row.shipping_cents === null || row.shipping_cents === undefined ? null : Number(row.shipping_cents),
   };
 }
 
@@ -414,6 +427,14 @@ export const NEEDS_WORK_SQL = `(
 
 export type ListingFilter = "facebook" | "ebay" | "amazon" | "elsewhere" | "none";
 
+export async function countMissingShipWeight(
+  db: Db,
+  states: UnitState[] = ["available", "reserved", "repair"],
+): Promise<number> {
+  const rows = await listUnits(db, { states });
+  return rows.filter((unit) => needsShipWeight(unit)).length;
+}
+
 export function unitNeedsWork(unit: Pick<Unit, "condition" | "testStatus">): boolean {
   const test = (unit.testStatus ?? "").trim().toLowerCase();
   const cond = (unit.condition ?? "").trim().toLowerCase();
@@ -513,6 +534,8 @@ export async function updateUnit(
     listing_body: raw.listingBody,
     listing_specs: raw.listingSpecs,
     show_on_website: raw.showOnWebsite ? 1 : 0,
+    shippable: raw.shippable ? 1 : 0,
+    shipping_cents: raw.shippingCents,
   };
 
   const changes = (Object.keys(patch) as EditableField[]).filter((key) => {

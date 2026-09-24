@@ -183,8 +183,9 @@ async function applyOnce(db: Db, payload: CachePayload): Promise<void> {
           `INSERT INTO units (
             sku, brand, model, title, category, condition, test_status, location, mfr_serial,
             defect_notes, upc, lot, acquisition_cost_cents, msrp_cents, ask_cents, floor_cents,
-            state, received_at, updated_at, listing_body, listing_specs, show_on_website
-          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+            state, received_at, updated_at, listing_body, listing_specs, show_on_website,
+            shippable, shipping_cents
+          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
           [
             sku,
             text(row.brand),
@@ -208,6 +209,8 @@ async function applyOnce(db: Db, payload: CachePayload): Promise<void> {
             nullable(row.listing_body),
             nullableJson(row.listing_specs),
             row.show_on_website === true || row.show_on_website === 1 || row.show_on_website === "1" ? 1 : 0,
+            row.shippable === true || row.shippable === 1 || row.shippable === "1" ? 1 : 0,
+            intOrNull(row.shipping_cents),
           ],
         );
       }

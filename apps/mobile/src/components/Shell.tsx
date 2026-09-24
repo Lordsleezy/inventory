@@ -1,15 +1,23 @@
 import { NavLink } from "react-router-dom";
 import { useStore } from "../store";
+import { showAdminUi } from "../flavor";
 
 export function Shell({ children }: { children: React.ReactNode }) {
-  const { online, cloudError, delistCount, incidentCount } = useStore();
+  const { online, cloudError, delistCount, incidentCount, session } = useStore();
+  const admin = showAdminUi(session.role);
 
   const tabs = [
     { to: "/inventory", label: "Inventory" },
-    { to: "/sales", label: "Sales" },
-    { to: "/delist", label: `Delist${delistCount ? ` (${delistCount})` : ""}` },
-    { to: "/reports", label: "Reports" },
-    { to: "/settings", label: "Setup" },
+    { to: "/shipments", label: "Shipments" },
+    { to: "/reader", label: "Reader" },
+    ...(admin
+      ? [
+          { to: "/delist", label: `Delist${delistCount ? ` (${delistCount})` : ""}` },
+          { to: "/reports", label: "Reports" },
+          { to: "/employees", label: "Employees" },
+          { to: "/settings", label: "Setup" },
+        ]
+      : []),
   ];
 
   return (
@@ -43,6 +51,21 @@ export function Shell({ children }: { children: React.ReactNode }) {
         </NavLink>
       ) : null}
       {children}
+      {!admin ? (
+        <button
+          type="button"
+          className="btn-text mt-8 px-0"
+          onClick={() => {
+            void (async () => {
+              const { floorCloud } = await import("@floor/cloud");
+              await floorCloud().auth.signOut();
+              location.reload();
+            })();
+          }}
+        >
+          Sign out
+        </button>
+      ) : null}
     </div>
   );
 }

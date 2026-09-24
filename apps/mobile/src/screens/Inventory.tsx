@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import {
+  countMissingShipWeight,
   countNeedsWork,
   formatCents,
   listedChannelsBySku,
   listUnits,
+  needsShipWeight,
   type ListingFilter,
   type Unit,
   type UnitState,
@@ -15,6 +17,7 @@ import { EbayBulkEdit } from "../components/EbayDetails";
 import { Notice, Spinner } from "../components/ui";
 import { ChannelMarks, ChannelToggleRow, normalizeChannel } from "../listingMarks";
 import { friendlyRpc } from "../rpc";
+import { showAdminUi } from "../flavor";
 
 const STOCK: UnitState[] = ["available", "reserved", "repair"];
 
@@ -23,9 +26,11 @@ const FILTERS: {
   label: string;
   states?: UnitState[];
   needsWork?: boolean;
+  missingWeight?: boolean;
 }[] = [
   { key: "stock", label: "In stock", states: STOCK },
   { key: "work", label: "Needs work", states: STOCK, needsWork: true },
+  { key: "weight", label: "Need weight", states: STOCK, missingWeight: true },
   { key: "sold", label: "Sold", states: ["sold"] },
   { key: "other", label: "Out", states: ["voided", "scrapped", "lost"] },
   { key: "all", label: "All" },
@@ -42,7 +47,7 @@ const LISTED_FILTERS: { key: "" | ListingFilter; label: string }[] = [
 
 export function InventoryScreen() {
   const db = useDb();
-  const { online, cacheEpoch, settings, hydrate, ensureOnline } = useStore();
+  const { online, cacheEpoch, settings, hydrate, ensureOnline, session } = useStore();
   const location = useLocation();
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("");
@@ -54,12 +59,14 @@ export function InventoryScreen() {
   const [units, setUnits] = useState<Unit[] | null>(null);
   const [listedMap, setListedMap] = useState<Map<string, string[]>>(new Map());
   const [workCount, setWorkCount] = useState(0);
+  const [weightCount, setWeightCount] = useState(0);
   const [error, setError] = useState("");
   const [selecting, setSelecting] = useState(false);
   const [picked, setPicked] = useState<string[]>([]);
 
   const tab = FILTERS.find((f) => f.key === filter);
   const states = tab?.states;
+  const admin = showAdminUi(session.role);
 
   useEffect(() => {
     let live = true;
@@ -73,18 +80,20 @@ export function InventoryScreen() {
       }),
       listedChannelsBySku(db),
       countNeedsWork(db),
+      countMissingShipWeight(db),
     ])
-      .then(([rows, map, count]) => {
+      .then(([rows, map, work, weight]) => {
         if (!live) return;
-        setUnits(rows);
+        setUnits(tab?.missingWeight ? rows.filter((unit) => needsShipWeight(unit)) : rows);
         setListedMap(map);
-        setWorkCount(count);
+        setWorkCount(work);
+        setWeightCount(weight);
       })
       .catch((err) => live && setError(friendlyRpc(err)));
     return () => {
       live = false;
     };
-  }, [db, query, states, category, listed, tab?.needsWork, cacheEpoch]);
+  }, [db, query, states, category, listed, tab?.needsWork, tab?.missingWeight, cacheEpoch]);
 
   const channelOptions = useMemo(() => {
     const fromSettings = settings.channels.filter((c) => c !== "floor");
@@ -150,6 +159,9 @@ export function InventoryScreen() {
             {item.key === "work" && workCount > 0 ? (
               <span className="ml-1 text-floor-accent">({workCount})</span>
             ) : null}
+            {item.key === "weight" && weightCount > 0 ? (
+              <span className="ml-1 text-floor-accent">({weightCount})</span>
+            ) : null}
           </button>
         ))}
       </div>
@@ -181,6 +193,7 @@ export function InventoryScreen() {
         ))}
       </select>
 
+      {admin ? (
       <div className="mt-2 flex items-center gap-3">
         <button
           type="button"
@@ -196,8 +209,9 @@ export function InventoryScreen() {
           <span className="text-quiet text-floor-mute">{picked.length} selected</span>
         ) : null}
       </div>
+      ) : null}
 
-      {selecting ? (
+      {admin && selecting ? (
         <div className="mt-1">
           <p className="text-quiet text-floor-mute">
             F Facebook, E eBay, A Amazon, other letters elsewhere. Filled means listed. Tap a letter to
@@ -223,6 +237,17 @@ export function InventoryScreen() {
         </div>
       ) : null}
 
+      {weightCount > 0 && filter !== "weight" ? (
+        <button
+          type="button"
+          className="mt-3 text-left text-quiet text-floor-accent"
+          onClick={() => setFilter("weight")}
+        >
+          {weightCount} shippable {weightCount === 1 ? "unit needs" : "units need"} a weight before Buy
+          shows on the website.
+        </button>
+      ) : null}
+
       <Notice tone="error">{error}</Notice>
 
       {units === null ? <Spinner label="Reading" /> : null}
@@ -233,7 +258,9 @@ export function InventoryScreen() {
             ? `Nothing matches “${query}”.`
             : filter === "work"
               ? "Nothing needs work."
-              : filter === "stock"
+              : filter === "weight"
+                ? "Every shippable unit has a weight."
+                : filter === "stock"
                 ? "Nothing in stock."
                 : "Nothing here yet."}
         </p>

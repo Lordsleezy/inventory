@@ -66,5 +66,27 @@ export function cacheUnitRow(
     updated_at: stripped.updated_at,
     acquisition_cost_cents: opts.includeCost ? (row.acquisition_cost_cents ?? null) : null,
     floor_cents: opts.includeCost ? (row.floor_cents ?? null) : null,
+    listing_body: stripped.listing_body ?? null,
+    listing_specs:
+      stripped.listing_specs == null
+        ? null
+        : typeof stripped.listing_specs === "string"
+          ? stripped.listing_specs
+          : JSON.stringify(stripped.listing_specs),
+    show_on_website:
+      stripped.show_on_website === true ||
+      stripped.show_on_website === 1 ||
+      stripped.show_on_website === "1" ||
+      stripped.show_on_website === "true"
+        ? 1
+        : 0,
+    shippable:
+      stripped.shippable === true ||
+      stripped.shippable === 1 ||
+      stripped.shippable === "1" ||
+      stripped.shippable === "true"
+        ? 1
+        : 0,
+    shipping_cents: stripped.shipping_cents ?? null,
   };
 }
