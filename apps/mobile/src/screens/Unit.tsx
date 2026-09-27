@@ -84,24 +84,11 @@ export function UnitScreen() {
   }
 
   async function setShippable(next: boolean) {
-    const flag = next ? "true" : "false";
-    setError("");
-    try {
-      await ensureOnline();
-      for (const field of ["shippable", "show_on_website"] as const) {
-        const { error: rpcErr } = await floorCloud().rpc("update_unit_field", {
-          p_sku: sku,
-          p_field: field,
-          p_value: flag,
-        });
-        if (rpcErr) throw rpcErr;
-      }
-      await hydrate();
-      await refresh();
-    } catch (err) {
-      setError(friendlyRpc(err));
-      await refresh();
-    }
+    await edit("shippable", next ? "true" : "false");
+  }
+
+  async function setListOnline(next: boolean) {
+    await edit("show_on_website", next ? "true" : "false");
   }
 
   async function saveDescription(value: string | null) {
@@ -276,17 +263,28 @@ export function UnitScreen() {
         <label className="flex items-center gap-2">
           <input
             type="checkbox"
-            checked={unit.showOnWebsite}
+            checked={unit.shippable}
             onChange={(e) => void setShippable(e.target.checked)}
           />
           <span className="text-body">Shippable</span>
         </label>
         <p className="mt-1 text-quiet text-floor-mute">
-          Lets this item be bought on the website. Needs a weight of 30 lb or less.
+          Turns on Buy online. Needs a weight of 30 lb or less.
         </p>
-        {unit.showOnWebsite && listingWeightLb(unit.listingSpecs) == null ? (
+        {unit.shippable && listingWeightLb(unit.listingSpecs) == null ? (
           <p className="mt-1 text-quiet text-floor-accent">Buy stays off until weight is filled in.</p>
         ) : null}
+        <label className="mt-3 flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={unit.showOnWebsite}
+            onChange={(e) => void setListOnline(e.target.checked)}
+          />
+          <span className="text-body">List online</span>
+        </label>
+        <p className="mt-1 text-quiet text-floor-mute">
+          Puts this item on the website. Needs at least one photo.
+        </p>
       </div>
 
       <TextField label="Brand" value={unit.brand} onCommit={(v) => edit("brand", v ?? "")} />

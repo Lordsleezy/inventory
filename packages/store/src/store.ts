@@ -35,6 +35,7 @@ export type Unit = {
   listingBody: string | null;
   listingSpecs: string | null;
   showOnWebsite: boolean;
+  shippable: boolean;
 };
 
 export type Sale = {
@@ -103,6 +104,7 @@ export const EDITABLE_FIELDS = {
   listing_body: "listing description",
   listing_specs: "listing specs",
   show_on_website: "list on website",
+  shippable: "shippable",
 } as const;
 
 export type EditableField = keyof typeof EDITABLE_FIELDS;
@@ -133,6 +135,9 @@ async function migrateUnitListingColumns(db: Db): Promise<void> {
   }
   if (!names.has("show_on_website")) {
     await db.exec("ALTER TABLE units ADD COLUMN show_on_website INTEGER NOT NULL DEFAULT 0");
+  }
+  if (!names.has("shippable")) {
+    await db.exec("ALTER TABLE units ADD COLUMN shippable INTEGER NOT NULL DEFAULT 0");
   }
 }
 
@@ -255,6 +260,7 @@ function toUnit(row: Record<string, SqlValue>): Unit {
     listingBody: specText(row.listing_body) ?? ((row.listing_body as string) || null),
     listingSpecs: specText(row.listing_specs),
     showOnWebsite: Number(row.show_on_website) === 1,
+    shippable: Number(row.shippable) === 1,
   };
 }
 
@@ -532,6 +538,7 @@ export async function updateUnit(
     listing_body: raw.listingBody,
     listing_specs: raw.listingSpecs,
     show_on_website: raw.showOnWebsite ? 1 : 0,
+    shippable: raw.shippable ? 1 : 0,
   };
 
   const changes = (Object.keys(patch) as EditableField[]).filter((key) => {
