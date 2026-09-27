@@ -66,5 +66,9 @@ export function cacheUnitRow(
     updated_at: stripped.updated_at,
     acquisition_cost_cents: opts.includeCost ? (row.acquisition_cost_cents ?? null) : null,
     floor_cents: opts.includeCost ? (row.floor_cents ?? null) : null,
+    listing_body: stripped.listing_body ?? row.listing_body ?? null,
+    listing_specs: stripped.listing_specs ?? row.listing_specs ?? null,
+    show_on_website: row.show_on_website,
+    shippable: row.shippable,
   };
 }
