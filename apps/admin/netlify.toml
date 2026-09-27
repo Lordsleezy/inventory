@@ -5,6 +5,9 @@
 [build.environment]
   NODE_VERSION = "22"
 
+[functions]
+  directory = "apps/admin/functions"
+
 [[redirects]]
   from = "/*"
   to = "/index.html"
