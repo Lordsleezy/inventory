@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { ReceivePanel } from './ReceivePanel';
 
 type Row = {
   sku: string; brand: string; model: string; title: string; condition: string | null;
@@ -11,7 +12,7 @@ type Photo = { id: number; path: string; is_primary: boolean };
 type Sale = { sold_at: string; price_cents: number; actor_name: string; receipt_no: string };
 type Detail = { unit: Record<string, unknown>; photos: Photo[]; listings: Listing[]; sales: Sale[] };
 type List = { items: Row[]; totals: { unit_count: number; retail_cents: number; cost_cents: number; missing_cost: number } };
-type Props = { client: SupabaseClient; money: (n: number) => string; stamp: (s: string) => string };
+type Props = { client: SupabaseClient; storeId: string; money: (n: number) => string; stamp: (s: string) => string };
 
 const label = (s: string) => s === 'available' ? 'In stock' : s.replace(/_/g, ' ').replace(/^./, c => c.toUpperCase());
 const name = (u: Row) => [u.brand, u.model].filter(Boolean).join(' ') || u.title || 'Untitled unit';
@@ -22,7 +23,9 @@ function thumb(path: string) {
   return `${parts[0]}/${parts[1]}/web/400/${stem}.webp`;
 }
 
-export function InventoryPage({ client, money, stamp }: Props) {
+export function InventoryPage({ client, storeId, money, stamp }: Props) {
+  const [tab, setTab] = useState<'browse' | 'receive'>('browse');
+  const [refresh, setRefresh] = useState(0);
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState('in_stock');
   const [unfinished, setUnfinished] = useState(false);
@@ -59,7 +62,7 @@ export function InventoryPage({ client, money, stamp }: Props) {
       finally { if (active) setLoading(false); }
     })(); }, 200);
     return () => { active = false; clearTimeout(timer); };
-  }, [client, query, status, unfinished, sort, offset]);
+  }, [client, query, status, unfinished, sort, offset, refresh]);
 
   useEffect(() => {
     if (!selected) { setDetail(null); return; }
@@ -80,7 +83,9 @@ export function InventoryPage({ client, money, stamp }: Props) {
   const change = (set: () => void) => { set(); setOffset(0); setList(null); };
   const total = list?.totals.unit_count || 0;
   return <>
-    <header><div><div className="eyebrow">FLOOR INVENTORY</div><h1>Inventory</h1><p>View only. Edit units in the register or phone app.</p></div></header>
+    <header><div><div className="eyebrow">FLOOR INVENTORY</div><h1>Inventory</h1><p>{tab === 'browse' ? 'View only. Edit units in the register or phone app.' : 'Add physical units to Floor.'}</p></div></header>
+    <div className="inventory-tabs"><button className={tab === 'browse' ? 'active' : ''} onClick={() => setTab('browse')}>Browse</button><button className={tab === 'receive' ? 'active' : ''} onClick={() => setTab('receive')}>Receive</button></div>
+    {tab === 'receive' ? <ReceivePanel client={client} storeId={storeId} onSaved={() => setRefresh(n => n + 1)} /> : <>
     <div className="inventory-controls">
       <label>Search<input type="search" placeholder="SKU, brand, model or title" value={query} onChange={e => change(() => setQuery(e.target.value))} /></label>
       <label>Status<select value={status} onChange={e => change(() => setStatus(e.target.value))}>
@@ -99,7 +104,6 @@ export function InventoryPage({ client, money, stamp }: Props) {
     <div className="stats inventory-stats">
       <div className="stat"><span>Units</span><strong>{total}</strong></div>
       <div className="stat"><span>Retail value</span><strong>{money(list?.totals.retail_cents || 0)}</strong></div>
-      <div className="stat"><span>Total cost</span><strong>{money(list?.totals.cost_cents || 0)}</strong></div>
       <div className="stat"><span>Missing cost</span><strong>{list?.totals.missing_cost || 0}</strong></div>
     </div>
     <section className="panel inventory-panel">
@@ -122,5 +126,6 @@ export function InventoryPage({ client, money, stamp }: Props) {
         <h3>Sales</h3>{detail.sales.length ? <div className="inventory-listings">{detail.sales.map(s => <div key={s.receipt_no}><strong>{stamp(s.sold_at)} · {money(s.price_cents)} merchandise</strong><span>Rang up by {s.actor_name} · Receipt {s.receipt_no}</span></div>)}</div> : <p>No sale recorded.</p>}
       </>}
     </section></div>}
+    </>}
   </>;
 }
