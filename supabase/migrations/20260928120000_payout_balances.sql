@@ -70,8 +70,8 @@ drop policy if exists portal_payment_insert on public.portal_payout_payments;
 create policy portal_payment_insert on public.portal_payout_payments for insert to authenticated
   with check (store_id = public.portal_store_id());
 
--- Old per-ticket paid records become balance payments. SQL Editor bypasses the
--- insert trigger, preserving who recorded each payment and when.
+-- Old per-ticket paid records become balance payments. With no auth.uid() in
+-- the SQL Editor, the trigger preserves who recorded each payment and when.
 do $$ begin
   if to_regclass('public.portal_paid_payouts') is not null then
     insert into public.portal_payout_payments
