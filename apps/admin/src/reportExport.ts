@@ -77,19 +77,19 @@ export async function downloadReportWorkbook(
     for (const col of [4, 5, 6]) saleTotal.getCell(col).numFmt = currency;
     sheet.addRow([]);
     sheet.addRow(['Expenses']);
-    const expenseHeader = sheet.addRow(['Description', 'Category', 'Amount', 'Needs reimbursement', 'Who']);
+    const expenseHeader = sheet.addRow(['Description', 'Amount', 'Needs reimbursement', 'Who']);
     expenseHeader.font = { bold: true };
     for (const expense of report.expenses) {
-      const row = sheet.addRow([expense.description, expense.category, dollars(expense.amount_cents),
+      const row = sheet.addRow([expense.description, dollars(expense.amount_cents),
         expense.needs_reimbursement ? 'Yes' : 'No',
         expense.needs_reimbursement && expense.employee_id ? personName(expense.employee_id) : '']);
-      row.getCell(3).numFmt = currency;
+      row.getCell(2).numFmt = currency;
     }
     const expenses = report.expenses.reduce((n, x) => n + x.amount_cents, 0);
-    const expenseTotal = sheet.addRow(['Total expenses', '', dollars(expenses)]);
-    expenseTotal.font = { bold: true }; expenseTotal.getCell(3).numFmt = currency;
-    const net = sheet.addRow(['Net merchandise after expenses', '', dollars(report.summary.sales_cents - expenses)]);
-    net.font = { bold: true }; net.getCell(3).numFmt = currency;
+    const expenseTotal = sheet.addRow(['Total expenses', dollars(expenses)]);
+    expenseTotal.font = { bold: true }; expenseTotal.getCell(2).numFmt = currency;
+    const net = sheet.addRow(['Net merchandise after expenses', dollars(report.summary.sales_cents - expenses)]);
+    net.font = { bold: true }; net.getCell(2).numFmt = currency;
     sheet.addRow([]);
     sheet.addRow(['Notes', report.notes]);
     sheet.addRow(['Submitted by', personName(report.created_by), dateTime(report.created_at)]);
