@@ -82,6 +82,17 @@ async function storedReports(storeId: string) {
     if (batch.length < 1000) return reports;
   }
 }
+async function storedPayments(storeId: string) {
+  const payments: Payment[] = [];
+  for (let offset = 0;; offset += 1000) {
+    const batch = check<Payment[]>(await sb.from('portal_payout_payments')
+      .select('id,employee_id,amount_cents,paid_at,paid_by,legacy_ticket_key')
+      .eq('store_id', storeId).order('paid_at', { ascending: false })
+      .range(offset, offset + 999));
+    payments.push(...batch);
+    if (batch.length < 1000) return payments;
+  }
+}
 async function payoutSales() {
   const lines: Line[] = [];
   for (let offset = 0;; offset += 1000) {
@@ -113,17 +124,18 @@ export function App() {
   const loadCommon = useCallback(async () => {
     if (!store) return;
     try {
-      const [p, r, q, a] = await Promise.all([
+      const [p, r, a] = await Promise.all([
         sb.rpc('portal_people'), sb.from('portal_payout_rules').select('employee_id,method,rate').eq('store_id', store),
-        sb.from('portal_payout_payments').select('id,employee_id,amount_cents,paid_at,paid_by,legacy_ticket_key').eq('store_id', store),
         storedReports(store)
       ]);
-      setPeople(check<Person[]>(p)); setRules(check<Rule[]>(r)); setPayments(check<Payment[]>(q)); setReports(a); setError('');
+      setPeople(check<Person[]>(p)); setRules(check<Rule[]>(r)); setReports(a); setError('');
     } catch (e) { setError(String(e)); }
   }, [store]);
+  const loadPayments = useCallback(async () => { if (!store) return; try { setPayments(await storedPayments(store)); } catch (e) { setError(String(e)); } }, [store]);
   const loadSales = useCallback(async () => { if (!store) return; try { setLive(await sales(selectedDay, datePlus(selectedDay, 1))); } catch (e) { setError(String(e)); } }, [store, selectedDay]);
   const loadPayoutSales = useCallback(async () => { if (!store) return; try { setAllSales(await payoutSales()); } catch (e) { setError(String(e)); } }, [store]);
   useEffect(() => { void loadCommon(); }, [loadCommon]);
+  useEffect(() => { if (page === 'payouts') void loadPayments(); }, [page, loadPayments]);
   useEffect(() => { void loadSales(); }, [loadSales]);
   useEffect(() => { void loadPayoutSales(); }, [loadPayoutSales]);
   useEffect(() => { if (!store) return; const c = sb.channel(`portal-sales-${store}`).on('postgres_changes', { event: '*', schema: 'public', table: 'sales', filter: `store_id=eq.${store}` }, () => { void loadSales(); void loadPayoutSales(); }).subscribe(); return () => { void sb.removeChannel(c); }; }, [store, loadSales, loadPayoutSales]);
@@ -139,7 +151,7 @@ export function App() {
   function viewReport(r: Report, editable = false) { setEditing(r); setReportReadOnly(!editable); setReportDraft({ start: r.period_start, end: r.period_end, summary: r.summary, expenses: r.expenses, notes: r.notes }); }
   async function saveReport() { if (!store || !session || !editing || !draft) return; if (draft.expenses.some(x => !x.description.trim() || !Number.isFinite(x.amount_cents) || x.amount_cents < 0 || (x.needs_reimbursement && !people.some(p => p.kind === 'employee' && p.user_id === x.employee_id)))) { setError('Every expense needs a description, amount, and valid reimbursement recipient.'); return; } await run(async () => { const payload = { store_id: store, period_type: typeof editing === 'string' ? editing : editing.period_type, period_start: draft.start, period_end: draft.end, summary: draft.summary, expenses: draft.expenses, notes: draft.notes, edited_by: session.user.id, created_by: session.user.id }; if (typeof editing === 'string') check(await sb.from('portal_reports').insert(payload)); else check(await sb.from('portal_reports').update({ expenses: payload.expenses, notes: payload.notes, edited_by: session.user.id }).eq('id', editing.id)); setEditing(null); setReportDraft(null); await loadCommon(); }); }
   async function setRule(id: string, method: Rule['method'], rate: number) { if (!store || !session) return; await run(async () => { check(await sb.from('portal_payout_rules').upsert({ store_id: store, employee_id: id, method, rate, updated_at: new Date().toISOString(), updated_by: session.user.id })); await loadCommon(); }); }
-  async function recordPayment(employeeId: string, amountCents: number): Promise<boolean> { if (!store || !session) return false; setBusy(true); setError(''); try { check(await sb.from('portal_payout_payments').insert({ store_id: store, employee_id: employeeId, amount_cents: amountCents, paid_by: session.user.id })); await loadCommon(); return true; } catch (e) { setError(e instanceof Error ? e.message : String(e)); return false; } finally { setBusy(false); } }
+  async function recordPayment(employeeId: string, amountCents: number): Promise<boolean> { if (!store || !session) return false; setBusy(true); setError(''); try { const saved = check<Payment>(await sb.from('portal_payout_payments').insert({ store_id: store, employee_id: employeeId, amount_cents: amountCents, paid_by: session.user.id }).select('id,employee_id,amount_cents,paid_at,paid_by,legacy_ticket_key').single()); setPayments(current => [saved, ...current.filter(p => p.id !== saved.id)]); return true; } catch (e) { setError(e instanceof Error ? e.message : String(e)); return false; } finally { setBusy(false); } }
   async function downloadReports(selected: Report[], all: boolean) { await run(async () => { const { downloadReportWorkbook } = await import('./reportExport'); await downloadReportWorkbook(selected, reportLines, personName, all); }); }
 
   if (!session) return <main className="auth"><div className="login"><div className="brand">OPEN BOX <span>INDUSTRIES</span></div><h1>Floor Admin</h1><p>Sign in to view your store.</p><form onSubmit={e => { e.preventDefault(); void run(async () => { const result = await sb.auth.signInWithPassword({ email, password }); if (result.error) throw result.error; }); }}><label>Email<input type="email" autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} required /></label><label>Password<input type="password" autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} required /></label><button disabled={busy}>Sign in</button></form>{error && <p className="error">{error}</p>}</div></main>;
