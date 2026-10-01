@@ -4,6 +4,7 @@
   "type": "module",
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",
+    "sharp": "^0.34.4",
     "square": "^42.0.0"
   }
 }
