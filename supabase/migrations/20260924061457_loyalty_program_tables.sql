@@ -1,0 +1,17 @@
+alter table public.customers add column if not exists signup_code text, add column if not exists unsub_token uuid not null default gen_random_uuid(), add column if not exists unsubscribed_at timestamptz;
+create unique index if not exists ux_customers_signup_code on public.customers (store_id, signup_code) where signup_code is not null;
+create unique index if not exists ux_customers_unsub_token on public.customers (unsub_token);
+update public.customers set signup_code = 'NEW5-' || upper(substr(replace(id::text, '-', ''), 1, 6)) where signup_code is null;
+create table if not exists public.email_outbox (id bigserial primary key, store_id uuid not null references public.stores (id), customer_id uuid references public.customers (id), campaign_id uuid, kind text not null check (kind in ('welcome', 'points', 'campaign')), to_email text not null, subject text, body_text text, status text not null default 'queued' check (status in ('queued', 'sending', 'sent', 'error', 'skipped')), error text, payload jsonb not null default '{}'::jsonb, created_at timestamptz not null default now(), sent_at timestamptz);
+create index if not exists ix_email_outbox_queued on public.email_outbox (status, created_at) where status = 'queued';
+create table if not exists public.email_campaigns (id uuid primary key default gen_random_uuid(), store_id uuid not null references public.stores (id), subject text not null, body_text text not null, filter jsonb not null default '{}'::jsonb, queued_count int not null default 0, created_by uuid references auth.users (id), created_at timestamptz not null default now());
+alter table public.email_outbox enable row level security;
+alter table public.email_campaigns enable row level security;
+revoke all on public.customers from anon, authenticated, public;
+revoke all on public.customer_points_ledger from anon, authenticated, public;
+revoke all on public.email_outbox from anon, authenticated, public;
+revoke all on public.email_campaigns from anon, authenticated, public;
+drop policy if exists staff_customers_select on public.customers;
+drop policy if exists staff_customers_insert on public.customers;
+drop policy if exists staff_customers_update on public.customers;
+drop policy if exists staff_ledger_select on public.customer_points_ledger;;

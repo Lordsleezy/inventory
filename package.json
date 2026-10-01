@@ -29,6 +29,7 @@
     "sharp": "^0.34.4"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "^0.5.8"
+    "@electric-sql/pglite": "^0.5.8",
+    "supabase": "2.119.0"
   }
 }
