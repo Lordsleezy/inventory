@@ -101,4 +101,46 @@ for (const [method, sku, cash, expectedCard, expectedFee] of [
 }
 assert.equal((await db.query('select count(*)::int n from public.card_charges')).rows[0].n, 0, 'manual tender never creates an integrated charge');
 
+// A negotiated line price is the merchandise basis for tax and card fee,
+// while the original and negotiated prices remain visible in the sale audit.
+await db.exec(`
+  insert into public.sku_ledger(sku,issued_at,store_id) values
+    ('91003',now(),'00000000-0000-0000-0000-000000000112');
+  insert into public.units(sku,title,ask_cents,floor_cents,state,store_id,received_at,updated_at)
+    values('91003','Negotiated unit',89900,100,'available','00000000-0000-0000-0000-000000000112',now(),now());
+`);
+const overrideLines = JSON.stringify([{sku:'91003',price_cents:85000,override_reason:'Counter negotiation'}]);
+const {rows:[{q:overrideQuote}]} = await db.query(`select public.quote_ticket_totals($1::jsonb,0,null,0,'floor','card',0) q`,[overrideLines]);
+assert.equal(overrideQuote.tax_cents,6163);
+assert.equal(overrideQuote.card_fee_cents,2279);
+const {rows:[{id:overrideTicket}]} = await db.query('select gen_random_uuid() id');
+await db.query(`select public.finalize_ticket(p_ticket_id=>$1::uuid,p_lines=>$2::jsonb,
+  p_payment_method=>'card',p_payment_id=>$3,p_card_cents=>$4)`,
+  [overrideTicket,overrideLines,`manual:${overrideTicket}`,overrideQuote.card_base_cents]);
+const {rows:[overrideSale]} = await db.query(`select price_cents,tax_cents,card_fee_cents,
+  list_price_cents,override_price_cents,override_by from public.sales where ticket_id=$1`,[overrideTicket]);
+assert.deepEqual([overrideSale.price_cents,overrideSale.tax_cents,overrideSale.card_fee_cents,
+  overrideSale.list_price_cents,overrideSale.override_price_cents], [85000,6163,2279,89900,85000]);
+assert.equal(overrideSale.override_by,'00000000-0000-0000-0000-000000000111');
+const {rows:[audit]} = await db.query(`select old_value,new_value from public.events
+  where sku='91003' and field='sale_price_override'`);
+assert.deepEqual([audit.old_value,audit.new_value],['89900','85000']);
+console.log('negotiated price: tax, fee, sale snapshot and audit ok');
+
+await db.exec(`
+  insert into public.sku_ledger(sku,issued_at,store_id) values
+    ('91004',now(),'00000000-0000-0000-0000-000000000112');
+  insert into public.units(sku,title,ask_cents,floor_cents,state,store_id,received_at,updated_at)
+    values('91004','Phone unit',89900,100,'available','00000000-0000-0000-0000-000000000112',now(),now());
+`);
+await db.query(`select public.finalize_sale(p_sku=>'91004',p_channel=>'facebook',
+  p_price_cents=>85000,p_payment_method=>'card',p_payment_id=>'manual:phone-override',
+  p_tax_cents=>6163)`);
+const {rows:[phoneSale]} = await db.query(`select price_cents,tax_cents,card_fee_cents,
+  list_price_cents,override_price_cents,override_by from public.sales where sku='91004'`);
+assert.deepEqual([phoneSale.price_cents,phoneSale.tax_cents,phoneSale.card_fee_cents,
+  phoneSale.list_price_cents,phoneSale.override_price_cents], [85000,6163,2279,89900,85000]);
+assert.equal(phoneSale.override_by,'00000000-0000-0000-0000-000000000111');
+console.log('phone price override: sale snapshot and card fee ok');
+
 await db.close();

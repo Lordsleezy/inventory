@@ -18,6 +18,8 @@ import { askManagerPin } from "../pin";
 import { friendlyRpc } from "../rpc";
 import { openHtml } from "../files";
 
+const moneyEntry = /^\d*(?:\.\d{0,2})?$/;
+
 export function CheckoutScreen() {
   const { sku = "" } = useParams();
   const navigate = useNavigate();
@@ -25,6 +27,7 @@ export function CheckoutScreen() {
   const [unit, setUnit] = useState<Unit | null>(null);
   const [channel, setChannel] = useState("facebook");
   const [price, setPrice] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState("external");
   const [error, setError] = useState("");
   const [loud, setLoud] = useState("");
   const [busy, setBusy] = useState(false);
@@ -42,7 +45,8 @@ export function CheckoutScreen() {
 
   const cents = parseMoneyToCents(price);
   const tax = typeof cents === "number" ? Math.round((cents * settings.taxRateBps) / 10_000) : 0;
-  const total = typeof cents === "number" ? cents + tax : 0;
+  const cardFee = paymentMethod === "card" ? Math.round(((cents ?? 0) + tax) * settings.cardFeeBps / 10_000) : 0;
+  const total = typeof cents === "number" ? cents + tax + cardFee : 0;
 
   async function recordSale() {
     setError("");
@@ -59,7 +63,7 @@ export function CheckoutScreen() {
           sku,
           channel,
           priceCents: cents,
-          paymentMethod: "external",
+          paymentMethod,
           paymentId: `manual_${Date.now()}`,
           reservationId: hold,
           taxCents: tax,
@@ -121,11 +125,20 @@ export function CheckoutScreen() {
       </label>
 
       <label className="block py-2">
-        <Label>Price</Label>
-        <input className="field mt-1" value={price} inputMode="decimal" onChange={(e) => setPrice(e.target.value)} />
+        <Label>Sale price before tax</Label>
+        <input className="field mt-1" type="text" value={price} inputMode="decimal"
+          onChange={(e) => { if (moneyEntry.test(e.target.value)) setPrice(e.target.value); }}
+          onBlur={() => { if (price === ".") setPrice(""); else if (price) setPrice(Number(price).toFixed(2)); }} />
+      </label>
+      {unit.askCents != null && cents != null && cents !== unit.askCents ?
+        <p className="text-quiet text-floor-mute">Original price {formatCentsTotal(unit.askCents)} → {formatCentsTotal(cents)}</p> : null}
+      <label className="block py-2"><Label>Payment type</Label>
+        <select className="field mt-1" value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)}>
+          <option value="external">Other already paid</option><option value="cash">Cash</option><option value="card">Card</option>
+        </select>
       </label>
       <p className="text-quiet text-floor-mute">
-        Tax {formatCents(tax) || "$0.00"} · Total {formatCentsTotal(total)}
+        Tax {formatCents(tax) || "$0.00"} · Card fee {formatCentsTotal(cardFee)} · Total {formatCentsTotal(total)}
       </p>
 
       <button type="button" className="btn-accent mt-4" disabled={busy || !online} onClick={() => void recordSale()}>

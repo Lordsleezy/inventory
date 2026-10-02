@@ -15,6 +15,7 @@ export type Receipt = {
   condition: string | null;
   priceCents: number;
   taxCents: number;
+  cardFeeCents: number;
   totalCents: number;
   voidedAt: string | null;
 };
@@ -36,7 +37,8 @@ export function buildReceipt(sale: Sale, unit: Unit | null, settings: Settings):
     condition: unit?.condition ?? null,
     priceCents: sale.priceCents,
     taxCents,
-    totalCents: sale.priceCents + taxCents,
+    cardFeeCents: sale.cardFeeCents,
+    totalCents: sale.priceCents + taxCents + sale.cardFeeCents,
     voidedAt: sale.voidedAt,
   };
 }
@@ -84,6 +86,7 @@ ${receipt.voidedAt ? `<div class="void">VOIDED ${escape(new Date(receipt.voidedA
 <div class="totals">
   <div><span>Price</span><span>${formatCents(receipt.priceCents)}</span></div>
   ${receipt.taxCents > 0 ? `<div><span>Tax</span><span>${formatCents(receipt.taxCents)}</span></div>` : ""}
+  ${receipt.cardFeeCents > 0 ? `<div><span>Card fee</span><span>${formatCents(receipt.cardFeeCents)}</span></div>` : ""}
   <div class="grand"><span>Total</span><span>${formatCentsTotal(receipt.totalCents)}</span></div>
 </div>
 <p class="muted">All sales final unless otherwise agreed in writing.</p>

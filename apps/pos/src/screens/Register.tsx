@@ -32,6 +32,8 @@ type ManualPayment = {
 };
 
 type PinKind = "below_floor" | "ticket_discount";
+const moneyEntry = /^\d*(?:\.\d{0,2})?$/;
+const cleanMoney = (value: string) => Number(value === "." ? 0 : value || 0).toFixed(2);
 
 function formatPoints(points: number): string {
   return Number((Number(points) || 0).toFixed(1)).toString();
@@ -75,6 +77,7 @@ export function RegisterScreen() {
   const [discountDraft, setDiscountDraft] = useState("");
   const [noteOpen, setNoteOpen] = useState(false);
   const [editSku, setEditSku] = useState<string | null>(null);
+  const [editPriceDraft, setEditPriceDraft] = useState("");
   const [splitOpen, setSplitOpen] = useState(false);
   const [splitCashDraft, setSplitCashDraft] = useState("");
   const [customer, setCustomer] = useState<Customer | null>(null);
@@ -500,11 +503,13 @@ export function RegisterScreen() {
                         <span>1</span>
                       )}
                     </td>
-                    <td>{formatCentsTotal(line.priceCents)}</td>
+                    <td><button type="button" className="price-edit" disabled={phase !== "idle"}
+                      title="Change sale price" onClick={() => { setEditSku(line.sku); setEditPriceDraft(centsToInput(line.priceCents)); }}>
+                      {formatCentsTotal(line.priceCents)}</button></td>
                     <td>{formatCentsTotal(lineExtendedPrice(line))}</td>
                     <td>
                       <div className="cart-actions">
-                        <button type="button" className="ghost" disabled={phase !== "idle"} onClick={() => setEditSku(line.sku)}>
+                        <button type="button" className="ghost" disabled={phase !== "idle"} onClick={() => { setEditSku(line.sku); setEditPriceDraft(centsToInput(line.priceCents)); }}>
                           Edit
                         </button>
                         <button
@@ -767,14 +772,16 @@ export function RegisterScreen() {
             <label>
               Sale price
               <input
-                value={centsToInput(editLine.priceCents)}
+                type="text"
+                inputMode="decimal"
+                value={editPriceDraft}
                 onChange={(e) => {
-                  const cents = parseMoneyToCents(e.target.value);
-                  if (typeof cents === "number") updateLine(editLine.sku, { priceCents: cents, approvalId: null });
+                  if (moneyEntry.test(e.target.value)) setEditPriceDraft(e.target.value);
                 }}
+                onBlur={() => { if (editPriceDraft === ".") setEditPriceDraft(""); else if (editPriceDraft) setEditPriceDraft(cleanMoney(editPriceDraft)); }}
               />
             </label>
-            {editLine.askCents != null && editLine.priceCents !== editLine.askCents ? (
+            {editLine.askCents != null && parseMoneyToCents(editPriceDraft) !== editLine.askCents ? (
               <label>
                 Override reason
                 <input
@@ -788,7 +795,12 @@ export function RegisterScreen() {
               <button type="button" className="danger" onClick={() => { removeSku(editLine.sku); setEditSku(null); }}>
                 Remove
               </button>
-              <button type="button" className="primary" onClick={() => setEditSku(null)}>
+              <button type="button" className="primary" onClick={() => {
+                const cents = parseMoneyToCents(editPriceDraft);
+                if (cents == null || cents < 0) { setError("Enter a valid sale price."); return; }
+                updateLine(editLine.sku, { priceCents: cents, approvalId: null });
+                setEditSku(null);
+              }}>
                 Done
               </button>
             </div>

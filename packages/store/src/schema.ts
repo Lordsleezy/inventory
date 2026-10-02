@@ -93,6 +93,7 @@ CREATE TABLE IF NOT EXISTS sales (
   sku            TEXT NOT NULL REFERENCES sku_ledger(sku),
   price_cents    INTEGER NOT NULL CHECK (price_cents >= 0),
   tax_cents      INTEGER NOT NULL DEFAULT 0 CHECK (tax_cents >= 0),
+  card_fee_cents INTEGER NOT NULL DEFAULT 0 CHECK (card_fee_cents >= 0),
   channel        TEXT NOT NULL,
   payment_method TEXT,
   customer_name  TEXT,

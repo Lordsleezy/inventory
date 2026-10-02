@@ -43,6 +43,7 @@ export type Sale = {
   sku: string;
   priceCents: number;
   taxCents: number;
+  cardFeeCents: number;
   channel: string;
   paymentMethod: string | null;
   customerName: string | null;
@@ -146,6 +147,9 @@ async function migrateSalesColumns(db: Db): Promise<void> {
   const names = new Set(cols.map((c) => String(c.name ?? c.Name ?? "")));
   if (!names.has("tax_cents")) {
     await db.exec("ALTER TABLE sales ADD COLUMN tax_cents INTEGER NOT NULL DEFAULT 0");
+  }
+  if (!names.has("card_fee_cents")) {
+    await db.exec("ALTER TABLE sales ADD COLUMN card_fee_cents INTEGER NOT NULL DEFAULT 0");
   }
   if (!names.has("actor")) {
     await db.exec("ALTER TABLE sales ADD COLUMN actor TEXT");
@@ -270,6 +274,7 @@ function toSale(row: Record<string, SqlValue>): Sale {
     sku: String(row.sku),
     priceCents: Number(row.price_cents),
     taxCents: row.tax_cents == null ? 0 : Number(row.tax_cents),
+    cardFeeCents: row.card_fee_cents == null ? 0 : Number(row.card_fee_cents),
     channel: String(row.channel),
     paymentMethod: (row.payment_method as string) ?? null,
     customerName: (row.customer_name as string) ?? null,

@@ -403,3 +403,5 @@ label { display: grid; gap: 0.3rem; }
     height: auto;
   }
 }
+.price-edit { border: 0; background: transparent; color: inherit; font: inherit; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; padding: 0; }
+.price-edit:disabled { cursor: default; text-decoration: none; }

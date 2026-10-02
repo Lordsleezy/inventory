@@ -222,13 +222,14 @@ async function applyOnce(db: Db, payload: CachePayload): Promise<void> {
         const sku = digitSku(s.sku);
         if (!sku || !ledger.has(sku)) continue;
         await db.run(
-          `INSERT INTO sales (id, sku, price_cents, tax_cents, channel, payment_method, customer_name, customer_phone, customer_email, note, sold_at, receipt_no, voided_at, void_reason, actor)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          `INSERT INTO sales (id, sku, price_cents, tax_cents, card_fee_cents, channel, payment_method, customer_name, customer_phone, customer_email, note, sold_at, receipt_no, voided_at, void_reason, actor)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
           [
             intOrNull(s.id),
             sku,
             Number(s.price_cents ?? 0),
             intOrNull(s.tax_cents) ?? 0,
+            intOrNull(s.card_fee_cents) ?? 0,
             text(s.channel, "floor"),
             nullable(s.payment_method),
             nullable(s.customer_name),

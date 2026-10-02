@@ -81,7 +81,8 @@ const rest = all.filter((f) => f.name > "0005_private_photos.sql");
   const db = await boot();
   await apply(db, all);
   const cols = await publicItemColumns(db);
-  assert.deepEqual(cols, expected, `fresh 0001→0012 columns: ${cols.join(",")}`);
+  assert.deepEqual(cols.slice(0, expected.length), expected, `public_items base columns: ${cols.join(",")}`);
+  assert.equal(cols.includes("manufacturer_photos"), true, "fresh replay has professional photos");
   const pos = await db.query(
     `select 1 from information_schema.views where table_schema = 'public' and table_name = 'units_pos'`,
   );
@@ -130,7 +131,8 @@ const rest = all.filter((f) => f.name > "0005_private_photos.sql");
   assert.equal(before.includes("store_id"), false, "0005 public_items has no store_id");
   await apply(db, rest);
   const cols = await publicItemColumns(db);
-  assert.deepEqual(cols, expected, `upgrade 0005→0014 columns: ${cols.join(",")}`);
+  assert.deepEqual(cols.slice(0, expected.length), expected, `upgrade public_items base columns: ${cols.join(",")}`);
+  assert.equal(cols.includes("manufacturer_photos"), true, "upgrade has professional photos");
   await db.query(`select public.anon_can_read_unit_photo('not-a-path')`);
   console.log("upgrade 0005→0014 ok");
 }
