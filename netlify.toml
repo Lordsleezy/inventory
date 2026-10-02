@@ -13,6 +13,12 @@
 [functions."loyalty-email"]
   schedule = "*/5 * * * *"
 
+[functions."web-order-email"]
+  schedule = "*/5 * * * *"
+
+[functions."web-order-reconcile"]
+  schedule = "*/5 * * * *"
+
 [build.processing.html]
   pretty_urls = false
 

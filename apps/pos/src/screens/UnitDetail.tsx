@@ -179,6 +179,37 @@ export function UnitDetailScreen() {
               disabled={busy || !online}
             />
           </label>
+          <label className="row">
+            <input type="checkbox" checked={unit.shippable === true} disabled={busy || !online}
+              onChange={(e) => void saveField("shippable", String(e.target.checked))} />
+            Shippable
+          </label>
+          <label className="row">
+            <input type="checkbox" checked={unit.show_on_website === true} disabled={busy || !online}
+              onChange={(e) => void saveField("show_on_website", String(e.target.checked))} />
+            List online
+          </label>
+          <label>
+            Shipping weight (lb)
+            <input type="number" min="0.01" step="0.01"
+              defaultValue={String((unit.listing_specs as Record<string, unknown> | null)?.weight_lb || "")}
+              disabled={busy || !online}
+              onBlur={(e) => {
+                const specs = { ...((unit.listing_specs as Record<string, unknown>) || {}) };
+                if (e.target.value) specs.weight_lb = e.target.value;
+                else delete specs.weight_lb;
+                void saveField("listing_specs", JSON.stringify(specs));
+              }} />
+          </label>
+          <label>
+            Shipping override ($; blank uses weight tiers, 0 is free)
+            <input defaultValue={centsToInput(typeof unit.shipping_cents === "number" ? unit.shipping_cents : null)}
+              disabled={busy || !online} onBlur={(e) => {
+                const cents = parseMoneyToCents(e.target.value);
+                if (cents !== undefined && (cents === null || cents >= 0)) void saveField("shipping_cents", cents);
+              }} />
+          </label>
+          <p className="muted">Buy online needs List online, a photo, a price, and a shipping weight of 30 lb or less.</p>
           <label>
             Add photos from disk
             <input type="file" accept="image/*" multiple disabled={busy || !online} onChange={(e) => void onFiles(e.target.files)} />

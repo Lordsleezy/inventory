@@ -1,6 +1,6 @@
 import { staffFromEvent, json, corsHeaders, serviceClient } from "../lib/server.mjs";
 import { wrapHandler } from "../lib/floor-log.mjs";
-import { sendResend } from "../lib/receipt.mjs";
+import { deliverOrderEmails } from "../lib/web-order-email.mjs";
 
 async function handle(event) {
   if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: corsHeaders(), body: "" };
@@ -29,7 +29,7 @@ async function handle(event) {
     .from("web_orders")
     .update({
       shipped_at: current.shipped_at || new Date().toISOString(),
-      tracking_number: tracking,
+      tracking_number: current.shipped_at ? current.tracking_number : tracking,
       updated_at: new Date().toISOString(),
     })
     .eq("id", id)
@@ -39,23 +39,8 @@ async function handle(event) {
   if (error) return json(400, { error: error.message });
   if (!order) return json(400, { error: "not_shippable" });
 
-  const to = String(order.buyer_email || "").trim();
-  let emailed = false;
-  if (to.includes("@")) {
-    const result = await sendResend({
-      to,
-      subject: `Your order shipped (SKU ${order.sku})`,
-      text: [
-        `Hi${order.buyer_name ? ` ${order.buyer_name}` : ""},`,
-        "",
-        `SKU ${order.sku} is on the way.`,
-        `Tracking number: ${order.tracking_number}`,
-        "",
-        "Open Box Industries",
-      ].join("\n"),
-    });
-    emailed = result.ok === true;
-  }
+  const deliveries = await deliverOrderEmails(sb, order.id).catch(() => []);
+  const emailed = deliveries.some(r => r.kind === "tracking" && r.ok);
 
   return json(200, { ok: true, order, emailed });
 }

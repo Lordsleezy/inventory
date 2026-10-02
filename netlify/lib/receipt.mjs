@@ -175,7 +175,7 @@ ${branding.footerMessage ? `<p style="color:#555">${escape(branding.footerMessag
 </body></html>`;
 }
 
-export async function sendResend({ to, subject, text, html, headers }) {
+export async function sendResend({ to, subject, text, html, headers, idempotencyKey }) {
   const key = process.env.RESEND_API_KEY;
   const from = process.env.RESEND_FROM;
   if (!key || !from || !to)
@@ -185,7 +185,7 @@ export async function sendResend({ to, subject, text, html, headers }) {
   if (headers) body.headers = headers;
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
-    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}) },
     body: JSON.stringify(body),
   });
   if (!res.ok) {

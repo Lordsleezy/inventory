@@ -1,416 +1,53 @@
-/**
- * Website checkout — reserve → Square payment → finalize, with full refund
- * when the ticket cannot finalize after capture.
- *
- * Auth: header `x-store-web-key` must equal STORE_WEB_REWARDS_KEY (falls back
- * to CONNECTIONS_KEY), same contract as rewards-quote. Server-to-server only —
- * the storefront never sees the service key or Square tokens.
- *
- * POST JSON actions:
- *   { action: "config", store_id }
- *     → { application_id, location_id, sandbox, store_name }
- *   { action: "begin", store_id, sku, phone?, name?, email?, redeem_points? }
- *     → reserves the unit, upserts the rewards customer, returns quote +
- *       reservation_id + Square config. Fee/tax are server-computed.
- *   { action: "pay", store_id, reservation_id, source_id, email?, ... }
- *     → charges the card for the server-quoted amount, finalizes the ticket
- *       (channel "website"), emails the receipt, refunds on failure.
- *   { action: "release", store_id, reservation_id }
- *     → releases an abandoned hold early.
- */
+/** Server-to-server shipping checkout. Square credentials are production-only and independent of register OAuth. */
 import { serviceClient, json, corsHeaders } from "../lib/server.mjs";
 import { wrapHandler } from "../lib/floor-log.mjs";
-import { getStoreSquareAccess, squareClient, refundSquarePayment } from "../lib/square.mjs";
-import { buildReceiptHtml, buildReceiptText, mergeBranding, sendResend } from "../lib/receipt.mjs";
-import { drainLoyaltyEmail } from "./loyalty-email.mjs";
-
-function rewardsKey() {
-  return process.env.STORE_WEB_REWARDS_KEY || process.env.CONNECTIONS_KEY || "";
-}
-
-function assertKey(event) {
-  const expected = rewardsKey();
-  if (!expected) throw new Error("rewards_key_unset");
-  const headers = event.headers || {};
-  const got =
-    headers["x-store-web-key"] ||
-    headers["X-Store-Web-Key"] ||
-    headers["x-connections-key"] ||
-    "";
-  if (!got || got !== expected) throw new Error("unauthorized");
-}
-
-const cors = {
-  ...corsHeaders(),
-  "Access-Control-Allow-Headers":
-    "Authorization, Content-Type, x-store-web-key, x-connections-key",
-};
-
-function digitsOnly(phone) {
-  return String(phone || "").replace(/\D/g, "");
-}
-
-async function loadBranding(sb, storeId) {
-  const { data } = await sb
-    .from("store_settings")
-    .select("key, value")
-    .eq("store_id", storeId)
-    .in("key", ["receipt_branding", "display_name"]);
-  let stored = null;
-  let displayName = null;
-  for (const row of data ?? []) {
-    if (row.key === "receipt_branding") stored = row.value;
-    if (row.key === "display_name") {
-      displayName = typeof row.value === "string" ? row.value : String(row.value ?? "");
-      displayName = displayName.replace(/^"|"$/g, "");
-    }
-  }
-  return mergeBranding(stored, null, displayName);
-}
-
-async function squareConfig(sb, storeId) {
-  const access = await getStoreSquareAccess(storeId);
-  return {
-    application_id: process.env.SQUARE_APPLICATION_ID || "",
-    location_id: access.locationId || "",
-    sandbox: access.sandbox !== false,
-  };
-}
-
-async function handleConfig(sb, body) {
-  const cfg = await squareConfig(sb, body.store_id);
-  const branding = await loadBranding(sb, body.store_id);
-  return json(200, { ...cfg, store_name: branding.storeName }, cors);
-}
-
-async function handleBegin(sb, body) {
-  const storeId = body.store_id;
-  const sku = String(body.sku || "").trim();
-  if (!sku) return json(400, { error: "sku_required" }, cors);
-
-  // A rewards account is created only after an explicit signup, not just from
-  // the contact details a buyer enters for checkout.
-  let customer = null;
-  const phone = digitsOnly(body.phone);
-  if (phone) {
-    const { data: cust, error: custErr } = await sb.rpc("web_lookup_customer", {
-      p_store: storeId,
-      p_phone: phone,
-    });
-    if (custErr) return json(500, { error: custErr.message }, cors);
-    customer = cust;
-  }
-
-  const redeem = Math.max(0, Math.trunc(Number(body.redeem_points) || 0));
-  const { data: res, error } = await sb.rpc("web_reserve_unit", {
-    p_store: storeId,
-    p_sku: sku,
-    p_customer_id: customer?.id ?? null,
-    p_redeem_points: redeem,
-  });
-  if (error) {
-    const msg = error.message || "reserve_failed";
-    const status = /not_sellable|not_priced/.test(msg) ? 409 : 400;
-    return json(status, { error: msg }, cors);
-  }
-
-  const cfg = await squareConfig(sb, storeId);
-  const branding = await loadBranding(sb, storeId);
-  const quote = res.quote || {};
-  return json(
-    200,
-    {
-      ok: true,
-      reservation_id: res.reservation_id,
-      expires_at: res.expires_at,
-      price_cents: res.price_cents,
-      customer,
-      quote: {
-        subtotal_cents: quote.subtotal_cents,
-        discount_cents: (quote.discount_cents || 0) + (quote.signup_discount_cents || 0),
-        signup_discount_cents: quote.signup_discount_cents || 0,
-        redeem_cents: quote.redeem_cents || 0,
-        tax_cents: quote.tax_cents,
-        card_fee_cents: quote.card_fee_cents || 0,
-        total_cents: quote.total_cents,
-        earn_points_preview: Math.floor(Number(quote.subtotal_cents || 0) / 100),
-      },
-      square: cfg,
-      store_name: branding.storeName,
-    },
-    cors,
-  );
-}
-
-async function loadTicketReceipt(sb, storeId, ticketId) {
-  const { data: sales } = await sb
-    .from("sales")
-    .select(
-      "id, sku, receipt_no, ticket_id, sold_at, price_cents, tax_cents, card_fee_cents, list_price_cents, payment_method, card_brand, card_last4, actor_id, voided_at",
-    )
-    .eq("store_id", storeId)
-    .eq("ticket_id", ticketId)
-    .is("voided_at", null)
-    .order("id", { ascending: true });
-  if (!sales?.length) return null;
-  const skus = [...new Set(sales.map((s) => s.sku))];
-  const [{ data: units }, { data: extras }] = await Promise.all([
-    sb.from("units").select("sku, title, brand, model, condition").eq("store_id", storeId).in("sku", skus),
-    sb
-      .from("ticket_extras")
-      .select(
-        "discount_cents, signup_discount_cents, points_earned, points_redeemed, cash_cents, card_cents, amount_tendered_cents, card_fee_cents",
-      )
-      .eq("store_id", storeId)
-      .eq("ticket_id", ticketId)
-      .maybeSingle(),
-  ]);
-  const unitBySku = Object.fromEntries((units ?? []).map((u) => [u.sku, u]));
-  const enriched = sales.map((s) => {
-    const u = unitBySku[s.sku];
-    return {
-      ...s,
-      title: [u?.brand, u?.model].filter(Boolean).join(" ") || u?.title || "Item",
-      condition: u?.condition ?? null,
-    };
-  });
-  return { sales: enriched, extras };
-}
-
-async function handlePay(sb, body) {
-  const storeId = body.store_id;
-  const reservationId = body.reservation_id;
-  const sourceId = String(body.source_id || "").trim();
-  const sku = String(body.sku || "").trim();
-  if (!reservationId || !sourceId || !sku) {
-    return json(400, { error: "reservation_source_sku_required" }, cors);
-  }
-
-  // The reservation drives the ticket id so retries are idempotent.
-  const { data: reservation } = await sb
-    .from("reservations")
-    .select("id, sku, store_id, released_at, finalized_at, expires_at")
-    .eq("id", reservationId)
-    .eq("store_id", storeId)
-    .maybeSingle();
-  if (!reservation || reservation.sku !== sku) {
-    return json(404, { error: "reservation_not_found" }, cors);
-  }
-  if (reservation.finalized_at) {
-    return json(409, { error: "already_finalized" }, cors);
-  }
-  if (reservation.released_at || new Date(reservation.expires_at) < new Date()) {
-    return json(410, { error: "reservation_expired" }, cors);
-  }
-
-  // Rewards customer (buyer may have added a phone during payment).
-  let customer = null;
-  const phone = digitsOnly(body.phone);
-  if (phone) {
-    const { data: cust } = await sb.rpc("web_upsert_customer", {
-      p_store: storeId,
-      p_phone: phone,
-      p_name: body.name || null,
-      p_email: body.email || null,
-      p_marketing_opt_in: Boolean(body.marketing_opt_in),
-    });
-    customer = cust;
-  }
-  const redeem = Math.min(
-    Math.max(0, Math.trunc(Number(body.redeem_points) || 0)),
-    Math.max(0, Number(customer?.points_balance) || 0),
-  );
-
-  const { data: unit } = await sb
-    .from("units")
-    .select("ask_cents")
-    .eq("store_id", storeId)
-    .eq("sku", sku)
-    .maybeSingle();
-  if (!unit?.ask_cents) return json(409, { error: "unit_not_priced" }, cors);
-
-  const lines = [{ sku, price_cents: unit.ask_cents, qty: 1 }];
-  const { data: quote, error: qErr } = await sb.rpc("web_quote", {
-    p_store: storeId,
-    p_lines: lines,
-    p_customer_id: customer?.id ?? null,
-    p_redeem_points: redeem,
-  });
-  if (qErr) return json(400, { error: qErr.message }, cors);
-  const chargeCents = Number(quote?.card_charge_cents ?? quote?.total_cents);
-  if (!Number.isFinite(chargeCents) || chargeCents <= 0) {
-    return json(400, { error: "bad_quote" }, cors);
-  }
-
-  const { accessToken, locationId } = await getStoreSquareAccess(storeId);
-  const client = squareClient(accessToken);
-
-  // Square payment — idempotent on the reservation so a retried submit or a
-  // double-tap cannot charge twice.
-  const { result: payResult } = await client.paymentsApi.createPayment({
-    sourceId: sourceId,
-    idempotencyKey: `web_${reservationId}`,
-    amountMoney: { amount: BigInt(chargeCents), currency: "USD" },
-    locationId: locationId || undefined,
-    note: `openboxindustries.com ${sku}`,
-    buyerEmailAddress: body.email || undefined,
-  });
-  const payment = payResult?.payment;
-  if (!payment?.id) return json(502, { error: "payment_not_created" }, cors);
-
-  const ticketId = reservationId;
-  const { data: summary, error: finErr } = await sb.rpc("web_finalize_ticket", {
-    p_store: storeId,
-    p_ticket_id: ticketId,
-    p_lines: lines,
-    p_payment_id: payment.id,
-    p_customer_id: customer?.id ?? null,
-    p_redeem_points: redeem,
-    p_note: body.note || null,
-  });
-
-  if (finErr) {
-    // Card captured but the sale could not record — refund the full amount.
-    try {
-      await refundSquarePayment(storeId, payment.id, chargeCents, "web_finalize_failed");
-      return json(409, {
-        error: finErr.message || "finalize_failed",
-        refunded: true,
-      }, cors);
-    } catch (refundErr) {
-      return json(409, {
-        error: finErr.message || "finalize_failed",
-        refunded: false,
-        payment_id: payment.id,
-        refund_error: refundErr instanceof Error ? refundErr.message : String(refundErr),
-      }, cors);
-    }
-  }
-
-  // Mark the reservation finalized (finalize_ticket releases open holds on the
-  // sku; the explicit reservation row gets its sale pointer here).
-  const saleId = summary?.lines?.[0]?.sale_id ?? null;
-  await sb
-    .from("reservations")
-    .update({ finalized_at: new Date().toISOString(), sale_id: saleId, payment_id: payment.id })
-    .eq("id", reservationId)
-    .eq("store_id", storeId);
-
-  // Receipt email (best-effort — the sale is already final).
-  let emailed = false;
-  const toEmail = String(body.email || customer?.email || "").trim();
-  if (toEmail.includes("@")) {
-    try {
-      const receipt = await loadTicketReceipt(sb, storeId, ticketId);
-      if (receipt) {
-        const branding = await loadBranding(sb, storeId);
-        const result = await sendResend({
-          to: toEmail,
-          subject: `Your receipt from ${branding.storeName} (${receipt.sales[0]?.receipt_no || "order"})`,
-          text: buildReceiptText(receipt.sales, receipt.extras, branding, "Online"),
-          html: buildReceiptHtml(receipt.sales, receipt.extras, branding, "Online"),
-        });
-        emailed = result.ok === true;
-      }
-    } catch {
-      /* receipt email is best-effort */
-    }
-  }
-  void drainLoyaltyEmail().catch(() => {});
-
-  try {
-    const buyer = {
-      name: body.name || null,
-      email: toEmail || body.email || null,
-      phone: body.phone || null,
-      line1: body.line1 || null,
-      line2: body.line2 || null,
-      city: body.city || null,
-      region: body.region || null,
-      postal: body.postal || null,
-      country: body.country || "US",
-    };
-    await sb.rpc("record_paid_web_order", {
-      p_store: storeId,
-      p_sku: sku,
-      p_reservation_id: reservationId,
-      p_sale_id: saleId,
-      p_payment_id: payment.id,
-      p_buyer: buyer,
-      p_item_cents: Number(quote?.item_cents ?? unit.ask_cents ?? 0),
-      p_shipping_cents: Number(quote?.shipping_cents ?? 0),
-      p_tax_cents: Number(quote?.tax_cents ?? 0),
-      p_total_cents: Number(quote?.total_cents ?? chargeCents),
-    });
-    const addr = [buyer.line1, buyer.city, buyer.region, buyer.postal].filter(Boolean).join(", ");
-    await emailStoreOwners(
-      sb,
-      storeId,
-      `New web order — SKU ${sku}`,
-      `Paid online order for SKU ${sku}.\nBuyer: ${buyer.name || "—"}\n${buyer.email || ""}\nShip to: ${addr || "no address"}\nTotal: ${(chargeCents / 100).toFixed(2)}`,
-    );
-  } catch {
-    /* packing row + owner email are best-effort after a successful sale */
-  }
-
-  return json(200, { ok: true, summary, emailed }, cors);
-}
-
-async function emailStoreOwners(sb, storeId, subject, text) {
-  const extra = process.env.FLOOR_OWNER_EMAIL || process.env.RESEND_NOTIFY_TO;
-  const { data: people } = await sb
-    .from("staff")
-    .select("user_id, role")
-    .eq("store_id", storeId);
-  const emails = new Set();
-  if (extra && String(extra).includes("@")) emails.add(String(extra).trim());
-  for (const person of people ?? []) {
-    if (person.role === "staff") continue;
-    const { data: user } = await sb.auth.admin.getUserById(person.user_id);
-    const email = user?.user?.email;
-    if (email) emails.add(email);
-  }
-  for (const to of emails) {
-    await sendResend({ to, subject, text });
-  }
-}
-
-async function handleRelease(sb, body) {
-  const { error } = await sb.rpc("web_release_reservation", {
-    p_store: body.store_id,
-    p_reservation_id: body.reservation_id,
-  });
-  if (error) return json(400, { error: error.message }, cors);
-  return json(200, { ok: true }, cors);
-}
+import { webSquareConfig } from "../lib/web-square.mjs";
+import { settleShippingOrder } from "../lib/web-payment.mjs";
 
 async function handle(event) {
-  if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: cors, body: "" };
-  if (event.httpMethod !== "POST") return json(405, { error: "post_only" }, cors);
-  assertKey(event);
+  if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: corsHeaders(), body: "" };
+  if (event.httpMethod !== "POST") return json(405, { error: "post_only" });
+  const key = process.env.STORE_WEB_KEY || process.env.STORE_WEB_REWARDS_KEY;
+  if (!key || (event.headers?.["x-store-web-key"] || event.headers?.["X-Store-Web-Key"]) !== key) return json(401, { error: "unauthorized" });
   const body = JSON.parse(event.body || "{}");
-  if (!body.store_id) return json(400, { error: "store_id_required" }, cors);
+  const cfg = webSquareConfig(body.store_id);
   const sb = serviceClient();
-  switch (body.action) {
-    case "config":
-      return await handleConfig(sb, body);
-    case "begin":
-      return await handleBegin(sb, body);
-    case "pay":
-      return await handlePay(sb, body);
-    case "release":
-      return await handleRelease(sb, body);
-    default:
-      return json(400, { error: "unknown_action" }, cors);
+  if (body.action === "config") return json(200, cfg);
+  if (body.action === "begin") {
+    for (const name of ["RESEND_API_KEY", "RESEND_FROM", "FLOOR_OWNER_EMAIL"]) {
+      if (!process.env[name]) return json(503, { error: `missing_${name}` });
+    }
+    const buyer = Object.fromEntries(["name", "email", "phone", "line1", "line2", "city", "region", "postal"].map(k => [k, String(body[k] || "").trim()]));
+    buyer.country = "US";
+    const { data, error } = await sb.rpc("begin_shipping_checkout", {
+      p_store: body.store_id, p_sku: String(body.sku || "").trim(), p_buyer: buyer,
+      p_redeem_points: Math.max(0, Math.min(2147483647, Math.trunc(Number(body.redeem_points) || 0))),
+    });
+    if (error) return json(/held_or_unavailable/.test(error.message) ? 409 : 400, { error: error.message });
+    const q = data.quote;
+    return json(200, { ...data, ok: true, square: cfg, price_cents: data.item_cents,
+      quote: { ...q, subtotal_cents: q.raw_subtotal_cents ?? q.subtotal_cents, discount_cents: Number(q.discount_cents || 0) + Number(q.signup_discount_cents || 0) } });
   }
+  if (body.action === "release") {
+    const { error } = await sb.rpc("release_shipping_checkout", { p_store: body.store_id, p_reservation: body.reservation_id });
+    if (error) return json(409, { error: error.message });
+    return json(200, { ok: true });
+  }
+  if (body.action !== "pay") return json(400, { error: "unknown_action" });
+  if (!body.order_id || !body.reservation_id || !body.sku || !body.source_id) return json(400, { error: "order_reservation_sku_source_required" });
+  const { data: order, error: prepError } = await sb.rpc("prepare_shipping_payment", {
+    p_store: body.store_id, p_order: body.order_id, p_reservation: body.reservation_id, p_sku: body.sku, p_source: body.source_id,
+  });
+  if (prepError) return json(409, { error: prepError.message });
+  return settleShippingOrder(sb, order);
+
 }
 
-export const handler = wrapHandler("web-checkout", async (event) => {
-  try {
-    return await handle(event);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    const status = msg === "unauthorized" || msg === "rewards_key_unset" ? 401 : 500;
-    return json(status, { error: msg }, cors);
+export const handler = wrapHandler("web-checkout", async event => {
+  try { return await handle(event); }
+  catch (err) {
+    // Square errors can contain payment tokens; never return the raw SDK exception.
+    if (err.statusCode) return json(502, { error: "Square could not complete payment. Retry this order; if it persists, contact the store." });
+    return json(500, { error: /^missing_|^web_store_not_allowed|^production_square_required/.test(err.message || "") ? err.message : "Checkout unavailable. Retry this order or contact the store." });
   }
 });

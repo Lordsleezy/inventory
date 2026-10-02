@@ -111,7 +111,9 @@ export function ShipmentsScreen() {
     }
   }
 
-  if (rows === null) return <Spinner label="Loading shipments" />;
+  if (rows === null) return error ? (
+    <section><Notice tone="error">{error}</Notice><button onClick={() => void refresh().catch((err) => setError(friendlyRpc(err)))}>Retry</button></section>
+  ) : <Spinner label="Loading shipments" />;
 
   const neu = rows.filter((r) => !r.boxed_at && !r.shipped_at);
   const awaiting = rows.filter((r) => r.boxed_at && !r.shipped_at);
