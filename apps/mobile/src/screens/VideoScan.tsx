@@ -55,7 +55,7 @@ export function VideoScan({ manager }: { manager: boolean }) {
     setBusy(true); setError('');
     try {
       if (scan.seconds < 10 || scan.video.size < 100_000) throw new Error('Record at least 10 seconds with a clear walk-around.');
-      if (scan.video.size > 25 * 1024 * 1024) throw new Error('Video is over 25 MB. Please scan again.');
+      if (scan.video.size > 15 * 1024 * 1024) throw new Error('Video is over 15 MB. Please scan again.');
       const { data: storeId, error: storeError } = await floorCloud().rpc('current_store_id');
       if (storeError || !storeId) throw storeError || new Error('No store linked to this login');
       const { data: auth } = await floorCloud().auth.getUser();
@@ -90,6 +90,11 @@ export function VideoScan({ manager }: { manager: boolean }) {
   async function start() {
     setError(''); setSuccess(''); setSavedSku('');
     try {
+      const budget = await floorCloud().rpc('video_scan_budget');
+      if (budget.error) throw budget.error;
+      const limit = budget.data as { spent_usd: number; reserved_usd: number; monthly_cap_usd: number };
+      if (Number(limit.spent_usd) + Number(limit.reserved_usd) + 1 > Number(limit.monthly_cap_usd))
+        throw new Error('The monthly AI scan cap is reached. An admin can raise it in Inventory → Receive; manual Receive still works.');
       if (!preview.current) return;
       recording.current = await startVideoScan(preview.current, scan => { recording.current = null; setStarted(0); void uploaded(scan); },
         cause => { setError(cause.message); recording.current = null; setStarted(0); });

@@ -102,6 +102,9 @@ export async function analyzeVideo(sb,job,bytes,mimeType='video/mp4') {
     lookup_reused:cacheHit};
   const input=observed.input+lookup.input,output=observed.output+lookup.output,queries=observed.queries+lookup.queries;
   // Conservative billed estimate: introductory Gemini 3.8 Flash rates plus all Search queries at post-free-tier price.
-  const estimatedCost=Number((input*0.75/1e6+output*3.75/1e6+queries*0.014).toFixed(5));
+  const inputRate=Number(process.env.GEMINI_INPUT_USD_PER_M || 0.75);
+  const outputRate=Number(process.env.GEMINI_OUTPUT_USD_PER_M || 3.75);
+  const searchRate=Number(process.env.GEMINI_SEARCH_USD_PER_QUERY || 0.014);
+  const estimatedCost=Number((input*inputRate/1e6+output*outputRate/1e6+queries*searchRate).toFixed(5));
   return {result,input,output,queries,estimatedCost,model:MODEL()};
 }

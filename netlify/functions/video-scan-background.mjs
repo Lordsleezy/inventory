@@ -17,7 +17,7 @@ export async function handler(event) {
     const downloaded=await sb.storage.from('video-scan-staging').download(job.video_path);
     if(downloaded.error)throw downloaded.error;
     const bytes=Buffer.from(await downloaded.data.arrayBuffer());
-    if(bytes.length>25*1024*1024)throw new Error('Video exceeds 25 MB; record a shorter clip');
+    if(bytes.length>15*1024*1024)throw new Error('Video exceeds 15 MB; record a shorter clip');
     const analyzed=await analyzeVideo(sb,job,bytes,job.video_path.endsWith('.webm')?'video/webm':'video/mp4');
     const saved=await sb.from('video_scan_jobs').update({status:'ready',result:analyzed.result,
       model_name:analyzed.model,input_tokens:analyzed.input,output_tokens:analyzed.output,

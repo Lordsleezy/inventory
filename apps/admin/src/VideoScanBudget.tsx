@@ -20,7 +20,7 @@ export function VideoScanBudget({ client }: { client: SupabaseClient }) {
     setBusy(false);
   }
   return <section className="panel receive-panel"><h2>AI scan budget</h2>
-    <p>{budget ? `$${Number(budget.spent_usd).toFixed(2)} spent this month · $${Number(budget.reserved_usd).toFixed(2)} processing · $${Number(budget.monthly_cap_usd).toFixed(2)} cap` : 'Loading spend…'}</p>
+    <p>{budget ? `$${Number(budget.spent_usd).toFixed(2)} estimated spend this month · $${Number(budget.reserved_usd).toFixed(2)} processing · $${Number(budget.monthly_cap_usd).toFixed(2)} cap` : 'Loading spend…'}</p>
     <label>Monthly hard cap (USD)<input inputMode="decimal" value={cap} onChange={e => { if (/^\d*(?:\.\d{0,2})?$/.test(e.target.value)) setCap(e.target.value); }} /></label>
     <button type="button" className="secondary" disabled={busy} onClick={() => void save()}>Save cap</button>
     {error && <p role="alert" className="alert">{error}</p>}
