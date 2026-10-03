@@ -7,14 +7,14 @@ import { startVideoScan } from '../video-scan-capture';
 
 type Price = { store: string; price_cents: number; url: string; pack_size?: number; approximate?: boolean; product_name?: string };
 type Identity = { title?: string; brand?: string; model?: string; color?: string;
-  options?: { label: string; title: string; brand: string; model: string; color: string }[];
+  options?: { label: string; title: string; brand: string; model: string; color: string; thumbnail_data_url?: string }[];
   retail_prices?: Price[]; msrp_cents?: number; retail_ready?: boolean };
 type Job = { id: string; status: string; result: Identity | null; error: string | null; sku: string | null; created_at: string };
 const moneyPattern = /^\d*(?:\.\d{0,2})?$/;
 const dollars = (cents: number) => `$${(cents / 100).toFixed(2)}`;
-async function post(path: string, id: string) {
+async function post(path: string, id: string, extra: Record<string, unknown> = {}) {
   const response = await fetch(functionsUrl(path), { method: 'POST', headers: {
-    ...await authHeader(), 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
+    ...await authHeader(), 'Content-Type': 'application/json' }, body: JSON.stringify({ id, ...extra }) });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body.error || `Scan request failed (${response.status})`);
   return body;
@@ -35,6 +35,7 @@ export function VideoScan() {
   const [savedSku, setSavedSku] = useState('');
   const [prices, setPrices] = useState<Record<string, string>>({});
   const [choices, setChoices] = useState<Record<string, number>>({});
+  const [choosing, setChoosing] = useState<string | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
   const [ownThumb, setOwnThumb] = useState('');
 
@@ -112,7 +113,9 @@ export function VideoScan() {
     const price = parseMoneyToCents(prices[job.id] || '');
     if (price === undefined || price === null || price <= 0) { setError('Enter your selling price.'); return; }
     const result = job.result || {};
-    if (result.options?.length && choices[job.id] === undefined) { setError('Pick the matching product first.'); return; }
+    if (choosing === job.id || (result.options?.length && choices[job.id] === undefined)) {
+      setError('Pick the matching product first.'); return;
+    }
     const chosen = result.options?.[choices[job.id]];
     setSaving(job.id); setError('');
     try {
@@ -162,8 +165,13 @@ export function VideoScan() {
         {result.options?.length ? <><h3 className="text-title">Which product is it?</h3>
           {result.options.slice(0, 3).map((option, index) =>
             <button type="button" key={index} className={`field text-left flex items-center gap-3 ${choices[current.id] === index ? 'ring-2' : ''}`}
-              onClick={() => setChoices(previous => ({ ...previous, [current.id]: index }))}>
-              {ownThumb && <img src={ownThumb} alt="Scan photo" className="w-14 h-14 object-cover rounded" />}
+              onClick={() => {setChoices(previous => ({ ...previous, [current.id]: index }));
+                setChoosing(current.id);
+                void post('video-scan-choice',current.id,{index}).catch(cause=>setError(cause.message))
+                  .finally(()=>setChoosing(null));}}>
+              {(option.thumbnail_data_url || ownThumb) &&
+                <img src={option.thumbnail_data_url || ownThumb} alt={option.thumbnail_data_url ? option.label : 'Your scan photo'}
+                  className="w-14 h-14 object-cover rounded" />}
               <span>{option.label}</span>
             </button>)}</> : null}
         <h3 className="text-title">{result.options?.[choices[current.id]]?.title || result.title}</h3>

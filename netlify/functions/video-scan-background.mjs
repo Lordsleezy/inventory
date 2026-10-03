@@ -1,8 +1,11 @@
 import { serviceClient } from '../lib/server.mjs';
 import { identifyFramesCached, lookupRetail, retailFields, tokenCost } from '../lib/video-scan.mjs';
+import { searchProductImages, imageBytes } from '../lib/visual-product-search.mjs';
+import sharp from 'sharp';
 
 export async function handler(event) {
-  const id=JSON.parse(event.body||'{}').id;
+  const payload=JSON.parse(event.body||'{}');
+  const id=payload.id;
   const token=(event.headers.authorization||event.headers.Authorization||'').replace(/^Bearer\s+/i,'');
   const sb=serviceClient();
   let job;
@@ -13,21 +16,42 @@ export async function handler(event) {
     const found=await sb.from('video_scan_jobs').select('*').eq('id',id).single();
     if(found.error||found.data.created_by!==auth.data.user.id)throw new Error('Scan not found');
     job=found.data;
-    if(job.status!=='processing')return {statusCode:200};
-    const frames=[];
-    for(const path of job.still_paths.slice(0,2)){
-      const downloaded=await sb.storage.from('video-scan-staging').download(path);
-      if(downloaded.error)throw downloaded.error;
-      frames.push(Buffer.from(await downloaded.data.arrayBuffer()));
+    let identity;
+    if(payload.mode==='price'){
+      if(job.status!=='ready'||!job.result?.selected_option)return {statusCode:200};
+      identity=job.result;
+    }else{
+      if(job.status!=='processing')return {statusCode:200};
+      const frames=[];
+      for(const path of job.still_paths.slice(0,2)){
+        const downloaded=await sb.storage.from('video-scan-staging').download(path);
+        if(downloaded.error)throw downloaded.error;
+        frames.push(Buffer.from(await downloaded.data.arrayBuffer()));
+      }
+      const identified=await identifyFramesCached(sb,job,frames);
+      identity={...identified.result,identified_at:new Date().toISOString()};
+      const ready=await sb.from('video_scan_jobs').update({status:'ready',result:identity,
+        model_name:process.env.GEMINI_VIDEO_MODEL||'gemini-3.8-flash',
+        input_tokens:identified.input,output_tokens:identified.output,
+        estimated_cost_usd:tokenCost(identified.input,identified.output),reserved_usd:0,
+        updated_at:new Date().toISOString()}).eq('id',id).eq('status','processing');
+      if(ready.error)throw ready.error;
+      if(identity.options?.length){
+        // Only ambiguous scans need candidate images; this runs after the popup is visible.
+        const options=await Promise.all(identity.options.map(async option=>{
+          try{
+            const matches=await searchProductImages([option.brand,option.model,option.color].filter(Boolean).join(' '));
+            const bytes=await imageBytes(matches[0].image);
+            const thumb=await sharp(bytes).resize(112,112,{fit:'contain',background:'#fff'}).webp({quality:70}).toBuffer();
+            return {...option,thumbnail_data_url:`data:image/webp;base64,${thumb.toString('base64')}`};
+          }catch{return option}
+        }));
+        const latest=await sb.from('video_scan_jobs').select('result').eq('id',id).single();
+        if(!latest.error&&latest.data.result?.options?.length)
+          await sb.from('video_scan_jobs').update({result:{...latest.data.result,options}}).eq('id',id).eq('status','ready');
+        return {statusCode:200};
+      }
     }
-    const identified=await identifyFramesCached(sb,job,frames);
-    const identity={...identified.result,identified_at:new Date().toISOString()};
-    const ready=await sb.from('video_scan_jobs').update({status:'ready',result:identity,
-      model_name:process.env.GEMINI_VIDEO_MODEL||'gemini-3.8-flash',
-      input_tokens:identified.input,output_tokens:identified.output,
-      estimated_cost_usd:tokenCost(identified.input,identified.output),reserved_usd:0,
-      updated_at:new Date().toISOString()}).eq('id',id).eq('status','processing');
-    if(ready.error)throw ready.error;
     // The popup is already available. Search and price may finish after the user starts typing.
     try {
       const retail=await lookupRetail(sb,job,identity);
