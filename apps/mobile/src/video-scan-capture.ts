@@ -1,5 +1,6 @@
 type Still = { blob: Blob; score: number; at: number; signature: Uint8Array };
 export type RecordedScan = { video: Blob; mimeType: string; stills: Blob[]; seconds: number };
+export const MIN_SCAN_SECONDS = 5;
 
 function frameQuality(canvas: HTMLCanvasElement): { score: number; signature: Uint8Array } {
   const sample=document.createElement('canvas');sample.width=256;sample.height=256;
@@ -79,12 +80,12 @@ export async function startVideoScan(
   const timeout = window.setTimeout(() => { if (recorder.state !== 'inactive') recorder.stop(); }, 20_000);
   recorder.onerror = () => onError(new Error('Video recording failed. Use manual Receive.'));
   recorder.onstop = async () => {
+    const seconds=(Date.now()-started)/1000;
     window.clearInterval(interval); window.clearTimeout(timeout);
     stream.getTracks().forEach(t => t.stop()); preview.srcObject = null;
     if (aborted) return;
     await new Promise(resolve=>window.setTimeout(resolve,350));
-    const seconds=Math.round((Date.now()-started)/1000);
-    if(seconds<10){onError(new Error('Record at least 10 seconds. Please rescan.'));return}
+    if(seconds<MIN_SCAN_SECONDS){onError(new Error('Record at least 5 seconds. Please rescan.'));return}
     const sharp=frames.filter(frame=>frame.score>=MIN_SHARPNESS).sort((a,b)=>b.score-a.score);
     // Keep the early angles for identification, but replace their saved stills with
     // the sharpest later frame of each angle before attaching photos to the unit.

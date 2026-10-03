@@ -95,7 +95,7 @@ export function VideoScan() {
       recording.current = await startVideoScan(preview.current, scan => {
         recording.current = null; setStarted(false); stopTimes.current[id] = performance.now();
         uploads.current[id] = (async () => {
-          if (scan.seconds < 10 || scan.video.size < 50_000) throw new Error('Record at least 10 seconds.');
+          if (scan.video.size < 4_096) throw new Error('The camera did not save the video. Please rescan.');
           if (scan.video.size > 15 * 1024 * 1024) throw new Error('Video is over 15 MB.');
           if (!early.current[id]) beginIdentify(scan.stills.slice(0, 2));
           // The full video is only needed after Save. Identification is already running from stills.
@@ -184,7 +184,7 @@ export function VideoScan() {
   const options = distinctOptions(result);
   return <section className="card p-4 my-4">
     <h2 className="text-title">Video scan</h2>
-    <p className="text-quiet">Film the item, label and box for 10–20 seconds. Speak any defects.</p>
+    <p className="text-quiet">Film the item, label and box for at least 5 seconds. Hold still on the front and another side; speak any defects.</p>
     <video ref={preview} className="w-full rounded-lg mt-3" autoPlay muted playsInline style={{ display: started ? 'block' : 'none' }} />
     <div className="flex gap-2 mt-3">
       {!started ? <button type="button" className="btn-accent" disabled={busy} onClick={() => void start()}>{busy ? 'Starting…' : 'Scan'}</button>
