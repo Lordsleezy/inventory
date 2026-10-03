@@ -88,10 +88,20 @@ async function loadAuthStateOnce(): Promise<AuthState> {
     .maybeSingle();
   if (error) throw error;
   if (!data?.store_id) {
+    const email = session.session.user.email ?? "";
+    // Clock-number / employee accounts never create a store. A missing staff
+    // row usually means deactivated or wrong login — send them to Sign in.
+    if (
+      /@(employees|staff)\.floor\.local$/i.test(email) ||
+      email.startsWith("android.probe@")
+    ) {
+      await sb.auth.signOut();
+      return { kind: "signed_out" };
+    }
     return {
       kind: "needs_store",
       userId: session.session.user.id,
-      email: session.session.user.email ?? "",
+      email,
     };
   }
   return {

@@ -44,11 +44,11 @@ export async function readDeviceNetwork(): Promise<DeviceNetwork> {
 
 export async function probeSupabase(): Promise<ReachCheck> {
   try {
+    // getSession is local (Preferences/memory). Avoid getUser() here — that is a
+    // network round trip and made the store phone feel stuck on every screen.
     const { data: session, error: sessionError } = await floorCloud().auth.getSession();
     if (sessionError) return { ok: false, detail: sessionError.message };
     if (!session.session) return { ok: false, detail: "Sign in required" };
-    const { error } = await floorCloud().auth.getUser();
-    if (error) return { ok: false, detail: error.message };
     return { ok: true, detail: "ok" };
   } catch (err) {
     return { ok: false, detail: authErrorMessage(err) };

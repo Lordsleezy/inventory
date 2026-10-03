@@ -54,6 +54,7 @@ export function App() {
   useEffect(() => {
     let live = true;
     let unsub = () => {};
+    let refreshTimer: number | undefined;
     // Only the first paint: if auth is still unknown after 12s, offer login.
     // Never keep a stale "ready" session when the JWT is gone (that caused
     // Receive to show Auth session missing / not_staff while still in the app).
@@ -68,8 +69,18 @@ export function App() {
       await refresh();
       if (!live) return;
       try {
-        const { data } = floorCloud().auth.onAuthStateChange(() => {
-          void refresh();
+        const { data } = floorCloud().auth.onAuthStateChange((_event, session) => {
+          // Debounce — SIGNED_IN + INITIAL_SESSION used to stack staff reads
+          // and make the phone wait on Supabase for tens of seconds.
+          window.clearTimeout(refreshTimer);
+          refreshTimer = window.setTimeout(() => {
+            if (!session) {
+              setAuth({ kind: "signed_out" });
+              setBootError("");
+              return;
+            }
+            void refresh();
+          }, 150);
         });
         unsub = () => data.subscription.unsubscribe();
       } catch (err) {
@@ -79,6 +90,7 @@ export function App() {
     return () => {
       live = false;
       window.clearTimeout(timer);
+      window.clearTimeout(refreshTimer);
       unsub();
     };
   }, [refresh]);
