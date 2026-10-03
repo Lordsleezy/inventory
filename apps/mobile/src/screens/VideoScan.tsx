@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { floorCloud } from '@floor/cloud';
 import { parseMoneyToCents } from '@floor/store';
 import { authHeader, functionsUrl } from '../functions';
@@ -21,6 +21,7 @@ async function post(path: string, id: string) {
 }
 
 export function VideoScan() {
+  const navigate = useNavigate();
   const preview = useRef<HTMLVideoElement>(null);
   const recording = useRef<{ stop: () => void; abort: () => void } | null>(null);
   const uploads = useRef<Record<string, Promise<void> | undefined>>({});
@@ -107,7 +108,7 @@ export function VideoScan() {
     finally { setBusy(false); }
   }
 
-  async function save(job: Job) {
+  async function save(job: Job, editAfter = false) {
     const price = parseMoneyToCents(prices[job.id] || '');
     if (price === undefined || price === null || price <= 0) { setError('Enter your selling price.'); return; }
     const result = job.result || {};
@@ -128,6 +129,7 @@ export function VideoScan() {
       void post('video-scan-photos', job.id).catch(cause => setError(`SKU ${sku} saved; photos need retry: ${cause.message}`));
       void post('video-scan-enrich-start', job.id).catch(cause => setError(`SKU ${sku} saved; details need retry: ${cause.message}`));
       window.setTimeout(() => setSavedSku(current => current === sku ? '' : current), 12000);
+      if (editAfter) navigate(`/inventory/${sku}`);
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setSaving(null); }
   }
@@ -181,7 +183,8 @@ export function VideoScan() {
         </label>
         <button type="button" className="btn-accent" disabled={saving === current.id}
           onClick={() => void save(current)}>{saving === current.id ? 'Saving…' : 'Save & next'}</button>
-        <p className="text-quiet text-sm">Details can be edited from Inventory after saving.</p>
+        <button type="button" className="btn-text text-sm" disabled={saving === current.id}
+          onClick={() => void save(current, true)}>Edit details after saving</button>
       </div>
     </div>}
   </section>;
