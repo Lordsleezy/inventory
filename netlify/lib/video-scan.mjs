@@ -49,7 +49,9 @@ export async function identifyFrames(stills) {
   const parts=[{text:'Identify the exact product from these store photos. Read labels, brand, model, pack size and color. Return a short shopper-facing title. Only offer 2-3 choices if two distinct products are genuinely plausible. No description or specifications.'},
     ...stills.map(bytes=>({inlineData:{mimeType:'image/jpeg',data:bytes.toString('base64')}}))];
   const found=await gemini(parts,{schema:identitySchema,maxOutputTokens:700});
-  return {...found,result:{...found.value,options:found.value.options||[]}};
+  const options=[...new Map((found.value.options||[]).map(option=>[
+    [option.brand,option.model,option.color].join('|').toLowerCase(),option])).values()];
+  return {...found,result:{...found.value,options:options.length>=2?options.slice(0,3):[]}};
 }
 async function fingerprint(bytes) {
   const pixels=await sharp(bytes).resize(9,8,{fit:'fill'}).grayscale().raw().toBuffer();
@@ -73,7 +75,7 @@ export async function identifyFramesCached(sb,job,stills) {
     &&Date.now()-Date.parse(row.created_at)<30*86400_000);
   if(match)return {result:{...match.identity,visual_reused:true},input:0,output:0,queries:0};
   const found=await identifyFrames(stills);
-  if(Number(found.result.confidence)>=0.85&&!found.result.options?.length){
+  if(Number(found.result.confidence)>=0.6&&found.result.brand&&found.result.title&&!found.result.options?.length){
     const fingerprintKey=createHash('sha256').update(fingerprints.join('|')).digest('hex');
     const stored=await sb.from('video_scan_visual_cache').upsert({store_id:job.store_id,
       fingerprint_key:fingerprintKey,fingerprints,identity:found.result,created_at:new Date().toISOString()});
