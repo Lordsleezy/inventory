@@ -19,6 +19,7 @@ import { ebayItemViewUrl } from "@floor/channels";
 import { EbayDetails } from "../components/EbayDetails";
 import { Photos } from "../components/Photos";
 import { OnlineShipping } from "../components/OnlineShipping";
+import { UnitCost } from "../components/UnitCost";
 import { DangerButton, MoneyField, Notice, SelectField, Spinner, TextField } from "../components/ui";
 import { openHtml } from "../files";
 import { useStore } from "../store";
@@ -354,6 +355,7 @@ export function UnitScreen() {
       />
       <TextField label="Defects" value={unit.defectNotes} multiline onCommit={(v) => edit("defect_notes", v)} />
       <MoneyField label="Price" cents={unit.askCents} onCommit={(v) => edit("ask_cents", v)} />
+      <UnitCost sku={unit.sku} ensureOnline={ensureOnline} />
       <SelectField
         label="Category"
         value={unit.category}

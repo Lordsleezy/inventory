@@ -116,6 +116,8 @@ export function ReceiveScreen() {
       });
       if (rpcErr) throw rpcErr;
       const savedSku = (data as { sku?: string } | null)?.sku ?? sku.trim();
+      // Clerks can enter the cost while receiving; the server only stores it when none exists yet.
+      if (!manager && money.cost != null) await floorCloud().rpc("set_unit_cost_if_missing", { p_sku: savedSku, p_cost_cents: money.cost });
       await hydrate();
 
       if (!andAnother) {
@@ -199,7 +201,7 @@ export function ReceiveScreen() {
       <Picker label="Location" value={location} options={settings.locations} onChange={setLocation} />
 
       <div className="grid grid-cols-2 gap-3">
-        {manager ? <Money label="Cost" value={cost} onChange={setCost} /> : null}
+        <Money label="Cost (what we paid)" value={cost} onChange={setCost} />
         {manager ? <Money label="Floor" value={floor} onChange={setFloor} /> : null}
         <Money label="MSRP" value={msrp} onChange={setMsrp} />
         <Money label="Ask" value={ask} onChange={setAsk} />

@@ -36,6 +36,7 @@ export function VideoScan() {
   const [error, setError] = useState('');
   const [savedSku, setSavedSku] = useState('');
   const [prices, setPrices] = useState<Record<string, string>>({});
+  const [costs, setCosts] = useState<Record<string, string>>({});
   const [choices, setChoices] = useState<Record<string, number>>({});
   const [choosing, setChoosing] = useState<string | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
@@ -124,6 +125,8 @@ export function VideoScan() {
   async function save(job: Job, editAfter = false) {
     const price = parseMoneyToCents(prices[job.id] || '');
     if (price === undefined || price === null || price <= 0) { setError('Enter your selling price.'); return; }
+    const cost = parseMoneyToCents(costs[job.id] || '');
+    if (cost === undefined) { setError('Check the cost amount.'); return; }
     const result = job.result || {};
     if (choosing === job.id || (distinctOptions(result).length >= 2 && choices[job.id] === undefined)) {
       setError('Pick the matching product first.'); return;
@@ -138,9 +141,13 @@ export function VideoScan() {
       if (saveError) throw saveError;
       const sku = (data as { sku: string }).sku;
       setSavedSku(sku);
+      // Acquisition cost is optional; a unit without one still saves and sells (it shows as missing cost in Admin).
+      if (cost !== null) void Promise.resolve(floorCloud().rpc('set_unit_cost_if_missing', { p_sku: sku, p_cost_cents: cost }))
+        .then(({ error: costError }) => { if (costError) setError(`SKU ${sku} saved; add its cost later: ${costError.message}`); });
       setActiveId(null);
       setJobs(previous => previous.map(row => row.id === job.id ? { ...row, status: 'saved', sku } : row));
       setPrices(previous => { const next = { ...previous }; delete next[job.id]; return next; });
+      setCosts(previous => { const next = { ...previous }; delete next[job.id]; return next; });
       // These run after the unit exists; the user can immediately start the next scan.
       void (async () => {
         try { await post('video-scan-photos', job.id); }
@@ -233,6 +240,12 @@ export function VideoScan() {
               const value = previous[current.id]; return value && parseMoneyToCents(value) != null
                 ? { ...previous, [current.id]: (Number(value) || 0).toFixed(2) } : previous;
             })} />
+        </label>
+        <label>What did you pay for it? <span className="text-quiet">(optional)</span>
+          <input className="field mt-2" type="text" inputMode="decimal" placeholder="$"
+            value={costs[current.id] || ''} onChange={event => {
+              if (moneyPattern.test(event.target.value)) setCosts(previous => ({ ...previous, [current.id]: event.target.value }));
+            }} />
         </label>
         <button type="button" className="btn-accent" disabled={saving === current.id}
           onClick={() => void save(current)}>{saving === current.id ? 'Saving…' : 'Save & next'}</button>
