@@ -42,10 +42,18 @@ export async function handler(event) {
         updated_at:new Date().toISOString()}).eq('id',id);
       if(updated.error)throw updated.error;
       if(latest.data.status==='saved'&&latest.data.sku){
-        const unit=await sb.from('units').update({msrp_cents:fields.msrp_cents,
-          retail_price_sources:fields.retail_prices,retail_source_name:fields.retail_source_name,
-          retail_source_url:fields.retail_source_url}).eq('store_id',job.store_id).eq('sku',latest.data.sku);
-        if(unit.error)throw unit.error;
+        const existing=await sb.from('units').select('msrp_cents,retail_price_sources,retail_source_name,retail_source_url')
+          .eq('store_id',job.store_id).eq('sku',latest.data.sku).single();
+        if(existing.error)throw existing.error;
+        const patch={};
+        if(existing.data.msrp_cents==null&&fields.msrp_cents!=null)patch.msrp_cents=fields.msrp_cents;
+        if(!existing.data.retail_price_sources?.length)patch.retail_price_sources=fields.retail_prices;
+        if(!existing.data.retail_source_name)patch.retail_source_name=fields.retail_source_name;
+        if(!existing.data.retail_source_url)patch.retail_source_url=fields.retail_source_url;
+        if(Object.keys(patch).length){
+          const unit=await sb.from('units').update(patch).eq('store_id',job.store_id).eq('sku',latest.data.sku);
+          if(unit.error)throw unit.error;
+        }
       }
     } catch(error) {
       await sb.from('video_scan_jobs').update({result:{...identity,retail_ready:true,retail_error:String(error.message||error).slice(0,200)}})

@@ -33,15 +33,22 @@ export async function handler(event) {
       'package_length_in','package_width_in','package_height_in','package_weight_lb'
     ].map(key=>[key,measure(detail.result[key])]));
     const hasDimensions=Object.values(dimensions).some(value=>value!==null);
-    const unit=await sb.from('units').update({category:detail.result.category||null,
+    const incoming={category:detail.result.category||null,
       condition:detail.result.condition||null,defect_notes:detail.result.condition_notes||null,
       ai_description:detail.result.description||null,upc:detail.result.upc||null,
       mfr_serial:detail.result.mfr_serial||null,ebay_title:detail.result.ebay_title||null,
       ebay_category:detail.result.ebay_category||null,ebay_item_specifics:detail.result.ebay_item_specifics||{},
       ...dimensions,dims_source:hasDimensions&&['verified','estimated'].includes(detail.result.dims_source)
-        ? detail.result.dims_source : null})
-      .eq('store_id',job.store_id).eq('sku',job.sku);
-    if(unit.error)throw unit.error;
+        ? detail.result.dims_source : null};
+    const existing=await sb.from('units').select('*').eq('store_id',job.store_id).eq('sku',job.sku).single();
+    if(existing.error)throw existing.error;
+    const blank=value=>value===null||value===undefined||value===''||
+      (typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).length===0);
+    const patch=Object.fromEntries(Object.entries(incoming).filter(([key,value])=>!blank(value)&&blank(existing.data[key])));
+    if(Object.keys(patch).length){
+      const unit=await sb.from('units').update(patch).eq('store_id',job.store_id).eq('sku',job.sku);
+      if(unit.error)throw unit.error;
+    }
     const input=latest.data.input_tokens+detail.input,output=latest.data.output_tokens+detail.output;
     const updated=await sb.from('video_scan_jobs').update({result,input_tokens:input,output_tokens:output,
       estimated_cost_usd:tokenCost(input,output),updated_at:new Date().toISOString()}).eq('id',id);
