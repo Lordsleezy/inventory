@@ -19,6 +19,12 @@
 [functions."web-order-reconcile"]
   schedule = "*/5 * * * *"
 
+[functions."web-pickup-sweep"]
+  schedule = "*/10 * * * *"
+
+[functions."listing-check"]
+  schedule = "0 14 * * *"
+
 [build.processing.html]
   pretty_urls = false
 

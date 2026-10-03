@@ -2,10 +2,11 @@ import { randomUUID } from "node:crypto";
 import { json } from "./server.mjs";
 import { webSquareClient, webSquareConfig } from "./web-square.mjs";
 import { deliverOrderEmails } from "./web-order-email.mjs";
+import { refundLabel } from "./shippo.mjs";
 
 export async function settleShippingOrder(sb, order, deps = {}) {
-  const cfg = deps.config || webSquareConfig(order.store_id);
-  const client = deps.client || webSquareClient(order.store_id);
+  const cfg = deps.config || webSquareConfig(order.store_id, order.payment_env || undefined);
+  const client = deps.client || webSquareClient(order.store_id, order.payment_env || undefined);
   let paymentId = order.payment_id;
   if (order.status !== "paid") {
     let result;
@@ -14,7 +15,7 @@ export async function settleShippingOrder(sb, order, deps = {}) {
       sourceId: order.payment_source_id, idempotencyKey: `web_${order.payment_attempt_id}`,
       amountMoney: { amount: BigInt(order.total_cents), currency: "USD" },
       locationId: cfg.location_id, buyerEmailAddress: order.buyer_email,
-      referenceId: order.id, note: `Open Box Industries SKU ${order.sku}`,
+      referenceId: order.id, note: `Open Box Industries SKU ${order.sku} (${order.fulfillment === "pickup" ? "store pickup" : "ship"})`,
       }));
     } catch (err) {
       // Explicit card rejection is safe to retry with a new card and a new attempt key.
@@ -52,4 +53,39 @@ export async function settleShippingOrder(sb, order, deps = {}) {
   // The transaction already queued both emails. Temporary delivery failures retry on the schedule.
   await (deps.deliver || deliverOrderEmails)(sb, order.id).catch(() => []);
   return json(200, { ok: true, summary, order_id: order.id });
+}
+
+/**
+ * Cancel a paid order with a full refund. Safe to retry: the DB lock step is idempotent, the Square
+ * refund uses a stable idempotency key, and the final step voids the sale exactly once.
+ */
+export async function cancelAndRefund(sb, storeId, orderId, source, reason, deps = {}) {
+  const { data: order, error } = await sb.rpc("request_web_order_refund", {
+    p_store: storeId, p_order: orderId, p_source: source, p_reason: reason || null,
+  });
+  if (error) return { ok: false, status: error.code === "P0001" ? 409 : 500, error: error.message };
+  const client = deps.client || webSquareClient(order.store_id, order.payment_env || undefined);
+  let refundId = null;
+  try {
+    const { result } = await client.refundsApi.refundPayment({
+      idempotencyKey: `cancel_${order.id}`, paymentId: order.payment_id,
+      amountMoney: { amount: BigInt(order.total_cents), currency: "USD" },
+      reason: source === "pickup_expired" ? "Store pickup not collected by deadline" : (reason || "Order canceled by store").slice(0, 190),
+    });
+    if (!["PENDING", "COMPLETED"].includes(result.refund?.status)) {
+      return { ok: false, status: 502, error: `refund_${String(result.refund?.status || "failed").toLowerCase()}` };
+    }
+    refundId = result.refund.id;
+  } catch {
+    // The order stays locked (refund_requested_at) and the pickup sweep retries the same key.
+    return { ok: false, status: 502, error: "Square refund failed; it will be retried automatically." };
+  }
+  const { data: done, error: finError } = await sb.rpc("finish_web_order_refund", { p_store: storeId, p_order: orderId, p_refund: refundId });
+  if (finError) return { ok: false, status: 500, error: finError.message, refund_id: refundId };
+  let label = null;
+  if (order.label_transaction_id && !order.shipped_at) {
+    label = await (deps.refundLabel || refundLabel)(order.label_transaction_id).then(r => r.status || "requested").catch(() => "label_refund_failed");
+  }
+  await (deps.deliver || deliverOrderEmails)(sb, orderId).catch(() => []);
+  return { ok: true, status: 200, order: done, refund_id: refundId, label_refund: label };
 }
