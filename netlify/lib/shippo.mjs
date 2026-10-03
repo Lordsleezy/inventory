@@ -90,16 +90,24 @@ export function pickRates(rates, max = 4) {
   return picked.slice(0, max).sort((a, b) => a.amount_cents - b.amount_cents);
 }
 
-export async function liveRates({ shipFrom, to, pkg, fetchImpl }) {
+/** Carriers activated in Shippo that we are willing to offer/buy (store setting ship_carriers, default USPS). */
+export async function allowedCarriers(sb, storeId) {
+  const { data } = await sb.from("store_settings").select("value").eq("store_id", storeId).eq("key", "ship_carriers").maybeSingle();
+  const list = Array.isArray(data?.value) ? data.value.map(x => String(x).trim().toUpperCase()).filter(Boolean) : [];
+  return list.length ? list : ["USPS"];
+}
+
+export async function liveRates({ shipFrom, to, pkg, fetchImpl, carriers }) {
   const shipment = await call("/shipments/", {
     method: "POST", fetchImpl,
     body: { address_from: shipFrom, address_to: to, parcels: [parcelFor(pkg)], async: false },
   });
+  const usable = carriers?.length ? (shipment.rates || []).filter(r => carriers.includes(String(r.provider).trim().toUpperCase())) : (shipment.rates || []);
   return {
     shipmentId: shipment.object_id,
-    rates: pickRates(shipment.rates),
-    all: normalizeRates(shipment.rates).slice(0, 15),
-    allRates: shipment.rates || [],
+    rates: pickRates(usable),
+    all: normalizeRates(usable).slice(0, 15),
+    allRates: usable,
     messages: (shipment.messages || []).map(m => m.text || String(m)).slice(0, 5),
   };
 }

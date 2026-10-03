@@ -1,4 +1,4 @@
-import { addressTo, buyLabel, getRate, liveRates, pickDefaultRate, refundLabel, shippoMode } from "./shippo.mjs";
+import { addressTo, allowedCarriers, buyLabel, getRate, liveRates, pickDefaultRate, refundLabel, shippoMode } from "./shippo.mjs";
 import { deliverOrderEmails, ownerEmails } from "./web-order-email.mjs";
 
 const num = v => Number(v);
@@ -51,6 +51,7 @@ export async function labelQuote(sb, storeId, orderId, box, deps = {}) {
     shipFrom,
     to: addressTo({ name: order.buyer_name, line1: order.ship_line1, line2: order.ship_line2, city: order.ship_city, region: order.ship_region, postal: order.ship_postal, phone: order.buyer_phone, email: order.buyer_email }),
     pkg: cleanBox(useBox),
+    carriers: await allowedCarriers(sb, storeId),
   });
   const rates = quote.all || quote.rates;
   if (!rates.length) return { ok: false, status: 502, error: `No carrier rates for this box: ${quote.messages.join("; ") || "unknown"}` };

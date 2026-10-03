@@ -4,7 +4,7 @@ import { wrapHandler } from "../lib/floor-log.mjs";
 import { webSquareConfig, webSquareEnv } from "../lib/web-square.mjs";
 import { settleShippingOrder } from "../lib/web-payment.mjs";
 import { ownerEmails } from "../lib/web-order-email.mjs";
-import { addressTo, fallbackRate, liveRates, shippoMode } from "../lib/shippo.mjs";
+import { addressTo, allowedCarriers, fallbackRate, liveRates, shippoMode } from "../lib/shippo.mjs";
 
 /** A real (production Square) order can only ever be shipped with a LIVE Shippo key. */
 export const shippingKeyOk = env => env !== "production" || shippoMode() === "live";
@@ -31,7 +31,7 @@ export async function quoteRates(sb, storeId, sku, buyer, deps = {}) {
   let source = "shippo";
   let messages = [];
   try {
-    const live = await (deps.liveRates || liveRates)({ shipFrom: unit.ship_from, to: addressTo(buyer), pkg: unit.package });
+    const live = await (deps.liveRates || liveRates)({ shipFrom: unit.ship_from, to: addressTo(buyer), pkg: unit.package, carriers: await allowedCarriers(sb, storeId) });
     rates = live.rates;
     messages = live.messages;
     if (!rates.length && !live.allRates?.length && messages.length) {

@@ -21,6 +21,7 @@ export function OnlineSellingPage({ client, accessToken, stamp }: Props) {
   const [check, setCheck] = useState<Check | null>(null);
   const [error, setError] = useState(''); const [saved, setSaved] = useState('');
   const [busy, setBusy] = useState(false);
+  const [carriers, setCarriers] = useState('USPS');
   const [ship, setShip] = useState<{ enabled: boolean; shippo: string; square_env: string } | null>(null);
   const [emails, setEmails] = useState(''); const [keywords, setKeywords] = useState(''); const [cats, setCats] = useState<string[]>([]);
   const [extraCats, setExtraCats] = useState('');
@@ -28,7 +29,8 @@ export function OnlineSellingPage({ client, accessToken, stamp }: Props) {
   const [nums, setNums] = useState({ ship_max_weight_lb: '', ship_max_length_in: '', ship_max_length_girth_in: '', pickup_hold_hours: '' });
 
   const load = useCallback(async () => {
-    const [a, b] = await Promise.all([client.rpc('portal_online_settings'), client.from('listing_checks').select('*').order('ran_at', { ascending: false }).limit(1)]);
+    const [a, b, c] = await Promise.all([client.rpc('portal_online_settings'), client.from('listing_checks').select('*').order('ran_at', { ascending: false }).limit(1), client.rpc('portal_ship_carriers')]);
+    if (!c.error && Array.isArray(c.data)) setCarriers((c.data as string[]).join(', '));
     if (a.error) { setError(a.error.message); return; }
     const v = a.data as Settings; setS(v);
     setEmails(v.order_notify_emails.join('\n')); setKeywords(v.ship_excluded_keywords.join('\n'));
@@ -48,6 +50,7 @@ export function OnlineSellingPage({ client, accessToken, stamp }: Props) {
       await put('order_notify_emails', lines(emails));
       await put('ship_excluded_categories', [...cats, ...lines(extraCats)]);
       await put('ship_excluded_keywords', lines(keywords));
+      await put('ship_carriers', lines(carriers));
       for (const [k, v] of Object.entries(nums)) await put(k, Number(v));
       const bps = (pct: string) => Math.round(Number(pct) * 100);
       if (!Number.isFinite(bps(tax.outPct)) || (tax.inPct.trim() !== '' && !Number.isFinite(bps(tax.inPct)))) throw new Error('Tax rates must be numbers like 7.25');
@@ -116,6 +119,7 @@ export function OnlineSellingPage({ client, accessToken, stamp }: Props) {
       <h3>Pickup-only categories</h3><div className="check-grid">{s.categories.map(c => <label key={c}><input type="checkbox" checked={cats.some(x => x.toLowerCase() === c.toLowerCase())} onChange={e => setCats(e.target.checked ? [...cats, c] : cats.filter(x => x.toLowerCase() !== c.toLowerCase()))} />{c}</label>)}</div>
       <label className="notes">Other pickup-only category names (for categories added later)<textarea rows={3} value={extraCats} onChange={e => setExtraCats(e.target.value)} /></label>
       <label className="notes">Pickup-only words in the title (whole words)<textarea rows={4} value={keywords} onChange={e => setKeywords(e.target.value)} /></label>
+      <label className="notes">Carriers we ship with (only carriers activated in Shippo: UPS stays off until it is activated there)<textarea rows={1} value={carriers} onChange={e => setCarriers(e.target.value)} /></label>
       <div className="number-grid">
         <label>Max package weight (lb)<input inputMode="decimal" value={nums.ship_max_weight_lb} onChange={e => setNums({ ...nums, ship_max_weight_lb: e.target.value })} /></label>
         <label>Max longest side (in)<input inputMode="decimal" value={nums.ship_max_length_in} onChange={e => setNums({ ...nums, ship_max_length_in: e.target.value })} /></label>
