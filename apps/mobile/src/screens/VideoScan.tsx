@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { floorCloud } from '@floor/cloud';
 import { parseMoneyToCents } from '@floor/store';
 import { authHeader, functionsUrl } from '../functions';
-import { startVideoScan } from '../video-scan-capture';
+import { prewarmVideoScan, releaseWarmVideoScan, startVideoScan } from '../video-scan-capture';
 
 type Price = { store: string; price_cents: number; url: string; pack_size?: number; approximate?: boolean; product_name?: string };
 type Identity = { title?: string; brand?: string; model?: string; color?: string; identified_at?: string; retail_started_at?: string;
@@ -14,13 +14,18 @@ const moneyPattern = /^\d*(?:\.\d{0,2})?$/;
 const dollars = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 const distinctOptions = (result: Identity) => [...new Map((result.options || []).map((option, index) => [
   [option.brand, option.model, option.color, option.title].join('|').toLowerCase(), { ...option, index }])).values()];
-async function post(path: string, id: string, extra: Record<string, unknown> = {}) {
-  const response = await fetch(functionsUrl(path), { method: 'POST', headers: {
-    ...await authHeader(), 'Content-Type': 'application/json' }, body: JSON.stringify({ id, ...extra }) });
+
+async function post(path: string, id: string, extra: Record<string, unknown> = {}, token?: string) {
+  const headers = token
+    ? { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
+    : { ...await authHeader(), 'Content-Type': 'application/json' };
+  const response = await fetch(functionsUrl(path), { method: 'POST', headers, body: JSON.stringify({ id, ...extra }) });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body.error || `Scan request failed (${response.status})`);
   return body;
 }
+
+type Account = { prefix: string; stillPaths: string[]; token: string; userId: string; storeId: string };
 
 export function VideoScan() {
   const navigate = useNavigate();
@@ -30,6 +35,7 @@ export function VideoScan() {
   const early = useRef<Record<string, Promise<void> | undefined>>({});
   const stopTimes = useRef<Record<string, number>>({});
   const announced = useRef<Record<string, boolean>>({});
+  const accessToken = useRef('');
   const [started, setStarted] = useState(false);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [busy, setBusy] = useState(false);
@@ -52,12 +58,26 @@ export function VideoScan() {
       if (active && data) setJobs(data as Job[]);
     };
     void refresh();
-    // Warm the two RPCs Scan used to await before the camera opened.
+    // Warm camera + RPCs while the clerk is still reading Receive.
+    prewarmVideoScan();
     void floorCloud().rpc('video_scan_budget');
     void floorCloud().rpc('current_store_id');
-    const timer = window.setInterval(() => { setNow(Date.now()); void refresh(); }, 900);
-    return () => { active = false; window.clearInterval(timer); recording.current?.abort(); };
+    void floorCloud().auth.getSession().then(({ data }) => {
+      if (data.session?.access_token) accessToken.current = data.session.access_token;
+    });
+    return () => { active = false; recording.current?.abort(); releaseWarmVideoScan(); };
   }, []);
+
+  const pendingWork = jobs.some(job => job.status === 'processing' || job.status === 'queued'
+    || (job.status === 'ready' && !job.result?.retail_ready));
+  useEffect(() => {
+    const timer = window.setInterval(() => { setNow(Date.now());
+      void floorCloud().from('video_scan_jobs')
+        .select('id,status,result,error,sku,created_at').order('created_at', { ascending: false }).limit(12)
+        .then(({ data }) => { if (data) setJobs(data as Job[]); });
+    }, pendingWork ? 280 : 1200);
+    return () => window.clearInterval(timer);
+  }, [pendingWork]);
 
   async function start() {
     setError(''); setSavedSku(''); setBusy(true);
@@ -68,10 +88,11 @@ export function VideoScan() {
     setStarted(true);
     let prefix = '';
     let stillPaths: string[] = [];
+    let token = accessToken.current;
     const extension = MediaRecorder.isTypeSupported('video/mp4') ? 'mp4' : 'webm';
     const bucket = floorCloud().storage.from('video-scan-staging');
     let earlyStills: Blob[] = [];
-    const account = (async () => {
+    const account = (async (): Promise<Account> => {
       const [budget, store, session] = await Promise.all([
         floorCloud().rpc('video_scan_budget'),
         floorCloud().rpc('current_store_id'),
@@ -83,25 +104,29 @@ export function VideoScan() {
         throw new Error('Monthly AI scan cap reached. Use manual Receive or ask an admin to raise it.');
       if (store.error || !store.data) throw store.error || new Error('Store login required');
       const userId = session.data.session?.user?.id;
-      if (!userId) throw new Error('Sign in to scan');
+      const access = session.data.session?.access_token;
+      if (!userId || !access) throw new Error('Sign in to scan');
+      token = access;
+      accessToken.current = access;
       prefix = `${store.data}/${userId}/${id}`;
       stillPaths = Array.from({ length: 4 }, (_, index) => `${prefix}/still-${index}.jpg`);
+      return { prefix, stillPaths, token: access, userId, storeId: String(store.data) };
     })();
     const beginIdentify = (stills: Blob[]) => {
       if (early.current[id]) return;
       earlyStills = stills;
       if (stills[0]) setOwnThumb(URL.createObjectURL(stills[0]));
       early.current[id] = (async () => {
-        await account;
+        const ready = await account;
         const sent = await Promise.all(stills.map((blob, index) =>
-          bucket.upload(stillPaths[index], blob, { contentType: 'image/jpeg' })));
+          bucket.upload(ready.stillPaths[index], blob, { contentType: 'image/jpeg' })));
         for (const item of sent) if (item.error) throw item.error;
         const created = await floorCloud().rpc('video_scan_create', {
-          p_id: id, p_video_path: `${prefix}/video.${extension}`, p_still_paths: stillPaths });
+          p_id: id, p_video_path: `${ready.prefix}/video.${extension}`, p_still_paths: ready.stillPaths });
         if (created.error) throw created.error;
         setJobs(previous => [{ id, status: 'processing', result: null, error: null, sku: null,
           created_at: new Date().toISOString() }, ...previous]);
-        await post('video-scan-start', id);
+        await post('video-scan-start', id, {}, ready.token);
       })();
       early.current[id]?.catch((cause: unknown) => setError(cause instanceof Error ? cause.message : String(cause)));
     };
@@ -130,11 +155,13 @@ export function VideoScan() {
         void (async () => {
           await early.current[id]?.catch(() => undefined);
           await account.catch(() => undefined);
-          if (prefix) await post('video-scan-discard', id).catch(() => undefined);
+          if (prefix) await post('video-scan-discard', id, {}, token || undefined).catch(() => undefined);
           if (stillPaths.length) await bucket.remove([...stillPaths, `${prefix}/video.${extension}`]);
         })();
       }, beginIdentify);
       recording.current = await camera;
+      // Preview is live — unlock the button; account checks continue in the background.
+      setBusy(false);
       try { await account; }
       catch (cause) {
         recording.current?.abort();
@@ -143,8 +170,7 @@ export function VideoScan() {
         setActiveId(null);
         throw cause;
       }
-    } catch (cause) { setActiveId(null); setStarted(false); setError(cause instanceof Error ? cause.message : String(cause)); }
-    finally { setBusy(false); }
+    } catch (cause) { setActiveId(null); setStarted(false); setError(cause instanceof Error ? cause.message : String(cause)); setBusy(false); }
   }
 
   async function save(job: Job, editAfter = false) {
@@ -159,7 +185,8 @@ export function VideoScan() {
     const chosen = result.options?.[choices[job.id]];
     setSaving(job.id); setError('');
     try {
-      await uploads.current[job.id];
+      // SKU mint only needs the job + identity. Do not wait on the full video upload.
+      if (early.current[job.id]) await early.current[job.id];
       const draft = { ...result, ...(chosen || {}) };
       const { data, error: saveError } = await floorCloud().rpc('video_scan_receive', {
         p_id: job.id, p_draft: draft, p_ask_cents: price });
@@ -173,11 +200,13 @@ export function VideoScan() {
       setJobs(previous => previous.map(row => row.id === job.id ? { ...row, status: 'saved', sku } : row));
       setPrices(previous => { const next = { ...previous }; delete next[job.id]; return next; });
       setCosts(previous => { const next = { ...previous }; delete next[job.id]; return next; });
-      // These run after the unit exists; the user can immediately start the next scan.
+      // Photos/enrich wait on remaining uploads in the background; clerk can scan again now.
       void (async () => {
-        try { await post('video-scan-photos', job.id); }
+        try { await uploads.current[job.id]; } catch { /* photo/enrich retries below surface errors */ }
+        const token = accessToken.current || undefined;
+        try { await post('video-scan-photos', job.id, {}, token); }
         catch (cause) { setError(`SKU ${sku} saved; photos need retry: ${(cause as Error).message}`); }
-        try { await post('video-scan-enrich-start', job.id); }
+        try { await post('video-scan-enrich-start', job.id, {}, token); }
         catch (cause) { setError(`SKU ${sku} saved; details need retry: ${(cause as Error).message}`); }
       })();
       window.setTimeout(() => setSavedSku(current => current === sku ? '' : current), 12000);
@@ -191,7 +220,7 @@ export function VideoScan() {
     setError('');
     try {
       await uploads.current[job.id]?.catch(() => undefined);
-      await post('video-scan-discard', job.id);
+      await post('video-scan-discard', job.id, {}, accessToken.current || undefined);
       setJobs(previous => previous.filter(row => row.id !== job.id));
       if (activeId === job.id) setActiveId(null);
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
@@ -200,7 +229,7 @@ export function VideoScan() {
   async function retry(job: Job) {
     setError(''); setActiveId(job.id);
     setJobs(previous => previous.map(row => row.id === job.id ? { ...row, status: 'processing', error: null } : row));
-    try { await post('video-scan-start', job.id); }
+    try { await post('video-scan-start', job.id, {}, accessToken.current || undefined); }
     catch (cause) {
       setJobs(previous => previous.map(row => row.id === job.id ? { ...row, status: 'failed' } : row));
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -253,7 +282,7 @@ export function VideoScan() {
             <button type="button" key={option.index} className={`field text-left flex items-center gap-3 ${choices[current.id] === option.index ? 'ring-2' : ''}`}
               onClick={() => {setChoices(previous => ({ ...previous, [current.id]: option.index }));
                 setChoosing(current.id);
-                void post('video-scan-choice',current.id,{index:option.index}).catch(cause=>setError(cause.message))
+                void post('video-scan-choice',current.id,{index:option.index},accessToken.current||undefined).catch(cause=>setError(cause.message))
                   .finally(()=>setChoosing(null));}}>
               {(option.thumbnail_data_url || ownThumb) &&
                 <img src={option.thumbnail_data_url || ownThumb} alt={option.thumbnail_data_url ? option.label : 'Your scan photo'}
@@ -267,7 +296,7 @@ export function VideoScan() {
           {' '}at {retail.store} <a href={retail.url} target="_blank" rel="noreferrer">View price ↗</a></p>
           : <p className="text-quiet">{retailWaiting ? 'Looking up retail price…' : "Couldn't find a retail price"}</p>}
         {!retail && !retailWaiting && <button type="button" className="btn-text" onClick={() =>
-          void post('video-scan-retry-price', current.id).catch(cause => setError(cause.message))}>Retry price lookup</button>}
+          void post('video-scan-retry-price', current.id, {}, accessToken.current || undefined).catch(cause => setError(cause.message))}>Retry price lookup</button>}
         <label>How much do you want to sell it for?
           <input className="field mt-2" type="text" inputMode="decimal" placeholder="$"
             value={prices[current.id] || ''} onChange={event => {

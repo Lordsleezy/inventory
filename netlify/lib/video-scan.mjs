@@ -134,12 +134,20 @@ async function searchOnce(identity,closer=false,signal) {
     identity.model&&!title.toLowerCase().includes(String(identity.model).toLowerCase())?identity.model:'',
     identity.color&&!title.toLowerCase().includes(String(identity.color).toLowerCase())?identity.color:'']
     .filter(Boolean).join(' ').replace(/\s+/g,' ').slice(0,180);
-  const prompt=`Use Google Search now for today's US retail prices of "${query}". Search with one exact product query. Report retailer product pages, current dollar prices, sizes and pack counts, with source links. ${closer?'If the exact size is not listed, find a clearly labeled close size or pack.':'Include multipacks containing the item, even when a single unit has no listing.'} Do not rely on memory or invent prices. Keep the answer short.`;
+  const prompt=`Use Google Search now for today's US retail prices of "${query}". Search with one exact product query. Return only verified retailer product pages with current dollar prices, sizes and pack counts. ${closer?'If the exact size is not listed, find a clearly labeled close size or pack and mark approximate=true.':'Include multipacks containing the item, even when a single unit has no listing.'} If the item is a single unit but sold only in a variety pack, give pack_size and mark approximate=true. If no priced product page, return an empty prices array. Do not rely on memory or invent a URL or price.`;
+  // One grounded+structured call instead of search-then-parse (cuts ~half the price latency).
+  try {
+    const combined=await gemini([{text:prompt}],{search:true,schema:pricesSchema,maxOutputTokens:900,signal});
+    const prices=cleanPrices(combined.value?.prices,identity);
+    if(combined.queries||prices.length)return {prices,input:combined.input,output:combined.output,queries:combined.queries};
+  } catch (error) {
+    console.warn('video_scan_retail_combined_failed',String(error.message||error).slice(0,160));
+  }
   const grounded=await gemini([{text:prompt}],{search:true,maxOutputTokens:1100,signal});
   if(!grounded.queries)return {...grounded,prices:[]};
-  const parsed=await gemini([{text:`Extract verified retail prices from these Google-grounded findings. Product: ${JSON.stringify(identity)}. Findings: ${grounded.value.slice(0,9000)}. Sources: ${JSON.stringify(grounded.sources).slice(0,4000)}. Use only linked product pages and observed prices. If the item is a single can but sold only in a variety pack, give pack_size and mark approximate=true. If a different size or variant, mark approximate=true. If no priced product page, return an empty prices array. Do not invent a URL or price.`}],
+  const parsed=await gemini([{text:`Extract verified retail prices from these Google-grounded findings. Product: ${JSON.stringify(identity)}. Findings: ${String(grounded.value||'').slice(0,9000)}. Sources: ${JSON.stringify(grounded.sources).slice(0,4000)}. Use only linked product pages and observed prices. If the item is a single can but sold only in a variety pack, give pack_size and mark approximate=true. If a different size or variant, mark approximate=true. If no priced product page, return an empty prices array. Do not invent a URL or price.`}],
     {schema:pricesSchema,maxOutputTokens:800,signal});
-  return {prices:await resolveRetailUrls(cleanPrices(parsed.value.prices,identity),signal),input:grounded.input+parsed.input,
+  return {prices:cleanPrices(parsed.value.prices,identity),input:grounded.input+parsed.input,
     output:grounded.output+parsed.output,queries:grounded.queries};
 }
 export async function lookupRetail(sb,job,identity,{signal}={}) {
@@ -148,12 +156,13 @@ export async function lookupRetail(sb,job,identity,{signal}={}) {
     if(cached.error)throw cached.error;
     if(cached.data&&Date.now()-Date.parse(cached.data.created_at)<
       (cached.data.lookup.retail_prices?.length?30:1)*86400_000){
-      const prices=await resolveRetailUrls(cleanPrices(cached.data.lookup.retail_prices,identity),signal);
-      return {prices,input:0,output:0,queries:0,reused:true,cachedDetails:cached.data.lookup};
+      // Show cached prices immediately; resolve redirect URLs in the background later if needed.
+      return {prices:cleanPrices(cached.data.lookup.retail_prices,identity),input:0,output:0,queries:0,reused:true,cachedDetails:cached.data.lookup};
     }}
   const first=await searchOnce(identity,false,signal);
   let prices=first.prices,input=first.input,output=first.output,queries=first.queries;
   if(!prices.length){const second=await searchOnce(identity,true,signal);prices=second.prices;input+=second.input;output+=second.output;queries+=second.queries}
+  // Skip HEAD redirect resolution on the critical path — grounding links still open in-app.
   if(key){const saved=await sb.from('video_scan_product_cache').upsert({store_id:job.store_id,product_key:key,
     lookup:{retail_prices:prices},created_at:new Date().toISOString()});if(saved.error)throw saved.error}
   return {prices,input,output,queries,reused:false};

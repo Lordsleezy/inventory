@@ -16,12 +16,11 @@ export async function handler(event) {
       identity=job.result;
     }else{
       if(job.status!=='processing')return {statusCode:200};
-      const frames=[];
-      for(const path of job.still_paths.slice(0,2)){
+      const frames=await Promise.all(job.still_paths.slice(0,2).map(async path=>{
         const downloaded=await sb.storage.from('video-scan-staging').download(path);
         if(downloaded.error)throw downloaded.error;
-        frames.push(Buffer.from(await downloaded.data.arrayBuffer()));
-      }
+        return Buffer.from(await downloaded.data.arrayBuffer());
+      }));
       const identified=await identifyFramesCached(sb,job,frames);
       identity={...identified.result,identified_at:new Date().toISOString()};
       const ready=await sb.from('video_scan_jobs').update({status:'ready',result:identity,
@@ -45,6 +44,9 @@ export async function handler(event) {
           await sb.from('video_scan_jobs').update({result:{...latest.data.result,options}}).eq('id',id).eq('status','ready');
         return {statusCode:200};
       }
+      // Mark retail start so the phone shows "Looking up…" immediately after identify.
+      await sb.from('video_scan_jobs').update({result:{...identity,retail_started_at:new Date().toISOString()}})
+        .eq('id',id).eq('status','ready');
     }
     // The popup is already available. Search and price may finish after the user starts typing.
     const retailStarted=Date.now();
