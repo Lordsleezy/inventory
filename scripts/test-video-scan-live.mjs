@@ -30,34 +30,51 @@ try {
   videoPath = `${prefix}/video.mp4`; stillPath = `${prefix}/still-0.jpg`;
   const video = await readFile(process.argv[2]);
   const still = await readFile(process.argv[3]);
-  check(await client.storage.from('video-scan-staging').upload(videoPath, video, { contentType: 'video/mp4' }), 'upload video');
+  const startedAt = performance.now();
   check(await client.storage.from('video-scan-staging').upload(stillPath, still, { contentType: 'image/jpeg' }), 'upload still');
   check(await client.rpc('video_scan_create', { p_id: scanId, p_video_path: videoPath, p_still_paths: [stillPath] }), 'create job');
   await post('video-scan-start');
+  const videoUpload = client.storage.from('video-scan-staging').upload(videoPath, video, { contentType: 'video/mp4' });
   let job;
-  for (let n = 0; n < 80; n++) {
-    await new Promise(resolve => setTimeout(resolve, 3000));
+  for (let n = 0; n < 180; n++) {
+    await new Promise(resolve => setTimeout(resolve, 500));
     job = check(await client.from('video_scan_jobs').select('*').eq('id', scanId).single(), 'poll job');
     if (job.status === 'ready' || job.status === 'failed') break;
   }
   if (job.status !== 'ready') throw new Error(`Scan ended as ${job.status}: ${job.error || 'timed out'}`);
-  if (!job.result?.brand || !job.result?.title || !job.result?.retail_prices?.length)
-    throw new Error('Draft lacks identity or retailer price/link');
+  const popupMs = Math.round(performance.now() - startedAt);
+  check(await videoUpload, 'upload video');
+  for (let n = 0; n < 180 && !job.result?.retail_ready; n++) {
+    await new Promise(resolve => setTimeout(resolve, 500));
+    job = check(await client.from('video_scan_jobs').select('*').eq('id', scanId).single(), 'poll retail');
+  }
+  const retailMs = Math.round(performance.now() - startedAt);
+  if (!job.result?.brand || !job.result?.title) throw new Error('Draft lacks product identity');
   if ('ask_cents' in job.result) throw new Error('AI set a selling price');
   const saved = check(await client.rpc('video_scan_receive', { p_id: scanId, p_draft: job.result, p_ask_cents: 100 }), 'receive unit');
   sku = saved.sku;
   check(await admin.from('units').update({ state: 'voided', show_on_website: false }).eq('store_id', storeId).eq('sku', sku), 'hide test unit');
   const photos = await post('video-scan-photos');
   if (photos.attached !== 1) throw new Error('Video still was not attached');
-  const unit = check(await admin.from('units').select('brand,model,title,ask_cents,msrp_cents,ebay_title').eq('store_id', storeId).eq('sku', sku).single(), 'verify unit');
+  await post('video-scan-enrich-start');
+  for (let n = 0; n < 240; n++) {
+    await new Promise(resolve => setTimeout(resolve, 500));
+    job = check(await client.from('video_scan_jobs').select('*').eq('id', scanId).single(), 'poll details');
+    if (job.result?.details_ready || job.error) break;
+  }
+  const unit = check(await admin.from('units').select('brand,model,title,ask_cents,msrp_cents,ebay_title,ebay_category,ebay_item_specifics,ai_description,defect_notes').eq('store_id', storeId).eq('sku', sku).single(), 'verify unit');
   const photo = check(await admin.from('photos').select('source,path').eq('store_id', storeId).eq('sku', sku).single(), 'verify photo');
   const videoInfo = await admin.storage.from('video-scan-staging').info(videoPath);
   if (!videoInfo.error) throw new Error('Raw video remains in storage');
   console.log(JSON.stringify({ scan_status: job.status, sku, brand: unit.brand, model: unit.model,
     ask_cents: unit.ask_cents, msrp_cents: unit.msrp_cents, retailer: job.result.retail_source_name,
     retailer_url: job.result.retail_source_url, photo_source: photo.source,
-    raw_video_deleted: true, input_tokens: job.input_tokens, output_tokens: job.output_tokens,
-    search_queries: job.search_queries, cost_usd: job.estimated_cost_usd }, null, 2));
+    raw_video_deleted: true, popup_ms: popupMs, retail_ms: retailMs,
+    details_ready: Boolean(job.result.details_ready), ebay_title: unit.ebay_title,
+    ebay_category: unit.ebay_category, specifics_count: Object.keys(unit.ebay_item_specifics || {}).length,
+    description_length: unit.ai_description?.length || 0, input_tokens: job.input_tokens,
+    output_tokens: job.output_tokens, search_queries: job.search_queries,
+    token_cost_usd: job.estimated_cost_usd }, null, 2));
 } finally {
   if (sku && storeId) {
     const prefix = `${storeId}/${sku}/video-${scanId}-0`;

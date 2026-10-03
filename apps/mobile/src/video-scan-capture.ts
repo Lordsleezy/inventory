@@ -23,6 +23,7 @@ export async function startVideoScan(
   preview: HTMLVideoElement,
   onFinish: (scan: RecordedScan) => void,
   onError: (error: Error) => void,
+  onEarlyStills?: (stills: Blob[]) => void,
 ): Promise<{ stop: () => void; abort: () => void }> {
   if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined')
     throw new Error('Video recording is unavailable in this app version. Use manual Receive.');
@@ -38,9 +39,9 @@ export async function startVideoScan(
   preview.muted = true;
   preview.playsInline = true;
   await preview.play();
-  const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 1_500_000, audioBitsPerSecond: 64_000 });
+  const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 900_000, audioBitsPerSecond: 48_000 });
   const pieces: Blob[] = [], frames: Still[] = [];
-  let aborted = false;
+  let aborted = false, earlyStills: Blob[] = [];
   const started = Date.now();
   const capture = () => {
     if (!preview.videoWidth || !preview.videoHeight) return;
@@ -52,7 +53,14 @@ export async function startVideoScan(
     if (!ctx) return;
     ctx.drawImage(preview, 0, 0, canvas.width, canvas.height);
     const score = sharpness(canvas), at = Date.now();
-    canvas.toBlob(blob => { if (blob) frames.push({ blob, score, at }); }, 'image/jpeg', .83);
+    canvas.toBlob(blob => {
+      if (!blob) return;
+      frames.push({ blob, score, at });
+      if (!earlyStills.length && frames.length >= 2 && onEarlyStills) {
+        earlyStills = frames.slice(0, 2).map(frame => frame.blob);
+        onEarlyStills(earlyStills);
+      }
+    }, 'image/jpeg', .78);
   };
   recorder.ondataavailable = event => { if (event.data.size) pieces.push(event.data); };
   const interval = window.setInterval(capture, 1800);
@@ -62,7 +70,9 @@ export async function startVideoScan(
     window.clearInterval(interval); window.clearTimeout(timeout);
     stream.getTracks().forEach(t => t.stop()); preview.srcObject = null;
     if (aborted) return;
-    const best = frames.sort((a, b) => b.score - a.score).slice(0, 4).sort((a, b) => a.at - b.at);
+    const early = frames.filter(frame => earlyStills.includes(frame.blob));
+    const best = [...early, ...frames.filter(frame => !early.includes(frame))
+      .sort((a, b) => b.score - a.score).slice(0, 4 - early.length)].sort((a, b) => a.at - b.at);
     onFinish({ video: new Blob(pieces, { type: mimeType }), mimeType, stills: best.map(x => x.blob),
       seconds: Math.round((Date.now() - started) / 1000) });
   };

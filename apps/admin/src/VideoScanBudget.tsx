@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-type Budget = { spent_usd: number; reserved_usd: number; monthly_cap_usd: number };
+type Budget = { spent_usd: number; reserved_usd: number; monthly_cap_usd: number; search_queries?: number; free_search_queries_remaining?: number };
 export function VideoScanBudget({ client }: { client: SupabaseClient }) {
   const [budget, setBudget] = useState<Budget | null>(null);
   const [cap, setCap] = useState('');
@@ -20,6 +20,9 @@ export function VideoScanBudget({ client }: { client: SupabaseClient }) {
     setBusy(false);
   }
   return <section className="panel receive-panel"><h2>AI scan budget</h2>
+    {budget?.free_search_queries_remaining !== undefined && <p>
+      {Number(budget.search_queries)} Floor searches this month; {Number(budget.free_search_queries_remaining)} of 5,000 free searches remain.
+    </p>}
     <p>{budget ? `$${Number(budget.spent_usd).toFixed(2)} estimated spend this month · $${Number(budget.reserved_usd).toFixed(2)} processing · $${Number(budget.monthly_cap_usd).toFixed(2)} cap` : 'Loading spend…'}</p>
     <label>Monthly hard cap (USD)<input inputMode="decimal" value={cap} onChange={e => { if (/^\d*(?:\.\d{0,2})?$/.test(e.target.value)) setCap(e.target.value); }} /></label>
     <button type="button" className="secondary" disabled={busy} onClick={() => void save()}>Save cap</button>

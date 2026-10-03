@@ -148,7 +148,9 @@ export function ReceiveScreen() {
         One record per physical thing. Five of the same item means five units.
       </p>
 
-      <VideoScan manager={manager} />
+      <VideoScan />
+      <details className="card p-4 mt-4">
+        <summary className="font-semibold cursor-pointer">Manual Receive</summary>
 
       <label className="block py-3">
         <Label>SKU</Label>
@@ -236,6 +238,7 @@ export function ReceiveScreen() {
       <p className="mt-3 text-quiet text-floor-mute">
         Prices can be left blank and filled in later. Blank is not zero.
       </p>
+      </details>
     </section>
   );
 }
