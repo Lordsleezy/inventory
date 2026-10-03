@@ -62,7 +62,7 @@ try {
     job = check(await client.from('video_scan_jobs').select('*').eq('id', scanId).single(), 'poll details');
     if (job.result?.details_ready || job.error) break;
   }
-  const unit = check(await admin.from('units').select('brand,model,title,ask_cents,msrp_cents,ebay_title,ebay_category,ebay_item_specifics,ai_description,defect_notes').eq('store_id', storeId).eq('sku', sku).single(), 'verify unit');
+  const unit = check(await admin.from('units').select('brand,model,title,ask_cents,msrp_cents,ebay_title,ebay_category,ebay_item_specifics,ai_description,defect_notes,product_height_in,product_width_in,product_depth_in,product_weight_lb,package_length_in,package_width_in,package_height_in,package_weight_lb,dims_source').eq('store_id', storeId).eq('sku', sku).single(), 'verify unit');
   const photo = check(await admin.from('photos').select('source,path').eq('store_id', storeId).eq('sku', sku).single(), 'verify photo');
   const videoInfo = await admin.storage.from('video-scan-staging').info(videoPath);
   if (!videoInfo.error) throw new Error('Raw video remains in storage');
@@ -72,7 +72,12 @@ try {
     raw_video_deleted: true, popup_ms: popupMs, retail_ms: retailMs,
     details_ready: Boolean(job.result.details_ready), ebay_title: unit.ebay_title,
     ebay_category: unit.ebay_category, specifics_count: Object.keys(unit.ebay_item_specifics || {}).length,
-    description_length: unit.ai_description?.length || 0, input_tokens: job.input_tokens,
+    description_length: unit.ai_description?.length || 0,
+    dimensions: {product_height_in:unit.product_height_in,product_width_in:unit.product_width_in,
+      product_depth_in:unit.product_depth_in,product_weight_lb:unit.product_weight_lb,
+      package_length_in:unit.package_length_in,package_width_in:unit.package_width_in,
+      package_height_in:unit.package_height_in,package_weight_lb:unit.package_weight_lb,
+      dims_source:unit.dims_source}, input_tokens: job.input_tokens,
     output_tokens: job.output_tokens, search_queries: job.search_queries,
     token_cost_usd: job.estimated_cost_usd }, null, 2));
 } finally {

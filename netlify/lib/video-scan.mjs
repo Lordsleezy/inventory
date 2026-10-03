@@ -99,6 +99,19 @@ export function cleanPrices(prices,identity={}) {
     size_mismatch:sizeMismatch,product_name:String(p.product_name||'').slice(0,160)}})
     .sort((a,b)=>Number(a.approximate)-Number(b.approximate)||b.price_cents/a.pack_size-a.price_cents/b.pack_size).slice(0,10);
 }
+async function resolveRetailUrls(prices) {
+  return Promise.all(prices.map(async price=>{
+    if(!/^https:\/\/vertexaisearch\.cloud\.google\.com\/grounding-api-redirect\//i.test(price.url))
+      return price;
+    try {
+      const response=await fetch(price.url,{method:'HEAD',redirect:'follow',signal:AbortSignal.timeout(6000)});
+      const final=new URL(response.url);
+      if(final.protocol==='https:'&&final.hostname!=='vertexaisearch.cloud.google.com'
+        &&final.pathname.length>8)return {...price,url:final.href};
+    } catch {/* The grounding link remains usable if the store blocks server-side checks. */}
+    return price;
+  }));
+}
 async function searchOnce(identity,closer=false) {
   const title=String(identity.title||'');
   const query=[!title.toLowerCase().includes(String(identity.brand||'').toLowerCase())?identity.brand:'',
@@ -111,7 +124,7 @@ async function searchOnce(identity,closer=false) {
   if(!grounded.queries)return {...grounded,prices:[]};
   const parsed=await gemini([{text:`Extract verified retail prices from these Google-grounded findings. Product: ${JSON.stringify(identity)}. Findings: ${grounded.value.slice(0,9000)}. Sources: ${JSON.stringify(grounded.sources).slice(0,4000)}. Use only linked product pages and observed prices. If the item is a single can but sold only in a variety pack, give pack_size and mark approximate=true. If a different size or variant, mark approximate=true. If no priced product page, return an empty prices array. Do not invent a URL or price.`}],
     {schema:pricesSchema,maxOutputTokens:800});
-  return {prices:cleanPrices(parsed.value.prices,identity),input:grounded.input+parsed.input,
+  return {prices:await resolveRetailUrls(cleanPrices(parsed.value.prices,identity)),input:grounded.input+parsed.input,
     output:grounded.output+parsed.output,queries:grounded.queries};
 }
 export async function lookupRetail(sb,job,identity) {
@@ -120,7 +133,7 @@ export async function lookupRetail(sb,job,identity) {
     if(cached.error)throw cached.error;
     if(cached.data&&Date.now()-Date.parse(cached.data.created_at)<
       (cached.data.lookup.retail_prices?.length?30:1)*86400_000){
-      const prices=cleanPrices(cached.data.lookup.retail_prices,identity);
+      const prices=await resolveRetailUrls(cleanPrices(cached.data.lookup.retail_prices,identity));
       return {prices,input:0,output:0,queries:0,reused:true,cachedDetails:cached.data.lookup};
     }}
   const first=await searchOnce(identity);
