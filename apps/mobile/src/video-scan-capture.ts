@@ -85,9 +85,12 @@ export async function startVideoScan(
     await new Promise(resolve=>window.setTimeout(resolve,350));
     const seconds=Math.round((Date.now()-started)/1000);
     if(seconds<10){onError(new Error('Record at least 10 seconds. Please rescan.'));return}
-    const early=frames.filter(frame=>earlyStills.includes(frame.blob));
-    const best:Still[]=[...early];
-    for(const frame of [...frames].filter(frame=>frame.score>=MIN_SHARPNESS).sort((a,b)=>b.score-a.score)){
+    const sharp=frames.filter(frame=>frame.score>=MIN_SHARPNESS).sort((a,b)=>b.score-a.score);
+    // Keep the early angles for identification, but replace their saved stills with
+    // the sharpest later frame of each angle before attaching photos to the unit.
+    const best:Still[]=frames.filter(frame=>earlyStills.includes(frame.blob)).map(early=>
+      sharp.find(frame=>!different(frame,early))||early);
+    for(const frame of sharp){
       if(best.length>=4)break;
       if(best.every(other=>different(frame,other)))best.push(frame);
     }

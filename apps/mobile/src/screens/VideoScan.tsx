@@ -100,9 +100,9 @@ export function VideoScan() {
           // The full video is only needed after Save. Identification is already running from stills.
           const video = bucket.upload(`${prefix}/video.${extension}`, scan.video, { contentType: scan.mimeType });
           await early.current[id];
-          const remaining = scan.stills.slice(earlyStills.length);
-          const rest = await Promise.all(remaining.map((blob, index) =>
-            bucket.upload(stillPaths[earlyStills.length + index], blob, { contentType: 'image/jpeg' })));
+          const rest = await Promise.all(scan.stills.map((blob, index) =>
+            blob === earlyStills[index] ? Promise.resolve({ error: null }) :
+              bucket.upload(stillPaths[index], blob, { contentType: 'image/jpeg', upsert: index < earlyStills.length })));
           for (const item of rest) if (item.error) throw item.error;
           const uploaded = await video;
           if (uploaded.error) throw uploaded.error;

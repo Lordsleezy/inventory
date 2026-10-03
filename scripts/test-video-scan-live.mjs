@@ -32,6 +32,8 @@ try {
   const still = await readFile(process.argv[3]);
   const startedAt = performance.now();
   check(await client.storage.from('video-scan-staging').upload(stillPath, still, { contentType: 'image/jpeg' }), 'upload still');
+  check(await client.storage.from('video-scan-staging').upload(stillPath, still,
+    { contentType: 'image/jpeg', upsert: true }), 'replace early still with sharper final still');
   check(await client.rpc('video_scan_create', { p_id: scanId, p_video_path: videoPath, p_still_paths: [stillPath] }), 'create job');
   await post('video-scan-start');
   const videoUpload = client.storage.from('video-scan-staging').upload(videoPath, video, { contentType: 'video/mp4' });
@@ -62,7 +64,9 @@ try {
     job = check(await client.from('video_scan_jobs').select('*').eq('id', scanId).single(), 'poll details');
     if (job.result?.details_ready || job.error) break;
   }
-  const unit = check(await admin.from('units').select('brand,model,title,ask_cents,msrp_cents,ebay_title,ebay_category,ebay_item_specifics,ai_description,defect_notes,product_height_in,product_width_in,product_depth_in,product_weight_lb,package_length_in,package_width_in,package_height_in,package_weight_lb,dims_source').eq('store_id', storeId).eq('sku', sku).single(), 'verify unit');
+  const unit = check(await admin.from('units').select('brand,model,title,ask_cents,msrp_cents,ebay_title,ebay_category,ebay_item_specifics,ai_description,listing_body,listing_specs,defect_notes,product_height_in,product_width_in,product_depth_in,product_weight_lb,package_length_in,package_width_in,package_height_in,package_weight_lb,dims_source').eq('store_id', storeId).eq('sku', sku).single(), 'verify unit');
+  if (!unit.listing_body || unit.listing_body === unit.title) throw new Error('Listing description is missing');
+  if (!Object.keys(unit.listing_specs?.ebay_aspects || {}).length) throw new Error('eBay listing aspects are missing');
   const photo = check(await admin.from('photos').select('source,path').eq('store_id', storeId).eq('sku', sku).single(), 'verify photo');
   const videoInfo = await admin.storage.from('video-scan-staging').info(videoPath);
   if (!videoInfo.error) throw new Error('Raw video remains in storage');
@@ -88,7 +92,9 @@ try {
     await admin.from('events').delete().eq('store_id', storeId).eq('sku', sku);
     await admin.from('listings').delete().eq('store_id', storeId).eq('sku', sku);
     await admin.from('units').delete().eq('store_id', storeId).eq('sku', sku);
-    await admin.from('sku_ledger').update({ fate: 'hard-deleted' }).eq('store_id', storeId).eq('sku', sku);
+    // Disposable tests must not advance the store's permanent five-digit run.
+    const sale = await admin.from('sales').select('sku').eq('store_id', storeId).eq('sku', sku).limit(1);
+    if (!sale.data?.length) await admin.from('sku_ledger').delete().eq('store_id', storeId).eq('sku', sku);
   }
   if (videoPath) await admin.storage.from('video-scan-staging').remove([videoPath, stillPath]);
   await admin.from('video_scan_jobs').delete().eq('id', scanId);
