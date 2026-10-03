@@ -5,6 +5,7 @@ import { floorCloud } from "@floor/cloud";
 import { useStore } from "../store";
 import { Label, Notice } from "../components/ui";
 import { friendlyRpc } from "../rpc";
+import { VideoScan } from "./VideoScan";
 
 /**
  * Receive one physical unit.
@@ -146,6 +147,8 @@ export function ReceiveScreen() {
       <p className="mt-1 text-quiet text-floor-mute">
         One record per physical thing. Five of the same item means five units.
       </p>
+
+      <VideoScan manager={manager} />
 
       <label className="block py-3">
         <Label>SKU</Label>

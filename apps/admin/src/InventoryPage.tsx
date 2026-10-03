@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { ReceivePanel } from './ReceivePanel';
+import { VideoScanBudget } from './VideoScanBudget';
 
 type Row = {
   sku: string; brand: string; model: string; title: string; condition: string | null;
@@ -85,7 +86,7 @@ export function InventoryPage({ client, storeId, money, stamp }: Props) {
   return <>
     <header><div><div className="eyebrow">FLOOR INVENTORY</div><h1>Inventory</h1><p>{tab === 'browse' ? 'View only. Edit units in the register or phone app.' : 'Add physical units to Floor.'}</p></div></header>
     <div className="inventory-tabs"><button className={tab === 'browse' ? 'active' : ''} onClick={() => setTab('browse')}>Browse</button><button className={tab === 'receive' ? 'active' : ''} onClick={() => setTab('receive')}>Receive</button></div>
-    {tab === 'receive' ? <ReceivePanel client={client} storeId={storeId} onSaved={() => setRefresh(n => n + 1)} /> : <>
+    {tab === 'receive' ? <><VideoScanBudget client={client} /><ReceivePanel client={client} storeId={storeId} onSaved={() => setRefresh(n => n + 1)} /></> : <>
     <div className="inventory-controls">
       <label>Search<input type="search" placeholder="SKU, brand, model or title" value={query} onChange={e => change(() => setQuery(e.target.value))} /></label>
       <label>Status<select value={status} onChange={e => change(() => setStatus(e.target.value))}>
