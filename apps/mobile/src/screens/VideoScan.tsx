@@ -52,49 +52,65 @@ export function VideoScan() {
       if (active && data) setJobs(data as Job[]);
     };
     void refresh();
+    // Warm the two RPCs Scan used to await before the camera opened.
+    void floorCloud().rpc('video_scan_budget');
+    void floorCloud().rpc('current_store_id');
     const timer = window.setInterval(() => { setNow(Date.now()); void refresh(); }, 900);
     return () => { active = false; window.clearInterval(timer); recording.current?.abort(); };
   }, []);
 
   async function start() {
     setError(''); setSavedSku(''); setBusy(true);
-    try {
-      const budget = await floorCloud().rpc('video_scan_budget');
+    if (!preview.current) { setBusy(false); return; }
+    const id = crypto.randomUUID();
+    setActiveId(id);
+    // Show the preview immediately; do not wait on budget/store before the camera.
+    setStarted(true);
+    let prefix = '';
+    let stillPaths: string[] = [];
+    const extension = MediaRecorder.isTypeSupported('video/mp4') ? 'mp4' : 'webm';
+    const bucket = floorCloud().storage.from('video-scan-staging');
+    let earlyStills: Blob[] = [];
+    const account = (async () => {
+      const [budget, store, session] = await Promise.all([
+        floorCloud().rpc('video_scan_budget'),
+        floorCloud().rpc('current_store_id'),
+        floorCloud().auth.getSession(),
+      ]);
       if (budget.error) throw budget.error;
       const limit = budget.data as { spent_usd: number; reserved_usd: number; monthly_cap_usd: number };
       if (Number(limit.spent_usd) + Number(limit.reserved_usd) + 1 > Number(limit.monthly_cap_usd))
         throw new Error('Monthly AI scan cap reached. Use manual Receive or ask an admin to raise it.');
-      const { data: storeId, error: storeError } = await floorCloud().rpc('current_store_id');
-      if (storeError || !storeId) throw storeError || new Error('Store login required');
-      const { data: auth } = await floorCloud().auth.getUser();
-      if (!auth.user?.id) throw new Error('Sign in to scan');
-      const id = crypto.randomUUID(), prefix = `${storeId}/${auth.user.id}/${id}`;
-      setActiveId(id);
-      const extension = MediaRecorder.isTypeSupported('video/mp4') ? 'mp4' : 'webm';
-      const bucket = floorCloud().storage.from('video-scan-staging');
-      const stillPaths = Array.from({ length: 4 }, (_, index) => `${prefix}/still-${index}.jpg`);
-      let earlyStills: Blob[] = [];
-      const beginIdentify = (stills: Blob[]) => {
-        if (early.current[id]) return;
-        earlyStills = stills;
-        if (stills[0]) setOwnThumb(URL.createObjectURL(stills[0]));
-        early.current[id] = (async () => {
-          const sent = await Promise.all(stills.map((blob, index) =>
-            bucket.upload(stillPaths[index], blob, { contentType: 'image/jpeg' })));
-          for (const item of sent) if (item.error) throw item.error;
-          const created = await floorCloud().rpc('video_scan_create', {
-            p_id: id, p_video_path: `${prefix}/video.${extension}`, p_still_paths: stillPaths });
-          if (created.error) throw created.error;
-          setJobs(previous => [{ id, status: 'processing', result: null, error: null, sku: null,
-            created_at: new Date().toISOString() }, ...previous]);
-          await post('video-scan-start', id);
-        })();
-        early.current[id]?.catch((cause: unknown) => setError(cause instanceof Error ? cause.message : String(cause)));
-      };
-      if (!preview.current) return;
-      recording.current = await startVideoScan(preview.current, scan => {
+      if (store.error || !store.data) throw store.error || new Error('Store login required');
+      const userId = session.data.session?.user?.id;
+      if (!userId) throw new Error('Sign in to scan');
+      prefix = `${store.data}/${userId}/${id}`;
+      stillPaths = Array.from({ length: 4 }, (_, index) => `${prefix}/still-${index}.jpg`);
+    })();
+    const beginIdentify = (stills: Blob[]) => {
+      if (early.current[id]) return;
+      earlyStills = stills;
+      if (stills[0]) setOwnThumb(URL.createObjectURL(stills[0]));
+      early.current[id] = (async () => {
+        await account;
+        const sent = await Promise.all(stills.map((blob, index) =>
+          bucket.upload(stillPaths[index], blob, { contentType: 'image/jpeg' })));
+        for (const item of sent) if (item.error) throw item.error;
+        const created = await floorCloud().rpc('video_scan_create', {
+          p_id: id, p_video_path: `${prefix}/video.${extension}`, p_still_paths: stillPaths });
+        if (created.error) throw created.error;
+        setJobs(previous => [{ id, status: 'processing', result: null, error: null, sku: null,
+          created_at: new Date().toISOString() }, ...previous]);
+        await post('video-scan-start', id);
+      })();
+      early.current[id]?.catch((cause: unknown) => setError(cause instanceof Error ? cause.message : String(cause)));
+    };
+    try {
+      // Camera opens while budget/store finish in the background.
+      const camera = startVideoScan(preview.current, scan => {
         recording.current = null; setStarted(false); stopTimes.current[id] = performance.now();
         uploads.current[id] = (async () => {
+          await account;
           if (scan.video.size < 4_096) throw new Error('The camera did not save the video. Please rescan.');
           if (scan.video.size > 15 * 1024 * 1024) throw new Error('Video is over 15 MB.');
           if (!early.current[id]) beginIdentify(scan.stills.slice(0, 2));
@@ -113,12 +129,21 @@ export function VideoScan() {
         setError(cause.message); recording.current = null; setStarted(false); setActiveId(null);
         void (async () => {
           await early.current[id]?.catch(() => undefined);
-          await post('video-scan-discard',id).catch(() => undefined);
-          await bucket.remove([...stillPaths,`${prefix}/video.${extension}`]);
+          await account.catch(() => undefined);
+          if (prefix) await post('video-scan-discard', id).catch(() => undefined);
+          if (stillPaths.length) await bucket.remove([...stillPaths, `${prefix}/video.${extension}`]);
         })();
       }, beginIdentify);
-      setStarted(true);
-    } catch (cause) { setActiveId(null); setError(cause instanceof Error ? cause.message : String(cause)); }
+      recording.current = await camera;
+      try { await account; }
+      catch (cause) {
+        recording.current?.abort();
+        recording.current = null;
+        setStarted(false);
+        setActiveId(null);
+        throw cause;
+      }
+    } catch (cause) { setActiveId(null); setStarted(false); setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setBusy(false); }
   }
 
