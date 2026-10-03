@@ -56,7 +56,9 @@ function productKey(vision) {
 
 function cleanPrices(prices) {
   return (Array.isArray(prices)?prices:[]).filter(p => p.exact_match && Number.isInteger(p.price_cents)
-    && p.price_cents>0 && p.price_cents<10_000_000 && /^https:\/\//i.test(p.url || ''))
+    && p.price_cents>0 && p.price_cents<10_000_000 && /^https:\/\//i.test(p.url || '')
+    && (()=>{try{const url=new URL(p.url);return url.pathname.length>8 && !/^(support|help|about|search)\./i.test(url.hostname)
+      && !/^\/(support|help|search)(\/|$)/i.test(url.pathname) && !/grounding-api-redirect|\.\.\./i.test(url.href)}catch{return false}})())
     .map(p=>({store:String(p.store||'').slice(0,80),price_cents:p.price_cents,url:String(p.url).slice(0,1500)}))
     .sort((a,b)=>b.price_cents-a.price_cents).slice(0,12);
 }
@@ -79,7 +81,7 @@ export async function analyzeVideo(sb,job,bytes,mimeType='video/mp4') {
   }
   if(!cacheHit){
     try{
-      const grounded=await callGemini([{text:`Use Google Search now. Find the exact ${vision.brand} ${vision.model} ${vision.title} ${vision.color} product on US retailer and manufacturer pages. Return verified features/specifications, current retail prices, store names and source URLs. Distinguish colors and variants; do not guess. Include canonical retailer links where possible.`}],null,true);
+      const grounded=await callGemini([{text:`Use Google Search now to find current US retail prices for the exact ${vision.brand} ${vision.model} ${vision.title} ${vision.color} product. Search retailer product pages at Walmart, Target, Amazon, Best Buy, Ace, Home Depot, Lowe's and the manufacturer when relevant. For each exact listing, report store, dollar price, and the DIRECT product-page URL, not a homepage, support page, search page or Google redirect. Also return verified product features/specifications. Distinguish colors and variants; do not guess.`}],null,true);
       if(!grounded.queries)throw new Error('Google Search grounding did not run');
       const parsed=await callGemini([{text:`Convert these Google-grounded findings into the requested product listing JSON. Use ONLY the supplied findings, not memory. Include prices only where exact brand/model/color/variant and a direct retailer URL are shown. If no verifiable exact retail price, return an empty retail_prices array. eBay title maximum 80 characters. Product: ${JSON.stringify(vision)}. Grounded findings: ${String(grounded.value).slice(0,18000)}`}],lookupSchema);
       lookup={value:parsed.value,input:grounded.input+parsed.input,output:grounded.output+parsed.output,queries:grounded.queries};
@@ -95,7 +97,8 @@ export async function analyzeVideo(sb,job,bytes,mimeType='video/mp4') {
     title:String(vision.title||'').slice(0,240),ebay_title:String(lookup.value.ebay_title||'').slice(0,80),
     retail_prices:prices,msrp_cents:highest?.price_cents||null,
     retail_source_name:highest?.store||'',retail_source_url:highest?.url||'',
-    uncertain_fields:[...new Set([...(vision.uncertain_fields||[]),...(lookup.value.uncertain_fields||[])])],
+    uncertain_fields:[...new Set([...(vision.uncertain_fields||[]),...(lookup.value.uncertain_fields||[]),
+      ...(!highest?['retail price: no verified product listing']:[])])],
     lookup_reused:cacheHit};
   const input=observed.input+lookup.input,output=observed.output+lookup.output,queries=observed.queries+lookup.queries;
   // Conservative billed estimate: introductory Gemini 3.8 Flash rates plus all Search queries at post-free-tier price.

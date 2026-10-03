@@ -30,6 +30,7 @@ export function VideoScan({ manager }: { manager: boolean }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [savedSku, setSavedSku] = useState('');
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [prices, setPrices] = useState<Record<string, string>>({});
   const [retailEdits, setRetailEdits] = useState<Record<string, string>>({});
@@ -87,7 +88,7 @@ export function VideoScan({ manager }: { manager: boolean }) {
   }
 
   async function start() {
-    setError(''); setSuccess('');
+    setError(''); setSuccess(''); setSavedSku('');
     try {
       if (!preview.current) return;
       recording.current = await startVideoScan(preview.current, scan => { recording.current = null; setStarted(0); void uploaded(scan); },
@@ -121,9 +122,10 @@ export function VideoScan({ manager }: { manager: boolean }) {
           acquisition_cost_cents: cost, floor_cents: floor, ebay_item_specifics: specifics }, p_ask_cents: price });
       if (saveError) throw saveError;
       const sku = (data as { sku: string }).sku;
+      setSavedSku(sku);
       try { await post('video-scan-photos', job.id); }
       catch (photoError) { setError(`SKU ${sku} saved. Stills need retry: ${photoError instanceof Error ? photoError.message : photoError}`); }
-      setSuccess(`Received SKU ${sku}. Write it on the unit. Ready for your next scan.`);
+      setSuccess('Write this number on the unit. Ready for your next scan.');
       setJobs(previous => previous.map(row => row.id === job.id ? { ...row, status: 'saved', sku } : row));
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setSaving(null); }
@@ -138,7 +140,8 @@ export function VideoScan({ manager }: { manager: boolean }) {
         : <button type="button" className="btn-accent" onClick={() => recording.current?.stop()}>Finish scan</button>}
     </div>
     {started > 0 && <p className="text-quiet">Recording; stops automatically at 20 seconds.</p>}
-    {success && <p role="status">{success}</p>}{error && <p role="alert" className="text-floor-danger">{error}</p>}
+    {success && <div role="status" className="mt-3"><p>{success}</p>{savedSku && <strong className="text-title font-mono">SKU {savedSku}</strong>}</div>}
+    {error && <p role="alert" className="text-floor-danger">{error}</p>}
     {jobs.filter(job => job.status !== 'saved').map(job => {
       const draft = draftFor(job);
       return <details key={job.id} className="mt-4 border-t pt-3" open={job.status === 'ready'}>
