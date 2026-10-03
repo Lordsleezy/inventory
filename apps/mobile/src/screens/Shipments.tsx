@@ -50,6 +50,8 @@ export function ShipmentsScreen() {
         "id, sku, status, buyer_name, buyer_email, ship_line1, ship_line2, ship_city, ship_region, ship_postal, boxed_at, shipped_at, tracking_number, created_at",
       )
       .eq("status", "paid")
+      .eq("fulfillment", "ship")
+      .is("refund_requested_at", null)
       .order("created_at", { ascending: false })
       .limit(200);
     if (qErr) throw qErr;

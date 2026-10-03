@@ -8,6 +8,7 @@ export type SellErrorCode =
   | "not_sellable"
   | "tax_rate_required"
   | "override_reason_required"
+  | "held_online"
   | "offline"
   | "unknown";
 
@@ -25,6 +26,9 @@ export function mapSellError(err: { code?: string; message?: string } | null | u
   const pg = err?.code ?? "";
   if (pg === "23505" || /unit_not_sellable|duplicate key|double_sell/i.test(message)) {
     return new SellError("double_sell", "DOUBLE SALE — this SKU already has a live sale. Do not take money.");
+  }
+  if (/held_by_online_order/i.test(message)) {
+    return new SellError("held_online", "Someone is paying for this item online right now. Try again in a few minutes.");
   }
   if (/below_floor/i.test(message)) {
     return new SellError("below_floor", "That price is below floor. A manager PIN is required.");

@@ -16,6 +16,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
 
   const items: Item[] = [
     { to: "/inventory", label: "Inventory" },
+    { to: "/pickups", label: "Pickups" },
     { to: "/shipments", label: "Shipments" },
     { to: "/sales", label: "Sales" },
     ...(admin

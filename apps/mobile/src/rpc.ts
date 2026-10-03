@@ -16,6 +16,8 @@ export function friendlyRpc(err: unknown): string {
   const msg = rpcMessage(err);
   if (!msg || msg === "[object Object]") return "Something went wrong";
   if (/manager_approval_required/i.test(msg)) return "A manager PIN is required.";
+  if (/held_by_online_order/i.test(msg)) return "Someone is paying for this item online right now. Try again in a few minutes.";
+  if (/pickup_not_open/i.test(msg)) return "That pickup was already handed over or canceled.";
   if (/void_the_sale_first/i.test(msg)) return "This item has a sale. Void the sale first to delete it.";
   if (/sale_not_voidable/i.test(msg)) return "That sale cannot be voided.";
   if (/void_needs_reason/i.test(msg)) return "Enter a reason to void.";

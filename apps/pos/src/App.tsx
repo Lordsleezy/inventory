@@ -20,6 +20,7 @@ import { SettingsScreen } from "./screens/Settings";
 import { AccountScreen } from "./screens/Account";
 import { InventoryScreen } from "./screens/Inventory";
 import { UnitDetailScreen } from "./screens/UnitDetail";
+import { PickupsScreen } from "./screens/Pickups";
 import { ReceiveScreen } from "./screens/Receive";
 import { ReceiptDesignerScreen } from "./screens/ReceiptDesigner";
 import { PosProvider, usePos } from "./pos-context";
@@ -188,6 +189,7 @@ function Shell() {
           <Route path="/inventory/receive" element={<ReceiveScreen />} />
           <Route path="/inventory/:sku" element={<UnitDetailScreen />} />
           <Route path="/receipts" element={<ReceiptsScreen />} />
+          <Route path="/pickups" element={<PickupsScreen />} />
           <Route path="/customers" element={isAdmin ? <CustomersScreen /> : <Navigate to="/" replace />} />
           <Route path="/reports" element={isAdmin ? <ReportsScreen /> : <Navigate to="/" replace />} />
           <Route path="/employees" element={isAdmin ? <EmployeesScreen /> : <Navigate to="/" replace />} />
@@ -206,6 +208,7 @@ function Shell() {
         {isAdmin ? <Link to="/customers">Customers</Link> : null}
         {isAdmin ? <Link to="/reports">Reports</Link> : null}
         <Link to="/receipts">Receipts{pendingOutbox ? ` (${pendingOutbox})` : ""}</Link>
+        <Link to="/pickups">Pickups</Link>
         <Link to="/inventory">Inventory</Link>
         {!onRegister ? <Link to="/">Register</Link> : null}
         <Link to="/settings">Settings</Link>

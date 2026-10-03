@@ -5,7 +5,6 @@ import {
   formatCents,
   listedChannelsBySku,
   listedEbayItem,
-  listingWeightLb,
   loadUnit,
   parseListingSpecs,
   receiptHtml,
@@ -19,6 +18,7 @@ import { floorCloud } from "@floor/cloud";
 import { ebayItemViewUrl } from "@floor/channels";
 import { EbayDetails } from "../components/EbayDetails";
 import { Photos } from "../components/Photos";
+import { OnlineShipping } from "../components/OnlineShipping";
 import { DangerButton, MoneyField, Notice, SelectField, Spinner, TextField } from "../components/ui";
 import { openHtml } from "../files";
 import { useStore } from "../store";
@@ -83,9 +83,6 @@ export function UnitScreen() {
     await edit("listing_specs", JSON.stringify(specs));
   }
 
-  async function setShippable(next: boolean) {
-    await edit("shippable", next ? "true" : "false");
-  }
 
   async function setListOnline(next: boolean) {
     await edit("show_on_website", next ? "true" : "false");
@@ -260,20 +257,7 @@ export function UnitScreen() {
       <Photos sku={unit.sku} />
 
       <div className="border-b border-floor-line py-3">
-        <label className="flex items-center gap-2">
-          <input
-            type="checkbox"
-            checked={unit.shippable}
-            onChange={(e) => void setShippable(e.target.checked)}
-          />
-          <span className="text-body">Shippable</span>
-        </label>
-        <p className="mt-1 text-quiet text-floor-mute">
-          Turns on Buy online. Needs a weight of 30 lb or less.
-        </p>
-        {unit.shippable && listingWeightLb(unit.listingSpecs) == null ? (
-          <p className="mt-1 text-quiet text-floor-accent">Buy stays off until weight is filled in.</p>
-        ) : null}
+        <OnlineShipping sku={unit.sku} ensureOnline={ensureOnline} />
         <label className="mt-3 flex items-center gap-2">
           <input
             type="checkbox"

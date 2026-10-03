@@ -23,6 +23,7 @@ import { CreateStoreScreen } from "./screens/CreateStore";
 import { CheckoutScreen } from "./screens/Checkout";
 import { DelistScreen } from "./screens/Delist";
 import { ShipmentsScreen } from "./screens/Shipments";
+import { PickupsScreen } from "./screens/Pickups";
 import { IncidentsScreen } from "./screens/Incidents";
 import { ConnectionsScreen } from "./screens/Connections";
 import { ReaderProvider } from "./reader-host";
@@ -105,6 +106,7 @@ export function App() {
               <Route path="/receive" element={<ReceiveScreen />} />
               <Route path="/sales" element={<SalesScreen />} />
               <Route path="/shipments" element={<ShipmentsScreen />} />
+              <Route path="/pickups" element={<PickupsScreen />} />
               <Route
                 path="/reports"
                 element={
