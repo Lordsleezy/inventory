@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { matchAllowedValue, matchMeasureBucket, pickAspectValue, pickTypeValue, aspectsFromTaxonomy, fillAspects } from "./ebay-aspects.mjs";
+import { matchAllowedValue, matchMeasureBucket, pickAspectValue, pickTypeValue, aspectsFromTaxonomy, fillAspects, confidentPhrase, pickCategorySuggestion } from "./ebay-aspects.mjs";
 
 test("Type maps refrigerator to an allowed appliance type, not Air Filter", () => {
   const allowed = ["Air Filter", "Compact Refrigerator", "Refrigerator", "Wine Fridge"];
@@ -77,8 +77,8 @@ test("maps real inches onto eBay height/width buckets", () => {
     { brand: "LG", model: "LTCS20020V", category: "Refrigerator" },
     { width_in: "32", height_in: "70", depth_in: "33" },
   );
-  assert.equal(aspects["Item Height"][0], "More Than 50 in");
-  assert.equal(aspects["Item Width"][0], "More Than 25 in");
+  assert.equal(aspects["Item Height"][0], "70 in");
+  assert.equal(aspects["Item Width"][0], "32 in");
   assert.equal(aspects.Model[0], "LTCS20020V");
   assert.equal(aspects.Installation[0], "Freestanding");
   assert.equal(missing.length, 0);
@@ -100,7 +100,7 @@ test("maps quoted spec inches and mixed-case / cm width buckets", () => {
     { brand: "LG", model: "LTCS20020V", category: "Refrigerator" },
     { width_in: '32"' },
   );
-  assert.equal(aspects["Item Width"][0], "More than 25 in");
+  assert.equal(aspects["Item Width"][0], "32 in");
   assert.equal(missing.length, 0);
   const fromJob = aspectsFromTaxonomy(
     [
@@ -113,7 +113,7 @@ test("maps quoted spec inches and mixed-case / cm width buckets", () => {
     { brand: "LG", model: "LTCS20020V", category: "Refrigerator" },
     { listing_body: '35.75" W × 69.88" H × 32.38" D' },
   );
-  assert.equal(fromJob.aspects["Item Width"][0], "More than 25 in");
+  assert.equal(fromJob.aspects["Item Width"][0], "35.75 in");
   assert.equal(fromJob.missing.length, 0);
 });
 
@@ -138,7 +138,7 @@ test("writes exact inches when eBay width buckets skip the 30-inch range", () =>
     { width_in: '29.7"', height_in: '66.6"', weight_lb: 158.7 },
   );
   assert.equal(aspects["Item Width"][0], "29.7 in");
-  assert.equal(aspects["Item Height"][0], "More than 65 in");
+  assert.equal(aspects["Item Height"][0], "66.6 in");
   assert.equal(missing.length, 0);
 });
 
@@ -250,5 +250,28 @@ test("remembered built-in Type is ignored on a freestanding unit", () => {
     },
   );
   assert.equal(aspects.Type[0], "Freestanding Refrigerator");
+});
+
+test("pump category name fills Type only when one allowed phrase matches", () => {
+  const allowed = ["Deep Well Jet Pump", "Shallow Well Jet Pump", "Other"];
+  assert.equal(confidentPhrase(allowed, ["Shallow Well & Jet Pumps"]), "Shallow Well Jet Pump");
+  assert.equal(confidentPhrase(allowed, ["well pump"]), "");
+  const { aspects } = fillAspects(
+    [{ name: "Type", required: true, allowed, selectionOnly: true }],
+    { title: "Wayne shallow well jet pump", category: "Pumps", brand: "Wayne" },
+    {},
+    { categoryName: "Shallow Well & Jet Pumps" },
+  );
+  assert.equal(aspects.Type[0], "Shallow Well Jet Pump");
+  assert.equal(pickCategorySuggestion([
+    { categoryId: "42132", categoryName: "Pumps" },
+    { categoryId: "184078", categoryName: "Shallow Well & Jet Pumps" },
+  ], ["Everbilt Professional Convertible Jet Pump"]).categoryId, "184078");
+  const custom = fillAspects(
+    [{ name: "Brand", required: true, allowed: ["Acme", "Other"], selectionOnly: true }],
+    { brand: "Wayne" },
+    {},
+  );
+  assert.equal(custom.aspects.Brand[0], "Wayne");
 });
 

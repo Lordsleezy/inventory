@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 const functionsBase = (import.meta.env.VITE_FLOOR_FUNCTIONS_URL || 'https://inventoryobi.netlify.app').replace(/\/$/, '');
 
@@ -17,8 +17,11 @@ type Draft = Summary & {
   aspect_defs: Aspect[]; aspects: Record<string, string>;
   photos: { path: string; url: string }[];
   box: { length_in: number | null; width_in: number | null; height_in: number | null; weight_lb: number | null };
-  floor_condition: string; checklist: { ok: boolean; label: string }[];
+  floor_condition: string; floor_cents: number | null; dims_source: string | null;
+  quotes: { free: number; calculated: number } | null;
+  checklist: { ok: boolean; label: string }[]; locks: string[];
 };
+type Backfill = { status?: string; processed?: number; total?: number; searched?: number; cost_usd?: number; note?: string };
 type Settings = { feePct: number; perOrderCents: number; cutoffCents: number; ending: number; farZip: string };
 type Props = { accessToken: string; money: (n: number) => string };
 
@@ -41,6 +44,7 @@ export function EbayDraftsPage({ accessToken, money }: Props) {
   const [settings, setSettings] = useState<Settings>({ feePct: 13.25, perOrderCents: 40, cutoffCents: 1500, ending: 99, farZip: '10001' });
   const [draft, setDraft] = useState<Draft | null>(null);
   const [picked, setPicked] = useState<string[]>([]);
+  const [backfill, setBackfill] = useState<Backfill | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -51,9 +55,17 @@ export function EbayDraftsPage({ accessToken, money }: Props) {
     setConnected(Boolean(data.connected));
     setPolicies(data.policies);
     if (data.settings) setSettings(data.settings);
+    if (data.backfill) setBackfill(data.backfill);
   }, [accessToken]);
 
   useEffect(() => { void load().catch((e) => setError(e.message)); }, [load]);
+  useEffect(() => {
+    if (backfill?.status !== 'running') return undefined;
+    const timer = setInterval(() => {
+      void call(accessToken, { action: 'backfill_status' }).then((data) => setBackfill(data.backfill)).catch(() => undefined);
+    }, 8000);
+    return () => clearInterval(timer);
+  }, [accessToken, backfill?.status]);
 
   async function run(fn: () => Promise<void>) {
     setBusy(true); setError('');
@@ -85,6 +97,8 @@ export function EbayDraftsPage({ accessToken, money }: Props) {
       </div></header>
     {error && <div className="alert" role="alert">{error}<button onClick={() => setError('')}>Dismiss</button></div>}
     <div className="stats"><div className="stat"><span>Drafts</span><strong>{counts.total}</strong></div><div className="stat"><span>Ready to push</span><strong>{counts.ready}</strong></div><div className="stat"><span>Need box size</span><strong>{counts.needsBox}</strong></div><div className="stat"><span>Live</span><strong>{counts.live}</strong></div></div>
+    {backfill?.status === 'running' && <p className="notice">Backfilling specs: {backfill.processed || 0}/{backfill.total || 0}</p>}
+    {backfill?.status === 'paused' && backfill.note && <p className="hint">Spec backfill paused: {backfill.note}</p>}
 
     <section className="panel"><h2>Connection and price</h2>
       <p>{connected ? 'eBay account is connected.' : 'eBay is not connected yet.'} {policies && !policies.ok && policies.missing?.length ? `Policies still needed: ${policies.missing.join(', ')}.` : ''}</p>
@@ -117,15 +131,10 @@ export function EbayDraftsPage({ accessToken, money }: Props) {
         <label className="notes">Condition<select value={draft.condition_id || ''} onChange={(e) => void save({ condition_id: e.target.value })}><option value="">Choose…</option>{(draft.conditions || []).map((c) => <option key={c.conditionId} value={c.conditionId}>{c.name}</option>)}</select><small>Floor condition: {draft.floor_condition || '—'}</small></label>
         <label className="notes">Condition notes<textarea rows={3} value={draft.condition_notes || ''} onChange={(e) => setDraft({ ...draft, condition_notes: e.target.value })} onBlur={() => void save({ condition_notes: draft.condition_notes })} /></label>
         <h3>Item specifics</h3>
-        {(draft.aspect_defs || []).length === 0 ? <p className="hint">Pick a category to load eBay’s required and recommended specifics.</p> : (draft.aspect_defs || []).map((def) => <label className="notes" key={def.name}>{def.name}{def.required ? ' (required)' : ' (recommended)'}{def.allowed?.length ? <select value={draft.aspects?.[def.name] || ''} onChange={(e) => void save({ aspects: { [def.name]: e.target.value } })}><option value="">Choose…</option>{def.allowed.map((v) => <option key={v} value={v}>{v}</option>)}</select> : <input value={draft.aspects?.[def.name] || ''} onChange={(e) => setDraft({ ...draft, aspects: { ...draft.aspects, [def.name]: e.target.value } })} onBlur={() => void save({ aspects: { [def.name]: draft.aspects?.[def.name] || '' } })} />}</label>)}
+        {(draft.aspect_defs || []).length === 0 ? <p className="hint">Pick a category to load eBay’s required and recommended specifics.</p> : (draft.aspect_defs || []).map((def) => <AspectField key={def.name} def={def} value={draft.aspects?.[def.name] || ''} disabled={busy} onChange={(value) => setDraft({ ...draft, aspects: { ...draft.aspects, [def.name]: value } })} onCommit={(value) => void save({ aspects: { [def.name]: value } })} />)}
         <h3>Box and shipping</h3>
         <BoxForm draft={draft} busy={busy} onSave={(box) => void run(async () => { const data = await call(accessToken, { action: 'save_box', sku: draft.sku, box }); setDraft(data.draft); await load(); })} />
-        <p className="hint">{draft.shipping_mode === 'free' ? 'Free shipping' : draft.shipping_mode === 'calculated' ? 'Calculated shipping' : 'Shipping not set'}{draft.label_cents != null ? ` · estimated label ${money(draft.label_cents)} (${draft.label_source || 'estimate'})` : ''}</p>
-        <div className="actions">
-          <button className="secondary" disabled={busy} onClick={() => void save({ shipping_mode: 'free' })}>Force free shipping</button>
-          <button className="secondary" disabled={busy} onClick={() => void save({ shipping_mode: 'calculated' })}>Force calculated</button>
-        </div>
-        <label className="notes">eBay price ($)<input value={draft.price_cents != null ? (draft.price_cents / 100).toFixed(2) : ''} onChange={(e) => setDraft({ ...draft, price_cents: Math.round(Number(e.target.value || 0) * 100) })} onBlur={() => { if (draft.price_cents) void save({ price_cents: draft.price_cents }); }} /></label>
+        <ShippingMath draft={draft} settings={settings} money={money} busy={busy} onMode={(mode) => void save({ shipping_mode: mode })} onPrice={(cents) => void save({ price_cents: cents })} />
         <h3>Ready check</h3>
         <ul className="ebay-check">{(draft.checklist || []).map((item) => <li key={item.label} className={item.ok ? 'ok-text' : 'bad-text'}>{item.ok ? 'Ready' : 'Needed'} · {item.label}</li>)}</ul>
         <div className="actions">
@@ -162,6 +171,75 @@ function SettingsForm({ settings, busy, onSave }: { settings: Settings; busy: bo
     <label>Far-zone ZIP<input value={form.zip} onChange={(e) => setForm({ ...form, zip: e.target.value })} /></label>
     <button disabled={busy}>Save price settings</button>
   </form>;
+}
+
+function PriceField({ cents, disabled, onCommit }: { cents: number | null; disabled: boolean; onCommit: (cents: number) => void }) {
+  const [text, setText] = useState(cents != null ? (cents / 100).toFixed(2) : '');
+  useEffect(() => { setText(cents != null ? (cents / 100).toFixed(2) : ''); }, [cents]);
+  return <label className="notes">eBay price ($)<input value={text} disabled={disabled} onChange={(e) => setText(e.target.value)} onBlur={() => { const next = Math.round(Number(text || 0) * 100); if (next > 0) onCommit(next); }} /></label>;
+}
+
+function boxReady(box: Draft['box']) {
+  return [box.length_in, box.width_in, box.height_in, box.weight_lb].every((n) => Number(n) > 0);
+}
+
+function allowsCustom(def: Aspect) {
+  const name = def.name.toLowerCase();
+  if (name === 'brand') return true;
+  if (/height|width|length|depth|weight|flow rate|working pressure|\bpressure\b|\bvolume\b/.test(name)) return true;
+  return !def.selectionOnly;
+}
+
+function AspectField({ def, value, disabled, onChange, onCommit }: { def: Aspect; value: string; disabled: boolean; onChange: (value: string) => void; onCommit: (value: string) => void }) {
+  const custom = allowsCustom(def);
+  const options = def.allowed || [];
+  const long = options.length > 30 || def.name.toLowerCase() === 'brand';
+  const label = `${def.name}${def.required ? ' (required)' : ' (recommended)'}`;
+  if (!custom && !long) {
+    return <label className="notes">{label}<select value={options.includes(value) ? value : ''} disabled={disabled} onChange={(e) => onCommit(e.target.value)}><option value="">Choose…</option>{options.map((v) => <option key={v} value={v}>{v}</option>)}</select></label>;
+  }
+  if (!custom) {
+    return <label className="notes">{label}<SearchList options={options} value={value} disabled={disabled} allowCustom={false} onChange={onChange} onCommit={onCommit} /></label>;
+  }
+  if (long) {
+    return <label className="notes">{label}<SearchList options={options} value={value} disabled={disabled} allowCustom onChange={onChange} onCommit={onCommit} /></label>;
+  }
+  const listId = `aspect-${def.name.replace(/[^a-z0-9]+/gi, '-')}`;
+  return <label className="notes">{label}<input value={value} disabled={disabled} list={options.length ? listId : undefined} onChange={(e) => onChange(e.target.value)} onBlur={() => onCommit(value)} />{options.length > 0 && <datalist id={listId}>{options.map((v) => <option key={v} value={v} />)}</datalist>}</label>;
+}
+
+function SearchList({ options, value, disabled, allowCustom, onChange, onCommit }: { options: string[]; value: string; disabled: boolean; allowCustom: boolean; onChange: (value: string) => void; onCommit: (value: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const picked = useRef(false);
+  const query = value.trim().toLowerCase();
+  const matches = options.filter((option) => option.toLowerCase().includes(query)).slice(0, 12);
+  return <span className="ebay-combo"><input value={value} disabled={disabled} placeholder={allowCustom ? 'Type to search or enter your own' : 'Type to search'} onFocus={() => setOpen(true)} onChange={(e) => { onChange(e.target.value); setOpen(true); }} onBlur={() => { setOpen(false); if (picked.current) { picked.current = false; return; } const exact = options.find((option) => option.toLowerCase() === value.trim().toLowerCase()); if (exact) onCommit(exact); else if (allowCustom) onCommit(value.trim()); else onCommit(options.includes(value) ? value : ''); }} />{open && matches.length > 0 && <ul>{matches.map((option) => <li key={option}><button type="button" onMouseDown={(e) => { e.preventDefault(); picked.current = true; onChange(option); onCommit(option); setOpen(false); }}>{option}</button></li>)}</ul>}</span>;
+}
+
+function ShippingMath({ draft, settings, money, busy, onMode, onPrice }: { draft: Draft; settings: Settings; money: (n: number) => string; busy: boolean; onMode: (mode: 'free' | 'calculated') => void; onPrice: (cents: number) => void }) {
+  const ready = boxReady(draft.box);
+  const label = draft.label_cents;
+  const forced = (draft.locks || []).includes('shipping');
+  const source = draft.label_source === 'shippo' ? 'Shippo quote' : draft.label_source === 'fallback' ? 'fallback table' : 'estimate';
+  const over = label != null && label > settings.cutoffCents;
+  const why = !ready || label == null
+    ? 'Enter box size to get shipping and price.'
+    : `${money(label)} from the ${source} to ${settings.farZip}, ${over ? `over ${money(settings.cutoffCents)}, so calculated shipping` : `at or under ${money(settings.cutoffCents)}, so free shipping`}.`;
+  return <>
+    {draft.dims_source === 'estimated' && <p className="hint">Estimated, check before shipping.</p>}
+    <p className="hint">{forced && ready ? `You chose ${draft.shipping_mode === 'free' ? 'free' : 'calculated'} shipping. Suggested: ${why}` : why}</p>
+    {ready && label != null && draft.floor_cents != null && <ul className="ebay-check">
+      <li>Floor price {money(draft.floor_cents)}</li>
+      <li>Label {money(label)} ({source}){draft.shipping_mode === 'free' ? ', baked into the price' : ', buyer pays shipping'}</li>
+      <li>eBay fee {settings.feePct}% plus {money(settings.perOrderCents)} per order</li>
+      <li>eBay price {draft.price_cents != null ? money(draft.price_cents) : '—'}</li>
+    </ul>}
+    <div className="actions">
+      <button className="secondary" disabled={busy || !draft.quotes} onClick={() => onMode('free')}>Force free shipping{draft.quotes ? ` · ${money(draft.quotes.free)}` : ''}</button>
+      <button className="secondary" disabled={busy || !draft.quotes} onClick={() => onMode('calculated')}>Force calculated{draft.quotes ? ` · ${money(draft.quotes.calculated)}` : ''}</button>
+    </div>
+    <PriceField cents={draft.price_cents} disabled={busy} onCommit={onPrice} />
+  </>;
 }
 
 function BoxForm({ draft, busy, onSave }: { draft: Draft; busy: boolean; onSave: (box: Draft['box']) => void }) {

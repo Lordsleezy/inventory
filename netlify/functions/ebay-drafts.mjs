@@ -14,6 +14,7 @@ import {
   saveDraft,
   saveEbaySettings,
 } from "../lib/ebay-drafts.mjs";
+import { backfillStatus, startBackfill } from "../lib/ebay-backfill.mjs";
 
 async function handle(event) {
   if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: corsHeaders(), body: "" };
@@ -24,7 +25,9 @@ async function handle(event) {
     ctx = await portalAdminFromEvent(event, body.store_id);
     const { storeId } = ctx;
     const action = body.action || "list";
-    if (action === "list") return json(200, { ok: true, ...(await listDraftPage(storeId)) });
+    if (action === "list") return json(200, { ok: true, ...(await listDraftPage(storeId)), backfill: await backfillStatus(storeId) });
+    if (action === "backfill_status") return json(200, { ok: true, backfill: await backfillStatus(storeId) });
+    if (action === "start_backfill") return json(200, { ok: true, backfill: await startBackfill(storeId) });
     if (action === "prepare") return json(200, { ok: true, draft: await prepareDraft(storeId, String(body.sku || "")) });
     if (action === "save") return json(200, { ok: true, draft: await saveDraft(storeId, String(body.sku || ""), body.fields || {}) });
     if (action === "save_box") return json(200, { ok: true, draft: await saveBox(storeId, String(body.sku || ""), body.box || {}) });

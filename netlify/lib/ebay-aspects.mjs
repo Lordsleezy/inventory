@@ -332,7 +332,8 @@ function finishColorCandidates(finish) {
 function candidatesForAspect(name, unit, specs, extras = {}) {
   const lower = name.toLowerCase();
   const brand = String(unit.brand || "").trim();
-  const model = String(specs?.matched_model || unit.model || "").trim();
+  const rawModel = String(specs?.matched_model || unit.model || "").trim();
+  const model = /\d/.test(rawModel) && !/^\d{5,}$/.test(rawModel) ? rawModel : "";
   const appliance = String(unit.category || unit.title || "").trim();
   const layout = String(specs?.configuration || "").trim();
   const finish = String(specs?.finish || "").trim();
@@ -361,20 +362,87 @@ function candidatesForAspect(name, unit, specs, extras = {}) {
   return [];
 }
 
+export function aspectAllowsCustom(def) {
+  const lower = String(def?.name || "").toLowerCase();
+  if (lower === "brand") return true;
+  if (itemMeasureKind(lower)) return true;
+  if (/flow rate|working pressure|\bpressure\b|\bvolume\b/.test(lower)) return true;
+  return !def?.selectionOnly;
+}
+
+function formatMeasure(kind, amount) {
+  if (kind === "weight") return `${amount} lb`;
+  if (kind === "capacity") return `${amount} cu ft`;
+  return `${amount} in`;
+}
+
 function coerceValue(def, raw) {
   const allowed = def.allowed || [];
   if (!raw && raw !== 0) return "";
-  if (allowed.length && !def.catalog) {
-    if (/height|width|depth|length|capacity|weight/.test(String(def.name || "").toLowerCase())) {
-      return matchMeasureBucket(allowed, raw) || matchAllowedValue(allowed, [raw]);
-    }
-    return matchAllowedValue(allowed, [raw]);
+  const text = String(raw).trim();
+  if (!text) return "";
+  const kind = itemMeasureKind(String(def.name || "").toLowerCase());
+  if (kind && kind !== "capacity") {
+    const amount = parseMeasure(text);
+    if (amount != null) return formatMeasure(kind, amount);
   }
-  return String(raw).trim();
+  if (allowed.length && !def.catalog) {
+    const hit = matchAllowedValue(allowed, [text]);
+    if (hit) return hit;
+    if (aspectAllowsCustom(def)) return text;
+    return "";
+  }
+  return text;
+}
+
+const GENERIC_ASPECT = /^(other|others|unknown|unbranded|does not apply|not applicable|see description|na|n a)$/;
+
+function softenPhrase(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/&/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => (word.length > 4 && word.endsWith("s") && !word.endsWith("ss") ? word.slice(0, -1) : word))
+    .join(" ");
+}
+
+/** One allowed value, only when the text contains that phrase and not a rival. */
+export function pickCategorySuggestion(suggestions, texts) {
+  const blob = softenPhrase((texts || []).filter(Boolean).join(" "));
+  let best = null;
+  for (const row of suggestions || []) {
+    const phrase = softenPhrase(row?.categoryName);
+    const tokens = phrase.split(" ").filter((token) => token.length >= 3);
+    if (!tokens.length) continue;
+    const hit = tokens.filter((token) => blob.includes(token)).length;
+    if (!hit || (tokens.length >= 2 && hit < 2)) continue;
+    if (!best || hit > best.hit || (hit === best.hit && phrase.length > best.phrase.length)) best = { row, hit, phrase };
+  }
+  return best?.row || suggestions?.[0] || null;
+}
+
+export function confidentPhrase(allowed, texts) {
+  const blob = softenPhrase((texts || []).filter(Boolean).join(" \n "));
+  if (!blob) return "";
+  const hits = [];
+  for (const label of allowed || []) {
+    const phrase = softenPhrase(label);
+    if (!phrase || phrase.length < 6 || GENERIC_ASPECT.test(phrase)) continue;
+    if (blob.includes(phrase)) hits.push(label);
+  }
+  if (!hits.length) return "";
+  hits.sort((a, b) => softenPhrase(b).length - softenPhrase(a).length);
+  if (hits.length === 1) return hits[0];
+  const best = softenPhrase(hits[0]);
+  if (hits.slice(1).every((label) => best.includes(softenPhrase(label)))) return hits[0];
+  return "";
 }
 
 export function fillAspects(defs, unit, specs, extras = {}) {
-  const model = String(specs?.matched_model || unit.model || "").trim();
+  const rawModel = String(specs?.matched_model || unit.model || "").trim();
+  const model = /\d/.test(rawModel) && !/^\d{5,}$/.test(rawModel) ? rawModel : "";
   const overrides = specs?.ebay_aspects && typeof specs.ebay_aspects === "object" ? specs.ebay_aspects : {};
   const remembered = extras.remembered && typeof extras.remembered === "object" ? extras.remembered : {};
   const categoryDefaults = extras.categoryDefaults && typeof extras.categoryDefaults === "object" ? extras.categoryDefaults : {};
@@ -390,9 +458,11 @@ export function fillAspects(defs, unit, specs, extras = {}) {
     let value = "";
     let source = "";
     const override = coerceValue(def, overrides[name]);
+    const modelAspect = lower === "mpn" || lower === "model" || lower === "manufacturer part number";
+    const fakeModel = modelAspect && override && !(/\d/.test(override) && !/^\d{5,}$/.test(override));
     const kind = installKind(specs?.installation || categoryDefaults.Installation) ||
       (extras.standalone === false ? "" : "freestanding");
-    if (override && !(lower === "type" && typeConflictsInstall(override, kind))) {
+    if (override && !fakeModel && !(lower === "type" && typeConflictsInstall(override, kind))) {
       value = override;
       source = "set";
     } else if (lower === "type") {
@@ -401,19 +471,19 @@ export function fillAspects(defs, unit, specs, extras = {}) {
     } else if (lower === "model" || (def.catalog && /model|mpn/.test(lower))) {
       value = model;
       source = value ? "unit" : "";
+    } else if (lower === "brand") {
+      value = String(unit.brand || "").trim();
+      source = value ? "unit" : "";
     } else if (itemMeasureKind(lower)) {
       const measureKind = itemMeasureKind(lower);
       const measure =
         measureKind === "capacity"
           ? parseMeasure(specs?.capacity_cu_ft)
           : measureKind === "weight"
-            ? parseMeasure(specs?.weight_lb || specs?.weight_lbs || specs?.weight)
+            ? parseMeasure(specs?.weight_lb || specs?.weight_lbs || specs?.weight || specs?.product_weight_lb)
             : specInches(specs, measureKind);
-      value = (def.allowed || []).length ? matchMeasureBucket(def.allowed, measure) : "";
-      if (!value && measure != null && !def.selectionOnly) {
-        const unitLabel = measureKind === "capacity" ? "cu ft" : measureKind === "weight" ? "lb" : "in";
-        value = `${measure} ${unitLabel}`;
-      }
+      if (measure != null && measureKind !== "capacity") value = formatMeasure(measureKind, measure);
+      else if (measure != null) value = matchMeasureBucket(def.allowed, measure) || formatMeasure(measureKind, measure);
       source = value ? "unit" : "";
     } else if (refuseGuess(lower) || (lower === "energy star" && euEnergyScale(def.allowed))) {
       value = "";
@@ -423,6 +493,21 @@ export function fillAspects(defs, unit, specs, extras = {}) {
       source = value ? "unit" : "";
     }
     const skipGuessed = refuseGuess(lower) || (lower === "energy star" && euEnergyScale(def.allowed));
+    if (!value && def.allowed?.length && !itemMeasureKind(lower) && lower !== "brand" && lower !== "color" && lower !== "colour") {
+      const fromText = confidentPhrase(def.allowed, [
+        extras.categoryName,
+        unit?.ebay_category,
+        unit?.category,
+        unit?.title,
+        extras.title,
+        unit?.listing_body,
+        extras.description,
+      ]);
+      if (fromText) {
+        value = fromText;
+        source = "text";
+      }
+    }
     if (!value && !skipGuessed) {
       const rememberedValue = coerceValue(def, remembered[name]);
       if (rememberedValue && !(lower === "type" && typeConflictsInstall(rememberedValue, kind))) {

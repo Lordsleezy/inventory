@@ -1,6 +1,7 @@
 import { json, corsHeaders, serviceClient } from "../lib/server.mjs";
 import { pollAllStores, reconcileListedOffers, withdrawOpenEbayTasks } from "../lib/ebay.mjs";
 import { syncDrafts } from "../lib/ebay-drafts.mjs";
+import { resumeBackfillIfStale, startBackfill, backfillStatus } from "../lib/ebay-backfill.mjs";
 import { wrapHandler } from "../lib/floor-log.mjs";
 
 async function handle(event) {
@@ -19,6 +20,9 @@ async function handle(event) {
     for (const row of allStores ?? []) {
       try {
         drafted.push({ storeId: row.id, ...(await syncDrafts(row.id, { quoteLimit: 2 })) });
+        const backfill = await backfillStatus(row.id);
+        if (backfill.status === "idle") await startBackfill(row.id);
+        else await resumeBackfillIfStale(row.id);
       } catch (err) {
         drafted.push({ storeId: row.id, error: err instanceof Error ? err.message : String(err) });
       }

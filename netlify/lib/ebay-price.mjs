@@ -1,4 +1,5 @@
 /** eBay price, shipping mode, and payout-fee math. Pure: no network. */
+import { aspectAllowsCustom } from "./ebay-aspects.mjs";
 
 export function roundUpEnding(cents, ending = 99) {
   const amount = Math.max(0, Number(cents) || 0);
@@ -18,6 +19,21 @@ export function shippingModeForLabel(labelCents, cutoffCents) {
  * Free shipping: (floor + label) / (1 - fee) + per-order fee, then round up to the ending.
  * Calculated: floor / (1 - fee) + per-order fee, same rounding. Label is not in the price.
  */
+export function priceQuotes(floorCents, labelCents, settings) {
+  if (labelCents == null || !(Number(labelCents) >= 0) || !(Number(floorCents) > 0)) return null;
+  const common = {
+    floorCents,
+    labelCents,
+    feePct: settings.feePct,
+    perOrderCents: settings.perOrderCents,
+    ending: settings.ending,
+  };
+  return {
+    free: ebayPriceCents({ ...common, mode: "free" }),
+    calculated: ebayPriceCents({ ...common, mode: "calculated" }),
+  };
+}
+
 export function ebayPriceCents({ floorCents, labelCents = 0, mode, feePct, perOrderCents = 0, ending = 99 }) {
   const fee = Number(feePct) / 100;
   if (!(fee >= 0 && fee < 1)) throw new Error("eBay fee percent must be between 0 and 100.");
@@ -125,7 +141,7 @@ export function draftReadiness(draft) {
     for (const def of defs.filter((d) => d.required)) {
       const value = String(aspects[def.name] || "").trim();
       const allowed = Array.isArray(def.allowed) ? def.allowed : [];
-      const known = !def.selectionOnly || !allowed.length || allowed.includes(value);
+      const known = aspectAllowsCustom(def) || !allowed.length || allowed.includes(value);
       need(value && known, `Required: ${def.name}`);
     }
   }

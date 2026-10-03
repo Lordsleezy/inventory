@@ -3,11 +3,12 @@ import { ebayFetch, listSku, userToken, withdrawSku } from "./ebay.mjs";
 import { formatEbayError } from "./ebay-errors.mjs";
 import { publicPhotoUrl } from "./ebay-photos.mjs";
 import { composeChannelDescription, parseListingSpecs } from "./listing-copy.mjs";
-import { fillAspects } from "./ebay-aspects.mjs";
+import { fillAspects, pickCategorySuggestion } from "./ebay-aspects.mjs";
 import {
   fetchLiveAspects,
   fetchLiveConditions,
   resolveFloorCategory,
+  categoryName,
   suggestCategories,
 } from "./ebay-catalog.mjs";
 import { inventoryConditionEnum, mapFloorCondition } from "./ebay-conditions.mjs";
@@ -22,6 +23,7 @@ import {
   ebayPriceCents,
   fallbackLabelCents,
   farZoneAddress,
+  priceQuotes,
   shippingModeForLabel,
 } from "./ebay-price.mjs";
 import { getShippingServiceDetails } from "./ebay-trading.mjs";
@@ -310,7 +312,7 @@ export async function syncDrafts(storeId, { quoteLimit = 4 } = {}) {
 }
 
 function persistShape(row) {
-  const { floor_cents, box, ...rest } = row;
+  const { floor_cents, box, quotes, dims_source, ...rest } = row;
   return rest;
 }
 
@@ -370,6 +372,9 @@ function detail(row, unit) {
     photos: (row.photo_paths || []).map((path) => ({ path, url: publicPhotoUrl(path) })),
     box: boxOf(unit),
     floor_condition: unit?.condition || "",
+    floor_cents: row.floor_cents ?? unit?.ask_cents ?? null,
+    dims_source: unit?.dims_source || null,
+    quotes: row.quotes || null,
     checklist: row.checklist || [],
     locks: row.locks || [],
   };
@@ -450,7 +455,11 @@ async function refreshCategoryRules(row, unit) {
   if (!locked(row, "aspects")) {
     const specs = parseListingSpecs(unit?.listing_specs) || {};
     specs.ebay_aspects = { ...aspectMap(unit), ...(row.aspects || {}) };
-    const filled = fillAspects(defs, unit || {}, specs);
+    const filled = fillAspects(defs, unit || {}, specs, {
+      categoryName: row.category_name,
+      title: row.title,
+      description: row.description,
+    });
     const next = {};
     for (const [name, value] of Object.entries(filled.aspects || {})) {
       next[name] = Array.isArray(value) ? value[0] : String(value);
@@ -460,6 +469,27 @@ async function refreshCategoryRules(row, unit) {
   return row;
 }
 
+function mergeBlankAspects(row, unit) {
+  if (!row.aspect_defs?.length) return;
+  const specs = parseListingSpecs(unit?.listing_specs) || {};
+  if (specs.height_in == null && unit?.product_height_in) specs.height_in = unit.product_height_in;
+  if (specs.width_in == null && unit?.product_width_in) specs.width_in = unit.product_width_in;
+  if (specs.depth_in == null && unit?.product_depth_in) specs.depth_in = unit.product_depth_in;
+  if (specs.weight_lb == null && unit?.product_weight_lb) specs.weight_lb = unit.product_weight_lb;
+  specs.ebay_aspects = { ...aspectMap(unit), ...(row.aspects || {}) };
+  const filled = fillAspects(row.aspect_defs, unit || {}, specs, {
+    categoryName: row.category_name,
+    title: row.title,
+    description: row.description,
+  });
+  const next = { ...(row.aspects || {}) };
+  for (const [name, value] of Object.entries(filled.aspects || {})) {
+    const text = Array.isArray(value) ? value[0] : String(value || "");
+    if (!String(next[name] || "").trim() && text) next[name] = text;
+  }
+  row.aspects = next;
+}
+
 export async function prepareDraft(storeId, sku) {
   const sb = serviceClient();
   const settings = await loadEbaySettings(storeId);
@@ -467,19 +497,26 @@ export async function prepareDraft(storeId, sku) {
   const unit = await loadUnit(sb, storeId, sku);
   row.floor_cents = unit?.ask_cents || null;
   row.box = boxOf(unit);
-  if (!row.suggestions?.length) {
+  if (!locked(row, "category")) {
     try {
-      const query = [row.title, unit?.brand, unit?.model, unit?.ebay_category].filter(Boolean).join(" ");
-      row.suggestions = await suggestCategories(query);
-      if (!locked(row, "category") && !row.category_id && row.suggestions[0]) {
-        row.category_id = row.suggestions[0].categoryId;
-        row.category_name = row.suggestions[0].categoryName;
-      } else if (row.category_id && !row.category_name) {
-        row.category_name = row.suggestions.find((s) => s.categoryId === String(row.category_id))?.categoryName || row.category_name;
-      }
+      const query = [row.title, unit?.brand, unit?.title, unit?.ebay_category].filter(Boolean).join(" ");
+      const suggestions = await suggestCategories(query);
+      if (suggestions.length) row.suggestions = suggestions;
+      const picked = pickCategorySuggestion(row.suggestions, [row.title, unit?.title, unit?.category, unit?.ebay_category]);
+      if (picked && String(picked.categoryId) !== String(row.category_id || "")) {
+        row.category_id = String(picked.categoryId);
+        row.category_name = picked.categoryName;
+        row.aspect_defs = [];
+        row.conditions = [];
+        if (!locked(row, "condition")) row.condition_id = null;
+        if (!locked(row, "aspects")) row.aspects = { ...aspectMap(unit) };
+      } else if (picked) row.category_name = picked.categoryName;
     } catch (err) {
       row.ebay_error = err instanceof Error ? err.message : String(err);
     }
+  } else if (!row.suggestions?.length) {
+    try { row.suggestions = await suggestCategories([row.title, unit?.brand, unit?.title].filter(Boolean).join(" ")); }
+    catch (err) { row.ebay_error = err instanceof Error ? err.message : String(err); }
   }
   const needsRules = row.category_id && (
     !row.aspect_defs?.length
@@ -499,11 +536,34 @@ export async function prepareDraft(storeId, sku) {
     row.label_source = quote.source;
     row.label_key = boxKey(row.box);
   }
+  if (row.category_id) {
+    const known = (row.suggestions || []).find((s) => String(s.categoryId) === String(row.category_id))?.categoryName;
+    if (known) row.category_name = known;
+    else {
+      try {
+        const official = await categoryName(row.category_id);
+        if (official) row.category_name = official;
+      } catch {
+        /* Keep the stored name when taxonomy is unavailable. */
+      }
+    }
+  }
+  if (!locked(row, "aspects") && row.aspects) {
+    for (const key of Object.keys(row.aspects)) {
+      const lower = key.toLowerCase();
+      const value = String(row.aspects[key] || "");
+      if ((lower === "mpn" || lower === "model" || lower.includes("manufacturer part")) && !(/\d/.test(value) && !/^\d{5,}$/.test(value))) {
+        delete row.aspects[key];
+      }
+    }
+  }
+  if (row.aspect_defs?.length) mergeBlankAspects(row, unit);
   applyPrice(row, settings);
   withReadiness(row);
   const saved = persistShape(row);
   const { error } = await sb.from("ebay_drafts").upsert(saved, { onConflict: "store_id,sku" });
   if (error) throw new Error(error.message);
+  row.quotes = priceQuotes(row.floor_cents, row.label_cents, settings);
   return detail(row, unit);
 }
 
@@ -595,6 +655,28 @@ export async function saveBox(storeId, sku, box) {
   const saved = await sb.from("ebay_drafts").upsert(persistShape(row), { onConflict: "store_id,sku" });
   if (saved.error) throw new Error(saved.error.message);
   return prepareDraft(storeId, sku);
+}
+
+export async function repriceDraft(storeId, sku) {
+  const sb = serviceClient();
+  const settings = await loadEbaySettings(storeId);
+  const row = await loadDraft(sb, storeId, sku).catch(() => null);
+  if (!row) return null;
+  const unit = await loadUnit(sb, storeId, sku);
+  row.floor_cents = unit?.ask_cents || null;
+  row.box = boxOf(unit);
+  if (!locked(row, "description") && unit) row.description = autoDescription(unit);
+  if (boxKey(row.box) && (row.label_key !== boxKey(row.box) || row.label_cents == null)) {
+    const quote = await quoteLabel(sb, storeId, settings, row.box);
+    row.label_cents = quote.cents;
+    row.label_source = quote.source;
+    row.label_key = boxKey(row.box);
+  }
+  applyPrice(row, settings);
+  withReadiness(row);
+  const { error } = await sb.from("ebay_drafts").upsert(persistShape(row), { onConflict: "store_id,sku" });
+  if (error) throw new Error(error.message);
+  return row.sku;
 }
 
 function policyMode(policy) {
