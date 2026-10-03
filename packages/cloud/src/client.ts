@@ -60,7 +60,7 @@ export type AuthState =
   | { kind: "needs_store"; userId: string; email: string }
   | { kind: "ready"; session: StaffSession };
 
-export async function loadAuthState(): Promise<AuthState> {
+async function loadAuthStateOnce(): Promise<AuthState> {
   const sb = floorCloud();
   const { data: session, error: sessionError } = await sb.auth.getSession();
   if (sessionError) throw sessionError;
@@ -90,6 +90,22 @@ export async function loadAuthState(): Promise<AuthState> {
       notifyPush: data.notify_push,
     },
   };
+}
+
+export async function loadAuthState(): Promise<AuthState> {
+  // A failed PostgREST transaction occasionally reaches the phone as 25P02
+  // while the database is changing. Each request has its own transaction, so
+  // retrying the read can recover without forcing the owner out of the app.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try { return await loadAuthStateOnce(); }
+    catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
+      if (attempt === 2 || (code !== '25P02' && !/current transaction is aborted/i.test(message))) throw error;
+      await new Promise(resolve => setTimeout(resolve, 250 * (attempt + 1)));
+    }
+  }
+  throw new Error('Could not load Floor session');
 }
 
 export async function loadStaffSession(): Promise<StaffSession | null> {
