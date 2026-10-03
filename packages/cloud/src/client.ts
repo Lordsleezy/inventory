@@ -89,13 +89,9 @@ async function loadAuthStateOnce(): Promise<AuthState> {
   if (error) throw error;
   if (!data?.store_id) {
     const email = session.session.user.email ?? "";
-    // Clock-number / employee accounts never create a store. A missing staff
-    // row usually means deactivated or wrong login — send them to Sign in.
-    if (
-      /@(employees|staff)\.floor\.local$/i.test(email) ||
-      email.startsWith("android.probe@")
-    ) {
-      await sb.auth.signOut();
+    // Clock-number accounts never create a store. Do not signOut() here — that
+    // re-enters onAuthStateChange and made the phone flap login/logout.
+    if (/@(employees|staff)\.floor\.local$/i.test(email) || email.startsWith("android.probe@")) {
       return { kind: "signed_out" };
     }
     return {

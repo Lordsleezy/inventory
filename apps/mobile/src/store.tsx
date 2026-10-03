@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Capacitor } from "@capacitor/core";
 import { initDb, loadSettings, type Db, type Settings } from "@floor/store";
 import {
@@ -179,32 +179,41 @@ export function StoreProvider({ session, children }: { session: StaffSession; ch
     if (!status.supabase.ok) throw new Error(status.supabase.detail);
   }, [refreshConnectivity]);
 
+  const hydrateInflight = useRef<Promise<void> | null>(null);
   const hydrate = useCallback(async () => {
     if (!db) return;
-    const status = await refreshConnectivity();
-    if (!status.connected) return;
-    try {
-      const cloudSettings = await settingsFromCloud(session);
-      await db.run("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", [
-        "storeName",
-        JSON.stringify(cloudSettings.storeName),
-      ]);
-      setSettings((prev) => ({ ...(prev as Settings), ...cloudSettings }));
-      setCardPayments(cloudSettings.cardPayments);
-      const counts = await Promise.race([
-        hydrateCache(db, session),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error("Cache refresh timed out. Check your connection and try again.")), 20_000),
-        ),
-      ]);
-      setDelistCount(counts.delist);
-      setIncidentCount(counts.incidents);
-      setCacheEpoch((n) => n + 1);
-      if (!status.supabase.ok) setCloudError(status.supabase.detail);
-      else setCloudError("");
-    } catch (err) {
-      setCloudError(authErrorMessage(err));
-    }
+    // Single-flight: overlapping hydrates were wiping the SQLite replica mid-read
+    // (empty inventory / price flicker) because applyCachePayload clears then fills.
+    if (hydrateInflight.current) return hydrateInflight.current;
+    hydrateInflight.current = (async () => {
+      const status = await refreshConnectivity();
+      if (!status.connected) return;
+      try {
+        const cloudSettings = await settingsFromCloud(session);
+        await db.run("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", [
+          "storeName",
+          JSON.stringify(cloudSettings.storeName),
+        ]);
+        setSettings((prev) => ({ ...(prev as Settings), ...cloudSettings }));
+        setCardPayments(cloudSettings.cardPayments);
+        const counts = await Promise.race([
+          hydrateCache(db, session),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("Cache refresh timed out. Check your connection and try again.")), 20_000),
+          ),
+        ]);
+        setDelistCount(counts.delist);
+        setIncidentCount(counts.incidents);
+        setCacheEpoch((n) => n + 1);
+        if (!status.supabase.ok) setCloudError(status.supabase.detail);
+        else setCloudError("");
+      } catch (err) {
+        setCloudError(authErrorMessage(err));
+      }
+    })().finally(() => {
+      hydrateInflight.current = null;
+    });
+    return hydrateInflight.current;
   }, [db, session, refreshConnectivity]);
 
   useEffect(() => {

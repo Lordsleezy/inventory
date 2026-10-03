@@ -2,7 +2,7 @@ import { useState } from "react";
 import { authErrorMessage, floorCloud, staffSignInAttempts } from "@floor/cloud";
 import { Label, Notice } from "../components/ui";
 
-export function LoginScreen() {
+export function LoginScreen({ onReady }: { onReady?: () => void }) {
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -17,7 +17,10 @@ export function LoginScreen() {
       let last: unknown = new Error("Could not sign in.");
       for (const attempt of attempts) {
         const { error: authError } = await floorCloud().auth.signInWithPassword(attempt);
-        if (!authError) return;
+        if (!authError) {
+          onReady?.();
+          return;
+        }
         last = authError;
       }
       throw last;

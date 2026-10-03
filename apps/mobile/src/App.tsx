@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import {
   authErrorMessage,
@@ -39,48 +39,71 @@ function AdminOnly({ children }: { children: React.ReactNode }) {
 export function App() {
   const [auth, setAuth] = useState<AuthState | undefined>(undefined);
   const [bootError, setBootError] = useState("");
+  const authRef = useRef<AuthState | undefined>(undefined);
+  authRef.current = auth;
+  const refreshGen = useRef(0);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (opts?: { allowSignedOut?: boolean }) => {
+    const gen = ++refreshGen.current;
     try {
       const next = await loadAuthState();
-      setAuth(next);
+      if (gen !== refreshGen.current) return;
+      setAuth((current) => {
+        // Only an explicit SIGNED_OUT event may drop a ready session. Async
+        // Preferences + INITIAL_SESSION(null) used to bounce the phone to login
+        // and remount StoreProvider (empty inventory / price flicker).
+        if (
+          next.kind === "signed_out" &&
+          current?.kind === "ready" &&
+          !opts?.allowSignedOut
+        ) {
+          return current;
+        }
+        return next;
+      });
       setBootError("");
     } catch (err) {
+      if (gen !== refreshGen.current) return;
       setBootError(authErrorMessage(err));
-      setAuth({ kind: "signed_out" });
+      setAuth((current) => current ?? { kind: "signed_out" });
     }
   }, []);
 
   useEffect(() => {
     let live = true;
     let unsub = () => {};
-    let refreshTimer: number | undefined;
-    // Only the first paint: if auth is still unknown after 12s, offer login.
-    // Never keep a stale "ready" session when the JWT is gone (that caused
-    // Receive to show Auth session missing / not_staff while still in the app).
     const timer = window.setTimeout(() => {
       setAuth((current) => {
         if (current !== undefined) return current;
         setBootError("Floor is taking too long to open. Check Wi‑Fi and try again.");
-        return { kind: "signed_out" };
+        // Stay on the splash with retry — do not force login while auth is still unknown.
+        return current;
       });
     }, 12_000);
     void (async () => {
-      await refresh();
+      await refresh({ allowSignedOut: true });
       if (!live) return;
       try {
-        const { data } = floorCloud().auth.onAuthStateChange((_event, session) => {
-          // Debounce — SIGNED_IN + INITIAL_SESSION used to stack staff reads
-          // and make the phone wait on Supabase for tens of seconds.
-          window.clearTimeout(refreshTimer);
-          refreshTimer = window.setTimeout(() => {
-            if (!session) {
-              setAuth({ kind: "signed_out" });
-              setBootError("");
-              return;
-            }
-            void refresh();
-          }, 150);
+        // Capacitor Preferences storage is async. Supabase often emits
+        // INITIAL_SESSION with session=null before the JWT is read — treating
+        // that as signed_out is what logged the store phone in and out.
+        const { data } = floorCloud().auth.onAuthStateChange((event) => {
+          if (event === "SIGNED_OUT") {
+            setAuth({ kind: "signed_out" });
+            setBootError("");
+            return;
+          }
+          if (
+            event === "INITIAL_SESSION" ||
+            event === "SIGNED_IN" ||
+            event === "TOKEN_REFRESHED" ||
+            event === "USER_UPDATED"
+          ) {
+            // INITIAL_SESSION must not be allowed to downgrade ready → signed_out.
+            void refresh({
+              allowSignedOut: event === "SIGNED_IN" || authRef.current?.kind !== "ready",
+            });
+          }
         });
         unsub = () => data.subscription.unsubscribe();
       } catch (err) {
@@ -90,7 +113,6 @@ export function App() {
     return () => {
       live = false;
       window.clearTimeout(timer);
-      window.clearTimeout(refreshTimer);
       unsub();
     };
   }, [refresh]);
@@ -101,7 +123,7 @@ export function App() {
         <p>Floor</p>
         <Notice tone="error">{bootError}</Notice>
         {bootError ? (
-          <button type="button" className="btn-accent mt-4" onClick={() => void refresh()}>
+          <button type="button" className="btn-accent mt-4" onClick={() => void refresh({ allowSignedOut: true })}>
             Try again
           </button>
         ) : null}
@@ -112,7 +134,7 @@ export function App() {
   if (auth.kind === "signed_out") {
     return (
       <Routes>
-        <Route path="/login" element={<LoginScreen />} />
+        <Route path="/login" element={<LoginScreen onReady={() => void refresh({ allowSignedOut: true })} />} />
         <Route path="/signup" element={<SignupScreen />} />
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
@@ -120,7 +142,7 @@ export function App() {
   }
 
   if (auth.kind === "needs_store") {
-    return <CreateStoreScreen email={auth.email} onReady={() => void refresh()} />;
+    return <CreateStoreScreen email={auth.email} onReady={() => void refresh({ allowSignedOut: true })} />;
   }
 
   return (
