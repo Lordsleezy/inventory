@@ -4,10 +4,13 @@
   "license": "UNLICENSED",
   "scripts": {
     "cap:www": "npm run build -w @floor/mobile",
-    "cap:sync": "npm run cap:www && npx cap sync ios"
+    "cap:sync": "npm run cap:www && npx cap sync ios",
+    "cap:sync:ios": "npm run cap:www && npx cap sync ios",
+    "cap:sync:android": "npm run cap:www && npx cap sync android"
   },
   "dependencies": {
     "@capacitor-community/sqlite": "^8.1.1",
+    "@capacitor/android": "^8.5.2",
     "@capacitor/app": "^8.0.1",
     "@capacitor/browser": "^8.0.1",
     "@capacitor/camera": "^8.2.4",
@@ -18,6 +21,7 @@
     "@capacitor/network": "^8.0.1",
     "@capacitor/preferences": "^8.0.1",
     "@capacitor/share": "^8.0.1",
+    "@capacitor/status-bar": "^8.0.4",
     "@floor/square-plugin": "*"
   }
 }

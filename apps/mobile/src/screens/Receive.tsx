@@ -1,11 +1,14 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { Capacitor } from "@capacitor/core";
 import { parseMoneyToCents } from "@floor/store";
 import { floorCloud } from "@floor/cloud";
 import { useStore } from "../store";
 import { Label, Notice } from "../components/ui";
 import { friendlyRpc } from "../rpc";
 import { VideoScan } from "./VideoScan";
+
+const aiScanOnThisDevice = Capacitor.getPlatform() !== "android";
 
 /**
  * Receive one physical unit.
@@ -150,9 +153,9 @@ export function ReceiveScreen() {
         One record per physical thing. Five of the same item means five units.
       </p>
 
-      <VideoScan />
-      <details className="card p-4 mt-4">
-        <summary className="font-semibold cursor-pointer">Manual Receive</summary>
+      {aiScanOnThisDevice ? <VideoScan /> : null}
+      <details className="card p-4 mt-4" open={!aiScanOnThisDevice}>
+        <summary className="font-semibold cursor-pointer">{aiScanOnThisDevice ? "Manual Receive" : "Receive"}</summary>
 
       <label className="block py-3">
         <Label>SKU</Label>

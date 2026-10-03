@@ -42,11 +42,18 @@ export function App() {
 
   const refresh = useCallback(async () => {
     try {
-      const next = await loadAuthState();
+      const next = await Promise.race([
+        loadAuthState(),
+        new Promise<never>((_, reject) =>
+          window.setTimeout(() => reject(new Error("Floor is taking too long to open. Check Wi‑Fi and try again.")), 12_000),
+        ),
+      ]);
       setAuth(next);
       setBootError("");
     } catch (err) {
       setBootError(authErrorMessage(err));
+      // Leave a blank login reachable when the session probe stalls.
+      setAuth((current) => current ?? { kind: "signed_out" });
     }
   }, []);
 
