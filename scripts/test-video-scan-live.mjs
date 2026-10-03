@@ -35,6 +35,9 @@ try {
   check(await client.storage.from('video-scan-staging').upload(stillPath, still,
     { contentType: 'image/jpeg', upsert: true }), 'replace early still with sharper final still');
   check(await client.rpc('video_scan_create', { p_id: scanId, p_video_path: videoPath, p_still_paths: [stillPath] }), 'create job');
+  if (process.env.SCAN_TEST_FAILED_RETRY === '1')
+    check(await admin.from('video_scan_jobs').update({ status: 'failed', error: 'simulated first identification failure',
+      reserved_usd: 0 }).eq('id', scanId), 'simulate failed first identification');
   await post('video-scan-start');
   const videoUpload = client.storage.from('video-scan-staging').upload(videoPath, video, { contentType: 'video/mp4' });
   let job;
