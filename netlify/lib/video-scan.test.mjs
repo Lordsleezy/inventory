@@ -20,3 +20,11 @@ test('rejects non-product links and keeps exact listings ahead of variants', () 
   assert.equal(fields.retail_source_name,'Best Buy');
   assert.equal(productKey({brand:'Ninja',model:'BL610'}),productKey({brand:'ninja',model:'bl610'}));
 });
+test('a 24 oz listing cannot become the MSRP for a 12 oz can', () => {
+  const fields=retailFields([{store:'Wine shop',price_cents:399,pack_size:1,
+    product_name:'Truly Unruly Tropical Twist 24 oz can',
+    url:'https://shop.example.com/product/truly-24-oz'}],
+  {title:'Truly Unruly Tropical Twist 12 fl oz Can'});
+  assert.equal(fields.retail_prices[0].approximate,true);
+  assert.equal(fields.msrp_cents,null);
+});

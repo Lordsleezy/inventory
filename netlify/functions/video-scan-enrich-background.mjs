@@ -1,6 +1,11 @@
 import { serviceClient } from '../lib/server.mjs';
 import { enrichVideo, tokenCost } from '../lib/video-scan.mjs';
 
+function measure(value,max=10000) {
+  const n=Number(value);
+  return Number.isFinite(n)&&n>0&&n<max?Math.round(n*100)/100:null;
+}
+
 export async function handler(event) {
   const id=JSON.parse(event.body||'{}').id;
   const token=(event.headers.authorization||event.headers.Authorization||'').replace(/^Bearer\s+/i,'');
@@ -23,11 +28,18 @@ export async function handler(event) {
     const latest=await sb.from('video_scan_jobs').select('result,input_tokens,output_tokens').eq('id',id).single();
     if(latest.error)throw latest.error;
     const result={...latest.data.result,...detail.result,details_ready:true,details_at:new Date().toISOString()};
+    const dimensions=Object.fromEntries([
+      'product_height_in','product_width_in','product_depth_in','product_weight_lb',
+      'package_length_in','package_width_in','package_height_in','package_weight_lb'
+    ].map(key=>[key,measure(detail.result[key])]));
+    const hasDimensions=Object.values(dimensions).some(value=>value!==null);
     const unit=await sb.from('units').update({category:detail.result.category||null,
       condition:detail.result.condition||null,defect_notes:detail.result.condition_notes||null,
       ai_description:detail.result.description||null,upc:detail.result.upc||null,
       mfr_serial:detail.result.mfr_serial||null,ebay_title:detail.result.ebay_title||null,
-      ebay_category:detail.result.ebay_category||null,ebay_item_specifics:detail.result.ebay_item_specifics||{}})
+      ebay_category:detail.result.ebay_category||null,ebay_item_specifics:detail.result.ebay_item_specifics||{},
+      ...dimensions,dims_source:hasDimensions&&['verified','estimated'].includes(detail.result.dims_source)
+        ? detail.result.dims_source : null})
       .eq('store_id',job.store_id).eq('sku',job.sku);
     if(unit.error)throw unit.error;
     const input=latest.data.input_tokens+detail.input,output=latest.data.output_tokens+detail.output;

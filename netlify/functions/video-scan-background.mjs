@@ -1,5 +1,5 @@
 import { serviceClient } from '../lib/server.mjs';
-import { identifyFrames, lookupRetail, retailFields, tokenCost } from '../lib/video-scan.mjs';
+import { identifyFramesCached, lookupRetail, retailFields, tokenCost } from '../lib/video-scan.mjs';
 
 export async function handler(event) {
   const id=JSON.parse(event.body||'{}').id;
@@ -20,7 +20,7 @@ export async function handler(event) {
       if(downloaded.error)throw downloaded.error;
       frames.push(Buffer.from(await downloaded.data.arrayBuffer()));
     }
-    const identified=await identifyFrames(frames);
+    const identified=await identifyFramesCached(sb,job,frames);
     const identity={...identified.result,identified_at:new Date().toISOString()};
     const ready=await sb.from('video_scan_jobs').update({status:'ready',result:identity,
       model_name:process.env.GEMINI_VIDEO_MODEL||'gemini-3.8-flash',
@@ -31,7 +31,7 @@ export async function handler(event) {
     // The popup is already available. Search and price may finish after the user starts typing.
     try {
       const retail=await lookupRetail(sb,job,identity);
-      const fields=retailFields(retail.prices);
+      const fields=retailFields(retail.prices,identity);
       const latest=await sb.from('video_scan_jobs').select('result,status,sku,input_tokens,output_tokens,search_queries').eq('id',id).single();
       if(latest.error)throw latest.error;
       const merged={...latest.data.result,...fields,retail_ready:true,retail_reused:retail.reused,

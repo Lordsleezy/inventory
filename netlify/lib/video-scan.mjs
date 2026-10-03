@@ -1,10 +1,14 @@
 import { createHash } from 'node:crypto';
+import sharp from 'sharp';
 import { requireEnv } from './server.mjs';
 
 const model = () => process.env.GEMINI_VIDEO_MODEL || 'gemini-3.8-flash';
 const api = 'https://generativelanguage.googleapis.com/v1beta/models/';
 const identitySchema = {type:'object',properties:{title:{type:'string'},brand:{type:'string'},model:{type:'string'},color:{type:'string'},confidence:{type:'number'},options:{type:'array',items:{type:'object',properties:{label:{type:'string'},title:{type:'string'},brand:{type:'string'},model:{type:'string'},color:{type:'string'}},required:['label','title','brand','model','color']}}},required:['title','brand','model','color','confidence','options']};
-const detailSchema = {type:'object',properties:{category:{type:'string'},condition:{type:'string'},condition_notes:{type:'string'},description:{type:'string'},key_features:{type:'array',items:{type:'string'}},upc:{type:'string'},mfr_serial:{type:'string'},ebay_title:{type:'string'},ebay_category:{type:'string'},ebay_item_specifics:{type:'object',additionalProperties:{type:'string'}}},required:['category','condition','condition_notes','description','key_features','upc','mfr_serial','ebay_title','ebay_category','ebay_item_specifics']};
+const detailSchema = {type:'object',properties:{category:{type:'string'},condition:{type:'string'},condition_notes:{type:'string'},description:{type:'string'},key_features:{type:'array',items:{type:'string'}},upc:{type:'string'},mfr_serial:{type:'string'},ebay_title:{type:'string'},ebay_category:{type:'string'},ebay_item_specifics:{type:'object',additionalProperties:{type:'string'}},
+  product_height_in:{type:'number'},product_width_in:{type:'number'},product_depth_in:{type:'number'},product_weight_lb:{type:'number'},
+  package_length_in:{type:'number'},package_width_in:{type:'number'},package_height_in:{type:'number'},package_weight_lb:{type:'number'},
+  dims_source:{type:'string',enum:['verified','estimated']}},required:['category','condition','condition_notes','description','key_features','upc','mfr_serial','ebay_title','ebay_category','ebay_item_specifics']};
 
 async function gemini(parts,{schema,search=false,maxOutputTokens=500}={}) {
   const controller=new AbortController();
@@ -41,17 +45,55 @@ export async function identifyFrames(stills) {
   const found=await gemini(parts,{schema:identitySchema,maxOutputTokens:700});
   return {...found,result:{...found.value,options:found.value.options||[]}};
 }
+async function fingerprint(bytes) {
+  const pixels=await sharp(bytes).resize(9,8,{fit:'fill'}).grayscale().raw().toBuffer();
+  let hash=0n;
+  for(let y=0;y<8;y++)for(let x=0;x<8;x++)
+    hash=(hash<<1n)|(pixels[y*9+x]>pixels[y*9+x+1]?1n:0n);
+  return hash.toString(16).padStart(16,'0');
+}
+function distance(a,b) {
+  let bits=BigInt(`0x${a}`)^BigInt(`0x${b}`),count=0;
+  while(bits){bits&=bits-1n;count++}
+  return count;
+}
+export async function identifyFramesCached(sb,job,stills) {
+  const fingerprints=await Promise.all(stills.map(fingerprint));
+  const recent=await sb.from('video_scan_visual_cache').select('fingerprints,identity,created_at')
+    .eq('store_id',job.store_id).order('created_at',{ascending:false}).limit(250);
+  if(recent.error)throw recent.error;
+  const match=(recent.data||[]).find(row=>row.fingerprints.length===fingerprints.length
+    &&row.fingerprints.every((hash,index)=>distance(hash,fingerprints[index])<=3)
+    &&Date.now()-Date.parse(row.created_at)<30*86400_000);
+  if(match)return {result:{...match.identity,visual_reused:true},input:0,output:0,queries:0};
+  const found=await identifyFrames(stills);
+  if(Number(found.result.confidence)>=0.85&&!found.result.options?.length){
+    const fingerprintKey=createHash('sha256').update(fingerprints.join('|')).digest('hex');
+    const stored=await sb.from('video_scan_visual_cache').upsert({store_id:job.store_id,
+      fingerprint_key:fingerprintKey,fingerprints,identity:found.result,created_at:new Date().toISOString()});
+    if(stored.error)throw stored.error;
+  }
+  return found;
+}
 function parseJson(text) {
   const start=text.indexOf('{'),end=text.lastIndexOf('}');
   if(start<0||end<start)throw new Error('Search did not return price data');
   return JSON.parse(text.slice(start,end+1));
 }
-export function cleanPrices(prices) {
+function ounces(text) {
+  const match=String(text||'').replace(/[-_]/g,' ').match(/\b(\d+(?:\.\d+)?)\s*(?:fl\s*)?oz\b/i);
+  return match?Number(match[1]):null;
+}
+export function cleanPrices(prices,identity={}) {
+  const itemSize=ounces(identity.title);
   return (Array.isArray(prices)?prices:[]).filter(p=>Number.isInteger(p.price_cents)&&p.price_cents>0&&p.price_cents<10_000_000&&/^https:\/\//i.test(p.url||'')&&(()=>{
     try {const u=new URL(p.url);return !/^\/(support|help|search)(\/|$)/i.test(u.pathname)&&!/\.\.\./.test(u.href)}catch{return false}
-  })()).map(p=>({store:String(p.store||'Retailer').slice(0,80),price_cents:p.price_cents,
+  })()).map(p=>{const listedSize=ounces(p.product_name)||ounces(p.url);
+    const sizeMismatch=Boolean(itemSize&&listedSize&&Math.abs(itemSize-listedSize)>0.1);
+    return {store:String(p.store||'Retailer').slice(0,80),price_cents:p.price_cents,
     url:String(p.url).slice(0,1500),pack_size:Math.max(1,Math.min(1000,Number(p.pack_size)||1)),
-    approximate:Boolean(p.approximate),product_name:String(p.product_name||'').slice(0,160)}))
+    approximate:Boolean(p.approximate)||sizeMismatch||(/variety/i.test(p.product_name||'')&&!/variety/i.test(identity.title||'')),
+    size_mismatch:sizeMismatch,product_name:String(p.product_name||'').slice(0,160)}})
     .sort((a,b)=>Number(a.approximate)-Number(b.approximate)||b.price_cents/a.pack_size-a.price_cents/b.pack_size).slice(0,10);
 }
 async function searchOnce(identity,closer=false) {
@@ -61,34 +103,35 @@ async function searchOnce(identity,closer=false) {
     identity.model&&!title.toLowerCase().includes(String(identity.model).toLowerCase())?identity.model:'',
     identity.color&&!title.toLowerCase().includes(String(identity.color).toLowerCase())?identity.color:'']
     .filter(Boolean).join(' ').replace(/\s+/g,' ').slice(0,180);
-  const prompt=`Use ONE Google Search query for current US retail prices of "${query}". Return compact JSON ONLY: {"prices":[{"store":"...","price_cents":2199,"url":"https://direct-product-page","pack_size":12,"approximate":false,"product_name":"..."}]}. Include single items and multipacks. If the same item is only sold in a pack, give the pack price and count. ${closer?'Find a clearly labeled close variant if exact size or pack is unavailable.':'An identical product in a different pack or size is allowed, marked approximate=true. Do not reject a valid pack because the scanned item is one unit.'} Use product-page URLs, never invent a price or URL. At most one search query.`;
+  const prompt=`You MUST invoke the Google Search tool now; do not answer from memory. Use ONE search query for today's US retail prices of "${query}". If the tool does not run, return {"prices":[]}. Return compact JSON ONLY: {"prices":[{"store":"...","price_cents":2199,"url":"https://direct-product-page","pack_size":12,"approximate":false,"product_name":"..."}]}. Include single items and multipacks. If the same item is only sold in a pack, give the pack price and count. ${closer?'Find a clearly labeled close variant if exact size or pack is unavailable.':'An identical product in a different pack or size is allowed, marked approximate=true. Do not reject a valid pack because the scanned item is one unit.'} Use direct product-page URLs from search results, never invent a price or URL. At most one search query.`;
   const result=await gemini([{text:prompt}],{search:true,maxOutputTokens:1200});
   let prices=[];
-  try {prices=cleanPrices(parseJson(result.value).prices)} catch {/* A grounded response may be prose; the retry can recover. */}
+  if(result.queries)try {prices=cleanPrices(parseJson(result.value).prices,identity)} catch {/* A grounded response may be prose; the retry can recover. */}
   return {...result,prices};
 }
 export async function lookupRetail(sb,job,identity) {
   const key=productKey(identity);
   if(key){const cached=await sb.from('video_scan_product_cache').select('lookup,created_at').eq('store_id',job.store_id).eq('product_key',key).maybeSingle();
     if(cached.error)throw cached.error;
-    if(cached.data&&Date.now()-Date.parse(cached.data.created_at)<30*86400_000){
-      const prices=cleanPrices(cached.data.lookup.retail_prices);
+    if(cached.data&&Date.now()-Date.parse(cached.data.created_at)<
+      (cached.data.lookup.retail_prices?.length?30:1)*86400_000){
+      const prices=cleanPrices(cached.data.lookup.retail_prices,identity);
       return {prices,input:0,output:0,queries:0,reused:true,cachedDetails:cached.data.lookup};
     }}
   const first=await searchOnce(identity);
   let prices=first.prices,input=first.input,output=first.output,queries=first.queries;
   if(!prices.length){const second=await searchOnce(identity,true);prices=second.prices;input+=second.input;output+=second.output;queries+=second.queries}
-  if(key&&prices.length){const saved=await sb.from('video_scan_product_cache').upsert({store_id:job.store_id,product_key:key,
+  if(key){const saved=await sb.from('video_scan_product_cache').upsert({store_id:job.store_id,product_key:key,
     lookup:{retail_prices:prices},created_at:new Date().toISOString()});if(saved.error)throw saved.error}
   return {prices,input,output,queries,reused:false};
 }
-export function retailFields(prices) {
-  const best=cleanPrices(prices)[0];
-  return {retail_prices:cleanPrices(prices),msrp_cents:best?Math.round(best.price_cents/best.pack_size):null,
+export function retailFields(prices,identity={}) {
+  const cleaned=cleanPrices(prices,identity),best=cleaned[0];
+  return {retail_prices:cleaned,msrp_cents:best&&!best.size_mismatch?Math.round(best.price_cents/best.pack_size):null,
     retail_source_name:best?.store||'',retail_source_url:best?.url||''};
 }
 export async function enrichVideo(bytes,mimeType,identity) {
-  const found=await gemini([{text:`Watch and listen to this intake video. Product already identified: ${JSON.stringify(identity)}. Read barcode/model/serial labels and spoken defects. Fill the backend listing fields. Condition must be one of New, Open box, Excellent, Good, Fair, For parts. Describe only supported features. eBay title maximum 80 characters. Never choose a selling price.`},
+  const found=await gemini([{text:`Watch and listen to this intake video. Product already identified: ${JSON.stringify(identity)}. Read barcode/model/serial labels, spoken defects and any printed product or package dimensions/weights. Fill the backend listing fields. Use inches and pounds. Include dimension fields only when a value is legible or explicitly spoken; never invent shipping measurements. Set dims_source=verified for printed/spoken measurements, estimated only for a clear but approximate stated measurement, and omit it when no measurements exist. Condition must be one of New, Open box, Excellent, Good, Fair, For parts. Describe only supported features. eBay title maximum 80 characters. Never choose a selling price.`},
     {inlineData:{mimeType,data:bytes.toString('base64')}}],{schema:detailSchema,maxOutputTokens:2500});
   return {...found,result:{...found.value,ebay_title:String(found.value.ebay_title||'').slice(0,80)}};
 }
