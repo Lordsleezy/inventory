@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { ReceivePanel } from './ReceivePanel';
 import { VideoScanBudget } from './VideoScanBudget';
+import { UnitShippingPanel } from './UnitShippingPanel';
 
 type Row = {
   sku: string; brand: string; model: string; title: string; condition: string | null;
@@ -84,7 +85,7 @@ export function InventoryPage({ client, storeId, money, stamp }: Props) {
   const change = (set: () => void) => { set(); setOffset(0); setList(null); };
   const total = list?.totals.unit_count || 0;
   return <>
-    <header><div><div className="eyebrow">FLOOR INVENTORY</div><h1>Inventory</h1><p>{tab === 'browse' ? 'View only. Edit units in the register or phone app.' : 'Add physical units to Floor.'}</p></div></header>
+    <header><div><div className="eyebrow">FLOOR INVENTORY</div><h1>Inventory</h1><p>{tab === 'browse' ? 'View only (except online shipping). Edit other unit fields in the register or phone app.' : 'Add physical units to Floor.'}</p></div></header>
     <div className="inventory-tabs"><button className={tab === 'browse' ? 'active' : ''} onClick={() => setTab('browse')}>Browse</button><button className={tab === 'receive' ? 'active' : ''} onClick={() => setTab('receive')}>Receive</button></div>
     {tab === 'receive' ? <><VideoScanBudget client={client} /><ReceivePanel client={client} storeId={storeId} onSaved={() => setRefresh(n => n + 1)} /></> : <>
     <div className="inventory-controls">
@@ -122,6 +123,7 @@ export function InventoryPage({ client, storeId, money, stamp }: Props) {
       <div className="section-head"><div><div className="eyebrow">UNIT DETAILS</div><h2>SKU {selected}</h2></div><button className="secondary" onClick={() => setSelected(null)}>Close</button></div>
       {!detail ? <p>Loading…</p> : <>
         <h3>Photos</h3>{detail.photos.length ? <div className="inventory-gallery">{detail.photos.map(p => urls[p.path] ? <img src={urls[p.path]} alt={`Unit ${selected}`} key={p.id} loading="lazy" /> : <div className="inventory-photo" key={p.id}>Photo unavailable</div>)}</div> : <p>No photos recorded.</p>}
+        <UnitShippingPanel client={client} sku={selected} />
         <h3>Unit fields</h3><dl className="inventory-fields">{Object.entries(detail.unit).map(([key, value]) => <div key={key}><dt>{key.replace(/_/g, ' ')}</dt><dd>{value === null ? '—' : key.endsWith('_cents') ? money(Number(value)) : typeof value === 'boolean' ? (value ? 'Yes' : 'No') : typeof value === 'object' ? JSON.stringify(value) : String(value)}</dd></div>)}</dl>
         <h3>Channel listings</h3>{detail.listings.length ? <div className="inventory-listings">{detail.listings.map(l => <div key={l.channel}><strong>{l.channel}</strong><span>{l.status.replace(/_/g, ' ')}{l.listing_id ? ` · ${l.listing_id}` : ''}</span></div>)}</div> : <p>No channel listings recorded.</p>}
         <h3>Sales</h3>{detail.sales.length ? <div className="inventory-listings">{detail.sales.map(s => <div key={s.receipt_no}><strong>{stamp(s.sold_at)} · {money(s.price_cents)} merchandise</strong><span>Rang up by {s.actor_name} · Receipt {s.receipt_no}</span></div>)}</div> : <p>No sale recorded.</p>}
