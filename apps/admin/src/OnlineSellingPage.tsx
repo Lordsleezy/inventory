@@ -7,6 +7,7 @@ type Settings = {
   ship_excluded_categories: string[]; ship_excluded_keywords: string[];
   ship_max_weight_lb: number; ship_max_length_in: number; ship_max_length_girth_in: number;
   pickup_hold_hours: number; order_notify_emails: string[]; categories: string[];
+  store_tax_bps: number; tax_origin_state: string; tax_out_of_state_bps: number; tax_in_state_ship_bps: number | null; tax_shipping: boolean;
   counts: { listed: number; shippable: number; pickup_only: number; missing_dims: number };
   pickup_only_units: { sku: string; title: string; category: string | null; reason: string }[];
 };
@@ -22,6 +23,7 @@ export function OnlineSellingPage({ client, accessToken, stamp }: Props) {
   const [busy, setBusy] = useState(false);
   const [emails, setEmails] = useState(''); const [keywords, setKeywords] = useState(''); const [cats, setCats] = useState<string[]>([]);
   const [extraCats, setExtraCats] = useState('');
+  const [tax, setTax] = useState({ state: 'CA', outPct: '0', inPct: '', taxShipping: false });
   const [nums, setNums] = useState({ ship_max_weight_lb: '', ship_max_length_in: '', ship_max_length_girth_in: '', pickup_hold_hours: '' });
 
   const load = useCallback(async () => {
@@ -33,6 +35,7 @@ export function OnlineSellingPage({ client, accessToken, stamp }: Props) {
     setCats(v.ship_excluded_categories.filter(c => known.has(c.toLowerCase())));
     setExtraCats(v.ship_excluded_categories.filter(c => !known.has(c.toLowerCase())).join('\n'));
     setNums({ ship_max_weight_lb: String(v.ship_max_weight_lb), ship_max_length_in: String(v.ship_max_length_in), ship_max_length_girth_in: String(v.ship_max_length_girth_in), pickup_hold_hours: String(v.pickup_hold_hours) });
+    setTax({ state: v.tax_origin_state, outPct: String(v.tax_out_of_state_bps / 100), inPct: v.tax_in_state_ship_bps == null ? '' : String(v.tax_in_state_ship_bps / 100), taxShipping: v.tax_shipping });
     if (!b.error) setCheck((b.data?.[0] as Check) || null);
   }, [client]);
   useEffect(() => { void load(); }, [load]);
@@ -45,6 +48,12 @@ export function OnlineSellingPage({ client, accessToken, stamp }: Props) {
       await put('ship_excluded_categories', [...cats, ...lines(extraCats)]);
       await put('ship_excluded_keywords', lines(keywords));
       for (const [k, v] of Object.entries(nums)) await put(k, Number(v));
+      const bps = (pct: string) => Math.round(Number(pct) * 100);
+      if (!Number.isFinite(bps(tax.outPct)) || (tax.inPct.trim() !== '' && !Number.isFinite(bps(tax.inPct)))) throw new Error('Tax rates must be numbers like 7.25');
+      await put('tax_origin_state', tax.state.trim());
+      await put('tax_out_of_state_bps', bps(tax.outPct));
+      await put('tax_in_state_ship_bps', tax.inPct.trim() === '' ? null : bps(tax.inPct));
+      await put('tax_shipping', tax.taxShipping);
       setSaved('Saved. The website uses the new rules immediately.'); await load();
     } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
     finally { setBusy(false); }
@@ -89,6 +98,17 @@ export function OnlineSellingPage({ client, accessToken, stamp }: Props) {
       </div>
       <p className="hint">Carrier limits: USPS 70 lb and 130 in length + girth; UPS 150 lb, 108 in longest side, 165 in length + girth. A pickup deadline that lands when the store is closed moves to closing time on the next open day. Per-unit overrides (force ship / pickup only) are in Inventory → unit.</p>
       <button disabled={busy} onClick={() => void save()}>Save settings</button>
+    </section>
+
+    <section className="panel"><h2>Sales tax on website orders</h2>
+      <p className="hint">Store pickup is always taxed at the register rate ({(s.store_tax_bps / 100).toFixed(2)}%, set in Floor Setup). These rules cover shipped orders.</p>
+      <div className="number-grid">
+        <label>Our state (tax applies here)<input maxLength={2} value={tax.state} onChange={e => setTax({ ...tax, state: e.target.value.toUpperCase() })} /></label>
+        <label>Ship in-state rate % (blank = register rate)<input inputMode="decimal" value={tax.inPct} onChange={e => setTax({ ...tax, inPct: e.target.value })} /></label>
+        <label>Ship out-of-state rate %<input inputMode="decimal" value={tax.outPct} onChange={e => setTax({ ...tax, outPct: e.target.value })} /></label>
+      </div>
+      <label className="inventory-check"><input type="checkbox" checked={tax.taxShipping} onChange={e => setTax({ ...tax, taxShipping: e.target.checked })} />Charge sales tax on the shipping fee too</label>
+      <p className="hint">Default: shipped to {tax.state || 'CA'} = register rate on the item; shipped anywhere else = {tax.outPct || 0}% tax; the carrier shipping charge is not taxed. Click Save settings below the shipping rules to apply.</p>
     </section>
 
     <section className="panel"><details><summary>Pickup-only units ({s.pickup_only_units.length})</summary><div className="inventory-listings">{s.pickup_only_units.map(u => <div key={u.sku}><strong>SKU {u.sku} · {u.title}</strong><span>{u.reason}</span></div>)}</div></details></section>
