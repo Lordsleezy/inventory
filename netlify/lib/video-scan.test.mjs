@@ -1,6 +1,31 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { cleanPrices, retailFields, productKey } from './video-scan.mjs';
+import { cleanPrices, retailFields, productKey, identifyFrames } from './video-scan.mjs';
+
+test('a truncated first Gemini identity response retries the same scan frames', async () => {
+  const fetchBefore=globalThis.fetch, keyBefore=process.env.GEMINI_API_KEY;
+  process.env.GEMINI_API_KEY='test-only';
+  let calls=0;
+  globalThis.fetch=async (_url,request) => {
+    calls++;
+    const budget=JSON.parse(request.body).generationConfig.maxOutputTokens;
+    assert.equal(budget,calls===1?1400:2100);
+    return Response.json({candidates:[{finishReason:calls===1?'MAX_TOKENS':'STOP',content:{parts:[{
+      text:calls===1?'{"title":"Fortessa':'{"title":"Fortessa Flatware Set","brand":"Fortessa","model":"","color":"Silver","confidence":0.9,"options":[]}'
+    }]}}],usageMetadata:{promptTokenCount:10,candidatesTokenCount:20,thoughtsTokenCount:30}});
+  };
+  try {
+    const found=await identifyFrames([Buffer.from('same captured still')]);
+    assert.equal(found.result.title,'Fortessa Flatware Set');
+    assert.equal(found.input,20);
+    assert.equal(found.output,100);
+    assert.equal(calls,2);
+  } finally {
+    globalThis.fetch=fetchBefore;
+    if(keyBefore===undefined)delete process.env.GEMINI_API_KEY;
+    else process.env.GEMINI_API_KEY=keyBefore;
+  }
+});
 
 test('a pack price remains visible and MSRP is per unit', () => {
   const prices=cleanPrices([{store:'Target',price_cents:1999,pack_size:12,

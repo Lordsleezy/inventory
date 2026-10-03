@@ -14,12 +14,13 @@ export async function handler(event) {
     const {data:job,error:jobError}=await sb.from('video_scan_jobs').select('id,created_by,status,still_paths,store_id').eq('id',id).single();
     if(jobError||job.created_by!==auth.user.id)return json(404,{error:'Scan not found'});
     authorizedJobId=id;
-    if(job.status!=='queued')return json(200,{ok:true,status:job.status});
+    if(!['queued','failed'].includes(job.status))return json(200,{ok:true,status:job.status});
     if(!job.still_paths?.length)return json(400,{error:'No scan photo'});
     const file=await sb.storage.from('video-scan-staging').info(job.still_paths[0]);
     if(file.error)return json(400,{error:'Upload scan photo before starting'});
-    const updated=await sb.from('video_scan_jobs').update({status:'processing',updated_at:new Date().toISOString()})
-      .eq('id',id).eq('status','queued').select('id').maybeSingle();
+    const updated=await sb.from('video_scan_jobs').update({status:'processing',error:null,reserved_usd:0.25,
+      updated_at:new Date().toISOString()})
+      .eq('id',id).eq('status',job.status).select('id').maybeSingle();
     if(updated.error)throw updated.error;
     if(!updated.data)return json(200,{ok:true,status:'processing'});
     const url=`${process.env.URL||'https://inventoryobi.netlify.app'}/.netlify/functions/video-scan-background`;

@@ -172,6 +172,16 @@ export function VideoScan() {
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
+  async function retry(job: Job) {
+    setError(''); setActiveId(job.id);
+    setJobs(previous => previous.map(row => row.id === job.id ? { ...row, status: 'processing', error: null } : row));
+    try { await post('video-scan-start', job.id); }
+    catch (cause) {
+      setJobs(previous => previous.map(row => row.id === job.id ? { ...row, status: 'failed' } : row));
+      setError(cause instanceof Error ? cause.message : String(cause));
+    }
+  }
+
   const current = !started ? jobs.find(job => job.id === activeId && job.status === 'ready' && job.result?.title) : undefined;
   if (current && stopTimes.current[current.id] && !announced.current[current.id]) {
     console.info('Floor scan stop-to-popup ms', Math.round(performance.now() - stopTimes.current[current.id]));
@@ -204,9 +214,10 @@ export function VideoScan() {
             <button type="button" className="flex-1 text-left" disabled={job.status !== 'ready'}
               onClick={() => { setActiveId(job.id); setError(''); }}>
               <strong>{job.result?.title || 'Scan'}</strong><span className="block text-quiet text-sm">
-                {job.status === 'ready' ? 'Tap to finish' : job.status === 'failed' ? 'Failed; use manual Receive' :
+                {job.status === 'ready' ? 'Tap to finish' : job.status === 'failed' ? 'Identification failed; retry this recording' :
                   now - Date.parse(job.created_at) > 120_000 ? 'Taking too long; you can discard it' : 'Identifying…'}
               </span></button>
+            {job.status === 'failed' && <button type="button" className="btn-text" onClick={() => void retry(job)}>Retry</button>}
             <button type="button" className="btn-text" onClick={() => void discard(job)}>Discard</button>
           </div>)}</div>}
     {current && <div role="dialog" aria-modal="true" aria-label="Scan result"

@@ -17,25 +17,36 @@ const pricesSchema={type:'object',properties:{prices:{type:'array',items:{type:'
   required:['store','price_cents','url','pack_size','approximate','product_name']}}},required:['prices']};
 
 async function gemini(parts,{schema,search=false,maxOutputTokens=500,signal}={}) {
-  const controller=new AbortController();
-  const timeout=setTimeout(()=>controller.abort(),90_000);
-  try {
-    const response=await fetch(`${api}${encodeURIComponent(model())}:generateContent`,{method:'POST',signal:signal?AbortSignal.any([controller.signal,signal]):controller.signal,
-      headers:{'Content-Type':'application/json','x-goog-api-key':requireEnv('GEMINI_API_KEY')},
-      body:JSON.stringify({contents:[{role:'user',parts}],...(search?{tools:[{googleSearch:{}}]}:{}),
-        generationConfig:{...(schema?{responseMimeType:'application/json',responseJsonSchema:schema}:{}),
-          maxOutputTokens,thinkingConfig:{thinkingLevel:'LOW'}}})});
-    const body=await response.json();
-    if(!response.ok)throw new Error(`Gemini ${response.status}: ${body.error?.message||'request failed'}`);
-    const text=body.candidates?.[0]?.content?.parts?.map(p=>p.text||'').join('')||'';
-    if(!text)throw new Error('Gemini returned no text');
-    const usage=body.usageMetadata||{};
-    return {value:schema?JSON.parse(text):text,input:usage.promptTokenCount||0,
-      output:(usage.candidatesTokenCount||0)+(usage.thoughtsTokenCount||0),
-      queries:(body.candidates?.[0]?.groundingMetadata?.webSearchQueries||[]).filter(Boolean).length,
-      sources:(body.candidates?.[0]?.groundingMetadata?.groundingChunks||[])
-        .map(chunk=>({title:chunk.web?.title||'',url:chunk.web?.uri||''})).filter(source=>source.url)};
-  } finally {clearTimeout(timeout)}
+  let input=0,output=0,queries=0;
+  for(let attempt=0;attempt<(schema?2:1);attempt++){
+    const controller=new AbortController();
+    const timeout=setTimeout(()=>controller.abort(),90_000);
+    try {
+      const budget=attempt?Math.min(6000,Math.max(maxOutputTokens+600,Math.ceil(maxOutputTokens*1.5))):maxOutputTokens;
+      const response=await fetch(`${api}${encodeURIComponent(model())}:generateContent`,{method:'POST',signal:signal?AbortSignal.any([controller.signal,signal]):controller.signal,
+        headers:{'Content-Type':'application/json','x-goog-api-key':requireEnv('GEMINI_API_KEY')},
+        body:JSON.stringify({contents:[{role:'user',parts}],...(search?{tools:[{googleSearch:{}}]}:{}),
+          generationConfig:{...(schema?{responseMimeType:'application/json',responseJsonSchema:schema}:{}),
+            maxOutputTokens:budget,thinkingConfig:{thinkingLevel:'LOW'}}})});
+      const body=await response.json();
+      if(!response.ok)throw new Error(`Gemini ${response.status}: ${body.error?.message||'request failed'}`);
+      const text=body.candidates?.[0]?.content?.parts?.map(p=>p.text||'').join('')||'';
+      const usage=body.usageMetadata||{};
+      input+=usage.promptTokenCount||0;
+      output+=(usage.candidatesTokenCount||0)+(usage.thoughtsTokenCount||0);
+      queries+=(body.candidates?.[0]?.groundingMetadata?.webSearchQueries||[]).filter(Boolean).length;
+      let value=text;
+      if(schema){try{value=JSON.parse(text)}catch(error){
+        console.warn('gemini_structured_response_invalid',JSON.stringify({attempt:attempt+1,
+          finishReason:body.candidates?.[0]?.finishReason||'unknown',length:text.length,budget}));
+        if(attempt===0)continue;
+        throw new Error(`Gemini returned invalid JSON after retry: ${error.message}`);
+      }}else if(!text)throw new Error('Gemini returned no text');
+      return {value,input,output,queries,
+        sources:(body.candidates?.[0]?.groundingMetadata?.groundingChunks||[])
+          .map(chunk=>({title:chunk.web?.title||'',url:chunk.web?.uri||''})).filter(source=>source.url)};
+    } finally {clearTimeout(timeout)}
+  }
 }
 
 export function productKey(item) {
@@ -50,7 +61,7 @@ export function tokenCost(input,output) {
 export async function identifyFrames(stills) {
   const parts=[{text:'Identify the exact product from these store photos. Read labels, brand, manufacturer model, pack size and color. ITM/ART, retailer item number, UPC, SKU and serial are NOT manufacturer model numbers; leave model empty unless clearly labeled MODEL/MODELO/MPN or verified by manufacturer. unit_count is how many retail items are in the package being sold (default 1), not bulbs or parts. Return a short shopper-facing title. Only offer 2-3 choices if two distinct products are genuinely plausible. No description or specifications.'},
     ...stills.map(bytes=>({inlineData:{mimeType:'image/jpeg',data:bytes.toString('base64')}}))];
-  const found=await gemini(parts,{schema:identitySchema,maxOutputTokens:700});
+  const found=await gemini(parts,{schema:identitySchema,maxOutputTokens:1400});
   const options=[...new Map((found.value.options||[]).map(option=>[
     [option.brand,option.model,option.color].join('|').toLowerCase(),option])).values()];
   const candidate=String(found.value.model||'').trim();
