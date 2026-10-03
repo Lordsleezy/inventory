@@ -42,3 +42,11 @@ test('two sets in one box keep the full box retail value', () => {
   {title:'Philips 200 Mini Lights (2 Sets of 100)',unit_count:1});
   assert.equal(fields.msrp_cents,4895);
 });
+test('an exact two-pack beats a single-item price when scanning a two-pack', () => {
+  const fields=retailFields([
+    {store:'Single store',price_cents:6000,pack_size:1,url:'https://example.com/item/single'},
+    {store:'Pack store',price_cents:9999,pack_size:2,url:'https://example.com/item/two-pack'},
+  ],{title:'Two toothbrushes 2-pack'});
+  assert.equal(fields.msrp_cents,9999);
+  assert.equal(fields.retail_source_name,'Pack store');
+});

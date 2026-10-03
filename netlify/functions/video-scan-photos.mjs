@@ -52,7 +52,12 @@ export async function handler(event) {
         .eq('kind','edit').eq('field','show_on_website').in('new_value',['false','0']).limit(1);
       if(manualOff.error)throw manualOff.error;
       if(!manualOff.data?.length){const listed=await sb.from('units').update({show_on_website:true})
-        .eq('store_id',job.store_id).eq('sku',job.sku);if(listed.error)throw listed.error;}
+        .eq('store_id',job.store_id).eq('sku',job.sku).eq('show_on_website',false).select('sku');
+        if(listed.error)throw listed.error;
+        if(listed.data?.length)await sb.from('events').insert({store_id:job.store_id,sku:job.sku,
+          kind:'edit',field:'show_on_website',old_value:'false',new_value:'true',actor:'video scan',
+          actor_id:job.created_by,note:'First saved scan photo automatically listed this unit online'});
+      }
     }
     return json(200,{ok:true,attached});
   }catch(error){return json(500,{error:error.message||String(error)})}

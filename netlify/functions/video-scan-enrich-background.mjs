@@ -5,7 +5,7 @@ import { resolveFloorCategory, loadStoredAspects, refreshCategoryAspects, prepar
 const dimensionKeys=['product_height_in','product_width_in','product_depth_in','product_weight_lb',
   'package_length_in','package_width_in','package_height_in','package_weight_lb'];
 function measure(value){const n=Number(value);return Number.isFinite(n)&&n>0&&n<10000?Math.round(n*100)/100:null}
-function cleanModel(value){const model=String(value||'').trim();return /^\d{5,}$/.test(model)?'':model}
+function cleanModel(value){const model=String(value||'').trim();return /\d/.test(model)&&!/^\d{5,}$/.test(model)?model:''}
 function goodDescription(value,title){const text=String(value||'').trim();return text.length>String(title||'').length+25?text:''}
 
 export async function handler(event) {
@@ -52,18 +52,24 @@ export async function handler(event) {
     const found=detail.result;
     const desc=goodDescription(found.description,identity.title)||goodDescription(existing.data.ai_description,identity.title);
     const sources=found.dimension_sources&&typeof found.dimension_sources==='object'?found.dimension_sources:{};
+    const types=found.dimension_types&&typeof found.dimension_types==='object'?found.dimension_types:{};
     const dimensions=Object.fromEntries(dimensionKeys.map(key=>[key,measure(found[key])]));
     const accepted=Object.fromEntries(Object.entries(dimensions).filter(([key,value])=>value!==null&&
-      (String(sources[key]||'').startsWith('https://')||String(sources[key]||'').startsWith('estimated'))));
-    const dimsSource=Object.values(sources).some(value=>String(value).startsWith('estimated'))?'estimated':
+      (types[key]==='estimated'&&String(sources[key]||'').startsWith('estimated')||
+       types[key]===(key.startsWith('package_')?'verified_shipping':'verified_product')&&
+       String(sources[key]||'').startsWith('https://'))));
+    const dimsSource=Object.keys(accepted).some(key=>types[key]==='estimated')?'estimated':
       Object.keys(accepted).length?'verified':null;
-    const model=cleanModel(found.manufacturer_model);
+    const candidate=cleanModel(found.manufacturer_model);
+    const exactSource=String(found.model_source_url||'').replace(/\/$/,'')===
+      String(job.result?.retail_source_url||'').replace(/\/$/,'');
+    const model=candidate&&(exactSource||candidate===cleanModel(job.result?.model))?candidate:'';
     const specifics={...(existing.data.ebay_item_specifics||{}),...(found.ebay_item_specifics||{})};
     if(/^\d{5,}$/.test(String(specifics.MPN||'')))delete specifics.MPN;
     const specs={...(existing.data.listing_specs||{}),
       ...Object.fromEntries(Object.entries(accepted).filter(([key])=>key.startsWith('product_')).map(([key,value])=>[key.slice(8),value])),
       dims_sources:{...(existing.data.listing_specs?.dims_sources||{}),
-        ...Object.fromEntries(Object.keys(accepted).map(key=>[key,String(sources[key])]))},
+        ...Object.fromEntries(Object.keys(accepted).map(key=>[key,`${types[key]}: ${String(sources[key])}`]))},
       ebay_aspects:{...(existing.data.listing_specs?.ebay_aspects||{}),...specifics}};
     const retail=retailFields(latest.data.result?.retail_prices||[],identity);
     const category=/\btoothbrush/i.test(identity.title||'')?'Electric Toothbrushes':
@@ -80,7 +86,7 @@ export async function handler(event) {
       listing_specs:specs,msrp_cents:retail.msrp_cents??existing.data.msrp_cents,
       ...Object.fromEntries(Object.entries(accepted).filter(([key])=>existing.data[key]==null)),
       dims_source:existing.data.dims_source||dimsSource,
-      model:model||(/^\d{5,}$/.test(existing.data.model||'')?'':existing.data.model)};
+      model:model||cleanModel(existing.data.model)};
     if(model){patch.ebay_item_specifics.MPN=model;patch.listing_specs.ebay_aspects.MPN=model}
     const saved=await sb.from('units').update(patch).eq('store_id',job.store_id).eq('sku',job.sku);
     if(saved.error)throw saved.error;
