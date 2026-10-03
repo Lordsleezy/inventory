@@ -19,6 +19,7 @@ type Draft = Summary & {
   box: { length_in: number | null; width_in: number | null; height_in: number | null; weight_lb: number | null };
   floor_condition: string; floor_cents: number | null; dims_source: string | null;
   quotes: { free: number; calculated: number } | null;
+  market: { kind: string; cents: number | null; store?: string; count?: number } | null;
   checklist: { ok: boolean; label: string }[]; locks: string[];
 };
 type Backfill = { status?: string; processed?: number; total?: number; searched?: number; cost_usd?: number; note?: string };
@@ -173,6 +174,16 @@ function SettingsForm({ settings, busy, onSave }: { settings: Settings; busy: bo
   </form>;
 }
 
+function MarketLine({ market, money }: { market: Draft['market']; money: (n: number) => string }) {
+  if (market?.cents) {
+    return <p className="hint">{market.kind === 'sold'
+      ? `Sells online around ${money(market.cents)} (average of ${market.count || 1} sale${market.count === 1 ? '' : 's'})`
+      : `Highest retail ${money(market.cents)}${market.store ? ` at ${market.store}` : ''}`}</p>;
+  }
+  if (market?.kind === 'none') return <p className="hint">No current selling price found.</p>;
+  return null;
+}
+
 function PriceField({ cents, disabled, onCommit }: { cents: number | null; disabled: boolean; onCommit: (cents: number) => void }) {
   const [text, setText] = useState(cents != null ? (cents / 100).toFixed(2) : '');
   useEffect(() => { setText(cents != null ? (cents / 100).toFixed(2) : ''); }, [cents]);
@@ -238,6 +249,7 @@ function ShippingMath({ draft, settings, money, busy, onMode, onPrice }: { draft
       <button className="secondary" disabled={busy || !draft.quotes} onClick={() => onMode('free')}>Force free shipping{draft.quotes ? ` · ${money(draft.quotes.free)}` : ''}</button>
       <button className="secondary" disabled={busy || !draft.quotes} onClick={() => onMode('calculated')}>Force calculated{draft.quotes ? ` · ${money(draft.quotes.calculated)}` : ''}</button>
     </div>
+    <MarketLine market={draft.market} money={money} />
     <PriceField cents={draft.price_cents} disabled={busy} onCommit={onPrice} />
   </>;
 }

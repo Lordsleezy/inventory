@@ -13,6 +13,7 @@ import {
 } from "./ebay-catalog.mjs";
 import { inventoryConditionEnum, mapFloorCondition } from "./ebay-conditions.mjs";
 import { ebayDraftEligibility } from "./ebay-eligibility.mjs";
+import { ensureMarket } from "./ebay-market.mjs";
 import {
   addressTo,
   allowedCarriers,
@@ -312,7 +313,7 @@ export async function syncDrafts(storeId, { quoteLimit = 4 } = {}) {
 }
 
 function persistShape(row) {
-  const { floor_cents, box, quotes, dims_source, ...rest } = row;
+  const { floor_cents, box, quotes, dims_source, market, ...rest } = row;
   return rest;
 }
 
@@ -375,6 +376,7 @@ function detail(row, unit) {
     floor_cents: row.floor_cents ?? unit?.ask_cents ?? null,
     dims_source: unit?.dims_source || null,
     quotes: row.quotes || null,
+    market: row.market || null,
     checklist: row.checklist || [],
     locks: row.locks || [],
   };
@@ -564,6 +566,8 @@ export async function prepareDraft(storeId, sku) {
   const { error } = await sb.from("ebay_drafts").upsert(saved, { onConflict: "store_id,sku" });
   if (error) throw new Error(error.message);
   row.quotes = priceQuotes(row.floor_cents, row.label_cents, settings);
+  try { row.market = unit ? await ensureMarket(sb, storeId, unit) : null; }
+  catch { row.market = null; }
   return detail(row, unit);
 }
 

@@ -158,6 +158,32 @@ export async function lookupRetail(sb,job,identity,{signal}={}) {
     lookup:{retail_prices:prices},created_at:new Date().toISOString()});if(saved.error)throw saved.error}
   return {prices,input,output,queries,reused:false};
 }
+const marketSchema={type:'object',properties:{kind:{type:'string',enum:['retail','sold','none']},
+  prices:{type:'array',items:{type:'object',properties:{store:{type:'string'},price_cents:{type:'integer'},url:{type:'string'},
+    pack_size:{type:'integer'},approximate:{type:'boolean'},product_name:{type:'string'}},
+    required:['store','price_cents','url','pack_size','approximate','product_name']}}},required:['kind','prices']};
+export async function lookupMarket(sb,storeId,identity) {
+  const key=productKey(identity);
+  let cached;
+  if(key){const read=await sb.from('video_scan_product_cache').select('lookup,created_at').eq('store_id',storeId).eq('product_key',key).maybeSingle();
+    if(read.error)throw read.error;cached=read.data;
+    const saved=cached?.lookup?.market;
+    if(saved?.checked_at&&Date.now()-Date.parse(saved.checked_at)<30*86400_000)
+      return {...saved,prices:cleanPrices(saved.prices,identity),input:0,output:0,queries:0,reused:true};}
+  const name=[identity.brand,identity.title,identity.model&&!/^\d{5,}$/.test(String(identity.model))?identity.model:'']
+    .filter(Boolean).join(' ').replace(/\s+/g,' ').slice(0,180);
+  const grounded=await gemini([{text:`Search the web ONCE for US prices of ${JSON.stringify(name)}. If retailers sell this exact item new today, list current retailer product pages and dollar prices. If it is old, discontinued, vintage, or collectible, list recent completed sale prices, meaning what buyers actually paid, not asking prices. Say which case it is. Include source links. Do not invent a price or a URL. Keep the answer short.`}],
+    {search:true,maxOutputTokens:1100});
+  const parsed=grounded.queries?await gemini([{text:`Extract prices from these Google-grounded findings. Product: ${JSON.stringify(identity)}. Findings: ${String(grounded.value||'').slice(0,9000)}. Sources: ${JSON.stringify(grounded.sources||[]).slice(0,4000)}. If the findings are current retail product pages, set kind to retail. If they are completed sales of an old or collectible item, set kind to sold. Otherwise set kind to none and prices to an empty array. Use only linked prices. Do not invent a URL or price.`}],
+    {schema:marketSchema,maxOutputTokens:800}):{value:{kind:'none',prices:[]},input:0,output:0};
+  const kind=parsed.value?.kind==='retail'||parsed.value?.kind==='sold'?parsed.value.kind:'none';
+  const prices=await resolveRetailUrls(cleanPrices(parsed.value?.prices||[],identity));
+  const market={kind:prices.length?kind:'none',prices,checked_at:new Date().toISOString()};
+  if(key){const saved=await sb.from('video_scan_product_cache').upsert({store_id:storeId,product_key:key,
+    lookup:{...(cached?.lookup||{}),market},created_at:cached?.created_at||new Date().toISOString()});
+    if(saved.error)throw saved.error;}
+  return {...market,input:grounded.input+parsed.input,output:grounded.output+parsed.output,queries:grounded.queries||0,reused:false};
+}
 export function retailFields(prices,identity={}) {
   const cleaned=cleanPrices(prices,identity);
   const title=String(identity.title||'');
