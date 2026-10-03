@@ -4,8 +4,9 @@ import { requireEnv } from './server.mjs';
 
 const model = () => process.env.GEMINI_VIDEO_MODEL || 'gemini-3.8-flash';
 const api = 'https://generativelanguage.googleapis.com/v1beta/models/';
-const identitySchema = {type:'object',properties:{title:{type:'string'},brand:{type:'string'},model:{type:'string'},color:{type:'string'},confidence:{type:'number'},options:{type:'array',items:{type:'object',properties:{label:{type:'string'},title:{type:'string'},brand:{type:'string'},model:{type:'string'},color:{type:'string'}},required:['label','title','brand','model','color']}}},required:['title','brand','model','color','confidence','options']};
+const identitySchema = {type:'object',properties:{title:{type:'string'},brand:{type:'string'},model:{type:'string'},color:{type:'string'},confidence:{type:'number'},unit_count:{type:'integer'},options:{type:'array',items:{type:'object',properties:{label:{type:'string'},title:{type:'string'},brand:{type:'string'},model:{type:'string'},color:{type:'string'}},required:['label','title','brand','model','color']}}},required:['title','brand','model','color','confidence','options']};
 const detailSchema = {type:'object',properties:{category:{type:'string'},condition:{type:'string'},condition_notes:{type:'string'},description:{type:'string'},key_features:{type:'array',items:{type:'string'}},upc:{type:'string'},mfr_serial:{type:'string'},ebay_title:{type:'string'},ebay_category:{type:'string'},ebay_item_specifics:{type:'object',additionalProperties:{type:'string'}},
+  manufacturer_model:{type:'string'},model_source_url:{type:'string'},dimension_sources:{type:'object',additionalProperties:{type:'string'}},main_photo_index:{type:'integer'},
   product_height_in:{type:'number'},product_width_in:{type:'number'},product_depth_in:{type:'number'},product_weight_lb:{type:'number'},
   package_length_in:{type:'number'},package_width_in:{type:'number'},package_height_in:{type:'number'},package_weight_lb:{type:'number'},
   dims_source:{type:'string',enum:['verified','estimated']}},required:['category','condition','condition_notes','description','key_features','upc','mfr_serial','ebay_title','ebay_category','ebay_item_specifics']};
@@ -46,12 +47,14 @@ export function tokenCost(input,output) {
   return Number(((input*Number(process.env.GEMINI_INPUT_USD_PER_M||0.75)+output*Number(process.env.GEMINI_OUTPUT_USD_PER_M||3.75))/1e6).toFixed(5));
 }
 export async function identifyFrames(stills) {
-  const parts=[{text:'Identify the exact product from these store photos. Read labels, brand, model, pack size and color. Return a short shopper-facing title. Only offer 2-3 choices if two distinct products are genuinely plausible. No description or specifications.'},
+  const parts=[{text:'Identify the exact product from these store photos. Read labels, brand, manufacturer model, pack size and color. ITM/ART, retailer item number, UPC, SKU and serial are NOT manufacturer model numbers; leave model empty unless clearly labeled MODEL/MODELO/MPN or verified by manufacturer. unit_count is how many retail items are in the package being sold (default 1), not bulbs or parts. Return a short shopper-facing title. Only offer 2-3 choices if two distinct products are genuinely plausible. No description or specifications.'},
     ...stills.map(bytes=>({inlineData:{mimeType:'image/jpeg',data:bytes.toString('base64')}}))];
   const found=await gemini(parts,{schema:identitySchema,maxOutputTokens:700});
   const options=[...new Map((found.value.options||[]).map(option=>[
     [option.brand,option.model,option.color].join('|').toLowerCase(),option])).values()];
-  return {...found,result:{...found.value,options:options.length>=2?options.slice(0,3):[]}};
+  const candidate=String(found.value.model||'').trim();
+  const model=/^\d{5,}$/.test(candidate)?'':candidate;
+  return {...found,result:{...found.value,model,unit_count:Math.max(1,Number(found.value.unit_count)||1),options:options.length>=2?options.slice(0,3):[]}};
 }
 async function fingerprint(bytes) {
   const pixels=await sharp(bytes).resize(9,8,{fit:'fill'}).grayscale().raw().toBuffer();
@@ -145,11 +148,32 @@ export async function lookupRetail(sb,job,identity,{signal}={}) {
 }
 export function retailFields(prices,identity={}) {
   const cleaned=cleanPrices(prices,identity),best=cleaned[0];
-  return {retail_prices:cleaned,msrp_cents:best&&!best.size_mismatch?Math.round(best.price_cents/best.pack_size):null,
+  const title=String(identity.title||'');
+  const packageCount=Math.max(1,Number(identity.unit_count)||1,
+    Number(title.match(/\b(\d+)\s*(?:-?\s*pack|sets?\s+of)\b/i)?.[1])||1);
+  const divisor=best?.pack_size>packageCount?best.pack_size/packageCount:1;
+  return {retail_prices:cleaned,msrp_cents:best&&!best.size_mismatch?Math.round(best.price_cents/divisor):null,
     retail_source_name:best?.store||'',retail_source_url:best?.url||''};
 }
-export async function enrichVideo(bytes,mimeType,identity) {
-  const found=await gemini([{text:`Watch and listen to this intake video. Product already identified: ${JSON.stringify(identity)}. Read barcode/model/serial labels, spoken defects and any printed product or package dimensions/weights. Fill the backend listing fields. Use inches and pounds. Include dimension fields only when a value is legible or explicitly spoken; never invent shipping measurements. Set dims_source=verified for printed/spoken measurements, estimated only for a clear but approximate stated measurement, and omit it when no measurements exist. Condition must be one of New, Open box, Excellent, Good, Fair, For parts. Describe only supported features. eBay title maximum 80 characters. Never choose a selling price.`},
-    {inlineData:{mimeType,data:bytes.toString('base64')}}],{schema:detailSchema,maxOutputTokens:2500});
+export async function lookupProductSpecs(sb,job,identity) {
+  const key=productKey(identity);
+  let cached;
+  if(key){const read=await sb.from('video_scan_product_cache').select('lookup,created_at').eq('store_id',job.store_id).eq('product_key',key).maybeSingle();
+    if(read.error)throw read.error;cached=read.data;
+    if(cached?.lookup?.spec_research&&Date.now()-Date.parse(cached.lookup.spec_at||cached.created_at)<30*86400_000)
+      return {text:cached.lookup.spec_research,sources:cached.lookup.spec_sources||[],input:0,output:0,queries:0,reused:true};}
+  const name=[identity.brand,identity.title].filter(Boolean).join(' ').slice(0,180);
+  const query=`Search the web ONCE for exact product ${JSON.stringify(name)} ${identity.model&&!/^\d{5,}$/.test(identity.model)?identity.model:''}. Find manufacturer/retailer specifications: verified manufacturer model (never ITM/ART, retailer item number or UPC), product dimensions and weight, and carton/shipping dimensions and weight. Give each number with units and source URL. Clearly say when a measurement is absent. Keep under 900 words. Do not invent dimensions.`;
+  const found=await gemini([{text:query}],{search:true,maxOutputTokens:1600});
+  if(key){const saved=await sb.from('video_scan_product_cache').upsert({store_id:job.store_id,product_key:key,
+    lookup:{...(cached?.lookup||{}),spec_research:found.value,spec_sources:found.sources,spec_at:new Date().toISOString()},
+    created_at:cached?.created_at||new Date().toISOString()});if(saved.error)throw saved.error;}
+  return {text:found.value,sources:found.sources,input:found.input,output:found.output,queries:found.queries,reused:false};
+}
+export async function enrichVideo(bytes,mimeType,identity,{stills=[],research={text:'',sources:[]},ebayAspects=[]}={}) {
+  const media=[...(bytes?.length?[{inlineData:{mimeType,data:bytes.toString('base64')}}]:[]),
+    ...stills.map(image=>({inlineData:{mimeType:'image/jpeg',data:image.toString('base64')}}))];
+  const found=await gemini([{text:`Create backend inventory data for this exact scanned item. Product identity: ${JSON.stringify({title:identity.title,brand:identity.brand,model:identity.model})}. Verified web research: ${String(research.text||'').slice(0,9000)}. Source URLs: ${JSON.stringify(research.sources||[]).slice(0,4000)}. eBay required/recommended aspect names and allowed values: ${JSON.stringify(ebayAspects).slice(0,6000)}. Watch/listen to the video if supplied; inspect the still photos in their numbered order. Write a useful 2-4 sentence description with features, what's included, and condition notes. Do not merely repeat the title; do not invent condition defects. Identify manufacturer model only if labeled MODEL/MPN or verified by an exact manufacturer/retailer page; never use ITM/ART, retailer item number, UPC, SKU or serial as model. Give product and boxed shipping dimensions/weight in inches/pounds from exact sourced specs when found. If no shipping measurements exist, estimate conservatively from the footage only when the object has a reliable visual scale; otherwise leave null. dimension_sources maps each populated dimension field to its source URL or 'estimated from video'. Set dims_source='estimated' if any populated field is estimated, otherwise 'verified' if all are sourced. main_photo_index is the 0-based index of the sharpest head-on PRODUCT/BOX FRONT still, not the back. Fill eBay item specifics using exact provided aspect names where known; no fabricated MPN. eBay title max 80 chars. Never set a selling price.`},...media],
+    {schema:detailSchema,maxOutputTokens:4200});
   return {...found,result:{...found.value,ebay_title:String(found.value.ebay_title||'').slice(0,80)}};
 }

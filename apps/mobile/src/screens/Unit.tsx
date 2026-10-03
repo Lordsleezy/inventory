@@ -40,6 +40,31 @@ export function UnitScreen() {
   const [listed, setListed] = useState<string[]>([]);
   const [ebayUrl, setEbayUrl] = useState<string | null>(null);
   const [ebayBusy, setEbayBusy] = useState(false);
+  const [enriched, setEnriched] = useState<Record<string, any>>({});
+
+  const loadEnriched = useCallback(async () => {
+    if (!online) return;
+    const { data } = await floorCloud().from(admin ? 'units' : 'units_pos').select('*').eq('sku', sku).maybeSingle();
+    if (data) setEnriched(data as Record<string, any>);
+  }, [admin, online, sku]);
+
+  useEffect(() => {
+    void loadEnriched();
+    const timer = window.setInterval(() => void loadEnriched(), 5000);
+    return () => window.clearInterval(timer);
+  }, [loadEnriched, cacheEpoch]);
+
+  async function editCloud(field: string, value: string | number | null) {
+    setError('');
+    try {
+      await ensureOnline();
+      const { error: err } = await floorCloud().rpc('update_unit_field', {
+        p_sku: sku, p_field: field, p_value: value == null ? '' : String(value),
+      });
+      if (err) throw err;
+      await hydrate(); await refresh(); await loadEnriched();
+    } catch (err) { setError(friendlyRpc(err)); }
+  }
 
   const refresh = useCallback(async () => {
     const [found, currentSale, map, ebay] = await Promise.all([
@@ -88,11 +113,7 @@ export function UnitScreen() {
     await edit("show_on_website", next ? "true" : "false");
   }
 
-  async function saveDescription(value: string | null) {
-    const text = value ?? "";
-    await edit("title", text);
-    await edit("listing_body", text);
-  }
+  async function saveDescription(value: string | null) { await edit("listing_body", value ?? ""); await loadEnriched(); }
 
   async function undoSale(reason: string, thenDelete = false): Promise<boolean> {
     if (!reason.trim()) {
@@ -273,6 +294,20 @@ export function UnitScreen() {
 
       <TextField label="Brand" value={unit.brand} onCommit={(v) => edit("brand", v ?? "")} />
       <TextField label="Model" value={unit.model} onCommit={(v) => edit("model", v ?? "")} />
+      <TextField label="Title" value={unit.title} onCommit={(v) => edit("title", v ?? "")} />
+      <MoneyField label="Value (highest retail)" cents={enriched.msrp_cents ?? unit.msrpCents}
+        onCommit={(v) => edit("msrp_cents", v)} />
+      {enriched.dims_source === 'estimated' && <p className="text-floor-danger">Estimated dimensions — check before shipping.</p>}
+      <div className="grid grid-cols-2 gap-x-4">
+        {([['product_height_in','Product height (in)'],['product_width_in','Product width (in)'],
+          ['product_depth_in','Product depth (in)'],['product_weight_lb','Product weight (lb)'],
+          ['package_length_in','Box length (in)'],['package_width_in','Box width (in)'],
+          ['package_height_in','Box height (in)'],['package_weight_lb','Box weight (lb)']] as const)
+          .map(([field,label]) => <TextField key={field}
+            label={label + (String(enriched.listing_specs?.dims_sources?.[field]||'').startsWith('estimated')?' · estimated — check':'')}
+            value={enriched[field] == null ? '' : String(enriched[field])} inputMode="decimal"
+            onCommit={(v) => editCloud(field,v)} />)}
+      </div>
       <div className="grid grid-cols-3 gap-x-4">
         <TextField
           label="Width (in)"
@@ -313,7 +348,7 @@ export function UnitScreen() {
       />
       <TextField
         label="Description"
-        value={unit.title || unit.listingBody || ""}
+        value={enriched.listing_body || enriched.ai_description || unit.listingBody || ""}
         multiline
         onCommit={(v) => saveDescription(v)}
       />
@@ -336,9 +371,7 @@ export function UnitScreen() {
               View on eBay
             </button>
           ) : null}
-          <p className="mt-2 text-quiet text-floor-mute">
-            eBay still needs category item specifics (Brand, Type, Size, etc.) beyond the fields above.
-          </p>
+          <p className="mt-2 text-quiet text-floor-mute">eBay item specifics are checked below.</p>
           <EbayDetails
             sku={unit.sku}
             category={unit.category}

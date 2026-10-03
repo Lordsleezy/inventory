@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { centsToInput, formatCents, parseMoneyToCents } from "@floor/store";
-import { authErrorMessage, floorCloud, storagePathForPhoto } from "@floor/cloud";
+import { authErrorMessage, floorCloud, storagePathForPhoto, webDerivativePaths } from "@floor/cloud";
 import { usePos } from "../pos-context";
 
 type UnitRow = Record<string, unknown>;
@@ -14,7 +14,8 @@ export function UnitDetailScreen() {
   const [error, setError] = useState("");
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
-  const [photos, setPhotos] = useState<{ id: number; path: string; is_primary: boolean }[]>([]);
+  const [photos, setPhotos] = useState<{ id: number; path: string; is_primary: boolean; sort_order: number; src: string }[]>([]);
+  const [newAspect, setNewAspect] = useState('');
 
   async function load() {
     const sb = floorCloud();
@@ -22,8 +23,12 @@ export function UnitDetailScreen() {
     const { data, error: err } = await sb.from(table).select("*").eq("sku", sku).maybeSingle();
     if (err) setError(err.message);
     else setUnit(data);
-    const { data: ph } = await sb.from("photos").select("id, path, is_primary").eq("sku", sku).order("is_primary", { ascending: false });
-    setPhotos((ph as typeof photos) ?? []);
+    const { data: ph } = await sb.from("photos").select("id, path, is_primary, sort_order").eq("sku", sku)
+      .order("is_primary", { ascending: false }).order("sort_order").order("id");
+    setPhotos(await Promise.all((ph ?? []).map(async row => {
+      const signed = await sb.storage.from('unit-photos').createSignedUrl(row.path,3600);
+      return { ...row,src:signed.data?.signedUrl || '' };
+    })));
   }
 
   useEffect(() => {
@@ -35,7 +40,9 @@ export function UnitDetailScreen() {
     setBusy(true);
     setError("");
     try {
-      const { error: rpcErr } = await floorCloud().rpc("update_unit_field", {
+      const rpc=['ai_description','ebay_title','ebay_category','ebay_item_specifics'].includes(field)
+        ? 'update_enriched_unit_field' : 'update_unit_field';
+      const { error: rpcErr } = await floorCloud().rpc(rpc, {
         p_sku: sku,
         p_field: field,
         p_value: value == null ? null : String(value),
@@ -48,6 +55,33 @@ export function UnitDetailScreen() {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function primary(id: number) {
+    setBusy(true);setError('');
+    try {const {error}=await floorCloud().rpc('set_primary_photo',{p_id:id});if(error)throw error;await load()}
+    catch(err){setError(authErrorMessage(err))}finally{setBusy(false)}
+  }
+
+  async function move(id: number,direction: -1|1) {
+    const ordered=[...photos].sort((a,b)=>a.sort_order-b.sort_order||a.id-b.id);
+    const index=ordered.findIndex(photo=>photo.id===id),other=index+direction;
+    if(index<0||other<0||other>=ordered.length)return;
+    [ordered[index],ordered[other]]=[ordered[other],ordered[index]];
+    setBusy(true);setError('');
+    try {const {error}=await floorCloud().rpc('reorder_unit_photos',{p_sku:sku,p_ids:ordered.map(photo=>photo.id)});
+      if(error)throw error;await load()}
+    catch(err){setError(authErrorMessage(err))}finally{setBusy(false)}
+  }
+
+  async function removePhoto(photo: typeof photos[number]) {
+    if(!window.confirm('Delete this photo?'))return;
+    setBusy(true);setError('');
+    try {const {error}=await floorCloud().rpc('delete_unit_photo',{p_id:photo.id});if(error)throw error;
+      if(/^[0-9a-f-]{36}\//i.test(photo.path))await floorCloud().storage.from('unit-photos')
+        .remove([photo.path,...webDerivativePaths(photo.path)]);
+      await load()}
+    catch(err){setError(authErrorMessage(err))}finally{setBusy(false)}
   }
 
   async function onFiles(files: FileList | null) {
@@ -100,8 +134,12 @@ export function UnitDetailScreen() {
   }
 
   const ask = typeof unit.ask_cents === "number" ? unit.ask_cents : null;
+  const value = typeof unit.msrp_cents === "number" ? unit.msrp_cents : null;
   const cost = typeof unit.acquisition_cost_cents === "number" ? unit.acquisition_cost_cents : null;
   const floor = typeof unit.floor_cents === "number" ? unit.floor_cents : null;
+  const specifics = unit.ebay_item_specifics && typeof unit.ebay_item_specifics === 'object'
+    ? unit.ebay_item_specifics as Record<string,string> : {};
+  async function saveSpecifics(next:Record<string,string>){await saveField('ebay_item_specifics',JSON.stringify(next))}
 
   return (
     <section className="page grid" style={{ maxWidth: 720 }}>
@@ -127,6 +165,19 @@ export function UnitDetailScreen() {
               onBlur={(e) => void saveField("title", e.target.value)}
               disabled={busy || !online}
             />
+          </label>
+          {([['brand','Brand'],['model','Model'],['category','Category'],['test_status','Test status']] as const)
+            .map(([field,label])=><label key={field}>{label}<input key={`${field}-${unit.updated_at}`}
+              defaultValue={String(unit[field]||'')} disabled={busy||!online}
+              onBlur={e=>void saveField(field,e.target.value)} /></label>)}
+          <label>Description<textarea key={`description-${unit.updated_at}`} rows={5}
+            defaultValue={String(unit.listing_body||unit.ai_description||'')}
+            disabled={busy||!online} onBlur={e=>void saveField('listing_body',e.target.value)} /></label>
+          <label>Value (highest retail price)
+            <input key={`value-${unit.updated_at}`} defaultValue={centsToInput(value)}
+              inputMode="decimal" disabled={busy||!online} onBlur={e=>{
+                const c=parseMoneyToCents(e.target.value);if(c!==undefined)void saveField('msrp_cents',c);
+              }} />
           </label>
           <label>
             Ask
@@ -179,6 +230,12 @@ export function UnitDetailScreen() {
               disabled={busy || !online}
             />
           </label>
+          {unit.dims_source==='estimated' ? <p className="error">Estimated dimensions — check before shipping.</p> : null}
+          {([['product_height_in','Product height (in)'],['product_width_in','Product width (in)'],
+            ['product_depth_in','Product depth (in)'],['product_weight_lb','Product weight (lb)']] as const)
+            .map(([field,label])=><label key={field}>{label}{String((unit.listing_specs as any)?.dims_sources?.[field]||'').startsWith('estimated')?' · estimated — check':''}<input type="number" min="0.01" step="0.01"
+              key={`${field}-${unit.updated_at}`} defaultValue={unit[field]==null?'':String(unit[field])}
+              disabled={busy||!online} onBlur={e=>void saveField(field,e.target.value)} /></label>)}
           <label className="row">
             <input type="checkbox" checked={unit.show_on_website === true} disabled={busy || !online}
               onChange={(e) => void saveField("show_on_website", String(e.target.checked))} />
@@ -195,7 +252,7 @@ export function UnitDetailScreen() {
           </label>
           {([["package_length_in", "Box length (in)"], ["package_width_in", "Box width (in)"], ["package_height_in", "Box height (in)"], ["package_weight_lb", "Box weight (lb)"]] as const).map(([field, label]) => (
             <label key={field}>
-              {label}
+              {label}{String((unit.listing_specs as any)?.dims_sources?.[field]||'').startsWith('estimated')?' · estimated — check':''}
               <input type="number" min="0.01" step="0.01" defaultValue={unit[field] == null ? "" : String(unit[field])}
                 disabled={busy || !online} onBlur={(e) => void saveField(field, e.target.value)} />
             </label>
@@ -209,6 +266,22 @@ export function UnitDetailScreen() {
               }} />
           </label>
           <p className="muted">Every listed unit can be bought online for store pickup. Shipping is offered with live carrier rates once all four box numbers are filled in and the size/category rules allow it.</p>
+          <label>eBay title<input key={`ebay-title-${unit.updated_at}`} maxLength={80}
+            defaultValue={String(unit.ebay_title||'')} disabled={busy||!online}
+            onBlur={e=>void saveField('ebay_title',e.target.value)} /></label>
+          <label>eBay category<input key={`ebay-cat-${unit.updated_at}`}
+            defaultValue={String(unit.ebay_category||'')} disabled={busy||!online}
+            onBlur={e=>void saveField('ebay_category',e.target.value)} /></label>
+          <div className="grid"><strong>eBay item specifics</strong>
+            {Object.entries(specifics).map(([name,item])=><label key={name}>{name}
+              <input key={`${name}-${unit.updated_at}`} defaultValue={String(item)} disabled={busy||!online}
+                onBlur={e=>void saveSpecifics({...specifics,[name]:e.target.value})} /></label>)}
+            <label>Add specific<input value={newAspect} disabled={busy||!online}
+              onChange={e=>setNewAspect(e.target.value)} placeholder="e.g. Size" /></label>
+            {newAspect.trim() ? <button type="button" disabled={busy||!online} onClick={()=>{
+              void saveSpecifics({...specifics,[newAspect.trim()]:''}).then(()=>setNewAspect(''));
+            }}>Add</button> : null}
+          </div>
           <label>
             Add photos from disk
             <input type="file" accept="image/*" multiple disabled={busy || !online} onChange={(e) => void onFiles(e.target.files)} />
@@ -218,14 +291,25 @@ export function UnitDetailScreen() {
         <p className="muted">Clerks can view units but cannot edit cost, floor, or details.</p>
       )}
 
-      <div className="row" style={{ flexWrap: "wrap" }}>
-        {photos.map((p) => (
-          <span key={p.id} className="muted">
-            {p.is_primary ? "★ " : ""}
-            {p.path.split("/").pop()}
-          </span>
+      <div className="row" style={{ flexWrap: "wrap", alignItems: "flex-start" }}>
+        {photos.map((photo) => (
+          <div key={photo.id} style={{ width: 136 }}>
+            {photo.src ? <img src={photo.src} alt={'SKU ' + sku + ' photo'}
+              style={{ width: 128, height: 128, objectFit: 'cover' }} />
+              : <span className="muted">Photo unavailable</span>}
+            <div>{photo.is_primary ? '★ Main photo' : ''}</div>
+            {isAdmin && <div className="row" style={{ flexWrap: 'wrap' }}>
+              <button type="button" disabled={busy || !online || photo.is_primary}
+                onClick={() => void primary(photo.id)}>Main</button>
+              <button type="button" disabled={busy || !online}
+                onClick={() => void move(photo.id, -1)}>←</button>
+              <button type="button" disabled={busy || !online}
+                onClick={() => void move(photo.id, 1)}>→</button>
+              <button type="button" disabled={busy || !online}
+                onClick={() => void removePhoto(photo)}>Delete</button>
+            </div>}
+          </div>
         ))}
-      </div>
-    </section>
+      </div>   </section>
   );
 }

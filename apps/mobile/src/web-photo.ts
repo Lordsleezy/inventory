@@ -1,7 +1,7 @@
 import { WEB_CACHE_CONTROL, WEB_DETAIL_PX, WEB_THUMB_PX, webDerivativePath, webDerivativePaths } from "@floor/cloud";
 
 async function rasterToWebp(jpeg: Uint8Array, maxEdge: number): Promise<Uint8Array> {
-  const blob = new Blob([jpeg], { type: "image/jpeg" });
+  const blob = new Blob([Uint8Array.from(jpeg)], { type: "image/jpeg" });
   const bitmap = await createImageBitmap(blob);
   try {
     const scale = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height));

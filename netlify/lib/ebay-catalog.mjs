@@ -112,6 +112,22 @@ export const FLOOR_EBAY_CATEGORIES = [
     standalone: true,
     defaults: { Installation: "Freestanding" },
   },
+  {
+    slug: "electric_toothbrushes",
+    name: "Electric toothbrushes",
+    ebayCategoryId: "31770",
+    aliases: ["electric toothbrush", "electric toothbrushes", "sonicare"],
+    standalone: false,
+    defaults: {},
+  },
+  {
+    slug: "string_lights",
+    name: "Holiday string lights",
+    ebayCategoryId: "38229",
+    aliases: ["seasonal string lights", "string lights", "christmas lights"],
+    standalone: false,
+    defaults: {},
+  },
 ];
 
 function norm(value) {

@@ -27,6 +27,8 @@ export async function handler(event) {
         const existing=await sb.from('photos').select('id').eq('store_id',job.store_id).eq('sku',job.sku)
           .eq('path',`${job.store_id}/${job.sku}/video-${job.id}-${index}.jpg`).maybeSingle();
         if(existing.data){attached++;continue}
+        // The recorder may keep fewer than four sharp, distinct frames.
+        if(index>=2)continue;
         throw downloaded.error;
       }
       const bytes=Buffer.from(await downloaded.data.arrayBuffer());
@@ -44,6 +46,13 @@ export async function handler(event) {
       if(linked.error)throw linked.error;
       attached++;
       await source.remove([path]);
+    }
+    if(attached){
+      const manualOff=await sb.from('events').select('id').eq('store_id',job.store_id).eq('sku',job.sku)
+        .eq('kind','edit').eq('field','show_on_website').in('new_value',['false','0']).limit(1);
+      if(manualOff.error)throw manualOff.error;
+      if(!manualOff.data?.length){const listed=await sb.from('units').update({show_on_website:true})
+        .eq('store_id',job.store_id).eq('sku',job.sku);if(listed.error)throw listed.error;}
     }
     return json(200,{ok:true,attached});
   }catch(error){return json(500,{error:error.message||String(error)})}

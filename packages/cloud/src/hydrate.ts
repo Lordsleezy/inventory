@@ -255,19 +255,21 @@ async function applyOnce(db: Db, payload: CachePayload): Promise<void> {
         const photoId = intOrNull(p.id);
         const primary = p.is_primary === true || p.is_primary === 1 || p.is_primary === "1" ? 1 : 0;
         if (photoId != null) {
-          await db.run(`INSERT INTO photos (id, sku, path, created_at, is_primary) VALUES (?,?,?,?,?)`, [
+          await db.run(`INSERT INTO photos (id, sku, path, created_at, is_primary, sort_order) VALUES (?,?,?,?,?,?)`, [
             photoId,
             sku,
             text(p.path),
             text(p.created_at, new Date().toISOString()),
             primary,
+            intOrNull(p.sort_order) ?? 0,
           ]);
         } else {
-          await db.run(`INSERT INTO photos (sku, path, created_at, is_primary) VALUES (?,?,?,?)`, [
+          await db.run(`INSERT INTO photos (sku, path, created_at, is_primary, sort_order) VALUES (?,?,?,?,?)`, [
             sku,
             text(p.path),
             text(p.created_at, new Date().toISOString()),
             primary,
+            intOrNull(p.sort_order) ?? 0,
           ]);
         }
       }

@@ -28,3 +28,17 @@ test('a 24 oz listing cannot become the MSRP for a 12 oz can', () => {
   assert.equal(fields.retail_prices[0].approximate,true);
   assert.equal(fields.msrp_cents,null);
 });
+test('a two-pack received as one unit keeps the full two-pack retail value', () => {
+  const fields=retailFields([{store:'Costco',price_cents:9999,pack_size:2,
+    product_name:'Philips Sonicare Advanced Clean 2-pack',
+    url:'https://www.costco.com/p/sonicare-2-pack'}],
+  {title:'Philips Sonicare Advanced Clean Rechargeable Electric Toothbrush 2-Pack'});
+  assert.equal(fields.msrp_cents,9999);
+});
+test('two sets in one box keep the full box retail value', () => {
+  const fields=retailFields([{store:'Christmas.com',price_cents:4895,pack_size:2,
+    product_name:'Philips Remains Lit Dual Color Mini LED Lights Pack of 2',
+    url:'https://christmas.com/philips-lights'}],
+  {title:'Philips 200 Mini Lights (2 Sets of 100)',unit_count:1});
+  assert.equal(fields.msrp_cents,4895);
+});

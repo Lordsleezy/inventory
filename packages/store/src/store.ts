@@ -156,6 +156,12 @@ async function migrateSalesColumns(db: Db): Promise<void> {
   }
 }
 
+async function migratePhotoOrder(db: Db): Promise<void> {
+  const cols=await db.all<{name?:string;Name?:string}>("PRAGMA table_info(photos)");
+  if(!cols.some(col=>String(col.name??col.Name)==='sort_order'))
+    await db.exec("ALTER TABLE photos ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0");
+}
+
 export async function initDb(db: Db): Promise<void> {
   for (const pragma of PRAGMAS) {
     // Some platforms refuse individual pragmas. None of the guarantees rest on
@@ -169,6 +175,7 @@ export async function initDb(db: Db): Promise<void> {
   await db.exec(SCHEMA);
   await migrateSalesColumns(db);
   await migrateUnitListingColumns(db);
+  await migratePhotoOrder(db);
   await db.run("INSERT OR IGNORE INTO meta(key, value) VALUES ('schema_version', ?)", [
     String(SCHEMA_VERSION),
   ]);
@@ -796,8 +803,8 @@ export async function addPhoto(db: Db, sku: string, path: string): Promise<void>
 }
 
 export async function listPhotos(db: Db, sku: string) {
-  return db.all<{ id: number; sku: string; path: string; created_at: string; is_primary: number }>(
-    "SELECT * FROM photos WHERE sku = ? ORDER BY is_primary DESC, id ASC",
+  return db.all<{ id: number; sku: string; path: string; created_at: string; is_primary: number; sort_order:number }>(
+    "SELECT * FROM photos WHERE sku = ? ORDER BY is_primary DESC, sort_order ASC, id ASC",
     [sku],
   );
 }

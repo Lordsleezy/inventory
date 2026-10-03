@@ -1,62 +1,116 @@
-import { serviceClient } from '../lib/server.mjs';
-import { enrichVideo, tokenCost } from '../lib/video-scan.mjs';
+import { authorizedScan } from '../lib/video-scan-auth.mjs';
+import { enrichVideo, lookupProductSpecs, retailFields, tokenCost } from '../lib/video-scan.mjs';
+import { resolveFloorCategory, loadStoredAspects, refreshCategoryAspects, prepareUnitAspects } from '../lib/ebay-catalog.mjs';
 
-function measure(value,max=10000) {
-  const n=Number(value);
-  return Number.isFinite(n)&&n>0&&n<max?Math.round(n*100)/100:null;
-}
+const dimensionKeys=['product_height_in','product_width_in','product_depth_in','product_weight_lb',
+  'package_length_in','package_width_in','package_height_in','package_weight_lb'];
+function measure(value){const n=Number(value);return Number.isFinite(n)&&n>0&&n<10000?Math.round(n*100)/100:null}
+function cleanModel(value){const model=String(value||'').trim();return /^\d{5,}$/.test(model)?'':model}
+function goodDescription(value,title){const text=String(value||'').trim();return text.length>String(title||'').length+25?text:''}
 
 export async function handler(event) {
-  const id=JSON.parse(event.body||'{}').id;
-  const token=(event.headers.authorization||event.headers.Authorization||'').replace(/^Bearer\s+/i,'');
-  const sb=serviceClient();
-  let job;
+  const payload=JSON.parse(event.body||'{}');
+  let sb,job,finished=false;
   try {
-    if(!token||!/^[0-9a-f-]{36}$/i.test(String(id)))throw new Error('Invalid scan request');
-    const auth=await sb.auth.getUser(token);
-    if(auth.error||!auth.data.user)throw new Error('Sign in required');
-    const found=await sb.from('video_scan_jobs').select('*').eq('id',id).single();
-    if(found.error||found.data.created_by!==auth.data.user.id||found.data.status!=='saved'||!found.data.sku)
-      throw new Error('Saved scan not found');
-    job=found.data;
-    if(job.result?.details_ready)return {statusCode:200};
-    const downloaded=await sb.storage.from('video-scan-staging').download(job.video_path);
-    if(downloaded.error)throw downloaded.error;
-    const bytes=Buffer.from(await downloaded.data.arrayBuffer());
-    if(bytes.length>15*1024*1024)throw new Error('Video exceeds 15 MB');
-    const detail=await enrichVideo(bytes,job.video_path.endsWith('.webm')?'video/webm':'video/mp4',job.result);
-    const latest=await sb.from('video_scan_jobs').select('result,input_tokens,output_tokens').eq('id',id).single();
+    ({sb,job}=await authorizedScan(event,payload.id));
+    if(job.status!=='saved'||!job.sku)throw new Error('Saved scan not found');
+    if(job.result?.details_ready&&!payload.force)return {statusCode:200};
+    const started=Date.now();
+    const photos=await sb.from('photos').select('path,id').eq('store_id',job.store_id).eq('sku',job.sku)
+      .like('path',`%/video-${job.id}-%`).order('id');
+    if(photos.error)throw photos.error;
+    const stills=[];
+    for(const path of (photos.data||[]).map(row=>row.path).slice(0,4)){
+      const download=await sb.storage.from('unit-photos').download(path);
+      if(!download.error)stills.push(Buffer.from(await download.data.arrayBuffer()));
+    }
+    if(!stills.length){for(const path of (job.still_paths||[]).slice(0,4)){
+      const download=await sb.storage.from('video-scan-staging').download(path);
+      if(!download.error)stills.push(Buffer.from(await download.data.arrayBuffer()));
+    }}
+    const video=job.video_path?await sb.storage.from('video-scan-staging').download(job.video_path):null;
+    const bytes=video&&!video.error?Buffer.from(await video.data.arrayBuffer()):null;
+    if(bytes?.length>15*1024*1024)throw new Error('Video exceeds 15 MB');
+    if(!bytes&&!stills.length)throw new Error('Scan media has expired; add details manually');
+    const identity={...job.result,model:cleanModel(job.result?.model)};
+    const research=await lookupProductSpecs(sb,job,identity);
+    const floorCategory=/\btoothbrush/i.test(identity.title||'')?'Electric Toothbrushes':
+      /\b(?:mini|string|christmas) lights\b/i.test(identity.title||'')?'String Lights':job.result?.category;
+    const mapped=resolveFloorCategory(floorCategory);
+    let ebayAspects=[];
+    if(mapped)try{
+      ebayAspects=await loadStoredAspects(mapped.ebayCategoryId);
+      if(!ebayAspects.length)ebayAspects=await refreshCategoryAspects(mapped.ebayCategoryId);
+    }catch(error){console.warn('video_scan_ebay_taxonomy_unavailable',job.id,String(error.message||error).slice(0,160))}
+    const detail=await enrichVideo(bytes,job.video_path?.endsWith('.webm')?'video/webm':'video/mp4',identity,
+      {stills,research,ebayAspects:ebayAspects.filter(row=>row.required||row.recommended)
+        .map(row=>({name:row.name,required:row.required,allowed:row.allowed.slice(0,12)}))});
+    const latest=await sb.from('video_scan_jobs').select('result,input_tokens,output_tokens,search_queries').eq('id',job.id).single();
     if(latest.error)throw latest.error;
-    const result={...latest.data.result,...detail.result,details_ready:true,details_at:new Date().toISOString()};
-    const dimensions=Object.fromEntries([
-      'product_height_in','product_width_in','product_depth_in','product_weight_lb',
-      'package_length_in','package_width_in','package_height_in','package_weight_lb'
-    ].map(key=>[key,measure(detail.result[key])]));
-    const hasDimensions=Object.values(dimensions).some(value=>value!==null);
-    const incoming={category:detail.result.category||null,
-      condition:detail.result.condition||null,defect_notes:detail.result.condition_notes||null,
-      ai_description:detail.result.description||null,upc:detail.result.upc||null,
-      mfr_serial:detail.result.mfr_serial||null,ebay_title:detail.result.ebay_title||null,
-      ebay_category:detail.result.ebay_category||null,ebay_item_specifics:detail.result.ebay_item_specifics||{},
-      ...dimensions,dims_source:hasDimensions&&['verified','estimated'].includes(detail.result.dims_source)
-        ? detail.result.dims_source : null};
     const existing=await sb.from('units').select('*').eq('store_id',job.store_id).eq('sku',job.sku).single();
     if(existing.error)throw existing.error;
-    const blank=value=>value===null||value===undefined||value===''||
-      (typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).length===0);
-    const patch=Object.fromEntries(Object.entries(incoming).filter(([key,value])=>!blank(value)&&blank(existing.data[key])));
-    if(Object.keys(patch).length){
-      const unit=await sb.from('units').update(patch).eq('store_id',job.store_id).eq('sku',job.sku);
-      if(unit.error)throw unit.error;
-    }
-    const input=latest.data.input_tokens+detail.input,output=latest.data.output_tokens+detail.output;
-    const updated=await sb.from('video_scan_jobs').update({result,input_tokens:input,output_tokens:output,
-      estimated_cost_usd:tokenCost(input,output),updated_at:new Date().toISOString()}).eq('id',id);
+    const found=detail.result;
+    const desc=goodDescription(found.description,identity.title)||goodDescription(existing.data.ai_description,identity.title);
+    const sources=found.dimension_sources&&typeof found.dimension_sources==='object'?found.dimension_sources:{};
+    const dimensions=Object.fromEntries(dimensionKeys.map(key=>[key,measure(found[key])]));
+    const accepted=Object.fromEntries(Object.entries(dimensions).filter(([key,value])=>value!==null&&
+      (String(sources[key]||'').startsWith('https://')||String(sources[key]||'').startsWith('estimated'))));
+    const dimsSource=Object.values(sources).some(value=>String(value).startsWith('estimated'))?'estimated':
+      Object.keys(accepted).length?'verified':null;
+    const model=cleanModel(found.manufacturer_model);
+    const specifics={...(existing.data.ebay_item_specifics||{}),...(found.ebay_item_specifics||{})};
+    if(/^\d{5,}$/.test(String(specifics.MPN||'')))delete specifics.MPN;
+    const specs={...(existing.data.listing_specs||{}),
+      ...Object.fromEntries(Object.entries(accepted).filter(([key])=>key.startsWith('product_')).map(([key,value])=>[key.slice(8),value])),
+      dims_sources:{...(existing.data.listing_specs?.dims_sources||{}),
+        ...Object.fromEntries(Object.keys(accepted).map(key=>[key,String(sources[key])]))},
+      ebay_aspects:{...(existing.data.listing_specs?.ebay_aspects||{}),...specifics}};
+    const retail=retailFields(latest.data.result?.retail_prices||[],identity);
+    const category=/\btoothbrush/i.test(identity.title||'')?'Electric Toothbrushes':
+      /\b(?:mini|string|christmas) lights\b/i.test(identity.title||'')?'String Lights':
+      existing.data.category||found.category||null;
+    const patch={category,
+      condition:existing.data.condition||found.condition||null,
+      defect_notes:existing.data.defect_notes||found.condition_notes||null,
+      ai_description:desc||null,listing_body:goodDescription(existing.data.listing_body,identity.title)||desc||null,
+      upc:existing.data.upc||found.upc||null,mfr_serial:existing.data.mfr_serial||found.mfr_serial||null,
+      ebay_title:String(found.ebay_title||existing.data.ebay_title||'').replace(/\b\d{7}\b/g,'').replace(/\s+/g,' ').trim(),
+      ebay_category:found.ebay_category||existing.data.ebay_category,
+      ebay_item_specifics:specifics,
+      listing_specs:specs,msrp_cents:retail.msrp_cents??existing.data.msrp_cents,
+      ...Object.fromEntries(Object.entries(accepted).filter(([key])=>existing.data[key]==null)),
+      dims_source:existing.data.dims_source||dimsSource,
+      model:model||(/^\d{5,}$/.test(existing.data.model||'')?'':existing.data.model)};
+    if(model){patch.ebay_item_specifics.MPN=model;patch.listing_specs.ebay_aspects.MPN=model}
+    const saved=await sb.from('units').update(patch).eq('store_id',job.store_id).eq('sku',job.sku);
+    if(saved.error)throw saved.error;
+    const input=latest.data.input_tokens+research.input+detail.input;
+    const output=latest.data.output_tokens+research.output+detail.output;
+    const result={...latest.data.result,...found,details_ready:true,details_at:new Date().toISOString(),
+      details_search_queries:research.queries,spec_sources:research.sources,dimension_sources:sources};
+    const updated=await sb.from('video_scan_jobs').update({result,error:null,input_tokens:input,output_tokens:output,
+      search_queries:latest.data.search_queries+research.queries,estimated_cost_usd:tokenCost(input,output),
+      updated_at:new Date().toISOString()}).eq('id',job.id);
     if(updated.error)throw updated.error;
-  } catch(error) {
-    if(job)await sb.from('video_scan_jobs').update({error:`Details: ${String(error.message||error).slice(0,450)}`}).eq('id',job.id);
-  } finally {
-    if(job?.video_path)await sb.storage.from('video-scan-staging').remove([job.video_path]);
+    if(mapped)try{
+      const checked=await prepareUnitAspects({storeId:job.store_id,unit:{...existing.data,...patch}});
+      if(checked.missingRequired.length)console.warn('video_scan_ebay_missing',job.id,checked.missingRequired.join(', '));
+    }catch(error){console.warn('video_scan_ebay_check_failed',job.id,String(error.message||error).slice(0,160))}
+    const best=Number(found.main_photo_index);
+    if(Number.isInteger(best)&&best>=0&&best<(photos.data||[]).length){
+      const id=(photos.data||[])[best].id;
+      await sb.from('photos').update({is_primary:false}).eq('store_id',job.store_id).eq('sku',job.sku);
+      await sb.from('photos').update({is_primary:true}).eq('id',id).eq('store_id',job.store_id);
+    }
+    console.info('video_scan_details_done',JSON.stringify({id:job.id,sku:job.sku,ms:Date.now()-started,
+      searches:research.queries,dimensions:Object.keys(accepted).length,photos:stills.length}));
+    finished=true;
+  }catch(error){
+    console.error('video_scan_details_failed',JSON.stringify({id:payload.id,error:String(error.message||error).slice(0,300)}));
+    if(job&&sb)await sb.from('video_scan_jobs').update({error:`Details: ${String(error.message||error).slice(0,450)}`})
+      .eq('id',job.id);
+  }finally{
+    if(finished&&job?.video_path)await sb.storage.from('video-scan-staging').remove([job.video_path]);
   }
   return {statusCode:200};
 }

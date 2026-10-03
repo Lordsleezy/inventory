@@ -108,7 +108,14 @@ export function VideoScan() {
           if (uploaded.error) throw uploaded.error;
         })();
         uploads.current[id].catch(cause => setError(cause instanceof Error ? cause.message : String(cause)));
-      }, cause => { setError(cause.message); recording.current = null; setStarted(false); }, beginIdentify);
+      }, cause => {
+        setError(cause.message); recording.current = null; setStarted(false); setActiveId(null);
+        void (async () => {
+          await early.current[id]?.catch(() => undefined);
+          await post('video-scan-discard',id).catch(() => undefined);
+          await bucket.remove([...stillPaths,`${prefix}/video.${extension}`]);
+        })();
+      }, beginIdentify);
       setStarted(true);
     } catch (cause) { setActiveId(null); setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setBusy(false); }
@@ -135,8 +142,12 @@ export function VideoScan() {
       setJobs(previous => previous.map(row => row.id === job.id ? { ...row, status: 'saved', sku } : row));
       setPrices(previous => { const next = { ...previous }; delete next[job.id]; return next; });
       // These run after the unit exists; the user can immediately start the next scan.
-      void post('video-scan-photos', job.id).catch(cause => setError(`SKU ${sku} saved; photos need retry: ${cause.message}`));
-      void post('video-scan-enrich-start', job.id).catch(cause => setError(`SKU ${sku} saved; details need retry: ${cause.message}`));
+      void (async () => {
+        try { await post('video-scan-photos', job.id); }
+        catch (cause) { setError(`SKU ${sku} saved; photos need retry: ${(cause as Error).message}`); }
+        try { await post('video-scan-enrich-start', job.id); }
+        catch (cause) { setError(`SKU ${sku} saved; details need retry: ${(cause as Error).message}`); }
+      })();
       window.setTimeout(() => setSavedSku(current => current === sku ? '' : current), 12000);
       if (editAfter) navigate(`/inventory/${sku}`);
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
