@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.FloorKiosk" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:windowBackground">@color/floor_bg</item>
+        <item name="android:statusBarColor">@color/floor_bg</item>
+        <item name="android:navigationBarColor">@color/floor_bg</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        <item name="colorAccent">@color/floor_accent</item>
+        <item name="android:fontFamily">sans-serif</item>
+    </style>
+
+    <style name="FloorKioskAction">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">64dp</item>
+        <item name="android:layout_marginBottom">10dp</item>
+        <item name="android:background">@drawable/btn_app</item>
+        <item name="android:clickable">true</item>
+        <item name="android:focusable">true</item>
+        <item name="android:gravity">center_vertical</item>
+        <item name="android:paddingStart">20dp</item>
+        <item name="android:paddingEnd">20dp</item>
+        <item name="android:textColor">@color/floor_text</item>
+        <item name="android:textSize">18sp</item>
+    </style>
+</resources>

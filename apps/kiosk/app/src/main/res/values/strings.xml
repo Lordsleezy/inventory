@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Register</string>
+    <string name="pin_title">Maintenance</string>
+    <string name="admin_hotspot">Register corner</string>
+</resources>

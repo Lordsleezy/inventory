@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="floor_bg">#0B0B0B</color>
+    <color name="floor_panel">#121212</color>
+    <color name="floor_text">#EDEDED</color>
+    <color name="floor_mute">#8A8A8A</color>
+    <color name="floor_accent">#F5C518</color>
+    <color name="floor_danger">#FF4D4D</color>
+    <color name="floor_line">#14FFFFFF</color>
+</resources>

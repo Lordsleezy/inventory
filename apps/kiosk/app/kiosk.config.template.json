@@ -1,0 +1,19 @@
+{
+  "title": "Register",
+  "subtitle": "Counter",
+  "pin": "__FLOOR_KIOSK_PIN__",
+  "pinRevision": 2,
+  "floorPackage": "com.openboxindustries.floor",
+  "floorLabel": "Floor",
+  "squarePackage": "com.squareup",
+  "squareLabel": "Square",
+  "extraPackages": [
+    "com.google.android.gms",
+    "com.google.android.webview",
+    "com.android.chrome",
+    "com.google.android.permissioncontroller",
+    "com.android.permissioncontroller",
+    "com.android.systemui"
+  ],
+  "maintenanceMinutes": 10
+}
