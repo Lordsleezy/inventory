@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { json } from "./server.mjs";
 import { webSquareClient, webSquareConfig } from "./web-square.mjs";
 import { deliverOrderEmails } from "./web-order-email.mjs";
-import { refundLabel } from "./shippo.mjs";
+import { voidLabel } from "./web-label.mjs";
 
 export async function settleShippingOrder(sb, order, deps = {}) {
   const cfg = deps.config || webSquareConfig(order.store_id, order.payment_env || undefined);
@@ -84,7 +84,8 @@ export async function cancelAndRefund(sb, storeId, orderId, source, reason, deps
   if (finError) return { ok: false, status: 500, error: finError.message, refund_id: refundId };
   let label = null;
   if (order.label_transaction_id && !order.shipped_at) {
-    label = await (deps.refundLabel || refundLabel)(order.label_transaction_id).then(r => r.status || "requested").catch(() => "label_refund_failed");
+    // Void at Shippo and reverse the label expense; a failure here never blocks the customer refund.
+    label = await (deps.voidLabel || voidLabel)(sb, storeId, orderId, { force: true }).then(r => (r.ok ? r.void_status : "label_void_failed")).catch(() => "label_void_failed");
   }
   await (deps.deliver || deliverOrderEmails)(sb, orderId).catch(() => []);
   return { ok: true, status: 200, order: done, refund_id: refundId, label_refund: label };

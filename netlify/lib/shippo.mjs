@@ -43,9 +43,8 @@ export function addressTo(o) {
   };
 }
 
-/** Cheapest option, the cheapest per carrier, and the fastest that is not absurdly expensive. */
-export function pickRates(rates, max = 4) {
-  const norm = (rates || [])
+export function normalizeRates(rates) {
+  return (rates || [])
     .filter(r => (r.currency || "USD") === "USD" && Number(r.amount) > 0 && r.object_id)
     .map(r => ({
       id: r.object_id,
@@ -53,10 +52,33 @@ export function pickRates(rates, max = 4) {
       carrier: r.provider,
       service: r.servicelevel?.name || r.servicelevel?.token || "Shipping",
       token: r.servicelevel?.token || null,
-      days: Number.isFinite(Number(r.estimated_days)) ? Number(r.estimated_days) : null,
+      days: r.estimated_days != null && Number.isFinite(Number(r.estimated_days)) ? Number(r.estimated_days) : null,
       source: "shippo",
     }))
-    .sort((a, b) => a.amount_cents - b.amount_cents);
+    .sort((a, b) => a.amount_cents - b.amount_cents || (a.days ?? 99) - (b.days ?? 99));
+}
+
+/**
+ * Packing-time default: the cheapest rate that is as fast as or faster than the service the customer
+ * paid for. If none is that fast, the fastest available. Without a delivery estimate to compare
+ * against (flat-rate fallback orders), the cheapest.
+ */
+export function pickDefaultRate(rates, paid) {
+  const sorted = [...(rates || [])].sort((a, b) => a.amount_cents - b.amount_cents || (a.days ?? 99) - (b.days ?? 99));
+  if (!sorted.length) return null;
+  const paidDays = Number(paid?.days);
+  if (Number.isFinite(paidDays) && paidDays > 0) {
+    const asFast = sorted.filter(r => r.days != null && r.days <= paidDays);
+    if (asFast.length) return { rate: asFast[0], reason: `Cheapest option delivering in ${paidDays} day${paidDays === 1 ? "" : "s"} or less (what the customer paid for)` };
+    const fastest = sorted.filter(r => r.days != null).sort((a, b) => a.days - b.days || a.amount_cents - b.amount_cents)[0];
+    if (fastest) return { rate: fastest, reason: "Nothing is as fast as what the customer paid for; this is the fastest available" };
+  }
+  return { rate: sorted[0], reason: "Cheapest option (no delivery estimate to match)" };
+}
+
+/** Cheapest option, the cheapest per carrier, and the fastest that is not absurdly expensive. */
+export function pickRates(rates, max = 4) {
+  const norm = normalizeRates(rates);
   if (!norm.length) return [];
   const picked = [];
   const add = r => { if (r && !picked.some(p => p.id === r.id)) picked.push(r); };
@@ -76,9 +98,17 @@ export async function liveRates({ shipFrom, to, pkg, fetchImpl }) {
   return {
     shipmentId: shipment.object_id,
     rates: pickRates(shipment.rates),
+    all: normalizeRates(shipment.rates).slice(0, 15),
     allRates: shipment.rates || [],
     messages: (shipment.messages || []).map(m => m.text || String(m)).slice(0, 5),
   };
+}
+
+export async function getRate(rateId, { fetchImpl } = {}) {
+  const r = await call(`/rates/${encodeURIComponent(rateId)}`, { fetchImpl });
+  const [norm] = normalizeRates([r]);
+  if (!norm) throw new Error("rate_not_usable");
+  return norm;
 }
 
 export async function buyLabel(rateId, { fetchImpl } = {}) {

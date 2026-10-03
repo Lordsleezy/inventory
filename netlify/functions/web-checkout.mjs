@@ -1,10 +1,13 @@
 /** Server-to-server website checkout: live shipping rates, ship-or-pickup hold, Square payment. */
 import { serviceClient, json, corsHeaders } from "../lib/server.mjs";
 import { wrapHandler } from "../lib/floor-log.mjs";
-import { webSquareConfig } from "../lib/web-square.mjs";
+import { webSquareConfig, webSquareEnv } from "../lib/web-square.mjs";
 import { settleShippingOrder } from "../lib/web-payment.mjs";
 import { ownerEmails } from "../lib/web-order-email.mjs";
 import { addressTo, fallbackRate, liveRates, shippoMode } from "../lib/shippo.mjs";
+
+/** A real (production Square) order can only ever be shipped with a LIVE Shippo key. */
+export const shippingKeyOk = env => env !== "production" || shippoMode() === "live";
 
 const BUYER_FIELDS = ["name", "email", "phone", "line1", "line2", "city", "region", "postal"];
 const buyerFrom = body => Object.fromEntries(BUYER_FIELDS.map(k => [k, String(body[k] || "").trim()]));
@@ -16,6 +19,7 @@ async function shippingSettings(sb, storeId) {
 }
 
 export async function quoteRates(sb, storeId, sku, buyer, deps = {}) {
+  if (!shippingKeyOk(deps.env ?? webSquareEnv())) return { status: 200, body: { ship: false, pickup: true, reason: "Shipping is not available yet. Choose store pickup." } };
   const { data: unit, error } = await sb.rpc("web_unit_fulfillment", { p_store: storeId, p_sku: sku });
   if (error) throw error;
   if (!unit?.listed) return { status: 409, body: { error: "held_or_unavailable" } };
@@ -69,6 +73,7 @@ async function handle(event) {
     for (const name of ["RESEND_API_KEY", "RESEND_FROM"]) if (!process.env[name]) return json(503, { error: `missing_${name}` });
     if (!(await ownerEmails(sb, body.store_id)).length) return json(503, { error: "missing_owner_emails" });
     const fulfillment = body.fulfillment === "ship" ? "ship" : "pickup";
+    if (fulfillment === "ship" && !shippingKeyOk(cfg.env)) return json(400, { error: "Shipping is not available yet. Choose store pickup." });
     const buyer = { ...buyerFrom(body), country: "US" };
     const { data, error } = await sb.rpc("begin_online_checkout", {
       p_store: body.store_id, p_sku: String(body.sku || "").trim(), p_buyer: buyer, p_fulfillment: fulfillment,

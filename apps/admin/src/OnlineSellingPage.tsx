@@ -8,7 +8,7 @@ type Settings = {
   ship_max_weight_lb: number; ship_max_length_in: number; ship_max_length_girth_in: number;
   pickup_hold_hours: number; order_notify_emails: string[]; categories: string[];
   store_tax_bps: number; tax_origin_state: string; tax_out_of_state_bps: number; tax_in_state_ship_bps: number | null; tax_shipping: boolean;
-  counts: { listed: number; shippable: number; pickup_only: number; missing_dims: number };
+  counts: { listed: number; shippable: number; pickup_only: number; missing_dims: number; ready_when_shipping_on: number };
   pickup_only_units: { sku: string; title: string; category: string | null; reason: string }[];
 };
 type Check = { id: number; ran_at: string; ok: boolean; counts: Record<string, number>; problems: { sku: string | null; title: string | null; where: string; reason: string }[]; healed: unknown[]; emailed_at: string | null; error: string | null };
@@ -21,6 +21,7 @@ export function OnlineSellingPage({ client, accessToken, stamp }: Props) {
   const [check, setCheck] = useState<Check | null>(null);
   const [error, setError] = useState(''); const [saved, setSaved] = useState('');
   const [busy, setBusy] = useState(false);
+  const [ship, setShip] = useState<{ enabled: boolean; shippo: string; square_env: string } | null>(null);
   const [emails, setEmails] = useState(''); const [keywords, setKeywords] = useState(''); const [cats, setCats] = useState<string[]>([]);
   const [extraCats, setExtraCats] = useState('');
   const [tax, setTax] = useState({ state: 'CA', outPct: '0', inPct: '', taxShipping: false });
@@ -58,6 +59,24 @@ export function OnlineSellingPage({ client, accessToken, stamp }: Props) {
     } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
     finally { setBusy(false); }
   }
+  const loadShip = useCallback(async () => {
+    try {
+      const res = await fetch(`${functionsBase}/.netlify/functions/web-order-admin`, { method: 'POST', headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'shipping_status' }) });
+      const d = await res.json(); if (res.ok) setShip(d);
+    } catch { /* shown as unknown */ }
+  }, [accessToken]);
+  useEffect(() => { void loadShip(); }, [loadShip]);
+  async function toggleShipping(enabled: boolean) {
+    if (enabled && !window.confirm('Turn shipping ON? Customers will see "Ship it" with live carrier rates on every item that qualifies.')) return;
+    setBusy(true); setError(''); setSaved('');
+    try {
+      const res = await fetch(`${functionsBase}/.netlify/functions/web-order-admin`, { method: 'POST', headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'set_shipping', enabled }) });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || 'Could not change shipping');
+      setShip(d); setSaved(enabled ? 'Shipping is ON.' : 'Shipping is OFF. The website is store pickup only.'); await load();
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    finally { setBusy(false); }
+  }
   async function runCheck() {
     setBusy(true); setError(''); setSaved('');
     try {
@@ -74,7 +93,14 @@ export function OnlineSellingPage({ client, accessToken, stamp }: Props) {
     <header><div><div className="eyebrow">WEBSITE</div><h1>Online selling</h1><p>Every listed unit can be bought online for store pickup. Shipping is offered only when the rules below allow it and the unit has package dimensions and weight.</p></div></header>
     {error && <div className="alert" role="alert">{error}<button onClick={() => setError('')}>Dismiss</button></div>}
     {saved && <div className="notice">{saved}</div>}
-    <div className="stats"><div className="stat"><span>Listed online</span><strong>{s.counts.listed}</strong></div><div className="stat"><span>Ship or pickup</span><strong>{s.counts.shippable}</strong></div><div className="stat"><span>Pickup only</span><strong>{s.counts.pickup_only}</strong></div><div className="stat"><span>Missing package dims/weight</span><strong>{s.counts.missing_dims}</strong></div></div>
+    <section className="panel"><div className="section-head"><h2>Shipping</h2>
+      <span className={`tag ${ship?.enabled ? 'on' : 'off'}`}>{ship ? (ship.enabled ? 'ON' : 'OFF — store pickup only') : '…'}</span></div>
+      <p className="hint">Shippo key on the server: <strong>{ship ? (ship.shippo === 'live' ? 'LIVE' : ship.shippo === 'test' ? 'TEST (not used for real orders)' : 'none') : '…'}</strong> · Square: <strong>{ship?.square_env ?? '…'}</strong>. {s.counts.ready_when_shipping_on} listed items would ship once shipping is on (the rest are missing box dimensions or are too big).</p>
+      <div className="actions">{ship?.enabled ? <button className="secondary" disabled={busy} onClick={() => void toggleShipping(false)}>Turn shipping off</button>
+        : <button disabled={busy} onClick={() => void toggleShipping(true)}>Turn shipping on</button>}</div>
+      {!ship?.enabled && ship?.square_env === 'production' && ship.shippo !== 'live' && <p className="hint">Turning shipping on needs the LIVE Shippo key saved on the server first.</p>}
+    </section>
+    <div className="stats"><div className="stat"><span>Listed online</span><strong>{s.counts.listed}</strong></div><div className="stat"><span>Ship or pickup (now)</span><strong>{s.counts.shippable}</strong></div><div className="stat"><span>Ready when shipping is on</span><strong>{s.counts.ready_when_shipping_on}</strong></div><div className="stat"><span>Pickup only</span><strong>{s.counts.pickup_only}</strong></div><div className="stat"><span>Missing package dims/weight</span><strong>{s.counts.missing_dims}</strong></div></div>
 
     <section className="panel"><div className="section-head"><h2>Website listing check</h2><button className="secondary" disabled={busy} onClick={() => void runCheck()}>Run check now</button></div>
       {!check ? <div className="empty">No check has run yet. It runs daily at 7 am.</div> : <>

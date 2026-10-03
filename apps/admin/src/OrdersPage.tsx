@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { LabelDialog } from './LabelDialog';
 
 const functionsBase = (import.meta.env.VITE_FLOOR_FUNCTIONS_URL || 'https://inventoryobi.netlify.app').replace(/\/$/, '');
 
@@ -30,6 +31,7 @@ export function OrdersPage({ client, accessToken, money, stamp }: Props) {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
+  const [labelFor, setLabelFor] = useState<WebOrder | null>(null);
 
   const load = useCallback(async () => {
     const { data, error: e } = await client.rpc('portal_web_orders', { p_days: 120 });
@@ -52,6 +54,12 @@ export function OrdersPage({ client, accessToken, money, stamp }: Props) {
       await load();
     } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
     finally { setBusy(null); }
+  }
+  function voidLabel(o: WebOrder) {
+    if (!window.confirm(`Void the ${o.carrier} label for ${o.order_no}?
+
+Shippo refunds the label cost, the label expense is reversed, and you can buy a different label.`)) return;
+    void act(o.id, 'void_label');
   }
   async function pickedUp(o: WebOrder) {
     if (!window.confirm(`Hand over ${o.title} (SKU ${o.sku})?\n\nCheck the customer's name (${o.buyer_name}) and order number ${o.order_no}.`)) return;
@@ -87,14 +95,16 @@ export function OrdersPage({ client, accessToken, money, stamp }: Props) {
     {error && <div className="alert" role="alert">{error}<button onClick={() => setError('')}>Dismiss</button></div>}
     <div className="stats"><div className="stat"><span>To ship</span><strong>{groups.toShip.length}</strong></div><div className="stat"><span>Awaiting pickup</span><strong>{groups.pickup.length}</strong></div><div className="stat"><span>Completed</span><strong>{groups.done.length}</strong></div><div className="stat"><span>Cancelled / refunded</span><strong>{groups.canceled.length}</strong></div></div>
     {orders === null && <p className="hint">Loading orders…</p>}
+    {labelFor && <LabelDialog order={labelFor} accessToken={accessToken} money={money} onClose={() => setLabelFor(null)} onDone={() => void load()} />}
 
     <section className="panel"><h2>To ship</h2>{groups.toShip.length === 0 ? <div className="empty">Nothing to ship.</div> : <div className="ticket-list">{groups.toShip.map(o => <div className="ticket order" key={o.id}>{head(o)}{item(o)}
       <div className="order-address">{[o.buyer_name, o.ship_line1, o.ship_line2, [o.ship_city, o.ship_region, o.ship_postal].filter(Boolean).join(', ')].filter(Boolean).join(' · ')}</div>
       <small>Package {o.package.length_in ?? '?'}×{o.package.width_in ?? '?'}×{o.package.height_in ?? '?'} in · {o.package.weight_lb ?? '?'} lb</small>
       {o.tracking_number && <div className="order-tracking">Tracking {o.carrier} {o.tracking_number}{o.tracking_url && <> · <a href={o.tracking_url} target="_blank" rel="noreferrer">track</a></>}{o.label_url && <> · <a href={o.label_url} target="_blank" rel="noreferrer">Print label</a></>}{o.label_cost_cents != null && ` · label cost ${money(o.label_cost_cents)}`}</div>}
       {o.refund_requested_at ? <p className="hint">Cancel & refund in progress…</p> : <div className="actions">
-        {!o.label_url ? <button disabled={!!busy} onClick={() => void act(o.id, 'buy_label')}>{busy === o.id + 'buy_label' ? 'Buying label…' : 'Buy & print label'}</button>
-          : <button className="secondary" onClick={() => window.open(o.label_url!, '_blank', 'noopener')}>Print label</button>}
+        {!o.label_url ? <button disabled={!!busy} onClick={() => setLabelFor(o)}>Buy label…</button>
+          : <><button className="secondary" onClick={() => window.open(o.label_url!, '_blank', 'noopener')}>Print label</button>
+            <button className="text-button danger" disabled={!!busy} onClick={() => voidLabel(o)}>{busy === o.id + 'void_label' ? 'Voiding…' : 'Void label'}</button></>}
         <button className="secondary" disabled={!!busy || !o.tracking_number} onClick={() => void act(o.id, 'mark_shipped')}>Mark shipped</button>
         <button className="text-button danger" disabled={!!busy} onClick={() => cancel(o)}>Cancel & refund</button></div>}
     </div>)}</div>}</section>
