@@ -42,17 +42,33 @@ export function ReceiveScreen() {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
+    let live = true;
     void (async () => {
-      try {
-        const { data, error: rpcErr } = await floorCloud().rpc("next_sku");
-        if (rpcErr) throw rpcErr;
-        const next = String(data ?? "");
-        setSuggested(next);
-        setSku((current) => current || next);
-      } catch {
-        /* next SKU stays blank until they type one */
+      // On Android the JWT is loaded from Preferences asynchronously. Retry so
+      // the SKU box fills instead of staying blank after a silent not_staff.
+      for (let attempt = 0; attempt < 6 && live; attempt++) {
+        try {
+          const { data: session } = await floorCloud().auth.getSession();
+          if (!session.session) {
+            await new Promise((resolve) => window.setTimeout(resolve, 250 * (attempt + 1)));
+            continue;
+          }
+          const { data, error: rpcErr } = await floorCloud().rpc("next_sku");
+          if (rpcErr) throw rpcErr;
+          const next = String(data ?? "");
+          if (!live || !next) return;
+          setSuggested(next);
+          setSku((current) => current || next);
+          return;
+        } catch (err) {
+          if (attempt === 5 && live) setError(friendlyRpc(err));
+          else await new Promise((resolve) => window.setTimeout(resolve, 250 * (attempt + 1)));
+        }
       }
     })();
+    return () => {
+      live = false;
+    };
   }, []);
 
   useEffect(() => {

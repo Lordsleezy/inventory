@@ -11,6 +11,7 @@ export {
 } from "./web-photos.ts";
 export {
   floorCloud,
+  setFloorCloudAuthStorage,
   loadAuthState,
   loadStaffSession,
   resetFloorCloud,

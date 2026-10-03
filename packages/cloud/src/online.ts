@@ -44,6 +44,9 @@ export async function readDeviceNetwork(): Promise<DeviceNetwork> {
 
 export async function probeSupabase(): Promise<ReachCheck> {
   try {
+    const { data: session, error: sessionError } = await floorCloud().auth.getSession();
+    if (sessionError) return { ok: false, detail: sessionError.message };
+    if (!session.session) return { ok: false, detail: "Sign in required" };
     const { error } = await floorCloud().auth.getUser();
     if (error) return { ok: false, detail: error.message };
     return { ok: true, detail: "ok" };

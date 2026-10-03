@@ -42,35 +42,45 @@ export function App() {
 
   const refresh = useCallback(async () => {
     try {
-      const next = await Promise.race([
-        loadAuthState(),
-        new Promise<never>((_, reject) =>
-          window.setTimeout(() => reject(new Error("Floor is taking too long to open. Check Wi‑Fi and try again.")), 12_000),
-        ),
-      ]);
+      const next = await loadAuthState();
       setAuth(next);
       setBootError("");
     } catch (err) {
       setBootError(authErrorMessage(err));
-      // Leave a blank login reachable when the session probe stalls.
-      setAuth((current) => current ?? { kind: "signed_out" });
+      setAuth({ kind: "signed_out" });
     }
   }, []);
 
   useEffect(() => {
+    let live = true;
     let unsub = () => {};
+    // Only the first paint: if auth is still unknown after 12s, offer login.
+    // Never keep a stale "ready" session when the JWT is gone (that caused
+    // Receive to show Auth session missing / not_staff while still in the app).
+    const timer = window.setTimeout(() => {
+      setAuth((current) => {
+        if (current !== undefined) return current;
+        setBootError("Floor is taking too long to open. Check Wi‑Fi and try again.");
+        return { kind: "signed_out" };
+      });
+    }, 12_000);
     void (async () => {
       await refresh();
+      if (!live) return;
       try {
         const { data } = floorCloud().auth.onAuthStateChange(() => {
           void refresh();
         });
         unsub = () => data.subscription.unsubscribe();
       } catch (err) {
-        setBootError(authErrorMessage(err));
+        if (live) setBootError(authErrorMessage(err));
       }
     })();
-    return () => unsub();
+    return () => {
+      live = false;
+      window.clearTimeout(timer);
+      unsub();
+    };
   }, [refresh]);
 
   if (auth === undefined) {

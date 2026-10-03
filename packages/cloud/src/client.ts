@@ -12,7 +12,20 @@ const memoryStorage = {
   },
 };
 
+type AuthStorage = {
+  getItem: (key: string) => string | null | Promise<string | null>;
+  setItem: (key: string, value: string) => void | Promise<void>;
+  removeItem: (key: string) => void | Promise<void>;
+};
+
 let client: SupabaseClient | null = null;
+let authStorageOverride: AuthStorage | undefined;
+
+/** Native apps should pass Capacitor Preferences so the JWT survives WebView restarts. */
+export function setFloorCloudAuthStorage(storage: AuthStorage | undefined): void {
+  authStorageOverride = storage;
+  client = null;
+}
 
 export function floorCloud(): SupabaseClient {
   if (client) return client;
@@ -31,7 +44,9 @@ export function floorCloud(): SupabaseClient {
     throw new Error("Supabase URL / anon key missing from this build");
   }
 
-  const authStorage = typeof window === "undefined" ? memoryStorage : undefined;
+  const authStorage =
+    authStorageOverride ||
+    (typeof window === "undefined" ? memoryStorage : undefined);
   client = createClient(url, anon, {
     auth: {
       persistSession: true,
