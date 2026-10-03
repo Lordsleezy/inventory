@@ -9,6 +9,10 @@ const detailSchema = {type:'object',properties:{category:{type:'string'},conditi
   product_height_in:{type:'number'},product_width_in:{type:'number'},product_depth_in:{type:'number'},product_weight_lb:{type:'number'},
   package_length_in:{type:'number'},package_width_in:{type:'number'},package_height_in:{type:'number'},package_weight_lb:{type:'number'},
   dims_source:{type:'string',enum:['verified','estimated']}},required:['category','condition','condition_notes','description','key_features','upc','mfr_serial','ebay_title','ebay_category','ebay_item_specifics']};
+const pricesSchema={type:'object',properties:{prices:{type:'array',items:{type:'object',properties:{
+  store:{type:'string'},price_cents:{type:'integer'},url:{type:'string'},pack_size:{type:'integer'},
+  approximate:{type:'boolean'},product_name:{type:'string'}},
+  required:['store','price_cents','url','pack_size','approximate','product_name']}}},required:['prices']};
 
 async function gemini(parts,{schema,search=false,maxOutputTokens=500}={}) {
   const controller=new AbortController();
@@ -26,7 +30,9 @@ async function gemini(parts,{schema,search=false,maxOutputTokens=500}={}) {
     const usage=body.usageMetadata||{};
     return {value:schema?JSON.parse(text):text,input:usage.promptTokenCount||0,
       output:(usage.candidatesTokenCount||0)+(usage.thoughtsTokenCount||0),
-      queries:(body.candidates?.[0]?.groundingMetadata?.webSearchQueries||[]).filter(Boolean).length};
+      queries:(body.candidates?.[0]?.groundingMetadata?.webSearchQueries||[]).filter(Boolean).length,
+      sources:(body.candidates?.[0]?.groundingMetadata?.groundingChunks||[])
+        .map(chunk=>({title:chunk.web?.title||'',url:chunk.web?.uri||''})).filter(source=>source.url)};
   } finally {clearTimeout(timeout)}
 }
 
@@ -75,11 +81,6 @@ export async function identifyFramesCached(sb,job,stills) {
   }
   return found;
 }
-function parseJson(text) {
-  const start=text.indexOf('{'),end=text.lastIndexOf('}');
-  if(start<0||end<start)throw new Error('Search did not return price data');
-  return JSON.parse(text.slice(start,end+1));
-}
 function ounces(text) {
   const match=String(text||'').replace(/[-_]/g,' ').match(/\b(\d+(?:\.\d+)?)\s*(?:fl\s*)?oz\b/i);
   return match?Number(match[1]):null;
@@ -103,11 +104,13 @@ async function searchOnce(identity,closer=false) {
     identity.model&&!title.toLowerCase().includes(String(identity.model).toLowerCase())?identity.model:'',
     identity.color&&!title.toLowerCase().includes(String(identity.color).toLowerCase())?identity.color:'']
     .filter(Boolean).join(' ').replace(/\s+/g,' ').slice(0,180);
-  const prompt=`You MUST invoke the Google Search tool now; do not answer from memory. Use ONE search query for today's US retail prices of "${query}". If the tool does not run, return {"prices":[]}. Return compact JSON ONLY: {"prices":[{"store":"...","price_cents":2199,"url":"https://direct-product-page","pack_size":12,"approximate":false,"product_name":"..."}]}. Include single items and multipacks. If the same item is only sold in a pack, give the pack price and count. ${closer?'Find a clearly labeled close variant if exact size or pack is unavailable.':'An identical product in a different pack or size is allowed, marked approximate=true. Do not reject a valid pack because the scanned item is one unit.'} Use direct product-page URLs from search results, never invent a price or URL. At most one search query.`;
-  const result=await gemini([{text:prompt}],{search:true,maxOutputTokens:1200});
-  let prices=[];
-  if(result.queries)try {prices=cleanPrices(parseJson(result.value).prices,identity)} catch {/* A grounded response may be prose; the retry can recover. */}
-  return {...result,prices};
+  const prompt=`Use Google Search now for today's US retail prices of "${query}". Search with one exact product query. Report retailer product pages, current dollar prices, sizes and pack counts, with source links. ${closer?'If the exact size is not listed, find a clearly labeled close size or pack.':'Include multipacks containing the item, even when a single unit has no listing.'} Do not rely on memory or invent prices. Keep the answer short.`;
+  const grounded=await gemini([{text:prompt}],{search:true,maxOutputTokens:1100});
+  if(!grounded.queries)return {...grounded,prices:[]};
+  const parsed=await gemini([{text:`Extract verified retail prices from these Google-grounded findings. Product: ${JSON.stringify(identity)}. Findings: ${grounded.value.slice(0,9000)}. Sources: ${JSON.stringify(grounded.sources).slice(0,4000)}. Use only linked product pages and observed prices. If the item is a single can but sold only in a variety pack, give pack_size and mark approximate=true. If a different size or variant, mark approximate=true. If no priced product page, return an empty prices array. Do not invent a URL or price.`}],
+    {schema:pricesSchema,maxOutputTokens:800});
+  return {prices:cleanPrices(parsed.value.prices,identity),input:grounded.input+parsed.input,
+    output:grounded.output+parsed.output,queries:grounded.queries};
 }
 export async function lookupRetail(sb,job,identity) {
   const key=productKey(identity);
