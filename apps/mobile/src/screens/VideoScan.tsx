@@ -6,12 +6,14 @@ import { authHeader, functionsUrl } from '../functions';
 import { startVideoScan } from '../video-scan-capture';
 
 type Price = { store: string; price_cents: number; url: string; pack_size?: number; approximate?: boolean; product_name?: string };
-type Identity = { title?: string; brand?: string; model?: string; color?: string;
+type Identity = { title?: string; brand?: string; model?: string; color?: string; identified_at?: string; retail_started_at?: string;
   options?: { label: string; title: string; brand: string; model: string; color: string; thumbnail_data_url?: string }[];
   retail_prices?: Price[]; msrp_cents?: number; retail_ready?: boolean };
 type Job = { id: string; status: string; result: Identity | null; error: string | null; sku: string | null; created_at: string };
 const moneyPattern = /^\d*(?:\.\d{0,2})?$/;
 const dollars = (cents: number) => `$${(cents / 100).toFixed(2)}`;
+const distinctOptions = (result: Identity) => [...new Map((result.options || []).map((option, index) => [
+  [option.brand, option.model, option.color, option.title].join('|').toLowerCase(), { ...option, index }])).values()];
 async function post(path: string, id: string, extra: Record<string, unknown> = {}) {
   const response = await fetch(functionsUrl(path), { method: 'POST', headers: {
     ...await authHeader(), 'Content-Type': 'application/json' }, body: JSON.stringify({ id, ...extra }) });
@@ -38,6 +40,8 @@ export function VideoScan() {
   const [choosing, setChoosing] = useState<string | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
   const [ownThumb, setOwnThumb] = useState('');
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
     let active = true;
@@ -47,7 +51,7 @@ export function VideoScan() {
       if (active && data) setJobs(data as Job[]);
     };
     void refresh();
-    const timer = window.setInterval(() => void refresh(), 900);
+    const timer = window.setInterval(() => { setNow(Date.now()); void refresh(); }, 900);
     return () => { active = false; window.clearInterval(timer); recording.current?.abort(); };
   }, []);
 
@@ -64,6 +68,7 @@ export function VideoScan() {
       const { data: auth } = await floorCloud().auth.getUser();
       if (!auth.user?.id) throw new Error('Sign in to scan');
       const id = crypto.randomUUID(), prefix = `${storeId}/${auth.user.id}/${id}`;
+      setActiveId(id);
       const extension = MediaRecorder.isTypeSupported('video/mp4') ? 'mp4' : 'webm';
       const bucket = floorCloud().storage.from('video-scan-staging');
       const stillPaths = Array.from({ length: 4 }, (_, index) => `${prefix}/still-${index}.jpg`);
@@ -105,7 +110,7 @@ export function VideoScan() {
         uploads.current[id].catch(cause => setError(cause instanceof Error ? cause.message : String(cause)));
       }, cause => { setError(cause.message); recording.current = null; setStarted(false); }, beginIdentify);
       setStarted(true);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+    } catch (cause) { setActiveId(null); setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setBusy(false); }
   }
 
@@ -113,7 +118,7 @@ export function VideoScan() {
     const price = parseMoneyToCents(prices[job.id] || '');
     if (price === undefined || price === null || price <= 0) { setError('Enter your selling price.'); return; }
     const result = job.result || {};
-    if (choosing === job.id || (result.options?.length && choices[job.id] === undefined)) {
+    if (choosing === job.id || (distinctOptions(result).length >= 2 && choices[job.id] === undefined)) {
       setError('Pick the matching product first.'); return;
     }
     const chosen = result.options?.[choices[job.id]];
@@ -126,6 +131,7 @@ export function VideoScan() {
       if (saveError) throw saveError;
       const sku = (data as { sku: string }).sku;
       setSavedSku(sku);
+      setActiveId(null);
       setJobs(previous => previous.map(row => row.id === job.id ? { ...row, status: 'saved', sku } : row));
       setPrices(previous => { const next = { ...previous }; delete next[job.id]; return next; });
       // These run after the unit exists; the user can immediately start the next scan.
@@ -137,13 +143,27 @@ export function VideoScan() {
     finally { setSaving(null); }
   }
 
-  const current = !started ? jobs.find(job => job.status === 'ready' && job.result?.title) : undefined;
+  async function discard(job: Job) {
+    if (!window.confirm('Discard this scan and its video/photos? This cannot be undone.')) return;
+    setError('');
+    try {
+      await uploads.current[job.id]?.catch(() => undefined);
+      await post('video-scan-discard', job.id);
+      setJobs(previous => previous.filter(row => row.id !== job.id));
+      if (activeId === job.id) setActiveId(null);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+  }
+
+  const current = !started ? jobs.find(job => job.id === activeId && job.status === 'ready' && job.result?.title) : undefined;
   if (current && stopTimes.current[current.id] && !announced.current[current.id]) {
     console.info('Floor scan stop-to-popup ms', Math.round(performance.now() - stopTimes.current[current.id]));
     announced.current[current.id] = true;
   }
   const result = current?.result || {};
   const retail = result.retail_prices?.[0];
+  const retailAge = now - Date.parse(result.retail_started_at || result.identified_at || current?.created_at || '');
+  const retailWaiting = !result.retail_ready && retailAge < 20_000;
+  const options = distinctOptions(result);
   return <section className="card p-4 my-4">
     <h2 className="text-title">Video scan</h2>
     <p className="text-quiet">Film the item, label and box for 10–20 seconds. Speak any defects.</p>
@@ -159,15 +179,27 @@ export function VideoScan() {
       <p>Write this on the unit. Ready for the next scan.</p><Link to={`/inventory/${savedSku}`}>Edit details</Link></div>}
     {error && <p role="alert" className="text-floor-danger mt-3">{error}</p>}
     {jobs.some(job => job.status === 'failed') && <p className="text-quiet">A scan failed. Manual Receive is available below.</p>}
+    {jobs.some(job => ['ready', 'processing', 'queued', 'failed'].includes(job.status)) &&
+      <div className="mt-4 grid gap-2"><h3 className="text-title">Pending scans</h3>
+        {jobs.filter(job => ['ready', 'processing', 'queued', 'failed'].includes(job.status)).map(job =>
+          <div key={job.id} className="flex items-center gap-2 border border-floor-line p-2">
+            <button type="button" className="flex-1 text-left" disabled={job.status !== 'ready'}
+              onClick={() => { setActiveId(job.id); setError(''); }}>
+              <strong>{job.result?.title || 'Scan'}</strong><span className="block text-quiet text-sm">
+                {job.status === 'ready' ? 'Tap to finish' : job.status === 'failed' ? 'Failed; use manual Receive' :
+                  now - Date.parse(job.created_at) > 120_000 ? 'Taking too long; you can discard it' : 'Identifying…'}
+              </span></button>
+            <button type="button" className="btn-text" onClick={() => void discard(job)}>Discard</button>
+          </div>)}</div>}
     {current && <div role="dialog" aria-modal="true" aria-label="Scan result"
-      className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-      <div className="card w-full max-w-md p-5 grid gap-4">
-        {result.options?.length ? <><h3 className="text-title">Which product is it?</h3>
-          {result.options.slice(0, 3).map((option, index) =>
-            <button type="button" key={index} className={`field text-left flex items-center gap-3 ${choices[current.id] === index ? 'ring-2' : ''}`}
-              onClick={() => {setChoices(previous => ({ ...previous, [current.id]: index }));
+      className="video-scan-modal">
+      <div className="video-scan-modal-panel grid gap-4">
+        {options.length >= 2 ? <><h3 className="text-title">Which product is it?</h3>
+          {options.slice(0, 3).map(option =>
+            <button type="button" key={option.index} className={`field text-left flex items-center gap-3 ${choices[current.id] === option.index ? 'ring-2' : ''}`}
+              onClick={() => {setChoices(previous => ({ ...previous, [current.id]: option.index }));
                 setChoosing(current.id);
-                void post('video-scan-choice',current.id,{index}).catch(cause=>setError(cause.message))
+                void post('video-scan-choice',current.id,{index:option.index}).catch(cause=>setError(cause.message))
                   .finally(()=>setChoosing(null));}}>
               {(option.thumbnail_data_url || ownThumb) &&
                 <img src={option.thumbnail_data_url || ownThumb} alt={option.thumbnail_data_url ? option.label : 'Your scan photo'}
@@ -179,7 +211,9 @@ export function VideoScan() {
           <strong>{dollars(retail.price_cents)}{retail.pack_size && retail.pack_size > 1
             ? ` for ${retail.pack_size}-pack (~${dollars(Math.round(retail.price_cents / retail.pack_size))} each)` : ''}</strong>
           {' '}at {retail.store} <a href={retail.url} target="_blank" rel="noreferrer">View price ↗</a></p>
-          : <p className="text-quiet">{result.retail_ready ? "Couldn't find a retail price" : 'Looking up retail price…'}</p>}
+          : <p className="text-quiet">{retailWaiting ? 'Looking up retail price…' : "Couldn't find a retail price"}</p>}
+        {!retail && !retailWaiting && <button type="button" className="btn-text" onClick={() =>
+          void post('video-scan-retry-price', current.id).catch(cause => setError(cause.message))}>Retry price lookup</button>}
         <label>How much do you want to sell it for?
           <input className="field mt-2" type="text" inputMode="decimal" placeholder="$"
             value={prices[current.id] || ''} onChange={event => {
@@ -193,6 +227,11 @@ export function VideoScan() {
           onClick={() => void save(current)}>{saving === current.id ? 'Saving…' : 'Save & next'}</button>
         <button type="button" className="btn-text text-sm" disabled={saving === current.id}
           onClick={() => void save(current, true)}>Edit details after saving</button>
+        <div className="flex justify-between gap-3 border-t border-floor-line pt-3">
+          <button type="button" className="btn-text" disabled={saving === current.id} onClick={() => setActiveId(null)}>Skip for now</button>
+          <button type="button" className="btn-text text-floor-danger" disabled={saving === current.id}
+            onClick={() => void discard(current)}>Cancel / Discard</button>
+        </div>
       </div>
     </div>}
   </section>;

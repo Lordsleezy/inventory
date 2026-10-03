@@ -14,11 +14,11 @@ const pricesSchema={type:'object',properties:{prices:{type:'array',items:{type:'
   approximate:{type:'boolean'},product_name:{type:'string'}},
   required:['store','price_cents','url','pack_size','approximate','product_name']}}},required:['prices']};
 
-async function gemini(parts,{schema,search=false,maxOutputTokens=500}={}) {
+async function gemini(parts,{schema,search=false,maxOutputTokens=500,signal}={}) {
   const controller=new AbortController();
   const timeout=setTimeout(()=>controller.abort(),90_000);
   try {
-    const response=await fetch(`${api}${encodeURIComponent(model())}:generateContent`,{method:'POST',signal:controller.signal,
+    const response=await fetch(`${api}${encodeURIComponent(model())}:generateContent`,{method:'POST',signal:signal?AbortSignal.any([controller.signal,signal]):controller.signal,
       headers:{'Content-Type':'application/json','x-goog-api-key':requireEnv('GEMINI_API_KEY')},
       body:JSON.stringify({contents:[{role:'user',parts}],...(search?{tools:[{googleSearch:{}}]}:{}),
         generationConfig:{...(schema?{responseMimeType:'application/json',responseJsonSchema:schema}:{}),
@@ -99,12 +99,12 @@ export function cleanPrices(prices,identity={}) {
     size_mismatch:sizeMismatch,product_name:String(p.product_name||'').slice(0,160)}})
     .sort((a,b)=>Number(a.approximate)-Number(b.approximate)||b.price_cents/a.pack_size-a.price_cents/b.pack_size).slice(0,10);
 }
-async function resolveRetailUrls(prices) {
+async function resolveRetailUrls(prices,signal) {
   return Promise.all(prices.map(async price=>{
     if(!/^https:\/\/vertexaisearch\.cloud\.google\.com\/grounding-api-redirect\//i.test(price.url))
       return price;
     try {
-      const response=await fetch(price.url,{method:'HEAD',redirect:'follow',signal:AbortSignal.timeout(6000)});
+      const response=await fetch(price.url,{method:'HEAD',redirect:'follow',signal:signal?AbortSignal.any([AbortSignal.timeout(6000),signal]):AbortSignal.timeout(6000)});
       const final=new URL(response.url);
       if(final.protocol==='https:'&&final.hostname!=='vertexaisearch.cloud.google.com'
         &&final.pathname.length>8)return {...price,url:final.href};
@@ -112,7 +112,7 @@ async function resolveRetailUrls(prices) {
     return price;
   }));
 }
-async function searchOnce(identity,closer=false) {
+async function searchOnce(identity,closer=false,signal) {
   const title=String(identity.title||'');
   const query=[!title.toLowerCase().includes(String(identity.brand||'').toLowerCase())?identity.brand:'',
     title||identity.model,
@@ -120,25 +120,25 @@ async function searchOnce(identity,closer=false) {
     identity.color&&!title.toLowerCase().includes(String(identity.color).toLowerCase())?identity.color:'']
     .filter(Boolean).join(' ').replace(/\s+/g,' ').slice(0,180);
   const prompt=`Use Google Search now for today's US retail prices of "${query}". Search with one exact product query. Report retailer product pages, current dollar prices, sizes and pack counts, with source links. ${closer?'If the exact size is not listed, find a clearly labeled close size or pack.':'Include multipacks containing the item, even when a single unit has no listing.'} Do not rely on memory or invent prices. Keep the answer short.`;
-  const grounded=await gemini([{text:prompt}],{search:true,maxOutputTokens:1100});
+  const grounded=await gemini([{text:prompt}],{search:true,maxOutputTokens:1100,signal});
   if(!grounded.queries)return {...grounded,prices:[]};
   const parsed=await gemini([{text:`Extract verified retail prices from these Google-grounded findings. Product: ${JSON.stringify(identity)}. Findings: ${grounded.value.slice(0,9000)}. Sources: ${JSON.stringify(grounded.sources).slice(0,4000)}. Use only linked product pages and observed prices. If the item is a single can but sold only in a variety pack, give pack_size and mark approximate=true. If a different size or variant, mark approximate=true. If no priced product page, return an empty prices array. Do not invent a URL or price.`}],
-    {schema:pricesSchema,maxOutputTokens:800});
-  return {prices:await resolveRetailUrls(cleanPrices(parsed.value.prices,identity)),input:grounded.input+parsed.input,
+    {schema:pricesSchema,maxOutputTokens:800,signal});
+  return {prices:await resolveRetailUrls(cleanPrices(parsed.value.prices,identity),signal),input:grounded.input+parsed.input,
     output:grounded.output+parsed.output,queries:grounded.queries};
 }
-export async function lookupRetail(sb,job,identity) {
+export async function lookupRetail(sb,job,identity,{signal}={}) {
   const key=productKey(identity);
   if(key){const cached=await sb.from('video_scan_product_cache').select('lookup,created_at').eq('store_id',job.store_id).eq('product_key',key).maybeSingle();
     if(cached.error)throw cached.error;
     if(cached.data&&Date.now()-Date.parse(cached.data.created_at)<
       (cached.data.lookup.retail_prices?.length?30:1)*86400_000){
-      const prices=await resolveRetailUrls(cleanPrices(cached.data.lookup.retail_prices,identity));
+      const prices=await resolveRetailUrls(cleanPrices(cached.data.lookup.retail_prices,identity),signal);
       return {prices,input:0,output:0,queries:0,reused:true,cachedDetails:cached.data.lookup};
     }}
-  const first=await searchOnce(identity);
+  const first=await searchOnce(identity,false,signal);
   let prices=first.prices,input=first.input,output=first.output,queries=first.queries;
-  if(!prices.length){const second=await searchOnce(identity,true);prices=second.prices;input+=second.input;output+=second.output;queries+=second.queries}
+  if(!prices.length){const second=await searchOnce(identity,true,signal);prices=second.prices;input+=second.input;output+=second.output;queries+=second.queries}
   if(key){const saved=await sb.from('video_scan_product_cache').upsert({store_id:job.store_id,product_key:key,
     lookup:{retail_prices:prices},created_at:new Date().toISOString()});if(saved.error)throw saved.error}
   return {prices,input,output,queries,reused:false};

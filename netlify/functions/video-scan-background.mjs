@@ -1,4 +1,4 @@
-import { serviceClient } from '../lib/server.mjs';
+import { authorizedScan } from '../lib/video-scan-auth.mjs';
 import { identifyFramesCached, lookupRetail, retailFields, tokenCost } from '../lib/video-scan.mjs';
 import { searchProductImages, imageBytes } from '../lib/visual-product-search.mjs';
 import sharp from 'sharp';
@@ -6,19 +6,13 @@ import sharp from 'sharp';
 export async function handler(event) {
   const payload=JSON.parse(event.body||'{}');
   const id=payload.id;
-  const token=(event.headers.authorization||event.headers.Authorization||'').replace(/^Bearer\s+/i,'');
-  const sb=serviceClient();
+  let sb;
   let job;
   try {
-    if(!token||!/^[0-9a-f-]{36}$/i.test(String(id)))throw new Error('Invalid scan request');
-    const auth=await sb.auth.getUser(token);
-    if(auth.error||!auth.data.user)throw new Error('Sign in required');
-    const found=await sb.from('video_scan_jobs').select('*').eq('id',id).single();
-    if(found.error||found.data.created_by!==auth.data.user.id)throw new Error('Scan not found');
-    job=found.data;
+    ({sb,job}=await authorizedScan(event,id));
     let identity;
     if(payload.mode==='price'){
-      if(job.status!=='ready'||!job.result?.selected_option)return {statusCode:200};
+      if(!['ready','saved'].includes(job.status)||(!job.result?.selected_option&&!payload.retry))return {statusCode:200};
       identity=job.result;
     }else{
       if(job.status!=='processing')return {statusCode:200};
@@ -53,18 +47,23 @@ export async function handler(event) {
       }
     }
     // The popup is already available. Search and price may finish after the user starts typing.
+    const retailStarted=Date.now();
+    const retailSignal=AbortSignal.timeout(20_000);
     try {
-      const retail=await lookupRetail(sb,job,identity);
+      console.info('video_scan_retail_started',JSON.stringify({id,mode:payload.mode||'initial'}));
+      const retail=await lookupRetail(sb,job,identity,{signal:retailSignal});
       const fields=retailFields(retail.prices,identity);
       const latest=await sb.from('video_scan_jobs').select('result,status,sku,input_tokens,output_tokens,search_queries').eq('id',id).single();
       if(latest.error)throw latest.error;
       const merged={...latest.data.result,...fields,retail_ready:true,retail_reused:retail.reused,
         retail_at:new Date().toISOString()};
       const input=latest.data.input_tokens+retail.input,output=latest.data.output_tokens+retail.output;
+      if(!['ready','saved'].includes(latest.data.status))return {statusCode:200};
       const updated=await sb.from('video_scan_jobs').update({result:merged,input_tokens:input,output_tokens:output,
         search_queries:latest.data.search_queries+retail.queries,estimated_cost_usd:tokenCost(input,output),
-        updated_at:new Date().toISOString()}).eq('id',id);
+        updated_at:new Date().toISOString()}).eq('id',id).in('status',['ready','saved']);
       if(updated.error)throw updated.error;
+      console.info('video_scan_retail_done',JSON.stringify({id,ms:Date.now()-retailStarted,prices:retail.prices.length,queries:retail.queries}));
       if(latest.data.status==='saved'&&latest.data.sku){
         const existing=await sb.from('units').select('msrp_cents,retail_price_sources,retail_source_name,retail_source_url')
           .eq('store_id',job.store_id).eq('sku',latest.data.sku).single();
@@ -80,8 +79,11 @@ export async function handler(event) {
         }
       }
     } catch(error) {
-      await sb.from('video_scan_jobs').update({result:{...identity,retail_ready:true,retail_error:String(error.message||error).slice(0,200)}})
-        .eq('id',id).eq('status','ready');
+      const latest=await sb.from('video_scan_jobs').select('result,status').eq('id',id).single();
+      if(!latest.error&&['ready','saved'].includes(latest.data.status))
+        await sb.from('video_scan_jobs').update({result:{...latest.data.result,retail_ready:true,
+          retail_error:String(error.message||error).slice(0,200)}}).eq('id',id).in('status',['ready','saved']);
+      console.error('video_scan_retail_failed',JSON.stringify({id,ms:Date.now()-retailStarted,error:String(error.message||error).slice(0,200)}));
     }
   } catch(error) {
     if(job)await sb.from('video_scan_jobs').update({status:'failed',error:String(error.message||error).slice(0,500),

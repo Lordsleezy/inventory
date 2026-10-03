@@ -84,6 +84,29 @@ a:focus-visible {
   border: 0;
 }
 
+.video-scan-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom));
+  background: #0b0b0b;
+  overflow-y: auto;
+}
+
+.video-scan-modal-panel {
+  width: 100%;
+  max-width: 440px;
+  max-height: 100%;
+  overflow-y: auto;
+  padding: 20px;
+  background: #171717;
+  color: #ededed;
+  border: 1px solid #474747;
+}
+
 .photo-viewer {
   position: fixed;
   inset: 0;
