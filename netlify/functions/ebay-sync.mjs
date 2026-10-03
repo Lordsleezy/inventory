@@ -1,5 +1,6 @@
 import { json, corsHeaders, serviceClient } from "../lib/server.mjs";
 import { pollAllStores, reconcileListedOffers, withdrawOpenEbayTasks } from "../lib/ebay.mjs";
+import { syncDrafts } from "../lib/ebay-drafts.mjs";
 import { wrapHandler } from "../lib/floor-log.mjs";
 
 async function handle(event) {
@@ -13,7 +14,16 @@ async function handle(event) {
       reconciled.push({ storeId: row.store_id, listings: await reconcileListedOffers(row.store_id) });
     }
     const orders = await pollAllStores();
-    return json(200, { withdrawn, reconciled, orders });
+    const { data: allStores } = await sb.from("stores").select("id");
+    const drafted = [];
+    for (const row of allStores ?? []) {
+      try {
+        drafted.push({ storeId: row.id, ...(await syncDrafts(row.id, { quoteLimit: 2 })) });
+      } catch (err) {
+        drafted.push({ storeId: row.id, error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+    return json(200, { withdrawn, reconciled, orders, drafted });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return json(500, { error: message });

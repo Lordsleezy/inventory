@@ -25,6 +25,8 @@ const ELECTRONICS = [
 test("appliance categories map Floor grades onto New / Open box / Used / For parts", () => {
   assert.equal(mapFloorCondition("New", APPLIANCE).conditionId, "1000");
   assert.equal(mapFloorCondition("Open box", APPLIANCE).conditionId, "1500");
+  assert.equal(mapFloorCondition("New other", APPLIANCE).conditionId, "1500");
+  assert.equal(mapFloorCondition("New other (see details)", APPLIANCE).conditionId, "1500");
   assert.equal(mapFloorCondition("Excellent", APPLIANCE).conditionId, "3000");
   assert.equal(mapFloorCondition("Very good", APPLIANCE).conditionId, "3000");
   assert.equal(mapFloorCondition("Good", APPLIANCE).conditionId, "3000");

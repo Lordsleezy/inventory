@@ -49,4 +49,8 @@ test("channel matching is case-insensitive and eBay plugs in by adding the chann
   const withEbay = { ...cfg, channels: ["website", "ebay"] };
   assert.equal(payout({ subtotal: 10000, cost: 4000, channel: "ebay" }, rules[0], withEbay), 1800);
   assert.equal(payout({ subtotal: 10000, cost: 4000, channel: "ebay" }, rules[1], withEbay), 0);
+  // $129.99 item, $17.22 fee, $12.00 baked label, $40.00 cost → $60.77 profit, 30% = $18.23
+  const ebay = { subtotal: 12999, cost: 4000, channel: "ebay", ebayFeeCents: 1722, bakedShipCents: 1200 };
+  assert.equal(payout(ebay, rules[0], withEbay), Math.round((12999 - 1722 - 1200 - 4000) * 0.3));
+  assert.equal(payout({ ...ebay, cost: null }, rules[0], withEbay), null);
 });

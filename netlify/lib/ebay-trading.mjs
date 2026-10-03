@@ -129,10 +129,11 @@ export function tradingOrderToIngest(order) {
     Number.isFinite(paid) && paid > 0
       ? String(order.amountPaid)
       : String(order.total || order.transactionPrice || "0");
+  const item = String(order.transactionPrice || value);
   return {
     orderId: order.orderId,
-    lineItems: [{ sku: order.sku, total: { value } }],
-    pricingSummary: { total: { value } },
+    lineItems: [{ sku: order.sku, lineItemCost: { value: item }, total: { value } }],
+    pricingSummary: { priceSubtotal: { value: item }, total: { value } },
   };
 }
 

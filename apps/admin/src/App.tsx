@@ -8,6 +8,7 @@ import { isOnline, NO_ONLINE, payout, remainingProfit, type OnlineCfg } from './
 import { ExpensesPage, type Expense as StoreExpense } from './ExpensesPage';
 import { MissingCostPage } from './MissingCostPage';
 import { TaxReportPage } from './TaxReportPage';
+import { EbayDraftsPage } from './EbayDraftsPage';
 
 const sb = createClient(import.meta.env.VITE_SUPABASE_URL || 'https://zoukmsmbztcuyoslvikp.supabase.co', import.meta.env.VITE_SUPABASE_ANON_KEY || 'missing', { auth: { persistSession: true } });
 const zone = 'America/Los_Angeles';
@@ -33,8 +34,8 @@ const weekStart = (d: string) => { const wd = new Date(`${d}T12:00:00Z`).getUTCD
 const range = (start: string, end: string) => ({ p_from: laMidnight(start), p_to: laMidnight(end) });
 const stamp = (s: string) => new Intl.DateTimeFormat('en-US', { timeZone: zone, month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(s));
 
-type Line = { id: number; ticket_key: string; sku: string; title: string; qty: number; sold_at: string; price_cents: number; tax_cents: number; card_fee_cents: number; cost_cents: number | null; payment_method: string | null; cash_cents: number | null; card_cents: number | null; actor_id: string | null; actor_name: string; channel: string; receipt_no: string; list_price_cents: number | null; override_price_cents: number | null; override_reason: string | null; override_by_name: string | null };
-type Ticket = { key: string; at: string; lines: Line[]; subtotal: number; tax: number; fee: number; total: number; cash: number; card: number; method: string; actorId: string | null; actor: string; cost: number | null; channel: string };
+type Line = { id: number; ticket_key: string; sku: string; title: string; qty: number; sold_at: string; price_cents: number; tax_cents: number; card_fee_cents: number; cost_cents: number | null; payment_method: string | null; cash_cents: number | null; card_cents: number | null; actor_id: string | null; actor_name: string; channel: string; receipt_no: string; list_price_cents: number | null; override_price_cents: number | null; override_reason: string | null; override_by_name: string | null; ebay_fee_cents?: number | null; baked_ship_cents?: number | null };
+type Ticket = { key: string; at: string; lines: Line[]; subtotal: number; tax: number; fee: number; total: number; cash: number; card: number; method: string; actorId: string | null; actor: string; cost: number | null; channel: string; ebayFeeCents: number; bakedShipCents: number };
 type Person = { user_id: string; display_name: string; kind: string };
 type Rule = { employee_id: string; method: 'percent_sale' | 'flat_ticket' | 'percent_profit'; rate: number };
 type Payment = { id: string; employee_id: string; amount_cents: number; paid_at: string; paid_by: string; legacy_ticket_key: string | null };
@@ -55,8 +56,9 @@ function tickets(lines: Line[]): Ticket[] {
   const map = new Map<string, Ticket>();
   for (const l of lines) {
     let t = map.get(l.ticket_key);
-    if (!t) { t = { key: l.ticket_key, at: l.sold_at, lines: [], subtotal: 0, tax: 0, fee: 0, total: 0, cash: 0, card: 0, method: l.payment_method || 'other', actorId: l.actor_id, actor: l.actor_name, cost: 0, channel: l.channel }; map.set(l.ticket_key, t); }
+    if (!t) { t = { key: l.ticket_key, at: l.sold_at, lines: [], subtotal: 0, tax: 0, fee: 0, total: 0, cash: 0, card: 0, method: l.payment_method || 'other', actorId: l.actor_id, actor: l.actor_name, cost: 0, channel: l.channel, ebayFeeCents: 0, bakedShipCents: 0 }; map.set(l.ticket_key, t); }
     t.lines.push(l); t.subtotal += l.price_cents; t.tax += l.tax_cents; t.fee += l.card_fee_cents;
+    t.ebayFeeCents += l.ebay_fee_cents || 0; t.bakedShipCents += l.baked_ship_cents || 0;
     if (l.cost_cents === null) t.cost = null;
     else if (t.cost !== null) t.cost += l.cost_cents * l.qty;
   }
@@ -110,7 +112,7 @@ async function payoutSales() {
 export function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [store, setStore] = useState<string | null>(null);
-  const [page, setPage] = useState<'sales' | 'orders' | 'online' | 'expenses' | 'taxes' | 'costs' | 'inventory' | 'reviews' | 'reports' | 'payouts' | 'settings' | 'cameras'>('sales');
+  const [page, setPage] = useState<'sales' | 'orders' | 'ebay' | 'online' | 'expenses' | 'taxes' | 'costs' | 'inventory' | 'reviews' | 'reports' | 'payouts' | 'settings' | 'cameras'>('sales');
   const [selectedDay, setSelectedDay] = useState(today());
   const [live, setLive] = useState<Ticket[]>([]);
   const [allSales, setAllSales] = useState<Ticket[]>([]);
@@ -126,6 +128,7 @@ export function App() {
   const [error, setError] = useState(''); const [busy, setBusy] = useState(false);
 
   useEffect(() => { void sb.auth.getSession().then(({ data }) => setSession(data.session)); const { data } = sb.auth.onAuthStateChange((_e, s) => setSession(s)); return () => data.subscription.unsubscribe(); }, []);
+  useEffect(() => { if (new URLSearchParams(window.location.search).get('ebay') === '1') setPage('ebay'); }, []);
   useEffect(() => { setStore(null); setLive([]); setAllSales([]); setPeople([]); setRules([]); setPayments([]); setReports([]); setExpenses([]); setOnlineCfg(NO_ONLINE); if (!session) return; void sb.from('portal_admins').select('store_id').eq('user_id', session.user.id).single().then(({ data, error: e }) => { setStore(e ? null : data?.store_id || null); if (e && e.code !== 'PGRST116') setError(e.message); }); }, [session]);
   const loadCommon = useCallback(async () => {
     if (!store) return;
@@ -172,9 +175,10 @@ export function App() {
 
   if (!session) return <main className="auth"><div className="login"><div className="brand">OPEN BOX <span>INDUSTRIES</span></div><h1>Floor Admin</h1><p>Sign in to view your store.</p><form onSubmit={e => { e.preventDefault(); void run(async () => { const result = await sb.auth.signInWithPassword({ email, password }); if (result.error) throw result.error; }); }}><label>Email<input type="email" autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} required /></label><label>Password<input type="password" autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} required /></label><button disabled={busy}>Sign in</button></form>{error && <p className="error">{error}</p>}</div></main>;
   if (!store) return <main className="auth"><div className="login"><h1>Access unavailable</h1><p>This account has no Floor Admin access. Ask an existing administrator to add it.</p><button onClick={() => void sb.auth.signOut()}>Sign out</button>{error && <p className="error">{error}</p>}</div></main>;
-  return <div className="app"><aside><div className="brand">OPEN BOX <span>INDUSTRIES</span></div><div className="product">Floor <b>Admin</b></div><nav>{([['sales','Live Sales'],['orders','Orders'],['online','Online selling'],['expenses','Expenses'],['taxes','Sales tax'],['costs','Missing cost'],['inventory','Inventory'],['reviews','Review matches'],['reports','Reports'],['payouts','Payouts'],['settings','Payout Settings'],['cameras','Cameras']] as const).map(([id,label]) => <button className={page === id ? 'active' : ''} key={id} onClick={() => { setPage(id); setEditing(null); }}>{label}</button>)}</nav><div className="account"><small>{session.user.email}</small><button onClick={() => void sb.auth.signOut()}>Sign out</button></div></aside><main className="content">{error && <div className="alert" role="alert">{error}<button onClick={() => setError('')}>Dismiss</button></div>}
+  return <div className="app"><aside><div className="brand">OPEN BOX <span>INDUSTRIES</span></div><div className="product">Floor <b>Admin</b></div><nav>{([['sales','Live Sales'],['orders','Orders'],['ebay','eBay'],['online','Online selling'],['expenses','Expenses'],['taxes','Sales tax'],['costs','Missing cost'],['inventory','Inventory'],['reviews','Review matches'],['reports','Reports'],['payouts','Payouts'],['settings','Payout Settings'],['cameras','Cameras']] as const).map(([id,label]) => <button className={page === id ? 'active' : ''} key={id} onClick={() => { setPage(id); setEditing(null); }}>{label}</button>)}</nav><div className="account"><small>{session.user.email}</small><button onClick={() => void sb.auth.signOut()}>Sign out</button></div></aside><main className="content">{error && <div className="alert" role="alert">{error}<button onClick={() => setError('')}>Dismiss</button></div>}
   {page === 'sales' && <><header><div><div className="eyebrow">REGISTER ACTIVITY</div><h1>Live Sales</h1><p>Transactions from Floor, updated as sales arrive.</p></div><label className="date-control">Date<input type="date" value={selectedDay} onChange={e => setSelectedDay(e.target.value)} /></label></header><div className="stats"><Stat name="Collected" value={money(sum(live).collected_cents)} /><Stat name="Sales" value={String(live.length)} /><Stat name="Cash" value={money(sum(live).cash_cents)} /><Stat name="Card" value={money(sum(live).card_cents)} /><Stat name="Card fees" value={money(sum(live).card_fee_cents)} /><Stat name="Other / unallocated" value={money(sum(live).other_cents)} /></div><section className="panel"><h2>{selectedDay === today() ? 'Today’s transactions' : `Transactions · ${selectedDay}`}</h2>{live.length === 0 ? <Empty>No sales recorded for this date.</Empty> : <div className="ticket-list">{live.map(t => <div className="ticket" key={t.key}><div className="ticket-top"><strong>{money(t.total)}</strong><span>{stamp(t.at)}</span></div><div className="ticket-items">{t.lines.map(l => <SaleItem key={l.id} line={l} />)}</div><div className="ticket-bottom"><span>{t.method === 'split' ? (t.lines[0].cash_cents === null ? 'Split amounts unavailable' : `Cash ${money(t.cash)} · Card ${money(t.card)}`) : t.method === 'card' ? `Card ${money(t.card)}` : t.method === 'cash' ? `Cash ${money(t.cash)}` : t.method}{t.fee > 0 && ` · fee ${money(t.fee)}`}</span><span>Rang up by {t.actor}</span></div></div>)}</div>}</section></>}
   {page === 'orders' && <OrdersPage client={sb} accessToken={session.access_token} money={money} stamp={stamp} />}
+  {page === 'ebay' && <EbayDraftsPage accessToken={session.access_token} money={money} />}
   {page === 'online' && <OnlineSellingPage client={sb} accessToken={session.access_token} stamp={stamp} />}
   {page === 'expenses' && <ExpensesPage client={sb} money={money} expenses={expenses} staff={staff} ownerId={onlineCfg.employeeId || defaultReimbursementId} onChanged={loadCommon} />}
   {page === 'taxes' && <TaxReportPage client={sb} money={money} />}
@@ -214,7 +218,9 @@ function PayoutsPage({allSales,staff,rules,payments,reports,expenses,cfg,personN
         at: t.at, kind: online ? 'online' as const : 'sale' as const, amount: payout(t,rule,cfg),
         detail: t.lines.map(l => l.sku).join(', '),
         note: online
-          ? `${t.channel} · ${money(t.subtotal)} sale − ${t.cost === null ? 'cost missing' : money(t.cost) + ' cost'} · ${cfg.pct}% of profit (tax, card fee, shipping and label excluded)`
+          ? (t.channel || '').toLowerCase() === 'ebay'
+            ? `ebay · item ${money(t.subtotal)} − fees ${money(t.ebayFeeCents || 0)} − baked shipping ${money(t.bakedShipCents || 0)} − ${t.cost === null ? 'cost missing' : money(t.cost) + ' cost'} · ${cfg.pct}% of profit`
+            : `${t.channel} · ${money(t.subtotal)} sale − ${t.cost === null ? 'cost missing' : money(t.cost) + ' cost'} · ${cfg.pct}% of profit (tax, card fee, shipping and label excluded)`
           : `${money(t.subtotal)} merchandise · ${rule.method === 'flat_ticket' ? money(Math.round(Number(rule.rate)*100)) + ' flat' : rule.rate + '% ' + (rule.method === 'percent_profit' ? 'of profit' : 'of sale')} · Remaining profit ${rp === null ? 'pending' : money(rp)}`
       }];
     });
@@ -261,7 +267,7 @@ function OnlinePayoutSettings({cfg,staff,busy,save}:{cfg:OnlineCfg;staff:Person[
   const [who,setWho]=useState(cfg.employeeId||''); const [pct,setPct]=useState(String(cfg.pct)); const [channels,setChannels]=useState(cfg.channels.join(', '));
   useEffect(()=>{setWho(cfg.employeeId||'');setPct(String(cfg.pct));setChannels(cfg.channels.join(', '));},[cfg]);
   return <section className="panel"><h2>Online sales payout</h2>
-    <p className="hint">On online sales the recipient gets this percent of profit (sale price − acquisition cost). Sales tax, card fee, shipping and label cost are left out, and nobody else is paid on online sales. A unit with no cost is marked “needs cost” until you fill it in. A refunded or canceled order reverses its payout.</p>
+    <p className="hint">On website sales the recipient gets this percent of profit (sale price − acquisition cost). On eBay sales, profit is the eBay item price minus eBay fees minus any shipping baked into that price minus acquisition cost. Sales tax, card fee, and buyer-paid shipping are left out. A unit with no cost is marked “needs cost” until you fill it in.</p>
     <form className="rule-row" onSubmit={e=>{e.preventDefault();void save(channels.split(/[,\s]+/).map(x=>x.trim().toLowerCase()).filter(Boolean),Number(pct),who);}}>
       <label>Paid to<select value={who} onChange={e=>setWho(e.target.value)} required><option value="" disabled>Choose…</option>{staff.map(p=><option key={p.user_id} value={p.user_id}>{p.display_name}</option>)}</select></label>
       <label>Percent of profit<input type="number" min={0} max={100} step="0.01" required value={pct} onChange={e=>setPct(e.target.value)} />%</label>

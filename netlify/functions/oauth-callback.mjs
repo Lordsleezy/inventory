@@ -23,7 +23,7 @@ function esc(value) {
     .replace(/"/g, "&quot;");
 }
 
-function page(status, { title, message, detail, href }) {
+function page(status, { title, message, detail, href, linkLabel }) {
   const link = href || deepLink({ ok: "0" });
   return html(
     status,
@@ -43,7 +43,7 @@ function page(status, { title, message, detail, href }) {
     <h1>${esc(title)}</h1>
     <p>${esc(message)}</p>
     ${detail ? `<p class="quiet">${esc(detail)}</p>` : ""}
-    <p><a class="btn" href="${esc(link)}">Back to Floor</a></p>
+    <p><a class="btn" href="${esc(link)}">${esc(linkLabel || "Back to Floor")}</a></p>
   </body>
 </html>`,
   );
@@ -312,14 +312,15 @@ async function handle(event) {
       try {
         await subscribeNotifications(state.store_id);
       } catch {
-        /* listing still works; polling will pick up sandbox sales */
+        /* listing still works; polling will pick up sales */
       }
     }
-    const href = deepLink({ provider: state.provider, ok: "1", ...extra });
+    const href = state.return_to || deepLink({ provider: state.provider, ok: "1", ...extra });
     const result = page(200, {
       title: "Connected",
-      message: `${state.provider} is connected. Return to Floor.`,
+      message: state.return_to ? `${state.provider} is connected. Return to the admin portal.` : `${state.provider} is connected. Return to Floor.`,
       href,
+      linkLabel: state.return_to ? "Back to Admin" : "Back to Floor",
     });
     result.body = result.body.replace(
       "</body>",

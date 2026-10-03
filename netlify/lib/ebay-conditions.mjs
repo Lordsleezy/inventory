@@ -61,11 +61,11 @@ export function mapFloorCondition(floorGrade, allowed) {
     );
   }
 
-  if (grade.includes("open")) {
+  if (grade.includes("open") || grade.includes("new other")) {
     return (
-      byName(list, (n) => n.includes("open box")) ||
+      byName(list, (n) => n.includes("open box") || n.includes("new other")) ||
       byId(list, OPEN_BOX_IDS) ||
-      byName(list, (n) => n === "like new" || n === "new other")
+      byName(list, (n) => n === "like new")
     );
   }
 

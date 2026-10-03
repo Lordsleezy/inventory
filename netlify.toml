@@ -25,6 +25,12 @@
 [functions."listing-check"]
   schedule = "0 14 * * *"
 
+[functions."ebay-sync"]
+  schedule = "* * * * *"
+
+[functions."ebay-drafts"]
+  timeout = 60
+
 [build.processing.html]
   pretty_urls = false
 

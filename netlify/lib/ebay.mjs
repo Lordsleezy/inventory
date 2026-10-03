@@ -7,6 +7,8 @@ import { composeChannelDescription, parseListingSpecs } from "./listing-copy.mjs
 import { parseMeasure, specInches } from "./ebay-aspects.mjs";
 import { listingMeasures, prepareUnitAspects, prepareUnitCondition } from "./ebay-catalog.mjs";
 import { floorLog, redact, setTrace } from "./floor-log.mjs";
+import { sendResend } from "./receipt.mjs";
+import { ebayFeeCents, ebayOrderAmounts, ebayShipTo } from "./ebay-price.mjs";
 import {
   compactShippingCatalog,
   getSellerOrders,
@@ -334,15 +336,15 @@ async function resetUnpublishedOffers(storeId, sku) {
 async function ensureLocation(storeId) {
   const key = locationKey(storeId);
   const body = {
-    name: "Floor warehouse",
+    name: "Open Box Industries",
     merchantLocationStatus: "ENABLED",
     locationTypes: ["WAREHOUSE"],
     location: {
       address: {
-        addressLine1: process.env.EBAY_LOCATION_LINE1 || "2051 Challenge Way",
-        city: process.env.EBAY_LOCATION_CITY || "Roseville",
+        addressLine1: process.env.EBAY_LOCATION_LINE1 || "3121 Penryn Rd",
+        city: process.env.EBAY_LOCATION_CITY || "Penryn",
         stateOrProvince: process.env.EBAY_LOCATION_REGION || "CA",
-        postalCode: process.env.EBAY_LOCATION_POSTAL || "95678",
+        postalCode: process.env.EBAY_LOCATION_POSTAL || "95663",
         country: process.env.EBAY_LOCATION_COUNTRY || "US",
       },
     },
@@ -352,6 +354,17 @@ async function ensureLocation(storeId) {
     existing = await ebayFetch(storeId, "GET", `/sell/inventory/v1/location/${key}`);
   } catch (err) {
     if (err.status !== 404) throw err;
+  }
+  if (existing && existing.location?.address?.postalCode !== body.location.address.postalCode) {
+    try {
+      await ebayFetch(storeId, "POST", `/sell/inventory/v1/location/${key}/update_location_details`, {
+        name: body.name,
+        phone: process.env.EBAY_LOCATION_PHONE || "+12799770722",
+        location: body.location,
+      });
+    } catch (err) {
+      console.log("ebay_location_update", err instanceof Error ? err.message : String(err));
+    }
   }
   if (!existing) {
     try {
@@ -715,7 +728,7 @@ function listingCopy(unit) {
   return { title, description };
 }
 
-export async function listSku(storeId, sku) {
+export async function listSku(storeId, sku, draft = null) {
   setTrace({ storeId, sku, source: "ebay-list" });
   const sb = serviceClient();
   const { data: unit, error } = await sb.from("units").select("*").eq("store_id", storeId).eq("sku", sku).maybeSingle();
@@ -727,14 +740,26 @@ export async function listSku(storeId, sku) {
   if (unit.ask_cents == null || unit.ask_cents <= 0) {
     throw new Error(`SKU ${sku} needs a price before it can go on eBay.`);
   }
-  const images = await photoUrls(storeId, sku);
-  const epid = await catalogEpid(storeId, unit);
+  const images = draft?.imageUrls?.length ? draft.imageUrls : await photoUrls(storeId, sku);
+  const epid = draft ? null : await catalogEpid(storeId, unit);
   const loc = await ensureLocation(storeId);
-  const copy = listingCopy(unit);
-  const { aspects, categoryId: cat } = await itemAspects(storeId, unit);
-  const condition = await prepareUnitCondition({ unit, liveCheck: true });
-  const pkg = packageSize(unit);
-  const policies = await ensurePolicies(storeId);
+  const copy = draft?.title ? { title: draft.title, description: draft.description || "" } : listingCopy(unit);
+  let aspects;
+  let cat;
+  let condition;
+  if (draft) {
+    aspects = draft.aspects || {};
+    cat = String(draft.categoryId || "");
+    condition = { payload: draft.conditionPayload, mapped: draft.conditionPayload, allowed: [] };
+  } else {
+    const prepared = await itemAspects(storeId, unit);
+    aspects = prepared.aspects;
+    cat = prepared.categoryId;
+    condition = await prepareUnitCondition({ unit, liveCheck: true });
+  }
+  const pkg = draft?.package || packageSize(unit);
+  const policies = draft?.policies || (await ensurePolicies(storeId));
+  const priceCents = draft?.priceCents ?? unit.ask_cents;
 
   await floorLog({
     storeId,
@@ -765,7 +790,7 @@ export async function listSku(storeId, sku) {
       },
     },
     ...condition.payload,
-    conditionDescription: unit.defect_notes || undefined,
+    conditionDescription: draft?.conditionNotes || unit.defect_notes || undefined,
     packageWeightAndSize: pkg,
     product: {
       title: copy.title,
@@ -804,13 +829,19 @@ export async function listSku(storeId, sku) {
     },
     merchantLocationKey: loc,
     listingDuration: "GTC",
-    pricingSummary: { price: { value: money(unit.ask_cents), currency: "USD" } },
+    pricingSummary: { price: { value: money(priceCents), currency: "USD" } },
   };
 
   let offerId = live?.offerId || null;
   let published = live;
   if (live?.listing?.listingId || live?.listingId) {
-    published = live;
+    if (draft && offerId) {
+      await ebayFetch(storeId, "PUT", `/sell/inventory/v1/offer/${offerId}`, offerBody);
+      published = (await quietGet(storeId, `/sell/inventory/v1/offer/${offerId}`)) || live;
+      if (published?._error) published = live;
+    } else {
+      published = live;
+    }
   } else {
     const created = await ebayFetch(storeId, "POST", "/sell/inventory/v1/offer", offerBody);
     offerId = created.offerId;
@@ -936,11 +967,23 @@ export async function reconcileListedOffers(storeId) {
   return results;
 }
 
+async function emailEndFailure(sb, storeId, sku, message) {
+  const { data } = await sb.from("store_settings").select("value").eq("store_id", storeId).eq("key", "order_notify_emails").maybeSingle();
+  const emails = Array.isArray(data?.value) ? data.value : [];
+  for (const to of emails) {
+    await sendResend({
+      to,
+      subject: `eBay listing did not end — SKU ${sku}`,
+      text: `SKU ${sku} sold somewhere other than eBay, but Floor could not end the eBay listing.\n\n${message}\n\nFloor will keep retrying.`,
+    }).catch(() => undefined);
+  }
+}
+
 export async function withdrawOpenEbayTasks() {
   const sb = serviceClient();
   const { data, error } = await sb
     .from("delist_tasks")
-    .select("store_id, sku")
+    .select("id, store_id, sku, attempts, alerted_at")
     .eq("channel", "ebay")
     .is("completed_at", null);
   if (error) throw new Error(error.message);
@@ -950,7 +993,15 @@ export async function withdrawOpenEbayTasks() {
       await withdrawSku(row.store_id, row.sku);
       results.push({ sku: row.sku, ok: true });
     } catch (err) {
-      results.push({ sku: row.sku, error: err instanceof Error ? err.message : String(err) });
+      const message = err instanceof Error ? err.message : String(err);
+      const attempts = Number(row.attempts || 0) + 1;
+      let alertedAt = row.alerted_at;
+      if (!alertedAt) {
+        await emailEndFailure(sb, row.store_id, row.sku, message);
+        alertedAt = new Date().toISOString();
+      }
+      await sb.from("delist_tasks").update({ attempts, last_error: message, alerted_at: alertedAt }).eq("id", row.id);
+      results.push({ sku: row.sku, error: message, attempts });
     }
   }
   return results;
@@ -965,10 +1016,7 @@ function orderSku(order) {
 }
 
 function orderCents(order) {
-  const total = order?.pricingSummary?.total?.value ?? order?.lineItems?.[0]?.total?.value;
-  const n = Number(total);
-  if (!Number.isFinite(n)) return 0;
-  return Math.round(n * 100);
+  return ebayOrderAmounts(order).itemCents;
 }
 
 export async function ingestEbayOrder(storeId, order) {
@@ -1001,13 +1049,61 @@ export async function ingestEbayOrder(storeId, order) {
     }
     throw new Error(error.message);
   }
+  const amounts = ebayOrderAmounts(order);
+  const itemCents = amounts.itemCents || orderCents(order);
+  const { data: settingRows } = await sb
+    .from("store_settings")
+    .select("key,value")
+    .eq("store_id", storeId)
+    .in("key", ["ebay_fee_pct", "ebay_per_order_cents"]);
+  const setting = Object.fromEntries((settingRows || []).map((row) => [row.key, row.value]));
+  const feePct = Number(setting.ebay_fee_pct ?? 13.25);
+  const perOrder = Number(setting.ebay_per_order_cents ?? 40);
+  const { data: draft } = await sb
+    .from("ebay_drafts")
+    .select("shipping_mode,label_cents")
+    .eq("store_id", storeId)
+    .eq("sku", sku)
+    .maybeSingle();
+  const baked = draft?.shipping_mode === "free" ? Number(draft.label_cents || 0) : 0;
   await sb.from("channel_orders").insert({
     store_id: storeId,
     provider: "ebay",
     order_id: orderId,
     sku,
     sale_id: sale?.id ?? null,
+    item_cents: itemCents,
+    fee_cents: ebayFeeCents(itemCents, feePct, perOrder),
+    baked_ship_cents: baked,
   });
+  const ship = ebayShipTo(order);
+  await sb.from("web_orders").insert({
+    store_id: storeId,
+    sku,
+    sale_id: sale?.id ?? null,
+    status: "paid",
+    channel: "ebay",
+    fulfillment: "ship",
+    order_no: String(orderId),
+    paid_at: new Date().toISOString(),
+    buyer_name: ship.name || null,
+    buyer_email: ship.email || null,
+    buyer_phone: ship.phone || null,
+    ship_line1: ship.line1 || null,
+    ship_line2: ship.line2 || null,
+    ship_city: ship.city || null,
+    ship_region: ship.region || null,
+    ship_postal: ship.postal || null,
+    item_cents: itemCents,
+    shipping_cents: amounts.shipCents,
+    tax_cents: 0,
+    total_cents: itemCents + amounts.shipCents,
+    payment_id: `ebay:${orderId}`,
+    payment_env: process.env.EBAY_ENV === "production" ? "production" : "sandbox",
+  }).then(({ error: orderError }) => {
+    if (orderError) console.log("ebay_packing_order", orderError.message);
+  });
+  await sb.from("ebay_drafts").delete().eq("store_id", storeId).eq("sku", sku);
   await sb.from("listings").upsert(
     {
       store_id: storeId,

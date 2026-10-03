@@ -22,5 +22,5 @@ export async function portalAdminFromEvent(event, storeIdHint) {
   if (error || !auth.user) throw Object.assign(new Error("Sign in required"), { status: 401 });
   const { data: member } = await sb.from("portal_admins").select("store_id").eq("user_id", auth.user.id).maybeSingle();
   if (!member) throw Object.assign(new Error("Admin access required"), { status: 403 });
-  return { sb, storeId: member.store_id, actor: auth.user.email || auth.user.id };
+  return { sb, storeId: member.store_id, actor: auth.user.email || auth.user.id, userId: auth.user.id };
 }

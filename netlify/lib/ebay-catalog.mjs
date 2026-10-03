@@ -252,6 +252,32 @@ async function applicationToken() {
   return { api, token: json.access_token };
 }
 
+export async function suggestCategories(query) {
+  const q = String(query || "").trim();
+  if (!q) return [];
+  const market = process.env.EBAY_MARKETPLACE_ID || "EBAY_US";
+  const { api, token } = await applicationToken();
+  const treeRes = await fetch(
+    `${api}/commerce/taxonomy/v1/get_default_category_tree_id?marketplace_id=${market}`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+  const tree = await treeRes.json();
+  const treeId = tree?.categoryTreeId || "0";
+  const res = await fetch(
+    `${api}/commerce/taxonomy/v1/category_tree/${treeId}/get_category_suggestions?q=${encodeURIComponent(q)}`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.errors?.[0]?.message || "ebay_category_suggestions_failed");
+  return (json.categorySuggestions || [])
+    .slice(0, 8)
+    .map((row) => ({
+      categoryId: String(row.category?.categoryId || ""),
+      categoryName: String(row.category?.categoryName || ""),
+    }))
+    .filter((row) => row.categoryId);
+}
+
 export async function fetchLiveAspects(ebayCategoryId) {
   const market = process.env.EBAY_MARKETPLACE_ID || "EBAY_US";
   const { api, token } = await applicationToken();
