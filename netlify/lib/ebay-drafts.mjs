@@ -630,6 +630,7 @@ export async function prepareDraft(storeId, sku, { metadataOnly = false } = {}) 
   if (needsRules) {
     try {
       await refreshCategoryRules(row, unit);
+      if (/no listing options/i.test(row.ebay_error || "")) row.ebay_error = null;
     } catch (err) {
       row.ebay_error = err instanceof Error ? err.message : String(err);
       try { await repairCategoryRules(row, unit); }
