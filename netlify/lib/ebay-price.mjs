@@ -120,6 +120,8 @@ export function fallbackLabelCents(pkg) {
   return 8000;
 }
 
+import { ebayIdentifiers } from "./ebay-product.mjs";
+
 export function draftReadiness(draft) {
   const items = [];
   const need = (ok, label) => items.push({ ok: Boolean(ok), label });
@@ -135,13 +137,18 @@ export function draftReadiness(draft) {
   need(boxOk, boxOk ? "Box size and weight" : "Needs box size");
   need(Number(draft?.price_cents) > 0, "eBay price");
   need(draft?.shipping_mode === "free" || draft?.shipping_mode === "calculated", "Shipping mode");
+  const identifiers = ebayIdentifiers({ brand: draft?.unit_brand, model: draft?.unit_model, upc: draft?.unit_upc }, draft?.aspects);
+  need(identifiers.validBrand, "Brand needed");
+  need(Boolean(identifiers.mpn), "MPN or Does not apply");
+  need(Boolean(identifiers.upc), "UPC or Does not apply");
   const defs = Array.isArray(draft?.aspect_defs) ? draft.aspect_defs : [];
   if (!draft?.category_id) need(false, "eBay item specifics");
   else if (!defs.length) need(false, "eBay item specifics loaded");
   else {
     const aspects = draft?.aspects || {};
     for (const def of defs.filter((d) => d.required)) {
-      const value = String(aspects[def.name] || "").trim();
+      const identifier = { brand: identifiers.brand, mpn: identifiers.mpn, upc: identifiers.upc }[String(def.name).toLowerCase()];
+      const value = String(aspects[def.name] || identifier || "").trim();
       const allowed = Array.isArray(def.allowed) ? def.allowed : [];
       const known = aspectAllowsCustom(def) || !allowed.length || allowed.includes(value);
       need(value && known, `Required: ${def.name}`);

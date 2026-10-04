@@ -39,13 +39,14 @@ async function samplePhoto(store) {
 
 async function makeUnit(store, sku, fields, photo) {
   const now = new Date().toISOString();
-  await sb.from("sku_ledger").delete().eq("sku", sku);
-  const ledger = await sb.from("sku_ledger").insert({ sku, issued_at: now, store_id: store, label: "ebay sandbox test" });
+  const { data: occupied } = await sb.from("sku_ledger").select("sku").eq("store_id", store).eq("sku", sku).maybeSingle();
+  if (occupied) throw new Error(`Refusing to overwrite existing SKU ${sku}`);
+  const ledger = await sb.from("sku_ledger").insert({ sku, issued_at: now, store_id: store, label: "ebay sandbox test", is_test: true });
   if (ledger.error) throw new Error(ledger.error.message);
   const row = {
     sku, store_id: store, state: "available", ask_cents: 4000, received_at: now, updated_at: now,
     show_on_website: true, title: "Sandbox desk lamp", brand: "Test", model: "LAMP", category: "Lighting",
-    condition: "Good", listing_body: "Sandbox listing used to prove the eBay draft flow. Not for sale.",
+    condition: "Good", listing_body: "Sandbox listing used to prove the eBay draft flow. Not for sale.", is_test: true,
     ...fields,
   };
   const unit = await sb.from("units").insert(row);
@@ -69,20 +70,25 @@ async function fillRequired(store, sku) {
 }
 
 async function cleanup(store) {
-  for (const sku of SKUS) {
+  const { data: ledger } = await sb.from("sku_ledger").select("sku,is_test").eq("store_id", store).in("sku", SKUS);
+  const { data: units } = await sb.from("units").select("sku,is_test").eq("store_id", store).in("sku", SKUS);
+  const marked = new Set((ledger || []).filter((row) => row.is_test).map((row) => row.sku));
+  const safe = SKUS.filter((sku) => marked.has(sku) && (units || []).some((row) => row.sku === sku && row.is_test));
+  for (const sku of safe) {
     await withdrawSku(store, sku).catch((err) => log("withdraw leftover", `${sku} ${err.message}`));
   }
-  await sb.from("delist_tasks").delete().eq("store_id", store).in("sku", SKUS);
-  await sb.from("channel_orders").delete().eq("store_id", store).in("sku", SKUS);
-  await sb.from("web_orders").delete().eq("store_id", store).in("sku", SKUS);
-  await sb.from("sales").delete().eq("store_id", store).in("sku", SKUS);
-  await sb.from("listings").delete().eq("store_id", store).in("sku", SKUS);
-  await sb.from("ebay_drafts").delete().eq("store_id", store).in("sku", SKUS);
-  await sb.from("photos").delete().eq("store_id", store).in("sku", SKUS);
-  await sb.from("events").delete().eq("store_id", store).in("sku", SKUS);
-  await sb.from("incidents").delete().eq("store_id", store).in("sku", SKUS);
-  await sb.from("units").delete().eq("store_id", store).in("sku", SKUS);
-  await sb.from("sku_ledger").delete().in("sku", SKUS);
+  if (!safe.length) return;
+  await sb.from("delist_tasks").delete().eq("store_id", store).in("sku", safe);
+  await sb.from("channel_orders").delete().eq("store_id", store).in("sku", safe);
+  await sb.from("web_orders").delete().eq("store_id", store).in("sku", safe);
+  await sb.from("sales").delete().eq("store_id", store).in("sku", safe);
+  await sb.from("listings").delete().eq("store_id", store).in("sku", safe);
+  await sb.from("ebay_drafts").delete().eq("store_id", store).in("sku", safe);
+  await sb.from("photos").delete().eq("store_id", store).in("sku", safe);
+  await sb.from("events").delete().eq("store_id", store).in("sku", safe);
+  await sb.from("incidents").delete().eq("store_id", store).in("sku", safe);
+  await sb.from("units").delete().eq("store_id", store).in("sku", safe).eq("is_test", true);
+  await sb.from("sku_ledger").delete().eq("store_id", store).in("sku", safe).eq("is_test", true);
 }
 
 const results = [];

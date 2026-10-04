@@ -4,6 +4,7 @@ import { EBAY_OAUTH_SCOPES, ebayHosts, ebayItemViewUrl, ebayRuName } from "./eba
 import { formatEbayError, locationKey } from "./ebay-errors.mjs";
 import { publicPhotoUrl } from "./ebay-photos.mjs";
 import { composeChannelDescription, parseListingSpecs } from "./listing-copy.mjs";
+import { ebayDescription, ebayIdentifiers } from "./ebay-product.mjs";
 import { parseMeasure, specInches } from "./ebay-aspects.mjs";
 import { listingMeasures, prepareUnitAspects, prepareUnitCondition } from "./ebay-catalog.mjs";
 import { floorLog, redact, setTrace } from "./floor-log.mjs";
@@ -725,7 +726,7 @@ function listingCopy(unit) {
     defectNotes: unit.defect_notes,
     sku: unit.sku,
   });
-  return { title, description };
+  return { title, description: ebayDescription(description, unit.sku) };
 }
 
 export async function listSku(storeId, sku, draft = null) {
@@ -760,6 +761,9 @@ export async function listSku(storeId, sku, draft = null) {
   const pkg = draft?.package || packageSize(unit);
   const policies = draft?.policies || (await ensurePolicies(storeId));
   const priceCents = draft?.priceCents ?? unit.ask_cents;
+  const identifiers = ebayIdentifiers(unit, aspects);
+  if (!identifiers.validBrand) throw new Error("Brand needed before pushing to eBay.");
+  aspects = { ...aspects, Brand: [identifiers.brand], MPN: [identifiers.mpn] };
 
   await floorLog({
     storeId,
@@ -796,8 +800,9 @@ export async function listSku(storeId, sku, draft = null) {
       title: copy.title,
       description: copy.description,
       imageUrls: images,
-      brand: unit.brand || undefined,
-      mpn: unit.model || undefined,
+      brand: identifiers.brand,
+      mpn: identifiers.mpn,
+      upc: [identifiers.upc],
       aspects,
       ...(epid ? { epid } : {}),
     },

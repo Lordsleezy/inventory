@@ -83,6 +83,7 @@ async function createThrowawaySoldPhoto() {
     issued_at: now,
     label: "photo-rls throwaway",
     fate: "issued",
+    is_test: true,
   });
   if (ledger.error) throw new Error(`sku_ledger: ${ledger.error.message}`);
 
@@ -90,6 +91,7 @@ async function createThrowawaySoldPhoto() {
     store_id: storeId,
     sku,
     title: "photo-rls throwaway",
+    is_test: true,
     state: "available",
     show_on_website: true,
     received_at: now,
@@ -126,6 +128,9 @@ async function createThrowawaySoldPhoto() {
 }
 
 async function cleanupThrowaway(sku, path, saleId, storeId) {
+  const { data: unit } = await admin.from("units").select("is_test").eq("sku", sku).eq("store_id", storeId).maybeSingle();
+  const { data: ledger } = await admin.from("sku_ledger").select("is_test").eq("sku", sku).eq("store_id", storeId).maybeSingle();
+  if (!unit?.is_test || !ledger?.is_test) throw new Error(`Refusing cleanup of unmarked SKU ${sku}`);
   if (saleId) {
     const voided = await admin.rpc("void_sale", {
       p_sale_id: saleId,

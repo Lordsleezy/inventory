@@ -3,6 +3,7 @@ import { ebayFetch, listSku, userToken, withdrawSku } from "./ebay.mjs";
 import { formatEbayError } from "./ebay-errors.mjs";
 import { publicPhotoUrl } from "./ebay-photos.mjs";
 import { composeChannelDescription, parseListingSpecs } from "./listing-copy.mjs";
+import { ebayDescription } from "./ebay-product.mjs";
 import { fillAspects, pickCategorySuggestion } from "./ebay-aspects.mjs";
 import {
   fetchLiveAspects,
@@ -125,7 +126,7 @@ function autoTitle(unit) {
 }
 
 function autoDescription(unit) {
-  return composeChannelDescription({
+  return ebayDescription(composeChannelDescription({
     listingBody: unit.listing_body,
     brand: unit.brand,
     model: unit.model,
@@ -135,7 +136,7 @@ function autoDescription(unit) {
     testStatus: unit.test_status,
     defectNotes: unit.defect_notes,
     sku: unit.sku,
-  });
+  }), unit.sku);
 }
 
 function localCategoryId(unit) {
@@ -194,7 +195,7 @@ function draftFromUnit(unit, photos, listing, previous, settings) {
     sku: unit.sku,
     status: listing?.status === "listed" ? "live" : "draft",
     title: locked(prev, "title") ? prev.title : autoTitle(unit),
-    description: locked(prev, "description") ? prev.description : autoDescription(unit),
+    description: locked(prev, "description") ? ebayDescription(prev.description, unit.sku) : autoDescription(unit),
     category_id: locked(prev, "category") ? prev.category_id : (prev.category_id || localCategoryId(unit)),
     category_name: locked(prev, "category") ? prev.category_name : (prev.category_name || null),
     suggestions: prev.suggestions || [],
@@ -217,6 +218,9 @@ function draftFromUnit(unit, photos, listing, previous, settings) {
     view_url: prev.view_url || null,
     locks: prev.locks || [],
     floor_cents: unit.ask_cents,
+    unit_brand: unit.brand,
+    unit_model: unit.model,
+    unit_upc: unit.upc,
     box,
     updated_at: new Date().toISOString(),
   };
@@ -231,7 +235,7 @@ async function unitsForDrafts(sb, storeId) {
   for (let from = 0; ; from += 500) {
     const { data, error } = await sb
       .from("units")
-      .select("store_id,sku,title,brand,model,category,condition,test_status,defect_notes,ask_cents,state,listing_body,listing_specs,ebay_title,ebay_category,ebay_item_specifics,package_length_in,package_width_in,package_height_in,package_weight_lb")
+      .select("store_id,sku,title,brand,model,upc,category,condition,test_status,defect_notes,ask_cents,state,listing_body,listing_specs,ebay_title,ebay_category,ebay_item_specifics,package_length_in,package_width_in,package_height_in,package_weight_lb")
       .eq("store_id", storeId)
       .eq("state", "available")
       .gt("ask_cents", 0)
@@ -320,7 +324,7 @@ export async function syncDrafts(storeId, { quoteLimit = 4 } = {}) {
 }
 
 function persistShape(row) {
-  const { floor_cents, box, quotes, dims_source, market, ...rest } = row;
+  const { floor_cents, box, quotes, dims_source, market, unit_brand, unit_model, unit_upc, ...rest } = row;
   return rest;
 }
 
@@ -508,6 +512,9 @@ export async function prepareDraft(storeId, sku) {
     loadEbaySettings(storeId), loadDraft(sb, storeId, sku), loadUnit(sb, storeId, sku),
   ]);
   row.floor_cents = unit?.ask_cents || null;
+  row.unit_brand = unit?.brand;
+  row.unit_model = unit?.model;
+  row.unit_upc = unit?.upc;
   row.box = boxOf(unit);
   if (!locked(row, "category") && !row.suggestions?.length && !row.category_id) {
     try {
@@ -605,9 +612,12 @@ export async function saveDraft(storeId, sku, fields) {
   const row = await loadDraft(sb, storeId, sku);
   const unit = await loadUnit(sb, storeId, sku);
   row.floor_cents = unit?.ask_cents || null;
+  row.unit_brand = unit?.brand;
+  row.unit_model = unit?.model;
+  row.unit_upc = unit?.upc;
   row.box = boxOf(unit);
   if (fields.title != null) { row.title = clipTitle(fields.title); lock(row, "title"); }
-  if (fields.description != null) { row.description = String(fields.description); lock(row, "description"); }
+  if (fields.description != null) { row.description = ebayDescription(fields.description, sku); lock(row, "description"); }
   if (fields.condition_notes != null) { row.condition_notes = String(fields.condition_notes); lock(row, "condition_notes"); }
   if (fields.condition_id != null) {
     const allowed = (row.conditions || []).find((c) => String(c.conditionId) === String(fields.condition_id));
@@ -623,7 +633,7 @@ export async function saveDraft(storeId, sku, fields) {
   if (Array.isArray(fields.photo_paths)) {
     const allowed = new Set(row.photo_paths || []);
     const next = fields.photo_paths.map(String).filter((path) => allowed.has(path));
-    if (next.length) { row.photo_paths = next; lock(row, "photos"); }
+    row.photo_paths = next; lock(row, "photos");
   }
   if (fields.category_id != null && String(fields.category_id) !== String(row.category_id)) {
     const suggestion = (row.suggestions || []).find((s) => String(s.categoryId) === String(fields.category_id));
@@ -682,6 +692,9 @@ export async function saveBox(storeId, sku, box) {
   const unit = await loadUnit(sb, storeId, sku);
   row.box = { length_in: length, width_in: width, height_in: height, weight_lb: weight };
   row.floor_cents = unit?.ask_cents || null;
+  row.unit_brand = unit?.brand;
+  row.unit_model = unit?.model;
+  row.unit_upc = unit?.upc;
   const quote = await quoteLabel(sb, storeId, settings, row.box);
   row.label_cents = quote.cents;
   row.label_source = quote.source;
@@ -702,6 +715,9 @@ export async function repriceDraft(storeId, sku) {
   if (!row) return null;
   const unit = await loadUnit(sb, storeId, sku);
   row.floor_cents = unit?.ask_cents || null;
+  row.unit_brand = unit?.brand;
+  row.unit_model = unit?.model;
+  row.unit_upc = unit?.upc;
   row.box = boxOf(unit);
   if (!locked(row, "description") && unit) row.description = autoDescription(unit);
   if (boxKey(row.box) && (row.label_key !== boxKey(row.box) || row.label_cents == null)) {
@@ -883,6 +899,9 @@ async function pushOne(storeId, sku, { revise = false, getPolicies = () => resol
   const unit = await loadUnit(sb, storeId, sku);
   row.box = boxOf(unit);
   row.floor_cents = unit?.ask_cents || null;
+  row.unit_brand = unit?.brand;
+  row.unit_model = unit?.model;
+  row.unit_upc = unit?.upc;
   const wasLive = row.status === "live" || revise;
   withReadiness(row);
   if (!row.ready) {

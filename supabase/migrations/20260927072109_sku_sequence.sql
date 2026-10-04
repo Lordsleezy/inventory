@@ -35,18 +35,5 @@ begin
 end;
 $$;
 
--- 99696 was a receive probe with no unit and no sale. It pulled the suggestion
--- up near 99697 while the store's stickers were still in the 11100s.
-do $$
-begin
-  if not exists (select 1 from public.units where sku = '99696')
-     and not exists (select 1 from public.sales where sku = '99696') then
-    delete from public.events where sku = '99696';
-    delete from public.photos where sku = '99696';
-    delete from public.listings where sku = '99696';
-    delete from public.delist_tasks where sku = '99696';
-    delete from public.reservations where sku = '99696';
-    delete from public.sku_ledger where sku = '99696' and fate = 'issued';
-  end if;
-end $$;
-;
+-- A historical receive probe was cleaned in production. Fresh replays must
+-- never delete rows by SKU alone; see explicit is_test markers in the later migration.
