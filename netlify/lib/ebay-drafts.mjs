@@ -1,3 +1,4 @@
+import { floorLog } from "./floor-log.mjs";
 import { dbBusy, sleep } from "./bg-guard.mjs";
 import { serviceClient } from "./server.mjs";
 import { ebayFetch, listSku, userToken, withdrawSku } from "./ebay.mjs";
@@ -425,6 +426,7 @@ function summary(row, settings = null) {
     photo_url: row.photo_paths?.[0] ? publicPhotoUrl(row.photo_paths[0]) : null,
     fails,
     ebay_error: row.ebay_error,
+    push_state: row.push_state || null,
     view_url: row.view_url,
     listing_id: row.listing_id,
   };
@@ -477,7 +479,7 @@ export async function listDraftPage(storeId, { refresh = false } = {}) {
   const sb = serviceClient();
   const [settings, { data: drafts, error }, connection] = await Promise.all([
     loadEbaySettings(storeId),
-    sb.from("ebay_drafts").select("sku,title,status,ready,price_cents,shipping_mode,label_cents,shipping_buffer_cents,label_source,category_name,category_id,photo_paths,checklist,ebay_error,view_url,listing_id,locks").eq("store_id", storeId).order("sku"),
+    sb.from("ebay_drafts").select("sku,title,status,ready,price_cents,shipping_mode,label_cents,shipping_buffer_cents,label_source,category_name,category_id,photo_paths,checklist,ebay_error,view_url,listing_id,locks,push_state").eq("store_id", storeId).order("sku"),
     sb.from("connections").select("status,last_error").eq("store_id", storeId).eq("provider", "ebay").maybeSingle(),
   ]);
   if (error) throw new Error(error.message);
@@ -1097,4 +1099,100 @@ export async function saveEbaySettings(storeId, input) {
   if (error) throw new Error(error.message);
   await syncDrafts(storeId, { quoteLimit: 0 });
   return loadEbaySettings(storeId);
+}
+
+// ---- Queued pushes -------------------------------------------------------------------------
+// A push used to run inside one web request; when eBay or the database was slow the platform killed it,
+// nothing was logged, and the page showed no error. Pushes are now queued, run in a background function,
+// always end in done/failed with a message, and are logged step by step.
+const PUSH_STALE_MS = 8 * 60_000;
+
+export async function reapStalePushes(storeId, sb = serviceClient()) {
+  const cutoff = new Date(Date.now() - PUSH_STALE_MS).toISOString();
+  const { data } = await sb.from("ebay_drafts").update({
+    push_state: "failed",
+    push_finished_at: new Date().toISOString(),
+    ebay_error: "The push did not finish in time. If the status below says Live it went through; otherwise try again.",
+  }).eq("store_id", storeId).in("push_state", ["queued", "running"]).lt("push_requested_at", cutoff).select("sku");
+  for (const row of data || []) await floorLog({ level: "warn", event: "ebay.push.stale", sku: row.sku, storeId, message: `push for ${row.sku} never finished; marked failed` });
+  return (data || []).length;
+}
+
+export async function queuePush(storeId, skus) {
+  const sb = serviceClient();
+  const wanted = [...new Set((skus || []).map(String))].slice(0, 25);
+  if (!wanted.length) throw new Error("Pick at least one draft to push.");
+  await reapStalePushes(storeId, sb);
+  const { data: rows, error } = await sb.from("ebay_drafts").select("sku,push_state").eq("store_id", storeId).in("sku", wanted);
+  if (error) throw new Error(error.message);
+  const found = new Map((rows || []).map((row) => [row.sku, row]));
+  const queued = [];
+  const skipped = [];
+  for (const sku of wanted) {
+    const row = found.get(sku);
+    if (!row) skipped.push({ sku, error: "There is no eBay draft for this SKU." });
+    else if (row.push_state === "queued" || row.push_state === "running") skipped.push({ sku, error: "This one is already being pushed. Wait for it to finish." });
+    else queued.push(sku);
+  }
+  if (queued.length) {
+    const { error: upError } = await sb.from("ebay_drafts").update({ push_state: "queued", push_requested_at: new Date().toISOString(), push_finished_at: null })
+      .eq("store_id", storeId).in("sku", queued);
+    if (upError) throw new Error(upError.message);
+    for (const sku of queued) await floorLog({ event: "ebay.push.queued", sku, storeId, message: `push queued for ${sku}` });
+  }
+  return { queued, skipped };
+}
+
+export async function kickPush(storeId, skus) {
+  const base = (process.env.URL || "https://inventoryobi.netlify.app").replace(/\/$/, "");
+  const res = await fetch(`${base}/.netlify/functions/ebay-push-background`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ store_id: storeId, skus }),
+  });
+  if (!res.ok && res.status !== 202) throw new Error(`The push worker did not start (HTTP ${res.status}).`);
+}
+
+export async function runPushQueue(storeId, skus) {
+  const sb = serviceClient();
+  let policyPromise;
+  const getPolicies = () => (policyPromise ??= resolveBusinessPolicies(storeId));
+  let cursor = 0;
+  await Promise.all(Array.from({ length: Math.min(2, skus.length) }, async () => {
+    while (cursor < skus.length) {
+      const sku = String(skus[cursor++]);
+      const started = Date.now();
+      await sb.from("ebay_drafts").update({ push_state: "running" }).eq("store_id", storeId).eq("sku", sku);
+      await floorLog({ event: "ebay.push.start", sku, storeId, message: `pushing ${sku}` });
+      let result;
+      try { result = await pushOne(storeId, sku, { getPolicies }); }
+      catch (err) { result = { sku, ok: false, error: err instanceof Error ? err.message : String(err), crashed: true }; }
+      const patch = { push_state: result.ok ? "done" : "failed", push_finished_at: new Date().toISOString() };
+      if (!result.ok) patch.ebay_error = String(result.error || "eBay did not accept this listing.").slice(0, 2000);
+      await sb.from("ebay_drafts").update(patch).eq("store_id", storeId).eq("sku", sku);
+      await floorLog({
+        level: result.ok ? "info" : "error",
+        event: result.ok ? "ebay.push.ok" : "ebay.push.fail",
+        sku, storeId,
+        message: result.ok ? `SKU ${sku} is live on eBay` : `SKU ${sku}: ${patch.ebay_error}`,
+        detail: { ms: Date.now() - started, listingId: result.listingId || null, error: result.error || null, crashed: Boolean(result.crashed) },
+      });
+    }
+  }));
+}
+
+export async function pushStatus(storeId, skus) {
+  const sb = serviceClient();
+  await reapStalePushes(storeId, sb);
+  const { data, error } = await sb.from("ebay_drafts").select("sku,status,push_state,ebay_error,view_url,listing_id")
+    .eq("store_id", storeId).in("sku", (skus || []).map(String).slice(0, 50));
+  if (error) throw new Error(error.message);
+  return data || [];
+}
+
+export async function markPushFailed(storeId, skus, message) {
+  const sb = serviceClient();
+  await sb.from("ebay_drafts").update({ push_state: "failed", push_finished_at: new Date().toISOString(), ebay_error: String(message).slice(0, 2000) })
+    .eq("store_id", storeId).in("sku", skus);
+  for (const sku of skus) await floorLog({ level: "error", event: "ebay.push.fail", sku, storeId, message: `SKU ${sku}: ${message}`, detail: { stage: "kick" } });
 }

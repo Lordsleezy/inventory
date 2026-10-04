@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { reportClientError } from './clientLog';
 
 const functionsBase = (import.meta.env.VITE_FLOOR_FUNCTIONS_URL || 'https://inventoryobi.netlify.app').replace(/\/$/, '');
 
@@ -8,7 +9,7 @@ type Summary = {
   floor_cents: number | null; box_ready: boolean; locked_price_below_formula: boolean;
   shipping_mode: string | null; label_cents: number | null; shipping_buffer_cents: number; label_source: string | null;
   category_name: string | null; category_id: string | null; photo_url: string | null;
-  fails: Fail[]; ebay_error: string | null; view_url: string | null; listing_id: string | null;
+  fails: Fail[]; ebay_error: string | null; view_url: string | null; listing_id: string | null; push_state?: string | null;
 };
 type Aspect = { name: string; required: boolean; recommended: boolean; allowed: string[]; selectionOnly: boolean };
 type Draft = Summary & {
@@ -39,14 +40,26 @@ function cachedEditor(userId: string, sku: string | null): { draft: Draft; dirty
 }
 
 async function call(token: string, body: Record<string, unknown>) {
-  const res = await fetch(`${functionsBase}/.netlify/functions/ebay-drafts`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok || data.ok === false) throw new Error(data.error || `Request failed (${res.status})`);
-  return data;
+  const sku = typeof body.sku === 'string' ? body.sku : Array.isArray(body.skus) ? String(body.skus[0] ?? '') : undefined;
+  let res: Response;
+  try {
+    res = await fetch(`${functionsBase}/.netlify/functions/ebay-drafts`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    reportClientError(token, { message: 'Could not reach the server', page: 'ebay-drafts', action_name: String(body.action), sku });
+    throw new Error('Could not reach the server. Check your connection and try again.');
+  }
+  const data = await res.json().catch(() => null);
+  if (!res.ok || data?.ok === false) {
+    const ref = data?.traceId ? ` (ref ${String(data.traceId).slice(0, 8)})` : '';
+    const message = data?.error ? `${data.error}${ref}` : `The server did not answer properly (HTTP ${res.status}); it probably timed out. Look on the Logs page.`;
+    reportClientError(token, { message, page: 'ebay-drafts', status: res.status, traceId: data?.traceId ?? null, action_name: String(body.action), sku });
+    throw new Error(message);
+  }
+  return data ?? {};
 }
 
 export function EbayDraftsPage({ accessToken, userId, money, active }: Props) {
@@ -65,6 +78,7 @@ export function EbayDraftsPage({ accessToken, userId, money, active }: Props) {
   const [backfill, setBackfill] = useState<Backfill | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [pushNote, setPushNote] = useState('');
   const [openingSku, setOpeningSku] = useState<string | null>(null);
   const marketInFlight = useRef(new Set<string>());
   const restoreAttempt = useRef<string | null>(null);
@@ -169,6 +183,31 @@ export function EbayDraftsPage({ accessToken, userId, money, active }: Props) {
     const sku = draft.sku;
     await run(async () => { const data = await call(accessToken, { action: 'save', sku, fields }); if (draftRef.current?.sku === sku) acceptSaved(data.draft, fields); setRows((current) => current?.map((row) => row.sku === data.draft.sku ? { ...row, ...data.draft } : row) || current); });
   }
+  /**
+   * Pushes are queued and run in the background (a request used to be killed silently when eBay or the
+   * database was slow). This starts them, then polls until every SKU is done or failed and reports each result.
+   */
+  async function pushAndWait(skus: string[]): Promise<{ sku: string; ok: boolean; error?: string }[]> {
+    setPushNote(`Sending ${skus.length === 1 ? 'the listing' : `${skus.length} listings`} to eBay…`);
+    try {
+      const first = await call(accessToken, { action: 'push', skus });
+      const results: { sku: string; ok: boolean; error?: string }[] = (first.skipped || []).map((s: { sku: string; error: string }) => ({ sku: s.sku, ok: false, error: s.error }));
+      const pending = new Set<string>(first.queued || []);
+      const deadline = Date.now() + 6 * 60_000;
+      while (pending.size && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 2500));
+        const status = await call(accessToken, { action: 'push_status', skus: [...pending] });
+        for (const row of (status.states || []) as { sku: string; push_state: string | null; status: string; ebay_error: string | null }[]) {
+          if (row.push_state === 'done') { results.push({ sku: row.sku, ok: true }); pending.delete(row.sku); }
+          else if (row.push_state === 'failed' || row.push_state == null) { results.push({ sku: row.sku, ok: false, error: row.ebay_error || 'eBay did not accept this listing.' }); pending.delete(row.sku); }
+        }
+        setPushNote(`Waiting for eBay… ${skus.length - pending.size} of ${skus.length} finished`);
+      }
+      for (const sku of pending) results.push({ sku, ok: false, error: 'Still running after 6 minutes. Check the Logs page (filter by this SKU), then Refresh.' });
+      return results;
+    } finally { setPushNote(''); }
+  }
+
   function toggle(sku: string) {
     setPicked((cur) => cur.includes(sku) ? cur.filter((s) => s !== sku) : [...cur, sku]);
   }
@@ -179,9 +218,9 @@ export function EbayDraftsPage({ accessToken, userId, money, active }: Props) {
       <div className="actions">
         <button className="secondary" disabled={busy} onClick={() => void run(() => load(true))}>Refresh</button>
         <button disabled={busy || picked.length === 0} onClick={() => void run(async () => {
-          const data = await call(accessToken, { action: 'push', skus: picked });
-          const failed = (data.results || []).filter((r: { ok: boolean; sku: string; error?: string }) => !r.ok);
-          const succeeded = (data.results || []).filter((r: { ok: boolean; sku: string }) => r.ok);
+          const results = await pushAndWait(picked);
+          const failed = results.filter((r) => !r.ok);
+          const succeeded = results.filter((r) => r.ok);
           for (const result of succeeded) localStorage.removeItem(editorKey(userId, result.sku));
           setPicked(failed.map((r: { sku: string }) => r.sku));
           if (draft && succeeded.some((r: { sku: string }) => r.sku === draft.sku)) showDraft(null);
@@ -189,6 +228,7 @@ export function EbayDraftsPage({ accessToken, userId, money, active }: Props) {
           if (failed.length) setError(failed.map((r: { sku: string; error?: string }) => `SKU ${r.sku}: ${r.error}`).join(' '));
         })}>Push selected</button>
       </div></header>
+    {busy && pushNote && <div className="notice" role="status">{pushNote}</div>}
     {error && <div className="alert" role="alert">{error}<button onClick={() => setError('')}>Dismiss</button></div>}
     <div className="stats"><div className="stat"><span>Drafts</span><strong>{counts.total}</strong></div><div className="stat"><span>Ready to push</span><strong>{counts.ready}</strong></div><div className="stat"><span>Need box size</span><strong>{counts.needsBox}</strong></div><div className="stat"><span>Live</span><strong>{counts.live}</strong></div></div>
     {backfill?.status === 'running' && <p className="notice">Backfilling specs: {backfill.processed || 0}/{backfill.total || 0}</p>}
@@ -236,8 +276,11 @@ export function EbayDraftsPage({ accessToken, userId, money, active }: Props) {
         <ShippingMath draft={draft} userId={userId} settings={settings} money={money} busy={busy} onMode={(mode) => void save({ shipping_mode: mode })} onPrice={(cents) => void save({ price_cents: cents })} />
         <h3>Ready check</h3>
         <ul className="ebay-check">{(draft.checklist || []).map((item) => <li key={item.label} className={item.ok ? 'ok-text' : 'bad-text'}>{item.ok ? 'Ready' : 'Needed'} · {item.label}</li>)}</ul>
+        {busy && pushNote && <div className="notice" role="status">{pushNote}</div>}
+        {error && <div className="alert" role="alert">{error}</div>}
+        {!error && !busy && draft.ebay_error && <p className="error">Last eBay response for this listing: {draft.ebay_error}</p>}
         <div className="actions">
-          <button disabled={busy || !draft.ready} onClick={() => void run(async () => { const data = await call(accessToken, { action: 'push', skus: [draft.sku] }); const result = data.results?.[0]; if (!result?.ok) throw new Error(result?.error || 'eBay did not accept this listing.'); localStorage.removeItem(editorKey(userId, draft.sku)); showDraft(null); await load(); })}>{draft.status === 'live' ? 'Update on eBay' : 'Push to eBay'}</button>
+          <button disabled={busy || !draft.ready} onClick={() => void run(async () => { const [result] = await pushAndWait([draft.sku]); if (!result?.ok) throw new Error(result?.error || 'eBay did not accept this listing.'); localStorage.removeItem(editorKey(userId, draft.sku)); showDraft(null); await load(); })}>{draft.status === 'live' ? 'Update on eBay' : 'Push to eBay'}</button>
           {draft.status === 'live' && <button className="text-button danger" disabled={busy} onClick={() => void run(async () => { await call(accessToken, { action: 'end', sku: draft.sku }); showDraft(null); await load(); })}>End listing</button>}
         </div>
       </section>}

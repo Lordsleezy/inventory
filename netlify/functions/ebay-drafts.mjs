@@ -14,6 +14,10 @@ import {
   saveBox,
   saveDraft,
   saveEbaySettings,
+  queuePush,
+  kickPush,
+  pushStatus,
+  markPushFailed,
 } from "../lib/ebay-drafts.mjs";
 import { backfillStatus, startBackfill } from "../lib/ebay-backfill.mjs";
 
@@ -36,7 +40,19 @@ async function handle(event) {
     if (action === "market") return json(200, { ok: true, market: await lookupDraftMarket(storeId, String(body.sku || "")) });
     if (action === "save") return json(200, { ok: true, draft: await saveDraft(storeId, String(body.sku || ""), body.fields || {}) });
     if (action === "save_box") return json(200, { ok: true, draft: await saveBox(storeId, String(body.sku || ""), body.box || {}) });
-    if (action === "push") return json(200, { ok: true, results: await pushDrafts(storeId, Array.isArray(body.skus) ? body.skus : []) });
+    if (action === "push") {
+      const queue = await queuePush(storeId, Array.isArray(body.skus) ? body.skus : []);
+      if (queue.queued.length) {
+        try { await kickPush(storeId, queue.queued); }
+        catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          await markPushFailed(storeId, queue.queued, message);
+          return json(502, { ok: false, error: message });
+        }
+      }
+      return json(200, { ok: true, ...queue });
+    }
+    if (action === "push_status") return json(200, { ok: true, states: await pushStatus(storeId, Array.isArray(body.skus) ? body.skus : []) });
     if (action === "end") return json(200, { ok: true, ...(await endDraft(storeId, String(body.sku || ""))) });
     if (action === "save_settings") {
       const settings = await saveEbaySettings(storeId, body.settings || {});
