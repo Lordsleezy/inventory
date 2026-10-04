@@ -40,3 +40,17 @@ test("a draft without a brand is blocked before push", () => {
   draft.unit_brand = "Colgate";
   assert.equal(draftReadiness(draft).ready, true);
 });
+
+test("a category without an eBay condition policy can still pass readiness", () => {
+  const draft = {
+    photo_paths: ["photo"], title: "Signed tennis memorabilia", description: "Signed collectible",
+    category_id: "1226", condition_id: null, condition_not_supported: true,
+    box: { length_in: 10, width_in: 10, height_in: 2, weight_lb: 2 },
+    price_cents: 3999, shipping_mode: "calculated", unit_brand: "Andre Agassi",
+    aspect_defs: [{ name: "Brand", required: true, allowed: [], selectionOnly: false }],
+    aspects: { MPN: "Does not apply" },
+  };
+  assert.equal(draftReadiness(draft).ready, true);
+  draft.condition_not_supported = false;
+  assert.equal(draftReadiness(draft).ready, false);
+});
