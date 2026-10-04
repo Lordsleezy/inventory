@@ -13,7 +13,7 @@ import {
 } from "./ebay-catalog.mjs";
 import { inventoryConditionEnum, mapFloorCondition } from "./ebay-conditions.mjs";
 import { ebayDraftEligibility } from "./ebay-eligibility.mjs";
-import { ensureMarket } from "./ebay-market.mjs";
+import { ensureMarket, summarizeMarket } from "./ebay-market.mjs";
 import {
   addressTo,
   allowedCarriers,
@@ -385,6 +385,7 @@ function detail(row, unit) {
     dims_source: unit?.dims_source || null,
     quotes: row.quotes || null,
     market: row.market || null,
+    market_needs_refresh: unit ? !(Date.now() - Date.parse(parseListingSpecs(unit.listing_specs)?.market?.checked_at || "") < 30 * 86400_000) : false,
     checklist: row.checklist || [],
     locks: row.locks || [],
   };
@@ -403,18 +404,18 @@ async function loadUnit(sb, storeId, sku) {
   return data;
 }
 
-export async function listDraftPage(storeId) {
-  const sync = await syncDrafts(storeId);
+export async function listDraftPage(storeId, { refresh = false } = {}) {
+  // The scheduled eBay sync runs every minute. A normal page read should not
+  // requote labels and rewrite every draft before it can render.
+  const sync = refresh ? await syncDrafts(storeId) : null;
   const sb = serviceClient();
-  const settings = await loadEbaySettings(storeId);
-  const [{ data: drafts, error }, connection] = await Promise.all([
-    sb.from("ebay_drafts").select("*").eq("store_id", storeId).order("sku"),
+  const [settings, { data: drafts, error }, connection] = await Promise.all([
+    loadEbaySettings(storeId),
+    sb.from("ebay_drafts").select("sku,title,status,ready,price_cents,shipping_mode,label_cents,shipping_buffer_cents,label_source,category_name,category_id,photo_paths,checklist,ebay_error,view_url,listing_id").eq("store_id", storeId).order("sku"),
     sb.from("connections").select("status,last_error").eq("store_id", storeId).eq("provider", "ebay").maybeSingle(),
   ]);
   if (error) throw new Error(error.message);
-  const units = await unitsForDrafts(sb, storeId);
-  const floor = new Map(units.map((unit) => [unit.sku, unit.ask_cents]));
-  const rows = (drafts || []).map((row) => summary({ ...row, floor_cents: floor.get(row.sku) || null }));
+  const rows = (drafts || []).map(summary);
   return {
     sync,
     connected: connection.data?.status === "connected",
@@ -503,12 +504,12 @@ function mergeBlankAspects(row, unit) {
 
 export async function prepareDraft(storeId, sku) {
   const sb = serviceClient();
-  const settings = await loadEbaySettings(storeId);
-  const row = await loadDraft(sb, storeId, sku);
-  const unit = await loadUnit(sb, storeId, sku);
+  const [settings, row, unit] = await Promise.all([
+    loadEbaySettings(storeId), loadDraft(sb, storeId, sku), loadUnit(sb, storeId, sku),
+  ]);
   row.floor_cents = unit?.ask_cents || null;
   row.box = boxOf(unit);
-  if (!locked(row, "category")) {
+  if (!locked(row, "category") && !row.suggestions?.length && !row.category_id) {
     try {
       const query = [row.title, unit?.brand, unit?.title, unit?.ebay_category].filter(Boolean).join(" ");
       const suggestions = await suggestCategories(query);
@@ -550,7 +551,7 @@ export async function prepareDraft(storeId, sku) {
   if (row.category_id) {
     const known = (row.suggestions || []).find((s) => String(s.categoryId) === String(row.category_id))?.categoryName;
     if (known) row.category_name = known;
-    else {
+    else if (!row.category_name) {
       try {
         const official = await categoryName(row.category_id);
         if (official) row.category_name = official;
@@ -575,9 +576,21 @@ export async function prepareDraft(storeId, sku) {
   const { error } = await sb.from("ebay_drafts").upsert(saved, { onConflict: "store_id,sku" });
   if (error) throw new Error(error.message);
   row.quotes = priceQuotes(row.floor_cents, row.label_cents, settings);
-  try { row.market = unit ? await ensureMarket(sb, storeId, unit) : null; }
-  catch { row.market = null; }
+  row.market = storedMarket(unit);
   return detail(row, unit);
+}
+
+function storedMarket(unit) {
+  if (!unit) return null;
+  const saved = parseListingSpecs(unit.listing_specs)?.market;
+  return saved || summarizeMarket("retail", unit.retail_price_sources);
+}
+
+export async function lookupDraftMarket(storeId, sku) {
+  const sb = serviceClient();
+  const unit = await loadUnit(sb, storeId, sku);
+  if (!unit) throw new Error(`No unit for SKU ${sku}`);
+  return ensureMarket(sb, storeId, unit);
 }
 
 function lock(row, field) {
@@ -635,8 +648,17 @@ export async function saveDraft(storeId, sku, fields) {
   withReadiness(row);
   const { error } = await sb.from("ebay_drafts").upsert(persistShape(row), { onConflict: "store_id,sku" });
   if (error) throw new Error(error.message);
-  if (row.status === "live") await pushOne(storeId, sku, { revise: true });
-  return prepareDraft(storeId, sku);
+  if (row.status === "live") {
+    const pushed = await pushOne(storeId, sku, { revise: true });
+    row.ebay_error = pushed.ok ? null : pushed.error;
+    if (pushed.ok) {
+      row.listing_id = pushed.listingId;
+      row.view_url = pushed.viewUrl;
+    }
+  }
+  row.quotes = priceQuotes(row.floor_cents, row.label_cents, settings);
+  row.market = storedMarket(unit);
+  return detail(row, unit);
 }
 
 export async function saveBox(storeId, sku, box) {
@@ -657,8 +679,9 @@ export async function saveBox(storeId, sku, box) {
   if (error) throw new Error(error.message);
   const settings = await loadEbaySettings(storeId);
   const row = await loadDraft(sb, storeId, sku);
+  const unit = await loadUnit(sb, storeId, sku);
   row.box = { length_in: length, width_in: width, height_in: height, weight_lb: weight };
-  row.floor_cents = row.floor_cents || (await loadUnit(sb, storeId, sku))?.ask_cents;
+  row.floor_cents = unit?.ask_cents || null;
   const quote = await quoteLabel(sb, storeId, settings, row.box);
   row.label_cents = quote.cents;
   row.label_source = quote.source;
@@ -667,7 +690,9 @@ export async function saveBox(storeId, sku, box) {
   withReadiness(row);
   const saved = await sb.from("ebay_drafts").upsert(persistShape(row), { onConflict: "store_id,sku" });
   if (saved.error) throw new Error(saved.error.message);
-  return prepareDraft(storeId, sku);
+  row.quotes = priceQuotes(row.floor_cents, row.label_cents, settings);
+  row.market = storedMarket(unit);
+  return detail(row, unit);
 }
 
 export async function repriceDraft(storeId, sku) {
@@ -765,7 +790,12 @@ async function createSandboxPolicies(storeId) {
   });
 }
 
-export async function resolveBusinessPolicies(storeId) {
+export async function resolveBusinessPolicies(storeId, { force = false } = {}) {
+  const cached = (await loadEbaySettings(storeId)).policyStatus;
+  if (!force && cached?.ok && Date.now() - Date.parse(cached.checked_at || 0) < 10 * 60_000
+    && cached.payment && cached.return && cached.free && cached.calculated) {
+    return { payment: cached.payment, returnP: cached.return, fulfillmentFree: cached.free, fulfillmentCalculated: cached.calculated };
+  }
   let payments = [];
   let returns = [];
   let fulfillments = [];
@@ -847,7 +877,7 @@ function packagePayload(box) {
   };
 }
 
-async function pushOne(storeId, sku, { revise = false } = {}) {
+async function pushOne(storeId, sku, { revise = false, getPolicies = () => resolveBusinessPolicies(storeId) } = {}) {
   const sb = serviceClient();
   const row = await loadDraft(sb, storeId, sku);
   const unit = await loadUnit(sb, storeId, sku);
@@ -859,7 +889,7 @@ async function pushOne(storeId, sku, { revise = false } = {}) {
     return { sku, ok: false, error: `Not ready: ${(row.checklist || []).filter((item) => !item.ok).map((item) => item.label).join("; ")}` };
   }
   try {
-    const policies = await resolveBusinessPolicies(storeId);
+    const policies = await getPolicies();
     const fulfillment = row.shipping_mode === "free" ? policies.fulfillmentFree : policies.fulfillmentCalculated;
     const published = await listSku(storeId, sku, {
       title: row.title,
@@ -894,8 +924,16 @@ async function pushOne(storeId, sku, { revise = false } = {}) {
 }
 
 export async function pushDrafts(storeId, skus) {
-  const results = [];
-  for (const sku of skus) results.push(await pushOne(storeId, String(sku)));
+  const results = new Array(skus.length);
+  let policyPromise;
+  const getPolicies = () => (policyPromise ??= resolveBusinessPolicies(storeId));
+  let cursor = 0;
+  await Promise.all(Array.from({ length: Math.min(2, skus.length) }, async () => {
+    while (cursor < skus.length) {
+      const index = cursor++;
+      results[index] = await pushOne(storeId, String(skus[index]), { getPolicies });
+    }
+  }));
   return results;
 }
 

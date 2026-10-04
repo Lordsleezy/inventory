@@ -112,7 +112,7 @@ async function payoutSales() {
 export function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [store, setStore] = useState<string | null>(null);
-  const [page, setPage] = useState<'sales' | 'orders' | 'ebay' | 'online' | 'expenses' | 'taxes' | 'costs' | 'inventory' | 'reviews' | 'reports' | 'payouts' | 'settings' | 'cameras'>(() => sessionStorage.getItem('floor-admin-page') === 'ebay' ? 'ebay' : 'sales');
+  const [page, setPage] = useState<'sales' | 'orders' | 'ebay' | 'online' | 'expenses' | 'taxes' | 'costs' | 'inventory' | 'reviews' | 'reports' | 'payouts' | 'settings' | 'cameras'>(() => localStorage.getItem('floor-admin-page') === 'ebay' ? 'ebay' : 'sales');
   const [ebayOpened, setEbayOpened] = useState(false);
   const [selectedDay, setSelectedDay] = useState(today());
   const [live, setLive] = useState<Ticket[]>([]);
@@ -128,9 +128,9 @@ export function App() {
   const [email, setEmail] = useState(''); const [password, setPassword] = useState('');
   const [error, setError] = useState(''); const [busy, setBusy] = useState(false);
 
-  useEffect(() => { void sb.auth.getSession().then(({ data }) => setSession(data.session)); const { data } = sb.auth.onAuthStateChange((_e, s) => setSession(s)); return () => data.subscription.unsubscribe(); }, []);
+  useEffect(() => { void sb.auth.getSession().then(({ data }) => setSession((current) => current ?? data.session)); const { data } = sb.auth.onAuthStateChange((_e, s) => setSession(s)); return () => data.subscription.unsubscribe(); }, []);
   useEffect(() => { if (new URLSearchParams(window.location.search).get('ebay') === '1') setPage('ebay'); }, []);
-  useEffect(() => { if (page === 'ebay') sessionStorage.setItem('floor-admin-page', 'ebay'); else sessionStorage.removeItem('floor-admin-page'); }, [page]);
+  useEffect(() => { if (page === 'ebay') localStorage.setItem('floor-admin-page', 'ebay'); else localStorage.removeItem('floor-admin-page'); }, [page]);
   useEffect(() => { if (page === 'ebay') setEbayOpened(true); }, [page]);
   const userId = session?.user.id;
   useEffect(() => { setStore(null); setLive([]); setAllSales([]); setPeople([]); setRules([]); setPayments([]); setReports([]); setExpenses([]); setOnlineCfg(NO_ONLINE); if (!userId) return; void sb.from('portal_admins').select('store_id').eq('user_id', userId).single().then(({ data, error: e }) => { setStore(e ? null : data?.store_id || null); if (e && e.code !== 'PGRST116') setError(e.message); }); }, [userId]);
@@ -182,7 +182,7 @@ export function App() {
   return <div className="app"><aside><div className="brand">OPEN BOX <span>INDUSTRIES</span></div><div className="product">Floor <b>Admin</b></div><nav>{([['sales','Live Sales'],['orders','Orders'],['ebay','eBay'],['online','Online selling'],['expenses','Expenses'],['taxes','Sales tax'],['costs','Missing cost'],['inventory','Inventory'],['reviews','Review matches'],['reports','Reports'],['payouts','Payouts'],['settings','Payout Settings'],['cameras','Cameras']] as const).map(([id,label]) => <button className={page === id ? 'active' : ''} key={id} onClick={() => { setPage(id); setEditing(null); }}>{label}</button>)}</nav><div className="account"><small>{session.user.email}</small><button onClick={() => void sb.auth.signOut({ scope: 'local' })}>Sign out</button></div></aside><main className="content">{error && <div className="alert" role="alert">{error}<button onClick={() => setError('')}>Dismiss</button></div>}
   {page === 'sales' && <><header><div><div className="eyebrow">REGISTER ACTIVITY</div><h1>Live Sales</h1><p>Transactions from Floor, updated as sales arrive.</p></div><label className="date-control">Date<input type="date" value={selectedDay} onChange={e => setSelectedDay(e.target.value)} /></label></header><div className="stats"><Stat name="Collected" value={money(sum(live).collected_cents)} /><Stat name="Sales" value={String(live.length)} /><Stat name="Cash" value={money(sum(live).cash_cents)} /><Stat name="Card" value={money(sum(live).card_cents)} /><Stat name="Card fees" value={money(sum(live).card_fee_cents)} /><Stat name="Other / unallocated" value={money(sum(live).other_cents)} /></div><section className="panel"><h2>{selectedDay === today() ? 'Today’s transactions' : `Transactions · ${selectedDay}`}</h2>{live.length === 0 ? <Empty>No sales recorded for this date.</Empty> : <div className="ticket-list">{live.map(t => <div className="ticket" key={t.key}><div className="ticket-top"><strong>{money(t.total)}</strong><span>{stamp(t.at)}</span></div><div className="ticket-items">{t.lines.map(l => <SaleItem key={l.id} line={l} />)}</div><div className="ticket-bottom"><span>{t.method === 'split' ? (t.lines[0].cash_cents === null ? 'Split amounts unavailable' : `Cash ${money(t.cash)} · Card ${money(t.card)}`) : t.method === 'card' ? `Card ${money(t.card)}` : t.method === 'cash' ? `Cash ${money(t.cash)}` : t.method}{t.fee > 0 && ` · fee ${money(t.fee)}`}</span><span>Rang up by {t.actor}</span></div></div>)}</div>}</section></>}
   {page === 'orders' && <OrdersPage client={sb} accessToken={session.access_token} money={money} stamp={stamp} />}
-  {(page === 'ebay' || ebayOpened) && <div hidden={page !== 'ebay'}><EbayDraftsPage accessToken={session.access_token} money={money} /></div>}
+  {(page === 'ebay' || ebayOpened) && <div hidden={page !== 'ebay'}><EbayDraftsPage accessToken={session.access_token} userId={session.user.id} money={money} active={page === 'ebay'} /></div>}
   {page === 'online' && <OnlineSellingPage client={sb} accessToken={session.access_token} stamp={stamp} />}
   {page === 'expenses' && <ExpensesPage client={sb} money={money} expenses={expenses} staff={staff} ownerId={onlineCfg.employeeId || defaultReimbursementId} onChanged={loadCommon} />}
   {page === 'taxes' && <TaxReportPage client={sb} money={money} />}
