@@ -4,6 +4,7 @@ import { formatEbayError } from "./ebay-errors.mjs";
 import { publicPhotoUrl } from "./ebay-photos.mjs";
 import { composeChannelDescription, parseListingSpecs } from "./listing-copy.mjs";
 import { ebayDescription } from "./ebay-product.mjs";
+import { gtinIssue } from "./gtin.mjs";
 import { fillAspects, pickCategorySuggestion } from "./ebay-aspects.mjs";
 import {
   fetchLiveAspects,
@@ -110,6 +111,7 @@ function aspectMap(unit) {
   const out = {};
   for (const [name, value] of Object.entries({ ...fromColumn, ...fromSpecs })) {
     const text = Array.isArray(value) ? value.filter(Boolean).join(", ") : value == null ? "" : String(value).trim();
+    if (name.toLowerCase() === "upc" && gtinIssue(text)) continue;
     if (text) out[name] = text;
   }
   return out;
@@ -139,6 +141,27 @@ function autoDescription(unit) {
   }), unit.sku);
 }
 
+function quoteKey(box, settings) {
+  const key = boxKey(box);
+  return key ? `${key}|${settings.farZip}|${settings.shipFrom?.zip || "95663"}` : "";
+}
+
+function needsQuote(row, settings, now = Date.now()) {
+  const key = quoteKey(row.box, settings);
+  if (!key || row.status === "live") return false;
+  const ttl = row.label_source === "fallback" ? 30 * 60_000 : 24 * 60 * 60_000;
+  return row.label_cents == null || row.label_key !== key || !row.label_quoted_at ||
+    now - Date.parse(row.label_quoted_at) >= ttl;
+}
+
+function setQuote(row, quote, settings) {
+  row.label_cents = quote.cents;
+  row.label_source = quote.source;
+  row.label_key = quoteKey(row.box, settings);
+  row.label_quoted_at = new Date().toISOString();
+  return withReadiness(applyPrice(row, settings));
+}
+
 function localCategoryId(unit) {
   const raw = String(unit?.ebay_category || "").trim();
   if (/^\d+$/.test(raw)) return raw;
@@ -148,12 +171,13 @@ function localCategoryId(unit) {
 function applyPrice(row, settings) {
   if (row.status === "live") return row;
   const box = row.box;
-  const key = boxKey(box);
+  const key = quoteKey(box, settings);
   if (!key) {
     row.label_cents = null;
     row.shipping_buffer_cents = 0;
     row.label_source = null;
     row.label_key = "";
+    row.label_quoted_at = null;
     if (!locked(row, "shipping")) row.shipping_mode = null;
     if (!locked(row, "price")) row.price_cents = null;
     return row;
@@ -161,6 +185,11 @@ function applyPrice(row, settings) {
   if (row.label_key !== key) {
     row.label_cents = null;
     row.label_source = null;
+    row.label_quoted_at = null;
+  }
+  if (row.label_cents == null) {
+    if (!locked(row, "shipping")) row.shipping_mode = null;
+    if (!locked(row, "price")) row.price_cents = null;
   }
   if (!locked(row, "shipping") && row.label_cents != null) {
     row.shipping_mode = shippingModeForLabel(row.label_cents, settings.cutoffCents);
@@ -212,6 +241,7 @@ function draftFromUnit(unit, photos, listing, previous, settings) {
     label_cents: prev.label_cents ?? null,
     label_source: prev.label_source || null,
     label_key: prev.label_key || "",
+    label_quoted_at: prev.label_quoted_at || null,
     ebay_error: prev.ebay_error || null,
     listing_id: listing?.listing_id || prev.listing_id || null,
     offer_id: listing?.offer_id || prev.offer_id || null,
@@ -271,7 +301,7 @@ async function photosBySku(sb, storeId, skus) {
   return map;
 }
 
-export async function syncDrafts(storeId, { quoteLimit = 4 } = {}) {
+export async function syncDrafts(storeId, { quoteLimit = 8 } = {}) {
   const sb = serviceClient();
   const settings = await loadEbaySettings(storeId);
   const [units, existingRes, listingRes] = await Promise.all([
@@ -299,20 +329,16 @@ export async function syncDrafts(storeId, { quoteLimit = 4 } = {}) {
     const { error } = await sb.from("ebay_drafts").delete().eq("store_id", storeId).in("sku", drop);
     if (error) throw new Error(error.message);
   }
-  let quoted = 0;
-  for (const row of keep) {
-    if (quoted >= quoteLimit) break;
-    if (row.status === "live") continue;
-    if (row.label_cents != null && row.label_key === boxKey(row.box)) continue;
-    if (!boxKey(row.box)) continue;
-    const quote = await quoteLabel(sb, storeId, settings, row.box);
-    row.label_cents = quote.cents;
-    row.label_source = quote.source;
-    row.label_key = boxKey(row.box);
-    applyPrice(row, settings);
-    withReadiness(row);
-    quoted += 1;
-  }
+  const pending = keep.filter((row) => needsQuote(row, settings)).slice(0, quoteLimit);
+  let cursor = 0;
+  await Promise.all(Array.from({ length: Math.min(4, pending.length) }, async () => {
+    while (cursor < pending.length) {
+      const row = pending[cursor++];
+      const quote = await quoteLabel(sb, storeId, settings, row.box);
+      setQuote(row, quote, settings);
+    }
+  }));
+  const quoted = pending.length;
   for (let i = 0; i < keep.length; i += 50) {
     const slice = keep.slice(i, i + 50).map(persistShape);
     const { error } = await sb.from("ebay_drafts").upsert(slice, { onConflict: "store_id,sku" });
@@ -348,8 +374,12 @@ export async function quoteLabel(sb, storeId, settings, box) {
   return { cents: fallbackLabelCents(pkg), source: "fallback" };
 }
 
-function summary(row) {
+function summary(row, settings = null) {
   const fails = (row.checklist || []).filter((item) => !item.ok).map((item) => item.label);
+  const formula = settings && row.label_cents != null && row.floor_cents > 0 && row.shipping_mode
+    ? ebayPriceCents({ floorCents: row.floor_cents, labelCents: row.label_cents,
+      bufferCents: settings.bufferCents, mode: row.shipping_mode, feePct: settings.feePct,
+      perOrderCents: settings.perOrderCents, ending: settings.ending }) : null;
   return {
     sku: row.sku,
     title: row.title,
@@ -357,6 +387,9 @@ function summary(row) {
     ready: row.ready,
     price_cents: row.price_cents,
     floor_cents: row.floor_cents,
+    box_ready: row.box_ready ?? Boolean(boxKey(row.box)),
+    locked_price_below_formula: row.status !== "live" && (row.locks || []).includes("price") &&
+      formula != null && row.price_cents < formula,
     shipping_mode: row.shipping_mode,
     label_cents: row.label_cents,
     shipping_buffer_cents: row.shipping_buffer_cents,
@@ -386,6 +419,8 @@ function detail(row, unit) {
     box: boxOf(unit),
     floor_condition: unit?.condition || "",
     floor_cents: row.floor_cents ?? unit?.ask_cents ?? null,
+    upc: Object.hasOwn(row.aspects || {}, "UPC") ? row.aspects.UPC : unit?.upc || "",
+    rejected_upc: row.rejected_upc || unit?.upc_rejected || null,
     dims_source: unit?.dims_source || null,
     quotes: row.quotes || null,
     market: row.market || null,
@@ -415,11 +450,23 @@ export async function listDraftPage(storeId, { refresh = false } = {}) {
   const sb = serviceClient();
   const [settings, { data: drafts, error }, connection] = await Promise.all([
     loadEbaySettings(storeId),
-    sb.from("ebay_drafts").select("sku,title,status,ready,price_cents,shipping_mode,label_cents,shipping_buffer_cents,label_source,category_name,category_id,photo_paths,checklist,ebay_error,view_url,listing_id").eq("store_id", storeId).order("sku"),
+    sb.from("ebay_drafts").select("sku,title,status,ready,price_cents,shipping_mode,label_cents,shipping_buffer_cents,label_source,category_name,category_id,photo_paths,checklist,ebay_error,view_url,listing_id,locks").eq("store_id", storeId).order("sku"),
     sb.from("connections").select("status,last_error").eq("store_id", storeId).eq("provider", "ebay").maybeSingle(),
   ]);
   if (error) throw new Error(error.message);
-  const rows = (drafts || []).map(summary);
+  const unitMap = new Map();
+  for (let i = 0; i < (drafts || []).length; i += 100) {
+    const skus = drafts.slice(i, i + 100).map((row) => row.sku);
+    const { data, error: unitError } = await sb.from("units")
+      .select("sku,ask_cents,package_length_in,package_width_in,package_height_in,package_weight_lb")
+      .eq("store_id", storeId).in("sku", skus);
+    if (unitError) throw new Error(unitError.message);
+    for (const unit of data || []) unitMap.set(unit.sku, unit);
+  }
+  const rows = (drafts || []).map((row) => {
+    const unit = unitMap.get(row.sku);
+    return summary({ ...row, floor_cents: unit?.ask_cents ?? null, box_ready: Boolean(boxKey(boxOf(unit))) }, settings);
+  });
   return {
     sync,
     connected: connection.data?.status === "connected",
@@ -458,6 +505,7 @@ async function refreshCategoryRules(row, unit) {
     fetchLiveAspects(row.category_id),
     fetchLiveConditions(row.category_id),
   ]);
+  if (!defs.length || !conditions.length) throw new Error(`eBay category ${row.category_id} has no listing options; choose a specific category.`);
   row.aspect_defs = defs;
   row.conditions = conditions;
   if (!locked(row, "condition")) {
@@ -485,6 +533,30 @@ async function refreshCategoryRules(row, unit) {
   return row;
 }
 
+async function repairCategoryRules(row, unit) {
+  if (locked(row, "category")) return false;
+  const previousId = row.category_id;
+  const previousName = row.category_name;
+  const query = [unit?.brand, unit?.title || row.title, unit?.category].filter(Boolean).join(" ");
+  const suggestions = row.suggestions?.length ? row.suggestions : await suggestCategories(query);
+  row.suggestions = suggestions;
+  for (const suggestion of suggestions.slice(0, 6)) {
+    if (!suggestion.categoryId || String(suggestion.categoryId) === String(previousId)) continue;
+    row.category_id = String(suggestion.categoryId);
+    row.category_name = suggestion.categoryName;
+    try {
+      await refreshCategoryRules(row, unit);
+      row.ebay_error = null;
+      return true;
+    } catch {
+      // Continue to another specific category; never invent condition choices.
+    }
+  }
+  row.category_id = previousId;
+  row.category_name = previousName;
+  return false;
+}
+
 function mergeBlankAspects(row, unit) {
   if (!row.aspect_defs?.length) return;
   const specs = parseListingSpecs(unit?.listing_specs) || {};
@@ -506,7 +578,7 @@ function mergeBlankAspects(row, unit) {
   row.aspects = next;
 }
 
-export async function prepareDraft(storeId, sku) {
+export async function prepareDraft(storeId, sku, { metadataOnly = false } = {}) {
   const sb = serviceClient();
   const [settings, row, unit] = await Promise.all([
     loadEbaySettings(storeId), loadDraft(sb, storeId, sku), loadUnit(sb, storeId, sku),
@@ -547,14 +619,11 @@ export async function prepareDraft(storeId, sku) {
       await refreshCategoryRules(row, unit);
     } catch (err) {
       row.ebay_error = err instanceof Error ? err.message : String(err);
+      try { await repairCategoryRules(row, unit); }
+      catch (repairError) { row.ebay_error = repairError instanceof Error ? repairError.message : String(repairError); }
     }
   }
-  if (boxKey(row.box) && (row.label_key !== boxKey(row.box) || row.label_cents == null)) {
-    const quote = await quoteLabel(sb, storeId, settings, row.box);
-    row.label_cents = quote.cents;
-    row.label_source = quote.source;
-    row.label_key = boxKey(row.box);
-  }
+  if (!metadataOnly && needsQuote(row, settings)) setQuote(row, await quoteLabel(sb, storeId, settings, row.box), settings);
   if (row.category_id) {
     const known = (row.suggestions || []).find((s) => String(s.categoryId) === String(row.category_id))?.categoryName;
     if (known) row.category_name = known;
@@ -577,7 +646,7 @@ export async function prepareDraft(storeId, sku) {
     }
   }
   if (row.aspect_defs?.length) mergeBlankAspects(row, unit);
-  applyPrice(row, settings);
+  if (!metadataOnly) applyPrice(row, settings);
   withReadiness(row);
   const saved = persistShape(row);
   const { error } = await sb.from("ebay_drafts").upsert(saved, { onConflict: "store_id,sku" });
@@ -627,6 +696,12 @@ export async function saveDraft(storeId, sku, fields) {
     lock(row, "condition");
   }
   if (fields.aspects && typeof fields.aspects === "object") {
+    if (Object.hasOwn(fields.aspects, "UPC")) {
+      const issue = gtinIssue(fields.aspects.UPC);
+      if (issue && !/^does\s+not\s+apply$/i.test(String(fields.aspects.UPC || "").trim())) {
+        throw new Error(`UPC from the scan looks wrong (${issue}); check the barcode or leave blank.`);
+      }
+    }
     row.aspects = { ...row.aspects, ...fields.aspects };
     lock(row, "aspects");
   }
@@ -697,10 +772,7 @@ export async function saveBox(storeId, sku, box) {
   row.unit_model = unit?.model;
   row.unit_upc = unit?.upc;
   const quote = await quoteLabel(sb, storeId, settings, row.box);
-  row.label_cents = quote.cents;
-  row.label_source = quote.source;
-  row.label_key = boxKey(row.box);
-  applyPrice(row, settings);
+  setQuote(row, quote, settings);
   withReadiness(row);
   const saved = await sb.from("ebay_drafts").upsert(persistShape(row), { onConflict: "store_id,sku" });
   if (saved.error) throw new Error(saved.error.message);
@@ -721,12 +793,7 @@ export async function repriceDraft(storeId, sku) {
   row.unit_upc = unit?.upc;
   row.box = boxOf(unit);
   if (!locked(row, "description") && unit) row.description = autoDescription(unit);
-  if (boxKey(row.box) && (row.label_key !== boxKey(row.box) || row.label_cents == null)) {
-    const quote = await quoteLabel(sb, storeId, settings, row.box);
-    row.label_cents = quote.cents;
-    row.label_source = quote.source;
-    row.label_key = boxKey(row.box);
-  }
+  if (needsQuote(row, settings)) setQuote(row, await quoteLabel(sb, storeId, settings, row.box), settings);
   applyPrice(row, settings);
   withReadiness(row);
   const { error } = await sb.from("ebay_drafts").upsert(persistShape(row), { onConflict: "store_id,sku" });
@@ -916,6 +983,7 @@ async function pushOne(storeId, sku, { revise = false, getPolicies = () => resol
       description: row.description,
       imageUrls: (row.photo_paths || []).slice(0, 12).map((path) => publicPhotoUrl(path)),
       aspects: stringsToAspects(row.aspects),
+      upcRequired: (row.aspect_defs || []).some((def) => def.required && String(def.name).toLowerCase() === "upc"),
       categoryId: row.category_id,
       conditionPayload: { condition: row.condition_enum, conditionId: String(row.condition_id) },
       conditionNotes: row.condition_notes || undefined,

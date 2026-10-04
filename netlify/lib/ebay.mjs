@@ -763,7 +763,9 @@ export async function listSku(storeId, sku, draft = null) {
   const priceCents = draft?.priceCents ?? unit.ask_cents;
   const identifiers = ebayIdentifiers(unit, aspects);
   if (!identifiers.validBrand) throw new Error("Brand needed before pushing to eBay.");
-  aspects = { ...aspects, Brand: [identifiers.brand], MPN: [identifiers.mpn] };
+  if (identifiers.upcIssue) throw new Error(`UPC from the scan looks wrong (${identifiers.upcIssue}); check the barcode or leave blank.`);
+  const upc = identifiers.upc || (draft?.upcRequired ? "Does not apply" : null);
+  aspects = { ...aspects, Brand: [identifiers.brand], MPN: [identifiers.mpn], ...(upc && draft?.upcRequired ? { UPC: [upc] } : {}) };
 
   await floorLog({
     storeId,
@@ -802,7 +804,7 @@ export async function listSku(storeId, sku, draft = null) {
       imageUrls: images,
       brand: identifiers.brand,
       mpn: identifiers.mpn,
-      upc: [identifiers.upc],
+      ...(upc ? { upc: [upc] } : {}),
       aspects,
       ...(epid ? { epid } : {}),
     },

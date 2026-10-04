@@ -7,19 +7,13 @@ import { wrapHandler } from "../lib/floor-log.mjs";
 async function handle(event) {
   if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: corsHeaders(), body: "" };
   try {
-    const withdrawn = await withdrawOpenEbayTasks();
     const sb = serviceClient();
-    const { data: stores } = await sb.from("connections").select("store_id").eq("provider", "ebay").eq("status", "connected");
-    const reconciled = [];
-    for (const row of stores ?? []) {
-      reconciled.push({ storeId: row.store_id, listings: await reconcileListedOffers(row.store_id) });
-    }
-    const orders = await pollAllStores();
+    // Draft pricing must still advance if a marketplace poll fails later.
     const { data: allStores } = await sb.from("stores").select("id");
     const drafted = [];
     for (const row of allStores ?? []) {
       try {
-        drafted.push({ storeId: row.id, ...(await syncDrafts(row.id, { quoteLimit: 2 })) });
+        drafted.push({ storeId: row.id, ...(await syncDrafts(row.id, { quoteLimit: 8 })) });
         const backfill = await backfillStatus(row.id);
         if (backfill.status === "idle") await startBackfill(row.id);
         else await resumeBackfillIfStale(row.id);
@@ -27,6 +21,13 @@ async function handle(event) {
         drafted.push({ storeId: row.id, error: err instanceof Error ? err.message : String(err) });
       }
     }
+    const withdrawn = await withdrawOpenEbayTasks();
+    const { data: stores } = await sb.from("connections").select("store_id").eq("provider", "ebay").eq("status", "connected");
+    const reconciled = [];
+    for (const row of stores ?? []) {
+      reconciled.push({ storeId: row.store_id, listings: await reconcileListedOffers(row.store_id) });
+    }
+    const orders = await pollAllStores();
     return json(200, { withdrawn, reconciled, orders, drafted });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

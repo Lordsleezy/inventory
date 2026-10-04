@@ -1,6 +1,7 @@
 import { authorizedScan } from '../lib/video-scan-auth.mjs';
 import { enrichVideo, lookupProductSpecs, retailFields, tokenCost } from '../lib/video-scan.mjs';
 import { resolveFloorCategory, loadStoredAspects, refreshCategoryAspects, prepareUnitAspects } from '../lib/ebay-catalog.mjs';
+import { gtinIssue } from '../lib/gtin.mjs';
 
 const dimensionKeys=['product_height_in','product_width_in','product_depth_in','product_weight_lb',
   'package_length_in','package_width_in','package_height_in','package_weight_lb'];
@@ -65,12 +66,22 @@ export async function handler(event) {
       String(job.result?.retail_source_url||'').replace(/\/$/,'');
     const model=candidate&&(exactSource||candidate===cleanModel(job.result?.model))?candidate:'';
     const specifics={...(existing.data.ebay_item_specifics||{}),...(found.ebay_item_specifics||{})};
+    const scannedUpc=String(found.upc||'').trim();
+    const upcIssue=gtinIssue(scannedUpc);
+    const existingUpc=String(existing.data.upc||'').trim();
+    const specificsUpc=String(specifics.UPC||'').trim();
+    const specificsIssue=gtinIssue(specificsUpc);
+    const validUpc=existingUpc&&!gtinIssue(existingUpc)?existingUpc:
+      scannedUpc&&!upcIssue?scannedUpc:specificsUpc&&!specificsIssue?specificsUpc:null;
+    if(specificsIssue)delete specifics.UPC;
     if(/^\d{5,}$/.test(String(specifics.MPN||'')))delete specifics.MPN;
+    const priorAspects={...(existing.data.listing_specs?.ebay_aspects||{})};
+    if(gtinIssue(priorAspects.UPC))delete priorAspects.UPC;
     const specs={...(existing.data.listing_specs||{}),
       ...Object.fromEntries(Object.entries(accepted).filter(([key])=>key.startsWith('product_')).map(([key,value])=>[key.slice(8),value])),
       dims_sources:{...(existing.data.listing_specs?.dims_sources||{}),
         ...Object.fromEntries(Object.keys(accepted).map(key=>[key,`${types[key]}: ${String(sources[key])}`]))},
-      ebay_aspects:{...(existing.data.listing_specs?.ebay_aspects||{}),...specifics}};
+      ebay_aspects:{...priorAspects,...specifics}};
     const retail=retailFields(latest.data.result?.retail_prices||[],identity);
     const category=/\btoothbrush/i.test(identity.title||'')?'Electric Toothbrushes':
       /\b(?:mini|string|christmas) lights\b/i.test(identity.title||'')?'String Lights':
@@ -79,7 +90,8 @@ export async function handler(event) {
       condition:existing.data.condition||found.condition||null,
       defect_notes:existing.data.defect_notes||found.condition_notes||null,
       ai_description:desc||null,listing_body:goodDescription(existing.data.listing_body,identity.title)||desc||null,
-      upc:existing.data.upc||found.upc||null,mfr_serial:existing.data.mfr_serial||found.mfr_serial||null,
+      upc:validUpc,upc_rejected:upcIssue?scannedUpc:specificsIssue?specificsUpc:existing.data.upc_rejected||null,
+      mfr_serial:existing.data.mfr_serial||found.mfr_serial||null,
       ebay_title:String(found.ebay_title||existing.data.ebay_title||'').replace(/\b\d{7}\b/g,'').replace(/\s+/g,' ').trim(),
       ebay_category:found.ebay_category||existing.data.ebay_category,
       ebay_item_specifics:specifics,

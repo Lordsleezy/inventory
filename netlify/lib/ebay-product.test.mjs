@@ -2,12 +2,23 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { draftReadiness } from "./ebay-price.mjs";
 import { ebayDescription, ebayIdentifiers } from "./ebay-product.mjs";
+import { gtinIssue } from "./gtin.mjs";
 
 test("draft Brand and MPN reach the Inventory API identifiers", () => {
   assert.deepEqual(ebayIdentifiers({ brand: "Old brand", model: "" }, { Brand: "Colgate", MPN: "Does Not Apply" }), {
-    brand: "Colgate", mpn: "Does not apply", upc: "Does not apply", validBrand: true,
+    brand: "Colgate", mpn: "Does not apply", upc: null, upcIssue: null, validBrand: true,
   });
   assert.equal(ebayIdentifiers({}, {}).validBrand, false);
+});
+
+test("UPC-A, EAN-13, and GTIN-14 require valid check digits", () => {
+  assert.equal(gtinIssue("075020108296"), null);
+  assert.equal(gtinIssue("887063466175"), "bad check digit");
+  assert.equal(gtinIssue("887063466178"), null);
+  assert.equal(gtinIssue("4006381333931"), null);
+  assert.equal(gtinIssue("00012345600012"), null);
+  assert.equal(gtinIssue("123456789"), "must have 12, 13, or 14 digits");
+  assert.equal(ebayIdentifiers({ upc: "887063466175" }).upc, null);
 });
 
 test("eBay copy drops Floor footer and ends with bare SKU", () => {

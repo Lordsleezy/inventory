@@ -5,6 +5,7 @@ const functionsBase = (import.meta.env.VITE_FLOOR_FUNCTIONS_URL || 'https://inve
 type Fail = string;
 type Summary = {
   sku: string; title: string | null; status: string; ready: boolean; price_cents: number | null;
+  floor_cents: number | null; box_ready: boolean; locked_price_below_formula: boolean;
   shipping_mode: string | null; label_cents: number | null; shipping_buffer_cents: number; label_source: string | null;
   category_name: string | null; category_id: string | null; photo_url: string | null;
   fails: Fail[]; ebay_error: string | null; view_url: string | null; listing_id: string | null;
@@ -12,6 +13,7 @@ type Summary = {
 type Aspect = { name: string; required: boolean; recommended: boolean; allowed: string[]; selectionOnly: boolean };
 type Draft = Summary & {
   description: string | null; condition_id: string | null; condition_notes: string | null;
+  upc: string; rejected_upc: string | null;
   suggestions: { categoryId: string; categoryName: string }[];
   conditions: { conditionId: string; name: string }[];
   aspect_defs: Aspect[]; aspects: Record<string, string>;
@@ -208,7 +210,7 @@ export function EbayDraftsPage({ accessToken, userId, money, active }: Props) {
         <button className="inventory-row" onClick={() => void open(row.sku)}>
           <span className="inventory-photo">{row.photo_url ? <img src={row.photo_url} alt="" /> : 'No photo'}</span>
           <span className="inventory-identity"><strong>{row.title || `SKU ${row.sku}`}</strong><small>SKU {row.sku}{row.category_name ? ` · ${row.category_name}` : ''}</small></span>
-          <span className="inventory-meta"><small>{row.price_cents != null ? money(row.price_cents) : 'No price'} · {row.shipping_mode === 'free' ? 'Free shipping' : row.shipping_mode === 'calculated' ? 'Calculated shipping' : 'Shipping TBD'}{row.label_cents != null ? ` · label ${money(row.label_cents)}` : ''}</small></span>
+          <span className="inventory-meta"><small>Floor {row.floor_cents != null ? money(row.floor_cents) : '—'} · eBay {row.price_cents != null ? money(row.price_cents) : row.box_ready ? 'Getting shipping quote' : 'Needs box size'} · {row.shipping_mode === 'free' ? 'Free shipping' : row.shipping_mode === 'calculated' ? 'Calculated shipping' : 'Shipping TBD'}{row.label_cents != null ? ` · label ${money(row.label_cents)}` : ''}</small>{row.locked_price_below_formula && <small className="bad-text">Manual price below formula</small>}</span>
           <span>{row.status === 'live' ? <b className="tag on">Live</b> : row.ready ? <b className="tag on">Ready</b> : <b className="tag warn">{row.fails[0] || 'Needs work'}</b>}</span>
         </button>
       </div>)}</div>}</section>
@@ -225,6 +227,8 @@ export function EbayDraftsPage({ accessToken, userId, money, active }: Props) {
         <label className="notes">Category<select value={draft.category_id || ''} onChange={(e) => void save({ category_id: e.target.value })}><option value="">Choose…</option>{(draft.suggestions || []).map((s) => <option key={s.categoryId} value={s.categoryId}>{s.categoryName}</option>)}{draft.category_id && !(draft.suggestions || []).some((s) => s.categoryId === draft.category_id) && <option value={draft.category_id}>{draft.category_name || draft.category_id}</option>}</select></label>
         <label className="notes">Condition<select value={draft.condition_id || ''} onChange={(e) => void save({ condition_id: e.target.value })}><option value="">Choose…</option>{(draft.conditions || []).map((c) => <option key={c.conditionId} value={c.conditionId}>{c.name}</option>)}</select><small>Floor condition: {draft.floor_condition || '—'}</small></label>
         <label className="notes">Condition notes<textarea rows={3} value={draft.condition_notes || ''} onChange={(e) => editDraft('condition_notes', { ...draft, condition_notes: e.target.value })} onBlur={() => void save({ condition_notes: draft.condition_notes })} /></label>
+        <label className="notes">UPC / EAN / GTIN<input inputMode="numeric" value={draft.upc || ''} placeholder="Leave blank if unknown" onChange={(e) => editDraft('aspects', { ...draft, upc: e.target.value, aspects: { ...draft.aspects, UPC: e.target.value } })} onBlur={() => void save({ aspects: { ...draft.aspects, UPC: draft.upc || '' } })} /></label>
+        {draft.rejected_upc && !draft.upc && <p className="bad-text">UPC from the scan looks wrong (bad check digit); check the barcode or leave blank. Scan read: {draft.rejected_upc}</p>}
         <h3>Item specifics</h3>
         {(draft.aspect_defs || []).length === 0 ? <p className="hint">Pick a category to load eBay’s required and recommended specifics.</p> : (draft.aspect_defs || []).map((def) => <AspectField key={def.name} def={def} value={draft.aspects?.[def.name] || ''} disabled={busy} onChange={(value) => editDraft('aspects', { ...draft, aspects: { ...draft.aspects, [def.name]: value } })} onCommit={(value) => void save({ aspects: { ...draft.aspects, [def.name]: value } })} />)}
         <h3>Box and shipping</h3>
@@ -305,8 +309,8 @@ function allowsCustom(def: Aspect) {
 }
 
 function AspectField({ def, value, disabled, onChange, onCommit }: { def: Aspect; value: string; disabled: boolean; onChange: (value: string) => void; onCommit: (value: string) => void }) {
-  const custom = allowsCustom(def);
   const options = def.allowed || [];
+  const custom = allowsCustom(def) || options.length === 0;
   const long = options.length > 30 || def.name.toLowerCase() === 'brand';
   const label = `${def.name}${def.required ? ' (required)' : ' (recommended)'}`;
   if (!custom && !long) {
@@ -337,7 +341,7 @@ function ShippingMath({ draft, userId, settings, money, busy, onMode, onPrice }:
   const source = draft.label_source === 'shippo' ? 'Shippo quote' : draft.label_source === 'fallback' ? 'fallback table' : 'estimate';
   const over = label != null && label > settings.cutoffCents;
   const why = !ready || label == null
-    ? 'Enter box size to get shipping and price.'
+    ? ready ? 'Getting shipping quote. Your Floor price is saved.' : 'Enter box size to get shipping and price.'
     : `${money(label)} from the ${source} to ${settings.farZip}, ${over ? `over ${money(settings.cutoffCents)}, so calculated shipping` : `at or under ${money(settings.cutoffCents)}, so free shipping`}.`;
   return <>
     {draft.dims_source === 'estimated' && <p className="hint">Estimated, check before shipping.</p>}
@@ -349,6 +353,7 @@ function ShippingMath({ draft, userId, settings, money, busy, onMode, onPrice }:
       <li>eBay fee {settings.feePct}% plus {money(settings.perOrderCents)} per order</li>
       <li>eBay price {draft.price_cents != null ? money(draft.price_cents) : '—'}</li>
     </ul>}
+    {(draft.locks || []).includes('price') && draft.quotes && draft.price_cents != null && draft.price_cents < (draft.shipping_mode === 'free' ? draft.quotes.free : draft.quotes.calculated) && <p className="bad-text">Manual eBay price is below the current formula.</p>}
     <div className="actions">
       <button className="secondary" disabled={busy || !draft.quotes} onClick={() => onMode('free')}>Force free shipping{draft.quotes ? ` · ${money(draft.quotes.free)} (includes ${money(settings.bufferCents)} buffer)` : ''}</button>
       <button className="secondary" disabled={busy || !draft.quotes} onClick={() => onMode('calculated')}>Force calculated{draft.quotes ? ` · ${money(draft.quotes.calculated)} ($0 buffer)` : ''}</button>

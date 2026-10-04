@@ -230,7 +230,9 @@ export async function rememberAspectDefault(storeId, slug, aspectName, value) {
   if (error) throw new Error(error.message);
 }
 
+let tokenCache = null;
 async function applicationToken() {
+  if (tokenCache && tokenCache.expiresAt > Date.now() + 60_000) return tokenCache.value;
   const { api } = ebayHosts(process.env.EBAY_ENV);
   const id = process.env.EBAY_CLIENT_ID;
   const secret = process.env.EBAY_CLIENT_SECRET;
@@ -249,7 +251,19 @@ async function applicationToken() {
   });
   const json = await res.json();
   if (!res.ok) throw new Error(json.error_description || json.error || "ebay_app_token_failed");
-  return { api, token: json.access_token };
+  const value = { api, token: json.access_token };
+  tokenCache = { value, expiresAt: Date.now() + Math.min(Number(json.expires_in || 7200) * 1000, 30 * 60_000) };
+  return value;
+}
+
+const taxonomyCache = new Map();
+async function cachedTaxonomy(key, load) {
+  const prior = taxonomyCache.get(key);
+  if (prior && prior.until > Date.now()) return prior.promise;
+  const promise = load();
+  taxonomyCache.set(key, { promise, until: Date.now() + 10 * 60_000 });
+  try { return await promise; }
+  catch (error) { taxonomyCache.delete(key); throw error; }
 }
 
 export async function categoryName(categoryId) {
@@ -299,6 +313,7 @@ export async function suggestCategories(query) {
 }
 
 export async function fetchLiveAspects(ebayCategoryId) {
+  return cachedTaxonomy(`aspects:${ebayCategoryId}`, async () => {
   const market = process.env.EBAY_MARKETPLACE_ID || "EBAY_US";
   const { api, token } = await applicationToken();
   const treeRes = await fetch(
@@ -311,8 +326,10 @@ export async function fetchLiveAspects(ebayCategoryId) {
     `${api}/commerce/taxonomy/v1/category_tree/${treeId}/get_item_aspects_for_category?category_id=${encodeURIComponent(ebayCategoryId)}`,
     { headers: { Authorization: `Bearer ${token}` } },
   );
-  const json = await res.json();
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.errors?.[0]?.message || `eBay aspects unavailable for category ${ebayCategoryId}`);
   return normalizeTaxonomyAspects(json?.aspects || []);
+  });
 }
 
 export async function refreshCategoryAspects(ebayCategoryId) {
@@ -354,6 +371,7 @@ export async function saveStoredConditions(ebayCategoryId, allowed) {
 }
 
 export async function fetchLiveConditions(ebayCategoryId) {
+  return cachedTaxonomy(`conditions:${ebayCategoryId}`, async () => {
   const market = process.env.EBAY_MARKETPLACE_ID || "EBAY_US";
   const { api, token } = await applicationToken();
   const filter = `categoryIds:{${ebayCategoryId}}`;
@@ -361,10 +379,11 @@ export async function fetchLiveConditions(ebayCategoryId) {
     `${api}/sell/metadata/v1/marketplace/${market}/get_item_condition_policies?filter=${encodeURIComponent(filter)}`,
     { headers: { Authorization: `Bearer ${token}` } },
   );
-  const json = await res.json();
+  const json = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(json.errors?.[0]?.message || json.error_description || "ebay_conditions_failed");
   const policy = (json.itemConditionPolicies || []).find((row) => String(row.categoryId) === String(ebayCategoryId));
   return parseItemConditions(policy);
+  });
 }
 
 export async function refreshCategoryConditions(ebayCategoryId) {

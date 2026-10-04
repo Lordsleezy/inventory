@@ -27,6 +27,7 @@
 
 [functions."ebay-sync"]
   schedule = "* * * * *"
+  timeout = 60
 
 [functions."ebay-drafts"]
   timeout = 60
