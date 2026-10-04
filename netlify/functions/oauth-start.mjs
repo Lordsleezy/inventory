@@ -30,7 +30,7 @@ async function handle(event) {
     if (message === "not_owner") {
       return json(403, {
         error: "not_owner",
-        message: "Only the store owner can connect Square, eBay, or Amazon. Sign in as the owner.",
+        message: "A Floor store owner or portal admin must connect Square, eBay, or Amazon.",
       });
     }
     return json(401, { error: message });

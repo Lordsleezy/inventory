@@ -47,10 +47,6 @@ async function handle(event) {
     if (action === "connect") {
       if (!ctx.userId) return json(400, { error: "Sign in from the admin portal to connect eBay." });
       const sb = serviceClient();
-      const staff = await sb.from("staff").select("role,deactivated_at").eq("store_id", storeId).eq("user_id", ctx.userId).maybeSingle();
-      if (staff.data?.role !== "owner" || staff.data?.deactivated_at) {
-        return json(403, { error: "Only the Floor store owner can connect the eBay account." });
-      }
       const nonce = randomBytes(24).toString("hex");
       const ins = await sb.from("oauth_states").insert({
         store_id: storeId,

@@ -1,4 +1,4 @@
-import { json, corsHeaders, staffFromEvent } from "../lib/server.mjs";
+import { json, corsHeaders, connectionAdminFromEvent } from "../lib/server.mjs";
 import { wrapHandler } from "../lib/floor-log.mjs";
 
 /**
@@ -11,9 +11,11 @@ async function handle(event) {
   if (event.httpMethod !== "POST" && event.httpMethod !== "GET") {
     return json(405, { error: "method_not_allowed" });
   }
-  const ctx = await staffFromEvent(event);
-  if (ctx.staff.role !== "owner" && ctx.staff.role !== "manager") {
-    return json(403, { error: "not_manager" });
+  let ctx;
+  try { ctx = await connectionAdminFromEvent(event, ["owner", "manager"]); }
+  catch (error) {
+    return json(error.message === "not_owner" ? 403 : error.message === "not_signed_in" ? 401 : 500,
+      { error: error.message === "not_owner" ? "not_manager" : error.message === "not_signed_in" ? "not_signed_in" : "auth_failed" });
   }
   const appId = process.env.SQUARE_APPLICATION_ID;
   const redirect = process.env.SQUARE_REDIRECT_URL;

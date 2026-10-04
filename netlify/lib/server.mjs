@@ -70,8 +70,25 @@ export async function staffFromEvent(event) {
   return { user: data.user, staff: staff.data, token };
 }
 
+export async function connectionAdminFromEvent(event, allowedStaffRoles = ["owner"]) {
+  const header = event.headers.authorization || event.headers.Authorization || "";
+  const token = header.replace(/^Bearer\s+/i, "");
+  if (!token) throw new Error("not_signed_in");
+  const sb = serviceClient();
+  const { data, error } = await sb.auth.getUser(token);
+  if (error || !data.user) throw new Error("not_signed_in");
+  const { data: staff, error: staffError } = await sb.from("staff")
+    .select("user_id,store_id,role,display_name,deactivated_at").eq("user_id", data.user.id).maybeSingle();
+  if (staffError) throw staffError;
+  if (staff && !staff.deactivated_at && allowedStaffRoles.includes(staff.role))
+    return { user: data.user, staff, token };
+  const { data: admin, error: adminError } = await sb.from("portal_admins")
+    .select("store_id").eq("user_id", data.user.id).maybeSingle();
+  if (adminError) throw adminError;
+  if (!admin) throw new Error("not_owner");
+  return { user: data.user, staff: { user_id: data.user.id, store_id: admin.store_id, role: "portal_admin" }, token };
+}
+
 export async function ownerFromEvent(event) {
-  const ctx = await staffFromEvent(event);
-  if (ctx.staff.role !== "owner") throw new Error("not_owner");
-  return ctx;
+  return connectionAdminFromEvent(event);
 }
