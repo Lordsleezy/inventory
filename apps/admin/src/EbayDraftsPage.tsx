@@ -49,6 +49,18 @@ export function EbayDraftsPage({ accessToken, money }: Props) {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
+  function showDraft(next: Draft | null) {
+    setDraft(next);
+    if (next) sessionStorage.setItem('floor-admin-ebay-draft', next.sku);
+    else sessionStorage.removeItem('floor-admin-ebay-draft');
+  }
+
+  useEffect(() => {
+    const sku = sessionStorage.getItem('floor-admin-ebay-draft');
+    if (!sku) return;
+    void call(accessToken, { action: 'prepare', sku }).then((data) => setDraft(data.draft)).catch(() => sessionStorage.removeItem('floor-admin-ebay-draft'));
+  }, []);
+
   const load = useCallback(async () => {
     const data = await call(accessToken, { action: 'list' });
     setRows(data.drafts || []);
@@ -74,11 +86,11 @@ export function EbayDraftsPage({ accessToken, money }: Props) {
     finally { setBusy(false); }
   }
   async function open(sku: string) {
-    await run(async () => { const data = await call(accessToken, { action: 'prepare', sku }); setDraft(data.draft); });
+    await run(async () => { const data = await call(accessToken, { action: 'prepare', sku }); showDraft(data.draft); });
   }
   async function save(fields: Record<string, unknown>) {
     if (!draft) return;
-    await run(async () => { const data = await call(accessToken, { action: 'save', sku: draft.sku, fields }); setDraft(data.draft); await load(); });
+    await run(async () => { const data = await call(accessToken, { action: 'save', sku: draft.sku, fields }); showDraft(data.draft); await load(); });
   }
   function toggle(sku: string) {
     setPicked((cur) => cur.includes(sku) ? cur.filter((s) => s !== sku) : [...cur, sku]);
@@ -92,7 +104,7 @@ export function EbayDraftsPage({ accessToken, money }: Props) {
         <button disabled={busy || picked.length === 0} onClick={() => void run(async () => {
           const data = await call(accessToken, { action: 'push', skus: picked });
           const failed = (data.results || []).filter((r: { ok: boolean; sku: string; error?: string }) => !r.ok);
-          setPicked([]); setDraft(null); await load();
+          setPicked([]); showDraft(null); await load();
           if (failed.length) setError(failed.map((r: { sku: string; error?: string }) => `SKU ${r.sku}: ${r.error}`).join(' '));
         })}>Push selected</button>
       </div></header>
@@ -122,7 +134,7 @@ export function EbayDraftsPage({ accessToken, money }: Props) {
         </button>
       </div>)}</div>}</section>
 
-      {draft && <section className="panel ebay-editor"><div className="section-head"><h2>SKU {draft.sku}</h2><button className="text-button" onClick={() => setDraft(null)}>Close</button></div>
+      {draft && <section className="panel ebay-editor"><div className="section-head"><h2>SKU {draft.sku}</h2><button className="text-button" onClick={() => showDraft(null)}>Close</button></div>
         {draft.status === 'live' && draft.view_url && <p><b className="tag on">Live</b> <a href={draft.view_url} target="_blank" rel="noreferrer">Open on eBay</a></p>}
         {draft.ebay_error && <div className="alert" role="alert">{draft.ebay_error}</div>}
         <div className="ebay-photos">{draft.photos.map((photo, i) => <figure key={photo.path}><img src={photo.url} alt="" />{i === 0 && <figcaption>Main</figcaption>}<div className="actions"><button className="secondary" disabled={i === 0 || busy} onClick={() => { const photos = [...draft.photos]; const [moved] = photos.splice(i, 1); photos.unshift(moved); void save({ photo_paths: photos.map((p) => p.path) }); }}>Make main</button>{i > 0 && <button className="secondary" disabled={busy} onClick={() => { const photos = [...draft.photos]; [photos[i - 1], photos[i]] = [photos[i], photos[i - 1]]; void save({ photo_paths: photos.map((p) => p.path) }); }}>Left</button>}</div></figure>)}</div>
@@ -134,13 +146,13 @@ export function EbayDraftsPage({ accessToken, money }: Props) {
         <h3>Item specifics</h3>
         {(draft.aspect_defs || []).length === 0 ? <p className="hint">Pick a category to load eBay’s required and recommended specifics.</p> : (draft.aspect_defs || []).map((def) => <AspectField key={def.name} def={def} value={draft.aspects?.[def.name] || ''} disabled={busy} onChange={(value) => setDraft({ ...draft, aspects: { ...draft.aspects, [def.name]: value } })} onCommit={(value) => void save({ aspects: { [def.name]: value } })} />)}
         <h3>Box and shipping</h3>
-        <BoxForm draft={draft} busy={busy} onSave={(box) => void run(async () => { const data = await call(accessToken, { action: 'save_box', sku: draft.sku, box }); setDraft(data.draft); await load(); })} />
+        <BoxForm draft={draft} busy={busy} onSave={(box) => void run(async () => { const data = await call(accessToken, { action: 'save_box', sku: draft.sku, box }); showDraft(data.draft); await load(); })} />
         <ShippingMath draft={draft} settings={settings} money={money} busy={busy} onMode={(mode) => void save({ shipping_mode: mode })} onPrice={(cents) => void save({ price_cents: cents })} />
         <h3>Ready check</h3>
         <ul className="ebay-check">{(draft.checklist || []).map((item) => <li key={item.label} className={item.ok ? 'ok-text' : 'bad-text'}>{item.ok ? 'Ready' : 'Needed'} · {item.label}</li>)}</ul>
         <div className="actions">
-          <button disabled={busy || !draft.ready} onClick={() => void run(async () => { await call(accessToken, { action: 'push', skus: [draft.sku] }); setDraft(null); await load(); })}>{draft.status === 'live' ? 'Update on eBay' : 'Push to eBay'}</button>
-          {draft.status === 'live' && <button className="text-button danger" disabled={busy} onClick={() => void run(async () => { await call(accessToken, { action: 'end', sku: draft.sku }); setDraft(null); await load(); })}>End listing</button>}
+          <button disabled={busy || !draft.ready} onClick={() => void run(async () => { await call(accessToken, { action: 'push', skus: [draft.sku] }); showDraft(null); await load(); })}>{draft.status === 'live' ? 'Update on eBay' : 'Push to eBay'}</button>
+          {draft.status === 'live' && <button className="text-button danger" disabled={busy} onClick={() => void run(async () => { await call(accessToken, { action: 'end', sku: draft.sku }); showDraft(null); await load(); })}>End listing</button>}
         </div>
       </section>}
     </div>
