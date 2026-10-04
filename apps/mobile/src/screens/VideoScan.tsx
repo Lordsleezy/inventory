@@ -118,11 +118,14 @@ export function VideoScan() {
       if (stills[0]) setOwnThumb(URL.createObjectURL(stills[0]));
       early.current[id] = (async () => {
         const ready = await account;
+        // Only register paths we actually upload now. Listing missing still-1/2/3 made
+        // the background worker fail while the job stayed stuck on "Identifying…".
+        const uploadedPaths = ready.stillPaths.slice(0, stills.length);
         const sent = await Promise.all(stills.map((blob, index) =>
-          bucket.upload(ready.stillPaths[index], blob, { contentType: 'image/jpeg' })));
+          bucket.upload(uploadedPaths[index], blob, { contentType: 'image/jpeg' })));
         for (const item of sent) if (item.error) throw item.error;
         const created = await floorCloud().rpc('video_scan_create', {
-          p_id: id, p_video_path: `${ready.prefix}/video.${extension}`, p_still_paths: ready.stillPaths });
+          p_id: id, p_video_path: `${ready.prefix}/video.${extension}`, p_still_paths: uploadedPaths });
         if (created.error) throw created.error;
         setJobs(previous => [{ id, status: 'processing', result: null, error: null, sku: null,
           created_at: new Date().toISOString() }, ...previous]);

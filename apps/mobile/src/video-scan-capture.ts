@@ -138,13 +138,11 @@ export async function startVideoScan(
         const ready = frames.filter((frame) => frame.score >= MIN_SHARPNESS).sort((a, b) => b.score - a.score);
         const distinct: Still[] = [];
         for (const frame of ready) if (distinct.every((other) => different(frame, other))) distinct.push(frame);
-        // Start identify on the first sharp frame; include a second angle when it arrives
-        // before we have already handed stills off.
-        if (!earlyStills.length && distinct.length >= 1 && onEarlyStills) {
-          earlyStills = distinct.slice(0, Math.min(2, distinct.length)).map((frame) => frame.blob);
+        // Need two distinct sharp angles before identify — one frame was too easy to
+        // fire with an empty second storage path and left jobs stuck processing.
+        if (!earlyStills.length && distinct.length >= 2 && onEarlyStills) {
+          earlyStills = distinct.slice(0, 2).map((frame) => frame.blob);
           onEarlyStills(earlyStills);
-        } else if (earlyStills.length === 1 && distinct.length >= 2 && onEarlyStills) {
-          // Too late to change the in-flight request; second angle still attaches on finish.
         }
       },
       "image/jpeg",
@@ -182,9 +180,9 @@ export async function startVideoScan(
       if (best.length >= 4) break;
       if (best.every((other) => different(frame, other))) best.push(frame);
     }
-    if (best.length < 1) {
+    if (best.length < 2) {
       onError(
-        new Error("Not enough sharp views. Hold still briefly on the front and another side, then rescan."),
+        new Error("Not enough sharp, different views. Hold still briefly on the front and another side, then rescan."),
       );
       return;
     }

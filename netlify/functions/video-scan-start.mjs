@@ -16,7 +16,9 @@ export async function handler(event) {
     authorizedJobId=id;
     if(!['queued','failed'].includes(job.status))return json(200,{ok:true,status:job.status});
     if(!job.still_paths?.length)return json(400,{error:'No scan photo'});
-    // Client already uploaded stills before create/start — skip storage.info round-trip.
+    // Confirm the first still is readable before kicking the background worker.
+    const file=await sb.storage.from('video-scan-staging').info(job.still_paths[0]);
+    if(file.error)return json(400,{error:'Upload scan photo before starting'});
     const updated=await sb.from('video_scan_jobs').update({status:'processing',error:null,reserved_usd:0.25,
       updated_at:new Date().toISOString()})
       .eq('id',id).eq('status',job.status).select('id').maybeSingle();

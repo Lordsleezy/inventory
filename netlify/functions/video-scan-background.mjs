@@ -16,11 +16,13 @@ export async function handler(event) {
       identity=job.result;
     }else{
       if(job.status!=='processing')return {statusCode:200};
-      const frames=await Promise.all(job.still_paths.slice(0,2).map(async path=>{
-        const downloaded=await sb.storage.from('video-scan-staging').download(path);
-        if(downloaded.error)throw downloaded.error;
-        return Buffer.from(await downloaded.data.arrayBuffer());
+      const downloaded=await Promise.all(job.still_paths.slice(0,2).map(async path=>{
+        const file=await sb.storage.from('video-scan-staging').download(path);
+        if(file.error||!file.data)return null;
+        return Buffer.from(await file.data.arrayBuffer());
       }));
+      const frames=downloaded.filter(Boolean);
+      if(!frames.length)throw new Error('Scan photos missing from storage');
       const identified=await identifyFramesCached(sb,job,frames);
       identity={...identified.result,identified_at:new Date().toISOString()};
       const ready=await sb.from('video_scan_jobs').update({status:'ready',result:identity,
