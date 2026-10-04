@@ -5,7 +5,7 @@ const functionsBase = (import.meta.env.VITE_FLOOR_FUNCTIONS_URL || 'https://inve
 type Fail = string;
 type Summary = {
   sku: string; title: string | null; status: string; ready: boolean; price_cents: number | null;
-  shipping_mode: string | null; label_cents: number | null; label_source: string | null;
+  shipping_mode: string | null; label_cents: number | null; shipping_buffer_cents: number; label_source: string | null;
   category_name: string | null; category_id: string | null; photo_url: string | null;
   fails: Fail[]; ebay_error: string | null; view_url: string | null; listing_id: string | null;
 };
@@ -23,7 +23,7 @@ type Draft = Summary & {
   checklist: { ok: boolean; label: string }[]; locks: string[];
 };
 type Backfill = { status?: string; processed?: number; total?: number; searched?: number; cost_usd?: number; note?: string };
-type Settings = { feePct: number; perOrderCents: number; cutoffCents: number; ending: number; farZip: string };
+type Settings = { feePct: number; perOrderCents: number; cutoffCents: number; bufferCents: number; ending: number; farZip: string };
 type Props = { accessToken: string; money: (n: number) => string };
 
 async function call(token: string, body: Record<string, unknown>) {
@@ -42,7 +42,7 @@ export function EbayDraftsPage({ accessToken, money }: Props) {
   const [counts, setCounts] = useState({ total: 0, ready: 0, needsBox: 0, live: 0 });
   const [connected, setConnected] = useState<boolean | null>(null);
   const [policies, setPolicies] = useState<{ ok?: boolean; missing?: string[] } | null>(null);
-  const [settings, setSettings] = useState<Settings>({ feePct: 13.25, perOrderCents: 40, cutoffCents: 1500, ending: 99, farZip: '10001' });
+  const [settings, setSettings] = useState<Settings>({ feePct: 13.25, perOrderCents: 40, cutoffCents: 1500, bufferCents: 200, ending: 99, farZip: '10001' });
   const [draft, setDraft] = useState<Draft | null>(null);
   const [picked, setPicked] = useState<string[]>([]);
   const [backfill, setBackfill] = useState<Backfill | null>(null);
@@ -150,6 +150,7 @@ export function EbayDraftsPage({ accessToken, money }: Props) {
 function SettingsForm({ settings, busy, onSave }: { settings: Settings; busy: boolean; onSave: (s: Settings) => void }) {
   const [form, setForm] = useState({
     cutoff: (settings.cutoffCents / 100).toFixed(2),
+    buffer: (settings.bufferCents / 100).toFixed(2),
     fee: String(settings.feePct),
     perOrder: (settings.perOrderCents / 100).toFixed(2),
     ending: String(settings.ending),
@@ -158,14 +159,16 @@ function SettingsForm({ settings, busy, onSave }: { settings: Settings; busy: bo
   useEffect(() => {
     setForm({
       cutoff: (settings.cutoffCents / 100).toFixed(2),
+      buffer: (settings.bufferCents / 100).toFixed(2),
       fee: String(settings.feePct),
       perOrder: (settings.perOrderCents / 100).toFixed(2),
       ending: String(settings.ending),
       zip: settings.farZip,
     });
-  }, [settings.cutoffCents, settings.feePct, settings.perOrderCents, settings.ending, settings.farZip]);
-  return <form className="number-grid" onSubmit={(e) => { e.preventDefault(); onSave({ feePct: Number(form.fee), perOrderCents: Math.round(Number(form.perOrder) * 100), cutoffCents: Math.round(Number(form.cutoff) * 100), ending: Number(form.ending), farZip: form.zip }); }}>
+  }, [settings.cutoffCents, settings.bufferCents, settings.feePct, settings.perOrderCents, settings.ending, settings.farZip]);
+  return <form className="number-grid" onSubmit={(e) => { e.preventDefault(); onSave({ feePct: Number(form.fee), perOrderCents: Math.round(Number(form.perOrder) * 100), cutoffCents: Math.round(Number(form.cutoff) * 100), bufferCents: Math.round(Number(form.buffer) * 100), ending: Number(form.ending), farZip: form.zip }); }}>
     <label>Free-shipping cutoff ($)<input value={form.cutoff} onChange={(e) => setForm({ ...form, cutoff: e.target.value })} /></label>
+    <label>Shipping buffer ($)<input inputMode="decimal" value={form.buffer} onChange={(e) => { if (/^\d*(?:\.\d{0,2})?$/.test(e.target.value)) setForm({ ...form, buffer: e.target.value }); }} onBlur={() => setForm((current) => ({ ...current, buffer: Number(current.buffer || 0).toFixed(2) }))} /></label>
     <label>eBay fee %<input value={form.fee} onChange={(e) => setForm({ ...form, fee: e.target.value })} /></label>
     <label>Per-order fee ($)<input value={form.perOrder} onChange={(e) => setForm({ ...form, perOrder: e.target.value })} /></label>
     <label>Price ends with<input value={form.ending} onChange={(e) => setForm({ ...form, ending: e.target.value })} /></label>
@@ -242,12 +245,13 @@ function ShippingMath({ draft, settings, money, busy, onMode, onPrice }: { draft
     {ready && label != null && draft.floor_cents != null && <ul className="ebay-check">
       <li>Floor price {money(draft.floor_cents)}</li>
       <li>Label {money(label)} ({source}){draft.shipping_mode === 'free' ? ', baked into the price' : ', buyer pays shipping'}</li>
+      <li>Shipping buffer {money(draft.shipping_mode === 'free' ? draft.shipping_buffer_cents : 0)}{draft.shipping_mode === 'free' ? ', baked into the price' : ', not applied'}</li>
       <li>eBay fee {settings.feePct}% plus {money(settings.perOrderCents)} per order</li>
       <li>eBay price {draft.price_cents != null ? money(draft.price_cents) : '—'}</li>
     </ul>}
     <div className="actions">
-      <button className="secondary" disabled={busy || !draft.quotes} onClick={() => onMode('free')}>Force free shipping{draft.quotes ? ` · ${money(draft.quotes.free)}` : ''}</button>
-      <button className="secondary" disabled={busy || !draft.quotes} onClick={() => onMode('calculated')}>Force calculated{draft.quotes ? ` · ${money(draft.quotes.calculated)}` : ''}</button>
+      <button className="secondary" disabled={busy || !draft.quotes} onClick={() => onMode('free')}>Force free shipping{draft.quotes ? ` · ${money(draft.quotes.free)} (includes ${money(settings.bufferCents)} buffer)` : ''}</button>
+      <button className="secondary" disabled={busy || !draft.quotes} onClick={() => onMode('calculated')}>Force calculated{draft.quotes ? ` · ${money(draft.quotes.calculated)} ($0 buffer)` : ''}</button>
     </div>
     <MarketLine market={draft.market} money={money} />
     <PriceField cents={draft.price_cents} disabled={busy} onCommit={onPrice} />

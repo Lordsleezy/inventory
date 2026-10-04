@@ -1061,11 +1061,11 @@ export async function ingestEbayOrder(storeId, order) {
   const perOrder = Number(setting.ebay_per_order_cents ?? 40);
   const { data: draft } = await sb
     .from("ebay_drafts")
-    .select("shipping_mode,label_cents")
+    .select("shipping_mode,label_cents,shipping_buffer_cents")
     .eq("store_id", storeId)
     .eq("sku", sku)
     .maybeSingle();
-  const baked = draft?.shipping_mode === "free" ? Number(draft.label_cents || 0) : 0;
+  const baked = draft?.shipping_mode === "free" ? Number(draft.label_cents || 0) + Number(draft.shipping_buffer_cents || 0) : 0;
   await sb.from("channel_orders").insert({
     store_id: storeId,
     provider: "ebay",

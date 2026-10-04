@@ -16,7 +16,7 @@ export function shippingModeForLabel(labelCents, cutoffCents) {
 }
 
 /**
- * Free shipping: (floor + label) / (1 - fee) + per-order fee, then round up to the ending.
+ * Free shipping: (floor + label + buffer) / (1 - fee) + per-order fee, then round up to the ending.
  * Calculated: floor / (1 - fee) + per-order fee, same rounding. Label is not in the price.
  */
 export function priceQuotes(floorCents, labelCents, settings) {
@@ -24,6 +24,7 @@ export function priceQuotes(floorCents, labelCents, settings) {
   const common = {
     floorCents,
     labelCents,
+    bufferCents: settings.bufferCents,
     feePct: settings.feePct,
     perOrderCents: settings.perOrderCents,
     ending: settings.ending,
@@ -34,12 +35,13 @@ export function priceQuotes(floorCents, labelCents, settings) {
   };
 }
 
-export function ebayPriceCents({ floorCents, labelCents = 0, mode, feePct, perOrderCents = 0, ending = 99 }) {
+export function ebayPriceCents({ floorCents, labelCents = 0, bufferCents = 0, mode, feePct, perOrderCents = 0, ending = 99 }) {
   const fee = Number(feePct) / 100;
   if (!(fee >= 0 && fee < 1)) throw new Error("eBay fee percent must be between 0 and 100.");
   const floor = Math.max(0, Math.round(Number(floorCents) || 0));
   const label = Math.max(0, Math.round(Number(labelCents) || 0));
-  const base = mode === "free" ? floor + label : floor;
+  const buffer = Math.max(0, Math.round(Number(bufferCents) || 0));
+  const base = mode === "free" ? floor + label + buffer : floor;
   const raw = base / (1 - fee) + Math.max(0, Number(perOrderCents) || 0);
   return roundUpEnding(raw, ending);
 }

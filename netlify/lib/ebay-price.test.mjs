@@ -30,6 +30,12 @@ test("free shipping bakes the label; calculated shipping does not", () => {
   assert.equal(shippingModeForLabel(1501, 1500), "calculated");
 });
 
+test("shipping buffer affects only free-shipping price, not cutoff", () => {
+  assert.equal(ebayPriceCents({ floorCents: 10000, labelCents: 1200, bufferCents: 200, mode: "free", ...fee }), 13199);
+  assert.equal(ebayPriceCents({ floorCents: 10000, labelCents: 1200, bufferCents: 200, mode: "calculated", ...fee }), 11599);
+  assert.equal(shippingModeForLabel(1500, 1500), "free");
+});
+
 test("eBay fee and order amounts use the item price, not buyer shipping", () => {
   assert.equal(ebayFeeCents(12999, 13.25, 40), Math.round(12999 * 0.1325) + 40);
   const amounts = ebayOrderAmounts({

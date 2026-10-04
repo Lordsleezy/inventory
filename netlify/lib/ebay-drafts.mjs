@@ -40,7 +40,7 @@ export const POLICY_SETUP = [
 ].join("\n");
 
 const SETTING_KEYS = [
-  "ebay_fee_pct", "ebay_per_order_cents", "ebay_free_ship_cutoff_cents", "ebay_price_ending", "ebay_far_zip",
+  "ebay_fee_pct", "ebay_per_order_cents", "ebay_free_ship_cutoff_cents", "ebay_shipping_buffer_cents", "ebay_price_ending", "ebay_far_zip",
   "ship_excluded_categories", "ship_excluded_keywords", "ship_max_weight_lb", "ship_max_length_in",
   "ship_max_length_girth_in", "ship_from", "ebay_policy_status",
 ];
@@ -58,6 +58,7 @@ export function readEbaySettings(rows) {
     feePct: Number(scalar(map.ebay_fee_pct, 13.25)) || 13.25,
     perOrderCents: Math.round(Number(scalar(map.ebay_per_order_cents, 40)) || 0),
     cutoffCents: Math.round(Number(scalar(map.ebay_free_ship_cutoff_cents, 1500)) || 1500),
+    bufferCents: Math.round(Number(scalar(map.ebay_shipping_buffer_cents, 200)) || 0),
     ending: Math.round(Number(scalar(map.ebay_price_ending, 99)) || 99),
     farZip: String(scalar(map.ebay_far_zip, "10001") || "10001"),
     excludedCategories: list("ship_excluded_categories"),
@@ -144,10 +145,12 @@ function localCategoryId(unit) {
 }
 
 function applyPrice(row, settings) {
+  if (row.status === "live") return row;
   const box = row.box;
   const key = boxKey(box);
   if (!key) {
     row.label_cents = null;
+    row.shipping_buffer_cents = 0;
     row.label_source = null;
     row.label_key = "";
     if (!locked(row, "shipping")) row.shipping_mode = null;
@@ -161,10 +164,12 @@ function applyPrice(row, settings) {
   if (!locked(row, "shipping") && row.label_cents != null) {
     row.shipping_mode = shippingModeForLabel(row.label_cents, settings.cutoffCents);
   }
+  row.shipping_buffer_cents = row.shipping_mode === "free" ? settings.bufferCents : 0;
   if (!locked(row, "price") && row.shipping_mode && row.label_cents != null) {
     row.price_cents = ebayPriceCents({
       floorCents: row.floor_cents,
       labelCents: row.label_cents,
+      bufferCents: settings.bufferCents,
       mode: row.shipping_mode,
       feePct: settings.feePct,
       perOrderCents: settings.perOrderCents,
@@ -202,6 +207,7 @@ function draftFromUnit(unit, photos, listing, previous, settings) {
     photo_paths: locked(prev, "photos") ? prev.photo_paths || [] : photos,
     shipping_mode: prev.shipping_mode || null,
     price_cents: prev.price_cents ?? null,
+    shipping_buffer_cents: prev.shipping_buffer_cents ?? 0,
     label_cents: prev.label_cents ?? null,
     label_source: prev.label_source || null,
     label_key: prev.label_key || "",
@@ -292,6 +298,7 @@ export async function syncDrafts(storeId, { quoteLimit = 4 } = {}) {
   let quoted = 0;
   for (const row of keep) {
     if (quoted >= quoteLimit) break;
+    if (row.status === "live") continue;
     if (row.label_cents != null && row.label_key === boxKey(row.box)) continue;
     if (!boxKey(row.box)) continue;
     const quote = await quoteLabel(sb, storeId, settings, row.box);
@@ -348,6 +355,7 @@ function summary(row) {
     floor_cents: row.floor_cents,
     shipping_mode: row.shipping_mode,
     label_cents: row.label_cents,
+    shipping_buffer_cents: row.shipping_buffer_cents,
     label_source: row.label_source,
     category_name: row.category_name,
     category_id: row.category_id,
@@ -415,6 +423,7 @@ export async function listDraftPage(storeId) {
       feePct: settings.feePct,
       perOrderCents: settings.perOrderCents,
       cutoffCents: settings.cutoffCents,
+      bufferCents: settings.bufferCents,
       ending: settings.ending,
       farZip: settings.farZip,
     },
@@ -901,11 +910,13 @@ export async function saveEbaySettings(storeId, input) {
   const feePct = Number(input.feePct);
   const perOrderCents = Math.round(Number(input.perOrderCents));
   const cutoffCents = Math.round(Number(input.cutoffCents));
+  const bufferCents = Math.round(Number(input.bufferCents));
   const ending = Math.round(Number(input.ending));
   const farZip = String(input.farZip || "").replace(/\D/g, "").slice(0, 5);
   if (!(feePct >= 0 && feePct < 100)) throw new Error("eBay fee percent must be between 0 and 100.");
   if (!(perOrderCents >= 0)) throw new Error("Per-order fee must be zero or more.");
   if (!(cutoffCents >= 0)) throw new Error("Free-shipping cutoff must be zero or more.");
+  if (!(bufferCents >= 0)) throw new Error("Shipping buffer must be zero or more.");
   if (!(ending >= 0 && ending <= 99)) throw new Error("Price ending must be 0 to 99.");
   if (!/^\d{5}$/.test(farZip)) throw new Error("Far-zone ZIP must be 5 digits.");
   const sb = serviceClient();
@@ -913,6 +924,7 @@ export async function saveEbaySettings(storeId, input) {
     ["ebay_fee_pct", feePct],
     ["ebay_per_order_cents", perOrderCents],
     ["ebay_free_ship_cutoff_cents", cutoffCents],
+    ["ebay_shipping_buffer_cents", bufferCents],
     ["ebay_price_ending", ending],
     ["ebay_far_zip", farZip],
   ].map(([key, value]) => ({ store_id: storeId, key, value }));
