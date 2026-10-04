@@ -152,11 +152,11 @@ export function App() {
   const loadPayments = useCallback(async () => { if (!store) return; try { setPayments(await storedPayments(store)); } catch (e) { setError(String(e)); } }, [store]);
   const loadSales = useCallback(async () => { if (!store) return; try { setLive(await sales(selectedDay, datePlus(selectedDay, 1))); } catch (e) { setError(String(e)); } }, [store, selectedDay]);
   const loadPayoutSales = useCallback(async () => { if (!store) return; try { setAllSales(await payoutSales()); } catch (e) { setError(String(e)); } }, [store]);
-  useEffect(() => { void loadCommon(); }, [loadCommon]);
+  useEffect(() => { if (['online', 'expenses', 'reports', 'payouts', 'settings'].includes(page)) void loadCommon(); }, [page, loadCommon]);
   useEffect(() => { if (page === 'payouts') void loadPayments(); }, [page, loadPayments]);
-  useEffect(() => { void loadSales(); }, [loadSales]);
-  useEffect(() => { void loadPayoutSales(); }, [loadPayoutSales]);
-  useEffect(() => { if (!store) return; const c = sb.channel(`portal-sales-${store}`).on('postgres_changes', { event: '*', schema: 'public', table: 'sales', filter: `store_id=eq.${store}` }, () => { void loadSales(); void loadPayoutSales(); }).subscribe(); return () => { void sb.removeChannel(c); }; }, [store, loadSales, loadPayoutSales]);
+  useEffect(() => { if (page === 'sales' || page === 'reports') void loadSales(); }, [page, loadSales]);
+  useEffect(() => { if (page === 'payouts') void loadPayoutSales(); }, [page, loadPayoutSales]);
+  useEffect(() => { if (!store || !['sales', 'reports', 'payouts'].includes(page)) return; const c = sb.channel(`portal-sales-${store}`).on('postgres_changes', { event: '*', schema: 'public', table: 'sales', filter: `store_id=eq.${store}` }, () => { if (page === 'sales' || page === 'reports') void loadSales(); if (page === 'payouts') void loadPayoutSales(); }).subscribe(); return () => { void sb.removeChannel(c); }; }, [store, page, loadSales, loadPayoutSales]);
   const ruleMap = useMemo(() => new Map(rules.map(x => [x.employee_id, x])), [rules]);
   const staff = people.filter(p => p.kind === 'employee');
   const activeRules = (() => {
