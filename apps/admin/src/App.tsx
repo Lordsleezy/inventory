@@ -112,7 +112,7 @@ async function payoutSales() {
 export function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [store, setStore] = useState<string | null>(null);
-  const [page, setPage] = useState<'sales' | 'orders' | 'ebay' | 'online' | 'expenses' | 'taxes' | 'costs' | 'inventory' | 'reviews' | 'reports' | 'payouts' | 'settings' | 'cameras'>(() => localStorage.getItem('floor-admin-page') === 'ebay' ? 'ebay' : 'sales');
+  const [page, setPage] = useState<'sales' | 'orders' | 'ebay' | 'online' | 'expenses' | 'taxes' | 'costs' | 'inventory' | 'reviews' | 'reports' | 'payouts' | 'settings' | 'cameras'>(() => (sessionStorage.getItem('floor-admin-page') ?? localStorage.getItem('floor-admin-page')) === 'ebay' ? 'ebay' : 'sales');
   const [ebayOpened, setEbayOpened] = useState(false);
   const [selectedDay, setSelectedDay] = useState(today());
   const [live, setLive] = useState<Ticket[]>([]);
@@ -130,7 +130,7 @@ export function App() {
 
   useEffect(() => { void sb.auth.getSession().then(({ data }) => setSession((current) => current ?? data.session)); const { data } = sb.auth.onAuthStateChange((_e, s) => setSession(s)); return () => data.subscription.unsubscribe(); }, []);
   useEffect(() => { if (new URLSearchParams(window.location.search).get('ebay') === '1') setPage('ebay'); }, []);
-  useEffect(() => { if (page === 'ebay') localStorage.setItem('floor-admin-page', 'ebay'); else localStorage.removeItem('floor-admin-page'); }, [page]);
+  useEffect(() => { if (page === 'ebay') { sessionStorage.setItem('floor-admin-page', 'ebay'); localStorage.setItem('floor-admin-page', 'ebay'); } else { sessionStorage.removeItem('floor-admin-page'); localStorage.removeItem('floor-admin-page'); } }, [page]);
   useEffect(() => { if (page === 'ebay') setEbayOpened(true); }, [page]);
   const userId = session?.user.id;
   useEffect(() => { setStore(null); setLive([]); setAllSales([]); setPeople([]); setRules([]); setPayments([]); setReports([]); setExpenses([]); setOnlineCfg(NO_ONLINE); if (!userId) return; void sb.from('portal_admins').select('store_id').eq('user_id', userId).single().then(({ data, error: e }) => { setStore(e ? null : data?.store_id || null); if (e && e.code !== 'PGRST116') setError(e.message); }); }, [userId]);

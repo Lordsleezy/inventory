@@ -56,8 +56,8 @@ export function EbayDraftsPage({ accessToken, userId, money, active }: Props) {
 
   function showDraft(next: Draft | null) {
     setDraft(next);
-    if (next) localStorage.setItem(draftKey, next.sku);
-    else localStorage.removeItem(draftKey);
+    if (next) { sessionStorage.setItem(draftKey, next.sku); localStorage.setItem(draftKey, next.sku); }
+    else { sessionStorage.removeItem(draftKey); localStorage.removeItem(draftKey); }
     if (next && next.market_needs_refresh && !marketInFlight.current.has(next.sku)) {
       marketInFlight.current.add(next.sku);
       void call(accessToken, { action: 'market', sku: next.sku })
@@ -68,12 +68,12 @@ export function EbayDraftsPage({ accessToken, userId, money, active }: Props) {
   }
 
   useEffect(() => {
-    const sku = localStorage.getItem(draftKey);
+    const sku = sessionStorage.getItem(draftKey) ?? localStorage.getItem(draftKey);
     const attempt = `${sku}:${accessToken}`;
     if (!sku || draft?.sku === sku || restoreAttempt.current === attempt) return;
     restoreAttempt.current = attempt;
     void call(accessToken, { action: 'prepare', sku })
-      .then((data) => { if (localStorage.getItem(draftKey) === sku) showDraft(data.draft); })
+      .then((data) => { if ((sessionStorage.getItem(draftKey) ?? localStorage.getItem(draftKey)) === sku) showDraft(data.draft); })
       .catch((e) => setError(`Could not reopen SKU ${sku}: ${e.message}`));
   }, [accessToken, draftKey]);
 
