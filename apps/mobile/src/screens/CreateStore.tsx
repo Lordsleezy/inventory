@@ -42,7 +42,7 @@ export function CreateStoreScreen({
   async function signOut() {
     setError("");
     try {
-      const { error: outError } = await floorCloud().auth.signOut();
+      const { error: outError } = await floorCloud().auth.signOut({ scope: 'local' });
       if (outError) throw outError;
     } catch (err) {
       setError(authErrorMessage(err));

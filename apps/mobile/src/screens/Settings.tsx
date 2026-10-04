@@ -13,7 +13,7 @@ export function SettingsScreen() {
   const [busy, setBusy] = useState(false);
 
   async function signOut() {
-    await floorCloud().auth.signOut();
+    await floorCloud().auth.signOut({ scope: 'local' });
     location.reload();
   }
 

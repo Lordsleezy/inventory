@@ -14,6 +14,7 @@ const CAMERA: MediaStreamConstraints = {
 
 let warmStream: MediaStream | null = null;
 let warmPromise: Promise<MediaStream | null> | null = null;
+let warmGeneration = 0;
 
 function streamLive(stream: MediaStream | null): stream is MediaStream {
   return Boolean(stream?.getTracks().some((track) => track.readyState === "live"));
@@ -23,19 +24,25 @@ function streamLive(stream: MediaStream | null): stream is MediaStream {
 export function prewarmVideoScan(): void {
   if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) return;
   if (streamLive(warmStream) || warmPromise) return;
+  const generation = warmGeneration;
   warmPromise = navigator.mediaDevices
     .getUserMedia(CAMERA)
     .then((stream) => {
+      if (generation !== warmGeneration) {
+        stream.getTracks().forEach((track) => track.stop());
+        return null;
+      }
       warmStream = stream;
       return stream;
     })
     .catch(() => null)
     .finally(() => {
-      warmPromise = null;
+      if (generation === warmGeneration) warmPromise = null;
     });
 }
 
 export function releaseWarmVideoScan(): void {
+  warmGeneration++;
   warmPromise = null;
   warmStream?.getTracks().forEach((track) => track.stop());
   warmStream = null;

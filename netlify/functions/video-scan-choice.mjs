@@ -1,4 +1,5 @@
 import { serviceClient, json, corsHeaders } from '../lib/server.mjs';
+import { scanWorkerHeader } from '../lib/video-scan-auth.mjs';
 
 export async function handler(event) {
   if(event.httpMethod==='OPTIONS')return {statusCode:204,headers:corsHeaders(),body:''};
@@ -20,7 +21,7 @@ export async function handler(event) {
     const updated=await sb.from('video_scan_jobs').update({result}).eq('id',id).eq('status','ready');
     if(updated.error)throw updated.error;
     const url=`${process.env.URL||'https://inventoryobi.netlify.app'}/.netlify/functions/video-scan-background`;
-    const started=await fetch(url,{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},
+    const started=await fetch(url,{method:'POST',headers:{'X-Floor-Scan-Worker':scanWorkerHeader(id),'Content-Type':'application/json'},
       body:JSON.stringify({id,mode:'price'})});
     if(!started.ok)throw new Error(`Retail lookup could not start (${started.status})`);
     return json(202,{ok:true});

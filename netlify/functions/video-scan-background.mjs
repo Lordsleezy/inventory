@@ -90,6 +90,7 @@ export async function handler(event) {
       console.error('video_scan_retail_failed',JSON.stringify({id,ms:Date.now()-retailStarted,error:String(error.message||error).slice(0,200)}));
     }
   } catch(error) {
+    console.error('video_scan_identification_failed',JSON.stringify({id,error:String(error.message||error).slice(0,300)}));
     if(job)await sb.from('video_scan_jobs').update({status:'failed',error:String(error.message||error).slice(0,500),
       reserved_usd:0,updated_at:new Date().toISOString()}).eq('id',job.id).eq('status','processing');
   }
