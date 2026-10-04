@@ -633,6 +633,7 @@ export async function saveDraft(storeId, sku, fields) {
   if (Array.isArray(fields.photo_paths)) {
     const allowed = new Set(row.photo_paths || []);
     const next = fields.photo_paths.map(String).filter((path) => allowed.has(path));
+    if (!next.length) throw new Error("eBay needs at least one photo.");
     row.photo_paths = next; lock(row, "photos");
   }
   if (fields.category_id != null && String(fields.category_id) !== String(row.category_id)) {
