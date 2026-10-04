@@ -1,3 +1,4 @@
+import { dbBusy, sleep } from "./bg-guard.mjs";
 import { serviceClient } from "./server.mjs";
 import { ebayFetch, listSku, userToken, withdrawSku } from "./ebay.mjs";
 import { formatEbayError } from "./ebay-errors.mjs";
@@ -304,7 +305,7 @@ async function photosBySku(sb, storeId, skus) {
   return map;
 }
 
-export async function syncDrafts(storeId, { quoteLimit = 8 } = {}) {
+export async function syncDrafts(storeId, { quoteLimit = 8, pace = false } = {}) {
   const sb = serviceClient();
   const settings = await loadEbaySettings(storeId);
   const [units, existingRes, listingRes] = await Promise.all([
@@ -334,22 +335,44 @@ export async function syncDrafts(storeId, { quoteLimit = 8 } = {}) {
   }
   const pending = keep.filter((row) => needsQuote(row, settings)).slice(0, quoteLimit);
   let cursor = 0;
-  await Promise.all(Array.from({ length: Math.min(4, pending.length) }, async () => {
+  await Promise.all(Array.from({ length: Math.min(pace ? 1 : 4, pending.length) }, async () => {
     while (cursor < pending.length) {
       const row = pending[cursor++];
       const quote = await quoteLabel(sb, storeId, settings, row.box);
       setQuote(row, quote, settings);
+      if (pace) await sleep(500);
     }
   }));
   const quoted = pending.length;
-  for (let i = 0; i < keep.length; i += 50) {
-    const slice = keep.slice(i, i + 50).map(persistShape);
+  // Only drafts that actually changed are written. Each draft carries ~60 kB of jsonb, so rewriting every
+  // draft on every run (as this used to) is what overloaded the database.
+  const changed = keep.filter((row) => rowChanged(row, previous.get(row.sku)));
+  const size = pace ? 10 : 50;
+  let written = 0;
+  let stopped = null;
+  for (let i = 0; i < changed.length; i += size) {
+    if (pace && i > 0) {
+      await sleep(400);
+      if (await dbBusy(sb)) { stopped = "busy"; break; }
+    }
+    const slice = changed.slice(i, i + size).map(persistShape);
     const { error } = await sb.from("ebay_drafts").upsert(slice, { onConflict: "store_id,sku" });
     if (error) throw new Error(error.message);
+    written += slice.length;
   }
   const ready = keep.filter((row) => row.ready).length;
   const needsBox = keep.filter((row) => row.checklist?.some((item) => item.label === "Needs box size" && !item.ok)).length;
-  return { total: keep.length, ready, needsBox, live: keep.filter((row) => row.status === "live").length, quoted };
+  return { total: keep.length, ready, needsBox, live: keep.filter((row) => row.status === "live").length, quoted, changed: changed.length, written, stopped };
+}
+
+const canon = (value) => JSON.stringify(value ?? null, (_key, v) => (v && typeof v === "object" && !Array.isArray(v)
+  ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, v[k]])) : v));
+
+/** True when the draft differs from what is already stored (ignoring the always-new updated_at). */
+export function rowChanged(next, prev) {
+  if (!prev) return true;
+  const { updated_at: _ignored, ...rest } = persistShape(next);
+  return Object.keys(rest).some((key) => canon(rest[key]) !== canon(prev[key]));
 }
 
 function persistShape(row) {

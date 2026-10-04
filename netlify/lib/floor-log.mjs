@@ -25,7 +25,7 @@ function clipDetail(detail) {
   const redacted = redact(detail && typeof detail === "object" ? detail : { value: detail });
   const raw = JSON.stringify(redacted);
   if (raw.length <= 24000) return redacted;
-  return { clipped: true, preview: raw.slice(0, 24000) };
+  return { clipped: true, preview: raw.slice(0, 6000) };
 }
 
 export function currentTrace() {

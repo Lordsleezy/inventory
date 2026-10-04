@@ -194,7 +194,6 @@ export async function startBackfill(storeId) {
     updated_at: new Date().toISOString(),
   };
   await writeJob(sb, storeId, job);
-  await kickBackfill(storeId);
   return backfillStatus(storeId);
 }
 
@@ -209,7 +208,7 @@ export async function resumeBackfillIfStale(storeId) {
   await kickBackfill(storeId);
 }
 
-export async function runBackfill(storeId, { maxMs = 11 * 60 * 1000 } = {}) {
+export async function runBackfill(storeId, { maxMs = 11 * 60 * 1000, maxUnits = Infinity, pauseMs = 0, busy = null } = {}) {
   if (process.env.EBAY_BACKGROUND_WORK !== "on") return;
   const sb = serviceClient();
   const worker = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -225,7 +224,11 @@ export async function runBackfill(storeId, { maxMs = 11 * 60 * 1000 } = {}) {
   const settings = await loadEbaySettings(storeId);
   let lastError = "";
   let sameError = 0;
-  while (Date.now() - started < maxMs) {
+  let queue = null;
+  let done = 0;
+  while (Date.now() - started < maxMs && done < maxUnits) {
+    if (busy && (await busy())) { job.note = "Waiting: the database is busy."; break; }
+    if (done > 0 && pauseMs) await new Promise((resolve) => setTimeout(resolve, pauseMs));
     const month = await monthSearches(sb, storeId);
     if (month + (job.searched || 0) >= SEARCH_CAP) {
       job.status = "paused";
@@ -234,7 +237,9 @@ export async function runBackfill(storeId, { maxMs = 11 * 60 * 1000 } = {}) {
       await writeJob(sb, storeId, job);
       return job;
     }
-    const todo = await candidates(sb, storeId, settings, job.attempted || []);
+    queue ??= await candidates(sb, storeId, settings, job.attempted || []);
+    const attemptedNow = new Set(job.attempted || []);
+    const todo = queue.filter((candidate) => !attemptedNow.has(candidate.sku));
     job.total = (job.processed || 0) + todo.length;
     if (!todo.length) {
       job.status = "done";
@@ -244,6 +249,7 @@ export async function runBackfill(storeId, { maxMs = 11 * 60 * 1000 } = {}) {
       return job;
     }
     const unit = todo[0];
+    done++;
     job.updated_at = new Date().toISOString();
     await writeJob(sb, storeId, job);
     try {
@@ -292,9 +298,8 @@ export async function runBackfill(storeId, { maxMs = 11 * 60 * 1000 } = {}) {
       await writeJob(sb, storeId, job);
     }
   }
-  job.handoff = true;
+  job.handoff = true; // the next scheduled run takes over; runs no longer chain themselves
   job.updated_at = new Date().toISOString();
   await writeJob(sb, storeId, job);
-  await kickBackfill(storeId);
   return job;
 }
