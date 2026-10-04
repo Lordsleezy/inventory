@@ -169,6 +169,7 @@ export async function kickBackfill(storeId) {
 }
 
 export async function startBackfill(storeId) {
+  if (process.env.EBAY_BACKGROUND_WORK !== "on") return { status: "paused", reason: "background work is paused" };
   const sb = serviceClient();
   const settings = await loadEbaySettings(storeId);
   const current = await readJob(sb, storeId);
@@ -209,6 +210,7 @@ export async function resumeBackfillIfStale(storeId) {
 }
 
 export async function runBackfill(storeId, { maxMs = 11 * 60 * 1000 } = {}) {
+  if (process.env.EBAY_BACKGROUND_WORK !== "on") return;
   const sb = serviceClient();
   const worker = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
   let job = await readJob(sb, storeId);

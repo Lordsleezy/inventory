@@ -9,7 +9,9 @@ async function handle(event) {
   try {
     const sb = serviceClient();
     // Draft pricing must still advance if a marketplace poll fails later.
-    const { data: allStores } = await sb.from("stores").select("id");
+    // EMERGENCY GATE: draft refresh/quotes/reprice and the spec backfill are paused unless EBAY_BACKGROUND_WORK=on.
+    const heavy = process.env.EBAY_BACKGROUND_WORK === "on";
+    const { data: allStores } = heavy ? await sb.from("stores").select("id") : { data: [] };
     const drafted = [];
     for (const row of allStores ?? []) {
       try {
