@@ -1,6 +1,7 @@
 import { json, corsHeaders, requireEnv } from "../lib/server.mjs";
 import { notificationChallenge, pollAllStores, withdrawOpenEbayTasks } from "../lib/ebay.mjs";
 import { wrapHandler } from "../lib/floor-log.mjs";
+import { handleDeletionPost } from "../lib/ebay-account-deletion.mjs";
 
 function endpointUrl(event) {
   return process.env.EBAY_NOTIFICATION_ENDPOINT || `https://${event.headers.host}/.netlify/functions/ebay-notify`;
@@ -18,9 +19,6 @@ async function handle(event) {
   try {
     const body = JSON.parse(event.body || "{}");
     const topic = body.metadata?.topic || body.topic || "";
-    if (topic === "MARKETPLACE_ACCOUNT_DELETION") {
-      return json(200, { ok: true });
-    }
     const results = await pollAllStores();
     await withdrawOpenEbayTasks();
     return json(200, { ok: true, polled: results.length });
@@ -30,4 +28,16 @@ async function handle(event) {
   }
 }
 
-export const handler = wrapHandler("ebay-notify", handle);
+const regularHandler = wrapHandler("ebay-notify", handle);
+export async function handler(event, context) {
+  // The regular request logger includes POST bodies. Keep deletion identifiers
+  // out of it, including when a forged notification fails verification.
+  if (event.httpMethod === "POST") {
+    try {
+      const raw = event.isBase64Encoded ? Buffer.from(event.body || "", "base64").toString("utf8") : event.body || "";
+      if (JSON.parse(raw).metadata?.topic === "MARKETPLACE_ACCOUNT_DELETION")
+        return handleDeletionPost(event);
+    } catch { /* Regular handler returns a JSON error. */ }
+  }
+  return regularHandler(event, context);
+}

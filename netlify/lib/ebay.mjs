@@ -1075,6 +1075,9 @@ export async function ingestEbayOrder(storeId, order) {
     item_cents: itemCents,
     fee_cents: ebayFeeCents(itemCents, feePct, perOrder),
     baked_ship_cents: baked,
+    buyer_user_id: order?.buyer?.userId || null,
+    buyer_username: order?.buyer?.username || null,
+    buyer_eias_token: order?.buyer?.eiasToken || null,
   });
   const ship = ebayShipTo(order);
   await sb.from("web_orders").insert({
