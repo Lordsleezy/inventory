@@ -11,6 +11,7 @@ import {
   fetchLiveConditions,
   resolveFloorCategory,
   categoryName,
+  categoryInfo,
   suggestCategories,
 } from "./ebay-catalog.mjs";
 import { inventoryConditionEnum, mapFloorCondition } from "./ebay-conditions.mjs";
@@ -210,6 +211,7 @@ function applyPrice(row, settings) {
 }
 
 function withReadiness(row) {
+  row.condition_not_supported = Boolean(row.category_id && row.aspect_defs?.length && !row.conditions?.length);
   const check = draftReadiness(row);
   row.checklist = check.items;
   row.ready = check.ready;
@@ -230,6 +232,7 @@ function draftFromUnit(unit, photos, listing, previous, settings) {
     suggestions: prev.suggestions || [],
     condition_id: locked(prev, "condition") ? prev.condition_id : (prev.condition_id || null),
     condition_enum: locked(prev, "condition") ? prev.condition_enum : (prev.condition_enum || null),
+    condition_not_supported: Boolean(prev.category_id && prev.aspect_defs?.length && !prev.conditions?.length),
     condition_notes: locked(prev, "condition_notes") ? prev.condition_notes : (unit.defect_notes || ""),
     aspects: locked(prev, "aspects") ? prev.aspects || {} : { ...aspectMap(unit), ...(prev.aspects || {}) },
     aspect_defs: prev.aspect_defs || [],
@@ -350,7 +353,7 @@ export async function syncDrafts(storeId, { quoteLimit = 8 } = {}) {
 }
 
 function persistShape(row) {
-  const { floor_cents, box, quotes, dims_source, market, unit_brand, unit_model, unit_upc, ...rest } = row;
+  const { floor_cents, box, quotes, dims_source, market, unit_brand, unit_model, unit_upc, condition_not_supported, ...rest } = row;
   return rest;
 }
 
@@ -410,6 +413,7 @@ function detail(row, unit) {
     description: row.description,
     condition_id: row.condition_id,
     condition_enum: row.condition_enum,
+    condition_not_supported: Boolean(row.category_id && row.aspect_defs?.length && !row.conditions?.length),
     condition_notes: row.condition_notes,
     suggestions: row.suggestions || [],
     conditions: row.conditions || [],
@@ -501,14 +505,20 @@ function stringsToAspects(aspects) {
 
 async function refreshCategoryRules(row, unit) {
   if (!row.category_id) return row;
-  const [defs, conditions] = await Promise.all([
+  const [defs, conditions, category] = await Promise.all([
     fetchLiveAspects(row.category_id),
     fetchLiveConditions(row.category_id),
+    categoryInfo(row.category_id),
   ]);
-  if (!defs.length || !conditions.length) throw new Error(`eBay category ${row.category_id} has no listing options; choose a specific category.`);
+  if (!category.leaf || !defs.length) throw new Error(`eBay category ${row.category_id} has no listing options; choose a specific category.`);
   row.aspect_defs = defs;
   row.conditions = conditions;
-  if (!locked(row, "condition")) {
+  row.condition_not_supported = conditions.length === 0;
+  if (row.condition_not_supported) {
+    row.condition_id = null;
+    row.condition_enum = null;
+  }
+  if (!row.condition_not_supported && !locked(row, "condition")) {
     const mapped = mapFloorCondition(unit?.condition, conditions);
     row.condition_id = mapped?.conditionId || null;
     row.condition_enum = mapped ? inventoryConditionEnum(mapped) : null;
@@ -599,6 +609,7 @@ export async function prepareDraft(storeId, sku, { metadataOnly = false } = {}) 
         row.category_name = picked.categoryName;
         row.aspect_defs = [];
         row.conditions = [];
+        row.condition_not_supported = false;
         if (!locked(row, "condition")) row.condition_id = null;
         if (!locked(row, "aspects")) row.aspects = { ...aspectMap(unit) };
       } else if (picked) row.category_name = picked.categoryName;
@@ -609,10 +620,12 @@ export async function prepareDraft(storeId, sku, { metadataOnly = false } = {}) 
     try { row.suggestions = await suggestCategories([row.title, unit?.brand, unit?.title].filter(Boolean).join(" ")); }
     catch (err) { row.ebay_error = err instanceof Error ? err.message : String(err); }
   }
+  row.condition_not_supported = Boolean(row.category_id && row.aspect_defs?.length && !row.conditions?.length);
   const needsRules = row.category_id && (
     !row.aspect_defs?.length
-    || !row.conditions?.length
-    || (!locked(row, "condition") && !row.condition_id)
+    || (!row.conditions?.length && !row.condition_not_supported)
+    || (!row.condition_not_supported && !locked(row, "condition") && !row.condition_id)
+    || /no listing options/i.test(row.ebay_error || "")
   );
   if (needsRules) {
     try {
@@ -717,6 +730,7 @@ export async function saveDraft(storeId, sku, fields) {
     row.category_name = suggestion?.categoryName || fields.category_name || row.category_name;
     row.aspect_defs = [];
     row.conditions = [];
+    row.condition_not_supported = false;
     lock(row, "category");
     await refreshCategoryRules(row, unit);
   }
@@ -964,6 +978,7 @@ function packagePayload(box) {
 async function pushOne(storeId, sku, { revise = false, getPolicies = () => resolveBusinessPolicies(storeId) } = {}) {
   const sb = serviceClient();
   const row = await loadDraft(sb, storeId, sku);
+  row.condition_not_supported = Boolean(row.category_id && row.aspect_defs?.length && !row.conditions?.length);
   const unit = await loadUnit(sb, storeId, sku);
   row.box = boxOf(unit);
   row.floor_cents = unit?.ask_cents || null;
@@ -985,7 +1000,7 @@ async function pushOne(storeId, sku, { revise = false, getPolicies = () => resol
       aspects: stringsToAspects(row.aspects),
       upcRequired: (row.aspect_defs || []).some((def) => def.required && String(def.name).toLowerCase() === "upc"),
       categoryId: row.category_id,
-      conditionPayload: { condition: row.condition_enum, conditionId: String(row.condition_id) },
+      conditionPayload: row.condition_not_supported ? {} : { condition: row.condition_enum, conditionId: String(row.condition_id) },
       conditionNotes: row.condition_notes || undefined,
       package: packagePayload(row.box),
       priceCents: row.price_cents,

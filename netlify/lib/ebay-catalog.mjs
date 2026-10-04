@@ -266,9 +266,9 @@ async function cachedTaxonomy(key, load) {
   catch (error) { taxonomyCache.delete(key); throw error; }
 }
 
-export async function categoryName(categoryId) {
+export async function categoryInfo(categoryId) {
   const id = String(categoryId || "").trim();
-  if (!/^\d+$/.test(id)) return "";
+  if (!/^\d+$/.test(id)) return { name: "", leaf: false };
   const market = process.env.EBAY_MARKETPLACE_ID || "EBAY_US";
   const { api, token } = await applicationToken();
   const treeRes = await fetch(
@@ -282,8 +282,13 @@ export async function categoryName(categoryId) {
     { headers: { Authorization: `Bearer ${token}` } },
   );
   const json = await res.json();
-  if (!res.ok) return "";
-  return String(json?.categorySubtreeNode?.category?.categoryName || "");
+  if (!res.ok) return { name: "", leaf: false };
+  const node = json?.categorySubtreeNode;
+  return { name: String(node?.category?.categoryName || ""), leaf: Boolean(node?.leafCategoryTreeNode) };
+}
+
+export async function categoryName(categoryId) {
+  return (await categoryInfo(categoryId)).name;
 }
 
 export async function suggestCategories(query) {

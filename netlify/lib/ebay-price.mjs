@@ -133,7 +133,7 @@ export function draftReadiness(draft) {
   need(title.trim().length > 0 && title.length <= 80, "Title, 80 characters or less");
   need(String(draft?.description || "").trim(), "Description");
   need(draft?.category_id, "eBay category");
-  need(draft?.condition_id, "Condition this category allows");
+  need(draft?.condition_not_supported || draft?.condition_id, draft?.condition_not_supported ? "This category does not use a condition field" : "Condition this category allows");
   need(boxOk, boxOk ? "Box size and weight" : "Needs box size");
   need(Number(draft?.price_cents) > 0, "eBay price");
   need(draft?.shipping_mode === "free" || draft?.shipping_mode === "calculated", "Shipping mode");
