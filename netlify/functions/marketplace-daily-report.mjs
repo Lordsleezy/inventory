@@ -5,7 +5,7 @@ const parts = new Intl.DateTimeFormat('en-US',{timeZone:'America/Los_Angeles',ye
 function dayAt(offset){const d=new Date(Date.now()+offset*86400000);return new Intl.DateTimeFormat('en-CA',{timeZone:'America/Los_Angeles',year:'numeric',month:'2-digit',day:'2-digit'}).format(d);}
 function laMidnight(day){const [y,m,d]=day.split('-').map(Number);let t=Date.UTC(y,m-1,d,8);for(let i=0;i<3;i++){const p=Object.fromEntries(parts.formatToParts(new Date(t)).map(x=>[x.type,Number(x.value)]));t+=Date.UTC(y,m-1,d)-Date.UTC(p.year,p.month-1,p.day,p.hour,p.minute);}return new Date(t).toISOString();}
 async function handle(){
- if(!process.env.RESEND_API_KEY)return json(200,{skipped:'email_not_configured'});
+ if(!process.env.RESEND_API_KEY||!process.env.RESEND_FROM)return json(200,{skipped:'email_not_configured'});
  try{const sb=serviceClient();const result=await withLock('marketplace-daily-report',600,async()=>{
   if(await dbBusy(sb))return{skipped:'database_busy'};
   const yesterday=dayAt(-1),today=dayAt(0),start=laMidnight(yesterday),end=laMidnight(today);
@@ -42,7 +42,7 @@ async function handle(){
   }
   const cfg=(await sb.from('store_settings').select('value').eq('key','order_notify_emails').limit(1)).data?.[0]?.value||['paul@sentinelprime.org'];
   const to=(Array.isArray(cfg)?cfg:[]).filter(x=>String(x).includes('@'));if(!to.length)to.push('paul@sentinelprime.org');
-  const response=await fetch('https://api.resend.com/emails',{method:'POST',headers:{authorization:`Bearer ${process.env.RESEND_API_KEY}`,'content-type':'application/json'},body:JSON.stringify({from:process.env.EMAIL_FROM||'Floor <orders@openboxindustries.com>',to,subject:`Floor daily sales inbox � ${yesterday}`,text:lines.join('\n\n')})});
+  const response=await fetch('https://api.resend.com/emails',{method:'POST',headers:{authorization:`Bearer ${process.env.RESEND_API_KEY}`,'content-type':'application/json'},body:JSON.stringify({from:process.env.RESEND_FROM,to,subject:`Floor daily sales inbox � ${yesterday}`,text:lines.join('\n\n')})});
   if(!response.ok)throw new Error(`Resend ${response.status}`);return{sent:true};
  });return json(200,result);}catch(e){return json(500,{error:String(e).slice(0,300)});}
 }
