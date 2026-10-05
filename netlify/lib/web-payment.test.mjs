@@ -89,12 +89,14 @@ test("live rates: cheapest first, one per carrier, no zero or foreign-currency r
  assert.ok(r.every(x=>x.amount_cents>0));
  assert.equal(r[0].amount_cents,980);
 });
-test("fallback tiers price from package weight, never $0, never above the tier limit",()=>{
- assert.equal(fallbackRate({},{weight_lb:4}).amount_cents,2000);
- assert.equal(fallbackRate({ship_tier_15_cents:3300},{weight_lb:12}).amount_cents,3300);
- assert.equal(fallbackRate({},{weight_lb:31}),null);
- assert.equal(fallbackRate({},{weight_lb:null}),null);
- assert.equal(fallbackRate({ship_tier_5_cents:0},{weight_lb:2}).amount_cents,2000);
+test("manual USPS rates use the greater of actual and dimensional weight plus current size fees",()=>{
+ const manual_shipping_tiers=[{max_lb:1,cents:1365},{max_lb:2,cents:1980},{max_lb:3,cents:2315},{max_lb:5,cents:2745},{max_lb:10,cents:4085},{max_lb:20,cents:7215},{max_lb:30,cents:12030},{max_lb:40,cents:14790},{max_lb:50,cents:17125},{max_lb:60,cents:19000},{max_lb:70,cents:20430}];
+ assert.equal(fallbackRate({manual_shipping_tiers},{weight_lb:4,length_in:4,width_in:4,height_in:4}).amount_cents,2745);
+ assert.equal(fallbackRate({manual_shipping_tiers},{weight_lb:0.5,length_in:10,width_in:8,height_in:4}).amount_cents,1365);
+ assert.equal(fallbackRate({manual_shipping_tiers},{weight_lb:2,length_in:24,width_in:12,height_in:10}).amount_cents,12480);
+ assert.equal(fallbackRate({manual_shipping_tiers},{weight_lb:71,length_in:4,width_in:4,height_in:4}),null);
+ assert.equal(fallbackRate({manual_shipping_tiers},{weight_lb:2}),null);
+ assert.equal(fallbackRate({manual_shipping_tiers},{weight_lb:2,length_in:80,width_in:30,height_in:25}),null);
 });
 test("pickup confirmation and reminder carry order number, deadline, address and hours",()=>{
  const o={...order,order_no:"OB-1001",fulfillment:"pickup",title:"Blender",buyer_name:"Pat",pickup_deadline:"2026-10-08T01:30:00Z",item_cents:200,tax_cents:15,total_cents:220,checkout_quote:{}};

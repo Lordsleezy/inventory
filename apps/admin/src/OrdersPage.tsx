@@ -32,6 +32,8 @@ export function OrdersPage({ client, accessToken, money, stamp }: Props) {
   const [busy, setBusy] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
   const [labelFor, setLabelFor] = useState<WebOrder | null>(null);
+  const [manualShipping, setManualShipping] = useState(false);
+  const [manual, setManual] = useState<Record<string, { carrier: string; tracking: string; cost: string }>>({});
 
   const load = useCallback(async () => {
     const { data, error: e } = await client.rpc('portal_web_orders', { p_days: 120 });
@@ -39,6 +41,7 @@ export function OrdersPage({ client, accessToken, money, stamp }: Props) {
     setOrders(data as WebOrder[]);
   }, [client]);
   useEffect(() => { void load(); const t = setInterval(() => { void load(); }, 30000); return () => clearInterval(t); }, [load]);
+  useEffect(() => { void fetch(`${functionsBase}/.netlify/functions/web-order-admin`, { method: 'POST', headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'shipping_status' }) }).then(r => r.json()).then(d => setManualShipping(d.mode !== 'live')).catch(() => setManualShipping(true)); }, [accessToken]);
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 30000); return () => clearInterval(t); }, []);
 
   async function act(id: string, action: string, extra: Record<string, unknown> = {}) {
@@ -101,10 +104,10 @@ const head = (o: WebOrder) => <div className="ticket-top"><strong>{o.channel && 
       <div className="order-address">{[o.buyer_name, o.ship_line1, o.ship_line2, [o.ship_city, o.ship_region, o.ship_postal].filter(Boolean).join(', ')].filter(Boolean).join(' · ')}</div>
       <small>Package {o.package.length_in ?? '?'}×{o.package.width_in ?? '?'}×{o.package.height_in ?? '?'} in · {o.package.weight_lb ?? '?'} lb</small>
       {o.tracking_number && <div className="order-tracking">Tracking {o.carrier} {o.tracking_number}{o.tracking_url && <> · <a href={o.tracking_url} target="_blank" rel="noreferrer">track</a></>}{o.label_url && <> · <a href={o.label_url} target="_blank" rel="noreferrer">Print label</a></>}{o.label_cost_cents != null && ` · label cost ${money(o.label_cost_cents)}`}</div>}
-      {o.refund_requested_at ? <p className="hint">Cancel & refund in progress…</p> : <div className="actions">
-        {!o.label_url ? <button disabled={!!busy} onClick={() => setLabelFor(o)}>Buy label…</button>
-          : <><button className="secondary" onClick={() => window.open(o.label_url!, '_blank', 'noopener')}>Print label</button>
-            <button className="text-button danger" disabled={!!busy} onClick={() => voidLabel(o)}>{busy === o.id + 'void_label' ? 'Voiding…' : 'Void label'}</button></>}
+      {manualShipping && !o.tracking_number && <div className="panel"><p>Buy the label on <a href="https://www.pirateship.com/" target="_blank" rel="noreferrer">Pirate Ship</a> using the address and package above. Enter the carrier, tracking number, and label cost here.</p><div className="number-grid"><label>Carrier<input value={manual[o.id]?.carrier ?? 'USPS'} onChange={e => setManual({ ...manual, [o.id]: { carrier: e.target.value, tracking: manual[o.id]?.tracking ?? '', cost: manual[o.id]?.cost ?? '' } })} /></label><label>Tracking number<input value={manual[o.id]?.tracking ?? ''} onChange={e => setManual({ ...manual, [o.id]: { carrier: manual[o.id]?.carrier ?? 'USPS', tracking: e.target.value, cost: manual[o.id]?.cost ?? '' } })} /></label><label>Label cost ($)<input inputMode="decimal" value={manual[o.id]?.cost ?? ''} onChange={e => setManual({ ...manual, [o.id]: { carrier: manual[o.id]?.carrier ?? 'USPS', tracking: manual[o.id]?.tracking ?? '', cost: e.target.value } })} /></label></div><button className="secondary" disabled={!!busy || !manual[o.id]?.tracking || !manual[o.id]?.cost} onClick={() => void act(o.id, 'manual_tracking', { carrier: manual[o.id]?.carrier ?? 'USPS', tracking: manual[o.id]?.tracking, label_cost_cents: Math.round(Number(manual[o.id]?.cost) * 100) })}>{busy === o.id + 'manual_tracking' ? 'Saving…' : 'Save tracking & email customer'}</button></div>}
+      {o.refund_requested_at ? <p className="hint">Cancel & refund in progress…</p> : <div className="actions">        {!manualShipping && !o.label_url && <button disabled={!!busy} onClick={() => setLabelFor(o)}>Buy label…</button>}
+        {!manualShipping && o.label_url && <><button className="secondary" onClick={() => window.open(o.label_url!, '_blank', 'noopener')}>Print label</button>
+          <button className="text-button danger" disabled={!!busy} onClick={() => voidLabel(o)}>{busy === o.id + 'void_label' ? 'Voiding…' : 'Void label'}</button></>}
         <button className="secondary" disabled={!!busy || !o.tracking_number} onClick={() => void act(o.id, 'mark_shipped')}>Mark shipped</button>
         {(!o.channel || o.channel === 'website') && <button className="text-button danger" disabled={!!busy} onClick={() => cancel(o)}>Cancel & refund</button>}</div>}
     </div>)}</div>}</section>

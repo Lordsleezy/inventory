@@ -6,15 +6,15 @@ import { settleShippingOrder } from "../lib/web-payment.mjs";
 import { ownerEmails } from "../lib/web-order-email.mjs";
 import { addressTo, allowedCarriers, fallbackRate, liveRates, shippoMode } from "../lib/shippo.mjs";
 
-/** A real (production Square) order can only ever be shipped with a LIVE Shippo key. */
-export const shippingKeyOk = env => env !== "production" || shippoMode() === "live";
+/** Shipping always has a manual-price fallback; live Shippo rates are preferred when available. */
+export const shippingKeyOk = () => true;
 
 const BUYER_FIELDS = ["name", "email", "phone", "line1", "line2", "city", "region", "postal"];
 const buyerFrom = body => Object.fromEntries(BUYER_FIELDS.map(k => [k, String(body[k] || "").trim()]));
 
 async function shippingSettings(sb, storeId) {
   const { data } = await sb.from("store_settings").select("key,value").eq("store_id", storeId)
-    .in("key", ["ship_max_lb", "ship_tier_5_cents", "ship_tier_15_cents", "ship_tier_30_cents"]);
+    .in("key", ["ship_max_lb", "ship_tier_5_cents", "ship_tier_15_cents", "ship_tier_30_cents", "manual_shipping_tiers", "manual_oversize_cents"]);
   return Object.fromEntries((data || []).map(r => [r.key, r.value]));
 }
 
@@ -28,24 +28,25 @@ export async function quoteRates(sb, storeId, sku, buyer, deps = {}) {
     return { status: 400, body: { error: "Enter a full US shipping address (street, city, 2-letter state, ZIP)." } };
   }
   let rates = [];
-  let source = "shippo";
+  let source = "manual";
   let messages = [];
-  try {
-    const live = await (deps.liveRates || liveRates)({ shipFrom: unit.ship_from, to: addressTo(buyer), pkg: unit.package, carriers: await allowedCarriers(sb, storeId) });
-    rates = live.rates;
-    messages = live.messages;
-    if (!rates.length && !live.allRates?.length && messages.length) {
-      return { status: 200, body: { ship: false, pickup: true, reason: "No carrier could quote this address. Check the address, or choose store pickup.", messages } };
+  if (shippoMode() === "live") {
+    try {
+      const live = await (deps.liveRates || liveRates)({ shipFrom: unit.ship_from, to: addressTo(buyer), pkg: unit.package, carriers: await allowedCarriers(sb, storeId) });
+      rates = live.rates;
+      messages = live.messages;
+      if (!rates.length && !live.allRates?.length && messages.length) messages = live.messages;
+      if (rates.length) source = "shippo";
+    } catch {
+      rates = [];
     }
-  } catch {
-    rates = [];
   }
   if (!rates.length) {
-    // Shippo down or no rates: flat weight tiers as a fallback; never $0.
+    // Missing/test/failing Shippo key: current USPS zone-8 tiers, never $0.
     const fb = fallbackRate(await shippingSettings(sb, storeId), unit.package, unit.shipping_cents_override);
-    if (!fb) return { status: 200, body: { ship: false, pickup: true, reason: "Live shipping rates are unavailable right now. Choose store pickup or try again shortly." } };
+    if (!fb) return { status: 200, body: { ship: false, pickup: true, reason: "This package exceeds the manual shipping limits. Choose store pickup or contact us for a shipping quote.", messages } };
     rates = [fb];
-    source = "fallback";
+    source = "manual";
   }
   const { data: quoteId, error: saveError } = await sb.rpc("save_shipping_quote", {
     p_store: storeId, p_sku: sku, p_postal: buyer.postal, p_region: buyer.region, p_rates: rates, p_source: source,
@@ -62,7 +63,7 @@ async function handle(event) {
   const body = JSON.parse(event.body || "{}");
   const sb = serviceClient();
   if (body.action === "config") {
-    return json(200, { ...webSquareConfig(body.store_id), shipping: shippoMode() || "fallback_only" });
+    return json(200, { ...webSquareConfig(body.store_id), shipping: shippoMode() === "live" ? "live" : "manual" });
   }
   if (body.action === "rates") {
     const r = await quoteRates(sb, body.store_id, String(body.sku || "").trim(), buyerFrom(body));
@@ -73,7 +74,6 @@ async function handle(event) {
     for (const name of ["RESEND_API_KEY", "RESEND_FROM"]) if (!process.env[name]) return json(503, { error: `missing_${name}` });
     if (!(await ownerEmails(sb, body.store_id)).length) return json(503, { error: "missing_owner_emails" });
     const fulfillment = body.fulfillment === "ship" ? "ship" : "pickup";
-    if (fulfillment === "ship" && !shippingKeyOk(cfg.env)) return json(400, { error: "Shipping is not available yet. Choose store pickup." });
     const buyer = { ...buyerFrom(body), country: "US" };
     const { data, error } = await sb.rpc("begin_online_checkout", {
       p_store: body.store_id, p_sku: String(body.sku || "").trim(), p_buyer: buyer, p_fulfillment: fulfillment,
@@ -118,4 +118,3 @@ export const handler = wrapHandler("web-checkout", async event => {
     return json(500, { error: /^missing_|^web_store_not_allowed|^production_square_required|^sandbox_square_required/.test(err.message || "") ? err.message : "Checkout unavailable. Retry this order or contact the store." });
   }
 });
-

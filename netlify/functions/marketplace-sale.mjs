@@ -7,9 +7,16 @@ async function handle(event) {
   try {
     const {staff}=await connectionAdminFromEvent(event,['owner','manager']);
     const body=JSON.parse(event.body||'{}');
+    const sb=serviceClient();
+    if(body.action==='channels'){
+      const {data}=await sb.from('store_settings').select('value').eq('store_id',staff.store_id).eq('key','marketplace_channels').maybeSingle();
+      return json(200,{channels:Array.isArray(data?.value)?data.value:[]});
+    }
     const sku=String(body.sku||'').trim(), channel=String(body.channel||'').toLowerCase(), cents=Math.round(Number(body.price_cents));
-    if(!/^\d{5}$/.test(sku)||!['mercari','poshmark','facebook','depop','other'].includes(channel)||!Number.isSafeInteger(cents)||cents<=0)return json(400,{error:'invalid_sale'});
-    const sb=serviceClient();let messageId=`manual:${channel}:${randomUUID()}`,marketplace=channel,title=String(body.title||''),order=String(body.order_number||''),shipBy=body.ship_by||null,buyer=body.buyer||{},fulfillment=body.fulfillment==='pickup'?'pickup':'ship';
+    const {data:channels}=await sb.from('store_settings').select('value').eq('store_id',staff.store_id).eq('key','marketplace_channels').maybeSingle();
+    const configured=Array.isArray(channels?.value)?channels.value:[];
+    if(!/^\d{5}$/.test(sku)||!configured.some(x=>x?.key===channel)||!Number.isSafeInteger(cents)||cents<=0)return json(400,{error:'invalid_sale'});
+    let messageId=`manual:${channel}:${randomUUID()}`,marketplace=channel,title=String(body.title||''),order=String(body.order_number||''),shipBy=body.ship_by||null,buyer=body.buyer||{},fulfillment=body.fulfillment==='pickup'?'pickup':'ship';
     if(body.action==='approve_review'){const {data:review,error}=await sb.from('marketplace_email_sales').select('*').eq('store_id',staff.store_id).eq('id',body.review_id).eq('state','needs_review').maybeSingle();if(error||!review)return json(404,{error:'review_not_found'});messageId=review.message_id;marketplace=review.marketplace||channel;title=review.item_title||title;order=review.order_number||order;shipBy=review.ship_by||shipBy;buyer=review.buyer||{};fulfillment=review.fulfillment==='pickup'?'pickup':'ship';}
     const {data:unit,error:uerr}=await sb.from('units').select('store_id,state').eq('sku',sku).maybeSingle();if(uerr||!unit)return json(404,{error:'unit_not_found'});if(unit.store_id!==staff.store_id)return json(403,{error:'wrong_store'});if(unit.state!=='available')return json(409,{error:'unit_not_available'});
     const {data,error}=await sb.rpc('marketplace_ingest_sale',{p_store:staff.store_id,p_sku:sku,p_channel:channel,p_price_cents:cents,p_order_number:order||messageId,p_message_id:messageId,p_marketplace:marketplace,p_item_title:title,p_ship_by:shipBy,p_fulfillment:fulfillment,p_buyer:buyer,p_confidence:1});if(error)throw error;return json(200,{ok:true,sale_id:data});

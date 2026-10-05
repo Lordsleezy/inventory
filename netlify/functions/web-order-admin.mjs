@@ -35,13 +35,41 @@ async function handle(event) {
     const env = webSquareEnv();
     if (body.action === "set_shipping") {
       const enabled = body.enabled === true;
-      if (enabled && !mode) return json(409, { error: "No Shippo key is saved yet." });
-      if (enabled && env === "production" && mode !== "live") return json(409, { error: "Shipping can't be turned on for real orders until the LIVE Shippo key is saved (the key on the server is a test key)." });
       const { error } = await sb.from("store_settings").upsert({ store_id: storeId, key: "shipping_enabled", value: enabled }, { onConflict: "store_id,key" });
       if (error) return json(500, { error: error.message });
     }
     const { data } = await sb.from("store_settings").select("value").eq("store_id", storeId).eq("key", "shipping_enabled").maybeSingle();
-    return json(200, { ok: true, enabled: data?.value === true, shippo: mode || "none", square_env: env });
+    return json(200, { ok: true, enabled: data?.value === true, shippo: mode || "none", mode: mode === "live" ? "live" : "manual", square_env: env });
+  }
+  if (body.action === "manual_tracking") {
+    const carrier = String(body.carrier || "").trim().slice(0, 60);
+    const tracking = String(body.tracking || "").trim().slice(0, 100);
+    const labelCents = Math.round(Number(body.label_cost_cents));
+    if (!carrier || !tracking || !Number.isInteger(labelCents) || labelCents < 0) return json(400, { error: "Enter carrier, tracking number, and a valid label cost." });
+    const { data: order, error: loadError } = await sb.from("web_orders").select("*").eq("id", id).eq("store_id", storeId).maybeSingle();
+    if (loadError) return json(500, { error: loadError.message });
+    if (!order || order.status !== "paid" || order.fulfillment !== "ship" || order.shipped_at) return json(400, { error: "This order is not waiting to ship." });
+    const now = new Date().toISOString();
+    const trackingUrl = carrier.toLowerCase().includes("usps") ? `https://tools.usps.com/go/TrackConfirmAction?tLabels=${encodeURIComponent(tracking)}`
+      : carrier.toLowerCase().includes("ups") ? `https://www.ups.com/track?tracknum=${encodeURIComponent(tracking)}`
+        : carrier.toLowerCase().includes("fedex") ? `https://www.fedex.com/fedextrack/?trknbr=${encodeURIComponent(tracking)}` : null;
+    const { data: saved, error: saveError } = await sb.from("web_orders").update({ carrier, tracking_number: tracking, tracking_url: trackingUrl,
+      label_cost_cents: labelCents, label_purchased_at: now, shipping_rate: { source: "manual", service: "Purchased externally" }, updated_at: now })
+      .eq("id", id).eq("store_id", storeId).select("*").single();
+    if (saveError) return json(500, { error: saveError.message });
+    const { data: previous } = await sb.from("portal_expenses").select("id,amount_cents").eq("store_id", storeId).eq("order_id", id).eq("source", "manual_label").is("voided_at", null).maybeSingle();
+    const { data: owner } = await sb.from("store_settings").select("value").eq("store_id", storeId).eq("key", "online_payout_employee_id").maybeSingle();
+    const employeeId = typeof owner?.value === "string" ? owner.value : null;
+    if (previous) {
+      if (previous.amount_cents !== labelCents) await sb.from("portal_expenses").update({ amount_cents: labelCents, description: `Manual shipping label ${order.order_no || id} — ${carrier}`, employee_id: employeeId, needs_reimbursement: Boolean(employeeId) }).eq("id", previous.id);
+    } else {
+      const { error: expenseError } = await sb.from("portal_expenses").insert({ store_id: storeId, description: `Manual shipping label ${order.order_no || id} — ${carrier}`, category: "Shipping", amount_cents: labelCents,
+        needs_reimbursement: Boolean(employeeId), employee_id: employeeId, source: "manual_label", order_id: id });
+      if (expenseError) return json(500, { error: `Tracking saved, but label expense failed: ${expenseError.message}` });
+    }
+    await sb.from("events").insert({ store_id: storeId, sku: order.sku, kind: "edit", field: "manual_shipping_label", new_value: JSON.stringify({ carrier, tracking, label_cost_cents: labelCents }), actor, note: `Order ${order.order_no || id}` });
+    const deliveries = await deliverOrderEmails(sb, id).catch(() => []);
+    return json(200, { ok: true, order: saved, emailed: deliveries.some(r => r.kind === "tracking" && r.ok) });
   }
   if (body.action === "mark_shipped") {
     const { data, error } = await sb.from("web_orders").update({ shipped_at: new Date().toISOString(), updated_at: new Date().toISOString() })

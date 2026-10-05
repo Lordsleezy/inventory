@@ -132,11 +132,25 @@ export function fallbackRate(settings, pkg, overrideCents) {
   if (Number(overrideCents) > 0) {
     return { id: "fallback", amount_cents: Number(overrideCents), carrier: "Open Box Industries", service: "Standard shipping", token: null, days: null, source: "fallback" };
   }
-  const lb = Number(pkg?.weight_lb);
-  if (!(lb > 0)) return null;
-  const tier = (key, dflt) => { const n = Number(settings?.[key] ?? dflt); return n > 0 ? n : dflt; };
-  const max = tier("ship_max_lb", 30);
-  if (lb > max) return null;
-  const cents = lb <= 5 ? tier("ship_tier_5_cents", 2000) : lb <= 15 ? tier("ship_tier_15_cents", 3200) : tier("ship_tier_30_cents", 5000);
-  return { id: "fallback", amount_cents: cents, carrier: "Open Box Industries", service: "Standard shipping", token: null, days: null, source: "fallback" };
+  const actual = Number(pkg?.weight_lb), dims = [Number(pkg?.length_in), Number(pkg?.width_in), Number(pkg?.height_in)];
+  if (!(actual > 0) || dims.some(n => !(n > 0))) return null;
+  const roundedVolume = dims.reduce((n, d) => n * Math.ceil(d), 1);
+  const dimWeight = roundedVolume > 1728 ? Math.ceil(roundedVolume / 139) : 0;
+  const billable = Math.max(Math.ceil(actual), dimWeight, 1);
+  const tiers = Array.isArray(settings?.manual_shipping_tiers) ? settings.manual_shipping_tiers : [];
+  const tier = tiers.find(t => Number(t.max_lb) >= billable);
+  if (!tier || billable > 70) return null;
+  const longest = Math.max(...dims), lengthGirth = longest + 2 * (dims.reduce((a,b) => a+b,0) - longest);
+  if (lengthGirth > 130) return null;
+  // USPS Notice 123, zone 8. Add current Ground Advantage nonstandard charges.
+  let cents = Number(tier.cents);
+  if (!Number.isFinite(cents) || cents <= 0) return null;
+  if (lengthGirth > 108) cents = Number(settings?.manual_oversize_cents || 30175);
+  else {
+    if (longest > 30) cents += 1000;
+    else if (longest > 22) cents += 450;
+    if (roundedVolume > 3456) cents += 2100;
+  }
+  const billableLabel = dimWeight > Math.ceil(actual) ? ` (dimensional weight ${dimWeight} lb)` : "";
+  return { id: "manual_usps_zone8", amount_cents: cents, carrier: "USPS", service: `Ground Advantage · up to ${Number(tier.max_lb)} lb${billableLabel}`, token: null, days: null, source: "manual" };
 }

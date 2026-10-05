@@ -10,6 +10,7 @@ type Settings = {
   store_tax_bps: number; tax_origin_state: string; tax_out_of_state_bps: number; tax_in_state_ship_bps: number | null; tax_shipping: boolean;
   counts: { listed: number; shippable: number; pickup_only: number; missing_dims: number; ready_when_shipping_on: number };
   pickup_only_units: { sku: string; title: string; category: string | null; reason: string }[];
+  manual_shipping_tiers: { max_lb: number; cents: number }[];
 };
 type Check = { id: number; ran_at: string; ok: boolean; counts: Record<string, number>; problems: { sku: string | null; title: string | null; where: string; reason: string }[]; healed: unknown[]; emailed_at: string | null; error: string | null };
 type Props = { client: SupabaseClient; accessToken: string; stamp: (s: string) => string };
@@ -22,17 +23,19 @@ export function OnlineSellingPage({ client, accessToken, stamp }: Props) {
   const [error, setError] = useState(''); const [saved, setSaved] = useState('');
   const [busy, setBusy] = useState(false);
   const [carriers, setCarriers] = useState('USPS');
-  const [ship, setShip] = useState<{ enabled: boolean; shippo: string; square_env: string } | null>(null);
+  const [ship, setShip] = useState<{ enabled: boolean; shippo: string; mode: string; square_env: string } | null>(null);
   const [emails, setEmails] = useState(''); const [keywords, setKeywords] = useState(''); const [cats, setCats] = useState<string[]>([]);
   const [extraCats, setExtraCats] = useState('');
   const [tax, setTax] = useState({ state: 'CA', outPct: '0', inPct: '', taxShipping: false });
   const [nums, setNums] = useState({ ship_max_weight_lb: '', ship_max_length_in: '', ship_max_length_girth_in: '', pickup_hold_hours: '' });
+  const [shippingTiers, setShippingTiers] = useState<{ max_lb: number; cents: number }[]>([]);
 
   const load = useCallback(async () => {
     const [a, b, c] = await Promise.all([client.rpc('portal_online_settings'), client.from('listing_checks').select('*').order('ran_at', { ascending: false }).limit(1), client.rpc('portal_ship_carriers')]);
     if (!c.error && Array.isArray(c.data)) setCarriers((c.data as string[]).join(', '));
     if (a.error) { setError(a.error.message); return; }
     const v = a.data as Settings; setS(v);
+    setShippingTiers(v.manual_shipping_tiers || []);
     setEmails(v.order_notify_emails.join('\n')); setKeywords(v.ship_excluded_keywords.join('\n'));
     const known = new Set(v.categories.map(c => c.toLowerCase()));
     setCats(v.ship_excluded_categories.filter(c => known.has(c.toLowerCase())));
@@ -51,6 +54,7 @@ export function OnlineSellingPage({ client, accessToken, stamp }: Props) {
       await put('ship_excluded_categories', [...cats, ...lines(extraCats)]);
       await put('ship_excluded_keywords', lines(keywords));
       await put('ship_carriers', lines(carriers));
+      await put('manual_shipping_tiers', shippingTiers);
       for (const [k, v] of Object.entries(nums)) await put(k, Number(v));
       const bps = (pct: string) => Math.round(Number(pct) * 100);
       if (!Number.isFinite(bps(tax.outPct)) || (tax.inPct.trim() !== '' && !Number.isFinite(bps(tax.inPct)))) throw new Error('Tax rates must be numbers like 7.25');
@@ -70,7 +74,7 @@ export function OnlineSellingPage({ client, accessToken, stamp }: Props) {
   }, [accessToken]);
   useEffect(() => { void loadShip(); }, [loadShip]);
   async function toggleShipping(enabled: boolean) {
-    if (enabled && !window.confirm('Turn shipping ON? Customers will see "Ship it" with live carrier rates on every item that qualifies.')) return;
+    if (enabled && !window.confirm('Turn shipping ON? Eligible items will use live Shippo rates when available and the manual USPS rate table otherwise.')) return;
     setBusy(true); setError(''); setSaved('');
     try {
       const res = await fetch(`${functionsBase}/.netlify/functions/web-order-admin`, { method: 'POST', headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'set_shipping', enabled }) });
@@ -98,10 +102,10 @@ export function OnlineSellingPage({ client, accessToken, stamp }: Props) {
     {saved && <div className="notice">{saved}</div>}
     <section className="panel"><div className="section-head"><h2>Shipping</h2>
       <span className={`tag ${ship?.enabled ? 'on' : 'off'}`}>{ship ? (ship.enabled ? 'ON' : 'OFF — store pickup only') : '…'}</span></div>
-      <p className="hint">Shippo key on the server: <strong>{ship ? (ship.shippo === 'live' ? 'LIVE' : ship.shippo === 'test' ? 'TEST (not used for real orders)' : 'none') : '…'}</strong> · Square: <strong>{ship?.square_env ?? '…'}</strong>. {s.counts.ready_when_shipping_on} listed items would ship once shipping is on (the rest are missing box dimensions or are too big).</p>
+      <p className="hint">Mode: <strong>{ship?.mode === 'live' ? 'live Shippo, with manual fallback' : 'manual USPS rates'}</strong> · Shippo key: <strong>{ship ? (ship.shippo === 'live' ? 'LIVE' : ship.shippo === 'test' ? 'TEST (manual rates used)' : 'none') : '…'}</strong> · Square: <strong>{ship?.square_env ?? '…'}</strong>.</p>
       <div className="actions">{ship?.enabled ? <button className="secondary" disabled={busy} onClick={() => void toggleShipping(false)}>Turn shipping off</button>
         : <button disabled={busy} onClick={() => void toggleShipping(true)}>Turn shipping on</button>}</div>
-      {!ship?.enabled && ship?.square_env === 'production' && ship.shippo !== 'live' && <p className="hint">Turning shipping on needs the LIVE Shippo key saved on the server first.</p>}
+      {ship?.enabled && <p className="hint">Rate mode: {ship.mode === 'live' ? 'Live Shippo rates (manual fallback if unavailable)' : 'Manual USPS Ground Advantage tiers until live Shippo is configured'}.</p>}
     </section>
     <div className="stats"><div className="stat"><span>Listed online</span><strong>{s.counts.listed}</strong></div><div className="stat"><span>Ship or pickup (now)</span><strong>{s.counts.shippable}</strong></div><div className="stat"><span>Ready when shipping is on</span><strong>{s.counts.ready_when_shipping_on}</strong></div><div className="stat"><span>Pickup only</span><strong>{s.counts.pickup_only}</strong></div><div className="stat"><span>Missing package dims/weight</span><strong>{s.counts.missing_dims}</strong></div></div>
 
@@ -116,6 +120,8 @@ export function OnlineSellingPage({ client, accessToken, stamp }: Props) {
     <section className="panel"><h2>Order notifications</h2><label className="notes">Email every new online order, cancellation and listing-check problem to (one per line)<textarea rows={3} value={emails} onChange={e => setEmails(e.target.value)} /></label></section>
 
     <section className="panel"><h2>Shipping rules</h2>
+      <h3>Manual label rate tiers (lower 48, USPS Zone 8)</h3><p className="hint">Used when Shippo has no live key or its live quote fails. Prices include USPS dimensional-weight and listed size surcharges. Buy labels through Pirate Ship and enter tracking in Orders.</p>
+      <div className="number-grid">{shippingTiers.map((tier, i) => <label key={tier.max_lb}>Up to {tier.max_lb} lb ($)<input inputMode="decimal" value={(tier.cents / 100).toFixed(2)} onChange={e => setShippingTiers(shippingTiers.map((t, j) => j === i ? { ...t, cents: Math.round(Number(e.target.value) * 100) || 0 } : t))} /></label>)}</div>
       <h3>Pickup-only categories</h3><div className="check-grid">{s.categories.map(c => <label key={c}><input type="checkbox" checked={cats.some(x => x.toLowerCase() === c.toLowerCase())} onChange={e => setCats(e.target.checked ? [...cats, c] : cats.filter(x => x.toLowerCase() !== c.toLowerCase()))} />{c}</label>)}</div>
       <label className="notes">Other pickup-only category names (for categories added later)<textarea rows={3} value={extraCats} onChange={e => setExtraCats(e.target.value)} /></label>
       <label className="notes">Pickup-only words in the title (whole words)<textarea rows={4} value={keywords} onChange={e => setKeywords(e.target.value)} /></label>
