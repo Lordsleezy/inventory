@@ -178,9 +178,10 @@ ${branding.footerMessage ? `<p style="color:#555">${escape(branding.footerMessag
 export async function sendResend({ to, subject, text, html, headers, idempotencyKey }) {
   const key = process.env.RESEND_API_KEY;
   const from = process.env.RESEND_FROM;
+  const replyTo = process.env.RESEND_REPLY_TO || "pgg124@gmail.com";
   if (!key || !from || !to)
     return { skipped: true, reason: !key || !from ? "missing_resend_env" : "missing_to" };
-  const body = { from, to: [to], subject, text };
+  const body = { from, to: [to], reply_to: replyTo, subject, text };
   if (html) body.html = html;
   if (headers) body.headers = headers;
   const res = await fetch("https://api.resend.com/emails", {

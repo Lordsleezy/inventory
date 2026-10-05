@@ -40,9 +40,9 @@ async function handle(){
    lines.push('Sales needing review: '+(x.review.length?x.review.map(s=>`${s.marketplace} SKU ${s.sku||'unknown'} ${s.item_title||''}`).join(', '):'none'));
    lines.push('Mismatches: '+(x.mismatch.length?x.mismatch.join('; '):'none'));
   }
-  const cfg=(await sb.from('store_settings').select('value').eq('key','order_notify_emails').limit(1)).data?.[0]?.value||['paul@sentinelprime.org'];
-  const to=(Array.isArray(cfg)?cfg:[]).filter(x=>String(x).includes('@'));if(!to.length)to.push('paul@sentinelprime.org');
-  const response=await fetch('https://api.resend.com/emails',{method:'POST',headers:{authorization:`Bearer ${process.env.RESEND_API_KEY}`,'content-type':'application/json'},body:JSON.stringify({from:process.env.RESEND_FROM,to,subject:`Floor daily sales inbox � ${yesterday}`,text:lines.join('\n\n')})});
+  const cfg=(await sb.from('store_settings').select('value').eq('key','order_notify_emails').limit(1)).data?.[0]?.value||['pgg124@gmail.com'];
+  const to=(Array.isArray(cfg)?cfg:[]).filter(x=>String(x).includes('@'));if(!to.length)to.push('pgg124@gmail.com');
+  const response=await fetch('https://api.resend.com/emails',{method:'POST',headers:{authorization:`Bearer ${process.env.RESEND_API_KEY}`,'content-type':'application/json'},body:JSON.stringify({from:process.env.RESEND_FROM,reply_to:process.env.RESEND_REPLY_TO||'pgg124@gmail.com',to,subject:`Floor daily sales inbox � ${yesterday}`,text:lines.join('\n\n')})});
   if(!response.ok)throw new Error(`Resend ${response.status}`);return{sent:true};
  });return json(200,result);}catch(e){return json(500,{error:String(e).slice(0,300)});}
 }

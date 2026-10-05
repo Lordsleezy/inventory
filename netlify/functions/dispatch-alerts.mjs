@@ -8,7 +8,7 @@ async function sendResend({ to, subject, text }) {
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ from, to: [to], subject, text }),
+    body: JSON.stringify({ from, to: [to], reply_to: process.env.RESEND_REPLY_TO || "pgg124@gmail.com", subject, text }),
   });
   if (!res.ok) {
     const body = await res.text();
@@ -93,7 +93,8 @@ async function handle(event) {
       for (const person of recipients) {
         if (person.notify_email) {
           const { data: user } = await sb.auth.admin.getUserById(person.user_id);
-          const email = user?.user?.email;
+          const ownerEmail = (process.env.FLOOR_OWNER_EMAIL || "").split(",").map((s) => s.trim()).filter(Boolean)[0];
+          const email = person.role === "owner" ? ownerEmail || user?.user?.email : user?.user?.email;
           if (email) await sendResend({ to: email, subject, text });
         }
         if (person.notify_push) await sendApns();
