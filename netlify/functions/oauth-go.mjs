@@ -1,6 +1,7 @@
 import { html, serviceClient } from "../lib/server.mjs";
 import { authorizeUrl } from "../lib/oauth-authorize.mjs";
 import { wrapHandler } from "../lib/floor-log.mjs";
+import { ebayDisabled } from "../lib/ebay-env.mjs";
 
 function fail(message) {
   return html(
@@ -37,6 +38,7 @@ async function handle(event) {
   if (error || !data || data.consumed_at || new Date(data.expires_at) <= new Date()) {
     return fail("This sign-in expired or was already used. Start Connect again from Floor.");
   }
+  if (data.provider === "ebay" && ebayDisabled()) return fail("eBay integrations are disabled.");
   const location = authorizeUrl(data.provider, data.nonce);
   const href = location
     .replace(/&/g, "&amp;")

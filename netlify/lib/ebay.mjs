@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { decryptSecret, encryptSecret, requireEnv, serviceClient } from "./server.mjs";
-import { EBAY_OAUTH_SCOPES, ebayHosts, ebayItemViewUrl, ebayRuName } from "./ebay-env.mjs";
+import { EBAY_OAUTH_SCOPES, ebayHosts, ebayItemViewUrl, ebayRuName, ebayDisabled, requireEbayEnabled } from "./ebay-env.mjs";
 import { formatEbayError, locationKey } from "./ebay-errors.mjs";
 import { publicPhotoUrl } from "./ebay-photos.mjs";
 import { composeChannelDescription, parseListingSpecs } from "./listing-copy.mjs";
@@ -30,6 +30,7 @@ function basicAuth() {
 }
 
 export async function exchangeEbayCode(code) {
+  requireEbayEnabled();
   const { api } = ebayHosts(process.env.EBAY_ENV);
   const body = new URLSearchParams({
     grant_type: "authorization_code",
@@ -81,6 +82,7 @@ export async function loadEbayConnection(storeId) {
 }
 
 export async function userToken(storeId) {
+  requireEbayEnabled();
   const row = await loadEbayConnection(storeId);
   const exp = row.expires_at ? new Date(row.expires_at).getTime() : 0;
   if (exp > Date.now() + 120_000) return decryptSecret(row.token_ciphertext);
@@ -105,6 +107,7 @@ export async function userToken(storeId) {
 }
 
 export async function ebayFetch(storeId, method, path, body) {
+  requireEbayEnabled();
   const { api } = ebayHosts(process.env.EBAY_ENV);
   const token = await userToken(storeId);
   const mutate = method !== "GET";
@@ -987,6 +990,7 @@ async function emailEndFailure(sb, storeId, sku, message) {
 }
 
 export async function withdrawOpenEbayTasks() {
+  if (ebayDisabled()) return [];
   const sb = serviceClient();
   const { data, error } = await sb
     .from("delist_tasks")
@@ -1240,6 +1244,7 @@ export async function pollEbayOrders(storeId) {
 }
 
 export async function pollAllStores() {
+  if (ebayDisabled()) return [];
   const sb = serviceClient();
   const { data, error } = await sb.from("connections").select("store_id").eq("provider", "ebay").eq("status", "connected");
   if (error) throw new Error(error.message);

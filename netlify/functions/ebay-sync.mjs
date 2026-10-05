@@ -2,6 +2,7 @@ import { json, corsHeaders, serviceClient } from "../lib/server.mjs";
 import { pollAllStores, withdrawOpenEbayTasks } from "../lib/ebay.mjs";
 import { withLock } from "../lib/bg-guard.mjs";
 import { wrapHandler } from "../lib/floor-log.mjs";
+import { ebayDisabled } from "../lib/ebay-env.mjs";
 
 /**
  * Frequent and cheap: ingest eBay orders and end eBay listings for units that sold elsewhere.
@@ -9,6 +10,7 @@ import { wrapHandler } from "../lib/floor-log.mjs";
  * ebay-drafts-refresh (every 15 minutes, locked, paced). This function never touches ebay_drafts.
  */
 async function handle(event) {
+  if (ebayDisabled()) return json(200, { disabled: true });
   if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: corsHeaders(), body: "" };
   try {
     const sb = serviceClient();

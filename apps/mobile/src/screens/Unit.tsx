@@ -16,15 +16,15 @@ import {
 } from "@floor/store";
 import { floorCloud } from "@floor/cloud";
 import { ebayItemViewUrl } from "@floor/channels";
-import { EbayDetails } from "../components/EbayDetails";
 import { Photos } from "../components/Photos";
 import { OnlineShipping } from "../components/OnlineShipping";
 import { UnitCost } from "../components/UnitCost";
 import { DangerButton, MoneyField, Notice, SelectField, Spinner, TextField } from "../components/ui";
 import { openHtml } from "../files";
 import { useStore } from "../store";
-import { applyChannelListing } from "../functions";
 import { openExternalUrl } from "../oauth-browser";
+import { applyChannelListing } from "../functions";
+import { MarketplaceSaleButton } from "../components/MarketplaceSaleButton";
 import { askManagerPin } from "../pin";
 import { friendlyRpc, needsManagerPin, needsVoidFirst } from "../rpc";
 
@@ -365,20 +365,8 @@ export function UnitScreen() {
 
       {admin ? (
         <div className="border-b border-floor-line py-3">
-          <button type="button" className="btn-accent" disabled={!online || ebayBusy} onClick={() => void listOnEbay()}>
-            {ebayBusy ? "Listing…" : ebayOn ? "Update eBay listing" : "List on eBay"}
-          </button>
-          {ebayUrl ? (
-            <button type="button" className="btn-text mt-2 block px-0" onClick={() => void openExternalUrl(ebayUrl)}>
-              View on eBay
-            </button>
-          ) : null}
-          <p className="mt-2 text-quiet text-floor-mute">eBay item specifics are checked below.</p>
-          <EbayDetails
-            sku={unit.sku}
-            category={unit.category}
-            cacheKey={`${unit.listingSpecs || ""}:${unit.brand}:${unit.model}`}
-          />
+          <p className="text-quiet">eBay listing is disabled.</p>
+
           <label className="mt-3 flex items-center gap-2">
             <input
               type="checkbox"
@@ -419,6 +407,7 @@ export function UnitScreen() {
           />
         )}
 
+        {!sold && admin && <MarketplaceSaleButton sku={sku} askCents={unit.askCents} disabled={!online} onDone={async () => { await hydrate(); await refresh(); }} />}
         {!sold && online ? (
           <Link to={`/checkout/${unit.sku}`} className="btn-accent mt-4 block text-center">
             Sell

@@ -9,7 +9,7 @@ import {
 } from "@floor/store";
 import { applyChannelListing } from "../functions";
 import { useDb, useStore } from "../store";
-import { EbayBulkEdit } from "../components/EbayDetails";
+
 import { Notice, Spinner } from "../components/ui";
 import { ChannelMarks, ChannelToggleRow, normalizeChannel } from "../listingMarks";
 import { friendlyRpc } from "../rpc";
@@ -67,8 +67,8 @@ export function InventoryScreen() {
   }, [db, query, category, tab?.unfinished, cacheEpoch]);
 
   const channelOptions = useMemo(() => {
-    const fromSettings = settings.channels.filter((c) => c !== "floor");
-    for (const extra of ["facebook", "ebay", "amazon"]) {
+    const fromSettings = settings.channels.filter((c) => c !== "floor" && normalizeChannel(c) !== "ebay");
+    for (const extra of ["facebook", "amazon"]) {
       if (!fromSettings.some((c) => normalizeChannel(c) === extra)) fromSettings.push(extra);
     }
     return fromSettings;
@@ -169,7 +169,7 @@ export function InventoryScreen() {
       {selecting ? (
         <div className="mt-1">
           <p className="text-quiet text-floor-mute">
-            F Facebook, E eBay, A Amazon, other letters elsewhere. Filled means listed. Tap a letter to
+            F Facebook, A Amazon, other letters elsewhere. Filled means listed. Tap a letter to
             mark or unmark the selected units.
           </p>
           <ChannelToggleRow
@@ -181,13 +181,6 @@ export function InventoryScreen() {
             }
             disabled={!online}
             onToggle={(channel, next) => void applyListing(channel, next)}
-          />
-          <EbayBulkEdit
-            skus={picked}
-            categoryHint={(() => {
-              const cats = [...new Set(picked.map((sku) => units?.find((u) => u.sku === sku)?.category || "").filter(Boolean))];
-              return cats.length === 1 ? cats[0] : "";
-            })()}
           />
         </div>
       ) : null}

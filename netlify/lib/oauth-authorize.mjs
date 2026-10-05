@@ -1,5 +1,5 @@
 import { requireEnv } from "./server.mjs";
-import { EBAY_OAUTH_SCOPES, ebayHosts, ebayRuName } from "./ebay-env.mjs";
+import { EBAY_OAUTH_SCOPES, ebayHosts, ebayRuName, requireEbayEnabled } from "./ebay-env.mjs";
 
 const SCOPES = {
   square: "MERCHANT_PROFILE_READ PAYMENTS_WRITE PAYMENTS_WRITE_IN_PERSON",
@@ -17,6 +17,7 @@ export function authorizeUrl(provider, nonce) {
     return `${host}/oauth2/authorize?client_id=${encodeURIComponent(id)}&scope=${encodeURIComponent(SCOPES.square)}&session=false&state=${nonce}&redirect_uri=${encodeURIComponent(redirectUri)}`;
   }
   if (provider === "ebay") {
+    requireEbayEnabled();
     const { auth } = ebayHosts(process.env.EBAY_ENV);
     const id = requireEnv("EBAY_CLIENT_ID");
     const ruName = ebayRuName(process.env.EBAY_RU_NAME);

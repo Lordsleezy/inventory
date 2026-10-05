@@ -2,8 +2,10 @@
 import { requireEnv } from "../lib/server.mjs";
 import { runTrace, floorLog } from "../lib/floor-log.mjs";
 import { markPushFailed, runPushQueue } from "../lib/ebay-drafts.mjs";
+import { ebayDisabled } from "../lib/ebay-env.mjs";
 
 export const handler = async (event) => {
+  if (ebayDisabled()) return { statusCode: 202, body: "disabled" };
   const header = event.headers?.authorization || event.headers?.Authorization || "";
   if (header !== `Bearer ${requireEnv("SUPABASE_SERVICE_ROLE")}`) return { statusCode: 401, body: "unauthorized" };
   const body = JSON.parse(event.body || "{}");

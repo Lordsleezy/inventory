@@ -8,6 +8,7 @@ import { exchangeEbayCode, subscribeNotifications } from "../lib/ebay.mjs";
 import { upsertEncryptedSquareTokens } from "../lib/square.mjs";
 import { paramsFromNetlifyEvent } from "../lib/oauth-params.mjs";
 import { wrapHandler } from "../lib/floor-log.mjs";
+import { ebayDisabled } from "../lib/ebay-env.mjs";
 
 function deepLink(query) {
   const base = process.env.APP_DEEP_LINK || "floor://connections";
@@ -181,6 +182,7 @@ async function exchangeAmazon(code) {
 }
 
 async function handle(event) {
+  if (ebayDisabled()) { const provider=event.queryStringParameters?.provider; if(provider==="ebay") return page(503,{title:"eBay disabled",message:"eBay integrations are disabled."}); }
   const params = paramsFromNetlifyEvent(event);
   let nonce = params.state;
   const code = params.code;

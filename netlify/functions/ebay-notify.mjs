@@ -2,6 +2,7 @@ import { json, corsHeaders, requireEnv } from "../lib/server.mjs";
 import { notificationChallenge, pollAllStores, withdrawOpenEbayTasks } from "../lib/ebay.mjs";
 import { wrapHandler } from "../lib/floor-log.mjs";
 import { handleDeletionPost } from "../lib/ebay-account-deletion.mjs";
+import { ebayDisabled } from "../lib/ebay-env.mjs";
 
 function endpointUrl(event) {
   return process.env.EBAY_NOTIFICATION_ENDPOINT || `https://${event.headers.host}/.netlify/functions/ebay-notify`;
@@ -9,6 +10,7 @@ function endpointUrl(event) {
 
 async function handle(event) {
   if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: corsHeaders(), body: "" };
+  if (ebayDisabled()) return json(410, { error: "eBay notifications are disabled." });
   if (event.httpMethod === "GET") {
     const challenge = event.queryStringParameters?.challenge_code;
     if (!challenge) return json(400, { error: "missing_challenge" });
@@ -30,6 +32,7 @@ async function handle(event) {
 
 const regularHandler = wrapHandler("ebay-notify", handle);
 export async function handler(event, context) {
+  if (ebayDisabled()) return json(410, { error: "eBay notifications are disabled." });
   // The regular request logger includes POST bodies. Keep deletion identifiers
   // out of it, including when a forged notification fails verification.
   if (event.httpMethod === "POST") {

@@ -20,9 +20,11 @@ import {
   markPushFailed,
 } from "../lib/ebay-drafts.mjs";
 import { backfillStatus, startBackfill } from "../lib/ebay-backfill.mjs";
+import { ebayDisabled } from "../lib/ebay-env.mjs";
 
 async function handle(event) {
   if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: corsHeaders(), body: "" };
+  if (ebayDisabled()) return json(200, { ok: true, disabled: true, message: "eBay is disabled. Floor inventory remains available for other channels." });
   if (event.httpMethod !== "POST") return json(405, { error: "post_only" });
   let ctx;
   try {

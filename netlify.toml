@@ -26,15 +26,6 @@
   schedule = "0 14 * * *"
 
 # Light and frequent: eBay order ingestion + ending listings after a sale. Nothing heavy.
-[functions."ebay-sync"]
-  schedule = "*/2 * * * *"
-  timeout = 30
-
-# Low priority, every 15 minutes: draft refresh/quotes/reprice, category refresh, spec backfill.
-# Runs as a background function behind a lock, in small paced batches that back off when the DB is busy.
-[functions."ebay-drafts-refresh"]
-  schedule = "*/15 * * * *"
-
 [functions."ebay-drafts"]
   timeout = 60
 
@@ -51,3 +42,12 @@
   from = "/"
   to = "/index.html"
   status = 200
+
+[functions."google-sync"]
+schedule = "*/5 * * * *"
+
+[functions."google-reconcile"]
+schedule = "0 */6 * * *"
+
+[functions."marketplace-daily-report"]
+schedule = "0 16 * * *"

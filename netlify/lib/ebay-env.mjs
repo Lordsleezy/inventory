@@ -1,3 +1,11 @@
+export function ebayDisabled(env = process.env.EBAY_DISABLED) {
+  return /^(1|true|yes|on)$/i.test(String(env || "").trim());
+}
+
+export function requireEbayEnabled() {
+  if (ebayDisabled()) throw new Error("eBay integration is disabled for this store.");
+}
+
 export function ebayHosts(env = process.env.EBAY_ENV) {
   const live = env === "production";
   return {

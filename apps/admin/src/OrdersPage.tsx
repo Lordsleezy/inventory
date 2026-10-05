@@ -84,13 +84,13 @@ Shippo refunds the label cost, the label expense is reversed, and you can buy a 
     };
   }, [orders]);
 
-  const head = (o: WebOrder) => <div className="ticket-top"><strong>{o.channel === 'ebay' ? 'eBay ' : ''}{o.order_no || 'Order'} · {money(o.total_cents)}</strong><span>{o.paid_at ? stamp(o.paid_at) : stamp(o.created_at)}{o.channel === 'ebay' && <b className="badge"> EBAY</b>}{o.payment_env === 'sandbox' && <b className="badge"> SANDBOX</b>}</span></div>;
+const head = (o: WebOrder) => <div className="ticket-top"><strong>{o.channel && o.channel !== 'website' ? `${o.channel} ` : ''}{o.order_no || 'Order'} · {money(o.total_cents)}</strong><span>{o.paid_at ? stamp(o.paid_at) : stamp(o.created_at)}{o.channel && o.channel !== 'website' && <b className="badge"> {o.channel.toUpperCase()}</b>}{o.payment_env === 'sandbox' && <b className="badge"> SANDBOX</b>}</span></div>;
   const item = (o: WebOrder) => <div className="ticket-items"><div>{o.title} <span>· SKU {o.sku}</span></div>
     <small>{o.buyer_name} · {o.buyer_email} · {o.buyer_phone}</small>
     <small>Item {money(o.item_cents)} · {o.fulfillment === 'ship' ? `Shipping ${money(o.shipping_cents)}${o.carrier ? ` (${o.carrier} ${o.service || ''})` : ''}${o.shipping_rate?.source === 'fallback' ? ' · flat-rate fallback' : ''}` : 'Store pickup'} · Tax {money(o.tax_cents)}</small></div>;
 
   return <>
-    <header><div><div className="eyebrow">WEBSITE AND EBAY</div><h1>Orders</h1><p>Website orders and eBay orders. Buy the label here when you pack it. Refreshes every 30 seconds.</p></div>
+    <header><div><div className="eyebrow">WEBSITE AND MARKETPLACES</div><h1>Orders</h1><p>Website and marketplace orders. Buy shipping labels here. Refreshes every 30 seconds.</p></div>
       <div className="actions"><button className="secondary" onClick={() => void load()}>Refresh</button></div></header>
     {error && <div className="alert" role="alert">{error}<button onClick={() => setError('')}>Dismiss</button></div>}
     <div className="stats"><div className="stat"><span>To ship</span><strong>{groups.toShip.length}</strong></div><div className="stat"><span>Awaiting pickup</span><strong>{groups.pickup.length}</strong></div><div className="stat"><span>Completed</span><strong>{groups.done.length}</strong></div><div className="stat"><span>Cancelled / refunded</span><strong>{groups.canceled.length}</strong></div></div>
@@ -106,7 +106,7 @@ Shippo refunds the label cost, the label expense is reversed, and you can buy a 
           : <><button className="secondary" onClick={() => window.open(o.label_url!, '_blank', 'noopener')}>Print label</button>
             <button className="text-button danger" disabled={!!busy} onClick={() => voidLabel(o)}>{busy === o.id + 'void_label' ? 'Voiding…' : 'Void label'}</button></>}
         <button className="secondary" disabled={!!busy || !o.tracking_number} onClick={() => void act(o.id, 'mark_shipped')}>Mark shipped</button>
-        {o.channel !== 'ebay' && <button className="text-button danger" disabled={!!busy} onClick={() => cancel(o)}>Cancel & refund</button>}</div>}
+        {(!o.channel || o.channel === 'website') && <button className="text-button danger" disabled={!!busy} onClick={() => cancel(o)}>Cancel & refund</button>}</div>}
     </div>)}</div>}</section>
 
     <section className="panel"><h2>Awaiting pickup</h2>{groups.pickup.length === 0 ? <div className="empty">No pickups waiting.</div> : <div className="ticket-list">{groups.pickup.map(o => <div className="ticket order" key={o.id}>{head(o)}{item(o)}

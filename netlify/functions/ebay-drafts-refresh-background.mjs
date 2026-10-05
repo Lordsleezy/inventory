@@ -8,6 +8,7 @@ import { reconcileListedOffers } from "../lib/ebay.mjs";
 import { syncDrafts } from "../lib/ebay-drafts.mjs";
 import { backfillStatus, runBackfill, startBackfill } from "../lib/ebay-backfill.mjs";
 import { dbBusy, sleep, withLock } from "../lib/bg-guard.mjs";
+import { ebayDisabled } from "../lib/ebay-env.mjs";
 
 const QUOTE_BATCH = Number(process.env.EBAY_QUOTE_BATCH) || 10;
 const BACKFILL_BATCH = Number(process.env.EBAY_BACKFILL_BATCH) || 5;
@@ -44,6 +45,7 @@ export async function refreshOnce(sb = serviceClient()) {
 }
 
 export const handler = async (event) => {
+  if (ebayDisabled()) return { statusCode: 202, body: "disabled" };
   const header = event.headers?.authorization || event.headers?.Authorization || "";
   if (header !== `Bearer ${requireEnv("SUPABASE_SERVICE_ROLE")}`) return { statusCode: 401, body: "unauthorized" };
   if (process.env.EBAY_BACKGROUND_WORK !== "on") return { statusCode: 202, body: "paused" };

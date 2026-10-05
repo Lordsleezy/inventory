@@ -1,4 +1,5 @@
 import { serviceClient } from "./server.mjs";
+import { requireEbayEnabled } from "./ebay-env.mjs";
 import { ebayHosts } from "./ebay-env.mjs";
 import {
   aspectsNeedRefresh,
@@ -232,6 +233,7 @@ export async function rememberAspectDefault(storeId, slug, aspectName, value) {
 
 let tokenCache = null;
 async function applicationToken() {
+  requireEbayEnabled();
   if (tokenCache && tokenCache.expiresAt > Date.now() + 60_000) return tokenCache.value;
   const { api } = ebayHosts(process.env.EBAY_ENV);
   const id = process.env.EBAY_CLIENT_ID;

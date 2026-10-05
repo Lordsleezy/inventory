@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { ownerFromEvent, json, corsHeaders, serviceClient } from "../lib/server.mjs";
 import { hopUrl } from "../lib/oauth-authorize.mjs";
 import { wrapHandler } from "../lib/floor-log.mjs";
+import { ebayDisabled } from "../lib/ebay-env.mjs";
 
 async function handle(event) {
   if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: corsHeaders(), body: "" };
@@ -13,6 +14,7 @@ async function handle(event) {
     if (provider === "amazon" && process.env.AMAZON_ACCOUNT_TYPE === "individual") {
       return json(400, { error: "amazon_individual_is_manual", message: "Amazon Individual has no Connect. Mark listings by hand." });
     }
+    if (provider === "ebay" && ebayDisabled()) return json(503, { error: "ebay_disabled" });
     const { user, staff } = await ownerFromEvent(event);
     const nonce = randomBytes(24).toString("hex");
     const sb = serviceClient();

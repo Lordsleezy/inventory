@@ -1,0 +1,33 @@
+import { createHash } from 'node:crypto';
+import PostalMime from 'postal-mime';
+import { json, serviceClient, requireEnv } from '../lib/server.mjs';
+import { wrapHandler } from '../lib/floor-log.mjs';
+const marketplaceOf=(s)=>{s=s.toLowerCase();if(/mercari/.test(s))return'mercari';if(/poshmark/.test(s))return'poshmark';if(/facebook|meta/.test(s))return'facebook';if(/depop/.test(s))return'depop';if(/vendoo/.test(s))return'other';return'other';};
+const safeDate=(s)=>{const d=new Date(s);return Number.isNaN(+d)?null:d.toISOString().slice(0,10);};
+function parseMail(mail){
+ const text=[mail.subject,mail.text||'',mail.html||''].join('\n').replace(/<[^>]*>/g,' ');
+ const sender=mail.from?.address||'';const marketplace=marketplaceOf(`${sender} ${mail.subject}`);
+ const sale=/sold|order (?:confirmed|placed)|purchase|your item has sold/i.test(`${mail.subject}\n${text}`);
+ const sku=text.match(/\bSKU\s*[:#-]?\s*(\d{5})\b/i)?.[1]||null;
+ const priceMatch=text.match(/(?:sold\s+for|sale\s+price|item\s+price|item\s+subtotal)\D{0,30}\$\s?([0-9]{1,6}(?:\.[0-9]{2})?)/i);
+ const price=priceMatch?Math.round(Number(priceMatch[1])*100):null;
+ const order=text.match(/(?:order|transaction|sale)\s*(?:number|#|no\.?|id)?\s*[:#-]?\s*([A-Z0-9-]{5,40})/i)?.[1]||null;
+ const ship=text.match(/(?:ship(?:ped)? by|ship before|ship no later than)\s*[:\-]?\s*([A-Z][a-z]+\s+\d{1,2}(?:,\s*\d{4})?)/i)?.[1];
+ const lines=text.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
+ const name=text.match(/(?:ship to|shipping name|recipient)\s*[:\-]\s*([^\r\n]+)/i)?.[1]||null;
+ const street=text.match(/\b\d{1,6}\s+[A-Za-z0-9.'# -]{3,70}\s(?:St|Street|Rd|Road|Ave|Avenue|Blvd|Drive|Dr|Lane|Ln|Way|Court|Ct)\.?\b/i)?.[0]||null;
+ const cityMatch=text.match(/([A-Za-z .'-]+),\s*([A-Z]{2})\s+(\d{5}(?:-\d{4})?)/);
+ const email=text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0]||null;
+ const phone=text.match(/(?:\+?1[ .-]?)?\(?\d{3}\)?[ .-]?\d{3}[ .-]?\d{4}/)?.[0]||null;
+ const buyer={...(name?{name}:{}),...(street?{line1:street}:{}),...(cityMatch?{city:cityMatch[1].trim(),region:cityMatch[2],postal:cityMatch[3],country:'US'}:{}),...(email?{email}:{}),...(phone?{phone}:{})};
+ const fulfillment=/local pickup|buyer will pick up|pickup order/i.test(text)?'pickup':'ship';
+ return{text,marketplace,sale,sku,price,order_number:order,ship_by:ship?safeDate(ship):null,item_title:String(mail.subject||'Marketplace order').slice(0,250),buyer,fulfillment};
+}
+async function geminiEmailHints(text){
+ const key=process.env.GEMINI_API_KEY;if(!key)return null;
+ const model=process.env.GEMINI_MODEL||'gemini-2.5-flash-lite';
+ const res=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:`Extract only these fields from this marketplace sale email: item_title, order_number, ship_by (YYYY-MM-DD or null), buyer_name, buyer_email, buyer_phone, ship_line1, ship_line2, ship_city, ship_region, ship_postal, ship_country. Return JSON only. Do not infer missing values. Email:\n${text.slice(0,14000)}`}]}],generationConfig:{responseMimeType:'application/json',maxOutputTokens:300,temperature:0}})});
+ if(!res.ok)throw new Error(`Gemini email parse ${res.status}`);const data=await res.json();return JSON.parse(data.candidates?.[0]?.content?.parts?.[0]?.text||'{}');
+}
+async function handle(event){if(event.httpMethod!=='POST')return json(405,{error:'method_not_allowed'});if(event.headers['x-marketplace-secret']!==requireEnv('MARKETPLACE_EMAIL_SECRET'))return json(401,{error:'unauthorized'});try{const raw=Buffer.from(event.headers['x-raw-email-base64']||JSON.parse(event.body||'{}').raw||'','base64');if(raw.length>5_000_000)return json(413,{error:'email_too_large'});const parsed=await new PostalMime().parse(raw);const p=parseMail(parsed);if(p.sale&&(!p.buyer.line1||!p.order_number||!p.ship_by)&&process.env.GEMINI_API_KEY){try{const hints=await geminiEmailHints(p.text);p.item_title=hints.item_title||p.item_title;p.order_number=p.order_number||hints.order_number;p.ship_by=p.ship_by||hints.ship_by||null;p.buyer={...p.buyer,...Object.fromEntries(Object.entries({name:hints.buyer_name,email:hints.buyer_email,phone:hints.buyer_phone,line1:hints.ship_line1,line2:hints.ship_line2,city:hints.ship_city,region:hints.ship_region,postal:hints.ship_postal,country:hints.ship_country}).filter(([,v])=>v))};}catch{}}const sb=serviceClient();const {data:store}=await sb.from('stores').select('id').limit(1).single();if(!store)throw new Error('store_missing');const msg=parsed.messageId||createHash('sha256').update(raw).digest('hex');const {data:exists}=await sb.from('marketplace_email_sales').select('id').eq('store_id',store.id).eq('message_id',msg).maybeSingle();if(exists)return json(200,{duplicate:true});if(!p.sale){await sb.from('marketplace_email_sales').insert({store_id:store.id,message_id:msg,marketplace:p.marketplace,subject:parsed.subject,state:'ignored',reason:'Not a sale notice'});return json(200,{state:'ignored'});}let reason='SKU or sale price was not found with confidence';if(p.sku&&p.price){const {data:unit}=await sb.from('units').select('sku,title,state').eq('store_id',store.id).eq('sku',p.sku).maybeSingle();if(unit?.state==='available'){const r=await sb.rpc('marketplace_ingest_sale',{p_store:store.id,p_sku:p.sku,p_channel:p.marketplace,p_price_cents:p.price,p_order_number:p.order_number,p_message_id:msg,p_marketplace:p.marketplace,p_item_title:unit.title||p.item_title,p_ship_by:p.ship_by,p_fulfillment:p.fulfillment,p_buyer:p.buyer,p_confidence:0.99});if(!r.error)return json(200,{state:'matched',sku:p.sku});reason=r.error.message;}else reason='SKU did not match an available unit';}await sb.from('marketplace_email_sales').insert({store_id:store.id,message_id:msg,marketplace:p.marketplace,subject:parsed.subject,state:'needs_review',sku:p.sku,item_title:p.item_title,order_number:p.order_number,sale_price_cents:p.price,ship_by:p.ship_by,fulfillment:p.fulfillment,buyer:p.buyer,confidence:p.sku&&p.price?0.5:null,reason});return json(200,{state:'needs_review'});}catch(e){return json(500,{error:String(e).slice(0,300)});}}
+export const handler=wrapHandler('marketplace-email',handle);

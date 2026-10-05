@@ -1,5 +1,4 @@
 import { serviceClient, json, corsHeaders } from "../lib/server.mjs";
-import { withdrawOpenEbayTasks } from "../lib/ebay.mjs";
 import { wrapHandler } from "../lib/floor-log.mjs";
 
 async function sendResend({ to, subject, text }) {
@@ -43,7 +42,6 @@ async function handle(event) {
   }
 
   const sb = serviceClient();
-  await withdrawOpenEbayTasks().catch(() => undefined);
   await sb.rpc("enqueue_delist_nags");
   const { data: alerts, error } = await sb.rpc("peek_alerts", { p_limit: 50 });
   if (error) return json(500, { error: error.message });
