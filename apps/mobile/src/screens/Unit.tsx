@@ -18,6 +18,7 @@ import { floorCloud } from "@floor/cloud";
 import { ebayItemViewUrl } from "@floor/channels";
 import { Photos } from "../components/Photos";
 import { OnlineShipping } from "../components/OnlineShipping";
+import { MarketplacePrices } from "../components/MarketplacePrices";
 import { UnitCost } from "../components/UnitCost";
 import { DangerButton, MoneyField, Notice, SelectField, Spinner, TextField } from "../components/ui";
 import { openHtml } from "../files";
@@ -280,6 +281,7 @@ export function UnitScreen() {
 
       <div className="border-b border-floor-line py-3">
         <OnlineShipping sku={unit.sku} ensureOnline={ensureOnline} />
+        <MarketplacePrices sku={unit.sku} />
         <label className="mt-3 flex items-center gap-2">
           <input
             type="checkbox"

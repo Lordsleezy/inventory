@@ -33,6 +33,12 @@
   pretty_urls = false
 
 [[redirects]]
+  from = "/api/marketplace-prices"
+  to = "/.netlify/functions/marketplace-prices"
+  status = 200
+  force = true
+
+[[redirects]]
   from = "/oauth/go"
   to = "/.netlify/functions/oauth-go"
   status = 200

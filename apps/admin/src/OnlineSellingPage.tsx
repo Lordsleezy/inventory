@@ -29,6 +29,8 @@ export function OnlineSellingPage({ client, accessToken, stamp }: Props) {
   const [tax, setTax] = useState({ state: 'CA', outPct: '0', inPct: '', taxShipping: false });
   const [nums, setNums] = useState({ ship_max_weight_lb: '', ship_max_length_in: '', ship_max_length_girth_in: '', pickup_hold_hours: '' });
   const [shippingTiers, setShippingTiers] = useState<{ max_lb: number; cents: number }[]>([]);
+  const [marketMarkup, setMarketMarkup] = useState('2.00');
+  const [feeUpdatedAt, setFeeUpdatedAt] = useState('2026-10-05');
 
   const load = useCallback(async () => {
     const [a, b, c] = await Promise.all([client.rpc('portal_online_settings'), client.from('listing_checks').select('*').order('ran_at', { ascending: false }).limit(1), client.rpc('portal_ship_carriers')]);
@@ -43,7 +45,12 @@ export function OnlineSellingPage({ client, accessToken, stamp }: Props) {
     setNums({ ship_max_weight_lb: String(v.ship_max_weight_lb), ship_max_length_in: String(v.ship_max_length_in), ship_max_length_girth_in: String(v.ship_max_length_girth_in), pickup_hold_hours: String(v.pickup_hold_hours) });
     setTax({ state: v.tax_origin_state, outPct: String(v.tax_out_of_state_bps / 100), inPct: v.tax_in_state_ship_bps == null ? '' : String(v.tax_in_state_ship_bps / 100), taxShipping: v.tax_shipping });
     if (!b.error) setCheck((b.data?.[0] as Check) || null);
-  }, [client]);
+    try {
+      const res = await fetch(`${functionsBase}/api/marketplace-prices?config=1`, { headers: { Authorization: `Bearer ${accessToken}` } });
+      const pricing = await res.json();
+      if (res.ok) { setMarketMarkup((pricing.packing_markup_cents / 100).toFixed(2)); setFeeUpdatedAt(pricing.fee_config_updated_at); }
+    } catch { /* pricing configuration can be loaded after the function deploy */ }
+  }, [client, accessToken]);
   useEffect(() => { void load(); }, [load]);
 
   async function save() {
@@ -63,6 +70,17 @@ export function OnlineSellingPage({ client, accessToken, stamp }: Props) {
       await put('tax_in_state_ship_bps', tax.inPct.trim() === '' ? null : bps(tax.inPct));
       await put('tax_shipping', tax.taxShipping);
       setSaved('Saved. The website uses the new rules immediately.'); await load();
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    finally { setBusy(false); }
+  }
+  async function saveMarketplaceMarkup() {
+    const cents = Math.round(Number(marketMarkup) * 100);
+    if (!Number.isFinite(cents) || cents < 0) { setError('Packing markup must be a nonnegative amount.'); return; }
+    setBusy(true); setError(''); setSaved('');
+    try {
+      const { error: e } = await client.rpc('portal_set_marketplace_packing_markup', { p_markup_cents: cents });
+      if (e) throw e;
+      setSaved('Marketplace packing markup saved.');
     } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
     finally { setBusy(false); }
   }
@@ -115,6 +133,12 @@ export function OnlineSellingPage({ client, accessToken, stamp }: Props) {
         <p className="hint">Floor listable {check.counts.floor_listable ?? '—'} · Storefront {check.counts.storefront_view ?? '—'} · Website {check.counts.website ?? '—'} · Catalog feed {check.counts.catalog_feed ?? '—'}</p>
         {check.problems.length > 0 && <div className="inventory-listings">{check.problems.map((p, i) => <div key={i}><strong>SKU {p.sku ?? '—'}{p.title ? ` · ${p.title}` : ''}</strong><span>{p.reason}</span></div>)}</div>}
       </>}
+    </section>
+
+    <section className="panel"><h2>Marketplace pricing</h2>
+      <p>Fee configuration last updated: <strong>{feeUpdatedAt}</strong></p>
+      <p className="hint">To update fee rates, set the MARKETPLACE_FEE_CONFIG env var in Netlify.</p>
+      <div className="actions"><label>Packing markup ($ per item)<input inputMode="decimal" value={marketMarkup} onChange={e => setMarketMarkup(e.target.value)} /></label><button disabled={busy} onClick={() => void saveMarketplaceMarkup()}>Save markup</button></div>
     </section>
 
     <section className="panel"><h2>Order notifications</h2><label className="notes">Email every new online order, cancellation and listing-check problem to (one per line)<textarea rows={3} value={emails} onChange={e => setEmails(e.target.value)} /></label></section>
