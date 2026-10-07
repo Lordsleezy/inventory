@@ -87,7 +87,7 @@ export function EligibilityPage({ client, stamp }: Props) {
   async function saveRules() {
     setBusy(true); setError(''); setNotice('');
     try {
-      const next = {
+      const next: Record<string, unknown> = {
         ...draft,
         blocked_keywords: parseLines(String(draft.blocked_keywords_text ?? lines(draft.blocked_keywords))),
         blocked_categories: parseLines(String(draft.blocked_categories_text ?? lines(draft.blocked_categories))),
