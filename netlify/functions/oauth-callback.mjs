@@ -8,7 +8,7 @@ import { exchangeEbayCode, getSellerUsername, subscribeNotifications } from "../
 import { upsertEncryptedSquareTokens } from "../lib/square.mjs";
 import { paramsFromNetlifyEvent } from "../lib/oauth-params.mjs";
 import { wrapHandler } from "../lib/floor-log.mjs";
-import { ebayDisabled, ebayRequiredUsername } from "../lib/ebay-env.mjs";
+import { ebayDisabled, ebayOrdersOnly, ebayRequiredUsername } from "../lib/ebay-env.mjs";
 
 function deepLink(query) {
   const base = process.env.APP_DEEP_LINK || "floor://connections";
@@ -310,11 +310,13 @@ async function handle(event) {
         console.error("square_connections mirror failed", mirrorErr);
       }
     } else {
+      // Orders-only eBay must not flip channel_config to auto (that implies listing).
+      const mode = state.provider === "ebay" && ebayOrdersOnly() ? "off" : "auto";
       await sb.from("channel_config").upsert(
         {
           store_id: state.store_id,
           channel: state.provider,
-          mode: "auto",
+          mode,
           updated_at: new Date().toISOString(),
         },
         { onConflict: "store_id,channel" },
