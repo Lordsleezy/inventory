@@ -86,6 +86,11 @@ export async function handler(event) {
     const category=/\btoothbrush/i.test(identity.title||'')?'Electric Toothbrushes':
       /\b(?:mini|string|christmas) lights\b/i.test(identity.title||'')?'String Lights':
       existing.data.category||found.category||null;
+    const powered=typeof found.requires_power==='boolean'?found.requires_power:
+      typeof found.is_electrical==='boolean'?found.is_electrical:
+      /\b(rechargeable|electric|electronic|cordless|battery|sonicare|toothbrush|bluetooth|vacuum|laptop)\b/i.test(`${identity.title||''} ${category||''}`);
+    const camera=typeof found.is_camera==='boolean'?found.is_camera:
+      /\b(camera|dslr|mirrorless|camcorder|gopro|webcam)\b/i.test(`${identity.title||''} ${category||''}`);
     const patch={category,
       condition:existing.data.condition||found.condition||null,
       defect_notes:existing.data.defect_notes||found.condition_notes||null,
@@ -98,7 +103,11 @@ export async function handler(event) {
       listing_specs:specs,msrp_cents:retail.msrp_cents??existing.data.msrp_cents,
       ...Object.fromEntries(Object.entries(accepted).filter(([key])=>existing.data[key]==null)),
       dims_source:existing.data.dims_source||dimsSource,
-      model:model||cleanModel(existing.data.model)};
+      model:model||cleanModel(existing.data.model),
+      requires_power:powered,
+      is_electrical:typeof found.is_electrical==='boolean'?found.is_electrical:powered,
+      is_camera:camera,
+      has_manufacturer_photos:existing.data.has_manufacturer_photos||false};
     if(model){patch.ebay_item_specifics.MPN=model;patch.listing_specs.ebay_aspects.MPN=model}
     const saved=await sb.from('units').update(patch).eq('store_id',job.store_id).eq('sku',job.sku);
     if(saved.error)throw saved.error;

@@ -43,11 +43,18 @@ export function UnitScreen() {
   const [ebayUrl, setEbayUrl] = useState<string | null>(null);
   const [ebayBusy, setEbayBusy] = useState(false);
   const [enriched, setEnriched] = useState<Record<string, any>>({});
+  const [eligibility, setEligibility] = useState<{ channel: string; status: string; reason: string }[]>([]);
 
   const loadEnriched = useCallback(async () => {
     if (!online) return;
-    const { data } = await floorCloud().from(admin ? 'units' : 'units_pos').select('*').eq('sku', sku).maybeSingle();
+    const [{ data }, elig] = await Promise.all([
+      floorCloud().from(admin ? 'units' : 'units_pos').select('*').eq('sku', sku).maybeSingle(),
+      floorCloud().rpc('unit_marketplace_eligibility', { p_sku: sku }),
+    ]);
     if (data) setEnriched(data as Record<string, any>);
+    if (!elig.error && Array.isArray(elig.data)) {
+      setEligibility(elig.data as { channel: string; status: string; reason: string }[]);
+    }
   }, [admin, online, sku]);
 
   useEffect(() => {
@@ -293,6 +300,23 @@ export function UnitScreen() {
         <p className="mt-1 text-quiet text-floor-mute">
           Puts this item on the website. Needs at least one photo.
         </p>
+        {eligibility.length > 0 ? (
+          <div className="mt-3 space-y-1">
+            <p className="text-quiet">Marketplace eligibility</p>
+            {eligibility.filter((row) => ['depop', 'ebay', 'whatnot', 'mercari', 'facebook', 'website'].includes(row.channel)).map((row) => (
+              <p key={row.channel} className={`text-quiet ${row.status === 'allow' ? 'text-floor-mute' : 'text-floor-danger'}`}>
+                {row.reason}
+              </p>
+            ))}
+          </div>
+        ) : null}
+        {(enriched.requires_power != null || enriched.is_camera != null) ? (
+          <p className="mt-2 text-quiet text-floor-mute">
+            Power: {enriched.requires_power ? 'yes' : enriched.requires_power === false ? 'no' : 'unknown'}
+            {enriched.is_camera ? ' · camera' : ''}
+            {enriched.is_electrical ? ' · electrical' : ''}
+          </p>
+        ) : null}
       </div>
 
       <TextField label="Brand" value={unit.brand} onCommit={(v) => edit("brand", v ?? "")} />

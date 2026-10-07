@@ -17,7 +17,14 @@ async function syncOne(sb, row) {
  const {data:unit}=await sb.from('units').select('sku,title,brand,model,upc,condition,ask_cents,msrp_cents,listing_body,ai_description,defect_notes,package_weight_lb,package_length_in,package_width_in,package_height_in,state,show_on_website').eq('store_id',row.store_id).eq('sku',row.sku).maybeSingle();
  const {data:pub}=await sb.from('storefront_items').select('sku,title,brand,model,condition,ask_cents,photo_paths,listing_body,shippable').eq('store_id',row.store_id).eq('sku',row.sku).maybeSingle();
  const base=`accounts/${process.env.GOOGLE_MERCHANT_ACCOUNT_ID}/productInputs`;
- if(row.action==='delete'||!unit||!pub||unit.state!=='available'||!unit.show_on_website||!unit.ask_cents||!pub.photo_paths?.length||pub.shippable!==true){
+ let websiteOk=true;
+ if(unit){
+  const {data:elig}=await sb.rpc('evaluate_marketplace_eligibility',{p_store:row.store_id,p_sku:row.sku,p_channel:'website'});
+  const row0=Array.isArray(elig)?elig[0]:elig;
+  websiteOk=row0?.status==='allow';
+  if(!websiteOk)await sb.rpc('enqueue_eligibility_review',{p_store:row.store_id,p_sku:row.sku,p_channel:'website',p_reason:row0?.reason||'Website eligibility blocked'});
+ }
+ if(row.action==='delete'||!unit||!pub||unit.state!=='available'||!unit.show_on_website||!websiteOk||!unit.ask_cents||!pub.photo_paths?.length||pub.shippable!==true){
    const existing=await sb.from('google_product_index').select('sku').eq('store_id',row.store_id).eq('sku',row.sku).maybeSingle();
    if(existing.data) { await merchantRequest(`products/v1/${base}/${skuId(row.sku)}?dataSource=${encodeURIComponent(`accounts/${process.env.GOOGLE_MERCHANT_ACCOUNT_ID}/dataSources/${process.env.GOOGLE_DATA_SOURCE_ID}`)}`,'DELETE'); await sb.from('google_product_index').delete().eq('store_id',row.store_id).eq('sku',row.sku); }
    await sb.from('google_sync_queue').delete().eq('store_id',row.store_id).eq('sku',row.sku); return 'deleted';
