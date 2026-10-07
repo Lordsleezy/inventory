@@ -756,6 +756,12 @@ export async function listSku(storeId, sku, draft = null) {
   if (unit.ask_cents == null || unit.ask_cents <= 0) {
     throw new Error(`SKU ${sku} needs a price before it can go on eBay.`);
   }
+  const { error: policyError } = await sb.rpc("assert_channel_eligible", {
+    p_store: storeId,
+    p_sku: sku,
+    p_channel: "ebay",
+  });
+  if (policyError) throw new Error(policyError.message);
   const images = draft?.imageUrls?.length ? draft.imageUrls : await photoUrls(storeId, sku);
   const epid = draft ? null : await catalogEpid(storeId, unit);
   const loc = await ensureLocation(storeId);

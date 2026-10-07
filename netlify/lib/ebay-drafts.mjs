@@ -18,6 +18,7 @@ import {
 } from "./ebay-catalog.mjs";
 import { inventoryConditionEnum, mapFloorCondition } from "./ebay-conditions.mjs";
 import { ebayDraftEligibility } from "./ebay-eligibility.mjs";
+import { evaluateMarketplaceEligibility } from "./marketplace-eligibility.mjs";
 import { ensureMarket, summarizeMarket } from "./ebay-market.mjs";
 import {
   addressTo,
@@ -270,7 +271,7 @@ async function unitsForDrafts(sb, storeId) {
   for (let from = 0; ; from += 500) {
     const { data, error } = await sb
       .from("units")
-      .select("store_id,sku,title,brand,model,upc,category,condition,test_status,defect_notes,ask_cents,state,listing_body,listing_specs,ebay_title,ebay_category,ebay_item_specifics,package_length_in,package_width_in,package_height_in,package_weight_lb")
+      .select("store_id,sku,title,brand,model,upc,category,condition,test_status,defect_notes,ask_cents,state,listing_body,listing_specs,ebay_title,ebay_category,ebay_item_specifics,package_length_in,package_width_in,package_height_in,package_weight_lb,requires_power,is_electrical,is_camera,has_stock_photos,has_ai_images,has_manufacturer_photos")
       .eq("store_id", storeId)
       .eq("state", "available")
       .gt("ask_cents", 0)
@@ -306,6 +307,29 @@ async function photosBySku(sb, storeId, skus) {
   return map;
 }
 
+async function loadEbayPolicyContext(sb, storeId, skus) {
+  const [{ data: rule }, { data: strikes }, { data: overrides }] = await Promise.all([
+    sb.from("marketplace_policy_rules").select("enabled,rules").eq("store_id", storeId).eq("channel", "ebay").maybeSingle(),
+    sb.from("marketplace_policy_strikes").select("sku").eq("store_id", storeId).eq("channel", "ebay").in("sku", skus.length ? skus : ["__none__"]),
+    sb.from("unit_marketplace_overrides").select("sku,decision,note").eq("store_id", storeId).eq("channel", "ebay").in("sku", skus.length ? skus : ["__none__"]),
+  ]);
+  return {
+    rules: rule?.enabled === false ? { enabled: false } : (rule?.rules || { enabled: true }),
+    strikes: new Set((strikes || []).map((r) => r.sku)),
+    overrides: new Map((overrides || []).map((r) => [r.sku, r])),
+  };
+}
+
+function ebayPolicyOk(unit, ctx) {
+  const result = evaluateMarketplaceEligibility(unit, ctx.rules, {
+    channel: "ebay",
+    channelLabel: "eBay",
+    strike: ctx.strikes.has(unit.sku),
+    override: ctx.overrides.get(unit.sku) || null,
+  });
+  return result.status === "allow";
+}
+
 export async function syncDrafts(storeId, { quoteLimit = 8, pace = false } = {}) {
   const sb = serviceClient();
   const settings = await loadEbaySettings(storeId);
@@ -319,13 +343,15 @@ export async function syncDrafts(storeId, { quoteLimit = 8, pace = false } = {})
   const photos = await photosBySku(sb, storeId, units.map((unit) => unit.sku));
   const previous = new Map((existingRes.data || []).map((row) => [row.sku, row]));
   const listings = new Map((listingRes.data || []).map((row) => [row.sku, row]));
+  const policyCtx = await loadEbayPolicyContext(sb, storeId, units.map((u) => u.sku));
   const keep = [];
   for (const unit of units) {
     const paths = photos.get(unit.sku) || [];
     const gate = ebayDraftEligibility({ ...unit, photo_count: paths.length }, settings);
+    const policy = ebayPolicyOk(unit, policyCtx);
     const listing = listings.get(unit.sku);
     const live = listing?.status === "listed";
-    if (!gate.ok && !live) continue;
+    if ((!gate.ok || !policy) && !live) continue;
     keep.push(draftFromUnit({ ...unit, store_id: storeId }, paths, listing, previous.get(unit.sku), settings));
   }
   const keepSkus = new Set(keep.map((row) => row.sku));

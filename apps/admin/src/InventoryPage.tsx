@@ -12,6 +12,7 @@ type Row = {
 type Listing = { channel: string; status: string; listing_id: string | null };
 type Photo = { id: number; path: string; is_primary: boolean };
 type Sale = { sold_at: string; price_cents: number; actor_name: string; receipt_no: string };
+type Elig = { channel: string; status: string; reason: string; source: string; strike?: boolean; override?: { decision: string; note: string } | null };
 type Detail = { unit: Record<string, unknown>; photos: Photo[]; listings: Listing[]; sales: Sale[] };
 type List = { items: Row[]; totals: { unit_count: number; retail_cents: number; cost_cents: number; missing_cost: number } };
 type Props = { client: SupabaseClient; storeId: string; money: (n: number) => string; stamp: (s: string) => string };
@@ -36,6 +37,7 @@ export function InventoryPage({ client, storeId, money, stamp }: Props) {
   const [list, setList] = useState<List | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<Detail | null>(null);
+  const [elig, setElig] = useState<Elig[]>([]);
   const [urls, setUrls] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -67,16 +69,23 @@ export function InventoryPage({ client, storeId, money, stamp }: Props) {
   }, [client, query, status, unfinished, sort, offset, refresh]);
 
   useEffect(() => {
-    if (!selected) { setDetail(null); return; }
-    let active = true; setDetail(null);
+    if (!selected) { setDetail(null); setElig([]); return; }
+    let active = true; setDetail(null); setElig([]);
     void (async () => {
       try {
-        const { data, error: e } = await client.rpc('portal_inventory_detail', { p_sku: selected });
+        const [{ data, error: e }, eligRes] = await Promise.all([
+          client.rpc('portal_inventory_detail', { p_sku: selected }),
+          client.rpc('portal_unit_eligibility', { p_sku: selected }),
+        ]);
         if (e) throw e;
         if (!data) throw new Error('Unit not found');
         const next = data as Detail;
         const signed = await sign(next.photos.map(x => x.path)).catch(() => ({}));
-        if (active) { setDetail(next); setUrls(prev => ({ ...prev, ...signed })); }
+        if (active) {
+          setDetail(next);
+          setUrls(prev => ({ ...prev, ...signed }));
+          if (!eligRes.error) setElig((eligRes.data || []) as Elig[]);
+        }
       } catch (e) { if (active) setError(e instanceof Error ? e.message : String(e)); }
     })();
     return () => { active = false; };
@@ -124,6 +133,8 @@ export function InventoryPage({ client, storeId, money, stamp }: Props) {
       {!detail ? <p>Loading…</p> : <>
         <h3>Photos</h3>{detail.photos.length ? <div className="inventory-gallery">{detail.photos.map(p => urls[p.path] ? <img src={urls[p.path]} alt={`Unit ${selected}`} key={p.id} loading="lazy" /> : <div className="inventory-photo" key={p.id}>Photo unavailable</div>)}</div> : <p>No photos recorded.</p>}
         <UnitShippingPanel client={client} sku={selected} />
+        <h3>Marketplace eligibility</h3>
+        {elig.length === 0 ? <p className="hint">No eligibility rules loaded.</p> : <div className="inventory-listings">{elig.map((row) => <div key={row.channel}><strong>{row.channel} · {row.status}{row.strike ? ' · STRIKE' : ''}</strong><span>{row.reason}</span></div>)}</div>}
         <h3>Unit fields</h3><dl className="inventory-fields">{Object.entries(detail.unit).map(([key, value]) => <div key={key}><dt>{key.replace(/_/g, ' ')}</dt><dd>{value === null ? '—' : key.endsWith('_cents') ? money(Number(value)) : typeof value === 'boolean' ? (value ? 'Yes' : 'No') : typeof value === 'object' ? JSON.stringify(value) : String(value)}</dd></div>)}</dl>
         <h3>Channel listings</h3>{detail.listings.length ? <div className="inventory-listings">{detail.listings.map(l => <div key={l.channel}><strong>{l.channel}</strong><span>{l.status.replace(/_/g, ' ')}{l.listing_id ? ` · ${l.listing_id}` : ''}</span></div>)}</div> : <p>No channel listings recorded.</p>}
         <h3>Sales</h3>{detail.sales.length ? <div className="inventory-listings">{detail.sales.map(s => <div key={s.receipt_no}><strong>{stamp(s.sold_at)} · {money(s.price_cents)} merchandise</strong><span>Rang up by {s.actor_name} · Receipt {s.receipt_no}</span></div>)}</div> : <p>No sale recorded.</p>}
