@@ -137,6 +137,35 @@ export function tradingOrderToIngest(order) {
   };
 }
 
+export async function getSellerUsername(token) {
+  const { api } = ebayHosts(process.env.EBAY_ENV);
+  const body = `<?xml version="1.0" encoding="utf-8"?>
+<GetUserRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <ErrorLanguage>en_US</ErrorLanguage>
+  <DetailLevel>ReturnSummary</DetailLevel>
+</GetUserRequest>`;
+  const res = await fetch(`${api}/ws/api.dll`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "text/xml",
+      "X-EBAY-API-COMPATIBILITY-LEVEL": "1315",
+      "X-EBAY-API-CALL-NAME": "GetUser",
+      "X-EBAY-API-SITEID": "0",
+      "X-EBAY-API-IAF-TOKEN": token,
+    },
+    body,
+  });
+  const xml = await res.text();
+  const ack = xmlTag(xml, "Ack");
+  if (!/success|warning/i.test(ack)) {
+    const longs = xmlAll(xml, "LongMessage");
+    const shorts = xmlAll(xml, "ShortMessage");
+    throw new Error([...longs, ...shorts].filter(Boolean).join(" ") || xml.slice(0, 400) || `GetUser HTTP ${res.status}`);
+  }
+  const userBlock = xmlBlocks(xml, "User")[0] || xml;
+  return xmlTag(userBlock, "UserID") || xmlTag(xml, "UserID") || "";
+}
+
 export async function getSellerOrders(token, days = 7) {
   const { api } = ebayHosts(process.env.EBAY_ENV);
   const body = `<?xml version="1.0" encoding="utf-8"?>

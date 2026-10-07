@@ -1,6 +1,16 @@
 import { createHash } from "node:crypto";
 import { decryptSecret, encryptSecret, requireEnv, serviceClient } from "./server.mjs";
-import { EBAY_OAUTH_SCOPES, ebayHosts, ebayItemViewUrl, ebayRuName, ebayDisabled, requireEbayEnabled } from "./ebay-env.mjs";
+import {
+  EBAY_OAUTH_SCOPES,
+  ebayHosts,
+  ebayItemViewUrl,
+  ebayOrderViewUrl,
+  ebayRuName,
+  ebayDisabled,
+  ebayOrdersOnly,
+  requireEbayEnabled,
+  requireEbayListingEnabled,
+} from "./ebay-env.mjs";
 import { formatEbayError, locationKey } from "./ebay-errors.mjs";
 import { publicPhotoUrl } from "./ebay-photos.mjs";
 import { composeChannelDescription, parseListingSpecs } from "./listing-copy.mjs";
@@ -13,13 +23,14 @@ import { ebayFeeCents, ebayOrderAmounts, ebayShipTo } from "./ebay-price.mjs";
 import {
   compactShippingCatalog,
   getSellerOrders,
+  getSellerUsername,
   getShippingServiceDetails,
   pickApplianceShipping,
   tradingOrderIsSale,
   tradingOrderToIngest,
 } from "./ebay-trading.mjs";
 
-export { EBAY_OAUTH_SCOPES, ebayHosts, ebayItemViewUrl, ebayRuName, formatEbayError };
+export { EBAY_OAUTH_SCOPES, ebayHosts, ebayItemViewUrl, ebayOrderViewUrl, ebayRuName, formatEbayError, getSellerUsername };
 
 export function marketplaceId() {
   return process.env.EBAY_MARKETPLACE_ID || "EBAY_US";
@@ -733,6 +744,7 @@ function listingCopy(unit) {
 }
 
 export async function listSku(storeId, sku, draft = null) {
+  requireEbayListingEnabled();
   setTrace({ storeId, sku, source: "ebay-list" });
   const sb = serviceClient();
   const { data: unit, error } = await sb.from("units").select("*").eq("store_id", storeId).eq("sku", sku).maybeSingle();
@@ -889,6 +901,10 @@ export async function listSku(storeId, sku, draft = null) {
 }
 
 export async function withdrawSku(storeId, sku) {
+  if (ebayOrdersOnly()) {
+    return { sku, skipped: true, reason: "orders_only" };
+  }
+  requireEbayListingEnabled();
   const sb = serviceClient();
   const { data: row } = await sb
     .from("listings")
@@ -990,7 +1006,7 @@ async function emailEndFailure(sb, storeId, sku, message) {
 }
 
 export async function withdrawOpenEbayTasks() {
-  if (ebayDisabled()) return [];
+  if (ebayDisabled() || ebayOrdersOnly()) return [];
   const sb = serviceClient();
   const { data, error } = await sb
     .from("delist_tasks")
@@ -1032,8 +1048,9 @@ function orderCents(order) {
 
 export async function ingestEbayOrder(storeId, order) {
   const orderId = order?.orderId;
-  const sku = orderSku(order);
-  if (!orderId || !sku) return { skipped: true };
+  if (!orderId) return { skipped: true, reason: "missing_order_id" };
+  const rawSku = orderSku(order);
+  const sku = rawSku || "UNMATCHED";
   const sb = serviceClient();
   const seen = await sb
     .from("channel_orders")
@@ -1043,25 +1060,57 @@ export async function ingestEbayOrder(storeId, order) {
     .eq("order_id", orderId)
     .maybeSingle();
   if (seen.data) return { skipped: true, sku, orderId };
+  const paidDup = await sb
+    .from("web_orders")
+    .select("id")
+    .eq("store_id", storeId)
+    .eq("payment_id", `ebay:${orderId}`)
+    .maybeSingle();
+  if (paidDup.data) return { skipped: true, sku, orderId, reason: "web_order_exists" };
 
-  const { data: sale, error } = await sb.rpc("finalize_sale", {
-    p_sku: sku,
-    p_channel: "ebay",
-    p_price_cents: orderCents(order) || 0,
-    p_payment_method: "ebay",
-    p_payment_id: `ebay:${orderId}`,
-    p_note: "eBay order",
-    p_tax_cents: 0,
-    p_approval_id: null,
-  });
-  if (error) {
-    if (/unit_not_sellable|duplicate key|23505/i.test(error.message)) {
-      await withdrawSku(storeId, sku).catch(() => undefined);
-    }
-    throw new Error(error.message);
-  }
   const amounts = ebayOrderAmounts(order);
-  const itemCents = amounts.itemCents || orderCents(order);
+  const itemCents = amounts.itemCents || orderCents(order) || 0;
+  const ship = ebayShipTo(order);
+  const title =
+    order?.lineItems?.[0]?.title ||
+    order?.lineItems?.[0]?.legacyItemId ||
+    `eBay order ${orderId}`;
+
+  let sale = null;
+  let matchStatus = "unmatched";
+  if (rawSku) {
+    const { data: unit } = await sb
+      .from("units")
+      .select("sku,state,title")
+      .eq("store_id", storeId)
+      .eq("sku", rawSku)
+      .maybeSingle();
+    if (unit?.state === "available" || unit?.state === "reserved") {
+      const { data, error } = await sb.rpc("finalize_sale", {
+        p_sku: rawSku,
+        p_channel: "ebay",
+        p_price_cents: itemCents,
+        p_payment_method: "ebay",
+        p_payment_id: `ebay:${orderId}`,
+        p_note: "eBay order",
+        p_tax_cents: 0,
+        p_approval_id: null,
+      });
+      if (error) {
+        if (/unit_not_sellable|duplicate key|23505/i.test(error.message)) {
+          matchStatus = "already_sold";
+        } else {
+          throw new Error(error.message);
+        }
+      } else {
+        sale = data;
+        matchStatus = "matched";
+      }
+    } else if (unit) {
+      matchStatus = "already_sold";
+    }
+  }
+
   const { data: settingRows } = await sb
     .from("store_settings")
     .select("key,value")
@@ -1070,13 +1119,18 @@ export async function ingestEbayOrder(storeId, order) {
   const setting = Object.fromEntries((settingRows || []).map((row) => [row.key, row.value]));
   const feePct = Number(setting.ebay_fee_pct ?? 13.25);
   const perOrder = Number(setting.ebay_per_order_cents ?? 40);
-  const { data: draft } = await sb
-    .from("ebay_drafts")
-    .select("shipping_mode,label_cents,shipping_buffer_cents")
-    .eq("store_id", storeId)
-    .eq("sku", sku)
-    .maybeSingle();
-  const baked = draft?.shipping_mode === "free" ? Number(draft.label_cents || 0) + Number(draft.shipping_buffer_cents || 0) : 0;
+  const feeCents = ebayFeeCents(itemCents, feePct, perOrder);
+  let baked = 0;
+  if (rawSku) {
+    const { data: draft } = await sb
+      .from("ebay_drafts")
+      .select("shipping_mode,label_cents,shipping_buffer_cents")
+      .eq("store_id", storeId)
+      .eq("sku", rawSku)
+      .maybeSingle();
+    baked = draft?.shipping_mode === "free" ? Number(draft.label_cents || 0) + Number(draft.shipping_buffer_cents || 0) : 0;
+  }
+
   await sb.from("channel_orders").insert({
     store_id: storeId,
     provider: "ebay",
@@ -1084,14 +1138,14 @@ export async function ingestEbayOrder(storeId, order) {
     sku,
     sale_id: sale?.id ?? null,
     item_cents: itemCents,
-    fee_cents: ebayFeeCents(itemCents, feePct, perOrder),
+    fee_cents: feeCents,
     baked_ship_cents: baked,
     buyer_user_id: order?.buyer?.userId || null,
     buyer_username: order?.buyer?.username || null,
     buyer_eias_token: order?.buyer?.eiasToken || null,
   });
-  const ship = ebayShipTo(order);
-  await sb.from("web_orders").insert({
+
+  const { error: orderError } = await sb.from("web_orders").insert({
     store_id: storeId,
     sku,
     sale_id: sale?.id ?? null,
@@ -1114,22 +1168,28 @@ export async function ingestEbayOrder(storeId, order) {
     total_cents: itemCents + amounts.shipCents,
     payment_id: `ebay:${orderId}`,
     payment_env: process.env.EBAY_ENV === "production" ? "production" : "sandbox",
-  }).then(({ error: orderError }) => {
-    if (orderError) console.log("ebay_packing_order", orderError.message);
+    match_status: matchStatus,
+    marketplace_fee_cents: feeCents,
+    marketplace_title: String(title).slice(0, 250),
   });
-  await sb.from("ebay_drafts").delete().eq("store_id", storeId).eq("sku", sku);
-  await sb.from("listings").upsert(
-    {
-      store_id: storeId,
-      sku,
-      channel: "ebay",
-      status: "delisted",
-      delisted_at: new Date().toISOString(),
-    },
-    { onConflict: "store_id,sku,channel" },
-  );
-  await withdrawSku(storeId, sku).catch(() => undefined);
-  return { sku, orderId, saleId: sale?.id };
+  if (orderError) console.log("ebay_packing_order", orderError.message);
+
+  if (matchStatus === "matched" && rawSku) {
+    await sb.from("ebay_drafts").delete().eq("store_id", storeId).eq("sku", rawSku);
+    await sb.from("listings").upsert(
+      {
+        store_id: storeId,
+        sku: rawSku,
+        channel: "ebay",
+        status: "delisted",
+        delisted_at: new Date().toISOString(),
+      },
+      { onConflict: "store_id,sku,channel" },
+    );
+    // Orders-only: do not end the eBay listing via API (Vendoo / eBay handle quantity).
+    if (!ebayOrdersOnly()) await withdrawSku(storeId, rawSku).catch(() => undefined);
+  }
+  return { sku, orderId, saleId: sale?.id ?? null, matchStatus };
 }
 
 function fulfillmentOrdersPath() {
@@ -1179,8 +1239,8 @@ async function listedSoldBySku(storeId) {
 async function ingestFrom(storeId, order, source, bag) {
   const sku = orderSku(order);
   const orderId = order?.orderId;
-  if (!orderId || !sku) return;
-  if (bag.skus.has(sku) || bag.orders.has(orderId)) return;
+  if (!orderId) return;
+  if (bag.orders.has(orderId)) return;
   try {
     const row = await ingestEbayOrder(storeId, order);
     bag.results.push({ ...row, source });
@@ -1189,7 +1249,7 @@ async function ingestFrom(storeId, order, source, bag) {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (/unit_not_sellable|duplicate key|23505/i.test(message)) {
-      bag.skus.add(sku);
+      if (sku) bag.skus.add(sku);
       bag.results.push({ sku, orderId, source, skipped: true, reason: "already_sold" });
       return;
     }
@@ -1210,12 +1270,14 @@ export async function pollEbayOrders(storeId) {
 
   let soldQty = {};
   let extras = [];
-  try {
-    const listed = await listedSoldBySku(storeId);
-    soldQty = listed.soldQty;
-    extras = listed.extras;
-  } catch (err) {
-    bag.results.push({ source: "sold_quantity", error: err instanceof Error ? err.message : String(err) });
+  if (!ebayOrdersOnly()) {
+    try {
+      const listed = await listedSoldBySku(storeId);
+      soldQty = listed.soldQty;
+      extras = listed.extras;
+    } catch (err) {
+      bag.results.push({ source: "sold_quantity", error: err instanceof Error ? err.message : String(err) });
+    }
   }
 
   try {
@@ -1240,6 +1302,14 @@ export async function pollEbayOrders(storeId) {
       bag,
     );
   }
+
+  const sb = serviceClient();
+  await sb.from("connections").update({ updated_at: new Date().toISOString(), last_error: null })
+    .eq("store_id", storeId).eq("provider", "ebay");
+  await sb.from("store_settings").upsert(
+    { store_id: storeId, key: "ebay_last_sync_at", value: new Date().toISOString() },
+    { onConflict: "store_id,key" },
+  );
   return bag.results;
 }
 
@@ -1259,11 +1329,69 @@ export async function pollAllStores() {
   return out;
 }
 
+export async function disconnectEbay(storeId) {
+  const sb = serviceClient();
+  const { error } = await sb.from("connections").upsert({
+    store_id: storeId,
+    provider: "ebay",
+    status: "disconnected",
+    token_ciphertext: null,
+    refresh_ciphertext: null,
+    scopes: null,
+    account_label: null,
+    expires_at: null,
+    connected_at: null,
+    last_error: null,
+    updated_at: new Date().toISOString(),
+  });
+  if (error) throw new Error(error.message);
+  await sb.from("channel_config").upsert(
+    { store_id: storeId, channel: "ebay", mode: "off", updated_at: new Date().toISOString() },
+    { onConflict: "store_id,channel" },
+  );
+  return { ok: true };
+}
+
+export async function ebayConnectionStatus(storeId) {
+  const sb = serviceClient();
+  const { data: conn } = await sb
+    .from("connections")
+    .select("status,account_label,connected_at,updated_at,expires_at,last_error,scopes")
+    .eq("store_id", storeId)
+    .eq("provider", "ebay")
+    .maybeSingle();
+  const { data: sync } = await sb
+    .from("store_settings")
+    .select("value")
+    .eq("store_id", storeId)
+    .eq("key", "ebay_last_sync_at")
+    .maybeSingle();
+  let lastSync = null;
+  try {
+    lastSync = typeof sync?.value === "string" ? JSON.parse(sync.value) : sync?.value ?? null;
+  } catch {
+    lastSync = sync?.value ?? null;
+  }
+  return {
+    connected: conn?.status === "connected",
+    username: conn?.account_label || null,
+    connectedAt: conn?.connected_at || null,
+    lastSyncAt: lastSync,
+    expiresAt: conn?.expires_at || null,
+    lastError: conn?.last_error || null,
+    scopes: conn?.scopes || [],
+    ordersOnly: ebayOrdersOnly(),
+    disabled: ebayDisabled(),
+    requiredUsername: process.env.EBAY_REQUIRED_USERNAME || "pgg124-5",
+  };
+}
+
 export function notificationChallenge(challengeCode, endpoint, verificationToken) {
   return createHash("sha256").update(challengeCode + verificationToken + endpoint).digest("hex");
 }
 
 export async function subscribeNotifications(storeId) {
+  if (ebayOrdersOnly()) return { skipped: true, reason: "orders_only" };
   const endpoint = requireEnv("EBAY_NOTIFICATION_ENDPOINT");
   const token = requireEnv("EBAY_NOTIFICATION_TOKEN");
   const dests = await ebayFetch(storeId, "GET", "/commerce/notification/v1/destination");

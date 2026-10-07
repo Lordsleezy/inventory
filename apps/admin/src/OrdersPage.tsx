@@ -4,6 +4,19 @@ import { LabelDialog } from './LabelDialog';
 
 const functionsBase = (import.meta.env.VITE_FLOOR_FUNCTIONS_URL || 'https://inventoryobi.netlify.app').replace(/\/$/, '');
 
+const CHANNEL_LABEL: Record<string, string> = {
+  website: 'Website',
+  ebay: 'eBay',
+  whatnot: 'Whatnot',
+  depop: 'Depop',
+  mercari: 'Mercari',
+  vendoo: 'Vendoo',
+  facebook: 'Facebook',
+  poshmark: 'Poshmark',
+  etsy: 'Etsy',
+  other: 'Other',
+};
+
 export type WebOrder = {
   id: string; order_no: string | null; sku: string; title: string; status: string; fulfillment: 'ship' | 'pickup'; channel?: string;
   buyer_name: string | null; buyer_email: string | null; buyer_phone: string | null;
@@ -15,6 +28,11 @@ export type WebOrder = {
   refund_requested_at: string | null; cancel_source: string | null; cancel_reason: string | null; canceled_at: string | null;
   shipping_rate: { source?: string; days?: number | null } | null;
   package: { length_in: number | null; width_in: number | null; height_in: number | null; weight_lb: number | null };
+  match_status?: string | null;
+  marketplace_fee_cents?: number | null;
+  fee_cents?: number | null;
+  marketplace_url?: string | null;
+  listed_on?: string[] | null;
 };
 type Props = { client: SupabaseClient; accessToken: string; money: (n: number) => string; stamp: (s: string) => string };
 
@@ -24,6 +42,17 @@ function timeLeft(deadline: string | null, now: number) {
   if (ms <= 0) return 'Deadline passed — auto-cancel pending';
   const h = Math.floor(ms / 3600000), m = Math.floor((ms % 3600000) / 60000);
   return h >= 24 ? `${Math.floor(h / 24)}d ${h % 24}h left` : `${h}h ${m}m left`;
+}
+
+function channelLabel(channel?: string | null) {
+  if (!channel) return 'Website';
+  return CHANNEL_LABEL[channel.toLowerCase()] || channel;
+}
+
+function otherStores(o: WebOrder) {
+  const listed = (o.listed_on || []).map((x) => x.toLowerCase()).filter(Boolean);
+  const self = (o.channel || '').toLowerCase();
+  return listed.filter((c) => c !== self && c !== 'website' && c !== 'ebay');
 }
 
 export function OrdersPage({ client, accessToken, money, stamp }: Props) {
@@ -76,6 +105,15 @@ Shippo refunds the label cost, the label expense is reversed, and you can buy a 
     if (reason === null) return;
     void act(o.id, 'cancel_refund', { reason });
   }
+  async function matchSku(o: WebOrder) {
+    const sku = window.prompt(`Link this ${channelLabel(o.channel)} order to a Floor SKU.\n\nOrder ${o.order_no || o.id}`, o.sku === 'UNMATCHED' ? '' : o.sku);
+    if (sku == null || !sku.trim()) return;
+    setBusy(o.id + 'match'); setError('');
+    const { error: e } = await client.rpc('portal_match_web_order', { p_order: o.id, p_sku: sku.trim() });
+    if (e) setError(e.message);
+    else await load();
+    setBusy(null);
+  }
 
   const groups = useMemo(() => {
     const list = orders || [];
@@ -87,13 +125,17 @@ Shippo refunds the label cost, the label expense is reversed, and you can buy a 
     };
   }, [orders]);
 
-const head = (o: WebOrder) => <div className="ticket-top"><strong>{o.channel && o.channel !== 'website' ? `${o.channel} ` : ''}{o.order_no || 'Order'} · {money(o.total_cents)}</strong><span>{o.paid_at ? stamp(o.paid_at) : stamp(o.created_at)}{o.channel && o.channel !== 'website' && <b className="badge"> {o.channel.toUpperCase()}</b>}{o.payment_env === 'sandbox' && <b className="badge"> SANDBOX</b>}</span></div>;
+  const fee = (o: WebOrder) => o.fee_cents ?? o.marketplace_fee_cents;
+  const head = (o: WebOrder) => <div className="ticket-top"><strong>{channelLabel(o.channel)} {o.marketplace_url && o.order_no ? <a href={o.marketplace_url} target="_blank" rel="noreferrer">{o.order_no}</a> : (o.order_no || 'Order')} · {money(o.total_cents)}</strong><span>{o.paid_at ? stamp(o.paid_at) : stamp(o.created_at)}<b className="badge"> {channelLabel(o.channel).toUpperCase()}</b>{o.match_status && o.match_status !== 'matched' && <b className="badge"> UNMATCHED</b>}{o.payment_env === 'sandbox' && <b className="badge"> SANDBOX</b>}</span></div>;
   const item = (o: WebOrder) => <div className="ticket-items"><div>{o.title} <span>· SKU {o.sku}</span></div>
     <small>{o.buyer_name} · {o.buyer_email} · {o.buyer_phone}</small>
-    <small>Item {money(o.item_cents)} · {o.fulfillment === 'ship' ? `Shipping ${money(o.shipping_cents)}${o.carrier ? ` (${o.carrier} ${o.service || ''})` : ''}${o.shipping_rate?.source === 'fallback' ? ' · flat-rate fallback' : ''}` : 'Store pickup'} · Tax {money(o.tax_cents)}</small></div>;
+    <small>Item {money(o.item_cents)}{fee(o) != null ? ` · Fees ${money(fee(o)!)}` : ''} · {o.fulfillment === 'ship' ? `Shipping ${money(o.shipping_cents)}${o.carrier ? ` (${o.carrier} ${o.service || ''})` : ''}${o.shipping_rate?.source === 'fallback' ? ' · flat-rate fallback' : ''}` : 'Store pickup'} · Tax {money(o.tax_cents)}</small>
+    {otherStores(o).length > 0 && <div className="alert" role="status">Pull from other stores: still marked live on {otherStores(o).map(channelLabel).join(', ')}. End those listings in Vendoo / each app.</div>}
+    {(o.match_status === 'unmatched' || o.match_status === 'already_sold') && <div className="alert" role="status">This sale is in Orders but not linked to an available Floor unit. <button className="secondary" disabled={!!busy} onClick={() => void matchSku(o)}>Link SKU…</button></div>}
+  </div>;
 
   return <>
-    <header><div><div className="eyebrow">WEBSITE AND MARKETPLACES</div><h1>Orders</h1><p>Website and marketplace orders. Buy shipping labels here. Refreshes every 30 seconds.</p></div>
+    <header><div><div className="eyebrow">WEBSITE AND MARKETPLACES</div><h1>Orders</h1><p>Website, eBay, Whatnot, Depop, Mercari, and other marketplace orders. Buy or enter shipping here. Refreshes every 30 seconds.</p></div>
       <div className="actions"><button className="secondary" onClick={() => void load()}>Refresh</button></div></header>
     {error && <div className="alert" role="alert">{error}<button onClick={() => setError('')}>Dismiss</button></div>}
     <div className="stats"><div className="stat"><span>To ship</span><strong>{groups.toShip.length}</strong></div><div className="stat"><span>Awaiting pickup</span><strong>{groups.pickup.length}</strong></div><div className="stat"><span>Completed</span><strong>{groups.done.length}</strong></div><div className="stat"><span>Cancelled / refunded</span><strong>{groups.canceled.length}</strong></div></div>

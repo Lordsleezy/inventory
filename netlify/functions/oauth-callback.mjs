@@ -4,11 +4,11 @@ import {
   html,
   requireEnv,
 } from "../lib/server.mjs";
-import { exchangeEbayCode, subscribeNotifications } from "../lib/ebay.mjs";
+import { exchangeEbayCode, getSellerUsername, subscribeNotifications } from "../lib/ebay.mjs";
 import { upsertEncryptedSquareTokens } from "../lib/square.mjs";
 import { paramsFromNetlifyEvent } from "../lib/oauth-params.mjs";
 import { wrapHandler } from "../lib/floor-log.mjs";
-import { ebayDisabled } from "../lib/ebay-env.mjs";
+import { ebayDisabled, ebayRequiredUsername } from "../lib/ebay-env.mjs";
 
 function deepLink(query) {
   const base = process.env.APP_DEEP_LINK || "floor://connections";
@@ -260,10 +260,22 @@ async function handle(event) {
     const access = tokens.access_token || tokens.accessToken;
     const refresh = tokens.refresh_token || tokens.refreshToken;
     const expiresIn = Number(tokens.expires_in || tokens.expiresIn || 86400);
+    let accountLabel = null;
+    if (state.provider === "ebay") {
+      const username = String(await getSellerUsername(access) || "").trim();
+      const required = ebayRequiredUsername();
+      if (!username || username.toLowerCase() !== required) {
+        throw new Error(
+          `Connected eBay account was "${username || "unknown"}". Floor only accepts ${required}. Tokens were not saved.`,
+        );
+      }
+      accountLabel = username;
+    }
     const row = {
       store_id: state.store_id,
       provider: state.provider,
       status: "connected",
+      account_label: accountLabel,
       token_ciphertext: encryptSecret(access),
       refresh_ciphertext: refresh ? encryptSecret(refresh) : null,
       scopes: String(tokens.scope || "").split(/[ ,]+/).filter(Boolean),

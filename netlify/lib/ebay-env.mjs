@@ -2,8 +2,29 @@ export function ebayDisabled(env = process.env.EBAY_DISABLED) {
   return /^(1|true|yes|on)$/i.test(String(env || "").trim());
 }
 
+/** Orders-only: read sales + mark shipped. Never create/revise/end listings. */
+export function ebayOrdersOnly(env = process.env.EBAY_ORDERS_ONLY) {
+  if (env == null || String(env).trim() === "") return true;
+  return /^(1|true|yes|on)$/i.test(String(env).trim());
+}
+
+export function ebayListingAllowed() {
+  return !ebayDisabled() && !ebayOrdersOnly();
+}
+
 export function requireEbayEnabled() {
   if (ebayDisabled()) throw new Error("eBay integration is disabled for this store.");
+}
+
+export function requireEbayListingEnabled() {
+  requireEbayEnabled();
+  if (!ebayListingAllowed()) {
+    throw new Error("eBay is connected for order sync only. Floor does not create or end eBay listings (Vendoo owns listings).");
+  }
+}
+
+export function ebayRequiredUsername(env = process.env.EBAY_REQUIRED_USERNAME) {
+  return String(env || "pgg124-5").trim().toLowerCase();
 }
 
 export function ebayHosts(env = process.env.EBAY_ENV) {
@@ -19,6 +40,13 @@ export function ebayItemViewUrl(listingId, env = process.env.EBAY_ENV) {
   const id = String(listingId ?? "").trim();
   if (!id) return null;
   return `${ebayHosts(env).www}/itm/${encodeURIComponent(id)}`;
+}
+
+export function ebayOrderViewUrl(orderId, env = process.env.EBAY_ENV) {
+  const id = String(orderId ?? "").trim();
+  if (!id) return null;
+  // Seller hub order details deep link.
+  return `${ebayHosts(env).www}/mesh/ord/details?orderid=${encodeURIComponent(id)}`;
 }
 
 export function ebayRuName(ruName = process.env.EBAY_RU_NAME) {
@@ -45,10 +73,20 @@ export function ebayCondition(floor) {
   return "USED_GOOD";
 }
 
-export const EBAY_OAUTH_SCOPES = [
+/** Full listing scopes (only used when EBAY_ORDERS_ONLY is off). */
+export const EBAY_LISTING_OAUTH_SCOPES = [
   "https://api.ebay.com/oauth/api_scope",
   "https://api.ebay.com/oauth/api_scope/sell.inventory",
   "https://api.ebay.com/oauth/api_scope/sell.fulfillment",
   "https://api.ebay.com/oauth/api_scope/sell.account",
   "https://api.ebay.com/oauth/api_scope/commerce.notification.subscription",
 ].join(" ");
+
+/** Orders + mark-shipped. No inventory/listing scopes. */
+export const EBAY_ORDERS_OAUTH_SCOPES = [
+  "https://api.ebay.com/oauth/api_scope",
+  "https://api.ebay.com/oauth/api_scope/sell.fulfillment",
+  "https://api.ebay.com/oauth/api_scope/sell.account",
+].join(" ");
+
+export const EBAY_OAUTH_SCOPES = ebayOrdersOnly() ? EBAY_ORDERS_OAUTH_SCOPES : EBAY_LISTING_OAUTH_SCOPES;
