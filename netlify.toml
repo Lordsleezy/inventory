@@ -25,7 +25,11 @@
 [functions."listing-check"]
   schedule = "0 14 * * *"
 
-# Light and frequent: eBay order ingestion + ending listings after a sale. Nothing heavy.
+# Orders-only sync: pull eBay sales into Floor every few minutes. Never pushes listings.
+[functions."ebay-sync"]
+  schedule = "*/3 * * * *"
+  timeout = 30
+
 [functions."ebay-drafts"]
   timeout = 60
 

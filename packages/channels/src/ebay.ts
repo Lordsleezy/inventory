@@ -47,10 +47,21 @@ export function ebayCondition(floor: string | null | undefined): string {
   return "USED_GOOD";
 }
 
-export const EBAY_OAUTH_SCOPES = [
-  "https://api.ebay.com/oauth/api_scope",
-  "https://api.ebay.com/oauth/api_scope/sell.inventory",
-  "https://api.ebay.com/oauth/api_scope/sell.fulfillment",
-  "https://api.ebay.com/oauth/api_scope/sell.account",
-  "https://api.ebay.com/oauth/api_scope/commerce.notification.subscription",
-].join(" ");
+/** Orders-only by default (fulfillment + account). Listing scopes are opted in via EBAY_ORDERS_ONLY=false. */
+const ordersOnly = !/^(0|false|no|off)$/i.test(String(process.env.EBAY_ORDERS_ONLY ?? "true").trim());
+
+export const EBAY_OAUTH_SCOPES = (
+  ordersOnly
+    ? [
+        "https://api.ebay.com/oauth/api_scope",
+        "https://api.ebay.com/oauth/api_scope/sell.fulfillment",
+        "https://api.ebay.com/oauth/api_scope/sell.account",
+      ]
+    : [
+        "https://api.ebay.com/oauth/api_scope",
+        "https://api.ebay.com/oauth/api_scope/sell.inventory",
+        "https://api.ebay.com/oauth/api_scope/sell.fulfillment",
+        "https://api.ebay.com/oauth/api_scope/sell.account",
+        "https://api.ebay.com/oauth/api_scope/commerce.notification.subscription",
+      ]
+).join(" ");
