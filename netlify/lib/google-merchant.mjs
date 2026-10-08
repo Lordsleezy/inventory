@@ -17,5 +17,7 @@ export async function merchantRequest(path, method = 'GET', body) {
   const token = await merchantAccessToken();
   const response = await fetch(`https://merchantapi.googleapis.com/${path}`, { method, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) });
   if (!response.ok) { const text = await response.text(); throw new Error(`Merchant API ${response.status}: ${text.slice(0,400)}`); }
-  return response.status === 204 ? null : response.json();
+  if (response.status === 204) return null;
+  const text = await response.text();
+  return text ? JSON.parse(text) : null;
 }
