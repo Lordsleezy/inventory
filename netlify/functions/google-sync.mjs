@@ -2,8 +2,9 @@ import { serviceClient, json, corsHeaders } from '../lib/server.mjs';
 import { withLock, dbBusy } from '../lib/bg-guard.mjs';
 import { merchantRequest } from '../lib/google-merchant.mjs';
 import { wrapHandler } from '../lib/floor-log.mjs';
+import { fallbackRate } from '../lib/shippo.mjs';
 
-const enabled = () => process.env.GOOGLE_MERCHANT_ENABLED === 'true' && !!process.env.GOOGLE_SERVICE_ACCOUNT_JSON_B64 && !!process.env.GOOGLE_MERCHANT_ACCOUNT_ID && !!process.env.GOOGLE_DATA_SOURCE_ID;
+const enabled = () => process.env.GOOGLE_MERCHANT_ENABLED === 'true' && !!process.env.GOOGLE_OAUTH_CLIENT_ID && !!process.env.GOOGLE_OAUTH_CLIENT_SECRET && !!process.env.GOOGLE_REFRESH_TOKEN && !!process.env.GOOGLE_MERCHANT_ACCOUNT_ID && !!process.env.GOOGLE_DATA_SOURCE_ID;
 const gtinValid = (s) => { const x=String(s||'').replace(/\D/g,''); if(![12,13,14].includes(x.length))return false; let sum=0; for(let i=x.length-2,j=0;i>=0;i--,j++)sum+=Number(x[i])*(j%2?1:3); return (10-sum%10)%10===Number(x.at(-1)); };
 const skuId = (sku) => Buffer.from(`en~US~${sku}`).toString('base64url');
 export function googlePackageAttributes(unit) {
@@ -14,8 +15,10 @@ export function googlePackageAttributes(unit) {
  return attrs;
 }
 async function syncOne(sb, row) {
- const {data:unit}=await sb.from('units').select('sku,title,brand,model,upc,condition,ask_cents,msrp_cents,listing_body,ai_description,defect_notes,package_weight_lb,package_length_in,package_width_in,package_height_in,state,show_on_website').eq('store_id',row.store_id).eq('sku',row.sku).maybeSingle();
+ const {data:unit}=await sb.from('units').select('sku,title,brand,model,upc,condition,ask_cents,shipping_cents,msrp_cents,listing_body,ai_description,defect_notes,package_weight_lb,package_length_in,package_width_in,package_height_in,state,show_on_website').eq('store_id',row.store_id).eq('sku',row.sku).maybeSingle();
  const {data:pub}=await sb.from('storefront_items').select('sku,title,brand,model,condition,ask_cents,photo_paths,listing_body,shippable').eq('store_id',row.store_id).eq('sku',row.sku).maybeSingle();
+ const {data:shippingSettings}=await sb.from('store_settings').select('key,value').eq('store_id',row.store_id).in('key',['manual_shipping_tiers','manual_oversize_cents']);
+ const shipSettings=Object.fromEntries((shippingSettings||[]).map(x=>[x.key,x.value]));
  const base=`accounts/${process.env.GOOGLE_MERCHANT_ACCOUNT_ID}/productInputs`;
  let websiteOk=true;
  if(unit){
@@ -31,7 +34,9 @@ async function syncOne(sb, row) {
  }
  const photo = (p) => `https://openboxindustries.com/media/${p.split('/').map(encodeURIComponent).join('/')}`;
  const priceMicros=String(Math.round(unit.ask_cents*10000));
- const attrs={ title:pub.title||unit.title, description:(pub.listing_body||unit.ai_description||unit.defect_notes||`${pub.title||unit.title}. Open box; see condition notes.`).slice(0,5000), link:`https://openboxindustries.com/item/${encodeURIComponent(unit.sku)}`, imageLink:photo(pub.photo_paths[0]), additionalImageLinks:pub.photo_paths.slice(1,10).map(photo), availability:'IN_STOCK', condition:/new|sealed/i.test(unit.condition||'')&&!/open|damage|defect|box/i.test(unit.condition||'')?'NEW':'USED', price:{amountMicros:priceMicros,currencyCode:'USD'}, brand:unit.brand||undefined, identifierExists:Boolean(gtinValid(unit.upc)||/[A-Za-z]/.test(unit.model||'')), gtins:gtinValid(unit.upc)?[String(unit.upc).replace(/\D/g,'')]:undefined, mpn:/[A-Za-z]/.test(unit.model||'')?unit.model:undefined, ...googlePackageAttributes(unit)};
+ const webRate=fallbackRate(shipSettings,{weight_lb:unit.package_weight_lb,length_in:unit.package_length_in,width_in:unit.package_width_in,height_in:unit.package_height_in},unit.shipping_cents);
+ if(!webRate)throw new Error('website_shipping_quote_unavailable');
+ const attrs={ title:pub.title||unit.title, description:(pub.listing_body||unit.ai_description||unit.defect_notes||`${pub.title||unit.title}. See condition notes and photos.`).slice(0,5000), link:`https://openboxindustries.com/item/${encodeURIComponent(unit.sku)}`, imageLink:photo(pub.photo_paths[0]), additionalImageLinks:pub.photo_paths.slice(1,10).map(photo), availability:'IN_STOCK', condition:/new|sealed/i.test(unit.condition||'')&&!/open|damage|defect|box/i.test(unit.condition||'')?'NEW':'USED', price:{amountMicros:priceMicros,currencyCode:'USD'}, brand:unit.brand||undefined, identifierExists:gtinValid(unit.upc), gtins:gtinValid(unit.upc)?[String(unit.upc).replace(/\D/g,'')]:undefined, shipping:[{country:'US',service:'USPS Ground Advantage',price:{amountMicros:String(webRate.amount_cents*10000),currencyCode:'USD'},minHandlingTime:'2',maxHandlingTime:'2'}], ...googlePackageAttributes(unit)};
  const dataSource=`accounts/${process.env.GOOGLE_MERCHANT_ACCOUNT_ID}/dataSources/${process.env.GOOGLE_DATA_SOURCE_ID}`;
  await merchantRequest(`products/v1/${base}:insert?dataSource=${encodeURIComponent(dataSource)}`,'POST',{offerId:String(unit.sku),contentLanguage:'en',feedLabel:'US',productAttributes:attrs});
  await sb.from('google_product_index').upsert({store_id:row.store_id,sku:row.sku,updated_at:new Date().toISOString()});
