@@ -50,7 +50,7 @@ async function handle(event) {
     }
 
     if (action === 'merchant-setup') {
-      await merchantRequest(ccounts/v1alpha/accounts/${account}/developerRegistration:registerGcp, 'POST', {
+      await merchantRequest(`accounts/v1alpha/accounts/${account}/developerRegistration:registerGcp`, 'POST', {
         developerEmail: 'pgg124@gmail.com',
       });
 
