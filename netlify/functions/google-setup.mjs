@@ -1,5 +1,5 @@
 import { timingSafeEqual } from 'node:crypto';
-import { json } from '../lib/server.mjs';
+import { json, serviceClient } from '../lib/server.mjs';
 import { merchantAccessToken, merchantRequest } from '../lib/google-merchant.mjs';
 import { wrapHandler } from '../lib/floor-log.mjs';
 import { handler as googleReconcileHandler } from './google-reconcile.mjs';
@@ -57,6 +57,13 @@ async function handle(event) {
         destinationStatuses: product.productStatus?.destinationStatuses || [],
         itemLevelIssues: product.productStatus?.itemLevelIssues || [],
       })) });
+    }
+
+    if (action === 'queue-errors') {
+      const { data, error } = await serviceClient()
+        .from('google_sync_queue').select('sku,action,attempts,last_error,queued_at').order('queued_at').limit(100);
+      if (error) throw error;
+      return json(200, { queued: data || [] });
     }
 
     if (action === 'site-token') {
