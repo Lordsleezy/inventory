@@ -50,6 +50,10 @@ async function handle(event) {
     }
 
     if (action === 'merchant-setup') {
+      await merchantRequest(ccounts/v1alpha/accounts/${account}/developerRegistration:registerGcp, 'POST', {
+        developerEmail: 'pgg124@gmail.com',
+      });
+
       await merchantRequest(`accounts/v1/accounts/${account}?updateMask=accountName`, 'PATCH', {
         name: `accounts/${account}`, accountName: 'Open Box Industries',
       });
@@ -77,9 +81,6 @@ async function handle(event) {
         homepage = await merchantRequest(`${homePath}?updateMask=uri`, 'PATCH', { name: `accounts/${account}/homepage`, uri: siteUrl });
       }
       await merchantRequest(`${homePath}:claim`, 'POST', {});
-      await merchantRequest(`accounts/v1alpha/accounts/${account}/developerRegistration:registerGcp`, 'POST', {
-        developerEmail: 'pgg124@gmail.com',
-      });
 
       const dsPath = `datasources/v1/accounts/${account}/dataSources`;
       const dsList = await merchantRequest(dsPath);
