@@ -54,7 +54,7 @@
   status = 200
 
 [functions."google-sync"]
-schedule = "*/5 * * * *"
+schedule = "* * * * *"
 
 [functions."google-reconcile"]
 schedule = "0 */6 * * *"
