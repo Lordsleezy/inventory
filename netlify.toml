@@ -61,3 +61,8 @@ schedule = "0 */6 * * *"
 
 [functions."marketplace-daily-report"]
 schedule = "0 16 * * *"
+
+# Reconcile real eBay marketplace fees and Square processing fees onto sales.
+[functions."channel-fee-sync"]
+schedule = "*/15 * * * *"
+timeout = 60

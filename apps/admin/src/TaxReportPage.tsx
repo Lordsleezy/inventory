@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-type Row = { category: string; sales_count: number; sales_cents: number; taxable_cents: number; tax_cents: number; shipping_cents: number;
+type Row = { category: string; sales_count: number; sales_cents: number; taxable_cents: number; tax_cents: number; tax_collected_cents?: number; shipping_cents: number;
   refund_count: number; refund_sales_cents: number; refund_taxable_cents: number; refund_tax_cents: number; refund_shipping_cents: number };
 type Report = { month: string; origin_state: string; rows: Row[] };
 type Props = { client: SupabaseClient; money: (n: number) => string };
@@ -24,10 +24,12 @@ export function TaxReportPage({ client, money }: Props) {
   }, [client, month]);
   useEffect(() => { void load(); }, [load]);
 
-  const label = (c: string) => ({ in_store: 'In-store', pickup: 'Website — store pickup', ship_in_state: `Website — shipped to ${report?.origin_state ?? 'CA'}`, ship_out_of_state: 'Website — shipped out of state', other_online: 'Other online channels' } as Record<string, string>)[c] || c;
+  const label = (c: string) => ({ in_store: 'In-store', pickup: 'Website — store pickup', ship_in_state: `Website — shipped to ${report?.origin_state ?? 'CA'}`, ship_out_of_state: 'Website — shipped out of state', other_online: 'Other online channels', marketplace_remitted: 'Marketplace-remitted (eBay, Mercari, …)' } as Record<string, string>)[c] || c;
   const rows = report?.rows ?? [];
-  const sum = (k: keyof Row) => rows.reduce((n, r) => n + Number(r[k]), 0);
+  const sum = (k: keyof Row) => rows.reduce((n, r) => n + Number(r[k] ?? 0), 0);
   const net = (r: Row) => ({ sales: r.sales_cents - r.refund_sales_cents, taxable: r.taxable_cents - r.refund_taxable_cents, tax: r.tax_cents - r.refund_tax_cents });
+  const owed = rows.filter(r => r.category !== 'marketplace_remitted');
+  const taxWeOwe = owed.reduce((n, r) => n + net(r).tax, 0);
 
   function csv() {
     const head = ['Month', 'Category', 'Sales (count)', 'Sales $', 'Taxable sales $', 'Non-taxable sales $', 'Tax collected $', 'Shipping charged $ (not in sales)', 'Refunds (count)', 'Refunded sales $', 'Refunded taxable $', 'Refunded tax $', 'Net sales $', 'Net taxable sales $', 'Net tax $'];
@@ -43,6 +45,7 @@ export function TaxReportPage({ client, money }: Props) {
       <div className="report-actions"><label className="date-control">Month<input type="month" value={month} onChange={e => setMonth(e.target.value || thisMonth())} /></label>
         <div className="actions"><button className="secondary" disabled={!rows.length} onClick={csv}>Download CSV</button></div></div></header>
     {error && <div className="alert" role="alert">{error}</div>}
+    {rows.length > 0 && <div className="stats"><div className="stat"><span>Tax we owe this month</span><strong>{money(taxWeOwe)}</strong></div><div className="stat"><span>Marketplace-remitted</span><strong>{money(sum('tax_cents') - taxWeOwe)}</strong></div><div className="stat"><span>Net sales</span><strong>{money(sum('sales_cents') - sum('refund_sales_cents'))}</strong></div></div>}
     <section className="panel"><h2>Sales — {report?.month ?? month}</h2>
       {!rows.length ? <div className="empty">No sales or refunds this month.</div> : <table className="tbl"><thead><tr><th>Sold as</th><th className="n">Sales</th><th className="n">Taxable sales</th><th className="n">Non-taxable</th><th className="n">Tax collected</th><th className="n">Shipping charged</th></tr></thead><tbody>
         {rows.map(r => <tr key={r.category}><td>{label(r.category)} <span className="tag">{r.sales_count}</span></td><td className="n">{money(r.sales_cents)}</td><td className="n">{money(r.taxable_cents)}</td><td className="n">{money(r.sales_cents - r.taxable_cents)}</td><td className="n">{money(r.tax_cents)}</td><td className="n">{money(r.shipping_cents)}</td></tr>)}

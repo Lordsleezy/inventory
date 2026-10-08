@@ -31,5 +31,9 @@
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.8",
     "supabase": "2.119.0"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true,
+    "sharp@0.34.5": true
   }
 }

@@ -10,7 +10,7 @@ type Props = { client: SupabaseClient; money: (n: number) => string; expenses: E
 
 const zone = 'America/Los_Angeles';
 const todayLA = () => new Date().toLocaleDateString('en-CA', { timeZone: zone });
-const CATEGORIES = ['Supplies', 'Inventory', 'Shipping', 'Equipment', 'Other'];
+const CATEGORIES = ['Supplies', 'Inventory', 'Shipping', 'Shipping supplies', 'Labels', 'Subscriptions', 'Advertising', 'Equipment', 'Other'];
 const entry = /^\d*(?:\.\d{0,2})?$/;
 
 /** Everything bought for the store: fast to add, and reimbursable expenses feed the payout balance. */

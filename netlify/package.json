@@ -7,5 +7,8 @@
     "postal-mime": "^2.4.3",
     "sharp": "^0.34.4",
     "square": "^42.0.0"
+  },
+  "allowScripts": {
+    "sharp@0.34.4": true
   }
 }

@@ -119,8 +119,10 @@ export async function getRate(rateId, { fetchImpl } = {}) {
   return norm;
 }
 
-export async function buyLabel(rateId, { fetchImpl } = {}) {
-  return call("/transactions/", { method: "POST", fetchImpl, body: { rate: rateId, label_file_type: "PDF_4x6", async: false } });
+export async function buyLabel(rateId, { fetchImpl, metadata } = {}) {
+  const body = { rate: rateId, label_file_type: "PDF_4x6", async: false };
+  if (metadata) body.metadata = String(metadata).slice(0, 200);
+  return call("/transactions/", { method: "POST", fetchImpl, body });
 }
 
 export async function refundLabel(transactionId, { fetchImpl } = {}) {

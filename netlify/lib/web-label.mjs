@@ -90,7 +90,7 @@ export async function buyLabelForOrder(sb, storeId, orderId, { rateId, box, acto
   let rate, tx;
   try {
     rate = await (deps.getRate || getRate)(rateId);
-    tx = await (deps.buyLabel || buyLabel)(rateId);
+    tx = await (deps.buyLabel || buyLabel)(rateId, { metadata: `OBI order ${order.order_no} SKU ${order.sku}` });
   } catch (err) {
     await release();
     return { ok: false, status: 502, error: `Label purchase failed: ${err.detail?.detail || err.message}` };

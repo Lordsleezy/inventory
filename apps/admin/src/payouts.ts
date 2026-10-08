@@ -1,29 +1,51 @@
-// Payout math, kept pure so it can be tested. In-store rules are unchanged from before the online rule existed.
+// Payout math, kept pure so it can be tested.
+// Profit = sale price − channel fees − label/shipping cost − card processing fee − item cost.
+// Tax, the customer card-fee surcharge, and buyer-paid shipping are pass-through: never profit.
+// `cost` arrives already resolved (real unit cost, collectible $0, or category default);
+// `costEstimated` marks sales whose profit used a default instead of a real cost.
 export type Rule = { employee_id: string; method: 'percent_sale' | 'flat_ticket' | 'percent_profit'; rate: number };
-export type TicketLike = { subtotal: number; cost: number | null; channel: string; ebayFeeCents?: number; bakedShipCents?: number };
-// Website profit = sale price − acquisition cost. eBay profit also subtracts eBay fees and any label baked into the item price.
-// Tax, card fee, and buyer-paid shipping stay outside the sale price. A missing cost is "needs cost".
+export type TicketLike = {
+  subtotal: number; cost: number | null; channel: string;
+  feeCents?: number; shipCostCents?: number; processingFeeCents?: number;
+  // Back-compat aliases from the old eBay-only ledger.
+  ebayFeeCents?: number; bakedShipCents?: number;
+  costEstimated?: boolean;
+};
 export type OnlineCfg = { channels: string[]; pct: number; employeeId: string | null };
 export const NO_ONLINE: OnlineCfg = { channels: [], pct: 0, employeeId: null };
 export const isOnline = (t: TicketLike, cfg: OnlineCfg) => cfg.channels.includes((t.channel || '').toLowerCase());
 
-/** Cents owed to this rule's person for one ticket; null = cannot be calculated yet (cost missing). */
+const channelFees = (t: TicketLike) => Math.max(0, t.feeCents ?? t.ebayFeeCents ?? 0);
+const shipCosts = (t: TicketLike) => Math.max(0, t.shipCostCents ?? t.bakedShipCents ?? 0);
+const processing = (t: TicketLike) => Math.max(0, t.processingFeeCents ?? 0);
+
+/** Real profit in cents; null only when the ticket has no cost at all (no default configured). */
+export function profit(t: TicketLike): number | null {
+  if (t.cost === null) return null;
+  return t.subtotal - channelFees(t) - shipCosts(t) - processing(t) - t.cost;
+}
+
+/** Cents owed to this rule's person for one ticket. null = cannot be calculated (no cost anywhere). */
 export function payout(t: TicketLike, rule: Rule | undefined, cfg: OnlineCfg): number | null {
   if (!rule) return null;
   if (isOnline(t, cfg)) {
     if (rule.employee_id !== cfg.employeeId) return 0;
-    if (t.cost === null) return null;
-    const extras = (t.channel || '').toLowerCase() === 'ebay' ? Math.max(0, t.ebayFeeCents || 0) + Math.max(0, t.bakedShipCents || 0) : 0;
-    return Math.round(Math.max(0, t.subtotal - extras - t.cost) * cfg.pct / 100);
+    const p = profit(t);
+    return p === null ? null : Math.round(Math.max(0, p) * cfg.pct / 100);
   }
   if (rule.method === 'flat_ticket') return Math.round(Number(rule.rate) * 100);
-  if (rule.method === 'percent_profit' && t.cost === null) return null;
-  const basis = rule.method === 'percent_profit' ? Math.max(0, t.subtotal - (t.cost || 0)) : t.subtotal;
-  return Math.round(basis * Number(rule.rate) / 100);
+  if (rule.method === 'percent_profit') {
+    const p = profit(t);
+    return p === null ? null : Math.round(Math.max(0, p) * Number(rule.rate) / 100);
+  }
+  return Math.round(t.subtotal * Number(rule.rate) / 100);
 }
 
+/** Profit left after every payout cut; null if any cut is unsettled. */
 export function remainingProfit(t: TicketLike, rules: Rule[], cfg: OnlineCfg): number | null {
+  const p = profit(t);
+  if (p === null) return null;
   const cuts = rules.map(r => payout(t, r, cfg));
   return cuts.some(x => x === null) ? null
-    : t.subtotal - cuts.reduce<number>((n, x) => n + (x || 0), 0);
+    : p - cuts.reduce<number>((n, x) => n + (x || 0), 0);
 }
