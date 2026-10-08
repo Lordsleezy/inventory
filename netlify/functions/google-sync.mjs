@@ -11,7 +11,7 @@ const account = () => process.env.GOOGLE_MERCHANT_ACCOUNT_ID;
 const dataSource = () => `accounts/${account()}/dataSources/${process.env.GOOGLE_DATA_SOURCE_ID}`;
 const productParent = (sku) => `accounts/${account()}/products/${skuId(sku)}`;
 const productInput = (sku) => `accounts/${account()}/productInputs/${skuId(sku)}`;
-const isLargePickup = (row, unit) => Number(unit.package_weight_lb)>150 || /\b(refrigerator|fridge|freezer|dishwasher|mattresses?|washer|washing machine|dryer|range|stove|oven|cooktop|water heater|sofa|couch|sectional|recliner|dining table|bed frame|dresser|wardrobe|armoire|pool table|treadmill|elliptical)\b/i.test(`${row.title||''} ${row.category||''}`);
+const isLargePickup = (row, unit) => Number(unit.package_weight_lb)>150 || /\b(refrigerator|fridge|freezer|dishwasher|mattresses?|washer|washing machine|clothes dryer|laundry dryer|tumble dryer|range|stove|oven|cooktop|water heater|sofa|couch|sectional|recliner|dining table|bed frame|dresser|wardrobe|armoire|pool table|treadmill|elliptical)\b/i.test(`${row.title||''} ${row.category||''}`);
 export function googlePackageAttributes(unit) {
  const attrs={};
  if(Number(unit.package_weight_lb)>0)attrs.shippingWeight={value:Number(unit.package_weight_lb),unit:'lb'};
