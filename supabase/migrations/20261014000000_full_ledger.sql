@@ -328,7 +328,7 @@ begin
     tax_remitted = coalesce(p_tax_remitted, tax_remitted),
     payout_cents = coalesce(p_payout_cents, payout_cents)
   where store_id = p_store and provider = lower(p_provider) and order_id = p_order_id;
-  if not found then
+  if not found and v_sale is not null then
     insert into public.channel_orders(store_id, provider, order_id, sku, sale_id, fee_cents, fee_source,
       ship_label_cents, tax_cents, tax_remitted, payout_cents)
     values (p_store, lower(p_provider), p_order_id, v_sku, v_sale, p_fee_cents, coalesce(p_fee_source, 'actual'),
