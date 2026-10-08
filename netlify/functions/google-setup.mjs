@@ -2,6 +2,8 @@ import { timingSafeEqual } from 'node:crypto';
 import { json } from '../lib/server.mjs';
 import { merchantAccessToken, merchantRequest } from '../lib/google-merchant.mjs';
 import { wrapHandler } from '../lib/floor-log.mjs';
+import { handler as googleReconcileHandler } from './google-reconcile.mjs';
+import { handler as googleSyncHandler } from './google-sync.mjs';
 
 const siteUrl = 'https://openboxindustries.com';
 const accountId = () => process.env.GOOGLE_MERCHANT_ACCOUNT_ID;
@@ -34,6 +36,28 @@ async function handle(event) {
     const { action } = JSON.parse(event.body || '{}');
     const account = accountId();
     if (!account) return json(503, { error: 'merchant_account_not_configured' });
+
+    if (action === 'sync-reconcile' || action === 'sync-now') {
+      const fn = action === 'sync-reconcile' ? googleReconcileHandler : googleSyncHandler;
+      const result = await fn({ httpMethod: 'POST', body: '{}' }, {});
+      return json(result.statusCode || 200, JSON.parse(result.body || '{}'));
+    }
+
+    if (action === 'product-statuses') {
+      const products = [];
+      let pageToken = '';
+      do {
+        const query = new URLSearchParams({ pageSize: '250', ...(pageToken ? { pageToken } : {}) });
+        const page = await merchantRequest(`products/v1/accounts/${account}/products?${query}`);
+        products.push(...(page.products || []));
+        pageToken = page.nextPageToken || '';
+      } while (pageToken);
+      return json(200, { products: products.map((product) => ({
+        offerId: product.offerId, title: product.title,
+        destinationStatuses: product.productStatus?.destinationStatuses || [],
+        itemLevelIssues: product.productStatus?.itemLevelIssues || [],
+      })) });
+    }
 
     if (action === 'site-token') {
       const result = await siteRequest('token', 'POST', {
