@@ -388,6 +388,9 @@ export function UnitScreen() {
         </>
       ) : null}
 
+      {!admin ? (
+        <MoneyField label="Price" cents={unit.askCents} onCommit={(v) => edit("ask_cents", v)} />
+      ) : null}
       <SelectField
         label="Location"
         value={unit.location}

@@ -222,12 +222,7 @@ export function VideoScan() {
 
   async function save(job: Job, editAfter = false) {
     const price = parseMoneyToCents(prices[job.id] || '');
-    if (manager && (price === undefined || price === null || price <= 0)) {
-      setError('Enter your selling price.'); return;
-    }
-    if (!manager && price !== undefined && price !== null) {
-      // Ignore any typed price; clerks leave ask blank for Unfinished.
-    }
+    if (price === undefined) { setError('Check the selling price.'); return; }
     const cost = parseMoneyToCents(costs[job.id] || '');
     if (manager && cost === undefined) { setError('Check the cost amount.'); return; }
     const result = job.result || {};
@@ -245,7 +240,7 @@ export function VideoScan() {
         delete (draft as { floor_cents?: unknown }).floor_cents;
       }
       const { data, error: saveError } = await floorCloud().rpc('video_scan_receive', {
-        p_id: job.id, p_draft: draft, p_ask_cents: manager ? price : null });
+        p_id: job.id, p_draft: draft, p_ask_cents: price });
       if (saveError) throw saveError;
       const sku = (data as { sku: string }).sku;
       setSavedSku(sku);
@@ -369,26 +364,24 @@ export function VideoScan() {
           : <p className="text-quiet">{retailWaiting ? 'Looking up retail price…' : "Couldn't find a retail price"}</p>}
         {!retail && !retailWaiting && <button type="button" className="btn-text" onClick={() =>
           void post('video-scan-retry-price', current.id).catch(cause => setError(cause.message))}>Retry price lookup</button>}
+        <label>How much do you want to sell it for? <span className="text-quiet">(optional)</span>
+          <input className="field mt-2" type="text" inputMode="decimal" placeholder="$"
+            value={prices[current.id] || ''} onChange={event => {
+              if (moneyPattern.test(event.target.value)) setPrices(previous => ({ ...previous, [current.id]: event.target.value }));
+            }} onBlur={() => setPrices(previous => {
+              const value = previous[current.id]; return value && parseMoneyToCents(value) != null
+                ? { ...previous, [current.id]: (Number(value) || 0).toFixed(2) } : previous;
+            })} />
+        </label>
         {manager ? (
-          <>
-            <label>How much do you want to sell it for?
-              <input className="field mt-2" type="text" inputMode="decimal" placeholder="$"
-                value={prices[current.id] || ''} onChange={event => {
-                  if (moneyPattern.test(event.target.value)) setPrices(previous => ({ ...previous, [current.id]: event.target.value }));
-                }} onBlur={() => setPrices(previous => {
-                  const value = previous[current.id]; return value && parseMoneyToCents(value) != null
-                    ? { ...previous, [current.id]: (Number(value) || 0).toFixed(2) } : previous;
-                })} />
-            </label>
-            <label>What did you pay for it? <span className="text-quiet">(optional)</span>
-              <input className="field mt-2" type="text" inputMode="decimal" placeholder="$"
-                value={costs[current.id] || ''} onChange={event => {
-                  if (moneyPattern.test(event.target.value)) setCosts(previous => ({ ...previous, [current.id]: event.target.value }));
-                }} />
-            </label>
-          </>
+          <label>What did you pay for it? <span className="text-quiet">(optional)</span>
+            <input className="field mt-2" type="text" inputMode="decimal" placeholder="$"
+              value={costs[current.id] || ''} onChange={event => {
+                if (moneyPattern.test(event.target.value)) setCosts(previous => ({ ...previous, [current.id]: event.target.value }));
+              }} />
+          </label>
         ) : (
-          <p className="text-quiet">Saves without a selling price or cost so it lands in Unfinished for admin pricing.</p>
+          <p className="text-quiet">Cost stays blank for admin.</p>
         )}
         <button type="button" className="btn-accent" disabled={saving === current.id}
           onClick={() => void save(current)}>{saving === current.id ? 'Saving…' : 'Save & next'}</button>

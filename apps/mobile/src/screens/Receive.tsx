@@ -109,7 +109,7 @@ export function ReceiveScreen() {
       ask: parseMoneyToCents(ask),
     };
     for (const [name, value] of Object.entries(money)) {
-      if (!manager && (name === "cost" || name === "floor" || name === "ask")) continue;
+      if (!manager && (name === "cost" || name === "floor" || name === "MSRP")) continue;
       if (value === undefined) {
         setError(`Check the ${name} amount. It should look like 19.99.`);
         return;
@@ -128,8 +128,8 @@ export function ReceiveScreen() {
         p_condition: condition || null,
         p_test_status: testStatus || null,
         p_location: location || null,
-        p_ask_cents: manager ? money.ask ?? null : null,
-        p_msrp_cents: money.MSRP ?? null,
+        p_ask_cents: money.ask ?? null,
+        p_msrp_cents: manager ? money.MSRP ?? null : null,
         p_cost_cents: manager ? money.cost ?? null : null,
         p_floor_cents: manager ? money.floor ?? null : null,
         p_notes: notes.trim() || null,
@@ -218,18 +218,19 @@ export function ReceiveScreen() {
       />
       <Picker label="Location" value={location} options={settings.locations} onChange={setLocation} />
 
-      {manager ? (
-        <div className="grid grid-cols-2 gap-3">
-          <Money label="Cost (what we paid)" value={cost} onChange={setCost} />
-          <Money label="Floor" value={floor} onChange={setFloor} />
-          <Money label="Value / MSRP" value={msrp} onChange={setMsrp} />
-          <Money label="Ask (selling price)" value={ask} onChange={setAsk} />
-        </div>
-      ) : (
-        <p className="text-quiet text-floor-mute py-2">
-          Price and cost stay blank so this unit shows in Unfinished for admin pricing.
-        </p>
-      )}
+      <div className="grid grid-cols-2 gap-3">
+        <Money label="Ask (selling price)" value={ask} onChange={setAsk} />
+        {manager ? (
+          <>
+            <Money label="Cost (what we paid)" value={cost} onChange={setCost} />
+            <Money label="Floor" value={floor} onChange={setFloor} />
+            <Money label="Value / MSRP" value={msrp} onChange={setMsrp} />
+          </>
+        ) : null}
+      </div>
+      {!manager ? (
+        <p className="text-quiet text-floor-mute py-2">Cost stays blank for admin.</p>
+      ) : null}
 
       <label className="block py-2">
         <Label>Defects and notes</Label>
