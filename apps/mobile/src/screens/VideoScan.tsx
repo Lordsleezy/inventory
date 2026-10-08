@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { floorCloud } from '@floor/cloud';
 import { parseMoneyToCents } from '@floor/store';
 import { functionsUrl } from '../functions';
+import { useStore } from '../store';
 import { prewarmVideoScan, releaseWarmVideoScan, startVideoScan } from '../video-scan-capture';
 
 type Price = { store: string; price_cents: number; url: string; pack_size?: number; approximate?: boolean; product_name?: string };
@@ -68,6 +69,8 @@ const timedOut = (job: Job, at: number) =>
 
 export function VideoScan() {
   const navigate = useNavigate();
+  const { session } = useStore();
+  const manager = session.role !== 'staff';
   const preview = useRef<HTMLVideoElement>(null);
   const recording = useRef<{ stop: () => void; abort: () => void } | null>(null);
   const uploads = useRef<Record<string, Promise<void> | undefined>>({});
@@ -219,9 +222,14 @@ export function VideoScan() {
 
   async function save(job: Job, editAfter = false) {
     const price = parseMoneyToCents(prices[job.id] || '');
-    if (price === undefined || price === null || price <= 0) { setError('Enter your selling price.'); return; }
+    if (manager && (price === undefined || price === null || price <= 0)) {
+      setError('Enter your selling price.'); return;
+    }
+    if (!manager && price !== undefined && price !== null) {
+      // Ignore any typed price; clerks leave ask blank for Unfinished.
+    }
     const cost = parseMoneyToCents(costs[job.id] || '');
-    if (cost === undefined) { setError('Check the cost amount.'); return; }
+    if (manager && cost === undefined) { setError('Check the cost amount.'); return; }
     const result = job.result || {};
     if (choosing === job.id || (distinctOptions(result).length >= 2 && choices[job.id] === undefined)) {
       setError('Pick the matching product first.'); return;
@@ -232,14 +240,22 @@ export function VideoScan() {
       // SKU mint only needs the job + identity. Do not wait on the full video upload.
       if (early.current[job.id]) await early.current[job.id];
       const draft = { ...result, ...(chosen || {}) };
+      if (!manager) {
+        delete (draft as { acquisition_cost_cents?: unknown }).acquisition_cost_cents;
+        delete (draft as { floor_cents?: unknown }).floor_cents;
+      }
       const { data, error: saveError } = await floorCloud().rpc('video_scan_receive', {
-        p_id: job.id, p_draft: draft, p_ask_cents: price });
+        p_id: job.id, p_draft: draft, p_ask_cents: manager ? price : null });
       if (saveError) throw saveError;
       const sku = (data as { sku: string }).sku;
       setSavedSku(sku);
-      // Acquisition cost is optional; a unit without one still saves and sells (it shows as missing cost in Admin).
-      if (cost !== null) void Promise.resolve(floorCloud().rpc('set_unit_cost_if_missing', { p_sku: sku, p_cost_cents: cost }))
-        .then(({ error: costError }) => { if (costError) setError(`SKU ${sku} saved; add its cost later: ${costError.message}`); });
+      if (manager && cost !== null) {
+        void Promise.resolve(floorCloud().rpc('update_unit_field', {
+          p_sku: sku, p_field: 'acquisition_cost_cents', p_value: String(cost),
+        })).then(({ error: costError }) => {
+          if (costError) setError(`SKU ${sku} saved; add its cost later: ${costError.message}`);
+        });
+      }
       setActiveId(null);
       setJobs(previous => previous.map(row => row.id === job.id ? { ...row, status: 'saved', sku } : row));
       setPrices(previous => { const next = { ...previous }; delete next[job.id]; return next; });
@@ -353,21 +369,27 @@ export function VideoScan() {
           : <p className="text-quiet">{retailWaiting ? 'Looking up retail price…' : "Couldn't find a retail price"}</p>}
         {!retail && !retailWaiting && <button type="button" className="btn-text" onClick={() =>
           void post('video-scan-retry-price', current.id).catch(cause => setError(cause.message))}>Retry price lookup</button>}
-        <label>How much do you want to sell it for?
-          <input className="field mt-2" type="text" inputMode="decimal" placeholder="$"
-            value={prices[current.id] || ''} onChange={event => {
-              if (moneyPattern.test(event.target.value)) setPrices(previous => ({ ...previous, [current.id]: event.target.value }));
-            }} onBlur={() => setPrices(previous => {
-              const value = previous[current.id]; return value && parseMoneyToCents(value) != null
-                ? { ...previous, [current.id]: (Number(value) || 0).toFixed(2) } : previous;
-            })} />
-        </label>
-        <label>What did you pay for it? <span className="text-quiet">(optional)</span>
-          <input className="field mt-2" type="text" inputMode="decimal" placeholder="$"
-            value={costs[current.id] || ''} onChange={event => {
-              if (moneyPattern.test(event.target.value)) setCosts(previous => ({ ...previous, [current.id]: event.target.value }));
-            }} />
-        </label>
+        {manager ? (
+          <>
+            <label>How much do you want to sell it for?
+              <input className="field mt-2" type="text" inputMode="decimal" placeholder="$"
+                value={prices[current.id] || ''} onChange={event => {
+                  if (moneyPattern.test(event.target.value)) setPrices(previous => ({ ...previous, [current.id]: event.target.value }));
+                }} onBlur={() => setPrices(previous => {
+                  const value = previous[current.id]; return value && parseMoneyToCents(value) != null
+                    ? { ...previous, [current.id]: (Number(value) || 0).toFixed(2) } : previous;
+                })} />
+            </label>
+            <label>What did you pay for it? <span className="text-quiet">(optional)</span>
+              <input className="field mt-2" type="text" inputMode="decimal" placeholder="$"
+                value={costs[current.id] || ''} onChange={event => {
+                  if (moneyPattern.test(event.target.value)) setCosts(previous => ({ ...previous, [current.id]: event.target.value }));
+                }} />
+            </label>
+          </>
+        ) : (
+          <p className="text-quiet">Saves without a selling price or cost so it lands in Unfinished for admin pricing.</p>
+        )}
         <button type="button" className="btn-accent" disabled={saving === current.id}
           onClick={() => void save(current)}>{saving === current.id ? 'Saving…' : 'Save & next'}</button>
         <button type="button" className="btn-text text-sm" disabled={saving === current.id}

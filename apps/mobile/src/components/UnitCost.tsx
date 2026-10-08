@@ -9,7 +9,7 @@ const toCents = (v: string) => {
   return Math.round(Number(s) * 100);
 };
 
-/** What we paid for the unit. Managers see/edit the number; clerks can only add it when it is missing. */
+/** Acquisition cost — managers only. Clerks leave cost blank for Unfinished pricing. */
 export function UnitCost({ sku, ensureOnline }: { sku: string; ensureOnline: () => Promise<void> }) {
   const [info, setInfo] = useState<Info | null>(null);
   const [value, setValue] = useState("");
@@ -35,9 +35,11 @@ export function UnitCost({ sku, ensureOnline }: { sku: string; ensureOnline: () 
     if (cents === null) { setError("Enter the cost like 12.50."); return; }
     try {
       await ensureOnline();
-      const { error: rpcErr } = info?.manager
-        ? await floorCloud().rpc("update_unit_field", { p_sku: sku, p_field: "acquisition_cost_cents", p_value: String(cents) })
-        : await floorCloud().rpc("set_unit_cost_if_missing", { p_sku: sku, p_cost_cents: cents });
+      const { error: rpcErr } = await floorCloud().rpc("update_unit_field", {
+        p_sku: sku,
+        p_field: "acquisition_cost_cents",
+        p_value: String(cents),
+      });
       if (rpcErr) throw rpcErr;
       await load();
       setSaved(true);
@@ -47,7 +49,7 @@ export function UnitCost({ sku, ensureOnline }: { sku: string; ensureOnline: () 
   }
 
   if (!info) return error ? <p className="text-quiet text-floor-danger">{error}</p> : null;
-  if (!info.manager && !info.missing) return <p className="text-quiet text-floor-mute">Cost recorded.</p>;
+  if (!info.manager) return null;
   return (
     <div className="mt-2">
       <label className="block">

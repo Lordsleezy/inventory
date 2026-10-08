@@ -286,80 +286,113 @@ export function UnitScreen() {
 
       <Photos sku={unit.sku} />
 
-      <div className="border-b border-floor-line py-3">
-        <OnlineShipping sku={unit.sku} ensureOnline={ensureOnline} />
-        <MarketplacePrices sku={unit.sku} />
-        <label className="mt-3 flex items-center gap-2">
-          <input
-            type="checkbox"
-            checked={unit.showOnWebsite}
-            onChange={(e) => void setListOnline(e.target.checked)}
-          />
-          <span className="text-body">List online</span>
-        </label>
-        <p className="mt-1 text-quiet text-floor-mute">
-          Puts this item on the website. Needs at least one photo.
-        </p>
-        {eligibility.length > 0 ? (
-          <div className="mt-3 space-y-1">
-            <p className="text-quiet">Marketplace eligibility</p>
-            {eligibility.filter((row) => ['depop', 'ebay', 'whatnot', 'mercari', 'facebook', 'website'].includes(row.channel)).map((row) => (
-              <p key={row.channel} className={`text-quiet ${row.status === 'allow' ? 'text-floor-mute' : 'text-floor-danger'}`}>
-                {row.reason}
-              </p>
-            ))}
-          </div>
-        ) : null}
-        {(enriched.requires_power != null || enriched.is_camera != null) ? (
-          <p className="mt-2 text-quiet text-floor-mute">
-            Power: {enriched.requires_power ? 'yes' : enriched.requires_power === false ? 'no' : 'unknown'}
-            {enriched.is_camera ? ' · camera' : ''}
-            {enriched.is_electrical ? ' · electrical' : ''}
+      {admin ? (
+        <div className="border-b border-floor-line py-3">
+          <OnlineShipping sku={unit.sku} ensureOnline={ensureOnline} />
+          <MarketplacePrices sku={unit.sku} />
+          <label className="mt-3 flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={unit.showOnWebsite}
+              onChange={(e) => void setListOnline(e.target.checked)}
+            />
+            <span className="text-body">List online</span>
+          </label>
+          <p className="mt-1 text-quiet text-floor-mute">
+            Puts this item on the website. Needs at least one photo.
           </p>
-        ) : null}
-      </div>
+          {eligibility.length > 0 ? (
+            <div className="mt-3 space-y-1">
+              <p className="text-quiet">Marketplace eligibility</p>
+              {eligibility.filter((row) => ['depop', 'ebay', 'whatnot', 'mercari', 'facebook', 'website'].includes(row.channel)).map((row) => (
+                <p key={row.channel} className={`text-quiet ${row.status === 'allow' ? 'text-floor-mute' : 'text-floor-danger'}`}>
+                  {row.reason}
+                </p>
+              ))}
+            </div>
+          ) : null}
+          {(enriched.requires_power != null || enriched.is_camera != null) ? (
+            <p className="mt-2 text-quiet text-floor-mute">
+              Power: {enriched.requires_power ? 'yes' : enriched.requires_power === false ? 'no' : 'unknown'}
+              {enriched.is_camera ? ' · camera' : ''}
+              {enriched.is_electrical ? ' · electrical' : ''}
+            </p>
+          ) : null}
+        </div>
+      ) : (
+        <p className="mt-2 text-quiet text-floor-mute">
+          {[unit.brand, unit.model].filter(Boolean).join(" ") || unit.title}
+          {unit.location ? ` · ${unit.location}` : ""}
+          {unit.askCents != null ? ` · ${formatCents(unit.askCents)}` : " · unpriced"}
+        </p>
+      )}
 
-      <TextField label="Brand" value={unit.brand} onCommit={(v) => edit("brand", v ?? "")} />
-      <TextField label="Model" value={unit.model} onCommit={(v) => edit("model", v ?? "")} />
-      <TextField label="Title" value={unit.title} onCommit={(v) => edit("title", v ?? "")} />
-      <MoneyField label="Value (highest retail)" cents={enriched.msrp_cents ?? unit.msrpCents}
-        onCommit={(v) => edit("msrp_cents", v)} />
-      {enriched.dims_source === 'estimated' && <p className="text-floor-danger">Estimated dimensions — check before shipping.</p>}
-      <div className="grid grid-cols-2 gap-x-4">
-        {([['product_height_in','Product height (in)'],['product_width_in','Product width (in)'],
-          ['product_depth_in','Product depth (in)'],['product_weight_lb','Product weight (lb)'],
-          ['package_length_in','Box length (in)'],['package_width_in','Box width (in)'],
-          ['package_height_in','Box height (in)'],['package_weight_lb','Box weight (lb)']] as const)
-          .map(([field,label]) => <TextField key={field}
-            label={label + (String(enriched.listing_specs?.dims_sources?.[field]||'').startsWith('estimated')?' · estimated — check':'')}
-            value={enriched[field] == null ? '' : String(enriched[field])} inputMode="decimal"
-            onCommit={(v) => editCloud(field,v)} />)}
-      </div>
-      <div className="grid grid-cols-3 gap-x-4">
-        <TextField
-          label="Width (in)"
-          value={specInchesValue(specs?.width_in)}
-          inputMode="decimal"
-          onCommit={(v) => editSpec("width_in", v ?? "")}
-        />
-        <TextField
-          label="Height (in)"
-          value={specInchesValue(specs?.height_in)}
-          inputMode="decimal"
-          onCommit={(v) => editSpec("height_in", v ?? "")}
-        />
-        <TextField
-          label="Depth (in)"
-          value={specInchesValue(specs?.depth_in)}
-          inputMode="decimal"
-          onCommit={(v) => editSpec("depth_in", v ?? "")}
-        />
-      </div>
-      <TextField
-        label="Weight (lb)"
-        value={specInchesValue(specs?.weight_lb)}
-        inputMode="decimal"
-        onCommit={(v) => editSpec("weight_lb", v ?? "")}
+      {admin ? (
+        <>
+          <TextField label="Brand" value={unit.brand} onCommit={(v) => edit("brand", v ?? "")} />
+          <TextField label="Model" value={unit.model} onCommit={(v) => edit("model", v ?? "")} />
+          <TextField label="Title" value={unit.title} onCommit={(v) => edit("title", v ?? "")} />
+          <MoneyField label="Value (highest retail)" cents={enriched.msrp_cents ?? unit.msrpCents}
+            onCommit={(v) => edit("msrp_cents", v)} />
+          {enriched.dims_source === 'estimated' && <p className="text-floor-danger">Estimated dimensions — check before shipping.</p>}
+          <div className="grid grid-cols-2 gap-x-4">
+            {([['product_height_in','Product height (in)'],['product_width_in','Product width (in)'],
+              ['product_depth_in','Product depth (in)'],['product_weight_lb','Product weight (lb)'],
+              ['package_length_in','Box length (in)'],['package_width_in','Box width (in)'],
+              ['package_height_in','Box height (in)'],['package_weight_lb','Box weight (lb)']] as const)
+              .map(([field,label]) => <TextField key={field}
+                label={label + (String(enriched.listing_specs?.dims_sources?.[field]||'').startsWith('estimated')?' · estimated — check':'')}
+                value={enriched[field] == null ? '' : String(enriched[field])} inputMode="decimal"
+                onCommit={(v) => editCloud(field,v)} />)}
+          </div>
+          <div className="grid grid-cols-3 gap-x-4">
+            <TextField
+              label="Width (in)"
+              value={specInchesValue(specs?.width_in)}
+              inputMode="decimal"
+              onCommit={(v) => editSpec("width_in", v ?? "")}
+            />
+            <TextField
+              label="Height (in)"
+              value={specInchesValue(specs?.height_in)}
+              inputMode="decimal"
+              onCommit={(v) => editSpec("height_in", v ?? "")}
+            />
+            <TextField
+              label="Depth (in)"
+              value={specInchesValue(specs?.depth_in)}
+              inputMode="decimal"
+              onCommit={(v) => editSpec("depth_in", v ?? "")}
+            />
+          </div>
+          <TextField
+            label="Weight (lb)"
+            value={specInchesValue(specs?.weight_lb)}
+            inputMode="decimal"
+            onCommit={(v) => editSpec("weight_lb", v ?? "")}
+          />
+          <TextField
+            label="Description"
+            value={enriched.listing_body || enriched.ai_description || unit.listingBody || ""}
+            multiline
+            onCommit={(v) => saveDescription(v)}
+          />
+          <MoneyField label="Price" cents={unit.askCents} onCommit={(v) => edit("ask_cents", v)} />
+          <UnitCost sku={unit.sku} ensureOnline={ensureOnline} />
+          <SelectField
+            label="Category"
+            value={unit.category}
+            options={settings.categories}
+            onCommit={(v) => edit("category", v)}
+          />
+        </>
+      ) : null}
+
+      <SelectField
+        label="Location"
+        value={unit.location}
+        options={settings.locations}
+        onCommit={(v) => edit("location", v)}
       />
       <SelectField
         label="Condition"
@@ -373,20 +406,15 @@ export function UnitScreen() {
         options={settings.testStatuses}
         onCommit={(v) => edit("test_status", v)}
       />
-      <TextField
-        label="Description"
-        value={enriched.listing_body || enriched.ai_description || unit.listingBody || ""}
-        multiline
-        onCommit={(v) => saveDescription(v)}
-      />
       <TextField label="Defects" value={unit.defectNotes} multiline onCommit={(v) => edit("defect_notes", v)} />
-      <MoneyField label="Price" cents={unit.askCents} onCommit={(v) => edit("ask_cents", v)} />
-      <UnitCost sku={unit.sku} ensureOnline={ensureOnline} />
-      <SelectField
-        label="Category"
-        value={unit.category}
-        options={settings.categories}
-        onCommit={(v) => edit("category", v)}
+      <TextField
+        label="Quantity"
+        value={enriched.qty_on_hand == null ? "1" : String(enriched.qty_on_hand)}
+        inputMode="numeric"
+        onCommit={(v) => {
+          const n = Math.round(Number(v));
+          if (Number.isFinite(n)) void editCloud("qty_on_hand", n);
+        }}
       />
 
       {admin ? (
@@ -413,7 +441,7 @@ export function UnitScreen() {
           </div>
         ) : null}
 
-        {sold && sale && !sale.voidedAt ? (
+        {admin && sold && sale && !sale.voidedAt ? (
           <button
             type="button"
             className="btn-text px-0 text-floor-danger"
@@ -424,14 +452,15 @@ export function UnitScreen() {
           >
             Delete
           </button>
-        ) : (
+        ) : null}
+        {admin && !(sold && sale && !sale.voidedAt) ? (
           <DangerButton
             idle="Delete"
             confirm="Delete forever"
             onConfirm={() => remove()}
             onError={(err) => setError(friendlyRpc(err))}
           />
-        )}
+        ) : null}
 
         {!sold && admin && <MarketplaceSaleButton sku={sku} askCents={unit.askCents} disabled={!online} onDone={async () => { await hydrate(); await refresh(); }} />}
         {!sold && online ? (

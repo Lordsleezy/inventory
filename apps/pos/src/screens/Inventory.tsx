@@ -11,8 +11,10 @@ type Row = {
   model: string | null;
   category: string | null;
   condition: string | null;
+  location?: string | null;
   ask_cents: number | null;
   state: string;
+  qty_on_hand?: number | null;
   acquisition_cost_cents?: number | null;
   floor_cents?: number | null;
 };
@@ -32,8 +34,8 @@ export function InventoryScreen() {
     setError("");
     const sb = floorCloud();
     const cols = isAdmin
-      ? "sku, title, brand, model, category, condition, ask_cents, state, acquisition_cost_cents, floor_cents"
-      : "sku, title, brand, model, category, condition, ask_cents, state";
+      ? "sku, title, brand, model, category, condition, location, ask_cents, state, qty_on_hand, acquisition_cost_cents, floor_cents"
+      : "sku, title, brand, model, category, condition, location, ask_cents, state, qty_on_hand";
     const { data, error: err } = await sb
       .from(isAdmin ? "units" : "units_pos")
       .select(cols)
@@ -80,13 +82,9 @@ export function InventoryScreen() {
     <section className="page">
       <div className="row">
         <h1>Inventory</h1>
-        {isAdmin ? (
-          <button type="button" className="primary" disabled={!online} onClick={() => navigate("/inventory/receive")}>
-            Receive
-          </button>
-        ) : (
-          <span className="muted">View only</span>
-        )}
+        <button type="button" className="primary" disabled={!online} onClick={() => navigate("/inventory/receive")}>
+          Receive
+        </button>
       </div>
       <input className="search" placeholder="Search SKU, title, brand…" value={q} onChange={(e) => setQ(e.target.value)} />
       <div className="row" style={{ marginTop: "0.5rem", gap: "1rem" }}>
@@ -110,6 +108,8 @@ export function InventoryScreen() {
               <div>{[u.brand, u.model].filter(Boolean).join(" ") || u.title}</div>
               <div className="muted">
                 {u.state} · {u.category || "—"} · {u.condition || "—"}
+                {u.location ? ` · ${u.location}` : ""}
+                {u.qty_on_hand && u.qty_on_hand > 1 ? ` · qty ${u.qty_on_hand}` : ""}
               </div>
               {isAdmin && (u.acquisition_cost_cents != null || u.floor_cents != null) ? (
                 <div className="muted">

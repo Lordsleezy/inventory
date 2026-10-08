@@ -26,6 +26,8 @@ export function ReceiveScreen() {
   const [title, setTitle] = useState("");
   const [category, setCategory] = useState("");
   const [condition, setCondition] = useState("");
+  const [location, setLocation] = useState("");
+  const [qty, setQty] = useState("1");
   const [ask, setAsk] = useState("");
   const [cost, setCost] = useState("");
   const [floor, setFloor] = useState("");
@@ -34,9 +36,9 @@ export function ReceiveScreen() {
   const [busy, setBusy] = useState(false);
   const [categories, setCategories] = useState<string[]>([]);
   const [conditions, setConditions] = useState<string[]>([]);
+  const [locations, setLocations] = useState<string[]>([]);
 
   useEffect(() => {
-    if (!isAdmin) return;
     void floorCloud()
       .rpc("next_sku")
       .then(({ data }) => setSku(String(data ?? "")));
@@ -44,31 +46,22 @@ export function ReceiveScreen() {
       .from("store_settings")
       .select("key, value")
       .eq("store_id", session.storeId)
-      .in("key", ["categories", "conditions"])
+      .in("key", ["categories", "conditions", "locations"])
       .then(({ data }) => {
         for (const row of data ?? []) {
           const list = jsonStringList(row.value);
           if (row.key === "categories") setCategories(list);
           if (row.key === "conditions") setConditions(list);
+          if (row.key === "locations") setLocations(list);
         }
       });
-  }, [isAdmin, session.storeId]);
-
-  if (!isAdmin) {
-    return (
-      <section className="page">
-        <p className="error">Only owners and managers can receive inventory.</p>
-        <button type="button" onClick={() => navigate("/inventory")}>
-          Back
-        </button>
-      </section>
-    );
-  }
+  }, [session.storeId]);
 
   async function save(andAnother: boolean) {
     setBusy(true);
     setError("");
     try {
+      const qtyN = Math.max(1, Math.min(9999, Math.round(Number(qty) || 1)));
       const { error: rpcErr } = await floorCloud().rpc("receive_unit", {
         p_sku: sku.trim(),
         p_brand: brand,
@@ -76,12 +69,21 @@ export function ReceiveScreen() {
         p_title: title || [brand, model].filter(Boolean).join(" "),
         p_category: category || null,
         p_condition: condition || null,
-        p_ask_cents: parseMoneyToCents(ask) ?? null,
-        p_cost_cents: parseMoneyToCents(cost) ?? null,
-        p_floor_cents: parseMoneyToCents(floor) ?? null,
+        p_location: location || null,
+        p_ask_cents: isAdmin ? parseMoneyToCents(ask) ?? null : null,
+        p_cost_cents: isAdmin ? parseMoneyToCents(cost) ?? null : null,
+        p_floor_cents: isAdmin ? parseMoneyToCents(floor) ?? null : null,
         p_notes: notes || null,
       });
       if (rpcErr) throw rpcErr;
+      if (qtyN > 1) {
+        const { error: qtyErr } = await floorCloud().rpc("update_unit_field", {
+          p_sku: sku.trim(),
+          p_field: "qty_on_hand",
+          p_value: String(qtyN),
+        });
+        if (qtyErr) throw qtyErr;
+      }
       await refreshUnits();
       if (andAnother) {
         const { data } = await floorCloud().rpc("next_sku");
@@ -92,6 +94,7 @@ export function ReceiveScreen() {
         setCost("");
         setFloor("");
         setNotes("");
+        setQty("1");
       } else {
         navigate(`/inventory/${sku.trim()}`);
       }
@@ -108,6 +111,9 @@ export function ReceiveScreen() {
         Back
       </button>
       <h1>Receive unit</h1>
+      {!isAdmin ? (
+        <p className="muted">Price and cost stay blank so the unit shows in Unfinished for admin pricing.</p>
+      ) : null}
       {error ? <p className="error">{error}</p> : null}
       <label>
         SKU
@@ -161,17 +167,44 @@ export function ReceiveScreen() {
         )}
       </label>
       <label>
-        Ask
-        <input value={ask} onChange={(e) => setAsk(e.target.value)} />
+        Location
+        {locations.length ? (
+          <select value={location} onChange={(e) => setLocation(e.target.value)}>
+            <option value="">Select…</option>
+            {locations.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Floor, Back room…" />
+        )}
       </label>
       <label>
-        Cost
-        <input value={cost} onChange={(e) => setCost(e.target.value)} />
+        Quantity (stocked multiples)
+        <input
+          value={qty}
+          inputMode="numeric"
+          onChange={(e) => setQty(e.target.value.replace(/\D/g, "").slice(0, 4) || "1")}
+        />
       </label>
-      <label>
-        Floor
-        <input value={floor} onChange={(e) => setFloor(e.target.value)} />
-      </label>
+      {isAdmin ? (
+        <>
+          <label>
+            Ask
+            <input value={ask} onChange={(e) => setAsk(e.target.value)} />
+          </label>
+          <label>
+            Cost
+            <input value={cost} onChange={(e) => setCost(e.target.value)} />
+          </label>
+          <label>
+            Floor
+            <input value={floor} onChange={(e) => setFloor(e.target.value)} />
+          </label>
+        </>
+      ) : null}
       <label>
         Notes
         <input value={notes} onChange={(e) => setNotes(e.target.value)} />

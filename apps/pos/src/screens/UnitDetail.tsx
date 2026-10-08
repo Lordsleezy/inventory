@@ -35,13 +35,16 @@ export function UnitDetailScreen() {
     void load();
   }, [sku, isAdmin]);
 
+  const clerkFields = new Set(["condition", "test_status", "location", "defect_notes", "qty_on_hand"]);
+
   async function saveField(field: string, value: string | number | null) {
-    if (!isAdmin) return;
+    if (!isAdmin && !clerkFields.has(field)) return;
     setBusy(true);
     setError("");
     try {
-      const rpc=['ai_description','ebay_title','ebay_category','ebay_item_specifics'].includes(field)
-        ? 'update_enriched_unit_field' : 'update_unit_field';
+      const rpc = ["ai_description", "ebay_title", "ebay_category", "ebay_item_specifics"].includes(field)
+        ? "update_enriched_unit_field"
+        : "update_unit_field";
       const { error: rpcErr } = await floorCloud().rpc(rpc, {
         p_sku: sku,
         p_field: field,
@@ -85,7 +88,7 @@ export function UnitDetailScreen() {
   }
 
   async function onFiles(files: FileList | null) {
-    if (!files?.length || !isAdmin) return;
+    if (!files?.length) return;
     setBusy(true);
     setError("");
     try {
@@ -152,9 +155,57 @@ export function UnitDetailScreen() {
       </p>
       <p className="muted">
         {String(unit.state || "")} · Ask {formatCents(ask) || "—"}
+        {unit.location ? ` · ${String(unit.location)}` : ""}
+        {typeof unit.qty_on_hand === "number" && unit.qty_on_hand > 1 ? ` · qty ${unit.qty_on_hand}` : ""}
       </p>
       {error ? <p className="error">{error}</p> : null}
       {msg ? <p>{msg}</p> : null}
+
+      {!isAdmin ? (
+        <>
+          <p className="muted">Clerks can update location, condition, quantity, notes, and photos. Price and cost are admin-only.</p>
+          <label>
+            Location
+            <input
+              defaultValue={String(unit.location || "")}
+              onBlur={(e) => void saveField("location", e.target.value)}
+              disabled={busy || !online}
+            />
+          </label>
+          <label>
+            Condition
+            <input
+              defaultValue={String(unit.condition || "")}
+              onBlur={(e) => void saveField("condition", e.target.value)}
+              disabled={busy || !online}
+            />
+          </label>
+          <label>
+            Quantity
+            <input
+              defaultValue={unit.qty_on_hand == null ? "1" : String(unit.qty_on_hand)}
+              inputMode="numeric"
+              onBlur={(e) => {
+                const n = Math.round(Number(e.target.value));
+                if (Number.isFinite(n)) void saveField("qty_on_hand", n);
+              }}
+              disabled={busy || !online}
+            />
+          </label>
+          <label>
+            Notes
+            <input
+              defaultValue={String(unit.defect_notes || "")}
+              onBlur={(e) => void saveField("defect_notes", e.target.value)}
+              disabled={busy || !online}
+            />
+          </label>
+          <label>
+            Add photos from disk
+            <input type="file" accept="image/*" multiple disabled={busy || !online} onChange={(e) => void onFiles(e.target.files)} />
+          </label>
+        </>
+      ) : null}
 
       {isAdmin ? (
         <>
@@ -283,13 +334,31 @@ export function UnitDetailScreen() {
             }}>Add</button> : null}
           </div>
           <label>
+            Quantity
+            <input
+              defaultValue={unit.qty_on_hand == null ? "1" : String(unit.qty_on_hand)}
+              inputMode="numeric"
+              onBlur={(e) => {
+                const n = Math.round(Number(e.target.value));
+                if (Number.isFinite(n)) void saveField("qty_on_hand", n);
+              }}
+              disabled={busy || !online}
+            />
+          </label>
+          <label>
+            Location
+            <input
+              defaultValue={String(unit.location || "")}
+              onBlur={(e) => void saveField("location", e.target.value)}
+              disabled={busy || !online}
+            />
+          </label>
+          <label>
             Add photos from disk
             <input type="file" accept="image/*" multiple disabled={busy || !online} onChange={(e) => void onFiles(e.target.files)} />
           </label>
         </>
-      ) : (
-        <p className="muted">Clerks can view units but cannot edit cost, floor, or details.</p>
-      )}
+      ) : null}
 
       <div className="row" style={{ flexWrap: "wrap", alignItems: "flex-start" }}>
         {photos.map((photo) => (
@@ -298,16 +367,18 @@ export function UnitDetailScreen() {
               style={{ width: 128, height: 128, objectFit: 'cover' }} />
               : <span className="muted">Photo unavailable</span>}
             <div>{photo.is_primary ? '★ Main photo' : ''}</div>
-            {isAdmin && <div className="row" style={{ flexWrap: 'wrap' }}>
+            <div className="row" style={{ flexWrap: 'wrap' }}>
               <button type="button" disabled={busy || !online || photo.is_primary}
                 onClick={() => void primary(photo.id)}>Main</button>
               <button type="button" disabled={busy || !online}
                 onClick={() => void move(photo.id, -1)}>←</button>
               <button type="button" disabled={busy || !online}
                 onClick={() => void move(photo.id, 1)}>→</button>
-              <button type="button" disabled={busy || !online}
-                onClick={() => void removePhoto(photo)}>Delete</button>
-            </div>}
+              {isAdmin ? (
+                <button type="button" disabled={busy || !online}
+                  onClick={() => void removePhoto(photo)}>Delete</button>
+              ) : null}
+            </div>
           </div>
         ))}
       </div>   </section>
