@@ -50,9 +50,13 @@ async function handle(event) {
     }
 
     if (action === 'merchant-setup') {
-      await merchantRequest(`accounts/v1alpha/accounts/${account}/developerRegistration:registerGcp`, 'POST', {
-        developerEmail: 'pgg124@gmail.com',
-      });
+      try {
+        await merchantRequest(`accounts/v1alpha/accounts/${account}/developerRegistration:registerGcp`, 'POST', {
+          developerEmail: 'pgg124@gmail.com',
+        });
+      } catch (error) {
+        if (!String(error).includes('already registered')) throw error;
+      }
 
       await merchantRequest(`accounts/v1/accounts/${account}?updateMask=accountName`, 'PATCH', {
         name: `accounts/${account}`, accountName: 'Open Box Industries',
