@@ -35,7 +35,7 @@ export function UnitDetailScreen() {
     void load();
   }, [sku, isAdmin]);
 
-  const clerkFields = new Set(["condition", "test_status", "location", "defect_notes", "qty_on_hand"]);
+  const clerkFields = new Set(["condition", "test_status", "location", "defect_notes", "qty_on_hand", "ask_cents"]);
 
   async function saveField(field: string, value: string | number | null) {
     if (!isAdmin && !clerkFields.has(field)) return;
@@ -163,7 +163,18 @@ export function UnitDetailScreen() {
 
       {!isAdmin ? (
         <>
-          <p className="muted">Clerks can update location, condition, quantity, notes, and photos. Price and cost are admin-only.</p>
+          <p className="muted">Clerks can set selling price, location, condition, quantity, notes, and photos. Cost is admin-only.</p>
+          <label>
+            Price (ask)
+            <input
+              defaultValue={centsToInput(ask)}
+              onBlur={(e) => {
+                const c = parseMoneyToCents(e.target.value);
+                if (c !== undefined) void saveField("ask_cents", c);
+              }}
+              disabled={busy || !online}
+            />
+          </label>
           <label>
             Location
             <input

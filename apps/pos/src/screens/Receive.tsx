@@ -70,7 +70,7 @@ export function ReceiveScreen() {
         p_category: category || null,
         p_condition: condition || null,
         p_location: location || null,
-        p_ask_cents: isAdmin ? parseMoneyToCents(ask) ?? null : null,
+        p_ask_cents: parseMoneyToCents(ask) ?? null,
         p_cost_cents: isAdmin ? parseMoneyToCents(cost) ?? null : null,
         p_floor_cents: isAdmin ? parseMoneyToCents(floor) ?? null : null,
         p_notes: notes || null,
@@ -112,7 +112,7 @@ export function ReceiveScreen() {
       </button>
       <h1>Receive unit</h1>
       {!isAdmin ? (
-        <p className="muted">Price and cost stay blank so the unit shows in Unfinished for admin pricing.</p>
+        <p className="muted">You can set the selling price. Cost stays blank for admin.</p>
       ) : null}
       {error ? <p className="error">{error}</p> : null}
       <label>
@@ -189,12 +189,12 @@ export function ReceiveScreen() {
           onChange={(e) => setQty(e.target.value.replace(/\D/g, "").slice(0, 4) || "1")}
         />
       </label>
+      <label>
+        Price (ask)
+        <input value={ask} onChange={(e) => setAsk(e.target.value)} placeholder="optional" />
+      </label>
       {isAdmin ? (
         <>
-          <label>
-            Ask
-            <input value={ask} onChange={(e) => setAsk(e.target.value)} />
-          </label>
           <label>
             Cost
             <input value={cost} onChange={(e) => setCost(e.target.value)} />
