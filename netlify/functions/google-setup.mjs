@@ -23,7 +23,7 @@ async function siteRequest(path, method, body) {
     ...(body ? { body: JSON.stringify(body) } : {}),
   });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(`Site Verification API ${response.status}`);
+  if (!response.ok) throw new Error(`Site Verification API ${response.status}: ${data.error?.message || "request_failed"}`);
   return data;
 }
 
