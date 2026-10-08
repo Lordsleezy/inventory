@@ -4,7 +4,7 @@ import { merchantRequest } from '../lib/google-merchant.mjs';
 import { wrapHandler } from '../lib/floor-log.mjs';
 import { fallbackRate } from '../lib/shippo.mjs';
 
-const enabled = () => process.env.GOOGLE_MERCHANT_ENABLED === 'true' && !!process.env.GOOGLE_OAUTH_CLIENT_ID && !!process.env.GOOGLE_OAUTH_CLIENT_SECRET && !!process.env.GOOGLE_REFRESH_TOKEN && !!process.env.GOOGLE_MERCHANT_ACCOUNT_ID && !!process.env.GOOGLE_DATA_SOURCE_ID;
+const enabled = () => process.env.GOOGLE_MERCHANT_ENABLED === 'true' && !!process.env.GOOGLE_OAUTH_CLIENT_ID && !!process.env.GOOGLE_REFRESH_TOKEN && !!process.env.GOOGLE_MERCHANT_ACCOUNT_ID && !!process.env.GOOGLE_DATA_SOURCE_ID;
 const gtinValid = (s) => { const x=String(s||'').replace(/\D/g,''); if(![12,13,14].includes(x.length))return false; let sum=0; for(let i=x.length-2,j=0;i>=0;i--,j++)sum+=Number(x[i])*(j%2?1:3); return (10-sum%10)%10===Number(x.at(-1)); };
 const skuId = (sku) => Buffer.from(`en~US~${sku}`).toString('base64url');
 const account = () => process.env.GOOGLE_MERCHANT_ACCOUNT_ID;
