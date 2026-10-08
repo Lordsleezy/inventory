@@ -101,11 +101,15 @@ async function handle(event) {
         });
       }
 
+      const freeListings = await merchantRequest(`accounts/v1/accounts/${account}/programs/free-listings:enable`, 'POST', {});
+
       return json(200, {
         accountId: account, accountName: 'Open Box Industries',
         homepageClaimed: true, businessInfoUpdated: true,
         dataSourceId: dataSource.dataSourceId,
         returnPolicyId: returnPolicy.returnPolicyId,
+        freeListingsState: freeListings.state,
+        freeListingsUnmetRequirements: (freeListings.unmetRequirements || []).map((item) => item.title),
       });
     }
 
