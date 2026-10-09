@@ -38,7 +38,7 @@ const stamp = (s: string) => new Intl.DateTimeFormat('en-US', { timeZone: zone, 
 type Line = { id: number; ticket_key: string; sku: string; title: string; qty: number; sold_at: string; price_cents: number; tax_cents: number; card_fee_cents: number; cost_cents: number | null; payment_method: string | null; cash_cents: number | null; card_cents: number | null; actor_id: string | null; actor_name: string; channel: string; receipt_no: string; list_price_cents: number | null; override_price_cents: number | null; override_reason: string | null; override_by_name: string | null; ebay_fee_cents?: number | null; baked_ship_cents?: number | null; cost_source?: string | null; channel_fee_cents?: number | null; fee_source?: string | null; ship_cost_cents?: number | null; ship_cost_source?: string | null; processing_fee_cents?: number | null; processing_fee_source?: string | null; tax_remitted_by?: string | null; tax_collected_cents?: number | null; tax_owed_cents?: number | null; ask_cents?: number | null; variance_cents?: number | null; profit_cents?: number | null };
 type Ticket = { key: string; at: string; lines: Line[]; subtotal: number; tax: number; fee: number; total: number; cash: number; card: number; method: string; actorId: string | null; actor: string; cost: number | null; channel: string; ebayFeeCents: number; bakedShipCents: number; feeCents: number; shipCostCents: number; processingFeeCents: number; costEstimated: boolean; taxOwedCents: number; taxCollectedCents: number; varianceCents: number | null; profitCents: number | null };
 type Person = { user_id: string; display_name: string; kind: string };
-type Payment = { id: string; employee_id: string; amount_cents: number; paid_at: string; paid_by: string; legacy_ticket_key: string | null };
+type Payment = { id: string; employee_id: string; amount_cents: number; paid_at: string; paid_by: string; legacy_ticket_key: string | null; note: string | null };
 type Expense = { description: string; category: string; amount_cents: number; needs_reimbursement?: boolean; employee_id?: string };
 type Summary = { sales_cents: number; tax_cents: number; card_fee_cents: number; collected_cents: number; cash_cents: number; card_cents: number; other_cents: number; sale_count: number; payout_cents: number; payout_unset: number };
 type Report = { id: string; period_type: 'daily' | 'weekly'; period_start: string; period_end: string; summary: Summary; expenses: Expense[]; notes: string; created_at: string; created_by: string; edited_at: string; edited_by: string };
@@ -105,7 +105,7 @@ async function storedPayments(storeId: string) {
   const payments: Payment[] = [];
   for (let offset = 0;; offset += 1000) {
     const batch = check<Payment[]>(await sb.from('portal_payout_payments')
-      .select('id,employee_id,amount_cents,paid_at,paid_by,legacy_ticket_key')
+      .select('id,employee_id,amount_cents,paid_at,paid_by,legacy_ticket_key,note')
       .eq('store_id', storeId).order('paid_at', { ascending: false })
       .range(offset, offset + 999));
     payments.push(...batch);
@@ -156,7 +156,7 @@ export function App() {
     if (!store) return;
     try {
       const [p, r, a, x, c] = await Promise.all([
-        sb.rpc('portal_people'), sb.from('portal_payout_rules').select('employee_id,method,rate,prior_method,prior_rate,effective_from').eq('store_id', store),
+        sb.rpc('portal_people'), sb.from('portal_payout_rules').select('employee_id,method,rate').eq('store_id', store),
         storedReports(store),
         sb.from('portal_expenses').select('*').eq('store_id', store).order('spent_on', { ascending: false }).order('created_at', { ascending: false }).limit(500),
         sb.rpc('portal_payout_config')
@@ -192,7 +192,24 @@ export function App() {
   function viewReport(r: Report, editable = false) { setEditing(r); setReportReadOnly(!editable); setReportDraft({ start: r.period_start, end: r.period_end, summary: r.summary, expenses: r.expenses, notes: r.notes }); }
   async function saveReport() { if (!store || !session || !editing || !draft) return; if (draft.expenses.some(x => !x.description.trim() || !Number.isFinite(x.amount_cents) || x.amount_cents < 0 || (x.needs_reimbursement && !people.some(p => p.kind === 'employee' && p.user_id === x.employee_id)))) { setError('Every expense needs a description, amount, and valid reimbursement recipient.'); return; } await run(async () => { const payload = { store_id: store, period_type: typeof editing === 'string' ? editing : editing.period_type, period_start: draft.start, period_end: draft.end, summary: draft.summary, expenses: draft.expenses, notes: draft.notes, edited_by: session.user.id, created_by: session.user.id }; if (typeof editing === 'string') check(await sb.from('portal_reports').insert(payload)); else check(await sb.from('portal_reports').update({ expenses: payload.expenses, notes: payload.notes, edited_by: session.user.id }).eq('id', editing.id)); setEditing(null); setReportDraft(null); await loadCommon(); }); }
   async function setRule(id: string, method: Rule['method'], rate: number) { if (!store || !session) return; await run(async () => { check(await sb.from('portal_payout_rules').upsert({ store_id: store, employee_id: id, method, rate, updated_at: new Date().toISOString(), updated_by: session.user.id })); await loadCommon(); }); }
-  async function recordPayment(employeeId: string, amountCents: number): Promise<string | null> { if (!store || !session) return 'Sign in again before recording a payment.'; setBusy(true); setError(''); try { const saved = check<Payment>(await sb.from('portal_payout_payments').insert({ store_id: store, employee_id: employeeId, amount_cents: amountCents, paid_by: session.user.id }).select('id,employee_id,amount_cents,paid_at,paid_by,legacy_ticket_key').single()); setPayments(current => [saved, ...current.filter(p => p.id !== saved.id)]); return null; } catch (e) { const message = e instanceof Error ? e.message : String(e); setError(message); return message; } finally { setBusy(false); } }
+  async function recordPayment(employeeId: string, amountCents: number, paidAt: string, note: string): Promise<string | null> {
+    if (!store || !session) return 'Sign in again before recording a payment.';
+    setBusy(true); setError('');
+    try {
+      const paidIso = paidAt.includes('T') ? paidAt : `${paidAt}T12:00:00`;
+      const saved = check<Payment>(await sb.from('portal_payout_payments').insert({
+        store_id: store, employee_id: employeeId, amount_cents: amountCents,
+        paid_at: new Date(paidIso).toISOString(),
+        note: note.trim() || null, paid_by: session.user.id,
+      }).select('id,employee_id,amount_cents,paid_at,paid_by,legacy_ticket_key,note').single());
+      setPayments(current => [saved, ...current.filter(p => p.id !== saved.id)]);
+      return null;
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      setError(message);
+      return message;
+    } finally { setBusy(false); }
+  }
   async function downloadReports(selected: Report[], all: boolean) { await run(async () => { const { downloadReportWorkbook } = await import('./reportExport'); await downloadReportWorkbook(selected, reportLines, personName, all); }); }
 
   if (!session) return <main className="auth"><div className="login"><div className="brand">OPEN BOX <span>INDUSTRIES</span></div><h1>Floor Admin</h1><p>Sign in to view your store.</p><form onSubmit={e => { e.preventDefault(); void run(async () => { const result = await sb.auth.signInWithPassword({ email, password }); if (result.error) throw result.error; }); }}><label>Email<input type="email" autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} required /></label><label>Password<input type="password" autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} required /></label><button disabled={busy}>Sign in</button></form>{error && <p className="error">{error}</p>}</div></main>;
@@ -224,7 +241,7 @@ function ExpenseAmount({cents,onCommit,disabled}:{cents:number;onCommit:(cents:n
     onBlur={() => { const clean = cleanMoney(text); setText(clean); onCommit(Math.round(Number(clean)*100)); }} />;
 }
 type LedgerEntry = { at: string; kind: 'sale' | 'online' | 'reimbursement' | 'payment'; amount: number | null; detail: string; note?: string };
-function PayoutsPage({allSales,staff,rules,payments,reports,expenses,cfg,personName,busy,recordPayment}:{allSales:Ticket[];staff:Person[];rules:Rule[];payments:Payment[];reports:Report[];expenses:StoreExpense[];cfg:OnlineCfg;personName:(id:string)=>string;busy:boolean;recordPayment:(id:string,amount:number)=>Promise<string | null>}) {
+function PayoutsPage({allSales,staff,rules,payments,reports,expenses,cfg,personName,busy,recordPayment}:{allSales:Ticket[];staff:Person[];rules:Rule[];payments:Payment[];reports:Report[];expenses:StoreExpense[];cfg:OnlineCfg;personName:(id:string)=>string;busy:boolean;recordPayment:(id:string,amount:number,paidAt:string,note:string)=>Promise<string | null>}) {
   const active = staff.filter(p => rules.some(r => r.employee_id === p.user_id));
   const profits = allSales.map(t => remainingProfit(t,rules,cfg));
   const totalProfit = profits.some(x => x === null) ? null : profits.reduce<number>((n,x) => n + (x || 0),0);
@@ -253,35 +270,44 @@ function PayoutsPage({allSales,staff,rules,payments,reports,expenses,cfg,personN
     })));
     const paid: LedgerEntry[] = payments.filter(p => p.employee_id === person.user_id).map(p => ({
       at: p.paid_at, kind: 'payment' as const, amount: -p.amount_cents,
-      detail: `Recorded by ${personName(p.paid_by)}`, note: p.legacy_ticket_key ? 'Previous per-sale payment' : undefined
+      detail: `Recorded by ${personName(p.paid_by)}`, note: p.note || (p.legacy_ticket_key ? 'Previous per-sale payment' : undefined)
     }));
     const entries = [...saleEntries,...reimbursements,...paid].sort((a,b)=>b.at.localeCompare(a.at));
-    const balance = entries.reduce((n,e)=>n+(e.amount || 0),0);
-    return {person,balance,entries};
+    const earned = saleEntries.reduce((n,e)=>n+(e.amount || 0),0) + reimbursements.reduce((n,e)=>n+(e.amount || 0),0);
+    const paidTotal = payments.filter(p => p.employee_id === person.user_id).reduce((n,p)=>n+p.amount_cents,0);
+    const balance = earned - paidTotal;
+    return {person,balance,earned,paidTotal,entries};
   });
+  const totalEarned = cards.reduce((n,c)=>n+c.earned,0);
+  const totalPaid = cards.reduce((n,c)=>n+c.paidTotal,0);
   const totalOwed = cards.reduce((n,c)=>n+c.balance,0);
   return <>
-    <header><div><div className="eyebrow">TEAM EARNINGS</div><h1>Payouts</h1><p>Every payout is a percent of real profit: sale price − channel fees − label/shipping cost − card processing − item cost. Online sales pay {personName(cfg.employeeId || '')} {cfg.pct}% of profit; tax, card-fee surcharge, and buyer-paid shipping are pass-through. Balances carry forward until paid; refunded orders drop out automatically.</p></div></header>
-    <div className="stats payout-stats"><Stat name="Total owed" value={money(totalOwed)} /><Stat name="Remaining profit" value={totalProfit === null ? 'Pending commission' : money(totalProfit)} /><Stat name="Online sales" value={String(onlineSales.length)} />{needsCost > 0 && <Stat name="Online sales needing cost" value={String(needsCost)} />}</div>
+    <header><div><div className="eyebrow">TEAM EARNINGS</div><h1>Payouts</h1><p>Profit rules apply to every sale on record. Balance = earned − payments. Online sales pay {personName(cfg.employeeId || '')} {cfg.pct}% of profit (sale − fees − shipping − processing − cost). Tax and buyer-paid shipping are pass-through.</p></div></header>
+    <div className="stats payout-stats"><Stat name="Total earned" value={money(totalEarned)} /><Stat name="Total paid" value={money(totalPaid)} /><Stat name="Balance owed" value={money(totalOwed)} /><Stat name="Remaining profit" value={totalProfit === null ? 'Pending commission' : money(totalProfit)} />{needsCost > 0 && <Stat name="Online sales needing cost" value={String(needsCost)} />}</div>
     {needsCost > 0 && <div className="alert" role="status">{needsCost} online sale{needsCost === 1 ? '' : 's'} can’t be paid out until the unit’s cost is filled in. Use Inventory → Needs attention → Missing cost; payouts calculate as soon as you save.</div>}
     {cards.length === 0 && <section className="panel"><Empty>No employee payout rules set.</Empty></section>}
     {cards.map(card => <PayoutCard key={card.person.user_id} {...card} busy={busy} recordPayment={recordPayment} />)}
   </>;
 }
-function PayoutCard({person,balance,entries,busy,recordPayment}:{person:Person;balance:number;entries:LedgerEntry[];busy:boolean;recordPayment:(id:string,amount:number)=>Promise<string | null>}) {
+function PayoutCard({person,balance,earned,paidTotal,entries,busy,recordPayment}:{person:Person;balance:number;earned:number;paidTotal:number;entries:LedgerEntry[];busy:boolean;recordPayment:(id:string,amount:number,paidAt:string,note:string)=>Promise<string | null>}) {
   const [amount,setAmount] = useState('');
+  const [paidOn,setPaidOn] = useState(today);
+  const [note,setNote] = useState('');
   const [paymentError,setPaymentError] = useState('');
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setPaymentError('');
     const cents = Math.round(Number(amount)*100);
     if (!Number.isFinite(cents) || cents <= 0) { setPaymentError('Enter an amount greater than zero.'); return; }
+    if (!paidOn) { setPaymentError('Choose a payment date.'); return; }
     if (cents > balance && !window.confirm(`This payment exceeds ${person.display_name}'s ${money(balance)} balance. Record ${money(cents)} anyway?`)) return;
-    const failure = await recordPayment(person.user_id,cents);
-    if (failure) setPaymentError(failure); else setAmount('');
+    const failure = await recordPayment(person.user_id,cents,paidOn,note);
+    if (failure) setPaymentError(failure);
+    else { setAmount(''); setNote(''); setPaidOn(today()); }
   }
-  return <section className="panel payout-card"><div className="payout-card-top"><div><h2>{person.display_name}</h2><strong>{money(balance)} owed</strong><div className="hint">{(() => { const sum = (k: LedgerEntry['kind']) => entries.filter(x => x.kind === k).reduce((n,x) => n + (x.amount || 0), 0); const pending = entries.filter(x => x.kind === 'online' && x.amount === null).length; return `In-store ${money(sum('sale'))} · Online ${money(sum('online'))}${pending ? ` (+${pending} needs cost)` : ''} · Reimbursements ${money(sum('reimbursement'))} · Paid ${money(-sum('payment'))}`; })()}</div></div><form onSubmit={e=>void submit(e)}><label>Payment amount<input type="text" inputMode="decimal" value={amount} onChange={e=>{ if (moneyEntry.test(e.target.value)) setAmount(e.target.value); }} onBlur={() => { if (amount) setAmount(cleanMoney(amount)); }} required /></label><button disabled={busy || !amount}>Paid</button></form></div>{paymentError && <p className="error" role="alert">{paymentError}</p>}<details><summary>Balance breakdown ({entries.length})</summary><div className="ledger-list">{entries.map((e,i)=><div className="ledger-row" key={i}><div><strong>{e.kind === 'sale' ? 'In-store sale' : e.kind === 'online' ? 'Online sale' : e.kind === 'payment' ? 'Payment' : 'Reimbursement'} · {stamp(e.at)}</strong><span>{e.detail}</span>{e.note && <small>{e.note}</small>}</div><b>{e.amount === null ? 'Needs cost' : (e.amount < 0 ? '−' : '+') + money(Math.abs(e.amount))}</b></div>)}</div></details></section>;
-}function RuleEditor({person,rule,save,busy}:{person:Person;rule?:Rule;save:(id:string,m:Rule['method'],r:number)=>Promise<void>;busy:boolean}) { const [method,setMethod]=useState<Rule['method']>(rule?.method||'percent_sale'); const [rate,setRate]=useState(String(rule?.rate??'')); useEffect(()=>{setMethod(rule?.method||'percent_sale');setRate(String(rule?.rate??''));},[rule]); return <form className="rule-row" onSubmit={e=>{e.preventDefault();void save(person.user_id,method,Number(rate));}}><strong>{person.display_name}</strong><select aria-label={`Cut type for ${person.display_name}`} value={method} onChange={e=>setMethod(e.target.value as Rule['method'])}><option value="percent_sale">Percent of sale</option><option value="flat_ticket">Flat per sale</option><option value="percent_profit">Percent of profit</option></select><label><input type={method==='flat_ticket'?'text':'number'} inputMode="decimal" min={method==='flat_ticket'?undefined:0} max={method==='flat_ticket'?undefined:100} step="0.01" required value={rate} onChange={e=>{ if (method!=='flat_ticket' || moneyEntry.test(e.target.value)) setRate(e.target.value); }} onBlur={() => { if (method==='flat_ticket' && rate) setRate(cleanMoney(rate)); }} />{method==='flat_ticket'?'$':'%'}</label><button disabled={busy}>Save</button></form>; }
+  return <section className="panel payout-card"><div className="payout-card-top"><div><h2>{person.display_name}</h2><strong>{money(balance)} owed</strong><div className="hint">Earned {money(earned)} − Paid {money(paidTotal)}{(() => { const pending = entries.filter(x => (x.kind === 'sale' || x.kind === 'online') && x.amount === null).length; return pending ? ` · ${pending} sale${pending === 1 ? '' : 's'} need cost` : ''; })()}</div></div><form className="payment-form" onSubmit={e=>void submit(e)}><label>Amount<input type="text" inputMode="decimal" value={amount} onChange={e=>{ if (moneyEntry.test(e.target.value)) setAmount(e.target.value); }} onBlur={() => { if (amount) setAmount(cleanMoney(amount)); }} required /></label><label>Date<input type="date" value={paidOn} onChange={e=>setPaidOn(e.target.value)} required /></label><label className="payment-note">Note<input type="text" value={note} onChange={e=>setNote(e.target.value.slice(0,500))} placeholder="Optional" /></label><button disabled={busy || !amount}>Paid</button></form></div>{paymentError && <p className="error" role="alert">{paymentError}</p>}<details><summary>Balance breakdown ({entries.length})</summary><div className="ledger-list">{entries.map((e,i)=><div className="ledger-row" key={i}><div><strong>{e.kind === 'sale' ? 'In-store sale' : e.kind === 'online' ? 'Online sale' : e.kind === 'payment' ? 'Payment' : 'Reimbursement'} · {stamp(e.at)}</strong><span>{e.detail}</span>{e.note && <small>{e.note}</small>}</div><b>{e.amount === null ? 'Needs cost' : (e.amount < 0 ? '−' : '+') + money(Math.abs(e.amount))}</b></div>)}</div></details></section>;
+}
+function RuleEditor({person,rule,save,busy}:{person:Person;rule?:Rule;save:(id:string,m:Rule['method'],r:number)=>Promise<void>;busy:boolean}) { const [method,setMethod]=useState<Rule['method']>(rule?.method||'percent_sale'); const [rate,setRate]=useState(String(rule?.rate??'')); useEffect(()=>{setMethod(rule?.method||'percent_sale');setRate(String(rule?.rate??''));},[rule]); return <form className="rule-row" onSubmit={e=>{e.preventDefault();void save(person.user_id,method,Number(rate));}}><strong>{person.display_name}</strong><select aria-label={`Cut type for ${person.display_name}`} value={method} onChange={e=>setMethod(e.target.value as Rule['method'])}><option value="percent_sale">Percent of sale</option><option value="flat_ticket">Flat per sale</option><option value="percent_profit">Percent of profit</option></select><label><input type={method==='flat_ticket'?'text':'number'} inputMode="decimal" min={method==='flat_ticket'?undefined:0} max={method==='flat_ticket'?undefined:100} step="0.01" required value={rate} onChange={e=>{ if (method!=='flat_ticket' || moneyEntry.test(e.target.value)) setRate(e.target.value); }} onBlur={() => { if (method==='flat_ticket' && rate) setRate(cleanMoney(rate)); }} />{method==='flat_ticket'?'$':'%'}</label><button disabled={busy}>Save</button></form>; }
 
 function OnlinePayoutSettings({cfg,staff,busy,save}:{cfg:OnlineCfg;staff:Person[];busy:boolean;save:(channels:string[],pct:number,who:string)=>Promise<void>}) {
   const [who,setWho]=useState(cfg.employeeId||''); const [pct,setPct]=useState(String(cfg.pct)); const [channels,setChannels]=useState(cfg.channels.join(', '));
