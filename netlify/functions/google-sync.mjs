@@ -71,6 +71,7 @@ async function syncOne(sb, row) {
   ...(shippable?{shippingLabel:'website-shippable',shipping:[{country:'US',service:webRate.service,price:{amountMicros:String(webRate.amount_cents*10000),currencyCode:'USD'},minHandlingTime:'2',maxHandlingTime:'2'}],...googlePackageAttributes(unit)}:{}),
  };
  await merchantRequest(`products/v1/accounts/${account()}/productInputs:insert?dataSource=${encodeURIComponent(dataSource())}`,'POST',{offerId:String(unit.sku),contentLanguage:'en',feedLabel:'US',productAttributes:attrs});
+ await sb.from('google_product_index').upsert({store_id:row.store_id,sku:row.sku,updated_at:new Date().toISOString()});
  if(!shippable) {
   if(!process.env.GOOGLE_STORE_CODE)throw new Error('google_store_code_missing');
   await merchantRequest(`inventories/v1/${productParent(row.sku)}/localInventories:insert`,'POST',{
@@ -78,7 +79,6 @@ async function syncOne(sb, row) {
    localInventoryAttributes:{price:{amountMicros:priceMicros,currencyCode:'USD'},availability:'IN_STOCK',pickupMethod:'BUY',pickupSla:'TWO_DAY'},
   });
  } else await removeLocalInventory(row.sku);
- await sb.from('google_product_index').upsert({store_id:row.store_id,sku:row.sku,updated_at:new Date().toISOString()});
  await sb.from('google_sync_queue').delete().eq('store_id',row.store_id).eq('sku',row.sku); return shippable?'upserted-online':'upserted-local';
 }
 async function handle(event){if(event.httpMethod==='OPTIONS')return{statusCode:204,headers:corsHeaders(),body:''}; if(!enabled())return json(200,{disabled:true}); try{const sb=serviceClient(); const result=await withLock('google-sync',180,async()=>{let done=0,errors=0;for(let i=0;i<15;i++){if(await dbBusy(sb))break;const {data,error}=await sb.from('google_sync_queue').select('store_id,sku,action,attempts').order('queued_at').limit(1).maybeSingle();if(error)throw error;if(!data)break;try{await syncOne(sb,data);done++;}catch(e){errors++;await sb.from('google_sync_queue').update({attempts:data.attempts+1,last_error:String(e).slice(0,500),queued_at:new Date(Date.now()+Math.min(3600000,30000*2**Math.min(data.attempts,6))).toISOString()}).eq('store_id',data.store_id).eq('sku',data.sku);if(/Google OAuth|Merchant API 401/i.test(String(e)))break;}}return{done,errors};},sb);return json(200,result);}catch(e){return json(500,{error:String(e).slice(0,500)});}}
