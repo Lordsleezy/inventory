@@ -5,6 +5,7 @@ export async function merchantAccessToken() {
     body: new URLSearchParams({
       grant_type: 'refresh_token',
       client_id: env('GOOGLE_OAUTH_CLIENT_ID'),
+      client_secret: env('GOOGLE_OAUTH_CLIENT_SECRET'),
       refresh_token: env('GOOGLE_REFRESH_TOKEN'),
     }),
   });
