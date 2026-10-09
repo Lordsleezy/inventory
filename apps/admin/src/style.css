@@ -12,4 +12,4 @@
 
 /* Keep the full desktop menu reachable without scrolling the page beside it. */
 aside{height:100dvh;overflow-y:auto;overscroll-behavior:contain}aside nav,aside .account{flex:none}
-@media(max-width:900px){aside{height:auto;overflow:visible}aside nav{overflow-x:auto;overscroll-behavior-inline:contain;scrollbar-width:thin;-webkit-overflow-scrolling:touch}aside nav button{flex:none}}
+.settings-gear{align-self:start;border:0;background:transparent;color:#506174;font-size:1.15rem;line-height:1;padding:4px 8px;border-radius:8px}.settings-gear:hover,.settings-gear.active{background:#eaf3f4;color:#145163}.settings-gear-nav{display:none!important}.report-tabs{margin-top:-4px}.inventory-tabs.report-tabs button{font-size:.88rem;padding:10px 14px!important}@media(max-width:900px){aside{height:auto;overflow:visible}aside nav{overflow-x:auto;overscroll-behavior-inline:contain;scrollbar-width:thin;-webkit-overflow-scrolling:touch}aside nav button{flex:none}.settings-gear-nav{display:inline-block!important;flex:none;padding:9px 11px!important}.account .settings-gear{display:none}}

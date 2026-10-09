@@ -579,18 +579,71 @@ grant execute on function public.portal_set_channel_fee_rate(text, numeric, int,
   public.portal_delete_cost_default(text), public.portal_set_tax_remitted(text, boolean)
   to authenticated;
 
--- ── Payout rules: in-store is percent of PROFIT — owner 20%, Jacob 10% ─────
+-- ── Payout rules: in-store percent of PROFIT from this migration forward ───
+-- Paul (ME) 20%, Jacob 10%. Target by display_name — never by role='owner'
+-- (Steve must not receive Paul's cut if ownership changes).
+-- prior_* + effective_from keep pre-cutover sales on the old rates;
+-- portal_payout_payments rows are never rewritten.
 
-insert into public.portal_payout_rules (store_id, employee_id, method, rate, updated_by)
-select st.store_id, st.user_id, 'percent_profit', 20, st.user_id
+alter table public.portal_payout_rules
+  add column if not exists prior_method text
+    check (prior_method is null or prior_method in ('percent_sale','flat_ticket','percent_profit')),
+  add column if not exists prior_rate numeric,
+  add column if not exists effective_from timestamptz;
+
+-- Paul: 20% of profit going forward (preserve previous rule for older sales).
+update public.portal_payout_rules r
+set prior_method = coalesce(r.prior_method, r.method),
+    prior_rate = coalesce(r.prior_rate, r.rate),
+    method = 'percent_profit',
+    rate = 20,
+    effective_from = coalesce(r.effective_from, now()),
+    updated_at = now()
 from public.staff st
-where st.role = 'owner' and st.deactivated_at is null
-on conflict (store_id, employee_id) do update set method = 'percent_profit', rate = 20, updated_at = now();
+where r.store_id = st.store_id and r.employee_id = st.user_id
+  and lower(btrim(st.display_name)) = 'paul'
+  and st.deactivated_at is null;
 
-insert into public.portal_payout_rules (store_id, employee_id, method, rate, updated_by)
-select st.store_id, st.user_id, 'percent_profit', 10, st.user_id
+insert into public.portal_payout_rules (store_id, employee_id, method, rate, updated_by, effective_from)
+select st.store_id, st.user_id, 'percent_profit', 20, st.user_id, now()
+from public.staff st
+where lower(btrim(st.display_name)) = 'paul' and st.deactivated_at is null
+  and not exists (
+    select 1 from public.portal_payout_rules r
+    where r.store_id = st.store_id and r.employee_id = st.user_id
+  );
+
+-- Jacob: 10% of profit going forward.
+update public.portal_payout_rules r
+set prior_method = coalesce(r.prior_method, r.method),
+    prior_rate = coalesce(r.prior_rate, r.rate),
+    method = 'percent_profit',
+    rate = 10,
+    effective_from = coalesce(r.effective_from, now()),
+    updated_at = now()
+from public.staff st
+where r.store_id = st.store_id and r.employee_id = st.user_id
+  and lower(st.display_name) like 'jacob%'
+  and st.deactivated_at is null;
+
+insert into public.portal_payout_rules (store_id, employee_id, method, rate, updated_by, effective_from)
+select st.store_id, st.user_id, 'percent_profit', 10, st.user_id, now()
 from public.staff st
 where lower(st.display_name) like 'jacob%' and st.deactivated_at is null
-on conflict (store_id, employee_id) do update set method = 'percent_profit', rate = 10, updated_at = now();
+  and not exists (
+    select 1 from public.portal_payout_rules r
+    where r.store_id = st.store_id and r.employee_id = st.user_id
+  );
+
+-- Online: 30% of profit to Paul (settings already drive online payout math).
+insert into public.store_settings (store_id, key, value)
+select st.store_id, d.key, d.value
+from public.staff st
+cross join lateral (values
+  ('online_payout_employee_id', to_jsonb(st.user_id::text)),
+  ('online_payout_pct', '30'::jsonb)
+) d(key, value)
+where lower(btrim(st.display_name)) = 'paul' and st.deactivated_at is null
+on conflict (store_id, key) do update set value = excluded.value;
 
 commit;

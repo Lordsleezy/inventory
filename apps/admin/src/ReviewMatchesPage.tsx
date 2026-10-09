@@ -11,7 +11,7 @@ type Review = {
 const pageSize = 12;
 const functionsBase = (import.meta.env.VITE_FLOOR_FUNCTIONS_URL || 'https://inventoryobi.netlify.app').replace(/\/$/, '');
 
-export function ReviewMatchesPage({ client, accessToken }: { client: SupabaseClient; accessToken: string }) {
+export function ReviewMatchesPage({ client, accessToken, embedded }: { client: SupabaseClient; accessToken: string; embedded?: boolean }) {
   const [reviews, setReviews] = useState<Review[]>([]);
   const [page, setPage] = useState(0);
   const [photos, setPhotos] = useState<Record<string,string>>({});
@@ -66,8 +66,9 @@ export function ReviewMatchesPage({ client, accessToken }: { client: SupabaseCli
   }
 
   return <>
-    <header><div><div className="eyebrow">PRODUCT MATCHING</div><h1>Review matches</h1>
-      <p>Compare your unit with a possible product match. Approval publishes its photos and description.</p></div></header>
+    {!embedded && <header><div><div className="eyebrow">PRODUCT MATCHING</div><h1>Review matches</h1>
+      <p>Compare your unit with a possible product match. Approval publishes its photos and description.</p></div></header>}
+    {embedded && <div className="section-head" style={{ marginBottom: 12 }}><div><h2>Review matches</h2><p className="hint" style={{ margin: 0 }}>Approve or reject candidate product matches.</p></div></div>}
     {error && <div className="alert" role="alert">{error}</div>}
     <section className="panel">
       <h2>{new Set(reviews.map(review => review.sku)).size} units · {reviews.length} candidates waiting for review</h2>

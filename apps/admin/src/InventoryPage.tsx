@@ -3,6 +3,8 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { ReceivePanel } from './ReceivePanel';
 import { VideoScanBudget } from './VideoScanBudget';
 import { UnitShippingPanel } from './UnitShippingPanel';
+import { NeedsAttentionPanel } from './NeedsAttentionPanel';
+import type { AttentionSection, InventoryTab } from './navigation';
 
 type Row = {
   sku: string; brand: string; model: string; title: string; condition: string | null;
@@ -15,7 +17,12 @@ type Sale = { sold_at: string; price_cents: number; actor_name: string; receipt_
 type Elig = { channel: string; status: string; reason: string; source: string; strike?: boolean; override?: { decision: string; note: string } | null };
 type Detail = { unit: Record<string, unknown>; photos: Photo[]; listings: Listing[]; sales: Sale[] };
 type List = { items: Row[]; totals: { unit_count: number; retail_cents: number; cost_cents: number; missing_cost: number } };
-type Props = { client: SupabaseClient; storeId: string; money: (n: number) => string; stamp: (s: string) => string };
+type Props = {
+  client: SupabaseClient; storeId: string; money: (n: number) => string; stamp: (s: string) => string;
+  tab: InventoryTab; onTab: (t: InventoryTab) => void;
+  attentionSection: AttentionSection; onAttentionSection: (s: AttentionSection) => void;
+  accessToken: string; busy: boolean; run: (f: () => Promise<void>) => Promise<void>; onCostChanged: () => void;
+};
 
 const label = (s: string) => s === 'available' ? 'In stock' : s.replace(/_/g, ' ').replace(/^./, c => c.toUpperCase());
 const name = (u: Row) => [u.brand, u.model].filter(Boolean).join(' ') || u.title || 'Untitled unit';
@@ -26,8 +33,7 @@ function thumb(path: string) {
   return `${parts[0]}/${parts[1]}/web/400/${stem}.webp`;
 }
 
-export function InventoryPage({ client, storeId, money, stamp }: Props) {
-  const [tab, setTab] = useState<'browse' | 'receive'>('browse');
+export function InventoryPage({ client, storeId, money, stamp, tab, onTab, attentionSection, onAttentionSection, accessToken, busy, run, onCostChanged }: Props) {
   const [refresh, setRefresh] = useState(0);
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState('in_stock');
@@ -94,9 +100,9 @@ export function InventoryPage({ client, storeId, money, stamp }: Props) {
   const change = (set: () => void) => { set(); setOffset(0); setList(null); };
   const total = list?.totals.unit_count || 0;
   return <>
-    <header><div><div className="eyebrow">FLOOR INVENTORY</div><h1>Inventory</h1><p>{tab === 'browse' ? 'View only (except online shipping). Edit other unit fields in the register or phone app.' : 'Add physical units to Floor.'}</p></div></header>
-    <div className="inventory-tabs"><button className={tab === 'browse' ? 'active' : ''} onClick={() => setTab('browse')}>Browse</button><button className={tab === 'receive' ? 'active' : ''} onClick={() => setTab('receive')}>Receive</button></div>
-    {tab === 'receive' ? <><VideoScanBudget client={client} /><ReceivePanel client={client} storeId={storeId} onSaved={() => setRefresh(n => n + 1)} /></> : <>
+    <header><div><div className="eyebrow">FLOOR INVENTORY</div><h1>Inventory</h1><p>{tab === 'browse' ? 'View only (except online shipping). Edit other unit fields in the register or phone app.' : tab === 'receive' ? 'Add physical units to Floor.' : 'Listing queue, missing costs, and product-match reviews.'}</p></div></header>
+    <div className="inventory-tabs"><button type="button" className={tab === 'browse' ? 'active' : ''} onClick={() => onTab('browse')}>Browse</button><button type="button" className={tab === 'receive' ? 'active' : ''} onClick={() => onTab('receive')}>Receive</button><button type="button" className={tab === 'attention' ? 'active' : ''} onClick={() => onTab('attention')}>Needs attention</button></div>
+    {tab === 'receive' ? <><VideoScanBudget client={client} /><ReceivePanel client={client} storeId={storeId} onSaved={() => setRefresh(n => n + 1)} /></> : tab === 'attention' ? <NeedsAttentionPanel client={client} accessToken={accessToken} money={money} stamp={stamp} busy={busy} run={run} section={attentionSection} onSection={onAttentionSection} onCostChanged={onCostChanged} /> : <>
     <div className="inventory-controls">
       <label>Search<input type="search" placeholder="SKU, brand, model or title" value={query} onChange={e => change(() => setQuery(e.target.value))} /></label>
       <label>Status<select value={status} onChange={e => change(() => setStatus(e.target.value))}>

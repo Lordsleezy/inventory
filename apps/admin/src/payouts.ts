@@ -3,14 +3,29 @@
 // Tax, the customer card-fee surcharge, and buyer-paid shipping are pass-through: never profit.
 // `cost` arrives already resolved (real unit cost, collectible $0, or category default);
 // `costEstimated` marks sales whose profit used a default instead of a real cost.
-export type Rule = { employee_id: string; method: 'percent_sale' | 'flat_ticket' | 'percent_profit'; rate: number };
+export type RuleMethod = 'percent_sale' | 'flat_ticket' | 'percent_profit';
+export type Rule = {
+  employee_id: string; method: RuleMethod; rate: number;
+  prior_method?: RuleMethod | null; prior_rate?: number | null; effective_from?: string | null;
+};
 export type TicketLike = {
-  subtotal: number; cost: number | null; channel: string;
+  subtotal: number; cost: number | null; channel: string; at?: string;
   feeCents?: number; shipCostCents?: number; processingFeeCents?: number;
   // Back-compat aliases from the old eBay-only ledger.
   ebayFeeCents?: number; bakedShipCents?: number;
   costEstimated?: boolean;
 };
+
+function activeRuleSlice(rule: Rule, at?: string): { method: RuleMethod; rate: number } {
+  if (rule.effective_from && at && rule.prior_method != null && rule.prior_rate != null) {
+    const sold = new Date(at).getTime();
+    const cut = new Date(rule.effective_from).getTime();
+    if (Number.isFinite(sold) && Number.isFinite(cut) && sold < cut) {
+      return { method: rule.prior_method, rate: Number(rule.prior_rate) };
+    }
+  }
+  return { method: rule.method, rate: Number(rule.rate) };
+}
 export type OnlineCfg = { channels: string[]; pct: number; employeeId: string | null };
 export const NO_ONLINE: OnlineCfg = { channels: [], pct: 0, employeeId: null };
 export const isOnline = (t: TicketLike, cfg: OnlineCfg) => cfg.channels.includes((t.channel || '').toLowerCase());
@@ -33,12 +48,13 @@ export function payout(t: TicketLike, rule: Rule | undefined, cfg: OnlineCfg): n
     const p = profit(t);
     return p === null ? null : Math.round(Math.max(0, p) * cfg.pct / 100);
   }
-  if (rule.method === 'flat_ticket') return Math.round(Number(rule.rate) * 100);
-  if (rule.method === 'percent_profit') {
+  const { method, rate } = activeRuleSlice(rule, t.at);
+  if (method === 'flat_ticket') return Math.round(Number(rate) * 100);
+  if (method === 'percent_profit') {
     const p = profit(t);
-    return p === null ? null : Math.round(Math.max(0, p) * Number(rule.rate) / 100);
+    return p === null ? null : Math.round(Math.max(0, p) * Number(rate) / 100);
   }
-  return Math.round(t.subtotal * Number(rule.rate) / 100);
+  return Math.round(t.subtotal * Number(rate) / 100);
 }
 
 /** Profit left after every payout cut; null if any cut is unsettled. */

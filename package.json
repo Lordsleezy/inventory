@@ -8,7 +8,8 @@
     "apps/*"
   ],
   "scripts": {
-    "test": "node --experimental-strip-types --test packages/store/src/*.test.ts packages/cloud/src/*.test.ts packages/payments/src/*.test.ts packages/channels/src/*.test.ts apps/pos/src/*.test.ts scripts/test-admin-payouts.mjs",
+    "test": "node --experimental-strip-types --test packages/store/src/*.test.ts packages/cloud/src/*.test.ts packages/payments/src/*.test.ts packages/channels/src/*.test.ts apps/pos/src/*.test.ts scripts/test-admin-payouts.mjs scripts/test-ledger.mjs",
+    "test:ledger": "node --experimental-strip-types scripts/test-ledger.mjs",
     "pos": "npm run tauri:dev -w @floor/pos",
     "test:migrations": "node --experimental-strip-types scripts/test-migrations.mjs",
     "test:store": "node --experimental-strip-types --test packages/store/src/*.test.ts",

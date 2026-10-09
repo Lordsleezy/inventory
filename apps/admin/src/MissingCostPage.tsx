@@ -2,12 +2,12 @@ import { useCallback, useEffect, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 type Row = { sku: string; title: string; state: string; ask_cents: number | null; received_at: string; sold_at: string | null; sold_channel: string | null; sold_price_cents: number | null };
-type Props = { client: SupabaseClient; money: (n: number) => string; stamp: (s: string) => string; onChanged: () => void };
+type Props = { client: SupabaseClient; money: (n: number) => string; stamp: (s: string) => string; onChanged: () => void; embedded?: boolean };
 const entry = /^\d*(?:\.\d{0,2})?$/;
 const PAGE = 100;
 
 /** Units with no acquisition cost. Sold ones come first because their payouts are waiting on it. */
-export function MissingCostPage({ client, money, stamp, onChanged }: Props) {
+export function MissingCostPage({ client, money, stamp, onChanged, embedded }: Props) {
   const [rows, setRows] = useState<Row[] | null>(null);
   const [total, setTotal] = useState(0); const [sold, setSold] = useState(0);
   const [vals, setVals] = useState<Record<string, string>>({});
@@ -35,7 +35,8 @@ export function MissingCostPage({ client, money, stamp, onChanged }: Props) {
   }
 
   return <>
-    <header><div><div className="eyebrow">INVENTORY</div><h1>Missing cost</h1><p>What we paid for each unit. Sold units are first: their online payouts are waiting on the cost and calculate the moment you save it.</p></div></header>
+    {!embedded && <header><div><div className="eyebrow">INVENTORY</div><h1>Missing cost</h1><p>What we paid for each unit. Sold units are first: their online payouts are waiting on the cost and calculate the moment you save it.</p></div></header>}
+    {embedded && <div className="section-head" style={{ marginBottom: 12 }}><div><h2>Missing cost</h2><p className="hint" style={{ margin: 0 }}>Sold units first — online payouts calculate when you save cost.</p></div></div>}
     {error && <div className="alert" role="alert">{error}<button onClick={() => setError('')}>Dismiss</button></div>}
     <div className="stats"><div className="stat"><span>Units missing cost</span><strong>{total}</strong></div><div className="stat"><span>Of those, already sold</span><strong>{sold}</strong></div></div>
     <section className="panel">

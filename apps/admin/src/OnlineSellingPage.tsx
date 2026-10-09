@@ -13,11 +13,11 @@ type Settings = {
   manual_shipping_tiers: { max_lb: number; cents: number }[];
 };
 type Check = { id: number; ran_at: string; ok: boolean; counts: Record<string, number>; problems: { sku: string | null; title: string | null; where: string; reason: string }[]; healed: unknown[]; emailed_at: string | null; error: string | null };
-type Props = { client: SupabaseClient; accessToken: string; stamp: (s: string) => string };
+type Props = { client: SupabaseClient; accessToken: string; stamp: (s: string) => string; embedded?: boolean };
 
 const lines = (s: string) => s.split(/[\n,]/).map(x => x.trim()).filter(Boolean);
 
-export function OnlineSellingPage({ client, accessToken, stamp }: Props) {
+export function OnlineSellingPage({ client, accessToken, stamp, embedded }: Props) {
   const [s, setS] = useState<Settings | null>(null);
   const [check, setCheck] = useState<Check | null>(null);
   const [error, setError] = useState(''); const [saved, setSaved] = useState('');
@@ -113,9 +113,10 @@ export function OnlineSellingPage({ client, accessToken, stamp }: Props) {
     finally { setBusy(false); }
   }
 
-  if (!s) return <><header><div><div className="eyebrow">WEBSITE</div><h1>Online selling</h1></div></header>{error ? <div className="alert">{error}</div> : <p className="hint">Loading…</p>}</>;
+  if (!s) return <>{embedded ? <section className="panel"><h2>Online selling</h2></section> : <header><div><div className="eyebrow">WEBSITE</div><h1>Online selling</h1></div></header>}{error ? <div className="alert">{error}</div> : <p className="hint">Loading…</p>}</>;
   return <>
-    <header><div><div className="eyebrow">WEBSITE</div><h1>Online selling</h1><p>Every listed unit can be bought online for store pickup. Shipping is offered only when the rules below allow it and the unit has package dimensions and weight.</p></div></header>
+    {embedded ? <section className="panel"><h2>Online selling</h2><p className="hint">Store pickup for every listed unit; shipping when rules and dimensions allow.</p></section>
+    : <header><div><div className="eyebrow">WEBSITE</div><h1>Online selling</h1><p>Every listed unit can be bought online for store pickup. Shipping is offered only when the rules below allow it and the unit has package dimensions and weight.</p></div></header>}
     {error && <div className="alert" role="alert">{error}<button onClick={() => setError('')}>Dismiss</button></div>}
     {saved && <div className="notice">{saved}</div>}
     <section className="panel"><div className="section-head"><h2>Shipping</h2>
