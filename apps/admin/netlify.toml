@@ -1,8 +1,6 @@
 [build]
-  # When Netlify package directory is apps/admin, cwd is that folder — publish relative to it.
-  # Root-linked deploys still work via `npm run build -w` from the monorepo root.
-  command = "cd ../.. && npm run build -w @floor/admin"
-  publish = "dist"
+  command = "npm run build -w @floor/admin"
+  publish = "apps/admin/dist"
 
 [build.environment]
   NODE_VERSION = "22"
