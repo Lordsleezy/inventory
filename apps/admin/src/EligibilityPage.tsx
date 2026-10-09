@@ -17,7 +17,7 @@ type Elig = {
   channel: string; status: string; reason: string; source: string;
   override?: { decision: string; note: string } | null; strike?: boolean;
 };
-type Props = { client: SupabaseClient; stamp: (s: string) => string };
+type Props = { client: SupabaseClient; stamp: (s: string) => string; embedded?: boolean };
 
 const boolKeys = [
   'block_requires_power', 'block_chargers_cables', 'allow_cameras', 'require_own_photos',
@@ -31,7 +31,7 @@ function parseLines(s: string) {
   return s.split(/[\n,]/).map((x) => x.trim()).filter(Boolean);
 }
 
-export function EligibilityPage({ client, stamp }: Props) {
+export function EligibilityPage({ client, stamp, embedded }: Props) {
   const [rules, setRules] = useState<RuleRow[]>([]);
   const [strikes, setStrikes] = useState<Strike[]>([]);
   const [review, setReview] = useState<Review[]>([]);
@@ -164,14 +164,17 @@ export function EligibilityPage({ client, stamp }: Props) {
   }
 
   return <>
-    <header>
+    {embedded ? <section className="panel"><div className="section-head"><div><h2>Marketplace eligibility</h2>
+      <p className="hint" style={{ margin: 0 }}>Per-channel policy rules, overrides, review queue, and strike log.</p></div>
+      <button className="secondary" disabled={busy} onClick={() => void load()}>Refresh</button></div></section>
+    : <header>
       <div>
         <div className="eyebrow">ACCOUNT RISK</div>
         <h1>Marketplace eligibility</h1>
         <p>Editable per-channel policy rules, unit overrides, review queue, and policy-strike log. When in doubt the system blocks and queues for review.</p>
       </div>
       <button className="secondary" disabled={busy} onClick={() => void load()}>Refresh</button>
-    </header>
+    </header>}
     {error && <div className="alert" role="alert">{error}<button onClick={() => setError('')}>Dismiss</button></div>}
     {notice && <div className="notice">{notice}</div>}
 

@@ -6,7 +6,7 @@ export type Expense = {
   needs_reimbursement: boolean; employee_id: string | null; source: 'manual' | 'label'; order_id: string | null; voided_at: string | null;
 };
 type Person = { user_id: string; display_name: string; kind: string };
-type Props = { client: SupabaseClient; money: (n: number) => string; expenses: Expense[]; staff: Person[]; ownerId: string; onChanged: () => Promise<void> };
+type Props = { client: SupabaseClient; money: (n: number) => string; expenses: Expense[]; staff: Person[]; ownerId: string; onChanged: () => Promise<void>; embedded?: boolean };
 
 const zone = 'America/Los_Angeles';
 const todayLA = () => new Date().toLocaleDateString('en-CA', { timeZone: zone });
@@ -14,7 +14,7 @@ const CATEGORIES = ['Supplies', 'Inventory', 'Shipping', 'Shipping supplies', 'L
 const entry = /^\d*(?:\.\d{0,2})?$/;
 
 /** Everything bought for the store: fast to add, and reimbursable expenses feed the payout balance. */
-export function ExpensesPage({ client, money, expenses, staff, ownerId, onChanged }: Props) {
+export function ExpensesPage({ client, money, expenses, staff, ownerId, onChanged, embedded }: Props) {
   const blank = { what: '', amount: '', date: todayLA(), category: 'Supplies', reimburse: true, who: ownerId };
   const [f, setF] = useState(blank);
   const [editing, setEditing] = useState<string | null>(null);
@@ -49,7 +49,8 @@ export function ExpensesPage({ client, money, expenses, staff, ownerId, onChange
   }
 
   return <>
-    <header><div><div className="eyebrow">MONEY OUT</div><h1>Expenses</h1><p>Anything you buy for the store. Check “needs reimbursement” and it is added to that person’s balance on the Payouts screen. Shippo labels are added automatically.</p></div></header>
+    {!embedded && <header><div><div className="eyebrow">MONEY OUT</div><h1>Expenses</h1><p>Anything you buy for the store. Check “needs reimbursement” and it is added to that person’s balance on the Payouts screen. Shippo labels are added automatically.</p></div></header>}
+    {embedded && <div className="section-head" style={{ marginBottom: 12 }}><div><h2>Expenses</h2><p className="hint" style={{ margin: 0 }}>Store purchases; reimbursable items feed payout balances.</p></div></div>}
     <div className="stats"><div className="stat"><span>This month</span><strong>{money(monthTotal)}</strong></div><div className="stat"><span>Needs reimbursement (all time)</span><strong>{money(owed)}</strong></div></div>
     <section className="panel"><h2>{editing ? 'Edit expense' : 'Add an expense'}</h2>
       <form className="exp-form" onSubmit={e => void submit(e)}>

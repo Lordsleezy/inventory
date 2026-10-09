@@ -60,6 +60,20 @@ test("negative fees/shipping can never inflate profit", () => {
   const t = { subtotal: 10000, cost: 4000, channel: "ebay", feeCents: -500, shipCostCents: -100, processingFeeCents: -1 };
   assert.equal(profit(t), 6000);
 });
+test("pre-cutover sales use prior_method and prior_rate when ticket is before effective_from", () => {
+  const tBefore = { subtotal: 10000, cost: 4000, channel: "floor", at: "2025-06-01T12:00:00Z" };
+  const tAfter = { ...tBefore, at: "2026-06-01T12:00:00Z" };
+  const rule = {
+    employee_id: PAUL, method: "percent_profit", rate: 20,
+    prior_method: "percent_sale", prior_rate: 30, effective_from: "2026-01-01T00:00:00Z",
+  };
+  assert.equal(payout(tBefore, rule, cfg), 3000);
+  assert.equal(payout(tAfter, rule, cfg), Math.round(6000 * 0.2));
+  // Postgres timestamptz often renders with a space; Date parse must still cut over correctly.
+  const pgStyle = { ...rule, effective_from: "2026-10-09 20:03:10.386799+00" };
+  assert.equal(payout({ ...tBefore, at: "2026-10-04T18:00:00Z" }, pgStyle, cfg), 3000);
+  assert.equal(payout({ ...tBefore, at: "2026-10-09T21:00:00Z" }, pgStyle, cfg), Math.round(6000 * 0.2));
+});
 test("channel matching is case-insensitive and eBay plugs in by adding the channel", () => {
   assert.equal(isOnline({ subtotal: 1, cost: 1, channel: "Website" }, cfg), true);
   assert.equal(isOnline({ subtotal: 1, cost: 1, channel: "ebay" }, cfg), false);

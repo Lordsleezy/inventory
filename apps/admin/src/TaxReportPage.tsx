@@ -4,14 +4,14 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 type Row = { category: string; sales_count: number; sales_cents: number; taxable_cents: number; tax_cents: number; tax_collected_cents?: number; shipping_cents: number;
   refund_count: number; refund_sales_cents: number; refund_taxable_cents: number; refund_tax_cents: number; refund_shipping_cents: number };
 type Report = { month: string; origin_state: string; rows: Row[] };
-type Props = { client: SupabaseClient; money: (n: number) => string };
+type Props = { client: SupabaseClient; money: (n: number) => string; embedded?: boolean };
 
 const zone = 'America/Los_Angeles';
 const thisMonth = () => new Date().toLocaleDateString('en-CA', { timeZone: zone }).slice(0, 7);
 const dollars = (n: number) => (n / 100).toFixed(2);
 
 /** One month of sales tax facts for the accountant: in-store, pickup, ship in-state, ship out of state; refunds; CSV. */
-export function TaxReportPage({ client, money }: Props) {
+export function TaxReportPage({ client, money, embedded }: Props) {
   const [month, setMonth] = useState(thisMonth());
   const [report, setReport] = useState<Report | null>(null);
   const [error, setError] = useState('');
@@ -40,10 +40,11 @@ export function TaxReportPage({ client, money }: Props) {
     const a = document.createElement('a'); a.href = url; a.download = `open-box-sales-tax-${report!.month}.csv`; a.click(); URL.revokeObjectURL(url);
   }
 
+  const monthControl = <div className="report-actions"><label className="date-control">Month<input type="month" value={month} onChange={e => setMonth(e.target.value || thisMonth())} /></label>
+    <div className="actions"><button className="secondary" disabled={!rows.length} onClick={csv}>Download CSV</button></div></div>;
   return <>
-    <header><div><div className="eyebrow">REPORTS</div><h1>Sales tax</h1><p>Sales, taxable sales and tax collected for the month, split by how it was sold. Refunds are sales canceled that month. Shipping fees are shown separately.</p></div>
-      <div className="report-actions"><label className="date-control">Month<input type="month" value={month} onChange={e => setMonth(e.target.value || thisMonth())} /></label>
-        <div className="actions"><button className="secondary" disabled={!rows.length} onClick={csv}>Download CSV</button></div></div></header>
+    {!embedded && <header><div><div className="eyebrow">REPORTS</div><h1>Sales tax</h1><p>Sales, taxable sales and tax collected for the month, split by how it was sold. Refunds are sales canceled that month. Shipping fees are shown separately.</p></div>{monthControl}</header>}
+    {embedded && <div className="section-head" style={{ marginBottom: 12, flexWrap: 'wrap' }}><div><h2>Sales tax</h2><p className="hint" style={{ margin: 0 }}>Monthly tax collected and amount we owe (excluding marketplace-remitted).</p></div>{monthControl}</div>}
     {error && <div className="alert" role="alert">{error}</div>}
     {rows.length > 0 && <div className="stats"><div className="stat"><span>Tax we owe this month</span><strong>{money(taxWeOwe)}</strong></div><div className="stat"><span>Marketplace-remitted</span><strong>{money(sum('tax_cents') - taxWeOwe)}</strong></div><div className="stat"><span>Net sales</span><strong>{money(sum('sales_cents') - sum('refund_sales_cents'))}</strong></div></div>}
     <section className="panel"><h2>Sales — {report?.month ?? month}</h2>
