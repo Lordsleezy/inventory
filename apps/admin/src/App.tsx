@@ -4,7 +4,7 @@ import { InventoryPage } from './InventoryPage';
 import { OrdersPage } from './OrdersPage';
 import { LogsPage } from './LogsPage';
 import { ClientErrorReporter } from './clientLog';
-import { isOnline, NO_ONLINE, payout, remainingProfit, type OnlineCfg, type Rule } from './payouts';
+import { isOnline, NO_ONLINE, payout, profit, remainingProfit, type OnlineCfg, type Rule } from './payouts';
 import { ExpensesPage, type Expense as StoreExpense } from './ExpensesPage';
 import { MarketplacesPage } from './MarketplacesPage';
 import { ReportsPage } from './ReportsPage';
@@ -35,8 +35,8 @@ const weekStart = (d: string) => { const wd = new Date(`${d}T12:00:00Z`).getUTCD
 const range = (start: string, end: string) => ({ p_from: laMidnight(start), p_to: laMidnight(end) });
 const stamp = (s: string) => new Intl.DateTimeFormat('en-US', { timeZone: zone, month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(s));
 
-type Line = { id: number; ticket_key: string; sku: string; title: string; qty: number; sold_at: string; price_cents: number; tax_cents: number; card_fee_cents: number; cost_cents: number | null; payment_method: string | null; cash_cents: number | null; card_cents: number | null; actor_id: string | null; actor_name: string; channel: string; receipt_no: string; list_price_cents: number | null; override_price_cents: number | null; override_reason: string | null; override_by_name: string | null; ebay_fee_cents?: number | null; baked_ship_cents?: number | null; cost_source?: string | null; channel_fee_cents?: number | null; fee_source?: string | null; ship_cost_cents?: number | null; ship_cost_source?: string | null; processing_fee_cents?: number | null; processing_fee_source?: string | null; tax_remitted_by?: string | null; tax_collected_cents?: number | null; tax_owed_cents?: number | null; ask_cents?: number | null; variance_cents?: number | null; profit_cents?: number | null };
-type Ticket = { key: string; at: string; lines: Line[]; subtotal: number; tax: number; fee: number; total: number; cash: number; card: number; method: string; actorId: string | null; actor: string; cost: number | null; channel: string; ebayFeeCents: number; bakedShipCents: number; feeCents: number; shipCostCents: number; processingFeeCents: number; costEstimated: boolean; taxOwedCents: number; taxCollectedCents: number; varianceCents: number | null; profitCents: number | null };
+type Line = { id: number; ticket_key: string; sku: string; title: string; qty: number; sold_at: string; price_cents: number; tax_cents: number; card_fee_cents: number; cost_cents: number | null; payment_method: string | null; cash_cents: number | null; card_cents: number | null; actor_id: string | null; actor_name: string; channel: string; receipt_no: string; list_price_cents: number | null; override_price_cents: number | null; override_reason: string | null; override_by_name: string | null; ebay_fee_cents?: number | null; baked_ship_cents?: number | null; cost_source?: string | null; channel_fee_cents?: number | null; fee_source?: string | null; ship_cost_cents?: number | null; ship_cost_source?: string | null; processing_fee_cents?: number | null; processing_fee_source?: string | null; tax_remitted_by?: string | null; tax_collected_cents?: number | null; tax_owed_cents?: number | null; ask_cents?: number | null; variance_cents?: number | null; profit_cents?: number | null; shipping_cents?: number | null };
+type Ticket = { key: string; at: string; lines: Line[]; subtotal: number; tax: number; fee: number; total: number; cash: number; card: number; method: string; actorId: string | null; actor: string; cost: number | null; channel: string; ebayFeeCents: number; bakedShipCents: number; feeCents: number; shipCostCents: number; processingFeeCents: number; shippingCents: number; costEstimated: boolean; taxOwedCents: number; taxCollectedCents: number; varianceCents: number | null; profitCents: number | null };
 type Person = { user_id: string; display_name: string; kind: string };
 type Payment = { id: string; employee_id: string; amount_cents: number; paid_at: string; paid_by: string; legacy_ticket_key: string | null; note: string | null };
 type Expense = { description: string; category: string; amount_cents: number; needs_reimbursement?: boolean; employee_id?: string };
@@ -61,12 +61,13 @@ function tickets(lines: Line[]): Ticket[] {
   const map = new Map<string, Ticket>();
   for (const l of lines) {
     let t = map.get(l.ticket_key);
-    if (!t) { t = { key: l.ticket_key, at: l.sold_at, lines: [], subtotal: 0, tax: 0, fee: 0, total: 0, cash: 0, card: 0, method: l.payment_method || 'other', actorId: l.actor_id, actor: l.actor_name, cost: 0, channel: l.channel, ebayFeeCents: 0, bakedShipCents: 0, feeCents: 0, shipCostCents: 0, processingFeeCents: 0, costEstimated: false, taxOwedCents: 0, taxCollectedCents: 0, varianceCents: null, profitCents: 0 }; map.set(l.ticket_key, t); }
+    if (!t) { t = { key: l.ticket_key, at: l.sold_at, lines: [], subtotal: 0, tax: 0, fee: 0, total: 0, cash: 0, card: 0, method: l.payment_method || 'other', actorId: l.actor_id, actor: l.actor_name, cost: 0, channel: l.channel, ebayFeeCents: 0, bakedShipCents: 0, feeCents: 0, shipCostCents: 0, processingFeeCents: 0, shippingCents: 0, costEstimated: false, taxOwedCents: 0, taxCollectedCents: 0, varianceCents: null, profitCents: 0 }; map.set(l.ticket_key, t); }
     t.lines.push(l); t.subtotal += l.price_cents; t.tax += l.tax_cents; t.fee += l.card_fee_cents;
     t.ebayFeeCents += l.ebay_fee_cents || 0; t.bakedShipCents += l.baked_ship_cents || 0;
     t.feeCents += l.channel_fee_cents ?? l.ebay_fee_cents ?? 0;
     t.shipCostCents += l.ship_cost_cents ?? l.baked_ship_cents ?? 0;
     t.processingFeeCents += l.processing_fee_cents || 0;
+    t.shippingCents += l.shipping_cents || 0;
     t.taxOwedCents += l.tax_owed_cents ?? l.tax_cents;
     t.taxCollectedCents += l.tax_collected_cents ?? l.tax_cents;
     if (l.cost_source && l.cost_source !== 'unit') t.costEstimated = true;
@@ -130,6 +131,7 @@ export function App() {
   const go = (patch: Partial<NavState>) => setNav(n => ({ ...n, ...patch }));
   const setPage = (p: MainPage) => go({ page: p });
   const [selectedDay, setSelectedDay] = useState(today());
+  const [salesScope, setSalesScope] = useState<'all' | 'instore' | 'online'>('all');
   const [live, setLive] = useState<Ticket[]>([]);
   const [allSales, setAllSales] = useState<Ticket[]>([]);
   const [people, setPeople] = useState<Person[]>([]);
@@ -220,7 +222,29 @@ export function App() {
     {editing && draft ? <section className="panel editor"><div className="section-head"><div><div className="eyebrow">{typeof editing === 'string' ? 'NEW REPORT' : 'SUBMITTED REPORT'}</div><h2>{draft.start} {draft.end !== datePlus(draft.start, 1) && `– ${datePlus(draft.end, -1)}`}</h2></div><div className="actions">{reportReadOnly && <button onClick={() => setReportReadOnly(false)}>Edit report</button>}{typeof editing !== 'string' && <button className="secondary" disabled={busy} onClick={() => void downloadReports([editing], false)}>Download</button>}<button className="text-button" onClick={() => { setEditing(null); setReportDraft(null); }}>Close</button></div></div><div className="stats compact"><Stat name="Sales" value={money(draft.summary.sales_cents)} /><Stat name="Card fees" value={money(draft.summary.card_fee_cents)} /><Stat name="Tax" value={money(draft.summary.tax_cents)} /></div><h3>Expenses</h3>{draft.expenses.map((x, i) => <div className="expense-row" key={i}><input disabled={reportReadOnly} aria-label="Description" placeholder="Description" value={x.description} onChange={e => setReportDraft({ ...draft, expenses: draft.expenses.map((v, j) => j === i ? { ...v, description: e.target.value } : v) })} /><ExpenseAmount disabled={reportReadOnly} cents={x.amount_cents} onCommit={cents => setReportDraft({ ...draft, expenses: draft.expenses.map((v, j) => j === i ? { ...v, amount_cents: cents } : v) })} /><label className="reimburse-check"><input type="checkbox" disabled={reportReadOnly} checked={!!x.needs_reimbursement} onChange={e => setReportDraft({ ...draft, expenses: draft.expenses.map((v, j) => j === i ? { ...v, needs_reimbursement: e.target.checked, employee_id: e.target.checked ? (v.employee_id || defaultReimbursementId) : undefined } : v) })} />Needs Reimbursement</label>{x.needs_reimbursement && <select disabled={reportReadOnly} aria-label="Reimburse employee" value={x.employee_id || defaultReimbursementId} onChange={e => setReportDraft({ ...draft, expenses: draft.expenses.map((v, j) => j === i ? { ...v, employee_id: e.target.value } : v) })}>{staff.map(p => <option value={p.user_id} key={p.user_id}>{p.display_name}</option>)}</select>}{!reportReadOnly && <button className="text-button" onClick={() => setReportDraft({ ...draft, expenses: draft.expenses.filter((_, j) => j !== i) })}>Remove</button>}</div>)}{!reportReadOnly && <button className="secondary" onClick={() => setReportDraft({ ...draft, expenses: [...draft.expenses, { description: '', category: '', amount_cents: 0 }] })}>Add expense</button>}<label className="notes">Notes<textarea disabled={reportReadOnly} rows={4} value={draft.notes} onChange={e => setReportDraft({ ...draft, notes: e.target.value })} placeholder="Anything to remember about this period" /></label><div className="net"><span>Net merchandise after expenses</span><strong>{money(draft.summary.sales_cents - draft.expenses.reduce((n, x) => n + x.amount_cents, 0))}</strong></div>{!reportReadOnly && <button disabled={busy} onClick={() => void saveReport()}>{typeof editing === 'string' ? 'Submit report' : 'Save edits'}</button>}{typeof editing !== 'string' && <p className="hint">Last edited by {personName(editing.edited_by)} · {stamp(editing.edited_at)}</p>}</section> : <section className="panel"><h2>Submitted reports</h2>{reports.length === 0 ? <Empty>No reports submitted yet.</Empty> : reports.map(r => <div className="report-list-row" key={r.id}><button className="report-row" onClick={() => viewReport(r)}><span><strong>{r.period_type === 'daily' ? 'Daily' : 'Weekly'} · {r.period_start}</strong><small>{r.summary.sale_count} sales · Edited {stamp(r.edited_at)} by {personName(r.edited_by)}</small></span><b>{money(r.summary.sales_cents - r.expenses.reduce((n, x) => n + x.amount_cents, 0))}</b></button><button className="secondary" onClick={() => viewReport(r, true)}>Edit</button><button className="secondary" disabled={busy} onClick={() => void downloadReports([r], false)}>Download</button></div>)}</section>}
   </>;
   return <div className="app"><ClientErrorReporter token={session.access_token} /><aside><div className="brand">OPEN BOX <span>INDUSTRIES</span></div><div className="product">Floor <b>Admin</b></div><nav>{mainNav.map(([id, label]) => <button type="button" className={page === id ? 'active' : ''} key={id} onClick={() => { go({ page: id }); setEditing(null); }}>{label}</button>)}<button type="button" className={`settings-gear settings-gear-nav${page === 'settings' ? ' active' : ''}`} aria-label="Settings" title="Settings" onClick={() => { go({ page: 'settings' }); setEditing(null); }}>⚙</button></nav><div className="account"><button type="button" className={`settings-gear${page === 'settings' ? ' active' : ''}`} aria-label="Settings" title="Settings" onClick={() => { go({ page: 'settings' }); setEditing(null); }}>⚙</button><small>{session.user.email}</small><button onClick={() => void sb.auth.signOut({ scope: 'local' })}>Sign out</button></div></aside><main className="content">{error && <div className="alert" role="alert">{error}<button onClick={() => setError('')}>Dismiss</button></div>}
-  {page === 'sales' && <><header><div><div className="eyebrow">REGISTER ACTIVITY</div><h1>Live Sales</h1><p>Transactions from Floor, updated as sales arrive.</p></div><label className="date-control">Date<input type="date" value={selectedDay} onChange={e => setSelectedDay(e.target.value)} /></label></header><div className="stats"><Stat name="Collected" value={money(sum(live).collected_cents)} /><Stat name="Sales" value={String(live.length)} /><Stat name="Cash" value={money(sum(live).cash_cents)} /><Stat name="Card" value={money(sum(live).card_cents)} /><Stat name="Card fees" value={money(sum(live).card_fee_cents)} /><Stat name="Other / unallocated" value={money(sum(live).other_cents)} /></div><section className="panel"><h2>{selectedDay === today() ? 'Today’s transactions' : `Transactions · ${selectedDay}`}</h2>{live.length === 0 ? <Empty>No sales recorded for this date.</Empty> : <div className="ticket-list">{live.map(t => <div className="ticket" key={t.key}><div className="ticket-top"><strong>{money(t.total)}</strong><span>{stamp(t.at)}</span></div><div className="ticket-items">{t.lines.map(l => <SaleItem key={l.id} line={l} />)}</div><div className="ticket-bottom"><span>{t.method === 'split' ? (t.lines[0].cash_cents === null ? 'Split amounts unavailable' : `Cash ${money(t.cash)} · Card ${money(t.card)}`) : t.method === 'card' ? `Card ${money(t.card)}` : t.method === 'cash' ? `Cash ${money(t.cash)}` : t.method}{t.fee > 0 && ` · fee ${money(t.fee)}`}</span><span>Rang up by {t.actor}</span></div></div>)}</div>}</section></>}
+  {page === 'sales' && (() => {
+    const liveShown = live.filter(t => {
+      const floor = (t.channel || '').toLowerCase() === 'floor';
+      if (salesScope === 'instore') return floor;
+      if (salesScope === 'online') return !floor;
+      return true;
+    });
+    const liveSum = sum(liveShown);
+    return <><header><div><div className="eyebrow">REGISTER ACTIVITY</div><h1>Live Sales</h1><p>Transactions from Floor, updated as sales arrive.</p></div>
+      <div className="report-actions">
+        <div className="actions">
+          <button type="button" className={salesScope === 'all' ? undefined : 'secondary'} onClick={() => setSalesScope('all')}>All sales</button>
+          <button type="button" className={salesScope === 'instore' ? undefined : 'secondary'} onClick={() => setSalesScope('instore')}>In store</button>
+          <button type="button" className={salesScope === 'online' ? undefined : 'secondary'} onClick={() => setSalesScope('online')}>Online</button>
+        </div>
+        <label className="date-control">Date<input type="date" value={selectedDay} onChange={e => setSelectedDay(e.target.value)} /></label>
+      </div>
+    </header>
+    <div className="stats"><Stat name="Collected" value={money(liveSum.collected_cents)} /><Stat name="Sales" value={String(liveShown.length)} /><Stat name="Cash" value={money(liveSum.cash_cents)} /><Stat name="Card" value={money(liveSum.card_cents)} /><Stat name="Card fees" value={money(liveSum.card_fee_cents)} /><Stat name="Other / unallocated" value={money(liveSum.other_cents)} /></div>
+    <section className="panel"><h2>{selectedDay === today() ? 'Today’s transactions' : `Transactions · ${selectedDay}`}{salesScope !== 'all' && <small> · {salesScope === 'instore' ? 'in store' : 'online'}</small>}</h2>
+      {liveShown.length === 0 ? <Empty>No {salesScope === 'all' ? '' : salesScope === 'instore' ? 'in-store ' : 'online '}sales recorded for this date.</Empty> : <div className="ticket-list">{liveShown.map(t => <div className="ticket" key={t.key}><div className="ticket-top"><strong>{money(t.total)}</strong><span>{stamp(t.at)}{(t.channel || '').toLowerCase() !== 'floor' && <b className="badge"> {(t.channel || 'online').toUpperCase()}</b>}</span></div><div className="ticket-items">{t.lines.map(l => <SaleItem key={l.id} line={l} />)}</div><div className="ticket-bottom"><span>{t.method === 'split' ? (t.lines[0].cash_cents === null ? 'Split amounts unavailable' : `Cash ${money(t.cash)} · Card ${money(t.card)}`) : t.method === 'card' ? `Card ${money(t.card)}` : t.method === 'cash' ? `Cash ${money(t.cash)}` : t.method}{t.fee > 0 && ` · fee ${money(t.fee)}`}</span><span>Rang up by {t.actor}</span></div></div>)}</div>}
+    </section></>;
+  })()}
   {page === 'orders' && <OrdersPage client={sb} accessToken={session.access_token} money={money} stamp={stamp} />}
   {page === 'marketplaces' && <MarketplacesPage client={sb} accessToken={session.access_token} money={money} stamp={stamp} />}
   {page === 'logs' && <LogsPage accessToken={session.access_token} stamp={stamp} />}
@@ -243,8 +267,6 @@ function ExpenseAmount({cents,onCommit,disabled}:{cents:number;onCommit:(cents:n
 type LedgerEntry = { at: string; kind: 'sale' | 'online' | 'reimbursement' | 'payment'; amount: number | null; detail: string; note?: string };
 function PayoutsPage({allSales,staff,rules,payments,reports,expenses,cfg,personName,busy,recordPayment}:{allSales:Ticket[];staff:Person[];rules:Rule[];payments:Payment[];reports:Report[];expenses:StoreExpense[];cfg:OnlineCfg;personName:(id:string)=>string;busy:boolean;recordPayment:(id:string,amount:number,paidAt:string,note:string)=>Promise<string | null>}) {
   const active = staff.filter(p => rules.some(r => r.employee_id === p.user_id));
-  const profits = allSales.map(t => remainingProfit(t,rules,cfg));
-  const totalProfit = profits.some(x => x === null) ? null : profits.reduce<number>((n,x) => n + (x || 0),0);
   const onlineSales = allSales.filter(t => isOnline(t,cfg));
   const needsCost = onlineSales.filter(t => t.cost === null).length;
   const cards = active.map(person => {
@@ -258,22 +280,16 @@ function PayoutsPage({allSales,staff,rules,payments,reports,expenses,cfg,personN
         detail: t.lines.map(l => l.sku).join(', '),
         note: online
           ? `${t.channel} · item ${money(t.subtotal)} − fees ${money(t.feeCents)} − shipping ${money(t.shipCostCents)} − ${t.cost === null ? 'cost missing' : money(t.cost) + ' cost'}${t.costEstimated ? ' (est.)' : ''} · ${cfg.pct}% of profit${t.feeCents > 0 && t.lines.every(l => l.fee_source === 'estimated') ? ' · fees est.' : ''}`
-          : `${money(t.subtotal)} merchandise · ${rule.method === 'flat_ticket' ? money(Math.round(Number(rule.rate)*100)) + ' flat' : rule.rate + '% ' + (rule.method === 'percent_profit' ? 'of profit' : 'of sale')} · Remaining profit ${rp === null ? 'pending' : money(rp)}`
+          : `${money(t.subtotal)} merchandise · ${rule.method === 'flat_ticket' ? money(Math.round(Number(rule.rate)*100)) + ' flat' : rule.rate + '% ' + (rule.method === 'percent_profit' ? 'of profit' : 'of sale')} · Owner share ${rp === null ? 'pending' : money(rp)}`
       }];
     });
-    const reimbursements: LedgerEntry[] = reports.flatMap(r => r.expenses.filter(e => e.needs_reimbursement && e.employee_id === person.user_id).map(e => ({
-      at: r.created_at, kind: 'reimbursement' as const, amount: e.amount_cents,
-      detail: e.description, note: `${r.period_type} report · ${r.period_start}`
-    }))).concat(expenses.filter(x => !x.voided_at && x.needs_reimbursement && x.employee_id === person.user_id).map(x => ({
-      at: `${x.spent_on}T12:00:00Z`, kind: 'reimbursement' as const, amount: x.amount_cents,
-      detail: x.description, note: x.source === 'label' ? 'Shippo label (automatic)' : `Expense · ${x.category}`
-    })));
+    // Commissions only (sale/online profit cuts). Expense reimbursements are tracked elsewhere and do not inflate owed.
     const paid: LedgerEntry[] = payments.filter(p => p.employee_id === person.user_id).map(p => ({
       at: p.paid_at, kind: 'payment' as const, amount: -p.amount_cents,
       detail: `Recorded by ${personName(p.paid_by)}`, note: p.note || (p.legacy_ticket_key ? 'Previous per-sale payment' : undefined)
     }));
-    const entries = [...saleEntries,...reimbursements,...paid].sort((a,b)=>b.at.localeCompare(a.at));
-    const earned = saleEntries.reduce((n,e)=>n+(e.amount || 0),0) + reimbursements.reduce((n,e)=>n+(e.amount || 0),0);
+    const entries = [...saleEntries,...paid].sort((a,b)=>b.at.localeCompare(a.at));
+    const earned = saleEntries.reduce((n,e)=>n+(e.amount || 0),0);
     const paidTotal = payments.filter(p => p.employee_id === person.user_id).reduce((n,p)=>n+p.amount_cents,0);
     const balance = earned - paidTotal;
     return {person,balance,earned,paidTotal,entries};
@@ -281,9 +297,24 @@ function PayoutsPage({allSales,staff,rules,payments,reports,expenses,cfg,personN
   const totalEarned = cards.reduce((n,c)=>n+c.earned,0);
   const totalPaid = cards.reduce((n,c)=>n+c.paidTotal,0);
   const totalOwed = cards.reduce((n,c)=>n+c.balance,0);
+  // Same cents as Reports → Profit (sale_ledger.profit_cents). Do not floor losses.
+  const profitAfterCosts = allSales.every(t => t.profitCents != null)
+    ? allSales.reduce((n, t) => n + (t.profitCents || 0), 0)
+    : (() => {
+      const parts = allSales.map(t => profit({ ...t, shippingCents: t.shippingCents, profitCents: t.profitCents }));
+      return parts.some(x => x === null) ? null : parts.reduce<number>((n, x) => n + (x || 0), 0);
+    })();
+  const ownerShare = profitAfterCosts === null ? null : profitAfterCosts - totalEarned;
   return <>
-    <header><div><div className="eyebrow">TEAM EARNINGS</div><h1>Payouts</h1><p>Profit rules apply to every sale on record. Balance = earned − payments. Online sales pay {personName(cfg.employeeId || '')} {cfg.pct}% of profit (sale − fees − shipping − processing − cost). Tax and buyer-paid shipping are pass-through.</p></div></header>
-    <div className="stats payout-stats"><Stat name="Total earned" value={money(totalEarned)} /><Stat name="Total paid" value={money(totalPaid)} /><Stat name="Balance owed" value={money(totalOwed)} /><Stat name="Remaining profit" value={totalProfit === null ? 'Pending commission' : money(totalProfit)} />{needsCost > 0 && <Stat name="Online sales needing cost" value={String(needsCost)} />}</div>
+    <header><div><div className="eyebrow">TEAM EARNINGS</div><h1>Payouts</h1><p>Profit after costs matches Reports (item + buyer shipping − fees − label − card processing − item cost). Owner share = that profit − commissions. Owed = commission earned − payments. Online sales pay {personName(cfg.employeeId || '')} {cfg.pct}% of profit.</p></div></header>
+    <div className="stats payout-stats">
+      <Stat name="Profit after costs" value={profitAfterCosts === null ? 'Pending cost' : money(profitAfterCosts)} />
+      <Stat name="Commission earned" value={money(totalEarned)} />
+      <Stat name="Total paid" value={money(totalPaid)} />
+      <Stat name="Balance owed" value={money(totalOwed)} />
+      <Stat name="Owner share" value={ownerShare === null ? 'Pending cost' : money(ownerShare)} />
+      {needsCost > 0 && <Stat name="Online sales needing cost" value={String(needsCost)} />}
+    </div>
     {needsCost > 0 && <div className="alert" role="status">{needsCost} online sale{needsCost === 1 ? '' : 's'} can’t be paid out until the unit’s cost is filled in. Use Inventory → Needs attention → Missing cost; payouts calculate as soon as you save.</div>}
     {cards.length === 0 && <section className="panel"><Empty>No employee payout rules set.</Empty></section>}
     {cards.map(card => <PayoutCard key={card.person.user_id} {...card} busy={busy} recordPayment={recordPayment} />)}
@@ -305,7 +336,7 @@ function PayoutCard({person,balance,earned,paidTotal,entries,busy,recordPayment}
     if (failure) setPaymentError(failure);
     else { setAmount(''); setNote(''); setPaidOn(today()); }
   }
-  return <section className="panel payout-card"><div className="payout-card-top"><div><h2>{person.display_name}</h2><strong>{money(balance)} owed</strong><div className="hint">Earned {money(earned)} − Paid {money(paidTotal)}{(() => { const pending = entries.filter(x => (x.kind === 'sale' || x.kind === 'online') && x.amount === null).length; return pending ? ` · ${pending} sale${pending === 1 ? '' : 's'} need cost` : ''; })()}</div></div><form className="payment-form" onSubmit={e=>void submit(e)}><label>Amount<input type="text" inputMode="decimal" value={amount} onChange={e=>{ if (moneyEntry.test(e.target.value)) setAmount(e.target.value); }} onBlur={() => { if (amount) setAmount(cleanMoney(amount)); }} required /></label><label>Date<input type="date" value={paidOn} onChange={e=>setPaidOn(e.target.value)} required /></label><label className="payment-note">Note<input type="text" value={note} onChange={e=>setNote(e.target.value.slice(0,500))} placeholder="Optional" /></label><button disabled={busy || !amount}>Paid</button></form></div>{paymentError && <p className="error" role="alert">{paymentError}</p>}<details><summary>Balance breakdown ({entries.length})</summary><div className="ledger-list">{entries.map((e,i)=><div className="ledger-row" key={i}><div><strong>{e.kind === 'sale' ? 'In-store sale' : e.kind === 'online' ? 'Online sale' : e.kind === 'payment' ? 'Payment' : 'Reimbursement'} · {stamp(e.at)}</strong><span>{e.detail}</span>{e.note && <small>{e.note}</small>}</div><b>{e.amount === null ? 'Needs cost' : (e.amount < 0 ? '−' : '+') + money(Math.abs(e.amount))}</b></div>)}</div></details></section>;
+  return <section className="panel payout-card"><div className="payout-card-top"><div><h2>{person.display_name}</h2><strong>{money(balance)} owed</strong><div className="hint">Commission {money(earned)} − Paid {money(paidTotal)}{(() => { const pending = entries.filter(x => (x.kind === 'sale' || x.kind === 'online') && x.amount === null).length; return pending ? ` · ${pending} sale${pending === 1 ? '' : 's'} need cost` : ''; })()}</div></div><form className="payment-form" onSubmit={e=>void submit(e)}><label>Amount<input type="text" inputMode="decimal" value={amount} onChange={e=>{ if (moneyEntry.test(e.target.value)) setAmount(e.target.value); }} onBlur={() => { if (amount) setAmount(cleanMoney(amount)); }} required /></label><label>Date<input type="date" value={paidOn} onChange={e=>setPaidOn(e.target.value)} required /></label><label className="payment-note">Note<input type="text" value={note} onChange={e=>setNote(e.target.value.slice(0,500))} placeholder="Optional" /></label><button disabled={busy || !amount}>Paid</button></form></div>{paymentError && <p className="error" role="alert">{paymentError}</p>}<details><summary>Balance breakdown ({entries.length})</summary><div className="ledger-list">{entries.map((e,i)=><div className="ledger-row" key={i}><div><strong>{e.kind === 'sale' ? 'In-store sale' : e.kind === 'online' ? 'Online sale' : e.kind === 'payment' ? 'Payment' : 'Reimbursement'} · {stamp(e.at)}</strong><span>{e.detail}</span>{e.note && <small>{e.note}</small>}</div><b>{e.amount === null ? 'Needs cost' : (e.amount < 0 ? '−' : '+') + money(Math.abs(e.amount))}</b></div>)}</div></details></section>;
 }
 function RuleEditor({person,rule,save,busy}:{person:Person;rule?:Rule;save:(id:string,m:Rule['method'],r:number)=>Promise<void>;busy:boolean}) { const [method,setMethod]=useState<Rule['method']>(rule?.method||'percent_sale'); const [rate,setRate]=useState(String(rule?.rate??'')); useEffect(()=>{setMethod(rule?.method||'percent_sale');setRate(String(rule?.rate??''));},[rule]); return <form className="rule-row" onSubmit={e=>{e.preventDefault();void save(person.user_id,method,Number(rate));}}><strong>{person.display_name}</strong><select aria-label={`Cut type for ${person.display_name}`} value={method} onChange={e=>setMethod(e.target.value as Rule['method'])}><option value="percent_sale">Percent of sale</option><option value="flat_ticket">Flat per sale</option><option value="percent_profit">Percent of profit</option></select><label><input type={method==='flat_ticket'?'text':'number'} inputMode="decimal" min={method==='flat_ticket'?undefined:0} max={method==='flat_ticket'?undefined:100} step="0.01" required value={rate} onChange={e=>{ if (method!=='flat_ticket' || moneyEntry.test(e.target.value)) setRate(e.target.value); }} onBlur={() => { if (method==='flat_ticket' && rate) setRate(cleanMoney(rate)); }} />{method==='flat_ticket'?'$':'%'}</label><button disabled={busy}>Save</button></form>; }
 
@@ -313,7 +344,7 @@ function OnlinePayoutSettings({cfg,staff,busy,save}:{cfg:OnlineCfg;staff:Person[
   const [who,setWho]=useState(cfg.employeeId||''); const [pct,setPct]=useState(String(cfg.pct)); const [channels,setChannels]=useState(cfg.channels.join(', '));
   useEffect(()=>{setWho(cfg.employeeId||'');setPct(String(cfg.pct));setChannels(cfg.channels.join(', '));},[cfg]);
   return <section className="panel"><h2>Online sales payout</h2>
-    <p className="hint">Online sales pay this percent of profit: sale price − actual channel fees − label/shipping cost − card processing − item cost. Sales tax, card-fee surcharge, and buyer-paid shipping are left out. When no real fee has synced yet, the channel rate below is used and flagged estimated; when a unit has no cost, the category default is used and flagged.</p>
+    <p className="hint">Online sales pay this percent of profit: item + buyer shipping − channel fees − label cost − card processing − item cost (same as Reports). Sales tax and card-fee surcharge stay out. Estimated fees/costs are flagged until real numbers land.</p>
     <form className="rule-row" onSubmit={e=>{e.preventDefault();void save(channels.split(/[,\s]+/).map(x=>x.trim().toLowerCase()).filter(Boolean),Number(pct),who);}}>
       <label>Paid to<select value={who} onChange={e=>setWho(e.target.value)} required><option value="" disabled>Choose…</option>{staff.map(p=><option key={p.user_id} value={p.user_id}>{p.display_name}</option>)}</select></label>
       <label>Percent of profit<input type="number" min={0} max={100} step="0.01" required value={pct} onChange={e=>setPct(e.target.value)} />%</label>

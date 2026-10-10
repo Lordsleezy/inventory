@@ -113,7 +113,8 @@ export function parseTradingOrders(xml) {
 export function tradingOrderIsSale(order, soldQtyBySku = {}) {
   if (!order?.orderId || !order.sku) return false;
   const cancel = String(order.cancelStatus || "").replace(/_/g, "").toLowerCase();
-  if (/^(cancelled|canceled|cancelpending|cancelrequested)$/.test(cancel)) return false;
+  // CancelClosedWithRefund / CancelClosedNoRefund / CancelPending / etc. are not live sales.
+  if (/cancel/.test(cancel) && !/notapplicable|none/.test(cancel)) return false;
   if (Number(order.quantityPurchased) < 1) return false;
   const paid =
     Number(order.amountPaid) > 0 ||

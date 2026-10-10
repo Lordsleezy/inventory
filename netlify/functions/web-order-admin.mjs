@@ -72,12 +72,27 @@ async function handle(event) {
     return json(200, { ok: true, order: saved, emailed: deliveries.some(r => r.kind === "tracking" && r.ok) });
   }
   if (body.action === "mark_shipped") {
+    // Internal inventory marker only — no tracking required, no customer email.
     const { data, error } = await sb.from("web_orders").update({ shipped_at: new Date().toISOString(), updated_at: new Date().toISOString() })
       .eq("id", id).eq("store_id", storeId).eq("status", "paid").eq("fulfillment", "ship").is("shipped_at", null)
-      .is("refund_requested_at", null).not("tracking_number", "is", null).select("*").maybeSingle();
+      .is("refund_requested_at", null).select("*").maybeSingle();
     if (error) return json(500, { error: error.message });
-    if (!data) return json(400, { error: "Buy a label (or enter tracking on the phone) before marking shipped." });
-    await deliverOrderEmails(sb, id).catch(() => []);
+    if (!data) return json(400, { error: "This order is not waiting to ship." });
+    return json(200, { ok: true, order: data });
+  }
+  if (body.action === "mark_delivered") {
+    const { data: current } = await sb.from("web_orders").select("id,shipped_at,delivered_at,status,fulfillment,refund_requested_at")
+      .eq("id", id).eq("store_id", storeId).maybeSingle();
+    if (!current || current.status !== "paid" || current.fulfillment !== "ship" || current.refund_requested_at || current.delivered_at) {
+      return json(400, { error: "This order cannot be marked delivered." });
+    }
+    const now = new Date().toISOString();
+    const { data, error } = await sb.from("web_orders").update({
+      shipped_at: current.shipped_at || now,
+      delivered_at: now,
+      updated_at: now,
+    }).eq("id", id).eq("store_id", storeId).select("*").maybeSingle();
+    if (error) return json(500, { error: error.message });
     return json(200, { ok: true, order: data });
   }
   if (body.action === "cancel_refund") {

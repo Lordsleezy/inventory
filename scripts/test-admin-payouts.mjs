@@ -39,6 +39,17 @@ test("profit subtracts channel fees, label cost, and card processing on every ch
   const withCfg = { ...cfg, channels: ["depop"], pct: 30 };
   assert.equal(payout(t, rules[0], withCfg), Math.round(5792 * 0.3));
 });
+test("buyer-paid shipping is revenue (matches sale_ledger / Reports)", () => {
+  const t = { subtotal: 8000, cost: 2000, channel: "website", shippingCents: 1200, shipCostCents: 1399, processingFeeCents: 313 };
+  assert.equal(profit(t), 8000 + 1200 - 1399 - 313 - 2000);
+  // Ledger profit_cents wins when present.
+  assert.equal(profit({ ...t, profitCents: 9999 }), 9999);
+});
+test("losses are not floored in profit(); commissions still floor at zero", () => {
+  const t = { subtotal: 1000, cost: 5000, channel: "floor", feeCents: 0, shipCostCents: 0, processingFeeCents: 0 };
+  assert.equal(profit(t), -4000);
+  assert.equal(payout(t, { employee_id: PAUL, method: "percent_profit", rate: 20 }, cfg), 0);
+});
 test("in-store card sale: Square processing fee lowers profit for percent_profit rules", () => {
   // $100 sale, $40 cost, $2.75 Square fee → $57.25 profit
   const t = { subtotal: 10000, cost: 4000, channel: "floor", processingFeeCents: 275 };
