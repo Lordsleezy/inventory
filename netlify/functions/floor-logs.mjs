@@ -2,7 +2,7 @@ import { staffFromEvent, json, corsHeaders } from "../lib/server.mjs";
 import { serviceClient } from "../lib/server.mjs";
 
 export async function handler(event) {
-  if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: corsHeaders(), body: "" };
+  if (event.httpMethod === "OPTIONS") return { statusCode: 200, headers: corsHeaders(), body: "" };
   if (event.httpMethod !== "GET") return json(405, { error: "get_only" });
   try {
     const { staff } = await staffFromEvent(event);

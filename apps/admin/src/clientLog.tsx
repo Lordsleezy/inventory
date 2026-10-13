@@ -1,13 +1,12 @@
 import { useEffect } from 'react';
-
-const functionsBase = (import.meta.env.VITE_FLOOR_FUNCTIONS_URL || 'https://inventoryobi.netlify.app').replace(/\/$/, '');
+import { floorFunctionUrl } from './floorApi';
 
 export type ClientErrorInfo = { message: string; page?: string; status?: number | null; traceId?: string | null; sku?: string; action_name?: string };
 
 /** Fire-and-forget: tell the backend about a failure the browser saw, so it shows up on the Logs page. */
 export function reportClientError(token: string, info: ClientErrorInfo) {
   try {
-    void fetch(`${functionsBase}/.netlify/functions/portal-logs`, {
+    void fetch(floorFunctionUrl('portal-logs'), {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'client_error', url: location.href.split('#')[0], ...info }),

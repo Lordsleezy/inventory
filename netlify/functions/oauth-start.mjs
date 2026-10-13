@@ -5,7 +5,7 @@ import { wrapHandler } from "../lib/floor-log.mjs";
 import { ebayDisabled } from "../lib/ebay-env.mjs";
 
 async function handle(event) {
-  if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: corsHeaders(), body: "" };
+  if (event.httpMethod === "OPTIONS") return { statusCode: 200, headers: corsHeaders(), body: "" };
   try {
     const provider = event.queryStringParameters?.provider;
     if (!provider || !["square", "ebay", "amazon"].includes(provider)) {

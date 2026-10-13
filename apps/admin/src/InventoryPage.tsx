@@ -139,6 +139,7 @@ export function InventoryPage({ client, storeId, accessToken, money, stamp, tab,
       unit={detail.unit}
       photos={detail.photos}
       urls={urls}
+      accessToken={accessToken}
       onClose={() => setSelected(null)}
       onSaved={(unit) => {
         setDetail(d => d ? { ...d, unit } : d);

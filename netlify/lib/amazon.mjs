@@ -545,10 +545,19 @@ function moneyCents(m) {
   return Number.isFinite(n) && n > 0 ? Math.round(n * 100) : null;
 }
 
+async function sleep(ms) {
+  await new Promise((r) => setTimeout(r, ms));
+}
+
+function isPricingRateLimited(err) {
+  return err?.status === 429 || /QuotaExceeded|Rate exceeded|Too Many Requests/i.test(String(err?.message || err?.code || ""));
+}
+
 /**
  * Current listing price (cents) for an ASIN. Needs the Pricing role on the SP-API app.
  * Tries getItemOffers (buy box → lowest new → lowest offer), then getPricing.
- * @returns {{ price_cents: number|null, source: string|null, as_of: string, raw_error?: string }}
+ * On 429: one polite retry, then return price_pending (never throws — catalog lookup must still succeed).
+ * @returns {{ price_cents: number|null, source: string|null, as_of: string, price_pending?: boolean, raw_error?: string }}
  */
 export async function competitivePriceByAsin(storeId, asin) {
   const id = String(asin || "").trim().toUpperCase();
@@ -556,8 +565,9 @@ export async function competitivePriceByAsin(storeId, asin) {
   if (!id) return { price_cents: null, source: null, as_of, raw_error: "asin_required" };
   const mp = marketplaceId();
   let firstError = null;
+  let rateLimited = false;
 
-  try {
+  async function tryOffers() {
     const json = await spapiFetch(
       storeId,
       "GET",
@@ -574,15 +584,10 @@ export async function competitivePriceByAsin(storeId, asin) {
     const offers = (payload.Offers || []).map((o) => moneyCents(o.ListingPrice)).filter(Boolean);
     cents = offers.length ? Math.min(...offers) : null;
     if (cents) return { price_cents: cents, source: "lowest_offer", as_of };
-  } catch (e) {
-    firstError = e;
-    // 403 = Pricing role missing; getPricing needs the same role, so don't burn another call.
-    if (e?.status === 403 || e?.status === 401 || /not_connected|Missing env/i.test(String(e?.message))) {
-      return { price_cents: null, source: null, as_of, raw_error: String(e.message).slice(0, 300) };
-    }
+    return null;
   }
 
-  try {
+  async function tryPricing() {
     const json = await spapiFetch(
       storeId,
       "GET",
@@ -596,8 +601,48 @@ export async function competitivePriceByAsin(storeId, asin) {
     const offerPrices = (product.Offers || []).map((o) => moneyCents(o.BuyingPrice?.ListingPrice)).filter(Boolean);
     cents = offerPrices.length ? Math.min(...offerPrices) : null;
     if (cents) return { price_cents: cents, source: "pricing_offer", as_of };
-  } catch (e) {
-    firstError = firstError || e;
+    return null;
+  }
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const hit = await tryOffers();
+      if (hit) return hit;
+      break;
+    } catch (e) {
+      firstError = e;
+      if (e?.status === 403 || e?.status === 401 || /not_connected|Missing env/i.test(String(e?.message))) {
+        return { price_cents: null, source: null, as_of, raw_error: String(e.message).slice(0, 300) };
+      }
+      if (isPricingRateLimited(e)) {
+        rateLimited = true;
+        if (attempt === 0) {
+          await sleep(900 + Math.floor(Math.random() * 500));
+          continue;
+        }
+      }
+      break;
+    }
+  }
+
+  if (!rateLimited) {
+    try {
+      const hit = await tryPricing();
+      if (hit) return hit;
+    } catch (e) {
+      firstError = firstError || e;
+      if (isPricingRateLimited(e)) rateLimited = true;
+    }
+  }
+
+  if (rateLimited) {
+    return {
+      price_cents: null,
+      source: null,
+      as_of,
+      price_pending: true,
+      raw_error: "amazon_pricing_rate_limited",
+    };
   }
 
   return {

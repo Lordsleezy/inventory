@@ -16,7 +16,7 @@ const MPSDK_COUNTRIES = new Set(["US", "CA", "GB", "AU"]);
  * Returns access token + location + diagnostics for the phone UI.
  */
 async function handle(event) {
-  if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: corsHeaders(), body: "" };
+  if (event.httpMethod === "OPTIONS") return { statusCode: 200, headers: corsHeaders(), body: "" };
   const ctx = await staffFromEvent(event);
   const access = await getStoreSquareAccess(ctx.staff.store_id);
   if (!access.locationId) {

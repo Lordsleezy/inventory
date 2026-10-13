@@ -4,7 +4,7 @@ import { wrapHandler } from "../lib/floor-log.mjs";
 
 /** List Square locations for the connected store (or sandbox test token). */
 async function handle(event) {
-  if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: corsHeaders(), body: "" };
+  if (event.httpMethod === "OPTIONS") return { statusCode: 200, headers: corsHeaders(), body: "" };
   const ctx = await staffFromEvent(event);
   const access = await getStoreSquareAccess(ctx.staff.store_id);
   const client = squareClient(access.accessToken);

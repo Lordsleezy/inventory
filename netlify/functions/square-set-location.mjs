@@ -2,7 +2,7 @@ import { ownerFromEvent, serviceClient, json, corsHeaders } from "../lib/server.
 import { wrapHandler } from "../lib/floor-log.mjs";
 
 async function handle(event) {
-  if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: corsHeaders(), body: "" };
+  if (event.httpMethod === "OPTIONS") return { statusCode: 200, headers: corsHeaders(), body: "" };
   if (event.httpMethod !== "POST") return json(405, { error: "POST" });
   try {
     const { staff } = await ownerFromEvent(event);

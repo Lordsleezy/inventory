@@ -8,6 +8,14 @@
 [functions]
   directory = "apps/admin/functions"
 
+# Same-origin proxy so the locked-down store phone (admin.openboxindustries.com only)
+# can call inventoryobi functions without opening cross-origin fetch.
+[[redirects]]
+  from = "/api/floor/*"
+  to = "https://inventoryobi.netlify.app/.netlify/functions/:splat"
+  status = 200
+  force = true
+
 [[redirects]]
   from = "/*"
   to = "/index.html"

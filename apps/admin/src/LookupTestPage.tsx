@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { isKioskShell, scannerInputMode } from './kiosk';
+import { floorFunctionUrl } from './floorApi';
+import { reportClientError } from './clientLog';
 
-const base = (import.meta.env.VITE_FLOOR_FUNCTIONS_URL || 'https://inventoryobi.netlify.app').replace(/\/$/, '');
 const money = (n: number | null | undefined) =>
   n == null ? '—' : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n / 100);
 
@@ -79,14 +80,34 @@ function sourceHas(block: SourceBlock | undefined, key: FieldKey): boolean {
 }
 
 async function lookupCall(token: string, upc: string, force = false, compare = true): Promise<LookupResult> {
-  const res = await fetch(`${base}/.netlify/functions/upc-lookup`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ action: 'lookup', upc, force, compare_upcitemdb: compare }),
-  });
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(json.error || json.message || `Lookup failed (${res.status})`);
-  return json as LookupResult;
+  const run = async () => {
+    const res = await fetch(floorFunctionUrl('upc-lookup'), {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'lookup', upc, force, compare_upcitemdb: compare }),
+    });
+    const json = await res.json().catch(() => ({} as { error?: string; message?: string }));
+    if (!res.ok) {
+      const msg = json.error || json.message || `Lookup failed (${res.status})`;
+      if (res.status === 401) throw new Error('Not logged in — sign in again.');
+      if (/failed to fetch/i.test(msg)) throw new Error("Couldn't reach the lookup server.");
+      throw new Error(msg);
+    }
+    return json as LookupResult;
+  };
+  try {
+    return await run();
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (/not logged in|invalid/i.test(msg)) throw e;
+    await new Promise((r) => setTimeout(r, 600));
+    try {
+      return await run();
+    } catch (e2) {
+      reportClientError(token, { message: `upc_lookup failed: ${e2 instanceof Error ? e2.message : String(e2)}`, page: 'lookup-test', action_name: 'upc_lookup', sku: upc });
+      throw e2;
+    }
+  }
 }
 
 type Props = { accessToken: string };

@@ -7,7 +7,7 @@ import { wrapHandler } from "../lib/floor-log.mjs";
  * Uses SQUARE_REDIRECT_URL (must match Square console + Netlify env).
  */
 async function handle(event) {
-  if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: corsHeaders(), body: "" };
+  if (event.httpMethod === "OPTIONS") return { statusCode: 200, headers: corsHeaders(), body: "" };
   if (event.httpMethod !== "POST" && event.httpMethod !== "GET") {
     return json(405, { error: "method_not_allowed" });
   }

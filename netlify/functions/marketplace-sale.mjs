@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { json, corsHeaders, serviceClient, connectionAdminFromEvent } from '../lib/server.mjs';
 import { wrapHandler } from '../lib/floor-log.mjs';
 async function handle(event) {
-  if(event.httpMethod==='OPTIONS') return {statusCode:204,headers:corsHeaders(),body:''};
+  if(event.httpMethod==='OPTIONS') return {statusCode: 200,headers:corsHeaders(),body:''};
   if(event.httpMethod!=='POST') return json(405,{error:'method_not_allowed'});
   try {
     const {staff}=await connectionAdminFromEvent(event,['owner','manager']);

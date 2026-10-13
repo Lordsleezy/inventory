@@ -2,7 +2,7 @@ import { json, corsHeaders } from '../lib/server.mjs';
 import { authorizedScan } from '../lib/video-scan-auth.mjs';
 
 export async function handler(event) {
-  if(event.httpMethod==='OPTIONS')return {statusCode:204,headers:corsHeaders(),body:''};
+  if(event.httpMethod==='OPTIONS')return {statusCode: 200,headers:corsHeaders(),body:''};
   if(event.httpMethod!=='POST')return json(405,{error:'POST required'});
   try {
     const {id}=JSON.parse(event.body||'{}'),{sb,job}=await authorizedScan(event,id);

@@ -181,11 +181,17 @@ async function amazonLookup(storeId, gtin, deps) {
     alternatives: res.alternatives || [],
   });
 
-  const price = await deps.priceByAsin(storeId, it.asin).catch((e) => ({ price_cents: null, raw_error: String(e?.message || e).slice(0, 300) }));
+  const price = await deps.priceByAsin(storeId, it.asin).catch((e) => ({
+    price_cents: null,
+    raw_error: String(e?.message || e).slice(0, 300),
+    price_pending: /429|rate.?limit|QuotaExceeded/i.test(String(e?.message || e?.status || "")),
+  }));
   out.price_cents = price.price_cents ?? null;
   out.price_source = price.price_cents ? `amazon_${price.source}` : null;
   out.price_as_of = price.price_cents ? price.as_of : null;
+  if (price.price_pending) out.price_pending = true;
   if (price.raw_error) out.price_error = price.raw_error;
+  // Rate-limited pricing must never fail the whole lookup — catalog data still stands.
   return out;
 }
 
@@ -435,10 +441,27 @@ export async function lookupUpc(storeId, rawCode, opts = {}) {
     looked_up_at: new Date().toISOString(),
   };
 
-  // Don't cache transient failures — they'd pin an incomplete answer until force:true.
-  const transient = Boolean(amazon.raw_error || amazon.price_error || upcitemdb.raw_error);
-  if (!transient) await writeCache(sb, gtin.gtin14, result);
-  else result.cache_skipped = "transient_error";
+  // Don't cache hard failures. Pricing rate-limits are OK to cache catalog without price
+  // (price_pending) so the next scan still gets title/dims instantly.
+  const hardFail = Boolean(amazon.raw_error && !amazon.found) || Boolean(upcitemdb.raw_error && !upcitemdb.found && !amazon.found);
+  const pricingOnlyPending = Boolean(amazon.price_pending || amazon.price_error === "amazon_pricing_rate_limited");
+  if (!hardFail) {
+    if (pricingOnlyPending && !amazon.price_cents) {
+      // Cache catalog; leave price null so a later force can refresh pricing.
+      const toCache = {
+        ...result,
+        amazon: { ...amazon, price_pending: true },
+        merged: { ...merged, retail_cents: merged.retail_cents || upcitemdb.price_cents || null },
+      };
+      await writeCache(sb, gtin.gtin14, toCache);
+    } else if (!amazon.price_error || pricingOnlyPending) {
+      await writeCache(sb, gtin.gtin14, result);
+    } else {
+      result.cache_skipped = "transient_error";
+    }
+  } else {
+    result.cache_skipped = "transient_error";
+  }
 
   return result;
 }

@@ -108,7 +108,7 @@ export async function drainLoyaltyEmail(limit = 40) {
 
 export const handler = wrapHandler("loyalty-email", async (event) => {
   const cors = corsHeaders();
-  if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: cors, body: "" };
+  if (event.httpMethod === "OPTIONS") return { statusCode: 200, headers: cors, body: "" };
   try {
     if (event.httpMethod === "POST") {
       const body = JSON.parse(event.body || "{}");

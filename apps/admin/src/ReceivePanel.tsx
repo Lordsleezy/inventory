@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { isKioskShell, scannerInputMode } from './kiosk';
+import { floorFunctionUrl } from './floorApi';
+import { reportClientError } from './clientLog';
+import { categoryDefaultCostCents, priceFloorCents, suggestAskCents } from './scanPricing';
 
 /* ------------------------------------------------------------------------------------------------
  * Receive = scan-to-list.
@@ -9,8 +12,6 @@ import { isKioskShell, scannerInputMode } from './kiosk';
  *   merge lookup data into units.listing_specs.
  * "Enter manually" falls back to the old blank form (no lookup).
  * ---------------------------------------------------------------------------------------------- */
-
-const base = (import.meta.env.VITE_FLOOR_FUNCTIONS_URL || 'https://inventoryobi.netlify.app').replace(/\/$/, '');
 
 type Options = { next_sku: string | null; conditions: unknown; test_statuses: unknown };
 type Props = { client: SupabaseClient; storeId: string; accessToken: string; onSaved: () => void };
@@ -29,6 +30,7 @@ type Source = {
   price_cents?: number | null;
   price_source?: string | null;
   price_as_of?: string | null;
+  price_pending?: boolean;
   msrp_cents?: number | null;
   raw_error?: string | null;
 };
@@ -40,6 +42,7 @@ type Lookup = {
   upcitemdb?: Source;
   merged?: {
     title?: string | null; brand?: string | null; model?: string | null; description?: string | null;
+    category?: string | null;
     features?: string[]; package?: Pkg; asin?: string | null; msrp_cents?: number | null;
     retail_cents?: number | null; retail_source?: string | null; retail_as_of?: string | null;
     disagreements?: Disagreement[]; never_list_reason?: string | null;
@@ -47,16 +50,17 @@ type Lookup = {
   fieldCoverage?: { package?: string | null };
 };
 
-type Form = {
+  type Form = {
   brand: string; model: string; title: string; description: string;
   condition: string; conditionNote: string; testStatus: string; ask: string; cost: string;
   notes: string; upc: string; quantity: string; shippable: string;
   length: string; width: string; height: string; weight: string;
+  costEstimate: boolean;
 };
 const blank: Form = {
   brand: '', model: '', title: '', description: '', condition: '', conditionNote: '', testStatus: '',
   ask: '', cost: '', notes: '', upc: '', quantity: '1', shippable: 'auto',
-  length: '', width: '', height: '', weight: '',
+  length: '', width: '', height: '', weight: '', costEstimate: false,
 };
 
 type Scan = {
@@ -131,36 +135,55 @@ function msrpOf(r?: Lookup): number | null {
   return pos(m) ? m : null;
 }
 
-/**
- * ≈55% of retail, ending in .99, never at/over retail. With a known cost the price is at least
- * max(cost + $5, $5.99); if that would reach retail it is capped to one cent under retail.
- */
-function suggestAsk(retail: number | null, cost: number | null): number | null {
-  if (!pos(retail)) return null;
-  let price = Math.ceil((Math.round(retail * 0.55) + 1) / 100) * 100 - 1;
-  if (cost != null) price = Math.max(price, Math.max(cost + 500, 599));
-  if (price >= retail) price = retail - 1;
-  return price > 0 ? price : null;
+function explainLookupError(err: unknown, status?: number, body?: { error?: string; message?: string }): string {
+  const raw = body?.error || body?.message || (err instanceof Error ? err.message : String(err || ''));
+  const lower = raw.toLowerCase();
+  if (err instanceof DOMException && err.name === 'AbortError') return 'Lookup timed out — the server took too long. Retry or enter manually.';
+  if (/failed to fetch|networkerror|load failed|network request failed/i.test(raw)) {
+    return "Couldn't reach the lookup server (network/CORS). Retry once; if it keeps failing, enter manually.";
+  }
+  if (status === 401 || /not_logged_in|sign in required|not_signed_in/i.test(lower)) return 'Not logged in — sign in again, then retry the scan.';
+  if (status === 403 || /not_authorized|staff access|not_owner|not_staff/i.test(lower)) return 'Not authorized for lookup — ask an admin to check your staff access.';
+  if (status === 429 || /rate.?limit|quota/i.test(lower)) return 'Amazon rate-limited pricing — catalog may still show; retry in a moment for the price.';
+  if (/invalid_gtin|upc_required/i.test(lower)) return 'That barcode does not look like a valid UPC/EAN.';
+  if (/not found|no source|upcitemdb/i.test(lower) && status === 404) return 'UPC not found in Amazon or UPCitemdb — fill the fields by hand.';
+  if (raw && raw !== 'Failed to fetch') return raw;
+  return 'Lookup failed — retry or enter manually.';
 }
 
 /* ----- lookup ----- */
+
+async function lookupUpcOnce(token: string, upc: string, signal: AbortSignal): Promise<Lookup> {
+  const res = await fetch(floorFunctionUrl('upc-lookup'), {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ action: 'lookup', upc, compare_upcitemdb: true }),
+    signal,
+  });
+  const json = await res.json().catch(() => ({} as { error?: string; message?: string }));
+  if (!res.ok) {
+    const err = new Error(explainLookupError(null, res.status, json));
+    (err as Error & { status?: number }).status = res.status;
+    throw err;
+  }
+  return json as Lookup;
+}
 
 async function lookupUpc(token: string, upc: string): Promise<Lookup> {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), 45000);
   try {
-    const res = await fetch(`${base}/.netlify/functions/upc-lookup`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ action: 'lookup', upc, compare_upcitemdb: true }),
-      signal: ctl.signal,
-    });
-    const json = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(json.error || json.message || `Lookup failed (${res.status})`);
-    return json as Lookup;
+    try {
+      return await lookupUpcOnce(token, upc, ctl.signal);
+    } catch (first) {
+      // Auto-retry once for network / transient failures (not auth or bad UPC).
+      const status = (first as { status?: number })?.status;
+      if (status === 401 || status === 403 || status === 400) throw first;
+      await new Promise(r => setTimeout(r, 600));
+      return await lookupUpcOnce(token, upc, ctl.signal);
+    }
   } catch (e) {
-    if (e instanceof DOMException && e.name === 'AbortError') throw new Error('Lookup timed out. Try again or enter manually.');
-    throw e;
+    throw new Error(explainLookupError(e, (e as { status?: number })?.status));
   } finally { clearTimeout(timer); }
 }
 
@@ -279,12 +302,29 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
   const msrp = useMemo(() => msrpOf(result), [result]);
   const costParsed = cents(form.cost);
   const costKnown = typeof costParsed === 'number' ? costParsed : null;
-  const suggestion = useMemo(() => suggestAsk(retail?.cents ?? null, costKnown), [retail, costKnown]);
+  const weightNum = (() => { const n = Number(form.weight.trim()); return Number.isFinite(n) && n > 0 ? n : null; })();
+  const floor = useMemo(
+    () => priceFloorCents({
+      // Treat category-default cost as "unknown" for floor labeling, but still use the dollars.
+      costCents: form.costEstimate ? null : costKnown,
+      weightLb: weightNum ?? (result?.merged?.package?.weight_lb ?? null),
+      title: form.title || result?.merged?.title,
+      brand: form.brand || result?.merged?.brand,
+      model: form.model || result?.merged?.model,
+      category: result?.merged?.category ?? null,
+    }),
+    [costKnown, form.costEstimate, weightNum, form.title, form.brand, form.model, result],
+  );
+  const suggestion = useMemo(() => suggestAskCents(retail?.cents ?? null, floor), [retail, floor]);
 
   const focusUpc = () => { requestAnimationFrame(() => upcInput.current?.focus()); };
   const update = (key: keyof Form, value: string) => {
     if (key === 'ask') askTouched.current = true;
-    setForm(prev => ({ ...prev, [key]: value }));
+    setForm(prev => {
+      const next = { ...prev, [key]: value };
+      if (key === 'cost') next.costEstimate = false;
+      return next;
+    });
   };
 
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
@@ -318,6 +358,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
         if (mounted.current) setQueue(q => q.map(s => (s.id === id ? { ...s, status: 'ready', result: res, error: undefined } : s)));
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
+        reportClientError(accessToken, { message: `upc_lookup failed: ${msg}`, page: 'inventory/receive', action_name: 'upc_lookup', sku: upc });
         if (mounted.current) setQueue(q => q.map(s => (s.id === id ? { ...s, status: 'error', error: msg } : s)));
       }
     });
@@ -361,6 +402,15 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
     const m = r?.merged;
     const p = m?.package;
     const retailNow = retailOf(r);
+    const defaultCost = categoryDefaultCostCents({
+      title: m?.title, brand: m?.brand, model: m?.model, category: m?.category,
+    });
+    const floorSuggest = priceFloorCents({
+      costCents: null,
+      weightLb: p?.weight_lb ?? null,
+      title: m?.title, brand: m?.brand, model: m?.model, category: m?.category,
+    });
+    const suggested = suggestAskCents(retailNow?.cents ?? null, floorSuggest);
     const initial: Form = {
       ...blank,
       upc: current.upc,
@@ -370,8 +420,10 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
       // description falls back to the real feature bullets from the lookup; never invented text
       description: text(m?.description) || featuresText(m?.features),
       length: num(p?.length_in), width: num(p?.width_in), height: num(p?.height_in), weight: num(p?.weight_lb),
-      ask: (() => { const s = suggestAsk(retailNow?.cents ?? null, null); return s ? dollars(s) : ''; })(),
+      ask: suggested ? dollars(suggested) : '',
+      cost: dollars(defaultCost.cents),
       ...(current.seed || {}),
+      costEstimate: current.seed?.cost ? false : true,
     };
     askTouched.current = Boolean(current.seed && 'ask' in current.seed);
     setForm(initial);
@@ -504,7 +556,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
         p_condition: form.condition || null,
         p_test_status: form.testStatus || null,
         p_ask_cents: hold ? null : parsed.ask, // held units never get an ask
-        p_cost_cents: parsed.cost,
+        p_cost_cents: parsed.cost ?? floor.costCents,
         p_notes: notes || null,
         p_upc: form.upc.trim() || current?.upc || null,
         p_shippable: form.shippable,
@@ -582,6 +634,11 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
       put('retail_as_of', retail?.asOf);
       put('features', (m?.features || []).map(f => f.trim()).filter(Boolean));
       if (parsed.dims.some(pos)) put('package_source', packageSource(parsed));
+      if (form.costEstimate || parsed.cost == null) {
+        put('cost_estimate', true);
+        put('cost_source', floor.costLabel);
+      }
+      if (A?.price_pending) put('amazon_price_pending', true);
     } else if (manual && form.upc.trim()) {
       put('upc', form.upc.trim());
     }
@@ -675,7 +732,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
     setFiles(prev => [...prev, ...Array.from(list)]);
   }
 
-  const picker = (labelText: string, key: keyof Form, values: string[]) => (
+  const picker = (labelText: string, key: Exclude<keyof Form, 'costEstimate'>, values: string[]) => (
     <label>{labelText}<select value={form[key]} onChange={e => update(key, e.target.value)}>
       <option value="">—</option>{values.map(x => <option key={x} value={x}>{x}</option>)}
     </select></label>
@@ -781,7 +838,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
               {' '}<button type="button" className="text-button" onClick={() => setPackage(A?.package)}>Use Amazon</button>
               <button type="button" className="text-button" onClick={() => setPackage(U?.package)}>Use UPCitemdb</button>
             </>)}
-            {cmpRow('Retail price', pos(A?.price_cents) ? `${money(A.price_cents)}${A.price_source ? ` (${label(A.price_source)})` : ''}` : '', pos(U?.price_cents) ? `${money(U.price_cents)}${U.price_source ? ` (${label(U.price_source)})` : ''}` : '', false)}
+            {cmpRow('Retail price', pos(A?.price_cents) ? `${money(A.price_cents)}${A.price_source ? ` (${label(A.price_source)})` : ''}` : (A?.price_pending ? 'pending (rate limit)' : ''), pos(U?.price_cents) ? `${money(U.price_cents)}${U.price_source ? ` (${label(U.price_source)})` : ''}` : '', false)}
             {cmpRow('ASIN', text(A?.asin), text(U?.asin), disagree.has('asin'))}
           </tbody>
         </table></div>
@@ -812,14 +869,19 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
         {needNoteForScratch && <label className="unit-edit-wide">What is scratched or dented? (required)<textarea rows={2} value={form.conditionNote} onChange={e => update('conditionNote', e.target.value)} /></label>}
 
         <label>Price{retail && !askTouched.current ? ' (suggested — edit if needed)' : ''}<input inputMode="decimal" placeholder="24.99" value={form.ask} onChange={e => update('ask', e.target.value)} /></label>
-        <label>Cost (optional)<input inputMode="decimal" placeholder="9.00" value={form.cost} onChange={e => update('cost', e.target.value)} /></label>
+        <label>Cost{form.costEstimate ? ' (estimate — edit if you know it)' : ' (optional)'}
+          <input inputMode="decimal" placeholder="9.00" value={form.cost} onChange={e => update('cost', e.target.value)} />
+        </label>
         {!manual && <div className="unit-edit-wide receive-retail">
           {retail
             ? <>Retail {money(retail.cents)} from {label(retail.source)}{retail.asOf ? ` (as of ${retail.asOf.slice(0, 10)})` : ''}
               {msrp ? ` · MSRP ${money(msrp)}` : ''}
+              {A?.price_pending ? ' · Amazon price pending (rate limit)' : ''}
               {suggestion ? <> · Suggested {money(suggestion)} <button type="button" className="text-button" onClick={() => { askTouched.current = true; setForm(p => ({ ...p, ask: dollars(suggestion) })); }}>Use</button></> : null}
-              <br /><small>Suggestion ≈ 55% of retail{costKnown != null ? `, at least cost + $5 (min $5.99)` : ''}, always under retail. The price is only saved when you finish.</small></>
-            : <>No retail price found{msrp ? ` · MSRP ${money(msrp)}` : ''}. Enter a price yourself or leave it blank.</>}
+              <br /><small>{floor.mathLine}. Suggestion ≈ 55% of retail, never under that floor, always under retail.</small></>
+            : <>No retail price found{msrp ? ` · MSRP ${money(msrp)}` : ''}{A?.price_pending ? ' · Amazon price pending (rate limit)' : ''}.
+              <br /><small>{floor.mathLine}</small>
+              Enter a price yourself or leave it blank.</>}
         </div>}
         {picker('Test status', 'testStatus', choices(options?.test_statuses))}
         <label>Shippable
@@ -872,7 +934,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
         <h3 id="ready-title">Ready to list?</h3>
         <p><strong>{form.title.trim() || [form.brand, form.model].filter(Boolean).join(' ')}</strong><br />
           Price {money(cents(form.ask) as number | null)} · {form.condition || 'no condition'} · {files.length} photo{files.length === 1 ? '' : 's'}</p>
-        <p className="hint">Yes receives it with normal show defaults; it moves to Online → Ready once the board criteria are met (a cost is still needed there).</p>
+        <p className="hint">Yes receives it with normal show defaults; it moves to Online → Ready once the board criteria are met.
+          {form.costEstimate ? ` Cost uses ${floor.costLabel} until you edit it.` : ''}</p>
         <div className="actions">
           <button type="button" disabled={busy} autoFocus onClick={() => { const p = parse(); if (p) void receive(p, null); }}>Yes — receive &amp; list</button>
           <button type="button" className="secondary" disabled={busy} onClick={() => setDialog('reason')}>No</button>

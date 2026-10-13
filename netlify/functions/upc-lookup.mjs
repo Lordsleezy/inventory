@@ -4,9 +4,9 @@
  * POST { action: "lookup", upc, force?, compare_upcitemdb?, store_id? }
  * POST { action: "batch_status", upcs?: string[] }   → cache coverage for the given codes (no external calls)
  */
-import { json, corsHeaders, serviceClient } from "../lib/server.mjs";
+import { json, optionsOk, serviceClient } from "../lib/server.mjs";
 import { portalAdminFromEvent } from "../lib/portal-auth.mjs";
-import { netlifyHandler } from "../lib/floor-log.mjs";
+import { netlifyHandler, floorLog } from "../lib/floor-log.mjs";
 import { lookupUpc } from "../lib/upc-lookup.mjs";
 import { normalizeGtin } from "../lib/gtin-normalize.mjs";
 
@@ -48,6 +48,13 @@ async function actions(event, ctx) {
       });
       return json(200, { ok: true, ...result });
     } catch (err) {
+      await floorLog({
+        level: "error",
+        event: "upc_lookup.fail",
+        message: err.message || "lookup_failed",
+        storeId: ctx.storeId,
+        detail: { upc, code: err.code || null, status: err.status || null },
+      });
       if (err.code === "invalid_gtin") return json(400, { ok: false, error: "invalid_gtin", message: err.message });
       throw err;
     }
@@ -86,14 +93,21 @@ async function actions(event, ctx) {
 }
 
 async function handle(event) {
-  if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: corsHeaders(), body: "" };
+  if (event.httpMethod === "OPTIONS") return optionsOk();
   if (event.httpMethod !== "POST") return json(405, { ok: false, error: "method_not_allowed" });
   try {
     const preview = JSON.parse(event.body || "{}");
     const ctx = await authFromEvent(event, preview.store_id);
     return await actions(event, ctx);
   } catch (err) {
-    return json(err.status || 500, { ok: false, error: err.message || "error" });
+    const status = err.status || 500;
+    const error =
+      status === 401
+        ? "not_logged_in"
+        : status === 403
+          ? "not_authorized"
+          : err.message || "error";
+    return json(status, { ok: false, error, message: err.message || error });
   }
 }
 

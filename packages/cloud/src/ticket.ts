@@ -235,6 +235,8 @@ export async function finalizeTicket(args: {
   cashCents?: number | null;
   cardCents?: number | null;
   note?: string | null;
+  /** Floor employee login code (e.g. Paul 0000, Jacob 1111). */
+  soldByCode?: string | null;
 }): Promise<TicketSummary> {
   await assertOnline();
   const { data, error } = await floorCloud().rpc("finalize_ticket", {
@@ -257,6 +259,7 @@ export async function finalizeTicket(args: {
     p_cash_cents: args.cashCents ?? null,
     p_card_cents: args.cardCents ?? null,
     p_note: args.note ?? null,
+    p_sold_by_code: args.soldByCode ?? null,
   });
   if (error) throw mapSellError(error);
   const summary = data as TicketSummary;
