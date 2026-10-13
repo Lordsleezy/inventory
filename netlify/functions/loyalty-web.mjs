@@ -34,7 +34,7 @@ function digitsOnly(phone) {
 }
 
 async function handle(event) {
-  if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: cors, body: "" };
+  if (event.httpMethod === "OPTIONS") return { statusCode: 200, headers: cors, body: "" };
   if (event.httpMethod !== "POST") return json(405, { error: "post_only" }, cors);
   assertKey(event);
   const body = JSON.parse(event.body || "{}");

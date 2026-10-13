@@ -5,7 +5,7 @@ import { ebayDisabled } from "../lib/ebay-env.mjs";
 
 async function handle(event) {
   if (ebayDisabled()) return json(410, { error: "eBay integration is disabled." });
-  if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: corsHeaders(), body: "" };
+  if (event.httpMethod === "OPTIONS") return { statusCode: 200, headers: corsHeaders(), body: "" };
   if (event.httpMethod !== "POST") return json(405, { error: "post_only" });
   try {
     const { staff } = await staffFromEvent(event);

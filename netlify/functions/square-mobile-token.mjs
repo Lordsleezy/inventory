@@ -2,7 +2,7 @@ import { staffFromEvent, serviceClient, decryptSecret, json, corsHeaders } from 
 import { wrapHandler } from "../lib/floor-log.mjs";
 
 async function handle(event) {
-  if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: corsHeaders(), body: "" };
+  if (event.httpMethod === "OPTIONS") return { statusCode: 200, headers: corsHeaders(), body: "" };
   try {
     const { staff } = await staffFromEvent(event);
     const sb = serviceClient();

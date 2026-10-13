@@ -1,40 +1,61 @@
-export type MainPage = 'sales' | 'orders' | 'inventory' | 'marketplaces' | 'reports' | 'cameras' | 'logs' | 'settings';
+export type MainPage = 'register' | 'sales' | 'orders' | 'receipts' | 'inventory' | 'online' | 'marketplaces' | 'amazon' | 'reports' | 'tax' | 'cameras' | 'remote' | 'logs' | 'settings';
 export type ReportTab = 'profit' | 'shipping' | 'expenses' | 'payouts';
-export type InventoryTab = 'browse' | 'receive' | 'attention';
-export type AttentionSection = 'your-call' | 'missing-cost' | 'reviews';
+export type InventoryTab = 'browse' | 'receive' | 'attention' | 'lookup-test';
+export type AttentionSection = 'missing-cost' | 'missing-photo' | 'missing-price' | 'missing-spec' | 'missing-model' | 'missing-description';
+export type OnlineTab = 'listed' | 'ready' | 'not-ready' | 'msc' | 'reports' | 'sold';
+export type OnlineChannel = 'all' | 'ebay' | 'depop' | 'whatnot' | 'mercari' | 'amazon' | 'tiktok' | 'facebook';
 
-const LEGACY: Record<string, { page: MainPage; tab?: ReportTab; inventoryTab?: InventoryTab; section?: AttentionSection }> = {
+const LEGACY: Record<string, { page: MainPage; tab?: ReportTab; inventoryTab?: InventoryTab; section?: AttentionSection; onlineTab?: OnlineTab; onlineChannel?: OnlineChannel }> = {
   eligibility: { page: 'settings' },
-  online: { page: 'settings' },
+  online: { page: 'online' },
   expenses: { page: 'reports', tab: 'expenses' },
-  taxes: { page: 'reports', tab: 'shipping' },
+  taxes: { page: 'tax' },
+  tax: { page: 'tax' },
   channels: { page: 'reports', tab: 'profit' },
   costs: { page: 'inventory', inventoryTab: 'attention', section: 'missing-cost' },
-  reviews: { page: 'inventory', inventoryTab: 'attention', section: 'reviews' },
+  reviews: { page: 'inventory', inventoryTab: 'attention', section: 'missing-cost' },
   payouts: { page: 'reports', tab: 'payouts' },
   settings: { page: 'settings' },
   marketplaces: { page: 'marketplaces' },
+  amazon: { page: 'amazon' },
   cameras: { page: 'cameras' },
+  remote: { page: 'remote' },
   logs: { page: 'logs' },
   sales: { page: 'sales' },
   orders: { page: 'orders' },
+  receipts: { page: 'receipts' },
+  register: { page: 'register' },
   inventory: { page: 'inventory' },
   reports: { page: 'reports' },
-  'your-call': { page: 'inventory', inventoryTab: 'attention', section: 'your-call' },
-  review: { page: 'inventory', inventoryTab: 'attention', section: 'your-call' },
+  'your-call': { page: 'inventory', inventoryTab: 'attention', section: 'missing-cost' },
+  review: { page: 'inventory', inventoryTab: 'attention', section: 'missing-cost' },
+  'missing-other': { page: 'inventory', inventoryTab: 'attention', section: 'missing-cost' },
 };
 
-const MAIN: MainPage[] = ['sales', 'orders', 'inventory', 'marketplaces', 'reports', 'cameras', 'logs', 'settings'];
+const MAIN: MainPage[] = ['register', 'sales', 'orders', 'receipts', 'inventory', 'online', 'marketplaces', 'amazon', 'reports', 'tax', 'cameras', 'remote', 'logs', 'settings'];
+const SECTIONS: AttentionSection[] = ['missing-cost', 'missing-photo', 'missing-price', 'missing-spec', 'missing-model', 'missing-description'];
+const ONLINE_TABS: OnlineTab[] = ['listed', 'ready', 'not-ready', 'msc', 'reports', 'sold'];
+const ONLINE_CHANNELS: OnlineChannel[] = ['all', 'ebay', 'depop', 'whatnot', 'mercari', 'amazon', 'tiktok', 'facebook'];
+const ONLINE_CHANNELS_SET = new Set<string>(ONLINE_CHANNELS);
 
 export type NavState = {
   page: MainPage;
   reportTab: ReportTab;
   inventoryTab: InventoryTab;
   attentionSection: AttentionSection;
+  onlineTab: OnlineTab;
+  onlineChannel: OnlineChannel;
 };
 
-export function defaultNavState(): NavState {
-  return { page: 'sales', reportTab: 'profit', inventoryTab: 'browse', attentionSection: 'your-call' };
+export function defaultNavState(page: MainPage = 'sales'): NavState {
+  return {
+    page,
+    reportTab: 'profit',
+    inventoryTab: 'browse',
+    attentionSection: 'missing-cost',
+    onlineTab: 'listed',
+    onlineChannel: 'all',
+  };
 }
 
 export function parseNavFromLocation(): NavState {
@@ -45,18 +66,40 @@ export function parseNavFromLocation(): NavState {
   const raw = (q.get('page') || hashQ?.get('page') || hashPage || 'sales').toLowerCase();
   if (q.get('ebay') === '1') return { ...defaultNavState(), page: 'marketplaces' };
   const mapped = LEGACY[raw];
-  const base = mapped ? mapped.page : (MAIN.includes(raw as MainPage) ? (raw as MainPage) : 'sales');
+  const base = mapped ? mapped.page : MAIN.includes(raw as MainPage) ? (raw as MainPage) : 'sales';
   const tabRaw = q.get('tab') || hashQ?.get('tab') || mapped?.tab || 'profit';
-  const invTabRaw = q.get('inventoryTab') || q.get('inv') || hashQ?.get('inventoryTab') || hashQ?.get('inv') || mapped?.inventoryTab || 'browse';
-  const sectionRaw = q.get('section') || q.get('attention') || hashQ?.get('section') || hashQ?.get('attention') || mapped?.section || 'your-call';
+  const invTabRaw =
+    q.get('inventoryTab') || q.get('inv') || hashQ?.get('inventoryTab') || hashQ?.get('inv') || mapped?.inventoryTab || 'browse';
+  let sectionRaw =
+    q.get('section') || q.get('attention') || hashQ?.get('section') || hashQ?.get('attention') || mapped?.section || 'missing-cost';
+  // Old bookmarks for removed queues → Missing cost
+  if (sectionRaw === 'your-call' || sectionRaw === 'reviews' || sectionRaw === 'missing-other') {
+    sectionRaw = 'missing-cost';
+  }
+  let onlineTabRaw = q.get('onlineTab') || hashQ?.get('onlineTab') || mapped?.onlineTab || 'listed';
+  const rawOnlineTab = onlineTabRaw;
+  const forceFacebookOnly = rawOnlineTab === 'facebook-only' || rawOnlineTab === 'not-listable';
+  if (forceFacebookOnly) onlineTabRaw = 'listed';
+  // Allow ?onlineTab=ebay (channel-as-tab bookmarks)
+  let onlineChannelRaw = q.get('channel') || hashQ?.get('channel') || mapped?.onlineChannel || (forceFacebookOnly ? 'facebook' : 'all');
+  if (forceFacebookOnly) onlineChannelRaw = 'facebook';
+  if (ONLINE_CHANNELS_SET.has(onlineTabRaw)) {
+    onlineChannelRaw = onlineTabRaw;
+    onlineTabRaw = 'listed';
+  }
   const reportTabs: ReportTab[] = ['profit', 'shipping', 'expenses', 'payouts'];
-  const invTabs: InventoryTab[] = ['browse', 'receive', 'attention'];
-  const sections: AttentionSection[] = ['your-call', 'missing-cost', 'reviews'];
+  const invTabs: InventoryTab[] = ['browse', 'receive', 'attention', 'lookup-test'];
   return {
     page: base,
     reportTab: reportTabs.includes(tabRaw as ReportTab) ? (tabRaw as ReportTab) : 'profit',
     inventoryTab: invTabs.includes(invTabRaw as InventoryTab) ? (invTabRaw as InventoryTab) : 'browse',
-    attentionSection: sections.includes(sectionRaw as AttentionSection) ? (sectionRaw as AttentionSection) : 'your-call',
+    attentionSection: SECTIONS.includes(sectionRaw as AttentionSection)
+      ? (sectionRaw as AttentionSection)
+      : 'missing-cost',
+    onlineTab: ONLINE_TABS.includes(onlineTabRaw as OnlineTab) ? (onlineTabRaw as OnlineTab) : 'listed',
+    onlineChannel: ONLINE_CHANNELS.includes(onlineChannelRaw as OnlineChannel)
+      ? (onlineChannelRaw as OnlineChannel)
+      : 'ebay',
   };
 }
 
@@ -66,7 +109,13 @@ export function writeNavToLocation(state: NavState) {
   if (state.page === 'reports' && state.reportTab !== 'profit') q.set('tab', state.reportTab);
   if (state.page === 'inventory') {
     if (state.inventoryTab !== 'browse') q.set('inventoryTab', state.inventoryTab);
-    if (state.inventoryTab === 'attention' && state.attentionSection !== 'your-call') q.set('section', state.attentionSection);
+    if (state.inventoryTab === 'attention' && state.attentionSection !== 'missing-cost') {
+      q.set('section', state.attentionSection);
+    }
+  }
+  if (state.page === 'online') {
+    if (state.onlineTab !== 'listed') q.set('onlineTab', state.onlineTab);
+    if (state.onlineTab === 'listed' && state.onlineChannel !== 'all') q.set('channel', state.onlineChannel);
   }
   const next = `${window.location.pathname}?${q.toString()}${window.location.hash.replace(/^#\/[^?]*/, '')}`;
   const cur = `${window.location.pathname}${window.location.search}${window.location.hash}`;

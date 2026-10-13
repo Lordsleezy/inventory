@@ -7,7 +7,7 @@ import { wrapHandler } from "../lib/floor-log.mjs";
  * (unit sold elsewhere, etc.). Marks the charge canceled.
  */
 async function handle(event) {
-  if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: corsHeaders(), body: "" };
+  if (event.httpMethod === "OPTIONS") return { statusCode: 200, headers: corsHeaders(), body: "" };
   if (event.httpMethod !== "POST") return json(405, { error: "method_not_allowed" });
   const ctx = await staffFromEvent(event);
   const body = JSON.parse(event.body || "{}");

@@ -119,7 +119,8 @@ export async function userToken(storeId) {
 
 export async function ebayFetch(storeId, method, path, body) {
   requireEbayEnabled();
-  const { api } = ebayHosts(process.env.EBAY_ENV);
+  const hosts = ebayHosts(process.env.EBAY_ENV);
+  const base = String(path).startsWith("/sell/finances/") ? hosts.finances : hosts.api;
   const token = await userToken(storeId);
   const mutate = method !== "GET";
   if (mutate) {
@@ -130,7 +131,7 @@ export async function ebayFetch(storeId, method, path, body) {
       detail: { method, path, body: redact(body) },
     });
   }
-  const res = await fetch(`${api}${path}`, {
+  const res = await fetch(`${base}${path}`, {
     method,
     headers: {
       Authorization: `Bearer ${token}`,
@@ -1263,15 +1264,119 @@ async function ingestFrom(storeId, order, source, bag) {
   }
 }
 
+/**
+ * Mark Floor web_orders (+ sales) canceled when eBay reports CancelClosed* / FULLY_REFUNDED.
+ * Unpaid / reversed cancels are stored as status=canceled (not refunded) so Admin groups them
+ * under Cancelled rather than implying a kept seller payout that was then refunded.
+ */
+export async function reconcileCanceledEbayOrders(storeId) {
+  const sb = serviceClient();
+  const json = await ebayFetch(storeId, "GET", fulfillmentOrdersPath());
+  const out = [];
+  for (const order of json?.orders ?? []) {
+    const orderId = order?.orderId;
+    if (!orderId) continue;
+    const cancelState = String(order?.cancelStatus?.cancelState || "");
+    const pay = String(order?.orderPaymentStatus || "");
+    const canceled =
+      /CANCELED|CANCELLED/i.test(cancelState) ||
+      /FULLY_REFUNDED/i.test(pay);
+    if (!canceled) continue;
+
+    const paymentDate = order?.paymentSummary?.payments?.[0]?.paymentDate || null;
+    const amountPaid = (order?.paymentSummary?.payments || []).reduce(
+      (n, p) => n + Number(p?.amount?.value || 0),
+      0,
+    );
+    // Managed payments often reverse before seller settlement — show as canceled, not refunded.
+    const status = "canceled";
+    const reason = /FULLY_REFUNDED/i.test(pay)
+      ? "eBay FULLY_REFUNDED / CancelClosed — funds reversed; treat as canceled"
+      : `eBay cancelState=${cancelState}`;
+
+    const { data: wo } = await sb
+      .from("web_orders")
+      .select("id,status,sale_id")
+      .eq("store_id", storeId)
+      .eq("channel", "ebay")
+      .eq("order_no", String(orderId))
+      .maybeSingle();
+    if (!wo || wo.status === "canceled" || wo.status === "refunded") {
+      out.push({ orderId, skipped: true, status: wo?.status || "missing" });
+      continue;
+    }
+    await sb
+      .from("web_orders")
+      .update({
+        status,
+        canceled_at: new Date().toISOString(),
+        cancel_source: "ebay_api",
+        cancel_reason: reason.slice(0, 500),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", wo.id);
+    if (wo.sale_id) {
+      await sb
+        .from("sales")
+        .update({
+          voided_at: new Date().toISOString(),
+          void_reason: reason.slice(0, 200),
+        })
+        .eq("id", wo.sale_id)
+        .is("voided_at", null);
+    } else {
+      await sb
+        .from("sales")
+        .update({
+          voided_at: new Date().toISOString(),
+          void_reason: reason.slice(0, 200),
+        })
+        .eq("store_id", storeId)
+        .eq("payment_id", `ebay:${orderId}`)
+        .is("voided_at", null);
+    }
+    out.push({
+      orderId,
+      status,
+      paymentDate,
+      amountPaid,
+      cancelState,
+      pay,
+    });
+  }
+  return out;
+}
+
 export async function pollEbayOrders(storeId) {
   const bag = { results: [], skus: new Set(), orders: new Set() };
   try {
     const json = await ebayFetch(storeId, "GET", fulfillmentOrdersPath());
     for (const order of json?.orders ?? []) {
+      // Do not ingest already-canceled / fully-refunded orders as new paid sales.
+      const cancelState = String(order?.cancelStatus?.cancelState || "");
+      const pay = String(order?.orderPaymentStatus || "");
+      if (/CANCELED|CANCELLED/i.test(cancelState) || /FULLY_REFUNDED/i.test(pay)) {
+        bag.results.push({
+          orderId: order?.orderId,
+          source: "fulfillment",
+          skipped: true,
+          reason: "canceled_or_refunded",
+        });
+        continue;
+      }
       await ingestFrom(storeId, order, "fulfillment", bag);
     }
   } catch (err) {
     bag.results.push({ source: "fulfillment", error: err instanceof Error ? err.message : String(err) });
+  }
+  try {
+    const reconciled = await reconcileCanceledEbayOrders(storeId);
+    if (reconciled.length) bag.results.push({ source: "cancel_reconcile", reconciled });
+  } catch (err) {
+    bag.results.push({
+      source: "cancel_reconcile",
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 
   let soldQty = {};
@@ -1386,6 +1491,7 @@ export async function ebayConnectionStatus(storeId) {
     expiresAt: conn?.expires_at || null,
     lastError: conn?.last_error || null,
     scopes: conn?.scopes || [],
+    hasFinances: Array.isArray(conn?.scopes) && conn.scopes.some((s) => String(s).includes("sell.finances")),
     ordersOnly: ebayOrdersOnly(),
     disabled: ebayDisabled(),
     requiredUsername: process.env.EBAY_REQUIRED_USERNAME || "pgg124-5",

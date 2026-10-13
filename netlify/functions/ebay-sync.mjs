@@ -11,7 +11,7 @@ import { ebayDisabled } from "../lib/ebay-env.mjs";
  */
 async function handle(event) {
   if (ebayDisabled()) return json(200, { disabled: true });
-  if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: corsHeaders(), body: "" };
+  if (event.httpMethod === "OPTIONS") return { statusCode: 200, headers: corsHeaders(), body: "" };
   try {
     const sb = serviceClient();
     // A run that is still going blocks the next one instead of piling on.

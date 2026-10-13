@@ -33,6 +33,10 @@
 [functions."ebay-drafts"]
   timeout = 60
 
+# Scan-to-list: Amazon catalog + pricing + UPCitemdb in one HTTP call.
+[functions."upc-lookup"]
+  timeout = 26
+
 [build.processing.html]
   pretty_urls = false
 

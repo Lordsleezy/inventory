@@ -56,7 +56,7 @@ export async function quoteRates(sb, storeId, sku, buyer, deps = {}) {
 }
 
 async function handle(event) {
-  if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: corsHeaders(), body: "" };
+  if (event.httpMethod === "OPTIONS") return { statusCode: 200, headers: corsHeaders(), body: "" };
   if (event.httpMethod !== "POST") return json(405, { error: "post_only" });
   const key = process.env.STORE_WEB_KEY || process.env.STORE_WEB_REWARDS_KEY;
   if (!key || (event.headers?.["x-store-web-key"] || event.headers?.["X-Store-Web-Key"]) !== key) return json(401, { error: "unauthorized" });

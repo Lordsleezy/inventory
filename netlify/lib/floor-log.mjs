@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
+import { withLambda } from "@netlify/aws-lambda-compat";
 import { serviceClient } from "./server.mjs";
 
 const traces = new AsyncLocalStorage();
@@ -96,6 +97,11 @@ function requestSummary(event) {
   };
 }
 
+/**
+ * Lambda-style wrapper (logging + redaction). Safe to compose inside other handlers.
+ * For the function entrypoint use netlifyHandler() so we leave Lambda compatibility mode
+ * (removes the AWS 4KB env-var deploy limit).
+ */
 export function wrapHandler(source, fn) {
   return async (event, context) => {
     if (event?.httpMethod === "OPTIONS") return fn(event, context);
@@ -157,4 +163,14 @@ export function wrapHandler(source, fn) {
       }
     });
   };
+}
+
+/** Entrypoint helper: wrapHandler + modern Netlify runtime (no 4KB env limit). */
+export function netlifyHandler(source, fn) {
+  return withLambda(wrapHandler(source, fn));
+}
+
+/** Raw Lambda-style handler → modern Netlify default export. */
+export function asNetlifyFunction(handler) {
+  return withLambda(handler);
 }

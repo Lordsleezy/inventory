@@ -3,12 +3,14 @@
 export function ebayHosts(env: string | undefined = process.env.EBAY_ENV): {
   auth: string;
   api: string;
+  finances: string;
   www: string;
 } {
   const live = env === "production";
   return {
     auth: live ? "https://auth.ebay.com" : "https://auth.sandbox.ebay.com",
     api: live ? "https://api.ebay.com" : "https://api.sandbox.ebay.com",
+    finances: live ? "https://apiz.ebay.com" : "https://apiz.sandbox.ebay.com",
     www: live ? "https://www.ebay.com" : "https://www.sandbox.ebay.com",
   };
 }
@@ -56,12 +58,14 @@ export const EBAY_OAUTH_SCOPES = (
         "https://api.ebay.com/oauth/api_scope",
         "https://api.ebay.com/oauth/api_scope/sell.fulfillment",
         "https://api.ebay.com/oauth/api_scope/sell.account",
+        "https://api.ebay.com/oauth/api_scope/sell.finances",
       ]
     : [
         "https://api.ebay.com/oauth/api_scope",
         "https://api.ebay.com/oauth/api_scope/sell.inventory",
         "https://api.ebay.com/oauth/api_scope/sell.fulfillment",
         "https://api.ebay.com/oauth/api_scope/sell.account",
+        "https://api.ebay.com/oauth/api_scope/sell.finances",
         "https://api.ebay.com/oauth/api_scope/commerce.notification.subscription",
       ]
 ).join(" ");

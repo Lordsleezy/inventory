@@ -32,7 +32,7 @@ function saleText(sku, payload) {
 }
 
 async function handle(event) {
-  if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: corsHeaders(), body: "" };
+  if (event.httpMethod === "OPTIONS") return { statusCode: 200, headers: corsHeaders(), body: "" };
   const secret = process.env.ALERT_WEBHOOK_SECRET;
   if (secret) {
     const got = event.headers["x-webhook-secret"] || event.headers["X-Webhook-Secret"];

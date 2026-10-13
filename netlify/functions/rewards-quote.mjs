@@ -54,7 +54,7 @@ export async function handler(event) {
       "Authorization, Content-Type, x-store-web-key, x-connections-key",
   };
   if (event.httpMethod === "OPTIONS") {
-    return { statusCode: 204, headers: cors, body: "" };
+    return { statusCode: 200, headers: cors, body: "" };
   }
   if (event.httpMethod !== "POST") {
     return { statusCode: 405, headers: cors, body: JSON.stringify({ error: "post_only" }) };

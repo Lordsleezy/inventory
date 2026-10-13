@@ -7,7 +7,7 @@ const DEFAULT_MARKUP_CENTS = 200;
 const specsOf = (value) => value && typeof value === 'object' && !Array.isArray(value) ? value : {};
 
 async function handle(event) {
-  if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers: corsHeaders(), body: '' };
+  if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers: corsHeaders(), body: '' };
   if (event.httpMethod !== 'GET') return json(405, { error: 'method_not_allowed' });
   try {
     const { staff } = await connectionAdminFromEvent(event, ['owner', 'manager', 'staff']);

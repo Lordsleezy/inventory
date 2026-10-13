@@ -83,9 +83,11 @@ l = await ledger("92003");
 const expectProcWeb = Math.round((8000 + 580) * 0.033) + 30;
 assert.equal(l.processing_fee_cents, expectProcWeb);
 assert.equal(l.ship_cost_cents, 1399); assert.equal(l.ship_cost_source, "shippo");
-assert.equal(l.profit_cents, 8000 - expectProcWeb - 1399 - 2000);
+// Buyer-paid shipping is revenue; Shippo label is the cost.
+assert.equal(l.shipping_cents, 1200);
+assert.equal(l.profit_cents, 8000 + 1200 - expectProcWeb - 1399 - 2000);
 assert.equal(l.tax_owed_cents, 580);
-console.log(`website shipped: label 1399, proc ${expectProcWeb}, profit ${l.profit_cents} ok`);
+console.log(`website shipped: +ship-in 1200, label 1399, proc ${expectProcWeb}, profit ${l.profit_cents} ok`);
 
 // 4) eBay: actual fee + baked label from channel_orders; tax remitted by marketplace.
 await addUnit("92004", { ask: 13000, cost: 4000 });

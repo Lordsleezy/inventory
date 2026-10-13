@@ -32,6 +32,8 @@ export function ebayHosts(env = process.env.EBAY_ENV) {
   return {
     auth: live ? "https://auth.ebay.com" : "https://auth.sandbox.ebay.com",
     api: live ? "https://api.ebay.com" : "https://api.sandbox.ebay.com",
+    // Sell Finances (fees + shipping labels) is served from apiz, not api.
+    finances: live ? "https://apiz.ebay.com" : "https://apiz.sandbox.ebay.com",
     www: live ? "https://www.ebay.com" : "https://www.sandbox.ebay.com",
   };
 }
@@ -79,14 +81,16 @@ export const EBAY_LISTING_OAUTH_SCOPES = [
   "https://api.ebay.com/oauth/api_scope/sell.inventory",
   "https://api.ebay.com/oauth/api_scope/sell.fulfillment",
   "https://api.ebay.com/oauth/api_scope/sell.account",
+  "https://api.ebay.com/oauth/api_scope/sell.finances",
   "https://api.ebay.com/oauth/api_scope/commerce.notification.subscription",
 ].join(" ");
 
-/** Orders + mark-shipped. No inventory/listing scopes. */
+/** Orders + mark-shipped + finances (actual fees / eBay label spend). No inventory/listing scopes. */
 export const EBAY_ORDERS_OAUTH_SCOPES = [
   "https://api.ebay.com/oauth/api_scope",
   "https://api.ebay.com/oauth/api_scope/sell.fulfillment",
   "https://api.ebay.com/oauth/api_scope/sell.account",
+  "https://api.ebay.com/oauth/api_scope/sell.finances",
 ].join(" ");
 
 export const EBAY_OAUTH_SCOPES = ebayOrdersOnly() ? EBAY_ORDERS_OAUTH_SCOPES : EBAY_LISTING_OAUTH_SCOPES;

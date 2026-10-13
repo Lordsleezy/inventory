@@ -21,6 +21,14 @@ export function corsHeaders() {
   };
 }
 
+/**
+ * Modern Netlify runtime (@netlify/aws-lambda-compat) rejects status 204 in Response().
+ * OPTIONS must return 200 with an empty body or browsers see "Failed to fetch".
+ */
+export function optionsOk() {
+  return { statusCode: 200, headers: corsHeaders(), body: "" };
+}
+
 export function json(status, body) {
   return { statusCode: status, headers: { "Content-Type": "application/json", ...corsHeaders() }, body: JSON.stringify(body) };
 }

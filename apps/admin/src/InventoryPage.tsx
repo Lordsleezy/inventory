@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { ReceivePanel } from './ReceivePanel';
-import { VideoScanBudget } from './VideoScanBudget';
-import { UnitShippingPanel } from './UnitShippingPanel';
 import { NeedsAttentionPanel } from './NeedsAttentionPanel';
+import { UnitEditDrawer } from './UnitEditDrawer';
+import { LookupTestPage } from './LookupTestPage';
 import type { AttentionSection, InventoryTab } from './navigation';
 
 type Row = {
@@ -14,14 +14,13 @@ type Row = {
 type Listing = { channel: string; status: string; listing_id: string | null };
 type Photo = { id: number; path: string; is_primary: boolean };
 type Sale = { sold_at: string; price_cents: number; actor_name: string; receipt_no: string };
-type Elig = { channel: string; status: string; reason: string; source: string; strike?: boolean; override?: { decision: string; note: string } | null };
 type Detail = { unit: Record<string, unknown>; photos: Photo[]; listings: Listing[]; sales: Sale[] };
-type List = { items: Row[]; totals: { unit_count: number; retail_cents: number; cost_cents: number; missing_cost: number } };
+type List = { items: Row[]; totals: { unit_count: number; cost_cents?: number; missing_cost?: number } };
 type Props = {
-  client: SupabaseClient; storeId: string; money: (n: number) => string; stamp: (s: string) => string;
+  client: SupabaseClient; storeId: string; accessToken: string; money: (n: number) => string; stamp: (s: string) => string;
   tab: InventoryTab; onTab: (t: InventoryTab) => void;
   attentionSection: AttentionSection; onAttentionSection: (s: AttentionSection) => void;
-  accessToken: string; busy: boolean; run: (f: () => Promise<void>) => Promise<void>; onCostChanged: () => void;
+  onCostChanged: () => void;
 };
 
 const label = (s: string) => s === 'available' ? 'In stock' : s.replace(/_/g, ' ').replace(/^./, c => c.toUpperCase());
@@ -33,7 +32,7 @@ function thumb(path: string) {
   return `${parts[0]}/${parts[1]}/web/400/${stem}.webp`;
 }
 
-export function InventoryPage({ client, storeId, money, stamp, tab, onTab, attentionSection, onAttentionSection, accessToken, busy, run, onCostChanged }: Props) {
+export function InventoryPage({ client, storeId, accessToken, money, stamp, tab, onTab, attentionSection, onAttentionSection, onCostChanged }: Props) {
   const [refresh, setRefresh] = useState(0);
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState('in_stock');
@@ -43,10 +42,10 @@ export function InventoryPage({ client, storeId, money, stamp, tab, onTab, atten
   const [list, setList] = useState<List | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<Detail | null>(null);
-  const [elig, setElig] = useState<Elig[]>([]);
   const [urls, setUrls] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [detailKey, setDetailKey] = useState(0);
 
   async function sign(paths: string[]) {
     const keys = [...new Set(paths.filter(p => /^[0-9a-f-]{36}\//i.test(p)))];
@@ -75,14 +74,11 @@ export function InventoryPage({ client, storeId, money, stamp, tab, onTab, atten
   }, [client, query, status, unfinished, sort, offset, refresh]);
 
   useEffect(() => {
-    if (!selected) { setDetail(null); setElig([]); return; }
-    let active = true; setDetail(null); setElig([]);
+    if (!selected) { setDetail(null); return; }
+    let active = true; setDetail(null);
     void (async () => {
       try {
-        const [{ data, error: e }, eligRes] = await Promise.all([
-          client.rpc('portal_inventory_detail', { p_sku: selected }),
-          client.rpc('portal_unit_eligibility', { p_sku: selected }),
-        ]);
+        const { data, error: e } = await client.rpc('portal_inventory_detail', { p_sku: selected });
         if (e) throw e;
         if (!data) throw new Error('Unit not found');
         const next = data as Detail;
@@ -90,19 +86,23 @@ export function InventoryPage({ client, storeId, money, stamp, tab, onTab, atten
         if (active) {
           setDetail(next);
           setUrls(prev => ({ ...prev, ...signed }));
-          if (!eligRes.error) setElig((eligRes.data || []) as Elig[]);
         }
       } catch (e) { if (active) setError(e instanceof Error ? e.message : String(e)); }
     })();
     return () => { active = false; };
-  }, [client, selected]);
+  }, [client, selected, detailKey]);
 
   const change = (set: () => void) => { set(); setOffset(0); setList(null); };
   const total = list?.totals.unit_count || 0;
   return <>
-    <header><div><div className="eyebrow">FLOOR INVENTORY</div><h1>Inventory</h1><p>{tab === 'browse' ? 'View only (except online shipping). Edit other unit fields in the register or phone app.' : tab === 'receive' ? 'Add physical units to Floor.' : 'Listing queue, missing costs, and product-match reviews.'}</p></div></header>
-    <div className="inventory-tabs"><button type="button" className={tab === 'browse' ? 'active' : ''} onClick={() => onTab('browse')}>Browse</button><button type="button" className={tab === 'receive' ? 'active' : ''} onClick={() => onTab('receive')}>Receive</button><button type="button" className={tab === 'attention' ? 'active' : ''} onClick={() => onTab('attention')}>Needs attention</button></div>
-    {tab === 'receive' ? <><VideoScanBudget client={client} /><ReceivePanel client={client} storeId={storeId} onSaved={() => setRefresh(n => n + 1)} /></> : tab === 'attention' ? <NeedsAttentionPanel client={client} accessToken={accessToken} money={money} stamp={stamp} busy={busy} run={run} section={attentionSection} onSection={onAttentionSection} onCostChanged={onCostChanged} /> : <>
+    <header><div><div className="eyebrow">FLOOR INVENTORY</div><h1>Inventory</h1><p>{tab === 'browse' ? 'Click a unit to edit SKU details, price, cost, package size, and photos.' : tab === 'receive' ? 'Scan a UPC to look up product data, then receive with a real photo.' : tab === 'lookup-test' ? 'Read-only UPC accuracy test — Amazon vs UPCitemdb. Does not create inventory.' : 'Units missing cost, photo, price, model, description, or package specs.'}</p></div></header>
+    <div className="inventory-tabs">
+      <button type="button" className={tab === 'browse' ? 'active' : ''} onClick={() => onTab('browse')}>Browse</button>
+      <button type="button" className={tab === 'receive' ? 'active' : ''} onClick={() => onTab('receive')}>Receive</button>
+      <button type="button" className={tab === 'attention' ? 'active' : ''} onClick={() => onTab('attention')}>Needs attention</button>
+      <button type="button" className={tab === 'lookup-test' ? 'active' : ''} onClick={() => onTab('lookup-test')}>Lookup test</button>
+    </div>
+    {tab === 'lookup-test' ? <LookupTestPage accessToken={accessToken} /> : tab === 'receive' ? <ReceivePanel client={client} storeId={storeId} accessToken={accessToken} onSaved={() => setRefresh(n => n + 1)} /> : tab === 'attention' ? <NeedsAttentionPanel client={client} storeId={storeId} money={money} stamp={stamp} section={attentionSection} onSection={onAttentionSection} onCostChanged={onCostChanged} /> : <>
     <div className="inventory-controls">
       <label>Search<input type="search" placeholder="SKU, brand, model or title" value={query} onChange={e => change(() => setQuery(e.target.value))} /></label>
       <label>Status<select value={status} onChange={e => change(() => setStatus(e.target.value))}>
@@ -118,10 +118,8 @@ export function InventoryPage({ client, storeId, money, stamp, tab, onTab, atten
       <label className="inventory-check"><input type="checkbox" checked={unfinished} onChange={e => change(() => setUnfinished(e.target.checked))} />Unfinished</label>
     </div>
     {error && <div className="alert" role="alert">{error}</div>}
-    <div className="stats inventory-stats">
+    <div className="stats inventory-stats inventory-stats-one">
       <div className="stat"><span>Units</span><strong>{total}</strong></div>
-      <div className="stat"><span>Retail value</span><strong>{money(list?.totals.retail_cents || 0)}</strong></div>
-      <div className="stat"><span>Missing cost</span><strong>{list?.totals.missing_cost || 0}</strong></div>
     </div>
     <section className="panel inventory-panel">
       {loading && <p className="hint">Loading inventory…</p>}
@@ -134,18 +132,23 @@ export function InventoryPage({ client, storeId, money, stamp, tab, onTab, atten
       </button>)}
     </section>
     {total > 24 && <div className="inventory-pagination"><button className="secondary" disabled={offset === 0 || loading} onClick={() => setOffset(Math.max(0, offset - 24))}>Previous</button><span>{offset + 1}–{Math.min(offset + 24, total)} of {total}</span><button className="secondary" disabled={offset + 24 >= total || loading} onClick={() => setOffset(offset + 24)}>Next</button></div>}
-    {selected && <div className="inventory-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) setSelected(null); }}><section className="inventory-detail" role="dialog" aria-modal="true" aria-label={`Unit ${selected}`}>
-      <div className="section-head"><div><div className="eyebrow">UNIT DETAILS</div><h2>SKU {selected}</h2></div><button className="secondary" onClick={() => setSelected(null)}>Close</button></div>
-      {!detail ? <p>Loading…</p> : <>
-        <h3>Photos</h3>{detail.photos.length ? <div className="inventory-gallery">{detail.photos.map(p => urls[p.path] ? <img src={urls[p.path]} alt={`Unit ${selected}`} key={p.id} loading="lazy" /> : <div className="inventory-photo" key={p.id}>Photo unavailable</div>)}</div> : <p>No photos recorded.</p>}
-        <UnitShippingPanel client={client} sku={selected} />
-        <h3>Marketplace eligibility</h3>
-        {elig.length === 0 ? <p className="hint">No eligibility rules loaded.</p> : <div className="inventory-listings">{elig.map((row) => <div key={row.channel}><strong>{row.channel} · {row.status}{row.strike ? ' · STRIKE' : ''}</strong><span>{row.reason}</span></div>)}</div>}
-        <h3>Unit fields</h3><dl className="inventory-fields">{Object.entries(detail.unit).map(([key, value]) => <div key={key}><dt>{key.replace(/_/g, ' ')}</dt><dd>{value === null ? '—' : key.endsWith('_cents') ? money(Number(value)) : typeof value === 'boolean' ? (value ? 'Yes' : 'No') : typeof value === 'object' ? JSON.stringify(value) : String(value)}</dd></div>)}</dl>
-        <h3>Channel listings</h3>{detail.listings.length ? <div className="inventory-listings">{detail.listings.map(l => <div key={l.channel}><strong>{l.channel}</strong><span>{l.status.replace(/_/g, ' ')}{l.listing_id ? ` · ${l.listing_id}` : ''}</span></div>)}</div> : <p>No channel listings recorded.</p>}
-        <h3>Sales</h3>{detail.sales.length ? <div className="inventory-listings">{detail.sales.map(s => <div key={s.receipt_no}><strong>{stamp(s.sold_at)} · {money(s.price_cents)} merchandise</strong><span>Rang up by {s.actor_name} · Receipt {s.receipt_no}</span></div>)}</div> : <p>No sale recorded.</p>}
-      </>}
-    </section></div>}
+    {selected && detail && <UnitEditDrawer
+      client={client}
+      storeId={storeId}
+      sku={selected}
+      unit={detail.unit}
+      photos={detail.photos}
+      urls={urls}
+      accessToken={accessToken}
+      onClose={() => setSelected(null)}
+      onSaved={(unit) => {
+        setDetail(d => d ? { ...d, unit } : d);
+        setRefresh(n => n + 1);
+        onCostChanged();
+      }}
+      onPhotosChanged={() => setDetailKey(k => k + 1)}
+    />}
+    {selected && !detail && <div className="inventory-backdrop"><section className="inventory-detail"><p>Loading…</p></section></div>}
     </>}
   </>;
 }

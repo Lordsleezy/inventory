@@ -9,7 +9,7 @@ function endpointUrl(event) {
 }
 
 async function handle(event) {
-  if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: corsHeaders(), body: "" };
+  if (event.httpMethod === "OPTIONS") return { statusCode: 200, headers: corsHeaders(), body: "" };
   if (ebayDisabled()) return json(410, { error: "eBay notifications are disabled." });
   if (event.httpMethod === "GET") {
     const challenge = event.queryStringParameters?.challenge_code;

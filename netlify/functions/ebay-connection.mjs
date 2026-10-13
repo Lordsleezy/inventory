@@ -11,7 +11,7 @@ import {
 } from "../lib/ebay.mjs";
 
 async function handle(event) {
-  if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: corsHeaders(), body: "" };
+  if (event.httpMethod === "OPTIONS") return { statusCode: 200, headers: corsHeaders(), body: "" };
   if (ebayDisabled()) return json(503, { ok: false, error: "eBay integration is fully disabled (EBAY_DISABLED)." });
   let ctx;
   try {
