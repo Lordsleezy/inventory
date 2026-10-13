@@ -1,8 +1,10 @@
-import { serviceClient } from "../lib/server.mjs";
+import { serviceClient, json, corsHeaders } from "../lib/server.mjs";
 import { ebayFetch, loadEbayConnection } from "../lib/ebay.mjs";
 import { getStoreSquareAccess, squareClient } from "../lib/square.mjs";
 import { webSquareClient, webSquareEnv } from "../lib/web-square.mjs";
 import { Environment } from "square/legacy";
+import { wrapHandler } from "../lib/floor-log.mjs";
+import { isNetlifyScheduleEvent } from "../lib/schedule.mjs";
 
 // Reconciles REAL fees + eBay-bought shipping labels onto recorded sales.
 //  - eBay Finances SALE → marketplace fee (actual)
@@ -180,16 +182,23 @@ async function syncSquareFees(sb, storeId, log) {
   }
 }
 
-export const handler = async () => {
+async function handle(event) {
+  if (event?.httpMethod === "OPTIONS") return { statusCode: 200, headers: corsHeaders(), body: "" };
+  // Schedule-only by default; allow manual invoke with webhook secret or schedule body.
+  if (event?.httpMethod && event.httpMethod !== "POST" && event.httpMethod !== "GET") {
+    return json(405, { error: "method_not_allowed" });
+  }
   const sb = serviceClient();
   const { data: stores, error } = await sb.from("stores").select("id");
   if (error) throw error;
-  const out = {};
+  const out = { schedule: isNetlifyScheduleEvent(event), stores: {} };
   for (const store of stores || []) {
     const log = [];
-    out[store.id] = log;
+    out.stores[store.id] = log;
     try { await syncEbayFees(sb, store.id, log); } catch (e) { log.push({ ebay: String(e?.message || e) }); }
     try { await syncSquareFees(sb, store.id, log); } catch (e) { log.push({ square: String(e?.message || e) }); }
   }
-  return { statusCode: 200, body: JSON.stringify(out) };
-};
+  return json(200, out);
+}
+
+export const handler = wrapHandler("channel-fee-sync", handle);

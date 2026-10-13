@@ -60,10 +60,12 @@ export async function exchangeEbayCode(code) {
 
 async function refreshEbay(refreshToken) {
   const { api } = ebayHosts(process.env.EBAY_ENV);
+  // Do NOT pass `scope` on refresh. Requesting scopes the user never consented to
+  // (or the app no longer has) returns invalid_scope and blocks every ebay-sync tick.
+  // Omitting scope reissues the originally granted scopes.
   const body = new URLSearchParams({
     grant_type: "refresh_token",
     refresh_token: refreshToken,
-    scope: EBAY_OAUTH_SCOPES,
   });
   const res = await fetch(`${api}/identity/v1/oauth2/token`, {
     method: "POST",
@@ -98,17 +100,35 @@ export async function userToken(storeId) {
   const exp = row.expires_at ? new Date(row.expires_at).getTime() : 0;
   if (exp > Date.now() + 120_000) return decryptSecret(row.token_ciphertext);
   if (!row.refresh_ciphertext) throw new Error("ebay_needs_reconnect");
-  const tokens = await refreshEbay(decryptSecret(row.refresh_ciphertext));
+  const sb = serviceClient();
+  let tokens;
+  try {
+    tokens = await refreshEbay(decryptSecret(row.refresh_ciphertext));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    await sb
+      .from("connections")
+      .update({
+        last_error: message.slice(0, 500),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("store_id", storeId)
+      .eq("provider", "ebay");
+    throw err;
+  }
   const access = tokens.access_token;
   const refresh = tokens.refresh_token ? encryptSecret(tokens.refresh_token) : row.refresh_ciphertext;
   const expiresIn = Number(tokens.expires_in || 7200);
-  const sb = serviceClient();
+  const scopes = String(tokens.scope || "")
+    .split(/[ ,]+/)
+    .filter(Boolean);
   await sb
     .from("connections")
     .update({
       token_ciphertext: encryptSecret(access),
       refresh_ciphertext: refresh,
       expires_at: new Date(Date.now() + expiresIn * 1000).toISOString(),
+      scopes: scopes.length ? scopes : row.scopes,
       last_error: null,
       updated_at: new Date().toISOString(),
     })
@@ -1415,8 +1435,15 @@ export async function pollEbayOrders(storeId) {
   }
 
   const sb = serviceClient();
-  await sb.from("connections").update({ updated_at: new Date().toISOString(), last_error: null })
-    .eq("store_id", storeId).eq("provider", "ebay");
+  const syncErrors = bag.results.filter((r) => r?.error).map((r) => `${r.source}: ${r.error}`);
+  await sb
+    .from("connections")
+    .update({
+      updated_at: new Date().toISOString(),
+      last_error: syncErrors.length ? syncErrors.join(" | ").slice(0, 500) : null,
+    })
+    .eq("store_id", storeId)
+    .eq("provider", "ebay");
   await sb.from("store_settings").upsert(
     { store_id: storeId, key: "ebay_last_sync_at", value: new Date().toISOString() },
     { onConflict: "store_id,key" },

@@ -7,8 +7,52 @@
 import { json, corsHeaders, serviceClient } from "../lib/server.mjs";
 import { portalAdminFromEvent } from "../lib/portal-auth.mjs";
 import { floorLog, redact } from "../lib/floor-log.mjs";
+import { SCHEDULED_JOBS } from "../lib/schedule.mjs";
 
 const like = (s) => String(s).replace(/[%_,()]/g, " ").trim();
+
+/** Last successful/failed run per scheduled job, for the Logs → Jobs panel. */
+export async function jobHealth(sb, storeId) {
+  const sources = SCHEDULED_JOBS.map((j) => j.source);
+  const since = new Date(Date.now() - 14 * 86400_000).toISOString();
+  const { data, error } = await sb
+    .from("floor_logs")
+    .select("source,created_at,level,event,message,detail")
+    .or(`store_id.eq.${storeId},store_id.is.null`)
+    .in("source", sources)
+    .in("event", ["fn.end", "fn.crash", "alerts.dispatch"])
+    .gte("created_at", since)
+    .order("created_at", { ascending: false })
+    .limit(800);
+  if (error) throw new Error(error.message);
+  const latest = new Map();
+  for (const row of data || []) {
+    if (!latest.has(row.source)) latest.set(row.source, row);
+  }
+  const now = Date.now();
+  return SCHEDULED_JOBS.map((job) => {
+    const row = latest.get(job.source);
+    const lastAt = row?.created_at ? new Date(row.created_at).getTime() : null;
+    const ageMin = lastAt != null ? (now - lastAt) / 60_000 : null;
+    // Daily jobs: red after 36h; others: red after 2.5× expected interval (min 10 min).
+    const staleAfter = job.everyMin >= 1440 ? 36 * 60 : Math.max(10, job.everyMin * 2.5);
+    const overdue = ageMin == null || ageMin > staleAfter;
+    const statusCode = row?.detail?.status ?? (row?.event === "fn.crash" ? 500 : null);
+    const ok = row && row.level !== "error" && row.event !== "fn.crash" && !(statusCode >= 400);
+    return {
+      source: job.source,
+      label: job.label,
+      cron: job.cron,
+      everyMin: job.everyMin,
+      lastRunAt: row?.created_at || null,
+      ageMin: ageMin != null ? Math.round(ageMin) : null,
+      level: row?.level || null,
+      message: row?.message || null,
+      status: !row ? "never" : overdue ? "stale" : ok ? "ok" : "error",
+      overdue,
+    };
+  });
+}
 
 export async function listLogs(sb, storeId, p = {}) {
   const limit = Math.min(200, Math.max(1, Number(p.limit) || 80));
@@ -75,10 +119,13 @@ async function handle(event) {
     });
     return json(200, { ok: true });
   }
-  const [logs, summaryRows, stalledRows] = await Promise.all([
-    listLogs(sb, storeId, body), body.light ? [] : summary(sb, storeId), body.light ? [] : stalled(sb, storeId),
+  const [logs, summaryRows, stalledRows, jobs] = await Promise.all([
+    listLogs(sb, storeId, body),
+    body.light ? [] : summary(sb, storeId),
+    body.light ? [] : stalled(sb, storeId),
+    body.light ? [] : jobHealth(sb, storeId),
   ]);
-  return json(200, { ok: true, logs, summary: summaryRows, stalled: stalledRows });
+  return json(200, { ok: true, logs, summary: summaryRows, stalled: stalledRows, jobs });
 }
 
 export const handler = async (event) => {

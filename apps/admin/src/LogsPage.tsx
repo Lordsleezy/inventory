@@ -1,10 +1,21 @@
 import { Fragment, useCallback, useEffect, useState } from 'react';
-
-const functionsBase = (import.meta.env.VITE_FLOOR_FUNCTIONS_URL || 'https://inventoryobi.netlify.app').replace(/\/$/, '');
+import { floorFunctionUrl } from './floorApi';
 
 type Log = { id: number; created_at: string; sku: string | null; trace_id: string; source: string; level: string; event: string; message: string | null; detail: unknown };
 type Stalled = { trace_id: string; created_at: string; source: string; sku: string | null; action: string | null };
 type SourceSummary = { source: string; errors: number; warnings: number };
+type Job = {
+  source: string;
+  label: string;
+  cron: string;
+  everyMin: number;
+  lastRunAt: string | null;
+  ageMin: number | null;
+  level: string | null;
+  message: string | null;
+  status: 'ok' | 'error' | 'stale' | 'never';
+  overdue: boolean;
+};
 type Props = { accessToken: string; stamp: (s: string) => string };
 
 /** Everything the backend does leaves a row here: requests, background jobs, eBay pushes, and failures the browser saw. */
@@ -19,24 +30,32 @@ export function LogsPage({ accessToken, stamp }: Props) {
   const [logs, setLogs] = useState<Log[]>([]);
   const [summary, setSummary] = useState<SourceSummary[]>([]);
   const [stalled, setStalled] = useState<Stalled[]>([]);
+  const [jobs, setJobs] = useState<Job[]>([]);
   const [open, setOpen] = useState<number | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [more, setMore] = useState(true);
 
   const fetchLogs = useCallback(async (before?: string) => {
-    const res = await fetch(`${functionsBase}/.netlify/functions/portal-logs`, {
+    const res = await fetch(floorFunctionUrl('portal-logs'), {
       method: 'POST', headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'list', level, source: source || undefined, sku: sku || undefined, q: q || undefined, traceId: traceId || undefined, includeStarts, limit: 80, before, light: Boolean(before) }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
-    return data as { logs: Log[]; summary: SourceSummary[]; stalled: Stalled[] };
+    return data as { logs: Log[]; summary: SourceSummary[]; stalled: Stalled[]; jobs: Job[] };
   }, [accessToken, level, source, sku, q, traceId, includeStarts]);
 
   const load = useCallback(async () => {
     setLoading(true); setError('');
-    try { const d = await fetchLogs(); setLogs(d.logs); setSummary(d.summary); setStalled(d.stalled); setMore(d.logs.length >= 80); }
+    try {
+      const d = await fetchLogs();
+      setLogs(d.logs);
+      setSummary(d.summary);
+      setStalled(d.stalled);
+      if (d.jobs) setJobs(d.jobs);
+      setMore(d.logs.length >= 80);
+    }
     catch (e) { setError(e instanceof Error ? e.message : String(e)); }
     finally { setLoading(false); }
   }, [fetchLogs]);
@@ -51,11 +70,40 @@ export function LogsPage({ accessToken, stamp }: Props) {
   }
   const sources = [...new Set([...summary.map(s => s.source), ...logs.map(l => l.source)])].sort();
   const tag = (l: string) => <span className={`tag ${l === 'error' ? 'off' : l === 'warn' ? 'warn' : ''}`}>{l}</span>;
+  const jobBad = jobs.some(j => j.status !== 'ok');
+  const ageLabel = (j: Job) => {
+    if (j.lastRunAt == null) return 'never';
+    if (j.ageMin == null) return stamp(j.lastRunAt);
+    if (j.ageMin < 1) return 'just now';
+    if (j.ageMin < 60) return `${j.ageMin}m ago`;
+    const h = Math.round(j.ageMin / 60);
+    return h < 48 ? `${h}h ago` : `${Math.round(h / 24)}d ago`;
+  };
 
   return <>
     <header><div><div className="eyebrow">BACKEND</div><h1>Logs</h1><p>What the backend did and what went wrong: web requests, background jobs, eBay pushes, and errors the portal hit in your browser. Kept for 14 days.</p></div>
       <div className="actions"><label className="inventory-check"><input type="checkbox" checked={auto} onChange={e => setAuto(e.target.checked)} />Auto-refresh</label><button className="secondary" onClick={() => void load()}>Refresh</button></div></header>
     {error && <div className="alert" role="alert">{error}<button onClick={() => setError('')}>Dismiss</button></div>}
+
+    <section className={`panel${jobBad ? ' jobs-bad' : ''}`}>
+      <h2>Jobs {jobBad ? <span className="tag off">attention</span> : <span className="tag">ok</span>}</h2>
+      <p className="hint">Scheduled Netlify functions. Red means no successful run within about 2.5× its expected interval (or 36 hours for daily jobs). HTTP 403 on these URLs is normal — schedules still fire.</p>
+      {jobs.length === 0 ? <p className="hint">Loading job status…</p> : (
+        <table className="tbl"><thead><tr><th>Job</th><th>Schedule</th><th>Last run</th><th>Status</th></tr></thead>
+          <tbody>{jobs.map(j => (
+            <tr key={j.source} style={j.status !== 'ok' ? { background: 'rgba(180,40,40,0.08)' } : undefined}>
+              <td>
+                <button className="text-button" onClick={() => { setSource(j.source); setLevel('all'); }}>{j.label}</button>
+                <div className="hint" style={{ margin: 0 }}>{j.source}</div>
+              </td>
+              <td><code style={{ fontSize: 12 }}>{j.cron}</code></td>
+              <td style={{ whiteSpace: 'nowrap' }} title={j.lastRunAt || ''}>{ageLabel(j)}{j.message ? <div className="hint" style={{ margin: 0 }}>{j.message}</div> : null}</td>
+              <td>{j.status === 'ok' ? tag('ok') : j.status === 'error' ? tag('error') : j.status === 'stale' ? tag('warn') : <span className="tag off">never</span>}</td>
+            </tr>
+          ))}</tbody>
+        </table>
+      )}
+    </section>
 
     {stalled.length > 0 && <section className="panel"><h2>Requests that never finished ({stalled.length})</h2>
       <p className="hint">These started and then nothing was recorded, which usually means the server timed out or was cut off. The screen that sent them showed no result.</p>
