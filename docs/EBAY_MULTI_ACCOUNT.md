@@ -10,7 +10,7 @@ Floor can hold more than one eBay OAuth connection per store.
 ## Operator sequence
 
 1. Deploy this change (functions + admin) via `scripts/deploy-prod-netlify.mjs`.
-2. Apply Supabase migration `20261025180000_ebay_multi_account.sql`.
+2. Apply Supabase migration `20261025150000_ebay_multi_account.sql`.
 3. In Admin → Marketplaces:
    - Keep **Connect pgg124-5 (orders only)** connected (backfill may already have it).
    - **Connect selling account** while logged into the business eBay account in the browser.
