@@ -5,7 +5,7 @@ import { deletionChallenge, verifyDeletionSignature } from './ebay-account-delet
 import { invoke as handler } from '../functions/ebay-account-deletion.mjs';
 
 test('eBay challenge hashes the exact configured URL and token', async () => {
-  process.env.EBAY_DELETION_ENDPOINT_URL = 'https://inventoryobi.netlify.app/.netlify/functions/ebay-account-deletion';
+  process.env.EBAY_DELETION_ENDPOINT_URL = 'https://example.invalid/ebay-challenge';
   process.env.EBAY_DELETION_VERIFICATION_TOKEN = 'fake-ebay-deletion-verification-token';
   const response = await handler({ httpMethod: 'GET', queryStringParameters: { challenge_code: 'abc123' } });
   assert.equal(response.statusCode, 200);
