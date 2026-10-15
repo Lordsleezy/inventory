@@ -5,6 +5,8 @@
   "dependencies": {
     "@netlify/aws-lambda-compat": "^2.0.2",
     "@supabase/supabase-js": "^2.57.4",
+    "imapflow": "^2.4.2",
+    "nodemailer": "^10.1.1",
     "postal-mime": "^2.4.3",
     "sharp": "^0.34.4",
     "square": "^42.0.0"
