@@ -33,3 +33,6 @@ Thumbs.db
 apps/pos/packaging/bin/
 apps/pos/src-tauri/target/
 apps/pos/src-tauri/gen/
+
+netlify/.amazon-*.tmp
+

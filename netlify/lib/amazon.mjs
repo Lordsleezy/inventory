@@ -1004,11 +1004,13 @@ export async function ingestAmazonOrder(storeId, order) {
 }
 
 export async function pollAmazonOrders(storeId) {
-  const createdAfter = new Date(Date.now() - 3 * 24 * 3600 * 1000).toISOString();
+  // Day-one lookback (override with AMAZON_ORDERS_LOOKBACK_DAYS). Prior 3-day window missed history.
+  const days = Math.max(1, Number(process.env.AMAZON_ORDERS_LOOKBACK_DAYS) || 90);
+  const createdAfter = new Date(Date.now() - days * 24 * 3600 * 1000).toISOString();
   const path =
     `/orders/v0/orders?MarketplaceIds=${marketplaceId()}` +
     `&CreatedAfter=${encodeURIComponent(createdAfter)}` +
-    `&OrderStatuses=Unshipped,PartiallyShipped,Shipped`;
+    `&OrderStatuses=Pending,Unshipped,PartiallyShipped,Shipped,Canceled,Unfulfillable`;
   let data;
   try {
     data = await spapiFetch(storeId, "GET", path);

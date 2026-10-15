@@ -1221,7 +1221,9 @@ export async function ingestEbayOrder(storeId, order) {
 
 function fulfillmentOrdersPath() {
   const end = new Date();
-  const start = new Date(end.getTime() - 7 * 24 * 3600 * 1000);
+  // Day-one lookback (override with EBAY_ORDERS_LOOKBACK_DAYS). Short windows miss early sales.
+  const days = Math.max(1, Number(process.env.EBAY_ORDERS_LOOKBACK_DAYS) || 90);
+  const start = new Date(end.getTime() - days * 24 * 3600 * 1000);
   const iso = (d) => d.toISOString().replace(/\.\d{3}Z$/, ".000Z");
   const filter = encodeURIComponent(`creationdate:[${iso(start)}..${iso(end)}]`);
   return `/sell/fulfillment/v1/order?limit=50&filter=${filter}`;

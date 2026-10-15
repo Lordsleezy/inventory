@@ -15,8 +15,9 @@ import { ingestMarketplaceMail, loadStoreChannels } from "../lib/marketplace-ema
  *   GMAIL_SMTP_USER, GMAIL_SMTP_APP_PASSWORD   Gmail address + app password (IMAP must be enabled on the account)
  * Optional:
  *   GMAIL_POLL_SENDERS        comma list of sender domains (default "depop.com,mercari.com")
- *   GMAIL_POLL_LOOKBACK_DAYS  how far back to look (default 3)
+ *   GMAIL_POLL_LOOKBACK_DAYS  how far back to look (default 45)
  *   GMAIL_POLL_INCLUDE_SEEN   "1" = also look at already-read mail in the lookback window (dedupe by Message-ID)
+ *   GMAIL_POLL_EXTRA_USER / GMAIL_POLL_EXTRA_APP_PASSWORD  optional second inbox (e.g. main Gmail)
  */
 
 const MAX_PER_RUN = 15;
@@ -44,17 +45,20 @@ function authorized(event) {
   return got === secret;
 }
 
-async function pollInbox(sb) {
-  const user = process.env.GMAIL_SMTP_USER;
-  const pass = process.env.GMAIL_SMTP_APP_PASSWORD;
-  if (!user || !pass) return { skipped: "gmail_not_configured" };
+function pollAccounts() {
+  const accounts = [];
+  const primaryUser = process.env.GMAIL_SMTP_USER;
+  const primaryPass = process.env.GMAIL_SMTP_APP_PASSWORD;
+  if (primaryUser && primaryPass) accounts.push({ user: primaryUser, pass: primaryPass });
+  const extraUser = process.env.GMAIL_POLL_EXTRA_USER;
+  const extraPass = process.env.GMAIL_POLL_EXTRA_APP_PASSWORD;
+  if (extraUser && extraPass && !accounts.some((a) => a.user.toLowerCase() === extraUser.toLowerCase())) {
+    accounts.push({ user: extraUser, pass: extraPass });
+  }
+  return accounts;
+}
 
-  const started = Date.now();
-  const domains = senderDomains();
-  const lookbackDays = Math.max(1, Number(process.env.GMAIL_POLL_LOOKBACK_DAYS) || 3);
-  const includeSeen = process.env.GMAIL_POLL_INCLUDE_SEEN === "1";
-  const { store, channels } = await loadStoreChannels(sb);
-
+async function pollOneInbox(sb, { user, pass }, store, channels, domains, lookbackDays, includeSeen, started) {
   const client = new ImapFlow({
     host: "imap.gmail.com",
     port: 993,
@@ -62,9 +66,19 @@ async function pollInbox(sb) {
     auth: { user, pass },
     logger: false,
   });
-  client.on("error", () => undefined); // surfaced through the awaited calls below
+  client.on("error", () => undefined);
 
-  const summary = { found: 0, matched: 0, needs_review: 0, ignored: 0, duplicate: 0, skipped_sender: 0, failed: 0, errors: [] };
+  const summary = {
+    user,
+    found: 0,
+    matched: 0,
+    needs_review: 0,
+    ignored: 0,
+    duplicate: 0,
+    skipped_sender: 0,
+    failed: 0,
+    errors: [],
+  };
   await client.connect();
   try {
     const lock = await client.getMailboxLock("INBOX");
@@ -91,7 +105,6 @@ async function pollInbox(sb) {
           }
           const parsed = await new PostalMime().parse(raw);
           if (!fromAllowed(parsed.from?.address, domains)) {
-            // Substring IMAP match caught a look-alike sender; leave it untouched.
             summary.skipped_sender++;
             continue;
           }
@@ -99,7 +112,6 @@ async function pollInbox(sb) {
           summary[result.state] = (summary[result.state] || 0) + 1;
           if (!alreadySeen) await client.messageFlagsAdd(uid, ["\\Seen"], { uid: true });
         } catch (err) {
-          // Leave the mail unread so the next run retries it.
           summary.failed++;
           if (summary.errors.length < 5) summary.errors.push(`uid ${uid}: ${String(err?.message || err).slice(0, 160)}`);
         }
@@ -111,6 +123,30 @@ async function pollInbox(sb) {
     await client.logout().catch(() => client.close());
   }
   return summary;
+}
+
+async function pollInbox(sb) {
+  const accounts = pollAccounts();
+  if (!accounts.length) return { skipped: "gmail_not_configured" };
+
+  const started = Date.now();
+  const domains = senderDomains();
+  const lookbackDays = Math.max(1, Number(process.env.GMAIL_POLL_LOOKBACK_DAYS) || 45);
+  const includeSeen = process.env.GMAIL_POLL_INCLUDE_SEEN === "1";
+  const { store, channels } = await loadStoreChannels(sb);
+
+  const perAccount = [];
+  const totals = { found: 0, matched: 0, needs_review: 0, ignored: 0, duplicate: 0, skipped_sender: 0, failed: 0, errors: [] };
+  for (const account of accounts) {
+    if (Date.now() - started > DEADLINE_MS) break;
+    const one = await pollOneInbox(sb, account, store, channels, domains, lookbackDays, includeSeen, started);
+    perAccount.push(one);
+    for (const k of Object.keys(totals)) {
+      if (k === "errors") totals.errors.push(...(one.errors || []).map((e) => `${one.user}: ${e}`));
+      else totals[k] += one[k] || 0;
+    }
+  }
+  return { ...totals, accounts: perAccount.map((a) => ({ user: a.user, found: a.found, matched: a.matched, needs_review: a.needs_review, failed: a.failed })) };
 }
 
 async function handle(event) {
