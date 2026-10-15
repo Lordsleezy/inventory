@@ -55,9 +55,11 @@ function otherStores(o: WebOrder) {
   return listed.filter((c) => c !== self && c !== 'website' && c !== 'ebay');
 }
 
-type OrderView = 'toShip' | 'shipped' | 'pickup' | 'done' | 'canceled';
+type OrderView = 'all' | 'toShip' | 'shipped' | 'pickup' | 'done' | 'canceled';
+type StatusFilter = 'all' | 'paid' | 'canceled' | 'refunded';
 
 const VIEW_LABEL: Record<OrderView, string> = {
+  all: 'All orders',
   toShip: 'To ship',
   shipped: 'Shipped',
   pickup: 'Awaiting pickup',
@@ -96,10 +98,12 @@ export function OrdersPage({ client, accessToken, money, stamp }: Props) {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
-  const [view, setView] = useState<OrderView>('toShip');
+  const [view, setView] = useState<OrderView>('all');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
 
   const load = useCallback(async () => {
-    const { data, error: e } = await client.rpc('portal_web_orders', { p_days: 120 });
+    // No practical date hide: cover store day-one history (portal still clamps to p_days).
+    const { data, error: e } = await client.rpc('portal_web_orders', { p_days: 400 });
     if (e) { setError(e.message); return; }
     setOrders(data as WebOrder[]);
   }, [client]);
@@ -168,17 +172,24 @@ export function OrdersPage({ client, accessToken, money, stamp }: Props) {
     setBusy(null);
   }
 
-  const groups = useMemo(() => {
+  const { groups, rawCount } = useMemo(() => {
     // Sandbox / test rows are not real customer orders — keep them out of the counts.
     const list = (orders || []).filter(o => o.payment_env !== 'sandbox' && !(o.order_no || '').toLowerCase().startsWith('sandbox'));
+    const byStatus = statusFilter === 'all'
+      ? list
+      : list.filter(o => o.status === statusFilter);
     return {
-      toShip: list.filter(o => o.status === 'paid' && o.fulfillment === 'ship' && !o.shipped_at),
-      shipped: list.filter(o => o.status === 'paid' && o.fulfillment === 'ship' && o.shipped_at && !o.delivered_at),
-      pickup: list.filter(o => o.status === 'paid' && o.fulfillment === 'pickup' && !o.picked_up_at),
-      done: list.filter(o => o.status === 'paid' && (o.delivered_at || o.picked_up_at)),
-      canceled: list.filter(o => o.status === 'refunded' || o.status === 'canceled'),
+      rawCount: list.length,
+      groups: {
+        all: byStatus,
+        toShip: byStatus.filter(o => o.status === 'paid' && o.fulfillment === 'ship' && !o.shipped_at),
+        shipped: byStatus.filter(o => o.status === 'paid' && o.fulfillment === 'ship' && o.shipped_at && !o.delivered_at),
+        pickup: byStatus.filter(o => o.status === 'paid' && o.fulfillment === 'pickup' && !o.picked_up_at),
+        done: byStatus.filter(o => o.status === 'paid' && (o.delivered_at || o.picked_up_at)),
+        canceled: byStatus.filter(o => o.status === 'refunded' || o.status === 'canceled'),
+      } as Record<OrderView, WebOrder[]>,
     };
-  }, [orders]);
+  }, [orders, statusFilter]);
 
   const active = groups[view];
   const summary = useMemo(() => breakdown(groups[view]), [groups, view]);
@@ -195,12 +206,61 @@ export function OrdersPage({ client, accessToken, money, stamp }: Props) {
     setView(next);
   }
 
+  const renderTicket = (o: WebOrder) => {
+    const isCanceled = o.status === 'canceled' || o.status === 'refunded';
+    const isToShip = o.status === 'paid' && o.fulfillment === 'ship' && !o.shipped_at;
+    const isShipped = o.status === 'paid' && o.fulfillment === 'ship' && !!o.shipped_at && !o.delivered_at;
+    const isPickup = o.status === 'paid' && o.fulfillment === 'pickup' && !o.picked_up_at;
+    const isDone = o.status === 'paid' && !!(o.delivered_at || o.picked_up_at);
+    return (
+      <div className="ticket order" key={o.id}>
+        {head(o)}{item(o)}
+        {isToShip && (
+          <>
+            <div className="order-address">{[o.buyer_name, o.ship_line1, o.ship_line2, [o.ship_city, o.ship_region, o.ship_postal].filter(Boolean).join(', ')].filter(Boolean).join(' · ')}</div>
+            {o.refund_requested_at ? <p className="hint">Cancel & refund in progress…</p> : <div className="actions">
+              <button disabled={!!busy} onClick={() => void markShipped(o)}>{busy === o.id + 'ship' ? 'Saving…' : 'Mark shipped'}</button>
+              <button className="secondary" disabled={!!busy} onClick={() => void markDelivered(o)}>{busy === o.id + 'deliver' ? 'Saving…' : 'Mark delivered'}</button>
+              <button className="secondary" disabled={!!busy} onClick={() => void recordLabelCost(o)}>{busy === o.id + 'label' ? 'Saving…' : o.label_cost_cents != null ? 'Edit label cost' : 'Record label cost'}</button>
+              {(!o.channel || o.channel === 'website') && <button className="text-button danger" disabled={!!busy} onClick={() => void cancel(o)}>Cancel & refund</button>}
+            </div>}
+          </>
+        )}
+        {isShipped && (
+          <>
+            <small>Shipped {stamp(o.shipped_at!)}</small>
+            {o.refund_requested_at ? <p className="hint">Cancel & refund in progress…</p> : <div className="actions">
+              <button disabled={!!busy} onClick={() => void markDelivered(o)}>{busy === o.id + 'deliver' ? 'Saving…' : 'Mark delivered'}</button>
+              <button className="secondary" disabled={!!busy} onClick={() => void recordLabelCost(o)}>{busy === o.id + 'label' ? 'Saving…' : o.label_cost_cents != null ? 'Edit label cost' : 'Record label cost'}</button>
+              {(!o.channel || o.channel === 'website') && <button className="text-button danger" disabled={!!busy} onClick={() => void cancel(o)}>Cancel & refund</button>}
+            </div>}
+          </>
+        )}
+        {isPickup && (
+          <>
+            <div className={`countdown${o.pickup_deadline && new Date(o.pickup_deadline).getTime() - now < 86400000 ? ' urgent' : ''}`}>Pick up by {o.pickup_deadline ? stamp(o.pickup_deadline) : '—'} · {timeLeft(o.pickup_deadline, now)}</div>
+            {o.refund_requested_at ? <p className="hint">Cancel & refund in progress…</p> : <div className="actions">
+              <button disabled={!!busy} onClick={() => void pickedUp(o)}>Picked up</button>
+              <button className="text-button danger" disabled={!!busy} onClick={() => void cancel(o)}>Cancel & refund</button></div>}
+          </>
+        )}
+        {isDone && (
+          <small>{o.picked_up_at ? `Picked up ${stamp(o.picked_up_at)} · ${o.picked_up_by || ''}` : `Delivered ${stamp(o.delivered_at!)}${o.shipped_at ? ` · shipped ${stamp(o.shipped_at)}` : ''}`}</small>
+        )}
+        {isCanceled && (
+          <small>{o.cancel_source === 'pickup_expired' ? 'Not picked up by the deadline' : o.cancel_source === 'admin' ? `Canceled in admin${o.cancel_reason ? `: ${o.cancel_reason}` : ''}` : o.cancel_source === 'ebay_api' ? `Canceled on eBay${o.cancel_reason ? `: ${o.cancel_reason}` : ''}` : o.status === 'refunded' ? 'Refunded' : o.status === 'canceled' ? `Canceled${o.cancel_reason ? `: ${o.cancel_reason}` : ''}` : 'Could not complete; refunded automatically'}{o.canceled_at ? ` · ${stamp(o.canceled_at)}` : ''}</small>
+        )}
+      </div>
+    );
+  };
+
   return <>
-    <header><div><div className="eyebrow">WEBSITE AND MARKETPLACES</div><h1>Orders</h1><p>Internal ship / deliver status for inventory. Click a card for that breakdown. No customer emails. Refreshes every 30 seconds.</p></div>
+    <header><div><div className="eyebrow">WEBSITE AND MARKETPLACES</div><h1>Orders</h1><p>Every online order since day one. Default view is All; use the status filter or stage cards. No customer emails. Refreshes every 30 seconds.</p></div>
       <div className="actions"><button className="secondary" onClick={() => void load()}>Refresh</button></div></header>
     {error && <div className="alert" role="alert">{error}<button onClick={() => setError('')}>Dismiss</button></div>}
     <div className="stats">
       {([
+        ['all', groups.all.length],
         ['toShip', groups.toShip.length],
         ['shipped', groups.shipped.length],
         ['pickup', groups.pickup.length],
@@ -211,6 +271,17 @@ export function OrdersPage({ client, accessToken, money, stamp }: Props) {
           <span>{VIEW_LABEL[key]}</span><strong>{count}</strong><small>View details</small>
         </button>
       ))}
+    </div>
+    <div className="actions" style={{ marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+      <label>Status{' '}
+        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as StatusFilter)} aria-label="Order status filter">
+          <option value="all">All statuses</option>
+          <option value="paid">Paid</option>
+          <option value="canceled">Canceled</option>
+          <option value="refunded">Refunded</option>
+        </select>
+      </label>
+      <span className="hint">{rawCount} loaded (no cancelled hide; 400-day window)</span>
     </div>
     {orders === null && <p className="hint">Loading orders…</p>}
 
@@ -255,37 +326,9 @@ export function OrdersPage({ client, accessToken, money, stamp }: Props) {
         </div>
       )}
 
-      {view === 'toShip' && (active.length === 0 ? <div className="empty">Nothing to ship.</div> : <div className="ticket-list">{active.map(o => <div className="ticket order" key={o.id}>{head(o)}{item(o)}
-        <div className="order-address">{[o.buyer_name, o.ship_line1, o.ship_line2, [o.ship_city, o.ship_region, o.ship_postal].filter(Boolean).join(', ')].filter(Boolean).join(' · ')}</div>
-        {o.refund_requested_at ? <p className="hint">Cancel & refund in progress…</p> : <div className="actions">
-          <button disabled={!!busy} onClick={() => void markShipped(o)}>{busy === o.id + 'ship' ? 'Saving…' : 'Mark shipped'}</button>
-          <button className="secondary" disabled={!!busy} onClick={() => void markDelivered(o)}>{busy === o.id + 'deliver' ? 'Saving…' : 'Mark delivered'}</button>
-          <button className="secondary" disabled={!!busy} onClick={() => void recordLabelCost(o)}>{busy === o.id + 'label' ? 'Saving…' : o.label_cost_cents != null ? 'Edit label cost' : 'Record label cost'}</button>
-          {(!o.channel || o.channel === 'website') && <button className="text-button danger" disabled={!!busy} onClick={() => void cancel(o)}>Cancel & refund</button>}
-        </div>}
-      </div>)}</div>)}
-
-      {view === 'shipped' && (active.length === 0 ? <div className="empty">None in transit.</div> : <div className="ticket-list">{active.map(o => <div className="ticket order" key={o.id}>{head(o)}{item(o)}
-        <small>Shipped {stamp(o.shipped_at!)}</small>
-        {o.refund_requested_at ? <p className="hint">Cancel & refund in progress…</p> : <div className="actions">
-          <button disabled={!!busy} onClick={() => void markDelivered(o)}>{busy === o.id + 'deliver' ? 'Saving…' : 'Mark delivered'}</button>
-          <button className="secondary" disabled={!!busy} onClick={() => void recordLabelCost(o)}>{busy === o.id + 'label' ? 'Saving…' : o.label_cost_cents != null ? 'Edit label cost' : 'Record label cost'}</button>
-          {(!o.channel || o.channel === 'website') && <button className="text-button danger" disabled={!!busy} onClick={() => void cancel(o)}>Cancel & refund</button>}
-        </div>}
-      </div>)}</div>)}
-
-      {view === 'pickup' && (active.length === 0 ? <div className="empty">No pickups waiting.</div> : <div className="ticket-list">{active.map(o => <div className="ticket order" key={o.id}>{head(o)}{item(o)}
-        <div className={`countdown${o.pickup_deadline && new Date(o.pickup_deadline).getTime() - now < 86400000 ? ' urgent' : ''}`}>Pick up by {o.pickup_deadline ? stamp(o.pickup_deadline) : '—'} · {timeLeft(o.pickup_deadline, now)}</div>
-        {o.refund_requested_at ? <p className="hint">Cancel & refund in progress…</p> : <div className="actions">
-          <button disabled={!!busy} onClick={() => void pickedUp(o)}>Picked up</button>
-          <button className="text-button danger" disabled={!!busy} onClick={() => void cancel(o)}>Cancel & refund</button></div>}
-      </div>)}</div>)}
-
-      {view === 'done' && (active.length === 0 ? <div className="empty">No completed orders yet.</div> : <div className="ticket-list">{active.map(o => <div className="ticket order" key={o.id}>{head(o)}{item(o)}
-        <small>{o.picked_up_at ? `Picked up ${stamp(o.picked_up_at)} · ${o.picked_up_by || ''}` : `Delivered ${stamp(o.delivered_at!)}${o.shipped_at ? ` · shipped ${stamp(o.shipped_at)}` : ''}`}</small></div>)}</div>)}
-
-      {view === 'canceled' && (active.length === 0 ? <div className="empty">None.</div> : <div className="ticket-list">{active.map(o => <div className="ticket order" key={o.id}>{head(o)}{item(o)}
-        <small>{o.cancel_source === 'pickup_expired' ? 'Not picked up by the deadline' : o.cancel_source === 'admin' ? `Canceled in admin${o.cancel_reason ? `: ${o.cancel_reason}` : ''}` : o.cancel_source === 'ebay_api' ? `Canceled on eBay${o.cancel_reason ? `: ${o.cancel_reason}` : ''}` : o.status === 'refunded' ? 'Refunded' : o.status === 'canceled' ? `Canceled${o.cancel_reason ? `: ${o.cancel_reason}` : ''}` : 'Could not complete; refunded automatically'}{o.canceled_at ? ` · ${stamp(o.canceled_at)}` : ''}</small></div>)}</div>)}
+      {active.length === 0
+        ? <div className="empty">{view === 'all' ? 'No orders match this filter.' : view === 'toShip' ? 'Nothing to ship.' : view === 'shipped' ? 'None in transit.' : view === 'pickup' ? 'No pickups waiting.' : view === 'done' ? 'No completed orders yet.' : 'None.'}</div>
+        : <div className="ticket-list">{active.map(renderTicket)}</div>}
     </section>
   </>;
 }
