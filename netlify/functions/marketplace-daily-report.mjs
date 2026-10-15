@@ -1,5 +1,5 @@
 import { json, serviceClient } from '../lib/server.mjs';
-import { wrapHandler } from '../lib/floor-log.mjs';
+import { wrapHandler, asNetlifyFunction } from '../lib/floor-log.mjs';
 import { withLock, dbBusy } from '../lib/bg-guard.mjs';
 import { sendInternalAlert, gmailConfigured } from '../lib/mail.mjs';
 const parts = new Intl.DateTimeFormat('en-US',{timeZone:'America/Los_Angeles',year:'numeric',month:'numeric',day:'numeric',hour:'numeric',minute:'numeric',hourCycle:'h23'});
@@ -47,4 +47,6 @@ async function handle(){
   if(sent.skipped)return{skipped:sent.reason||'email_not_configured'};return{sent:true};
  });return json(200,result);}catch(e){return json(500,{error:String(e).slice(0,300)});}
 }
-export const handler=wrapHandler('marketplace-daily-report',handle);
+export const invoke=wrapHandler('marketplace-daily-report',handle);
+
+export default asNetlifyFunction(invoke);

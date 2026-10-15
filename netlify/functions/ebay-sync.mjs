@@ -1,7 +1,7 @@
 import { json, corsHeaders, serviceClient } from "../lib/server.mjs";
 import { pollAllStores, withdrawOpenEbayTasks } from "../lib/ebay.mjs";
 import { withLock } from "../lib/bg-guard.mjs";
-import { wrapHandler } from "../lib/floor-log.mjs";
+import { wrapHandler, asNetlifyFunction } from "../lib/floor-log.mjs";
 import { ebayDisabled } from "../lib/ebay-env.mjs";
 
 /**
@@ -27,4 +27,6 @@ async function handle(event) {
   }
 }
 
-export const handler = wrapHandler("ebay-sync", handle);
+export const invoke = wrapHandler("ebay-sync", handle);
+
+export default asNetlifyFunction(invoke);

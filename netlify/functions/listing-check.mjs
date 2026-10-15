@@ -1,5 +1,5 @@
 import { requireEnv, json, corsHeaders } from "../lib/server.mjs";
-import { wrapHandler } from "../lib/floor-log.mjs";
+import { wrapHandler, asNetlifyFunction } from "../lib/floor-log.mjs";
 import { isNetlifyScheduleEvent } from "../lib/schedule.mjs";
 
 // Scheduled daily (netlify.toml). Hands off to the background function (15-minute limit).
@@ -14,4 +14,6 @@ async function handle(event) {
   return json(200, { queued: res.status, schedule: isNetlifyScheduleEvent(event) });
 }
 
-export const handler = wrapHandler("listing-check", handle);
+export const invoke = wrapHandler("listing-check", handle);
+
+export default asNetlifyFunction(invoke);

@@ -1,8 +1,9 @@
+import { asNetlifyFunction } from "../lib/floor-log.mjs";
 import { createClient } from '@supabase/supabase-js';
 import sharp from 'sharp';
 import { serviceClient, requireEnv, json, corsHeaders } from '../lib/server.mjs';
 
-export async function handler(event) {
+export async function invoke(event) {
   if(event.httpMethod==='OPTIONS')return {statusCode: 200,headers:corsHeaders(),body:''};
   if(event.httpMethod!=='POST')return json(405,{error:'POST required'});
   try{
@@ -62,3 +63,5 @@ export async function handler(event) {
     return json(200,{ok:true,attached});
   }catch(error){return json(500,{error:error.message||String(error)})}
 }
+
+export default asNetlifyFunction(invoke);

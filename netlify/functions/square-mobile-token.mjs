@@ -1,5 +1,5 @@
 import { staffFromEvent, serviceClient, decryptSecret, json, corsHeaders } from "../lib/server.mjs";
-import { wrapHandler } from "../lib/floor-log.mjs";
+import { wrapHandler, asNetlifyFunction } from "../lib/floor-log.mjs";
 
 async function handle(event) {
   if (event.httpMethod === "OPTIONS") return { statusCode: 200, headers: corsHeaders(), body: "" };
@@ -27,4 +27,6 @@ async function handle(event) {
   }
 }
 
-export const handler = wrapHandler("square-mobile-token", handle);
+export const invoke = wrapHandler("square-mobile-token", handle);
+
+export default asNetlifyFunction(invoke);

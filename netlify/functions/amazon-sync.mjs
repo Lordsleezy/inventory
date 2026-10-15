@@ -3,7 +3,7 @@
  * Schedule body `{ next_run }` → poll orders / finances / zero qty for sold-elsewhere units.
  */
 import { json, corsHeaders } from "../lib/server.mjs";
-import { wrapHandler } from "../lib/floor-log.mjs";
+import { wrapHandler, asNetlifyFunction } from "../lib/floor-log.mjs";
 import { isNetlifyScheduleEvent } from "../lib/schedule.mjs";
 import { withLock } from "../lib/bg-guard.mjs";
 import { amazonConnectionStatus, runAmazonSyncJob } from "../lib/amazon.mjs";
@@ -35,4 +35,6 @@ async function handle(event) {
   }
 }
 
-export const handler = wrapHandler("amazon-sync", handle);
+export const invoke = wrapHandler("amazon-sync", handle);
+
+export default asNetlifyFunction(invoke);

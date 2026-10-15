@@ -5,7 +5,7 @@ import {
   squareClient,
   squareHttpErrorMessage,
 } from "../lib/square.mjs";
-import { wrapHandler } from "../lib/floor-log.mjs";
+import { wrapHandler, asNetlifyFunction } from "../lib/floor-log.mjs";
 import { Environment } from "square/legacy";
 
 /** Countries where Mobile Payments SDK can authorize (sandbox + production). */
@@ -118,7 +118,7 @@ async function handle(event) {
   });
 }
 
-export const handler = wrapHandler("square-mobile-auth", async (event) => {
+export const invoke = wrapHandler("square-mobile-auth", async (event) => {
   try {
     return await handle(event);
   } catch (err) {
@@ -127,3 +127,5 @@ export const handler = wrapHandler("square-mobile-auth", async (event) => {
     throw err;
   }
 });
+
+export default asNetlifyFunction(invoke);

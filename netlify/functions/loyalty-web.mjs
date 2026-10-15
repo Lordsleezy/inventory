@@ -3,7 +3,7 @@
  * Auth: x-store-web-key (same as web-checkout). No SMS.
  */
 import { serviceClient, json, corsHeaders } from "../lib/server.mjs";
-import { wrapHandler } from "../lib/floor-log.mjs";
+import { wrapHandler, asNetlifyFunction } from "../lib/floor-log.mjs";
 import { drainLoyaltyEmail } from "./loyalty-email.mjs";
 
 function rewardsKey() {
@@ -81,7 +81,7 @@ async function handle(event) {
   return json(400, { error: "unknown_action" }, cors);
 }
 
-export const handler = wrapHandler("loyalty-web", async (event) => {
+export const invoke = wrapHandler("loyalty-web", async (event) => {
   try {
     return await handle(event);
   } catch (err) {
@@ -90,3 +90,5 @@ export const handler = wrapHandler("loyalty-web", async (event) => {
     return json(status, { error: msg }, cors);
   }
 });
+
+export default asNetlifyFunction(invoke);

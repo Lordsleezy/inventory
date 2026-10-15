@@ -1,5 +1,5 @@
 import { staffFromEvent, json, corsHeaders, serviceClient } from "../lib/server.mjs";
-import { wrapHandler } from "../lib/floor-log.mjs";
+import { wrapHandler, asNetlifyFunction } from "../lib/floor-log.mjs";
 import { deliverOrderEmails } from "../lib/web-order-email.mjs";
 
 async function handle(event) {
@@ -45,4 +45,6 @@ async function handle(event) {
   return json(200, { ok: true, order, emailed });
 }
 
-export const handler = wrapHandler("web-ship", handle);
+export const invoke = wrapHandler("web-ship", handle);
+
+export default asNetlifyFunction(invoke);

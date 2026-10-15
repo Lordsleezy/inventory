@@ -1,6 +1,6 @@
 import { staffFromEvent, json, corsHeaders } from "../lib/server.mjs";
 import { withdrawOpenEbayTasks, withdrawSku } from "../lib/ebay.mjs";
-import { wrapHandler } from "../lib/floor-log.mjs";
+import { wrapHandler, asNetlifyFunction } from "../lib/floor-log.mjs";
 import { ebayDisabled } from "../lib/ebay-env.mjs";
 
 async function handle(event) {
@@ -30,4 +30,6 @@ async function handle(event) {
   }
 }
 
-export const handler = wrapHandler("ebay-withdraw", handle);
+export const invoke = wrapHandler("ebay-withdraw", handle);
+
+export default asNetlifyFunction(invoke);

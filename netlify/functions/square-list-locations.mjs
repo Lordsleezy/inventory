@@ -1,6 +1,6 @@
 import { json, corsHeaders, staffFromEvent } from "../lib/server.mjs";
 import { getStoreSquareAccess, squareClient } from "../lib/square.mjs";
-import { wrapHandler } from "../lib/floor-log.mjs";
+import { wrapHandler, asNetlifyFunction } from "../lib/floor-log.mjs";
 
 /** List Square locations for the connected store (or sandbox test token). */
 async function handle(event) {
@@ -18,7 +18,7 @@ async function handle(event) {
   return json(200, { locations, current_location_id: access.locationId, source: access.source });
 }
 
-export const handler = wrapHandler("square-list-locations", async (event) => {
+export const invoke = wrapHandler("square-list-locations", async (event) => {
   try {
     return await handle(event);
   } catch (err) {
@@ -27,3 +27,5 @@ export const handler = wrapHandler("square-list-locations", async (event) => {
     throw err;
   }
 });
+
+export default asNetlifyFunction(invoke);

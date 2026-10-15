@@ -1,6 +1,6 @@
 /** Server-to-server website checkout: live shipping rates, ship-or-pickup hold, Square payment. */
 import { serviceClient, json, corsHeaders } from "../lib/server.mjs";
-import { wrapHandler } from "../lib/floor-log.mjs";
+import { wrapHandler, asNetlifyFunction } from "../lib/floor-log.mjs";
 import { webSquareConfig, webSquareEnv } from "../lib/web-square.mjs";
 import { settleShippingOrder } from "../lib/web-payment.mjs";
 import { ownerEmails } from "../lib/web-order-email.mjs";
@@ -110,7 +110,7 @@ async function handle(event) {
   return settleShippingOrder(sb, order);
 }
 
-export const handler = wrapHandler("web-checkout", async event => {
+export const invoke = wrapHandler("web-checkout", async event => {
   try { return await handle(event); }
   catch (err) {
     // Square errors can contain payment tokens; never return the raw SDK exception.
@@ -118,3 +118,5 @@ export const handler = wrapHandler("web-checkout", async event => {
     return json(500, { error: /^missing_|^web_store_not_allowed|^production_square_required|^sandbox_square_required/.test(err.message || "") ? err.message : "Checkout unavailable. Retry this order or contact the store." });
   }
 });
+
+export default asNetlifyFunction(invoke);

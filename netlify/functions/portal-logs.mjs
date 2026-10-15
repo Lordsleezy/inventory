@@ -6,7 +6,7 @@
  */
 import { json, corsHeaders, serviceClient } from "../lib/server.mjs";
 import { portalAdminFromEvent } from "../lib/portal-auth.mjs";
-import { floorLog, redact } from "../lib/floor-log.mjs";
+import { floorLog, redact, asNetlifyFunction } from "../lib/floor-log.mjs";
 import { SCHEDULED_JOBS } from "../lib/schedule.mjs";
 
 const like = (s) => String(s).replace(/[%_,()]/g, " ").trim();
@@ -128,7 +128,9 @@ async function handle(event) {
   return json(200, { ok: true, logs, summary: summaryRows, stalled: stalledRows, jobs });
 }
 
-export const handler = async (event) => {
+export const invoke = async (event) => {
   try { return await handle(event); }
   catch (err) { return json(500, { error: err instanceof Error ? err.message : String(err) }); }
 };
+
+export default asNetlifyFunction(invoke);

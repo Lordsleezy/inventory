@@ -7,7 +7,7 @@ import {
 import { exchangeEbayCode, getSellerUsername, subscribeNotifications } from "../lib/ebay.mjs";
 import { upsertEncryptedSquareTokens } from "../lib/square.mjs";
 import { paramsFromNetlifyEvent } from "../lib/oauth-params.mjs";
-import { wrapHandler } from "../lib/floor-log.mjs";
+import { wrapHandler, asNetlifyFunction } from "../lib/floor-log.mjs";
 import { ebayDisabled, ebayOrdersOnly, ebayRequiredUsername } from "../lib/ebay-env.mjs";
 
 function deepLink(query) {
@@ -361,4 +361,6 @@ async function handle(event) {
   }
 }
 
-export const handler = wrapHandler("oauth-callback", handle);
+export const invoke = wrapHandler("oauth-callback", handle);
+
+export default asNetlifyFunction(invoke);

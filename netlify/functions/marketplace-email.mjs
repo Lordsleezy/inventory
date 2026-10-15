@@ -1,6 +1,6 @@
 import PostalMime from 'postal-mime';
 import { json, serviceClient } from '../lib/server.mjs';
-import { wrapHandler } from '../lib/floor-log.mjs';
+import { wrapHandler, asNetlifyFunction } from '../lib/floor-log.mjs';
 import { ingestMarketplaceMail, loadStoreChannels } from '../lib/marketplace-email-parse.mjs';
 
 // Raw-email webhook (forwarder -> POST). The Gmail inbox poller (gmail-sales-poll) shares the same parse + ingest code.
@@ -22,4 +22,6 @@ async function handle(event) {
     return json(500, { error: String(e).slice(0, 300) });
   }
 }
-export const handler = wrapHandler('marketplace-email', handle);
+export const invoke = wrapHandler('marketplace-email', handle);
+
+export default asNetlifyFunction(invoke);

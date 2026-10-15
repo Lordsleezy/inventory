@@ -1,6 +1,6 @@
 /** Floor Admin → Orders actions: buy label, mark shipped, cancel & refund, run pickup sweep. */
 import { json, corsHeaders } from "../lib/server.mjs";
-import { wrapHandler } from "../lib/floor-log.mjs";
+import { wrapHandler, asNetlifyFunction } from "../lib/floor-log.mjs";
 import { portalAdminFromEvent } from "../lib/portal-auth.mjs";
 import { buyLabelForOrder, labelQuote, voidLabel } from "../lib/web-label.mjs";
 import { shippoMode } from "../lib/shippo.mjs";
@@ -174,10 +174,12 @@ async function handle(event) {
   return json(400, { error: "unknown_action" });
 }
 
-export const handler = wrapHandler("web-order-admin", async event => {
+export const invoke = wrapHandler("web-order-admin", async event => {
   try { return await handle(event); }
   catch (err) {
     if (err.statusCode) return json(502, { error: "Square request failed." });
     return json(500, { error: String(err.message || err).slice(0, 300) });
   }
 });
+
+export default asNetlifyFunction(invoke);

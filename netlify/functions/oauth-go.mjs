@@ -1,6 +1,6 @@
 import { html, serviceClient } from "../lib/server.mjs";
 import { authorizeUrl } from "../lib/oauth-authorize.mjs";
-import { wrapHandler } from "../lib/floor-log.mjs";
+import { wrapHandler, asNetlifyFunction } from "../lib/floor-log.mjs";
 import { ebayDisabled } from "../lib/ebay-env.mjs";
 
 function fail(message) {
@@ -68,4 +68,6 @@ async function handle(event) {
   );
 }
 
-export const handler = wrapHandler("oauth-go", handle);
+export const invoke = wrapHandler("oauth-go", handle);
+
+export default asNetlifyFunction(invoke);

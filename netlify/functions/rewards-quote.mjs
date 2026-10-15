@@ -10,6 +10,7 @@
  *
  * When `lines` is omitted, pass `subtotal_cents` for a rough redeem/signup preview.
  */
+import { asNetlifyFunction } from "../lib/floor-log.mjs";
 import { serviceClient, json, corsHeaders, requireEnv } from "../lib/server.mjs";
 
 function rewardsKey() {
@@ -47,7 +48,7 @@ function settingBool(rows, key, fallback) {
   return String(row.value) === "true";
 }
 
-export async function handler(event) {
+export async function invoke(event) {
   const cors = {
     ...corsHeaders(),
     "Access-Control-Allow-Headers":
@@ -207,3 +208,5 @@ export async function handler(event) {
     };
   }
 }
+
+export default asNetlifyFunction(invoke);

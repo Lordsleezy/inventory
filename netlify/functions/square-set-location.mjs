@@ -1,5 +1,5 @@
 import { ownerFromEvent, serviceClient, json, corsHeaders } from "../lib/server.mjs";
-import { wrapHandler } from "../lib/floor-log.mjs";
+import { wrapHandler, asNetlifyFunction } from "../lib/floor-log.mjs";
 
 async function handle(event) {
   if (event.httpMethod === "OPTIONS") return { statusCode: 200, headers: corsHeaders(), body: "" };
@@ -34,4 +34,6 @@ async function handle(event) {
   }
 }
 
-export const handler = wrapHandler("square-set-location", handle);
+export const invoke = wrapHandler("square-set-location", handle);
+
+export default asNetlifyFunction(invoke);

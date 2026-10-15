@@ -3,7 +3,7 @@
  * Scheduled every 5 minutes. Never SMS.
  */
 import { serviceClient, json, corsHeaders, staffFromEvent } from "../lib/server.mjs";
-import { wrapHandler } from "../lib/floor-log.mjs";
+import { wrapHandler, asNetlifyFunction } from "../lib/floor-log.mjs";
 import { sendResend } from "../lib/receipt.mjs";
 
 const STOREFRONT = (process.env.STOREFRONT_URL || "https://openboxindustries.com").replace(/\/$/, "");
@@ -106,7 +106,7 @@ export async function drainLoyaltyEmail(limit = 40) {
   return { claimed: rows.length, sent, failed };
 }
 
-export const handler = wrapHandler("loyalty-email", async (event) => {
+export const invoke = wrapHandler("loyalty-email", async (event) => {
   const cors = corsHeaders();
   if (event.httpMethod === "OPTIONS") return { statusCode: 200, headers: cors, body: "" };
   try {
@@ -130,3 +130,5 @@ export const handler = wrapHandler("loyalty-email", async (event) => {
     return json(status, { error: msg });
   }
 });
+
+export default asNetlifyFunction(invoke);

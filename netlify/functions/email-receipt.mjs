@@ -1,5 +1,5 @@
 import { staffFromEvent, serviceClient, json, corsHeaders } from "../lib/server.mjs";
-import { wrapHandler } from "../lib/floor-log.mjs";
+import { wrapHandler, asNetlifyFunction } from "../lib/floor-log.mjs";
 import {
   buildReceiptHtml,
   buildReceiptText,
@@ -107,7 +107,7 @@ async function handle(event) {
   return json(200, { ok: true, to: toEmail, receiptNo });
 }
 
-export const handler = wrapHandler("email-receipt", async (event) => {
+export const invoke = wrapHandler("email-receipt", async (event) => {
   try {
     return await handle(event);
   } catch (err) {
@@ -115,3 +115,5 @@ export const handler = wrapHandler("email-receipt", async (event) => {
     return json(500, { error: msg });
   }
 });
+
+export default asNetlifyFunction(invoke);

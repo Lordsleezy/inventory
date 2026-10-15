@@ -165,12 +165,33 @@ export function wrapHandler(source, fn) {
   };
 }
 
-/** Entrypoint helper: wrapHandler + modern Netlify runtime (no 4KB env limit). */
-export function netlifyHandler(source, fn) {
-  return withLambda(wrapHandler(source, fn));
-}
-
 /** Raw Lambda-style handler → modern Netlify default export. */
 export function asNetlifyFunction(handler) {
-  return withLambda(handler);
+  // withLambda turns a 204 with body "" into `new Response("")`, which Node rejects.
+  const wrapped = withLambda(async (event, context) => {
+    const result = await handler(event, context);
+    if (result && result.statusCode === 204) {
+      return {
+        ...result,
+        statusCode: 200,
+        body: "",
+        headers: { ...(result.headers || {}), "x-floor-empty": "204" },
+      };
+    }
+    return result;
+  });
+  return async (request, context) => {
+    const response = await wrapped(request, context ?? {});
+    if (response.headers.get("x-floor-empty") === "204") {
+      const headers = new Headers(response.headers);
+      headers.delete("x-floor-empty");
+      return new Response(null, { status: 204, headers });
+    }
+    return response;
+  };
+}
+
+/** Entrypoint helper: wrapHandler + modern Netlify runtime (no 4KB env limit). */
+export function netlifyHandler(source, fn) {
+  return asNetlifyFunction(wrapHandler(source, fn));
 }
