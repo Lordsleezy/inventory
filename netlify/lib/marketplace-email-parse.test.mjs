@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { parseMail, isMarketplaceNoise, looksLikeSaleNotice } from "./marketplace-email-parse.mjs";
+import { parseMail, isMarketplaceNoise, looksLikeSaleNotice, marketplaceDkimPassed, mailAuthenticatedForMarketplace } from "./marketplace-email-parse.mjs";
 
 assert.equal(looksLikeSaleNotice("You've made a sale: Lasko Fan", "You've made a sale! $25.00"), true);
 assert.equal(
@@ -72,4 +72,64 @@ assert.equal(subjectSku.price, 5800);
 assert.equal(looksLikeSaleNotice("Password reset", "Your item sold for $10"), false);
 assert.equal(looksLikeSaleNotice("Verify your account", "Item sold"), false);
 
+
+// DKIM / ARC trust gate — forged content without marketplace dkim=pass must fail.
+const dkimRaw = [
+  "From: sold@alerts.depop.com",
+  "To: obitracking@gmail.com",
+  "Subject: Your USPS shipping label and sale confirmation for @buyer",
+  "Authentication-Results: mx.google.com;",
+  "\tdkim=pass header.i=@alerts.depop.com header.s=selector header.b=abc;",
+  "\tspf=pass smtp.mailfrom=depop.com;",
+  "\tdmarc=pass header.from=alerts.depop.com",
+  "Message-ID: <real@depop.com>",
+  "",
+  "You've made a sale!",
+  "SKU: 11410",
+  "Item price $22.00",
+].join("\r\n");
+assert.equal(marketplaceDkimPassed(dkimRaw, ["depop.com", "mercari.com"]), true);
+assert.equal(mailAuthenticatedForMarketplace(dkimRaw), true);
+
+const forgedRaw = [
+  "From: sold@alerts.depop.com",
+  "To: obitracking@gmail.com",
+  "Subject: Your USPS shipping label and sale confirmation for @buyer",
+  "Authentication-Results: mx.google.com;",
+  "\tdkim=pass header.i=@gmail.com header.s=20240101 header.b=xyz;",
+  "\tspf=fail smtp.mailfrom=evil.example;",
+  "Message-ID: <fake@evil>",
+  "",
+  "You've made a sale!",
+  "SKU: 11410",
+  "Item price $22.00",
+  "Sign in to Depop",
+].join("\r\n");
+assert.equal(marketplaceDkimPassed(forgedRaw, ["depop.com", "mercari.com"]), false);
+assert.equal(mailAuthenticatedForMarketplace(forgedRaw), false);
+
+const noAuthRaw = [
+  "From: attacker@gmail.com",
+  "Subject: You've made a sale: Fake Lamp",
+  "",
+  "You've made a sale! Sold for $99.00",
+  "SKU: 11410",
+  "Depop order",
+].join("\r\n");
+assert.equal(mailAuthenticatedForMarketplace(noAuthRaw), false);
+
+const arcRaw = [
+  "From: pgg124@gmail.com",
+  "Subject: Fwd: Your USPS shipping label and sale confirmation",
+  "ARC-Authentication-Results: i=1; mx.google.com;",
+  "\tdkim=pass header.i=@alerts.depop.com header.s=selector header.b=abc;",
+  "\tdmarc=pass header.from=alerts.depop.com",
+  "",
+  "You've made a sale!",
+  "SKU: 11410",
+  "Item price $22.00",
+].join("\r\n");
+assert.equal(marketplaceDkimPassed(arcRaw, ["depop.com"]), true);
+
 console.log("marketplace-email-parse.test.mjs ok");
+

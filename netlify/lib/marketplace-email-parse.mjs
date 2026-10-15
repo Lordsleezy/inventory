@@ -40,6 +40,47 @@ export const safeDate = (s) => {
   return Number.isNaN(+d) ? null : d.toISOString().slice(0, 10);
 };
 
+/**
+ * Extract Authentication-Results / ARC-Authentication-Results header blocks from raw RFC822.
+ * Only the header section is inspected (fail closed if missing).
+ */
+export function authResultBlocks(raw) {
+  const text = Buffer.isBuffer(raw) ? raw.toString('utf8') : String(raw || '');
+  const cut = text.search(/\r?\n\r?\n/);
+  const headerSection = (cut >= 0 ? text.slice(0, cut) : text).replace(/\r\n[ \t]+/g, ' ').replace(/\n[ \t]+/g, ' ');
+  const blocks = [];
+  const re = /^(?:ARC-)?Authentication-Results\s*:\s*(.+)$/gim;
+  let m;
+  while ((m = re.exec(headerSection))) blocks.push(m[1]);
+  return blocks;
+}
+
+/**
+ * True only when a receiver recorded dkim=pass for a Depop/Mercari signing domain.
+ * From-header spoofing alone is not enough — a stranger emailing obitracking a fake
+ * "You've made a sale" must not mark inventory sold. Gmail filter forwards from pgg124
+ * are accepted when Google preserves ARC/Authentication-Results with the original DKIM.
+ */
+export function marketplaceDkimPassed(raw, domains = ['depop.com', 'mercari.com']) {
+  const allowed = (domains || []).map((d) => String(d).toLowerCase().replace(/^@/, '')).filter(Boolean);
+  if (!allowed.length) return false;
+  const domainOk = (host) => {
+    const h = String(host || '').toLowerCase().replace(/^@/, '');
+    return allowed.some((d) => h === d || h.endsWith(`.${d}`));
+  };
+  for (const block of authResultBlocks(raw)) {
+    if (!/dkim\s*=\s*pass\b/i.test(block)) continue;
+    const hosts = [...block.matchAll(/\bheader\.(?:i|d)\s*=\s*@?([A-Za-z0-9.-]+)/gi)].map((x) => x[1]);
+    if (hosts.some(domainOk)) return true;
+  }
+  return false;
+}
+
+/** IMAP/webhook gate: marketplace DKIM (or ARC-preserved DKIM) must pass. */
+export function mailAuthenticatedForMarketplace(raw, domains = ['depop.com', 'mercari.com']) {
+  return marketplaceDkimPassed(raw, domains);
+}
+
 const SALE_SIGNAL =
   /sold|you(?:'ve| have) made a sale|sale confirmation|shipping label and sale confirmation|order (?:confirmed|placed|complete|completed)|your item has sold|transaction (?:complete|completed)|payment received|item sold/i;
 
@@ -288,6 +329,38 @@ export async function ingestMarketplaceMail(sb, { store, channels, parsed, raw }
   }
 
   let reason = 'SKU or sale price was not found with confidence';
+  // Order-id dedupe before finalize: same marketplace order must never create a second sale.
+  if (p.order_number) {
+    const { data: prior } = await sb
+      .from('marketplace_email_sales')
+      .select('id,sale_id,state')
+      .eq('store_id', store.id)
+      .eq('order_number', p.order_number)
+      .not('sale_id', 'is', null)
+      .limit(1)
+      .maybeSingle();
+    if (prior?.sale_id) {
+      await sb.from('marketplace_email_sales').upsert(
+        {
+          store_id: store.id,
+          message_id: msg,
+          marketplace: p.marketplace,
+          subject: parsed.subject,
+          state: 'matched',
+          sku: p.sku,
+          item_title: p.item_title,
+          order_number: p.order_number,
+          sale_price_cents: p.price,
+          sale_id: prior.sale_id,
+          reason: 'Duplicate of existing order',
+          confidence: p.sku && p.price ? 0.99 : null,
+        },
+        { onConflict: 'store_id,message_id' },
+      );
+      return { state: 'duplicate', sku: p.sku, marketplace: p.marketplace, sale_id: prior.sale_id };
+    }
+  }
+
   if (p.sku && p.price) {
     const { data: unit } = await sb
       .from('units')
@@ -314,7 +387,11 @@ export async function ingestMarketplaceMail(sb, { store, channels, parsed, raw }
         p_tax_cents: p.tax,
         p_payout_cents: p.payout,
       });
-      if (!r.error) return { state: 'matched', sku: p.sku, marketplace: p.marketplace };
+      if (!r.error) {
+        // RPC returns null when it attached a duplicate order without a new sale.
+        if (r.data == null) return { state: 'duplicate', sku: p.sku, marketplace: p.marketplace };
+        return { state: 'matched', sku: p.sku, marketplace: p.marketplace, sale_id: r.data };
+      }
       reason = r.error.message;
     } else reason = 'SKU did not match an available unit';
   }

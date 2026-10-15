@@ -4,7 +4,7 @@ import { json, corsHeaders, serviceClient, connectionAdminFromEvent } from "../l
 import { wrapHandler, floorLog, asNetlifyFunction } from "../lib/floor-log.mjs";
 import { withLock } from "../lib/bg-guard.mjs";
 import { isNetlifyScheduleEvent } from "../lib/schedule.mjs";
-import { ingestMarketplaceMail, loadStoreChannels, looksLikeSaleNotice } from "../lib/marketplace-email-parse.mjs";
+import { ingestMarketplaceMail, loadStoreChannels, mailAuthenticatedForMarketplace } from "../lib/marketplace-email-parse.mjs";
 
 /**
  * Gmail inbox reader: every 2 minutes, read new Depop / Mercari mail from the same Gmail account that
@@ -19,6 +19,7 @@ import { ingestMarketplaceMail, loadStoreChannels, looksLikeSaleNotice } from ".
  *   GMAIL_POLL_INCLUDE_SEEN   "1" = also look at already-read mail in the lookback window (dedupe by Message-ID)
  * Manual rescan: POST { "include_seen": true } with owner/manager Bearer token or x-marketplace-secret.
  * Previously-ignored Message-IDs are re-evaluated after a parser fix.
+ * Spoof protection: only messages with dkim=pass for depop.com/mercari.com (Auth/ARC results) are ingested.
  *   GMAIL_POLL_EXTRA_USER / GMAIL_POLL_EXTRA_APP_PASSWORD  optional second inbox (e.g. main Gmail)
  */
 
@@ -39,16 +40,16 @@ function fromAllowed(address, domains) {
   return domains.some((d) => host === d || host.endsWith(`.${d}`));
 }
 
-/** True when From/Reply-To is Depop/Mercari, or a rewritten forward still looks like their sale mail. */
-function mailAllowed(parsed, domains) {
-  const addresses = [parsed?.from?.address, ...(parsed?.replyTo || []).map((r) => r?.address)];
-  if (addresses.some((a) => fromAllowed(a, domains))) return true;
-  const subject = String(parsed?.subject || "");
-  const text = `${subject}\n${parsed?.text || ""}\n${parsed?.html || ""}`.replace(/<[^>]*>/g, " ");
-  if (!/\bdepop\b|\bmercari\b|depop\.com|mercari\.com/i.test(`${addresses.join(" ")} ${text.slice(0, 2500)}`)) {
-    return false;
-  }
-  return looksLikeSaleNotice(subject, text);
+/**
+ * Trust gate for inbox mail.
+ * Content that merely *looks like* a Depop/Mercari sale is NOT enough — anyone could
+ * email obitracking a forged notice. Accept only when Authentication-Results or
+ * ARC-Authentication-Results records dkim=pass for depop.com / mercari.com.
+ * That is what makes the pgg124 → obitracking Gmail filter path safe: Google keeps
+ * the original DKIM/ARC result. Spoofed From without marketplace DKIM is rejected.
+ */
+function mailAllowed(_parsed, raw, domains) {
+  return mailAuthenticatedForMarketplace(raw, domains);
 }
 
 async function authorized(event) {
@@ -96,6 +97,7 @@ async function pollOneInbox(sb, { user, pass }, store, channels, domains, lookba
     ignored: 0,
     duplicate: 0,
     skipped_sender: 0,
+    skipped_auth: 0,
     failed: 0,
     errors: [],
   };
@@ -131,9 +133,10 @@ async function pollOneInbox(sb, { user, pass }, store, channels, domains, lookba
             continue;
           }
           const parsed = await new PostalMime().parse(raw);
-          if (!mailAllowed(parsed, domains)) {
-            summary.skipped_sender++;
-            // Mark seen so non-sale subject hits (newsletter, etc.) do not starve the 15/run budget.
+          if (!mailAllowed(parsed, raw, domains)) {
+            if (fromAllowed(parsed.from?.address, domains)) summary.skipped_auth++;
+            else summary.skipped_sender++;
+            // Mark seen so forgeries / newsletters do not starve the 15/run budget.
             if (!alreadySeen) await client.messageFlagsAdd(uid, ["\\Seen"], { uid: true });
             continue;
           }
@@ -165,7 +168,7 @@ async function pollInbox(sb, { forceIncludeSeen = false } = {}) {
   const { store, channels } = await loadStoreChannels(sb);
 
   const perAccount = [];
-  const totals = { found: 0, matched: 0, needs_review: 0, ignored: 0, duplicate: 0, skipped_sender: 0, failed: 0, errors: [] };
+  const totals = { found: 0, matched: 0, needs_review: 0, ignored: 0, duplicate: 0, skipped_sender: 0, skipped_auth: 0, failed: 0, errors: [] };
   for (const account of accounts) {
     if (Date.now() - started > DEADLINE_MS) break;
     const one = await pollOneInbox(sb, account, store, channels, domains, lookbackDays, includeSeen, started);
