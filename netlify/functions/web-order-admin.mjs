@@ -100,6 +100,76 @@ async function handle(event) {
     const r = await cancelAndRefund(sb, storeId, id, "admin", reason);
     return json(r.status, r);
   }
+  if (body.action === "delete_order") {
+    // Remove from Orders. Reverses a still-live Floor sale (unit back to available).
+    // Never refunds the marketplace / Square — use Cancel & refund for that.
+    const { data: order, error: loadError } = await sb
+      .from("web_orders")
+      .select("id,store_id,sku,sale_id,order_no,channel,status,payment_id")
+      .eq("id", id)
+      .eq("store_id", storeId)
+      .maybeSingle();
+    if (loadError) return json(500, { error: loadError.message });
+    if (!order) return json(404, { error: "order_not_found" });
+    const reason = String(body.reason || "").trim() || `Deleted from Orders by ${actor}`;
+    const now = new Date().toISOString();
+    let saleVoided = false;
+    if (order.sale_id != null) {
+      const { data: sale } = await sb
+        .from("sales")
+        .select("id,sku,voided_at")
+        .eq("id", order.sale_id)
+        .eq("store_id", storeId)
+        .maybeSingle();
+      if (sale && !sale.voided_at) {
+        const { error: voidErr } = await sb
+          .from("sales")
+          .update({ voided_at: now, void_reason: reason })
+          .eq("id", sale.id)
+          .eq("store_id", storeId)
+          .is("voided_at", null);
+        if (voidErr) return json(500, { error: voidErr.message });
+        await sb
+          .from("units")
+          .update({ state: "available", updated_at: now })
+          .eq("store_id", storeId)
+          .eq("sku", sale.sku);
+        saleVoided = true;
+      }
+    }
+    await sb.from("web_order_emails").delete().eq("order_id", id);
+    if (order.order_no && order.channel) {
+      await sb
+        .from("channel_orders")
+        .delete()
+        .eq("store_id", storeId)
+        .eq("provider", order.channel)
+        .eq("order_id", order.order_no);
+    }
+    await sb
+      .from("portal_expenses")
+      .update({ voided_at: now, void_reason: reason })
+      .eq("store_id", storeId)
+      .eq("order_id", id)
+      .is("voided_at", null);
+    const { error: delErr } = await sb.from("web_orders").delete().eq("id", id).eq("store_id", storeId);
+    if (delErr) return json(500, { error: delErr.message });
+    await sb.from("events").insert({
+      store_id: storeId,
+      sku: order.sku,
+      kind: "edit",
+      field: "web_order_deleted",
+      new_value: JSON.stringify({
+        order_no: order.order_no,
+        channel: order.channel,
+        status: order.status,
+        sale_voided: saleVoided,
+      }),
+      actor,
+      note: reason,
+    });
+    return json(200, { ok: true, deleted: id, sale_voided: saleVoided });
+  }
   if (body.action === "pickup_sweep") return json(200, await pickupSweep(sb));
   return json(400, { error: "unknown_action" });
 }

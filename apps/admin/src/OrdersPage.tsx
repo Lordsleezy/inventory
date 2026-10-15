@@ -144,6 +144,28 @@ export function OrdersPage({ client, accessToken, money, stamp }: Props) {
     } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
     finally { setBusy(null); }
   }
+  async function deleteOrder(o: WebOrder) {
+    const live = o.status === 'paid';
+    const ok = window.confirm(
+      `Delete ${channelLabel(o.channel)} order ${o.order_no || o.id} (SKU ${o.sku}) from Orders?\n\n` +
+      (live
+        ? 'This removes it from Orders and reverses the Floor sale (unit goes available again).\nIt does NOT refund the buyer on eBay / Amazon / Depop / Mercari / Square.'
+        : 'This only removes the row from Orders. It does not refund anyone.') +
+      '\n\nThis cannot be undone from the UI.',
+    );
+    if (!ok) return;
+    setBusy(o.id + 'delete'); setError('');
+    try {
+      const res = await fetch(floorFunctionUrl('web-order-admin'), {
+        method: 'POST', headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'delete_order', id: o.id }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || body.ok === false) throw new Error(body.error || `Request failed (${res.status})`);
+      await load();
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    finally { setBusy(null); }
+  }
   async function matchSku(o: WebOrder) {
     const sku = window.prompt(`Link this ${channelLabel(o.channel)} order to a Floor SKU.\n\nOrder ${o.order_no || o.id}`, o.sku === 'UNMATCHED' ? '' : o.sku);
     if (sku == null || !sku.trim()) return;
@@ -223,6 +245,7 @@ export function OrdersPage({ client, accessToken, money, stamp }: Props) {
               <button className="secondary" disabled={!!busy} onClick={() => void markDelivered(o)}>{busy === o.id + 'deliver' ? 'Saving…' : 'Mark delivered'}</button>
               <button className="secondary" disabled={!!busy} onClick={() => void recordLabelCost(o)}>{busy === o.id + 'label' ? 'Saving…' : o.label_cost_cents != null ? 'Edit label cost' : 'Record label cost'}</button>
               {(!o.channel || o.channel === 'website') && <button className="text-button danger" disabled={!!busy} onClick={() => void cancel(o)}>Cancel & refund</button>}
+              <button className="text-button danger" disabled={!!busy} onClick={() => void deleteOrder(o)}>{busy === o.id + 'delete' ? 'Deleting…' : 'Delete'}</button>
             </div>}
           </>
         )}
@@ -233,6 +256,7 @@ export function OrdersPage({ client, accessToken, money, stamp }: Props) {
               <button disabled={!!busy} onClick={() => void markDelivered(o)}>{busy === o.id + 'deliver' ? 'Saving…' : 'Mark delivered'}</button>
               <button className="secondary" disabled={!!busy} onClick={() => void recordLabelCost(o)}>{busy === o.id + 'label' ? 'Saving…' : o.label_cost_cents != null ? 'Edit label cost' : 'Record label cost'}</button>
               {(!o.channel || o.channel === 'website') && <button className="text-button danger" disabled={!!busy} onClick={() => void cancel(o)}>Cancel & refund</button>}
+              <button className="text-button danger" disabled={!!busy} onClick={() => void deleteOrder(o)}>{busy === o.id + 'delete' ? 'Deleting…' : 'Delete'}</button>
             </div>}
           </>
         )}
@@ -241,14 +265,31 @@ export function OrdersPage({ client, accessToken, money, stamp }: Props) {
             <div className={`countdown${o.pickup_deadline && new Date(o.pickup_deadline).getTime() - now < 86400000 ? ' urgent' : ''}`}>Pick up by {o.pickup_deadline ? stamp(o.pickup_deadline) : '—'} · {timeLeft(o.pickup_deadline, now)}</div>
             {o.refund_requested_at ? <p className="hint">Cancel & refund in progress…</p> : <div className="actions">
               <button disabled={!!busy} onClick={() => void pickedUp(o)}>Picked up</button>
-              <button className="text-button danger" disabled={!!busy} onClick={() => void cancel(o)}>Cancel & refund</button></div>}
+              <button className="text-button danger" disabled={!!busy} onClick={() => void cancel(o)}>Cancel & refund</button>
+              <button className="text-button danger" disabled={!!busy} onClick={() => void deleteOrder(o)}>{busy === o.id + 'delete' ? 'Deleting…' : 'Delete'}</button>
+            </div>}
           </>
         )}
         {isDone && (
-          <small>{o.picked_up_at ? `Picked up ${stamp(o.picked_up_at)} · ${o.picked_up_by || ''}` : `Delivered ${stamp(o.delivered_at!)}${o.shipped_at ? ` · shipped ${stamp(o.shipped_at)}` : ''}`}</small>
+          <>
+            <small>{o.picked_up_at ? `Picked up ${stamp(o.picked_up_at)} · ${o.picked_up_by || ''}` : `Delivered ${stamp(o.delivered_at!)}${o.shipped_at ? ` · shipped ${stamp(o.shipped_at)}` : ''}`}</small>
+            <div className="actions">
+              <button className="text-button danger" disabled={!!busy} onClick={() => void deleteOrder(o)}>{busy === o.id + 'delete' ? 'Deleting…' : 'Delete'}</button>
+            </div>
+          </>
         )}
         {isCanceled && (
-          <small>{o.cancel_source === 'pickup_expired' ? 'Not picked up by the deadline' : o.cancel_source === 'admin' ? `Canceled in admin${o.cancel_reason ? `: ${o.cancel_reason}` : ''}` : o.cancel_source === 'ebay_api' ? `Canceled on eBay${o.cancel_reason ? `: ${o.cancel_reason}` : ''}` : o.status === 'refunded' ? 'Refunded' : o.status === 'canceled' ? `Canceled${o.cancel_reason ? `: ${o.cancel_reason}` : ''}` : 'Could not complete; refunded automatically'}{o.canceled_at ? ` · ${stamp(o.canceled_at)}` : ''}</small>
+          <>
+            <small>{o.cancel_source === 'pickup_expired' ? 'Not picked up by the deadline' : o.cancel_source === 'admin' ? `Canceled in admin${o.cancel_reason ? `: ${o.cancel_reason}` : ''}` : o.cancel_source === 'ebay_api' ? `Canceled on eBay${o.cancel_reason ? `: ${o.cancel_reason}` : ''}` : o.status === 'refunded' ? 'Refunded' : o.status === 'canceled' ? `Canceled${o.cancel_reason ? `: ${o.cancel_reason}` : ''}` : 'Could not complete; refunded automatically'}{o.canceled_at ? ` · ${stamp(o.canceled_at)}` : ''}</small>
+            <div className="actions">
+              <button className="text-button danger" disabled={!!busy} onClick={() => void deleteOrder(o)}>{busy === o.id + 'delete' ? 'Deleting…' : 'Delete'}</button>
+            </div>
+          </>
+        )}
+        {!isToShip && !isShipped && !isPickup && !isDone && !isCanceled && (
+          <div className="actions">
+            <button className="text-button danger" disabled={!!busy} onClick={() => void deleteOrder(o)}>{busy === o.id + 'delete' ? 'Deleting…' : 'Delete'}</button>
+          </div>
         )}
       </div>
     );
