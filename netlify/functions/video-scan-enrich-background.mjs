@@ -1,3 +1,4 @@
+import { asNetlifyFunction } from "../lib/floor-log.mjs";
 import { authorizedScan } from '../lib/video-scan-auth.mjs';
 import { enrichVideo, lookupProductSpecs, retailFields, tokenCost } from '../lib/video-scan.mjs';
 import { resolveFloorCategory, loadStoredAspects, refreshCategoryAspects, prepareUnitAspects } from '../lib/ebay-catalog.mjs';
@@ -9,7 +10,7 @@ function measure(value){const n=Number(value);return Number.isFinite(n)&&n>0&&n<
 function cleanModel(value){const model=String(value||'').trim();return /\d/.test(model)&&!/^\d{5,}$/.test(model)?model:''}
 function goodDescription(value,title){const text=String(value||'').trim();return text.length>String(title||'').length+25?text:''}
 
-export async function handler(event) {
+export async function invoke(event) {
   const payload=JSON.parse(event.body||'{}');
   let sb,job,finished=false;
   try {
@@ -141,3 +142,5 @@ export async function handler(event) {
   }
   return {statusCode:200};
 }
+
+export default asNetlifyFunction(invoke);

@@ -1,6 +1,6 @@
 import { json, corsHeaders, staffFromEvent, serviceClient } from "../lib/server.mjs";
 import { refundSquarePayment } from "../lib/square.mjs";
-import { wrapHandler } from "../lib/floor-log.mjs";
+import { wrapHandler, asNetlifyFunction } from "../lib/floor-log.mjs";
 
 /**
  * Refund a Square payment when finalize_ticket cannot complete after capture
@@ -58,7 +58,7 @@ async function handle(event) {
   });
 }
 
-export const handler = wrapHandler("square-refund-payment", async (event) => {
+export const invoke = wrapHandler("square-refund-payment", async (event) => {
   try {
     return await handle(event);
   } catch (err) {
@@ -66,3 +66,5 @@ export const handler = wrapHandler("square-refund-payment", async (event) => {
     return json(500, { error: msg });
   }
 });
+
+export default asNetlifyFunction(invoke);

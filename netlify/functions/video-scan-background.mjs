@@ -1,9 +1,10 @@
+import { asNetlifyFunction } from "../lib/floor-log.mjs";
 import { authorizedScan } from '../lib/video-scan-auth.mjs';
 import { identifyFramesCached, lookupRetail, retailFields, tokenCost } from '../lib/video-scan.mjs';
 import { searchProductImages, imageBytes } from '../lib/visual-product-search.mjs';
 import sharp from 'sharp';
 
-export async function handler(event) {
+export async function invoke(event) {
   const payload=JSON.parse(event.body||'{}');
   const id=payload.id;
   let sb;
@@ -96,3 +97,5 @@ export async function handler(event) {
   }
   return {statusCode:200};
 }
+
+export default asNetlifyFunction(invoke);

@@ -1,6 +1,6 @@
 import { serviceClient, json, corsHeaders } from "../lib/server.mjs";
 import { settleShippingOrder } from "../lib/web-payment.mjs";
-import { wrapHandler } from "../lib/floor-log.mjs";
+import { wrapHandler, asNetlifyFunction } from "../lib/floor-log.mjs";
 import { isNetlifyScheduleEvent } from "../lib/schedule.mjs";
 
 async function handle(event) {
@@ -27,4 +27,6 @@ async function handle(event) {
   return json(200, { results, schedule: isNetlifyScheduleEvent(event) });
 }
 
-export const handler = wrapHandler("web-order-reconcile", handle);
+export const invoke = wrapHandler("web-order-reconcile", handle);
+
+export default asNetlifyFunction(invoke);

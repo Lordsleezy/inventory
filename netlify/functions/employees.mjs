@@ -1,5 +1,5 @@
 import { staffFromEvent, serviceClient, json, corsHeaders } from "../lib/server.mjs";
-import { wrapHandler } from "../lib/floor-log.mjs";
+import { wrapHandler, asNetlifyFunction } from "../lib/floor-log.mjs";
 import { randomBytes } from "node:crypto";
 
 /**
@@ -216,10 +216,12 @@ async function handle(event) {
   return json(400, { error: "unknown_action" });
 }
 
-export const handler = wrapHandler("employees", async (event) => {
+export const invoke = wrapHandler("employees", async (event) => {
   try {
     return await handle(event);
   } catch (err) {
     return json(err.status ?? 500, { error: err instanceof Error ? err.message : String(err) });
   }
 });
+
+export default asNetlifyFunction(invoke);

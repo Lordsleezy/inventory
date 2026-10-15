@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { json, corsHeaders, serviceClient, connectionAdminFromEvent } from '../lib/server.mjs';
-import { wrapHandler } from '../lib/floor-log.mjs';
+import { wrapHandler, asNetlifyFunction } from '../lib/floor-log.mjs';
 async function handle(event) {
   if(event.httpMethod==='OPTIONS') return {statusCode: 200,headers:corsHeaders(),body:''};
   if(event.httpMethod!=='POST') return json(405,{error:'method_not_allowed'});
@@ -23,4 +23,6 @@ async function handle(event) {
     const {data,error}=await sb.rpc('marketplace_ingest_sale',{p_store:staff.store_id,p_sku:sku,p_channel:channel,p_price_cents:cents,p_order_number:order||messageId,p_message_id:messageId,p_marketplace:marketplace,p_item_title:title,p_ship_by:shipBy,p_fulfillment:fulfillment,p_buyer:buyer,p_confidence:1,p_fee_cents:feeCents,p_ship_label_cents:shipLabelCents,p_tax_cents:taxCents,p_payout_cents:payoutCents});if(error)throw error;return json(200,{ok:true,sale_id:data});
   }catch(e){const message=e instanceof Error?e.message:String(e);return json(message==='not_signed_in'?401:400,{error:message});}
 }
-export const handler=wrapHandler('marketplace-sale',handle);
+export const invoke=wrapHandler('marketplace-sale',handle);
+
+export default asNetlifyFunction(invoke);

@@ -1,7 +1,8 @@
+import { asNetlifyFunction } from "../lib/floor-log.mjs";
 import { requireEnv } from "../lib/server.mjs";
 import { runBackfill } from "../lib/ebay-backfill.mjs";
 
-export async function handler(event) {
+export async function invoke(event) {
   const header = event.headers?.authorization || event.headers?.Authorization || "";
   if (header !== `Bearer ${requireEnv("SUPABASE_SERVICE_ROLE")}`) {
     return { statusCode: 401, body: "unauthorized" };
@@ -11,3 +12,5 @@ export async function handler(event) {
   await runBackfill(body.storeId);
   return { statusCode: 200, body: "" };
 }
+
+export default asNetlifyFunction(invoke);

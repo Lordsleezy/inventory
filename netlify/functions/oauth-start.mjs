@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { ownerFromEvent, json, corsHeaders, serviceClient } from "../lib/server.mjs";
 import { hopUrl } from "../lib/oauth-authorize.mjs";
-import { wrapHandler } from "../lib/floor-log.mjs";
+import { wrapHandler, asNetlifyFunction } from "../lib/floor-log.mjs";
 import { ebayDisabled } from "../lib/ebay-env.mjs";
 
 async function handle(event) {
@@ -39,4 +39,6 @@ async function handle(event) {
   }
 }
 
-export const handler = wrapHandler("oauth-start", handle);
+export const invoke = wrapHandler("oauth-start", handle);
+
+export default asNetlifyFunction(invoke);

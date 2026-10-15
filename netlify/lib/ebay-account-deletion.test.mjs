@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createSign, generateKeyPairSync } from 'node:crypto';
 import { deletionChallenge, verifyDeletionSignature } from './ebay-account-deletion.mjs';
-import { handler } from '../functions/ebay-account-deletion.mjs';
+import { invoke as handler } from '../functions/ebay-account-deletion.mjs';
 
 test('eBay challenge hashes the exact configured URL and token', async () => {
   process.env.EBAY_DELETION_ENDPOINT_URL = 'https://inventoryobi.netlify.app/.netlify/functions/ebay-account-deletion';

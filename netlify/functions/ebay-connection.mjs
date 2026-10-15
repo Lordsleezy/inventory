@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { json, corsHeaders } from "../lib/server.mjs";
 import { portalAdminFromEvent } from "../lib/portal-auth.mjs";
 import { hopUrl } from "../lib/oauth-authorize.mjs";
-import { wrapHandler } from "../lib/floor-log.mjs";
+import { wrapHandler, asNetlifyFunction } from "../lib/floor-log.mjs";
 import { ebayDisabled } from "../lib/ebay-env.mjs";
 import {
   disconnectEbay,
@@ -53,4 +53,6 @@ async function handle(event) {
   return json(400, { error: "unknown_action" });
 }
 
-export const handler = wrapHandler("ebay-connection", handle);
+export const invoke = wrapHandler("ebay-connection", handle);
+
+export default asNetlifyFunction(invoke);

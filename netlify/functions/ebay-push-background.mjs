@@ -1,10 +1,10 @@
 /** Runs queued eBay pushes (up to 15 minutes, so a slow eBay or database cannot silently kill them). */
 import { requireEnv } from "../lib/server.mjs";
-import { runTrace, floorLog } from "../lib/floor-log.mjs";
+import { runTrace, floorLog, asNetlifyFunction } from "../lib/floor-log.mjs";
 import { markPushFailed, runPushQueue } from "../lib/ebay-drafts.mjs";
 import { ebayDisabled } from "../lib/ebay-env.mjs";
 
-export const handler = async (event) => {
+export const invoke = async (event) => {
   if (ebayDisabled()) return { statusCode: 202, body: "disabled" };
   const header = event.headers?.authorization || event.headers?.Authorization || "";
   if (header !== `Bearer ${requireEnv("SUPABASE_SERVICE_ROLE")}`) return { statusCode: 401, body: "unauthorized" };
@@ -22,3 +22,5 @@ export const handler = async (event) => {
   });
   return { statusCode: 202 };
 };
+
+export default asNetlifyFunction(invoke);

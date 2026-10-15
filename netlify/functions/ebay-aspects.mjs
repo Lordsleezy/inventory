@@ -11,7 +11,7 @@ import {
 } from "../lib/ebay-catalog.mjs";
 import { parseListingSpecs } from "../lib/listing-copy.mjs";
 import { unitSpecificAspect } from "../lib/ebay-aspects.mjs";
-import { wrapHandler } from "../lib/floor-log.mjs";
+import { wrapHandler, asNetlifyFunction } from "../lib/floor-log.mjs";
 
 async function loadUnit(storeId, sku) {
   const sb = serviceClient();
@@ -102,4 +102,6 @@ async function handle(event) {
   }
 }
 
-export const handler = wrapHandler("ebay-aspects", handle);
+export const invoke = wrapHandler("ebay-aspects", handle);
+
+export default asNetlifyFunction(invoke);

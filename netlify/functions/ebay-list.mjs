@@ -1,6 +1,6 @@
 import { staffFromEvent, json, corsHeaders } from "../lib/server.mjs";
 import { inspectLiveSku, listSku } from "../lib/ebay.mjs";
-import { wrapHandler, setTrace } from "../lib/floor-log.mjs";
+import { wrapHandler, setTrace, asNetlifyFunction } from "../lib/floor-log.mjs";
 
 async function handle(event) {
   if (event.httpMethod === "OPTIONS") return { statusCode: 200, headers: corsHeaders(), body: "" };
@@ -58,5 +58,6 @@ async function handle(event) {
   }
 }
 
-export const handler = wrapHandler("ebay-list", handle);
+export const invoke = wrapHandler("ebay-list", handle);
 
+export default asNetlifyFunction(invoke);

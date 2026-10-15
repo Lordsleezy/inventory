@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { json, corsHeaders, serviceClient } from "../lib/server.mjs";
 import { portalAdminFromEvent } from "../lib/portal-auth.mjs";
 import { hopUrl } from "../lib/oauth-authorize.mjs";
-import { wrapHandler } from "../lib/floor-log.mjs";
+import { wrapHandler, asNetlifyFunction } from "../lib/floor-log.mjs";
 import {
   endDraft,
   listDraftPage,
@@ -89,4 +89,6 @@ async function handle(event) {
   }
 }
 
-export const handler = wrapHandler("ebay-drafts", handle);
+export const invoke = wrapHandler("ebay-drafts", handle);
+
+export default asNetlifyFunction(invoke);

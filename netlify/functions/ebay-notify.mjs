@@ -1,6 +1,6 @@
 import { json, corsHeaders, requireEnv } from "../lib/server.mjs";
 import { notificationChallenge, pollAllStores, withdrawOpenEbayTasks } from "../lib/ebay.mjs";
-import { wrapHandler } from "../lib/floor-log.mjs";
+import { wrapHandler, asNetlifyFunction } from "../lib/floor-log.mjs";
 import { handleDeletionPost } from "../lib/ebay-account-deletion.mjs";
 import { ebayDisabled } from "../lib/ebay-env.mjs";
 
@@ -31,7 +31,7 @@ async function handle(event) {
 }
 
 const regularHandler = wrapHandler("ebay-notify", handle);
-export async function handler(event, context) {
+export async function invoke(event, context) {
   if (ebayDisabled()) return json(410, { error: "eBay notifications are disabled." });
   // The regular request logger includes POST bodies. Keep deletion identifiers
   // out of it, including when a forged notification fails verification.
@@ -44,3 +44,5 @@ export async function handler(event, context) {
   }
   return regularHandler(event, context);
 }
+
+export default asNetlifyFunction(invoke);

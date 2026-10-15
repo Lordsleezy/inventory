@@ -1,6 +1,6 @@
 import { exchangeSquareCode, upsertEncryptedSquareTokens } from "../lib/square.mjs";
 import { html, serviceClient } from "../lib/server.mjs";
-import { wrapHandler } from "../lib/floor-log.mjs";
+import { wrapHandler, asNetlifyFunction } from "../lib/floor-log.mjs";
 
 function deepLink(query) {
   const base = process.env.APP_DEEP_LINK_SETTINGS || "floor://settings";
@@ -99,4 +99,6 @@ async function handle(event) {
   }
 }
 
-export const handler = wrapHandler("square-oauth-callback", handle);
+export const invoke = wrapHandler("square-oauth-callback", handle);
+
+export default asNetlifyFunction(invoke);

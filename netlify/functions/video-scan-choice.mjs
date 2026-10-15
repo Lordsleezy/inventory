@@ -1,7 +1,8 @@
+import { asNetlifyFunction } from "../lib/floor-log.mjs";
 import { serviceClient, json, corsHeaders } from '../lib/server.mjs';
 import { scanWorkerHeader } from '../lib/video-scan-auth.mjs';
 
-export async function handler(event) {
+export async function invoke(event) {
   if(event.httpMethod==='OPTIONS')return {statusCode: 200,headers:corsHeaders(),body:''};
   if(event.httpMethod!=='POST')return json(405,{error:'POST required'});
   try {
@@ -27,3 +28,5 @@ export async function handler(event) {
     return json(202,{ok:true});
   }catch(error){return json(500,{error:error.message||String(error)})}
 }
+
+export default asNetlifyFunction(invoke);

@@ -1,7 +1,7 @@
 import { corsHeaders, json, serviceClient } from '../lib/server.mjs';
 import { connectionAdminFromEvent } from '../lib/server.mjs';
 import { calcListPrice, estimateLabelCost, getFeeConfig } from '../lib/marketplace-pricing.mjs';
-import { wrapHandler } from '../lib/floor-log.mjs';
+import { wrapHandler, asNetlifyFunction } from '../lib/floor-log.mjs';
 
 const DEFAULT_MARKUP_CENTS = 200;
 const specsOf = (value) => value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -54,4 +54,6 @@ async function handle(event) {
   }
 }
 
-export const handler = wrapHandler('marketplace-prices', handle);
+export const invoke = wrapHandler('marketplace-prices', handle);
+
+export default asNetlifyFunction(invoke);

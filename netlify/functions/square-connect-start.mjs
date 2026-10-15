@@ -1,5 +1,5 @@
 import { json, corsHeaders, connectionAdminFromEvent } from "../lib/server.mjs";
-import { wrapHandler } from "../lib/floor-log.mjs";
+import { wrapHandler, asNetlifyFunction } from "../lib/floor-log.mjs";
 
 /**
  * Start Square OAuth for the caller's store (owner/manager).
@@ -35,4 +35,6 @@ async function handle(event) {
   return json(200, { url, store_id: ctx.staff.store_id });
 }
 
-export const handler = wrapHandler("square-connect-start", handle);
+export const invoke = wrapHandler("square-connect-start", handle);
+
+export default asNetlifyFunction(invoke);

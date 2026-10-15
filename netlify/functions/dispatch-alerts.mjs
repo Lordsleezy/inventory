@@ -1,5 +1,5 @@
 import { serviceClient, json, corsHeaders } from "../lib/server.mjs";
-import { wrapHandler, floorLog } from "../lib/floor-log.mjs";
+import { wrapHandler, floorLog, asNetlifyFunction } from "../lib/floor-log.mjs";
 import { isNetlifyScheduleEvent } from "../lib/schedule.mjs";
 import { sendInternalAlert, gmailConfigured } from "../lib/mail.mjs";
 import { sendResend } from "../lib/receipt.mjs";
@@ -347,4 +347,6 @@ async function handle(event) {
   });
 }
 
-export const handler = wrapHandler("dispatch-alerts", handle);
+export const invoke = wrapHandler("dispatch-alerts", handle);
+
+export default asNetlifyFunction(invoke);

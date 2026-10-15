@@ -1,9 +1,10 @@
 /** Website listing check (daily schedule, or "Run now" from Floor Admin → Online selling). */
+import { asNetlifyFunction } from "../lib/floor-log.mjs";
 import { serviceClient } from "../lib/server.mjs";
 import { portalAdminFromEvent } from "../lib/portal-auth.mjs";
 import { runListingCheck } from "../lib/listing-check.mjs";
 
-export const handler = async (event) => {
+export const invoke = async (event) => {
   const body = JSON.parse(event.body || "{}");
   let storeIds;
   try {
@@ -18,3 +19,5 @@ export const handler = async (event) => {
   for (const id of storeIds) await runListingCheck(sb, id, { email: body.email !== false });
   return { statusCode: 202 };
 };
+
+export default asNetlifyFunction(invoke);

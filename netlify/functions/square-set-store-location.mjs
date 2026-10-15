@@ -1,5 +1,5 @@
 import { json, corsHeaders, staffFromEvent, serviceClient, encryptSecret } from "../lib/server.mjs";
-import { wrapHandler } from "../lib/floor-log.mjs";
+import { wrapHandler, asNetlifyFunction } from "../lib/floor-log.mjs";
 
 /** Persist Square location_id for the store. */
 async function handle(event) {
@@ -57,4 +57,6 @@ async function handle(event) {
   return json(200, { ok: true, location_id: locationId });
 }
 
-export const handler = wrapHandler("square-set-store-location", handle);
+export const invoke = wrapHandler("square-set-store-location", handle);
+
+export default asNetlifyFunction(invoke);

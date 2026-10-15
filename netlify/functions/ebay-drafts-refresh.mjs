@@ -1,8 +1,9 @@
+import { asNetlifyFunction } from "../lib/floor-log.mjs";
 import { requireEnv } from "../lib/server.mjs";
 import { ebayDisabled } from "../lib/ebay-env.mjs";
 
 // Scheduled every 15 minutes (netlify.toml). Only hands off to the background function, which holds the lock.
-export const handler = async () => {
+export const invoke = async () => {
   if (ebayDisabled()) return { statusCode: 200, body: JSON.stringify({ skipped: "eBay integration is disabled" }) };
   if (process.env.EBAY_BACKGROUND_WORK !== "on") return { statusCode: 200, body: JSON.stringify({ skipped: "EBAY_BACKGROUND_WORK is off" }) };
   const base = (process.env.URL || "https://inventoryobi.netlify.app").replace(/\/$/, "");
@@ -13,3 +14,5 @@ export const handler = async () => {
   });
   return { statusCode: 200, body: JSON.stringify({ queued: res.status }) };
 };
+
+export default asNetlifyFunction(invoke);

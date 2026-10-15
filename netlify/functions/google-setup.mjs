@@ -1,9 +1,9 @@
 import { timingSafeEqual } from 'node:crypto';
 import { json, serviceClient } from '../lib/server.mjs';
 import { merchantAccessToken, merchantRequest } from '../lib/google-merchant.mjs';
-import { wrapHandler } from '../lib/floor-log.mjs';
-import { handler as googleReconcileHandler } from './google-reconcile.mjs';
-import { handler as googleSyncHandler } from './google-sync.mjs';
+import { wrapHandler, asNetlifyFunction } from '../lib/floor-log.mjs';
+import { invoke as googleReconcileHandler } from './google-reconcile.mjs';
+import { invoke as googleSyncHandler } from './google-sync.mjs';
 
 const siteUrl = 'https://openboxindustries.com';
 const accountId = () => process.env.GOOGLE_MERCHANT_ACCOUNT_ID;
@@ -155,4 +155,6 @@ async function handle(event) {
   }
 }
 
-export const handler = wrapHandler('google-setup', handle);
+export const invoke = wrapHandler('google-setup', handle);
+
+export default asNetlifyFunction(invoke);

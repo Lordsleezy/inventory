@@ -1,7 +1,7 @@
 import { ImapFlow } from "imapflow";
 import PostalMime from "postal-mime";
 import { json, corsHeaders, serviceClient } from "../lib/server.mjs";
-import { wrapHandler, floorLog } from "../lib/floor-log.mjs";
+import { wrapHandler, floorLog, asNetlifyFunction } from "../lib/floor-log.mjs";
 import { withLock } from "../lib/bg-guard.mjs";
 import { isNetlifyScheduleEvent } from "../lib/schedule.mjs";
 import { ingestMarketplaceMail, loadStoreChannels } from "../lib/marketplace-email-parse.mjs";
@@ -171,4 +171,6 @@ async function handle(event) {
   }
 }
 
-export const handler = wrapHandler("gmail-sales-poll", handle);
+export const invoke = wrapHandler("gmail-sales-poll", handle);
+
+export default asNetlifyFunction(invoke);

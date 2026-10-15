@@ -1,6 +1,6 @@
 import { serviceClient } from "../lib/server.mjs";
 import { verifyPhotoPath } from "../lib/ebay-photos.mjs";
-import { wrapHandler } from "../lib/floor-log.mjs";
+import { wrapHandler, asNetlifyFunction } from "../lib/floor-log.mjs";
 
 async function handle(event) {
   const path = event.queryStringParameters?.p || "";
@@ -27,4 +27,6 @@ async function handle(event) {
   };
 }
 
-export const handler = wrapHandler("ebay-photo", handle);
+export const invoke = wrapHandler("ebay-photo", handle);
+
+export default asNetlifyFunction(invoke);

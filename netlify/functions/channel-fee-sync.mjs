@@ -3,7 +3,7 @@ import { ebayFetch, loadEbayConnection } from "../lib/ebay.mjs";
 import { getStoreSquareAccess, squareClient } from "../lib/square.mjs";
 import { webSquareClient, webSquareEnv } from "../lib/web-square.mjs";
 import { Environment } from "square/legacy";
-import { wrapHandler } from "../lib/floor-log.mjs";
+import { wrapHandler, asNetlifyFunction } from "../lib/floor-log.mjs";
 import { isNetlifyScheduleEvent } from "../lib/schedule.mjs";
 
 // Reconciles REAL fees + eBay-bought shipping labels onto recorded sales.
@@ -201,4 +201,6 @@ async function handle(event) {
   return json(200, out);
 }
 
-export const handler = wrapHandler("channel-fee-sync", handle);
+export const invoke = wrapHandler("channel-fee-sync", handle);
+
+export default asNetlifyFunction(invoke);

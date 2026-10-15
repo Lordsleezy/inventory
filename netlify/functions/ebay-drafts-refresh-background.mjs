@@ -3,6 +3,7 @@
  * database is busy so the register, website, phone app and admin portal always win.
  * It never publishes, ends or reprices a live eBay listing; it only refreshes Floor's own draft rows.
  */
+import { asNetlifyFunction } from "../lib/floor-log.mjs";
 import { requireEnv, serviceClient } from "../lib/server.mjs";
 import { reconcileListedOffers } from "../lib/ebay.mjs";
 import { syncDrafts } from "../lib/ebay-drafts.mjs";
@@ -44,7 +45,7 @@ export async function refreshOnce(sb = serviceClient()) {
   return out;
 }
 
-export const handler = async (event) => {
+export const invoke = async (event) => {
   if (ebayDisabled()) return { statusCode: 202, body: "disabled" };
   const header = event.headers?.authorization || event.headers?.Authorization || "";
   if (header !== `Bearer ${requireEnv("SUPABASE_SERVICE_ROLE")}`) return { statusCode: 401, body: "unauthorized" };
@@ -53,3 +54,5 @@ export const handler = async (event) => {
   console.info("ebay_drafts_refresh", JSON.stringify(result).slice(0, 2000));
   return { statusCode: 202 };
 };
+
+export default asNetlifyFunction(invoke);
