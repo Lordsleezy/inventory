@@ -20,7 +20,7 @@ import { AssociateSettings } from './AssociateSettings';
 import { type MainPage, type NavState, defaultNavState, parseNavFromLocation, writeNavToLocation } from './navigation';
 import { formatLabelWithPending, parseShipCostSource } from './shipCostSource';
 
-const ASSOCIATE_PAGES: MainPage[] = ['register', 'receipts', 'inventory', 'cameras', 'settings'];
+const ASSOCIATE_PAGES: MainPage[] = ['register', 'inventory', 'cameras', 'settings'];
 
 const sb = floorCloud();
 const zone = 'America/Los_Angeles';
@@ -505,7 +505,7 @@ export function App() {
   if (!store) return <main className="auth"><div className="login"><h1>Access unavailable</h1><p>This account is not attached to the store as Floor staff or an admin. Ask Paul or Steve to add it.</p><button onClick={() => void sb.auth.signOut({ scope: 'local' })}>Sign out</button>{error && <p className="error">{error}</p>}</div></main>;
   const registerOnly = !fullAccess;
   const mainNav: [MainPage, string][] = registerOnly
-    ? [['register', 'Register'], ['receipts', 'Receipts'], ['inventory', 'Inventory'], ['cameras', 'Cameras']]
+    ? [['register', 'Register'], ['inventory', 'Inventory'], ['cameras', 'Cameras']]
     : [['register', 'Register'], ['sales', 'Live Sales'], ['orders', 'Orders'], ['receipts', 'Receipts'], ['online', 'Online'], ['marketplaces', 'Marketplaces'], ['amazon', 'Amazon'], ['cameras', 'Cameras'], ['remote', 'Remote'], ['logs', 'Logs']];
   const pageLabel = ({ register: 'Register', sales: 'Live Sales', orders: 'Orders', receipts: 'Receipts', inventory: 'Inventory', online: 'Online', marketplaces: 'Marketplaces', amazon: 'Amazon', reports: 'Reports', tax: 'Tax', cameras: 'Cameras', remote: 'Remote', logs: 'Logs', settings: 'Settings' } as const)[page];
   const reportSubs: [typeof nav.reportTab, string][] = [['profit', 'Sales & profits'], ['shipping', 'Shipping & fees'], ['expenses', 'Expenses'], ['payouts', 'Payouts']];
@@ -558,7 +558,7 @@ export function App() {
     <nav>
       {registerOnly
         ? <>
-      {([['register', 'Register'], ['receipts', 'Receipts']] as const).map(([id, label]) => <button type="button" className={page === id ? 'active' : ''} key={id} title={label} onClick={() => goNav({ page: id })}>{label}</button>)}
+      <button type="button" className={page === 'register' ? 'active' : ''} key="register" title="Register" onClick={() => goNav({ page: 'register' })}>Register</button>
       <div className={`nav-group${navGroup === 'inventory' ? ' open' : ''}${page === 'inventory' ? ' on' : ''}`}>
         <button type="button" title="Inventory" className={`nav-parent${page === 'inventory' ? ' active' : ''}`} onClick={() => { setNavGroup(g => g === 'inventory' ? null : 'inventory'); go({ page: 'inventory', inventoryTab: 'browse' }); setEditing(null); }}>Inventory</button>
         <div className="nav-sub">
@@ -690,7 +690,7 @@ export function App() {
     </section></>;
   })()}
   {fullAccess && page === 'orders' && <OrdersPage client={sb} accessToken={session.access_token} money={money} stamp={stamp} rules={activeRules} cfg={onlineCfg} commissionOverrides={commissionOverrides} personName={personName} busy={busy} onCommissionChanged={setTicketOverride} />}
-  {(fullAccess || registerOnly) && page === 'receipts' && <ReceiptsPage client={sb} money={money} stamp={stamp} />}
+  {fullAccess && page === 'receipts' && <ReceiptsPage client={sb} money={money} stamp={stamp} />}
   {fullAccess && page === 'online' && <OnlinePage client={sb} money={money} tab={nav.onlineTab} onTab={t => go({ onlineTab: t, page: 'online' })} channel={nav.onlineChannel} onChannel={c => go({ onlineChannel: c, onlineTab: 'listed', page: 'online' })} onInventory={() => goNav({ page: 'inventory', inventoryTab: 'browse' })} />}
   {fullAccess && page === 'marketplaces' && <MarketplacesPage client={sb} accessToken={session.access_token} money={money} stamp={stamp} />}
   {fullAccess && page === 'amazon' && <AmazonPage client={sb} accessToken={session.access_token} money={money} />}
