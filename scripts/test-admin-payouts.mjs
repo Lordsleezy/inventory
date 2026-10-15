@@ -147,3 +147,71 @@ test("channel matching is case-insensitive and eBay plugs in by adding the chann
   const depop = { subtotal: 12999, cost: 4000, channel: "depop", feeCents: 474, shipCostCents: 800 };
   assert.equal(payout(depop, rules[0], { ...cfg, channels: ["depop"] }), Math.round((12999 - 4000) * 0.3));
 });
+
+test("per-sale override replaces defaults for Paul and Jacob", () => {
+  const rPaul = { employee_id: PAYOUT_PAUL_ID, method: "percent_profit", rate: 20 };
+  const rJacob = { employee_id: PAYOUT_JACOB_ID, method: "percent_profit", rate: 10 };
+  const t = {
+    subtotal: 10000, cost: 4000, channel: "floor",
+    commissionOverride: { paulPct: 10, jacobPct: 20 },
+  };
+  // Commission base $60 → Paul $6, Jacob $12 (flipped from default 20/10)
+  assert.equal(payout(t, rPaul, cfg), 600);
+  assert.equal(payout(t, rJacob, cfg), 1200);
+  assert.equal(remainingProfit(t, [rPaul, rJacob], cfg), 6000 - 600 - 1200);
+});
+
+test("custom override on online sale can pay Jacob (defaults only pay Paul)", () => {
+  const rPaul = { employee_id: PAYOUT_PAUL_ID, method: "percent_profit", rate: 20 };
+  const rJacob = { employee_id: PAYOUT_JACOB_ID, method: "percent_profit", rate: 10 };
+  const onlineCfg = { channels: ["website"], pct: 30, employeeId: PAYOUT_PAUL_ID };
+  const base = { subtotal: 10000, cost: 4000, channel: "website" };
+  assert.equal(payout(base, rPaul, onlineCfg), 1800);
+  assert.equal(payout(base, rJacob, onlineCfg), 0);
+  const flipped = { ...base, commissionOverride: { paulPct: 0, jacobPct: 30 } };
+  assert.equal(payout(flipped, rPaul, onlineCfg), 0);
+  assert.equal(payout(flipped, rJacob, onlineCfg), 1800);
+});
+
+test("ticket override wins over per-SKU in-store rates", () => {
+  const rPaul = { employee_id: PAYOUT_PAUL_ID, method: "percent_profit", rate: 20 };
+  const rJacob = { employee_id: PAYOUT_JACOB_ID, method: "percent_profit", rate: 10 };
+  const line = { sku: "11314", price_cents: 5252, cost_cents: 1000 }; // SKU would be 25/5
+  const t = {
+    subtotal: 5252, cost: 1000, channel: "floor", lines: [line],
+    commissionOverride: { paulPct: 15, jacobPct: 15 },
+  };
+  const base = 4252;
+  assert.equal(payout(t, rPaul, cfg), Math.round(base * 0.15));
+  assert.equal(payout(t, rJacob, cfg), Math.round(base * 0.15));
+});
+
+test("override on already-paid sale only changes commission cents (payments untouched)", () => {
+  const rPaul = { employee_id: PAYOUT_PAUL_ID, method: "percent_profit", rate: 20 };
+  const rJacob = { employee_id: PAYOUT_JACOB_ID, method: "percent_profit", rate: 10 };
+  const t = { subtotal: 10000, cost: 4000, channel: "floor" };
+  const beforePaul = payout(t, rPaul, cfg); // 1200
+  const beforeJacob = payout(t, rJacob, cfg); // 600
+  const paidPaul = 1200; // fully paid Paul's commission for this sale conceptually
+  const paidJacob = 600;
+  const after = { ...t, commissionOverride: { paulPct: 10, jacobPct: 20 } };
+  const afterPaul = payout(after, rPaul, cfg); // 600
+  const afterJacob = payout(after, rJacob, cfg); // 1200
+  // Running balances move by delta; payment records stay
+  assert.equal(beforePaul - paidPaul, 0);
+  assert.equal(beforeJacob - paidJacob, 0);
+  assert.equal(afterPaul - paidPaul, -600); // Paul owes $6 back / balance down
+  assert.equal(afterJacob - paidJacob, 600); // Jacob owed $6 more
+});
+
+test("sum over 100% is allowed in math (UI warns)", () => {
+  const rPaul = { employee_id: PAYOUT_PAUL_ID, method: "percent_profit", rate: 20 };
+  const rJacob = { employee_id: PAYOUT_JACOB_ID, method: "percent_profit", rate: 10 };
+  const t = {
+    subtotal: 10000, cost: 4000, channel: "floor",
+    commissionOverride: { paulPct: 60, jacobPct: 50 },
+  };
+  assert.equal(payout(t, rPaul, cfg), 3600);
+  assert.equal(payout(t, rJacob, cfg), 3000);
+  assert.equal(remainingProfit(t, [rPaul, rJacob], cfg), 6000 - 3600 - 3000);
+});

@@ -8,7 +8,8 @@ import { RegisterPage } from './RegisterPage';
 import { TaxPage } from './TaxPage';
 import { LogsPage } from './LogsPage';
 import { ClientErrorReporter } from './clientLog';
-import { inStoreOverrideRate, isOnline, NO_ONLINE, payout, profit, remainingProfit, reportProfitCents, type OnlineCfg, type Rule } from './payouts';
+import { inStoreOverrideRate, isOnline, NO_ONLINE, PAYOUT_JACOB_ID, PAYOUT_PAUL_ID, payout, profit, remainingProfit, reportProfitCents, type CommissionOverride, type OnlineCfg, type Rule } from './payouts';
+import { CommissionOverrideControls, CommissionOverrideMark } from './CommissionOverride';
 import { ExpensesPage, type Expense as StoreExpense } from './ExpensesPage';
 import { MarketplacesPage } from './MarketplacesPage';
 import { AmazonPage } from './AmazonPage';
@@ -57,7 +58,8 @@ type VoidedLine = {
   processing_fee_cents: number | null; profit_cents: number | null;
   shipping_cents: number | null; order_no: string | null; buyer_name: string | null;
 };
-type Ticket = { key: string; at: string; lines: Line[]; subtotal: number; tax: number; fee: number; total: number; cash: number; card: number; method: string; actorId: string | null; actor: string; cost: number | null; channel: string; ebayFeeCents: number; bakedShipCents: number; feeCents: number; shipCostCents: number; pendingLabelCreditCents: number; processingFeeCents: number; shippingCents: number; costEstimated: boolean; taxOwedCents: number; taxCollectedCents: number; varianceCents: number | null; profitCents: number | null };
+type Ticket = { key: string; at: string; lines: Line[]; subtotal: number; tax: number; fee: number; total: number; cash: number; card: number; method: string; actorId: string | null; actor: string; cost: number | null; channel: string; ebayFeeCents: number; bakedShipCents: number; feeCents: number; shipCostCents: number; pendingLabelCreditCents: number; processingFeeCents: number; shippingCents: number; costEstimated: boolean; taxOwedCents: number; taxCollectedCents: number; varianceCents: number | null; profitCents: number | null; commissionOverride: CommissionOverride | null };
+type OverrideMap = Map<string, CommissionOverride>;
 type Person = { user_id: string; display_name: string; kind: string };
 type Payment = { id: string; employee_id: string; amount_cents: number; paid_at: string; paid_by: string; legacy_ticket_key: string | null; note: string | null };
 type Expense = { description: string; category: string; amount_cents: number; needs_reimbursement?: boolean; employee_id?: string };
@@ -78,11 +80,11 @@ function SaleItem({ line }: { line: Line }) {
   </div>;
 }
 
-function tickets(lines: Line[]): Ticket[] {
+function tickets(lines: Line[], overrides: OverrideMap = new Map()): Ticket[] {
   const map = new Map<string, Ticket>();
   for (const l of lines) {
     let t = map.get(l.ticket_key);
-    if (!t) { t = { key: l.ticket_key, at: l.sold_at, lines: [], subtotal: 0, tax: 0, fee: 0, total: 0, cash: 0, card: 0, method: l.payment_method || 'other', actorId: l.actor_id, actor: l.actor_name, cost: 0, channel: l.channel, ebayFeeCents: 0, bakedShipCents: 0, feeCents: 0, shipCostCents: 0, pendingLabelCreditCents: 0, processingFeeCents: 0, shippingCents: 0, costEstimated: false, taxOwedCents: 0, taxCollectedCents: 0, varianceCents: null, profitCents: 0 }; map.set(l.ticket_key, t); }
+    if (!t) { t = { key: l.ticket_key, at: l.sold_at, lines: [], subtotal: 0, tax: 0, fee: 0, total: 0, cash: 0, card: 0, method: l.payment_method || 'other', actorId: l.actor_id, actor: l.actor_name, cost: 0, channel: l.channel, ebayFeeCents: 0, bakedShipCents: 0, feeCents: 0, shipCostCents: 0, pendingLabelCreditCents: 0, processingFeeCents: 0, shippingCents: 0, costEstimated: false, taxOwedCents: 0, taxCollectedCents: 0, varianceCents: null, profitCents: 0, commissionOverride: overrides.get(l.ticket_key) || null }; map.set(l.ticket_key, t); }
     t.lines.push(l); t.subtotal += l.price_cents; t.tax += l.tax_cents; t.fee += l.card_fee_cents;
     t.ebayFeeCents += l.ebay_fee_cents || 0; t.bakedShipCents += l.baked_ship_cents || 0;
     t.feeCents += l.channel_fee_cents ?? l.ebay_fee_cents ?? 0;
@@ -107,7 +109,7 @@ function tickets(lines: Line[]): Ticket[] {
   return [...map.values()].sort((a, b) => b.at.localeCompare(a.at));
 }
 const check = <T,>(r: { data: T | null; error: { message: string } | null }): T => { if (r.error) throw new Error(r.error.message); return r.data as T; };
-async function sales(start: string, end: string) { return tickets(check<Line[]>(await sb.rpc('portal_sales', range(start, end)))); }
+async function sales(start: string, end: string, overrides: OverrideMap = new Map()) { return tickets(check<Line[]>(await sb.rpc('portal_sales', range(start, end))), overrides); }
 async function voidedSales(start: string, end: string) {
   return check<VoidedLine[]>(await sb.rpc('portal_voided_sales', range(start, end)));
 }
@@ -117,6 +119,21 @@ async function reportLines(r: { period_start: string; period_end: string }) {
     const batch = check<Line[]>(await sb.rpc('portal_sales', range(r.period_start, r.period_end)).range(offset, offset + 999));
     lines.push(...batch);
     if (batch.length < 1000) return lines;
+  }
+}
+async function storedCommissionOverrides(storeId: string): Promise<OverrideMap> {
+  const map: OverrideMap = new Map();
+  for (let offset = 0;; offset += 1000) {
+    const batch = check<{ ticket_key: string; paul_pct: number; jacob_pct: number }[]>(
+      await sb.from('portal_commission_overrides')
+        .select('ticket_key,paul_pct,jacob_pct')
+        .eq('store_id', storeId)
+        .range(offset, offset + 999),
+    );
+    for (const row of batch) {
+      map.set(row.ticket_key, { paulPct: Number(row.paul_pct), jacobPct: Number(row.jacob_pct) });
+    }
+    if (batch.length < 1000) return map;
   }
 }
 async function storedReports(storeId: string) {
@@ -138,14 +155,14 @@ async function storedPayments(storeId: string) {
     if (batch.length < 1000) return payments;
   }
 }
-async function payoutSales() {
+async function payoutSales(overrides: OverrideMap = new Map()) {
   const lines: Line[] = [];
   for (let offset = 0;; offset += 1000) {
     const batch = check<Line[]>(await sb.rpc('portal_payout_sales').range(offset, offset + 999));
     lines.push(...batch);
     if (batch.length < 1000) break;
   }
-  return tickets(lines);
+  return tickets(lines, overrides);
 }
 /** Same window as Reports → Profit → All time (ChannelReportPage). */
 const PROFIT_ALL_TIME_START = '2020-01-01';
@@ -191,6 +208,7 @@ export function App() {
   const [reports, setReports] = useState<Report[]>([]);
   const [expenses, setExpenses] = useState<StoreExpense[]>([]);
   const [onlineCfg, setOnlineCfg] = useState<OnlineCfg>(NO_ONLINE);
+  const [commissionOverrides, setCommissionOverrides] = useState<OverrideMap>(new Map());
   const [editing, setEditing] = useState<Report | 'daily' | 'weekly' | null>(null);
   const [reportReadOnly, setReportReadOnly] = useState(false);
   const [email, setEmail] = useState(''); const [password, setPassword] = useState('');
@@ -301,7 +319,7 @@ export function App() {
     setFullAccess(false);
     setStaffSession(null);
     setAccessReady(false);
-    setLive([]); setAllSales([]); setPeople([]); setRules([]); setPayments([]); setReports([]); setExpenses([]); setOnlineCfg(NO_ONLINE);
+    setLive([]); setAllSales([]); setPeople([]); setRules([]); setPayments([]); setReports([]); setExpenses([]); setOnlineCfg(NO_ONLINE); setCommissionOverrides(new Map());
     if (!userId) return;
     let alive = true;
     void (async () => {
@@ -357,14 +375,20 @@ export function App() {
     } catch (e) { setError(String(e)); }
   }, [store]);
   const loadPayments = useCallback(async () => { if (!store) return; try { setPayments(await storedPayments(store)); } catch (e) { setError(String(e)); } }, [store]);
+  const loadCommissionOverrides = useCallback(async () => {
+    if (!store) return;
+    try { setCommissionOverrides(await storedCommissionOverrides(store)); } catch (e) { setError(String(e)); }
+  }, [store]);
   const loadSales = useCallback(async () => {
     if (!store) return;
     try {
-      const rows = await sales(selectedDay, datePlus(selectedDay, 1));
+      const overrides = await storedCommissionOverrides(store);
+      setCommissionOverrides(overrides);
+      const rows = await sales(selectedDay, datePlus(selectedDay, 1), overrides);
       // Overnight: marketplace sales often sit on the previous LA calendar day.
       if (rows.length === 0 && selectedDay === today()) {
         const prev = datePlus(selectedDay, -1);
-        const prevRows = await sales(prev, selectedDay);
+        const prevRows = await sales(prev, selectedDay, overrides);
         if (prevRows.length) {
           setSelectedDay(prev);
           setLive(prevRows);
@@ -394,16 +418,29 @@ export function App() {
   const loadPayoutSales = useCallback(async () => {
     if (!store) return;
     try {
-      const [sales, fees] = await Promise.all([payoutSales(), ebayInsertionFees(store)]);
-      setAllSales(sales);
+      const overrides = await storedCommissionOverrides(store);
+      setCommissionOverrides(overrides);
+      const [salesRows, fees] = await Promise.all([payoutSales(overrides), ebayInsertionFees(store)]);
+      setAllSales(salesRows);
       setEbayFees(fees);
     } catch (e) { setError(String(e)); }
   }, [store]);
+  const setTicketOverride = useCallback((ticketKey: string, next: CommissionOverride | null) => {
+    setCommissionOverrides(prev => {
+      const map = new Map(prev);
+      if (next) map.set(ticketKey, next); else map.delete(ticketKey);
+      return map;
+    });
+    setLive(list => list.map(t => t.key === ticketKey ? { ...t, commissionOverride: next } : t));
+    setAllSales(list => list.map(t => t.key === ticketKey ? { ...t, commissionOverride: next } : t));
+  }, []);
   useEffect(() => { if (page === 'reports' || page === 'settings') void loadCommon(); }, [page, loadCommon]);
   useEffect(() => { if (page === 'reports' && nav.reportTab === 'payouts') void loadPayments(); }, [page, nav.reportTab, loadPayments]);
   useEffect(() => { if (page === 'sales' || (page === 'reports' && nav.reportTab === 'profit')) void loadSales(); }, [page, nav.reportTab, loadSales]);
   useEffect(() => { if (page === 'sales' && salesScope === 'voided') void loadVoided(); }, [page, salesScope, loadVoided]);
   useEffect(() => { if (page === 'reports' && nav.reportTab === 'payouts') void loadPayoutSales(); }, [page, nav.reportTab, loadPayoutSales]);
+  useEffect(() => { if (page === 'orders' && fullAccess) void loadCommissionOverrides(); }, [page, fullAccess, loadCommissionOverrides]);
+  useEffect(() => { if (page === 'orders' && fullAccess) void loadCommon(); }, [page, fullAccess, loadCommon]);
   useEffect(() => { if (!store || !['sales', 'reports'].includes(page)) return; const c = sb.channel(`portal-sales-${store}`).on('postgres_changes', { event: '*', schema: 'public', table: 'sales', filter: `store_id=eq.${store}` }, () => { if (page === 'sales' || (page === 'reports' && nav.reportTab === 'profit')) void loadSales(); if (page === 'sales' && salesScope === 'voided') void loadVoided(); if (page === 'reports' && nav.reportTab === 'payouts') void loadPayoutSales(); }).subscribe(); return () => { void sb.removeChannel(c); }; }, [store, page, nav.reportTab, salesScope, loadSales, loadVoided, loadPayoutSales]);
   const ruleMap = useMemo(() => new Map(rules.map(x => [x.employee_id, x])), [rules]);
   const staff = people.filter(p => p.kind === 'employee');
@@ -417,7 +454,13 @@ export function App() {
   const personName = (id: string) => people.find(x => x.user_id === id)?.display_name || 'Unknown';
   const sum = (ts: Ticket[]): Summary => { const cuts = ts.flatMap(t => activeRules.map(r => payout(t, r, onlineCfg))); return { sales_cents: ts.reduce((n, t) => n + t.subtotal, 0), tax_cents: ts.reduce((n, t) => n + t.tax, 0), card_fee_cents: ts.reduce((n, t) => n + t.fee, 0), collected_cents: ts.reduce((n, t) => n + t.total, 0), cash_cents: ts.reduce((n, t) => n + t.cash, 0), card_cents: ts.reduce((n, t) => n + t.card, 0), other_cents: ts.reduce((n, t) => n + t.total - t.cash - t.card, 0), sale_count: ts.length, payout_cents: cuts.reduce<number>((n, x) => n + (x || 0), 0), payout_unset: cuts.filter(x => x === null).length }; };
   async function run(f: () => Promise<void>) { setBusy(true); setError(''); try { await f(); } catch (e) { setError(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); } }
-  async function openReport(type: 'daily' | 'weekly') { const start = type === 'daily' ? selectedDay : weekStart(selectedDay); const summary = sum(await sales(start, datePlus(start, type === 'daily' ? 1 : 7))); setReportDraft({ start, end: datePlus(start, type === 'daily' ? 1 : 7), summary, expenses: [], notes: '' }); setReportReadOnly(false); setEditing(type); }
+  async function openReport(type: 'daily' | 'weekly') {
+    const start = type === 'daily' ? selectedDay : weekStart(selectedDay);
+    const overrides = store ? await storedCommissionOverrides(store) : new Map();
+    const summary = sum(await sales(start, datePlus(start, type === 'daily' ? 1 : 7), overrides));
+    setReportDraft({ start, end: datePlus(start, type === 'daily' ? 1 : 7), summary, expenses: [], notes: '' });
+    setReportReadOnly(false); setEditing(type);
+  }
   const [draft, setReportDraft] = useState<{ start: string; end: string; summary: Summary; expenses: Expense[]; notes: string } | null>(null);
   function viewReport(r: Report, editable = false) { setEditing(r); setReportReadOnly(!editable); setReportDraft({ start: r.period_start, end: r.period_end, summary: r.summary, expenses: r.expenses, notes: r.notes }); }
   async function saveReport() { if (!store || !session || !editing || !draft) return; if (draft.expenses.some(x => !x.description.trim() || !Number.isFinite(x.amount_cents) || x.amount_cents < 0 || (x.needs_reimbursement && !people.some(p => p.kind === 'employee' && p.user_id === x.employee_id)))) { setError('Every expense needs a description, amount, and valid reimbursement recipient.'); return; } await run(async () => { const payload = { store_id: store, period_type: typeof editing === 'string' ? editing : editing.period_type, period_start: draft.start, period_end: draft.end, summary: draft.summary, expenses: draft.expenses, notes: draft.notes, edited_by: session.user.id, created_by: session.user.id }; if (typeof editing === 'string') check(await sb.from('portal_reports').insert(payload)); else check(await sb.from('portal_reports').update({ expenses: payload.expenses, notes: payload.notes, edited_by: session.user.id }).eq('id', editing.id)); setEditing(null); setReportDraft(null); await loadCommon(); }); }
@@ -628,17 +671,17 @@ export function App() {
       <Stat name="Instore sales" value={String(instoreN)} />
     </div>
     <section className="panel"><h2>{selectedDay === today() ? 'Today’s transactions' : `Transactions · ${selectedDay}`}{salesScope !== 'all' && <small> · {salesScope === 'instore' ? 'in store' : 'online'}</small>}</h2>
-      {liveShown.length === 0 ? <Empty>No {salesScope === 'all' ? '' : salesScope === 'instore' ? 'in-store ' : 'online '}sales for {selectedDay === today() ? 'today' : selectedDay}. Try the previous date if a marketplace sale just came in.</Empty> : <div className="ticket-list">{liveShown.map(t => <LiveTicket key={t.key} t={t} money={money} stamp={stamp} />)}</div>}
+      {liveShown.length === 0 ? <Empty>No {salesScope === 'all' ? '' : salesScope === 'instore' ? 'in-store ' : 'online '}sales for {selectedDay === today() ? 'today' : selectedDay}. Try the previous date if a marketplace sale just came in.</Empty> : <div className="ticket-list">{liveShown.map(t => <LiveTicket key={t.key} t={t} money={money} stamp={stamp} rules={activeRules} cfg={onlineCfg} personName={personName} busy={busy} onCommissionChanged={setTicketOverride} />)}</div>}
     </section></>;
   })()}
-  {fullAccess && page === 'orders' && <OrdersPage client={sb} accessToken={session.access_token} money={money} stamp={stamp} />}
+  {fullAccess && page === 'orders' && <OrdersPage client={sb} accessToken={session.access_token} money={money} stamp={stamp} rules={activeRules} cfg={onlineCfg} commissionOverrides={commissionOverrides} personName={personName} busy={busy} onCommissionChanged={setTicketOverride} />}
   {(fullAccess || registerOnly) && page === 'receipts' && <ReceiptsPage client={sb} money={money} stamp={stamp} />}
   {fullAccess && page === 'online' && <OnlinePage client={sb} money={money} tab={nav.onlineTab} onTab={t => go({ onlineTab: t, page: 'online' })} channel={nav.onlineChannel} onChannel={c => go({ onlineChannel: c, onlineTab: 'listed', page: 'online' })} onInventory={() => goNav({ page: 'inventory', inventoryTab: 'browse' })} />}
   {fullAccess && page === 'marketplaces' && <MarketplacesPage client={sb} accessToken={session.access_token} money={money} stamp={stamp} />}
   {fullAccess && page === 'amazon' && <AmazonPage client={sb} accessToken={session.access_token} money={money} />}
   {fullAccess && page === 'logs' && <LogsPage accessToken={session.access_token} stamp={stamp} />}
   {(fullAccess || registerOnly) && page === 'inventory' && <InventoryPage client={sb} storeId={store} accessToken={session.access_token} money={money} stamp={stamp} tab={nav.inventoryTab} onTab={t => go({ inventoryTab: t })} attentionSection={nav.attentionSection} onAttentionSection={s => go({ attentionSection: s, inventoryTab: 'attention' })} onCostChanged={() => { void loadPayoutSales(); void loadSales(); }} />}
-  {fullAccess && page === 'reports' && <ReportsPage client={sb} money={money} tab={nav.reportTab} onTab={t => go({ reportTab: t })} closeouts={closeouts} expenses={<ExpensesPage client={sb} money={money} expenses={expenses} staff={staff} ownerId={onlineCfg.employeeId || defaultReimbursementId} onChanged={loadCommon} embedded />} payouts={<PayoutsPage allSales={allSales} ebayFees={ebayFees} staff={staff} rules={activeRules} payments={payments} expenses={expenses} cfg={onlineCfg} personName={personName} busy={busy} recordPayment={recordPayment} />} />}
+  {fullAccess && page === 'reports' && <ReportsPage client={sb} money={money} tab={nav.reportTab} onTab={t => go({ reportTab: t })} closeouts={closeouts} expenses={<ExpensesPage client={sb} money={money} expenses={expenses} staff={staff} ownerId={onlineCfg.employeeId || defaultReimbursementId} onChanged={loadCommon} embedded />} payouts={<PayoutsPage allSales={allSales} ebayFees={ebayFees} staff={staff} rules={activeRules} payments={payments} expenses={expenses} cfg={onlineCfg} personName={personName} busy={busy} recordPayment={recordPayment} onCommissionChanged={setTicketOverride} />} />}
   {fullAccess && page === 'tax' && <TaxPage client={sb} money={money} stamp={stamp} />}
   {fullAccess && page === 'settings' && <SettingsPage client={sb} accessToken={session.access_token} stamp={stamp} money={money} busy={busy} run={run} onLedgerChanged={async () => { await loadSales(); await loadPayoutSales(); }} ruleEditor={<>{staff.map(p => <RuleEditor key={p.user_id} person={p} rule={ruleMap.get(p.user_id)} save={setRule} busy={busy} />)}</>} onlinePayoutSettings={<OnlinePayoutSettings cfg={onlineCfg} staff={staff} busy={busy} save={async (channels, pct, who) => { await run(async () => { check(await sb.rpc('portal_set_payout_config', { p_channels: channels, p_pct: pct, p_employee: who })); await loadCommon(); await loadPayoutSales(); }); }} />} />}
   {registerOnly && page === 'settings' && <AssociateSettings client={sb} displayName={staffSession?.displayName || 'Associate'} />}
@@ -667,19 +710,25 @@ function VoidedTicket({ r, money, stamp }: { r: VoidedLine; money: (n: number) =
     </div>
   </div>;
 }
-function LiveTicket({ t, money, stamp }: { t: Ticket; money: (n: number) => string; stamp: (s: string) => string }) {
+function LiveTicket({ t, money, stamp, rules, cfg, personName, busy, onCommissionChanged }: {
+  t: Ticket; money: (n: number) => string; stamp: (s: string) => string;
+  rules: Rule[]; cfg: OnlineCfg; personName: (id: string) => string; busy: boolean;
+  onCommissionChanged: (ticketKey: string, next: CommissionOverride | null) => void;
+}) {
   const [open, setOpen] = useState(false);
   const online = (t.channel || '').toLowerCase() !== 'floor';
   const feeEst = t.lines.some(l => l.fee_source === 'estimated' && (l.channel_fee_cents ?? 0) > 0);
   const costEst = t.costEstimated;
   const profit = t.profitCents;
-  return <div className={`ticket${open ? ' ticket-open' : ''}`}>
+  return <div className={`ticket${open ? ' ticket-open' : ''}${t.commissionOverride ? ' ticket-commission-override' : ''}`}>
     <button type="button" className="ticket-toggle" aria-expanded={open} onClick={() => setOpen(v => !v)}>
       <div className="ticket-top">
-        <strong>{money(t.subtotal)}{online && profit != null ? <small className="ticket-profit"> · profit {money(profit)}</small> : null}</strong>
-        <span>{stamp(t.at)}{online && <b className="badge"> {(t.channel || 'online').toUpperCase()}</b>}<span className="ticket-chevron" aria-hidden>{open ? '▴' : '▾'}</span></span>
+        <strong>{money(t.subtotal)}{online && profit != null ? <small className="ticket-profit"> · profit {money(profit)}</small> : null}{t.commissionOverride ? <small className="ticket-profit"> · split overridden</small> : null}</strong>
+        <span>{stamp(t.at)}{online && <b className="badge"> {(t.channel || 'online').toUpperCase()}</b>}{t.commissionOverride && <b className="badge badge-override"> SPLIT</b>}<span className="ticket-chevron" aria-hidden>{open ? '▴' : '▾'}</span></span>
       </div>
-      <div className="ticket-items">{t.lines.map(l => <SaleItem key={l.id} line={l} />)}</div>
+      <div className="ticket-items">{t.lines.map(l => <SaleItem key={l.id} line={l} />)}
+        <CommissionOverrideMark overridden={!!t.commissionOverride} />
+      </div>
       <div className="ticket-bottom">
         <span>{online
           ? `${t.channel}${t.feeCents > 0 ? ` · fees ${money(t.feeCents)}${feeEst ? ' est.' : ''}` : ''}${t.shipCostCents > 0 ? ` · label ${formatLabelWithPending(money, t.shipCostCents, t.pendingLabelCreditCents)}` : ''}${t.shippingCents > 0 ? ` · buyer ship ${money(t.shippingCents)}` : ''}`
@@ -705,6 +754,18 @@ function LiveTicket({ t, money, stamp }: { t: Ticket; money: (n: number) => stri
         <div><span>Profit</span><strong>{profit == null ? 'Pending' : money(profit)}</strong></div>
       </div>
       {online && <p className="hint" style={{ margin: '8px 0 0' }}>Profit = item + buyer shipping − fees − label − processing − cost. Label totals keep voided eBay labels until the credit posts; pending refund shows in ().</p>}
+      <CommissionOverrideControls
+        client={sb}
+        ticketKey={t.key}
+        ticket={t}
+        rules={rules}
+        cfg={cfg}
+        override={t.commissionOverride}
+        personName={personName}
+        stamp={stamp}
+        busy={busy}
+        onChanged={next => onCommissionChanged(t.key, next)}
+      />
     </div>}
   </div>;
 }
@@ -716,8 +777,11 @@ function ExpenseAmount({cents,onCommit,disabled}:{cents:number;onCommit:(cents:n
     onChange={e => { if (moneyEntry.test(e.target.value)) setText(e.target.value); }}
     onBlur={() => { const clean = cleanMoney(text); setText(clean); onCommit(Math.round(Number(clean)*100)); }} />;
 }
-type LedgerEntry = { at: string; kind: 'sale' | 'online' | 'reimbursement' | 'payment'; amount: number | null; detail: string; note?: string };
-function PayoutsPage({allSales,ebayFees,staff,rules,payments,expenses,cfg,personName,busy,recordPayment}:{allSales:Ticket[];ebayFees:number;staff:Person[];rules:Rule[];payments:Payment[];expenses:StoreExpense[];cfg:OnlineCfg;personName:(id:string)=>string;busy:boolean;recordPayment:(id:string,amount:number,paidAt:string,note:string)=>Promise<string | null>}) {
+type LedgerEntry = {
+  at: string; kind: 'sale' | 'online' | 'reimbursement' | 'payment'; amount: number | null;
+  detail: string; note?: string; ticketKey?: string; ticket?: Ticket; overridden?: boolean;
+};
+function PayoutsPage({allSales,ebayFees,staff,rules,payments,expenses,cfg,personName,busy,recordPayment,onCommissionChanged}:{allSales:Ticket[];ebayFees:number;staff:Person[];rules:Rule[];payments:Payment[];expenses:StoreExpense[];cfg:OnlineCfg;personName:(id:string)=>string;busy:boolean;recordPayment:(id:string,amount:number,paidAt:string,note:string)=>Promise<string | null>;onCommissionChanged:(ticketKey:string,next:CommissionOverride|null)=>void}) {
   const hasReimburse = (id: string) => expenses.some(e => !e.voided_at && e.needs_reimbursement && e.employee_id === id);
   const active = staff.filter(p => rules.some(r => r.employee_id === p.user_id) || hasReimburse(p.user_id));
   const onlineSales = allSales.filter(t => isOnline(t,cfg));
@@ -726,21 +790,33 @@ function PayoutsPage({allSales,ebayFees,staff,rules,payments,expenses,cfg,person
     const rule = rules.find(r => r.employee_id === person.user_id);
     const saleEntries: LedgerEntry[] = !rule ? [] : allSales.flatMap(t => {
       const online = isOnline(t,cfg);
-      if (online && person.user_id !== cfg.employeeId) return [];
-      const ticket = { ...t, lines: t.lines.map(l => ({ sku: l.sku, price_cents: l.price_cents, cost_cents: l.cost_cents })) };
-      const rp = remainingProfit(ticket,rules,cfg);
+      const ticket = { ...t, lines: t.lines.map(l => ({ sku: l.sku, price_cents: l.price_cents, cost_cents: l.cost_cents })), commissionOverride: t.commissionOverride };
       const amount = payout(ticket,rule,cfg);
-      const overrideSkus = t.lines.filter(l => inStoreOverrideRate(l.sku, person.user_id) != null).map(l => l.sku);
-      const rateLabel = rule.method === 'flat_ticket'
-        ? money(Math.round(Number(rule.rate)*100)) + ' flat'
-        : overrideSkus.length > 0 && rule.method === 'percent_profit'
-          ? `SKU rates on sale − cost (${overrideSkus.join(', ')})`
-          : rule.rate + '% ' + (rule.method === 'percent_profit' ? 'of sale − cost' : 'of sale');
+      // Default online: only the online recipient. Override: anyone with a non-zero cut.
+      if (online && !t.commissionOverride && person.user_id !== cfg.employeeId) return [];
+      if (online && t.commissionOverride && person.user_id !== cfg.employeeId) {
+        const rate = person.user_id === PAYOUT_PAUL_ID ? t.commissionOverride.paulPct
+          : person.user_id === PAYOUT_JACOB_ID ? t.commissionOverride.jacobPct
+          : 0;
+        if (!rate) return [];
+      }
+      const rp = remainingProfit(ticket,rules,cfg);
+      const overrideSkus = !t.commissionOverride
+        ? t.lines.filter(l => inStoreOverrideRate(l.sku, person.user_id) != null).map(l => l.sku)
+        : [];
+      const rateLabel = t.commissionOverride
+        ? `override Paul ${t.commissionOverride.paulPct}% / Jacob ${t.commissionOverride.jacobPct}% of sale − cost`
+        : rule.method === 'flat_ticket'
+          ? money(Math.round(Number(rule.rate)*100)) + ' flat'
+          : overrideSkus.length > 0 && rule.method === 'percent_profit'
+            ? `SKU rates on sale − cost (${overrideSkus.join(', ')})`
+            : rule.rate + '% ' + (rule.method === 'percent_profit' ? 'of sale − cost' : 'of sale');
       return [{
         at: t.at, kind: online ? 'online' as const : 'sale' as const, amount,
         detail: t.lines.map(l => l.sku).join(', '),
+        ticketKey: t.key, ticket: t, overridden: !!t.commissionOverride,
         note: online
-          ? `${t.channel} · item ${money(t.subtotal)}${t.shippingCents ? ` + ship ${money(t.shippingCents)}` : ''} − ${t.cost === null ? 'cost missing' : money(t.cost) + ' cost'}${t.costEstimated ? ' (est.)' : ''} · ${cfg.pct}% of sale − cost (fees excluded)`
+          ? `${t.channel} · item ${money(t.subtotal)}${t.shippingCents ? ` + ship ${money(t.shippingCents)}` : ''} − ${t.cost === null ? 'cost missing' : money(t.cost) + ' cost'}${t.costEstimated ? ' (est.)' : ''} · ${t.commissionOverride ? rateLabel : `${cfg.pct}% of sale − cost (fees excluded)`}`
           : `${money(t.subtotal)} merchandise · ${rateLabel} · Owner share ${rp === null ? 'pending' : money(rp)}`
       }];
     });
@@ -794,10 +870,10 @@ function PayoutsPage({allSales,ebayFees,staff,rules,payments,expenses,cfg,person
     </div>
     {needsCost > 0 && <div className="alert" role="status">{needsCost} online sale{needsCost === 1 ? '' : 's'} can’t be paid out until the unit’s cost is filled in. Use Inventory → Needs attention → Missing cost; payouts calculate as soon as you save.</div>}
     {owedSplits.length === 0 && <section className="panel"><Empty>No employee payout rules set.</Empty></section>}
-    {owedSplits.map(card => <PayoutCard key={card.person.user_id} {...card} busy={busy} recordPayment={recordPayment} />)}
+    {owedSplits.map(card => <PayoutCard key={card.person.user_id} {...card} busy={busy} recordPayment={recordPayment} rules={rules} cfg={cfg} personName={personName} onCommissionChanged={onCommissionChanged} />)}
   </>;
 }
-function PayoutCard({person,balance,entries,commissionOwed,reimburseOwed,busy,recordPayment}:{person:Person;balance:number;commission?:number;reimburse?:number;paidTotal?:number;entries:LedgerEntry[];commissionOwed:number;reimburseOwed:number;busy:boolean;recordPayment:(id:string,amount:number,paidAt:string,note:string)=>Promise<string | null>}) {
+function PayoutCard({person,balance,entries,commissionOwed,reimburseOwed,busy,recordPayment,rules,cfg,personName,onCommissionChanged}:{person:Person;balance:number;commission?:number;reimburse?:number;paidTotal?:number;entries:LedgerEntry[];commissionOwed:number;reimburseOwed:number;busy:boolean;recordPayment:(id:string,amount:number,paidAt:string,note:string)=>Promise<string | null>;rules:Rule[];cfg:OnlineCfg;personName:(id:string)=>string;onCommissionChanged:(ticketKey:string,next:CommissionOverride|null)=>void}) {
   const [amount,setAmount] = useState('');
   const [paidOn,setPaidOn] = useState(today);
   const [note,setNote] = useState('');
@@ -814,7 +890,7 @@ function PayoutCard({person,balance,entries,commissionOwed,reimburseOwed,busy,re
     else { setAmount(''); setNote(''); setPaidOn(today()); }
   }
   const pending = entries.filter(x => (x.kind === 'sale' || x.kind === 'online') && x.amount === null).length;
-  return <section className="panel payout-card"><div className="payout-card-top"><div><h2>{person.display_name}</h2><strong>{money(balance)} owed</strong><small className="payout-owed-split">Commission {money(commissionOwed)} · Reimbursement {money(reimburseOwed)}</small>{pending > 0 && <div className="hint">{pending} sale{pending === 1 ? '' : 's'} need cost</div>}</div><form className="payment-form" onSubmit={e=>void submit(e)}><label>Amount<input type="text" inputMode="decimal" value={amount} onChange={e=>{ if (moneyEntry.test(e.target.value)) setAmount(e.target.value); }} onBlur={() => { if (amount) setAmount(cleanMoney(amount)); }} required /></label><label>Date<input type="date" value={paidOn} onChange={e=>setPaidOn(e.target.value)} required /></label><label className="payment-note">Note<input type="text" value={note} onChange={e=>setNote(e.target.value.slice(0,500))} placeholder="Optional" /></label><button disabled={busy || !amount}>Paid</button></form></div>{paymentError && <p className="error" role="alert">{paymentError}</p>}<details><summary>Balance breakdown ({entries.length})</summary><div className="ledger-list">{entries.map((e,i)=><div className="ledger-row" key={i}><div><strong>{e.kind === 'sale' ? 'In-store sale' : e.kind === 'online' ? 'Online sale' : e.kind === 'payment' ? 'Payment' : 'Reimbursement'} · {stamp(e.at)}</strong><span>{e.detail}</span>{e.note && <small>{e.note}</small>}</div><b>{e.amount === null ? 'Needs cost' : (e.amount < 0 ? '−' : '+') + money(Math.abs(e.amount))}</b></div>)}</div></details></section>;
+  return <section className="panel payout-card"><div className="payout-card-top"><div><h2>{person.display_name}</h2><strong>{money(balance)} owed</strong><small className="payout-owed-split">Commission {money(commissionOwed)} · Reimbursement {money(reimburseOwed)}</small>{pending > 0 && <div className="hint">{pending} sale{pending === 1 ? '' : 's'} need cost</div>}</div><form className="payment-form" onSubmit={e=>void submit(e)}><label>Amount<input type="text" inputMode="decimal" value={amount} onChange={e=>{ if (moneyEntry.test(e.target.value)) setAmount(e.target.value); }} onBlur={() => { if (amount) setAmount(cleanMoney(amount)); }} required /></label><label>Date<input type="date" value={paidOn} onChange={e=>setPaidOn(e.target.value)} required /></label><label className="payment-note">Note<input type="text" value={note} onChange={e=>setNote(e.target.value.slice(0,500))} placeholder="Optional" /></label><button disabled={busy || !amount}>Paid</button></form></div>{paymentError && <p className="error" role="alert">{paymentError}</p>}<details><summary>Balance breakdown ({entries.length})</summary><div className="ledger-list">{entries.map((e,i)=><div className={`ledger-row${e.overridden ? ' ledger-override' : ''}`} key={i}><div><strong>{e.kind === 'sale' ? 'In-store sale' : e.kind === 'online' ? 'Online sale' : e.kind === 'payment' ? 'Payment' : 'Reimbursement'} · {stamp(e.at)}{e.overridden ? ' · split overridden' : ''}</strong><span>{e.detail}</span>{e.note && <small>{e.note}</small>}{e.ticketKey && e.ticket && (e.kind === 'sale' || e.kind === 'online') && <CommissionOverrideControls client={sb} ticketKey={e.ticketKey} ticket={e.ticket} rules={rules} cfg={cfg} override={e.ticket.commissionOverride} personName={personName} stamp={stamp} busy={busy} onChanged={next => onCommissionChanged(e.ticketKey!, next)} />}</div><b>{e.amount === null ? 'Needs cost' : (e.amount < 0 ? '−' : '+') + money(Math.abs(e.amount))}</b></div>)}</div></details></section>;
 }
 function RuleEditor({person,rule,save,busy}:{person:Person;rule?:Rule;save:(id:string,m:Rule['method'],r:number)=>Promise<void>;busy:boolean}) { const [method,setMethod]=useState<Rule['method']>(rule?.method||'percent_sale'); const [rate,setRate]=useState(String(rule?.rate??'')); useEffect(()=>{setMethod(rule?.method||'percent_sale');setRate(String(rule?.rate??''));},[rule]); return <form className="rule-row" onSubmit={e=>{e.preventDefault();void save(person.user_id,method,Number(rate));}}><strong>{person.display_name}</strong><select aria-label={`Cut type for ${person.display_name}`} value={method} onChange={e=>setMethod(e.target.value as Rule['method'])}><option value="percent_sale">Percent of sale</option><option value="flat_ticket">Flat per sale</option><option value="percent_profit">Percent of profit</option></select><label><input type={method==='flat_ticket'?'text':'number'} inputMode="decimal" min={method==='flat_ticket'?undefined:0} max={method==='flat_ticket'?undefined:100} step="0.01" required value={rate} onChange={e=>{ if (method!=='flat_ticket' || moneyEntry.test(e.target.value)) setRate(e.target.value); }} onBlur={() => { if (method==='flat_ticket' && rate) setRate(cleanMoney(rate)); }} />{method==='flat_ticket'?'$':'%'}</label><button disabled={busy}>Save</button></form>; }
 
@@ -822,10 +898,10 @@ function OnlinePayoutSettings({cfg,staff,busy,save}:{cfg:OnlineCfg;staff:Person[
   const [who,setWho]=useState(cfg.employeeId||''); const [pct,setPct]=useState(String(cfg.pct)); const [channels,setChannels]=useState(cfg.channels.join(', '));
   useEffect(()=>{setWho(cfg.employeeId||'');setPct(String(cfg.pct));setChannels(cfg.channels.join(', '));},[cfg]);
   return <section className="panel"><h2>Online sales payout</h2>
-    <p className="hint">Online sales pay this percent of profit: item + buyer shipping − channel fees − label cost − card processing − item cost (same as Reports). Sales tax and card-fee surcharge stay out. Estimated fees/costs are flagged until real numbers land.</p>
+    <p className="hint">Online sales pay this percent of sale − cost: merchandise + buyer shipping − item cost. Channel fees, labels, card processing, and sales tax stay out of the commission base (Reports profit still subtracts those). Estimated fees/costs are flagged until real numbers land.</p>
     <form className="rule-row" onSubmit={e=>{e.preventDefault();void save(channels.split(/[,\s]+/).map(x=>x.trim().toLowerCase()).filter(Boolean),Number(pct),who);}}>
       <label>Paid to<select value={who} onChange={e=>setWho(e.target.value)} required><option value="" disabled>Choose…</option>{staff.map(p=><option key={p.user_id} value={p.user_id}>{p.display_name}</option>)}</select></label>
-      <label>Percent of profit<input type="number" min={0} max={100} step="0.01" required value={pct} onChange={e=>setPct(e.target.value)} />%</label>
+      <label>Percent of sale − cost<input type="number" min={0} max={100} step="0.01" required value={pct} onChange={e=>setPct(e.target.value)} />%</label>
       <label>Online channels (comma separated)<input value={channels} onChange={e=>setChannels(e.target.value)} placeholder="website, mercari, poshmark" /></label>
       <button disabled={busy||!who}>Save</button></form></section>;
 }

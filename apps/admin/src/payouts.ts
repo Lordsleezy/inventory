@@ -20,6 +20,8 @@ export type TicketLineLike = {
   /** Legacy fee-adjusted ledger profit — ignored for commissions. */
   profit_cents?: number | null;
 };
+/** Per-sale Paul/Jacob percent-of-(sale−cost) override. Null/absent = use defaults. */
+export type CommissionOverride = { paulPct: number; jacobPct: number };
 export type TicketLike = {
   subtotal: number; cost: number | null; channel: string; at?: string;
   feeCents?: number; shipCostCents?: number; processingFeeCents?: number;
@@ -32,6 +34,8 @@ export type TicketLike = {
   profitCents?: number | null;
   /** Sale lines — used for per-SKU in-store profit rate overrides. */
   lines?: TicketLineLike[];
+  /** Admin per-sale commission split override (Paul / Jacob). */
+  commissionOverride?: CommissionOverride | null;
 };
 export type OnlineCfg = { channels: string[]; pct: number; employeeId: string | null };
 export const NO_ONLINE: OnlineCfg = { channels: [], pct: 0, employeeId: null };
@@ -93,9 +97,47 @@ export function lineCommissionProfit(l: TicketLineLike): number | null {
   return l.price_cents - l.cost_cents;
 }
 
+/**
+ * Channel defaults for Paul/Jacob when no per-sale override is set.
+ * Online → online pct / 0. In-store → rule rates (SKU line overrides ignored here).
+ */
+export function defaultCommissionSplit(t: TicketLike, rules: Rule[], cfg: OnlineCfg): CommissionOverride {
+  if (isOnline(t, cfg)) {
+    return { paulPct: Number(cfg.pct) || 0, jacobPct: 0 };
+  }
+  const paul = rules.find(r => r.employee_id === PAYOUT_PAUL_ID);
+  const jacob = rules.find(r => r.employee_id === PAYOUT_JACOB_ID);
+  return {
+    paulPct: paul && paul.method === 'percent_profit' ? Number(paul.rate) || 0 : Number(paul?.rate) || 0,
+    jacobPct: jacob && jacob.method === 'percent_profit' ? Number(jacob.rate) || 0 : Number(jacob?.rate) || 0,
+  };
+}
+
+/** Effective Paul/Jacob % for display (override wins). */
+export function effectiveCommissionSplit(
+  t: TicketLike, rules: Rule[], cfg: OnlineCfg,
+): CommissionOverride & { overridden: boolean } {
+  if (t.commissionOverride) {
+    return { ...t.commissionOverride, overridden: true };
+  }
+  return { ...defaultCommissionSplit(t, rules, cfg), overridden: false };
+}
+
+function overridePayout(t: TicketLike, employeeId: string, ov: CommissionOverride): number | null {
+  const p = commissionProfit(t);
+  if (p === null) return null;
+  const rate = employeeId === PAYOUT_PAUL_ID ? ov.paulPct
+    : employeeId === PAYOUT_JACOB_ID ? ov.jacobPct
+    : 0;
+  return Math.round(Math.max(0, p) * Number(rate) / 100);
+}
+
 /** Cents owed to this rule's person for one ticket. null = cannot be calculated (no cost anywhere). */
 export function payout(t: TicketLike, rule: Rule | undefined, cfg: OnlineCfg): number | null {
   if (!rule) return null;
+  if (t.commissionOverride) {
+    return overridePayout(t, rule.employee_id, t.commissionOverride);
+  }
   if (isOnline(t, cfg)) {
     if (rule.employee_id !== cfg.employeeId) return 0;
     const p = commissionProfit(t);

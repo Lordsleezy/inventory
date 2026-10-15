@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { floorFunctionUrl } from './floorApi';
+import { CommissionOverrideControls, CommissionOverrideMark } from './CommissionOverride';
+import { type CommissionOverride, type OnlineCfg, type Rule } from './payouts';
 
 const CHANNEL_LABEL: Record<string, string> = {
   website: 'Website',
@@ -33,8 +35,17 @@ export type WebOrder = {
   fee_cents?: number | null;
   marketplace_url?: string | null;
   listed_on?: string[] | null;
+  sale_id?: number | null;
+  ticket_key?: string | null;
+  cost_cents?: number | null;
+  profit_cents?: number | null;
 };
-type Props = { client: SupabaseClient; accessToken: string; money: (n: number) => string; stamp: (s: string) => string };
+type Props = {
+  client: SupabaseClient; accessToken: string; money: (n: number) => string; stamp: (s: string) => string;
+  rules: Rule[]; cfg: OnlineCfg; commissionOverrides: Map<string, CommissionOverride>;
+  personName: (id: string) => string; busy: boolean;
+  onCommissionChanged: (ticketKey: string, next: CommissionOverride | null) => void;
+};
 
 function timeLeft(deadline: string | null, now: number) {
   if (!deadline) return '';
@@ -93,7 +104,7 @@ function breakdown(rows: WebOrder[]) {
   };
 }
 
-export function OrdersPage({ client, accessToken, money, stamp }: Props) {
+export function OrdersPage({ client, accessToken, money, stamp, rules, cfg, commissionOverrides, personName, busy: parentBusy, onCommissionChanged }: Props) {
   const [orders, setOrders] = useState<WebOrder[] | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
@@ -216,13 +227,43 @@ export function OrdersPage({ client, accessToken, money, stamp }: Props) {
   const active = groups[view];
   const summary = useMemo(() => breakdown(groups[view]), [groups, view]);
 
-  const head = (o: WebOrder) => <div className="ticket-top"><strong>{channelLabel(o.channel)} {o.marketplace_url && o.order_no ? <a href={o.marketplace_url} target="_blank" rel="noreferrer">{o.order_no}</a> : (o.order_no || 'Order')} · {money(o.total_cents)}</strong><span>{o.paid_at ? stamp(o.paid_at) : stamp(o.created_at)}<b className="badge"> {channelLabel(o.channel).toUpperCase()}</b>{o.match_status && o.match_status !== 'matched' && <b className="badge"> UNMATCHED</b>}</span></div>;
-  const item = (o: WebOrder) => <div className="ticket-items"><div>{o.title} <span>· SKU {o.sku}</span></div>
+  const head = (o: WebOrder) => {
+    const ov = o.ticket_key ? commissionOverrides.get(o.ticket_key) : null;
+    return <div className="ticket-top"><strong>{channelLabel(o.channel)} {o.marketplace_url && o.order_no ? <a href={o.marketplace_url} target="_blank" rel="noreferrer">{o.order_no}</a> : (o.order_no || 'Order')} · {money(o.total_cents)}{ov ? <small className="ticket-profit"> · split overridden</small> : null}</strong><span>{o.paid_at ? stamp(o.paid_at) : stamp(o.created_at)}<b className="badge"> {channelLabel(o.channel).toUpperCase()}</b>{ov && <b className="badge badge-override"> SPLIT</b>}{o.match_status && o.match_status !== 'matched' && <b className="badge"> UNMATCHED</b>}</span></div>;
+  };
+  const item = (o: WebOrder) => {
+    const ov = o.ticket_key ? commissionOverrides.get(o.ticket_key) || null : null;
+    const ticketLike = {
+      subtotal: o.item_cents,
+      cost: o.cost_cents ?? null,
+      channel: (o.channel || 'website').toLowerCase(),
+      shippingCents: o.shipping_cents || 0,
+      commissionOverride: ov,
+      lines: [{ sku: o.sku, price_cents: o.item_cents, cost_cents: o.cost_cents ?? null }],
+    };
+    const canOverride = !!o.ticket_key && (o.status === 'paid' || !!o.paid_at);
+    return <div className="ticket-items"><div>{o.title} <span>· SKU {o.sku}</span></div>
     <small>{o.buyer_name}{o.buyer_email ? ` · ${o.buyer_email}` : ''}{o.buyer_phone ? ` · ${o.buyer_phone}` : ''}</small>
     <small>Item {money(o.item_cents)}{orderFee(o) ? ` · Fees ${money(orderFee(o))}` : ''} · {o.fulfillment === 'ship' ? `Buyer ship ${money(o.shipping_cents)}` : 'Store pickup'}{o.fulfillment === 'ship' ? ` · Label ${o.label_cost_cents != null ? money(o.label_cost_cents) : '—'}` : ''} · Tax {money(o.tax_cents)}</small>
+    <CommissionOverrideMark overridden={!!ov} />
+    {canOverride && o.ticket_key && (
+      <CommissionOverrideControls
+        client={client}
+        ticketKey={o.ticket_key}
+        ticket={ticketLike}
+        rules={rules}
+        cfg={cfg}
+        override={ov}
+        personName={personName}
+        stamp={stamp}
+        busy={!!busy || parentBusy}
+        onChanged={next => onCommissionChanged(o.ticket_key!, next)}
+      />
+    )}
     {otherStores(o).length > 0 && <div className="alert" role="status">Pull from other stores: still marked live on {otherStores(o).map(channelLabel).join(', ')}. End those listings in Vendoo / each app.</div>}
     {(o.match_status === 'unmatched' || o.match_status === 'already_sold') && <div className="alert" role="status">This sale is in Orders but not linked to an available Floor unit. <button className="secondary" disabled={!!busy} onClick={() => void matchSku(o)}>Link SKU…</button></div>}
   </div>;
+  };
 
   function selectView(next: OrderView) {
     setView(next);
