@@ -69,6 +69,17 @@ export function profit(t: TicketLike): number | null {
   return t.subtotal + buyerShipping(t) - channelFees(t) - shipCosts(t) - processing(t) - t.cost;
 }
 
+/**
+ * Reports → Profit (all time) is the sum of sale profit minus eBay insertion and
+ * store-subscription fees. Those fees are not on a sale row. Commissions stay on
+ * sale − cost and are not reduced here. Losses are kept.
+ */
+export function reportProfitCents(saleProfitCents: number | null, ebayOverheadCents: number): number | null {
+  if (saleProfitCents == null || !Number.isFinite(saleProfitCents)) return null;
+  const overhead = Number.isFinite(ebayOverheadCents) ? Math.max(0, Math.round(ebayOverheadCents)) : 0;
+  return saleProfitCents - overhead;
+}
+
 /** Commission base: sale (− tax/fees) minus cost. Buyer shipping counts as sale revenue. */
 export function commissionProfit(t: TicketLike): number | null {
   if (t.cost === null) return null;

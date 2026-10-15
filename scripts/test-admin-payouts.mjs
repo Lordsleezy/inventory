@@ -1,7 +1,7 @@
 // node --experimental-strip-types --test scripts/test-admin-payouts.mjs
 import test from "node:test";
 import assert from "node:assert/strict";
-import { payout, remainingProfit, isOnline, profit, commissionProfit, PAYOUT_JACOB_ID, PAYOUT_PAUL_ID } from "../apps/admin/src/payouts.ts";
+import { payout, remainingProfit, isOnline, profit, commissionProfit, reportProfitCents, PAYOUT_JACOB_ID, PAYOUT_PAUL_ID } from "../apps/admin/src/payouts.ts";
 
 const PAUL = "paul", JACOB = "jacob";
 const rules = [{ employee_id: PAUL, method: "percent_sale", rate: 30 }, { employee_id: JACOB, method: "percent_sale", rate: 20 }];
@@ -32,6 +32,12 @@ test("online: zero cost is a real cost; selling below cost pays nothing", () => 
 test("online rounding and a different percent", () => {
   assert.equal(payout(online(999, 100), rules[0], cfg), Math.round(899 * 0.3));
   assert.equal(payout(online(10000, 4000), rules[0], { ...cfg, pct: 25 }), 1500);
+});
+test("Payouts profit matches Reports after eBay insertion and subscription fees", () => {
+  assert.equal(reportProfitCents(280546, 6834), 273712);
+  assert.equal(reportProfitCents(null, 6834), null);
+  assert.equal(reportProfitCents(100, 0), 100);
+  assert.equal(reportProfitCents(-50, 10), -60);
 });
 test("Reports profit subtracts fees; commissions ignore fees", () => {
   // Depop sale: $80 item, real fee, prepaid label, $9 default cost
