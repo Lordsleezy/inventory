@@ -8,7 +8,7 @@ import { RegisterPage } from './RegisterPage';
 import { TaxPage } from './TaxPage';
 import { LogsPage } from './LogsPage';
 import { ClientErrorReporter } from './clientLog';
-import { inStoreOverrideRate, isOnline, NO_ONLINE, payout, profit, remainingProfit, type OnlineCfg, type Rule } from './payouts';
+import { inStoreOverrideRate, isOnline, NO_ONLINE, payout, profit, remainingProfit, reportProfitCents, type OnlineCfg, type Rule } from './payouts';
 import { ExpensesPage, type Expense as StoreExpense } from './ExpensesPage';
 import { MarketplacesPage } from './MarketplacesPage';
 import { AmazonPage } from './AmazonPage';
@@ -147,6 +147,28 @@ async function payoutSales() {
   }
   return tickets(lines);
 }
+/** Same window as Reports → Profit → All time (ChannelReportPage). */
+const PROFIT_ALL_TIME_START = '2020-01-01';
+function profitReportEndDate() {
+  return new Date(Date.now() + 86400000).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+}
+/** eBay insertion and store subscription. Not attached to a sale, so payout sales omit them. */
+async function ebayInsertionFees(storeId: string) {
+  const end = profitReportEndDate();
+  let total = 0;
+  for (let offset = 0;; offset += 1000) {
+    const batch = check<{ amount_cents: number | null }[]>(await sb.from('portal_expenses')
+      .select('amount_cents')
+      .eq('store_id', storeId)
+      .eq('source', 'ebay')
+      .is('voided_at', null)
+      .gte('spent_on', PROFIT_ALL_TIME_START)
+      .lt('spent_on', end)
+      .range(offset, offset + 999));
+    total += batch.reduce((n, row) => n + (row.amount_cents || 0), 0);
+    if (batch.length < 1000) return total;
+  }
+}
 
 export function App() {
   const [session, setSession] = useState<Session | null>(null);
@@ -162,6 +184,7 @@ export function App() {
   const [live, setLive] = useState<Ticket[]>([]);
   const [voided, setVoided] = useState<VoidedLine[]>([]);
   const [allSales, setAllSales] = useState<Ticket[]>([]);
+  const [ebayFees, setEbayFees] = useState(0);
   const [people, setPeople] = useState<Person[]>([]);
   const [rules, setRules] = useState<Rule[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
@@ -368,7 +391,14 @@ export function App() {
       setVoided(rows);
     } catch (e) { setError(String(e)); }
   }, [store, selectedDay]);
-  const loadPayoutSales = useCallback(async () => { if (!store) return; try { setAllSales(await payoutSales()); } catch (e) { setError(String(e)); } }, [store]);
+  const loadPayoutSales = useCallback(async () => {
+    if (!store) return;
+    try {
+      const [sales, fees] = await Promise.all([payoutSales(), ebayInsertionFees(store)]);
+      setAllSales(sales);
+      setEbayFees(fees);
+    } catch (e) { setError(String(e)); }
+  }, [store]);
   useEffect(() => { if (page === 'reports' || page === 'settings') void loadCommon(); }, [page, loadCommon]);
   useEffect(() => { if (page === 'reports' && nav.reportTab === 'payouts') void loadPayments(); }, [page, nav.reportTab, loadPayments]);
   useEffect(() => { if (page === 'sales' || (page === 'reports' && nav.reportTab === 'profit')) void loadSales(); }, [page, nav.reportTab, loadSales]);
@@ -608,7 +638,7 @@ export function App() {
   {fullAccess && page === 'amazon' && <AmazonPage client={sb} accessToken={session.access_token} money={money} />}
   {fullAccess && page === 'logs' && <LogsPage accessToken={session.access_token} stamp={stamp} />}
   {(fullAccess || registerOnly) && page === 'inventory' && <InventoryPage client={sb} storeId={store} accessToken={session.access_token} money={money} stamp={stamp} tab={nav.inventoryTab} onTab={t => go({ inventoryTab: t })} attentionSection={nav.attentionSection} onAttentionSection={s => go({ attentionSection: s, inventoryTab: 'attention' })} onCostChanged={() => { void loadPayoutSales(); void loadSales(); }} />}
-  {fullAccess && page === 'reports' && <ReportsPage client={sb} money={money} tab={nav.reportTab} onTab={t => go({ reportTab: t })} closeouts={closeouts} expenses={<ExpensesPage client={sb} money={money} expenses={expenses} staff={staff} ownerId={onlineCfg.employeeId || defaultReimbursementId} onChanged={loadCommon} embedded />} payouts={<PayoutsPage allSales={allSales} staff={staff} rules={activeRules} payments={payments} expenses={expenses} cfg={onlineCfg} personName={personName} busy={busy} recordPayment={recordPayment} />} />}
+  {fullAccess && page === 'reports' && <ReportsPage client={sb} money={money} tab={nav.reportTab} onTab={t => go({ reportTab: t })} closeouts={closeouts} expenses={<ExpensesPage client={sb} money={money} expenses={expenses} staff={staff} ownerId={onlineCfg.employeeId || defaultReimbursementId} onChanged={loadCommon} embedded />} payouts={<PayoutsPage allSales={allSales} ebayFees={ebayFees} staff={staff} rules={activeRules} payments={payments} expenses={expenses} cfg={onlineCfg} personName={personName} busy={busy} recordPayment={recordPayment} />} />}
   {fullAccess && page === 'tax' && <TaxPage client={sb} money={money} stamp={stamp} />}
   {fullAccess && page === 'settings' && <SettingsPage client={sb} accessToken={session.access_token} stamp={stamp} money={money} busy={busy} run={run} onLedgerChanged={async () => { await loadSales(); await loadPayoutSales(); }} ruleEditor={<>{staff.map(p => <RuleEditor key={p.user_id} person={p} rule={ruleMap.get(p.user_id)} save={setRule} busy={busy} />)}</>} onlinePayoutSettings={<OnlinePayoutSettings cfg={onlineCfg} staff={staff} busy={busy} save={async (channels, pct, who) => { await run(async () => { check(await sb.rpc('portal_set_payout_config', { p_channels: channels, p_pct: pct, p_employee: who })); await loadCommon(); await loadPayoutSales(); }); }} />} />}
   {registerOnly && page === 'settings' && <AssociateSettings client={sb} displayName={staffSession?.displayName || 'Associate'} />}
@@ -687,7 +717,7 @@ function ExpenseAmount({cents,onCommit,disabled}:{cents:number;onCommit:(cents:n
     onBlur={() => { const clean = cleanMoney(text); setText(clean); onCommit(Math.round(Number(clean)*100)); }} />;
 }
 type LedgerEntry = { at: string; kind: 'sale' | 'online' | 'reimbursement' | 'payment'; amount: number | null; detail: string; note?: string };
-function PayoutsPage({allSales,staff,rules,payments,expenses,cfg,personName,busy,recordPayment}:{allSales:Ticket[];staff:Person[];rules:Rule[];payments:Payment[];expenses:StoreExpense[];cfg:OnlineCfg;personName:(id:string)=>string;busy:boolean;recordPayment:(id:string,amount:number,paidAt:string,note:string)=>Promise<string | null>}) {
+function PayoutsPage({allSales,ebayFees,staff,rules,payments,expenses,cfg,personName,busy,recordPayment}:{allSales:Ticket[];ebayFees:number;staff:Person[];rules:Rule[];payments:Payment[];expenses:StoreExpense[];cfg:OnlineCfg;personName:(id:string)=>string;busy:boolean;recordPayment:(id:string,amount:number,paidAt:string,note:string)=>Promise<string | null>}) {
   const hasReimburse = (id: string) => expenses.some(e => !e.voided_at && e.needs_reimbursement && e.employee_id === id);
   const active = staff.filter(p => rules.some(r => r.employee_id === p.user_id) || hasReimburse(p.user_id));
   const onlineSales = allSales.filter(t => isOnline(t,cfg));
@@ -740,18 +770,20 @@ function PayoutsPage({allSales,staff,rules,payments,expenses,cfg,personName,busy
   });
   const commissionBalanceOwed = owedSplits.reduce((n, c) => n + c.commissionOwed, 0);
   const reimburseBalanceOwed = owedSplits.reduce((n, c) => n + c.reimburseOwed, 0);
-  // Same cents as Reports → Profit (sale_ledger.profit_cents). Do not floor losses.
-  const profitAfterCosts = allSales.every(t => t.profitCents != null)
+  // Sale rows omit eBay insertion/subscription. Profit tab subtracts them once on the eBay channel.
+  const saleProfit = allSales.every(t => t.profitCents != null)
     ? allSales.reduce((n, t) => n + (t.profitCents || 0), 0)
     : (() => {
       const parts = allSales.map(t => profit({ ...t, shippingCents: t.shippingCents, profitCents: t.profitCents }));
       return parts.some(x => x === null) ? null : parts.reduce<number>((n, x) => n + (x || 0), 0);
     })();
+  const hasEbaySale = allSales.some(t => (t.channel || '').toLowerCase() === 'ebay');
+  const profitAfterCosts = reportProfitCents(saleProfit, hasEbaySale ? ebayFees : 0);
   const ownerShare = profitAfterCosts === null ? null : profitAfterCosts - totalCommission;
   return <>
-    <header><div><div className="eyebrow">TEAM EARNINGS</div><h1>Payouts</h1><p>Commissions are always % of sale − cost (merchandise + buyer shipping, before tax and fees). Reports “profit after costs” still nets channel fees, labels, and card processing; owner share = that figure − commissions. Payments count against expense reimbursements first, then commission. Online sales pay {personName(cfg.employeeId || '')} {cfg.pct}% of sale − cost.</p></div></header>
+    <header><div><div className="eyebrow">TEAM EARNINGS</div><h1>Payouts</h1><p>Profit after costs matches Reports → Profit on All time, including eBay insertion and subscription fees. Commissions stay a percent of sale − cost (merchandise + buyer shipping) and do not shrink for those fees. Owner share = profit after costs − commissions. Payments count against expense reimbursements first, then commission. Online sales pay {personName(cfg.employeeId || '')} {cfg.pct}% of sale − cost.</p></div></header>
     <div className="stats payout-stats">
-      <Stat name="Profit after costs" value={profitAfterCosts === null ? 'Pending cost' : money(profitAfterCosts)} />
+      <Stat name="Profit after costs" hint={hasEbaySale && ebayFees > 0 ? `includes ${money(ebayFees)} eBay insertion/subscription` : undefined} value={profitAfterCosts === null ? 'Pending cost' : money(profitAfterCosts)} />
       <Stat name="Commission earned" value={money(totalCommission)} />
       <Stat name="Reimbursements" value={money(totalReimburse)} />
       <Stat name="Total paid" value={money(totalPaid)} />
