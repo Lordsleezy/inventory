@@ -56,9 +56,15 @@ button.camera-btn:disabled{opacity:.6}
 .commission-overridden { color: #9a3412; }
 .badge-override { background: #ffedd5 !important; color: #9a3412 !important; }
 .ticket-commission-override { box-shadow: inset 3px 0 0 #ea580c; }
-.commission-override { margin-top: 12px; padding-top: 10px; border-top: 1px dashed #d7dee5; }
-.commission-override-summary { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; font-size: .9rem; }
-.commission-override-panel { margin-top: 10px; display: grid; gap: 10px; }
+.commission-override { margin-top: 14px; padding: 12px; border: 1px solid #e5e9ee; border-radius: 10px; background: #fbfcfd; display: grid; gap: 10px; }
+.commission-override.is-overridden { border-color: #fdba74; background: #fff7ed; }
+.commission-override-head { display: grid; gap: 2px; }
+.commission-override-head .eyebrow { margin: 0; }
+.commission-override-head strong { font-size: .98rem; }
+.commission-amounts { margin: 0 !important; }
+.commission-amounts small { font-weight: 500; color: #71808d; margin-left: .25rem; }
+.commission-actions { margin: 0; flex-wrap: wrap; gap: 8px; }
+.commission-override-panel { margin-top: 2px; display: grid; gap: 10px; }
 .commission-custom { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
 .commission-custom label { display: grid; gap: 4px; font-size: .78rem; font-weight: 650; color: #627282; }
 .commission-custom input { min-width: 5.5rem; }

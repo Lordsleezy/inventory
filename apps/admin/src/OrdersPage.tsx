@@ -256,6 +256,7 @@ export function OrdersPage({ client, accessToken, money, stamp, rules, cfg, comm
         override={ov}
         personName={personName}
         stamp={stamp}
+        money={money}
         busy={!!busy || parentBusy}
         onChanged={next => onCommissionChanged(o.ticket_key!, next)}
       />

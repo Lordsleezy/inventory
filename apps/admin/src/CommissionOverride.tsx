@@ -1,8 +1,12 @@
 import { useEffect, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
+  commissionProfit,
   defaultCommissionSplit,
   effectiveCommissionSplit,
+  PAYOUT_JACOB_ID,
+  PAYOUT_PAUL_ID,
+  payout,
   type CommissionOverride,
   type OnlineCfg,
   type Rule,
@@ -33,6 +37,7 @@ type Props = {
   override: CommissionOverride | null;
   personName: (id: string) => string;
   stamp: (iso: string) => string;
+  money: (cents: number) => string;
   busy?: boolean;
   onChanged: (next: CommissionOverride | null) => void;
 };
@@ -47,9 +52,9 @@ export function CommissionOverrideMark({ overridden }: { overridden: boolean }) 
 }
 
 export function CommissionOverrideControls({
-  client, ticketKey, ticket, rules, cfg, override, personName, stamp, busy, onChanged,
+  client, ticketKey, ticket, rules, cfg, override, personName, stamp, money, busy, onChanged,
 }: Props) {
-  const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
   const [paulText, setPaulText] = useState('');
   const [jacobText, setJacobText] = useState('');
   const [reason, setReason] = useState('');
@@ -58,19 +63,25 @@ export function CommissionOverrideControls({
   const [history, setHistory] = useState<CommissionLogRow[] | null>(null);
   const [historyError, setHistoryError] = useState('');
 
+  const ticketWithOv = { ...ticket, commissionOverride: override };
   const def = defaultCommissionSplit(ticket, rules, cfg);
-  const current = effectiveCommissionSplit({ ...ticket, commissionOverride: override }, rules, cfg);
+  const current = effectiveCommissionSplit(ticketWithOv, rules, cfg);
+  const base = commissionProfit(ticketWithOv);
+  const paulRule = rules.find(r => r.employee_id === PAYOUT_PAUL_ID) || { employee_id: PAYOUT_PAUL_ID, method: 'percent_profit' as const, rate: current.paulPct };
+  const jacobRule = rules.find(r => r.employee_id === PAYOUT_JACOB_ID) || { employee_id: PAYOUT_JACOB_ID, method: 'percent_profit' as const, rate: current.jacobPct };
+  const paulCents = payout(ticketWithOv, paulRule, cfg);
+  const jacobCents = payout(ticketWithOv, jacobRule, cfg);
 
   useEffect(() => {
-    if (!open) return;
+    if (!editing) return;
     setPaulText(String(current.paulPct));
     setJacobText(String(current.jacobPct));
     setReason('');
     setError('');
-  }, [open, current.paulPct, current.jacobPct]);
+  }, [editing, current.paulPct, current.jacobPct]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!editing) return;
     let alive = true;
     void (async () => {
       setHistoryError('');
@@ -85,7 +96,7 @@ export function CommissionOverrideControls({
       setHistory((data || []) as CommissionLogRow[]);
     })();
     return () => { alive = false; };
-  }, [open, client, ticketKey, override]);
+  }, [editing, client, ticketKey, override]);
 
   async function apply(action: 'set' | 'flip' | 'reset', paul?: number, jacob?: number) {
     setSaving(true); setError('');
@@ -101,7 +112,7 @@ export function CommissionOverrideControls({
       const row = data as { override: { paul_pct: number; jacob_pct: number } | null } | null;
       if (!row?.override) onChanged(null);
       else onChanged({ paulPct: Number(row.override.paul_pct), jacobPct: Number(row.override.jacob_pct) });
-      if (action !== 'set') setOpen(false);
+      if (action === 'flip' || action === 'reset') setEditing(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -116,31 +127,45 @@ export function CommissionOverrideControls({
   const disabled = !!busy || saving;
 
   return (
-    <div className="commission-override">
-      <div className="commission-override-summary">
-        <span>Commission · {pctLabel(current.paulPct, current.jacobPct)}
-          {current.overridden ? ' (override)' : ' (default)'}</span>
-        <button type="button" className="secondary" disabled={disabled} onClick={() => setOpen(o => !o)}>
-          {open ? 'Close' : 'Change commission'}
-        </button>
+    <div className={`commission-override${current.overridden ? ' is-overridden' : ''}`}>
+      <div className="commission-override-head">
+        <div className="eyebrow">COMMISSION</div>
+        <strong>{pctLabel(current.paulPct, current.jacobPct)}{current.overridden ? ' · overridden' : ' · default'}</strong>
       </div>
-      {open && (
+      <div className="ticket-detail-grid commission-amounts">
+        <div>
+          <span>Paul</span>
+          <strong>{paulCents == null ? 'Needs cost' : money(paulCents)} <small>({current.paulPct}%)</small></strong>
+        </div>
+        <div>
+          <span>Jacob</span>
+          <strong>{jacobCents == null ? 'Needs cost' : money(jacobCents)} <small>({current.jacobPct}%)</small></strong>
+        </div>
+        <div>
+          <span>Sale − cost</span>
+          <strong>{base == null ? 'Needs cost' : money(base)}</strong>
+        </div>
+      </div>
+      <div className="actions commission-actions">
+        <button type="button" disabled={disabled} onClick={() => void apply('flip')}>
+          Flip to {current.jacobPct}% / {current.paulPct}%
+        </button>
+        <button type="button" className="secondary" disabled={disabled} onClick={() => setEditing(e => !e)}>
+          {editing ? 'Hide custom' : 'Change commission'}
+        </button>
+        {current.overridden && (
+          <button type="button" className="secondary" disabled={disabled} onClick={() => void apply('reset')}>
+            Reset to default
+          </button>
+        )}
+      </div>
+      {editing && (
         <div className="commission-override-panel">
           <p className="hint" style={{ marginTop: 0 }}>
             Split is a percent of sale − cost (merchandise + buyer shipping). Tax and fees stay out.
-            Defaults: {pctLabel(def.paulPct, def.jacobPct)}.
-            Flip swaps the two percentages. Custom lets you type any split. Reset clears the override.
+            Defaults for this sale: {pctLabel(def.paulPct, def.jacobPct)}.
             Changing a sale that was already paid just moves the running balance — past payments stay as recorded.
           </p>
-          <div className="actions" style={{ flexWrap: 'wrap', gap: 8 }}>
-            <button type="button" disabled={disabled} onClick={() => void apply('flip')}>
-              Flip ({current.jacobPct}% / {current.paulPct}%)
-            </button>
-            <button type="button" className="secondary" disabled={disabled || !current.overridden}
-              onClick={() => void apply('reset')}>
-              Reset to default
-            </button>
-          </div>
           <form className="commission-custom" onSubmit={e => {
             e.preventDefault();
             if (!Number.isFinite(paulN) || !Number.isFinite(jacobN) || paulN < 0 || jacobN < 0) {
@@ -193,6 +218,7 @@ export function CommissionOverrideControls({
           </div>
         </div>
       )}
+      {error && !editing && <p className="error" role="alert">{error}</p>}
     </div>
   );
 }
