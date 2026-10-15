@@ -40,13 +40,35 @@ export const safeDate = (s) => {
   return Number.isNaN(+d) ? null : d.toISOString().slice(0, 10);
 };
 
+/** Noise we must not treat as a sale (offers, reminders, auth). */
+export function isMarketplaceNoise(subject, text) {
+  const s = `${subject || ''}\n${text || ''}`;
+  return /counter[\s-]?offer|you(?:'ve| have) received an offer|new offer|offer (?:received|expir|accepted|declined)|time to ship|ship(?:ping)? reminder|login|sign[\s-]?in|security alert|verify your|password reset|confirm your email/i.test(
+    s,
+  );
+}
+
+export function looksLikeSaleNotice(subject, text) {
+  const s = `${subject || ''}\n${text || ''}`;
+  if (isMarketplaceNoise(subject, text)) return false;
+  return /sold|you(?:'ve| have) made a sale|sale confirmation|shipping label and sale confirmation|order (?:confirmed|placed|complete|completed)|your item has sold|transaction (?:complete|completed)|payment received|item sold/i.test(
+    s,
+  );
+}
+
 export function parseMail(mail, channels = defaultChannels) {
   const text = [mail.subject, mail.text || '', mail.html || ''].join('\n').replace(/<[^>]*>/g, ' ');
   const sender = mail.from?.address || '';
   const marketplace = marketplaceOf(`${sender} ${mail.subject} ${text.slice(0, 2000)}`, channels);
-  const sale = /sold|order (?:confirmed|placed|complete|completed)|purchase|your item has sold|transaction (?:complete|completed)|payment received/i.test(`${mail.subject}\n${text}`);
-  const sku = text.match(/\bSKU\s*[:#-]?\s*(\d{5})\b/i)?.[1] || null;
-  const priceMatch = text.match(/(?:sold\s+for|sale\s+price|item\s+price|item\s+subtotal)\D{0,30}\$\s?([0-9]{1,6}(?:\.[0-9]{2})?)/i);
+  const sale = looksLikeSaleNotice(mail.subject, text);
+  const sku =
+    text.match(/\bSKU\s*[:#-]?\s*(\d{5})\b/i)?.[1] ||
+    // Vendoo / internal subjects often end with (11412)
+    String(mail.subject || '').match(/\((\d{5})\)\s*$/)?.[1] ||
+    null;
+  const priceMatch = text.match(
+    /(?:sold\s+for|sale\s+price|item\s+price|item\s+subtotal|you've made a sale!?)\D{0,40}\$\s?([0-9]{1,6}(?:\.[0-9]{2})?)/i,
+  ) || String(mail.subject || '').match(/\$\s?([0-9]{1,6}(?:\.[0-9]{2})?)/);
   const price = priceMatch ? Math.round(Number(priceMatch[1]) * 100) : null;
   const order = text.match(/(?:order|transaction|sale)\s*(?:number|#|no\.?|id)?\s*[:#-]?\s*([A-Z0-9-]{5,40})/i)?.[1] || null;
   const ship = text.match(/(?:ship(?:ped)? by|ship before|ship no later than)\s*[:\-]?\s*([A-Z][a-z]+\s+\d{1,2}(?:,\s*\d{4})?)/i)?.[1];
