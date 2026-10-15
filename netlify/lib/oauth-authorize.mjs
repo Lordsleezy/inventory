@@ -1,12 +1,18 @@
 import { requireEnv } from "./server.mjs";
-import { EBAY_OAUTH_SCOPES, ebayHosts, ebayRuName, requireEbayEnabled } from "./ebay-env.mjs";
+import {
+  EBAY_OAUTH_SCOPES,
+  ebayHosts,
+  ebayRuName,
+  oauthScopesForRole,
+  requireEbayEnabled,
+} from "./ebay-env.mjs";
 
 const SCOPES = {
   square: "MERCHANT_PROFILE_READ PAYMENTS_WRITE PAYMENTS_WRITE_IN_PERSON",
   ebay: EBAY_OAUTH_SCOPES,
 };
 
-export function authorizeUrl(provider, nonce) {
+export function authorizeUrl(provider, nonce, { ebayRole = null } = {}) {
   if (provider === "square") {
     const redirectUri = requireEnv("OAUTH_REDIRECT_URI");
     const host =
@@ -21,7 +27,8 @@ export function authorizeUrl(provider, nonce) {
     const { auth } = ebayHosts(process.env.EBAY_ENV);
     const id = requireEnv("EBAY_CLIENT_ID");
     const ruName = ebayRuName(process.env.EBAY_RU_NAME);
-    return `${auth}/oauth2/authorize?client_id=${encodeURIComponent(id)}&response_type=code&redirect_uri=${encodeURIComponent(ruName)}&scope=${encodeURIComponent(SCOPES.ebay)}&state=${nonce}`;
+    const scopes = ebayRole ? oauthScopesForRole(ebayRole) : SCOPES.ebay;
+    return `${auth}/oauth2/authorize?client_id=${encodeURIComponent(id)}&response_type=code&redirect_uri=${encodeURIComponent(ruName)}&scope=${encodeURIComponent(scopes)}&state=${nonce}`;
   }
   if (provider === "amazon") {
     const appId = requireEnv("AMAZON_APPLICATION_ID");

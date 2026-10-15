@@ -49,23 +49,27 @@ export function ebayCondition(floor: string | null | undefined): string {
   return "USED_GOOD";
 }
 
-/** Orders-only by default (fulfillment + account). Listing scopes are opted in via EBAY_ORDERS_ONLY=false. */
+/** Orders-only by default (fulfillment + account). Listing scopes are opted in via EBAY_ORDERS_ONLY=false or connect_selling. */
 const ordersOnly = !/^(0|false|no|off)$/i.test(String(process.env.EBAY_ORDERS_ONLY ?? "true").trim());
 
-export const EBAY_OAUTH_SCOPES = (
-  ordersOnly
-    ? [
-        "https://api.ebay.com/oauth/api_scope",
-        "https://api.ebay.com/oauth/api_scope/sell.fulfillment",
-        "https://api.ebay.com/oauth/api_scope/sell.account",
-        "https://api.ebay.com/oauth/api_scope/sell.finances",
-      ]
-    : [
-        "https://api.ebay.com/oauth/api_scope",
-        "https://api.ebay.com/oauth/api_scope/sell.inventory",
-        "https://api.ebay.com/oauth/api_scope/sell.fulfillment",
-        "https://api.ebay.com/oauth/api_scope/sell.account",
-        "https://api.ebay.com/oauth/api_scope/sell.finances",
-        "https://api.ebay.com/oauth/api_scope/commerce.notification.subscription",
-      ]
-).join(" ");
+export const EBAY_LISTING_OAUTH_SCOPES = [
+  "https://api.ebay.com/oauth/api_scope",
+  "https://api.ebay.com/oauth/api_scope/sell.inventory",
+  "https://api.ebay.com/oauth/api_scope/sell.fulfillment",
+  "https://api.ebay.com/oauth/api_scope/sell.account",
+  "https://api.ebay.com/oauth/api_scope/sell.finances",
+  "https://api.ebay.com/oauth/api_scope/commerce.notification.subscription",
+].join(" ");
+
+export const EBAY_ORDERS_OAUTH_SCOPES = [
+  "https://api.ebay.com/oauth/api_scope",
+  "https://api.ebay.com/oauth/api_scope/sell.fulfillment",
+  "https://api.ebay.com/oauth/api_scope/sell.account",
+  "https://api.ebay.com/oauth/api_scope/sell.finances",
+].join(" ");
+
+export const EBAY_OAUTH_SCOPES = ordersOnly ? EBAY_ORDERS_OAUTH_SCOPES : EBAY_LISTING_OAUTH_SCOPES;
+
+export function oauthScopesForRole(role: string): string {
+  return role === "selling" ? EBAY_LISTING_OAUTH_SCOPES : EBAY_ORDERS_OAUTH_SCOPES;
+}

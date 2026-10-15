@@ -2,29 +2,45 @@ export function ebayDisabled(env = process.env.EBAY_DISABLED) {
   return /^(1|true|yes|on)$/i.test(String(env || "").trim());
 }
 
-/** Orders-only: read sales + mark shipped. Never create/revise/end listings. */
+/**
+ * Legacy global orders-only flag. Prefer per-account role on ebay_accounts:
+ * selling accounts always list; orders_only accounts never list.
+ * When unset, defaults to true for backward compatibility with the Vendoo cutover.
+ */
 export function ebayOrdersOnly(env = process.env.EBAY_ORDERS_ONLY) {
   if (env == null || String(env).trim() === "") return true;
   return /^(1|true|yes|on)$/i.test(String(env).trim());
 }
 
-export function ebayListingAllowed() {
-  return !ebayDisabled() && !ebayOrdersOnly();
+/** @param {{ role?: string, status?: string } | null} account */
+export function ebayListingAllowed(account = null) {
+  if (ebayDisabled()) return false;
+  if (account) return account.role === "selling" && account.status === "connected";
+  // No account context: honor global flag (legacy single-connection path).
+  return !ebayOrdersOnly();
 }
 
 export function requireEbayEnabled() {
   if (ebayDisabled()) throw new Error("eBay integration is disabled for this store.");
 }
 
-export function requireEbayListingEnabled() {
+/** @param {{ role?: string, status?: string } | null} account */
+export function requireEbayListingEnabled(account = null) {
   requireEbayEnabled();
-  if (!ebayListingAllowed()) {
-    throw new Error("eBay is connected for order sync only. Floor does not create or end eBay listings (Vendoo owns listings).");
+  if (!ebayListingAllowed(account)) {
+    throw new Error(
+      "eBay is connected for order sync only. Connect a selling account (or set EBAY_ORDERS_ONLY=false) before creating or ending listings.",
+    );
   }
 }
 
+/** Legacy personal seller username used for orders-only reconnect hints. */
 export function ebayRequiredUsername(env = process.env.EBAY_REQUIRED_USERNAME) {
   return String(env || "pgg124-5").trim().toLowerCase();
+}
+
+export function marketplaceIdFromEnv(env = process.env.EBAY_MARKETPLACE_ID) {
+  return String(env || "EBAY_US").trim() || "EBAY_US";
 }
 
 export function ebayHosts(env = process.env.EBAY_ENV) {
@@ -75,7 +91,7 @@ export function ebayCondition(floor) {
   return "USED_GOOD";
 }
 
-/** Full listing scopes (only used when EBAY_ORDERS_ONLY is off). */
+/** Full listing scopes — always requested when connecting a selling account. */
 export const EBAY_LISTING_OAUTH_SCOPES = [
   "https://api.ebay.com/oauth/api_scope",
   "https://api.ebay.com/oauth/api_scope/sell.inventory",
@@ -93,4 +109,9 @@ export const EBAY_ORDERS_OAUTH_SCOPES = [
   "https://api.ebay.com/oauth/api_scope/sell.finances",
 ].join(" ");
 
+/** Default scopes for legacy callers; prefer scopesForRole / authorizeUrl(role). */
 export const EBAY_OAUTH_SCOPES = ebayOrdersOnly() ? EBAY_ORDERS_OAUTH_SCOPES : EBAY_LISTING_OAUTH_SCOPES;
+
+export function oauthScopesForRole(role) {
+  return role === "selling" ? EBAY_LISTING_OAUTH_SCOPES : EBAY_ORDERS_OAUTH_SCOPES;
+}

@@ -5,10 +5,11 @@ import {
   requireEnv,
 } from "../lib/server.mjs";
 import { exchangeEbayCode, getSellerUsername, subscribeNotifications } from "../lib/ebay.mjs";
+import { upsertEbayAccountFromOAuth } from "../lib/ebay-accounts.mjs";
 import { upsertEncryptedSquareTokens } from "../lib/square.mjs";
 import { paramsFromNetlifyEvent } from "../lib/oauth-params.mjs";
 import { wrapHandler, asNetlifyFunction } from "../lib/floor-log.mjs";
-import { ebayDisabled, ebayOrdersOnly, ebayRequiredUsername } from "../lib/ebay-env.mjs";
+import { ebayDisabled, ebayRequiredUsername } from "../lib/ebay-env.mjs";
 
 function deepLink(query) {
   const base = process.env.APP_DEEP_LINK || "floor://connections";
@@ -261,66 +262,84 @@ async function handle(event) {
     const refresh = tokens.refresh_token || tokens.refreshToken;
     const expiresIn = Number(tokens.expires_in || tokens.expiresIn || 86400);
     let accountLabel = null;
+    let expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
+
     if (state.provider === "ebay") {
-      const username = String(await getSellerUsername(access) || "").trim();
-      const required = ebayRequiredUsername();
-      if (!username || username.toLowerCase() !== required) {
-        throw new Error(
-          `Connected eBay account was "${username || "unknown"}". Floor only accepts ${required}. Tokens were not saved.`,
-        );
+      const username = String((await getSellerUsername(access)) || "").trim();
+      if (!username) throw new Error("Could not read the eBay seller username after OAuth.");
+      const meta = state.meta && typeof state.meta === "object" ? state.meta : {};
+      const role = meta.role === "selling" ? "selling" : "orders_only";
+      // orders_only reconnect still prefers the known personal seller unless meta.allowAnyUsername.
+      if (role === "orders_only" && !meta.allowAnyUsername) {
+        const required = ebayRequiredUsername();
+        if (username.toLowerCase() !== required) {
+          throw new Error(
+            `Connected eBay account was "${username}". Orders-only reconnect expects ${required}. For the business store account, use “Connect selling account”. Tokens were not saved.`,
+          );
+        }
       }
       accountLabel = username;
-    }
-    const row = {
-      store_id: state.store_id,
-      provider: state.provider,
-      status: "connected",
-      account_label: accountLabel,
-      token_ciphertext: encryptSecret(access),
-      refresh_ciphertext: refresh ? encryptSecret(refresh) : null,
-      scopes: String(tokens.scope || "").split(/[ ,]+/).filter(Boolean),
-      expires_at: new Date(Date.now() + expiresIn * 1000).toISOString(),
-      reauthorize_after:
-        state.provider === "amazon" ? new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString() : null,
-      last_error: null,
-      connected_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
-    const up = await sb.from("connections").upsert(row);
-    if (up.error) throw new Error(up.error.message);
-
-    if (state.provider === "square") {
-      await sb.from("store_settings").upsert(
-        {
-          store_id: state.store_id,
-          key: "card_payments_enabled",
-          value: true,
-        },
-        { onConflict: "store_id,key" },
-      );
-      // Mirror into square_connections so register / mobile-auth / refund share one store.
-      try {
-        await upsertEncryptedSquareTokens(state.store_id, {
-          accessToken: access,
-          refreshToken: refresh || undefined,
-          expiresAt: row.expires_at,
-          merchantId: tokens.merchant_id || tokens.merchantId || null,
-        });
-      } catch (mirrorErr) {
-        console.error("square_connections mirror failed", mirrorErr);
-      }
+      const scopes = String(tokens.scope || "")
+        .split(/[ ,]+/)
+        .filter(Boolean);
+      await upsertEbayAccountFromOAuth({
+        storeId: state.store_id,
+        username,
+        role,
+        access,
+        refresh,
+        expiresIn,
+        scopes,
+      });
     } else {
-      // Orders-only eBay must not flip channel_config to auto (that implies listing).
-      const mode = state.provider === "ebay" && ebayOrdersOnly() ? "off" : "auto";
-      await sb.from("channel_config").upsert(
-        {
-          store_id: state.store_id,
-          channel: state.provider,
-          mode,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "store_id,channel" },
-      );
+      const row = {
+        store_id: state.store_id,
+        provider: state.provider,
+        status: "connected",
+        account_label: accountLabel,
+        token_ciphertext: encryptSecret(access),
+        refresh_ciphertext: refresh ? encryptSecret(refresh) : null,
+        scopes: String(tokens.scope || "").split(/[ ,]+/).filter(Boolean),
+        expires_at: expiresAt,
+        reauthorize_after:
+          state.provider === "amazon" ? new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString() : null,
+        last_error: null,
+        connected_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      const up = await sb.from("connections").upsert(row);
+      if (up.error) throw new Error(up.error.message);
+
+      if (state.provider === "square") {
+        await sb.from("store_settings").upsert(
+          {
+            store_id: state.store_id,
+            key: "card_payments_enabled",
+            value: true,
+          },
+          { onConflict: "store_id,key" },
+        );
+        try {
+          await upsertEncryptedSquareTokens(state.store_id, {
+            accessToken: access,
+            refreshToken: refresh || undefined,
+            expiresAt: row.expires_at,
+            merchantId: tokens.merchant_id || tokens.merchantId || null,
+          });
+        } catch (mirrorErr) {
+          console.error("square_connections mirror failed", mirrorErr);
+        }
+      } else {
+        await sb.from("channel_config").upsert(
+          {
+            store_id: state.store_id,
+            channel: state.provider,
+            mode: "auto",
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "store_id,channel" },
+        );
+      }
     }
 
     const extra = state.provider === "square" ? { needs_location: "1" } : {};

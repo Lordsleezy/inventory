@@ -1,5 +1,6 @@
 import { serviceClient, json, corsHeaders } from "../lib/server.mjs";
-import { ebayFetch, loadEbayConnection } from "../lib/ebay.mjs";
+import { ebayFetch } from "../lib/ebay.mjs";
+import { listEbayAccounts, resolveEbayAccount } from "../lib/ebay-accounts.mjs";
 import { getStoreSquareAccess, squareClient } from "../lib/square.mjs";
 import { webSquareClient, webSquareEnv } from "../lib/web-square.mjs";
 import { Environment } from "square/legacy";
@@ -20,13 +21,13 @@ function moneyToCents(amount) {
   return Number.isFinite(n) ? Math.round(n * 100) : null;
 }
 
-async function* ebayTransactions(storeId, type, since) {
+async function* ebayTransactions(storeId, type, since, hint = {}) {
   // Finances uses apiz host + filter=transactionType:{…} (not a top-level query param).
   let offset = 0;
   for (;;) {
     const filter = encodeURIComponent(`transactionType:{${type}},transactionDate:[${since}..]`);
     const res = await ebayFetch(storeId, "GET",
-      `/sell/finances/v1/transaction?filter=${filter}&limit=200&offset=${offset}`);
+      `/sell/finances/v1/transaction?filter=${filter}&limit=200&offset=${offset}`, undefined, hint);
     const txns = res?.transactions || [];
     for (const tx of txns) yield tx;
     if (txns.length < 200) break;
@@ -34,17 +35,16 @@ async function* ebayTransactions(storeId, type, since) {
   }
 }
 
-async function syncEbayFees(sb, storeId, log) {
-  const conn = await loadEbayConnection(storeId).catch(() => null);
-  if (!conn) return;
-  const scopes = Array.isArray(conn.scopes) ? conn.scopes : [];
+async function syncEbayFeesForAccount(sb, storeId, account, log) {
+  const scopes = Array.isArray(account.scopes) ? account.scopes : [];
   if (scopes.length && !scopes.some((s) => String(s).includes("sell.finances"))) {
-    log.push({ ebay: "reconnect_required_for_finances_scope" });
+    log.push({ ebay: "reconnect_required_for_finances_scope", username: account.username, accountId: account.id });
     return;
   }
   const since = new Date(Date.now() - LOOKBACK_DAYS * 86400000).toISOString();
+  const hint = account.id ? { accountId: account.id } : {};
 
-  for await (const tx of ebayTransactions(storeId, "SALE", since)) {
+  for await (const tx of ebayTransactions(storeId, "SALE", since, hint)) {
     const orderId = tx.orderId;
     if (!orderId) continue;
     let fee = 0;
@@ -68,7 +68,7 @@ async function syncEbayFees(sb, storeId, log) {
   // (e.g. Ninja $110.21 canceled, then $43.51 kept; credit may lag in Finances).
   const labels = new Map(); // orderId -> { debits: [{cents,date}], creditCents }
   const orphanLabels = [];
-  for await (const tx of ebayTransactions(storeId, "SHIPPING_LABEL", since)) {
+  for await (const tx of ebayTransactions(storeId, "SHIPPING_LABEL", since, hint)) {
     if (String(tx.transactionType || "").toUpperCase() !== "SHIPPING_LABEL") continue;
     const refs = Array.isArray(tx.references) ? tx.references : [];
     const orderRef = refs.find((r) => /ORDER_ID/i.test(String(r.referenceType || "")));
@@ -130,9 +130,33 @@ async function syncEbayFees(sb, storeId, log) {
         label_cost_cents: labelCents,
         label_purchased_at: new Date().toISOString(),
       }).eq("store_id", storeId).eq("payment_id", `ebay:${orderId}`);
-      log.push({ orderId, label: labelCents, ...(note ? { note, debitSum, creditCents: agg.creditCents } : {}) });
+      log.push({
+        orderId,
+        label: labelCents,
+        username: account.username,
+        ...(note ? { note, debitSum, creditCents: agg.creditCents } : {}),
+      });
     }
   }
+}
+
+async function syncEbayFees(sb, storeId, log) {
+  const accounts = await listEbayAccounts(storeId).catch(() => []);
+  const connected = accounts.filter((a) => a.status === "connected");
+  if (connected.length) {
+    for (const account of connected) {
+      try {
+        await syncEbayFeesForAccount(sb, storeId, account, log);
+      } catch (e) {
+        log.push({ ebay: String(e?.message || e), username: account.username, accountId: account.id });
+      }
+    }
+    return;
+  }
+  // Legacy single connection fallback.
+  const legacy = await resolveEbayAccount(storeId).catch(() => null);
+  if (!legacy) return;
+  await syncEbayFeesForAccount(sb, storeId, legacy, log);
 }
 
 async function squareFee(client, paymentId) {

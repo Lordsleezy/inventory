@@ -32,14 +32,15 @@ async function handle(event) {
   const sb = serviceClient();
   const { data, error } = await sb
     .from("oauth_states")
-    .select("provider, nonce, expires_at, consumed_at")
+    .select("provider, nonce, expires_at, consumed_at, meta")
     .eq("nonce", nonce)
     .maybeSingle();
   if (error || !data || data.consumed_at || new Date(data.expires_at) <= new Date()) {
     return fail("This sign-in expired or was already used. Start Connect again from Floor.");
   }
   if (data.provider === "ebay" && ebayDisabled()) return fail("eBay integrations are disabled.");
-  const location = authorizeUrl(data.provider, data.nonce);
+  const ebayRole = data.provider === "ebay" ? data.meta?.role || null : null;
+  const location = authorizeUrl(data.provider, data.nonce, { ebayRole });
   const href = location
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")

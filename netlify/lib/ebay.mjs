@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { decryptSecret, encryptSecret, requireEnv, serviceClient } from "./server.mjs";
+import { requireEnv, serviceClient } from "./server.mjs";
 import {
   EBAY_OAUTH_SCOPES,
   ebayHosts,
@@ -8,6 +8,8 @@ import {
   ebayRuName,
   ebayDisabled,
   ebayOrdersOnly,
+  ebayListingAllowed,
+  marketplaceIdFromEnv,
   requireEbayEnabled,
   requireEbayListingEnabled,
 } from "./ebay-env.mjs";
@@ -22,6 +24,7 @@ import { sendResend } from "./receipt.mjs";
 import { ebayFeeCents, ebayOrderAmounts, ebayShipTo } from "./ebay-price.mjs";
 import {
   compactShippingCatalog,
+  endTradingItem,
   getSellerOrders,
   getSellerUsername,
   getShippingServiceDetails,
@@ -29,11 +32,22 @@ import {
   tradingOrderIsSale,
   tradingOrderToIngest,
 } from "./ebay-trading.mjs";
+import {
+  accountAllowsListing,
+  disconnectEbayAccount,
+  ebayFetchAccount,
+  listEbayAccounts,
+  loadEbayAccount,
+  resolveEbayAccount,
+  userTokenForAccount,
+} from "./ebay-accounts.mjs";
+import { ensureBusinessPolicies } from "./ebay-policies.mjs";
 
 export { EBAY_OAUTH_SCOPES, ebayHosts, ebayItemViewUrl, ebayOrderViewUrl, ebayRuName, formatEbayError, getSellerUsername };
+export { listEbayAccounts, resolveEbayAccount, loadEbayAccount };
 
 export function marketplaceId() {
-  return process.env.EBAY_MARKETPLACE_ID || "EBAY_US";
+  return marketplaceIdFromEnv();
 }
 
 function basicAuth() {
@@ -58,153 +72,35 @@ export async function exchangeEbayCode(code) {
   return json;
 }
 
-async function refreshEbay(refreshToken) {
-  const { api } = ebayHosts(process.env.EBAY_ENV);
-  // Do NOT pass `scope` on refresh. Requesting scopes the user never consented to
-  // (or the app no longer has) returns invalid_scope and blocks every ebay-sync tick.
-  // Omitting scope reissues the originally granted scopes.
-  const body = new URLSearchParams({
-    grant_type: "refresh_token",
-    refresh_token: refreshToken,
-  });
-  const res = await fetch(`${api}/identity/v1/oauth2/token`, {
-    method: "POST",
-    headers: { Authorization: `Basic ${basicAuth()}`, "Content-Type": "application/x-www-form-urlencoded" },
-    body,
-  });
-  const json = await res.json();
-  if (!res.ok) throw new Error(json.error_description || json.error || "ebay_refresh_failed");
-  return json;
+/** @deprecated Prefer resolveEbayAccount / listEbayAccounts. Returns a connection-shaped row. */
+export async function loadEbayConnection(storeId, hint = {}) {
+  const account = await resolveEbayAccount(storeId, hint);
+  return {
+    store_id: storeId,
+    provider: "ebay",
+    status: account.status,
+    account_label: account.username,
+    token_ciphertext: account.token_ciphertext,
+    refresh_ciphertext: account.refresh_ciphertext,
+    scopes: account.scopes,
+    expires_at: account.expires_at,
+    last_error: account.last_error,
+    connected_at: account.connected_at,
+    ebay_account_id: account.id,
+    role: account.role,
+    _account: account,
+  };
 }
 
-export async function loadEbayConnection(storeId) {
-  const sb = serviceClient();
-  const { data, error } = await sb
-    .from("connections")
-    .select("*")
-    .eq("store_id", storeId)
-    .eq("provider", "ebay")
-    .maybeSingle();
-  if (error) throw new Error(error.message);
-  if (!data || data.status !== "connected" || !data.token_ciphertext) {
-    const err = new Error("ebay_not_connected");
-    err.code = "ebay_not_connected";
-    throw err;
-  }
-  return data;
+export async function userToken(storeId, hint = {}) {
+  const account = hint._account || (await resolveEbayAccount(storeId, hint));
+  return userTokenForAccount(account);
 }
 
-export async function userToken(storeId) {
-  requireEbayEnabled();
-  const row = await loadEbayConnection(storeId);
-  const exp = row.expires_at ? new Date(row.expires_at).getTime() : 0;
-  if (exp > Date.now() + 120_000) return decryptSecret(row.token_ciphertext);
-  if (!row.refresh_ciphertext) throw new Error("ebay_needs_reconnect");
-  const sb = serviceClient();
-  let tokens;
-  try {
-    tokens = await refreshEbay(decryptSecret(row.refresh_ciphertext));
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    await sb
-      .from("connections")
-      .update({
-        last_error: message.slice(0, 500),
-        updated_at: new Date().toISOString(),
-      })
-      .eq("store_id", storeId)
-      .eq("provider", "ebay");
-    throw err;
-  }
-  const access = tokens.access_token;
-  const refresh = tokens.refresh_token ? encryptSecret(tokens.refresh_token) : row.refresh_ciphertext;
-  const expiresIn = Number(tokens.expires_in || 7200);
-  const scopes = String(tokens.scope || "")
-    .split(/[ ,]+/)
-    .filter(Boolean);
-  await sb
-    .from("connections")
-    .update({
-      token_ciphertext: encryptSecret(access),
-      refresh_ciphertext: refresh,
-      expires_at: new Date(Date.now() + expiresIn * 1000).toISOString(),
-      scopes: scopes.length ? scopes : row.scopes,
-      last_error: null,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("store_id", storeId)
-    .eq("provider", "ebay");
-  return access;
-}
-
-export async function ebayFetch(storeId, method, path, body) {
-  requireEbayEnabled();
-  const hosts = ebayHosts(process.env.EBAY_ENV);
-  const base = String(path).startsWith("/sell/finances/") ? hosts.finances : hosts.api;
-  const token = await userToken(storeId);
-  const mutate = method !== "GET";
-  if (mutate) {
-    await floorLog({
-      storeId,
-      event: "ebay.request",
-      message: `${method} ${path}`,
-      detail: { method, path, body: redact(body) },
-    });
-  }
-  const res = await fetch(`${base}${path}`, {
-    method,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      Accept: "application/json",
-      "Content-Language": "en-US",
-      "Accept-Language": "en-US",
-      "X-EBAY-C-MARKETPLACE-ID": marketplaceId(),
-    },
-    body: body == null ? undefined : JSON.stringify(body),
-  });
-  const text = await res.text();
-  let json = null;
-  try {
-    json = text ? JSON.parse(text) : null;
-  } catch {
-    json = { raw: text };
-  }
-  if (!res.ok) {
-    const payload = {
-      method,
-      path,
-      status: res.status,
-      errors: json?.errors ?? null,
-      warnings: json?.warnings ?? null,
-      body: json,
-      raw: text?.slice?.(0, 8000) || text || null,
-    };
-    console.log("ebay_api_error_full", JSON.stringify(payload));
-    await floorLog({
-      storeId,
-      level: "error",
-      event: "ebay.error",
-      message: `${method} ${path} ${res.status}`,
-      detail: payload,
-    });
-    const msg = formatEbayError(json, text || `eBay HTTP ${res.status}`);
-    const err = new Error(msg);
-    err.status = res.status;
-    err.body = json;
-    err.path = path;
-    err.raw = text;
-    throw err;
-  }
-  if (mutate) {
-    await floorLog({
-      storeId,
-      event: "ebay.response",
-      message: `${method} ${path} ${res.status}`,
-      detail: { method, path, status: res.status, body: redact(json) },
-    });
-  }
-  return json;
+/** REST call as a specific account (or selling/default). */
+export async function ebayFetch(storeId, method, path, body, hint = {}) {
+  const account = hint._account || (await resolveEbayAccount(storeId, hint));
+  return ebayFetchAccount(account, method, path, body);
 }
 
 async function quietGet(storeId, path) {
@@ -582,7 +478,23 @@ async function ensurePaymentPolicy(storeId, market, existing) {
   return String(created.paymentPolicyId || created.id);
 }
 
-async function ensurePolicies(storeId) {
+async function ensurePolicies(storeId, accountHint = {}) {
+  // Prefer the named OBI business policies on the selling account.
+  try {
+    const selling = await resolveEbayAccount(storeId, { role: "selling", ...accountHint });
+    if (selling.role === "selling") {
+      if (selling.payment_policy_id && selling.return_policy_id && selling.fulfillment_policy_id) {
+        return {
+          payment: selling.payment_policy_id,
+          returnP: selling.return_policy_id,
+          fulfillment: selling.fulfillment_policy_id,
+        };
+      }
+      return ensureBusinessPolicies(selling);
+    }
+  } catch (err) {
+    if (err.code !== "ebay_not_connected" && err.code !== "ebay_account_not_found") throw err;
+  }
   const market = marketplaceId();
   await optInToSellingPolicies(storeId);
   const payments = await listPolicies(storeId, "payment");
@@ -765,8 +677,12 @@ function listingCopy(unit) {
 }
 
 export async function listSku(storeId, sku, draft = null) {
-  requireEbayListingEnabled();
+  const selling = await resolveEbayAccount(storeId, { role: "selling" }).catch(async () =>
+    resolveEbayAccount(storeId),
+  );
+  requireEbayListingEnabled(selling);
   setTrace({ storeId, sku, source: "ebay-list" });
+  const hint = { _account: selling, accountId: selling.id, role: "selling" };
   const sb = serviceClient();
   const { data: unit, error } = await sb.from("units").select("*").eq("store_id", storeId).eq("sku", sku).maybeSingle();
   if (error) throw new Error(error.message);
@@ -786,6 +702,8 @@ export async function listSku(storeId, sku, draft = null) {
   const images = draft?.imageUrls?.length ? draft.imageUrls : await photoUrls(storeId, sku);
   const epid = draft ? null : await catalogEpid(storeId, unit);
   const loc = await ensureLocation(storeId);
+  // ensureLocation / catalogEpid / ebayFetch use default resolve — pin selling account for all subsequent calls
+  const fetchHint = hint;
   const copy = draft?.title ? { title: draft.title, description: draft.description || "" } : listingCopy(unit);
   let aspects;
   let cat;
@@ -801,7 +719,7 @@ export async function listSku(storeId, sku, draft = null) {
     condition = await prepareUnitCondition({ unit, liveCheck: true });
   }
   const pkg = draft?.package || packageSize(unit);
-  const policies = draft?.policies || (await ensurePolicies(storeId));
+  const policies = draft?.policies || (await ensurePolicies(storeId, fetchHint));
   const priceCents = draft?.priceCents ?? unit.ask_cents;
   const identifiers = ebayIdentifiers(unit, aspects);
   if (!identifiers.validBrand) throw new Error("Brand needed before pushing to eBay.");
@@ -919,19 +837,29 @@ export async function listSku(storeId, sku, draft = null) {
       status: "listed",
       listing_id: listingId,
       offer_id: offerId,
+      ebay_account_id: selling.id || null,
       listed_at: new Date().toISOString(),
       delisted_at: null,
     },
     { onConflict: "store_id,sku,channel" },
   );
-  return { sku, offerId, listingId, viewUrl: ebayItemViewUrl(listingId) };
+  return { sku, offerId, listingId, viewUrl: ebayItemViewUrl(listingId), accountId: selling.id, username: selling.username };
 }
 
 export async function withdrawSku(storeId, sku) {
-  if (ebayOrdersOnly()) {
-    return { sku, skipped: true, reason: "orders_only" };
+  let selling = null;
+  try {
+    selling = await resolveEbayAccount(storeId, { role: "selling" });
+  } catch {
+    selling = null;
   }
-  requireEbayListingEnabled();
+  // Listing-capable selling account always wins over the legacy global orders-only flag.
+  if (!selling || !accountAllowsListing(selling)) {
+    if (ebayOrdersOnly() || !ebayListingAllowed(selling)) {
+      return { sku, skipped: true, reason: "orders_only" };
+    }
+  }
+  requireEbayListingEnabled(selling);
   const sb = serviceClient();
   const { data: row } = await sb
     .from("listings")
@@ -940,18 +868,48 @@ export async function withdrawSku(storeId, sku) {
     .eq("sku", sku)
     .eq("channel", "ebay")
     .maybeSingle();
+
+  let account = selling;
+  if (row?.ebay_account_id) {
+    try {
+      account = await loadEbayAccount(storeId, { id: row.ebay_account_id });
+    } catch {
+      account = selling;
+    }
+  }
+  const hint = { _account: account, accountId: account?.id };
+
   let offerId = row?.offer_id;
   if (!offerId) {
-    const offers = await ebayFetch(storeId, "GET", `/sell/inventory/v1/offer?sku=${encodeURIComponent(sku)}`);
-    offerId = offers?.offers?.[0]?.offerId;
+    try {
+      const offers = await ebayFetch(storeId, "GET", `/sell/inventory/v1/offer?sku=${encodeURIComponent(sku)}`, undefined, hint);
+      offerId = offers?.offers?.[0]?.offerId;
+    } catch {
+      offerId = null;
+    }
   }
   if (offerId) {
     try {
       await ebayFetch(storeId, "POST", `/sell/inventory/v1/offer/${offerId}/withdraw`, {
         listingId: row?.listing_id || undefined,
-      });
+      }, hint);
     } catch (err) {
-      if (!/already|not published|unpublished/i.test(err.message)) throw err;
+      if (!/already|not published|unpublished/i.test(err.message)) {
+        // Trading EndItem fallback for listings created outside Inventory API (migration / Vendoo).
+        if (row?.listing_id && account) {
+          const token = await userTokenForAccount(account);
+          await endTradingItem(token, row.listing_id, "NotAvailable");
+        } else {
+          throw err;
+        }
+      }
+    }
+  } else if (row?.listing_id && account) {
+    const token = await userTokenForAccount(account);
+    try {
+      await endTradingItem(token, row.listing_id, "NotAvailable");
+    } catch (err) {
+      if (!/already|ended|not found|invalid item/i.test(err.message)) throw err;
     }
   }
   await sb.from("listings").upsert(
@@ -962,6 +920,7 @@ export async function withdrawSku(storeId, sku) {
       status: "delisted",
       listing_id: row?.listing_id ?? null,
       offer_id: offerId ?? row?.offer_id ?? null,
+      ebay_account_id: row?.ebay_account_id ?? account?.id ?? null,
       delisted_at: new Date().toISOString(),
     },
     { onConflict: "store_id,sku,channel" },
@@ -973,7 +932,7 @@ export async function withdrawSku(storeId, sku) {
     .eq("sku", sku)
     .eq("channel", "ebay")
     .is("completed_at", null);
-  return { sku, offerId };
+  return { sku, offerId, accountId: account?.id || null };
 }
 
 /** Clear Floor's E when eBay already ended the offer (Seller Hub / API withdraw). */
@@ -1033,8 +992,17 @@ async function emailEndFailure(sb, storeId, sku, message) {
 }
 
 export async function withdrawOpenEbayTasks() {
-  if (ebayDisabled() || ebayOrdersOnly()) return [];
+  if (ebayDisabled()) return [];
+  // Skip only when no selling account exists AND legacy orders-only is on.
   const sb = serviceClient();
+  const { data: sellingAny } = await sb
+    .from("ebay_accounts")
+    .select("id")
+    .eq("role", "selling")
+    .eq("status", "connected")
+    .limit(1)
+    .maybeSingle();
+  if (!sellingAny && ebayOrdersOnly()) return [];
   const { data, error } = await sb
     .from("delist_tasks")
     .select("id, store_id, sku, attempts, alerted_at")
@@ -1213,8 +1181,16 @@ export async function ingestEbayOrder(storeId, order) {
       },
       { onConflict: "store_id,sku,channel" },
     );
-    // Orders-only: do not end the eBay listing via API (Vendoo / eBay handle quantity).
-    if (!ebayOrdersOnly()) await withdrawSku(storeId, rawSku).catch(() => undefined);
+    // Orders-only accounts: do not end via API (quantity already gone on that seller).
+    // Selling account: end on eBay when Floor records the sale (also covers sold-elsewhere delist path).
+    try {
+      const selling = await resolveEbayAccount(storeId, { role: "selling" });
+      if (accountAllowsListing(selling)) {
+        await withdrawSku(storeId, rawSku).catch(() => undefined);
+      }
+    } catch {
+      if (!ebayOrdersOnly()) await withdrawSku(storeId, rawSku).catch(() => undefined);
+    }
   }
   return { sku, orderId, saleId: sale?.id ?? null, matchStatus };
 }
@@ -1291,9 +1267,9 @@ async function ingestFrom(storeId, order, source, bag) {
  * Unpaid / reversed cancels are stored as status=canceled (not refunded) so Admin groups them
  * under Cancelled rather than implying a kept seller payout that was then refunded.
  */
-export async function reconcileCanceledEbayOrders(storeId) {
+export async function reconcileCanceledEbayOrders(storeId, hint = {}) {
   const sb = serviceClient();
-  const json = await ebayFetch(storeId, "GET", fulfillmentOrdersPath());
+  const json = await ebayFetch(storeId, "GET", fulfillmentOrdersPath(), undefined, hint);
   const out = [];
   for (const order of json?.orders ?? []) {
     const orderId = order?.orderId;
@@ -1369,10 +1345,12 @@ export async function reconcileCanceledEbayOrders(storeId) {
   return out;
 }
 
-export async function pollEbayOrders(storeId) {
+export async function pollEbayOrders(storeId, accountHint = {}) {
+  const account = accountHint._account || (await resolveEbayAccount(storeId, accountHint));
+  const hint = { _account: account, accountId: account.id };
   const bag = { results: [], skus: new Set(), orders: new Set() };
   try {
-    const json = await ebayFetch(storeId, "GET", fulfillmentOrdersPath());
+    const json = await ebayFetch(storeId, "GET", fulfillmentOrdersPath(), undefined, hint);
     for (const order of json?.orders ?? []) {
       // Do not ingest already-canceled / fully-refunded orders as new paid sales.
       const cancelState = String(order?.cancelStatus?.cancelState || "");
@@ -1381,6 +1359,8 @@ export async function pollEbayOrders(storeId) {
         bag.results.push({
           orderId: order?.orderId,
           source: "fulfillment",
+          accountId: account.id,
+          username: account.username,
           skipped: true,
           reason: "canceled_or_refunded",
         });
@@ -1389,21 +1369,27 @@ export async function pollEbayOrders(storeId) {
       await ingestFrom(storeId, order, "fulfillment", bag);
     }
   } catch (err) {
-    bag.results.push({ source: "fulfillment", error: err instanceof Error ? err.message : String(err) });
+    bag.results.push({
+      source: "fulfillment",
+      accountId: account.id,
+      username: account.username,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
   try {
-    const reconciled = await reconcileCanceledEbayOrders(storeId);
-    if (reconciled.length) bag.results.push({ source: "cancel_reconcile", reconciled });
+    const reconciled = await reconcileCanceledEbayOrders(storeId, hint);
+    if (reconciled.length) bag.results.push({ source: "cancel_reconcile", accountId: account.id, reconciled });
   } catch (err) {
     bag.results.push({
       source: "cancel_reconcile",
+      accountId: account.id,
       error: err instanceof Error ? err.message : String(err),
     });
   }
 
   let soldQty = {};
   let extras = [];
-  if (!ebayOrdersOnly()) {
+  if (accountAllowsListing(account)) {
     try {
       const listed = await listedSoldBySku(storeId);
       soldQty = listed.soldQty;
@@ -1414,13 +1400,18 @@ export async function pollEbayOrders(storeId) {
   }
 
   try {
-    const trading = await getSellerOrders(await userToken(storeId));
+    const trading = await getSellerOrders(await userTokenForAccount(account));
     for (const order of trading) {
       if (!tradingOrderIsSale(order, soldQty)) continue;
       await ingestFrom(storeId, tradingOrderToIngest(order), "trading", bag);
     }
   } catch (err) {
-    bag.results.push({ source: "trading", error: err instanceof Error ? err.message : String(err) });
+    bag.results.push({
+      source: "trading",
+      accountId: account.id,
+      username: account.username,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 
   for (const row of extras) {
@@ -1438,6 +1429,15 @@ export async function pollEbayOrders(storeId) {
 
   const sb = serviceClient();
   const syncErrors = bag.results.filter((r) => r?.error).map((r) => `${r.source}: ${r.error}`);
+  if (account.id) {
+    await sb
+      .from("ebay_accounts")
+      .update({
+        updated_at: new Date().toISOString(),
+        last_error: syncErrors.length ? syncErrors.join(" | ").slice(0, 500) : null,
+      })
+      .eq("id", account.id);
+  }
   await sb
     .from("connections")
     .update({
@@ -1456,22 +1456,61 @@ export async function pollEbayOrders(storeId) {
 export async function pollAllStores() {
   if (ebayDisabled()) return [];
   const sb = serviceClient();
-  const { data, error } = await sb.from("connections").select("store_id").eq("provider", "ebay").eq("status", "connected");
+  const { data: accounts, error } = await sb
+    .from("ebay_accounts")
+    .select("id,store_id,username,role")
+    .eq("status", "connected");
   if (error) throw new Error(error.message);
+
+  const byStore = new Map();
+  for (const row of accounts ?? []) {
+    if (!byStore.has(row.store_id)) byStore.set(row.store_id, []);
+    byStore.get(row.store_id).push(row);
+  }
+
+  // Legacy stores that still only have connections(ebay).
+  if (!byStore.size) {
+    const { data: legacy } = await sb.from("connections").select("store_id").eq("provider", "ebay").eq("status", "connected");
+    for (const row of legacy ?? []) byStore.set(row.store_id, [{ id: null, store_id: row.store_id, role: "orders_only" }]);
+  }
+
   const out = [];
-  for (const row of data ?? []) {
-    try {
-      out.push({ storeId: row.store_id, orders: await pollEbayOrders(row.store_id) });
-    } catch (err) {
-      out.push({ storeId: row.store_id, error: err instanceof Error ? err.message : String(err) });
+  for (const [storeId, rows] of byStore) {
+    const accountResults = [];
+    for (const row of rows) {
+      try {
+        const hint = row.id ? { accountId: row.id } : {};
+        accountResults.push({
+          accountId: row.id,
+          username: row.username,
+          role: row.role,
+          orders: await pollEbayOrders(storeId, hint),
+        });
+      } catch (err) {
+        accountResults.push({
+          accountId: row.id,
+          username: row.username,
+          role: row.role,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
     }
+    out.push({ storeId, accounts: accountResults, orders: accountResults.flatMap((a) => a.orders || []) });
   }
   return out;
 }
 
-export async function disconnectEbay(storeId) {
+export async function disconnectEbay(storeId, accountId = null) {
   const sb = serviceClient();
-  const { error } = await sb.from("connections").upsert({
+  if (accountId) {
+    await disconnectEbayAccount(storeId, accountId);
+    return { ok: true, accounts: await listEbayAccounts(storeId) };
+  }
+  const accounts = await listEbayAccounts(storeId);
+  for (const row of accounts) {
+    if (row.status === "connected") await disconnectEbayAccount(storeId, row.id);
+  }
+  await sb.from("connections").upsert({
     store_id: storeId,
     provider: "ebay",
     status: "disconnected",
@@ -1484,22 +1523,37 @@ export async function disconnectEbay(storeId) {
     last_error: null,
     updated_at: new Date().toISOString(),
   });
-  if (error) throw new Error(error.message);
   await sb.from("channel_config").upsert(
     { store_id: storeId, channel: "ebay", mode: "off", updated_at: new Date().toISOString() },
     { onConflict: "store_id,channel" },
   );
-  return { ok: true };
+  return { ok: true, accounts: await listEbayAccounts(storeId) };
 }
 
 export async function ebayConnectionStatus(storeId) {
   const sb = serviceClient();
-  const { data: conn } = await sb
-    .from("connections")
-    .select("status,account_label,connected_at,updated_at,expires_at,last_error,scopes")
-    .eq("store_id", storeId)
-    .eq("provider", "ebay")
-    .maybeSingle();
+  const accounts = await listEbayAccounts(storeId);
+  const selling = accounts.find((a) => a.role === "selling" && a.status === "connected") || null;
+  const ordersOnlyAccount =
+    accounts.find((a) => a.role === "orders_only" && a.status === "connected") || null;
+  const primary =
+    selling ||
+    ordersOnlyAccount ||
+    accounts.find((a) => a.status === "connected") ||
+    null;
+
+  // Legacy fallback display when ebay_accounts not backfilled yet.
+  let legacy = null;
+  if (!accounts.length) {
+    const { data: conn } = await sb
+      .from("connections")
+      .select("status,account_label,connected_at,updated_at,expires_at,last_error,scopes")
+      .eq("store_id", storeId)
+      .eq("provider", "ebay")
+      .maybeSingle();
+    legacy = conn;
+  }
+
   const { data: sync } = await sb
     .from("store_settings")
     .select("value")
@@ -1512,18 +1566,27 @@ export async function ebayConnectionStatus(storeId) {
   } catch {
     lastSync = sync?.value ?? null;
   }
+
+  const connected = Boolean(primary) || legacy?.status === "connected";
   return {
-    connected: conn?.status === "connected",
-    username: conn?.account_label || null,
-    connectedAt: conn?.connected_at || null,
+    connected,
+    username: primary?.username || legacy?.account_label || null,
+    connectedAt: primary?.connected_at || legacy?.connected_at || null,
     lastSyncAt: lastSync,
-    expiresAt: conn?.expires_at || null,
-    lastError: conn?.last_error || null,
-    scopes: conn?.scopes || [],
-    hasFinances: Array.isArray(conn?.scopes) && conn.scopes.some((s) => String(s).includes("sell.finances")),
-    ordersOnly: ebayOrdersOnly(),
+    expiresAt: primary?.expires_at || legacy?.expires_at || null,
+    lastError: primary?.last_error || legacy?.last_error || null,
+    scopes: primary?.scopes || legacy?.scopes || [],
+    hasFinances:
+      (Array.isArray(primary?.scopes) && primary.scopes.some((s) => String(s).includes("sell.finances"))) ||
+      (Array.isArray(legacy?.scopes) && legacy.scopes.some((s) => String(s).includes("sell.finances"))),
+    ordersOnly: !selling && (ebayOrdersOnly() || Boolean(ordersOnlyAccount)),
+    listingEnabled: Boolean(selling),
     disabled: ebayDisabled(),
     requiredUsername: process.env.EBAY_REQUIRED_USERNAME || "pgg124-5",
+    sellingAccount: selling,
+    ordersOnlyAccount,
+    accounts,
+    migrationReady: Boolean(selling?.policiesReady && ordersOnlyAccount),
   };
 }
 
@@ -1532,7 +1595,13 @@ export function notificationChallenge(challengeCode, endpoint, verificationToken
 }
 
 export async function subscribeNotifications(storeId) {
-  if (ebayOrdersOnly()) return { skipped: true, reason: "orders_only" };
+  let selling = null;
+  try {
+    selling = await resolveEbayAccount(storeId, { role: "selling" });
+  } catch {
+    selling = null;
+  }
+  if (!accountAllowsListing(selling) && ebayOrdersOnly()) return { skipped: true, reason: "orders_only" };
   const endpoint = requireEnv("EBAY_NOTIFICATION_ENDPOINT");
   const token = requireEnv("EBAY_NOTIFICATION_TOKEN");
   const dests = await ebayFetch(storeId, "GET", "/commerce/notification/v1/destination");

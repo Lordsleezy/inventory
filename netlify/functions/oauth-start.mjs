@@ -17,16 +17,22 @@ async function handle(event) {
     if (provider === "ebay" && ebayDisabled()) return json(503, { error: "ebay_disabled" });
     const { user, staff } = await ownerFromEvent(event);
     const nonce = randomBytes(24).toString("hex");
+    const roleParam = String(event.queryStringParameters?.role || "").trim();
+    const meta =
+      provider === "ebay"
+        ? { role: roleParam === "selling" ? "selling" : "orders_only" }
+        : {};
     const sb = serviceClient();
     const ins = await sb.from("oauth_states").insert({
       store_id: staff.store_id,
       user_id: user.id,
       provider,
       nonce,
+      meta,
       expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
     });
     if (ins.error) return json(500, { error: ins.error.message });
-    return json(200, { url: hopUrl(event, nonce) });
+    return json(200, { url: hopUrl(event, nonce), role: meta.role || null });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (message === "not_owner") {
