@@ -6,6 +6,7 @@
  * Listing gated by AMAZON_LISTING_ENABLED=1. Never upload AI images — catalog ASIN offers only.
  */
 import { serviceClient, decryptSecret, encryptSecret, requireEnv } from "./server.mjs";
+import { sendInternalAlert, gmailConfigured } from "./mail.mjs";
 
 const LWA_TOKEN = "https://api.amazon.com/auth/o2/token";
 /** US marketplace — not a secret; keep out of Netlify env to save Lambda budget / clutter. */
@@ -859,10 +860,9 @@ export async function zeroAmazonQuantityForSku(storeId, sku) {
 }
 
 async function alertDoubleSellAmazon(sku, orderId, detail) {
-  const key = process.env.RESEND_API_KEY;
   const to = process.env.AMAZON_DOUBLE_SELL_EMAIL || "pgg124@gmail.com";
-  if (!key) {
-    console.log("amazon_double_sell_no_resend", JSON.stringify({ sku, orderId }));
+  if (!gmailConfigured()) {
+    console.log("amazon_double_sell_no_gmail_smtp", JSON.stringify({ sku, orderId }));
     return;
   }
   const text = [
@@ -871,15 +871,10 @@ async function alertDoubleSellAmazon(sku, orderId, detail) {
     `Detail: ${JSON.stringify(detail).slice(0, 500)}`,
     `(No buyer PII is included — we do not have restricted order roles.)`,
   ].join("\n");
-  await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      from: process.env.RESEND_FROM || "Floor <onboarding@resend.dev>",
-      to: [to],
-      subject: `URGENT: double sale risk SKU ${sku} on Amazon`,
-      text,
-    }),
+  await sendInternalAlert({
+    to,
+    subject: `URGENT: double sale risk SKU ${sku} on Amazon`,
+    text,
   }).catch(() => undefined);
 }
 

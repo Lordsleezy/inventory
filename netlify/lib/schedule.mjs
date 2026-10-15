@@ -24,8 +24,10 @@ export function isNetlifyScheduleEvent(event) {
 
 /** Expected cadence for the Jobs health panel (minutes). Keep in sync with root netlify.toml. */
 export const SCHEDULED_JOBS = [
-  { source: "dispatch-alerts", everyMin: 5, cron: "*/5 * * * *", label: "Sale / delist alert emails" },
+  { source: "dispatch-alerts", everyMin: 5, cron: "*/5 * * * *", label: "Sale / delist alert emails (Gmail SMTP)" },
+  { source: "gmail-sales-poll", everyMin: 2, cron: "*/2 * * * *", label: "Gmail sales inbox (Depop/Mercari)" },
   { source: "ebay-sync", everyMin: 3, cron: "*/3 * * * *", label: "eBay orders + withdraw" },
+  { source: "amazon-sync", everyMin: 10, cron: "*/10 * * * *", label: "Amazon orders + qty" },
   { source: "google-sync", everyMin: 1, cron: "* * * * *", label: "Google Merchant sync" },
   { source: "google-reconcile", everyMin: 360, cron: "0 */6 * * *", label: "Google reconcile" },
   { source: "channel-fee-sync", everyMin: 15, cron: "*/15 * * * *", label: "eBay/Square fee reconcile" },

@@ -1,4 +1,4 @@
-import { sendResend } from "./receipt.mjs";
+import { sendInternalAlert } from "./mail.mjs";
 import { ownerEmails } from "./web-order-email.mjs";
 
 export const SITE_URL = (process.env.STORE_SITE_URL || "https://openboxindustries.com").replace(/\/$/, "");
@@ -86,7 +86,7 @@ export async function runListingCheck(sb, storeId, { fetchImpl = fetch, email = 
       "Floor Admin → Online selling shows the latest check.", "", "Open Box Industries"].join("\n");
     let sent = 0;
     for (const addr of to) {
-      const r = await sendResend({ to: addr, subject: `Website listing check: ${result.problems.length} problem(s)`, text }).catch(() => ({}));
+      const r = await sendInternalAlert({ to: addr, subject: `Website listing check: ${result.problems.length} problem(s)`, text }).catch(() => ({}));
       if (r.ok) sent++;
     }
     if (sent) emailedAt = new Date().toISOString();

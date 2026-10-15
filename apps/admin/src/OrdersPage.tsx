@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { floorFunctionUrl } from './floorApi';
 
 const CHANNEL_LABEL: Record<string, string> = {
   website: 'Website',
   ebay: 'eBay',
+  amazon: 'Amazon',
   whatnot: 'Whatnot',
   depop: 'Depop',
   mercari: 'Mercari',
@@ -128,8 +130,7 @@ export function OrdersPage({ client, accessToken, money, stamp }: Props) {
     if (reason === null) return;
     setBusy(o.id + 'cancel'); setError('');
     try {
-      const functionsBase = (import.meta.env.VITE_FLOOR_FUNCTIONS_URL || 'https://inventoryobi.netlify.app').replace(/\/$/, '');
-      const res = await fetch(`${functionsBase}/.netlify/functions/web-order-admin`, {
+      const res = await fetch(floorFunctionUrl('web-order-admin'), {
         method: 'POST', headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'cancel_refund', id: o.id, reason }),
       });
