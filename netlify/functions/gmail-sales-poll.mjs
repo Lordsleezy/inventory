@@ -1,10 +1,10 @@
 import { ImapFlow } from "imapflow";
 import PostalMime from "postal-mime";
-import { json, corsHeaders, serviceClient } from "../lib/server.mjs";
+import { json, corsHeaders, serviceClient, connectionAdminFromEvent } from "../lib/server.mjs";
 import { wrapHandler, floorLog, asNetlifyFunction } from "../lib/floor-log.mjs";
 import { withLock } from "../lib/bg-guard.mjs";
 import { isNetlifyScheduleEvent } from "../lib/schedule.mjs";
-import { ingestMarketplaceMail, loadStoreChannels } from "../lib/marketplace-email-parse.mjs";
+import { ingestMarketplaceMail, loadStoreChannels, looksLikeSaleNotice } from "../lib/marketplace-email-parse.mjs";
 
 /**
  * Gmail inbox reader: every 2 minutes, read new Depop / Mercari mail from the same Gmail account that
@@ -17,6 +17,8 @@ import { ingestMarketplaceMail, loadStoreChannels } from "../lib/marketplace-ema
  *   GMAIL_POLL_SENDERS        comma list of sender domains (default "depop.com,mercari.com")
  *   GMAIL_POLL_LOOKBACK_DAYS  how far back to look (default 45)
  *   GMAIL_POLL_INCLUDE_SEEN   "1" = also look at already-read mail in the lookback window (dedupe by Message-ID)
+ * Manual rescan: POST { "include_seen": true } with owner/manager Bearer token or x-marketplace-secret.
+ * Previously-ignored Message-IDs are re-evaluated after a parser fix.
  *   GMAIL_POLL_EXTRA_USER / GMAIL_POLL_EXTRA_APP_PASSWORD  optional second inbox (e.g. main Gmail)
  */
 
@@ -37,12 +39,30 @@ function fromAllowed(address, domains) {
   return domains.some((d) => host === d || host.endsWith(`.${d}`));
 }
 
-function authorized(event) {
+/** True when From/Reply-To is Depop/Mercari, or a rewritten forward still looks like their sale mail. */
+function mailAllowed(parsed, domains) {
+  const addresses = [parsed?.from?.address, ...(parsed?.replyTo || []).map((r) => r?.address)];
+  if (addresses.some((a) => fromAllowed(a, domains))) return true;
+  const subject = String(parsed?.subject || "");
+  const text = `${subject}\n${parsed?.text || ""}\n${parsed?.html || ""}`.replace(/<[^>]*>/g, " ");
+  if (!/\bdepop\b|\bmercari\b|depop\.com|mercari\.com/i.test(`${addresses.join(" ")} ${text.slice(0, 2500)}`)) {
+    return false;
+  }
+  return looksLikeSaleNotice(subject, text);
+}
+
+async function authorized(event) {
   if (isNetlifyScheduleEvent(event)) return true;
   const secret = process.env.MARKETPLACE_EMAIL_SECRET;
-  if (!secret) return false;
   const got = event.headers?.["x-marketplace-secret"] || event.headers?.["X-Marketplace-Secret"];
-  return got === secret;
+  if (secret && got === secret) return true;
+  // Owner/manager can trigger a manual rescan from the admin portal (Bearer token).
+  try {
+    await connectionAdminFromEvent(event, ["owner", "manager"]);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function pollAccounts() {
@@ -83,9 +103,16 @@ async function pollOneInbox(sb, { user, pass }, store, channels, domains, lookba
   try {
     const lock = await client.getMailboxLock("INBOX");
     try {
+      // From-domain search plus subject fallbacks for filter/manual forwards that rewrite From.
       const query = {
         since: new Date(Date.now() - lookbackDays * 86400_000),
-        or: domains.map((d) => ({ from: d })),
+        or: [
+          ...domains.map((d) => ({ from: d })),
+          { subject: "sale confirmation" },
+          { subject: "made a sale" },
+          { subject: "You've made a sale" },
+          { subject: "shipping label and sale" },
+        ],
       };
       if (!includeSeen) query.seen = false;
       const uids = ((await client.search(query, { uid: true })) || []).sort((a, b) => a - b);
@@ -104,8 +131,10 @@ async function pollOneInbox(sb, { user, pass }, store, channels, domains, lookba
             continue;
           }
           const parsed = await new PostalMime().parse(raw);
-          if (!fromAllowed(parsed.from?.address, domains)) {
+          if (!mailAllowed(parsed, domains)) {
             summary.skipped_sender++;
+            // Mark seen so non-sale subject hits (newsletter, etc.) do not starve the 15/run budget.
+            if (!alreadySeen) await client.messageFlagsAdd(uid, ["\\Seen"], { uid: true });
             continue;
           }
           const result = await ingestMarketplaceMail(sb, { store, channels, parsed, raw });
@@ -125,14 +154,14 @@ async function pollOneInbox(sb, { user, pass }, store, channels, domains, lookba
   return summary;
 }
 
-async function pollInbox(sb) {
+async function pollInbox(sb, { forceIncludeSeen = false } = {}) {
   const accounts = pollAccounts();
   if (!accounts.length) return { skipped: "gmail_not_configured" };
 
   const started = Date.now();
   const domains = senderDomains();
   const lookbackDays = Math.max(1, Number(process.env.GMAIL_POLL_LOOKBACK_DAYS) || 45);
-  const includeSeen = process.env.GMAIL_POLL_INCLUDE_SEEN === "1";
+  const includeSeen = forceIncludeSeen || process.env.GMAIL_POLL_INCLUDE_SEEN === "1";
   const { store, channels } = await loadStoreChannels(sb);
 
   const perAccount = [];
@@ -151,17 +180,26 @@ async function pollInbox(sb) {
 
 async function handle(event) {
   if (event.httpMethod === "OPTIONS") return { statusCode: 200, headers: corsHeaders(), body: "" };
-  if (!authorized(event)) return json(401, { error: "unauthorized" });
+  if (!(await authorized(event))) return json(401, { error: "unauthorized" });
   try {
+    let forceIncludeSeen = false;
+    if (event.httpMethod === "POST" && event.body) {
+      try {
+        const body = JSON.parse(event.body);
+        forceIncludeSeen = body?.include_seen === true || body?.action === "rescan_inbox";
+      } catch {
+        /* ignore bad JSON — schedule events have no body */
+      }
+    }
     const sb = serviceClient();
-    const result = await withLock("gmail-sales-poll", 90, () => pollInbox(sb), sb);
-    const active = result && (result.matched || result.needs_review || result.failed || result.ignored);
-    if (active) {
+    const result = await withLock("gmail-sales-poll", 90, () => pollInbox(sb, { forceIncludeSeen }), sb);
+    // Always leave a gmail.sales_poll breadcrumb (including found=0) so empty-inbox days are diagnosable.
+    if (result && !result.skipped) {
       await floorLog({
         level: result.failed ? "warn" : "info",
         event: "gmail.sales_poll",
-        message: `matched=${result.matched} review=${result.needs_review} ignored=${result.ignored} failed=${result.failed}`,
-        detail: result,
+        message: `found=${result.found || 0} matched=${result.matched || 0} review=${result.needs_review || 0} ignored=${result.ignored || 0} failed=${result.failed || 0}${forceIncludeSeen ? " rescan=1" : ""}`,
+        detail: { ...result, include_seen: forceIncludeSeen || process.env.GMAIL_POLL_INCLUDE_SEEN === "1" },
       });
     }
     return json(200, result);

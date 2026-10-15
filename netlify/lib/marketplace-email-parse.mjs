@@ -40,20 +40,59 @@ export const safeDate = (s) => {
   return Number.isNaN(+d) ? null : d.toISOString().slice(0, 10);
 };
 
-/** Noise we must not treat as a sale (offers, reminders, auth). */
+const SALE_SIGNAL =
+  /sold|you(?:'ve| have) made a sale|sale confirmation|shipping label and sale confirmation|order (?:confirmed|placed|complete|completed)|your item has sold|transaction (?:complete|completed)|payment received|item sold/i;
+
+/** Strong sale confirmation phrases that beat offer/ship-reminder wording in the same email. */
+const STRONG_SALE =
+  /you(?:'ve| have) made a sale|shipping label and sale confirmation|sale confirmation|your item has sold|item sold(?:\s+for)?|payment received/i;
+
+/**
+ * Noise we must not treat as a sale (offers, reminders, auth).
+ * Auth / "sign in" / "verify your" wording is subject-only — real Depop/Mercari sale
+ * emails put those phrases in footers and must still ingest.
+ */
 export function isMarketplaceNoise(subject, text) {
-  const s = `${subject || ''}\n${text || ''}`;
-  return /counter[\s-]?offer|you(?:'ve| have) received an offer|new offer|offer (?:received|expir|accepted|declined)|time to ship|ship(?:ping)? reminder|login|sign[\s-]?in|security alert|verify your|password reset|confirm your email/i.test(
-    s,
-  );
+  const subj = String(subject || '');
+  const body = String(text || '');
+  const combined = `${subj}\n${body}`;
+
+  if (/security alert|password reset|verify your (?:email|account)|confirm your email|new login|sign[\s-]?in attempt/i.test(subj)) {
+    return true;
+  }
+  if (/^(?:login|sign[\s-]?in)\b/i.test(subj.trim())) return true;
+
+  // Offers: never a sale notice (even if the word "sold" appears elsewhere).
+  if (
+    /counter[\s-]?offer|you(?:'ve| have) received an offer|\bnew offer\b|offer (?:received|expir|accepted|declined)/i.test(
+      combined,
+    )
+  ) {
+    return true;
+  }
+
+  // Ship reminders: subject-driven only. Sale confirmations often say "ship soon".
+  if (/^(?:time to ship|ship(?:ping)? reminder)\b/i.test(subj.trim()) || /\b(?:time to ship|ship(?:ping)? reminder)\b/i.test(subj)) {
+    return true;
+  }
+
+  return false;
 }
 
 export function looksLikeSaleNotice(subject, text) {
   const s = `${subject || ''}\n${text || ''}`;
-  if (isMarketplaceNoise(subject, text)) return false;
-  return /sold|you(?:'ve| have) made a sale|sale confirmation|shipping label and sale confirmation|order (?:confirmed|placed|complete|completed)|your item has sold|transaction (?:complete|completed)|payment received|item sold/i.test(
-    s,
-  );
+  const subj = String(subject || '');
+  // Auth / security subjects are never sales, even if the body mentions "sold".
+  if (/security alert|password reset|verify your (?:email|account)|confirm your email|new login|sign[\s-]?in attempt/i.test(subj)) {
+    return false;
+  }
+  if (/^(?:login|sign[\s-]?in)\b/i.test(subj.trim())) return false;
+  if (!SALE_SIGNAL.test(s)) return false;
+  if (isMarketplaceNoise(subject, text)) {
+    // A clear sale confirmation wins over a subject that looks like a ship reminder.
+    return STRONG_SALE.test(s);
+  }
+  return true;
 }
 
 export function parseMail(mail, channels = defaultChannels) {
@@ -65,15 +104,28 @@ export function parseMail(mail, channels = defaultChannels) {
     text.match(/\bSKU\s*[:#-]?\s*(\d{5})\b/i)?.[1] ||
     // Vendoo / internal subjects often end with (11412)
     String(mail.subject || '').match(/\((\d{5})\)\s*$/)?.[1] ||
+    // Depop/Mercari listing bodies sometimes bury "SKU 11412" without a colon.
+    text.match(/\bSKU\s+(\d{5})\b/i)?.[1] ||
     null;
-  const priceMatch = text.match(
-    /(?:sold\s+for|sale\s+price|item\s+price|item\s+subtotal|you've made a sale!?)\D{0,40}\$\s?([0-9]{1,6}(?:\.[0-9]{2})?)/i,
-  ) || String(mail.subject || '').match(/\$\s?([0-9]{1,6}(?:\.[0-9]{2})?)/);
+  const priceMatch =
+    text.match(
+      /(?:sold\s+for|sale\s+price|item\s+price|item\s+subtotal|you(?:'ve| have) made a sale!?|total\s+(?:sale\s+)?price)\D{0,40}\$\s?([0-9]{1,6}(?:\.[0-9]{2})?)/i,
+    ) ||
+    text.match(/\$\s?([0-9]{1,6}(?:\.[0-9]{2})?)\s*(?:sold|sale price|item price)/i) ||
+    String(mail.subject || '').match(/\$\s?([0-9]{1,6}(?:\.[0-9]{2})?)/);
   const price = priceMatch ? Math.round(Number(priceMatch[1]) * 100) : null;
-  const order = text.match(/(?:order|transaction|sale)\s*(?:number|#|no\.?|id)?\s*[:#-]?\s*([A-Z0-9-]{5,40})/i)?.[1] || null;
-  const ship = text.match(/(?:ship(?:ped)? by|ship before|ship no later than)\s*[:\-]?\s*([A-Z][a-z]+\s+\d{1,2}(?:,\s*\d{4})?)/i)?.[1];
+  // Require number/#/id after "sale" so "sale confirmation" is not an order id.
+  const order =
+    text.match(/(?:order|transaction)\s*(?:number|#|no\.?|id)?\s*[:#-]?\s*([A-Z0-9-]{5,40})/i)?.[1] ||
+    text.match(/sale\s*(?:number|#|no\.?|id)\s*[:#-]?\s*([A-Z0-9-]{5,40})/i)?.[1] ||
+    null;
+  const ship = text.match(
+    /(?:ship(?:ped)? by|ship before|ship no later than|ship by date)\s*[:\-]?\s*([A-Z][a-z]+\s+\d{1,2}(?:,\s*\d{4})?)/i,
+  )?.[1];
   const name = text.match(/(?:ship to|shipping name|recipient)\s*[:\-]\s*([^\r\n]+)/i)?.[1] || null;
-  const street = text.match(/\b\d{1,6}\s+[A-Za-z0-9.'# -]{3,70}\s(?:St|Street|Rd|Road|Ave|Avenue|Blvd|Drive|Dr|Lane|Ln|Way|Court|Ct)\.?\b/i)?.[0] || null;
+  const street =
+    text.match(/\b\d{1,6}\s+[A-Za-z0-9.'# -]{3,70}\s(?:St|Street|Rd|Road|Ave|Avenue|Blvd|Drive|Dr|Lane|Ln|Way|Court|Ct)\.?\b/i)?.[0] ||
+    null;
   const cityMatch = text.match(/([A-Za-z .'-]+),\s*([A-Z]{2})\s+(\d{5}(?:-\d{4})?)/);
   const email = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0] || null;
   const phone = text.match(/(?:\+?1[ .-]?)?\(?\d{3}\)?[ .-]?\d{3}[ .-]?\d{4}/)?.[0] || null;
@@ -89,12 +141,16 @@ export function parseMail(mail, channels = defaultChannels) {
     const m = text.match(re);
     return m ? Math.round(Number(m[1]) * 100) : null;
   };
-  const fee = money(/(?:selling|transaction|processing|marketplace|final value|platform)\s*(?:fee|commission)[^\d$]{0,30}\$\s?([0-9]{1,6}(?:\.[0-9]{2})?)/i);
+  const fee = money(
+    /(?:selling|transaction|processing|marketplace|final value|platform)\s*(?:fee|commission)[^\d$]{0,30}\$\s?([0-9]{1,6}(?:\.[0-9]{2})?)/i,
+  );
   const shipLabel =
     money(/(?:prepaid\s+|shipping\s+)label[^\d$]{0,30}\$\s?([0-9]{1,6}(?:\.[0-9]{2})?)/i) ||
     money(/label\s+cost[^\d$]{0,30}\$\s?([0-9]{1,6}(?:\.[0-9]{2})?)/i);
   const tax = money(/(?:sales|buyer[\s-]?paid|order)\s*tax[^\d$]{0,30}\$\s?([0-9]{1,6}(?:\.[0-9]{2})?)/i);
-  const payout = money(/(?:earnings|payout|net proceeds|you(?:'ll| will) (?:receive|earn)|take[\s-]?home)[^\d$]{0,30}\$\s?([0-9]{1,6}(?:\.[0-9]{2})?)/i);
+  const payout = money(
+    /(?:earnings|payout|net proceeds|you(?:'ll| will) (?:receive|earn)|take[\s-]?home)[^\d$]{0,30}\$\s?([0-9]{1,6}(?:\.[0-9]{2})?)/i,
+  );
   return {
     text,
     marketplace,
@@ -117,22 +173,25 @@ export async function geminiEmailHints(text) {
   const key = process.env.GEMINI_API_KEY;
   if (!key) return null;
   const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite';
-  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      contents: [
-        {
-          parts: [
-            {
-              text: `Extract only these fields from this marketplace sale email: item_title, order_number, ship_by (YYYY-MM-DD or null), buyer_name, buyer_email, buyer_phone, ship_line1, ship_line2, ship_city, ship_region, ship_postal, ship_country. Return JSON only. Do not infer missing values. Email:\n${text.slice(0, 14000)}`,
-            },
-          ],
-        },
-      ],
-      generationConfig: { responseMimeType: 'application/json', maxOutputTokens: 300, temperature: 0 },
-    }),
-  });
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [
+              {
+                text: `Extract only these fields from this marketplace sale email: item_title, order_number, ship_by (YYYY-MM-DD or null), buyer_name, buyer_email, buyer_phone, ship_line1, ship_line2, ship_city, ship_region, ship_postal, ship_country. Return JSON only. Do not infer missing values. Email:\n${text.slice(0, 14000)}`,
+              },
+            ],
+          },
+        ],
+        generationConfig: { responseMimeType: 'application/json', maxOutputTokens: 300, temperature: 0 },
+      }),
+    },
+  );
   if (!res.ok) throw new Error(`Gemini email parse ${res.status}`);
   const data = await res.json();
   return JSON.parse(data.candidates?.[0]?.content?.parts?.[0]?.text || '{}');
@@ -142,7 +201,12 @@ export async function geminiEmailHints(text) {
 export async function loadStoreChannels(sb) {
   const { data: store } = await sb.from('stores').select('id').limit(1).single();
   if (!store) throw new Error('store_missing');
-  const { data: channelRow } = await sb.from('store_settings').select('value').eq('store_id', store.id).eq('key', 'marketplace_channels').maybeSingle();
+  const { data: channelRow } = await sb
+    .from('store_settings')
+    .select('value')
+    .eq('store_id', store.id)
+    .eq('key', 'marketplace_channels')
+    .maybeSingle();
   const channels = Array.isArray(channelRow?.value) ? channelRow.value : defaultChannels;
   return { store, channels };
 }
@@ -158,6 +222,9 @@ export function messageIdFor(parsed, raw) {
  *   non-sale mail                            -> marketplace_email_sales (ignored)
  * Returns { state: 'matched' | 'needs_review' | 'ignored' | 'duplicate', ... }. Throws on database errors
  * so pollers can leave the message unread and retry.
+ *
+ * Previously-ignored rows for the same Message-ID are deleted and re-evaluated so a parser fix
+ * (or INCLUDE_SEEN rescan) can recover sales that were wrongly discarded.
  */
 export async function ingestMarketplaceMail(sb, { store, channels, parsed, raw }) {
   const p = parseMail(parsed, channels);
@@ -188,18 +255,46 @@ export async function ingestMarketplaceMail(sb, { store, channels, parsed, raw }
     }
   }
   const msg = messageIdFor(parsed, raw);
-  const { data: exists } = await sb.from('marketplace_email_sales').select('id').eq('store_id', store.id).eq('message_id', msg).maybeSingle();
-  if (exists) return { state: 'duplicate' };
+  const { data: exists } = await sb
+    .from('marketplace_email_sales')
+    .select('id,state,sale_id')
+    .eq('store_id', store.id)
+    .eq('message_id', msg)
+    .maybeSingle();
+  if (exists) {
+    if (exists.state === 'ignored' && !exists.sale_id) {
+      const { error: delErr } = await sb.from('marketplace_email_sales').delete().eq('id', exists.id);
+      if (delErr) throw delErr;
+    } else {
+      return { state: 'duplicate' };
+    }
+  }
 
   if (!p.sale) {
-    const { error } = await sb.from('marketplace_email_sales').insert({ store_id: store.id, message_id: msg, marketplace: p.marketplace, subject: parsed.subject, state: 'ignored', reason: 'Not a sale notice' });
+    const { error } = await sb.from('marketplace_email_sales').insert({
+      store_id: store.id,
+      message_id: msg,
+      marketplace: p.marketplace,
+      subject: parsed.subject,
+      state: 'ignored',
+      reason: 'Not a sale notice',
+      sku: p.sku,
+      item_title: p.item_title,
+      order_number: p.order_number,
+      sale_price_cents: p.price,
+    });
     if (error) throw error;
     return { state: 'ignored' };
   }
 
   let reason = 'SKU or sale price was not found with confidence';
   if (p.sku && p.price) {
-    const { data: unit } = await sb.from('units').select('sku,title,state').eq('store_id', store.id).eq('sku', p.sku).maybeSingle();
+    const { data: unit } = await sb
+      .from('units')
+      .select('sku,title,state')
+      .eq('store_id', store.id)
+      .eq('sku', p.sku)
+      .maybeSingle();
     if (unit?.state === 'available') {
       const r = await sb.rpc('marketplace_ingest_sale', {
         p_store: store.id,
