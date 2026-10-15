@@ -123,17 +123,32 @@ async function reportLines(r: { period_start: string; period_end: string }) {
 }
 async function storedCommissionOverrides(storeId: string): Promise<OverrideMap> {
   const map: OverrideMap = new Map();
-  for (let offset = 0;; offset += 1000) {
-    const batch = check<{ ticket_key: string; paul_pct: number; jacob_pct: number }[]>(
-      await sb.from('portal_commission_overrides')
+  try {
+    for (let offset = 0;; offset += 1000) {
+      const res = await sb.from('portal_commission_overrides')
         .select('ticket_key,paul_pct,jacob_pct')
         .eq('store_id', storeId)
-        .range(offset, offset + 999),
-    );
-    for (const row of batch) {
-      map.set(row.ticket_key, { paulPct: Number(row.paul_pct), jacobPct: Number(row.jacob_pct) });
+        .range(offset, offset + 999);
+      // Migration not applied yet / schema cache miss — don't block Live Sales or Payouts.
+      if (res.error) {
+        const msg = res.error.message || '';
+        if (/portal_commission_overrides|schema cache|does not exist|Could not find the table/i.test(msg)) {
+          return map;
+        }
+        throw new Error(msg);
+      }
+      const batch = (res.data || []) as { ticket_key: string; paul_pct: number; jacob_pct: number }[];
+      for (const row of batch) {
+        map.set(row.ticket_key, { paulPct: Number(row.paul_pct), jacobPct: Number(row.jacob_pct) });
+      }
+      if (batch.length < 1000) return map;
     }
-    if (batch.length < 1000) return map;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (/portal_commission_overrides|schema cache|does not exist|Could not find the table/i.test(msg)) {
+      return map;
+    }
+    throw e;
   }
 }
 async function storedReports(storeId: string) {
