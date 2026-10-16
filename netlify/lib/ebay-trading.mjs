@@ -490,17 +490,23 @@ export async function addFixedPriceItem(token, item) {
         <PackagingHandlingCosts currencyID="USD">0.00</PackagingHandlingCosts>
       </CalculatedShippingRate>
     </ShippingDetails>`;
-  // Calculated shipping (business policy) requires package weight — default 1 lb when unknown.
+  // Calculated shipping (business policy) requires package weight + dims — defaults when unknown.
   const weightLb = Number(item.weightLb) > 0 ? Number(item.weightLb) : 1;
-  const weightMajor = Math.floor(weightLb);
+  const weightMajor = Math.max(0, Math.floor(weightLb));
   const weightMinor = Math.min(15, Math.max(0, Math.round((weightLb % 1) * 16)));
+  // eBay rejects 0/0 weight; ensure at least 1 oz equivalent when major is 0.
+  const majorOut = weightMajor > 0 || weightMinor > 0 ? weightMajor : 1;
+  const minorOut = weightMajor > 0 || weightMinor > 0 ? weightMinor : 0;
+  const lengthIn = Number(item.lengthIn) > 0 ? Number(item.lengthIn) : 12;
+  const widthIn = Number(item.widthIn) > 0 ? Number(item.widthIn) : 9;
+  const heightIn = Number(item.heightIn) > 0 ? Number(item.heightIn) : 3;
   const packageDetails = `<ShippingPackageDetails>
       <MeasurementUnit>English</MeasurementUnit>
-      <WeightMajor>${xmlEsc(weightMajor)}</WeightMajor>
-      <WeightMinor>${xmlEsc(weightMinor)}</WeightMinor>
-      ${item.lengthIn ? `<PackageLength>${xmlEsc(item.lengthIn)}</PackageLength>` : ""}
-      ${item.widthIn ? `<PackageWidth>${xmlEsc(item.widthIn)}</PackageWidth>` : ""}
-      ${item.heightIn ? `<PackageDepth>${xmlEsc(item.heightIn)}</PackageDepth>` : ""}
+      <PackageLength>${xmlEsc(lengthIn)}</PackageLength>
+      <PackageWidth>${xmlEsc(widthIn)}</PackageWidth>
+      <PackageDepth>${xmlEsc(heightIn)}</PackageDepth>
+      <WeightMajor unit="lbs">${xmlEsc(majorOut)}</WeightMajor>
+      <WeightMinor unit="oz">${xmlEsc(minorOut)}</WeightMinor>
       <ShippingPackage>PackageThickEnvelope</ShippingPackage>
     </ShippingPackageDetails>`;
   const inner = `<WarningLevel>High</WarningLevel>
@@ -522,8 +528,8 @@ export async function addFixedPriceItem(token, item) {
     ${item.sku ? `<SKU>${xmlEsc(item.sku)}</SKU>` : ""}
     <PictureDetails>${pictures}</PictureDetails>
     ${specifics ? `<ItemSpecifics>${specifics}</ItemSpecifics>` : ""}
-    ${sellerProfiles}
     ${packageDetails}
+    ${sellerProfiles}
     <ShipToLocations>US</ShipToLocations>
   </Item>`;
   const xml = await tradingCall(token, "AddFixedPriceItem", inner);

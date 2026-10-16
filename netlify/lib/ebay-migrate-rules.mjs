@@ -18,6 +18,12 @@ export const MIGRATION_TITLE_MAX = 80;
 /** Default package weight (lb) when Floor / source has none — calculated shipping requires it. */
 export const MIGRATION_DEFAULT_WEIGHT_LB = 1;
 
+/** Bump when create payload hardening changes — written into failure detail to confirm deploy. */
+export const MIGRATION_CREATE_BUILD = 2;
+
+/** Default inches when Floor dims are missing (calculated shipping package box). */
+export const MIGRATION_DEFAULT_DIMS_IN = { lengthIn: 12, widthIn: 9, heightIn: 3 };
+
 function textBlob(item) {
   return [item?.title, item?.categoryName, item?.sku, item?.conditionDisplayName, ...(Object.values(item?.aspects || {}).flat())]
     .filter(Boolean)
@@ -179,6 +185,22 @@ export function migrationWeightLb(unit = null, item = null) {
   if (Number.isFinite(fromUnit) && fromUnit > 0) return fromUnit;
   if (Number.isFinite(fromItem) && fromItem > 0) return fromItem;
   return MIGRATION_DEFAULT_WEIGHT_LB;
+}
+
+/** Package dimensions (inches) for calculated shipping — always returns positive L/W/H. */
+export function migrationPackageDims(unit = null, item = null) {
+  const pick = (unitVal, itemVal, fallback) => {
+    const a = Number(unitVal);
+    const b = Number(itemVal);
+    if (Number.isFinite(a) && a > 0) return a;
+    if (Number.isFinite(b) && b > 0) return b;
+    return fallback;
+  };
+  return {
+    lengthIn: pick(unit?.package_length_in, item?.lengthIn, MIGRATION_DEFAULT_DIMS_IN.lengthIn),
+    widthIn: pick(unit?.package_width_in, item?.widthIn, MIGRATION_DEFAULT_DIMS_IN.widthIn),
+    heightIn: pick(unit?.package_height_in, item?.heightIn, MIGRATION_DEFAULT_DIMS_IN.heightIn),
+  };
 }
 
 /** EndItem already succeeded on a prior attempt (or Seller Hub ended it). */
