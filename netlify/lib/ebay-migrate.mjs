@@ -21,9 +21,11 @@ import {
 } from "./ebay-trading.mjs";
 import { ebayItemViewUrl } from "./ebay-env.mjs";
 import { publicPhotoUrl } from "./ebay-photos.mjs";
+import { suggestCategories } from "./ebay-catalog.mjs";
 import {
   describeMigrationPlan,
   emptyMigrationSummary,
+  isListingRemovedPolicyError,
   isVerificationHiddenListingError,
   itemFromActiveListSummary,
   migrationBannedReason,
@@ -33,6 +35,7 @@ import {
 export {
   describeMigrationPlan,
   emptyMigrationSummary,
+  isListingRemovedPolicyError,
   isVerificationHiddenListingError,
   itemFromActiveListSummary,
   migrationBannedReason,
@@ -227,6 +230,22 @@ async function loadBanContext(storeId, sku) {
   };
 }
 
+async function suggestEbayCategory(title, unitCategory) {
+  const query = [title, unitCategory].filter(Boolean).join(" ").trim();
+  if (!query) return { categoryId: "", categoryName: "" };
+  try {
+    const suggestions = await suggestCategories(query);
+    const pick = suggestions[0] || null;
+    return {
+      categoryId: pick?.categoryId || "",
+      categoryName: pick?.categoryName || "",
+    };
+  } catch (err) {
+    console.log("ebay_migrate_suggest_category", err instanceof Error ? err.message : String(err));
+    return { categoryId: "", categoryName: "" };
+  }
+}
+
 /**
  * When GetItem fails because pgg124-5 is under eBay verification, fill listing fields from
  * ActiveList + Floor (draft / photos / unit) so the listing can still move.
@@ -254,13 +273,23 @@ export async function enrichVerificationHiddenItem(storeId, item) {
         : unit?.ask_cents
           ? (unit.ask_cents / 100).toFixed(2)
           : item.price;
+  const title = item.title || draft?.title || unit?.title || "";
+  let categoryId = item.categoryId || draft?.category_id || "";
+  let categoryName = item.categoryName || draft?.category_name || unit?.category || "";
+  let categorySource = categoryId ? (item.categoryId ? "ebay" : "draft") : "";
+  if (!categoryId) {
+    const suggested = await suggestEbayCategory(title, unit?.category);
+    categoryId = suggested.categoryId;
+    categoryName = suggested.categoryName || categoryName;
+    if (categoryId) categorySource = "taxonomy_suggest";
+  }
   return {
     ...item,
-    title: item.title || draft?.title || unit?.title || "",
+    title,
     description: draft?.description || item.description || item.title || unit?.title || "",
     sku: sku || item.sku || "",
-    categoryId: item.categoryId || draft?.category_id || "",
-    categoryName: item.categoryName || draft?.category_name || unit?.category || "",
+    categoryId,
+    categoryName,
     conditionId: item.conditionId || draft?.condition_id || "3000",
     conditionDescription: item.conditionDescription || draft?.condition_notes || unit?.defect_notes || "",
     price,
@@ -268,6 +297,7 @@ export async function enrichVerificationHiddenItem(storeId, item) {
     aspects: Object.keys(item.aspects || {}).length ? item.aspects : normalizeAspects(draft?.aspects),
     verificationHidden: true,
     floorMatched: Boolean(unit),
+    categorySource,
   };
 }
 
@@ -616,6 +646,19 @@ export async function runEbayMigration(storeId, { mode = "dry_run", createdBy = 
           // Treat as movable: use ActiveList + Floor enrichment, then end/create as normal.
           verificationHidden = true;
           item = await enrichVerificationHiddenItem(storeId, itemFromActiveListSummary(row));
+        } else if (isListingRemovedPolicyError(message)) {
+          const skip = {
+            sourceItemId: row.itemId,
+            sku: row.sku || null,
+            title: row.title || null,
+            priceCents: moneyToCents(row.currentPrice),
+            outcome: "skipped",
+            reason: "listing_removed_policy_violation",
+            detail: { stage: "get_item", ebayMessage: message.slice(0, 300) },
+          };
+          results.push(skip);
+          await saveItem(run.id, storeId, skip);
+          continue;
         } else {
           const fail = {
             sourceItemId: row.itemId,
