@@ -499,13 +499,13 @@ html.dark .ticket-open{box-shadow:inset 0 0 0 1px #3a4553}
 html.dark .ticket-detail{background:#151a21;border-top-color:#2c3440;color:#e8eef4}
 html.dark .ticket-detail-grid span{color:#9aa7b5}
 html.dark .ticket-detail-grid strong{color:#e8eef4}
-/* Nested light surfaces → dark (payouts, commission, cards, etc.) */
-html.dark .ledger-override{background:#2a2118;color:#e8eef4}
+/* Nested light surfaces → dark charcoal (match panels; keep orange border for override cue) */
+html.dark .ledger-override{background:#151a21!important;color:#e8eef4;border-radius:10px;padding:12px;margin:6px 0;box-shadow:inset 3px 0 0 #ea580c}
 html.dark .ledger-override strong{color:#e8eef4}
-html.dark .ledger-override span,html.dark .ledger-override small{color:#c4b5a5}
+html.dark .ledger-override span,html.dark .ledger-override small{color:#9aa7b5}
 html.dark .ledger-row span,html.dark .ledger-row small{color:#9aa7b5}
-html.dark .commission-override{background:#151a21;border-color:#3a4553;color:#e8eef4}
-html.dark .commission-override.is-overridden{background:#2a2118;border-color:#6b3a2a}
+html.dark .commission-override{background:#12161c!important;border-color:#3a4553;color:#e8eef4}
+html.dark .commission-override.is-overridden{background:#12161c!important;border-color:#ea580c}
 html.dark .commission-override-head strong,html.dark .commission-override strong{color:#e8eef4}
 html.dark .commission-amounts small,html.dark .commission-custom label,html.dark .commission-history{color:#9aa7b5}
 html.dark .commission-history li{border-top-color:#2c3440}
@@ -541,5 +541,5 @@ html.dark .admin-register .register-qr-preview{border-color:#3a4553;background:#
 .receive-file-btn{display:inline-flex;align-items:center;border:1px solid var(--btn-border);border-radius:8px;padding:10px 14px;font-weight:650;cursor:pointer;background:#fff;color:var(--btn-text);font-size:14px!important}
 .receive-check{margin:12px 0}
 .receive-modal{position:fixed;inset:0;background:#17232d99;z-index:40;display:flex;align-items:center;justify-content:center;padding:16px}.receive-modal-card{background:#fff;border-radius:14px;padding:22px;width:min(480px,100%);display:grid;gap:12px;box-shadow:0 18px 50px #17232d40}.receive-modal-card h3{margin:0}.receive-video{width:100%;border-radius:10px;background:#000;max-height:50vh}
-html.dark .receive-modal-card{background:#1c2430;color:#e6edf3}html.dark .receive-chip,html.dark .receive-file-btn{background:#232d3a;color:#e6edf3!important}html.dark .receive-retail,html.dark .receive-flagged{background:#232d3a;color:#e6edf3}html.dark .receive-dup{background:#2a2118;border-color:#6b3a2a;color:#f7d8c8}html.dark .receive-dup p{color:#c4b5a5}html.dark .receive-label{color:#9aa7b5}
+html.dark .receive-modal-card{background:#1c2430;color:#e6edf3}html.dark .receive-chip,html.dark .receive-file-btn{background:#232d3a;color:#e6edf3!important}html.dark .receive-retail,html.dark .receive-flagged{background:#232d3a;color:#e6edf3}html.dark .receive-dup{background:#151a21;border-color:#3a4553;color:#e8eef4}html.dark .receive-dup p{color:#9aa7b5}html.dark .receive-label{color:#9aa7b5}
 @media(max-width:600px){.receive-chip{padding:12px 14px}}
