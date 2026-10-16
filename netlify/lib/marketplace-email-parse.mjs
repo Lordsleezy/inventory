@@ -309,7 +309,7 @@ export function messageIdFor(parsed, raw) {
 export async function suggestSkuMatches(sb, { storeId, channel, title, priceCents, limit = 5 }) {
   const { data: units } = await sb
     .from('units')
-    .select('sku,title,ask_cents,listed_on,state')
+    .select('sku,title,brand,model,ask_cents,listed_on,state')
     .eq('store_id', storeId)
     .eq('state', 'available')
     .contains('listed_on', [channel])
@@ -318,13 +318,15 @@ export async function suggestSkuMatches(sb, { storeId, channel, title, priceCent
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, ' ')
     .split(/\s+/)
-    .filter((w) => w.length > 2 && !['the', 'and', 'for', 'with', 'pack', 'open', 'box', 'sale', 'depop', 'mercari'].includes(w));
+    .filter((w) => w.length > 2 && !['the', 'and', 'for', 'with', 'pack', 'open', 'box', 'sale', 'depop', 'mercari', 'your', 'usps', 'shipping', 'label', 'confirmation'].includes(w));
   const scored = [];
   for (const u of units || []) {
-    const t = String(u.title || '').toLowerCase();
+    const t = `${u.title || ''} ${u.brand || ''} ${u.model || ''}`.toLowerCase().trim();
     if (!t) continue;
     let score = 0;
     for (const w of words) if (t.includes(w)) score += w.length > 4 ? 2 : 1;
+    // Price alone must never win — require at least one title/brand/model token.
+    if (score === 0) continue;
     if (priceCents != null && u.ask_cents != null) {
       const diff = Math.abs(Number(u.ask_cents) - Number(priceCents));
       if (diff === 0) score += 5;
@@ -573,51 +575,9 @@ export async function ingestMarketplaceMail(sb, { store, channels, parsed, raw }
       reason = r.error.message;
     } else reason = 'SKU did not match an available unit';
   }
-  // Try title/price suggestion against units listed on this channel before parking unmatched.
-  if (!p.sku && p.price) {
-    try {
-      const suggestions = await suggestSkuMatches(sb, {
-        storeId: store.id,
-        channel: p.marketplace,
-        title: p.item_title,
-        priceCents: p.price,
-        limit: 1,
-      });
-      if (suggestions[0]?.score >= 4) {
-        const { data: unit } = await sb
-          .from('units')
-          .select('sku,title,state')
-          .eq('store_id', store.id)
-          .eq('sku', suggestions[0].sku)
-          .maybeSingle();
-        if (unit?.state === 'available') {
-          const r = await sb.rpc('marketplace_ingest_sale', {
-            p_store: store.id,
-            p_sku: unit.sku,
-            p_channel: p.marketplace,
-            p_price_cents: p.price,
-            p_order_number: p.order_number,
-            p_message_id: msg,
-            p_marketplace: p.marketplace,
-            p_item_title: unit.title || p.item_title,
-            p_ship_by: p.ship_by,
-            p_fulfillment: p.fulfillment,
-            p_buyer: p.buyer,
-            p_confidence: 0.8,
-            p_fee_cents: p.fee,
-            p_ship_label_cents: p.ship_label,
-            p_tax_cents: p.tax,
-            p_payout_cents: p.payout,
-          });
-          if (!r.error && r.data != null) {
-            return { state: 'matched', sku: unit.sku, marketplace: p.marketplace, sale_id: r.data, suggested: true };
-          }
-        }
-      }
-    } catch {
-      /* suggestions are best-effort */
-    }
-  }
+  // Do not auto-finalize from title/price suggestions. A price-only hit wrongly
+  // sold puzzle SKU 99096 as the measuring-cups Depop order. Unmatched sales
+  // stay visible in Orders for a human Link SKU.
 
   const { error } = await sb.from('marketplace_email_sales').insert({
     store_id: store.id,
