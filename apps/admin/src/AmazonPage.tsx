@@ -93,14 +93,37 @@ function formatAdded(a: AddResult): string {
   return a.sku;
 }
 
+function errText(e: unknown): string {
+  if (e == null) return 'Unknown error';
+  if (typeof e === 'string') return e;
+  if (e instanceof Error) return e.message || e.name || 'Error';
+  if (typeof e === 'object') {
+    const o = e as Record<string, unknown>;
+    if (typeof o.message === 'string' && o.message.trim()) return o.message;
+    if (typeof o.error === 'string' && o.error.trim()) return o.error;
+    if (o.error != null && o.error !== e) return errText(o.error);
+    if (typeof o.details === 'string' && o.details.trim()) return o.details;
+    if (typeof o.hint === 'string' && o.hint.trim()) return o.hint;
+    try {
+      return JSON.stringify(e);
+    } catch {
+      /* ignore */
+    }
+  }
+  const s = String(e);
+  return s === '[object Object]' ? 'Something went wrong' : s;
+}
+
 async function amazonListCall(token: string, body: Record<string, unknown>) {
   const res = await fetch(`${base}/.netlify/functions/amazon-list`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'content-type': 'application/json' },
     body: JSON.stringify(body),
   });
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok && json.ok !== true) throw new Error(json.message || json.error || `Amazon list failed (${res.status})`);
+  const json = await res.json().catch(() => ({} as Record<string, unknown>));
+  if (!res.ok && json.ok !== true) {
+    throw new Error(errText(json.message ?? json.error ?? `Amazon list failed (${res.status})`));
+  }
   return json;
 }
 
@@ -121,7 +144,7 @@ export function AmazonPage({ client, accessToken, money: moneyFmt }: Props) {
   }, [client]);
 
   useEffect(() => {
-    void load().catch((e) => setError(e instanceof Error ? e.message : String(e)));
+    void load().catch((e) => setError(errText(e)));
   }, [load]);
 
   useEffect(() => {
@@ -181,7 +204,7 @@ export function AmazonPage({ client, accessToken, money: moneyFmt }: Props) {
       await load();
       inputRef.current?.focus();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errText(e));
     } finally {
       setBusy(false);
     }
@@ -200,7 +223,7 @@ export function AmazonPage({ client, accessToken, money: moneyFmt }: Props) {
       if (e) throw e;
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errText(e));
     } finally {
       setBusy(false);
     }
@@ -215,7 +238,7 @@ export function AmazonPage({ client, accessToken, money: moneyFmt }: Props) {
       setFlash(`ASIN saved for ${sku}.`);
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errText(e));
     } finally {
       setBusy(false);
     }
@@ -232,7 +255,7 @@ export function AmazonPage({ client, accessToken, money: moneyFmt }: Props) {
       await amazonListCall(accessToken, { action: 'set_price', sku, price_cents: cents });
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errText(e));
     } finally {
       setBusy(false);
     }
@@ -245,7 +268,7 @@ export function AmazonPage({ client, accessToken, money: moneyFmt }: Props) {
       setFlash(`Retried prepare for ${sku}.`);
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errText(e));
     } finally {
       setBusy(false);
     }
@@ -261,7 +284,7 @@ export function AmazonPage({ client, accessToken, money: moneyFmt }: Props) {
       else setFlash(`${sku}: ${result.message || result.reason || 'not listed'}`);
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errText(e));
       await load();
     } finally {
       setBusy(false);

@@ -1,5 +1,6 @@
 {
   "functions": [
+    "amazon-list",
     "amazon-sync",
     "channel-fee-sync",
     "dispatch-alerts",
