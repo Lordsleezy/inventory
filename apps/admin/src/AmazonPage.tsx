@@ -71,11 +71,8 @@ const FLAG_LABEL: Record<string, string> = {
 const SKIP_REASON_LABEL: Record<string, string> = {
   unknown_sku: 'not a Floor SKU',
   unknown_upc: 'no unit with that UPC',
-  already_sold_or_unavailable: 'not available (sold or held)',
-  no_price: 'no Floor ask price',
-  no_photos: 'no photos on Floor — add photos in Inventory first',
-  never_list_scooter: 'never list on Amazon (scooter)',
-  never_list_category: 'never list on Amazon (oversized / restricted category)',
+  already_sold: 'already sold',
+  already_sold_or_unavailable: 'already sold',
 };
 
 function parseCodes(raw: string): string[] {
@@ -307,7 +304,7 @@ export function AmazonPage({ client, accessToken, money: moneyFmt }: Props) {
       <section className="panel amazon-add">
         <h2>Add SKU or UPC</h2>
         <p className="hint" style={{ marginTop: 0 }}>
-          Scan a Floor SKU or product UPC. UPC with multiple units queues the oldest available one.
+          Scan a Floor SKU or product UPC. Only already-sold units are skipped. UPC with multiple available units queues the oldest one.
         </p>
         <div className="amazon-add-row">
           <input
