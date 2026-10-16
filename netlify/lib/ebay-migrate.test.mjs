@@ -18,6 +18,8 @@ import {
   MIGRATION_CREATE_BUILD,
   parseMissingAspectNames,
   fillMissingAspects,
+  replaceInvalidAspectValues,
+  clampMigrationPackageDims,
   sanitizeMigrationAspects,
 } from "./ebay-migrate-rules.mjs";
 import { tradingItemBlockedReason, parseActiveListSummaries, parseTradingItem } from "./ebay-trading.mjs";
@@ -195,7 +197,7 @@ test("migration create helpers default weight and sanitize bad MPN", () => {
   assert.ok(migrationConditionFallbacks("3000").includes("1000"));
   assert.equal(isEndAlreadyEndedError("The auction has already been closed."), true);
   assert.equal(isSourceAlreadyEndedStatus("listing_status_completed"), true);
-  assert.ok(MIGRATION_CREATE_BUILD >= 3);
+  assert.ok(MIGRATION_CREATE_BUILD >= 5);
   const aspects = sanitizeMigrationAspects(
     { MPN: ["bowman 1989 official complete set sealed"], Brand: [] },
     { brand: "Topps", model: "1989" },
@@ -210,9 +212,18 @@ test("migration create helpers default weight and sanitize bad MPN", () => {
     ),
     ["Item Width", "Color"],
   );
-  const filled = fillMissingAspects({}, ["Item Width", "Artist"], {
+  const filled = fillMissingAspects({}, ["Item Width", "Size", "Card Condition"], {
     dims: { lengthIn: 12, widthIn: 9, heightIn: 3 },
   });
   assert.equal(filled["Item Width"][0], "9");
-  assert.equal(filled.Artist[0], "Does not apply");
+  assert.equal(filled.Size[0], "One Size");
+  assert.equal(filled["Card Condition"][0], "Ungraded");
+  const replaced = replaceInvalidAspectValues(
+    { Size: ["Does not apply"] },
+    '&quot;Does not apply&quot; is not a valid value for Size. Select a value from the available options.',
+  );
+  assert.equal(replaced.changed, true);
+  assert.equal(replaced.aspects.Size[0], "One Size");
+  const clamped = clampMigrationPackageDims({ lengthIn: 80, widthIn: 40, heightIn: 40 });
+  assert.ok(clamped.lengthIn + 2 * (clamped.widthIn + clamped.heightIn) <= 108);
 });
