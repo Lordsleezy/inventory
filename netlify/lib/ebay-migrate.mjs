@@ -31,9 +31,11 @@ import {
   isSourceAlreadyEndedStatus,
   isVerificationHiddenListingError,
   itemFromActiveListSummary,
+  MIGRATION_CREATE_BUILD,
   migrationBannedReason,
   migrationConditionFallbacks,
   migrationConditionId,
+  migrationPackageDims,
   migrationWeightLb,
   sanitizeMigrationAspects,
   tallyMigrationSummary,
@@ -48,9 +50,11 @@ export {
   isSourceAlreadyEndedStatus,
   isVerificationHiddenListingError,
   itemFromActiveListSummary,
+  MIGRATION_CREATE_BUILD,
   migrationBannedReason,
   migrationConditionFallbacks,
   migrationConditionId,
+  migrationPackageDims,
   migrationWeightLb,
   sanitizeMigrationAspects,
   tallyMigrationSummary,
@@ -499,9 +503,7 @@ async function createOnDestination(destAccount, item, policies, { storeId } = {}
   const title = clipMigrationTitle(item.title);
   const aspects = sanitizeMigrationAspects(item.aspects, unit, item);
   const weightLb = migrationWeightLb(unit, item);
-  const lengthIn = Number(unit?.package_length_in) > 0 ? Number(unit.package_length_in) : item.lengthIn;
-  const widthIn = Number(unit?.package_width_in) > 0 ? Number(unit.package_width_in) : item.widthIn;
-  const heightIn = Number(unit?.package_height_in) > 0 ? Number(unit.package_height_in) : item.heightIn;
+  const dims = migrationPackageDims(unit, item);
   const conditionIds = migrationConditionFallbacks(item.conditionId);
   let lastErr = null;
   for (let i = 0; i < conditionIds.length; i += 1) {
@@ -518,9 +520,9 @@ async function createOnDestination(destAccount, item, policies, { storeId } = {}
         imageUrls: item.imageUrls,
         aspects,
         weightLb,
-        lengthIn,
-        widthIn,
-        heightIn,
+        lengthIn: dims.lengthIn,
+        widthIn: dims.widthIn,
+        heightIn: dims.heightIn,
         location: item.location,
         postalCode: item.postalCode || process.env.EBAY_LOCATION_POSTAL || "95663",
         city: item.location || "Penryn",
@@ -534,14 +536,19 @@ async function createOnDestination(destAccount, item, policies, { storeId } = {}
       lastErr = err;
       const message = err instanceof Error ? err.message : String(err);
       const conditionIssue = /condition/i.test(message) && /invalid|not\s+valid|does\s+not\s+exist/i.test(message);
-      const titleIssue = /title/i.test(message) && /80|character/i.test(message);
-      if (titleIssue && title.length > 70) {
-        // One more attempt with a harder clip already applied; don't loop forever.
-      }
       if (!conditionIssue || i === conditionIds.length - 1) break;
     }
   }
-  throw lastErr || new Error("AddFixedPriceItem failed");
+  const err = lastErr || new Error("AddFixedPriceItem failed");
+  err.createMeta = {
+    createBuild: MIGRATION_CREATE_BUILD,
+    weightLb,
+    dims,
+    aspectKeys: Object.keys(aspects),
+    brand: aspects.Brand?.[0] || null,
+    conditionTried: conditionIds,
+  };
+  throw err;
 }
 
 async function confirmDestLive(destAccount, listingId) {
@@ -666,6 +673,10 @@ export async function runEbayMigration(storeId, { mode = "dry_run", createdBy = 
   });
 
   const results = [];
+  console.log(
+    "ebay_migrate_start",
+    JSON.stringify({ runId: run.id, mode, createBuild: MIGRATION_CREATE_BUILD, storeId }),
+  );
 
   try {
     const sourceToken = await userTokenForAccount(source);
@@ -846,7 +857,12 @@ export async function runEbayMigration(storeId, { mode = "dry_run", createdBy = 
           ...base,
           outcome: "failed",
           reason: err instanceof Error ? err.message : String(err),
-          detail: { ...base.detail, stage: "end_or_create" },
+          detail: {
+            ...base.detail,
+            stage: "end_or_create",
+            createBuild: MIGRATION_CREATE_BUILD,
+            ...(err && typeof err === "object" && err.createMeta ? err.createMeta : {}),
+          },
         };
         results.push(fail);
         await saveItem(run.id, storeId, fail);

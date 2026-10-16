@@ -14,6 +14,8 @@ import {
   migrationConditionId,
   migrationConditionFallbacks,
   migrationWeightLb,
+  migrationPackageDims,
+  MIGRATION_CREATE_BUILD,
   sanitizeMigrationAspects,
 } from "./ebay-migrate-rules.mjs";
 import { tradingItemBlockedReason, parseActiveListSummaries, parseTradingItem } from "./ebay-trading.mjs";
@@ -185,11 +187,13 @@ test("clipMigrationTitle enforces eBay 80-char limit", () => {
 test("migration create helpers default weight and sanitize bad MPN", () => {
   assert.equal(migrationWeightLb(null, null), 1);
   assert.equal(migrationWeightLb({ package_weight_lb: 2.5 }, null), 2.5);
+  assert.deepEqual(migrationPackageDims(null, null), { lengthIn: 12, widthIn: 9, heightIn: 3 });
   assert.equal(migrationConditionId("USED_EXCELLENT"), "3000");
   assert.equal(migrationConditionId("3000"), "3000");
   assert.ok(migrationConditionFallbacks("3000").includes("1000"));
   assert.equal(isEndAlreadyEndedError("The auction has already been closed."), true);
   assert.equal(isSourceAlreadyEndedStatus("listing_status_completed"), true);
+  assert.ok(MIGRATION_CREATE_BUILD >= 2);
   const aspects = sanitizeMigrationAspects(
     { MPN: ["bowman 1989 official complete set sealed"], Brand: [] },
     { brand: "Topps", model: "1989" },
