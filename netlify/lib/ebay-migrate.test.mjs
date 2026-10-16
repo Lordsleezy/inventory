@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { migrationBannedReason, describeMigrationPlan } from "./ebay-migrate-rules.mjs";
+import {
+  migrationBannedReason,
+  describeMigrationPlan,
+  isVerificationHiddenListingError,
+  itemFromActiveListSummary,
+  tallyMigrationSummary,
+  emptyMigrationSummary,
+} from "./ebay-migrate-rules.mjs";
 import { tradingItemBlockedReason, parseActiveListSummaries, parseTradingItem } from "./ebay-trading.mjs";
 import { ebayListingAllowed, oauthScopesForRole, EBAY_LISTING_OAUTH_SCOPES } from "./ebay-env.mjs";
 
@@ -9,6 +16,54 @@ test("migration skips refrigerators, dishwashers, mattresses", () => {
   assert.match(migrationBannedReason({ title: "Bosch dishwasher stainless" }), /dishwasher/i);
   assert.match(migrationBannedReason({ title: "Queen mattress and box spring" }), /mattress|box spring/i);
   assert.equal(migrationBannedReason({ title: "Ninja blender", categoryName: "Small Kitchen Appliances" }), null);
+});
+
+test("Floor unit title beats a bogus eBay fridge category for ban checks", () => {
+  assert.equal(
+    migrationBannedReason(
+      { title: "Signed Shirt Brett Favre", categoryName: "Refrigerators" },
+      { title: "Signed shirt Brett Favre sign tank top framed", category: "Sports memorabilia", sku: "11272" },
+    ),
+    null,
+  );
+});
+
+test("verification-hidden GetItem errors are detected", () => {
+  assert.equal(
+    isVerificationHiddenListingError(
+      "This listing has a policy violation. It&apos;s hidden until you can fix it. (See email notice for more info.)",
+    ),
+    true,
+  );
+  assert.equal(isVerificationHiddenListingError("Item not found"), false);
+});
+
+test("tallyMigrationSummary matches item outcomes (not empty zeros)", () => {
+  const summary = tallyMigrationSummary([
+    { outcome: "will_move" },
+    { outcome: "will_move" },
+    { outcome: "skipped" },
+    { outcome: "failed" },
+  ]);
+  assert.deepEqual(summary, { moved: 0, skipped: 1, failed: 1, will_move: 2, total: 4 });
+  assert.deepEqual(emptyMigrationSummary().total, 0);
+});
+
+test("itemFromActiveListSummary marks verificationHidden for enrichment path", () => {
+  const item = itemFromActiveListSummary({
+    itemId: "123",
+    title: "Lamp",
+    sku: "11111",
+    currentPrice: "19.99",
+    quantity: 1,
+    quantitySold: 0,
+    bidCount: 0,
+    categoryId: "20667",
+    imageUrls: ["https://i.ebayimg.com/a.jpg"],
+  });
+  assert.equal(item.verificationHidden, true);
+  assert.equal(item.itemId, "123");
+  assert.equal(item.imageUrls.length, 1);
 });
 
 test("migration skips eBay-prohibited alcohol/tobacco", () => {
@@ -39,6 +94,8 @@ test("parseActiveListSummaries reads GetMyeBaySelling ActiveList items", () => {
         <Title>Lamp</Title>
         <SKU>12345</SKU>
         <Quantity>1</Quantity>
+        <PrimaryCategory><CategoryID>20667</CategoryID><CategoryName>Lamps</CategoryName></PrimaryCategory>
+        <PictureDetails><GalleryURL>https://i.ebayimg.com/g.jpg</GalleryURL><PictureURL>https://i.ebayimg.com/a.jpg</PictureURL></PictureDetails>
         <SellingStatus><CurrentPrice>19.99</CurrentPrice><QuantitySold>0</QuantitySold><BidCount>0</BidCount><ListingStatus>Active</ListingStatus></SellingStatus>
         <ListingType>FixedPriceItem</ListingType>
       </Item>
@@ -49,6 +106,8 @@ test("parseActiveListSummaries reads GetMyeBaySelling ActiveList items", () => {
   assert.equal(rows[0].itemId, "111");
   assert.equal(rows[0].sku, "12345");
   assert.equal(rows[0].currentPrice, "19.99");
+  assert.equal(rows[0].categoryId, "20667");
+  assert.equal(rows[0].imageUrls[0], "https://i.ebayimg.com/g.jpg");
 });
 
 test("parseTradingItem captures photos, specifics, and best offers", () => {
