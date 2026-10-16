@@ -1,5 +1,6 @@
 import { json, corsHeaders, serviceClient } from "../lib/server.mjs";
 import { pollAllStores, withdrawOpenEbayTasks } from "../lib/ebay.mjs";
+import { dispatchQueuedMigrationRequests } from "../lib/ebay-migrate.mjs";
 import { withLock } from "../lib/bg-guard.mjs";
 import { wrapHandler, asNetlifyFunction } from "../lib/floor-log.mjs";
 import { ebayDisabled } from "../lib/ebay-env.mjs";
@@ -8,6 +9,7 @@ import { ebayDisabled } from "../lib/ebay-env.mjs";
  * Frequent and cheap: ingest eBay orders and end eBay listings for units that sold elsewhere.
  * Draft refresh, label quotes, repricing, category refresh, reconciliation and the spec backfill live in
  * ebay-drafts-refresh (every 15 minutes, locked, paced). This function never touches ebay_drafts.
+ * Also dispatches any queued ebay_migration_request rows to ebay-migrate-background.
  */
 async function handle(event) {
   if (ebayDisabled()) return json(200, { disabled: true });
@@ -18,7 +20,13 @@ async function handle(event) {
     const result = await withLock("ebay-sync", 100, async () => {
       const withdrawn = await withdrawOpenEbayTasks();
       const orders = await pollAllStores();
-      return { withdrawn, orders };
+      let migrationDispatch = [];
+      try {
+        migrationDispatch = await dispatchQueuedMigrationRequests();
+      } catch (err) {
+        migrationDispatch = [{ ok: false, error: err instanceof Error ? err.message : String(err) }];
+      }
+      return { withdrawn, orders, migrationDispatch };
     }, sb);
     return json(200, result);
   } catch (err) {
