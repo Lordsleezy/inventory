@@ -176,40 +176,6 @@ export function ChannelReportPage({ client, money, embedded, mode = 'full' }: { 
             </tr>)}</tbody>
           </table></div>}
       </section>}
-      <section className="panel">
-        <h2>By channel</h2>
-        {channels.length === 0 ? <div className="empty">No sales in this range.</div> :
-          <div className="table-wrap"><table>
-            <thead><tr><th>Channel</th><th>Sales</th>{mode === 'full' && <th>Gross</th>}<th>Fees</th><th>Label cost</th><th>Card proc.</th>{mode === 'full' && <><th>Item cost</th><th>Tax collected</th><th>vs ask</th><th>Profit</th><th>Margin</th></>}</tr></thead>
-            <tbody>{channels.map(c => <tr key={c.channel}>
-              <td><strong>{c.channel}</strong>{mode === 'full' && c.cost_estimated_count > 0 && <small> · {c.cost_estimated_count} est. cost</small>}</td>
-              <td>{c.sales_count}</td>
-              {mode === 'full' && <td>{money(c.gross_cents)}</td>}
-              <td>{money(c.fee_cents)}{c.fee_estimated_cents > 0 && c.fee_actual_cents === 0 ? <small> est.</small> : c.fee_estimated_cents > 0 ? <small> ({money(c.fee_estimated_cents)} est.)</small> : null}</td>
-              <td>{money(c.ship_cost_cents)}</td>
-              <td>{money(c.processing_fee_cents)}</td>
-              {mode === 'full' && <>
-                <td>{money(c.cost_cents)}</td>
-                <td>{money(c.tax_collected_cents)}</td>
-                <td>{c.variance_cents === null ? '—' : `${c.variance_cents > 0 ? '+' : '−'}${money(Math.abs(c.variance_cents))}`}</td>
-                <td><strong>{money(c.profit_cents)}</strong></td>
-                <td>{c.gross_cents > 0 ? `${(c.profit_cents / c.gross_cents * 100).toFixed(0)}%` : '—'}</td>
-              </>}
-            </tr>)}</tbody>
-          </table></div>}
-      </section>
-      {mode === 'full' && report.refunds.filter(r => channel === 'all' || r.channel === channel).length > 0 && <section className="panel"><h2>Refunds in range</h2>
-        <div className="table-wrap"><table><thead><tr><th>Channel</th><th>Count</th><th>Gross reversed</th><th>Profit reversed</th></tr></thead>
-        <tbody>{report.refunds.filter(r => channel === 'all' || r.channel === channel).map(r => <tr key={r.channel}><td>{r.channel}</td><td>{r.count}</td><td>{money(r.sales_cents)}</td><td>{money(r.profit_reversed_cents)}</td></tr>)}</tbody></table></div>
-        <button type="button" className="secondary" style={{ marginTop: 12 }} onClick={() => setDrill('refunds')}>View refund details</button>
-      </section>}
-      {mode === 'full' && channel === 'all' && report.expenses.length > 0 && <section className="panel"><h2>Expenses in range</h2>
-        <div className="table-wrap"><table><thead><tr><th>Category</th><th>Amount</th></tr></thead>
-        <tbody>{report.expenses.map(e => <tr key={e.category}><td>{e.category}</td><td>{money(e.cents)}</td></tr>)}</tbody>
-        <tfoot><tr><td>Total</td><td>{money(report.expense_cents)}</td></tr></tfoot></table></div>
-        {report.label_expense_cents > 0 && <p className="hint">Shipping-label ledger expenses ({money(report.label_expense_cents)}) are counted under Label / ship cost on each sale, not again in Net.</p>}
-        <button type="button" className="secondary" style={{ marginTop: 12 }} onClick={() => setDrill('expenses')}>View expense details</button>
-      </section>}
     </>}
   </>;
 }
