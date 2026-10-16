@@ -46,6 +46,10 @@
   schedule = "* * * * *"
   timeout = 20
 
+# Background migrate worker (Netlify *-background = up to 15 minutes).
+[functions."ebay-migrate-background"]
+  timeout = 900
+
 [functions."ebay-drafts"]
   timeout = 60
 
