@@ -20,6 +20,10 @@
   schedule = "*/10 * * * *"
   timeout = 60
 
+# Admin Amazon queue: prepare / ASIN / price / list_one (kept off amazon-sync cron bundle).
+[functions."amazon-list"]
+  timeout = 60
+
 
 [functions."loyalty-email"]
   schedule = "*/5 * * * *"
