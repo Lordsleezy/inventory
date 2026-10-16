@@ -86,6 +86,11 @@ schedule = "0 */6 * * *"
 [functions."marketplace-daily-report"]
 schedule = "0 16 * * *"
 
+# Safety net: sale emails without an Orders row within 10 minutes → alert + backfill.
+[functions."marketplace-sale-watch"]
+schedule = "*/5 * * * *"
+timeout = 30
+
 # Reconcile real eBay marketplace fees and Square processing fees onto sales.
 [functions."channel-fee-sync"]
 schedule = "*/15 * * * *"
