@@ -19,7 +19,7 @@ export const MIGRATION_TITLE_MAX = 80;
 export const MIGRATION_DEFAULT_WEIGHT_LB = 1;
 
 /** Bump when create payload hardening changes — written into failure detail to confirm deploy. */
-export const MIGRATION_CREATE_BUILD = 2;
+export const MIGRATION_CREATE_BUILD = 3;
 
 /** Default inches when Floor dims are missing (calculated shipping package box). */
 export const MIGRATION_DEFAULT_DIMS_IN = { lengthIn: 12, widthIn: 9, heightIn: 3 };
@@ -201,6 +201,54 @@ export function migrationPackageDims(unit = null, item = null) {
     widthIn: pick(unit?.package_width_in, item?.widthIn, MIGRATION_DEFAULT_DIMS_IN.widthIn),
     heightIn: pick(unit?.package_height_in, item?.heightIn, MIGRATION_DEFAULT_DIMS_IN.heightIn),
   };
+}
+
+/**
+ * Parse "The item specific X is missing" names from an AddFixedPriceItem error.
+ * eBay often HTML-encodes spaces as &nbsp; / \u00a0.
+ */
+export function parseMissingAspectNames(message) {
+  const text = String(message || "")
+    .replace(/&nbsp;|&#160;|\u00a0/gi, " ")
+    .replace(/&apos;/gi, "'");
+  const names = [];
+  const re = /item\s+specific\s+([^.]+?)\s+is\s+missing/gi;
+  let m;
+  while ((m = re.exec(text))) {
+    const name = String(m[1] || "").replace(/\s+/g, " ").trim();
+    if (name && !names.some((n) => n.toLowerCase() === name.toLowerCase())) names.push(name);
+  }
+  return names;
+}
+
+/**
+ * Fill required aspects eBay rejected as missing. Prefer Floor dims/brand/model;
+ * otherwise "Does not apply".
+ */
+export function fillMissingAspects(aspects, missingNames, { unit = null, dims = null } = {}) {
+  const out = { ...(aspects || {}) };
+  for (const name of missingNames || []) {
+    if (out[name]?.[0]) continue;
+    const lower = name.toLowerCase();
+    if (lower === "item length" || lower === "length") {
+      out[name] = [String(dims?.lengthIn || unit?.package_length_in || MIGRATION_DEFAULT_DIMS_IN.lengthIn)];
+    } else if (lower === "item width" || lower === "width") {
+      out[name] = [String(dims?.widthIn || unit?.package_width_in || MIGRATION_DEFAULT_DIMS_IN.widthIn)];
+    } else if (lower === "item height" || lower === "height" || lower === "item depth" || lower === "depth") {
+      out[name] = [String(dims?.heightIn || unit?.package_height_in || MIGRATION_DEFAULT_DIMS_IN.heightIn)];
+    } else if (lower === "brand" && unit?.brand) {
+      out[name] = [String(unit.brand).trim()];
+    } else if ((lower === "model" || lower === "compatible model") && unit?.model) {
+      out[name] = [String(unit.model).trim()];
+    } else if (lower === "size type") {
+      out[name] = ["Regular"];
+    } else if (lower === "color") {
+      out[name] = ["Multicolor"];
+    } else {
+      out[name] = [NOT_APPLICABLE];
+    }
+  }
+  return out;
 }
 
 /** EndItem already succeeded on a prior attempt (or Seller Hub ended it). */

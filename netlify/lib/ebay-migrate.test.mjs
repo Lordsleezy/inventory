@@ -16,6 +16,8 @@ import {
   migrationWeightLb,
   migrationPackageDims,
   MIGRATION_CREATE_BUILD,
+  parseMissingAspectNames,
+  fillMissingAspects,
   sanitizeMigrationAspects,
 } from "./ebay-migrate-rules.mjs";
 import { tradingItemBlockedReason, parseActiveListSummaries, parseTradingItem } from "./ebay-trading.mjs";
