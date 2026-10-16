@@ -269,14 +269,20 @@ async function handle(event) {
       if (!username) throw new Error("Could not read the eBay seller username after OAuth.");
       const meta = state.meta && typeof state.meta === "object" ? state.meta : {};
       const role = meta.role === "selling" ? "selling" : "orders_only";
+      const required = ebayRequiredUsername();
       // orders_only reconnect still prefers the known personal seller unless meta.allowAnyUsername.
       if (role === "orders_only" && !meta.allowAnyUsername) {
-        const required = ebayRequiredUsername();
         if (username.toLowerCase() !== required) {
           throw new Error(
             `Connected eBay account was "${username}". Orders-only reconnect expects ${required}. For the business store account, use “Connect selling account”. Tokens were not saved.`,
           );
         }
+      }
+      // Selling must be the store business account — never the personal cutover seller.
+      if (role === "selling" && username.toLowerCase() === required) {
+        throw new Error(
+          `Connected eBay account was "${username}", which is the personal orders-only seller. Sign out of that account on eBay (or use “Switch accounts”), then Connect selling account again while logged into the store business eBay account. Tokens were not saved.`,
+        );
       }
       accountLabel = username;
       const scopes = String(tokens.scope || "")

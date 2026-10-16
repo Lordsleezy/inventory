@@ -45,6 +45,16 @@ async function handle(event) {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/"/g, "&quot;");
+  const sellingHint =
+    ebayRole === "selling"
+      ? `<p><strong>Use the store business eBay account</strong> — not pgg124-5. If eBay shows the personal seller, choose Switch accounts / Not you and sign into the business account.</p>`
+      : ebayRole === "orders_only"
+        ? `<p class="quiet">Orders-only reconnect expects the personal seller (pgg124-5).</p>`
+        : "";
+  const heading =
+    data.provider === "ebay" && ebayRole === "selling"
+      ? "Opening eBay for the business selling account…"
+      : `Opening ${data.provider}…`;
   return html(
     200,
     `<!doctype html>
@@ -60,7 +70,8 @@ async function handle(event) {
     </style>
   </head>
   <body>
-    <h1>Opening ${data.provider}…</h1>
+    <h1>${heading}</h1>
+    ${sellingHint}
     <p class="quiet">Continue in the next screen, then return to Floor.</p>
     <p><a class="btn" href="${href}">Continue</a></p>
     <script>location.replace(${JSON.stringify(location)});</script>

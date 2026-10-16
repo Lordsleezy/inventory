@@ -111,6 +111,7 @@ export function MarketplacesPage({client,accessToken,money,stamp}:Props){
    </div>)}</div>}
    <div className="actions" style={{marginTop:'1rem'}}>
     {!selling && <button disabled={busy} onClick={()=>void (async()=>{setBusy(true);setError('');try{const data=await ebayCall(accessToken,'connect_selling');if(data.url)window.location.href=data.url;}catch(e){setError(e instanceof Error?e.message:String(e));}finally{setBusy(false);}})()}>Connect selling account</button>}
+    {!selling && <p className="hint">Opens eBay with a fresh login. Sign into the <strong>business</strong> seller — if you see {ebay?.requiredUsername || 'pgg124-5'}, use Switch accounts / Not you before approving.</p>}
     {!personal && <button className="secondary" disabled={busy} onClick={()=>void (async()=>{setBusy(true);setError('');try{const data=await ebayCall(accessToken,'connect_orders_only');if(data.url)window.location.href=data.url;}catch(e){setError(e instanceof Error?e.message:String(e));}finally{setBusy(false);}})()}>Connect {ebay?.requiredUsername || 'pgg124-5'} (orders only)</button>}
     {ebay?.connected && <button className="secondary" disabled={busy} onClick={()=>void (async()=>{setBusy(true);setError('');try{const data=await ebayCall(accessToken,'sync_now');setEbay(data);setNotice(`Sync finished${Array.isArray(data.orders)?` · ${data.orders.length} result(s)`:''}. Check the Orders tab.`);}catch(e){setError(e instanceof Error?e.message:String(e));}finally{setBusy(false);}})()}>Sync all accounts now</button>}
    </div>

@@ -28,7 +28,11 @@ export function authorizeUrl(provider, nonce, { ebayRole = null } = {}) {
     const id = requireEnv("EBAY_CLIENT_ID");
     const ruName = ebayRuName(process.env.EBAY_RU_NAME);
     const scopes = ebayRole ? oauthScopesForRole(ebayRole) : SCOPES.ebay;
-    return `${auth}/oauth2/authorize?client_id=${encodeURIComponent(id)}&response_type=code&redirect_uri=${encodeURIComponent(ruName)}&scope=${encodeURIComponent(scopes)}&state=${nonce}`;
+    // prompt=login forces eBay to show credentials / account switcher instead of
+    // silently reusing the previous session (which is almost always pgg124-5).
+    const forceLogin = ebayRole === "selling" || ebayRole === "orders_only";
+    const prompt = forceLogin ? "&prompt=login" : "";
+    return `${auth}/oauth2/authorize?client_id=${encodeURIComponent(id)}&response_type=code&redirect_uri=${encodeURIComponent(ruName)}&scope=${encodeURIComponent(scopes)}&state=${nonce}${prompt}`;
   }
   if (provider === "amazon") {
     const appId = requireEnv("AMAZON_APPLICATION_ID");
