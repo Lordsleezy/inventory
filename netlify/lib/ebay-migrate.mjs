@@ -527,12 +527,12 @@ export async function runEbayMigration(storeId, { mode = "dry_run", createdBy = 
         }
       }
 
-      const unit = await loadUnitBySku(storeId, item.sku || row.sku);
-      const decision = classifyItem(item, { openOrders, unit });
+      const banUnit = await loadBanContext(storeId, item.sku || row.sku);
+      const decision = classifyItem(item, { openOrders, unit: banUnit });
       const base = {
         sourceItemId: item.itemId,
-        sku: item.sku || row.sku || unit?.sku || null,
-        title: item.title,
+        sku: item.sku || row.sku || banUnit?.sku || null,
+        title: item.title || banUnit?.title || null,
         priceCents: moneyToCents(item.price),
         sourceUrl: ebayItemViewUrl(item.itemId),
         detail: {
@@ -542,7 +542,7 @@ export async function runEbayMigration(storeId, { mode = "dry_run", createdBy = 
           bidCount: item.bidCount,
           bestOfferCount: item.bestOfferCount,
           quantitySold: item.quantitySold,
-          floorMatched: Boolean(unit),
+          floorMatched: Boolean(banUnit),
           verificationHidden: Boolean(verificationHidden || item.verificationHidden),
         },
       };
