@@ -135,7 +135,11 @@ function normalizeAspects(raw) {
   return out;
 }
 
-/** Active FixedPrice listings tracked in Floor (Vendoo / Seller Hub may outnumber ActiveList page 1). */
+/**
+ * Floor eBay listing rows to migrate.
+ * Includes `listed` on source/null account, plus `delisted` null-account rows that were
+ * ended on source when create failed (stranded) so resume can recreate on dest.
+ */
 async function loadFloorEbayListingSummaries(storeId, { sourceAccountId = null, destAccountId = null } = {}) {
   const sb = serviceClient();
   const { data, error } = await sb
@@ -143,7 +147,7 @@ async function loadFloorEbayListingSummaries(storeId, { sourceAccountId = null, 
     .select("listing_id,sku,status,ebay_account_id")
     .eq("store_id", storeId)
     .eq("channel", "ebay")
-    .eq("status", "listed");
+    .in("status", ["listed", "delisted"]);
   if (error) throw new Error(error.message);
   const out = [];
   for (const row of data || []) {
@@ -151,6 +155,12 @@ async function loadFloorEbayListingSummaries(storeId, { sourceAccountId = null, 
     if (!itemId) continue;
     // Skip rows already remapped onto the business selling account.
     if (destAccountId && row.ebay_account_id && String(row.ebay_account_id) === String(destAccountId)) continue;
+    // Delisted rows only resume when they were never mapped to selling (stranded after EndItem).
+    if (row.status === "delisted") {
+      if (row.ebay_account_id && destAccountId && String(row.ebay_account_id) === String(destAccountId)) continue;
+      if (row.ebay_account_id && sourceAccountId && String(row.ebay_account_id) !== String(sourceAccountId)) continue;
+      // null account or source account delisted → include
+    }
     if (
       sourceAccountId &&
       row.ebay_account_id &&
@@ -169,12 +179,69 @@ async function loadFloorEbayListingSummaries(storeId, { sourceAccountId = null, 
       quantitySold: 0,
       bidCount: 0,
       listingType: "FixedPriceItem",
-      listingStatus: "Active",
+      listingStatus: row.status === "delisted" ? "Completed" : "Active",
       categoryId: "",
       categoryName: "",
       imageUrls: [],
       viewItemUrl: "",
       fromFloor: true,
+      strandedResume: row.status === "delisted",
+    });
+  }
+  return out;
+}
+
+/** SKUs that failed live create and are not yet on the selling account. */
+async function loadStrandedFailedMigrationSummaries(storeId, destAccountId = null) {
+  const sb = serviceClient();
+  const { data: failed, error } = await sb
+    .from("ebay_migration_items")
+    .select("sku,source_item_id,title,price_cents,created_at")
+    .eq("store_id", storeId)
+    .eq("outcome", "failed")
+    .not("sku", "is", null)
+    .order("created_at", { ascending: false })
+    .limit(2000);
+  if (error) throw new Error(error.message);
+  const bySku = new Map();
+  for (const row of failed || []) {
+    const sku = String(row.sku || "").trim();
+    if (!sku || bySku.has(sku)) continue;
+    bySku.set(sku, row);
+  }
+  if (!bySku.size) return [];
+  const skus = [...bySku.keys()];
+  const { data: listings } = await sb
+    .from("listings")
+    .select("sku,listing_id,status,ebay_account_id")
+    .eq("store_id", storeId)
+    .eq("channel", "ebay")
+    .in("sku", skus);
+  const listingBySku = new Map((listings || []).map((r) => [String(r.sku), r]));
+  const out = [];
+  for (const [sku, row] of bySku) {
+    const listing = listingBySku.get(sku);
+    if (destAccountId && listing?.ebay_account_id && String(listing.ebay_account_id) === String(destAccountId) && listing.status === "listed") {
+      continue; // already moved
+    }
+    const itemId = String(listing?.listing_id || row.source_item_id || "").trim();
+    if (!itemId) continue;
+    out.push({
+      itemId,
+      title: row.title || "",
+      sku,
+      currentPrice: row.price_cents != null ? (Number(row.price_cents) / 100).toFixed(2) : "",
+      quantity: 1,
+      quantitySold: 0,
+      bidCount: 0,
+      listingType: "FixedPriceItem",
+      listingStatus: "Completed",
+      categoryId: "",
+      categoryName: "",
+      imageUrls: [],
+      viewItemUrl: "",
+      fromFloor: true,
+      strandedResume: true,
     });
   }
   return out;

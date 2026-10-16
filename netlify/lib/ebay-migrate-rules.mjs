@@ -19,7 +19,7 @@ export const MIGRATION_TITLE_MAX = 80;
 export const MIGRATION_DEFAULT_WEIGHT_LB = 1;
 
 /** Bump when create payload hardening changes — written into failure detail to confirm deploy. */
-export const MIGRATION_CREATE_BUILD = 3;
+export const MIGRATION_CREATE_BUILD = 4;
 
 /** Default inches when Floor dims are missing (calculated shipping package box). */
 export const MIGRATION_DEFAULT_DIMS_IN = { lengthIn: 12, widthIn: 9, heightIn: 3 };

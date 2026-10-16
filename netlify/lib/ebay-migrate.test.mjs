@@ -195,7 +195,7 @@ test("migration create helpers default weight and sanitize bad MPN", () => {
   assert.ok(migrationConditionFallbacks("3000").includes("1000"));
   assert.equal(isEndAlreadyEndedError("The auction has already been closed."), true);
   assert.equal(isSourceAlreadyEndedStatus("listing_status_completed"), true);
-  assert.ok(MIGRATION_CREATE_BUILD >= 2);
+  assert.ok(MIGRATION_CREATE_BUILD >= 3);
   const aspects = sanitizeMigrationAspects(
     { MPN: ["bowman 1989 official complete set sealed"], Brand: [] },
     { brand: "Topps", model: "1989" },
@@ -204,4 +204,15 @@ test("migration create helpers default weight and sanitize bad MPN", () => {
   assert.equal(aspects.Brand[0], "Topps");
   assert.equal(aspects.MPN[0], "Does not apply");
   assert.equal(aspects.Type[0], "Sealed Trading Card Boxes");
+  assert.deepEqual(
+    parseMissingAspectNames(
+      "The item specific Item Width\u00a0is missing. Add Item Width to this listing. The item specific Color is missing.",
+    ),
+    ["Item Width", "Color"],
+  );
+  const filled = fillMissingAspects({}, ["Item Width", "Artist"], {
+    dims: { lengthIn: 12, widthIn: 9, heightIn: 3 },
+  });
+  assert.equal(filled["Item Width"][0], "9");
+  assert.equal(filled.Artist[0], "Does not apply");
 });
