@@ -31,6 +31,7 @@ export type WebOrder = {
   shipping_rate: { source?: string; days?: number | null } | null;
   package: { length_in: number | null; width_in: number | null; height_in: number | null; weight_lb: number | null };
   match_status?: string | null;
+  marketplace_title?: string | null;
   marketplace_fee_cents?: number | null;
   fee_cents?: number | null;
   marketplace_url?: string | null;
@@ -178,9 +179,37 @@ export function OrdersPage({ client, accessToken, money, stamp, rules, cfg, comm
     finally { setBusy(null); }
   }
   async function matchSku(o: WebOrder) {
-    const sku = window.prompt(`Link this ${channelLabel(o.channel)} order to a Floor SKU.\n\nOrder ${o.order_no || o.id}`, o.sku === 'UNMATCHED' ? '' : o.sku);
-    if (sku == null || !sku.trim()) return;
     setBusy(o.id + 'match'); setError('');
+    let hint = '';
+    try {
+      const { data: suggestions } = await client.rpc('portal_suggest_order_skus', { p_order: o.id, p_limit: 5 });
+      const list = Array.isArray(suggestions) ? suggestions : [];
+      if (list.length) {
+        hint =
+          '\n\nSuggested (listed on this channel · title/price):\n' +
+          list
+            .map(
+              (s: { sku?: string; title?: string; ask_cents?: number; score?: number }) =>
+                `  ${s.sku} · ${s.title || 'untitled'} · ${money(Number(s.ask_cents || 0))} (score ${s.score ?? '?'})`,
+            )
+            .join('\n');
+      }
+    } catch {
+      /* suggestions optional */
+    }
+    const sku = window.prompt(
+      `Needs SKU match — link this ${channelLabel(o.channel)} order to a Floor SKU.\n\n` +
+        `${o.marketplace_title || o.title || 'Sale'} · ${money(o.item_cents)}\n` +
+        `Buyer: ${o.buyer_name || '—'}\n` +
+        `Order ${o.order_no || o.id}` +
+        hint +
+        '\n\nEnter SKU:',
+      o.sku === 'UNMATCHED' ? '' : o.sku,
+    );
+    if (sku == null || !sku.trim()) {
+      setBusy(null);
+      return;
+    }
     const { error: e } = await client.rpc('portal_match_web_order', { p_order: o.id, p_sku: sku.trim() });
     if (e) setError(e.message);
     else await load();
@@ -229,7 +258,8 @@ export function OrdersPage({ client, accessToken, money, stamp, rules, cfg, comm
 
   const head = (o: WebOrder) => {
     const ov = o.ticket_key ? commissionOverrides.get(o.ticket_key) : null;
-    return <div className="ticket-top"><strong>{channelLabel(o.channel)} {o.marketplace_url && o.order_no ? <a href={o.marketplace_url} target="_blank" rel="noreferrer">{o.order_no}</a> : (o.order_no || 'Order')} · {money(o.total_cents)}{ov ? <small className="ticket-profit"> · split overridden</small> : null}</strong><span>{o.paid_at ? stamp(o.paid_at) : stamp(o.created_at)}<b className="badge"> {channelLabel(o.channel).toUpperCase()}</b>{ov && <b className="badge badge-override"> SPLIT</b>}{o.match_status && o.match_status !== 'matched' && <b className="badge"> UNMATCHED</b>}</span></div>;
+    const needsSku = o.match_status && o.match_status !== 'matched';
+    return <div className="ticket-top"><strong>{channelLabel(o.channel)} {o.marketplace_url && o.order_no ? <a href={o.marketplace_url} target="_blank" rel="noreferrer">{o.order_no}</a> : (o.order_no || 'Order')} · {money(o.total_cents)}{ov ? <small className="ticket-profit"> · split overridden</small> : null}</strong><span>{o.paid_at ? stamp(o.paid_at) : stamp(o.created_at)}<b className="badge"> {channelLabel(o.channel).toUpperCase()}</b>{ov && <b className="badge badge-override"> SPLIT</b>}{needsSku && <b className="badge"> Needs SKU match</b>}</span></div>;
   };
   const item = (o: WebOrder) => {
     const ov = o.ticket_key ? commissionOverrides.get(o.ticket_key) || null : null;
@@ -242,7 +272,9 @@ export function OrdersPage({ client, accessToken, money, stamp, rules, cfg, comm
       lines: [{ sku: o.sku, price_cents: o.item_cents, cost_cents: o.cost_cents ?? null }],
     };
     const canOverride = !!o.ticket_key && (o.status === 'paid' || !!o.paid_at);
-    return <div className="ticket-items"><div>{o.title} <span>· SKU {o.sku}</span></div>
+    const displayTitle = o.marketplace_title || o.title;
+    const skuLabel = o.match_status && o.match_status !== 'matched' ? 'Needs SKU match' : `SKU ${o.sku}`;
+    return <div className="ticket-items"><div>{displayTitle} <span>· {skuLabel}</span></div>
     <small>{o.buyer_name}{o.buyer_email ? ` · ${o.buyer_email}` : ''}{o.buyer_phone ? ` · ${o.buyer_phone}` : ''}</small>
     <small>Item {money(o.item_cents)}{orderFee(o) ? ` · Fees ${money(orderFee(o))}` : ''} · {o.fulfillment === 'ship' ? `Buyer ship ${money(o.shipping_cents)}` : 'Store pickup'}{o.fulfillment === 'ship' ? ` · Label ${o.label_cost_cents != null ? money(o.label_cost_cents) : '—'}` : ''} · Tax {money(o.tax_cents)}</small>
     <CommissionOverrideMark overridden={!!ov} />
@@ -262,7 +294,7 @@ export function OrdersPage({ client, accessToken, money, stamp, rules, cfg, comm
       />
     )}
     {otherStores(o).length > 0 && <div className="alert" role="status">Pull from other stores: still marked live on {otherStores(o).map(channelLabel).join(', ')}. End those listings in Vendoo / each app.</div>}
-    {(o.match_status === 'unmatched' || o.match_status === 'already_sold') && <div className="alert" role="status">This sale is in Orders but not linked to an available Floor unit. <button className="secondary" disabled={!!busy} onClick={() => void matchSku(o)}>Link SKU…</button></div>}
+    {(o.match_status === 'unmatched' || o.match_status === 'already_sold') && <div className="alert" role="status">Needs SKU match — sale is in Orders but not linked to a Floor unit yet. <button className="secondary" disabled={!!busy} onClick={() => void matchSku(o)}>Link SKU…</button></div>}
   </div>;
   };
 

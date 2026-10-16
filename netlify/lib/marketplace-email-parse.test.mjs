@@ -131,5 +131,22 @@ const arcRaw = [
 ].join("\r\n");
 assert.equal(marketplaceDkimPassed(arcRaw, ["depop.com"]), true);
 
+
+const depopReal = parseMail({
+  subject: "Your USPS shipping label and sale confirmation for @kwfastkat1988.",
+  text: "You've made a sale!\nItem price $14.99\nShip to:\nJane Doe\n5017 Shade Tree Ln\nAustin, TX 78745\nSign in to Depop",
+  from: { address: "sold@alerts.depop.com" },
+});
+assert.equal(depopReal.sale, true);
+assert.equal(depopReal.marketplace, "depop");
+assert.equal(depopReal.price, 1499);
+assert.equal(depopReal.buyer.handle, "kwfastkat1988");
+assert.equal(depopReal.order_number, null); // must not capture "details"
+assert.match(depopReal.item_title, /@kwfastkat1988|Depop sale/i);
+
+assert.equal(looksLikeSaleNotice("We've removed your listing", "This listing was sold then removed"), false);
+assert.equal(looksLikeSaleNotice("You still need to ship", "Please ship your sold item"), false);
+
 console.log("marketplace-email-parse.test.mjs ok");
+
 
