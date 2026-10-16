@@ -32,11 +32,13 @@ import {
   isVerificationHiddenListingError,
   itemFromActiveListSummary,
   MIGRATION_CREATE_BUILD,
+  fillMissingAspects,
   migrationBannedReason,
   migrationConditionFallbacks,
   migrationConditionId,
   migrationPackageDims,
   migrationWeightLb,
+  parseMissingAspectNames,
   sanitizeMigrationAspects,
   tallyMigrationSummary,
 } from "./ebay-migrate-rules.mjs";
@@ -51,11 +53,13 @@ export {
   isVerificationHiddenListingError,
   itemFromActiveListSummary,
   MIGRATION_CREATE_BUILD,
+  fillMissingAspects,
   migrationBannedReason,
   migrationConditionFallbacks,
   migrationConditionId,
   migrationPackageDims,
   migrationWeightLb,
+  parseMissingAspectNames,
   sanitizeMigrationAspects,
   tallyMigrationSummary,
 };
@@ -501,13 +505,16 @@ async function createOnDestination(destAccount, item, policies, { storeId } = {}
   const token = await userTokenForAccount(destAccount);
   const unit = storeId ? await loadUnitBySku(storeId, item.sku) : null;
   const title = clipMigrationTitle(item.title);
-  const aspects = sanitizeMigrationAspects(item.aspects, unit, item);
+  let aspects = sanitizeMigrationAspects(item.aspects, unit, item);
   const weightLb = migrationWeightLb(unit, item);
   const dims = migrationPackageDims(unit, item);
   const conditionIds = migrationConditionFallbacks(item.conditionId);
+  let conditionIdx = 0;
   let lastErr = null;
-  for (let i = 0; i < conditionIds.length; i += 1) {
-    const conditionId = conditionIds[i];
+  const filledAspectNames = [];
+
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    const conditionId = conditionIds[Math.min(conditionIdx, conditionIds.length - 1)];
     try {
       const created = await addFixedPriceItem(token, {
         title,
@@ -515,7 +522,7 @@ async function createOnDestination(destAccount, item, policies, { storeId } = {}
         categoryId: item.categoryId,
         price: item.price,
         conditionId,
-        conditionDescription: i === 0 ? item.conditionDescription : undefined,
+        conditionDescription: conditionIdx === 0 ? item.conditionDescription : undefined,
         sku: item.sku || undefined,
         imageUrls: item.imageUrls,
         aspects,
@@ -535,8 +542,18 @@ async function createOnDestination(destAccount, item, policies, { storeId } = {}
     } catch (err) {
       lastErr = err;
       const message = err instanceof Error ? err.message : String(err);
+      const missing = parseMissingAspectNames(message);
+      if (missing.length) {
+        aspects = fillMissingAspects(aspects, missing, { unit, dims });
+        filledAspectNames.push(...missing);
+        continue;
+      }
       const conditionIssue = /condition/i.test(message) && /invalid|not\s+valid|does\s+not\s+exist/i.test(message);
-      if (!conditionIssue || i === conditionIds.length - 1) break;
+      if (conditionIssue && conditionIdx < conditionIds.length - 1) {
+        conditionIdx += 1;
+        continue;
+      }
+      break;
     }
   }
   const err = lastErr || new Error("AddFixedPriceItem failed");
@@ -546,7 +563,8 @@ async function createOnDestination(destAccount, item, policies, { storeId } = {}
     dims,
     aspectKeys: Object.keys(aspects),
     brand: aspects.Brand?.[0] || null,
-    conditionTried: conditionIds,
+    conditionTried: conditionIds.slice(0, conditionIdx + 1),
+    filledAspectNames: [...new Set(filledAspectNames)],
   };
   throw err;
 }
