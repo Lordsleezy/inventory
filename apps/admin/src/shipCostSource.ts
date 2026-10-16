@@ -19,5 +19,5 @@ export function formatLabelWithPending(
 ): string {
   if (pendingCreditCents <= 0) return money(labelCents);
   // Label cost = what actually shipped; () = voided label still charged on eBay.
-  return `${money(labelCents)} (${money(pendingCreditCents)} void pending ΓÇö still on eBay)`;
+  return `${money(labelCents)} (${money(pendingCreditCents)} void pending — still on eBay)`;
 }

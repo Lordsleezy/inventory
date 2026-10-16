@@ -102,7 +102,7 @@ function labelChannel(key: string) {
 }
 
 function skuLabel(r: Row) {
-  const qty = r.qty && r.qty > 1 ? ` (├ù${r.qty})` : '';
+  const qty = r.qty && r.qty > 1 ? ` (×${r.qty})` : '';
   return `SKU ${r.sku}${qty}`;
 }
 
@@ -292,7 +292,7 @@ export function OnlinePage({
   const listedHint = report?.listed_mode === 'put_up_in_period'
     ? 'Listed = listings stamped in that month (0 before the tracker existed). Sold / revenue are for the same period.'
     : report?.listed_mode === 'future'
-      ? 'Future months show 0 until that month starts ΓÇö then Listed updates live automatically.'
+      ? 'Future months show 0 until that month starts — then Listed updates live automatically.'
       : 'Listed = live on each platform right now (updates live). Sold / revenue cover the selected period (online only).';
 
   return <>
@@ -306,7 +306,7 @@ export function OnlinePage({
         </p>
       </div>
       <button type="button" className="secondary" disabled={loading} onClick={() => void load()}>
-        {loading ? 'LoadingΓÇª' : 'Refresh'}
+        {loading ? 'Loading…' : 'Refresh'}
       </button>
     </header>
 
@@ -317,7 +317,7 @@ export function OnlinePage({
         <span>Total inventory</span><strong>{counts.inventory}</strong>
       </button>
       <button type="button" className={`stat stat-link${showingAllListed ? ' active' : ''}`} onClick={() => onChannel('all')}>
-        <span>Listed (ΓëÑ1 channel)</span><strong>{counts.listed}</strong>
+        <span>Listed (≥1 channel)</span><strong>{counts.listed}</strong>
       </button>
       <button type="button" className={`stat stat-link${tab === 'ready' ? ' active' : ''}`} onClick={() => onTab('ready')}>
         <span>Ready to list</span><strong>{counts.ready}</strong>
@@ -358,7 +358,7 @@ export function OnlinePage({
     {onQueuePage && (
       <div className="inventory-tabs report-tabs">
         <button type="button" className="secondary" onClick={() => onChannel('all')}>
-          ΓåÉ Back to Online
+          ← Back to Online
         </button>
       </div>
     )}
@@ -367,7 +367,7 @@ export function OnlinePage({
       <section className="panel">
         <div className="section-head" style={{ marginBottom: 16 }}>
           <div>
-            <h2 style={{ margin: 0 }}>Online reports ┬╖ {report?.month_label || 'ΓÇª'}</h2>
+            <h2 style={{ margin: 0 }}>Online reports · {report?.month_label || '…'}</h2>
             <p className="hint" style={{ margin: '6px 0 0' }}>{listedHint}</p>
           </div>
           <div className="online-report-period">
@@ -408,7 +408,7 @@ export function OnlinePage({
             </>}
           </div>
         </div>
-        {!report && loading ? <div className="empty">LoadingΓÇª</div> : <>
+        {!report && loading ? <div className="empty">Loading…</div> : <>
           <div className="stats" style={{ marginBottom: 18 }}>
             <div className="stat"><span>{listedLabel}</span><strong>{listedTotal}</strong></div>
             <div className="stat"><span>{soldLabel}</span><strong>{soldFromTable}</strong></div>
@@ -441,30 +441,30 @@ export function OnlinePage({
         <div className="section-head" style={{ marginBottom: 12 }}>
           <div>
             <h2 style={{ margin: 0 }}>
-              {showingAllListed && 'Listed ┬╖ every channel'}
-              {tab === 'listed' && !showingFacebookOnly && !showingAllListed && `${labelChannel(channel)} ┬╖ currently listed`}
-              {showingFacebookOnly && 'Facebook only ┬╖ oversized / local'}
+              {showingAllListed && 'Listed · every channel'}
+              {tab === 'listed' && !showingFacebookOnly && !showingAllListed && `${labelChannel(channel)} · currently listed`}
+              {showingFacebookOnly && 'Facebook only · oversized / local'}
               {tab === 'ready' && 'Ready to list'}
               {tab === 'not-ready' && 'Not ready to list'}
-              {tab === 'msc' && 'MSC ┬╖ on eBay, missing other channels'}
+              {tab === 'msc' && 'MSC · on eBay, missing other channels'}
               {tab === 'sold' && 'Sold online'}
             </h2>
             <p className="hint" style={{ margin: '6px 0 0' }}>
-              {showingAllListed && `${counts.listed} unique items live on at least one marketplace. Quantity lots show once with (├ùN) remaining in stock.`}
-              {tab === 'listed' && !showingFacebookOnly && !showingAllListed && `${subtabCount(channel)} active on ${labelChannel(channel)}. Quantity lots show once with (├ùN) remaining in stock.`}
-              {showingFacebookOnly && 'Fridges, scooters, sofas, mattresses, dishwashers, commercial fryers, beds ΓÇö local Facebook Marketplace only.'}
-              {tab === 'ready' && 'In stock with photo, price, cost, specs, and eBay eligibility ΓÇö and not already on eBay. Quantity lots already listed as one unit are excluded.'}
-              {tab === 'not-ready' && 'Shippable units missing photo, price, cost, specs, or eligibility ΓÇö fix these before listing.'}
+              {showingAllListed && `${counts.listed} unique items live on at least one marketplace. Quantity lots show once with (×N) remaining in stock.`}
+              {tab === 'listed' && !showingFacebookOnly && !showingAllListed && `${subtabCount(channel)} active on ${labelChannel(channel)}. Quantity lots show once with (×N) remaining in stock.`}
+              {showingFacebookOnly && 'Fridges, scooters, sofas, mattresses, dishwashers, commercial fryers, beds — local Facebook Marketplace only.'}
+              {tab === 'ready' && 'In stock with photo, price, cost, specs, and eBay eligibility — and not already on eBay. Quantity lots already listed as one unit are excluded.'}
+              {tab === 'not-ready' && 'Shippable units missing photo, price, cost, specs, or eligibility — fix these before listing.'}
               {tab === 'msc' && 'Listed on eBay but missing Mercari, Depop, and/or Whatnot (Facebook & Amazon ignored for now).'}
-              {tab === 'sold' && 'Online marketplace and website sales only ΓÇö in-store / Floor sales are excluded.'}
+              {tab === 'sold' && 'Online marketplace and website sales only — in-store / Floor sales are excluded.'}
             </p>
           </div>
           <label className="date-control">Search
-            <input value={query} onChange={e => setQuery(e.target.value)} placeholder="SKU, title, reasonΓÇª" />
+            <input value={query} onChange={e => setQuery(e.target.value)} placeholder="SKU, title, reason…" />
           </label>
         </div>
 
-        {loading && !board ? <div className="empty">LoadingΓÇª</div>
+        {loading && !board ? <div className="empty">Loading…</div>
           : filtered.length === 0 ? <div className="empty">Nothing in this list.</div>
           : <div className="ticket-list">
             {filtered.map(r => (
@@ -486,7 +486,7 @@ export function OnlinePage({
                   <small>Sold {new Date(r.sold_at).toLocaleString()}{r.needs_sku ? ' · link SKU in Orders / Live Sales to attach inventory' : ''}</small>
                 )}
                 {tab !== 'sold' && !showingFacebookOnly && (r.listed_on?.length || 0) > 0 && (
-                  <small>On: {r.listed_on.map(labelChannel).join(' ┬╖ ')}</small>
+                  <small>On: {r.listed_on.map(labelChannel).join(' · ')}</small>
                 )}
                 {(showingFacebookOnly || tab === 'ready' || tab === 'not-ready') && (r.reasons?.length || 0) > 0 && (
                   <div className="online-reasons">
@@ -495,7 +495,7 @@ export function OnlinePage({
                 )}
                 {tab === 'msc' && (r.missing?.length || 0) > 0 && (
                   <div className="online-reasons missing">
-                    Missing: {r.missing!.map(labelChannel).join(' ┬╖ ')}
+                    Missing: {r.missing!.map(labelChannel).join(' · ')}
                   </div>
                 )}
               </div>

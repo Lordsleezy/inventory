@@ -42,14 +42,14 @@ function tender(r: Receipt) {
   const ch = (r.channel || '').toLowerCase();
   if (ch !== 'floor' && ch !== 'website') return CHANNEL[ch] || ch;
   const method = (r.payment_method || 'other').toUpperCase();
-  const card = [r.card_brand, r.card_last4 ? `ΓÇóΓÇóΓÇóΓÇó ${r.card_last4}` : null].filter(Boolean).join(' ');
+  const card = [r.card_brand, r.card_last4 ? `•••• ${r.card_last4}` : null].filter(Boolean).join(' ');
   if (method === 'SPLIT') {
     const parts = ['SPLIT'];
     if (r.cash_cents != null) parts.push(`cash $${(r.cash_cents / 100).toFixed(2)}`);
     parts.push(`${card || 'card'}${r.card_cents != null ? ` $${(r.card_cents / 100).toFixed(2)}` : ''}`);
-    return parts.join(' ┬╖ ');
+    return parts.join(' · ');
   }
-  return `${method}${card ? ` ┬╖ ${card}` : ''}`;
+  return `${method}${card ? ` · ${card}` : ''}`;
 }
 
 function depositCents(r: Receipt) {
@@ -73,15 +73,15 @@ function ReceiptDoc({ r, money, stamp }: { r: Receipt; money: (n: number) => str
   const online = isOnline(r.channel);
   const marketplace = online && (r.channel || '').toLowerCase() !== 'website';
   const channel = CHANNEL[(r.channel || '').toLowerCase()] || r.channel;
-  const buyer = [r.buyer_name, r.buyer_email].filter(Boolean).join(' ┬╖ ');
+  const buyer = [r.buyer_name, r.buyer_email].filter(Boolean).join(' · ');
   const deposit = depositCents(r);
   const who = actorLabel(r.channel, r.actor_name);
 
   return <div className="receipt-sheet">
     <h1>Open Box Industries</h1>
     <p className="receipt-meta">
-      Receipt {r.receipt_no} ┬╖ {stamp(r.sold_at)}<br />
-      {channel} ┬╖ {who}
+      Receipt {r.receipt_no} · {stamp(r.sold_at)}<br />
+      {channel} · {who}
       {buyer ? <><br />{buyer}</> : null}
       {r.order_no ? <><br />Order {r.order_no}</> : null}
     </p>
@@ -90,8 +90,8 @@ function ReceiptDoc({ r, money, stamp }: { r: Receipt; money: (n: number) => str
         {r.lines.map(l => (
           <tr key={l.id}>
             <td>
-              <strong>{l.qty > 1 ? `${l.qty}├ù ` : ''}{l.title || 'Item'}</strong>
-              <small>SKU {l.sku}{l.condition ? ` ┬╖ ${l.condition}` : ''}</small>
+              <strong>{l.qty > 1 ? `${l.qty}× ` : ''}{l.title || 'Item'}</strong>
+              <small>SKU {l.sku}{l.condition ? ` · ${l.condition}` : ''}</small>
             </td>
             <td>{money(l.price_cents)}</td>
           </tr>
@@ -103,13 +103,13 @@ function ReceiptDoc({ r, money, stamp }: { r: Receipt; money: (n: number) => str
       {marketplace && (r.shipping_cents || 0) > 0 && row('Buyer shipping', money(r.shipping_cents))}
       {!marketplace && (r.tax_cents || 0) > 0 && row('Sales tax', money(r.tax_cents))}
       {!marketplace && (r.card_fee_cents || 0) > 0 && row('Card surcharge', money(r.card_fee_cents))}
-      {marketplace && (r.fee_cents || 0) > 0 && row(feeName(r.channel), `ΓêÆ${money(r.fee_cents || 0)}`)}
-      {marketplace && (r.label_cents || 0) > 0 && row('Shipping label', `ΓêÆ${money(r.label_cents || 0)}`)}
-      {!marketplace && (r.processing_cents || 0) > 0 && row('Card fees', `ΓêÆ${money(r.processing_cents || 0)}`)}
+      {marketplace && (r.fee_cents || 0) > 0 && row(feeName(r.channel), `−${money(r.fee_cents || 0)}`)}
+      {marketplace && (r.label_cents || 0) > 0 && row('Shipping label', `−${money(r.label_cents || 0)}`)}
+      {!marketplace && (r.processing_cents || 0) > 0 && row('Card fees', `−${money(r.processing_cents || 0)}`)}
       {marketplace
         ? row('Net deposit', money(deposit), true)
         : row('Total collected', money(r.total_cents), true)}
-      {marketplace && (r.cost_cents || 0) > 0 && row('Item cost', `ΓêÆ${money(r.cost_cents || 0)}`)}
+      {marketplace && (r.cost_cents || 0) > 0 && row('Item cost', `−${money(r.cost_cents || 0)}`)}
       {marketplace && r.profit_cents != null && row('Profit', money(r.profit_cents || 0))}
       <div className="receipt-row"><span>{marketplace ? 'Channel' : 'Paid'}</span><b>{tender(r)}</b></div>
     </div>
@@ -128,10 +128,10 @@ function printReceipt(r: Receipt, money: (n: number) => string, stamp: (s: strin
   const online = isOnline(r.channel);
   const marketplace = online && (r.channel || '').toLowerCase() !== 'website';
   const channel = CHANNEL[(r.channel || '').toLowerCase()] || r.channel;
-  const buyer = [r.buyer_name, r.buyer_email].filter(Boolean).join(' ┬╖ ');
+  const buyer = [r.buyer_name, r.buyer_email].filter(Boolean).join(' · ');
   const deposit = depositCents(r);
   const esc = (t: string) => String(t || '').replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]!);
-  const items = r.lines.map(l => `<tr><td><strong>${esc((l.qty > 1 ? `${l.qty}├ù ` : '') + (l.title || 'Item'))}</strong><div style="color:#666;font-size:12px">SKU ${esc(l.sku)}${l.condition ? ` ┬╖ ${esc(l.condition)}` : ''}</div></td><td style="text-align:right">${esc(money(l.price_cents))}</td></tr>`).join('');
+  const items = r.lines.map(l => `<tr><td><strong>${esc((l.qty > 1 ? `${l.qty}× ` : '') + (l.title || 'Item'))}</strong><div style="color:#666;font-size:12px">SKU ${esc(l.sku)}${l.condition ? ` · ${esc(l.condition)}` : ''}</div></td><td style="text-align:right">${esc(money(l.price_cents))}</td></tr>`).join('');
   const line = (label: string, value: string, bold = false) =>
     `<div style="display:flex;justify-content:space-between${bold ? ';font-weight:700;font-size:18px;margin-top:4px' : ''}"><span>${esc(label)}</span><span>${esc(value)}</span></div>`;
   const totals = [
@@ -139,11 +139,11 @@ function printReceipt(r: Receipt, money: (n: number) => string, stamp: (s: strin
     marketplace && (r.shipping_cents || 0) > 0 ? line('Buyer shipping', money(r.shipping_cents)) : '',
     !marketplace && (r.tax_cents || 0) > 0 ? line('Sales tax', money(r.tax_cents)) : '',
     !marketplace && (r.card_fee_cents || 0) > 0 ? line('Card surcharge', money(r.card_fee_cents)) : '',
-    marketplace && (r.fee_cents || 0) > 0 ? line(feeName(r.channel), `ΓêÆ${money(r.fee_cents || 0)}`) : '',
-    marketplace && (r.label_cents || 0) > 0 ? line('Shipping label', `ΓêÆ${money(r.label_cents || 0)}`) : '',
-    !marketplace && (r.processing_cents || 0) > 0 ? line('Card fees', `ΓêÆ${money(r.processing_cents || 0)}`) : '',
+    marketplace && (r.fee_cents || 0) > 0 ? line(feeName(r.channel), `−${money(r.fee_cents || 0)}`) : '',
+    marketplace && (r.label_cents || 0) > 0 ? line('Shipping label', `−${money(r.label_cents || 0)}`) : '',
+    !marketplace && (r.processing_cents || 0) > 0 ? line('Card fees', `−${money(r.processing_cents || 0)}`) : '',
     marketplace ? line('Net deposit', money(deposit), true) : line('Total collected', money(r.total_cents), true),
-    marketplace && (r.cost_cents || 0) > 0 ? line('Item cost', `ΓêÆ${money(r.cost_cents || 0)}`) : '',
+    marketplace && (r.cost_cents || 0) > 0 ? line('Item cost', `−${money(r.cost_cents || 0)}`) : '',
     marketplace && r.profit_cents != null ? line('Profit', money(r.profit_cents || 0)) : '',
     line(marketplace ? 'Channel' : 'Paid', tender(r)),
   ].filter(Boolean).join('');
@@ -153,7 +153,7 @@ h1{margin:0;font-size:22px}.muted{color:#666;font-size:12px}table{width:100%;bor
 td{padding:6px 0;vertical-align:top}.box{border-top:1px solid #ccc;margin-top:14px;padding-top:12px;display:grid;gap:4px}
 .legal{color:#555;font-size:12px;margin-top:22px}</style></head><body>
 <h1>Open Box Industries</h1>
-<p class="muted">Receipt ${esc(r.receipt_no)} ┬╖ ${esc(stamp(r.sold_at))}<br/>${esc(channel)} ┬╖ ${esc(actorLabel(r.channel, r.actor_name))}${buyer ? `<br/>${esc(buyer)}` : ''}${r.order_no ? `<br/>Order ${esc(r.order_no)}` : ''}</p>
+<p class="muted">Receipt ${esc(r.receipt_no)} · ${esc(stamp(r.sold_at))}<br/>${esc(channel)} · ${esc(actorLabel(r.channel, r.actor_name))}${buyer ? `<br/>${esc(buyer)}` : ''}${r.order_no ? `<br/>Order ${esc(r.order_no)}` : ''}</p>
 <table>${items}</table><div class="box">${totals}</div>
 <p class="legal">${esc(LEGAL)}</p>
 <script>window.onload=function(){window.print();}</script>
@@ -221,12 +221,12 @@ export function ReceiptsPage({ client, money, stamp }: {
       <div>
         <div className="eyebrow">SALES HISTORY</div>
         <h1>Receipts</h1>
-        <p>Every purchase ΓÇö in person and online. View in the browser or print.</p>
+        <p>Every purchase — in person and online. View in the browser or print.</p>
       </div>
     </header>
     <div className="inventory-controls">
       <label>Search
-        <input type="search" placeholder="Receipt #, SKU, buyer, channelΓÇª"
+        <input type="search" placeholder="Receipt #, SKU, buyer, channel…"
           value={query} onChange={e => { setQuery(e.target.value); setOffset(0); }} />
       </label>
       <div className="actions" style={{ alignSelf: 'end' }}>
@@ -240,7 +240,7 @@ export function ReceiptsPage({ client, money, stamp }: {
       <div className="stat"><span>Receipts</span><strong>{scope === 'all' ? total : shown.length}{scope !== 'all' ? ' shown' : ''}</strong></div>
     </div>
     <section className="panel">
-      {busy && rows.length === 0 && <p className="hint">Loading receiptsΓÇª</p>}
+      {busy && rows.length === 0 && <p className="hint">Loading receipts…</p>}
       {!busy && shown.length === 0 && <div className="empty">No receipts match.</div>}
       <div className="ticket-list">
         {shown.map(r => {
@@ -248,7 +248,7 @@ export function ReceiptsPage({ client, money, stamp }: {
           const label = CHANNEL[(r.channel || '').toLowerCase()] || r.channel;
           const marketplace = !floor && (r.channel || '').toLowerCase() !== 'website';
           const displayTotal = marketplace ? depositCents(r) : r.total_cents;
-          const title = r.lines.map(l => l.title).filter(Boolean).slice(0, 2).join(' ┬╖ ')
+          const title = r.lines.map(l => l.title).filter(Boolean).slice(0, 2).join(' · ')
             + (r.lines.length > 2 ? ` +${r.lines.length - 2} more` : '');
           return <div className="ticket" key={r.ticket_key}>
             <div className="ticket-top">
@@ -258,12 +258,12 @@ export function ReceiptsPage({ client, money, stamp }: {
               <span>{stamp(r.sold_at)}<b className="badge"> {(label || '').toUpperCase()}</b>{r.needs_sku ? <b className="badge"> UNMATCHED</b> : null}</span>
             </div>
             <div className="ticket-items"><div><strong>{title || 'Sale'}</strong>
-              <small> ┬╖ Receipt {r.receipt_no}{r.order_no && r.order_no !== r.receipt_no ? ` ┬╖ Order ${r.order_no}` : ''}
-                {r.buyer_name ? ` ┬╖ ${r.buyer_name}` : floor ? ` ┬╖ ${actorLabel(r.channel, r.actor_name)}` : ''}
+              <small> · Receipt {r.receipt_no}{r.order_no && r.order_no !== r.receipt_no ? ` · Order ${r.order_no}` : ''}
+                {r.buyer_name ? ` · ${r.buyer_name}` : floor ? ` · ${actorLabel(r.channel, r.actor_name)}` : ''}
               </small>
             </div></div>
             <div className="ticket-bottom">
-              <span>{tender(r)}{(r.fee_cents || 0) > 0 ? ` ┬╖ fees ${money(r.fee_cents || 0)}` : ''}{(r.label_cents || 0) > 0 ? ` ┬╖ label ${money(r.label_cents || 0)}` : ''}</span>
+              <span>{tender(r)}{(r.fee_cents || 0) > 0 ? ` · fees ${money(r.fee_cents || 0)}` : ''}{(r.label_cents || 0) > 0 ? ` · label ${money(r.label_cents || 0)}` : ''}</span>
               <span className="actions">
                 <button type="button" className="secondary" onClick={() => setViewing(r)}>View</button>
                 <button type="button" onClick={() => { if (!printReceipt(r, money, stamp)) setError('Could not open print dialog.'); }}>Print</button>
@@ -275,7 +275,7 @@ export function ReceiptsPage({ client, money, stamp }: {
     </section>
     {scope === 'all' && total > limit && <div className="inventory-pagination">
       <button type="button" className="secondary" disabled={offset === 0 || busy} onClick={() => setOffset(Math.max(0, offset - limit))}>Previous</button>
-      <span>{offset + 1}ΓÇô{Math.min(offset + limit, total)} of {total}</span>
+      <span>{offset + 1}–{Math.min(offset + limit, total)} of {total}</span>
       <button type="button" className="secondary" disabled={offset + limit >= total || busy} onClick={() => setOffset(offset + limit)}>Next</button>
     </div>}
     {viewing && <div className="inventory-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) setViewing(null); }}>
