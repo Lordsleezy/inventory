@@ -19,7 +19,7 @@ export const MIGRATION_TITLE_MAX = 80;
 export const MIGRATION_DEFAULT_WEIGHT_LB = 1;
 
 /** Bump when create payload hardening changes — written into failure detail to confirm deploy. */
-export const MIGRATION_CREATE_BUILD = 4;
+export const MIGRATION_CREATE_BUILD = 5;
 
 /** Default inches when Floor dims are missing (calculated shipping package box). */
 export const MIGRATION_DEFAULT_DIMS_IN = { lengthIn: 12, widthIn: 9, heightIn: 3 };
@@ -221,34 +221,91 @@ export function parseMissingAspectNames(message) {
   return names;
 }
 
+/** Prefer real-looking values — many categories reject "Does not apply" for Size/etc. */
+function defaultAspectValue(name, { unit = null, dims = null } = {}) {
+  const lower = String(name || "").toLowerCase();
+  if (lower === "item length" || lower === "length") {
+    return String(dims?.lengthIn || unit?.package_length_in || MIGRATION_DEFAULT_DIMS_IN.lengthIn);
+  }
+  if (lower === "item width" || lower === "width") {
+    return String(dims?.widthIn || unit?.package_width_in || MIGRATION_DEFAULT_DIMS_IN.widthIn);
+  }
+  if (lower === "item height" || lower === "height" || lower === "item depth" || lower === "depth") {
+    return String(dims?.heightIn || unit?.package_height_in || MIGRATION_DEFAULT_DIMS_IN.heightIn);
+  }
+  if (lower === "brand" && unit?.brand) return String(unit.brand).trim();
+  if ((lower === "model" || lower === "compatible model") && unit?.model) return String(unit.model).trim();
+  if (lower === "size type") return "Regular";
+  if (lower === "size" || lower === "clothing size") return "One Size";
+  if (lower === "color") return "Multicolor";
+  if (lower === "card condition" || lower === "grade") return "Ungraded";
+  if (lower === "material") return "Unknown";
+  if (lower === "artist") return "Unknown";
+  return NOT_APPLICABLE;
+}
+
 /**
  * Fill required aspects eBay rejected as missing. Prefer Floor dims/brand/model;
- * otherwise "Does not apply".
+ * use category-safe placeholders (avoid "Does not apply" for Size).
  */
 export function fillMissingAspects(aspects, missingNames, { unit = null, dims = null } = {}) {
   const out = { ...(aspects || {}) };
   for (const name of missingNames || []) {
     if (out[name]?.[0]) continue;
-    const lower = name.toLowerCase();
-    if (lower === "item length" || lower === "length") {
-      out[name] = [String(dims?.lengthIn || unit?.package_length_in || MIGRATION_DEFAULT_DIMS_IN.lengthIn)];
-    } else if (lower === "item width" || lower === "width") {
-      out[name] = [String(dims?.widthIn || unit?.package_width_in || MIGRATION_DEFAULT_DIMS_IN.widthIn)];
-    } else if (lower === "item height" || lower === "height" || lower === "item depth" || lower === "depth") {
-      out[name] = [String(dims?.heightIn || unit?.package_height_in || MIGRATION_DEFAULT_DIMS_IN.heightIn)];
-    } else if (lower === "brand" && unit?.brand) {
-      out[name] = [String(unit.brand).trim()];
-    } else if ((lower === "model" || lower === "compatible model") && unit?.model) {
-      out[name] = [String(unit.model).trim()];
-    } else if (lower === "size type") {
-      out[name] = ["Regular"];
-    } else if (lower === "color") {
-      out[name] = ["Multicolor"];
-    } else {
-      out[name] = [NOT_APPLICABLE];
-    }
+    out[name] = [defaultAspectValue(name, { unit, dims })];
   }
   return out;
+}
+
+/**
+ * Replace aspect values eBay rejected as invalid (often "Does not apply" for Size).
+ * Returns { aspects, changed }.
+ */
+export function replaceInvalidAspectValues(aspects, message, { unit = null, dims = null } = {}) {
+  const text = String(message || "")
+    .replace(/&quot;/gi, '"')
+    .replace(/&nbsp;|&#160;|\u00a0/gi, " ");
+  const out = { ...(aspects || {}) };
+  let changed = false;
+  // "Does not apply" is not a valid value for Size
+  const invalidRe = /["“]([^"”]+)["”]\s+is\s+not\s+a\s+valid\s+value\s+for\s+([^.]+)/gi;
+  let m;
+  while ((m = invalidRe.exec(text))) {
+    const badVal = String(m[1] || "").trim();
+    const name = String(m[2] || "").trim();
+    if (!name) continue;
+    const next = defaultAspectValue(name, { unit, dims });
+    if (next && next !== badVal) {
+      out[name] = [next];
+      changed = true;
+    }
+  }
+  // Card Condition (40001) is a required field — set Card Condition aspect
+  if (/card\s+condition/i.test(text) && /required/i.test(text)) {
+    if (!out["Card Condition"]?.[0]) {
+      out["Card Condition"] = ["Ungraded"];
+      changed = true;
+    }
+  }
+  return { aspects: out, changed };
+}
+
+/** Clamp package dims so L + 2(W+H) stays under common carrier girth limits. */
+export function clampMigrationPackageDims(dims) {
+  let lengthIn = Math.max(1, Number(dims?.lengthIn) || MIGRATION_DEFAULT_DIMS_IN.lengthIn);
+  let widthIn = Math.max(1, Number(dims?.widthIn) || MIGRATION_DEFAULT_DIMS_IN.widthIn);
+  let heightIn = Math.max(1, Number(dims?.heightIn) || MIGRATION_DEFAULT_DIMS_IN.heightIn);
+  const girth = () => lengthIn + 2 * (widthIn + heightIn);
+  // Soft limit ~108" for many parcel services; shrink toward defaults if over.
+  while (girth() > 108 && (lengthIn > 12 || widthIn > 9 || heightIn > 3)) {
+    lengthIn = Math.max(12, Math.floor(lengthIn * 0.85));
+    widthIn = Math.max(9, Math.floor(widthIn * 0.85));
+    heightIn = Math.max(3, Math.floor(heightIn * 0.85));
+  }
+  if (girth() > 108) {
+    return { ...MIGRATION_DEFAULT_DIMS_IN };
+  }
+  return { lengthIn, widthIn, heightIn };
 }
 
 /** EndItem already succeeded on a prior attempt (or Seller Hub ended it). */

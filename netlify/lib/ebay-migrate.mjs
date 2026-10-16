@@ -32,6 +32,7 @@ import {
   isVerificationHiddenListingError,
   itemFromActiveListSummary,
   MIGRATION_CREATE_BUILD,
+  clampMigrationPackageDims,
   fillMissingAspects,
   migrationBannedReason,
   migrationConditionFallbacks,
@@ -39,6 +40,7 @@ import {
   migrationPackageDims,
   migrationWeightLb,
   parseMissingAspectNames,
+  replaceInvalidAspectValues,
   sanitizeMigrationAspects,
   tallyMigrationSummary,
 } from "./ebay-migrate-rules.mjs";
@@ -53,6 +55,7 @@ export {
   isVerificationHiddenListingError,
   itemFromActiveListSummary,
   MIGRATION_CREATE_BUILD,
+  clampMigrationPackageDims,
   fillMissingAspects,
   migrationBannedReason,
   migrationConditionFallbacks,
@@ -60,6 +63,7 @@ export {
   migrationPackageDims,
   migrationWeightLb,
   parseMissingAspectNames,
+  replaceInvalidAspectValues,
   sanitizeMigrationAspects,
   tallyMigrationSummary,
 };
@@ -574,13 +578,13 @@ async function createOnDestination(destAccount, item, policies, { storeId } = {}
   const title = clipMigrationTitle(item.title);
   let aspects = sanitizeMigrationAspects(item.aspects, unit, item);
   const weightLb = migrationWeightLb(unit, item);
-  const dims = migrationPackageDims(unit, item);
+  let dims = clampMigrationPackageDims(migrationPackageDims(unit, item));
   const conditionIds = migrationConditionFallbacks(item.conditionId);
   let conditionIdx = 0;
   let lastErr = null;
   const filledAspectNames = [];
 
-  for (let attempt = 0; attempt < 12; attempt += 1) {
+  for (let attempt = 0; attempt < 14; attempt += 1) {
     const conditionId = conditionIds[Math.min(conditionIdx, conditionIds.length - 1)];
     try {
       const created = await addFixedPriceItem(token, {
@@ -615,9 +619,35 @@ async function createOnDestination(destAccount, item, policies, { storeId } = {}
         filledAspectNames.push(...missing);
         continue;
       }
-      const conditionIssue = /condition/i.test(message) && /invalid|not\s+valid|does\s+not\s+exist/i.test(message);
+      const replaced = replaceInvalidAspectValues(aspects, message, { unit, dims });
+      if (replaced.changed) {
+        aspects = replaced.aspects;
+        continue;
+      }
+      if (/girth|package.*(exceed|too\s+large|limit)/i.test(message)) {
+        const next = clampMigrationPackageDims({
+          lengthIn: Math.max(8, dims.lengthIn * 0.7),
+          widthIn: Math.max(6, dims.widthIn * 0.7),
+          heightIn: Math.max(2, dims.heightIn * 0.7),
+        });
+        if (next.lengthIn !== dims.lengthIn || next.widthIn !== dims.widthIn || next.heightIn !== dims.heightIn) {
+          dims = next;
+          continue;
+        }
+      }
+      const conditionIssue =
+        (/condition/i.test(message) && /invalid|not\s+valid|does\s+not\s+exist/i.test(message)) ||
+        (/card\s+condition/i.test(message) && /required/i.test(message));
       if (conditionIssue && conditionIdx < conditionIds.length - 1) {
         conditionIdx += 1;
+        // Trading card categories often want New (1000) + Card Condition aspect.
+        if (/card\s+condition/i.test(message) && !aspects["Card Condition"]?.[0]) {
+          aspects = { ...aspects, "Card Condition": ["Ungraded"] };
+        }
+        continue;
+      }
+      if (/card\s+condition/i.test(message) && /required/i.test(message) && !aspects["Card Condition"]?.[0]) {
+        aspects = { ...aspects, "Card Condition": ["Ungraded"] };
         continue;
       }
       break;
@@ -768,6 +798,7 @@ export async function runEbayMigration(storeId, { mode = "dry_run", createdBy = 
     let activeList = [];
     let sellerList = [];
     let floorList = [];
+    let strandedList = [];
     try {
       activeList = await getMyEbaySellingActive(sourceToken);
     } catch (err) {
@@ -786,14 +817,21 @@ export async function runEbayMigration(storeId, { mode = "dry_run", createdBy = 
     } catch (err) {
       console.log("ebay_migrate_floor_list", err instanceof Error ? err.message : String(err));
     }
-    const summaries = mergeListingSummaries(activeList, sellerList, floorList);
+    try {
+      strandedList = await loadStrandedFailedMigrationSummaries(storeId, dest?.id || null);
+    } catch (err) {
+      console.log("ebay_migrate_stranded_list", err instanceof Error ? err.message : String(err));
+    }
+    const summaries = mergeListingSummaries(activeList, sellerList, floorList, strandedList);
     console.log(
       "ebay_migrate_sources",
       JSON.stringify({
         activeList: activeList.length,
         sellerList: sellerList.length,
         floorList: floorList.length,
+        strandedList: strandedList.length,
         merged: summaries.length,
+        createBuild: MIGRATION_CREATE_BUILD,
       }),
     );
     const openOrders = await openOrderItemIds(sourceToken);
