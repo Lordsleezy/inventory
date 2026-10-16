@@ -541,6 +541,9 @@ export async function ingestMarketplaceMail(sb, { store, channels, parsed, raw }
     }
   }
 
+  // Stable order key (never raw Message-ID with <>/@) so payment_id dedupes with unmatched rows.
+  const orderKey = marketplaceOrderKey({ orderNumber: p.order_number, messageId: msg });
+
   if (p.sku && p.price) {
     const { data: unit } = await sb
       .from('units')
@@ -554,7 +557,7 @@ export async function ingestMarketplaceMail(sb, { store, channels, parsed, raw }
         p_sku: p.sku,
         p_channel: p.marketplace,
         p_price_cents: p.price,
-        p_order_number: p.order_number,
+        p_order_number: orderKey,
         p_message_id: msg,
         p_marketplace: p.marketplace,
         p_item_title: unit.title || p.item_title,
@@ -606,7 +609,7 @@ export async function ingestMarketplaceMail(sb, { store, channels, parsed, raw }
     storeId: store.id,
     marketplace: p.marketplace,
     messageId: msg,
-    orderNumber: p.order_number,
+    orderNumber: orderKey.startsWith('msg:') ? null : orderKey,
     itemTitle: p.item_title,
     priceCents: p.price,
     shipBy: p.ship_by,
