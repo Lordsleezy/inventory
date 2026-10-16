@@ -112,7 +112,7 @@ export function describeMigrationPlan() {
       "Connect business eBay account as role=selling (full listing scopes).",
       "Create business policies: Calculated Shipping – Buyer Pays, No Returns, Payment.",
       "Keep pgg124-5 connected as role=orders_only until its open orders finish shipping.",
-      "Dry-run: list every ActiveList item from source via GetMyeBaySelling + GetItem; mark will_move / skipped. Account-verification hides (GetItem policy-violation/hidden) count as will_move, not failed.",
+      "Dry-run: discover every source listing via GetMyeBaySelling ActiveList (all pages) + GetSellerList + Floor listings.ebay, then GetItem; mark will_move / skipped. Account-verification hides count as will_move, not failed.",
       "Live: for each will_move item — EndItem on source, AddFixedPriceItem on dest with same title/photos/description/specifics/condition/price (Floor enrichment when GetItem is blocked by verification), confirm Active, update listings.ebay_account_id + listing_id.",
       "Pace 4–9s between live moves. Never cancel/refund. Skip open orders, bids, best offers, refrigerators/dishwashers/mattresses, prohibited goods.",
       "After cutover: new listings + auto-delist use selling account; ebay-sync polls every connected account for sales/fees.",

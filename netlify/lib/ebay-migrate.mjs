@@ -14,6 +14,7 @@ import {
   addFixedPriceItem,
   endTradingItem,
   getMyEbaySellingActive,
+  getSellerListActive,
   getSellerOrders,
   getTradingItem,
   tradingItemBlockedReason,
@@ -38,7 +39,8 @@ export {
   tallyMigrationSummary,
 };
 
-const DEFAULT_PACE_MS = { min: 4000, max: 9000 };
+// Live: ~250–300 listings must finish inside Netlify background (~15 min) → keep pace tight.
+const DEFAULT_PACE_MS = { min: 2000, max: 4000 };
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -104,6 +106,79 @@ function normalizeAspects(raw) {
     }
   }
   return out;
+}
+
+/** Active FixedPrice listings tracked in Floor (Vendoo / Seller Hub may outnumber ActiveList page 1). */
+async function loadFloorEbayListingSummaries(storeId, { sourceAccountId = null, destAccountId = null } = {}) {
+  const sb = serviceClient();
+  const { data, error } = await sb
+    .from("listings")
+    .select("listing_id,sku,status,ebay_account_id")
+    .eq("store_id", storeId)
+    .eq("channel", "ebay")
+    .eq("status", "listed");
+  if (error) throw new Error(error.message);
+  const out = [];
+  for (const row of data || []) {
+    const itemId = String(row.listing_id || "").trim();
+    if (!itemId) continue;
+    // Skip rows already remapped onto the business selling account.
+    if (destAccountId && row.ebay_account_id && String(row.ebay_account_id) === String(destAccountId)) continue;
+    if (
+      sourceAccountId &&
+      row.ebay_account_id &&
+      String(row.ebay_account_id) !== String(sourceAccountId) &&
+      destAccountId &&
+      String(row.ebay_account_id) === String(destAccountId)
+    ) {
+      continue;
+    }
+    out.push({
+      itemId,
+      title: "",
+      sku: row.sku || "",
+      currentPrice: "",
+      quantity: 1,
+      quantitySold: 0,
+      bidCount: 0,
+      listingType: "FixedPriceItem",
+      listingStatus: "Active",
+      categoryId: "",
+      categoryName: "",
+      imageUrls: [],
+      viewItemUrl: "",
+      fromFloor: true,
+    });
+  }
+  return out;
+}
+
+function mergeListingSummaries(...lists) {
+  const byId = new Map();
+  for (const list of lists) {
+    for (const row of list || []) {
+      const id = String(row?.itemId || "").trim();
+      if (!id) continue;
+      const prev = byId.get(id);
+      if (!prev) {
+        byId.set(id, { ...row, itemId: id });
+        continue;
+      }
+      byId.set(id, {
+        ...prev,
+        ...row,
+        itemId: id,
+        title: row.title || prev.title,
+        sku: row.sku || prev.sku,
+        currentPrice: row.currentPrice || prev.currentPrice,
+        categoryId: row.categoryId || prev.categoryId,
+        categoryName: row.categoryName || prev.categoryName,
+        imageUrls: row.imageUrls?.length ? row.imageUrls : prev.imageUrls,
+        fromFloor: Boolean(prev.fromFloor || row.fromFloor),
+      });
+    }
+  }
+  return [...byId.values()];
 }
 
 async function floorPhotoUrls(storeId, sku) {
@@ -495,7 +570,37 @@ export async function runEbayMigration(storeId, { mode = "dry_run", createdBy = 
 
   try {
     const sourceToken = await userTokenForAccount(source);
-    const summaries = await getMyEbaySellingActive(sourceToken);
+    let activeList = [];
+    let sellerList = [];
+    let floorList = [];
+    try {
+      activeList = await getMyEbaySellingActive(sourceToken);
+    } catch (err) {
+      console.log("ebay_migrate_active_list", err instanceof Error ? err.message : String(err));
+    }
+    try {
+      sellerList = await getSellerListActive(sourceToken);
+    } catch (err) {
+      console.log("ebay_migrate_seller_list", err instanceof Error ? err.message : String(err));
+    }
+    try {
+      floorList = await loadFloorEbayListingSummaries(storeId, {
+        sourceAccountId: source.id,
+        destAccountId: dest?.id || null,
+      });
+    } catch (err) {
+      console.log("ebay_migrate_floor_list", err instanceof Error ? err.message : String(err));
+    }
+    const summaries = mergeListingSummaries(activeList, sellerList, floorList);
+    console.log(
+      "ebay_migrate_sources",
+      JSON.stringify({
+        activeList: activeList.length,
+        sellerList: sellerList.length,
+        floorList: floorList.length,
+        merged: summaries.length,
+      }),
+    );
     const openOrders = await openOrderItemIds(sourceToken);
     const capped = limit != null ? summaries.slice(0, Number(limit)) : summaries;
 
@@ -696,6 +801,20 @@ export async function queueMigrationRequest(storeId, { mode = "dry_run", request
   return value;
 }
 
+function parseSettingValue(raw) {
+  if (raw == null) return {};
+  if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  if (typeof raw === "object" && !Array.isArray(raw)) return raw;
+  return {};
+}
+
 /** Called from ebay-sync cron: dispatch any queued migration requests to the background worker. */
 export async function dispatchQueuedMigrationRequests() {
   const sb = serviceClient();
@@ -708,7 +827,7 @@ export async function dispatchQueuedMigrationRequests() {
   const token = requireEnv("SUPABASE_SERVICE_ROLE");
   const results = [];
   for (const row of rows || []) {
-    const val = row.value && typeof row.value === "object" ? row.value : {};
+    const val = parseSettingValue(row.value);
     if (val.status !== "queued") continue;
     const mode = val.mode === "live" ? "live" : "dry_run";
     const claimed = {

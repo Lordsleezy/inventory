@@ -287,26 +287,96 @@ export function parseActiveListSummaries(xml) {
 }
 
 /** Paginate GetMyeBaySelling ActiveList — includes Vendoo / Seller Hub listings Inventory API misses. */
-export async function getMyEbaySellingActive(token, { entriesPerPage = 100, maxPages = 50 } = {}) {
+export async function getMyEbaySellingActive(token, { entriesPerPage = 200, maxPages = 50 } = {}) {
   const items = [];
   let page = 1;
   let totalPages = 1;
+  const perPage = Math.min(200, Math.max(1, Number(entriesPerPage) || 200));
   while (page <= totalPages && page <= maxPages) {
     const xml = await tradingCall(
       token,
       "GetMyeBaySelling",
       `<ActiveList>
   <Include>true</Include>
-  <Pagination><EntriesPerPage>${Number(entriesPerPage) || 100}</EntriesPerPage><PageNumber>${page}</PageNumber></Pagination>
+  <Pagination><EntriesPerPage>${perPage}</EntriesPerPage><PageNumber>${page}</PageNumber></Pagination>
 </ActiveList>`,
     );
+    // IMPORTANT: PaginationResult must come from ActiveList — the response also embeds
+    // PaginationResult for SoldList/UnsoldList/etc. Taking xml's first match stopped after page 1.
     const active = xmlBlocks(xml, "ActiveList")[0] || xml;
     items.push(...parseActiveListSummaries(active));
-    const pagination = xmlBlocks(xml, "PaginationResult")[0] || "";
-    totalPages = Math.max(1, Number(xmlTag(pagination, "TotalNumberOfPages") || 1));
+    const pagination = xmlBlocks(active, "PaginationResult")[0] || "";
+    const pages = Number(xmlTag(pagination, "TotalNumberOfPages") || 0);
+    const totalEntries = Number(xmlTag(pagination, "TotalNumberOfEntries") || 0);
+    if (pages > 0) totalPages = pages;
+    else if (totalEntries > 0) totalPages = Math.max(1, Math.ceil(totalEntries / perPage));
+    else if (parseActiveListSummaries(active).length < perPage) totalPages = page;
+    else totalPages = page + 1;
     page += 1;
   }
-  return items;
+  // Dedupe by ItemID (safe if a page is re-fetched).
+  const byId = new Map();
+  for (const row of items) {
+    if (row?.itemId) byId.set(String(row.itemId), row);
+  }
+  return [...byId.values()];
+}
+
+function isoDaysFromNow(days) {
+  return new Date(Date.now() + Number(days) * 86400000).toISOString();
+}
+
+/**
+ * Backup active-listing discovery via GetSellerList (EndTime window).
+ * Catches listings GetMyeBaySelling ActiveList pagination can miss.
+ */
+export async function getSellerListActive(token, { entriesPerPage = 200, maxPages = 50, endDays = 120 } = {}) {
+  const items = [];
+  let page = 1;
+  let totalPages = 1;
+  const perPage = Math.min(200, Math.max(1, Number(entriesPerPage) || 200));
+  const endFrom = new Date().toISOString();
+  const endTo = isoDaysFromNow(Math.min(120, Math.max(1, Number(endDays) || 120)));
+  while (page <= totalPages && page <= maxPages) {
+    const xml = await tradingCall(
+      token,
+      "GetSellerList",
+      `<EndTimeFrom>${xmlEsc(endFrom)}</EndTimeFrom>
+<EndTimeTo>${xmlEsc(endTo)}</EndTimeTo>
+<IncludeVariations>true</IncludeVariations>
+<Pagination><EntriesPerPage>${perPage}</EntriesPerPage><PageNumber>${page}</PageNumber></Pagination>
+<DetailLevel>ReturnSummary</DetailLevel>
+<OutputSelector>ItemArray.Item.ItemID</OutputSelector>
+<OutputSelector>ItemArray.Item.Title</OutputSelector>
+<OutputSelector>ItemArray.Item.SKU</OutputSelector>
+<OutputSelector>ItemArray.Item.SellingStatus</OutputSelector>
+<OutputSelector>ItemArray.Item.PrimaryCategory</OutputSelector>
+<OutputSelector>ItemArray.Item.PictureDetails</OutputSelector>
+<OutputSelector>ItemArray.Item.ListingType</OutputSelector>
+<OutputSelector>ItemArray.Item.ListingDetails</OutputSelector>
+<OutputSelector>ItemArray.Item.Quantity</OutputSelector>
+<OutputSelector>PaginationResult</OutputSelector>`,
+    );
+    const array = xmlBlocks(xml, "ItemArray")[0] || xml;
+    const rows = parseActiveListSummaries(array).filter((row) => {
+      const status = String(row.listingStatus || "Active").toLowerCase();
+      return !status || status === "active";
+    });
+    items.push(...rows);
+    const pagination = xmlBlocks(xml, "PaginationResult")[0] || "";
+    const pages = Number(xmlTag(pagination, "TotalNumberOfPages") || 0);
+    const totalEntries = Number(xmlTag(pagination, "TotalNumberOfEntries") || 0);
+    if (pages > 0) totalPages = pages;
+    else if (totalEntries > 0) totalPages = Math.max(1, Math.ceil(totalEntries / perPage));
+    else if (rows.length < perPage) totalPages = page;
+    else totalPages = page + 1;
+    page += 1;
+  }
+  const byId = new Map();
+  for (const row of items) {
+    if (row?.itemId) byId.set(String(row.itemId), row);
+  }
+  return [...byId.values()];
 }
 
 export function parseTradingItem(xml) {
