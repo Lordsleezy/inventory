@@ -141,14 +141,14 @@ export type ReceiptPayload = {
 export function ticketReceiptPayload(summary: TicketSummary, meta: ReceiptMeta): ReceiptPayload {
   const first = summary.lines[0];
   const method = (summary.payment_method || 'cash').toUpperCase();
-  const cardBits = [summary.card_brand, summary.card_last4 ? `ΓÇóΓÇóΓÇóΓÇó ${summary.card_last4}` : null]
+  const cardBits = [summary.card_brand, summary.card_last4 ? `•••• ${summary.card_last4}` : null]
     .filter(Boolean)
     .join(' ');
   const tender =
     method +
-    (cardBits ? ` ┬╖ ${cardBits}` : '') +
-    (method === 'SPLIT' ? ` ┬╖ cash ${formatCentsTotal(summary.cash_cents ?? 0)} ┬╖ card ${formatCentsTotal(summary.card_cents ?? 0)}` : '') +
-    (meta.changeCents != null ? ` ┬╖ change ${formatCentsTotal(meta.changeCents)}` : '');
+    (cardBits ? ` · ${cardBits}` : '') +
+    (method === 'SPLIT' ? ` · cash ${formatCentsTotal(summary.cash_cents ?? 0)} · card ${formatCentsTotal(summary.card_cents ?? 0)}` : '') +
+    (meta.changeCents != null ? ` · change ${formatCentsTotal(meta.changeCents)}` : '');
   const lineDiscount = summary.lines.reduce((sum, l) => {
     const list = l.list_price_cents;
     return list != null && list > l.price_cents ? sum + (list - l.price_cents) : sum;
@@ -193,14 +193,14 @@ export function receiptHtml(r: ReceiptPayload): string {
   const items = r.lines
     .map(
       l =>
-        `<tr><td><strong>${esc((l.qty > 1 ? `${l.qty}├ù ` : '') + l.title)}</strong><div style="color:#666;font-size:12px">SKU ${esc(l.sku)}${l.condition ? ` ┬╖ ${esc(l.condition)}` : ''}</div></td><td style="text-align:right">${esc(formatCentsTotal(l.priceCents))}</td></tr>`,
+        `<tr><td><strong>${esc((l.qty > 1 ? `${l.qty}× ` : '') + l.title)}</strong><div style="color:#666;font-size:12px">SKU ${esc(l.sku)}${l.condition ? ` · ${esc(l.condition)}` : ''}</div></td><td style="text-align:right">${esc(formatCentsTotal(l.priceCents))}</td></tr>`,
     )
     .join('');
   const line = (label: string, value: string, bold = false) =>
     `<div style="display:flex;justify-content:space-between${bold ? ';font-weight:700;font-size:18px;margin-top:4px' : ''}"><span>${esc(label)}</span><span>${esc(value)}</span></div>`;
   const totals = [
     line('Subtotal', formatCentsTotal(r.subtotalCents)),
-    r.discountCents ? line('Discount', `ΓêÆ${formatCentsTotal(r.discountCents)}`) : '',
+    r.discountCents ? line('Discount', `−${formatCentsTotal(r.discountCents)}`) : '',
     r.taxCents > 0 ? line('Sales tax', formatCentsTotal(r.taxCents)) : '',
     r.cardFeeCents ? line('Card surcharge', formatCentsTotal(r.cardFeeCents)) : '',
     line('Total', formatCentsTotal(r.totalCents), true),
@@ -226,7 +226,7 @@ td{padding:6px 0;vertical-align:top}.box{border-top:1px solid #ccc;margin-top:14
 .qr{margin-top:18px;text-align:center}.qr-head{font-size:13px;margin-bottom:8px}.qr img{width:140px;height:140px;object-fit:contain}</style></head><body>
 <h1>${esc(r.storeName)}</h1>
 ${r.headerMessage ? `<p class="muted">${esc(r.headerMessage)}</p>` : ''}
-<p class="muted">Receipt ${esc(r.receiptNo)} ┬╖ ${esc(r.soldAt)}<br/>In person ┬╖ ${esc(r.clerkName)}</p>
+<p class="muted">Receipt ${esc(r.receiptNo)} · ${esc(r.soldAt)}<br/>In person · ${esc(r.clerkName)}</p>
 <table>${items}</table><div class="box">${totals}</div>
 ${r.footerMessage ? `<p class="foot">${esc(r.footerMessage)}</p>` : ''}
 <p class="legal">${esc(r.legal)}</p>
@@ -241,11 +241,11 @@ export function receiptText(r: ReceiptPayload): string {
   const rows = [
     r.storeName,
     `Receipt ${r.receiptNo}`,
-    `${r.soldAt} ┬╖ ${r.clerkName}`,
+    `${r.soldAt} · ${r.clerkName}`,
     '-'.repeat(width),
     ...r.lines.flatMap(l => [
       pair((l.qty > 1 ? `${l.qty}x ` : '') + l.title, formatCentsTotal(l.priceCents)),
-      `  SKU ${l.sku}${l.condition ? ` ┬╖ ${l.condition}` : ''}`,
+      `  SKU ${l.sku}${l.condition ? ` · ${l.condition}` : ''}`,
     ]),
     '-'.repeat(width),
     pair('Subtotal', formatCentsTotal(r.subtotalCents)),

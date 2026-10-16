@@ -144,7 +144,7 @@ export function AmazonPage({ client, accessToken, money: moneyFmt }: Props) {
       setFlash(
         bad.length
           ? `Added ${added.length}. Skipped: ${bad.map((b) => `${b.sku} (${b.reason})`).join(', ')}`
-          : `Added ${added.length} SKU${added.length === 1 ? '' : 's'}. Matching ASINsΓÇª`,
+          : `Added ${added.length} SKU${added.length === 1 ? '' : 's'}. Matching ASINs…`,
       );
       setDraft('');
       await load();
@@ -270,7 +270,7 @@ export function AmazonPage({ client, accessToken, money: moneyFmt }: Props) {
 
       {listingEnabled === false && (
         <div className="alert" role="status">
-          Listing is OFF (`AMAZON_LISTING_ENABLED` Γëá 1). You can queue and prepare SKUs; List one will stay blocked until
+          Listing is OFF (`AMAZON_LISTING_ENABLED` ≠ 1). You can queue and prepare SKUs; List one will stay blocked until
           you enable it on inventoryobi.
         </div>
       )}
@@ -316,20 +316,20 @@ export function AmazonPage({ client, accessToken, money: moneyFmt }: Props) {
                   </div>
                   <div className="amazon-title">{r.title || 'Untitled'}</div>
                   <div className="amazon-meta">
-                    Floor {r.ask_cents != null ? moneyFmt(r.ask_cents) : 'ΓÇö'}
-                    {r.amazon_price_cents != null ? ` ┬╖ Amazon ${moneyFmt(r.amazon_price_cents)}` : ''}
-                    {r.fee_estimate_cents != null ? ` ┬╖ Fees ~${moneyFmt(r.fee_estimate_cents)}` : ''}
-                    {r.cost_cents != null ? ` ┬╖ Cost ${moneyFmt(r.cost_cents)}` : ''}
+                    Floor {r.ask_cents != null ? moneyFmt(r.ask_cents) : '—'}
+                    {r.amazon_price_cents != null ? ` · Amazon ${moneyFmt(r.amazon_price_cents)}` : ''}
+                    {r.fee_estimate_cents != null ? ` · Fees ~${moneyFmt(r.fee_estimate_cents)}` : ''}
+                    {r.cost_cents != null ? ` · Cost ${moneyFmt(r.cost_cents)}` : ''}
                   </div>
                   <div className="amazon-meta">
-                    Condition: {r.condition || 'ΓÇö'}
-                    {r.condition_code ? ` ΓåÆ ${r.condition_code}` : ''}
-                    {r.upc ? ` ┬╖ UPC ${r.upc}` : ''}
+                    Condition: {r.condition || '—'}
+                    {r.condition_code ? ` → ${r.condition_code}` : ''}
+                    {r.upc ? ` · UPC ${r.upc}` : ''}
                   </div>
                   {r.asin ? (
                     <div className="amazon-meta">
                       ASIN <strong>{r.asin}</strong>
-                      {r.matched_title ? ` ┬╖ ${r.matched_title}` : ''}
+                      {r.matched_title ? ` · ${r.matched_title}` : ''}
                     </div>
                   ) : (
                     <div className="amazon-meta">No ASIN matched yet</div>
