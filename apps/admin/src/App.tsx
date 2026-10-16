@@ -765,7 +765,8 @@ export function App() {
       return true;
     });
     const liveSum = sum(liveShown);
-    const salesDollars = liveShown.reduce((n, t) => n + t.subtotal, 0);
+    // Gross = merchandise + sales tax (card fees stay separate). Fridge $1,499 + $108.68 tax = $1,607.68.
+    const salesDollars = liveShown.reduce((n, t) => n + t.subtotal + t.tax, 0);
     const marketplaceFees = liveShown.reduce((n, t) => n + t.feeCents, 0);
     const cardFees = liveShown.reduce((n, t) => n + t.processingFeeCents, 0);
     const taxCollected = liveShown.reduce((n, t) => n + t.taxCollectedCents, 0);
@@ -783,7 +784,7 @@ export function App() {
       {salesFilters}
     </header>
     <div className="stats">
-      <Stat name="Sales $" value={money(salesDollars)} />
+      <Stat name="Sales $" hint="item + tax" value={money(salesDollars)} />
       <Stat name="Sales" value={String(liveShown.length)} />
       <Stat name="Profit" value={profitTotal === null ? 'Pending cost' : money(profitTotal)} />
       <Stat name="Marketplace fees" value={money(marketplaceFees)} />
@@ -852,7 +853,7 @@ function LiveTicket({ t, money, stamp, rules, cfg, personName, busy, onCommissio
   return <div className={`ticket${open ? ' ticket-open' : ''}${t.commissionOverride ? ' ticket-commission-override' : ''}${t.needsMatch ? ' ticket-unmatched' : ''}`}>
     <button type="button" className="ticket-toggle" aria-expanded={open} onClick={() => setOpen(v => !v)}>
       <div className="ticket-top">
-        <strong>{money(t.subtotal)}{online && profit != null ? <small className="ticket-profit"> · profit {money(profit)}</small> : null}{t.needsMatch ? <small className="ticket-profit"> · needs SKU</small> : null}{t.commissionOverride ? <small className="ticket-profit"> · split overridden</small> : null}</strong>
+        <strong>{money(online ? t.subtotal : t.subtotal + t.tax)}{!online && t.tax > 0 ? <small className="ticket-profit"> · incl. tax</small> : null}{online && profit != null ? <small className="ticket-profit"> · profit {money(profit)}</small> : null}{t.needsMatch ? <small className="ticket-profit"> · needs SKU</small> : null}{t.commissionOverride ? <small className="ticket-profit"> · split overridden</small> : null}</strong>
         <span>{stamp(t.at)}{online && <b className="badge"> {(t.channel || 'online').toUpperCase()}</b>}{t.needsMatch && <b className="badge"> UNMATCHED</b>}{t.commissionOverride && <b className="badge badge-override"> SPLIT</b>}<span className="ticket-chevron" aria-hidden>{open ? '▴' : '▾'}</span></span>
       </div>
       <div className="ticket-items">{t.lines.map(l => <SaleItem key={`${t.key}-${l.id}-${l.sku}`} line={l} />)}
