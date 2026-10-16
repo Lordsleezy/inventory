@@ -5,9 +5,16 @@ import {
   describeMigrationPlan,
   isVerificationHiddenListingError,
   isListingRemovedPolicyError,
+  isEndAlreadyEndedError,
+  isSourceAlreadyEndedStatus,
   itemFromActiveListSummary,
   tallyMigrationSummary,
   emptyMigrationSummary,
+  clipMigrationTitle,
+  migrationConditionId,
+  migrationConditionFallbacks,
+  migrationWeightLb,
+  sanitizeMigrationAspects,
 } from "./ebay-migrate-rules.mjs";
 import { tradingItemBlockedReason, parseActiveListSummaries, parseTradingItem } from "./ebay-trading.mjs";
 import { ebayListingAllowed, oauthScopesForRole, EBAY_LISTING_OAUTH_SCOPES } from "./ebay-env.mjs";
@@ -45,6 +52,16 @@ test("verification-hidden GetItem errors are detected", () => {
     true,
   );
   assert.equal(isVerificationHiddenListingError("Item not found"), false);
+  assert.equal(
+    isListingRemovedPolicyError("This listing has been removed for a policy violation. Listing removed for policy violation."),
+    true,
+  );
+  assert.equal(
+    isListingRemovedPolicyError(
+      "This listing has a policy violation. It&apos;s hidden until you can fix it.",
+    ),
+    false,
+  );
 });
 
 test("tallyMigrationSummary matches item outcomes (not empty zeros)", () => {
@@ -156,4 +173,29 @@ test("describeMigrationPlan documents end-then-create and skip rules", () => {
   const plan = describeMigrationPlan();
   assert.ok(plan.steps.some((s) => /EndItem/i.test(s)));
   assert.ok(plan.skipRules.some((s) => /refrigerator|fridge/i.test(s)));
+});
+
+test("clipMigrationTitle enforces eBay 80-char limit", () => {
+  const long = "A".repeat(90);
+  assert.equal(clipMigrationTitle(long).length, 80);
+  assert.ok(clipMigrationTitle(long).endsWith("..."));
+  assert.equal(clipMigrationTitle("Short title"), "Short title");
+});
+
+test("migration create helpers default weight and sanitize bad MPN", () => {
+  assert.equal(migrationWeightLb(null, null), 1);
+  assert.equal(migrationWeightLb({ package_weight_lb: 2.5 }, null), 2.5);
+  assert.equal(migrationConditionId("USED_EXCELLENT"), "3000");
+  assert.equal(migrationConditionId("3000"), "3000");
+  assert.ok(migrationConditionFallbacks("3000").includes("1000"));
+  assert.equal(isEndAlreadyEndedError("The auction has already been closed."), true);
+  assert.equal(isSourceAlreadyEndedStatus("listing_status_completed"), true);
+  const aspects = sanitizeMigrationAspects(
+    { MPN: ["bowman 1989 official complete set sealed"], Brand: [] },
+    { brand: "Topps", model: "1989" },
+    { categoryName: "Sealed Trading Card Boxes" },
+  );
+  assert.equal(aspects.Brand[0], "Topps");
+  assert.equal(aspects.MPN[0], "Does not apply");
+  assert.equal(aspects.Type[0], "Sealed Trading Card Boxes");
 });

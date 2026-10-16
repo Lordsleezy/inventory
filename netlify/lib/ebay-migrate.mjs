@@ -23,22 +23,36 @@ import { ebayItemViewUrl } from "./ebay-env.mjs";
 import { publicPhotoUrl } from "./ebay-photos.mjs";
 import { suggestCategories } from "./ebay-catalog.mjs";
 import {
+  clipMigrationTitle,
   describeMigrationPlan,
   emptyMigrationSummary,
+  isEndAlreadyEndedError,
   isListingRemovedPolicyError,
+  isSourceAlreadyEndedStatus,
   isVerificationHiddenListingError,
   itemFromActiveListSummary,
   migrationBannedReason,
+  migrationConditionFallbacks,
+  migrationConditionId,
+  migrationWeightLb,
+  sanitizeMigrationAspects,
   tallyMigrationSummary,
 } from "./ebay-migrate-rules.mjs";
 
 export {
+  clipMigrationTitle,
   describeMigrationPlan,
   emptyMigrationSummary,
+  isEndAlreadyEndedError,
   isListingRemovedPolicyError,
+  isSourceAlreadyEndedStatus,
   isVerificationHiddenListingError,
   itemFromActiveListSummary,
   migrationBannedReason,
+  migrationConditionFallbacks,
+  migrationConditionId,
+  migrationWeightLb,
+  sanitizeMigrationAspects,
   tallyMigrationSummary,
 };
 
@@ -90,7 +104,9 @@ async function loadUnitBySku(storeId, sku) {
   const sb = serviceClient();
   const { data } = await sb
     .from("units")
-    .select("sku,state,title,brand,model,category,ask_cents,condition,defect_notes,listed_on,test_status")
+    .select(
+      "sku,state,title,brand,model,category,ask_cents,condition,defect_notes,listed_on,test_status,package_length_in,package_width_in,package_height_in,package_weight_lb",
+    )
     .eq("store_id", storeId)
     .eq("sku", String(sku).trim())
     .maybeSingle();
@@ -332,10 +348,15 @@ export async function migrationPrerequisites(storeId) {
   };
 }
 
-function classifyItem(item, { openOrders, unit }) {
+function classifyItem(item, { openOrders, unit, mode = "dry_run" }) {
   const blocked = tradingItemBlockedReason(item, { openOrderItemIds: openOrders });
   if (blocked) {
-    return { outcome: "skipped", reason: blocked };
+    // Live resume: source may already be ended from a prior EndItem-before-create failure.
+    if (mode === "live" && isSourceAlreadyEndedStatus(blocked)) {
+      // fall through — still create on destination
+    } else {
+      return { outcome: "skipped", reason: blocked };
+    }
   }
   const banned = migrationBannedReason(item, unit);
   if (banned) {
@@ -347,10 +368,30 @@ function classifyItem(item, { openOrders, unit }) {
   if (!item.title || !item.categoryId || !(moneyToCents(item.price) > 0)) {
     return { outcome: "skipped", reason: "incomplete_listing_data" };
   }
-  return {
-    outcome: "will_move",
-    reason: unit ? `Matched Floor SKU ${unit.sku}` : "No Floor SKU match — will still move listing",
-  };
+  const reason = unit
+    ? `Matched Floor SKU ${unit.sku}`
+    : "No Floor SKU match — will still move listing";
+  if (mode === "live" && blocked && isSourceAlreadyEndedStatus(blocked)) {
+    return { outcome: "will_move", reason: `${reason} (source already ended — resume create on dest)` };
+  }
+  return { outcome: "will_move", reason };
+}
+
+async function alreadyOnDestAccount(storeId, sku, destAccountId) {
+  if (!sku || !destAccountId) return false;
+  const sb = serviceClient();
+  const { data } = await sb
+    .from("listings")
+    .select("listing_id,status,ebay_account_id")
+    .eq("store_id", storeId)
+    .eq("sku", String(sku).trim())
+    .eq("channel", "ebay")
+    .maybeSingle();
+  return (
+    data?.status === "listed" &&
+    data?.listing_id &&
+    String(data.ebay_account_id || "") === String(destAccountId)
+  );
 }
 
 async function persistRun(storeId, { mode, sourceId, destId, createdBy, status = "running" }) {
@@ -451,28 +492,56 @@ async function finalizeStuckRuns(storeId) {
   }
 }
 
-async function createOnDestination(destAccount, item, policies) {
+async function createOnDestination(destAccount, item, policies, { storeId } = {}) {
   // Prefer Trading AddFixedPriceItem with seller profiles so price/photos/description carry over as-is.
   const token = await userTokenForAccount(destAccount);
-  const created = await addFixedPriceItem(token, {
-    title: item.title,
-    description: item.description || item.title,
-    categoryId: item.categoryId,
-    price: item.price,
-    conditionId: item.conditionId || "3000",
-    conditionDescription: item.conditionDescription,
-    sku: item.sku || undefined,
-    imageUrls: item.imageUrls,
-    aspects: item.aspects,
-    location: item.location,
-    postalCode: item.postalCode || process.env.EBAY_LOCATION_POSTAL || "95663",
-    city: item.location || "Penryn",
-    dispatchTimeMax: item.dispatchTimeMax || 2,
-    paymentPolicyId: policies.payment,
-    returnPolicyId: policies.returnP,
-    fulfillmentPolicyId: policies.fulfillment,
-  });
-  return created.listingId;
+  const unit = storeId ? await loadUnitBySku(storeId, item.sku) : null;
+  const title = clipMigrationTitle(item.title);
+  const aspects = sanitizeMigrationAspects(item.aspects, unit, item);
+  const weightLb = migrationWeightLb(unit, item);
+  const lengthIn = Number(unit?.package_length_in) > 0 ? Number(unit.package_length_in) : item.lengthIn;
+  const widthIn = Number(unit?.package_width_in) > 0 ? Number(unit.package_width_in) : item.widthIn;
+  const heightIn = Number(unit?.package_height_in) > 0 ? Number(unit.package_height_in) : item.heightIn;
+  const conditionIds = migrationConditionFallbacks(item.conditionId);
+  let lastErr = null;
+  for (let i = 0; i < conditionIds.length; i += 1) {
+    const conditionId = conditionIds[i];
+    try {
+      const created = await addFixedPriceItem(token, {
+        title,
+        description: item.description || title,
+        categoryId: item.categoryId,
+        price: item.price,
+        conditionId,
+        conditionDescription: i === 0 ? item.conditionDescription : undefined,
+        sku: item.sku || undefined,
+        imageUrls: item.imageUrls,
+        aspects,
+        weightLb,
+        lengthIn,
+        widthIn,
+        heightIn,
+        location: item.location,
+        postalCode: item.postalCode || process.env.EBAY_LOCATION_POSTAL || "95663",
+        city: item.location || "Penryn",
+        dispatchTimeMax: item.dispatchTimeMax || 2,
+        paymentPolicyId: policies.payment,
+        returnPolicyId: policies.returnP,
+        fulfillmentPolicyId: policies.fulfillment,
+      });
+      return created.listingId;
+    } catch (err) {
+      lastErr = err;
+      const message = err instanceof Error ? err.message : String(err);
+      const conditionIssue = /condition/i.test(message) && /invalid|not\s+valid|does\s+not\s+exist/i.test(message);
+      const titleIssue = /title/i.test(message) && /80|character/i.test(message);
+      if (titleIssue && title.length > 70) {
+        // One more attempt with a harder clip already applied; don't loop forever.
+      }
+      if (!conditionIssue || i === conditionIds.length - 1) break;
+    }
+  }
+  throw lastErr || new Error("AddFixedPriceItem failed");
 }
 
 async function confirmDestLive(destAccount, listingId) {
@@ -659,6 +728,15 @@ export async function runEbayMigration(storeId, { mode = "dry_run", createdBy = 
           results.push(skip);
           await saveItem(run.id, storeId, skip);
           continue;
+        } else if (
+          mode === "live" &&
+          (row.fromFloor || row.sku) &&
+          /not\s+found|invalid\s+item|cannot\s+be\s+accessed|ended|no\s+longer\s+available/i.test(message)
+        ) {
+          // Prior live attempt ended source but create failed — Floor still points at source ItemID.
+          verificationHidden = true;
+          item = await enrichVerificationHiddenItem(storeId, itemFromActiveListSummary(row));
+          item.listingStatus = "Completed";
         } else {
           const fail = {
             sourceItemId: row.itemId,
@@ -676,7 +754,7 @@ export async function runEbayMigration(storeId, { mode = "dry_run", createdBy = 
       }
 
       const banUnit = await loadBanContext(storeId, item.sku || row.sku);
-      const decision = classifyItem(item, { openOrders, unit: banUnit });
+      const decision = classifyItem(item, { openOrders, unit: banUnit, mode });
       const base = {
         sourceItemId: item.itemId,
         sku: item.sku || row.sku || banUnit?.sku || null,
@@ -712,13 +790,36 @@ export async function runEbayMigration(storeId, { mode = "dry_run", createdBy = 
         continue;
       }
 
+      // LIVE: already remapped onto selling account — skip.
+      if (dest && (await alreadyOnDestAccount(storeId, base.sku, dest.id))) {
+        const skip = {
+          ...base,
+          outcome: "skipped",
+          reason: "already_on_destination_account",
+        };
+        results.push(skip);
+        await saveItem(run.id, storeId, skip);
+        continue;
+      }
+
       // LIVE: end on source first so the item is never dual-live.
       try {
         if (!policies || !dest) throw new Error("Destination selling account / policies missing");
-        await endTradingItem(sourceToken, item.itemId, "NotAvailable");
+        let sourceEnded = false;
+        try {
+          await endTradingItem(sourceToken, item.itemId, "NotAvailable");
+          sourceEnded = true;
+        } catch (endErr) {
+          const endMsg = endErr instanceof Error ? endErr.message : String(endErr);
+          if (isEndAlreadyEndedError(endMsg)) {
+            sourceEnded = true;
+          } else {
+            throw endErr;
+          }
+        }
         // Brief pause so eBay search/index settles before create.
         await sleep(1500 + Math.floor(Math.random() * 1500));
-        const destItemId = await createOnDestination(dest, item, policies);
+        const destItemId = await createOnDestination(dest, item, policies, { storeId });
         const live = await confirmDestLive(dest, destItemId);
         const mapping = await updateFloorMapping(storeId, {
           sku: base.sku,
@@ -731,7 +832,9 @@ export async function runEbayMigration(storeId, { mode = "dry_run", createdBy = 
           outcome: "moved",
           reason: verificationHidden
             ? "ended_on_source_created_on_dest (was verification-hidden)"
-            : "ended_on_source_created_on_dest",
+            : sourceEnded
+              ? "ended_on_source_created_on_dest"
+              : "created_on_dest",
           destItemId,
           destUrl: ebayItemViewUrl(destItemId),
           detail: { ...base.detail, mapping, destStatus: live.listingStatus },
