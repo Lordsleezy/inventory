@@ -27,6 +27,12 @@ export function isVerificationHiddenListingError(message) {
   );
 }
 
+/** Listing was actually removed for a policy hit (not just account-verification hide). */
+export function isListingRemovedPolicyError(message) {
+  const text = String(message || "");
+  return /listing\s+has\s+been\s+removed\s+for\s+a\s+policy\s+violation/i.test(text);
+}
+
 export function migrationBannedReason(item, unit = null) {
   const banned = prohibitedReason(unit || { title: item?.title, category: item?.categoryName });
   if (banned) return `eBay terms / prohibited (${banned})`;
