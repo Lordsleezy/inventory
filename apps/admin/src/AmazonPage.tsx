@@ -186,7 +186,7 @@ export function AmazonPage({ client, accessToken, money: moneyFmt }: Props) {
       const added = results.filter((x) => x.ok);
       const bad = results.filter((x) => !x.ok);
       if (!results.length) {
-        setFlash('Nothing to add — enter a Floor SKU or UPC.');
+        setFlash('Nothing to add — enter a Floor SKU and/or UPC.');
       } else if (bad.length && !added.length) {
         setFlash(`Skipped: ${bad.map(formatSkip).join('; ')}`);
       } else if (bad.length) {
@@ -325,9 +325,9 @@ export function AmazonPage({ client, accessToken, money: moneyFmt }: Props) {
       )}
 
       <section className="panel amazon-add">
-        <h2>Add SKU or UPC</h2>
+        <h2>Add SKU and/or UPC</h2>
         <p className="hint" style={{ marginTop: 0 }}>
-          Scan a Floor SKU or product UPC. Only already-sold units are skipped. UPC with multiple available units queues the oldest one.
+          Scan a Floor SKU and/or product UPC. Only already-sold units are skipped. UPC with multiple available units queues the oldest one.
         </p>
         <div className="amazon-add-row">
           <input
@@ -336,8 +336,8 @@ export function AmazonPage({ client, accessToken, money: moneyFmt }: Props) {
             inputMode={isKioskShell() ? 'none' : 'numeric'}
             autoComplete="off"
             spellCheck={false}
-            placeholder="Scan or type SKU or UPC"
-            aria-label="Scan or type SKU or UPC"
+            placeholder="Scan or type SKU and/or UPC"
+            aria-label="Scan or type SKU and/or UPC"
             value={draft}
             onChange={(e) => setDraft(e.target.value.replace(/[^\dA-Za-z\-]/g, ''))}
             onKeyDown={onScanKey}
@@ -353,7 +353,7 @@ export function AmazonPage({ client, accessToken, money: moneyFmt }: Props) {
       <section className="panel">
         <h2>Queue</h2>
         {rows.length === 0 ? (
-          <div className="empty">No SKUs yet. Scan or enter a SKU or UPC above.</div>
+          <div className="empty">No SKUs yet. Scan or enter a SKU and/or UPC above.</div>
         ) : (
           <div className="amazon-grid">
             {rows.map((r) => (
