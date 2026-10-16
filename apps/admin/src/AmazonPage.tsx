@@ -33,6 +33,14 @@ type Row = {
   state: string | null;
 };
 
+type AddResult = {
+  sku: string;
+  ok: boolean;
+  reason: string;
+  matched_by?: string | null;
+  input?: string | null;
+};
+
 type Props = {
   client: SupabaseClient;
   accessToken: string;
@@ -60,15 +68,33 @@ const FLAG_LABEL: Record<string, string> = {
   no_price: 'No price',
 };
 
-function parseSkus(raw: string): string[] {
+const SKIP_REASON_LABEL: Record<string, string> = {
+  unknown_sku: 'not a Floor SKU',
+  unknown_upc: 'no unit with that UPC',
+  already_sold: 'already sold',
+  already_sold_or_unavailable: 'already sold',
+};
+
+function parseCodes(raw: string): string[] {
   return raw
     .split(/[\s,;]+/)
     .map((s) => s.trim())
     .filter(Boolean);
 }
 
+function formatSkip(b: AddResult): string {
+  const label = SKIP_REASON_LABEL[b.reason] || b.reason;
+  const shown = b.input && b.input !== b.sku ? `${b.input} → ${b.sku}` : (b.sku || b.input || '?');
+  return `${shown} (${label})`;
+}
+
+function formatAdded(a: AddResult): string {
+  if (a.matched_by === 'upc' && a.input && a.input !== a.sku) return `${a.sku} via UPC ${a.input}`;
+  return a.sku;
+}
+
 async function amazonListCall(token: string, body: Record<string, unknown>) {
-  const res = await fetch(`${base}/.netlify/functions/amazon-sync`, {
+  const res = await fetch(`${base}/.netlify/functions/amazon-list`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'content-type': 'application/json' },
     body: JSON.stringify(body),
@@ -101,13 +127,8 @@ export function AmazonPage({ client, accessToken, money: moneyFmt }: Props) {
   useEffect(() => {
     void (async () => {
       try {
-        const res = await fetch(`${base}/.netlify/functions/amazon-sync`, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
-          body: JSON.stringify({ action: 'status' }),
-        });
-        const body = await res.json().catch(() => ({}));
-        if (res.ok) setListingEnabled(Boolean(body.listingEnabled));
+        const body = await amazonListCall(accessToken, { action: 'status' });
+        setListingEnabled(Boolean(body.listingEnabled));
       } catch {
         /* ignore */
       }
@@ -130,25 +151,30 @@ export function AmazonPage({ client, accessToken, money: moneyFmt }: Props) {
     };
   }, [rows, client, thumbs]);
 
-  async function addSkus(raw: string) {
-    const skus = parseSkus(raw);
-    if (!skus.length) return;
+  async function addCodes(raw: string) {
+    const codes = parseCodes(raw);
+    if (!codes.length) return;
     setBusy(true);
     setError('');
     try {
-      const { data, error: e } = await client.rpc('portal_amazon_list_add', { p_skus: skus, p_note: '' });
+      const { data, error: e } = await client.rpc('portal_amazon_list_add', { p_skus: codes, p_note: '' });
       if (e) throw e;
-      const results = (data as { sku: string; ok: boolean; reason: string }[]) || [];
+      const results = (data as AddResult[]) || [];
       const added = results.filter((x) => x.ok);
       const bad = results.filter((x) => !x.ok);
-      setFlash(
-        bad.length
-          ? `Added ${added.length}. Skipped: ${bad.map((b) => `${b.sku} (${b.reason})`).join(', ')}`
-          : `Added ${added.length} SKU${added.length === 1 ? '' : 's'}. Matching ASINsΓÇª`,
-      );
+      if (!results.length) {
+        setFlash('Nothing to add — enter a Floor SKU or UPC.');
+      } else if (bad.length && !added.length) {
+        setFlash(`Skipped: ${bad.map(formatSkip).join('; ')}`);
+      } else if (bad.length) {
+        setFlash(
+          `Added ${added.map(formatAdded).join(', ')}. Skipped: ${bad.map(formatSkip).join('; ')}`,
+        );
+      } else {
+        setFlash(`Added ${added.map(formatAdded).join(', ')}. Matching ASINs…`);
+      }
       setDraft('');
       await load();
-      // Prepare newly added (ASIN match + price) without listing
       for (const a of added) {
         await amazonListCall(accessToken, { action: 'prepare', sku: a.sku }).catch(() => undefined);
       }
@@ -164,7 +190,7 @@ export function AmazonPage({ client, accessToken, money: moneyFmt }: Props) {
   function onScanKey(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key !== 'Enter') return;
     e.preventDefault();
-    void addSkus(draft);
+    void addCodes(draft);
   }
 
   async function remove(sku: string) {
@@ -270,13 +296,16 @@ export function AmazonPage({ client, accessToken, money: moneyFmt }: Props) {
 
       {listingEnabled === false && (
         <div className="alert" role="status">
-          Listing is OFF (`AMAZON_LISTING_ENABLED` Γëá 1). You can queue and prepare SKUs; List one will stay blocked until
+          Listing is OFF (`AMAZON_LISTING_ENABLED` ≠ 1). You can queue and prepare SKUs; List one will stay blocked until
           you enable it on inventoryobi.
         </div>
       )}
 
       <section className="panel amazon-add">
-        <h2>Add SKU</h2>
+        <h2>Add SKU or UPC</h2>
+        <p className="hint" style={{ marginTop: 0 }}>
+          Scan a Floor SKU or product UPC. Only already-sold units are skipped. UPC with multiple available units queues the oldest one.
+        </p>
         <div className="amazon-add-row">
           <input
             ref={inputRef}
@@ -284,14 +313,14 @@ export function AmazonPage({ client, accessToken, money: moneyFmt }: Props) {
             inputMode={isKioskShell() ? 'none' : 'numeric'}
             autoComplete="off"
             spellCheck={false}
-            placeholder="Scan or type SKU"
-            aria-label="Scan or type SKU"
+            placeholder="Scan or type SKU or UPC"
+            aria-label="Scan or type SKU or UPC"
             value={draft}
-            onChange={(e) => setDraft(e.target.value.replace(/[^\d]/g, ''))}
+            onChange={(e) => setDraft(e.target.value.replace(/[^\dA-Za-z\-]/g, ''))}
             onKeyDown={onScanKey}
             disabled={busy}
           />
-          <button disabled={busy || !parseSkus(draft).length} onClick={() => void addSkus(draft)}>
+          <button disabled={busy || !parseCodes(draft).length} onClick={() => void addCodes(draft)}>
             Enter
           </button>
           <span className="hint">{rows.length} on list</span>
@@ -301,7 +330,7 @@ export function AmazonPage({ client, accessToken, money: moneyFmt }: Props) {
       <section className="panel">
         <h2>Queue</h2>
         {rows.length === 0 ? (
-          <div className="empty">No SKUs yet. Scan or enter one above.</div>
+          <div className="empty">No SKUs yet. Scan or enter a SKU or UPC above.</div>
         ) : (
           <div className="amazon-grid">
             {rows.map((r) => (
@@ -316,20 +345,20 @@ export function AmazonPage({ client, accessToken, money: moneyFmt }: Props) {
                   </div>
                   <div className="amazon-title">{r.title || 'Untitled'}</div>
                   <div className="amazon-meta">
-                    Floor {r.ask_cents != null ? moneyFmt(r.ask_cents) : 'ΓÇö'}
-                    {r.amazon_price_cents != null ? ` ┬╖ Amazon ${moneyFmt(r.amazon_price_cents)}` : ''}
-                    {r.fee_estimate_cents != null ? ` ┬╖ Fees ~${moneyFmt(r.fee_estimate_cents)}` : ''}
-                    {r.cost_cents != null ? ` ┬╖ Cost ${moneyFmt(r.cost_cents)}` : ''}
+                    Floor {r.ask_cents != null ? moneyFmt(r.ask_cents) : '—'}
+                    {r.amazon_price_cents != null ? ` · Amazon ${moneyFmt(r.amazon_price_cents)}` : ''}
+                    {r.fee_estimate_cents != null ? ` · Fees ~${moneyFmt(r.fee_estimate_cents)}` : ''}
+                    {r.cost_cents != null ? ` · Cost ${moneyFmt(r.cost_cents)}` : ''}
                   </div>
                   <div className="amazon-meta">
-                    Condition: {r.condition || 'ΓÇö'}
-                    {r.condition_code ? ` ΓåÆ ${r.condition_code}` : ''}
-                    {r.upc ? ` ┬╖ UPC ${r.upc}` : ''}
+                    Condition: {r.condition || '—'}
+                    {r.condition_code ? ` → ${r.condition_code}` : ''}
+                    {r.upc ? ` · UPC ${r.upc}` : ''}
                   </div>
                   {r.asin ? (
                     <div className="amazon-meta">
                       ASIN <strong>{r.asin}</strong>
-                      {r.matched_title ? ` ┬╖ ${r.matched_title}` : ''}
+                      {r.matched_title ? ` · ${r.matched_title}` : ''}
                     </div>
                   ) : (
                     <div className="amazon-meta">No ASIN matched yet</div>
