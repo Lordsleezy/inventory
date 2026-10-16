@@ -136,6 +136,22 @@ async function loadEbayDraft(storeId, sku) {
   return data || null;
 }
 
+/** Floor unit + draft fields used for skip rules (prefer Floor/draft over a bogus eBay category). */
+async function loadBanContext(storeId, sku) {
+  const unit = await loadUnitBySku(storeId, sku);
+  const draft = await loadEbayDraft(storeId, sku);
+  if (!unit && !draft) return null;
+  return {
+    sku: unit?.sku || draft?.sku || sku,
+    title: unit?.title || draft?.title || "",
+    category: unit?.category && !/^uncategorized$/i.test(unit.category) ? unit.category : draft?.category_name || unit?.category || "",
+    condition: unit?.condition || "",
+    brand: unit?.brand || null,
+    model: unit?.model || null,
+    defect_notes: unit?.defect_notes || draft?.condition_notes || null,
+  };
+}
+
 /**
  * When GetItem fails because pgg124-5 is under eBay verification, fill listing fields from
  * ActiveList + Floor (draft / photos / unit) so the listing can still move.
