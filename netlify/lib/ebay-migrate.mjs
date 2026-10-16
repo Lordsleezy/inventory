@@ -3,7 +3,7 @@
  * Uses Trading API GetMyeBaySelling / GetItem / EndItem so Vendoo & Seller Hub listings are included.
  * Live mode: end on source → create on dest → confirm → update Floor. Never dual-live.
  */
-import { serviceClient } from "./server.mjs";
+import { requireEnv, serviceClient } from "./server.mjs";
 import {
   listEbayAccounts,
   loadEbayAccount,
@@ -669,5 +669,97 @@ export async function latestMigrationRun(storeId) {
     return { run: { ...run, summary }, items: rows };
   }
   return { run, items: rows };
+}
+
+const MIGRATION_REQUEST_KEY = "ebay_migration_request";
+
+/**
+ * Queue a dry-run or live migration via store_settings so ebay-sync (which has
+ * SUPABASE_SERVICE_ROLE on Netlify) can kick ebay-migrate-background without an
+ * agent-held secret.
+ */
+export async function queueMigrationRequest(storeId, { mode = "dry_run", requestedBy = "queue", limit = null } = {}) {
+  if (mode !== "dry_run" && mode !== "live") throw new Error("mode must be dry_run or live");
+  const sb = serviceClient();
+  const value = {
+    mode,
+    status: "queued",
+    requested_at: new Date().toISOString(),
+    requested_by: requestedBy || "queue",
+    limit: limit != null ? Number(limit) : null,
+  };
+  const { error } = await sb.from("store_settings").upsert(
+    { store_id: storeId, key: MIGRATION_REQUEST_KEY, value },
+    { onConflict: "store_id,key" },
+  );
+  if (error) throw new Error(error.message);
+  return value;
+}
+
+/** Called from ebay-sync cron: dispatch any queued migration requests to the background worker. */
+export async function dispatchQueuedMigrationRequests() {
+  const sb = serviceClient();
+  const { data: rows, error } = await sb
+    .from("store_settings")
+    .select("store_id,value")
+    .eq("key", MIGRATION_REQUEST_KEY);
+  if (error) throw new Error(error.message);
+  const base = (process.env.URL || "https://inventoryobi.netlify.app").replace(/\/$/, "");
+  const token = requireEnv("SUPABASE_SERVICE_ROLE");
+  const results = [];
+  for (const row of rows || []) {
+    const val = row.value && typeof row.value === "object" ? row.value : {};
+    if (val.status !== "queued") continue;
+    const mode = val.mode === "live" ? "live" : "dry_run";
+    const claimed = {
+      ...val,
+      status: "dispatched",
+      dispatched_at: new Date().toISOString(),
+    };
+    await sb.from("store_settings").upsert(
+      { store_id: row.store_id, key: MIGRATION_REQUEST_KEY, value: claimed },
+      { onConflict: "store_id,key" },
+    );
+    try {
+      const res = await fetch(`${base}/.netlify/functions/ebay-migrate-background`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          store_id: row.store_id,
+          mode,
+          created_by: val.requested_by || "ebay_migration_request",
+          limit: val.limit != null ? Number(val.limit) : null,
+        }),
+      });
+      const ok = res.ok || res.status === 202;
+      const next = {
+        ...claimed,
+        status: ok ? "started" : "dispatch_failed",
+        http_status: res.status,
+        started_at: ok ? new Date().toISOString() : claimed.dispatched_at,
+        error: ok ? null : (await res.text()).slice(0, 300),
+      };
+      await sb.from("store_settings").upsert(
+        { store_id: row.store_id, key: MIGRATION_REQUEST_KEY, value: next },
+        { onConflict: "store_id,key" },
+      );
+      results.push({ storeId: row.store_id, mode, ok, status: res.status });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      await sb.from("store_settings").upsert(
+        {
+          store_id: row.store_id,
+          key: MIGRATION_REQUEST_KEY,
+          value: { ...claimed, status: "dispatch_failed", error: message.slice(0, 300) },
+        },
+        { onConflict: "store_id,key" },
+      );
+      results.push({ storeId: row.store_id, mode, ok: false, error: message });
+    }
+  }
+  return results;
 }
 
