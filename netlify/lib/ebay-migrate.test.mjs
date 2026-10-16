@@ -108,6 +108,7 @@ test("parseActiveListSummaries reads GetMyeBaySelling ActiveList items", () => {
         <ListingType>FixedPriceItem</ListingType>
       </Item>
     </ItemArray>
+    <PaginationResult><TotalNumberOfPages>2</TotalNumberOfPages><TotalNumberOfEntries>201</TotalNumberOfEntries></PaginationResult>
   </ActiveList>`;
   const rows = parseActiveListSummaries(xml);
   assert.equal(rows.length, 1);
