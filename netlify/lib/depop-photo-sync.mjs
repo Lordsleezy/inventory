@@ -54,6 +54,17 @@ export async function syncDepopListingPhotos(sb, {
   fetchImpl = fetch,
   limit = 80,
 } = {}) {
+  if (!username && storeId) {
+    const { data: row } = await sb
+      .from('store_settings')
+      .select('value')
+      .eq('store_id', storeId)
+      .eq('key', 'depop_shop_username')
+      .maybeSingle();
+    const v = row?.value;
+    username = typeof v === 'string' ? v : v != null ? String(v) : '';
+    username = username.replace(/^"|"$/g, '').trim();
+  }
   const summary = {
     listed: 0,
     updated: 0,
