@@ -1,4 +1,5 @@
 import { sendResend } from "./receipt.mjs";
+import { filterDeliverableEmails } from "./mail.mjs";
 
 const money = (n) => `$${(Number(n || 0) / 100).toFixed(2)}`;
 const ZONE = "America/Los_Angeles";
@@ -76,9 +77,9 @@ export function orderEmail(kind, o, ctx = {}) {
 
 export async function ownerEmails(sb, storeId) {
   const { data } = await sb.from("store_settings").select("value").eq("store_id", storeId).eq("key", "order_notify_emails").maybeSingle();
-  const list = Array.isArray(data?.value) ? data.value.filter(x => typeof x === "string" && x.includes("@")) : [];
+  const list = filterDeliverableEmails(Array.isArray(data?.value) ? data.value : []);
   if (list.length) return list;
-  return (process.env.FLOOR_OWNER_EMAIL || "").split(",").map(s => s.trim()).filter(Boolean);
+  return filterDeliverableEmails((process.env.FLOOR_OWNER_EMAIL || "").split(","));
 }
 
 async function storeHours(sb, storeId, cache) {

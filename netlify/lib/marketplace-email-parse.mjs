@@ -474,6 +474,8 @@ export async function ingestMarketplaceMail(sb, { store, channels, parsed, raw }
     }
   }
   const msg = messageIdFor(parsed, raw);
+  const orderKeyEarly = marketplaceOrderKey({ orderNumber: p.order_number, messageId: msg });
+  const paymentIdEarly = `marketplace:${String(p.marketplace || 'other').toLowerCase()}:${orderKeyEarly}`;
   const { data: exists } = await sb
     .from('marketplace_email_sales')
     .select('id,state,sale_id')
@@ -481,8 +483,28 @@ export async function ingestMarketplaceMail(sb, { store, channels, parsed, raw }
     .eq('message_id', msg)
     .maybeSingle();
   if (exists) {
-    // Re-evaluate ignored mail and unmatched needs_review on INCLUDE_SEEN rescan
-    // (parser fixes / Gemini SKU hints). Never reopen a row that already finalized a sale.
+    // Never reopen a row that already finalized a sale.
+    if (exists.sale_id) return { state: 'duplicate', sale_id: exists.sale_id };
+
+    // If this sale is already in Orders, do not delete/recreate the email row on
+    // INCLUDE_SEEN rescans (that churned ids and risked duplicate payment_ids).
+    if (exists.state === 'needs_review') {
+      const { data: wo } = await sb
+        .from('web_orders')
+        .select('id,match_status')
+        .eq('store_id', store.id)
+        .eq('payment_id', paymentIdEarly)
+        .maybeSingle();
+      if (wo) {
+        // Only re-open when we newly have an exact SKU to finalize.
+        if (!(p.sale && p.sku && p.price)) {
+          return { state: 'needs_review', web_order_id: wo.id, order_created: false, stable: true };
+        }
+      }
+    }
+
+    // Re-evaluate ignored mail (and needs_review without an Orders row) so parser
+    // fixes / Gemini SKU hints can recover sales.
     if (!exists.sale_id && (exists.state === 'ignored' || exists.state === 'needs_review')) {
       const { error: delErr } = await sb.from('marketplace_email_sales').delete().eq('id', exists.id);
       if (delErr) throw delErr;
@@ -542,7 +564,7 @@ export async function ingestMarketplaceMail(sb, { store, channels, parsed, raw }
   }
 
   // Stable order key (never raw Message-ID with <>/@) so payment_id dedupes with unmatched rows.
-  const orderKey = marketplaceOrderKey({ orderNumber: p.order_number, messageId: msg });
+  const orderKey = orderKeyEarly;
 
   if (p.sku && p.price) {
     const { data: unit } = await sb

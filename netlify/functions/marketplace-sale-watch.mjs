@@ -2,7 +2,7 @@ import { json, corsHeaders, serviceClient } from "../lib/server.mjs";
 import { wrapHandler, asNetlifyFunction } from "../lib/floor-log.mjs";
 import { withLock, dbBusy } from "../lib/bg-guard.mjs";
 import { isNetlifyScheduleEvent } from "../lib/schedule.mjs";
-import { sendInternalAlert, gmailConfigured } from "../lib/mail.mjs";
+import { sendInternalAlert, gmailConfigured, filterDeliverableEmails } from "../lib/mail.mjs";
 import { marketplaceOrderKey } from "../lib/marketplace-email-parse.mjs";
 
 /**
@@ -25,9 +25,9 @@ function isSaleSubject(subject) {
 async function notifyEmails(sb) {
   const cfg =
     (await sb.from("store_settings").select("value").eq("key", "order_notify_emails").limit(1)).data?.[0]
-      ?.value || ["pgg124@gmail.com"];
-  const to = (Array.isArray(cfg) ? cfg : []).filter((x) => String(x).includes("@"));
-  if (!to.length) to.push("pgg124@gmail.com");
+      ?.value || ["pgg124@gmail.com", "obitracking@gmail.com"];
+  const to = filterDeliverableEmails(Array.isArray(cfg) ? cfg : []);
+  if (!to.length) return filterDeliverableEmails(["pgg124@gmail.com", "obitracking@gmail.com"]);
   return to;
 }
 

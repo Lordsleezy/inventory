@@ -1,7 +1,7 @@
 import { json, serviceClient } from '../lib/server.mjs';
 import { wrapHandler, asNetlifyFunction } from '../lib/floor-log.mjs';
 import { withLock, dbBusy } from '../lib/bg-guard.mjs';
-import { sendInternalAlert, gmailConfigured } from '../lib/mail.mjs';
+import { sendInternalAlert, gmailConfigured, filterDeliverableEmails } from '../lib/mail.mjs';
 const parts = new Intl.DateTimeFormat('en-US',{timeZone:'America/Los_Angeles',year:'numeric',month:'numeric',day:'numeric',hour:'numeric',minute:'numeric',hourCycle:'h23'});
 function dayAt(offset){const d=new Date(Date.now()+offset*86400000);return new Intl.DateTimeFormat('en-CA',{timeZone:'America/Los_Angeles',year:'numeric',month:'2-digit',day:'2-digit'}).format(d);}
 function laMidnight(day){const [y,m,d]=day.split('-').map(Number);let t=Date.UTC(y,m-1,d,8);for(let i=0;i<3;i++){const p=Object.fromEntries(parts.formatToParts(new Date(t)).map(x=>[x.type,Number(x.value)]));t+=Date.UTC(y,m-1,d)-Date.UTC(p.year,p.month-1,p.day,p.hour,p.minute);}return new Date(t).toISOString();}
@@ -41,8 +41,9 @@ async function handle(){
    lines.push('Sales needing review: '+(x.review.length?x.review.map(s=>`${s.marketplace} SKU ${s.sku||'unknown'} ${s.item_title||''}`).join(', '):'none'));
    lines.push('Mismatches: '+(x.mismatch.length?x.mismatch.join('; '):'none'));
   }
-  const cfg=(await sb.from('store_settings').select('value').eq('key','order_notify_emails').limit(1)).data?.[0]?.value||['pgg124@gmail.com'];
-  const to=(Array.isArray(cfg)?cfg:[]).filter(x=>String(x).includes('@'));if(!to.length)to.push('pgg124@gmail.com');
+  const cfg=(await sb.from('store_settings').select('value').eq('key','order_notify_emails').limit(1)).data?.[0]?.value||['pgg124@gmail.com','obitracking@gmail.com'];
+  let to=filterDeliverableEmails(Array.isArray(cfg)?cfg:[]);
+  if(!to.length) to=filterDeliverableEmails(['pgg124@gmail.com','obitracking@gmail.com']);
   const sent=await sendInternalAlert({to,subject:`Floor daily sales inbox - ${yesterday}`,text:lines.join('\n\n')});
   if(sent.skipped)return{skipped:sent.reason||'email_not_configured'};return{sent:true};
  });return json(200,result);}catch(e){return json(500,{error:String(e).slice(0,300)});}

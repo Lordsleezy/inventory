@@ -1,7 +1,7 @@
 import { serviceClient, json, corsHeaders } from "../lib/server.mjs";
 import { wrapHandler, floorLog, asNetlifyFunction } from "../lib/floor-log.mjs";
 import { isNetlifyScheduleEvent } from "../lib/schedule.mjs";
-import { sendInternalAlert, gmailConfigured } from "../lib/mail.mjs";
+import { sendInternalAlert, gmailConfigured, isDeliverableEmail, filterDeliverableEmails } from "../lib/mail.mjs";
 import { sendResend } from "../lib/receipt.mjs";
 
 // Internal alerts (sales, delist digests, double-sell, web-order pings) go through Gmail SMTP
@@ -216,13 +216,21 @@ async function handle(event) {
     });
   }
 
-  async function emailFor(person) {
+  async function emailFor(person, storeId) {
+    // Owners: prefer real notify list / FLOOR_OWNER_EMAIL over auth login emails.
+    if (person.role === "owner") {
+      const fromEnv = filterDeliverableEmails((process.env.FLOOR_OWNER_EMAIL || "").split(","));
+      if (fromEnv[0]) return fromEnv[0];
+      let cfgQ = sb.from("store_settings").select("value").eq("key", "order_notify_emails");
+      if (storeId) cfgQ = cfgQ.eq("store_id", storeId);
+      const { data: cfg } = await cfgQ.maybeSingle();
+      const fromSettings = filterDeliverableEmails(Array.isArray(cfg?.value) ? cfg.value : []);
+      if (fromSettings[0]) return fromSettings[0];
+    }
     const { data: user } = await sb.auth.admin.getUserById(person.user_id);
-    const ownerEmail = (process.env.FLOOR_OWNER_EMAIL || "")
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean)[0];
-    return person.role === "owner" ? ownerEmail || user?.user?.email : user?.user?.email;
+    const authEmail = user?.user?.email || null;
+    // Drop PIN-login aliases like local@employees.floor.local (NXDOMAIN bounces).
+    return isDeliverableEmail(authEmail) ? authEmail : null;
   }
 
   for (const alert of saleLike) {
@@ -270,7 +278,7 @@ async function handle(event) {
       let anyOk = false;
       for (const person of recipients) {
         if (person.notify_email) {
-          const email = await emailFor(person);
+          const email = await emailFor(person, alert.store_id);
           if (email) {
             const r = await mail(email, subject, text);
             if (r.error) sendError = r.error;
@@ -310,7 +318,7 @@ async function handle(event) {
     let digestErr = null;
     for (const person of owners) {
       if (!person.notify_email) continue;
-      const email = await emailFor(person);
+      const email = await emailFor(person, nags[0].store_id);
       if (!email) continue;
       const r = await mail(email, subject, text);
       if (r.ok) digestOk = true;
