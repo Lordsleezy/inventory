@@ -262,6 +262,11 @@ export function parseActiveListSummaries(xml) {
   return xmlBlocks(xml, "Item").map((block) => {
     const selling = xmlBlocks(block, "SellingStatus")[0] || "";
     const listingDetails = xmlBlocks(block, "ListingDetails")[0] || "";
+    const picture = xmlBlocks(block, "PictureDetails")[0] || "";
+    const primary = xmlBlocks(block, "PrimaryCategory")[0] || "";
+    const pictureUrls = xmlAll(picture, "PictureURL").filter(Boolean);
+    const gallery = xmlTag(picture, "GalleryURL");
+    if (gallery && !pictureUrls.includes(gallery)) pictureUrls.unshift(gallery);
     return {
       itemId: xmlTag(block, "ItemID"),
       title: xmlTag(block, "Title"),
@@ -271,7 +276,10 @@ export function parseActiveListSummaries(xml) {
       quantitySold: Number(xmlTag(selling, "QuantitySold") || 0),
       bidCount: Number(xmlTag(selling, "BidCount") || 0),
       listingType: xmlTag(block, "ListingType"),
-      listingStatus: xmlTag(selling, "ListingStatus"),
+      listingStatus: xmlTag(selling, "ListingStatus") || "Active",
+      categoryId: xmlTag(primary, "CategoryID"),
+      categoryName: xmlTag(primary, "CategoryName"),
+      imageUrls: pictureUrls,
       viewItemUrl: xmlTag(listingDetails, "ViewItemURL"),
       timeLeft: xmlTag(block, "TimeLeft"),
     };

@@ -8,7 +8,6 @@ import {
   listEbayAccounts,
   loadEbayAccount,
   userTokenForAccount,
-  ebayFetchAccount,
 } from "./ebay-accounts.mjs";
 import { ensureBusinessPolicies } from "./ebay-policies.mjs";
 import {
@@ -20,9 +19,24 @@ import {
   tradingItemBlockedReason,
 } from "./ebay-trading.mjs";
 import { ebayItemViewUrl } from "./ebay-env.mjs";
-import { describeMigrationPlan, migrationBannedReason } from "./ebay-migrate-rules.mjs";
+import { publicPhotoUrl } from "./ebay-photos.mjs";
+import {
+  describeMigrationPlan,
+  emptyMigrationSummary,
+  isVerificationHiddenListingError,
+  itemFromActiveListSummary,
+  migrationBannedReason,
+  tallyMigrationSummary,
+} from "./ebay-migrate-rules.mjs";
 
-export { describeMigrationPlan, migrationBannedReason };
+export {
+  describeMigrationPlan,
+  emptyMigrationSummary,
+  isVerificationHiddenListingError,
+  itemFromActiveListSummary,
+  migrationBannedReason,
+  tallyMigrationSummary,
+};
 
 const DEFAULT_PACE_MS = { min: 4000, max: 9000 };
 
@@ -71,11 +85,99 @@ async function loadUnitBySku(storeId, sku) {
   const sb = serviceClient();
   const { data } = await sb
     .from("units")
-    .select("sku,state,title,brand,model,category,ask_cents,condition,defect_notes,listed_on")
+    .select("sku,state,title,brand,model,category,ask_cents,condition,defect_notes,listed_on,test_status")
     .eq("store_id", storeId)
     .eq("sku", String(sku).trim())
     .maybeSingle();
   return data || null;
+}
+
+function normalizeAspects(raw) {
+  const out = {};
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return out;
+  for (const [name, value] of Object.entries(raw)) {
+    if (Array.isArray(value)) {
+      const vals = value.map((v) => String(v ?? "").trim()).filter(Boolean);
+      if (vals.length) out[name] = vals;
+    } else if (value != null && String(value).trim()) {
+      out[name] = [String(value).trim()];
+    }
+  }
+  return out;
+}
+
+async function floorPhotoUrls(storeId, sku) {
+  if (!sku) return [];
+  const sb = serviceClient();
+  const { data } = await sb
+    .from("photos")
+    .select("path, is_primary")
+    .eq("store_id", storeId)
+    .eq("sku", String(sku).trim())
+    .order("is_primary", { ascending: false });
+  return (data || [])
+    .map((row) => row.path)
+    .filter((path) => path && !String(path).includes("/official-"))
+    .slice(0, 12)
+    .map((path) => publicPhotoUrl(path));
+}
+
+async function loadEbayDraft(storeId, sku) {
+  if (!sku) return null;
+  const sb = serviceClient();
+  const { data } = await sb
+    .from("ebay_drafts")
+    .select(
+      "sku,title,description,category_id,category_name,condition_id,condition_notes,aspects,price_cents,photo_paths",
+    )
+    .eq("store_id", storeId)
+    .eq("sku", String(sku).trim())
+    .maybeSingle();
+  return data || null;
+}
+
+/**
+ * When GetItem fails because pgg124-5 is under eBay verification, fill listing fields from
+ * ActiveList + Floor (draft / photos / unit) so the listing can still move.
+ */
+export async function enrichVerificationHiddenItem(storeId, item) {
+  const sku = String(item.sku || "").trim();
+  const unit = await loadUnitBySku(storeId, sku);
+  const draft = await loadEbayDraft(storeId, sku);
+  const photos = await floorPhotoUrls(storeId, sku);
+  const draftPhotos = Array.isArray(draft?.photo_paths)
+    ? draft.photo_paths.filter(Boolean).slice(0, 12).map((path) =>
+        String(path).startsWith("http") ? path : publicPhotoUrl(path),
+      )
+    : [];
+  const imageUrls = item.imageUrls?.length
+    ? item.imageUrls
+    : photos.length
+      ? photos
+      : draftPhotos;
+  const price =
+    item.price && Number(item.price) > 0
+      ? item.price
+      : draft?.price_cents
+        ? (draft.price_cents / 100).toFixed(2)
+        : unit?.ask_cents
+          ? (unit.ask_cents / 100).toFixed(2)
+          : item.price;
+  return {
+    ...item,
+    title: item.title || draft?.title || unit?.title || "",
+    description: draft?.description || item.description || item.title || unit?.title || "",
+    sku: sku || item.sku || "",
+    categoryId: item.categoryId || draft?.category_id || "",
+    categoryName: item.categoryName || draft?.category_name || unit?.category || "",
+    conditionId: item.conditionId || draft?.condition_id || "3000",
+    conditionDescription: item.conditionDescription || draft?.condition_notes || unit?.defect_notes || "",
+    price,
+    imageUrls,
+    aspects: Object.keys(item.aspects || {}).length ? item.aspects : normalizeAspects(draft?.aspects),
+    verificationHidden: true,
+    floorMatched: Boolean(unit),
+  };
 }
 
 export async function migrationPrerequisites(storeId) {
@@ -182,6 +284,52 @@ async function finishRun(runId, summary, status = "completed", error = null) {
     .eq("id", runId);
 }
 
+/** Recompute summary from persisted item rows (fixes stuck runs left by sync timeouts). */
+export async function recomputeMigrationRunSummary(runId) {
+  const sb = serviceClient();
+  const { data: items } = await sb
+    .from("ebay_migration_items")
+    .select("outcome")
+    .eq("run_id", runId);
+  const summary = tallyMigrationSummary(items || []);
+  const { data: run } = await sb
+    .from("ebay_migration_runs")
+    .select("status")
+    .eq("id", runId)
+    .maybeSingle();
+  const patch = {
+    summary,
+    updated_at: new Date().toISOString(),
+  };
+  if (run?.status === "running") {
+    patch.status = "completed";
+    patch.finished_at = new Date().toISOString();
+    patch.error = "Run finalized from item rows (worker did not finish writing summary).";
+  }
+  await sb.from("ebay_migration_runs").update(patch).eq("id", runId);
+  return summary;
+}
+
+async function finalizeStuckRuns(storeId) {
+  const sb = serviceClient();
+  const { data: stuck } = await sb
+    .from("ebay_migration_runs")
+    .select("id,summary,status")
+    .eq("store_id", storeId)
+    .eq("status", "running");
+  for (const run of stuck || []) {
+    const summary = run.summary && typeof run.summary === "object" ? run.summary : {};
+    const hasCounts =
+      Number(summary.total || 0) > 0 ||
+      Number(summary.will_move || 0) +
+        Number(summary.skipped || 0) +
+        Number(summary.failed || 0) +
+        Number(summary.moved || 0) >
+        0;
+    if (!hasCounts) await recomputeMigrationRunSummary(run.id);
+  }
+}
+
 async function createOnDestination(destAccount, item, policies) {
   // Prefer Trading AddFixedPriceItem with seller profiles so price/photos/description carry over as-is.
   const token = await userTokenForAccount(destAccount);
@@ -271,7 +419,7 @@ export async function runEbayMigration(storeId, { mode = "dry_run", createdBy = 
       blockers: pre.blockers,
       accounts: pre.accounts,
       items: [],
-      summary: { moved: 0, skipped: 0, failed: 0, will_move: 0 },
+      summary: emptyMigrationSummary(),
     };
   }
   if (!pre.source && !pre.selling) {
@@ -284,7 +432,7 @@ export async function runEbayMigration(storeId, { mode = "dry_run", createdBy = 
         : ["Connect at least the source (pgg124-5) account to preview listings."],
       accounts: pre.accounts,
       items: [],
-      summary: { moved: 0, skipped: 0, failed: 0, will_move: 0 },
+      summary: emptyMigrationSummary(),
       note:
         "Dry-run without accounts: connect the business selling account + keep pgg124-5 as orders-only, create policies, then re-run dry-run to see every ItemID.",
     };
@@ -297,9 +445,11 @@ export async function runEbayMigration(storeId, { mode = "dry_run", createdBy = 
       blockers: pre.blockers,
       accounts: pre.accounts,
       items: [],
-      summary: { moved: 0, skipped: 0, failed: 0, will_move: 0 },
+      summary: emptyMigrationSummary(),
     };
   }
+
+  await finalizeStuckRuns(storeId);
 
   const source = await loadEbayAccount(storeId, { id: pre.source.id });
   let dest = null;
@@ -326,33 +476,39 @@ export async function runEbayMigration(storeId, { mode = "dry_run", createdBy = 
   });
 
   const results = [];
-  const summary = { moved: 0, skipped: 0, failed: 0, will_move: 0, total: 0 };
 
   try {
     const sourceToken = await userTokenForAccount(source);
     const summaries = await getMyEbaySellingActive(sourceToken);
     const openOrders = await openOrderItemIds(sourceToken);
     const capped = limit != null ? summaries.slice(0, Number(limit)) : summaries;
-    summary.total = capped.length;
 
     for (const row of capped) {
       let item;
+      let verificationHidden = false;
       try {
         item = await getTradingItem(sourceToken, row.itemId);
       } catch (err) {
-        const fail = {
-          sourceItemId: row.itemId,
-          sku: row.sku || null,
-          title: row.title || null,
-          priceCents: moneyToCents(row.currentPrice),
-          outcome: "failed",
-          reason: err instanceof Error ? err.message : String(err),
-          detail: { stage: "get_item" },
-        };
-        results.push(fail);
-        summary.failed += 1;
-        await saveItem(run.id, storeId, fail);
-        continue;
+        const message = err instanceof Error ? err.message : String(err);
+        if (isVerificationHiddenListingError(message)) {
+          // Account under eBay verification — listing is hidden, not a real policy violation.
+          // Treat as movable: use ActiveList + Floor enrichment, then end/create as normal.
+          verificationHidden = true;
+          item = await enrichVerificationHiddenItem(storeId, itemFromActiveListSummary(row));
+        } else {
+          const fail = {
+            sourceItemId: row.itemId,
+            sku: row.sku || null,
+            title: row.title || null,
+            priceCents: moneyToCents(row.currentPrice),
+            outcome: "failed",
+            reason: message,
+            detail: { stage: "get_item" },
+          };
+          results.push(fail);
+          await saveItem(run.id, storeId, fail);
+          continue;
+        }
       }
 
       const unit = await loadUnitBySku(storeId, item.sku || row.sku);
@@ -371,21 +527,23 @@ export async function runEbayMigration(storeId, { mode = "dry_run", createdBy = 
           bestOfferCount: item.bestOfferCount,
           quantitySold: item.quantitySold,
           floorMatched: Boolean(unit),
+          verificationHidden: Boolean(verificationHidden || item.verificationHidden),
         },
       };
 
       if (decision.outcome === "skipped") {
         const skip = { ...base, outcome: "skipped", reason: decision.reason };
         results.push(skip);
-        summary.skipped += 1;
         await saveItem(run.id, storeId, skip);
         continue;
       }
 
       if (mode === "dry_run") {
-        const planned = { ...base, outcome: "will_move", reason: decision.reason };
+        const reason = verificationHidden
+          ? `${decision.reason} (source listing hidden by account verification — will end on pgg124-5 and recreate on selling account)`
+          : decision.reason;
+        const planned = { ...base, outcome: "will_move", reason };
         results.push(planned);
-        summary.will_move += 1;
         await saveItem(run.id, storeId, planned);
         continue;
       }
@@ -407,13 +565,14 @@ export async function runEbayMigration(storeId, { mode = "dry_run", createdBy = 
         const moved = {
           ...base,
           outcome: "moved",
-          reason: "ended_on_source_created_on_dest",
+          reason: verificationHidden
+            ? "ended_on_source_created_on_dest (was verification-hidden)"
+            : "ended_on_source_created_on_dest",
           destItemId,
           destUrl: ebayItemViewUrl(destItemId),
           detail: { ...base.detail, mapping, destStatus: live.listingStatus },
         };
         results.push(moved);
-        summary.moved += 1;
         await saveItem(run.id, storeId, moved);
       } catch (err) {
         const fail = {
@@ -423,13 +582,13 @@ export async function runEbayMigration(storeId, { mode = "dry_run", createdBy = 
           detail: { ...base.detail, stage: "end_or_create" },
         };
         results.push(fail);
-        summary.failed += 1;
         await saveItem(run.id, storeId, fail);
       }
 
       await sleep(paceDelay(pace));
     }
 
+    const summary = tallyMigrationSummary(results);
     await finishRun(run.id, summary, "completed");
     return {
       ok: true,
@@ -445,6 +604,7 @@ export async function runEbayMigration(storeId, { mode = "dry_run", createdBy = 
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    const summary = tallyMigrationSummary(results);
     await finishRun(run.id, summary, "failed", message);
     return {
       ok: false,
@@ -475,6 +635,23 @@ export async function latestMigrationRun(storeId) {
     .select("source_item_id,sku,title,price_cents,outcome,reason,dest_item_id,detail,created_at")
     .eq("run_id", run.id)
     .order("created_at", { ascending: true });
-  return { run, items: items || [] };
+  const rows = items || [];
+  const stored = run.summary && typeof run.summary === "object" ? run.summary : {};
+  const storedTotal =
+    Number(stored.total || 0) ||
+    Number(stored.will_move || 0) +
+      Number(stored.skipped || 0) +
+      Number(stored.failed || 0) +
+      Number(stored.moved || 0);
+  if (run.status === "running" || storedTotal === 0) {
+    const summary = await recomputeMigrationRunSummary(run.id);
+    const { data: refreshed } = await sb.from("ebay_migration_runs").select("*").eq("id", run.id).maybeSingle();
+    return { run: { ...(refreshed || run), summary }, items: rows };
+  }
+  if (Number(stored.total || 0) === 0 && rows.length) {
+    const summary = tallyMigrationSummary(rows);
+    return { run: { ...run, summary }, items: rows };
+  }
+  return { run, items: rows };
 }
 

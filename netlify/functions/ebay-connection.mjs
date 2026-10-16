@@ -107,7 +107,9 @@ async function handle(event) {
   }
 
   if (action === "migration_dry_run") {
-    const background = Boolean(body.background);
+    // Default to background — sync Netlify functions time out before ~76 GetItem calls finish,
+    // which left runs stuck as status=running with an empty summary while item rows existed.
+    const background = body.background !== false && body.sync !== true;
     if (background) {
       const base = process.env.URL || "https://inventoryobi.netlify.app";
       const res = await fetch(`${base}/.netlify/functions/ebay-migrate-background`, {
@@ -131,7 +133,7 @@ async function handle(event) {
         ok: true,
         started: true,
         mode: "dry_run",
-        message: "Dry-run started in the background. Refresh in a minute for results.",
+        message: "Dry-run started in the background. Results appear when the worker finishes — use Load latest results.",
       });
     }
     const result = await runEbayMigration(storeId, {
