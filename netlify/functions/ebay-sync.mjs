@@ -18,14 +18,16 @@ async function handle(event) {
     const sb = serviceClient();
     // A run that is still going blocks the next one instead of piling on.
     const result = await withLock("ebay-sync", 100, async () => {
-      const withdrawn = await withdrawOpenEbayTasks();
-      const orders = await pollAllStores();
+      // Dispatch queued migrations FIRST — withdrawOpenEbayTasks can burn the 30s
+      // timeout on Inventory offer 404s and never reach the queue otherwise.
       let migrationDispatch = [];
       try {
         migrationDispatch = await dispatchQueuedMigrationRequests();
       } catch (err) {
         migrationDispatch = [{ ok: false, error: err instanceof Error ? err.message : String(err) }];
       }
+      const withdrawn = await withdrawOpenEbayTasks();
+      const orders = await pollAllStores();
       return { withdrawn, orders, migrationDispatch };
     }, sb);
     return json(200, result);

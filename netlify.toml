@@ -41,6 +41,11 @@
   schedule = "*/3 * * * *"
   timeout = 30
 
+# Dispatch queued ebay_migration_request → ebay-migrate-background (agent/SQL can queue without secrets).
+[functions."ebay-migrate-dispatch"]
+  schedule = "* * * * *"
+  timeout = 20
+
 [functions."ebay-drafts"]
   timeout = 60
 
