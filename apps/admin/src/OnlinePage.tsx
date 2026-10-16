@@ -17,6 +17,9 @@ type Row = {
   sold_at?: string | null;
   sold_channel?: string | null;
   sold_price_cents?: number | null;
+  needs_sku?: boolean;
+  match_status?: string | null;
+  order_no?: string | null;
 };
 
 type PlatformReport = {
@@ -180,6 +183,7 @@ export function OnlinePage({
       .on('postgres_changes', { event: '*', schema: 'public', table: 'sales' }, quiet)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'listings' }, quiet)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'units' }, quiet)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'web_orders' }, quiet)
       .subscribe();
     return () => {
       window.clearInterval(timer);
@@ -464,21 +468,22 @@ export function OnlinePage({
           : filtered.length === 0 ? <div className="empty">Nothing in this list.</div>
           : <div className="ticket-list">
             {filtered.map(r => (
-              <div className="ticket" key={`${r.sku}-${r.is_lot ? 'lot' : 'unit'}-${r.sold_at || ''}`}>
+              <div className="ticket" key={`${r.sku}-${r.is_lot ? 'lot' : 'unit'}-${r.sold_at || ''}-${r.order_no || ''}`}>
                 <div className="ticket-top">
-                  <strong>{r.title}{r.qty && r.qty > 1 ? ` (├ù${r.qty})` : ''}</strong>
+                  <strong>{r.title}{r.qty && r.qty > 1 ? ` (×${r.qty})` : ''}{r.needs_sku ? <small className="ticket-profit"> · needs SKU</small> : null}</strong>
                   <span>
                     {skuLabel(r)}
                     {tab === 'sold'
-                      ? (r.sold_price_cents != null ? ` ┬╖ ${money(r.sold_price_cents)}` : r.ask_cents != null ? ` ┬╖ ${money(r.ask_cents)}` : ' ┬╖ No price')
-                      : (r.ask_cents != null ? ` ┬╖ ${money(r.ask_cents)}` : ' ┬╖ No price')}
-                    {tab === 'sold' && r.sold_channel ? ` ┬╖ ${labelChannel(r.sold_channel)}` : ''}
-                    {tab !== 'sold' && r.state && r.state !== 'available' ? ` ┬╖ ${r.state}` : ''}
-                    {r.is_lot ? ' ┬╖ quantity lot' : ''}
+                      ? (r.sold_price_cents != null ? ` · ${money(r.sold_price_cents)}` : r.ask_cents != null ? ` · ${money(r.ask_cents)}` : ' · No price')
+                      : (r.ask_cents != null ? ` · ${money(r.ask_cents)}` : ' · No price')}
+                    {tab === 'sold' && r.sold_channel ? ` · ${labelChannel(r.sold_channel)}` : ''}
+                    {tab !== 'sold' && r.state && r.state !== 'available' ? ` · ${r.state}` : ''}
+                    {r.is_lot ? ' · quantity lot' : ''}
+                    {r.needs_sku ? <b className="badge"> UNMATCHED</b> : null}
                   </span>
                 </div>
                 {tab === 'sold' && r.sold_at && (
-                  <small>Sold {new Date(r.sold_at).toLocaleString()}</small>
+                  <small>Sold {new Date(r.sold_at).toLocaleString()}{r.needs_sku ? ' · link SKU in Orders / Live Sales to attach inventory' : ''}</small>
                 )}
                 {tab !== 'sold' && !showingFacebookOnly && (r.listed_on?.length || 0) > 0 && (
                   <small>On: {r.listed_on.map(labelChannel).join(' ┬╖ ')}</small>

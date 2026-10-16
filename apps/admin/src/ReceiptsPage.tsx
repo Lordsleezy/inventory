@@ -13,6 +13,7 @@ type Receipt = {
   subtotal_cents: number; tax_cents: number; card_fee_cents: number; total_cents: number;
   shipping_cents: number; fee_cents?: number; label_cents?: number;
   processing_cents?: number; cost_cents?: number; profit_cents?: number;
+  needs_sku?: boolean;
   lines: Line[];
 };
 
@@ -252,9 +253,9 @@ export function ReceiptsPage({ client, money, stamp }: {
           return <div className="ticket" key={r.ticket_key}>
             <div className="ticket-top">
               <strong>{money(displayTotal)}
-                <small className="ticket-profit"> ┬╖ {r.lines.length} item{r.lines.length === 1 ? '' : 's'}{marketplace ? ' ┬╖ net deposit' : ''}</small>
+                <small className="ticket-profit"> · {r.lines.length} item{r.lines.length === 1 ? '' : 's'}{marketplace ? ' · net deposit' : ''}{r.needs_sku ? ' · needs SKU' : ''}</small>
               </strong>
-              <span>{stamp(r.sold_at)}<b className="badge"> {(label || '').toUpperCase()}</b></span>
+              <span>{stamp(r.sold_at)}<b className="badge"> {(label || '').toUpperCase()}</b>{r.needs_sku ? <b className="badge"> UNMATCHED</b> : null}</span>
             </div>
             <div className="ticket-items"><div><strong>{title || 'Sale'}</strong>
               <small> ┬╖ Receipt {r.receipt_no}{r.order_no && r.order_no !== r.receipt_no ? ` ┬╖ Order ${r.order_no}` : ''}
