@@ -490,17 +490,19 @@ export async function addFixedPriceItem(token, item) {
         <PackagingHandlingCosts currencyID="USD">0.00</PackagingHandlingCosts>
       </CalculatedShippingRate>
     </ShippingDetails>`;
-  const packageDetails =
-    item.weightLb || item.lengthIn
-      ? `<ShippingPackageDetails>
+  // Calculated shipping (business policy) requires package weight — default 1 lb when unknown.
+  const weightLb = Number(item.weightLb) > 0 ? Number(item.weightLb) : 1;
+  const weightMajor = Math.floor(weightLb);
+  const weightMinor = Math.min(15, Math.max(0, Math.round((weightLb % 1) * 16)));
+  const packageDetails = `<ShippingPackageDetails>
       <MeasurementUnit>English</MeasurementUnit>
-      ${item.weightLb ? `<WeightMajor>${xmlEsc(Math.floor(Number(item.weightLb) || 1))}</WeightMajor><WeightMinor>${xmlEsc(Math.round(((Number(item.weightLb) || 1) % 1) * 16))}</WeightMinor>` : ""}
+      <WeightMajor>${xmlEsc(weightMajor)}</WeightMajor>
+      <WeightMinor>${xmlEsc(weightMinor)}</WeightMinor>
       ${item.lengthIn ? `<PackageLength>${xmlEsc(item.lengthIn)}</PackageLength>` : ""}
       ${item.widthIn ? `<PackageWidth>${xmlEsc(item.widthIn)}</PackageWidth>` : ""}
       ${item.heightIn ? `<PackageDepth>${xmlEsc(item.heightIn)}</PackageDepth>` : ""}
       <ShippingPackage>PackageThickEnvelope</ShippingPackage>
-    </ShippingPackageDetails>`
-      : "";
+    </ShippingPackageDetails>`;
   const inner = `<WarningLevel>High</WarningLevel>
   <Item>
     <Title>${xmlEsc(item.title)}</Title>
