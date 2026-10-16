@@ -58,7 +58,13 @@ type VoidedLine = {
   processing_fee_cents: number | null; profit_cents: number | null;
   shipping_cents: number | null; order_no: string | null; buyer_name: string | null;
 };
-type Ticket = { key: string; at: string; lines: Line[]; subtotal: number; tax: number; fee: number; total: number; cash: number; card: number; method: string; actorId: string | null; actor: string; cost: number | null; channel: string; ebayFeeCents: number; bakedShipCents: number; feeCents: number; shipCostCents: number; pendingLabelCreditCents: number; processingFeeCents: number; shippingCents: number; costEstimated: boolean; taxOwedCents: number; taxCollectedCents: number; varianceCents: number | null; profitCents: number | null; commissionOverride: CommissionOverride | null };
+type Ticket = { key: string; at: string; lines: Line[]; subtotal: number; tax: number; fee: number; total: number; cash: number; card: number; method: string; actorId: string | null; actor: string; cost: number | null; channel: string; ebayFeeCents: number; bakedShipCents: number; feeCents: number; shipCostCents: number; pendingLabelCreditCents: number; processingFeeCents: number; shippingCents: number; costEstimated: boolean; taxOwedCents: number; taxCollectedCents: number; varianceCents: number | null; profitCents: number | null; commissionOverride: CommissionOverride | null; needsMatch?: boolean; webOrderId?: string; orderNo?: string | null; buyerName?: string | null };
+type UnmatchedOrder = {
+  id: string; ticket_key: string; order_no: string | null; sku: string; title: string;
+  channel: string; at: string; price_cents: number; tax_cents: number; shipping_cents: number;
+  total_cents: number; buyer_name: string | null; buyer_email: string | null;
+  match_status: string | null; marketplace_url?: string | null;
+};
 type OverrideMap = Map<string, CommissionOverride>;
 type Person = { user_id: string; display_name: string; kind: string };
 type Payment = { id: string; employee_id: string; amount_cents: number; paid_at: string; paid_by: string; legacy_ticket_key: string | null; note: string | null };
@@ -110,6 +116,74 @@ function tickets(lines: Line[], overrides: OverrideMap = new Map()): Ticket[] {
 }
 const check = <T,>(r: { data: T | null; error: { message: string } | null }): T => { if (r.error) throw new Error(r.error.message); return r.data as T; };
 async function sales(start: string, end: string, overrides: OverrideMap = new Map()) { return tickets(check<Line[]>(await sb.rpc('portal_sales', range(start, end))), overrides); }
+function unmatchedTickets(rows: UnmatchedOrder[]): Ticket[] {
+  return (rows || []).map(o => ({
+    key: o.ticket_key || `unmatched:${o.id}`,
+    at: o.at,
+    lines: [{
+      id: 0,
+      ticket_key: o.ticket_key || `unmatched:${o.id}`,
+      sku: o.sku || 'UNMATCHED',
+      title: o.title || `${o.channel || 'marketplace'} sale`,
+      qty: 1,
+      sold_at: o.at,
+      price_cents: o.price_cents || 0,
+      tax_cents: o.tax_cents || 0,
+      card_fee_cents: 0,
+      cost_cents: null,
+      payment_method: 'marketplace',
+      cash_cents: null,
+      card_cents: null,
+      actor_id: null,
+      actor_name: 'Online',
+      channel: o.channel,
+      receipt_no: o.order_no || 'UNMATCHED',
+      list_price_cents: null,
+      override_price_cents: null,
+      override_reason: null,
+      override_by_name: null,
+      profit_cents: null,
+      shipping_cents: o.shipping_cents || 0,
+    }],
+    subtotal: o.price_cents || 0,
+    tax: o.tax_cents || 0,
+    fee: 0,
+    total: o.total_cents || o.price_cents || 0,
+    cash: 0,
+    card: 0,
+    method: 'marketplace',
+    actorId: null,
+    actor: 'Online',
+    cost: null,
+    channel: o.channel,
+    ebayFeeCents: 0,
+    bakedShipCents: 0,
+    feeCents: 0,
+    shipCostCents: 0,
+    pendingLabelCreditCents: 0,
+    processingFeeCents: 0,
+    shippingCents: o.shipping_cents || 0,
+    costEstimated: false,
+    taxOwedCents: o.tax_cents || 0,
+    taxCollectedCents: o.tax_cents || 0,
+    varianceCents: null,
+    profitCents: null,
+    commissionOverride: null,
+    needsMatch: true,
+    webOrderId: o.id,
+    orderNo: o.order_no,
+    buyerName: o.buyer_name,
+  })).sort((a, b) => b.at.localeCompare(a.at));
+}
+async function unmatchedOrders(start: string, end: string) {
+  try {
+    return unmatchedTickets(check<UnmatchedOrder[]>(await sb.rpc('portal_unmatched_orders', range(start, end))));
+  } catch (e) {
+    // Older DBs without the RPC should still load matched Live Sales.
+    if (/portal_unmatched_orders|PGRST202|404|does not exist/i.test(String(e))) return [];
+    throw e;
+  }
+}
 async function voidedSales(start: string, end: string) {
   return check<VoidedLine[]>(await sb.rpc('portal_voided_sales', range(start, end)));
 }
@@ -399,18 +473,28 @@ export function App() {
     try {
       const overrides = await storedCommissionOverrides(store);
       setCommissionOverrides(overrides);
-      const rows = await sales(selectedDay, datePlus(selectedDay, 1), overrides);
+      const end = datePlus(selectedDay, 1);
+      const [rows, pending] = await Promise.all([
+        sales(selectedDay, end, overrides),
+        unmatchedOrders(selectedDay, end),
+      ]);
+      const merged = [...rows, ...pending].sort((a, b) => b.at.localeCompare(a.at));
       // Overnight: marketplace sales often sit on the previous LA calendar day.
-      if (rows.length === 0 && selectedDay === today()) {
+      // Keep today if unmatched Orders already landed for this calendar day.
+      if (merged.length === 0 && selectedDay === today()) {
         const prev = datePlus(selectedDay, -1);
-        const prevRows = await sales(prev, selectedDay, overrides);
-        if (prevRows.length) {
+        const [prevRows, prevPending] = await Promise.all([
+          sales(prev, selectedDay, overrides),
+          unmatchedOrders(prev, selectedDay),
+        ]);
+        const prevMerged = [...prevRows, ...prevPending].sort((a, b) => b.at.localeCompare(a.at));
+        if (prevMerged.length) {
           setSelectedDay(prev);
-          setLive(prevRows);
+          setLive(prevMerged);
           return;
         }
       }
-      setLive(rows);
+      setLive(merged);
     } catch (e) { setError(String(e)); }
   }, [store, selectedDay]);
   const loadVoided = useCallback(async () => {
@@ -456,7 +540,34 @@ export function App() {
   useEffect(() => { if (page === 'reports' && nav.reportTab === 'payouts') void loadPayoutSales(); }, [page, nav.reportTab, loadPayoutSales]);
   useEffect(() => { if (page === 'orders' && fullAccess) void loadCommissionOverrides(); }, [page, fullAccess, loadCommissionOverrides]);
   useEffect(() => { if (page === 'orders' && fullAccess) void loadCommon(); }, [page, fullAccess, loadCommon]);
-  useEffect(() => { if (!store || !['sales', 'reports'].includes(page)) return; const c = sb.channel(`portal-sales-${store}`).on('postgres_changes', { event: '*', schema: 'public', table: 'sales', filter: `store_id=eq.${store}` }, () => { if (page === 'sales' || (page === 'reports' && nav.reportTab === 'profit')) void loadSales(); if (page === 'sales' && salesScope === 'voided') void loadVoided(); if (page === 'reports' && nav.reportTab === 'payouts') void loadPayoutSales(); }).subscribe(); return () => { void sb.removeChannel(c); }; }, [store, page, nav.reportTab, salesScope, loadSales, loadVoided, loadPayoutSales]);
+  useEffect(() => {
+    if (!store || !['sales', 'reports'].includes(page)) return;
+    const refresh = () => {
+      if (page === 'sales' || (page === 'reports' && nav.reportTab === 'profit')) void loadSales();
+      if (page === 'sales' && salesScope === 'voided') void loadVoided();
+      if (page === 'reports' && nav.reportTab === 'payouts') void loadPayoutSales();
+    };
+    const c = sb.channel(`portal-sales-${store}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sales', filter: `store_id=eq.${store}` }, refresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'web_orders', filter: `store_id=eq.${store}` }, refresh)
+      .subscribe();
+    return () => { void sb.removeChannel(c); };
+  }, [store, page, nav.reportTab, salesScope, loadSales, loadVoided, loadPayoutSales]);
+  async function matchLiveSku(t: Ticket) {
+    if (!t.webOrderId || !t.needsMatch) return;
+    const sku = window.prompt(
+      `Link this ${(t.channel || 'marketplace').toUpperCase()} sale to a Floor SKU.\n\n${t.lines[0]?.title || 'Sale'}${t.orderNo ? ` · ${t.orderNo}` : ''}`,
+      t.lines[0]?.sku === 'UNMATCHED' ? '' : (t.lines[0]?.sku || ''),
+    );
+    if (sku == null || !sku.trim()) return;
+    setBusy(true); setError('');
+    try {
+      const { error: e } = await sb.rpc('portal_match_web_order', { p_order: t.webOrderId, p_sku: sku.trim() });
+      if (e) throw e;
+      await loadSales();
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    finally { setBusy(false); }
+  }
   const ruleMap = useMemo(() => new Map(rules.map(x => [x.employee_id, x])), [rules]);
   const staff = people.filter(p => p.kind === 'employee');
   const activeRules = (() => {
@@ -667,7 +778,8 @@ export function App() {
       : null;
     const onlineN = liveShown.filter(t => (t.channel || '').toLowerCase() !== 'floor').length;
     const instoreN = liveShown.filter(t => (t.channel || '').toLowerCase() === 'floor').length;
-    return <><header><div><div className="eyebrow">REGISTER ACTIVITY</div><h1>Live Sales</h1><p>Click a sale for profit, fees, cost, and shipping. Online totals use the same ledger math as Reports.</p></div>
+    const unmatchedN = liveShown.filter(t => t.needsMatch).length;
+    return <><header><div><div className="eyebrow">REGISTER ACTIVITY</div><h1>Live Sales</h1><p>Click a sale for profit, fees, cost, and shipping. Online totals use the same ledger math as Reports.{unmatchedN > 0 ? ` ${unmatchedN} marketplace sale${unmatchedN === 1 ? '' : 's'} still need a Floor SKU link.` : ''}</p></div>
       {salesFilters}
     </header>
     <div className="stats">
@@ -684,9 +796,10 @@ export function App() {
       {salesScope !== 'online' && <Stat name="Card sales" value={money(liveSum.card_cents)} />}
       <Stat name="Online sales" value={String(onlineN)} />
       <Stat name="Instore sales" value={String(instoreN)} />
+      {unmatchedN > 0 && <Stat name="Need SKU" value={String(unmatchedN)} />}
     </div>
     <section className="panel"><h2>{selectedDay === today() ? 'Today’s transactions' : `Transactions · ${selectedDay}`}{salesScope !== 'all' && <small> · {salesScope === 'instore' ? 'in store' : 'online'}</small>}</h2>
-      {liveShown.length === 0 ? <Empty>No {salesScope === 'all' ? '' : salesScope === 'instore' ? 'in-store ' : 'online '}sales for {selectedDay === today() ? 'today' : selectedDay}. Try the previous date if a marketplace sale just came in.</Empty> : <div className="ticket-list">{liveShown.map(t => <LiveTicket key={t.key} t={t} money={money} stamp={stamp} rules={activeRules} cfg={onlineCfg} personName={personName} busy={busy} onCommissionChanged={setTicketOverride} />)}</div>}
+      {liveShown.length === 0 ? <Empty>No {salesScope === 'all' ? '' : salesScope === 'instore' ? 'in-store ' : 'online '}sales for {selectedDay === today() ? 'today' : selectedDay}. Try the previous date if a marketplace sale just came in.</Empty> : <div className="ticket-list">{liveShown.map(t => <LiveTicket key={t.key} t={t} money={money} stamp={stamp} rules={activeRules} cfg={onlineCfg} personName={personName} busy={busy} onCommissionChanged={setTicketOverride} onMatchSku={t.needsMatch ? () => void matchLiveSku(t) : undefined} />)}</div>}
     </section></>;
   })()}
   {fullAccess && page === 'orders' && <OrdersPage client={sb} accessToken={session.access_token} money={money} stamp={stamp} rules={activeRules} cfg={onlineCfg} commissionOverrides={commissionOverrides} personName={personName} busy={busy} onCommissionChanged={setTicketOverride} />}
@@ -725,34 +838,43 @@ function VoidedTicket({ r, money, stamp }: { r: VoidedLine; money: (n: number) =
     </div>
   </div>;
 }
-function LiveTicket({ t, money, stamp, rules, cfg, personName, busy, onCommissionChanged }: {
+function LiveTicket({ t, money, stamp, rules, cfg, personName, busy, onCommissionChanged, onMatchSku }: {
   t: Ticket; money: (n: number) => string; stamp: (s: string) => string;
   rules: Rule[]; cfg: OnlineCfg; personName: (id: string) => string; busy: boolean;
   onCommissionChanged: (ticketKey: string, next: CommissionOverride | null) => void;
+  onMatchSku?: () => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(!!t.needsMatch);
   const online = (t.channel || '').toLowerCase() !== 'floor';
   const feeEst = t.lines.some(l => l.fee_source === 'estimated' && (l.channel_fee_cents ?? 0) > 0);
   const costEst = t.costEstimated;
   const profit = t.profitCents;
-  return <div className={`ticket${open ? ' ticket-open' : ''}${t.commissionOverride ? ' ticket-commission-override' : ''}`}>
+  return <div className={`ticket${open ? ' ticket-open' : ''}${t.commissionOverride ? ' ticket-commission-override' : ''}${t.needsMatch ? ' ticket-unmatched' : ''}`}>
     <button type="button" className="ticket-toggle" aria-expanded={open} onClick={() => setOpen(v => !v)}>
       <div className="ticket-top">
-        <strong>{money(t.subtotal)}{online && profit != null ? <small className="ticket-profit"> · profit {money(profit)}</small> : null}{t.commissionOverride ? <small className="ticket-profit"> · split overridden</small> : null}</strong>
-        <span>{stamp(t.at)}{online && <b className="badge"> {(t.channel || 'online').toUpperCase()}</b>}{t.commissionOverride && <b className="badge badge-override"> SPLIT</b>}<span className="ticket-chevron" aria-hidden>{open ? '▴' : '▾'}</span></span>
+        <strong>{money(t.subtotal)}{online && profit != null ? <small className="ticket-profit"> · profit {money(profit)}</small> : null}{t.needsMatch ? <small className="ticket-profit"> · needs SKU</small> : null}{t.commissionOverride ? <small className="ticket-profit"> · split overridden</small> : null}</strong>
+        <span>{stamp(t.at)}{online && <b className="badge"> {(t.channel || 'online').toUpperCase()}</b>}{t.needsMatch && <b className="badge"> UNMATCHED</b>}{t.commissionOverride && <b className="badge badge-override"> SPLIT</b>}<span className="ticket-chevron" aria-hidden>{open ? '▴' : '▾'}</span></span>
       </div>
-      <div className="ticket-items">{t.lines.map(l => <SaleItem key={l.id} line={l} />)}
+      <div className="ticket-items">{t.lines.map(l => <SaleItem key={`${t.key}-${l.id}-${l.sku}`} line={l} />)}
         <CommissionOverrideMark overridden={!!t.commissionOverride} />
       </div>
       <div className="ticket-bottom">
-        <span>{online
+        <span>{t.needsMatch
+          ? `${t.channel} · not linked to inventory yet${t.buyerName ? ` · ${t.buyerName}` : ''}${t.orderNo ? ` · ${t.orderNo}` : ''}`
+          : online
           ? `${t.channel}${t.feeCents > 0 ? ` · fees ${money(t.feeCents)}${feeEst ? ' est.' : ''}` : ''}${t.shipCostCents > 0 ? ` · label ${formatLabelWithPending(money, t.shipCostCents, t.pendingLabelCreditCents)}` : ''}${t.shippingCents > 0 ? ` · buyer ship ${money(t.shippingCents)}` : ''}`
           : t.method === 'split' ? (t.lines[0].cash_cents === null ? 'Split amounts unavailable' : `Cash ${money(t.cash)} · Card ${money(t.card)}`)
-            : t.method === 'card' ? `Card ${money(t.card)}` : t.method === 'cash' ? `Cash ${money(t.cash)}` : t.method}{!online && t.processingFeeCents > 0 && ` · card fees ${money(t.processingFeeCents)}`}</span>
-        <span>{online ? 'Online' : `Rang up by ${t.actor || 'Unassigned'}`}</span>
+            : t.method === 'card' ? `Card ${money(t.card)}` : t.method === 'cash' ? `Cash ${money(t.cash)}` : t.method}{!online && !t.needsMatch && t.processingFeeCents > 0 && ` · card fees ${money(t.processingFeeCents)}`}</span>
+        <span>{online || t.needsMatch ? 'Online' : `Rang up by ${t.actor || 'Unassigned'}`}</span>
       </div>
     </button>
     {open && <div className="ticket-detail">
+      {t.needsMatch && onMatchSku && (
+        <div className="alert" role="status" style={{ marginBottom: 10 }}>
+          This marketplace sale is in Live Sales / Orders but not linked to a Floor unit yet — so it will not hit inventory, profit, or payouts until you link a SKU.
+          <button type="button" className="secondary" disabled={busy} onClick={onMatchSku}>Link SKU…</button>
+        </div>
+      )}
       <div className="ticket-detail-grid">
         <div><span>Item</span><strong>{money(t.subtotal)}</strong></div>
         {t.shippingCents > 0 && <div><span>Buyer shipping (buyer pays)</span><strong>{money(t.shippingCents)}</strong></div>}
@@ -768,8 +890,8 @@ function LiveTicket({ t, money, stamp, rules, cfg, personName, busy, onCommissio
         <div><span>Item cost{costEst ? ' (est.)' : ''}</span><strong>{t.cost === null ? 'Missing' : `−${money(t.cost)}`}</strong></div>
         <div><span>Profit</span><strong>{profit == null ? 'Pending' : money(profit)}</strong></div>
       </div>
-      {online && <p className="hint" style={{ margin: '8px 0 0' }}>Profit = item + buyer shipping − fees − label − processing − cost. Label totals keep voided eBay labels until the credit posts; pending refund shows in ().</p>}
-      <CommissionOverrideControls
+      {online && !t.needsMatch && <p className="hint" style={{ margin: '8px 0 0' }}>Profit = item + buyer shipping − fees − label − processing − cost. Label totals keep voided eBay labels until the credit posts; pending refund shows in ().</p>}
+      {!t.needsMatch && <CommissionOverrideControls
         client={sb}
         ticketKey={t.key}
         ticket={t}
@@ -781,7 +903,7 @@ function LiveTicket({ t, money, stamp, rules, cfg, personName, busy, onCommissio
         money={money}
         busy={busy}
         onChanged={next => onCommissionChanged(t.key, next)}
-      />
+      />}
     </div>}
   </div>;
 }
