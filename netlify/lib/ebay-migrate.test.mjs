@@ -26,6 +26,14 @@ test("Floor unit title beats a bogus eBay fridge category for ban checks", () =>
     ),
     null,
   );
+  // Draft-backed context when units.title is empty / Uncategorized.
+  assert.equal(
+    migrationBannedReason(
+      { title: "Signed Shirt Brett Favre", categoryName: "Refrigerators" },
+      { title: "Signed shirt Brett Favre sign tank top framed", category: "", sku: "11272" },
+    ),
+    null,
+  );
 });
 
 test("verification-hidden GetItem errors are detected", () => {
