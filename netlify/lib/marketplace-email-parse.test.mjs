@@ -147,6 +147,9 @@ assert.match(depopReal.item_title, /@kwfastkat1988|Depop sale/i);
 assert.equal(looksLikeSaleNotice("We've removed your listing", "This listing was sold then removed"), false);
 assert.equal(looksLikeSaleNotice("You still need to ship", "Please ship your sold item"), false);
 
+// Title cleanup for shipping-label subjects
+assert.match(depopReal.item_title, /Depop sale for @kwfastkat1988/i);
+
 console.log("marketplace-email-parse.test.mjs ok");
 
 
