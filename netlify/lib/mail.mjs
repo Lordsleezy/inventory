@@ -13,6 +13,37 @@ import nodemailer from "nodemailer";
 let cachedTransport = null;
 let cachedKey = "";
 
+/** Non-routable / synthetic login domains — never use as SMTP recipients. */
+const BLOCKED_EMAIL_HOSTS = new Set(["localhost", "local", "invalid", "test", "example", "example.com", "example.org", "example.net"]);
+
+/**
+ * True only for real-looking deliverable addresses.
+ * Blocks employee PIN logins like local@employees.floor.local and *.local hosts.
+ */
+export function isDeliverableEmail(addr) {
+  const s = String(addr || "").trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s)) return false;
+  const host = s.split("@").pop() || "";
+  if (!host || host.endsWith(".local") || BLOCKED_EMAIL_HOSTS.has(host)) return false;
+  if (host.endsWith(".test") || host.endsWith(".invalid") || host.endsWith(".localhost")) return false;
+  if (host.includes("employees.floor.") || host.includes("staff.floor.")) return false;
+  return true;
+}
+
+export function filterDeliverableEmails(list) {
+  const out = [];
+  const seen = new Set();
+  for (const raw of Array.isArray(list) ? list : [list]) {
+    const s = String(raw || "").trim();
+    if (!isDeliverableEmail(s)) continue;
+    const key = s.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(s);
+  }
+  return out;
+}
+
 export function gmailConfigured() {
   return Boolean(process.env.GMAIL_SMTP_USER && process.env.GMAIL_SMTP_APP_PASSWORD);
 }
@@ -40,8 +71,8 @@ function transport() {
 export async function sendInternalAlert({ to, subject, text }) {
   const user = process.env.GMAIL_SMTP_USER;
   if (!gmailConfigured() || !to) return { skipped: true, reason: "gmail_smtp_not_configured" };
-  const recipients = Array.isArray(to) ? to.filter(Boolean) : [to];
-  if (!recipients.length) return { skipped: true, reason: "no_recipient" };
+  const recipients = filterDeliverableEmails(Array.isArray(to) ? to : [to]);
+  if (!recipients.length) return { skipped: true, reason: "no_deliverable_recipient" };
   const info = await transport().sendMail({
     from: user,
     to: recipients,

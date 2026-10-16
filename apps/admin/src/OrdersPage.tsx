@@ -272,8 +272,12 @@ export function OrdersPage({ client, accessToken, money, stamp, rules, cfg, comm
       lines: [{ sku: o.sku, price_cents: o.item_cents, cost_cents: o.cost_cents ?? null }],
     };
     const canOverride = !!o.ticket_key && (o.status === 'paid' || !!o.paid_at);
-    const displayTitle = o.marketplace_title || o.title;
-    const skuLabel = o.match_status && o.match_status !== 'matched' ? 'Needs SKU match' : `SKU ${o.sku}`;
+    // Matched: Floor unit title. Unmatched: email/listing title until Link SKU.
+    const linked = o.match_status === 'matched' || (!!o.sku && o.sku !== 'UNMATCHED' && !!o.sale_id);
+    const displayTitle = linked
+      ? (o.title || o.marketplace_title || 'Item')
+      : (o.marketplace_title || o.title || 'Marketplace sale');
+    const skuLabel = linked ? `SKU ${o.sku}` : 'Needs SKU match';
     return <div className="ticket-items"><div>{displayTitle} <span>· {skuLabel}</span></div>
     <small>{o.buyer_name}{o.buyer_email ? ` · ${o.buyer_email}` : ''}{o.buyer_phone ? ` · ${o.buyer_phone}` : ''}</small>
     <small>Item {money(o.item_cents)}{orderFee(o) ? ` · Fees ${money(orderFee(o))}` : ''} · {o.fulfillment === 'ship' ? `Buyer ship ${money(o.shipping_cents)}` : 'Store pickup'}{o.fulfillment === 'ship' ? ` · Label ${o.label_cost_cents != null ? money(o.label_cost_cents) : '—'}` : ''} · Tax {money(o.tax_cents)}</small>
