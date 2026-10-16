@@ -11,6 +11,7 @@
     "ebay-drafts-refresh-background",
     "ebay-list",
     "ebay-migrate-background",
+    "ebay-migrate-dispatch",
     "ebay-notify",
     "ebay-photo",
     "ebay-push-background",
