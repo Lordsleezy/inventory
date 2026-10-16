@@ -224,7 +224,7 @@ export async function geminiEmailHints(text) {
           {
             parts: [
               {
-                text: `Extract only these fields from this marketplace sale email: item_title, order_number, ship_by (YYYY-MM-DD or null), buyer_name, buyer_email, buyer_phone, ship_line1, ship_line2, ship_city, ship_region, ship_postal, ship_country. Return JSON only. Do not infer missing values. Email:\n${text.slice(0, 14000)}`,
+                text: `Extract only these fields from this marketplace sale email: sku (5-digit Floor SKU if explicitly present), item_title, order_number, ship_by (YYYY-MM-DD or null), buyer_name, buyer_email, buyer_phone, ship_line1, ship_line2, ship_city, ship_region, ship_postal, ship_country. Return JSON only. Do not invent a SKU. Do not infer missing values. Email:\n${text.slice(0, 14000)}`,
               },
             ],
           },
@@ -264,14 +264,21 @@ export function messageIdFor(parsed, raw) {
  * Returns { state: 'matched' | 'needs_review' | 'ignored' | 'duplicate', ... }. Throws on database errors
  * so pollers can leave the message unread and retry.
  *
- * Previously-ignored rows for the same Message-ID are deleted and re-evaluated so a parser fix
- * (or INCLUDE_SEEN rescan) can recover sales that were wrongly discarded.
+ * Previously-ignored rows and unmatched needs_review rows for the same Message-ID are deleted
+ * and re-evaluated so a parser fix (or INCLUDE_SEEN rescan) can recover sales that were wrongly
+ * discarded or lacked a SKU on the first pass.
  */
 export async function ingestMarketplaceMail(sb, { store, channels, parsed, raw }) {
   const p = parseMail(parsed, channels);
-  if (p.sale && (!p.buyer.line1 || !p.order_number || !p.ship_by) && process.env.GEMINI_API_KEY) {
+  if (
+    p.sale &&
+    (!p.sku || !p.buyer.line1 || !p.order_number || !p.ship_by) &&
+    process.env.GEMINI_API_KEY
+  ) {
     try {
       const hints = await geminiEmailHints(p.text);
+      const hintSku = String(hints.sku || '').match(/\b(\d{5})\b/)?.[1];
+      p.sku = p.sku || hintSku || null;
       p.item_title = hints.item_title || p.item_title;
       p.order_number = p.order_number || hints.order_number;
       p.ship_by = p.ship_by || hints.ship_by || null;
@@ -303,7 +310,9 @@ export async function ingestMarketplaceMail(sb, { store, channels, parsed, raw }
     .eq('message_id', msg)
     .maybeSingle();
   if (exists) {
-    if (exists.state === 'ignored' && !exists.sale_id) {
+    // Re-evaluate ignored mail and unmatched needs_review on INCLUDE_SEEN rescan
+    // (parser fixes / Gemini SKU hints). Never reopen a row that already finalized a sale.
+    if (!exists.sale_id && (exists.state === 'ignored' || exists.state === 'needs_review')) {
       const { error: delErr } = await sb.from('marketplace_email_sales').delete().eq('id', exists.id);
       if (delErr) throw delErr;
     } else {
