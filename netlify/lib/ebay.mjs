@@ -766,12 +766,13 @@ export async function listSku(storeId, sku, draft = null) {
 
   const pickupOnly = Boolean(draft?.pickupOnly);
   const live = await resetUnpublishedOffers(storeId, sku);
+  // eBay rejects fulfillmentTime.value 0 (errorId 25709). Same-day pickup = 1 HOUR.
   const availability = pickupOnly
     ? {
         pickupAtLocationAvailability: [
           {
             availabilityType: "IN_STOCK",
-            fulfillmentTime: { value: 0, unit: "HOUR" },
+            fulfillmentTime: { value: 1, unit: "HOUR" },
             merchantLocationKey: loc,
             quantity: 1,
           },
