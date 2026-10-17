@@ -399,35 +399,15 @@ export function App() {
     try {
       const overrides = await storedCommissionOverrides(store);
       setCommissionOverrides(overrides);
-      const rows = await sales(selectedDay, datePlus(selectedDay, 1), overrides);
-      // Overnight: marketplace sales often sit on the previous LA calendar day.
-      if (rows.length === 0 && selectedDay === today()) {
-        const prev = datePlus(selectedDay, -1);
-        const prevRows = await sales(prev, selectedDay, overrides);
-        if (prevRows.length) {
-          setSelectedDay(prev);
-          setLive(prevRows);
-          return;
-        }
-      }
-      setLive(rows);
+      // Always keep the selected calendar day (default: today LA). Do not jump to
+      // yesterday when today is empty — that made Live Sales show the prior day.
+      setLive(await sales(selectedDay, datePlus(selectedDay, 1), overrides));
     } catch (e) { setError(String(e)); }
   }, [store, selectedDay]);
   const loadVoided = useCallback(async () => {
     if (!store) return;
     try {
-      const rows = await voidedSales(selectedDay, datePlus(selectedDay, 1));
-      // Same overnight quirk as Live Sales: cancel time often lands on the previous LA day.
-      if (rows.length === 0 && selectedDay === today()) {
-        const prev = datePlus(selectedDay, -1);
-        const prevRows = await voidedSales(prev, selectedDay);
-        if (prevRows.length) {
-          setSelectedDay(prev);
-          setVoided(prevRows);
-          return;
-        }
-      }
-      setVoided(rows);
+      setVoided(await voidedSales(selectedDay, datePlus(selectedDay, 1)));
     } catch (e) { setError(String(e)); }
   }, [store, selectedDay]);
   const loadPayoutSales = useCallback(async () => {
@@ -686,7 +666,7 @@ export function App() {
       <Stat name="Instore sales" value={String(instoreN)} />
     </div>
     <section className="panel"><h2>{selectedDay === today() ? 'Today’s transactions' : `Transactions · ${selectedDay}`}{salesScope !== 'all' && <small> · {salesScope === 'instore' ? 'in store' : 'online'}</small>}</h2>
-      {liveShown.length === 0 ? <Empty>No {salesScope === 'all' ? '' : salesScope === 'instore' ? 'in-store ' : 'online '}sales for {selectedDay === today() ? 'today' : selectedDay}. Try the previous date if a marketplace sale just came in.</Empty> : <div className="ticket-list">{liveShown.map(t => <LiveTicket key={t.key} t={t} money={money} stamp={stamp} rules={activeRules} cfg={onlineCfg} personName={personName} busy={busy} onCommissionChanged={setTicketOverride} />)}</div>}
+      {liveShown.length === 0 ? <Empty>No {salesScope === 'all' ? '' : salesScope === 'instore' ? 'in-store ' : 'online '}sales for {selectedDay === today() ? 'today' : selectedDay}. Use the date control above to check another day.</Empty> : <div className="ticket-list">{liveShown.map(t => <LiveTicket key={t.key} t={t} money={money} stamp={stamp} rules={activeRules} cfg={onlineCfg} personName={personName} busy={busy} onCommissionChanged={setTicketOverride} />)}</div>}
     </section></>;
   })()}
   {fullAccess && page === 'orders' && <OrdersPage client={sb} accessToken={session.access_token} money={money} stamp={stamp} rules={activeRules} cfg={onlineCfg} commissionOverrides={commissionOverrides} personName={personName} busy={busy} onCommissionChanged={setTicketOverride} />}
