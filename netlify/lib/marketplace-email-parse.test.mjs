@@ -1,5 +1,14 @@
 import assert from "node:assert/strict";
-import { parseMail, isMarketplaceNoise, looksLikeSaleNotice, marketplaceDkimPassed, mailAuthenticatedForMarketplace } from "./marketplace-email-parse.mjs";
+import { readFileSync } from "node:fs";
+import {
+  parseMail,
+  isMarketplaceNoise,
+  looksLikeSaleNotice,
+  marketplaceDkimPassed,
+  mailAuthenticatedForMarketplace,
+  extractDepopPhotoIds,
+  extractSkuFirstLine,
+} from "./marketplace-email-parse.mjs";
 
 assert.equal(looksLikeSaleNotice("You've made a sale: Lasko Fan", "You've made a sale! $25.00"), true);
 assert.equal(
@@ -149,6 +158,53 @@ assert.equal(looksLikeSaleNotice("You still need to ship", "Please ship your sol
 
 // Title cleanup for shipping-label subjects
 assert.match(depopReal.item_title, /Depop sale for @kwfastkat1988/i);
+
+// SKU on first description line (Depop truncated snippet).
+assert.equal(extractSkuFirstLine("SKU 11449 · Pyrex glass mixing bowls See photos for...\nItem price $14.99"), "11449");
+assert.equal(
+  parseMail({
+    subject: "Your USPS shipping label and sale confirmation for @buyer",
+    text: "You've made a sale!\nSKU 99119 · 15in iron skillet\nItem price $24.99",
+    from: { address: "sold@alerts.depop.com" },
+  }).sku,
+  "99119",
+);
+
+assert.deepEqual(
+  extractDepopPhotoIds(
+    "https://media-photos.depop.com/b1/481279620/4955799423_0680165964224f8d85ef55abae729c7c/P0.jpg",
+  ),
+  ["4955799423"],
+);
+
+// Real uploaded Depop sale .eml — photo id + truncated title, no SKU / product URL.
+try {
+  const emlPath =
+    "/home/ubuntu/.cursor/projects/workspace/uploads/Your_USPS_shipping_label_and_sale_confirmation_for__kwfastkat1988._a948.eml";
+  const raw = readFileSync(emlPath, "utf8");
+  const subject = raw.match(/^Subject:\s*(.+)$/m)?.[1]?.trim();
+  const html = raw.includes("Content-Type: text/html")
+    ? raw.slice(raw.search(/Content-Type:\s*text\/html/i))
+    : raw;
+  const parsed = parseMail({
+    subject,
+    html,
+    text: raw,
+    from: { address: "sold@alerts.depop.com" },
+  });
+  assert.equal(parsed.sale, true);
+  assert.equal(parsed.marketplace, "depop");
+  assert.equal(parsed.price, 1499);
+  assert.equal(parsed.sku, null);
+  assert.deepEqual(parsed.photo_ids, ["4955799423"]);
+  assert.match(parsed.item_title, /Pyrex glass mixing bowls/i);
+} catch (err) {
+  if (err && err.code === "ENOENT") {
+    // Upload path absent in CI — photo unit test above still covers extraction.
+  } else {
+    throw err;
+  }
+}
 
 console.log("marketplace-email-parse.test.mjs ok");
 

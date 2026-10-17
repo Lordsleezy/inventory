@@ -96,7 +96,21 @@ function mockSb() {
           .then(resolve, reject);
       return builder;
     },
-    rpc: async () => ({ data: null, error: { message: "not used in unmatched path" } }),
+    rpc: async (name, args) => {
+      if (name === "match_listing_sku_by_photo" || name === "match_vendoo_sold_sku_by_photo") {
+        const photos = args?.p_photo_ids || [];
+        const hit = (state.photoMap || []).find(
+          (r) => r.channel === args?.p_channel && photos.some((p) => (r.photo_ids || []).includes(p)),
+        );
+        // Ambiguous → null (same as SQL).
+        const all = (state.photoMap || []).filter(
+          (r) => r.channel === args?.p_channel && photos.some((p) => (r.photo_ids || []).includes(p)),
+        );
+        if (all.length === 1) return { data: all[0].sku, error: null };
+        return { data: null, error: null };
+      }
+      return { data: null, error: { message: "not used in unmatched path" } };
+    },
     _state: state,
   };
   return api;
@@ -170,6 +184,41 @@ const channels = [{ key: "depop", aliases: ["depop"] }, { key: "mercari", aliase
   assert.ok(result.web_order_id);
   assert.equal(sb._state.webOrders[0].channel, "mercari");
   assert.equal(sb._state.webOrders[0].item_cents, 950);
+}
+
+{
+  // Exact Depop photo-id match finalizes when unit is available.
+  const sb = mockSb();
+  sb._state.photoMap = [{ sku: "99119", channel: "depop", photo_ids: ["4955799423"] }];
+  sb._state.units.push({ sku: "99119", title: "Pyrex bowls", state: "available" });
+  let ingested = null;
+  sb.rpc = async (name, args) => {
+    if (name === "match_listing_sku_by_photo") {
+      return { data: "99119", error: null };
+    }
+    if (name === "marketplace_ingest_sale") {
+      ingested = args;
+      return { data: 4242, error: null };
+    }
+    if (name === "match_vendoo_sold_sku_by_photo") return { data: null, error: null };
+    return { data: null, error: { message: "unexpected rpc " + name } };
+  };
+  const result = await ingestMarketplaceMail(sb, {
+    store,
+    channels,
+    parsed: {
+      subject: "Your USPS shipping label and sale confirmation for @kwfastkat1988.",
+      text: "You've made a sale!\nItem price $14.99",
+      html: '<img src="https://media-photos.depop.com/b1/481279620/4955799423_0680165964224f8d85ef55abae729c7c/P0.jpg"/>',
+      from: { address: "sold@alerts.depop.com" },
+      messageId: "<photo-match@depop>",
+    },
+    raw: "Message-ID: <photo-match@depop>\n\n",
+  });
+  assert.equal(result.state, "matched");
+  assert.equal(result.sku, "99119");
+  assert.equal(ingested?.p_sku, "99119");
+  assert.equal(ingested?.p_price_cents, 1499);
 }
 
 console.log("marketplace-email-ingest.test.mjs ok");
