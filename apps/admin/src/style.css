@@ -198,7 +198,8 @@ nav .nav-parent.active{background:var(--btn-bg-active);color:var(--btn-text);fon
 }
 
 .amazon-add-row{display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px;max-width:640px}
-.amazon-add-field{display:flex;flex-direction:column;gap:4px;flex:1 1 160px;min-width:140px;margin:0;font-size:12px;font-weight:600;color:var(--muted,#9aa3ad)}
+.amazon-add-field{display:flex;flex-direction:column;gap:4px;flex:1 1 160px;min-width:140px;margin:0;font-size:12px;font-weight:600;color:#627282}
+html.dark .amazon-add-field{color:#9aa3ad}
 .amazon-add-field input{width:100%;margin:0;font-weight:400}
 .amazon-add-row>button{flex:0 0 auto;white-space:nowrap;align-self:flex-end}
 .amazon-add-row>.hint{flex:0 0 auto;margin:0 0 10px;align-self:flex-end}
