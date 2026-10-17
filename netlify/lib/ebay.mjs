@@ -21,7 +21,9 @@ import { parseMeasure, specInches } from "./ebay-aspects.mjs";
 import { listingMeasures, prepareUnitAspects, prepareUnitCondition } from "./ebay-catalog.mjs";
 import { floorLog, redact, setTrace } from "./floor-log.mjs";
 import { sendResend } from "./receipt.mjs";
-import { ebayFeeCents, ebayOrderAmounts, ebayShipTo } from "./ebay-price.mjs";
+import { ebayFeeCents, ebayOrderAmounts, ebayOrderIsLocalPickup, ebayShipTo } from "./ebay-price.mjs";
+
+export { ebayOrderIsLocalPickup };
 import {
   compactShippingCatalog,
   endTradingItem,
@@ -265,12 +267,14 @@ async function resetUnpublishedOffers(storeId, sku) {
   return null;
 }
 
-async function ensureLocation(storeId) {
+async function ensureLocation(storeId, { forPickup = false } = {}) {
   const key = locationKey(storeId);
+  // STORE is required for local-pickup inventory availability; keep WAREHOUSE for ship listings.
+  const locationTypes = forPickup ? ["STORE", "WAREHOUSE"] : ["WAREHOUSE"];
   const body = {
     name: "Open Box Industries",
     merchantLocationStatus: "ENABLED",
-    locationTypes: ["WAREHOUSE"],
+    locationTypes,
     location: {
       address: {
         addressLine1: process.env.EBAY_LOCATION_LINE1 || "3121 Penryn Rd",
@@ -287,11 +291,17 @@ async function ensureLocation(storeId) {
   } catch (err) {
     if (err.status !== 404) throw err;
   }
-  if (existing && existing.location?.address?.postalCode !== body.location.address.postalCode) {
+  const existingTypes = (existing?.locationTypes || []).map((t) => String(t).toUpperCase());
+  const needsTypeUpdate =
+    forPickup && existing && !existingTypes.includes("STORE");
+  const needsAddressUpdate =
+    existing && existing.location?.address?.postalCode !== body.location.address.postalCode;
+  if (needsAddressUpdate || needsTypeUpdate) {
     try {
       await ebayFetch(storeId, "POST", `/sell/inventory/v1/location/${key}/update_location_details`, {
         name: body.name,
         phone: process.env.EBAY_LOCATION_PHONE || "+12799770722",
+        locationTypes: body.locationTypes,
         location: body.location,
       });
     } catch (err) {
@@ -701,22 +711,29 @@ export async function listSku(storeId, sku, draft = null) {
   if (policyError) throw new Error(policyError.message);
   const images = draft?.imageUrls?.length ? draft.imageUrls : await photoUrls(storeId, sku);
   const epid = draft ? null : await catalogEpid(storeId, unit);
-  const loc = await ensureLocation(storeId);
+  const loc = await ensureLocation(storeId, { forPickup: Boolean(draft?.pickupOnly) });
   // ensureLocation / catalogEpid / ebayFetch use default resolve — pin selling account for all subsequent calls
   const fetchHint = hint;
   const copy = draft?.title ? { title: draft.title, description: draft.description || "" } : listingCopy(unit);
   let aspects;
   let cat;
   let condition;
-  if (draft) {
+  const draftHasCategory = Boolean(draft?.categoryId && (draft?.aspects || draft?.conditionPayload));
+  if (draft && draftHasCategory) {
     aspects = draft.aspects || {};
     cat = String(draft.categoryId || "");
-    condition = { payload: draft.conditionPayload, mapped: draft.conditionPayload, allowed: [] };
+    condition = {
+      payload: draft.conditionPayload,
+      mapped: draft.conditionPayload,
+      allowed: [],
+    };
   } else {
     const prepared = await itemAspects(storeId, unit);
-    aspects = prepared.aspects;
-    cat = prepared.categoryId;
-    condition = await prepareUnitCondition({ unit, liveCheck: true });
+    aspects = { ...(prepared.aspects || {}), ...(draft?.aspects || {}) };
+    cat = String(draft?.categoryId || prepared.categoryId || "");
+    condition = draft?.conditionPayload
+      ? { payload: draft.conditionPayload, mapped: draft.conditionPayload, allowed: [] }
+      : await prepareUnitCondition({ unit, liveCheck: true });
   }
   const pkg = draft?.package || packageSize(unit);
   const policies = draft?.policies || (await ensurePolicies(storeId, fetchHint));
@@ -747,14 +764,27 @@ export async function listSku(storeId, sku, draft = null) {
     },
   });
 
+  const pickupOnly = Boolean(draft?.pickupOnly);
   const live = await resetUnpublishedOffers(storeId, sku);
+  const availability = pickupOnly
+    ? {
+        pickupAtLocationAvailability: [
+          {
+            availabilityType: "IN_STOCK",
+            fulfillmentTime: { value: 0, unit: "HOUR" },
+            merchantLocationKey: loc,
+            quantity: 1,
+          },
+        ],
+      }
+    : {
+        shipToLocationAvailability: {
+          quantity: 1,
+          availabilityDistributions: [{ merchantLocationKey: loc, quantity: 1 }],
+        },
+      };
   await ebayFetch(storeId, "PUT", `/sell/inventory/v1/inventory_item/${encodeURIComponent(sku)}`, {
-    availability: {
-      shipToLocationAvailability: {
-        quantity: 1,
-        availabilityDistributions: [{ merchantLocationKey: loc, quantity: 1 }],
-      },
-    },
+    availability,
     ...condition.payload,
     conditionDescription: draft?.conditionNotes || unit.defect_notes || undefined,
     packageWeightAndSize: pkg,
@@ -779,6 +809,7 @@ export async function listSku(storeId, sku, draft = null) {
       conditionId: storedItem?.conditionId ?? storedItem?.conditionDescriptors ?? null,
       conditionDescription: storedItem?.conditionDescription ?? null,
       error: storedItem?._error ?? null,
+      pickupOnly,
     },
   });
 
@@ -797,6 +828,9 @@ export async function listSku(storeId, sku, draft = null) {
     merchantLocationKey: loc,
     listingDuration: "GTC",
     pricingSummary: { price: { value: money(priceCents), currency: "USD" } },
+    ...(draft && Object.prototype.hasOwnProperty.call(draft, "bestOfferEnabled")
+      ? { bestOfferTerms: { bestOfferEnabled: draft.bestOfferEnabled === true } }
+      : {}),
   };
 
   let offerId = live?.offerId || null;
@@ -1041,6 +1075,53 @@ function orderCents(order) {
   return ebayOrderAmounts(order).itemCents;
 }
 
+/**
+ * Seller-initiated cancel when the unit already sold in-store (in-store wins).
+ * Uses Post-Order cancellation; failures are logged and do not block ingest.
+ */
+export async function cancelEbayOrderForSoldElsewhere(storeId, orderId, reason = "OUT_OF_STOCK_OR_CANNOT_FULFILL") {
+  if (!orderId) return { ok: false, reason: "missing_order_id" };
+  try {
+    const selling = await resolveEbayAccount(storeId, { role: "selling" }).catch(() =>
+      resolveEbayAccount(storeId),
+    );
+    const hosts = ebayHosts(process.env.EBAY_ENV);
+    const token = await userTokenForAccount(selling);
+    const res = await fetch(`${hosts.api}/post-order/v2/cancellation`, {
+      method: "POST",
+      headers: {
+        Authorization: `TOKEN ${token}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "X-EBAY-C-MARKETPLACE-ID": marketplaceIdFromEnv(),
+      },
+      body: JSON.stringify({
+        legacyOrderId: String(orderId),
+        cancelReason: reason,
+      }),
+    });
+    const text = await res.text();
+    let json = null;
+    try {
+      json = text ? JSON.parse(text) : null;
+    } catch {
+      json = { raw: text };
+    }
+    if (!res.ok) {
+      console.log(
+        "ebay_cancel_sold_elsewhere",
+        JSON.stringify({ orderId, status: res.status, body: json }),
+      );
+      return { ok: false, status: res.status, body: json };
+    }
+    return { ok: true, cancelId: json?.cancelId || json?.cancellationId || null, body: json };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.log("ebay_cancel_sold_elsewhere", JSON.stringify({ orderId, error: message }));
+    return { ok: false, error: message };
+  }
+}
+
 export async function ingestEbayOrder(storeId, order) {
   const orderId = order?.orderId;
   if (!orderId) return { skipped: true, reason: "missing_order_id" };
@@ -1066,6 +1147,7 @@ export async function ingestEbayOrder(storeId, order) {
   const amounts = ebayOrderAmounts(order);
   const itemCents = amounts.itemCents || orderCents(order) || 0;
   const ship = ebayShipTo(order);
+  const isPickup = ebayOrderIsLocalPickup(order);
   const title =
     order?.lineItems?.[0]?.title ||
     order?.lineItems?.[0]?.legacyItemId ||
@@ -1087,7 +1169,7 @@ export async function ingestEbayOrder(storeId, order) {
         p_price_cents: itemCents,
         p_payment_method: "ebay",
         p_payment_id: `ebay:${orderId}`,
-        p_note: "eBay order",
+        p_note: isPickup ? "eBay local pickup order" : "eBay order",
         p_tax_cents: 0,
         p_approval_id: null,
       });
@@ -1106,17 +1188,24 @@ export async function ingestEbayOrder(storeId, order) {
     }
   }
 
+  let cancelResult = null;
+  if (matchStatus === "already_sold") {
+    // In-store sale wins: cancel the eBay order so the buyer is not left hanging.
+    cancelResult = await cancelEbayOrderForSoldElsewhere(storeId, orderId);
+  }
+
   const { data: settingRows } = await sb
     .from("store_settings")
     .select("key,value")
     .eq("store_id", storeId)
-    .in("key", ["ebay_fee_pct", "ebay_per_order_cents"]);
+    .in("key", ["ebay_fee_pct", "ebay_per_order_cents", "pickup_hold_hours"]);
   const setting = Object.fromEntries((settingRows || []).map((row) => [row.key, row.value]));
   const feePct = Number(setting.ebay_fee_pct ?? 13.25);
   const perOrder = Number(setting.ebay_per_order_cents ?? 40);
   const feeCents = ebayFeeCents(itemCents, feePct, perOrder);
+  const holdHours = Math.max(1, Number(setting.pickup_hold_hours ?? 48) || 48);
   let baked = 0;
-  if (rawSku) {
+  if (rawSku && !isPickup) {
     const { data: draft } = await sb
       .from("ebay_drafts")
       .select("shipping_mode,label_cents,shipping_buffer_cents")
@@ -1140,32 +1229,47 @@ export async function ingestEbayOrder(storeId, order) {
     buyer_eias_token: order?.buyer?.eiasToken || null,
   });
 
+  const paidAt = new Date();
+  const webStatus = matchStatus === "already_sold" ? "canceled" : "paid";
   const { error: orderError } = await sb.from("web_orders").insert({
     store_id: storeId,
     sku,
     sale_id: sale?.id ?? null,
-    status: "paid",
+    status: webStatus,
     channel: "ebay",
-    fulfillment: "ship",
+    fulfillment: isPickup ? "pickup" : "ship",
     order_no: String(orderId),
-    paid_at: new Date().toISOString(),
-    buyer_name: ship.name || null,
+    paid_at: paidAt.toISOString(),
+    pickup_deadline:
+      isPickup && webStatus === "paid"
+        ? new Date(paidAt.getTime() + holdHours * 3600 * 1000).toISOString()
+        : null,
+    buyer_name: ship.name || order?.buyer?.username || null,
     buyer_email: ship.email || null,
     buyer_phone: ship.phone || null,
-    ship_line1: ship.line1 || null,
-    ship_line2: ship.line2 || null,
-    ship_city: ship.city || null,
-    ship_region: ship.region || null,
-    ship_postal: ship.postal || null,
+    ship_line1: isPickup ? null : ship.line1 || null,
+    ship_line2: isPickup ? null : ship.line2 || null,
+    ship_city: isPickup ? null : ship.city || null,
+    ship_region: isPickup ? null : ship.region || null,
+    ship_postal: isPickup ? null : ship.postal || null,
     item_cents: itemCents,
-    shipping_cents: amounts.shipCents,
+    shipping_cents: isPickup ? 0 : amounts.shipCents,
     tax_cents: 0,
-    total_cents: itemCents + amounts.shipCents,
+    total_cents: itemCents + (isPickup ? 0 : amounts.shipCents),
     payment_id: `ebay:${orderId}`,
     payment_env: process.env.EBAY_ENV === "production" ? "production" : "sandbox",
     match_status: matchStatus,
     marketplace_fee_cents: feeCents,
     marketplace_title: String(title).slice(0, 250),
+    ...(webStatus === "canceled"
+      ? {
+          canceled_at: paidAt.toISOString(),
+          cancel_source: "sold_in_store",
+          cancel_reason: cancelResult?.ok
+            ? "Sold in store — eBay order cancelled"
+            : `Sold in store — eBay cancel ${cancelResult?.ok === false ? "failed/pending" : "attempted"}`,
+        }
+      : {}),
   });
   if (orderError) console.log("ebay_packing_order", orderError.message);
 
@@ -1192,7 +1296,15 @@ export async function ingestEbayOrder(storeId, order) {
       if (!ebayOrdersOnly()) await withdrawSku(storeId, rawSku).catch(() => undefined);
     }
   }
-  return { sku, orderId, saleId: sale?.id ?? null, matchStatus };
+  return {
+    sku,
+    orderId,
+    saleId: sale?.id ?? null,
+    matchStatus,
+    fulfillment: isPickup ? "pickup" : "ship",
+    canceledForSoldElsewhere: matchStatus === "already_sold",
+    cancelResult,
+  };
 }
 
 function fulfillmentOrdersPath() {

@@ -1,10 +1,11 @@
 /**
- * Lightweight cron: claim queued ebay_migration_request rows and start
- * ebay-migrate-background. Kept separate from ebay-sync so Inventory offer
+ * Lightweight cron: claim queued ebay_migration_request / ebay_pickup_list_request
+ * rows and start background workers. Kept separate from ebay-sync so Inventory offer
  * 404 noise cannot burn the timeout before dispatch runs.
  */
 import { json, corsHeaders } from "../lib/server.mjs";
 import { dispatchQueuedMigrationRequests } from "../lib/ebay-migrate.mjs";
+import { dispatchQueuedPickupListRequests } from "../lib/ebay-pickup-list.mjs";
 import { wrapHandler, asNetlifyFunction } from "../lib/floor-log.mjs";
 import { ebayDisabled } from "../lib/ebay-env.mjs";
 
@@ -13,7 +14,8 @@ async function handle(event) {
   if (event.httpMethod === "OPTIONS") return { statusCode: 200, headers: corsHeaders(), body: "" };
   try {
     const migrationDispatch = await dispatchQueuedMigrationRequests();
-    return json(200, { ok: true, migrationDispatch });
+    const pickupListDispatch = await dispatchQueuedPickupListRequests();
+    return json(200, { ok: true, migrationDispatch, pickupListDispatch });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return json(500, { error: message });
