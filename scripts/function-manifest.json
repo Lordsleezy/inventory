@@ -15,6 +15,7 @@
     "ebay-migrate-dispatch",
     "ebay-notify",
     "ebay-photo",
+    "ebay-pickup-list-background",
     "ebay-push-background",
     "ebay-spec-backfill-background",
     "ebay-sync",

@@ -86,6 +86,22 @@ export function ebayShipTo(order) {
   };
 }
 
+/** True when the eBay order is local pickup (pickup step / pickup instruction, no ship-to). */
+export function ebayOrderIsLocalPickup(order) {
+  const steps = order?.fulfillmentStartInstructions || [];
+  if (!steps.length) return false;
+  for (const step of steps) {
+    const type = String(step?.fulfillmentInstructionsType || "").toUpperCase();
+    if (/PICK.?UP|PREPARE_FOR_PICKUP|SELLER_DEFINED_PICKUP/i.test(type)) return true;
+    if (step?.pickupStep) return true;
+    if (step?.shippingStep && !step?.pickupStep) return false;
+  }
+  const hasShip = steps.some((s) => s?.shippingStep);
+  const hasPickup = steps.some((s) => s?.pickupStep);
+  if (hasPickup && !hasShip) return true;
+  return false;
+}
+
 /** East-coast quote address for a ZIP. City is only so Shippo will rate the ZIP. */
 export function farZoneAddress(zip) {
   const z = String(zip || "10001").replace(/\D/g, "").slice(0, 5).padStart(5, "0");

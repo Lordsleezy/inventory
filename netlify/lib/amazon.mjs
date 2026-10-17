@@ -13,7 +13,7 @@ const LWA_TOKEN = "https://api.amazon.com/auth/o2/token";
 export const MARKETPLACE_US = "ATVPDKIKX0DER";
 const SPAPI_NA = "https://sellingpartnerapi-na.amazon.com";
 const NEVER_LIST_SKUS = new Set(["11284"]);
-const STORE_DEFAULT = "5487ca47-6147-4fe8-bc6d-46b6472726ba";
+export const STORE_DEFAULT = "5487ca47-6147-4fe8-bc6d-46b6472726ba";
 
 export function amazonListingEnabled() {
   return process.env.AMAZON_LISTING_ENABLED === "1";
@@ -857,6 +857,78 @@ export async function zeroAmazonQuantityForSku(storeId, sku) {
     .eq("channel", "amazon")
     .is("completed_at", null);
   return { ok: true, sku };
+}
+
+/**
+ * Push Floor availability onto an Amazon offer SKU (seller SKU / listing SKU).
+ * Quantity 1 when the Floor unit is available/reserved; 0 otherwise.
+ */
+export async function syncAmazonOfferQuantity(storeId, offerSku) {
+  const sku = String(offerSku || "").trim();
+  if (!sku) return { ok: false, reason: "offer_sku_required" };
+  const sb = serviceClient();
+  const { data: listing } = await sb
+    .from("listings")
+    .select("*")
+    .eq("store_id", storeId)
+    .eq("channel", "amazon")
+    .or(`sku.eq.${sku},listing_id.eq.${sku},offer_id.eq.${sku}`)
+    .maybeSingle();
+  const floorSku = listing?.sku || sku;
+  const { data: unit } = await sb
+    .from("units")
+    .select("sku,state")
+    .eq("store_id", storeId)
+    .eq("sku", floorSku)
+    .maybeSingle();
+  const qty = unit && (unit.state === "available" || unit.state === "reserved") ? 1 : 0;
+  if (!listing || listing.status !== "listed") {
+    if (qty === 0) return { ok: true, sku: floorSku, offerSku: sku, quantity: 0, skipped: "not_listed" };
+    return { ok: false, reason: "not_listed", sku: floorSku, offerSku: sku };
+  }
+  if (qty === 0) {
+    return { ...(await zeroAmazonQuantityForSku(storeId, floorSku)), quantity: 0, offerSku: sku };
+  }
+  try {
+    await spapiFetch(
+      storeId,
+      "PATCH",
+      `/listings/2021-08-01/items/${encodeURIComponent(sellerId() || "SELLER")}/${encodeURIComponent(listing.listing_id || sku)}?marketplaceIds=${marketplaceId()}`,
+      {
+        productType: listing.offer_id || "PRODUCT",
+        patches: [
+          {
+            op: "replace",
+            path: "/attributes/fulfillment_availability",
+            value: [{ fulfillment_channel_code: "DEFAULT", quantity: qty }],
+          },
+        ],
+      },
+    );
+  } catch (err) {
+    return { ok: false, reason: "patch_failed", message: String(err.message || err).slice(0, 300), sku: floorSku, offerSku: sku };
+  }
+  await sb
+    .from("amazon_list_items")
+    .update({ qty_listed: qty, updated_at: new Date().toISOString() })
+    .eq("store_id", storeId)
+    .eq("sku", floorSku);
+  return { ok: true, sku: floorSku, offerSku: sku, quantity: qty };
+}
+
+/** Resolve Floor SKU → Amazon offer and sync quantity from unit state. */
+export async function syncAmazonOfferForFloorSku(storeId, sku) {
+  const floorSku = String(sku || "").trim();
+  if (!floorSku) return { ok: false, reason: "sku_required" };
+  const sb = serviceClient();
+  const { data: row } = await sb
+    .from("amazon_list_items")
+    .select("offer_sku,listing_sku,sku")
+    .eq("store_id", storeId)
+    .eq("sku", floorSku)
+    .maybeSingle();
+  const offerSku = row?.offer_sku || row?.listing_sku || floorSku;
+  return syncAmazonOfferQuantity(storeId, offerSku);
 }
 
 async function alertDoubleSellAmazon(sku, orderId, detail) {

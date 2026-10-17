@@ -4,6 +4,7 @@ import {
   draftReadiness,
   ebayFeeCents,
   ebayOrderAmounts,
+  ebayOrderIsLocalPickup,
   ebayPriceCents,
   fallbackLabelCents,
   roundUpEnding,
@@ -68,4 +69,22 @@ test("push stays blocked until required fields pass", () => {
     aspect_defs: [{ name: "Brand", required: true, allowed: [], selectionOnly: false }],
   });
   assert.equal(ready.ready, true);
+});
+
+test("ebayOrderIsLocalPickup detects pickupStep / pickup instruction types", () => {
+  assert.equal(
+    ebayOrderIsLocalPickup({
+      fulfillmentStartInstructions: [
+        { fulfillmentInstructionsType: "PREPARE_FOR_PICKUP", pickupStep: { merchantLocationKey: "x" } },
+      ],
+    }),
+    true,
+  );
+  assert.equal(
+    ebayOrderIsLocalPickup({
+      fulfillmentStartInstructions: [{ fulfillmentInstructionsType: "FULFILLED", shippingStep: { shipTo: {} } }],
+    }),
+    false,
+  );
+  assert.equal(ebayOrderIsLocalPickup({ fulfillmentStartInstructions: [] }), false);
 });
