@@ -82,6 +82,15 @@ function parseCodes(raw: string): string[] {
     .filter(Boolean);
 }
 
+function hasUpc(row: Row): boolean {
+  return Boolean(nullifTrim(row.upc));
+}
+
+function nullifTrim(v: string | null | undefined): string | null {
+  const t = (v || '').trim();
+  return t ? t : null;
+}
+
 function formatSkip(b: AddResult): string {
   const label = SKIP_REASON_LABEL[b.reason] || b.reason;
   const shown = b.input && b.input !== b.sku ? `${b.input} → ${b.sku}` : (b.sku || b.input || '?');
@@ -129,13 +138,15 @@ async function amazonListCall(token: string, body: Record<string, unknown>) {
 
 export function AmazonPage({ client, accessToken, money: moneyFmt }: Props) {
   const [rows, setRows] = useState<Row[]>([]);
-  const [draft, setDraft] = useState('');
+  const [skuDraft, setSkuDraft] = useState('');
+  const [upcDraft, setUpcDraft] = useState('');
   const [thumbs, setThumbs] = useState<Record<string, string>>({});
   const [flash, setFlash] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [listingEnabled, setListingEnabled] = useState<boolean | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const skuRef = useRef<HTMLInputElement>(null);
+  const upcRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
     const { data, error: e } = await client.rpc('portal_amazon_list');
@@ -174,8 +185,7 @@ export function AmazonPage({ client, accessToken, money: moneyFmt }: Props) {
     };
   }, [rows, client, thumbs]);
 
-  async function addCodes(raw: string) {
-    const codes = parseCodes(raw);
+  async function addCodes(codes: string[], clear: 'sku' | 'upc' | 'both') {
     if (!codes.length) return;
     setBusy(true);
     setError('');
@@ -186,7 +196,7 @@ export function AmazonPage({ client, accessToken, money: moneyFmt }: Props) {
       const added = results.filter((x) => x.ok);
       const bad = results.filter((x) => !x.ok);
       if (!results.length) {
-        setFlash('Nothing to add — enter a Floor SKU or UPC.');
+        setFlash('Nothing to add — enter a Floor SKU and/or UPC.');
       } else if (bad.length && !added.length) {
         setFlash(`Skipped: ${bad.map(formatSkip).join('; ')}`);
       } else if (bad.length) {
@@ -196,13 +206,14 @@ export function AmazonPage({ client, accessToken, money: moneyFmt }: Props) {
       } else {
         setFlash(`Added ${added.map(formatAdded).join(', ')}. Matching ASINs…`);
       }
-      setDraft('');
+      if (clear === 'sku' || clear === 'both') setSkuDraft('');
+      if (clear === 'upc' || clear === 'both') setUpcDraft('');
       await load();
       for (const a of added) {
         await amazonListCall(accessToken, { action: 'prepare', sku: a.sku }).catch(() => undefined);
       }
       await load();
-      inputRef.current?.focus();
+      skuRef.current?.focus();
     } catch (e) {
       setError(errText(e));
     } finally {
@@ -210,10 +221,29 @@ export function AmazonPage({ client, accessToken, money: moneyFmt }: Props) {
     }
   }
 
-  function onScanKey(e: React.KeyboardEvent<HTMLInputElement>) {
+  function submitAdd() {
+    const skus = parseCodes(skuDraft);
+    const upcs = parseCodes(upcDraft);
+    const codes = [...skus, ...upcs];
+    if (!codes.length) return;
+    const clear = skus.length && upcs.length ? 'both' : skus.length ? 'sku' : 'upc';
+    void addCodes(codes, clear);
+  }
+
+  function onSkuKey(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key !== 'Enter') return;
     e.preventDefault();
-    void addCodes(draft);
+    const codes = parseCodes(skuDraft);
+    if (codes.length) void addCodes(codes, 'sku');
+    else if (parseCodes(upcDraft).length) void addCodes(parseCodes(upcDraft), 'upc');
+  }
+
+  function onUpcKey(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    const codes = parseCodes(upcDraft);
+    if (codes.length) void addCodes(codes, 'upc');
+    else if (parseCodes(skuDraft).length) void addCodes(parseCodes(skuDraft), 'sku');
   }
 
   async function remove(sku: string) {
@@ -229,13 +259,16 @@ export function AmazonPage({ client, accessToken, money: moneyFmt }: Props) {
     }
   }
 
-  async function saveAsin(sku: string, asin: string) {
+  async function saveMissingUpc(sku: string, upc: string) {
+    const digits = upc.replace(/[^\d]/g, '');
+    if (!digits) return;
     setBusy(true);
     setError('');
     try {
-      await amazonListCall(accessToken, { action: 'set_asin', sku, asin });
-      await amazonListCall(accessToken, { action: 'prepare', sku });
-      setFlash(`ASIN saved for ${sku}.`);
+      const { error: e } = await client.rpc('portal_amazon_set_upc', { p_sku: sku, p_upc: digits });
+      if (e) throw e;
+      await amazonListCall(accessToken, { action: 'prepare', sku }).catch(() => undefined);
+      setFlash(`UPC saved for ${sku}. Matching ASINs…`);
       await load();
     } catch (e) {
       setError(errText(e));
@@ -291,6 +324,8 @@ export function AmazonPage({ client, accessToken, money: moneyFmt }: Props) {
     }
   }
 
+  const canEnter = Boolean(parseCodes(skuDraft).length || parseCodes(upcDraft).length);
+
   return (
     <>
       <header>
@@ -325,25 +360,44 @@ export function AmazonPage({ client, accessToken, money: moneyFmt }: Props) {
       )}
 
       <section className="panel amazon-add">
-        <h2>Add SKU or UPC</h2>
+        <h2>Add to queue</h2>
         <p className="hint" style={{ marginTop: 0 }}>
-          Scan a Floor SKU or product UPC. Only already-sold units are skipped. UPC with multiple available units queues the oldest one.
+          Use the SKU box, the UPC box, or both. Only already-sold units are skipped. UPC with multiple available units
+          queues the oldest one.
         </p>
         <div className="amazon-add-row">
-          <input
-            ref={inputRef}
-            autoFocus
-            inputMode={isKioskShell() ? 'none' : 'numeric'}
-            autoComplete="off"
-            spellCheck={false}
-            placeholder="Scan or type SKU or UPC"
-            aria-label="Scan or type SKU or UPC"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value.replace(/[^\dA-Za-z\-]/g, ''))}
-            onKeyDown={onScanKey}
-            disabled={busy}
-          />
-          <button disabled={busy || !parseCodes(draft).length} onClick={() => void addCodes(draft)}>
+          <label className="amazon-add-field">
+            SKU
+            <input
+              ref={skuRef}
+              autoFocus
+              inputMode={isKioskShell() ? 'none' : 'numeric'}
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="Floor SKU"
+              aria-label="Floor SKU"
+              value={skuDraft}
+              onChange={(e) => setSkuDraft(e.target.value.replace(/[^\dA-Za-z\-]/g, ''))}
+              onKeyDown={onSkuKey}
+              disabled={busy}
+            />
+          </label>
+          <label className="amazon-add-field">
+            UPC
+            <input
+              ref={upcRef}
+              inputMode={isKioskShell() ? 'none' : 'numeric'}
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="Product UPC"
+              aria-label="Product UPC"
+              value={upcDraft}
+              onChange={(e) => setUpcDraft(e.target.value.replace(/[^\d]/g, ''))}
+              onKeyDown={onUpcKey}
+              disabled={busy}
+            />
+          </label>
+          <button disabled={busy || !canEnter} onClick={submitAdd}>
             Enter
           </button>
           <span className="hint">{rows.length} on list</span>
@@ -353,100 +407,134 @@ export function AmazonPage({ client, accessToken, money: moneyFmt }: Props) {
       <section className="panel">
         <h2>Queue</h2>
         {rows.length === 0 ? (
-          <div className="empty">No SKUs yet. Scan or enter a SKU or UPC above.</div>
+          <div className="empty">No SKUs yet. Enter a Floor SKU and/or UPC above.</div>
         ) : (
           <div className="amazon-grid">
-            {rows.map((r) => (
-              <article className="amazon-card" key={r.id}>
-                <div className="amazon-thumb">
-                  {thumbs[r.sku] ? <img src={thumbs[r.sku]} alt="" /> : <span>No photo</span>}
-                </div>
-                <div className="amazon-body">
-                  <div className="amazon-card-top">
-                    <strong>SKU {r.sku}</strong>
-                    <span className={`amazon-status st-${r.status}`}>{STATUS_LABEL[r.status] || r.status}</span>
+            {rows.map((r) => {
+              const missingUpc = !hasUpc(r);
+              const missingSku = !nullifTrim(r.sku);
+              return (
+                <article className="amazon-card" key={r.id}>
+                  <div className="amazon-thumb">
+                    {thumbs[r.sku] ? <img src={thumbs[r.sku]} alt="" /> : <span>No photo</span>}
                   </div>
-                  <div className="amazon-title">{r.title || 'Untitled'}</div>
-                  <div className="amazon-meta">
-                    Floor {r.ask_cents != null ? moneyFmt(r.ask_cents) : '—'}
-                    {r.amazon_price_cents != null ? ` · Amazon ${moneyFmt(r.amazon_price_cents)}` : ''}
-                    {r.fee_estimate_cents != null ? ` · Fees ~${moneyFmt(r.fee_estimate_cents)}` : ''}
-                    {r.cost_cents != null ? ` · Cost ${moneyFmt(r.cost_cents)}` : ''}
-                  </div>
-                  <div className="amazon-meta">
-                    Condition: {r.condition || '—'}
-                    {r.condition_code ? ` → ${r.condition_code}` : ''}
-                    {r.upc ? ` · UPC ${r.upc}` : ''}
-                  </div>
-                  {r.asin ? (
+                  <div className="amazon-body">
+                    <div className="amazon-card-top">
+                      <strong>SKU {r.sku || '—'}</strong>
+                      <span className={`amazon-status st-${r.status}`}>{STATUS_LABEL[r.status] || r.status}</span>
+                    </div>
+                    <div className="amazon-title">{r.title || 'Untitled'}</div>
                     <div className="amazon-meta">
-                      ASIN <strong>{r.asin}</strong>
-                      {r.matched_title ? ` · ${r.matched_title}` : ''}
+                      Floor {r.ask_cents != null ? moneyFmt(r.ask_cents) : '—'}
+                      {r.amazon_price_cents != null ? ` · Amazon ${moneyFmt(r.amazon_price_cents)}` : ''}
+                      {r.fee_estimate_cents != null ? ` · Fees ~${moneyFmt(r.fee_estimate_cents)}` : ''}
+                      {r.cost_cents != null ? ` · Cost ${moneyFmt(r.cost_cents)}` : ''}
                     </div>
-                  ) : (
-                    <div className="amazon-meta">No ASIN matched yet</div>
-                  )}
-                  {(r.flags || []).length > 0 && (
-                    <div className="amazon-flags">
-                      {(r.flags || []).map((f) => (
-                        <span className="amazon-flag" key={f}>
-                          {FLAG_LABEL[f] || f}
-                        </span>
-                      ))}
+                    <div className="amazon-meta">
+                      Condition: {r.condition || '—'}
+                      {r.condition_code ? ` → ${r.condition_code}` : ''}
+                      {r.upc ? ` · UPC ${r.upc}` : ''}
                     </div>
-                  )}
-                  {r.last_error && <p className="error" style={{ margin: '6px 0' }}>{r.last_error}</p>}
-                  {r.needs_review_reason && <p className="hint" style={{ margin: '6px 0' }}>{r.needs_review_reason}</p>}
-                  {r.condition_note && <p className="hint" style={{ margin: '6px 0' }}>{r.condition_note}</p>}
-
-                  <label>
-                    Confirm / change ASIN
-                    <input
-                      defaultValue={r.asin || ''}
-                      key={`${r.sku}:asin:${r.asin}`}
-                      disabled={busy}
-                      placeholder="B0XXXXXXXX"
-                      onBlur={(e) => {
-                        const v = e.target.value.trim().toUpperCase();
-                        if (v && v !== (r.asin || '')) void saveAsin(r.sku, v);
-                      }}
-                    />
-                  </label>
-                  <label>
-                    Amazon price ($)
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="5"
-                      defaultValue={r.amazon_price_cents != null ? (r.amazon_price_cents / 100).toFixed(2) : ''}
-                      key={`${r.sku}:price:${r.amazon_price_cents}`}
-                      disabled={busy}
-                      onBlur={(e) => {
-                        const next = e.target.value;
-                        const cur = r.amazon_price_cents != null ? (r.amazon_price_cents / 100).toFixed(2) : '';
-                        if (next && next !== cur) void savePrice(r.sku, next);
-                      }}
-                    />
-                  </label>
-
-                  <div className="actions" style={{ marginTop: 10 }}>
-                    {(r.status === 'ready' || r.status === 'error') && (
-                      <button disabled={busy || listingEnabled === false} onClick={() => void listOne(r.sku)}>
-                        List one
-                      </button>
+                    {r.asin ? (
+                      <div className="amazon-meta">
+                        ASIN <strong>{r.asin}</strong>
+                        {r.matched_title ? ` · ${r.matched_title}` : ''}
+                      </div>
+                    ) : (
+                      <div className="amazon-meta">No ASIN matched yet</div>
                     )}
-                    {(r.status === 'error' || r.status === 'needs_review' || r.status === 'queued') && (
-                      <button className="secondary" disabled={busy} onClick={() => void retry(r.sku)}>
-                        Retry / prepare
-                      </button>
+                    {(r.flags || []).length > 0 && (
+                      <div className="amazon-flags">
+                        {(r.flags || []).map((f) => (
+                          <span className="amazon-flag" key={f}>
+                            {FLAG_LABEL[f] || f}
+                          </span>
+                        ))}
+                      </div>
                     )}
-                    <button className="text-button danger" disabled={busy} onClick={() => void remove(r.sku)}>
-                      Remove
-                    </button>
+                    {r.last_error && <p className="error" style={{ margin: '6px 0' }}>{r.last_error}</p>}
+                    {r.needs_review_reason && <p className="hint" style={{ margin: '6px 0' }}>{r.needs_review_reason}</p>}
+                    {r.condition_note && <p className="hint" style={{ margin: '6px 0' }}>{r.condition_note}</p>}
+
+                    {missingSku && (
+                      <label>
+                        Add Floor SKU
+                        <input
+                          disabled={busy}
+                          placeholder="Floor SKU"
+                          inputMode={isKioskShell() ? 'none' : 'numeric'}
+                          autoComplete="off"
+                          onBlur={(e) => {
+                            const v = e.target.value.trim();
+                            if (v) void addCodes([v], 'sku');
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key !== 'Enter') return;
+                            e.preventDefault();
+                            const v = (e.target as HTMLInputElement).value.trim();
+                            if (v) void addCodes([v], 'sku');
+                          }}
+                        />
+                      </label>
+                    )}
+                    {missingUpc && (
+                      <label>
+                        Add UPC
+                        <input
+                          disabled={busy}
+                          placeholder="Product UPC"
+                          inputMode={isKioskShell() ? 'none' : 'numeric'}
+                          autoComplete="off"
+                          key={`${r.sku}:upc`}
+                          onBlur={(e) => {
+                            const v = e.target.value.replace(/[^\d]/g, '');
+                            if (v) void saveMissingUpc(r.sku, v);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key !== 'Enter') return;
+                            e.preventDefault();
+                            const v = (e.target as HTMLInputElement).value.replace(/[^\d]/g, '');
+                            if (v) void saveMissingUpc(r.sku, v);
+                          }}
+                        />
+                      </label>
+                    )}
+                    <label>
+                      Amazon price ($)
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="5"
+                        defaultValue={r.amazon_price_cents != null ? (r.amazon_price_cents / 100).toFixed(2) : ''}
+                        key={`${r.sku}:price:${r.amazon_price_cents}`}
+                        disabled={busy}
+                        onBlur={(e) => {
+                          const next = e.target.value;
+                          const cur = r.amazon_price_cents != null ? (r.amazon_price_cents / 100).toFixed(2) : '';
+                          if (next && next !== cur) void savePrice(r.sku, next);
+                        }}
+                      />
+                    </label>
+
+                    <div className="actions" style={{ marginTop: 10 }}>
+                      {(r.status === 'ready' || r.status === 'error') && (
+                        <button disabled={busy || listingEnabled === false} onClick={() => void listOne(r.sku)}>
+                          List one
+                        </button>
+                      )}
+                      {(r.status === 'error' || r.status === 'needs_review' || r.status === 'queued') && (
+                        <button className="secondary" disabled={busy} onClick={() => void retry(r.sku)}>
+                          Retry / prepare
+                        </button>
+                      )}
+                      <button className="text-button danger" disabled={busy} onClick={() => void remove(r.sku)}>
+                        Remove
+                      </button>
+                    </div>
                   </div>
-                </div>
-              </article>
-            ))}
+                </article>
+              );
+            })}
           </div>
         )}
       </section>

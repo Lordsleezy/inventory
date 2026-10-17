@@ -197,10 +197,11 @@ nav .nav-parent.active{background:var(--btn-bg-active);color:var(--btn-text);fon
   .app.menu-open .theme-toggle{justify-content:space-between;padding:8px 4px}
 }
 
-.amazon-add-row{display:flex;flex-wrap:wrap;align-items:center;gap:10px;max-width:520px}
-.amazon-add-row input{flex:1 1 180px;min-width:140px;margin:0}
-.amazon-add-row button{flex:0 0 auto;white-space:nowrap}
-.amazon-add-row .hint{flex:0 0 auto;margin:0}
+.amazon-add-row{display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px;max-width:640px}
+.amazon-add-field{display:flex;flex-direction:column;gap:4px;flex:1 1 160px;min-width:140px;margin:0;font-size:12px;font-weight:600;color:var(--muted,#9aa3ad)}
+.amazon-add-field input{width:100%;margin:0;font-weight:400}
+.amazon-add-row>button{flex:0 0 auto;white-space:nowrap;align-self:flex-end}
+.amazon-add-row>.hint{flex:0 0 auto;margin:0 0 10px;align-self:flex-end}
 .amazon-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px}
 .amazon-card{display:grid;grid-template-columns:88px minmax(0,1fr);gap:12px;border:1px solid #e5e9ee;border-radius:12px;padding:12px;background:#fafbfc}
 .amazon-thumb{width:88px;height:88px;border-radius:8px;background:#edf1f3;color:#84909a;display:grid;place-items:center;overflow:hidden;font-size:.7rem;text-align:center}
