@@ -99,6 +99,11 @@ schedule = "0 16 * * *"
 schedule = "*/5 * * * *"
 timeout = 30
 
+# Refresh Depop listings.photo_ids for exact sale-email photo matching.
+[functions."depop-photo-sync"]
+schedule = "0 15 * * *"
+timeout = 60
+
 # Reconcile real eBay marketplace fees and Square processing fees onto sales.
 [functions."channel-fee-sync"]
 schedule = "*/15 * * * *"

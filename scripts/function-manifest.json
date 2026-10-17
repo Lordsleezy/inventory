@@ -3,6 +3,7 @@
     "amazon-list",
     "amazon-sync",
     "channel-fee-sync",
+    "depop-photo-sync",
     "dispatch-alerts",
     "ebay-account-deletion",
     "ebay-aspects",
@@ -85,6 +86,7 @@
     "google-reconcile": "0 */6 * * *",
     "marketplace-daily-report": "0 16 * * *",
     "marketplace-sale-watch": "*/5 * * * *",
+    "depop-photo-sync": "0 15 * * *",
     "channel-fee-sync": "*/15 * * * *",
     "enrich-models": "*/2 * * * *"
   },

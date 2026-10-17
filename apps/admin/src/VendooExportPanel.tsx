@@ -46,7 +46,7 @@ export function VendooExportPanel({ client, compact }: Props) {
         ['Title', 'Description', 'Price', 'Condition', 'Brand', 'Category', 'Photo URLs', 'Weight lb', 'Length in', 'Width in', 'Height in', 'SKU', 'eBay OK', 'Whatnot OK', 'Depop OK', 'Mercari OK', 'Eligibility notes'],
         ...rows.map(x => [
           x.title,
-          `${x.description.replace(/\s*SKU\s+\d{5}\s*$/i, '').trim()}\n\nSKU ${x.sku}`,
+          `SKU ${x.sku} · ${x.description.replace(/^\s*SKU\s+\d{5}\s*[·•|]?\s*/i, '').replace(/\s*SKU\s+\d{5}\s*$/i, '').trim()}`,
           (x.price_cents / 100).toFixed(2),
           /sealed|new/i.test(x.condition || '') && !/open|damage/i.test(x.condition || '') ? 'New' : /open|box|package/i.test(x.condition || '') ? 'New with defects / Open box' : 'Used',
           x.brand, x.category,

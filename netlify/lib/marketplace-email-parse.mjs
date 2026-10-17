@@ -164,12 +164,53 @@ export function marketplaceOrderKey({ orderNumber, messageId }) {
   return `msg:${msg.slice(0, 48) || 'unknown'}`;
 }
 
+/** Undo quoted-printable soft breaks / =XX so CDN URLs in .eml / MIME bodies stay intact. */
+export function decodeQuotedPrintableLight(input) {
+  return String(input || '')
+    .replace(/=\r?\n/g, '')
+    .replace(/=([0-9A-Fa-f]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+}
+
+/**
+ * Depop sale emails embed listing photos as:
+ *   https://media-photos.depop.com/b1/{userId}/{photoId}_{hash}/P0.jpg
+ * The photoId (digits before the underscore) is stable enough for exact SKU matching.
+ * Tolerates quoted-printable soft-wrapped MIME (…4955799=\\n423_…).
+ */
+export function extractDepopPhotoIds(text) {
+  const ids = new Set();
+  const src = decodeQuotedPrintableLight(text);
+  for (const m of src.matchAll(/media-photos\.depop\.com\/b\d+\/\d+\/(\d+)_[0-9a-f]+\//gi)) {
+    if (m[1]) ids.add(m[1]);
+  }
+  // Soft-wrap fallback if decode missed a boundary.
+  for (const m of src.matchAll(/media-photos\.depop\.com\/b\d+\/\d+\/(\d{6,})/gi)) {
+    if (m[1]) ids.add(m[1]);
+  }
+  return [...ids];
+}
+
+/** Prefer "SKU ##### ·" at the start of a description line (Depop truncated first line). */
+export function extractSkuFirstLine(text) {
+  const src = String(text || '');
+  return (
+    src.match(/(?:^|[\r\n])\s*SKU\s*[:#-]?\s*(\d{5})\s*[·•|,\-]/i)?.[1] ||
+    src.match(/(?:^|[\r\n])\s*SKU\s*[:#-]?\s*(\d{5})\b/i)?.[1] ||
+    null
+  );
+}
+
 export function parseMail(mail, channels = defaultChannels) {
-  const text = [mail.subject, mail.text || '', mail.html || ''].join('\n').replace(/<[^>]*>/g, ' ');
+  const rawHtml = decodeQuotedPrintableLight(mail.html || '');
+  const rawText = decodeQuotedPrintableLight(mail.text || '');
+  const text = [mail.subject, rawText, rawHtml].join('\n').replace(/<[^>]*>/g, ' ');
   const sender = mail.from?.address || '';
   const marketplace = marketplaceOf(`${sender} ${mail.subject} ${text.slice(0, 2000)}`, channels);
   const sale = looksLikeSaleNotice(mail.subject, text);
+  // Prefer raw MIME (before tag strip) so photo URLs in <img src> survive.
+  const photo_ids = extractDepopPhotoIds(`${mail.text || ''}\n${mail.html || ''}\n${rawText}\n${rawHtml}`);
   const sku =
+    extractSkuFirstLine(text) ||
     text.match(/\bSKU\s*[:#-]?\s*(\d{5})\b/i)?.[1] ||
     // Vendoo / internal subjects often end with (11412)
     String(mail.subject || '').match(/\((\d{5})\)\s*$/)?.[1] ||
@@ -214,10 +255,21 @@ export function parseMail(mail, channels = defaultChannels) {
     ...(phone ? { phone } : {}),
   };
   // Prefer a real listing title over the Depop shipping-label subject.
+  // Real Depop US sale emails put a truncated description first line under "Order details"
+  // (e.g. "Pyrex glass mixing bowls See photos for...") — not labeled as Item/Listing.
   const subject = String(mail.subject || '').trim();
+  const orderDetailsTitle = (() => {
+    const m = text.match(/Order details[\s\S]{0,500}?([A-Za-z0-9][^\r\n$]{3,120}?)\s*(?:See photos|\$\s?\d)/i);
+    if (!m?.[1]) return null;
+    return m[1]
+      .replace(/^(?:image|img|photo)\s+/i, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  })();
   const bodyTitle =
     text.match(/(?:item(?:\s+title)?|listing(?:\s+title)?|product)\s*[:\-]\s*([^\r\n]{4,120})/i)?.[1] ||
     text.match(/you(?:'ve| have) made a sale[:\s]+([^\r\n$]{4,120})/i)?.[1] ||
+    orderDetailsTitle ||
     null;
   let item_title = (bodyTitle || subject || 'Marketplace order').replace(/\s+/g, ' ').trim().slice(0, 250);
   if (/shipping label and sale confirmation/i.test(item_title) && handle) {
@@ -245,6 +297,7 @@ export function parseMail(mail, channels = defaultChannels) {
     marketplace,
     sale,
     sku,
+    photo_ids,
     price,
     order_number: order,
     ship_by: ship ? safeDate(ship) : null,
@@ -256,6 +309,43 @@ export function parseMail(mail, channels = defaultChannels) {
     tax,
     payout,
   };
+}
+
+/**
+ * Resolve Floor SKU without guessing:
+ *  1) exact Depop photo-id → listed available unit
+ *  2) explicit SKU in email (already on `parsed.sku`)
+ *  3) exact Vendoo-sold photo-id fallback
+ * Ambiguous / empty → null (Orders stays Needs SKU match).
+ */
+export async function resolveMarketplaceSku(sb, { storeId, marketplace, sku, photoIds }) {
+  const channel = String(marketplace || '').toLowerCase();
+  const photos = Array.isArray(photoIds) ? photoIds.filter((x) => /^\d{6,}$/.test(String(x))) : [];
+
+  if (photos.length && (channel === 'depop' || channel === 'mercari')) {
+    const { data: byPhoto, error } = await sb.rpc('match_listing_sku_by_photo', {
+      p_store: storeId,
+      p_channel: channel,
+      p_photo_ids: photos,
+    });
+    if (error) throw error;
+    if (byPhoto) return { sku: String(byPhoto), via: 'photo' };
+  }
+
+  const explicit = String(sku || '').match(/^\d{5}$/)?.[0] || null;
+  if (explicit) return { sku: explicit, via: 'sku' };
+
+  if (photos.length && (channel === 'depop' || channel === 'mercari')) {
+    const { data: bySold, error } = await sb.rpc('match_vendoo_sold_sku_by_photo', {
+      p_store: storeId,
+      p_channel: channel,
+      p_photo_ids: photos,
+    });
+    if (error) throw error;
+    if (bySold) return { sku: String(bySold), via: 'vendoo_sold' };
+  }
+
+  return { sku: null, via: null };
 }
 
 export async function geminiEmailHints(text) {
@@ -531,6 +621,15 @@ export async function ingestMarketplaceMail(sb, { store, channels, parsed, raw }
   }
 
   let reason = 'SKU or sale price was not found with confidence';
+  // Exact photo / SKU / Vendoo-sold match only — never fuzzy title/price auto-finalize.
+  const resolved = await resolveMarketplaceSku(sb, {
+    storeId: store.id,
+    marketplace: p.marketplace,
+    sku: p.sku,
+    photoIds: p.photo_ids,
+  });
+  if (resolved.sku) p.sku = resolved.sku;
+
   // Order-id dedupe before finalize: same marketplace order must never create a second sale.
   if (p.order_number) {
     const { data: prior } = await sb
