@@ -478,40 +478,15 @@ export function App() {
         sales(selectedDay, end, overrides),
         unmatchedOrders(selectedDay, end),
       ]);
-      const merged = [...rows, ...pending].sort((a, b) => b.at.localeCompare(a.at));
-      // Overnight: marketplace sales often sit on the previous LA calendar day.
-      // Keep today if unmatched Orders already landed for this calendar day.
-      if (merged.length === 0 && selectedDay === today()) {
-        const prev = datePlus(selectedDay, -1);
-        const [prevRows, prevPending] = await Promise.all([
-          sales(prev, selectedDay, overrides),
-          unmatchedOrders(prev, selectedDay),
-        ]);
-        const prevMerged = [...prevRows, ...prevPending].sort((a, b) => b.at.localeCompare(a.at));
-        if (prevMerged.length) {
-          setSelectedDay(prev);
-          setLive(prevMerged);
-          return;
-        }
-      }
-      setLive(merged);
+      // Always keep the selected calendar day (default: today LA). Do not jump to
+      // yesterday when today is empty — that made Live Sales show the prior day.
+      setLive([...rows, ...pending].sort((a, b) => b.at.localeCompare(a.at)));
     } catch (e) { setError(String(e)); }
   }, [store, selectedDay]);
   const loadVoided = useCallback(async () => {
     if (!store) return;
     try {
-      const rows = await voidedSales(selectedDay, datePlus(selectedDay, 1));
-      // Same overnight quirk as Live Sales: cancel time often lands on the previous LA day.
-      if (rows.length === 0 && selectedDay === today()) {
-        const prev = datePlus(selectedDay, -1);
-        const prevRows = await voidedSales(prev, selectedDay);
-        if (prevRows.length) {
-          setSelectedDay(prev);
-          setVoided(prevRows);
-          return;
-        }
-      }
-      setVoided(rows);
+      setVoided(await voidedSales(selectedDay, datePlus(selectedDay, 1)));
     } catch (e) { setError(String(e)); }
   }, [store, selectedDay]);
   const loadPayoutSales = useCallback(async () => {
@@ -800,7 +775,7 @@ export function App() {
       {unmatchedN > 0 && <Stat name="Need SKU" value={String(unmatchedN)} />}
     </div>
     <section className="panel"><h2>{selectedDay === today() ? 'Today’s transactions' : `Transactions · ${selectedDay}`}{salesScope !== 'all' && <small> · {salesScope === 'instore' ? 'in store' : 'online'}</small>}</h2>
-      {liveShown.length === 0 ? <Empty>No {salesScope === 'all' ? '' : salesScope === 'instore' ? 'in-store ' : 'online '}sales for {selectedDay === today() ? 'today' : selectedDay}. Try the previous date if a marketplace sale just came in.</Empty> : <div className="ticket-list">{liveShown.map(t => <LiveTicket key={t.key} t={t} money={money} stamp={stamp} rules={activeRules} cfg={onlineCfg} personName={personName} busy={busy} onCommissionChanged={setTicketOverride} onMatchSku={t.needsMatch ? () => void matchLiveSku(t) : undefined} />)}</div>}
+      {liveShown.length === 0 ? <Empty>No {salesScope === 'all' ? '' : salesScope === 'instore' ? 'in-store ' : 'online '}sales for {selectedDay === today() ? 'today' : selectedDay}. Use the date control above to check another day.</Empty> : <div className="ticket-list">{liveShown.map(t => <LiveTicket key={t.key} t={t} money={money} stamp={stamp} rules={activeRules} cfg={onlineCfg} personName={personName} busy={busy} onCommissionChanged={setTicketOverride} onMatchSku={t.needsMatch ? () => void matchLiveSku(t) : undefined} />)}</div>}
     </section></>;
   })()}
   {fullAccess && page === 'orders' && <OrdersPage client={sb} accessToken={session.access_token} money={money} stamp={stamp} rules={activeRules} cfg={onlineCfg} commissionOverrides={commissionOverrides} personName={personName} busy={busy} onCommissionChanged={setTicketOverride} />}
