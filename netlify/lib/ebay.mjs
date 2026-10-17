@@ -766,9 +766,18 @@ export async function listSku(storeId, sku, draft = null) {
 
   const pickupOnly = Boolean(draft?.pickupOnly);
   const live = await resetUnpublishedOffers(storeId, sku);
+  // Publish uses AVAILABLE_QUANTITY from shipToLocationAvailability (errorId 25004 if missing/0).
+  // Pickup-only still needs ship-to qty 1; the local-pickup fulfillment policy blocks shipping.
   // eBay rejects fulfillmentTime.value 0 (errorId 25709). Same-day pickup = 1 HOUR.
+  const shipQty = {
+    shipToLocationAvailability: {
+      quantity: 1,
+      availabilityDistributions: [{ merchantLocationKey: loc, quantity: 1 }],
+    },
+  };
   const availability = pickupOnly
     ? {
+        ...shipQty,
         pickupAtLocationAvailability: [
           {
             availabilityType: "IN_STOCK",
@@ -778,12 +787,7 @@ export async function listSku(storeId, sku, draft = null) {
           },
         ],
       }
-    : {
-        shipToLocationAvailability: {
-          quantity: 1,
-          availabilityDistributions: [{ merchantLocationKey: loc, quantity: 1 }],
-        },
-      };
+    : shipQty;
   await ebayFetch(storeId, "PUT", `/sell/inventory/v1/inventory_item/${encodeURIComponent(sku)}`, {
     availability,
     ...condition.payload,
