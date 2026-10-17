@@ -12,7 +12,7 @@ import { policiesForLocalPickup, POLICY_NAMES } from "./ebay-policies.mjs";
 import { listSku } from "./ebay.mjs";
 import { hoursText, STORE_ADDRESS, STORE_PHONE } from "./web-order-email.mjs";
 import { composeChannelDescription, parseListingSpecs } from "./listing-copy.mjs";
-import { ebayDescription } from "./ebay-product.mjs";
+import { ebayDescription, ebayIdentifiers } from "./ebay-product.mjs";
 import { ebayItemViewUrl } from "./ebay-env.mjs";
 import { floorLog } from "./floor-log.mjs";
 import { prohibitedReason } from "./ebay-eligibility.mjs";
@@ -181,6 +181,10 @@ export async function preparePickupListingMeta(storeId, unit) {
   for (const row of filled.filled || []) {
     if (row.required && !aspects[row.name]) aspects[row.name] = ["Does not apply"];
   }
+  // Title-as-model must not ship as MPN (eBay rejects long/invalid values).
+  const ids = ebayIdentifiers(unit, aspects);
+  aspects.Brand = [ids.brand];
+  aspects.MPN = [ids.mpn];
 
   return {
     categoryId: String(categoryId),

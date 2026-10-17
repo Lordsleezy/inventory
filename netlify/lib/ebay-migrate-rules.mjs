@@ -1,6 +1,6 @@
 /** Pure migration eligibility helpers (no network / no server imports). */
 import { prohibitedReason } from "./ebay-eligibility.mjs";
-import { NOT_APPLICABLE } from "./ebay-product.mjs";
+import { NOT_APPLICABLE, looksLikeBadMpn } from "./ebay-product.mjs";
 
 export const MIGRATION_SKIP_KEYWORDS = [
   "refrigerator",
@@ -134,16 +134,6 @@ function aspectValues(value) {
   if (value == null) return [];
   const s = String(value).trim();
   return s ? [s] : [];
-}
-
-function looksLikeBadMpn(value) {
-  const v = String(value || "").trim();
-  if (!v) return true;
-  if (/^does\s+not\s+apply$/i.test(v)) return false;
-  if (v.length > 40) return true;
-  if (v.split(/\s+/).length > 4) return true;
-  if (/sealed|complete\s+set|official\s+complete|trading\s+card/i.test(v)) return true;
-  return false;
 }
 
 /**

@@ -9,6 +9,13 @@ test("draft Brand and MPN reach the Inventory API identifiers", () => {
     brand: "Colgate", mpn: "Does not apply", upc: null, upcIssue: null, validBrand: true,
   });
   assert.equal(ebayIdentifiers({}, {}).validBrand, false);
+  assert.equal(
+    ebayIdentifiers(
+      { brand: "foster grant", model: "design optics full rim metal 3 reading glasses +2.50" },
+      {},
+    ).mpn,
+    "Does not apply",
+  );
 });
 
 test("UPC-A, EAN-13, and GTIN-14 require valid check digits", () => {
