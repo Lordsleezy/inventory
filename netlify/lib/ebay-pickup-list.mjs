@@ -16,6 +16,15 @@ import { ebayDescription } from "./ebay-product.mjs";
 import { ebayItemViewUrl } from "./ebay-env.mjs";
 import { floorLog } from "./floor-log.mjs";
 import { prohibitedReason } from "./ebay-eligibility.mjs";
+import { fillAspects } from "./ebay-aspects.mjs";
+import {
+  listingMeasures,
+  refreshCategoryAspects,
+  refreshCategoryConditions,
+  resolveFloorCategory,
+  suggestCategories,
+} from "./ebay-catalog.mjs";
+import { listingConditionPayload, mapFloorCondition } from "./ebay-conditions.mjs";
 
 export const PICKUP_LIST_REQUEST_KEY = "ebay_pickup_list_request";
 
@@ -125,6 +134,61 @@ export function pickupCandidateBlocked(unit) {
   const blob = [unit.title, unit.brand, unit.model, unit.category].filter(Boolean).join(" ");
   if (BLOCKED_TITLE.test(blob)) return "blocked_category_or_title";
   return null;
+}
+
+/**
+ * Resolve eBay category + aspects + condition without requiring a Floor allowlist match.
+ * Prefers Floor mapping when present; otherwise uses eBay category suggestions.
+ */
+export async function preparePickupListingMeta(storeId, unit) {
+  const floor = resolveFloorCategory(unit.category);
+  let categoryId = floor?.ebayCategoryId || null;
+  let categoryName = floor?.name || null;
+  if (!categoryId) {
+    const query = [unit.brand, unit.model, unit.title, unit.category].filter(Boolean).join(" ");
+    const suggestions = await suggestCategories(query);
+    const picked = suggestions[0] || null;
+    if (!picked?.categoryId) {
+      throw new Error(`No eBay category suggestion for SKU ${unit.sku} (${query || "no query"})`);
+    }
+    categoryId = String(picked.categoryId);
+    categoryName = picked.categoryName || null;
+  }
+
+  const defs = await refreshCategoryAspects(categoryId);
+  const conditions = await refreshCategoryConditions(categoryId);
+  const mapped = mapFloorCondition(unit.condition, conditions);
+  const conditionPayload = listingConditionPayload(mapped);
+  if (!mapped || !conditionPayload) {
+    const allowed = (conditions || []).map((row) => `${row.name} (${row.conditionId})`).join(", ") || "none";
+    throw new Error(
+      `eBay category ${categoryName || categoryId} has no honest match for Floor grade “${unit.condition || "(blank)"}”. Allowed: ${allowed}.`,
+    );
+  }
+
+  const specs = listingMeasures(unit);
+  const filled = fillAspects(defs, unit, specs, {
+    categoryDefaults: floor?.defaults || {},
+    standalone: floor?.standalone || false,
+    categoryName,
+    title: unit.title,
+  });
+  const aspects = {};
+  for (const [name, value] of Object.entries(filled.aspects || {})) {
+    const text = Array.isArray(value) ? value[0] : String(value || "");
+    if (text) aspects[name] = [text];
+  }
+  for (const row of filled.filled || []) {
+    if (row.required && !aspects[row.name]) aspects[row.name] = ["Does not apply"];
+  }
+
+  return {
+    categoryId: String(categoryId),
+    categoryName,
+    aspects,
+    conditionPayload,
+    floorSlug: floor?.slug || null,
+  };
 }
 
 export async function queuePickupListRequest(
@@ -346,6 +410,25 @@ export async function runPickupListJob(storeId, { createdBy = "ebay-pickup-list-
       costCents: Number(unit.acquisition_cost_cents) > 0 ? unit.acquisition_cost_cents : STORE_COST_CENTS,
       feePct: storeFee,
     });
+
+    let meta;
+    try {
+      meta = await preparePickupListingMeta(storeId, unit);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      results.push({
+        sku,
+        ok: false,
+        error: message.slice(0, 500),
+        floorAskCents: unit.ask_cents,
+        ebayPriceCents: priceCents,
+      });
+      progress = { ...progress, results: [...results], updated_at: new Date().toISOString() };
+      await persistProgress(storeId, progress);
+      if (i < skus.length - 1) await sleep(paceDelay(pace));
+      continue;
+    }
+
     const draft = {
       title: titleForUnit(unit),
       description: pickupDescription(unit, hours),
@@ -357,6 +440,9 @@ export async function runPickupListJob(storeId, { createdBy = "ebay-pickup-list-
       },
       pickupOnly: true,
       bestOfferEnabled: false,
+      categoryId: meta.categoryId,
+      aspects: meta.aspects,
+      conditionPayload: meta.conditionPayload,
     };
 
     try {
