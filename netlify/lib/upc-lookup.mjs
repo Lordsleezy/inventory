@@ -88,6 +88,17 @@ export function parseUpcitemdbItem(item) {
     price_as_of: updated.length ? new Date(Math.max(...updated) * 1000).toISOString() : null,
     msrp_cents: median(listPrices),
     offer_count: offers.length,
+    // Keep merchant offers for retail audits (Walmart / Best Buy / etc.).
+    offers: offers
+      .map((o) => ({
+        merchant: clean(o.merchant) || clean(o.domain),
+        domain: clean(o.domain),
+        price: o.price,
+        list_price: o.list_price,
+        condition: clean(o.condition),
+        link: clean(o.link) || clean(o.url),
+      }))
+      .filter((o) => o.merchant || o.domain),
   };
 }
 

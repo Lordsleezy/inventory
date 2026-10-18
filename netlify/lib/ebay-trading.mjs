@@ -400,6 +400,16 @@ export function parseTradingItem(xml) {
     xmlTag(item, "BuyItNowPrice") ||
     xmlTag(item, "StartPrice") ||
     "0";
+  const profiles = xmlBlocks(item, "SellerProfiles")[0] || "";
+  const shippingServices = xmlBlocks(ship, "ShippingServiceOptions").map((block) => ({
+    service: xmlTag(block, "ShippingService"),
+    cost: xmlTag(block, "ShippingServiceCost"),
+    free: /^true$/i.test(xmlTag(block, "FreeShipping") || "") || Number(xmlTag(block, "ShippingServiceCost") || 0) === 0,
+    priority: Number(xmlTag(block, "ShippingServicePriority") || 0),
+  }));
+  const localPickup =
+    /LocalPickup|PickupInStore|ClickAndCollect|PickupOnly/i.test(item) ||
+    shippingServices.some((s) => /pickup/i.test(s.service || ""));
   return {
     itemId: xmlTag(item, "ItemID"),
     title: xmlTag(item, "Title"),
@@ -427,6 +437,11 @@ export function parseTradingItem(xml) {
     dispatchTimeMax: Number(xmlTag(item, "DispatchTimeMax") || 2),
     returnsAccepted: xmlTag(returnPol, "ReturnsAcceptedOption"),
     shippingType: xmlTag(ship, "ShippingType"),
+    shippingProfile: xmlTag(profiles, "ShippingProfileName"),
+    paymentProfile: xmlTag(profiles, "PaymentProfileName"),
+    returnProfile: xmlTag(profiles, "ReturnProfileName"),
+    shippingServices,
+    localPickup,
     viewItemUrl: xmlTag(xmlBlocks(item, "ListingDetails")[0] || "", "ViewItemURL"),
   };
 }
