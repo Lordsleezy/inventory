@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
-import { parseMail, isMarketplaceNoise, looksLikeSaleNotice, marketplaceDkimPassed, mailAuthenticatedForMarketplace } from "./marketplace-email-parse.mjs";
+import {
+  parseMail,
+  isMarketplaceNoise,
+  isMarketplacePromo,
+  looksLikeSaleNotice,
+  marketplaceDkimPassed,
+  mailAuthenticatedForMarketplace,
+} from "./marketplace-email-parse.mjs";
 
 assert.equal(looksLikeSaleNotice("You've made a sale: Lasko Fan", "You've made a sale! $25.00"), true);
 assert.equal(
@@ -146,6 +153,23 @@ assert.match(depopReal.item_title, /@kwfastkat1988|Depop sale/i);
 
 assert.equal(looksLikeSaleNotice("We've removed your listing", "This listing was sold then removed"), false);
 assert.equal(looksLikeSaleNotice("You still need to ship", "Please ship your sold item"), false);
+
+// Mercari marketing tip that previously created a false $0 Live Sales row.
+const mercariPromo =
+  "It’s time to turn “just browsing” into “just sold” 💰";
+assert.equal(isMarketplacePromo(mercariPromo, "Tips to sell faster on Mercari"), true);
+assert.equal(looksLikeSaleNotice(mercariPromo, "Tips to sell faster on Mercari"), false);
+assert.equal(isMarketplaceNoise(mercariPromo, "Tips to sell faster on Mercari"), true);
+assert.equal(
+  parseMail({
+    subject: mercariPromo,
+    text: "Just browsing tips. Sign in to Mercari.",
+    from: { address: "no-reply@mercari.com" },
+  }).sale,
+  false,
+);
+// Real Mercari sold subject still works.
+assert.equal(looksLikeSaleNotice("SOLD on Mercari – $58 (11412)", "You've made a sale!\nSold for $58.00"), true);
 
 // Title cleanup for shipping-label subjects
 assert.match(depopReal.item_title, /Depop sale for @kwfastkat1988/i);

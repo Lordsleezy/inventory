@@ -89,6 +89,25 @@ const STRONG_SALE =
   /you(?:'ve| have) made a sale|shipping label and sale confirmation|sale confirmation|your item has sold|item sold(?:\s+for)?|payment received/i;
 
 /**
+ * Mercari/Depop marketing tips that mention "sold" / "just sold" but are not sale notices.
+ * Real failure mode: subject "It’s time to turn “just browsing” into “just sold”"
+ * created a $0 Orders row that was later Link-SKU'd into Live Sales.
+ */
+export function isMarketplacePromo(subject, text) {
+  const subj = String(subject || '');
+  const combined = `${subj}\n${text || ''}`;
+  if (/just browsing/i.test(subj)) return true;
+  if (/it(?:['’]s| is) time to turn\b/i.test(subj)) return true;
+  if (/turn .{0,60}into .{0,40}just sold/i.test(subj)) return true;
+  if (/\b(?:tips?|tricks?|ideas?) to (?:sell|boost)\b/i.test(subj)) return true;
+  if (/\bboost (?:your )?(?:listing|sales|visibility)\b/i.test(subj)) return true;
+  if (/\bget (?:more|faster) sales\b/i.test(subj)) return true;
+  // Body-only promo banners are fine if the subject is a real sale confirmation.
+  if (!STRONG_SALE.test(subj) && /just browsing.{0,80}just sold/i.test(combined)) return true;
+  return false;
+}
+
+/**
  * Noise we must not treat as a sale (offers, reminders, auth).
  * Auth / "sign in" / "verify your" wording is subject-only — real Depop/Mercari sale
  * emails put those phrases in footers and must still ingest.
@@ -97,6 +116,8 @@ export function isMarketplaceNoise(subject, text) {
   const subj = String(subject || '');
   const body = String(text || '');
   const combined = `${subj}\n${body}`;
+
+  if (isMarketplacePromo(subject, text)) return true;
 
   if (/security alert|password reset|verify your (?:email|account)|confirm your email|new login|sign[\s-]?in attempt/i.test(subj)) {
     return true;
@@ -134,6 +155,8 @@ export function looksLikeSaleNotice(subject, text) {
   }
   if (/^(?:login|sign[\s-]?in)\b/i.test(subj.trim())) return false;
   if (/we(?:'ve| have) removed your listing|you still need to ship/i.test(subj)) return false;
+  // Promo tips that say "just sold" must never ingest as sales.
+  if (isMarketplacePromo(subject, text)) return false;
   if (!SALE_SIGNAL.test(s)) return false;
   if (isMarketplaceNoise(subject, text)) {
     // A clear sale confirmation wins over a subject that looks like a ship reminder.
@@ -528,6 +551,25 @@ export async function ingestMarketplaceMail(sb, { store, channels, parsed, raw }
     });
     if (error) throw error;
     return { state: 'ignored' };
+  }
+
+  // Incomplete / promo leftovers: a "sale" with neither price nor order id must not
+  // create a $0 Orders row that can be Link-SKU'd into Live Sales.
+  if (!p.price && !p.order_number && !STRONG_SALE.test(`${parsed.subject || ''}\n${p.text || ''}`)) {
+    const { error } = await sb.from('marketplace_email_sales').insert({
+      store_id: store.id,
+      message_id: msg,
+      marketplace: p.marketplace,
+      subject: parsed.subject,
+      state: 'ignored',
+      reason: 'Sale notice missing price and order number',
+      sku: p.sku,
+      item_title: p.item_title,
+      order_number: p.order_number,
+      sale_price_cents: p.price,
+    });
+    if (error) throw error;
+    return { state: 'ignored', reason: 'incomplete_sale_notice' };
   }
 
   let reason = 'SKU or sale price was not found with confidence';
