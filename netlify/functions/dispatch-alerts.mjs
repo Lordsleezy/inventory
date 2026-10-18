@@ -58,11 +58,16 @@ function dollars(cents) {
 }
 
 /** `SOLD on Depop – Title $69 (11449) – delist Mercari` (delist part only when pull_from is present). */
+function soldOn(payload) {
+  const name = channelName(payload?.channel);
+  return payload?.local_pickup ? `${name} LOCAL PICKUP` : name;
+}
+
 function saleSubject(sku, title, payload) {
   const pull = pullList(payload);
   const price = dollars(payload?.price_cents);
   const what = [shortTitle(title), price].filter(Boolean).join(" ");
-  let subject = `SOLD on ${channelName(payload?.channel)} – ${what ? `${what} ` : ""}(${sku})`;
+  let subject = `SOLD on ${soldOn(payload)} – ${what ? `${what} ` : ""}(${sku})`;
   if (pull.length) subject += ` – delist ${pull.join(", ")}`;
   return subject;
 }
@@ -71,7 +76,7 @@ function saleText(sku, title, payload) {
   const pull = pullList(payload);
   const price = dollars(payload?.price_cents);
   const lines = [
-    `SKU ${sku}${title ? ` – ${title}` : ""} sold on ${channelName(payload?.channel)}${price ? ` for ${price}` : ""}.`,
+    `SKU ${sku}${title ? ` – ${title}` : ""} sold on ${soldOn(payload)}${price ? ` for ${price}` : ""}.`,
   ];
   if (payload?.receipt_no) lines.push(`Receipt: ${payload.receipt_no}`);
   lines.push(pull.length ? `Pull it from: ${pull.join(", ")}.` : "Nothing else to pull down.");

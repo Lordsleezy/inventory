@@ -1174,7 +1174,7 @@ export async function ingestEbayOrder(storeId, order) {
         p_price_cents: itemCents,
         p_payment_method: "ebay",
         p_payment_id: `ebay:${orderId}`,
-        p_note: isPickup ? "eBay local pickup order" : "eBay order",
+        p_note: isPickup ? "eBay LOCAL PICKUP" : "eBay order",
         p_tax_cents: 0,
         p_approval_id: null,
       });
@@ -1236,6 +1236,14 @@ export async function ingestEbayOrder(storeId, order) {
 
   const paidAt = new Date();
   const webStatus = matchStatus === "already_sold" ? "canceled" : "paid";
+  let pickupDeadline = null;
+  if (isPickup && webStatus === "paid") {
+    const { data: deadline } = await sb.rpc("pickup_deadline_from", {
+      p_store: storeId,
+      p_from: paidAt.toISOString(),
+    });
+    pickupDeadline = deadline || new Date(paidAt.getTime() + holdHours * 3600 * 1000).toISOString();
+  }
   const { error: orderError } = await sb.from("web_orders").insert({
     store_id: storeId,
     sku,
@@ -1245,10 +1253,7 @@ export async function ingestEbayOrder(storeId, order) {
     fulfillment: isPickup ? "pickup" : "ship",
     order_no: String(orderId),
     paid_at: paidAt.toISOString(),
-    pickup_deadline:
-      isPickup && webStatus === "paid"
-        ? new Date(paidAt.getTime() + holdHours * 3600 * 1000).toISOString()
-        : null,
+    pickup_deadline: pickupDeadline,
     buyer_name: ship.name || order?.buyer?.username || null,
     buyer_email: ship.email || null,
     buyer_phone: ship.phone || null,
@@ -1277,6 +1282,25 @@ export async function ingestEbayOrder(storeId, order) {
       : {}),
   });
   if (orderError) console.log("ebay_packing_order", orderError.message);
+
+  if (isPickup && matchStatus === "matched" && rawSku) {
+    const { data: alert } = await sb
+      .from("alert_outbox")
+      .select("id,payload")
+      .eq("store_id", storeId)
+      .eq("sku", rawSku)
+      .eq("kind", "sale_delist")
+      .is("sent_at", null)
+      .order("id", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (alert?.id) {
+      await sb
+        .from("alert_outbox")
+        .update({ payload: { ...(alert.payload || {}), channel: "ebay", local_pickup: true } })
+        .eq("id", alert.id);
+    }
+  }
 
   if (matchStatus === "matched" && rawSku) {
     await sb.from("ebay_drafts").delete().eq("store_id", storeId).eq("sku", rawSku);
