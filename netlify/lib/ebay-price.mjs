@@ -92,6 +92,9 @@ export function ebayOrderIsLocalPickup(order) {
   if (!steps.length) return false;
   for (const step of steps) {
     const type = String(step?.fulfillmentInstructionsType || "").toUpperCase();
+    const service = String(step?.shippingStep?.shippingServiceCode || "");
+    // Ship + pickup policies offer a $0 "Pickup" service. Buyer choice is that code.
+    if (/^pickup$/i.test(service)) return true;
     if (/PICK.?UP|PREPARE_FOR_PICKUP|SELLER_DEFINED_PICKUP/i.test(type)) return true;
     if (step?.pickupStep) return true;
     if (step?.shippingStep && !step?.pickupStep) return false;

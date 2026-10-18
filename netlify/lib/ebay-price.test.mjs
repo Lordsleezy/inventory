@@ -82,6 +82,22 @@ test("ebayOrderIsLocalPickup detects pickupStep / pickup instruction types", () 
   );
   assert.equal(
     ebayOrderIsLocalPickup({
+      fulfillmentStartInstructions: [
+        { fulfillmentInstructionsType: "SHIP_TO", shippingStep: { shippingServiceCode: "Pickup" } },
+      ],
+    }),
+    true,
+  );
+  assert.equal(
+    ebayOrderIsLocalPickup({
+      fulfillmentStartInstructions: [
+        { fulfillmentInstructionsType: "SHIP_TO", shippingStep: { shippingServiceCode: "USPSPriority" } },
+      ],
+    }),
+    false,
+  );
+  assert.equal(
+    ebayOrderIsLocalPickup({
       fulfillmentStartInstructions: [{ fulfillmentInstructionsType: "FULFILLED", shippingStep: { shipTo: {} } }],
     }),
     false,
