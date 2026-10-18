@@ -8,6 +8,7 @@ import { dispatchQueuedMigrationRequests } from "../lib/ebay-migrate.mjs";
 import { dispatchQueuedPickupListRequests } from "../lib/ebay-pickup-list.mjs";
 import { dispatchQueuedEbayListingAudits } from "../lib/ebay-listing-audit.mjs";
 import { dispatchQueuedFreeShipBumps } from "../lib/ebay-free-ship-bump.mjs";
+import { dispatchQueuedPhotoDayLists } from "../lib/ebay-photo-day-list.mjs";
 import { wrapHandler, asNetlifyFunction } from "../lib/floor-log.mjs";
 import { ebayDisabled } from "../lib/ebay-env.mjs";
 
@@ -19,12 +20,14 @@ async function handle(event) {
     const pickupListDispatch = await dispatchQueuedPickupListRequests();
     const listingAuditDispatch = await dispatchQueuedEbayListingAudits();
     const freeShipBumpDispatch = await dispatchQueuedFreeShipBumps();
+    const photoDayListDispatch = await dispatchQueuedPhotoDayLists();
     return json(200, {
       ok: true,
       migrationDispatch,
       pickupListDispatch,
       listingAuditDispatch,
       freeShipBumpDispatch,
+      photoDayListDispatch,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

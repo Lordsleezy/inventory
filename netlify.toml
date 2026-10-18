@@ -62,6 +62,10 @@
 [functions."ebay-free-ship-bump-background"]
   timeout = 900
 
+# List today's first-photo units (free-ship bake-in + 10% fees, else calculated).
+[functions."ebay-photo-day-list-background"]
+  timeout = 900
+
 # Local-pickup first-sales batch (paced listings; up to ~15 minutes).
 [functions."ebay-pickup-list-background"]
   timeout = 900

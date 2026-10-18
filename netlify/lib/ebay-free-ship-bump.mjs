@@ -164,7 +164,7 @@ function policyId(row, kind) {
   return row?.[`${kind}PolicyId`] || row?.policyId || row?.id || null;
 }
 
-async function ensureFreeShippingPolicy(account) {
+export async function ensureFreeShippingPolicy(account) {
   const market = marketplaceIdFromEnv();
   const json = await ebayFetchAccount(
     account,
