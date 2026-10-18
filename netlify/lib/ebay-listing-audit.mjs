@@ -158,52 +158,67 @@ async function ensureUnitsForSkus(sb, storeId, bySku, skus) {
   }
 }
 
-async function quoteShippo(sb, storeId, shipFrom, pkg) {
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+async function quoteShippo(sb, storeId, shipFrom, pkg, { retries = 3 } = {}) {
   if (!shippoMode()) return { status: "no_shippo_key", estimate_cents: null, detail: null };
   if (!pkg?.ready) return { status: "missing_dims", estimate_cents: null, detail: null };
-  try {
-    const carriers = await allowedCarriers(sb, storeId);
-    const live = await liveRates({
-      shipFrom: {
-        name: shipFrom.name || "Open Box Industries",
-        street1: shipFrom.street1 || shipFrom.line1,
-        street2: shipFrom.street2 || "",
-        city: shipFrom.city,
-        state: shipFrom.state || shipFrom.region,
-        zip: shipFrom.zip || shipFrom.postal,
-        country: shipFrom.country || "US",
-        phone: shipFrom.phone || "",
-        email: shipFrom.email || "",
-      },
-      to: addressTo(farZoneAddress(MID_COUNTRY_ZIP)),
-      pkg: {
-        length_in: pkg.length_in,
-        width_in: pkg.width_in,
-        height_in: pkg.height_in,
-        weight_lb: pkg.weight_lb,
-      },
-      carriers,
-    });
-    const best = live.rates?.[0] || live.all?.[0] || null;
-    if (!best?.amount_cents) {
+  const from = {
+    name: shipFrom.name || "Open Box Industries",
+    street1: shipFrom.street1 || shipFrom.line1,
+    street2: shipFrom.street2 || "",
+    city: shipFrom.city,
+    state: shipFrom.state || shipFrom.region,
+    zip: shipFrom.zip || shipFrom.postal,
+    country: shipFrom.country || "US",
+    phone: shipFrom.phone || "",
+    email: shipFrom.email || "",
+  };
+  const parcel = {
+    length_in: pkg.length_in,
+    width_in: pkg.width_in,
+    height_in: pkg.height_in,
+    weight_lb: pkg.weight_lb,
+  };
+  let lastErr = null;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      if (attempt) await sleep(800 * attempt);
+      const carriers = await allowedCarriers(sb, storeId);
+      const live = await liveRates({
+        shipFrom: from,
+        to: addressTo(farZoneAddress(MID_COUNTRY_ZIP)),
+        pkg: parcel,
+        carriers,
+      });
+      const best = live.rates?.[0] || live.all?.[0] || null;
+      if (!best?.amount_cents) {
+        return {
+          status: "no_rate",
+          estimate_cents: null,
+          detail: (live.messages || []).join("; ").slice(0, 200) || null,
+        };
+      }
       return {
-        status: "no_rate",
-        estimate_cents: null,
-        detail: (live.messages || []).join("; ").slice(0, 200) || null,
+        status: "ok",
+        estimate_cents: best.amount_cents,
+        detail: `${best.carrier} ${best.service}${best.days != null ? ` · ~${best.days}d` : ""} → ${MID_COUNTRY_ZIP}`,
       };
+    } catch (err) {
+      lastErr = err;
+      const msg = String(err?.message || err);
+      if (!/429|rate/i.test(msg) || attempt === retries) {
+        return { status: "error", estimate_cents: null, detail: msg.slice(0, 200) };
+      }
     }
-    return {
-      status: "ok",
-      estimate_cents: best.amount_cents,
-      detail: `${best.carrier} ${best.service}${best.days != null ? ` · ~${best.days}d` : ""} → ${MID_COUNTRY_ZIP}`,
-    };
-  } catch (err) {
-    return {
-      status: "error",
-      estimate_cents: null,
-      detail: String(err?.message || err).slice(0, 200),
-    };
   }
+  return {
+    status: "error",
+    estimate_cents: null,
+    detail: String(lastErr?.message || lastErr || "shippo_failed").slice(0, 200),
+  };
 }
 
 function retailFromUnit(unit) {
@@ -533,7 +548,8 @@ export async function runEbayListingAudit(storeId = STORE_DEFAULT, { onProgress 
 
   await progress({ phase: "enrich_items", total: live.length, done: 0 });
   let done = 0;
-  const enriched = await mapPool(live, 4, async (summary) => {
+  // Keep concurrency low so Shippo live-rate calls do not 429 mid-audit.
+  const enriched = await mapPool(live, 2, async (summary) => {
     let detail = null;
     try {
       detail = await getTradingItem(token, summary.itemId);
@@ -562,6 +578,8 @@ export async function runEbayListingAudit(storeId = STORE_DEFAULT, { onProgress 
       shippo = { status: "flat", estimate_cents: ship.flat_shipping_cents, detail: "listing flat rate" };
     } else if (ship.shipping_mode === "calculated" || /calculated/i.test(ship.shipping_profile || "")) {
       ship.shipping_mode = "calculated";
+      // Pace Shippo: one quote every ~350ms per worker (2 workers ≈ ~6/sec max).
+      await sleep(350);
       shippo = await quoteShippo(sb, storeId, shipFrom, pkg);
       if (shippo.status === "ok") shippingDisplay = `Calculated est. ${MONEY(shippo.estimate_cents)} (${MID_COUNTRY_ZIP})`;
       else if (shippo.status === "missing_dims") shippingDisplay = "Calculated — dims/weight missing in Floor (no estimate)";
