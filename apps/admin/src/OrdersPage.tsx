@@ -197,6 +197,11 @@ export function OrdersPage({ client, accessToken, money, stamp, rules, cfg, comm
     } catch {
       /* suggestions optional */
     }
+    if (!(Number(o.item_cents) > 0)) {
+      setError('This order has no sale price, so it cannot be linked to a Floor SKU. It is probably a promo/reminder email — ignore it or wait for the real sale confirmation.');
+      setBusy(null);
+      return;
+    }
     const sku = window.prompt(
       `Needs SKU match — link this ${channelLabel(o.channel)} order to a Floor SKU.\n\n` +
         `${o.marketplace_title || o.title || 'Sale'} · ${money(o.item_cents)}\n` +
@@ -211,7 +216,7 @@ export function OrdersPage({ client, accessToken, money, stamp, rules, cfg, comm
       return;
     }
     const { error: e } = await client.rpc('portal_match_web_order', { p_order: o.id, p_sku: sku.trim() });
-    if (e) setError(e.message);
+    if (e) setError(e.message === 'sale_price_required' ? 'Cannot link a $0 order. Use a real sale confirmation with a price.' : e.message);
     else await load();
     setBusy(null);
   }
