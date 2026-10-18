@@ -7,6 +7,7 @@ import { json, corsHeaders } from "../lib/server.mjs";
 import { dispatchQueuedMigrationRequests } from "../lib/ebay-migrate.mjs";
 import { dispatchQueuedPickupListRequests } from "../lib/ebay-pickup-list.mjs";
 import { dispatchQueuedEbayListingAudits } from "../lib/ebay-listing-audit.mjs";
+import { dispatchQueuedFreeShipBumps } from "../lib/ebay-free-ship-bump.mjs";
 import { wrapHandler, asNetlifyFunction } from "../lib/floor-log.mjs";
 import { ebayDisabled } from "../lib/ebay-env.mjs";
 
@@ -17,7 +18,14 @@ async function handle(event) {
     const migrationDispatch = await dispatchQueuedMigrationRequests();
     const pickupListDispatch = await dispatchQueuedPickupListRequests();
     const listingAuditDispatch = await dispatchQueuedEbayListingAudits();
-    return json(200, { ok: true, migrationDispatch, pickupListDispatch, listingAuditDispatch });
+    const freeShipBumpDispatch = await dispatchQueuedFreeShipBumps();
+    return json(200, {
+      ok: true,
+      migrationDispatch,
+      pickupListDispatch,
+      listingAuditDispatch,
+      freeShipBumpDispatch,
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return json(500, { error: message });

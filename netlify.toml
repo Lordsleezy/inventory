@@ -58,6 +58,10 @@
 [functions."ebay-listing-audit-background"]
   timeout = 900
 
+# +$10 / free shipping bump for listings whose audit ship estimate was ≤ $10.
+[functions."ebay-free-ship-bump-background"]
+  timeout = 900
+
 # Local-pickup first-sales batch (paced listings; up to ~15 minutes).
 [functions."ebay-pickup-list-background"]
   timeout = 900

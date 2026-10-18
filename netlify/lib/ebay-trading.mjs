@@ -487,6 +487,41 @@ export async function reviseFixedPriceStandards(token, change) {
   return { itemId: String(change.itemId), ack: xmlTag(xml, "Ack"), xml };
 }
 
+/**
+ * Revise StartPrice and/or business-policy shipping profile on a live FixedPrice item.
+ * When fulfillmentPolicyId is set, payment + return profile IDs should also be provided
+ * (eBay expects the SellerProfiles block as a set).
+ */
+export async function reviseFixedPricePriceAndShipping(token, change) {
+  const itemId = String(change.itemId || "").trim();
+  if (!/^\d+$/.test(itemId)) throw new Error("revise price/shipping needs a numeric item id");
+  const price = change.price != null ? Number(change.price) : null;
+  const parts = [`<ItemID>${xmlEsc(itemId)}</ItemID>`];
+  if (Number.isFinite(price) && price > 0) {
+    parts.push(`<StartPrice>${xmlEsc(price.toFixed(2))}</StartPrice>`);
+  }
+  if (change.fulfillmentPolicyId && change.paymentPolicyId && change.returnPolicyId) {
+    parts.push(`<SellerProfiles>
+      <SellerPaymentProfile><PaymentProfileID>${xmlEsc(change.paymentPolicyId)}</PaymentProfileID></SellerPaymentProfile>
+      <SellerReturnProfile><ReturnProfileID>${xmlEsc(change.returnPolicyId)}</ReturnProfileID></SellerReturnProfile>
+      <SellerShippingProfile><ShippingProfileID>${xmlEsc(change.fulfillmentPolicyId)}</ShippingProfileID></SellerShippingProfile>
+    </SellerProfiles>`);
+  } else if (change.fulfillmentPolicyId) {
+    parts.push(`<SellerProfiles>
+      <SellerShippingProfile><ShippingProfileID>${xmlEsc(change.fulfillmentPolicyId)}</ShippingProfileID></SellerShippingProfile>
+    </SellerProfiles>`);
+  }
+  const xml = await tradingCall(
+    token,
+    "ReviseFixedPriceItem",
+    `<WarningLevel>High</WarningLevel>
+  <Item>
+    ${parts.join("\n    ")}
+  </Item>`,
+  );
+  return { itemId, ack: xmlTag(xml, "Ack"), fees: xmlTag(xml, "Fee"), xml };
+}
+
 export async function uploadSiteHostedPicture(token, externalUrl) {
   const xml = await tradingCall(
     token,
