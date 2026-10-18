@@ -27,6 +27,7 @@ export { ebayOrderIsLocalPickup };
 import {
   compactShippingCatalog,
   endTradingItem,
+  ensureListingStoreCategories,
   getSellerOrders,
   getSellerUsername,
   getShippingServiceDetails,
@@ -738,6 +739,27 @@ export async function listSku(storeId, sku, draft = null) {
   const pkg = draft?.package || packageSize(unit);
   const policies = draft?.policies || (await ensurePolicies(storeId, fetchHint));
   const priceCents = draft?.priceCents ?? unit.ask_cents;
+  if (String(selling.username || "").toLowerCase() === "pgg124-5") {
+    throw new Error("Refusing to list on the personal eBay account.");
+  }
+  let storeCategoryNamesForOffer;
+  try {
+    const token = await userTokenForAccount(selling);
+    const resolved = await ensureListingStoreCategories(token, {
+      title: copy.title,
+      category: unit.category,
+      priceCents,
+    });
+    storeCategoryNamesForOffer = resolved.names;
+  } catch (err) {
+    await floorLog({
+      level: "warn",
+      storeId,
+      sku,
+      event: "ebay.store_category_skip",
+      message: err instanceof Error ? err.message : String(err),
+    });
+  }
   const identifiers = ebayIdentifiers(unit, aspects);
   if (!identifiers.validBrand) throw new Error("Brand needed before pushing to eBay.");
   if (identifiers.upcIssue) throw new Error(`UPC from the scan looks wrong (${identifiers.upcIssue}); check the barcode or leave blank.`);
@@ -833,6 +855,7 @@ export async function listSku(storeId, sku, draft = null) {
     merchantLocationKey: loc,
     listingDuration: "GTC",
     pricingSummary: { price: { value: money(priceCents), currency: "USD" } },
+    ...(storeCategoryNamesForOffer?.length ? { storeCategoryNames: storeCategoryNamesForOffer } : {}),
     ...(draft && Object.prototype.hasOwnProperty.call(draft, "bestOfferEnabled")
       ? { bestOfferTerms: { bestOfferEnabled: draft.bestOfferEnabled === true } }
       : {}),

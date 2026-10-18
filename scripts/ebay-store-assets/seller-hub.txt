@@ -1,0 +1,20 @@
+Seller Hub clicks. Signed in as ikonikdeals2026.
+The API can create categories and assign listings. It cannot set the store name, logo, billboard, or About text on this account.
+
+1. Seller Hub → Store → Edit store.
+2. Store name: Open Box Industries
+3. Logo: upload scripts/ebay-store-assets/logo-300.png (300x300).
+   If the editor rejects it, use billboard-1200x270.png only for the banner and skip the logo.
+4. Billboard: upload billboard-1280x290.png.
+   If eBay asks for 1200x270, use billboard-1200x270.png instead.
+5. About: paste the text in about.txt. Do not add a website, phone, email, or social link.
+6. Featured listings, if the editor has that module: pin these, in order.
+   - 24 in 1 trimmer (item 820244274277)
+   - HOTO Flexi Cordless Spin Scrubber (item 820244222666)
+   - Fortessa Arezzo flatware set (item 820244209862)
+   - glenhaven runner rug (item 820244262159)
+   - 15in iron skillet (item 820244223051)
+   - Artic Zone Titan 40 Can cooler (item 820244219957)
+   - 5000 lumen lantern (item 820244218955)
+7. Optional square banner: marketing-640.png. Link the click to the Under $25 store category, not to a website.
+8. Save. Do not turn on a coupon, markdown, or volume discount.

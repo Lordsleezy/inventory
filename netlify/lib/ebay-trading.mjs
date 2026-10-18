@@ -1,4 +1,5 @@
 import { ebayHosts } from "./ebay-env.mjs";
+import { classifyEbayStoreCategory, storeCategoryNames } from "./ebay-store-categories.mjs";
 
 export function xmlEsc(value) {
   return String(value ?? "")
@@ -430,6 +431,29 @@ export function parseTradingItem(xml) {
   };
 }
 
+export async function getItemStorefront(token, itemId) {
+  const xml = await tradingCall(
+    token,
+    "GetItem",
+    `<ItemID>${xmlEsc(itemId)}</ItemID>
+<OutputSelector>Item.ItemID</OutputSelector>
+<OutputSelector>Item.Title</OutputSelector>
+<OutputSelector>Item.SellingStatus.CurrentPrice</OutputSelector>
+<OutputSelector>Item.Storefront</OutputSelector>`,
+  );
+  const store = xmlBlocks(xml, "Storefront")[0] || "";
+  const selling = xmlBlocks(xml, "SellingStatus")[0] || "";
+  return {
+    itemId: xmlTag(xml, "ItemID"),
+    title: xmlTag(xml, "Title"),
+    price: xmlTag(selling, "CurrentPrice") || "",
+    storeCategoryId: xmlTag(store, "StoreCategoryID"),
+    storeCategory2Id: xmlTag(store, "StoreCategory2ID"),
+    storeCategoryName: xmlTag(store, "StoreCategoryName"),
+    storeCategory2Name: xmlTag(store, "StoreCategory2Name"),
+  };
+}
+
 export async function getTradingItem(token, itemId) {
   const xml = await tradingCall(
     token,
@@ -449,6 +473,182 @@ export async function endTradingItem(token, itemId, reason = "NotAvailable") {
 <EndingReason>${xmlEsc(reason)}</EndingReason>`,
   );
   return { itemId: String(itemId), endTime: xmlTag(xml, "EndTime"), xml };
+}
+
+let storeCategoryCache = { at: 0, map: null };
+
+function decodeXml(value) {
+  return String(value || "")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+}
+
+function parseStoreCategoryMap(xml) {
+  const sliceMatch = String(xml).match(/<CustomCategories\b[^>]*>([\s\S]*)<\/CustomCategories>/i);
+  const slice = sliceMatch ? sliceMatch[1] : "";
+  const map = new Map();
+  const stack = [];
+  const re = /<(\/?)CustomCategory\b[^>]*>|<Name>([\s\S]*?)<\/Name>|<CategoryID>([\s\S]*?)<\/CategoryID>/gi;
+  let current = null;
+  let match;
+  const remember = (node) => {
+    if (node?.name && node?.id) map.set(decodeXml(node.name), node.id);
+  };
+  while ((match = re.exec(slice))) {
+    if (match[1] === "/") {
+      remember(current);
+      stack.pop();
+      current = stack[stack.length - 1] || null;
+      continue;
+    }
+    if (match[0].startsWith("<CustomCategory")) {
+      current = { name: "", id: "" };
+      stack.push(current);
+      continue;
+    }
+    if (!current) continue;
+    if (match[2] != null && !current.name) current.name = match[2].trim();
+    else if (match[3] != null && !current.id) current.id = match[3].trim();
+    remember(current);
+  }
+  return map;
+}
+
+export async function getStoreCategoryMap(token, { force = false } = {}) {
+  if (!force && storeCategoryCache.map && Date.now() - storeCategoryCache.at < 10 * 60_000) {
+    return storeCategoryCache.map;
+  }
+  const xml = await tradingCall(token, "GetStore", "<CategoryStructureOnly>true</CategoryStructureOnly><LevelLimit>3</LevelLimit>");
+  const map = parseStoreCategoryMap(xml);
+  storeCategoryCache = { at: Date.now(), map };
+  return map;
+}
+
+async function ensureStoreCategoryIds(token, names) {
+  let map = await getStoreCategoryMap(token);
+  const missing = names.filter((name) => name && !map.has(name));
+  if (!missing.length) return map;
+  const blocks = missing
+    .map((name) => `<CustomCategory><Name>${xmlEsc(name)}</Name></CustomCategory>`)
+    .join("");
+  await tradingCall(token, "SetStoreCategories", `<Action>Add</Action><StoreCategories>${blocks}</StoreCategories>`);
+  return getStoreCategoryMap(token, { force: true });
+}
+
+/**
+ * Make sure the department (and Under $25, when the price qualifies) exists,
+ * then return the names and store category IDs. Never throws for a missing
+ * department — callers skip the storefront rather than block a listing.
+ */
+export async function ensureListingStoreCategories(token, input) {
+  const classified = classifyEbayStoreCategory(input);
+  const names = storeCategoryNames(classified);
+  if (!names.length) return { names: [], ids: [], classified };
+  const map = await ensureStoreCategoryIds(token, names);
+  const resolved = names
+    .map((name) => ({ name, id: map.get(name) }))
+    .filter((row) => row.id && row.id !== "1");
+  return { names: resolved.map((row) => row.name), ids: resolved.map((row) => row.id), classified };
+}
+
+export function invalidateStoreCategoryCache() {
+  storeCategoryCache = { at: 0, map: null };
+}
+
+export async function setStoreCategories(token, action, categories) {
+  const allowed = new Set(["Add", "Delete", "Rename", "Move"]);
+  if (!allowed.has(action)) throw new Error(`unsupported store category action ${action}`);
+  const blocks = (categories || []).map((cat) => {
+    const id = cat.id ? `<CategoryID>${xmlEsc(cat.id)}</CategoryID>` : "";
+    const name = cat.name ? `<Name>${xmlEsc(cat.name)}</Name>` : "";
+    const order = cat.order ? `<Order>${xmlEsc(cat.order)}</Order>` : "";
+    return `<CustomCategory>${id}${name}${order}</CustomCategory>`;
+  }).join("");
+  const xml = await tradingCall(
+    token,
+    "SetStoreCategories",
+    `<Action>${action}</Action><StoreCategories>${blocks}</StoreCategories>`,
+  );
+  invalidateStoreCategoryCache();
+  return xml;
+}
+
+/** Change only the store categories on a live fixed-price listing. Does not send price, title, photos, quantity, or shipping. */
+export async function reviseItemStoreCategories(token, itemId, categoryId, category2Id = "0") {
+  const id = String(itemId || "").trim();
+  const primary = String(categoryId || "").trim();
+  if (!/^\d+$/.test(id) || !/^\d+$/.test(primary)) throw new Error("store category revise needs a numeric item id and category id");
+  const second = /^\d+$/.test(String(category2Id || "")) ? String(category2Id) : "0";
+  return tradingCall(
+    token,
+    "ReviseFixedPriceItem",
+    `<Item>
+      <ItemID>${xmlEsc(id)}</ItemID>
+      <Storefront>
+        <StoreCategoryID>${xmlEsc(primary)}</StoreCategoryID>
+        <StoreCategory2ID>${xmlEsc(second)}</StoreCategory2ID>
+      </Storefront>
+    </Item>`,
+  );
+}
+
+export async function setEbayStoreProfile(token, { name, description, logoUrl } = {}) {
+  const parts = [];
+  if (name) parts.push(`<Name>${xmlEsc(name)}</Name>`);
+  if (description) parts.push(`<Description><![CDATA[${String(description).replace(/\]\]>/g, "")}]]></Description>`);
+  if (logoUrl) parts.push(`<Logo><URL>${xmlEsc(logoUrl)}</URL></Logo>`);
+  if (!parts.length) throw new Error("setEbayStoreProfile needs a name, description, or logo");
+  return tradingCall(token, "SetStore", `<Store>${parts.join("")}</Store>`);
+}
+
+export async function uploadEbayPicture(token, { filename, bytes, pictureName }) {
+  const { api } = ebayHosts(process.env.EBAY_ENV);
+  const boundary = `ebaypic${Date.now()}`;
+  const xml = `<?xml version="1.0" encoding="utf-8"?>
+<UploadSiteHostedPicturesRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <ErrorLanguage>en_US</ErrorLanguage>
+  <PictureName>${xmlEsc(pictureName || filename || "store-image")}</PictureName>
+  <PictureSet>Supersize</PictureSet>
+</UploadSiteHostedPicturesRequest>`;
+  const head = Buffer.from(
+    `--${boundary}\r\nContent-Disposition: form-data; name="XML Payload"\r\nContent-Type: text/xml; charset=utf-8\r\n\r\n${xml}\r\n--${boundary}\r\nContent-Disposition: form-data; name="${pictureName || "image"}"; filename="${filename || "image.png"}"\r\nContent-Type: image/png\r\n\r\n`,
+  );
+  const tail = Buffer.from(`\r\n--${boundary}--\r\n`);
+  const body = Buffer.concat([head, Buffer.from(bytes), tail]);
+  const res = await fetch(`${api}/ws/api.dll`, {
+    method: "POST",
+    headers: {
+      "Content-Type": `multipart/form-data; boundary=${boundary}`,
+      "X-EBAY-API-COMPATIBILITY-LEVEL": "1315",
+      "X-EBAY-API-CALL-NAME": "UploadSiteHostedPictures",
+      "X-EBAY-API-SITEID": "0",
+      "X-EBAY-API-IAF-TOKEN": token,
+    },
+    body,
+  });
+  const text = await res.text();
+  const ack = xmlTag(text, "Ack");
+  if (!/success|warning/i.test(ack)) {
+    throw new Error(xmlTag(text, "LongMessage") || xmlTag(text, "ShortMessage") || text.slice(0, 400));
+  }
+  return xmlTag(text, "FullURL") || xmlTag(text, "PictureURL") || "";
+}
+
+export async function setEbayStoreCustomPage(token, { name, content, order = 1 }) {
+  return tradingCall(
+    token,
+    "SetStoreCustomPage",
+    `<CustomPage>
+      <Name>${xmlEsc(name)}</Name>
+      <Content><![CDATA[${String(content || "").replace(/\]\]>/g, "")}]]></Content>
+      <Status>Active</Status>
+      <LeftNav>true</LeftNav>
+      <Order>${xmlEsc(order)}</Order>
+    </CustomPage>`,
+  );
 }
 
 /**
@@ -509,6 +709,23 @@ export async function addFixedPriceItem(token, item) {
       <WeightMinor unit="oz">${xmlEsc(minorOut)}</WeightMinor>
       <ShippingPackage>PackageThickEnvelope</ShippingPackage>
     </ShippingPackageDetails>`;
+  let storefrontXml = "";
+  if (item.storeCategory !== false && !item.storeCategoryId) {
+    try {
+      const resolved = await ensureListingStoreCategories(token, {
+        title: item.title,
+        category: item.floorCategory || "",
+        priceCents: Math.round(Number(item.price) * 100),
+      });
+      if (resolved.ids[0]) {
+        storefrontXml = `<Storefront><StoreCategoryID>${xmlEsc(resolved.ids[0])}</StoreCategoryID><StoreCategory2ID>${xmlEsc(resolved.ids[1] || "0")}</StoreCategory2ID></Storefront>`;
+      }
+    } catch (err) {
+      console.warn("ebay_store_category_skip", err instanceof Error ? err.message : String(err));
+    }
+  } else if (item.storeCategoryId) {
+    storefrontXml = `<Storefront><StoreCategoryID>${xmlEsc(item.storeCategoryId)}</StoreCategoryID><StoreCategory2ID>${xmlEsc(item.storeCategory2Id || "0")}</StoreCategory2ID></Storefront>`;
+  }
   const inner = `<WarningLevel>High</WarningLevel>
   <Item>
     <Title>${xmlEsc(item.title)}</Title>
@@ -530,12 +747,25 @@ export async function addFixedPriceItem(token, item) {
     ${specifics ? `<ItemSpecifics>${specifics}</ItemSpecifics>` : ""}
     ${packageDetails}
     ${sellerProfiles}
+    ${storefrontXml}
     <ShipToLocations>US</ShipToLocations>
   </Item>`;
-  const xml = await tradingCall(token, "AddFixedPriceItem", inner);
-  const itemId = xmlTag(xml, "ItemID");
-  if (!itemId) throw new Error("AddFixedPriceItem succeeded without ItemID");
-  return { listingId: itemId, xml };
+  const send = async (body) => {
+    const xml = await tradingCall(token, "AddFixedPriceItem", body);
+    const itemId = xmlTag(xml, "ItemID");
+    if (!itemId) throw new Error("AddFixedPriceItem succeeded without ItemID");
+    return { listingId: itemId, xml };
+  };
+  try {
+    return await send(inner);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (storefrontXml && /store categor/i.test(message)) {
+      console.warn("ebay_store_category_skip", message);
+      return send(inner.replace(storefrontXml, ""));
+    }
+    throw err;
+  }
 }
 
 /** True when the active listing should not be ended (open sale activity). */
