@@ -12,11 +12,26 @@ import { reviseFixedPricePriceAndShipping } from "./ebay-trading.mjs";
 
 export const BUMP_REQUEST_KEY = "ebay_free_ship_bump_request";
 export const BUMP_RESULT_KEY = "ebay_free_ship_bump_result";
+export const REVERT_REQUEST_KEY = "ebay_free_ship_bump_revert_request";
+export const REVERT_RESULT_KEY = "ebay_free_ship_bump_revert_result";
 export const SELLING_USERNAME = "ikonikdeals2026";
 export const STORE_DEFAULT = "5487ca47-6147-4fe8-bc6d-46b6472726ba";
 export const SHIP_CUTOFF_CENTS = 1000;
 export const PRICE_BUMP_CENTS = 1000;
 export const FREE_POLICY_NAME = "OBI Free Shipping";
+
+/** Toys, cards, vinyl, comics — not lunchboxes / household. */
+export function isCollectible({ title = "", categoryName = "" } = {}) {
+  const blob = `${title} ${categoryName}`.toLowerCase();
+  if (
+    /collectible|trading card|ccg\b|action figure|vinyl|comics?|graphic novel|star wars|pokemon|poke.?trivia|power ranger|gundam|hot wheels|transformers|indiana jones|indiani jones|panini|topps|bowman|\bscore\b|burger king|naboo|y.?wing|tie fighter|assault walker|assult walker|jedha|moroff|tusken|conlon|sporting news/.test(
+      blob,
+    )
+  ) {
+    return true;
+  }
+  return false;
+}
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
@@ -271,9 +286,9 @@ export async function queueFreeShipBump(storeId = STORE_DEFAULT, { requestedBy =
   return value;
 }
 
-export async function dispatchQueuedFreeShipBumps() {
+async function dispatchQueuedByKey(requestKey, action) {
   const sb = serviceClient();
-  const { data: rows, error } = await sb.from("store_settings").select("store_id,value").eq("key", BUMP_REQUEST_KEY);
+  const { data: rows, error } = await sb.from("store_settings").select("store_id,value").eq("key", requestKey);
   if (error) throw new Error(error.message);
   const base = (process.env.URL || "https://inventoryobi.netlify.app").replace(/\/$/, "");
   const token = requireEnv("SUPABASE_SERVICE_ROLE");
@@ -282,33 +297,185 @@ export async function dispatchQueuedFreeShipBumps() {
     const val = row.value && typeof row.value === "object" ? row.value : {};
     if (val.status !== "queued") continue;
     const claimed = { ...val, status: "dispatched", dispatched_at: new Date().toISOString() };
-    await setSetting(sb, row.store_id, BUMP_REQUEST_KEY, claimed);
+    await setSetting(sb, row.store_id, requestKey, claimed);
     try {
       const res = await fetch(`${base}/.netlify/functions/ebay-free-ship-bump-background`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
-        body: JSON.stringify({ store_id: row.store_id, requested_by: val.requested_by || "dispatch" }),
+        body: JSON.stringify({
+          store_id: row.store_id,
+          action,
+          requested_by: val.requested_by || "dispatch",
+        }),
       });
       const ok = res.ok || res.status === 202;
-      await setSetting(sb, row.store_id, BUMP_REQUEST_KEY, {
+      await setSetting(sb, row.store_id, requestKey, {
         ...claimed,
         status: ok ? "started" : "dispatch_failed",
         http_status: res.status,
         started_at: ok ? new Date().toISOString() : claimed.dispatched_at,
         error: ok ? null : (await res.text()).slice(0, 300),
       });
-      results.push({ storeId: row.store_id, ok, status: res.status });
+      results.push({ storeId: row.store_id, ok, status: res.status, action });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      await setSetting(sb, row.store_id, BUMP_REQUEST_KEY, {
+      await setSetting(sb, row.store_id, requestKey, {
         ...claimed,
         status: "dispatch_failed",
         error: message.slice(0, 300),
       });
-      results.push({ storeId: row.store_id, ok: false, error: message });
+      results.push({ storeId: row.store_id, ok: false, error: message, action });
     }
   }
   return results;
+}
+
+export async function dispatchQueuedFreeShipBumps() {
+  const bumps = await dispatchQueuedByKey(BUMP_REQUEST_KEY, "bump");
+  const reverts = await dispatchQueuedByKey(REVERT_REQUEST_KEY, "revert_collectibles");
+  return { bumps, reverts };
+}
+
+export function selectCollectiblesToRevert(bumpRows, { categoryBySku = {} } = {}) {
+  const out = [];
+  for (const r of bumpRows || []) {
+    if (String(r.ok || "").toLowerCase() !== "yes" && r.ok !== true) continue;
+    const sku = String(r.sku || "").trim();
+    const title = r.title || "";
+    const categoryName = categoryBySku[sku] || r.category_name || r.category || "";
+    if (!isCollectible({ title, categoryName })) continue;
+    const oldCents = Number(r.old_ebay_cents);
+    const newCents = Number(r.new_ebay_cents);
+    const itemId = String(r.item_id || "").trim();
+    if (!sku || !itemId || !Number.isFinite(oldCents) || oldCents <= 0) continue;
+    out.push({
+      sku,
+      item_id: itemId,
+      title: title || categoryName,
+      restore_cents: oldCents,
+      bumped_cents: Number.isFinite(newCents) ? newCents : oldCents + PRICE_BUMP_CENTS,
+      prior_path: r.path || null,
+    });
+  }
+  return out;
+}
+
+export async function runCollectibleBumpRevert(storeId = STORE_DEFAULT) {
+  const startedAt = new Date().toISOString();
+  const sb = serviceClient();
+  const progress = async (patch) => {
+    const cur = (await getSetting(sb, storeId, REVERT_REQUEST_KEY)) || {};
+    await setSetting(sb, storeId, REVERT_REQUEST_KEY, {
+      ...cur,
+      status: "running",
+      ...patch,
+      updated_at: new Date().toISOString(),
+    });
+  };
+
+  await progress({ phase: "load_bump_result" });
+  const bump = await getSetting(sb, storeId, BUMP_RESULT_KEY);
+  if (!bump?.csv) throw new Error("ebay_free_ship_bump_result missing — nothing to revert");
+  const targets = selectCollectiblesToRevert(parseCsv(bump.csv));
+  await progress({ phase: "targets", total: targets.length });
+
+  const account = await loadEbayAccount(storeId, { username: SELLING_USERNAME });
+  if (String(account.role) !== "selling") throw new Error("expected selling account ikonikdeals2026");
+  const token = await userTokenForAccount(account);
+  const calculatedId = account.fulfillment_policy_id;
+  if (!calculatedId) throw new Error("selling account missing calculated fulfillment_policy_id");
+  const policies = {
+    fulfillmentPolicyId: String(calculatedId),
+    paymentPolicyId: account.payment_policy_id || null,
+    returnPolicyId: account.return_policy_id || null,
+  };
+
+  const results = [];
+  let done = 0;
+  for (const row of targets) {
+    done += 1;
+    if (done % 5 === 0 || done === targets.length) {
+      await progress({ phase: "reverting", done, total: targets.length });
+    }
+    await sleep(350);
+    try {
+      let updated = null;
+      let inventoryError = null;
+      try {
+        updated = await updateViaInventory(account, {
+          sku: row.sku,
+          newCents: row.restore_cents,
+          policies,
+        });
+        if (!updated.ok) inventoryError = updated.reason || "no_inventory_offer";
+      } catch (err) {
+        inventoryError = String(err?.message || err).slice(0, 200);
+        updated = { ok: false };
+      }
+      if (!updated?.ok) {
+        updated = await updateViaTrading(account, token, {
+          itemId: row.item_id,
+          newCents: row.restore_cents,
+          policies,
+        });
+        if (inventoryError) updated.via = `trading_after_${inventoryError}`;
+      }
+      await sb
+        .from("ebay_drafts")
+        .update({
+          price_cents: row.restore_cents,
+          shipping_mode: "calculated",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("store_id", storeId)
+        .eq("sku", row.sku);
+      results.push({ ...row, ok: true, path: updated.path, error: null });
+    } catch (err) {
+      results.push({
+        ...row,
+        ok: false,
+        path: null,
+        error: String(err?.message || err).slice(0, 400),
+      });
+    }
+  }
+
+  const okRows = results.filter((r) => r.ok);
+  const failRows = results.filter((r) => !r.ok);
+  const finishedAt = new Date().toISOString();
+  const summary = {
+    account: SELLING_USERNAME,
+    started_at: startedAt,
+    finished_at: finishedAt,
+    targets: targets.length,
+    reverted: okRows.length,
+    failed: failRows.length,
+    calculated_policy_id: policies.fulfillmentPolicyId,
+  };
+  const txt = [
+    `Collectible free-ship bump REVERT — ${SELLING_USERNAME}`,
+    `Started:  ${startedAt}`,
+    `Finished: ${finishedAt}`,
+    "",
+    `Collectibles targeted: ${targets.length}`,
+    `Reverted OK:           ${okRows.length}`,
+    `Failed:                ${failRows.length}`,
+    "",
+    "Restored original eBay price and Calculated Shipping – Buyer Pays.",
+    "",
+    "--- FAILURES ---",
+    ...(failRows.length ? failRows.map((r) => `${r.sku} | ${r.item_id} | ${r.error}`) : ["(none)"]),
+    "",
+  ].join("\n");
+
+  const result = { status: "done", summary, txt, results, failures: failRows };
+  await setSetting(sb, storeId, REVERT_RESULT_KEY, result);
+  await setSetting(sb, storeId, REVERT_REQUEST_KEY, {
+    status: "done",
+    finished_at: finishedAt,
+    summary,
+  });
+  return result;
 }
 
 export async function runFreeShipBump(storeId = STORE_DEFAULT) {
