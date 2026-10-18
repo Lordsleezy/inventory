@@ -14,6 +14,8 @@ export const BUMP_REQUEST_KEY = "ebay_free_ship_bump_request";
 export const BUMP_RESULT_KEY = "ebay_free_ship_bump_result";
 export const REVERT_REQUEST_KEY = "ebay_free_ship_bump_revert_request";
 export const REVERT_RESULT_KEY = "ebay_free_ship_bump_revert_result";
+export const BAKEIN_REQUEST_KEY = "ebay_free_ship_bakein_request";
+export const BAKEIN_RESULT_KEY = "ebay_free_ship_bakein_result";
 export const SELLING_USERNAME = "ikonikdeals2026";
 export const STORE_DEFAULT = "5487ca47-6147-4fe8-bc6d-46b6472726ba";
 export const SHIP_CUTOFF_CENTS = 1000;
@@ -333,7 +335,137 @@ async function dispatchQueuedByKey(requestKey, action) {
 export async function dispatchQueuedFreeShipBumps() {
   const bumps = await dispatchQueuedByKey(BUMP_REQUEST_KEY, "bump");
   const reverts = await dispatchQueuedByKey(REVERT_REQUEST_KEY, "revert_collectibles");
-  return { bumps, reverts };
+  const bakeins = await dispatchQueuedByKey(BAKEIN_REQUEST_KEY, "bake_in");
+  return { bumps, reverts, bakeins };
+}
+
+/**
+ * Bake Shippo shipping into price + free shipping for an explicit target list.
+ * Request value shape: { status, targets: [{ sku, item_id, price_cents, title? }] }
+ */
+export async function runBakeInFreeShip(storeId = STORE_DEFAULT) {
+  const startedAt = new Date().toISOString();
+  const sb = serviceClient();
+  const progress = async (patch) => {
+    const cur = (await getSetting(sb, storeId, BAKEIN_REQUEST_KEY)) || {};
+    await setSetting(sb, storeId, BAKEIN_REQUEST_KEY, {
+      ...cur,
+      status: "running",
+      ...patch,
+      updated_at: new Date().toISOString(),
+    });
+  };
+
+  const req = (await getSetting(sb, storeId, BAKEIN_REQUEST_KEY)) || {};
+  const targets = Array.isArray(req.targets) ? req.targets : [];
+  if (!targets.length) throw new Error("bake-in request missing targets[]");
+  await progress({ phase: "targets", total: targets.length });
+
+  const account = await loadEbayAccount(storeId, { username: SELLING_USERNAME });
+  if (String(account.role) !== "selling") throw new Error("expected selling account ikonikdeals2026");
+  const token = await userTokenForAccount(account);
+  const free = await ensureFreeShippingPolicy(account);
+  const policies = {
+    fulfillmentPolicyId: free.fulfillmentPolicyId,
+    paymentPolicyId: free.paymentPolicyId || account.payment_policy_id || null,
+    returnPolicyId: free.returnPolicyId || account.return_policy_id || null,
+  };
+
+  const results = [];
+  let done = 0;
+  for (const raw of targets) {
+    done += 1;
+    if (done % 5 === 0 || done === targets.length) {
+      await progress({ phase: "updating", done, total: targets.length });
+    }
+    const sku = String(raw.sku || "").trim();
+    const itemId = String(raw.item_id || "").trim();
+    const priceCents = Math.round(Number(raw.price_cents));
+    const title = raw.title || "";
+    if (!sku || !itemId || !Number.isFinite(priceCents) || priceCents <= 0) {
+      results.push({ sku, item_id: itemId, title, price_cents: priceCents, ok: false, error: "bad_target" });
+      continue;
+    }
+    await sleep(350);
+    try {
+      let updated = null;
+      let inventoryError = null;
+      try {
+        updated = await updateViaInventory(account, { sku, newCents: priceCents, policies });
+        if (!updated.ok) inventoryError = updated.reason || "no_inventory_offer";
+      } catch (err) {
+        inventoryError = String(err?.message || err).slice(0, 200);
+        updated = { ok: false };
+      }
+      if (!updated?.ok) {
+        updated = await updateViaTrading(account, token, {
+          itemId,
+          newCents: priceCents,
+          policies,
+        });
+        if (inventoryError) updated.via = `trading_after_${inventoryError}`;
+      }
+      await sb
+        .from("ebay_drafts")
+        .update({
+          price_cents: priceCents,
+          shipping_mode: "free",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("store_id", storeId)
+        .eq("sku", sku);
+      results.push({
+        sku,
+        item_id: itemId,
+        title,
+        price_cents: priceCents,
+        ok: true,
+        path: updated.path,
+        error: null,
+      });
+    } catch (err) {
+      results.push({
+        sku,
+        item_id: itemId,
+        title,
+        price_cents: priceCents,
+        ok: false,
+        path: null,
+        error: String(err?.message || err).slice(0, 400),
+      });
+    }
+  }
+
+  const okRows = results.filter((r) => r.ok);
+  const failRows = results.filter((r) => !r.ok);
+  const finishedAt = new Date().toISOString();
+  const summary = {
+    account: SELLING_USERNAME,
+    started_at: startedAt,
+    finished_at: finishedAt,
+    targets: targets.length,
+    updated: okRows.length,
+    failed: failRows.length,
+    free_policy_id: policies.fulfillmentPolicyId,
+  };
+  const txt = [
+    `Bake-in free shipping — ${SELLING_USERNAME}`,
+    `Started:  ${startedAt}`,
+    `Finished: ${finishedAt}`,
+    `Targets: ${targets.length}  OK: ${okRows.length}  Failed: ${failRows.length}`,
+    "",
+    "--- OK ---",
+    ...okRows.map((r) => `${r.sku} | ${r.item_id} | $${(r.price_cents / 100).toFixed(2)} free ship | ${r.title}`),
+    "",
+    "--- FAILURES ---",
+    ...(failRows.length ? failRows.map((r) => `${r.sku} | ${r.error}`) : ["(none)"]),
+    "",
+  ].join("\n");
+
+  const result = { status: "done", summary, txt, results, failures: failRows };
+  await setSetting(sb, storeId, BAKEIN_RESULT_KEY, result);
+  await setSetting(sb, storeId, BAKEIN_REQUEST_KEY, { status: "done", finished_at: finishedAt, summary });
+  return result;
 }
 
 export function selectCollectiblesToRevert(bumpRows, { categoryBySku = {} } = {}) {

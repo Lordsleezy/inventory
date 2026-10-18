@@ -4,7 +4,11 @@
 import { requireEnv } from "../lib/server.mjs";
 import { asNetlifyFunction, floorLog, runTrace } from "../lib/floor-log.mjs";
 import { ebayDisabled } from "../lib/ebay-env.mjs";
-import { runFreeShipBump, runCollectibleBumpRevert } from "../lib/ebay-free-ship-bump.mjs";
+import {
+  runFreeShipBump,
+  runCollectibleBumpRevert,
+  runBakeInFreeShip,
+} from "../lib/ebay-free-ship-bump.mjs";
 
 export const invoke = async (event) => {
   if (ebayDisabled()) return { statusCode: 202, body: "disabled" };
@@ -15,21 +19,36 @@ export const invoke = async (event) => {
   const body = JSON.parse(event.body || "{}");
   const storeId = body.store_id;
   if (!storeId) return { statusCode: 400, body: "store_id_required" };
-  const action = body.action === "revert_collectibles" ? "revert_collectibles" : "bump";
+  const action =
+    body.action === "revert_collectibles"
+      ? "revert_collectibles"
+      : body.action === "bake_in"
+        ? "bake_in"
+        : "bump";
 
   await runTrace({ source: "ebay-free-ship-bump", storeId, action }, async () => {
     try {
       const result =
         action === "revert_collectibles"
           ? await runCollectibleBumpRevert(storeId)
-          : await runFreeShipBump(storeId);
+          : action === "bake_in"
+            ? await runBakeInFreeShip(storeId)
+            : await runFreeShipBump(storeId);
+      const msg =
+        action === "revert_collectibles"
+          ? `reverted ${result.summary?.reverted || 0}/${result.summary?.targets || 0} collectibles`
+          : action === "bake_in"
+            ? `bake-in ${result.summary?.updated || 0}/${result.summary?.targets || 0}`
+            : `updated ${result.summary?.updated || 0}/${result.summary?.eligible || 0}`;
       await floorLog({
         storeId,
-        event: action === "revert_collectibles" ? "ebay.free_ship_bump.revert_done" : "ebay.free_ship_bump.done",
-        message:
+        event:
           action === "revert_collectibles"
-            ? `reverted ${result.summary?.reverted || 0}/${result.summary?.targets || 0} collectibles`
-            : `updated ${result.summary?.updated || 0}/${result.summary?.eligible || 0}`,
+            ? "ebay.free_ship_bump.revert_done"
+            : action === "bake_in"
+              ? "ebay.free_ship_bump.bakein_done"
+              : "ebay.free_ship_bump.done",
+        message: msg,
         detail: { summary: result.summary, action },
       });
     } catch (err) {
@@ -37,7 +56,9 @@ export const invoke = async (event) => {
       const requestKey =
         action === "revert_collectibles"
           ? "ebay_free_ship_bump_revert_request"
-          : "ebay_free_ship_bump_request";
+          : action === "bake_in"
+            ? "ebay_free_ship_bakein_request"
+            : "ebay_free_ship_bump_request";
       await floorLog({
         storeId,
         level: "error",
