@@ -17,6 +17,8 @@ const POLICY_NAMES = {
   fulfillment: "OBI Calculated Shipping – Buyer Pays",
   /** Separate from calculated shipping — used only for local-pickup listings. */
   localPickup: "OBI Local Pickup Only",
+  /** Calculated buyer-pays shipping with local pickup also offered. */
+  calculatedWithPickup: "OBI Calculated Shipping – Buyer Pays + Local Pickup",
 };
 
 function policyIdOf(row, kind) {
@@ -270,6 +272,77 @@ export async function policiesForLocalPickup(account) {
     fulfillment: pickup.fulfillmentPolicyId,
     pickupPolicyName: pickup.name,
     pickupReused: pickup.reused,
+  };
+}
+
+function calculatedWithPickupBody(market, service) {
+  return {
+    ...calculatedBuyerPaysBody(market, service),
+    name: POLICY_NAMES.calculatedWithPickup,
+    localPickup: true,
+  };
+}
+
+/**
+ * Calculated shipping (buyer pays) with local pickup also offered.
+ * Separate named policy so we never rewrite "OBI Calculated Shipping – Buyer Pays"
+ * or the pickup-only policy.
+ */
+export async function ensureCalculatedWithPickupFulfillmentPolicy(account) {
+  if (!account || account.role !== "selling") {
+    throw new Error("Calculated+pickup policy can only be created on the selling eBay account.");
+  }
+  const market = marketplaceIdFromEnv();
+  await optIn(account);
+  const fulfillments = await listPolicies(account, "fulfillment");
+  const named = findNamed(fulfillments, "fulfillment", POLICY_NAMES.calculatedWithPickup);
+  const id = policyIdOf(named, "fulfillment");
+  if (named && id && named.localPickup === true) {
+    const services = (named.shippingOptions || []).flatMap((opt) => opt?.shippingServices || []);
+    if (services.length > 0) {
+      return {
+        fulfillmentPolicyId: String(id),
+        name: POLICY_NAMES.calculatedWithPickup,
+        reused: true,
+      };
+    }
+  }
+  const service = await pickCalculatedService(account);
+  const body = calculatedWithPickupBody(market, service);
+  if (id) {
+    const updated = await ebayFetchAccount(account, "PUT", `/sell/account/v1/fulfillment_policy/${id}`, body);
+    return {
+      fulfillmentPolicyId: String(updated.fulfillmentPolicyId || updated.id || id),
+      name: POLICY_NAMES.calculatedWithPickup,
+      reused: false,
+    };
+  }
+  const created = await ebayFetchAccount(account, "POST", "/sell/account/v1/fulfillment_policy", body);
+  return {
+    fulfillmentPolicyId: String(created.fulfillmentPolicyId || created.id),
+    name: POLICY_NAMES.calculatedWithPickup,
+    reused: false,
+  };
+}
+
+/**
+ * Payment + no-returns + calculated shipping with local pickup enabled.
+ * Does not overwrite ebay_accounts.fulfillment_policy_id (keeps the ship-only default).
+ */
+export async function policiesForCalculatedWithPickup(account) {
+  let payment = account.payment_policy_id || null;
+  let returnP = account.return_policy_id || null;
+  if (!payment || !returnP) {
+    const ensured = await ensureBusinessPolicies(account);
+    payment = ensured.payment;
+    returnP = ensured.returnP;
+  }
+  const ship = await ensureCalculatedWithPickupFulfillmentPolicy(account);
+  return {
+    payment,
+    returnP,
+    fulfillment: ship.fulfillmentPolicyId,
+    reused: ship.reused,
   };
 }
 
