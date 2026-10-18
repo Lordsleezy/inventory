@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -17,16 +17,56 @@ export function netlifyCliPath() {
   return existsSync(candidate) ? candidate : null;
 }
 
+/** CLI 27 dropped the global --cwd flag. The spawn cwd is the repo root. */
+function argsWithoutCwd(args) {
+  const out = [];
+  for (let i = 0; i < args.length; i += 1) {
+    if (args[i] === "--cwd") {
+      i += 1;
+      continue;
+    }
+    out.push(args[i]);
+  }
+  return out;
+}
+
+/**
+ * Netlify CLI 27 treats an npm-workspace root as a monorepo and asks which
+ * package to build. This functions site is the repository root, so hide
+ * workspaces for the duration of the CLI call and put the file back after.
+ */
+function withoutWorkspaces(cwd, fn) {
+  const pkgPath = path.join(cwd, "package.json");
+  if (!existsSync(pkgPath)) return fn();
+  const original = readFileSync(pkgPath, "utf8");
+  let parsed;
+  try {
+    parsed = JSON.parse(original);
+  } catch {
+    return fn();
+  }
+  if (!parsed.workspaces) return fn();
+  const hidden = { ...parsed };
+  delete hidden.workspaces;
+  writeFileSync(pkgPath, `${JSON.stringify(hidden, null, 2)}\n`);
+  try {
+    return fn();
+  } finally {
+    writeFileSync(pkgPath, original);
+  }
+}
+
 /** Spawn the Netlify CLI without a shell so JSON quotes survive. Caller passes flags. */
 export function runNetlify(args, { root, site, stdio } = {}) {
   const cli = netlifyCliPath();
   if (!cli) return { status: 127, stdout: "", stderr: "netlify cli not found" };
-  return spawnSync(process.execPath, [cli, ...args], {
-    cwd: root || path.dirname(fileURLToPath(import.meta.url)),
+  const cwd = root || path.dirname(fileURLToPath(import.meta.url));
+  return withoutWorkspaces(cwd, () => spawnSync(process.execPath, [cli, ...argsWithoutCwd(args)], {
+    cwd,
     encoding: stdio === "inherit" ? undefined : "utf8",
     stdio: stdio || "pipe",
     shell: false,
     maxBuffer: 20 * 1024 * 1024,
-    env: site ? { ...process.env, NETLIFY_SITE_ID: site } : process.env,
-  });
+    env: site ? { ...process.env, NETLIFY_SITE_ID: site, CI: process.env.CI || "true" } : { ...process.env, CI: process.env.CI || "true" },
+  }));
 }
