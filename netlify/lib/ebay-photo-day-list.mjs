@@ -20,6 +20,15 @@ import { liveRates, addressTo, allowedCarriers } from "./shippo.mjs";
 import { preparePickupListingMeta } from "./ebay-pickup-list.mjs";
 import { ensureFreeShippingPolicy } from "./ebay-free-ship-bump.mjs";
 import { resolveBusinessPolicies } from "./ebay-drafts.mjs";
+import {
+  listingMeasures,
+  refreshCategoryAspects,
+  refreshCategoryConditions,
+  resolveFloorCategory,
+  suggestCategories,
+} from "./ebay-catalog.mjs";
+import { fillAspects } from "./ebay-aspects.mjs";
+import { listingConditionPayload } from "./ebay-conditions.mjs";
 
 export const PHOTO_DAY_REQUEST_KEY = "ebay_photo_day_list_request";
 export const PHOTO_DAY_RESULT_KEY = "ebay_photo_day_list_result";
@@ -190,6 +199,67 @@ export async function skusFirstPhotoToday(storeId = STORE_DEFAULT) {
   if (priorErr) throw new Error(priorErr.message);
   const prior = new Set((priorRows || []).map((r) => r.sku));
   return candidates.filter((sku) => !prior.has(sku));
+}
+
+/** When Floor grade has no honest eBay match (blank / Excellent on sealed cats), prefer New. */
+async function prepareListingMetaPreferNew(storeId, unit) {
+  const floor = resolveFloorCategory(unit.category);
+  let categoryId = floor?.ebayCategoryId || null;
+  let categoryName = floor?.name || null;
+  if (!categoryId) {
+    const query = [unit.brand, unit.model, unit.title, unit.category].filter(Boolean).join(" ");
+    const suggestions = await suggestCategories(query);
+    const picked = suggestions[0] || null;
+    if (!picked?.categoryId) throw new Error(`No eBay category suggestion for SKU ${unit.sku}`);
+    categoryId = String(picked.categoryId);
+    categoryName = picked.categoryName || null;
+  }
+  const defs = await refreshCategoryAspects(categoryId);
+  const conditions = await refreshCategoryConditions(categoryId);
+  const prefer =
+    (conditions || []).find((row) => /factory sealed/i.test(row.name || "")) ||
+    (conditions || []).find((row) => /^new\b/i.test(row.name || "") && !/other|open/i.test(row.name || "")) ||
+    (conditions || []).find((row) => /brand new/i.test(row.name || "")) ||
+    (conditions || [])[0];
+  if (!prefer?.conditionId) throw new Error(`No usable eBay condition for ${categoryName || categoryId}`);
+  const conditionPayload = listingConditionPayload({
+    conditionId: String(prefer.conditionId),
+    conditionEnum: prefer.conditionEnum || prefer.enum || null,
+    name: prefer.name,
+  }) || { conditionId: String(prefer.conditionId) };
+
+  const specs = listingMeasures(unit);
+  const filled = fillAspects(defs, unit, specs, {
+    categoryDefaults: floor?.defaults || {},
+    standalone: floor?.standalone || false,
+    categoryName,
+    title: unit.title,
+  });
+  const aspects = {};
+  for (const [name, value] of Object.entries(filled.aspects || {})) {
+    const text = Array.isArray(value) ? value[0] : String(value || "");
+    if (text) aspects[name] = [text];
+  }
+  for (const row of filled.filled || []) {
+    if (row.required && !aspects[row.name]) aspects[row.name] = ["Does not apply"];
+  }
+  const ids = ebayIdentifiers(unit, aspects);
+  if (!ids.validBrand) {
+    const brand = String(unit.brand || unit.title || "Unbranded").trim().slice(0, 65) || "Unbranded";
+    aspects.Brand = [brand];
+  } else {
+    aspects.Brand = [ids.brand];
+  }
+  aspects.MPN = [ids.mpn || "Does Not Apply"];
+
+  return {
+    categoryId: String(categoryId),
+    categoryName,
+    aspects,
+    conditionPayload,
+    floorSlug: floor?.slug || null,
+    forcedNew: true,
+  };
 }
 
 async function quoteShipCents(sb, storeId, box) {
@@ -383,16 +453,21 @@ export async function runPhotoDayList(storeId = STORE_DEFAULT) {
     try {
       meta = await preparePickupListingMeta(storeId, unit);
     } catch (err) {
-      results.push({
-        sku,
-        ok: false,
-        error: String(err?.message || err).slice(0, 400),
-        plan,
-        quote,
-        dims_assumed: box.assumed,
-      });
-      await sleep(paceMs);
-      continue;
+      const message = String(err?.message || err);
+      try {
+        meta = await prepareListingMetaPreferNew(storeId, unit);
+      } catch (err2) {
+        results.push({
+          sku,
+          ok: false,
+          error: `${message.slice(0, 180)} | retry: ${String(err2?.message || err2).slice(0, 180)}`,
+          plan,
+          quote,
+          dims_assumed: box.assumed,
+        });
+        await sleep(paceMs);
+        continue;
+      }
     }
 
     const fulfillment =
@@ -414,10 +489,24 @@ export async function runPhotoDayList(storeId = STORE_DEFAULT) {
       bestOfferEnabled: false,
     };
 
+    const tryList = async (d) => listSku(storeId, sku, d);
     try {
-      // Brand validation needs identifiers
-      ebayIdentifiers(unit, draft.aspects);
-      const listed = await listSku(storeId, sku, draft);
+      let listed;
+      try {
+        listed = await tryList(draft);
+      } catch (err) {
+        const message = String(err?.message || err);
+        if (!/condition|Brand needed|25059/i.test(message)) throw err;
+        const retryMeta = await prepareListingMetaPreferNew(storeId, unit);
+        const retryDraft = {
+          ...draft,
+          categoryId: retryMeta.categoryId,
+          aspects: retryMeta.aspects,
+          conditionPayload: retryMeta.conditionPayload,
+        };
+        listed = await tryList(retryDraft);
+        meta = retryMeta;
+      }
       results.push({
         sku,
         ok: true,
@@ -432,6 +521,7 @@ export async function runPhotoDayList(storeId = STORE_DEFAULT) {
         dims_assumed: box.assumed,
         listingId: listed.listingId,
         viewUrl: listed.viewUrl || ebayItemViewUrl(listed.listingId),
+        forced_new: Boolean(meta?.forcedNew),
       });
       await floorLog({
         storeId,
