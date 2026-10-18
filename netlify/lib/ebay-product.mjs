@@ -1,4 +1,5 @@
 import { gtinIssue } from "./gtin.mjs";
+import { appendClearanceFooter, stripClearanceFooter } from "./ebay-listing-standards.mjs";
 
 export const NOT_APPLICABLE = "Does not apply";
 
@@ -30,10 +31,10 @@ export function ebayIdentifiers(unit = {}, aspects = {}) {
 }
 
 export function ebayDescription(description, sku) {
-  const body = String(description || "")
+  const body = stripClearanceFooter(String(description || ""))
     .replace(/\n\s*This unit \(Floor\):[\s\S]*$/i, "")
     .replace(/\n\s*Sold as-is\. Local pickup unless arranged\.\s*$/i, "")
     .replace(/\n\s*(?:SKU\s*)?\d{5}\s*$/i, "")
     .trim();
-  return `${body}\n\n${sku}`.trim();
+  return appendClearanceFooter(`${body}\n\n${sku}`.trim());
 }

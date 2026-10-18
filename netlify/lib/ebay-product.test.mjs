@@ -28,10 +28,13 @@ test("UPC-A, EAN-13, and GTIN-14 require valid check digits", () => {
   assert.equal(ebayIdentifiers({ upc: "887063466175" }).upc, null);
 });
 
-test("eBay copy drops Floor footer and ends with bare SKU", () => {
+test("eBay copy drops Floor footer, keeps the SKU, and adds the clearance footer once", () => {
   const old = "Product features.\n\nThis unit (Floor):\nCondition: New\nSKU 99105\nSold as-is. Local pickup unless arranged.";
-  assert.equal(ebayDescription(old, "99105"), "Product features.\n\n99105");
-  assert.equal(ebayDescription(ebayDescription(old, "99105"), "99105"), "Product features.\n\n99105");
+  const once = ebayDescription(old, "99105");
+  assert.match(once, /^Product features\.\n\n99105/);
+  assert.match(once, /font-size:12px/);
+  assert.equal((once.match(/Open-box clearance item/g) || []).length, 1);
+  assert.equal(ebayDescription(once, "99105"), once);
 });
 
 test("a draft without a brand is blocked before push", () => {

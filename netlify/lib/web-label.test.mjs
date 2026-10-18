@@ -57,6 +57,7 @@ const paidOrder = {
   id: "o1", order_no: "OB-1001", sku: "11", status: "paid", fulfillment: "ship", payment_env: "sandbox", shipping_cents: 900,
   shipping_rate: { carrier: "USPS", service: "Ground Advantage", days: 5, source: "shippo" },
   buyer_name: "A", ship_line1: "1 St", ship_city: "NYC", ship_region: "NY", ship_postal: "10001", tracking_number: null, label_url: null,
+  pack_condition: "ok",
 };
 
 test("label quote re-quotes with the corrected (bigger, heavier) box and pre-selects per the speed rule", async () => {
@@ -90,6 +91,17 @@ test("buying saves the measured box, logs the label expense, and records the lab
   assert.equal(expense.employee_id, "owner-uuid");
   assert.match(expense.description, /OB-1001/);
   assert.ok(log.inserts.some(([t]) => t === "web_order_labels"));
+});
+
+test("a label is not bought until condition is confirmed ok", async () => {
+  let bought = false;
+  const deps = { mode: "test", getRate: async () => R("r", 500, 3), buyLabel: async () => { bought = true; return { status: "SUCCESS" }; } };
+  const missing = await buyLabelForOrder(labelDb({ ...paidOrder, pack_condition: null }).sb, "store", "o1", { rateId: "r", box: { length_in: 1, width_in: 1, height_in: 1, weight_lb: 1 } }, deps);
+  assert.equal(missing.ok, false);
+  assert.match(missing.error, /Confirm the item/);
+  const bad = await buyLabelForOrder(labelDb({ ...paidOrder, pack_condition: "not_as_listed" }).sb, "store", "o1", { rateId: "r", box: { length_in: 1, width_in: 1, height_in: 1, weight_lb: 1 } }, deps);
+  assert.equal(bad.status, 409);
+  assert.equal(bought, false);
 });
 
 test("a failed Shippo purchase charges nothing and records nothing", async () => {

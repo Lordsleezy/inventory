@@ -17,6 +17,7 @@ import {
   suggestCategories,
 } from "./ebay-catalog.mjs";
 import { inventoryConditionEnum, mapFloorCondition } from "./ebay-conditions.mjs";
+import { appendClearanceFooter, clearanceCondition, isCollectible } from "./ebay-listing-standards.mjs";
 import { ebayDraftEligibility } from "./ebay-eligibility.mjs";
 import { evaluateMarketplaceEligibility } from "./marketplace-eligibility.mjs";
 import { ensureMarket, summarizeMarket } from "./ebay-market.mjs";
@@ -545,6 +546,18 @@ export async function listDraftPage(storeId, { refresh = false } = {}) {
   };
 }
 
+function draftCondition(unit, row, conditions) {
+  const collectible = isCollectible({
+    title: row?.title || unit?.title,
+    category: unit?.category,
+    categoryName: row?.category_name,
+    is_collectible: unit?.is_collectible,
+    aspects: row?.aspects,
+  });
+  if (collectible) return mapFloorCondition(unit?.condition, conditions);
+  return clearanceCondition(conditions);
+}
+
 function stringsToAspects(aspects) {
   const out = {};
   for (const [name, value] of Object.entries(aspects || {})) {
@@ -570,7 +583,7 @@ async function refreshCategoryRules(row, unit) {
     row.condition_enum = null;
   }
   if (!row.condition_not_supported && !locked(row, "condition")) {
-    const mapped = mapFloorCondition(unit?.condition, conditions);
+    const mapped = draftCondition(unit, row, conditions);
     row.condition_id = mapped?.conditionId || null;
     row.condition_enum = mapped ? inventoryConditionEnum(mapped) : null;
   } else if (row.condition_id) {
@@ -711,6 +724,14 @@ export async function prepareDraft(storeId, sku, { metadataOnly = false } = {}) 
     }
   }
   if (row.aspect_defs?.length) mergeBlankAspects(row, unit);
+  if (!locked(row, "condition") && row.conditions?.length && !row.condition_not_supported) {
+    const mapped = draftCondition(unit, row, row.conditions);
+    if (mapped?.conditionId) {
+      row.condition_id = String(mapped.conditionId);
+      row.condition_enum = inventoryConditionEnum(mapped);
+    }
+  }
+  if (row.description) row.description = appendClearanceFooter(row.description);
   if (!metadataOnly) applyPrice(row, settings);
   withReadiness(row);
   const saved = persistShape(row);

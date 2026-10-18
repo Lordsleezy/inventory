@@ -17,6 +17,8 @@ import { formatEbayError, locationKey } from "./ebay-errors.mjs";
 import { publicPhotoUrl } from "./ebay-photos.mjs";
 import { composeChannelDescription, parseListingSpecs } from "./listing-copy.mjs";
 import { ebayDescription, ebayIdentifiers } from "./ebay-product.mjs";
+import { appendClearanceFooter } from "./ebay-listing-standards.mjs";
+import { confirmCatalogVisual, matchCatalogPhoto } from "./ebay-catalog-photo.mjs";
 import { parseMeasure, specInches } from "./ebay-aspects.mjs";
 import { listingMeasures, prepareUnitAspects, prepareUnitCondition } from "./ebay-catalog.mjs";
 import { floorLog, redact, setTrace } from "./floor-log.mjs";
@@ -577,29 +579,14 @@ async function categoryId(storeId, query, hint) {
   }
 }
 
-async function catalogEpid(storeId, unit) {
-  const brand = String(unit.brand || "").trim();
-  const specs = parseListingSpecs(unit.listing_specs);
-  const mpn = String(specs?.matched_model || unit.model || "").trim();
-  if (!brand || !mpn) return null;
-  try {
-    const q = encodeURIComponent(`${brand} ${mpn}`);
-    const data = await ebayFetch(
-      storeId,
-      "GET",
-      `/commerce/catalog/v1_beta/product_summary/search?q=${q}&limit=8`,
-    );
-    const rows = data?.productSummaries || [];
-    const needle = mpn.replace(/[^a-z0-9]/gi, "").toUpperCase();
-    const hit =
-      rows.find((row) => String(row.mpn || "").replace(/[^a-z0-9]/gi, "").toUpperCase() === needle) ||
-      rows.find((row) => String(row.mpn || "").replace(/[^a-z0-9]/gi, "").toUpperCase().includes(needle)) ||
-      rows[0];
-    const epid = hit?.epid || hit?.product?.epid;
-    return epid ? String(epid) : null;
-  } catch {
-    return null;
-  }
+async function strictCatalogPhoto(storeId, unit, aspects, imageUrls, hint) {
+  return matchCatalogPhoto({
+    unit,
+    aspects,
+    imageUrls,
+    fetchJson: (path) => ebayFetch(storeId, "GET", path, undefined, hint),
+    visualConfirm: (args) => confirmCatalogVisual(args),
+  });
 }
 
 async function photoUrls(storeId, sku) {
@@ -710,12 +697,13 @@ export async function listSku(storeId, sku, draft = null) {
     p_channel: "ebay",
   });
   if (policyError) throw new Error(policyError.message);
-  const images = draft?.imageUrls?.length ? draft.imageUrls : await photoUrls(storeId, sku);
-  const epid = draft ? null : await catalogEpid(storeId, unit);
+  const ownImages = draft?.imageUrls?.length ? draft.imageUrls : await photoUrls(storeId, sku);
   const loc = await ensureLocation(storeId, { forPickup: Boolean(draft?.pickupOnly) });
-  // ensureLocation / catalogEpid / ebayFetch use default resolve — pin selling account for all subsequent calls
+  // ensureLocation / ebayFetch use default resolve — pin selling account for all subsequent calls
   const fetchHint = hint;
-  const copy = draft?.title ? { title: draft.title, description: draft.description || "" } : listingCopy(unit);
+  const copy = draft?.title
+    ? { title: draft.title, description: appendClearanceFooter(draft.description || "") }
+    : listingCopy(unit);
   let aspects;
   let cat;
   let condition;
@@ -765,6 +753,18 @@ export async function listSku(storeId, sku, draft = null) {
   if (identifiers.upcIssue) throw new Error(`UPC from the scan looks wrong (${identifiers.upcIssue}); check the barcode or leave blank.`);
   const upc = identifiers.upc || (draft?.upcRequired ? "Does not apply" : null);
   aspects = { ...aspects, Brand: [identifiers.brand], MPN: [identifiers.mpn], ...(upc && draft?.upcRequired ? { UPC: [upc] } : {}) };
+  let images = ownImages;
+  let epid = null;
+  let catalogPhoto = { apply: false, reason: "not_checked" };
+  try {
+    catalogPhoto = await strictCatalogPhoto(storeId, unit, aspects, ownImages, fetchHint);
+    if (catalogPhoto.apply) {
+      images = catalogPhoto.imageUrls;
+      epid = catalogPhoto.epid || null;
+    }
+  } catch (err) {
+    catalogPhoto = { apply: false, reason: err instanceof Error ? err.message : String(err) };
+  }
 
   await floorLog({
     storeId,
@@ -779,6 +779,7 @@ export async function listSku(storeId, sku, draft = null) {
       payload: condition.payload,
       allowed: condition.allowed,
       epid,
+      catalogPhoto,
       location: loc,
       policies,
       aspectKeys: Object.keys(aspects || {}),

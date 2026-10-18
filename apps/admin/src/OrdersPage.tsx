@@ -27,6 +27,7 @@ export type WebOrder = {
   shipped_at: string | null; delivered_at: string | null;
   tracking_number: string | null; tracking_url: string | null; carrier: string | null; service: string | null;
   label_url: string | null; label_purchased_at: string | null; label_cost_cents: number | null;
+  pack_condition?: 'ok' | 'not_as_listed' | null;
   refund_requested_at: string | null; cancel_source: string | null; cancel_reason: string | null; canceled_at: string | null;
   shipping_rate: { source?: string; days?: number | null } | null;
   package: { length_in: number | null; width_in: number | null; height_in: number | null; weight_lb: number | null };
@@ -220,7 +221,28 @@ export function OrdersPage({ client, accessToken, money, stamp, rules, cfg, comm
     else await load();
     setBusy(null);
   }
+  async function setPackCondition(o: WebOrder, status: 'ok' | 'not_as_listed') {
+    setBusy(o.id + 'pack'); setError('');
+    try {
+      const res = await fetch(floorFunctionUrl('web-order-admin'), {
+        method: 'POST', headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'pack_condition', id: o.id, status }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || body.ok === false) {
+        const { error: rpcErr } = await client.rpc('portal_set_pack_condition', { p_order: o.id, p_status: status });
+        if (rpcErr) throw new Error(body.error || rpcErr.message);
+      }
+      if (status === 'not_as_listed') setError(`SKU ${o.sku} marked not as listed. The owner is alerted. Do not buy a label.`);
+      await load();
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    finally { setBusy(null); }
+  }
   async function recordLabelCost(o: WebOrder) {
+    if (o.pack_condition !== 'ok') {
+      setError('Confirm the item matches the listing before recording a label cost.');
+      return;
+    }
     const current = o.label_cost_cents != null ? (o.label_cost_cents / 100).toFixed(2) : '';
     const raw = window.prompt(
       `Label cost for ${channelLabel(o.channel)} order ${o.order_no || o.id} (USD).\n\nUse this for Pirate Ship, USPS, eBay labels, Depop, Mercari, Whatnot, Vendoo — whatever you paid to ship.`,
@@ -323,13 +345,21 @@ export function OrdersPage({ client, accessToken, money, stamp, rules, cfg, comm
         {isToShip && (
           <>
             <div className="order-address">{[o.buyer_name, o.ship_line1, o.ship_line2, [o.ship_city, o.ship_region, o.ship_postal].filter(Boolean).join(', ')].filter(Boolean).join(' · ')}</div>
-            {o.refund_requested_at ? <p className="hint">Cancel & refund in progress…</p> : <div className="actions">
+            {o.refund_requested_at ? <p className="hint">Cancel & refund in progress…</p> : <>
+            <div className="actions">
+              <span className="hint">Condition OK?</span>
+              <button className={o.pack_condition === 'ok' ? '' : 'secondary'} disabled={!!busy} onClick={() => void setPackCondition(o, 'ok')}>{busy === o.id + 'pack' ? 'Saving…' : 'OK'}</button>
+              <button className="secondary" disabled={!!busy} onClick={() => void setPackCondition(o, 'not_as_listed')}>Not as listed</button>
+            </div>
+            {o.pack_condition === 'not_as_listed' && <div className="alert" role="alert">Not as listed. The owner is alerted. Do not buy a label.</div>}
+            {o.pack_condition !== 'ok' && o.pack_condition !== 'not_as_listed' && <p className="hint">Check the item against the listing before a label is bought.</p>}
+            <div className="actions">
               <button disabled={!!busy} onClick={() => void markShipped(o)}>{busy === o.id + 'ship' ? 'Saving…' : 'Mark shipped'}</button>
               <button className="secondary" disabled={!!busy} onClick={() => void markDelivered(o)}>{busy === o.id + 'deliver' ? 'Saving…' : 'Mark delivered'}</button>
-              <button className="secondary" disabled={!!busy} onClick={() => void recordLabelCost(o)}>{busy === o.id + 'label' ? 'Saving…' : o.label_cost_cents != null ? 'Edit label cost' : 'Record label cost'}</button>
+              <button className="secondary" disabled={!!busy || (o.label_cost_cents == null && o.pack_condition !== 'ok')} onClick={() => void recordLabelCost(o)}>{busy === o.id + 'label' ? 'Saving…' : o.label_cost_cents != null ? 'Edit label cost' : 'Record label cost'}</button>
               {(!o.channel || o.channel === 'website') && <button className="text-button danger" disabled={!!busy} onClick={() => void cancel(o)}>Cancel & refund</button>}
               <button className="text-button danger" disabled={!!busy} onClick={() => void deleteOrder(o)}>{busy === o.id + 'delete' ? 'Deleting…' : 'Delete'}</button>
-            </div>}
+            </div></>}
           </>
         )}
         {isShipped && (

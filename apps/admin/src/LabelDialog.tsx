@@ -21,6 +21,7 @@ export function LabelDialog({ order, accessToken, money, onClose, onDone }: Prop
   const [loading, setLoading] = useState(false);
   const [buying, setBuying] = useState(false);
   const [error, setError] = useState('');
+  const [condition, setCondition] = useState<'ok' | 'not_as_listed' | ''>(order.pack_condition === 'ok' || order.pack_condition === 'not_as_listed' ? order.pack_condition : '');
 
   const call = useCallback(async (body: Record<string, unknown>) => {
     const res = await fetch(`${functionsBase}/.netlify/functions/web-order-admin`, {
@@ -56,9 +57,10 @@ export function LabelDialog({ order, accessToken, money, onClose, onDone }: Prop
   const changed = quote && (Number(box.l) !== stored.length_in || Number(box.w) !== stored.width_in || Number(box.h) !== stored.height_in || Number(box.lb) !== stored.weight_lb);
 
   async function buy() {
-    if (!selected) return;
+    if (!selected || condition !== 'ok') return;
     setBuying(true); setError('');
     try {
+      await call({ action: 'pack_condition', status: 'ok' });
       const r = await call({ action: 'buy_label', rate_id: selected.id, box: boxBody() });
       if (r.order?.label_url) window.open(r.order.label_url, '_blank', 'noopener');
       onDone(); onClose();
@@ -70,6 +72,17 @@ export function LabelDialog({ order, accessToken, money, onClose, onDone }: Prop
     <section className="inventory-detail label-dialog" role="dialog" aria-modal="true" aria-label={`Buy label for ${order.order_no}`}>
       <div className="section-head"><div><div className="eyebrow">PACKING</div><h2>Buy label · {order.order_no}</h2></div><button className="secondary" disabled={buying} onClick={onClose}>Close</button></div>
       <p className="hint">{order.title} (SKU {order.sku}) → {[order.ship_city, order.ship_region, order.ship_postal].filter(Boolean).join(', ')}. Nothing is charged until you press Buy.</p>
+
+      <h3>Condition OK?</h3>
+      <div className="actions">
+        <button type="button" className={condition === 'ok' ? '' : 'secondary'} disabled={buying} onClick={() => setCondition('ok')}>OK</button>
+        <button type="button" className="secondary" disabled={buying} onClick={async () => {
+          setCondition('not_as_listed'); setError('');
+          try { await call({ action: 'pack_condition', status: 'not_as_listed' }); setError('Marked not as listed. The owner is alerted. The label was not bought.'); }
+          catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+        }}>Not as listed</button>
+      </div>
+      {condition === 'not_as_listed' && <div className="alert" role="alert">Do not buy a label. Message the buyer or swap the unit.</div>}
 
       <h3>Real box</h3>
       <div className="number-grid">
@@ -96,7 +109,7 @@ export function LabelDialog({ order, accessToken, money, onClose, onDone }: Prop
           <div><span>This label costs</span><strong>{money(selected.amount_cents)}</strong></div>
           <div><span>Difference</span><strong>{diff > 0 ? `${money(diff)} more than the customer paid` : diff < 0 ? `${money(-diff)} under what the customer paid` : 'Even'}</strong></div>
         </div>}
-        <div className="actions"><button disabled={!selected || buying || loading || stale} onClick={() => void buy()}>{buying ? 'Buying…' : selected ? `Buy label · ${money(selected.amount_cents)}` : 'Buy label'}</button></div>
+        <div className="actions"><button disabled={!selected || buying || loading || stale || condition !== 'ok'} onClick={() => void buy()}>{buying ? 'Buying…' : selected ? `Buy label · ${money(selected.amount_cents)}` : 'Buy label'}</button></div>
       </>}
     </section>
   </div>;

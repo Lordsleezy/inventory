@@ -7,7 +7,8 @@ import { shippoMode } from "../lib/shippo.mjs";
 import { webSquareEnv } from "../lib/web-square.mjs";
 import { cancelAndRefund } from "../lib/web-payment.mjs";
 import { pickupSweep } from "../lib/web-pickup.mjs";
-import { deliverOrderEmails } from "../lib/web-order-email.mjs";
+import { deliverOrderEmails, ownerEmails } from "../lib/web-order-email.mjs";
+import { sendInternalAlert } from "../lib/mail.mjs";
 
 async function handle(event) {
   if (event.httpMethod === "OPTIONS") return { statusCode: 200, headers: corsHeaders(), body: "" };
@@ -49,6 +50,8 @@ async function handle(event) {
     const { data: order, error: loadError } = await sb.from("web_orders").select("*").eq("id", id).eq("store_id", storeId).maybeSingle();
     if (loadError) return json(500, { error: loadError.message });
     if (!order || order.status !== "paid" || order.fulfillment !== "ship" || order.shipped_at) return json(400, { error: "This order is not waiting to ship." });
+    if (order.pack_condition === "not_as_listed") return json(409, { error: "Condition was marked not as listed. Do not buy a label." });
+    if (order.pack_condition !== "ok") return json(400, { error: "Confirm the item matches the listing before recording a label." });
     const now = new Date().toISOString();
     const trackingUrl = carrier.toLowerCase().includes("usps") ? `https://tools.usps.com/go/TrackConfirmAction?tLabels=${encodeURIComponent(tracking)}`
       : carrier.toLowerCase().includes("ups") ? `https://www.ups.com/track?tracknum=${encodeURIComponent(tracking)}`
@@ -169,6 +172,34 @@ async function handle(event) {
       note: reason,
     });
     return json(200, { ok: true, deleted: id, sale_voided: saleVoided });
+  }
+  if (body.action === "pack_condition") {
+    const status = body.status === "not_as_listed" ? "not_as_listed" : body.status === "ok" ? "ok" : "";
+    if (!status) return json(400, { error: "Choose ok or not as listed." });
+    const { data: order, error: loadError } = await sb.from("web_orders").select("id,sku,order_no,channel,buyer_name,pack_condition").eq("id", id).eq("store_id", storeId).maybeSingle();
+    if (loadError) return json(500, { error: loadError.message });
+    if (!order) return json(404, { error: "order_not_found" });
+    const now = new Date().toISOString();
+    const { error: saveError } = await sb.from("web_orders").update({ pack_condition: status, pack_condition_at: now, updated_at: now }).eq("id", id).eq("store_id", storeId);
+    if (saveError) return json(500, { error: saveError.message });
+    let alerted = false;
+    if (status === "not_as_listed") {
+      const { data: unit } = await sb.from("units").select("title").eq("store_id", storeId).eq("sku", order.sku).maybeSingle();
+      const title = unit?.title || order.sku;
+      const subject = `CONDITION NOT AS LISTED – ${title} (${order.sku})`;
+      const text = `SKU ${order.sku} – ${title}\nOrder ${order.order_no || id} on ${order.channel || "website"}.\nBuyer: ${order.buyer_name || "unknown"}.\nStaff marked the item not as listed. Do not buy a shipping label until you message the buyer or swap the unit.`;
+      const { data: inserted, error: alertError } = await sb.from("alert_outbox").insert({
+        store_id: storeId, kind: "pack_condition", sku: order.sku,
+        payload: { order_id: id, order_no: order.order_no, channel: order.channel, buyer_name: order.buyer_name, title },
+      }).select("id").maybeSingle();
+      if (alertError) return json(500, { error: alertError.message });
+      const to = await ownerEmails(sb, storeId);
+      const sent = await sendInternalAlert({ to, subject, text }).catch((err) => ({ error: err.message }));
+      if (sent?.ok && inserted?.id) await sb.rpc("mark_alert_sent", { p_id: inserted.id, p_error: null });
+      alerted = Boolean(sent?.ok);
+    }
+    await sb.from("events").insert({ store_id: storeId, sku: order.sku, kind: "edit", field: "pack_condition", new_value: status, actor, note: `Order ${order.order_no || id}` });
+    return json(200, { ok: true, pack_condition: status, alerted });
   }
   if (body.action === "pickup_sweep") return json(200, await pickupSweep(sb));
   return json(400, { error: "unknown_action" });

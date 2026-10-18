@@ -465,6 +465,24 @@ export async function getTradingItem(token, itemId) {
   return parseTradingItem(xml);
 }
 
+/** In-place revise of condition, description, and pictures only. */
+export async function reviseFixedPriceStandards(token, change) {
+  const { reviseStandardsXml } = await import("./ebay-listing-standards.mjs");
+  const xml = await tradingCall(token, "ReviseFixedPriceItem", reviseStandardsXml(change));
+  return { itemId: String(change.itemId), ack: xmlTag(xml, "Ack"), xml };
+}
+
+export async function uploadSiteHostedPicture(token, externalUrl) {
+  const xml = await tradingCall(
+    token,
+    "UploadSiteHostedPictures",
+    `<ExternalPictureURL>${xmlEsc(externalUrl)}</ExternalPictureURL>`,
+  );
+  const url = xmlTag(xml, "FullURL") || xmlTag(xml, "PictureURL");
+  if (!url) throw new Error("UploadSiteHostedPictures returned no URL");
+  return url;
+}
+
 export async function endTradingItem(token, itemId, reason = "NotAvailable") {
   const xml = await tradingCall(
     token,

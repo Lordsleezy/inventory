@@ -75,6 +75,12 @@ export async function buyLabelForOrder(sb, storeId, orderId, { rateId, box, acto
   if (problem) return { ok: false, status: 400, error: problem };
   const match = shippoMatchesOrder(order, deps.mode);
   if (!match.ok) return { ok: false, status: 409, error: match.error };
+  if (order.pack_condition === "not_as_listed") {
+    return { ok: false, status: 409, error: "Condition was marked not as listed. The label was not bought." };
+  }
+  if (order.pack_condition !== "ok") {
+    return { ok: false, status: 400, error: "Confirm the item matches the listing before buying a label." };
+  }
   if (!rateId) return { ok: false, status: 400, error: "Pick a rate first." };
   if (!validBox(box)) return { ok: false, status: 400, error: "Enter the box length, width, height (in) and weight (lb)." };
   const cb = cleanBox(box);

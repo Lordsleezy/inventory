@@ -42,6 +42,7 @@ export function ShipmentsScreen() {
   const [tracking, setTracking] = useState<Record<string, string>>({});
   const [error, setError] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
+  const [packOk, setPackOk] = useState<Record<string, "ok" | "not_as_listed">>({});
 
   const refresh = useCallback(async () => {
     const { data, error: qErr } = await floorCloud()
@@ -72,7 +73,36 @@ export function ShipmentsScreen() {
     void refresh().catch((err) => setError(friendlyRpc(err)));
   }, [refresh]);
 
+  async function setPack(id: string, sku: string, status: "ok" | "not_as_listed") {
+    setError("");
+    setBusy(id);
+    try {
+      await ensureOnline();
+      const headers = await authHeader();
+      const res = await fetch(functionsUrl("web-order-admin"), {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "pack_condition", id, status }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || body.ok === false) {
+        const { error: rpcErr } = await floorCloud().rpc("portal_set_pack_condition", { p_order: id, p_status: status });
+        if (rpcErr) throw new Error(body.error || rpcErr.message);
+      }
+      setPackOk((prev) => ({ ...prev, [id]: status }));
+      if (status === "not_as_listed") setError(`SKU ${sku} is not as listed. Do not buy a label. The owner is alerted.`);
+    } catch (err) {
+      setError(friendlyRpc(err));
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function markBoxed(id: string) {
+    if (packOk[id] !== "ok") {
+      setError("Confirm the item matches the listing before packing.");
+      return;
+    }
     setError("");
     setBusy(id);
     try {
@@ -131,11 +161,16 @@ export function ShipmentsScreen() {
           <article key={row.id} className="border-b border-floor-line py-3">
             <ItemHead sku={row.sku} title={titles[row.sku]} />
             <pre className="mt-1 whitespace-pre-wrap font-sans text-quiet text-floor-mute">{address(row) || "No address on file"}</pre>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <span className="text-body">Condition OK?</span>
+              <button type="button" disabled={busy === row.id} onClick={() => void setPack(row.id, row.sku, "ok")}>OK</button>
+              <button type="button" disabled={busy === row.id} onClick={() => void setPack(row.id, row.sku, "not_as_listed")}>Not as listed</button>
+            </div>
             <label className="mt-2 flex min-h-touch items-center gap-2">
               <input
                 type="checkbox"
                 checked={false}
-                disabled={busy === row.id}
+                disabled={busy === row.id || packOk[row.id] !== "ok"}
                 onChange={() => void markBoxed(row.id)}
               />
               <span className="text-body">Boxed</span>
