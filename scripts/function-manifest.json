@@ -30,6 +30,7 @@
     "google-sync",
     "listing-check",
     "listing-check-background",
+    "listing-feed",
     "loyalty-email",
     "loyalty-web",
     "marketplace-daily-report",
@@ -124,7 +125,8 @@
     "SQUARE_APPLICATION_SECRET",
     "OAUTH_REDIRECT_URI",
     "AMAZON_LWA_CLIENT_ID",
-    "AMAZON_LWA_CLIENT_SECRET"
+    "AMAZON_LWA_CLIENT_SECRET",
+    "LISTING_FEED_KEY"
   ],
   "restore_env": [
     "EBAY_DELETION_ENDPOINT_URL",

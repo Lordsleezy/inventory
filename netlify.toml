@@ -65,8 +65,18 @@
 [functions."upc-lookup"]
   timeout = 26
 
+# Read-only inventory feed for marketplace listing agents. No schedule.
+[functions."listing-feed"]
+  timeout = 26
+
 [build.processing.html]
   pretty_urls = false
+
+[[redirects]]
+  from = "/listing-feed"
+  to = "/.netlify/functions/listing-feed"
+  status = 200
+  force = true
 
 [[redirects]]
   from = "/api/marketplace-prices"

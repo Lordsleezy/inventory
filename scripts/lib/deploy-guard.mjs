@@ -75,6 +75,7 @@ export function buildManifest(root) {
       "OAUTH_REDIRECT_URI",
       "AMAZON_LWA_CLIENT_ID",
       "AMAZON_LWA_CLIENT_SECRET",
+      "LISTING_FEED_KEY",
     ],
     // Missing these breaks one flow. They do not block a deploy of the rest of the store.
     restore_env: [
