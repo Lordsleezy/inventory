@@ -376,7 +376,20 @@ export async function runCollectibleBumpRevert(storeId = STORE_DEFAULT) {
   await progress({ phase: "load_bump_result" });
   const bump = await getSetting(sb, storeId, BUMP_RESULT_KEY);
   if (!bump?.csv) throw new Error("ebay_free_ship_bump_result missing — nothing to revert");
-  const targets = selectCollectiblesToRevert(parseCsv(bump.csv));
+  const bumpRows = parseCsv(bump.csv);
+  const skus = bumpRows.map((r) => String(r.sku || "").trim()).filter(Boolean);
+  const categoryBySku = {};
+  if (skus.length) {
+    const { data: drafts } = await sb
+      .from("ebay_drafts")
+      .select("sku,category_name,title")
+      .eq("store_id", storeId)
+      .in("sku", skus);
+    for (const d of drafts || []) {
+      categoryBySku[d.sku] = [d.category_name, d.title].filter(Boolean).join(" ");
+    }
+  }
+  const targets = selectCollectiblesToRevert(bumpRows, { categoryBySku });
   await progress({ phase: "targets", total: targets.length });
 
   const account = await loadEbayAccount(storeId, { username: SELLING_USERNAME });
