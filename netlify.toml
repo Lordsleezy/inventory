@@ -20,6 +20,14 @@
   schedule = "*/10 * * * *"
   timeout = 60
 
+# Amazon MFN returns report + TikTok stub → returns table / decision alerts.
+[functions."returns-sync"]
+  schedule = "*/30 * * * *"
+  timeout = 60
+
+[functions."tiktok-returns-sync"]
+  timeout = 30
+
 # Admin Amazon queue: prepare / ASIN / price / list_one (kept off amazon-sync cron bundle).
 [functions."amazon-list"]
   timeout = 60

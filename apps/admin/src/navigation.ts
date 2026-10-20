@@ -1,5 +1,5 @@
 export type MainPage = 'register' | 'sales' | 'orders' | 'receipts' | 'inventory' | 'online' | 'marketplaces' | 'amazon' | 'reports' | 'tax' | 'cameras' | 'remote' | 'logs' | 'settings';
-export type ReportTab = 'profit' | 'shipping' | 'expenses' | 'payouts';
+export type ReportTab = 'profit' | 'shipping' | 'expenses' | 'payouts' | 'returns';
 export type InventoryTab = 'browse' | 'receive' | 'attention' | 'lookup-test';
 export type AttentionSection = 'missing-cost' | 'missing-photo' | 'missing-price' | 'missing-spec' | 'missing-model' | 'missing-description';
 export type OnlineTab = 'listed' | 'ready' | 'not-ready' | 'msc' | 'reports' | 'sold';
@@ -87,7 +87,7 @@ export function parseNavFromLocation(): NavState {
     onlineChannelRaw = onlineTabRaw;
     onlineTabRaw = 'listed';
   }
-  const reportTabs: ReportTab[] = ['profit', 'shipping', 'expenses', 'payouts'];
+  const reportTabs: ReportTab[] = ['profit', 'shipping', 'expenses', 'payouts', 'returns'];
   const invTabs: InventoryTab[] = ['browse', 'receive', 'attention', 'lookup-test'];
   return {
     page: base,
@@ -106,7 +106,7 @@ export function parseNavFromLocation(): NavState {
 export function writeNavToLocation(state: NavState) {
   const q = new URLSearchParams();
   q.set('page', state.page);
-  if (state.page === 'reports' && state.reportTab !== 'profit') q.set('tab', state.reportTab);
+  if (state.page === 'reports' && state.reportTab !== 'profit') q.set('tab', state.reportTab); // includes returns
   if (state.page === 'inventory') {
     if (state.inventoryTab !== 'browse') q.set('inventoryTab', state.inventoryTab);
     if (state.inventoryTab === 'attention' && state.attentionSection !== 'missing-cost') {

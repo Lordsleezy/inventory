@@ -296,8 +296,10 @@ export function amazonConditionFromUnit(unit) {
   };
 }
 
-/** Suggest list price: 40% off retail, cover Amazon fees + $5 profit over cost. Buyer pays ship (template). */
-export function suggestAmazonPriceCents(unit, feePct = 0.15) {
+/** Suggest list price: 40% off retail, cover Amazon fees + $5 profit over cost. Buyer pays ship (template).
+ * Optional returnReservePct (from return_settings) bakes a channel return reserve into NEW list prices only —
+ * never mutates stored ask_cents / existing listings. */
+export function suggestAmazonPriceCents(unit, feePct = 0.15, returnReservePct = 0) {
   const retail =
     Number(unit.retail_cents) ||
     Number(unit.listing_specs?.retail_cents) ||
@@ -310,7 +312,11 @@ export function suggestAmazonPriceCents(unit, feePct = 0.15) {
   if (!Number.isFinite(target) || target <= 0) target = Number(unit.ask_cents) || 0;
   // Ensure net after referral ≥ cost + $5
   const minList = Math.ceil((cost + 500) / (1 - feePct));
-  const list = Math.max(target, minList);
+  let list = Math.max(target, minList);
+  const reserve = Number(returnReservePct) || 0;
+  if (reserve > 0 && list > 0) {
+    list = Math.max(list, Math.ceil((list * (100 + reserve)) / 100));
+  }
   const fee = Math.round(list * feePct);
   const profit = list - fee - cost;
   return {
@@ -319,6 +325,7 @@ export function suggestAmazonPriceCents(unit, feePct = 0.15) {
     costCents: cost,
     retailCents: Math.round(retail) || null,
     profitCents: profit,
+    returnReservePct: reserve,
     ok: profit >= 500 && list > 0,
   };
 }
@@ -1266,7 +1273,14 @@ export async function prepareAmazonQueueItem(storeId, sku) {
   }
 
   const match = await searchCatalogAsin(storeId, unit);
-  const price = suggestAmazonPriceCents(unit);
+  let returnReservePct = 0;
+  try {
+    const { reservePctForChannel } = await import("./returns.mjs");
+    returnReservePct = await reservePctForChannel(storeId, "amazon");
+  } catch {
+    returnReservePct = 0;
+  }
+  const price = suggestAmazonPriceCents(unit, 0.15, returnReservePct);
   let fee = { feeCents: amazonReferralFeeCents(price.listCents), source: "pct" };
   if (match.asin) {
     fee = await getFeesEstimate(storeId, { asin: match.asin, priceCents: price.listCents });

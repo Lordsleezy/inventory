@@ -230,6 +230,38 @@ export function evaluateMarketplaceEligibility(unit, rules = {}, extras = {}) {
     }
   }
 
+  // Return-risk gate for forced-return channels (mirrors SQL return_risk_channel_gate).
+  const channelKey = String(extras.channel || "").toLowerCase();
+  if (channelKey === "amazon" || channelKey === "tiktok") {
+    const gate = extras.returnGate || {};
+    const blockConds = (gate.block_conditions || ["fair", "defective", "for parts", "for_parts"]).map((c) =>
+      String(c).toLowerCase(),
+    );
+    const cond = String(unit?.condition || "").trim().toLowerCase();
+    for (const blocked of blockConds) {
+      if (cond && (cond === blocked || cond.includes(blocked))) {
+        return {
+          status: "block",
+          reason: `${channelLabel}: blocked — condition "${unit.condition}" not eligible for forced-return channels`,
+          source: "return_gate",
+        };
+      }
+    }
+    const requirePhotos = gate.require_real_photos !== false;
+    if (requirePhotos) {
+      const photoCount = Number(extras.photoCount ?? unit?.photo_count ?? 0);
+      const real =
+        photoCount > 0 && unit?.has_stock_photos !== true && unit?.has_ai_images !== true;
+      if (!real) {
+        return {
+          status: "block",
+          reason: `${channelLabel}: blocked — needs real unit photos before Amazon/TikTok listing`,
+          source: "return_gate",
+        };
+      }
+    }
+  }
+
   return { status: "allow", reason: `${channelLabel}: eligible`, source: "rules" };
 }
 

@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { EligibilityPage } from './EligibilityPage';
 import { OnlineSellingPage } from './OnlineSellingPage';
 import { LedgerSettingsPanel } from './LedgerSettingsPanel';
+import { ReturnSettingsPanel } from './ReturnSettingsPanel';
 import { VendooExportPanel } from './VendooExportPanel';
 type Props = {
   client: SupabaseClient;
@@ -25,6 +26,7 @@ export function SettingsPage({
     <section className="panel"><h2>Employee cuts (in-store sales)</h2>{ruleEditor}</section>
     {onlinePayoutSettings}
     <LedgerSettingsPanel client={client} money={money} busy={busy} run={run} onChanged={onLedgerChanged} />
+    <ReturnSettingsPanel client={client} money={money} busy={busy} run={run} />
     <EligibilityPage client={client} stamp={stamp} embedded />
     <OnlineSellingPage client={client} accessToken={accessToken} stamp={stamp} embedded />
     <VendooExportPanel client={client} />

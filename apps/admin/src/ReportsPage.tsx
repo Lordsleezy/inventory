@@ -3,6 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ReportTab } from './navigation';
 import { ChannelReportPage } from './ChannelReportPage';
 import { TaxReportPage } from './TaxReportPage';
+import { ReturnsReportPanel } from './ReturnsReportPanel';
 
 type Props = {
   client: SupabaseClient;
@@ -23,6 +24,7 @@ export function ReportsPage({ client, money, tab, onTab, closeouts, expenses, pa
       <button type="button" className={tab === 'shipping' ? 'active' : ''} onClick={() => onTab('shipping')}>Shipping &amp; fees</button>
       <button type="button" className={tab === 'expenses' ? 'active' : ''} onClick={() => onTab('expenses')}>Expenses</button>
       <button type="button" className={tab === 'payouts' ? 'active' : ''} onClick={() => onTab('payouts')}>Payouts</button>
+      <button type="button" className={tab === 'returns' ? 'active' : ''} onClick={() => onTab('returns')}>Returns</button>
     </div>
     {tab === 'profit' && <>
       <ChannelReportPage client={client} money={money} embedded />
@@ -34,5 +36,6 @@ export function ReportsPage({ client, money, tab, onTab, closeouts, expenses, pa
     </>}
     {tab === 'expenses' && expenses}
     {tab === 'payouts' && payouts}
+    {tab === 'returns' && <ReturnsReportPanel client={client} money={money} />}
   </>;
 }

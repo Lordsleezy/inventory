@@ -3,6 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { floorFunctionUrl } from './floorApi';
 import { CommissionOverrideControls, CommissionOverrideMark } from './CommissionOverride';
 import { type CommissionOverride, type OnlineCfg, type Rule } from './payouts';
+import { ReturnsPage } from './ReturnsPage';
 
 const CHANNEL_LABEL: Record<string, string> = {
   website: 'Website',
@@ -28,6 +29,9 @@ export type WebOrder = {
   tracking_number: string | null; tracking_url: string | null; carrier: string | null; service: string | null;
   label_url: string | null; label_purchased_at: string | null; label_cost_cents: number | null;
   pack_condition?: 'ok' | 'not_as_listed' | null;
+  pack_proof_photo_path?: string | null;
+  pack_proof_serial?: string | null;
+  pack_proof_at?: string | null;
   refund_requested_at: string | null; cancel_source: string | null; cancel_reason: string | null; canceled_at: string | null;
   shipping_rate: { source?: string; days?: number | null } | null;
   package: { length_in: number | null; width_in: number | null; height_in: number | null; weight_lb: number | null };
@@ -43,7 +47,7 @@ export type WebOrder = {
   profit_cents?: number | null;
 };
 type Props = {
-  client: SupabaseClient; accessToken: string; money: (n: number) => string; stamp: (s: string) => string;
+  client: SupabaseClient; accessToken: string; storeId: string; money: (n: number) => string; stamp: (s: string) => string;
   rules: Rule[]; cfg: OnlineCfg; commissionOverrides: Map<string, CommissionOverride>;
   personName: (id: string) => string; busy: boolean;
   onCommissionChanged: (ticketKey: string, next: CommissionOverride | null) => void;
@@ -70,6 +74,7 @@ function otherStores(o: WebOrder) {
 
 type OrderView = 'all' | 'toShip' | 'shipped' | 'pickup' | 'done' | 'canceled';
 type StatusFilter = 'all' | 'paid' | 'canceled' | 'refunded';
+type OrdersSection = 'orders' | 'returns';
 
 const VIEW_LABEL: Record<OrderView, string> = {
   all: 'All orders',
@@ -106,13 +111,14 @@ function breakdown(rows: WebOrder[]) {
   };
 }
 
-export function OrdersPage({ client, accessToken, money, stamp, rules, cfg, commissionOverrides, personName, busy: parentBusy, onCommissionChanged }: Props) {
+export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, cfg, commissionOverrides, personName, busy: parentBusy, onCommissionChanged }: Props) {
   const [orders, setOrders] = useState<WebOrder[] | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
   const [view, setView] = useState<OrderView>('all');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [section, setSection] = useState<OrdersSection>('orders');
 
   const load = useCallback(async () => {
     // No practical date hide: cover store day-one history (portal still clamps to p_days).
@@ -124,10 +130,46 @@ export function OrdersPage({ client, accessToken, money, stamp, rules, cfg, comm
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 30000); return () => clearInterval(t); }, []);
 
   async function markShipped(o: WebOrder) {
+    const ch = (o.channel || '').toLowerCase();
+    if ((ch === 'amazon' || ch === 'tiktok') && !o.pack_proof_photo_path) {
+      setError('Amazon/TikTok orders need a pack-time unit photo (and serial if any) before Mark shipped.');
+      return;
+    }
     setBusy(o.id + 'ship'); setError('');
     const { error: e } = await client.rpc('portal_mark_order_shipped', { p_order: o.id });
-    if (e) setError(e.message);
+    if (e) setError(e.message === 'pack_proof_required'
+      ? 'Upload a pack-time photo of the actual unit before marking shipped.'
+      : e.message);
     await load(); setBusy(null);
+  }
+
+  async function uploadPackProof(o: WebOrder, file: File) {
+    if (!file.type.startsWith('image/')) {
+      setError('Choose an image for pack proof.');
+      return;
+    }
+    setBusy(o.id + 'proof'); setError('');
+    try {
+      const serial = window.prompt('Serial number (optional — leave blank if none):', o.pack_proof_serial || '') ?? '';
+      const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, '_') || 'pack.jpg';
+      const path = `${storeId}/${o.sku}/pack-proof/${Date.now()}-${crypto.randomUUID()}-${safe}`;
+      const upload = await client.storage.from('unit-photos').upload(path, file, {
+        contentType: file.type || 'image/jpeg',
+        upsert: false,
+      });
+      if (upload.error) throw upload.error;
+      const { error: e } = await client.rpc('portal_set_pack_proof', {
+        p_order: o.id,
+        p_photo_path: path,
+        p_serial: serial.trim() || null,
+      });
+      if (e) throw e;
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
   }
   async function markDelivered(o: WebOrder) {
     setBusy(o.id + 'deliver'); setError('');
@@ -353,6 +395,27 @@ export function OrdersPage({ client, accessToken, money, stamp, rules, cfg, comm
             </div>
             {o.pack_condition === 'not_as_listed' && <div className="alert" role="alert">Not as listed. The owner is alerted. Do not buy a label.</div>}
             {o.pack_condition !== 'ok' && o.pack_condition !== 'not_as_listed' && <p className="hint">Check the item against the listing before a label is bought.</p>}
+            {((o.channel || '').toLowerCase() === 'amazon' || (o.channel || '').toLowerCase() === 'tiktok') && (
+              <div className="actions">
+                <span className="hint">Pack proof (required)</span>
+                <label className="secondary" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 14px', border: '1px solid var(--btn-border)', borderRadius: 8, cursor: 'pointer' }}>
+                  {busy === o.id + 'proof' ? 'Uploading…' : o.pack_proof_photo_path ? 'Replace unit photo' : 'Photo of unit'}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    hidden
+                    disabled={!!busy}
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) void uploadPackProof(o, f);
+                      e.target.value = '';
+                    }}
+                  />
+                </label>
+                {o.pack_proof_at && <small className="ok-text">Proof saved {stamp(o.pack_proof_at)}{o.pack_proof_serial ? ` · S/N ${o.pack_proof_serial}` : ''}</small>}
+              </div>
+            )}
             <div className="actions">
               <button disabled={!!busy} onClick={() => void markShipped(o)}>{busy === o.id + 'ship' ? 'Saving…' : 'Mark shipped'}</button>
               <button className="secondary" disabled={!!busy} onClick={() => void markDelivered(o)}>{busy === o.id + 'deliver' ? 'Saving…' : 'Mark delivered'}</button>
@@ -409,8 +472,14 @@ export function OrdersPage({ client, accessToken, money, stamp, rules, cfg, comm
   };
 
   return <>
-    <header><div><div className="eyebrow">WEBSITE AND MARKETPLACES</div><h1>Orders</h1><p>Every online order since day one. Default view is All; use the status filter or stage cards. No customer emails. Refreshes every 30 seconds.</p></div>
+    <header><div><div className="eyebrow">WEBSITE AND MARKETPLACES</div><h1>Orders</h1><p>Every online order since day one. Returns live under this page for garage scan/inspect. No customer emails. Refreshes every 30 seconds.</p></div>
       <div className="actions"><button className="secondary" onClick={() => void load()}>Refresh</button></div></header>
+    <div className="inventory-tabs" role="tablist" aria-label="Orders sections">
+      <button type="button" className={section === 'orders' ? 'active' : ''} onClick={() => setSection('orders')}>Fulfillment</button>
+      <button type="button" className={section === 'returns' ? 'active' : ''} onClick={() => setSection('returns')}>Returns</button>
+    </div>
+    {section === 'returns' && <ReturnsPage client={client} storeId={storeId} money={money} stamp={stamp} />}
+    {section === 'orders' && <>
     {error && <div className="alert" role="alert">{error}<button onClick={() => setError('')}>Dismiss</button></div>}
     <div className="stats">
       {([
@@ -484,5 +553,6 @@ export function OrdersPage({ client, accessToken, money, stamp, rules, cfg, comm
         ? <div className="empty">{view === 'all' ? 'No orders match this filter.' : view === 'toShip' ? 'Nothing to ship.' : view === 'shipped' ? 'None in transit.' : view === 'pickup' ? 'No pickups waiting.' : view === 'done' ? 'No completed orders yet.' : 'None.'}</div>
         : <div className="ticket-list">{active.map(renderTicket)}</div>}
     </section>
+    </>}
   </>;
 }

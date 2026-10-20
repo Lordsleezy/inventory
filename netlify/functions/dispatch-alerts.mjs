@@ -142,7 +142,7 @@ async function handle(event) {
 
   // Prioritize real sales over nag spam; one digest for remaining nags.
   const rows = [...(alerts || [])];
-  const priority = { double_sell: 0, pack_condition: 0, sale_delist: 1, web_order: 2, web_shipped: 3, sale_relist: 4, delist_nag: 9 };
+  const priority = { double_sell: 0, pack_condition: 0, return_decision: 0, sale_delist: 1, web_order: 2, web_shipped: 3, sale_relist: 4, delist_nag: 9 };
   rows.sort((a, b) => (priority[a.kind] ?? 5) - (priority[b.kind] ?? 5) || String(a.created_at).localeCompare(String(b.created_at)));
 
   const saleLike = rows.filter((a) => a.kind !== "delist_nag");
@@ -216,7 +216,9 @@ async function handle(event) {
       if (alert.kind === "double_sell") return u.notify_email || u.notify_push;
       if (alert.kind === "sale_delist" || alert.kind === "delist_nag") return u.delist_duty || u.role === "owner";
       if (alert.kind === "web_order") return u.role !== "staff" && u.notify_email;
-      if (alert.kind === "sale_relist" || alert.kind === "pack_condition") return u.role === "owner" || u.notify_email;
+      if (alert.kind === "sale_relist" || alert.kind === "pack_condition" || alert.kind === "return_decision") {
+        return u.role === "owner" || u.notify_email;
+      }
       return false;
     });
   }
@@ -265,6 +267,23 @@ async function handle(event) {
       } else if (alert.kind === "pack_condition") {
         subject = `CONDITION NOT AS LISTED – ${label ? `${label} ` : ""}(${alert.sku})`;
         text = `SKU ${alert.sku}${title ? ` – ${title}` : ""} was marked not as listed while packing${payload.order_no ? ` (order ${payload.order_no})` : ""}. Do not buy a shipping label. Message the buyer or swap the unit.`;
+      } else if (alert.kind === "return_decision") {
+        const ch = channelName(payload.channel);
+        const deadline = payload.deadline_at
+          ? new Date(payload.deadline_at).toLocaleString("en-US", { timeZone: "America/Los_Angeles" })
+          : "soon";
+        subject = `RETURN DECISION NEEDED – ${ch} – ${label ? `${label} ` : ""}(${alert.sku})`;
+        text = [
+          `A ${ch} return needs a seller decision before the clock runs out.`,
+          `SKU ${alert.sku}${title ? ` – ${title}` : ""}`,
+          payload.order_id ? `Order: ${payload.order_id}` : null,
+          `Reason: ${payload.reason || "n/a"}`,
+          `Decide by: ${deadline} (PT)`,
+          `Open Admin → Orders → Returns and approve / refund-no-return / deny.`,
+          payload.return_id ? `Return id: ${payload.return_id}` : null,
+        ]
+          .filter(Boolean)
+          .join("\n");
       } else if (alert.kind === "sale_relist") {
         const relist = (payload.relist_on || []).filter(Boolean).map(channelName);
         subject = `RELIST – ${label ? `${label} ` : ""}(${alert.sku})${relist.length ? ` – ${relist.join(", ")}` : ""}`;
