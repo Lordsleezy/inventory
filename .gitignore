@@ -12,7 +12,7 @@ logs/
 !.env.example
 !**/.env.example
 exports/
-data/
+/data/
 *.sqlite
 *.sqlite3
 *.db
