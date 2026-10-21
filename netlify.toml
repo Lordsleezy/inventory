@@ -76,6 +76,10 @@
 [functions."ebay-migrate-background"]
   timeout = 900
 
+# Manual portal "Sync all accounts" / per-account sync (avoids 504 on ebay-connection).
+[functions."ebay-sync-now-background"]
+  timeout = 900
+
 # Read-only ikonikdeals2026 listing audit (ActiveList + Shippo rates + UPC retail).
 [functions."ebay-listing-audit-background"]
   timeout = 900
