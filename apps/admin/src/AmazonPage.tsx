@@ -66,7 +66,14 @@ const FLAG_LABEL: Record<string, string> = {
   gated_brand: 'Gated brand',
   never_list: 'Never list',
   no_price: 'No price',
+  approval_required: 'Approval required',
+  gated_restriction: 'Listing restricted',
 };
+
+function isRestrictionReview(reason: string | null | undefined): boolean {
+  if (!reason) return false;
+  return /approval required|not eligible|listing restriction|gated|Seller Central|restrictions check/i.test(reason);
+}
 
 const SKIP_REASON_LABEL: Record<string, string> = {
   unknown_sku: 'not a Floor SKU',
@@ -209,10 +216,22 @@ export function AmazonPage({ client, accessToken, money: moneyFmt }: Props) {
       if (clear === 'sku' || clear === 'both') setSkuDraft('');
       if (clear === 'upc' || clear === 'both') setUpcDraft('');
       await load();
+      const prepareFails: string[] = [];
       for (const a of added) {
-        await amazonListCall(accessToken, { action: 'prepare', sku: a.sku }).catch(() => undefined);
+        try {
+          const prep = await amazonListCall(accessToken, { action: 'prepare', sku: a.sku });
+          if (prep.ok === false) {
+            const why = String(prep.needs_review_reason || prep.last_error || prep.message || prep.status || 'prepare failed');
+            prepareFails.push(`${a.sku}: ${why}`);
+          }
+        } catch (e) {
+          prepareFails.push(`${a.sku}: ${errText(e)}`);
+        }
       }
       await load();
+      if (prepareFails.length) {
+        setError(`Prepare issues — ${prepareFails.join('; ')}`);
+      }
       skuRef.current?.focus();
     } catch (e) {
       setError(errText(e));
@@ -267,8 +286,45 @@ export function AmazonPage({ client, accessToken, money: moneyFmt }: Props) {
     try {
       const { error: e } = await client.rpc('portal_amazon_set_upc', { p_sku: sku, p_upc: digits });
       if (e) throw e;
-      await amazonListCall(accessToken, { action: 'prepare', sku }).catch(() => undefined);
-      setFlash(`UPC saved for ${sku}. Matching ASINs…`);
+      try {
+        const prep = await amazonListCall(accessToken, { action: 'prepare', sku });
+        if (prep.ok === false) {
+          setError(`${sku}: ${String(prep.needs_review_reason || prep.last_error || prep.message || 'prepare failed')}`);
+        } else {
+          setFlash(`UPC saved for ${sku}. Matching ASINs…`);
+        }
+      } catch (e) {
+        setError(`UPC saved for ${sku}, but prepare failed: ${errText(e)}`);
+      }
+      await load();
+    } catch (e) {
+      setError(errText(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveAsin(sku: string, rawAsin: string) {
+    const asin = rawAsin.trim().toUpperCase();
+    if (!asin) return;
+    if (!/^B0[A-Z0-9]{8}$/i.test(asin)) {
+      setError('ASIN must look like B0XXXXXXXX (10 characters)');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    try {
+      const result = await amazonListCall(accessToken, { action: 'set_asin', sku, asin });
+      const prep = (result.prepare || {}) as Record<string, unknown>;
+      if (prep.ok === false) {
+        setError(
+          `${sku}: ASIN ${asin} saved, but ${String(prep.needs_review_reason || prep.last_error || prep.message || 'needs review')}`,
+        );
+      } else if (prep.status === 'needs_review') {
+        setFlash(`${sku}: ASIN ${asin} saved — ${String(prep.needs_review_reason || 'needs review')}`);
+      } else {
+        setFlash(`${sku}: ASIN ${asin} saved and prepared.`);
+      }
       await load();
     } catch (e) {
       setError(errText(e));
@@ -296,9 +352,16 @@ export function AmazonPage({ client, accessToken, money: moneyFmt }: Props) {
 
   async function retry(sku: string) {
     setBusy(true);
+    setError('');
     try {
-      await amazonListCall(accessToken, { action: 'retry', sku });
-      setFlash(`Retried prepare for ${sku}.`);
+      const prep = await amazonListCall(accessToken, { action: 'retry', sku });
+      if (prep.ok === false) {
+        setError(`${sku}: ${String(prep.needs_review_reason || prep.last_error || prep.message || 'prepare failed')}`);
+      } else if (prep.status === 'needs_review') {
+        setFlash(`${sku}: needs review — ${String(prep.needs_review_reason || 'see details')}`);
+      } else {
+        setFlash(`Retried prepare for ${sku} → ${String(prep.status || 'ok')}.`);
+      }
       await load();
     } catch (e) {
       setError(errText(e));
@@ -441,7 +504,7 @@ export function AmazonPage({ client, accessToken, money: moneyFmt }: Props) {
                         {r.matched_title ? ` · ${r.matched_title}` : ''}
                       </div>
                     ) : (
-                      <div className="amazon-meta">No ASIN matched yet</div>
+                      <div className="amazon-meta">No ASIN matched yet — paste one below</div>
                     )}
                     {(r.flags || []).length > 0 && (
                       <div className="amazon-flags">
@@ -452,9 +515,54 @@ export function AmazonPage({ client, accessToken, money: moneyFmt }: Props) {
                         ))}
                       </div>
                     )}
-                    {r.last_error && <p className="error" style={{ margin: '6px 0' }}>{r.last_error}</p>}
-                    {r.needs_review_reason && <p className="hint" style={{ margin: '6px 0' }}>{r.needs_review_reason}</p>}
+                    {(r.status === 'needs_review' || isRestrictionReview(r.needs_review_reason)) && (
+                      <div className="amazon-review-banner" role="status">
+                        <strong>
+                          {/approval/i.test(r.needs_review_reason || '')
+                            ? 'Approval needed in Seller Central'
+                            : /not eligible|restriction/i.test(r.needs_review_reason || '')
+                              ? 'Listing restricted'
+                              : 'Needs review'}
+                        </strong>
+                        {r.needs_review_reason ? <span>{r.needs_review_reason}</span> : null}
+                      </div>
+                    )}
+                    {r.last_error && (
+                      <p className="error amazon-prepare-error" style={{ margin: '6px 0' }}>
+                        {r.last_error}
+                      </p>
+                    )}
+                    {r.needs_review_reason &&
+                      r.status !== 'needs_review' &&
+                      !isRestrictionReview(r.needs_review_reason) && (
+                        <p className="hint" style={{ margin: '6px 0' }}>
+                          {r.needs_review_reason}
+                        </p>
+                      )}
                     {r.condition_note && <p className="hint" style={{ margin: '6px 0' }}>{r.condition_note}</p>}
+
+                    <label>
+                      Amazon ASIN
+                      <input
+                        disabled={busy}
+                        placeholder="B0…"
+                        autoComplete="off"
+                        spellCheck={false}
+                        defaultValue={r.asin || ''}
+                        key={`${r.sku}:asin:${r.asin || ''}`}
+                        onBlur={(e) => {
+                          const next = e.target.value.trim().toUpperCase();
+                          const cur = (r.asin || '').trim().toUpperCase();
+                          if (next && next !== cur) void saveAsin(r.sku, next);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key !== 'Enter') return;
+                          e.preventDefault();
+                          const next = (e.target as HTMLInputElement).value.trim().toUpperCase();
+                          if (next) void saveAsin(r.sku, next);
+                        }}
+                      />
+                    </label>
 
                     {missingSku && (
                       <label>
