@@ -6,6 +6,7 @@ import {
   oauthScopesForRole,
   requireEbayEnabled,
 } from "./ebay-env.mjs";
+import { tiktokAuthorizeUrl } from "./tiktok-shop.mjs";
 
 const SCOPES = {
   square: "MERCHANT_PROFILE_READ PAYMENTS_WRITE PAYMENTS_WRITE_IN_PERSON",
@@ -37,6 +38,9 @@ export function authorizeUrl(provider, nonce, { ebayRole = null } = {}) {
   if (provider === "amazon") {
     const appId = requireEnv("AMAZON_APPLICATION_ID");
     return `https://sellercentral.amazon.com/apps/authorize/consent?application_id=${encodeURIComponent(appId)}&version=beta&state=${nonce}`;
+  }
+  if (provider === "tiktok") {
+    return tiktokAuthorizeUrl(nonce);
   }
   throw new Error("unknown_provider");
 }

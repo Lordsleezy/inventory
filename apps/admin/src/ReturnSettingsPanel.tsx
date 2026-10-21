@@ -22,7 +22,7 @@ type Supplier = {
   notes?: string | null;
 };
 
-const CHANNELS = ['amazon', 'tiktok', 'ebay', 'mercari', 'website', 'depop', 'whatnot', 'facebook', 'other'] as const;
+const CHANNELS = ['amazon', 'tiktok', 'ebay', 'depop', 'website', 'other'] as const;
 
 export function ReturnSettingsPanel({ client, money, busy, run }: Props) {
   const [settings, setSettings] = useState<Record<string, unknown> | null>(null);

@@ -73,17 +73,21 @@ type Props = {
 const CHANNELS: { key: Exclude<OnlineChannel, 'all'>; label: string }[] = [
   { key: 'ebay', label: 'eBay' },
   { key: 'depop', label: 'Depop' },
-  { key: 'whatnot', label: 'Whatnot' },
-  { key: 'mercari', label: 'Mercari' },
   { key: 'amazon', label: 'Amazon' },
   { key: 'tiktok', label: 'TikTok' },
   { key: 'facebook', label: 'Facebook' },
 ];
 
-/** Report table platforms (includes website sales that aren't a listing subtab). */
+/** Report platforms — includes retired sale channels for sold history. */
 const REPORT_CHANNELS: { key: string; label: string }[] = [
-  ...CHANNELS,
+  { key: 'ebay', label: 'eBay' },
+  { key: 'depop', label: 'Depop' },
+  { key: 'amazon', label: 'Amazon' },
+  { key: 'tiktok', label: 'TikTok' },
   { key: 'website', label: 'Website' },
+  { key: 'mercari', label: 'Mercari' },
+  { key: 'whatnot', label: 'Whatnot' },
+  { key: 'facebook', label: 'Facebook' },
 ];
 
 const MONTHS = [
@@ -92,8 +96,7 @@ const MONTHS = [
 ];
 
 const CHANNEL_LABEL: Record<string, string> = Object.fromEntries([
-  ...CHANNELS.map(c => [c.key, c.label] as const),
-  ['website', 'Website'] as const,
+  ...REPORT_CHANNELS.map(c => [c.key, c.label] as const),
   ['web', 'Website'] as const,
 ]);
 
@@ -455,7 +458,7 @@ export function OnlinePage({
               {showingFacebookOnly && 'Fridges, scooters, sofas, mattresses, dishwashers, commercial fryers, beds ΓÇö local Facebook Marketplace only.'}
               {tab === 'ready' && 'In stock with photo, price, cost, specs, and eBay eligibility ΓÇö and not already on eBay. Quantity lots already listed as one unit are excluded.'}
               {tab === 'not-ready' && 'Shippable units missing photo, price, cost, specs, or eligibility ΓÇö fix these before listing.'}
-              {tab === 'msc' && 'Listed on eBay but missing Mercari, Depop, and/or Whatnot (Facebook & Amazon ignored for now).'}
+              {tab === 'msc' && 'Listed on eBay but missing Depop, Amazon, and/or TikTok (Facebook ignored for MSC).'}
               {tab === 'sold' && 'Online marketplace and website sales only ΓÇö in-store / Floor sales are excluded.'}
             </p>
           </div>

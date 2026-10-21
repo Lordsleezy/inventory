@@ -699,9 +699,17 @@ export async function listAmazonOffer(storeId, kit) {
   const gating = await amazonGatingCheck(storeId, { brand: unit.brand, category: unit.category, asin });
   if (!gating.ok) return { ok: false, reason: gating.reason, message: gating.message || "Gated" };
 
-  const priceHint = suggestAmazonPriceCents(unit);
+  let returnReservePct = 0;
+  try {
+    const { reservePctForChannel } = await import("./returns.mjs");
+    returnReservePct = await reservePctForChannel(storeId, "amazon");
+  } catch {
+    returnReservePct = 0;
+  }
+  const priceHint = suggestAmazonPriceCents(unit, 0.15, returnReservePct);
   const fees = await getFeesEstimate(storeId, { asin, priceCents: kit.priceCents || priceHint.listCents });
-  const price = suggestAmazonPriceCents(unit, fees.feeCents / Math.max(kit.priceCents || priceHint.listCents, 1));
+  const feePct = fees.feeCents / Math.max(kit.priceCents || priceHint.listCents, 1);
+  const price = suggestAmazonPriceCents(unit, feePct || 0.15, returnReservePct);
   const listCents = kit.priceCents || price.listCents;
   if (listCents - fees.feeCents - price.costCents < 500) {
     return {
@@ -716,24 +724,14 @@ export async function listAmazonOffer(storeId, kit) {
   const sid = sellerId();
   if (!sid) return { ok: false, reason: "missing_seller_id", message: "AMAZON_SELLER_ID not set" };
 
-  // Restrictions check
-  try {
-    const restr = await spapiFetch(
-      storeId,
-      "GET",
-      `/listings/2021-08-01/restrictions?asin=${encodeURIComponent(asin)}&sellerId=${encodeURIComponent(sid)}&marketplaceIds=${marketplaceId()}&conditionType=${encodeURIComponent(cond.amazon)}`,
-    );
-    const blocked = (restr?.restrictions || []).some((r) => /NOT_ELIGIBLE|APPROVAL_REQUIRED/i.test(JSON.stringify(r)));
-    if (blocked) {
-      return {
-        ok: false,
-        reason: "gated_restriction",
-        message: "Amazon listing restrictions block this ASIN/condition. Approve in Seller Central or skip.",
-        restr,
-      };
-    }
-  } catch {
-    /* restrictions endpoint optional */
+  const restr = await checkListingRestrictions(storeId, { asin, sellerId: sid, conditionType: cond.amazon });
+  if (restr.blocked) {
+    return {
+      ok: false,
+      reason: restr.reason || "gated_restriction",
+      message: restr.message,
+      restr: restr.raw,
+    };
   }
 
   const productType = kit.productType || "PRODUCT";
@@ -802,6 +800,85 @@ export async function amazonGatingCheck(_storeId, { brand, category, asin }) {
   void category;
   void asin;
   return { ok: true };
+}
+
+/**
+ * Listings Restrictions API — surface approval / not-eligible clearly (never silent).
+ * Empty restrictions (or none matching condition) means eligible to list.
+ */
+export async function checkListingRestrictions(storeId, { asin, sellerId: sid, conditionType }) {
+  const seller = sid || sellerId();
+  if (!asin || !seller) {
+    return {
+      blocked: true,
+      reason: "restrictions_incomplete",
+      message: !asin
+        ? "ASIN required before Amazon restrictions check."
+        : "AMAZON_SELLER_ID not set — cannot check listing restrictions.",
+      raw: null,
+    };
+  }
+  const cond = conditionType || "new_new";
+  try {
+    const restr = await spapiFetch(
+      storeId,
+      "GET",
+      `/listings/2021-08-01/restrictions?asin=${encodeURIComponent(asin)}&sellerId=${encodeURIComponent(seller)}&marketplaceIds=${marketplaceId()}&conditionType=${encodeURIComponent(cond)}`,
+    );
+    const rows = restr?.restrictions || [];
+    const reasons = [];
+    for (const r of rows) {
+      for (const reason of r?.reasons || []) {
+        const code = String(reason?.reasonCode || reason?.code || "").toUpperCase();
+        const msg = String(reason?.message || "").trim();
+        if (code || msg) reasons.push({ code, message: msg });
+      }
+      // Some payloads only nest codes in the restriction object itself
+      const blob = JSON.stringify(r);
+      if (/APPROVAL_REQUIRED/i.test(blob) && !reasons.some((x) => x.code === "APPROVAL_REQUIRED")) {
+        reasons.push({ code: "APPROVAL_REQUIRED", message: "Seller Central approval required for this ASIN/condition." });
+      }
+      if (/NOT_ELIGIBLE/i.test(blob) && !reasons.some((x) => x.code === "NOT_ELIGIBLE")) {
+        reasons.push({ code: "NOT_ELIGIBLE", message: "Not eligible to list this ASIN/condition." });
+      }
+    }
+    const approval = reasons.find((x) => /APPROVAL_REQUIRED/i.test(x.code));
+    const ineligible = reasons.find((x) => /NOT_ELIGIBLE/i.test(x.code));
+    if (ineligible || approval || reasons.some((x) => /NOT_ELIGIBLE|APPROVAL_REQUIRED/i.test(x.code + x.message))) {
+      const primary = ineligible || approval || reasons[0];
+      const label = primary?.code === "APPROVAL_REQUIRED"
+        ? "Amazon approval required"
+        : primary?.code === "NOT_ELIGIBLE"
+          ? "Amazon listing not eligible"
+          : "Amazon listing restriction";
+      const detail = primary?.message || reasons.map((x) => x.message || x.code).filter(Boolean).join("; ");
+      return {
+        blocked: true,
+        reason: primary?.code === "APPROVAL_REQUIRED" ? "approval_required" : "gated_restriction",
+        message: detail ? `${label}: ${detail}` : `${label} for ASIN ${asin} (${cond}). Approve in Seller Central or skip.`,
+        codes: reasons.map((x) => x.code).filter(Boolean),
+        raw: restr,
+      };
+    }
+    return { blocked: false, reason: null, message: null, raw: restr };
+  } catch (e) {
+    const msg = String(e?.message || e).slice(0, 280);
+    // Auth / role gaps must not look like "ready to list"
+    if (/Unauthorized|403|Access|Forbidden|amazon_not_connected|Missing env/i.test(msg)) {
+      return {
+        blocked: true,
+        reason: "restrictions_check_failed",
+        message: `Could not verify Amazon listing restrictions (${msg}). Fix SP-API access, then Retry / prepare.`,
+        raw: e?.body || null,
+      };
+    }
+    return {
+      blocked: true,
+      reason: "restrictions_check_failed",
+      message: `Amazon restrictions check failed: ${msg}. Retry after Seller Central / API recovers.`,
+      raw: e?.body || null,
+    };
+  }
 }
 
 export async function zeroAmazonQuantityForSku(storeId, sku) {
@@ -1286,6 +1363,61 @@ export async function prepareAmazonQueueItem(storeId, sku) {
     fee = await getFeesEstimate(storeId, { asin: match.asin, priceCents: price.listCents });
   }
 
+  const gating = await amazonGatingCheck(storeId, {
+    brand: unit.brand,
+    category: unit.category,
+    asin: match.asin,
+  });
+  if (!gating.ok) {
+    const patch = {
+      status: "needs_review",
+      asin: match.asin,
+      matched_title: match.title,
+      amazon_price_cents: price.listCents,
+      fee_estimate_cents: fee.feeCents,
+      condition_code: cond.amazon,
+      condition_note: cond.note,
+      retail_cents: price.retailCents,
+      cost_cents: price.costCents,
+      needs_review_reason: gating.message || "Gated brand — approval needed in Seller Central",
+      last_error: null,
+    };
+    await sb
+      .from("amazon_list_items")
+      .update({ ...patch, updated_at: new Date().toISOString() })
+      .eq("store_id", storeId)
+      .eq("sku", sku);
+    return { ok: false, ...patch, match, price, gating };
+  }
+
+  if (match.asin) {
+    const restr = await checkListingRestrictions(storeId, {
+      asin: match.asin,
+      conditionType: cond.amazon,
+    });
+    if (restr.blocked) {
+      const patch = {
+        status: "needs_review",
+        asin: match.asin,
+        matched_title: match.title,
+        amazon_price_cents: price.listCents,
+        fee_estimate_cents: fee.feeCents,
+        condition_code: cond.amazon,
+        condition_note: cond.note,
+        retail_cents: price.retailCents,
+        cost_cents: price.costCents,
+        needs_review_reason: restr.message,
+        last_error: restr.reason === "restrictions_check_failed" ? restr.message : null,
+      };
+      await sb
+        .from("amazon_list_items")
+        .update({ ...patch, updated_at: new Date().toISOString() })
+        .eq("store_id", storeId)
+        .eq("sku", sku);
+      return { ok: false, ...patch, match, price, restrictions: restr };
+    }
+  }
+
   const patch = {
     status: match.asin ? "ready" : "needs_review",
     asin: match.asin,
@@ -1296,7 +1428,9 @@ export async function prepareAmazonQueueItem(storeId, sku) {
     condition_note: cond.note,
     retail_cents: price.retailCents,
     cost_cents: price.costCents,
-    needs_review_reason: match.asin ? null : "No ASIN match — paste correct ASIN or remove",
+    needs_review_reason: match.asin
+      ? null
+      : "No ASIN match — paste correct ASIN below, then Retry / prepare",
     last_error: null,
   };
   await sb
@@ -1304,5 +1438,5 @@ export async function prepareAmazonQueueItem(storeId, sku) {
     .update({ ...patch, updated_at: new Date().toISOString() })
     .eq("store_id", storeId)
     .eq("sku", sku);
-  return { ok: true, ...patch, match, price };
+  return { ok: true, ...patch, match, price, returnReservePct };
 }

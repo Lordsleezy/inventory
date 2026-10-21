@@ -41,13 +41,21 @@ async function handleStaff(event) {
     if (!/^B0[A-Z0-9]{8}$/i.test(asin)) return json(400, { ok: false, error: "invalid_asin" });
     await sb
       .from("amazon_list_items")
-      .update({ asin, updated_at: new Date().toISOString(), last_error: null })
+      .update({
+        asin,
+        status: "queued",
+        needs_review_reason: null,
+        updated_at: new Date().toISOString(),
+        last_error: null,
+      })
       .eq("store_id", storeId)
       .eq("sku", sku);
     const { data: unit } = await sb.from("units").select("listing_specs").eq("store_id", storeId).eq("sku", sku).maybeSingle();
     const specs = { ...(unit?.listing_specs || {}), asin };
     await sb.from("units").update({ listing_specs: specs }).eq("store_id", storeId).eq("sku", sku);
-    return json(200, { ok: true, sku, asin });
+    // Re-run prepare so restrictions / fees / price refresh against the pasted ASIN
+    const prepared = await prepareAmazonQueueItem(storeId, sku);
+    return json(200, { ok: true, sku, asin, prepare: prepared });
   }
 
   if (action === "set_price") {
@@ -101,10 +109,20 @@ async function handleStaff(event) {
         .eq("store_id", storeId)
         .eq("sku", sku);
     } else {
+      const reviewReasons = new Set([
+        "needs_asin",
+        "gated_restriction",
+        "approval_required",
+        "gated_brand",
+        "restrictions_check_failed",
+        "condition_unclear",
+      ]);
+      const needsReview = reviewReasons.has(result.reason);
       await sb
         .from("amazon_list_items")
         .update({
-          status: result.reason === "needs_asin" ? "needs_review" : "error",
+          status: needsReview ? "needs_review" : "error",
+          needs_review_reason: needsReview ? result.message || result.reason || null : null,
           last_error: result.message || result.reason || "list_failed",
           updated_at: new Date().toISOString(),
         })

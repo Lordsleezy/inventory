@@ -193,7 +193,7 @@ export function EligibilityPage({ client, stamp, embedded }: Props) {
           {rules.map((r) => <option key={r.channel} value={r.channel}>{r.channel}</option>)}
         </select></label>
       </div>
-      <p className="hint">Changes apply immediately to Vendoo export, Floor listing toggles, eBay drafts, website listing, and Google sync. No code deploy needed.</p>
+      <p className="hint">Changes apply immediately to Floor listing toggles, eBay drafts, Amazon/TikTok queues, website listing, and Google sync. No code deploy needed.</p>
       <label className="inventory-check"><input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />Rules enabled for {channel}</label>
       <div className="check-grid" style={{ marginTop: 12 }}>
         {boolKeys.map((key) => <label key={key}>

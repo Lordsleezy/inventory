@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 const base = (import.meta.env.VITE_FLOOR_FUNCTIONS_URL || 'https://inventoryobi.netlify.app').replace(/\/$/, '');
-const channels = [['ebay', 'eBay'], ['mercari', 'Mercari'], ['whatnot', 'Whatnot'], ['depop', 'Depop'], ['website', 'Website']] as const;
+const channels = [['ebay', 'eBay'], ['depop', 'Depop'], ['website', 'Website']] as const;
 type Pricing = {
   sku: string; floor_cents: number; label_estimate_cents: number; label_is_estimate: boolean;
   missing_package_data: boolean; packing_markup_cents: number; global_packing_markup_cents: number;
