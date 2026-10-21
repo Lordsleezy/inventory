@@ -7,7 +7,6 @@ import { ebayDisabled } from "../lib/ebay-env.mjs";
 import {
   disconnectEbay,
   ebayConnectionStatus,
-  pollEbayOrders,
 } from "../lib/ebay.mjs";
 import { loadEbayAccount } from "../lib/ebay-accounts.mjs";
 import { ensureBusinessPolicies } from "../lib/ebay-policies.mjs";
@@ -17,6 +16,7 @@ import {
   migrationPrerequisites,
   runEbayMigration,
 } from "../lib/ebay-migrate.mjs";
+import { getEbaySyncNowStatus, startEbaySyncNow } from "../lib/ebay-sync-now.mjs";
 
 async function startConnect(ctx, event, role) {
   if (!ctx.userId) return json(400, { error: "Sign in from the admin portal to connect eBay." });
@@ -54,9 +54,11 @@ async function handle(event) {
     const status = await ebayConnectionStatus(storeId);
     const pre = await migrationPrerequisites(storeId);
     const latest = await latestMigrationRun(storeId);
+    const syncNow = await getEbaySyncNowStatus(storeId);
     return json(200, {
       ok: true,
       ...status,
+      syncNow,
       migration: {
         ready: pre.ready,
         blockers: pre.blockers,
@@ -80,17 +82,27 @@ async function handle(event) {
   }
 
   if (action === "sync_now") {
-    const status = await ebayConnectionStatus(storeId);
-    if (!status.connected) return json(400, { ok: false, error: "eBay is not connected." });
+    // Always background — syncing both accounts (fulfillment + cancel reconcile + Trading)
+    // exceeds the ~26s sync-function budget and 504s the portal.
     const accountId = body.account_id || body.accountId || null;
-    const orders = accountId
-      ? await pollEbayOrders(storeId, { accountId })
-      : await Promise.all(
-          (status.accounts || [])
-            .filter((a) => a.status === "connected")
-            .map((a) => pollEbayOrders(storeId, { accountId: a.id })),
-        ).then((rows) => rows.flat());
-    return json(200, { ok: true, orders, ...(await ebayConnectionStatus(storeId)) });
+    const started = await startEbaySyncNow(storeId, {
+      accountId,
+      requestedBy: ctx.actor || ctx.userId || "portal",
+    });
+    if (!started.ok) return json(400, started);
+    return json(200, {
+      ...started,
+      ...(await ebayConnectionStatus(storeId)),
+      syncNow: started.sync || (await getEbaySyncNowStatus(storeId)),
+    });
+  }
+
+  if (action === "sync_latest" || action === "sync_status") {
+    return json(200, {
+      ok: true,
+      syncNow: await getEbaySyncNowStatus(storeId),
+      ...(await ebayConnectionStatus(storeId)),
+    });
   }
 
   if (action === "ensure_policies") {

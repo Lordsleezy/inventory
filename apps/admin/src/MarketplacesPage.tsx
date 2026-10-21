@@ -20,6 +20,17 @@ type Review={id:number;marketplace:string|null;subject:string|null;state:string;
 type Delist={id:number;sku:string;channel:string;created_at:string};
 type EbayAccount={id:string;username:string;role:string;status:string;policiesReady?:boolean;hasFinances?:boolean;connected_at?:string|null;last_error?:string|null;scopes?:string[]};
 type MigrationItem={source_item_id?:string;sourceItemId?:string;sku?:string|null;title?:string|null;price_cents?:number|null;priceCents?:number|null;outcome:string;reason?:string|null;dest_item_id?:string|null;destItemId?:string|null};
+type EbaySyncNow={
+  status?:string;
+  requested_at?:string;
+  started_at?:string|null;
+  finished_at?:string|null;
+  error?:string|null;
+  message?:string;
+  progress?:{phase?:string;current?:number;total?:number;username?:string;message?:string};
+  summary?:{accounts?:number;results?:number;errors?:number;ok_accounts?:number;failed_accounts?:number}|null;
+  account_results?:{username?:string;role?:string;ok?:boolean;result_count?:number;matched?:number;skipped?:number;errors?:string[]}[];
+};
 type EbayStatus={
   connected:boolean;
   username:string|null;
@@ -36,6 +47,7 @@ type EbayStatus={
   sellingAccount?:EbayAccount|null;
   ordersOnlyAccount?:EbayAccount|null;
   migrationReady?:boolean;
+  syncNow?:EbaySyncNow|null;
   migration?:{
     ready:boolean;
     blockers:string[];
@@ -53,13 +65,26 @@ async function ebayCall(token:string,action:string,extra:Record<string,unknown>=
     url?:string;
     orders?:unknown;
     started?:boolean;
+    alreadyRunning?:boolean;
     message?:string;
     summary?:Record<string,number>;
     items?:MigrationItem[];
     blockers?:string[];
     policies?:unknown;
+    syncNow?:EbaySyncNow|null;
     latest?:{run:Record<string,unknown>;items:MigrationItem[]}|null;
   };
+}
+function syncNowRunning(s?:EbaySyncNow|null){
+  return !!s && ['queued','started','running'].includes(String(s.status||''));
+}
+function formatSyncNotice(sync?:EbaySyncNow|null){
+  if(!sync)return 'eBay sync finished.';
+  const sum=sync.summary;
+  if(sum){
+    return `eBay sync ${sync.status||'done'} · ${sum.ok_accounts??0}/${sum.accounts??0} account(s) · ${sum.results??0} result(s)${sum.failed_accounts?` · ${sum.failed_accounts} with errors`:''}. Check Orders.`;
+  }
+  return sync.progress?.message||sync.message||`eBay sync ${sync.status||'done'}.`;
 }
 function outcomeLabel(o:string){
   if(o==='will_move')return 'Will move';
@@ -77,7 +102,44 @@ export function MarketplacesPage({client,accessToken,money,stamp}:Props){
  const [sale,setSale]=useState<{sku:string;channel:string;price:string;order:string;fulfillment:string}|null>(null);
  const [reviewEdit,setReviewEdit]=useState<{row:Review;sku:string;channel:string;price:string}|null>(null);
  const [ebayError,setEbayError]=useState('');
- const loadEbay=useCallback(async()=>{try{const s=await ebayCall(accessToken,'status');setEbay(s);setEbayError('');}catch(e){setEbayError(e instanceof Error?e.message:String(e));}},[accessToken]);
+ const [syncPolling,setSyncPolling]=useState(false);
+ const pollEbaySync=useCallback(async()=>{
+   setSyncPolling(true);
+   try{
+     for(let i=0;i<90;i++){
+       await new Promise(r=>setTimeout(r,2000));
+       const latest=await ebayCall(accessToken,'sync_latest');
+       setEbay(latest);
+       const sync=latest.syncNow;
+       if(sync?.progress?.message)setNotice(sync.progress.message);
+       if(!syncNowRunning(sync)){
+         setNotice(formatSyncNotice(sync));
+         return;
+       }
+     }
+     setNotice('eBay sync still running — hit Refresh sync status in a minute.');
+   }catch(e){setError(e instanceof Error?e.message:String(e));}
+   finally{setSyncPolling(false);}
+ },[accessToken]);
+ const loadEbay=useCallback(async()=>{
+   try{
+     const s=await ebayCall(accessToken,'status');
+     setEbay(s);setEbayError('');
+     if(syncNowRunning(s.syncNow))void pollEbaySync();
+     return s;
+   }catch(e){setEbayError(e instanceof Error?e.message:String(e));return null;}
+ },[accessToken,pollEbaySync]);
+ async function startEbaySync(extra:Record<string,unknown>={}){
+   setBusy(true);setError('');
+   try{
+     const data=await ebayCall(accessToken,'sync_now',extra);
+     setEbay(data);
+     setNotice(data.message||data.syncNow?.progress?.message||'eBay sync started…');
+     if(data.started||data.alreadyRunning||syncNowRunning(data.syncNow))void pollEbaySync();
+     else setNotice(formatSyncNotice(data.syncNow));
+   }catch(e){setError(e instanceof Error?e.message:String(e));}
+   finally{setBusy(false);}
+ }
  async function load(){setError('');try{const [a,b,c,ch]=await Promise.all([client.rpc('portal_marketplace_inventory'),client.rpc('portal_marketplace_email_sales'),client.rpc('portal_marketplace_delists'),client.rpc('portal_marketplace_channels')]);for(const x of [a,b,c,ch])if(x.error)throw x.error;setInv(a.data||[]);setReview((b.data||[]).filter((x:Review)=>x.state==='needs_review'));setIgnored((b.data||[]).filter((x:Review)=>x.state==='ignored'&&(x.marketplace==='depop'||x.marketplace==='mercari')).slice(0,30));setDelists(c.data||[]);const configured=((ch.data||defaultChannels) as Channel[]).filter(x=>x.key!=='vendoo');setChannelOptions(configured);setChannelText(configured.map(x=>x.key+' | '+x.label+' | '+x.aliases.join(', ')).join('\n'));await loadEbay();}catch(e){setError(e instanceof Error?e.message:String(e));}}
  useEffect(()=>{void load();},[]);
  async function listed(u:Inv,channel:string,checked:boolean){setBusy(true);try{const next=checked?[...new Set([...(u.listed_on||[]),channel])]:u.listed_on.filter(x=>x!==channel);const {error:e}=await client.rpc('portal_set_unit_listed_on',{p_sku:u.sku,p_channels:next});if(e)throw e;setNotice(`SKU ${u.sku} listing status saved.`);await load();}catch(e){setError(e instanceof Error?e.message:String(e));}finally{setBusy(false);}}
@@ -110,7 +172,7 @@ export function MarketplacesPage({client,accessToken,money,stamp}:Props){
      {a.last_error && <p className="hint">Last error: {a.last_error}</p>}
      <div className="actions">
       {a.role==='selling' && a.status==='connected' && !a.policiesReady && <button disabled={busy} onClick={()=>void (async()=>{setBusy(true);setError('');try{await ebayCall(accessToken,'ensure_policies',{account_id:a.id});setNotice('Business policies created on the selling account.');await loadEbay();}catch(e){setError(e instanceof Error?e.message:String(e));}finally{setBusy(false);}})()}>Create business policies</button>}
-      {a.status==='connected' && <button className="secondary" disabled={busy} onClick={()=>void (async()=>{setBusy(true);setError('');try{const data=await ebayCall(accessToken,'sync_now',{account_id:a.id});setEbay(data);setNotice(`Sync finished for ${a.username}${Array.isArray(data.orders)?` · ${data.orders.length} result(s)`:''}.`);}catch(e){setError(e instanceof Error?e.message:String(e));}finally{setBusy(false);}})()}>Sync orders</button>}
+      {a.status==='connected' && <button className="secondary" disabled={busy||syncPolling} onClick={()=>void startEbaySync({account_id:a.id})}>Sync orders</button>}
       {a.status==='connected' && <button className="text-button danger" disabled={busy} onClick={()=>{if(!window.confirm(`Disconnect ${a.username}?`))return;void (async()=>{setBusy(true);try{setEbay(await ebayCall(accessToken,'disconnect',{account_id:a.id}));setNotice(`${a.username} disconnected.`);}catch(e){setError(e instanceof Error?e.message:String(e));}finally{setBusy(false);}})();}}>Disconnect</button>}
      </div>
    </div>)}</div>}
@@ -118,8 +180,24 @@ export function MarketplacesPage({client,accessToken,money,stamp}:Props){
     {!selling && <button disabled={busy} onClick={()=>void (async()=>{setBusy(true);setError('');try{const data=await ebayCall(accessToken,'connect_selling');if(data.url)window.location.href=data.url;}catch(e){setError(e instanceof Error?e.message:String(e));}finally{setBusy(false);}})()}>Connect selling account</button>}
     {!selling && <p className="hint">Opens eBay with a fresh login. Sign into the <strong>business</strong> seller — if you see {ebay?.requiredUsername || 'pgg124-5'}, use Switch accounts / Not you before approving.</p>}
     {!personal && <button className="secondary" disabled={busy} onClick={()=>void (async()=>{setBusy(true);setError('');try{const data=await ebayCall(accessToken,'connect_orders_only');if(data.url)window.location.href=data.url;}catch(e){setError(e instanceof Error?e.message:String(e));}finally{setBusy(false);}})()}>Connect {ebay?.requiredUsername || 'pgg124-5'} (orders only)</button>}
-    {ebay?.connected && <button className="secondary" disabled={busy} onClick={()=>void (async()=>{setBusy(true);setError('');try{const data=await ebayCall(accessToken,'sync_now');setEbay(data);setNotice(`Sync finished${Array.isArray(data.orders)?` · ${data.orders.length} result(s)`:''}. Check the Orders tab.`);}catch(e){setError(e instanceof Error?e.message:String(e));}finally{setBusy(false);}})()}>Sync all accounts now</button>}
+    {ebay?.connected && <button className="secondary" disabled={busy||syncPolling} onClick={()=>void startEbaySync()}>Sync all accounts now</button>}
    </div>
+   {ebay?.syncNow && <div className="ticket" style={{marginTop:'1rem'}}>
+     <div className="ticket-top">
+       <strong>Manual sync · {ebay.syncNow.status||'unknown'}</strong>
+       <span>{ebay.syncNow.progress?.current!=null&&ebay.syncNow.progress?.total!=null?`${ebay.syncNow.progress.current}/${ebay.syncNow.progress.total}`:''}{syncPolling?' · updating…':''}</span>
+     </div>
+     <p className="hint" style={{margin:'6px 0'}}>{ebay.syncNow.progress?.message||ebay.syncNow.error||'No progress yet.'}</p>
+     {ebay.syncNow.summary && <p><strong>Result:</strong> {ebay.syncNow.summary.ok_accounts??0}/{ebay.syncNow.summary.accounts??0} account(s) ok · {ebay.syncNow.summary.results??0} result(s){ebay.syncNow.summary.failed_accounts?` · ${ebay.syncNow.summary.failed_accounts} failed`:''}</p>}
+     {(ebay.syncNow.account_results||[]).length>0 && <div className="ticket-list">{(ebay.syncNow.account_results||[]).map((r,i)=><div className="ticket" key={`${r.username||i}`}>
+       <strong>{r.ok===false?'Error':'OK'} · {r.username||'account'}{r.role?` (${r.role})`:''}</strong>
+       <small>{r.result_count??0} result(s){r.matched!=null?` · matched ${r.matched}`:''}{r.skipped!=null?` · skipped ${r.skipped}`:''}{(r.errors&&r.errors[0])?` · ${r.errors[0]}`:''}</small>
+     </div>)}</div>}
+     {ebay.syncNow.error && ebay.syncNow.status==='error' && <p className="alert" role="alert">{ebay.syncNow.error}</p>}
+     <div className="actions">
+       <button className="text-button" disabled={busy||syncPolling} onClick={()=>void (async()=>{setBusy(true);try{const s=await ebayCall(accessToken,'sync_latest');setEbay(s);if(!syncNowRunning(s.syncNow))setNotice(formatSyncNotice(s.syncNow));}catch(e){setError(e instanceof Error?e.message:String(e));}finally{setBusy(false);}})()}>Refresh sync status</button>
+     </div>
+   </div>}
    {selling && !selling.policiesReady && <p className="hint">After connecting the business account, create its business policies (calculated shipping buyer-pays, no returns, payment). No local pickup.</p>}
    {ebay?.lastError && <p className="hint">Last sync error: {ebay.lastError}</p>}
   </>}
