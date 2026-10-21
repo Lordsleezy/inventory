@@ -15,14 +15,17 @@ Garage receiving lives under **Admin → Orders → Returns**.
 6. After deploy, hit `POST https://inventoryobi.netlify.app/.netlify/functions/returns-sync` with `{"action":"status"}` then a plain POST to run once.
 7. Confirm a test RMA appears under **Orders → Returns** and that `return_decision` email hits `obitracking@gmail.com` (Gmail SMTP / `FLOOR_OWNER_EMAIL`).
 
-### TikTok Shop (not connected yet)
+### TikTok Shop (US Custom app)
 
-1. Create a TikTok Shop Partner account and register an app for Open Box Industries.
-2. Request **Orders** + **Return/Refund** scopes; complete app review and shop authorization (US).
-3. Set Netlify env: `TIKTOK_SHOP_APP_KEY`, `TIKTOK_SHOP_APP_SECRET`, `TIKTOK_SHOP_ACCESS_TOKEN`, `TIKTOK_SHOP_SHOP_ID`.
-4. Redeploy Netlify. Status: `GET/POST .../tiktok-returns-sync` with `{"action":"status"}`.
-5. When Partner API paths for your region/version are confirmed, the stub in `netlify/lib/tiktok-shop.mjs` is ready to wire the live search → `ingest_channel_return`.
-6. Decision clock defaults to **48 hours** (`return_settings.decision_hours.tiktok`).
+Full setup (redirect URL, Manage API scopes, env list): **[docs/TIKTOK_SHOP.md](./TIKTOK_SHOP.md)**.
+
+1. Create a TikTok Shop Partner account and a US Custom app for Open Box Industries.
+2. Request seller **order / product / return-refund** scopes; complete app review and shop authorization.
+3. Register redirect: `https://inventoryobi.netlify.app/.netlify/functions/tiktok-oauth-callback`.
+4. Set Netlify env: `TIKTOK_SHOP_APP_KEY`, `TIKTOK_SHOP_APP_SECRET`, `TIKTOK_SHOP_SHOP_ID` (optional `TIKTOK_SHOP_SERVICE_ID`).
+5. Admin → Marketplaces → **Authorize TikTok Shop** (tokens land in `connections` provider=`tiktok`).
+6. Redeploy Netlify. Status: `POST .../tiktok-returns-sync` with `{"action":"status"}`.
+7. Decision clock defaults to **48 hours** (`return_settings.decision_hours.tiktok`); `ingest_channel_return` enqueues `return_decision` alerts.
 
 ### Dropship bot branch
 

@@ -8,8 +8,18 @@ async function handle(event) {
   if (event.httpMethod === "OPTIONS") return { statusCode: 200, headers: corsHeaders(), body: "" };
   try {
     const provider = event.queryStringParameters?.provider;
-    if (!provider || !["square", "ebay", "amazon"].includes(provider)) {
+    if (!provider || !["square", "ebay", "amazon", "tiktok"].includes(provider)) {
       return json(400, { error: "unknown_provider" });
+    }
+    if (provider === "tiktok") {
+      const key = (process.env.TIKTOK_SHOP_APP_KEY || "").trim();
+      const secret = (process.env.TIKTOK_SHOP_APP_SECRET || "").trim();
+      if (!key || !secret) {
+        return json(503, {
+          error: "tiktok_env_missing",
+          message: "Set TIKTOK_SHOP_APP_KEY and TIKTOK_SHOP_APP_SECRET in Netlify before authorizing.",
+        });
+      }
     }
     if (provider === "amazon" && process.env.AMAZON_ACCOUNT_TYPE === "individual") {
       return json(400, { error: "amazon_individual_is_manual", message: "Amazon Individual has no Connect. Mark listings by hand." });
@@ -38,7 +48,7 @@ async function handle(event) {
     if (message === "not_owner") {
       return json(403, {
         error: "not_owner",
-        message: "A Floor store owner or portal admin must connect Square, eBay, or Amazon.",
+        message: "A Floor store owner or portal admin must connect Square, eBay, Amazon, or TikTok Shop.",
       });
     }
     return json(401, { error: message });
