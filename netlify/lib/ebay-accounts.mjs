@@ -208,7 +208,7 @@ export async function userTokenForAccount(account) {
   return access;
 }
 
-export async function ebayFetchAccount(account, method, path, body) {
+export async function ebayFetchAccount(account, method, path, body, { _retried401 = false } = {}) {
   requireEbayEnabled();
   const hosts = ebayHosts(process.env.EBAY_ENV);
   const base = String(path).startsWith("/sell/finances/") ? hosts.finances : hosts.api;
@@ -243,6 +243,11 @@ export async function ebayFetchAccount(account, method, path, body) {
     json = { raw: text };
   }
   if (!res.ok) {
+    // Access token can be marked valid by expires_at but rejected by eBay — force one refresh retry.
+    if (res.status === 401 && !_retried401 && account.refresh_ciphertext) {
+      account.expires_at = new Date(0).toISOString();
+      return ebayFetchAccount(account, method, path, body, { _retried401: true });
+    }
     const payload = {
       method,
       path,
