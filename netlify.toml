@@ -96,6 +96,10 @@
 [functions."ebay-pickup-list-background"]
   timeout = 900
 
+# Calculated shipping + local pickup batch (paced; up to ~15 minutes).
+[functions."ebay-ship-list-background"]
+  timeout = 900
+
 [functions."ebay-drafts"]
   timeout = 60
 
