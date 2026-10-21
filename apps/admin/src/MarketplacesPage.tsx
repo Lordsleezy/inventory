@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { MarketplacePrices } from './MarketplacePrices';
 import { ListingsHealthPanel } from './ListingsHealthPanel';
+import { ListingManagerPanel } from './ListingManagerPanel';
 import { TikTokShopPanel } from './TikTokShopPanel';
 import { floorFunctionUrl } from './floorApi';
 type Channel={key:string;label:string;aliases:string[]};
@@ -160,6 +161,8 @@ export function MarketplacesPage({client,accessToken,money,stamp}:Props){
  {error&&<div className="alert" role="alert">{error}<button onClick={()=>setError('')}>Dismiss</button></div>}{notice&&<div className="hint">{notice}<button className="text-button" onClick={()=>setNotice('')}>Dismiss</button></div>}
  <div className="stats"><div className="stat"><span>Units listed elsewhere</span><strong>{counts.listed}</strong></div><div className="stat"><span>Sales to review</span><strong>{counts.review}</strong></div><div className="stat"><span>Delist reminders</span><strong>{delists.length}</strong></div></div>
  <ListingsHealthPanel client={client} stamp={stamp || ((s) => s)} />
+
+ <ListingManagerPanel accessToken={accessToken} money={money} />
 
  <section className="panel"><h2>eBay accounts</h2>
   <p>Floor supports more than one eBay account. The <strong>selling</strong> account is the store business account (new listings, sale ingest, auto-delist). <strong>Orders-only</strong> is for {ebay?.requiredUsername || 'pgg124-5'} until leftover orders ship — Floor never cancels those orders.</p>

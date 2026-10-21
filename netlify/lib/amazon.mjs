@@ -1418,8 +1418,81 @@ export async function prepareAmazonQueueItem(storeId, sku) {
     }
   }
 
+  // No catalog ASIN: run VALIDATION_PREVIEW create probe. GS1/brand mismatch → not_on_amazon.
+  if (!match.asin) {
+    try {
+      const { createAmazonCatalogListing } = await import("./amazon-create.mjs");
+      const preview = await createAmazonCatalogListing(storeId, sku, { mode: "VALIDATION_PREVIEW" });
+      if (preview.gs1OrBrandBlocked || preview.autoMarkedNotOnAmazon) {
+        const patchBlocked = {
+          status: "not_on_amazon",
+          asin: null,
+          matched_title: null,
+          amazon_price_cents: price.listCents,
+          fee_estimate_cents: fee.feeCents,
+          condition_code: cond.amazon,
+          condition_note: cond.note,
+          retail_cents: price.retailCents,
+          cost_cents: price.costCents,
+          needs_review_reason:
+            "Not on Amazon — sell on other channels. UPC/brand not in Amazon GS1 brand records (create blocked).",
+          last_error: (preview.errors || []).map((e) => e.message).filter(Boolean).join(" · ").slice(0, 500) || null,
+        };
+        await sb
+          .from("amazon_list_items")
+          .update({ ...patchBlocked, updated_at: new Date().toISOString() })
+          .eq("store_id", storeId)
+          .eq("sku", sku);
+        return { ok: false, ...patchBlocked, match, price, createPreview: preview };
+      }
+      const patchCreate = {
+        status: "needs_review",
+        asin: null,
+        matched_title: null,
+        amazon_price_cents: price.listCents,
+        fee_estimate_cents: fee.feeCents,
+        condition_code: cond.amazon,
+        condition_note: cond.note,
+        retail_cents: price.retailCents,
+        cost_cents: price.costCents,
+        needs_review_reason: preview.ok
+          ? "No ASIN — create-new VALIDATION_PREVIEW is clean. Review Create new listing, then submit (needs Amazon-hosted main image)."
+          : `No ASIN — create preview has ${preview.errorCount || 0} error(s). Open Create new listing to fix attributes, or mark Not on Amazon.`,
+        last_error: preview.ok
+          ? null
+          : (preview.errors || []).map((e) => e.message).filter(Boolean).join(" · ").slice(0, 500) || null,
+      };
+      await sb
+        .from("amazon_list_items")
+        .update({ ...patchCreate, updated_at: new Date().toISOString() })
+        .eq("store_id", storeId)
+        .eq("sku", sku);
+      return { ok: false, ...patchCreate, match, price, createPreview: preview };
+    } catch (e) {
+      const patchFallback = {
+        status: "needs_review",
+        asin: null,
+        matched_title: null,
+        amazon_price_cents: price.listCents,
+        fee_estimate_cents: fee.feeCents,
+        condition_code: cond.amazon,
+        condition_note: cond.note,
+        retail_cents: price.retailCents,
+        cost_cents: price.costCents,
+        needs_review_reason: "No ASIN match — paste ASIN, try Create new listing, or mark Not on Amazon.",
+        last_error: e instanceof Error ? e.message : String(e),
+      };
+      await sb
+        .from("amazon_list_items")
+        .update({ ...patchFallback, updated_at: new Date().toISOString() })
+        .eq("store_id", storeId)
+        .eq("sku", sku);
+      return { ok: false, ...patchFallback, match, price };
+    }
+  }
+
   const patch = {
-    status: match.asin ? "ready" : "needs_review",
+    status: "ready",
     asin: match.asin,
     matched_title: match.title,
     amazon_price_cents: price.listCents,
@@ -1428,9 +1501,7 @@ export async function prepareAmazonQueueItem(storeId, sku) {
     condition_note: cond.note,
     retail_cents: price.retailCents,
     cost_cents: price.costCents,
-    needs_review_reason: match.asin
-      ? null
-      : "No ASIN match — paste correct ASIN below, then Retry / prepare",
+    needs_review_reason: null,
     last_error: null,
   };
   await sb
