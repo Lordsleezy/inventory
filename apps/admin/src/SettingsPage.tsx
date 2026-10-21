@@ -4,7 +4,6 @@ import { EligibilityPage } from './EligibilityPage';
 import { OnlineSellingPage } from './OnlineSellingPage';
 import { LedgerSettingsPanel } from './LedgerSettingsPanel';
 import { ReturnSettingsPanel } from './ReturnSettingsPanel';
-import { VendooExportPanel } from './VendooExportPanel';
 type Props = {
   client: SupabaseClient;
   accessToken: string;
@@ -22,13 +21,12 @@ export function SettingsPage({
 }: Props) {
   return <>
     <header><div><div className="eyebrow">CONFIGURATION</div><h1>Settings</h1>
-      <p>Payout rules, ledger defaults, marketplace eligibility, and exports.</p></div></header>
+      <p>Payout rules, ledger defaults, and marketplace eligibility.</p></div></header>
     <section className="panel"><h2>Employee cuts (in-store sales)</h2>{ruleEditor}</section>
     {onlinePayoutSettings}
     <LedgerSettingsPanel client={client} money={money} busy={busy} run={run} onChanged={onLedgerChanged} />
     <ReturnSettingsPanel client={client} money={money} busy={busy} run={run} />
     <EligibilityPage client={client} stamp={stamp} embedded />
     <OnlineSellingPage client={client} accessToken={accessToken} stamp={stamp} embedded />
-    <VendooExportPanel client={client} />
   </>;
 }

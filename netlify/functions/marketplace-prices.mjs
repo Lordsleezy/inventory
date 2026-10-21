@@ -33,7 +33,7 @@ async function handle(event) {
     const override = specs.marketplace_packing_markup_cents;
     const markup = override == null ? globalMarkup : Number(override);
     const label = estimateLabelCost(unit);
-    const prices = Object.fromEntries(['ebay', 'mercari', 'whatnot', 'depop', 'website']
+    const prices = Object.fromEntries(['ebay', 'depop', 'website']
       .map((channel) => [channel, calcListPrice(floorCents, channel, label.labelCostCents, markup)]));
     return json(200, {
       sku: unit.sku,

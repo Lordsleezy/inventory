@@ -3,7 +3,7 @@ import { floorCloud } from '@floor/cloud';
 import { formatCents } from '@floor/store';
 
 const base = (import.meta.env.VITE_FUNCTIONS_URL || 'https://inventoryobi.netlify.app').replace(/\/$/, '');
-const channels = [['ebay', 'eBay'], ['mercari', 'Mercari'], ['whatnot', 'Whatnot'], ['depop', 'Depop'], ['website', 'Website']] as const;
+const channels = [['ebay', 'eBay'], ['depop', 'Depop'], ['website', 'Website']] as const;
 type PriceData = { prices: Record<string, number>; label_estimate_cents: number; missing_package_data: boolean };
 
 export function MarketplacePrices({ sku }: { sku: string }) {

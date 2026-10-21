@@ -67,9 +67,9 @@ Do not post when `available` or `eligible` is false.
 - `created_at` (received), `updated_at`
 - `photos`: signed URLs from the private `unit-photos` bucket, in display order (`sort_order`, then primary, then oldest). Each photo includes `created_at`. URLs last one hour (`photo_url_ttl_seconds`). The bucket stays private.
 - `listings`: channels currently `listed` in Floor, with `listing_id`, `offer_id`, `url` when Floor can build one, and `ebay_account` (`username`, `role`) for eBay. Both eBay accounts are returned when Floor has a row for each. Website is added from the live storefront.
-- `listed_on`: the staff checklist, which can name a channel that has no listing id yet (Mercari often has none).
+- `listed_on`: the staff checklist for active list targets (eBay, Depop, Amazon, TikTok Shop, website).
 
-URLs: eBay `https://www.ebay.com/itm/{id}`, Depop `https://www.depop.com/products/{id}/`, Amazon `https://www.amazon.com/dp/{asin}`, website `https://openboxindustries.com/item/{sku}`. Mercari and Whatnot return the stored id and a null URL.
+URLs: eBay `https://www.ebay.com/itm/{id}`, Depop `https://www.depop.com/products/{id}/`, Amazon `https://www.amazon.com/dp/{asin}`, website `https://openboxindustries.com/item/{sku}`.
 
 ## Eligible
 

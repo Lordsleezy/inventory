@@ -3,7 +3,8 @@ export type ReportTab = 'profit' | 'shipping' | 'expenses' | 'payouts' | 'return
 export type InventoryTab = 'browse' | 'receive' | 'attention' | 'lookup-test';
 export type AttentionSection = 'missing-cost' | 'missing-photo' | 'missing-price' | 'missing-spec' | 'missing-model' | 'missing-description';
 export type OnlineTab = 'listed' | 'ready' | 'not-ready' | 'msc' | 'reports' | 'sold';
-export type OnlineChannel = 'all' | 'ebay' | 'depop' | 'whatnot' | 'mercari' | 'amazon' | 'tiktok' | 'facebook';
+/** Listing subtabs: eBay, Depop, Amazon, TikTok (+ Facebook-only oversized). Sale history may still show Mercari/Whatnot. */
+export type OnlineChannel = 'all' | 'ebay' | 'depop' | 'amazon' | 'tiktok' | 'facebook';
 
 const LEGACY: Record<string, { page: MainPage; tab?: ReportTab; inventoryTab?: InventoryTab; section?: AttentionSection; onlineTab?: OnlineTab; onlineChannel?: OnlineChannel }> = {
   eligibility: { page: 'settings' },
@@ -35,8 +36,10 @@ const LEGACY: Record<string, { page: MainPage; tab?: ReportTab; inventoryTab?: I
 const MAIN: MainPage[] = ['register', 'sales', 'orders', 'receipts', 'inventory', 'online', 'marketplaces', 'amazon', 'reports', 'tax', 'cameras', 'remote', 'logs', 'settings'];
 const SECTIONS: AttentionSection[] = ['missing-cost', 'missing-photo', 'missing-price', 'missing-spec', 'missing-model', 'missing-description'];
 const ONLINE_TABS: OnlineTab[] = ['listed', 'ready', 'not-ready', 'msc', 'reports', 'sold'];
-const ONLINE_CHANNELS: OnlineChannel[] = ['all', 'ebay', 'depop', 'whatnot', 'mercari', 'amazon', 'tiktok', 'facebook'];
+const ONLINE_CHANNELS: OnlineChannel[] = ['all', 'ebay', 'depop', 'amazon', 'tiktok', 'facebook'];
 const ONLINE_CHANNELS_SET = new Set<string>(ONLINE_CHANNELS);
+/** Retired list targets — old bookmarks fall back to all. */
+const RETIRED_ONLINE_CHANNELS = new Set(['mercari', 'vendoo', 'whatnot']);
 
 export type NavState = {
   page: MainPage;
@@ -87,6 +90,9 @@ export function parseNavFromLocation(): NavState {
     onlineChannelRaw = onlineTabRaw;
     onlineTabRaw = 'listed';
   }
+  if (RETIRED_ONLINE_CHANNELS.has(onlineChannelRaw) || RETIRED_ONLINE_CHANNELS.has(onlineTabRaw)) {
+    onlineChannelRaw = 'all';
+  }
   const reportTabs: ReportTab[] = ['profit', 'shipping', 'expenses', 'payouts', 'returns'];
   const invTabs: InventoryTab[] = ['browse', 'receive', 'attention', 'lookup-test'];
   return {
@@ -99,7 +105,7 @@ export function parseNavFromLocation(): NavState {
     onlineTab: ONLINE_TABS.includes(onlineTabRaw as OnlineTab) ? (onlineTabRaw as OnlineTab) : 'listed',
     onlineChannel: ONLINE_CHANNELS.includes(onlineChannelRaw as OnlineChannel)
       ? (onlineChannelRaw as OnlineChannel)
-      : 'ebay',
+      : 'all',
   };
 }
 

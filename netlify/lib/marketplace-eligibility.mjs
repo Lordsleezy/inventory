@@ -318,20 +318,6 @@ export const DEFAULT_CHANNEL_RULES = {
     blocked_categories: [],
     notes: "Whatnot: block clearly prohibited goods and AI images.",
   },
-  mercari: {
-    enabled: true,
-    block_requires_power: false,
-    block_ai_images: true,
-    block_stock_photos: true,
-    block_manufacturer_photos: false,
-    strip_manufacturer_photos: true,
-    require_own_photos: true,
-    review_if_power_unknown: false,
-    prohibited_keywords: ["firearm", "ammunition", "ammo", "alcohol", "tobacco", "vape", "counterfeit", "replica", "fake"],
-    blocked_keywords: [],
-    blocked_categories: [],
-    notes: "Mercari: own photos only (no stock/ad/manufacturer). AI banned. Powered OK. Strip manufacturer photos from payload.",
-  },
   facebook: {
     enabled: true,
     block_requires_power: false,
@@ -369,12 +355,7 @@ export const DEFAULT_CHANNEL_RULES = {
     prohibited_keywords: ["firearm", "ammunition", "ammo", "alcohol", "tobacco", "vape"],
     notes: "TikTok Shop: no stock/AI; block restricted goods.",
   },
-  vendoo: {
-    enabled: true,
-    block_requires_power: false,
-    block_ai_images: true,
-    notes: "Vendoo is a crosslist hub. Export includes per-channel flags; items blocked on all Vendoo targets are excluded.",
-  },
 };
 
-export const VENDOO_TARGET_CHANNELS = ["ebay", "whatnot", "depop", "mercari"];
+/** Active crosslist / list targets (Vendoo retired). */
+export const LIST_TARGET_CHANNELS = ["ebay", "depop", "amazon", "tiktok"];

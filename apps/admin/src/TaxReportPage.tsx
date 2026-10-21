@@ -24,7 +24,7 @@ export function TaxReportPage({ client, money, embedded }: Props) {
   }, [client, month]);
   useEffect(() => { void load(); }, [load]);
 
-  const label = (c: string) => ({ in_store: 'In-store', pickup: 'Website — store pickup', ship_in_state: `Website — shipped to ${report?.origin_state ?? 'CA'}`, ship_out_of_state: 'Website — shipped out of state', other_online: 'Other online channels', marketplace_remitted: 'Marketplace-remitted (eBay, Mercari, …)' } as Record<string, string>)[c] || c;
+  const label = (c: string) => ({ in_store: 'In-store', pickup: 'Website — store pickup', ship_in_state: `Website — shipped to ${report?.origin_state ?? 'CA'}`, ship_out_of_state: 'Website — shipped out of state', other_online: 'Other online channels', marketplace_remitted: 'Marketplace-remitted (eBay, Depop, …)' } as Record<string, string>)[c] || c;
   const rows = report?.rows ?? [];
   const sum = (k: keyof Row) => rows.reduce((n, r) => n + Number(r[k] ?? 0), 0);
   const net = (r: Row) => ({ sales: r.sales_cents - r.refund_sales_cents, taxable: r.taxable_cents - r.refund_taxable_cents, tax: r.tax_cents - r.refund_tax_cents });

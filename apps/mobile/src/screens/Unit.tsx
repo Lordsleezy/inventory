@@ -304,7 +304,7 @@ export function UnitScreen() {
           {eligibility.length > 0 ? (
             <div className="mt-3 space-y-1">
               <p className="text-quiet">Marketplace eligibility</p>
-              {eligibility.filter((row) => ['depop', 'ebay', 'whatnot', 'mercari', 'facebook', 'website'].includes(row.channel)).map((row) => (
+              {eligibility.filter((row) => ['depop', 'ebay', 'amazon', 'tiktok', 'facebook', 'website'].includes(row.channel)).map((row) => (
                 <p key={row.channel} className={`text-quiet ${row.status === 'allow' ? 'text-floor-mute' : 'text-floor-danger'}`}>
                   {row.reason}
                 </p>

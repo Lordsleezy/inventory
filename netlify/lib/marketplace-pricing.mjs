@@ -2,14 +2,12 @@ const DEFAULT_CONFIG = Object.freeze({
   updatedAt: '2026-10-05',
   marketplaces: {
     ebay: { rate: 0.136, fixedFeeCents: 40, labelPaidBySeller: true },
-    mercari: { rate: 0.10, fixedFeeCents: 0, labelPaidBySeller: true },
-    whatnot: { rate: 0.109, fixedFeeCents: 30, labelPaidBySeller: false },
     depop: { rate: 0.033, fixedFeeCents: 45, labelPaidBySeller: false },
     website: { rate: 0, fixedFeeCents: 0, labelPaidBySeller: false },
   },
 });
 
-const CHANNELS = ['ebay', 'mercari', 'whatnot', 'depop', 'website'];
+const CHANNELS = ['ebay', 'depop', 'website'];
 const deepMerge = (base, override) => ({
   ...base,
   ...override,
@@ -54,7 +52,6 @@ export function calcListPrice(floorCents, marketplace, labelCostCents = 0, packi
   const netTarget = floor + markup;
   let gross;
   if (channel === 'ebay') gross = (netTarget + label + fee.fixedFeeCents) / (1 - fee.rate);
-  else if (channel === 'mercari') gross = (netTarget + label) / (1 - fee.rate);
   else gross = (netTarget + fee.fixedFeeCents) / (1 - fee.rate);
   return roundUpTo99(gross);
 }

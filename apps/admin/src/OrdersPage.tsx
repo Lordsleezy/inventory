@@ -204,7 +204,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
     const ok = window.confirm(
       `Delete ${channelLabel(o.channel)} order ${o.order_no || o.id} (SKU ${o.sku}) from Orders?\n\n` +
       (live
-        ? 'This removes it from Orders and reverses the Floor sale (unit goes available again).\nIt does NOT refund the buyer on eBay / Amazon / Depop / Mercari / Square.'
+        ? 'This removes it from Orders and reverses the Floor sale (unit goes available again).\nIt does NOT refund the buyer on eBay / Amazon / Depop / TikTok / Square.'
         : 'This only removes the row from Orders. It does not refund anyone.') +
       '\n\nThis cannot be undone from the UI.',
     );
@@ -287,7 +287,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
     }
     const current = o.label_cost_cents != null ? (o.label_cost_cents / 100).toFixed(2) : '';
     const raw = window.prompt(
-      `Label cost for ${channelLabel(o.channel)} order ${o.order_no || o.id} (USD).\n\nUse this for Pirate Ship, USPS, eBay labels, Depop, Mercari, Whatnot, Vendoo — whatever you paid to ship.`,
+      `Label cost for ${channelLabel(o.channel)} order ${o.order_no || o.id} (USD).\n\nUse this for Pirate Ship, USPS, eBay labels, Depop, Amazon, TikTok — whatever you paid to ship.`,
       current,
     );
     if (raw == null) return;
@@ -366,7 +366,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
         onChanged={next => onCommissionChanged(o.ticket_key!, next)}
       />
     )}
-    {otherStores(o).length > 0 && <div className="alert" role="status">Pull from other stores: still marked live on {otherStores(o).map(channelLabel).join(', ')}. End those listings in Vendoo / each app.</div>}
+    {otherStores(o).length > 0 && <div className="alert" role="status">Pull from other stores: still marked live on {otherStores(o).map(channelLabel).join(', ')}. End those listings in each marketplace app (eBay / Depop / Amazon / TikTok).</div>}
     {(o.match_status === 'unmatched' || o.match_status === 'already_sold') && <div className="alert" role="status">Needs SKU match — sale is in Orders but not linked to a Floor unit yet. <button className="secondary" disabled={!!busy} onClick={() => void matchSku(o)}>Link SKU…</button></div>}
   </div>;
   };

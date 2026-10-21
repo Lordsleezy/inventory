@@ -1,6 +1,6 @@
 # Returns system (Floor)
 
-Channel-agnostic returns for Amazon, TikTok Shop, website, eBay, Mercari, and the rest.
+Channel-agnostic returns for Amazon, TikTok Shop, website, eBay, Depop, and the rest (historical Mercari sales still label correctly).
 Garage receiving lives under **Admin → Orders → Returns**.
 
 ## What you must do by hand
