@@ -220,6 +220,20 @@ html.dark .amazon-add-field{color:#9aa3ad}
 .amazon-status.st-live{background:#d1e9ff;color:#175cd3}
 .amazon-status.st-error{background:#fee4e2;color:#b42318}
 .amazon-status.st-needs_review{background:#fef0c7;color:#93370d}
+
+/* Missing cost — stacked rows so phone layouts never crush table columns */
+.missing-cost-list{display:grid;gap:0}
+.missing-cost-row{display:grid;gap:8px;padding:14px 0;border-top:1px solid #eef1f3;min-width:0}
+.missing-cost-row:first-child{border-top:0;padding-top:0}
+.missing-cost-top{display:flex;align-items:center;justify-content:space-between;gap:10px;min-width:0}
+.missing-cost-sku{font-variant-numeric:tabular-nums;white-space:nowrap}
+.missing-cost-top .tag{flex:0 0 auto;max-width:60%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.missing-cost-title{font-weight:650;line-height:1.35;overflow-wrap:anywhere;color:#243544}
+.missing-cost-meta{font-size:.84rem;color:#71808d}
+.missing-cost-actions{display:flex;align-items:end;gap:10px;flex-wrap:wrap}
+.missing-cost-field{display:grid;gap:4px;flex:1 1 140px;min-width:120px;margin:0;font-size:12px;font-weight:600;color:#627282}
+.missing-cost-field input{width:100%;min-width:0;margin:0;font-weight:400;font-size:16px;min-height:44px}
+.missing-cost-actions button{flex:0 0 auto;min-height:44px;white-space:nowrap;padding-inline:16px}
 .amazon-status.st-listing{background:#e0f2fe;color:#075985}
 .amazon-status.st-sold{background:#e9f5ee;color:#176a4b}
 .amazon-body label{display:grid;gap:4px;font-size:.78rem;font-weight:650;color:#627282;margin-top:4px}
@@ -452,8 +466,9 @@ html.dark .amazon-review-banner{background:#3d2e12;color:#f5c97a}
   .inventory-detail{width:100%;padding:16px 14px calc(16px + env(safe-area-inset-bottom,0px))}
 
   .section-head{flex-direction:column;align-items:stretch;gap:8px}
-  .tbl{font-size:13px}
-  .tbl th,.tbl td{padding:8px 6px;overflow-wrap:anywhere}
+  .tbl{font-size:13px;min-width:560px}
+  .tbl th,.tbl td{padding:8px 6px;overflow-wrap:normal;word-break:normal}
+  .tbl td:not(.n){overflow-wrap:break-word}
   .receive-next{flex-direction:column;align-items:stretch;gap:12px}
   .receive-next p{max-width:none}
   .receive-upc,.receive-upc input{min-width:0;width:100%}
@@ -523,6 +538,10 @@ html.dark .badge-override{background:#3a241c!important;color:#f7d8c8!important}
 html.dark .commission-custom input{background:#12161c;border-color:#3a4553;color:#e8eef4}
 html.dark .amazon-card{background:#151a21;border-color:#2c3440;color:#e8eef4}
 html.dark .amazon-body label{color:#9aa7b5}
+html.dark .missing-cost-row{border-top-color:#2c3440}
+html.dark .missing-cost-title{color:#e8eef4}
+html.dark .missing-cost-meta,html.dark .missing-cost-field{color:#9aa7b5}
+html.dark .missing-cost-field input{background:#12161c;border-color:#3a4553;color:#e8eef4}
 html.dark .match-comparison>div{background:#151a21;border-color:#2c3440;color:#e8eef4}
 html.dark .match-comparison img{background:#12161c}
 html.dark .online-reasons span{background:#222933;border-color:#3a4553;color:#c5d0dc}
