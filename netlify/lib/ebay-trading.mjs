@@ -111,6 +111,19 @@ export function parseTradingOrders(xml) {
   });
 }
 
+/**
+ * Trading orders for listings created outside the Inventory API often have an
+ * ItemID and no SKU. Floor already stored that ItemID on listings.listing_id.
+ * Without this, a paid order is dropped and the unit stays Available.
+ */
+export function attachListingSku(order, skuByItemId) {
+  if (!order || order.sku) return order;
+  const itemId = String(order.itemId || "");
+  const sku = itemId && skuByItemId?.get?.(itemId);
+  if (!sku) return order;
+  return { ...order, sku: String(sku) };
+}
+
 export function tradingOrderIsSale(order, soldQtyBySku = {}) {
   if (!order?.orderId || !order.sku) return false;
   const cancel = String(order.cancelStatus || "").replace(/_/g, "").toLowerCase();

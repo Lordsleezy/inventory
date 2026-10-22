@@ -34,6 +34,8 @@ import {
   getSellerUsername,
   getShippingServiceDetails,
   pickApplianceShipping,
+  attachListingSku,
+  getTradingItem,
   tradingOrderIsSale,
   tradingOrderToIngest,
 } from "./ebay-trading.mjs";
@@ -1100,6 +1102,17 @@ function orderSku(order) {
   return null;
 }
 
+function withListingSku(order, skuByItemId) {
+  if (!order || orderSku(order) || !skuByItemId?.size) return order;
+  const lineItems = (order.lineItems || []).map((item) => {
+    if (item?.sku) return item;
+    const id = String(item?.legacyItemId || item?.itemId || "");
+    const sku = id && skuByItemId.get(id);
+    return sku ? { ...item, sku } : item;
+  });
+  return { ...order, lineItems };
+}
+
 function orderCents(order) {
   return ebayOrderAmounts(order).itemCents;
 }
@@ -1381,6 +1394,7 @@ async function listedSoldBySku(storeId) {
   if (error) throw new Error(error.message);
   const soldQty = {};
   const extras = [];
+  let tradingChecks = 0;
   for (const row of data ?? []) {
     let offers = [];
     try {
@@ -1392,13 +1406,28 @@ async function listedSoldBySku(storeId) {
       offers.find((o) => String(o.offerId) === String(row.offer_id)) ||
       offers.find((o) => String(o.status || "").toUpperCase() === "PUBLISHED") ||
       offers[0];
-    const soldQuantity = Number(live?.listing?.soldQuantity || 0);
+    let soldQuantity = Number(live?.listing?.soldQuantity || 0);
+    let price = live?.pricingSummary?.price?.value || "0";
+    let listingId = live?.listing?.listingId || live?.listingId || row.listing_id;
+    // Inventory offer 404 (listing exists only as a Trading item id) used to
+    // report soldQuantity 0, so a completed sale never entered Floor.
+    if (!live && row.listing_id && tradingChecks < 25) {
+      tradingChecks += 1;
+      try {
+        const item = await getTradingItem(await userToken(storeId), row.listing_id);
+        soldQuantity = Number(item?.quantitySold || 0);
+        if (item?.price) price = String(item.price);
+        listingId = item?.itemId || row.listing_id;
+      } catch {
+        /* offer miss plus GetItem failure stays unsold this run */
+      }
+    }
     soldQty[row.sku] = soldQuantity;
     if (soldQuantity >= 1) {
       extras.push({
         sku: row.sku,
-        listingId: live?.listing?.listingId || live?.listingId || row.listing_id,
-        price: live?.pricingSummary?.price?.value || "0",
+        listingId,
+        price,
         soldQuantity,
       });
     }
@@ -1407,6 +1436,7 @@ async function listedSoldBySku(storeId) {
 }
 
 async function ingestFrom(storeId, order, source, bag) {
+  order = withListingSku(order, bag.skuByItemId);
   const sku = orderSku(order);
   const orderId = order?.orderId;
   if (!orderId) return;
@@ -1510,10 +1540,26 @@ export async function reconcileCanceledEbayOrders(storeId, hint = {}) {
   return out;
 }
 
+async function listingSkuByItemId(storeId) {
+  const sb = serviceClient();
+  const { data: listed } = await sb
+    .from("listings")
+    .select("sku, listing_id")
+    .eq("store_id", storeId)
+    .eq("channel", "ebay")
+    .not("listing_id", "is", null);
+  return new Map((listed || []).filter((row) => row.listing_id).map((row) => [String(row.listing_id), row.sku]));
+}
+
 export async function pollEbayOrders(storeId, accountHint = {}) {
   const account = accountHint._account || (await resolveEbayAccount(storeId, accountHint));
   const hint = { _account: account, accountId: account.id };
-  const bag = { results: [], skus: new Set(), orders: new Set() };
+  const bag = { results: [], skus: new Set(), orders: new Set(), skuByItemId: new Map() };
+  try {
+    bag.skuByItemId = await listingSkuByItemId(storeId);
+  } catch {
+    bag.skuByItemId = new Map();
+  }
   try {
     const json = await ebayFetch(storeId, "GET", fulfillmentOrdersPath(), undefined, hint);
     for (const order of json?.orders ?? []) {
@@ -1567,8 +1613,9 @@ export async function pollEbayOrders(storeId, accountHint = {}) {
   try {
     const trading = await getSellerOrders(await userTokenForAccount(account));
     for (const order of trading) {
-      if (!tradingOrderIsSale(order, soldQty)) continue;
-      await ingestFrom(storeId, tradingOrderToIngest(order), "trading", bag);
+      const withSku = attachListingSku(order, bag.skuByItemId);
+      if (!tradingOrderIsSale(withSku, soldQty)) continue;
+      await ingestFrom(storeId, tradingOrderToIngest(withSku), "trading", bag);
     }
   } catch (err) {
     bag.results.push({

@@ -62,6 +62,11 @@
 [functions."listing-check"]
   schedule = "0 14 * * *"
 
+# Sold-but-available and sold-but-still-listed. Emails the owner; ends eBay.
+[functions."inventory-reconcile"]
+  schedule = "*/15 * * * *"
+  timeout = 60
+
 # Orders-only sync: pull eBay sales into Floor every few minutes. Never pushes listings.
 [functions."ebay-sync"]
   schedule = "*/3 * * * *"

@@ -5,6 +5,7 @@ import { wrapHandler, floorLog, asNetlifyFunction } from "../lib/floor-log.mjs";
 import { withLock } from "../lib/bg-guard.mjs";
 import { isNetlifyScheduleEvent } from "../lib/schedule.mjs";
 import { ingestMarketplaceMail, loadStoreChannels, mailAuthenticatedForMarketplace } from "../lib/marketplace-email-parse.mjs";
+import { normalizeMessageId, planPollUids } from "../lib/gmail-poll-plan.mjs";
 
 /**
  * Gmail inbox reader: every 2 minutes, read new Depop / Mercari mail from the same Gmail account that
@@ -79,7 +80,7 @@ function pollAccounts() {
   return accounts;
 }
 
-async function pollOneInbox(sb, { user, pass }, store, channels, domains, lookbackDays, includeSeen, started) {
+async function pollOneInbox(sb, { user, pass }, store, channels, domains, lookbackDays, includeSeen, started, rescan) {
   const client = new ImapFlow({
     host: "imap.gmail.com",
     port: 993,
@@ -99,6 +100,7 @@ async function pollOneInbox(sb, { user, pass }, store, channels, domains, lookba
     skipped_sender: 0,
     skipped_auth: 0,
     failed: 0,
+    fresh: 0,
     errors: [],
   };
   await client.connect();
@@ -117,10 +119,45 @@ async function pollOneInbox(sb, { user, pass }, store, channels, domains, lookba
         ],
       };
       if (!includeSeen) query.seen = false;
-      const uids = ((await client.search(query, { uid: true })) || []).sort((a, b) => a - b);
+      const uids = (await client.search(query, { uid: true })) || [];
       summary.found = uids.length;
+      // Newest first, and only a bounded envelope peek. The full body fetch
+      // below is reserved for Message-IDs we have not already stored.
+      const newest = [...uids].sort((a, b) => b - a).slice(0, 80);
+      const envelopes = [];
+      if (newest.length) {
+        for await (const msg of client.fetch(newest, { envelope: true, uid: true }, { uid: true })) {
+          envelopes.push(msg);
+        }
+      }
+      const stored = new Set();
+      if (store?.id) {
+        const since = new Date(Date.now() - lookbackDays * 86400_000).toISOString();
+        const { data, error } = await sb
+          .from("marketplace_email_sales")
+          .select("message_id")
+          .eq("store_id", store.id)
+          .gte("created_at", since);
+        if (error) throw new Error(error.message);
+        for (const row of data || []) {
+          if (!row.message_id) continue;
+          stored.add(row.message_id);
+          stored.add(normalizeMessageId(row.message_id));
+        }
+      }
+      const planned = planPollUids(
+        envelopes.map((msg) => {
+          const messageId = msg?.envelope?.messageId || "";
+          return {
+            uid: msg.uid,
+            stored: stored.has(messageId) || stored.has(normalizeMessageId(messageId)),
+          };
+        }),
+        { rescan, limit: MAX_PER_RUN },
+      );
+      summary.fresh = planned.length;
 
-      for (const uid of uids.slice(0, MAX_PER_RUN)) {
+      for (const uid of planned) {
         if (Date.now() - started > DEADLINE_MS) break;
         try {
           const msg = await client.fetchOne(uid, { source: true, flags: true }, { uid: true });
@@ -157,7 +194,7 @@ async function pollOneInbox(sb, { user, pass }, store, channels, domains, lookba
   return summary;
 }
 
-async function pollInbox(sb, { forceIncludeSeen = false } = {}) {
+async function pollInbox(sb, { forceIncludeSeen = false, rescan = false } = {}) {
   const accounts = pollAccounts();
   if (!accounts.length) return { skipped: "gmail_not_configured" };
 
@@ -168,10 +205,10 @@ async function pollInbox(sb, { forceIncludeSeen = false } = {}) {
   const { store, channels } = await loadStoreChannels(sb);
 
   const perAccount = [];
-  const totals = { found: 0, matched: 0, needs_review: 0, ignored: 0, duplicate: 0, skipped_sender: 0, skipped_auth: 0, failed: 0, errors: [] };
+  const totals = { found: 0, matched: 0, needs_review: 0, ignored: 0, duplicate: 0, skipped_sender: 0, skipped_auth: 0, failed: 0, fresh: 0, errors: [] };
   for (const account of accounts) {
     if (Date.now() - started > DEADLINE_MS) break;
-    const one = await pollOneInbox(sb, account, store, channels, domains, lookbackDays, includeSeen, started);
+    const one = await pollOneInbox(sb, account, store, channels, domains, lookbackDays, includeSeen, started, rescan);
     perAccount.push(one);
     for (const k of Object.keys(totals)) {
       if (k === "errors") totals.errors.push(...(one.errors || []).map((e) => `${one.user}: ${e}`));
@@ -195,13 +232,18 @@ async function handle(event) {
       }
     }
     const sb = serviceClient();
-    const result = await withLock("gmail-sales-poll", 90, () => pollInbox(sb, { forceIncludeSeen }), sb);
+    const result = await withLock(
+      "gmail-sales-poll",
+      90,
+      () => pollInbox(sb, { forceIncludeSeen, rescan: forceIncludeSeen }),
+      sb,
+    );
     // Always leave a gmail.sales_poll breadcrumb (including found=0) so empty-inbox days are diagnosable.
     if (result && !result.skipped) {
       await floorLog({
         level: result.failed ? "warn" : "info",
         event: "gmail.sales_poll",
-        message: `found=${result.found || 0} matched=${result.matched || 0} review=${result.needs_review || 0} ignored=${result.ignored || 0} failed=${result.failed || 0}${forceIncludeSeen ? " rescan=1" : ""}`,
+        message: `found=${result.found || 0} fresh=${result.fresh || 0} matched=${result.matched || 0} review=${result.needs_review || 0} ignored=${result.ignored || 0} failed=${result.failed || 0}${forceIncludeSeen ? " rescan=1" : ""}`,
         detail: { ...result, include_seen: forceIncludeSeen || process.env.GMAIL_POLL_INCLUDE_SEEN === "1" },
       });
     }

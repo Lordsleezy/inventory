@@ -40,7 +40,7 @@ create or replace function public.portal_payout_adjustments()
 returns jsonb language plpgsql stable security definer set search_path = public as $$
 declare v_store uuid := public.portal_store_id();
 begin
-  if v_store is null then raise exception 'portal_access_denied' using errcode = '42501'; end if;
+  if v_store is null or not public.portal_financial_access() then raise exception 'portal_access_denied' using errcode = '42501'; end if;
   return coalesce((
     select jsonb_agg(to_jsonb(a) order by a.created_at desc)
     from public.portal_payout_adjustments a

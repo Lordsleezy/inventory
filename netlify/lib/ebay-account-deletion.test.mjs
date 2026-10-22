@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createSign, generateKeyPairSync } from 'node:crypto';
-import { deletionChallenge, verifyDeletionSignature } from './ebay-account-deletion.mjs';
+import { authorizeEbayNotifyPost, deletionChallenge, verifyDeletionSignature } from './ebay-account-deletion.mjs';
 import { invoke as handler } from '../functions/ebay-account-deletion.mjs';
+import { invoke as notify } from '../functions/ebay-notify.mjs';
 
 test('eBay challenge hashes the exact configured URL and token', async () => {
   process.env.EBAY_DELETION_ENDPOINT_URL = 'https://example.invalid/ebay-challenge';
@@ -23,4 +24,28 @@ test('signature verification binds the exact notification payload', async () => 
   assert.equal(await verifyDeletionSignature(body, header, key), true);
   assert.equal(await verifyDeletionSignature(body.replace('test', 'tast'), header, key), false);
   assert.equal(await verifyDeletionSignature(body, '', key).catch(() => false), false);
+});
+
+test('unsigned ebay-notify POST is rejected and does not poll', async () => {
+  delete process.env.EBAY_DISABLED;
+  const response = await notify({
+    httpMethod: 'POST',
+    headers: {},
+    body: JSON.stringify({ metadata: { topic: 'MARKETPLACE_ORDER' }, notification: { notificationId: 'unsigned' } }),
+  });
+  assert.equal(response.statusCode, 412);
+  assert.equal(JSON.parse(response.body).error, 'invalid_signature');
+  const garbage = await notify({ httpMethod: 'POST', headers: {}, body: 'not-json' });
+  assert.equal(garbage.statusCode, 412);
+  assert.equal(JSON.parse(garbage.body).error, 'invalid_signature');
+});
+
+test('ebay-notify stops when the signature key cannot be fetched', async () => {
+  const gate = await authorizeEbayNotifyPost({
+    httpMethod: 'POST',
+    headers: { 'x-ebay-signature': Buffer.from(JSON.stringify({ kid: 'missing', signature: 'aaaa' })).toString('base64') },
+    body: JSON.stringify({ metadata: { topic: 'MARKETPLACE_ORDER' } }),
+  }, async () => { throw new Error('ebay_public_key_unavailable'); });
+  assert.equal(gate.kind, 'stop');
+  assert.equal(gate.response.statusCode, 503);
 });

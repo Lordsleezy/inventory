@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { xmlEsc, tradingConditionId, parseShippingServiceDetails, pickApplianceShipping, parseTradingOrders, tradingOrderIsSale, tradingOrderToIngest } from "./ebay-trading.mjs";
+import { xmlEsc, tradingConditionId, parseShippingServiceDetails, pickApplianceShipping, parseTradingOrders, tradingOrderIsSale, tradingOrderToIngest, attachListingSku } from "./ebay-trading.mjs";
 
 test("xmlEsc encodes markup so Trading API XML stays well-formed", () => {
   assert.equal(xmlEsc(`A & B <C>`), "A &amp; B &lt;C&gt;");
@@ -112,6 +112,33 @@ test("sandbox soldQuantity is enough to ingest when Fulfillment is empty", () =>
   assert.equal(tradingOrderIsSale(order, { 11155: 1 }), true);
   assert.equal(tradingOrderToIngest(order).orderId, "110590746616-10000013654610");
   assert.equal(tradingOrderToIngest(order).pricingSummary.total.value, "199.0");
+});
+
+test("Trading order with ItemID and no SKU maps onto the Floor listing", () => {
+  const xml = `<?xml version="1.0" encoding="utf-8"?>
+<GetOrdersResponse xmlns="urn:ebay:apis:eBLBaseComponents">
+  <Order>
+    <OrderID>18-15399-00001</OrderID>
+    <OrderStatus>Completed</OrderStatus>
+    <AmountPaid currencyID="USD">37.99</AmountPaid>
+    <PaidTime>2026-10-21T18:00:00.000Z</PaidTime>
+    <CheckoutStatus><Status>Complete</Status></CheckoutStatus>
+    <CancelStatus>NotApplicable</CancelStatus>
+    <Total currencyID="USD">37.99</Total>
+    <TransactionArray><Transaction>
+      <Item><ItemID>820244277561</ItemID></Item>
+      <QuantityPurchased>1</QuantityPurchased>
+      <TransactionPrice currencyID="USD">37.99</TransactionPrice>
+    </Transaction></TransactionArray>
+  </Order>
+</GetOrdersResponse>`;
+  const [order] = parseTradingOrders(xml);
+  assert.equal(order.sku, "");
+  assert.equal(tradingOrderIsSale(order), false);
+  const mapped = attachListingSku(order, new Map([["820244277561", "11352"]]));
+  assert.equal(mapped.sku, "11352");
+  assert.equal(tradingOrderIsSale(mapped), true);
+  assert.equal(tradingOrderToIngest(mapped).lineItems[0].sku, "11352");
 });
 
 test("paid Trading orders ingest even without soldQuantity map", () => {
