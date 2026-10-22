@@ -15,7 +15,7 @@ import {
 import { createAmazonCatalogListing } from "./amazon-create.mjs";
 import { ebayFetch, listEbayAccounts, loadEbayAccount, listSku, withdrawSku, photoUrls } from "./ebay.mjs";
 import { userTokenForAccount } from "./ebay-accounts.mjs";
-import { getMyEbaySellingActive } from "./ebay-trading.mjs";
+import { getMyEbaySellingActive, getSellerListActive } from "./ebay-trading.mjs";
 import {
   tiktokApiFetch,
   tiktokConnectionStatus,
@@ -327,8 +327,17 @@ export async function patchAmazonListing(
 async function pullEbayActive(storeId, account) {
   const full = await loadEbayAccount(storeId, { id: account.id });
   const token = await userTokenForAccount(full);
-  const rows = await getMyEbaySellingActive(token, { entriesPerPage: 200, maxPages: 20 });
-  return rows;
+  const active = await getMyEbaySellingActive(token, { entriesPerPage: 200, maxPages: 20 });
+  if (active.length) return { rows: active, source: "active_list" };
+  // ActiveList can come back empty for a seller who still has live listings. Seller list is the backup.
+  try {
+    const seller = await getSellerListActive(token, { entriesPerPage: 200, maxPages: 20 });
+    if (seller.length) return { rows: seller, source: "seller_list" };
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    return { rows: [], source: "active_list", error: `ActiveList was empty and GetSellerList failed: ${message}` };
+  }
+  return { rows: [], source: "active_list" };
 }
 
 export async function listEbayListings(storeId = STORE_DEFAULT, { query = "", limit = LISTING_MANAGER_LIMIT } = {}) {
@@ -338,10 +347,10 @@ export async function listEbayListings(storeId = STORE_DEFAULT, { query = "", li
   const pulled = await Promise.all(
     connected.map(async (account) => {
       try {
-        const rows = await pullEbayActive(storeId, account);
-        return { account, rows, error: null };
+        const pulled = await pullEbayActive(storeId, account);
+        return { account, rows: pulled.rows, source: pulled.source, error: pulled.error || null };
       } catch (e) {
-        return { account, rows: [], error: e instanceof Error ? e.message : String(e) };
+        return { account, rows: [], source: null, error: e instanceof Error ? e.message : String(e) };
       }
     }),
   );
