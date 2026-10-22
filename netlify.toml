@@ -90,7 +90,7 @@
   timeout = 900
 
 [functions."listing-manager"]
-  timeout = 60
+  timeout = 120
 
 # Read-only ikonikdeals2026 listing audit (ActiveList + Shippo rates + UPC retail).
 [functions."ebay-listing-audit-background"]

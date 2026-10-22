@@ -13,7 +13,9 @@ import {
   listAmazonOffer,
 } from "./amazon.mjs";
 import { createAmazonCatalogListing } from "./amazon-create.mjs";
-import { ebayFetch, listEbayAccounts, listSku, withdrawSku, photoUrls } from "./ebay.mjs";
+import { ebayFetch, listEbayAccounts, loadEbayAccount, listSku, withdrawSku, photoUrls } from "./ebay.mjs";
+import { userTokenForAccount } from "./ebay-accounts.mjs";
+import { getMyEbaySellingActive } from "./ebay-trading.mjs";
 import {
   tiktokApiFetch,
   tiktokConnectionStatus,
@@ -21,6 +23,18 @@ import {
   prepareTikTokQueueItem,
   listTikTokProduct,
 } from "./tiktok-shop.mjs";
+import {
+  LISTING_MANAGER_LIMIT,
+  amazonIsLive,
+  amazonRowFromFloor,
+  amazonRowFromSearchItem,
+  depopRowFromFloor,
+  ebayRowFromActive,
+  listingMatches,
+  mergeEbayListings,
+  tiktokIsLive,
+  tiktokRowFromProduct,
+} from "./listing-manager-rows.mjs";
 import { listLegacyEbayCandidates, migrateEbayListingsToInventory } from "./ebay-inventory-migrate.mjs";
 import { calcListPrice, estimateLabelCost, getFeeConfig } from "./marketplace-pricing.mjs";
 import { composeChannelDescription, parseListingSpecs } from "./listing-copy.mjs";
@@ -89,85 +103,120 @@ async function unitPhotos(storeId, sku) {
   return { paths, urls };
 }
 
-export async function listAmazonListings(storeId = STORE_DEFAULT, { query = "", limit = 50 } = {}) {
-  const sid = sellerId();
-  if (!sid) return { ok: false, error: "AMAZON_SELLER_ID missing", items: [] };
+async function unitsBySku(storeId, skus) {
   const sb = serviceClient();
-  // Floor listings table + live queue
-  const { data: floorRows } = await sb
+  const map = {};
+  const list = [...new Set((skus || []).map((sku) => String(sku || "").trim()).filter(Boolean))];
+  for (let i = 0; i < list.length; i += 200) {
+    const chunk = list.slice(i, i + 200);
+    const { data, error } = await sb
+      .from("units")
+      .select("sku, title, ask_cents, state, brand")
+      .eq("store_id", storeId)
+      .in("sku", chunk);
+    if (error) throw new Error(error.message);
+    for (const row of data || []) map[row.sku] = row;
+  }
+  return map;
+}
+
+async function pullAmazonSearchItems(storeId, sid) {
+  const items = [];
+  let pageToken = "";
+  for (let page = 0; page < 40; page += 1) {
+    const qs = new URLSearchParams({
+      marketplaceIds: marketplaceId(),
+      pageSize: "20",
+      includedData: "summaries,offers,fulfillmentAvailability",
+    });
+    if (pageToken) qs.set("pageToken", pageToken);
+    const json = await spapiFetch(
+      storeId,
+      "GET",
+      `/listings/2021-08-01/items/${encodeURIComponent(sid)}?${qs.toString()}`,
+    );
+    const batch = json?.items || [];
+    items.push(...batch);
+    pageToken = json?.pagination?.nextToken || "";
+    if (!pageToken || !batch.length) break;
+  }
+  return items;
+}
+
+export async function listAmazonListings(storeId = STORE_DEFAULT, { query = "", limit = LISTING_MANAGER_LIMIT } = {}) {
+  const sid = sellerId();
+  const sb = serviceClient();
+  const { data: floorRows, error: floorError } = await sb
     .from("listings")
-    .select("sku, status, listing_id, offer_id, listed_at, updated_at")
+    .select("sku, status, listing_id, offer_id, listed_at")
     .eq("store_id", storeId)
     .eq("channel", "amazon")
-    .neq("status", "ended")
-    .limit(200);
-  const { data: queue } = await sb
+    .in("status", ["listed", "live", "listing"])
+    .limit(LISTING_MANAGER_LIMIT);
+  if (floorError) return { ok: false, error: floorError.message, items: [] };
+  const { data: queue, error: queueError } = await sb
     .from("amazon_list_items")
     .select("sku, asin, status, amazon_price_cents, listing_sku, offer_sku, qty_listed, needs_review_reason")
     .eq("store_id", storeId)
     .neq("status", "removed")
-    .limit(200);
-  const skus = [...new Set([...(floorRows || []).map((r) => r.sku), ...(queue || []).map((r) => r.sku)])];
-  const { data: units } = skus.length
-    ? await sb.from("units").select("sku, title, ask_cents, state, brand").eq("store_id", storeId).in("sku", skus)
-    : { data: [] };
-  const unitMap = Object.fromEntries((units || []).map((u) => [u.sku, u]));
-  const qMap = Object.fromEntries((queue || []).map((q) => [q.sku, q]));
+    .limit(LISTING_MANAGER_LIMIT);
+  if (queueError) return { ok: false, error: queueError.message, items: [] };
+  const qMap = Object.fromEntries((queue || []).map((row) => [row.sku, row]));
+  const floorMap = Object.fromEntries((floorRows || []).filter((row) => row.sku).map((row) => [row.sku, row]));
 
-  // Best-effort pull of seller SKUs from SP-API search
   let apiItems = [];
-  try {
-    const path =
-      `/listings/2021-08-01/items/${encodeURIComponent(sid)}` +
-      `?marketplaceIds=${marketplaceId()}&pageSize=${Math.min(20, limit)}` +
-      `&includedData=summaries,attributes,offers,fulfillmentAvailability`;
-    // Some regions use /items without seller in path — try seller-scoped search via issues endpoint fallback
-    const json = await spapiFetch(
-      storeId,
-      "GET",
-      `/listings/2021-08-01/items?sellerId=${encodeURIComponent(sid)}&marketplaceIds=${marketplaceId()}&pageSize=${Math.min(20, limit)}&includedData=summaries,attributes`,
-    ).catch(() => null);
-    apiItems = json?.items || [];
-  } catch {
-    apiItems = [];
+  let apiError = null;
+  if (!sid) apiError = "AMAZON_SELLER_ID missing";
+  else {
+    try {
+      apiItems = await pullAmazonSearchItems(storeId, sid);
+    } catch (e) {
+      apiError = e instanceof Error ? e.message : String(e);
+      apiItems = [];
+    }
   }
-
-  const items = skus.map((sku) => {
-    const u = unitMap[sku] || {};
-    const q = qMap[sku] || {};
-    const f = (floorRows || []).find((r) => r.sku === sku) || {};
-    const api = apiItems.find((it) => String(it.sku || "") === sku || String(it.sku || "") === q.offer_sku);
-    const priceCents = q.amazon_price_cents ?? u.ask_cents ?? null;
-    const title = api?.summaries?.[0]?.itemName || u.title || sku;
-    const asin = q.asin || f.listing_id || api?.summaries?.[0]?.asin || null;
-    return {
-      channel: "amazon",
-      sku,
-      title,
-      asin,
-      price_cents: priceCents,
-      qty: q.qty_listed ?? 1,
-      status: q.status || f.status || "unknown",
-      floor_state: u.state || null,
-      floor_ask_cents: u.ask_cents ?? null,
-      drift:
-        priceCents != null && u.ask_cents != null && Math.abs(priceCents - u.ask_cents) > 1
-          ? `Amazon price ≠ Floor ask ($${(u.ask_cents / 100).toFixed(2)})`
-          : q.status === "not_on_amazon"
-            ? q.needs_review_reason || "Not on Amazon — sell elsewhere"
-            : null,
-      url: asin ? `https://www.amazon.com/dp/${asin}` : null,
-      editable: Boolean(q.offer_sku || q.listing_sku) && ["live", "listing", "ready"].includes(q.status || f.status),
-      offer_sku: q.offer_sku || q.listing_sku || sku,
-    };
-  }).filter((row) => {
-    if (!query) return true;
-    const blob = `${row.sku} ${row.title} ${row.asin || ""}`.toLowerCase();
-    return blob.includes(String(query).toLowerCase());
-  });
-
-  const last_synced = await stampSync(storeId, "amazon", { count: items.length });
-  return { ok: true, items: items.slice(0, limit), api_count: apiItems.length, last_synced };
+  const liveApi = apiItems.filter(amazonIsLive);
+  const skus = [
+    ...new Set([
+      ...liveApi.map((item) => item.sku),
+      ...(floorRows || []).map((row) => row.sku),
+      ...(queue || []).map((row) => row.sku),
+    ]),
+  ];
+  const unitMap = await unitsBySku(storeId, skus);
+  const seen = new Set();
+  const items = [];
+  for (const item of liveApi) {
+    const sku = item.sku || null;
+    if (sku) seen.add(sku);
+    items.push(amazonRowFromSearchItem(item, sku ? unitMap[sku] : null, sku ? qMap[sku] : null, sku ? floorMap[sku] : null));
+  }
+  for (const sku of skus) {
+    if (!sku || seen.has(sku)) continue;
+    const q = qMap[sku];
+    const floor = floorMap[sku];
+    if (!floor && (!q || q.status === "not_on_amazon")) continue;
+    seen.add(sku);
+    items.push(amazonRowFromFloor(sku, unitMap[sku], q, floor));
+  }
+  const filtered = items.filter((row) => listingMatches(row, query));
+  const capped = filtered.slice(0, limit);
+  const warnings = [];
+  if (apiError) warnings.push(apiError);
+  const last_synced = await stampSync(storeId, "amazon", { count: filtered.length, live: liveApi.length, api_error: apiError });
+  if (!capped.length && apiError && !(floorRows || []).length) {
+    return { ok: false, error: apiError, items: [], warnings, last_synced };
+  }
+  return {
+    ok: true,
+    items: capped,
+    total: filtered.length,
+    live_count: liveApi.length,
+    api_count: apiItems.length,
+    warnings,
+    truncated: filtered.length > capped.length,
+    last_synced,
+  };
 }
 
 export async function patchAmazonListing(
@@ -275,142 +324,96 @@ export async function patchAmazonListing(
   return { ok: true, warning: warn, submission: json, url: queue?.asin ? `https://www.amazon.com/dp/${queue.asin}` : null };
 }
 
-export async function listEbayListings(storeId = STORE_DEFAULT, { query = "", limit = 50 } = {}) {
+async function pullEbayActive(storeId, account) {
+  const full = await loadEbayAccount(storeId, { id: account.id });
+  const token = await userTokenForAccount(full);
+  const rows = await getMyEbaySellingActive(token, { entriesPerPage: 200, maxPages: 20 });
+  return rows;
+}
+
+export async function listEbayListings(storeId = STORE_DEFAULT, { query = "", limit = LISTING_MANAGER_LIMIT } = {}) {
   const accounts = await listEbayAccounts(storeId).catch(() => []);
   const connected = (accounts || []).filter((a) => a.status === "connected");
   const sb = serviceClient();
-  const items = [];
-
-  for (const account of connected) {
-    const label = account.username || account.role || account.id;
-    // orders_only (personal) usually lacks Inventory scopes — skip Inventory scan, still show Floor legacy.
-    if (account.role === "orders_only") continue;
-    // Inventory API pagination
-    let offset = 0;
-    let guard = 0;
-    while (guard++ < 5) {
-      let page;
+  const pulled = await Promise.all(
+    connected.map(async (account) => {
       try {
-        page = await ebayFetch(
-          storeId,
-          "GET",
-          `/sell/inventory/v1/inventory_item?limit=50&offset=${offset}`,
-          undefined,
-          { accountId: account.id },
-        );
+        const rows = await pullEbayActive(storeId, account);
+        return { account, rows, error: null };
       } catch (e) {
-        items.push({
-          channel: "ebay",
-          account: label,
-          account_role: account.role,
-          sku: null,
-          title: null,
-          error: e instanceof Error ? e.message : String(e),
-          editable: false,
-        });
-        break;
+        return { account, rows: [], error: e instanceof Error ? e.message : String(e) };
       }
-      for (const inv of page?.inventoryItems || []) {
-        const sku = inv.sku;
-        const title = inv.product?.title || sku;
-        const price = inv.offers?.[0] // not always present
-        void price;
-        // Fetch offers for price
-        let offer = null;
-        try {
-          const offers = await ebayFetch(
-            storeId,
-            "GET",
-            `/sell/inventory/v1/offer?sku=${encodeURIComponent(sku)}&limit=20`,
-            undefined,
-            { accountId: account.id },
-          );
-          offer = (offers?.offers || []).find((o) => o.status === "PUBLISHED") || (offers?.offers || [])[0] || null;
-        } catch {
-          offer = null;
-        }
-        const priceCents = offer?.pricingSummary?.price?.value
-          ? Math.round(Number(offer.pricingSummary.price.value) * 100)
-          : null;
-        const itemId = offer?.listing?.listingId || offer?.listingId || null;
-        const { data: unit } = await sb
-          .from("units")
-          .select("sku, title, ask_cents, state")
-          .eq("store_id", storeId)
-          .eq("sku", sku)
-          .maybeSingle();
-        items.push({
-          channel: "ebay",
-          account: label,
-          account_id: account.id,
-          account_role: account.role,
-          sku,
-          title: title || unit?.title || sku,
-          price_cents: priceCents,
-          qty: inv.availability?.shipToLocationAvailability?.quantity ?? null,
-          status: offer?.status || "INVENTORY",
-          floor_state: unit?.state || null,
-          floor_ask_cents: unit?.ask_cents ?? null,
-          drift:
-            priceCents != null && unit?.ask_cents != null && Math.abs(priceCents - unit.ask_cents) > 1
-              ? `eBay price ≠ Floor ask`
-              : null,
-          url: itemId ? `https://www.ebay.com/itm/${itemId}` : null,
-          editable: Boolean(offer?.offerId),
-          offer_id: offer?.offerId || null,
-          item_id: itemId,
-          api: "inventory",
-        });
-      }
-      if (!page?.next || (page?.inventoryItems || []).length < 50) break;
-      offset += 50;
-    }
-  }
+    }),
+  );
 
-  // Trading-era / Vendoo listings may only appear in Floor listings table without Inventory API SKU
-  const { data: floorOnly } = await sb
+  const { data: floorRows, error: floorError } = await sb
     .from("listings")
-    .select("sku, listing_id, status, listed_at")
+    .select("sku, listing_id, status, listed_at, ebay_account_id")
     .eq("store_id", storeId)
     .eq("channel", "ebay")
     .eq("status", "listed")
-    .limit(100);
-  for (const row of floorOnly || []) {
-    if (items.some((i) => i.sku === row.sku && i.channel === "ebay")) continue;
-    const { data: unit } = await sb
-      .from("units")
-      .select("title, ask_cents, state")
-      .eq("store_id", storeId)
-      .eq("sku", row.sku)
-      .maybeSingle();
-    items.push({
-      channel: "ebay",
-      account: "unknown / legacy",
-      account_role: null,
-      sku: row.sku,
-      title: unit?.title || row.sku,
-      price_cents: unit?.ask_cents ?? null,
-      qty: null,
-      status: row.status,
-      floor_state: unit?.state || null,
-      floor_ask_cents: unit?.ask_cents ?? null,
-      drift: "Listed on Floor as eBay but not found in Inventory API — likely Trading/Vendoo-era; edit in eBay Seller Hub or migrate",
-      url: row.listing_id ? `https://www.ebay.com/itm/${row.listing_id}` : null,
-      editable: false,
-      api: "legacy_floor_only",
-    });
-  }
+    .limit(LISTING_MANAGER_LIMIT);
+  if (floorError) return { ok: false, error: floorError.message, items: [] };
 
-  const filtered = items.filter((row) => {
-    if (!query) return true;
-    const blob = `${row.sku} ${row.title} ${row.account} ${row.item_id || ""}`.toLowerCase();
-    return blob.includes(String(query).toLowerCase());
+  const live = [];
+  for (const bag of pulled) {
+    for (const row of bag.rows) {
+      const status = String(row.listingStatus || "Active").toLowerCase();
+      if (status && status !== "active") continue;
+      live.push(ebayRowFromActive(bag.account, row, null));
+    }
+  }
+  const skuList = [
+    ...live.map((row) => row.sku),
+    ...(floorRows || []).map((row) => row.sku),
+  ];
+  const unitMap = await unitsBySku(storeId, skuList);
+  const liveWithFloor = live.map((row) => {
+    const unit = row.sku ? unitMap[row.sku] : null;
+    if (!unit) return row;
+    return ebayRowFromActive(
+      { id: row.account_id, username: row.account, role: row.account_role },
+      {
+        itemId: row.item_id,
+        sku: row.sku,
+        title: row.title,
+        currentPrice: row.price_cents != null ? (row.price_cents / 100).toFixed(2) : "",
+        quantity: row.qty ?? 0,
+        quantitySold: 0,
+        listingStatus: row.status,
+        viewItemUrl: row.url,
+      },
+      unit,
+    );
   });
-  const last_synced = await stampSync(storeId, "ebay", { count: filtered.length });
+  const accountById = Object.fromEntries(connected.map((account) => [account.id, account]));
+  const merged = mergeEbayListings(liveWithFloor, floorRows || [], unitMap, accountById);
+  const filtered = merged.filter((row) => listingMatches(row, query));
+  const capped = filtered.slice(0, limit);
+  const warnings = pulled.filter((bag) => bag.error).map((bag) => `${bag.account.username || bag.account.role}: ${bag.error}`);
+  const accountSummary = pulled.map((bag) => ({
+    id: bag.account.id,
+    username: bag.account.username,
+    role: bag.account.role,
+    live_count: bag.rows.filter((row) => String(row.listingStatus || "Active").toLowerCase() === "active" || !row.listingStatus).length,
+    error: bag.error,
+  }));
+  const last_synced = await stampSync(storeId, "ebay", {
+    count: filtered.length,
+    live: live.length,
+    accounts: accountSummary.map((row) => ({ username: row.username, live_count: row.live_count, error: row.error })),
+  });
+  if (!capped.length && warnings.length && !(floorRows || []).length) {
+    return { ok: false, error: warnings.join(" · "), items: [], accounts: accountSummary, warnings, last_synced };
+  }
   return {
     ok: true,
-    items: filtered.slice(0, limit),
-    accounts: connected.map((a) => ({ id: a.id, username: a.username, role: a.role })),
+    items: capped,
+    total: filtered.length,
+    live_count: live.length,
+    accounts: accountSummary,
+    warnings,
+    truncated: filtered.length > capped.length,
     last_synced,
   };
 }
@@ -520,71 +523,113 @@ export async function patchEbayListing(
   return { ok: true, warning: warn, offerId, sku };
 }
 
-export async function listTikTokListings(storeId = STORE_DEFAULT, { query = "", limit = 50 } = {}) {
+async function pullTikTokProducts(storeId) {
+  const products = [];
+  let pageToken = "";
+  for (let page = 0; page < 20; page += 1) {
+    const json = await tiktokApiFetch(
+      storeId,
+      "POST",
+      "/product/202309/products/search",
+      { status: "ACTIVATE" },
+      { page_size: "100", ...(pageToken ? { page_token: pageToken } : {}) },
+    );
+    if (json?.code != null && Number(json.code) !== 0) {
+      throw new Error(json.message || json.msg || `tiktok_code_${json.code}`);
+    }
+    const batch = json?.data?.products || json?.data?.list || json?.products || [];
+    products.push(...batch);
+    pageToken = json?.data?.next_page_token || "";
+    if (!pageToken || !batch.length) break;
+  }
+  return products;
+}
+
+export async function listTikTokListings(storeId = STORE_DEFAULT, { query = "", limit = LISTING_MANAGER_LIMIT } = {}) {
   await ensureTikTokTokenFresh(storeId).catch(() => undefined);
   const status = await tiktokConnectionStatus(storeId);
+  const sb = serviceClient();
+  const { data: floorRows, error: floorError } = await sb
+    .from("listings")
+    .select("sku, listing_id, status, listed_at")
+    .eq("store_id", storeId)
+    .eq("channel", "tiktok")
+    .eq("status", "listed")
+    .limit(LISTING_MANAGER_LIMIT);
+  if (floorError) return { ok: false, error: floorError.message, items: [] };
+
+  let products = [];
+  let apiError = null;
   if (!status.connected && !status.configured) {
+    apiError = "TikTok Shop not connected — set Partner app keys and Authorize in Marketplaces.";
+  } else {
+    try {
+      products = await pullTikTokProducts(storeId);
+    } catch (e) {
+      apiError = e instanceof Error ? e.message : String(e);
+    }
+  }
+  const liveProducts = products.filter((product) => tiktokIsLive(product?.status || product?.product_status || "ACTIVATE"));
+  const skus = [
+    ...liveProducts.map((product) => product?.skus?.[0]?.seller_sku || product?.external_sku || product?.seller_sku),
+    ...(floorRows || []).map((row) => row.sku),
+  ];
+  const unitMap = await unitsBySku(storeId, skus);
+  const seen = new Set();
+  const items = [];
+  for (const product of liveProducts) {
+    const row = tiktokRowFromProduct(product, null);
+    const unit = row.sku ? unitMap[row.sku] : null;
+    const shaped = unit ? tiktokRowFromProduct(product, unit) : row;
+    if (shaped.sku) seen.add(shaped.sku);
+    if (shaped.product_id) seen.add(`id:${shaped.product_id}`);
+    items.push(shaped);
+  }
+  for (const floor of floorRows || []) {
+    if (floor.sku && seen.has(floor.sku)) continue;
+    if (floor.listing_id && seen.has(`id:${floor.listing_id}`)) continue;
+    const unit = floor.sku ? unitMap[floor.sku] : null;
+    items.push({
+      channel: "tiktok",
+      sku: floor.sku,
+      title: unit?.title || floor.sku,
+      product_id: floor.listing_id || null,
+      price_cents: unit?.ask_cents ?? null,
+      qty: null,
+      status: floor.status,
+      floor_state: unit?.state || null,
+      floor_ask_cents: unit?.ask_cents ?? null,
+      drift: "On Floor as listed, not in the live TikTok catalog",
+      url: null,
+      editable: Boolean(floor.listing_id),
+      api: "floor",
+    });
+  }
+  const filtered = items.filter((row) => listingMatches(row, query));
+  const capped = filtered.slice(0, limit);
+  const warnings = apiError ? [apiError] : [];
+  const last_synced = await stampSync(storeId, "tiktok", { count: filtered.length, live: liveProducts.length, api_error: apiError });
+  if (!capped.length && apiError) {
     return {
       ok: true,
       items: [],
-      stub: true,
-      message: "TikTok Shop not connected — set Partner app keys and Authorize in Marketplaces.",
+      stub: !status.connected,
+      message: apiError,
+      warnings,
       status,
+      last_synced,
     };
   }
-  let products = [];
-  try {
-    const json = await tiktokApiFetch(storeId, "POST", "/product/202309/products/search", {
-      page_size: Math.min(50, limit),
-      status: "ALL",
-    });
-    products = json?.data?.products || json?.data?.list || json?.products || [];
-  } catch (e) {
-    return {
-      ok: false,
-      items: [],
-      error: e instanceof Error ? e.message : String(e),
-      status,
-    };
-  }
-  const sb = serviceClient();
-  const items = [];
-  for (const p of products) {
-    const sku = String(p.external_sku || p.seller_sku || p.skus?.[0]?.seller_sku || "").trim();
-    const title = p.title || p.product_name || sku;
-    const priceCents = p.skus?.[0]?.price?.sale_price
-      ? Math.round(Number(p.skus[0].price.sale_price) * 100)
-      : p.sale_price
-        ? Math.round(Number(p.sale_price) * 100)
-        : null;
-    const { data: unit } = sku
-      ? await sb.from("units").select("ask_cents, state, title").eq("store_id", storeId).eq("sku", sku).maybeSingle()
-      : { data: null };
-    items.push({
-      channel: "tiktok",
-      sku: sku || null,
-      title,
-      product_id: p.id || p.product_id,
-      price_cents: priceCents,
-      qty: p.skus?.[0]?.inventory?.[0]?.quantity ?? p.quantity ?? null,
-      status: p.status || p.product_status || "unknown",
-      floor_state: unit?.state || null,
-      floor_ask_cents: unit?.ask_cents ?? null,
-      drift:
-        priceCents != null && unit?.ask_cents != null && Math.abs(priceCents - unit.ask_cents) > 1
-          ? "TikTok price ≠ Floor ask"
-          : null,
-      url: null,
-      editable: Boolean(p.id || p.product_id),
-    });
-  }
-  const filtered = items.filter((row) => {
-    if (!query) return true;
-    const blob = `${row.sku} ${row.title}`.toLowerCase();
-    return blob.includes(String(query).toLowerCase());
-  });
-  const last_synced = await stampSync(storeId, "tiktok", { count: filtered.length });
-  return { ok: true, items: filtered.slice(0, limit), status, last_synced };
+  return {
+    ok: true,
+    items: capped,
+    total: filtered.length,
+    live_count: liveProducts.length,
+    warnings,
+    status,
+    truncated: filtered.length > capped.length,
+    last_synced,
+  };
 }
 
 export async function endAmazonListing(storeId, { sku, offerSku }) {
@@ -788,8 +833,8 @@ export function parseDepopListingRef(input) {
   }
 }
 
-/** Floor Depop listings (no live API — rows you confirmed via Push to Depop). */
-export async function listDepopListings(storeId = STORE_DEFAULT, { query = "", limit = 50 } = {}) {
+/** Floor Depop listings (no live API — rows confirmed via Push to Depop). */
+export async function listDepopListings(storeId = STORE_DEFAULT, { query = "", limit = LISTING_MANAGER_LIMIT } = {}) {
   const sb = serviceClient();
   const { data: rows, error } = await sb
     .from("listings")
@@ -798,50 +843,23 @@ export async function listDepopListings(storeId = STORE_DEFAULT, { query = "", l
     .eq("channel", "depop")
     .eq("status", "listed")
     .order("listed_at", { ascending: false })
-    .limit(Math.min(200, Math.max(1, limit)));
+    .limit(LISTING_MANAGER_LIMIT);
   if (error) return { ok: false, error: error.message, items: [], last_synced: await stampSync(storeId, "depop", { count: 0 }) };
-
-  const qLower = String(query || "").trim().toLowerCase();
-  const items = [];
-  for (const row of rows || []) {
-    const { data: unit } = await sb
-      .from("units")
-      .select("sku, title, ask_cents, state, brand")
-      .eq("store_id", storeId)
-      .eq("sku", row.sku)
-      .maybeSingle();
-    const title = unit?.title || row.sku;
-    const hay = `${row.sku} ${title} ${row.listing_id || ""}`.toLowerCase();
-    if (qLower && !hay.includes(qLower)) continue;
-    const url = row.listing_id
-      ? row.listing_id.startsWith("http")
-        ? row.listing_id
-        : `https://www.depop.com/products/${row.listing_id}/`
-      : null;
-    items.push({
-      channel: "depop",
-      sku: row.sku,
-      title,
-      price_cents: unit?.ask_cents ?? null,
-      qty: 1,
-      status: row.status,
-      floor_state: unit?.state || null,
-      floor_ask_cents: unit?.ask_cents ?? null,
-      listing_id: row.listing_id,
-      url,
-      editable: false,
-      api: "manual_confirm",
-      note: "Depop has no listing API — edit on Depop, or End here to clear the Floor row.",
-    });
-    if (items.length >= limit) break;
-  }
+  const unitMap = await unitsBySku(storeId, (rows || []).map((row) => row.sku));
+  const items = (rows || [])
+    .map((row) => depopRowFromFloor(row, unitMap[row.sku]))
+    .filter((row) => listingMatches(row, query));
+  const capped = items.slice(0, limit);
   return {
     ok: true,
     channel: "depop",
-    items,
+    items: capped,
+    total: items.length,
+    live_count: items.length,
+    truncated: items.length > capped.length,
     last_synced: await stampSync(storeId, "depop", { count: items.length }),
     stub: false,
-    message: "Floor Depop rows only (confirmed via Push to Depop). Sales still ingest from Depop email.",
+    message: "Depop has no listing API. These are the live Floor rows confirmed from Push to Depop.",
   };
 }
 

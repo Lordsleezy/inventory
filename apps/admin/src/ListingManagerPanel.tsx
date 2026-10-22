@@ -76,6 +76,7 @@ export function ListingManagerPanel({ accessToken, money, channel: channelProp, 
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [meta, setMeta] = useState('');
+  const [warnings, setWarnings] = useState<string[]>([]);
   const [lastSynced, setLastSynced] = useState<string | null>(null);
 
   useEffect(() => {
@@ -107,21 +108,34 @@ export function ListingManagerPanel({ accessToken, money, channel: channelProp, 
   const load = useCallback(async () => {
     setBusy(true);
     setError('');
+    setItems([]);
+    setWarnings([]);
+    setLastSynced(null);
     try {
-      const body = await lm(accessToken, { action: 'list', channel, query, limit: 80 });
-      setItems((body.items || []) as ListingRow[]);
-      const synced = body.last_synced?.at || null;
-      setLastSynced(synced);
+      const body = await lm(accessToken, { action: 'list', channel, limit: 2000 });
+      const next = (body.items || []) as ListingRow[];
+      setItems(next);
+      setLastSynced(body.last_synced?.at || null);
+      const notes = Array.isArray(body.warnings) ? body.warnings.map((w: unknown) => String(w)).filter(Boolean) : [];
+      if (body.message && !notes.includes(String(body.message))) notes.push(String(body.message));
+      setWarnings(notes);
+      const total = Number(body.total ?? next.length);
       if (body.stub) setMeta(String(body.message || 'Not connected'));
-      else if (body.accounts) setMeta(`${body.accounts.length} eBay account(s) · ${(body.items || []).length} listing(s)`);
-      else setMeta(`${(body.items || []).length} listing(s)`);
+      else if (Array.isArray(body.accounts) && body.accounts.length) {
+        const accounts = body.accounts
+          .map((a: { username?: string; live_count?: number; error?: string | null }) =>
+            `${a.username || 'account'} ${a.error ? 'failed' : a.live_count ?? 0}`,
+          )
+          .join(' · ');
+        setMeta(`${total} listing(s) · ${accounts}`);
+      } else setMeta(`${total} listing(s)`);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setItems([]);
     } finally {
       setBusy(false);
     }
-  }, [accessToken, channel, query]);
+  }, [accessToken, channel]);
 
   useEffect(() => {
     void load();
@@ -458,9 +472,20 @@ export function ListingManagerPanel({ accessToken, money, channel: channelProp, 
     }
   }
 
-  const syncedLabel = lastSynced
-    ? `Last synced ${new Date(lastSynced).toLocaleString('en-US', { timeZone: 'America/Los_Angeles' })} PT`
-    : 'Not synced this session';
+  const syncedLabel = busy && !lastSynced
+    ? 'Syncing live listings…'
+    : lastSynced
+      ? `Last synced ${new Date(lastSynced).toLocaleString('en-US', { timeZone: 'America/Los_Angeles' })} PT`
+      : 'Not synced this session';
+
+  const needle = query.trim().toLowerCase();
+  const shown = needle
+    ? items.filter((row) =>
+        `${row.sku || ''} ${row.title || ''} ${row.account || ''} ${row.asin || ''} ${row.item_id || ''} ${row.product_id || ''}`
+          .toLowerCase()
+          .includes(needle),
+      )
+    : items;
 
   const channelLabel =
     channel === 'ebay' ? 'eBay' : channel === 'amazon' ? 'Amazon' : channel === 'tiktok' ? 'TikTok Shop' : 'Depop';
@@ -513,20 +538,21 @@ export function ListingManagerPanel({ accessToken, money, channel: channelProp, 
         Search
         <input
           value={query}
-          disabled={busy}
           placeholder="SKU, title, ASIN…"
           onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault();
-              void load();
-            }
-          }}
         />
       </label>
       <p className="hint">
-        {meta} · {syncedLabel}
+        {busy && !meta ? 'Loading live listings from Floor and the marketplace…' : meta || 'No listings loaded yet'}
+        {' · '}
+        {syncedLabel}
+        {needle ? ` · showing ${shown.length} of ${items.length}` : ''}
       </p>
+      {warnings.map((warning) => (
+        <p className="hint" key={warning}>
+          {warning}
+        </p>
+      ))}
       {error && (
         <div className="alert" role="alert">
           {error}
@@ -544,11 +570,19 @@ export function ListingManagerPanel({ accessToken, money, channel: channelProp, 
         </div>
       )}
 
-      {items.length === 0 ? (
-        <div className="empty">No listings loaded for {channel}. Use Add listing or Refresh.</div>
+      {shown.length === 0 ? (
+        <div className="empty">
+          {busy
+            ? `Loading live ${channelLabel} listings…`
+            : error
+              ? `Could not load ${channelLabel} listings.`
+              : needle
+                ? `No ${channelLabel} listings match “${query.trim()}”.`
+                : `No live ${channelLabel} listings.`}
+        </div>
       ) : (
         <div className="ticket-list">
-          {items.map((row, i) => (
+          {shown.map((row, i) => (
             <div className="ticket" key={`${row.channel}-${row.sku}-${row.offer_id || row.asin || row.product_id || i}`}>
               <div className="ticket-top">
                 <strong>{row.title || row.sku || 'Listing'}</strong>

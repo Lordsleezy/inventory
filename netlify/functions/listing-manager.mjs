@@ -38,7 +38,7 @@ async function handleStaff(event) {
   const channel = String(body.channel || "").trim().toLowerCase();
   const { storeId, actor } = await portalAdminFromEvent(event, body.store_id || STORE_DEFAULT);
   const query = body.query || "";
-  const limit = Math.min(100, Math.max(1, Number(body.limit) || 50));
+  const limit = Math.min(2000, Math.max(1, Number(body.limit) || (action === "list" ? 2000 : 50)));
 
   if (action === "list") {
     if (channel === "amazon") return json(200, await listAmazonListings(storeId, { query, limit }));
