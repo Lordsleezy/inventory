@@ -22,6 +22,8 @@ import {
   listTikTokProduct,
 } from "./tiktok-shop.mjs";
 import { listLegacyEbayCandidates, migrateEbayListingsToInventory } from "./ebay-inventory-migrate.mjs";
+import { calcListPrice, estimateLabelCost, getFeeConfig } from "./marketplace-pricing.mjs";
+import { composeChannelDescription, parseListingSpecs } from "./listing-copy.mjs";
 
 function sellerId() {
   return (process.env.AMAZON_SELLER_ID || "").trim();
@@ -762,6 +764,237 @@ export async function endTikTokListing(storeId, { productId, sku }) {
   return { ok: true, ended: true, productId, sku, result: json };
 }
 
+/** Normalize a Depop product URL → stable listing_id (path after /products/). */
+export function parseDepopListingRef(input) {
+  const raw = String(input || "").trim();
+  if (!raw) return { ok: false, error: "depop_url_required" };
+  if (/^listed$/i.test(raw)) return { ok: true, listingId: null, url: null, markedOnly: true };
+  let url = raw;
+  if (!/^https?:\/\//i.test(url)) {
+    if (url.startsWith("depop.com/") || url.startsWith("www.depop.com/")) url = `https://${url}`;
+    else if (url.startsWith("/products/")) url = `https://www.depop.com${url}`;
+  }
+  try {
+    const u = new URL(url);
+    if (!/\.depop\.com$/i.test(u.hostname) && !/^depop\.com$/i.test(u.hostname)) {
+      return { ok: false, error: "url_must_be_depop_com" };
+    }
+    const m = u.pathname.match(/\/products\/([^/?#]+)/i);
+    if (!m) return { ok: false, error: "depop_url_needs_products_path" };
+    const listingId = m[1];
+    return { ok: true, listingId, url: `https://www.depop.com/products/${listingId}/`, markedOnly: false };
+  } catch {
+    return { ok: false, error: "invalid_depop_url" };
+  }
+}
+
+/** Floor Depop listings (no live API — rows you confirmed via Push to Depop). */
+export async function listDepopListings(storeId = STORE_DEFAULT, { query = "", limit = 50 } = {}) {
+  const sb = serviceClient();
+  const { data: rows, error } = await sb
+    .from("listings")
+    .select("sku, listing_id, status, listed_at, delisted_at")
+    .eq("store_id", storeId)
+    .eq("channel", "depop")
+    .eq("status", "listed")
+    .order("listed_at", { ascending: false })
+    .limit(Math.min(200, Math.max(1, limit)));
+  if (error) return { ok: false, error: error.message, items: [], last_synced: await stampSync(storeId, "depop", { count: 0 }) };
+
+  const qLower = String(query || "").trim().toLowerCase();
+  const items = [];
+  for (const row of rows || []) {
+    const { data: unit } = await sb
+      .from("units")
+      .select("sku, title, ask_cents, state, brand")
+      .eq("store_id", storeId)
+      .eq("sku", row.sku)
+      .maybeSingle();
+    const title = unit?.title || row.sku;
+    const hay = `${row.sku} ${title} ${row.listing_id || ""}`.toLowerCase();
+    if (qLower && !hay.includes(qLower)) continue;
+    const url = row.listing_id
+      ? row.listing_id.startsWith("http")
+        ? row.listing_id
+        : `https://www.depop.com/products/${row.listing_id}/`
+      : null;
+    items.push({
+      channel: "depop",
+      sku: row.sku,
+      title,
+      price_cents: unit?.ask_cents ?? null,
+      qty: 1,
+      status: row.status,
+      floor_state: unit?.state || null,
+      floor_ask_cents: unit?.ask_cents ?? null,
+      listing_id: row.listing_id,
+      url,
+      editable: false,
+      api: "manual_confirm",
+      note: "Depop has no listing API — edit on Depop, or End here to clear the Floor row.",
+    });
+    if (items.length >= limit) break;
+  }
+  return {
+    ok: true,
+    channel: "depop",
+    items,
+    last_synced: await stampSync(storeId, "depop", { count: items.length }),
+    stub: false,
+    message: "Floor Depop rows only (confirmed via Push to Depop). Sales still ingest from Depop email.",
+  };
+}
+
+/**
+ * Ready-to-paste Depop listing pack (title, description, fee-aware price, photo download URLs).
+ * No marketplace write.
+ */
+export async function buildDepopPack(storeId, { sku } = {}) {
+  const sb = serviceClient();
+  const { data: unit, error } = await sb.from("units").select("*").eq("store_id", storeId).eq("sku", sku).maybeSingle();
+  if (error) return { ok: false, error: error.message };
+  if (!unit) return { ok: false, error: "unknown_sku" };
+  if (unit.state !== "available" && unit.state !== "reserved") {
+    return { ok: false, error: `unit_not_sellable:${unit.state}` };
+  }
+  const photos = await unitPhotos(storeId, sku);
+  if (!photos.paths.length) return { ok: false, error: "photos_required — real unit photos only (no AI)" };
+
+  const floorAsk = Number(unit.ask_cents || 0);
+  const label = estimateLabelCost(unit);
+  const listCents = calcListPrice(floorAsk, "depop", 0, 0);
+  const fee = getFeeConfig().marketplaces.depop;
+  const feeCents = Math.round(listCents * fee.rate) + fee.fixedFeeCents;
+  const description = composeChannelDescription({
+    listingBody: unit.listing_body,
+    brand: unit.brand,
+    model: unit.model,
+    title: unit.title,
+    specs: parseListingSpecs(unit.listing_specs),
+    defectNotes: unit.defect_notes,
+    condition: unit.condition,
+    testStatus: unit.test_status,
+    sku,
+  });
+
+  return {
+    ok: true,
+    channel: "depop",
+    sku,
+    pack: {
+      title: String(unit.title || `SKU ${sku}`).slice(0, 80),
+      description,
+      condition: unit.condition,
+      brand: unit.brand,
+      price_cents: listCents,
+      price_display: `$${(listCents / 100).toFixed(2)}`,
+      floor_ask_cents: floorAsk,
+      fee_cents: feeCents,
+      fee_note: `Depop fees ~${(fee.rate * 100).toFixed(1)}% + $${(fee.fixedFeeCents / 100).toFixed(2)} (≈$${(feeCents / 100).toFixed(2)} on this price). List price is Floor ask grossed up for fees.`,
+      photos: photos.urls.map((p, i) => ({
+        index: i + 1,
+        path: p.path,
+        download_url: p.url,
+      })),
+      photo_count: photos.urls.length,
+      instructions: [
+        "1. Open Depop Seller and create a new listing.",
+        "2. Paste title + description; set price to the amount below.",
+        "3. Download each photo from Floor (real unit photos only — never AI) and upload in order.",
+        "4. Publish on Depop, then paste the listing URL back here (or tap Listed on Depop).",
+      ],
+      label_estimate: label,
+    },
+  };
+}
+
+/**
+ * After you post on Depop: paste URL (preferred) or mark listed without URL.
+ * Writes a real listings row + listed_on. Never marks sold.
+ */
+export async function confirmDepopListed(storeId, { sku, depopUrl = null, markOnly = false } = {}) {
+  const sb = serviceClient();
+  const { data: unit } = await sb.from("units").select("sku, state, listed_on").eq("store_id", storeId).eq("sku", sku).maybeSingle();
+  if (!unit) return { ok: false, error: "unknown_sku" };
+  if (unit.state !== "available" && unit.state !== "reserved") {
+    return { ok: false, error: `unit_not_sellable:${unit.state}` };
+  }
+
+  let listingId = null;
+  let url = null;
+  if (!markOnly && depopUrl) {
+    const parsed = parseDepopListingRef(depopUrl);
+    if (!parsed.ok) return parsed;
+    if (parsed.markedOnly) {
+      markOnly = true;
+    } else {
+      listingId = parsed.listingId;
+      url = parsed.url;
+    }
+  }
+  if (!markOnly && !listingId) {
+    return { ok: false, error: "depop_url_required — paste the Depop product link, or pass mark_only=true" };
+  }
+
+  const { error: upErr } = await sb.from("listings").upsert(
+    {
+      store_id: storeId,
+      sku,
+      channel: "depop",
+      status: "listed",
+      listing_id: listingId,
+      listed_at: new Date().toISOString(),
+      delisted_at: null,
+    },
+    { onConflict: "store_id,sku,channel" },
+  );
+  if (upErr) return { ok: false, error: upErr.message };
+
+  const prev = Array.isArray(unit.listed_on) ? unit.listed_on : [];
+  const next = [...new Set([...prev.filter((c) => c !== "vendoo" && c !== "mercari"), "depop"])];
+  const { error: unitErr } = await sb
+    .from("units")
+    .update({ listed_on: next, updated_at: new Date().toISOString() })
+    .eq("store_id", storeId)
+    .eq("sku", sku);
+  if (unitErr) return { ok: false, error: unitErr.message };
+
+  return {
+    ok: true,
+    channel: "depop",
+    sku,
+    listing_id: listingId,
+    url,
+    listed_on: next,
+    message: url ? `Depop listing recorded: ${url}` : "Marked listed on Depop (no URL — paste the link later to attach it).",
+  };
+}
+
+/** Clear Depop listing row + listed_on flag. Does not mark the unit sold. */
+export async function endDepopListing(storeId, { sku } = {}) {
+  if (!sku) return { ok: false, error: "sku_required" };
+  const sb = serviceClient();
+  const { data: unit } = await sb.from("units").select("sku, listed_on, state").eq("store_id", storeId).eq("sku", sku).maybeSingle();
+  if (!unit) return { ok: false, error: "unknown_sku" };
+
+  await sb
+    .from("listings")
+    .update({ status: "delisted", delisted_at: new Date().toISOString() })
+    .eq("store_id", storeId)
+    .eq("sku", sku)
+    .eq("channel", "depop")
+    .eq("status", "listed");
+
+  const next = (unit.listed_on || []).filter((c) => c !== "depop");
+  await sb
+    .from("units")
+    .update({ listed_on: next, updated_at: new Date().toISOString() })
+    .eq("store_id", storeId)
+    .eq("sku", sku);
+
+  return { ok: true, ended: true, sku, channel: "depop", unit_state: unit.state, listed_on: next };
+}
+
 /** Floor units eligible to add to a channel (available, priced, has real photos, not already live). */
 export async function listEligibleUnits(storeId, { channel, query = "", limit = 40 } = {}) {
   const sb = serviceClient();
@@ -783,12 +1016,12 @@ export async function listEligibleUnits(storeId, { channel, query = "", limit = 
     : units || [];
 
   const listed = new Set();
-  if (ch === "ebay") {
+  if (ch === "ebay" || ch === "depop") {
     const { data } = await sb
       .from("listings")
       .select("sku")
       .eq("store_id", storeId)
-      .eq("channel", "ebay")
+      .eq("channel", ch)
       .eq("status", "listed");
     for (const r of data || []) listed.add(r.sku);
   } else if (ch === "amazon") {
@@ -906,6 +1139,23 @@ export async function prefillCreate(storeId, { channel, sku } = {}) {
           : prep.last_error || "Not ready — check TikTok connection / eligibility.",
       },
       prepare: prep,
+    };
+  }
+  if (ch === "depop") {
+    const pack = await buildDepopPack(storeId, { sku });
+    if (!pack.ok) return pack;
+    return {
+      ok: true,
+      draft: {
+        ...base,
+        ...pack.pack,
+        price_cents: pack.pack.price_cents,
+        description: pack.pack.description,
+        image_urls: (pack.pack.photos || []).map((p) => p.download_url),
+        note: "Depop has no API — copy this pack into Depop Seller, then confirm with the listing URL.",
+        mode: "push_pack",
+      },
+      pack: pack.pack,
     };
   }
   return { ok: false, error: "channel_required" };

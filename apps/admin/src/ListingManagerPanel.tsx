@@ -35,7 +35,17 @@ type Eligible = {
   condition: string | null;
 };
 
-type Channel = 'amazon' | 'ebay' | 'tiktok';
+type Channel = 'amazon' | 'ebay' | 'tiktok' | 'depop';
+
+type DepopPack = {
+  title?: string;
+  description?: string;
+  price_cents?: number;
+  price_display?: string;
+  fee_note?: string;
+  photos?: { index: number; path: string; download_url: string }[];
+  instructions?: string[];
+};
 
 type Props = {
   accessToken: string;
@@ -83,6 +93,9 @@ export function ListingManagerPanel({ accessToken, money }: Props) {
 
   const [legacy, setLegacy] = useState<{ sku: string; listing_id: string; title: string }[]>([]);
   const [showMigrate, setShowMigrate] = useState(false);
+  const [depopPack, setDepopPack] = useState<DepopPack | null>(null);
+  const [depopSku, setDepopSku] = useState('');
+  const [depopUrl, setDepopUrl] = useState('');
 
   const load = useCallback(async () => {
     setBusy(true);
@@ -195,7 +208,11 @@ export function ListingManagerPanel({ accessToken, money }: Props) {
         account_id: row.account_id,
         product_id: row.product_id,
       });
-      setNotice('Listing ended via marketplace API. Floor unit was not marked sold.');
+      setNotice(
+        row.channel === 'depop'
+          ? 'Depop Floor row cleared (listed_on + listings). End the listing on Depop Seller yourself — unit not marked sold.'
+          : 'Listing ended via marketplace API. Floor unit was not marked sold.',
+      );
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -230,6 +247,9 @@ export function ListingManagerPanel({ accessToken, money }: Props) {
     setShowAdd(true);
     setDraft(null);
     setDraftSku('');
+    setDepopPack(null);
+    setDepopSku('');
+    setDepopUrl('');
     setSelected(new Set());
     setBusy(true);
     setError('');
@@ -264,8 +284,19 @@ export function ListingManagerPanel({ accessToken, money }: Props) {
     setBusy(true);
     setError('');
     try {
+      if (channel === 'depop') {
+        const body = await lm(accessToken, { action: 'depop_pack', sku });
+        setDepopSku(sku);
+        setDepopPack((body.pack || {}) as DepopPack);
+        setDepopUrl('');
+        setDraft(null);
+        setDraftSku('');
+        setNotice(`Push pack ready for SKU ${sku} — copy into Depop, then paste the listing URL below.`);
+        return;
+      }
       const body = await lm(accessToken, { action: 'prefill', channel, sku });
       setDraftSku(sku);
+      setDepopPack(null);
       setDraft({
         ...(body.draft || {}),
         title: body.draft?.title || '',
@@ -277,6 +308,40 @@ export function ListingManagerPanel({ accessToken, money }: Props) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function confirmDepop(markOnly = false) {
+    if (!depopSku) return;
+    setBusy(true);
+    setError('');
+    try {
+      const body = await lm(accessToken, {
+        action: 'depop_confirm',
+        sku: depopSku,
+        depop_url: markOnly ? null : depopUrl || null,
+        mark_only: markOnly,
+      });
+      setNotice(String(body.message || `Depop listing recorded for SKU ${depopSku}.`));
+      setShowAdd(false);
+      setDepopPack(null);
+      setDepopSku('');
+      setDepopUrl('');
+      setChannel('depop');
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function copyText(label: string, text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setNotice(`Copied ${label}.`);
+    } catch {
+      setNotice(`Select and copy ${label} manually.`);
     }
   }
 
@@ -397,8 +462,8 @@ export function ListingManagerPanel({ accessToken, money }: Props) {
           <div className="eyebrow">LIVE LISTINGS</div>
           <h2>Listing manager</h2>
           <p className="hint" style={{ margin: 0 }}>
-            Add, edit, and end Amazon / eBay / TikTok listings from Floor. Admin-only. Real photos only — no AI images. Ending never
-            marks a unit sold. Depop has no public listing API.
+            eBay / Amazon / TikTok: live APIs. Depop: Push pack → you post → paste link. Admin-only. Real photos only — no AI.
+            Ending never marks a unit sold.
           </p>
         </div>
         <div className="actions">
@@ -406,7 +471,7 @@ export function ListingManagerPanel({ accessToken, money }: Props) {
             Refresh
           </button>
           <button type="button" disabled={busy} onClick={() => void openAdd()}>
-            Add listing
+            {channel === 'depop' ? 'Push to Depop' : 'Add listing'}
           </button>
           {channel === 'ebay' && (
             <button type="button" className="secondary" disabled={busy} onClick={() => void openMigrate()}>
@@ -422,6 +487,7 @@ export function ListingManagerPanel({ accessToken, money }: Props) {
             ['ebay', 'eBay'],
             ['amazon', 'Amazon'],
             ['tiktok', 'TikTok Shop'],
+            ['depop', 'Depop'],
           ] as const
         ).map(([key, label]) => (
           <button key={key} type="button" className={channel === key ? '' : 'secondary'} disabled={busy} onClick={() => setChannel(key)}>
@@ -488,10 +554,11 @@ export function ListingManagerPanel({ accessToken, money }: Props) {
                 </p>
               )}
               {row.error && <p className="error">{row.error}</p>}
-              {!row.editable && (
-                <p className="hint">
-                  Not editable via API{row.api === 'legacy_floor_only' ? ' (Trading/Vendoo — use Migrate legacy eBay)' : ''}.
-                </p>
+              {!row.editable && row.api === 'legacy_floor_only' && (
+                <p className="hint">Not editable via API yet — Trading-era listing. Use Migrate legacy eBay.</p>
+              )}
+              {row.channel === 'depop' && (
+                <p className="hint">Manual Depop row — edit on Depop Seller. End here clears Floor only (does not mark sold).</p>
               )}
               <div className="actions">
                 {row.url && (
@@ -504,7 +571,7 @@ export function ListingManagerPanel({ accessToken, money }: Props) {
                     Edit
                   </button>
                 )}
-                {row.editable && (
+                {(row.editable || row.channel === 'depop') && (
                   <button type="button" className="text-button danger" disabled={busy} onClick={() => void endListing(row)}>
                     End
                   </button>
@@ -583,8 +650,92 @@ export function ListingManagerPanel({ accessToken, money }: Props) {
       {showAdd && (
         <div className="modal-backdrop">
           <div className="panel modal" style={{ maxWidth: 720 }}>
-            <h2>Add {channel} listing from Floor</h2>
-            {!draft ? (
+            <h2>{channel === 'depop' ? 'Push to Depop' : `Add ${channel} listing from Floor`}</h2>
+            {channel === 'depop' && depopPack ? (
+              <>
+                <p className="hint">SKU {depopSku} — copy into Depop Seller, then paste the live listing URL. Real photos only.</p>
+                {(depopPack.instructions || []).map((line) => (
+                  <p key={line} className="hint" style={{ margin: '2px 0' }}>
+                    {line}
+                  </p>
+                ))}
+                <label>
+                  Title
+                  <input readOnly value={depopPack.title || ''} />
+                </label>
+                <div className="actions">
+                  <button type="button" className="secondary" onClick={() => void copyText('title', depopPack.title || '')}>
+                    Copy title
+                  </button>
+                </div>
+                <label>
+                  Description
+                  <textarea readOnly rows={8} value={depopPack.description || ''} />
+                </label>
+                <div className="actions">
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() => void copyText('description', depopPack.description || '')}
+                  >
+                    Copy description
+                  </button>
+                </div>
+                <p>
+                  <strong>List price:</strong> {depopPack.price_display || money(depopPack.price_cents || 0)}
+                </p>
+                <p className="hint">{depopPack.fee_note}</p>
+                <div className="actions">
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() => void copyText('price', ((depopPack.price_cents || 0) / 100).toFixed(2))}
+                  >
+                    Copy price
+                  </button>
+                </div>
+                <h3>Photos (download → upload on Depop)</h3>
+                <div className="ticket-list">
+                  {(depopPack.photos || []).map((p) => (
+                    <div className="ticket ticket-top" key={p.path}>
+                      <strong>Photo {p.index}</strong>
+                      <a className="text-button" href={p.download_url} target="_blank" rel="noreferrer">
+                        Download
+                      </a>
+                    </div>
+                  ))}
+                </div>
+                <label>
+                  Depop listing URL
+                  <input
+                    value={depopUrl}
+                    placeholder="https://www.depop.com/products/…"
+                    onChange={(e) => setDepopUrl(e.target.value)}
+                  />
+                </label>
+                <div className="actions">
+                  <button type="button" disabled={busy || !depopUrl.trim()} onClick={() => void confirmDepop(false)}>
+                    Save listing link
+                  </button>
+                  <button type="button" className="secondary" disabled={busy} onClick={() => void confirmDepop(true)}>
+                    Listed on Depop
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() => {
+                      setDepopPack(null);
+                      setDepopSku('');
+                    }}
+                  >
+                    Back
+                  </button>
+                  <button type="button" className="secondary" onClick={() => setShowAdd(false)}>
+                    Close
+                  </button>
+                </div>
+              </>
+            ) : !draft ? (
               <>
                 <label>
                   Find units (photos + price, not already on {channel})
@@ -603,9 +754,11 @@ export function ListingManagerPanel({ accessToken, money }: Props) {
                   <button type="button" className="secondary" disabled={busy} onClick={() => void loadEligible()}>
                     Search
                   </button>
-                  <button type="button" disabled={busy || selected.size < 2} onClick={() => void bulkPublish()}>
-                    Bulk publish selected ({selected.size})
-                  </button>
+                  {channel !== 'depop' && (
+                    <button type="button" disabled={busy || selected.size < 2} onClick={() => void bulkPublish()}>
+                      Bulk publish selected ({selected.size})
+                    </button>
+                  )}
                   <button type="button" className="secondary" onClick={() => setShowAdd(false)}>
                     Close
                   </button>
@@ -621,21 +774,23 @@ export function ListingManagerPanel({ accessToken, money }: Props) {
                         </span>
                       </div>
                       <div className="actions">
-                        <label>
-                          <input
-                            type="checkbox"
-                            checked={selected.has(u.sku)}
-                            onChange={(e) => {
-                              const next = new Set(selected);
-                              if (e.target.checked) next.add(u.sku);
-                              else next.delete(u.sku);
-                              setSelected(next);
-                            }}
-                          />{' '}
-                          Select
-                        </label>
+                        {channel !== 'depop' && (
+                          <label>
+                            <input
+                              type="checkbox"
+                              checked={selected.has(u.sku)}
+                              onChange={(e) => {
+                                const next = new Set(selected);
+                                if (e.target.checked) next.add(u.sku);
+                                else next.delete(u.sku);
+                                setSelected(next);
+                              }}
+                            />{' '}
+                            Select
+                          </label>
+                        )}
                         <button type="button" disabled={busy} onClick={() => void pickForDraft(u.sku)}>
-                          Review & publish
+                          {channel === 'depop' ? 'Build push pack' : 'Review & publish'}
                         </button>
                       </div>
                     </div>
@@ -692,8 +847,8 @@ export function ListingManagerPanel({ accessToken, money }: Props) {
           <div className="panel modal" style={{ maxWidth: 720 }}>
             <h2>Migrate legacy eBay → Inventory API</h2>
             <p className="hint">
-              Trading/Vendoo listings that Floor knows about but Inventory API does not. Migrating should keep the live listing
-              (price/photos/views). Test one first.
+              Older Trading-era listings Floor knows about but Inventory API does not. Migrating keeps the live listing
+              (price/photos/views). Prefer batches of 5.
             </p>
             <div className="actions">
               <button type="button" disabled={busy || !legacy.length} onClick={() => void migrateBatch()}>

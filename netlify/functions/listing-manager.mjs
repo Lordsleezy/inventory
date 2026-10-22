@@ -17,6 +17,10 @@ import {
   listTikTokListings,
   patchTikTokListing,
   endTikTokListing,
+  listDepopListings,
+  buildDepopPack,
+  confirmDepopListed,
+  endDepopListing,
   listEligibleUnits,
   prefillCreate,
   publishCreate,
@@ -40,7 +44,8 @@ async function handleStaff(event) {
     if (channel === "amazon") return json(200, await listAmazonListings(storeId, { query, limit }));
     if (channel === "ebay") return json(200, await listEbayListings(storeId, { query, limit }));
     if (channel === "tiktok") return json(200, await listTikTokListings(storeId, { query, limit }));
-    return json(400, { ok: false, error: "channel_required", channels: ["amazon", "ebay", "tiktok"] });
+    if (channel === "depop") return json(200, await listDepopListings(storeId, { query, limit }));
+    return json(400, { ok: false, error: "channel_required", channels: ["amazon", "ebay", "tiktok", "depop"] });
   }
 
   if (action === "sync_meta") {
@@ -50,6 +55,7 @@ async function handleStaff(event) {
         amazon: await readSync(storeId, "amazon"),
         ebay: await readSync(storeId, "ebay"),
         tiktok: await readSync(storeId, "tiktok"),
+        depop: await readSync(storeId, "depop"),
       },
       bulk: await getBulkPublishStatus(storeId),
     });
@@ -62,6 +68,21 @@ async function handleStaff(event) {
   if (action === "prefill") {
     if (!body.sku) return json(400, { ok: false, error: "sku_required" });
     return json(200, await prefillCreate(storeId, { channel, sku: String(body.sku).trim() }));
+  }
+
+  if (action === "depop_pack") {
+    if (!body.sku) return json(400, { ok: false, error: "sku_required" });
+    return json(200, await buildDepopPack(storeId, { sku: String(body.sku).trim() }));
+  }
+
+  if (action === "depop_confirm") {
+    if (!body.sku) return json(400, { ok: false, error: "sku_required" });
+    const result = await confirmDepopListed(storeId, {
+      sku: String(body.sku).trim(),
+      depopUrl: body.depop_url || body.url || null,
+      markOnly: Boolean(body.mark_only),
+    });
+    return json(result.ok ? 200 : 400, result);
   }
 
   if (action === "detail") {
@@ -167,6 +188,10 @@ async function handleStaff(event) {
       const result = await endTikTokListing(storeId, { productId: body.product_id, sku: body.sku });
       return json(result.ok ? 200 : 400, result);
     }
+    if (channel === "depop") {
+      const result = await endDepopListing(storeId, { sku: body.sku });
+      return json(result.ok ? 200 : 400, result);
+    }
     return json(400, { ok: false, error: "end_not_supported", channel });
   }
 
@@ -223,7 +248,14 @@ async function handleStaff(event) {
           bulk: true,
           requires: "Partner app keys + OAuth",
         },
-        depop: { list: false, note: "No public listing management API" },
+        depop: {
+          list: true,
+          add: "Push pack (copy/paste) → paste Depop URL or Listed on Depop",
+          edit: false,
+          end: "Clears Floor listing row + listed_on — does not mark sold; end on Depop yourself",
+          bulk: false,
+          note: "No public Depop listing API. Sales still ingest via Depop email poll.",
+        },
       },
     });
   }
