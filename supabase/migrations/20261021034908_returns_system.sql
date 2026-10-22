@@ -455,9 +455,13 @@ revoke all on function public.return_reverse_sale(uuid, bigint, text, boolean) f
 grant execute on function public.return_reverse_sale(uuid, bigint, text, boolean) to service_role;
 
 -- Expand expense sources used by returns + existing label/ebay writers.
+alter table public.portal_expenses add column if not exists external_id text;
 alter table public.portal_expenses drop constraint if exists portal_expenses_source_check;
 alter table public.portal_expenses add constraint portal_expenses_source_check
   check (source in ('manual', 'label', 'manual_label', 'ebay', 'return', 'amazon', 'channel'));
+create index if not exists portal_expenses_external_id_idx
+  on public.portal_expenses (store_id, source, external_id)
+  where external_id is not null;
 
 create or replace function public.return_post_ledger(p_return_id uuid)
 returns void language plpgsql security definer set search_path = public as $$
