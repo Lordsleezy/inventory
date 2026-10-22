@@ -2,7 +2,7 @@
  * Admin listing manager: list / add / edit / end / migrate / bulk for Amazon / eBay / TikTok.
  * Enforced server-side via portalAdminFromEvent (clerks have no portal_admins row → 403).
  */
-import { json, corsHeaders } from "../lib/server.mjs";
+import { json, corsHeaders, serviceClient } from "../lib/server.mjs";
 import { portalAdminFromEvent } from "../lib/portal-auth.mjs";
 import { wrapHandler, asNetlifyFunction } from "../lib/floor-log.mjs";
 import {
@@ -38,6 +38,7 @@ import {
   queueBoardJob,
   saveFloorListingFields,
 } from "../lib/marketplace-board.mjs";
+import { syncLiveChannels } from "../lib/channel-sync.mjs";
 
 async function handleStaff(event) {
   const body = typeof event.body === "string" ? JSON.parse(event.body || "{}") : event.body || {};
@@ -133,64 +134,59 @@ async function handleStaff(event) {
   }
 
   if (action === "patch") {
-    if (channel === "amazon") {
-      const result = await patchAmazonListing(storeId, {
-        sku: body.sku,
-        offerSku: body.offer_sku,
-        priceCents: body.price_cents != null ? Math.round(Number(body.price_cents)) : null,
-        quantity: body.quantity != null ? Math.round(Number(body.quantity)) : null,
-        title: body.title || null,
-        bullets: body.bullets || null,
-        description: body.description || null,
-        conditionNote: body.condition_note || null,
-        productType: body.product_type || null,
-        syncFloorAsk: body.sync_floor_ask !== false,
-      });
-      if (result.ok && body.sku && body.condition) {
-        await saveFloorListingFields(storeId, { sku: body.sku, condition: body.condition, channel });
-      }
-      return json(result.ok ? 200 : 400, result);
-    }
-    if (channel === "ebay") {
-      const result = await patchEbayListing(storeId, {
-        accountId: body.account_id,
-        offerId: body.offer_id,
-        sku: body.sku,
-        priceCents: body.price_cents != null ? Math.round(Number(body.price_cents)) : null,
-        quantity: body.quantity != null ? Math.round(Number(body.quantity)) : null,
-        title: body.title || null,
-        description: body.description || null,
-        conditionDescription: body.condition_note || body.condition_description || null,
-        imageUrls: body.image_urls || null,
-        aspects: body.aspects || null,
-        syncFloorAsk: body.sync_floor_ask !== false,
-      });
-      if (result.ok && body.sku && (body.condition || body.shipping_mode)) {
-        const extra = await saveFloorListingFields(storeId, {
-          sku: body.sku,
-          condition: body.condition || null,
-          shipping_mode: body.shipping_mode || null,
-          channel,
-        });
-        if (extra.shipping_warning) result.shipping_warning = extra.shipping_warning;
-      }
-      return json(result.ok ? 200 : 400, result);
-    }
-    if (channel === "tiktok") {
-      const result = await patchTikTokListing(storeId, {
-        productId: body.product_id,
-        sku: body.sku,
-        priceCents: body.price_cents != null ? Math.round(Number(body.price_cents)) : null,
-        title: body.title || null,
-        description: body.description || null,
-        syncFloorAsk: body.sync_floor_ask !== false,
-      });
-      if (result.ok && body.sku && body.condition) {
-        await saveFloorListingFields(storeId, { sku: body.sku, condition: body.condition, channel });
-      }
-      return json(result.ok ? 200 : 400, result);
-    }
-    return json(400, { ok: false, error: "channel_required" });
+    if (!["ebay", "amazon", "tiktok"].includes(channel)) return json(400, { ok: false, error: "channel_required" });
+    const sku = String(body.sku || "").trim();
+    if (!sku) return json(400, { ok: false, error: "sku_required" });
+    const sb = serviceClient();
+    const { data: before } = await sb
+      .from("units")
+      .select("ask_cents, title, listing_body, defect_notes")
+      .eq("store_id", storeId)
+      .eq("sku", sku)
+      .maybeSingle();
+    const nextAsk = body.price_cents != null && Number.isFinite(Number(body.price_cents)) ? Math.round(Number(body.price_cents)) : null;
+    const sameText = (next, prev) => String(next ?? "").trim() === String(prev ?? "").trim();
+    const nextTitle = body.title != null && String(body.title).trim() && !sameText(body.title, before?.title) ? String(body.title).trim() : null;
+    const nextDescription = body.description != null && !sameText(body.description, before?.listing_body) ? String(body.description) : null;
+    const nextNote = (body.condition_note ?? body.condition_description) != null
+      && !sameText(body.condition_note ?? body.condition_description, before?.defect_notes)
+      ? String(body.condition_note ?? body.condition_description)
+      : null;
+    const floor = await saveFloorListingFields(storeId, {
+      sku,
+      title: nextTitle,
+      description: nextDescription,
+      price_cents: nextAsk,
+      condition: body.condition || null,
+      condition_note: nextNote,
+      shipping_mode: body.shipping_mode || null,
+      channel,
+    });
+    if (!floor.ok) return json(400, floor);
+    const synced = await syncLiveChannels(storeId, sku, {
+      title: nextTitle,
+      description: nextDescription,
+      conditionNote: nextNote,
+      imageUrls: body.image_urls || null,
+      aspects: body.aspects || null,
+      priceChanged: nextAsk != null && nextAsk !== before?.ask_cents,
+      quantity: body.quantity != null && Number.isFinite(Number(body.quantity)) ? Math.round(Number(body.quantity)) : null,
+      shippingMode: body.shipping_mode || null,
+      originChannel: channel,
+      offerId: body.offer_id || null,
+      itemId: body.item_id || null,
+      productId: body.product_id || null,
+      accountId: body.account_id || null,
+    });
+    const ok = synced.ok !== false;
+    return json(ok ? 200 : 400, {
+      ok,
+      sku,
+      floor_ask_cents: nextAsk ?? before?.ask_cents ?? null,
+      channels: synced.results || [],
+      error: synced.error || null,
+      shipping_warning: floor.shipping_warning || null,
+    });
   }
 
   if (action === "end") {

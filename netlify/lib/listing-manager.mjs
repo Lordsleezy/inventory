@@ -14,8 +14,8 @@ import {
 } from "./amazon.mjs";
 import { createAmazonCatalogListing } from "./amazon-create.mjs";
 import { ebayFetch, listEbayAccounts, loadEbayAccount, listSku, withdrawSku, photoUrls } from "./ebay.mjs";
-import { userTokenForAccount } from "./ebay-accounts.mjs";
-import { getMyEbaySellingActive, getSellerListActive } from "./ebay-trading.mjs";
+import { resolveEbayAccount, userTokenForAccount } from "./ebay-accounts.mjs";
+import { getMyEbaySellingActive, getSellerListActive, reviseTradingFixedPrice } from "./ebay-trading.mjs";
 import {
   tiktokApiFetch,
   tiktokConnectionStatus,
@@ -38,6 +38,8 @@ import {
 import { listLegacyEbayCandidates, migrateEbayListingsToInventory } from "./ebay-inventory-migrate.mjs";
 import { calcListPrice, estimateLabelCost, getFeeConfig } from "./marketplace-pricing.mjs";
 import { composeChannelDescription, parseListingSpecs } from "./listing-copy.mjs";
+import { channelGaps } from "./listing-requirements.mjs";
+import { prepareUnitAspects } from "./ebay-catalog.mjs";
 
 function sellerId() {
   return (process.env.AMAZON_SELLER_ID || "").trim();
@@ -111,7 +113,7 @@ async function unitsBySku(storeId, skus) {
     const chunk = list.slice(i, i + 200);
     const { data, error } = await sb
       .from("units")
-      .select("sku, title, ask_cents, state, brand")
+      .select("sku, title, ask_cents, state, brand, listing_specs")
       .eq("store_id", storeId)
       .in("sku", chunk);
     if (error) throw new Error(error.message);
@@ -427,11 +429,41 @@ export async function listEbayListings(storeId = STORE_DEFAULT, { query = "", li
   };
 }
 
+function numericItemId(value) {
+  const id = String(value || "").trim();
+  return /^\d+$/.test(id) ? id : null;
+}
+
+async function reviseTradingEraListing(storeId, { accountId, itemId, priceCents, quantity, title, description, conditionDescription, imageUrls, aspects }) {
+  const tradingId = numericItemId(itemId);
+  if (!tradingId) {
+    return {
+      ok: false,
+      error: "trading_item_id_required",
+      hint: "Listing may be Trading/Vendoo-era — migrate to Inventory API first.",
+    };
+  }
+  const account = await resolveEbayAccount(storeId, accountId ? { accountId } : { role: "selling" });
+  const token = await userTokenForAccount(account);
+  const revised = await reviseTradingFixedPrice(token, {
+    itemId: tradingId,
+    price: priceCents != null ? priceCents / 100 : null,
+    quantity,
+    title,
+    description,
+    conditionDescription,
+    pictureUrls: imageUrls,
+    aspects,
+  });
+  return { ok: true, via: "trading", itemId: tradingId, ack: revised.ack };
+}
+
 export async function patchEbayListing(
   storeId,
   {
     accountId,
     offerId,
+    itemId,
     sku,
     priceCents,
     quantity,
@@ -443,93 +475,150 @@ export async function patchEbayListing(
     syncFloorAsk = true,
   } = {},
 ) {
-  if (!offerId && !sku) return { ok: false, error: "offer_id_or_sku_required" };
+  if (!offerId && !sku && !itemId) return { ok: false, error: "offer_id_or_sku_required" };
   const hint = accountId ? { accountId } : undefined;
   const sb = serviceClient();
-  const { data: unit } = await sb.from("units").select("*").eq("store_id", storeId).eq("sku", sku).maybeSingle();
+  const { data: unit } = sku
+    ? await sb.from("units").select("*").eq("store_id", storeId).eq("sku", sku).maybeSingle()
+    : { data: null };
   const warn = underFloorWarn(unit, priceCents);
+  const tradingId = numericItemId(itemId);
 
-  // Inventory item content (title/desc/photos/aspects)
+  // Inventory item content (title/desc/photos/aspects). A miss means Trading/Vendoo.
   const contentTouch = title || description || conditionDescription || (imageUrls && imageUrls.length) || aspects;
+  let inventoryFound = false;
   if (contentTouch && sku) {
     let inv;
     try {
       inv = await ebayFetch(storeId, "GET", `/sell/inventory/v1/inventory_item/${encodeURIComponent(sku)}`, undefined, hint);
+      inventoryFound = true;
     } catch (e) {
-      return {
-        ok: false,
-        error: e instanceof Error ? e.message : String(e),
-        hint: "Listing may be Trading/Vendoo-era — migrate to Inventory API first.",
-      };
+      if (!tradingId) {
+        return {
+          ok: false,
+          error: e instanceof Error ? e.message : String(e),
+          hint: "Listing may be Trading/Vendoo-era — migrate to Inventory API first.",
+          warning: warn,
+        };
+      }
     }
-    const product = { ...(inv.product || {}) };
-    if (title) product.title = String(title).slice(0, 80);
-    if (description) product.description = String(description);
-    if (imageUrls?.length) {
-      product.imageUrls = imageUrls.filter((u) => typeof u === "string" && /^https?:\/\//i.test(u)).slice(0, 12);
-      if (!product.imageUrls.length) return { ok: false, error: "image_urls_must_be_https_real_photos" };
-    }
-    if (aspects && typeof aspects === "object") product.aspects = aspects;
-    const putBody = {
-      ...inv,
-      product,
-      ...(conditionDescription
-        ? { conditionDescription: String(conditionDescription).slice(0, 1000) }
-        : {}),
-      ...(quantity != null
-        ? {
-            availability: {
-              ...(inv.availability || {}),
-              shipToLocationAvailability: {
-                ...(inv.availability?.shipToLocationAvailability || {}),
-                quantity: Number(quantity),
+    if (inventoryFound) {
+      const product = { ...(inv.product || {}) };
+      if (title) product.title = String(title).slice(0, 80);
+      if (description) product.description = String(description);
+      if (imageUrls?.length) {
+        product.imageUrls = imageUrls.filter((u) => typeof u === "string" && /^https?:\/\//i.test(u)).slice(0, 12);
+        if (!product.imageUrls.length) return { ok: false, error: "image_urls_must_be_https_real_photos" };
+      }
+      if (aspects && typeof aspects === "object") product.aspects = aspects;
+      const putBody = {
+        ...inv,
+        product,
+        ...(conditionDescription
+          ? { conditionDescription: String(conditionDescription).slice(0, 1000) }
+          : {}),
+        ...(quantity != null
+          ? {
+              availability: {
+                ...(inv.availability || {}),
+                shipToLocationAvailability: {
+                  ...(inv.availability?.shipToLocationAvailability || {}),
+                  quantity: Number(quantity),
+                },
               },
-            },
-          }
-        : {}),
-    };
-    delete putBody.sku;
-    try {
-      await ebayFetch(storeId, "PUT", `/sell/inventory/v1/inventory_item/${encodeURIComponent(sku)}`, putBody, hint);
-    } catch (e) {
-      return { ok: false, error: e instanceof Error ? e.message : String(e), body: e?.body || null, warning: warn };
+            }
+          : {}),
+      };
+      delete putBody.sku;
+      try {
+        await ebayFetch(storeId, "PUT", `/sell/inventory/v1/inventory_item/${encodeURIComponent(sku)}`, putBody, hint);
+      } catch (e) {
+        return { ok: false, error: e instanceof Error ? e.message : String(e), body: e?.body || null, warning: warn };
+      }
     }
   }
 
-  if (offerId && (priceCents != null || quantity != null)) {
+  let priced = false;
+  let resolvedOfferId = offerId || null;
+  if (!resolvedOfferId && sku && (priceCents != null || quantity != null)) {
+    const found = await ebayFetch(
+      storeId,
+      "GET",
+      `/sell/inventory/v1/offer?sku=${encodeURIComponent(sku)}`,
+      undefined,
+      hint,
+    ).catch(() => null);
+    resolvedOfferId = found?.offers?.[0]?.offerId || null;
+  }
+  if (resolvedOfferId && (priceCents != null || quantity != null)) {
     let offer;
     try {
-      offer = await ebayFetch(storeId, "GET", `/sell/inventory/v1/offer/${offerId}`, undefined, hint);
+      offer = await ebayFetch(storeId, "GET", `/sell/inventory/v1/offer/${resolvedOfferId}`, undefined, hint);
     } catch (e) {
-      return { ok: false, error: e instanceof Error ? e.message : String(e), warning: warn };
-    }
-    const body = { ...offer };
-    delete body.offerId;
-    delete body.listing;
-    delete body.status;
-    if (priceCents != null) {
-      body.pricingSummary = {
-        ...(body.pricingSummary || {}),
-        price: { value: (priceCents / 100).toFixed(2), currency: "USD" },
-      };
-    }
-    if (quantity != null) body.availableQuantity = Number(quantity);
-    try {
-      await ebayFetch(storeId, "PUT", `/sell/inventory/v1/offer/${offerId}`, body, hint);
-      try {
-        await ebayFetch(storeId, "POST", `/sell/inventory/v1/offer/${offerId}/publish`, undefined, hint);
-      } catch {
-        /* already published */
+      if (!tradingId || inventoryFound) {
+        return { ok: false, error: e instanceof Error ? e.message : String(e), warning: warn };
       }
-    } catch (e) {
-      return { ok: false, error: e instanceof Error ? e.message : String(e), body: e?.body || null, warning: warn };
+      offer = null;
+    }
+    if (offer) {
+      const body = { ...offer };
+      delete body.offerId;
+      delete body.listing;
+      delete body.status;
+      if (priceCents != null) {
+        body.pricingSummary = {
+          ...(body.pricingSummary || {}),
+          price: { value: (priceCents / 100).toFixed(2), currency: "USD" },
+        };
+      }
+      if (quantity != null) body.availableQuantity = Number(quantity);
+      try {
+        await ebayFetch(storeId, "PUT", `/sell/inventory/v1/offer/${resolvedOfferId}`, body, hint);
+        priced = true;
+        try {
+          await ebayFetch(storeId, "POST", `/sell/inventory/v1/offer/${resolvedOfferId}/publish`, undefined, hint);
+        } catch {
+          /* already published */
+        }
+      } catch (e) {
+        if (!tradingId || inventoryFound) {
+          return { ok: false, error: e instanceof Error ? e.message : String(e), body: e?.body || null, warning: warn };
+        }
+      }
+    }
+  }
+
+  const needTrading = (contentTouch && !inventoryFound) || ((priceCents != null || quantity != null) && !priced);
+  let via = inventoryFound || priced ? "inventory" : null;
+  if (needTrading) {
+    if (!tradingId && (priceCents != null || quantity != null) && !priced) {
+      return { ok: false, error: "no_ebay_offer_or_item_id", warning: warn };
+    }
+    if (tradingId) {
+      try {
+        const revised = await reviseTradingEraListing(storeId, {
+          accountId,
+          itemId: tradingId,
+          priceCents: priced ? null : priceCents,
+          quantity: priced ? null : quantity,
+          title: inventoryFound ? null : title,
+          description: inventoryFound ? null : description,
+          conditionDescription: inventoryFound ? null : conditionDescription,
+          imageUrls: inventoryFound ? null : imageUrls,
+          aspects: inventoryFound ? null : aspects,
+        });
+        if (!revised.ok) return { ...revised, warning: warn };
+        via = "trading";
+      } catch (e) {
+        return { ok: false, error: e instanceof Error ? e.message : String(e), via: "trading", warning: warn };
+      }
     }
   }
 
   if (syncFloorAsk && priceCents != null && sku) {
     await sb.from("units").update({ ask_cents: priceCents, updated_at: new Date().toISOString() }).eq("store_id", storeId).eq("sku", sku);
   }
-  return { ok: true, warning: warn, offerId, sku };
+  return { ok: true, warning: warn, offerId: resolvedOfferId || offerId, sku, itemId: tradingId, via };
 }
 
 async function pullTikTokProducts(storeId) {
@@ -1188,6 +1277,59 @@ export async function prefillCreate(storeId, { channel, sku } = {}) {
   return { ok: false, error: "channel_required" };
 }
 
+async function pushReadiness(storeId, unit, channel) {
+  const sb = serviceClient();
+  const photos = await unitPhotos(storeId, unit.sku);
+  let aspectDefs = null;
+  let aspects = null;
+  let amazonBlocked = null;
+  if (channel === "ebay") {
+    const { data } = await sb
+      .from("ebay_drafts")
+      .select("aspect_defs, aspects, category_id")
+      .eq("store_id", storeId)
+      .eq("sku", unit.sku)
+      .maybeSingle();
+    aspectDefs = data?.aspect_defs || null;
+    aspects = data?.aspects || null;
+    if (data?.category_id && !unit.listing_specs?.ebay_category_id && !unit.category && !unit.ebay_category) {
+      unit = { ...unit, listing_specs: { ...(unit.listing_specs || {}), ebay_category_id: data.category_id } };
+    }
+  }
+  if (channel === "amazon") {
+    const { data } = await sb
+      .from("amazon_list_items")
+      .select("status, needs_review_reason")
+      .eq("store_id", storeId)
+      .eq("sku", unit.sku)
+      .maybeSingle();
+    if (data?.status === "not_on_amazon") amazonBlocked = data.needs_review_reason || "Not on Amazon";
+  }
+  const local = channelGaps(
+    { ...unit, aspects: aspects || unit.aspects },
+    { channel, photoCount: photos.paths.length, aspectDefs, amazonBlocked },
+  );
+  if (!local.ready || channel !== "ebay") return local;
+  try {
+    const prepared = await prepareUnitAspects({ storeId, unit, liveCheck: false });
+    const extra = (prepared.missingRequired || []).filter((name) => !/^(brand|upc|mpn)$/i.test(name));
+    if (!extra.length) return local;
+    return {
+      ready: false,
+      gaps: local.gaps,
+      summary: extra,
+      reason: `Needs: ${extra.slice(0, 3).join(", ")}`,
+      section: "missing-category",
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (/category/i.test(message)) {
+      return { ready: false, gaps: local.gaps, summary: ["category"], reason: "Needs: category", section: "missing-category" };
+    }
+    return { ready: false, gaps: local.gaps, summary: [], reason: message, section: "missing-category" };
+  }
+}
+
 /** Publish a new listing from Floor (live marketplace write). */
 export async function publishCreate(
   storeId,
@@ -1197,6 +1339,12 @@ export async function publishCreate(
   const sb = serviceClient();
   const { data: unit } = await sb.from("units").select("*").eq("store_id", storeId).eq("sku", sku).maybeSingle();
   if (!unit) return { ok: false, error: "unknown_sku" };
+  if (["ebay", "amazon", "tiktok"].includes(ch)) {
+    const ready = await pushReadiness(storeId, unit, ch);
+    if (!ready.ready) {
+      return { ok: false, error: ready.reason || "listing_not_ready", missing: ready.summary || [], section: ready.section };
+    }
+  }
   const warn = underFloorWarn(unit, priceCents ?? unit.ask_cents);
 
   if (ch === "ebay") {

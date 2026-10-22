@@ -638,19 +638,24 @@ async function itemAspects(storeId, unit) {
 
 function packageSize(unit) {
   const specs = listingMeasures(unit);
-  const width = specInches(specs, "width") || parseMeasure(specs.width_in);
-  const height = specInches(specs, "height") || parseMeasure(specs.height_in);
-  const depth = specInches(specs, "depth") || parseMeasure(specs.depth_in);
-  const weight = parseMeasure(specs.weight_lb || specs.weight_lbs);
+  const length = Number(unit?.package_length_in) || specInches(specs, "depth") || parseMeasure(specs.depth_in) || parseMeasure(specs.length_in);
+  const width = Number(unit?.package_width_in) || specInches(specs, "width") || parseMeasure(specs.width_in);
+  const height = Number(unit?.package_height_in) || specInches(specs, "height") || parseMeasure(specs.height_in);
+  const weight = Number(unit?.package_weight_lb) || parseMeasure(specs.weight_lb || specs.weight_lbs);
+  if (!(length > 0 && width > 0 && height > 0 && weight > 0)) {
+    const err = new Error("Package weight and dimensions are required before pushing to eBay.");
+    err.code = "package_required";
+    throw err;
+  }
   return {
     dimensions: {
-      length: String(depth || 32),
-      width: String(width || 32),
-      height: String(height || 70),
+      length: String(length),
+      width: String(width),
+      height: String(height),
       unit: "INCH",
     },
     weight: {
-      value: String(weight > 0 ? weight : 300),
+      value: String(weight),
       unit: "POUND",
     },
   };

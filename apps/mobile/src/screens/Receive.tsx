@@ -36,6 +36,12 @@ export function ReceiveScreen() {
   const [msrp, setMsrp] = useState("");
   const [ask, setAsk] = useState("");
   const [notes, setNotes] = useState("");
+  const [upc, setUpc] = useState("");
+  const [lengthIn, setLengthIn] = useState("");
+  const [widthIn, setWidthIn] = useState("");
+  const [heightIn, setHeightIn] = useState("");
+  const [weightLb, setWeightLb] = useState("");
+  const [unbranded, setUnbranded] = useState(false);
   const [error, setError] = useState("");
   const [skuHint, setSkuHint] = useState("");
   const [skuStatus, setSkuStatus] = useState("empty");
@@ -115,13 +121,28 @@ export function ReceiveScreen() {
         return;
       }
     }
+    const brandValue = unbranded ? "Unbranded" : brand.trim();
+    if (money.ask != null) {
+      const missing: string[] = [];
+      if (!brandValue || /^(generic|unknown|n\/?a|does not apply)$/i.test(brandValue)) missing.push("brand");
+      if (!title.trim()) missing.push("title");
+      if (!category.trim()) missing.push("category");
+      if (!condition) missing.push("condition");
+      if (!upc.trim()) missing.push("UPC");
+      const dims = [lengthIn, widthIn, heightIn, weightLb].map((v) => Number(v));
+      if (dims.some((n) => !(n > 0))) missing.push("package size");
+      if (missing.length) {
+        setError(`Fill ${missing.join(", ")} before saving a price, or clear the price.`);
+        return;
+      }
+    }
 
     setSaving(true);
     try {
       await ensureOnline();
       const { data, error: rpcErr } = await floorCloud().rpc("receive_unit", {
         p_sku: sku.trim(),
-        p_brand: brand.trim(),
+        p_brand: brandValue,
         p_model: model.trim(),
         p_title: title.trim(),
         p_category: category || null,
@@ -133,6 +154,11 @@ export function ReceiveScreen() {
         p_cost_cents: manager ? money.cost ?? null : null,
         p_floor_cents: manager ? money.floor ?? null : null,
         p_notes: notes.trim() || null,
+        p_upc: upc.trim() || null,
+        p_length: Number(lengthIn) > 0 ? Number(lengthIn) : null,
+        p_width: Number(widthIn) > 0 ? Number(widthIn) : null,
+        p_height: Number(heightIn) > 0 ? Number(heightIn) : null,
+        p_weight: Number(weightLb) > 0 ? Number(weightLb) : null,
       });
       if (rpcErr) throw rpcErr;
       const savedSku = (data as { sku?: string } | null)?.sku ?? sku.trim();
@@ -195,7 +221,14 @@ export function ReceiveScreen() {
 
       <label className="block py-2">
         <Label>Brand</Label>
-        <input className="field mt-1" value={brand} onChange={(e) => setBrand(e.target.value)} />
+        <input className="field mt-1" value={unbranded ? "Unbranded" : brand} disabled={unbranded} onChange={(e) => setBrand(e.target.value)} />
+      </label>
+      <label className="block py-2">
+        <input type="checkbox" checked={unbranded} onChange={(e) => setUnbranded(e.target.checked)} /> Unbranded — no brand on the product or packaging
+      </label>
+      <label className="block py-2">
+        <Label>UPC</Label>
+        <input className="field mt-1" value={upc} inputMode="numeric" onChange={(e) => setUpc(e.target.value.replace(/\D/g, "").slice(0, 14))} />
       </label>
 
       <label className="block py-2">
@@ -231,6 +264,13 @@ export function ReceiveScreen() {
       {!manager ? (
         <p className="text-quiet text-floor-mute py-2">Cost stays blank for admin.</p>
       ) : null}
+
+      <div className="grid grid-cols-2 gap-3">
+        <label className="block py-2"><Label>Length (in)</Label><input className="field mt-1" value={lengthIn} inputMode="decimal" onChange={(e) => setLengthIn(e.target.value)} /></label>
+        <label className="block py-2"><Label>Width (in)</Label><input className="field mt-1" value={widthIn} inputMode="decimal" onChange={(e) => setWidthIn(e.target.value)} /></label>
+        <label className="block py-2"><Label>Height (in)</Label><input className="field mt-1" value={heightIn} inputMode="decimal" onChange={(e) => setHeightIn(e.target.value)} /></label>
+        <label className="block py-2"><Label>Weight (lb)</Label><input className="field mt-1" value={weightLb} inputMode="decimal" onChange={(e) => setWeightLb(e.target.value)} /></label>
+      </div>
 
       <label className="block py-2">
         <Label>Defects and notes</Label>

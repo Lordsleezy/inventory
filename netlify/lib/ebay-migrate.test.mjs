@@ -141,6 +141,28 @@ test("parseActiveListSummaries reads GetMyeBaySelling ActiveList items", () => {
   assert.equal(rows[0].currentPrice, "19.99");
   assert.equal(rows[0].categoryId, "20667");
   assert.equal(rows[0].imageUrls[0], "https://i.ebayimg.com/g.jpg");
+  assert.equal(rows[0].shippingMode, null);
+});
+
+test("parseActiveListSummaries reads live free and buyer-pays shipping", () => {
+  const xml = `
+  <ActiveList>
+    <ItemArray>
+      <Item>
+        <ItemID>1</ItemID>
+        <ShippingDetails><ShippingType>Flat</ShippingType>
+          <ShippingServiceOptions><FreeShipping>true</FreeShipping><ShippingServiceCost>0.0</ShippingServiceCost></ShippingServiceOptions>
+        </ShippingDetails>
+      </Item>
+      <Item>
+        <ItemID>2</ItemID>
+        <SellerProfiles><SellerShippingProfile><ShippingProfileName>OBI Calculated Shipping – Buyer Pays</ShippingProfileName></SellerShippingProfile></SellerProfiles>
+      </Item>
+    </ItemArray>
+  </ActiveList>`;
+  const rows = parseActiveListSummaries(xml);
+  assert.equal(rows[0].shippingMode, "free");
+  assert.equal(rows[1].shippingMode, "calculated");
 });
 
 test("parseTradingItem captures photos, specifics, and best offers", () => {

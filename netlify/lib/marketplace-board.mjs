@@ -23,6 +23,7 @@ import {
   quarterBounds,
   shippingTag,
 } from "./marketplace-board-math.mjs";
+import { channelGaps } from "./listing-requirements.mjs";
 
 const JOB_KEY = "marketplace_board_job";
 const CHANNELS = new Set(["ebay", "amazon", "tiktok"]);
@@ -127,7 +128,8 @@ function listedRow(row) {
     upc: null,
     condition: null,
     listed_at: null,
-    shipping: "buyer",
+    shipping: row.shipping_mode ? shippingTag(row.shipping_mode) : "unknown",
+    floor_ask_cents: row.floor_ask_cents ?? null,
     photo_url: null,
     offer_id: row.offer_id || null,
     offer_sku: row.offer_sku || null,
@@ -181,7 +183,8 @@ async function enrichListed(storeId, channel, items) {
       upc: unit?.upc || null,
       asin: row.asin || amz?.asin || null,
       listed_at: floor?.listed_at || null,
-      shipping: shippingTag(draft?.shipping_mode),
+      shipping: row.shipping && row.shipping !== "unknown" ? row.shipping : "unknown",
+      floor_ask_cents: unit?.ask_cents ?? row.floor_ask_cents ?? null,
       photo_url: row.sku ? photos[row.sku] || null : null,
     };
   });
@@ -192,7 +195,7 @@ async function availableUnits(storeId) {
   return paged(async (offset) => {
     const { data, error } = await sb
       .from("units")
-      .select("sku, title, condition, upc, ask_cents, state")
+      .select("sku, title, condition, upc, ask_cents, state, brand, category, ebay_category, package_weight_lb, package_length_in, package_width_in, package_height_in, listing_specs")
       .eq("store_id", storeId)
       .eq("state", "available")
       .order("sku", { ascending: false })
@@ -231,14 +234,37 @@ async function loadNotListed(storeId, channel, listed) {
     .filter((sku) => sku && !liveSkus.includes(sku));
   const photoBySku = await primaryPhotoUrls(storeId, needPhotos);
   const drafts = channel === "ebay"
-    ? await mapIn(storeId, "ebay_drafts", "sku", needPhotos, "sku, shipping_mode")
+    ? await mapIn(storeId, "ebay_drafts", "sku", needPhotos, "sku, aspect_defs, aspects, category_id, category_name")
     : {};
-  return buildNotListed(candidates, { liveSkus, photoBySku, blockedBySku }).map((row) => ({
+  const gapsBySku = {};
+  for (const unit of candidates) {
+    if (!unit?.sku || liveSkus.includes(unit.sku)) continue;
+    const draft = drafts[unit.sku] || null;
+    const specs = unit.listing_specs && typeof unit.listing_specs === "object" ? unit.listing_specs : {};
+    gapsBySku[unit.sku] = channelGaps(
+      {
+        ...unit,
+        category: unit.category || draft?.category_name || null,
+        aspects: draft?.aspects || specs.ebay_aspects || null,
+        listing_specs: {
+          ...specs,
+          ebay_category_id: specs.ebay_category_id || draft?.category_id || null,
+        },
+      },
+      {
+        channel,
+        photoCount: photoBySku[unit.sku] ? 1 : 0,
+        aspectDefs: draft?.aspect_defs || null,
+        amazonBlocked: blockedBySku[unit.sku] || null,
+      },
+    );
+  }
+  return buildNotListed(candidates, { liveSkus, photoBySku, gapsBySku }).map((row) => ({
     ...row,
     key: row.sku,
     qty: 1,
     listed_at: null,
-    shipping: shippingTag(drafts[row.sku]?.shipping_mode),
+    shipping: "unknown",
     offer_id: null,
     offer_sku: null,
     account_id: null,

@@ -51,14 +51,14 @@ type Lookup = {
 };
 
   type Form = {
-  brand: string; model: string; title: string; description: string;
+  brand: string; unbranded: boolean; model: string; title: string; category: string; description: string;
   condition: string; conditionNote: string; testStatus: string; ask: string; cost: string;
   notes: string; upc: string; quantity: string; shippable: string;
   length: string; width: string; height: string; weight: string;
   costEstimate: boolean;
 };
 const blank: Form = {
-  brand: '', model: '', title: '', description: '', condition: '', conditionNote: '', testStatus: '',
+  brand: '', unbranded: false, model: '', title: '', category: '', description: '', condition: '', conditionNote: '', testStatus: '',
   ask: '', cost: '', notes: '', upc: '', quantity: '1', shippable: 'auto',
   length: '', width: '', height: '', weight: '', costEstimate: false,
 };
@@ -415,8 +415,10 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
       ...blank,
       upc: current.upc,
       brand: text(m?.brand),
+      unbranded: false,
       model: text(m?.model),
       title: text(m?.title),
+      category: text(m?.category),
       // description falls back to the real feature bullets from the lookup; never invented text
       description: text(m?.description) || featuresText(m?.features),
       length: num(p?.length_in), width: num(p?.width_in), height: num(p?.height_in), weight: num(p?.weight_lb),
@@ -483,10 +485,19 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
     if (dims.some(v => v === undefined)) { setError('Dimensions and weight must be positive numbers (or blank).'); return null; }
     return { ask, cost, dims: dims as (number | null)[] };
   }
+  function brandReady() {
+    if (form.unbranded) return true;
+    const value = form.brand.trim();
+    if (!value) return false;
+    return !/^(generic|unknown|n\/?a|does not apply)$/i.test(value);
+  }
   function missingFor(p: Parsed): string[] {
     const out: string[] = [];
+    if (!brandReady()) out.push('brand');
     if (!form.title.trim()) out.push('title');
-    if (!form.model.trim()) out.push('model');
+    if (!form.category.trim()) out.push('category');
+    if (!form.condition) out.push('condition');
+    if (!(form.upc.trim() || current?.upc || '').trim()) out.push('UPC');
     if (!pos(p.ask)) out.push('price');
     if (!form.description.trim()) out.push('description/features');
     if (p.dims.some(d => !pos(d))) out.push('package L/W/H/weight');
@@ -497,8 +508,11 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
     const a = cents(form.ask);
     const dims = [form.length, form.width, form.height, form.weight].map(v => Number(v.trim()));
     const out: string[] = [];
+    if (!brandReady()) out.push('brand');
     if (!form.title.trim()) out.push('title');
-    if (!form.model.trim()) out.push('model');
+    if (!form.category.trim()) out.push('category');
+    if (!form.condition) out.push('condition');
+    if (!(form.upc.trim() || current?.upc || '').trim()) out.push('UPC');
     if (!pos(typeof a === 'number' ? a : null)) out.push('price');
     if (!form.description.trim()) out.push('description/features');
     if (dims.some(d => !pos(d))) out.push('package L/W/H/weight');
@@ -531,7 +545,12 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
       const d = await findDups(upcVariants(upc, result));
       if (d && d.count > 0) { setDups(d); setError(`You already have ${d.count} of these in stock. Tap "Add another unit" to confirm this is a new one.`); return; }
     }
-    if (missingFor(parsed).length === 0) { setDialog('ready'); return; }
+    const gaps = missingFor(parsed);
+    if (pos(parsed.ask) && gaps.length) {
+      setError(`Fill these before saving a price: ${gaps.join(', ')}. Clear the price to receive it into Needs attention.`);
+      return;
+    }
+    if (gaps.length === 0) { setDialog('ready'); return; }
     await receive(parsed, null);
   }
 
@@ -549,9 +568,10 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
       ].filter(Boolean).join('\n');
       const { data, error: e } = await client.rpc('portal_receive_unit', {
         p_quantity: quantity,
-        p_brand: form.brand.trim(),
+        p_brand: form.unbranded ? 'Unbranded' : form.brand.trim(),
         p_model: form.model.trim(),
         p_title: form.title.trim(),
+        p_category: form.category.trim() || null,
         p_description: form.description.trim() || null,
         p_condition: form.condition || null,
         p_test_status: form.testStatus || null,
@@ -592,7 +612,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
 
       // Remember product data for "Add another unit".
       const seed: Partial<Form> = {
-        brand: form.brand, model: form.model, title: form.title, description: form.description,
+        brand: form.unbranded ? 'Unbranded' : form.brand, unbranded: form.unbranded, model: form.model, title: form.title, category: form.category, description: form.description,
         ask: hold ? '' : form.ask, testStatus: '', shippable: form.shippable,
         length: form.length, width: form.width, height: form.height, weight: form.weight, upc: form.upc || current?.upc || '',
       };
@@ -851,8 +871,13 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
       <div className="unit-edit-grid">
         {manual && <label>UPC<input value={form.upc} onChange={e => { update('upc', e.target.value); setDups(null); setDupAck(false); }} inputMode={scannerInputMode()} autoComplete="off" placeholder="optional" /></label>}
         {manual && <label>Quantity<input type="number" min="1" max="100" step="1" value={form.quantity} onChange={e => update('quantity', e.target.value)} required /></label>}
-        <label>Brand<input value={form.brand} onChange={e => update('brand', e.target.value)} /></label>
+        <label>Brand<input value={form.unbranded ? 'Unbranded' : form.brand} disabled={form.unbranded} onChange={e => update('brand', e.target.value)} /></label>
+        <label className="mboard-inline">
+          <input type="checkbox" checked={form.unbranded} onChange={e => setForm(p => ({ ...p, unbranded: e.target.checked }))} />
+          Unbranded — no brand anywhere on the product or packaging
+        </label>
         <label>Model<input value={form.model} onChange={e => update('model', e.target.value)} /></label>
+        <label>Category<input value={form.category} onChange={e => update('category', e.target.value)} /></label>
         <label className="unit-edit-wide">Title<input value={form.title} onChange={e => update('title', e.target.value)} /></label>
         <label className="unit-edit-wide">Description / features<textarea rows={4} value={form.description} onChange={e => update('description', e.target.value)} /></label>
 

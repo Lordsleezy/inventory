@@ -14,7 +14,9 @@ type CatalogRow = {
   upc: string | null;
   condition: string | null;
   listed_at: string | null;
-  shipping: 'free' | 'buyer' | string;
+  shipping: 'free' | 'buyer' | 'unknown' | string;
+  floor_ask_cents?: number | null;
+  fix_section?: string | null;
   photo_url: string | null;
   offer_id: string | null;
   offer_sku: string | null;
@@ -214,9 +216,11 @@ export function MarketplaceBoard({ channel, accessToken, money }: Props) {
   const [editQty, setEditQty] = useState('1');
   const [editCondition, setEditCondition] = useState('');
   const [editNote, setEditNote] = useState('');
-  const [editShip, setEditShip] = useState('calculated');
+  const [editShip, setEditShip] = useState('');
+  const [editShipBase, setEditShipBase] = useState('');
   const [editAspects, setEditAspects] = useState('');
   const [editImages, setEditImages] = useState('');
+  const [editBase, setEditBase] = useState({ title: '', desc: '', qty: '1', note: '', aspects: '', images: '' });
   const [editThumbs, setEditThumbs] = useState<string[]>([]);
   const [editBusy, setEditBusy] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
@@ -376,15 +380,27 @@ export function MarketplaceBoard({ channel, accessToken, money }: Props) {
     setEditBusy(true);
     setError('');
     setEdit(row);
-    setEditTitle(row.title || '');
-    setEditDesc('');
-    setEditPrice(row.price_cents != null ? (row.price_cents / 100).toFixed(2) : '');
-    setEditQty(row.qty != null ? String(row.qty) : '1');
+    const askCents = row.floor_ask_cents ?? null;
+    const ship = row.shipping === 'free' ? 'free' : row.shipping === 'buyer' ? 'calculated' : '';
+    const opened = {
+      title: row.title || '',
+      desc: '',
+      qty: row.qty != null ? String(row.qty) : '1',
+      note: '',
+      aspects: '',
+      images: '',
+    };
+    setEditTitle(opened.title);
+    setEditDesc(opened.desc);
+    setEditPrice(askCents != null ? (askCents / 100).toFixed(2) : '');
+    setEditQty(opened.qty);
     setEditCondition(row.condition || '');
-    setEditNote('');
-    setEditShip(row.shipping === 'free' ? 'free' : 'calculated');
-    setEditAspects('');
-    setEditImages('');
+    setEditNote(opened.note);
+    setEditShip(ship);
+    setEditShipBase(ship);
+    setEditAspects(opened.aspects);
+    setEditImages(opened.images);
+    setEditBase(opened);
     setEditThumbs(row.photo_url ? [row.photo_url] : []);
     try {
       const { status, json } = await call(accessToken, {
@@ -403,16 +419,25 @@ export function MarketplaceBoard({ channel, accessToken, money }: Props) {
           condition_description?: string; condition_note?: string; aspects?: unknown;
           image_urls?: string[]; photos?: { url?: string }[]; unit?: { condition?: string };
         };
-        if (detail.title) setEditTitle(detail.title);
-        setEditDesc(detail.description || '');
-        if (detail.price_cents != null) setEditPrice((Number(detail.price_cents) / 100).toFixed(2));
-        if (detail.qty != null) setEditQty(String(detail.qty));
+        const loaded = {
+          title: detail.title || row.title || '',
+          desc: detail.description || '',
+          qty: detail.qty != null ? String(detail.qty) : (row.qty != null ? String(row.qty) : '1'),
+          note: detail.condition_description || detail.condition_note || '',
+          aspects: aspectsToText(detail.aspects),
+          images: (detail.image_urls || []).filter(Boolean).join('\n'),
+        };
+        setEditTitle(loaded.title);
+        setEditDesc(loaded.desc);
+        setEditQty(loaded.qty);
         setEditCondition(detail.unit?.condition || row.condition || '');
-        setEditNote(detail.condition_description || detail.condition_note || '');
-        setEditAspects(aspectsToText(detail.aspects));
-        const urls = (detail.image_urls || []).filter(Boolean);
-        const thumbs = urls.length ? urls : (detail.photos || []).map((p) => p.url).filter((url): url is string => Boolean(url));
-        setEditImages(urls.join('\n'));
+        setEditNote(loaded.note);
+        setEditAspects(loaded.aspects);
+        setEditImages(loaded.images);
+        setEditBase(loaded);
+        const thumbs = loaded.images
+          ? loaded.images.split('\n')
+          : (detail.photos || []).map((p) => p.url).filter((url): url is string => Boolean(url));
         if (thumbs.length) setEditThumbs(thumbs);
       }
     } catch (e) {
@@ -425,9 +450,14 @@ export function MarketplaceBoard({ channel, accessToken, money }: Props) {
   async function saveEdit() {
     if (!edit?.sku) return;
     const price_cents = editPrice.trim() ? Math.round(Number(editPrice) * 100) : null;
-    const quantity = editQty.trim() ? Math.round(Number(editQty)) : null;
-    const aspects = parseAspects(editAspects);
-    const image_urls = editImages.split(/\n+/).map((s) => s.trim()).filter(Boolean);
+    const quantity = editQty.trim() !== editBase.qty.trim() && editQty.trim() ? Math.round(Number(editQty)) : null;
+    const title = editTitle.trim() !== editBase.title.trim() ? (editTitle.trim() || null) : null;
+    const description = editDesc !== editBase.desc ? editDesc : null;
+    const condition_note = editNote !== editBase.note ? (editNote.trim() || null) : null;
+    const aspects = editAspects.trim() !== editBase.aspects.trim() ? parseAspects(editAspects) : null;
+    const image_urls = editImages !== editBase.images
+      ? editImages.split(/\n+/).map((s) => s.trim()).filter(Boolean)
+      : null;
     setEditBusy(true);
     setError('');
     try {
@@ -442,18 +472,22 @@ export function MarketplaceBoard({ channel, accessToken, money }: Props) {
           product_id: edit.product_id,
           price_cents,
           quantity,
-          title: editTitle.trim() || null,
-          description: editDesc,
+          title,
+          description,
           condition: editCondition || null,
-          condition_note: editNote.trim() || null,
+          condition_note,
+          item_id: edit.item_id,
           aspects,
-          image_urls: image_urls.length ? image_urls : null,
-          shipping_mode: channel === 'ebay' ? editShip : null,
+          image_urls,
+          shipping_mode: channel === 'ebay' && editShip && editShip !== editShipBase ? editShip : null,
           sync_floor_ask: true,
         });
-        const body = unwrap(status, json) as { warning?: string; shipping_warning?: string };
-        const extra = [body.warning, body.shipping_warning].filter(Boolean).join(' ');
-        setNotice(extra ? `Saved. ${extra}` : 'Saved — pushed live and Floor ask updated.');
+        const body = unwrap(status, json) as { warning?: string; shipping_warning?: string; channels?: { channel: string; ok?: boolean; error?: string | null; manual?: boolean }[] };
+        const failed = (body.channels || []).filter((row) => row.ok === false).map((row) => `${row.channel}: ${row.error || 'failed'}`);
+        const manual = (body.channels || []).some((row) => row.manual);
+        const extra = [body.warning, body.shipping_warning, failed.join(' · '), manual ? 'Depop needs a manual update.' : ''].filter(Boolean).join(' ');
+        const synced = (body.channels || []).length > 0;
+        setNotice(extra ? `Saved. ${extra}` : synced ? 'Saved. Floor ask updated, and every live channel was synced from it.' : 'Saved.');
       } else {
         const { status, json } = await call(accessToken, {
           action: 'board_floor_save',
@@ -728,7 +762,7 @@ export function MarketplaceBoard({ channel, accessToken, money }: Props) {
                 <p>
                   {tab === 'listed' && channel === 'amazon' && 'Amazon has no live offers right now. Ready units are on Not listed.'}
                   {tab === 'listed' && channel !== 'amazon' && 'Listings show up here as soon as the marketplace reports them live.'}
-                  {tab === 'not_listed' && 'Available units with a photo and a price that are not already live on this marketplace show up here.'}
+                  {tab === 'not_listed' && 'Units that are not live here show up here. Push is only available when that marketplace’s required fields are filled.'}
                   {tab === 'sold' && 'Sales for the quarter selected above show up here. Voided sales stay out, same as Reports.'}
                 </p>
               </div>
@@ -745,11 +779,16 @@ export function MarketplaceBoard({ channel, accessToken, money }: Props) {
                       {catalog && <>SKU {catalog.sku || '—'}{catalog.condition ? ` · ${catalog.condition}` : ''}{catalog.listed_at ? ` · listed ${stamp(catalog.listed_at)}` : ''}</>}
                       {sale && <>SKU {sale.sku || '—'}{sale.order_no ? ` · Order ${sale.order_no}` : ''}{sale.sold_at ? ` · ${stamp(sale.sold_at, true)}` : ''}</>}
                     </small>
-                    {catalog?.blocked_reason && <small className="mboard-reason">{catalog.blocked_reason}</small>}
+                    {catalog?.blocked_reason && (
+                      <small className="mboard-reason">
+                        {catalog.blocked_reason}
+                        {catalog.fix_section && <> · <a href={`/?page=inventory&inventoryTab=attention&section=${catalog.fix_section}`}>Fix in Inventory</a></>}
+                      </small>
+                    )}
                   </div>
                   <div className="mboard-price">{row.price_cents != null ? money(row.price_cents) : '—'}</div>
                   <div className="mboard-ship">
-                    {catalog && <span className={catalog.shipping === 'free' ? 'mboard-tag free' : 'mboard-tag buyer'}>{catalog.shipping === 'free' ? 'Free shipping' : 'Buyer pays'}</span>}
+                    {catalog?.live && <span className={`mboard-tag ${catalog.shipping === 'free' ? 'free' : catalog.shipping === 'buyer' ? 'buyer' : 'unknown'}`}>{catalog.shipping === 'free' ? 'Free shipping' : catalog.shipping === 'buyer' ? 'Buyer pays' : 'Shipping unknown'}</span>}
                     {sale && <span className="mboard-fees">Fees {money(sale.fee_cents)} · Label {money(sale.label_cents)} · Net {sale.net_cents == null ? '—' : money(sale.net_cents)}</span>}
                   </div>
                   <div className="mboard-actions">
@@ -784,18 +823,19 @@ export function MarketplaceBoard({ channel, accessToken, money }: Props) {
           <div className="mboard-modal-card">
             <h2>Edit {edit.sku}</h2>
             {error && <div className="alert" role="alert">{error}</div>}
-            <p className="hint">{edit.live ? 'Save pushes this listing live and updates the Floor ask (website price).' : 'This unit is not live here. Save updates Floor. Push lists it.'}</p>
+            <p className="hint">{edit.live ? 'Price is the Floor ask. A new ask reprices every live channel. Title, photos, and condition push only when you change them. On eBay, changing shipping switches the live business policy. Unknown shipping stays as it is.' : 'This unit is not live here. Save updates Floor. Push lists it once the required fields are filled.'}</p>
             {editThumbs.length > 0 && <div className="mboard-thumbs">{editThumbs.slice(0, 8).map((url) => <img key={url} src={url} alt="" />)}</div>}
             <label>Title<input value={editTitle} onChange={(e) => setEditTitle(e.target.value)} /></label>
             <label>Description<textarea rows={4} value={editDesc} onChange={(e) => setEditDesc(e.target.value)} /></label>
             <div className="mboard-edit-grid">
-              <label>Price<input value={editPrice} onChange={(e) => setEditPrice(e.target.value)} inputMode="decimal" /></label>
+              <label>Floor ask<input value={editPrice} onChange={(e) => setEditPrice(e.target.value)} inputMode="decimal" /></label>
               <label>Qty<input value={editQty} onChange={(e) => setEditQty(e.target.value)} inputMode="numeric" /></label>
               <label>Condition<select value={editCondition} onChange={(e) => setEditCondition(e.target.value)}>
                 <option value=""> </option>
                 {[...new Set([...CONDITIONS, editCondition].filter(Boolean))].map((c) => <option key={c} value={c}>{c}</option>)}
               </select></label>
               {channel === 'ebay' && <label>Shipping<select value={editShip} onChange={(e) => setEditShip(e.target.value)}>
+                {editShipBase === '' && <option value="">Shipping unknown — leave unchanged</option>}
                 <option value="calculated">Buyer pays</option>
                 <option value="free">Free shipping</option>
               </select></label>}

@@ -26,7 +26,7 @@ export function ebayIdentifiers(unit = {}, aspects = {}) {
     mpn: looksLikeBadMpn(rawMpn) ? NOT_APPLICABLE : normalize(rawMpn),
     upc: upcIssue ? null : rawUpc ? normalize(rawUpc) : null,
     upcIssue,
-    validBrand: Boolean(brand && !/^(?:unknown|does\s+not\s+apply|n\/?a)$/i.test(brand)),
+    validBrand: Boolean(brand && !/^(?:unknown|generic|does\s+not\s+apply|n\/?a)$/i.test(brand)),
   };
 }
 

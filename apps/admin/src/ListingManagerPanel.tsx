@@ -23,6 +23,7 @@ type ListingRow = {
   item_id?: string | null;
   api?: string | null;
   error?: string | null;
+  manual_update?: string | null;
 };
 
 type Eligible = {
@@ -605,7 +606,7 @@ export function ListingManagerPanel({ accessToken, money, channel: channelProp, 
                 <p className="hint">Not editable via API yet — Trading-era listing. Use Migrate legacy eBay.</p>
               )}
               {row.channel === 'depop' && (
-                <p className="hint">Manual Depop row — edit on Depop Seller. End here clears Floor only (does not mark sold).</p>
+                <p className="hint">{row.manual_update || 'Manual Depop row — edit on Depop Seller. End here clears Floor only (does not mark sold).'}</p>
               )}
               <div className="actions">
                 {row.url && (

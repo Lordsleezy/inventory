@@ -18,7 +18,18 @@ export type MainPage =
   | 'settings';
 export type ReportTab = 'profit' | 'shipping' | 'expenses' | 'payouts' | 'returns';
 export type InventoryTab = 'browse' | 'receive' | 'attention' | 'lookup-test';
-export type AttentionSection = 'missing-cost' | 'missing-photo' | 'missing-price' | 'missing-spec' | 'missing-model' | 'missing-description';
+export type AttentionSection =
+  | 'missing-cost'
+  | 'missing-brand'
+  | 'missing-category'
+  | 'missing-specifics'
+  | 'missing-spec'
+  | 'missing-upc'
+  | 'missing-photo'
+  | 'missing-price'
+  | 'missing-condition'
+  | 'missing-model'
+  | 'missing-description';
 export type OnlineTab = 'listed' | 'ready' | 'not-ready' | 'msc' | 'reports' | 'sold';
 /** Listing subtabs: eBay, Depop, Amazon, TikTok (+ Facebook-only oversized). Sale history may still show Mercari/Whatnot. */
 export type OnlineChannel = 'all' | 'ebay' | 'depop' | 'amazon' | 'tiktok' | 'facebook';
@@ -72,7 +83,19 @@ const MAIN: MainPage[] = [
   'logs',
   'settings',
 ];
-const SECTIONS: AttentionSection[] = ['missing-cost', 'missing-photo', 'missing-price', 'missing-spec', 'missing-model', 'missing-description'];
+const SECTIONS: AttentionSection[] = [
+  'missing-cost',
+  'missing-brand',
+  'missing-category',
+  'missing-specifics',
+  'missing-spec',
+  'missing-upc',
+  'missing-photo',
+  'missing-price',
+  'missing-condition',
+  'missing-model',
+  'missing-description',
+];
 const ONLINE_TABS: OnlineTab[] = ['listed', 'ready', 'not-ready', 'msc', 'reports', 'sold'];
 const ONLINE_CHANNELS: OnlineChannel[] = ['all', 'ebay', 'depop', 'amazon', 'tiktok', 'facebook'];
 const ONLINE_CHANNELS_SET = new Set<string>(ONLINE_CHANNELS);

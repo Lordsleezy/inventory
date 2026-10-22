@@ -657,10 +657,15 @@ export function App() {
     ['reports', 'Reports'],
   ];
   const attentionSubs: [typeof nav.attentionSection, string][] = [
-    ['missing-cost', 'Missing cost'],
+    ['missing-brand', 'Missing brand'],
+    ['missing-category', 'Missing category'],
+    ['missing-specifics', 'Missing item specifics'],
+    ['missing-spec', 'Missing weight & dimensions'],
+    ['missing-upc', 'Missing UPC'],
     ['missing-photo', 'Missing photo'],
     ['missing-price', 'Missing price'],
-    ['missing-spec', 'Missing spec'],
+    ['missing-condition', 'Missing condition'],
+    ['missing-cost', 'Missing cost'],
     ['missing-model', 'Missing model'],
     ['missing-description', 'Missing description'],
   ];

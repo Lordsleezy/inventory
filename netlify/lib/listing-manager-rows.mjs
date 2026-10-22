@@ -54,6 +54,7 @@ export function ebayRowFromActive(account, row, unit = null) {
     offer_id: null,
     item_id: itemId,
     api: "trading_active",
+    shipping_mode: row.shippingMode || null,
   };
 }
 
@@ -204,6 +205,7 @@ export function depopListingUrl(listingId) {
 }
 
 export function depopRowFromFloor(row, unit) {
+  const manual = unit?.listing_specs?.manual_updates?.depop || null;
   return {
     channel: "depop",
     sku: row.sku,
@@ -218,5 +220,6 @@ export function depopRowFromFloor(row, unit) {
     editable: false,
     api: "floor",
     note: "Depop has no listing API — this is the Floor row confirmed from Push to Depop.",
+    manual_update: manual?.reason || null,
   };
 }

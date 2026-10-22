@@ -32,6 +32,12 @@ export function ReceiveScreen() {
   const [cost, setCost] = useState("");
   const [floor, setFloor] = useState("");
   const [notes, setNotes] = useState("");
+  const [upc, setUpc] = useState("");
+  const [lengthIn, setLengthIn] = useState("");
+  const [widthIn, setWidthIn] = useState("");
+  const [heightIn, setHeightIn] = useState("");
+  const [weightLb, setWeightLb] = useState("");
+  const [unbranded, setUnbranded] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [categories, setCategories] = useState<string[]>([]);
@@ -62,18 +68,39 @@ export function ReceiveScreen() {
     setError("");
     try {
       const qtyN = Math.max(1, Math.min(9999, Math.round(Number(qty) || 1)));
+      const askCents = parseMoneyToCents(ask);
+      const brandValue = unbranded ? "Unbranded" : brand.trim();
+      if (askCents != null) {
+        const missing: string[] = [];
+        if (!brandValue || /^(generic|unknown|n\/?a|does not apply)$/i.test(brandValue)) missing.push("brand");
+        if (!(title.trim() || brandValue)) missing.push("title");
+        if (!category.trim()) missing.push("category");
+        if (!condition) missing.push("condition");
+        if (!upc.trim()) missing.push("UPC");
+        if ([lengthIn, widthIn, heightIn, weightLb].map(Number).some((n) => !(n > 0))) missing.push("package size");
+        if (missing.length) {
+          setError(`Fill ${missing.join(", ")} before saving a price, or clear the price.`);
+          setBusy(false);
+          return;
+        }
+      }
       const { error: rpcErr } = await floorCloud().rpc("receive_unit", {
         p_sku: sku.trim(),
-        p_brand: brand,
+        p_brand: brandValue,
         p_model: model,
-        p_title: title || [brand, model].filter(Boolean).join(" "),
+        p_title: title || [brandValue, model].filter(Boolean).join(" "),
         p_category: category || null,
         p_condition: condition || null,
         p_location: location || null,
-        p_ask_cents: parseMoneyToCents(ask) ?? null,
+        p_ask_cents: askCents ?? null,
         p_cost_cents: isAdmin ? parseMoneyToCents(cost) ?? null : null,
         p_floor_cents: isAdmin ? parseMoneyToCents(floor) ?? null : null,
         p_notes: notes || null,
+        p_upc: upc.trim() || null,
+        p_length: Number(lengthIn) > 0 ? Number(lengthIn) : null,
+        p_width: Number(widthIn) > 0 ? Number(widthIn) : null,
+        p_height: Number(heightIn) > 0 ? Number(heightIn) : null,
+        p_weight: Number(weightLb) > 0 ? Number(weightLb) : null,
       });
       if (rpcErr) throw rpcErr;
       if (qtyN > 1) {
@@ -121,7 +148,14 @@ export function ReceiveScreen() {
       </label>
       <label>
         Brand
-        <input value={brand} onChange={(e) => setBrand(e.target.value)} />
+        <input value={unbranded ? "Unbranded" : brand} disabled={unbranded} onChange={(e) => setBrand(e.target.value)} />
+      </label>
+      <label>
+        <input type="checkbox" checked={unbranded} onChange={(e) => setUnbranded(e.target.checked)} /> Unbranded — no brand on the product or packaging
+      </label>
+      <label>
+        UPC
+        <input value={upc} inputMode="numeric" onChange={(e) => setUpc(e.target.value.replace(/\D/g, "").slice(0, 14))} />
       </label>
       <label>
         Model
@@ -205,6 +239,22 @@ export function ReceiveScreen() {
           </label>
         </>
       ) : null}
+      <label>
+        Length (in)
+        <input value={lengthIn} onChange={(e) => setLengthIn(e.target.value)} />
+      </label>
+      <label>
+        Width (in)
+        <input value={widthIn} onChange={(e) => setWidthIn(e.target.value)} />
+      </label>
+      <label>
+        Height (in)
+        <input value={heightIn} onChange={(e) => setHeightIn(e.target.value)} />
+      </label>
+      <label>
+        Weight (lb)
+        <input value={weightLb} onChange={(e) => setWeightLb(e.target.value)} />
+      </label>
       <label>
         Notes
         <input value={notes} onChange={(e) => setNotes(e.target.value)} />

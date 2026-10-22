@@ -113,21 +113,31 @@ export function buildStringLightAttributes(unit, { listCents, retailCents } = {}
       fulfillment_availability: [
         { fulfillment_channel_code: "DEFAULT", quantity: 1, marketplace_id: mp },
       ],
-      item_package_dimensions: [
-        {
-          length: { value: Number(specs.package_length_in || unit.package_length_in || 12), unit: "inches" },
-          width: { value: Number(specs.package_width_in || unit.package_width_in || 8), unit: "inches" },
-          height: { value: Number(specs.package_height_in || unit.package_height_in || 6), unit: "inches" },
-          marketplace_id: mp,
-        },
-      ],
-      item_package_weight: [
-        {
-          value: Number(specs.package_weight_lb || unit.package_weight_lb || 2),
-          unit: "pounds",
-          marketplace_id: mp,
-        },
-      ],
+      ...(Number(unit.package_length_in || specs.package_length_in) > 0
+        && Number(unit.package_width_in || specs.package_width_in) > 0
+        && Number(unit.package_height_in || specs.package_height_in) > 0
+        ? {
+            item_package_dimensions: [
+              {
+                length: { value: Number(unit.package_length_in || specs.package_length_in), unit: "inches" },
+                width: { value: Number(unit.package_width_in || specs.package_width_in), unit: "inches" },
+                height: { value: Number(unit.package_height_in || specs.package_height_in), unit: "inches" },
+                marketplace_id: mp,
+              },
+            ],
+          }
+        : {}),
+      ...(Number(unit.package_weight_lb || specs.package_weight_lb) > 0
+        ? {
+            item_package_weight: [
+              {
+                value: Number(unit.package_weight_lb || specs.package_weight_lb),
+                unit: "pounds",
+                marketplace_id: mp,
+              },
+            ],
+          }
+        : {}),
       batteries_required: v(mp, false),
       batteries_included: v(mp, false),
     },

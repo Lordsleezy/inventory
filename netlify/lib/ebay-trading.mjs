@@ -272,6 +272,25 @@ async function tradingCall(token, callName, innerXml) {
   return xml;
 }
 
+/** free | calculated | null. Null stays unknown — do not treat a missing block as buyer-pays. */
+export function shippingModeFromItemXml(block) {
+  const ship = xmlBlocks(block, "ShippingDetails")[0] || "";
+  const profiles = xmlBlocks(block, "SellerProfiles")[0] || "";
+  const profile = xmlBlocks(profiles, "SellerShippingProfile")[0] || profiles;
+  const profileName = xmlTag(profile, "ShippingProfileName") || "";
+  if (/free/i.test(profileName) && !/buyer/i.test(profileName)) return "free";
+  if (/calculated|buyer/i.test(profileName)) return "calculated";
+  const services = xmlBlocks(ship, "ShippingServiceOptions");
+  const freeFlags = services.map((row) => xmlTag(row, "FreeShipping")).filter(Boolean);
+  const costs = services.map((row) => xmlTag(row, "ShippingServiceCost")).filter((value) => value !== "");
+  const type = xmlTag(ship, "ShippingType");
+  if (freeFlags.some((flag) => /^true$/i.test(flag))) return "free";
+  if (costs.length && costs.every((cost) => Number(cost) === 0)) return "free";
+  if (/^calculated$/i.test(type) || costs.some((cost) => Number(cost) > 0)) return "calculated";
+  if (/^flat$/i.test(type) && costs.some((cost) => Number(cost) > 0)) return "calculated";
+  return null;
+}
+
 export function parseActiveListSummaries(xml) {
   return xmlBlocks(xml, "Item").map((block) => {
     const selling = xmlBlocks(block, "SellingStatus")[0] || "";
@@ -296,9 +315,29 @@ export function parseActiveListSummaries(xml) {
       imageUrls: pictureUrls,
       viewItemUrl: xmlTag(listingDetails, "ViewItemURL"),
       timeLeft: xmlTag(block, "TimeLeft"),
+      shippingMode: shippingModeFromItemXml(block),
     };
   }).filter((row) => row.itemId);
 }
+
+const ACTIVE_LIST_SELECTORS = [
+  "ActiveList.PaginationResult",
+  "ActiveList.ItemArray.Item.ItemID",
+  "ActiveList.ItemArray.Item.Title",
+  "ActiveList.ItemArray.Item.SKU",
+  "ActiveList.ItemArray.Item.CustomLabel",
+  "ActiveList.ItemArray.Item.Quantity",
+  "ActiveList.ItemArray.Item.BuyItNowPrice",
+  "ActiveList.ItemArray.Item.StartPrice",
+  "ActiveList.ItemArray.Item.ListingType",
+  "ActiveList.ItemArray.Item.TimeLeft",
+  "ActiveList.ItemArray.Item.SellingStatus",
+  "ActiveList.ItemArray.Item.PrimaryCategory",
+  "ActiveList.ItemArray.Item.PictureDetails",
+  "ActiveList.ItemArray.Item.ListingDetails",
+  "ActiveList.ItemArray.Item.ShippingDetails",
+  "ActiveList.ItemArray.Item.SellerProfiles",
+].map((path) => `<OutputSelector>${path}</OutputSelector>`).join("\n");
 
 /** Paginate GetMyeBaySelling ActiveList — includes Vendoo / Seller Hub listings Inventory API misses. */
 export async function getMyEbaySellingActive(token, { entriesPerPage = 200, maxPages = 50 } = {}) {
@@ -306,18 +345,23 @@ export async function getMyEbaySellingActive(token, { entriesPerPage = 200, maxP
   let page = 1;
   let totalPages = 1;
   const perPage = Math.min(200, Math.max(1, Number(entriesPerPage) || 200));
+  let useSelectors = true;
   while (page <= totalPages && page <= maxPages) {
-    const xml = await tradingCall(
-      token,
-      "GetMyeBaySelling",
-      `<ActiveList>
+    const listXml = `<ActiveList>
   <Include>true</Include>
   <Pagination><EntriesPerPage>${perPage}</EntriesPerPage><PageNumber>${page}</PageNumber></Pagination>
-</ActiveList>`,
-    );
+</ActiveList>`;
+    let xml = await tradingCall(token, "GetMyeBaySelling", useSelectors ? `${listXml}\n${ACTIVE_LIST_SELECTORS}` : listXml);
+    let active = xmlBlocks(xml, "ActiveList")[0] || xml;
+    // A bad OutputSelector list can hide every item. Fall back to the default summary
+    // for the rest of the pull; shipping then stays unknown instead of buyer-pays.
+    if (page === 1 && useSelectors && parseActiveListSummaries(active).length === 0) {
+      useSelectors = false;
+      xml = await tradingCall(token, "GetMyeBaySelling", listXml);
+      active = xmlBlocks(xml, "ActiveList")[0] || xml;
+    }
     // IMPORTANT: PaginationResult must come from ActiveList — the response also embeds
     // PaginationResult for SoldList/UnsoldList/etc. Taking xml's first match stopped after page 1.
-    const active = xmlBlocks(xml, "ActiveList")[0] || xml;
     items.push(...parseActiveListSummaries(active));
     const pagination = xmlBlocks(active, "PaginationResult")[0] || "";
     const pages = Number(xmlTag(pagination, "TotalNumberOfPages") || 0);
@@ -369,6 +413,8 @@ export async function getSellerListActive(token, { entriesPerPage = 200, maxPage
 <OutputSelector>ItemArray.Item.ListingType</OutputSelector>
 <OutputSelector>ItemArray.Item.ListingDetails</OutputSelector>
 <OutputSelector>ItemArray.Item.Quantity</OutputSelector>
+<OutputSelector>ItemArray.Item.ShippingDetails</OutputSelector>
+<OutputSelector>ItemArray.Item.SellerProfiles</OutputSelector>
 <OutputSelector>PaginationResult</OutputSelector>`,
     );
     const array = xmlBlocks(xml, "ItemArray")[0] || xml;
@@ -533,6 +579,60 @@ export async function reviseFixedPricePriceAndShipping(token, change) {
   </Item>`,
   );
   return { itemId, ack: xmlTag(xml, "Ack"), fees: xmlTag(xml, "Fee"), xml };
+}
+
+/**
+ * XML for one ReviseFixedPriceItem on a Trading / Vendoo listing.
+ * Price is dollars. Shipping profiles stay out of this call.
+ */
+export function tradingReviseItemXml(change) {
+  const itemId = String(change.itemId || "").trim();
+  if (!/^\d+$/.test(itemId)) throw new Error("revise needs a numeric item id");
+  const parts = [`<ItemID>${xmlEsc(itemId)}</ItemID>`];
+  const price = change.price != null ? Number(change.price) : null;
+  if (Number.isFinite(price) && price > 0) {
+    parts.push(`<StartPrice>${xmlEsc(price.toFixed(2))}</StartPrice>`);
+  }
+  if (change.title) {
+    parts.push(`<Title>${xmlEsc(String(change.title).slice(0, 80))}</Title>`);
+  }
+  if (change.description != null && String(change.description) !== "") {
+    const safe = String(change.description).replace(/]]>/g, "]]]]><![CDATA[>");
+    parts.push(`<Description><![CDATA[${safe}]]></Description>`);
+  }
+  if (change.conditionDescription) {
+    parts.push(`<ConditionDescription>${xmlEsc(String(change.conditionDescription).slice(0, 1000))}</ConditionDescription>`);
+  }
+  if (change.quantity != null && Number.isFinite(Number(change.quantity))) {
+    parts.push(`<Quantity>${xmlEsc(String(Math.max(0, Math.round(Number(change.quantity)))))}</Quantity>`);
+  }
+  const urls = (change.pictureUrls || []).filter((url) => typeof url === "string" && /^https?:\/\//i.test(url)).slice(0, 12);
+  if (urls.length) {
+    parts.push(`<PictureDetails>${urls.map((url) => `<PictureURL>${xmlEsc(url)}</PictureURL>`).join("")}</PictureDetails>`);
+  }
+  if (change.aspects && typeof change.aspects === "object") {
+    const lists = Object.entries(change.aspects)
+      .filter(([name]) => name)
+      .slice(0, 45)
+      .map(([name, value]) => {
+        const values = (Array.isArray(value) ? value : [value]).map((v) => String(v || "").trim()).filter(Boolean).slice(0, 10);
+        if (!values.length) return "";
+        return `<NameValueList><Name>${xmlEsc(String(name).slice(0, 65))}</Name>${values.map((v) => `<Value>${xmlEsc(v.slice(0, 65))}</Value>`).join("")}</NameValueList>`;
+      })
+      .filter(Boolean);
+    if (lists.length) parts.push(`<ItemSpecifics>${lists.join("")}</ItemSpecifics>`);
+  }
+  if (parts.length < 2) throw new Error("nothing_to_revise");
+  return `<WarningLevel>High</WarningLevel>
+  <Item>
+    ${parts.join("\n    ")}
+  </Item>`;
+}
+
+/** In-place revise of price, title, description, photos, or quantity. Does not change shipping profiles. */
+export async function reviseTradingFixedPrice(token, change) {
+  const xml = await tradingCall(token, "ReviseFixedPriceItem", tradingReviseItemXml(change));
+  return { itemId: String(change.itemId), ack: xmlTag(xml, "Ack"), via: "trading", xml };
 }
 
 export async function uploadSiteHostedPicture(token, externalUrl) {

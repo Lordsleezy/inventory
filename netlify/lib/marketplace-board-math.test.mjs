@@ -81,7 +81,7 @@ test("stats match the channel report: voids leave gross/fees, labels still cut p
   assert.equal(stats.fee_pct, 99.4);
 });
 
-test("not listed keeps priced units with a real photo and greys Amazon blocks", () => {
+test("not listed shows incomplete units greyed and keeps Amazon blocks", () => {
   const rows = buildNotListed(
     [
       { sku: "1", title: "Ready", ask_cents: 1000, condition: "Open box", upc: "111" },
@@ -94,16 +94,25 @@ test("not listed keeps priced units with a real photo and greys Amazon blocks", 
       liveSkus: ["2"],
       photoBySku: { 1: "https://photo/1", 3: null, 5: "https://photo/5" },
       blockedBySku: { 5: "No ASIN match — not on Amazon" },
+      gapsBySku: {
+        1: { ready: true, reason: null, section: null },
+        3: { ready: false, reason: "Needs: photos", section: "missing-photo" },
+        4: { ready: false, reason: "Needs: price", section: "missing-price" },
+        5: { ready: false, reason: "Needs: Amazon catalog", section: "missing-upc" },
+      },
     },
   );
-  assert.deepEqual(rows.map((r) => r.sku), ["1", "5"]);
+  assert.deepEqual(rows.map((r) => r.sku), ["1", "3", "4", "5"]);
   assert.equal(rows[0].blocked, false);
   assert.equal(rows[1].blocked, true);
-  assert.match(rows[1].blocked_reason, /not on Amazon/);
+  assert.match(rows[1].blocked_reason, /photos/);
+  assert.equal(rows[1].fix_section, "missing-photo");
+  assert.equal(rows[3].blocked, true);
+  assert.match(rows[3].blocked_reason, /Amazon catalog/);
 });
 
-test("unknown shipping is buyer pays", () => {
+test("unknown shipping stays unknown", () => {
   assert.equal(shippingTag("free"), "free");
-  assert.equal(shippingTag(null), "buyer");
+  assert.equal(shippingTag(null), "unknown");
   assert.equal(shippingTag("calculated"), "buyer");
 });

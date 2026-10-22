@@ -123,7 +123,10 @@ export function aggregateChannelStats(rows, { insertionCents = 0 } = {}) {
 }
 
 export function shippingTag(mode) {
-  return String(mode || "").toLowerCase() === "free" ? "free" : "buyer";
+  const value = String(mode || "").toLowerCase();
+  if (value === "free") return "free";
+  if (value === "calculated" || value === "buyer" || value === "flat") return "buyer";
+  return "unknown";
 }
 
 export function rowSearchText(row) {
@@ -133,30 +136,31 @@ export function rowSearchText(row) {
     .toLowerCase();
 }
 
-export function buildNotListed(units, { liveSkus = [], photoBySku = {}, blockedBySku = {} } = {}) {
+export function buildNotListed(units, { liveSkus = [], photoBySku = {}, blockedBySku = {}, gapsBySku = {} } = {}) {
   const live = new Set(liveSkus.filter(Boolean));
   const out = [];
   for (const unit of units || []) {
     const sku = unit?.sku ? String(unit.sku) : "";
     if (!sku || live.has(sku)) continue;
-    const blockedReason = blockedBySku[sku] || null;
     const photo = photoBySku[sku] || null;
     const priced = Number(unit.ask_cents) > 0;
-    if (blockedReason) {
-      out.push({
-        sku,
-        title: unit.title || `SKU ${sku}`,
-        condition: unit.condition || null,
-        upc: unit.upc || null,
-        asin: unit.asin || null,
-        price_cents: unit.ask_cents ?? null,
-        photo_url: photo,
-        blocked: true,
-        blocked_reason: blockedReason,
-      });
-      continue;
+    const gap = gapsBySku[sku];
+    const catalogReason = blockedBySku[sku] || null;
+    let reason = catalogReason;
+    let section = catalogReason ? "missing-upc" : null;
+    if (gap && gap.ready === false) {
+      reason = [catalogReason, gap.reason].filter(Boolean).join(" · ") || gap.reason;
+      section = gap.section || section;
+    } else if (gap && gap.ready === true && !catalogReason) {
+      reason = null;
+      section = null;
+    } else if (!gap && !catalogReason && (!priced || !photo)) {
+      const labels = [];
+      if (!priced) labels.push("price");
+      if (!photo) labels.push("photos");
+      reason = `Needs: ${labels.join(", ")}`;
+      section = !priced ? "missing-price" : "missing-photo";
     }
-    if (!priced || !photo) continue;
     out.push({
       sku,
       title: unit.title || `SKU ${sku}`,
@@ -164,9 +168,11 @@ export function buildNotListed(units, { liveSkus = [], photoBySku = {}, blockedB
       upc: unit.upc || null,
       asin: unit.asin || null,
       price_cents: unit.ask_cents ?? null,
+      floor_ask_cents: unit.ask_cents ?? null,
       photo_url: photo,
-      blocked: false,
-      blocked_reason: null,
+      blocked: Boolean(reason),
+      blocked_reason: reason,
+      fix_section: reason ? section : null,
     });
   }
   return out;

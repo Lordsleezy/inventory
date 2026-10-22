@@ -594,6 +594,8 @@ html.dark .receive-modal-card{background:#1c2430;color:#e6edf3}html.dark .receiv
 .mboard-tag{display:inline-flex;border-radius:999px;padding:4px 8px;font-size:.75rem;font-weight:700}
 .mboard-tag.free{background:#e7f8ee;color:#067647}
 .mboard-tag.buyer{background:#fff4e5;color:#b54708}
+.mboard-tag.unknown{background:#eceff3;color:#667085}
+.mboard-push:disabled{opacity:.45;cursor:not-allowed}
 .mboard-actions{display:flex;gap:8px;justify-content:flex-end}
 .mboard-push{background:#178a45;color:#fff;border:0;border-radius:8px;padding:8px 14px;font-weight:700}
 .mboard-danger{background:#d92d20;color:#fff;border:0;border-radius:8px;padding:8px 14px;font-weight:700}
@@ -634,6 +636,7 @@ html.dark .mboard-photo{background:#12161c;color:#9aa7b5}
 html.dark .mboard-fees{color:#c5d0dc}
 html.dark .mboard-tag.free{background:#123524;color:#3dd68c}
 html.dark .mboard-tag.buyer{background:#3d2e12;color:#f5c97a}
+html.dark .mboard-tag.unknown{background:#2a2f38;color:#c5cad3}
 html.dark .mboard-reason{color:#f5c97a!important}
 html.dark .mboard-modal-card{background:#1c2430;color:#e8eef4}
 html.dark .mboard-progress-bar{background:#2a3340}
