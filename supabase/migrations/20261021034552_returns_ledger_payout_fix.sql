@@ -14,7 +14,8 @@ create table if not exists public.portal_payout_adjustments (
   employee_id uuid not null references auth.users(id),
   amount_cents int not null check (amount_cents <> 0),
   reason text not null,
-  return_id uuid references public.returns(id) on delete set null,
+  -- FK to returns added in 20261021034908 after public.returns exists (CI migrate order).
+  return_id uuid,
   sale_id bigint references public.sales(id) on delete set null,
   ticket_key text,
   -- Full commission on the sale before refund fraction (for Payouts UI add-back).

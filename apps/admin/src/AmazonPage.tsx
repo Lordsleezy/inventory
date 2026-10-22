@@ -51,6 +51,7 @@ const STATUS_LABEL: Record<string, string> = {
   queued: 'Queued',
   ready: 'Ready',
   needs_review: 'Needs review',
+  not_on_amazon: 'Not on Amazon',
   listing: 'Listing',
   live: 'Live',
   sold: 'Sold',
@@ -73,6 +74,11 @@ const FLAG_LABEL: Record<string, string> = {
 function isRestrictionReview(reason: string | null | undefined): boolean {
   if (!reason) return false;
   return /approval required|not eligible|listing restriction|gated|Seller Central|restrictions check/i.test(reason);
+}
+
+function isNoAsinCreate(reason: string | null | undefined): boolean {
+  if (!reason) return false;
+  return /no asin|create-new|create preview|GS1|Not on Amazon/i.test(reason);
 }
 
 const SKIP_REASON_LABEL: Record<string, string> = {
@@ -152,6 +158,18 @@ export function AmazonPage({ client, accessToken, money: moneyFmt }: Props) {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [listingEnabled, setListingEnabled] = useState<boolean | null>(null);
+  const [createDraft, setCreateDraft] = useState<{
+    sku: string;
+    title: string;
+    brand: string;
+    bullets: string;
+    description: string;
+    price: string;
+    productType: string;
+    mainImage: string;
+    previewOk: boolean | null;
+    previewMsg: string;
+  } | null>(null);
   const skuRef = useRef<HTMLInputElement>(null);
   const upcRef = useRef<HTMLInputElement>(null);
 
@@ -350,6 +368,170 @@ export function AmazonPage({ client, accessToken, money: moneyFmt }: Props) {
     }
   }
 
+  async function openCreateListing(sku: string) {
+    setBusy(true);
+    setError('');
+    try {
+      const result = await amazonListCall(accessToken, { action: 'create_prefill', sku });
+      const prefill = (result.prefill || {}) as {
+        productType?: string;
+        attributes?: Record<string, unknown>;
+      };
+      const attrs = prefill.attributes || {};
+      const asLang = (key: string) => {
+        const arr = attrs[key];
+        if (!Array.isArray(arr) || !arr[0] || typeof arr[0] !== 'object') return '';
+        const v = (arr[0] as { value?: unknown }).value;
+        return typeof v === 'string' ? v : '';
+      };
+      const bulletArr = Array.isArray(attrs.bullet_point) ? attrs.bullet_point : [];
+      const bullets = bulletArr
+        .map((b) => (b && typeof b === 'object' ? String((b as { value?: unknown }).value || '') : ''))
+        .filter(Boolean)
+        .join('\n');
+      let dollars = '';
+      const offer0 = Array.isArray(attrs.purchasable_offer) ? attrs.purchasable_offer[0] : null;
+      if (offer0 && typeof offer0 === 'object') {
+        const schedule = (offer0 as { our_price?: { schedule?: { value_with_tax?: number }[] }[] }).our_price?.[0]
+          ?.schedule?.[0];
+        if (schedule?.value_with_tax != null) dollars = String(schedule.value_with_tax);
+      }
+      setCreateDraft({
+        sku,
+        title: asLang('item_name'),
+        brand: asLang('brand'),
+        bullets,
+        description: asLang('product_description'),
+        price: dollars,
+        productType: prefill.productType || 'STRING_LIGHT',
+        mainImage: '',
+        previewOk: null,
+        previewMsg:
+          'Real brand + UPC only. No Generic. No AI images — main image must be a real photo Amazon already hosts (or leave blank for preview).',
+      });
+    } catch (e) {
+      setError(errText(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runCreatePreview() {
+    if (!createDraft) return;
+    setBusy(true);
+    setError('');
+    try {
+      const bulletLines = createDraft.bullets.split(/\n+/).map((s) => s.trim()).filter(Boolean);
+      const result = await amazonListCall(accessToken, {
+        action: 'create_preview',
+        sku: createDraft.sku,
+        product_type: createDraft.productType,
+        price_cents: createDraft.price ? Math.round(Number(createDraft.price) * 100) : null,
+        main_image_media_location: createDraft.mainImage.trim() || null,
+        attributes: {
+          item_name: [{ value: createDraft.title, language_tag: 'en_US', marketplace_id: 'ATVPDKIKX0DER' }],
+          brand: [{ value: createDraft.brand, language_tag: 'en_US', marketplace_id: 'ATVPDKIKX0DER' }],
+          bullet_point: bulletLines.map((value) => ({
+            value,
+            language_tag: 'en_US',
+            marketplace_id: 'ATVPDKIKX0DER',
+          })),
+          product_description: [
+            { value: createDraft.description, language_tag: 'en_US', marketplace_id: 'ATVPDKIKX0DER' },
+          ],
+        },
+      });
+      const preview = (result.preview || {}) as Record<string, unknown>;
+      const errors = (preview.errors as { code?: string; message?: string }[]) || [];
+      if (preview.gs1OrBrandBlocked || preview.autoMarkedNotOnAmazon) {
+        setCreateDraft(null);
+        setFlash(
+          `${createDraft.sku}: Amazon blocked create (UPC/brand GS1). Marked Not on Amazon — sell elsewhere. ${errors[0]?.message || ''}`,
+        );
+        await load();
+        return;
+      }
+      setCreateDraft({
+        ...createDraft,
+        previewOk: Boolean(preview.ok),
+        previewMsg: preview.ok
+          ? `VALIDATION_PREVIEW clean (${String(preview.productType || createDraft.productType)}). Live submit needs Amazon-hosted main image + confirm.`
+          : errors.map((e) => e.message).filter(Boolean).join(' · ') || String(preview.message || 'validation errors'),
+      });
+      await load();
+    } catch (e) {
+      setError(errText(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitCreateLive() {
+    if (!createDraft?.previewOk) return;
+    if (!createDraft.mainImage.trim()) {
+      setError('Live create needs an Amazon-hosted main image URL (media_location). Never use AI images.');
+      return;
+    }
+    if (
+      !window.confirm(
+        `Submit LIVE create for SKU ${createDraft.sku} under brand "${createDraft.brand}"? This creates a new catalog ASIN if Amazon accepts it.`,
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    setError('');
+    try {
+      const bulletLines = createDraft.bullets.split(/\n+/).map((s) => s.trim()).filter(Boolean);
+      const result = await amazonListCall(accessToken, {
+        action: 'create_submit',
+        sku: createDraft.sku,
+        confirm_live: true,
+        product_type: createDraft.productType,
+        price_cents: createDraft.price ? Math.round(Number(createDraft.price) * 100) : null,
+        main_image_media_location: createDraft.mainImage.trim(),
+        attributes: {
+          item_name: [{ value: createDraft.title, language_tag: 'en_US', marketplace_id: 'ATVPDKIKX0DER' }],
+          brand: [{ value: createDraft.brand, language_tag: 'en_US', marketplace_id: 'ATVPDKIKX0DER' }],
+          bullet_point: bulletLines.map((value) => ({
+            value,
+            language_tag: 'en_US',
+            marketplace_id: 'ATVPDKIKX0DER',
+          })),
+          product_description: [
+            { value: createDraft.description, language_tag: 'en_US', marketplace_id: 'ATVPDKIKX0DER' },
+          ],
+        },
+      });
+      if (result.ok) {
+        setFlash(`${createDraft.sku}: create submitted — waiting for Amazon ASIN.`);
+        setCreateDraft(null);
+      } else {
+        setError(errText(result.message || result.error || 'Create submit failed'));
+      }
+      await load();
+    } catch (e) {
+      setError(errText(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function markNotOnAmazon(sku: string) {
+    if (!window.confirm(`Mark SKU ${sku} as Not on Amazon — sell on other channels?`)) return;
+    setBusy(true);
+    setError('');
+    try {
+      await amazonListCall(accessToken, { action: 'mark_not_on_amazon', sku });
+      setFlash(`${sku}: marked Not on Amazon.`);
+      await load();
+    } catch (e) {
+      setError(errText(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function retry(sku: string) {
     setBusy(true);
     setError('');
@@ -359,6 +541,8 @@ export function AmazonPage({ client, accessToken, money: moneyFmt }: Props) {
         setError(`${sku}: ${String(prep.needs_review_reason || prep.last_error || prep.message || 'prepare failed')}`);
       } else if (prep.status === 'needs_review') {
         setFlash(`${sku}: needs review — ${String(prep.needs_review_reason || 'see details')}`);
+      } else if (prep.status === 'not_on_amazon') {
+        setFlash(`${sku}: Not on Amazon — ${String(prep.needs_review_reason || 'sell on other channels')}`);
       } else {
         setFlash(`Retried prepare for ${sku} → ${String(prep.status || 'ok')}.`);
       }
@@ -515,14 +699,23 @@ export function AmazonPage({ client, accessToken, money: moneyFmt }: Props) {
                         ))}
                       </div>
                     )}
-                    {(r.status === 'needs_review' || isRestrictionReview(r.needs_review_reason)) && (
+                    {(r.status === 'needs_review' ||
+                      r.status === 'not_on_amazon' ||
+                      isRestrictionReview(r.needs_review_reason) ||
+                      isNoAsinCreate(r.needs_review_reason)) && (
                       <div className="amazon-review-banner" role="status">
                         <strong>
-                          {/approval/i.test(r.needs_review_reason || '')
-                            ? 'Approval needed in Seller Central'
-                            : /not eligible|restriction/i.test(r.needs_review_reason || '')
-                              ? 'Listing restricted'
-                              : 'Needs review'}
+                          {r.status === 'not_on_amazon' || /Not on Amazon/i.test(r.needs_review_reason || '')
+                            ? 'Not on Amazon — sell elsewhere'
+                            : /GS1|brand records/i.test(r.needs_review_reason || '')
+                              ? 'Create blocked (GS1 / brand)'
+                              : /approval/i.test(r.needs_review_reason || '')
+                                ? 'Approval needed in Seller Central'
+                                : /not eligible|restriction/i.test(r.needs_review_reason || '')
+                                  ? 'Listing restricted'
+                                  : /No ASIN|create/i.test(r.needs_review_reason || '')
+                                    ? 'No catalog match'
+                                    : 'Needs review'}
                         </strong>
                         {r.needs_review_reason ? <span>{r.needs_review_reason}</span> : null}
                       </div>
@@ -630,9 +823,19 @@ export function AmazonPage({ client, accessToken, money: moneyFmt }: Props) {
                           List one
                         </button>
                       )}
+                      {!r.asin && r.status !== 'not_on_amazon' && r.status !== 'live' && r.status !== 'sold' && (
+                        <button className="secondary" disabled={busy} onClick={() => void openCreateListing(r.sku)}>
+                          Create new listing
+                        </button>
+                      )}
                       {(r.status === 'error' || r.status === 'needs_review' || r.status === 'queued') && (
                         <button className="secondary" disabled={busy} onClick={() => void retry(r.sku)}>
                           Retry / prepare
+                        </button>
+                      )}
+                      {!r.asin && r.status !== 'not_on_amazon' && r.status !== 'live' && (
+                        <button className="text-button" disabled={busy} onClick={() => void markNotOnAmazon(r.sku)}>
+                          Not on Amazon
                         </button>
                       )}
                       <button className="text-button danger" disabled={busy} onClick={() => void remove(r.sku)}>
@@ -646,6 +849,102 @@ export function AmazonPage({ client, accessToken, money: moneyFmt }: Props) {
           </div>
         )}
       </section>
+
+      {createDraft && (
+        <div className="modal-backdrop">
+          <form
+            className="panel modal"
+            style={{ maxWidth: 640 }}
+            onSubmit={(e) => {
+              e.preventDefault();
+              void runCreatePreview();
+            }}
+          >
+            <h2>Create new Amazon listing — SKU {createDraft.sku}</h2>
+            <p className="hint">
+              Real brand + real UPC only. Never Generic. Main image must be a real product photo (no AI). Preview runs
+              VALIDATION_PREVIEW first; live submit only when clean.
+            </p>
+            <label>
+              Brand
+              <input
+                required
+                value={createDraft.brand}
+                onChange={(e) => setCreateDraft({ ...createDraft, brand: e.target.value, previewOk: null })}
+              />
+            </label>
+            <label>
+              Title
+              <input
+                required
+                value={createDraft.title}
+                onChange={(e) => setCreateDraft({ ...createDraft, title: e.target.value, previewOk: null })}
+              />
+            </label>
+            <label>
+              Bullets (one per line)
+              <textarea
+                rows={5}
+                value={createDraft.bullets}
+                onChange={(e) => setCreateDraft({ ...createDraft, bullets: e.target.value, previewOk: null })}
+              />
+            </label>
+            <label>
+              Description
+              <textarea
+                rows={4}
+                value={createDraft.description}
+                onChange={(e) => setCreateDraft({ ...createDraft, description: e.target.value, previewOk: null })}
+              />
+            </label>
+            <label>
+              Price ($)
+              <input
+                type="number"
+                step="0.01"
+                min="5"
+                value={createDraft.price}
+                onChange={(e) => setCreateDraft({ ...createDraft, price: e.target.value, previewOk: null })}
+              />
+            </label>
+            <label>
+              Product type
+              <input
+                value={createDraft.productType}
+                onChange={(e) => setCreateDraft({ ...createDraft, productType: e.target.value, previewOk: null })}
+              />
+            </label>
+            <label>
+              Main image media_location (Amazon-hosted URL only — leave blank for preview)
+              <input
+                placeholder="https://m.media-amazon.com/… (real photo only)"
+                value={createDraft.mainImage}
+                onChange={(e) => setCreateDraft({ ...createDraft, mainImage: e.target.value })}
+              />
+            </label>
+            {createDraft.previewMsg && (
+              <p className={createDraft.previewOk === false ? 'alert' : 'hint'} role="status">
+                {createDraft.previewMsg}
+              </p>
+            )}
+            <div className="actions">
+              <button type="submit" disabled={busy}>
+                Run VALIDATION_PREVIEW
+              </button>
+              <button
+                type="button"
+                disabled={busy || !createDraft.previewOk}
+                onClick={() => void submitCreateLive()}
+              >
+                Submit live create
+              </button>
+              <button type="button" className="secondary" onClick={() => setCreateDraft(null)}>
+                Cancel
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </>
   );
 }
