@@ -589,7 +589,7 @@ async function strictCatalogPhoto(storeId, unit, aspects, imageUrls, hint) {
   });
 }
 
-async function photoUrls(storeId, sku) {
+export async function photoUrls(storeId, sku) {
   const sb = serviceClient();
   const { data } = await sb
     .from("photos")

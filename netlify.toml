@@ -80,6 +80,13 @@
 [functions."ebay-sync-now-background"]
   timeout = 900
 
+# Listing manager paced bulk publish.
+[functions."listing-manager-background"]
+  timeout = 900
+
+[functions."listing-manager"]
+  timeout = 60
+
 # Read-only ikonikdeals2026 listing audit (ActiveList + Shippo rates + UPC retail).
 [functions."ebay-listing-audit-background"]
   timeout = 900

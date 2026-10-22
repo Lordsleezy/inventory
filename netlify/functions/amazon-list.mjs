@@ -14,6 +14,11 @@ import {
   syncAmazonOfferForFloorSku,
   STORE_DEFAULT,
 } from "../lib/amazon.mjs";
+import {
+  createAmazonCatalogListing,
+  markAmazonNotOnAmazon,
+  buildStringLightAttributes,
+} from "../lib/amazon-create.mjs";
 
 const STORE = STORE_DEFAULT;
 
@@ -143,6 +148,71 @@ async function handleStaff(event) {
     if (!sku) return json(400, { ok: false, error: "sku_required" });
     const result = await syncAmazonOfferForFloorSku(storeId, sku);
     return json(200, { ok: true, ...result });
+  }
+
+  /** Prefill + VALIDATION_PREVIEW for creating a new catalog product (no ASIN). */
+  if (action === "create_preview" || action === "create_prefill") {
+    if (!sku) return json(400, { ok: false, error: "sku_required" });
+    const { data: unit } = await sb.from("units").select("*").eq("store_id", storeId).eq("sku", sku).maybeSingle();
+    if (!unit) return json(404, { ok: false, error: "unknown_sku" });
+    let prefill = null;
+    try {
+      prefill = buildStringLightAttributes(unit, { listCents: body.price_cents || null });
+    } catch (e) {
+      return json(400, { ok: false, error: e instanceof Error ? e.message : String(e) });
+    }
+    if (action === "create_prefill") {
+      return json(200, { ok: true, sku, prefill });
+    }
+    const preview = await createAmazonCatalogListing(storeId, sku, {
+      mode: "VALIDATION_PREVIEW",
+      overrides: {
+        price_cents: body.price_cents || null,
+        attributes: body.attributes || null,
+        main_image_media_location: body.main_image_media_location || null,
+        product_type: body.product_type || null,
+      },
+      productType: body.product_type || prefill.productType,
+    });
+    return json(200, { ok: true, sku, prefill, preview });
+  }
+
+  /** Live create — only after clean preview + confirmLive. */
+  if (action === "create_submit") {
+    if (!sku) return json(400, { ok: false, error: "sku_required" });
+    if (!body.confirm_live) return json(400, { ok: false, error: "confirm_live_required" });
+    const result = await createAmazonCatalogListing(storeId, sku, {
+      mode: "LIVE",
+      confirmLive: true,
+      overrides: {
+        price_cents: body.price_cents || null,
+        attributes: body.attributes || null,
+        main_image_media_location: body.main_image_media_location || null,
+        product_type: body.product_type || null,
+      },
+      productType: body.product_type || null,
+    });
+    if (result.ok) {
+      await sb
+        .from("amazon_list_items")
+        .update({
+          status: "listing",
+          listing_sku: result.sellerSku,
+          offer_sku: result.sellerSku,
+          last_error: null,
+          needs_review_reason: "Create submitted — wait for Amazon catalog ASIN assignment",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("store_id", storeId)
+        .eq("sku", sku);
+    }
+    return json(result.ok ? 200 : 400, result);
+  }
+
+  if (action === "mark_not_on_amazon") {
+    if (!sku) return json(400, { ok: false, error: "sku_required" });
+    const result = await markAmazonNotOnAmazon(storeId, sku, body.reason || null);
+    return json(200, result);
   }
 
   return json(400, { ok: false, error: "unknown_action", action });
