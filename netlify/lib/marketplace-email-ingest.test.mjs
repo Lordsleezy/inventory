@@ -39,6 +39,9 @@ function mockSb() {
           ctx.filters[k] = v;
           return builder;
         },
+        in() {
+          return builder;
+        },
         not() {
           return builder;
         },
