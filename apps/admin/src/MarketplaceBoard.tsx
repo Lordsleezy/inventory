@@ -249,8 +249,8 @@ export function MarketplaceBoard({ channel, accessToken, money }: Props) {
       setNotListed(body.not_listed || []);
       setConnected(body.connected !== false);
       setConnectMessage(body.connect_message || '');
-      const notes = [...(body.warnings || [])];
-      if (body.message && body.connected !== false && !notes.includes(body.message)) notes.push(body.message);
+      const notes = body.connected === false ? [] : [...(body.warnings || [])];
+      if (body.connected !== false && body.message && !notes.includes(body.message)) notes.push(body.message);
       setWarnings(notes.filter(Boolean));
       setAccounts(body.accounts || []);
       setLastSynced(body.last_synced?.at || null);
