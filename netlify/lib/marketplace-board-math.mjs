@@ -89,12 +89,16 @@ export function aggregateChannelStats(rows, { insertionCents = 0 } = {}) {
   let ship = 0;
   let profit = 0;
   let voided = 0;
+  let voidedShip = 0;
   for (const row of rows || []) {
     const isVoid = row.voided_at != null && row.voided_at !== "";
     const shipCost = Number(row.ship_cost_cents) || 0;
     if (!isVoid || shipCost > 0) ship += shipCost;
     if (isVoid) {
       voided += 1;
+      // Same as portal_channel_report: voided sales drop out of gross/fees, but
+      // labels already bought still reduce profit.
+      if (shipCost > 0) voidedShip += shipCost;
       continue;
     }
     orders += 1;
@@ -109,7 +113,7 @@ export function aggregateChannelStats(rows, { insertionCents = 0 } = {}) {
     fee_cents: fees,
     fee_pct: feePct,
     ship_cents: ship,
-    profit_cents: profit,
+    profit_cents: profit - voidedShip,
     voided_count: voided,
     insertion_cents: Math.max(0, Math.round(Number(insertionCents) || 0)),
   };

@@ -47,7 +47,7 @@ test("quarters include the current one and past quarters with data, newest first
   assert.deepEqual(list.map((q) => q.id), ["2026-Q4", "2026-Q3", "2026-Q2", "2025-Q1"]);
 });
 
-test("stats match the channel report: voids leave gross, fees stay out, labels remain", () => {
+test("stats match the channel report: voids leave gross/fees, labels still cut profit", () => {
   const stats = aggregateChannelStats(
     [
       {
@@ -73,7 +73,8 @@ test("stats match the channel report: voids leave gross, fees stay out, labels r
   assert.equal(stats.gross_cents, 2999);
   assert.equal(stats.fee_cents, 480);
   assert.equal(stats.ship_cents, 1310);
-  assert.equal(stats.profit_cents, 1109);
+  // Open profit 1109 − voided label 800 (same as portal_channel_report).
+  assert.equal(stats.profit_cents, 309);
   assert.equal(stats.voided_count, 1);
   assert.equal(stats.insertion_cents, 2500);
   assert.equal(stats.fee_pct, 16);
