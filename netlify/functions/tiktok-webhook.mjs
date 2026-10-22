@@ -52,15 +52,15 @@ async function handle(event) {
   }
 
   const raw = typeof event.body === "string" ? event.body : JSON.stringify(event.body || {});
-  const sig =
-    event.headers?.["authorization"] ||
-    event.headers?.Authorization ||
+  const sig = String(
     event.headers?.["x-tts-signature"] ||
     event.headers?.["X-Tts-Signature"] ||
-    "";
-  // Soft-verify: if TikTok sends a signature header, check it; otherwise proceed when secret is set
-  // but log — Partner Center signing variants differ by region.
-  if (sig && /^[a-f0-9]{32,}$/i.test(String(sig).replace(/^Bearer\s+/i, "")) && !verifySignature(raw, String(sig).replace(/^Bearer\s+/i, ""))) {
+    event.headers?.["authorization"] ||
+    event.headers?.Authorization ||
+    "",
+  ).replace(/^Bearer\s+/i, "").trim();
+  // Unsigned posts must not create orders. Partner Center always signs with the app secret.
+  if (!verifySignature(raw, sig)) {
     return json(401, { ok: false, error: "invalid_signature" });
   }
 
