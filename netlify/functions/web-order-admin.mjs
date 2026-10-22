@@ -137,14 +137,22 @@ async function handle(event) {
           .update({ state: "available", updated_at: now })
           .eq("store_id", storeId)
           .eq("sku", sale.sku);
+        await sb
+          .from("sku_ledger")
+          .update({ fate: "issued" })
+          .eq("store_id", storeId)
+          .eq("sku", sale.sku)
+          .eq("fate", "sold");
         saleVoided = true;
       }
     }
     await sb.from("web_order_emails").delete().eq("order_id", id);
+    // Keep channel_orders as a tombstone. Deleting them lets marketplace sync
+    // (eBay/Amazon/TikTok) re-ingest the same order and re-sell the unit.
     if (order.order_no && order.channel) {
       await sb
         .from("channel_orders")
-        .delete()
+        .update({ sale_id: null })
         .eq("store_id", storeId)
         .eq("provider", order.channel)
         .eq("order_id", order.order_no);

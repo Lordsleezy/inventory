@@ -1185,6 +1185,29 @@ export async function ingestEbayOrder(storeId, order) {
     .eq("payment_id", `ebay:${orderId}`)
     .maybeSingle();
   if (paidDup.data) return { skipped: true, sku, orderId, reason: "web_order_exists" };
+  // Tombstone / previously voided Floor sale for this eBay order — do not re-sell.
+  const { data: priorSale } = await sb
+    .from("sales")
+    .select("id,voided_at")
+    .eq("store_id", storeId)
+    .eq("payment_id", `ebay:${orderId}`)
+    .order("id", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (priorSale?.voided_at) {
+    await sb.from("channel_orders").upsert(
+      {
+        store_id: storeId,
+        provider: "ebay",
+        order_id: orderId,
+        sku,
+        sale_id: null,
+        item_cents: ebayOrderAmounts(order).itemCents || orderCents(order) || 0,
+      },
+      { onConflict: "store_id,provider,order_id" },
+    );
+    return { skipped: true, sku, orderId, reason: "prior_sale_voided" };
+  }
 
   const amounts = ebayOrderAmounts(order);
   const itemCents = amounts.itemCents || orderCents(order) || 0;
