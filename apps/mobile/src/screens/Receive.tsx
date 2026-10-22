@@ -42,6 +42,7 @@ export function ReceiveScreen() {
   const [heightIn, setHeightIn] = useState("");
   const [weightLb, setWeightLb] = useState("");
   const [unbranded, setUnbranded] = useState(false);
+  const [noUpc, setNoUpc] = useState(false);
   const [error, setError] = useState("");
   const [skuHint, setSkuHint] = useState("");
   const [skuStatus, setSkuStatus] = useState("empty");
@@ -122,20 +123,7 @@ export function ReceiveScreen() {
       }
     }
     const brandValue = unbranded ? "Unbranded" : brand.trim();
-    if (money.ask != null) {
-      const missing: string[] = [];
-      if (!brandValue || /^(generic|unknown|n\/?a|does not apply)$/i.test(brandValue)) missing.push("brand");
-      if (!title.trim()) missing.push("title");
-      if (!category.trim()) missing.push("category");
-      if (!condition) missing.push("condition");
-      if (!upc.trim()) missing.push("UPC");
-      const dims = [lengthIn, widthIn, heightIn, weightLb].map((v) => Number(v));
-      if (dims.some((n) => !(n > 0))) missing.push("package size");
-      if (missing.length) {
-        setError(`Fill ${missing.join(", ")} before saving a price, or clear the price.`);
-        return;
-      }
-    }
+    // Never block save/price for missing listing fields — Needs attention + Push enforce them.
 
     setSaving(true);
     try {
@@ -154,7 +142,7 @@ export function ReceiveScreen() {
         p_cost_cents: manager ? money.cost ?? null : null,
         p_floor_cents: manager ? money.floor ?? null : null,
         p_notes: notes.trim() || null,
-        p_upc: upc.trim() || null,
+        p_upc: noUpc ? "Does not apply" : upc.trim() || null,
         p_length: Number(lengthIn) > 0 ? Number(lengthIn) : null,
         p_width: Number(widthIn) > 0 ? Number(widthIn) : null,
         p_height: Number(heightIn) > 0 ? Number(heightIn) : null,
@@ -180,6 +168,8 @@ export function ReceiveScreen() {
       setCost("");
       setFloor("");
       setMsrp("");
+      setUpc("");
+      setNoUpc(false);
     } catch (err) {
       setError(friendlyRpc(err));
     } finally {
@@ -228,7 +218,28 @@ export function ReceiveScreen() {
       </label>
       <label className="block py-2">
         <Label>UPC</Label>
-        <input className="field mt-1" value={upc} inputMode="numeric" onChange={(e) => setUpc(e.target.value.replace(/\D/g, "").slice(0, 14))} />
+        <input
+          className="field mt-1"
+          value={noUpc ? "Does not apply" : upc}
+          disabled={noUpc}
+          inputMode="numeric"
+          onChange={(e) => {
+            setNoUpc(false);
+            setUpc(e.target.value.replace(/\D/g, "").slice(0, 14));
+          }}
+        />
+      </label>
+      <label className="block py-2">
+        <input
+          type="checkbox"
+          checked={noUpc}
+          onChange={(e) => {
+            const on = e.target.checked;
+            setNoUpc(on);
+            if (on) setUpc("");
+          }}
+        />{" "}
+        No UPC / doesn’t have a barcode — marketplaces get “Does not apply”
       </label>
 
       <label className="block py-2">
