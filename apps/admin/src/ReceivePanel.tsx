@@ -52,17 +52,18 @@ type Lookup = {
 };
 
   type Form = {
-  brand: string; unbranded: boolean; model: string; title: string; category: string; description: string;
+  brand: string; unbranded: boolean; noUpc: boolean; model: string; title: string; category: string; description: string;
   condition: string; conditionNote: string; testStatus: string; ask: string; cost: string;
   notes: string; upc: string; quantity: string; shippable: string;
   length: string; width: string; height: string; weight: string;
   costEstimate: boolean;
 };
 const blank: Form = {
-  brand: '', unbranded: false, model: '', title: '', category: '', description: '', condition: '', conditionNote: '', testStatus: '',
+  brand: '', unbranded: false, noUpc: false, model: '', title: '', category: '', description: '', condition: '', conditionNote: '', testStatus: '',
   ask: '', cost: '', notes: '', upc: '', quantity: '1', shippable: 'auto',
   length: '', width: '', height: '', weight: '', costEstimate: false,
 };
+const UPC_NOT_APPLICABLE = 'Does not apply';
 
 type Scan = {
   id: string;
@@ -492,13 +493,17 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
     if (!value) return false;
     return !/^(generic|unknown|n\/?a|does not apply)$/i.test(value);
   }
+  function upcReady() {
+    if (form.noUpc) return true;
+    return Boolean((form.upc.trim() || current?.upc || '').trim());
+  }
   function missingFor(p: Parsed): string[] {
     const out: string[] = [];
     if (!brandReady()) out.push('brand');
     if (!form.title.trim()) out.push('title');
     if (!form.category.trim()) out.push('category');
     if (!form.condition) out.push('condition');
-    if (!(form.upc.trim() || current?.upc || '').trim()) out.push('UPC');
+    if (!upcReady()) out.push('UPC');
     if (!pos(p.ask)) out.push('price');
     if (!form.description.trim()) out.push('description/features');
     if (p.dims.some(d => !pos(d))) out.push('package L/W/H/weight');
@@ -513,7 +518,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
     if (!form.title.trim()) out.push('title');
     if (!form.category.trim()) out.push('category');
     if (!form.condition) out.push('condition');
-    if (!(form.upc.trim() || current?.upc || '').trim()) out.push('UPC');
+    if (!upcReady()) out.push('UPC');
     if (!pos(typeof a === 'number' ? a : null)) out.push('price');
     if (!form.description.trim()) out.push('description/features');
     if (dims.some(d => !pos(d))) out.push('package L/W/H/weight');
@@ -547,14 +552,14 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
       if (d && d.count > 0) { setDups(d); setError(`You already have ${d.count} of these in stock. Tap "Add another unit" to confirm this is a new one.`); return; }
     }
     const gaps = missingFor(parsed);
-    // Never block inventory save. Incomplete (or priced-but-incomplete) units
-    // receive without an ask and land in Needs attention until fields are filled.
+    // Never block save or price for missing listing fields. Incomplete units keep
+    // their ask (if any) and land in Needs attention until Push/list requirements
+    // are filled. Marketplace push enforces channel-specific fields.
     if (gaps.length === 0) { setDialog('ready'); return; }
-    const toSave: Parsed = pos(parsed.ask) ? { ...parsed, ask: null } : parsed;
-    if (pos(parsed.ask) && gaps.length) {
-      setWarning(`Saving into Needs attention without a price. Still needed: ${gaps.join(', ')}.`);
+    if (gaps.length) {
+      setWarning(`Saving now. Still needed for listing (Needs attention): ${gaps.join(', ')}.`);
     }
-    await receive(toSave, null);
+    await receive(parsed, null);
   }
 
   async function receive(parsed: Parsed, hold: { reason: string; note: string } | null) {
@@ -578,10 +583,10 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
         p_description: form.description.trim() || null,
         p_condition: form.condition || null,
         p_test_status: form.testStatus || null,
-        p_ask_cents: hold ? null : parsed.ask, // held / incomplete units never get an ask
+        p_ask_cents: hold ? null : parsed.ask, // held units never get an ask; priced incomplete keeps ask
         p_cost_cents: parsed.cost ?? floor.costCents,
         p_notes: notes || null,
-        p_upc: form.upc.trim() || current?.upc || null,
+        p_upc: form.noUpc ? null : (form.upc.trim() || current?.upc || null),
         p_shippable: form.shippable || 'auto',
         p_length: parsed.dims[0],
         p_width: parsed.dims[1],
@@ -615,9 +620,11 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
 
       // Remember product data for "Add another unit".
       const seed: Partial<Form> = {
-        brand: form.unbranded ? 'Unbranded' : form.brand, unbranded: form.unbranded, model: form.model, title: form.title, category: form.category, description: form.description,
+        brand: form.unbranded ? 'Unbranded' : form.brand, unbranded: form.unbranded, noUpc: form.noUpc,
+        model: form.model, title: form.title, category: form.category, description: form.description,
         ask: hold ? '' : form.ask, testStatus: '', shippable: form.shippable,
-        length: form.length, width: form.width, height: form.height, weight: form.weight, upc: form.upc || current?.upc || '',
+        length: form.length, width: form.width, height: form.height, weight: form.weight,
+        upc: form.noUpc ? '' : (form.upc || current?.upc || ''),
       };
       if (hold) delete seed.ask;
       setLast({ upc: (form.upc || current?.upc || '').trim(), result, seed });
@@ -662,8 +669,12 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
         put('cost_source', floor.costLabel);
       }
       if (A?.price_pending) put('amazon_price_pending', true);
-    } else if (manual && form.upc.trim()) {
+    } else if (manual && form.upc.trim() && !form.noUpc) {
       put('upc', form.upc.trim());
+    }
+    if (form.noUpc) {
+      put('ebay_aspects', { UPC: UPC_NOT_APPLICABLE });
+      put('upc', UPC_NOT_APPLICABLE);
     }
     if (hold) { put('hold_reason', hold.reason); put('hold_note', hold.note.trim()); }
     const hide = Boolean(hold) || forceHide;
@@ -671,7 +682,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
 
     const patch = {
       specs, msrp: msrp, show: hide ? false : null,
-      brand: form.brand.trim(), model: form.model.trim(), title: form.title.trim(), description: form.description.trim(),
+      brand: form.unbranded ? 'Unbranded' : form.brand.trim(), model: form.model.trim(), title: form.title.trim(), description: form.description.trim(),
     };
     let failed = 0;
     for (const sku of skus) { if (!(await enrichOne(sku, patch))) failed++; }
@@ -755,7 +766,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
     setFiles(prev => [...prev, ...Array.from(list)]);
   }
 
-  const picker = (labelText: string, key: Exclude<keyof Form, 'costEstimate' | 'unbranded'>, values: string[]) => (
+  const picker = (labelText: string, key: Exclude<keyof Form, 'costEstimate' | 'unbranded' | 'noUpc'>, values: string[]) => (
     <label>{labelText}<select value={form[key]} onChange={e => update(key, e.target.value)}>
       <option value="">—</option>{values.map(x => <option key={x} value={x}>{x}</option>)}
     </select></label>
@@ -872,7 +883,28 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
       </div>}
 
       <div className="unit-edit-grid">
-        {manual && <label className={liveMissing.includes('UPC') ? 'receive-need' : undefined}>UPC{liveMissing.includes('UPC') ? ' (needed to list)' : ''}<input value={form.upc} onChange={e => { update('upc', e.target.value); setDups(null); setDupAck(false); }} inputMode={scannerInputMode()} autoComplete="off" placeholder="optional — blank is fine to receive" /></label>}
+        {manual && <label className={liveMissing.includes('UPC') ? 'receive-need' : undefined}>UPC{liveMissing.includes('UPC') ? ' (needed to list)' : ''}
+          <input
+            value={form.noUpc ? UPC_NOT_APPLICABLE : form.upc}
+            disabled={form.noUpc}
+            onChange={e => {
+              const v = e.target.value;
+              setForm(p => ({ ...p, upc: v, noUpc: false }));
+              setDups(null); setDupAck(false);
+            }}
+            inputMode={scannerInputMode()}
+            autoComplete="off"
+            placeholder="optional — or mark No UPC below"
+          />
+        </label>}
+        {manual && <label className="mboard-inline">
+          <input type="checkbox" checked={form.noUpc} onChange={e => {
+            const on = e.target.checked;
+            setForm(p => ({ ...p, noUpc: on, upc: on ? '' : p.upc }));
+            setDups(null); setDupAck(false);
+          }} />
+          No UPC / doesn’t have a barcode — marketplaces get “Does not apply”
+        </label>}
         {manual && <label>Quantity<input type="number" min="1" max="100" step="1" value={form.quantity} onChange={e => update('quantity', e.target.value)} required /></label>}
         <label className={liveMissing.includes('brand') ? 'receive-need' : undefined}>Brand{liveMissing.includes('brand') ? ' (needed to list)' : ''}<input value={form.unbranded ? 'Unbranded' : form.brand} disabled={form.unbranded} onChange={e => update('brand', e.target.value)} /></label>
         <label className="mboard-inline">
@@ -896,7 +928,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
         </div>
         {needNoteForScratch && <label className="unit-edit-wide">What is scratched or dented? (required)<textarea rows={2} value={form.conditionNote} onChange={e => update('conditionNote', e.target.value)} /></label>}
 
-        <label className={liveMissing.includes('price') ? 'receive-need' : undefined}>Price{liveMissing.includes('price') ? ' (needed to list — leave blank to receive now)' : (retail && !askTouched.current ? ' (suggested — edit if needed)' : '')}<input inputMode="decimal" placeholder="24.99" value={form.ask} onChange={e => update('ask', e.target.value)} /></label>
+        <label className={liveMissing.includes('price') ? 'receive-need' : undefined}>Price{liveMissing.includes('price') ? ' (needed to list)' : (retail && !askTouched.current ? ' (suggested — edit if needed)' : '')}<input inputMode="decimal" placeholder="24.99" value={form.ask} onChange={e => update('ask', e.target.value)} /></label>
         <label>Cost{form.costEstimate ? ' (estimate — edit if you know it)' : ' (optional)'}
           <input inputMode="decimal" placeholder="9.00" value={form.cost} onChange={e => update('cost', e.target.value)} />
         </label>
@@ -943,7 +975,9 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
       </div>
 
       <p className="hint receive-check">
-        {liveMissing.length === 0 ? 'Complete — ready to list.' : `Missing for listing: ${liveMissing.join(', ')}. You can still receive; these land in Needs attention.`}
+        {liveMissing.length === 0
+          ? 'Complete — ready to list.'
+          : `Missing for listing: ${liveMissing.join(', ')}. You can still receive and set a price; incomplete units land in Needs attention. Push to a marketplace will require what that channel needs.`}
       </p>
       <div className="actions">
         <button disabled={busy || !options?.next_sku || (dups !== null && dups.count > 0 && !dupAck)}>{busy ? 'Receiving…' : 'Finish & receive'}</button>
