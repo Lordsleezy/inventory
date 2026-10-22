@@ -71,13 +71,14 @@ test("stats match the channel report: voids leave gross/fees, labels still cut p
   );
   assert.equal(stats.orders, 1);
   assert.equal(stats.gross_cents, 2999);
-  assert.equal(stats.fee_cents, 480);
+  // Sale fees 480 + insertion 2500 (same as Reports ebay channel fees).
+  assert.equal(stats.fee_cents, 2980);
   assert.equal(stats.ship_cents, 1310);
-  // Open profit 1109 − voided label 800 (same as portal_channel_report).
-  assert.equal(stats.profit_cents, 309);
+  // Open profit 1109 − voided label 800 − insertion 2500.
+  assert.equal(stats.profit_cents, -2191);
   assert.equal(stats.voided_count, 1);
   assert.equal(stats.insertion_cents, 2500);
-  assert.equal(stats.fee_pct, 16);
+  assert.equal(stats.fee_pct, 99.4);
 });
 
 test("not listed keeps priced units with a real photo and greys Amazon blocks", () => {

@@ -106,16 +106,19 @@ export function aggregateChannelStats(rows, { insertionCents = 0 } = {}) {
     fees += Number(row.channel_fee_cents) || 0;
     profit += Number(row.profit_cents) || 0;
   }
-  const feePct = gross > 0 ? Math.round((fees / gross) * 1000) / 10 : 0;
+  const insertion = Math.max(0, Math.round(Number(insertionCents) || 0));
+  const feeTotal = fees + insertion;
+  const feePct = gross > 0 ? Math.round((feeTotal / gross) * 1000) / 10 : 0;
   return {
     orders,
     gross_cents: gross,
-    fee_cents: fees,
+    fee_cents: feeTotal,
     fee_pct: feePct,
     ship_cents: ship,
-    profit_cents: profit - voidedShip,
+    // Match Reports: voided labels + eBay insertion/subscription cut profit.
+    profit_cents: profit - voidedShip - insertion,
     voided_count: voided,
-    insertion_cents: Math.max(0, Math.round(Number(insertionCents) || 0)),
+    insertion_cents: insertion,
   };
 }
 
