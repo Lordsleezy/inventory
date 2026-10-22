@@ -1,5 +1,6 @@
 ﻿import { useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { errText } from './errText';
 
 type Props = {
   client: SupabaseClient;
@@ -33,7 +34,7 @@ export function AssociateSettings({ client, displayName }: Props) {
       setConfirm('');
       setOk('Password updated.');
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errText(err));
     } finally {
       setBusy(false);
     }

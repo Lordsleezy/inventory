@@ -1,5 +1,6 @@
 ﻿import { useCallback, useEffect, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { errText } from './errText';
 
 type Line = {
   id: number; sku: string; title: string; condition: string | null; qty: number;
@@ -196,10 +197,7 @@ export function ReceiptsPage({ client, money, stamp }: {
       setTotal(payload?.total || 0);
       setRows(payload?.rows || []);
     } catch (e) {
-      const msg = e && typeof e === 'object' && 'message' in e
-        ? String((e as { message: unknown }).message)
-        : e instanceof Error ? e.message : String(e);
-      setError(msg || 'Could not load receipts.');
+      setError(errText(e) || 'Could not load receipts.');
     }
     finally { setBusy(false); }
   }, [client]);

@@ -1,6 +1,7 @@
 ﻿import { useEffect, useMemo, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { OnlineChannel, OnlineTab } from './navigation';
+import { errText } from './errText';
 
 type Row = {
   sku: string;
@@ -165,7 +166,7 @@ export function OnlinePage({
       setChannelCounts((countsRes.data || {}) as ChannelCounts);
       await loadReport(period);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errText(e));
     } finally {
       if (!opts?.quiet) setLoading(false);
     }
@@ -175,7 +176,7 @@ export function OnlinePage({
 
   useEffect(() => {
     if (tab !== 'reports') return;
-    void loadReport(period).catch(e => setError(e instanceof Error ? e.message : String(e)));
+    void loadReport(period).catch(e => setError(errText(e)));
   }, [period, tab, client]);
 
   useEffect(() => {

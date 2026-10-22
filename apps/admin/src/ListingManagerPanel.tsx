@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { floorFunctionUrl } from './floorApi';
+import { errText } from './errText';
 
 type ListingRow = {
   channel: string;
@@ -131,7 +132,7 @@ export function ListingManagerPanel({ accessToken, money, channel: channelProp, 
         setMeta(`${total} listing(s) · ${accounts}`);
       } else setMeta(`${total} listing(s)`);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errText(e));
       setItems([]);
     } finally {
       setBusy(false);
@@ -169,7 +170,7 @@ export function ListingManagerPanel({ accessToken, money, channel: channelProp, 
       setEditBullets('');
       setEditImages(Array.isArray(detail.image_urls) ? detail.image_urls.join('\n') : '');
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errText(e));
     } finally {
       setBusy(false);
     }
@@ -209,7 +210,7 @@ export function ListingManagerPanel({ accessToken, money, channel: channelProp, 
       setEdit(null);
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errText(e));
     } finally {
       setBusy(false);
     }
@@ -237,7 +238,7 @@ export function ListingManagerPanel({ accessToken, money, channel: channelProp, 
       );
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errText(e));
     } finally {
       setBusy(false);
     }
@@ -259,7 +260,7 @@ export function ListingManagerPanel({ accessToken, money, channel: channelProp, 
       setNotice(body.url ? `Relisted — ${body.url}` : 'Relist submitted.');
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errText(e));
     } finally {
       setBusy(false);
     }
@@ -284,7 +285,7 @@ export function ListingManagerPanel({ accessToken, money, channel: channelProp, 
       });
       setEligible((body.items || []) as Eligible[]);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errText(e));
     } finally {
       setBusy(false);
     }
@@ -296,7 +297,7 @@ export function ListingManagerPanel({ accessToken, money, channel: channelProp, 
       const body = await lm(accessToken, { action: 'eligible', channel, query: eligibleQuery, limit: 40 });
       setEligible((body.items || []) as Eligible[]);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errText(e));
     } finally {
       setBusy(false);
     }
@@ -327,7 +328,7 @@ export function ListingManagerPanel({ accessToken, money, channel: channelProp, 
       });
       if (body.draft?.note) setNotice(String(body.draft.note));
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errText(e));
     } finally {
       setBusy(false);
     }
@@ -352,7 +353,7 @@ export function ListingManagerPanel({ accessToken, money, channel: channelProp, 
       setChannel('depop');
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errText(e));
     } finally {
       setBusy(false);
     }
@@ -393,7 +394,7 @@ export function ListingManagerPanel({ accessToken, money, channel: channelProp, 
         setError(String(body.error || body.message || 'Publish failed'));
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errText(e));
     } finally {
       setBusy(false);
     }
@@ -410,7 +411,7 @@ export function ListingManagerPanel({ accessToken, money, channel: channelProp, 
       setNotice(String(body.message || 'Bulk started'));
       setShowAdd(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errText(e));
     } finally {
       setBusy(false);
     }
@@ -425,7 +426,7 @@ export function ListingManagerPanel({ accessToken, money, channel: channelProp, 
       setLegacy((body.items || []) as { sku: string; listing_id: string; title: string }[]);
       setNotice(`${(body.items || []).length} legacy candidate(s) (Floor listed, not in Inventory API).`);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errText(e));
     } finally {
       setBusy(false);
     }
@@ -447,7 +448,7 @@ export function ListingManagerPanel({ accessToken, money, channel: channelProp, 
       await openMigrate();
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errText(e));
     } finally {
       setBusy(false);
     }
@@ -467,7 +468,7 @@ export function ListingManagerPanel({ accessToken, money, channel: channelProp, 
       await openMigrate();
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errText(e));
     } finally {
       setBusy(false);
     }

@@ -55,6 +55,8 @@ revoke all on table public.public_categories from public, anon, authenticated;
 grant select on table public.public_categories to anon, authenticated;
 
 -- Internal helpers. Callers are security-definer functions (owner) or service_role.
+-- Only ordinary functions (prokind = 'f'): pg_get_functiondef() errors on
+-- aggregates ("array_agg" is an aggregate function) and breaks fresh CI applies.
 do $$
 declare
   r record;
@@ -64,9 +66,10 @@ begin
     from pg_proc p
     join pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'public'
+      and p.prokind = 'f'
       and (
-        pg_get_functiondef(p.oid) ilike '%if auth.role() <> ''service_role'' then raise exception%'
-        or pg_get_functiondef(p.oid) ilike '%if auth.role() <> ''service_role'' then%raise exception%'
+        p.prosrc ilike '%if auth.role() <> ''service_role'' then raise exception%'
+        or p.prosrc ilike '%if auth.role() <> ''service_role'' then%raise exception%'
         or p.proname in (
           'steal_open_web_orders',
           'seed_store_settings',

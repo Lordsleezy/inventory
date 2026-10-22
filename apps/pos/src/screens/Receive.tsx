@@ -38,6 +38,7 @@ export function ReceiveScreen() {
   const [heightIn, setHeightIn] = useState("");
   const [weightLb, setWeightLb] = useState("");
   const [unbranded, setUnbranded] = useState(false);
+  const [noUpc, setNoUpc] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [categories, setCategories] = useState<string[]>([]);
@@ -70,20 +71,7 @@ export function ReceiveScreen() {
       const qtyN = Math.max(1, Math.min(9999, Math.round(Number(qty) || 1)));
       const askCents = parseMoneyToCents(ask);
       const brandValue = unbranded ? "Unbranded" : brand.trim();
-      if (askCents != null) {
-        const missing: string[] = [];
-        if (!brandValue || /^(generic|unknown|n\/?a|does not apply)$/i.test(brandValue)) missing.push("brand");
-        if (!(title.trim() || brandValue)) missing.push("title");
-        if (!category.trim()) missing.push("category");
-        if (!condition) missing.push("condition");
-        if (!upc.trim()) missing.push("UPC");
-        if ([lengthIn, widthIn, heightIn, weightLb].map(Number).some((n) => !(n > 0))) missing.push("package size");
-        if (missing.length) {
-          setError(`Fill ${missing.join(", ")} before saving a price, or clear the price.`);
-          setBusy(false);
-          return;
-        }
-      }
+      // Never block save/price for missing listing fields — Needs attention + Push enforce them.
       const { error: rpcErr } = await floorCloud().rpc("receive_unit", {
         p_sku: sku.trim(),
         p_brand: brandValue,
@@ -96,7 +84,7 @@ export function ReceiveScreen() {
         p_cost_cents: isAdmin ? parseMoneyToCents(cost) ?? null : null,
         p_floor_cents: isAdmin ? parseMoneyToCents(floor) ?? null : null,
         p_notes: notes || null,
-        p_upc: upc.trim() || null,
+        p_upc: noUpc ? "Does not apply" : upc.trim() || null,
         p_length: Number(lengthIn) > 0 ? Number(lengthIn) : null,
         p_width: Number(widthIn) > 0 ? Number(widthIn) : null,
         p_height: Number(heightIn) > 0 ? Number(heightIn) : null,
@@ -121,6 +109,8 @@ export function ReceiveScreen() {
         setCost("");
         setFloor("");
         setNotes("");
+        setUpc("");
+        setNoUpc(false);
         setQty("1");
       } else {
         navigate(`/inventory/${sku.trim()}`);
@@ -155,7 +145,27 @@ export function ReceiveScreen() {
       </label>
       <label>
         UPC
-        <input value={upc} inputMode="numeric" onChange={(e) => setUpc(e.target.value.replace(/\D/g, "").slice(0, 14))} />
+        <input
+          value={noUpc ? "Does not apply" : upc}
+          disabled={noUpc}
+          inputMode="numeric"
+          onChange={(e) => {
+            setNoUpc(false);
+            setUpc(e.target.value.replace(/\D/g, "").slice(0, 14));
+          }}
+        />
+      </label>
+      <label>
+        <input
+          type="checkbox"
+          checked={noUpc}
+          onChange={(e) => {
+            const on = e.target.checked;
+            setNoUpc(on);
+            if (on) setUpc("");
+          }}
+        />{" "}
+        No UPC / doesn’t have a barcode — marketplaces get “Does not apply”
       </label>
       <label>
         Model

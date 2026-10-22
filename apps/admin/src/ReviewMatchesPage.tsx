@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { errText } from './errText';
 
 type Review = {
   id: string; sku: string; unit_name: string; own_photo_path: string;
@@ -61,7 +62,7 @@ export function ReviewMatchesPage({ client, accessToken, embedded }: { client: S
       if (!response.ok) throw new Error(data.error || 'Review action failed');
       setReviews(current => current.filter(x => x.id !== id));
       setReload(n => n + 1);
-    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    } catch (e) { setError(errText(e)); }
     finally { setBusy(null); }
   }
 

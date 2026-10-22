@@ -6,6 +6,18 @@ test("authErrorMessage never prints [object Object]", () => {
   assert.equal(authErrorMessage({}), "Something went wrong");
   assert.equal(authErrorMessage({ foo: 1 }), '{"foo":1}');
   assert.equal(authErrorMessage("[object Object]"), "Something went wrong");
+  // Supabase-js often returns plain objects, not Error instances.
+  assert.match(
+    authErrorMessage({
+      code: "PGRST203",
+      message: "Could not choose the best candidate function between: public.portal_receive_unit(...)",
+    }),
+    /out of date|Refresh/i,
+  );
+  assert.match(
+    authErrorMessage({ code: "22023", message: "condition_required" }),
+    /condition|Needs attention/i,
+  );
 });
 
 test("authErrorMessage unwraps PostgREST unique failures into a SKU sentence", () => {

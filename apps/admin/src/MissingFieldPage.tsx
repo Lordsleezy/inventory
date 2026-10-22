@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { errText } from './errText';
 
 type Kind = 'photo' | 'price' | 'spec' | 'model' | 'description' | 'brand' | 'category' | 'upc' | 'condition' | 'specifics';
 type Row = {
@@ -55,8 +56,8 @@ const COPY: Record<Kind, { title: string; hint: string; empty: string }> = {
   },
   upc: {
     title: 'Missing UPC',
-    hint: 'Enter the 8–14 digit barcode. Blocks eBay and Amazon.',
-    empty: 'Every in-stock unit has a UPC.',
+    hint: 'Enter the 8–14 digit barcode, or mark Does not apply when the item has no barcode. Blocks eBay and Amazon until set.',
+    empty: 'Every in-stock unit has a UPC or Does not apply.',
   },
   condition: {
     title: 'Missing condition',
@@ -185,7 +186,7 @@ export function MissingFieldPage({ client, storeId, kind, money, stamp }: Props)
       setFlash(`Photo added for SKU ${sku}.`);
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errText(e));
     } finally {
       setBusySku(null);
     }
@@ -538,6 +539,31 @@ export function MissingFieldPage({ client, storeId, kind, money, stamp }: Props)
                       >
                         {busySku === r.sku ? 'Saving…' : 'Save'}
                       </button>
+                      {kind === 'upc' && (
+                        <button
+                          type="button"
+                          className="secondary"
+                          disabled={busySku === r.sku}
+                          onClick={() => {
+                            setTexts((p) => ({ ...p, [r.sku]: 'Does not apply' }));
+                            void (async () => {
+                              setBusySku(r.sku);
+                              setError('');
+                              setFlash(null);
+                              const { error: e } = await client.rpc('portal_set_unit_text', {
+                                p_sku: r.sku, p_field: 'upc', p_value: 'Does not apply',
+                              });
+                              setBusySku(null);
+                              if (e) { setError(errText(e)); return; }
+                              setTexts((p) => { const n = { ...p }; delete n[r.sku]; return n; });
+                              setFlash(`UPC marked Does not apply for SKU ${r.sku}.`);
+                              await load();
+                            })();
+                          }}
+                        >
+                          Does not apply
+                        </button>
+                      )}
                     </>
                   )}
                   {kind === 'specifics' && (r.missing_aspects || '').split(',').map((name) => name.trim()).filter(Boolean).map((name) => (

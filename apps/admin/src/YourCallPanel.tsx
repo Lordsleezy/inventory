@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { errText } from './errText';
 
 export type QueueRow = {
   id: string; sku: string; reason: string; detail: Record<string, unknown>;
@@ -35,7 +36,7 @@ export function YourCallPanel({ client, money, busy, run, embedded }: Props) {
       if (e) throw e;
       setQueue((data || []) as QueueRow[]);
       setError('');
-    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    } catch (e) { setError(errText(e)); }
   }, [client]);
 
   useEffect(() => { void loadQueue(); }, [loadQueue]);

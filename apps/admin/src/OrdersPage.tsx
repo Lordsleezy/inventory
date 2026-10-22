@@ -4,6 +4,7 @@ import { floorFunctionUrl } from './floorApi';
 import { CommissionOverrideControls, CommissionOverrideMark } from './CommissionOverride';
 import { type CommissionOverride, type OnlineCfg, type Rule } from './payouts';
 import { ReturnsPage } from './ReturnsPage';
+import { errText } from './errText';
 
 const CHANNEL_LABEL: Record<string, string> = {
   website: 'Website',
@@ -166,7 +167,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
       if (e) throw e;
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errText(err));
     } finally {
       setBusy(null);
     }
@@ -196,7 +197,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
       const body = await res.json().catch(() => ({}));
       if (!res.ok || body.ok === false) throw new Error(body.error || `Request failed (${res.status})`);
       await load();
-    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    } catch (e) { setError(errText(e)); }
     finally { setBusy(null); }
   }
   async function deleteOrder(o: WebOrder) {
@@ -218,7 +219,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
       const body = await res.json().catch(() => ({}));
       if (!res.ok || body.ok === false) throw new Error(body.error || `Request failed (${res.status})`);
       await load();
-    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    } catch (e) { setError(errText(e)); }
     finally { setBusy(null); }
   }
   async function matchSku(o: WebOrder) {
@@ -277,7 +278,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
       }
       if (status === 'not_as_listed') setError(`SKU ${o.sku} marked not as listed. The owner is alerted. Do not buy a label.`);
       await load();
-    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    } catch (e) { setError(errText(e)); }
     finally { setBusy(null); }
   }
   async function recordLabelCost(o: WebOrder) {

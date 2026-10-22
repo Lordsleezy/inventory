@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { floorFunctionUrl } from './floorApi';
+import { errText } from './errText';
 
 type TikTokStatus = {
   ok?: boolean;
@@ -69,14 +70,14 @@ export function TikTokShopPanel({ client, accessToken, money, connectionOnly = f
       setStatus(s);
       setError('');
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errText(e));
     }
   }, [accessToken]);
 
   useEffect(() => {
     void loadStatus();
     if (!connectionOnly) {
-      void loadQueue().catch((e) => setError(e instanceof Error ? e.message : String(e)));
+      void loadQueue().catch((e) => setError(errText(e)));
     }
   }, [loadStatus, loadQueue, connectionOnly]);
 
@@ -92,7 +93,7 @@ export function TikTokShopPanel({ client, accessToken, money, connectionOnly = f
       if (body.url) window.location.href = body.url;
       else throw new Error('No authorize URL returned');
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errText(e));
     } finally {
       setBusy(false);
     }
@@ -110,11 +111,11 @@ export function TikTokShopPanel({ client, accessToken, money, connectionOnly = f
       setNotice(`Queued ${data || 0} SKU(s). Preparing…`);
       await loadQueue();
       await tiktokCall(accessToken, { action: 'prepare', sku }).catch((err) => {
-        setError(err instanceof Error ? err.message : String(err));
+        setError(errText(err));
       });
       await loadQueue();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errText(e));
     } finally {
       setBusy(false);
     }
@@ -128,7 +129,7 @@ export function TikTokShopPanel({ client, accessToken, money, connectionOnly = f
       setNotice(result.ok ? `Listed SKU ${sku} on TikTok Shop.` : String(result.message || result.reason));
       await loadQueue();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errText(e));
       await loadQueue();
     } finally {
       setBusy(false);
@@ -143,7 +144,7 @@ export function TikTokShopPanel({ client, accessToken, money, connectionOnly = f
       setNotice(`Prepared SKU ${sku}.`);
       await loadQueue();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errText(e));
       await loadQueue();
     } finally {
       setBusy(false);
@@ -217,7 +218,7 @@ export function TikTokShopPanel({ client, accessToken, money, connectionOnly = f
                     await tiktokCall(accessToken, { action: 'sync_orders' });
                     setNotice('TikTok order sync finished.');
                   } catch (e) {
-                    setError(e instanceof Error ? e.message : String(e));
+                    setError(errText(e));
                   } finally {
                     setBusy(false);
                   }

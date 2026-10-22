@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { floorFunctionUrl } from './floorApi';
+import { errText } from './errText';
 
 export type BoardChannel = 'ebay' | 'amazon' | 'tiktok';
 type Tab = 'listed' | 'not_listed' | 'sold';
@@ -259,7 +260,7 @@ export function MarketplaceBoard({ channel, accessToken, money }: Props) {
       setAccounts(body.accounts || []);
       setLastSynced(body.last_synced?.at || null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errText(e));
       setListed([]);
       setNotListed([]);
     } finally {
@@ -278,7 +279,7 @@ export function MarketplaceBoard({ channel, accessToken, money }: Props) {
       setQuarters(next);
       if (body.quarter?.id && !next.some((q) => q.id === id)) setQuarter(body.quarter.id);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errText(e));
     } finally {
       setQuarterBusy(false);
     }
@@ -441,7 +442,7 @@ export function MarketplaceBoard({ channel, accessToken, money }: Props) {
         if (thumbs.length) setEditThumbs(thumbs);
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errText(e));
     } finally {
       setEditBusy(false);
     }
@@ -506,7 +507,7 @@ export function MarketplaceBoard({ channel, accessToken, money }: Props) {
       setEdit(null);
       await loadCatalog();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errText(e));
     } finally {
       setEditBusy(false);
     }
@@ -559,7 +560,7 @@ export function MarketplaceBoard({ channel, accessToken, money }: Props) {
       const body = unwrap(status, json) as { items?: { sku: string; title: string | null; ask_cents: number | null }[] };
       setEligible(body.items || []);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errText(e));
     } finally {
       setEditBusy(false);
     }
@@ -576,7 +577,7 @@ export function MarketplaceBoard({ channel, accessToken, money }: Props) {
       setShowAdd(false);
       await loadCatalog();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errText(e));
     } finally {
       setEditBusy(false);
     }
@@ -590,7 +591,7 @@ export function MarketplaceBoard({ channel, accessToken, money }: Props) {
       const body = unwrap(status, json) as { items?: { sku: string; listing_id: string; title: string }[] };
       setLegacy(body.items || []);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errText(e));
     } finally {
       setEditBusy(false);
     }
@@ -606,7 +607,7 @@ export function MarketplaceBoard({ channel, accessToken, money }: Props) {
       setNotice(`Migrated ${listingId}.`);
       await openMigrate();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errText(e));
     } finally {
       setEditBusy(false);
     }

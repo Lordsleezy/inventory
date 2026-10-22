@@ -12,6 +12,7 @@ import {
   type Rule,
   type TicketLike,
 } from './payouts';
+import { errText } from './errText';
 
 export type CommissionOverrideRow = { ticket_key: string; paul_pct: number; jacob_pct: number };
 export type CommissionLogRow = {
@@ -114,7 +115,7 @@ export function CommissionOverrideControls({
       else onChanged({ paulPct: Number(row.override.paul_pct), jacobPct: Number(row.override.jacob_pct) });
       if (action === 'flip' || action === 'reset') setEditing(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errText(err));
     } finally {
       setSaving(false);
     }

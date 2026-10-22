@@ -5,6 +5,7 @@ import { NeedsAttentionPanel } from './NeedsAttentionPanel';
 import { UnitEditDrawer } from './UnitEditDrawer';
 import { LookupTestPage } from './LookupTestPage';
 import type { AttentionSection, InventoryTab } from './navigation';
+import { errText } from './errText';
 
 type Row = {
   sku: string; brand: string; model: string; title: string; condition: string | null;
@@ -67,7 +68,7 @@ export function InventoryPage({ client, storeId, accessToken, money, stamp, tab,
         const next = data as List;
         const signed = await sign(next.items.flatMap(x => x.photo_path ? [thumb(x.photo_path), x.photo_path] : [])).catch(() => ({}));
         if (active) { setList(next); setUrls(prev => ({ ...prev, ...signed })); }
-      } catch (e) { if (active) setError(e instanceof Error ? e.message : String(e)); }
+      } catch (e) { if (active) setError(errText(e)); }
       finally { if (active) setLoading(false); }
     })(); }, 200);
     return () => { active = false; clearTimeout(timer); };
@@ -87,7 +88,7 @@ export function InventoryPage({ client, storeId, accessToken, money, stamp, tab,
           setDetail(next);
           setUrls(prev => ({ ...prev, ...signed }));
         }
-      } catch (e) { if (active) setError(e instanceof Error ? e.message : String(e)); }
+      } catch (e) { if (active) setError(errText(e)); }
     })();
     return () => { active = false; };
   }, [client, selected, detailKey]);
