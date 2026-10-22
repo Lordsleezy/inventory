@@ -629,7 +629,7 @@ export function MarketplaceBoard({ channel, accessToken, money }: Props) {
           <strong>{quarterBusy || !stats ? '…' : money(stats.profit_cents)}</strong>
           <small>
             after fees, shipping & item cost
-            {channel === 'ebay' && stats && stats.insertion_cents > 0 ? ` · insertion & subscription ${money(stats.insertion_cents)} is in Expenses` : ''}
+            {channel === 'ebay' && stats && stats.insertion_cents > 0 ? ` · includes ${money(stats.insertion_cents)} insertion & subscription` : ''}
           </small>
         </article>
       </div>
