@@ -1,7 +1,7 @@
 import { json, corsHeaders, requireEnv } from "../lib/server.mjs";
 import { notificationChallenge, pollAllStores, withdrawOpenEbayTasks } from "../lib/ebay.mjs";
 import { wrapHandler, asNetlifyFunction } from "../lib/floor-log.mjs";
-import { handleDeletionPost } from "../lib/ebay-account-deletion.mjs";
+import { authorizeEbayNotifyPost, handleDeletionPost } from "../lib/ebay-account-deletion.mjs";
 import { ebayDisabled } from "../lib/ebay-env.mjs";
 
 function endpointUrl(event) {
@@ -35,12 +35,11 @@ export async function invoke(event, context) {
   if (ebayDisabled()) return json(410, { error: "eBay notifications are disabled." });
   // The regular request logger includes POST bodies. Keep deletion identifiers
   // out of it, including when a forged notification fails verification.
+  // Every other POST must carry a valid x-ebay-signature before any poll.
   if (event.httpMethod === "POST") {
-    try {
-      const raw = event.isBase64Encoded ? Buffer.from(event.body || "", "base64").toString("utf8") : event.body || "";
-      if (JSON.parse(raw).metadata?.topic === "MARKETPLACE_ACCOUNT_DELETION")
-        return handleDeletionPost(event);
-    } catch { /* Regular handler returns a JSON error. */ }
+    const gate = await authorizeEbayNotifyPost(event);
+    if (gate.kind === "deletion") return handleDeletionPost(event);
+    if (gate.kind === "stop") return gate.response;
   }
   return regularHandler(event, context);
 }

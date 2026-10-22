@@ -39,6 +39,9 @@
 [functions."tiktok-webhook"]
   timeout = 30
 
+[functions."square-webhook"]
+  timeout = 26
+
 [functions."tiktok-oauth-callback"]
   timeout = 30
 

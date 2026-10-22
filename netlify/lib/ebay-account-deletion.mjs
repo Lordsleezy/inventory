@@ -54,6 +54,42 @@ async function publicKey(kid) {
   return key;
 }
 
+export function rawEventBody(event) {
+  return event?.isBase64Encoded ? Buffer.from(event.body || '', 'base64').toString('utf8') : (event?.body || '');
+}
+
+export function ebaySignatureHeader(event) {
+  const headers = event?.headers || {};
+  for (const [key, value] of Object.entries(headers)) {
+    if (String(key).toLowerCase() === 'x-ebay-signature' && value) return String(value);
+  }
+  return '';
+}
+
+/**
+ * Every ebay-notify POST must be signed. The account-deletion topic keeps its
+ * own handler. Anything else stops here unless x-ebay-signature verifies,
+ * so an unsigned post cannot trigger a poll or a listing withdrawal.
+ * Returns { kind: 'deletion' | 'ok' | 'stop', response? }.
+ */
+export async function authorizeEbayNotifyPost(event, fetchKey = publicKey) {
+  const raw = rawEventBody(event);
+  if (raw.length > 65_536) return { kind: 'stop', response: json(413, { error: 'payload_too_large' }) };
+  let topic = '';
+  try { topic = JSON.parse(raw).metadata?.topic || ''; } catch { topic = ''; }
+  if (topic === 'MARKETPLACE_ACCOUNT_DELETION') return { kind: 'deletion' };
+  let valid = false;
+  try {
+    valid = await verifyDeletionSignature(raw, ebaySignatureHeader(event), fetchKey);
+  } catch (error) {
+    const message = String(error?.message || error);
+    if (message.startsWith('ebay_')) return { kind: 'stop', response: json(503, { error: 'signature_key_unavailable' }) };
+    return { kind: 'stop', response: json(412, { error: 'invalid_signature' }) };
+  }
+  if (!valid) return { kind: 'stop', response: json(412, { error: 'invalid_signature' }) };
+  return { kind: 'ok' };
+}
+
 export async function verifyDeletionSignature(body, header, fetchKey = publicKey) {
   const { kid, signature } = decodeSignature(header);
   const key = await fetchKey(kid);
