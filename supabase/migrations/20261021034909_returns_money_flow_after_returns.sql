@@ -4,6 +4,13 @@
 
 begin;
 
+-- Idempotent: prod may already have returns functions from the pre-split 34552,
+-- but portal_expenses.external_id was never migrated.
+alter table public.portal_expenses add column if not exists external_id text;
+create index if not exists portal_expenses_external_id_idx
+  on public.portal_expenses (store_id, source, external_id)
+  where external_id is not null;
+
 -- Commission clawbacks / partial retains for returns.
 -- Void drops the full sale from live commission. This posts one adjustment per employee so
 -- that (UI add-back of sale_commission_cents) + amount_cents nets to −frac × commission.
