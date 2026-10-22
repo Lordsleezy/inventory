@@ -1,5 +1,7 @@
--- Signed Square refund/dispute intake and the public checkout rate counter.
+-- Checkout rate counter, plus an unused Square event table.
 -- Applied to production as version 20261022020521.
+-- Refunds happen on Amazon and TikTok, not in the store or on the website,
+-- so no Netlify function calls apply_square_webhook. The table stays empty.
 -- Both tables are service-role only. Anon and authenticated have no policy and no grants.
 
 create table if not exists public.public_rate_buckets (

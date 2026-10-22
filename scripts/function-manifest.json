@@ -58,7 +58,6 @@
     "square-mobile-token",
     "square-oauth-callback",
     "square-refund-payment",
-    "square-webhook",
     "square-set-location",
     "square-set-store-location",
     "square-terminal-checkout",
