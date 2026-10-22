@@ -68,9 +68,8 @@ export function EbayDetails({
       <Notice tone="error">{error || unmapped}</Notice>
       {unmapped ? (
         <p className="text-quiet text-floor-mute">
-          Floor lists refrigerators, freezers, washers, dryers, ranges/ovens, dishwashers, microwaves,
-          laptops, TVs, small kitchen appliances, tools, and vacuums. Ask before adding another eBay
-          category.
+          No Floor shortcut for this label — eBay Taxonomy will pick a category from the title/brand when
+          you list. You can also set an eBay category ID on the unit.
         </p>
       ) : null}
       {rows === null ? <Spinner label="Loading eBay fields" /> : null}
