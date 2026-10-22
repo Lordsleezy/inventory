@@ -373,7 +373,7 @@ export function OnlinePage({
     {onQueuePage && (
       <div className="inventory-tabs report-tabs">
         <button type="button" className="secondary" onClick={() => onChannel('all')}>
-          ΓåÉ Back to Online
+          ← Back to Online
         </button>
       </div>
     )}

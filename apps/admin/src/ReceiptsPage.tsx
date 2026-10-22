@@ -103,13 +103,13 @@ function ReceiptDoc({ r, money, stamp }: { r: Receipt; money: (n: number) => str
       {marketplace && (r.shipping_cents || 0) > 0 && row('Buyer shipping', money(r.shipping_cents))}
       {!marketplace && (r.tax_cents || 0) > 0 && row('Sales tax', money(r.tax_cents))}
       {!marketplace && (r.card_fee_cents || 0) > 0 && row('Card surcharge', money(r.card_fee_cents))}
-      {marketplace && (r.fee_cents || 0) > 0 && row(feeName(r.channel), `ΓêÆ${money(r.fee_cents || 0)}`)}
-      {marketplace && (r.label_cents || 0) > 0 && row('Shipping label', `ΓêÆ${money(r.label_cents || 0)}`)}
-      {!marketplace && (r.processing_cents || 0) > 0 && row('Card fees', `ΓêÆ${money(r.processing_cents || 0)}`)}
+      {marketplace && (r.fee_cents || 0) > 0 && row(feeName(r.channel), `−${money(r.fee_cents || 0)}`)}
+      {marketplace && (r.label_cents || 0) > 0 && row('Shipping label', `−${money(r.label_cents || 0)}`)}
+      {!marketplace && (r.processing_cents || 0) > 0 && row('Card fees', `−${money(r.processing_cents || 0)}`)}
       {marketplace
         ? row('Net deposit', money(deposit), true)
         : row('Total collected', money(r.total_cents), true)}
-      {marketplace && (r.cost_cents || 0) > 0 && row('Item cost', `ΓêÆ${money(r.cost_cents || 0)}`)}
+      {marketplace && (r.cost_cents || 0) > 0 && row('Item cost', `−${money(r.cost_cents || 0)}`)}
       {marketplace && r.profit_cents != null && row('Profit', money(r.profit_cents || 0))}
       <div className="receipt-row"><span>{marketplace ? 'Channel' : 'Paid'}</span><b>{tender(r)}</b></div>
     </div>
@@ -139,11 +139,11 @@ function printReceipt(r: Receipt, money: (n: number) => string, stamp: (s: strin
     marketplace && (r.shipping_cents || 0) > 0 ? line('Buyer shipping', money(r.shipping_cents)) : '',
     !marketplace && (r.tax_cents || 0) > 0 ? line('Sales tax', money(r.tax_cents)) : '',
     !marketplace && (r.card_fee_cents || 0) > 0 ? line('Card surcharge', money(r.card_fee_cents)) : '',
-    marketplace && (r.fee_cents || 0) > 0 ? line(feeName(r.channel), `ΓêÆ${money(r.fee_cents || 0)}`) : '',
-    marketplace && (r.label_cents || 0) > 0 ? line('Shipping label', `ΓêÆ${money(r.label_cents || 0)}`) : '',
-    !marketplace && (r.processing_cents || 0) > 0 ? line('Card fees', `ΓêÆ${money(r.processing_cents || 0)}`) : '',
+    marketplace && (r.fee_cents || 0) > 0 ? line(feeName(r.channel), `−${money(r.fee_cents || 0)}`) : '',
+    marketplace && (r.label_cents || 0) > 0 ? line('Shipping label', `−${money(r.label_cents || 0)}`) : '',
+    !marketplace && (r.processing_cents || 0) > 0 ? line('Card fees', `−${money(r.processing_cents || 0)}`) : '',
     marketplace ? line('Net deposit', money(deposit), true) : line('Total collected', money(r.total_cents), true),
-    marketplace && (r.cost_cents || 0) > 0 ? line('Item cost', `ΓêÆ${money(r.cost_cents || 0)}`) : '',
+    marketplace && (r.cost_cents || 0) > 0 ? line('Item cost', `−${money(r.cost_cents || 0)}`) : '',
     marketplace && r.profit_cents != null ? line('Profit', money(r.profit_cents || 0)) : '',
     line(marketplace ? 'Channel' : 'Paid', tender(r)),
   ].filter(Boolean).join('');

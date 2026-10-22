@@ -200,7 +200,7 @@ export function receiptHtml(r: ReceiptPayload): string {
     `<div style="display:flex;justify-content:space-between${bold ? ';font-weight:700;font-size:18px;margin-top:4px' : ''}"><span>${esc(label)}</span><span>${esc(value)}</span></div>`;
   const totals = [
     line('Subtotal', formatCentsTotal(r.subtotalCents)),
-    r.discountCents ? line('Discount', `ΓêÆ${formatCentsTotal(r.discountCents)}`) : '',
+    r.discountCents ? line('Discount', `−${formatCentsTotal(r.discountCents)}`) : '',
     r.taxCents > 0 ? line('Sales tax', formatCentsTotal(r.taxCents)) : '',
     r.cardFeeCents ? line('Card surcharge', formatCentsTotal(r.cardFeeCents)) : '',
     line('Total', formatCentsTotal(r.totalCents), true),

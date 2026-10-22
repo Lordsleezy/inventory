@@ -495,7 +495,7 @@ function RegisterInner({ staffSession, onNeedFullReload }: Props) {
   function pushDigit(d: string) {
     setCashDigits(prev => {
       if (d === 'C') return '';
-      if (d === 'Γî½') return prev.slice(0, -1);
+      if (d === '⌫') return prev.slice(0, -1);
       if (prev.length >= 8) return prev;
       return prev + d;
     });
@@ -583,10 +583,10 @@ function RegisterInner({ staffSession, onNeedFullReload }: Props) {
           <div className="register-done-totals">
             <div className="summary-row"><span>Subtotal</span><span>{formatCentsTotal(summary.subtotal_cents)}</span></div>
             {summary.discount_cents ? (
-              <div className="summary-row"><span>Discount</span><span>ΓêÆ{formatCentsTotal(summary.discount_cents)}</span></div>
+              <div className="summary-row"><span>Discount</span><span>−{formatCentsTotal(summary.discount_cents)}</span></div>
             ) : null}
             {summary.signup_discount_cents ? (
-              <div className="summary-row muted"><span>New-customer discount</span><span>ΓêÆ{formatCentsTotal(summary.signup_discount_cents)}</span></div>
+              <div className="summary-row muted"><span>New-customer discount</span><span>−{formatCentsTotal(summary.signup_discount_cents)}</span></div>
             ) : null}
             <div className="summary-row"><span>Tax</span><span>{formatCentsTotal(summary.tax_cents)}</span></div>
             {summary.card_fee_cents ? (
@@ -687,9 +687,9 @@ function RegisterInner({ staffSession, onNeedFullReload }: Props) {
             title="Register settings"
             onClick={() => setSettingsOpen(true)}
           >
-            ΓÜÖ
+            ⚙
           </button>
-          <button type="button" className="secondary" disabled={!idle} onClick={() => setNoteOpen(true)}>Note{note ? ' Γ£ô' : ''}</button>
+          <button type="button" className="secondary" disabled={!idle} onClick={() => setNoteOpen(true)}>Note{note ? ' ✓' : ''}</button>
           <button type="button" className="secondary" disabled={!idle} onClick={() => void refreshUnits().catch(err => setError(authErrorMessage(err)))}>Refresh</button>
           <button type="button" className="danger" disabled={!lines.length || !idle} onClick={() => { if (window.confirm('Clear the cart?')) clear(); }}>Clear</button>
         </div>
@@ -771,7 +771,7 @@ function RegisterInner({ staffSession, onNeedFullReload }: Props) {
                 <td>
                   {line.qtyOnHand > 1 ? (
                     <div className="qty-stepper">
-                      <button type="button" className="secondary" disabled={!idle || cashOpen || line.qty <= 1} onClick={() => setQty(line.sku, line.qty - 1)}>ΓêÆ</button>
+                      <button type="button" className="secondary" disabled={!idle || cashOpen || line.qty <= 1} onClick={() => setQty(line.sku, line.qty - 1)}>−</button>
                       <span>{line.qty}</span>
                       <button type="button" className="secondary" disabled={!idle || cashOpen || line.qty >= line.qtyOnHand} onClick={() => setQty(line.sku, line.qty + 1)}>+</button>
                     </div>
@@ -800,7 +800,7 @@ function RegisterInner({ staffSession, onNeedFullReload }: Props) {
                 </td>
                 <td>{formatCentsTotal(lineExtendedPrice({ ...line, priceCents: draftCents ?? line.priceCents }))}</td>
                 <td>
-                  <button type="button" className="secondary" disabled={!idle || cashOpen} onClick={() => removeSku(line.sku)} aria-label="Remove">Γ£ò</button>
+                  <button type="button" className="secondary" disabled={!idle || cashOpen} onClick={() => removeSku(line.sku)} aria-label="Remove">✕</button>
                 </td>
               </tr>
               );
@@ -825,9 +825,9 @@ function RegisterInner({ staffSession, onNeedFullReload }: Props) {
             <div className="summary-row">
               <span>
                 Discount
-                <button type="button" className="icon-btn" title="Edit discount" disabled={!idle || cashOpen} onClick={() => { setDiscountDraft(String(discountPct || '')); setDiscountOpen(true); }}>Γ£Ä</button>
+                <button type="button" className="icon-btn" title="Edit discount" disabled={!idle || cashOpen} onClick={() => { setDiscountDraft(String(discountPct || '')); setDiscountOpen(true); }}>✎</button>
               </span>
-              <span>{discountCents ? `ΓêÆ${formatCentsTotal(discountCents)}` : formatCentsTotal(0)}</span>
+              <span>{discountCents ? `−${formatCentsTotal(discountCents)}` : formatCentsTotal(0)}</span>
             </div>
           )}
           <div className="summary-row">
@@ -985,7 +985,7 @@ function RegisterInner({ staffSession, onNeedFullReload }: Props) {
             ) : null}
             {error ? <p className="error">{error}</p> : null}
             <div className="numpad">
-              {['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', 'Γî½'].map(d => (
+              {['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'].map(d => (
                 <button key={d} type="button" className="secondary" disabled={busy} onClick={() => pushDigit(d)}>{d}</button>
               ))}
             </div>
