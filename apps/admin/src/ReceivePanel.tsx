@@ -752,7 +752,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
     setFiles(prev => [...prev, ...Array.from(list)]);
   }
 
-  const picker = (labelText: string, key: Exclude<keyof Form, 'costEstimate'>, values: string[]) => (
+  const picker = (labelText: string, key: Exclude<keyof Form, 'costEstimate' | 'unbranded'>, values: string[]) => (
     <label>{labelText}<select value={form[key]} onChange={e => update(key, e.target.value)}>
       <option value="">—</option>{values.map(x => <option key={x} value={x}>{x}</option>)}
     </select></label>
