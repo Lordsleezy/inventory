@@ -145,7 +145,7 @@ export function ChannelReportPage({ client, money, embedded, mode = 'full' }: { 
       {mode === 'full' && totals.unmatched > 0 && <div className="alert" role="status">{unmatchedHint}</div>}
       {mode === 'full' && channel === 'ebay' && ebayOverhead > 0 && <div className="alert" role="status">Profit is after voided label spend and {money(ebayOverhead)} eBay insertion/subscription (same stack as the eBay tab and Payouts).</div>}
       <div className="stats">
-        {mode === 'full' && <Stat name="Gross sales" value={money(totals.gross)} onClick={() => setDrill('gross')} active={drill === 'gross'} note="item + buyer shipping · tax is separate" />}
+        {mode === 'full' && <Stat name="Gross sales" value={money(totals.gross)} onClick={() => setDrill('gross')} active={drill === 'gross'} note="item + buyer shipping + tax" />}
         <Stat name="Channel fees" value={money(totals.fees)} onClick={() => setDrill('fees')} active={drill === 'fees'} />
         <Stat name="Label / ship cost" value={money(totals.ship)} onClick={() => setDrill('ship')} active={drill === 'ship'} />
         <Stat name="Card processing" value={money(totals.proc)} onClick={() => setDrill('processing')} active={drill === 'processing'} />
