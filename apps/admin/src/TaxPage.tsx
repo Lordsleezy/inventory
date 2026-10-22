@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 type SaleTaxRow = {
@@ -52,7 +52,7 @@ export function TaxPage({ client, money, stamp }: Props) {
     const { data, error: e } = await client.rpc('portal_sale_tax_rows', { p_start: start, p_end: end });
     if (e) { setError(e.message); setRows(null); return; }
     const body = data as { rows?: SaleTaxRow[] };
-    // In-person (floor) only ΓÇö marketplaces remit their own sales tax.
+    // In-person (floor) only — marketplaces remit their own sales tax.
     const floor = (body?.rows || []).filter(r => (r.channel || '').toLowerCase() === 'floor');
     setRows(floor);
     await loadPayments();
@@ -107,7 +107,7 @@ export function TaxPage({ client, money, stamp }: Props) {
       <div>
         <div className="eyebrow">TAX LEDGER</div>
         <h1>Sales tax</h1>
-        <p>In-person sales tax the store remits. Marketplace sales (eBay, Depop, etc.) are not tracked here ΓÇö those channels remit for you.</p>
+        <p>In-person sales tax the store remits. Marketplace sales (eBay, Depop, etc.) are not tracked here — those channels remit for you.</p>
       </div>
       <div className="report-actions">
         <label className="date-control">From<input type="date" value={start} onChange={e => setStart(e.target.value || monthStart())} /></label>
@@ -143,9 +143,9 @@ export function TaxPage({ client, money, stamp }: Props) {
           <input type="date" value={paidDate} onChange={e => setPaidDate(e.target.value || today())} required />
         </label>
         <label className="payment-note">Note
-          <input type="text" value={paidNote} onChange={e => setPaidNote(e.target.value.slice(0, 200))} placeholder="Optional ΓÇö e.g. Q3 filing" />
+          <input type="text" value={paidNote} onChange={e => setPaidNote(e.target.value.slice(0, 200))} placeholder="Optional — e.g. Q3 filing" />
         </label>
-        <button disabled={busy || !paidAmount}>{busy ? 'SavingΓÇª' : 'Record payment'}</button>
+        <button disabled={busy || !paidAmount}>{busy ? 'Saving…' : 'Record payment'}</button>
       </form>
       {taxPaid.length === 0 ? <p className="hint">No sales tax payments in this range yet.</p>
         : <div className="ledger-list">{taxPaid.map(p => (
@@ -159,7 +159,7 @@ export function TaxPage({ client, money, stamp }: Props) {
 
     <section className="panel">
       <div className="section-head"><div><div className="eyebrow">IN PERSON</div><h2>Sales tax by sale</h2></div></div>
-      {rows === null ? <p className="hint">LoadingΓÇª</p>
+      {rows === null ? <p className="hint">Loading…</p>
         : rows.length === 0 ? <div className="empty">No in-person sales with tax in this range.</div>
         : <div className="table-wrap"><table className="tbl">
           <thead>

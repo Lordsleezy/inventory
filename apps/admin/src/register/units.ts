@@ -1,4 +1,4 @@
-﻿import { floorCloud, stripCostFromUnit, webDerivativePath } from '@floor/cloud';
+import { floorCloud, stripCostFromUnit, webDerivativePath } from '@floor/cloud';
 
 export type RegisterUnit = {
   sku: string;
@@ -37,7 +37,7 @@ function escapeIlike(value: string): string {
   return value.replace(/[%_,]/g, c => `\\${c}`);
 }
 
-/** Lightweight warm list ΓÇö never pull thousands of rows (freezes phones). */
+/** Lightweight warm list — never pull thousands of rows (freezes phones). */
 export async function loadAvailableUnits(limit = 80): Promise<RegisterUnit[]> {
   const sb = floorCloud();
   const first = await sb

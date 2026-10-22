@@ -1,4 +1,4 @@
-﻿import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { authErrorMessage, searchCustomersByPhone, upsertCustomer, type Customer } from '@floor/cloud';
 
 export function formatPoints(points: number): string {
@@ -134,8 +134,8 @@ export function CustomerAttach({ customer, onAttach, onClear, disabled, autoFocu
                 <strong>{row.name || 'No name'}</strong>
                 <span className="muted">
                   {row.phone}
-                  {row.email ? ` ┬╖ ${row.email}` : ''}
-                  {` ┬╖ ${formatPoints(row.balance)} pts`}
+                  {row.email ? ` · ${row.email}` : ''}
+                  {` · ${formatPoints(row.balance)} pts`}
                 </span>
               </button>
             ))}
@@ -145,14 +145,14 @@ export function CustomerAttach({ customer, onAttach, onClear, disabled, autoFocu
                 <span className="muted">No match for {digits}</span>
               </button>
             ) : null}
-            {!showCreate && hits.length === 0 ? <div className="customer-dropdown-empty muted">SearchingΓÇª</div> : null}
+            {!showCreate && hits.length === 0 ? <div className="customer-dropdown-empty muted">Searching…</div> : null}
           </div>
         ) : null}
       </div>
       {customer ? (
         <p className="muted">
-          {customer.name || 'Customer'} ┬╖ {formatPoints(customer.balance)} pts
-          {!customer.first_purchase_discount_used ? ` ┬╖ new-customer discount (${customer.signup_code || 'on account'})` : ''}
+          {customer.name || 'Customer'} · {formatPoints(customer.balance)} pts
+          {!customer.first_purchase_discount_used ? ` · new-customer discount (${customer.signup_code || 'on account'})` : ''}
         </p>
       ) : (
         <p className="muted">Type at least 3 digits to search, or 7+ to register.</p>
@@ -174,7 +174,7 @@ export function CustomerAttach({ customer, onAttach, onClear, disabled, autoFocu
             <div className="row">
               <button type="button" className="secondary" onClick={() => setSignupOpen(false)}>Cancel</button>
               <button type="button" className="primary" disabled={busy} onClick={() => void createCustomer()}>
-                {busy ? 'SavingΓÇª' : 'Create & attach'}
+                {busy ? 'Saving…' : 'Create & attach'}
               </button>
             </div>
           </div>
