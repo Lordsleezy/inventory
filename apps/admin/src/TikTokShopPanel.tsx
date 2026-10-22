@@ -34,6 +34,8 @@ type Props = {
   client: SupabaseClient;
   accessToken: string;
   money: (n: number) => string;
+  /** Marketplaces page: connection + order sync only (listing lives under TikTok tab). */
+  connectionOnly?: boolean;
 };
 
 async function tiktokCall(token: string, body: Record<string, unknown>) {
@@ -47,7 +49,7 @@ async function tiktokCall(token: string, body: Record<string, unknown>) {
   return json as TikTokStatus & Record<string, unknown>;
 }
 
-export function TikTokShopPanel({ client, accessToken, money }: Props) {
+export function TikTokShopPanel({ client, accessToken, money, connectionOnly = false }: Props) {
   const [status, setStatus] = useState<TikTokStatus | null>(null);
   const [rows, setRows] = useState<QueueRow[]>([]);
   const [skuDraft, setSkuDraft] = useState('');
@@ -73,8 +75,10 @@ export function TikTokShopPanel({ client, accessToken, money }: Props) {
 
   useEffect(() => {
     void loadStatus();
-    void loadQueue().catch((e) => setError(e instanceof Error ? e.message : String(e)));
-  }, [loadStatus, loadQueue]);
+    if (!connectionOnly) {
+      void loadQueue().catch((e) => setError(e instanceof Error ? e.message : String(e)));
+    }
+  }, [loadStatus, loadQueue, connectionOnly]);
 
   async function authorize() {
     setBusy(true);
@@ -150,10 +154,10 @@ export function TikTokShopPanel({ client, accessToken, money }: Props) {
 
   return (
     <section className="panel">
-      <h2>TikTok Shop</h2>
+      <h2>TikTok Shop connection</h2>
       <p>
-        US Custom app OAuth, product push (real photos only), order sync → Floor sale / delist elsewhere, and returns
-        (48h decision). Keys live in Netlify env; tokens in <code>connections</code> (provider=tiktok).
+        OAuth, API health, and order sync. List / edit / end listings from the TikTok sidebar tab. Keys live in Netlify
+        env; tokens in <code>connections</code> (provider=tiktok).
       </p>
 
       {error && (
@@ -232,74 +236,78 @@ export function TikTokShopPanel({ client, accessToken, money }: Props) {
         </div>
       </div>
 
-      <h3 style={{ marginTop: '1.25rem' }}>Listing queue</h3>
-      <p className="hint">
-        Pricing uses the same online rule as Amazon (≈40% off retail, fees + $5 over cost) plus TikTok fees and the
-        TikTok return reserve.
-      </p>
-      <div className="actions">
-        <input
-          aria-label="Floor SKU"
-          inputMode="numeric"
-          placeholder="Floor SKU"
-          value={skuDraft}
-          disabled={busy}
-          onChange={(e) => setSkuDraft(e.target.value.replace(/[^\dA-Za-z\-]/g, ''))}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault();
-              void addSku();
-            }
-          }}
-        />
-        <button disabled={busy || !skuDraft.trim()} onClick={() => void addSku()}>
-          Add to queue
-        </button>
-      </div>
+      {!connectionOnly && (
+        <>
+          <h3 style={{ marginTop: '1.25rem' }}>Listing queue</h3>
+          <p className="hint">
+            Pricing uses the same online rule as Amazon (≈40% off retail, fees + $5 over cost) plus TikTok fees and the
+            TikTok return reserve.
+          </p>
+          <div className="actions">
+            <input
+              aria-label="Floor SKU"
+              inputMode="numeric"
+              placeholder="Floor SKU"
+              value={skuDraft}
+              disabled={busy}
+              onChange={(e) => setSkuDraft(e.target.value.replace(/[^\dA-Za-z\-]/g, ''))}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  void addSku();
+                }
+              }}
+            />
+            <button disabled={busy || !skuDraft.trim()} onClick={() => void addSku()}>
+              Add to queue
+            </button>
+          </div>
 
-      {errors.length > 0 && (
-        <div className="alert" role="status">
-          <strong>{errors.length} queue error(s)</strong>
-          <ul>
-            {errors.slice(0, 12).map((r) => (
-              <li key={r.sku}>
-                SKU {r.sku}: {r.last_error || r.status}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {rows.length === 0 ? (
-        <div className="empty">No TikTok queue items yet.</div>
-      ) : (
-        <div className="ticket-list">
-          {rows.map((r) => (
-            <div className="ticket" key={r.sku}>
-              <div className="ticket-top">
-                <strong>{r.title || `SKU ${r.sku}`}</strong>
-                <span>
-                  {r.status}
-                  {r.tiktok_price_cents != null ? ` · ${money(r.tiktok_price_cents)}` : ''}
-                  {r.product_id ? ` · ${r.product_id}` : ''}
-                </span>
-              </div>
-              {r.last_error && <p className="hint">Error: {r.last_error}</p>}
-              <div className="actions">
-                {(r.status === 'queued' || r.status === 'error' || r.status === 'ready') && (
-                  <button className="secondary" disabled={busy} onClick={() => void prepare(r.sku)}>
-                    Prepare
-                  </button>
-                )}
-                {(r.status === 'ready' || r.status === 'error') && (
-                  <button disabled={busy || status?.listingEnabled === false} onClick={() => void listOne(r.sku)}>
-                    List on TikTok
-                  </button>
-                )}
-              </div>
+          {errors.length > 0 && (
+            <div className="alert" role="status">
+              <strong>{errors.length} queue error(s)</strong>
+              <ul>
+                {errors.slice(0, 12).map((r) => (
+                  <li key={r.sku}>
+                    SKU {r.sku}: {r.last_error || r.status}
+                  </li>
+                ))}
+              </ul>
             </div>
-          ))}
-        </div>
+          )}
+
+          {rows.length === 0 ? (
+            <div className="empty">No TikTok queue items yet.</div>
+          ) : (
+            <div className="ticket-list">
+              {rows.map((r) => (
+                <div className="ticket" key={r.sku}>
+                  <div className="ticket-top">
+                    <strong>{r.title || `SKU ${r.sku}`}</strong>
+                    <span>
+                      {r.status}
+                      {r.tiktok_price_cents != null ? ` · ${money(r.tiktok_price_cents)}` : ''}
+                      {r.product_id ? ` · ${r.product_id}` : ''}
+                    </span>
+                  </div>
+                  {r.last_error && <p className="hint">Error: {r.last_error}</p>}
+                  <div className="actions">
+                    {(r.status === 'queued' || r.status === 'error' || r.status === 'ready') && (
+                      <button className="secondary" disabled={busy} onClick={() => void prepare(r.sku)}>
+                        Prepare
+                      </button>
+                    )}
+                    {(r.status === 'ready' || r.status === 'error') && (
+                      <button disabled={busy || status?.listingEnabled === false} onClick={() => void listOne(r.sku)}>
+                        List on TikTok
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
       )}
     </section>
   );

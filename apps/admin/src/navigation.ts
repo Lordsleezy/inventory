@@ -1,4 +1,21 @@
-export type MainPage = 'register' | 'sales' | 'orders' | 'receipts' | 'inventory' | 'online' | 'marketplaces' | 'amazon' | 'reports' | 'tax' | 'cameras' | 'remote' | 'logs' | 'settings';
+export type MainPage =
+  | 'register'
+  | 'sales'
+  | 'orders'
+  | 'receipts'
+  | 'inventory'
+  | 'online'
+  | 'marketplaces'
+  | 'ebay'
+  | 'amazon'
+  | 'tiktok'
+  | 'depop'
+  | 'reports'
+  | 'tax'
+  | 'cameras'
+  | 'remote'
+  | 'logs'
+  | 'settings';
 export type ReportTab = 'profit' | 'shipping' | 'expenses' | 'payouts' | 'returns';
 export type InventoryTab = 'browse' | 'receive' | 'attention' | 'lookup-test';
 export type AttentionSection = 'missing-cost' | 'missing-photo' | 'missing-price' | 'missing-spec' | 'missing-model' | 'missing-description';
@@ -18,7 +35,10 @@ const LEGACY: Record<string, { page: MainPage; tab?: ReportTab; inventoryTab?: I
   payouts: { page: 'reports', tab: 'payouts' },
   settings: { page: 'settings' },
   marketplaces: { page: 'marketplaces' },
+  ebay: { page: 'ebay' },
   amazon: { page: 'amazon' },
+  tiktok: { page: 'tiktok' },
+  depop: { page: 'depop' },
   cameras: { page: 'cameras' },
   remote: { page: 'remote' },
   logs: { page: 'logs' },
@@ -33,7 +53,25 @@ const LEGACY: Record<string, { page: MainPage; tab?: ReportTab; inventoryTab?: I
   'missing-other': { page: 'inventory', inventoryTab: 'attention', section: 'missing-cost' },
 };
 
-const MAIN: MainPage[] = ['register', 'sales', 'orders', 'receipts', 'inventory', 'online', 'marketplaces', 'amazon', 'reports', 'tax', 'cameras', 'remote', 'logs', 'settings'];
+const MAIN: MainPage[] = [
+  'register',
+  'sales',
+  'orders',
+  'receipts',
+  'inventory',
+  'online',
+  'marketplaces',
+  'ebay',
+  'amazon',
+  'tiktok',
+  'depop',
+  'reports',
+  'tax',
+  'cameras',
+  'remote',
+  'logs',
+  'settings',
+];
 const SECTIONS: AttentionSection[] = ['missing-cost', 'missing-photo', 'missing-price', 'missing-spec', 'missing-model', 'missing-description'];
 const ONLINE_TABS: OnlineTab[] = ['listed', 'ready', 'not-ready', 'msc', 'reports', 'sold'];
 const ONLINE_CHANNELS: OnlineChannel[] = ['all', 'ebay', 'depop', 'amazon', 'tiktok', 'facebook'];
@@ -67,7 +105,7 @@ export function parseNavFromLocation(): NavState {
   const hashQ = hashRaw.includes('=') ? new URLSearchParams(hashRaw.replace(/^\?/, '')) : null;
   const hashPage = hashRaw && !hashRaw.includes('=') ? hashRaw.split('/')[0] : '';
   const raw = (q.get('page') || hashQ?.get('page') || hashPage || 'sales').toLowerCase();
-  if (q.get('ebay') === '1') return { ...defaultNavState(), page: 'marketplaces' };
+  if (q.get('ebay') === '1') return { ...defaultNavState(), page: 'ebay' };
   const mapped = LEGACY[raw];
   const base = mapped ? mapped.page : MAIN.includes(raw as MainPage) ? (raw as MainPage) : 'sales';
   const tabRaw = q.get('tab') || hashQ?.get('tab') || mapped?.tab || 'profit';

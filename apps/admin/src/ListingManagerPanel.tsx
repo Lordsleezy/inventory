@@ -35,7 +35,7 @@ type Eligible = {
   condition: string | null;
 };
 
-type Channel = 'amazon' | 'ebay' | 'tiktok' | 'depop';
+export type ListingChannel = 'amazon' | 'ebay' | 'tiktok' | 'depop';
 
 type DepopPack = {
   title?: string;
@@ -50,6 +50,9 @@ type DepopPack = {
 type Props = {
   accessToken: string;
   money: (n: number) => string;
+  /** When set with channelLocked, this page is dedicated to one marketplace (no channel tabs). */
+  channel?: ListingChannel;
+  channelLocked?: boolean;
 };
 
 async function lm(token: string, body: Record<string, unknown>) {
@@ -65,8 +68,8 @@ async function lm(token: string, body: Record<string, unknown>) {
   return json;
 }
 
-export function ListingManagerPanel({ accessToken, money }: Props) {
-  const [channel, setChannel] = useState<Channel>('ebay');
+export function ListingManagerPanel({ accessToken, money, channel: channelProp, channelLocked = false }: Props) {
+  const [channel, setChannel] = useState<ListingChannel>(channelProp || 'ebay');
   const [query, setQuery] = useState('');
   const [items, setItems] = useState<ListingRow[]>([]);
   const [busy, setBusy] = useState(false);
@@ -74,6 +77,10 @@ export function ListingManagerPanel({ accessToken, money }: Props) {
   const [notice, setNotice] = useState('');
   const [meta, setMeta] = useState('');
   const [lastSynced, setLastSynced] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (channelProp) setChannel(channelProp);
+  }, [channelProp]);
 
   const [edit, setEdit] = useState<ListingRow | null>(null);
   const [editTitle, setEditTitle] = useState('');
@@ -455,15 +462,19 @@ export function ListingManagerPanel({ accessToken, money }: Props) {
     ? `Last synced ${new Date(lastSynced).toLocaleString('en-US', { timeZone: 'America/Los_Angeles' })} PT`
     : 'Not synced this session';
 
+  const channelLabel =
+    channel === 'ebay' ? 'eBay' : channel === 'amazon' ? 'Amazon' : channel === 'tiktok' ? 'TikTok Shop' : 'Depop';
+
   return (
     <section className="panel">
       <div className="section-head">
         <div>
           <div className="eyebrow">LIVE LISTINGS</div>
-          <h2>Listing manager</h2>
+          <h2>{channelLocked ? `${channelLabel} listing manager` : 'Listing manager'}</h2>
           <p className="hint" style={{ margin: 0 }}>
-            eBay / Amazon / TikTok: live APIs. Depop: Push pack → you post → paste link. Admin-only. Real photos only — no AI.
-            Ending never marks a unit sold.
+            {channel === 'depop'
+              ? 'Push pack → post on Depop → paste link. Admin-only. Real photos only — no AI. Ending clears Floor only (never marks sold).'
+              : 'Add, edit, end, and bulk via the marketplace API. Admin-only. Real photos only — no AI. Ending never marks a unit sold.'}
           </p>
         </div>
         <div className="actions">
@@ -481,20 +492,22 @@ export function ListingManagerPanel({ accessToken, money }: Props) {
         </div>
       </div>
 
-      <div className="actions" style={{ marginBottom: '0.75rem', flexWrap: 'wrap' }}>
-        {(
-          [
-            ['ebay', 'eBay'],
-            ['amazon', 'Amazon'],
-            ['tiktok', 'TikTok Shop'],
-            ['depop', 'Depop'],
-          ] as const
-        ).map(([key, label]) => (
-          <button key={key} type="button" className={channel === key ? '' : 'secondary'} disabled={busy} onClick={() => setChannel(key)}>
-            {label}
-          </button>
-        ))}
-      </div>
+      {!channelLocked && (
+        <div className="actions" style={{ marginBottom: '0.75rem', flexWrap: 'wrap' }}>
+          {(
+            [
+              ['ebay', 'eBay'],
+              ['amazon', 'Amazon'],
+              ['tiktok', 'TikTok Shop'],
+              ['depop', 'Depop'],
+            ] as const
+          ).map(([key, label]) => (
+            <button key={key} type="button" className={channel === key ? '' : 'secondary'} disabled={busy} onClick={() => setChannel(key)}>
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
 
       <label>
         Search

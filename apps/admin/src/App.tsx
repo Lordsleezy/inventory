@@ -13,6 +13,7 @@ import { CommissionOverrideControls, CommissionOverrideMark } from './Commission
 import { ExpensesPage, type Expense as StoreExpense } from './ExpensesPage';
 import { MarketplacesPage } from './MarketplacesPage';
 import { AmazonPage } from './AmazonPage';
+import { ChannelListingPage } from './ChannelListingPage';
 import { OnlinePage } from './OnlinePage';
 import { ReportsPage } from './ReportsPage';
 import { SettingsPage } from './SettingsPage';
@@ -615,8 +616,40 @@ export function App() {
   const registerOnly = !fullAccess;
   const mainNav: [MainPage, string][] = registerOnly
     ? [['register', 'Register'], ['inventory', 'Inventory'], ['cameras', 'Cameras']]
-    : [['register', 'Register'], ['sales', 'Live Sales'], ['orders', 'Orders'], ['receipts', 'Receipts'], ['online', 'Online'], ['marketplaces', 'Marketplaces'], ['amazon', 'Amazon'], ['cameras', 'Cameras'], ['remote', 'Remote'], ['logs', 'Logs']];
-  const pageLabel = ({ register: 'Register', sales: 'Live Sales', orders: 'Orders', receipts: 'Receipts', inventory: 'Inventory', online: 'Online', marketplaces: 'Marketplaces', amazon: 'Amazon', reports: 'Reports', tax: 'Tax', cameras: 'Cameras', remote: 'Remote', logs: 'Logs', settings: 'Settings' } as const)[page];
+    : [
+        ['register', 'Register'],
+        ['sales', 'Live Sales'],
+        ['orders', 'Orders'],
+        ['receipts', 'Receipts'],
+        ['online', 'Online'],
+        ['ebay', 'eBay'],
+        ['amazon', 'Amazon'],
+        ['tiktok', 'TikTok'],
+        ['depop', 'Depop'],
+        ['marketplaces', 'Marketplaces'],
+        ['cameras', 'Cameras'],
+        ['remote', 'Remote'],
+        ['logs', 'Logs'],
+      ];
+  const pageLabel = ({
+    register: 'Register',
+    sales: 'Live Sales',
+    orders: 'Orders',
+    receipts: 'Receipts',
+    inventory: 'Inventory',
+    online: 'Online',
+    marketplaces: 'Marketplaces',
+    ebay: 'eBay',
+    amazon: 'Amazon',
+    tiktok: 'TikTok',
+    depop: 'Depop',
+    reports: 'Reports',
+    tax: 'Tax',
+    cameras: 'Cameras',
+    remote: 'Remote',
+    logs: 'Logs',
+    settings: 'Settings',
+  } as const)[page];
   const reportSubs: [typeof nav.reportTab, string][] = [['profit', 'Sales & profits'], ['shipping', 'Shipping & fees'], ['expenses', 'Expenses'], ['payouts', 'Payouts']];
   const inventorySubs: [typeof nav.inventoryTab, string][] = [['browse', 'Browse'], ['receive', 'Receive'], ['lookup-test', 'Lookup test']];
   const onlineSubs: [typeof nav.onlineTab, string][] = [
@@ -695,7 +728,13 @@ export function App() {
           {onlineSubs.map(([tab, label]) => <button type="button" key={tab} className={page === 'online' && nav.onlineTab === tab ? 'active' : ''} onClick={() => goNav({ page: 'online', onlineTab: tab })}>{label}</button>)}
         </div>
       </div>
-      {mainNav.filter(([id]) => id === 'marketplaces' || id === 'amazon').map(([id, label]) => <button type="button" className={page === id ? 'active' : ''} key={id} title={label} onClick={() => goNav({ page: id })}>{label}</button>)}
+      {mainNav
+        .filter(([id]) => id === 'ebay' || id === 'amazon' || id === 'tiktok' || id === 'depop' || id === 'marketplaces')
+        .map(([id, label]) => (
+          <button type="button" className={page === id ? 'active' : ''} key={id} title={label} onClick={() => goNav({ page: id })}>
+            {label}
+          </button>
+        ))}
       <div className={`nav-group${navGroup === 'reports' ? ' open' : ''}${page === 'reports' ? ' on' : ''}`}>
         <button type="button" title="Reports" className={`nav-parent${page === 'reports' ? ' active' : ''}`} onClick={() => { setNavGroup(g => g === 'reports' ? null : 'reports'); go({ page: 'reports' }); setEditing(null); }}>Reports</button>
         <div className="nav-sub">
@@ -805,7 +844,10 @@ export function App() {
   {fullAccess && page === 'receipts' && <ReceiptsPage client={sb} money={money} stamp={stamp} />}
   {fullAccess && page === 'online' && <OnlinePage client={sb} money={money} tab={nav.onlineTab} onTab={t => go({ onlineTab: t, page: 'online' })} channel={nav.onlineChannel} onChannel={c => go({ onlineChannel: c, onlineTab: 'listed', page: 'online' })} onInventory={() => goNav({ page: 'inventory', inventoryTab: 'browse' })} />}
   {fullAccess && page === 'marketplaces' && <MarketplacesPage client={sb} accessToken={session.access_token} money={money} stamp={stamp} />}
+  {fullAccess && page === 'ebay' && <ChannelListingPage channel="ebay" accessToken={session.access_token} money={money} />}
   {fullAccess && page === 'amazon' && <AmazonPage client={sb} accessToken={session.access_token} money={money} />}
+  {fullAccess && page === 'tiktok' && <ChannelListingPage channel="tiktok" accessToken={session.access_token} money={money} />}
+  {fullAccess && page === 'depop' && <ChannelListingPage channel="depop" accessToken={session.access_token} money={money} />}
   {fullAccess && page === 'logs' && <LogsPage accessToken={session.access_token} stamp={stamp} />}
   {(fullAccess || registerOnly) && page === 'inventory' && <InventoryPage client={sb} storeId={store} accessToken={session.access_token} money={money} stamp={stamp} tab={nav.inventoryTab} onTab={t => go({ inventoryTab: t })} attentionSection={nav.attentionSection} onAttentionSection={s => go({ attentionSection: s, inventoryTab: 'attention' })} onCostChanged={() => { void loadPayoutSales(); void loadSales(); }} />}
   {fullAccess && page === 'reports' && <ReportsPage client={sb} money={money} tab={nav.reportTab} onTab={t => go({ reportTab: t })} closeouts={closeouts} expenses={<ExpensesPage client={sb} money={money} expenses={expenses} staff={staff} ownerId={onlineCfg.employeeId || defaultReimbursementId} onChanged={loadCommon} embedded />} payouts={<PayoutsPage allSales={allSales} ebayFees={ebayFees} staff={staff} rules={activeRules} payments={payments} adjustments={payoutAdjustments} expenses={expenses} cfg={onlineCfg} personName={personName} busy={busy} recordPayment={recordPayment} onCommissionChanged={setTicketOverride} />} />}
