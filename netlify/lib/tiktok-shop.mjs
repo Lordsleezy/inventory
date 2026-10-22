@@ -269,7 +269,7 @@ async function accessToken(storeId) {
  * Signed Open API fetch. Returns parsed JSON; throws on transport/HTTP errors.
  * Does not invent success — callers must check TikTok `code` field.
  */
-export async function tiktokApiFetch(storeId, method, path, bodyObj) {
+export async function tiktokApiFetch(storeId, method, path, bodyObj, extraParams = null) {
   if (!tiktokAppCredsPresent()) {
     throw new Error("tiktok_env_missing: set TIKTOK_SHOP_APP_KEY and TIKTOK_SHOP_APP_SECRET");
   }
@@ -279,6 +279,11 @@ export async function tiktokApiFetch(storeId, method, path, bodyObj) {
     app_key: process.env.TIKTOK_SHOP_APP_KEY.trim(),
     timestamp,
   };
+  if (extraParams && typeof extraParams === "object") {
+    for (const [key, value] of Object.entries(extraParams)) {
+      if (value != null && value !== "") params[key] = String(value);
+    }
+  }
   if (shopId()) params.shop_id = shopId();
   const body = bodyObj != null ? JSON.stringify(bodyObj) : "";
   params.sign = signTikTokRequest({ path, params, body });
