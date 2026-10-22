@@ -1445,4 +1445,15 @@ revoke all on function public.portal_upsert_supplier(jsonb) from public, anon;
 grant execute on function public.portal_suppliers() to authenticated;
 grant execute on function public.portal_upsert_supplier(jsonb) to authenticated;
 
+-- Attach payout-adjustment → returns FK now that public.returns exists
+-- (20261021034552 creates the column without the FK for migrate order).
+do $$ begin
+  alter table public.portal_payout_adjustments
+    add constraint portal_payout_adjustments_return_id_fkey
+    foreign key (return_id) references public.returns(id) on delete set null;
+exception
+  when duplicate_object then null;
+  when undefined_table then null;
+end $$;
+
 commit;
