@@ -1,5 +1,3 @@
-import nodemailer from "nodemailer";
-
 /**
  * Internal (owner / staff) alert mail via Gmail SMTP.
  *
@@ -8,10 +6,21 @@ import nodemailer from "nodemailer";
  *   GMAIL_SMTP_APP_PASSWORD  a Google "app password" for that account (2-Step Verification required)
  *
  * Customer-facing mail stays on Resend (see sendResend in receipt.mjs).
+ *
+ * nodemailer is loaded lazily so unit tests that import alert helpers (via
+ * tiktok-shop → mail) do not require the Netlify-only dependency at root.
  */
 
 let cachedTransport = null;
 let cachedKey = "";
+let nodemailerPromise = null;
+
+function loadNodemailer() {
+  if (!nodemailerPromise) {
+    nodemailerPromise = import("nodemailer").then((m) => m.default || m);
+  }
+  return nodemailerPromise;
+}
 
 /** Non-routable / synthetic login domains — never use as SMTP recipients. */
 const BLOCKED_EMAIL_HOSTS = new Set(["localhost", "local", "invalid", "test", "example", "example.com", "example.org", "example.net"]);
@@ -48,11 +57,12 @@ export function gmailConfigured() {
   return Boolean(process.env.GMAIL_SMTP_USER && process.env.GMAIL_SMTP_APP_PASSWORD);
 }
 
-function transport() {
+async function transport() {
   const user = process.env.GMAIL_SMTP_USER;
   const pass = process.env.GMAIL_SMTP_APP_PASSWORD;
   const key = `${user}:${pass}`;
   if (!cachedTransport || cachedKey !== key) {
+    const nodemailer = await loadNodemailer();
     cachedTransport = nodemailer.createTransport({
       host: "smtp.gmail.com",
       port: 465,
@@ -73,7 +83,8 @@ export async function sendInternalAlert({ to, subject, text }) {
   if (!gmailConfigured() || !to) return { skipped: true, reason: "gmail_smtp_not_configured" };
   const recipients = filterDeliverableEmails(Array.isArray(to) ? to : [to]);
   if (!recipients.length) return { skipped: true, reason: "no_deliverable_recipient" };
-  const info = await transport().sendMail({
+  const tx = await transport();
+  const info = await tx.sendMail({
     from: user,
     to: recipients,
     subject,
