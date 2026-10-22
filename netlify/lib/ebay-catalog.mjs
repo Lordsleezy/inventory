@@ -16,7 +16,10 @@ import {
 } from "./ebay-conditions.mjs";
 import { clearanceCondition, isCollectible } from "./ebay-listing-standards.mjs";
 
-/** Floor categories we list. Ask before adding others. Leaf eBay US IDs from the June 2026 tree. */
+/**
+ * Convenience Floor→eBay leaf IDs (appliances etc.). Not an allowlist — anything else
+ * resolves via eBay Taxonomy suggestions. Leaf eBay US IDs from the June 2026 tree.
+ */
 export const FLOOR_EBAY_CATEGORIES = [
   {
     slug: "refrigerators",
@@ -400,17 +403,58 @@ export async function refreshCategoryConditions(ebayCategoryId) {
   return live;
 }
 
-export async function prepareUnitCondition({ unit, liveCheck = false }) {
-  const floor = resolveFloorCategory(unit.category);
-  if (!floor) {
+/**
+ * Resolve an eBay leaf category for a unit:
+ * 1) explicit unit.ebay_category ID when set
+ * 2) Floor convenience map for known labels
+ * 3) eBay Taxonomy suggestions (no Floor allowlist)
+ */
+export async function resolveListingCategory(unit) {
+  const explicit = String(unit?.ebay_category || "").trim();
+  if (/^\d{3,}$/.test(explicit)) {
+    let name = "";
+    try {
+      name = await categoryName(explicit);
+    } catch {
+      name = "";
+    }
+    return {
+      slug: `ebay_${explicit}`,
+      name: name || explicit,
+      ebayCategoryId: explicit,
+      aliases: [],
+      defaults: {},
+      standalone: false,
+      source: "unit_ebay_category",
+    };
+  }
+  const floor = resolveFloorCategory(unit?.category) || resolveFloorCategory(explicit);
+  if (floor) return { ...floor, source: "floor_map" };
+  const query = [unit?.brand, unit?.model, unit?.title, unit?.category, explicit].filter(Boolean).join(" ");
+  const suggestions = await suggestCategories(query);
+  const picked = suggestions[0] || null;
+  if (!picked?.categoryId) {
     const err = new Error(
-      unit.category
-        ? `“${unit.category}” is not one of Floor’s eBay categories. Ask before adding others.`
-        : "This unit needs a Floor category mapped to eBay (refrigerators, washers, TVs, …).",
+      query
+        ? `eBay found no category for “${query}”. Clarify title/brand/model, or set ebay_category on the unit.`
+        : "Need a title, brand, model, or category so eBay can suggest a listing category.",
     );
     err.code = "ebay_category_unmapped";
     throw err;
   }
+  return {
+    slug: `ebay_${picked.categoryId}`,
+    name: picked.categoryName || String(picked.categoryId),
+    ebayCategoryId: String(picked.categoryId),
+    aliases: [],
+    defaults: {},
+    standalone: false,
+    source: "taxonomy",
+  };
+}
+
+export async function prepareUnitCondition({ unit, liveCheck = false }) {
+  const floor = await resolveListingCategory(unit);
   let stored = await loadStoredConditions(floor.ebayCategoryId);
   let refreshed = false;
   if (!stored.length) {
@@ -452,16 +496,7 @@ function visibleDefs(defs) {
 }
 
 export async function prepareUnitAspects({ storeId, unit, liveCheck = false }) {
-  const floor = resolveFloorCategory(unit.category);
-  if (!floor) {
-    const err = new Error(
-      unit.category
-        ? `“${unit.category}” is not one of Floor’s eBay categories. Ask before adding others.`
-        : "This unit needs a Floor category mapped to eBay (refrigerators, washers, TVs, …).",
-    );
-    err.code = "ebay_category_unmapped";
-    throw err;
-  }
+  const floor = await resolveListingCategory(unit);
   let stored = await loadStoredAspects(floor.ebayCategoryId);
   let refreshed = false;
   if (!stored.length) {
@@ -479,8 +514,10 @@ export async function prepareUnitAspects({ storeId, unit, liveCheck = false }) {
   const { remembered } = storeId ? await loadRememberedDefaults(storeId, floor.slug) : { remembered: {} };
   const filled = fillAspects(stored, unit, specs, {
     remembered,
-    categoryDefaults: floor.defaults,
-    standalone: floor.standalone,
+    categoryDefaults: floor.defaults || {},
+    standalone: Boolean(floor.standalone),
+    categoryName: floor.name,
+    title: unit?.title,
   });
   const ui = visibleDefs(filled.filled);
   const missingRequired = ui.filter((row) => row.required && !row.value).map((row) => row.name);
