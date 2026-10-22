@@ -72,7 +72,7 @@ export function ListingManagerPanel({ accessToken, money, channel: channelProp, 
   const [channel, setChannel] = useState<ListingChannel>(channelProp || 'ebay');
   const [query, setQuery] = useState('');
   const [items, setItems] = useState<ListingRow[]>([]);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState(true);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [meta, setMeta] = useState('');
