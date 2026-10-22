@@ -1383,7 +1383,7 @@ function fulfillmentOrdersPath() {
   return `/sell/fulfillment/v1/order?limit=50&filter=${filter}`;
 }
 
-async function listedSoldBySku(storeId) {
+async function listedSoldBySku(storeId, { maxOfferChecks = 8 } = {}) {
   const sb = serviceClient();
   const { data, error } = await sb
     .from("listings")
@@ -1395,7 +1395,15 @@ async function listedSoldBySku(storeId) {
   const soldQty = {};
   const extras = [];
   let tradingChecks = 0;
-  for (const row of data ?? []) {
+  let offerChecks = 0;
+  const rows = data ?? [];
+  // Rotate which slice we ask eBay about. Walking every listed SKU 404s for minutes
+  // and the 30s function was killed before either account's orders were saved.
+  const start = rows.length ? (Math.floor(Date.now() / 600000) * maxOfferChecks) % rows.length : 0;
+  const ordered = rows.slice(start).concat(rows.slice(0, start));
+  for (const row of ordered) {
+    if (offerChecks >= maxOfferChecks) break;
+    offerChecks += 1;
     let offers = [];
     try {
       offers = await listOffersForSku(storeId, row.sku);
@@ -1600,9 +1608,10 @@ export async function pollEbayOrders(storeId, accountHint = {}) {
 
   let soldQty = {};
   let extras = [];
-  if (accountAllowsListing(account)) {
+  const maxOfferChecks = Number.isFinite(Number(accountHint.maxOfferChecks)) ? Number(accountHint.maxOfferChecks) : 8;
+  if (accountHint.soldScan !== false && accountAllowsListing(account)) {
     try {
-      const listed = await listedSoldBySku(storeId);
+      const listed = await listedSoldBySku(storeId, { maxOfferChecks });
       soldQty = listed.soldQty;
       extras = listed.extras;
     } catch (err) {
