@@ -1,5 +1,6 @@
 ﻿import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { ChannelListingPage } from './ChannelListingPage';
 import { isKioskShell } from './kiosk';
 
 const base = (import.meta.env.VITE_FLOOR_FUNCTIONS_URL || 'https://inventoryobi.netlify.app').replace(/\/$/, '');
@@ -573,15 +574,8 @@ export function AmazonPage({ client, accessToken, money: moneyFmt }: Props) {
 
   const canEnter = Boolean(parseCodes(skuDraft).length || parseCodes(upcDraft).length);
 
-  return (
+  const amazonQueue = (
     <>
-      <header>
-        <div>
-          <div className="eyebrow">SELLING PARTNER</div>
-          <h1>Amazon</h1>
-        </div>
-      </header>
-
       {error && (
         <div className="alert" role="alert">
           {error}
@@ -607,7 +601,7 @@ export function AmazonPage({ client, accessToken, money: moneyFmt }: Props) {
       )}
 
       <section className="panel amazon-add">
-        <h2>Add to queue</h2>
+        <h2>Create / queue workflow</h2>
         <p className="hint" style={{ marginTop: 0 }}>
           Use the SKU box, the UPC box, or both. Only already-sold units are skipped. UPC with multiple available units
           queues the oldest one.
@@ -946,5 +940,14 @@ export function AmazonPage({ client, accessToken, money: moneyFmt }: Props) {
         </div>
       )}
     </>
+  );
+
+  return (
+    <ChannelListingPage
+      channel="amazon"
+      accessToken={accessToken}
+      money={moneyFmt}
+      amazonQueue={amazonQueue}
+    />
   );
 }
