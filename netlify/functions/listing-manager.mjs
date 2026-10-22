@@ -31,6 +31,13 @@ import {
   migrateEbayListingsToInventory,
   readSync,
 } from "../lib/listing-manager.mjs";
+import {
+  getBoardJobStatus,
+  loadCatalog,
+  loadQuarter,
+  queueBoardJob,
+  saveFloorListingFields,
+} from "../lib/marketplace-board.mjs";
 
 async function handleStaff(event) {
   const body = typeof event.body === "string" ? JSON.parse(event.body || "{}") : event.body || {};
@@ -139,6 +146,9 @@ async function handleStaff(event) {
         productType: body.product_type || null,
         syncFloorAsk: body.sync_floor_ask !== false,
       });
+      if (result.ok && body.sku && body.condition) {
+        await saveFloorListingFields(storeId, { sku: body.sku, condition: body.condition, channel });
+      }
       return json(result.ok ? 200 : 400, result);
     }
     if (channel === "ebay") {
@@ -155,6 +165,15 @@ async function handleStaff(event) {
         aspects: body.aspects || null,
         syncFloorAsk: body.sync_floor_ask !== false,
       });
+      if (result.ok && body.sku && (body.condition || body.shipping_mode)) {
+        const extra = await saveFloorListingFields(storeId, {
+          sku: body.sku,
+          condition: body.condition || null,
+          shipping_mode: body.shipping_mode || null,
+          channel,
+        });
+        if (extra.shipping_warning) result.shipping_warning = extra.shipping_warning;
+      }
       return json(result.ok ? 200 : 400, result);
     }
     if (channel === "tiktok") {
@@ -166,6 +185,9 @@ async function handleStaff(event) {
         description: body.description || null,
         syncFloorAsk: body.sync_floor_ask !== false,
       });
+      if (result.ok && body.sku && body.condition) {
+        await saveFloorListingFields(storeId, { sku: body.sku, condition: body.condition, channel });
+      }
       return json(result.ok ? 200 : 400, result);
     }
     return json(400, { ok: false, error: "channel_required" });
@@ -216,6 +238,33 @@ async function handleStaff(event) {
       dryRun: Boolean(body.dry_run),
     });
     return json(result.ok || result.dryRun ? 200 : 400, result);
+  }
+
+  if (action === "board_catalog") {
+    return json(200, await loadCatalog(storeId, channel));
+  }
+
+  if (action === "board_quarter") {
+    return json(200, await loadQuarter(storeId, channel, body.quarter || null));
+  }
+
+  if (action === "board_job") {
+    const result = await queueBoardJob(storeId, {
+      channel,
+      kind: body.kind,
+      items: body.items || [],
+      requestedBy: actor || "portal",
+    });
+    return json(result.ok ? 200 : 400, result);
+  }
+
+  if (action === "board_job_status") {
+    return json(200, { ok: true, job: await getBoardJobStatus(storeId) });
+  }
+
+  if (action === "board_floor_save") {
+    const result = await saveFloorListingFields(storeId, { ...body, channel });
+    return json(result.ok ? 200 : 400, result);
   }
 
   if (action === "capabilities") {

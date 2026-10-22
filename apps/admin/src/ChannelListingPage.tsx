@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { ListingManagerPanel, type ListingChannel } from './ListingManagerPanel';
+import { MarketplaceBoard, type BoardChannel } from './MarketplaceBoard';
 
 const TITLES: Record<ListingChannel, { eyebrow: string; title: string; blurb: string }> = {
   ebay: {
@@ -33,6 +34,19 @@ type Props = {
 };
 
 export function ChannelListingPage({ channel, accessToken, money, amazonQueue }: Props) {
+  if (channel !== 'depop') {
+    return (
+      <>
+        <MarketplaceBoard channel={channel as BoardChannel} accessToken={accessToken} money={money} />
+        {channel === 'amazon' && amazonQueue ? (
+          <details className="mboard-more">
+            <summary>Amazon create queue and catalog tools</summary>
+            {amazonQueue}
+          </details>
+        ) : null}
+      </>
+    );
+  }
   const meta = TITLES[channel];
   return (
     <>
@@ -44,7 +58,6 @@ export function ChannelListingPage({ channel, accessToken, money, amazonQueue }:
         </div>
       </header>
       <ListingManagerPanel accessToken={accessToken} money={money} channel={channel} channelLocked />
-      {channel === 'amazon' ? amazonQueue : null}
     </>
   );
 }

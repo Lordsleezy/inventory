@@ -5,6 +5,7 @@
 import { requireEnv } from "../lib/server.mjs";
 import { asNetlifyFunction, floorLog, runTrace } from "../lib/floor-log.mjs";
 import { runBulkPublish } from "../lib/listing-manager.mjs";
+import { runBoardJob } from "../lib/marketplace-board.mjs";
 
 export const invoke = async (event) => {
   const header = event.headers?.authorization || event.headers?.Authorization || "";
@@ -28,6 +29,19 @@ export const invoke = async (event) => {
           event: "listing_manager.bulk_publish.done",
           message: result?.progress?.message || "bulk done",
           detail: { summary: result?.summary, channel: body.channel },
+        });
+      } else if (job === "board") {
+        const result = await runBoardJob(storeId, {
+          channel: body.channel,
+          kind: body.kind,
+          items: body.items || [],
+          results: body.results || [],
+        });
+        await floorLog({
+          storeId,
+          event: "listing_manager.board_job.done",
+          message: result?.progress?.message || body.kind || "board job",
+          detail: { kind: body.kind, channel: body.channel, summary: result?.summary || null, continued: result?.continued || false },
         });
       }
     } catch (err) {
