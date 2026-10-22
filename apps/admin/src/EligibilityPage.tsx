@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { errText } from './errText';
 
 type RuleRow = {
   channel: string; enabled: boolean; rules: Record<string, unknown>; notes: string | null;
@@ -68,7 +69,7 @@ export function EligibilityPage({ client, stamp, embedded }: Props) {
     }
   }, [client, channel]);
 
-  useEffect(() => { void load().catch((e) => setError(e instanceof Error ? e.message : String(e))); }, [load]);
+  useEffect(() => { void load().catch((e) => setError(errText(e))); }, [load]);
 
   useEffect(() => {
     const current = rules.find((r) => r.channel === channel);
@@ -102,7 +103,7 @@ export function EligibilityPage({ client, stamp, embedded }: Props) {
       if (e) throw e;
       setNotice(`Saved ${channel} rules.`);
       await load();
-    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    } catch (e) { setError(errText(e)); }
     finally { setBusy(false); }
   }
 
@@ -113,7 +114,7 @@ export function EligibilityPage({ client, stamp, embedded }: Props) {
       const { data, error: e } = await client.rpc('portal_unit_eligibility', { p_sku: sku.trim() });
       if (e) throw e;
       setElig((data || []) as Elig[]);
-    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    } catch (e) { setError(errText(e)); }
     finally { setBusy(false); }
   }
 
@@ -129,7 +130,7 @@ export function EligibilityPage({ client, stamp, embedded }: Props) {
       if (e) throw e;
       setNotice(`Override saved for SKU ${sku.trim()} on ${overrideForm.channel}.`);
       await lookupSku();
-    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    } catch (e) { setError(errText(e)); }
     finally { setBusy(false); }
   }
 
@@ -141,7 +142,7 @@ export function EligibilityPage({ client, stamp, embedded }: Props) {
       });
       if (e) throw e;
       await lookupSku();
-    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    } catch (e) { setError(errText(e)); }
     finally { setBusy(false); }
   }
 
@@ -159,7 +160,7 @@ export function EligibilityPage({ client, stamp, embedded }: Props) {
       setNotice(`Strike logged for SKU ${strikeForm.sku} on ${strikeForm.channel}. That SKU is permanently blocked there.`);
       setStrikeForm({ channel: 'depop', sku: '', reason: '', email: '', date: '' });
       await load();
-    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    } catch (e) { setError(errText(e)); }
     finally { setBusy(false); }
   }
 

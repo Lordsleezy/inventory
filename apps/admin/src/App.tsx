@@ -20,6 +20,7 @@ import { SettingsPage } from './SettingsPage';
 import { AssociateSettings } from './AssociateSettings';
 import { type MainPage, type NavState, defaultNavState, parseNavFromLocation, writeNavToLocation } from './navigation';
 import { formatLabelWithPending, parseShipCostSource } from './shipCostSource';
+import { errText } from './errText';
 
 const ASSOCIATE_PAGES: MainPage[] = ['register', 'inventory', 'cameras', 'settings'];
 
@@ -224,7 +225,7 @@ async function storedCommissionOverrides(storeId: string): Promise<OverrideMap> 
       if (batch.length < 1000) return map;
     }
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errText(e);
     if (/portal_commission_overrides|schema cache|does not exist|Could not find the table/i.test(msg)) {
       return map;
     }
@@ -255,7 +256,7 @@ async function storedPayoutAdjustments(): Promise<PayoutAdjustment[]> {
     const rows = check<PayoutAdjustment[]>(await sb.rpc('portal_payout_adjustments'));
     return rows || [];
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errText(e);
     if (/portal_payout_adjustments|schema cache|does not exist|PGRST202|404/i.test(msg)) return [];
     throw e;
   }
@@ -454,7 +455,7 @@ export function App() {
           setNav(defaultNavState('register'));
         }
       } catch (e) {
-        if (alive) setError(e instanceof Error ? e.message : String(e));
+        if (alive) setError(errText(e));
       } finally {
         if (alive) setAccessReady(true);
       }
@@ -478,7 +479,7 @@ export function App() {
       const cfg = check<{ online_channels: string[]; online_payout_pct: number; online_payout_employee_id: string | null }>(c);
       setOnlineCfg({ channels: (cfg.online_channels || []).map(s => String(s).toLowerCase()), pct: Number(cfg.online_payout_pct) || 0, employeeId: cfg.online_payout_employee_id });
       setError('');
-    } catch (e) { setError(String(e)); }
+    } catch (e) { setError(errText(e)); }
   }, [store]);
   const loadPayments = useCallback(async () => {
     if (!store) return;
@@ -486,11 +487,11 @@ export function App() {
       const [pays, adjs] = await Promise.all([storedPayments(store), storedPayoutAdjustments()]);
       setPayments(pays);
       setPayoutAdjustments(adjs);
-    } catch (e) { setError(String(e)); }
+    } catch (e) { setError(errText(e)); }
   }, [store]);
   const loadCommissionOverrides = useCallback(async () => {
     if (!store) return;
-    try { setCommissionOverrides(await storedCommissionOverrides(store)); } catch (e) { setError(String(e)); }
+    try { setCommissionOverrides(await storedCommissionOverrides(store)); } catch (e) { setError(errText(e)); }
   }, [store]);
   const loadSales = useCallback(async () => {
     if (!store) return;
@@ -505,13 +506,13 @@ export function App() {
       // Always keep the selected calendar day (default: today LA). Do not jump to
       // yesterday when today is empty — that made Live Sales show the prior day.
       setLive([...rows, ...pending].sort((a, b) => b.at.localeCompare(a.at)));
-    } catch (e) { setError(String(e)); }
+    } catch (e) { setError(errText(e)); }
   }, [store, selectedDay]);
   const loadVoided = useCallback(async () => {
     if (!store) return;
     try {
       setVoided(await voidedSales(selectedDay, datePlus(selectedDay, 1)));
-    } catch (e) { setError(String(e)); }
+    } catch (e) { setError(errText(e)); }
   }, [store, selectedDay]);
   const loadPayoutSales = useCallback(async () => {
     if (!store) return;
@@ -521,7 +522,7 @@ export function App() {
       const [salesRows, fees] = await Promise.all([payoutSales(overrides), ebayInsertionFees(store)]);
       setAllSales(salesRows);
       setEbayFees(fees);
-    } catch (e) { setError(String(e)); }
+    } catch (e) { setError(errText(e)); }
   }, [store]);
   const setTicketOverride = useCallback((ticketKey: string, next: CommissionOverride | null) => {
     setCommissionOverrides(prev => {
@@ -564,7 +565,7 @@ export function App() {
       const { error: e } = await sb.rpc('portal_match_web_order', { p_order: t.webOrderId, p_sku: sku.trim() });
       if (e) throw e;
       await loadSales();
-    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    } catch (e) { setError(errText(e)); }
     finally { setBusy(false); }
   }
   const ruleMap = useMemo(() => new Map(rules.map(x => [x.employee_id, x])), [rules]);
@@ -578,7 +579,7 @@ export function App() {
   const defaultReimbursementId = staff.find(p => p.display_name === 'Paul')?.user_id || staff[0]?.user_id || '';
   const personName = (id: string) => people.find(x => x.user_id === id)?.display_name || 'Unknown';
   const sum = (ts: Ticket[]): Summary => { const cuts = ts.flatMap(t => activeRules.map(r => payout(t, r, onlineCfg))); return { sales_cents: ts.reduce((n, t) => n + t.subtotal, 0), tax_cents: ts.reduce((n, t) => n + t.tax, 0), card_fee_cents: ts.reduce((n, t) => n + t.fee, 0), collected_cents: ts.reduce((n, t) => n + t.total, 0), cash_cents: ts.reduce((n, t) => n + t.cash, 0), card_cents: ts.reduce((n, t) => n + t.card, 0), other_cents: ts.reduce((n, t) => n + t.total - t.cash - t.card, 0), sale_count: ts.length, payout_cents: cuts.reduce<number>((n, x) => n + (x || 0), 0), payout_unset: cuts.filter(x => x === null).length }; };
-  async function run(f: () => Promise<void>) { setBusy(true); setError(''); try { await f(); } catch (e) { setError(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); } }
+  async function run(f: () => Promise<void>) { setBusy(true); setError(''); try { await f(); } catch (e) { setError(errText(e)); } finally { setBusy(false); } }
   async function openReport(type: 'daily' | 'weekly') {
     const start = type === 'daily' ? selectedDay : weekStart(selectedDay);
     const overrides = store ? await storedCommissionOverrides(store) : new Map();
@@ -603,7 +604,7 @@ export function App() {
       setPayments(current => [saved, ...current.filter(p => p.id !== saved.id)]);
       return null;
     } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
+      const message = errText(e);
       setError(message);
       return message;
     } finally { setBusy(false); }

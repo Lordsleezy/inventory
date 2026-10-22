@@ -224,6 +224,23 @@ export function authErrorMessage(err: unknown): string {
   }
   if (/invalid_sku/i.test(text)) return "SKU must be digits.";
   if (/no_store/i.test(text)) return "This account is not attached to a store yet.";
+  if (/PGRST203|Could not choose the best candidate function/i.test(text)) {
+    return "Receive is out of date with the server (ambiguous function). Refresh the page and try again.";
+  }
+  if (/units_upc_valid_gtin|invalid_gtin/i.test(text)) {
+    return "That barcode is not a valid UPC/EAN. Clear UPC or fix the digits, then save again.";
+  }
+  if (/condition_required/i.test(text)) return "Pick a condition, or clear the price to receive into Needs attention.";
+  if (/brand_required|brand_invalid/i.test(text)) return "Enter a real brand (or mark Unbranded), or clear the price to receive into Needs attention.";
+  if (/title_required/i.test(text)) return "Title is required to save a price. Clear the price to receive into Needs attention.";
+  if (/category_required/i.test(text)) return "Category is required to save a price. Clear the price to receive into Needs attention.";
+  if (/upc_required/i.test(text)) return "UPC is required to save a price. Clear the price to receive into Needs attention.";
+  if (/package_required/i.test(text)) return "Package size/weight is required to save a price. Clear the price to receive into Needs attention.";
+  if (/portal_access_denied/i.test(text)) return "Not signed in to a store — sign in again, then retry.";
+  if (/quantity_must_be_1_to_100/i.test(text)) return "Quantity must be 1–100.";
+  if (/dims_must_be_positive/i.test(text)) return "Dimensions and weight must be positive numbers (or blank).";
+  if (/invalid_shippable/i.test(text)) return "Shippable must be Automatic, Yes, or Pickup only.";
+  if (/negative_amount/i.test(text)) return "Price and cost cannot be negative.";
   if (isNetworkFailureText(text) || isNetworkAuthFailure(err)) {
     const host = bakedSupabaseHost();
     const where = host ? ` (${host})` : "";

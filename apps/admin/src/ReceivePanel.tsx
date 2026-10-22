@@ -4,6 +4,7 @@ import { isKioskShell, scannerInputMode } from './kiosk';
 import { floorFunctionUrl } from './floorApi';
 import { reportClientError } from './clientLog';
 import { categoryDefaultCostCents, priceFloorCents, suggestAskCents } from './scanPricing';
+import { errText } from './errText';
 
 /* ------------------------------------------------------------------------------------------------
  * Receive = scan-to-list.
@@ -136,7 +137,7 @@ function msrpOf(r?: Lookup): number | null {
 }
 
 function explainLookupError(err: unknown, status?: number, body?: { error?: string; message?: string }): string {
-  const raw = body?.error || body?.message || (err instanceof Error ? err.message : String(err || ''));
+  const raw = errText(body?.error || body?.message || err || '');
   const lower = raw.toLowerCase();
   if (err instanceof DOMException && err.name === 'AbortError') return 'Lookup timed out — the server took too long. Retry or enter manually.';
   if (/failed to fetch|networkerror|load failed|network request failed/i.test(raw)) {
@@ -145,9 +146,9 @@ function explainLookupError(err: unknown, status?: number, body?: { error?: stri
   if (status === 401 || /not_logged_in|sign in required|not_signed_in/i.test(lower)) return 'Not logged in — sign in again, then retry the scan.';
   if (status === 403 || /not_authorized|staff access|not_owner|not_staff/i.test(lower)) return 'Not authorized for lookup — ask an admin to check your staff access.';
   if (status === 429 || /rate.?limit|quota/i.test(lower)) return 'Amazon rate-limited pricing — catalog may still show; retry in a moment for the price.';
-  if (/invalid_gtin|upc_required/i.test(lower)) return 'That barcode does not look like a valid UPC/EAN.';
+  if (/invalid_gtin|upc_required|valid upc/i.test(lower)) return 'That barcode does not look like a valid UPC/EAN.';
   if (/not found|no source|upcitemdb/i.test(lower) && status === 404) return 'UPC not found in Amazon or UPCitemdb — fill the fields by hand.';
-  if (raw && raw !== 'Failed to fetch') return raw;
+  if (raw && raw !== 'Failed to fetch' && raw !== 'Something went wrong') return raw;
   return 'Lookup failed — retry or enter manually.';
 }
 
@@ -244,7 +245,7 @@ function CameraScanner({ onDetect, onFile, onClose }: {
             if (raw && !done.current) { done.current = true; detect.current(raw); }
           }).catch(() => undefined);
         }, 250);
-      } catch (e) { setErr(e instanceof Error ? e.message : 'Camera unavailable.'); }
+      } catch (e) { setErr(errText(e) || 'Camera unavailable.'); }
     })();
     return () => { stopped = true; window.clearInterval(timer); stream?.getTracks().forEach(t => t.stop()); };
   }, []);
@@ -335,7 +336,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
     if (e) throw e;
     setOptions(data as Options);
   }
-  useEffect(() => { void loadOptions().catch(e => setError(e instanceof Error ? e.message : String(e))); }, [client]);
+  useEffect(() => { void loadOptions().catch(e => setError(errText(e))); }, [client]);
 
   /* ----- photo previews ----- */
   const previews = useMemo(() => files.map(f => URL.createObjectURL(f)), [files]);
@@ -357,7 +358,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
         const res = await lookupUpc(accessToken, upc);
         if (mounted.current) setQueue(q => q.map(s => (s.id === id ? { ...s, status: 'ready', result: res, error: undefined } : s)));
       } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
+        const msg = errText(e);
         reportClientError(accessToken, { message: `upc_lookup failed: ${msg}`, page: 'inventory/receive', action_name: 'upc_lookup', sku: upc });
         if (mounted.current) setQueue(q => q.map(s => (s.id === id ? { ...s, status: 'error', error: msg } : s)));
       }
@@ -546,12 +547,14 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
       if (d && d.count > 0) { setDups(d); setError(`You already have ${d.count} of these in stock. Tap "Add another unit" to confirm this is a new one.`); return; }
     }
     const gaps = missingFor(parsed);
-    if (pos(parsed.ask) && gaps.length) {
-      setError(`Fill these before saving a price: ${gaps.join(', ')}. Clear the price to receive it into Needs attention.`);
-      return;
-    }
+    // Never block inventory save. Incomplete (or priced-but-incomplete) units
+    // receive without an ask and land in Needs attention until fields are filled.
     if (gaps.length === 0) { setDialog('ready'); return; }
-    await receive(parsed, null);
+    const toSave: Parsed = pos(parsed.ask) ? { ...parsed, ask: null } : parsed;
+    if (pos(parsed.ask) && gaps.length) {
+      setWarning(`Saving into Needs attention without a price. Still needed: ${gaps.join(', ')}.`);
+    }
+    await receive(toSave, null);
   }
 
   async function receive(parsed: Parsed, hold: { reason: string; note: string } | null) {
@@ -575,11 +578,11 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
         p_description: form.description.trim() || null,
         p_condition: form.condition || null,
         p_test_status: form.testStatus || null,
-        p_ask_cents: hold ? null : parsed.ask, // held units never get an ask
+        p_ask_cents: hold ? null : parsed.ask, // held / incomplete units never get an ask
         p_cost_cents: parsed.cost ?? floor.costCents,
         p_notes: notes || null,
         p_upc: form.upc.trim() || current?.upc || null,
-        p_shippable: form.shippable,
+        p_shippable: form.shippable || 'auto',
         p_length: parsed.dims[0],
         p_width: parsed.dims[1],
         p_height: parsed.dims[2],
@@ -632,7 +635,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
       onSaved();
       await loadOptions().catch(() => setWarning(w => `${w} Units were received. Refresh the page to see the next suggested SKU.`.trim()));
       focusUpc();
-    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    } catch (e) { setError(errText(e)); }
     finally { setBusy(false); }
   }
 
@@ -869,20 +872,20 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
       </div>}
 
       <div className="unit-edit-grid">
-        {manual && <label>UPC<input value={form.upc} onChange={e => { update('upc', e.target.value); setDups(null); setDupAck(false); }} inputMode={scannerInputMode()} autoComplete="off" placeholder="optional" /></label>}
+        {manual && <label className={liveMissing.includes('UPC') ? 'receive-need' : undefined}>UPC{liveMissing.includes('UPC') ? ' (needed to list)' : ''}<input value={form.upc} onChange={e => { update('upc', e.target.value); setDups(null); setDupAck(false); }} inputMode={scannerInputMode()} autoComplete="off" placeholder="optional — blank is fine to receive" /></label>}
         {manual && <label>Quantity<input type="number" min="1" max="100" step="1" value={form.quantity} onChange={e => update('quantity', e.target.value)} required /></label>}
-        <label>Brand<input value={form.unbranded ? 'Unbranded' : form.brand} disabled={form.unbranded} onChange={e => update('brand', e.target.value)} /></label>
+        <label className={liveMissing.includes('brand') ? 'receive-need' : undefined}>Brand{liveMissing.includes('brand') ? ' (needed to list)' : ''}<input value={form.unbranded ? 'Unbranded' : form.brand} disabled={form.unbranded} onChange={e => update('brand', e.target.value)} /></label>
         <label className="mboard-inline">
           <input type="checkbox" checked={form.unbranded} onChange={e => setForm(p => ({ ...p, unbranded: e.target.checked }))} />
           Unbranded — no brand anywhere on the product or packaging
         </label>
         <label>Model<input value={form.model} onChange={e => update('model', e.target.value)} /></label>
-        <label>Category<input value={form.category} onChange={e => update('category', e.target.value)} /></label>
-        <label className="unit-edit-wide">Title<input value={form.title} onChange={e => update('title', e.target.value)} /></label>
-        <label className="unit-edit-wide">Description / features<textarea rows={4} value={form.description} onChange={e => update('description', e.target.value)} /></label>
+        <label className={liveMissing.includes('category') ? 'receive-need' : undefined}>Category{liveMissing.includes('category') ? ' (needed to list)' : ''}<input value={form.category} onChange={e => update('category', e.target.value)} /></label>
+        <label className={`unit-edit-wide${liveMissing.includes('title') ? ' receive-need' : ''}`}>Title{liveMissing.includes('title') ? ' (needed to list)' : ''}<input value={form.title} onChange={e => update('title', e.target.value)} /></label>
+        <label className={`unit-edit-wide${liveMissing.includes('description/features') ? ' receive-need' : ''}`}>Description / features{liveMissing.includes('description/features') ? ' (needed to list)' : ''}<textarea rows={4} value={form.description} onChange={e => update('description', e.target.value)} /></label>
 
-        <div className="unit-edit-wide receive-cond" role="radiogroup" aria-label="Condition">
-          <span className="receive-label">Condition{manual ? '' : ' (required)'}</span>
+        <div className={`unit-edit-wide receive-cond${liveMissing.includes('condition') ? ' receive-need' : ''}`} role="radiogroup" aria-label="Condition">
+          <span className="receive-label">Condition{liveMissing.includes('condition') ? ' (needed to list)' : (manual ? '' : ' (required for scan)')}</span>
           {manual
             ? <select value={form.condition} onChange={e => update('condition', e.target.value)}>
               <option value="">—</option>{[...new Set([...choices(options?.conditions), SCRATCH])].map(x => <option key={x} value={x}>{x}</option>)}
@@ -893,7 +896,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
         </div>
         {needNoteForScratch && <label className="unit-edit-wide">What is scratched or dented? (required)<textarea rows={2} value={form.conditionNote} onChange={e => update('conditionNote', e.target.value)} /></label>}
 
-        <label>Price{retail && !askTouched.current ? ' (suggested — edit if needed)' : ''}<input inputMode="decimal" placeholder="24.99" value={form.ask} onChange={e => update('ask', e.target.value)} /></label>
+        <label className={liveMissing.includes('price') ? 'receive-need' : undefined}>Price{liveMissing.includes('price') ? ' (needed to list — leave blank to receive now)' : (retail && !askTouched.current ? ' (suggested — edit if needed)' : '')}<input inputMode="decimal" placeholder="24.99" value={form.ask} onChange={e => update('ask', e.target.value)} /></label>
         <label>Cost{form.costEstimate ? ' (estimate — edit if you know it)' : ' (optional)'}
           <input inputMode="decimal" placeholder="9.00" value={form.cost} onChange={e => update('cost', e.target.value)} />
         </label>
@@ -916,10 +919,10 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
             <option value="pickup">No — pickup only</option>
           </select>
         </label>
-        <label>Length (in)<input inputMode="decimal" value={form.length} onChange={e => update('length', e.target.value)} /></label>
-        <label>Width (in)<input inputMode="decimal" value={form.width} onChange={e => update('width', e.target.value)} /></label>
-        <label>Height (in)<input inputMode="decimal" value={form.height} onChange={e => update('height', e.target.value)} /></label>
-        <label>Weight (lb)<input inputMode="decimal" value={form.weight} onChange={e => update('weight', e.target.value)} /></label>
+        <label className={liveMissing.includes('package L/W/H/weight') ? 'receive-need' : undefined}>Length (in){liveMissing.includes('package L/W/H/weight') ? ' (needed to list)' : ''}<input inputMode="decimal" value={form.length} onChange={e => update('length', e.target.value)} /></label>
+        <label className={liveMissing.includes('package L/W/H/weight') ? 'receive-need' : undefined}>Width (in)<input inputMode="decimal" value={form.width} onChange={e => update('width', e.target.value)} /></label>
+        <label className={liveMissing.includes('package L/W/H/weight') ? 'receive-need' : undefined}>Height (in)<input inputMode="decimal" value={form.height} onChange={e => update('height', e.target.value)} /></label>
+        <label className={liveMissing.includes('package L/W/H/weight') ? 'receive-need' : undefined}>Weight (lb)<input inputMode="decimal" value={form.weight} onChange={e => update('weight', e.target.value)} /></label>
         <label className="unit-edit-wide">Notes<textarea rows={2} value={form.notes} onChange={e => update('notes', e.target.value)} /></label>
 
         <div className="unit-edit-wide">

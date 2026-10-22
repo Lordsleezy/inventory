@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { WebOrder } from './OrdersPage';
+import { errText } from './errText';
 
 const functionsBase = (import.meta.env.VITE_FLOOR_FUNCTIONS_URL || 'https://inventoryobi.netlify.app').replace(/\/$/, '');
 
@@ -41,7 +42,7 @@ export function LabelDialog({ order, accessToken, money, onClose, onDone }: Prop
     try {
       const q = (await call({ action: 'label_quote', box: boxBody() })) as Quote;
       setQuote(q); setRateId(q.selected_id);
-    } catch (e) { setQuote(null); setError(e instanceof Error ? e.message : String(e)); }
+    } catch (e) { setQuote(null); setError(errText(e)); }
     finally { setLoading(false); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [call, box]);
@@ -64,7 +65,7 @@ export function LabelDialog({ order, accessToken, money, onClose, onDone }: Prop
       const r = await call({ action: 'buy_label', rate_id: selected.id, box: boxBody() });
       if (r.order?.label_url) window.open(r.order.label_url, '_blank', 'noopener');
       onDone(); onClose();
-    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    } catch (e) { setError(errText(e)); }
     finally { setBuying(false); }
   }
 
@@ -79,7 +80,7 @@ export function LabelDialog({ order, accessToken, money, onClose, onDone }: Prop
         <button type="button" className="secondary" disabled={buying} onClick={async () => {
           setCondition('not_as_listed'); setError('');
           try { await call({ action: 'pack_condition', status: 'not_as_listed' }); setError('Marked not as listed. The owner is alerted. The label was not bought.'); }
-          catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+          catch (e) { setError(errText(e)); }
         }}>Not as listed</button>
       </div>
       {condition === 'not_as_listed' && <div className="alert" role="alert">Do not buy a label. Message the buyer or swap the unit.</div>}

@@ -1,4 +1,4 @@
-﻿import React, { Component, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import React, { Component, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { centsToInput, formatCents, formatCentsTotal, parseMoneyToCents } from '@floor/store';
 import {
   SellError,
@@ -33,6 +33,7 @@ import {
 } from './register/sale';
 import { loadAvailableUnits, queryAvailableUnits, searchUnits, type RegisterUnit } from './register/units';
 import { isKioskShell, scannerInputMode } from './kiosk';
+import { errText } from './errText';
 
 type ManualPayment = {
   quote: TicketQuote;
@@ -1116,7 +1117,7 @@ type Props = { staffSession: StaffSession; onNeedFullReload?: () => void };
 class RegisterBoundary extends Component<{ children: ReactNode }, { error: string }> {
   state = { error: '' };
   static getDerivedStateFromError(err: unknown) {
-    return { error: err instanceof Error ? err.message : String(err) };
+    return { error: errText(err) };
   }
   render() {
     if (this.state.error) {

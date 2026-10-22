@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { reportClientError } from './clientLog';
+import { errText } from './errText';
 
 const functionsBase = (import.meta.env.VITE_FLOOR_FUNCTIONS_URL || 'https://inventoryobi.netlify.app').replace(/\/$/, '');
 
@@ -165,7 +166,7 @@ export function EbayDraftsPage({ accessToken, userId, money, active }: Props) {
 
   async function run(fn: () => Promise<void>) {
     setBusy(true); setError('');
-    try { await fn(); } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    try { await fn(); } catch (e) { setError(errText(e)); }
     finally { setBusy(false); }
   }
   async function open(sku: string) {

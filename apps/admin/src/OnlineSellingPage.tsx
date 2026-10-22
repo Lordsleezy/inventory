@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { errText } from './errText';
 
 const functionsBase = (import.meta.env.VITE_FLOOR_FUNCTIONS_URL || 'https://inventoryobi.netlify.app').replace(/\/$/, '');
 
@@ -70,7 +71,7 @@ export function OnlineSellingPage({ client, accessToken, stamp, embedded }: Prop
       await put('tax_in_state_ship_bps', tax.inPct.trim() === '' ? null : bps(tax.inPct));
       await put('tax_shipping', tax.taxShipping);
       setSaved('Saved. The website uses the new rules immediately.'); await load();
-    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    } catch (e) { setError(errText(e)); }
     finally { setBusy(false); }
   }
   async function saveMarketplaceMarkup() {
@@ -81,7 +82,7 @@ export function OnlineSellingPage({ client, accessToken, stamp, embedded }: Prop
       const { error: e } = await client.rpc('portal_set_marketplace_packing_markup', { p_markup_cents: cents });
       if (e) throw e;
       setSaved('Marketplace packing markup saved.');
-    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    } catch (e) { setError(errText(e)); }
     finally { setBusy(false); }
   }
   const loadShip = useCallback(async () => {
@@ -99,7 +100,7 @@ export function OnlineSellingPage({ client, accessToken, stamp, embedded }: Prop
       const d = await res.json();
       if (!res.ok) throw new Error(d.error || 'Could not change shipping');
       setShip(d); setSaved(enabled ? 'Shipping is ON.' : 'Shipping is OFF. The website is store pickup only.'); await load();
-    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    } catch (e) { setError(errText(e)); }
     finally { setBusy(false); }
   }
   async function runCheck() {
@@ -109,7 +110,7 @@ export function OnlineSellingPage({ client, accessToken, stamp, embedded }: Prop
       if (res.status !== 202) throw new Error(`Could not start the check (${res.status})`);
       setSaved('Check started. Results appear here in about a minute.');
       setTimeout(() => { void load(); }, 45000);
-    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    } catch (e) { setError(errText(e)); }
     finally { setBusy(false); }
   }
 

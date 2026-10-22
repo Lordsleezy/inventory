@@ -3,6 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { floorFunctionUrl } from './floorApi';
 import { scannerInputMode } from './kiosk';
 import { reportClientError } from './clientLog';
+import { errText } from './errText';
 
 type Photo = { id: number; path: string; is_primary: boolean };
 type Unit = Record<string, unknown>;
@@ -192,7 +193,7 @@ export function UnitEditDrawer({
         ? `Attached UPC ${upc}. Filled blank: ${filled.join(', ')}. Review and Save if price/cost look right.`
         : `Attached UPC ${upc}. Existing fields were kept (nothing overwritten).`);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errText(e));
     } finally {
       setLookupBusy(false);
     }

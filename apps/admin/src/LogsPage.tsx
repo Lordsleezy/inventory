@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useState } from 'react';
 import { floorFunctionUrl } from './floorApi';
+import { errText } from './errText';
 
 type Log = { id: number; created_at: string; sku: string | null; trace_id: string; source: string; level: string; event: string; message: string | null; detail: unknown };
 type Stalled = { trace_id: string; created_at: string; source: string; sku: string | null; action: string | null };
@@ -56,7 +57,7 @@ export function LogsPage({ accessToken, stamp }: Props) {
       if (d.jobs) setJobs(d.jobs);
       setMore(d.logs.length >= 80);
     }
-    catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    catch (e) { setError(errText(e)); }
     finally { setLoading(false); }
   }, [fetchLogs]);
 
@@ -66,7 +67,7 @@ export function LogsPage({ accessToken, stamp }: Props) {
   async function older() {
     const last = logs[logs.length - 1]; if (!last) return;
     try { const d = await fetchLogs(last.created_at); setLogs(cur => [...cur, ...d.logs.filter(r => !cur.some(c => c.id === r.id))]); setMore(d.logs.length >= 80); }
-    catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    catch (e) { setError(errText(e)); }
   }
   const sources = [...new Set([...summary.map(s => s.source), ...logs.map(l => l.source)])].sort();
   const tag = (l: string) => <span className={`tag ${l === 'error' ? 'off' : l === 'warn' ? 'warn' : ''}`}>{l}</span>;

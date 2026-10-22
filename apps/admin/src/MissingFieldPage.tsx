@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { errText } from './errText';
 
 type Kind = 'photo' | 'price' | 'spec' | 'model' | 'description' | 'brand' | 'category' | 'upc' | 'condition' | 'specifics';
 type Row = {
@@ -185,7 +186,7 @@ export function MissingFieldPage({ client, storeId, kind, money, stamp }: Props)
       setFlash(`Photo added for SKU ${sku}.`);
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errText(e));
     } finally {
       setBusySku(null);
     }

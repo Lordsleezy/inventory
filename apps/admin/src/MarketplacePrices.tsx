@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { errText } from './errText';
 
 const base = (import.meta.env.VITE_FLOOR_FUNCTIONS_URL || 'https://inventoryobi.netlify.app').replace(/\/$/, '');
 const channels = [['ebay', 'eBay'], ['depop', 'Depop'], ['website', 'Website']] as const;
@@ -28,7 +29,7 @@ export function MarketplacePrices({ sku, accessToken, client, money }: Props) {
       if (!res.ok) throw new Error(result.error || `Price request failed (${res.status})`);
       setData(result);
       setDraft(result.unit_packing_markup_cents == null ? '' : (result.unit_packing_markup_cents / 100).toFixed(2));
-    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    } catch (e) { setError(errText(e)); }
   }
   useEffect(() => { if (open && !data) void load(); }, [open, data]);
 
@@ -42,7 +43,7 @@ export function MarketplacePrices({ sku, accessToken, client, money }: Props) {
       setData(null);
       setDraft(value == null ? '' : (value / 100).toFixed(2));
       await load();
-    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    } catch (e) { setError(errText(e)); }
     finally { setBusy(false); }
   }
 
