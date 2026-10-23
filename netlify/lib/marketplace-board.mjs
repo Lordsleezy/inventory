@@ -29,7 +29,15 @@ const JOB_KEY = "marketplace_board_job";
 const CHANNELS = new Set(["ebay", "amazon", "tiktok"]);
 /** Short in-memory TTL for board_catalog on a warm Netlify instance. */
 const CATALOG_TTL_MS = 50_000;
+/** Durable store_settings TTL so cold instances still paint under ~2s. */
+const DURABLE_CATALOG_TTL_MS = 90_000;
+/** Sign this many listed thumbs server-side; the rest paint as placeholders (keeps catalog under 2s). */
+const LISTED_SIGN_LIMIT = 80;
 const catalogCache = new Map();
+
+function durableCatalogKey(channel) {
+  return `marketplace_board_catalog_${channel}`;
+}
 
 function channelOf(channel) {
   const ch = String(channel || "").toLowerCase();
@@ -104,8 +112,10 @@ async function primaryPhotoPaths(storeId, skus) {
   return out;
 }
 
-async function primaryPhotoUrls(storeId, skus) {
-  const pathsBySku = await primaryPhotoPaths(storeId, skus);
+async function primaryPhotoUrls(storeId, skus, { signLimit = Infinity, fallbackOriginals = true } = {}) {
+  const list = [...new Set((skus || []).map((sku) => String(sku || "").trim()).filter(Boolean))];
+  const signSkus = Number.isFinite(signLimit) ? list.slice(0, Math.max(0, signLimit)) : list;
+  const pathsBySku = await primaryPhotoPaths(storeId, signSkus);
   const prefer = {};
   const originals = [];
   for (const [sku, path] of Object.entries(pathsBySku)) {
@@ -115,16 +125,23 @@ async function primaryPhotoUrls(storeId, skus) {
   }
   const preferPaths = Object.values(prefer);
   const urls = await signStoragePaths([...preferPaths, ...originals]);
-  const missingOriginals = [];
-  for (const [sku, path] of Object.entries(pathsBySku)) {
-    const thumb = prefer[sku];
-    if (thumb && !urls[thumb]) missingOriginals.push(path);
-  }
-  if (missingOriginals.length) {
-    Object.assign(urls, await signStoragePaths(missingOriginals));
+  if (fallbackOriginals) {
+    const missingOriginals = [];
+    for (const [sku, path] of Object.entries(pathsBySku)) {
+      const thumb = prefer[sku];
+      if (thumb && !urls[thumb]) missingOriginals.push(path);
+    }
+    if (missingOriginals.length) {
+      Object.assign(urls, await signStoragePaths(missingOriginals));
+    }
   }
   const out = {};
-  for (const [sku, path] of Object.entries(pathsBySku)) {
+  for (const sku of list) {
+    const path = pathsBySku[sku];
+    if (!path) {
+      out[sku] = null;
+      continue;
+    }
     const thumb = prefer[sku];
     out[sku] = (thumb && urls[thumb]) || urls[path] || null;
   }
@@ -207,12 +224,12 @@ async function listingsForChannel(storeId, channel, skus) {
   return map;
 }
 
-async function enrichListed(storeId, channel, items) {
+async function enrichListed(storeId, channel, items, { signLimit = LISTED_SIGN_LIMIT } = {}) {
   const rows = (items || []).map(listedRow).filter((row) => row.key);
   const skus = rows.map((row) => row.sku).filter(Boolean);
   const [units, photos, drafts, floorListings, amazon] = await Promise.all([
     unitsFor(storeId, skus, "sku, title, condition, upc, ask_cents"),
-    primaryPhotoUrls(storeId, skus),
+    primaryPhotoUrls(storeId, skus, { signLimit, fallbackOriginals: false }),
     channel === "ebay" ? mapIn(storeId, "ebay_drafts", "sku", skus, "sku, shipping_mode") : Promise.resolve({}),
     listingsForChannel(storeId, channel, skus),
     channel === "amazon" ? mapIn(storeId, "amazon_list_items", "sku", skus, "sku, asin, needs_review_reason") : Promise.resolve({}),
@@ -262,9 +279,9 @@ async function amazonBlocks(storeId) {
   return data || [];
 }
 
-async function loadNotListed(storeId, channel, listed) {
+async function loadNotListed(storeId, channel, listed, { units: preloadedUnits = null } = {}) {
   const liveSkus = listed.map((row) => row.sku).filter(Boolean);
-  const units = await availableUnits(storeId);
+  const units = preloadedUnits || await availableUnits(storeId);
   const blocks = channel === "amazon" ? await amazonBlocks(storeId) : [];
   const blockedBySku = {};
   const unitBySku = Object.fromEntries(units.map((unit) => [unit.sku, unit]));
@@ -330,22 +347,64 @@ function tiktokConnected(pack) {
   return !pack?.stub;
 }
 
+async function readDurableCatalog(storeId, channel) {
+  const sb = serviceClient();
+  const { data, error } = await sb
+    .from("store_settings")
+    .select("value")
+    .eq("store_id", storeId)
+    .eq("key", durableCatalogKey(channel))
+    .maybeSingle();
+  if (error || !data?.value?.at || !data.value.pack) return null;
+  const at = Date.parse(data.value.at);
+  if (!Number.isFinite(at) || Date.now() - at > DURABLE_CATALOG_TTL_MS) return null;
+  return data.value.pack;
+}
+
+async function writeDurableCatalog(storeId, channel, pack) {
+  try {
+    const sb = serviceClient();
+    await sb.from("store_settings").upsert(
+      {
+        store_id: storeId,
+        key: durableCatalogKey(channel),
+        value: { at: new Date().toISOString(), pack },
+      },
+      { onConflict: "store_id,key" },
+    );
+  } catch { /* best-effort cache */ }
+}
+
 export async function loadCatalog(storeId, channel, { force = false } = {}) {
   const ch = channelOf(channel);
   const cacheKey = `${storeId}:${ch}`;
   if (!force) {
     const hit = catalogCache.get(cacheKey);
     if (hit && Date.now() - hit.at < CATALOG_TTL_MS) return hit.pack;
+    const durable = await readDurableCatalog(storeId, ch);
+    if (durable) {
+      catalogCache.set(cacheKey, { at: Date.now(), pack: durable });
+      return durable;
+    }
   }
+  // Floor-first by default (live marketplace only on Refresh / force) so info + inventory paint together under ~2s.
+  const live = Boolean(force);
+  // Start available-units while the channel list loads.
+  const availablePromise = availableUnits(storeId).catch(() => null);
   const pack = ch === "ebay"
-    ? await listEbayListings(storeId, { limit: 2000 })
+    ? await listEbayListings(storeId, { limit: 2000, live })
     : ch === "amazon"
-      ? await listAmazonListings(storeId, { limit: 2000 })
-      : await listTikTokListings(storeId, { limit: 2000 });
+      ? await listAmazonListings(storeId, { limit: 2000, live })
+      : await listTikTokListings(storeId, { limit: 2000, live });
   if (pack?.ok === false && !pack?.items) return { ok: false, error: pack.error || "list_failed", channel: ch };
   const connected = ch !== "tiktok" || tiktokConnected(pack);
-  const listed = await enrichListed(storeId, ch, pack?.items || []);
-  const notListed = connected ? await loadNotListed(storeId, ch, listed) : [];
+  const [listed, preloadedUnits] = await Promise.all([
+    enrichListed(storeId, ch, pack?.items || []),
+    availablePromise,
+  ]);
+  const notListed = connected
+    ? await loadNotListed(storeId, ch, listed, { units: preloadedUnits || undefined })
+    : [];
   const result = {
     ok: true,
     channel: ch,
@@ -357,10 +416,12 @@ export async function loadCatalog(storeId, channel, { force = false } = {}) {
     message: pack?.message || null,
     last_synced: pack?.last_synced || null,
     accounts: pack?.accounts || null,
+    source: pack?.source || (live ? "live" : "floor"),
     listed,
     not_listed: notListed,
   };
   catalogCache.set(cacheKey, { at: Date.now(), pack: result });
+  void writeDurableCatalog(storeId, ch, result);
   return result;
 }
 
@@ -385,32 +446,27 @@ async function quarterSeeds(storeId, channel) {
   const sb = serviceClient();
   const instants = [];
   const dates = [];
-  const sales = await paged(async (offset) => {
-    const { data, error } = await sb
-      .from("sale_ledger")
-      .select("sold_at")
-      .eq("store_id", storeId)
-      .ilike("channel", channel)
-      .order("sold_at", { ascending: false })
-      .range(offset, offset + 999);
-    if (error) throw new Error(error.message);
-    return data || [];
-  });
-  for (const row of sales) instants.push(row.sold_at);
+  // Cap history — full ledger paging was dominating board_quarter for little UI value.
+  const { data: sales, error } = await sb
+    .from("sale_ledger")
+    .select("sold_at")
+    .eq("store_id", storeId)
+    .ilike("channel", channel)
+    .order("sold_at", { ascending: false })
+    .limit(500);
+  if (error) throw new Error(error.message);
+  for (const row of sales || []) instants.push(row.sold_at);
   if (channel === "ebay") {
-    const expenses = await paged(async (offset) => {
-      const { data, error } = await sb
-        .from("portal_expenses")
-        .select("spent_on")
-        .eq("store_id", storeId)
-        .eq("source", "ebay")
-        .is("voided_at", null)
-        .order("spent_on", { ascending: false })
-        .range(offset, offset + 999);
-      if (error) throw new Error(error.message);
-      return data || [];
-    });
-    for (const row of expenses) dates.push(row.spent_on);
+    const { data: expenses, error: expErr } = await sb
+      .from("portal_expenses")
+      .select("spent_on")
+      .eq("store_id", storeId)
+      .eq("source", "ebay")
+      .is("voided_at", null)
+      .order("spent_on", { ascending: false })
+      .limit(200);
+    if (expErr) throw new Error(expErr.message);
+    for (const row of expenses || []) dates.push(row.spent_on);
   }
   return { instants, dates };
 }
@@ -448,7 +504,8 @@ async function shapeSold(storeId, sales) {
   const ids = open.map((row) => row.id).filter((id) => id != null);
   const [units, photos, channelOrders, webOrders] = await Promise.all([
     unitsFor(storeId, skus, "sku, title, brand, model, condition, upc"),
-    primaryPhotoUrls(storeId, skus),
+    // Cap sold thumbs — stats must not wait on signing every historical sale photo.
+    primaryPhotoUrls(storeId, skus, { signLimit: 40, fallbackOriginals: false }),
     mapIn(storeId, "channel_orders", "sale_id", ids, "sale_id, order_id, buyer_username"),
     mapIn(storeId, "web_orders", "sale_id", ids, "sale_id, order_no, buyer_name, buyer_email"),
   ]);
@@ -491,10 +548,12 @@ export async function loadQuarter(storeId, channel, quarterId) {
   const ch = channelOf(channel);
   const id = quarterId || currentQuarter().id;
   const bounds = quarterBounds(id);
-  const [sales, seeds, insertion] = await Promise.all([
-    salesInQuarter(storeId, ch, bounds),
+  const salesP = salesInQuarter(storeId, ch, bounds);
+  const [sales, seeds, insertion, sold] = await Promise.all([
+    salesP,
     quarterSeeds(storeId, ch),
     ch === "ebay" ? insertionCents(storeId, bounds) : Promise.resolve(0),
+    salesP.then((rows) => shapeSold(storeId, rows)),
   ]);
   const quarters = collectQuarters(seeds.instants, seeds.dates);
   if (!quarters.some((quarter) => quarter.id === bounds.id)) quarters.unshift({ id: bounds.id, label: bounds.label, year: bounds.year, q: bounds.q });
@@ -504,7 +563,7 @@ export async function loadQuarter(storeId, channel, quarterId) {
     quarter: { id: bounds.id, label: bounds.label, start: bounds.start, end: bounds.end },
     quarters: quarters.map((quarter) => ({ id: quarter.id, label: quarter.label })),
     stats: aggregateChannelStats(sales, { insertionCents: insertion }),
-    sold: await shapeSold(storeId, sales),
+    sold,
   };
 }
 

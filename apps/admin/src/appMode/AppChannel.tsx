@@ -128,7 +128,8 @@ export function AppChannel({ channel, accessToken, money, onBack }: Props) {
   const [pulling, setPulling] = useState(false);
 
   const loadCatalog = useCallback(async (opts?: { force?: boolean }) => {
-    setCatalogBusy(true);
+    // Keep cached inventory visible while refreshing so stats + rows appear together.
+    setCatalogBusy((prev) => prev || !(cached?.listed?.length || cached?.not_listed?.length));
     setError('');
     try {
       const cat = await call(accessToken, {
@@ -161,7 +162,7 @@ export function AppChannel({ channel, accessToken, money, onBack }: Props) {
       setCatalogBusy(false);
       setPulling(false);
     }
-  }, [accessToken, channel]);
+  }, [accessToken, channel, cached]);
 
   const loadQuarter = useCallback(async (id: string) => {
     setQuarterBusy(true);
