@@ -96,14 +96,20 @@ export function AppModeShell({
   staffSession,
   money,
   stamp,
+  rules: _rules,
+  onlineCfg: _onlineCfg,
+  commissionOverrides: _commissionOverrides,
+  personName: _personName,
+  busy: _busy,
+  onCommissionChanged: _onCommissionChanged,
   settingsSlot,
 }: Props) {
-  void rules;
-  void onlineCfg;
-  void commissionOverrides;
-  void personName;
-  void busy;
-  void onCommissionChanged;
+  void _rules;
+  void _onlineCfg;
+  void _commissionOverrides;
+  void _personName;
+  void _busy;
+  void _onCommissionChanged;
   const [tab, setTab] = useState<AppTab>('inventory');
   const [itemSku, setItemSku] = useState<string | null>(null);
   const [morePage, setMorePage] = useState<MoreId | null>(null);
