@@ -220,13 +220,20 @@ export function UnitEditDrawer({
       setError('Dimensions and weight must be positive numbers (or blank).');
       return;
     }
+    // units.title is NOT NULL — never send blank/null. Prefer typed title, else brand + model, else SKU.
+    const title = form.title.trim()
+      || [form.brand, form.model].map((s) => s.trim()).filter(Boolean).join(' ')
+      || `SKU ${sku}`;
+    if (title !== form.title.trim()) {
+      setForm((prev) => ({ ...prev, title }));
+    }
     setBusy(true); setError(''); setMsg('');
     const { data, error: e } = await client.rpc('portal_update_unit', {
       p_sku: sku,
       p_upc: form.upc,
       p_brand: form.brand,
       p_model: form.model,
-      p_title: form.title,
+      p_title: title,
       p_description: form.description,
       p_ask_cents: ask,
       p_cost_cents: cost,
