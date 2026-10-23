@@ -2,8 +2,13 @@
 import { json, corsHeaders } from "../lib/server.mjs";
 import { wrapHandler, asNetlifyFunction } from "../lib/floor-log.mjs";
 import { portalAdminFromEvent } from "../lib/portal-auth.mjs";
-import { buyLabelForOrder, labelQuote, voidLabel } from "../lib/web-label.mjs";
+import { buyLabelForOrder, labelQuote, voidLabel, labelStatus } from "../lib/web-label.mjs";
 import { shippoMode } from "../lib/shippo.mjs";
+import { channelAllowsLabels, sourcesForChannel } from "../lib/shipping/sources.mjs";
+import { veeqoStatus } from "../lib/shipping/veeqo.mjs";
+import { tiktokShippingStatus } from "../lib/shipping/tiktok-shipping.mjs";
+import { amazonShippingStatus } from "../lib/shipping/amazon-shipping.mjs";
+import { ebayLogisticsStatus } from "../lib/shipping/ebay-logistics.mjs";
 import { webSquareEnv } from "../lib/web-square.mjs";
 import { cancelAndRefund } from "../lib/web-payment.mjs";
 import { pickupSweep } from "../lib/web-pickup.mjs";
@@ -24,12 +29,50 @@ async function handle(event) {
     return json(r.status, r);
   }
   if (body.action === "buy_label") {
-    const r = await buyLabelForOrder(sb, storeId, id, { rateId: String(body.rate_id || ""), box: body.box, actor });
+    const r = await buyLabelForOrder(sb, storeId, id, {
+      rateId: String(body.rate_id || ""),
+      box: body.box,
+      actor,
+      purchaseToken: body.purchase_token ? String(body.purchase_token).slice(0, 80) : null,
+      selectedRate: body.selected_rate || null,
+      labelFormat: body.label_format || null,
+    });
     return json(r.status, r);
   }
   if (body.action === "void_label") {
-    const r = await voidLabel(sb, storeId, id);
+    const r = await voidLabel(sb, storeId, id, { force: body.force === true });
     return json(r.status, r);
+  }
+  if (body.action === "label_status") {
+    const r = await labelStatus(sb, storeId, id);
+    return json(r.status, r);
+  }
+  if (body.action === "label_sources") {
+    const { data: order } = await sb.from("web_orders").select("channel").eq("id", id).eq("store_id", storeId).maybeSingle();
+    const channel = order?.channel || body.channel || "website";
+    const wanted = sourcesForChannel(channel);
+    const statusFor = {
+      shippo: () => ({ online: Boolean(shippoMode()), reason: shippoMode() ? null : "SHIPPO_API_KEY missing/invalid" }),
+      veeqo: veeqoStatus,
+      tiktok: tiktokShippingStatus,
+      amazon: amazonShippingStatus,
+      ebay_logistics: ebayLogisticsStatus,
+    };
+    return json(200, {
+      ok: true,
+      channel,
+      allowed: channelAllowsLabels(channel),
+      sources: wanted.map((s) => ({ source: s, ...(statusFor[s] ? statusFor[s]() : { online: false, reason: "unknown" }) })),
+    });
+  }
+  if (body.action === "set_label_format") {
+    const format = body.format === "PDF" || body.format === "PDF_LETTER" ? "PDF" : "PDF_4x6";
+    const { error } = await sb.from("store_settings").upsert(
+      { store_id: storeId, key: "label_format", value: format },
+      { onConflict: "store_id,key" },
+    );
+    if (error) return json(500, { error: error.message });
+    return json(200, { ok: true, label_format: format });
   }
   if (body.action === "shipping_status" || body.action === "set_shipping") {
     const mode = shippoMode();

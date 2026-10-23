@@ -4,7 +4,13 @@ import { floorFunctionUrl } from './floorApi';
 import { CommissionOverrideControls, CommissionOverrideMark } from './CommissionOverride';
 import { type CommissionOverride, type OnlineCfg, type Rule } from './payouts';
 import { ReturnsPage } from './ReturnsPage';
+import { LabelDialog } from './LabelDialog';
 import { errText } from './errText';
+
+function channelAllowsLabels(channel?: string | null) {
+  const ch = (channel || 'website').toLowerCase();
+  return ch === 'website' || ch === 'web' || ch === 'ebay' || ch === 'amazon' || ch === 'tiktok';
+}
 
 const CHANNEL_LABEL: Record<string, string> = {
   website: 'Website',
@@ -120,6 +126,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
   const [view, setView] = useState<OrderView>('all');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [section, setSection] = useState<OrdersSection>('orders');
+  const [labelOrder, setLabelOrder] = useState<WebOrder | null>(null);
 
   const load = useCallback(async () => {
     // No practical date hide: cover store day-one history (portal still clamps to p_days).
@@ -418,6 +425,11 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
               </div>
             )}
             <div className="actions">
+              {channelAllowsLabels(o.channel) && (
+                o.label_url
+                  ? <button type="button" disabled={!!busy} onClick={() => setLabelOrder(o)}>Download / Reprint label</button>
+                  : <button type="button" disabled={!!busy || o.pack_condition === 'not_as_listed'} onClick={() => setLabelOrder(o)}>Get label</button>
+              )}
               <button disabled={!!busy} onClick={() => void markShipped(o)}>{busy === o.id + 'ship' ? 'Saving…' : 'Mark shipped'}</button>
               <button className="secondary" disabled={!!busy} onClick={() => void markDelivered(o)}>{busy === o.id + 'deliver' ? 'Saving…' : 'Mark delivered'}</button>
               <button className="secondary" disabled={!!busy || (o.label_cost_cents == null && o.pack_condition !== 'ok')} onClick={() => void recordLabelCost(o)}>{busy === o.id + 'label' ? 'Saving…' : o.label_cost_cents != null ? 'Edit label cost' : 'Record label cost'}</button>
@@ -428,8 +440,11 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
         )}
         {isShipped && (
           <>
-            <small>Shipped {stamp(o.shipped_at!)}</small>
+            <small>Shipped {stamp(o.shipped_at!)}{o.tracking_number ? ` · ${o.tracking_number}` : ''}</small>
             {o.refund_requested_at ? <p className="hint">Cancel & refund in progress…</p> : <div className="actions">
+              {channelAllowsLabels(o.channel) && o.label_url && (
+                <button type="button" disabled={!!busy} onClick={() => setLabelOrder(o)}>Download / Reprint label</button>
+              )}
               <button disabled={!!busy} onClick={() => void markDelivered(o)}>{busy === o.id + 'deliver' ? 'Saving…' : 'Mark delivered'}</button>
               <button className="secondary" disabled={!!busy} onClick={() => void recordLabelCost(o)}>{busy === o.id + 'label' ? 'Saving…' : o.label_cost_cents != null ? 'Edit label cost' : 'Record label cost'}</button>
               {(!o.channel || o.channel === 'website') && <button className="text-button danger" disabled={!!busy} onClick={() => void cancel(o)}>Cancel & refund</button>}
@@ -554,6 +569,15 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
         ? <div className="empty">{view === 'all' ? 'No orders match this filter.' : view === 'toShip' ? 'Nothing to ship.' : view === 'shipped' ? 'None in transit.' : view === 'pickup' ? 'No pickups waiting.' : view === 'done' ? 'No completed orders yet.' : 'None.'}</div>
         : <div className="ticket-list">{active.map(renderTicket)}</div>}
     </section>
+    {labelOrder && (
+      <LabelDialog
+        order={labelOrder}
+        accessToken={accessToken}
+        money={money}
+        onClose={() => setLabelOrder(null)}
+        onDone={() => { setLabelOrder(null); void load(); }}
+      />
+    )}
     </>}
   </>;
 }
