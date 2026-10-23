@@ -4,6 +4,8 @@ import { ReceivePanel } from './ReceivePanel';
 import { NeedsAttentionPanel } from './NeedsAttentionPanel';
 import { UnitEditDrawer } from './UnitEditDrawer';
 import { LookupTestPage } from './LookupTestPage';
+import { FloorProductsPage } from './FloorProductsPage';
+import { MarkerMatPage } from './MarkerMatPage';
 import type { AttentionSection, InventoryTab } from './navigation';
 import { errText } from './errText';
 
@@ -104,16 +106,18 @@ export function InventoryPage({
   const change = (set: () => void) => { set(); setOffset(0); setList(null); };
   const total = list?.totals.unit_count || 0;
   return <>
-    <header><div><div className="eyebrow">FLOOR INVENTORY</div><h1>Inventory</h1><p>{tab === 'browse' ? 'Click a unit to edit SKU details, price, cost, package size, and photos.' : tab === 'receive' ? 'Scan a UPC to look up product data, then receive with a real photo.' : tab === 'lookup-test' ? 'Read-only UPC accuracy test — Amazon vs UPCitemdb. Does not create inventory.' : 'Units missing cost, photo, price, model, description, or package specs.'}</p></div></header>
+    <header><div><div className="eyebrow">FLOOR INVENTORY</div><h1>Inventory</h1><p>{tab === 'browse' ? 'Click a unit to edit SKU details, price, cost, package size, and photos.' : tab === 'receive' ? 'Scan a UPC to look up product data, then receive with a real photo.' : tab === 'lookup-test' ? 'Read-only UPC accuracy test — Amazon vs UPCitemdb. Does not create inventory.' : tab === 'products' ? 'Shared UPC product database — edits stick for future scans. Price/condition stay on each unit.' : tab === 'measure-mat' ? 'Printable 50 mm scale mat for Receive photo measuring.' : 'Units missing cost, photo, price, model, description, or package specs.'}</p></div></header>
     {!associateBrowseOnly && (
       <div className="inventory-tabs">
         <button type="button" className={tab === 'browse' ? 'active' : ''} onClick={() => onTab('browse')}>Browse</button>
         <button type="button" className={tab === 'receive' ? 'active' : ''} onClick={() => onTab('receive')}>Receive</button>
         <button type="button" className={tab === 'attention' ? 'active' : ''} onClick={() => onTab('attention')}>Needs attention</button>
         <button type="button" className={tab === 'lookup-test' ? 'active' : ''} onClick={() => onTab('lookup-test')}>Lookup test</button>
+        <button type="button" className={tab === 'products' ? 'active' : ''} onClick={() => onTab('products')}>Products</button>
+        <button type="button" className={tab === 'measure-mat' ? 'active' : ''} onClick={() => onTab('measure-mat')}>Measure mat</button>
       </div>
     )}
-    {!associateBrowseOnly && tab === 'lookup-test' ? <LookupTestPage accessToken={accessToken} /> : !associateBrowseOnly && tab === 'receive' ? <ReceivePanel client={client} storeId={storeId} accessToken={accessToken} onSaved={() => setRefresh(n => n + 1)} /> : !associateBrowseOnly && tab === 'attention' ? <NeedsAttentionPanel client={client} storeId={storeId} money={money} stamp={stamp} section={attentionSection} onSection={onAttentionSection} onCostChanged={onCostChanged} /> : <>
+    {!associateBrowseOnly && tab === 'lookup-test' ? <LookupTestPage accessToken={accessToken} /> : !associateBrowseOnly && tab === 'products' ? <FloorProductsPage client={client} /> : !associateBrowseOnly && tab === 'measure-mat' ? <MarkerMatPage /> : !associateBrowseOnly && tab === 'receive' ? <ReceivePanel client={client} storeId={storeId} accessToken={accessToken} onSaved={() => setRefresh(n => n + 1)} /> : !associateBrowseOnly && tab === 'attention' ? <NeedsAttentionPanel client={client} storeId={storeId} money={money} stamp={stamp} section={attentionSection} onSection={onAttentionSection} onCostChanged={onCostChanged} /> : <>
     <div className="inventory-controls">
       <label>Search<input type="search" placeholder="SKU, brand, model or title" value={query} onChange={e => change(() => setQuery(e.target.value))} /></label>
       <label>Status<select value={status} onChange={e => change(() => setStatus(e.target.value))}>

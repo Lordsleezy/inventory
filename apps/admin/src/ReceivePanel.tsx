@@ -145,6 +145,9 @@ type Disagreement = { field: string; amazon?: string | number | null; upcitemdb?
 type Lookup = {
   gtin?: { gtin14?: string; upcA?: string; ean13?: string };
   cached?: boolean;
+  floor_product?: boolean;
+  true_miss?: boolean;
+  miss_id?: string | null;
   amazon?: Source;
   upcitemdb?: Source;
   merged?: {
@@ -157,6 +160,26 @@ type Lookup = {
   };
   fieldCoverage?: { package?: string | null; price?: string | null };
 };
+
+type PhotoPriceInfo = {
+  kind: string;
+  median_cents: number | null;
+  low_cents: number | null;
+  high_cents: number | null;
+  count: number;
+  highest_retail?: { store?: string; price_cents?: number; url?: string; product_name?: string } | null;
+};
+
+async function fileToBase64(file: File): Promise<string> {
+  const buf = await file.arrayBuffer();
+  const bytes = new Uint8Array(buf);
+  let binary = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
 
 /** "Flavor: Berry · Item Form: Gummy" from Amazon catalog aspects. */
 function formatAspectsLine(aspects?: Record<string, string> | null): string {
@@ -210,22 +233,44 @@ function composeListingTitle(brand: string, model: string, unbranded: boolean): 
   return [b, m].filter(Boolean).join(' ');
 }
 
-function catalogMissMessage(r?: Lookup): string | null {
+/** Transient lookup failure (retry), not a clean catalog miss. */
+function catalogLookupFailed(r?: Lookup): string | null {
   if (!r) return null;
   const m = r.merged;
   const hasCatalog = Boolean(text(m?.title) || text(m?.brand) || text(m?.model) || text(m?.asin));
-  if (hasCatalog) return null;
+  if (hasCatalog || r.floor_product) return null;
   const amazonErr = r.amazon?.raw_error || '';
   const upcErr = r.upcitemdb?.raw_error || '';
   if (/rate.?limit/i.test(upcErr) && !r.amazon?.found) {
-    return 'No Amazon match, and UPCitemdb is rate-limited. Retry in a minute or fill the fields by hand.';
+    return 'Lookup hit a rate limit — retrying in a moment usually works. Or fill fields by hand.';
   }
   if (amazonErr && !r.amazon?.found && !r.upcitemdb?.found) {
-    return `Lookup sources failed (${amazonErr.slice(0, 80)}${upcErr ? `; ${upcErr.slice(0, 60)}` : ''}). Fill by hand or retry.`;
+    return `Lookup failed (${amazonErr.slice(0, 80)}${upcErr ? `; ${upcErr.slice(0, 60)}` : ''}). Retry, or fill by hand.`;
   }
-  if (m?.not_found || (!r.amazon?.found && !r.upcitemdb?.found)) {
-    return 'No match in Amazon or UPCitemdb for this UPC — fill the fields by hand, or retry.';
+  return null;
+}
+
+/** Clean miss (both sources found nothing) — offer photo identify. */
+function isTrueCatalogMiss(r?: Lookup): boolean {
+  if (!r || r.floor_product) return false;
+  if (r.true_miss) return true;
+  const m = r.merged;
+  const hasCatalog = Boolean(text(m?.title) || text(m?.brand) || text(m?.model) || text(m?.asin));
+  if (hasCatalog) return false;
+  if (catalogLookupFailed(r)) return false;
+  return Boolean(m?.not_found || (!r.amazon?.found && !r.upcitemdb?.found));
+}
+
+function catalogMissMessage(r?: Lookup): string | null {
+  if (!r) return null;
+  const fail = catalogLookupFailed(r);
+  if (fail) return fail;
+  if (isTrueCatalogMiss(r)) {
+    return 'No match in Amazon or UPCitemdb for this UPC — try a product photo, or fill the fields by hand.';
   }
+  const m = r.merged;
+  const hasCatalog = Boolean(text(m?.title) || text(m?.brand) || text(m?.model) || text(m?.asin));
+  if (hasCatalog) return null;
   return 'Lookup returned no title/brand — fill the fields by hand, or retry.';
 }
 
@@ -478,12 +523,17 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   const [busy, setBusy] = useState(false);
   const [dups, setDups] = useState<Dups | null>(null);
   const [dupAck, setDupAck] = useState(false);
-  const [dialog, setDialog] = useState<null | 'ready' | 'reason'>(null);
+  const [dialog, setDialog] = useState<null | 'ready' | 'reason' | 'miss-photo' | 'photo-price'>(null);
   const [reason, setReason] = useState('damaged');
   const [reasonNote, setReasonNote] = useState('');
   const [camera, setCamera] = useState(false);
   const [readyToList, setReadyToList] = useState(false);
   const [readyAmazonTiktok, setReadyAmazonTiktok] = useState(false);
+  const [photoIdBusy, setPhotoIdBusy] = useState(false);
+  const [photoIdStatus, setPhotoIdStatus] = useState('');
+  const [photoPrice, setPhotoPrice] = useState<PhotoPriceInfo | null>(null);
+  const missPhotoFile = useRef<HTMLInputElement>(null);
+  const missPromptedFor = useRef<string | null>(null);
 
   const upcInput = useRef<HTMLInputElement>(null);
   const cameraFile = useRef<HTMLInputElement>(null);
@@ -679,13 +729,19 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     const miss = current.status === 'ready' || current.status === 'error'
       ? (current.status === 'error' ? null : catalogMissMessage(r))
       : null;
-    if (miss) setWarning(miss);
+    if (miss && !isTrueCatalogMiss(r)) setWarning(miss);
     else if (A?.price_pending && !retailNow) setWarning('Amazon catalog found, but pricing was rate-limited — enter price by hand or retry for a suggested retail.');
     else if (!retailNow && (r?.amazon?.found || r?.upcitemdb?.found)) setWarning('No retail price from Amazon/UPCitemdb — enter price by hand.');
     else setWarning('');
     photoSessionKey.current = current.id;
     setFiles([]);
-    setDialog(null);
+    // Instant miss popup (photo fallback). Do not re-prompt the same scan id.
+    if (isTrueCatalogMiss(r) && missPromptedFor.current !== current.id) {
+      missPromptedFor.current = current.id;
+      setDialog('miss-photo');
+    } else {
+      setDialog(null);
+    }
     setDupAck(Boolean(current.again));
     setDups(null);
     if (!current.again) setLast(null);
@@ -1087,6 +1143,66 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     }
   }
 
+  /** Barcode miss → one product photo → identify + asking-price median popup. */
+  async function identifyMissPhoto(list: FileList | null) {
+    if (!list?.length || !current) return;
+    const raw = list[0];
+    const file = await copyImageFile(raw);
+    if (!file) {
+      setError('Could not read that photo. Try one clear picture of the box or label.');
+      return;
+    }
+    setPhotoIdBusy(true);
+    setPhotoIdStatus('Identifying product…');
+    setError('');
+    setDialog(null);
+    try {
+      setFiles([file]);
+      void savePendingPhotos(pendingPhotoKey(storeId, photoSessionKey.current), [file]);
+      const image_base64 = await fileToBase64(file);
+      const res = await fetch(floorFunctionUrl('receive-photo-identify'), {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          upc: current.upc,
+          miss_id: current.result?.miss_id || null,
+          image_base64,
+          mime_type: file.type || 'image/jpeg',
+        }),
+      });
+      const json = await res.json().catch(() => ({} as { error?: string; message?: string }));
+      if (!res.ok) {
+        setError(json.message || json.error || 'Photo identify failed. Fill fields by hand, or retry.');
+        setWarning(catalogMissMessage(current.result) || '');
+        return;
+      }
+      const brand = text(json.fill?.brand || json.identity?.brand);
+      const model = text(json.fill?.model || json.identity?.model);
+      const title = text(json.fill?.title) || composeListingTitle(brand, model, false);
+      setPhotoIdStatus(title || 'Product found');
+      setForm(prev => ({
+        ...prev,
+        brand: brand || prev.brand,
+        unbranded: false,
+        model: model || prev.model,
+        title: title || composeListingTitle(brand || prev.brand, model || prev.model, false),
+      }));
+      const price = json.price as PhotoPriceInfo | undefined;
+      setPhotoPrice(price || null);
+      if (price?.median_cents) {
+        askTouched.current = false;
+        setForm(prev => ({ ...prev, ask: dollars(price.median_cents!) }));
+      }
+      setDialog('photo-price');
+      setWarning('');
+    } catch (e) {
+      setError(errText(e) || 'Photo identify failed. Fill fields by hand.');
+    } finally {
+      setPhotoIdBusy(false);
+      setPhotoIdStatus('');
+    }
+  }
+
   // Manual entry: restore any stashed photos after a camera-app kill.
   useEffect(() => {
     if (!manual) return;
@@ -1105,6 +1221,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   const needNoteForScratch = form.condition === SCRATCH;
   const holdReady = reason !== 'other' || reasonNote.trim().length > 0;
   const catalogMiss = !manual && current?.status === 'ready' ? catalogMissMessage(result) : null;
+  const trueMiss = !manual && current?.status === 'ready' && isTrueCatalogMiss(result);
 
   return <section className={`panel receive-panel${appChrome ? ' receive-app' : ''}`}>
     {appChrome && (
@@ -1189,8 +1306,14 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
 
       {catalogMiss && current && <div className="alert" role="alert">
         <span>{catalogMiss}</span>
+        {trueMiss && (
+          <button type="button" disabled={photoIdBusy} onClick={() => setDialog('miss-photo')}>
+            Scan with camera
+          </button>
+        )}
         <button type="button" onClick={() => retry(current)}>Retry lookup</button>
       </div>}
+      {photoIdBusy && <p className="hint" role="status">{photoIdStatus || 'Identifying from photo…'}</p>}
 
       {!manual && merged?.never_list_reason && <p className="hint">Amazon will not list this: {merged.never_list_reason}</p>}
 
@@ -1414,6 +1537,73 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         <div className="actions">
           <button type="button" disabled={busy || !holdReady} onClick={() => { const p = parse(); if (p) void receive(p, { reason, note: reasonNote }); }}>Receive without listing</button>
           <button type="button" className="text-button" onClick={() => setDialog('ready')}>Back</button>
+        </div>
+      </div>
+    </div>}
+
+    {dialog === 'miss-photo' && <div className="receive-modal" role="dialog" aria-modal="true" aria-labelledby="miss-photo-title">
+      <div className="receive-modal-card">
+        <h3 id="miss-photo-title">Can&apos;t find this item. Scan with camera?</h3>
+        <p>Take <strong>one</strong> clear photo of the box or label. We&apos;ll identify brand, name, and pack size, then show asking prices so you can set the price.</p>
+        <input
+          ref={missPhotoFile}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          className="sr-only"
+          aria-hidden
+          tabIndex={-1}
+          onChange={e => {
+            const input = e.currentTarget;
+            const list = input.files;
+            input.value = '';
+            void identifyMissPhoto(list);
+          }}
+        />
+        <div className="actions">
+          <button type="button" disabled={photoIdBusy} autoFocus onClick={() => missPhotoFile.current?.click()}>
+            Yes — take photo
+          </button>
+          <button type="button" className="secondary" disabled={photoIdBusy} onClick={() => setDialog(null)}>
+            No — fill by hand
+          </button>
+        </div>
+      </div>
+    </div>}
+
+    {dialog === 'photo-price' && <div className="receive-modal" role="dialog" aria-modal="true" aria-labelledby="photo-price-title">
+      <div className="receive-modal-card">
+        <h3 id="photo-price-title">What price do you want to set?</h3>
+        {previews[0] && <img src={previews[0]} alt="" style={{ maxWidth: '100%', maxHeight: 180, objectFit: 'contain', marginBottom: 8 }} />}
+        <p><strong>{form.title.trim() || [form.brand, form.model].filter(Boolean).join(' ')}</strong></p>
+        {photoPrice && photoPrice.count > 0 ? (
+          <p className="hint">
+            Median asking price {money(photoPrice.median_cents)} from {photoPrice.count} listing{photoPrice.count === 1 ? '' : 's'}
+            {photoPrice.low_cents != null && photoPrice.high_cents != null
+              ? ` (range ${money(photoPrice.low_cents)}–${money(photoPrice.high_cents)})`
+              : ''}.
+            {photoPrice.highest_retail?.store
+              ? ` Highest retail seen: ${photoPrice.highest_retail.store} ${money(photoPrice.highest_retail.price_cents ?? null)}.`
+              : ''}
+            {' '}These are asking prices, not sold comps — you choose the price.
+          </p>
+        ) : (
+          <p className="hint">No current asking prices found. Enter the price you want.</p>
+        )}
+        <label>Your price
+          <input
+            inputMode="decimal"
+            placeholder="24.99"
+            value={form.ask}
+            onChange={e => { askTouched.current = true; update('ask', e.target.value); }}
+            autoFocus
+          />
+        </label>
+        <div className="actions">
+          <button type="button" onClick={() => setDialog(null)}>Use this price</button>
+          {photoPrice?.highest_retail?.url && (
+            <a className="secondary" href={photoPrice.highest_retail.url} target="_blank" rel="noreferrer">Open retail link</a>
+          )}
         </div>
       </div>
     </div>}

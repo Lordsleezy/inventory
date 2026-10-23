@@ -726,7 +726,7 @@ export function App() {
     settings: 'Settings',
   } as const)[page];
   const reportSubs: [typeof nav.reportTab, string][] = [['profit', 'Sales & profits'], ['shipping', 'Shipping & fees'], ['expenses', 'Expenses'], ['payouts', 'Payouts'], ['returns', 'Returns']];
-  const inventorySubs: [typeof nav.inventoryTab, string][] = [['browse', 'Browse'], ['receive', 'Receive'], ['lookup-test', 'Lookup test']];
+  const inventorySubs: [typeof nav.inventoryTab, string][] = [['browse', 'Browse'], ['receive', 'Receive'], ['lookup-test', 'Lookup test'], ['products', 'Products'], ['measure-mat', 'Measure mat']];
   const onlineSubs: [typeof nav.onlineTab, string][] = [
     ['listed', 'Listed'],
     ['reports', 'Reports'],

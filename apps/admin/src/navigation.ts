@@ -17,7 +17,7 @@ export type MainPage =
   | 'logs'
   | 'settings';
 export type ReportTab = 'profit' | 'shipping' | 'expenses' | 'payouts' | 'returns';
-export type InventoryTab = 'browse' | 'receive' | 'attention' | 'lookup-test';
+export type InventoryTab = 'browse' | 'receive' | 'attention' | 'lookup-test' | 'products' | 'measure-mat';
 export type AttentionSection =
   | 'missing-cost'
   | 'missing-brand'
@@ -155,7 +155,7 @@ export function parseNavFromLocation(): NavState {
     onlineChannelRaw = 'all';
   }
   const reportTabs: ReportTab[] = ['profit', 'shipping', 'expenses', 'payouts', 'returns'];
-  const invTabs: InventoryTab[] = ['browse', 'receive', 'attention', 'lookup-test'];
+  const invTabs: InventoryTab[] = ['browse', 'receive', 'attention', 'lookup-test', 'products', 'measure-mat'];
   return {
     page: base,
     reportTab: reportTabs.includes(tabRaw as ReportTab) ? (tabRaw as ReportTab) : 'profit',

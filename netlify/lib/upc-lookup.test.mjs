@@ -118,9 +118,21 @@ test("merge prefers amazon, fills gaps from upcitemdb, lists disagreements", () 
 });
 
 function fakeSb(store = new Map()) {
+  const empty = {
+    select: () => ({
+      eq: () => ({
+        maybeSingle: async () => ({ data: null, error: null }),
+        order: () => ({ limit: () => ({ maybeSingle: async () => ({ data: null, error: null }) }) }),
+      }),
+    }),
+    upsert: async () => ({ data: null, error: null }),
+    insert: () => ({ select: () => ({ maybeSingle: async () => ({ data: { id: "miss-1" }, error: null }) }) }),
+    update: () => ({ eq: async () => ({ error: null }) }),
+  };
   return {
     store,
-    from() {
+    from(table) {
+      if (table === "floor_products" || table === "upc_lookup_misses") return empty;
       return {
         select: () => ({ eq: (_c, v) => ({ maybeSingle: async () => ({ data: store.get(v) || null, error: null }) }) }),
         upsert: async (row) => {
