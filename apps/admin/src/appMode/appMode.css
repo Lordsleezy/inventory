@@ -801,6 +801,36 @@ html.app-mode .app-embed-soft textarea {
   border-color: #3a3a3c;
 }
 
+/* Reports — restore Profit / Shipping & fees / Expenses / Payouts / Returns tabs */
+html.app-mode .app-reports .inventory-tabs.report-tabs {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 8px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 4px 16px 12px;
+  margin: 0;
+  border: 0;
+}
+html.app-mode .app-reports .inventory-tabs.report-tabs button {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  border: 0;
+  background: #1c1c1e;
+  color: #8e8e93;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 8px 14px !important;
+  white-space: nowrap;
+}
+html.app-mode .app-reports .inventory-tabs.report-tabs button.active {
+  background: #2c2c2e;
+  color: #fff;
+}
+html.app-mode .app-reports .inventory-tabs.report-tabs button:hover {
+  color: #fff;
+}
+
 /* Receive app form */
 html.app-mode .receive-app .receive-next { margin: 0 16px; }
 html.app-mode .receive-app .eyebrow { display: none; }

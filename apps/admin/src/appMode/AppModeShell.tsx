@@ -37,6 +37,8 @@ type Props = {
   busy: boolean;
   onCommissionChanged: (ticketKey: string, next: CommissionOverride | null) => void;
   settingsSlot?: React.ReactNode;
+  /** Full ReportsPage (profit / shipping / expenses / payouts / returns). */
+  reportsSlot?: React.ReactNode;
 };
 
 /** Store associates (e.g. Jacob): Inventory / Receive / Register / Settings. */
@@ -118,6 +120,7 @@ export function AppModeShell({
   busy: _busy,
   onCommissionChanged: _onCommissionChanged,
   settingsSlot,
+  reportsSlot,
 }: Props) {
   void _rules;
   void _onlineCfg;
@@ -307,7 +310,9 @@ export function AppModeShell({
           />
         )}
         {fullAccess && morePage === 'reports' && (
-          <AppReportsNative client={client} money={money} onBack={() => setMorePage(null)} />
+          <AppReportsNative onBack={() => setMorePage(null)}>
+            {reportsSlot || <p className="app-footer-count">Reports unavailable.</p>}
+          </AppReportsNative>
         )}
         {fullAccess && morePage === 'tax' && (
           <AppTaxNative client={client} money={money} stamp={stamp} onBack={() => setMorePage(null)} />

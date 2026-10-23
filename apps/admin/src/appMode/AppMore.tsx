@@ -1,10 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { Session, SupabaseClient } from '@supabase/supabase-js';
 import type { StaffSession } from '@floor/cloud';
 import { floorFunctionUrl } from '../floorApi';
 import { MissingFieldPage } from '../MissingFieldPage';
 import { MissingCostPage } from '../MissingCostPage';
-import { ChannelReportPage } from '../ChannelReportPage';
 import { TaxPage } from '../TaxPage';
 import { ListingManagerPanel } from '../ListingManagerPanel';
 import { MarketplacesPage } from '../MarketplacesPage';
@@ -355,8 +354,9 @@ export function AppConnections({ client, accessToken, money, stamp, onBack }: {
   );
 }
 
-export function AppReportsNative({ client, money, onBack }: {
-  client: SupabaseClient; money: (n: number) => string; onBack: () => void;
+export function AppReportsNative({ onBack, children }: {
+  onBack: () => void;
+  children: ReactNode;
 }) {
   return (
     <div className="app-stack">
@@ -365,8 +365,8 @@ export function AppReportsNative({ client, money, onBack }: {
         <div className="app-nav-title">Reports</div>
         <button type="button" style={{ visibility: 'hidden' }}>·</button>
       </div>
-      <div className="app-embed-soft">
-        <ChannelReportPage client={client} money={money} embedded />
+      <div className="app-embed-soft app-reports">
+        {children}
       </div>
     </div>
   );
