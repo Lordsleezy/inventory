@@ -110,7 +110,7 @@ Until a source’s env/role is ready, Floor **skips it** in the quote and lists 
 - `netlify/lib/shippo.mjs` — existing website Shippo; plan note + quota heuristic.
 
 ### Schema
-- Migration `supabase/migrations/20261028140000_one_click_shipping_labels.sql` (applied on Floor DB as `one_click_shipping_labels`).
+- Migration `supabase/migrations/20261023222043_one_click_shipping_labels.sql` (matches applied Floor DB version).
 - `web_order_labels`: `source`, `label_format`, `purchase_token`, `external_shipment_id`, `quote_snapshot`, tracking-push audit columns.
 - Unique **one active label per order** (`voided_at is null`).
 - Unique `(store_id, purchase_token)` when token set.
