@@ -320,12 +320,13 @@ export function parseActiveListSummaries(xml) {
   }).filter((row) => row.itemId);
 }
 
-const ACTIVE_LIST_SELECTORS = [
+// Seller Hub calls SKU "Custom label", but Trading has no Item.CustomLabel field — that
+// OutputSelector makes GetMyeBaySelling Ack=Failure and the eBay tab shows account fetch errors.
+export const ACTIVE_LIST_SELECTORS = [
   "ActiveList.PaginationResult",
   "ActiveList.ItemArray.Item.ItemID",
   "ActiveList.ItemArray.Item.Title",
   "ActiveList.ItemArray.Item.SKU",
-  "ActiveList.ItemArray.Item.CustomLabel",
   "ActiveList.ItemArray.Item.Quantity",
   "ActiveList.ItemArray.Item.BuyItNowPrice",
   "ActiveList.ItemArray.Item.StartPrice",
@@ -339,6 +340,10 @@ const ACTIVE_LIST_SELECTORS = [
   "ActiveList.ItemArray.Item.SellerProfiles",
 ].map((path) => `<OutputSelector>${path}</OutputSelector>`).join("\n");
 
+function isBadOutputSelectorError(err) {
+  return /OutputSelector|output selectors?/i.test(err instanceof Error ? err.message : String(err || ""));
+}
+
 /** Paginate GetMyeBaySelling ActiveList — includes Vendoo / Seller Hub listings Inventory API misses. */
 export async function getMyEbaySellingActive(token, { entriesPerPage = 200, maxPages = 50 } = {}) {
   const items = [];
@@ -351,9 +356,22 @@ export async function getMyEbaySellingActive(token, { entriesPerPage = 200, maxP
   <Include>true</Include>
   <Pagination><EntriesPerPage>${perPage}</EntriesPerPage><PageNumber>${page}</PageNumber></Pagination>
 </ActiveList>`;
-    let xml = await tradingCall(token, "GetMyeBaySelling", useSelectors ? `${listXml}\n${ACTIVE_LIST_SELECTORS}` : listXml);
-    let active = xmlBlocks(xml, "ActiveList")[0] || xml;
-    // A bad OutputSelector list can hide every item. Fall back to the default summary
+    let xml;
+    let active;
+    try {
+      xml = await tradingCall(token, "GetMyeBaySelling", useSelectors ? `${listXml}\n${ACTIVE_LIST_SELECTORS}` : listXml);
+      active = xmlBlocks(xml, "ActiveList")[0] || xml;
+    } catch (err) {
+      // Ack=Failure on a bad selector never reaches the empty-list fallback below.
+      if (page === 1 && useSelectors && isBadOutputSelectorError(err)) {
+        useSelectors = false;
+        xml = await tradingCall(token, "GetMyeBaySelling", listXml);
+        active = xmlBlocks(xml, "ActiveList")[0] || xml;
+      } else {
+        throw err;
+      }
+    }
+    // A bad OutputSelector list can also hide every item. Fall back to the default summary
     // for the rest of the pull; shipping then stays unknown instead of buyer-pays.
     if (page === 1 && useSelectors && parseActiveListSummaries(active).length === 0) {
       useSelectors = false;

@@ -22,7 +22,7 @@ import {
   clampMigrationPackageDims,
   sanitizeMigrationAspects,
 } from "./ebay-migrate-rules.mjs";
-import { tradingItemBlockedReason, parseActiveListSummaries, parseTradingItem } from "./ebay-trading.mjs";
+import { tradingItemBlockedReason, parseActiveListSummaries, parseTradingItem, ACTIVE_LIST_SELECTORS } from "./ebay-trading.mjs";
 import { ebayListingAllowed, oauthScopesForRole, EBAY_LISTING_OAUTH_SCOPES } from "./ebay-env.mjs";
 
 test("migration skips refrigerators, dishwashers, mattresses", () => {
@@ -115,6 +115,11 @@ test("tradingItemBlockedReason catches bids, offers, open orders", () => {
     tradingItemBlockedReason({ itemId: "1", bidCount: 0, bestOfferCount: 0, quantitySold: 0, listingStatus: "Active" }),
     null,
   );
+});
+
+test("ActiveList OutputSelectors never request Item.CustomLabel (Trading rejects it)", () => {
+  assert.match(ACTIVE_LIST_SELECTORS, /ActiveList\.ItemArray\.Item\.SKU/);
+  assert.doesNotMatch(ACTIVE_LIST_SELECTORS, /CustomLabel/);
 });
 
 test("parseActiveListSummaries reads GetMyeBaySelling ActiveList items", () => {
