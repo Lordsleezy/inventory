@@ -1,9 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { type WebOrder } from '../OrdersPage';
+import { LabelDialog } from '../LabelDialog';
 import { ReturnsPage } from '../ReturnsPage';
 import { errText } from '../errText';
 import { shortError } from './shortError';
+
+function channelAllowsLabels(channel?: string | null) {
+  const ch = (channel || 'website').toLowerCase();
+  return ch === 'website' || ch === 'web' || ch === 'ebay' || ch === 'amazon' || ch === 'tiktok';
+}
 
 type Seg = 'toShip' | 'shipped' | 'pickup' | 'done' | 'canceled' | 'returns';
 
@@ -32,13 +38,13 @@ function statusPill(o: WebOrder): { text: string; tone: 'warn' | 'ok' | 'muted' 
 }
 
 export function AppOrders({ client, storeId, accessToken, money, stamp }: Props) {
-  void accessToken;
   const [seg, setSeg] = useState<Seg>('toShip');
   const [orders, setOrders] = useState<WebOrder[] | null>(null);
   const [error, setError] = useState('');
   const [open, setOpen] = useState<WebOrder | null>(null);
   const [urls, setUrls] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState('');
+  const [labelOpen, setLabelOpen] = useState(false);
   const packProofInput = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
@@ -195,6 +201,19 @@ export function AppOrders({ client, storeId, accessToken, money, stamp }: Props)
     const ship = open.fulfillment === 'ship';
     const pickup = open.fulfillment === 'pickup';
     const needsProof = (ch === 'amazon' || ch === 'tiktok') && !open.pack_proof_photo_path;
+    const canLabel = channelAllowsLabels(ch) && ship && paid;
+    if (labelOpen && canLabel) {
+      return (
+        <LabelDialog
+          order={open}
+          accessToken={accessToken}
+          money={money}
+          appMode
+          onClose={() => setLabelOpen(false)}
+          onDone={() => { setLabelOpen(false); void load(); }}
+        />
+      );
+    }
     return (
       <div className="app-stack">
         <div className="app-nav">
@@ -223,6 +242,11 @@ export function AppOrders({ client, storeId, accessToken, money, stamp }: Props)
 
         {paid && (
           <div className="app-actions" style={{ paddingTop: 8 }}>
+            {canLabel && (
+              <button type="button" disabled={!!busy} onClick={() => setLabelOpen(true)}>
+                {open.label_url ? 'Download / Reprint label' : 'Get label'}
+              </button>
+            )}
             {ship && !open.shipped_at && (
               <button type="button" disabled={!!busy} onClick={() => void markShipped(open)}>
                 {busy === 'ship' ? '…' : 'Mark shipped'}
