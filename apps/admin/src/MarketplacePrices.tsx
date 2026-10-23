@@ -55,10 +55,10 @@ export function MarketplacePrices({ sku, accessToken, client, money }: Props) {
   return <details className="suggested-prices" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
     <summary>Suggested prices</summary>
     {error && <p className="bad-text" role="alert">{error}</p>}
-    {!data ? <p className="hint">Loading pricesâ€¦</p> : <>
+    {!data ? <p className="hint">Loading prices…</p> : <>
       <p className="hint">Floor {money(data.floor_cents)} Â· label estimate {money(data.label_estimate_cents)}
         {data.label_is_estimate ? ' (estimate)' : ''}</p>
-      {data.missing_package_data && <p className="hint">Missing package dims â€” label cost is estimated.</p>}
+      {data.missing_package_data && <p className="hint">Missing package dims — label cost is estimated.</p>}
       <div className="suggested-price-list">{channels.map(([key, label]) => <div key={key} className="suggested-price-row">
         <strong>{label}</strong><span>{money(data.prices[key])}</span>
         <button type="button" className="text-button" onClick={() => void copy(key, data.prices[key])}>{copied === key ? 'Copied' : 'Copy'}</button>
@@ -67,7 +67,7 @@ export function MarketplacePrices({ sku, accessToken, client, money }: Props) {
         <label>Unit packing markup ($; blank uses global ${((data.global_packing_markup_cents || 0) / 100).toFixed(2)})
           <input inputMode="decimal" value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Use global" />
         </label>
-        <button type="button" disabled={busy} onClick={() => void saveOverride()}>{busy ? 'Savingâ€¦' : 'Save unit markup'}</button>
+        <button type="button" disabled={busy} onClick={() => void saveOverride()}>{busy ? 'Saving…' : 'Save unit markup'}</button>
       </div>
     </>}
   </details>;

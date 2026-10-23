@@ -1,4 +1,4 @@
-﻿/** Parse ship_cost_source from sale_ledger / channel_orders.
+/** Parse ship_cost_source from sale_ledger / channel_orders.
  * Fee sync encodes void-in-flight credits as `ebay|pending:11021`. */
 export function parseShipCostSource(source: string | null | undefined): {
   base: string;
@@ -19,5 +19,5 @@ export function formatLabelWithPending(
 ): string {
   if (pendingCreditCents <= 0) return money(labelCents);
   // Label cost = what actually shipped; () = voided label still charged on eBay.
-  return `${money(labelCents)} (${money(pendingCreditCents)} void pending ΓÇö still on eBay)`;
+  return `${money(labelCents)} (${money(pendingCreditCents)} void pending — still on eBay)`;
 }
