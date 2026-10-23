@@ -99,18 +99,17 @@ export function AppInventory({ client, money, onOpen, scrollRef }: Props) {
   const urlsRef = useRef(urls);
   urlsRef.current = urls;
 
-  async function signThumbs(paths: string[]) {
+  /** Sign storage paths; skip missing objects (web/400 often absent for fresh captures). */
+  async function signPaths(paths: string[]) {
     const keys = [...new Set(paths.filter((p) => /^[0-9a-f-]{36}\//i.test(p) && !urlsRef.current[p]))];
     if (!keys.length) return {} as Record<string, string>;
-    // Batch in chunks of 50 — storage API is happier and phones stay responsive.
     const out: Record<string, string> = {};
     for (let i = 0; i < keys.length; i += 50) {
       const chunk = keys.slice(i, i + 50);
       const { data, error: e } = await client.storage.from('unit-photos').createSignedUrls(chunk, 3600);
       if (e) throw e;
-      for (let j = 0; j < chunk.length; j++) {
-        const url = data?.[j]?.signedUrl;
-        if (url) out[chunk[j]] = url;
+      for (const row of data || []) {
+        if (row?.path && row.signedUrl && !row.error) out[row.path] = row.signedUrl;
       }
     }
     return out;
@@ -125,10 +124,28 @@ export function AppInventory({ client, money, onOpen, scrollRef }: Props) {
     });
   }
 
+  /**
+   * Sign original photo paths for list previews.
+   * Fresh captures usually have no web/400 derivative yet — createSignedUrls on missing
+   * keys is slow (~2s) and returns no URL, which left every row stuck on "+".
+   */
+  async function signItemPhotos(items: Row[], apply: (urls: Record<string, string>) => void) {
+    const originals = items.map((x) => x.photo_path).filter((p): p is string => Boolean(p));
+    if (!originals.length) return;
+    apply(await signPaths(originals).catch(() => ({})));
+  }
+
   useEffect(() => {
     let alive = true;
+    const apply = (extra: Record<string, string>) => {
+      if (alive) mergeUrls(extra);
+    };
     const cached = readCache(filter, query, offset);
-    if (cached) setList(cached);
+    if (cached) {
+      setList(cached);
+      // Warm cache: start signing immediately — don't wait on the revalidate RPC.
+      void signItemPhotos(cached.items, apply);
+    }
 
     const t = setTimeout(() => {
       // Only show the full-page spinner when we have nothing to paint.
@@ -152,14 +169,7 @@ export function AppInventory({ client, money, onOpen, scrollRef }: Props) {
           setList(next);
           writeCache(filter, query, offset, next);
           setLoading(false);
-
-          // Photos after paint — web/400 only (not full originals).
-          const thumbPaths = next.items
-            .map((x) => (x.photo_path ? thumb(x.photo_path) : null))
-            .filter((p): p is string => Boolean(p));
-          const signed = await signThumbs(thumbPaths).catch(() => ({}));
-          if (!alive) return;
-          mergeUrls(signed);
+          await signItemPhotos(next.items, apply);
         } catch (err) {
           if (!alive) return;
           setError(err instanceof Error ? err.message : String(err));
@@ -251,10 +261,13 @@ export function AppInventory({ client, money, onOpen, scrollRef }: Props) {
       {loading && list ? <p className="app-footer-count">Updating…</p> : null}
 
       <div className="app-group">
-        {(list?.items || []).map((u) => {
+        {(list?.items || []).map((u, idx) => {
           const warn = needs(u);
           const thumbPath = u.photo_path ? thumb(u.photo_path) : '';
-          const src = thumbPath ? urls[thumbPath] || urls[u.photo_path!] || '' : '';
+          // Prefer small derivative when signed; otherwise the original (always exists when photo_path is set).
+          const src = u.photo_path
+            ? (thumbPath && urls[thumbPath]) || urls[u.photo_path] || ''
+            : '';
           return (
             <button type="button" className="app-row" key={u.sku} onClick={() => onOpen(u.sku)}>
               <span className="app-thumb">
@@ -262,22 +275,23 @@ export function AppInventory({ client, money, onOpen, scrollRef }: Props) {
                   <img
                     src={src}
                     alt=""
-                    loading="lazy"
+                    loading={idx < 12 ? 'eager' : 'lazy'}
                     decoding="async"
                     onError={(e) => {
-                      // Fall back to original once if the web/400 derivative is missing.
+                      // web/400 URL can 404 if Storage signed a missing key — swap to original once.
                       if (!u.photo_path || e.currentTarget.dataset.fallback === '1') return;
                       e.currentTarget.dataset.fallback = '1';
                       const original = urls[u.photo_path];
-                      if (original) e.currentTarget.src = original;
-                      else {
-                        void client.storage.from('unit-photos').createSignedUrl(u.photo_path, 3600).then(({ data }) => {
-                          if (data?.signedUrl) {
-                            mergeUrls({ [u.photo_path!]: data.signedUrl });
-                            e.currentTarget.src = data.signedUrl;
-                          }
-                        });
+                      if (original && original !== e.currentTarget.src) {
+                        e.currentTarget.src = original;
+                        return;
                       }
+                      void client.storage.from('unit-photos').createSignedUrl(u.photo_path, 3600).then(({ data }) => {
+                        if (data?.signedUrl) {
+                          mergeUrls({ [u.photo_path!]: data.signedUrl });
+                          e.currentTarget.src = data.signedUrl;
+                        }
+                      });
                     }}
                   />
                 ) : '+'}
