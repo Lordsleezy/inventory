@@ -32,7 +32,7 @@ const ATTN: { kind: Kind; label: string; blocks: string }[] = [
   { kind: 'brand', label: 'No brand', blocks: 'eBay, Amazon' },
   { kind: 'category', label: 'No category details', blocks: 'eBay, Amazon' },
   { kind: 'price', label: 'No price', blocks: 'Website & marketplaces' },
-  { kind: 'upc', label: 'No UPC', blocks: 'Amazon' },
+  { kind: 'upc', label: 'No UPC', blocks: 'Amazon / TikTok' },
   { kind: 'condition', label: 'No condition', blocks: 'Listing' },
   { kind: 'cost', label: 'No cost', blocks: 'Profit reports' },
   { kind: 'model', label: 'No model', blocks: 'Matching' },
