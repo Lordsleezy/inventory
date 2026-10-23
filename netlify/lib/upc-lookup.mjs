@@ -11,7 +11,12 @@
  */
 import { serviceClient } from "./server.mjs";
 import { normalizeGtin } from "./gtin-normalize.mjs";
-import { catalogItemByIdentifier, competitivePriceByAsin, amazonNeverListReason } from "./amazon.mjs";
+import {
+  catalogItemByIdentifier,
+  competitivePriceByAsin,
+  amazonNeverListReason,
+  usableModelNumber,
+} from "./amazon.mjs";
 
 const UPCITEMDB_TRIAL = "https://api.upcitemdb.com/prod/trial/lookup";
 const UPCITEMDB_PAID = "https://api.upcitemdb.com/prod/v1/lookup";
@@ -75,7 +80,8 @@ export function parseUpcitemdbItem(item) {
   return {
     title: clean(item.title),
     brand: clean(item.brand),
-    model: clean(item.model),
+    // Drop retailer digit codes (same rule as Amazon parse) — not usable as item specifics.
+    model: usableModelNumber(clean(item.model)),
     description: clean(item.description),
     category: clean(item.category),
     asin: clean(item.asin)?.toUpperCase() || null,
@@ -275,7 +281,14 @@ export function mergeLookup(amazon, upc) {
 
   const [title, titleSrc] = pick("title");
   const [brand, brandSrc] = pick("brand");
-  const [model, modelSrc] = pick("model");
+  // Prefer a real MPN; never keep bare digit retailer codes in merged.model.
+  const pickModel = () => {
+    const a = usableModelNumber(clean(A?.model));
+    if (a) return [a, "amazon"];
+    const u = usableModelNumber(clean(U?.model));
+    return u ? [u, "upcitemdb"] : [null, null];
+  };
+  const [model, modelSrc] = pickModel();
   const [description, descSrc] = pick("description");
   const [category] = pick("category");
   const [asin, asinSrc] = A?.asin ? [A.asin, "amazon"] : U?.asin ? [U.asin, "upcitemdb"] : [null, null];

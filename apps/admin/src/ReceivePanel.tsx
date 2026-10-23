@@ -167,6 +167,49 @@ function formatAspectsLine(aspects?: Record<string, string> | null): string {
     .join(' · ');
 }
 
+/** Reject retailer ITM/SKU digit codes; prefer aspects or a pack/variant phrase from the title. */
+function usableModelNumber(raw?: string | null): string {
+  const m = String(raw || '').trim();
+  if (!m) return '';
+  if (/^\d{4,}$/.test(m)) return '';
+  if (/^(itm|art|sku|dpci|tcin)[\s#:-]?\d+/i.test(m)) return '';
+  return m;
+}
+
+function variantFromTitle(title?: string | null, brand?: string | null): string {
+  let t = String(title || '').trim().replace(/\s+/g, ' ');
+  if (!t) return '';
+  const b = String(brand || '').trim();
+  if (b && t.toLowerCase().startsWith(b.toLowerCase())) {
+    t = t.slice(b.length).replace(/^[\s,:\-|–—]+/, '').trim();
+  }
+  const pack = t.match(
+    /(.{0,80}\b\d+\s*(?:-?\s*)?(?:count|ct|pack|pk|heads?|refills?|pieces?|pcs?|oz|fl\s*oz|ml|g)\b[^|/]{0,40})/i,
+  );
+  if (pack) return pack[1].trim().replace(/^[\s,:\-|–—]+/, '');
+  return t.split(/[|/]/)[0].trim().slice(0, 80);
+}
+
+function itemSpecificsFromLookup(m?: Lookup['merged']): string {
+  if (!m) return '';
+  return (
+    usableModelNumber(m.model) ||
+    formatAspectsLine(m.aspects) ||
+    variantFromTitle(m.title, m.brand)
+  );
+}
+
+/**
+ * Floor listing title = brand + item specifics (model).
+ * Used for scans and manual — never Amazon's long catalog title or bare retailer digit codes.
+ * Example: brand "Oral-B" + model "Replacement Brush Heads 10 Pack" → title.
+ */
+function composeListingTitle(brand: string, model: string, unbranded: boolean): string {
+  const b = unbranded ? 'Unbranded' : brand.trim();
+  const m = model.trim();
+  return [b, m].filter(Boolean).join(' ');
+}
+
 function catalogMissMessage(r?: Lookup): string | null {
   if (!r) return null;
   const m = r.merged;
@@ -501,6 +544,14 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     setForm(prev => {
       const next = { ...prev, [key]: value };
       if (key === 'cost') next.costEstimate = false;
+      // Title is always brand + item specifics (scans and manual).
+      if (key === 'brand' || key === 'model') {
+        next.title = composeListingTitle(
+          key === 'brand' ? value : next.brand,
+          key === 'model' ? value : next.model,
+          next.unbranded,
+        );
+      }
       return next;
     });
   };
@@ -601,15 +652,17 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       title: m?.title, brand: m?.brand, model: m?.model, category: m?.category,
     });
     const suggested = suggestAskCents(retailNow?.cents ?? null, floorSuggest);
-    const aspectsLine = formatAspectsLine(m?.aspects);
+    // Item specifics = pack phrase / aspects / real MPN — never retailer digit codes (e.g. "4610583").
+    const specifics = itemSpecificsFromLookup(m);
+    const brand = text(m?.brand);
     const initial: Form = {
       ...blank,
       upc: current.upc,
-      brand: text(m?.brand),
+      brand,
       unbranded: false,
-      // Prefer real model #; else Amazon item specifics (flavor / form / size…).
-      model: text(m?.model) || aspectsLine,
-      title: text(m?.title),
+      model: specifics,
+      // Title = brand + model (not Amazon's long catalog title).
+      title: composeListingTitle(brand, specifics, false),
       category: text(m?.category),
       // description falls back to the real feature bullets from the lookup; never invented text
       description: text(m?.description) || featuresText(m?.features),
@@ -619,6 +672,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       ...(current.seed || {}),
       costEstimate: current.seed?.cost ? false : true,
     };
+    // Seed may override brand/model — keep title in sync.
+    initial.title = composeListingTitle(initial.brand, initial.model, initial.unbranded);
     askTouched.current = Boolean(current.seed && 'ask' in current.seed);
     setForm(initial);
     const miss = current.status === 'ready' || current.status === 'error'
@@ -776,11 +831,14 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         hold ? `Not listing — ${holdLabel}${hold.note.trim() ? `: ${hold.note.trim()}` : ''}` : '',
         form.notes.trim(),
       ].filter(Boolean).join('\n');
+      const brandValue = form.unbranded ? 'Unbranded' : form.brand.trim();
+      // Scans and manual: title is always brand + item specifics (never catalog junk / digit codes).
+      const titleValue = composeListingTitle(form.brand, form.model, form.unbranded);
       const { data, error: e } = await client.rpc('portal_receive_unit', {
         p_quantity: quantity,
-        p_brand: form.unbranded ? 'Unbranded' : form.brand.trim(),
+        p_brand: brandValue,
         p_model: form.model.trim(),
-        p_title: form.title.trim(),
+        p_title: titleValue,
         p_category: form.category.trim() || null,
         p_description: form.description.trim() || null,
         p_condition: form.condition || null,
@@ -832,8 +890,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
 
       // Remember product data for "Add another unit".
       const seed: Partial<Form> = {
-        brand: form.unbranded ? 'Unbranded' : form.brand, unbranded: form.unbranded, noUpc: form.noUpc,
-        model: form.model, title: form.title, category: form.category, description: form.description,
+        brand: brandValue, unbranded: form.unbranded, noUpc: form.noUpc,
+        model: form.model, title: titleValue, category: form.category, description: form.description,
         ask: hold ? '' : form.ask, testStatus: '', shippable: form.shippable,
         length: form.length, width: form.width, height: form.height, weight: form.weight,
         upc: form.noUpc ? '' : (form.upc || current?.upc || ''),
@@ -843,7 +901,20 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
 
       if (manual) {
         askTouched.current = false;
-        setForm(prev => ({ ...blank, brand: prev.brand, condition: prev.condition, testStatus: prev.testStatus, shippable: prev.shippable }));
+        // Keep brand/condition for the next unit; title stays brand (+ empty model) until specifics are typed.
+        setForm(prev => {
+          const brand = prev.brand;
+          const unbranded = prev.unbranded;
+          return {
+            ...blank,
+            brand,
+            unbranded,
+            condition: prev.condition,
+            testStatus: prev.testStatus,
+            shippable: prev.shippable,
+            title: composeListingTitle(brand, '', unbranded),
+          };
+        });
         setFiles([]); setDups(null); setDupAck(false);
       } else {
         const doneId = current?.id;
@@ -903,7 +974,10 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
 
     const patch = {
       specs, msrp: msrp, show: hide ? false : null,
-      brand: form.unbranded ? 'Unbranded' : form.brand.trim(), model: form.model.trim(), title: form.title.trim(), description: form.description.trim(),
+      brand: form.unbranded ? 'Unbranded' : form.brand.trim(),
+      model: form.model.trim(),
+      title: composeListingTitle(form.brand, form.model, form.unbranded),
+      description: form.description.trim(),
     };
     let failed = 0;
     for (const sku of skus) { if (!(await enrichOne(sku, patch))) failed++; }
@@ -1152,7 +1226,14 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           <input value={form.unbranded ? 'Unbranded' : form.brand} disabled={form.unbranded} onChange={e => update('brand', e.target.value)} />
         </label>
         <label className="mboard-inline">
-          <input type="checkbox" checked={form.unbranded} onChange={e => setForm(p => ({ ...p, unbranded: e.target.checked }))} />
+          <input type="checkbox" checked={form.unbranded} onChange={e => setForm(p => {
+            const unbranded = e.target.checked;
+            return {
+              ...p,
+              unbranded,
+              title: composeListingTitle(p.brand, p.model, unbranded),
+            };
+          })} />
           Unbranded — no brand anywhere on the product or packaging
         </label>
 
@@ -1211,7 +1292,16 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         </label>
 
         {manual && <label>Quantity<input type="number" min="1" max="100" step="1" value={form.quantity} onChange={e => update('quantity', e.target.value)} required /></label>}
-        {manual && <label className="unit-edit-wide">Title<input value={form.title} onChange={e => update('title', e.target.value)} /></label>}
+        <label className="unit-edit-wide">
+          Title
+          <input
+            value={form.title}
+            onChange={e => update('title', e.target.value)}
+            placeholder="Brand + item specifics"
+            autoComplete="off"
+          />
+          <span className="hint">Auto-filled as brand + item specifics (scans and manual).</span>
+        </label>
         {manual && <label className="unit-edit-wide">Description / features<textarea rows={3} value={form.description} onChange={e => update('description', e.target.value)} /></label>}
         {manual && <label>Cost (optional)<input inputMode="decimal" placeholder="9.00" value={form.cost} onChange={e => update('cost', e.target.value)} /></label>}
 
