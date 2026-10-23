@@ -15,6 +15,90 @@ function preferNativeCapture() {
     || (navigator as Navigator & { standalone?: boolean }).standalone === true;
 }
 
+const PHOTO_MAX_BYTES = 15 * 1024 * 1024;
+const PHOTO_MIN_BYTES = 2048;
+const PENDING_PHOTO_DB = 'floor-receive-photos';
+const PENDING_PHOTO_STORE = 'files';
+
+/**
+ * Camera capture on Android/iOS PWAs often returns File with empty type, a generic name,
+ * or a blob that is invalidated when the <input> value is cleared. Copy bytes into a
+ * fresh File before clearing the input.
+ */
+async function copyImageFile(file: File): Promise<File | null> {
+  if (file.size > PHOTO_MAX_BYTES) return null;
+  let buf: ArrayBuffer;
+  try {
+    buf = await file.arrayBuffer();
+  } catch {
+    return null;
+  }
+  if (buf.byteLength < PHOTO_MIN_BYTES) return null;
+  const type = file.type && file.type.startsWith('image/') ? file.type : 'image/jpeg';
+  const rawName = (file.name || '').trim();
+  const hasExt = /\.[a-z0-9]{2,5}$/i.test(rawName);
+  const name = (hasExt ? rawName : `photo-${Date.now()}.jpg`).replace(/[^a-zA-Z0-9._-]/g, '_') || 'photo.jpg';
+  return new File([buf], name, { type, lastModified: file.lastModified || Date.now() });
+}
+
+function pendingPhotoKey(storeId: string, scanKey: string) {
+  return `${storeId}:${scanKey}`;
+}
+
+function openPendingPhotoDb(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(PENDING_PHOTO_DB, 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(PENDING_PHOTO_STORE)) db.createObjectStore(PENDING_PHOTO_STORE);
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error || new Error('indexedDB open failed'));
+  });
+}
+
+async function savePendingPhotos(key: string, files: File[]): Promise<void> {
+  if (typeof indexedDB === 'undefined') return;
+  try {
+    const db = await openPendingPhotoDb();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(PENDING_PHOTO_STORE, 'readwrite');
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error || new Error('indexedDB write failed'));
+      const store = tx.objectStore(PENDING_PHOTO_STORE);
+      if (!files.length) store.delete(key);
+      else store.put(files, key);
+    });
+    db.close();
+  } catch { /* best-effort; receive still works without persistence */ }
+}
+
+async function loadPendingPhotos(key: string): Promise<File[]> {
+  if (typeof indexedDB === 'undefined') return [];
+  try {
+    const db = await openPendingPhotoDb();
+    const blobs = await new Promise<Blob[]>((resolve, reject) => {
+      const tx = db.transaction(PENDING_PHOTO_STORE, 'readonly');
+      const req = tx.objectStore(PENDING_PHOTO_STORE).get(key);
+      req.onsuccess = () => {
+        const v = req.result;
+        resolve(Array.isArray(v) ? v.filter((f): f is Blob => f instanceof Blob) : []);
+      };
+      req.onerror = () => reject(req.error || new Error('indexedDB read failed'));
+    });
+    db.close();
+    return blobs.map((f, i) => (f instanceof File
+      ? f
+      : new File([f], `photo-${i + 1}.jpg`, { type: f.type || 'image/jpeg' })));
+  } catch {
+    return [];
+  }
+}
+
+async function clearPendingPhotos(key: string): Promise<void> {
+  await savePendingPhotos(key, []);
+}
+
 /* ------------------------------------------------------------------------------------------------
  * Receive = scan-to-list.
  *   scan UPC -> lookup fills listing fields -> edit requirements (price, condition, category,
@@ -332,6 +416,9 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   const takePhotoFile = useRef<HTMLInputElement>(null);
   const choosePhotoFile = useRef<HTMLInputElement>(null);
   const consumedInitialUpc = useRef(false);
+  /** Stable key for IndexedDB photo stash (survives camera-app process death on store phones). */
+  const photoSessionKey = useRef(`manual-${Date.now()}`);
+  const [photoBusy, setPhotoBusy] = useState(false);
 
   function openBarcodeCamera() {
     // Phones / installed PWA: native capture is far more reliable than getUserMedia + BarcodeDetector.
@@ -455,6 +542,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     askTouched.current = false;
     setForm({ ...blank, ...keepProduct });
     setFiles([]);
+    void clearPendingPhotos(pendingPhotoKey(storeId, photoSessionKey.current));
     setDups(null);
     setDupAck(false);
     setDialog(null);
@@ -500,6 +588,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     };
     askTouched.current = Boolean(current.seed && 'ask' in current.seed);
     setForm(initial);
+    photoSessionKey.current = current.id;
     setFiles([]);
     setDialog(null);
     setDupAck(Boolean(current.again));
@@ -509,6 +598,11 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     activeScan.current = current.id;
     const scanId = current.id;
     void findDups(upcVariants(current.upc, r)).then(d => { if (mounted.current && activeScan.current === scanId) setDups(d); });
+    // Restore photos if the camera app killed the PWA mid-capture for this scan.
+    void loadPendingPhotos(pendingPhotoKey(storeId, scanId)).then(restored => {
+      if (!mounted.current || activeScan.current !== scanId || !restored.length) return;
+      setFiles(restored);
+    });
     setReadyToList(false);
     setReadyAmazonTiktok(false);
     upcInput.current?.blur();
@@ -523,7 +617,11 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
 
   function toggleManual() {
     setError(''); setWarning('');
-    if (!manual) { setManual(true); return; }
+    if (!manual) {
+      photoSessionKey.current = `manual-${storeId}`;
+      setManual(true);
+      return;
+    }
     setManual(false);
     setLoadedId(null);
     resetEntry();
@@ -591,12 +689,12 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     if (!manual && current?.status === 'loading') { setError('Lookup still running…'); return; }
     const quantity = manual ? Number(form.quantity) : 1;
     if (!Number.isInteger(quantity) || quantity < 1 || quantity > 100) { setError('Quantity must be 1–100.'); return; }
-    if (files.some(file => !file.type.startsWith('image/') || file.size > 15 * 1024 * 1024)) {
+    if (files.some(file => (file.type && !file.type.startsWith('image/')) || file.size > PHOTO_MAX_BYTES)) {
       setError('Photos must be images under 15 MB each.'); return;
     }
     if (!manual) {
       if (!files.length) { setError('Add at least one real photo of this unit before finishing.'); return; }
-      if (files.some(f => f.size < 2048)) { setError('One of the photos looks empty or too small. Retake it.'); return; }
+      if (files.some(f => f.size < PHOTO_MIN_BYTES)) { setError('One of the photos looks empty or too small. Retake it.'); return; }
       if (!form.condition) { setError('Pick a condition: New (sealed), Open box, or Scratch & dent.'); return; }
     }
     if (form.condition === SCRATCH && !form.conditionNote.trim()) { setError('Scratch & dent needs a note describing the damage.'); return; }
@@ -663,17 +761,27 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       const warnings: string[] = [];
 
       let failed = 0;
+      const uploadErrors: string[] = [];
       for (const sku of skus) for (const file of files) {
         const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, '_') || 'photo.jpg';
         const path = `${storeId}/${sku}/${Date.now()}-${crypto.randomUUID()}-${safe}`;
         try {
-          const upload = await client.storage.from('unit-photos').upload(path, file, { contentType: file.type, upsert: false });
+          const contentType = file.type && file.type.startsWith('image/') ? file.type : 'image/jpeg';
+          const upload = await client.storage.from('unit-photos').upload(path, file, { contentType, upsert: false });
           if (upload.error) throw upload.error;
           const linked = await client.rpc('portal_add_unit_photo', { p_sku: sku, p_path: path });
           if (linked.error) throw linked.error;
-        } catch { failed++; }
+        } catch (err) {
+          failed++;
+          const msg = errText(err);
+          if (msg && uploadErrors.length < 2) uploadErrors.push(msg);
+        }
       }
-      if (failed) warnings.push(`${failed} photo upload(s) did not finish. The unit(s) were received; they will show under Needs attention → Missing photo.`);
+      if (failed) {
+        warnings.push(`${failed} photo upload(s) did not finish. The unit(s) were received; they will show under Needs attention → Missing photo.${uploadErrors.length ? ` (${uploadErrors.join('; ')})` : ''}`);
+      } else if (files.length) {
+        void clearPendingPhotos(pendingPhotoKey(storeId, photoSessionKey.current));
+      }
 
       // Merge lookup data (and any hold) into the new unit(s).
       const blocked = skus.includes(NEVER_LIST_SKU);
@@ -827,10 +935,48 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     focusUpc();
   }
 
-  function addFiles(list: FileList | null) {
+  async function ingestFiles(list: FileList | null) {
     if (!list || !list.length) return;
-    setFiles(prev => [...prev, ...Array.from(list)]);
+    // Snapshot the list before any await — FileList is live and clears with the input.
+    const raw = Array.from(list);
+    setPhotoBusy(true);
+    setError('');
+    try {
+      const copied: File[] = [];
+      let rejected = 0;
+      for (const file of raw) {
+        const next = await copyImageFile(file);
+        if (next) copied.push(next);
+        else rejected++;
+      }
+      if (!copied.length) {
+        setError(rejected
+          ? 'Camera photo could not be saved. Try Take photo again, or use Choose photos.'
+          : 'No photo was returned. Try Take photo again.');
+        return;
+      }
+      setFiles(prev => {
+        const next = [...prev, ...copied];
+        void savePendingPhotos(pendingPhotoKey(storeId, photoSessionKey.current), next);
+        return next;
+      });
+      if (rejected) setWarning(`${rejected} photo(s) looked empty or too large and were skipped.`);
+    } finally {
+      setPhotoBusy(false);
+    }
   }
+
+  // Manual entry: restore any stashed photos after a camera-app kill.
+  useEffect(() => {
+    if (!manual) return;
+    photoSessionKey.current = `manual-${storeId}`;
+    let alive = true;
+    void loadPendingPhotos(pendingPhotoKey(storeId, photoSessionKey.current)).then(restored => {
+      if (!alive || !restored.length) return;
+      setFiles(prev => (prev.length ? prev : restored));
+    });
+    return () => { alive = false; };
+  }, [manual, storeId]);
 
   const showForm = manual || (current && current.status !== 'loading' && loadedId === current.id);
   const waiting = queue.length - (current ? 1 : 0);
@@ -1020,7 +1166,12 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
               className="sr-only"
               aria-hidden
               tabIndex={-1}
-              onChange={e => { addFiles(e.target.files); e.target.value = ''; }}
+              onChange={e => {
+                const input = e.currentTarget;
+                const list = input.files;
+                // Copy bytes before clearing — clearing first empties the File on some Android PWAs.
+                void ingestFiles(list).finally(() => { input.value = ''; });
+              }}
             />
             <input
               ref={choosePhotoFile}
@@ -1030,18 +1181,28 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
               className="sr-only"
               aria-hidden
               tabIndex={-1}
-              onChange={e => { addFiles(e.target.files); e.target.value = ''; }}
+              onChange={e => {
+                const input = e.currentTarget;
+                const list = input.files;
+                void ingestFiles(list).finally(() => { input.value = ''; });
+              }}
             />
-            <button type="button" className="secondary receive-file-btn" onClick={() => takePhotoFile.current?.click()}>
-              Take photo
+            <button type="button" className="secondary receive-file-btn" disabled={photoBusy || busy} onClick={() => takePhotoFile.current?.click()}>
+              {photoBusy ? 'Saving photo…' : 'Take photo'}
             </button>
-            <button type="button" className="secondary receive-file-btn" onClick={() => choosePhotoFile.current?.click()}>
+            <button type="button" className="secondary receive-file-btn" disabled={photoBusy || busy} onClick={() => choosePhotoFile.current?.click()}>
               Choose photos
             </button>
           </div>
-          {hasFiles && <div className="receive-photos">{files.map((f, i) => <figure key={`${f.name}-${i}`}>
+          {hasFiles && <div className="receive-photos">{files.map((f, i) => <figure key={`${f.name}-${f.size}-${i}`}>
             <img src={previews[i]} alt={`Photo ${i + 1}`} />
-            <button type="button" className="text-button" onClick={() => setFiles(prev => prev.filter((_, j) => j !== i))}>Remove</button>
+            <button type="button" className="text-button" onClick={() => {
+              setFiles(prev => {
+                const next = prev.filter((_, j) => j !== i);
+                void savePendingPhotos(pendingPhotoKey(storeId, photoSessionKey.current), next);
+                return next;
+              });
+            }}>Remove</button>
           </figure>)}</div>}
         </div>
 

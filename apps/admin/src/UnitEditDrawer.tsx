@@ -300,14 +300,25 @@ export function UnitEditDrawer({
 
   async function addPhotos(files: FileList | null) {
     if (!files?.length) return;
+    // Snapshot before any await — FileList is live on the input.
+    const picked = Array.from(files);
     setBusy(true); setError(''); setMsg('');
     let failed = 0;
-    for (const file of Array.from(files)) {
-      if (!file.type.startsWith('image/') || file.size > 15 * 1024 * 1024) { failed++; continue; }
-      const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+    for (const file of picked) {
+      const typeOk = !file.type || file.type.startsWith('image/');
+      if (!typeOk || file.size > 15 * 1024 * 1024 || file.size < 1) { failed++; continue; }
+      let body: Blob = file;
+      try {
+        // Detach from the <input> so clearing value cannot empty the blob (Android PWA).
+        body = new Blob([await file.arrayBuffer()], { type: file.type || 'image/jpeg' });
+      } catch { failed++; continue; }
+      const safe = (file.name || 'photo.jpg').replace(/[^a-zA-Z0-9._-]/g, '_') || 'photo.jpg';
       const path = `${storeId}/${sku}/${Date.now()}-${crypto.randomUUID()}-${safe}`;
       try {
-        const upload = await client.storage.from('unit-photos').upload(path, file, { contentType: file.type, upsert: false });
+        const upload = await client.storage.from('unit-photos').upload(path, body, {
+          contentType: file.type || 'image/jpeg',
+          upsert: false,
+        });
         if (upload.error) throw upload.error;
         const linked = await client.rpc('portal_add_unit_photo', { p_sku: sku, p_path: path });
         if (linked.error) throw linked.error;
