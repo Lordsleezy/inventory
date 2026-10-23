@@ -15,7 +15,16 @@ import { errText } from './errText';
  * ---------------------------------------------------------------------------------------------- */
 
 type Options = { next_sku: string | null; conditions: unknown; test_statuses: unknown };
-type Props = { client: SupabaseClient; storeId: string; accessToken: string; onSaved: () => void };
+type Props = {
+  client: SupabaseClient;
+  storeId: string;
+  accessToken: string;
+  onSaved: () => void;
+  /** App-mode chrome: Cancel / Receive · SKU / Save nav, no instruction paragraphs. */
+  appChrome?: boolean;
+  initialManual?: boolean;
+  onAppCancel?: () => void;
+};
 
 type Pkg = { length_in?: number | null; width_in?: number | null; height_in?: number | null; weight_lb?: number | null };
 type Source = {
@@ -256,9 +265,9 @@ function CameraScanner({ onDetect, onFile, onClose }: {
 
 /* ================================================================================================ */
 
-export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
+export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome, initialManual, onAppCancel }: Props) {
   const [options, setOptions] = useState<Options | null>(null);
-  const [manual, setManual] = useState(false);
+  const [manual, setManual] = useState(!!initialManual);
   const [draft, setDraft] = useState('');
   const [queue, setQueue] = useState<Scan[]>([]);
   const [loadedId, setLoadedId] = useState<string | null>(null);
@@ -771,7 +780,17 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
   const needNoteForScratch = form.condition === SCRATCH;
   const holdReady = reason !== 'other' || reasonNote.trim().length > 0;
 
-  return <section className="panel receive-panel">
+  return <section className={`panel receive-panel${appChrome ? ' receive-app' : ''}`}>
+    {appChrome && (
+      <div className="app-nav receive-app-nav">
+        <button type="button" onClick={() => onAppCancel?.()}>Cancel</button>
+        <div className="app-nav-title">Receive · {options?.next_sku || '…'}</div>
+        <button type="button" disabled={busy || !options?.next_sku} onClick={() => {
+          const formEl = document.getElementById('receive-app-form') as HTMLFormElement | null;
+          formEl?.requestSubmit();
+        }}>Save</button>
+      </div>
+    )}
     <div className="receive-next">
       <div className="receive-sku-block">
         <div><div className="eyebrow">NEXT AVAILABLE SKU</div><strong>{options?.next_sku || 'Loading…'}</strong></div>
@@ -806,10 +825,12 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
           }} />
         </div>}
       </div>
-      <div>
-        <p>{manual ? 'Manual entry: fill listing fields, add a photo, then receive.' : 'Scan a UPC, edit the listing fields, add a photo, then receive.'}</p>
-        <button type="button" className="text-button" onClick={toggleManual}>{manual ? '← Back to scan' : 'Enter manually'}</button>
-      </div>
+      {!appChrome && (
+        <div>
+          <p>{manual ? 'Manual entry: fill listing fields, add a photo, then receive.' : 'Scan a UPC, edit the listing fields, add a photo, then receive.'}</p>
+          <button type="button" className="text-button" onClick={toggleManual}>{manual ? '← Back to scan' : 'Enter manually'}</button>
+        </div>
+      )}
     </div>
 
     {!manual && queue.length > 0 && <p className="hint" role="status">
@@ -825,10 +846,10 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
     {warning && <p className="hint">{warning}</p>}
     {error && <div className="alert" role="alert">{error}<button type="button" onClick={() => setError('')}>Dismiss</button></div>}
 
-    {!manual && !current && <div className="empty">Scan a UPC to start. Rapid scans are queued.</div>}
+    {!appChrome && !manual && !current && <div className="empty">Scan a UPC to start. Rapid scans are queued.</div>}
     {!manual && current?.status === 'loading' && <div className="empty">Looking up {current.upc}…</div>}
 
-    {showForm && <form onSubmit={e => void finish(e)}>
+    {showForm && <form id={appChrome ? 'receive-app-form' : undefined} onSubmit={e => void finish(e)}>
       {dups && dups.count > 0 && <div className="receive-dup" role="status">
         <strong>You have {dups.count} of these</strong>{dups.skus.length ? <> (SKU {dups.skus.slice(0, 8).join(', ')}{dups.skus.length > 8 ? '…' : ''})</> : null}
         {!dupAck ? <> <button type="button" className="secondary" onClick={confirmDup}>Add another unit</button></> : <span className="tag on">confirmed — new unit</span>}

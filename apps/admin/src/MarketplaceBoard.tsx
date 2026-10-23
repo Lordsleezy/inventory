@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { floorFunctionUrl } from './floorApi';
 import { errText } from './errText';
+import { shortError } from './appMode/shortError';
 
 export type BoardChannel = 'ebay' | 'amazon' | 'tiktok';
 type Tab = 'listed' | 'not_listed' | 'sold';
@@ -84,9 +85,9 @@ type Props = {
 const PAGE = 40;
 const ZONE = 'America/Los_Angeles';
 const NAMES: Record<BoardChannel, { title: string; fee: string }> = {
-  ebay: { title: 'ebay', fee: 'eBay fees' },
-  amazon: { title: 'amazon', fee: 'Amazon fees' },
-  tiktok: { title: 'tiktok', fee: 'TikTok fees' },
+  ebay: { title: 'eBay', fee: 'eBay fees' },
+  amazon: { title: 'Amazon', fee: 'Amazon fees' },
+  tiktok: { title: 'TikTok', fee: 'TikTok fees' },
 };
 const CONDITIONS = ['New (sealed)', 'Open box', 'Scratch & dent'];
 
@@ -256,11 +257,14 @@ export function MarketplaceBoard({ channel, accessToken, money }: Props) {
       setConnectMessage(body.connect_message || '');
       const notes = body.connected === false ? [] : [...(body.warnings || [])];
       if (body.connected !== false && body.message && !notes.includes(body.message)) notes.push(body.message);
-      setWarnings(notes.filter(Boolean));
+      for (const a of body.accounts || []) {
+        if (a.error) notes.push(`${a.username || 'Account'}: ${shortError(a.error)}`);
+      }
+      setWarnings([...new Set(notes.filter(Boolean).map((n) => shortError(n)))]);
       setAccounts(body.accounts || []);
       setLastSynced(body.last_synced?.at || null);
     } catch (e) {
-      setError(errText(e));
+      setError(shortError(errText(e)));
       setListed([]);
       setNotListed([]);
     } finally {
@@ -279,7 +283,7 @@ export function MarketplaceBoard({ channel, accessToken, money }: Props) {
       setQuarters(next);
       if (body.quarter?.id && !next.some((q) => q.id === id)) setQuarter(body.quarter.id);
     } catch (e) {
-      setError(errText(e));
+      setError(shortError(errText(e)));
     } finally {
       setQuarterBusy(false);
     }
@@ -442,7 +446,7 @@ export function MarketplaceBoard({ channel, accessToken, money }: Props) {
         if (thumbs.length) setEditThumbs(thumbs);
       }
     } catch (e) {
-      setError(errText(e));
+      setError(shortError(errText(e)));
     } finally {
       setEditBusy(false);
     }
@@ -507,7 +511,7 @@ export function MarketplaceBoard({ channel, accessToken, money }: Props) {
       setEdit(null);
       await loadCatalog();
     } catch (e) {
-      setError(errText(e));
+      setError(shortError(errText(e)));
     } finally {
       setEditBusy(false);
     }
@@ -560,7 +564,7 @@ export function MarketplaceBoard({ channel, accessToken, money }: Props) {
       const body = unwrap(status, json) as { items?: { sku: string; title: string | null; ask_cents: number | null }[] };
       setEligible(body.items || []);
     } catch (e) {
-      setError(errText(e));
+      setError(shortError(errText(e)));
     } finally {
       setEditBusy(false);
     }
@@ -577,7 +581,7 @@ export function MarketplaceBoard({ channel, accessToken, money }: Props) {
       setShowAdd(false);
       await loadCatalog();
     } catch (e) {
-      setError(errText(e));
+      setError(shortError(errText(e)));
     } finally {
       setEditBusy(false);
     }
@@ -591,7 +595,7 @@ export function MarketplaceBoard({ channel, accessToken, money }: Props) {
       const body = unwrap(status, json) as { items?: { sku: string; listing_id: string; title: string }[] };
       setLegacy(body.items || []);
     } catch (e) {
-      setError(errText(e));
+      setError(shortError(errText(e)));
     } finally {
       setEditBusy(false);
     }
@@ -607,7 +611,7 @@ export function MarketplaceBoard({ channel, accessToken, money }: Props) {
       setNotice(`Migrated ${listingId}.`);
       await openMigrate();
     } catch (e) {
-      setError(errText(e));
+      setError(shortError(errText(e)));
     } finally {
       setEditBusy(false);
     }
@@ -681,7 +685,7 @@ export function MarketplaceBoard({ channel, accessToken, money }: Props) {
         />
       </label>
 
-      {error && <div className="alert" role="alert">{error}</div>}
+      {error && <div className="alert" role="alert">{shortError(error)}</div>}
       {notice && <div className="notice" role="status">{notice}</div>}
       {warnings.length > 0 && <div className="alert" role="status">{warnings.join(' · ')}</div>}
       {jobActive && (
@@ -823,7 +827,7 @@ export function MarketplaceBoard({ channel, accessToken, money }: Props) {
         <div className="mboard-modal">
           <div className="mboard-modal-card">
             <h2>Edit {edit.sku}</h2>
-            {error && <div className="alert" role="alert">{error}</div>}
+            {error && <div className="alert" role="alert">{shortError(error)}</div>}
             <p className="hint">{edit.live ? 'Price is the Floor ask. A new ask reprices every live channel. Title, photos, and condition push only when you change them. On eBay, changing shipping switches the live business policy. Unknown shipping stays as it is.' : 'This unit is not live here. Save updates Floor. Push lists it once the required fields are filled.'}</p>
             {editThumbs.length > 0 && <div className="mboard-thumbs">{editThumbs.slice(0, 8).map((url) => <img key={url} src={url} alt="" />)}</div>}
             <label>Title<input value={editTitle} onChange={(e) => setEditTitle(e.target.value)} /></label>
@@ -856,7 +860,7 @@ export function MarketplaceBoard({ channel, accessToken, money }: Props) {
         <div className="mboard-modal">
           <div className="mboard-modal-card">
             <h2>Mark sold</h2>
-            {error && <div className="alert" role="alert">{error}</div>}
+            {error && <div className="alert" role="alert">{shortError(error)}</div>}
             <p className="hint">Records a {meta.title} sale in Floor and pulls the unit off every other channel, same as a marketplace sale.</p>
             {markSold.length > 1 && <label className="mboard-inline"><input type="checkbox" checked={useListedPrice} onChange={(e) => setUseListedPrice(e.target.checked)} /> Use each listing’s price</label>}
             {(!useListedPrice || markSold.length === 1) && <label>Sale price<input value={soldPrice} onChange={(e) => setSoldPrice(e.target.value)} inputMode="decimal" /></label>}
@@ -893,7 +897,7 @@ export function MarketplaceBoard({ channel, accessToken, money }: Props) {
         <div className="mboard-modal">
           <div className="mboard-modal-card">
             <h2>Add listing</h2>
-            {error && <div className="alert" role="alert">{error}</div>}
+            {error && <div className="alert" role="alert">{shortError(error)}</div>}
             <label>Search<input value={eligibleQuery} onChange={(e) => setEligibleQuery(e.target.value)} /></label>
             <button type="button" className="secondary" onClick={() => void openAdd()}>Search Floor</button>
             <div className="mboard-eligible">
@@ -914,7 +918,7 @@ export function MarketplaceBoard({ channel, accessToken, money }: Props) {
         <div className="mboard-modal">
           <div className="mboard-modal-card">
             <h2>Migrate legacy eBay</h2>
-            {error && <div className="alert" role="alert">{error}</div>}
+            {error && <div className="alert" role="alert">{shortError(error)}</div>}
             <p className="hint">Trading-era listings Floor knows about but Inventory API does not. Migrating keeps the live listing.</p>
             <div className="mboard-eligible">
               {legacy.map((row) => (

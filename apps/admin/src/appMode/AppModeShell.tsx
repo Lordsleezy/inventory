@@ -1,28 +1,26 @@
 import { useEffect, useRef, useState } from 'react';
-import type { Session } from '@supabase/supabase-js';
+import type { Session, SupabaseClient } from '@supabase/supabase-js';
 import type { StaffSession } from '@floor/cloud';
-import type { SupabaseClient } from '@supabase/supabase-js';
-import { ReceivePanel } from '../ReceivePanel';
 import { RegisterPage } from '../RegisterPage';
-import { OrdersPage } from '../OrdersPage';
 import { AppInventory } from './AppInventory';
 import { AppItemDetail } from './AppItemDetail';
+import { AppReceive } from './AppReceive';
+import { AppOrders } from './AppOrders';
+import { AppChannel } from './AppChannel';
+import {
+  AppMoreHome,
+  AppAttention,
+  AppLiveSales,
+  AppConnections,
+  AppReportsNative,
+  AppTaxNative,
+  AppDepopNative,
+  AppSettingsNative,
+  type MoreId,
+} from './AppMore';
 import type { OnlineCfg, Rule, CommissionOverride } from '../payouts';
 
 export type AppTab = 'inventory' | 'receive' | 'register' | 'orders' | 'more';
-
-type MorePage =
-  | null
-  | 'sales'
-  | 'ebay'
-  | 'amazon'
-  | 'tiktok'
-  | 'depop'
-  | 'marketplaces'
-  | 'reports'
-  | 'tax'
-  | 'settings'
-  | 'attention';
 
 type Props = {
   client: SupabaseClient;
@@ -38,7 +36,7 @@ type Props = {
   personName: (id: string) => string;
   busy: boolean;
   onCommissionChanged: (ticketKey: string, next: CommissionOverride | null) => void;
-  moreContent?: (page: Exclude<MorePage, null>, back: () => void) => React.ReactNode;
+  settingsSlot?: React.ReactNode;
 };
 
 const TABS: { id: AppTab; label: string; icon: React.ReactNode; adminOnly?: boolean }[] = [
@@ -98,19 +96,25 @@ export function AppModeShell({
   staffSession,
   money,
   stamp,
-  rules,
-  onlineCfg,
-  commissionOverrides,
-  personName,
-  busy,
-  onCommissionChanged,
-  moreContent,
+  rules: _rules,
+  onlineCfg: _onlineCfg,
+  commissionOverrides: _commissionOverrides,
+  personName: _personName,
+  busy: _busy,
+  onCommissionChanged: _onCommissionChanged,
+  settingsSlot,
 }: Props) {
+  void _rules;
+  void _onlineCfg;
+  void _commissionOverrides;
+  void _personName;
+  void _busy;
+  void _onCommissionChanged;
   const [tab, setTab] = useState<AppTab>('inventory');
   const [itemSku, setItemSku] = useState<string | null>(null);
-  const [morePage, setMorePage] = useState<MorePage>(null);
+  const [morePage, setMorePage] = useState<MoreId | null>(null);
+  const [channel, setChannel] = useState<'ebay' | 'amazon' | 'tiktok' | null>(null);
   const [invKey, setInvKey] = useState(0);
-  const invScroll = useRef<HTMLDivElement>(null);
   const scrollPos = useRef<Record<string, number>>({});
 
   useEffect(() => {
@@ -122,23 +126,16 @@ export function AppModeShell({
     };
   }, []);
 
-  // Android back: close item / more page first
   useEffect(() => {
     const onPop = () => {
-      if (itemSku) {
-        setItemSku(null);
-        history.pushState({ floorApp: 1 }, '');
-        return;
-      }
-      if (morePage) {
-        setMorePage(null);
-        history.pushState({ floorApp: 1 }, '');
-      }
+      if (itemSku) { setItemSku(null); history.pushState({ floorApp: 1 }, ''); return; }
+      if (channel) { setChannel(null); history.pushState({ floorApp: 1 }, ''); return; }
+      if (morePage) { setMorePage(null); history.pushState({ floorApp: 1 }, ''); }
     };
     history.pushState({ floorApp: 1 }, '');
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
-  }, [itemSku, morePage]);
+  }, [itemSku, morePage, channel]);
 
   function switchTab(next: AppTab) {
     const panel = document.querySelector('.app-tab-panel:not([hidden])') as HTMLElement | null;
@@ -146,6 +143,7 @@ export function AppModeShell({
     setTab(next);
     setItemSku(null);
     setMorePage(null);
+    setChannel(null);
     requestAnimationFrame(() => {
       const el = document.querySelector(`.app-tab-panel[data-tab="${next}"]`) as HTMLElement | null;
       if (el) el.scrollTop = scrollPos.current[next] || 0;
@@ -153,24 +151,12 @@ export function AppModeShell({
   }
 
   const tabs = TABS.filter((t) => !t.adminOnly || fullAccess);
-
-  const moreLinks: { id: Exclude<MorePage, null>; label: string; adminOnly?: boolean }[] = [
-    { id: 'attention', label: 'Needs attention' },
-    { id: 'sales', label: 'Live sales', adminOnly: true },
-    { id: 'ebay', label: 'eBay', adminOnly: true },
-    { id: 'amazon', label: 'Amazon', adminOnly: true },
-    { id: 'tiktok', label: 'TikTok', adminOnly: true },
-    { id: 'depop', label: 'Depop', adminOnly: true },
-    { id: 'marketplaces', label: 'Marketplaces', adminOnly: true },
-    { id: 'reports', label: 'Reports', adminOnly: true },
-    { id: 'tax', label: 'Tax', adminOnly: true },
-    { id: 'settings', label: 'Settings' },
-  ];
+  const stackOpen = !!(itemSku || morePage || channel);
 
   return (
     <div className="app-mode-root">
       <div className="app-mode-main">
-        <div className="app-tab-panel" data-tab="inventory" hidden={tab !== 'inventory' || !!itemSku} ref={invScroll}>
+        <div className="app-tab-panel" data-tab="inventory" hidden={tab !== 'inventory' || !!itemSku}>
           {tab === 'inventory' && !itemSku && (
             <AppInventory
               key={invKey}
@@ -200,24 +186,21 @@ export function AppModeShell({
           />
         )}
 
-        <div className="app-tab-panel app-receive" data-tab="receive" hidden={tab !== 'receive'}>
+        <div className="app-tab-panel" data-tab="receive" hidden={tab !== 'receive'}>
           {tab === 'receive' && (
-            <>
-              <div className="app-large-title"><h1>Receive</h1></div>
-              <ReceivePanel
-                client={client}
-                storeId={storeId}
-                accessToken={session.access_token}
-                onSaved={() => setInvKey((n) => n + 1)}
-              />
-            </>
+            <AppReceive
+              client={client}
+              storeId={storeId}
+              accessToken={session.access_token}
+              onSaved={() => setInvKey((n) => n + 1)}
+            />
           )}
         </div>
 
         <div className="app-tab-panel app-register" data-tab="register" hidden={tab !== 'register'}>
           {tab === 'register' && (
             staffSession
-              ? <RegisterPage staffSession={staffSession} />
+              ? <RegisterPage staffSession={staffSession} variant="app" />
               : <p className="app-footer-count">This login can’t ring sales. Ask an owner to add a staff row.</p>
           )}
         </div>
@@ -225,77 +208,87 @@ export function AppModeShell({
         {fullAccess && (
           <div className="app-tab-panel" data-tab="orders" hidden={tab !== 'orders'}>
             {tab === 'orders' && (
-              <>
-                <div className="app-large-title"><h1>Orders</h1></div>
-                <div className="app-embed">
-                  <OrdersPage
-                    client={client}
-                    accessToken={session.access_token}
-                    storeId={storeId}
-                    money={money}
-                    stamp={stamp}
-                    rules={rules}
-                    cfg={onlineCfg}
-                    commissionOverrides={commissionOverrides}
-                    personName={personName}
-                    busy={busy}
-                    onCommissionChanged={onCommissionChanged}
-                  />
-                </div>
-              </>
+              <AppOrders
+                client={client}
+                storeId={storeId}
+                accessToken={session.access_token}
+                money={money}
+                stamp={stamp}
+              />
             )}
           </div>
         )}
 
-        <div className="app-tab-panel" data-tab="more" hidden={tab !== 'more' || !!morePage}>
-          {tab === 'more' && !morePage && (
-            <>
-              <div className="app-large-title"><h1>More</h1></div>
-              <div className="app-group">
-                {moreLinks
-                  .filter((l) => !l.adminOnly || fullAccess)
-                  .map((l) => (
-                    <button
-                      type="button"
-                      className="app-more-link"
-                      key={l.id}
-                      onClick={() => {
-                        history.pushState({ floorApp: 1, more: l.id }, '');
-                        setMorePage(l.id);
-                      }}
-                    >
-                      {l.label}
-                      <span className="app-chevron">›</span>
-                    </button>
-                  ))}
-              </div>
-              <p className="app-footer-count">{staffSession?.displayName || session.user.email}</p>
-              <button
-                type="button"
-                className="app-primary"
-                style={{ background: '#1c1c1e', color: '#ff453a' }}
-                onClick={() => void client.auth.signOut({ scope: 'local' })}
-              >
-                Sign out
-              </button>
-            </>
+        <div className="app-tab-panel" data-tab="more" hidden={tab !== 'more' || stackOpen}>
+          {tab === 'more' && !morePage && !channel && (
+            <AppMoreHome
+              client={client}
+              session={session}
+              fullAccess={fullAccess}
+              staffSession={staffSession}
+              money={money}
+              setPage={(p) => {
+                history.pushState({ floorApp: 1, more: p }, '');
+                setMorePage(p);
+              }}
+              onOpenChannel={(ch) => {
+                history.pushState({ floorApp: 1, channel: ch }, '');
+                setChannel(ch);
+              }}
+            />
           )}
         </div>
 
-        {morePage && (
-          <div className="app-stack">
-            <div className="app-nav">
-              <button type="button" onClick={() => setMorePage(null)}>‹ More</button>
-              <div className="app-nav-title">{moreLinks.find((l) => l.id === morePage)?.label || ''}</div>
-              <button type="button" style={{ visibility: 'hidden' }}>Done</button>
-            </div>
-            <div className="app-embed">
-              {moreContent ? moreContent(morePage, () => setMorePage(null)) : (
-                <p className="app-footer-count">Open this section on desktop for the full tools.</p>
-              )}
-            </div>
-          </div>
+        {channel && (
+          <AppChannel
+            channel={channel}
+            accessToken={session.access_token}
+            money={money}
+            onBack={() => setChannel(null)}
+          />
         )}
+
+        {morePage === 'attention' && (
+          <AppAttention
+            client={client}
+            storeId={storeId}
+            money={money}
+            stamp={stamp}
+            onBack={() => setMorePage(null)}
+          />
+        )}
+        {morePage === 'sales' && (
+          <AppLiveSales client={client} money={money} stamp={stamp} onBack={() => setMorePage(null)} />
+        )}
+        {morePage === 'connections' && (
+          <AppConnections
+            client={client}
+            accessToken={session.access_token}
+            money={money}
+            stamp={stamp}
+            onBack={() => setMorePage(null)}
+          />
+        )}
+        {morePage === 'reports' && (
+          <AppReportsNative client={client} money={money} onBack={() => setMorePage(null)} />
+        )}
+        {morePage === 'tax' && (
+          <AppTaxNative client={client} money={money} stamp={stamp} onBack={() => setMorePage(null)} />
+        )}
+        {morePage === 'depop' && (
+          <AppDepopNative accessToken={session.access_token} money={money} onBack={() => setMorePage(null)} />
+        )}
+        {morePage === 'settings' && (
+          <AppSettingsNative
+            client={client}
+            fullAccess={fullAccess}
+            staffSession={staffSession}
+            session={session}
+            settingsSlot={settingsSlot || <p className="app-footer-count">Settings unavailable.</p>}
+            onBack={() => setMorePage(null)}
+          />
+        )}
+
       </div>
 
       <nav className="app-tabbar" aria-label="App">
@@ -303,7 +296,7 @@ export function AppModeShell({
           <button
             key={t.id}
             type="button"
-            className={tab === t.id && !itemSku && !morePage ? 'active' : tab === t.id ? 'active' : ''}
+            className={tab === t.id ? 'active' : ''}
             onClick={() => switchTab(t.id)}
           >
             {t.icon}

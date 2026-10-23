@@ -644,28 +644,9 @@ export function App() {
         personName={personName}
         busy={busy}
         onCommissionChanged={setTicketOverride}
-        moreContent={(morePage, back) => {
-          if (morePage === 'attention') {
-            return <NeedsAttentionPanel client={sb} storeId={store} money={money} stamp={stamp} section={nav.attentionSection} onSection={s => go({ attentionSection: s, inventoryTab: 'attention' })} onCostChanged={() => { void loadPayoutSales(); void loadSales(); }} />;
-          }
-          if (morePage === 'ebay') return <ChannelListingPage channel="ebay" accessToken={session.access_token} money={money} />;
-          if (morePage === 'amazon') return <AmazonPage client={sb} accessToken={session.access_token} money={money} />;
-          if (morePage === 'tiktok') return <ChannelListingPage channel="tiktok" accessToken={session.access_token} money={money} />;
-          if (morePage === 'depop') return <ChannelListingPage channel="depop" accessToken={session.access_token} money={money} />;
-          if (morePage === 'marketplaces') return <MarketplacesPage client={sb} accessToken={session.access_token} money={money} stamp={stamp} />;
-          if (morePage === 'reports') return <ReportsPage client={sb} money={money} tab={nav.reportTab} onTab={t => go({ reportTab: t })} closeouts={<p className="hint">Closeouts are on desktop Reports.</p>} expenses={<ExpensesPage client={sb} money={money} expenses={expenses} staff={staff} ownerId={onlineCfg.employeeId || defaultReimbursementId} onChanged={loadCommon} embedded />} payouts={<PayoutsPage allSales={allSales} ebayFees={ebayFees} staff={staff} rules={activeRules} payments={payments} adjustments={payoutAdjustments} expenses={expenses} cfg={onlineCfg} personName={personName} busy={busy} recordPayment={recordPayment} onCommissionChanged={setTicketOverride} />} />;
-          if (morePage === 'tax') return <TaxPage client={sb} money={money} stamp={stamp} />;
-          if (morePage === 'settings') {
-            return fullAccess
-              ? <SettingsPage client={sb} accessToken={session.access_token} stamp={stamp} money={money} busy={busy} run={run} onLedgerChanged={async () => { await loadSales(); await loadPayoutSales(); }} ruleEditor={<>{staff.map(p => <RuleEditor key={p.user_id} person={p} rule={ruleMap.get(p.user_id)} save={setRule} busy={busy} />)}</>} onlinePayoutSettings={<OnlinePayoutSettings cfg={onlineCfg} staff={staff} busy={busy} save={async (channels, pct, who) => { await run(async () => { check(await sb.rpc('portal_set_payout_config', { p_channels: channels, p_pct: pct, p_employee: who })); await loadCommon(); await loadPayoutSales(); }); }} />} />
-              : <AssociateSettings client={sb} displayName={staffSession?.displayName || 'Associate'} />;
-          }
-          if (morePage === 'sales') {
-            return <p className="hint">Live Sales is easier on desktop. Use Register for ringing sales on the phone.</p>;
-          }
-          void back;
-          return null;
-        }}
+        settingsSlot={fullAccess
+          ? <SettingsPage client={sb} accessToken={session.access_token} stamp={stamp} money={money} busy={busy} run={run} onLedgerChanged={async () => { await loadSales(); await loadPayoutSales(); }} ruleEditor={<>{staff.map(p => <RuleEditor key={p.user_id} person={p} rule={ruleMap.get(p.user_id)} save={setRule} busy={busy} />)}</>} onlinePayoutSettings={<OnlinePayoutSettings cfg={onlineCfg} staff={staff} busy={busy} save={async (channels, pct, who) => { await run(async () => { check(await sb.rpc('portal_set_payout_config', { p_channels: channels, p_pct: pct, p_employee: who })); await loadCommon(); await loadPayoutSales(); }); }} />} />
+          : <AssociateSettings client={sb} displayName={staffSession?.displayName || 'Associate'} />}
       />
     </>;
   }
