@@ -453,7 +453,8 @@ html.dark .amazon-review-banner{background:#3d2e12;color:#f5c97a}
 
   .section-head{flex-direction:column;align-items:stretch;gap:8px}
   .tbl{font-size:13px}
-  .tbl th,.tbl td{padding:8px 6px;overflow-wrap:anywhere}
+  /* break-word (not anywhere): avoid one-character-per-line labels in tight columns */
+  .tbl th,.tbl td{padding:8px 6px;overflow-wrap:break-word;word-break:normal}
   .receive-next{flex-direction:column;align-items:stretch;gap:12px}
   .receive-next p{max-width:none}
   .receive-upc,.receive-upc input{min-width:0;width:100%}
@@ -541,8 +542,36 @@ html.dark .theme-toggle{color:#9aa7b5}
 html.dark .admin-register .register-qr-label{color:#9aa7b5}
 html.dark .admin-register .register-qr-preview{border-color:#3a4553;background:#12161c}
 
-/* Receive: scan-to-list */
-.receive-compare{margin:0 0 16px}.receive-compare .tbl td,.receive-compare .tbl th{vertical-align:top;font-size:13px}.receive-flagged{background:#fff8e6}
+/* Receive: scan-to-list — grid cards (not a <table>) so phone never crushes labels vertical */
+.receive-compare{margin:0 0 16px}
+.receive-compare-list{display:grid;gap:8px;width:100%;min-width:0}
+.receive-compare-head,.receive-compare-row{
+  display:grid;grid-template-columns:minmax(5.5rem,7rem) minmax(0,1fr) minmax(0,1fr) auto;
+  gap:8px 12px;align-items:start;padding:8px 10px;border-bottom:1px solid #eaecf0;font-size:13px;min-width:0
+}
+.receive-compare-head{font-weight:700;color:#627282;border-bottom:1px solid #dfe6ea;padding-bottom:6px}
+.receive-compare-field{font-weight:700;color:#1e2935;white-space:nowrap}
+.receive-compare-src{min-width:0;overflow-wrap:break-word;word-break:normal}
+.receive-compare-label{display:none}
+.receive-compare-actions{display:flex;flex-wrap:wrap;gap:6px;align-items:center;justify-content:flex-end}
+.receive-flagged{background:#fff8e6;border-radius:8px;border:1px solid #efcf8d;border-bottom-color:#efcf8d}
+@media(max-width:720px){
+  .receive-compare-head{display:none}
+  .receive-compare-row{
+    grid-template-columns:1fr;gap:4px;padding:10px 12px;margin:0;
+    background:#f6f8f9;border:1px solid #e7ecef;border-radius:10px
+  }
+  .receive-compare-row.receive-flagged{background:#fff8e6;border-color:#efcf8d}
+  .receive-compare-field{white-space:normal;font-size:.95rem;margin-bottom:2px}
+  .receive-compare-label{display:inline;font-weight:650;color:#627282;margin-right:.35rem}
+  .receive-compare-actions{justify-content:flex-start;margin-top:4px}
+  html.dark .receive-compare-row{background:#232d3a;border-color:#3a4553}
+  html.dark .receive-compare-row.receive-flagged{background:#2a2418;border-color:#8a6a36}
+  html.dark .receive-compare-label{color:#9aa7b5}
+}
+html.dark .receive-compare-field{color:#e6edf3}
+html.dark .receive-compare-head{color:#9aa7b5;border-bottom-color:#3a4553}
+html.dark .receive-compare-row{border-bottom-color:#2a3340}
 .receive-dup{border:1px solid #efcf8d;background:#fff8e6;border-radius:10px;padding:12px 14px;margin:0 0 14px;color:#7a4b10}.receive-dup p{margin:6px 0 0;color:#8a6a36;font-size:.82rem}
 .receive-label{display:block;font-size:13px;color:#5d6b7a;margin-bottom:6px}.receive-cond-row{display:flex;gap:8px;flex-wrap:wrap}
 .receive-chip{display:inline-flex!important;align-items:center;gap:6px;border:1px solid #d0d5dd;border-radius:999px;padding:9px 14px;cursor:pointer;font-size:14px!important;color:#1e2935!important;background:#fff}.receive-chip.on{border-color:#1e2935;background:#f4f6f9;font-weight:700}.receive-chip input{width:auto!important}
