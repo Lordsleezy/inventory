@@ -19,6 +19,8 @@ type Props = {
   onBack: () => void;
   onChanged: () => void;
   onSellInStore: () => void;
+  /** Portal admin / manager — show Delete on edit. */
+  canDelete?: boolean;
 };
 
 const CHANNELS: { key: string; label: string }[] = [
@@ -33,7 +35,9 @@ function titleOf(u: Record<string, unknown>) {
   return [u.brand, u.model].filter(Boolean).join(' ') || String(u.title || 'Untitled');
 }
 
-export function AppItemDetail({ client, storeId, accessToken, sku, money, onBack, onChanged, onSellInStore }: Props) {
+export function AppItemDetail({
+  client, storeId, accessToken, sku, money, onBack, onChanged, onSellInStore, canDelete = false,
+}: Props) {
   const [detail, setDetail] = useState<Detail | null>(null);
   const [urls, setUrls] = useState<Record<string, string>>({});
   const [error, setError] = useState('');
@@ -77,7 +81,7 @@ export function AppItemDetail({ client, storeId, accessToken, sku, money, onBack
 
   if (editing && detail) {
     return (
-      <div className="app-stack">
+      <div className="app-stack app-stack-edit">
         <UnitEditDrawer
           client={client}
           storeId={storeId}
@@ -86,6 +90,8 @@ export function AppItemDetail({ client, storeId, accessToken, sku, money, onBack
           photos={detail.photos}
           urls={urls}
           accessToken={accessToken}
+          appMode
+          canDelete={canDelete}
           onClose={() => setEditing(false)}
           onSaved={() => {
             setEditing(false);
@@ -93,6 +99,10 @@ export function AppItemDetail({ client, storeId, accessToken, sku, money, onBack
             onChanged();
           }}
           onPhotosChanged={() => setReload((n) => n + 1)}
+          onDeleted={() => {
+            onChanged();
+            onBack();
+          }}
         />
       </div>
     );

@@ -87,6 +87,7 @@ type LookupMerged = {
 
 export function UnitEditDrawer({
   client, storeId, sku, unit, photos, urls, accessToken, onClose, onSaved, onPhotosChanged,
+  canDelete = false, onDeleted, appMode = false,
 }: {
   client: SupabaseClient;
   storeId: string;
@@ -98,6 +99,11 @@ export function UnitEditDrawer({
   onClose: () => void;
   onSaved: (unit: Unit) => void;
   onPhotosChanged: () => void;
+  /** Portal admins / managers only — hides Delete for register associates. */
+  canDelete?: boolean;
+  onDeleted?: () => void;
+  /** Standalone Floor app: clear the bottom tab bar; use app chrome. */
+  appMode?: boolean;
 }) {
   const [form, setForm] = useState<Form>(() => fromUnit(unit));
   const [options, setOptions] = useState<Options | null>(null);
@@ -258,6 +264,33 @@ export function UnitEditDrawer({
     setMsg('Saved.');
   }
 
+  async function removeUnit() {
+    if (!canDelete) return;
+    if (!window.confirm(`Delete SKU ${sku} permanently?\n\nThis removes it from inventory. Sales history stays. If the unit still has an open sale, void that first.`)) {
+      return;
+    }
+    setBusy(true);
+    setError('');
+    setMsg('');
+    try {
+      const { error: e } = await client.rpc('delete_unit', { p_sku: sku, p_approval_id: null });
+      if (e) throw e;
+      onDeleted?.();
+      onClose();
+    } catch (err) {
+      const text = errText(err);
+      if (/void_the_sale_first/i.test(text)) {
+        setError('This item has an open sale. Void the sale first, then delete.');
+      } else if (/manager_approval_required/i.test(text)) {
+        setError('Only store admins can delete inventory.');
+      } else {
+        setError(text);
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function addPhotos(files: FileList | null) {
     if (!files?.length) return;
     setBusy(true); setError(''); setMsg('');
@@ -291,12 +324,25 @@ export function UnitEditDrawer({
   if (!photos.length) missing.push('photo');
 
   return (
-    <div className="inventory-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
+    <div
+      className={`inventory-backdrop${appMode ? ' app-unit-edit' : ''}`}
+      onMouseDown={e => { if (!appMode && e.target === e.currentTarget) onClose(); }}
+    >
       <section className="inventory-detail" role="dialog" aria-modal="true" aria-label={`Edit unit ${sku}`}>
-        <div className="section-head">
-          <div><div className="eyebrow">EDIT UNIT</div><h2>SKU {sku}</h2></div>
-          <button type="button" className="secondary" onClick={onClose}>Close</button>
-        </div>
+        {appMode ? (
+          <div className="app-nav app-unit-edit-nav">
+            <button type="button" onClick={onClose}>Cancel</button>
+            <div className="app-nav-title">Edit · {sku}</div>
+            <button type="button" disabled={busy || lookupBusy} onClick={() => void save()}>
+              {busy ? '…' : 'Save'}
+            </button>
+          </div>
+        ) : (
+          <div className="section-head">
+            <div><div className="eyebrow">EDIT UNIT</div><h2>SKU {sku}</h2></div>
+            <button type="button" className="secondary" onClick={onClose}>Close</button>
+          </div>
+        )}
         {error && <div className="alert" role="alert">{error}</div>}
         {msg && <p className="hint">{msg}</p>}
         <p className="hint">{missing.length === 0 ? 'Looks complete for listing.' : `Still missing: ${missing.join(', ')}. Scan a UPC to fill blanks.`}</p>
@@ -372,9 +418,19 @@ export function UnitEditDrawer({
           <label>Weight (lb)<input inputMode="decimal" value={form.weight} onChange={e => set('weight', e.target.value)} /></label>
           <label className="unit-edit-wide">Notes<textarea rows={3} value={form.notes} onChange={e => set('notes', e.target.value)} /></label>
         </div>
-        <div className="actions" style={{ marginTop: 16 }}>
+        <div className={`actions unit-edit-actions${appMode ? ' app-unit-edit-actions' : ''}`} style={{ marginTop: 16 }}>
           <button type="button" disabled={busy || lookupBusy} onClick={() => void save()}>{busy ? 'Saving…' : 'Save changes'}</button>
           <button type="button" className="secondary" disabled={busy} onClick={onClose}>Cancel</button>
+          {canDelete ? (
+            <button
+              type="button"
+              className="danger"
+              disabled={busy || lookupBusy}
+              onClick={() => void removeUnit()}
+            >
+              {busy ? 'Working…' : 'Delete'}
+            </button>
+          ) : null}
         </div>
       </section>
     </div>

@@ -177,6 +177,7 @@ export function AppModeShell({
             accessToken={session.access_token}
             sku={itemSku}
             money={money}
+            canDelete={fullAccess}
             onBack={() => setItemSku(null)}
             onChanged={() => setInvKey((n) => n + 1)}
             onSellInStore={() => {
