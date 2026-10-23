@@ -6,6 +6,7 @@ import { OrdersPage } from './OrdersPage';
 import { ReceiptsPage } from './ReceiptsPage';
 import { RegisterPage } from './RegisterPage';
 import { TaxPage } from './TaxPage';
+import { WithdrawalsPage } from './WithdrawalsPage';
 import { LogsPage } from './LogsPage';
 import { ClientErrorReporter } from './clientLog';
 import { inStoreOverrideRate, isOnline, NO_ONLINE, PAYOUT_JACOB_ID, PAYOUT_PAUL_ID, payout, profit, remainingProfit, reportProfitCents, type CommissionOverride, type OnlineCfg, type Rule } from './payouts';
@@ -719,6 +720,7 @@ export function App() {
     tiktok: 'TikTok',
     depop: 'Depop',
     reports: 'Reports',
+    withdrawals: 'Withdrawals',
     tax: 'Tax',
     cameras: 'Cameras',
     remote: 'Remote',
@@ -809,6 +811,7 @@ export function App() {
           {reportSubs.map(([tab, label]) => <button type="button" key={tab} className={page === 'reports' && nav.reportTab === tab ? 'active' : ''} onClick={() => goNav({ page: 'reports', reportTab: tab })}>{label}</button>)}
         </div>
       </div>
+      <button type="button" title="Withdrawals" className={page === 'withdrawals' ? 'active' : ''} onClick={() => goNav({ page: 'withdrawals' })}>Withdrawals</button>
       <button type="button" title="Tax" className={page === 'tax' ? 'active' : ''} onClick={() => goNav({ page: 'tax' })}>Tax</button>
       {mainNav.filter(([id]) => id === 'cameras' || id === 'remote' || id === 'logs').map(([id, label]) => <button type="button" className={page === id ? 'active' : ''} key={id} title={label} onClick={() => goNav({ page: id })}>{label}</button>)}
       <button type="button" title="Settings" className={page === 'settings' ? 'active' : ''} onClick={() => goNav({ page: 'settings' })}>Settings</button>
@@ -919,6 +922,7 @@ export function App() {
   {fullAccess && page === 'logs' && <LogsPage accessToken={session.access_token} stamp={stamp} />}
   {(fullAccess || registerOnly) && page === 'inventory' && <InventoryPage client={sb} storeId={store} accessToken={session.access_token} money={money} stamp={stamp} tab={registerOnly ? 'browse' : nav.inventoryTab} onTab={t => go({ inventoryTab: t })} attentionSection={nav.attentionSection} onAttentionSection={s => go({ attentionSection: s, inventoryTab: 'attention' })} canDelete={fullAccess} associateBrowseOnly={registerOnly} onCostChanged={() => { void loadPayoutSales(); void loadSales(); }} />}
   {fullAccess && page === 'reports' && <ReportsPage client={sb} money={money} tab={nav.reportTab} onTab={t => go({ reportTab: t })} closeouts={closeouts} expenses={<ExpensesPage client={sb} money={money} expenses={expenses} staff={staff} ownerId={onlineCfg.employeeId || defaultReimbursementId} onChanged={loadCommon} embedded />} payouts={<PayoutsPage allSales={allSales} ebayFees={ebayFees} staff={staff} rules={activeRules} payments={payments} adjustments={payoutAdjustments} expenses={expenses} cfg={onlineCfg} personName={personName} busy={busy} recordPayment={recordPayment} onCommissionChanged={setTicketOverride} />} />}
+  {fullAccess && page === 'withdrawals' && <WithdrawalsPage client={sb} money={money} stamp={stamp} />}
   {fullAccess && page === 'tax' && <TaxPage client={sb} money={money} stamp={stamp} />}
   {fullAccess && page === 'settings' && <SettingsPage client={sb} accessToken={session.access_token} stamp={stamp} money={money} busy={busy} run={run} onLedgerChanged={async () => { await loadSales(); await loadPayoutSales(); }} ruleEditor={<>{staff.map(p => <RuleEditor key={p.user_id} person={p} rule={ruleMap.get(p.user_id)} save={setRule} busy={busy} />)}</>} onlinePayoutSettings={<OnlinePayoutSettings cfg={onlineCfg} staff={staff} busy={busy} save={async (channels, pct, who) => { await run(async () => { check(await sb.rpc('portal_set_payout_config', { p_channels: channels, p_pct: pct, p_employee: who })); await loadCommon(); await loadPayoutSales(); }); }} />} />}
   {registerOnly && page === 'settings' && <AssociateSettings client={sb} displayName={staffSession?.displayName || 'Associate'} />}
