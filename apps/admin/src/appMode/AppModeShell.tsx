@@ -39,8 +39,8 @@ type Props = {
   settingsSlot?: React.ReactNode;
 };
 
-/** Store associates (e.g. Jacob) only get Inventory / Register / Settings. */
-const ASSOCIATE_TABS: AppTab[] = ['inventory', 'register', 'settings'];
+/** Store associates (e.g. Jacob): Inventory / Receive / Register / Settings. */
+const ASSOCIATE_TABS: AppTab[] = ['inventory', 'receive', 'register', 'settings'];
 
 const TABS: { id: AppTab; label: string; icon: React.ReactNode; adminOnly?: boolean; associateOnly?: boolean }[] = [
   {
@@ -55,7 +55,6 @@ const TABS: { id: AppTab; label: string; icon: React.ReactNode; adminOnly?: bool
   {
     id: 'receive',
     label: 'Receive',
-    adminOnly: true,
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
         <path d="M13 3v10h4l-5 8-5-8h4V3z" />
@@ -167,7 +166,7 @@ export function AppModeShell({
     });
   }
 
-  // Associates: Inventory / Register / Settings only. Admins keep Receive, Orders, More.
+  // Associates: Inventory / Receive / Register / Settings. Admins also get Orders + More.
   const tabs = TABS.filter((t) => {
     if (t.adminOnly && !fullAccess) return false;
     if (t.associateOnly && fullAccess) return false;
@@ -208,18 +207,16 @@ export function AppModeShell({
           />
         )}
 
-        {fullAccess && (
-          <div className="app-tab-panel" data-tab="receive" hidden={tab !== 'receive'}>
-            {tab === 'receive' && (
-              <AppReceive
-                client={client}
-                storeId={storeId}
-                accessToken={session.access_token}
-                onSaved={() => setInvKey((n) => n + 1)}
-              />
-            )}
-          </div>
-        )}
+        <div className="app-tab-panel" data-tab="receive" hidden={tab !== 'receive'}>
+          {tab === 'receive' && (
+            <AppReceive
+              client={client}
+              storeId={storeId}
+              accessToken={session.access_token}
+              onSaved={() => setInvKey((n) => n + 1)}
+            />
+          )}
+        </div>
 
         <div className="app-tab-panel app-register" data-tab="register" hidden={tab !== 'register'}>
           {tab === 'register' && (
