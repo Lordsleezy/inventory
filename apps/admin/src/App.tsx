@@ -21,6 +21,10 @@ import { AssociateSettings } from './AssociateSettings';
 import { type MainPage, type NavState, defaultNavState, parseNavFromLocation, writeNavToLocation } from './navigation';
 import { formatLabelWithPending, parseShipCostSource } from './shipCostSource';
 import { errText } from './errText';
+import { isStandaloneApp, shouldShowInstallGate } from './appMode/isAppMode';
+import { InstallGate } from './appMode/InstallGate';
+import { AppModeShell } from './appMode/AppModeShell';
+import { NeedsAttentionPanel } from './NeedsAttentionPanel';
 
 const ASSOCIATE_PAGES: MainPage[] = ['register', 'inventory', 'cameras', 'settings'];
 
@@ -333,6 +337,8 @@ export function App() {
     try { return localStorage.getItem('floor_admin_dark') === '1'; } catch { return false; }
   });
   const [navGroup, setNavGroup] = useState<'reports' | 'inventory' | 'online' | null>(null);
+  const [showInstallGate, setShowInstallGate] = useState(() => shouldShowInstallGate());
+  const standaloneApp = useMemo(() => isStandaloneApp(), []);
   useEffect(() => {
     try { localStorage.setItem('floor_admin_nav_collapsed', navCollapsed ? '1' : '0'); } catch { /* ignore */ }
   }, [navCollapsed]);
@@ -611,10 +617,59 @@ export function App() {
   }
   async function downloadReports(selected: Report[], all: boolean) { await run(async () => { const { downloadReportWorkbook } = await import('./reportExport'); await downloadReportWorkbook(selected, reportLines, personName, all); }); }
 
+  if (showInstallGate && !standaloneApp) {
+    return <InstallGate onContinue={() => setShowInstallGate(false)} />;
+  }
+
   if (!session) return <main className="auth"><div className="login"><div className="brand">OPEN BOX <span>INDUSTRIES</span></div><h1>Floor Admin</h1><p>Email for admins, or clock number + PIN for register staff.</p><form onSubmit={e => { e.preventDefault(); void run(async () => { const attempts = staffSignInAttempts(email, password); if (!attempts.length) throw new Error('Enter a valid email, username, or clock number.'); let last: unknown = new Error('Could not sign in.'); for (const attempt of attempts) { const result = await sb.auth.signInWithPassword(attempt); if (!result.error) return; last = result.error; } throw last; }); }}><label>Email or clock number<input type="text" autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} required /></label><label>Password or PIN<input type="password" autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} required /></label><button disabled={busy}>Sign in</button></form>{error && <p className="error">{error}</p>}</div></main>;
   if (!accessReady) return <main className="auth"><div className="login"><h1>Floor Admin</h1><p>Checking access…</p></div></main>;
   if (!store) return <main className="auth"><div className="login"><h1>Access unavailable</h1><p>This account is not attached to the store as Floor staff or an admin. Ask Paul or Steve to add it.</p><button onClick={() => void sb.auth.signOut({ scope: 'local' })}>Sign out</button>{error && <p className="error">{error}</p>}</div></main>;
+
   const registerOnly = !fullAccess;
+
+  if (standaloneApp) {
+    return <>
+      <ClientErrorReporter token={session.access_token} />
+      <AppModeShell
+        client={sb}
+        session={session}
+        storeId={store}
+        fullAccess={fullAccess}
+        staffSession={staffSession}
+        money={money}
+        stamp={stamp}
+        rules={activeRules}
+        onlineCfg={onlineCfg}
+        commissionOverrides={commissionOverrides}
+        personName={personName}
+        busy={busy}
+        onCommissionChanged={setTicketOverride}
+        moreContent={(morePage, back) => {
+          if (morePage === 'attention') {
+            return <NeedsAttentionPanel client={sb} storeId={store} money={money} stamp={stamp} section={nav.attentionSection} onSection={s => go({ attentionSection: s, inventoryTab: 'attention' })} onCostChanged={() => { void loadPayoutSales(); void loadSales(); }} />;
+          }
+          if (morePage === 'ebay') return <ChannelListingPage channel="ebay" accessToken={session.access_token} money={money} />;
+          if (morePage === 'amazon') return <AmazonPage client={sb} accessToken={session.access_token} money={money} />;
+          if (morePage === 'tiktok') return <ChannelListingPage channel="tiktok" accessToken={session.access_token} money={money} />;
+          if (morePage === 'depop') return <ChannelListingPage channel="depop" accessToken={session.access_token} money={money} />;
+          if (morePage === 'marketplaces') return <MarketplacesPage client={sb} accessToken={session.access_token} money={money} stamp={stamp} />;
+          if (morePage === 'reports') return <ReportsPage client={sb} money={money} tab={nav.reportTab} onTab={t => go({ reportTab: t })} closeouts={<p className="hint">Closeouts are on desktop Reports.</p>} expenses={<ExpensesPage client={sb} money={money} expenses={expenses} staff={staff} ownerId={onlineCfg.employeeId || defaultReimbursementId} onChanged={loadCommon} embedded />} payouts={<PayoutsPage allSales={allSales} ebayFees={ebayFees} staff={staff} rules={activeRules} payments={payments} adjustments={payoutAdjustments} expenses={expenses} cfg={onlineCfg} personName={personName} busy={busy} recordPayment={recordPayment} onCommissionChanged={setTicketOverride} />} />;
+          if (morePage === 'tax') return <TaxPage client={sb} money={money} stamp={stamp} />;
+          if (morePage === 'settings') {
+            return fullAccess
+              ? <SettingsPage client={sb} accessToken={session.access_token} stamp={stamp} money={money} busy={busy} run={run} onLedgerChanged={async () => { await loadSales(); await loadPayoutSales(); }} ruleEditor={<>{staff.map(p => <RuleEditor key={p.user_id} person={p} rule={ruleMap.get(p.user_id)} save={setRule} busy={busy} />)}</>} onlinePayoutSettings={<OnlinePayoutSettings cfg={onlineCfg} staff={staff} busy={busy} save={async (channels, pct, who) => { await run(async () => { check(await sb.rpc('portal_set_payout_config', { p_channels: channels, p_pct: pct, p_employee: who })); await loadCommon(); await loadPayoutSales(); }); }} />} />
+              : <AssociateSettings client={sb} displayName={staffSession?.displayName || 'Associate'} />;
+          }
+          if (morePage === 'sales') {
+            return <p className="hint">Live Sales is easier on desktop. Use Register for ringing sales on the phone.</p>;
+          }
+          void back;
+          return null;
+        }}
+      />
+    </>;
+  }
+
   const mainNav: [MainPage, string][] = registerOnly
     ? [['register', 'Register'], ['inventory', 'Inventory'], ['cameras', 'Cameras']]
     : [
