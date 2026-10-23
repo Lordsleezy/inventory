@@ -20,6 +20,22 @@ test("a complete unit can be pushed to eBay", () => {
   assert.equal(result.reason, null);
 });
 
+test("eBay does not require a UPC", () => {
+  const result = channelGaps({ ...ready, upc: "" }, { channel: "ebay", photoCount: 2 });
+  assert.equal(result.ready, true);
+  assert.equal(result.reason, null);
+});
+
+test("Amazon and TikTok still require a UPC", () => {
+  const noUpc = { ...ready, upc: "" };
+  const amazon = channelGaps(noUpc, { channel: "amazon", photoCount: 2 });
+  const tiktok = channelGaps(noUpc, { channel: "tiktok", photoCount: 2 });
+  assert.equal(amazon.ready, false);
+  assert.match(amazon.reason, /UPC/);
+  assert.equal(tiktok.ready, false);
+  assert.match(tiktok.reason, /UPC/);
+});
+
 test("missing brand and weight are named, and Generic is not a brand", () => {
   assert.equal(brandProblem("Generic"), "invalid");
   assert.equal(brandProblem("Unbranded"), null);

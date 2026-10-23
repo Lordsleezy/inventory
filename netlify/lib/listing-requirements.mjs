@@ -70,7 +70,8 @@ export function channelGaps(unit = {}, { channel, photoCount = 0, aspectDefs = n
   const dimsOk = [unit.package_weight_lb, unit.package_length_in, unit.package_width_in, unit.package_height_in]
     .every((n) => Number(n) > 0);
   if (!dimsOk) gaps.push({ code: "spec", label: "weight", blocks: ["ebay", "amazon", "tiktok"] });
-  if (!text(unit.upc)) gaps.push({ code: "upc", label: "UPC", blocks: ["ebay", "amazon"] });
+  // eBay allows listing without a UPC (Does not apply / blank). Amazon and TikTok need one.
+  if (!text(unit.upc)) gaps.push({ code: "upc", label: "UPC", blocks: ["amazon", "tiktok"] });
 
   const aspects = specs.ebay_aspects || unit.aspects || {};
   const missingAspects = missingRequiredAspects(aspects, aspectDefs || unit.aspect_defs || []);
