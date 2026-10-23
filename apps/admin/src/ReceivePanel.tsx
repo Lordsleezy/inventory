@@ -773,19 +773,19 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
   );
 
   const cmpRow = (name: string, a: string, u: string, flagged: boolean, actions?: React.ReactNode) => (
-    <tr className={flagged ? 'receive-flagged' : undefined} key={name}>
-      <td><strong>{name}</strong></td>
-      <td>{a || <span className="hint">—</span>}</td>
-      <td>{u || <span className="hint">—</span>}</td>
-      <td>{flagged && <span className="tag warn">disagree</span>}{actions}</td>
-    </tr>
+    <div className={flagged ? 'receive-compare-row receive-flagged' : 'receive-compare-row'} key={name}>
+      <strong className="receive-compare-field">{name}</strong>
+      <div className="receive-compare-src"><span className="receive-compare-label">Amazon</span>{a || <span className="hint">—</span>}</div>
+      <div className="receive-compare-src"><span className="receive-compare-label">UPCitemdb</span>{u || <span className="hint">—</span>}</div>
+      {(flagged || actions) ? <div className="receive-compare-actions">{flagged && <span className="tag warn">disagree</span>}{actions}</div> : null}
+    </div>
   );
   const textRow = (key: 'title' | 'brand' | 'model', name: string) => {
     const a = text(A?.found ? A[key] : null);
     const u = text(U?.found ? U[key] : null);
     const differ = Boolean(a && u && !same(a, u));
     return cmpRow(name, a, u, disagree.has(key) || differ, differ && <>
-      {' '}<button type="button" className="text-button" onClick={() => setFrom(key, a)}>Use Amazon</button>
+      <button type="button" className="text-button" onClick={() => setFrom(key, a)}>Use Amazon</button>
       <button type="button" className="text-button" onClick={() => setFrom(key, u)}>Use UPCitemdb</button>
     </>);
   };
@@ -860,22 +860,25 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
 
       {!manual && result && <div className="receive-compare">
         <div className="eyebrow">LOOKUP{result.cached ? ' · CACHED' : ''} · {upcVariants(current?.upc || '', result).join(' / ')}</div>
-        <div className="table-wrap"><table className="tbl">
-          <thead><tr><th>Field</th><th>Amazon</th><th>UPCitemdb</th><th /></tr></thead>
-          <tbody>
-            {textRow('title', 'Title')}
-            {textRow('brand', 'Brand')}
-            {textRow('model', 'Model')}
-            {cmpRow('Description', text(A?.description).slice(0, 140), text(U?.description).slice(0, 140), false)}
-            {cmpRow('Features', A?.features?.length ? `${A.features.length} bullets` : '', U?.features?.length ? `${U.features.length} bullets` : '', false)}
-            {cmpRow('Package', pkgText(A?.package), pkgText(U?.package), pkgDisagrees, pkgDisagrees && <>
-              {' '}<button type="button" className="text-button" onClick={() => setPackage(A?.package)}>Use Amazon</button>
-              <button type="button" className="text-button" onClick={() => setPackage(U?.package)}>Use UPCitemdb</button>
-            </>)}
-            {cmpRow('Retail price', pos(A?.price_cents) ? `${money(A.price_cents)}${A.price_source ? ` (${label(A.price_source)})` : ''}` : (A?.price_pending ? 'pending (rate limit)' : ''), pos(U?.price_cents) ? `${money(U.price_cents)}${U.price_source ? ` (${label(U.price_source)})` : ''}` : '', false)}
-            {cmpRow('ASIN', text(A?.asin), text(U?.asin), disagree.has('asin'))}
-          </tbody>
-        </table></div>
+        <div className="receive-compare-list" role="table" aria-label="Amazon vs UPCitemdb lookup">
+          <div className="receive-compare-head" role="row">
+            <span role="columnheader">Field</span>
+            <span role="columnheader">Amazon</span>
+            <span role="columnheader">UPCitemdb</span>
+            <span role="columnheader" className="sr-only">Actions</span>
+          </div>
+          {textRow('title', 'Title')}
+          {textRow('brand', 'Brand')}
+          {textRow('model', 'Model')}
+          {cmpRow('Description', text(A?.description).slice(0, 140), text(U?.description).slice(0, 140), false)}
+          {cmpRow('Features', A?.features?.length ? `${A.features.length} bullets` : '', U?.features?.length ? `${U.features.length} bullets` : '', false)}
+          {cmpRow('Package', pkgText(A?.package), pkgText(U?.package), pkgDisagrees, pkgDisagrees && <>
+            <button type="button" className="text-button" onClick={() => setPackage(A?.package)}>Use Amazon</button>
+            <button type="button" className="text-button" onClick={() => setPackage(U?.package)}>Use UPCitemdb</button>
+          </>)}
+          {cmpRow('Retail price', pos(A?.price_cents) ? `${money(A.price_cents)}${A.price_source ? ` (${label(A.price_source)})` : ''}` : (A?.price_pending ? 'pending (rate limit)' : ''), pos(U?.price_cents) ? `${money(U.price_cents)}${U.price_source ? ` (${label(U.price_source)})` : ''}` : '', false)}
+          {cmpRow('ASIN', text(A?.asin), text(U?.asin), disagree.has('asin'))}
+        </div>
         {[...disagree.keys()].length > 0 && <p className="hint" role="status">Sources disagree on: {[...disagree.keys()].map(k => k.replace('package.', 'package ').replace(/_/g, ' ')).join(', ')}. Check the box/label before saving. Blank means no source had a value.</p>}
         {A?.raw_error && <p className="hint">Amazon: {A.raw_error}</p>}
         {merged?.never_list_reason && <p className="hint">Amazon will not list this: {merged.never_list_reason}</p>}
