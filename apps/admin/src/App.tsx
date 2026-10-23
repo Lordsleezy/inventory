@@ -26,7 +26,8 @@ import { InstallGate } from './appMode/InstallGate';
 import { AppModeShell } from './appMode/AppModeShell';
 import { NeedsAttentionPanel } from './NeedsAttentionPanel';
 
-const ASSOCIATE_PAGES: MainPage[] = ['register', 'inventory', 'cameras', 'settings'];
+/** Store associates (Jacob / clock staff): Inventory, Register, Settings only. */
+const ASSOCIATE_PAGES: MainPage[] = ['register', 'inventory', 'settings'];
 
 const sb = floorCloud();
 const zone = 'America/Los_Angeles';
@@ -652,7 +653,7 @@ export function App() {
   }
 
   const mainNav: [MainPage, string][] = registerOnly
-    ? [['register', 'Register'], ['inventory', 'Inventory'], ['cameras', 'Cameras']]
+    ? [['register', 'Register'], ['inventory', 'Inventory'], ['settings', 'Settings']]
     : [
         ['register', 'Register'],
         ['sales', 'Live Sales'],
@@ -743,15 +744,7 @@ export function App() {
       {registerOnly
         ? <>
       <button type="button" className={page === 'register' ? 'active' : ''} key="register" title="Register" onClick={() => goNav({ page: 'register' })}>Register</button>
-      <div className={`nav-group${navGroup === 'inventory' ? ' open' : ''}${page === 'inventory' ? ' on' : ''}`}>
-        <button type="button" title="Inventory" className={`nav-parent${page === 'inventory' ? ' active' : ''}`} onClick={() => { setNavGroup(g => g === 'inventory' ? null : 'inventory'); go({ page: 'inventory', inventoryTab: 'browse' }); setEditing(null); }}>Inventory</button>
-        <div className="nav-sub">
-          {inventorySubs.map(([tab, label]) => <button type="button" key={tab} className={page === 'inventory' && nav.inventoryTab === tab ? 'active' : ''} onClick={() => goNav({ page: 'inventory', inventoryTab: tab })}>{label}</button>)}
-          <div className="nav-sub-label">Needs attention</div>
-          {attentionSubs.map(([section, label]) => <button type="button" key={section} className={page === 'inventory' && nav.inventoryTab === 'attention' && nav.attentionSection === section ? 'active' : ''} onClick={() => goNav({ page: 'inventory', inventoryTab: 'attention', attentionSection: section })}>{label}</button>)}
-        </div>
-      </div>
-      <button type="button" className={page === 'cameras' ? 'active' : ''} title="Cameras" onClick={() => goNav({ page: 'cameras' })}>Cameras</button>
+      <button type="button" className={page === 'inventory' ? 'active' : ''} title="Inventory" onClick={() => goNav({ page: 'inventory', inventoryTab: 'browse' })}>Inventory</button>
       <button type="button" title="Settings" className={page === 'settings' ? 'active' : ''} onClick={() => goNav({ page: 'settings' })}>Settings</button>
         </>
         : <>
@@ -891,12 +884,12 @@ export function App() {
   {fullAccess && page === 'tiktok' && <ChannelListingPage channel="tiktok" accessToken={session.access_token} money={money} />}
   {fullAccess && page === 'depop' && <ChannelListingPage channel="depop" accessToken={session.access_token} money={money} />}
   {fullAccess && page === 'logs' && <LogsPage accessToken={session.access_token} stamp={stamp} />}
-  {(fullAccess || registerOnly) && page === 'inventory' && <InventoryPage client={sb} storeId={store} accessToken={session.access_token} money={money} stamp={stamp} tab={nav.inventoryTab} onTab={t => go({ inventoryTab: t })} attentionSection={nav.attentionSection} onAttentionSection={s => go({ attentionSection: s, inventoryTab: 'attention' })} canDelete={fullAccess} onCostChanged={() => { void loadPayoutSales(); void loadSales(); }} />}
+  {(fullAccess || registerOnly) && page === 'inventory' && <InventoryPage client={sb} storeId={store} accessToken={session.access_token} money={money} stamp={stamp} tab={registerOnly ? 'browse' : nav.inventoryTab} onTab={t => go({ inventoryTab: t })} attentionSection={nav.attentionSection} onAttentionSection={s => go({ attentionSection: s, inventoryTab: 'attention' })} canDelete={fullAccess} associateBrowseOnly={registerOnly} onCostChanged={() => { void loadPayoutSales(); void loadSales(); }} />}
   {fullAccess && page === 'reports' && <ReportsPage client={sb} money={money} tab={nav.reportTab} onTab={t => go({ reportTab: t })} closeouts={closeouts} expenses={<ExpensesPage client={sb} money={money} expenses={expenses} staff={staff} ownerId={onlineCfg.employeeId || defaultReimbursementId} onChanged={loadCommon} embedded />} payouts={<PayoutsPage allSales={allSales} ebayFees={ebayFees} staff={staff} rules={activeRules} payments={payments} adjustments={payoutAdjustments} expenses={expenses} cfg={onlineCfg} personName={personName} busy={busy} recordPayment={recordPayment} onCommissionChanged={setTicketOverride} />} />}
   {fullAccess && page === 'tax' && <TaxPage client={sb} money={money} stamp={stamp} />}
   {fullAccess && page === 'settings' && <SettingsPage client={sb} accessToken={session.access_token} stamp={stamp} money={money} busy={busy} run={run} onLedgerChanged={async () => { await loadSales(); await loadPayoutSales(); }} ruleEditor={<>{staff.map(p => <RuleEditor key={p.user_id} person={p} rule={ruleMap.get(p.user_id)} save={setRule} busy={busy} />)}</>} onlinePayoutSettings={<OnlinePayoutSettings cfg={onlineCfg} staff={staff} busy={busy} save={async (channels, pct, who) => { await run(async () => { check(await sb.rpc('portal_set_payout_config', { p_channels: channels, p_pct: pct, p_employee: who })); await loadCommon(); await loadPayoutSales(); }); }} />} />}
   {registerOnly && page === 'settings' && <AssociateSettings client={sb} displayName={staffSession?.displayName || 'Associate'} />}
-  {(fullAccess || registerOnly) && page === 'cameras' && <><header><div><div className="eyebrow">FUTURE INTEGRATION</div><h1>Cameras</h1></div></header><section className="panel"><Empty>Camera feeds coming soon</Empty></section></>}
+  {fullAccess && page === 'cameras' && <><header><div><div className="eyebrow">FUTURE INTEGRATION</div><h1>Cameras</h1></div></header><section className="panel"><Empty>Camera feeds coming soon</Empty></section></>}
   {fullAccess && page === 'remote' && <><header><div><div className="eyebrow">FUTURE INTEGRATION</div><h1>Remote</h1><p>Connect to the store computer from here later.</p></div></header><section className="panel"><Empty>Remote access coming soon</Empty></section></>}
   </main></div>;
 }

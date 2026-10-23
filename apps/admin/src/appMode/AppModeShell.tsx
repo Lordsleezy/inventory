@@ -20,7 +20,7 @@ import {
 } from './AppMore';
 import type { OnlineCfg, Rule, CommissionOverride } from '../payouts';
 
-export type AppTab = 'inventory' | 'receive' | 'register' | 'orders' | 'more';
+export type AppTab = 'inventory' | 'receive' | 'register' | 'orders' | 'more' | 'settings';
 
 type Props = {
   client: SupabaseClient;
@@ -39,7 +39,10 @@ type Props = {
   settingsSlot?: React.ReactNode;
 };
 
-const TABS: { id: AppTab; label: string; icon: React.ReactNode; adminOnly?: boolean }[] = [
+/** Store associates (e.g. Jacob) only get Inventory / Register / Settings. */
+const ASSOCIATE_TABS: AppTab[] = ['inventory', 'register', 'settings'];
+
+const TABS: { id: AppTab; label: string; icon: React.ReactNode; adminOnly?: boolean; associateOnly?: boolean }[] = [
   {
     id: 'inventory',
     label: 'Inventory',
@@ -52,6 +55,7 @@ const TABS: { id: AppTab; label: string; icon: React.ReactNode; adminOnly?: bool
   {
     id: 'receive',
     label: 'Receive',
+    adminOnly: true,
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
         <path d="M13 3v10h4l-5 8-5-8h4V3z" />
@@ -80,9 +84,21 @@ const TABS: { id: AppTab; label: string; icon: React.ReactNode; adminOnly?: bool
   {
     id: 'more',
     label: 'More',
+    adminOnly: true,
     icon: (
       <svg viewBox="0 0 24 24" fill="currentColor">
         <circle cx="6" cy="12" r="1.6" /><circle cx="12" cy="12" r="1.6" /><circle cx="18" cy="12" r="1.6" />
+      </svg>
+    ),
+  },
+  {
+    id: 'settings',
+    label: 'Settings',
+    associateOnly: true,
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+        <circle cx="12" cy="12" r="3" />
+        <path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4l1.4-1.4M17 7l1.4-1.4" />
       </svg>
     ),
   },
@@ -138,6 +154,7 @@ export function AppModeShell({
   }, [itemSku, morePage, channel]);
 
   function switchTab(next: AppTab) {
+    if (!fullAccess && !ASSOCIATE_TABS.includes(next)) next = 'inventory';
     const panel = document.querySelector('.app-tab-panel:not([hidden])') as HTMLElement | null;
     if (panel && tab) scrollPos.current[tab] = panel.scrollTop;
     setTab(next);
@@ -150,7 +167,12 @@ export function AppModeShell({
     });
   }
 
-  const tabs = TABS.filter((t) => !t.adminOnly || fullAccess);
+  // Associates: Inventory / Register / Settings only. Admins keep Receive, Orders, More.
+  const tabs = TABS.filter((t) => {
+    if (t.adminOnly && !fullAccess) return false;
+    if (t.associateOnly && fullAccess) return false;
+    return true;
+  });
   const stackOpen = !!(itemSku || morePage || channel);
 
   return (
@@ -186,16 +208,18 @@ export function AppModeShell({
           />
         )}
 
-        <div className="app-tab-panel" data-tab="receive" hidden={tab !== 'receive'}>
-          {tab === 'receive' && (
-            <AppReceive
-              client={client}
-              storeId={storeId}
-              accessToken={session.access_token}
-              onSaved={() => setInvKey((n) => n + 1)}
-            />
-          )}
-        </div>
+        {fullAccess && (
+          <div className="app-tab-panel" data-tab="receive" hidden={tab !== 'receive'}>
+            {tab === 'receive' && (
+              <AppReceive
+                client={client}
+                storeId={storeId}
+                accessToken={session.access_token}
+                onSaved={() => setInvKey((n) => n + 1)}
+              />
+            )}
+          </div>
+        )}
 
         <div className="app-tab-panel app-register" data-tab="register" hidden={tab !== 'register'}>
           {tab === 'register' && (
@@ -219,27 +243,43 @@ export function AppModeShell({
           </div>
         )}
 
-        <div className="app-tab-panel" data-tab="more" hidden={tab !== 'more' || stackOpen}>
-          {tab === 'more' && !morePage && !channel && (
-            <AppMoreHome
-              client={client}
-              session={session}
-              fullAccess={fullAccess}
-              staffSession={staffSession}
-              money={money}
-              setPage={(p) => {
-                history.pushState({ floorApp: 1, more: p }, '');
-                setMorePage(p);
-              }}
-              onOpenChannel={(ch) => {
-                history.pushState({ floorApp: 1, channel: ch }, '');
-                setChannel(ch);
-              }}
-            />
-          )}
-        </div>
+        {fullAccess && (
+          <div className="app-tab-panel" data-tab="more" hidden={tab !== 'more' || stackOpen}>
+            {tab === 'more' && !morePage && !channel && (
+              <AppMoreHome
+                client={client}
+                session={session}
+                fullAccess={fullAccess}
+                staffSession={staffSession}
+                money={money}
+                setPage={(p) => {
+                  history.pushState({ floorApp: 1, more: p }, '');
+                  setMorePage(p);
+                }}
+                onOpenChannel={(ch) => {
+                  history.pushState({ floorApp: 1, channel: ch }, '');
+                  setChannel(ch);
+                }}
+              />
+            )}
+          </div>
+        )}
 
-        {channel && (
+        {!fullAccess && (
+          <div className="app-tab-panel" data-tab="settings" hidden={tab !== 'settings'}>
+            {tab === 'settings' && (
+              <AppSettingsNative
+                client={client}
+                fullAccess={false}
+                staffSession={staffSession}
+                session={session}
+                settingsSlot={settingsSlot || <p className="app-footer-count">Settings unavailable.</p>}
+              />
+            )}
+          </div>
+        )}
+
+        {fullAccess && channel && (
           <AppChannel
             channel={channel}
             accessToken={session.access_token}
@@ -248,7 +288,7 @@ export function AppModeShell({
           />
         )}
 
-        {morePage === 'attention' && (
+        {fullAccess && morePage === 'attention' && (
           <AppAttention
             client={client}
             storeId={storeId}
@@ -257,10 +297,10 @@ export function AppModeShell({
             onBack={() => setMorePage(null)}
           />
         )}
-        {morePage === 'sales' && (
+        {fullAccess && morePage === 'sales' && (
           <AppLiveSales client={client} money={money} stamp={stamp} onBack={() => setMorePage(null)} />
         )}
-        {morePage === 'connections' && (
+        {fullAccess && morePage === 'connections' && (
           <AppConnections
             client={client}
             accessToken={session.access_token}
@@ -269,16 +309,16 @@ export function AppModeShell({
             onBack={() => setMorePage(null)}
           />
         )}
-        {morePage === 'reports' && (
+        {fullAccess && morePage === 'reports' && (
           <AppReportsNative client={client} money={money} onBack={() => setMorePage(null)} />
         )}
-        {morePage === 'tax' && (
+        {fullAccess && morePage === 'tax' && (
           <AppTaxNative client={client} money={money} stamp={stamp} onBack={() => setMorePage(null)} />
         )}
-        {morePage === 'depop' && (
+        {fullAccess && morePage === 'depop' && (
           <AppDepopNative accessToken={session.access_token} money={money} onBack={() => setMorePage(null)} />
         )}
-        {morePage === 'settings' && (
+        {fullAccess && morePage === 'settings' && (
           <AppSettingsNative
             client={client}
             fullAccess={fullAccess}
