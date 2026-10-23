@@ -1,7 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { lookupUpc, mergeLookup, parseUpcitemdbDimension, parseUpcitemdbWeight, upcitemdbLookup } from "./upc-lookup.mjs";
-import { extractCatalogAspects, formatAspectsLine, parseCatalogItem, pickLargestImages } from "./amazon.mjs";
+import {
+  extractCatalogAspects,
+  formatAspectsLine,
+  itemSpecificsFromLookup,
+  parseCatalogItem,
+  pickLargestImages,
+  usableModelNumber,
+  variantFromTitle,
+} from "./amazon.mjs";
 
 const catalogItem = {
   asin: "B0TESTASIN",
@@ -51,6 +59,36 @@ test("extractCatalogAspects ignores empty / unknown attributes", () => {
   assert.equal(formatAspectsLine({}), "");
 });
 
+test("item specifics rejects numeric retailer codes; prefers pack phrase from title", () => {
+  assert.equal(usableModelNumber("4610583"), null);
+  assert.equal(usableModelNumber("WP-100"), "WP-100");
+  assert.match(
+    variantFromTitle("Oral-B Replacement Brush Heads, 10 Count Soft", "Oral-B"),
+    /brush heads.*10 count/i,
+  );
+  const oralB = itemSpecificsFromLookup({
+    model: "4610583",
+    title: "Oral-B Replacement Brush Heads 10 Pack",
+    brand: "Oral-B",
+  });
+  assert.match(oralB, /brush heads/i);
+  assert.match(oralB, /10 pack/i);
+  assert.doesNotMatch(oralB, /^4610583$/);
+  assert.equal(
+    itemSpecificsFromLookup({ model: "EB-20", title: "Oral-B Something", brand: "Oral-B" }),
+    "EB-20",
+  );
+});
+
+test("mergeLookup drops digit retailer model codes from upcitemdb", () => {
+  const { merged, fieldCoverage } = mergeLookup(
+    { found: true, title: "Oral-B Replacement Brush Heads 10 Pack", brand: "Oral-B", model: "4610583", aspects: {}, package: {}, images: [] },
+    { found: true, title: "Oral-B Heads", brand: "Oral-B", model: "4610583", package: {}, images: [] },
+  );
+  assert.equal(merged.model, null);
+  assert.equal(fieldCoverage.model, null);
+});
+
 test("merge marks not_found when both sources miss", () => {
   const { merged } = mergeLookup({ found: false }, { found: false });
   assert.equal(merged.not_found, true);
@@ -80,9 +118,21 @@ test("merge prefers amazon, fills gaps from upcitemdb, lists disagreements", () 
 });
 
 function fakeSb(store = new Map()) {
+  const empty = {
+    select: () => ({
+      eq: () => ({
+        maybeSingle: async () => ({ data: null, error: null }),
+        order: () => ({ limit: () => ({ maybeSingle: async () => ({ data: null, error: null }) }) }),
+      }),
+    }),
+    upsert: async () => ({ data: null, error: null }),
+    insert: () => ({ select: () => ({ maybeSingle: async () => ({ data: { id: "miss-1" }, error: null }) }) }),
+    update: () => ({ eq: async () => ({ error: null }) }),
+  };
   return {
     store,
-    from() {
+    from(table) {
+      if (table === "floor_products" || table === "upc_lookup_misses") return empty;
       return {
         select: () => ({ eq: (_c, v) => ({ maybeSingle: async () => ({ data: store.get(v) || null, error: null }) }) }),
         upsert: async (row) => {

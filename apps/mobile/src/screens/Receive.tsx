@@ -123,6 +123,8 @@ export function ReceiveScreen() {
       }
     }
     const brandValue = unbranded ? "Unbranded" : brand.trim();
+    // Manual receive: title is always brand + model (same as admin Enter manually).
+    const titleValue = [brandValue, model.trim()].filter(Boolean).join(" ") || title.trim();
     // Never block save/price for missing listing fields — Needs attention + Push enforce them.
 
     setSaving(true);
@@ -132,7 +134,7 @@ export function ReceiveScreen() {
         p_sku: sku.trim(),
         p_brand: brandValue,
         p_model: model.trim(),
-        p_title: title.trim(),
+        p_title: titleValue,
         p_category: category || null,
         p_condition: condition || null,
         p_test_status: testStatus || null,
@@ -162,7 +164,7 @@ export function ReceiveScreen() {
       setSuggested(nextSku);
       setSku(nextSku);
       setModel("");
-      setTitle("");
+      setTitle(brandValue);
       setNotes("");
       setAsk("");
       setCost("");
@@ -211,10 +213,28 @@ export function ReceiveScreen() {
 
       <label className="block py-2">
         <Label>Brand</Label>
-        <input className="field mt-1" value={unbranded ? "Unbranded" : brand} disabled={unbranded} onChange={(e) => setBrand(e.target.value)} />
+        <input
+          className="field mt-1"
+          value={unbranded ? "Unbranded" : brand}
+          disabled={unbranded}
+          onChange={(e) => {
+            const next = e.target.value;
+            setBrand(next);
+            setTitle([unbranded ? "Unbranded" : next.trim(), model.trim()].filter(Boolean).join(" "));
+          }}
+        />
       </label>
       <label className="block py-2">
-        <input type="checkbox" checked={unbranded} onChange={(e) => setUnbranded(e.target.checked)} /> Unbranded — no brand on the product or packaging
+        <input
+          type="checkbox"
+          checked={unbranded}
+          onChange={(e) => {
+            const on = e.target.checked;
+            setUnbranded(on);
+            setTitle([on ? "Unbranded" : brand.trim(), model.trim()].filter(Boolean).join(" "));
+          }}
+        />{" "}
+        Unbranded — no brand on the product or packaging
       </label>
       <label className="block py-2">
         <Label>UPC</Label>
@@ -244,12 +264,26 @@ export function ReceiveScreen() {
 
       <label className="block py-2">
         <Label>Model</Label>
-        <input className="field mt-1" value={model} onChange={(e) => setModel(e.target.value)} />
+        <input
+          className="field mt-1"
+          value={model}
+          onChange={(e) => {
+            const next = e.target.value;
+            setModel(next);
+            setTitle([(unbranded ? "Unbranded" : brand).trim(), next.trim()].filter(Boolean).join(" "));
+          }}
+        />
       </label>
 
       <label className="block py-2">
-        <Label>Description</Label>
-        <input className="field mt-1" value={title} onChange={(e) => setTitle(e.target.value)} />
+        <Label>Title</Label>
+        <input
+          className="field mt-1"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          placeholder="Auto-filled as brand + model"
+        />
+        <p className="mt-1 text-quiet text-sm">Auto-filled as brand + model.</p>
       </label>
 
       <Picker label="Category" value={category} options={settings.categories} onChange={setCategory} />

@@ -115,6 +115,10 @@
 [functions."upc-lookup"]
   timeout = 26
 
+# Barcode-miss photo identify + asking-price median (Gemini).
+[functions."receive-photo-identify"]
+  timeout = 60
+
 # Read-only inventory feed for marketplace listing agents. No schedule.
 [functions."listing-feed"]
   timeout = 26

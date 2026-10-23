@@ -550,6 +550,44 @@ export function formatAspectsLine(aspects) {
     .join(" · ");
 }
 
+/** Reject retailer item numbers / bare digit codes masquerading as model. */
+export function usableModelNumber(raw) {
+  const m = String(raw ?? "").trim();
+  if (!m) return null;
+  if (/^\d{4,}$/.test(m)) return null;
+  if (/^(itm|art|sku|dpci|tcin)[\s#:-]?\d+/i.test(m)) return null;
+  return m;
+}
+
+/**
+ * Human-facing item specifics for Receive: real MPN, else aspect line, else a short
+ * pack/variant phrase from the title (never a bare digit code).
+ */
+export function itemSpecificsFromLookup({ model, aspects, title, brand } = {}) {
+  const mpn = usableModelNumber(model);
+  if (mpn) return mpn;
+  const aspectsLine = formatAspectsLine(aspects);
+  if (aspectsLine) return aspectsLine;
+  return variantFromTitle(title, brand);
+}
+
+/** "Oral-B Replacement Brush Heads, 10 Count" → "Replacement Brush Heads, 10 Count" */
+export function variantFromTitle(title, brand) {
+  let t = String(title || "").trim().replace(/\s+/g, " ");
+  if (!t) return "";
+  const b = String(brand || "").trim();
+  if (b && t.toLowerCase().startsWith(b.toLowerCase())) {
+    t = t.slice(b.length).replace(/^[\s,:\-|–—]+/, "").trim();
+  }
+  // Prefer a pack/size clause when present (allow commas so "Brush Heads, 10 Count" keeps the product words).
+  const pack = t.match(
+    /(.{0,80}\b\d+\s*(?:-?\s*)?(?:count|ct|pack|pk|heads?|refills?|pieces?|pcs?|oz|fl\s*oz|ml|g)\b[^|/]{0,40})/i,
+  );
+  if (pack) return pack[1].trim().replace(/^[\s,:\-|–—]+/, "");
+  // Otherwise first clause, capped.
+  return t.split(/[|/]/)[0].trim().slice(0, 80);
+}
+
 /** Parse one SP-API Catalog Items 2022-04-01 item into Floor's flat shape. Never invents fields. */
 export function parseCatalogItem(item) {
   if (!item?.asin) return null;
@@ -570,11 +608,16 @@ export function parseCatalogItem(item) {
   const listPrice = attrValue(attrs, "list_price");
   const listAmount = Number(listPrice?.value ?? listPrice?.value_with_tax);
   const aspects = extractCatalogAspects(attrs);
+  // Amazon often puts retailer ITM/ART/SKU-style digit strings in modelNumber — those are not
+  // usable as Floor "item specifics" (e.g. Oral-B "4610583"). Keep a real MPN; drop pure digits.
+  const rawModel =
+    summary.modelNumber || attrString(attrs, "model_number") || summary.partNumber || attrString(attrs, "part_number");
+  const model = usableModelNumber(rawModel);
   return {
     asin: item.asin,
     title: summary.itemName || attrString(attrs, "item_name"),
     brand: summary.brand || attrString(attrs, "brand"),
-    model: summary.modelNumber || attrString(attrs, "model_number") || summary.partNumber || attrString(attrs, "part_number"),
+    model,
     part_number: summary.partNumber || attrString(attrs, "part_number"),
     manufacturer: summary.manufacturer || attrString(attrs, "manufacturer"),
     description: attrString(attrs, "product_description"),
