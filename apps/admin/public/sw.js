@@ -1,5 +1,5 @@
 /* Floor admin shell — cache static assets only; never cache live inventory/API data. */
-const SHELL = 'floor-shell-v2';
+const SHELL = 'floor-shell-v3';
 const SHELL_URLS = [
   '/',
   '/index.html',
@@ -29,6 +29,7 @@ function isLiveData(url) {
     if (u.pathname.startsWith('/api/')) return true;
     if (u.hostname.includes('supabase')) return true;
     if (u.pathname.includes('/rest/v1') || u.pathname.includes('/auth/v1') || u.pathname.includes('/storage/v1')) return true;
+    if (u.pathname.includes('/.netlify/functions/')) return true;
   } catch { /* ignore */ }
   return false;
 }
@@ -42,17 +43,28 @@ self.addEventListener('fetch', (event) => {
   try { url = new URL(request.url); } catch { return; }
   if (url.origin !== self.location.origin) return;
 
-  if (request.mode === 'navigate') {
+  // Navigations and hashed bundles: network-first so deploys aren't stuck on stale shell.
+  const asset = url.pathname.startsWith('/assets/')
+    || url.pathname.endsWith('.js')
+    || url.pathname.endsWith('.css')
+    || url.pathname.endsWith('.webmanifest');
+  if (request.mode === 'navigate' || asset) {
     event.respondWith(
       fetch(request)
         .then((res) => {
           if (res && res.ok) {
             const copy = res.clone();
-            void caches.open(SHELL).then((c) => c.put('/index.html', copy)).catch(() => undefined);
+            const key = request.mode === 'navigate' ? '/index.html' : request;
+            void caches.open(SHELL).then((c) => c.put(key, copy)).catch(() => undefined);
           }
           return res;
         })
-        .catch(async () => (await caches.match('/index.html')) || (await caches.match('/')) || Response.error()),
+        .catch(async () => {
+          if (request.mode === 'navigate') {
+            return (await caches.match('/index.html')) || (await caches.match('/')) || Response.error();
+          }
+          return (await caches.match(request)) || Response.error();
+        }),
     );
     return;
   }
@@ -61,7 +73,7 @@ self.addEventListener('fetch', (event) => {
     caches.match(request).then((cached) => {
       const network = fetch(request)
         .then((res) => {
-          if (res && res.ok && (url.pathname.startsWith('/assets/') || url.pathname.startsWith('/icons/') || url.pathname.endsWith('.js') || url.pathname.endsWith('.css'))) {
+          if (res && res.ok && (url.pathname.startsWith('/icons/') || url.pathname.endsWith('.png') || url.pathname.endsWith('.webp'))) {
             const copy = res.clone();
             void caches.open(SHELL).then((c) => c.put(request, copy)).catch(() => undefined);
           }

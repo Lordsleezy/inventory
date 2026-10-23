@@ -810,16 +810,34 @@ html.app-mode .receive-app .actions { margin-left: 16px; margin-right: 16px; }
 html.app-mode .receive-app-nav { position: sticky; top: 0; z-index: 5; background: #000; }
 
 /* Register app — native iOS cart / pay sheets */
-html.app-mode .app-register {
+html.app-mode .app-tab-panel.app-register {
   padding: 0 !important;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+html.app-mode .app-tab-panel.app-register[hidden] {
+  display: none !important;
 }
 html.app-mode .native-register {
   display: flex;
   flex-direction: column;
-  min-height: 100%;
-  padding: 0 0 calc(8px + env(safe-area-inset-bottom, 0px));
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  padding: 0;
   color: #fff;
   background: #000;
+}
+html.app-mode .nr-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+  padding-bottom: 12px;
 }
 html.app-mode .nr-top {
   display: flex;
@@ -938,8 +956,8 @@ html.app-mode .nr-hit strong { display: block; font-size: 15px; }
 html.app-mode .nr-hit small { color: #8e8e93; font-size: 12px; }
 html.app-mode .nr-cart {
   margin: 0 16px 10px;
-  flex: 1;
-  min-height: 80px;
+  flex: none;
+  min-height: 120px;
 }
 html.app-mode .nr-empty {
   padding: 28px 16px;
@@ -1093,11 +1111,13 @@ html.app-mode .nr-tools button {
 }
 html.app-mode .nr-banner { margin: 0 16px 8px; }
 html.app-mode .nr-checkout {
-  margin-top: auto;
-  padding: 12px 16px 10px;
-  position: sticky;
-  bottom: calc(56px + env(safe-area-inset-bottom, 0px));
-  background: linear-gradient(180deg, transparent, #000 18px);
+  flex-shrink: 0;
+  margin-top: 0;
+  padding: 10px 16px calc(10px + 56px + env(safe-area-inset-bottom, 0px));
+  position: relative;
+  bottom: auto;
+  background: #000;
+  border-top: 0.5px solid rgba(84, 84, 88, 0.65);
   z-index: 4;
 }
 html.app-mode .nr-totals {

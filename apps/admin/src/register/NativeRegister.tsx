@@ -271,200 +271,202 @@ export function NativeRegisterCart(props: NativeRegisterProps) {
 
   return (
     <div className="admin-register register-app native-register">
-      <div className="nr-top">
-        <button
-          type="button"
-          className="nr-clear"
-          disabled={!lines.length || !idle}
-          onClick={() => { if (window.confirm('Clear the cart?')) clear(); }}
-        >
-          Clear
-        </button>
-        <button
-          type="button"
-          className="nr-cashier-chip"
-          disabled={!idle || cashOpen}
-          onClick={() => { setEmployeeDraft(''); setEmployeeError(''); setEmployeeOpen(true); }}
-        >
-          {soldByName || 'Cashier'} ▾
-        </button>
-        <button
-          type="button"
-          className="nr-add-item"
-          disabled={!idle || cashOpen}
-          onClick={() => { setCustomError(''); setCustomOpen(true); }}
-        >
-          + Item
-        </button>
-      </div>
+      <div className="nr-scroll">
+        <div className="nr-top">
+          <button
+            type="button"
+            className="nr-clear"
+            disabled={!lines.length || !idle}
+            onClick={() => { if (window.confirm('Clear the cart?')) clear(); }}
+          >
+            Clear
+          </button>
+          <button
+            type="button"
+            className="nr-cashier-chip"
+            disabled={!idle || cashOpen}
+            onClick={() => { setEmployeeDraft(''); setEmployeeError(''); setEmployeeOpen(true); }}
+          >
+            {soldByName || 'Cashier'} ▾
+          </button>
+          <button
+            type="button"
+            className="nr-add-item"
+            disabled={!idle || cashOpen}
+            onClick={() => { setCustomError(''); setCustomOpen(true); }}
+          >
+            + Item
+          </button>
+        </div>
 
-      <div className="nr-title-row">
-        <h1>Register</h1>
-        <span className="nr-ticket">#{shortTicket}</span>
-      </div>
+        <div className="nr-title-row">
+          <h1>Register</h1>
+          <span className="nr-ticket">#{shortTicket}</span>
+        </div>
 
-      <div className="nr-search">
-        <span className="nr-search-icon" aria-hidden>⌕</span>
-        <input
-          ref={searchRef}
-          placeholder="Scan or search SKU, title"
-          value={q}
-          onChange={e => {
-            setQ(e.target.value);
-            setShowHits(Boolean(e.target.value.trim()));
-          }}
-          onFocus={() => q.trim() && setShowHits(true)}
-          onKeyDown={onSearchKey}
-          autoComplete="off"
-          autoCorrect="off"
-          autoCapitalize="off"
-          spellCheck={false}
-          enterKeyHint="search"
-          inputMode="search"
-          disabled={!idle || cashOpen}
-        />
-        <button
-          type="button"
-          className="nr-scan-btn"
-          disabled={!idle || cashOpen || scanBusy}
-          aria-label="Scan barcode"
-          onClick={() => void onCameraScan()}
-        >
-          {scanBusy ? '…' : 'Scan'}
-        </button>
-        {showHits && (hits.length || searchBusy) ? (
-          <div className="nr-hits">
-            {searchBusy && !hits.length ? <div className="nr-hit muted">Searching…</div> : null}
-            {hits.map(u => (
-              <button key={u.sku} type="button" className="nr-hit" onClick={() => addFromSearch(u)}>
-                <span>
-                  <strong>{[u.brand, u.model].filter(Boolean).join(' ') || u.title}</strong>
-                  <small>SKU {u.sku}{u.condition ? ` · ${u.condition}` : ''}</small>
-                </span>
-                <span>{formatCents(u.askCents) || '—'}</span>
-              </button>
-            ))}
-          </div>
-        ) : null}
-      </div>
-
-      <div className="nr-cart app-group">
-        {!lines.length ? (
-          <div className="nr-empty">Scan or search to add an item</div>
-        ) : (
-          lines.map(line => {
-            const overridden = line.askCents != null && line.priceCents !== line.askCents;
-            const photo = line.photoUrl || thumbs[line.sku];
-            const dx = swipe?.sku === line.sku ? swipe.x : 0;
-            return (
-              <div
-                key={line.sku}
-                className={`nr-line${overridden ? ' overridden' : ''}`}
-                style={{ transform: dx < 0 ? `translateX(${dx}px)` : undefined }}
-                onTouchStart={e => {
-                  touchOrigin.current = { sku: line.sku, x: e.touches[0]?.clientX ?? 0 };
-                }}
-                onTouchMove={e => {
-                  const o = touchOrigin.current;
-                  if (!o || o.sku !== line.sku) return;
-                  const x = (e.touches[0]?.clientX ?? 0) - o.x;
-                  if (x < -8) setSwipe({ sku: line.sku, x: Math.max(-96, x) });
-                }}
-                onTouchEnd={() => {
-                  if (swipe?.sku === line.sku && swipe.x < -64) removeSku(line.sku);
-                  setSwipe(null);
-                  touchOrigin.current = null;
-                }}
-              >
-                <div className="nr-line-main">
-                  <span className="nr-thumb">
-                    {photo ? <img src={photo} alt="" loading="lazy" decoding="async" /> : null}
+        <div className="nr-search">
+          <span className="nr-search-icon" aria-hidden>⌕</span>
+          <input
+            ref={searchRef}
+            placeholder="Scan or search SKU, title"
+            value={q}
+            onChange={e => {
+              setQ(e.target.value);
+              setShowHits(Boolean(e.target.value.trim()));
+            }}
+            onFocus={() => q.trim() && setShowHits(true)}
+            onKeyDown={onSearchKey}
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="off"
+            spellCheck={false}
+            enterKeyHint="search"
+            inputMode="search"
+            disabled={!idle || cashOpen}
+          />
+          <button
+            type="button"
+            className="nr-scan-btn"
+            disabled={!idle || cashOpen || scanBusy}
+            aria-label="Scan barcode"
+            onClick={() => void onCameraScan()}
+          >
+            {scanBusy ? '…' : 'Scan'}
+          </button>
+          {showHits && (hits.length || searchBusy) ? (
+            <div className="nr-hits">
+              {searchBusy && !hits.length ? <div className="nr-hit muted">Searching…</div> : null}
+              {hits.map(u => (
+                <button key={u.sku} type="button" className="nr-hit" onClick={() => addFromSearch(u)}>
+                  <span>
+                    <strong>{[u.brand, u.model].filter(Boolean).join(' ') || u.title}</strong>
+                    <small>SKU {u.sku}{u.condition ? ` · ${u.condition}` : ''}</small>
                   </span>
-                  <span className="nr-line-text">
-                    <strong>{line.title}</strong>
-                    <small>SKU {line.sku}{line.condition ? ` · ${line.condition}` : ''}</small>
-                    {line.qtyOnHand > 1 ? (
-                      <span className="nr-stepper">
-                        <button type="button" disabled={!idle || cashOpen || line.qty <= 1} onClick={() => setQty(line.sku, line.qty - 1)}>−</button>
-                        <span>{line.qty}</span>
-                        <button type="button" disabled={!idle || cashOpen || line.qty >= line.qtyOnHand} onClick={() => setQty(line.sku, line.qty + 1)}>+</button>
-                      </span>
-                    ) : null}
-                  </span>
-                  <span className="nr-line-price">
-                    {editingSku === line.sku ? (
-                      <input
-                        ref={priceInputRef}
-                        className="nr-price-input"
-                        type="text"
-                        inputMode="decimal"
-                        enterKeyHint="done"
-                        value={editDraft}
-                        onChange={e => {
-                          if (!moneyEntry.test(e.target.value)) return;
-                          setEditDraft(e.target.value);
-                        }}
-                        onBlur={() => finishEdit(line.sku, editDraft, false)}
-                        onKeyDown={e => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
-                            (e.target as HTMLInputElement).blur();
-                          } else if (e.key === 'Escape') {
-                            e.preventDefault();
-                            finishEdit(line.sku, editDraft, true);
-                          }
-                        }}
-                      />
-                    ) : (
-                      <button
-                        type="button"
-                        className={`nr-price-btn${overridden ? ' is-override' : ''}`}
-                        disabled={!idle || cashOpen}
-                        onClick={() => beginEdit(line)}
-                      >
-                        {formatCentsTotal(line.priceCents * (line.qty || 1))}
-                        {overridden ? <i aria-hidden>•</i> : null}
-                      </button>
-                    )}
-                    {overridden ? (
-                      <button type="button" className="nr-reset-price" disabled={!idle || cashOpen} onClick={() => resetPrice(line)}>
-                        Reset
-                      </button>
-                    ) : null}
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  className="nr-swipe-delete"
-                  tabIndex={-1}
-                  onClick={() => removeSku(line.sku)}
-                >
-                  Delete
+                  <span>{formatCents(u.askCents) || '—'}</span>
                 </button>
-              </div>
-            );
-          })
-        )}
-      </div>
+              ))}
+            </div>
+          ) : null}
+        </div>
 
-      <div className="nr-tools">
-        <button
-          type="button"
-          disabled={!idle || cashOpen}
-          onClick={() => { setDiscountDraft(String(discountPct || '')); setDiscountOpen(true); }}
-        >
-          {discountPct > 0 ? `${discountPct}% off` : 'Discount'}
-        </button>
-        <button type="button" disabled={!idle || cashOpen} onClick={() => setCustomerOpen(true)}>
-          {customer?.name || customer?.phone || 'Customer'}
-        </button>
-        <button type="button" disabled={!idle} onClick={() => setNoteOpen(true)}>
-          {note.trim() ? 'Note ✓' : 'Note'}
-        </button>
-      </div>
+        <div className="nr-cart app-group">
+          {!lines.length ? (
+            <div className="nr-empty">Scan or search to add an item</div>
+          ) : (
+            lines.map(line => {
+              const overridden = line.askCents != null && line.priceCents !== line.askCents;
+              const photo = line.photoUrl || thumbs[line.sku];
+              const dx = swipe?.sku === line.sku ? swipe.x : 0;
+              return (
+                <div
+                  key={line.sku}
+                  className={`nr-line${overridden ? ' overridden' : ''}`}
+                  style={{ transform: dx < 0 ? `translateX(${dx}px)` : undefined }}
+                  onTouchStart={e => {
+                    touchOrigin.current = { sku: line.sku, x: e.touches[0]?.clientX ?? 0 };
+                  }}
+                  onTouchMove={e => {
+                    const o = touchOrigin.current;
+                    if (!o || o.sku !== line.sku) return;
+                    const x = (e.touches[0]?.clientX ?? 0) - o.x;
+                    if (x < -8) setSwipe({ sku: line.sku, x: Math.max(-96, x) });
+                  }}
+                  onTouchEnd={() => {
+                    if (swipe?.sku === line.sku && swipe.x < -64) removeSku(line.sku);
+                    setSwipe(null);
+                    touchOrigin.current = null;
+                  }}
+                >
+                  <div className="nr-line-main">
+                    <span className="nr-thumb">
+                      {photo ? <img src={photo} alt="" loading="lazy" decoding="async" /> : null}
+                    </span>
+                    <span className="nr-line-text">
+                      <strong>{line.title}</strong>
+                      <small>SKU {line.sku}{line.condition ? ` · ${line.condition}` : ''}</small>
+                      {line.qtyOnHand > 1 ? (
+                        <span className="nr-stepper">
+                          <button type="button" disabled={!idle || cashOpen || line.qty <= 1} onClick={() => setQty(line.sku, line.qty - 1)}>−</button>
+                          <span>{line.qty}</span>
+                          <button type="button" disabled={!idle || cashOpen || line.qty >= line.qtyOnHand} onClick={() => setQty(line.sku, line.qty + 1)}>+</button>
+                        </span>
+                      ) : null}
+                    </span>
+                    <span className="nr-line-price">
+                      {editingSku === line.sku ? (
+                        <input
+                          ref={priceInputRef}
+                          className="nr-price-input"
+                          type="text"
+                          inputMode="decimal"
+                          enterKeyHint="done"
+                          value={editDraft}
+                          onChange={e => {
+                            if (!moneyEntry.test(e.target.value)) return;
+                            setEditDraft(e.target.value);
+                          }}
+                          onBlur={() => finishEdit(line.sku, editDraft, false)}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              (e.target as HTMLInputElement).blur();
+                            } else if (e.key === 'Escape') {
+                              e.preventDefault();
+                              finishEdit(line.sku, editDraft, true);
+                            }
+                          }}
+                        />
+                      ) : (
+                        <button
+                          type="button"
+                          className={`nr-price-btn${overridden ? ' is-override' : ''}`}
+                          disabled={!idle || cashOpen}
+                          onClick={() => beginEdit(line)}
+                        >
+                          {formatCentsTotal(line.priceCents * (line.qty || 1))}
+                          {overridden ? <i aria-hidden>•</i> : null}
+                        </button>
+                      )}
+                      {overridden ? (
+                        <button type="button" className="nr-reset-price" disabled={!idle || cashOpen} onClick={() => resetPrice(line)}>
+                          Reset
+                        </button>
+                      ) : null}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    className="nr-swipe-delete"
+                    tabIndex={-1}
+                    onClick={() => removeSku(line.sku)}
+                  >
+                    Delete
+                  </button>
+                </div>
+              );
+            })
+          )}
+        </div>
 
-      {loud ? <div className="incident nr-banner">{loud}</div> : null}
-      {error && !cashOpen ? <p className="error nr-banner">{error}</p> : null}
+        <div className="nr-tools">
+          <button
+            type="button"
+            disabled={!idle || cashOpen}
+            onClick={() => { setDiscountDraft(String(discountPct || '')); setDiscountOpen(true); }}
+          >
+            {discountPct > 0 ? `${discountPct}% off` : 'Discount'}
+          </button>
+          <button type="button" disabled={!idle || cashOpen} onClick={() => setCustomerOpen(true)}>
+            {customer?.name || customer?.phone || 'Customer'}
+          </button>
+          <button type="button" disabled={!idle} onClick={() => setNoteOpen(true)}>
+            {note.trim() ? 'Note ✓' : 'Note'}
+          </button>
+        </div>
+
+        {loud ? <div className="incident nr-banner">{loud}</div> : null}
+        {error && !cashOpen ? <p className="error nr-banner">{error}</p> : null}
+      </div>
 
       <div className="nr-checkout">
         <div className="nr-totals">

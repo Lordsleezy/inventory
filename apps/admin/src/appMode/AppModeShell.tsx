@@ -144,9 +144,11 @@ export function AppModeShell({
     setItemSku(null);
     setMorePage(null);
     setChannel(null);
+    // Remount inventory when returning to it so a stuck/empty list can't linger after Register.
+    if (next === 'inventory') setInvKey((n) => n + 1);
     requestAnimationFrame(() => {
       const el = document.querySelector(`.app-tab-panel[data-tab="${next}"]`) as HTMLElement | null;
-      if (el) el.scrollTop = scrollPos.current[next] || 0;
+      if (el) el.scrollTop = next === 'inventory' ? 0 : (scrollPos.current[next] || 0);
     });
   }
 
