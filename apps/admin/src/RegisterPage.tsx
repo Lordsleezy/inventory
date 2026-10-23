@@ -57,7 +57,8 @@ const sum = (values: number[]) => values.reduce((a, b) => a + b, 0);
 const lineExtendedPrice = (line: CartLine) => line.priceCents * (line.qty || 1);
 const EMPLOYEE_CODES: Record<string, string> = { '0000': 'Paul', '1111': 'Jacob' };
 
-function RegisterInner({ staffSession, onNeedFullReload }: Props) {
+function RegisterInner({ staffSession, onNeedFullReload, variant = 'desktop' }: Props) {
+  const app = variant === 'app';
   const { lines, note, setNote, ticketId, addUnit, removeSku, updateLine, setQty, clear } = useCart();
   const isAdmin = staffSession.role === 'owner' || staffSession.role === 'manager';
   const manualKey = `floor_manual_${staffSession.storeId}_${staffSession.userId}`;
@@ -456,7 +457,7 @@ function RegisterInner({ staffSession, onNeedFullReload }: Props) {
         };
         localStorage.setItem(manualKey, JSON.stringify(approved));
         setManual(approved);
-        setError('Approved. Click Card paid ΓÇö complete sale again. Do not charge again.');
+        setError('Approved. Click Card paid — complete sale again. Do not charge again.');
       } else {
         await startPay(pendingAction ?? 'cash', { [pinSku]: id });
       }
@@ -485,7 +486,7 @@ function RegisterInner({ staffSession, onNeedFullReload }: Props) {
       void queryAvailableUnits(term, 1)
         .then(rows => {
           if (rows[0]) addFromSearch(rows[0]);
-          else setError(`No available unit for ΓÇ£${term}ΓÇ¥.`);
+          else setError(`No available unit for “${term}”.`);
         })
         .catch(err => setError(authErrorMessage(err)));
     } else if (e.key === 'Escape') {
@@ -496,7 +497,7 @@ function RegisterInner({ staffSession, onNeedFullReload }: Props) {
   function pushDigit(d: string) {
     setCashDigits(prev => {
       if (d === 'C') return '';
-      if (d === 'Γî½') return prev.slice(0, -1);
+      if (d === '⌫') return prev.slice(0, -1);
       if (prev.length >= 8) return prev;
       return prev + d;
     });
@@ -522,7 +523,7 @@ function RegisterInner({ staffSession, onNeedFullReload }: Props) {
       return;
     }
     if (splitCash >= total) {
-      setError('Cash covers the full total ΓÇö use Cash instead.');
+      setError('Cash covers the full total — use Cash instead.');
       return;
     }
     setSplitOpen(false);
@@ -568,14 +569,14 @@ function RegisterInner({ staffSession, onNeedFullReload }: Props) {
           <div>
             <div className="eyebrow">REGISTER</div>
             <h1>Sale complete</h1>
-            <p>Ticket {summary.ticket_id.slice(0, 8)}ΓÇª</p>
+            <p>Ticket {summary.ticket_id.slice(0, 8)}…</p>
           </div>
         </header>
         <section className="panel register-done">
           {summary.lines.map(l => (
             <div className="summary-row" key={l.sale_id}>
               <span>
-                <strong>{l.receipt_no} ┬╖ {l.sku}</strong>
+                <strong>{l.receipt_no} · {l.sku}</strong>
                 <div className="muted">{receipt.lines.find(x => x.sku === l.sku)?.title || 'Item'}</div>
               </span>
               <span>{formatCentsTotal(l.price_cents + l.tax_cents)}</span>
@@ -584,10 +585,10 @@ function RegisterInner({ staffSession, onNeedFullReload }: Props) {
           <div className="register-done-totals">
             <div className="summary-row"><span>Subtotal</span><span>{formatCentsTotal(summary.subtotal_cents)}</span></div>
             {summary.discount_cents ? (
-              <div className="summary-row"><span>Discount</span><span>ΓêÆ{formatCentsTotal(summary.discount_cents)}</span></div>
+              <div className="summary-row"><span>Discount</span><span>−{formatCentsTotal(summary.discount_cents)}</span></div>
             ) : null}
             {summary.signup_discount_cents ? (
-              <div className="summary-row muted"><span>New-customer discount</span><span>ΓêÆ{formatCentsTotal(summary.signup_discount_cents)}</span></div>
+              <div className="summary-row muted"><span>New-customer discount</span><span>−{formatCentsTotal(summary.signup_discount_cents)}</span></div>
             ) : null}
             <div className="summary-row"><span>Tax</span><span>{formatCentsTotal(summary.tax_cents)}</span></div>
             {summary.card_fee_cents ? (
@@ -597,7 +598,7 @@ function RegisterInner({ staffSession, onNeedFullReload }: Props) {
             {summary.payment_method === 'split' ? (
               <div className="summary-row muted">
                 <span>Tender</span>
-                <span>cash {formatCentsTotal(summary.cash_cents ?? 0)} ┬╖ card {formatCentsTotal(summary.card_cents ?? 0)}</span>
+                <span>cash {formatCentsTotal(summary.cash_cents ?? 0)} · card {formatCentsTotal(summary.card_cents ?? 0)}</span>
               </div>
             ) : null}
             {changeCents != null ? (
@@ -606,7 +607,7 @@ function RegisterInner({ staffSession, onNeedFullReload }: Props) {
             {summary.points_earned ? (
               <div className="summary-row muted">
                 <span>Points earned</span>
-                <span>{formatPoints(summary.points_earned)}{summary.points_balance != null ? ` ┬╖ balance ${formatPoints(summary.points_balance)}` : ''}</span>
+                <span>{formatPoints(summary.points_earned)}{summary.points_balance != null ? ` · balance ${formatPoints(summary.points_balance)}` : ''}</span>
               </div>
             ) : null}
           </div>
@@ -627,7 +628,26 @@ function RegisterInner({ staffSession, onNeedFullReload }: Props) {
   }
 
   return (
-    <div className="admin-register compact">
+    <div className={`admin-register compact${app ? ' register-app' : ''}`}>
+      {app ? (
+        <>
+          <div className="app-nav">
+            <button type="button" className="danger" disabled={!lines.length || !idle} onClick={() => { if (window.confirm('Clear the cart?')) clear(); }}>Clear</button>
+            <div className="app-nav-title">Register</div>
+            <button type="button" disabled={!idle || cashOpen} onClick={() => searchRef.current?.focus()} aria-label="Add item">+ Item</button>
+          </div>
+          <div className="app-register-tiles">
+            <button type="button" className="app-tile" disabled={!idle || cashOpen} onClick={() => { setEmployeeDraft(''); setEmployeeError(''); setEmployeeOpen(true); }}>
+              <small>Cashier</small>
+              <strong>{soldByName || 'Tap to set'}</strong>
+            </button>
+            <button type="button" className="app-tile" disabled={!idle || cashOpen} onClick={() => setCustomerOpen(true)}>
+              <small>Customer</small>
+              <strong>{customer?.name || customer?.phone || 'Tap to set'}</strong>
+            </button>
+          </div>
+        </>
+      ) : (
       <header className="register-top">
         <div>
           <h1>Register</h1>
@@ -663,7 +683,7 @@ function RegisterInner({ staffSession, onNeedFullReload }: Props) {
             <div className="customer-chip">
               <span>
                 <strong>{customer.name || 'Customer'}</strong>
-                <small className="muted">{customer.phone} ┬╖ {formatPoints(customer.balance)} pts</small>
+                <small className="muted">{customer.phone} · {formatPoints(customer.balance)} pts</small>
               </span>
               <button type="button" className="secondary" disabled={!idle || cashOpen} onClick={() => setCustomerOpen(true)}>Edit</button>
               <button type="button" className="secondary" disabled={!idle || cashOpen} onClick={() => { setCustomer(null); setRedeemPoints(0); }}>Clear</button>
@@ -688,20 +708,21 @@ function RegisterInner({ staffSession, onNeedFullReload }: Props) {
             title="Register settings"
             onClick={() => setSettingsOpen(true)}
           >
-            ΓÜÖ
+            ⚙
           </button>
-          <button type="button" className="secondary" disabled={!idle} onClick={() => setNoteOpen(true)}>Note{note ? ' Γ£ô' : ''}</button>
+          <button type="button" className="secondary" disabled={!idle} onClick={() => setNoteOpen(true)}>Note{note ? ' ✓' : ''}</button>
           <button type="button" className="secondary" disabled={!idle} onClick={() => void refreshUnits().catch(err => setError(authErrorMessage(err)))}>Refresh</button>
           <button type="button" className="danger" disabled={!lines.length || !idle} onClick={() => { if (window.confirm('Clear the cart?')) clear(); }}>Clear</button>
         </div>
       </header>
+      )}
 
       <div className="cart-panel">
         <div className="register-search-wrap">
           <input
             ref={searchRef}
             className="search"
-            placeholder="Scan or search SKU, titleΓÇª"
+            placeholder="Scan or search SKU, title…"
             value={q}
             onChange={e => {
               setQ(e.target.value);
@@ -720,14 +741,14 @@ function RegisterInner({ staffSession, onNeedFullReload }: Props) {
           />
           {showHits && (hits.length || searchBusy) ? (
             <div className="search-results">
-              {searchBusy && !hits.length ? <div className="search-hit muted">SearchingΓÇª</div> : null}
+              {searchBusy && !hits.length ? <div className="search-hit muted">Searching…</div> : null}
               {hits.map(u => (
                 <button key={u.sku} type="button" className="search-hit" onClick={() => addFromSearch(u)}>
                   <span>
                     <strong>{u.sku}</strong>
                     <div>{[u.brand, u.model].filter(Boolean).join(' ') || u.title}</div>
                   </span>
-                  <span className="price">{formatCents(u.askCents) || 'ΓÇö'}</span>
+                  <span className="price">{formatCents(u.askCents) || '—'}</span>
                 </button>
               ))}
             </div>
@@ -754,7 +775,7 @@ function RegisterInner({ staffSession, onNeedFullReload }: Props) {
                 <td>
                   <div className="cart-item">
                     <strong>{line.title}</strong>
-                    <span className="muted">{line.sku}{line.condition ? ` ┬╖ ${line.condition}` : ''}{line.askCents != null ? ` ┬╖ ask ${formatCents(line.askCents)}` : ''}</span>
+                    <span className="muted">{line.sku}{line.condition ? ` · ${line.condition}` : ''}{line.askCents != null ? ` · ask ${formatCents(line.askCents)}` : ''}</span>
                     {priceChanged ? (
                       <label className="cart-override">
                         Override reason
@@ -762,7 +783,7 @@ function RegisterInner({ staffSession, onNeedFullReload }: Props) {
                           type="text"
                           value={line.overrideReason}
                           disabled={!idle || cashOpen}
-                          placeholder="Required when price Γëá ask"
+                          placeholder="Required when price ≠ ask"
                           onChange={e => updateLine(line.sku, { overrideReason: e.target.value })}
                         />
                       </label>
@@ -772,7 +793,7 @@ function RegisterInner({ staffSession, onNeedFullReload }: Props) {
                 <td>
                   {line.qtyOnHand > 1 ? (
                     <div className="qty-stepper">
-                      <button type="button" className="secondary" disabled={!idle || cashOpen || line.qty <= 1} onClick={() => setQty(line.sku, line.qty - 1)}>ΓêÆ</button>
+                      <button type="button" className="secondary" disabled={!idle || cashOpen || line.qty <= 1} onClick={() => setQty(line.sku, line.qty - 1)}>−</button>
                       <span>{line.qty}</span>
                       <button type="button" className="secondary" disabled={!idle || cashOpen || line.qty >= line.qtyOnHand} onClick={() => setQty(line.sku, line.qty + 1)}>+</button>
                     </div>
@@ -801,7 +822,7 @@ function RegisterInner({ staffSession, onNeedFullReload }: Props) {
                 </td>
                 <td>{formatCentsTotal(lineExtendedPrice({ ...line, priceCents: draftCents ?? line.priceCents }))}</td>
                 <td>
-                  <button type="button" className="secondary" disabled={!idle || cashOpen} onClick={() => removeSku(line.sku)} aria-label="Remove">Γ£ò</button>
+                  <button type="button" className="secondary" disabled={!idle || cashOpen} onClick={() => removeSku(line.sku)} aria-label="Remove">×</button>
                 </td>
               </tr>
               );
@@ -826,9 +847,9 @@ function RegisterInner({ staffSession, onNeedFullReload }: Props) {
             <div className="summary-row">
               <span>
                 Discount
-                <button type="button" className="icon-btn" title="Edit discount" disabled={!idle || cashOpen} onClick={() => { setDiscountDraft(String(discountPct || '')); setDiscountOpen(true); }}>Γ£Ä</button>
+                <button type="button" className="icon-btn" title="Edit discount" disabled={!idle || cashOpen} onClick={() => { setDiscountDraft(String(discountPct || '')); setDiscountOpen(true); }}>✎</button>
               </span>
-              <span>{discountCents ? `ΓêÆ${formatCentsTotal(discountCents)}` : formatCentsTotal(0)}</span>
+              <span>{discountCents ? `−${formatCentsTotal(discountCents)}` : formatCentsTotal(0)}</span>
             </div>
           )}
           <div className="summary-row">
@@ -845,13 +866,16 @@ function RegisterInner({ staffSession, onNeedFullReload }: Props) {
         </div>
 
         {!idle ? (
-          <p className="muted">{phase === 'quoting' ? 'Getting exact totalΓÇª' : 'Confirm paymentΓÇª'}</p>
+          <p className="muted">{phase === 'quoting' ? 'Getting exact total…' : 'Confirm payment…'}</p>
         ) : (
           <div className="pay-row">
-            <button type="button" className="cash" disabled={busy || !lines.length || cashOpen} onClick={() => void startPay('cash')}>CASH</button>
-            <button type="button" className="card" disabled={busy || !lines.length || cashOpen} onClick={() => void startPay('card')}>CARD</button>
+            <button type="button" className="cash" disabled={busy || !lines.length || cashOpen} onClick={() => void startPay('cash')}>{app ? 'Cash' : 'CASH'}</button>
+            <button type="button" className="card" disabled={busy || !lines.length || cashOpen} onClick={() => void startPay('card')}>
+              {app ? `Card ${formatCentsTotal(total + cardFeePreview)}` : 'CARD'}
+            </button>
             <button type="button" className="secondary" disabled={busy || !lines.length || cashOpen} onClick={() => void startPay('split')}>Split</button>
-            <button type="button" className="secondary" disabled={!idle || cashOpen} onClick={() => { setDiscountDraft(String(discountPct || '')); setDiscountOpen(true); }}>% Off</button>
+            <button type="button" className="secondary" disabled={!idle || cashOpen} onClick={() => { setDiscountDraft(String(discountPct || '')); setDiscountOpen(true); }}>{app ? 'Discount' : '% Off'}</button>
+            {app && <button type="button" className="secondary" disabled={!idle} onClick={() => setNoteOpen(true)}>Note</button>}
           </div>
         )}
 
@@ -986,7 +1010,7 @@ function RegisterInner({ staffSession, onNeedFullReload }: Props) {
             ) : null}
             {error ? <p className="error">{error}</p> : null}
             <div className="numpad">
-              {['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', 'Γî½'].map(d => (
+              {['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'].map(d => (
                 <button key={d} type="button" className="secondary" disabled={busy} onClick={() => pushDigit(d)}>{d}</button>
               ))}
             </div>
@@ -1000,7 +1024,7 @@ function RegisterInner({ staffSession, onNeedFullReload }: Props) {
                 disabled={busy || cashTendered == null || cashTendered < total}
                 onClick={() => void runCash({})}
               >
-                {busy ? 'RecordingΓÇª' : 'Complete sale'}
+                {busy ? 'Recording…' : 'Complete sale'}
               </button>
             </div>
           </div>
@@ -1012,12 +1036,12 @@ function RegisterInner({ staffSession, onNeedFullReload }: Props) {
           <div className="card grid">
             <h2>Charge in Square</h2>
             <strong className="register-charge">{formatCentsTotal(manual.quote.card_charge_cents)}</strong>
-            <p>Tax {formatCentsTotal(manual.quote.tax_cents)} ┬╖ Card fee {formatCentsTotal(manual.quote.card_fee_cents)} (included)</p>
+            <p>Tax {formatCentsTotal(manual.quote.tax_cents)} · Card fee {formatCentsTotal(manual.quote.card_fee_cents)} (included)</p>
             {manual.args.paymentMethod === 'split' ? <p>Collect {formatCentsTotal(manual.args.cashCents ?? 0)} cash in the drawer.</p> : null}
             <p>Charge the exact amount above in Square. Confirm only after Square says paid.</p>
             {error ? <p className="error">{error}</p> : null}
             <button type="button" className="primary" disabled={busy} onClick={() => void completeManualCard()}>
-              {busy ? 'Recording saleΓÇª' : 'Card paid ΓÇö complete sale'}
+              {busy ? 'Recording sale…' : 'Card paid — complete sale'}
             </button>
             <button
               type="button"
@@ -1044,7 +1068,7 @@ function RegisterInner({ staffSession, onNeedFullReload }: Props) {
             <h2>Ticket discount %</h2>
             <p className="muted">
               Clerk max {(rewards.clerkMaxDiscountBps / 100).toFixed(0)}%
-              {isAdmin ? ' (managers may exceed)' : ' ΓÇö above that needs manager PIN'}.
+              {isAdmin ? ' (managers may exceed)' : ' — above that needs manager PIN'}.
             </p>
             <label>Percent<input value={discountDraft} onChange={e => setDiscountDraft(e.target.value)} inputMode="decimal" autoFocus /></label>
             <div className="row">
@@ -1112,7 +1136,7 @@ function RegisterInner({ staffSession, onNeedFullReload }: Props) {
   );
 }
 
-type Props = { staffSession: StaffSession; onNeedFullReload?: () => void };
+type Props = { staffSession: StaffSession; onNeedFullReload?: () => void; variant?: 'desktop' | 'app' };
 
 class RegisterBoundary extends Component<{ children: ReactNode }, { error: string }> {
   state = { error: '' };
