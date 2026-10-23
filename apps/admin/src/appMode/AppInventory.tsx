@@ -87,7 +87,10 @@ export function AppInventory({ client, money, onOpen, scrollRef }: Props) {
           setList(next);
           setUrls((prev) => ({ ...prev, ...signed }));
         } catch (err) {
-          if (alive) setError(err instanceof Error ? err.message : String(err));
+          if (alive) {
+            setError(err instanceof Error ? err.message : String(err));
+            setList({ items: [], totals: { unit_count: 0 } });
+          }
         } finally {
           if (alive) setLoading(false);
         }
@@ -169,7 +172,7 @@ export function AppInventory({ client, money, onOpen, scrollRef }: Props) {
         ))}
       </div>
 
-      {error && <p className="app-footer-count" style={{ color: '#ff453a' }}>{error}</p>}
+      {error && <p className="app-inline-error">{error}</p>}
       {loading && !list && <p className="app-footer-count">Loading…</p>}
 
       <div className="app-group">
@@ -196,7 +199,9 @@ export function AppInventory({ client, money, onOpen, scrollRef }: Props) {
           );
         })}
         {!loading && list && list.items.length === 0 && (
-          <div className="app-row"><span className="app-row-text"><strong>No items</strong><small>Nothing matches this filter.</small></span></div>
+          <div className="app-empty-row">
+            {error ? 'Couldn’t load inventory — pull to retry or reopen the tab.' : 'Nothing matches this filter.'}
+          </div>
         )}
       </div>
 
