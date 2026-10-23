@@ -128,7 +128,7 @@ export function InstallGate({ onContinue }: Props) {
         )}
 
         <button type="button" className="install-gate-continue" onClick={continueBrowser}>
-          Continue in browser
+          Open Floor app
         </button>
       </div>
     </div>
