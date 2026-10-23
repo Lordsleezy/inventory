@@ -424,12 +424,16 @@ export function AppSettingsNative({
   staffSession: StaffSession | null;
   session: Session;
   settingsSlot: React.ReactNode;
-  onBack: () => void;
+  /** Omit when Settings is a root tab (associates). */
+  onBack?: () => void;
 }) {
+  void fullAccess;
   return (
     <div className="app-stack">
       <div className="app-nav">
-        <button type="button" onClick={onBack}>‹ More</button>
+        {onBack
+          ? <button type="button" onClick={onBack}>‹ More</button>
+          : <button type="button" style={{ visibility: 'hidden' }}>·</button>}
         <div className="app-nav-title">Settings</div>
         <button type="button" style={{ visibility: 'hidden' }}>·</button>
       </div>
