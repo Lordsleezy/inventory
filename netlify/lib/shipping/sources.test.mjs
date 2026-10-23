@@ -46,3 +46,10 @@ test("rate id encode/decode", () => {
   assert.equal(encodeRateId("veeqo", "abc"), "veeqo:abc");
   assert.deepEqual(decodeRateId("veeqo:abc:def"), { source: "veeqo", remoteId: "abc:def" });
 });
+
+test("Shippo quota/payment heuristic", async () => {
+  const { shippoQuotaOrPaymentError, shippoPlanNote } = await import("../shippo.mjs");
+  assert.equal(shippoQuotaOrPaymentError({ message: "shippo_402", detail: { detail: "payment required" } }), true);
+  assert.equal(shippoQuotaOrPaymentError({ message: "shippo_400", detail: { detail: "address invalid" } }), false);
+  assert.match(shippoPlanNote(), /30 labels/i);
+});

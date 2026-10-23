@@ -11,6 +11,8 @@ import {
   getRate as shippoGetRate,
   liveRates as shippoLiveRates,
   shippoMode,
+  shippoPlanNote,
+  shippoQuotaOrPaymentError,
 } from "../shippo.mjs";
 import { ownerEmails } from "../web-order-email.mjs";
 import {
@@ -100,14 +102,26 @@ async function shippoSourceQuote({ sb, storeId, order, box, shipFrom, deps }) {
       source: LABEL_SOURCES.shippo,
       raw: { shippo_rate_id: r.id.includes(":") ? decodeRateId(r.id).remoteId : r.id },
     }));
+    const messages = [...(quote.messages || [])];
+    if (rates.length) messages.push(shippoPlanNote());
     return {
       source: LABEL_SOURCES.shippo,
       online: true,
       rates,
-      messages: quote.messages || [],
+      messages,
     };
   } catch (err) {
-    return { source: LABEL_SOURCES.shippo, online: false, rates: [], messages: [err.message || "Shippo quote failed"] };
+    const quota = shippoQuotaOrPaymentError(err);
+    return {
+      source: LABEL_SOURCES.shippo,
+      online: false,
+      rates: [],
+      messages: [
+        quota
+          ? `Shippo payment/quota error — skipped; using other sources. ${err.message || ""}`.trim()
+          : err.message || "Shippo quote failed",
+      ],
+    };
   }
 }
 
@@ -276,7 +290,16 @@ export async function buyFromRate(sb, storeId, order, rateId, box, { labelFormat
     });
     if (tx.status !== "SUCCESS" || !tx.tracking_number) {
       const msg = (tx.messages || []).map((m) => m.text || String(m)).join("; ");
-      throw Object.assign(new Error(`Shippo label failed${msg ? `: ${msg}` : ""}`), { status: 502 });
+      {
+        const err = Object.assign(new Error(`Shippo label failed${msg ? `: ${msg}` : ""}`), {
+          status: 502,
+          detail: tx,
+        });
+        if (shippoQuotaOrPaymentError(err)) {
+          err.message = `${err.message}. Re-quote — Floor will skip Shippo and prefer Veeqo/other sources.`;
+        }
+        throw err;
+      }
     }
     return {
       source: LABEL_SOURCES.shippo,
@@ -316,7 +339,16 @@ export async function buySelectedRate(storeId, order, selectedRate, box, { label
     });
     if (tx.status !== "SUCCESS" || !tx.tracking_number) {
       const msg = (tx.messages || []).map((m) => m.text || String(m)).join("; ");
-      throw Object.assign(new Error(`Shippo label failed${msg ? `: ${msg}` : ""}`), { status: 502 });
+      {
+        const err = Object.assign(new Error(`Shippo label failed${msg ? `: ${msg}` : ""}`), {
+          status: 502,
+          detail: tx,
+        });
+        if (shippoQuotaOrPaymentError(err)) {
+          err.message = `${err.message}. Re-quote — Floor will skip Shippo and prefer Veeqo/other sources.`;
+        }
+        throw err;
+      }
     }
     return {
       source,

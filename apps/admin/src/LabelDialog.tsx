@@ -319,6 +319,11 @@ export function LabelDialog({ order, accessToken, money, onClose, onDone, appMod
               }).join(' · ')}
             </p>
           )}
+          {!!quote?.messages?.length && (
+            <p className={appMode ? 'app-footer-count' : 'hint'} style={{ opacity: 0.85 }}>
+              {quote.messages.filter((m) => /shippo|veeqo|quota|plan|billing|offline/i.test(m)).slice(0, 3).join(' · ')}
+            </p>
+          )}
 
           {quote && selected && (
             <>

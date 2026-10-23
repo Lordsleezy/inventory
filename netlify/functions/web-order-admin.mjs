@@ -3,7 +3,7 @@ import { json, corsHeaders } from "../lib/server.mjs";
 import { wrapHandler, asNetlifyFunction } from "../lib/floor-log.mjs";
 import { portalAdminFromEvent } from "../lib/portal-auth.mjs";
 import { buyLabelForOrder, labelQuote, voidLabel, labelStatus } from "../lib/web-label.mjs";
-import { shippoMode } from "../lib/shippo.mjs";
+import { shippoMode, shippoPlanNote } from "../lib/shippo.mjs";
 import { channelAllowsLabels, sourcesForChannel } from "../lib/shipping/sources.mjs";
 import { veeqoStatus } from "../lib/shipping/veeqo.mjs";
 import { tiktokShippingStatus } from "../lib/shipping/tiktok-shipping.mjs";
@@ -52,7 +52,12 @@ async function handle(event) {
     const channel = order?.channel || body.channel || "website";
     const wanted = sourcesForChannel(channel);
     const statusFor = {
-      shippo: () => ({ online: Boolean(shippoMode()), reason: shippoMode() ? null : "SHIPPO_API_KEY missing/invalid" }),
+      shippo: () => {
+        const mode = shippoMode();
+        return mode
+          ? { online: true, reason: null, plan_note: shippoPlanNote() }
+          : { online: false, reason: "SHIPPO_API_KEY missing/invalid" };
+      },
       veeqo: veeqoStatus,
       tiktok: tiktokShippingStatus,
       amazon: amazonShippingStatus,
