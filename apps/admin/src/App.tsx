@@ -21,7 +21,7 @@ import { AssociateSettings } from './AssociateSettings';
 import { type MainPage, type NavState, defaultNavState, parseNavFromLocation, writeNavToLocation } from './navigation';
 import { formatLabelWithPending, parseShipCostSource } from './shipCostSource';
 import { errText } from './errText';
-import { isStandaloneApp, shouldShowInstallGate } from './appMode/isAppMode';
+import { enableAppShell, isStandaloneApp, shouldShowInstallGate } from './appMode/isAppMode';
 import { InstallGate } from './appMode/InstallGate';
 import { AppModeShell } from './appMode/AppModeShell';
 import { NeedsAttentionPanel } from './NeedsAttentionPanel';
@@ -339,7 +339,11 @@ export function App() {
   });
   const [navGroup, setNavGroup] = useState<'reports' | 'inventory' | 'online' | null>(null);
   const [showInstallGate, setShowInstallGate] = useState(() => shouldShowInstallGate());
-  const standaloneApp = useMemo(() => isStandaloneApp(), []);
+  // Re-check on mount so store-phone Chrome / kiosk / persisted app mode win over the install coach.
+  const [standaloneApp, setStandaloneApp] = useState(() => isStandaloneApp());
+  useEffect(() => {
+    if (isStandaloneApp()) setStandaloneApp(true);
+  }, []);
   useEffect(() => {
     try { localStorage.setItem('floor_admin_nav_collapsed', navCollapsed ? '1' : '0'); } catch { /* ignore */ }
   }, [navCollapsed]);
@@ -619,7 +623,16 @@ export function App() {
   async function downloadReports(selected: Report[], all: boolean) { await run(async () => { const { downloadReportWorkbook } = await import('./reportExport'); await downloadReportWorkbook(selected, reportLines, personName, all); }); }
 
   if (showInstallGate && !standaloneApp) {
-    return <InstallGate onContinue={() => setShowInstallGate(false)} />;
+    return (
+      <InstallGate
+        onContinue={() => {
+          // Store phone / staff: use the app shell immediately — do not fall into desktop browser chrome.
+          enableAppShell();
+          setStandaloneApp(true);
+          setShowInstallGate(false);
+        }}
+      />
+    );
   }
 
   if (!session) return <main className="auth"><div className="login"><div className="brand">OPEN BOX <span>INDUSTRIES</span></div><h1>Floor Admin</h1><p>Email for admins, or clock number + PIN for register staff.</p><form onSubmit={e => { e.preventDefault(); void run(async () => { const attempts = staffSignInAttempts(email, password); if (!attempts.length) throw new Error('Enter a valid email, username, or clock number.'); let last: unknown = new Error('Could not sign in.'); for (const attempt of attempts) { const result = await sb.auth.signInWithPassword(attempt); if (!result.error) return; last = result.error; } throw last; }); }}><label>Email or clock number<input type="text" autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} required /></label><label>Password or PIN<input type="password" autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} required /></label><button disabled={busy}>Sign in</button></form>{error && <p className="error">{error}</p>}</div></main>;

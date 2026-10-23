@@ -1,10 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { isKioskShell, scannerInputMode } from './kiosk';
 import { floorFunctionUrl } from './floorApi';
 import { reportClientError } from './clientLog';
 import { categoryDefaultCostCents, priceFloorCents, suggestAskCents } from './scanPricing';
 import { errText } from './errText';
+
+/** iOS/Android PWA: prefer native capture over getUserMedia (more reliable in standalone). */
+function preferNativeCapture() {
+  if (typeof navigator === 'undefined') return false;
+  return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
+    || window.matchMedia('(display-mode: standalone)').matches
+    || (navigator as Navigator & { standalone?: boolean }).standalone === true;
+}
 
 /* ------------------------------------------------------------------------------------------------
  * Receive = scan-to-list.
@@ -23,6 +32,8 @@ type Props = {
   /** App-mode chrome: Cancel / Receive · SKU / Save nav, no instruction paragraphs. */
   appChrome?: boolean;
   initialManual?: boolean;
+  /** Prefill / enqueue a UPC from an earlier camera capture. */
+  initialUpc?: string | null;
   onAppCancel?: () => void;
 };
 
@@ -206,7 +217,7 @@ const FORMATS = ['upc_a', 'upc_e', 'ean_13', 'ean_8'];
 const detectorCtor = (): DetectorCtor | undefined =>
   (typeof window !== 'undefined' ? (window as unknown as { BarcodeDetector?: DetectorCtor }).BarcodeDetector : undefined);
 
-async function decodeFile(file: File): Promise<string | null> {
+export async function decodeBarcodeFile(file: File): Promise<string | null> {
   const Ctor = detectorCtor();
   if (!Ctor) return null;
   try {
@@ -216,10 +227,15 @@ async function decodeFile(file: File): Promise<string | null> {
   } catch { return null; }
 }
 
+async function decodeFile(file: File): Promise<string | null> {
+  return decodeBarcodeFile(file);
+}
+
 function CameraScanner({ onDetect, onFile, onClose }: {
   onDetect: (code: string) => void; onFile: (file: File) => void; onClose: () => void;
 }) {
   const video = useRef<HTMLVideoElement>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
   const done = useRef(false);
   const detect = useRef(onDetect);
   detect.current = onDetect;
@@ -232,11 +248,17 @@ function CameraScanner({ onDetect, onFile, onClose }: {
       try {
         const Ctor = detectorCtor();
         if (!Ctor) throw new Error('This browser cannot read barcodes from the camera.');
-        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } });
+        if (!navigator.mediaDevices?.getUserMedia) throw new Error('Camera API unavailable.');
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: 'environment' } },
+          audio: false,
+        });
         if (stopped) { stream.getTracks().forEach(t => t.stop()); return; }
         const el = video.current;
         if (!el) return;
         el.srcObject = stream;
+        el.setAttribute('playsinline', 'true');
+        el.muted = true;
         await el.play();
         const detector = new Ctor({ formats: FORMATS });
         timer = window.setInterval(() => {
@@ -245,27 +267,45 @@ function CameraScanner({ onDetect, onFile, onClose }: {
             if (raw && !done.current) { done.current = true; detect.current(raw); }
           }).catch(() => undefined);
         }, 250);
-      } catch (e) { setErr(errText(e) || 'Camera unavailable.'); }
+      } catch (e) { setErr(errText(e) || 'Camera unavailable. Use Take photo instead.'); }
     })();
     return () => { stopped = true; window.clearInterval(timer); stream?.getTracks().forEach(t => t.stop()); };
   }, []);
-  return <div className="receive-modal" role="dialog" aria-modal="true" aria-label="Scan barcode with camera">
-    <div className="receive-modal-card">
-      <h3>Scan barcode</h3>
-      {err ? <p className="error">{err}</p> : <video ref={video} className="receive-video" playsInline muted />}
-      <div className="actions">
-        <label className="secondary receive-file-btn">Take photo of barcode
-          <input type="file" accept="image/*" capture="environment" className="sr-only" onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) onFile(f); }} />
-        </label>
-        <button type="button" className="secondary" onClick={onClose}>Close</button>
+  // Portal to body — app-mode uses position:fixed + overflow which clips nested fixed modals on iOS.
+  return createPortal(
+    <div className="receive-modal receive-modal-portal" role="dialog" aria-modal="true" aria-label="Scan barcode with camera">
+      <div className="receive-modal-card">
+        <h3>Scan barcode</h3>
+        {err ? <p className="error">{err}</p> : <video ref={video} className="receive-video" playsInline muted />}
+        <div className="actions">
+          <input
+            ref={fileInput}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="sr-only"
+            aria-hidden
+            tabIndex={-1}
+            onChange={e => {
+              const f = e.target.files?.[0];
+              e.target.value = '';
+              if (f) onFile(f);
+            }}
+          />
+          <button type="button" className="secondary receive-file-btn" onClick={() => fileInput.current?.click()}>
+            Take photo of barcode
+          </button>
+          <button type="button" className="secondary" onClick={onClose}>Close</button>
+        </div>
       </div>
-    </div>
-  </div>;
+    </div>,
+    document.body,
+  );
 }
 
 /* ================================================================================================ */
 
-export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome, initialManual, onAppCancel }: Props) {
+export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome, initialManual, initialUpc, onAppCancel }: Props) {
   const [options, setOptions] = useState<Options | null>(null);
   const [manual, setManual] = useState(!!initialManual);
   const [draft, setDraft] = useState('');
@@ -289,6 +329,18 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
 
   const upcInput = useRef<HTMLInputElement>(null);
   const cameraFile = useRef<HTMLInputElement>(null);
+  const takePhotoFile = useRef<HTMLInputElement>(null);
+  const choosePhotoFile = useRef<HTMLInputElement>(null);
+  const consumedInitialUpc = useRef(false);
+
+  function openBarcodeCamera() {
+    // Phones / installed PWA: native capture is far more reliable than getUserMedia + BarcodeDetector.
+    if (preferNativeCapture() || appChrome || !detectorCtor()) {
+      cameraFile.current?.click();
+      return;
+    }
+    setCamera(true);
+  }
   const chain = useRef<Promise<void>>(Promise.resolve());
   const mounted = useRef(true);
   const askTouched = useRef(false);
@@ -386,6 +438,12 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     runLookup(id, upc);
     focusUpc();
   }
+
+  useEffect(() => {
+    if (!initialUpc || consumedInitialUpc.current || manual) return;
+    consumedInitialUpc.current = true;
+    enqueue(initialUpc);
+  }, [initialUpc, manual]);
 
   function retry(scan: Scan) {
     setQueue(q => q.map(s => (s.id === scan.id ? { ...s, status: 'loading', error: undefined } : s)));
@@ -818,7 +876,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         </label>}
         {!manual && !formOpen && <div className="actions">
           <button type="button" disabled={!draft.trim()} onClick={() => enqueue(draft)}>Look up</button>
-          <button type="button" className="secondary" onClick={() => { if (detectorCtor()) setCamera(true); else cameraFile.current?.click(); }}>Camera</button>
+          <button type="button" className="secondary" onClick={openBarcodeCamera}>Camera</button>
           <input ref={cameraFile} type="file" accept="image/*" capture="environment" className="sr-only" aria-label="Photo of barcode" onChange={e => {
             const f = e.target.files?.[0]; e.target.value = '';
             if (f) void decodeFile(f).then(code => { if (code) enqueue(code); else { setError('This browser cannot read barcodes from photos. Type the digits under the barcode instead.'); focusUpc(); } });
@@ -953,12 +1011,33 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         <div className={`unit-edit-wide${liveMissing.includes('photo') ? ' receive-need' : ''}`}>
           <span className="receive-label">Photo{liveMissing.includes('photo') ? ' (needed to list)' : (manual ? ' (optional)' : '')}</span>
           <div className="actions">
-            <label className="secondary receive-file-btn">Add photo
-              <input type="file" accept="image/*" capture="environment" className="sr-only" onChange={e => { addFiles(e.target.files); e.target.value = ''; }} />
-            </label>
-            <label className="secondary receive-file-btn">Choose photos
-              <input type="file" accept="image/*" multiple className="sr-only" onChange={e => { addFiles(e.target.files); e.target.value = ''; }} />
-            </label>
+            {/* Buttons + programmatic click — label+sr-only file inputs often do nothing in iOS PWA. */}
+            <input
+              ref={takePhotoFile}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              className="sr-only"
+              aria-hidden
+              tabIndex={-1}
+              onChange={e => { addFiles(e.target.files); e.target.value = ''; }}
+            />
+            <input
+              ref={choosePhotoFile}
+              type="file"
+              accept="image/*"
+              multiple
+              className="sr-only"
+              aria-hidden
+              tabIndex={-1}
+              onChange={e => { addFiles(e.target.files); e.target.value = ''; }}
+            />
+            <button type="button" className="secondary receive-file-btn" onClick={() => takePhotoFile.current?.click()}>
+              Take photo
+            </button>
+            <button type="button" className="secondary receive-file-btn" onClick={() => choosePhotoFile.current?.click()}>
+              Choose photos
+            </button>
           </div>
           {hasFiles && <div className="receive-photos">{files.map((f, i) => <figure key={`${f.name}-${i}`}>
             <img src={previews[i]} alt={`Photo ${i + 1}`} />

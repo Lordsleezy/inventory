@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { ReceivePanel } from '../ReceivePanel';
+import { decodeBarcodeFile, ReceivePanel } from '../ReceivePanel';
 
 type Props = {
   client: SupabaseClient;
@@ -13,9 +13,12 @@ type Props = {
 export function AppReceive({ client, storeId, accessToken, onSaved }: Props) {
   const [phase, setPhase] = useState<'home' | 'form'>('home');
   const [manual, setManual] = useState(false);
+  const [pendingUpc, setPendingUpc] = useState<string | null>(null);
+  const [cameraError, setCameraError] = useState('');
   const [scannerOk, setScannerOk] = useState(true);
   const [nextSku, setNextSku] = useState<string | null>(null);
   const [today, setToday] = useState<{ sku: string; title: string }[]>([]);
+  const homeCamera = useRef<HTMLInputElement>(null);
 
   function openForm(asManual: boolean) {
     setManual(asManual);
@@ -65,11 +68,16 @@ export function AppReceive({ client, storeId, accessToken, onSaved }: Props) {
           accessToken={accessToken}
           onSaved={() => {
             onSaved();
+            setPendingUpc(null);
             setPhase('home');
           }}
           appChrome
           initialManual={manual}
-          onAppCancel={() => setPhase('home')}
+          initialUpc={pendingUpc}
+          onAppCancel={() => {
+            setPendingUpc(null);
+            setPhase('home');
+          }}
         />
       </div>
     );
@@ -90,10 +98,37 @@ export function AppReceive({ client, storeId, accessToken, onSaved }: Props) {
         <span>Next SKU {nextSku || '…'}</span>
       </button>
 
+      <input
+        ref={homeCamera}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="sr-only"
+        aria-hidden
+        tabIndex={-1}
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = '';
+          if (!file) return;
+          setCameraError('');
+          void decodeBarcodeFile(file).then((code) => {
+            if (code) {
+              setPendingUpc(code);
+              openForm(false);
+            } else {
+              setCameraError('Couldn’t read a barcode from that photo. Try again or type the digits.');
+              openForm(false);
+            }
+          });
+        }}
+      />
+
       <div className="app-actions" style={{ paddingTop: 0 }}>
-        <button type="button" onClick={() => openForm(false)}>Use camera</button>
+        {/* Must open the file picker in this tap — deferred clicks are blocked on iOS. */}
+        <button type="button" onClick={() => homeCamera.current?.click()}>Use camera</button>
         <button type="button" onClick={() => openForm(true)}>No barcode</button>
       </div>
+      {cameraError && <p className="app-inline-error">{cameraError}</p>}
 
       <p className="app-section-label">Received today</p>
       <div className="app-group">

@@ -10,6 +10,7 @@
   "theme_color": "#000000",
   "lang": "en-US",
   "categories": ["business", "productivity"],
+  "permissions": ["camera"],
   "icons": [
     {
       "src": "/icons/icon-192.png",
