@@ -228,11 +228,12 @@ export function UnitEditDrawer({
       setForm((prev) => ({ ...prev, title }));
     }
     setBusy(true); setError(''); setMsg('');
+    // brand/model/title are NOT NULL — always send strings ('' ok), never null/undefined.
     const { data, error: e } = await client.rpc('portal_update_unit', {
       p_sku: sku,
-      p_upc: form.upc,
-      p_brand: form.brand,
-      p_model: form.model,
+      p_upc: form.upc.trim(),
+      p_brand: form.brand.trim(),
+      p_model: form.model.trim(),
       p_title: title,
       p_description: form.description,
       p_ask_cents: ask,
