@@ -89,42 +89,32 @@ export function AppMoreHome({
         if (alive) setSalesToday(Array.isArray(data) ? new Set((data as { ticket_id?: string }[]).map((r) => r.ticket_id)).size : 0);
       } catch { /* ignore */ }
 
+      // Prefetch channel boards in parallel (Floor-fast catalog) so opening eBay is warm.
       try {
         const token = session.access_token;
-        const res = await fetch(floorFunctionUrl('listing-manager'), {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-          body: JSON.stringify({ action: 'board_catalog', channel: 'ebay' }),
-        });
-        const json = await res.json();
-        if (alive && json?.listed) setEbayN(String(json.listed.length));
-        if (alive && json?.last_synced?.at) {
-          const mins = Math.max(0, Math.round((Date.now() - new Date(json.last_synced.at).getTime()) / 60000));
+        const headers = { Authorization: `Bearer ${token}`, 'content-type': 'application/json' };
+        const post = (body: Record<string, unknown>) =>
+          fetch(floorFunctionUrl('listing-manager'), {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(body),
+          }).then((r) => r.json().catch(() => ({})));
+        const [ebay, amazon, tiktok, meta] = await Promise.all([
+          post({ action: 'board_catalog', channel: 'ebay' }),
+          post({ action: 'board_catalog', channel: 'amazon' }),
+          post({ action: 'board_catalog', channel: 'tiktok' }),
+          post({ action: 'sync_meta' }),
+        ]);
+        if (!alive) return;
+        if (ebay?.listed) setEbayN(String(ebay.listed.length));
+        const syncedAt = ebay?.last_synced?.at || meta?.last_synced?.ebay?.at;
+        if (syncedAt) {
+          const mins = Math.max(0, Math.round((Date.now() - new Date(syncedAt).getTime()) / 60000));
           setSync(mins < 1 ? 'Just now' : `${mins} min ago`);
         }
-      } catch { /* ignore */ }
-
-      try {
-        const token = session.access_token;
-        const res = await fetch(floorFunctionUrl('listing-manager'), {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-          body: JSON.stringify({ action: 'board_catalog', channel: 'amazon' }),
-        });
-        const json = await res.json();
-        if (alive && json?.listed) setAmazonN(String(json.listed.length));
-        if (alive && json?.connected === false) setAmazonN('Connect');
-      } catch { /* ignore */ }
-
-      try {
-        const token = session.access_token;
-        const res = await fetch(floorFunctionUrl('listing-manager'), {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-          body: JSON.stringify({ action: 'board_catalog', channel: 'tiktok' }),
-        });
-        const json = await res.json();
-        if (alive) setTiktokN(json?.connected === false ? 'Connect' : String(json?.listed?.length ?? 0));
+        if (amazon?.connected === false) setAmazonN('Connect');
+        else if (amazon?.listed) setAmazonN(String(amazon.listed.length));
+        setTiktokN(tiktok?.connected === false ? 'Connect' : String(tiktok?.listed?.length ?? 0));
       } catch { /* ignore */ }
 
       void money;

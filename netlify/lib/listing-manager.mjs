@@ -145,7 +145,11 @@ async function pullAmazonSearchItems(storeId, sid) {
   return items;
 }
 
-export async function listAmazonListings(storeId = STORE_DEFAULT, { query = "", limit = LISTING_MANAGER_LIMIT } = {}) {
+export async function listAmazonListings(storeId = STORE_DEFAULT, {
+  query = "",
+  limit = LISTING_MANAGER_LIMIT,
+  live = true,
+} = {}) {
   const sid = sellerId();
   const sb = serviceClient();
   const { data: floorRows, error: floorError } = await sb
@@ -168,13 +172,15 @@ export async function listAmazonListings(storeId = STORE_DEFAULT, { query = "", 
 
   let apiItems = [];
   let apiError = null;
-  if (!sid) apiError = "AMAZON_SELLER_ID missing";
-  else {
-    try {
-      apiItems = await pullAmazonSearchItems(storeId, sid);
-    } catch (e) {
-      apiError = e instanceof Error ? e.message : String(e);
-      apiItems = [];
+  if (live) {
+    if (!sid) apiError = "AMAZON_SELLER_ID missing";
+    else {
+      try {
+        apiItems = await pullAmazonSearchItems(storeId, sid);
+      } catch (e) {
+        apiError = e instanceof Error ? e.message : String(e);
+        apiItems = [];
+      }
     }
   }
   const liveApi = apiItems.filter(amazonIsLive);
@@ -201,11 +207,15 @@ export async function listAmazonListings(storeId = STORE_DEFAULT, { query = "", 
     seen.add(sku);
     items.push(amazonRowFromFloor(sku, unitMap[sku], q, floor));
   }
-  const filtered = items.filter((row) => listingMatches(row, query));
+  const filtered = items
+    .filter((row) => listingMatches(row, query))
+    .map((row) => (live ? row : { ...row, drift: null }));
   const capped = filtered.slice(0, limit);
   const warnings = [];
   if (apiError) warnings.push(apiError);
-  const last_synced = await stampSync(storeId, "amazon", { count: filtered.length, live: liveApi.length, api_error: apiError });
+  const last_synced = live
+    ? await stampSync(storeId, "amazon", { count: filtered.length, live: liveApi.length, api_error: apiError })
+    : await readSync(storeId, "amazon");
   if (!capped.length && apiError && !(floorRows || []).length) {
     return { ok: false, error: apiError, items: [], warnings, last_synced };
   }
@@ -218,6 +228,7 @@ export async function listAmazonListings(storeId = STORE_DEFAULT, { query = "", 
     warnings,
     truncated: filtered.length > capped.length,
     last_synced,
+    source: live ? "live" : "floor",
   };
 }
 
@@ -342,20 +353,27 @@ async function pullEbayActive(storeId, account) {
   return { rows: [], source: "active_list" };
 }
 
-export async function listEbayListings(storeId = STORE_DEFAULT, { query = "", limit = LISTING_MANAGER_LIMIT } = {}) {
+export async function listEbayListings(storeId = STORE_DEFAULT, {
+  query = "",
+  limit = LISTING_MANAGER_LIMIT,
+  /** When false, skip live GetMyeBaySelling and serve Floor `listings` only (board cold path). */
+  live = true,
+} = {}) {
   const accounts = await listEbayAccounts(storeId).catch(() => []);
   const connected = (accounts || []).filter((a) => a.status === "connected");
   const sb = serviceClient();
-  const pulled = await Promise.all(
-    connected.map(async (account) => {
-      try {
-        const pulled = await pullEbayActive(storeId, account);
-        return { account, rows: pulled.rows, source: pulled.source, error: pulled.error || null };
-      } catch (e) {
-        return { account, rows: [], source: null, error: e instanceof Error ? e.message : String(e) };
-      }
-    }),
-  );
+  const pulled = live
+    ? await Promise.all(
+      connected.map(async (account) => {
+        try {
+          const bag = await pullEbayActive(storeId, account);
+          return { account, rows: bag.rows, source: bag.source, error: bag.error || null };
+        } catch (e) {
+          return { account, rows: [], source: null, error: e instanceof Error ? e.message : String(e) };
+        }
+      }),
+    )
+    : connected.map((account) => ({ account, rows: [], source: "floor", error: null }));
 
   const { data: floorRows, error: floorError } = await sb
     .from("listings")
@@ -366,20 +384,20 @@ export async function listEbayListings(storeId = STORE_DEFAULT, { query = "", li
     .limit(LISTING_MANAGER_LIMIT);
   if (floorError) return { ok: false, error: floorError.message, items: [] };
 
-  const live = [];
+  const liveRows = [];
   for (const bag of pulled) {
     for (const row of bag.rows) {
       const status = String(row.listingStatus || "Active").toLowerCase();
       if (status && status !== "active") continue;
-      live.push(ebayRowFromActive(bag.account, row, null));
+      liveRows.push(ebayRowFromActive(bag.account, row, null));
     }
   }
   const skuList = [
-    ...live.map((row) => row.sku),
+    ...liveRows.map((row) => row.sku),
     ...(floorRows || []).map((row) => row.sku),
   ];
   const unitMap = await unitsBySku(storeId, skuList);
-  const liveWithFloor = live.map((row) => {
+  const liveWithFloor = liveRows.map((row) => {
     const unit = row.sku ? unitMap[row.sku] : null;
     if (!unit) return row;
     return ebayRowFromActive(
@@ -398,7 +416,8 @@ export async function listEbayListings(storeId = STORE_DEFAULT, { query = "", li
     );
   });
   const accountById = Object.fromEntries(connected.map((account) => [account.id, account]));
-  const merged = mergeEbayListings(liveWithFloor, floorRows || [], unitMap, accountById);
+  const merged = mergeEbayListings(liveWithFloor, floorRows || [], unitMap, accountById)
+    .map((row) => (live ? row : { ...row, drift: null }));
   const filtered = merged.filter((row) => listingMatches(row, query));
   const capped = filtered.slice(0, limit);
   const warnings = pulled.filter((bag) => bag.error).map((bag) => `${bag.account.username || bag.account.role}: ${bag.error}`);
@@ -409,11 +428,13 @@ export async function listEbayListings(storeId = STORE_DEFAULT, { query = "", li
     live_count: bag.rows.filter((row) => String(row.listingStatus || "Active").toLowerCase() === "active" || !row.listingStatus).length,
     error: bag.error,
   }));
-  const last_synced = await stampSync(storeId, "ebay", {
-    count: filtered.length,
-    live: live.length,
-    accounts: accountSummary.map((row) => ({ username: row.username, live_count: row.live_count, error: row.error })),
-  });
+  const last_synced = live
+    ? await stampSync(storeId, "ebay", {
+      count: filtered.length,
+      live: liveRows.length,
+      accounts: accountSummary.map((row) => ({ username: row.username, live_count: row.live_count, error: row.error })),
+    })
+    : await readSync(storeId, "ebay");
   if (!capped.length && warnings.length && !(floorRows || []).length) {
     return { ok: false, error: warnings.join(" · "), items: [], accounts: accountSummary, warnings, last_synced };
   }
@@ -421,11 +442,12 @@ export async function listEbayListings(storeId = STORE_DEFAULT, { query = "", li
     ok: true,
     items: capped,
     total: filtered.length,
-    live_count: live.length,
+    live_count: liveRows.length,
     accounts: accountSummary,
     warnings,
     truncated: filtered.length > capped.length,
     last_synced,
+    source: live ? "live" : "floor",
   };
 }
 
@@ -643,8 +665,12 @@ async function pullTikTokProducts(storeId) {
   return products;
 }
 
-export async function listTikTokListings(storeId = STORE_DEFAULT, { query = "", limit = LISTING_MANAGER_LIMIT } = {}) {
-  await ensureTikTokTokenFresh(storeId).catch(() => undefined);
+export async function listTikTokListings(storeId = STORE_DEFAULT, {
+  query = "",
+  limit = LISTING_MANAGER_LIMIT,
+  live = true,
+} = {}) {
+  if (live) await ensureTikTokTokenFresh(storeId).catch(() => undefined);
   const status = await tiktokConnectionStatus(storeId);
   const sb = serviceClient();
   const { data: floorRows, error: floorError } = await sb
@@ -658,13 +684,15 @@ export async function listTikTokListings(storeId = STORE_DEFAULT, { query = "", 
 
   let products = [];
   let apiError = null;
-  if (!status.connected && !status.configured) {
-    apiError = "TikTok Shop not connected — set Partner app keys and Authorize in Marketplaces.";
-  } else {
-    try {
-      products = await pullTikTokProducts(storeId);
-    } catch (e) {
-      apiError = e instanceof Error ? e.message : String(e);
+  if (live) {
+    if (!status.connected && !status.configured) {
+      apiError = "TikTok Shop not connected — set Partner app keys and Authorize in Marketplaces.";
+    } else {
+      try {
+        products = await pullTikTokProducts(storeId);
+      } catch (e) {
+        apiError = e instanceof Error ? e.message : String(e);
+      }
     }
   }
   const liveProducts = products.filter((product) => tiktokIsLive(product?.status || product?.product_status || "ACTIVATE"));
@@ -697,7 +725,7 @@ export async function listTikTokListings(storeId = STORE_DEFAULT, { query = "", 
       status: floor.status,
       floor_state: unit?.state || null,
       floor_ask_cents: unit?.ask_cents ?? null,
-      drift: "On Floor as listed, not in the live TikTok catalog",
+      drift: live ? "On Floor as listed, not in the live TikTok catalog" : null,
       url: null,
       editable: Boolean(floor.listing_id),
       api: "floor",
@@ -706,7 +734,9 @@ export async function listTikTokListings(storeId = STORE_DEFAULT, { query = "", 
   const filtered = items.filter((row) => listingMatches(row, query));
   const capped = filtered.slice(0, limit);
   const warnings = apiError ? [apiError] : [];
-  const last_synced = await stampSync(storeId, "tiktok", { count: filtered.length, live: liveProducts.length, api_error: apiError });
+  const last_synced = live
+    ? await stampSync(storeId, "tiktok", { count: filtered.length, live: liveProducts.length, api_error: apiError })
+    : await readSync(storeId, "tiktok");
   if (!capped.length && apiError) {
     return {
       ok: true,
@@ -727,6 +757,7 @@ export async function listTikTokListings(storeId = STORE_DEFAULT, { query = "", 
     status,
     truncated: filtered.length > capped.length,
     last_synced,
+    source: live ? "live" : "floor",
   };
 }
 

@@ -271,7 +271,7 @@ export function MarketplaceBoard({ channel, accessToken, money }: Props) {
   const jobSeen = useRef<string>('');
 
   const loadCatalog = useCallback(async (opts?: { force?: boolean }) => {
-    setCatalogBusy(true);
+    setCatalogBusy((prev) => prev || !(cached?.listed?.length || cached?.not_listed?.length));
     try {
       const { status, json } = await call(accessToken, {
         action: 'board_catalog',
@@ -322,7 +322,7 @@ export function MarketplaceBoard({ channel, accessToken, money }: Props) {
     } finally {
       setCatalogBusy(false);
     }
-  }, [accessToken, channel]);
+  }, [accessToken, channel, cached]);
 
   const loadQuarter = useCallback(async (id: string) => {
     setQuarterBusy(true);
@@ -702,22 +702,22 @@ export function MarketplaceBoard({ channel, accessToken, money }: Props) {
       <div className="mboard-stats">
         <article className="mboard-card">
           <span>Gross sales</span>
-          <strong>{quarterBusy || !stats ? '…' : money(stats.gross_cents)}</strong>
+          <strong>{!stats ? (quarterBusy ? '…' : money(0)) : money(stats.gross_cents)}</strong>
           <small>{stats ? `${stats.orders} order${stats.orders === 1 ? '' : 's'} this quarter` : ' '}</small>
         </article>
         <article className="mboard-card neg">
           <span>{feeLabel}</span>
-          <strong>{quarterBusy || !stats ? '…' : stats.fee_cents ? `−${money(stats.fee_cents)}` : money(0)}</strong>
+          <strong>{!stats ? (quarterBusy ? '…' : money(0)) : stats.fee_cents ? `−${money(stats.fee_cents)}` : money(0)}</strong>
           <small>{stats && stats.gross_cents ? `${stats.fee_pct.toFixed(1)}% of gross` : 'marketplace fees'}</small>
         </article>
         <article className="mboard-card neg">
           <span>Shipping cost</span>
-          <strong>{quarterBusy || !stats ? '…' : stats.ship_cents ? `−${money(stats.ship_cents)}` : money(0)}</strong>
+          <strong>{!stats ? (quarterBusy ? '…' : money(0)) : stats.ship_cents ? `−${money(stats.ship_cents)}` : money(0)}</strong>
           <small>labels paid by you</small>
         </article>
         <article className="mboard-card pos">
           <span>Profit</span>
-          <strong>{quarterBusy || !stats ? '…' : money(stats.profit_cents)}</strong>
+          <strong>{!stats ? (quarterBusy ? '…' : money(0)) : money(stats.profit_cents)}</strong>
           <small>
             after fees, shipping & item cost
             {channel === 'ebay' && stats && stats.insertion_cents > 0 ? ` · includes ${money(stats.insertion_cents)} insertion & subscription` : ''}
