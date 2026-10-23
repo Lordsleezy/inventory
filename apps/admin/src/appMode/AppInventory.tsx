@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 type Filter = 'in_stock' | 'unfinished' | 'listed' | 'sold';
@@ -25,11 +25,55 @@ type Props = {
   scrollRef?: React.RefObject<HTMLDivElement | null>;
 };
 
+const CACHE_PREFIX = 'floor_inv_cache_v1_';
+const URL_CACHE_KEY = 'floor_inv_urls_v1';
+const PAGE = 40;
+/** Signed URLs are minted for 3600s; refresh a bit early. */
+const URL_TTL_MS = 50 * 60 * 1000;
+
 function thumb(path: string) {
   const parts = path.split('/');
   if (parts.length < 3 || parts[1] === 'archive' || parts[2] === 'web') return path;
   const stem = parts[parts.length - 1].replace(/\.[^.]+$/, '');
   return `${parts[0]}/${parts[1]}/web/400/${stem}.webp`;
+}
+
+function cacheKey(filter: Filter, query: string, offset: number) {
+  return `${CACHE_PREFIX}${filter}:${query.trim().toLowerCase()}:${offset}`;
+}
+
+function readCache(filter: Filter, query: string, offset: number): List | null {
+  try {
+    const raw = sessionStorage.getItem(cacheKey(filter, query, offset));
+    if (!raw) return null;
+    return JSON.parse(raw) as List;
+  } catch {
+    return null;
+  }
+}
+
+function writeCache(filter: Filter, query: string, offset: number, list: List) {
+  try {
+    sessionStorage.setItem(cacheKey(filter, query, offset), JSON.stringify(list));
+  } catch { /* quota */ }
+}
+
+function readUrlCache(): Record<string, string> {
+  try {
+    const raw = sessionStorage.getItem(URL_CACHE_KEY);
+    if (!raw) return {};
+    const pack = JSON.parse(raw) as { at: number; urls: Record<string, string> };
+    if (!pack?.at || Date.now() - pack.at > URL_TTL_MS) return {};
+    return pack.urls || {};
+  } catch {
+    return {};
+  }
+}
+
+function writeUrlCache(urls: Record<string, string>) {
+  try {
+    sessionStorage.setItem(URL_CACHE_KEY, JSON.stringify({ at: Date.now(), urls }));
+  } catch { /* quota */ }
 }
 
 function name(u: Row) {
@@ -47,24 +91,48 @@ export function AppInventory({ client, money, onOpen, scrollRef }: Props) {
   const [filter, setFilter] = useState<Filter>('in_stock');
   const [query, setQuery] = useState('');
   const [offset, setOffset] = useState(0);
-  const [list, setList] = useState<List | null>(null);
-  const [urls, setUrls] = useState<Record<string, string>>({});
+  const [list, setList] = useState<List | null>(() => readCache('in_stock', '', 0));
+  const [urls, setUrls] = useState<Record<string, string>>(() => readUrlCache());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [unfinishedCount, setUnfinishedCount] = useState<number | null>(null);
+  const urlsRef = useRef(urls);
+  urlsRef.current = urls;
 
-  async function sign(paths: string[]) {
-    const keys = [...new Set(paths.filter((p) => /^[0-9a-f-]{36}\//i.test(p)))];
+  async function signThumbs(paths: string[]) {
+    const keys = [...new Set(paths.filter((p) => /^[0-9a-f-]{36}\//i.test(p) && !urlsRef.current[p]))];
     if (!keys.length) return {} as Record<string, string>;
-    const { data, error: e } = await client.storage.from('unit-photos').createSignedUrls(keys, 3600);
-    if (e) throw e;
-    return Object.fromEntries((data || []).map((x, i) => [keys[i], x.signedUrl || '']));
+    // Batch in chunks of 50 — storage API is happier and phones stay responsive.
+    const out: Record<string, string> = {};
+    for (let i = 0; i < keys.length; i += 50) {
+      const chunk = keys.slice(i, i + 50);
+      const { data, error: e } = await client.storage.from('unit-photos').createSignedUrls(chunk, 3600);
+      if (e) throw e;
+      for (let j = 0; j < chunk.length; j++) {
+        const url = data?.[j]?.signedUrl;
+        if (url) out[chunk[j]] = url;
+      }
+    }
+    return out;
+  }
+
+  function mergeUrls(extra: Record<string, string>) {
+    if (!Object.keys(extra).length) return;
+    setUrls((prev) => {
+      const next = { ...prev, ...extra };
+      writeUrlCache(next);
+      return next;
+    });
   }
 
   useEffect(() => {
     let alive = true;
+    const cached = readCache(filter, query, offset);
+    if (cached) setList(cached);
+
     const t = setTimeout(() => {
-      setLoading(true);
+      // Only show the full-page spinner when we have nothing to paint.
+      if (!cached) setLoading(true);
       setError('');
       void (async () => {
         try {
@@ -76,32 +144,37 @@ export function AppInventory({ client, money, onOpen, scrollRef }: Props) {
             p_unfinished: unfinished,
             p_sort: 'sku',
             p_offset: offset,
-            p_limit: 40,
+            p_limit: PAGE,
           });
           if (e) throw e;
           const next = data as List;
-          const signed = await sign(
-            next.items.flatMap((x) => (x.photo_path ? [thumb(x.photo_path), x.photo_path] : [])),
-          ).catch(() => ({}));
           if (!alive) return;
           setList(next);
-          setUrls((prev) => ({ ...prev, ...signed }));
+          writeCache(filter, query, offset, next);
+          setLoading(false);
+
+          // Photos after paint — web/400 only (not full originals).
+          const thumbPaths = next.items
+            .map((x) => (x.photo_path ? thumb(x.photo_path) : null))
+            .filter((p): p is string => Boolean(p));
+          const signed = await signThumbs(thumbPaths).catch(() => ({}));
+          if (!alive) return;
+          mergeUrls(signed);
         } catch (err) {
-          if (alive) {
-            setError(err instanceof Error ? err.message : String(err));
-            setList({ items: [], totals: { unit_count: 0 } });
-          }
-        } finally {
-          if (alive) setLoading(false);
+          if (!alive) return;
+          setError(err instanceof Error ? err.message : String(err));
+          if (!cached) setList({ items: [], totals: { unit_count: 0 } });
+          setLoading(false);
         }
       })();
-    }, 180);
+    }, query.trim() ? 180 : 0);
     return () => {
       alive = false;
       clearTimeout(t);
     };
   }, [client, filter, query, offset]);
 
+  // Unfinished badge once — not after every list refresh.
   useEffect(() => {
     let alive = true;
     void client
@@ -119,7 +192,7 @@ export function AppInventory({ client, money, onOpen, scrollRef }: Props) {
     return () => {
       alive = false;
     };
-  }, [client, list]);
+  }, [client]);
 
   const total = list?.totals.unit_count ?? 0;
   const footer = useMemo(() => {
@@ -133,7 +206,8 @@ export function AppInventory({ client, money, onOpen, scrollRef }: Props) {
   function setFilterTab(next: Filter) {
     setFilter(next);
     setOffset(0);
-    setList(null);
+    const hit = readCache(next, query, 0);
+    setList(hit);
   }
 
   return (
@@ -174,15 +248,39 @@ export function AppInventory({ client, money, onOpen, scrollRef }: Props) {
 
       {error && <p className="app-inline-error">{error}</p>}
       {loading && !list && <p className="app-footer-count">Loading…</p>}
+      {loading && list ? <p className="app-footer-count">Updating…</p> : null}
 
       <div className="app-group">
         {(list?.items || []).map((u) => {
           const warn = needs(u);
-          const src = u.photo_path ? urls[thumb(u.photo_path)] || urls[u.photo_path] : '';
+          const thumbPath = u.photo_path ? thumb(u.photo_path) : '';
+          const src = thumbPath ? urls[thumbPath] || urls[u.photo_path!] || '' : '';
           return (
             <button type="button" className="app-row" key={u.sku} onClick={() => onOpen(u.sku)}>
               <span className="app-thumb">
-                {src ? <img src={src} alt="" loading="lazy" /> : '+'}
+                {src ? (
+                  <img
+                    src={src}
+                    alt=""
+                    loading="lazy"
+                    decoding="async"
+                    onError={(e) => {
+                      // Fall back to original once if the web/400 derivative is missing.
+                      if (!u.photo_path || e.currentTarget.dataset.fallback === '1') return;
+                      e.currentTarget.dataset.fallback = '1';
+                      const original = urls[u.photo_path];
+                      if (original) e.currentTarget.src = original;
+                      else {
+                        void client.storage.from('unit-photos').createSignedUrl(u.photo_path, 3600).then(({ data }) => {
+                          if (data?.signedUrl) {
+                            mergeUrls({ [u.photo_path!]: data.signedUrl });
+                            e.currentTarget.src = data.signedUrl;
+                          }
+                        });
+                      }
+                    }}
+                  />
+                ) : '+'}
               </span>
               <span className="app-row-text">
                 <strong>{name(u)}</strong>
@@ -200,16 +298,16 @@ export function AppInventory({ client, money, onOpen, scrollRef }: Props) {
         })}
         {!loading && list && list.items.length === 0 && (
           <div className="app-empty-row">
-            {error ? 'Couldn’t load inventory — pull to retry or reopen the tab.' : 'Nothing matches this filter.'}
+            {error ? 'Couldn’t load inventory — reopen the tab to retry.' : 'Nothing matches this filter.'}
           </div>
         )}
       </div>
 
       <div className="app-footer-count">{footer}</div>
-      {total > 40 && (
+      {total > PAGE && (
         <div className="app-actions" style={{ gridTemplateColumns: '1fr 1fr' }}>
-          <button type="button" disabled={offset === 0 || loading} onClick={() => setOffset(Math.max(0, offset - 40))}>Previous</button>
-          <button type="button" disabled={offset + 40 >= total || loading} onClick={() => setOffset(offset + 40)}>Next</button>
+          <button type="button" disabled={offset === 0 || loading} onClick={() => setOffset(Math.max(0, offset - PAGE))}>Previous</button>
+          <button type="button" disabled={offset + PAGE >= total || loading} onClick={() => setOffset(offset + PAGE)}>Next</button>
         </div>
       )}
     </div>
