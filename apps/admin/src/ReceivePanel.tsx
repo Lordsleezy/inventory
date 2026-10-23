@@ -131,11 +131,13 @@ type Source = {
   model?: string | null;
   description?: string | null;
   features?: string[];
+  aspects?: Record<string, string>;
   package?: Pkg;
   price_cents?: number | null;
   price_source?: string | null;
   price_as_of?: string | null;
   price_pending?: boolean;
+  price_error?: string | null;
   msrp_cents?: number | null;
   raw_error?: string | null;
 };
@@ -148,12 +150,41 @@ type Lookup = {
   merged?: {
     title?: string | null; brand?: string | null; model?: string | null; description?: string | null;
     category?: string | null;
-    features?: string[]; package?: Pkg; asin?: string | null; msrp_cents?: number | null;
+    features?: string[]; aspects?: Record<string, string>; package?: Pkg; asin?: string | null; msrp_cents?: number | null;
     retail_cents?: number | null; retail_source?: string | null; retail_as_of?: string | null;
     disagreements?: Disagreement[]; never_list_reason?: string | null;
+    not_found?: boolean;
   };
-  fieldCoverage?: { package?: string | null };
+  fieldCoverage?: { package?: string | null; price?: string | null };
 };
+
+/** "Flavor: Berry · Item Form: Gummy" from Amazon catalog aspects. */
+function formatAspectsLine(aspects?: Record<string, string> | null): string {
+  if (!aspects) return '';
+  return Object.entries(aspects)
+    .filter(([, v]) => typeof v === 'string' && v.trim())
+    .map(([k, v]) => `${k}: ${v.trim()}`)
+    .join(' · ');
+}
+
+function catalogMissMessage(r?: Lookup): string | null {
+  if (!r) return null;
+  const m = r.merged;
+  const hasCatalog = Boolean(text(m?.title) || text(m?.brand) || text(m?.model) || text(m?.asin));
+  if (hasCatalog) return null;
+  const amazonErr = r.amazon?.raw_error || '';
+  const upcErr = r.upcitemdb?.raw_error || '';
+  if (/rate.?limit/i.test(upcErr) && !r.amazon?.found) {
+    return 'No Amazon match, and UPCitemdb is rate-limited. Retry in a minute or fill the fields by hand.';
+  }
+  if (amazonErr && !r.amazon?.found && !r.upcitemdb?.found) {
+    return `Lookup sources failed (${amazonErr.slice(0, 80)}${upcErr ? `; ${upcErr.slice(0, 60)}` : ''}). Fill by hand or retry.`;
+  }
+  if (m?.not_found || (!r.amazon?.found && !r.upcitemdb?.found)) {
+    return 'No match in Amazon or UPCitemdb for this UPC — fill the fields by hand, or retry.';
+  }
+  return 'Lookup returned no title/brand — fill the fields by hand, or retry.';
+}
 
   type Form = {
   brand: string; unbranded: boolean; noUpc: boolean; model: string; title: string; category: string; description: string;
@@ -570,12 +601,14 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       title: m?.title, brand: m?.brand, model: m?.model, category: m?.category,
     });
     const suggested = suggestAskCents(retailNow?.cents ?? null, floorSuggest);
+    const aspectsLine = formatAspectsLine(m?.aspects);
     const initial: Form = {
       ...blank,
       upc: current.upc,
       brand: text(m?.brand),
       unbranded: false,
-      model: text(m?.model),
+      // Prefer real model #; else Amazon item specifics (flavor / form / size…).
+      model: text(m?.model) || aspectsLine,
       title: text(m?.title),
       category: text(m?.category),
       // description falls back to the real feature bullets from the lookup; never invented text
@@ -588,6 +621,13 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     };
     askTouched.current = Boolean(current.seed && 'ask' in current.seed);
     setForm(initial);
+    const miss = current.status === 'ready' || current.status === 'error'
+      ? (current.status === 'error' ? null : catalogMissMessage(r))
+      : null;
+    if (miss) setWarning(miss);
+    else if (A?.price_pending && !retailNow) setWarning('Amazon catalog found, but pricing was rate-limited — enter price by hand or retry for a suggested retail.');
+    else if (!retailNow && (r?.amazon?.found || r?.upcitemdb?.found)) setWarning('No retail price from Amazon/UPCitemdb — enter price by hand.');
+    else setWarning('');
     photoSessionKey.current = current.id;
     setFiles([]);
     setDialog(null);
@@ -835,6 +875,10 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       put('retail_source', retail?.source);
       put('retail_as_of', retail?.asOf);
       put('features', (m?.features || []).map(f => f.trim()).filter(Boolean));
+      if (m?.aspects && Object.keys(m.aspects).length) {
+        put('amazon_aspects', m.aspects);
+        put('ebay_aspects', { ...m.aspects });
+      }
       if (parsed.dims.some(pos)) put('package_source', packageSource(parsed));
       if (form.costEstimate || parsed.cost == null) {
         put('cost_estimate', true);
@@ -845,7 +889,10 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       put('upc', form.upc.trim());
     }
     if (form.noUpc) {
-      put('ebay_aspects', { UPC: UPC_NOT_APPLICABLE });
+      const existing = (specs.ebay_aspects && typeof specs.ebay_aspects === 'object')
+        ? (specs.ebay_aspects as Record<string, unknown>)
+        : {};
+      put('ebay_aspects', { ...existing, UPC: UPC_NOT_APPLICABLE });
       put('upc', UPC_NOT_APPLICABLE);
     }
     if (readyAmazonTiktok) put('ready_amazon_tiktok', true);
@@ -983,6 +1030,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   const hasFiles = files.length > 0;
   const needNoteForScratch = form.condition === SCRATCH;
   const holdReady = reason !== 'other' || reasonNote.trim().length > 0;
+  const catalogMiss = !manual && current?.status === 'ready' ? catalogMissMessage(result) : null;
 
   return <section className={`panel receive-panel${appChrome ? ' receive-app' : ''}`}>
     {appChrome && (
@@ -1065,12 +1113,21 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         <button type="button" onClick={() => retry(current)}>Retry</button>
       </div>}
 
+      {catalogMiss && current && <div className="alert" role="alert">
+        <span>{catalogMiss}</span>
+        <button type="button" onClick={() => retry(current)}>Retry lookup</button>
+      </div>}
+
       {!manual && merged?.never_list_reason && <p className="hint">Amazon will not list this: {merged.never_list_reason}</p>}
 
       <div className="unit-edit-grid">
         <label className={liveMissing.includes('price') ? 'receive-need' : undefined}>
-          Price{liveMissing.includes('price') ? ' (needed to list)' : (retail && !askTouched.current ? ' (suggested — edit if needed)' : '')}
-          <input inputMode="decimal" placeholder="24.99" value={form.ask} onChange={e => update('ask', e.target.value)} />
+          Price{liveMissing.includes('price')
+            ? ' (needed to list)'
+            : (retail && !askTouched.current
+              ? ` (suggested from ${retail.source}${retail.asOf ? ` · ${retail.asOf.slice(0, 10)}` : ''} — edit if needed)`
+              : ' (no source price — type it)')}
+          <input inputMode="decimal" placeholder="24.99" value={form.ask} onChange={e => update('ask', e.target.value)} autoComplete="off" />
         </label>
 
         <div className={`unit-edit-wide receive-cond${liveMissing.includes('condition') ? ' receive-need' : ''}`} role="radiogroup" aria-label="Condition">
@@ -1109,7 +1166,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
               setForm(p => ({ ...p, upc: v, noUpc: false }));
               setDups(null); setDupAck(false);
             }}
-            inputMode={scannerInputMode()}
+            /* Always allow the soft keyboard on the form UPC field (kiosk mode hides it only on the scan box). */
+            inputMode="numeric"
             autoComplete="off"
             placeholder="optional — or mark No UPC below"
           />
@@ -1141,11 +1199,14 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         </label>
 
         <label className={`unit-edit-wide${liveMissing.includes('item specifics') ? ' receive-need' : ''}`}>
-          Item specifics{liveMissing.includes('item specifics') ? ' (needed to list)' : ''}
+          Item specifics{liveMissing.includes('item specifics') ? ' (needed to list)' : (formatAspectsLine(merged?.aspects) && !text(merged?.model) ? ' (from UPC lookup)' : '')}
           <input
             value={form.model}
             onChange={e => update('model', e.target.value)}
-            placeholder="Model, size, color… (varies by category)"
+            placeholder="Model, flavor, size, color… (from UPC when available)"
+            autoComplete="off"
+            enterKeyHint="done"
+            autoCapitalize="sentences"
           />
         </label>
 

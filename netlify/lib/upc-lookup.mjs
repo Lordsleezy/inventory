@@ -147,6 +147,7 @@ function emptyAmazon(extra = {}) {
     model: null,
     description: null,
     features: [],
+    aspects: {},
     package: EMPTY_PKG(),
     item: EMPTY_PKG(),
     images: [],
@@ -183,6 +184,7 @@ async function amazonLookup(storeId, gtin, deps) {
     model: it.model,
     description: it.description,
     features: it.features || [],
+    aspects: it.aspects && typeof it.aspects === "object" ? it.aspects : {},
     package: it.package || EMPTY_PKG(),
     item: it.item || EMPTY_PKG(),
     images: it.images || [],
@@ -314,6 +316,12 @@ export function mergeLookup(amazon, upc) {
     }
   }
 
+  const aspects = A?.aspects && typeof A.aspects === "object" && Object.keys(A.aspects).length
+    ? A.aspects
+    : U?.aspects && typeof U.aspects === "object" && Object.keys(U.aspects).length
+      ? U.aspects
+      : {};
+
   return {
     merged: {
       title,
@@ -321,6 +329,7 @@ export function mergeLookup(amazon, upc) {
       model,
       description,
       features: A?.features || [],
+      aspects,
       package: pkg,
       images,
       category,
@@ -330,6 +339,8 @@ export function mergeLookup(amazon, upc) {
       retail_source,
       retail_as_of,
       disagreements,
+      // True when neither source returned a usable catalog hit.
+      not_found: !A && !U,
     },
     fieldCoverage: {
       title: titleSrc,
@@ -340,6 +351,7 @@ export function mergeLookup(amazon, upc) {
       package: pkgSrc,
       images: imagesSrc,
       asin: asinSrc,
+      aspects: Object.keys(aspects).length ? (A?.aspects && Object.keys(A.aspects).length ? "amazon" : "upcitemdb") : null,
     },
   };
 }

@@ -10,7 +10,9 @@ html.app-mode body {
 }
 
 html.app-mode body {
-  overflow: hidden;
+  /* overflow:auto (not hidden) — iOS PWAs often show the accessory bar but no keyboard
+     when the document root cannot scroll. Scrolling still happens inside .app-tab-panel. */
+  overflow: auto;
   position: fixed;
   inset: 0;
   width: 100%;
@@ -900,6 +902,30 @@ html.app-mode .receive-app .unit-edit-grid,
 html.app-mode .receive-app .receive-photos,
 html.app-mode .receive-app .actions { margin-left: 16px; margin-right: 16px; }
 html.app-mode .receive-app-nav { position: sticky; top: 0; z-index: 5; background: #000; }
+/* Labels are 13px; inputs use font:inherit — bump to ≥16px so iOS shows the soft keyboard. */
+html.app-mode .receive-app .unit-edit-grid input,
+html.app-mode .receive-app .unit-edit-grid select,
+html.app-mode .receive-app .unit-edit-grid textarea,
+html.app-mode .receive-app .receive-upc input {
+  font-size: 16px !important;
+  line-height: 1.3;
+  color: #fff;
+  background: #1c1c1e;
+  border: 1px solid #3a3a3c;
+  border-radius: 10px;
+  -webkit-user-select: text;
+  user-select: text;
+}
+html.app-mode .receive-app .unit-edit-grid label,
+html.app-mode .receive-app .receive-label {
+  color: #aeaeb2;
+  font-size: 13px;
+}
+html.app-mode input,
+html.app-mode textarea,
+html.app-mode select {
+  font-size: max(16px, 1em);
+}
 
 /* Register app — native iOS cart / pay sheets */
 html.app-mode .app-tab-panel.app-register {
