@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { lookupUpc, mergeLookup, parseUpcitemdbDimension, parseUpcitemdbWeight, upcitemdbLookup } from "./upc-lookup.mjs";
-import { parseCatalogItem, pickLargestImages } from "./amazon.mjs";
+import { extractCatalogAspects, formatAspectsLine, parseCatalogItem, pickLargestImages } from "./amazon.mjs";
 
 const catalogItem = {
   asin: "B0TESTASIN",
@@ -9,6 +9,9 @@ const catalogItem = {
   attributes: {
     bullet_point: [{ value: "Fast", marketplace_id: "ATVPDKIKX0DER" }, { value: "Light", marketplace_id: "ATVPDKIKX0DER" }],
     product_description: [{ value: "A widget.", marketplace_id: "ATVPDKIKX0DER" }],
+    flavor: [{ value: "Berry Blast", marketplace_id: "ATVPDKIKX0DER" }],
+    item_form: [{ value: "Gummy", marketplace_id: "ATVPDKIKX0DER" }],
+    product_benefit: [{ value: "Gut Health", marketplace_id: "ATVPDKIKX0DER" }],
   },
   dimensions: [
     {
@@ -34,10 +37,24 @@ test("parseCatalogItem converts units and picks largest images", () => {
   assert.equal(p.title, "Acme Widget Pro");
   assert.equal(p.model, "WP-100");
   assert.deepEqual(p.features, ["Fast", "Light"]);
+  assert.deepEqual(p.aspects, { Flavor: "Berry Blast", "Item Form": "Gummy", "Product Benefit": "Gut Health" });
+  assert.match(formatAspectsLine(p.aspects), /Flavor: Berry Blast/);
   assert.deepEqual(p.package, { length_in: 10, width_in: 5, height_in: 2, weight_lb: 1.5 });
   assert.deepEqual(p.images, ["big.jpg", "pt.jpg"]);
   assert.equal(p.product_type, "CONSUMER_ELECTRONICS");
   assert.deepEqual(pickLargestImages([]), []);
+});
+
+test("extractCatalogAspects ignores empty / unknown attributes", () => {
+  assert.deepEqual(extractCatalogAspects({}), {});
+  assert.deepEqual(extractCatalogAspects({ color: [{ value: "  Red  ", marketplace_id: "ATVPDKIKX0DER" }] }), { Color: "Red" });
+  assert.equal(formatAspectsLine({}), "");
+});
+
+test("merge marks not_found when both sources miss", () => {
+  const { merged } = mergeLookup({ found: false }, { found: false });
+  assert.equal(merged.not_found, true);
+  assert.equal(merged.title, null);
 });
 
 test("upcitemdb dimension/weight parsing refuses to guess", () => {

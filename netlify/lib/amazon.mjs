@@ -484,6 +484,72 @@ export function pickLargestImages(imageSets) {
   return [...byVariant.entries()].sort((a, b) => order(a[0]) - order(b[0])).map(([, v]) => v.link);
 }
 
+/**
+ * Amazon catalog attribute keys that map cleanly to listing "item specifics"
+ * (flavor, form, size, etc.). Values are taken only when Amazon returned them.
+ */
+const SPECIFIC_ATTR_KEYS = [
+  ["flavor", "Flavor"],
+  ["scent", "Scent"],
+  ["color", "Color"],
+  ["size", "Size"],
+  ["style", "Style"],
+  ["item_form", "Item Form"],
+  ["form_factor", "Item Form"],
+  ["material_type", "Material"],
+  ["material", "Material"],
+  ["special_feature", "Special Feature"],
+  ["special_features", "Special Feature"],
+  ["product_benefit", "Product Benefit"],
+  ["diet_type", "Diet Type"],
+  ["target_gender", "Target Gender"],
+  ["age_range_description", "Age Range"],
+  ["unit_count", "Unit Count"],
+  ["number_of_items", "Number of Items"],
+  ["pattern", "Pattern"],
+  ["capacity", "Capacity"],
+  ["wattage", "Wattage"],
+  ["voltage", "Voltage"],
+  ["fragrance", "Fragrance"],
+  ["hair_type", "Hair Type"],
+  ["skin_type", "Skin Type"],
+  ["occasion_type", "Occasion"],
+  ["sport_type", "Sport"],
+  ["department", "Department"],
+];
+
+/** Pull named specifics from catalog attributes. Never invents values. */
+export function extractCatalogAspects(attributes) {
+  const out = {};
+  if (!attributes || typeof attributes !== "object") return out;
+  for (const [key, label] of SPECIFIC_ATTR_KEYS) {
+    if (out[label]) continue;
+    const raw = attrValue(attributes, key);
+    if (raw == null) continue;
+    let value = null;
+    if (typeof raw.value === "string" && raw.value.trim()) value = raw.value.trim();
+    else if (typeof raw.value === "number" && Number.isFinite(raw.value)) {
+      const unit = typeof raw.unit === "string" && raw.unit.trim() ? ` ${raw.unit.trim()}` : "";
+      value = `${raw.value}${unit}`;
+    } else if (Array.isArray(raw.value)) {
+      value = raw.value.map((v) => (typeof v === "string" ? v.trim() : String(v ?? "").trim())).filter(Boolean).join(", ") || null;
+    } else if (raw.value && typeof raw.value === "object" && typeof raw.value.value === "string") {
+      value = raw.value.value.trim() || null;
+    }
+    if (value) out[label] = value;
+  }
+  return out;
+}
+
+/** "Flavor: Berry · Item Form: Gummy" — empty string when nothing real. */
+export function formatAspectsLine(aspects) {
+  if (!aspects || typeof aspects !== "object") return "";
+  return Object.entries(aspects)
+    .filter(([, v]) => typeof v === "string" && v.trim())
+    .map(([k, v]) => `${k}: ${String(v).trim()}`)
+    .join(" · ");
+}
+
 /** Parse one SP-API Catalog Items 2022-04-01 item into Floor's flat shape. Never invents fields. */
 export function parseCatalogItem(item) {
   if (!item?.asin) return null;
@@ -503,6 +569,7 @@ export function parseCatalogItem(item) {
   const productType = forMarketplace(item.productTypes)?.productType || null;
   const listPrice = attrValue(attrs, "list_price");
   const listAmount = Number(listPrice?.value ?? listPrice?.value_with_tax);
+  const aspects = extractCatalogAspects(attrs);
   return {
     asin: item.asin,
     title: summary.itemName || attrString(attrs, "item_name"),
@@ -512,6 +579,7 @@ export function parseCatalogItem(item) {
     manufacturer: summary.manufacturer || attrString(attrs, "manufacturer"),
     description: attrString(attrs, "product_description"),
     features,
+    aspects,
     package: pkg,
     item: itemDims,
     images: pickLargestImages(item.images),
