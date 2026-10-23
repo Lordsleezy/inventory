@@ -22,6 +22,8 @@ type Props = {
   tab: InventoryTab; onTab: (t: InventoryTab) => void;
   attentionSection: AttentionSection; onAttentionSection: (s: AttentionSection) => void;
   onCostChanged: () => void;
+  /** Portal admin / manager — show Delete in the unit editor. */
+  canDelete?: boolean;
 };
 
 const label = (s: string) => s === 'available' ? 'In stock' : s.replace(/_/g, ' ').replace(/^./, c => c.toUpperCase());
@@ -33,7 +35,10 @@ function thumb(path: string) {
   return `${parts[0]}/${parts[1]}/web/400/${stem}.webp`;
 }
 
-export function InventoryPage({ client, storeId, accessToken, money, stamp, tab, onTab, attentionSection, onAttentionSection, onCostChanged }: Props) {
+export function InventoryPage({
+  client, storeId, accessToken, money, stamp, tab, onTab, attentionSection, onAttentionSection, onCostChanged,
+  canDelete = false,
+}: Props) {
   const [refresh, setRefresh] = useState(0);
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState('in_stock');
@@ -141,6 +146,7 @@ export function InventoryPage({ client, storeId, accessToken, money, stamp, tab,
       photos={detail.photos}
       urls={urls}
       accessToken={accessToken}
+      canDelete={canDelete}
       onClose={() => setSelected(null)}
       onSaved={(unit) => {
         setDetail(d => d ? { ...d, unit } : d);
@@ -148,6 +154,12 @@ export function InventoryPage({ client, storeId, accessToken, money, stamp, tab,
         onCostChanged();
       }}
       onPhotosChanged={() => setDetailKey(k => k + 1)}
+      onDeleted={() => {
+        setSelected(null);
+        setDetail(null);
+        setRefresh(n => n + 1);
+        onCostChanged();
+      }}
     />}
     {selected && !detail && <div className="inventory-backdrop"><section className="inventory-detail"><p>Loading…</p></section></div>}
     </>}

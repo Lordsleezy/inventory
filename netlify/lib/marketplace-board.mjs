@@ -27,6 +27,9 @@ import { channelGaps } from "./listing-requirements.mjs";
 
 const JOB_KEY = "marketplace_board_job";
 const CHANNELS = new Set(["ebay", "amazon", "tiktok"]);
+/** Short in-memory TTL for board_catalog on a warm Netlify instance. */
+const CATALOG_TTL_MS = 50_000;
+const catalogCache = new Map();
 
 function channelOf(channel) {
   const ch = String(channel || "").toLowerCase();
@@ -53,7 +56,32 @@ function realPhoto(path) {
   return Boolean(value) && !value.includes("/official-") && !/ai[-_]?gen/i.test(value);
 }
 
-async function primaryPhotoUrls(storeId, skus) {
+/** Prefer `{store}/{sku}/web/400/{stem}.webp` for board thumbs (same as AppInventory). */
+export function web400Path(originalPath) {
+  const parts = String(originalPath || "").replace(/\\/g, "/").split("/").filter(Boolean);
+  if (parts.length < 3 || parts[1] === "archive" || parts[2] === "web") return null;
+  const file = parts[parts.length - 1] || "photo.jpg";
+  const stem = file.replace(/\.[^.]+$/, "") || "photo";
+  return `${parts[0]}/${parts[1]}/web/400/${stem}.webp`;
+}
+
+async function signStoragePaths(paths) {
+  const sb = serviceClient();
+  const urls = {};
+  const list = [...new Set((paths || []).map((p) => String(p || "").trim()).filter(Boolean))];
+  for (let i = 0; i < list.length; i += 100) {
+    const chunk = list.slice(i, i + 100);
+    const { data, error } = await sb.storage.from("unit-photos").createSignedUrls(chunk, 3600);
+    if (error) throw new Error(error.message);
+    for (const row of data || []) {
+      if (row?.path && row.signedUrl && !row.error) urls[row.path] = row.signedUrl;
+    }
+  }
+  return urls;
+}
+
+/** Map sku → primary photo storage path (no signing). */
+async function primaryPhotoPaths(storeId, skus) {
   const sb = serviceClient();
   const list = [...new Set((skus || []).map((sku) => String(sku || "").trim()).filter(Boolean))];
   const chosen = {};
@@ -71,18 +99,35 @@ async function primaryPhotoUrls(storeId, skus) {
       if (!prev || (row.is_primary && !prev.is_primary)) chosen[row.sku] = row;
     }
   }
-  const paths = Object.values(chosen).map((row) => row.path);
-  const urls = {};
-  for (let i = 0; i < paths.length; i += 100) {
-    const chunk = paths.slice(i, i + 100);
-    const { data, error } = await sb.storage.from("unit-photos").createSignedUrls(chunk, 3600);
-    if (error) throw new Error(error.message);
-    for (const row of data || []) {
-      if (row?.path && row.signedUrl) urls[row.path] = row.signedUrl;
-    }
+  const out = {};
+  for (const [sku, row] of Object.entries(chosen)) out[sku] = row.path;
+  return out;
+}
+
+async function primaryPhotoUrls(storeId, skus) {
+  const pathsBySku = await primaryPhotoPaths(storeId, skus);
+  const prefer = {};
+  const originals = [];
+  for (const [sku, path] of Object.entries(pathsBySku)) {
+    const thumb = web400Path(path);
+    if (thumb) prefer[sku] = thumb;
+    else originals.push(path);
+  }
+  const preferPaths = Object.values(prefer);
+  const urls = await signStoragePaths([...preferPaths, ...originals]);
+  const missingOriginals = [];
+  for (const [sku, path] of Object.entries(pathsBySku)) {
+    const thumb = prefer[sku];
+    if (thumb && !urls[thumb]) missingOriginals.push(path);
+  }
+  if (missingOriginals.length) {
+    Object.assign(urls, await signStoragePaths(missingOriginals));
   }
   const out = {};
-  for (const [sku, row] of Object.entries(chosen)) out[sku] = urls[row.path] || null;
+  for (const [sku, path] of Object.entries(pathsBySku)) {
+    const thumb = prefer[sku];
+    out[sku] = (thumb && urls[thumb]) || urls[path] || null;
+  }
   return out;
 }
 
@@ -232,7 +277,9 @@ async function loadNotListed(storeId, channel, listed) {
   const needPhotos = candidates
     .map((unit) => unit.sku)
     .filter((sku) => sku && !liveSkus.includes(sku));
-  const photoBySku = await primaryPhotoUrls(storeId, needPhotos);
+  // Existence only — signing every not-listed thumb was the bulk of board_catalog cost.
+  const photoPathBySku = await primaryPhotoPaths(storeId, needPhotos);
+  const photoBySku = {};
   const drafts = channel === "ebay"
     ? await mapIn(storeId, "ebay_drafts", "sku", needPhotos, "sku, aspect_defs, aspects, category_id, category_name")
     : {};
@@ -253,7 +300,7 @@ async function loadNotListed(storeId, channel, listed) {
       },
       {
         channel,
-        photoCount: photoBySku[unit.sku] ? 1 : 0,
+        photoCount: photoPathBySku[unit.sku] ? 1 : 0,
         aspectDefs: draft?.aspect_defs || null,
         amazonBlocked: blockedBySku[unit.sku] || null,
       },
@@ -283,8 +330,13 @@ function tiktokConnected(pack) {
   return !pack?.stub;
 }
 
-export async function loadCatalog(storeId, channel) {
+export async function loadCatalog(storeId, channel, { force = false } = {}) {
   const ch = channelOf(channel);
+  const cacheKey = `${storeId}:${ch}`;
+  if (!force) {
+    const hit = catalogCache.get(cacheKey);
+    if (hit && Date.now() - hit.at < CATALOG_TTL_MS) return hit.pack;
+  }
   const pack = ch === "ebay"
     ? await listEbayListings(storeId, { limit: 2000 })
     : ch === "amazon"
@@ -294,7 +346,7 @@ export async function loadCatalog(storeId, channel) {
   const connected = ch !== "tiktok" || tiktokConnected(pack);
   const listed = await enrichListed(storeId, ch, pack?.items || []);
   const notListed = connected ? await loadNotListed(storeId, ch, listed) : [];
-  return {
+  const result = {
     ok: true,
     channel: ch,
     connected,
@@ -308,6 +360,8 @@ export async function loadCatalog(storeId, channel) {
     listed,
     not_listed: notListed,
   };
+  catalogCache.set(cacheKey, { at: Date.now(), pack: result });
+  return result;
 }
 
 async function salesInQuarter(storeId, channel, bounds) {

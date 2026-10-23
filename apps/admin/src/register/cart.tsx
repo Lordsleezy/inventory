@@ -20,7 +20,7 @@ type CartValue = {
   setNote: (note: string) => void;
   ticketId: string;
   resetTicketId: () => void;
-  addUnit: (unit: RegisterUnit) => void;
+  addUnit: (unit: RegisterUnit, opts?: { priceCents?: number; overrideReason?: string }) => void;
   removeSku: (sku: string) => void;
   updateLine: (sku: string, patch: Partial<CartLine>) => void;
   setQty: (sku: string, qty: number) => void;
@@ -47,14 +47,23 @@ export function CartProvider({ children }: { children: ReactNode }) {
   const [note, setNote] = useState('');
   const [ticketId, setTicketId] = useState(newTicketId);
 
-  const addUnit = useCallback((unit: RegisterUnit) => {
+  const addUnit = useCallback((unit: RegisterUnit, opts?: { priceCents?: number; overrideReason?: string }) => {
     setLines(prev => {
       const existing = prev.find(l => l.sku === unit.sku);
       const maxQty = unit.qtyOnHand > 1 ? unit.qtyOnHand : 1;
+      const priceCents = opts?.priceCents ?? unit.askCents ?? 0;
+      const overrideReason = opts?.overrideReason
+        ?? (unit.askCents != null && priceCents !== unit.askCents ? 'Sale price' : '');
       if (existing) {
-        if (maxQty <= 1) return prev;
+        if (maxQty <= 1) {
+          return prev.map(l => (l.sku === unit.sku
+            ? { ...l, priceCents, overrideReason, approvalId: null }
+            : l));
+        }
         const nextQty = Math.min(maxQty, existing.qty + 1);
-        return prev.map(l => (l.sku === unit.sku ? { ...l, qty: nextQty } : l));
+        return prev.map(l => (l.sku === unit.sku
+          ? { ...l, qty: nextQty, priceCents, overrideReason, approvalId: null }
+          : l));
       }
       const title = [unit.brand, unit.model].filter(Boolean).join(' ') || unit.title;
       return [
@@ -64,8 +73,8 @@ export function CartProvider({ children }: { children: ReactNode }) {
           title,
           condition: unit.condition,
           askCents: unit.askCents,
-          priceCents: unit.askCents ?? 0,
-          overrideReason: '',
+          priceCents,
+          overrideReason,
           approvalId: null,
           qty: 1,
           qtyOnHand: maxQty,
