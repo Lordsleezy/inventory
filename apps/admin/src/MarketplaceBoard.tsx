@@ -91,6 +91,38 @@ const NAMES: Record<BoardChannel, { title: string; fee: string }> = {
 };
 const CONDITIONS = ['New (sealed)', 'Open box', 'Scratch & dent'];
 
+function boardCacheKey(channel: BoardChannel) {
+  return `floor_board_cache_${channel}`;
+}
+
+function readBoardCache(channel: BoardChannel): {
+  listed?: CatalogRow[];
+  not_listed?: CatalogRow[];
+  connected?: boolean;
+  connect_message?: string;
+  warnings?: string[];
+  accounts?: { username?: string; live_count?: number; error?: string | null }[];
+  last_synced?: string | null;
+} | null {
+  try {
+    const raw = sessionStorage.getItem(boardCacheKey(channel));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeBoardCache(channel: BoardChannel, pack: Record<string, unknown>) {
+  try {
+    sessionStorage.setItem(boardCacheKey(channel), JSON.stringify(pack));
+  } catch {
+    /* quota / private mode */
+  }
+}
+
 function clientQuarter(now = new Date()): Quarter {
   const parts = new Intl.DateTimeFormat('en-US', { timeZone: ZONE, year: 'numeric', month: 'numeric' }).formatToParts(now);
   const year = Number(parts.find((p) => p.type === 'year')?.value);
@@ -191,21 +223,22 @@ function downloadCsv(name: string, rows: string[][]) {
 
 export function MarketplaceBoard({ channel, accessToken, money }: Props) {
   const meta = NAMES[channel];
+  const cached = useMemo(() => readBoardCache(channel), [channel]);
   const [tab, setTab] = useState<Tab>('listed');
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(0);
   const [quarter, setQuarter] = useState(() => clientQuarter().id);
   const [quarters, setQuarters] = useState<Quarter[]>(() => [clientQuarter()]);
   const [stats, setStats] = useState<Stats | null>(null);
-  const [listed, setListed] = useState<CatalogRow[]>([]);
-  const [notListed, setNotListed] = useState<CatalogRow[]>([]);
+  const [listed, setListed] = useState<CatalogRow[]>(() => cached?.listed || []);
+  const [notListed, setNotListed] = useState<CatalogRow[]>(() => cached?.not_listed || []);
   const [sold, setSold] = useState<SoldRow[]>([]);
-  const [connected, setConnected] = useState(channel !== 'tiktok');
-  const [connectMessage, setConnectMessage] = useState('');
-  const [warnings, setWarnings] = useState<string[]>([]);
-  const [accounts, setAccounts] = useState<{ username?: string; live_count?: number; error?: string | null }[]>([]);
-  const [lastSynced, setLastSynced] = useState<string | null>(null);
-  const [catalogBusy, setCatalogBusy] = useState(true);
+  const [connected, setConnected] = useState(() => cached?.connected ?? channel !== 'tiktok');
+  const [connectMessage, setConnectMessage] = useState(() => cached?.connect_message || '');
+  const [warnings, setWarnings] = useState<string[]>(() => cached?.warnings || []);
+  const [accounts, setAccounts] = useState<{ username?: string; live_count?: number; error?: string | null }[]>(() => cached?.accounts || []);
+  const [lastSynced, setLastSynced] = useState<string | null>(() => cached?.last_synced || null);
+  const [catalogBusy, setCatalogBusy] = useState(() => !cached);
   const [quarterBusy, setQuarterBusy] = useState(true);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -237,10 +270,14 @@ export function MarketplaceBoard({ channel, accessToken, money }: Props) {
   const headRef = useRef<HTMLInputElement>(null);
   const jobSeen = useRef<string>('');
 
-  const loadCatalog = useCallback(async () => {
+  const loadCatalog = useCallback(async (opts?: { force?: boolean }) => {
     setCatalogBusy(true);
     try {
-      const { status, json } = await call(accessToken, { action: 'board_catalog', channel });
+      const { status, json } = await call(accessToken, {
+        action: 'board_catalog',
+        channel,
+        ...(opts?.force ? { force: true } : {}),
+      });
       const body = unwrap(status, json) as {
         listed?: CatalogRow[];
         not_listed?: CatalogRow[];
@@ -251,22 +288,37 @@ export function MarketplaceBoard({ channel, accessToken, money }: Props) {
         accounts?: { username?: string; live_count?: number; error?: string | null }[];
         last_synced?: { at?: string } | null;
       };
-      setListed(body.listed || []);
-      setNotListed(body.not_listed || []);
-      setConnected(body.connected !== false);
-      setConnectMessage(body.connect_message || '');
+      const nextListed = body.listed || [];
+      const nextNotListed = body.not_listed || [];
+      const nextConnected = body.connected !== false;
+      const nextMessage = body.connect_message || '';
+      setListed(nextListed);
+      setNotListed(nextNotListed);
+      setConnected(nextConnected);
+      setConnectMessage(nextMessage);
       const notes = body.connected === false ? [] : [...(body.warnings || [])];
       if (body.connected !== false && body.message && !notes.includes(body.message)) notes.push(body.message);
       for (const a of body.accounts || []) {
         if (a.error) notes.push(`${a.username || 'Account'}: ${shortError(a.error)}`);
       }
-      setWarnings([...new Set(notes.filter(Boolean).map((n) => shortError(n)))]);
-      setAccounts(body.accounts || []);
-      setLastSynced(body.last_synced?.at || null);
+      const nextWarnings = [...new Set(notes.filter(Boolean).map((n) => shortError(n)))];
+      const nextAccounts = body.accounts || [];
+      const nextSynced = body.last_synced?.at || null;
+      setWarnings(nextWarnings);
+      setAccounts(nextAccounts);
+      setLastSynced(nextSynced);
+      writeBoardCache(channel, {
+        listed: nextListed,
+        not_listed: nextNotListed,
+        connected: nextConnected,
+        connect_message: nextMessage,
+        warnings: nextWarnings,
+        accounts: nextAccounts,
+        last_synced: nextSynced,
+      });
     } catch (e) {
       setError(shortError(errText(e)));
-      setListed([]);
-      setNotListed([]);
+      // Keep any sessionStorage-painted or prior rows on refresh failure.
     } finally {
       setCatalogBusy(false);
     }
@@ -305,7 +357,7 @@ export function MarketplaceBoard({ channel, accessToken, money }: Props) {
         setNotice(next.progress?.message || 'Job finished');
         if (failed.length) setError(failed.map((row) => `${row.sku}: ${row.error || 'failed'}`).join(' · '));
         setSelected(new Set());
-        void loadCatalog();
+        void loadCatalog({ force: true });
         void loadQuarter(quarter);
       }
     }
@@ -509,7 +561,7 @@ export function MarketplaceBoard({ channel, accessToken, money }: Props) {
         setNotice('Saved on Floor. Push the row when you want it live on this marketplace.');
       }
       setEdit(null);
-      await loadCatalog();
+      await loadCatalog({ force: true });
     } catch (e) {
       setError(shortError(errText(e)));
     } finally {
@@ -579,7 +631,7 @@ export function MarketplaceBoard({ channel, accessToken, money }: Props) {
       if (body.needs_confirm) setNotice(body.message || 'Amazon preview is clean. Confirm the live create from the Amazon queue.');
       else setNotice(body.warning ? `Listed. ${body.warning}` : body.url ? `Listed — ${body.url}` : 'Listed.');
       setShowAdd(false);
-      await loadCatalog();
+      await loadCatalog({ force: true });
     } catch (e) {
       setError(shortError(errText(e)));
     } finally {
@@ -640,7 +692,7 @@ export function MarketplaceBoard({ channel, accessToken, money }: Props) {
             </select>
           </label>
           <div className="actions">
-            <button type="button" className="secondary" onClick={() => { setError(''); setNotice(''); void loadCatalog(); void loadQuarter(quarter); }}>Refresh</button>
+            <button type="button" className="secondary" onClick={() => { setError(''); setNotice(''); void loadCatalog({ force: true }); void loadQuarter(quarter); }}>Refresh</button>
             <button type="button" onClick={() => void openAdd()} disabled={!connected}>Add listing</button>
             {channel === 'ebay' && <button type="button" className="secondary" onClick={() => void openMigrate()}>Migrate legacy eBay</button>}
           </div>
@@ -777,7 +829,7 @@ export function MarketplaceBoard({ channel, accessToken, money }: Props) {
               return (
                 <div className={`mboard-row${catalog?.blocked ? ' is-blocked' : ''}`} key={row.key}>
                   <label className="mboard-check"><input type="checkbox" checked={selected.has(row.key)} onChange={() => toggleKey(row.key)} aria-label={`Select ${row.sku || row.title}`} /></label>
-                  <div className="mboard-photo">{row.photo_url ? <img src={row.photo_url} alt="" /> : <span>No photo</span>}</div>
+                  <div className="mboard-photo">{row.photo_url ? <img src={row.photo_url} alt="" loading="lazy" decoding="async" /> : <span>No photo</span>}</div>
                   <div className="mboard-item">
                     <strong>{row.title}</strong>
                     <small>
@@ -829,7 +881,7 @@ export function MarketplaceBoard({ channel, accessToken, money }: Props) {
             <h2>Edit {edit.sku}</h2>
             {error && <div className="alert" role="alert">{shortError(error)}</div>}
             <p className="hint">{edit.live ? 'Price is the Floor ask. A new ask reprices every live channel. Title, photos, and condition push only when you change them. On eBay, changing shipping switches the live business policy. Unknown shipping stays as it is.' : 'This unit is not live here. Save updates Floor. Push lists it once the required fields are filled.'}</p>
-            {editThumbs.length > 0 && <div className="mboard-thumbs">{editThumbs.slice(0, 8).map((url) => <img key={url} src={url} alt="" />)}</div>}
+            {editThumbs.length > 0 && <div className="mboard-thumbs">{editThumbs.slice(0, 8).map((url) => <img key={url} src={url} alt="" loading="lazy" decoding="async" />)}</div>}
             <label>Title<input value={editTitle} onChange={(e) => setEditTitle(e.target.value)} /></label>
             <label>Description<textarea rows={4} value={editDesc} onChange={(e) => setEditDesc(e.target.value)} /></label>
             <div className="mboard-edit-grid">

@@ -237,7 +237,7 @@ async function handleStaff(event) {
   }
 
   if (action === "board_catalog") {
-    return json(200, await loadCatalog(storeId, channel));
+    return json(200, await loadCatalog(storeId, channel, { force: Boolean(body.force) }));
   }
 
   if (action === "board_quarter") {

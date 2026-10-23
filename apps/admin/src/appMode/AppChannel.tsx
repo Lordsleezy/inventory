@@ -41,6 +41,40 @@ type Quarter = { id: string; label: string };
 const ZONE = 'America/Los_Angeles';
 const TITLES: Record<AppChannelId, string> = { ebay: 'eBay', amazon: 'Amazon', tiktok: 'TikTok' };
 
+function boardCacheKey(channel: AppChannelId) {
+  return `floor_board_cache_${channel}`;
+}
+
+function readBoardCache(channel: AppChannelId): {
+  listed?: CatalogRow[];
+  not_listed?: CatalogRow[];
+  connected?: boolean;
+  connect_message?: string;
+} | null {
+  try {
+    const raw = sessionStorage.getItem(boardCacheKey(channel));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeBoardCache(channel: AppChannelId, pack: {
+  listed: CatalogRow[];
+  not_listed: CatalogRow[];
+  connected: boolean;
+  connect_message: string;
+}) {
+  try {
+    sessionStorage.setItem(boardCacheKey(channel), JSON.stringify(pack));
+  } catch {
+    /* quota / private mode */
+  }
+}
+
 function clientQuarter(now = new Date()): Quarter {
   const parts = new Intl.DateTimeFormat('en-US', { timeZone: ZONE, year: 'numeric', month: 'numeric' }).formatToParts(now);
   const year = Number(parts.find((p) => p.type === 'year')?.value);
@@ -75,6 +109,7 @@ type Props = {
 };
 
 export function AppChannel({ channel, accessToken, money, onBack }: Props) {
+  const cached = useMemo(() => readBoardCache(channel), [channel]);
   const [tab, setTab] = useState<Tab>('listed');
   const [query, setQuery] = useState('');
   const [selecting, setSelecting] = useState(false);
@@ -82,44 +117,68 @@ export function AppChannel({ channel, accessToken, money, onBack }: Props) {
   const [quarter, setQuarter] = useState(() => clientQuarter().id);
   const [quarters, setQuarters] = useState<Quarter[]>(() => [clientQuarter()]);
   const [stats, setStats] = useState<Stats | null>(null);
-  const [listed, setListed] = useState<CatalogRow[]>([]);
-  const [notListed, setNotListed] = useState<CatalogRow[]>([]);
+  const [listed, setListed] = useState<CatalogRow[]>(() => cached?.listed || []);
+  const [notListed, setNotListed] = useState<CatalogRow[]>(() => cached?.not_listed || []);
   const [sold, setSold] = useState<SoldRow[]>([]);
-  const [connected, setConnected] = useState(channel !== 'tiktok');
-  const [connectMessage, setConnectMessage] = useState('');
+  const [connected, setConnected] = useState(() => cached?.connected ?? channel !== 'tiktok');
+  const [connectMessage, setConnectMessage] = useState(() => cached?.connect_message || '');
   const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [catalogBusy, setCatalogBusy] = useState(() => !cached);
+  const [quarterBusy, setQuarterBusy] = useState(true);
   const [pulling, setPulling] = useState(false);
 
-  const reload = useCallback(async () => {
-    setBusy(true);
+  const loadCatalog = useCallback(async (opts?: { force?: boolean }) => {
+    setCatalogBusy(true);
     setError('');
     try {
-      const [cat, q] = await Promise.all([
-        call(accessToken, { action: 'board_catalog', channel }),
-        call(accessToken, { action: 'board_quarter', channel, quarter }),
-      ]);
-      setListed(cat.listed || []);
-      setNotListed(cat.not_listed || []);
-      setConnected(cat.connected !== false);
-      setConnectMessage(cat.connect_message || '');
+      const cat = await call(accessToken, {
+        action: 'board_catalog',
+        channel,
+        ...(opts?.force ? { force: true } : {}),
+      });
+      const nextListed = cat.listed || [];
+      const nextNotListed = cat.not_listed || [];
+      const nextConnected = cat.connected !== false;
+      const nextMessage = cat.connect_message || '';
+      setListed(nextListed);
+      setNotListed(nextNotListed);
+      setConnected(nextConnected);
+      setConnectMessage(nextMessage);
+      writeBoardCache(channel, {
+        listed: nextListed,
+        not_listed: nextNotListed,
+        connected: nextConnected,
+        connect_message: nextMessage,
+      });
       const notes: string[] = [];
       for (const a of cat.accounts || []) {
         if (a?.error) notes.push(shortError(a.error));
       }
       if (notes.length) setError(notes[0]);
+    } catch (e) {
+      setError(shortError(errText(e)));
+    } finally {
+      setCatalogBusy(false);
+      setPulling(false);
+    }
+  }, [accessToken, channel]);
+
+  const loadQuarter = useCallback(async (id: string) => {
+    setQuarterBusy(true);
+    try {
+      const q = await call(accessToken, { action: 'board_quarter', channel, quarter: id });
       setStats(q.stats || null);
       setSold(q.sold || []);
       if (q.quarters?.length) setQuarters(q.quarters);
     } catch (e) {
       setError(shortError(errText(e)));
     } finally {
-      setBusy(false);
-      setPulling(false);
+      setQuarterBusy(false);
     }
-  }, [accessToken, channel, quarter]);
+  }, [accessToken, channel]);
 
-  useEffect(() => { void reload(); }, [reload]);
+  useEffect(() => { void loadCatalog(); }, [loadCatalog]);
+  useEffect(() => { void loadQuarter(quarter); }, [loadQuarter, quarter]);
 
   const source = tab === 'listed' ? listed : tab === 'not_listed' ? notListed : sold;
   const filtered = useMemo(() => {
@@ -138,12 +197,14 @@ export function AppChannel({ channel, accessToken, money, onBack }: Props) {
       await call(accessToken, { action: 'board_job', channel, kind, keys });
       setSelected(new Set());
       setSelecting(false);
-      void reload();
+      void loadCatalog({ force: true });
+      void loadQuarter(quarter);
     } catch (e) {
       setError(shortError(errText(e)));
     }
   }
 
+  const listBusy = tab === 'sold' ? quarterBusy : catalogBusy;
   const title = TITLES[channel];
 
   return (
@@ -185,10 +246,10 @@ export function AppChannel({ channel, accessToken, money, onBack }: Props) {
       </div>
 
       <div className="app-stat-grid">
-        <div><span>Sales</span><strong>{busy && !stats ? '…' : money(stats?.gross_cents || 0)}</strong></div>
-        <div><span>Fees</span><strong>{busy && !stats ? '…' : money(stats?.fee_cents || 0)}</strong></div>
-        <div><span>Shipping labels</span><strong>{busy && !stats ? '…' : money(stats?.ship_cents || 0)}</strong></div>
-        <div><span>Profit</span><strong className="pos">{busy && !stats ? '…' : money(stats?.profit_cents || 0)}</strong></div>
+        <div><span>Sales</span><strong>{quarterBusy && !stats ? '…' : money(stats?.gross_cents || 0)}</strong></div>
+        <div><span>Fees</span><strong>{quarterBusy && !stats ? '…' : money(stats?.fee_cents || 0)}</strong></div>
+        <div><span>Shipping labels</span><strong>{quarterBusy && !stats ? '…' : money(stats?.ship_cents || 0)}</strong></div>
+        <div><span>Profit</span><strong className="pos">{quarterBusy && !stats ? '…' : money(stats?.profit_cents || 0)}</strong></div>
       </div>
 
       <div className="app-segment">
@@ -223,11 +284,18 @@ export function AppChannel({ channel, accessToken, money, onBack }: Props) {
         onTouchEnd={(e) => {
           const start = Number((e.currentTarget as HTMLElement).dataset.y || 0);
           const end = e.changedTouches[0]?.clientY || 0;
-          if (end - start > 80 && !pulling) { setPulling(true); void reload(); }
+          if (end - start > 80 && !pulling) {
+            setPulling(true);
+            void loadCatalog({ force: true });
+            void loadQuarter(quarter);
+          }
         }}
       >
-        {filtered.length === 0 && !busy && (
-          <div className="app-empty-row">{pulling || busy ? 'Loading…' : 'Nothing here'}</div>
+        {filtered.length === 0 && !listBusy && (
+          <div className="app-empty-row">{pulling || listBusy ? 'Loading…' : 'Nothing here'}</div>
+        )}
+        {filtered.length === 0 && listBusy && (
+          <div className="app-empty-row">Loading…</div>
         )}
         {filtered.map((row) => {
           const key = row.key;
@@ -254,7 +322,7 @@ export function AppChannel({ channel, accessToken, money, onBack }: Props) {
                 <span className={`app-check ${checked ? 'on' : ''}`} aria-hidden>{checked ? '✓' : ''}</span>
               )}
               <span className="app-thumb">
-                {row.photo_url ? <img src={row.photo_url} alt="" /> : '+'}
+                {row.photo_url ? <img src={row.photo_url} alt="" loading="lazy" decoding="async" /> : '+'}
               </span>
               <span className="app-row-text">
                 <strong>{row.title || 'Untitled'}</strong>
