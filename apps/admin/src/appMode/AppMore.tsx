@@ -4,7 +4,7 @@ import type { StaffSession } from '@floor/cloud';
 import { floorFunctionUrl } from '../floorApi';
 import { TaxPage } from '../TaxPage';
 import { ListingManagerPanel } from '../ListingManagerPanel';
-import { MarketplacesPage } from '../MarketplacesPage';
+import { ConnectionsPage } from '../ConnectionsPage';
 import { errText } from '../errText';
 import { shortError } from './shortError';
 
@@ -258,10 +258,9 @@ export function AppLiveSales({ client, money, stamp, onBack }: {
   );
 }
 
-export function AppConnections({ client, accessToken, money, stamp, onBack }: {
+export function AppConnections({ accessToken, onBack }: {
   client: SupabaseClient; accessToken: string; money: (n: number) => string; stamp: (s: string) => string; onBack: () => void;
 }) {
-  void client; void money;
   return (
     <div className="app-stack">
       <div className="app-nav">
@@ -269,9 +268,7 @@ export function AppConnections({ client, accessToken, money, stamp, onBack }: {
         <div className="app-nav-title">Connections & sync</div>
         <button type="button" style={{ visibility: 'hidden' }}>·</button>
       </div>
-      <div className="app-embed-soft">
-        <MarketplacesPage client={client} accessToken={accessToken} money={money} stamp={stamp} />
-      </div>
+      <ConnectionsPage accessToken={accessToken} standalone />
     </div>
   );
 }

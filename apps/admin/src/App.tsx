@@ -15,7 +15,7 @@ import { ClientErrorReporter } from './clientLog';
 import { inStoreOverrideRate, isOnline, NO_ONLINE, PAYOUT_JACOB_ID, PAYOUT_PAUL_ID, payout, profit, remainingProfit, reportProfitCents, type CommissionOverride, type OnlineCfg, type Rule } from './payouts';
 import { CommissionOverrideControls, CommissionOverrideMark } from './CommissionOverride';
 import { ExpensesPage, type Expense as StoreExpense } from './ExpensesPage';
-import { MarketplacesPage } from './MarketplacesPage';
+import { ConnectionsPage } from './ConnectionsPage';
 import { AmazonPage } from './AmazonPage';
 import { ChannelListingPage } from './ChannelListingPage';
 import { OnlinePage } from './OnlinePage';
@@ -705,7 +705,7 @@ export function App() {
         ['amazon', 'Amazon'],
         ['tiktok', 'TikTok'],
         ['depop', 'Depop'],
-        ['marketplaces', 'Marketplaces'],
+        ['marketplaces', 'Connections & sync'],
         ['cameras', 'Cameras'],
         ['remote', 'Remote'],
         ['logs', 'Logs'],
@@ -717,7 +717,7 @@ export function App() {
     receipts: 'Receipts',
     inventory: 'Inventory',
     online: 'Online',
-    marketplaces: 'Marketplaces',
+    marketplaces: 'Connections & sync',
     ebay: 'eBay',
     amazon: 'Amazon',
     tiktok: 'TikTok',
@@ -908,7 +908,7 @@ export function App() {
   {fullAccess && page === 'orders' && store && <OrdersPage client={sb} accessToken={session.access_token} storeId={store} money={money} stamp={stamp} rules={activeRules} cfg={onlineCfg} commissionOverrides={commissionOverrides} personName={personName} busy={busy} onCommissionChanged={setTicketOverride} />}
   {fullAccess && page === 'receipts' && <ReceiptsPage client={sb} money={money} stamp={stamp} />}
   {fullAccess && page === 'online' && <OnlinePage client={sb} money={money} tab={nav.onlineTab} onTab={t => go({ onlineTab: t, page: 'online' })} channel={nav.onlineChannel} onChannel={c => go({ onlineChannel: c, onlineTab: 'listed', page: 'online' })} onInventory={() => goNav({ page: 'inventory', inventoryTab: 'in-stock' })} />}
-  {fullAccess && page === 'marketplaces' && <MarketplacesPage client={sb} accessToken={session.access_token} money={money} stamp={stamp} />}
+  {fullAccess && page === 'marketplaces' && <ConnectionsPage accessToken={session.access_token} />}
   {fullAccess && page === 'ebay' && <ChannelListingPage channel="ebay" accessToken={session.access_token} money={money} />}
   {fullAccess && page === 'amazon' && <AmazonPage client={sb} accessToken={session.access_token} money={money} />}
   {fullAccess && page === 'tiktok' && <ChannelListingPage channel="tiktok" accessToken={session.access_token} money={money} />}
