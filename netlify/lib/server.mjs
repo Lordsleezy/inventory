@@ -4,6 +4,10 @@ import { createCipheriv, createDecipheriv, randomBytes, createHash } from "node:
 export function requireEnv(name) {
   const v = process.env[name];
   if (!v) throw new Error(`Missing env ${name}`);
+  // Catch secrets that were accidentally saved as Netlify UI masks (****…last4).
+  if (/^\*+[A-Za-z0-9._-]{0,8}$/.test(String(v).trim())) {
+    throw new Error(`Env ${name} looks masked/placeholder — set the real secret in Netlify`);
+  }
   return v;
 }
 

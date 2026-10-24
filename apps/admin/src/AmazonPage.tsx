@@ -1,7 +1,7 @@
 ﻿import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { ChannelListingPage } from './ChannelListingPage';
-import { isKioskShell } from './kiosk';
+import { focusScannerField, scannerFieldStartsReadOnly } from './kiosk';
 
 const base = (import.meta.env.VITE_FLOOR_FUNCTIONS_URL || 'https://inventoryobi.netlify.app').replace(/\/$/, '');
 const money = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n / 100);
@@ -172,7 +172,15 @@ export function AmazonPage({ client, accessToken, money: moneyFmt }: Props) {
     previewMsg: string;
   } | null>(null);
   const skuRef = useRef<HTMLInputElement>(null);
+  const hideSoftKb = scannerFieldStartsReadOnly();
+  /** Never "none" — that freezes Android Gboard until reboot. */
+  const scanMode = hideSoftKb ? undefined : 'numeric';
   const upcRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!hideSoftKb) return;
+    requestAnimationFrame(() => focusScannerField(skuRef.current));
+  }, [hideSoftKb]);
 
   const load = useCallback(async () => {
     const { data, error: e } = await client.rpc('portal_amazon_list');
@@ -251,7 +259,7 @@ export function AmazonPage({ client, accessToken, money: moneyFmt }: Props) {
       if (prepareFails.length) {
         setError(`Prepare issues — ${prepareFails.join('; ')}`);
       }
-      skuRef.current?.focus();
+      focusScannerField(skuRef.current);
     } catch (e) {
       setError(errText(e));
     } finally {
@@ -611,8 +619,8 @@ export function AmazonPage({ client, accessToken, money: moneyFmt }: Props) {
             SKU
             <input
               ref={skuRef}
-              autoFocus
-              inputMode={isKioskShell() ? 'none' : 'numeric'}
+              autoFocus={!hideSoftKb}
+              inputMode={scanMode}
               autoComplete="off"
               spellCheck={false}
               placeholder="Floor SKU"
@@ -627,7 +635,7 @@ export function AmazonPage({ client, accessToken, money: moneyFmt }: Props) {
             UPC
             <input
               ref={upcRef}
-              inputMode={isKioskShell() ? 'none' : 'numeric'}
+              inputMode={scanMode}
               autoComplete="off"
               spellCheck={false}
               placeholder="Product UPC"
@@ -757,7 +765,7 @@ export function AmazonPage({ client, accessToken, money: moneyFmt }: Props) {
                         <input
                           disabled={busy}
                           placeholder="Floor SKU"
-                          inputMode={isKioskShell() ? 'none' : 'numeric'}
+                          inputMode={scanMode ?? 'numeric'}
                           autoComplete="off"
                           onBlur={(e) => {
                             const v = e.target.value.trim();
@@ -778,7 +786,7 @@ export function AmazonPage({ client, accessToken, money: moneyFmt }: Props) {
                         <input
                           disabled={busy}
                           placeholder="Product UPC"
-                          inputMode={isKioskShell() ? 'none' : 'numeric'}
+                          inputMode={scanMode ?? 'numeric'}
                           autoComplete="off"
                           key={`${r.sku}:upc`}
                           onBlur={(e) => {

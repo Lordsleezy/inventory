@@ -7,10 +7,14 @@ type Props = {
   storeId: string;
   accessToken: string;
   onSaved: () => void;
+  /** Open inventory item detail / edit for a SKU received today. */
+  onOpenItem?: (sku: string) => void;
+  /** Associate / local staff — require core fields on manual receive. */
+  requireManualCore?: boolean;
 };
 
 /** Native Receive home; opens the shared ReceivePanel form after scan / camera / manual. */
-export function AppReceive({ client, storeId, accessToken, onSaved }: Props) {
+export function AppReceive({ client, storeId, accessToken, onSaved, onOpenItem, requireManualCore }: Props) {
   const [phase, setPhase] = useState<'home' | 'form'>('home');
   const [manual, setManual] = useState(false);
   const [pendingUpc, setPendingUpc] = useState<string | null>(null);
@@ -74,6 +78,7 @@ export function AppReceive({ client, storeId, accessToken, onSaved }: Props) {
           appChrome
           initialManual={manual}
           initialUpc={pendingUpc}
+          requireManualCore={requireManualCore}
           onAppCancel={() => {
             setPendingUpc(null);
             setPhase('home');
@@ -134,12 +139,19 @@ export function AppReceive({ client, storeId, accessToken, onSaved }: Props) {
       <div className="app-group">
         {today.length === 0 && <div className="app-empty-row">Nothing yet today</div>}
         {today.map((u) => (
-          <div key={u.sku} className="app-row" style={{ cursor: 'default' }}>
+          <button
+            key={u.sku}
+            type="button"
+            className="app-row"
+            onClick={() => onOpenItem?.(u.sku)}
+            aria-label={`Edit ${u.title} (${u.sku})`}
+          >
             <span className="app-row-text">
               <strong>{u.title}</strong>
               <small>{u.sku}</small>
             </span>
-          </div>
+            <span className="app-row-chevron" aria-hidden>›</span>
+          </button>
         ))}
       </div>
     </>

@@ -40,8 +40,20 @@ function num(value) {
 /**
  * @returns {{ ok: boolean, reason: string, needsBox?: boolean }}
  */
+function listingSpecsOf(unit) {
+  const specs = unit?.listing_specs;
+  return specs && typeof specs === "object" ? specs : {};
+}
+
 export function ebayDraftEligibility(unit, settings = {}) {
   if (String(unit?.state || "available") !== "available") return { ok: false, reason: "Not available" };
+  const specs = listingSpecsOf(unit);
+  if (specs.do_not_list === true || specs.hold_reason === "do_not_list") {
+    return { ok: false, reason: "Marked don't list for sale" };
+  }
+  if (String(specs.bundle_parent_sku || "").trim()) {
+    return { ok: false, reason: `Bundle child — lists with SKU ${String(specs.bundle_parent_sku).trim()}` };
+  }
   if (!(Number(unit?.ask_cents) > 0)) return { ok: false, reason: "No price" };
   if (!(Number(unit?.photo_count) > 0)) return { ok: false, reason: "No photo" };
   const banned = prohibitedReason(unit);

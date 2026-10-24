@@ -1,5 +1,5 @@
 /* Floor admin shell — cache static assets only; never cache live inventory/API data. */
-const SHELL = 'floor-shell-v3';
+const SHELL = 'floor-shell-v13';
 const SHELL_URLS = [
   '/',
   '/index.html',
@@ -10,8 +10,10 @@ const SHELL_URLS = [
 ];
 
 self.addEventListener('install', (event) => {
+  // Do not skipWaiting here — the page activates the new worker only when Receive
+  // is idle, so inventoring isn't interrupted by a reload mid-scan/photo.
   event.waitUntil(
-    caches.open(SHELL).then((cache) => cache.addAll(SHELL_URLS)).then(() => self.skipWaiting()).catch(() => self.skipWaiting()),
+    caches.open(SHELL).then((cache) => cache.addAll(SHELL_URLS)).catch(() => undefined),
   );
 });
 
@@ -21,6 +23,10 @@ self.addEventListener('activate', (event) => {
       Promise.all(keys.filter((k) => k !== SHELL).map((k) => caches.delete(k))),
     ).then(() => self.clients.claim()),
   );
+});
+
+self.addEventListener('message', (event) => {
+  if (event.data === 'SKIP_WAITING') void self.skipWaiting();
 });
 
 function isLiveData(url) {
