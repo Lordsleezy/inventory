@@ -276,15 +276,16 @@ export function AppConnections({ client, accessToken, money, stamp, onBack }: {
   );
 }
 
-export function AppReportsNative({ onBack, children }: {
+export function AppReportsNative({ onBack, children, title = 'Reports' }: {
   onBack: () => void;
   children: ReactNode;
+  title?: string;
 }) {
   return (
     <div className="app-stack">
       <div className="app-nav">
         <button type="button" onClick={onBack}>‹ More</button>
-        <div className="app-nav-title">Reports</div>
+        <div className="app-nav-title">{title}</div>
         <button type="button" style={{ visibility: 'hidden' }}>·</button>
       </div>
       <div className="app-embed-soft app-reports">

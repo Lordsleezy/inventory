@@ -327,22 +327,22 @@ export function AppModeShell({
           </AppReportsNative>
         )}
         {fullAccess && morePage === 'withdrawals' && (
-          <AppReportsNative onBack={() => setMorePage(null)}>
+          <AppReportsNative onBack={() => setMorePage(null)} title="Withdrawals">
             <WithdrawalsPage client={client} storeId={storeId} money={money} stamp={stamp} />
           </AppReportsNative>
         )}
         {fullAccess && morePage === 'manifests' && (
-          <AppReportsNative onBack={() => setMorePage(null)}>
+          <AppReportsNative onBack={() => setMorePage(null)} title="Manifests">
             <ManifestsPage client={client} storeId={storeId} money={money} />
           </AppReportsNative>
         )}
         {fullAccess && morePage === 'locations' && (
-          <AppReportsNative onBack={() => setMorePage(null)}>
+          <AppReportsNative onBack={() => setMorePage(null)} title="Locations">
             <LocationsPage client={client} storeId={storeId} />
           </AppReportsNative>
         )}
         {fullAccess && morePage === 'insights' && (
-          <AppReportsNative onBack={() => setMorePage(null)}>
+          <AppReportsNative onBack={() => setMorePage(null)} title="Insights">
             <InsightsPage client={client} money={money} />
           </AppReportsNative>
         )}
