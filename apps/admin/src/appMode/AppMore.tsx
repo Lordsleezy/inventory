@@ -84,8 +84,11 @@ export function AppMoreHome({
 
       try {
         const day = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
-        const { data } = await client.rpc('portal_sales', { p_start: day, p_end: day });
-        if (alive) setSalesToday(Array.isArray(data) ? new Set((data as { ticket_id?: string }[]).map((r) => r.ticket_id)).size : 0);
+        const { data } = await client.rpc('portal_sales', salesRange(day, day));
+        if (alive) {
+          const rows = Array.isArray(data) ? data as { ticket_key?: string }[] : [];
+          setSalesToday(new Set(rows.map((r) => r.ticket_key).filter(Boolean)).size);
+        }
       } catch { /* ignore */ }
 
       // Prefetch channel boards in parallel (Floor-fast catalog) so opening eBay is warm.
@@ -257,50 +260,141 @@ export function AppAttention({ client, storeId, money, stamp, onBack }: {
   );
 }
 
+/** LA calendar day → exclusive portal_sales window (p_from / p_to). */
+function salesRange(startDay: string, endDayInclusive: string) {
+  const zone = 'America/Los_Angeles';
+  const midnight = (d: string) => {
+    const [y, m, a] = d.split('-').map(Number);
+    let t = Date.UTC(y, m - 1, a, 8);
+    const partsFmt = new Intl.DateTimeFormat('en-US', {
+      timeZone: zone, year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', hourCycle: 'h23',
+    });
+    for (let i = 0; i < 3; i++) {
+      const p = Object.fromEntries(partsFmt.formatToParts(new Date(t)).map((x) => [x.type, Number(x.value)]));
+      const seen = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute);
+      t += Date.UTC(y, m - 1, a) - seen;
+    }
+    return new Date(t).toISOString();
+  };
+  const nextDay = (d: string) => {
+    const x = new Date(`${d}T12:00:00Z`);
+    x.setUTCDate(x.getUTCDate() + 1);
+    return x.toISOString().slice(0, 10);
+  };
+  return { p_from: midnight(startDay), p_to: midnight(nextDay(endDayInclusive)) };
+}
+
+type LiveSaleLine = {
+  ticket_key: string;
+  sold_at: string;
+  channel: string;
+  price_cents: number;
+  tax_cents?: number | null;
+  card_fee_cents?: number | null;
+  payment_method?: string | null;
+  receipt_no?: string | null;
+  profit_cents?: number | null;
+  actor_name?: string | null;
+  title?: string | null;
+  sku?: string | null;
+  qty?: number | null;
+};
+
+type LiveTicket = {
+  key: string;
+  at: string;
+  channel: string;
+  who: string;
+  method: string;
+  receipt: string;
+  sale: number;
+  tax: number;
+  fee: number;
+  /** Customer total = sale + tax (taxes included). */
+  total: number;
+  profit: number;
+  lines: { title: string; sku: string; qty: number; sale: number; tax: number }[];
+};
+
+function liveTickets(rows: LiveSaleLine[]): LiveTicket[] {
+  const map = new Map<string, LiveTicket>();
+  for (const r of rows) {
+    const key = r.ticket_key || String(r.sold_at);
+    let t = map.get(key);
+    if (!t) {
+      t = {
+        key,
+        at: r.sold_at,
+        channel: r.channel || 'floor',
+        who: r.actor_name || '',
+        method: r.payment_method || '',
+        receipt: r.receipt_no || '',
+        sale: 0,
+        tax: 0,
+        fee: 0,
+        total: 0,
+        profit: 0,
+        lines: [],
+      };
+      map.set(key, t);
+    }
+    const sale = r.price_cents || 0;
+    const tax = r.tax_cents || 0;
+    t.sale += sale;
+    t.tax += tax;
+    t.fee += r.card_fee_cents || 0;
+    t.profit += r.profit_cents || 0;
+    t.lines.push({
+      title: r.title || r.sku || 'Item',
+      sku: r.sku || '',
+      qty: Math.max(1, r.qty || 1),
+      sale,
+      tax,
+    });
+  }
+  for (const t of map.values()) t.total = t.sale + t.tax;
+  return [...map.values()].sort((a, b) => (a.at < b.at ? 1 : -1));
+}
+
 export function AppLiveSales({ client, money, stamp, onBack }: {
   client: SupabaseClient; money: (n: number) => string; stamp: (s: string) => string; onBack: () => void;
 }) {
   const [range, setRange] = useState<'today' | 'week' | 'month'>('today');
-  const [rows, setRows] = useState<{ ticket_id: string; sold_at: string; channel: string; total_cents: number; profit_cents?: number; sold_by?: string; title?: string }[]>([]);
+  const [rows, setRows] = useState<LiveSaleLine[]>([]);
   const [error, setError] = useState('');
+  const [open, setOpen] = useState<LiveTicket | null>(null);
 
   useEffect(() => {
     let alive = true;
     void (async () => {
+      setError('');
+      setOpen(null);
       try {
         const end = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
         const d = new Date();
         if (range === 'week') d.setDate(d.getDate() - 6);
         if (range === 'month') d.setDate(1);
         const start = range === 'today' ? end : d.toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
-        const { data, error: e } = await client.rpc('portal_sales', { p_start: start, p_end: end });
+        const { data, error: e } = await client.rpc('portal_sales', salesRange(start, end));
         if (e) throw e;
         if (!alive) return;
-        setRows((data || []) as typeof rows);
+        setRows((data || []) as LiveSaleLine[]);
       } catch (e) {
-        if (alive) setError(shortError(errText(e)));
+        if (alive) {
+          setRows([]);
+          setError(shortError(errText(e)));
+        }
       }
     })();
     return () => { alive = false; };
   }, [client, range]);
 
-  const summary = useMemo(() => {
-    const tickets = new Map<string, { total: number; profit: number; channel: string; at: string; who: string; title: string }>();
-    for (const r of rows) {
-      const id = r.ticket_id || String(r.sold_at);
-      const cur = tickets.get(id) || { total: 0, profit: 0, channel: r.channel, at: r.sold_at, who: r.sold_by || '', title: r.title || '' };
-      cur.total += r.total_cents || 0;
-      cur.profit += r.profit_cents || 0;
-      tickets.set(id, cur);
-    }
-    const list = [...tickets.values()];
-    return {
-      list: list.sort((a, b) => (a.at < b.at ? 1 : -1)),
-      sales: list.reduce((n, t) => n + t.total, 0),
-      orders: list.length,
-      profit: list.reduce((n, t) => n + t.profit, 0),
-    };
-  }, [rows]);
+  const tickets = useMemo(() => liveTickets(rows), [rows]);
+  const summary = useMemo(() => ({
+    sales: tickets.reduce((n, t) => n + t.total, 0),
+    orders: tickets.length,
+    profit: tickets.reduce((n, t) => n + t.profit, 0),
+  }), [tickets]);
 
   return (
     <div className="app-stack">
@@ -321,17 +415,61 @@ export function AppLiveSales({ client, money, stamp, onBack }: {
       </div>
       {error && <p className="app-inline-error">{error}</p>}
       <div className="app-group">
-        {summary.list.length === 0 && <div className="app-empty-row">No sales in this range</div>}
-        {summary.list.map((t, i) => (
-          <div key={i} className="app-row" style={{ cursor: 'default' }}>
+        {tickets.length === 0 && <div className="app-empty-row">No sales in this range</div>}
+        {tickets.map((t) => (
+          <button type="button" className="app-row" key={t.key} onClick={() => setOpen(t)}>
             <span className="app-row-text">
               <strong>{money(t.total)} · {t.channel || 'floor'}</strong>
               <small>{stamp(t.at)}{t.who ? ` · ${t.who}` : ''}</small>
               <small className="live">Pulled everywhere</small>
             </span>
-          </div>
+            <span className="app-chevron" aria-hidden>›</span>
+          </button>
         ))}
       </div>
+
+      {open && (
+        <div className="app-stats-sheet" role="dialog" aria-modal="true" aria-label="Sale breakdown">
+          <button type="button" className="app-stats-backdrop" aria-label="Close" onClick={() => setOpen(null)} />
+          <div className="app-stats-panel">
+            <div className="app-stats-head">
+              <h2>Sale</h2>
+              <button type="button" className="app-stats-close" onClick={() => setOpen(null)}>Done</button>
+            </div>
+            <p className="app-footer-count" style={{ marginTop: 0 }}>
+              {stamp(open.at)}
+              {open.who ? ` · ${open.who}` : ''}
+              {open.channel ? ` · ${open.channel}` : ''}
+              {open.method ? ` · ${open.method}` : ''}
+              {open.receipt ? ` · #${open.receipt}` : ''}
+            </p>
+            <ul className="app-stats-list">
+              <li><span>Sale price</span><strong>{money(open.sale)}</strong></li>
+              <li><span>Tax</span><strong>{money(open.tax)}</strong></li>
+              {open.fee > 0 && <li><span>Card fees</span><strong>{money(open.fee)}</strong></li>}
+              <li><span>Total</span><strong>{money(open.total)}</strong></li>
+              <li><span>Profit</span><strong>{money(open.profit)}</strong></li>
+            </ul>
+            {open.lines.length > 0 && (
+              <>
+                <p className="app-footer-count">Items</p>
+                <ul className="app-stats-list">
+                  {open.lines.map((line, i) => (
+                    <li key={`${line.sku}-${i}`}>
+                      <span>
+                        {line.title}
+                        {line.qty > 1 ? ` ×${line.qty}` : ''}
+                        {line.sku ? <small style={{ display: 'block', color: '#8e8e93' }}>SKU {line.sku}</small> : null}
+                      </span>
+                      <strong>{money(line.sale + line.tax)}</strong>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
