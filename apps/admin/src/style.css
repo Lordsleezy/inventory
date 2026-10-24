@@ -799,6 +799,8 @@ html.dark .mboard-progress-bar{background:#2a3340}
 .category-panel .category-row,.category-panel .category-results button{display:flex;flex-direction:column;align-items:flex-start;text-align:left;gap:4px;width:100%;padding:12px;border:1px solid var(--line,#354050);border-radius:10px;background:transparent;color:inherit}
 .category-panel .category-row.active,.category-panel .category-results button.active{border-color:#56a2df;background:#18354d}
 .category-panel .category-row small,.category-panel .category-results small{opacity:.75}
+.category-panel .category-row,.category-panel .category-results button{flex-shrink:0}
+.category-panel .category-row strong{display:flex;flex-direction:column;gap:4px}
 .category-panel .category-channel-list{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .category-panel .category-channel-list label{display:flex;align-items:center;gap:6px}
 .category-panel .category-channel-list button{min-height:42px}
