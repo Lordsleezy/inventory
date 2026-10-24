@@ -167,16 +167,18 @@ export async function resolveUnitCategories(storeId, sku, { network = true } = {
   const { data: gaps, error: gapError } = await sb.rpc('floor_category_gaps', { p_store: storeId, p_sku: sku, p_channel: null });
   if (gapError) throw new Error(gapError.message);
   const enabledChannels = CHANNELS.filter((channel) => current.get(channel)?.enabled);
+  const finalIds = Object.fromEntries(CHANNELS.map((channel) => [channel,
+    updates.find((row) => row.channel === channel)?.category_id || current.get(channel)?.category_id || null]));
   const confirmed = !conflict && !gaps?.length && enabledChannels.length > 0 &&
-    enabledChannels.every((channel) => Boolean(ids[channel] || current.get(channel)?.category_id));
+    enabledChannels.every((channel) => Boolean(finalIds[channel]));
   if (gtin.ok && confirmed && !cached) {
     const { error } = await sb.from('store_upc_categories').upsert({ store_id: storeId, gtin14: gtin.gtin14,
-      ebay_category_id: ids.ebay, amazon_product_type: ids.amazon, amazon_listing_id: amazonListingId,
-      tiktok_category_id: ids.tiktok, depop_category_id: ids.depop, internal_category: product?.category || unit.internal_category || null,
+      ebay_category_id: finalIds.ebay, amazon_product_type: finalIds.amazon, amazon_listing_id: amazonListingId,
+      tiktok_category_id: finalIds.tiktok, depop_category_id: finalIds.depop, internal_category: product?.category || unit.internal_category || null,
       channel_attributes: Object.fromEntries(CHANNELS.map((channel) => [channel,
         updates.find((row) => row.channel === channel)?.attributes || current.get(channel)?.attributes || {}])),
       confirmed_at: new Date().toISOString() }, { onConflict: 'store_id,gtin14' });
     if (error) throw new Error(error.message);
   }
-  return { sku, categories: ids, sources, conflict, confirmed: Boolean(confirmed), gaps };
+  return { sku, categories: finalIds, sources, conflict, confirmed: Boolean(confirmed), gaps };
 }
