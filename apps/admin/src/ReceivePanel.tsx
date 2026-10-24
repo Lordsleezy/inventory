@@ -1,20 +1,139 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { isKioskShell, scannerInputMode } from './kiosk';
+import {
+  bindHidWedgeListener,
+  focusScannerField,
+  isAndroidStoreDevice,
+  isKioskShell,
+  scannerFieldStartsReadOnly,
+  scannerInputMode,
+} from './kiosk';
+import { StoreNumPad } from './StoreNumPad';
+
+/** Store-phone number fields: never focus (readOnly + focus freezes Gboard). */
+function padPointerDown(storePad: boolean, e: React.PointerEvent | React.MouseEvent) {
+  if (!storePad) return;
+  e.preventDefault();
+}
 import { floorFunctionUrl } from './floorApi';
 import { reportClientError } from './clientLog';
 import { categoryDefaultCostCents, priceFloorCents, suggestAskCents } from './scanPricing';
+import { errText } from './errText';
+
+/** iOS/Android PWA: prefer native capture over getUserMedia (more reliable in standalone). */
+function preferNativeCapture() {
+  if (typeof navigator === 'undefined') return false;
+  return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
+    || window.matchMedia('(display-mode: standalone)').matches
+    || (navigator as Navigator & { standalone?: boolean }).standalone === true;
+}
+
+const PHOTO_MAX_BYTES = 15 * 1024 * 1024;
+const PHOTO_MIN_BYTES = 2048;
+const PENDING_PHOTO_DB = 'floor-receive-photos';
+const PENDING_PHOTO_STORE = 'files';
+
+/**
+ * Camera capture on Android/iOS PWAs often returns File with empty type, a generic name,
+ * or a blob that is invalidated when the <input> value is cleared. Copy bytes into a
+ * fresh File before clearing the input.
+ */
+async function copyImageFile(file: File): Promise<File | null> {
+  if (file.size > PHOTO_MAX_BYTES) return null;
+  let buf: ArrayBuffer;
+  try {
+    buf = await file.arrayBuffer();
+  } catch {
+    return null;
+  }
+  if (buf.byteLength < PHOTO_MIN_BYTES) return null;
+  const type = file.type && file.type.startsWith('image/') ? file.type : 'image/jpeg';
+  const rawName = (file.name || '').trim();
+  const hasExt = /\.[a-z0-9]{2,5}$/i.test(rawName);
+  const name = (hasExt ? rawName : `photo-${Date.now()}.jpg`).replace(/[^a-zA-Z0-9._-]/g, '_') || 'photo.jpg';
+  return new File([buf], name, { type, lastModified: file.lastModified || Date.now() });
+}
+
+function pendingPhotoKey(storeId: string, scanKey: string) {
+  return `${storeId}:${scanKey}`;
+}
+
+function openPendingPhotoDb(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(PENDING_PHOTO_DB, 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(PENDING_PHOTO_STORE)) db.createObjectStore(PENDING_PHOTO_STORE);
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error || new Error('indexedDB open failed'));
+  });
+}
+
+async function savePendingPhotos(key: string, files: File[]): Promise<void> {
+  if (typeof indexedDB === 'undefined') return;
+  try {
+    const db = await openPendingPhotoDb();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(PENDING_PHOTO_STORE, 'readwrite');
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error || new Error('indexedDB write failed'));
+      const store = tx.objectStore(PENDING_PHOTO_STORE);
+      if (!files.length) store.delete(key);
+      else store.put(files, key);
+    });
+    db.close();
+  } catch { /* best-effort; receive still works without persistence */ }
+}
+
+async function loadPendingPhotos(key: string): Promise<File[]> {
+  if (typeof indexedDB === 'undefined') return [];
+  try {
+    const db = await openPendingPhotoDb();
+    const blobs = await new Promise<Blob[]>((resolve, reject) => {
+      const tx = db.transaction(PENDING_PHOTO_STORE, 'readonly');
+      const req = tx.objectStore(PENDING_PHOTO_STORE).get(key);
+      req.onsuccess = () => {
+        const v = req.result;
+        resolve(Array.isArray(v) ? v.filter((f): f is Blob => f instanceof Blob) : []);
+      };
+      req.onerror = () => reject(req.error || new Error('indexedDB read failed'));
+    });
+    db.close();
+    return blobs.map((f, i) => (f instanceof File
+      ? f
+      : new File([f], `photo-${i + 1}.jpg`, { type: f.type || 'image/jpeg' })));
+  } catch {
+    return [];
+  }
+}
+
+async function clearPendingPhotos(key: string): Promise<void> {
+  await savePendingPhotos(key, []);
+}
 
 /* ------------------------------------------------------------------------------------------------
  * Receive = scan-to-list.
- *   scan UPC -> Amazon + UPCitemdb lookup -> review/fix fields -> real photo + condition -> price
- *   -> completeness check -> "Ready to list?" -> receive (portal_receive_unit) -> photo upload ->
- *   merge lookup data into units.listing_specs.
- * "Enter manually" falls back to the old blank form (no lookup).
+ *   scan UPC -> lookup fills listing fields -> edit requirements (price, condition, category,
+ *   brand, UPC, weight+dims, item specifics) + photo -> Ready to list checkboxes ->
+ *   receive (portal_receive_unit) -> photo upload -> merge lookup into listing_specs.
+ * "Enter manually" uses the same requirements (plus title/description helpers).
  * ---------------------------------------------------------------------------------------------- */
 
 type Options = { next_sku: string | null; conditions: unknown; test_statuses: unknown };
-type Props = { client: SupabaseClient; storeId: string; accessToken: string; onSaved: () => void };
+type Props = {
+  client: SupabaseClient;
+  storeId: string;
+  accessToken: string;
+  onSaved: () => void;
+  /** App-mode chrome: Cancel / Receive · SKU / Save nav, no instruction paragraphs. */
+  appChrome?: boolean;
+  initialManual?: boolean;
+  /** Prefill / enqueue a UPC from an earlier camera capture. */
+  initialUpc?: string | null;
+  onAppCancel?: () => void;
+};
 
 type Pkg = { length_in?: number | null; width_in?: number | null; height_in?: number | null; weight_lb?: number | null };
 type Source = {
@@ -26,11 +145,13 @@ type Source = {
   model?: string | null;
   description?: string | null;
   features?: string[];
+  aspects?: Record<string, string>;
   package?: Pkg;
   price_cents?: number | null;
   price_source?: string | null;
   price_as_of?: string | null;
   price_pending?: boolean;
+  price_error?: string | null;
   msrp_cents?: number | null;
   raw_error?: string | null;
 };
@@ -38,30 +159,148 @@ type Disagreement = { field: string; amazon?: string | number | null; upcitemdb?
 type Lookup = {
   gtin?: { gtin14?: string; upcA?: string; ean13?: string };
   cached?: boolean;
+  floor_product?: boolean;
+  true_miss?: boolean;
+  miss_id?: string | null;
   amazon?: Source;
   upcitemdb?: Source;
   merged?: {
     title?: string | null; brand?: string | null; model?: string | null; description?: string | null;
     category?: string | null;
-    features?: string[]; package?: Pkg; asin?: string | null; msrp_cents?: number | null;
+    features?: string[]; aspects?: Record<string, string>; package?: Pkg; asin?: string | null; msrp_cents?: number | null;
     retail_cents?: number | null; retail_source?: string | null; retail_as_of?: string | null;
     disagreements?: Disagreement[]; never_list_reason?: string | null;
+    not_found?: boolean;
   };
-  fieldCoverage?: { package?: string | null };
+  fieldCoverage?: { package?: string | null; price?: string | null };
 };
 
+type PhotoPriceInfo = {
+  kind: string;
+  median_cents: number | null;
+  low_cents: number | null;
+  high_cents: number | null;
+  count: number;
+  highest_retail?: { store?: string; price_cents?: number; url?: string; product_name?: string } | null;
+};
+
+async function fileToBase64(file: File): Promise<string> {
+  const buf = await file.arrayBuffer();
+  const bytes = new Uint8Array(buf);
+  let binary = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
+/** "Flavor: Berry · Item Form: Gummy" from Amazon catalog aspects. */
+function formatAspectsLine(aspects?: Record<string, string> | null): string {
+  if (!aspects) return '';
+  return Object.entries(aspects)
+    .filter(([, v]) => typeof v === 'string' && v.trim())
+    .map(([k, v]) => `${k}: ${v.trim()}`)
+    .join(' · ');
+}
+
+/** Reject retailer ITM/SKU digit codes; prefer aspects or a pack/variant phrase from the title. */
+function usableModelNumber(raw?: string | null): string {
+  const m = String(raw || '').trim();
+  if (!m) return '';
+  if (/^\d{4,}$/.test(m)) return '';
+  if (/^(itm|art|sku|dpci|tcin)[\s#:-]?\d+/i.test(m)) return '';
+  return m;
+}
+
+function variantFromTitle(title?: string | null, brand?: string | null): string {
+  let t = String(title || '').trim().replace(/\s+/g, ' ');
+  if (!t) return '';
+  const b = String(brand || '').trim();
+  if (b && t.toLowerCase().startsWith(b.toLowerCase())) {
+    t = t.slice(b.length).replace(/^[\s,:\-|–—]+/, '').trim();
+  }
+  const pack = t.match(
+    /(.{0,80}\b\d+\s*(?:-?\s*)?(?:count|ct|pack|pk|heads?|refills?|pieces?|pcs?|oz|fl\s*oz|ml|g)\b[^|/]{0,40})/i,
+  );
+  if (pack) return pack[1].trim().replace(/^[\s,:\-|–—]+/, '');
+  return t.split(/[|/]/)[0].trim().slice(0, 80);
+}
+
+function itemSpecificsFromLookup(m?: Lookup['merged']): string {
+  if (!m) return '';
+  return (
+    usableModelNumber(m.model) ||
+    formatAspectsLine(m.aspects) ||
+    variantFromTitle(m.title, m.brand)
+  );
+}
+
+/**
+ * Floor listing title = brand + item specifics (model).
+ * Used for scans and manual — never Amazon's long catalog title or bare retailer digit codes.
+ * Example: brand "Oral-B" + model "Replacement Brush Heads 10 Pack" → title.
+ */
+function composeListingTitle(brand: string, model: string, unbranded: boolean): string {
+  const b = unbranded ? 'Unbranded' : brand.trim();
+  const m = model.trim();
+  return [b, m].filter(Boolean).join(' ');
+}
+
+/** Transient lookup failure (retry), not a clean catalog miss. */
+function catalogLookupFailed(r?: Lookup): string | null {
+  if (!r) return null;
+  const m = r.merged;
+  const hasCatalog = Boolean(text(m?.title) || text(m?.brand) || text(m?.model) || text(m?.asin));
+  if (hasCatalog || r.floor_product) return null;
+  const amazonErr = r.amazon?.raw_error || '';
+  const upcErr = r.upcitemdb?.raw_error || '';
+  if (/rate.?limit/i.test(upcErr) && !r.amazon?.found) {
+    return 'Lookup hit a rate limit — retrying in a moment usually works. Or fill fields by hand.';
+  }
+  if (amazonErr && !r.amazon?.found && !r.upcitemdb?.found) {
+    return `Lookup failed (${amazonErr.slice(0, 80)}${upcErr ? `; ${upcErr.slice(0, 60)}` : ''}). Retry, or fill by hand.`;
+  }
+  return null;
+}
+
+/** Clean miss (both sources found nothing) — offer photo identify. */
+function isTrueCatalogMiss(r?: Lookup): boolean {
+  if (!r || r.floor_product) return false;
+  if (r.true_miss) return true;
+  const m = r.merged;
+  const hasCatalog = Boolean(text(m?.title) || text(m?.brand) || text(m?.model) || text(m?.asin));
+  if (hasCatalog) return false;
+  if (catalogLookupFailed(r)) return false;
+  return Boolean(m?.not_found || (!r.amazon?.found && !r.upcitemdb?.found));
+}
+
+function catalogMissMessage(r?: Lookup): string | null {
+  if (!r) return null;
+  const fail = catalogLookupFailed(r);
+  if (fail) return fail;
+  if (isTrueCatalogMiss(r)) {
+    return 'No match in Amazon or UPCitemdb for this UPC — try a product photo, or fill the fields by hand.';
+  }
+  const m = r.merged;
+  const hasCatalog = Boolean(text(m?.title) || text(m?.brand) || text(m?.model) || text(m?.asin));
+  if (hasCatalog) return null;
+  return 'Lookup returned no title/brand — fill the fields by hand, or retry.';
+}
+
   type Form = {
-  brand: string; model: string; title: string; description: string;
+  brand: string; unbranded: boolean; noUpc: boolean; model: string; title: string; category: string; description: string;
   condition: string; conditionNote: string; testStatus: string; ask: string; cost: string;
   notes: string; upc: string; quantity: string; shippable: string;
   length: string; width: string; height: string; weight: string;
   costEstimate: boolean;
 };
 const blank: Form = {
-  brand: '', model: '', title: '', description: '', condition: '', conditionNote: '', testStatus: '',
+  brand: '', unbranded: false, noUpc: false, model: '', title: '', category: '', description: '', condition: '', conditionNote: '', testStatus: '',
   ask: '', cost: '', notes: '', upc: '', quantity: '1', shippable: 'auto',
   length: '', width: '', height: '', weight: '', costEstimate: false,
 };
+const UPC_NOT_APPLICABLE = 'Does not apply';
 
 type Scan = {
   id: string;
@@ -77,8 +316,11 @@ type LastReceived = { upc: string; result?: Lookup; seed: Partial<Form> };
 
 const NEW = 'New';
 const OPEN = 'Open box';
-const SCRATCH = 'Scratch & dent';
-const CONDITIONS: [string, string][] = [[NEW, 'New (sealed)'], [OPEN, 'Open box'], [SCRATCH, 'Scratch & dent']];
+const SCRATCH = 'Defective/non-sellable';
+/** Legacy condition value — still needs a defect note if somehow selected. */
+const SCRATCH_LEGACY = 'Scratch & dent';
+const isDefectiveCondition = (value: string) => value === SCRATCH || value === SCRATCH_LEGACY;
+const CONDITIONS: [string, string][] = [[NEW, 'New (sealed)'], [OPEN, 'Open box'], [SCRATCH, 'Defective/non-sellable']];
 const HOLD_REASONS: [string, string][] = [
   ['damaged', 'Damaged'], ['needs_testing', 'Needs testing'], ['keep_in_store', 'Keep in store'], ['other', 'Other'],
 ];
@@ -104,17 +346,7 @@ const money = (c: number | null | undefined) => (c == null ? '—' : `$${(c / 10
 const dollars = (c: number) => (c / 100).toFixed(2);
 const pos = (n: number | null | undefined): n is number => typeof n === 'number' && Number.isFinite(n) && n > 0;
 const text = (v: string | null | undefined) => (v || '').trim();
-const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 const num = (n: number | null | undefined) => (pos(n) ? String(n) : '');
-const label = (s: string | null | undefined) => (s || '').replace(/_/g, ' ');
-
-function pkgText(p?: Pkg) {
-  if (!p) return '';
-  const dims = [p.length_in, p.width_in, p.height_in];
-  const d = dims.every(pos) ? `${dims.join(' × ')} in` : '';
-  const w = pos(p.weight_lb) ? `${p.weight_lb} lb` : '';
-  return [d, w].filter(Boolean).join(' · ');
-}
 
 /* ----- retail / price suggestion ----- */
 
@@ -136,7 +368,7 @@ function msrpOf(r?: Lookup): number | null {
 }
 
 function explainLookupError(err: unknown, status?: number, body?: { error?: string; message?: string }): string {
-  const raw = body?.error || body?.message || (err instanceof Error ? err.message : String(err || ''));
+  const raw = errText(body?.error || body?.message || err || '');
   const lower = raw.toLowerCase();
   if (err instanceof DOMException && err.name === 'AbortError') return 'Lookup timed out — the server took too long. Retry or enter manually.';
   if (/failed to fetch|networkerror|load failed|network request failed/i.test(raw)) {
@@ -145,9 +377,9 @@ function explainLookupError(err: unknown, status?: number, body?: { error?: stri
   if (status === 401 || /not_logged_in|sign in required|not_signed_in/i.test(lower)) return 'Not logged in — sign in again, then retry the scan.';
   if (status === 403 || /not_authorized|staff access|not_owner|not_staff/i.test(lower)) return 'Not authorized for lookup — ask an admin to check your staff access.';
   if (status === 429 || /rate.?limit|quota/i.test(lower)) return 'Amazon rate-limited pricing — catalog may still show; retry in a moment for the price.';
-  if (/invalid_gtin|upc_required/i.test(lower)) return 'That barcode does not look like a valid UPC/EAN.';
+  if (/invalid_gtin|upc_required|valid upc/i.test(lower)) return 'That barcode does not look like a valid UPC/EAN.';
   if (/not found|no source|upcitemdb/i.test(lower) && status === 404) return 'UPC not found in Amazon or UPCitemdb — fill the fields by hand.';
-  if (raw && raw !== 'Failed to fetch') return raw;
+  if (raw && raw !== 'Failed to fetch' && raw !== 'Something went wrong') return raw;
   return 'Lookup failed — retry or enter manually.';
 }
 
@@ -205,7 +437,7 @@ const FORMATS = ['upc_a', 'upc_e', 'ean_13', 'ean_8'];
 const detectorCtor = (): DetectorCtor | undefined =>
   (typeof window !== 'undefined' ? (window as unknown as { BarcodeDetector?: DetectorCtor }).BarcodeDetector : undefined);
 
-async function decodeFile(file: File): Promise<string | null> {
+export async function decodeBarcodeFile(file: File): Promise<string | null> {
   const Ctor = detectorCtor();
   if (!Ctor) return null;
   try {
@@ -215,10 +447,15 @@ async function decodeFile(file: File): Promise<string | null> {
   } catch { return null; }
 }
 
+async function decodeFile(file: File): Promise<string | null> {
+  return decodeBarcodeFile(file);
+}
+
 function CameraScanner({ onDetect, onFile, onClose }: {
   onDetect: (code: string) => void; onFile: (file: File) => void; onClose: () => void;
 }) {
   const video = useRef<HTMLVideoElement>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
   const done = useRef(false);
   const detect = useRef(onDetect);
   detect.current = onDetect;
@@ -231,11 +468,17 @@ function CameraScanner({ onDetect, onFile, onClose }: {
       try {
         const Ctor = detectorCtor();
         if (!Ctor) throw new Error('This browser cannot read barcodes from the camera.');
-        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } });
+        if (!navigator.mediaDevices?.getUserMedia) throw new Error('Camera API unavailable.');
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: 'environment' } },
+          audio: false,
+        });
         if (stopped) { stream.getTracks().forEach(t => t.stop()); return; }
         const el = video.current;
         if (!el) return;
         el.srcObject = stream;
+        el.setAttribute('playsinline', 'true');
+        el.muted = true;
         await el.play();
         const detector = new Ctor({ formats: FORMATS });
         timer = window.setInterval(() => {
@@ -244,29 +487,47 @@ function CameraScanner({ onDetect, onFile, onClose }: {
             if (raw && !done.current) { done.current = true; detect.current(raw); }
           }).catch(() => undefined);
         }, 250);
-      } catch (e) { setErr(e instanceof Error ? e.message : 'Camera unavailable.'); }
+      } catch (e) { setErr(errText(e) || 'Camera unavailable. Use Take photo instead.'); }
     })();
     return () => { stopped = true; window.clearInterval(timer); stream?.getTracks().forEach(t => t.stop()); };
   }, []);
-  return <div className="receive-modal" role="dialog" aria-modal="true" aria-label="Scan barcode with camera">
-    <div className="receive-modal-card">
-      <h3>Scan barcode</h3>
-      {err ? <p className="error">{err}</p> : <video ref={video} className="receive-video" playsInline muted />}
-      <div className="actions">
-        <label className="secondary receive-file-btn">Take photo of barcode
-          <input type="file" accept="image/*" capture="environment" className="sr-only" onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) onFile(f); }} />
-        </label>
-        <button type="button" className="secondary" onClick={onClose}>Close</button>
+  // Portal to body — app-mode uses position:fixed + overflow which clips nested fixed modals on iOS.
+  return createPortal(
+    <div className="receive-modal receive-modal-portal" role="dialog" aria-modal="true" aria-label="Scan barcode with camera">
+      <div className="receive-modal-card">
+        <h3>Scan barcode</h3>
+        {err ? <p className="error">{err}</p> : <video ref={video} className="receive-video" playsInline muted />}
+        <div className="actions">
+          <input
+            ref={fileInput}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="sr-only"
+            aria-hidden
+            tabIndex={-1}
+            onChange={e => {
+              const f = e.target.files?.[0];
+              e.target.value = '';
+              if (f) onFile(f);
+            }}
+          />
+          <button type="button" className="secondary receive-file-btn" onClick={() => fileInput.current?.click()}>
+            Take photo of barcode
+          </button>
+          <button type="button" className="secondary" onClick={onClose}>Close</button>
+        </div>
       </div>
-    </div>
-  </div>;
+    </div>,
+    document.body,
+  );
 }
 
 /* ================================================================================================ */
 
-export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
+export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome, initialManual, initialUpc, onAppCancel }: Props) {
   const [options, setOptions] = useState<Options | null>(null);
-  const [manual, setManual] = useState(false);
+  const [manual, setManual] = useState(!!initialManual);
   const [draft, setDraft] = useState('');
   const [queue, setQueue] = useState<Scan[]>([]);
   const [loadedId, setLoadedId] = useState<string | null>(null);
@@ -279,13 +540,45 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
   const [busy, setBusy] = useState(false);
   const [dups, setDups] = useState<Dups | null>(null);
   const [dupAck, setDupAck] = useState(false);
-  const [dialog, setDialog] = useState<null | 'ready' | 'reason'>(null);
+  const [dialog, setDialog] = useState<null | 'ready' | 'reason' | 'miss-photo' | 'photo-price'>(null);
   const [reason, setReason] = useState('damaged');
   const [reasonNote, setReasonNote] = useState('');
   const [camera, setCamera] = useState(false);
+  const [readyToList, setReadyToList] = useState(false);
+  const [readyAmazonTiktok, setReadyAmazonTiktok] = useState(false);
+  /** Store-only / not selling online — photo not required to receive. */
+  const [doNotList, setDoNotList] = useState(false);
+  const [photoIdBusy, setPhotoIdBusy] = useState(false);
+  const [photoIdStatus, setPhotoIdStatus] = useState('');
+  const [photoPrice, setPhotoPrice] = useState<PhotoPriceInfo | null>(null);
+  const missPhotoFile = useRef<HTMLInputElement>(null);
+  const missPromptedFor = useRef<string | null>(null);
 
   const upcInput = useRef<HTMLInputElement>(null);
+  const askInput = useRef<HTMLInputElement>(null);
   const cameraFile = useRef<HTMLInputElement>(null);
+  const takePhotoFile = useRef<HTMLInputElement>(null);
+  const choosePhotoFile = useRef<HTMLInputElement>(null);
+  const consumedInitialUpc = useRef(false);
+  /** Stable key for IndexedDB photo stash (survives camera-app process death on store phones). */
+  const photoSessionKey = useRef(`manual-${Date.now()}`);
+  const [photoBusy, setPhotoBusy] = useState(false);
+  // Android: never use inputMode="none" + focus (freezes Gboard until reboot). Soft keyboard
+  // only after an explicit tap; HID wedges use window-level capture (bindHidWedgeListener).
+  const [upcTyping, setUpcTyping] = useState(() => !scannerFieldStartsReadOnly());
+  const androidStore = isAndroidStoreDevice();
+  /** Store-phone on-screen pad — avoids broken Gboard for price / dims after scan or on first tap. */
+  const [numPadField, setNumPadField] = useState<'ask' | 'length' | 'width' | 'height' | 'weight' | null>(null);
+  const storePad = Boolean(androidStore && appChrome);
+
+  function openBarcodeCamera() {
+    // Phones / installed PWA: native capture is far more reliable than getUserMedia + BarcodeDetector.
+    if (preferNativeCapture() || appChrome || !detectorCtor()) {
+      cameraFile.current?.click();
+      return;
+    }
+    setCamera(true);
+  }
   const chain = useRef<Promise<void>>(Promise.resolve());
   const mounted = useRef(true);
   const askTouched = useRef(false);
@@ -297,7 +590,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
   const result = current?.result;
   const merged = result?.merged;
   const A = result?.amazon;
-  const U = result?.upcitemdb;
+  const formOpen = Boolean(manual || (current && current.status !== 'loading' && loadedId === current.id));
   const retail = useMemo(() => retailOf(result), [result]);
   const msrp = useMemo(() => msrpOf(result), [result]);
   const costParsed = cents(form.cost);
@@ -317,25 +610,65 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
   );
   const suggestion = useMemo(() => suggestAskCents(retail?.cents ?? null, floor), [retail, floor]);
 
-  const focusUpc = () => { requestAnimationFrame(() => upcInput.current?.focus()); };
+  // Keep the scan box focused for HID wedges when idle — never on Android (programmatic
+  // focus freezes Gboard until reboot). Android uses bindHidWedgeListener instead.
+  // Never focus while the unit form is open (Price / Brand need a clean IME).
+  const focusUpc = () => {
+    if (manual || formOpen || modalOpen.current) return;
+    if (androidStore) return;
+    if (upcTyping) return;
+    requestAnimationFrame(() => focusScannerField(upcInput.current, { softKeyboard: false }));
+  };
   const update = (key: keyof Form, value: string) => {
     if (key === 'ask') askTouched.current = true;
     setForm(prev => {
       const next = { ...prev, [key]: value };
       if (key === 'cost') next.costEstimate = false;
+      // Title is always brand + item specifics (scans and manual).
+      if (key === 'brand' || key === 'model') {
+        next.title = composeListingTitle(
+          key === 'brand' ? value : next.brand,
+          key === 'model' ? value : next.model,
+          next.unbranded,
+        );
+      }
       return next;
     });
   };
 
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
-  useEffect(() => { focusUpc(); }, []);
+  useEffect(() => {
+    if (!manual && !formOpen) focusUpc();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // Android: capture Bluetooth wedge only while idle on the scan box — never while the
+  // unit form / manual entry is open (first Brand/Price tap was freezing Gboard).
+  useEffect(() => {
+    if (!androidStore || manual || formOpen) return;
+    return bindHidWedgeListener({
+      active: () => !upcTyping && !modalOpen.current && Boolean(accessToken),
+      onScan: (code) => { enqueue(code); },
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [androidStore, manual, formOpen, upcTyping, accessToken]);
+  useEffect(() => {
+    if (!formOpen) return;
+    // Do not blurActiveInput() / effect-blur on Android — that races the associate's
+    // first tap (manual Brand / Price) and freezes Gboard until reboot.
+    if (!androidStore) {
+      const el = upcInput.current;
+      if (el && document.activeElement === el) el.blur();
+    }
+    setUpcTyping(false);
+    setNumPadField(null);
+  }, [formOpen, loadedId, androidStore]);
 
   async function loadOptions() {
     const { data, error: e } = await client.rpc('portal_receive_options');
     if (e) throw e;
     setOptions(data as Options);
   }
-  useEffect(() => { void loadOptions().catch(e => setError(e instanceof Error ? e.message : String(e))); }, [client]);
+  useEffect(() => { void loadOptions().catch(e => setError(errText(e))); }, [client]);
 
   /* ----- photo previews ----- */
   const previews = useMemo(() => files.map(f => URL.createObjectURL(f)), [files]);
@@ -357,7 +690,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
         const res = await lookupUpc(accessToken, upc);
         if (mounted.current) setQueue(q => q.map(s => (s.id === id ? { ...s, status: 'ready', result: res, error: undefined } : s)));
       } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
+        const msg = errText(e);
         reportClientError(accessToken, { message: `upc_lookup failed: ${msg}`, page: 'inventory/receive', action_name: 'upc_lookup', sku: upc });
         if (mounted.current) setQueue(q => q.map(s => (s.id === id ? { ...s, status: 'error', error: msg } : s)));
       }
@@ -376,6 +709,12 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
     focusUpc();
   }
 
+  useEffect(() => {
+    if (!initialUpc || consumedInitialUpc.current || manual) return;
+    consumedInitialUpc.current = true;
+    enqueue(initialUpc);
+  }, [initialUpc, manual]);
+
   function retry(scan: Scan) {
     setQueue(q => q.map(s => (s.id === scan.id ? { ...s, status: 'loading', error: undefined } : s)));
     setLoadedId(null);
@@ -386,11 +725,15 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
     askTouched.current = false;
     setForm({ ...blank, ...keepProduct });
     setFiles([]);
+    void clearPendingPhotos(pendingPhotoKey(storeId, photoSessionKey.current));
     setDups(null);
     setDupAck(false);
     setDialog(null);
     setReason('damaged');
     setReasonNote('');
+    setReadyToList(false);
+    setReadyAmazonTiktok(false);
+    setDoNotList(false);
   }
 
   /* Load the head of the queue into the form once its lookup has settled. */
@@ -411,12 +754,18 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
       title: m?.title, brand: m?.brand, model: m?.model, category: m?.category,
     });
     const suggested = suggestAskCents(retailNow?.cents ?? null, floorSuggest);
+    // Item specifics = pack phrase / aspects / real MPN — never retailer digit codes (e.g. "4610583").
+    const specifics = itemSpecificsFromLookup(m);
+    const brand = text(m?.brand);
     const initial: Form = {
       ...blank,
       upc: current.upc,
-      brand: text(m?.brand),
-      model: text(m?.model),
-      title: text(m?.title),
+      brand,
+      unbranded: false,
+      model: specifics,
+      // Title = brand + model (not Amazon's long catalog title).
+      title: composeListingTitle(brand, specifics, false),
+      category: text(m?.category),
       // description falls back to the real feature bullets from the lookup; never invented text
       description: text(m?.description) || featuresText(m?.features),
       length: num(p?.length_in), width: num(p?.width_in), height: num(p?.height_in), weight: num(p?.weight_lb),
@@ -425,10 +774,26 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
       ...(current.seed || {}),
       costEstimate: current.seed?.cost ? false : true,
     };
+    // Seed may override brand/model — keep title in sync.
+    initial.title = composeListingTitle(initial.brand, initial.model, initial.unbranded);
     askTouched.current = Boolean(current.seed && 'ask' in current.seed);
     setForm(initial);
+    const miss = current.status === 'ready' || current.status === 'error'
+      ? (current.status === 'error' ? null : catalogMissMessage(r))
+      : null;
+    if (miss && !isTrueCatalogMiss(r)) setWarning(miss);
+    else if (A?.price_pending && !retailNow) setWarning('Amazon catalog found, but pricing was rate-limited — enter price by hand or retry for a suggested retail.');
+    else if (!retailNow && (r?.amazon?.found || r?.upcitemdb?.found)) setWarning('No retail price from Amazon/UPCitemdb — enter price by hand.');
+    else setWarning('');
+    photoSessionKey.current = current.id;
     setFiles([]);
-    setDialog(null);
+    // Instant miss popup (photo fallback). Do not re-prompt the same scan id.
+    if (isTrueCatalogMiss(r) && missPromptedFor.current !== current.id) {
+      missPromptedFor.current = current.id;
+      setDialog('miss-photo');
+    } else {
+      setDialog(null);
+    }
     setDupAck(Boolean(current.again));
     setDups(null);
     if (!current.again) setLast(null);
@@ -436,7 +801,18 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
     activeScan.current = current.id;
     const scanId = current.id;
     void findDups(upcVariants(current.upc, r)).then(d => { if (mounted.current && activeScan.current === scanId) setDups(d); });
-    focusUpc();
+    // Restore photos if the camera app killed the PWA mid-capture for this scan.
+    void loadPendingPhotos(pendingPhotoKey(storeId, scanId)).then(restored => {
+      if (!mounted.current || activeScan.current !== scanId || !restored.length) return;
+      setFiles(restored);
+    });
+    setReadyToList(false);
+    setReadyAmazonTiktok(false);
+    setDoNotList(false);
+    setUpcTyping(false);
+    setNumPadField(null);
+    // Avoid effect-driven blur on Android (wedges Gboard). Unmount scan box instead when formOpen.
+    if (!androidStore) upcInput.current?.blur();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current?.id, current?.status, manual, loadedId]);
 
@@ -448,24 +824,19 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
 
   function toggleManual() {
     setError(''); setWarning('');
-    if (!manual) { setManual(true); return; }
+    setNumPadField(null);
+    if (!manual) {
+      photoSessionKey.current = `manual-${storeId}`;
+      // Leaving the scan box: drop typing/focus state before unmount so Gboard isn't wedged.
+      setUpcTyping(false);
+      setManual(true);
+      return;
+    }
     setManual(false);
     setLoadedId(null);
+    setUpcTyping(!scannerFieldStartsReadOnly());
     resetEntry();
   }
-
-  /* ----- helpers on the compare table ----- */
-  const disagree = new Map<string, Disagreement>((merged?.disagreements || []).map(d => [d.field, d]));
-  const pkgDisagrees = [...disagree.keys()].some(k => k.startsWith('package.'));
-  const setFrom = (key: 'title' | 'brand' | 'model', value?: string | null) => { if (value) update(key, value); };
-  const setPackage = (p?: Pkg) => {
-    if (!p) return;
-    setForm(prev => ({
-      ...prev,
-      length: num(p.length_in) || prev.length, width: num(p.width_in) || prev.width,
-      height: num(p.height_in) || prev.height, weight: num(p.weight_lb) || prev.weight,
-    }));
-  };
 
   /* ----- validation / completeness ----- */
   type Parsed = { ask: number | null; cost: number | null; dims: (number | null)[] };
@@ -483,26 +854,41 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
     if (dims.some(v => v === undefined)) { setError('Dimensions and weight must be positive numbers (or blank).'); return null; }
     return { ask, cost, dims: dims as (number | null)[] };
   }
+  function brandReady() {
+    if (form.unbranded) return true;
+    const value = form.brand.trim();
+    if (!value) return false;
+    return !/^(generic|unknown|n\/?a|does not apply)$/i.test(value);
+  }
+  function upcReady() {
+    if (form.noUpc) return true;
+    return Boolean((form.upc.trim() || current?.upc || '').trim());
+  }
+  /** Listing requirements only (price, condition, category, brand, UPC, weight+dims, item specifics, photo). */
   function missingFor(p: Parsed): string[] {
     const out: string[] = [];
-    if (!form.title.trim()) out.push('title');
-    if (!form.model.trim()) out.push('model');
     if (!pos(p.ask)) out.push('price');
-    if (!form.description.trim()) out.push('description/features');
-    if (p.dims.some(d => !pos(d))) out.push('package L/W/H/weight');
-    if (!files.length) out.push('photo');
+    if (!form.condition) out.push('condition');
+    if (!form.category.trim()) out.push('category');
+    if (!brandReady()) out.push('brand');
+    if (!upcReady()) out.push('UPC');
+    if (p.dims.some(d => !pos(d))) out.push('weight + box dimensions');
+    if (!form.model.trim()) out.push('item specifics');
+    if (!doNotList && !files.length) out.push('photo');
     return out;
   }
   const liveMissing = (() => {
     const a = cents(form.ask);
     const dims = [form.length, form.width, form.height, form.weight].map(v => Number(v.trim()));
     const out: string[] = [];
-    if (!form.title.trim()) out.push('title');
-    if (!form.model.trim()) out.push('model');
     if (!pos(typeof a === 'number' ? a : null)) out.push('price');
-    if (!form.description.trim()) out.push('description/features');
-    if (dims.some(d => !pos(d))) out.push('package L/W/H/weight');
-    if (!files.length) out.push('photo');
+    if (!form.condition) out.push('condition');
+    if (!form.category.trim()) out.push('category');
+    if (!brandReady()) out.push('brand');
+    if (!upcReady()) out.push('UPC');
+    if (dims.some(d => !pos(d))) out.push('weight + box dimensions');
+    if (!form.model.trim()) out.push('item specifics');
+    if (!doNotList && !files.length) out.push('photo');
     return out;
   })();
 
@@ -514,15 +900,16 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
     if (!manual && current?.status === 'loading') { setError('Lookup still running…'); return; }
     const quantity = manual ? Number(form.quantity) : 1;
     if (!Number.isInteger(quantity) || quantity < 1 || quantity > 100) { setError('Quantity must be 1–100.'); return; }
-    if (files.some(file => !file.type.startsWith('image/') || file.size > 15 * 1024 * 1024)) {
+    if (files.some(file => (file.type && !file.type.startsWith('image/')) || file.size > PHOTO_MAX_BYTES)) {
       setError('Photos must be images under 15 MB each.'); return;
     }
     if (!manual) {
-      if (!files.length) { setError('Add at least one real photo of this unit before finishing.'); return; }
-      if (files.some(f => f.size < 2048)) { setError('One of the photos looks empty or too small. Retake it.'); return; }
-      if (!form.condition) { setError('Pick a condition: New (sealed), Open box, or Scratch & dent.'); return; }
+      // Do not list for sale: photo is optional — unit stays off the website/marketplaces.
+      if (!doNotList && !files.length) { setError('Add at least one real photo of this unit before finishing, or check Do not list for sale.'); return; }
+      if (files.some(f => f.size < PHOTO_MIN_BYTES)) { setError('One of the photos looks empty or too small. Retake it.'); return; }
+      if (!form.condition) { setError('Pick a condition: New (sealed), Open box, or Defective/non-sellable.'); return; }
     }
-    if (form.condition === SCRATCH && !form.conditionNote.trim()) { setError('Scratch & dent needs a note describing the damage.'); return; }
+    if (isDefectiveCondition(form.condition) && !form.conditionNote.trim()) { setError('Defective/non-sellable needs a note describing the defect.'); return; }
     const parsed = parse();
     if (!parsed) return;
     // Duplicate check right before create (another device may have received it meanwhile).
@@ -531,7 +918,30 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
       const d = await findDups(upcVariants(upc, result));
       if (d && d.count > 0) { setDups(d); setError(`You already have ${d.count} of these in stock. Tap "Add another unit" to confirm this is a new one.`); return; }
     }
-    if (missingFor(parsed).length === 0) { setDialog('ready'); return; }
+    const gaps = missingFor(parsed);
+    if (doNotList) {
+      if (gaps.length) {
+        setWarning(`Saving without listing. Still incomplete (ok for store-only): ${gaps.join(', ')}.`);
+      } else {
+        setWarning('Saving without listing — hidden from the website and marketplaces.');
+      }
+      await receive(parsed, null);
+      return;
+    }
+    if (readyToList) {
+      if (gaps.length) {
+        setError(`Ready to list needs: ${gaps.join(', ')}. Uncheck Ready to list to save into Needs attention.`);
+        return;
+      }
+      await receive(parsed, null);
+      return;
+    }
+    // Never block save or price for missing listing fields. Incomplete units keep
+    // their ask (if any) and land in Needs attention until Push/list requirements
+    // are filled. Marketplace push enforces channel-specific fields.
+    if (gaps.length) {
+      setWarning(`Saving now. Still needed for listing (Needs attention): ${gaps.join(', ')}.`);
+    }
     await receive(parsed, null);
   }
 
@@ -543,23 +953,27 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
       const quantity = manual ? Number(form.quantity) : 1;
       const holdLabel = hold ? (HOLD_REASONS.find(([k]) => k === hold.reason)?.[1] || hold.reason) : '';
       const notes = [
-        form.condition === SCRATCH ? `Scratch & dent: ${form.conditionNote.trim()}` : '',
+        isDefectiveCondition(form.condition) ? `Defective/non-sellable: ${form.conditionNote.trim()}` : '',
         hold ? `Not listing — ${holdLabel}${hold.note.trim() ? `: ${hold.note.trim()}` : ''}` : '',
         form.notes.trim(),
       ].filter(Boolean).join('\n');
+      const brandValue = form.unbranded ? 'Unbranded' : form.brand.trim();
+      // Scans and manual: title is always brand + item specifics (never catalog junk / digit codes).
+      const titleValue = composeListingTitle(form.brand, form.model, form.unbranded);
       const { data, error: e } = await client.rpc('portal_receive_unit', {
         p_quantity: quantity,
-        p_brand: form.brand.trim(),
+        p_brand: brandValue,
         p_model: form.model.trim(),
-        p_title: form.title.trim(),
+        p_title: titleValue,
+        p_category: form.category.trim() || null,
         p_description: form.description.trim() || null,
         p_condition: form.condition || null,
         p_test_status: form.testStatus || null,
-        p_ask_cents: hold ? null : parsed.ask, // held units never get an ask
+        p_ask_cents: hold ? null : parsed.ask, // held units never get an ask; priced incomplete keeps ask
         p_cost_cents: parsed.cost ?? floor.costCents,
         p_notes: notes || null,
-        p_upc: form.upc.trim() || current?.upc || null,
-        p_shippable: form.shippable,
+        p_upc: form.noUpc ? null : (form.upc.trim() || current?.upc || null),
+        p_shippable: form.shippable || 'auto',
         p_length: parsed.dims[0],
         p_width: parsed.dims[1],
         p_height: parsed.dims[2],
@@ -571,38 +985,67 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
       const warnings: string[] = [];
 
       let failed = 0;
+      const uploadErrors: string[] = [];
       for (const sku of skus) for (const file of files) {
         const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, '_') || 'photo.jpg';
         const path = `${storeId}/${sku}/${Date.now()}-${crypto.randomUUID()}-${safe}`;
         try {
-          const upload = await client.storage.from('unit-photos').upload(path, file, { contentType: file.type, upsert: false });
+          const contentType = file.type && file.type.startsWith('image/') ? file.type : 'image/jpeg';
+          const upload = await client.storage.from('unit-photos').upload(path, file, { contentType, upsert: false });
           if (upload.error) throw upload.error;
           const linked = await client.rpc('portal_add_unit_photo', { p_sku: sku, p_path: path });
           if (linked.error) throw linked.error;
-        } catch { failed++; }
+        } catch (err) {
+          failed++;
+          const msg = errText(err);
+          if (msg && uploadErrors.length < 2) uploadErrors.push(msg);
+        }
       }
-      if (failed) warnings.push(`${failed} photo upload(s) did not finish. The unit(s) were received; they will show under Needs attention → Missing photo.`);
+      if (failed) {
+        warnings.push(`${failed} photo upload(s) did not finish. The unit(s) were received; they will show under Needs attention → Missing photo.${uploadErrors.length ? ` (${uploadErrors.join('; ')})` : ''}`);
+      } else if (files.length) {
+        void clearPendingPhotos(pendingPhotoKey(storeId, photoSessionKey.current));
+      }
 
       // Merge lookup data (and any hold) into the new unit(s).
       const blocked = skus.includes(NEVER_LIST_SKU);
-      const enrichFailed = await enrichUnits(skus, parsed, hold, blocked);
+      const enrichFailed = await enrichUnits(skus, parsed, hold, blocked || doNotList);
       if (enrichFailed) warnings.push(`Could not save lookup details on ${enrichFailed} unit(s).${hold ? ' They have no price, so they will not list.' : ''}`);
       if (blocked) warnings.push(`SKU ${NEVER_LIST_SKU} is a permanent do-not-list item; it was hidden from the website.`);
+      else if (doNotList) warnings.push('Marked Do not list for sale — hidden from the website and marketplaces.');
       if (warnings.length) setWarning(warnings.join(' '));
 
       // Remember product data for "Add another unit".
       const seed: Partial<Form> = {
-        brand: form.brand, model: form.model, title: form.title, description: form.description,
+        brand: brandValue, unbranded: form.unbranded, noUpc: form.noUpc,
+        model: form.model, title: titleValue, category: form.category, description: form.description,
         ask: hold ? '' : form.ask, testStatus: '', shippable: form.shippable,
-        length: form.length, width: form.width, height: form.height, weight: form.weight, upc: form.upc || current?.upc || '',
+        length: form.length, width: form.width, height: form.height, weight: form.weight,
+        upc: form.noUpc ? '' : (form.upc || current?.upc || ''),
       };
       if (hold) delete seed.ask;
       setLast({ upc: (form.upc || current?.upc || '').trim(), result, seed });
 
       if (manual) {
         askTouched.current = false;
-        setForm(prev => ({ ...blank, brand: prev.brand, condition: prev.condition, testStatus: prev.testStatus, shippable: prev.shippable }));
+        // Keep brand/condition for the next unit; title stays brand (+ empty model) until specifics are typed.
+        setForm(prev => {
+          const brand = prev.brand;
+          const unbranded = prev.unbranded;
+          return {
+            ...blank,
+            brand,
+            unbranded,
+            condition: prev.condition,
+            testStatus: prev.testStatus,
+            shippable: prev.shippable,
+            title: composeListingTitle(brand, '', unbranded),
+          };
+        });
         setFiles([]); setDups(null); setDupAck(false);
+        setReadyToList(false);
+        setReadyAmazonTiktok(false);
+        setDoNotList(false);
       } else {
         const doneId = current?.id;
         setQueue(q => q.filter(s => s.id !== doneId));
@@ -612,7 +1055,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
       onSaved();
       await loadOptions().catch(() => setWarning(w => `${w} Units were received. Refresh the page to see the next suggested SKU.`.trim()));
       focusUpc();
-    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    } catch (e) { setError(errText(e)); }
     finally { setBusy(false); }
   }
 
@@ -633,22 +1076,39 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
       put('retail_source', retail?.source);
       put('retail_as_of', retail?.asOf);
       put('features', (m?.features || []).map(f => f.trim()).filter(Boolean));
+      if (m?.aspects && Object.keys(m.aspects).length) {
+        put('amazon_aspects', m.aspects);
+        put('ebay_aspects', { ...m.aspects });
+      }
       if (parsed.dims.some(pos)) put('package_source', packageSource(parsed));
       if (form.costEstimate || parsed.cost == null) {
         put('cost_estimate', true);
         put('cost_source', floor.costLabel);
       }
       if (A?.price_pending) put('amazon_price_pending', true);
-    } else if (manual && form.upc.trim()) {
+    } else if (manual && form.upc.trim() && !form.noUpc) {
       put('upc', form.upc.trim());
     }
+    if (form.noUpc) {
+      const existing = (specs.ebay_aspects && typeof specs.ebay_aspects === 'object')
+        ? (specs.ebay_aspects as Record<string, unknown>)
+        : {};
+      put('ebay_aspects', { ...existing, UPC: UPC_NOT_APPLICABLE });
+      put('upc', UPC_NOT_APPLICABLE);
+    }
+    if (!doNotList && readyAmazonTiktok) put('ready_amazon_tiktok', true);
+    if (!doNotList && readyToList) put('ready_to_list', true);
+    if (doNotList) put('do_not_list', true);
     if (hold) { put('hold_reason', hold.reason); put('hold_note', hold.note.trim()); }
-    const hide = Boolean(hold) || forceHide;
+    const hide = Boolean(hold) || forceHide || doNotList;
     if (!Object.keys(specs).length && !hide) return 0;
 
     const patch = {
       specs, msrp: msrp, show: hide ? false : null,
-      brand: form.brand.trim(), model: form.model.trim(), title: form.title.trim(), description: form.description.trim(),
+      brand: form.unbranded ? 'Unbranded' : form.brand.trim(),
+      model: form.model.trim(),
+      title: composeListingTitle(form.brand, form.model, form.unbranded),
+      description: form.description.trim(),
     };
     let failed = 0;
     for (const sku of skus) { if (!(await enrichOne(sku, patch))) failed++; }
@@ -727,73 +1187,189 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
     focusUpc();
   }
 
-  function addFiles(list: FileList | null) {
+  async function ingestFiles(list: FileList | null) {
     if (!list || !list.length) return;
-    setFiles(prev => [...prev, ...Array.from(list)]);
+    // Snapshot the list before any await — FileList is live and clears with the input.
+    const raw = Array.from(list);
+    setPhotoBusy(true);
+    setError('');
+    try {
+      const copied: File[] = [];
+      let rejected = 0;
+      for (const file of raw) {
+        const next = await copyImageFile(file);
+        if (next) copied.push(next);
+        else rejected++;
+      }
+      if (!copied.length) {
+        setError(rejected
+          ? 'Camera photo could not be saved. Try Take photo again, or use Choose photos.'
+          : 'No photo was returned. Try Take photo again.');
+        return;
+      }
+      setFiles(prev => {
+        const next = [...prev, ...copied];
+        void savePendingPhotos(pendingPhotoKey(storeId, photoSessionKey.current), next);
+        return next;
+      });
+      if (rejected) setWarning(`${rejected} photo(s) looked empty or too large and were skipped.`);
+    } finally {
+      setPhotoBusy(false);
+    }
   }
 
-  const picker = (labelText: string, key: Exclude<keyof Form, 'costEstimate'>, values: string[]) => (
-    <label>{labelText}<select value={form[key]} onChange={e => update(key, e.target.value)}>
-      <option value="">—</option>{values.map(x => <option key={x} value={x}>{x}</option>)}
-    </select></label>
-  );
+  /** Barcode miss → one product photo → identify + asking-price median popup. */
+  async function identifyMissPhoto(list: FileList | null) {
+    if (!list?.length || !current) return;
+    const raw = list[0];
+    const file = await copyImageFile(raw);
+    if (!file) {
+      setError('Could not read that photo. Try one clear picture of the box or label.');
+      return;
+    }
+    setPhotoIdBusy(true);
+    setPhotoIdStatus('Identifying product…');
+    setError('');
+    setDialog(null);
+    try {
+      setFiles([file]);
+      void savePendingPhotos(pendingPhotoKey(storeId, photoSessionKey.current), [file]);
+      const image_base64 = await fileToBase64(file);
+      const res = await fetch(floorFunctionUrl('receive-photo-identify'), {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          upc: current.upc,
+          miss_id: current.result?.miss_id || null,
+          image_base64,
+          mime_type: file.type || 'image/jpeg',
+        }),
+      });
+      const json = await res.json().catch(() => ({} as { error?: string; message?: string }));
+      if (!res.ok) {
+        setError(json.message || json.error || 'Photo identify failed. Fill fields by hand, or retry.');
+        setWarning(catalogMissMessage(current.result) || '');
+        return;
+      }
+      const brand = text(json.fill?.brand || json.identity?.brand);
+      const model = text(json.fill?.model || json.identity?.model);
+      const title = text(json.fill?.title) || composeListingTitle(brand, model, false);
+      setPhotoIdStatus(title || 'Product found');
+      setForm(prev => ({
+        ...prev,
+        brand: brand || prev.brand,
+        unbranded: false,
+        model: model || prev.model,
+        title: title || composeListingTitle(brand || prev.brand, model || prev.model, false),
+      }));
+      const price = json.price as PhotoPriceInfo | undefined;
+      setPhotoPrice(price || null);
+      if (price?.median_cents) {
+        askTouched.current = false;
+        setForm(prev => ({ ...prev, ask: dollars(price.median_cents!) }));
+      }
+      setDialog('photo-price');
+      setWarning('');
+    } catch (e) {
+      setError(errText(e) || 'Photo identify failed. Fill fields by hand.');
+    } finally {
+      setPhotoIdBusy(false);
+      setPhotoIdStatus('');
+    }
+  }
 
-  const cmpRow = (name: string, a: string, u: string, flagged: boolean, actions?: React.ReactNode) => (
-    <tr className={flagged ? 'receive-flagged' : undefined} key={name}>
-      <td><strong>{name}</strong></td>
-      <td>{a || <span className="hint">—</span>}</td>
-      <td>{u || <span className="hint">—</span>}</td>
-      <td>{flagged && <span className="tag warn">disagree</span>}{actions}</td>
-    </tr>
-  );
-  const textRow = (key: 'title' | 'brand' | 'model', name: string) => {
-    const a = text(A?.found ? A[key] : null);
-    const u = text(U?.found ? U[key] : null);
-    const differ = Boolean(a && u && !same(a, u));
-    return cmpRow(name, a, u, disagree.has(key) || differ, differ && <>
-      {' '}<button type="button" className="text-button" onClick={() => setFrom(key, a)}>Use Amazon</button>
-      <button type="button" className="text-button" onClick={() => setFrom(key, u)}>Use UPCitemdb</button>
-    </>);
-  };
+  // Manual entry: restore any stashed photos after a camera-app kill.
+  useEffect(() => {
+    if (!manual) return;
+    photoSessionKey.current = `manual-${storeId}`;
+    let alive = true;
+    void loadPendingPhotos(pendingPhotoKey(storeId, photoSessionKey.current)).then(restored => {
+      if (!alive || !restored.length) return;
+      setFiles(prev => (prev.length ? prev : restored));
+    });
+    return () => { alive = false; };
+  }, [manual, storeId]);
 
   const showForm = manual || (current && current.status !== 'loading' && loadedId === current.id);
   const waiting = queue.length - (current ? 1 : 0);
   const hasFiles = files.length > 0;
-  const needNoteForScratch = form.condition === SCRATCH;
+  const needNoteForScratch = isDefectiveCondition(form.condition);
   const holdReady = reason !== 'other' || reasonNote.trim().length > 0;
+  const catalogMiss = !manual && current?.status === 'ready' ? catalogMissMessage(result) : null;
+  const trueMiss = !manual && current?.status === 'ready' && isTrueCatalogMiss(result);
 
-  return <section className="panel receive-panel">
+  return <section className={`panel receive-panel${appChrome ? ' receive-app' : ''}`}>
+    {appChrome && (
+      <div className="app-nav receive-app-nav">
+        <button type="button" onClick={() => onAppCancel?.()}>Cancel</button>
+        <div className="app-nav-title">Receive · {options?.next_sku || '…'}</div>
+        <button type="button" disabled={busy || !options?.next_sku} onClick={() => {
+          const formEl = document.getElementById('receive-app-form') as HTMLFormElement | null;
+          formEl?.requestSubmit();
+        }}>Save</button>
+      </div>
+    )}
     <div className="receive-next">
       <div className="receive-sku-block">
         <div><div className="eyebrow">NEXT AVAILABLE SKU</div><strong>{options?.next_sku || 'Loading…'}</strong></div>
-        {!manual && <label className="receive-upc">Scan UPC
+        {!manual && formOpen && androidStore && (
+          <p className="hint receive-scan-idle">Working on {current?.upc || 'this item'} — tap a field below (number pad for price).</p>
+        )}
+        {/* Unmount the scan box on Android once the form is open — a lingering focused/readOnly
+            UPC input is what wedges Gboard on the first Brand/Price tap (scan and manual). */}
+        {!manual && !(androidStore && formOpen) && <label className="receive-upc">Scan UPC
           <input
             ref={upcInput}
             value={draft}
             onChange={e => setDraft(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); enqueue(draft); } }}
-            onBlur={() => { setTimeout(() => { if (!modalOpen.current && (!document.activeElement || document.activeElement === document.body)) upcInput.current?.focus(); }, 0); }}
-            autoFocus
-            inputMode={scannerInputMode()}
+            onClick={() => {
+              if (formOpen) return;
+              // Explicit tap = user wants the soft keyboard.
+              if (androidStore || isKioskShell()) {
+                setUpcTyping(true);
+                requestAnimationFrame(() => focusScannerField(upcInput.current, { softKeyboard: true }));
+              }
+            }}
+            onBlur={() => {
+              // Never steal focus back on Android — that fight freezes the system keyboard.
+              if (androidStore || formOpen || manual || modalOpen.current) return;
+              setTimeout(() => {
+                if (modalOpen.current || formOpen || androidStore) return;
+                if (!document.activeElement || document.activeElement === document.body) {
+                  focusScannerField(upcInput.current);
+                }
+              }, 0);
+            }}
+            autoFocus={!formOpen && !androidStore && !scannerFieldStartsReadOnly()}
+            readOnly={!upcTyping}
+            inputMode={androidStore && !upcTyping ? undefined : (upcTyping ? 'numeric' : scannerInputMode())}
+            data-hid-wedge={androidStore && !upcTyping ? '1' : undefined}
             autoComplete="off"
             enterKeyHint="done"
-            placeholder={isKioskShell() ? 'Scan barcode' : 'Scan or type · Enter'}
+            placeholder={
+              isKioskShell() || androidStore
+                ? (upcTyping ? 'Type UPC · Enter' : 'Scan barcode (tap to type)')
+                : 'Scan or type · Enter'
+            }
             disabled={!accessToken}
           />
         </label>}
-        {!manual && <div className="actions">
+        {!manual && !formOpen && <div className="actions">
           <button type="button" disabled={!draft.trim()} onClick={() => enqueue(draft)}>Look up</button>
-          <button type="button" className="secondary" onClick={() => { if (detectorCtor()) setCamera(true); else cameraFile.current?.click(); }}>Camera</button>
+          <button type="button" className="secondary" onClick={openBarcodeCamera}>Camera</button>
           <input ref={cameraFile} type="file" accept="image/*" capture="environment" className="sr-only" aria-label="Photo of barcode" onChange={e => {
             const f = e.target.files?.[0]; e.target.value = '';
             if (f) void decodeFile(f).then(code => { if (code) enqueue(code); else { setError('This browser cannot read barcodes from photos. Type the digits under the barcode instead.'); focusUpc(); } });
           }} />
         </div>}
       </div>
-      <div>
-        <p>{manual ? 'Manual entry: no lookup. Same fields as Browse → edit unit.' : 'Scan a UPC, check the product data, add a photo and condition, then confirm the price.'}</p>
-        <button type="button" className="text-button" onClick={toggleManual}>{manual ? '← Back to scan' : 'Enter manually'}</button>
-      </div>
+      {!appChrome && (
+        <div>
+          <p>{manual ? 'Manual entry: fill listing fields, add a photo, then receive.' : 'Scan a UPC, edit the listing fields, add a photo, then receive.'}</p>
+          <button type="button" className="text-button" onClick={toggleManual}>{manual ? '← Back to scan' : 'Enter manually'}</button>
+        </div>
+      )}
     </div>
 
     {!manual && queue.length > 0 && <p className="hint" role="status">
@@ -809,10 +1385,10 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
     {warning && <p className="hint">{warning}</p>}
     {error && <div className="alert" role="alert">{error}<button type="button" onClick={() => setError('')}>Dismiss</button></div>}
 
-    {!manual && !current && <div className="empty">Scan a UPC to start. Rapid scans are queued.</div>}
+    {!appChrome && !manual && !current && <div className="empty">Scan a UPC to start. Rapid scans are queued.</div>}
     {!manual && current?.status === 'loading' && <div className="empty">Looking up {current.upc}…</div>}
 
-    {showForm && <form onSubmit={e => void finish(e)}>
+    {showForm && <form id={appChrome ? 'receive-app-form' : undefined} onSubmit={e => void finish(e)}>
       {dups && dups.count > 0 && <div className="receive-dup" role="status">
         <strong>You have {dups.count} of these</strong>{dups.skus.length ? <> (SKU {dups.skus.slice(0, 8).join(', ')}{dups.skus.length > 8 ? '…' : ''})</> : null}
         {!dupAck ? <> <button type="button" className="secondary" onClick={confirmDup}>Add another unit</button></> : <span className="tag on">confirmed — new unit</span>}
@@ -824,40 +1400,43 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
         <button type="button" onClick={() => retry(current)}>Retry</button>
       </div>}
 
-      {!manual && result && <div className="receive-compare">
-        <div className="eyebrow">LOOKUP{result.cached ? ' · CACHED' : ''} · {upcVariants(current?.upc || '', result).join(' / ')}</div>
-        <div className="table-wrap"><table className="tbl">
-          <thead><tr><th>Field</th><th>Amazon</th><th>UPCitemdb</th><th /></tr></thead>
-          <tbody>
-            {textRow('title', 'Title')}
-            {textRow('brand', 'Brand')}
-            {textRow('model', 'Model')}
-            {cmpRow('Description', text(A?.description).slice(0, 140), text(U?.description).slice(0, 140), false)}
-            {cmpRow('Features', A?.features?.length ? `${A.features.length} bullets` : '', U?.features?.length ? `${U.features.length} bullets` : '', false)}
-            {cmpRow('Package', pkgText(A?.package), pkgText(U?.package), pkgDisagrees, pkgDisagrees && <>
-              {' '}<button type="button" className="text-button" onClick={() => setPackage(A?.package)}>Use Amazon</button>
-              <button type="button" className="text-button" onClick={() => setPackage(U?.package)}>Use UPCitemdb</button>
-            </>)}
-            {cmpRow('Retail price', pos(A?.price_cents) ? `${money(A.price_cents)}${A.price_source ? ` (${label(A.price_source)})` : ''}` : (A?.price_pending ? 'pending (rate limit)' : ''), pos(U?.price_cents) ? `${money(U.price_cents)}${U.price_source ? ` (${label(U.price_source)})` : ''}` : '', false)}
-            {cmpRow('ASIN', text(A?.asin), text(U?.asin), disagree.has('asin'))}
-          </tbody>
-        </table></div>
-        {[...disagree.keys()].length > 0 && <p className="hint" role="status">Sources disagree on: {[...disagree.keys()].map(k => k.replace('package.', 'package ').replace(/_/g, ' ')).join(', ')}. Check the box/label before saving. Blank means no source had a value.</p>}
-        {A?.raw_error && <p className="hint">Amazon: {A.raw_error}</p>}
-        {merged?.never_list_reason && <p className="hint">Amazon will not list this: {merged.never_list_reason}</p>}
-        {!A?.found && !U?.found && <p className="hint">No source knew this UPC. Fill the fields by hand — nothing was guessed.</p>}
+      {catalogMiss && current && <div className="alert" role="alert">
+        <span>{catalogMiss}</span>
+        {trueMiss && (
+          <button type="button" disabled={photoIdBusy} onClick={() => setDialog('miss-photo')}>
+            Scan with camera
+          </button>
+        )}
+        <button type="button" onClick={() => retry(current)}>Retry lookup</button>
       </div>}
+      {photoIdBusy && <p className="hint" role="status">{photoIdStatus || 'Identifying from photo…'}</p>}
+
+      {!manual && merged?.never_list_reason && <p className="hint">Amazon will not list this: {merged.never_list_reason}</p>}
 
       <div className="unit-edit-grid">
-        {manual && <label>UPC<input value={form.upc} onChange={e => { update('upc', e.target.value); setDups(null); setDupAck(false); }} inputMode={scannerInputMode()} autoComplete="off" placeholder="optional" /></label>}
-        {manual && <label>Quantity<input type="number" min="1" max="100" step="1" value={form.quantity} onChange={e => update('quantity', e.target.value)} required /></label>}
-        <label>Brand<input value={form.brand} onChange={e => update('brand', e.target.value)} /></label>
-        <label>Model<input value={form.model} onChange={e => update('model', e.target.value)} /></label>
-        <label className="unit-edit-wide">Title<input value={form.title} onChange={e => update('title', e.target.value)} /></label>
-        <label className="unit-edit-wide">Description / features<textarea rows={4} value={form.description} onChange={e => update('description', e.target.value)} /></label>
+        <label className={liveMissing.includes('price') ? 'receive-need' : undefined}>
+          Price{liveMissing.includes('price')
+            ? ' (needed to list)'
+            : (retail && !askTouched.current
+              ? ` (suggested from ${retail.source}${retail.asOf ? ` · ${retail.asOf.slice(0, 10)}` : ''} — edit if needed)`
+              : ' (no source price — type it)')}
+          <input
+            ref={askInput}
+            inputMode={storePad ? undefined : 'decimal'}
+            enterKeyHint="done"
+            placeholder="24.99"
+            value={form.ask}
+            onChange={e => update('ask', e.target.value)}
+            onPointerDown={(e) => padPointerDown(storePad, e)}
+            onClick={() => { if (storePad) setNumPadField('ask'); }}
+            autoComplete="off"
+            readOnly={storePad || undefined}
+            tabIndex={storePad ? 0 : undefined}
+          />
+        </label>
 
-        <div className="unit-edit-wide receive-cond" role="radiogroup" aria-label="Condition">
-          <span className="receive-label">Condition{manual ? '' : ' (required)'}</span>
+        <div className={`unit-edit-wide receive-cond${liveMissing.includes('condition') ? ' receive-need' : ''}`} role="radiogroup" aria-label="Condition">
+          <span className="receive-label">Condition{liveMissing.includes('condition') ? ' (needed to list)' : ''}</span>
           {manual
             ? <select value={form.condition} onChange={e => update('condition', e.target.value)}>
               <option value="">—</option>{[...new Set([...choices(options?.conditions), SCRATCH])].map(x => <option key={x} value={x}>{x}</option>)}
@@ -866,56 +1445,246 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
               <input type="radio" name="receive-condition" value={value} checked={form.condition === value} onChange={() => update('condition', value)} />{text2}
             </label>)}</div>}
         </div>
-        {needNoteForScratch && <label className="unit-edit-wide">What is scratched or dented? (required)<textarea rows={2} value={form.conditionNote} onChange={e => update('conditionNote', e.target.value)} /></label>}
+        {needNoteForScratch && <label className="unit-edit-wide">What is defective / why non-sellable? (required)<textarea rows={2} value={form.conditionNote} onChange={e => update('conditionNote', e.target.value)} /></label>}
 
-        <label>Price{retail && !askTouched.current ? ' (suggested — edit if needed)' : ''}<input inputMode="decimal" placeholder="24.99" value={form.ask} onChange={e => update('ask', e.target.value)} /></label>
-        <label>Cost{form.costEstimate ? ' (estimate — edit if you know it)' : ' (optional)'}
-          <input inputMode="decimal" placeholder="9.00" value={form.cost} onChange={e => update('cost', e.target.value)} />
+        <label className={liveMissing.includes('category') ? 'receive-need' : undefined}>
+          Category{liveMissing.includes('category') ? ' (needed to list)' : ''}
+          <input value={form.category} onChange={e => update('category', e.target.value)} />
         </label>
-        {!manual && <div className="unit-edit-wide receive-retail">
-          {retail
-            ? <>Retail {money(retail.cents)} from {label(retail.source)}{retail.asOf ? ` (as of ${retail.asOf.slice(0, 10)})` : ''}
-              {msrp ? ` · MSRP ${money(msrp)}` : ''}
-              {A?.price_pending ? ' · Amazon price pending (rate limit)' : ''}
-              {suggestion ? <> · Suggested {money(suggestion)} <button type="button" className="text-button" onClick={() => { askTouched.current = true; setForm(p => ({ ...p, ask: dollars(suggestion) })); }}>Use</button></> : null}
-              <br /><small>{floor.mathLine}. Suggestion ≈ 55% of retail, never under that floor, always under retail.</small></>
-            : <>No retail price found{msrp ? ` · MSRP ${money(msrp)}` : ''}{A?.price_pending ? ' · Amazon price pending (rate limit)' : ''}.
-              <br /><small>{floor.mathLine}</small>
-              Enter a price yourself or leave it blank.</>}
-        </div>}
-        {picker('Test status', 'testStatus', choices(options?.test_statuses))}
-        <label>Shippable
-          <select value={form.shippable} onChange={e => update('shippable', e.target.value)}>
-            <option value="auto">Automatic (rules)</option>
-            <option value="ship">Yes — can ship</option>
-            <option value="pickup">No — pickup only</option>
-          </select>
-        </label>
-        <label>Length (in)<input inputMode="decimal" value={form.length} onChange={e => update('length', e.target.value)} /></label>
-        <label>Width (in)<input inputMode="decimal" value={form.width} onChange={e => update('width', e.target.value)} /></label>
-        <label>Height (in)<input inputMode="decimal" value={form.height} onChange={e => update('height', e.target.value)} /></label>
-        <label>Weight (lb)<input inputMode="decimal" value={form.weight} onChange={e => update('weight', e.target.value)} /></label>
-        <label className="unit-edit-wide">Notes<textarea rows={2} value={form.notes} onChange={e => update('notes', e.target.value)} /></label>
 
-        <div className="unit-edit-wide">
-          <span className="receive-label">Photos{manual ? ' (optional)' : ' (at least 1 real photo required)'}</span>
-          <div className="actions">
-            <label className="secondary receive-file-btn">Take photo
-              <input type="file" accept="image/*" capture="environment" className="sr-only" onChange={e => { addFiles(e.target.files); e.target.value = ''; }} />
-            </label>
-            <label className="secondary receive-file-btn">Choose photos
-              <input type="file" accept="image/*" multiple className="sr-only" onChange={e => { addFiles(e.target.files); e.target.value = ''; }} />
-            </label>
+        <label className={liveMissing.includes('brand') ? 'receive-need' : undefined}>
+          Brand{liveMissing.includes('brand') ? ' (needed to list)' : ''}
+          <input
+            value={form.unbranded ? 'Unbranded' : form.brand}
+            disabled={form.unbranded}
+            onChange={e => update('brand', e.target.value)}
+            autoComplete="off"
+            enterKeyHint="next"
+            autoCapitalize="words"
+            // No programmatic focus on Android — native tap focus only (double-focus froze Gboard).
+          />
+        </label>
+        <label className="mboard-inline">
+          <input type="checkbox" checked={form.unbranded} onChange={e => setForm(p => {
+            const unbranded = e.target.checked;
+            return {
+              ...p,
+              unbranded,
+              title: composeListingTitle(p.brand, p.model, unbranded),
+            };
+          })} />
+          Unbranded — no brand anywhere on the product or packaging
+        </label>
+
+        <label className={liveMissing.includes('UPC') ? 'receive-need' : undefined}>
+          UPC{liveMissing.includes('UPC') ? ' (needed to list)' : ''}
+          <input
+            value={form.noUpc ? UPC_NOT_APPLICABLE : form.upc}
+            disabled={form.noUpc}
+            onChange={e => {
+              const v = e.target.value;
+              setForm(p => ({ ...p, upc: v, noUpc: false }));
+              setDups(null); setDupAck(false);
+            }}
+            /* Always allow the soft keyboard on the form UPC field (kiosk mode hides it only on the scan box). */
+            inputMode="numeric"
+            autoComplete="off"
+            placeholder="optional — or mark No UPC below"
+          />
+        </label>
+        <label className="mboard-inline">
+          <input type="checkbox" checked={form.noUpc} onChange={e => {
+            const on = e.target.checked;
+            setForm(p => ({ ...p, noUpc: on, upc: on ? '' : p.upc }));
+            setDups(null); setDupAck(false);
+          }} />
+          No UPC / doesn’t have a barcode — marketplaces get “Does not apply”
+        </label>
+
+        <label className={liveMissing.includes('weight + box dimensions') ? 'receive-need' : undefined}>
+          Length (in){liveMissing.includes('weight + box dimensions') ? ' (needed to list)' : ''}
+          <input
+            inputMode={storePad ? undefined : 'decimal'}
+            value={form.length}
+            onChange={e => update('length', e.target.value)}
+            onPointerDown={(e) => padPointerDown(storePad, e)}
+            onClick={() => { if (storePad) setNumPadField('length'); }}
+            readOnly={storePad || undefined}
+          />
+        </label>
+        <label className={liveMissing.includes('weight + box dimensions') ? 'receive-need' : undefined}>
+          Width (in)
+          <input
+            inputMode={storePad ? undefined : 'decimal'}
+            value={form.width}
+            onChange={e => update('width', e.target.value)}
+            onPointerDown={(e) => padPointerDown(storePad, e)}
+            onClick={() => { if (storePad) setNumPadField('width'); }}
+            readOnly={storePad || undefined}
+          />
+        </label>
+        <label className={liveMissing.includes('weight + box dimensions') ? 'receive-need' : undefined}>
+          Height (in)
+          <input
+            inputMode={storePad ? undefined : 'decimal'}
+            value={form.height}
+            onChange={e => update('height', e.target.value)}
+            onPointerDown={(e) => padPointerDown(storePad, e)}
+            onClick={() => { if (storePad) setNumPadField('height'); }}
+            readOnly={storePad || undefined}
+          />
+        </label>
+        <label className={liveMissing.includes('weight + box dimensions') ? 'receive-need' : undefined}>
+          Weight (lb)
+          <input
+            inputMode={storePad ? undefined : 'decimal'}
+            value={form.weight}
+            onChange={e => update('weight', e.target.value)}
+            onPointerDown={(e) => padPointerDown(storePad, e)}
+            onClick={() => { if (storePad) setNumPadField('weight'); }}
+            readOnly={storePad || undefined}
+          />
+        </label>
+
+        {storePad && numPadField && (
+          <div className="unit-edit-wide store-num-pad-wrap">
+            <StoreNumPad
+              value={
+                numPadField === 'ask' ? form.ask
+                  : numPadField === 'length' ? form.length
+                  : numPadField === 'width' ? form.width
+                  : numPadField === 'height' ? form.height
+                  : form.weight
+              }
+              onChange={(next) => update(numPadField === 'ask' ? 'ask' : numPadField, next)}
+              ariaLabel={numPadField === 'ask' ? 'Price pad' : `${numPadField} pad`}
+            />
           </div>
-          {hasFiles && <div className="receive-photos">{files.map((f, i) => <figure key={`${f.name}-${i}`}>
+        )}
+
+        <label className={`unit-edit-wide${liveMissing.includes('item specifics') ? ' receive-need' : ''}`}>
+          Item specifics{liveMissing.includes('item specifics') ? ' (needed to list)' : (formatAspectsLine(merged?.aspects) && !text(merged?.model) ? ' (from UPC lookup)' : '')}
+          <input
+            value={form.model}
+            onChange={e => update('model', e.target.value)}
+            placeholder="Model, flavor, size, color… (from UPC when available)"
+            autoComplete="off"
+            enterKeyHint="done"
+            autoCapitalize="sentences"
+          />
+        </label>
+
+        {manual && <label>Quantity<input type="number" min="1" max="100" step="1" value={form.quantity} onChange={e => update('quantity', e.target.value)} required /></label>}
+        <label className="unit-edit-wide">
+          Title
+          <input
+            value={form.title}
+            onChange={e => update('title', e.target.value)}
+            placeholder="Brand + item specifics"
+            autoComplete="off"
+          />
+          <span className="hint">Auto-filled as brand + item specifics (scans and manual).</span>
+        </label>
+        {manual && <label className="unit-edit-wide">Description / features<textarea rows={3} value={form.description} onChange={e => update('description', e.target.value)} /></label>}
+        {manual && <label>Cost (optional)<input inputMode="decimal" placeholder="9.00" value={form.cost} onChange={e => update('cost', e.target.value)} /></label>}
+
+        <div className={`unit-edit-wide${liveMissing.includes('photo') ? ' receive-need' : ''}`}>
+          <span className="receive-label">Photo{doNotList || manual ? ' (optional)' : (liveMissing.includes('photo') ? ' (needed to list)' : '')}</span>
+          <div className="actions">
+            {/* Buttons + programmatic click — label+sr-only file inputs often do nothing in iOS PWA. */}
+            <input
+              ref={takePhotoFile}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              className="sr-only"
+              aria-hidden
+              tabIndex={-1}
+              onChange={e => {
+                const input = e.currentTarget;
+                const list = input.files;
+                // Copy bytes before clearing — clearing first empties the File on some Android PWAs.
+                void ingestFiles(list).finally(() => { input.value = ''; });
+              }}
+            />
+            <input
+              ref={choosePhotoFile}
+              type="file"
+              accept="image/*"
+              multiple
+              className="sr-only"
+              aria-hidden
+              tabIndex={-1}
+              onChange={e => {
+                const input = e.currentTarget;
+                const list = input.files;
+                void ingestFiles(list).finally(() => { input.value = ''; });
+              }}
+            />
+            <button type="button" className="secondary receive-file-btn" disabled={photoBusy || busy} onClick={() => takePhotoFile.current?.click()}>
+              {photoBusy ? 'Saving photo…' : 'Take photo'}
+            </button>
+            <button type="button" className="secondary receive-file-btn" disabled={photoBusy || busy} onClick={() => choosePhotoFile.current?.click()}>
+              Choose photos
+            </button>
+          </div>
+          {hasFiles && <div className="receive-photos">{files.map((f, i) => <figure key={`${f.name}-${f.size}-${i}`}>
             <img src={previews[i]} alt={`Photo ${i + 1}`} />
-            <button type="button" className="text-button" onClick={() => setFiles(prev => prev.filter((_, j) => j !== i))}>Remove</button>
+            <button type="button" className="text-button" onClick={() => {
+              setFiles(prev => {
+                const next = prev.filter((_, j) => j !== i);
+                void savePendingPhotos(pendingPhotoKey(storeId, photoSessionKey.current), next);
+                return next;
+              });
+            }}>Remove</button>
           </figure>)}</div>}
         </div>
+
+        <label className="mboard-inline unit-edit-wide">
+          <input
+            type="checkbox"
+            checked={doNotList}
+            onChange={e => {
+              const on = e.target.checked;
+              setDoNotList(on);
+              if (on) {
+                setReadyToList(false);
+                setReadyAmazonTiktok(false);
+              }
+            }}
+          />
+          Do not list for sale
+        </label>
+        <label className="mboard-inline unit-edit-wide">
+          <input
+            type="checkbox"
+            checked={readyToList}
+            disabled={doNotList}
+            onChange={e => setReadyToList(e.target.checked)}
+          />
+          Ready to list
+        </label>
+        <label className="mboard-inline unit-edit-wide">
+          <input
+            type="checkbox"
+            checked={readyAmazonTiktok}
+            disabled={doNotList}
+            onChange={e => setReadyAmazonTiktok(e.target.checked)}
+          />
+          Ready to list Amazon/TikTok
+        </label>
       </div>
 
       <p className="hint receive-check">
-        {liveMissing.length === 0 ? 'Complete — ready to list.' : `Missing for listing: ${liveMissing.join(', ')}. You can still receive; these land in Needs attention.`}
+        {doNotList
+          ? (files.length
+            ? 'Store-only — will receive without listing. Photo is optional.'
+            : 'Store-only — photo not required. Unit stays off the website and marketplaces.')
+          : liveMissing.length === 0
+            ? (readyToList ? 'Complete — will receive as ready to list.' : 'Complete — check Ready to list, or Finish to save without listing pressure.')
+            : readyToList
+              ? `Ready to list still needs: ${liveMissing.join(', ')}.`
+              : `Missing for listing: ${liveMissing.join(', ')}. You can still receive; incomplete units land in Needs attention.`}
       </p>
       <div className="actions">
         <button disabled={busy || !options?.next_sku || (dups !== null && dups.count > 0 && !dupAck)}>{busy ? 'Receiving…' : 'Finish & receive'}</button>
@@ -937,7 +1706,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
         <p className="hint">Yes receives it with normal show defaults; it moves to Online → Ready once the board criteria are met.
           {form.costEstimate ? ` Cost uses ${floor.costLabel} until you edit it.` : ''}</p>
         <div className="actions">
-          <button type="button" disabled={busy} autoFocus onClick={() => { const p = parse(); if (p) void receive(p, null); }}>Yes — receive &amp; list</button>
+          <button type="button" disabled={busy} autoFocus={!androidStore} onClick={() => { const p = parse(); if (p) void receive(p, null); }}>Yes — receive &amp; list</button>
           <button type="button" className="secondary" disabled={busy} onClick={() => setDialog('reason')}>No</button>
           <button type="button" className="text-button" onClick={() => setDialog(null)}>Back</button>
         </div>
@@ -957,6 +1726,73 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved }: Props) {
         <div className="actions">
           <button type="button" disabled={busy || !holdReady} onClick={() => { const p = parse(); if (p) void receive(p, { reason, note: reasonNote }); }}>Receive without listing</button>
           <button type="button" className="text-button" onClick={() => setDialog('ready')}>Back</button>
+        </div>
+      </div>
+    </div>}
+
+    {dialog === 'miss-photo' && <div className="receive-modal" role="dialog" aria-modal="true" aria-labelledby="miss-photo-title">
+      <div className="receive-modal-card">
+        <h3 id="miss-photo-title">Can&apos;t find this item. Scan with camera?</h3>
+        <p>Take <strong>one</strong> clear photo of the box or label. We&apos;ll identify brand, name, and pack size, then show asking prices so you can set the price.</p>
+        <input
+          ref={missPhotoFile}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          className="sr-only"
+          aria-hidden
+          tabIndex={-1}
+          onChange={e => {
+            const input = e.currentTarget;
+            const list = input.files;
+            input.value = '';
+            void identifyMissPhoto(list);
+          }}
+        />
+        <div className="actions">
+          <button type="button" disabled={photoIdBusy} autoFocus={!androidStore} onClick={() => missPhotoFile.current?.click()}>
+            Yes — take photo
+          </button>
+          <button type="button" className="secondary" disabled={photoIdBusy} onClick={() => setDialog(null)}>
+            No — fill by hand
+          </button>
+        </div>
+      </div>
+    </div>}
+
+    {dialog === 'photo-price' && <div className="receive-modal" role="dialog" aria-modal="true" aria-labelledby="photo-price-title">
+      <div className="receive-modal-card">
+        <h3 id="photo-price-title">What price do you want to set?</h3>
+        {previews[0] && <img src={previews[0]} alt="" style={{ maxWidth: '100%', maxHeight: 180, objectFit: 'contain', marginBottom: 8 }} />}
+        <p><strong>{form.title.trim() || [form.brand, form.model].filter(Boolean).join(' ')}</strong></p>
+        {photoPrice && photoPrice.count > 0 ? (
+          <p className="hint">
+            Median asking price {money(photoPrice.median_cents)} from {photoPrice.count} listing{photoPrice.count === 1 ? '' : 's'}
+            {photoPrice.low_cents != null && photoPrice.high_cents != null
+              ? ` (range ${money(photoPrice.low_cents)}–${money(photoPrice.high_cents)})`
+              : ''}.
+            {photoPrice.highest_retail?.store
+              ? ` Highest retail seen: ${photoPrice.highest_retail.store} ${money(photoPrice.highest_retail.price_cents ?? null)}.`
+              : ''}
+            {' '}These are asking prices, not sold comps — you choose the price.
+          </p>
+        ) : (
+          <p className="hint">No current asking prices found. Enter the price you want.</p>
+        )}
+        <label>Your price
+          <input
+            inputMode="decimal"
+            placeholder="24.99"
+            value={form.ask}
+            onChange={e => { askTouched.current = true; update('ask', e.target.value); }}
+            autoFocus={!androidStore}
+          />
+        </label>
+        <div className="actions">
+          <button type="button" onClick={() => setDialog(null)}>Use this price</button>
+          {photoPrice?.highest_retail?.url && (
+            <a className="secondary" href={photoPrice.highest_retail.url} target="_blank" rel="noreferrer">Open retail link</a>
+          )}
         </div>
       </div>
     </div>}

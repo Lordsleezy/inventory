@@ -4,7 +4,10 @@ import { ReceivePanel } from './ReceivePanel';
 import { NeedsAttentionPanel } from './NeedsAttentionPanel';
 import { UnitEditDrawer } from './UnitEditDrawer';
 import { LookupTestPage } from './LookupTestPage';
+import { FloorProductsPage } from './FloorProductsPage';
+import { MarkerMatPage } from './MarkerMatPage';
 import type { AttentionSection, InventoryTab } from './navigation';
+import { errText } from './errText';
 
 type Row = {
   sku: string; brand: string; model: string; title: string; condition: string | null;
@@ -21,6 +24,10 @@ type Props = {
   tab: InventoryTab; onTab: (t: InventoryTab) => void;
   attentionSection: AttentionSection; onAttentionSection: (s: AttentionSection) => void;
   onCostChanged: () => void;
+  /** Portal admin / manager — show Delete in the unit editor. */
+  canDelete?: boolean;
+  /** Associates: browse-only (no Receive / Needs attention / Lookup test). */
+  associateBrowseOnly?: boolean;
 };
 
 const label = (s: string) => s === 'available' ? 'In stock' : s.replace(/_/g, ' ').replace(/^./, c => c.toUpperCase());
@@ -32,7 +39,11 @@ function thumb(path: string) {
   return `${parts[0]}/${parts[1]}/web/400/${stem}.webp`;
 }
 
-export function InventoryPage({ client, storeId, accessToken, money, stamp, tab, onTab, attentionSection, onAttentionSection, onCostChanged }: Props) {
+export function InventoryPage({
+  client, storeId, accessToken, money, stamp, tab, onTab, attentionSection, onAttentionSection, onCostChanged,
+  canDelete = false,
+  associateBrowseOnly = false,
+}: Props) {
   const [refresh, setRefresh] = useState(0);
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState('in_stock');
@@ -67,7 +78,7 @@ export function InventoryPage({ client, storeId, accessToken, money, stamp, tab,
         const next = data as List;
         const signed = await sign(next.items.flatMap(x => x.photo_path ? [thumb(x.photo_path), x.photo_path] : [])).catch(() => ({}));
         if (active) { setList(next); setUrls(prev => ({ ...prev, ...signed })); }
-      } catch (e) { if (active) setError(e instanceof Error ? e.message : String(e)); }
+      } catch (e) { if (active) setError(errText(e)); }
       finally { if (active) setLoading(false); }
     })(); }, 200);
     return () => { active = false; clearTimeout(timer); };
@@ -87,7 +98,7 @@ export function InventoryPage({ client, storeId, accessToken, money, stamp, tab,
           setDetail(next);
           setUrls(prev => ({ ...prev, ...signed }));
         }
-      } catch (e) { if (active) setError(e instanceof Error ? e.message : String(e)); }
+      } catch (e) { if (active) setError(errText(e)); }
     })();
     return () => { active = false; };
   }, [client, selected, detailKey]);
@@ -95,14 +106,18 @@ export function InventoryPage({ client, storeId, accessToken, money, stamp, tab,
   const change = (set: () => void) => { set(); setOffset(0); setList(null); };
   const total = list?.totals.unit_count || 0;
   return <>
-    <header><div><div className="eyebrow">FLOOR INVENTORY</div><h1>Inventory</h1><p>{tab === 'browse' ? 'Click a unit to edit SKU details, price, cost, package size, and photos.' : tab === 'receive' ? 'Scan a UPC to look up product data, then receive with a real photo.' : tab === 'lookup-test' ? 'Read-only UPC accuracy test — Amazon vs UPCitemdb. Does not create inventory.' : 'Units missing cost, photo, price, model, description, or package specs.'}</p></div></header>
-    <div className="inventory-tabs">
-      <button type="button" className={tab === 'browse' ? 'active' : ''} onClick={() => onTab('browse')}>Browse</button>
-      <button type="button" className={tab === 'receive' ? 'active' : ''} onClick={() => onTab('receive')}>Receive</button>
-      <button type="button" className={tab === 'attention' ? 'active' : ''} onClick={() => onTab('attention')}>Needs attention</button>
-      <button type="button" className={tab === 'lookup-test' ? 'active' : ''} onClick={() => onTab('lookup-test')}>Lookup test</button>
-    </div>
-    {tab === 'lookup-test' ? <LookupTestPage accessToken={accessToken} /> : tab === 'receive' ? <ReceivePanel client={client} storeId={storeId} accessToken={accessToken} onSaved={() => setRefresh(n => n + 1)} /> : tab === 'attention' ? <NeedsAttentionPanel client={client} storeId={storeId} money={money} stamp={stamp} section={attentionSection} onSection={onAttentionSection} onCostChanged={onCostChanged} /> : <>
+    <header><div><div className="eyebrow">FLOOR INVENTORY</div><h1>Inventory</h1><p>{tab === 'browse' ? 'Click a unit to edit SKU details, price, cost, package size, and photos.' : tab === 'receive' ? 'Scan a UPC to look up product data, then receive with a real photo.' : tab === 'lookup-test' ? 'Read-only UPC accuracy test — Amazon vs UPCitemdb. Does not create inventory.' : tab === 'products' ? 'Shared UPC product database — edits stick for future scans. Price/condition stay on each unit.' : tab === 'measure-mat' ? 'Printable 50 mm scale mat for Receive photo measuring.' : 'Units missing cost, photo, price, model, description, or package specs.'}</p></div></header>
+    {!associateBrowseOnly && (
+      <div className="inventory-tabs">
+        <button type="button" className={tab === 'browse' ? 'active' : ''} onClick={() => onTab('browse')}>Browse</button>
+        <button type="button" className={tab === 'receive' ? 'active' : ''} onClick={() => onTab('receive')}>Receive</button>
+        <button type="button" className={tab === 'attention' ? 'active' : ''} onClick={() => onTab('attention')}>Needs attention</button>
+        <button type="button" className={tab === 'lookup-test' ? 'active' : ''} onClick={() => onTab('lookup-test')}>Lookup test</button>
+        <button type="button" className={tab === 'products' ? 'active' : ''} onClick={() => onTab('products')}>Products</button>
+        <button type="button" className={tab === 'measure-mat' ? 'active' : ''} onClick={() => onTab('measure-mat')}>Measure mat</button>
+      </div>
+    )}
+    {!associateBrowseOnly && tab === 'lookup-test' ? <LookupTestPage accessToken={accessToken} /> : !associateBrowseOnly && tab === 'products' ? <FloorProductsPage client={client} /> : !associateBrowseOnly && tab === 'measure-mat' ? <MarkerMatPage /> : !associateBrowseOnly && tab === 'receive' ? <ReceivePanel client={client} storeId={storeId} accessToken={accessToken} onSaved={() => setRefresh(n => n + 1)} /> : !associateBrowseOnly && tab === 'attention' ? <NeedsAttentionPanel client={client} storeId={storeId} money={money} stamp={stamp} section={attentionSection} onSection={onAttentionSection} onCostChanged={onCostChanged} /> : <>
     <div className="inventory-controls">
       <label>Search<input type="search" placeholder="SKU, brand, model or title" value={query} onChange={e => change(() => setQuery(e.target.value))} /></label>
       <label>Status<select value={status} onChange={e => change(() => setStatus(e.target.value))}>
@@ -140,6 +155,7 @@ export function InventoryPage({ client, storeId, accessToken, money, stamp, tab,
       photos={detail.photos}
       urls={urls}
       accessToken={accessToken}
+      canDelete={canDelete}
       onClose={() => setSelected(null)}
       onSaved={(unit) => {
         setDetail(d => d ? { ...d, unit } : d);
@@ -147,6 +163,12 @@ export function InventoryPage({ client, storeId, accessToken, money, stamp, tab,
         onCostChanged();
       }}
       onPhotosChanged={() => setDetailKey(k => k + 1)}
+      onDeleted={() => {
+        setSelected(null);
+        setDetail(null);
+        setRefresh(n => n + 1);
+        onCostChanged();
+      }}
     />}
     {selected && !detail && <div className="inventory-backdrop"><section className="inventory-detail"><p>Loading…</p></section></div>}
     </>}

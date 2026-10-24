@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { errText } from './errText';
 
 const base = (import.meta.env.VITE_FLOOR_FUNCTIONS_URL || 'https://inventoryobi.netlify.app').replace(/\/$/, '');
-const channels = [['ebay', 'eBay'], ['mercari', 'Mercari'], ['whatnot', 'Whatnot'], ['depop', 'Depop'], ['website', 'Website']] as const;
+const channels = [['ebay', 'eBay'], ['depop', 'Depop'], ['website', 'Website']] as const;
 type Pricing = {
   sku: string; floor_cents: number; label_estimate_cents: number; label_is_estimate: boolean;
   missing_package_data: boolean; packing_markup_cents: number; global_packing_markup_cents: number;
@@ -28,7 +29,7 @@ export function MarketplacePrices({ sku, accessToken, client, money }: Props) {
       if (!res.ok) throw new Error(result.error || `Price request failed (${res.status})`);
       setData(result);
       setDraft(result.unit_packing_markup_cents == null ? '' : (result.unit_packing_markup_cents / 100).toFixed(2));
-    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    } catch (e) { setError(errText(e)); }
   }
   useEffect(() => { if (open && !data) void load(); }, [open, data]);
 
@@ -42,7 +43,7 @@ export function MarketplacePrices({ sku, accessToken, client, money }: Props) {
       setData(null);
       setDraft(value == null ? '' : (value / 100).toFixed(2));
       await load();
-    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    } catch (e) { setError(errText(e)); }
     finally { setBusy(false); }
   }
 
@@ -54,10 +55,10 @@ export function MarketplacePrices({ sku, accessToken, client, money }: Props) {
   return <details className="suggested-prices" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
     <summary>Suggested prices</summary>
     {error && <p className="bad-text" role="alert">{error}</p>}
-    {!data ? <p className="hint">Loading pricesâ€¦</p> : <>
-      <p className="hint">Floor {money(data.floor_cents)} Â· label estimate {money(data.label_estimate_cents)}
+    {!data ? <p className="hint">Loading prices…</p> : <>
+      <p className="hint">Floor {money(data.floor_cents)} · label estimate {money(data.label_estimate_cents)}
         {data.label_is_estimate ? ' (estimate)' : ''}</p>
-      {data.missing_package_data && <p className="hint">Missing package dims â€” label cost is estimated.</p>}
+      {data.missing_package_data && <p className="hint">Missing package dims — label cost is estimated.</p>}
       <div className="suggested-price-list">{channels.map(([key, label]) => <div key={key} className="suggested-price-row">
         <strong>{label}</strong><span>{money(data.prices[key])}</span>
         <button type="button" className="text-button" onClick={() => void copy(key, data.prices[key])}>{copied === key ? 'Copied' : 'Copy'}</button>
@@ -66,7 +67,7 @@ export function MarketplacePrices({ sku, accessToken, client, money }: Props) {
         <label>Unit packing markup ($; blank uses global ${((data.global_packing_markup_cents || 0) / 100).toFixed(2)})
           <input inputMode="decimal" value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Use global" />
         </label>
-        <button type="button" disabled={busy} onClick={() => void saveOverride()}>{busy ? 'Savingâ€¦' : 'Save unit markup'}</button>
+        <button type="button" disabled={busy} onClick={() => void saveOverride()}>{busy ? 'Saving…' : 'Save unit markup'}</button>
       </div>
     </>}
   </details>;

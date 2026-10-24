@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { depopItemTitle, depopProductIds, emailPhotoUrls, matchDepopListing } from './depop-email-match.mjs';
 
 /**
  * Shared marketplace sale-email parsing + ingest.
@@ -238,15 +239,19 @@ export function parseMail(mail, channels = defaultChannels) {
   };
   // Prefer a real listing title over the Depop shipping-label subject.
   const subject = String(mail.subject || '').trim();
+  const plainHtml = String(mail.html || '').replace(/<[^>]+>/g, '\n');
   const bodyTitle =
     text.match(/(?:item(?:\s+title)?|listing(?:\s+title)?|product)\s*[:\-]\s*([^\r\n]{4,120})/i)?.[1] ||
     text.match(/you(?:'ve| have) made a sale[:\s]+([^\r\n$]{4,120})/i)?.[1] ||
     null;
   let item_title = (bodyTitle || subject || 'Marketplace order').replace(/\s+/g, ' ').trim().slice(0, 250);
-  if (/shipping label and sale confirmation/i.test(item_title) && handle) {
-    item_title = `Depop sale for @${handle}`;
-  } else if (/shipping label and sale confirmation/i.test(item_title)) {
-    item_title = 'Depop sale';
+  const photo_urls = emailPhotoUrls(mail.html, mail.text);
+  const product_ids = depopProductIds(`${mail.html || ''}\n${mail.text || ''}\n${subject}`);
+  if (marketplace === 'depop') {
+    const extracted = depopItemTitle(subject, `${mail.text || ''}\n${plainHtml}`);
+    if (extracted) item_title = extracted;
+    else if (/shipping label and sale confirmation/i.test(item_title) && handle) item_title = `Depop sale for @${handle}`;
+    else if (/shipping label and sale confirmation/i.test(item_title)) item_title = 'Depop sale';
   }
   const fulfillment = /local pickup|buyer will pick up|pickup order/i.test(text) ? 'pickup' : 'ship';
   const money = (re) => {
@@ -272,6 +277,8 @@ export function parseMail(mail, channels = defaultChannels) {
     order_number: order,
     ship_by: ship ? safeDate(ship) : null,
     item_title,
+    photo_urls,
+    product_ids,
     buyer,
     fulfillment,
     fee,
@@ -307,6 +314,51 @@ export async function geminiEmailHints(text) {
   if (!res.ok) throw new Error(`Gemini email parse ${res.status}`);
   const data = await res.json();
   return JSON.parse(data.candidates?.[0]?.content?.parts?.[0]?.text || '{}');
+}
+
+/** Listed Depop rows from Push to Depop, with the unit title, ask, and photo paths. */
+export async function loadDepopListings(sb, storeId) {
+  const { data, error } = await sb
+    .from('listings')
+    .select('sku,listing_id,photo_ids')
+    .eq('store_id', storeId)
+    .eq('channel', 'depop')
+    .eq('status', 'listed');
+  if (error) throw new Error(error.message);
+  const rows = Array.isArray(data) ? data : [];
+  if (!rows.length) return [];
+  const skus = [...new Set(rows.map((row) => row.sku).filter(Boolean))];
+  const { data: units, error: unitErr } = await sb
+    .from('units')
+    .select('sku,title,ask_cents,state')
+    .eq('store_id', storeId)
+    .in('sku', skus);
+  if (unitErr) throw new Error(unitErr.message);
+  const { data: photos, error: photoErr } = await sb
+    .from('photos')
+    .select('id,sku,path')
+    .eq('store_id', storeId)
+    .in('sku', skus);
+  if (photoErr) throw new Error(photoErr.message);
+  const unitBySku = new Map((units || []).map((unit) => [unit.sku, unit]));
+  return rows
+    .map((row) => {
+      const unit = unitBySku.get(row.sku);
+      if (!unit || unit.state !== 'available') return null;
+      const ids = new Set((row.photo_ids || []).map((id) => String(id)));
+      const paths = (photos || [])
+        .filter((photo) => photo.sku === row.sku && (!ids.size || ids.has(String(photo.id))))
+        .map((photo) => photo.path)
+        .filter(Boolean);
+      return {
+        sku: row.sku,
+        listing_id: row.listing_id,
+        title: unit.title,
+        ask_cents: unit.ask_cents,
+        photo_paths: paths,
+      };
+    })
+    .filter(Boolean);
 }
 
 /** Load the store id and its configured marketplace channels (falls back to defaults). */
@@ -495,6 +547,14 @@ export async function ingestMarketplaceMail(sb, { store, channels, parsed, raw }
     } catch {
       /* hints are optional */
     }
+  }
+  if (p.sale && p.marketplace === 'depop' && !p.sku && p.price) {
+    const listings = await loadDepopListings(sb, store.id);
+    const hit = matchDepopListing(
+      { title: p.item_title, priceCents: p.price, urls: p.photo_urls, productIds: p.product_ids },
+      listings,
+    );
+    if (hit?.sku) p.sku = hit.sku;
   }
   const msg = messageIdFor(parsed, raw);
   const orderKeyEarly = marketplaceOrderKey({ orderNumber: p.order_number, messageId: msg });

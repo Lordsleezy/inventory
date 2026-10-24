@@ -34,6 +34,8 @@ import {
   getSellerUsername,
   getShippingServiceDetails,
   pickApplianceShipping,
+  attachListingSku,
+  getTradingItem,
   tradingOrderIsSale,
   tradingOrderToIngest,
 } from "./ebay-trading.mjs";
@@ -589,7 +591,7 @@ async function strictCatalogPhoto(storeId, unit, aspects, imageUrls, hint) {
   });
 }
 
-async function photoUrls(storeId, sku) {
+export async function photoUrls(storeId, sku) {
   const sb = serviceClient();
   const { data } = await sb
     .from("photos")
@@ -636,19 +638,24 @@ async function itemAspects(storeId, unit) {
 
 function packageSize(unit) {
   const specs = listingMeasures(unit);
-  const width = specInches(specs, "width") || parseMeasure(specs.width_in);
-  const height = specInches(specs, "height") || parseMeasure(specs.height_in);
-  const depth = specInches(specs, "depth") || parseMeasure(specs.depth_in);
-  const weight = parseMeasure(specs.weight_lb || specs.weight_lbs);
+  const length = Number(unit?.package_length_in) || specInches(specs, "depth") || parseMeasure(specs.depth_in) || parseMeasure(specs.length_in);
+  const width = Number(unit?.package_width_in) || specInches(specs, "width") || parseMeasure(specs.width_in);
+  const height = Number(unit?.package_height_in) || specInches(specs, "height") || parseMeasure(specs.height_in);
+  const weight = Number(unit?.package_weight_lb) || parseMeasure(specs.weight_lb || specs.weight_lbs);
+  if (!(length > 0 && width > 0 && height > 0 && weight > 0)) {
+    const err = new Error("Package weight and dimensions are required before pushing to eBay.");
+    err.code = "package_required";
+    throw err;
+  }
   return {
     dimensions: {
-      length: String(depth || 32),
-      width: String(width || 32),
-      height: String(height || 70),
+      length: String(length),
+      width: String(width),
+      height: String(height),
       unit: "INCH",
     },
     weight: {
-      value: String(weight > 0 ? weight : 300),
+      value: String(weight),
       unit: "POUND",
     },
   };
@@ -1100,6 +1107,17 @@ function orderSku(order) {
   return null;
 }
 
+function withListingSku(order, skuByItemId) {
+  if (!order || orderSku(order) || !skuByItemId?.size) return order;
+  const lineItems = (order.lineItems || []).map((item) => {
+    if (item?.sku) return item;
+    const id = String(item?.legacyItemId || item?.itemId || "");
+    const sku = id && skuByItemId.get(id);
+    return sku ? { ...item, sku } : item;
+  });
+  return { ...order, lineItems };
+}
+
 function orderCents(order) {
   return ebayOrderAmounts(order).itemCents;
 }
@@ -1370,7 +1388,7 @@ function fulfillmentOrdersPath() {
   return `/sell/fulfillment/v1/order?limit=50&filter=${filter}`;
 }
 
-async function listedSoldBySku(storeId) {
+async function listedSoldBySku(storeId, { maxOfferChecks = 8 } = {}) {
   const sb = serviceClient();
   const { data, error } = await sb
     .from("listings")
@@ -1381,7 +1399,16 @@ async function listedSoldBySku(storeId) {
   if (error) throw new Error(error.message);
   const soldQty = {};
   const extras = [];
-  for (const row of data ?? []) {
+  let tradingChecks = 0;
+  let offerChecks = 0;
+  const rows = data ?? [];
+  // Rotate which slice we ask eBay about. Walking every listed SKU 404s for minutes
+  // and the 30s function was killed before either account's orders were saved.
+  const start = rows.length ? (Math.floor(Date.now() / 600000) * maxOfferChecks) % rows.length : 0;
+  const ordered = rows.slice(start).concat(rows.slice(0, start));
+  for (const row of ordered) {
+    if (offerChecks >= maxOfferChecks) break;
+    offerChecks += 1;
     let offers = [];
     try {
       offers = await listOffersForSku(storeId, row.sku);
@@ -1392,13 +1419,28 @@ async function listedSoldBySku(storeId) {
       offers.find((o) => String(o.offerId) === String(row.offer_id)) ||
       offers.find((o) => String(o.status || "").toUpperCase() === "PUBLISHED") ||
       offers[0];
-    const soldQuantity = Number(live?.listing?.soldQuantity || 0);
+    let soldQuantity = Number(live?.listing?.soldQuantity || 0);
+    let price = live?.pricingSummary?.price?.value || "0";
+    let listingId = live?.listing?.listingId || live?.listingId || row.listing_id;
+    // Inventory offer 404 (listing exists only as a Trading item id) used to
+    // report soldQuantity 0, so a completed sale never entered Floor.
+    if (!live && row.listing_id && tradingChecks < 25) {
+      tradingChecks += 1;
+      try {
+        const item = await getTradingItem(await userToken(storeId), row.listing_id);
+        soldQuantity = Number(item?.quantitySold || 0);
+        if (item?.price) price = String(item.price);
+        listingId = item?.itemId || row.listing_id;
+      } catch {
+        /* offer miss plus GetItem failure stays unsold this run */
+      }
+    }
     soldQty[row.sku] = soldQuantity;
     if (soldQuantity >= 1) {
       extras.push({
         sku: row.sku,
-        listingId: live?.listing?.listingId || live?.listingId || row.listing_id,
-        price: live?.pricingSummary?.price?.value || "0",
+        listingId,
+        price,
         soldQuantity,
       });
     }
@@ -1407,6 +1449,7 @@ async function listedSoldBySku(storeId) {
 }
 
 async function ingestFrom(storeId, order, source, bag) {
+  order = withListingSku(order, bag.skuByItemId);
   const sku = orderSku(order);
   const orderId = order?.orderId;
   if (!orderId) return;
@@ -1510,10 +1553,26 @@ export async function reconcileCanceledEbayOrders(storeId, hint = {}) {
   return out;
 }
 
+async function listingSkuByItemId(storeId) {
+  const sb = serviceClient();
+  const { data: listed } = await sb
+    .from("listings")
+    .select("sku, listing_id")
+    .eq("store_id", storeId)
+    .eq("channel", "ebay")
+    .not("listing_id", "is", null);
+  return new Map((listed || []).filter((row) => row.listing_id).map((row) => [String(row.listing_id), row.sku]));
+}
+
 export async function pollEbayOrders(storeId, accountHint = {}) {
   const account = accountHint._account || (await resolveEbayAccount(storeId, accountHint));
   const hint = { _account: account, accountId: account.id };
-  const bag = { results: [], skus: new Set(), orders: new Set() };
+  const bag = { results: [], skus: new Set(), orders: new Set(), skuByItemId: new Map() };
+  try {
+    bag.skuByItemId = await listingSkuByItemId(storeId);
+  } catch {
+    bag.skuByItemId = new Map();
+  }
   try {
     const json = await ebayFetch(storeId, "GET", fulfillmentOrdersPath(), undefined, hint);
     for (const order of json?.orders ?? []) {
@@ -1554,9 +1613,10 @@ export async function pollEbayOrders(storeId, accountHint = {}) {
 
   let soldQty = {};
   let extras = [];
-  if (accountAllowsListing(account)) {
+  const maxOfferChecks = Number.isFinite(Number(accountHint.maxOfferChecks)) ? Number(accountHint.maxOfferChecks) : 8;
+  if (accountHint.soldScan !== false && accountAllowsListing(account)) {
     try {
-      const listed = await listedSoldBySku(storeId);
+      const listed = await listedSoldBySku(storeId, { maxOfferChecks });
       soldQty = listed.soldQty;
       extras = listed.extras;
     } catch (err) {
@@ -1567,8 +1627,9 @@ export async function pollEbayOrders(storeId, accountHint = {}) {
   try {
     const trading = await getSellerOrders(await userTokenForAccount(account));
     for (const order of trading) {
-      if (!tradingOrderIsSale(order, soldQty)) continue;
-      await ingestFrom(storeId, tradingOrderToIngest(order), "trading", bag);
+      const withSku = attachListingSku(order, bag.skuByItemId);
+      if (!tradingOrderIsSale(withSku, soldQty)) continue;
+      await ingestFrom(storeId, tradingOrderToIngest(withSku), "trading", bag);
     }
   } catch (err) {
     bag.results.push({

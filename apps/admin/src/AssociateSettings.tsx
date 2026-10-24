@@ -1,5 +1,6 @@
 ﻿import { useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { errText } from './errText';
 
 type Props = {
   client: SupabaseClient;
@@ -33,7 +34,7 @@ export function AssociateSettings({ client, displayName }: Props) {
       setConfirm('');
       setOk('Password updated.');
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errText(err));
     } finally {
       setBusy(false);
     }
@@ -56,7 +57,7 @@ export function AssociateSettings({ client, displayName }: Props) {
         <label>Confirm password
           <input type="password" autoComplete="new-password" value={confirm} onChange={e => setConfirm(e.target.value)} required />
         </label>
-        <button disabled={busy}>{busy ? 'SavingΓÇª' : 'Update password'}</button>
+        <button disabled={busy}>{busy ? 'Saving…' : 'Update password'}</button>
       </form>
       {error && <p className="error" style={{ marginTop: 12 }}>{error}</p>}
       {ok && <p className="hint" style={{ marginTop: 12 }}>{ok}</p>}

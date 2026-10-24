@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { isKioskShell, scannerInputMode } from './kiosk';
 import { floorFunctionUrl } from './floorApi';
 import { reportClientError } from './clientLog';
+import { errText } from './errText';
 
 const money = (n: number | null | undefined) =>
   n == null ? '—' : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n / 100);
@@ -98,7 +99,7 @@ async function lookupCall(token: string, upc: string, force = false, compare = t
   try {
     return await run();
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errText(e);
     if (/not logged in|invalid/i.test(msg)) throw e;
     await new Promise((r) => setTimeout(r, 600));
     try {
@@ -164,7 +165,7 @@ export function LookupTestPage({ accessToken }: Props) {
               prev.map((r) => (r.id === id ? { ...r, ok: true, result } : r)),
             );
           } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e);
+            const msg = errText(e);
             setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ok: false, error: msg } : r)));
             setError(msg);
           }
@@ -235,8 +236,8 @@ export function LookupTestPage({ accessToken }: Props) {
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={onKeyDown}
-            autoFocus
-            inputMode={scannerInputMode() === 'none' ? 'none' : 'numeric'}
+            autoFocus={!isKioskShell()}
+            inputMode={scannerInputMode() || 'numeric'}
             autoComplete="off"
             enterKeyHint="done"
             placeholder={isKioskShell() ? 'Scan barcode' : 'Scan or type · Enter'}

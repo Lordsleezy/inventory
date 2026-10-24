@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { errText } from './errText';
 
 export type ReturnRow = {
   id: string;
@@ -214,7 +215,7 @@ export function ReturnsPage({ client, storeId, money, stamp }: Props) {
       if (list[0]) pick(list[0]);
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errText(err));
     } finally {
       setBusy(null);
     }

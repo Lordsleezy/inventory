@@ -20,12 +20,26 @@
   schedule = "*/10 * * * *"
   timeout = 60
 
-# Amazon MFN returns report + TikTok stub → returns table / decision alerts.
+# Amazon MFN returns report + TikTok returns → returns table / decision alerts.
 [functions."returns-sync"]
   schedule = "*/30 * * * *"
   timeout = 60
 
 [functions."tiktok-returns-sync"]
+  schedule = "*/30 * * * *"
+  timeout = 60
+
+[functions."tiktok-orders-sync"]
+  schedule = "*/10 * * * *"
+  timeout = 60
+
+[functions."tiktok-list"]
+  timeout = 60
+
+[functions."tiktok-webhook"]
+  timeout = 30
+
+[functions."tiktok-oauth-callback"]
   timeout = 30
 
 # Admin Amazon queue: prepare / ASIN / price / list_one (kept off amazon-sync cron bundle).
@@ -48,10 +62,15 @@
 [functions."listing-check"]
   schedule = "0 14 * * *"
 
+# Sold-but-available and sold-but-still-listed. Emails the owner; ends eBay.
+[functions."inventory-reconcile"]
+  schedule = "*/15 * * * *"
+  timeout = 60
+
 # Orders-only sync: pull eBay sales into Floor every few minutes. Never pushes listings.
 [functions."ebay-sync"]
   schedule = "*/3 * * * *"
-  timeout = 30
+  timeout = 60
 
 # Dispatch queued ebay_migration_request → ebay-migrate-background (agent/SQL can queue without secrets).
 [functions."ebay-migrate-dispatch"]
@@ -61,6 +80,17 @@
 # Background migrate worker (Netlify *-background = up to 15 minutes).
 [functions."ebay-migrate-background"]
   timeout = 900
+
+# Manual portal "Sync all accounts" / per-account sync (avoids 504 on ebay-connection).
+[functions."ebay-sync-now-background"]
+  timeout = 900
+
+# Listing manager paced bulk publish.
+[functions."listing-manager-background"]
+  timeout = 900
+
+[functions."listing-manager"]
+  timeout = 120
 
 # Read-only ikonikdeals2026 listing audit (ActiveList + Shippo rates + UPC retail).
 [functions."ebay-listing-audit-background"]
@@ -84,6 +114,10 @@
 # Scan-to-list: Amazon catalog + pricing + UPCitemdb in one HTTP call.
 [functions."upc-lookup"]
   timeout = 26
+
+# Barcode-miss photo identify + asking-price median (Gemini).
+[functions."receive-photo-identify"]
+  timeout = 60
 
 # Read-only inventory feed for marketplace listing agents. No schedule.
 [functions."listing-feed"]

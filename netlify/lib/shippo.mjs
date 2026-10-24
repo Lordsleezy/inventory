@@ -8,6 +8,19 @@ export function shippoMode() {
   return null;
 }
 
+/** Soft plan note for UI. Shippo API Starter is pay-as-you-go (not a hard monthly cut-off). */
+export function shippoPlanNote() {
+  const custom = (process.env.SHIPPO_PLAN_NOTE || "").trim();
+  if (custom) return custom;
+  return "Shippo API Starter: first ~30 labels/mo free, then ~7¢/label + label postage. Monitor Shippo billing — if purchases fail for payment/quota, Floor skips Shippo and shops Veeqo.";
+}
+
+/** True when a Shippo error looks like plan/payment/quota — caller should fall back to other sources. */
+export function shippoQuotaOrPaymentError(err) {
+  const text = `${err?.message || ""} ${JSON.stringify(err?.detail || "")}`.toLowerCase();
+  return /402|4020|payment|quota|limit|exceed|billing|insufficient|plan|subscription|credit/i.test(text);
+}
+
 async function call(path, { method = "GET", body, fetchImpl = fetch, timeoutMs = 15000 } = {}) {
   const key = process.env.SHIPPO_API_KEY;
   if (!key) throw new Error("missing_SHIPPO_API_KEY");
@@ -119,8 +132,9 @@ export async function getRate(rateId, { fetchImpl } = {}) {
   return norm;
 }
 
-export async function buyLabel(rateId, { fetchImpl, metadata } = {}) {
-  const body = { rate: rateId, label_file_type: "PDF_4x6", async: false };
+export async function buyLabel(rateId, { fetchImpl, metadata, labelFileType = "PDF_4x6" } = {}) {
+  const fileType = labelFileType === "PDF" || labelFileType === "PDF_LETTER" ? "PDF" : "PDF_4x6";
+  const body = { rate: rateId, label_file_type: fileType, async: false };
   if (metadata) body.metadata = String(metadata).slice(0, 200);
   return call("/transactions/", { method: "POST", fetchImpl, body });
 }

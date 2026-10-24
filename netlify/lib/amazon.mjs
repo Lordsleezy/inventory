@@ -484,6 +484,110 @@ export function pickLargestImages(imageSets) {
   return [...byVariant.entries()].sort((a, b) => order(a[0]) - order(b[0])).map(([, v]) => v.link);
 }
 
+/**
+ * Amazon catalog attribute keys that map cleanly to listing "item specifics"
+ * (flavor, form, size, etc.). Values are taken only when Amazon returned them.
+ */
+const SPECIFIC_ATTR_KEYS = [
+  ["flavor", "Flavor"],
+  ["scent", "Scent"],
+  ["color", "Color"],
+  ["size", "Size"],
+  ["style", "Style"],
+  ["item_form", "Item Form"],
+  ["form_factor", "Item Form"],
+  ["material_type", "Material"],
+  ["material", "Material"],
+  ["special_feature", "Special Feature"],
+  ["special_features", "Special Feature"],
+  ["product_benefit", "Product Benefit"],
+  ["diet_type", "Diet Type"],
+  ["target_gender", "Target Gender"],
+  ["age_range_description", "Age Range"],
+  ["unit_count", "Unit Count"],
+  ["number_of_items", "Number of Items"],
+  ["pattern", "Pattern"],
+  ["capacity", "Capacity"],
+  ["wattage", "Wattage"],
+  ["voltage", "Voltage"],
+  ["fragrance", "Fragrance"],
+  ["hair_type", "Hair Type"],
+  ["skin_type", "Skin Type"],
+  ["occasion_type", "Occasion"],
+  ["sport_type", "Sport"],
+  ["department", "Department"],
+];
+
+/** Pull named specifics from catalog attributes. Never invents values. */
+export function extractCatalogAspects(attributes) {
+  const out = {};
+  if (!attributes || typeof attributes !== "object") return out;
+  for (const [key, label] of SPECIFIC_ATTR_KEYS) {
+    if (out[label]) continue;
+    const raw = attrValue(attributes, key);
+    if (raw == null) continue;
+    let value = null;
+    if (typeof raw.value === "string" && raw.value.trim()) value = raw.value.trim();
+    else if (typeof raw.value === "number" && Number.isFinite(raw.value)) {
+      const unit = typeof raw.unit === "string" && raw.unit.trim() ? ` ${raw.unit.trim()}` : "";
+      value = `${raw.value}${unit}`;
+    } else if (Array.isArray(raw.value)) {
+      value = raw.value.map((v) => (typeof v === "string" ? v.trim() : String(v ?? "").trim())).filter(Boolean).join(", ") || null;
+    } else if (raw.value && typeof raw.value === "object" && typeof raw.value.value === "string") {
+      value = raw.value.value.trim() || null;
+    }
+    if (value) out[label] = value;
+  }
+  return out;
+}
+
+/** "Flavor: Berry · Item Form: Gummy" — empty string when nothing real. */
+export function formatAspectsLine(aspects) {
+  if (!aspects || typeof aspects !== "object") return "";
+  return Object.entries(aspects)
+    .filter(([, v]) => typeof v === "string" && v.trim())
+    .map(([k, v]) => `${k}: ${String(v).trim()}`)
+    .join(" · ");
+}
+
+/** Reject retailer item numbers / bare digit codes masquerading as model. */
+export function usableModelNumber(raw) {
+  const m = String(raw ?? "").trim();
+  if (!m) return null;
+  if (/^\d{4,}$/.test(m)) return null;
+  if (/^(itm|art|sku|dpci|tcin)[\s#:-]?\d+/i.test(m)) return null;
+  return m;
+}
+
+/**
+ * Human-facing item specifics for Receive: real MPN, else aspect line, else a short
+ * pack/variant phrase from the title (never a bare digit code).
+ */
+export function itemSpecificsFromLookup({ model, aspects, title, brand } = {}) {
+  const mpn = usableModelNumber(model);
+  if (mpn) return mpn;
+  const aspectsLine = formatAspectsLine(aspects);
+  if (aspectsLine) return aspectsLine;
+  return variantFromTitle(title, brand);
+}
+
+/** "Oral-B Replacement Brush Heads, 10 Count" → "Replacement Brush Heads, 10 Count" */
+export function variantFromTitle(title, brand) {
+  let t = String(title || "").trim().replace(/\s+/g, " ");
+  if (!t) return "";
+  const b = String(brand || "").trim();
+  if (b && t.toLowerCase().startsWith(b.toLowerCase())) {
+    t = t.slice(b.length).replace(/^[\s,:\-|–—]+/, "").trim();
+  }
+  // Prefer a pack/size clause when present (allow commas so "Brush Heads, 10 Count" keeps the product words).
+  const pack = t.match(
+    /(.{0,80}\b\d+\s*(?:-?\s*)?(?:count|ct|pack|pk|heads?|refills?|pieces?|pcs?|oz|fl\s*oz|ml|g)\b[^|/]{0,40})/i,
+  );
+  if (pack) return pack[1].trim().replace(/^[\s,:\-|–—]+/, "");
+  // Otherwise first clause, capped.
+  return t.split(/[|/]/)[0].trim().slice(0, 80);
+}
+
 /** Parse one SP-API Catalog Items 2022-04-01 item into Floor's flat shape. Never invents fields. */
 export function parseCatalogItem(item) {
   if (!item?.asin) return null;
@@ -503,15 +607,22 @@ export function parseCatalogItem(item) {
   const productType = forMarketplace(item.productTypes)?.productType || null;
   const listPrice = attrValue(attrs, "list_price");
   const listAmount = Number(listPrice?.value ?? listPrice?.value_with_tax);
+  const aspects = extractCatalogAspects(attrs);
+  // Amazon often puts retailer ITM/ART/SKU-style digit strings in modelNumber — those are not
+  // usable as Floor "item specifics" (e.g. Oral-B "4610583"). Keep a real MPN; drop pure digits.
+  const rawModel =
+    summary.modelNumber || attrString(attrs, "model_number") || summary.partNumber || attrString(attrs, "part_number");
+  const model = usableModelNumber(rawModel);
   return {
     asin: item.asin,
     title: summary.itemName || attrString(attrs, "item_name"),
     brand: summary.brand || attrString(attrs, "brand"),
-    model: summary.modelNumber || attrString(attrs, "model_number") || summary.partNumber || attrString(attrs, "part_number"),
+    model,
     part_number: summary.partNumber || attrString(attrs, "part_number"),
     manufacturer: summary.manufacturer || attrString(attrs, "manufacturer"),
     description: attrString(attrs, "product_description"),
     features,
+    aspects,
     package: pkg,
     item: itemDims,
     images: pickLargestImages(item.images),
@@ -699,9 +810,17 @@ export async function listAmazonOffer(storeId, kit) {
   const gating = await amazonGatingCheck(storeId, { brand: unit.brand, category: unit.category, asin });
   if (!gating.ok) return { ok: false, reason: gating.reason, message: gating.message || "Gated" };
 
-  const priceHint = suggestAmazonPriceCents(unit);
+  let returnReservePct = 0;
+  try {
+    const { reservePctForChannel } = await import("./returns.mjs");
+    returnReservePct = await reservePctForChannel(storeId, "amazon");
+  } catch {
+    returnReservePct = 0;
+  }
+  const priceHint = suggestAmazonPriceCents(unit, 0.15, returnReservePct);
   const fees = await getFeesEstimate(storeId, { asin, priceCents: kit.priceCents || priceHint.listCents });
-  const price = suggestAmazonPriceCents(unit, fees.feeCents / Math.max(kit.priceCents || priceHint.listCents, 1));
+  const feePct = fees.feeCents / Math.max(kit.priceCents || priceHint.listCents, 1);
+  const price = suggestAmazonPriceCents(unit, feePct || 0.15, returnReservePct);
   const listCents = kit.priceCents || price.listCents;
   if (listCents - fees.feeCents - price.costCents < 500) {
     return {
@@ -716,24 +835,14 @@ export async function listAmazonOffer(storeId, kit) {
   const sid = sellerId();
   if (!sid) return { ok: false, reason: "missing_seller_id", message: "AMAZON_SELLER_ID not set" };
 
-  // Restrictions check
-  try {
-    const restr = await spapiFetch(
-      storeId,
-      "GET",
-      `/listings/2021-08-01/restrictions?asin=${encodeURIComponent(asin)}&sellerId=${encodeURIComponent(sid)}&marketplaceIds=${marketplaceId()}&conditionType=${encodeURIComponent(cond.amazon)}`,
-    );
-    const blocked = (restr?.restrictions || []).some((r) => /NOT_ELIGIBLE|APPROVAL_REQUIRED/i.test(JSON.stringify(r)));
-    if (blocked) {
-      return {
-        ok: false,
-        reason: "gated_restriction",
-        message: "Amazon listing restrictions block this ASIN/condition. Approve in Seller Central or skip.",
-        restr,
-      };
-    }
-  } catch {
-    /* restrictions endpoint optional */
+  const restr = await checkListingRestrictions(storeId, { asin, sellerId: sid, conditionType: cond.amazon });
+  if (restr.blocked) {
+    return {
+      ok: false,
+      reason: restr.reason || "gated_restriction",
+      message: restr.message,
+      restr: restr.raw,
+    };
   }
 
   const productType = kit.productType || "PRODUCT";
@@ -802,6 +911,85 @@ export async function amazonGatingCheck(_storeId, { brand, category, asin }) {
   void category;
   void asin;
   return { ok: true };
+}
+
+/**
+ * Listings Restrictions API — surface approval / not-eligible clearly (never silent).
+ * Empty restrictions (or none matching condition) means eligible to list.
+ */
+export async function checkListingRestrictions(storeId, { asin, sellerId: sid, conditionType }) {
+  const seller = sid || sellerId();
+  if (!asin || !seller) {
+    return {
+      blocked: true,
+      reason: "restrictions_incomplete",
+      message: !asin
+        ? "ASIN required before Amazon restrictions check."
+        : "AMAZON_SELLER_ID not set — cannot check listing restrictions.",
+      raw: null,
+    };
+  }
+  const cond = conditionType || "new_new";
+  try {
+    const restr = await spapiFetch(
+      storeId,
+      "GET",
+      `/listings/2021-08-01/restrictions?asin=${encodeURIComponent(asin)}&sellerId=${encodeURIComponent(seller)}&marketplaceIds=${marketplaceId()}&conditionType=${encodeURIComponent(cond)}`,
+    );
+    const rows = restr?.restrictions || [];
+    const reasons = [];
+    for (const r of rows) {
+      for (const reason of r?.reasons || []) {
+        const code = String(reason?.reasonCode || reason?.code || "").toUpperCase();
+        const msg = String(reason?.message || "").trim();
+        if (code || msg) reasons.push({ code, message: msg });
+      }
+      // Some payloads only nest codes in the restriction object itself
+      const blob = JSON.stringify(r);
+      if (/APPROVAL_REQUIRED/i.test(blob) && !reasons.some((x) => x.code === "APPROVAL_REQUIRED")) {
+        reasons.push({ code: "APPROVAL_REQUIRED", message: "Seller Central approval required for this ASIN/condition." });
+      }
+      if (/NOT_ELIGIBLE/i.test(blob) && !reasons.some((x) => x.code === "NOT_ELIGIBLE")) {
+        reasons.push({ code: "NOT_ELIGIBLE", message: "Not eligible to list this ASIN/condition." });
+      }
+    }
+    const approval = reasons.find((x) => /APPROVAL_REQUIRED/i.test(x.code));
+    const ineligible = reasons.find((x) => /NOT_ELIGIBLE/i.test(x.code));
+    if (ineligible || approval || reasons.some((x) => /NOT_ELIGIBLE|APPROVAL_REQUIRED/i.test(x.code + x.message))) {
+      const primary = ineligible || approval || reasons[0];
+      const label = primary?.code === "APPROVAL_REQUIRED"
+        ? "Amazon approval required"
+        : primary?.code === "NOT_ELIGIBLE"
+          ? "Amazon listing not eligible"
+          : "Amazon listing restriction";
+      const detail = primary?.message || reasons.map((x) => x.message || x.code).filter(Boolean).join("; ");
+      return {
+        blocked: true,
+        reason: primary?.code === "APPROVAL_REQUIRED" ? "approval_required" : "gated_restriction",
+        message: detail ? `${label}: ${detail}` : `${label} for ASIN ${asin} (${cond}). Approve in Seller Central or skip.`,
+        codes: reasons.map((x) => x.code).filter(Boolean),
+        raw: restr,
+      };
+    }
+    return { blocked: false, reason: null, message: null, raw: restr };
+  } catch (e) {
+    const msg = String(e?.message || e).slice(0, 280);
+    // Auth / role gaps must not look like "ready to list"
+    if (/Unauthorized|403|Access|Forbidden|amazon_not_connected|Missing env/i.test(msg)) {
+      return {
+        blocked: true,
+        reason: "restrictions_check_failed",
+        message: `Could not verify Amazon listing restrictions (${msg}). Fix SP-API access, then Retry / prepare.`,
+        raw: e?.body || null,
+      };
+    }
+    return {
+      blocked: true,
+      reason: "restrictions_check_failed",
+      message: `Amazon restrictions check failed: ${msg}. Retry after Seller Central / API recovers.`,
+      raw: e?.body || null,
+    };
+  }
 }
 
 export async function zeroAmazonQuantityForSku(storeId, sku) {
@@ -1286,8 +1474,136 @@ export async function prepareAmazonQueueItem(storeId, sku) {
     fee = await getFeesEstimate(storeId, { asin: match.asin, priceCents: price.listCents });
   }
 
+  const gating = await amazonGatingCheck(storeId, {
+    brand: unit.brand,
+    category: unit.category,
+    asin: match.asin,
+  });
+  if (!gating.ok) {
+    const patch = {
+      status: "needs_review",
+      asin: match.asin,
+      matched_title: match.title,
+      amazon_price_cents: price.listCents,
+      fee_estimate_cents: fee.feeCents,
+      condition_code: cond.amazon,
+      condition_note: cond.note,
+      retail_cents: price.retailCents,
+      cost_cents: price.costCents,
+      needs_review_reason: gating.message || "Gated brand — approval needed in Seller Central",
+      last_error: null,
+    };
+    await sb
+      .from("amazon_list_items")
+      .update({ ...patch, updated_at: new Date().toISOString() })
+      .eq("store_id", storeId)
+      .eq("sku", sku);
+    return { ok: false, ...patch, match, price, gating };
+  }
+
+  if (match.asin) {
+    const restr = await checkListingRestrictions(storeId, {
+      asin: match.asin,
+      conditionType: cond.amazon,
+    });
+    if (restr.blocked) {
+      const patch = {
+        status: "needs_review",
+        asin: match.asin,
+        matched_title: match.title,
+        amazon_price_cents: price.listCents,
+        fee_estimate_cents: fee.feeCents,
+        condition_code: cond.amazon,
+        condition_note: cond.note,
+        retail_cents: price.retailCents,
+        cost_cents: price.costCents,
+        needs_review_reason: restr.message,
+        last_error: restr.reason === "restrictions_check_failed" ? restr.message : null,
+      };
+      await sb
+        .from("amazon_list_items")
+        .update({ ...patch, updated_at: new Date().toISOString() })
+        .eq("store_id", storeId)
+        .eq("sku", sku);
+      return { ok: false, ...patch, match, price, restrictions: restr };
+    }
+  }
+
+  // No catalog ASIN: run VALIDATION_PREVIEW create probe. GS1/brand mismatch → not_on_amazon.
+  if (!match.asin) {
+    try {
+      const { createAmazonCatalogListing } = await import("./amazon-create.mjs");
+      const preview = await createAmazonCatalogListing(storeId, sku, { mode: "VALIDATION_PREVIEW" });
+      if (preview.gs1OrBrandBlocked || preview.autoMarkedNotOnAmazon) {
+        const patchBlocked = {
+          status: "not_on_amazon",
+          asin: null,
+          matched_title: null,
+          amazon_price_cents: price.listCents,
+          fee_estimate_cents: fee.feeCents,
+          condition_code: cond.amazon,
+          condition_note: cond.note,
+          retail_cents: price.retailCents,
+          cost_cents: price.costCents,
+          needs_review_reason:
+            "Not on Amazon — sell on other channels. UPC/brand not in Amazon GS1 brand records (create blocked).",
+          last_error: (preview.errors || []).map((e) => e.message).filter(Boolean).join(" · ").slice(0, 500) || null,
+        };
+        await sb
+          .from("amazon_list_items")
+          .update({ ...patchBlocked, updated_at: new Date().toISOString() })
+          .eq("store_id", storeId)
+          .eq("sku", sku);
+        return { ok: false, ...patchBlocked, match, price, createPreview: preview };
+      }
+      const patchCreate = {
+        status: "needs_review",
+        asin: null,
+        matched_title: null,
+        amazon_price_cents: price.listCents,
+        fee_estimate_cents: fee.feeCents,
+        condition_code: cond.amazon,
+        condition_note: cond.note,
+        retail_cents: price.retailCents,
+        cost_cents: price.costCents,
+        needs_review_reason: preview.ok
+          ? "No ASIN — create-new VALIDATION_PREVIEW is clean. Review Create new listing, then submit (needs Amazon-hosted main image)."
+          : `No ASIN — create preview has ${preview.errorCount || 0} error(s). Open Create new listing to fix attributes, or mark Not on Amazon.`,
+        last_error: preview.ok
+          ? null
+          : (preview.errors || []).map((e) => e.message).filter(Boolean).join(" · ").slice(0, 500) || null,
+      };
+      await sb
+        .from("amazon_list_items")
+        .update({ ...patchCreate, updated_at: new Date().toISOString() })
+        .eq("store_id", storeId)
+        .eq("sku", sku);
+      return { ok: false, ...patchCreate, match, price, createPreview: preview };
+    } catch (e) {
+      const patchFallback = {
+        status: "needs_review",
+        asin: null,
+        matched_title: null,
+        amazon_price_cents: price.listCents,
+        fee_estimate_cents: fee.feeCents,
+        condition_code: cond.amazon,
+        condition_note: cond.note,
+        retail_cents: price.retailCents,
+        cost_cents: price.costCents,
+        needs_review_reason: "No ASIN match — paste ASIN, try Create new listing, or mark Not on Amazon.",
+        last_error: e instanceof Error ? e.message : String(e),
+      };
+      await sb
+        .from("amazon_list_items")
+        .update({ ...patchFallback, updated_at: new Date().toISOString() })
+        .eq("store_id", storeId)
+        .eq("sku", sku);
+      return { ok: false, ...patchFallback, match, price };
+    }
+  }
+
   const patch = {
-    status: match.asin ? "ready" : "needs_review",
+    status: "ready",
     asin: match.asin,
     matched_title: match.title,
     amazon_price_cents: price.listCents,
@@ -1296,7 +1612,7 @@ export async function prepareAmazonQueueItem(storeId, sku) {
     condition_note: cond.note,
     retail_cents: price.retailCents,
     cost_cents: price.costCents,
-    needs_review_reason: match.asin ? null : "No ASIN match — paste correct ASIN or remove",
+    needs_review_reason: null,
     last_error: null,
   };
   await sb
@@ -1304,5 +1620,5 @@ export async function prepareAmazonQueueItem(storeId, sku) {
     .update({ ...patch, updated_at: new Date().toISOString() })
     .eq("store_id", storeId)
     .eq("sku", sku);
-  return { ok: true, ...patch, match, price };
+  return { ok: true, ...patch, match, price, returnReservePct };
 }

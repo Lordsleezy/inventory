@@ -13,14 +13,21 @@ import { CommissionOverrideControls, CommissionOverrideMark } from './Commission
 import { ExpensesPage, type Expense as StoreExpense } from './ExpensesPage';
 import { MarketplacesPage } from './MarketplacesPage';
 import { AmazonPage } from './AmazonPage';
+import { ChannelListingPage } from './ChannelListingPage';
 import { OnlinePage } from './OnlinePage';
 import { ReportsPage } from './ReportsPage';
 import { SettingsPage } from './SettingsPage';
 import { AssociateSettings } from './AssociateSettings';
 import { type MainPage, type NavState, defaultNavState, parseNavFromLocation, writeNavToLocation } from './navigation';
 import { formatLabelWithPending, parseShipCostSource } from './shipCostSource';
+import { errText } from './errText';
+import { enableAppShell, isStandaloneApp, shouldShowInstallGate } from './appMode/isAppMode';
+import { InstallGate } from './appMode/InstallGate';
+import { AppModeShell } from './appMode/AppModeShell';
+import { NeedsAttentionPanel } from './NeedsAttentionPanel';
 
-const ASSOCIATE_PAGES: MainPage[] = ['register', 'inventory', 'cameras', 'settings'];
+/** Store associates (Jacob / clock staff): Inventory, Register, Settings only. */
+const ASSOCIATE_PAGES: MainPage[] = ['register', 'inventory', 'settings'];
 
 const sb = floorCloud();
 const zone = 'America/Los_Angeles';
@@ -68,6 +75,11 @@ type UnmatchedOrder = {
 type OverrideMap = Map<string, CommissionOverride>;
 type Person = { user_id: string; display_name: string; kind: string };
 type Payment = { id: string; employee_id: string; amount_cents: number; paid_at: string; paid_by: string; legacy_ticket_key: string | null; note: string | null };
+type PayoutAdjustment = {
+  id: string; employee_id: string; amount_cents: number; reason: string;
+  return_id: string | null; sale_id: number | null; ticket_key: string | null;
+  sale_commission_cents: number | null; created_at: string;
+};
 type Expense = { description: string; category: string; amount_cents: number; needs_reimbursement?: boolean; employee_id?: string };
 type Summary = { sales_cents: number; tax_cents: number; card_fee_cents: number; collected_cents: number; cash_cents: number; card_cents: number; other_cents: number; sale_count: number; payout_cents: number; payout_unset: number };
 type Report = { id: string; period_type: 'daily' | 'weekly'; period_start: string; period_end: string; summary: Summary; expenses: Expense[]; notes: string; created_at: string; created_by: string; edited_at: string; edited_by: string };
@@ -218,7 +230,7 @@ async function storedCommissionOverrides(storeId: string): Promise<OverrideMap> 
       if (batch.length < 1000) return map;
     }
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errText(e);
     if (/portal_commission_overrides|schema cache|does not exist|Could not find the table/i.test(msg)) {
       return map;
     }
@@ -242,6 +254,16 @@ async function storedPayments(storeId: string) {
       .range(offset, offset + 999));
     payments.push(...batch);
     if (batch.length < 1000) return payments;
+  }
+}
+async function storedPayoutAdjustments(): Promise<PayoutAdjustment[]> {
+  try {
+    const rows = check<PayoutAdjustment[]>(await sb.rpc('portal_payout_adjustments'));
+    return rows || [];
+  } catch (e) {
+    const msg = errText(e);
+    if (/portal_payout_adjustments|schema cache|does not exist|PGRST202|404/i.test(msg)) return [];
+    throw e;
   }
 }
 async function payoutSales(overrides: OverrideMap = new Map()) {
@@ -294,6 +316,7 @@ export function App() {
   const [people, setPeople] = useState<Person[]>([]);
   const [rules, setRules] = useState<Rule[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
+  const [payoutAdjustments, setPayoutAdjustments] = useState<PayoutAdjustment[]>([]);
   const [reports, setReports] = useState<Report[]>([]);
   const [expenses, setExpenses] = useState<StoreExpense[]>([]);
   const [onlineCfg, setOnlineCfg] = useState<OnlineCfg>(NO_ONLINE);
@@ -315,6 +338,12 @@ export function App() {
     try { return localStorage.getItem('floor_admin_dark') === '1'; } catch { return false; }
   });
   const [navGroup, setNavGroup] = useState<'reports' | 'inventory' | 'online' | null>(null);
+  const [showInstallGate, setShowInstallGate] = useState(() => shouldShowInstallGate());
+  // Re-check on mount so store-phone Chrome / kiosk / persisted app mode win over the install coach.
+  const [standaloneApp, setStandaloneApp] = useState(() => isStandaloneApp());
+  useEffect(() => {
+    if (isStandaloneApp()) setStandaloneApp(true);
+  }, []);
   useEffect(() => {
     try { localStorage.setItem('floor_admin_nav_collapsed', navCollapsed ? '1' : '0'); } catch { /* ignore */ }
   }, [navCollapsed]);
@@ -437,7 +466,7 @@ export function App() {
           setNav(defaultNavState('register'));
         }
       } catch (e) {
-        if (alive) setError(e instanceof Error ? e.message : String(e));
+        if (alive) setError(errText(e));
       } finally {
         if (alive) setAccessReady(true);
       }
@@ -461,12 +490,19 @@ export function App() {
       const cfg = check<{ online_channels: string[]; online_payout_pct: number; online_payout_employee_id: string | null }>(c);
       setOnlineCfg({ channels: (cfg.online_channels || []).map(s => String(s).toLowerCase()), pct: Number(cfg.online_payout_pct) || 0, employeeId: cfg.online_payout_employee_id });
       setError('');
-    } catch (e) { setError(String(e)); }
+    } catch (e) { setError(errText(e)); }
   }, [store]);
-  const loadPayments = useCallback(async () => { if (!store) return; try { setPayments(await storedPayments(store)); } catch (e) { setError(String(e)); } }, [store]);
+  const loadPayments = useCallback(async () => {
+    if (!store) return;
+    try {
+      const [pays, adjs] = await Promise.all([storedPayments(store), storedPayoutAdjustments()]);
+      setPayments(pays);
+      setPayoutAdjustments(adjs);
+    } catch (e) { setError(errText(e)); }
+  }, [store]);
   const loadCommissionOverrides = useCallback(async () => {
     if (!store) return;
-    try { setCommissionOverrides(await storedCommissionOverrides(store)); } catch (e) { setError(String(e)); }
+    try { setCommissionOverrides(await storedCommissionOverrides(store)); } catch (e) { setError(errText(e)); }
   }, [store]);
   const loadSales = useCallback(async () => {
     if (!store) return;
@@ -481,13 +517,13 @@ export function App() {
       // Always keep the selected calendar day (default: today LA). Do not jump to
       // yesterday when today is empty — that made Live Sales show the prior day.
       setLive([...rows, ...pending].sort((a, b) => b.at.localeCompare(a.at)));
-    } catch (e) { setError(String(e)); }
+    } catch (e) { setError(errText(e)); }
   }, [store, selectedDay]);
   const loadVoided = useCallback(async () => {
     if (!store) return;
     try {
       setVoided(await voidedSales(selectedDay, datePlus(selectedDay, 1)));
-    } catch (e) { setError(String(e)); }
+    } catch (e) { setError(errText(e)); }
   }, [store, selectedDay]);
   const loadPayoutSales = useCallback(async () => {
     if (!store) return;
@@ -497,7 +533,7 @@ export function App() {
       const [salesRows, fees] = await Promise.all([payoutSales(overrides), ebayInsertionFees(store)]);
       setAllSales(salesRows);
       setEbayFees(fees);
-    } catch (e) { setError(String(e)); }
+    } catch (e) { setError(errText(e)); }
   }, [store]);
   const setTicketOverride = useCallback((ticketKey: string, next: CommissionOverride | null) => {
     setCommissionOverrides(prev => {
@@ -513,6 +549,13 @@ export function App() {
   useEffect(() => { if (page === 'sales' || (page === 'reports' && nav.reportTab === 'profit')) void loadSales(); }, [page, nav.reportTab, loadSales]);
   useEffect(() => { if (page === 'sales' && salesScope === 'voided') void loadVoided(); }, [page, salesScope, loadVoided]);
   useEffect(() => { if (page === 'reports' && nav.reportTab === 'payouts') void loadPayoutSales(); }, [page, nav.reportTab, loadPayoutSales]);
+  useEffect(() => { if (standaloneApp && fullAccess) void loadCommon(); }, [standaloneApp, fullAccess, loadCommon]);
+  useEffect(() => {
+    if (!standaloneApp || !fullAccess) return;
+    if (nav.reportTab === 'payouts') { void loadPayments(); void loadPayoutSales(); }
+    if (nav.reportTab === 'profit') void loadSales();
+  }, [standaloneApp, fullAccess, nav.reportTab, loadPayments, loadPayoutSales, loadSales]);
+
   useEffect(() => { if (page === 'orders' && fullAccess) void loadCommissionOverrides(); }, [page, fullAccess, loadCommissionOverrides]);
   useEffect(() => { if (page === 'orders' && fullAccess) void loadCommon(); }, [page, fullAccess, loadCommon]);
   useEffect(() => {
@@ -540,7 +583,7 @@ export function App() {
       const { error: e } = await sb.rpc('portal_match_web_order', { p_order: t.webOrderId, p_sku: sku.trim() });
       if (e) throw e;
       await loadSales();
-    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    } catch (e) { setError(errText(e)); }
     finally { setBusy(false); }
   }
   const ruleMap = useMemo(() => new Map(rules.map(x => [x.employee_id, x])), [rules]);
@@ -554,7 +597,7 @@ export function App() {
   const defaultReimbursementId = staff.find(p => p.display_name === 'Paul')?.user_id || staff[0]?.user_id || '';
   const personName = (id: string) => people.find(x => x.user_id === id)?.display_name || 'Unknown';
   const sum = (ts: Ticket[]): Summary => { const cuts = ts.flatMap(t => activeRules.map(r => payout(t, r, onlineCfg))); return { sales_cents: ts.reduce((n, t) => n + t.subtotal, 0), tax_cents: ts.reduce((n, t) => n + t.tax, 0), card_fee_cents: ts.reduce((n, t) => n + t.fee, 0), collected_cents: ts.reduce((n, t) => n + t.total, 0), cash_cents: ts.reduce((n, t) => n + t.cash, 0), card_cents: ts.reduce((n, t) => n + t.card, 0), other_cents: ts.reduce((n, t) => n + t.total - t.cash - t.card, 0), sale_count: ts.length, payout_cents: cuts.reduce<number>((n, x) => n + (x || 0), 0), payout_unset: cuts.filter(x => x === null).length }; };
-  async function run(f: () => Promise<void>) { setBusy(true); setError(''); try { await f(); } catch (e) { setError(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); } }
+  async function run(f: () => Promise<void>) { setBusy(true); setError(''); try { await f(); } catch (e) { setError(errText(e)); } finally { setBusy(false); } }
   async function openReport(type: 'daily' | 'weekly') {
     const start = type === 'daily' ? selectedDay : weekStart(selectedDay);
     const overrides = store ? await storedCommissionOverrides(store) : new Map();
@@ -579,39 +622,128 @@ export function App() {
       setPayments(current => [saved, ...current.filter(p => p.id !== saved.id)]);
       return null;
     } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
+      const message = errText(e);
       setError(message);
       return message;
     } finally { setBusy(false); }
   }
   async function downloadReports(selected: Report[], all: boolean) { await run(async () => { const { downloadReportWorkbook } = await import('./reportExport'); await downloadReportWorkbook(selected, reportLines, personName, all); }); }
 
+  if (showInstallGate && !standaloneApp) {
+    return (
+      <InstallGate
+        onContinue={() => {
+          // Store phone / staff: use the app shell immediately — do not fall into desktop browser chrome.
+          enableAppShell();
+          setStandaloneApp(true);
+          setShowInstallGate(false);
+        }}
+      />
+    );
+  }
+
   if (!session) return <main className="auth"><div className="login"><div className="brand">OPEN BOX <span>INDUSTRIES</span></div><h1>Floor Admin</h1><p>Email for admins, or clock number + PIN for register staff.</p><form onSubmit={e => { e.preventDefault(); void run(async () => { const attempts = staffSignInAttempts(email, password); if (!attempts.length) throw new Error('Enter a valid email, username, or clock number.'); let last: unknown = new Error('Could not sign in.'); for (const attempt of attempts) { const result = await sb.auth.signInWithPassword(attempt); if (!result.error) return; last = result.error; } throw last; }); }}><label>Email or clock number<input type="text" autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} required /></label><label>Password or PIN<input type="password" autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} required /></label><button disabled={busy}>Sign in</button></form>{error && <p className="error">{error}</p>}</div></main>;
   if (!accessReady) return <main className="auth"><div className="login"><h1>Floor Admin</h1><p>Checking access…</p></div></main>;
   if (!store) return <main className="auth"><div className="login"><h1>Access unavailable</h1><p>This account is not attached to the store as Floor staff or an admin. Ask Paul or Steve to add it.</p><button onClick={() => void sb.auth.signOut({ scope: 'local' })}>Sign out</button>{error && <p className="error">{error}</p>}</div></main>;
+
+  const closeouts = <>
+    <header style={{ marginTop: 8 }}><div><div className="eyebrow">CLOSEOUTS</div><h2 style={{ fontSize: '1.18rem', margin: 0 }}>Daily &amp; weekly reports</h2><p>Save a day or week with expenses and notes.</p></div><div className="report-actions"><label className="date-control">Report date<input type="date" value={selectedDay} onChange={e => setSelectedDay(e.target.value)} /></label><div className="actions"><button onClick={() => void run(() => openReport('daily'))}>Submit Daily Report</button><button className="secondary" onClick={() => void run(() => openReport('weekly'))}>Submit Weekly Report</button>{reports.length > 0 && <button className="secondary" disabled={busy} onClick={() => void downloadReports(reports, true)}>Download all</button>}</div></div></header>
+    {editing && draft ? <section className="panel editor"><div className="section-head"><div><div className="eyebrow">{typeof editing === 'string' ? 'NEW REPORT' : 'SUBMITTED REPORT'}</div><h2>{draft.start} {draft.end !== datePlus(draft.start, 1) && `– ${datePlus(draft.end, -1)}`}</h2></div><div className="actions">{reportReadOnly && <button onClick={() => setReportReadOnly(false)}>Edit report</button>}{typeof editing !== 'string' && <button className="secondary" disabled={busy} onClick={() => void downloadReports([editing], false)}>Download</button>}<button className="text-button" onClick={() => { setEditing(null); setReportDraft(null); }}>Close</button></div></div><div className="stats compact"><Stat name="Sales" value={money(draft.summary.sales_cents)} /><Stat name="Card fees" value={money(draft.summary.card_fee_cents)} /><Stat name="Tax" value={money(draft.summary.tax_cents)} /></div><h3>Expenses</h3>{draft.expenses.map((x, i) => <div className="expense-row" key={i}><input disabled={reportReadOnly} aria-label="Description" placeholder="Description" value={x.description} onChange={e => setReportDraft({ ...draft, expenses: draft.expenses.map((v, j) => j === i ? { ...v, description: e.target.value } : v) })} /><ExpenseAmount disabled={reportReadOnly} cents={x.amount_cents} onCommit={cents => setReportDraft({ ...draft, expenses: draft.expenses.map((v, j) => j === i ? { ...v, amount_cents: cents } : v) })} /><label className="reimburse-check"><input type="checkbox" disabled={reportReadOnly} checked={!!x.needs_reimbursement} onChange={e => setReportDraft({ ...draft, expenses: draft.expenses.map((v, j) => j === i ? { ...v, needs_reimbursement: e.target.checked, employee_id: e.target.checked ? (v.employee_id || defaultReimbursementId) : undefined } : v) })} />Needs Reimbursement</label>{x.needs_reimbursement && <select disabled={reportReadOnly} aria-label="Reimburse employee" value={x.employee_id || defaultReimbursementId} onChange={e => setReportDraft({ ...draft, expenses: draft.expenses.map((v, j) => j === i ? { ...v, employee_id: e.target.value } : v) })}>{staff.map(p => <option value={p.user_id} key={p.user_id}>{p.display_name}</option>)}</select>}{!reportReadOnly && <button className="text-button" onClick={() => setReportDraft({ ...draft, expenses: draft.expenses.filter((_, j) => j !== i) })}>Remove</button>}</div>)}{!reportReadOnly && <button className="secondary" onClick={() => setReportDraft({ ...draft, expenses: [...draft.expenses, { description: '', category: '', amount_cents: 0 }] })}>Add expense</button>}<label className="notes">Notes<textarea disabled={reportReadOnly} rows={4} value={draft.notes} onChange={e => setReportDraft({ ...draft, notes: e.target.value })} placeholder="Anything to remember about this period" /></label><div className="net"><span>Net merchandise after expenses</span><strong>{money(draft.summary.sales_cents - draft.expenses.reduce((n, x) => n + x.amount_cents, 0))}</strong></div>{!reportReadOnly && <button disabled={busy} onClick={() => void saveReport()}>{typeof editing === 'string' ? 'Submit report' : 'Save edits'}</button>}{typeof editing !== 'string' && <p className="hint">Last edited by {personName(editing.edited_by)} · {stamp(editing.edited_at)}</p>}</section> : <section className="panel"><h2>Submitted reports</h2>{reports.length === 0 ? <Empty>No reports submitted yet.</Empty> : reports.map(r => <div className="report-list-row" key={r.id}><button className="report-row" onClick={() => viewReport(r)}><span><strong>{r.period_type === 'daily' ? 'Daily' : 'Weekly'} · {r.period_start}</strong><small>{r.summary.sale_count} sales · Edited {stamp(r.edited_at)} by {personName(r.edited_by)}</small></span><b>{money(r.summary.sales_cents - r.expenses.reduce((n, x) => n + x.amount_cents, 0))}</b></button><button className="secondary" onClick={() => viewReport(r, true)}>Edit</button><button className="secondary" disabled={busy} onClick={() => void downloadReports([r], false)}>Download</button></div>)}</section>}
+  </>;
+
+
   const registerOnly = !fullAccess;
+
+  if (standaloneApp) {
+    return <>
+      <ClientErrorReporter token={session.access_token} />
+      <AppModeShell
+        client={sb}
+        session={session}
+        storeId={store}
+        fullAccess={fullAccess}
+        staffSession={staffSession}
+        money={money}
+        stamp={stamp}
+        rules={activeRules}
+        onlineCfg={onlineCfg}
+        commissionOverrides={commissionOverrides}
+        personName={personName}
+        busy={busy}
+        onCommissionChanged={setTicketOverride}
+        settingsSlot={fullAccess
+          ? <SettingsPage client={sb} accessToken={session.access_token} stamp={stamp} money={money} busy={busy} run={run} onLedgerChanged={async () => { await loadSales(); await loadPayoutSales(); }} ruleEditor={<>{staff.map(p => <RuleEditor key={p.user_id} person={p} rule={ruleMap.get(p.user_id)} save={setRule} busy={busy} />)}</>} onlinePayoutSettings={<OnlinePayoutSettings cfg={onlineCfg} staff={staff} busy={busy} save={async (channels, pct, who) => { await run(async () => { check(await sb.rpc('portal_set_payout_config', { p_channels: channels, p_pct: pct, p_employee: who })); await loadCommon(); await loadPayoutSales(); }); }} />} />
+          : <AssociateSettings client={sb} displayName={staffSession?.displayName || 'Associate'} />}
+        reportsSlot={fullAccess ? (
+          <ReportsPage
+            client={sb}
+            money={money}
+            tab={nav.reportTab}
+            onTab={(t) => go({ reportTab: t })}
+            closeouts={closeouts}
+            expenses={<ExpensesPage client={sb} money={money} expenses={expenses} staff={staff} ownerId={onlineCfg.employeeId || defaultReimbursementId} onChanged={loadCommon} embedded />}
+            payouts={<PayoutsPage allSales={allSales} ebayFees={ebayFees} staff={staff} rules={activeRules} payments={payments} adjustments={payoutAdjustments} expenses={expenses} cfg={onlineCfg} personName={personName} busy={busy} recordPayment={recordPayment} onCommissionChanged={setTicketOverride} />}
+          />
+        ) : null}
+      />
+    </>;
+  }
+
   const mainNav: [MainPage, string][] = registerOnly
-    ? [['register', 'Register'], ['inventory', 'Inventory'], ['cameras', 'Cameras']]
-    : [['register', 'Register'], ['sales', 'Live Sales'], ['orders', 'Orders'], ['receipts', 'Receipts'], ['online', 'Online'], ['marketplaces', 'Marketplaces'], ['amazon', 'Amazon'], ['cameras', 'Cameras'], ['remote', 'Remote'], ['logs', 'Logs']];
-  const pageLabel = ({ register: 'Register', sales: 'Live Sales', orders: 'Orders', receipts: 'Receipts', inventory: 'Inventory', online: 'Online', marketplaces: 'Marketplaces', amazon: 'Amazon', reports: 'Reports', tax: 'Tax', cameras: 'Cameras', remote: 'Remote', logs: 'Logs', settings: 'Settings' } as const)[page];
-  const reportSubs: [typeof nav.reportTab, string][] = [['profit', 'Sales & profits'], ['shipping', 'Shipping & fees'], ['expenses', 'Expenses'], ['payouts', 'Payouts']];
-  const inventorySubs: [typeof nav.inventoryTab, string][] = [['browse', 'Browse'], ['receive', 'Receive'], ['lookup-test', 'Lookup test']];
+    ? [['register', 'Register'], ['inventory', 'Inventory'], ['settings', 'Settings']]
+    : [
+        ['register', 'Register'],
+        ['sales', 'Live Sales'],
+        ['orders', 'Orders'],
+        ['receipts', 'Receipts'],
+        ['online', 'Online'],
+        ['ebay', 'eBay'],
+        ['amazon', 'Amazon'],
+        ['tiktok', 'TikTok'],
+        ['depop', 'Depop'],
+        ['marketplaces', 'Marketplaces'],
+        ['cameras', 'Cameras'],
+        ['remote', 'Remote'],
+        ['logs', 'Logs'],
+      ];
+  const pageLabel = ({
+    register: 'Register',
+    sales: 'Live Sales',
+    orders: 'Orders',
+    receipts: 'Receipts',
+    inventory: 'Inventory',
+    online: 'Online',
+    marketplaces: 'Marketplaces',
+    ebay: 'eBay',
+    amazon: 'Amazon',
+    tiktok: 'TikTok',
+    depop: 'Depop',
+    reports: 'Reports',
+    tax: 'Tax',
+    cameras: 'Cameras',
+    remote: 'Remote',
+    logs: 'Logs',
+    settings: 'Settings',
+  } as const)[page];
+  const reportSubs: [typeof nav.reportTab, string][] = [['profit', 'Sales & profits'], ['shipping', 'Shipping & fees'], ['expenses', 'Expenses'], ['payouts', 'Payouts'], ['returns', 'Returns']];
+  const inventorySubs: [typeof nav.inventoryTab, string][] = [['browse', 'Browse'], ['receive', 'Receive'], ['lookup-test', 'Lookup test'], ['products', 'Products'], ['measure-mat', 'Measure mat']];
   const onlineSubs: [typeof nav.onlineTab, string][] = [
     ['listed', 'Listed'],
     ['reports', 'Reports'],
   ];
   const attentionSubs: [typeof nav.attentionSection, string][] = [
-    ['missing-cost', 'Missing cost'],
+    ['missing-brand', 'Missing brand'],
+    ['missing-category', 'Missing category'],
+    ['missing-specifics', 'Missing item specifics'],
+    ['missing-spec', 'Missing weight & dimensions'],
+    ['missing-upc', 'Missing UPC'],
     ['missing-photo', 'Missing photo'],
     ['missing-price', 'Missing price'],
-    ['missing-spec', 'Missing spec'],
+    ['missing-condition', 'Missing condition'],
+    ['missing-cost', 'Missing cost'],
     ['missing-model', 'Missing model'],
     ['missing-description', 'Missing description'],
   ];
-  const closeouts = <>
-    <header style={{ marginTop: 8 }}><div><div className="eyebrow">CLOSEOUTS</div><h2 style={{ fontSize: '1.18rem', margin: 0 }}>Daily &amp; weekly reports</h2><p>Save a day or week with expenses and notes.</p></div><div className="report-actions"><label className="date-control">Report date<input type="date" value={selectedDay} onChange={e => setSelectedDay(e.target.value)} /></label><div className="actions"><button onClick={() => void run(() => openReport('daily'))}>Submit Daily Report</button><button className="secondary" onClick={() => void run(() => openReport('weekly'))}>Submit Weekly Report</button>{reports.length > 0 && <button className="secondary" disabled={busy} onClick={() => void downloadReports(reports, true)}>Download all</button>}</div></div></header>
-    {editing && draft ? <section className="panel editor"><div className="section-head"><div><div className="eyebrow">{typeof editing === 'string' ? 'NEW REPORT' : 'SUBMITTED REPORT'}</div><h2>{draft.start} {draft.end !== datePlus(draft.start, 1) && `– ${datePlus(draft.end, -1)}`}</h2></div><div className="actions">{reportReadOnly && <button onClick={() => setReportReadOnly(false)}>Edit report</button>}{typeof editing !== 'string' && <button className="secondary" disabled={busy} onClick={() => void downloadReports([editing], false)}>Download</button>}<button className="text-button" onClick={() => { setEditing(null); setReportDraft(null); }}>Close</button></div></div><div className="stats compact"><Stat name="Sales" value={money(draft.summary.sales_cents)} /><Stat name="Card fees" value={money(draft.summary.card_fee_cents)} /><Stat name="Tax" value={money(draft.summary.tax_cents)} /></div><h3>Expenses</h3>{draft.expenses.map((x, i) => <div className="expense-row" key={i}><input disabled={reportReadOnly} aria-label="Description" placeholder="Description" value={x.description} onChange={e => setReportDraft({ ...draft, expenses: draft.expenses.map((v, j) => j === i ? { ...v, description: e.target.value } : v) })} /><ExpenseAmount disabled={reportReadOnly} cents={x.amount_cents} onCommit={cents => setReportDraft({ ...draft, expenses: draft.expenses.map((v, j) => j === i ? { ...v, amount_cents: cents } : v) })} /><label className="reimburse-check"><input type="checkbox" disabled={reportReadOnly} checked={!!x.needs_reimbursement} onChange={e => setReportDraft({ ...draft, expenses: draft.expenses.map((v, j) => j === i ? { ...v, needs_reimbursement: e.target.checked, employee_id: e.target.checked ? (v.employee_id || defaultReimbursementId) : undefined } : v) })} />Needs Reimbursement</label>{x.needs_reimbursement && <select disabled={reportReadOnly} aria-label="Reimburse employee" value={x.employee_id || defaultReimbursementId} onChange={e => setReportDraft({ ...draft, expenses: draft.expenses.map((v, j) => j === i ? { ...v, employee_id: e.target.value } : v) })}>{staff.map(p => <option value={p.user_id} key={p.user_id}>{p.display_name}</option>)}</select>}{!reportReadOnly && <button className="text-button" onClick={() => setReportDraft({ ...draft, expenses: draft.expenses.filter((_, j) => j !== i) })}>Remove</button>}</div>)}{!reportReadOnly && <button className="secondary" onClick={() => setReportDraft({ ...draft, expenses: [...draft.expenses, { description: '', category: '', amount_cents: 0 }] })}>Add expense</button>}<label className="notes">Notes<textarea disabled={reportReadOnly} rows={4} value={draft.notes} onChange={e => setReportDraft({ ...draft, notes: e.target.value })} placeholder="Anything to remember about this period" /></label><div className="net"><span>Net merchandise after expenses</span><strong>{money(draft.summary.sales_cents - draft.expenses.reduce((n, x) => n + x.amount_cents, 0))}</strong></div>{!reportReadOnly && <button disabled={busy} onClick={() => void saveReport()}>{typeof editing === 'string' ? 'Submit report' : 'Save edits'}</button>}{typeof editing !== 'string' && <p className="hint">Last edited by {personName(editing.edited_by)} · {stamp(editing.edited_at)}</p>}</section> : <section className="panel"><h2>Submitted reports</h2>{reports.length === 0 ? <Empty>No reports submitted yet.</Empty> : reports.map(r => <div className="report-list-row" key={r.id}><button className="report-row" onClick={() => viewReport(r)}><span><strong>{r.period_type === 'daily' ? 'Daily' : 'Weekly'} · {r.period_start}</strong><small>{r.summary.sale_count} sales · Edited {stamp(r.edited_at)} by {personName(r.edited_by)}</small></span><b>{money(r.summary.sales_cents - r.expenses.reduce((n, x) => n + x.amount_cents, 0))}</b></button><button className="secondary" onClick={() => viewReport(r, true)}>Edit</button><button className="secondary" disabled={busy} onClick={() => void downloadReports([r], false)}>Download</button></div>)}</section>}
-  </>;
   return <div className={`app${menuOpen ? ' menu-open' : ''}${navCollapsed ? ' nav-collapsed' : ''}${navCollapsed && navHoverPeek && navHoverOpen ? ' nav-peek-open' : ''}${page === 'register' ? ' register-mode' : ''}${darkMode ? ' dark' : ''}`}><ClientErrorReporter token={session.access_token} />
   <header className="mobile-top">
     <button type="button" className="hamburger" aria-label={menuOpen ? 'Close menu' : 'Open menu'} aria-expanded={menuOpen} aria-controls="admin-nav" onClick={() => setMenuOpen(o => !o)}>
@@ -645,15 +777,7 @@ export function App() {
       {registerOnly
         ? <>
       <button type="button" className={page === 'register' ? 'active' : ''} key="register" title="Register" onClick={() => goNav({ page: 'register' })}>Register</button>
-      <div className={`nav-group${navGroup === 'inventory' ? ' open' : ''}${page === 'inventory' ? ' on' : ''}`}>
-        <button type="button" title="Inventory" className={`nav-parent${page === 'inventory' ? ' active' : ''}`} onClick={() => { setNavGroup(g => g === 'inventory' ? null : 'inventory'); go({ page: 'inventory', inventoryTab: 'browse' }); setEditing(null); }}>Inventory</button>
-        <div className="nav-sub">
-          {inventorySubs.map(([tab, label]) => <button type="button" key={tab} className={page === 'inventory' && nav.inventoryTab === tab ? 'active' : ''} onClick={() => goNav({ page: 'inventory', inventoryTab: tab })}>{label}</button>)}
-          <div className="nav-sub-label">Needs attention</div>
-          {attentionSubs.map(([section, label]) => <button type="button" key={section} className={page === 'inventory' && nav.inventoryTab === 'attention' && nav.attentionSection === section ? 'active' : ''} onClick={() => goNav({ page: 'inventory', inventoryTab: 'attention', attentionSection: section })}>{label}</button>)}
-        </div>
-      </div>
-      <button type="button" className={page === 'cameras' ? 'active' : ''} title="Cameras" onClick={() => goNav({ page: 'cameras' })}>Cameras</button>
+      <button type="button" className={page === 'inventory' ? 'active' : ''} title="Inventory" onClick={() => goNav({ page: 'inventory', inventoryTab: 'browse' })}>Inventory</button>
       <button type="button" title="Settings" className={page === 'settings' ? 'active' : ''} onClick={() => goNav({ page: 'settings' })}>Settings</button>
         </>
         : <>
@@ -672,7 +796,13 @@ export function App() {
           {onlineSubs.map(([tab, label]) => <button type="button" key={tab} className={page === 'online' && nav.onlineTab === tab ? 'active' : ''} onClick={() => goNav({ page: 'online', onlineTab: tab })}>{label}</button>)}
         </div>
       </div>
-      {mainNav.filter(([id]) => id === 'marketplaces' || id === 'amazon').map(([id, label]) => <button type="button" className={page === id ? 'active' : ''} key={id} title={label} onClick={() => goNav({ page: id })}>{label}</button>)}
+      {mainNav
+        .filter(([id]) => id === 'ebay' || id === 'amazon' || id === 'tiktok' || id === 'depop' || id === 'marketplaces')
+        .map(([id, label]) => (
+          <button type="button" className={page === id ? 'active' : ''} key={id} title={label} onClick={() => goNav({ page: id })}>
+            {label}
+          </button>
+        ))}
       <div className={`nav-group${navGroup === 'reports' ? ' open' : ''}${page === 'reports' ? ' on' : ''}`}>
         <button type="button" title="Reports" className={`nav-parent${page === 'reports' ? ' active' : ''}`} onClick={() => { setNavGroup(g => g === 'reports' ? null : 'reports'); go({ page: 'reports' }); setEditing(null); }}>Reports</button>
         <div className="nav-sub">
@@ -782,14 +912,17 @@ export function App() {
   {fullAccess && page === 'receipts' && <ReceiptsPage client={sb} money={money} stamp={stamp} />}
   {fullAccess && page === 'online' && <OnlinePage client={sb} money={money} tab={nav.onlineTab} onTab={t => go({ onlineTab: t, page: 'online' })} channel={nav.onlineChannel} onChannel={c => go({ onlineChannel: c, onlineTab: 'listed', page: 'online' })} onInventory={() => goNav({ page: 'inventory', inventoryTab: 'browse' })} />}
   {fullAccess && page === 'marketplaces' && <MarketplacesPage client={sb} accessToken={session.access_token} money={money} stamp={stamp} />}
+  {fullAccess && page === 'ebay' && <ChannelListingPage channel="ebay" accessToken={session.access_token} money={money} />}
   {fullAccess && page === 'amazon' && <AmazonPage client={sb} accessToken={session.access_token} money={money} />}
+  {fullAccess && page === 'tiktok' && <ChannelListingPage channel="tiktok" accessToken={session.access_token} money={money} />}
+  {fullAccess && page === 'depop' && <ChannelListingPage channel="depop" accessToken={session.access_token} money={money} />}
   {fullAccess && page === 'logs' && <LogsPage accessToken={session.access_token} stamp={stamp} />}
-  {(fullAccess || registerOnly) && page === 'inventory' && <InventoryPage client={sb} storeId={store} accessToken={session.access_token} money={money} stamp={stamp} tab={nav.inventoryTab} onTab={t => go({ inventoryTab: t })} attentionSection={nav.attentionSection} onAttentionSection={s => go({ attentionSection: s, inventoryTab: 'attention' })} onCostChanged={() => { void loadPayoutSales(); void loadSales(); }} />}
-  {fullAccess && page === 'reports' && <ReportsPage client={sb} money={money} tab={nav.reportTab} onTab={t => go({ reportTab: t })} closeouts={closeouts} expenses={<ExpensesPage client={sb} money={money} expenses={expenses} staff={staff} ownerId={onlineCfg.employeeId || defaultReimbursementId} onChanged={loadCommon} embedded />} payouts={<PayoutsPage allSales={allSales} ebayFees={ebayFees} staff={staff} rules={activeRules} payments={payments} expenses={expenses} cfg={onlineCfg} personName={personName} busy={busy} recordPayment={recordPayment} onCommissionChanged={setTicketOverride} />} />}
+  {(fullAccess || registerOnly) && page === 'inventory' && <InventoryPage client={sb} storeId={store} accessToken={session.access_token} money={money} stamp={stamp} tab={registerOnly ? 'browse' : nav.inventoryTab} onTab={t => go({ inventoryTab: t })} attentionSection={nav.attentionSection} onAttentionSection={s => go({ attentionSection: s, inventoryTab: 'attention' })} canDelete={fullAccess} associateBrowseOnly={registerOnly} onCostChanged={() => { void loadPayoutSales(); void loadSales(); }} />}
+  {fullAccess && page === 'reports' && <ReportsPage client={sb} money={money} tab={nav.reportTab} onTab={t => go({ reportTab: t })} closeouts={closeouts} expenses={<ExpensesPage client={sb} money={money} expenses={expenses} staff={staff} ownerId={onlineCfg.employeeId || defaultReimbursementId} onChanged={loadCommon} embedded />} payouts={<PayoutsPage allSales={allSales} ebayFees={ebayFees} staff={staff} rules={activeRules} payments={payments} adjustments={payoutAdjustments} expenses={expenses} cfg={onlineCfg} personName={personName} busy={busy} recordPayment={recordPayment} onCommissionChanged={setTicketOverride} />} />}
   {fullAccess && page === 'tax' && <TaxPage client={sb} money={money} stamp={stamp} />}
   {fullAccess && page === 'settings' && <SettingsPage client={sb} accessToken={session.access_token} stamp={stamp} money={money} busy={busy} run={run} onLedgerChanged={async () => { await loadSales(); await loadPayoutSales(); }} ruleEditor={<>{staff.map(p => <RuleEditor key={p.user_id} person={p} rule={ruleMap.get(p.user_id)} save={setRule} busy={busy} />)}</>} onlinePayoutSettings={<OnlinePayoutSettings cfg={onlineCfg} staff={staff} busy={busy} save={async (channels, pct, who) => { await run(async () => { check(await sb.rpc('portal_set_payout_config', { p_channels: channels, p_pct: pct, p_employee: who })); await loadCommon(); await loadPayoutSales(); }); }} />} />}
   {registerOnly && page === 'settings' && <AssociateSettings client={sb} displayName={staffSession?.displayName || 'Associate'} />}
-  {(fullAccess || registerOnly) && page === 'cameras' && <><header><div><div className="eyebrow">FUTURE INTEGRATION</div><h1>Cameras</h1></div></header><section className="panel"><Empty>Camera feeds coming soon</Empty></section></>}
+  {fullAccess && page === 'cameras' && <><header><div><div className="eyebrow">FUTURE INTEGRATION</div><h1>Cameras</h1></div></header><section className="panel"><Empty>Camera feeds coming soon</Empty></section></>}
   {fullAccess && page === 'remote' && <><header><div><div className="eyebrow">FUTURE INTEGRATION</div><h1>Remote</h1><p>Connect to the store computer from here later.</p></div></header><section className="panel"><Empty>Remote access coming soon</Empty></section></>}
   </main></div>;
 }
@@ -892,12 +1025,13 @@ function ExpenseAmount({cents,onCommit,disabled}:{cents:number;onCommit:(cents:n
     onBlur={() => { const clean = cleanMoney(text); setText(clean); onCommit(Math.round(Number(clean)*100)); }} />;
 }
 type LedgerEntry = {
-  at: string; kind: 'sale' | 'online' | 'reimbursement' | 'payment'; amount: number | null;
+  at: string; kind: 'sale' | 'online' | 'reimbursement' | 'payment' | 'adjustment'; amount: number | null;
   detail: string; note?: string; ticketKey?: string; ticket?: Ticket; overridden?: boolean;
 };
-function PayoutsPage({allSales,ebayFees,staff,rules,payments,expenses,cfg,personName,busy,recordPayment,onCommissionChanged}:{allSales:Ticket[];ebayFees:number;staff:Person[];rules:Rule[];payments:Payment[];expenses:StoreExpense[];cfg:OnlineCfg;personName:(id:string)=>string;busy:boolean;recordPayment:(id:string,amount:number,paidAt:string,note:string)=>Promise<string | null>;onCommissionChanged:(ticketKey:string,next:CommissionOverride|null)=>void}) {
+function PayoutsPage({allSales,ebayFees,staff,rules,payments,adjustments,expenses,cfg,personName,busy,recordPayment,onCommissionChanged}:{allSales:Ticket[];ebayFees:number;staff:Person[];rules:Rule[];payments:Payment[];adjustments:PayoutAdjustment[];expenses:StoreExpense[];cfg:OnlineCfg;personName:(id:string)=>string;busy:boolean;recordPayment:(id:string,amount:number,paidAt:string,note:string)=>Promise<string | null>;onCommissionChanged:(ticketKey:string,next:CommissionOverride|null)=>void}) {
   const hasReimburse = (id: string) => expenses.some(e => !e.voided_at && e.needs_reimbursement && e.employee_id === id);
-  const active = staff.filter(p => rules.some(r => r.employee_id === p.user_id) || hasReimburse(p.user_id));
+  const hasAdjustment = (id: string) => adjustments.some(a => a.employee_id === id);
+  const active = staff.filter(p => rules.some(r => r.employee_id === p.user_id) || hasReimburse(p.user_id) || hasAdjustment(p.user_id));
   const onlineSales = allSales.filter(t => isOnline(t,cfg));
   const needsCost = onlineSales.filter(t => t.cost === null).length;
   const cards = active.map(person => {
@@ -934,6 +1068,26 @@ function PayoutsPage({allSales,ebayFees,staff,rules,payments,expenses,cfg,person
           : `${money(t.subtotal)} merchandise · ${rateLabel} · Owner share ${rp === null ? 'pending' : money(rp)}`
       }];
     });
+    // Paid-sale returns: void drops the sale from live commission. Add back the original
+    // sale commission so the negative clawback line is the visible net change.
+    const personAdjs = adjustments.filter(a => a.employee_id === person.user_id);
+    const clawbackAddbacks: LedgerEntry[] = personAdjs
+      .filter(a => a.amount_cents < 0 && a.return_id && (a.sale_commission_cents || 0) > 0)
+      .map(a => ({
+        at: a.created_at,
+        kind: 'adjustment' as const,
+        amount: a.sale_commission_cents || 0,
+        detail: a.ticket_key || (a.sale_id != null ? `sale:${a.sale_id}` : 'returned sale'),
+        note: 'Prior commission on returned sale (see clawback)',
+      }));
+    const adjEntries: LedgerEntry[] = personAdjs.map(a => ({
+      at: a.created_at,
+      kind: 'adjustment' as const,
+      amount: a.amount_cents,
+      detail: a.reason,
+      note: a.return_id ? `Return ${a.return_id.slice(0, 8)}…` : undefined,
+      ticketKey: a.ticket_key || undefined,
+    }));
     const reimburseEntries: LedgerEntry[] = expenses.filter(e => !e.voided_at && e.needs_reimbursement && e.employee_id === person.user_id).map(e => ({
       at: `${e.spent_on}T12:00:00`, kind: 'reimbursement' as const, amount: e.amount_cents,
       detail: e.description, note: e.category || undefined,
@@ -942,20 +1096,25 @@ function PayoutsPage({allSales,ebayFees,staff,rules,payments,expenses,cfg,person
       at: p.paid_at, kind: 'payment' as const, amount: -p.amount_cents,
       detail: `Recorded by ${personName(p.paid_by)}`, note: p.note || (p.legacy_ticket_key ? 'Previous per-sale payment' : undefined)
     }));
-    const entries = [...saleEntries, ...reimburseEntries, ...paid].sort((a,b)=>b.at.localeCompare(a.at));
+    const entries = [...saleEntries, ...clawbackAddbacks, ...adjEntries, ...reimburseEntries, ...paid].sort((a,b)=>b.at.localeCompare(a.at));
     const commission = saleEntries.reduce((n,e)=>n+(e.amount || 0),0);
+    const adjTotal = personAdjs.reduce((n, a) => n + a.amount_cents, 0);
+    const addbackTotal = clawbackAddbacks.reduce((n, e) => n + (e.amount || 0), 0);
     const reimburse = reimburseEntries.reduce((n,e)=>n+(e.amount || 0),0);
     const paidTotal = payments.filter(p => p.employee_id === person.user_id).reduce((n,p)=>n+p.amount_cents,0);
-    const balance = commission + reimburse - paidTotal;
-    return {person,balance,commission,reimburse,paidTotal,entries};
+    // Unpaid voids: sale drops only. Paid voids: drop + addback + clawback net to −claw (already paid).
+    const balance = commission + addbackTotal + adjTotal + reimburse - paidTotal;
+    return {person,balance,commission,reimburse,paidTotal,adjTotal,addbackTotal,entries};
   });
   const totalCommission = cards.reduce((n,c)=>n+c.commission,0);
   const totalReimburse = cards.reduce((n,c)=>n+c.reimburse,0);
   const totalPaid = cards.reduce((n,c)=>n+c.paidTotal,0);
+  const totalAdj = cards.reduce((n,c)=>n+(c.adjTotal || 0),0);
   // Payments apply to reimbursements (expenses) first, then commission — per person.
   const owedSplits = cards.map(c => {
+    const earnedForPay = c.commission + (c.addbackTotal || 0) + (c.adjTotal || 0);
     const reimburseOwed = Math.max(0, c.reimburse - c.paidTotal);
-    const commissionOwed = Math.max(0, c.commission - Math.max(0, c.paidTotal - c.reimburse));
+    const commissionOwed = Math.max(0, earnedForPay - Math.max(0, c.paidTotal - c.reimburse));
     return { ...c, commissionOwed, reimburseOwed };
   });
   const commissionBalanceOwed = owedSplits.reduce((n, c) => n + c.commissionOwed, 0);
@@ -971,11 +1130,12 @@ function PayoutsPage({allSales,ebayFees,staff,rules,payments,expenses,cfg,person
   const profitAfterCosts = reportProfitCents(saleProfit, hasEbaySale ? ebayFees : 0);
   const ownerShare = profitAfterCosts === null ? null : profitAfterCosts - totalCommission;
   return <>
-    <header><div><div className="eyebrow">TEAM EARNINGS</div><h1>Payouts</h1><p>Profit after costs matches Reports → Profit on All time, including eBay insertion and subscription fees. Commissions stay a percent of sale − cost (merchandise + buyer shipping) and do not shrink for those fees. Owner share = profit after costs − commissions. Payments count against expense reimbursements first, then commission. Online sales pay {personName(cfg.employeeId || '')} {cfg.pct}% of sale − cost.</p></div></header>
+    <header><div><div className="eyebrow">TEAM EARNINGS</div><h1>Payouts</h1><p>Profit after costs matches Reports → Profit on All time, including eBay insertion and subscription fees. Commissions stay a percent of sale − cost (merchandise + buyer shipping) and do not shrink for those fees. Owner share = profit after costs − commissions. Payments count against expense reimbursements first, then commission. Online sales pay {personName(cfg.employeeId || '')} {cfg.pct}% of sale − cost. Return clawbacks appear as their own adjustment lines when a sale was already paid out — payment history is never rewritten.</p></div></header>
     <div className="stats payout-stats">
       <Stat name="Profit after costs" hint={hasEbaySale && ebayFees > 0 ? `includes ${money(ebayFees)} eBay insertion/subscription` : undefined} value={profitAfterCosts === null ? 'Pending cost' : money(profitAfterCosts)} />
       <Stat name="Commission earned" value={money(totalCommission)} />
       <Stat name="Reimbursements" value={money(totalReimburse)} />
+      <Stat name="Return adjustments" value={money(totalAdj)} />
       <Stat name="Total paid" value={money(totalPaid)} />
       <Stat name="Commissions balance owed" value={money(commissionBalanceOwed)} />
       <Stat name="Reimbursement balance owed" value={money(reimburseBalanceOwed)} />
@@ -1004,7 +1164,8 @@ function PayoutCard({person,balance,entries,commissionOwed,reimburseOwed,busy,re
     else { setAmount(''); setNote(''); setPaidOn(today()); }
   }
   const pending = entries.filter(x => (x.kind === 'sale' || x.kind === 'online') && x.amount === null).length;
-  return <section className="panel payout-card"><div className="payout-card-top"><div><h2>{person.display_name}</h2><strong>{money(balance)} owed</strong><small className="payout-owed-split">Commission {money(commissionOwed)} · Reimbursement {money(reimburseOwed)}</small>{pending > 0 && <div className="hint">{pending} sale{pending === 1 ? '' : 's'} need cost</div>}</div><form className="payment-form" onSubmit={e=>void submit(e)}><label>Amount<input type="text" inputMode="decimal" value={amount} onChange={e=>{ if (moneyEntry.test(e.target.value)) setAmount(e.target.value); }} onBlur={() => { if (amount) setAmount(cleanMoney(amount)); }} required /></label><label>Date<input type="date" value={paidOn} onChange={e=>setPaidOn(e.target.value)} required /></label><label className="payment-note">Note<input type="text" value={note} onChange={e=>setNote(e.target.value.slice(0,500))} placeholder="Optional" /></label><button disabled={busy || !amount}>Paid</button></form></div>{paymentError && <p className="error" role="alert">{paymentError}</p>}<details><summary>Balance breakdown ({entries.length})</summary><div className="ledger-list">{entries.map((e,i)=><div className={`ledger-row${e.overridden ? ' ledger-override' : ''}`} key={i}><div><strong>{e.kind === 'sale' ? 'In-store sale' : e.kind === 'online' ? 'Online sale' : e.kind === 'payment' ? 'Payment' : 'Reimbursement'} · {stamp(e.at)}{e.overridden ? ' · split overridden' : ''}</strong><span>{e.detail}</span>{e.note && <small>{e.note}</small>}{e.ticketKey && e.ticket && (e.kind === 'sale' || e.kind === 'online') && <CommissionOverrideControls client={sb} ticketKey={e.ticketKey} ticket={e.ticket} rules={rules} cfg={cfg} override={e.ticket.commissionOverride} personName={personName} stamp={stamp} money={money} busy={busy} onChanged={next => onCommissionChanged(e.ticketKey!, next)} />}</div><b>{e.amount === null ? 'Needs cost' : (e.amount < 0 ? '−' : '+') + money(Math.abs(e.amount))}</b></div>)}</div></details></section>;
+  const kindLabel = (k: LedgerEntry['kind']) => k === 'sale' ? 'In-store sale' : k === 'online' ? 'Online sale' : k === 'payment' ? 'Payment' : k === 'adjustment' ? 'Adjustment' : 'Reimbursement';
+  return <section className="panel payout-card"><div className="payout-card-top"><div><h2>{person.display_name}</h2><strong>{money(balance)} owed</strong><small className="payout-owed-split">Commission {money(commissionOwed)} · Reimbursement {money(reimburseOwed)}</small>{pending > 0 && <div className="hint">{pending} sale{pending === 1 ? '' : 's'} need cost</div>}</div><form className="payment-form" onSubmit={e=>void submit(e)}><label>Amount<input type="text" inputMode="decimal" value={amount} onChange={e=>{ if (moneyEntry.test(e.target.value)) setAmount(e.target.value); }} onBlur={() => { if (amount) setAmount(cleanMoney(amount)); }} required /></label><label>Date<input type="date" value={paidOn} onChange={e=>setPaidOn(e.target.value)} required /></label><label className="payment-note">Note<input type="text" value={note} onChange={e=>setNote(e.target.value.slice(0,500))} placeholder="Optional" /></label><button disabled={busy || !amount}>Paid</button></form></div>{paymentError && <p className="error" role="alert">{paymentError}</p>}<details><summary>Balance breakdown ({entries.length})</summary><div className="ledger-list">{entries.map((e,i)=><div className={`ledger-row${e.overridden ? ' ledger-override' : ''}${e.kind === 'adjustment' ? ' ledger-adjustment' : ''}`} key={i}><div><strong>{kindLabel(e.kind)} · {stamp(e.at)}{e.overridden ? ' · split overridden' : ''}</strong><span>{e.detail}</span>{e.note && <small>{e.note}</small>}{e.ticketKey && e.ticket && (e.kind === 'sale' || e.kind === 'online') && <CommissionOverrideControls client={sb} ticketKey={e.ticketKey} ticket={e.ticket} rules={rules} cfg={cfg} override={e.ticket.commissionOverride} personName={personName} stamp={stamp} money={money} busy={busy} onChanged={next => onCommissionChanged(e.ticketKey!, next)} />}</div><b>{e.amount === null ? 'Needs cost' : (e.amount < 0 ? '−' : '+') + money(Math.abs(e.amount))}</b></div>)}</div></details></section>;
 }
 function RuleEditor({person,rule,save,busy}:{person:Person;rule?:Rule;save:(id:string,m:Rule['method'],r:number)=>Promise<void>;busy:boolean}) { const [method,setMethod]=useState<Rule['method']>(rule?.method||'percent_sale'); const [rate,setRate]=useState(String(rule?.rate??'')); useEffect(()=>{setMethod(rule?.method||'percent_sale');setRate(String(rule?.rate??''));},[rule]); return <form className="rule-row" onSubmit={e=>{e.preventDefault();void save(person.user_id,method,Number(rate));}}><strong>{person.display_name}</strong><select aria-label={`Cut type for ${person.display_name}`} value={method} onChange={e=>setMethod(e.target.value as Rule['method'])}><option value="percent_sale">Percent of sale</option><option value="flat_ticket">Flat per sale</option><option value="percent_profit">Percent of profit</option></select><label><input type={method==='flat_ticket'?'text':'number'} inputMode="decimal" min={method==='flat_ticket'?undefined:0} max={method==='flat_ticket'?undefined:100} step="0.01" required value={rate} onChange={e=>{ if (method!=='flat_ticket' || moneyEntry.test(e.target.value)) setRate(e.target.value); }} onBlur={() => { if (method==='flat_ticket' && rate) setRate(cleanMoney(rate)); }} />{method==='flat_ticket'?'$':'%'}</label><button disabled={busy}>Save</button></form>; }
 
@@ -1016,6 +1177,6 @@ function OnlinePayoutSettings({cfg,staff,busy,save}:{cfg:OnlineCfg;staff:Person[
     <form className="rule-row" onSubmit={e=>{e.preventDefault();void save(channels.split(/[,\s]+/).map(x=>x.trim().toLowerCase()).filter(Boolean),Number(pct),who);}}>
       <label>Paid to<select value={who} onChange={e=>setWho(e.target.value)} required><option value="" disabled>Choose…</option>{staff.map(p=><option key={p.user_id} value={p.user_id}>{p.display_name}</option>)}</select></label>
       <label>Percent of sale − cost<input type="number" min={0} max={100} step="0.01" required value={pct} onChange={e=>setPct(e.target.value)} />%</label>
-      <label>Online channels (comma separated)<input value={channels} onChange={e=>setChannels(e.target.value)} placeholder="website, mercari, poshmark" /></label>
+      <label>Online channels (comma separated)<input value={channels} onChange={e=>setChannels(e.target.value)} placeholder="website, ebay, depop, amazon, tiktok" /></label>
       <button disabled={busy||!who}>Save</button></form></section>;
 }

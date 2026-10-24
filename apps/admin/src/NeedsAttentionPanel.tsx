@@ -14,10 +14,15 @@ type Props = {
 };
 
 const TABS: [AttentionSection, string][] = [
-  ['missing-cost', 'Missing cost'],
+  ['missing-brand', 'Missing brand'],
+  ['missing-category', 'Missing category'],
+  ['missing-specifics', 'Missing item specifics'],
+  ['missing-spec', 'Missing weight & dimensions'],
+  ['missing-upc', 'Missing UPC'],
   ['missing-photo', 'Missing photo'],
   ['missing-price', 'Missing price'],
-  ['missing-spec', 'Missing spec'],
+  ['missing-condition', 'Missing condition'],
+  ['missing-cost', 'Missing cost'],
   ['missing-model', 'Missing model'],
   ['missing-description', 'Missing description'],
 ];
@@ -49,6 +54,21 @@ export function NeedsAttentionPanel({
       </div>
       {active === 'missing-cost' && (
         <MissingCostPage client={client} money={money} stamp={stamp} onChanged={onCostChanged} embedded />
+      )}
+      {active === 'missing-brand' && (
+        <MissingFieldPage client={client} storeId={storeId} kind="brand" money={money} stamp={stamp} />
+      )}
+      {active === 'missing-category' && (
+        <MissingFieldPage client={client} storeId={storeId} kind="category" money={money} stamp={stamp} />
+      )}
+      {active === 'missing-specifics' && (
+        <MissingFieldPage client={client} storeId={storeId} kind="specifics" money={money} stamp={stamp} />
+      )}
+      {active === 'missing-upc' && (
+        <MissingFieldPage client={client} storeId={storeId} kind="upc" money={money} stamp={stamp} />
+      )}
+      {active === 'missing-condition' && (
+        <MissingFieldPage client={client} storeId={storeId} kind="condition" money={money} stamp={stamp} />
       )}
       {active === 'missing-photo' && (
         <MissingFieldPage client={client} storeId={storeId} kind="photo" money={money} stamp={stamp} />

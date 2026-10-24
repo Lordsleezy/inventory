@@ -1,15 +1,17 @@
+import { applyReturnReserveCents } from "./returns.mjs";
+
 const DEFAULT_CONFIG = Object.freeze({
-  updatedAt: '2026-10-05',
+  updatedAt: '2026-10-22',
   marketplaces: {
     ebay: { rate: 0.136, fixedFeeCents: 40, labelPaidBySeller: true },
-    mercari: { rate: 0.10, fixedFeeCents: 0, labelPaidBySeller: true },
-    whatnot: { rate: 0.109, fixedFeeCents: 30, labelPaidBySeller: false },
+    amazon: { rate: 0.15, fixedFeeCents: 0, labelPaidBySeller: true },
+    tiktok: { rate: 0.08, fixedFeeCents: 0, labelPaidBySeller: true },
     depop: { rate: 0.033, fixedFeeCents: 45, labelPaidBySeller: false },
     website: { rate: 0, fixedFeeCents: 0, labelPaidBySeller: false },
   },
 });
 
-const CHANNELS = ['ebay', 'mercari', 'whatnot', 'depop', 'website'];
+const CHANNELS = ['ebay', 'amazon', 'tiktok', 'depop', 'website'];
 const deepMerge = (base, override) => ({
   ...base,
   ...override,
@@ -42,21 +44,20 @@ function roundUpTo99(cents) {
   return Math.floor(value / 100) * 100 + 99;
 }
 
-export function calcListPrice(floorCents, marketplace, labelCostCents = 0, packingMarkupCents = 0) {
+export function calcListPrice(floorCents, marketplace, labelCostCents = 0, packingMarkupCents = 0, reservePct = 0) {
   const channel = String(marketplace).toLowerCase();
   if (!CHANNELS.includes(channel)) throw new Error(`Unsupported marketplace: ${marketplace}`);
   const floor = Number(floorCents), label = Number(labelCostCents) || 0, markup = Number(packingMarkupCents) || 0;
-  if (![floor, label, markup].every(Number.isFinite) || floor < 0 || label < 0 || markup < 0) {
+  const reserve = Number(reservePct) || 0;
+  if (![floor, label, markup, reserve].every(Number.isFinite) || floor < 0 || label < 0 || markup < 0 || reserve < 0) {
     throw new Error('Price inputs must be nonnegative cents');
   }
   if (channel === 'website') return Math.round(floor);
   const fee = getFeeConfig().marketplaces[channel];
   const netTarget = floor + markup;
-  let gross;
-  if (channel === 'ebay') gross = (netTarget + label + fee.fixedFeeCents) / (1 - fee.rate);
-  else if (channel === 'mercari') gross = (netTarget + label) / (1 - fee.rate);
-  else gross = (netTarget + fee.fixedFeeCents) / (1 - fee.rate);
-  return roundUpTo99(gross);
+  const labelIn = fee.labelPaidBySeller ? label : 0;
+  const gross = (netTarget + labelIn + fee.fixedFeeCents) / (1 - fee.rate);
+  return applyReturnReserveCents(roundUpTo99(gross), reserve);
 }
 
 const n = (v) => {

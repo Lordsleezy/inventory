@@ -113,7 +113,7 @@ test("a failed Shippo purchase charges nothing and records nothing", async () =>
   assert.equal(log.inserts.length, 0);
 });
 
-test("void label: Shippo refund, expense reversed, tracking cleared; refuses once shipped", async () => {
+test("void label: Shippo refund, expense reversed, tracking cleared; refuses once delivered", async () => {
   const labeled = { ...paidOrder, label_transaction_id: "tx1", tracking_number: "1Z999", label_url: "u" };
   const { sb, log } = labelDb(labeled);
   const r = await voidLabel(sb, "store", "o1", { refundLabel: async () => ({ status: "QUEUED" }) });
@@ -123,8 +123,11 @@ test("void label: Shippo refund, expense reversed, tracking cleared; refuses onc
   assert.equal(cleared.tracking_number, null);
   assert.equal(cleared.label_url, null);
   assert.ok(log.deletes.includes("web_order_emails"));
+  // Still voidable after Floor mark-shipped (carrier refund window); blocked after delivered.
   const shipped = labelDb({ ...labeled, shipped_at: "2026-10-04" });
-  assert.equal((await voidLabel(shipped.sb, "store", "o1", { refundLabel: async () => ({ status: "QUEUED" }) })).status, 409);
+  assert.equal((await voidLabel(shipped.sb, "store", "o1", { refundLabel: async () => ({ status: "QUEUED" }) })).ok, true);
+  const delivered = labelDb({ ...labeled, shipped_at: "2026-10-04", delivered_at: "2026-10-05" });
+  assert.equal((await voidLabel(delivered.sb, "store", "o1", { refundLabel: async () => ({ status: "QUEUED" }) })).status, 409);
   const rejected = labelDb(labeled);
   assert.equal((await voidLabel(rejected.sb, "store", "o1", { refundLabel: async () => ({ status: "ERROR" }) })).ok, false);
 });

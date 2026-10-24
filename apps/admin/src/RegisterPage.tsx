@@ -1,4 +1,4 @@
-﻿import React, { Component, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import React, { Component, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { centsToInput, formatCents, formatCentsTotal, parseMoneyToCents } from '@floor/store';
 import {
   SellError,
@@ -32,7 +32,9 @@ import {
   type SalePhase,
 } from './register/sale';
 import { loadAvailableUnits, queryAvailableUnits, searchUnits, type RegisterUnit } from './register/units';
-import { isKioskShell, scannerInputMode } from './kiosk';
+import { NativePaySheets, NativeRegisterCart, NativeRegisterDone, SALE_OVERRIDE } from './register/NativeRegister';
+import { isAndroidStoreDevice, isKioskShell, scannerInputMode } from './kiosk';
+import { errText } from './errText';
 
 type ManualPayment = {
   quote: TicketQuote;
@@ -45,6 +47,7 @@ type DonePanel = {
   changeCents: number | null;
   cashTenderedCents: number | null;
   receipt: ReceiptPayload;
+  customerEmail: string | null;
 };
 
 type PinKind = 'below_floor' | 'ticket_discount';
@@ -56,7 +59,8 @@ const sum = (values: number[]) => values.reduce((a, b) => a + b, 0);
 const lineExtendedPrice = (line: CartLine) => line.priceCents * (line.qty || 1);
 const EMPLOYEE_CODES: Record<string, string> = { '0000': 'Paul', '1111': 'Jacob' };
 
-function RegisterInner({ staffSession, onNeedFullReload }: Props) {
+function RegisterInner({ staffSession, onNeedFullReload, variant = 'desktop' }: Props) {
+  const app = variant === 'app';
   const { lines, note, setNote, ticketId, addUnit, removeSku, updateLine, setQty, clear } = useCart();
   const isAdmin = staffSession.role === 'owner' || staffSession.role === 'manager';
   const manualKey = `floor_manual_${staffSession.storeId}_${staffSession.userId}`;
@@ -264,6 +268,7 @@ function RegisterInner({ staffSession, onNeedFullReload }: Props) {
       summary,
       changeCents,
       cashTenderedCents: tenderedCents,
+      customerEmail: customer?.email ?? null,
       receipt: ticketReceiptPayload(summary, {
         clerkName: soldByName || staffSession.displayName,
         storeName: rewards.storeDisplayName,
@@ -455,7 +460,7 @@ function RegisterInner({ staffSession, onNeedFullReload }: Props) {
         };
         localStorage.setItem(manualKey, JSON.stringify(approved));
         setManual(approved);
-        setError('Approved. Click Card paid ΓÇö complete sale again. Do not charge again.');
+        setError('Approved. Click Card paid — complete sale again. Do not charge again.');
       } else {
         await startPay(pendingAction ?? 'cash', { [pinSku]: id });
       }
@@ -484,7 +489,7 @@ function RegisterInner({ staffSession, onNeedFullReload }: Props) {
       void queryAvailableUnits(term, 1)
         .then(rows => {
           if (rows[0]) addFromSearch(rows[0]);
-          else setError(`No available unit for ΓÇ£${term}ΓÇ¥.`);
+          else setError(`No available unit for “${term}”.`);
         })
         .catch(err => setError(authErrorMessage(err)));
     } else if (e.key === 'Escape') {
@@ -495,7 +500,7 @@ function RegisterInner({ staffSession, onNeedFullReload }: Props) {
   function pushDigit(d: string) {
     setCashDigits(prev => {
       if (d === 'C') return '';
-      if (d === 'Γî½') return prev.slice(0, -1);
+      if (d === '⌫') return prev.slice(0, -1);
       if (prev.length >= 8) return prev;
       return prev + d;
     });
@@ -521,7 +526,7 @@ function RegisterInner({ staffSession, onNeedFullReload }: Props) {
       return;
     }
     if (splitCash >= total) {
-      setError('Cash covers the full total ΓÇö use Cash instead.');
+      setError('Cash covers the full total — use Cash instead.');
       return;
     }
     setSplitOpen(false);
@@ -552,329 +557,26 @@ function RegisterInner({ staffSession, onNeedFullReload }: Props) {
     if (cents == null || cents < 0) return;
     const line = lines.find(l => l.sku === sku);
     if (!line || line.priceCents === cents) return;
+    const backToAsk = line.askCents != null && cents === line.askCents;
     updateLine(sku, {
       priceCents: cents,
       approvalId: null,
-      overrideReason: line.askCents != null && cents === line.askCents ? '' : line.overrideReason,
+      overrideReason: backToAsk ? '' : (line.overrideReason.trim() || SALE_OVERRIDE),
     });
   }
 
-  if (done) {
-    const { summary, changeCents, receipt } = done;
-    return (
-      <div className="admin-register">
-        <header>
-          <div>
-            <div className="eyebrow">REGISTER</div>
-            <h1>Sale complete</h1>
-            <p>Ticket {summary.ticket_id.slice(0, 8)}ΓÇª</p>
-          </div>
-        </header>
-        <section className="panel register-done">
-          {summary.lines.map(l => (
-            <div className="summary-row" key={l.sale_id}>
-              <span>
-                <strong>{l.receipt_no} ┬╖ {l.sku}</strong>
-                <div className="muted">{receipt.lines.find(x => x.sku === l.sku)?.title || 'Item'}</div>
-              </span>
-              <span>{formatCentsTotal(l.price_cents + l.tax_cents)}</span>
-            </div>
-          ))}
-          <div className="register-done-totals">
-            <div className="summary-row"><span>Subtotal</span><span>{formatCentsTotal(summary.subtotal_cents)}</span></div>
-            {summary.discount_cents ? (
-              <div className="summary-row"><span>Discount</span><span>ΓêÆ{formatCentsTotal(summary.discount_cents)}</span></div>
-            ) : null}
-            {summary.signup_discount_cents ? (
-              <div className="summary-row muted"><span>New-customer discount</span><span>ΓêÆ{formatCentsTotal(summary.signup_discount_cents)}</span></div>
-            ) : null}
-            <div className="summary-row"><span>Tax</span><span>{formatCentsTotal(summary.tax_cents)}</span></div>
-            {summary.card_fee_cents ? (
-              <div className="summary-row"><span>Card fee</span><span>{formatCentsTotal(summary.card_fee_cents)}</span></div>
-            ) : null}
-            <div className="summary-row checkout-total"><span>Total</span><span>{formatCentsTotal(summary.total_cents)}</span></div>
-            {summary.payment_method === 'split' ? (
-              <div className="summary-row muted">
-                <span>Tender</span>
-                <span>cash {formatCentsTotal(summary.cash_cents ?? 0)} ┬╖ card {formatCentsTotal(summary.card_cents ?? 0)}</span>
-              </div>
-            ) : null}
-            {changeCents != null ? (
-              <div className="summary-row"><span>Change</span><strong>{formatCentsTotal(changeCents)}</strong></div>
-            ) : null}
-            {summary.points_earned ? (
-              <div className="summary-row muted">
-                <span>Points earned</span>
-                <span>{formatPoints(summary.points_earned)}{summary.points_balance != null ? ` ┬╖ balance ${formatPoints(summary.points_balance)}` : ''}</span>
-              </div>
-            ) : null}
-          </div>
-          {doneMsg ? <p className="muted">{doneMsg}</p> : null}
-          <div className="actions">
-            <button
-              type="button"
-              onClick={() => setDoneMsg(printReceiptHtml(receiptHtml(receipt)) ? 'Print dialog opened.' : 'Could not open print dialog.')}
-            >
-              Print receipt
-            </button>
-            <button type="button" className="secondary" onClick={() => downloadReceiptText(receipt)}>Save as text</button>
-            <button type="button" className="secondary" onClick={newSale}>New sale</button>
-          </div>
-        </section>
-      </div>
-    );
+  function addCustomPricedUnit(unit: RegisterUnit, priceCents: number) {
+    const backToAsk = unit.askCents != null && priceCents === unit.askCents;
+    addUnit(unit, {
+      priceCents,
+      overrideReason: backToAsk ? '' : SALE_OVERRIDE,
+    });
+    setPriceDrafts(d => ({ ...d, [unit.sku]: centsToInput(priceCents) }));
+    setError('');
   }
 
-  return (
-    <div className="admin-register compact">
-      <header className="register-top">
-        <div>
-          <h1>Register</h1>
-          <p>Scan items, then cash or card.</p>
-        </div>
-        <div className="register-center-actions">
-          {soldByName ? (
-            <div className="employee-chip">
-              <span>
-                <strong>{soldByName}</strong>
-                <small className="muted">Employee</small>
-              </span>
-              <button
-                type="button"
-                className="secondary"
-                disabled={!idle || cashOpen}
-                onClick={() => { setSoldByCode(null); setSoldByName(null); }}
-              >
-                Clear
-              </button>
-            </div>
-          ) : (
-            <button
-              type="button"
-              className="employee-id-btn"
-              disabled={!idle || cashOpen}
-              onClick={() => { setEmployeeDraft(''); setEmployeeError(''); setEmployeeOpen(true); }}
-            >
-              Employee ID
-            </button>
-          )}
-          {customer ? (
-            <div className="customer-chip">
-              <span>
-                <strong>{customer.name || 'Customer'}</strong>
-                <small className="muted">{customer.phone} ┬╖ {formatPoints(customer.balance)} pts</small>
-              </span>
-              <button type="button" className="secondary" disabled={!idle || cashOpen} onClick={() => setCustomerOpen(true)}>Edit</button>
-              <button type="button" className="secondary" disabled={!idle || cashOpen} onClick={() => { setCustomer(null); setRedeemPoints(0); }}>Clear</button>
-            </div>
-          ) : (
-            <button
-              type="button"
-              className="customer-lookup-btn"
-              disabled={!idle || cashOpen}
-              onClick={() => setCustomerOpen(true)}
-            >
-              Customer lookup
-            </button>
-          )}
-        </div>
-        <div className="register-top-actions">
-          <button
-            type="button"
-            className="secondary register-gear"
-            disabled={!idle || cashOpen}
-            aria-label="Register settings"
-            title="Register settings"
-            onClick={() => setSettingsOpen(true)}
-          >
-            ΓÜÖ
-          </button>
-          <button type="button" className="secondary" disabled={!idle} onClick={() => setNoteOpen(true)}>Note{note ? ' Γ£ô' : ''}</button>
-          <button type="button" className="secondary" disabled={!idle} onClick={() => void refreshUnits().catch(err => setError(authErrorMessage(err)))}>Refresh</button>
-          <button type="button" className="danger" disabled={!lines.length || !idle} onClick={() => { if (window.confirm('Clear the cart?')) clear(); }}>Clear</button>
-        </div>
-      </header>
-
-      <div className="cart-panel">
-        <div className="register-search-wrap">
-          <input
-            ref={searchRef}
-            className="search"
-            placeholder="Scan or search SKU, titleΓÇª"
-            value={q}
-            onChange={e => {
-              setQ(e.target.value);
-              setShowHits(Boolean(e.target.value.trim()));
-            }}
-            onFocus={() => q.trim() && setShowHits(true)}
-            onKeyDown={onSearchKey}
-            autoFocus={!isCoarse || isKioskShell()}
-            autoComplete="off"
-            autoCorrect="off"
-            autoCapitalize="off"
-            spellCheck={false}
-            enterKeyHint="search"
-            inputMode={scannerInputMode() === 'none' ? 'none' : 'search'}
-            disabled={!idle || cashOpen}
-          />
-          {showHits && (hits.length || searchBusy) ? (
-            <div className="search-results">
-              {searchBusy && !hits.length ? <div className="search-hit muted">SearchingΓÇª</div> : null}
-              {hits.map(u => (
-                <button key={u.sku} type="button" className="search-hit" onClick={() => addFromSearch(u)}>
-                  <span>
-                    <strong>{u.sku}</strong>
-                    <div>{[u.brand, u.model].filter(Boolean).join(' ') || u.title}</div>
-                  </span>
-                  <span className="price">{formatCents(u.askCents) || 'ΓÇö'}</span>
-                </button>
-              ))}
-            </div>
-          ) : null}
-        </div>
-        <div className="cart-scroll">
-        <table className="cart-table">
-          <thead>
-            <tr>
-              <th>Item</th>
-              <th>Qty</th>
-              <th>Price</th>
-              <th>Total</th>
-              <th style={{ width: 44 }} />
-            </tr>
-          </thead>
-          <tbody>
-            {lines.map(line => {
-              const draft = priceDrafts[line.sku] ?? centsToInput(line.priceCents);
-              const draftCents = parseMoneyToCents(draft);
-              const priceChanged = line.askCents != null && draftCents != null && draftCents !== line.askCents;
-              return (
-              <tr key={line.sku}>
-                <td>
-                  <div className="cart-item">
-                    <strong>{line.title}</strong>
-                    <span className="muted">{line.sku}{line.condition ? ` ┬╖ ${line.condition}` : ''}{line.askCents != null ? ` ┬╖ ask ${formatCents(line.askCents)}` : ''}</span>
-                    {priceChanged ? (
-                      <label className="cart-override">
-                        Override reason
-                        <input
-                          type="text"
-                          value={line.overrideReason}
-                          disabled={!idle || cashOpen}
-                          placeholder="Required when price Γëá ask"
-                          onChange={e => updateLine(line.sku, { overrideReason: e.target.value })}
-                        />
-                      </label>
-                    ) : null}
-                  </div>
-                </td>
-                <td>
-                  {line.qtyOnHand > 1 ? (
-                    <div className="qty-stepper">
-                      <button type="button" className="secondary" disabled={!idle || cashOpen || line.qty <= 1} onClick={() => setQty(line.sku, line.qty - 1)}>ΓêÆ</button>
-                      <span>{line.qty}</span>
-                      <button type="button" className="secondary" disabled={!idle || cashOpen || line.qty >= line.qtyOnHand} onClick={() => setQty(line.sku, line.qty + 1)}>+</button>
-                    </div>
-                  ) : '1'}
-                </td>
-                <td>
-                  <input
-                    className="cart-price"
-                    type="text"
-                    inputMode="decimal"
-                    aria-label={`Price for ${line.sku}`}
-                    disabled={!idle || cashOpen}
-                    value={draft}
-                    onChange={e => {
-                      if (!moneyEntry.test(e.target.value)) return;
-                      setPriceDrafts(d => ({ ...d, [line.sku]: e.target.value }));
-                    }}
-                    onBlur={() => commitLinePrice(line.sku, draft)}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        (e.target as HTMLInputElement).blur();
-                      }
-                    }}
-                  />
-                </td>
-                <td>{formatCentsTotal(lineExtendedPrice({ ...line, priceCents: draftCents ?? line.priceCents }))}</td>
-                <td>
-                  <button type="button" className="secondary" disabled={!idle || cashOpen} onClick={() => removeSku(line.sku)} aria-label="Remove">Γ£ò</button>
-                </td>
-              </tr>
-              );
-            })}
-            {!lines.length ? (
-              <tr><td colSpan={5}><p className="muted register-empty">Scan or search to add an item.</p></td></tr>
-            ) : null}
-          </tbody>
-        </table>
-        </div>
-      </div>
-
-      <div className="checkout-bar">
-        {loud ? <div className="incident">{loud}</div> : null}
-        {error && !cashOpen ? <p className="error">{error}</p> : null}
-        <div className="checkout-summary">
-          <div className="summary-row">
-            <span>Subtotal ({itemCount})</span>
-            <span>{formatCentsTotal(rawSubtotal)}</span>
-          </div>
-          {(discountCents > 0 || discountPct > 0) && (
-            <div className="summary-row">
-              <span>
-                Discount
-                <button type="button" className="icon-btn" title="Edit discount" disabled={!idle || cashOpen} onClick={() => { setDiscountDraft(String(discountPct || '')); setDiscountOpen(true); }}>Γ£Ä</button>
-              </span>
-              <span>{discountCents ? `ΓêÆ${formatCentsTotal(discountCents)}` : formatCentsTotal(0)}</span>
-            </div>
-          )}
-          <div className="summary-row">
-            <span>Tax {taxRateBps != null ? `(${(taxRateBps / 100).toFixed(2)}%)` : ''}</span>
-            <span>{formatCentsTotal(tax)}</span>
-          </div>
-          {cardFeeBps > 0 && lines.length ? (
-            <div className="summary-row muted">
-              <span>Card total (+{(cardFeeBps / 100).toFixed(2)}%)</span>
-              <span>{formatCentsTotal(total + cardFeePreview)}</span>
-            </div>
-          ) : null}
-          <div className="summary-row checkout-total"><span>TOTAL</span><span>{formatCentsTotal(total)}</span></div>
-        </div>
-
-        {!idle ? (
-          <p className="muted">{phase === 'quoting' ? 'Getting exact totalΓÇª' : 'Confirm paymentΓÇª'}</p>
-        ) : (
-          <div className="pay-row">
-            <button type="button" className="cash" disabled={busy || !lines.length || cashOpen} onClick={() => void startPay('cash')}>CASH</button>
-            <button type="button" className="card" disabled={busy || !lines.length || cashOpen} onClick={() => void startPay('card')}>CARD</button>
-            <button type="button" className="secondary" disabled={busy || !lines.length || cashOpen} onClick={() => void startPay('split')}>Split</button>
-            <button type="button" className="secondary" disabled={!idle || cashOpen} onClick={() => { setDiscountDraft(String(discountPct || '')); setDiscountOpen(true); }}>% Off</button>
-          </div>
-        )}
-
-        {customer && customerBalance > 0 ? (
-          <div className="row">
-            <label style={{ flex: 1 }}>
-              Apply credit (points)
-              <input
-                type="number"
-                min={0}
-                step={0.1}
-                max={customerBalance}
-                value={redeemPoints || ''}
-                disabled={!idle || cashOpen}
-                onChange={e => setRedeemPoints(Math.round(Math.max(0, Math.min(customerBalance, Number(e.target.value) || 0)) * 10) / 10)}
-              />
-            </label>
-            {lines.length ? <p className="muted">+{formatPoints(earnPreview)} pts this sale</p> : null}
-          </div>
-        ) : customer && lines.length ? (
-          <p className="muted">Points this sale +{formatPoints(earnPreview)}</p>
-        ) : null}
-      </div>
-
+  const sharedModals = (
+    <>
       <RegisterSettingsModal
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
@@ -898,9 +600,9 @@ function RegisterInner({ staffSession, onNeedFullReload }: Props) {
       />
 
       {employeeOpen ? (
-        <div className="modal" role="dialog" aria-modal="true" aria-label="Employee ID">
-          <div className="card grid">
-            <h2>Employee ID</h2>
+        <div className={`modal${app ? ' nr-sheet' : ''}`} role="dialog" aria-modal="true" aria-label="Employee ID">
+          <div className={`card grid${app ? ' nr-sheet-card' : ''}`}>
+            <h2>{app ? 'Cashier' : 'Employee ID'}</h2>
             <p className="muted">Enter your code before ringing up.</p>
             <label>
               Code
@@ -954,9 +656,9 @@ function RegisterInner({ staffSession, onNeedFullReload }: Props) {
       ) : null}
 
       {customerOpen ? (
-        <div className="modal" role="dialog" aria-modal="true" aria-label="Customer lookup">
-          <div className="card grid">
-            <h2>Customer lookup</h2>
+        <div className={`modal${app ? ' nr-sheet' : ''}`} role="dialog" aria-modal="true" aria-label="Customer lookup">
+          <div className={`card grid${app ? ' nr-sheet-card' : ''}`}>
+            <h2>Customer</h2>
             <CustomerAttach
               customer={customer}
               autoFocus
@@ -970,6 +672,467 @@ function RegisterInner({ staffSession, onNeedFullReload }: Props) {
           </div>
         </div>
       ) : null}
+
+      {discountOpen ? (
+        <div className={`modal${app ? ' nr-sheet' : ''}`}>
+          <div className={`card grid${app ? ' nr-sheet-card' : ''}`}>
+            <h2>Ticket discount %</h2>
+            <p className="muted">
+              Clerk max {(rewards.clerkMaxDiscountBps / 100).toFixed(0)}%
+              {isAdmin ? ' (managers may exceed)' : ' — above that needs manager PIN'}.
+            </p>
+            <label>Percent<input value={discountDraft} onChange={e => setDiscountDraft(e.target.value)} inputMode="decimal" autoFocus /></label>
+            <div className="row">
+              <button type="button" className="secondary" onClick={() => setDiscountOpen(false)}>Cancel</button>
+              <button type="button" className="primary" onClick={applyDiscountDraft}>Apply</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {noteOpen ? (
+        <div className={`modal${app ? ' nr-sheet' : ''}`}>
+          <div className={`card grid${app ? ' nr-sheet-card' : ''}`}>
+            <h2>Order note</h2>
+            <textarea rows={4} value={note} onChange={e => setNote(e.target.value)} autoFocus />
+            <div className="row"><button type="button" onClick={() => setNoteOpen(false)}>Done</button></div>
+          </div>
+        </div>
+      ) : null}
+
+      {pinKind ? (
+        <div className={`modal${app ? ' nr-sheet' : ''}`}>
+          <div className={`card grid${app ? ' nr-sheet-card' : ''}`}>
+            <h2>Manager PIN</h2>
+            <p className="muted">
+              {pinKind === 'ticket_discount' ? 'Discount above clerk maximum.' : `Below floor on SKU ${pinSku}.`}
+            </p>
+            <input type="password" value={pin} onChange={e => setPin(e.target.value)} autoFocus />
+            {error ? <p className="error">{error}</p> : null}
+            <div className="row">
+              <button type="button" className="secondary" onClick={() => { closePin(); setPendingAction(null); }}>Cancel</button>
+              <button type="button" className="primary" onClick={() => void submitPin()}>Approve</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      <NativePaySheets
+        app={app}
+        cashOpen={cashOpen}
+        total={total}
+        cashDigits={cashDigits}
+        setCashDigits={setCashDigits}
+        cashTendered={cashTendered}
+        change={change}
+        pushDigit={pushDigit}
+        busy={busy}
+        error={error}
+        setCashOpen={setCashOpen}
+        setError={setError}
+        runCash={() => void runCash({})}
+        manual={manual}
+        completeManualCard={() => void completeManualCard()}
+        dismissManual={() => {
+          localStorage.removeItem(manualKey);
+          setManual(null);
+          setPhase('idle');
+          setError('');
+        }}
+        splitOpen={splitOpen}
+        setSplitOpen={setSplitOpen}
+        splitCashDraft={splitCashDraft}
+        setSplitCashDraft={setSplitCashDraft}
+        splitCash={splitCash}
+        splitBase={splitBase}
+        cardFeeBps={cardFeeBps}
+        confirmSplit={() => void confirmSplit()}
+      />
+    </>
+  );
+
+  if (done) {
+    if (app) {
+      return (
+        <NativeRegisterDone
+          done={done}
+          doneMsg={doneMsg}
+          setDoneMsg={setDoneMsg}
+          newSale={newSale}
+          customerEmail={done.customerEmail}
+        />
+      );
+    }
+    const { summary, changeCents, receipt } = done;
+    return (
+      <div className="admin-register">
+        <header>
+          <div>
+            <div className="eyebrow">REGISTER</div>
+            <h1>Sale complete</h1>
+            <p>Ticket {summary.ticket_id.slice(0, 8)}…</p>
+          </div>
+        </header>
+        <section className="panel register-done">
+          {summary.lines.map(l => (
+            <div className="summary-row" key={l.sale_id}>
+              <span>
+                <strong>{l.receipt_no} · {l.sku}</strong>
+                <div className="muted">{receipt.lines.find(x => x.sku === l.sku)?.title || 'Item'}</div>
+              </span>
+              <span>{formatCentsTotal(l.price_cents + l.tax_cents)}</span>
+            </div>
+          ))}
+          <div className="register-done-totals">
+            <div className="summary-row"><span>Subtotal</span><span>{formatCentsTotal(summary.subtotal_cents)}</span></div>
+            {summary.discount_cents ? (
+              <div className="summary-row"><span>Discount</span><span>−{formatCentsTotal(summary.discount_cents)}</span></div>
+            ) : null}
+            {summary.signup_discount_cents ? (
+              <div className="summary-row muted"><span>New-customer discount</span><span>−{formatCentsTotal(summary.signup_discount_cents)}</span></div>
+            ) : null}
+            <div className="summary-row"><span>Tax</span><span>{formatCentsTotal(summary.tax_cents)}</span></div>
+            {summary.card_fee_cents ? (
+              <div className="summary-row"><span>Card fee</span><span>{formatCentsTotal(summary.card_fee_cents)}</span></div>
+            ) : null}
+            <div className="summary-row checkout-total"><span>Total</span><span>{formatCentsTotal(summary.total_cents)}</span></div>
+            {summary.payment_method === 'split' ? (
+              <div className="summary-row muted">
+                <span>Tender</span>
+                <span>cash {formatCentsTotal(summary.cash_cents ?? 0)} · card {formatCentsTotal(summary.card_cents ?? 0)}</span>
+              </div>
+            ) : null}
+            {changeCents != null ? (
+              <div className="summary-row"><span>Change</span><strong>{formatCentsTotal(changeCents)}</strong></div>
+            ) : null}
+            {summary.points_earned ? (
+              <div className="summary-row muted">
+                <span>Points earned</span>
+                <span>{formatPoints(summary.points_earned)}{summary.points_balance != null ? ` · balance ${formatPoints(summary.points_balance)}` : ''}</span>
+              </div>
+            ) : null}
+          </div>
+          {doneMsg ? <p className="muted">{doneMsg}</p> : null}
+          <div className="actions">
+            <button
+              type="button"
+              onClick={() => setDoneMsg(printReceiptHtml(receiptHtml(receipt)) ? 'Print dialog opened.' : 'Could not open print dialog.')}
+            >
+              Print receipt
+            </button>
+            <button type="button" className="secondary" onClick={() => downloadReceiptText(receipt)}>Save as text</button>
+            <button type="button" className="secondary" onClick={newSale}>New sale</button>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
+  if (app) {
+    return (
+      <NativeRegisterCart
+        lines={lines}
+        note={note}
+        setNote={setNote}
+        ticketId={ticketId}
+        q={q}
+        setQ={setQ}
+        showHits={showHits}
+        setShowHits={setShowHits}
+        hits={hits}
+        searchBusy={searchBusy}
+        searchRef={searchRef}
+        onSearchKey={onSearchKey}
+        addFromSearch={addFromSearch}
+        idle={idle}
+        busy={busy}
+        cashOpen={cashOpen}
+        error={error}
+        loud={loud}
+        soldByName={soldByName}
+        customer={customer}
+        taxRateBps={taxRateBps}
+        itemCount={itemCount}
+        rawSubtotal={rawSubtotal}
+        discountCents={discountCents}
+        discountPct={discountPct}
+        tax={tax}
+        total={total}
+        cardFeePreview={cardFeePreview}
+        cardFeeBps={cardFeeBps}
+        phase={phase}
+        priceDrafts={priceDrafts}
+        setPriceDrafts={setPriceDrafts}
+        commitLinePrice={commitLinePrice}
+        updateLine={updateLine}
+        setQty={setQty}
+        removeSku={removeSku}
+        clear={clear}
+        startPay={kind => void startPay(kind)}
+        setDiscountOpen={setDiscountOpen}
+        setDiscountDraft={setDiscountDraft}
+        setNoteOpen={setNoteOpen}
+        setCustomerOpen={setCustomerOpen}
+        setEmployeeOpen={setEmployeeOpen}
+        setEmployeeDraft={setEmployeeDraft}
+        setEmployeeError={setEmployeeError}
+        onCustomUnit={addCustomPricedUnit}
+        queryUnit={term => queryAvailableUnits(term, 8)}
+      >
+        {sharedModals}
+      </NativeRegisterCart>
+    );
+  }
+
+  return (
+    <div className="admin-register compact">
+      <header className="register-top">
+        <div>
+          <h1>Register</h1>
+          <p>Scan items, then cash or card.</p>
+        </div>
+        <div className="register-center-actions">
+          {soldByName ? (
+            <div className="employee-chip">
+              <span>
+                <strong>{soldByName}</strong>
+                <small className="muted">Employee</small>
+              </span>
+              <button
+                type="button"
+                className="secondary"
+                disabled={!idle || cashOpen}
+                onClick={() => { setSoldByCode(null); setSoldByName(null); }}
+              >
+                Clear
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              className="employee-id-btn"
+              disabled={!idle || cashOpen}
+              onClick={() => { setEmployeeDraft(''); setEmployeeError(''); setEmployeeOpen(true); }}
+            >
+              Employee ID
+            </button>
+          )}
+          {customer ? (
+            <div className="customer-chip">
+              <span>
+                <strong>{customer.name || 'Customer'}</strong>
+                <small className="muted">{customer.phone} · {formatPoints(customer.balance)} pts</small>
+              </span>
+              <button type="button" className="secondary" disabled={!idle || cashOpen} onClick={() => setCustomerOpen(true)}>Edit</button>
+              <button type="button" className="secondary" disabled={!idle || cashOpen} onClick={() => { setCustomer(null); setRedeemPoints(0); }}>Clear</button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              className="customer-lookup-btn"
+              disabled={!idle || cashOpen}
+              onClick={() => setCustomerOpen(true)}
+            >
+              Customer lookup
+            </button>
+          )}
+        </div>
+        <div className="register-top-actions">
+          <button
+            type="button"
+            className="secondary register-gear"
+            disabled={!idle || cashOpen}
+            aria-label="Register settings"
+            title="Register settings"
+            onClick={() => setSettingsOpen(true)}
+          >
+            ⚙
+          </button>
+          <button type="button" className="secondary" disabled={!idle} onClick={() => setNoteOpen(true)}>Note{note ? ' ✓' : ''}</button>
+          <button type="button" className="secondary" disabled={!idle} onClick={() => void refreshUnits().catch(err => setError(authErrorMessage(err)))}>Refresh</button>
+          <button type="button" className="danger" disabled={!lines.length || !idle} onClick={() => { if (window.confirm('Clear the cart?')) clear(); }}>Clear</button>
+        </div>
+      </header>
+
+      <div className="cart-panel">
+        <div className="register-search-wrap">
+          <input
+            ref={searchRef}
+            className="search"
+            placeholder="Scan or search SKU, title…"
+            value={q}
+            onChange={e => {
+              setQ(e.target.value);
+              setShowHits(Boolean(e.target.value.trim()));
+            }}
+            onFocus={() => q.trim() && setShowHits(true)}
+            onKeyDown={onSearchKey}
+            autoFocus={!isAndroidStoreDevice() && (!isCoarse || isKioskShell())}
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="off"
+            spellCheck={false}
+            enterKeyHint="search"
+            inputMode={scannerInputMode() || 'search'}
+            disabled={!idle || cashOpen}
+          />
+          {showHits && (hits.length || searchBusy) ? (
+            <div className="search-results">
+              {searchBusy && !hits.length ? <div className="search-hit muted">Searching…</div> : null}
+              {hits.map(u => (
+                <button key={u.sku} type="button" className="search-hit" onClick={() => addFromSearch(u)}>
+                  <span>
+                    <strong>{u.sku}</strong>
+                    <div>{[u.brand, u.model].filter(Boolean).join(' ') || u.title}</div>
+                  </span>
+                  <span className="price">{formatCents(u.askCents) || '—'}</span>
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
+        <div className="cart-scroll">
+        <table className="cart-table">
+          <thead>
+            <tr>
+              <th>Item</th>
+              <th>Qty</th>
+              <th>Price</th>
+              <th>Total</th>
+              <th style={{ width: 44 }} />
+            </tr>
+          </thead>
+          <tbody>
+            {lines.map(line => {
+              const draft = priceDrafts[line.sku] ?? centsToInput(line.priceCents);
+              const draftCents = parseMoneyToCents(draft);
+              const priceChanged = line.askCents != null && draftCents != null && draftCents !== line.askCents;
+              return (
+              <tr key={line.sku}>
+                <td>
+                  <div className="cart-item">
+                    <strong>{line.title}</strong>
+                    <span className="muted">{line.sku}{line.condition ? ` · ${line.condition}` : ''}{line.askCents != null ? ` · ask ${formatCents(line.askCents)}` : ''}</span>
+                    {priceChanged ? (
+                      <label className="cart-override">
+                        Override reason
+                        <input
+                          type="text"
+                          value={line.overrideReason}
+                          disabled={!idle || cashOpen}
+                          placeholder="Required when price ≠ ask"
+                          onChange={e => updateLine(line.sku, { overrideReason: e.target.value })}
+                        />
+                      </label>
+                    ) : null}
+                  </div>
+                </td>
+                <td>
+                  {line.qtyOnHand > 1 ? (
+                    <div className="qty-stepper">
+                      <button type="button" className="secondary" disabled={!idle || cashOpen || line.qty <= 1} onClick={() => setQty(line.sku, line.qty - 1)}>−</button>
+                      <span>{line.qty}</span>
+                      <button type="button" className="secondary" disabled={!idle || cashOpen || line.qty >= line.qtyOnHand} onClick={() => setQty(line.sku, line.qty + 1)}>+</button>
+                    </div>
+                  ) : '1'}
+                </td>
+                <td>
+                  <input
+                    className="cart-price"
+                    type="text"
+                    inputMode="decimal"
+                    aria-label={`Price for ${line.sku}`}
+                    disabled={!idle || cashOpen}
+                    value={draft}
+                    onChange={e => {
+                      if (!moneyEntry.test(e.target.value)) return;
+                      setPriceDrafts(d => ({ ...d, [line.sku]: e.target.value }));
+                    }}
+                    onBlur={() => commitLinePrice(line.sku, draft)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        (e.target as HTMLInputElement).blur();
+                      }
+                    }}
+                  />
+                </td>
+                <td>{formatCentsTotal(lineExtendedPrice({ ...line, priceCents: draftCents ?? line.priceCents }))}</td>
+                <td>
+                  <button type="button" className="secondary" disabled={!idle || cashOpen} onClick={() => removeSku(line.sku)} aria-label="Remove">×</button>
+                </td>
+              </tr>
+              );
+            })}
+            {!lines.length ? (
+              <tr><td colSpan={5}><p className="muted register-empty">Scan or search to add an item.</p></td></tr>
+            ) : null}
+          </tbody>
+        </table>
+        </div>
+      </div>
+
+      <div className="checkout-bar">
+        {loud ? <div className="incident">{loud}</div> : null}
+        {error && !cashOpen ? <p className="error">{error}</p> : null}
+        <div className="checkout-summary">
+          <div className="summary-row">
+            <span>Subtotal ({itemCount})</span>
+            <span>{formatCentsTotal(rawSubtotal)}</span>
+          </div>
+          {(discountCents > 0 || discountPct > 0) && (
+            <div className="summary-row">
+              <span>
+                Discount
+                <button type="button" className="icon-btn" title="Edit discount" disabled={!idle || cashOpen} onClick={() => { setDiscountDraft(String(discountPct || '')); setDiscountOpen(true); }}>✎</button>
+              </span>
+              <span>{discountCents ? `−${formatCentsTotal(discountCents)}` : formatCentsTotal(0)}</span>
+            </div>
+          )}
+          <div className="summary-row">
+            <span>Tax {taxRateBps != null ? `(${(taxRateBps / 100).toFixed(2)}%)` : ''}</span>
+            <span>{formatCentsTotal(tax)}</span>
+          </div>
+          {cardFeeBps > 0 && lines.length ? (
+            <div className="summary-row muted">
+              <span>Card total (+{(cardFeeBps / 100).toFixed(2)}%)</span>
+              <span>{formatCentsTotal(total + cardFeePreview)}</span>
+            </div>
+          ) : null}
+          <div className="summary-row checkout-total"><span>TOTAL</span><span>{formatCentsTotal(total)}</span></div>
+        </div>
+
+        {!idle ? (
+          <p className="muted">{phase === 'quoting' ? 'Getting exact total…' : 'Confirm payment…'}</p>
+        ) : (
+          <div className="pay-row">
+            <button type="button" className="cash" disabled={busy || !lines.length || cashOpen} onClick={() => void startPay('cash')}>CASH</button>
+            <button type="button" className="card" disabled={busy || !lines.length || cashOpen} onClick={() => void startPay('card')}>CARD</button>
+            <button type="button" className="secondary" disabled={busy || !lines.length || cashOpen} onClick={() => void startPay('split')}>Split</button>
+            <button type="button" className="secondary" disabled={!idle || cashOpen} onClick={() => { setDiscountDraft(String(discountPct || '')); setDiscountOpen(true); }}>% Off</button>
+          </div>
+        )}
+
+        {customer && customerBalance > 0 ? (
+          <div className="row">
+            <label style={{ flex: 1 }}>
+              Apply credit (points)
+              <input
+                type="number"
+                min={0}
+                step={0.1}
+                max={customerBalance}
+                value={redeemPoints || ''}
+                disabled={!idle || cashOpen}
+                onChange={e => setRedeemPoints(Math.round(Math.max(0, Math.min(customerBalance, Number(e.target.value) || 0)) * 10) / 10)}
+              />
+            </label>
+            {lines.length ? <p className="muted">+{formatPoints(earnPreview)} pts this sale</p> : null}
+          </div>
+        ) : customer && lines.length ? (
+          <p className="muted">Points this sale +{formatPoints(earnPreview)}</p>
+        ) : null}
+      </div>
 
       {cashOpen ? (
         <div className="modal" role="dialog" aria-modal="true" aria-label="Cash tendered">
@@ -985,7 +1148,7 @@ function RegisterInner({ staffSession, onNeedFullReload }: Props) {
             ) : null}
             {error ? <p className="error">{error}</p> : null}
             <div className="numpad">
-              {['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', 'Γî½'].map(d => (
+              {['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'].map(d => (
                 <button key={d} type="button" className="secondary" disabled={busy} onClick={() => pushDigit(d)}>{d}</button>
               ))}
             </div>
@@ -999,7 +1162,7 @@ function RegisterInner({ staffSession, onNeedFullReload }: Props) {
                 disabled={busy || cashTendered == null || cashTendered < total}
                 onClick={() => void runCash({})}
               >
-                {busy ? 'RecordingΓÇª' : 'Complete sale'}
+                {busy ? 'Recording…' : 'Complete sale'}
               </button>
             </div>
           </div>
@@ -1011,12 +1174,12 @@ function RegisterInner({ staffSession, onNeedFullReload }: Props) {
           <div className="card grid">
             <h2>Charge in Square</h2>
             <strong className="register-charge">{formatCentsTotal(manual.quote.card_charge_cents)}</strong>
-            <p>Tax {formatCentsTotal(manual.quote.tax_cents)} ┬╖ Card fee {formatCentsTotal(manual.quote.card_fee_cents)} (included)</p>
+            <p>Tax {formatCentsTotal(manual.quote.tax_cents)} · Card fee {formatCentsTotal(manual.quote.card_fee_cents)} (included)</p>
             {manual.args.paymentMethod === 'split' ? <p>Collect {formatCentsTotal(manual.args.cashCents ?? 0)} cash in the drawer.</p> : null}
             <p>Charge the exact amount above in Square. Confirm only after Square says paid.</p>
             {error ? <p className="error">{error}</p> : null}
             <button type="button" className="primary" disabled={busy} onClick={() => void completeManualCard()}>
-              {busy ? 'Recording saleΓÇª' : 'Card paid ΓÇö complete sale'}
+              {busy ? 'Recording sale…' : 'Card paid — complete sale'}
             </button>
             <button
               type="button"
@@ -1033,33 +1196,6 @@ function RegisterInner({ staffSession, onNeedFullReload }: Props) {
             >
               Back
             </button>
-          </div>
-        </div>
-      ) : null}
-
-      {discountOpen ? (
-        <div className="modal">
-          <div className="card grid">
-            <h2>Ticket discount %</h2>
-            <p className="muted">
-              Clerk max {(rewards.clerkMaxDiscountBps / 100).toFixed(0)}%
-              {isAdmin ? ' (managers may exceed)' : ' ΓÇö above that needs manager PIN'}.
-            </p>
-            <label>Percent<input value={discountDraft} onChange={e => setDiscountDraft(e.target.value)} inputMode="decimal" autoFocus /></label>
-            <div className="row">
-              <button type="button" className="secondary" onClick={() => setDiscountOpen(false)}>Cancel</button>
-              <button type="button" className="primary" onClick={applyDiscountDraft}>Apply</button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {noteOpen ? (
-        <div className="modal">
-          <div className="card grid">
-            <h2>Order note</h2>
-            <textarea rows={4} value={note} onChange={e => setNote(e.target.value)} autoFocus />
-            <div className="row"><button type="button" onClick={() => setNoteOpen(false)}>Done</button></div>
           </div>
         </div>
       ) : null}
@@ -1091,32 +1227,17 @@ function RegisterInner({ staffSession, onNeedFullReload }: Props) {
         </div>
       ) : null}
 
-      {pinKind ? (
-        <div className="modal">
-          <div className="card grid">
-            <h2>Manager PIN</h2>
-            <p className="muted">
-              {pinKind === 'ticket_discount' ? 'Discount above clerk maximum.' : `Below floor on SKU ${pinSku}.`}
-            </p>
-            <input type="password" value={pin} onChange={e => setPin(e.target.value)} autoFocus />
-            {error ? <p className="error">{error}</p> : null}
-            <div className="row">
-              <button type="button" className="secondary" onClick={() => { closePin(); setPendingAction(null); }}>Cancel</button>
-              <button type="button" className="primary" onClick={() => void submitPin()}>Approve</button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      {sharedModals}
     </div>
   );
 }
 
-type Props = { staffSession: StaffSession; onNeedFullReload?: () => void };
+type Props = { staffSession: StaffSession; onNeedFullReload?: () => void; variant?: 'desktop' | 'app' };
 
 class RegisterBoundary extends Component<{ children: ReactNode }, { error: string }> {
   state = { error: '' };
   static getDerivedStateFromError(err: unknown) {
-    return { error: err instanceof Error ? err.message : String(err) };
+    return { error: errText(err) };
   }
   render() {
     if (this.state.error) {

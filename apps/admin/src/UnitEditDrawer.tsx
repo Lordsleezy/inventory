@@ -3,6 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { floorFunctionUrl } from './floorApi';
 import { scannerInputMode } from './kiosk';
 import { reportClientError } from './clientLog';
+import { errText } from './errText';
 
 type Photo = { id: number; path: string; is_primary: boolean };
 type Unit = Record<string, unknown>;
@@ -86,6 +87,7 @@ type LookupMerged = {
 
 export function UnitEditDrawer({
   client, storeId, sku, unit, photos, urls, accessToken, onClose, onSaved, onPhotosChanged,
+  canDelete = false, onDeleted, appMode = false,
 }: {
   client: SupabaseClient;
   storeId: string;
@@ -97,6 +99,11 @@ export function UnitEditDrawer({
   onClose: () => void;
   onSaved: (unit: Unit) => void;
   onPhotosChanged: () => void;
+  /** Portal admins / managers only — hides Delete for register associates. */
+  canDelete?: boolean;
+  onDeleted?: () => void;
+  /** Standalone Floor app: clear the bottom tab bar; use app chrome. */
+  appMode?: boolean;
 }) {
   const [form, setForm] = useState<Form>(() => fromUnit(unit));
   const [options, setOptions] = useState<Options | null>(null);
@@ -192,7 +199,7 @@ export function UnitEditDrawer({
         ? `Attached UPC ${upc}. Filled blank: ${filled.join(', ')}. Review and Save if price/cost look right.`
         : `Attached UPC ${upc}. Existing fields were kept (nothing overwritten).`);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errText(e));
     } finally {
       setLookupBusy(false);
     }
@@ -213,13 +220,21 @@ export function UnitEditDrawer({
       setError('Dimensions and weight must be positive numbers (or blank).');
       return;
     }
+    // units.title is NOT NULL — never send blank/null. Prefer typed title, else brand + model, else SKU.
+    const title = form.title.trim()
+      || [form.brand, form.model].map((s) => s.trim()).filter(Boolean).join(' ')
+      || `SKU ${sku}`;
+    if (title !== form.title.trim()) {
+      setForm((prev) => ({ ...prev, title }));
+    }
     setBusy(true); setError(''); setMsg('');
+    // brand/model/title are NOT NULL — always send strings ('' ok), never null/undefined.
     const { data, error: e } = await client.rpc('portal_update_unit', {
       p_sku: sku,
-      p_upc: form.upc,
-      p_brand: form.brand,
-      p_model: form.model,
-      p_title: form.title,
+      p_upc: form.upc.trim(),
+      p_brand: form.brand.trim(),
+      p_model: form.model.trim(),
+      p_title: title,
       p_description: form.description,
       p_ask_cents: ask,
       p_cost_cents: cost,
@@ -257,16 +272,54 @@ export function UnitEditDrawer({
     setMsg('Saved.');
   }
 
+  async function removeUnit() {
+    if (!canDelete) return;
+    if (!window.confirm(`Delete SKU ${sku} permanently?\n\nThis removes it from inventory. Sales history stays. If the unit still has an open sale, void that first.`)) {
+      return;
+    }
+    setBusy(true);
+    setError('');
+    setMsg('');
+    try {
+      const { error: e } = await client.rpc('delete_unit', { p_sku: sku, p_approval_id: null });
+      if (e) throw e;
+      onDeleted?.();
+      onClose();
+    } catch (err) {
+      const text = errText(err);
+      if (/void_the_sale_first/i.test(text)) {
+        setError('This item has an open sale. Void the sale first, then delete.');
+      } else if (/manager_approval_required/i.test(text)) {
+        setError('Only store admins can delete inventory.');
+      } else {
+        setError(text);
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function addPhotos(files: FileList | null) {
     if (!files?.length) return;
+    // Snapshot before any await — FileList is live on the input.
+    const picked = Array.from(files);
     setBusy(true); setError(''); setMsg('');
     let failed = 0;
-    for (const file of Array.from(files)) {
-      if (!file.type.startsWith('image/') || file.size > 15 * 1024 * 1024) { failed++; continue; }
-      const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+    for (const file of picked) {
+      const typeOk = !file.type || file.type.startsWith('image/');
+      if (!typeOk || file.size > 15 * 1024 * 1024 || file.size < 1) { failed++; continue; }
+      let body: Blob = file;
+      try {
+        // Detach from the <input> so clearing value cannot empty the blob (Android PWA).
+        body = new Blob([await file.arrayBuffer()], { type: file.type || 'image/jpeg' });
+      } catch { failed++; continue; }
+      const safe = (file.name || 'photo.jpg').replace(/[^a-zA-Z0-9._-]/g, '_') || 'photo.jpg';
       const path = `${storeId}/${sku}/${Date.now()}-${crypto.randomUUID()}-${safe}`;
       try {
-        const upload = await client.storage.from('unit-photos').upload(path, file, { contentType: file.type, upsert: false });
+        const upload = await client.storage.from('unit-photos').upload(path, body, {
+          contentType: file.type || 'image/jpeg',
+          upsert: false,
+        });
         if (upload.error) throw upload.error;
         const linked = await client.rpc('portal_add_unit_photo', { p_sku: sku, p_path: path });
         if (linked.error) throw linked.error;
@@ -290,12 +343,25 @@ export function UnitEditDrawer({
   if (!photos.length) missing.push('photo');
 
   return (
-    <div className="inventory-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
+    <div
+      className={`inventory-backdrop${appMode ? ' app-unit-edit' : ''}`}
+      onMouseDown={e => { if (!appMode && e.target === e.currentTarget) onClose(); }}
+    >
       <section className="inventory-detail" role="dialog" aria-modal="true" aria-label={`Edit unit ${sku}`}>
-        <div className="section-head">
-          <div><div className="eyebrow">EDIT UNIT</div><h2>SKU {sku}</h2></div>
-          <button type="button" className="secondary" onClick={onClose}>Close</button>
-        </div>
+        {appMode ? (
+          <div className="app-nav app-unit-edit-nav">
+            <button type="button" onClick={onClose}>Cancel</button>
+            <div className="app-nav-title">Edit · {sku}</div>
+            <button type="button" disabled={busy || lookupBusy} onClick={() => void save()}>
+              {busy ? '…' : 'Save'}
+            </button>
+          </div>
+        ) : (
+          <div className="section-head">
+            <div><div className="eyebrow">EDIT UNIT</div><h2>SKU {sku}</h2></div>
+            <button type="button" className="secondary" onClick={onClose}>Close</button>
+          </div>
+        )}
         {error && <div className="alert" role="alert">{error}</div>}
         {msg && <p className="hint">{msg}</p>}
         <p className="hint">{missing.length === 0 ? 'Looks complete for listing.' : `Still missing: ${missing.join(', ')}. Scan a UPC to fill blanks.`}</p>
@@ -371,9 +437,19 @@ export function UnitEditDrawer({
           <label>Weight (lb)<input inputMode="decimal" value={form.weight} onChange={e => set('weight', e.target.value)} /></label>
           <label className="unit-edit-wide">Notes<textarea rows={3} value={form.notes} onChange={e => set('notes', e.target.value)} /></label>
         </div>
-        <div className="actions" style={{ marginTop: 16 }}>
+        <div className={`actions unit-edit-actions${appMode ? ' app-unit-edit-actions' : ''}`} style={{ marginTop: 16 }}>
           <button type="button" disabled={busy || lookupBusy} onClick={() => void save()}>{busy ? 'Saving…' : 'Save changes'}</button>
           <button type="button" className="secondary" disabled={busy} onClick={onClose}>Cancel</button>
+          {canDelete ? (
+            <button
+              type="button"
+              className="danger"
+              disabled={busy || lookupBusy}
+              onClick={() => void removeUnit()}
+            >
+              {busy ? 'Working…' : 'Delete'}
+            </button>
+          ) : null}
         </div>
       </section>
     </div>

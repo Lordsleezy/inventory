@@ -168,7 +168,7 @@ export function RegisterSettingsModal({ open, onClose, onSaved }: Props) {
     <div className="modal" role="dialog" aria-modal="true" aria-label="Register settings">
       <div className="card grid">
         <h2>Register settings</h2>
-        {loading ? <p className="muted">LoadingΓÇª</p> : null}
+        {loading ? <p className="muted">Loading…</p> : null}
         {!loading ? (
           <>
             <label>
@@ -250,7 +250,7 @@ export function RegisterSettingsModal({ open, onClose, onSaved }: Props) {
         <div className="row">
           <button type="button" className="secondary" disabled={busy} onClick={onClose}>Close</button>
           <button type="button" disabled={busy || loading} onClick={() => void save()}>
-            {busy ? 'SavingΓÇª' : 'Save'}
+            {busy ? 'Saving…' : 'Save'}
           </button>
         </div>
       </div>

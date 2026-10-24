@@ -11,7 +11,19 @@
  */
 import { serviceClient } from "./server.mjs";
 import { normalizeGtin } from "./gtin-normalize.mjs";
-import { catalogItemByIdentifier, competitivePriceByAsin, amazonNeverListReason } from "./amazon.mjs";
+import {
+  catalogItemByIdentifier,
+  competitivePriceByAsin,
+  amazonNeverListReason,
+  itemSpecificsFromLookup,
+  usableModelNumber,
+} from "./amazon.mjs";
+import {
+  logUpcMiss,
+  productToMerged,
+  readFloorProduct,
+  saveFloorProduct,
+} from "./floor-products.mjs";
 
 const UPCITEMDB_TRIAL = "https://api.upcitemdb.com/prod/trial/lookup";
 const UPCITEMDB_PAID = "https://api.upcitemdb.com/prod/v1/lookup";
@@ -75,7 +87,8 @@ export function parseUpcitemdbItem(item) {
   return {
     title: clean(item.title),
     brand: clean(item.brand),
-    model: clean(item.model),
+    // Drop retailer digit codes (same rule as Amazon parse) — not usable as item specifics.
+    model: usableModelNumber(clean(item.model)),
     description: clean(item.description),
     category: clean(item.category),
     asin: clean(item.asin)?.toUpperCase() || null,
@@ -147,6 +160,7 @@ function emptyAmazon(extra = {}) {
     model: null,
     description: null,
     features: [],
+    aspects: {},
     package: EMPTY_PKG(),
     item: EMPTY_PKG(),
     images: [],
@@ -162,17 +176,37 @@ function emptyAmazon(extra = {}) {
 
 async function amazonLookup(storeId, gtin, deps) {
   const isUpc = gtin.gtin14.startsWith("00");
+  const attempts = [];
+  const tryId = async (type, value) => {
+    if (!value) return null;
+    try {
+      const res = await deps.catalogByIdentifier(storeId, type, value);
+      attempts.push({ type, value, found: Boolean(res?.found), alt: (res?.alternatives || []).length });
+      return res;
+    } catch (e) {
+      attempts.push({ type, value, found: false, error: String(e?.message || e).slice(0, 200) });
+      throw e;
+    }
+  };
   let res;
   try {
-    // A 12-digit UPC-A only makes sense when the GTIN-14 is a padded UPC; otherwise query as EAN/GTIN.
-    res = isUpc
-      ? await deps.catalogByIdentifier(storeId, "UPC", gtin.upcA)
-      : await deps.catalogByIdentifier(storeId, gtin.gtin14.startsWith("0") ? "EAN" : "GTIN", gtin.gtin14.startsWith("0") ? gtin.ean13 : gtin.gtin14);
-    if (!res.found && isUpc) res = await deps.catalogByIdentifier(storeId, "EAN", gtin.ean13);
+    // UPC-A → EAN-13 (leading 0) → GTIN-14 so padded codes don't silently miss.
+    if (isUpc) {
+      res = await tryId("UPC", gtin.upcA);
+      if (!res?.found) res = await tryId("EAN", gtin.ean13);
+      if (!res?.found) res = await tryId("GTIN", gtin.gtin14);
+    } else if (gtin.gtin14.startsWith("0")) {
+      res = await tryId("EAN", gtin.ean13);
+      if (!res?.found) res = await tryId("GTIN", gtin.gtin14);
+      if (!res?.found && gtin.upcA) res = await tryId("UPC", gtin.upcA);
+    } else {
+      res = await tryId("GTIN", gtin.gtin14);
+      if (!res?.found) res = await tryId("EAN", gtin.ean13);
+    }
   } catch (e) {
-    return emptyAmazon({ raw_error: String(e?.message || e).slice(0, 300) });
+    return emptyAmazon({ raw_error: String(e?.message || e).slice(0, 300), amazon_attempts: attempts });
   }
-  if (!res.found) return emptyAmazon({ alternatives: res.alternatives || [] });
+  if (!res?.found) return emptyAmazon({ alternatives: res?.alternatives || [], amazon_attempts: attempts });
 
   const it = res.item;
   const out = emptyAmazon({
@@ -183,6 +217,7 @@ async function amazonLookup(storeId, gtin, deps) {
     model: it.model,
     description: it.description,
     features: it.features || [],
+    aspects: it.aspects && typeof it.aspects === "object" ? it.aspects : {},
     package: it.package || EMPTY_PKG(),
     item: it.item || EMPTY_PKG(),
     images: it.images || [],
@@ -202,6 +237,7 @@ async function amazonLookup(storeId, gtin, deps) {
   out.price_as_of = price.price_cents ? price.as_of : null;
   if (price.price_pending) out.price_pending = true;
   if (price.raw_error) out.price_error = price.raw_error;
+  out.amazon_attempts = attempts;
   // Rate-limited pricing must never fail the whole lookup — catalog data still stands.
   return out;
 }
@@ -273,7 +309,14 @@ export function mergeLookup(amazon, upc) {
 
   const [title, titleSrc] = pick("title");
   const [brand, brandSrc] = pick("brand");
-  const [model, modelSrc] = pick("model");
+  // Prefer a real MPN; never keep bare digit retailer codes in merged.model.
+  const pickModel = () => {
+    const a = usableModelNumber(clean(A?.model));
+    if (a) return [a, "amazon"];
+    const u = usableModelNumber(clean(U?.model));
+    return u ? [u, "upcitemdb"] : [null, null];
+  };
+  const [model, modelSrc] = pickModel();
   const [description, descSrc] = pick("description");
   const [category] = pick("category");
   const [asin, asinSrc] = A?.asin ? [A.asin, "amazon"] : U?.asin ? [U.asin, "upcitemdb"] : [null, null];
@@ -314,6 +357,12 @@ export function mergeLookup(amazon, upc) {
     }
   }
 
+  const aspects = A?.aspects && typeof A.aspects === "object" && Object.keys(A.aspects).length
+    ? A.aspects
+    : U?.aspects && typeof U.aspects === "object" && Object.keys(U.aspects).length
+      ? U.aspects
+      : {};
+
   return {
     merged: {
       title,
@@ -321,6 +370,7 @@ export function mergeLookup(amazon, upc) {
       model,
       description,
       features: A?.features || [],
+      aspects,
       package: pkg,
       images,
       category,
@@ -330,6 +380,8 @@ export function mergeLookup(amazon, upc) {
       retail_source,
       retail_as_of,
       disagreements,
+      // True when neither source returned a usable catalog hit.
+      not_found: !A && !U,
     },
     fieldCoverage: {
       title: titleSrc,
@@ -340,6 +392,7 @@ export function mergeLookup(amazon, upc) {
       package: pkgSrc,
       images: imagesSrc,
       asin: asinSrc,
+      aspects: Object.keys(aspects).length ? (A?.aspects && Object.keys(A.aspects).length ? "amazon" : "upcitemdb") : null,
     },
   };
 }
@@ -420,6 +473,35 @@ export async function lookupUpc(storeId, rawCode, opts = {}) {
   };
   const sb = deps.sb || serviceClient();
 
+  // Own product DB first (shared across stores) — permanent edits beat cache/API.
+  if (!opts.force) {
+    const owned = await readFloorProduct(sb, gtin.gtin14);
+    if (owned && (owned.brand || owned.model || owned.title)) {
+      const merged = productToMerged(owned);
+      return {
+        gtin: gtinOut,
+        cached: false,
+        floor_product: true,
+        amazon: { found: false, skipped: "floor_product" },
+        upcitemdb: { found: false, skipped: "floor_product" },
+        ebay: null,
+        merged,
+        fieldCoverage: {
+          title: "floor_product",
+          brand: "floor_product",
+          model: "floor_product",
+          price: null,
+          description: merged.description ? "floor_product" : null,
+          package: PKG_KEYS.some((k) => merged.package?.[k] != null) ? "floor_product" : null,
+          images: merged.images?.length ? "floor_product" : null,
+          asin: merged.asin ? "floor_product" : null,
+          aspects: Object.keys(merged.aspects || {}).length ? "floor_product" : null,
+        },
+        looked_up_at: owned.updated_at || new Date().toISOString(),
+      };
+    }
+  }
+
   if (!opts.force) {
     const hit = await readCache(sb, gtin.gtin14);
     if (hit) return { ...hit.payload, gtin: gtinOut, cached: true, looked_up_at: hit.looked_up_at || hit.payload?.looked_up_at || null };
@@ -438,6 +520,14 @@ export async function lookupUpc(storeId, rawCode, opts = {}) {
   const ebay = opts.skipEbay ? null : await deps.ebayComps(storeId, gtin).catch(() => null);
 
   const { merged, fieldCoverage } = mergeLookup(amazon, upcitemdb);
+  // Prefer pack/variant phrase over bare digit retailer codes for item specifics.
+  const specifics = itemSpecificsFromLookup({
+    model: merged.model,
+    aspects: merged.aspects,
+    title: merged.title,
+    brand: merged.brand,
+  });
+  if (specifics) merged.model = specifics;
   const never = amazonNeverListReason({ title: merged.title, brand: merged.brand, model: merged.model, category: merged.category });
   if (never) merged.never_list_reason = never;
 
@@ -451,6 +541,23 @@ export async function lookupUpc(storeId, rawCode, opts = {}) {
     fieldCoverage,
     looked_up_at: new Date().toISOString(),
   };
+
+  // True miss → log for paid-DB evaluation / photo fallback. Transient errors skipped.
+  if (!amazon.found && !upcitemdb.found) {
+    const missId = await logUpcMiss(sb, {
+      gtin,
+      rawCode,
+      storeId,
+      amazon,
+      upcitemdb,
+      amazonAttempts: amazon.amazon_attempts || null,
+    });
+    if (missId) result.miss_id = missId;
+    result.true_miss = !amazon.raw_error && !upcitemdb.raw_error;
+  } else if (merged.title || merged.brand) {
+    const src = amazon.found ? "amazon" : "upcitemdb";
+    await saveFloorProduct(sb, gtin, merged, { source: src });
+  }
 
   // Don't cache hard failures. Pricing rate-limits are OK to cache catalog without price
   // (price_pending) so the next scan still gets title/dims instantly.

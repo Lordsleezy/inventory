@@ -5,6 +5,7 @@ import { webSquareConfig, webSquareEnv } from "../lib/web-square.mjs";
 import { settleShippingOrder } from "../lib/web-payment.mjs";
 import { ownerEmails } from "../lib/web-order-email.mjs";
 import { addressTo, allowedCarriers, fallbackRate, liveRates, shippoMode } from "../lib/shippo.mjs";
+import { enforceCheckoutRate } from "../lib/checkout-rate.mjs";
 
 /** Shipping always has a manual-price fallback; live Shippo rates are preferred when available. */
 export const shippingKeyOk = () => true;
@@ -62,6 +63,8 @@ async function handle(event) {
   if (!key || (event.headers?.["x-store-web-key"] || event.headers?.["X-Store-Web-Key"]) !== key) return json(401, { error: "unauthorized" });
   const body = JSON.parse(event.body || "{}");
   const sb = serviceClient();
+  const limited = await enforceCheckoutRate(sb, event, body.action);
+  if (limited) return limited;
   if (body.action === "config") {
     return json(200, { ...webSquareConfig(body.store_id), shipping: shippoMode() === "live" ? "live" : "manual" });
   }

@@ -36,6 +36,13 @@ export function ReceiveScreen() {
   const [msrp, setMsrp] = useState("");
   const [ask, setAsk] = useState("");
   const [notes, setNotes] = useState("");
+  const [upc, setUpc] = useState("");
+  const [lengthIn, setLengthIn] = useState("");
+  const [widthIn, setWidthIn] = useState("");
+  const [heightIn, setHeightIn] = useState("");
+  const [weightLb, setWeightLb] = useState("");
+  const [unbranded, setUnbranded] = useState(false);
+  const [noUpc, setNoUpc] = useState(false);
   const [error, setError] = useState("");
   const [skuHint, setSkuHint] = useState("");
   const [skuStatus, setSkuStatus] = useState("empty");
@@ -115,15 +122,19 @@ export function ReceiveScreen() {
         return;
       }
     }
+    const brandValue = unbranded ? "Unbranded" : brand.trim();
+    // Manual receive: title is always brand + model (same as admin Enter manually).
+    const titleValue = [brandValue, model.trim()].filter(Boolean).join(" ") || title.trim();
+    // Never block save/price for missing listing fields — Needs attention + Push enforce them.
 
     setSaving(true);
     try {
       await ensureOnline();
       const { data, error: rpcErr } = await floorCloud().rpc("receive_unit", {
         p_sku: sku.trim(),
-        p_brand: brand.trim(),
+        p_brand: brandValue,
         p_model: model.trim(),
-        p_title: title.trim(),
+        p_title: titleValue,
         p_category: category || null,
         p_condition: condition || null,
         p_test_status: testStatus || null,
@@ -133,6 +144,11 @@ export function ReceiveScreen() {
         p_cost_cents: manager ? money.cost ?? null : null,
         p_floor_cents: manager ? money.floor ?? null : null,
         p_notes: notes.trim() || null,
+        p_upc: noUpc ? "Does not apply" : upc.trim() || null,
+        p_length: Number(lengthIn) > 0 ? Number(lengthIn) : null,
+        p_width: Number(widthIn) > 0 ? Number(widthIn) : null,
+        p_height: Number(heightIn) > 0 ? Number(heightIn) : null,
+        p_weight: Number(weightLb) > 0 ? Number(weightLb) : null,
       });
       if (rpcErr) throw rpcErr;
       const savedSku = (data as { sku?: string } | null)?.sku ?? sku.trim();
@@ -148,12 +164,14 @@ export function ReceiveScreen() {
       setSuggested(nextSku);
       setSku(nextSku);
       setModel("");
-      setTitle("");
+      setTitle(brandValue);
       setNotes("");
       setAsk("");
       setCost("");
       setFloor("");
       setMsrp("");
+      setUpc("");
+      setNoUpc(false);
     } catch (err) {
       setError(friendlyRpc(err));
     } finally {
@@ -195,17 +213,77 @@ export function ReceiveScreen() {
 
       <label className="block py-2">
         <Label>Brand</Label>
-        <input className="field mt-1" value={brand} onChange={(e) => setBrand(e.target.value)} />
+        <input
+          className="field mt-1"
+          value={unbranded ? "Unbranded" : brand}
+          disabled={unbranded}
+          onChange={(e) => {
+            const next = e.target.value;
+            setBrand(next);
+            setTitle([unbranded ? "Unbranded" : next.trim(), model.trim()].filter(Boolean).join(" "));
+          }}
+        />
+      </label>
+      <label className="block py-2">
+        <input
+          type="checkbox"
+          checked={unbranded}
+          onChange={(e) => {
+            const on = e.target.checked;
+            setUnbranded(on);
+            setTitle([on ? "Unbranded" : brand.trim(), model.trim()].filter(Boolean).join(" "));
+          }}
+        />{" "}
+        Unbranded — no brand on the product or packaging
+      </label>
+      <label className="block py-2">
+        <Label>UPC</Label>
+        <input
+          className="field mt-1"
+          value={noUpc ? "Does not apply" : upc}
+          disabled={noUpc}
+          inputMode="numeric"
+          onChange={(e) => {
+            setNoUpc(false);
+            setUpc(e.target.value.replace(/\D/g, "").slice(0, 14));
+          }}
+        />
+      </label>
+      <label className="block py-2">
+        <input
+          type="checkbox"
+          checked={noUpc}
+          onChange={(e) => {
+            const on = e.target.checked;
+            setNoUpc(on);
+            if (on) setUpc("");
+          }}
+        />{" "}
+        No UPC / doesn’t have a barcode — marketplaces get “Does not apply”
       </label>
 
       <label className="block py-2">
         <Label>Model</Label>
-        <input className="field mt-1" value={model} onChange={(e) => setModel(e.target.value)} />
+        <input
+          className="field mt-1"
+          value={model}
+          onChange={(e) => {
+            const next = e.target.value;
+            setModel(next);
+            setTitle([(unbranded ? "Unbranded" : brand).trim(), next.trim()].filter(Boolean).join(" "));
+          }}
+        />
       </label>
 
       <label className="block py-2">
-        <Label>Description</Label>
-        <input className="field mt-1" value={title} onChange={(e) => setTitle(e.target.value)} />
+        <Label>Title</Label>
+        <input
+          className="field mt-1"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          placeholder="Auto-filled as brand + model"
+        />
+        <p className="mt-1 text-quiet text-sm">Auto-filled as brand + model.</p>
       </label>
 
       <Picker label="Category" value={category} options={settings.categories} onChange={setCategory} />
@@ -231,6 +309,13 @@ export function ReceiveScreen() {
       {!manager ? (
         <p className="text-quiet text-floor-mute py-2">Cost stays blank for admin.</p>
       ) : null}
+
+      <div className="grid grid-cols-2 gap-3">
+        <label className="block py-2"><Label>Length (in)</Label><input className="field mt-1" value={lengthIn} inputMode="decimal" onChange={(e) => setLengthIn(e.target.value)} /></label>
+        <label className="block py-2"><Label>Width (in)</Label><input className="field mt-1" value={widthIn} inputMode="decimal" onChange={(e) => setWidthIn(e.target.value)} /></label>
+        <label className="block py-2"><Label>Height (in)</Label><input className="field mt-1" value={heightIn} inputMode="decimal" onChange={(e) => setHeightIn(e.target.value)} /></label>
+        <label className="block py-2"><Label>Weight (lb)</Label><input className="field mt-1" value={weightLb} inputMode="decimal" onChange={(e) => setWeightLb(e.target.value)} /></label>
+      </div>
 
       <label className="block py-2">
         <Label>Defects and notes</Label>

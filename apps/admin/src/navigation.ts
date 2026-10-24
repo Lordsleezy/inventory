@@ -1,9 +1,38 @@
-export type MainPage = 'register' | 'sales' | 'orders' | 'receipts' | 'inventory' | 'online' | 'marketplaces' | 'amazon' | 'reports' | 'tax' | 'cameras' | 'remote' | 'logs' | 'settings';
+export type MainPage =
+  | 'register'
+  | 'sales'
+  | 'orders'
+  | 'receipts'
+  | 'inventory'
+  | 'online'
+  | 'marketplaces'
+  | 'ebay'
+  | 'amazon'
+  | 'tiktok'
+  | 'depop'
+  | 'reports'
+  | 'tax'
+  | 'cameras'
+  | 'remote'
+  | 'logs'
+  | 'settings';
 export type ReportTab = 'profit' | 'shipping' | 'expenses' | 'payouts' | 'returns';
-export type InventoryTab = 'browse' | 'receive' | 'attention' | 'lookup-test';
-export type AttentionSection = 'missing-cost' | 'missing-photo' | 'missing-price' | 'missing-spec' | 'missing-model' | 'missing-description';
+export type InventoryTab = 'browse' | 'receive' | 'attention' | 'lookup-test' | 'products' | 'measure-mat';
+export type AttentionSection =
+  | 'missing-cost'
+  | 'missing-brand'
+  | 'missing-category'
+  | 'missing-specifics'
+  | 'missing-spec'
+  | 'missing-upc'
+  | 'missing-photo'
+  | 'missing-price'
+  | 'missing-condition'
+  | 'missing-model'
+  | 'missing-description';
 export type OnlineTab = 'listed' | 'ready' | 'not-ready' | 'msc' | 'reports' | 'sold';
-export type OnlineChannel = 'all' | 'ebay' | 'depop' | 'whatnot' | 'mercari' | 'amazon' | 'tiktok' | 'facebook';
+/** Listing subtabs: eBay, Depop, Amazon, TikTok (+ Facebook-only oversized). Sale history may still show Mercari/Whatnot. */
+export type OnlineChannel = 'all' | 'ebay' | 'depop' | 'amazon' | 'tiktok' | 'facebook';
 
 const LEGACY: Record<string, { page: MainPage; tab?: ReportTab; inventoryTab?: InventoryTab; section?: AttentionSection; onlineTab?: OnlineTab; onlineChannel?: OnlineChannel }> = {
   eligibility: { page: 'settings' },
@@ -17,7 +46,10 @@ const LEGACY: Record<string, { page: MainPage; tab?: ReportTab; inventoryTab?: I
   payouts: { page: 'reports', tab: 'payouts' },
   settings: { page: 'settings' },
   marketplaces: { page: 'marketplaces' },
+  ebay: { page: 'ebay' },
   amazon: { page: 'amazon' },
+  tiktok: { page: 'tiktok' },
+  depop: { page: 'depop' },
   cameras: { page: 'cameras' },
   remote: { page: 'remote' },
   logs: { page: 'logs' },
@@ -32,11 +64,43 @@ const LEGACY: Record<string, { page: MainPage; tab?: ReportTab; inventoryTab?: I
   'missing-other': { page: 'inventory', inventoryTab: 'attention', section: 'missing-cost' },
 };
 
-const MAIN: MainPage[] = ['register', 'sales', 'orders', 'receipts', 'inventory', 'online', 'marketplaces', 'amazon', 'reports', 'tax', 'cameras', 'remote', 'logs', 'settings'];
-const SECTIONS: AttentionSection[] = ['missing-cost', 'missing-photo', 'missing-price', 'missing-spec', 'missing-model', 'missing-description'];
+const MAIN: MainPage[] = [
+  'register',
+  'sales',
+  'orders',
+  'receipts',
+  'inventory',
+  'online',
+  'marketplaces',
+  'ebay',
+  'amazon',
+  'tiktok',
+  'depop',
+  'reports',
+  'tax',
+  'cameras',
+  'remote',
+  'logs',
+  'settings',
+];
+const SECTIONS: AttentionSection[] = [
+  'missing-cost',
+  'missing-brand',
+  'missing-category',
+  'missing-specifics',
+  'missing-spec',
+  'missing-upc',
+  'missing-photo',
+  'missing-price',
+  'missing-condition',
+  'missing-model',
+  'missing-description',
+];
 const ONLINE_TABS: OnlineTab[] = ['listed', 'ready', 'not-ready', 'msc', 'reports', 'sold'];
-const ONLINE_CHANNELS: OnlineChannel[] = ['all', 'ebay', 'depop', 'whatnot', 'mercari', 'amazon', 'tiktok', 'facebook'];
+const ONLINE_CHANNELS: OnlineChannel[] = ['all', 'ebay', 'depop', 'amazon', 'tiktok', 'facebook'];
 const ONLINE_CHANNELS_SET = new Set<string>(ONLINE_CHANNELS);
+/** Retired list targets — old bookmarks fall back to all. */
+const RETIRED_ONLINE_CHANNELS = new Set(['mercari', 'vendoo', 'whatnot']);
 
 export type NavState = {
   page: MainPage;
@@ -64,7 +128,7 @@ export function parseNavFromLocation(): NavState {
   const hashQ = hashRaw.includes('=') ? new URLSearchParams(hashRaw.replace(/^\?/, '')) : null;
   const hashPage = hashRaw && !hashRaw.includes('=') ? hashRaw.split('/')[0] : '';
   const raw = (q.get('page') || hashQ?.get('page') || hashPage || 'sales').toLowerCase();
-  if (q.get('ebay') === '1') return { ...defaultNavState(), page: 'marketplaces' };
+  if (q.get('ebay') === '1') return { ...defaultNavState(), page: 'ebay' };
   const mapped = LEGACY[raw];
   const base = mapped ? mapped.page : MAIN.includes(raw as MainPage) ? (raw as MainPage) : 'sales';
   const tabRaw = q.get('tab') || hashQ?.get('tab') || mapped?.tab || 'profit';
@@ -87,8 +151,11 @@ export function parseNavFromLocation(): NavState {
     onlineChannelRaw = onlineTabRaw;
     onlineTabRaw = 'listed';
   }
+  if (RETIRED_ONLINE_CHANNELS.has(onlineChannelRaw) || RETIRED_ONLINE_CHANNELS.has(onlineTabRaw)) {
+    onlineChannelRaw = 'all';
+  }
   const reportTabs: ReportTab[] = ['profit', 'shipping', 'expenses', 'payouts', 'returns'];
-  const invTabs: InventoryTab[] = ['browse', 'receive', 'attention', 'lookup-test'];
+  const invTabs: InventoryTab[] = ['browse', 'receive', 'attention', 'lookup-test', 'products', 'measure-mat'];
   return {
     page: base,
     reportTab: reportTabs.includes(tabRaw as ReportTab) ? (tabRaw as ReportTab) : 'profit',
@@ -99,7 +166,7 @@ export function parseNavFromLocation(): NavState {
     onlineTab: ONLINE_TABS.includes(onlineTabRaw as OnlineTab) ? (onlineTabRaw as OnlineTab) : 'listed',
     onlineChannel: ONLINE_CHANNELS.includes(onlineChannelRaw as OnlineChannel)
       ? (onlineChannelRaw as OnlineChannel)
-      : 'ebay',
+      : 'all',
   };
 }
 

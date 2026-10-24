@@ -23,7 +23,7 @@ export function MarketplaceSaleButton({ sku, askCents, disabled, onDone }: { sku
         if (!active) return;
         const rows = (body.channels || []) as Channel[];
         setChannels(rows);
-        setChannel(rows.find(x => x.key === "mercari")?.key || rows[0]?.key || "");
+        setChannel(rows.find(x => x.key === "depop")?.key || rows.find(x => x.key === "ebay")?.key || rows[0]?.key || "");
       } catch (e) { if (active) setError(e instanceof Error ? e.message : String(e)); }
     })();
     return () => { active = false; };

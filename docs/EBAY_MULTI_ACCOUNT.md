@@ -17,7 +17,7 @@ Floor can hold more than one eBay OAuth connection per store.
    - **Create business policies** (Calculated Shipping – Buyer Pays, No Returns – As Is, Payments).
 4. **Dry-run migration** — review will_move / skipped / failed.
 5. **Run migration** — ends each listing on source, recreates on dest at the same price, updates Floor.
-6. Point Vendoo (if still used) at the business account; stop creating new listings on pgg124-5.
+6. Stop creating new listings on pgg124-5; new listings go on the business selling account only.
 7. When pgg124-5 has no open store orders left, Disconnect that orders-only account.
 8. Optionally set Netlify `EBAY_ORDERS_ONLY=false` so legacy code paths also treat eBay as listing-capable.
 

@@ -14,6 +14,11 @@ import {
   syncAmazonOfferForFloorSku,
   STORE_DEFAULT,
 } from "../lib/amazon.mjs";
+import {
+  createAmazonCatalogListing,
+  markAmazonNotOnAmazon,
+  buildStringLightAttributes,
+} from "../lib/amazon-create.mjs";
 
 const STORE = STORE_DEFAULT;
 
@@ -41,13 +46,21 @@ async function handleStaff(event) {
     if (!/^B0[A-Z0-9]{8}$/i.test(asin)) return json(400, { ok: false, error: "invalid_asin" });
     await sb
       .from("amazon_list_items")
-      .update({ asin, updated_at: new Date().toISOString(), last_error: null })
+      .update({
+        asin,
+        status: "queued",
+        needs_review_reason: null,
+        updated_at: new Date().toISOString(),
+        last_error: null,
+      })
       .eq("store_id", storeId)
       .eq("sku", sku);
     const { data: unit } = await sb.from("units").select("listing_specs").eq("store_id", storeId).eq("sku", sku).maybeSingle();
     const specs = { ...(unit?.listing_specs || {}), asin };
     await sb.from("units").update({ listing_specs: specs }).eq("store_id", storeId).eq("sku", sku);
-    return json(200, { ok: true, sku, asin });
+    // Re-run prepare so restrictions / fees / price refresh against the pasted ASIN
+    const prepared = await prepareAmazonQueueItem(storeId, sku);
+    return json(200, { ok: true, sku, asin, prepare: prepared });
   }
 
   if (action === "set_price") {
@@ -101,10 +114,20 @@ async function handleStaff(event) {
         .eq("store_id", storeId)
         .eq("sku", sku);
     } else {
+      const reviewReasons = new Set([
+        "needs_asin",
+        "gated_restriction",
+        "approval_required",
+        "gated_brand",
+        "restrictions_check_failed",
+        "condition_unclear",
+      ]);
+      const needsReview = reviewReasons.has(result.reason);
       await sb
         .from("amazon_list_items")
         .update({
-          status: result.reason === "needs_asin" ? "needs_review" : "error",
+          status: needsReview ? "needs_review" : "error",
+          needs_review_reason: needsReview ? result.message || result.reason || null : null,
           last_error: result.message || result.reason || "list_failed",
           updated_at: new Date().toISOString(),
         })
@@ -125,6 +148,71 @@ async function handleStaff(event) {
     if (!sku) return json(400, { ok: false, error: "sku_required" });
     const result = await syncAmazonOfferForFloorSku(storeId, sku);
     return json(200, { ok: true, ...result });
+  }
+
+  /** Prefill + VALIDATION_PREVIEW for creating a new catalog product (no ASIN). */
+  if (action === "create_preview" || action === "create_prefill") {
+    if (!sku) return json(400, { ok: false, error: "sku_required" });
+    const { data: unit } = await sb.from("units").select("*").eq("store_id", storeId).eq("sku", sku).maybeSingle();
+    if (!unit) return json(404, { ok: false, error: "unknown_sku" });
+    let prefill = null;
+    try {
+      prefill = buildStringLightAttributes(unit, { listCents: body.price_cents || null });
+    } catch (e) {
+      return json(400, { ok: false, error: e instanceof Error ? e.message : String(e) });
+    }
+    if (action === "create_prefill") {
+      return json(200, { ok: true, sku, prefill });
+    }
+    const preview = await createAmazonCatalogListing(storeId, sku, {
+      mode: "VALIDATION_PREVIEW",
+      overrides: {
+        price_cents: body.price_cents || null,
+        attributes: body.attributes || null,
+        main_image_media_location: body.main_image_media_location || null,
+        product_type: body.product_type || null,
+      },
+      productType: body.product_type || prefill.productType,
+    });
+    return json(200, { ok: true, sku, prefill, preview });
+  }
+
+  /** Live create — only after clean preview + confirmLive. */
+  if (action === "create_submit") {
+    if (!sku) return json(400, { ok: false, error: "sku_required" });
+    if (!body.confirm_live) return json(400, { ok: false, error: "confirm_live_required" });
+    const result = await createAmazonCatalogListing(storeId, sku, {
+      mode: "LIVE",
+      confirmLive: true,
+      overrides: {
+        price_cents: body.price_cents || null,
+        attributes: body.attributes || null,
+        main_image_media_location: body.main_image_media_location || null,
+        product_type: body.product_type || null,
+      },
+      productType: body.product_type || null,
+    });
+    if (result.ok) {
+      await sb
+        .from("amazon_list_items")
+        .update({
+          status: "listing",
+          listing_sku: result.sellerSku,
+          offer_sku: result.sellerSku,
+          last_error: null,
+          needs_review_reason: "Create submitted — wait for Amazon catalog ASIN assignment",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("store_id", storeId)
+        .eq("sku", sku);
+    }
+    return json(result.ok ? 200 : 400, result);
+  }
+
+  if (action === "mark_not_on_amazon") {
+    if (!sku) return json(400, { ok: false, error: "sku_required" });
+    const result = await markAmazonNotOnAmazon(storeId, sku, body.reason || null);
+    return json(200, result);
   }
 
   return json(400, { ok: false, error: "unknown_action", action });

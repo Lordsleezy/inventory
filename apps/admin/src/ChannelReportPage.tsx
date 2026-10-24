@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 type ChannelRow = {
-  channel: string; sales_count: number; gross_cents: number;
+  channel: string; sales_count: number; unmatched_count?: number; gross_cents: number;
   fee_cents: number; fee_actual_cents: number; fee_estimated_cents: number;
   ship_cost_cents: number; processing_fee_cents: number;
   tax_collected_cents: number; tax_owed_cents: number;
@@ -14,6 +14,7 @@ type Report = {
   refunds: { channel: string; count: number; sales_cents: number; profit_reversed_cents: number }[];
   expenses: { category: string; cents: number }[];
   expense_cents: number; label_expense_cents: number;
+  ebay_overhead_cents?: number;
 };
 type DetailRow = {
   id: number | string; at: string; channel: string; sku: string | null;
@@ -103,13 +104,21 @@ export function ChannelReportPage({ client, money, embedded, mode = 'full' }: { 
     proc: t.proc + c.processing_fee_cents, cost: t.cost + c.cost_cents,
     taxCollected: t.taxCollected + c.tax_collected_cents,
     profit: t.profit + c.profit_cents,
-  }), { gross: 0, fees: 0, ship: 0, proc: 0, cost: 0, taxCollected: 0, profit: 0 });
+    unmatched: t.unmatched + (c.unmatched_count || 0),
+  }), { gross: 0, fees: 0, ship: 0, proc: 0, cost: 0, taxCollected: 0, profit: 0, unmatched: 0 });
   // expense_cents excludes Shippo/manual labels (already in Label / ship cost + profit).
   const net = report ? totals.profit - (channel === 'all' ? (report.expense_cents || 0) : 0) : 0;
   const refundTotal = (report?.refunds || []).filter(r => channel === 'all' || r.channel === channel)
     .reduce((n, r) => n + r.sales_cents, 0);
   const detailTotal = detailRows.reduce((n, r) => n + (r.amount_cents || 0), 0);
   const isAllTime = start === ALL_TIME_START;
+  const ebayOverhead = report?.ebay_overhead_cents || 0;
+  const unmatchedHint = totals.unmatched > 0
+    ? `${totals.unmatched} unmatched Orders sale${totals.unmatched === 1 ? '' : 's'} included in gross/profit (item cost pending Link SKU). Marketplace payouts can look higher than linked Floor sales alone.`
+    : 'Gross includes paid marketplace Orders that still need a Floor SKU link, so totals stay closer to channel payouts.';
+  const ebayHint = (channel === 'ebay' || channel === 'all') && ebayOverhead > 0
+    ? ` eBay profit includes −${money(ebayOverhead)} insertion/subscription.`
+    : '';
 
   const dateControls = <div className="report-actions">
     <div className="actions">
@@ -130,11 +139,13 @@ export function ChannelReportPage({ client, money, embedded, mode = 'full' }: { 
       <p>Defaults to all-time (includes early floor sales). Profit = item + buyer shipping − channel fees − label cost − card processing − item cost. Click any total for the rows.</p></div>{dateControls}</header>}
     {!embedded && mode === 'fees' && <header><div><div className="eyebrow">SHIPPING & FEES</div><h1>Channel fees & labels</h1>
       <p>Marketplace fees, label spend, and card processing by channel. Click a total for the line items.</p></div>{dateControls}</header>}
-    {embedded && <div className="section-head" style={{ marginBottom: 12, flexWrap: 'wrap' }}><div><h2>{mode === 'fees' ? 'Fees & label spend by channel' : 'Profit by channel'}</h2><p className="hint" style={{ margin: 0 }}>Click a total to see how it was calculated.</p></div>{dateControls}</div>}
+    {embedded && <div className="section-head" style={{ marginBottom: 12, flexWrap: 'wrap' }}><div><h2>{mode === 'fees' ? 'Fees & label spend by channel' : 'Profit by channel'}</h2><p className="hint" style={{ margin: 0 }}>Click a total to see how it was calculated. {mode === 'full' ? `${unmatchedHint}${ebayHint}` : ''}</p></div>{dateControls}</div>}
     {error && <div className="alert" role="alert">{error}</div>}
     {busy && !report ? <section className="panel"><div className="empty">Loading…</div></section> : report && <>
+      {mode === 'full' && totals.unmatched > 0 && <div className="alert" role="status">{unmatchedHint}</div>}
+      {mode === 'full' && channel === 'ebay' && ebayOverhead > 0 && <div className="alert" role="status">Profit is after voided label spend and {money(ebayOverhead)} eBay insertion/subscription (same stack as the eBay tab and Payouts).</div>}
       <div className="stats">
-        {mode === 'full' && <Stat name="Gross sales" value={money(totals.gross)} onClick={() => setDrill('gross')} active={drill === 'gross'} />}
+        {mode === 'full' && <Stat name="Gross sales" value={money(totals.gross)} onClick={() => setDrill('gross')} active={drill === 'gross'} note="item + buyer shipping + tax" />}
         <Stat name="Channel fees" value={money(totals.fees)} onClick={() => setDrill('fees')} active={drill === 'fees'} />
         <Stat name="Label / ship cost" value={money(totals.ship)} onClick={() => setDrill('ship')} active={drill === 'ship'} />
         <Stat name="Card processing" value={money(totals.proc)} onClick={() => setDrill('processing')} active={drill === 'processing'} />
@@ -179,9 +190,9 @@ export function ChannelReportPage({ client, money, embedded, mode = 'full' }: { 
     </>}
   </>;
 }
-function Stat({ name, value, onClick, active }: { name: string; value: string; onClick?: () => void; active?: boolean }) {
-  if (!onClick) return <div className="stat"><span>{name}</span><strong>{value}</strong></div>;
+function Stat({ name, value, onClick, active, note }: { name: string; value: string; onClick?: () => void; active?: boolean; note?: string }) {
+  if (!onClick) return <div className="stat"><span>{name}</span><strong>{value}</strong>{note ? <small>{note}</small> : null}</div>;
   return <button type="button" className={`stat stat-button${active ? ' active' : ''}`} onClick={onClick}>
-    <span>{name}</span><strong>{value}</strong><small>View details</small>
+    <span>{name}</span><strong>{value}</strong><small>{note || 'View details'}</small>
   </button>;
 }
