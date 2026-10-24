@@ -60,6 +60,7 @@ async function upsertSnapshot(channel, storeId, version, rows) {
     if (readError) throw new Error(readError.message);
     const old = new Map((prior || []).map((row) => [row.category_id, row]));
     const payload = batch.map((row) => {
+      row = { ...row, active: row.active !== false };
       const fingerprint = digest([row.parent_id, row.path, row.leaf, row.active, row.permissions || []]);
       const before = old.get(row.category_id);
       const same = before?.fingerprint === fingerprint;
