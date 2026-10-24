@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { ReceivePanel } from './ReceivePanel';
-import { NeedsAttentionPanel } from './NeedsAttentionPanel';
+import { ATTENTION_SECTIONS, NeedsAttentionPanel, useAttentionCounts } from './NeedsAttentionPanel';
 import { UnitEditDrawer } from './UnitEditDrawer';
 import { LookupTestPage } from './LookupTestPage';
 import { FloorProductsPage } from './FloorProductsPage';
@@ -13,6 +13,8 @@ type Row = {
   sku: string; brand: string; model: string; title: string; condition: string | null;
   ask_cents: number | null; acquisition_cost_cents: number | null; state: string;
   received_at: string; photo_path: string | null; photo_count: number;
+  defective?: boolean; not_for_sale?: boolean; missing?: string[];
+  sold_at?: string | null; sold_price_cents?: number | null;
 };
 type Listing = { channel: string; status: string; listing_id: string | null };
 type Photo = { id: number; path: string; is_primary: boolean };
@@ -26,9 +28,15 @@ type Props = {
   onCostChanged: () => void;
   /** Portal admin / manager — show Delete in the unit editor. */
   canDelete?: boolean;
-  /** Associates: browse-only (no Receive / Needs attention / Lookup test). */
+  /** Associates: list tabs only (no Receive / fix queues / Lookup test). The server also withholds sold prices and cost. */
   associateBrowseOnly?: boolean;
 };
+
+/** Unit-list subtabs, in this order. Everything after them is an admin tool. */
+const LIST_TABS: [InventoryTab, string][] = [['in-stock', 'In stock'], ['sold', 'Sold'], ['unfinished', 'Unfinished'], ['defective', 'Defective']];
+const TOOL_TABS: [InventoryTab, string][] = [['receive', 'Receive'], ['lookup-test', 'Lookup test'], ['products', 'Products'], ['measure-mat', 'Measure mat']];
+const MISSING_LABEL: Record<string, string> = { spec: 'weight & box', upc: 'UPC', specifics: 'item specifics' };
+const missingText = (m: string[]) => m.map(k => MISSING_LABEL[k] || k).join(', ');
 
 const label = (s: string) => s === 'available' ? 'In stock' : s.replace(/_/g, ' ').replace(/^./, c => c.toUpperCase());
 const name = (u: Row) => [u.brand, u.model].filter(Boolean).join(' ') || u.title || 'Untitled unit';
@@ -47,7 +55,6 @@ export function InventoryPage({
   const [refresh, setRefresh] = useState(0);
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState('in_stock');
-  const [unfinished, setUnfinished] = useState(false);
   const [sort, setSort] = useState('sku');
   const [offset, setOffset] = useState(0);
   const [list, setList] = useState<List | null>(null);
@@ -57,6 +64,13 @@ export function InventoryPage({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [detailKey, setDetailKey] = useState(0);
+  const listTab = LIST_TABS.some(([id]) => id === tab) ? tab : associateBrowseOnly ? 'in-stock' : null;
+  const queue = listTab === 'unfinished' && !associateBrowseOnly && attentionSection !== 'all' ? attentionSection : null;
+  const counts = useAttentionCounts(client, listTab === 'unfinished' && !associateBrowseOnly, refresh);
+  // Status only narrows In stock; the other subtabs have a fixed status.
+  const pStatus = listTab === 'sold' ? 'sold' : listTab === 'defective' ? 'defective' : listTab === 'unfinished' ? 'all' : status;
+  const pUnfinished = listTab === 'unfinished';
+  const hideMoney = associateBrowseOnly && listTab === 'sold';
 
   async function sign(paths: string[]) {
     const keys = [...new Set(paths.filter(p => /^[0-9a-f-]{36}\//i.test(p)))];
@@ -67,11 +81,12 @@ export function InventoryPage({
   }
 
   useEffect(() => {
+    if (!listTab || queue) return;
     let active = true;
     const timer = setTimeout(() => { setLoading(true); setError(''); void (async () => {
       try {
         const { data, error: e } = await client.rpc('portal_inventory_list', {
-          p_query: query, p_status: status, p_unfinished: unfinished,
+          p_query: query, p_status: pStatus, p_unfinished: pUnfinished,
           p_sort: sort, p_offset: offset, p_limit: 24
         });
         if (e) throw e;
@@ -82,7 +97,7 @@ export function InventoryPage({
       finally { if (active) setLoading(false); }
     })(); }, 200);
     return () => { active = false; clearTimeout(timer); };
-  }, [client, query, status, unfinished, sort, offset, refresh]);
+  }, [client, listTab, queue, query, pStatus, pUnfinished, sort, offset, refresh]);
 
   useEffect(() => {
     if (!selected) { setDetail(null); return; }
@@ -104,33 +119,32 @@ export function InventoryPage({
   }, [client, selected, detailKey]);
 
   const change = (set: () => void) => { set(); setOffset(0); setList(null); };
+  const pickTab = (t: InventoryTab) => { setOffset(0); setList(null); onTab(t); };
   const total = list?.totals.unit_count || 0;
   return <>
-    <header><div><div className="eyebrow">FLOOR INVENTORY</div><h1>Inventory</h1><p>{tab === 'browse' ? 'Click a unit to edit SKU details, price, cost, package size, and photos.' : tab === 'receive' ? 'Scan a UPC to look up product data, then receive with a real photo.' : tab === 'lookup-test' ? 'Read-only UPC accuracy test — Amazon vs UPCitemdb. Does not create inventory.' : tab === 'products' ? 'Shared UPC product database — edits stick for future scans. Price/condition stay on each unit.' : tab === 'measure-mat' ? 'Printable 50 mm scale mat for Receive photo measuring.' : 'Units missing cost, photo, price, model, description, or package specs.'}</p></div></header>
-    {!associateBrowseOnly && (
-      <div className="inventory-tabs">
-        <button type="button" className={tab === 'browse' ? 'active' : ''} onClick={() => onTab('browse')}>Browse</button>
-        <button type="button" className={tab === 'receive' ? 'active' : ''} onClick={() => onTab('receive')}>Receive</button>
-        <button type="button" className={tab === 'attention' ? 'active' : ''} onClick={() => onTab('attention')}>Needs attention</button>
-        <button type="button" className={tab === 'lookup-test' ? 'active' : ''} onClick={() => onTab('lookup-test')}>Lookup test</button>
-        <button type="button" className={tab === 'products' ? 'active' : ''} onClick={() => onTab('products')}>Products</button>
-        <button type="button" className={tab === 'measure-mat' ? 'active' : ''} onClick={() => onTab('measure-mat')}>Measure mat</button>
+    <header><div><div className="eyebrow">FLOOR INVENTORY</div><h1>Inventory</h1><p>{listTab === 'in-stock' ? 'For-sale units on hand. Click a unit to edit details, price, cost, package size, and photos.' : listTab === 'sold' ? (associateBrowseOnly ? 'Sold units by SKU.' : 'Sold units and what they sold for.') : listTab === 'defective' ? 'Not-for-sale units and anything graded Defective. These only need a brand.' : listTab === 'unfinished' ? 'For-sale units missing a photo, price, or other required info.' : tab === 'receive' ? 'Scan a UPC to look up product data, then receive with a real photo.' : tab === 'lookup-test' ? 'Read-only UPC accuracy test — Amazon vs UPCitemdb. Does not create inventory.' : tab === 'products' ? 'Shared UPC product database — edits stick for future scans. Price/condition stay on each unit.' : tab === 'measure-mat' ? 'Printable 50 mm scale mat for Receive photo measuring.' : ''}</p></div></header>
+    <div className="inventory-tabs">
+      {[...LIST_TABS, ...(associateBrowseOnly ? [] : TOOL_TABS)].map(([id, text]) => <button type="button" key={id} className={(listTab ?? tab) === id ? 'active' : ''} onClick={() => pickTab(id)}>{text}</button>)}
+    </div>
+    {listTab === 'unfinished' && !associateBrowseOnly && (
+      <div className="inventory-tabs report-tabs online-channel-tabs">
+        <button type="button" className={!queue ? 'active' : ''} onClick={() => { setOffset(0); setList(null); onAttentionSection('all'); }}>All unfinished</button>
+        {ATTENTION_SECTIONS.map(([id, text]) => <button type="button" key={id} className={queue === id ? 'active' : ''} onClick={() => onAttentionSection(id)}>{text}{counts[id] !== undefined && <small>{counts[id]}</small>}</button>)}
       </div>
     )}
-    {!associateBrowseOnly && tab === 'lookup-test' ? <LookupTestPage accessToken={accessToken} /> : !associateBrowseOnly && tab === 'products' ? <FloorProductsPage client={client} /> : !associateBrowseOnly && tab === 'measure-mat' ? <MarkerMatPage /> : !associateBrowseOnly && tab === 'receive' ? <ReceivePanel client={client} storeId={storeId} accessToken={accessToken} onSaved={() => setRefresh(n => n + 1)} /> : !associateBrowseOnly && tab === 'attention' ? <NeedsAttentionPanel client={client} storeId={storeId} money={money} stamp={stamp} section={attentionSection} onSection={onAttentionSection} onCostChanged={onCostChanged} /> : <>
+    {!listTab && tab === 'lookup-test' ? <LookupTestPage accessToken={accessToken} /> : !listTab && tab === 'products' ? <FloorProductsPage client={client} /> : !listTab && tab === 'measure-mat' ? <MarkerMatPage /> : !listTab && tab === 'receive' ? <ReceivePanel client={client} storeId={storeId} accessToken={accessToken} onSaved={() => setRefresh(n => n + 1)} /> : queue ? <NeedsAttentionPanel client={client} storeId={storeId} money={money} stamp={stamp} section={queue} onCostChanged={() => { setRefresh(n => n + 1); onCostChanged(); }} /> : <>
     <div className="inventory-controls">
       <label>Search<input type="search" placeholder="SKU, brand, model or title" value={query} onChange={e => change(() => setQuery(e.target.value))} /></label>
-      <label>Status<select value={status} onChange={e => change(() => setStatus(e.target.value))}>
-        <option value="in_stock">In stock</option><option value="all">All</option><option value="sold">Sold</option>
+      {listTab === 'in-stock' && <label>Status<select value={status} onChange={e => change(() => setStatus(e.target.value))}>
+        <option value="in_stock">In stock</option><option value="listed">Listed online</option>
         <option value="reserved">Reserved</option><option value="repair">Repair</option>
-        <option value="delisted">Delisted listing</option><option value="voided">Voided</option>
+        <option value="delisted">Delisted listing</option><option value="all">All statuses</option><option value="voided">Voided</option>
         <option value="scrapped">Scrapped</option><option value="lost">Lost</option>
-      </select></label>
+      </select></label>}
       <label>Sort<select value={sort} onChange={e => change(() => setSort(e.target.value))}>
-        <option value="sku">SKU (newest)</option><option value="price">Price (low to high)</option>
-        <option value="date">Date added (newest)</option>
+        <option value="sku">SKU (newest)</option>{!hideMoney && <option value="price">Price (low to high)</option>}
+        <option value="date">{listTab === 'sold' ? 'Date sold (newest)' : 'Date added (newest)'}</option>
       </select></label>
-      <label className="inventory-check"><input type="checkbox" checked={unfinished} onChange={e => change(() => setUnfinished(e.target.checked))} />Unfinished</label>
     </div>
     {error && <div className="alert" role="alert">{error}</div>}
     <div className="stats inventory-stats inventory-stats-one">
@@ -138,12 +152,14 @@ export function InventoryPage({
     </div>
     <section className="panel inventory-panel">
       {loading && <p className="hint">Loading inventory…</p>}
-      {!loading && list?.items.length === 0 && <div className="empty">No units match this filter.</div>}
-      {list?.items.map(u => <button type="button" className="inventory-row" key={u.sku} onClick={() => setSelected(u.sku)}>
+      {!loading && list?.items.length === 0 && <div className="empty">{listTab === 'in-stock' && query.trim() ? 'No for-sale units match. Not-for-sale and defective units are under Defective.' : 'No units match this filter.'}</div>}
+      {list?.items.map(u => <button type="button" className="inventory-row" key={u.sku} disabled={hideMoney} onClick={() => { if (!hideMoney) setSelected(u.sku); }}>
         <span className="inventory-photo">{u.photo_path && urls[u.photo_path] ? <img loading="lazy" src={urls[thumb(u.photo_path)] || urls[u.photo_path]} onError={e => { const fallback = urls[u.photo_path!]; if (e.currentTarget.src !== fallback) e.currentTarget.src = fallback; }} alt="" /> : 'No photo'}</span>
         <span className="inventory-identity"><strong>{name(u)}</strong><small>SKU {u.sku}{u.title && u.title !== name(u) ? ` · ${u.title}` : ''}</small></span>
-        <span className="inventory-meta">{u.condition || 'No grade'}<small>{label(u.state)}</small></span>
-        <span className="inventory-money"><strong>{u.ask_cents === null ? 'No price' : money(u.ask_cents)}</strong><small>Cost {u.acquisition_cost_cents === null ? 'missing' : money(u.acquisition_cost_cents)}</small></span>
+        <span className="inventory-meta">{u.condition || 'No grade'}<small>{u.not_for_sale ? 'Not for sale' : listTab === 'sold' && u.sold_at ? `Sold ${stamp(u.sold_at)}` : label(u.state)}</small>{listTab === 'unfinished' && !!u.missing?.length && <small className="inventory-missing">Missing {missingText(u.missing)}</small>}</span>
+        {hideMoney ? <span className="inventory-money" /> : listTab === 'sold'
+          ? <span className="inventory-money"><strong>{u.sold_price_cents == null ? '—' : money(u.sold_price_cents)}</strong><small>{u.acquisition_cost_cents == null ? 'Cost missing' : `Cost ${money(u.acquisition_cost_cents)}`}</small></span>
+          : <span className="inventory-money"><strong>{u.ask_cents == null ? 'No price' : money(u.ask_cents)}</strong>{!associateBrowseOnly && <small>Cost {u.acquisition_cost_cents == null ? 'missing' : money(u.acquisition_cost_cents)}</small>}</span>}
       </button>)}
     </section>
     {total > 24 && <div className="inventory-pagination"><button className="secondary" disabled={offset === 0 || loading} onClick={() => setOffset(Math.max(0, offset - 24))}>Previous</button><span>{offset + 1}–{Math.min(offset + 24, total)} of {total}</span><button className="secondary" disabled={offset + 24 >= total || loading} onClick={() => setOffset(offset + 24)}>Next</button></div>}

@@ -17,8 +17,10 @@ export type MainPage =
   | 'logs'
   | 'settings';
 export type ReportTab = 'profit' | 'shipping' | 'expenses' | 'payouts' | 'returns';
-export type InventoryTab = 'browse' | 'receive' | 'attention' | 'lookup-test' | 'products' | 'measure-mat';
+/** In stock / Sold / Unfinished / Defective are unit lists; the rest are tools. Unfinished replaces the old Needs attention tab. */
+export type InventoryTab = 'in-stock' | 'sold' | 'unfinished' | 'defective' | 'receive' | 'lookup-test' | 'products' | 'measure-mat';
 export type AttentionSection =
+  | 'all'
   | 'missing-cost'
   | 'missing-brand'
   | 'missing-category'
@@ -41,8 +43,8 @@ const LEGACY: Record<string, { page: MainPage; tab?: ReportTab; inventoryTab?: I
   taxes: { page: 'tax' },
   tax: { page: 'tax' },
   channels: { page: 'reports', tab: 'profit' },
-  costs: { page: 'inventory', inventoryTab: 'attention', section: 'missing-cost' },
-  reviews: { page: 'inventory', inventoryTab: 'attention', section: 'missing-cost' },
+  costs: { page: 'inventory', inventoryTab: 'unfinished', section: 'missing-cost' },
+  reviews: { page: 'inventory', inventoryTab: 'unfinished', section: 'missing-cost' },
   payouts: { page: 'reports', tab: 'payouts' },
   settings: { page: 'settings' },
   marketplaces: { page: 'marketplaces' },
@@ -59,9 +61,9 @@ const LEGACY: Record<string, { page: MainPage; tab?: ReportTab; inventoryTab?: I
   register: { page: 'register' },
   inventory: { page: 'inventory' },
   reports: { page: 'reports' },
-  'your-call': { page: 'inventory', inventoryTab: 'attention', section: 'missing-cost' },
-  review: { page: 'inventory', inventoryTab: 'attention', section: 'missing-cost' },
-  'missing-other': { page: 'inventory', inventoryTab: 'attention', section: 'missing-cost' },
+  'your-call': { page: 'inventory', inventoryTab: 'unfinished', section: 'missing-cost' },
+  review: { page: 'inventory', inventoryTab: 'unfinished', section: 'missing-cost' },
+  'missing-other': { page: 'inventory', inventoryTab: 'unfinished', section: 'missing-cost' },
 };
 
 const MAIN: MainPage[] = [
@@ -84,6 +86,7 @@ const MAIN: MainPage[] = [
   'settings',
 ];
 const SECTIONS: AttentionSection[] = [
+  'all',
   'missing-cost',
   'missing-brand',
   'missing-category',
@@ -115,8 +118,8 @@ export function defaultNavState(page: MainPage = 'sales'): NavState {
   return {
     page,
     reportTab: 'profit',
-    inventoryTab: 'browse',
-    attentionSection: 'missing-cost',
+    inventoryTab: 'in-stock',
+    attentionSection: 'all',
     onlineTab: 'listed',
     onlineChannel: 'all',
   };
@@ -133,9 +136,9 @@ export function parseNavFromLocation(): NavState {
   const base = mapped ? mapped.page : MAIN.includes(raw as MainPage) ? (raw as MainPage) : 'sales';
   const tabRaw = q.get('tab') || hashQ?.get('tab') || mapped?.tab || 'profit';
   const invTabRaw =
-    q.get('inventoryTab') || q.get('inv') || hashQ?.get('inventoryTab') || hashQ?.get('inv') || mapped?.inventoryTab || 'browse';
+    q.get('inventoryTab') || q.get('inv') || hashQ?.get('inventoryTab') || hashQ?.get('inv') || mapped?.inventoryTab || 'in-stock';
   let sectionRaw =
-    q.get('section') || q.get('attention') || hashQ?.get('section') || hashQ?.get('attention') || mapped?.section || 'missing-cost';
+    q.get('section') || q.get('attention') || hashQ?.get('section') || hashQ?.get('attention') || mapped?.section || 'all';
   // Old bookmarks for removed queues → Missing cost
   if (sectionRaw === 'your-call' || sectionRaw === 'reviews' || sectionRaw === 'missing-other') {
     sectionRaw = 'missing-cost';
@@ -155,14 +158,16 @@ export function parseNavFromLocation(): NavState {
     onlineChannelRaw = 'all';
   }
   const reportTabs: ReportTab[] = ['profit', 'shipping', 'expenses', 'payouts', 'returns'];
-  const invTabs: InventoryTab[] = ['browse', 'receive', 'attention', 'lookup-test', 'products', 'measure-mat'];
+  const invTabs: InventoryTab[] = ['in-stock', 'sold', 'unfinished', 'defective', 'receive', 'lookup-test', 'products', 'measure-mat'];
+  // Old bookmarks: Browse → In stock, Needs attention → Unfinished.
+  const invTab = invTabRaw === 'browse' ? 'in-stock' : invTabRaw === 'attention' ? 'unfinished' : invTabRaw;
   return {
     page: base,
     reportTab: reportTabs.includes(tabRaw as ReportTab) ? (tabRaw as ReportTab) : 'profit',
-    inventoryTab: invTabs.includes(invTabRaw as InventoryTab) ? (invTabRaw as InventoryTab) : 'browse',
+    inventoryTab: invTabs.includes(invTab as InventoryTab) ? (invTab as InventoryTab) : 'in-stock',
     attentionSection: SECTIONS.includes(sectionRaw as AttentionSection)
       ? (sectionRaw as AttentionSection)
-      : 'missing-cost',
+      : 'all',
     onlineTab: ONLINE_TABS.includes(onlineTabRaw as OnlineTab) ? (onlineTabRaw as OnlineTab) : 'listed',
     onlineChannel: ONLINE_CHANNELS.includes(onlineChannelRaw as OnlineChannel)
       ? (onlineChannelRaw as OnlineChannel)
@@ -175,8 +180,8 @@ export function writeNavToLocation(state: NavState) {
   q.set('page', state.page);
   if (state.page === 'reports' && state.reportTab !== 'profit') q.set('tab', state.reportTab); // includes returns
   if (state.page === 'inventory') {
-    if (state.inventoryTab !== 'browse') q.set('inventoryTab', state.inventoryTab);
-    if (state.inventoryTab === 'attention' && state.attentionSection !== 'missing-cost') {
+    if (state.inventoryTab !== 'in-stock') q.set('inventoryTab', state.inventoryTab);
+    if (state.inventoryTab === 'unfinished' && state.attentionSection !== 'all') {
       q.set('section', state.attentionSection);
     }
   }

@@ -680,3 +680,5 @@ html.dark .mboard-progress-bar{background:#2a3340}
   .mboard-check{grid-area:check}.mboard-photo{grid-area:photo}.mboard-item{grid-area:item}.mboard-price{grid-area:price}.mboard-ship{grid-area:ship}.mboard-actions{grid-area:actions;justify-content:flex-start}
   .mboard-head-side{justify-items:start}
 }
+/* Inventory → Unfinished: what each unit is still missing. */
+.inventory-row small.inventory-missing{color:#b45309;white-space:normal}

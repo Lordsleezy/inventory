@@ -2,16 +2,14 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { Session, SupabaseClient } from '@supabase/supabase-js';
 import type { StaffSession } from '@floor/cloud';
 import { floorFunctionUrl } from '../floorApi';
-import { MissingFieldPage } from '../MissingFieldPage';
-import { MissingCostPage } from '../MissingCostPage';
 import { TaxPage } from '../TaxPage';
 import { ListingManagerPanel } from '../ListingManagerPanel';
 import { MarketplacesPage } from '../MarketplacesPage';
 import { errText } from '../errText';
 import { shortError } from './shortError';
 
+/** Needs attention moved to Inventory → Unfinished; it is not a More page. */
 export type MoreId =
-  | 'attention'
   | 'sales'
   | 'ebay'
   | 'amazon'
@@ -21,24 +19,6 @@ export type MoreId =
   | 'reports'
   | 'tax'
   | 'settings';
-
-type Kind =
-  | 'photo' | 'spec' | 'brand' | 'category' | 'specifics' | 'price' | 'upc' | 'condition' | 'cost' | 'model' | 'description';
-
-const ATTN: { kind: Kind; label: string; blocks: string }[] = [
-  { kind: 'photo', label: 'No photos', blocks: 'All marketplaces' },
-  { kind: 'spec', label: 'No weight or box size', blocks: 'TikTok, shipping' },
-  { kind: 'brand', label: 'No brand', blocks: 'eBay, Amazon' },
-  { kind: 'category', label: 'No category details', blocks: 'eBay, Amazon' },
-  { kind: 'price', label: 'No price', blocks: 'Website & marketplaces' },
-  { kind: 'upc', label: 'No UPC', blocks: 'Amazon / TikTok' },
-  { kind: 'condition', label: 'No condition', blocks: 'Listing' },
-  { kind: 'cost', label: 'No cost', blocks: 'Profit reports' },
-  { kind: 'model', label: 'No model', blocks: 'Matching' },
-  { kind: 'description', label: 'No description', blocks: 'Listings' },
-];
-
-type Counts = Partial<Record<Kind, number>>;
 
 type Props = {
   client: SupabaseClient;
@@ -61,7 +41,6 @@ function Icon({ tone }: { tone: string }) {
 export function AppMoreHome({
   client, fullAccess, staffSession, session, money, setPage, onOpenChannel,
 }: Pick<Props, 'client' | 'fullAccess' | 'staffSession' | 'session' | 'money' | 'setPage' | 'onOpenChannel'>) {
-  const [attn, setAttn] = useState<number | null>(null);
   const [salesToday, setSalesToday] = useState<number | null>(null);
   const [ebayN, setEbayN] = useState<string>('…');
   const [amazonN, setAmazonN] = useState<string>('…');
@@ -72,16 +51,6 @@ export function AppMoreHome({
   useEffect(() => {
     let alive = true;
     void (async () => {
-      try {
-        const kinds: Kind[] = ['photo', 'spec', 'brand', 'price'];
-        let total = 0;
-        for (const k of kinds) {
-          const { data } = await client.rpc('portal_units_missing_field', { p_kind: k, p_limit: 1, p_offset: 0 });
-          total += Number((data as { total?: number })?.total || 0);
-        }
-        if (alive) setAttn(total);
-      } catch { if (alive) setAttn(null); }
-
       try {
         const day = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
         const { data } = await client.rpc('portal_sales', { p_start: day, p_end: day });
@@ -128,10 +97,6 @@ export function AppMoreHome({
       <div className="app-large-title"><h1>More</h1></div>
 
       <div className="app-group">
-        <button type="button" className="app-more-link" onClick={() => setPage('attention')}>
-          <span className="app-more-left"><Icon tone="#ff9f0a" />Needs attention</span>
-          <span className="app-more-right">{attn ?? '…'}<span className="app-chevron">›</span></span>
-        </button>
         {fullAccess && (
           <button type="button" className="app-more-link" onClick={() => setPage('sales')}>
             <span className="app-more-left"><Icon tone="#30d158" />Live sales</span>
@@ -188,72 +153,6 @@ export function AppMoreHome({
       </div>
       <p className="app-footer-count">{staffSession?.displayName || session.user.email}</p>
     </>
-  );
-}
-
-export function AppAttention({ client, storeId, money, stamp, onBack }: {
-  client: SupabaseClient; storeId: string; money: (n: number) => string; stamp: (s: string) => string; onBack: () => void;
-}) {
-  const [counts, setCounts] = useState<Counts>({});
-  const [kind, setKind] = useState<Kind | null>(null);
-
-  useEffect(() => {
-    let alive = true;
-    void (async () => {
-      const next: Counts = {};
-      for (const row of ATTN) {
-        if (row.kind === 'cost') {
-          try {
-            const { data } = await client.rpc('portal_units_missing_cost', { p_limit: 1, p_offset: 0 });
-            next.cost = Number((data as { total?: number })?.total || 0);
-          } catch { next.cost = 0; }
-        } else {
-          const { data } = await client.rpc('portal_units_missing_field', { p_kind: row.kind, p_limit: 1, p_offset: 0 });
-          next[row.kind] = Number((data as { total?: number })?.total || 0);
-        }
-      }
-      if (alive) setCounts(next);
-    })();
-    return () => { alive = false; };
-  }, [client]);
-
-  if (kind) {
-    return (
-      <div className="app-stack">
-        <div className="app-nav">
-          <button type="button" onClick={() => setKind(null)}>‹ Attention</button>
-          <div className="app-nav-title">{ATTN.find((a) => a.kind === kind)?.label}</div>
-          <button type="button" style={{ visibility: 'hidden' }}>·</button>
-        </div>
-        <div className="app-embed-soft">
-          {kind === 'cost'
-            ? <MissingCostPage client={client} money={money} stamp={stamp} onChanged={() => undefined} embedded />
-            : <MissingFieldPage client={client} storeId={storeId} kind={kind} money={money} stamp={stamp} />}
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="app-stack">
-      <div className="app-nav">
-        <button type="button" onClick={onBack}>‹ More</button>
-        <div className="app-nav-title">Needs attention</div>
-        <button type="button" style={{ visibility: 'hidden' }}>·</button>
-      </div>
-      <div className="app-group">
-        {ATTN.map((row) => (
-          <button key={row.kind} type="button" className="app-more-link" onClick={() => setKind(row.kind)}>
-            <span className="app-more-left">{row.label}</span>
-            <span className="app-more-right">
-              <span className="warn">{counts[row.kind] ?? '…'}</span>
-              <span className="app-chevron">›</span>
-            </span>
-          </button>
-        ))}
-      </div>
-      <p className="app-footer-count">Tap a row to fix items. Orange fields show what blocks listing.</p>
-    </div>
   );
 }
 

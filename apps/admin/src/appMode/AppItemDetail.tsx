@@ -116,13 +116,16 @@ export function AppItemDetail({
   const ask = unit?.ask_cents != null ? Number(unit.ask_cents) : null;
   const cost = unit?.acquisition_cost_cents != null ? Number(unit.acquisition_cost_cents) : null;
   const photos = detail?.photos || [];
+  // Clerk accounts: the server sends no money for sold/out-of-stock units, so show none and don't offer Edit.
+  const inStock = ['available', 'reserved', 'repair'].includes(String(unit?.state || ''));
+  const moneyHidden = !canDelete && !!unit && !inStock;
 
   return (
     <div className="app-stack">
       <div className="app-nav">
         <button type="button" onClick={onBack}>‹ Inventory</button>
         <div className="app-nav-title">{sku}</div>
-        <button type="button" onClick={() => setEditing(true)} disabled={!detail}>Edit</button>
+        <button type="button" onClick={() => setEditing(true)} disabled={!detail} style={moneyHidden ? { visibility: 'hidden' } : undefined}>Edit</button>
       </div>
 
       {error && <p className="app-footer-count" style={{ color: '#ff453a' }}>{error}</p>}
@@ -142,7 +145,7 @@ export function AppItemDetail({
             <p className="meta">
               {sku} · {String(unit.condition || 'No grade')} · {String(unit.category || 'Uncategorized')}
             </p>
-            <p className="price">{ask == null ? 'No price' : money(ask)}</p>
+            <p className="price">{moneyHidden ? String(unit.state).replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase()) : ask == null ? 'No price' : money(ask)}</p>
           </div>
 
           <div className="app-section-label">Selling on</div>
@@ -158,7 +161,7 @@ export function AppItemDetail({
               let value = 'Not listed';
               let cls = 'muted';
               if (live) {
-                value = price != null ? `Live · ${money(price)}` : 'Live';
+                value = price != null && !moneyHidden ? `Live · ${money(price)}` : 'Live';
                 cls = 'live';
               } else if (ch.key === 'amazon' && !row) {
                 value = 'Not on Amazon';
@@ -176,10 +179,10 @@ export function AppItemDetail({
 
           <div className="app-section-label">Details</div>
           <div className="app-group">
-            <div className="app-kv">
+            {!moneyHidden && <div className="app-kv">
               <span>Cost</span>
               <strong className={cost == null ? 'warn' : undefined}>{cost == null ? 'Add cost' : money(cost)}</strong>
-            </div>
+            </div>}
             <div className="app-kv">
               <span>Weight · box</span>
               <strong className={weight == null || !box ? 'warn' : undefined}>
@@ -194,7 +197,7 @@ export function AppItemDetail({
             </div>
           </div>
 
-          <div className="app-actions">
+          {inStock && <div className="app-actions">
             <button type="button" onClick={onSellInStore}>Sell in store</button>
             <button
               type="button"
@@ -206,7 +209,7 @@ export function AppItemDetail({
             >
               Mark sold
             </button>
-          </div>
+          </div>}
         </>
       )}
     </div>

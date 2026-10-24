@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { AttentionSection } from './navigation';
 import { MissingCostPage } from './MissingCostPage';
@@ -8,83 +9,52 @@ type Props = {
   storeId: string;
   money: (n: number) => string;
   stamp: (s: string) => string;
-  section: AttentionSection;
-  onSection: (s: AttentionSection) => void;
+  section: Exclude<AttentionSection, 'all'>;
   onCostChanged: () => void;
 };
 
-const TABS: [AttentionSection, string][] = [
-  ['missing-brand', 'Missing brand'],
-  ['missing-category', 'Missing category'],
-  ['missing-specifics', 'Missing item specifics'],
-  ['missing-spec', 'Missing weight & dimensions'],
-  ['missing-upc', 'Missing UPC'],
-  ['missing-photo', 'Missing photo'],
-  ['missing-price', 'Missing price'],
-  ['missing-condition', 'Missing condition'],
-  ['missing-cost', 'Missing cost'],
-  ['missing-model', 'Missing model'],
-  ['missing-description', 'Missing description'],
+type FieldKind = 'brand' | 'category' | 'specifics' | 'spec' | 'upc' | 'photo' | 'price' | 'condition' | 'model' | 'description';
+
+/**
+ * Fix queues under Inventory → Unfinished (this used to be its own Needs attention tab).
+ * The server skips not-for-sale units in every queue except Missing brand.
+ */
+export const ATTENTION_SECTIONS: [Exclude<AttentionSection, 'all'>, string, FieldKind | 'cost'][] = [
+  ['missing-photo', 'Missing photo', 'photo'],
+  ['missing-price', 'Missing price', 'price'],
+  ['missing-brand', 'Missing brand', 'brand'],
+  ['missing-condition', 'Missing condition', 'condition'],
+  ['missing-category', 'Missing category', 'category'],
+  ['missing-upc', 'Missing UPC', 'upc'],
+  ['missing-spec', 'Missing weight & dimensions', 'spec'],
+  ['missing-model', 'Missing model', 'model'],
+  ['missing-specifics', 'Missing item specifics', 'specifics'],
+  ['missing-description', 'Missing description', 'description'],
+  ['missing-cost', 'Missing cost', 'cost'],
 ];
 
-export function NeedsAttentionPanel({
-  client,
-  storeId,
-  money,
-  stamp,
-  section,
-  onSection,
-  onCostChanged,
-}: Props) {
-  const active = TABS.some(([id]) => id === section) ? section : 'missing-cost';
+/** Per-queue counts, fetched in parallel. Null while loading or on error. */
+export function useAttentionCounts(client: SupabaseClient, enabled: boolean, refresh = 0) {
+  const [counts, setCounts] = useState<Partial<Record<AttentionSection, number>>>({});
+  useEffect(() => {
+    if (!enabled) return;
+    let alive = true;
+    void Promise.all(ATTENTION_SECTIONS.map(async ([id, , kind]) => {
+      const { data, error } = kind === 'cost'
+        ? await client.rpc('portal_units_missing_cost', { p_limit: 1, p_offset: 0 })
+        : await client.rpc('portal_units_missing_field', { p_kind: kind, p_limit: 1, p_offset: 0 });
+      return [id, error ? undefined : Number((data as { total?: number })?.total || 0)] as const;
+    })).then(rows => {
+      if (alive) setCounts(Object.fromEntries(rows.filter(([, n]) => n !== undefined)));
+    }).catch(() => undefined);
+    return () => { alive = false; };
+  }, [client, enabled, refresh]);
+  return counts;
+}
 
-  return (
-    <>
-      <div className="inventory-tabs report-tabs">
-        {TABS.map(([id, label]) => (
-          <button
-            type="button"
-            key={id}
-            className={active === id ? 'active' : ''}
-            onClick={() => onSection(id)}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-      {active === 'missing-cost' && (
-        <MissingCostPage client={client} money={money} stamp={stamp} onChanged={onCostChanged} embedded />
-      )}
-      {active === 'missing-brand' && (
-        <MissingFieldPage client={client} storeId={storeId} kind="brand" money={money} stamp={stamp} />
-      )}
-      {active === 'missing-category' && (
-        <MissingFieldPage client={client} storeId={storeId} kind="category" money={money} stamp={stamp} />
-      )}
-      {active === 'missing-specifics' && (
-        <MissingFieldPage client={client} storeId={storeId} kind="specifics" money={money} stamp={stamp} />
-      )}
-      {active === 'missing-upc' && (
-        <MissingFieldPage client={client} storeId={storeId} kind="upc" money={money} stamp={stamp} />
-      )}
-      {active === 'missing-condition' && (
-        <MissingFieldPage client={client} storeId={storeId} kind="condition" money={money} stamp={stamp} />
-      )}
-      {active === 'missing-photo' && (
-        <MissingFieldPage client={client} storeId={storeId} kind="photo" money={money} stamp={stamp} />
-      )}
-      {active === 'missing-price' && (
-        <MissingFieldPage client={client} storeId={storeId} kind="price" money={money} stamp={stamp} />
-      )}
-      {active === 'missing-spec' && (
-        <MissingFieldPage client={client} storeId={storeId} kind="spec" money={money} stamp={stamp} />
-      )}
-      {active === 'missing-model' && (
-        <MissingFieldPage client={client} storeId={storeId} kind="model" money={money} stamp={stamp} />
-      )}
-      {active === 'missing-description' && (
-        <MissingFieldPage client={client} storeId={storeId} kind="description" money={money} stamp={stamp} />
-      )}
-    </>
-  );
+export function NeedsAttentionPanel({ client, storeId, money, stamp, section, onCostChanged }: Props) {
+  const kind = ATTENTION_SECTIONS.find(([id]) => id === section)?.[2] ?? 'cost';
+  return kind === 'cost'
+    ? <MissingCostPage client={client} money={money} stamp={stamp} onChanged={onCostChanged} embedded />
+    : <MissingFieldPage client={client} storeId={storeId} kind={kind} money={money} stamp={stamp} />;
 }

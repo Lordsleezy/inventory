@@ -9,7 +9,6 @@ import { AppOrders } from './AppOrders';
 import { AppChannel } from './AppChannel';
 import {
   AppMoreHome,
-  AppAttention,
   AppLiveSales,
   AppConnections,
   AppReportsNative,
@@ -185,7 +184,10 @@ export function AppModeShell({
           <AppInventory
             key={invKey}
             client={client}
+            storeId={storeId}
+            fullAccess={fullAccess}
             money={money}
+            stamp={stamp}
             onOpen={(sku) => {
               history.pushState({ floorApp: 1, sku }, '');
               setItemSku(sku);
@@ -288,15 +290,6 @@ export function AppModeShell({
           />
         )}
 
-        {fullAccess && morePage === 'attention' && (
-          <AppAttention
-            client={client}
-            storeId={storeId}
-            money={money}
-            stamp={stamp}
-            onBack={() => setMorePage(null)}
-          />
-        )}
         {fullAccess && morePage === 'sales' && (
           <AppLiveSales client={client} money={money} stamp={stamp} onBack={() => setMorePage(null)} />
         )}
