@@ -161,6 +161,14 @@ html.app-mode .app-row-text small {
   color: #8e8e93;
 }
 html.app-mode .app-row-text .warn { color: #ff9f0a; font-weight: 600; }
+html.app-mode .app-row-chevron {
+  flex: 0 0 auto;
+  color: #636366;
+  font-size: 22px;
+  font-weight: 300;
+  line-height: 1;
+  margin-left: 8px;
+}
 html.app-mode .app-row-price {
   font-size: 16px;
   font-weight: 600;
@@ -916,6 +924,26 @@ html.app-mode .receive-app .receive-upc input {
   -webkit-user-select: text;
   user-select: text;
 }
+/* On-screen pad — store phone bypasses Gboard for price / dims. */
+html.app-mode .store-num-pad-wrap { margin-top: 4px; }
+html.app-mode .store-num-pad {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+html.app-mode .store-num-pad-key {
+  min-height: 48px;
+  border: 0;
+  border-radius: 12px;
+  background: #2c2c2e;
+  color: #fff;
+  font-size: 22px;
+  font-weight: 600;
+}
+html.app-mode .store-num-pad-key:active { background: #3a3a3c; }
+html.app-mode .store-num-pad-key.muted { color: #aeaeb2; font-size: 18px; }
+html.app-mode .receive-scan-idle { margin: 8px 16px 0; color: #8e8e93; }
 html.app-mode .receive-app .unit-edit-grid label,
 html.app-mode .receive-app .receive-label {
   color: #aeaeb2;

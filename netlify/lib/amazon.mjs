@@ -39,6 +39,13 @@ function sellerId() {
 export function amazonNeverListReason(unit = {}) {
   const sku = String(unit.sku || "").trim();
   if (sku && NEVER_LIST_SKUS.has(sku)) return "SKU 11284 scooter — never list online";
+  const specs = unit.listing_specs && typeof unit.listing_specs === "object" ? unit.listing_specs : {};
+  if (specs.do_not_list === true || specs.hold_reason === "do_not_list") {
+    return "Marked don't list for sale at receive";
+  }
+  if (String(specs.bundle_parent_sku || "").trim()) {
+    return `Bundle child — lists with SKU ${String(specs.bundle_parent_sku).trim()}`;
+  }
   const blob = `${unit.category || ""} ${unit.title || ""} ${unit.brand || ""} ${unit.model || ""} ${unit.listing_body || ""}`.toLowerCase();
   if (/\bscooter\b|m365|segway|hoverboard/.test(blob)) return "Electric scooter — never list online";
   if (/fridge|refrigerator|dishwasher|freezer|mattress|box.?spring/.test(blob)) return "Appliance/mattress — never list online";

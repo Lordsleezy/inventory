@@ -111,12 +111,52 @@ export async function invoke(event) {
     }
   }
 
-  const identified = await identifyFrames([bytes]);
+  let identified;
+  try {
+    identified = await identifyFrames([bytes]);
+  } catch (e) {
+    const msg = String(e?.message || e);
+    await floorLog({
+      level: "error",
+      event: "receive_photo.identify_fail",
+      message: msg.slice(0, 300),
+      storeId: ctx.storeId,
+      detail: { upc },
+    });
+    if (/masked|placeholder|Missing env GEMINI|API key not valid|API_KEY_INVALID|invalid api key/i.test(msg)) {
+      return json(503, {
+        ok: false,
+        error: "gemini_misconfigured",
+        message:
+          "Photo AI is misconfigured (Gemini API key). An admin needs to set a real GEMINI_API_KEY on inventoryobi Netlify, then retry. Or fill fields by hand.",
+      });
+    }
+    if (/timeout|aborted|Deadline/i.test(msg)) {
+      return json(504, {
+        ok: false,
+        error: "identify_timeout",
+        message: "Photo identify timed out. Try one clearer, closer photo — or fill fields by hand.",
+      });
+    }
+    return json(502, {
+      ok: false,
+      error: "identify_failed",
+      message: `Photo identify failed (${msg.slice(0, 160)}). Retry, or fill fields by hand.`,
+    });
+  }
   const identity = identified.result || {};
   const brand = String(identity.brand || "").trim();
   const model = specificsFromIdentity(identity);
   const title = listingTitle(brand, model) || String(identity.title || "").trim();
   const identifyMs = Date.now() - t0;
+
+  if (!brand && !title) {
+    return json(422, {
+      ok: false,
+      error: "not_recognized",
+      message: "Couldn’t recognize a product in that photo. Try a clearer label shot, or fill fields by hand.",
+    });
+  }
 
   // Price lookup in parallel spirit: start after name is known; user can see name first client-side
   // when we stream — for now one response with both.

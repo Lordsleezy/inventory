@@ -46,3 +46,15 @@ test("Truly hard seltzer is prohibited", () => {
   assert.equal(prohibitedReason(unit), "hard seltzer");
   assert.match(ebayDraftEligibility(unit, rules).reason, /prohibits/i);
 });
+
+test("do not list at receive blocks eBay drafts", () => {
+  const row = ebayDraftEligibility({ ...base, listing_specs: { do_not_list: true } }, rules);
+  assert.equal(row.ok, false);
+  assert.match(row.reason, /don't list/i);
+});
+
+test("bundle children do not get their own eBay draft", () => {
+  const row = ebayDraftEligibility({ ...base, listing_specs: { bundle_parent_sku: "12001" } }, rules);
+  assert.equal(row.ok, false);
+  assert.match(row.reason, /bundle child/i);
+});

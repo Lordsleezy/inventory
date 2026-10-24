@@ -201,6 +201,7 @@ export function AppModeShell({
             sku={itemSku}
             money={money}
             canDelete={fullAccess}
+            backLabel={tab === 'receive' ? 'Receive' : 'Inventory'}
             onBack={() => setItemSku(null)}
             onChanged={() => setInvKey((n) => n + 1)}
             onSellInStore={() => {
@@ -210,13 +211,19 @@ export function AppModeShell({
           />
         )}
 
-        <div className="app-tab-panel" data-tab="receive" hidden={tab !== 'receive'}>
+        <div className="app-tab-panel" data-tab="receive" hidden={tab !== 'receive' || !!itemSku}>
           {tab === 'receive' && (
             <AppReceive
               client={client}
               storeId={storeId}
               accessToken={session.access_token}
               onSaved={() => setInvKey((n) => n + 1)}
+              // Jacob / local staff on the store phone — not portal admins.
+              requireManualCore={!fullAccess}
+              onOpenItem={(sku) => {
+                history.pushState({ floorApp: 1, sku }, '');
+                setItemSku(sku);
+              }}
             />
           )}
         </div>

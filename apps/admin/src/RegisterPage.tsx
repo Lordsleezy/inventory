@@ -33,7 +33,14 @@ import {
 } from './register/sale';
 import { loadAvailableUnits, queryAvailableUnits, searchUnits, type RegisterUnit } from './register/units';
 import { NativePaySheets, NativeRegisterCart, NativeRegisterDone, SALE_OVERRIDE } from './register/NativeRegister';
-import { isKioskShell, scannerInputMode } from './kiosk';
+import {
+  bindHidWedgeListener,
+  focusScannerField,
+  isAndroidStoreDevice,
+  isKioskShell,
+  scannerFieldStartsReadOnly,
+  scannerInputMode,
+} from './kiosk';
 import { errText } from './errText';
 
 type ManualPayment = {
@@ -76,6 +83,9 @@ function RegisterInner({ staffSession, onNeedFullReload, variant = 'desktop' }: 
     try { return typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches; }
     catch { return false; }
   })();
+  // Android store phone: never inputMode=none + focus (freezes Gboard until reboot).
+  const [searchTyping, setSearchTyping] = useState(() => !scannerFieldStartsReadOnly());
+  const androidStore = isAndroidStoreDevice();
   const [error, setError] = useState('');
   const [loud, setLoud] = useState('');
   const [busy, setBusy] = useState(false);
@@ -474,8 +484,36 @@ function RegisterInner({ staffSession, onNeedFullReload, variant = 'desktop' }: 
     setQ('');
     setShowHits(false);
     setError('');
-    searchRef.current?.focus();
+    // Next scan: wedge-friendly focus on desktop; Android uses HID window listener.
+    if (androidStore) setSearchTyping(false);
+    else requestAnimationFrame(() => focusScannerField(searchRef.current, { softKeyboard: false }));
   }
+
+  useEffect(() => {
+    if (androidStore) return;
+    if (scannerFieldStartsReadOnly()) {
+      focusScannerField(searchRef.current, { softKeyboard: false });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!androidStore) return;
+    return bindHidWedgeListener({
+      active: () => idle && !cashOpen && !done && !searchTyping,
+      onScan: (code) => {
+        setQ(code);
+        setShowHits(true);
+        void queryAvailableUnits(code, 1)
+          .then((rows) => {
+            if (rows[0]) addFromSearch(rows[0]);
+            else setError(`No available unit for “${code}”.`);
+          })
+          .catch((err) => setError(authErrorMessage(err)));
+      },
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [androidStore, idle, cashOpen, done, searchTyping]);
 
   function onSearchKey(e: KeyboardEvent<HTMLInputElement>) {
     if (e.key === 'Enter') {
@@ -959,21 +997,33 @@ function RegisterInner({ staffSession, onNeedFullReload, variant = 'desktop' }: 
           <input
             ref={searchRef}
             className="search"
-            placeholder="Scan or search SKU, title…"
+            placeholder={
+              androidStore || isKioskShell()
+                ? (searchTyping ? 'Type SKU or title…' : 'Scan or search (tap to type)')
+                : 'Scan or search SKU, title…'
+            }
             value={q}
             onChange={e => {
               setQ(e.target.value);
               setShowHits(Boolean(e.target.value.trim()));
             }}
             onFocus={() => q.trim() && setShowHits(true)}
+            onClick={() => {
+              if (androidStore || isKioskShell()) {
+                setSearchTyping(true);
+                requestAnimationFrame(() => focusScannerField(searchRef.current, { softKeyboard: true }));
+              }
+            }}
             onKeyDown={onSearchKey}
-            autoFocus={!isCoarse || isKioskShell()}
+            autoFocus={!isCoarse && !androidStore && !scannerFieldStartsReadOnly()}
             autoComplete="off"
             autoCorrect="off"
             autoCapitalize="off"
             spellCheck={false}
             enterKeyHint="search"
-            inputMode={scannerInputMode() === 'none' ? 'none' : 'search'}
+            readOnly={androidStore && !searchTyping}
+            inputMode={searchTyping ? 'search' : scannerInputMode()}
+            data-hid-wedge={androidStore && !searchTyping ? '1' : undefined}
             disabled={!idle || cashOpen}
           />
           {showHits && (hits.length || searchBusy) ? (
