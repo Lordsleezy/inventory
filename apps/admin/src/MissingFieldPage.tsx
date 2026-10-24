@@ -61,7 +61,7 @@ const COPY: Record<Kind, { title: string; hint: string; empty: string }> = {
   },
   condition: {
     title: 'Missing condition',
-    hint: 'Enter the condition (New, Open box, Scratch & dent). Blocks eBay, Amazon, and TikTok.',
+    hint: 'Enter the condition (New, Open box, Defective/non-sellable). Blocks eBay, Amazon, and TikTok.',
     empty: 'Every in-stock unit has a condition.',
   },
   specifics: {

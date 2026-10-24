@@ -89,7 +89,7 @@ const NAMES: Record<BoardChannel, { title: string; fee: string }> = {
   amazon: { title: 'Amazon', fee: 'Amazon fees' },
   tiktok: { title: 'TikTok', fee: 'TikTok fees' },
 };
-const CONDITIONS = ['New (sealed)', 'Open box', 'Scratch & dent'];
+const CONDITIONS = ['New (sealed)', 'Open box', 'Defective/non-sellable'];
 
 function boardCacheKey(channel: BoardChannel) {
   return `floor_board_cache_${channel}`;

@@ -302,8 +302,11 @@ type LastReceived = { upc: string; result?: Lookup; seed: Partial<Form> };
 
 const NEW = 'New';
 const OPEN = 'Open box';
-const SCRATCH = 'Scratch & dent';
-const CONDITIONS: [string, string][] = [[NEW, 'New (sealed)'], [OPEN, 'Open box'], [SCRATCH, 'Scratch & dent']];
+const SCRATCH = 'Defective/non-sellable';
+/** Legacy condition value — still needs a defect note if somehow selected. */
+const SCRATCH_LEGACY = 'Scratch & dent';
+const isDefectiveCondition = (value: string) => value === SCRATCH || value === SCRATCH_LEGACY;
+const CONDITIONS: [string, string][] = [[NEW, 'New (sealed)'], [OPEN, 'Open box'], [SCRATCH, 'Defective/non-sellable']];
 const HOLD_REASONS: [string, string][] = [
   ['damaged', 'Damaged'], ['needs_testing', 'Needs testing'], ['keep_in_store', 'Keep in store'], ['other', 'Other'],
 ];
@@ -851,9 +854,9 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       // Do not list for sale: photo is optional — unit stays off the website/marketplaces.
       if (!doNotList && !files.length) { setError('Add at least one real photo of this unit before finishing, or check Do not list for sale.'); return; }
       if (files.some(f => f.size < PHOTO_MIN_BYTES)) { setError('One of the photos looks empty or too small. Retake it.'); return; }
-      if (!form.condition) { setError('Pick a condition: New (sealed), Open box, or Scratch & dent.'); return; }
+      if (!form.condition) { setError('Pick a condition: New (sealed), Open box, or Defective/non-sellable.'); return; }
     }
-    if (form.condition === SCRATCH && !form.conditionNote.trim()) { setError('Scratch & dent needs a note describing the damage.'); return; }
+    if (isDefectiveCondition(form.condition) && !form.conditionNote.trim()) { setError('Defective/non-sellable needs a note describing the defect.'); return; }
     const parsed = parse();
     if (!parsed) return;
     // Duplicate check right before create (another device may have received it meanwhile).
@@ -897,7 +900,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       const quantity = manual ? Number(form.quantity) : 1;
       const holdLabel = hold ? (HOLD_REASONS.find(([k]) => k === hold.reason)?.[1] || hold.reason) : '';
       const notes = [
-        form.condition === SCRATCH ? `Scratch & dent: ${form.conditionNote.trim()}` : '',
+        isDefectiveCondition(form.condition) ? `Defective/non-sellable: ${form.conditionNote.trim()}` : '',
         hold ? `Not listing — ${holdLabel}${hold.note.trim() ? `: ${hold.note.trim()}` : ''}` : '',
         form.notes.trim(),
       ].filter(Boolean).join('\n');
@@ -1237,7 +1240,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   const showForm = manual || (current && current.status !== 'loading' && loadedId === current.id);
   const waiting = queue.length - (current ? 1 : 0);
   const hasFiles = files.length > 0;
-  const needNoteForScratch = form.condition === SCRATCH;
+  const needNoteForScratch = isDefectiveCondition(form.condition);
   const holdReady = reason !== 'other' || reasonNote.trim().length > 0;
   const catalogMiss = !manual && current?.status === 'ready' ? catalogMissMessage(result) : null;
   const trueMiss = !manual && current?.status === 'ready' && isTrueCatalogMiss(result);
@@ -1356,7 +1359,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
               <input type="radio" name="receive-condition" value={value} checked={form.condition === value} onChange={() => update('condition', value)} />{text2}
             </label>)}</div>}
         </div>
-        {needNoteForScratch && <label className="unit-edit-wide">What is scratched or dented? (required)<textarea rows={2} value={form.conditionNote} onChange={e => update('conditionNote', e.target.value)} /></label>}
+        {needNoteForScratch && <label className="unit-edit-wide">What is defective / why non-sellable? (required)<textarea rows={2} value={form.conditionNote} onChange={e => update('conditionNote', e.target.value)} /></label>}
 
         <label className={liveMissing.includes('category') ? 'receive-need' : undefined}>
           Category{liveMissing.includes('category') ? ' (needed to list)' : ''}
