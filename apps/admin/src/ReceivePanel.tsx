@@ -181,6 +181,43 @@ async function fileToBase64(file: File): Promise<string> {
   return btoa(binary);
 }
 
+/** Shrink camera JPEGs before upload — full phone photos exceed Netlify’s ~6MB body limit as base64. */
+async function compressImageForIdentify(file: File, maxEdge = 1600, quality = 0.82): Promise<File> {
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height));
+    const w = Math.max(1, Math.round(bitmap.width * scale));
+    const h = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return file;
+    ctx.drawImage(bitmap, 0, 0, w, h);
+    bitmap.close?.();
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality));
+    if (!blob || blob.size < 1024) return file;
+    return new File([blob], (file.name || 'photo.jpg').replace(/\.\w+$/, '') + '.jpg', {
+      type: 'image/jpeg',
+      lastModified: Date.now(),
+    });
+  } catch {
+    return file;
+  }
+}
+
+function identifyErrorMessage(res: Response, json: { error?: string; message?: string; errorMessage?: string }): string {
+  return (
+    json.message
+    || json.errorMessage
+    || (json.error && json.error !== 'Error' ? String(json.error) : '')
+    || (res.status === 413 || res.status === 502
+      ? 'Photo was too large or the identify service crashed. Retry with one clear photo, or fill by hand.'
+      : '')
+    || `Photo identify failed (${res.status}). Fill fields by hand, or retry.`
+  );
+}
+
 /** "Flavor: Berry · Item Form: Gummy" from Amazon catalog aspects. */
 function formatAspectsLine(aspects?: Record<string, string> | null): string {
   if (!aspects) return '';
@@ -1265,19 +1302,21 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       return;
     }
     const scan = current;
-    const file = await copyImageFile(raw);
-    if (!file) {
+    const copied = await copyImageFile(raw);
+    if (!copied) {
       setError('Could not read that photo. Try one clear picture of the box or label.');
       setDialog('miss-photo');
       return;
     }
     setPhotoIdBusy(true);
-    setPhotoIdStatus('Identifying product…');
+    setPhotoIdStatus('Preparing photo…');
     setError('');
     setDialog(null);
     try {
+      const file = await compressImageForIdentify(copied);
       setFiles([file]);
       void savePendingPhotos(pendingPhotoKey(storeId, photoSessionKey.current), [file]);
+      setPhotoIdStatus('Identifying product…');
       const image_base64 = await fileToBase64(file);
       const res = await fetch(floorFunctionUrl('receive-photo-identify'), {
         method: 'POST',
@@ -1289,9 +1328,9 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           mime_type: file.type || 'image/jpeg',
         }),
       });
-      const json = await res.json().catch(() => ({} as { error?: string; message?: string }));
+      const json = await res.json().catch(() => ({} as { error?: string; message?: string; errorMessage?: string }));
       if (!res.ok) {
-        setError(json.message || json.error || 'Photo identify failed. Fill fields by hand, or retry.');
+        setError(identifyErrorMessage(res, json));
         setWarning(catalogMissMessage(scan.result) || '');
         setDialog('miss-photo');
         return;
