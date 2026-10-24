@@ -319,7 +319,6 @@ export async function suggestCategories(query) {
     .map((row) => ({
       categoryId: String(row.category?.categoryId || ""),
       categoryName: String(row.category?.categoryName || ""),
-      path: [...(row.categoryTreeNodeAncestors || []).map((node) => String(node.category?.categoryName || "")).filter(Boolean), String(row.category?.categoryName || "")].filter(Boolean).join(" › "),
     }))
     .filter((row) => row.categoryId);
 }

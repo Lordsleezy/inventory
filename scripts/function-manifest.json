@@ -2,7 +2,6 @@
   "functions": [
     "amazon-list",
     "amazon-sync",
-    "category-search",
     "census-seasonality-sync",
     "channel-fee-sync",
     "dispatch-alerts",

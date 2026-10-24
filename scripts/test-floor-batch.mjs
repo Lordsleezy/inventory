@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
-import { readdir, readFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { PGlite } from "@electric-sql/pglite";
+import { replayMigrationPaths } from "./lib/replay-migrations.mjs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const db = new PGlite();
 await db.exec(await readFile(new URL("../supabase/tests/pglite-stub.sql", import.meta.url), "utf8"));
-const root = new URL("../supabase/migrations/", import.meta.url);
-for (const file of (await readdir(root)).filter((name) => name.endsWith(".sql")).sort()) {
-  const sql = (await readFile(new URL(file, root), "utf8"))
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+for (const file of replayMigrationPaths(root)) {
+  const sql = (await readFile(file, "utf8"))
     .replace(/create extension if not exists pgcrypto;/gi, "-- pglite: pgcrypto stubbed");
   try { await db.exec(sql); }
   catch (error) { throw new Error(`${file}: ${error.message}`); }
@@ -54,15 +57,6 @@ await db.query("select public.portal_tag_manifest($1,array['12345'])", [manifest
 const list = await db.query("select public.portal_manifest_list() result");
 assert.equal(list.rows[0].result[0].received_count, 2);
 
-await db.query("insert into public.channel_taxonomy(channel,category_id,path,leaf,version) values('ebay','123','Health & Beauty > Oral Care',true,'test')");
-await db.query("insert into public.channel_taxonomy(channel,category_id,path,leaf,version) values('tiktok','456','Personal Care > Oral Care',true,'test')");
-const categoryCount = await db.query(
-  "select public.portal_set_channel_categories(array['12345'],'123','456',null,null,'Personal Care','{\"amazon\":false,\"depop\":false}'::jsonb) as n");
-assert.equal(categoryCount.rows[0].n, 1);
-const categoryGaps = await db.query("select public.portal_category_gaps('12345') as gaps");
-assert.deepEqual(categoryGaps.rows[0].gaps, []);
-const badCategory = await db.query("select count(*)::int n from public.store_category_mappings where ebay_category_id='123'");
-assert.equal(badCategory.rows[0].n, 1);
 await db.query("select public.portal_insights('month')");
 await db.query("select public.portal_withdrawal_reconciliation()");
 console.log("withdrawals, payout link/audit, manifests, locations and insights RPCs ok");
