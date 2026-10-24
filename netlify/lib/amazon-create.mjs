@@ -190,6 +190,10 @@ export async function createAmazonCatalogListing(
   if (!unit) return { ok: false, reason: "unknown_sku" };
   const never = amazonNeverListReason(unit);
   if (never) return { ok: false, reason: "never_list", message: never };
+  if (assignedCategory.category_id !== "STRING_LIGHT") {
+    return { ok: false, reason: "catalog_create_unsupported_product_type",
+      message: `New Amazon catalog creation is supported for STRING_LIGHT only; ${assignedCategory.category_id} needs a product-type-specific builder.` };
+  }
 
   const sid = sellerId();
   if (!sid) return { ok: false, reason: "missing_seller_id", message: "AMAZON_SELLER_ID not set" };

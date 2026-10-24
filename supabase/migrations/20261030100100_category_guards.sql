@@ -72,6 +72,8 @@ returns jsonb language sql stable security definer set search_path=public as $$
         when c.channel='depop' and (d.category_id is null or not d.active) then 'retired category'
         when c.channel<>'depop' and (t.category_id is null or not t.active or not t.leaf) then 'retired category'
         when c.channel<>'depop' and t.fields_fetched_at is null then 'category fields not synced'
+        when c.channel<>'depop' and (t.fetched_at < now()-interval '4 days'
+          or t.fields_fetched_at < now()-interval '4 days') then 'category taxonomy stale'
         when c.channel<>'depop' and c.validated_version is distinct from
           (coalesce(t.fingerprint,'')||':'||coalesce(t.fields_version,'')) then 'category changed; recheck'
         when f.value->>'kind'='unsupported_document' then 'channel document required'
