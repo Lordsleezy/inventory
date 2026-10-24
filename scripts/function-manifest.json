@@ -2,6 +2,8 @@
   "functions": [
     "amazon-list",
     "amazon-sync",
+    "category-search",
+    "census-seasonality-sync",
     "channel-fee-sync",
     "dispatch-alerts",
     "ebay-account-deletion",
@@ -105,10 +107,12 @@
     "marketplace-daily-report": "0 16 * * *",
     "marketplace-sale-watch": "*/5 * * * *",
     "channel-fee-sync": "*/15 * * * *",
+    "census-seasonality-sync": "0 8 1 * *",
     "enrich-models": "*/2 * * * *"
   },
   "critical": [
     "amazon-sync",
+    "census-seasonality-sync",
     "channel-fee-sync",
     "dispatch-alerts",
     "ebay-migrate-dispatch",

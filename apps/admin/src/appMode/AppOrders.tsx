@@ -5,6 +5,7 @@ import { LabelDialog } from '../LabelDialog';
 import { ReturnsPage } from '../ReturnsPage';
 import { errText } from '../errText';
 import { shortError } from './shortError';
+import { loadOrderLocations, locationCompare } from '../locationOrder';
 
 function channelAllowsLabels(channel?: string | null) {
   const ch = (channel || 'website').toLowerCase();
@@ -43,6 +44,7 @@ export function AppOrders({ client, storeId, accessToken, money, stamp }: Props)
   const [error, setError] = useState('');
   const [open, setOpen] = useState<WebOrder | null>(null);
   const [urls, setUrls] = useState<Record<string, string>>({});
+  const [locations, setLocations] = useState<Record<string, string[]>>({});
   const [busy, setBusy] = useState('');
   const [labelOpen, setLabelOpen] = useState(false);
   const packProofInput = useRef<HTMLInputElement>(null);
@@ -55,6 +57,7 @@ export function AppOrders({ client, storeId, accessToken, money, stamp }: Props)
       setOrders(list);
       setOpen((prev) => (prev ? list.find((o) => o.id === prev.id) || prev : null));
       const skus = [...new Set(list.map((o) => o.sku).filter(Boolean))];
+      setLocations(await loadOrderLocations(client, storeId, skus));
       if (skus.length) {
         const { data: photos } = await client.from('photos').select('sku, path, is_primary').in('sku', skus.slice(0, 80));
         const bySku = new Map<string, string>();
@@ -75,7 +78,7 @@ export function AppOrders({ client, storeId, accessToken, money, stamp }: Props)
     } catch (e) {
       setError(shortError(errText(e)));
     }
-  }, [client]);
+  }, [client, storeId]);
 
   useEffect(() => { void load(); const t = setInterval(() => void load(), 30000); return () => clearInterval(t); }, [load]);
 
@@ -91,12 +94,15 @@ export function AppOrders({ client, storeId, accessToken, money, stamp }: Props)
     };
   }, [orders]);
 
-  const rows = seg === 'toShip' ? buckets.toShip
+  const rows = (seg === 'toShip' ? buckets.toShip
     : seg === 'shipped' ? buckets.shipped
       : seg === 'pickup' ? buckets.pickup
         : seg === 'done' ? buckets.done
           : seg === 'canceled' ? buckets.canceled
-            : [];
+            : []).slice().sort((a,b) => {
+              if (seg !== 'toShip' && seg !== 'pickup') return 0;
+              return locationCompare(locations[a.sku]?.[0] || '99999', locations[b.sku]?.[0] || '99999');
+            });
   const totals = useMemo(() => {
     const src = seg === 'returns' ? [] : rows;
     return {
@@ -229,6 +235,7 @@ export function AppOrders({ client, storeId, accessToken, money, stamp }: Props)
         <div className="app-group">
           <div className="app-kv"><span>Status</span><strong className={pill.tone === 'warn' ? 'warn' : pill.tone === 'ok' ? 'live' : 'muted'}>{pill.text}</strong></div>
           <div className="app-kv"><span>SKU</span><strong>{open.sku}</strong></div>
+          <div className="app-kv"><span>Pick location</span><strong className="pick-location">{locations[open.sku]?.join(', ') || 'Unassigned'}</strong></div>
           <div className="app-kv"><span>Buyer</span><strong>{open.buyer_name || '—'}</strong></div>
           <div className="app-kv"><span>Placed</span><strong>{stamp(open.created_at)}</strong></div>
           {open.shipped_at && <div className="app-kv"><span>Shipped</span><strong>{stamp(open.shipped_at)}</strong></div>}
@@ -338,7 +345,7 @@ export function AppOrders({ client, storeId, accessToken, money, stamp }: Props)
                   <span className="app-thumb">{urls[o.sku] ? <img src={urls[o.sku]} alt="" /> : '+'}</span>
                   <span className="app-row-text">
                     <strong>{o.title}</strong>
-                    <small>{ch} · {o.order_no || o.sku}</small>
+                    <small>{ch} · {o.order_no || o.sku} · Pick {locations[o.sku]?.[0] || 'unassigned'}</small>
                   </span>
                   <span className={`app-pill ${pill.tone}`}>{pill.text}</span>
                   <span className="app-chevron">›</span>

@@ -683,3 +683,100 @@ html.dark .mboard-progress-bar{background:#2a3340}
 }
 /* Inventory → Unfinished: what each unit is still missing. */
 .inventory-row small.inventory-missing{color:#b45309;white-space:normal}
+/* Withdrawals share portal panels on desktop and the app's grouped rows in standalone mode. */
+.withdrawal-form{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;align-items:end}
+.withdrawal-form label{display:grid;gap:5px;font-size:.82rem;font-weight:650;color:#627282}
+.withdrawal-form .withdrawal-note{grid-column:span 2}
+.withdrawal-form .actions{grid-column:1/-1}
+.withdrawal-balance-list,.withdrawal-list{display:grid}
+.withdrawal-balance,.withdrawal-entry{border-top:1px solid #edf0f2}
+.withdrawal-balance summary,.withdrawal-entry summary{display:flex;justify-content:space-between;align-items:center;gap:14px;min-height:54px;padding:12px 4px;cursor:pointer;list-style:none}
+.withdrawal-balance summary::-webkit-details-marker,.withdrawal-entry summary::-webkit-details-marker{display:none}
+.withdrawal-entry summary span:first-child{display:grid;gap:4px}
+.withdrawal-entry summary small,.withdrawal-entry-body small{font-size:.78rem;color:#71808d}
+.withdrawal-entry-body{padding:4px 4px 16px}.withdrawal-entry-body p{margin:6px 0}
+.withdrawal-entry-body .actions{margin-top:12px}
+.withdrawal-parts{display:grid;grid-template-columns:1fr auto;gap:7px;padding:0 4px 16px;font-size:.85rem}
+.withdrawal-audit{margin-top:14px;border-top:1px solid #edf0f2}
+.withdrawal-audit>div{padding:9px 0;border-bottom:1px solid #edf0f2;font-size:.82rem}
+.withdrawal-audit small{display:block;margin-top:3px}
+@media(max-width:750px){.withdrawal-form{grid-template-columns:1fr 1fr}.withdrawal-form .withdrawal-note{grid-column:1/-1}}
+@media(max-width:500px){.withdrawal-form{grid-template-columns:1fr}.withdrawal-form .withdrawal-note{grid-column:1}}
+.app-mode .withdrawals-page header{padding:6px 2px 14px;margin:0}
+.app-mode .withdrawals-page header h1{font-size:1.5rem}
+.app-mode .withdrawals-page .panel{border:0;border-radius:14px;background:var(--app-group-bg,#1c1c1e);box-shadow:none;padding:16px;margin:0 0 16px}
+.app-mode .withdrawals-page .panel h2{margin:0 0 12px}
+.app-mode .withdrawal-balance,.app-mode .withdrawal-entry{border-color:var(--app-separator,#38383a)}
+.app-mode .withdrawal-balance summary,.app-mode .withdrawal-entry summary{min-height:56px}
+.app-mode .withdrawal-form input,.app-mode .withdrawal-form select{min-height:48px}
+.manifest-form{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;align-items:end}
+.manifest-form label{display:grid;gap:5px;font-size:.82rem;font-weight:650;color:#627282}
+.manifest-form label:first-child{grid-column:1/-1}
+.manifest-form label small{font-weight:400;color:#71808d}
+.manifest-form .actions{grid-column:1/-1}
+.manifest-row{border-top:1px solid #edf0f2}
+.manifest-row summary{display:flex;justify-content:space-between;gap:16px;align-items:center;min-height:56px;cursor:pointer;list-style:none;padding:10px 4px}
+.manifest-row summary::-webkit-details-marker{display:none}
+.manifest-row summary span{display:grid;gap:3px}.manifest-row summary small{font-size:.8rem;color:#71808d}
+.manifest-detail{padding:8px 4px 16px}
+.manifest-metrics{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.manifest-metrics span{border:1px solid #e5e9ee;border-radius:8px;padding:8px 10px;font-size:.8rem}
+.manifest-bulk{display:grid;gap:10px}.manifest-bulk button{justify-self:start}
+@media(max-width:750px){.manifest-form{grid-template-columns:1fr 1fr}}
+@media(max-width:500px){.manifest-form{grid-template-columns:1fr}}
+.app-mode .manifests-page header{padding:6px 2px 14px;margin:0}
+.app-mode .manifests-page header h1{font-size:1.5rem}
+.app-mode .manifests-page .panel{border:0;border-radius:14px;background:var(--app-group-bg,#1c1c1e);box-shadow:none;padding:16px;margin:0 0 16px}
+.app-mode .manifests-page .panel h2{margin:0 0 12px}
+.app-mode .manifest-row{border-color:var(--app-separator,#38383a)}
+.app-mode .manifest-form input,.app-mode .manifest-form select,.app-mode .manifest-bulk select,.app-mode .manifest-bulk textarea{min-height:48px}
+.inventory-location{font-size:.8rem;font-weight:700;color:#506174;align-self:center;min-width:80px}
+.location-bay-form,.location-scan-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:12px;align-items:end}
+.location-bay-form label,.location-scan-form label{display:grid;gap:5px;font-size:.82rem;font-weight:650;color:#627282}
+.location-bay-form .actions{grid-column:1/-1}
+.location-bay,.location-code-list span{border-top:1px solid #edf0f2}
+.location-bay summary{display:flex;justify-content:space-between;gap:12px;min-height:54px;align-items:center;cursor:pointer;list-style:none}
+.location-bay summary::-webkit-details-marker{display:none}
+.location-bay-body{padding:4px 0 16px}
+.location-code-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:8px;margin:8px 0 15px}
+.location-code-list span{display:grid;gap:3px;padding:10px 4px}
+.location-code-list b{font-size:1.15rem}.location-code-list small{color:#71808d}
+.location-print-sheet{display:none}
+.app-mode .locations-page header{padding:6px 2px 14px;margin:0}
+.app-mode .locations-page header h1{font-size:1.5rem}
+.app-mode .locations-page .panel{border:0;border-radius:14px;background:var(--app-group-bg,#1c1c1e);box-shadow:none;padding:16px;margin:0 0 16px}
+.app-mode .locations-page .panel h2{margin:0 0 12px}
+.app-mode .location-bay{border-color:var(--app-separator,#38383a)}
+.app-mode .location-scan-form input,.app-mode .location-scan-form select{min-height:50px;font-size:1rem}
+.pick-location{font-size:1.2rem;font-weight:900;letter-spacing:.03em;color:#0f766e}
+.app-mode .pick-location{font-size:1.35rem;color:#30d158}
+.insights-bars{display:grid;gap:10px}.insights-bar{display:grid;grid-template-columns:90px minmax(0,1fr) 85px;gap:7px 10px;align-items:center;font-size:.82rem}
+.insights-bar-track{height:16px;background:#dce4eb;border-radius:10px;overflow:hidden}
+.insights-bar-track i{display:block;height:100%;background:#0a84ff;border-radius:10px}
+.insights-bar strong{text-align:right}.insights-bar small{grid-column:2/-1;text-align:right;color:#71808d}
+.insights-category-list{display:grid}.insights-category-list details,.insights-manifest{border-top:1px solid #edf0f2}
+.insights-category-list summary,.insights-manifest{display:flex;justify-content:space-between;gap:12px;align-items:center;min-height:52px;padding:9px 2px;cursor:pointer}
+.insights-category-list summary span,.insights-manifest span{font-size:.82rem;color:#71808d}
+.insights-category-detail{display:flex;gap:8px 16px;flex-wrap:wrap;padding:4px 2px 14px;font-size:.8rem}
+.insights-aging{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.insights-aging div{display:grid;gap:4px;text-align:center;padding:16px;background:#f7f8fa;border-radius:10px}
+.insights-aging strong{font-size:1.5rem}.insights-aging span{font-size:.8rem;color:#71808d}
+.insights-chart-scroll{overflow-x:auto}.insights-chart-scroll svg{display:block;width:100%;min-width:320px;max-height:300px}
+.insights-forecast-list{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.insights-forecast-list div{display:grid;gap:4px;border:1px solid #e5e9ee;border-radius:9px;padding:10px;font-size:.78rem}
+.insights-forecast-list span{color:#71808d}
+.app-mode .insights-page header{padding:6px 2px 14px;margin:0}
+.app-mode .insights-page header h1{font-size:1.5rem}
+.app-mode .insights-page .panel{border:0;border-radius:14px;background:var(--app-group-bg,#1c1c1e);box-shadow:none;padding:16px;margin:0 0 16px}
+.app-mode .insights-page .panel h2{margin:0 0 12px}
+.app-mode .insights-aging div{background:#2c2c2e}
+@media(max-width:650px){.insights-bar{grid-template-columns:68px minmax(0,1fr) 66px;font-size:.72rem}.insights-forecast-list{grid-template-columns:1fr 1fr}.insights-category-list summary,.insights-manifest{align-items:start;flex-direction:column}}
+@media print{
+  body:has(.location-print-sheet:not(:empty)) *{visibility:hidden!important}
+  body:has(.location-print-sheet:not(:empty)) .location-print-sheet,
+  body:has(.location-print-sheet:not(:empty)) .location-print-sheet *{visibility:visible!important}
+  body:has(.location-print-sheet:not(:empty)) .location-print-sheet{display:grid!important;position:fixed;inset:0;background:#fff;grid-template-columns:repeat(2,1fr);gap:8mm}
+  .location-label{break-inside:avoid;border:1px solid #333;border-radius:3mm;text-align:center;padding:8mm;min-height:45mm;background:#fff;color:#000}
+  .location-label strong{display:block;font:900 26pt system-ui;margin-bottom:4mm}
+  .location-barcode svg{max-width:100%;height:17mm}
+}

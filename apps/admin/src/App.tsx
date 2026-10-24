@@ -7,6 +7,9 @@ import { ReceiptsPage } from './ReceiptsPage';
 import { RegisterPage } from './RegisterPage';
 import { TaxPage } from './TaxPage';
 import { WithdrawalsPage } from './WithdrawalsPage';
+import { ManifestsPage } from './ManifestsPage';
+import { LocationsPage } from './LocationsPage';
+import { InsightsPage } from './InsightsPage';
 import { LogsPage } from './LogsPage';
 import { ClientErrorReporter } from './clientLog';
 import { inStoreOverrideRate, isOnline, NO_ONLINE, PAYOUT_JACOB_ID, PAYOUT_PAUL_ID, payout, profit, remainingProfit, reportProfitCents, type CommissionOverride, type OnlineCfg, type Rule } from './payouts';
@@ -251,7 +254,7 @@ async function storedPayments(storeId: string) {
   for (let offset = 0;; offset += 1000) {
     const batch = check<Payment[]>(await sb.from('portal_payout_payments')
       .select('id,employee_id,amount_cents,paid_at,paid_by,legacy_ticket_key,note')
-      .eq('store_id', storeId).order('paid_at', { ascending: false })
+      .eq('store_id', storeId).is('voided_at', null).order('paid_at', { ascending: false })
       .range(offset, offset + 999));
     payments.push(...batch);
     if (batch.length < 1000) return payments;
@@ -721,6 +724,9 @@ export function App() {
     depop: 'Depop',
     reports: 'Reports',
     withdrawals: 'Withdrawals',
+    manifests: 'Manifests',
+    locations: 'Locations',
+    insights: 'Insights',
     tax: 'Tax',
     cameras: 'Cameras',
     remote: 'Remote',
@@ -797,6 +803,9 @@ export function App() {
         </div>
       </div>
       <button type="button" title="Withdrawals" className={page === 'withdrawals' ? 'active' : ''} onClick={() => goNav({ page: 'withdrawals' })}>Withdrawals</button>
+      <button type="button" title="Manifests" className={page === 'manifests' ? 'active' : ''} onClick={() => goNav({ page: 'manifests' })}>Manifests</button>
+      <button type="button" title="Locations" className={page === 'locations' ? 'active' : ''} onClick={() => goNav({ page: 'locations' })}>Locations</button>
+      <button type="button" title="Insights" className={page === 'insights' ? 'active' : ''} onClick={() => goNav({ page: 'insights' })}>Insights</button>
       <button type="button" title="Tax" className={page === 'tax' ? 'active' : ''} onClick={() => goNav({ page: 'tax' })}>Tax</button>
       {mainNav.filter(([id]) => id === 'cameras' || id === 'remote' || id === 'logs').map(([id, label]) => <button type="button" className={page === id ? 'active' : ''} key={id} title={label} onClick={() => goNav({ page: id })}>{label}</button>)}
       <button type="button" title="Settings" className={page === 'settings' ? 'active' : ''} onClick={() => goNav({ page: 'settings' })}>Settings</button>
@@ -907,7 +916,10 @@ export function App() {
   {fullAccess && page === 'logs' && <LogsPage accessToken={session.access_token} stamp={stamp} />}
   {(fullAccess || registerOnly) && page === 'inventory' && <InventoryPage client={sb} storeId={store} accessToken={session.access_token} money={money} stamp={stamp} tab={nav.inventoryTab} onTab={t => go({ inventoryTab: t })} attentionSection={nav.attentionSection} onAttentionSection={s => go({ attentionSection: s, inventoryTab: 'unfinished' })} canDelete={fullAccess} associateBrowseOnly={registerOnly} onCostChanged={() => { void loadPayoutSales(); void loadSales(); }} />}
   {fullAccess && page === 'reports' && <ReportsPage client={sb} money={money} tab={nav.reportTab} onTab={t => go({ reportTab: t })} closeouts={closeouts} expenses={<ExpensesPage client={sb} money={money} expenses={expenses} staff={staff} ownerId={onlineCfg.employeeId || defaultReimbursementId} onChanged={loadCommon} embedded />} payouts={<PayoutsPage allSales={allSales} ebayFees={ebayFees} staff={staff} rules={activeRules} payments={payments} adjustments={payoutAdjustments} expenses={expenses} cfg={onlineCfg} personName={personName} busy={busy} recordPayment={recordPayment} onCommissionChanged={setTicketOverride} />} />}
-  {fullAccess && page === 'withdrawals' && <WithdrawalsPage client={sb} money={money} stamp={stamp} />}
+  {fullAccess && page === 'withdrawals' && <WithdrawalsPage client={sb} storeId={store} money={money} stamp={stamp} />}
+  {fullAccess && page === 'manifests' && <ManifestsPage client={sb} storeId={store} money={money} />}
+  {fullAccess && page === 'locations' && <LocationsPage client={sb} storeId={store} />}
+  {fullAccess && page === 'insights' && <InsightsPage client={sb} money={money} />}
   {fullAccess && page === 'tax' && <TaxPage client={sb} money={money} stamp={stamp} />}
   {fullAccess && page === 'settings' && <SettingsPage client={sb} accessToken={session.access_token} stamp={stamp} money={money} busy={busy} run={run} onLedgerChanged={async () => { await loadSales(); await loadPayoutSales(); }} ruleEditor={<>{staff.map(p => <RuleEditor key={p.user_id} person={p} rule={ruleMap.get(p.user_id)} save={setRule} busy={busy} />)}</>} onlinePayoutSettings={<OnlinePayoutSettings cfg={onlineCfg} staff={staff} busy={busy} save={async (channels, pct, who) => { await run(async () => { check(await sb.rpc('portal_set_payout_config', { p_channels: channels, p_pct: pct, p_employee: who })); await loadCommon(); await loadPayoutSales(); }); }} />} />}
   {registerOnly && page === 'settings' && <AssociateSettings client={sb} displayName={staffSession?.displayName || 'Associate'} />}

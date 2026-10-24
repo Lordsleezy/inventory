@@ -17,6 +17,10 @@ export type MoreId =
   | 'depop'
   | 'connections'
   | 'reports'
+  | 'withdrawals'
+  | 'manifests'
+  | 'locations'
+  | 'insights'
   | 'tax'
   | 'settings';
 
@@ -137,8 +141,27 @@ export function AppMoreHome({
               <span className="app-more-left"><Icon tone="#30d158" />Reports</span>
               <span className="app-chevron">›</span>
             </button>
+            <button type="button" className="app-more-link" onClick={() => setPage('insights')}>
+              <span className="app-more-left"><Icon tone="#5e5ce6" />Insights</span>
+              <span className="app-chevron">›</span>
+            </button>
+            <button type="button" className="app-more-link" onClick={() => setPage('withdrawals')}>
+              <span className="app-more-left"><Icon tone="#64d2ff" />Withdrawals</span>
+              <span className="app-chevron">›</span>
+            </button>
             <button type="button" className="app-more-link" onClick={() => setPage('tax')}>
               <span className="app-more-left"><Icon tone="#ffd60a" />Sales tax</span>
+              <span className="app-chevron">›</span>
+            </button>
+          </div>
+          <p className="app-section-label">Inventory records</p>
+          <div className="app-group">
+            <button type="button" className="app-more-link" onClick={() => setPage('manifests')}>
+              <span className="app-more-left"><Icon tone="#ff9f0a" />Manifests</span>
+              <span className="app-chevron">›</span>
+            </button>
+            <button type="button" className="app-more-link" onClick={() => setPage('locations')}>
+              <span className="app-more-left"><Icon tone="#30d158" />Locations</span>
               <span className="app-chevron">›</span>
             </button>
           </div>

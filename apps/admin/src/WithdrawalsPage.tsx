@@ -1,377 +1,183 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import type { FormEvent } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-type PlatformKey = 'square' | 'ebay' | 'depop' | 'amazon' | 'tiktok';
-
-type PlatformRow = {
-  platform: PlatformKey;
-  label: string;
-  available_cents: number;
-  available_noted_on: string | null;
-  withdrawn_cents: number;
-  withdrawn_range_cents: number;
+type Source = 'safe' | 'square' | 'ebay' | 'amazon' | 'tiktok' | 'depop';
+type Reason = 'bank_deposit' | 'person_payout' | 'owner_draw' | 'other';
+type Entry = {
+  id: string; source: Source; amount_cents: number; moved_on: string;
+  reason: Reason; note: string; person_id: string | null;
+  performed_by: string | null;
+  created_by: string | null; created_at: string; updated_by: string | null;
+  updated_at: string | null; voided_at: string | null;
 };
-
-type Summary = {
-  start: string;
-  end: string;
-  cash_in_cents: number;
-  cash_in_all_cents: number;
-  owner_take_cents: number;
-  owner_take_all_cents: number;
-  owner_put_cents: number;
-  owner_put_all_cents: number;
-  cash_on_hand_cents: number;
-  platforms: PlatformRow[];
+type Balance = {
+  source: Source; sales_less_fees_cents: number; refund_cents: number;
+  withdrawn_cents: number; expected_cents: number;
 };
+type Person = { user_id: string; display_name: string };
+type Audit = { id: number; action: string; at: string; actor_id: string | null; old_row: Entry | null; new_row: Entry | null };
+type Props = { client: SupabaseClient; storeId: string; money: (cents: number) => string; stamp: (value: string) => string };
 
-type CashMovement = {
-  id: string;
-  kind: 'owner_take' | 'owner_put' | 'adjustment';
-  amount_cents: number;
-  moved_on: string;
-  note: string;
-  created_at: string;
-  voided_at: string | null;
-};
-
-type PlatformWithdrawal = {
-  id: string;
-  platform: PlatformKey;
-  amount_cents: number;
-  withdrawn_on: string;
-  note: string;
-  created_at: string;
-  voided_at: string | null;
-};
-
-type Props = {
-  client: SupabaseClient;
-  money: (n: number) => string;
-  stamp: (s: string) => string;
-};
-
-const zone = 'America/Los_Angeles';
-const todayLA = () => new Date().toLocaleDateString('en-CA', { timeZone: zone });
-const monthStartLA = () => `${todayLA().slice(0, 7)}-01`;
-const moneyEntry = /^\d*(?:\.\d{0,2})?$/;
-
-const KIND_LABEL: Record<CashMovement['kind'], string> = {
-  owner_take: 'Owner take',
-  owner_put: 'Cash put back',
-  adjustment: 'Adjustment',
-};
-
-const PLATFORMS: { key: PlatformKey; label: string }[] = [
-  { key: 'square', label: 'Square' },
-  { key: 'ebay', label: 'eBay' },
-  { key: 'depop', label: 'Depop' },
-  { key: 'amazon', label: 'Amazon' },
-  { key: 'tiktok', label: 'TikTok' },
+const SOURCES: { id: Source; label: string }[] = [
+  { id: 'safe', label: 'Safe · cash' }, { id: 'square', label: 'Square' },
+  { id: 'ebay', label: 'eBay' }, { id: 'amazon', label: 'Amazon' },
+  { id: 'tiktok', label: 'TikTok' }, { id: 'depop', label: 'Depop' },
 ];
+const REASONS: { id: Reason; label: string }[] = [
+  { id: 'bank_deposit', label: 'Bank deposit' },
+  { id: 'person_payout', label: 'Payout to a person' },
+  { id: 'owner_draw', label: 'Owner draw' },
+  { id: 'other', label: 'Other' },
+];
+const today = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+const empty = () => ({ source: 'safe' as Source, amount: '', moved_on: today(), reason: 'bank_deposit' as Reason, person_id: '', performed_by: '', note: '' });
+const label = (source: Source) => SOURCES.find((item) => item.id === source)?.label || source;
+const reasonLabel = (reason: Reason) => REASONS.find((item) => item.id === reason)?.label || reason;
 
-function centsFromInput(value: string) {
-  const n = Math.round(Number(value === '.' ? 0 : value || 0) * 100);
-  return Number.isFinite(n) ? n : NaN;
-}
-
-/** Cash drawer + marketplace balances the owner can withdraw. */
-export function WithdrawalsPage({ client, money, stamp }: Props) {
-  const [start, setStart] = useState(monthStartLA);
-  const [end, setEnd] = useState(todayLA);
-  const [summary, setSummary] = useState<Summary | null>(null);
-  const [cashMoves, setCashMoves] = useState<CashMovement[]>([]);
-  const [withdrawals, setWithdrawals] = useState<PlatformWithdrawal[]>([]);
-  const [error, setError] = useState('');
+export function WithdrawalsPage({ client, storeId, money, stamp }: Props) {
+  const [entries, setEntries] = useState<Entry[]>([]);
+  const [balances, setBalances] = useState<Balance[]>([]);
+  const [people, setPeople] = useState<Person[]>([]);
+  const [form, setForm] = useState(empty);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [auditFor, setAuditFor] = useState<string | null>(null);
+  const [audit, setAudit] = useState<Audit[]>([]);
   const [busy, setBusy] = useState(false);
-
-  const [cashKind, setCashKind] = useState<CashMovement['kind']>('owner_take');
-  const [cashAmount, setCashAmount] = useState('');
-  const [cashDate, setCashDate] = useState(todayLA);
-  const [cashNote, setCashNote] = useState('');
-
-  const [platForms, setPlatForms] = useState<Record<PlatformKey, { available: string; withdraw: string; note: string }>>(() =>
-    Object.fromEntries(PLATFORMS.map(p => [p.key, { available: '', withdraw: '', note: '' }])) as Record<
-      PlatformKey,
-      { available: string; withdraw: string; note: string }
-    >,
-  );
+  const [error, setError] = useState('');
+  const [loaded, setLoaded] = useState(false);
 
   const load = useCallback(async () => {
-    setError('');
-    const [sumRes, cashRes, wdRes] = await Promise.all([
-      client.rpc('portal_withdrawals_summary', { p_start: start, p_end: end }),
-      client.rpc('portal_cash_movements', { p_limit: 150 }),
-      client.rpc('portal_platform_withdrawals', { p_limit: 150 }),
+    const [entryResult, balanceResult, peopleResult] = await Promise.all([
+      client.rpc('portal_withdrawal_entries', { p_limit: 1000 }),
+      client.rpc('portal_withdrawal_reconciliation'),
+      client.from('staff').select('user_id,display_name').eq('store_id', storeId).is('deactivated_at', null).order('display_name'),
     ]);
-    if (sumRes.error) { setError(sumRes.error.message); setSummary(null); return; }
-    if (cashRes.error) { setError(cashRes.error.message); return; }
-    if (wdRes.error) { setError(wdRes.error.message); return; }
-    const body = sumRes.data as Summary;
-    setSummary({
-      ...body,
-      platforms: (body.platforms || []) as PlatformRow[],
-    });
-    setCashMoves((cashRes.data || []) as CashMovement[]);
-    setWithdrawals((wdRes.data || []) as PlatformWithdrawal[]);
-    setPlatForms(prev => {
-      const next = { ...prev };
-      for (const p of (body.platforms || []) as PlatformRow[]) {
-        const cur = next[p.platform] || { available: '', withdraw: '', note: '' };
-        next[p.platform] = {
-          ...cur,
-          available: (Number(p.available_cents || 0) / 100).toFixed(2),
-        };
-      }
-      return next;
-    });
-  }, [client, start, end]);
+    if (entryResult.error) throw entryResult.error;
+    if (balanceResult.error) throw balanceResult.error;
+    if (peopleResult.error) throw peopleResult.error;
+    setEntries((entryResult.data || []) as Entry[]);
+    setBalances((balanceResult.data || []) as Balance[]);
+    setPeople((peopleResult.data || []) as Person[]);
+    setLoaded(true);
+  }, [client, storeId]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { void load().catch((e) => setError(String(e.message || e))); }, [load]);
 
-  const platformByKey = useMemo(() => {
-    const map = new Map<PlatformKey, PlatformRow>();
-    for (const p of summary?.platforms || []) map.set(p.platform, p);
-    return map;
-  }, [summary]);
-
-  async function submitCash(ev: React.FormEvent) {
-    ev.preventDefault();
-    const cents = centsFromInput(cashAmount);
-    if (!Number.isFinite(cents) || cents <= 0) { setError('Enter a cash amount.'); return; }
+  async function save(event: FormEvent) {
+    event.preventDefault();
+    const amount = Number(form.amount);
+    const cents = Math.round(amount * 100);
+    if (!Number.isFinite(amount) || cents <= 0 || Math.abs(amount * 100 - cents) > 0.001) {
+      setError('Enter a positive amount with no more than two decimal places.'); return;
+    }
+    if (form.reason === 'person_payout' && !form.person_id) {
+      setError('Choose the person receiving this payout.'); return;
+    }
     setBusy(true); setError('');
-    const { error: e } = await client.rpc('portal_add_cash_movement', {
-      p_kind: cashKind,
-      p_amount_cents: cents,
-      p_moved_on: cashDate,
-      p_note: cashNote.trim(),
-    });
-    setBusy(false);
-    if (e) { setError(e.message); return; }
-    setCashAmount('');
-    setCashNote('');
-    await load();
+    try {
+      const { error: rpcError } = await client.rpc('portal_save_withdrawal', {
+        p_id: editing, p_source: form.source, p_amount_cents: cents, p_on: form.moved_on,
+        p_reason: form.reason, p_note: form.note, p_person: form.reason === 'person_payout' ? form.person_id : null,
+        p_performer: form.performed_by || null,
+      });
+      if (rpcError) throw rpcError;
+      setEditing(null); setForm(empty()); await load();
+    } catch (e) { setError(String((e as Error).message || e)); }
+    finally { setBusy(false); }
   }
 
-  async function voidCash(id: string) {
-    if (!window.confirm('Remove this cash movement?')) return;
+  async function remove(entry: Entry) {
+    if (!window.confirm(`Remove ${money(entry.amount_cents)} from ${label(entry.source)}? Its audit history will remain.`)) return;
     setBusy(true); setError('');
-    const { error: e } = await client.rpc('portal_void_cash_movement', { p_id: id });
-    setBusy(false);
-    if (e) setError(e.message);
-    else await load();
+    try {
+      const { error: rpcError } = await client.rpc('portal_void_withdrawal', { p_id: entry.id, p_source: entry.source });
+      if (rpcError) throw rpcError;
+      if (editing === entry.id) { setEditing(null); setForm(empty()); }
+      await load();
+    } catch (e) { setError(String((e as Error).message || e)); }
+    finally { setBusy(false); }
   }
 
-  async function setAvailable(platform: PlatformKey) {
-    const cents = centsFromInput(platForms[platform].available);
-    if (!Number.isFinite(cents) || cents < 0) { setError('Enter an available amount (0 or more).'); return; }
-    setBusy(true); setError('');
-    const { error: e } = await client.rpc('portal_set_platform_available', {
-      p_platform: platform,
-      p_available_cents: cents,
-      p_noted_on: todayLA(),
-      p_note: platForms[platform].note.trim(),
+  function edit(entry: Entry) {
+    setEditing(entry.id);
+    setForm({
+      source: entry.source, amount: (entry.amount_cents / 100).toFixed(2),
+      moved_on: entry.moved_on, reason: entry.reason, person_id: entry.person_id || '',
+      performed_by: entry.performed_by || '', note: entry.note,
     });
-    setBusy(false);
-    if (e) { setError(e.message); return; }
-    await load();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
-  async function recordWithdrawal(platform: PlatformKey) {
-    const cents = centsFromInput(platForms[platform].withdraw);
-    if (!Number.isFinite(cents) || cents <= 0) { setError('Enter a withdrawal amount.'); return; }
-    setBusy(true); setError('');
-    const { error: e } = await client.rpc('portal_add_platform_withdrawal', {
-      p_platform: platform,
-      p_amount_cents: cents,
-      p_withdrawn_on: todayLA(),
-      p_note: platForms[platform].note.trim(),
-      p_reduce_available: true,
-    });
-    setBusy(false);
-    if (e) { setError(e.message); return; }
-    setPlatForms(prev => ({
-      ...prev,
-      [platform]: { ...prev[platform], withdraw: '', note: '' },
-    }));
-    await load();
+  async function showAudit(entry: Entry) {
+    if (auditFor === entry.id) { setAuditFor(null); return; }
+    setError('');
+    const { data, error: rpcError } = await client.rpc('portal_withdrawal_audit', { p_source: entry.source, p_id: entry.id });
+    if (rpcError) { setError(rpcError.message); return; }
+    setAudit((data || []) as Audit[]); setAuditFor(entry.id);
   }
 
-  async function voidWithdrawal(id: string) {
-    if (!window.confirm('Remove this platform withdrawal?')) return;
-    setBusy(true); setError('');
-    const { error: e } = await client.rpc('portal_void_platform_withdrawal', { p_id: id });
-    setBusy(false);
-    if (e) setError(e.message);
-    else await load();
-  }
-
-  const labelFor = (platform: string) => PLATFORMS.find(p => p.key === platform)?.label || platform;
-
-  return <>
-    <header>
-      <div>
-        <div className="eyebrow">MONEY OUT</div>
-        <h1>Withdrawals</h1>
-        <p>
-          Track cash from the register, owner takes from the drawer, and what you can still pull
-          from Square, eBay, Depop, Amazon, and TikTok.
-        </p>
-      </div>
-      <div className="report-actions">
-        <label className="date-control">From
-          <input type="date" value={start} onChange={e => setStart(e.target.value)} />
-        </label>
-        <label className="date-control">To
-          <input type="date" value={end} onChange={e => setEnd(e.target.value)} />
-        </label>
-      </div>
-    </header>
-
-    {error && <p className="error" role="alert">{error}</p>}
-
-    <div className="stats">
-      <div className="stat"><span>Cash in (range)</span><strong>{money(summary?.cash_in_cents ?? 0)}</strong></div>
-      <div className="stat"><span>Cash in (all time)</span><strong>{money(summary?.cash_in_all_cents ?? 0)}</strong></div>
-      <div className="stat"><span>Owner taken (range)</span><strong>{money(summary?.owner_take_cents ?? 0)}</strong></div>
-      <div className="stat"><span>Owner taken (all time)</span><strong>{money(summary?.owner_take_all_cents ?? 0)}</strong></div>
-      <div className="stat"><span>Est. cash in drawer</span><strong>{money(summary?.cash_on_hand_cents ?? 0)}</strong></div>
-    </div>
-
+  const visibleSources = SOURCES.filter((source) => balances.some((balance) => balance.source === source.id));
+  return <div className="withdrawals-page">
+    <header><div><div className="eyebrow">MONEY MOVING</div><h1>Withdrawals</h1>
+      <p>Record cash taken from the safe and transfers from each selling account. Withdrawals do not reduce profit.</p></div></header>
+    {error && <div className="alert" role="alert">{error}<button type="button" onClick={() => setError('')}>×</button></div>}
     <section className="panel">
-      <h2>Cash drawer</h2>
-      <p className="hint" style={{ marginTop: 0 }}>
-        Cash in comes from register sales. Record when the owner takes cash out (or puts cash back).
-      </p>
-      <form className="exp-form" onSubmit={e => void submitCash(e)}>
-        <label>Type
-          <select value={cashKind} onChange={e => setCashKind(e.target.value as CashMovement['kind'])}>
-            <option value="owner_take">Owner take</option>
-            <option value="owner_put">Cash put back</option>
-            <option value="adjustment">Adjustment</option>
-          </select>
-        </label>
-        <label>Amount ($)
-          <input
-            inputMode="decimal"
-            value={cashAmount}
-            onChange={e => { if (moneyEntry.test(e.target.value)) setCashAmount(e.target.value); }}
-            onBlur={() => cashAmount && setCashAmount(Number(cashAmount === '.' ? 0 : cashAmount).toFixed(2))}
-          />
-        </label>
-        <label>Date
-          <input type="date" value={cashDate} onChange={e => setCashDate(e.target.value)} />
-        </label>
-        <label>Note
-          <input value={cashNote} onChange={e => setCashNote(e.target.value.slice(0, 200))} placeholder="Optional" />
-        </label>
-        <div className="actions"><button disabled={busy}>Record</button></div>
+      <h2>{editing ? 'Edit withdrawal' : 'Record withdrawal'}</h2>
+      <form className="withdrawal-form" onSubmit={(event) => void save(event)}>
+        <label>Source<select value={form.source} disabled={!!editing} onChange={(event) => setForm({ ...form, source: event.target.value as Source })}>
+          {visibleSources.map((source) => <option key={source.id} value={source.id}>{source.label}</option>)}
+        </select></label>
+        <label>Amount ($)<input required inputMode="decimal" type="number" min="0.01" step="0.01" value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} /></label>
+        <label>Date<input required type="date" value={form.moved_on} onChange={(event) => setForm({ ...form, moved_on: event.target.value })} /></label>
+        <label>Reason<select value={form.reason} onChange={(event) => setForm({ ...form, reason: event.target.value as Reason, person_id: '' })}>
+          {REASONS.map((reason) => <option key={reason.id} value={reason.id}>{reason.label}</option>)}
+        </select></label>
+        <label>Who did it<select value={form.performed_by} onChange={(event) => setForm({ ...form, performed_by: event.target.value })}>
+          <option value="">Me · signed in</option>{people.map((person) => <option key={person.user_id} value={person.user_id}>{person.display_name}</option>)}
+        </select></label>
+        {form.reason === 'person_payout' && <label>Person<select required value={form.person_id} onChange={(event) => setForm({ ...form, person_id: event.target.value })}>
+          <option value="">Choose person</option>{people.map((person) => <option key={person.user_id} value={person.user_id}>{person.display_name}</option>)}
+        </select></label>}
+        <label className="withdrawal-note">Note<input value={form.note} maxLength={500} onChange={(event) => setForm({ ...form, note: event.target.value })} placeholder="Optional reference or details" /></label>
+        <div className="actions"><button disabled={busy}>{editing ? 'Save changes' : 'Record'}</button>
+          {editing && <button type="button" className="secondary" onClick={() => { setEditing(null); setForm(empty()); }}>Cancel</button>}</div>
       </form>
-      {cashMoves.length === 0 ? <div className="empty" style={{ marginTop: 16 }}>No cash movements yet.</div> : (
-        <table className="tbl" style={{ marginTop: 16 }}>
-          <thead><tr><th>Date</th><th>Type</th><th className="n">Amount</th><th>Note</th><th /></tr></thead>
-          <tbody>
-            {cashMoves.map(m => (
-              <tr key={m.id} style={m.voided_at ? { opacity: 0.5, textDecoration: 'line-through' } : undefined}>
-                <td>{m.moved_on}</td>
-                <td>{KIND_LABEL[m.kind]}</td>
-                <td className="n">{money(m.amount_cents)}</td>
-                <td>{m.note || '—'}{m.voided_at ? <> · voided {stamp(m.voided_at)}</> : null}</td>
-                <td>{!m.voided_at && <button type="button" className="text-button danger" disabled={busy} onClick={() => void voidCash(m.id)}>Remove</button>}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+      {form.reason === 'person_payout' && <p className="hint">Saving also posts one linked payment to this person’s running payout balance.</p>}
     </section>
-
-    <section className="panel">
-      <h2>Platform balances</h2>
-      <p className="hint" style={{ marginTop: 0 }}>
-        Enter the available-to-withdraw balance you see in each app. Recording a withdrawal logs it and
-        lowers available by that amount.
-      </p>
-      <div className="withdrawals-grid">
-        {PLATFORMS.map(p => {
-          const row = platformByKey.get(p.key);
-          const form = platForms[p.key];
-          return (
-            <div className="withdrawal-card" key={p.key}>
-              <div className="withdrawal-card-top">
-                <h3>{p.label}</h3>
-                <div className="stats compact" style={{ margin: 0 }}>
-                  <div className="stat">
-                    <span>Available</span>
-                    <strong>{money(row?.available_cents ?? 0)}</strong>
-                    {row?.available_noted_on ? <small className="stat-hint">as of {row.available_noted_on}</small> : null}
-                  </div>
-                  <div className="stat">
-                    <span>Withdrawn (all)</span>
-                    <strong>{money(row?.withdrawn_cents ?? 0)}</strong>
-                  </div>
-                  <div className="stat">
-                    <span>Withdrawn (range)</span>
-                    <strong>{money(row?.withdrawn_range_cents ?? 0)}</strong>
-                  </div>
-                </div>
-              </div>
-              <div className="exp-form">
-                <label>Available now ($)
-                  <input
-                    inputMode="decimal"
-                    value={form.available}
-                    onChange={e => {
-                      if (!moneyEntry.test(e.target.value)) return;
-                      setPlatForms(prev => ({ ...prev, [p.key]: { ...prev[p.key], available: e.target.value } }));
-                    }}
-                  />
-                </label>
-                <label>Withdraw ($)
-                  <input
-                    inputMode="decimal"
-                    value={form.withdraw}
-                    onChange={e => {
-                      if (!moneyEntry.test(e.target.value)) return;
-                      setPlatForms(prev => ({ ...prev, [p.key]: { ...prev[p.key], withdraw: e.target.value } }));
-                    }}
-                  />
-                </label>
-                <label>Note
-                  <input
-                    value={form.note}
-                    onChange={e => setPlatForms(prev => ({ ...prev, [p.key]: { ...prev[p.key], note: e.target.value.slice(0, 200) } }))}
-                    placeholder="Optional"
-                  />
-                </label>
-                <div className="actions">
-                  <button type="button" className="secondary" disabled={busy} onClick={() => void setAvailable(p.key)}>Set available</button>
-                  <button type="button" disabled={busy} onClick={() => void recordWithdrawal(p.key)}>Record withdrawal</button>
-                </div>
-              </div>
-            </div>
-          );
-        })}
+    <section className="panel"><h2>Reconciliation · all time</h2>
+      <p className="hint">Expected balance uses recorded sales less channel fees, refunds and withdrawals. Opening balances, deposits and unmatched external payouts may need separate review.</p>
+      <div className="withdrawal-balance-list">
+        {balances.map((row) => <details className="withdrawal-balance" key={row.source}>
+          <summary><strong>{label(row.source)}</strong><span>Expected {money(row.expected_cents)}</span></summary>
+          <div className="withdrawal-parts"><span>Sales less fees</span><b>{money(row.sales_less_fees_cents)}</b>
+            <span>Refunds</span><b>−{money(row.refund_cents)}</b>
+            <span>Withdrawn</span><b>−{money(row.withdrawn_cents)}</b></div>
+        </details>)}
       </div>
     </section>
-
-    <section className="panel">
-      <h2>Recent platform withdrawals</h2>
-      {withdrawals.length === 0 ? <div className="empty">No platform withdrawals yet.</div> : (
-        <table className="tbl">
-          <thead><tr><th>Date</th><th>Platform</th><th className="n">Amount</th><th>Note</th><th /></tr></thead>
-          <tbody>
-            {withdrawals.map(w => (
-              <tr key={w.id} style={w.voided_at ? { opacity: 0.5, textDecoration: 'line-through' } : undefined}>
-                <td>{w.withdrawn_on}</td>
-                <td>{labelFor(w.platform)}</td>
-                <td className="n">{money(w.amount_cents)}</td>
-                <td>{w.note || '—'}{w.voided_at ? <> · voided {stamp(w.voided_at)}</> : null}</td>
-                <td>{!w.voided_at && <button type="button" className="text-button danger" disabled={busy} onClick={() => void voidWithdrawal(w.id)}>Remove</button>}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+    <section className="panel"><h2>History</h2>
+      {!loaded ? <p>Loading…</p> : entries.length === 0 ? <p className="empty">No withdrawals recorded yet.</p>
+        : <div className="withdrawal-list">{entries.map((entry) => <details key={entry.id} className="withdrawal-entry">
+          <summary><span><strong>{label(entry.source)} · {money(entry.amount_cents)}</strong>
+            <small>{entry.moved_on} · {reasonLabel(entry.reason)}{entry.voided_at ? ' · Removed' : ''}</small></span><span className="app-chevron">›</span></summary>
+          <div className="withdrawal-entry-body">
+            {entry.person_id && <p>Paid to {people.find((person) => person.user_id === entry.person_id)?.display_name || entry.person_id}</p>}
+            <p>Withdrawn by {people.find((person) => person.user_id === entry.performed_by)?.display_name || 'Unknown'}</p>
+            {entry.note && <p>{entry.note}</p>}
+            <small>Recorded {stamp(entry.created_at)} by {people.find((person) => person.user_id === entry.created_by)?.display_name || 'Unknown'}
+              {entry.updated_at ? ` · Edited ${stamp(entry.updated_at)}` : ''}</small>
+            <div className="actions">
+              {!entry.voided_at && <><button type="button" className="secondary" disabled={busy} onClick={() => edit(entry)}>Edit</button>
+                <button type="button" className="secondary" disabled={busy} onClick={() => void remove(entry)}>Remove</button></>}
+              <button type="button" className="secondary" onClick={() => void showAudit(entry)}>Audit trail</button>
+            </div>
+            {auditFor === entry.id && <div className="withdrawal-audit">{audit.map((revision) => <div key={revision.id}>
+              <strong>{revision.action}</strong> · {stamp(revision.at)} · {people.find((person) => person.user_id === revision.actor_id)?.display_name || 'Unknown'}
+              {revision.old_row && <small>Previously {money(revision.old_row.amount_cents)} · {revision.old_row.moved_on} · {reasonLabel(revision.old_row.reason)}</small>}
+            </div>)}</div>}
+          </div>
+        </details>)}</div>}
     </section>
-  </>;
+  </div>;
 }
