@@ -1,12 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { medianReference, verifyRetailListings, upcOfferPrices } from './receive-price.mjs';
+import { medianReference, verifyRetailListings, upcOfferPrices, receivePriceCacheKey } from './receive-price.mjs';
 
 const item = { brand: 'Febreze', title: 'Febreze Air Mist Air Freshener Spray, Linen & Sky, 8.8 oz', variant: 'Linen & Sky', size: '8.8 oz', unit_count: 1 };
 const listing = (store, cents, suffix = '') => ({ store, price_cents: cents,
   product_name: `Febreze Air Mist Linen & Sky 8.8 fl oz${suffix}`,
   url: `https://${store.toLowerCase()}.example/products/febreze-air-mist-linen-sky-8.8oz${suffix.replaceAll(' ', '-')}`,
   pack_size: 1, approximate: false });
+
+test('fallback caches separate size, scent and pack even when UPC or model is shared', () => {
+  const identity = {...item,model:'Air Mist',upc:'037000962564'};
+  const key=receivePriceCacheKey(identity);
+  assert.notEqual(key,receivePriceCacheKey({...identity,size:'24 oz'}));
+  assert.notEqual(key,receivePriceCacheKey({...identity,variant:'Spring Meadow'}));
+  assert.notEqual(key,receivePriceCacheKey({...identity,unit_count:3}));
+  assert.equal(key,receivePriceCacheKey({...identity,brand:'FEBREZE'}));
+});
 
 test('median counts distinct exact whole-package listings only', () => {
   const prices = [listing('A', 299), listing('B', 399), listing('C', 499),
@@ -41,6 +50,8 @@ test('count printed in a listing establishes whole-package count and rejects a c
   const price = {store:'eBay',price_cents:4445,url:'https://ebay.com/itm/1',product_name:'Philips Sonicare HX9999/01 2 pack'};
   assert.equal(medianReference([price], identity).count, 0);
   assert.equal(medianReference([{...price,product_name:'Philips Sonicare HX7129/02 2 pack'}], identity).count, 1);
+  assert.equal(medianReference([{...price,product_name:'Philips Sonicare Advanced Clean HX7129/02 2 pack'}],
+    {...identity,model:'Sonicare Advanced Clean'}).count,1);
 });
 
 test('a multipack is priced as the whole package, never divided', () => {

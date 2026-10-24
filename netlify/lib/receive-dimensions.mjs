@@ -36,7 +36,8 @@ export function mergeDimensions(floor, amazon, upcitemdb) {
 
 export function dimensionIdentityMatches(catalog, identity) {
   if (!identity?.title || !identity?.brand) return true;
-  return comparablePrices([{price_cents:1, url:'https://catalog.example/item', product_name:catalog?.title}], identity).length > 0;
+  return comparablePrices([{price_cents:1, url:'https://catalog.example/item',
+    product_name:[catalog?.title,catalog?.model].filter(Boolean).join(' ')}], identity).length > 0;
 }
 
 export async function lookupReceiveDimensions(sb, storeId, rawUpc, identity, { source = 'all' } = {}) {

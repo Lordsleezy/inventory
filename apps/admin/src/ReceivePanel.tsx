@@ -1660,13 +1660,15 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           {files.length > 0 && <span>{files.length} photo{files.length === 1 ? '' : 's'}</span>}
         </div>
         <div className="receive-confirm-bottom">
-          <details open className="receive-confirm-prices"><summary>{photoPriceBusy ? 'Searching prices...' : !photoIdentity ? 'Prices available after product identification' : photoPriceError ? 'Price search incomplete' : photoPrice?.median_cents != null
+          <details className="receive-confirm-prices"><summary>{photoPriceBusy ? 'Searching prices...' : !photoIdentity ? 'Prices available after product identification' : photoPriceError ? 'Price search incomplete' : photoPrice?.median_cents != null
             ? `Online asking price ~${money(photoPrice.median_cents)} (${photoPrice.count} listings, ${money(photoPrice.low_cents)}–${money(photoPrice.high_cents)})`
             : photoPrice?.count ? `Online price ${money(photoPrice.low_cents)}${photoPrice.count > 1 ? `–${money(photoPrice.high_cents)}` : ''}` : 'No comparable online price found'}</summary>
             {photoPrice?.listings?.map(listing => <a key={listing.url} href={listing.url} target="_blank" rel="noreferrer">{listing.store} · {money(listing.price_cents)} · {listing.product_name}</a>)}
             {photoPrice?.highest_retail && <small>Highest retail seen: {photoPrice.highest_retail.store} · {money(photoPrice.highest_retail.price_cents)}</small>}
             {photoPriceError && <><span>{photoPriceError}</span>{photoIdentity && <button type="button" className="secondary" onClick={() => void findPhotoPrices(photoIdentity)}>Retry prices</button>}</>}
           </details>
+          {photoPrice?.listings?.[0] && <a className="receive-confirm-source" href={photoPrice.listings[0].url} target="_blank" rel="noreferrer">
+            {photoPrice.listings[0].store} · {money(photoPrice.listings[0].price_cents)} · source ↗</a>}
           <div className="receive-confirm-bottom-row"><label>Your price<input inputMode="decimal" placeholder="0.00" value={form.ask} onChange={e => update('ask',e.target.value)} /></label>
             <label className="receive-confirm-ready"><input type="checkbox" checked={readyToList} onChange={e => setReadyToList(e.target.checked)} /> Ready to list</label></div>
           {liveMissing.length > 0 && <small>Missing: {liveMissing.join(', ')} · saves to Unfinished</small>}

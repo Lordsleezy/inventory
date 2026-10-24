@@ -17,8 +17,8 @@ export function MeasureOnMat({ onApply, onClose }: { onApply: (value: Measuremen
     try { setImage(await rectifyMatPhoto(file)); } catch(e) { setError(e instanceof Error ? e.message : 'Photo could not be measured.'); }
     finally { setBusy(false); }
   }
-  return createPortal(<div style={{position:'fixed',inset:0,zIndex:200,background:'#17232dcc',display:'grid',placeItems:'center',padding:8}}><section role="dialog" aria-modal="true" aria-label="Measure on mat" style={{maxHeight:'95dvh',overflow:'auto',width:'min(95vw,600px)',background:'white',borderRadius:16,padding:20,boxSizing:'border-box'}}>
-    <h2>Measure on mat</h2>
+  return createPortal(<div style={{position:'fixed',inset:0,zIndex:200,background:'#17232dcc',display:'grid',placeItems:'center',padding:8}}><section role="dialog" aria-modal="true" aria-label="Measure on mat" style={{maxHeight:'95dvh',overflow:'auto',width:'min(95vw,600px)',background:'white',color:'#17232d',borderRadius:16,padding:20,boxSizing:'border-box'}}>
+    <h2 style={{color:'inherit'}}>Measure on mat</h2>
     <p><a href="/floor-aruco-mat.pdf" target="_blank" rel="noreferrer">Print letter-size ArUco mat</a> at 100%. Check the printed scale with a ruler.</p>
     <label>Measuring<select value={target} onChange={e=>{setTarget(e.target.value as 'product'|'package');setValues({length:'',width:'',height:''});setStage('top');setImage('');setPoints([]);}}><option value="product">Product</option><option value="package">Actual shipping package</option></select></label>
     <p>{stage==='top' ? 'Top photo: camera directly overhead. Keep all markers visible. Tap two opposite corners of the item to mark its length and width.' : 'Side photo: stand the mat upright beside the item, in the same plane as its side. Tap the bottom and top of the item.'}</p>

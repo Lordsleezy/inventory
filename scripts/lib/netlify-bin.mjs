@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { safeNetlifyOutput } from './netlify-output.mjs';
 
 export function netlifyCliPath() {
   if (process.env.NETLIFY_CLI && existsSync(process.env.NETLIFY_CLI)) return process.env.NETLIFY_CLI;
@@ -61,12 +62,17 @@ export function runNetlify(args, { root, site, stdio } = {}) {
   const cli = netlifyCliPath();
   if (!cli) return { status: 127, stdout: "", stderr: "netlify cli not found" };
   const cwd = root || path.dirname(fileURLToPath(import.meta.url));
-  return withoutWorkspaces(cwd, () => spawnSync(process.execPath, [cli, ...argsWithoutCwd(args)], {
+  const result = withoutWorkspaces(cwd, () => spawnSync(process.execPath, [cli, ...argsWithoutCwd(args)], {
     cwd,
-    encoding: stdio === "inherit" ? undefined : "utf8",
-    stdio: stdio || "pipe",
+    encoding: "utf8",
+    stdio: stdio === 'inherit' ? 'pipe' : stdio || "pipe",
     shell: false,
     maxBuffer: 20 * 1024 * 1024,
     env: site ? { ...process.env, NETLIFY_SITE_ID: site, CI: process.env.CI || "true" } : { ...process.env, CI: process.env.CI || "true" },
   }));
+  if (stdio === 'inherit') {
+    process.stdout.write(safeNetlifyOutput(result.stdout));
+    process.stderr.write(safeNetlifyOutput(result.stderr));
+  }
+  return result;
 }
