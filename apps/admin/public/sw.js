@@ -1,5 +1,6 @@
 /* Floor admin shell — cache static assets only; never cache live inventory/API data. */
-const SHELL = 'floor-shell-v3';
+/* Bump SHELL on every store-phone-facing deploy so installed PWAs install a new worker. */
+const SHELL = 'floor-shell-v4';
 const SHELL_URLS = [
   '/',
   '/index.html',
@@ -21,6 +22,10 @@ self.addEventListener('activate', (event) => {
       Promise.all(keys.filter((k) => k !== SHELL).map((k) => caches.delete(k))),
     ).then(() => self.clients.claim()),
   );
+});
+
+self.addEventListener('message', (event) => {
+  if (event.data === 'SKIP_WAITING') void self.skipWaiting();
 });
 
 function isLiveData(url) {
