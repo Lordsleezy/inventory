@@ -99,6 +99,11 @@ update public.sales s set sold_at=o.paid_at
 from public.web_orders o
 where o.id in ('5b6e8ff9-0ae2-4004-af70-9baaa4abe258','8e94bb52-317b-49c4-bf13-4e4b05ff2c68')
   and s.id=o.sale_id and s.store_id=o.store_id and o.paid_at is not null;
+-- The linked kay_lucha sale was entered on October 23, but the verified
+-- Depop order date is October 20. The source provides a date, not a time;
+-- use local noon and preserve the original timestamp in the audit snapshot.
+update public.sales set sold_at='2026-10-20 12:00:00-07'::timestamptz
+where id=124 and store_id='5487ca47-6147-4fe8-bc6d-46b6472726ba';
 
 -- Mark verified payment processing fees as actual. Do not count buyer shipping as store proceeds.
 update public.web_orders o set marketplace_fee_cents=v.fee_cents, updated_at=now()
