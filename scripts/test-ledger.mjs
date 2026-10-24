@@ -4,13 +4,13 @@
  *   node --experimental-strip-types scripts/test-ledger.mjs
  */
 import assert from "node:assert/strict";
-import { readdir, readFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { PGlite } from "@electric-sql/pglite";
+import { replayMigrationPaths } from "./lib/replay-migrations.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const migrationsDir = path.join(root, "supabase", "migrations");
 const stubPath = path.join(root, "supabase", "tests", "pglite-stub.sql");
 
 const STORE = "00000000-0000-0000-0000-000000000112";
@@ -18,8 +18,8 @@ const OWNER = "00000000-0000-0000-0000-000000000111";
 
 const db = new PGlite();
 await db.exec(await readFile(stubPath, "utf8"));
-for (const name of (await readdir(migrationsDir)).filter((n) => n.endsWith(".sql")).sort()) {
-  const sql = await readFile(path.join(migrationsDir, name), "utf8");
+for (const file of replayMigrationPaths(root)) {
+  const sql = await readFile(file, "utf8");
   await db.exec(sql.replace(/create extension if not exists pgcrypto;/gi, "-- pglite stub"));
 }
 

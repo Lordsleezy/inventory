@@ -22,10 +22,10 @@ echo "Applying stub + migrations to $DB_URL"
 psql "$DB_URL" -v ON_ERROR_STOP=1 -f "$ROOT/supabase/tests/pglite-stub.sql" >/dev/null
 psql "$DB_URL" -v ON_ERROR_STOP=1 -c 'create extension if not exists pgtap' >/dev/null
 
-for f in $(ls "$ROOT/supabase/migrations/"*.sql | sort); do
+while IFS= read -r f; do
   echo "  $(basename "$f")"
   psql "$DB_URL" -v ON_ERROR_STOP=1 -f "$f" >/dev/null
-done
+done < <(node "$ROOT/scripts/list-replay-migrations.mjs")
 
 echo "Running pgTAP"
 shopt -s nullglob
