@@ -6,7 +6,8 @@
 import { asNetlifyFunction, floorLog } from "../lib/floor-log.mjs";
 import { json, optionsOk, serviceClient } from "../lib/server.mjs";
 import { portalAdminFromEvent } from "../lib/portal-auth.mjs";
-import { identifyFrames, lookupRetail, retailFields, tokenCost } from "../lib/video-scan.mjs";
+import { identifyFrames, lookupRetail, tokenCost } from "../lib/video-scan.mjs";
+import { medianReference } from "../lib/receive-price.mjs";
 import { itemSpecificsFromLookup, usableModelNumber, variantFromTitle } from "../lib/amazon.mjs";
 import { normalizeGtin } from "../lib/gtin-normalize.mjs";
 import {
@@ -37,13 +38,6 @@ async function authFromEvent(event) {
   }
 }
 
-function median(nums) {
-  if (!nums.length) return null;
-  const s = [...nums].sort((a, b) => a - b);
-  const mid = Math.floor(s.length / 2);
-  return s.length % 2 ? s[mid] : Math.round((s[mid - 1] + s[mid]) / 2);
-}
-
 function specificsFromIdentity(identity) {
   const brand = String(identity.brand || "").trim();
   const title = String(identity.title || "").trim();
@@ -62,9 +56,11 @@ async function budgetError(ctx) {
   const monthStart = new Date();
   monthStart.setUTCDate(1);
   monthStart.setUTCHours(0, 0, 0, 0);
-  const settings = await ctx.sb.from('video_scan_settings').select('monthly_cap_usd').eq('store_id', ctx.storeId).maybeSingle();
-  const spend = await ctx.sb.from('video_scan_jobs').select('estimated_cost_usd, reserved_usd')
-    .eq('store_id', ctx.storeId).gte('created_at', monthStart.toISOString());
+  const [settings, spend] = await Promise.all([
+    ctx.sb.from('video_scan_settings').select('monthly_cap_usd').eq('store_id', ctx.storeId).maybeSingle(),
+    ctx.sb.from('video_scan_jobs').select('estimated_cost_usd, reserved_usd')
+      .eq('store_id', ctx.storeId).gte('created_at', monthStart.toISOString()),
+  ]);
   if (settings.error || spend.error) {
     await floorLog({ level: 'error', event: 'receive_photo.budget_check_failed', message: String(settings.error?.message || spend.error?.message), storeId: ctx.storeId });
     return json(503, { ok: false, error: 'budget_check_failed', message: 'AI spend could not be checked. Retry or fill the fields by hand.' });
@@ -151,20 +147,13 @@ export async function invoke(event) {
     if (!identity.title || !identity.brand) return json(400, { ok: false, error: 'product_identity_required' });
     const started = Date.now();
     try {
-      const retail = await lookupRetail(ctx.sb, { store_id: ctx.storeId }, identity, { singlePass: true });
-      const fields = retailFields(retail.prices || [], identity);
-      const unitCents = (fields.retail_prices || []).filter(p => !p.approximate && !p.size_mismatch)
-        .map(p => Math.round(p.price_cents / Math.max(1, (Number(p.pack_size) || 1) / Math.max(1, Number(source.unit_count) || 1))));
-      const highest = (fields.retail_prices || [])[0] || null;
+      identity.unit_count = Math.max(1, Number(source.unit_count) || 1);
+      const retail = await lookupRetail(ctx.sb, { store_id: ctx.storeId }, identity, { singlePass: true, exactMatch: true });
+      const reference = medianReference(retail.prices || [], identity);
       const costUsd = tokenCost(retail.input || 0, retail.output || 0);
       await logUsage(ctx, identity, { price_input_tokens: retail.input || 0, price_output_tokens: retail.output || 0,
         search_queries: retail.queries || 0 }, costUsd);
-      return json(200, { ok: true, price: { kind: 'asking', median_cents: median(unitCents),
-        low_cents: unitCents.length ? Math.min(...unitCents) : null,
-        high_cents: unitCents.length ? Math.max(...unitCents) : null, count: unitCents.length,
-        highest_retail: highest ? { store: highest.store, price_cents: highest.price_cents,
-          url: highest.url, product_name: highest.product_name } : null,
-        listings: (fields.retail_prices || []).slice(0, 8) },
+      return json(200, { ok: true, price: reference,
         timing: { price_ms: Date.now() - started }, cost_usd: costUsd });
     } catch (e) {
       await floorLog({ level: 'warn', event: 'receive_photo.retail_fail', message: String(e?.message || e).slice(0, 300), storeId: ctx.storeId });
@@ -235,7 +224,7 @@ export async function invoke(event) {
   let prices = [];
   let retailMeta = { input: 0, output: 0, queries: 0, reused: false };
   try {
-    retailMeta = await lookupRetail(ctx.sb, job, { ...identity, title, brand, model }, { singlePass: true });
+    retailMeta = await lookupRetail(ctx.sb, job, { ...identity, title, brand, model }, { singlePass: true, exactMatch: true });
     prices = retailMeta.prices || [];
   } catch (e) {
     await floorLog({
@@ -246,18 +235,7 @@ export async function invoke(event) {
     });
   }
 
-  const fields = retailFields(prices, { ...identity, title, brand, model, unit_count: identity.unit_count });
-  const unitCents = (fields.retail_prices || [])
-    .filter((p) => !p.approximate && !p.size_mismatch)
-    .map((p) => {
-      const pack = Math.max(1, Number(p.pack_size) || 1);
-      const units = Math.max(1, Number(identity.unit_count) || 1);
-      return Math.round(p.price_cents / Math.max(1, pack / units));
-    });
-  const askMedian = median(unitCents);
-  const askLow = unitCents.length ? Math.min(...unitCents) : null;
-  const askHigh = unitCents.length ? Math.max(...unitCents) : null;
-  const highest = (fields.retail_prices || [])[0] || null;
+  const reference = medianReference(prices, { ...identity, title, brand, model });
 
   const costUsd = tokenCost(
     (identified.input || 0) + (retailMeta.input || 0),
@@ -282,7 +260,7 @@ export async function invoke(event) {
     event: "receive_photo.ok",
     message: title || brand || "identified",
     storeId: ctx.storeId,
-    detail: { upc, identify_ms: identifyMs, total_ms: Date.now() - t0, prices: unitCents.length, cost_usd: costUsd },
+    detail: { upc, identify_ms: identifyMs, total_ms: Date.now() - t0, prices: reference.count, cost_usd: costUsd },
   });
 
   return json(200, {
@@ -301,17 +279,7 @@ export async function invoke(event) {
       catalog_title: identity.title || "",
     },
     fill: photoFill(identity, brand, model, title),
-    price: {
-      kind: "asking",
-      median_cents: askMedian,
-      low_cents: askLow,
-      high_cents: askHigh,
-      count: unitCents.length,
-      highest_retail: highest
-        ? { store: highest.store, price_cents: highest.price_cents, url: highest.url, product_name: highest.product_name }
-        : null,
-      listings: (fields.retail_prices || []).slice(0, 8),
-    },
+    price: reference,
     timing: { identify_ms: identifyMs, total_ms: Date.now() - t0 },
     cost_usd: costUsd,
   });

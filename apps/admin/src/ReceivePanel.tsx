@@ -168,7 +168,7 @@ type PhotoPriceInfo = {
   low_cents: number | null;
   high_cents: number | null;
   count: number;
-  highest_retail?: { store?: string; price_cents?: number; url?: string; product_name?: string } | null;
+  listings?: { store: string; price_cents: number; url: string; product_name: string }[];
 };
 type PhotoFill = { aspects: Record<string, string> };
 
@@ -581,6 +581,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   const [photoNeed, setPhotoNeed] = useState('');
   const [photoPrice, setPhotoPrice] = useState<PhotoPriceInfo | null>(null);
   const [photoPriceError, setPhotoPriceError] = useState('');
+  const [photoPriceBusy, setPhotoPriceBusy] = useState(false);
   const [photoIdentity, setPhotoIdentity] = useState<Record<string, unknown> | null>(null);
   const [photoFill, setPhotoFill] = useState<PhotoFill | null>(null);
   const missPhotoFile = useRef<HTMLInputElement>(null);
@@ -1256,8 +1257,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   }
 
   async function findPhotoPrices(identity: Record<string, unknown>) {
-    setPhotoIdBusy(true);
-    setPhotoIdStatus('Finding prices…');
+    setPhotoPriceBusy(true);
     setPhotoPriceError('');
     try {
       const response = await fetch(floorFunctionUrl('receive-photo-identify'), {
@@ -1272,8 +1272,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       setPhotoPrice(null);
       setPhotoPriceError(`${errText(e)} You can enter your price by hand or retry prices.`);
     } finally {
-      setPhotoIdBusy(false);
-      setPhotoIdStatus('');
+      setPhotoPriceBusy(false);
     }
   }
 
@@ -1287,6 +1286,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     setPhotoIdBusy(true);
     setPhotoIdStatus('Identifying product…');
     setPhotoIdError('');
+    setPhotoPrice(null);
+    setPhotoPriceError('');
     setFiles([raw]);
     const file = await copyImageFile(raw);
     if (!file) {
@@ -1333,9 +1334,9 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       setPhotoFill({ aspects: json.fill?.aspects || {} });
       const identity = (json.identity || {}) as Record<string, unknown>;
       setPhotoIdentity(identity);
-      await findPhotoPrices(identity);
       setDialog('photo-price');
       setWarning('');
+      void findPhotoPrices(identity);
     } catch (e) {
       setPhotoIdError(errText(e) || 'Photo identify failed. Retry or fill fields by hand.');
     } finally {
@@ -1761,23 +1762,25 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     {dialog === 'photo-price' && <div className="receive-modal" role="dialog" aria-modal="true" aria-labelledby="photo-price-title">
       <div className="receive-modal-card">
         <h3 id="photo-price-title">What price do you want to set?</h3>
-        {photoIdBusy && <p role="status">{photoIdStatus || 'Finding prices…'}</p>}
+        {photoPriceBusy && <p role="status">Finding prices… You can enter your price now.</p>}
         {previews[0] && <img src={previews[0]} alt="" style={{ maxWidth: '100%', maxHeight: 180, objectFit: 'contain', marginBottom: 8 }} />}
         <p><strong>{form.title.trim() || [form.brand, form.model].filter(Boolean).join(' ')}</strong></p>
-        {photoPrice && photoPrice.count > 0 ? (
+        {photoPrice?.median_cents != null ? (
           <p className="hint">
-            Median asking price {money(photoPrice.median_cents)} from {photoPrice.count} listing{photoPrice.count === 1 ? '' : 's'}
+            Median of {photoPrice.count} listings: {money(photoPrice.median_cents)}
             {photoPrice.low_cents != null && photoPrice.high_cents != null
               ? ` (range ${money(photoPrice.low_cents)}–${money(photoPrice.high_cents)})`
               : ''}.
-            {photoPrice.highest_retail?.store
-              ? ` Highest retail seen: ${photoPrice.highest_retail.store} ${money(photoPrice.highest_retail.price_cents ?? null)}.`
-              : ''}
             {' '}These are asking prices, not sold comps — you choose the price.
           </p>
+        ) : photoPriceBusy ? (
+          <p className="hint">The identified product is ready. Price research is still running.</p>
+        ) : photoPrice?.count ? (
+          <p className="hint">Only {photoPrice.count} matching listing{photoPrice.count === 1 ? '' : 's'} found; at least 3 are needed for a median. Enter your price.</p>
         ) : (
-          <p className="hint">No current asking prices found. Enter the price you want.</p>
+          <p className="hint">No matching single-package prices found. Enter the price you want.</p>
         )}
+        {!!photoPrice?.listings?.length && <div className="hint">Matching listings: {photoPrice.listings.map((listing, index) => <span key={listing.url}>{index ? ' · ' : ''}<a href={listing.url} target="_blank" rel="noreferrer">{listing.store} {money(listing.price_cents)}</a></span>)}</div>}
         {photoPriceError && <p className="alert" role="alert">{photoPriceError}</p>}
         <p className="hint">A single angled photo cannot reliably give physical size or shipping weight. Measure the item and its packed box, then enter what you know. Leave unknown values blank; they stay on the listing checklist.</p>
         <div className="receive-measure-grid">
@@ -1799,10 +1802,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         </label>
         <div className="actions">
           <button type="button" onClick={() => setDialog(null)}>Use this price</button>
-          {photoPriceError && photoIdentity && <button type="button" className="secondary" disabled={photoIdBusy} onClick={() => void findPhotoPrices(photoIdentity)}>Retry prices</button>}
-          {photoPrice?.highest_retail?.url && (
-            <a className="secondary" href={photoPrice.highest_retail.url} target="_blank" rel="noreferrer">Open retail link</a>
-          )}
+          {photoPriceError && photoIdentity && <button type="button" className="secondary" disabled={photoPriceBusy} onClick={() => void findPhotoPrices(photoIdentity)}>Retry prices</button>}
         </div>
       </div>
     </div>}

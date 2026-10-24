@@ -134,18 +134,20 @@ async function resolveRetailUrls(prices,signal) {
     return price;
   }));
 }
-async function searchOnce(identity,closer=false,signal,singlePass=false) {
+async function searchOnce(identity,closer=false,signal,singlePass=false,exactMatch=false) {
   const title=String(identity.title||'');
   const query=[!title.toLowerCase().includes(String(identity.brand||'').toLowerCase())?identity.brand:'',
     title||identity.model,
     identity.model&&!title.toLowerCase().includes(String(identity.model).toLowerCase())?identity.model:'',
     identity.color&&!title.toLowerCase().includes(String(identity.color).toLowerCase())?identity.color:'']
     .filter(Boolean).join(' ').replace(/\s+/g,' ').slice(0,180);
-  const prompt=`Use Google Search now for today's US retail prices of "${query}". Search with one exact product query. Return only verified retailer product pages with current dollar prices, sizes and pack counts. ${closer?'If the exact size is not listed, find a clearly labeled close size or pack and mark approximate=true.':'Include multipacks containing the item, even when a single unit has no listing.'} If the item is a single unit but sold only in a variety pack, give pack_size and mark approximate=true. If no priced product page, return an empty prices array. Do not rely on memory or invent a URL or price.`;
+  const prompt=exactMatch
+    ? `Use Google Search now to find at least 3 distinct US retailers with today's priced product pages for this exact item: ${JSON.stringify({title:identity.title,brand:identity.brand,model:identity.model,variant:identity.variant,size:identity.size,pack_count:identity.unit_count||1})}. Search several retailer listings in this one research call. Match product line, variant/scent, printed size and the retail package count. For a single item, EXCLUDE multipacks, cases and variety packs entirely. For a multipack, only include the same pack count. Return each whole-package asking price, seller, exact page URL, listing title and pack_size. Never divide a pack price. Exclude search pages, sponsored snippets without a product page, stale prices, and different sizes or variants. Return an empty array if no priced exact pages exist. Do not invent links or prices.`
+    : `Use Google Search now for today's US retail prices of "${query}". Search with one exact product query. Return only verified retailer product pages with current dollar prices, sizes and pack counts. ${closer?'If the exact size is not listed, find a clearly labeled close size or pack and mark approximate=true.':'Include multipacks containing the item, even when a single unit has no listing.'} If the item is a single unit but sold only in a variety pack, give pack_size and mark approximate=true. If no priced product page, return an empty prices array. Do not rely on memory or invent a URL or price.`;
   // One grounded+structured call instead of search-then-parse (cuts ~half the price latency).
   try {
-    const combined=await gemini([{text:prompt}],{search:true,schema:pricesSchema,maxOutputTokens:900,signal,maxAttempts:singlePass?1:undefined});
-    const prices=cleanPrices(combined.value?.prices,identity);
+    const combined=await gemini([{text:prompt}],{search:true,schema:pricesSchema,maxOutputTokens:exactMatch?1800:900,signal,maxAttempts:singlePass?1:undefined});
+    const prices=exactMatch&&!combined.queries?[]:cleanPrices(combined.value?.prices,identity);
     if(combined.queries||prices.length||singlePass)return {prices,input:combined.input,output:combined.output,queries:combined.queries};
   } catch (error) {
     console.warn('video_scan_retail_combined_failed',String(error.message||error).slice(0,160));
@@ -158,21 +160,21 @@ async function searchOnce(identity,closer=false,signal,singlePass=false) {
   return {prices:cleanPrices(parsed.value.prices,identity),input:grounded.input+parsed.input,
     output:grounded.output+parsed.output,queries:grounded.queries};
 }
-export async function lookupRetail(sb,job,identity,{signal,singlePass=false}={}) {
+export async function lookupRetail(sb,job,identity,{signal,singlePass=false,exactMatch=false}={}) {
   const key=productKey(identity);
   if(key){const cached=await sb.from('video_scan_product_cache').select('lookup,created_at').eq('store_id',job.store_id).eq('product_key',key).maybeSingle();
     if(cached.error)throw cached.error;
-    if(cached.data&&Date.now()-Date.parse(cached.data.created_at)<
+    if(cached.data&&(!exactMatch||cached.data.lookup?.retail_match_version===2)&&Date.now()-Date.parse(cached.data.created_at)<
       (cached.data.lookup.retail_prices?.length?30:1)*86400_000){
       // Show cached prices immediately; resolve redirect URLs in the background later if needed.
       return {prices:cleanPrices(cached.data.lookup.retail_prices,identity),input:0,output:0,queries:0,reused:true,cachedDetails:cached.data.lookup};
     }}
-  const first=await searchOnce(identity,false,signal,singlePass);
+  const first=await searchOnce(identity,false,signal,singlePass,exactMatch);
   let prices=first.prices,input=first.input,output=first.output,queries=first.queries;
-  if(!prices.length&&!singlePass){const second=await searchOnce(identity,true,signal);prices=second.prices;input+=second.input;output+=second.output;queries+=second.queries}
+  if(!prices.length&&!singlePass){const second=await searchOnce(identity,true,signal,false,exactMatch);prices=second.prices;input+=second.input;output+=second.output;queries+=second.queries}
   // Skip HEAD redirect resolution on the critical path — grounding links still open in-app.
   if(key){const saved=await sb.from('video_scan_product_cache').upsert({store_id:job.store_id,product_key:key,
-    lookup:{retail_prices:prices},created_at:new Date().toISOString()});if(saved.error)throw saved.error}
+    lookup:{retail_prices:prices,...(exactMatch?{retail_match_version:2}:{})},created_at:new Date().toISOString()});if(saved.error)throw saved.error}
   return {prices,input,output,queries,reused:false};
 }
 const marketSchema={type:'object',properties:{kind:{type:'string',enum:['retail','sold','none']},
