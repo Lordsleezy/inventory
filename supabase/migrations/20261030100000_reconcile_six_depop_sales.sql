@@ -119,7 +119,7 @@ begin
   select count(*) into v_bad from depop_verified v join public.web_orders o on o.id=v.web_order_id
   left join public.sales s on s.id=o.sale_id
   left join public.channel_orders c on c.store_id=o.store_id and c.provider='depop' and c.sale_id=o.sale_id
-  where o.sale_id is null or o.match_status<>'matched' or o.item_cents<>v.item_cents
+  where o.sale_id is null or c.sale_id is null or o.match_status<>'matched' or o.item_cents<>v.item_cents
     or o.marketplace_fee_cents<>v.fee_cents or s.price_cents<>v.item_cents
     or c.fee_cents<>v.fee_cents or c.fee_source<>'actual' or c.payout_cents<>v.payout_cents;
   if v_bad<>0 then raise exception 'Depop reconciliation verification failed for % rows',v_bad; end if;
