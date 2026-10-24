@@ -1,28 +1,79 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { loadStoreSetting, loadStoreTaxRateBps } from '@floor/cloud';
 
 type Row = { category: string; sales_count: number; sales_cents: number; taxable_cents: number; tax_cents: number; tax_collected_cents?: number; shipping_cents: number;
   refund_count: number; refund_sales_cents: number; refund_taxable_cents: number; refund_tax_cents: number; refund_shipping_cents: number };
 type Report = { month: string; origin_state: string; rows: Row[] };
-type Props = { client: SupabaseClient; money: (n: number) => string; embedded?: boolean };
+type Props = { client: SupabaseClient; money: (n: number) => string; embedded?: boolean; native?: boolean };
 
 const zone = 'America/Los_Angeles';
 const thisMonth = () => new Date().toLocaleDateString('en-CA', { timeZone: zone }).slice(0, 7);
 const dollars = (n: number) => (n / 100).toFixed(2);
 
 /** One month of sales tax facts for the accountant: in-store, pickup, ship in-state, ship out of state; refunds; CSV. */
-export function TaxReportPage({ client, money, embedded }: Props) {
+export function TaxReportPage({ client, money, embedded, native }: Props) {
   const [month, setMonth] = useState(thisMonth());
+  const [period, setPeriod] = useState<'month' | 'last' | 'quarter'>('month');
   const [report, setReport] = useState<Report | null>(null);
+  const requestId = useRef(0);
+  const [marketplaceSplit, setMarketplaceSplit] = useState<{ channel: string; cents: number }[]>([]);
+  const [splitLoaded, setSplitLoaded] = useState(false);
   const [error, setError] = useState('');
+  const [jurisdiction, setJurisdiction] = useState('');
+  useEffect(() => {
+    if (!native) return;
+    let alive = true;
+    void Promise.all([loadStoreSetting('ship_from'), loadStoreTaxRateBps()]).then(([from, bps]) => {
+      if (!alive) return;
+      const place = from && typeof from === 'object' ? from as { city?: string; state?: string } : {};
+      setJurisdiction([place.city, place.state].filter(Boolean).join(', ') + (bps == null ? '' : ` · ${(bps / 100).toFixed(2)}% store rate`));
+    }).catch(() => undefined);
+    return () => { alive = false; };
+  }, [native]);
 
   const load = useCallback(async () => {
+    const id = ++requestId.current;
     setError('');
-    const { data, error: e } = await client.rpc('portal_tax_report', { p_month: `${month}-01` });
-    if (e) { setError(e.message); setReport(null); return; }
-    setReport(data as Report);
-  }, [client, month]);
+    const months = period === 'quarter' ? [0, 1, 2].map(i => {
+      const now = new Date(`${thisMonth()}-15T12:00:00`);
+      const q = Math.floor(now.getMonth() / 3) * 3;
+      return `${now.getFullYear()}-${String(q + i + 1).padStart(2, '0')}`;
+    }) : [month];
+    const result = await Promise.all(months.map(m => client.rpc('portal_tax_report', { p_month: `${m}-01` })));
+    if (id !== requestId.current) return;
+    const failure = result.find(r => r.error)?.error;
+    if (failure) { setError(failure.message); setReport(null); return; }
+    const parts = result.map(r => r.data as Report);
+    if (parts.length === 1) { setReport(parts[0]); return; }
+    const keys: (keyof Row)[] = ['sales_count','sales_cents','taxable_cents','tax_cents','tax_collected_cents','shipping_cents','refund_count','refund_sales_cents','refund_taxable_cents','refund_tax_cents','refund_shipping_cents'];
+    const map = new Map<string, Row>();
+    for (const part of parts) for (const r of part.rows || []) {
+      const prev = map.get(r.category) || { ...r, ...Object.fromEntries(keys.map(k => [k, 0])) } as Row;
+      for (const key of keys) (prev as unknown as Record<string, number>)[key] = Number(prev[key] || 0) + Number(r[key] || 0);
+      map.set(r.category, prev);
+    }
+    setReport({ month: `${months[0]}–${months[2]}`, origin_state: parts[0].origin_state, rows: [...map.values()] });
+  }, [client, month, period]);
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    if (!native) return;
+    let alive = true;
+    setMarketplaceSplit([]); setSplitLoaded(false);
+    const first = period === 'quarter' ? (() => { const d = new Date(`${month}-15T12:00:00`); return `${d.getFullYear()}-${String(Math.floor(d.getMonth()/3)*3+1).padStart(2,'0')}-01`; })() : `${month}-01`;
+    const after = new Date(`${first}T12:00:00Z`); after.setUTCMonth(after.getUTCMonth() + (period === 'quarter' ? 3 : 1));
+    const last = new Date(after); last.setUTCDate(last.getUTCDate() - 1);
+    void Promise.resolve(client.rpc('portal_sale_tax_rows', {p_start:first,p_end:last.toISOString().slice(0,10)})).then(({data,error:err}) => {
+      if (!alive) return;
+      if (err) { setSplitLoaded(true); return; }
+      const rows = (data as {rows?: {channel:string;sales_tax_who:string;sales_tax_cents:number}[]})?.rows || [];
+      const split = new Map<string,number>();
+      for (const r of rows) if (r.sales_tax_who === 'marketplace') split.set(r.channel, (split.get(r.channel) || 0) + Number(r.sales_tax_cents || 0));
+      setMarketplaceSplit([...split].map(([channel,cents]) => ({channel,cents})));
+      setSplitLoaded(true);
+    }).catch(() => { if (alive) setSplitLoaded(true); });
+    return () => { alive = false; };
+  }, [client, native, period, month]);
 
   const label = (c: string) => ({ in_store: 'In-store', pickup: 'Website — store pickup', ship_in_state: `Website — shipped to ${report?.origin_state ?? 'CA'}`, ship_out_of_state: 'Website — shipped out of state', other_online: 'Other online channels', marketplace_remitted: 'Marketplace-remitted (eBay, Depop, …)' } as Record<string, string>)[c] || c;
   const rows = report?.rows ?? [];
@@ -30,6 +81,33 @@ export function TaxReportPage({ client, money, embedded }: Props) {
   const net = (r: Row) => ({ sales: r.sales_cents - r.refund_sales_cents, taxable: r.taxable_cents - r.refund_taxable_cents, tax: r.tax_cents - r.refund_tax_cents });
   const owed = rows.filter(r => r.category !== 'marketplace_remitted');
   const taxWeOwe = owed.reduce((n, r) => n + net(r).tax, 0);
+  useEffect(() => {
+    if (!native) return;
+    const download = () => { if (report) csv(); };
+    window.addEventListener('floor:reports-action', download);
+    return () => window.removeEventListener('floor:reports-action', download);
+  }, [native, report]);
+
+  if (native) {
+    const marketplaces = rows.filter(r => r.category === 'marketplace_remitted');
+    const marketplaceNet = marketplaces.reduce((n,r)=>n+net(r).tax,0);
+    const splitMatches = marketplaceSplit.length > 0 && marketplaceSplit.reduce((n,r)=>n+r.cents,0) === marketplaceNet;
+    const own = rows.filter(r => r.category !== 'marketplace_remitted');
+    const select = (next: 'month' | 'last' | 'quarter') => {
+      setReport(null); setPeriod(next);
+      const now = new Date(`${thisMonth()}-15T12:00:00`);
+      if (next === 'last') now.setMonth(now.getMonth() - 1);
+      setMonth(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`);
+    };
+    return <div className="native-report-body">
+      <div className="native-report-segment" role="group" aria-label="Tax period"><button type="button" className={period === 'month' ? 'selected' : ''} onClick={() => select('month')}>This month</button><button type="button" className={period === 'last' ? 'selected' : ''} onClick={() => select('last')}>Last month</button><button type="button" className={period === 'quarter' ? 'selected' : ''} onClick={() => select('quarter')}>Quarter</button></div>
+      {error && <div className="alert" role="alert">{error}</div>}
+      <div className="native-report-hero"><small>Tax collected by you · {report?.month || month}</small><strong>{report ? money(taxWeOwe) : <span className="native-skeleton" />}</strong><span>{report ? jurisdiction || `Store origin: ${report.origin_state}. Rate comes from each sale.` : 'Loading tax report…'}</span></div>
+      {!report && !error && <div className="native-report-group">{[0,1,2].map(i => <div className="native-skeleton-row" key={i}><span className="native-skeleton" /></div>)}</div>}
+      <h3 className="native-report-section">Collected by you</h3><div className="native-report-group">{own.map(r => <div className="native-report-row" key={r.category}><span>{label(r.category)}<small>Taxable sales {money(net(r).taxable)}</small></span><b>{money(net(r).tax)}</b></div>)}<div className="native-report-row strong"><span>You owe</span><b>{money(taxWeOwe)}</b></div></div>
+      <h3 className="native-report-section">Collected by marketplaces</h3><div className="native-report-group">{splitMatches ? marketplaceSplit.map(r => <div className="native-report-row" key={r.channel}><span>{({ebay:'eBay',depop:'Depop',tiktok:'TikTok Shop'} as Record<string,string>)[r.channel] || r.channel}</span><b>{money(r.cents)}</b></div>) : marketplaces.map(r => <div className="native-report-row" key={r.category}><span>{label(r.category)}</span><b>{money(net(r).tax)}</b></div>)}{!marketplaces.length && <p className="native-report-empty">No marketplace-remitted tax in this period.</p>}</div><p className="native-report-footnote">Marketplaces collect and remit this tax themselves. It is shown for reference and is not included in what you owe.{marketplaceNet > 0 && splitLoaded && !splitMatches ? ' A per-channel split is unavailable for this period because sale rows do not reconcile with refunds.' : ''}</p>
+    </div>;
+  }
 
   function csv() {
     const head = ['Month', 'Category', 'Sales (count)', 'Sales $', 'Taxable sales $', 'Non-taxable sales $', 'Tax collected $', 'Shipping charged $ (not in sales)', 'Refunds (count)', 'Refunded sales $', 'Refunded taxable $', 'Refunded tax $', 'Net sales $', 'Net taxable sales $', 'Net tax $'];

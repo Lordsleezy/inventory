@@ -15,12 +15,11 @@ export type MainPage =
   | 'manifests'
   | 'locations'
   | 'insights'
-  | 'tax'
   | 'cameras'
   | 'remote'
   | 'logs'
   | 'settings';
-export type ReportTab = 'profit' | 'shipping' | 'expenses' | 'payouts' | 'returns';
+export type ReportTab = 'profit' | 'shipping' | 'expenses' | 'payouts' | 'daily' | 'sales-tax' | 'returns';
 /** In stock / Sold / Unfinished / Defective are unit lists; the rest are tools. Unfinished replaces the old Needs attention tab. */
 export type InventoryTab = 'in-stock' | 'sold' | 'unfinished' | 'defective' | 'receive' | 'lookup-test' | 'products' | 'measure-mat';
 export type AttentionSection =
@@ -44,8 +43,8 @@ const LEGACY: Record<string, { page: MainPage; tab?: ReportTab; inventoryTab?: I
   eligibility: { page: 'settings' },
   online: { page: 'online' },
   expenses: { page: 'reports', tab: 'expenses' },
-  taxes: { page: 'tax' },
-  tax: { page: 'tax' },
+  taxes: { page: 'reports', tab: 'sales-tax' },
+  tax: { page: 'reports', tab: 'sales-tax' },
   channels: { page: 'reports', tab: 'profit' },
   costs: { page: 'inventory', inventoryTab: 'unfinished', section: 'missing-cost' },
   reviews: { page: 'inventory', inventoryTab: 'unfinished', section: 'missing-cost' },
@@ -92,7 +91,6 @@ const MAIN: MainPage[] = [
   'manifests',
   'locations',
   'insights',
-  'tax',
   'cameras',
   'remote',
   'logs',
@@ -170,7 +168,7 @@ export function parseNavFromLocation(): NavState {
   if (RETIRED_ONLINE_CHANNELS.has(onlineChannelRaw) || RETIRED_ONLINE_CHANNELS.has(onlineTabRaw)) {
     onlineChannelRaw = 'all';
   }
-  const reportTabs: ReportTab[] = ['profit', 'shipping', 'expenses', 'payouts', 'returns'];
+  const reportTabs: ReportTab[] = ['profit', 'shipping', 'expenses', 'payouts', 'daily', 'sales-tax', 'returns'];
   const invTabs: InventoryTab[] = ['in-stock', 'sold', 'unfinished', 'defective', 'receive', 'lookup-test', 'products', 'measure-mat'];
   // Old bookmarks: Browse → In stock, Needs attention → Unfinished.
   const invTab = invTabRaw === 'browse' ? 'in-stock' : invTabRaw === 'attention' ? 'unfinished' : invTabRaw;

@@ -15,7 +15,7 @@ type SaleTaxRow = {
 
 type TaxPayment = { id: string; spent_on: string; description: string; amount_cents: number };
 
-type Props = { client: SupabaseClient; money: (n: number) => string; stamp: (s: string) => string };
+type Props = { client: SupabaseClient; money: (n: number) => string; stamp: (s: string) => string; embedded?: boolean; native?: boolean };
 
 const zone = 'America/Los_Angeles';
 const today = () => new Date().toLocaleDateString('en-CA', { timeZone: zone });
@@ -23,7 +23,7 @@ const monthStart = () => `${today().slice(0, 7)}-01`;
 const moneyEntry = /^\d*(?:\.\d{0,2})?$/;
 const SALES_TAX_CATEGORY = 'Sales tax';
 
-export function TaxPage({ client, money, stamp }: Props) {
+export function TaxPage({ client, money, stamp, embedded, native }: Props) {
   const [start, setStart] = useState(monthStart);
   const [end, setEnd] = useState(today);
   const [rows, setRows] = useState<SaleTaxRow[] | null>(null);
@@ -55,10 +55,9 @@ export function TaxPage({ client, money, stamp }: Props) {
     // In-person (floor) only — marketplaces remit their own sales tax.
     const floor = (body?.rows || []).filter(r => (r.channel || '').toLowerCase() === 'floor');
     setRows(floor);
-    await loadPayments();
-  }, [client, start, end, loadPayments]);
+  }, [client, start, end]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { void load(); void loadPayments(); }, [load, loadPayments]);
 
   async function recordTaxPaid(ev: React.FormEvent) {
     ev.preventDefault();
@@ -102,8 +101,10 @@ export function TaxPage({ client, money, stamp }: Props) {
     };
   }, [rows, taxPaid]);
 
+  if (native) return <div className="native-report-body native-tax-ledger"><h3 className="native-report-section">In-store tax ledger · {start} – {end}</h3><div className="native-report-group"><div className="native-report-row"><span>In-store tax owed</span><b>{money(totals.salesTaxOwed)}</b></div><div className="native-report-row"><span>Paid to state</span><b>{money(totals.salesTaxPaid)}</b></div><div className="native-report-row strong"><span>In-store balance</span><b>{money(totals.salesTaxBalance)}</b></div></div><details className="native-report-expand"><summary>Record or review tax payments ›</summary><form onSubmit={e => void recordTaxPaid(e)}><label>Amount paid<input inputMode="decimal" value={paidAmount} onChange={e => { if (moneyEntry.test(e.target.value)) setPaidAmount(e.target.value); }} required /></label><label>Date<input type="date" value={paidDate} onChange={e => setPaidDate(e.target.value)} required /></label><label>Note<input value={paidNote} onChange={e => setPaidNote(e.target.value.slice(0,200))} /></label><button disabled={busy || !paidAmount}>Record payment</button></form>{taxPaid.map(p => <div className="native-report-row" key={p.id}><span>{p.description}<small>{p.spent_on}</small></span><b>{money(p.amount_cents)}</b><button type="button" onClick={() => void removeTaxPaid(p.id)}>Remove</button></div>)}</details><h3 className="native-report-section">In-store sales</h3><div className="native-report-group">{rows?.slice(0,50).map(r => <div className="native-report-row" key={r.id}><span>{r.title}<small>{stamp(r.sold_at)} · SKU {r.sku}</small></span><b>{money(r.sales_tax_owed_cents || r.sales_tax_cents || 0)}</b></div>)}{rows?.length === 0 && <p className="native-report-empty">No in-store sales in this period.</p>}</div>{error && <p className="error" role="alert">{error}</p>}</div>;
+
   return <>
-    <header>
+    {!embedded && <header>
       <div>
         <div className="eyebrow">TAX LEDGER</div>
         <h1>Sales tax</h1>
@@ -116,7 +117,7 @@ export function TaxPage({ client, money, stamp }: Props) {
           <button className="secondary" onClick={() => void load()}>Refresh</button>
         </div>
       </div>
-    </header>
+    </header>}
     {error && <div className="alert" role="alert">{error}<button onClick={() => setError('')}>Dismiss</button></div>}
 
     <div className="stats">

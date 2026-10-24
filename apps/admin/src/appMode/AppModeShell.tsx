@@ -16,12 +16,12 @@ import {
   AppLiveSales,
   AppConnections,
   AppReportsNative,
-  AppTaxNative,
   AppDepopNative,
   AppSettingsNative,
   type MoreId,
 } from './AppMore';
 import type { OnlineCfg, Rule, CommissionOverride } from '../payouts';
+import { parseNavFromLocation } from '../navigation';
 
 export type AppTab = 'inventory' | 'receive' | 'register' | 'orders' | 'more' | 'settings' | 'locations';
 
@@ -42,6 +42,9 @@ type Props = {
   settingsSlot?: React.ReactNode;
   /** Full ReportsPage (profit / shipping / expenses / payouts / returns). */
   reportsSlot?: React.ReactNode;
+  onReportsOpen?: () => void;
+  reportsAction?: 'add' | 'download';
+  onReportsAction?: () => void;
 };
 
 /** Store associates (e.g. Jacob): Inventory / Receive / Register / Settings. */
@@ -134,6 +137,9 @@ export function AppModeShell({
   onCommissionChanged: _onCommissionChanged,
   settingsSlot,
   reportsSlot,
+  onReportsOpen,
+  reportsAction,
+  onReportsAction,
 }: Props) {
   void _rules;
   void _onlineCfg;
@@ -141,12 +147,15 @@ export function AppModeShell({
   void _personName;
   void _busy;
   void _onCommissionChanged;
-  const [tab, setTab] = useState<AppTab>('inventory');
+  const [tab, setTab] = useState<AppTab>(() => fullAccess && parseNavFromLocation().page === 'reports' ? 'more' : 'inventory');
   const [itemSku, setItemSku] = useState<string | null>(null);
-  const [morePage, setMorePage] = useState<MoreId | null>(null);
+  const [morePage, setMorePage] = useState<MoreId | null>(() => fullAccess && parseNavFromLocation().page === 'reports' ? 'reports' : null);
   const [channel, setChannel] = useState<'ebay' | 'amazon' | 'tiktok' | null>(null);
   const [invKey, setInvKey] = useState(0);
   const scrollPos = useRef<Record<string, number>>({});
+  const reportsOpenRef = useRef(onReportsOpen);
+  reportsOpenRef.current = onReportsOpen;
+  useEffect(() => { if (morePage === 'reports') reportsOpenRef.current?.(); }, [morePage]);
 
   useEffect(() => {
     document.documentElement.classList.add('app-mode');
@@ -322,7 +331,7 @@ export function AppModeShell({
           />
         )}
         {fullAccess && morePage === 'reports' && (
-          <AppReportsNative onBack={() => setMorePage(null)}>
+          <AppReportsNative onBack={() => setMorePage(null)} action={reportsAction} onAction={onReportsAction}>
             {reportsSlot || <p className="app-footer-count">Reports unavailable.</p>}
           </AppReportsNative>
         )}
@@ -345,9 +354,6 @@ export function AppModeShell({
           <AppReportsNative onBack={() => setMorePage(null)} title="Insights">
             <InsightsPage client={client} money={money} />
           </AppReportsNative>
-        )}
-        {fullAccess && morePage === 'tax' && (
-          <AppTaxNative client={client} money={money} stamp={stamp} onBack={() => setMorePage(null)} />
         )}
         {fullAccess && morePage === 'depop' && (
           <AppDepopNative accessToken={session.access_token} money={money} onBack={() => setMorePage(null)} />

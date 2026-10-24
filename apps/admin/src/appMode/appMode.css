@@ -888,12 +888,100 @@ html.app-mode .app-reports .inventory-tabs.report-tabs button {
   white-space: nowrap;
 }
 html.app-mode .app-reports .inventory-tabs.report-tabs button.active {
-  background: #2c2c2e;
-  color: #fff;
+  background: #fff;
+  color: #111;
 }
 html.app-mode .app-reports .inventory-tabs.report-tabs button:hover {
   color: #fff;
 }
+
+/* Reports in the standalone phone shell. Desktop Reports keeps its own layout. */
+html.app-mode .app-reports { overflow-x: hidden; }
+html.app-mode .app-reports .inventory-tabs.report-tabs { padding: 5px 12px 8px; gap: 6px; scrollbar-width: none; }
+html.app-mode .app-reports .inventory-tabs.report-tabs::-webkit-scrollbar { display: none; }
+html.app-mode .app-reports .inventory-tabs.report-tabs button { min-height: 40px; padding: 8px 12px !important; background: #202022 !important; color: #d4d4d7 !important; border-radius: 999px !important; border-bottom: 0 !important; font-size: 12px; }
+html.app-mode .app-reports .inventory-tabs.report-tabs button.active { background: #fff !important; color: #111 !important; }
+html.app-mode .app-reports .native-report-body { padding: 0 12px 24px; min-width: 0; color: #f5f5f7; font-size: 13px; }
+html.app-mode .app-reports .native-report-action { position: absolute; top: 8px; right: 9px; z-index: 7; border: 0; background: transparent; color: #0a84ff; font-size: 24px; line-height: 1; width: 44px; height: 40px; }
+html.app-mode .app-reports .native-report-action:disabled { opacity: .45; }
+html.app-mode .app-reports .native-report-segment { display: flex; background: #1c1c1e; padding: 2px; border-radius: 7px; margin: 0 0 8px; }
+html.app-mode .app-reports .native-report-segment button { flex: 1; min-width: 0; min-height: 40px; border: 0; border-radius: 5px; background: transparent; color: #ccc; font-size: 11px; padding: 4px 2px; }
+html.app-mode .app-reports .native-report-segment button.selected { color: #fff; background: #636366; box-shadow: 0 1px 3px #0008; }
+html.app-mode .app-reports .native-report-period { display: block; color: #a1a1a6; background: none; border: 0; padding: 5px 0; font-size: 11px; text-align: left; width: 100%; }
+html.app-mode .app-reports .native-report-dates { display: flex; gap: 8px; margin: 5px 0; }
+html.app-mode .app-reports .native-report-dates label { flex: 1; min-width: 0; color: #8e8e93; }
+html.app-mode .app-reports .native-report-dates input { width: 100%; box-sizing: border-box; }
+html.app-mode .app-reports .native-report-hero { min-height: 87px; display: flex; flex-direction: column; gap: 2px; padding: 6px 4px 14px; }
+html.app-mode .app-reports .native-report-hero small { color: #a1a1a6; font-size: 11px; }
+html.app-mode .app-reports .native-report-hero strong { font-size: clamp(30px, 9vw, 39px); line-height: 1.05; letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
+html.app-mode .app-reports .native-report-hero span { color: #8e8e93; font-size: 11px; }
+html.app-mode .app-reports .native-skeleton { display: inline-block; width: 135px; height: 35px; border-radius: 7px; background: linear-gradient(100deg,#222 20%,#38383a 50%,#222 80%); background-size: 200% 100%; animation: native-report-load 1.2s infinite; }
+html.app-mode .app-reports .native-skeleton-row { height: 44px; display: flex; align-items: center; padding: 0 10px; border-bottom: 1px solid #333336; }
+html.app-mode .app-reports .native-skeleton-row:last-child { border-bottom: 0; }
+html.app-mode .app-reports .native-skeleton-row .native-skeleton { height: 15px; width: 60%; }
+@keyframes native-report-load { to { background-position-x: -200%; } }
+html.app-mode .app-reports .native-report-warning { width: 100%; border: 0; border-radius: 9px; background: #3a240a; color: #ffc469; text-align: left; font-size: 11px; padding: 10px 12px; margin: 0 0 12px; min-height: 44px; }
+html.app-mode .app-reports .native-report-warning b { color: #ffd88a; }
+html.app-mode .app-reports .native-report-section { margin: 18px 10px 5px; color: #8e8e93; font-size: 10px; font-weight: 500; text-transform: uppercase; letter-spacing: .04em; }
+html.app-mode .app-reports .native-report-group { overflow: hidden; background: #1c1c1e; border-radius: 10px; }
+html.app-mode .app-reports .native-report-row { display: flex; align-items: center; width: 100%; min-height: 44px; padding: 8px 10px; box-sizing: border-box; border: 0; border-bottom: 1px solid #333336; background: transparent; color: #eee; text-align: left; gap: 5px; font-size: 13px; font-weight: 400; }
+html.app-mode .app-reports .native-report-row:last-child { border-bottom: 0; }
+html.app-mode .app-reports .native-report-row > span:first-child { min-width: 0; flex: 1; }
+html.app-mode .app-reports .native-report-row small { display: block; color: #8e8e93; font-size: 10px; line-height: 1.3; margin-top: 2px; }
+html.app-mode .app-reports .native-report-row b { font-weight: 500; white-space: nowrap; font-variant-numeric: tabular-nums; }
+html.app-mode .app-reports .native-report-row.strong, html.app-mode .app-reports .native-report-row.strong b { font-weight: 700; }
+html.app-mode .app-reports .native-report-row .minus { color: #ff453a; }
+html.app-mode .app-reports .native-report-row .plus { color: #30d158; }
+html.app-mode .app-reports .native-chevron { color: #666; font-size: 19px; line-height: 1; }
+html.app-mode .app-reports .native-report-footnote { color: #8e8e93; font-size: 10px; line-height: 1.4; padding: 0 10px; }
+html.app-mode .app-reports .native-report-empty { padding: 15px 12px; color: #8e8e93; margin: 0; }
+html.app-mode .app-reports .native-channel-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 7px; vertical-align: 2px; background: #0a84ff; }
+html.app-mode .app-reports .native-channel-dot.channel-depop { background: #bf5af2; }
+html.app-mode .app-reports .native-channel-dot.channel-tiktok { background: #ff375f; }
+html.app-mode .app-reports .native-channel-dot.channel-floor { background: #30d158; }
+html.app-mode .app-reports .native-report-category .native-report-row { border-bottom: 0; padding-bottom: 2px; }
+html.app-mode .app-reports .native-report-progress { height: 3px; margin: 0 11px 8px; border-radius: 2px; background: #303034; }
+html.app-mode .app-reports .native-report-progress span { display: block; height: 100%; background: #0a84ff; border-radius: inherit; }
+html.app-mode .app-reports .native-report-form, html.app-mode .app-reports .native-report-detail, html.app-mode .app-reports .native-report-expand { display: block; background: #1c1c1e; border-radius: 10px; padding: 12px; margin: 8px 0; }
+html.app-mode .app-reports .native-report-form-head { display: flex; justify-content: space-between; align-items: center; }
+html.app-mode .app-reports .native-report-form h2, html.app-mode .app-reports .native-report-detail h2 { font-size: 18px; margin: 0; }
+html.app-mode .app-reports .native-report-form form, html.app-mode .app-reports .native-report-expand form { display: grid; gap: 9px; }
+html.app-mode .app-reports .native-report-form label, html.app-mode .app-reports .native-report-expand label { display: grid; gap: 3px; }
+html.app-mode .app-reports .native-report-form input, html.app-mode .app-reports .native-report-form select, html.app-mode .app-reports .native-report-expand input { width: 100%; box-sizing: border-box; min-height: 40px; }
+html.app-mode .app-reports .native-report-form input[type=checkbox] { width: auto; min-height: auto; }
+html.app-mode .app-reports .native-payout-card { background: #1c1c1e; border-radius: 10px; overflow: hidden; margin: 0 0 10px; }
+html.app-mode .app-reports .native-payout-head { display: flex; align-items: center; gap: 8px; padding: 10px; }
+html.app-mode .app-reports .native-payout-avatar { flex: none; width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; background: #3a3a3c; font-weight: 700; }
+html.app-mode .app-reports .native-payout-name { flex: 1; min-width: 0; }
+html.app-mode .app-reports .native-payout-name small, html.app-mode .app-reports .native-payout-balance small { display: block; color: #8e8e93; font-size: 10px; }
+html.app-mode .app-reports .native-payout-balance { text-align: right; font-variant-numeric: tabular-nums; }
+html.app-mode .app-reports .native-payout-balance strong { font-size: 18px; }
+html.app-mode .app-reports .native-payout-form { display: flex; gap: 6px; padding: 2px 10px 10px; }
+html.app-mode .app-reports .native-payout-form input { min-width: 0; flex: 1; width: 0; border: 0; border-radius: 6px; padding: 6px; }
+html.app-mode .app-reports .native-payout-form button { min-width: 52px; min-height: 38px; border: 0; border-radius: 6px; background: #30d158; color: #081b0e; font-weight: 700; }
+html.app-mode .app-reports .native-payout-breakdown { border-top: 1px solid #333336; }
+html.app-mode .app-reports .native-payout-breakdown summary { list-style: none; padding: 12px 10px; min-height: 42px; box-sizing: border-box; }
+html.app-mode .app-reports .native-payout-breakdown summary::-webkit-details-marker { display: none; }
+html.app-mode .app-reports .native-payout-breakdown summary span { float: right; color: #8e8e93; }
+html.app-mode .app-reports .native-payout-note { display: block; color: #8e8e93; padding: 0 10px 10px; }
+html.app-mode .app-reports .native-payout-note input { display: block; width: 100%; box-sizing: border-box; min-height: 40px; }
+html.app-mode .app-reports .native-week-chart { height: 43px; display: flex; align-items: end; gap: 4px; margin: 2px 2px 14px; }
+html.app-mode .app-reports .native-week-chart div { flex: 1; background: #304c70; border-radius: 2px 2px 0 0; }
+html.app-mode .app-reports .native-week-chart div.today { background: #0a84ff; }
+html.app-mode .app-reports .native-closeout-buttons { display: flex; gap: 8px; }
+html.app-mode .app-reports .native-closeout-buttons button { flex: 1; min-width: 0; min-height: 45px; border: 0; border-radius: 8px; background: #0a84ff; color: white; font-weight: 600; }
+html.app-mode .app-reports .native-closeout-buttons button + button { background: #2c2c2e; color: #0a84ff; }
+html.app-mode .app-reports .native-report-date { margin-top: 10px; border-radius: 9px; background: #1c1c1e; }
+html.app-mode .app-reports .native-report-date input { width: auto; max-width: 55%; border: 0; text-align: right; }
+html.app-mode .app-reports .native-closeout-editor header { display: none; }
+html.app-mode .app-reports .native-closeout-editor .panel { margin: 0; padding: 12px; }
+html.app-mode .app-reports .native-closeout-editor .expense-row, html.app-mode .app-reports .native-closeout-editor .section-head { display: flex; flex-wrap: wrap; gap: 6px; }
+html.app-mode .app-reports .native-closeout-editor input, html.app-mode .app-reports .native-closeout-editor select, html.app-mode .app-reports .native-closeout-editor textarea { max-width: 100%; box-sizing: border-box; }
+html.app-mode .app-reports .native-tax-ledger { padding-top: 0; }
+html.app-mode .app-reports .native-sku-sheet { position: fixed; inset: 0; z-index: 10; overflow-y: auto; background: #000; padding: 0 12px calc(64px + env(safe-area-inset-bottom, 0px)); }
+html.app-mode .app-reports .native-sku-sheet .app-nav { margin: 0 -12px 8px; }
+html.app-mode .app-reports .native-sku-sheet .native-report-group { margin-top: 12px; }
+@media (max-width: 370px) { html.app-mode .app-reports .native-report-body { padding-left: 10px; padding-right: 10px; } html.app-mode .app-reports .native-payout-form { gap: 4px; } html.app-mode .app-reports .native-payout-form button { min-width: 47px; } }
 
 /* Receive app form */
 html.app-mode .receive-app .receive-next { margin: 0 16px; }

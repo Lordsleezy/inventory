@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { Session, SupabaseClient } from '@supabase/supabase-js';
 import type { StaffSession } from '@floor/cloud';
 import { floorFunctionUrl } from '../floorApi';
-import { TaxPage } from '../TaxPage';
 import { ListingManagerPanel } from '../ListingManagerPanel';
 import { ConnectionsPage } from '../ConnectionsPage';
 import { errText } from '../errText';
@@ -21,7 +20,6 @@ export type MoreId =
   | 'manifests'
   | 'locations'
   | 'insights'
-  | 'tax'
   | 'settings';
 
 type Props = {
@@ -149,10 +147,6 @@ export function AppMoreHome({
               <span className="app-more-left"><Icon tone="#64d2ff" />Withdrawals</span>
               <span className="app-chevron">›</span>
             </button>
-            <button type="button" className="app-more-link" onClick={() => setPage('tax')}>
-              <span className="app-more-left"><Icon tone="#ffd60a" />Sales tax</span>
-              <span className="app-chevron">›</span>
-            </button>
           </div>
           <p className="app-section-label">Inventory records</p>
           <div className="app-group">
@@ -273,37 +267,22 @@ export function AppConnections({ accessToken, onBack }: {
   );
 }
 
-export function AppReportsNative({ onBack, children, title = 'Reports' }: {
+export function AppReportsNative({ onBack, children, title = 'Reports', action, onAction }: {
   onBack: () => void;
   children: ReactNode;
   title?: string;
+  action?: 'add' | 'download';
+  onAction?: () => void;
 }) {
   return (
     <div className="app-stack">
       <div className="app-nav">
         <button type="button" onClick={onBack}>‹ More</button>
         <div className="app-nav-title">{title}</div>
-        <button type="button" style={{ visibility: 'hidden' }}>·</button>
+        {action ? <button type="button" aria-label={action === 'add' ? 'Add expense' : 'Download report'} onClick={onAction}>{action === 'add' ? '+' : '↓'}</button> : <button type="button" style={{ visibility: 'hidden' }}>·</button>}
       </div>
       <div className="app-embed-soft app-reports">
         {children}
-      </div>
-    </div>
-  );
-}
-
-export function AppTaxNative({ client, money, stamp, onBack }: {
-  client: SupabaseClient; money: (n: number) => string; stamp: (s: string) => string; onBack: () => void;
-}) {
-  return (
-    <div className="app-stack">
-      <div className="app-nav">
-        <button type="button" onClick={onBack}>‹ More</button>
-        <div className="app-nav-title">Sales tax</div>
-        <button type="button" style={{ visibility: 'hidden' }}>·</button>
-      </div>
-      <div className="app-embed-soft">
-        <TaxPage client={client} money={money} stamp={stamp} />
       </div>
     </div>
   );

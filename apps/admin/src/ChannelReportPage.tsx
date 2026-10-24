@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 type ChannelRow = {
@@ -42,30 +42,50 @@ const stamp = (s: string) => new Intl.DateTimeFormat('en-US', { timeZone: 'Ameri
 
 const ALL_TIME_START = '2020-01-01';
 
-export function ChannelReportPage({ client, money, embedded, mode = 'full' }: { client: SupabaseClient; money: (n: number) => string; embedded?: boolean; mode?: 'full' | 'fees' }) {
+export function ChannelReportPage({ client, money, embedded, mode = 'full', native, onLinkSku }: { client: SupabaseClient; money: (n: number) => string; embedded?: boolean; mode?: 'full' | 'fees'; native?: boolean; onLinkSku?: () => void }) {
   // Default to all-time so early floor sales (fridges, etc.) are not hidden behind "this month".
-  const [start, setStart] = useState(ALL_TIME_START);
+  const [start, setStart] = useState(() => native && mode === 'fees' ? day(new Date(new Date().getFullYear(), new Date().getMonth(), 1)) : ALL_TIME_START);
   const [end, setEnd] = useState(() => day(new Date(Date.now() + 86400000)));
   const [channel, setChannel] = useState('all');
   const [report, setReport] = useState<Report | null>(null);
+  const requestId = useRef(0);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [drill, setDrill] = useState<MetricKey | null>(null);
   const [detailRows, setDetailRows] = useState<DetailRow[]>([]);
   const [detailBusy, setDetailBusy] = useState(false);
   const [detailError, setDetailError] = useState('');
+  const [range, setRange] = useState<'day' | 'week' | 'month' | 'all' | 'custom'>(native && mode === 'fees' ? 'month' : 'all');
+  const [showDates, setShowDates] = useState(false);
+  const [buyerShipping, setBuyerShipping] = useState<number | null>(null);
+  const [buyerShippingError, setBuyerShippingError] = useState(false);
 
   const load = useCallback(async (s: string, e: string) => {
+    const id = ++requestId.current;
     setBusy(true); setError('');
+    if (native) setReport(null);
     try {
       const { data, error: err } = await client.rpc('portal_channel_report', { p_start: s, p_end: e });
       if (err) throw err;
-      setReport(data as Report);
-    } catch (x) { setError(x instanceof Error ? x.message : String(x)); }
-    finally { setBusy(false); }
-  }, [client]);
+      if (id === requestId.current) setReport(data as Report);
+    } catch (x) { if (id === requestId.current) setError(x instanceof Error ? x.message : String(x)); }
+    finally { if (id === requestId.current) setBusy(false); }
+  }, [client, native]);
 
   useEffect(() => { void load(start, end); }, [load, start, end]);
+
+  useEffect(() => {
+    if (!native || mode !== 'fees') return;
+    let alive = true;
+    setBuyerShipping(null); setBuyerShippingError(false);
+    const last = new Date(`${end}T12:00:00Z`); last.setUTCDate(last.getUTCDate() - 1);
+    void Promise.resolve(client.rpc('portal_sale_tax_rows', { p_start: start, p_end: last.toISOString().slice(0,10) }))
+      .then(({ data, error: err }) => {
+        if (alive && !err) setBuyerShipping(((data as { rows?: { shipping_cents?: number }[] })?.rows || []).reduce((n, r) => n + Number(r.shipping_cents || 0), 0));
+        else if (alive) setBuyerShippingError(true);
+      }).catch(() => { if (alive) setBuyerShippingError(true); });
+    return () => { alive = false; };
+  }, [client, start, end, native, mode]);
 
   const openDrill = useCallback(async (metric: MetricKey) => {
     setDrill(metric); setDetailBusy(true); setDetailError(''); setDetailRows([]);
@@ -85,6 +105,7 @@ export function ChannelReportPage({ client, money, embedded, mode = 'full' }: { 
   }, [channel, start, end, drill, openDrill]);
 
   function preset(kind: 'day' | 'week' | 'month' | 'all') {
+    setRange(kind);
     const now = new Date();
     const endD = day(new Date(now.getTime() + 86400000));
     if (kind === 'all') { setStart(ALL_TIME_START); setEnd(endD); return; }
@@ -134,6 +155,28 @@ export function ChannelReportPage({ client, money, embedded, mode = 'full' }: { 
       {(report?.channels || []).map(c => <option key={c.channel} value={c.channel}>{c.channel}</option>)}
     </select></label>
   </div>;
+  if (native) {
+    const period = range === 'all' ? 'All time' : range === 'day' ? 'Today' : range === 'week' ? 'This week' : range === 'month' ? 'This month' : `${start} – ${end}`;
+    const row = (label: string, amount: number, metric: MetricKey, tone?: 'minus' | 'plus', strong?: boolean, note?: string) =>
+      <button type="button" className={`native-report-row${strong ? ' strong' : ''}`} onClick={() => setDrill(metric)} key={label}>
+        <span>{label}{note && <small>{note}</small>}</span><b className={tone || ''}>{tone === 'minus' ? '−' : tone === 'plus' ? '+' : ''}{money(Math.abs(amount))}</b><span className="native-chevron">›</span>
+      </button>;
+    return <div className="native-report-body">
+      <div className="native-report-segment" role="group" aria-label="Date range">{(['day', 'week', 'month', 'all'] as const).map(k =>
+        <button type="button" key={k} className={range === k ? 'selected' : ''} onClick={() => preset(k)}>{k === 'all' ? 'All' : k[0].toUpperCase() + k.slice(1)}</button>)}</div>
+      <button type="button" className="native-report-period" onClick={() => setShowDates(v => !v)} aria-expanded={showDates}>{period} · {start} – {end} ▾</button>
+      {showDates && <div className="native-report-dates"><label>From<input type="date" value={start} onChange={e => { setRange('custom'); setStart(e.target.value); }} /></label><label>To<input type="date" value={end} onChange={e => { setRange('custom'); setEnd(e.target.value); }} /></label></div>}
+      {error && <div className="alert" role="alert">{error}</div>}
+      <div className="native-report-hero" aria-live="polite"><small>{mode === 'fees' ? 'Total shipping & fees' : 'Net profit'} · {period}</small><strong>{report ? money(mode === 'fees' ? totals.ship + totals.fees + totals.proc : net) : <span className="native-skeleton" />}</strong><span>{report ? mode === 'fees' ? `${totals.gross ? (((totals.ship + totals.fees + totals.proc) / totals.gross) * 100).toFixed(1) : '0'}% of gross sales` : `${money(totals.profit)} profit before expenses` : 'Loading report…'}</span></div>
+      {!report && !error && <div className="native-report-group">{[0,1,2,3].map(i => <div className="native-skeleton-row" key={i}><span className="native-skeleton" /></div>)}</div>}
+      {report && mode === 'full' && totals.unmatched > 0 && <button type="button" className="native-report-warning" onClick={onLinkSku}>{totals.unmatched} marketplace sale{totals.unmatched === 1 ? '' : 's'} need a SKU link. Item cost is pending. <b>Link SKUs ›</b></button>}
+      {report && mode === 'full' && <><div className="native-report-group">
+        {row('Gross sales', totals.gross, 'gross')}{row('Channel fees', totals.fees, 'fees', 'minus')}{row('Labels & shipping', totals.ship, 'ship', 'minus')}{row('Card processing', totals.proc, 'processing', 'minus')}{row('Item cost', totals.cost, 'cost', 'minus')}{row('Profit', totals.profit, 'profit', undefined, true)}{row('Expenses', report.expense_cents || 0, 'expenses', 'minus')}{row('Net', net, 'net', net >= 0 ? 'plus' : 'minus', true)}
+      </div><p className="native-report-footnote">Gross includes item price, buyer-paid shipping and tax.</p><h3 className="native-report-section">By channel</h3><div className="native-report-group">{channels.map(c => <button type="button" className="native-report-row" key={c.channel} onClick={() => { setChannel(c.channel); setDrill('profit'); }}><span><i className={`native-channel-dot channel-${c.channel.toLowerCase()}`} />{c.channel}<small>{c.channel === 'ebay' && ebayOverhead > 0 ? `Includes ${money(ebayOverhead)} insertion/subscription` : `${c.sales_count} sales`}</small></span><b>{money(c.profit_cents)}</b><span className="native-chevron">›</span></button>)}</div></>}
+      {report && mode === 'fees' && <><h3 className="native-report-section">Shipping</h3><div className="native-report-group">{row('Labels bought', totals.ship, 'ship', 'minus')}{buyerShipping !== null && <div className="native-report-row"><span>{totals.unmatched ? 'Buyer shipping · linked sales' : 'Shipping paid by buyers'}</span><b className="plus">+{money(buyerShipping)}</b></div>}{buyerShipping !== null && totals.unmatched === 0 && <div className="native-report-row strong"><span>Shipping net</span><b className={buyerShipping >= totals.ship ? 'plus' : 'minus'}>{buyerShipping >= totals.ship ? '+' : '−'}{money(Math.abs(buyerShipping - totals.ship))}</b></div>}</div>{totals.unmatched > 0 && <p className="native-report-footnote">Shipping paid by buyers excludes {totals.unmatched} unmatched order{totals.unmatched === 1 ? '' : 's'}. A net figure would mix different sets of sales.</p>}{buyerShippingError && <p className="native-report-footnote">Buyer-paid shipping is unavailable from sale rows for this period.</p>}<h3 className="native-report-section">Channel fees</h3><div className="native-report-group">{channels.filter(c => c.fee_cents).map(c => <button type="button" className="native-report-row" key={c.channel} onClick={() => { setChannel(c.channel); setDrill('fees'); }}><span><i className={`native-channel-dot channel-${c.channel.toLowerCase()}`} />{c.channel}{c.channel === 'ebay' && ebayOverhead > 0 && <small>Includes {money(ebayOverhead)} insertion/subscription</small>}</span><b>{money(c.fee_cents)}</b><span className="native-chevron">›</span></button>)}</div><h3 className="native-report-section">Card processing</h3><div className="native-report-group">{row('Square', totals.proc, 'processing', 'minus')}</div></>}
+      {drill && <section className="native-report-detail"><button type="button" onClick={() => { setDrill(null); setChannel('all'); }}>‹ Back to report</button><h2>{METRIC_LABELS[drill]}</h2>{detailError && <p role="alert">{detailError}</p>}{detailBusy ? <div className="native-skeleton" /> : detailRows.length ? detailRows.map((r, i) => <div className="native-report-row" key={`${r.id}-${i}`}><span>{r.title || r.sku || r.channel}<small>{r.at ? stamp(r.at) : ''} · {r.detail || r.reason || ''}</small></span><b>{money(r.amount_cents || 0)}</b></div>) : <p>No rows in this range.</p>}</section>}
+    </div>;
+  }
   return <>
     {!embedded && mode === 'full' && <header><div><div className="eyebrow">PROFITABILITY</div><h1>Channels</h1>
       <p>Defaults to all-time (includes early floor sales). Profit = item + buyer shipping − channel fees − label cost − card processing − item cost. Click any total for the rows.</p></div>{dateControls}</header>}
