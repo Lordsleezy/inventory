@@ -118,6 +118,15 @@ const rest = all.filter((f) => f.name > "0005_private_photos.sql");
     `select 1 from information_schema.tables where table_schema = 'public' and table_name = 'channel_orders'`,
   );
   assert.equal(channelOrders.rows.length, 1, "channel_orders exists");
+  const mp = await db.query(
+    `select c.relrowsecurity as rls,
+            has_table_privilege('anon', 'public.manufacturer_photos', 'INSERT') as anon_insert,
+            has_table_privilege('anon', 'public.manufacturer_photos', 'SELECT') as anon_select,
+            has_table_privilege('authenticated', 'public.manufacturer_photos', 'UPDATE') as auth_update,
+            has_table_privilege('authenticated', 'public.manufacturer_photos', 'SELECT') as auth_select
+       from pg_class c where c.oid = 'public.manufacturer_photos'::regclass`,
+  );
+  assert.deepEqual(mp.rows[0], { rls: true, anon_insert: false, anon_select: false, auth_update: false, auth_select: true }, "manufacturer_photos locked down");
   await db.query(`select public.anon_can_read_unit_photo('not-a-path')`);
   console.log("fresh 0001→0014 ok");
 }
