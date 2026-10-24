@@ -73,6 +73,20 @@ assert.equal(l.profit_cents, 10000 - expectProc - 4000);
 assert.equal(l.variance_cents, -2000);
 console.log(`in-store card: est. processing ${expectProc}, profit ${l.profit_cents}, variance -2000 ok`);
 
+// Reports gross includes collected tax, while profit excludes that pass-through.
+// The Profit tab must show the tax deduction to reconcile its displayed rows.
+const { rows: [{ report: floorReport }] } = await db.query(`
+  select public.portal_channel_report(
+    (now() at time zone 'America/Los_Angeles')::date,
+    (now() at time zone 'America/Los_Angeles')::date + 1
+  ) as report`);
+const floorTotals = (typeof floorReport === 'string' ? JSON.parse(floorReport) : floorReport).channels.find(c => c.channel === 'floor');
+assert.equal(floorTotals.gross_cents, 21450);
+assert.equal(floorTotals.tax_collected_cents, 1450);
+assert.equal(floorTotals.gross_cents - floorTotals.fee_cents - floorTotals.ship_cost_cents
+  - floorTotals.processing_fee_cents - floorTotals.tax_collected_cents - floorTotals.cost_cents,
+  floorTotals.profit_cents);
+
 // 3) Website shipped: Square online estimate + Shippo label cost via web_orders.
 await addUnit("92003", { ask: 8000, cost: 2000 });
 await db.query(`insert into public.sales(store_id,sku,qty,sold_at,price_cents,tax_cents,card_fee_cents,shipping_cents,channel,payment_method,payment_id,receipt_no)
@@ -101,6 +115,17 @@ assert.equal(l.ship_cost_cents, 1200); assert.equal(l.ship_cost_source, "estimat
 assert.equal(l.profit_cents, 12999 - 1722 - 1200 - 4000);
 assert.equal(l.tax_collected_cents, 943); assert.equal(l.tax_owed_cents, 0);
 assert.equal(l.tax_remitted_by, "marketplace");
+const { rows: [{ report: ebayReport }] } = await db.query(`
+  select public.portal_channel_report(
+    (now() at time zone 'America/Los_Angeles')::date,
+    (now() at time zone 'America/Los_Angeles')::date + 1
+  ) as report`);
+const ebayTotals = (typeof ebayReport === 'string' ? JSON.parse(ebayReport) : ebayReport).channels.find(c => c.channel === 'ebay');
+assert.equal(ebayTotals.tax_collected_cents, 943);
+assert.equal(ebayTotals.tax_owed_cents, 0);
+assert.equal(ebayTotals.gross_cents - ebayTotals.fee_cents - ebayTotals.ship_cost_cents
+  - ebayTotals.processing_fee_cents - ebayTotals.tax_collected_cents - ebayTotals.cost_cents,
+  ebayTotals.profit_cents);
 console.log(`ebay actuals: fee 1722 ship 1200 profit ${l.profit_cents}, tax remitted by marketplace ok`);
 
 // 5) Depop via marketplace_ingest_sale: email gave real fee + prepaid label deduction.

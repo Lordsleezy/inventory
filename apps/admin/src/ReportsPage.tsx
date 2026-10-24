@@ -40,7 +40,7 @@ export function ReportsPage({ client, money, tab, onTab, closeouts, expenses, pa
       {tabs.map(t => <button key={t.id} type="button" role="tab" aria-selected={tab === t.id} className={tab === t.id ? 'active' : ''} onClick={() => onTab(t.id)}>{t.label}</button>)}
     </div>
     {tab === 'profit' && <>
-      <ChannelReportPage key={reportVersion} client={client} money={money} embedded native={native} onLinkSku={() => setShowSkuLinks(true)} onOpenOverhead={() => onTab('overhead')} />
+      <ChannelReportPage key={reportVersion} client={client} money={money} embedded native={native} onLinkSku={() => setShowSkuLinks(true)} />
       {!native && closeouts}
     </>}
     {tab === 'shipping' && <>

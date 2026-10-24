@@ -22,7 +22,7 @@ type DetailRow = {
   order_no: string | null; amount_cents: number; detail: string | null;
   reason: string | null; source: string | null;
 };
-type MetricKey = 'gross' | 'fees' | 'ship' | 'processing' | 'cost' | 'profit' | 'expenses' | 'net' | 'tax_collected' | 'refunds';
+type MetricKey = 'gross' | 'fees' | 'ship' | 'processing' | 'cost' | 'profit' | 'expenses' | 'tax_collected' | 'refunds';
 
 const METRIC_LABELS: Record<MetricKey, string> = {
   gross: 'Gross sales',
@@ -32,8 +32,7 @@ const METRIC_LABELS: Record<MetricKey, string> = {
   cost: 'Item cost',
   profit: 'Profit',
   expenses: 'Expenses',
-  net: 'Net',
-  tax_collected: 'Tax collected',
+  tax_collected: 'Sales tax collected',
   refunds: 'Refunded',
 };
 
@@ -42,13 +41,12 @@ const stamp = (s: string) => new Intl.DateTimeFormat('en-US', { timeZone: 'Ameri
 
 const ALL_TIME_START = '2020-01-01';
 
-export function ChannelReportPage({ client, money, embedded, mode = 'full', native, onLinkSku, onOpenOverhead }: { client: SupabaseClient; money: (n: number) => string; embedded?: boolean; mode?: 'full' | 'fees'; native?: boolean; onLinkSku?: () => void; onOpenOverhead?: () => void }) {
+export function ChannelReportPage({ client, money, embedded, mode = 'full', native, onLinkSku }: { client: SupabaseClient; money: (n: number) => string; embedded?: boolean; mode?: 'full' | 'fees'; native?: boolean; onLinkSku?: () => void }) {
   // Default to all-time so early floor sales (fridges, etc.) are not hidden behind "this month".
   const [start, setStart] = useState(() => native && mode === 'fees' ? day(new Date(new Date().getFullYear(), new Date().getMonth(), 1)) : ALL_TIME_START);
   const [end, setEnd] = useState(() => day(new Date(Date.now() + 86400000)));
   const [channel, setChannel] = useState('all');
   const [report, setReport] = useState<Report | null>(null);
-  const [overhead, setOverhead] = useState(0);
   const requestId = useRef(0);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -66,16 +64,12 @@ export function ChannelReportPage({ client, money, embedded, mode = 'full', nati
     setBusy(true); setError('');
     if (native) setReport(null);
     try {
-      const [result, overheadResult] = await Promise.all([
-        client.rpc('portal_channel_report', { p_start: s, p_end: e }),
-        mode === 'full' ? client.rpc('portal_overhead_total', { p_start: s, p_end: e }) : Promise.resolve({ data: 0, error: null }),
-      ]);
+      const result = await client.rpc('portal_channel_report', { p_start: s, p_end: e });
       if (result.error) throw result.error;
-      if (overheadResult.error) throw overheadResult.error;
-      if (id === requestId.current) { setReport(result.data as Report); setOverhead(Number(overheadResult.data || 0)); }
+      if (id === requestId.current) setReport(result.data as Report);
     } catch (x) { if (id === requestId.current) setError(x instanceof Error ? x.message : String(x)); }
     finally { if (id === requestId.current) setBusy(false); }
-  }, [client, native, mode]);
+  }, [client, native]);
 
   useEffect(() => { void load(start, end); }, [load, start, end]);
 
@@ -132,8 +126,6 @@ export function ChannelReportPage({ client, money, embedded, mode = 'full', nati
     profit: t.profit + c.profit_cents,
     unmatched: t.unmatched + (c.unmatched_count || 0),
   }), { gross: 0, fees: 0, ship: 0, proc: 0, cost: 0, taxCollected: 0, profit: 0, unmatched: 0 });
-  // expense_cents excludes Shippo/manual labels (already in Label / ship cost + profit).
-  const net = report ? totals.profit - (channel === 'all' ? (report.expense_cents || 0) + overhead : 0) : 0;
   const refundTotal = (report?.refunds || []).filter(r => channel === 'all' || r.channel === channel)
     .reduce((n, r) => n + r.sales_cents, 0);
   const detailTotal = detailRows.reduce((n, r) => n + (r.amount_cents || 0), 0);
@@ -176,15 +168,15 @@ export function ChannelReportPage({ client, money, embedded, mode = 'full', nati
       {!report && !error && <div className="native-report-group">{[0,1,2,3].map(i => <div className="native-skeleton-row" key={i}><span className="native-skeleton" /></div>)}</div>}
       {report && mode === 'full' && totals.unmatched > 0 && <button type="button" className="native-report-warning" onClick={onLinkSku}>{totals.unmatched} marketplace sale{totals.unmatched === 1 ? '' : 's'} need a SKU link. Item cost is pending. <b>Link SKUs ›</b></button>}
       {report && mode === 'full' && <><div className="native-report-group">
-        {row('Gross sales', totals.gross, 'gross')}{row('Channel fees', totals.fees, 'fees', 'minus')}{row('Labels & shipping', totals.ship, 'ship', 'minus')}{row('Card processing', totals.proc, 'processing', 'minus')}{row('Item cost', totals.cost, 'cost', 'minus')}{row('Profit', totals.profit, 'profit', undefined, true)}{row('Expenses', report.expense_cents || 0, 'expenses', 'minus')}<button type="button" className="native-report-row" onClick={onOpenOverhead}><span>Overhead</span><b className="minus">−{money(overhead)}</b><span className="native-chevron">›</span></button><div className="native-report-row strong"><span>Net</span><b className={net >= 0 ? 'plus' : 'minus'}>{net < 0 ? '−' : ''}{money(Math.abs(net))}</b></div>
-      </div><p className="native-report-footnote">Gross includes item price, buyer-paid shipping and tax.</p><h3 className="native-report-section">By channel</h3><div className="native-report-group">{channels.map(c => <button type="button" className="native-report-row" key={c.channel} onClick={() => { setChannel(c.channel); setDrill('profit'); }}><span><i className={`native-channel-dot channel-${c.channel.toLowerCase()}`} />{c.channel}<small>{c.channel === 'ebay' && ebayOverhead > 0 ? `Includes ${money(ebayOverhead)} insertion/subscription` : `${c.sales_count} sales`}</small></span><b>{money(c.profit_cents)}</b><span className="native-chevron">›</span></button>)}</div></>}
+        {row('Gross sales', totals.gross, 'gross')}{row('Channel fees', totals.fees, 'fees', 'minus')}{row('Labels & shipping', totals.ship, 'ship', 'minus')}{row('Card processing', totals.proc, 'processing', 'minus')}{row('Sales tax collected', totals.taxCollected, 'tax_collected', 'minus', false, 'Pass-through, including marketplace-remitted tax')}{row('Item cost', totals.cost, 'cost', 'minus')}{row('Profit', totals.profit, 'profit', totals.profit < 0 ? 'minus' : undefined, true)}
+      </div><p className="native-report-footnote">Gross includes item price, buyer-paid shipping and tax. Tax is removed before profit; see Sales tax for the amount your store owes.</p><h3 className="native-report-section">By channel</h3><div className="native-report-group">{channels.map(c => <button type="button" className="native-report-row" key={c.channel} onClick={() => { setChannel(c.channel); setDrill('profit'); }}><span><i className={`native-channel-dot channel-${c.channel.toLowerCase()}`} />{c.channel}<small>{c.channel === 'ebay' && ebayOverhead > 0 ? `Includes ${money(ebayOverhead)} insertion/subscription` : `${c.sales_count} sales`}</small></span><b>{money(c.profit_cents)}</b><span className="native-chevron">›</span></button>)}</div></>}
       {report && mode === 'fees' && <><h3 className="native-report-section">Shipping</h3><div className="native-report-group">{row('Labels bought', totals.ship, 'ship', 'minus')}{buyerShipping !== null && <div className="native-report-row"><span>{totals.unmatched ? 'Buyer shipping · linked sales' : 'Shipping paid by buyers'}</span><b className="plus">+{money(buyerShipping)}</b></div>}{buyerShipping !== null && totals.unmatched === 0 && <div className="native-report-row strong"><span>Shipping net</span><b className={buyerShipping >= totals.ship ? 'plus' : 'minus'}>{buyerShipping >= totals.ship ? '+' : '−'}{money(Math.abs(buyerShipping - totals.ship))}</b></div>}</div>{totals.unmatched > 0 && <p className="native-report-footnote">Shipping paid by buyers excludes {totals.unmatched} unmatched order{totals.unmatched === 1 ? '' : 's'}. A net figure would mix different sets of sales.</p>}{buyerShippingError && <p className="native-report-footnote">Buyer-paid shipping is unavailable from sale rows for this period.</p>}<h3 className="native-report-section">Channel fees</h3><div className="native-report-group">{channels.filter(c => c.fee_cents).map(c => <button type="button" className="native-report-row" key={c.channel} onClick={() => { setChannel(c.channel); setDrill('fees'); }}><span><i className={`native-channel-dot channel-${c.channel.toLowerCase()}`} />{c.channel}{c.channel === 'ebay' && ebayOverhead > 0 && <small>Includes {money(ebayOverhead)} insertion/subscription</small>}</span><b>{money(c.fee_cents)}</b><span className="native-chevron">›</span></button>)}</div><h3 className="native-report-section">Card processing</h3><div className="native-report-group">{row('Square', totals.proc, 'processing', 'minus')}</div></>}
       {drill && <section className="native-report-detail"><button type="button" onClick={() => { setDrill(null); setChannel('all'); }}>‹ Back to report</button><h2>{METRIC_LABELS[drill]}</h2>{detailError && <p role="alert">{detailError}</p>}{detailBusy ? <div className="native-skeleton" /> : detailRows.length ? detailRows.map((r, i) => <div className="native-report-row" key={`${r.id}-${i}`}><span>{r.title || r.sku || r.channel}<small>{r.at ? stamp(r.at) : ''} · {r.detail || r.reason || ''}</small></span><b>{money(r.amount_cents || 0)}</b></div>) : <p>No rows in this range.</p>}</section>}
     </div>;
   }
   return <>
     {!embedded && mode === 'full' && <header><div><div className="eyebrow">PROFITABILITY</div><h1>Channels</h1>
-      <p>Defaults to all-time (includes early floor sales). Profit = item + buyer shipping − channel fees − label cost − card processing − item cost. Click any total for the rows.</p></div>{dateControls}</header>}
+      <p>Defaults to all-time (includes early floor sales). Gross includes collected tax, which is removed before profit. Profit also subtracts channel fees, label cost, card processing, and item cost. Click any total for the rows.</p></div>{dateControls}</header>}
     {!embedded && mode === 'fees' && <header><div><div className="eyebrow">SHIPPING & FEES</div><h1>Channel fees & labels</h1>
       <p>Marketplace fees, label spend, and card processing by channel. Click a total for the line items.</p></div>{dateControls}</header>}
     {embedded && <div className="section-head" style={{ marginBottom: 12, flexWrap: 'wrap' }}><div><h2>{mode === 'fees' ? 'Fees & label spend by channel' : 'Profit by channel'}</h2><p className="hint" style={{ margin: 0 }}>Click a total to see how it was calculated. {mode === 'full' ? `${unmatchedHint}${ebayHint}` : ''}</p></div>{dateControls}</div>}
@@ -198,13 +190,10 @@ export function ChannelReportPage({ client, money, embedded, mode = 'full', nati
         <Stat name="Label / ship cost" value={money(totals.ship)} onClick={() => setDrill('ship')} active={drill === 'ship'} />
         <Stat name="Card processing" value={money(totals.proc)} onClick={() => setDrill('processing')} active={drill === 'processing'} />
         {mode === 'full' && <>
+          <Stat name="Sales tax collected" value={money(totals.taxCollected)} onClick={() => setDrill('tax_collected')} active={drill === 'tax_collected'} note="Pass-through, not profit" />
           <Stat name="Item cost" value={money(totals.cost)} onClick={() => setDrill('cost')} active={drill === 'cost'} />
           <Stat name="Profit" value={money(totals.profit)} onClick={() => setDrill('profit')} active={drill === 'profit'} />
-          {channel === 'all' && <Stat name="Expenses" value={money(report.expense_cents)} onClick={() => setDrill('expenses')} active={drill === 'expenses'} />}
-          {channel === 'all' && <Stat name="Overhead" value={money(overhead)} onClick={onOpenOverhead} note="View and edit entries" />}
-          <Stat name="Net" value={money(net)} note="Profit less expenses and overhead" />
         </>}
-        <Stat name="Tax collected" value={money(totals.taxCollected)} onClick={() => setDrill('tax_collected')} active={drill === 'tax_collected'} />
         {mode === 'full' && refundTotal > 0 && <Stat name="Refunded" value={money(refundTotal)} onClick={() => setDrill('refunds')} active={drill === 'refunds'} />}
         {mode === 'fees' && channel === 'all' && report.label_expense_cents > 0 && <Stat name="Label expenses (ledger)" value={money(report.label_expense_cents)} onClick={() => setDrill('expenses')} active={drill === 'expenses'} />}
       </div>
