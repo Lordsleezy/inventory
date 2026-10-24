@@ -33,7 +33,7 @@ import {
 } from './register/sale';
 import { loadAvailableUnits, queryAvailableUnits, searchUnits, type RegisterUnit } from './register/units';
 import { NativePaySheets, NativeRegisterCart, NativeRegisterDone, SALE_OVERRIDE } from './register/NativeRegister';
-import { isKioskShell, scannerInputMode } from './kiosk';
+import { isAndroidStoreDevice, isKioskShell, scannerInputMode } from './kiosk';
 import { errText } from './errText';
 
 type ManualPayment = {
@@ -967,13 +967,13 @@ function RegisterInner({ staffSession, onNeedFullReload, variant = 'desktop' }: 
             }}
             onFocus={() => q.trim() && setShowHits(true)}
             onKeyDown={onSearchKey}
-            autoFocus={!isCoarse || isKioskShell()}
+            autoFocus={!isAndroidStoreDevice() && (!isCoarse || isKioskShell())}
             autoComplete="off"
             autoCorrect="off"
             autoCapitalize="off"
             spellCheck={false}
             enterKeyHint="search"
-            inputMode={scannerInputMode() === 'none' ? 'none' : 'search'}
+            inputMode={scannerInputMode() || 'search'}
             disabled={!idle || cashOpen}
           />
           {showHits && (hits.length || searchBusy) ? (
