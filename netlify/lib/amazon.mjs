@@ -870,10 +870,7 @@ export async function listAmazonOffer(storeId, kit) {
       ],
     },
   };
-  for (const [name, value] of Object.entries(assignedCategory.attributes || {})) {
-    if (payload.attributes[name]) continue;
-    payload.attributes[name] = [{ value, marketplace_id: marketplaceId() }];
-  }
+  payload.attributes = { ...(assignedCategory.native_attributes || {}), ...payload.attributes };
 
   const path = `/listings/2021-08-01/items/${encodeURIComponent(sid)}/${encodeURIComponent(sku)}?marketplaceIds=${marketplaceId()}`;
   let preview;

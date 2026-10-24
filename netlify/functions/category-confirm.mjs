@@ -2,6 +2,7 @@ import { json, corsHeaders, serviceClient } from '../lib/server.mjs';
 import { portalAdminFromEvent } from '../lib/portal-auth.mjs';
 import { normalizeGtin } from '../lib/gtin-normalize.mjs';
 import { wrapHandler, asNetlifyFunction } from '../lib/floor-log.mjs';
+import { validateAmazonUnitCategory } from '../lib/amazon-category-validation.mjs';
 
 async function handle(event) {
   if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers: corsHeaders(), body: '' };
@@ -13,6 +14,7 @@ async function handle(event) {
     const sb = serviceClient();
     const { data: unit, error } = await sb.from('units').select('sku,upc,internal_category').eq('store_id', storeId).eq('sku', sku).single();
     if (error) throw new Error(error.message);
+    await validateAmazonUnitCategory(storeId, sku);
     const gtin = normalizeGtin(unit.upc);
     if (!gtin.ok) return json(200, { ok: true, cached: false, reason: 'no_valid_upc' });
     const { data: gaps, error: gapError } = await sb.rpc('floor_category_gaps', { p_store: storeId, p_sku: sku, p_channel: null });

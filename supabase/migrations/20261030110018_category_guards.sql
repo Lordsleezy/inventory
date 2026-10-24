@@ -4,6 +4,11 @@ alter table public.channel_taxonomy add column if not exists fingerprint text;
 alter table public.channel_taxonomy add column if not exists changed_at timestamptz;
 alter table public.channel_taxonomy add column if not exists retired_at timestamptz;
 alter table public.channel_taxonomy add column if not exists fields_fetched_at timestamptz;
+alter table public.channel_taxonomy add column if not exists validation_schema jsonb;
+alter table public.unit_channel_categories add column if not exists validation_version text;
+alter table public.unit_channel_categories add column if not exists validation_unit jsonb;
+alter table public.unit_channel_categories add column if not exists validation_attributes jsonb;
+alter table public.unit_channel_categories add column if not exists validation_errors jsonb not null default '[]'::jsonb;
 alter table public.channel_taxonomy add column if not exists fields_version text;
 alter table public.channel_taxonomy add column if not exists permissions jsonb not null default '[]'::jsonb;
 alter table public.unit_channel_categories add column if not exists review_reason text;
@@ -76,11 +81,17 @@ returns jsonb language sql stable security definer set search_path=public as $$
           or t.fields_fetched_at < now()-interval '4 days') then 'category taxonomy stale'
         when c.channel<>'depop' and c.validated_version is distinct from
           (coalesce(t.fingerprint,'')||':'||coalesce(t.fields_version,'')) then 'category changed; recheck'
+        when c.channel='amazon' and (c.validation_version is distinct from t.fields_version
+          or c.validation_attributes is distinct from c.attributes
+          or c.validation_unit is distinct from jsonb_build_object('condition',u.condition,'ask_cents',u.ask_cents,
+            'qty_on_hand',u.qty_on_hand,'asin',u.listing_specs->>'asin')) then 'Amazon schema validation pending'
+        when f.value->>'issue' is not null then f.value->>'issue'
         when f.value->>'kind'='unsupported_document' then 'channel document required'
         when f.value is not null then 'missing required field'
         else null end issue,
       f.value->>'name' field
     from public.unit_channel_categories c
+    join public.units u on u.store_id=c.store_id and u.sku=c.sku
     left join public.channel_taxonomy t on t.channel=c.channel and t.category_id=c.category_id
     left join public.store_depop_categories d on c.channel='depop' and d.store_id=c.store_id and d.category_id=c.category_id
     left join lateral (
@@ -92,6 +103,7 @@ returns jsonb language sql stable security definer set search_path=public as $$
           or (jsonb_typeof(elem.value->'allowed')='array'
             and jsonb_array_length(elem.value->'allowed')>0
             and not ((elem.value->'allowed') ? (c.attributes->>(elem.value->>'name')))))
+      union all select elem.value from jsonb_array_elements(c.validation_errors) elem where c.channel='amazon'
     ) f on true
     where c.store_id=p_store and c.sku=p_sku and c.enabled
       and (p_channel is null or c.channel=p_channel)
@@ -258,7 +270,7 @@ begin
   perform public.floor_category_demote_sku(new.store_id,new.sku);
   return new;
 end $$;
-create trigger floor_category_unit_changed after insert or update of category_id,attributes,enabled,review_reason,validated_version
+create trigger floor_category_unit_changed after insert or update of category_id,attributes,enabled,review_reason,validated_version,validation_version,validation_errors
   on public.unit_channel_categories for each row execute function public.floor_category_unit_changed();
 
 create or replace function public.floor_bundle_category_disable_amazon()
@@ -287,7 +299,7 @@ create trigger floor_category_taxonomy_changed after update of fingerprint,field
   for each row when (old.fingerprint is distinct from new.fingerprint or old.fields_version is distinct from new.fields_version
     or old.active is distinct from new.active) execute function public.floor_category_taxonomy_changed();
 -- Existing inserts need category rows first. Alphabetical trigger order puts initialize_unit_categories first.
-create trigger unit_category_ready_guard after insert or update of listing_specs on public.units
+create trigger unit_category_ready_guard after insert or update of listing_specs,condition,ask_cents,qty_on_hand on public.units
   for each row execute function public.floor_category_ready_guard();
 
 revoke all on function public.floor_category_gaps(uuid,text,text) from public,anon,authenticated;

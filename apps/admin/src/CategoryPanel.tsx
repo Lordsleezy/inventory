@@ -4,7 +4,7 @@ import { floorFunctionUrl } from './floorApi';
 
 type Channel = 'ebay' | 'amazon' | 'tiktok' | 'depop';
 const CHANNELS: [Channel, string][] = [['ebay', 'eBay'], ['amazon', 'Amazon'], ['tiktok', 'TikTok Shop'], ['depop', 'Depop']];
-type Choice = { category_id: string; path: string; required_fields: { name: string; label?: string; allowed?: string[]; labels?: Record<string, string>; kind?: string }[] };
+type Choice = { category_id: string; path: string; required_fields: { name: string; label?: string; required?: boolean; allowed?: string[]; labels?: Record<string, string>; kind?: string }[] };
 type Row = { sku: string; title: string; upc: string | null; gaps: { channel: Channel; issue: string; field?: string }[];
   channels: Record<Channel, { category_id: string | null; enabled: boolean; attributes: Record<string, string> }> | null; live: boolean };
 type Props = { client: SupabaseClient; storeId: string; initialSku?: string; onSaved?: () => void };
@@ -124,13 +124,15 @@ export function CategoryPanel({ client, storeId, initialSku, onSaved }: Props) {
       }
       const { data: session } = await client.auth.getSession();
       if (session.session?.access_token) {
+        for (const sku of selected) {
         const response = await fetch(floorFunctionUrl('category-confirm'), { method: 'POST',
           headers: { Authorization: `Bearer ${session.session.access_token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ store_id: storeId, sku: selected[0] }) });
+          body: JSON.stringify({ store_id: storeId, sku }) });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || 'Could not confirm the UPC category mapping.');
         if (result.cached) setNotice(`Saved ${selected.length} item${selected.length === 1 ? '' : 's'} and confirmed UPC for future scans.`);
         else setNotice(`Saved ${selected.length} item${selected.length === 1 ? '' : 's'}. UPC cache pending: ${result.reason || 'missing data'}.`);
+        }
       } else setNotice(`Saved ${selected.length} item${selected.length === 1 ? '' : 's'}.`);
       setReload((n) => n + 1);
       onSaved?.();
@@ -184,13 +186,17 @@ export function CategoryPanel({ client, storeId, initialSku, onSaved }: Props) {
             {choice.path}<small>{choice.category_id}</small></button>)}</div>
           {categories[channel] && <p className="hint">Selected: {activeChoice?.path || categories[channel]}</p>}
           {mapping && <p className="hint">{mapping}</p>}
-          {(activeChoice?.required_fields || []).map((field) => field.kind === 'unsupported_document'
+          {(activeChoice?.required_fields || []).filter((field) => field.required !== false
+            || Boolean(attributes[channel][field.name])
+            || first?.gaps.some((gap) => gap.channel === channel && gap.field === field.name)).map((field) => field.kind === 'unsupported_document'
             ? <p className="hint" key={field.name}>{field.label || field.name} requires channel approval or a document upload before listing.</p>
             : <label key={field.name}>{field.label || field.name}
             {field.allowed?.length ? <select value={attributes[channel][field.name] || ''} onChange={(e) => setAttributes((old) => ({ ...old,
               [channel]: { ...old[channel], [field.name]: e.target.value } }))}>
               <option value="">Choose…</option>{field.allowed.map((value) => <option key={value} value={value}>{field.labels?.[value] || value}</option>)}
-            </select> : <input value={attributes[channel][field.name] || ''} onChange={(e) => setAttributes((old) => ({ ...old,
+            </select> : field.kind === 'json' ? <textarea rows={3} value={attributes[channel][field.name] || ''}
+              onChange={(e) => setAttributes((old) => ({ ...old, [channel]: { ...old[channel], [field.name]: e.target.value } }))} />
+              : <input value={attributes[channel][field.name] || ''} onChange={(e) => setAttributes((old) => ({ ...old,
               [channel]: { ...old[channel], [field.name]: e.target.value } }))} />}</label>)}
           <label>Floor category<input value={internal} onChange={(e) => setInternal(e.target.value)} /></label>
           <button type="button" disabled={busy} onClick={() => void save()}>{busy ? 'Saving…' : 'Save categories and fields'}</button>

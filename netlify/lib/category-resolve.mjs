@@ -4,6 +4,7 @@ import { catalogItemByIdentifier } from './amazon.mjs';
 import { ebayCategoriesForGtin, suggestCategories } from './ebay-catalog.mjs';
 import { tiktokApiFetch } from './tiktok-shop.mjs';
 import { refreshChannelCategoryFields } from './category-taxonomy.mjs';
+import { validateAmazonUnitCategory } from './amazon-category-validation.mjs';
 
 const CHANNELS = ['ebay', 'amazon', 'tiktok', 'depop'];
 
@@ -39,7 +40,7 @@ async function recommendedTiktok(storeId, unit) {
 async function categoryRows(sb, ids) {
   const valid = Object.entries(ids).filter(([channel, id]) => channel !== 'depop' && id);
   if (!valid.length) return new Map();
-  const { data, error } = await sb.from('channel_taxonomy').select('channel,category_id,active,leaf,required_fields,fields_fetched_at,fingerprint,fields_version')
+  const { data, error } = await sb.from('channel_taxonomy').select('channel,category_id,active,leaf,required_fields,fields_fetched_at,fingerprint,fields_version,validation_schema')
     .in('category_id', [...new Set(valid.map(([, id]) => id))]);
   if (error) throw new Error(error.message);
   return new Map((data || []).map((row) => [`${row.channel}:${row.category_id}`, row]));
@@ -137,7 +138,8 @@ export async function resolveUnitCategories(storeId, sku, { network = true } = {
     for (const [channel, id] of Object.entries(ids)) {
       const row = tax.get(`${channel}:${id}`);
       if (channel === 'depop' || !row?.active || !row.leaf) continue;
-      if (!row.fields_fetched_at || Date.parse(row.fields_fetched_at) < Date.now() - 3 * 86400000) {
+      if (!row.fields_fetched_at || (channel === 'amazon' && !row.validation_schema)
+        || Date.parse(row.fields_fetched_at) < Date.now() - 3 * 86400000) {
         await refreshChannelCategoryFields(channel, storeId, id).catch(() => {});
       }
     }
@@ -167,6 +169,7 @@ export async function resolveUnitCategories(storeId, sku, { network = true } = {
     const { error } = await sb.from('unit_channel_categories').upsert(updates, { onConflict: 'store_id,sku,channel' });
     if (error) throw new Error(error.message);
   }
+  await validateAmazonUnitCategory(storeId, sku);
   const { data: gaps, error: gapError } = await sb.rpc('floor_category_gaps', { p_store: storeId, p_sku: sku, p_channel: null });
   if (gapError) throw new Error(gapError.message);
   const enabledChannels = CHANNELS.filter((channel) => current.get(channel)?.enabled);

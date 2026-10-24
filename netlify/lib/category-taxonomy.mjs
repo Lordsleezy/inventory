@@ -79,11 +79,11 @@ async function upsertSnapshot(channel, storeId, version, rows) {
   return { channel, version, count: rows.length, storeId };
 }
 
-async function updateRequired(channel, categoryId, defs) {
+async function updateRequired(channel, categoryId, defs, validationSchema = null) {
   const sb = serviceClient();
-  const fieldsVersion = digest(defs);
+  const fieldsVersion = digest([defs, validationSchema]);
   const { data: before } = await sb.from('channel_taxonomy').select('fields_version').eq('channel', channel).eq('category_id', categoryId).maybeSingle();
-  const { error } = await sb.from("channel_taxonomy").update({ required_fields: defs, fields_version: fieldsVersion,
+  const { error } = await sb.from("channel_taxonomy").update({ required_fields: defs, validation_schema: validationSchema, fields_version: fieldsVersion,
     fields_fetched_at: new Date().toISOString(),
     ...(before?.fields_version && before.fields_version !== fieldsVersion ? { changed_at: new Date().toISOString() } : {})
   }).eq("channel", channel).eq("category_id", categoryId);
@@ -97,6 +97,7 @@ export async function refreshChannelCategoryFields(channel, storeId, categoryId)
   if (readError) throw new Error(readError.message);
   if (!category?.active || !category.leaf) throw new Error('category_not_active_leaf');
   let defs;
+  let validationSchema = null;
   if (channel === 'ebay') {
     const live = await retryLimited(() => fetchLiveAspects(categoryId));
     defs = live.filter((d) => d.required).map((d) => ({ name: d.name, required: true,
@@ -119,16 +120,20 @@ export async function refreshChannelCategoryFields(channel, storeId, categoryId)
       required: true, allowed: [], kind: 'unsupported_document' });
   } else if (channel === 'amazon') {
     const def = await retryLimited(() => spapiFetch(storeId, 'GET', `/definitions/2020-09-01/productTypes/${encodeURIComponent(categoryId)}` +
-      `?marketplaceIds=${marketplaceId()}&requirements=LISTING_OFFER_ONLY&requirementsEnforced=ENFORCED`));
+      `?marketplaceIds=${marketplaceId()}&requirements=LISTING_OFFER_ONLY&requirementsEnforced=ENFORCED` +
+      (process.env.AMAZON_SELLER_ID ? `&sellerId=${encodeURIComponent(process.env.AMAZON_SELLER_ID)}` : '')));
     const schemaUrl = def.schema?.link?.resource;
     if (!schemaUrl) throw new Error(`amazon_definition_missing_schema:${categoryId}`);
     const response = await fetch(schemaUrl);
     if (!response.ok) throw new Error(`amazon_schema_${response.status}:${categoryId}`);
     const schema = await response.json();
-    defs = (schema.required || []).map((name) => ({ name, required: true,
-      allowed: schema.properties?.[name]?.items?.properties?.value?.enum || schema.properties?.[name]?.enum || [] }));
+    validationSchema = schema;
+    defs = Object.entries(schema.properties || {}).map(([name, property]) => ({ name, label: property.title || name,
+      required: (schema.required || []).includes(name),
+      kind: property.items?.properties?.value ? 'value' : 'json',
+      allowed: (property.items?.properties?.value?.enum || property.enum || []).map(String) }));
   } else throw new Error('invalid_channel');
-  await updateRequired(channel, categoryId, defs);
+  await updateRequired(channel, categoryId, defs, validationSchema);
   return defs;
 }
 
