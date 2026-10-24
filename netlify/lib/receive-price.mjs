@@ -4,7 +4,11 @@ const words = value => String(value || '').toLowerCase().replace(/&/g, ' and ')
   .replace(/[^a-z0-9.]+/g, ' ').trim().split(/\s+/).filter(Boolean);
 
 function printedSize(value) {
-  const match = String(value || '').toLowerCase().match(/\b(\d+(?:\.\d+)?)[\s-]*(fl\s*oz|oz|ml|l|g|kg|lb)\b/);
+  const normalized = String(value || '').toLowerCase()
+    .replace(/\bfluid\s+ounces?\b/g, 'fl oz').replace(/\bfl[.\s]*oz[.]?/g, 'fl oz')
+    .replace(/\bounces?\b/g, 'oz').replace(/\bmillilit(?:er|re)s?\b/g, 'ml')
+    .replace(/\bkilograms?\b/g, 'kg').replace(/\bgrams?\b/g, 'g').replace(/\bpounds?\b/g, 'lb');
+  const match = normalized.match(/\b(\d+(?:\.\d+)?)[\s-]*(fl\s*oz|oz|ml|l|g|kg|lb)\b/);
   return match ? { amount: Number(match[1]), unit: match[2].replace(/\s+/g, '') === 'floz' ? 'oz' : match[2].replace(/\s+/g, '') } : null;
 }
 

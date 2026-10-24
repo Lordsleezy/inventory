@@ -1628,10 +1628,10 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         <details className="receive-confirm-details"><summary>Description {form.description ? '· filled' : '· empty'}</summary>
           <textarea rows={3} value={form.description} onChange={e => update('description', e.target.value)} /></details>
         <details className="receive-confirm-details"><summary>Product · {[form.productHeight, form.productWidth, form.productDepth].every(Boolean)
-          ? `${form.productHeight} × ${form.productWidth} × ${form.productDepth} in` : 'Add dimensions'}{form.productWeight ? ` · ${form.productWeight} lb` : ''}
+          ? `${form.productDepth} × ${form.productWidth} × ${form.productHeight} in (L × W × H)` : 'Add dimensions'}{form.productWeight ? ` · ${form.productWeight} lb` : ''}
           {dimensionsBusy ? ' · finding…' : ''} <small>{[...new Set(['product_height_in','product_width_in','product_depth_in','product_weight_lb'].map(k => dimensionSources[k]).filter(Boolean))].join(' / ')}</small></summary>
-          <div className="receive-confirm-dims">{([['productHeight','Height (in)','product_height_in'],['productWidth','Width (in)','product_width_in'],
-            ['productDepth','Depth (in)','product_depth_in'],['productWeight','Weight (lb)','product_weight_lb']] as const).map(([key,label,source]) =>
+          <div className="receive-confirm-dims">{([['productDepth','Length (in)','product_depth_in'],['productWidth','Width (in)','product_width_in'],
+            ['productHeight','Height (in)','product_height_in'],['productWeight','Weight (lb)','product_weight_lb']] as const).map(([key,label,source]) =>
             <label key={key}>{label}<input type="number" min="0" step="any" inputMode="decimal" value={form[key]} onChange={e => { update(key, e.target.value); setDimensionSources(p => ({...p,[source]:'staff'})); }} />
               {form[key] && <small>{dimensionSources[source] || 'staff'}</small>}</label>)}</div></details>
         <details className="receive-confirm-details"><summary>Package · {[form.length, form.width, form.height].every(Boolean)

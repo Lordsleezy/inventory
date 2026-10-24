@@ -33,6 +33,14 @@ test('one or two listings do not claim a median', () => {
   assert.equal(result.median_cents, null);
 });
 
+test('printed Fl. Oz. and Ounce spellings still enforce exact size', () => {
+  const identity={brand:'White Claw',title:'White Claw Black Cherry',size:'24 Fl. Oz.',variant:'Black Cherry'};
+  const price={store:'Target',price_cents:249,url:'https://target.com/item',product_name:'White Claw Black Cherry 19.2 fl oz Can'};
+  assert.equal(medianReference([price],identity).count,0);
+  assert.equal(medianReference([{...price,product_name:'White Claw Black Cherry 24 fluid ounces Can'}],identity).count,1);
+  assert.equal(medianReference([listing('A',349)],{...item,title:'Febreze Air Mist Linen & Sky',size:'8.1 Ounce'}).count,0);
+});
+
 test('recorded offers retain distinct merchants behind UPCitemdb redirects and exclude CAD', () => {
   const offers = [
     { merchant: 'Canadian store', domain: 'store.ca', price: 7.99, link: 'https://www.upcitemdb.com/offer/ca' },
