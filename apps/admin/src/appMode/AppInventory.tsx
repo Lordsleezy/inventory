@@ -18,6 +18,16 @@ type Row = {
 
 type List = { items: Row[]; totals: { unit_count: number } };
 
+type InvStats = {
+  total_active_inventory: number;
+  sold_inventory: number;
+  ebay: number;
+  amazon: number;
+  depop: number;
+  tiktok: number;
+  do_not_list: number;
+};
+
 type Props = {
   client: SupabaseClient;
   money: (n: number) => string;
@@ -96,6 +106,10 @@ export function AppInventory({ client, money, onOpen, scrollRef }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [unfinishedCount, setUnfinishedCount] = useState<number | null>(null);
+  const [statsOpen, setStatsOpen] = useState(false);
+  const [stats, setStats] = useState<InvStats | null>(null);
+  const [statsLoading, setStatsLoading] = useState(false);
+  const [statsError, setStatsError] = useState('');
   const urlsRef = useRef(urls);
   urlsRef.current = urls;
 
@@ -220,9 +234,39 @@ export function AppInventory({ client, money, onOpen, scrollRef }: Props) {
     setList(hit);
   }
 
+  async function openStats() {
+    setStatsOpen(true);
+    setStatsLoading(true);
+    setStatsError('');
+    try {
+      const { data, error: e } = await client.rpc('portal_inventory_stats');
+      if (e) throw e;
+      const raw = (data || {}) as Partial<InvStats>;
+      setStats({
+        total_active_inventory: Number(raw.total_active_inventory) || 0,
+        sold_inventory: Number(raw.sold_inventory) || 0,
+        ebay: Number(raw.ebay) || 0,
+        amazon: Number(raw.amazon) || 0,
+        depop: Number(raw.depop) || 0,
+        tiktok: Number(raw.tiktok) || 0,
+        do_not_list: Number(raw.do_not_list) || 0,
+      });
+    } catch (err) {
+      setStats(null);
+      setStatsError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setStatsLoading(false);
+    }
+  }
+
   return (
     <div ref={scrollRef as React.RefObject<HTMLDivElement>}>
-      <div className="app-large-title"><h1>Inventory</h1></div>
+      <div className="app-large-title app-large-title-row">
+        <h1>Inventory</h1>
+        <button type="button" className="app-title-box" onClick={() => { void openStats(); }}>
+          Stats
+        </button>
+      </div>
       <label className="app-search">
         <span aria-hidden>⌕</span>
         <input
@@ -322,6 +366,31 @@ export function AppInventory({ client, money, onOpen, scrollRef }: Props) {
         <div className="app-actions" style={{ gridTemplateColumns: '1fr 1fr' }}>
           <button type="button" disabled={offset === 0 || loading} onClick={() => setOffset(Math.max(0, offset - PAGE))}>Previous</button>
           <button type="button" disabled={offset + PAGE >= total || loading} onClick={() => setOffset(offset + PAGE)}>Next</button>
+        </div>
+      )}
+
+      {statsOpen && (
+        <div className="app-stats-sheet" role="dialog" aria-modal="true" aria-label="Inventory stats">
+          <button type="button" className="app-stats-backdrop" aria-label="Close stats" onClick={() => setStatsOpen(false)} />
+          <div className="app-stats-panel">
+            <div className="app-stats-head">
+              <h2>Inventory stats</h2>
+              <button type="button" className="app-stats-close" onClick={() => setStatsOpen(false)}>Done</button>
+            </div>
+            {statsLoading && <p className="app-footer-count">Loading…</p>}
+            {statsError && <p className="app-inline-error">{statsError}</p>}
+            {stats && !statsLoading && (
+              <ul className="app-stats-list">
+                <li><span>Total active inventory</span><strong>{stats.total_active_inventory}</strong></li>
+                <li><span>Sold inventory</span><strong>{stats.sold_inventory}</strong></li>
+                <li><span>eBay</span><strong>{stats.ebay}</strong></li>
+                <li><span>Amazon</span><strong>{stats.amazon}</strong></li>
+                <li><span>Depop</span><strong>{stats.depop}</strong></li>
+                <li><span>TikTok</span><strong>{stats.tiktok}</strong></li>
+                <li><span>Not able to sell when received</span><strong>{stats.do_not_list}</strong></li>
+              </ul>
+            )}
+          </div>
         </div>
       )}
     </div>

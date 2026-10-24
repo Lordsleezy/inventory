@@ -65,9 +65,10 @@ if ('serviceWorker' in navigator) {
     void navigator.serviceWorker.register('/sw.js').then((reg) => {
       const poke = () => { void reg.update().catch(() => undefined); };
 
-      // Do NOT poke on every visibility/focus — returning from the camera would
-      // discover a waiting SW and reload mid-entry. Quiet background check only.
-      setInterval(poke, 5 * 60_000);
+      // Pick up new deploys quickly when the app is idle (not mid-Receive / camera).
+      // Do NOT poke on every visibility/focus — that restarted inventoring on camera return.
+      poke();
+      setInterval(poke, 60_000);
 
       reg.addEventListener('updatefound', () => {
         const sw = reg.installing;
