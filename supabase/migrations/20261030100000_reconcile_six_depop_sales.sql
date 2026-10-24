@@ -28,17 +28,23 @@ create temporary table depop_verified (
   item_cents integer not null, fee_cents integer not null, payout_cents integer not null,
   web_order_id uuid not null, expected_sale_id bigint
 ) on commit drop;
-insert into depop_verified values
+insert into depop_verified
+select v.external_order_id,v.buyer_handle,v.verified_sku,v.item_cents,v.fee_cents,
+  v.payout_cents,v.web_order_id::uuid,v.expected_sale_id::bigint from (values
  ('478386059381','kay_lucha','11352',1999,136,1863,'fed7b310-ccf5-48b3-bb86-3e9550ed126b',124),
  ('477954162338','kwfastkat1988','11406',1499,94,1405,'5b6e8ff9-0ae2-4004-af70-9baaa4abe258',null),
  ('477909417053','f102z','99102',2800,145,2655,'8e94bb52-317b-49c4-bf13-4e4b05ff2c68',null),
  ('477564801434','slpb5',null,1800,115,1685,'cc2b287d-b5f5-498d-9f66-906943744556',75),
  ('477520571840','melps_ex','99106',3670,197,3473,'dbd598f4-61b8-4268-8cb6-3d00203b5f38',76),
- ('477486291306','len112255',null,2500,144,2356,'5ef40790-4d84-462d-b4da-e1f49f22fe3f',59);
+ ('477486291306','len112255',null,2500,144,2356,'5ef40790-4d84-462d-b4da-e1f49f22fe3f',59)
+) as v(external_order_id,buyer_handle,verified_sku,item_cents,fee_cents,payout_cents,web_order_id,expected_sale_id)
+where exists (select 1 from public.stores where id='5487ca47-6147-4fe8-bc6d-46b6472726ba');
 
 do $$
 declare v_store uuid := '5487ca47-6147-4fe8-bc6d-46b6472726ba'; v_bad int;
 begin
+  if not exists (select 1 from public.stores where id=v_store) then return; end if;
+  if (select count(*) from depop_verified)<>6 then raise exception 'Expected six verified Depop rows'; end if;
   select count(*) into v_bad from depop_verified v
   left join public.web_orders o on o.id=v.web_order_id
   where o.id is null or o.store_id<>v_store or o.channel<>'depop' or o.status<>'paid'
@@ -81,10 +87,14 @@ from depop_verified v;
 
 -- Use the existing order-linking workflow to sell the two verified available units.
 -- The function preserves each web order's payment_id and creates the sale/event/delist records.
-select set_config('request.jwt.claim.sub','68b0d022-b9e4-427e-ab25-5399bc4cfd41',true);
-select set_config('request.jwt.claim.role','service_role',true);
-select public.portal_match_web_order('5b6e8ff9-0ae2-4004-af70-9baaa4abe258','11406');
-select public.portal_match_web_order('8e94bb52-317b-49c4-bf13-4e4b05ff2c68','99102');
+do $$ begin
+  if exists (select 1 from depop_verified) then
+    perform set_config('request.jwt.claim.sub','68b0d022-b9e4-427e-ab25-5399bc4cfd41',true);
+    perform set_config('request.jwt.claim.role','service_role',true);
+    perform public.portal_match_web_order('5b6e8ff9-0ae2-4004-af70-9baaa4abe258','11406');
+    perform public.portal_match_web_order('8e94bb52-317b-49c4-bf13-4e4b05ff2c68','99102');
+  end if;
+end $$;
 update public.sales s set sold_at=o.paid_at
 from public.web_orders o
 where o.id in ('5b6e8ff9-0ae2-4004-af70-9baaa4abe258','8e94bb52-317b-49c4-bf13-4e4b05ff2c68')
