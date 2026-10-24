@@ -13,7 +13,8 @@ async function handle(event) {
     const base = (process.env.URL || 'https://inventoryobi.netlify.app').replace(/\/$/, '');
     const response = await fetch(`${base}/.netlify/functions/category-backfill-background`, { method: 'POST',
       headers: { Authorization: `Bearer ${requireEnv('SUPABASE_SERVICE_ROLE')}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ store_id: storeId, offset, limit: Math.min(Math.max(Number(body.limit) || 20, 1), 50) }) });
+      body: JSON.stringify({ store_id: storeId, offset, limit: Math.min(Math.max(Number(body.limit) || 20, 1), 50),
+        skus: Array.isArray(body.skus) ? body.skus.slice(0, 50).map(String) : null }) });
     return json(response.ok ? 202 : 502, { queued: response.ok, offset, status: response.status });
   } catch (error) { return json(error?.status || 500, { error: String(error?.message || error) }); }
 }

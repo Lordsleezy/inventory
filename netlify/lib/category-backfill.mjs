@@ -87,11 +87,14 @@ async function adoptListingCategories(storeId, unit) {
 }
 
 /** One bounded batch; a caller can repeat offset until processed is zero. */
-export async function backfillCategoryBatch(storeId, { offset = 0, limit = 20, network = true } = {}) {
+export async function backfillCategoryBatch(storeId, { offset = 0, limit = 20, network = true, skus = null } = {}) {
   const sb = serviceClient();
-  const { data: units, error } = await sb.from('units').select('sku,upc,state,listing_specs')
+  let query = sb.from('units').select('sku,upc,state,listing_specs')
     .eq('store_id', storeId).in('state', ['available', 'reserved', 'repair'])
-    .order('sku').range(offset, offset + Math.min(Math.max(limit, 1), 50) - 1);
+    .order('sku');
+  query = Array.isArray(skus) ? query.in('sku', skus.slice(0, 50).map(String))
+    : query.range(offset, offset + Math.min(Math.max(limit, 1), 50) - 1);
+  const { data: units, error } = await query;
   if (error) throw new Error(error.message);
   const stats = { processed: 0, auto_resolved: 0, needs_owner: 0, live_adopted: 0, moved_not_ready: 0, failures: [] };
   for (const unit of units || []) {

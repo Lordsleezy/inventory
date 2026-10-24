@@ -9,7 +9,8 @@ async function handle(event) {
   const body = JSON.parse(event.body || '{}');
   try {
     return json(200, { ok: true, ...await backfillCategoryBatch(body.store_id || STORE_DEFAULT,
-      { offset: Math.max(0, Number(body.offset) || 0), limit: Math.min(Math.max(Number(body.limit) || 20, 1), 50) }) });
+      { offset: Math.max(0, Number(body.offset) || 0), limit: Math.min(Math.max(Number(body.limit) || 20, 1), 50),
+        skus: Array.isArray(body.skus) ? body.skus.slice(0, 50).map(String) : null }) });
   } catch (error) { return json(500, { ok: false, error: String(error?.message || error) }); }
 }
 
