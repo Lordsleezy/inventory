@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { requireEnv } from './server.mjs';
-import { verifyRetailListings } from './receive-price.mjs';
+import { verifyRetailListings, receivePriceCacheKey } from './receive-price.mjs';
 
 const model = () => process.env.GEMINI_VIDEO_MODEL || 'gemini-3.8-flash';
 const api = 'https://generativelanguage.googleapis.com/v1beta/models/';
@@ -169,11 +169,10 @@ async function searchOnce(identity,closer=false,signal,singlePass=false,exactMat
     output:grounded.output+parsed.output,queries:grounded.queries};
 }
 export async function lookupRetail(sb,job,identity,{signal,singlePass=false,exactMatch=false}={}) {
-  const key=exactMatch&&/^\d{8,14}$/.test(String(identity.upc||''))
-    ? createHash('sha256').update(`receive-upc:${identity.upc}`).digest('hex') : productKey(identity);
+  const key=exactMatch ? receivePriceCacheKey(identity) : productKey(identity);
   if(key){const cached=await sb.from('video_scan_product_cache').select('lookup,created_at').eq('store_id',job.store_id).eq('product_key',key).maybeSingle();
     if(cached.error)throw cached.error;
-    if(cached.data&&(!exactMatch||cached.data.lookup?.retail_match_version===5)&&Date.now()-Date.parse(cached.data.created_at)<
+    if(cached.data&&(!exactMatch||cached.data.lookup?.retail_match_version===6)&&Date.now()-Date.parse(cached.data.created_at)<
       (cached.data.lookup.retail_prices?.length?30:1)*86400_000){
       // Show cached prices immediately; resolve redirect URLs in the background later if needed.
       return {prices:cleanPrices(cached.data.lookup.retail_prices,identity),input:0,output:0,queries:0,reused:true,cachedDetails:cached.data.lookup};
@@ -188,7 +187,7 @@ export async function lookupRetail(sb,job,identity,{signal,singlePass=false,exac
   if(exactMatch)prices=await verifyRetailListings(prices,identity);
   // Skip HEAD redirect resolution on the critical path — grounding links still open in-app.
   if(key){const saved=await sb.from('video_scan_product_cache').upsert({store_id:job.store_id,product_key:key,
-    lookup:{retail_prices:prices,...(exactMatch?{retail_match_version:5}:{})},created_at:new Date().toISOString()});if(saved.error)throw saved.error}
+    lookup:{retail_prices:prices,...(exactMatch?{retail_match_version:6}:{})},created_at:new Date().toISOString()});if(saved.error)throw saved.error}
   return {prices,input,output,queries,reused:false};
 }
 const marketSchema={type:'object',properties:{kind:{type:'string',enum:['retail','sold','none']},

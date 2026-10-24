@@ -1,4 +1,5 @@
 /** Exact, whole-package asking prices for the photo receiving reference. */
+import { createHash } from 'node:crypto';
 const words = value => String(value || '').toLowerCase().replace(/&/g, ' and ')
   .replace(/[^a-z0-9.]+/g, ' ').trim().split(/\s+/).filter(Boolean);
 
@@ -15,6 +16,13 @@ function packCount(value) {
 
 function identityPack(identity) {
   return Math.max(1, Number(identity.unit_count) || 1, packCount(identity.title) || 1, packCount(identity.size) || 1);
+}
+
+export function receivePriceCacheKey(identity) {
+  if (!identity?.brand || !identity?.title) return null;
+  const parts = ['upc','brand','title','model','variant','size','color'].map(key =>
+    String(identity[key] || '').trim().toLowerCase());
+  return createHash('sha256').update(JSON.stringify(['receive-price-v6',...parts,identityPack(identity)])).digest('hex');
 }
 
 export function comparablePrices(prices, identity) {
@@ -40,8 +48,10 @@ export function comparablePrices(prices, identity) {
     if (line.length && !line.some(word => listedWords.includes(word))) return false;
     const model = String(identity.model || '').toLowerCase().trim();
     // If the listing prints a manufacturer model, it must agree. GTIN searches may omit it.
-    const listedModels = listed.match(/\b[a-z]{1,4}\d{3,}(?:[/-]\d+)?\b/g) || [];
-    if (model && listedModels.length && !listedModels.includes(model)) return false;
+    const listedModels = (listed.match(/\b[a-z][a-z0-9]*(?:[/-][a-z0-9]+)*\b/g) || [])
+      .filter(word => word.length >= 4 && /\d/.test(word));
+    const manufacturerModel = /^(?=.*[a-z])(?=.*\d)[a-z0-9/-]{4,}$/.test(model);
+    if (manufacturerModel && listedModels.length && !listedModels.includes(model)) return false;
     const size = printedSize(price.product_name) || printedSize(listedUrl);
     if (expectedSize && (!size || expectedSize.unit !== size.unit || Math.abs(expectedSize.amount - size.amount) > 0.05)) return false;
     const namedPack = packCount(price.product_name) || packCount(listedUrl);
