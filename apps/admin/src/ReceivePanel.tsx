@@ -307,6 +307,10 @@ const CONDITIONS: [string, string][] = [[NEW, 'New (sealed)'], [OPEN, 'Open box'
 const HOLD_REASONS: [string, string][] = [
   ['damaged', 'Damaged'], ['needs_testing', 'Needs testing'], ['keep_in_store', 'Keep in store'], ['other', 'Other'],
 ];
+function holdReasonLabel(reason: string): string {
+  if (reason === 'do_not_list') return "Don't list for sale";
+  return HOLD_REASONS.find(([k]) => k === reason)?.[1] || reason;
+}
 const NEVER_LIST_SKU = '11284'; // permanent stop — never list (see workspace rule)
 const IN_STOCK = ['available', 'reserved', 'repair'];
 
@@ -529,6 +533,9 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   const [camera, setCamera] = useState(false);
   const [readyToList, setReadyToList] = useState(false);
   const [readyAmazonTiktok, setReadyAmazonTiktok] = useState(false);
+  const [doNotList, setDoNotList] = useState(false);
+  const [bundle, setBundle] = useState(false);
+  const [bundleParentSku, setBundleParentSku] = useState('');
   const [photoIdBusy, setPhotoIdBusy] = useState(false);
   const [photoIdStatus, setPhotoIdStatus] = useState('');
   const [photoPrice, setPhotoPrice] = useState<PhotoPriceInfo | null>(null);
@@ -682,6 +689,9 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     setReasonNote('');
     setReadyToList(false);
     setReadyAmazonTiktok(false);
+    setDoNotList(false);
+    setBundle(false);
+    setBundleParentSku('');
   }
 
   /* Load the head of the queue into the form once its lookup has settled. */
@@ -756,6 +766,9 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     });
     setReadyToList(false);
     setReadyAmazonTiktok(false);
+    setDoNotList(false);
+    setBundle(false);
+    setBundleParentSku('');
     upcInput.current?.blur();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current?.id, current?.status, manual, loadedId]);
@@ -858,33 +871,57 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       if (d && d.count > 0) { setDups(d); setError(`You already have ${d.count} of these in stock. Tap "Add another unit" to confirm this is a new one.`); return; }
     }
     const gaps = missingFor(parsed);
-    if (readyToList) {
+    const bundleSku = bundle ? bundleParentSku.trim() : '';
+    if (bundle) {
+      if (!bundleSku) {
+        setError('Bundle is checked — enter the Floor SKU this item belongs with.');
+        return;
+      }
+      const parent = await client.from('units').select('sku').eq('store_id', storeId).eq('sku', bundleSku).maybeSingle();
+      if (parent.error) { setError(errText(parent.error)); return; }
+      if (!parent.data) {
+        setError(`No unit with SKU ${bundleSku}. Receive that item first, then bundle into it.`);
+        return;
+      }
+    }
+    const hold = doNotList
+      ? { reason: 'do_not_list', note: "Marked don't list for sale at receive" }
+      : null;
+    if (readyToList && !doNotList) {
       if (gaps.length) {
         setError(`Ready to list needs: ${gaps.join(', ')}. Uncheck Ready to list to save into Needs attention.`);
         return;
       }
-      await receive(parsed, null);
+      await receive(parsed, null, { bundleParentSku: bundleSku || null });
       return;
     }
     // Never block save or price for missing listing fields. Incomplete units keep
     // their ask (if any) and land in Needs attention until Push/list requirements
     // are filled. Marketplace push enforces channel-specific fields.
-    if (gaps.length) {
+    if (gaps.length && !doNotList) {
       setWarning(`Saving now. Still needed for listing (Needs attention): ${gaps.join(', ')}.`);
     }
-    await receive(parsed, null);
+    await receive(parsed, hold, { bundleParentSku: bundleSku || null });
   }
 
-  async function receive(parsed: Parsed, hold: { reason: string; note: string } | null) {
+  async function receive(
+    parsed: Parsed,
+    hold: { reason: string; note: string } | null,
+    opts: { bundleParentSku?: string | null } = {},
+  ) {
     setDialog(null);
     setBusy(true);
     setError('');
     try {
       const quantity = manual ? Number(form.quantity) : 1;
-      const holdLabel = hold ? (HOLD_REASONS.find(([k]) => k === hold.reason)?.[1] || hold.reason) : '';
+      const holdLabel = hold ? holdReasonLabel(hold.reason) : '';
+      const bundleNote = opts.bundleParentSku
+        ? `Bundle with SKU ${opts.bundleParentSku}`
+        : '';
       const notes = [
         form.condition === SCRATCH ? `Scratch & dent: ${form.conditionNote.trim()}` : '',
         hold ? `Not listing — ${holdLabel}${hold.note.trim() ? `: ${hold.note.trim()}` : ''}` : '',
+        bundleNote,
         form.notes.trim(),
       ].filter(Boolean).join('\n');
       const brandValue = form.unbranded ? 'Unbranded' : form.brand.trim();
@@ -937,11 +974,16 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         void clearPendingPhotos(pendingPhotoKey(storeId, photoSessionKey.current));
       }
 
-      // Merge lookup data (and any hold) into the new unit(s).
+      // Merge lookup data (and any hold / bundle) into the new unit(s).
       const blocked = skus.includes(NEVER_LIST_SKU);
-      const enrichFailed = await enrichUnits(skus, parsed, hold, blocked);
+      const enrichFailed = await enrichUnits(skus, parsed, hold, blocked, opts.bundleParentSku || null);
       if (enrichFailed) warnings.push(`Could not save lookup details on ${enrichFailed} unit(s).${hold ? ' They have no price, so they will not list.' : ''}`);
       if (blocked) warnings.push(`SKU ${NEVER_LIST_SKU} is a permanent do-not-list item; it was hidden from the website.`);
+      if (opts.bundleParentSku) {
+        const linked = await linkBundleChildren(opts.bundleParentSku, skus);
+        if (linked) warnings.push(linked);
+        else warnings.push(`Bundled with SKU ${opts.bundleParentSku} for online listings.`);
+      }
       if (warnings.length) setWarning(warnings.join(' '));
 
       // Remember product data for "Add another unit".
@@ -985,8 +1027,42 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     finally { setBusy(false); }
   }
 
+  /** Append child SKUs onto the parent's listing_specs.bundle_child_skus. */
+  async function linkBundleChildren(parentSku: string, childSkus: string[]): Promise<string | null> {
+    try {
+      const cur = await client.from('units').select('listing_specs')
+        .eq('store_id', storeId).eq('sku', parentSku).maybeSingle();
+      if (cur.error || !cur.data) return `Could not update parent SKU ${parentSku} bundle list.`;
+      const prev = (cur.data.listing_specs as Record<string, unknown> | null) || {};
+      const existing = Array.isArray(prev.bundle_child_skus)
+        ? prev.bundle_child_skus.map(String)
+        : [];
+      const merged = [...new Set([...existing, ...childSkus])];
+      const rpc = await client.rpc('portal_enrich_received_unit', {
+        p_sku: parentSku,
+        p_specs: { bundle_child_skus: merged },
+        p_msrp_cents: null,
+        p_show: null,
+        p_brand: null,
+        p_model: null,
+        p_title: null,
+        p_description: null,
+      });
+      if (rpc.error) return `Bundled on the new unit(s), but parent SKU ${parentSku} could not be updated (${errText(rpc.error)}).`;
+      return null;
+    } catch (e) {
+      return `Bundled on the new unit(s), but parent SKU ${parentSku} could not be updated (${errText(e)}).`;
+    }
+  }
+
   /** Build listing_specs from the lookup (only real values) and merge into each new unit. */
-  async function enrichUnits(skus: string[], parsed: Parsed, hold: { reason: string; note: string } | null, forceHide: boolean): Promise<number> {
+  async function enrichUnits(
+    skus: string[],
+    parsed: Parsed,
+    hold: { reason: string; note: string } | null,
+    forceHide: boolean,
+    bundleParent: string | null,
+  ): Promise<number> {
     const specs: Record<string, unknown> = {};
     const put = (k: string, v: unknown) => {
       if (v == null || v === '' || (Array.isArray(v) && !v.length)) return;
@@ -1022,9 +1098,18 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       put('ebay_aspects', { ...existing, UPC: UPC_NOT_APPLICABLE });
       put('upc', UPC_NOT_APPLICABLE);
     }
-    if (readyAmazonTiktok) put('ready_amazon_tiktok', true);
-    if (readyToList) put('ready_to_list', true);
-    if (hold) { put('hold_reason', hold.reason); put('hold_note', hold.note.trim()); }
+    if (readyAmazonTiktok && !hold) put('ready_amazon_tiktok', true);
+    if (readyToList && !hold) put('ready_to_list', true);
+    if (hold) {
+      put('hold_reason', hold.reason);
+      put('hold_note', hold.note.trim());
+      if (hold.reason === 'do_not_list') put('do_not_list', true);
+    }
+    if (bundleParent) {
+      put('bundle_parent_sku', bundleParent);
+      // Bundle children list with the parent online — not as their own listing.
+      put('bundle_role', 'child');
+    }
     const hide = Boolean(hold) || forceHide;
     if (!Object.keys(specs).length && !hide) return 0;
 
@@ -1481,21 +1566,82 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         </div>
 
         <label className="mboard-inline unit-edit-wide">
-          <input type="checkbox" checked={readyToList} onChange={e => setReadyToList(e.target.checked)} />
+          <input
+            type="checkbox"
+            checked={readyToList}
+            onChange={e => {
+              const on = e.target.checked;
+              setReadyToList(on);
+              if (on) setDoNotList(false);
+            }}
+          />
           Ready to list
         </label>
         <label className="mboard-inline unit-edit-wide">
-          <input type="checkbox" checked={readyAmazonTiktok} onChange={e => setReadyAmazonTiktok(e.target.checked)} />
+          <input
+            type="checkbox"
+            checked={readyAmazonTiktok}
+            onChange={e => {
+              const on = e.target.checked;
+              setReadyAmazonTiktok(on);
+              if (on) setDoNotList(false);
+            }}
+          />
           Ready to list Amazon/TikTok
         </label>
+        <label className="mboard-inline unit-edit-wide">
+          <input
+            type="checkbox"
+            checked={doNotList}
+            onChange={e => {
+              const on = e.target.checked;
+              setDoNotList(on);
+              if (on) {
+                setReadyToList(false);
+                setReadyAmazonTiktok(false);
+              }
+            }}
+          />
+          Don&apos;t list for sale
+        </label>
+        <label className="mboard-inline unit-edit-wide">
+          <input
+            type="checkbox"
+            checked={bundle}
+            onChange={e => {
+              const on = e.target.checked;
+              setBundle(on);
+              if (!on) setBundleParentSku('');
+            }}
+          />
+          Bundle
+        </label>
+        {bundle ? (
+          <label className="unit-edit-wide receive-bundle-sku">
+            Bundle with SKU
+            <input
+              value={bundleParentSku}
+              onChange={e => setBundleParentSku(e.target.value.replace(/[^\dA-Za-z\-]/g, ''))}
+              inputMode="numeric"
+              autoComplete="off"
+              autoCorrect="off"
+              spellCheck={false}
+              placeholder="Existing Floor SKU"
+              aria-label="Bundle parent SKU"
+            />
+            <span className="hint">This unit lists online with that SKU (not by itself).</span>
+          </label>
+        ) : null}
       </div>
 
       <p className="hint receive-check">
-        {liveMissing.length === 0
-          ? (readyToList ? 'Complete — will receive as ready to list.' : 'Complete — check Ready to list, or Finish to save without listing pressure.')
-          : readyToList
-            ? `Ready to list still needs: ${liveMissing.join(', ')}.`
-            : `Missing for listing: ${liveMissing.join(', ')}. You can still receive; incomplete units land in Needs attention.`}
+        {doNotList
+          ? "Won't list online — received with no ask price and hidden from the website."
+          : liveMissing.length === 0
+            ? (readyToList ? 'Complete — will receive as ready to list.' : 'Complete — check Ready to list, or Finish to save without listing pressure.')
+            : readyToList
+              ? `Ready to list still needs: ${liveMissing.join(', ')}.`
+              : `Missing for listing: ${liveMissing.join(', ')}. You can still receive; incomplete units land in Needs attention.`}
       </p>
       <div className="actions">
         <button disabled={busy || !options?.next_sku || (dups !== null && dups.count > 0 && !dupAck)}>{busy ? 'Receiving…' : 'Finish & receive'}</button>
@@ -1517,7 +1663,10 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         <p className="hint">Yes receives it with normal show defaults; it moves to Online → Ready once the board criteria are met.
           {form.costEstimate ? ` Cost uses ${floor.costLabel} until you edit it.` : ''}</p>
         <div className="actions">
-          <button type="button" disabled={busy} autoFocus onClick={() => { const p = parse(); if (p) void receive(p, null); }}>Yes — receive &amp; list</button>
+          <button type="button" disabled={busy} autoFocus onClick={() => {
+            const p = parse();
+            if (p) void receive(p, null, { bundleParentSku: bundle ? bundleParentSku.trim() || null : null });
+          }}>Yes — receive &amp; list</button>
           <button type="button" className="secondary" disabled={busy} onClick={() => setDialog('reason')}>No</button>
           <button type="button" className="text-button" onClick={() => setDialog(null)}>Back</button>
         </div>
@@ -1535,7 +1684,10 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         </label>
         <p className="hint">The unit is received with no price, hidden from the website, and the reason is saved in its notes.</p>
         <div className="actions">
-          <button type="button" disabled={busy || !holdReady} onClick={() => { const p = parse(); if (p) void receive(p, { reason, note: reasonNote }); }}>Receive without listing</button>
+          <button type="button" disabled={busy || !holdReady} onClick={() => {
+            const p = parse();
+            if (p) void receive(p, { reason, note: reasonNote }, { bundleParentSku: bundle ? bundleParentSku.trim() || null : null });
+          }}>Receive without listing</button>
           <button type="button" className="text-button" onClick={() => setDialog('ready')}>Back</button>
         </div>
       </div>
