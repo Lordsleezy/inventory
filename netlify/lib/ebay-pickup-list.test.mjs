@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import {
   breakEvenPickupCents,
   pickupListPriceCents,
-  resolvePickupPriceCents,
   pickupCandidateBlocked,
 } from "./ebay-pickup-list.mjs";
 import { isLocalPickupOnlyPolicy, pickupOnlyFulfillmentBody, POLICY_NAMES } from "./ebay-policies.mjs";
@@ -17,11 +16,6 @@ test("break-even covers $9 cost at 13% fee, rounded to a whole dollar", () => {
 test("pickup price uses Floor ask when it is already below break-even", () => {
   assert.equal(pickupListPriceCents(999, { costCents: 900, feePct: 13 }), 999);
   assert.equal(pickupListPriceCents(1599, { costCents: 900, feePct: 13 }), 1100);
-});
-
-test("an explicit pickup price is used instead of the break-even", () => {
-  assert.equal(resolvePickupPriceCents(1999, { price_cents: 1000 }, { costCents: 900, feePct: 13 }), 1000);
-  assert.equal(resolvePickupPriceCents(1999, {}, { costCents: 900, feePct: 13 }), 1100);
 });
 
 test("blocks scooter / vinyl / collectibles", () => {

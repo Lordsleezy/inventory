@@ -636,20 +636,13 @@ async function itemAspects(storeId, unit) {
   return { aspects: prepared.aspects, categoryId: prepared.floor.ebayCategoryId, floor: prepared.floor };
 }
 
-function packageSize(unit, { pickupOnly = false } = {}) {
+function packageSize(unit) {
   const specs = listingMeasures(unit);
   const length = Number(unit?.package_length_in) || specInches(specs, "depth") || parseMeasure(specs.depth_in) || parseMeasure(specs.length_in);
   const width = Number(unit?.package_width_in) || specInches(specs, "width") || parseMeasure(specs.width_in);
   const height = Number(unit?.package_height_in) || specInches(specs, "height") || parseMeasure(specs.height_in);
   const weight = Number(unit?.package_weight_lb) || parseMeasure(specs.weight_lb || specs.weight_lbs);
-  const hasDims = length > 0 && width > 0 && height > 0;
-  if (!(hasDims && weight > 0)) {
-    // Pickup does not charge a label. A known weight can go up without a guessed box size.
-    if (pickupOnly && weight > 0 && !hasDims && !(length > 0 || width > 0 || height > 0)) {
-      return {
-        weight: { value: String(weight), unit: "POUND" },
-      };
-    }
+  if (!(length > 0 && width > 0 && height > 0 && weight > 0)) {
     const err = new Error("Package weight and dimensions are required before pushing to eBay.");
     err.code = "package_required";
     throw err;
@@ -738,7 +731,7 @@ export async function listSku(storeId, sku, draft = null) {
       ? { payload: draft.conditionPayload, mapped: draft.conditionPayload, allowed: [] }
       : await prepareUnitCondition({ unit, liveCheck: true });
   }
-  const pkg = draft?.package || packageSize(unit, { pickupOnly: Boolean(draft?.pickupOnly) });
+  const pkg = draft?.package || packageSize(unit);
   const policies = draft?.policies || (await ensurePolicies(storeId, fetchHint));
   const priceCents = draft?.priceCents ?? unit.ask_cents;
   if (String(selling.username || "").toLowerCase() === "pgg124-5") {

@@ -73,13 +73,6 @@ export function pickupListPriceCents(askCents, { costCents = STORE_COST_CENTS, f
   return Math.min(ask, breakEven);
 }
 
-/** An explicit job price wins. Otherwise use the ask / break-even rule. */
-export function resolvePickupPriceCents(askCents, job = {}, options = {}) {
-  const requested = Number(job?.price_cents);
-  if (Number.isInteger(requested) && requested >= 99) return requested;
-  return pickupListPriceCents(askCents, options);
-}
-
 function titleForUnit(unit) {
   if (unit.ebay_title && String(unit.ebay_title).trim()) {
     let t = String(unit.ebay_title).trim();
@@ -417,7 +410,7 @@ export async function runPickupListJob(storeId, { createdBy = "ebay-pickup-list-
       continue;
     }
 
-    const priceCents = resolvePickupPriceCents(unit.ask_cents, job, {
+    const priceCents = pickupListPriceCents(unit.ask_cents, {
       costCents: Number(unit.acquisition_cost_cents) > 0 ? unit.acquisition_cost_cents : STORE_COST_CENTS,
       feePct: storeFee,
     });
