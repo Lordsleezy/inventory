@@ -1,9 +1,13 @@
 /**
- * Apply Floor migrations on PGlite.
+ * HISTORICAL FRESH REPLAY on PGlite — this is NOT what live has.
  *
  *   node --experimental-strip-types scripts/test-migrations.mjs
  *
- * Covers a fresh 0001→latest run and an upgrade that already has 0005.
+ * Replays supabase/migrations minus the versions recovered from the live ledger
+ * (supabase/tests/recovered-live-versions.txt) plus supabase/unapplied-legacy-migrations,
+ * from an empty database. Useful to keep a from-scratch install working and to smoke-test
+ * new SQL, but it cannot prove a migration is safe for live. That is
+ * scripts/test-migrations-live.sh (live schema baseline + pending migrations).
  */
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -119,7 +123,7 @@ const rest = all.filter((f) => f.name > "0005_private_photos.sql");
   );
   assert.equal(channelOrders.rows.length, 1, "channel_orders exists");
   await db.query(`select public.anon_can_read_unit_photo('not-a-path')`);
-  console.log("fresh 0001→0014 ok");
+  console.log("historical fresh replay (not live): empty → latest ok");
 }
 
 {
@@ -133,5 +137,5 @@ const rest = all.filter((f) => f.name > "0005_private_photos.sql");
   assert.deepEqual(cols.slice(0, expected.length), expected, `upgrade public_items base columns: ${cols.join(",")}`);
   assert.equal(cols.includes("manufacturer_photos"), true, "upgrade has professional photos");
   await db.query(`select public.anon_can_read_unit_photo('not-a-path')`);
-  console.log("upgrade 0005→0014 ok");
+  console.log("historical fresh replay (not live): 0005 → latest upgrade ok");
 }
