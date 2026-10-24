@@ -57,36 +57,38 @@ if ('serviceWorker' in navigator) {
   }
 
   navigator.serviceWorker.addEventListener('controllerchange', () => {
-    // New worker took control — reload only when it won't wipe an open receive form.
-    reloadWhenSafe();
+    // Keyboard hotfix: always reload once the new worker controls us. Losing an open
+    // form once is better than leaving the phone on a Gboard-freezing shell.
+    if (refreshing) return;
+    refreshing = true;
+    location.reload();
   });
 
   window.addEventListener('load', () => {
+    try { document.documentElement.dataset.floorShell = 'v16'; } catch { /* ignore */ }
     void navigator.serviceWorker.register('/sw.js').then((reg) => {
       const poke = () => { void reg.update().catch(() => undefined); };
 
-      // Pick up new deploys quickly when the app is idle (not mid-Receive / camera).
-      // Do NOT poke on every visibility/focus — that restarted inventoring on camera return.
       poke();
-      setInterval(poke, 60_000);
+      setInterval(poke, 30_000);
 
       reg.addEventListener('updatefound', () => {
         const sw = reg.installing;
         if (!sw) return;
         sw.addEventListener('statechange', () => {
           if (sw.state !== 'installed') return;
-          if (!navigator.serviceWorker.controller) return; // first install — no reload needed
+          if (!navigator.serviceWorker.controller) return;
           waitingWorker = sw;
-          activateWaiting();
+          // Hotfix: activate immediately.
+          waitingWorker = null;
+          sw.postMessage('SKIP_WAITING');
         });
       });
 
       if (reg.waiting) {
-        waitingWorker = reg.waiting;
-        activateWaiting();
+        reg.waiting.postMessage('SKIP_WAITING');
       }
 
-      // If a reload was deferred (or a worker is waiting), apply when inventoring is idle.
       setInterval(() => {
         if (waitingWorker) activateWaiting();
         if (pendingReload) reloadWhenSafe();

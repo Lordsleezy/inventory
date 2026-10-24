@@ -92,6 +92,8 @@ export function AppReceive({ client, storeId, accessToken, onSaved }: Props) {
           {scannerOk ? 'Scanner connected' : 'Scanner not connected'}
         </span>
       </div>
+      {/* Confirms the phone picked up the keyboard hotfix shell — remove after verified. */}
+      <p className="app-footer-count" style={{ marginTop: -4 }}>Shell v16</p>
 
       <button type="button" className="app-scan-card" onClick={() => openForm(false)}>
         <strong>Scan a barcode</strong>

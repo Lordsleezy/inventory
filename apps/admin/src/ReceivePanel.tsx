@@ -3,7 +3,6 @@ import { createPortal } from 'react-dom';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   bindHidWedgeListener,
-  focusFromUserGesture,
   focusScannerField,
   isAndroidStoreDevice,
   isKioskShell,
@@ -11,6 +10,12 @@ import {
   scannerInputMode,
 } from './kiosk';
 import { StoreNumPad } from './StoreNumPad';
+
+/** Store-phone number fields: never focus (readOnly + focus freezes Gboard). */
+function padPointerDown(storePad: boolean, e: React.PointerEvent | React.MouseEvent) {
+  if (!storePad) return;
+  e.preventDefault();
+}
 import { floorFunctionUrl } from './floorApi';
 import { reportClientError } from './clientLog';
 import { categoryDefaultCostCents, priceFloorCents, suggestAskCents } from './scanPricing';
@@ -1417,20 +1422,16 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
               : ' (no source price — type it)')}
           <input
             ref={askInput}
-            inputMode="decimal"
+            inputMode={storePad ? undefined : 'decimal'}
             enterKeyHint="done"
             placeholder="24.99"
             value={form.ask}
             onChange={e => update('ask', e.target.value)}
-            onFocus={() => { if (storePad) setNumPadField('ask'); }}
-            onTouchEnd={(e) => {
-              if (storePad) {
-                setNumPadField('ask');
-                focusFromUserGesture(e.currentTarget);
-              }
-            }}
+            onPointerDown={(e) => padPointerDown(storePad, e)}
+            onClick={() => { if (storePad) setNumPadField('ask'); }}
             autoComplete="off"
             readOnly={storePad || undefined}
+            tabIndex={storePad ? 0 : undefined}
           />
         </label>
 
@@ -1457,10 +1458,10 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
             value={form.unbranded ? 'Unbranded' : form.brand}
             disabled={form.unbranded}
             onChange={e => update('brand', e.target.value)}
-            onTouchEnd={(e) => { if (androidStore && !form.unbranded) focusFromUserGesture(e.currentTarget); }}
             autoComplete="off"
             enterKeyHint="next"
             autoCapitalize="words"
+            // No programmatic focus on Android — native tap focus only (double-focus froze Gboard).
           />
         </label>
         <label className="mboard-inline">
@@ -1503,44 +1504,44 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         <label className={liveMissing.includes('weight + box dimensions') ? 'receive-need' : undefined}>
           Length (in){liveMissing.includes('weight + box dimensions') ? ' (needed to list)' : ''}
           <input
-            inputMode="decimal"
+            inputMode={storePad ? undefined : 'decimal'}
             value={form.length}
             onChange={e => update('length', e.target.value)}
-            onFocus={() => { if (storePad) setNumPadField('length'); }}
-            onTouchEnd={(e) => { if (storePad) { setNumPadField('length'); focusFromUserGesture(e.currentTarget); } }}
+            onPointerDown={(e) => padPointerDown(storePad, e)}
+            onClick={() => { if (storePad) setNumPadField('length'); }}
             readOnly={storePad || undefined}
           />
         </label>
         <label className={liveMissing.includes('weight + box dimensions') ? 'receive-need' : undefined}>
           Width (in)
           <input
-            inputMode="decimal"
+            inputMode={storePad ? undefined : 'decimal'}
             value={form.width}
             onChange={e => update('width', e.target.value)}
-            onFocus={() => { if (storePad) setNumPadField('width'); }}
-            onTouchEnd={(e) => { if (storePad) { setNumPadField('width'); focusFromUserGesture(e.currentTarget); } }}
+            onPointerDown={(e) => padPointerDown(storePad, e)}
+            onClick={() => { if (storePad) setNumPadField('width'); }}
             readOnly={storePad || undefined}
           />
         </label>
         <label className={liveMissing.includes('weight + box dimensions') ? 'receive-need' : undefined}>
           Height (in)
           <input
-            inputMode="decimal"
+            inputMode={storePad ? undefined : 'decimal'}
             value={form.height}
             onChange={e => update('height', e.target.value)}
-            onFocus={() => { if (storePad) setNumPadField('height'); }}
-            onTouchEnd={(e) => { if (storePad) { setNumPadField('height'); focusFromUserGesture(e.currentTarget); } }}
+            onPointerDown={(e) => padPointerDown(storePad, e)}
+            onClick={() => { if (storePad) setNumPadField('height'); }}
             readOnly={storePad || undefined}
           />
         </label>
         <label className={liveMissing.includes('weight + box dimensions') ? 'receive-need' : undefined}>
           Weight (lb)
           <input
-            inputMode="decimal"
+            inputMode={storePad ? undefined : 'decimal'}
             value={form.weight}
             onChange={e => update('weight', e.target.value)}
-            onFocus={() => { if (storePad) setNumPadField('weight'); }}
-            onTouchEnd={(e) => { if (storePad) { setNumPadField('weight'); focusFromUserGesture(e.currentTarget); } }}
+            onPointerDown={(e) => padPointerDown(storePad, e)}
+            onClick={() => { if (storePad) setNumPadField('weight'); }}
             readOnly={storePad || undefined}
           />
         </label>
@@ -1566,7 +1567,6 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           <input
             value={form.model}
             onChange={e => update('model', e.target.value)}
-            onTouchEnd={(e) => { if (androidStore) focusFromUserGesture(e.currentTarget); }}
             placeholder="Model, flavor, size, color… (from UPC when available)"
             autoComplete="off"
             enterKeyHint="done"

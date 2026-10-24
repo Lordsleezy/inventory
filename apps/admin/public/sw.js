@@ -1,5 +1,5 @@
 /* Floor admin shell — cache static assets only; never cache live inventory/API data. */
-const SHELL = 'floor-shell-v15';
+const SHELL = 'floor-shell-v16';
 const SHELL_URLS = [
   '/',
   '/index.html',
@@ -10,10 +10,10 @@ const SHELL_URLS = [
 ];
 
 self.addEventListener('install', (event) => {
-  // Do not skipWaiting here — the page activates the new worker only when Receive
-  // is idle, so inventoring isn't interrupted by a reload mid-scan/photo.
+  // v16 keyboard hotfix: activate immediately so store phones leave the broken v3/v15
+  // shells even if a Receive form is open. Safe activate + clients.claim below.
   event.waitUntil(
-    caches.open(SHELL).then((cache) => cache.addAll(SHELL_URLS)).catch(() => undefined),
+    caches.open(SHELL).then((cache) => cache.addAll(SHELL_URLS)).then(() => self.skipWaiting()).catch(() => self.skipWaiting()),
   );
 });
 
