@@ -1252,11 +1252,23 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
 
   /** Barcode miss → one product photo → identify + asking-price median popup. */
   async function identifyMissPhoto(list: FileList | null) {
-    if (!list?.length || !current) return;
-    const raw = list[0];
+    // Snapshot immediately — FileList is live; clearing the <input> empties it on Android PWAs.
+    const raw = list?.[0] ? list[0] : null;
+    if (!raw) {
+      setError('No photo came back from the camera. Tap Yes and take the picture again.');
+      setDialog('miss-photo');
+      return;
+    }
+    if (!current) {
+      setError('That scan was lost after the camera closed. Scan the barcode again, then retry the photo.');
+      setDialog(null);
+      return;
+    }
+    const scan = current;
     const file = await copyImageFile(raw);
     if (!file) {
       setError('Could not read that photo. Try one clear picture of the box or label.');
+      setDialog('miss-photo');
       return;
     }
     setPhotoIdBusy(true);
@@ -1271,8 +1283,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         method: 'POST',
         headers: { Authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
         body: JSON.stringify({
-          upc: current.upc,
-          miss_id: current.result?.miss_id || null,
+          upc: scan.upc,
+          miss_id: scan.result?.miss_id || null,
           image_base64,
           mime_type: file.type || 'image/jpeg',
         }),
@@ -1280,7 +1292,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       const json = await res.json().catch(() => ({} as { error?: string; message?: string }));
       if (!res.ok) {
         setError(json.message || json.error || 'Photo identify failed. Fill fields by hand, or retry.');
-        setWarning(catalogMissMessage(current.result) || '');
+        setWarning(catalogMissMessage(scan.result) || '');
+        setDialog('miss-photo');
         return;
       }
       const brand = text(json.fill?.brand || json.identity?.brand);
@@ -1304,6 +1317,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       setWarning('');
     } catch (e) {
       setError(errText(e) || 'Photo identify failed. Fill fields by hand.');
+      setDialog('miss-photo');
     } finally {
       setPhotoIdBusy(false);
       setPhotoIdStatus('');
@@ -1751,30 +1765,34 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       </div>
     </div>}
 
+    {/* Keep file input mounted outside the modal — unmounting mid-camera drops the onChange on some Androids. */}
+    <input
+      ref={missPhotoFile}
+      type="file"
+      accept="image/*"
+      capture="environment"
+      className="sr-only"
+      aria-hidden
+      tabIndex={-1}
+      onChange={e => {
+        const input = e.currentTarget;
+        const list = input.files;
+        // Copy bytes before clearing — clearing first empties the File on Android PWAs
+        // (same bug as the regular Take photo path). That looked like "camera → back to this popup".
+        void identifyMissPhoto(list).finally(() => { input.value = ''; });
+      }}
+    />
     {dialog === 'miss-photo' && <div className="receive-modal" role="dialog" aria-modal="true" aria-labelledby="miss-photo-title">
       <div className="receive-modal-card">
         <h3 id="miss-photo-title">Can&apos;t find this item. Scan with camera?</h3>
         <p>Take <strong>one</strong> clear photo of the box or label. We&apos;ll identify brand, name, and pack size, then show asking prices so you can set the price.</p>
-        <input
-          ref={missPhotoFile}
-          type="file"
-          accept="image/*"
-          capture="environment"
-          className="sr-only"
-          aria-hidden
-          tabIndex={-1}
-          onChange={e => {
-            const input = e.currentTarget;
-            const list = input.files;
-            input.value = '';
-            void identifyMissPhoto(list);
-          }}
-        />
+        {error ? <p className="error" role="alert">{error}</p> : null}
+        {photoIdBusy ? <p className="hint" role="status">{photoIdStatus || 'Identifying from photo…'}</p> : null}
         <div className="actions">
           <button type="button" disabled={photoIdBusy} autoFocus onClick={() => missPhotoFile.current?.click()}>
-            Yes — take photo
+            {photoIdBusy ? 'Working…' : 'Yes — take photo'}
           </button>
-          <button type="button" className="secondary" disabled={photoIdBusy} onClick={() => setDialog(null)}>
+          <button type="button" className="secondary" disabled={photoIdBusy} onClick={() => { setError(''); setDialog(null); }}>
             No — fill by hand
           </button>
         </div>

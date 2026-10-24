@@ -1,5 +1,5 @@
 /* Floor admin shell — cache static assets only; never cache live inventory/API data. */
-const SHELL = 'floor-shell-v5';
+const SHELL = 'floor-shell-v6';
 const SHELL_URLS = [
   '/',
   '/index.html',
