@@ -14,7 +14,6 @@ import {
   listingTitle,
   saveFloorProduct,
 } from "../lib/floor-products.mjs";
-import sharp from "sharp";
 
 async function authFromEvent(event) {
   try {
@@ -177,14 +176,13 @@ export async function invoke(event) {
 
   let bytes;
   try {
-    const raw = Buffer.from(rawB64, "base64");
-    bytes = await sharp(raw)
-      .rotate()
-      .resize(1600, 1600, { fit: "inside", withoutEnlargement: true })
-      .jpeg({ quality: 85 })
-      .toBuffer();
+    bytes = Buffer.from(rawB64, 'base64');
+    // The browser sends a downscaled JPEG. Validate the format and cap bytes here
+    // so this endpoint does not load a platform-native image library in Lambda.
+    if (bytes.length < 2048 || bytes.length > 6 * 1024 * 1024 ||
+      bytes[0] !== 0xff || bytes[1] !== 0xd8 || bytes[2] !== 0xff) throw new Error('invalid_jpeg');
   } catch {
-    return json(400, { ok: false, error: "invalid_image" });
+    return json(400, { ok: false, error: 'invalid_image', message: 'That photo could not be read. Try one clear JPEG photo or fill the fields by hand.' });
   }
 
   const upc = String(body.upc || "").trim();

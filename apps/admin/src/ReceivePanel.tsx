@@ -186,13 +186,23 @@ async function fileToBase64(file: File): Promise<string> {
 /** Send a small JPEG to identification; keep the original for the unit photo. */
 async function identificationJpeg(file: File): Promise<File> {
   try {
-    const bitmap = await createImageBitmap(file);
-    const scale = Math.min(1, 1600 / Math.max(bitmap.width, bitmap.height));
+    let source: ImageBitmap | HTMLImageElement;
+    let objectUrl: string | null = null;
+    try { source = await createImageBitmap(file); }
+    catch {
+      objectUrl = URL.createObjectURL(file);
+      const img = new Image();
+      img.src = objectUrl;
+      await img.decode();
+      source = img;
+    }
+    const scale = Math.min(1, 1600 / Math.max(source.width, source.height));
     const canvas = document.createElement('canvas');
-    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
-    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
-    canvas.getContext('2d')?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-    bitmap.close();
+    canvas.width = Math.max(1, Math.round(source.width * scale));
+    canvas.height = Math.max(1, Math.round(source.height * scale));
+    canvas.getContext('2d')?.drawImage(source, 0, 0, canvas.width, canvas.height);
+    if (source instanceof ImageBitmap) source.close();
+    if (objectUrl) URL.revokeObjectURL(objectUrl);
     const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.78));
     return blob && blob.size > PHOTO_MIN_BYTES
       ? new File([blob], 'identify.jpg', { type: 'image/jpeg' }) : file;

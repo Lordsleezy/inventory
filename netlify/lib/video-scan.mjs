@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto';
-import sharp from 'sharp';
 import { requireEnv } from './server.mjs';
 
 const model = () => process.env.GEMINI_VIDEO_MODEL || 'gemini-3.8-flash';
@@ -76,6 +75,7 @@ export async function identifyFrames(stills) {
   return {...found,result:{...found.value,model,unit_count:Math.max(1,Number(found.value.unit_count)||1),options:options.length>=2?options.slice(0,3):[]}};
 }
 async function fingerprint(bytes) {
+  const { default: sharp } = await import('sharp');
   const pixels=await sharp(bytes).resize(9,8,{fit:'fill'}).grayscale().raw().toBuffer();
   let hash=0n;
   for(let y=0;y<8;y++)for(let x=0;x<8;x++)
