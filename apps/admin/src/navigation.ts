@@ -19,7 +19,7 @@ export type MainPage =
   | 'remote'
   | 'logs'
   | 'settings';
-export type ReportTab = 'profit' | 'shipping' | 'expenses' | 'payouts' | 'daily' | 'sales-tax' | 'returns';
+export type ReportTab = 'profit' | 'shipping' | 'expenses' | 'overhead' | 'payouts' | 'daily' | 'sales-tax' | 'returns';
 /** In stock / Sold / Unfinished / Defective are unit lists; the rest are tools. Unfinished replaces the old Needs attention tab. */
 export type InventoryTab = 'in-stock' | 'sold' | 'unfinished' | 'defective' | 'receive' | 'lookup-test' | 'products' | 'measure-mat';
 export type AttentionSection =

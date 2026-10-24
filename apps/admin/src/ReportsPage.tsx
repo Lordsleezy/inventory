@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ReportTab } from './navigation';
 import { ChannelReportPage } from './ChannelReportPage';
+import { OverheadPage } from './OverheadPage';
 import { TaxReportPage } from './TaxReportPage';
 import { ReturnsReportPanel } from './ReturnsReportPanel';
 import { TaxPage } from './TaxPage';
@@ -30,8 +31,8 @@ export function ReportsPage({ client, money, tab, onTab, closeouts, expenses, pa
     if (selected) list.scrollTo({ left: selected.offsetLeft - (list.clientWidth - selected.clientWidth) / 2, behavior: 'smooth' });
   }, [tab, native]);
   const tabs: { id: ReportTab; label: string }[] = native
-    ? [{id:'profit',label:'Profit'},{id:'shipping',label:'Shipping & fees'},{id:'expenses',label:'Expenses'},{id:'payouts',label:'Payouts'},{id:'daily',label:'Daily & weekly'},{id:'sales-tax',label:'Sales tax'}]
-    : [{id:'profit',label:'Profit'},{id:'shipping',label:'Shipping & fees'},{id:'expenses',label:'Expenses'},{id:'payouts',label:'Payouts'},{id:'returns',label:'Returns'},{id:'sales-tax',label:'Sales tax'}];
+    ? [{id:'profit',label:'Profit'},{id:'shipping',label:'Shipping & fees'},{id:'expenses',label:'Expenses'},{id:'overhead',label:'Overhead'},{id:'payouts',label:'Payouts'},{id:'daily',label:'Daily & weekly'},{id:'sales-tax',label:'Sales tax'}]
+    : [{id:'profit',label:'Profit'},{id:'shipping',label:'Shipping & fees'},{id:'expenses',label:'Expenses'},{id:'overhead',label:'Overhead'},{id:'payouts',label:'Payouts'},{id:'returns',label:'Returns'},{id:'sales-tax',label:'Sales tax'}];
   return <>
     {!native && <header><div><div className="eyebrow">STORE LEDGER</div><h1>Reports</h1>
       <p>Profit, shipping and fees, expenses, payouts, and period closeouts.</p></div></header>}
@@ -39,13 +40,14 @@ export function ReportsPage({ client, money, tab, onTab, closeouts, expenses, pa
       {tabs.map(t => <button key={t.id} type="button" role="tab" aria-selected={tab === t.id} className={tab === t.id ? 'active' : ''} onClick={() => onTab(t.id)}>{t.label}</button>)}
     </div>
     {tab === 'profit' && <>
-      <ChannelReportPage key={reportVersion} client={client} money={money} embedded native={native} onLinkSku={() => setShowSkuLinks(true)} />
+      <ChannelReportPage key={reportVersion} client={client} money={money} embedded native={native} onLinkSku={() => setShowSkuLinks(true)} onOpenOverhead={() => onTab('overhead')} />
       {!native && closeouts}
     </>}
     {tab === 'shipping' && <>
       <ChannelReportPage client={client} money={money} embedded mode="fees" native={native} />
     </>}
     {tab === 'expenses' && expenses}
+    {tab === 'overhead' && <OverheadPage client={client} money={money} native={native} onBack={() => onTab('profit')} />}
     {tab === 'payouts' && payouts}
     {tab === 'daily' && (native ? nativeCloseouts : closeouts)}
     {tab === 'sales-tax' && <><TaxReportPage client={client} money={money} embedded native={native} /><TaxPage client={client} money={money} stamp={s => new Date(s).toLocaleDateString()} embedded={native} native={native} /></>}
