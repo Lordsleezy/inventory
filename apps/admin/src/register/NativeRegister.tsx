@@ -384,6 +384,9 @@ export function NativeRegisterCart(props: NativeRegisterProps) {
                     <span className="nr-line-text">
                       <strong>{line.title}</strong>
                       <small>SKU {line.sku}{line.condition ? ` · ${line.condition}` : ''}</small>
+                      {line.bundleIncludes?.map(part => (
+                        <small key={part.sku}>FREE {part.quantity * line.qty} × {part.title} · SKU {part.sku}</small>
+                      ))}
                       {line.qtyOnHand > 1 ? (
                         <span className="nr-stepper">
                           <button type="button" disabled={!idle || cashOpen || line.qty <= 1} onClick={() => setQty(line.sku, line.qty - 1)}>−</button>

@@ -12,6 +12,7 @@ export type CartLine = {
   qty: number;
   qtyOnHand: number;
   photoUrl: string | null;
+  bundleIncludes?: { sku: string; title: string; quantity: number }[];
 };
 
 type CartValue = {
@@ -20,7 +21,7 @@ type CartValue = {
   setNote: (note: string) => void;
   ticketId: string;
   resetTicketId: () => void;
-  addUnit: (unit: RegisterUnit, opts?: { priceCents?: number; overrideReason?: string }) => void;
+  addUnit: (unit: RegisterUnit, opts?: { priceCents?: number; overrideReason?: string; bundleIncludes?: CartLine['bundleIncludes'] }) => void;
   removeSku: (sku: string) => void;
   updateLine: (sku: string, patch: Partial<CartLine>) => void;
   setQty: (sku: string, qty: number) => void;
@@ -47,7 +48,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
   const [note, setNote] = useState('');
   const [ticketId, setTicketId] = useState(newTicketId);
 
-  const addUnit = useCallback((unit: RegisterUnit, opts?: { priceCents?: number; overrideReason?: string }) => {
+  const addUnit = useCallback((unit: RegisterUnit, opts?: { priceCents?: number; overrideReason?: string; bundleIncludes?: CartLine['bundleIncludes'] }) => {
     setLines(prev => {
       const existing = prev.find(l => l.sku === unit.sku);
       const maxQty = unit.qtyOnHand > 1 ? unit.qtyOnHand : 1;
@@ -57,12 +58,12 @@ export function CartProvider({ children }: { children: ReactNode }) {
       if (existing) {
         if (maxQty <= 1) {
           return prev.map(l => (l.sku === unit.sku
-            ? { ...l, priceCents, overrideReason, approvalId: null }
+            ? { ...l, priceCents, overrideReason, approvalId: null, bundleIncludes: opts?.bundleIncludes ?? l.bundleIncludes }
             : l));
         }
         const nextQty = Math.min(maxQty, existing.qty + 1);
         return prev.map(l => (l.sku === unit.sku
-          ? { ...l, qty: nextQty, priceCents, overrideReason, approvalId: null }
+          ? { ...l, qty: nextQty, priceCents, overrideReason, approvalId: null, bundleIncludes: opts?.bundleIncludes ?? l.bundleIncludes }
           : l));
       }
       const title = [unit.brand, unit.model].filter(Boolean).join(' ') || unit.title;
@@ -79,6 +80,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
           qty: 1,
           qtyOnHand: maxQty,
           photoUrl: unit.photoUrl,
+          bundleIncludes: opts?.bundleIncludes,
         },
       ];
     });

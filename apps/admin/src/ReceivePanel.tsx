@@ -6,6 +6,7 @@ import { floorFunctionUrl } from './floorApi';
 import { reportClientError } from './clientLog';
 import { categoryDefaultCostCents, priceFloorCents } from './scanPricing';
 import { errText } from './errText';
+import { BundleReceive } from './BundleReceive';
 
 /** iOS/Android PWA: prefer native capture over getUserMedia (more reliable in standalone). */
 function preferNativeCapture() {
@@ -1318,6 +1319,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         </div>
       )}
     </div>
+
+    <BundleReceive client={client} lastReceived={saved[0]} onSaved={onSaved} />
 
     {!manual && queue.length > 0 && <p className="hint" role="status">
       {current?.status === 'loading' ? `Looking up ${current.upc}…` : current ? `Working on ${current.upc}` : ''}

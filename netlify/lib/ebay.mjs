@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { assertBundlePush, bundleMainSku } from "./bundle-gate.mjs";
 import { requireEnv, serviceClient } from "./server.mjs";
 import {
   EBAY_OAUTH_SCOPES,
@@ -603,6 +604,10 @@ export async function photoUrls(storeId, sku) {
   const keys = (data ?? [])
     .map((row) => row.path)
     .filter((path) => path && !String(path).includes("/official-"));
+  if (!keys.length) {
+    const mainSku = await bundleMainSku(storeId, sku);
+    if (mainSku) return photoUrls(storeId, mainSku);
+  }
   if (!keys.length) throw new Error(`SKU ${sku} has no photos. Add at least one before listing on eBay.`);
   return keys.slice(0, 12).map((path) => publicPhotoUrl(path));
 }
@@ -663,8 +668,11 @@ function packageSize(unit) {
 }
 
 function listingCopy(unit) {
-  const name = [unit.brand, unit.model].filter((p) => String(p || "").trim()).join(" ").trim() || unit.title || `SKU ${unit.sku}`;
-  const titleBits = [name, unit.condition, unit.category].filter((p) => p && String(p).trim());
+  const bundled = unit.listing_specs?.bundle_role === 'parent';
+  const name = bundled
+    ? unit.title
+    : [unit.brand, unit.model].filter((p) => String(p || "").trim()).join(" ").trim() || unit.title || `SKU ${unit.sku}`;
+  const titleBits = bundled ? [name] : [name, unit.condition, unit.category].filter((p) => p && String(p).trim());
   let title = titleBits.join(" — ");
   title += ` | SKU ${unit.sku}`;
   if (title.length > 80) title = title.slice(0, 77) + "...";
@@ -693,6 +701,7 @@ export async function listSku(storeId, sku, draft = null) {
   const { data: unit, error } = await sb.from("units").select("*").eq("store_id", storeId).eq("sku", sku).maybeSingle();
   if (error) throw new Error(error.message);
   if (!unit) throw new Error(`No unit ${sku}`);
+  await assertBundlePush(storeId, sku, 'ebay');
   assertEbayListable(unit);
   if (unit.state !== "available" && unit.state !== "reserved") {
     throw new Error(`SKU ${sku} is ${unit.state}, not for sale.`);
