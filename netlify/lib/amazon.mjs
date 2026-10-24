@@ -791,7 +791,7 @@ export async function listAmazonOffer(storeId, kit) {
     return { ok: false, reason: "condition_unclear", message: cond.reason || "Confirm condition" };
   }
 
-  let asin = kit.asin || unit.listing_specs?.asin || null;
+  let asin = kit.asin || unit.listing_specs?.asin || assignedCategory.attributes?.merchant_suggested_asin || null;
   if (!asin) {
     const match = await searchCatalogAsin(storeId, unit);
     asin = match.asin;
@@ -870,7 +870,7 @@ export async function listAmazonOffer(storeId, kit) {
       ],
     },
   };
-  payload.attributes = { ...(assignedCategory.native_attributes || {}), ...payload.attributes };
+  payload.attributes = { ...(assignedCategory.native_attributes || {}), purchasable_offer: payload.attributes.purchasable_offer };
 
   const path = `/listings/2021-08-01/items/${encodeURIComponent(sid)}/${encodeURIComponent(sku)}?marketplaceIds=${marketplaceId()}`;
   let preview;
