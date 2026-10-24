@@ -119,7 +119,7 @@ export async function refreshChannelCategoryFields(channel, storeId, categoryId)
       required: true, allowed: [], kind: 'unsupported_document' });
   } else if (channel === 'amazon') {
     const def = await retryLimited(() => spapiFetch(storeId, 'GET', `/definitions/2020-09-01/productTypes/${encodeURIComponent(categoryId)}` +
-      `?marketplaceIds=${marketplaceId()}&requirements=LISTING_OFFER_ONLY&requirementsEnforced=ENFORCED&parentageLevel=NONE`));
+      `?marketplaceIds=${marketplaceId()}&requirements=LISTING_OFFER_ONLY&requirementsEnforced=ENFORCED`));
     const schemaUrl = def.schema?.link?.resource;
     if (!schemaUrl) throw new Error(`amazon_definition_missing_schema:${categoryId}`);
     const response = await fetch(schemaUrl);

@@ -77,6 +77,7 @@ export async function resolveUnitCategories(storeId, sku, { network = true } = {
   const ids = { ebay: cached?.ebay_category_id || null, amazon: cached?.amazon_product_type || null,
     tiktok: cached?.tiktok_category_id || null, depop: cached?.depop_category_id || null };
   const sources = {};
+  let productData = product;
   let conflict = false;
   let amazonListingId = cached?.amazon_listing_id || null;
   if (!cached && product?.category) {
@@ -98,6 +99,8 @@ export async function resolveUnitCategories(storeId, sku, { network = true } = {
     const amazon = await catalogItemByIdentifier(storeId, gtin.upcA ? 'UPC' : 'GTIN', gtin.upcA || gtin.gtin14)
       .catch(() => ({ found: false }));
     if (amazon.found && amazon.item?.product_type) {
+      productData = { ...amazon.item, ...(product || {}), aspects: { ...(amazon.item.aspects || {}), ...(product?.aspects || {}) } };
+      if (amazon.alternatives?.length) conflict = true;
       if (ids.amazon && ids.amazon !== amazon.item.product_type) conflict = true;
       else ids.amazon = amazon.item.product_type;
       sources.amazon = 'amazon_catalog';
@@ -152,7 +155,7 @@ export async function resolveUnitCategories(storeId, sku, { network = true } = {
     const valid = channel === 'depop' ? Boolean(id) : Boolean(row?.active && row?.leaf && row?.fields_fetched_at);
     const attributes = channel === 'depop' ? { ...(cached?.channel_attributes?.[channel] || {}), ...(prior?.attributes || {}) }
       : { ...(cached?.channel_attributes?.[channel] || {}), ...(prior?.attributes || {}),
-      ...supportedAttributes(row?.required_fields, product, unit) };
+      ...supportedAttributes(row?.required_fields, productData, unit) };
     updates.push({ store_id: storeId, sku, channel, category_id: id || prior?.category_id || null,
       enabled: prior?.enabled ?? channel !== 'depop', attributes,
       source: sources[channel] || (cached ? 'confirmed_upc' : 'auto'),
