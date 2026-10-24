@@ -227,7 +227,7 @@ async function amazonLookup(storeId, gtin, deps) {
     alternatives: res.alternatives || [],
   });
 
-  const price = await deps.priceByAsin(storeId, it.asin).catch((e) => ({
+  const price = deps.skipPrice ? {} : await deps.priceByAsin(storeId, it.asin).catch((e) => ({
     price_cents: null,
     raw_error: String(e?.message || e).slice(0, 300),
     price_pending: /429|rate.?limit|QuotaExceeded/i.test(String(e?.message || e?.status || "")),
@@ -475,6 +475,17 @@ export async function lookupUpc(storeId, rawCode, opts = {}) {
     ...(opts.deps || {}),
   };
   const sb = deps.sb || serviceClient();
+
+  // Background dimension enrichment must not rewrite a staff-confirmed Floor product.
+  // Catalog and UPCitemdb run together; Amazon pricing and eBay are irrelevant here.
+  if (opts.dimensionsOnly) {
+    deps.skipPrice = true;
+    const code = gtin.gtin14.startsWith("00") ? gtin.upcA : gtin.ean13;
+    const [amazon, upcitemdb] = await Promise.all([
+      amazonLookup(storeId, gtin, deps), deps.upcitemdb(code),
+    ]);
+    return { gtin: gtinOut, amazon, upcitemdb };
+  }
 
   // Own product DB first (shared across stores) — permanent edits beat cache/API.
   if (!opts.force) {

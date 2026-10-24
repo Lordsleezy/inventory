@@ -8,6 +8,7 @@ import { json, optionsOk, serviceClient } from "../lib/server.mjs";
 import { portalAdminFromEvent } from "../lib/portal-auth.mjs";
 import { identifyFrames, lookupRetail, tokenCost } from "../lib/video-scan.mjs";
 import { medianReference } from "../lib/receive-price.mjs";
+import { lookupReceiveDimensions } from "../lib/receive-dimensions.mjs";
 import { itemSpecificsFromLookup, usableModelNumber, variantFromTitle } from "../lib/amazon.mjs";
 import { normalizeGtin } from "../lib/gtin-normalize.mjs";
 import {
@@ -15,6 +16,8 @@ import {
   listingTitle,
   saveFloorProduct,
 } from "../lib/floor-products.mjs";
+const receiveModel = () => process.env.GEMINI_RECEIVE_MODEL || 'gemini-3.5-flash-lite';
+const retailModel = () => process.env.GEMINI_RETAIL_MODEL || 'gemini-3.1-flash-lite-preview';
 
 async function authFromEvent(event) {
   try {
@@ -109,6 +112,8 @@ export async function invoke(event) {
         .map(key => [key, cleanMeasure(fields[key])]).filter(([, value]) => value != null),
     );
     const aspects = { ...(existing?.aspects || {}), ...(fields.aspects && typeof fields.aspects === 'object' ? fields.aspects : {}) };
+    const dimensionSources = fields.dimension_sources && typeof fields.dimension_sources === 'object'
+      ? fields.dimension_sources : {};
     for (const [key, value] of Object.entries(productDimensions)) aspects[key] = String(value);
     const saved = await saveFloorProduct(ctx.sb, gtin, {
       brand, title, model: String(fields.model || '').trim().slice(0, 150),
@@ -122,16 +127,28 @@ export async function invoke(event) {
         height_in: cleanMeasure(fields.height_in) || existing?.package_height_in,
         weight_lb: cleanMeasure(fields.weight_lb) || existing?.package_weight_lb,
       },
-    }, { source: 'photo', actorId: ctx.userId,
+    }, { source: body.source === 'photo' ? 'photo' : 'manual', actorId: ctx.userId,
       dimSources: { ...(existing?.dim_sources || {}),
-        ...Object.fromEntries(['length_in','width_in','height_in','weight_lb'].filter(k => cleanMeasure(fields[k])).map(k => [k, 'measured_by_staff'])) } });
+        ...Object.fromEntries(['length_in','width_in','height_in','weight_lb'].filter(k => cleanMeasure(fields[k]))
+          .map(k => [k, String(dimensionSources[`package_${k}`] || 'staff_entered').slice(0, 50)])) } });
     const skus = Array.isArray(body.skus) ? body.skus.map(String).filter(Boolean).slice(0, 100) : [];
     if (skus.length && Object.keys(productDimensions).length) {
-      const { error } = await ctx.sb.from('units').update({ ...productDimensions, dims_source: 'measured' })
+      const productSource = Object.keys(productDimensions).some(k => dimensionSources[k] === 'estimated') ? 'estimated' : 'verified';
+      const { error } = await ctx.sb.from('units').update({ ...productDimensions, dims_source: productSource })
         .eq('store_id', ctx.storeId).eq('upc', String(body.upc || '').trim()).in('sku', skus);
       if (error) await floorLog({ level: 'warn', event: 'receive_photo.measure_save_failed', message: error.message, storeId: ctx.storeId });
     }
     return saved ? json(200, { ok: true, gtin14: gtin.gtin14 }) : json(500, { ok: false, error: 'product_save_failed', message: 'The unit was saved, but its UPC product details could not be cached.' });
+  }
+  if (body.action === 'dimensions') {
+    const started = Date.now();
+    try {
+      const dimensions = await lookupReceiveDimensions(ctx.sb, ctx.storeId, String(body.upc || '').trim());
+      return json(200, { ok: true, dimensions, timing: { dims_ms: Date.now() - started } });
+    } catch (error) {
+      await floorLog({ level: 'warn', event: 'receive_photo.dimensions_failed', message: String(error?.message || error).slice(0, 200), storeId: ctx.storeId });
+      return json(502, { ok: false, message: 'Dimensions could not be found right now. You can still save this item.' });
+    }
   }
   const apiKey = String(process.env.GEMINI_API_KEY || '').trim();
   if (!apiKey || /\*{3,}/.test(apiKey)) {
@@ -142,7 +159,7 @@ export async function invoke(event) {
     const denied = await budgetError(ctx);
     if (denied) return denied;
     const source = body.identity || {};
-    const identity = Object.fromEntries(['title', 'brand', 'model', 'variant', 'size', 'color']
+    const identity = Object.fromEntries(['title', 'brand', 'model', 'variant', 'size', 'color', 'upc']
       .map(key => [key, String(source[key] || '').slice(0, 200)]));
     if (!identity.title || !identity.brand) return json(400, { ok: false, error: 'product_identity_required' });
     const started = Date.now();
@@ -150,7 +167,7 @@ export async function invoke(event) {
       identity.unit_count = Math.max(1, Number(source.unit_count) || 1);
       const retail = await lookupRetail(ctx.sb, { store_id: ctx.storeId }, identity, { singlePass: true, exactMatch: true });
       const reference = medianReference(retail.prices || [], identity);
-      const costUsd = tokenCost(retail.input || 0, retail.output || 0);
+      const costUsd = tokenCost(retail.input || 0, retail.output || 0, retailModel());
       await logUsage(ctx, identity, { price_input_tokens: retail.input || 0, price_output_tokens: retail.output || 0,
         search_queries: retail.queries || 0 }, costUsd);
       return json(200, { ok: true, price: reference,
@@ -183,11 +200,11 @@ export async function invoke(event) {
 
   let identified;
   try {
-    identified = await identifyFrames([bytes]);
+    identified = await identifyFrames([bytes], { modelName: receiveModel(), maxOutputTokens: 1100, receivePhoto: true });
   } catch (e) {
     const upstream = String(e?.message || e).slice(0, 400);
     await floorLog({ level: 'error', event: 'receive_photo.identify_failed', message: upstream, storeId: ctx.storeId,
-      detail: { elapsed_ms: Date.now() - t0, gemini_model: process.env.GEMINI_VIDEO_MODEL || 'gemini-3.8-flash' } });
+      detail: { elapsed_ms: Date.now() - t0, gemini_model: receiveModel() } });
     const status = /Gemini 401|Gemini 403|API key|PERMISSION_DENIED/i.test(upstream) ? 502 : /Gemini 429|RESOURCE_EXHAUSTED/i.test(upstream) ? 429 : 502;
     const message = status === 429 ? 'Photo identification is busy at the AI provider. Retry once or fill the fields by hand.'
       : /Gemini 404|model.*not found/i.test(upstream) ? 'The photo model is unavailable. Retry later or fill the fields by hand.'
@@ -203,7 +220,7 @@ export async function invoke(event) {
   const identifyMs = Date.now() - t0;
 
   if (body.action === 'identify_only') {
-    const costUsd = tokenCost(identified.input || 0, identified.output || 0);
+    const costUsd = tokenCost(identified.input || 0, identified.output || 0, receiveModel());
     await logUsage(ctx, { ...identity, title, brand, model },
       { identify_input_tokens: identified.input || 0, identify_output_tokens: identified.output || 0,
         search_queries: 0 }, costUsd);
@@ -224,7 +241,7 @@ export async function invoke(event) {
   let prices = [];
   let retailMeta = { input: 0, output: 0, queries: 0, reused: false };
   try {
-    retailMeta = await lookupRetail(ctx.sb, job, { ...identity, title, brand, model }, { singlePass: true, exactMatch: true });
+    retailMeta = await lookupRetail(ctx.sb, job, { ...identity, title, brand, model, upc }, { singlePass: true, exactMatch: true });
     prices = retailMeta.prices || [];
   } catch (e) {
     await floorLog({
@@ -237,10 +254,8 @@ export async function invoke(event) {
 
   const reference = medianReference(prices, { ...identity, title, brand, model });
 
-  const costUsd = tokenCost(
-    (identified.input || 0) + (retailMeta.input || 0),
-    (identified.output || 0) + (retailMeta.output || 0),
-  );
+  const costUsd = tokenCost(identified.input || 0, identified.output || 0, receiveModel())
+    + tokenCost(retailMeta.input || 0, retailMeta.output || 0, retailModel());
   // Record spend against video_scan_jobs so the existing AI scan budget UI counts this.
   await logUsage(ctx, { ...identity, title, brand, model },
     { identify_input_tokens: identified.input || 0, identify_output_tokens: identified.output || 0,

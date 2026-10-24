@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto';
 import { requireEnv } from './server.mjs';
+import { verifyRetailListings } from './receive-price.mjs';
 
 const model = () => process.env.GEMINI_VIDEO_MODEL || 'gemini-3.8-flash';
 const api = 'https://generativelanguage.googleapis.com/v1beta/models/';
-const identitySchema = {type:'object',properties:{title:{type:'string'},brand:{type:'string'},model:{type:'string'},variant:{type:'string'},category:{type:'string'},description:{type:'string'},size:{type:'string'},color:{type:'string'},confidence:{type:'number'},unit_count:{type:'integer'},options:{type:'array',items:{type:'object',properties:{label:{type:'string'},title:{type:'string'},brand:{type:'string'},model:{type:'string'},color:{type:'string'}},required:['label','title','brand','model','color']}}},required:['title','brand','model','variant','category','description','size','color','confidence','options']};
+const identitySchema = {type:'object',properties:{title:{type:'string'},brand:{type:'string'},model:{type:'string'},variant:{type:'string'},category:{type:'string'},description:{type:'string'},size:{type:'string'},color:{type:'string'},condition:{type:'string',enum:['New','Open box','Defective/non-sellable','']},confidence:{type:'number'},unit_count:{type:'integer'},options:{type:'array',items:{type:'object',properties:{label:{type:'string'},title:{type:'string'},brand:{type:'string'},model:{type:'string'},color:{type:'string'}},required:['label','title','brand','model','color']}}},required:['title','brand','model','variant','category','description','size','color','confidence','options']};
 const detailSchema = {type:'object',properties:{category:{type:'string'},condition:{type:'string'},condition_notes:{type:'string'},description:{type:'string'},key_features:{type:'array',items:{type:'string'}},upc:{type:'string'},mfr_serial:{type:'string'},ebay_title:{type:'string'},ebay_category:{type:'string'},ebay_item_specifics:{type:'object',additionalProperties:{type:'string'}},
   manufacturer_model:{type:'string'},model_source_url:{type:'string'},dimension_sources:{type:'object',additionalProperties:{type:'string'}},
   dimension_types:{type:'object',additionalProperties:{type:'string',enum:['verified_product','verified_shipping','estimated']}},main_photo_index:{type:'integer'},
@@ -20,7 +21,7 @@ const pricesSchema={type:'object',properties:{prices:{type:'array',items:{type:'
   approximate:{type:'boolean'},product_name:{type:'string'}},
   required:['store','price_cents','url','pack_size','approximate','product_name']}}},required:['prices']};
 
-async function gemini(parts,{schema,search=false,maxOutputTokens=500,signal,maxAttempts}={}) {
+async function gemini(parts,{schema,search=false,maxOutputTokens=500,signal,maxAttempts,modelName=model()}={}) {
   let input=0,output=0,queries=0;
   const attempts=maxAttempts ?? (schema?2:1);
   for(let attempt=0;attempt<attempts;attempt++){
@@ -28,7 +29,7 @@ async function gemini(parts,{schema,search=false,maxOutputTokens=500,signal,maxA
     const timeout=setTimeout(()=>controller.abort(),90_000);
     try {
       const budget=attempt?Math.min(6000,Math.max(maxOutputTokens+600,Math.ceil(maxOutputTokens*1.5))):maxOutputTokens;
-      const response=await fetch(`${api}${encodeURIComponent(model())}:generateContent`,{method:'POST',signal:signal?AbortSignal.any([controller.signal,signal]):controller.signal,
+      const response=await fetch(`${api}${encodeURIComponent(modelName)}:generateContent`,{method:'POST',signal:signal?AbortSignal.any([controller.signal,signal]):controller.signal,
         headers:{'Content-Type':'application/json','x-goog-api-key':requireEnv('GEMINI_API_KEY')},
         body:JSON.stringify({contents:[{role:'user',parts}],...(search?{tools:[{googleSearch:{}}]}:{}),
           generationConfig:{...(schema?{responseMimeType:'application/json',responseJsonSchema:schema}:{}),
@@ -60,14 +61,20 @@ export function productKey(item) {
   if(!brand||identity.length<4)return null;
   return createHash('sha256').update(`${brand}|${identity}|${String(item.color||'').toLowerCase()}`).digest('hex');
 }
-export function tokenCost(input,output) {
-  return Number(((input*Number(process.env.GEMINI_INPUT_USD_PER_M||0.75)+output*Number(process.env.GEMINI_OUTPUT_USD_PER_M||3.75))/1e6).toFixed(5));
+export function tokenCost(input,output,modelName=model()) {
+  const rate=/gemini-3\.5-flash-lite/.test(modelName) ? [0.30,2.50]
+    : /gemini-3\.1-flash-lite/.test(modelName) ? [0.25,1.50]
+    : [Number(process.env.GEMINI_INPUT_USD_PER_M||0.75),Number(process.env.GEMINI_OUTPUT_USD_PER_M||3.75)];
+  return Number(((input*rate[0]+output*rate[1])/1e6).toFixed(5));
 }
-export async function identifyFrames(stills) {
-  const parts=[{text:'Identify the exact product from these ordinary store photos, including angled counter shots. Read the visible label carefully: brand, product line, scent/flavor/color variant, and printed size or count. Title must identify the specific item, e.g. Febreze Air Mist, Linen & Sky, 8.8 oz. Write a factual one-sentence description and a broad category. Variant is the scent/flavor/color or other labeled variant; size is the printed net content or count, NOT shipping weight. ITM/ART, retailer item number, UPC, SKU and serial are NOT manufacturer model numbers; leave model empty unless clearly labeled MODEL/MODELO/MPN or verified by manufacturer. unit_count is how many retail items are in the package being sold (default 1), not bulbs or parts. Never invent measurements, condition or price. Only offer 2-3 choices if two distinct products are genuinely plausible.'},
+export async function identifyFrames(stills,{modelName,maxOutputTokens=1700,receivePhoto=false}={}) {
+  const prompt=receivePhoto
+    ? 'Read this ordinary angled store photo. Return exact brand, product line, variant/scent, printed size, title, broad category and one-sentence description from the label. Model only if clearly labeled MODEL/MPN; never use retailer SKU/UPC as model. unit_count is retail packages being sold, default 1. Set condition to New only if factory seal is visible, Open box only if visibly opened, Defective/non-sellable only if damage is clear; otherwise empty. Never guess dimensions, weight or price. Give options only if two different products are genuinely plausible.'
+    : 'Identify the exact product from these ordinary store photos, including angled counter shots. Read the visible label carefully: brand, product line, scent/flavor/color variant, and printed size or count. Title must identify the specific item, e.g. Febreze Air Mist, Linen & Sky, 8.8 oz. Write a factual one-sentence description and a broad category. Variant is the scent/flavor/color or other labeled variant; size is the printed net content or count, NOT shipping weight. ITM/ART, retailer item number, UPC, SKU and serial are NOT manufacturer model numbers; leave model empty unless clearly labeled MODEL/MODELO/MPN or verified by manufacturer. unit_count is how many retail items are in the package being sold (default 1), not bulbs or parts. Never invent measurements, condition or price. Only offer 2-3 choices if two distinct products are genuinely plausible.';
+  const parts=[{text:prompt},
     ...stills.map(bytes=>({inlineData:{mimeType:'image/jpeg',data:bytes.toString('base64')}}))];
   // A photo is billed once. Invalid structured output is an error, not a hidden second image call.
-  const found=await gemini(parts,{schema:identitySchema,maxOutputTokens:1700,maxAttempts:1});
+  const found=await gemini(parts,{schema:identitySchema,maxOutputTokens,maxAttempts:1,modelName});
   const options=[...new Map((found.value.options||[]).map(option=>[
     [option.brand,option.model,option.color].join('|').toLowerCase(),option])).values()];
   const candidate=String(found.value.model||'').trim();
@@ -142,12 +149,13 @@ async function searchOnce(identity,closer=false,signal,singlePass=false,exactMat
     identity.color&&!title.toLowerCase().includes(String(identity.color).toLowerCase())?identity.color:'']
     .filter(Boolean).join(' ').replace(/\s+/g,' ').slice(0,180);
   const prompt=exactMatch
-    ? `Use Google Search now to find at least 3 distinct US retailers with today's priced product pages for this exact item: ${JSON.stringify({title:identity.title,brand:identity.brand,model:identity.model,variant:identity.variant,size:identity.size,pack_count:identity.unit_count||1})}. Search several retailer listings in this one research call. Match product line, variant/scent, printed size and the retail package count. For a single item, EXCLUDE multipacks, cases and variety packs entirely. For a multipack, only include the same pack count. Return each whole-package asking price, seller, exact page URL, listing title and pack_size. Never divide a pack price. Exclude search pages, sponsored snippets without a product page, stale prices, and different sizes or variants. Return an empty array if no priced exact pages exist. Do not invent links or prices.`
+    ? `Use Google Search now for current US retailer product pages for ${closer?'the exact printed product name and size':'the exact barcode and product'}: ${JSON.stringify({title:identity.title,brand:identity.brand,variant:identity.variant,size:identity.size,...(closer?{}:{upc:identity.upc}),pack_count:identity.unit_count||1})}. Find several distinct sellers. Require exact variant/scent, printed size and retail pack count. EXCLUDE multipacks for a single item and any page without a current dollar price. Return the whole-package price, exact page title and product URL; never divide a pack price. No invented URLs or prices. Empty prices if no exact pages.`
     : `Use Google Search now for today's US retail prices of "${query}". Search with one exact product query. Return only verified retailer product pages with current dollar prices, sizes and pack counts. ${closer?'If the exact size is not listed, find a clearly labeled close size or pack and mark approximate=true.':'Include multipacks containing the item, even when a single unit has no listing.'} If the item is a single unit but sold only in a variety pack, give pack_size and mark approximate=true. If no priced product page, return an empty prices array. Do not rely on memory or invent a URL or price.`;
   // One grounded+structured call instead of search-then-parse (cuts ~half the price latency).
   try {
-    const combined=await gemini([{text:prompt}],{search:true,schema:pricesSchema,maxOutputTokens:exactMatch?1800:900,signal,maxAttempts:singlePass?1:undefined});
-    const prices=exactMatch&&!combined.queries?[]:cleanPrices(combined.value?.prices,identity);
+    const combined=await gemini([{text:prompt}],{search:true,schema:pricesSchema,maxOutputTokens:exactMatch?1400:900,signal,maxAttempts:singlePass?1:undefined,
+      ...(exactMatch?{modelName:process.env.GEMINI_RETAIL_MODEL||'gemini-3.1-flash-lite-preview'}:{})});
+    const prices=cleanPrices(combined.value?.prices,identity);
     if(combined.queries||prices.length||singlePass)return {prices,input:combined.input,output:combined.output,queries:combined.queries};
   } catch (error) {
     console.warn('video_scan_retail_combined_failed',String(error.message||error).slice(0,160));
@@ -161,20 +169,26 @@ async function searchOnce(identity,closer=false,signal,singlePass=false,exactMat
     output:grounded.output+parsed.output,queries:grounded.queries};
 }
 export async function lookupRetail(sb,job,identity,{signal,singlePass=false,exactMatch=false}={}) {
-  const key=productKey(identity);
+  const key=exactMatch&&/^\d{8,14}$/.test(String(identity.upc||''))
+    ? createHash('sha256').update(`receive-upc:${identity.upc}`).digest('hex') : productKey(identity);
   if(key){const cached=await sb.from('video_scan_product_cache').select('lookup,created_at').eq('store_id',job.store_id).eq('product_key',key).maybeSingle();
     if(cached.error)throw cached.error;
-    if(cached.data&&(!exactMatch||cached.data.lookup?.retail_match_version===2)&&Date.now()-Date.parse(cached.data.created_at)<
+    if(cached.data&&(!exactMatch||cached.data.lookup?.retail_match_version===5)&&Date.now()-Date.parse(cached.data.created_at)<
       (cached.data.lookup.retail_prices?.length?30:1)*86400_000){
       // Show cached prices immediately; resolve redirect URLs in the background later if needed.
       return {prices:cleanPrices(cached.data.lookup.retail_prices,identity),input:0,output:0,queries:0,reused:true,cachedDetails:cached.data.lookup};
     }}
-  const first=await searchOnce(identity,false,signal,singlePass,exactMatch);
-  let prices=first.prices,input=first.input,output=first.output,queries=first.queries;
-  if(!prices.length&&!singlePass){const second=await searchOnce(identity,true,signal,false,exactMatch);prices=second.prices;input+=second.input;output+=second.output;queries+=second.queries}
+  const [first, parallelSecond]=exactMatch
+    ? await Promise.all([searchOnce(identity,false,signal,true,true),searchOnce(identity,true,signal,true,true)])
+    : [await searchOnce(identity,false,signal,singlePass,false),null];
+  let prices=[...first.prices,...(parallelSecond?.prices||[])],
+    input=first.input+(parallelSecond?.input||0),output=first.output+(parallelSecond?.output||0),
+    queries=first.queries+(parallelSecond?.queries||0);
+  if(!prices.length&&!singlePass&&!exactMatch){const second=await searchOnce(identity,true,signal);prices=second.prices;input+=second.input;output+=second.output;queries+=second.queries}
+  if(exactMatch)prices=await verifyRetailListings(prices,identity);
   // Skip HEAD redirect resolution on the critical path — grounding links still open in-app.
   if(key){const saved=await sb.from('video_scan_product_cache').upsert({store_id:job.store_id,product_key:key,
-    lookup:{retail_prices:prices,...(exactMatch?{retail_match_version:2}:{})},created_at:new Date().toISOString()});if(saved.error)throw saved.error}
+    lookup:{retail_prices:prices,...(exactMatch?{retail_match_version:5}:{})},created_at:new Date().toISOString()});if(saved.error)throw saved.error}
   return {prices,input,output,queries,reused:false};
 }
 const marketSchema={type:'object',properties:{kind:{type:'string',enum:['retail','sold','none']},

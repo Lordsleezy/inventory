@@ -991,6 +991,20 @@ html.app-mode .receive-app .unit-edit-grid,
 html.app-mode .receive-app .receive-photos,
 html.app-mode .receive-app .actions { margin-left: 16px; margin-right: 16px; }
 html.app-mode .receive-app-nav { position: sticky; top: 0; z-index: 5; background: #000; }
+html.app-mode .receive-app .receive-confirm { margin: 10px 12px 0; gap: 8px; padding-bottom: 8px; }
+html.app-mode .receive-app .receive-confirm-head small { color: #8e8e93; }
+html.app-mode .receive-app .receive-confirm label { color: #aeaeb2; }
+html.app-mode .receive-app .receive-confirm input:not([type=checkbox]),
+html.app-mode .receive-app .receive-confirm select,
+html.app-mode .receive-app .receive-confirm textarea { background: #2c2c2e; color: #fff; border: 1px solid #3a3a3c; border-radius: 9px; min-height: 42px; }
+html.app-mode .receive-app .receive-confirm-details { background: #1c1c1e; border: 0; }
+html.app-mode .receive-app .receive-confirm-details summary { min-height: 44px; box-sizing: border-box; }
+html.app-mode .receive-app .receive-confirm-bottom { bottom: calc(56px + env(safe-area-inset-bottom, 0px)); background: #111113; border-top: 1px solid #3a3a3c; box-shadow: 0 -6px 24px #0009; margin: 0 -12px; padding: 10px 16px; }
+html.app-mode .receive-app .receive-confirm-bottom > button { background: #0a84ff; color: #fff; border: 0; border-radius: 10px; }
+html.app-mode .receive-app .receive-confirm-prices summary { color: #d1e7ff; }
+html.app-mode .receive-app .receive-confirm-bottom > small { color: #ffb366; }
+html.app-mode .receive-app .receive-advanced { margin: 12px 16px; }
+html.app-mode .receive-app .receive-advanced > summary { color: #8e8e93; }
 /* Labels are 13px; inputs use font:inherit — bump to ≥16px so iOS shows the soft keyboard. */
 html.app-mode .receive-app .unit-edit-grid input,
 html.app-mode .receive-app .unit-edit-grid select,

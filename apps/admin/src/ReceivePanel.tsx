@@ -7,6 +7,7 @@ import { reportClientError } from './clientLog';
 import { categoryDefaultCostCents, priceFloorCents } from './scanPricing';
 import { errText } from './errText';
 import { BundleReceive } from './BundleReceive';
+import { measureMatPhoto } from './matMeasure';
 
 /** iOS/Android PWA: prefer native capture over getUserMedia (more reliable in standalone). */
 function preferNativeCapture() {
@@ -169,6 +170,7 @@ type PhotoPriceInfo = {
   high_cents: number | null;
   count: number;
   listings?: { store: string; price_cents: number; url: string; product_name: string }[];
+  highest_retail?: { store: string; price_cents: number; url: string; product_name: string } | null;
 };
 type PhotoFill = { aspects: Record<string, string> };
 
@@ -181,6 +183,28 @@ async function fileToBase64(file: File): Promise<string> {
     binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
   }
   return btoa(binary);
+}
+
+function postIdentifyPhoto(accessToken: string, body: Record<string, unknown>): Promise<{
+  status: number; data: Record<string, any>; uploadMs: number; requestMs: number }> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    const started = performance.now();
+    let uploadMs = 0;
+    xhr.open('POST', floorFunctionUrl('receive-photo-identify'));
+    xhr.setRequestHeader('Authorization', `Bearer ${accessToken}`);
+    xhr.setRequestHeader('content-type', 'application/json');
+    xhr.timeout = 12000;
+    xhr.upload.onload = () => { uploadMs = performance.now() - started; };
+    xhr.onload = () => {
+      let data = {};
+      try { data = JSON.parse(xhr.responseText || '{}'); } catch { /* plain-English fallback below */ }
+      resolve({ status: xhr.status, data, uploadMs, requestMs: performance.now() - started });
+    };
+    xhr.onerror = () => reject(new Error('Photo upload failed. Retry or fill fields by hand.'));
+    xhr.ontimeout = () => reject(new Error('Photo identification took too long. Retry or fill fields by hand.'));
+    xhr.send(JSON.stringify(body));
+  });
 }
 
 /** Send a small JPEG to identification; keep the original for the unit photo. */
@@ -196,14 +220,14 @@ async function identificationJpeg(file: File): Promise<File> {
       await img.decode();
       source = img;
     }
-    const scale = Math.min(1, 1600 / Math.max(source.width, source.height));
+    const scale = Math.min(1, 1024 / Math.max(source.width, source.height));
     const canvas = document.createElement('canvas');
     canvas.width = Math.max(1, Math.round(source.width * scale));
     canvas.height = Math.max(1, Math.round(source.height * scale));
     canvas.getContext('2d')?.drawImage(source, 0, 0, canvas.width, canvas.height);
     if (source instanceof ImageBitmap) source.close();
     if (objectUrl) URL.revokeObjectURL(objectUrl);
-    const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.78));
+    const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.7));
     return blob && blob.size > PHOTO_MIN_BYTES
       ? new File([blob], 'identify.jpg', { type: 'image/jpeg' }) : file;
   } catch { return file; }
@@ -312,7 +336,7 @@ function catalogMissMessage(r?: Lookup): string | null {
 }
 
   type Form = {
-  brand: string; unbranded: boolean; noUpc: boolean; model: string; title: string; category: string; description: string;
+  brand: string; unbranded: boolean; noUpc: boolean; model: string; variant: string; size: string; title: string; category: string; description: string;
   condition: string; conditionNote: string; testStatus: string; ask: string; cost: string;
   notes: string; upc: string; quantity: string; shippable: string;
   length: string; width: string; height: string; weight: string;
@@ -320,7 +344,7 @@ function catalogMissMessage(r?: Lookup): string | null {
   costEstimate: boolean;
 };
 const blank: Form = {
-  brand: '', unbranded: false, noUpc: false, model: '', title: '', category: '', description: '', condition: '', conditionNote: '', testStatus: '',
+  brand: '', unbranded: false, noUpc: false, model: '', variant: '', size: '', title: '', category: '', description: '', condition: '', conditionNote: '', testStatus: '',
   ask: '', cost: '', notes: '', upc: '', quantity: '1', shippable: 'auto',
   length: '', width: '', height: '', weight: '', costEstimate: false,
   productHeight: '', productWidth: '', productDepth: '', productWeight: '',
@@ -567,7 +591,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   const [busy, setBusy] = useState(false);
   const [dups, setDups] = useState<Dups | null>(null);
   const [dupAck, setDupAck] = useState(false);
-  const [dialog, setDialog] = useState<null | 'ready' | 'reason' | 'miss-photo' | 'photo-price'>(null);
+  const [dialog, setDialog] = useState<null | 'ready' | 'reason' | 'miss-photo'>(null);
   const [reason, setReason] = useState('damaged');
   const [reasonNote, setReasonNote] = useState('');
   const [camera, setCamera] = useState(false);
@@ -582,6 +606,9 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   const [photoPrice, setPhotoPrice] = useState<PhotoPriceInfo | null>(null);
   const [photoPriceError, setPhotoPriceError] = useState('');
   const [photoPriceBusy, setPhotoPriceBusy] = useState(false);
+  const [dimensionsBusy, setDimensionsBusy] = useState(false);
+  const [dimensionsError, setDimensionsError] = useState('');
+  const [dimensionSources, setDimensionSources] = useState<Record<string, string>>({});
   const [photoIdentity, setPhotoIdentity] = useState<Record<string, unknown> | null>(null);
   const [photoFill, setPhotoFill] = useState<PhotoFill | null>(null);
   const missPhotoFile = useRef<HTMLInputElement>(null);
@@ -599,6 +626,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   const upcInput = useRef<HTMLInputElement>(null);
   const cameraFile = useRef<HTMLInputElement>(null);
   const takePhotoFile = useRef<HTMLInputElement>(null);
+  const confirmPhotoFile = useRef<HTMLInputElement>(null);
   const choosePhotoFile = useRef<HTMLInputElement>(null);
   const consumedInitialUpc = useRef(false);
   /** Stable key for IndexedDB photo stash (survives camera-app process death on store phones). */
@@ -616,6 +644,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   const chain = useRef<Promise<void>>(Promise.resolve());
   const mounted = useRef(true);
   const askTouched = useRef(false);
+  const titleTouched = useRef(false);
+  const priceRequest = useRef(0);
   const activeScan = useRef<string | null>(null);
   const modalOpen = useRef(false);
   modalOpen.current = camera || dialog !== null;
@@ -651,11 +681,12 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   };
   const update = (key: keyof Form, value: string) => {
     if (key === 'ask') askTouched.current = true;
+    if (key === 'title') titleTouched.current = true;
     setForm(prev => {
       const next = { ...prev, [key]: value };
       if (key === 'cost') next.costEstimate = false;
       // Title is always brand + item specifics (scans and manual).
-      if (key === 'brand' || key === 'model') {
+      if ((key === 'brand' || key === 'model') && !titleTouched.current) {
         next.title = composeListingTitle(
           key === 'brand' ? value : next.brand,
           key === 'model' ? value : next.model,
@@ -732,6 +763,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
 
   function resetEntry(keepProduct?: Partial<Form>) {
     askTouched.current = false;
+    titleTouched.current = false;
     setForm({ ...blank, ...keepProduct });
     setFiles([]);
     void clearPendingPhotos(pendingPhotoKey(storeId, photoSessionKey.current));
@@ -746,6 +778,9 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     setPhotoFill(null);
     setPhotoIdentity(null);
     setPhotoPriceError('');
+    setPhotoPrice(null);
+    setDimensionSources({});
+    setDimensionsError('');
   }
 
   /* Load the head of the queue into the form once its lookup has settled. */
@@ -769,6 +804,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       brand,
       unbranded: false,
       model: specifics,
+      variant: text(m?.aspects?.Variant),
+      size: text(m?.aspects?.Size),
       // Title = brand + model (not Amazon's long catalog title).
       title: composeListingTitle(brand, specifics, false),
       category: text(m?.category),
@@ -787,6 +824,15 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     // Seed may override brand/model — keep title in sync.
     initial.title = composeListingTitle(initial.brand, initial.model, initial.unbranded);
     askTouched.current = Boolean(current.seed && 'ask' in current.seed);
+    titleTouched.current = Boolean(current.seed && 'title' in current.seed);
+    setDimensionSources(Object.fromEntries([
+      ...(['length_in', 'width_in', 'height_in', 'weight_lb'] as const).map((key, i) => [
+        ['package_length_in', 'package_width_in', 'package_height_in', 'package_weight_lb'][i],
+        p?.[key] != null ? (r?.fieldCoverage?.package || 'Floor') : '',
+      ]),
+      ...(['product_height_in', 'product_width_in', 'product_depth_in', 'product_weight_lb'] as const)
+        .map(key => [key, m?.aspects?.[key] ? (r?.floor_product ? 'Floor' : 'Amazon') : '']),
+    ].filter(([, source]) => source)));
     setForm(initial);
     const miss = current.status === 'ready' || current.status === 'error'
       ? (current.status === 'error' ? null : catalogMissMessage(r))
@@ -799,6 +845,13 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     setFiles([]);
     // Instant miss popup (photo fallback). Do not re-prompt the same scan id.
     const identityNeeds = missingIdentityFields(r);
+    setPhotoPrice(null);
+    if (!identityNeeds.length && m?.title && m?.brand) {
+      const priceIdentity = { title: m.title, brand: m.brand, model: m.model || '',
+        variant: initial.variant, size: initial.size, unit_count: 1 };
+      setPhotoIdentity(priceIdentity);
+      void findPhotoPrices(priceIdentity);
+    }
     if ((isTrueCatalogMiss(r) || identityNeeds.length > 0) && missPromptedFor.current !== current.id) {
       missPromptedFor.current = current.id;
       setPhotoNeed(identityNeeds.length ? `Need: ${identityNeeds.join(', ')}. Take a photo of the product label.` : 'No catalog match. Take a clear photo of the box or label.');
@@ -813,6 +866,9 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     setLoadedId(current.id);
     activeScan.current = current.id;
     const scanId = current.id;
+    if (!isTrueCatalogMiss(r) && [initial.length, initial.width, initial.height, initial.weight,
+      initial.productHeight, initial.productWidth, initial.productDepth, initial.productWeight].some(v => !v))
+      void findPhotoDimensions(current.upc, scanId);
     void findDups(upcVariants(current.upc, r)).then(d => { if (mounted.current && activeScan.current === scanId) setDups(d); });
     // Restore photos if the camera app killed the PWA mid-capture for this scan.
     void loadPendingPhotos(pendingPhotoKey(storeId, scanId)).then(restored => {
@@ -871,6 +927,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     const out: string[] = [];
     if (!pos(p.ask)) out.push('price');
     if (!form.condition) out.push('condition');
+    if (isDefectiveCondition(form.condition) && !form.conditionNote.trim()) out.push('defect note');
     if (!form.category.trim()) out.push('category');
     if (!brandReady()) out.push('brand');
     if (!upcReady()) out.push('UPC');
@@ -885,6 +942,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     const out: string[] = [];
     if (!pos(typeof a === 'number' ? a : null)) out.push('price');
     if (!form.condition) out.push('condition');
+    if (isDefectiveCondition(form.condition) && !form.conditionNote.trim()) out.push('defect note');
     if (!form.category.trim()) out.push('category');
     if (!brandReady()) out.push('brand');
     if (!upcReady()) out.push('UPC');
@@ -905,13 +963,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     if (files.some(file => (file.type && !file.type.startsWith('image/')) || file.size > PHOTO_MAX_BYTES)) {
       setError('Photos must be images under 15 MB each.'); return;
     }
-    if (!manual) {
-      // Do not list for sale: photo is optional — unit stays off the website/marketplaces.
-      if (!doNotList && !files.length) { setError('Add at least one real photo of this unit before finishing, or check Do not list for sale.'); return; }
-      if (files.some(f => f.size < PHOTO_MIN_BYTES)) { setError('One of the photos looks empty or too small. Retake it.'); return; }
-      if (!form.condition) { setError('Pick a condition: New (sealed), Open box, or Defective/non-sellable.'); return; }
-    }
-    if (isDefectiveCondition(form.condition) && !form.conditionNote.trim()) { setError('Defective/non-sellable needs a note describing the defect.'); return; }
+    if (files.some(f => f.size < PHOTO_MIN_BYTES)) { setError('One of the photos looks empty or too small. Retake it.'); return; }
     const parsed = parse();
     if (!parsed) return;
     // Duplicate check right before create (another device may have received it meanwhile).
@@ -932,8 +984,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     }
     if (readyToList) {
       if (gaps.length) {
-        setError(`Ready to list needs: ${gaps.join(', ')}. Uncheck Ready to list to save into Needs attention.`);
-        return;
+        setWarning(`Saved to Unfinished. Missing: ${gaps.join(', ')}.`);
       }
       await receive(parsed, null);
       return;
@@ -961,7 +1012,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       ].filter(Boolean).join('\n');
       const brandValue = form.unbranded ? 'Unbranded' : form.brand.trim();
       // Scans and manual: title is always brand + item specifics (never catalog junk / digit codes).
-      const titleValue = composeListingTitle(form.brand, form.model, form.unbranded);
+      const titleValue = form.title.trim() || composeListingTitle(form.brand, form.model, form.unbranded);
       const { data, error: e } = await client.rpc('portal_receive_unit', {
         p_quantity: quantity,
         p_brand: brandValue,
@@ -1017,14 +1068,17 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       const blocked = skus.includes(NEVER_LIST_SKU);
       const enrichFailed = await enrichUnits(skus, parsed, hold, blocked || doNotList);
       if (enrichFailed) warnings.push(`Could not save lookup details on ${enrichFailed} unit(s).${hold ? ' They have no price, so they will not list.' : ''}`);
-      if (photoFill && current?.upc) {
+      if (!manual && current?.upc) {
         try {
           const confirm = await fetch(floorFunctionUrl('receive-photo-identify'), {
             method: 'POST',
             headers: { Authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
-            body: JSON.stringify({ action: 'confirm', upc: current.upc, skus, fields: {
+            body: JSON.stringify({ action: 'confirm', source: photoFill ? 'photo' : 'manual', upc: current.upc, skus, fields: {
               brand: brandValue, model: form.model, title: titleValue, category: form.category,
-              description: form.description, aspects: photoFill.aspects,
+              description: form.description, aspects: { ...(photoFill?.aspects || {}),
+                ...(form.variant.trim() ? { Variant: form.variant.trim() } : {}),
+                ...(form.size.trim() ? { Size: form.size.trim() } : {}) },
+              dimension_sources: dimensionSources,
               length_in: parsed.dims[0], width_in: parsed.dims[1], height_in: parsed.dims[2], weight_lb: parsed.dims[3],
               product_height_in: form.productHeight, product_width_in: form.productWidth,
               product_depth_in: form.productDepth, product_weight_lb: form.productWeight,
@@ -1040,7 +1094,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       // Remember product data for "Add another unit".
       const seed: Partial<Form> = {
         brand: brandValue, unbranded: form.unbranded, noUpc: form.noUpc,
-        model: form.model, title: titleValue, category: form.category, description: form.description,
+        model: form.model, variant: form.variant, size: form.size,
+        title: titleValue, category: form.category, description: form.description,
         ask: hold ? '' : form.ask, testStatus: '', shippable: form.shippable,
         length: form.length, width: form.width, height: form.height, weight: form.weight,
         productHeight: form.productHeight, productWidth: form.productWidth,
@@ -1107,9 +1162,12 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           put('ebay_aspects', listingAspects);
         }
       }
-      if (photoFill?.aspects && Object.keys(photoFill.aspects).length) put('ebay_aspects', {
+      const editedAspects = { ...(photoFill?.aspects || {}),
+        ...(form.variant.trim() ? { Variant: form.variant.trim() } : {}),
+        ...(form.size.trim() ? { Size: form.size.trim() } : {}) };
+      if (Object.keys(editedAspects).length) put('ebay_aspects', {
         ...Object.fromEntries(Object.entries(m?.aspects || {}).filter(([key]) => !/^product_(height|width|depth|weight)_/i.test(key))),
-        ...photoFill.aspects,
+        ...editedAspects,
       });
       for (const [field, value] of [
         ['product_height_in', form.productHeight], ['product_width_in', form.productWidth],
@@ -1118,7 +1176,9 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         const n = Number(value);
         if (value.trim() && Number.isFinite(n) && n > 0) put(field, n);
       }
-      if (parsed.dims.some(pos)) put('package_source', packageSource(parsed));
+      if (parsed.dims.some(pos)) put('package_source',
+        [...new Set(['package_length_in','package_width_in','package_height_in','package_weight_lb']
+          .map(key => dimensionSources[key]).filter(Boolean))].join(', ') || packageSource(parsed));
       if (form.costEstimate || parsed.cost == null) {
         put('cost_estimate', true);
         put('cost_source', floor.costLabel);
@@ -1135,7 +1195,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       put('upc', UPC_NOT_APPLICABLE);
     }
     if (!doNotList && readyAmazonTiktok) put('ready_amazon_tiktok', true);
-    if (!doNotList && readyToList) put('ready_to_list', true);
+    if (!doNotList && readyToList && missingFor(parsed).length === 0) put('ready_to_list', true);
     if (doNotList) put('do_not_list', true);
     if (hold) { put('hold_reason', hold.reason); put('hold_note', hold.note.trim()); }
     const hide = Boolean(hold) || forceHide || doNotList;
@@ -1145,7 +1205,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       specs, msrp: msrp, show: hide ? false : null,
       brand: form.unbranded ? 'Unbranded' : form.brand.trim(),
       model: form.model.trim(),
-      title: composeListingTitle(form.brand, form.model, form.unbranded),
+      title: form.title.trim() || composeListingTitle(form.brand, form.model, form.unbranded),
       description: form.description.trim(),
     };
     let failed = 0;
@@ -1257,22 +1317,63 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   }
 
   async function findPhotoPrices(identity: Record<string, unknown>) {
+    const request = ++priceRequest.current;
+    const started = performance.now();
     setPhotoPriceBusy(true);
     setPhotoPriceError('');
     try {
       const response = await fetch(floorFunctionUrl('receive-photo-identify'), {
         method: 'POST',
         headers: { Authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
-        body: JSON.stringify({ action: 'prices', identity }),
+        body: JSON.stringify({ action: 'prices', identity: { ...identity, upc: current?.upc || '' } }),
+        signal: AbortSignal.timeout(10000),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.message || 'Online prices could not be found.');
-      setPhotoPrice((data.price as PhotoPriceInfo) || null);
+      if (request === priceRequest.current) setPhotoPrice((data.price as PhotoPriceInfo) || null);
+      console.info('receive_price_timing', { price_ms: Math.round(performance.now() - started), listings: data.price?.count || 0 });
     } catch (e) {
-      setPhotoPrice(null);
-      setPhotoPriceError(`${errText(e)} You can enter your price by hand or retry prices.`);
+      if (request === priceRequest.current) {
+        setPhotoPrice(null);
+        setPhotoPriceError(`${errText(e)} You can enter your price by hand or retry prices.`);
+      }
     } finally {
-      setPhotoPriceBusy(false);
+      if (request === priceRequest.current) setPhotoPriceBusy(false);
+    }
+  }
+
+  async function findPhotoDimensions(upc: string, scanId: string) {
+    setDimensionsBusy(true);
+    setDimensionsError('');
+    const started = performance.now();
+    try {
+      const response = await fetch(floorFunctionUrl('receive-photo-identify'), {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'dimensions', upc }),
+        signal: AbortSignal.timeout(10000),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.message || 'Dimensions could not be found.');
+      if (activeScan.current !== scanId) return;
+      const values = (data.dimensions?.values || {}) as Record<string, number | null>;
+      const sources = (data.dimensions?.sources || {}) as Record<string, string>;
+      const map = { product_height_in: 'productHeight', product_width_in: 'productWidth',
+        product_depth_in: 'productDepth', product_weight_lb: 'productWeight',
+        package_length_in: 'length', package_width_in: 'width',
+        package_height_in: 'height', package_weight_lb: 'weight' } as const;
+      setForm(prev => {
+        const next = { ...prev };
+        for (const [field, formKey] of Object.entries(map) as [keyof typeof map, typeof map[keyof typeof map]][])
+          if (!next[formKey] && values[field] != null) next[formKey] = String(values[field]);
+        return next;
+      });
+      setDimensionSources(prev => ({ ...sources, ...prev }));
+      console.info('receive_dimensions_timing', { dims_ms: Math.round(performance.now() - started), source: sources });
+    } catch (error) {
+      if (activeScan.current === scanId) setDimensionsError(`${errText(error)} Tap dimensions to edit them.`);
+    } finally {
+      if (activeScan.current === scanId) setDimensionsBusy(false);
     }
   }
 
@@ -1284,6 +1385,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       return;
     }
     setPhotoIdBusy(true);
+    const photoStarted = performance.now();
     setPhotoIdStatus('Identifying product…');
     setPhotoIdError('');
     setPhotoPrice(null);
@@ -1300,20 +1402,18 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       setFiles([file]);
       void savePendingPhotos(pendingPhotoKey(storeId, photoSessionKey.current), [file]);
       const upload = await identificationJpeg(file);
+      const compressedMs = performance.now() - photoStarted;
+      const matMeasurement = measureMatPhoto(upload).catch(() => null);
       const image_base64 = await fileToBase64(upload);
-      const res = await fetch(floorFunctionUrl('receive-photo-identify'), {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
-        body: JSON.stringify({
+      const photoResponse = await postIdentifyPhoto(accessToken, {
           action: 'identify_only',
           upc: current.upc,
           miss_id: current.result?.miss_id || null,
           image_base64,
           mime_type: upload.type || 'image/jpeg',
-        }),
       });
-      const json = await res.json().catch(() => ({} as { error?: string; message?: string }));
-      if (!res.ok) {
+      const json = photoResponse.data;
+      if (photoResponse.status < 200 || photoResponse.status >= 300) {
         setPhotoIdError(json.message || json.error || 'Photo identify failed. Retry or fill fields by hand.');
         setWarning(catalogMissMessage(current.result) || '');
         return;
@@ -1321,22 +1421,42 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       const brand = text(json.fill?.brand || json.identity?.brand);
       const model = text(json.fill?.model || json.identity?.model);
       const title = text(json.fill?.title) || composeListingTitle(brand, model, false);
+      const identity = (json.identity || {}) as Record<string, unknown>;
       setPhotoIdStatus(title || 'Product found');
       setForm(prev => ({
         ...prev,
         brand: brand || prev.brand,
         unbranded: false,
         model: model || prev.model,
+        variant: String(identity.variant || '').trim() || prev.variant,
+        size: String(identity.size || '').trim() || prev.size,
+        condition: CONDITIONS.some(([value]) => value === identity.condition) ? String(identity.condition) : prev.condition,
         category: text(json.fill?.category) || prev.category,
         description: text(json.fill?.description) || prev.description,
         title: title || composeListingTitle(brand || prev.brand, model || prev.model, false),
       }));
       setPhotoFill({ aspects: json.fill?.aspects || {} });
-      const identity = (json.identity || {}) as Record<string, unknown>;
       setPhotoIdentity(identity);
-      setDialog('photo-price');
+      setDialog(null);
       setWarning('');
       void findPhotoPrices(identity);
+      const scanId = current.id;
+      void findPhotoDimensions(current.upc, scanId).then(async () => {
+        const mat = await matMeasurement;
+        if (!mat || activeScan.current !== scanId) return;
+        setForm(prev => ({ ...prev,
+          productWidth: prev.productWidth || String(mat.product_width_in),
+          productDepth: prev.productDepth || String(mat.product_depth_in),
+        }));
+        setDimensionSources(prev => ({
+          ...prev,
+          ...(!prev.product_width_in ? { product_width_in: 'mat estimated' } : {}),
+          ...(!prev.product_depth_in ? { product_depth_in: 'mat estimated' } : {}),
+        }));
+      });
+      console.info('receive_photo_timing', { compressed_ms: Math.round(compressedMs), upload_ms: Math.round(photoResponse.uploadMs),
+        photo_bytes: upload.size, photo_to_filled_ms: Math.round(performance.now() - photoStarted),
+        identify_server_ms: json.timing?.identify_ms || null, request_ms: Math.round(photoResponse.requestMs) });
     } catch (e) {
       setPhotoIdError(errText(e) || 'Photo identify failed. Retry or fill fields by hand.');
     } finally {
@@ -1461,7 +1581,63 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
 
       {!manual && merged?.never_list_reason && <p className="hint">Amazon will not list this: {merged.never_list_reason}</p>}
 
-      <div className="unit-edit-grid">
+      {!manual && <div className="receive-confirm">
+        <div className="receive-confirm-head">
+          {previews[0] ? <img src={previews[0]} alt="Item being received" /> : <div className="receive-confirm-placeholder">No photo</div>}
+          <div><small>CONFIRM ITEM · {current?.upc}</small>
+            <label>Title<input value={form.title} onChange={e => update('title', e.target.value)} /></label>
+          </div>
+        </div>
+        <div className="receive-confirm-fields">
+          <label>Brand<input value={form.brand} onChange={e => update('brand', e.target.value)} /></label>
+          <label>Model / item specifics<input value={form.model} onChange={e => update('model', e.target.value)} /></label>
+          <label>Variant<input value={form.variant} onChange={e => update('variant', e.target.value)} placeholder="Scent, color…" /></label>
+          <label>Size<input value={form.size} onChange={e => update('size', e.target.value)} placeholder="8.8 oz" /></label>
+          <label>Category<input value={form.category} onChange={e => update('category', e.target.value)} /></label>
+          <label>Condition<select value={form.condition} onChange={e => update('condition', e.target.value)}>
+            <option value="">Choose condition</option>{CONDITIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+          </select></label>
+        </div>
+        {isDefectiveCondition(form.condition) && <label className="receive-confirm-full">Defect note<input value={form.conditionNote} onChange={e => update('conditionNote', e.target.value)} /></label>}
+        <details className="receive-confirm-details"><summary>Description {form.description ? '· filled' : '· empty'}</summary>
+          <textarea rows={3} value={form.description} onChange={e => update('description', e.target.value)} /></details>
+        <details className="receive-confirm-details"><summary>Product · {[form.productHeight, form.productWidth, form.productDepth].every(Boolean)
+          ? `${form.productHeight} × ${form.productWidth} × ${form.productDepth} in` : 'Add dimensions'}{form.productWeight ? ` · ${form.productWeight} lb` : ''}
+          {dimensionsBusy ? ' · finding…' : ''} <small>{[...new Set(['product_height_in','product_width_in','product_depth_in','product_weight_lb'].map(k => dimensionSources[k]).filter(Boolean))].join(' / ')}</small></summary>
+          <div className="receive-confirm-dims">{([['productHeight','Height (in)','product_height_in'],['productWidth','Width (in)','product_width_in'],
+            ['productDepth','Depth (in)','product_depth_in'],['productWeight','Weight (lb)','product_weight_lb']] as const).map(([key,label,source]) =>
+            <label key={key}>{label}<input type="number" min="0" step="any" inputMode="decimal" value={form[key]} onChange={e => { update(key, e.target.value); setDimensionSources(p => ({...p,[source]:'staff'})); }} />
+              {form[key] && <small>{dimensionSources[source] || 'staff'}</small>}</label>)}</div></details>
+        <details className="receive-confirm-details"><summary>Package · {[form.length, form.width, form.height].every(Boolean)
+          ? `${form.length} × ${form.width} × ${form.height} in` : 'Add dimensions'}{form.weight ? ` · ${form.weight} lb` : ''}
+          {dimensionsBusy ? ' · finding…' : ''} <small>{[...new Set(['package_length_in','package_width_in','package_height_in','package_weight_lb'].map(k => dimensionSources[k]).filter(Boolean))].join(' / ')}</small></summary>
+          <div className="receive-confirm-dims">{([['length','Length (in)','package_length_in'],['width','Width (in)','package_width_in'],
+            ['height','Height (in)','package_height_in'],['weight','Weight (lb)','package_weight_lb']] as const).map(([key,label,source]) =>
+            <label key={key}>{label}<input type="number" min="0" step="any" inputMode="decimal" value={form[key]} onChange={e => { update(key, e.target.value); setDimensionSources(p => ({...p,[source]:'staff'})); }} />
+              {form[key] && <small>{dimensionSources[source] || 'staff'}</small>}</label>)}</div></details>
+        {dimensionsError && <small className="receive-confirm-note">{dimensionsError}</small>}
+        <div className="receive-confirm-photos">
+          <input ref={confirmPhotoFile} type="file" accept="image/*" capture="environment" className="sr-only" aria-hidden tabIndex={-1}
+            onChange={e => { const input=e.currentTarget; void ingestFiles(input.files).finally(() => {input.value='';}); }} />
+          <button type="button" className="secondary" onClick={() => confirmPhotoFile.current?.click()}>Add unit photo</button>
+          {files.length > 0 && <span>{files.length} photo{files.length === 1 ? '' : 's'}</span>}
+        </div>
+        <div className="receive-confirm-bottom">
+          <details className="receive-confirm-prices"><summary>{photoPriceBusy ? 'Finding online prices…' : photoPrice?.median_cents != null
+            ? `Sells online for ~${money(photoPrice.median_cents)} (${photoPrice.count} listings, ${money(photoPrice.low_cents)}–${money(photoPrice.high_cents)})`
+            : photoPrice?.count ? `Only ${photoPrice.count} matching listings · no median yet` : 'No comparable online price found'}</summary>
+            {photoPrice?.listings?.map(listing => <a key={listing.url} href={listing.url} target="_blank" rel="noreferrer">{listing.store} · {money(listing.price_cents)} · {listing.product_name}</a>)}
+            {photoPrice?.highest_retail && <small>Highest retail seen: {photoPrice.highest_retail.store} · {money(photoPrice.highest_retail.price_cents)}</small>}
+            {photoPriceError && <><span>{photoPriceError}</span>{photoIdentity && <button type="button" className="secondary" onClick={() => void findPhotoPrices(photoIdentity)}>Retry prices</button>}</>}
+          </details>
+          <div className="receive-confirm-bottom-row"><label>Your price<input inputMode="decimal" placeholder="0.00" value={form.ask} onChange={e => update('ask',e.target.value)} /></label>
+            <label className="receive-confirm-ready"><input type="checkbox" checked={readyToList} onChange={e => setReadyToList(e.target.checked)} /> Ready to list</label></div>
+          {liveMissing.length > 0 && <small>Missing: {liveMissing.join(', ')} · saves to Unfinished</small>}
+          <button type="submit" disabled={busy || !options?.next_sku || (dups !== null && dups.count > 0 && !dupAck)}>{busy ? 'Saving…' : 'Save & next'}</button>
+        </div>
+      </div>}
+
+      <details className="receive-advanced" open={manual}><summary>{manual ? 'Receive details' : 'More options'}</summary><div className="unit-edit-grid">
         <label className={liveMissing.includes('price') ? 'receive-need' : undefined}>
           Price{liveMissing.includes('price')
             ? ' (needed to list)'
@@ -1680,6 +1856,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         <button disabled={busy || !options?.next_sku || (dups !== null && dups.count > 0 && !dupAck)}>{busy ? 'Receiving…' : 'Finish & receive'}</button>
         {!manual && current && <button type="button" className="secondary" disabled={busy} onClick={skipCurrent}>Skip this scan</button>}
       </div>
+      </details>
     </form>}
 
     {camera && <CameraScanner
@@ -1759,52 +1936,5 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       </div>
     </div>}
 
-    {dialog === 'photo-price' && <div className="receive-modal" role="dialog" aria-modal="true" aria-labelledby="photo-price-title">
-      <div className="receive-modal-card">
-        <h3 id="photo-price-title">What price do you want to set?</h3>
-        {photoPriceBusy && <p role="status">Finding prices… You can enter your price now.</p>}
-        {previews[0] && <img src={previews[0]} alt="" style={{ maxWidth: '100%', maxHeight: 180, objectFit: 'contain', marginBottom: 8 }} />}
-        <p><strong>{form.title.trim() || [form.brand, form.model].filter(Boolean).join(' ')}</strong></p>
-        {photoPrice?.median_cents != null ? (
-          <p className="hint">
-            Median of {photoPrice.count} listings: {money(photoPrice.median_cents)}
-            {photoPrice.low_cents != null && photoPrice.high_cents != null
-              ? ` (range ${money(photoPrice.low_cents)}–${money(photoPrice.high_cents)})`
-              : ''}.
-            {' '}These are asking prices, not sold comps — you choose the price.
-          </p>
-        ) : photoPriceBusy ? (
-          <p className="hint">The identified product is ready. Price research is still running.</p>
-        ) : photoPrice?.count ? (
-          <p className="hint">Only {photoPrice.count} matching listing{photoPrice.count === 1 ? '' : 's'} found; at least 3 are needed for a median. Enter your price.</p>
-        ) : (
-          <p className="hint">No matching single-package prices found. Enter the price you want.</p>
-        )}
-        {!!photoPrice?.listings?.length && <div className="hint">Matching listings: {photoPrice.listings.map((listing, index) => <span key={listing.url}>{index ? ' · ' : ''}<a href={listing.url} target="_blank" rel="noreferrer">{listing.store} {money(listing.price_cents)}</a></span>)}</div>}
-        {photoPriceError && <p className="alert" role="alert">{photoPriceError}</p>}
-        <p className="hint">A single angled photo cannot reliably give physical size or shipping weight. Measure the item and its packed box, then enter what you know. Leave unknown values blank; they stay on the listing checklist.</p>
-        <div className="receive-measure-grid">
-          <strong>Product (without shipping box)</strong>
-          {([['productHeight', 'Height (in)'], ['productWidth', 'Width (in)'], ['productDepth', 'Depth (in)'], ['productWeight', 'Weight (lb)']] as const).map(([key, label]) =>
-            <label key={key}>{label}<input type="number" min="0" step="any" inputMode="decimal" value={form[key]} onChange={e => update(key, e.target.value)} /></label>)}
-          <strong>Package (ready to ship)</strong>
-          {([['length', 'Length (in)'], ['width', 'Width (in)'], ['height', 'Height (in)'], ['weight', 'Weight (lb)']] as const).map(([key, label]) =>
-            <label key={key}>{label}<input type="number" min="0" step="any" inputMode="decimal" value={form[key]} onChange={e => update(key, e.target.value)} /></label>)}
-        </div>
-        <label>Your price
-          <input
-            inputMode="decimal"
-            placeholder="24.99"
-            value={form.ask}
-            onChange={e => { askTouched.current = true; update('ask', e.target.value); }}
-            autoFocus
-          />
-        </label>
-        <div className="actions">
-          <button type="button" onClick={() => setDialog(null)}>Use this price</button>
-          {photoPriceError && photoIdentity && <button type="button" className="secondary" disabled={photoPriceBusy} onClick={() => void findPhotoPrices(photoIdentity)}>Retry prices</button>}
-        </div>
-      </div>
-    </div>}
   </section>;
 }

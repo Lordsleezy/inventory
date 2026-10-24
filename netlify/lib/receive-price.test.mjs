@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { medianReference } from './receive-price.mjs';
+import { medianReference, verifyRetailListings } from './receive-price.mjs';
 
 const item = { brand: 'Febreze', title: 'Febreze Air Mist Air Freshener Spray, Linen & Sky, 8.8 oz', variant: 'Linen & Sky', size: '8.8 oz', unit_count: 1 };
 const listing = (store, cents, suffix = '') => ({ store, price_cents: cents,
@@ -29,4 +29,14 @@ test('a multipack is priced as the whole package, never divided', () => {
   const prices = ['A', 'B', 'C'].map((store, index) => ({ ...listing(store, 3000 + index * 300, ' 6 pack'), pack_size: 6 }));
   const result = medianReference(prices, pack);
   assert.deepEqual([result.count, result.median_cents], [3, 3300]);
+});
+
+test('live page must confirm exact title and listed price', async () => {
+  const prices = [listing('A', 379), listing('B', 449), listing('C', 499)];
+  const fetched = await verifyRetailListings(prices, item, { fetchImpl: async url => ({
+    ok: true, url, headers: { get: () => 'text/html' },
+    text: async () => `<title>Febreze Air Mist Linen & Sky 8.8 oz</title>${url.includes('b.example') ? '$9.99' : '$' + (url.includes('a.example') ? '3.79' : '4.99')}`,
+  }) });
+  assert.equal(fetched.length, 2);
+  assert.deepEqual(fetched.map(x => x.store), ['A', 'C']);
 });

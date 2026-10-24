@@ -24,7 +24,7 @@ export function comparablePrices(prices, identity) {
   const variant = words(identity.variant).filter(word => word !== 'and');
   const afterBrand = String(identity.title || '').replace(new RegExp(`^${String(identity.brand || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*`, 'i'), '');
   const line = words(afterBrand.split(/[,–—]/)[0]).filter(word =>
-    !['the', 'and', 'with', 'for', 'spray', 'freshener', 'air', 'new'].includes(word) && !/^\d/.test(word)).slice(0, 2);
+    !['the', 'and', 'with', 'for', 'spray', 'freshener', 'new'].includes(word) && !/^\d/.test(word)).slice(0, 2);
   const seen = new Set();
   return (Array.isArray(prices) ? prices : []).filter(price => {
     if (!Number.isInteger(price.price_cents) || price.price_cents <= 0 || price.approximate || price.size_mismatch) return false;
@@ -37,7 +37,7 @@ export function comparablePrices(prices, identity) {
     const listedWords = words(listed);
     if (brand && !listed.includes(brand)) return false;
     if (variant.length && !variant.every(word => listedWords.includes(word))) return false;
-    if (line.length && !line.every(word => listedWords.includes(word))) return false;
+    if (line.length && !line.some(word => listedWords.includes(word))) return false;
     const size = printedSize(price.product_name) || printedSize(listedUrl);
     if (expectedSize && (!size || expectedSize.unit !== size.unit || Math.abs(expectedSize.amount - size.amount) > 0.05)) return false;
     const namedPack = packCount(price.product_name) || packCount(listedUrl);
@@ -57,5 +57,32 @@ export function medianReference(prices, identity) {
   return { kind: 'asking', count: cents.length,
     median_cents: cents.length >= 3 ? (cents.length % 2 ? cents[mid] : Math.round((cents[mid - 1] + cents[mid]) / 2)) : null,
     low_cents: cents.length ? cents[0] : null, high_cents: cents.length ? cents.at(-1) : null,
+    highest_retail: listings.length ? listings.reduce((highest, listing) => listing.price_cents > highest.price_cents ? listing : highest) : null,
     listings };
+}
+
+/** A generated price counts only when its live retailer page confirms the exact item and amount. */
+export async function verifyRetailListings(prices, identity, { fetchImpl = fetch } = {}) {
+  const candidates = (Array.isArray(prices) ? prices : []).filter(price =>
+    Number(price.pack_size || 1) === identityPack(identity) && !price.approximate && !price.size_mismatch);
+  const checked = await Promise.all(candidates.slice(0, 8).map(async candidate => {
+    try {
+      const response = await fetchImpl(candidate.url, { redirect: 'follow', signal: AbortSignal.timeout(3500),
+        headers: { 'user-agent': 'Mozilla/5.0 FloorPriceResearch/1.0' } });
+      if (!response.ok || !String(response.headers.get('content-type') || '').includes('text/html')) return null;
+      const final = new URL(response.url);
+      if (!/^https:$/.test(final.protocol) || /vertexaisearch|public\.cj\.com|upcitemdb\.com/.test(final.hostname)) return null;
+      const html = (await response.text()).slice(0, 3_000_000);
+      const pageName = (html.match(/<title[^>]*>([^<]{5,250})<\/title>/i)?.[1] ||
+        html.match(/<h1[^>]*>([^<]{5,250})<\/h1>/i)?.[1] || '')
+        .replace(/&amp;/gi, '&').replace(/&#39;/gi, "'").replace(/&quot;/gi, '"');
+      const pageIdentity = `${pageName} ${final.pathname.replace(/[-_]/g, ' ')}`;
+      if (!comparablePrices([{ ...candidate, product_name: pageIdentity, url: final.href }], identity).length) return null;
+      const dollars = (candidate.price_cents / 100).toFixed(2);
+      if (!html.includes(`$${dollars}`) && !html.includes(`"${dollars}"`) &&
+        !html.includes(`>${dollars}<`)) return null;
+      return { ...candidate, product_name: pageName, url: final.href };
+    } catch { return null; }
+  }));
+  return comparablePrices(checked.filter(Boolean), identity);
 }
