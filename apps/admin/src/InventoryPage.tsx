@@ -6,6 +6,7 @@ import { UnitEditDrawer } from './UnitEditDrawer';
 import { LookupTestPage } from './LookupTestPage';
 import { FloorProductsPage } from './FloorProductsPage';
 import { MarkerMatPage } from './MarkerMatPage';
+import { CategoryPanel } from './CategoryPanel';
 import type { AttentionSection, InventoryTab } from './navigation';
 import { errText } from './errText';
 import { reviewReasonLabel } from './inventoryReview';
@@ -36,7 +37,7 @@ type Props = {
 
 /** Unit-list subtabs, in this order. Everything after them is an admin tool. */
 const LIST_TABS: [InventoryTab, string][] = [['in-stock', 'In stock'], ['sold', 'Sold'], ['unfinished', 'Unfinished'], ['defective', 'Defective']];
-const TOOL_TABS: [InventoryTab, string][] = [['receive', 'Receive'], ['lookup-test', 'Lookup test'], ['products', 'Products'], ['measure-mat', 'Measure mat']];
+const TOOL_TABS: [InventoryTab, string][] = [['missing-category', 'Missing Category'], ['receive', 'Receive'], ['lookup-test', 'Lookup test'], ['products', 'Products'], ['measure-mat', 'Measure mat']];
 const MISSING_LABEL: Record<string, string> = { spec: 'weight & box', upc: 'UPC', specifics: 'item specifics' };
 const missingText = (m: string[]) => {
   const fields = m.filter(k => !reviewReasonLabel(k));
@@ -149,7 +150,7 @@ export function InventoryPage({
         {ATTENTION_SECTIONS.map(([id, text]) => <button type="button" key={id} className={queue === id ? 'active' : ''} onClick={() => onAttentionSection(id)}>{text}{counts[id] !== undefined && <small>{counts[id]}</small>}</button>)}
       </div>
     )}
-    {!listTab && tab === 'lookup-test' ? <LookupTestPage accessToken={accessToken} /> : !listTab && tab === 'products' ? <FloorProductsPage client={client} /> : !listTab && tab === 'measure-mat' ? <MarkerMatPage /> : !listTab && tab === 'receive' ? <ReceivePanel client={client} storeId={storeId} accessToken={accessToken} onSaved={() => setRefresh(n => n + 1)} /> : queue ? <NeedsAttentionPanel client={client} storeId={storeId} money={money} stamp={stamp} section={queue} onCostChanged={() => { setRefresh(n => n + 1); onCostChanged(); }} /> : <>
+    {!listTab && tab === 'missing-category' ? <CategoryPanel client={client} storeId={storeId} /> : !listTab && tab === 'lookup-test' ? <LookupTestPage accessToken={accessToken} /> : !listTab && tab === 'products' ? <FloorProductsPage client={client} /> : !listTab && tab === 'measure-mat' ? <MarkerMatPage /> : !listTab && tab === 'receive' ? <ReceivePanel client={client} storeId={storeId} accessToken={accessToken} onSaved={() => setRefresh(n => n + 1)} /> : queue ? <NeedsAttentionPanel client={client} storeId={storeId} money={money} stamp={stamp} section={queue} onCostChanged={() => { setRefresh(n => n + 1); onCostChanged(); }} /> : <>
     <div className="inventory-controls">
       <label>Search<input type="search" placeholder="SKU, brand, model or title" value={query} onChange={e => change(() => setQuery(e.target.value))} /></label>
       {listTab === 'in-stock' && <label>Status<select value={status} onChange={e => change(() => setStatus(e.target.value))}>

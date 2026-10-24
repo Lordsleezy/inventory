@@ -701,7 +701,7 @@ export async function listSku(storeId, sku, draft = null) {
   const { data: unit, error } = await sb.from("units").select("*").eq("store_id", storeId).eq("sku", sku).maybeSingle();
   if (error) throw new Error(error.message);
   if (!unit) throw new Error(`No unit ${sku}`);
-  await assertBundlePush(storeId, sku, 'ebay');
+  const assignedCategory = await assertBundlePush(storeId, sku, 'ebay');
   assertEbayListable(unit);
   if (unit.state !== "available" && unit.state !== "reserved") {
     throw new Error(`SKU ${sku} is ${unit.state}, not for sale.`);
@@ -742,6 +742,11 @@ export async function listSku(storeId, sku, draft = null) {
       ? { payload: draft.conditionPayload, mapped: draft.conditionPayload, allowed: [] }
       : await prepareUnitCondition({ unit, liveCheck: true });
   }
+  if (cat !== assignedCategory?.category_id) {
+    throw new Error(`eBay draft category ${cat || '(none)'} does not match confirmed Floor category ${assignedCategory?.category_id || '(none)'}. Refresh the draft.`);
+  }
+  aspects = { ...aspects, ...Object.fromEntries(Object.entries(assignedCategory.attributes || {})
+    .map(([name, value]) => [name, [String(value)]])) };
   const pkg = draft?.package || packageSize(unit);
   const policies = draft?.policies || (await ensurePolicies(storeId, fetchHint));
   const priceCents = draft?.priceCents ?? unit.ask_cents;

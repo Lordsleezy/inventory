@@ -778,7 +778,8 @@ export async function listAmazonOffer(storeId, kit) {
       message: "Set AMAZON_LISTING_ENABLED=1 in Netlify when ready to create offers.",
     };
   }
-  try { await assertBundlePush(storeId, kit?.sku || kit?.unit?.sku, 'amazon'); }
+  let assignedCategory;
+  try { assignedCategory = await assertBundlePush(storeId, kit?.sku || kit?.unit?.sku, 'amazon'); }
   catch (error) { return { ok: false, reason: 'bundle_gate', message: error.message }; }
   const unit = kit?.unit || kit;
   const sku = String(unit.sku || kit.sku || "");
@@ -790,7 +791,7 @@ export async function listAmazonOffer(storeId, kit) {
     return { ok: false, reason: "condition_unclear", message: cond.reason || "Confirm condition" };
   }
 
-  let asin = kit.asin || unit.listing_specs?.asin || null;
+  let asin = kit.asin || unit.listing_specs?.asin || assignedCategory.attributes?.merchant_suggested_asin || null;
   if (!asin) {
     const match = await searchCatalogAsin(storeId, unit);
     asin = match.asin;
@@ -842,7 +843,10 @@ export async function listAmazonOffer(storeId, kit) {
     };
   }
 
-  const productType = kit.productType || "PRODUCT";
+  const productType = assignedCategory.category_id;
+  if (kit.productType && kit.productType !== productType) {
+    return { ok: false, reason: "category_mismatch", message: `Requested product type ${kit.productType} does not match confirmed ${productType}` };
+  }
   const payload = {
     productType,
     requirements: "LISTING_OFFER_ONLY",
@@ -866,8 +870,17 @@ export async function listAmazonOffer(storeId, kit) {
       ],
     },
   };
+  payload.attributes = { ...(assignedCategory.native_attributes || {}), purchasable_offer: payload.attributes.purchasable_offer };
 
   const path = `/listings/2021-08-01/items/${encodeURIComponent(sid)}/${encodeURIComponent(sku)}?marketplaceIds=${marketplaceId()}`;
+  let preview;
+  try { preview = await spapiFetch(storeId, 'PUT', `${path}&mode=VALIDATION_PREVIEW`, payload); }
+  catch (error) { return { ok: false, reason: 'validation_preview_failed', message: String(error?.message || error) }; }
+  const previewIssues = (preview?.issues || []).filter((issue) => String(issue.severity || '').toUpperCase() === 'ERROR');
+  if (previewIssues.length || String(preview?.status || '').toUpperCase() === 'INVALID') {
+    return { ok: false, reason: 'category_required_fields', message: previewIssues.map((issue) => issue.message).join('; ') || 'Amazon rejected the listing preview.',
+      issues: previewIssues };
+  }
   const json = await spapiFetch(storeId, "PUT", path, payload);
 
   const sb = serviceClient();

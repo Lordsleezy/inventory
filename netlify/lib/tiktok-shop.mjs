@@ -514,7 +514,8 @@ export async function listTikTokProduct(storeId, { unit, sku, priceCents } = {})
   if (!tiktokAppCredsPresent()) {
     return { ok: false, reason: "tiktok_env_missing", message: "TIKTOK_SHOP_APP_KEY / TIKTOK_SHOP_APP_SECRET required." };
   }
-  try { await assertBundlePush(storeId, sku || unit?.sku, 'tiktok'); }
+  let assignedCategory;
+  try { assignedCategory = await assertBundlePush(storeId, sku || unit?.sku, 'tiktok'); }
   catch (error) { return { ok: false, reason: 'bundle_gate', message: error.message }; }
   const sb = serviceClient();
   const code = String(sku || unit?.sku || "").trim();
@@ -565,6 +566,9 @@ export async function listTikTokProduct(storeId, { unit, sku, priceCents } = {})
   const title = String(u.title || `SKU ${code}`).slice(0, 255);
   const description = String(u.listing_body || u.title || title).slice(0, 5000);
   const body = {
+    category_id: assignedCategory.category_id,
+    product_attributes: Object.entries(assignedCategory.attributes || {}).map(([id, value]) => ({ id,
+      values: [/^\d+$/.test(String(value)) ? { id: String(value) } : { name: String(value) }] })),
     title,
     description,
     main_images: imageUris.map((uri) => ({ uri })),

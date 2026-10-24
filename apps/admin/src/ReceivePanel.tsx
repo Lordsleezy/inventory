@@ -9,6 +9,7 @@ import { errText } from './errText';
 import { BundleReceive } from './BundleReceive';
 import { measureMatPhoto } from './matMeasure';
 import { receiveSpecifics, receiveVariant } from '../../../shared/receive-specifics.mjs';
+import { CategoryPanel } from './CategoryPanel';
 
 /** iOS/Android PWA: prefer native capture over getUserMedia (more reliable in standalone). */
 function preferNativeCapture() {
@@ -1006,7 +1007,6 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       });
       if (e) throw e;
       const skus = (data as { skus: string[] }).skus;
-      setSaved(skus);
       const warnings: string[] = [];
       if (manifestId) {
         const tagged = await client.rpc('portal_tag_manifest', { p_id: manifestId, p_skus: skus });
@@ -1040,6 +1040,22 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       const blocked = skus.includes(NEVER_LIST_SKU);
       const enrichFailed = await enrichUnits(skus, parsed, hold, blocked || doNotList);
       if (enrichFailed) warnings.push(`Could not save lookup details on ${enrichFailed} unit(s).${hold ? ' They have no price, so they will not list.' : ''}`);
+      if (!blocked && !doNotList && !hold) {
+        for (const [index, sku] of skus.entries()) {
+          try {
+            const categoryResponse = await fetch(floorFunctionUrl('category-resolve'), { method: 'POST',
+              headers: { Authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
+              body: JSON.stringify({ store_id: storeId, sku, network: index === 0 }) });
+            const categoryResult = await categoryResponse.json();
+            if (!categoryResponse.ok) throw new Error(categoryResult.error || 'category_resolve_failed');
+            if (categoryResult.gaps?.length) warnings.push(`SKU ${sku} needs category review; open Missing Category below.`);
+            else if (readyToList) {
+              const marked = await client.rpc('portal_enrich_received_unit', { p_sku: sku, p_specs: { ready_to_list: true } });
+              if (marked.error) warnings.push(`SKU ${sku} categories are complete, but Ready to list could not be set.`);
+            }
+          } catch { warnings.push(`SKU ${sku} category lookup did not finish; use Missing Category below.`); }
+        }
+      }
       if (!manual && current?.upc) {
         try {
           const confirm = await fetch(floorFunctionUrl('receive-photo-identify'), {
@@ -1103,6 +1119,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         setLoadedId(null);
         resetEntry();
       }
+      setSaved(skus);
       onSaved();
       await loadOptions().catch(() => setWarning(w => `${w} Units were received. Refresh the page to see the next suggested SKU.`.trim()));
       focusUpc();
@@ -1511,6 +1528,9 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     </div>
 
     <BundleReceive client={client} lastReceived={saved[0]} onSaved={onSaved} />
+    {saved.length > 0 && <details className="receive-category-details" open><summary>Categories for received items</summary>
+      <CategoryPanel client={client} storeId={storeId} initialSku={saved[0]} onSaved={onSaved} />
+    </details>}
 
     {!manual && queue.length > 0 && <p className="hint" role="status">
       {current?.status === 'loading' ? `Looking up ${current.upc}…` : current ? `Working on ${current.upc}` : ''}
@@ -1819,7 +1839,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
             ? 'Store-only — will receive without listing. Photo is optional.'
             : 'Store-only — photo not required. Unit stays off the website and marketplaces.')
           : liveMissing.length === 0
-            ? (readyToList ? 'Complete — will receive as ready to list.' : 'Complete — check Ready to list, or Finish to save without listing pressure.')
+            ? (readyToList ? 'After receiving, categories will be checked before Ready to list is saved.' : 'Complete — check Ready to list, or Finish to save without listing pressure.')
             : readyToList
               ? `Ready to list still needs: ${liveMissing.join(', ')}.`
               : `Missing for listing: ${liveMissing.join(', ')}. You can still receive; incomplete units land in Needs attention.`}

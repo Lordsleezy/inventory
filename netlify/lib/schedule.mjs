@@ -37,6 +37,7 @@ export const SCHEDULED_JOBS = [
   { source: "web-order-reconcile", everyMin: 5, cron: "*/5 * * * *", label: "Web order reconcile" },
   { source: "web-pickup-sweep", everyMin: 10, cron: "*/10 * * * *", label: "Pickup sweep" },
   { source: "listing-check", everyMin: 1440, cron: "0 14 * * *", label: "Listing check (daily)" },
+  { source: "category-sync", everyMin: 1440, cron: "0 10 * * *", label: "Channel category sync (daily rotation)" },
   { source: "marketplace-daily-report", everyMin: 1440, cron: "0 16 * * *", label: "Marketplace daily report" },
   { source: "marketplace-sale-watch", everyMin: 5, cron: "*/5 * * * *", label: "Sale email → Orders safety net" },
   { source: "enrich-models", everyMin: 2, cron: "*/2 * * * *", label: "Model enrich" },

@@ -62,6 +62,22 @@
 [functions."listing-check"]
   schedule = "0 14 * * *"
 
+[functions."category-sync"]
+  schedule = "0 10 * * *"
+  timeout = 30
+
+[functions."category-sync-background"]
+  timeout = 900
+
+[functions."category-fields"]
+  timeout = 60
+
+[functions."category-resolve"]
+  timeout = 60
+
+[functions."category-backfill-background"]
+  timeout = 900
+
 # Sold-but-available and sold-but-still-listed. Emails the owner; ends eBay.
 [functions."inventory-reconcile"]
   schedule = "*/15 * * * *"

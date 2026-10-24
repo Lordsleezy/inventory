@@ -262,6 +262,34 @@ async function applicationToken() {
   return value;
 }
 
+export async function fetchCategoryTree() {
+  const market = process.env.EBAY_MARKETPLACE_ID || "EBAY_US";
+  const { api, token } = await applicationToken();
+  const headers = { Authorization: `Bearer ${token}` };
+  const idResponse = await fetch(`${api}/commerce/taxonomy/v1/get_default_category_tree_id?marketplace_id=${encodeURIComponent(market)}`, { headers });
+  const idBody = await idResponse.json();
+  if (!idResponse.ok || !idBody.categoryTreeId) throw new Error(idBody.errors?.[0]?.message || "ebay_tree_id_failed");
+  const response = await fetch(`${api}/commerce/taxonomy/v1/category_tree/${encodeURIComponent(idBody.categoryTreeId)}`, { headers });
+  const body = await response.json();
+  if (!response.ok || !body.rootCategoryNode) throw new Error(body.errors?.[0]?.message || "ebay_tree_failed");
+  return { treeId: idBody.categoryTreeId, version: String(body.categoryTreeVersion || ""), root: body.rootCategoryNode };
+}
+
+export async function ebayCategoriesForGtin(gtin) {
+  const { api, token } = await applicationToken();
+  const response = await fetch(`${api}/buy/browse/v1/item_summary/search?gtin=${encodeURIComponent(gtin)}&limit=20`, {
+    headers: { Authorization: `Bearer ${token}`, 'X-EBAY-C-MARKETPLACE-ID': process.env.EBAY_MARKETPLACE_ID || 'EBAY_US' },
+  });
+  const body = await response.json();
+  if (!response.ok) throw new Error(body.errors?.[0]?.message || 'ebay_gtin_search_failed');
+  const counts = new Map();
+  for (const item of body.itemSummaries || []) {
+    const id = String(item.leafCategoryIds?.[0] || item.categories?.[0]?.categoryId || '');
+    if (id) counts.set(id, (counts.get(id) || 0) + 1);
+  }
+  return [...counts].sort((a, b) => b[1] - a[1]).map(([categoryId, count]) => ({ categoryId, count }));
+}
+
 const taxonomyCache = new Map();
 async function cachedTaxonomy(key, load) {
   const prior = taxonomyCache.get(key);
@@ -410,6 +438,18 @@ export async function refreshCategoryConditions(ebayCategoryId) {
  * 3) eBay Taxonomy suggestions (no Floor allowlist)
  */
 export async function resolveListingCategory(unit) {
+  if (unit?.store_id && unit?.sku) {
+    const { data: assigned, error } = await serviceClient().from('unit_channel_categories')
+      .select('category_id').eq('store_id', unit.store_id).eq('sku', unit.sku).eq('channel', 'ebay').maybeSingle();
+    if (error) throw new Error(error.message);
+    if (assigned?.category_id) {
+      const { data: taxonomy } = await serviceClient().from('channel_taxonomy').select('path,active,leaf')
+        .eq('channel', 'ebay').eq('category_id', assigned.category_id).maybeSingle();
+      if (!taxonomy?.active || !taxonomy.leaf) throw new Error('Confirmed eBay category is retired or unavailable; open Missing Category.');
+      return { slug: `ebay_${assigned.category_id}`, name: taxonomy.path, ebayCategoryId: assigned.category_id,
+        aliases: [], defaults: {}, standalone: false, source: 'confirmed_floor_category' };
+    }
+  }
   const explicit = String(unit?.ebay_category || "").trim();
   if (/^\d{3,}$/.test(explicit)) {
     let name = "";
