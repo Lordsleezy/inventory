@@ -46,6 +46,15 @@ export function appShellEnabled(): boolean {
 export function isStandaloneApp(): boolean {
   if (typeof window === 'undefined') return false;
 
+  // Explicit desktop QA exit for a browser that previously opened ?app=1.
+  // Clear its remembered app shell so subsequent ordinary tabs stay desktop.
+  try {
+    if (new URLSearchParams(window.location.search).get('app') === '0') {
+      localStorage.removeItem(APP_MODE_KEY);
+      return false;
+    }
+  } catch { /* ignore */ }
+
   // Store-phone Android kiosk WebView / FloorInventoryShell / ?kiosk=1
   if (isKioskShell()) {
     enableAppShell();
