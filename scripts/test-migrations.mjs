@@ -6,21 +6,20 @@
  * Covers a fresh 0001→latest run and an upgrade that already has 0005.
  */
 import assert from "node:assert/strict";
-import { readdir, readFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { PGlite } from "@electric-sql/pglite";
+import { replayMigrationPaths } from "./lib/replay-migrations.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const migrationsDir = path.join(root, "supabase", "migrations");
 const stubPath = path.join(root, "supabase", "tests", "pglite-stub.sql");
 
 async function migrationFiles() {
-  const names = (await readdir(migrationsDir)).filter((n) => n.endsWith(".sql")).sort();
   return Promise.all(
-    names.map(async (name) => ({
-      name,
-      sql: await readFile(path.join(migrationsDir, name), "utf8"),
+    replayMigrationPaths(root).map(async (file) => ({
+      name: path.basename(file),
+      sql: await readFile(file, "utf8"),
     })),
   );
 }

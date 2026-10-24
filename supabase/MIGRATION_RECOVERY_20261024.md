@@ -4,7 +4,7 @@ The 149 files below were absent from every fetched branch, PR head, stash, workt
 
 The 33 older, unapplied files previously in `supabase/migrations` are preserved unchanged under `supabase/unapplied-legacy-migrations`. Their recorded version numbers are absent from live; many overlap SQL already applied under earlier versions. Do not apply them as a batch.
 
-A `supabase db push --dry-run --linked` after recovery returned `upToDate: true`. The four proposed Phase 1 migrations applied successfully to a local PostgreSQL copy of the live schema. The original fresh-replay PGlite test fails at `20261009202042` because its function references `portal_payout_rules.prior_method`, which the versioned local `20261016093000` migration adds later. This historical ordering gap remains under investigation.
+A `supabase db push --dry-run --linked` after recovery returned `upToDate: true`. The four proposed Phase 1 migrations applied successfully to a local PostgreSQL copy of the live schema. The live SQL cannot be replayed from zero in timestamp order: `20261009202042` references `portal_payout_rules.prior_method`, which the versioned local `20261016093000` migration adds later. The fresh-replay PGlite/pgTAP suites therefore use the preserved legacy files as their historical model; the live-schema copy is the production upgrade test. `scripts/lib/replay-migrations.mjs` keeps those test paths explicit and excludes the 149 reconstructed production files from that historical replay.
 
 ## Reconstructed versions
 
