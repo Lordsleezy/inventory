@@ -16,7 +16,9 @@ export default defineConfig(({ mode }) => {
   const fileEnv = loadEnv(mode, process.cwd(), '');
   const url = pickEnv(process.env.VITE_SUPABASE_URL, process.env.SUPABASE_URL, fileEnv.VITE_SUPABASE_URL, fileEnv.SUPABASE_URL);
   const anon = pickEnv(process.env.VITE_SUPABASE_ANON_KEY, process.env.SUPABASE_ANON_KEY, fileEnv.VITE_SUPABASE_ANON_KEY, fileEnv.SUPABASE_ANON_KEY);
-  if (mode === 'production' && (!url || !anon)) throw new Error('Admin build requires Supabase URL and anon key');
+  // FLOOR_CI_BUILD=1: compile-only check in CI (no keys baked, never deployed). Real deploys still require both.
+  const ciCompileOnly = process.env.FLOOR_CI_BUILD === '1';
+  if (mode === 'production' && !ciCompileOnly && (!url || !anon)) throw new Error('Admin build requires Supabase URL and anon key');
   return {
     plugins: [react()],
     base: '/',

@@ -14,3 +14,14 @@ for (const url of ['https://floor.test/?page=tax', 'https://floor.test/?page=tax
     assert.equal(new URLSearchParams(location.search).get('tab'), 'sales-tax');
   });
 }
+
+test('Reports → Overhead bookmark opens Overhead (not Profit)', () => {
+  const history = { replaceState: (_: unknown, __: string, next: string) => { location = new URL(next, location); } };
+  let location = new URL('https://floor.test/?page=reports&tab=overhead');
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: { get location() { return location; }, history } });
+  const state = parseNavFromLocation();
+  assert.equal(state.page, 'reports');
+  assert.equal(state.reportTab, 'overhead');
+  writeNavToLocation(state);
+  assert.equal(new URLSearchParams(location.search).get('tab'), 'overhead');
+});

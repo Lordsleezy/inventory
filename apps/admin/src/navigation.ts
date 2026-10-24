@@ -168,7 +168,7 @@ export function parseNavFromLocation(): NavState {
   if (RETIRED_ONLINE_CHANNELS.has(onlineChannelRaw) || RETIRED_ONLINE_CHANNELS.has(onlineTabRaw)) {
     onlineChannelRaw = 'all';
   }
-  const reportTabs: ReportTab[] = ['profit', 'shipping', 'expenses', 'payouts', 'daily', 'sales-tax', 'returns'];
+  const reportTabs: ReportTab[] = ['profit', 'shipping', 'expenses', 'overhead', 'payouts', 'daily', 'sales-tax', 'returns'];
   const invTabs: InventoryTab[] = ['in-stock', 'sold', 'unfinished', 'defective', 'missing-category', 'receive', 'lookup-test', 'products', 'measure-mat'];
   // Old bookmarks: Browse → In stock, Needs attention → Unfinished.
   const invTab = invTabRaw === 'browse' ? 'in-stock' : invTabRaw === 'attention' ? 'unfinished' : invTabRaw;

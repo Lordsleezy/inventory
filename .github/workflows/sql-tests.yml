@@ -32,6 +32,13 @@ jobs:
           npm test
           npm run build -w @floor/pos
 
+      - name: Admin tests and build (compile-only, no keys baked)
+        env:
+          FLOOR_CI_BUILD: "1"
+        run: |
+          node --experimental-strip-types --test apps/admin/src/*.test.ts
+          npm run build -w @floor/admin
+
       - name: PGlite apply all migrations
         run: npm run test:migrations
 
