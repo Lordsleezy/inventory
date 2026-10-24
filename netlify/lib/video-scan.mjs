@@ -178,9 +178,9 @@ export async function lookupRetail(sb,job,identity,{signal,singlePass=false,exac
       // Show cached prices immediately; resolve redirect URLs in the background later if needed.
       return {prices:cleanPrices(cached.data.lookup.retail_prices,identity),input:0,output:0,queries:0,reused:true,cachedDetails:cached.data.lookup};
     }}
-  const [first, parallelSecond]=exactMatch
+  const [first, parallelSecond]=exactMatch&&!singlePass
     ? await Promise.all([searchOnce(identity,false,signal,true,true),searchOnce(identity,true,signal,true,true)])
-    : [await searchOnce(identity,false,signal,singlePass,false),null];
+    : [await searchOnce(identity,false,signal,singlePass,exactMatch),null];
   let prices=[...first.prices,...(parallelSecond?.prices||[])],
     input=first.input+(parallelSecond?.input||0),output=first.output+(parallelSecond?.output||0),
     queries=first.queries+(parallelSecond?.queries||0);

@@ -7,7 +7,9 @@ import { asNetlifyFunction, floorLog } from "../lib/floor-log.mjs";
 import { json, optionsOk, serviceClient } from "../lib/server.mjs";
 import { portalAdminFromEvent } from "../lib/portal-auth.mjs";
 import { identifyFrames, lookupRetail, tokenCost } from "../lib/video-scan.mjs";
-import { medianReference } from "../lib/receive-price.mjs";
+import { medianReference, upcOfferPrices } from "../lib/receive-price.mjs";
+import { upcitemdbLookup } from "../lib/upc-lookup.mjs";
+import { receiveBrowsePrices } from "../lib/ebay-catalog.mjs";
 import { lookupReceiveDimensions } from "../lib/receive-dimensions.mjs";
 import { receiveSpecifics } from '../../shared/receive-specifics.mjs';
 import { normalizeGtin } from "../lib/gtin-normalize.mjs";
@@ -133,7 +135,10 @@ export async function invoke(event) {
   if (body.action === 'dimensions') {
     const started = Date.now();
     try {
-      const dimensions = await lookupReceiveDimensions(ctx.sb, ctx.storeId, String(body.upc || '').trim());
+      const dimensions = await lookupReceiveDimensions(ctx.sb, ctx.storeId, String(body.upc || '').trim(), body.identity,
+        { source: ['amazon','upcitemdb'].includes(body.source) ? body.source : 'all' });
+      await floorLog({ level: 'info', event: 'receive_photo.dimension_sources', storeId: ctx.storeId,
+        detail: { sources: dimensions.sources, fields: Object.keys(dimensions.sources).length, elapsed_ms: Date.now() - started } });
       return json(200, { ok: true, dimensions, timing: { dims_ms: Date.now() - started } });
     } catch (error) {
       await floorLog({ level: 'warn', event: 'receive_photo.dimensions_failed', message: String(error?.message || error).slice(0, 200), storeId: ctx.storeId });
@@ -141,13 +146,15 @@ export async function invoke(event) {
     }
   }
   const apiKey = String(process.env.GEMINI_API_KEY || '').trim();
-  if (!apiKey || /\*{3,}/.test(apiKey)) {
+  if (body.action !== 'prices' && (!apiKey || /\*{3,}/.test(apiKey))) {
     await floorLog({ level: 'error', event: 'receive_photo.key_unavailable', message: 'Production GEMINI_API_KEY is empty or masked', storeId: ctx.storeId });
     return json(503, { ok: false, error: 'photo_identification_unavailable', message: 'Photo identification is temporarily unavailable. Retry or fill the fields by hand.' });
   }
   if (body.action === 'prices') {
-    const denied = await budgetError(ctx);
-    if (denied) return denied;
+    if (!['upcitemdb', 'ebay'].includes(body.source)) {
+      const denied = await budgetError(ctx);
+      if (denied) return denied;
+    }
     const source = body.identity || {};
     const identity = Object.fromEntries(['title', 'brand', 'model', 'variant', 'size', 'color', 'upc']
       .map(key => [key, String(source[key] || '').slice(0, 200)]));
@@ -155,15 +162,28 @@ export async function invoke(event) {
     const started = Date.now();
     try {
       identity.unit_count = Math.max(1, Number(source.unit_count) || 1);
-      const retail = await lookupRetail(ctx.sb, { store_id: ctx.storeId }, identity, { singlePass: true, exactMatch: true });
+      const sourceName = ['upcitemdb', 'ebay', 'gemini'].includes(body.source) ? body.source : 'gemini';
+      let recorded;
+      if (sourceName === 'upcitemdb' && /^\d{8,14}$/.test(identity.upc)) {
+        recorded = await upcitemdbLookup(identity.upc);
+        if (recorded.raw_error) throw new Error(recorded.raw_error);
+      }
+      const retail = sourceName === 'upcitemdb'
+        ? { prices: upcOfferPrices(recorded, identity) }
+        : sourceName === 'ebay' ? { prices: await receiveBrowsePrices(identity) }
+        : await lookupRetail(ctx.sb, { store_id: ctx.storeId }, identity, { singlePass: true, exactMatch: true });
       const reference = medianReference(retail.prices || [], identity);
+      await floorLog({ level: 'info', event: 'receive_photo.price_source', storeId: ctx.storeId,
+        message: `${sourceName}: ${reference.count ? 'hit' : 'empty'}`,
+        detail: { source: sourceName, count: reference.count, elapsed_ms: Date.now() - started } });
       const costUsd = tokenCost(retail.input || 0, retail.output || 0, retailModel());
-      await logUsage(ctx, identity, { price_input_tokens: retail.input || 0, price_output_tokens: retail.output || 0,
+      if (sourceName === 'gemini') await logUsage(ctx, identity, { price_input_tokens: retail.input || 0, price_output_tokens: retail.output || 0,
         search_queries: retail.queries || 0 }, costUsd);
       return json(200, { ok: true, price: reference,
         timing: { price_ms: Date.now() - started }, cost_usd: costUsd });
     } catch (e) {
-      await floorLog({ level: 'warn', event: 'receive_photo.retail_fail', message: String(e?.message || e).slice(0, 300), storeId: ctx.storeId });
+      await floorLog({ level: 'warn', event: 'receive_photo.retail_fail', message: String(e?.message || e).slice(0, 300),
+        detail: { source: body.source || 'gemini', outcome: 'error', elapsed_ms: Date.now() - started }, storeId: ctx.storeId });
       return json(502, { ok: false, error: 'price_lookup_failed', message: 'Online prices could not be found right now. Enter your price by hand.' });
     }
   }
