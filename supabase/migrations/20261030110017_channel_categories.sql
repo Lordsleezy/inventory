@@ -50,6 +50,7 @@ create table public.store_upc_categories (
   depop_category_id text,
   internal_category text,
   confirmed_at timestamptz not null default now(),
+  channel_attributes jsonb not null default '{}'::jsonb,
   primary key(store_id,gtin14)
 );
 alter table public.store_upc_categories enable row level security;

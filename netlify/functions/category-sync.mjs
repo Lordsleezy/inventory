@@ -9,7 +9,7 @@ async function handle(event) {
   const scheduled = isNetlifyScheduleEvent(event);
   const body = typeof event.body === "string" ? JSON.parse(event.body || "{}") : event.body || {};
   const storeId = scheduled ? STORE_DEFAULT : (await portalAdminFromEvent(event, body.store_id || STORE_DEFAULT)).storeId;
-  const channel = scheduled ? ["ebay", "tiktok", "amazon"][new Date().getUTCDay() % 3] : String(body.channel || "ebay");
+  const channel = scheduled ? ["ebay", "tiktok", "amazon"][Math.floor(Date.now() / 86400000) % 3] : String(body.channel || "ebay");
   if (!["ebay", "amazon", "tiktok"].includes(channel)) return json(400, { error: "invalid_channel" });
   const base = (process.env.URL || "https://inventoryobi.netlify.app").replace(/\/$/, "");
   const response = await fetch(`${base}/.netlify/functions/category-sync-background`, {

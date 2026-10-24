@@ -135,7 +135,12 @@ async function usedCategoryIds(channel, storeId) {
   const { data, error } = await serviceClient().from("unit_channel_categories").select("category_id")
     .eq("store_id", storeId).eq("channel", channel).not("category_id", "is", null).limit(10000);
   if (error) throw new Error(error.message);
-  return [...new Set((data || []).map((x) => x.category_id).filter(Boolean))];
+  const ids = [...new Set((data || []).map((x) => x.category_id).filter(Boolean))];
+  if (!ids.length) return [];
+  const { data: active, error: activeError } = await serviceClient().from('channel_taxonomy').select('category_id')
+    .eq('channel', channel).eq('active', true).eq('leaf', true).in('category_id', ids);
+  if (activeError) throw new Error(activeError.message);
+  return (active || []).map((row) => row.category_id);
 }
 
 async function syncEbay(storeId) {

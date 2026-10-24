@@ -3,10 +3,12 @@ import { inspectLiveSku } from './ebay.mjs';
 import { spapiFetch, marketplaceId } from './amazon.mjs';
 import { tiktokApiFetch } from './tiktok-shop.mjs';
 import { resolveUnitCategories } from './category-resolve.mjs';
+import { resolveEbayAccount, userTokenForAccount } from './ebay-accounts.mjs';
+import { getTradingItem } from './ebay-trading.mjs';
 
 const sellerId = () => String(process.env.AMAZON_SELLER_ID || '').trim();
 
-async function adoptLive(storeId, sku, channel, categoryId) {
+async function adoptLive(storeId, sku, channel, categoryId, attributes = {}) {
   if (!categoryId) return false;
   const sb = serviceClient();
   const { data: prior } = await sb.from('unit_channel_categories').select('category_id,attributes,adopted_live')
@@ -16,7 +18,7 @@ async function adoptLive(storeId, sku, channel, categoryId) {
     .select('fingerprint,fields_version').eq('channel', channel).eq('category_id', String(categoryId)).maybeSingle();
   const { error } = await sb.from('unit_channel_categories').upsert({ store_id: storeId, sku, channel,
     category_id: String(categoryId), enabled: true, adopted_live: true, source: 'live_listing',
-    attributes: prior?.category_id === String(categoryId) ? prior.attributes || {} : {},
+    attributes: { ...(prior?.category_id === String(categoryId) ? prior.attributes || {} : {}), ...attributes },
     validated_version: taxonomy ? `${taxonomy.fingerprint || ''}:${taxonomy.fields_version || ''}` : null,
     review_reason: null, updated_at: new Date().toISOString() }, { onConflict: 'store_id,sku,channel' });
   if (error) throw new Error(error.message);
@@ -45,9 +47,21 @@ async function adoptListingCategories(storeId, unit) {
   let adopted = 0;
   const failures = [];
   for (const listing of liveRows) {
+    if (!['ebay', 'amazon', 'tiktok', 'depop'].includes(listing.channel)) continue;
     try {
       let id = null;
-      if (listing.channel === 'ebay') id = (await inspectLiveSku(storeId, sku)).categoryId;
+      let attributes = {};
+      if (listing.channel === 'ebay') {
+        let live = await inspectLiveSku(storeId, sku);
+        if (!live.categoryId && listing.listing_id) {
+          const account = await resolveEbayAccount(storeId, { role: 'selling' });
+          const token = await userTokenForAccount(account);
+          live = await getTradingItem(token, listing.listing_id);
+        }
+        id = live.categoryId;
+        attributes = Object.fromEntries(Object.entries(live.aspects || live.specifics || {}).map(([key, value]) =>
+          [key, Array.isArray(value) ? String(value[0] || '') : String(value)]));
+      }
       if (listing.channel === 'amazon' && sellerId()) {
         const { data: amazonLink } = await sb.from('amazon_list_items').select('listing_sku,offer_sku')
           .eq('store_id', storeId).eq('sku', sku).maybeSingle();
@@ -65,7 +79,7 @@ async function adoptListingCategories(storeId, unit) {
         }
       }
       if (id) {
-        if (await adoptLive(storeId, sku, listing.channel, id)) adopted++;
+        if (await adoptLive(storeId, sku, listing.channel, id, attributes)) adopted++;
       } else failures.push(`${listing.channel}:category_unavailable`);
     } catch (error) { failures.push(`${listing.channel}:${String(error?.message || error).slice(0, 120)}`); }
   }
@@ -75,7 +89,7 @@ async function adoptListingCategories(storeId, unit) {
 /** One bounded batch; a caller can repeat offset until processed is zero. */
 export async function backfillCategoryBatch(storeId, { offset = 0, limit = 20, network = true } = {}) {
   const sb = serviceClient();
-  const { data: units, error } = await sb.from('units').select('sku,upc,state')
+  const { data: units, error } = await sb.from('units').select('sku,upc,state,listing_specs')
     .eq('store_id', storeId).in('state', ['available', 'reserved', 'repair'])
     .order('sku').range(offset, offset + Math.min(Math.max(limit, 1), 50) - 1);
   if (error) throw new Error(error.message);
@@ -85,9 +99,10 @@ export async function backfillCategoryBatch(storeId, { offset = 0, limit = 20, n
       const live = await adoptListingCategories(storeId, unit);
       stats.live_adopted += live.adopted;
       const result = await resolveUnitCategories(storeId, unit.sku, { network });
-      const { data: demoted, error: demoteError } = await sb.rpc('floor_category_demote_sku', { p_store: storeId, p_sku: unit.sku });
+      const { error: demoteError } = await sb.rpc('floor_category_demote_sku', { p_store: storeId, p_sku: unit.sku });
       if (demoteError) throw new Error(demoteError.message);
-      if (demoted) stats.moved_not_ready++;
+      const { data: after } = await sb.from('units').select('listing_specs').eq('store_id', storeId).eq('sku', unit.sku).single();
+      if (unit.listing_specs?.ready_to_list && !after?.listing_specs?.ready_to_list) stats.moved_not_ready++;
       if (result.gaps?.length || result.conflict || live.failures.length) stats.needs_owner++;
       else stats.auto_resolved++;
       stats.processed++;

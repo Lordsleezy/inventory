@@ -3,6 +3,7 @@ import { normalizeGtin } from './gtin-normalize.mjs';
 import { catalogItemByIdentifier } from './amazon.mjs';
 import { ebayCategoriesForGtin, suggestCategories } from './ebay-catalog.mjs';
 import { tiktokApiFetch } from './tiktok-shop.mjs';
+import { refreshChannelCategoryFields } from './category-taxonomy.mjs';
 
 const CHANNELS = ['ebay', 'amazon', 'tiktok', 'depop'];
 
@@ -104,6 +105,8 @@ export async function resolveUnitCategories(storeId, sku, { network = true } = {
         .eq('store_id', storeId).eq('sku', sku).eq('status', 'live').maybeSingle();
       if (matched?.asin === amazon.item.asin) amazonListingId = matched.asin;
     }
+  }
+  if (!cached && network) {
     const ebay = await bestEbayCategory(unit, gtin);
     if (ebay.conflict) conflict = true;
     if (ebay.id) {
@@ -126,7 +129,17 @@ export async function resolveUnitCategories(storeId, sku, { network = true } = {
     ids.tiktok = await recommendedTiktok(storeId, unit);
     if (ids.tiktok) sources.tiktok = 'tiktok_recommendation';
   }
-  const tax = await categoryRows(sb, ids);
+  let tax = await categoryRows(sb, ids);
+  if (network) {
+    for (const [channel, id] of Object.entries(ids)) {
+      const row = tax.get(`${channel}:${id}`);
+      if (channel === 'depop' || !row?.active || !row.leaf) continue;
+      if (!row.fields_fetched_at || Date.parse(row.fields_fetched_at) < Date.now() - 3 * 86400000) {
+        await refreshChannelCategoryFields(channel, storeId, id).catch(() => {});
+      }
+    }
+    tax = await categoryRows(sb, ids);
+  }
   const { data: existing } = await sb.from('unit_channel_categories').select('channel,category_id,enabled,attributes,adopted_live,source')
     .eq('store_id', storeId).eq('sku', sku);
   const current = new Map((existing || []).map((row) => [row.channel, row]));
@@ -137,7 +150,8 @@ export async function resolveUnitCategories(storeId, sku, { network = true } = {
     const id = ids[channel];
     const row = tax.get(`${channel}:${id}`);
     const valid = channel === 'depop' ? Boolean(id) : Boolean(row?.active && row?.leaf && row?.fields_fetched_at);
-    const attributes = channel === 'depop' ? prior?.attributes || {} : { ...(prior?.attributes || {}),
+    const attributes = channel === 'depop' ? { ...(cached?.channel_attributes?.[channel] || {}), ...(prior?.attributes || {}) }
+      : { ...(cached?.channel_attributes?.[channel] || {}), ...(prior?.attributes || {}),
       ...supportedAttributes(row?.required_fields, product, unit) };
     updates.push({ store_id: storeId, sku, channel, category_id: id || prior?.category_id || null,
       enabled: prior?.enabled ?? channel !== 'depop', attributes,
@@ -150,16 +164,19 @@ export async function resolveUnitCategories(storeId, sku, { network = true } = {
     const { error } = await sb.from('unit_channel_categories').upsert(updates, { onConflict: 'store_id,sku,channel' });
     if (error) throw new Error(error.message);
   }
-  const confirmed = !conflict && ids.ebay && ids.amazon && ids.tiktok &&
-    CHANNELS.filter((channel) => channel !== 'depop').every((channel) => tax.get(`${channel}:${ids[channel]}`)?.active);
+  const { data: gaps, error: gapError } = await sb.rpc('floor_category_gaps', { p_store: storeId, p_sku: sku, p_channel: null });
+  if (gapError) throw new Error(gapError.message);
+  const enabledChannels = CHANNELS.filter((channel) => current.get(channel)?.enabled);
+  const confirmed = !conflict && !gaps?.length && enabledChannels.length > 0 &&
+    enabledChannels.every((channel) => Boolean(ids[channel] || current.get(channel)?.category_id));
   if (gtin.ok && confirmed && !cached) {
     const { error } = await sb.from('store_upc_categories').upsert({ store_id: storeId, gtin14: gtin.gtin14,
       ebay_category_id: ids.ebay, amazon_product_type: ids.amazon, amazon_listing_id: amazonListingId,
       tiktok_category_id: ids.tiktok, depop_category_id: ids.depop, internal_category: product?.category || unit.internal_category || null,
+      channel_attributes: Object.fromEntries(CHANNELS.map((channel) => [channel,
+        updates.find((row) => row.channel === channel)?.attributes || current.get(channel)?.attributes || {}])),
       confirmed_at: new Date().toISOString() }, { onConflict: 'store_id,gtin14' });
     if (error) throw new Error(error.message);
   }
-  const { data: gaps, error: gapError } = await sb.rpc('floor_category_gaps', { p_store: storeId, p_sku: sku, p_channel: null });
-  if (gapError) throw new Error(gapError.message);
   return { sku, categories: ids, sources, conflict, confirmed: Boolean(confirmed), gaps };
 }

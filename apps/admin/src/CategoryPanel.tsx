@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { floorFunctionUrl } from './floorApi';
 
 type Channel = 'ebay' | 'amazon' | 'tiktok' | 'depop';
 const CHANNELS: [Channel, string][] = [['ebay', 'eBay'], ['amazon', 'Amazon'], ['tiktok', 'TikTok Shop'], ['depop', 'Depop']];
@@ -85,7 +86,7 @@ export function CategoryPanel({ client, storeId, initialSku, onSaved }: Props) {
       const { data: session } = await client.auth.getSession();
       const token = session.session?.access_token;
       if (token) {
-        const response = await fetch('/.netlify/functions/category-fields', { method: 'POST',
+        const response = await fetch(floorFunctionUrl('category-fields'), { method: 'POST',
           headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({ store_id: storeId, channel: id, category_id: value }) });
         const result = await response.json();
@@ -123,7 +124,7 @@ export function CategoryPanel({ client, storeId, initialSku, onSaved }: Props) {
       }
       const { data: session } = await client.auth.getSession();
       if (session.session?.access_token) {
-        const response = await fetch('/.netlify/functions/category-confirm', { method: 'POST',
+        const response = await fetch(floorFunctionUrl('category-confirm'), { method: 'POST',
           headers: { Authorization: `Bearer ${session.session.access_token}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({ store_id: storeId, sku: selected[0] }) });
         const result = await response.json();

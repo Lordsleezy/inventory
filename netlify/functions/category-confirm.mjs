@@ -18,17 +18,18 @@ async function handle(event) {
     const { data: gaps, error: gapError } = await sb.rpc('floor_category_gaps', { p_store: storeId, p_sku: sku, p_channel: null });
     if (gapError) throw new Error(gapError.message);
     if (gaps?.length) return json(200, { ok: true, cached: false, reason: 'category_gaps', gaps });
-    const { data: rows, error: rowsError } = await sb.from('unit_channel_categories').select('channel,category_id,enabled')
+    const { data: rows, error: rowsError } = await sb.from('unit_channel_categories').select('channel,category_id,enabled,attributes')
       .eq('store_id', storeId).eq('sku', sku);
     if (rowsError) throw new Error(rowsError.message);
     const channels = Object.fromEntries((rows || []).map((row) => [row.channel, row]));
-    if (!channels.ebay?.category_id || !channels.amazon?.category_id || !channels.tiktok?.category_id)
+    if (!rows?.some((row) => row.enabled) || rows.some((row) => row.enabled && !row.category_id))
       return json(200, { ok: true, cached: false, reason: 'incomplete_mapping' });
     const { data: prior } = await sb.from('store_upc_categories').select('amazon_listing_id')
       .eq('store_id', storeId).eq('gtin14', gtin.gtin14).maybeSingle();
     const { error: saveError } = await sb.from('store_upc_categories').upsert({ store_id: storeId, gtin14: gtin.gtin14,
-      ebay_category_id: channels.ebay.category_id, amazon_product_type: channels.amazon.category_id,
-      tiktok_category_id: channels.tiktok.category_id, depop_category_id: channels.depop?.category_id || null,
+      ebay_category_id: channels.ebay?.category_id || null, amazon_product_type: channels.amazon?.category_id || null,
+      tiktok_category_id: channels.tiktok?.category_id || null, depop_category_id: channels.depop?.category_id || null,
+      channel_attributes: Object.fromEntries(rows.map((row) => [row.channel, row.attributes || {}])),
       amazon_listing_id: prior?.amazon_listing_id || null,
       internal_category: unit.internal_category || null, confirmed_at: new Date().toISOString() }, { onConflict: 'store_id,gtin14' });
     if (saveError) throw new Error(saveError.message);
