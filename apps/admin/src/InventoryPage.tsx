@@ -15,6 +15,7 @@ type Row = {
   received_at: string; photo_path: string | null; photo_count: number;
   defective?: boolean; not_for_sale?: boolean; missing?: string[];
   sold_at?: string | null; sold_price_cents?: number | null;
+  locations?: string; assigned?: number;
 };
 type Listing = { channel: string; status: string; listing_id: string | null };
 type Photo = { id: number; path: string; is_primary: boolean };
@@ -55,6 +56,8 @@ export function InventoryPage({
   const [refresh, setRefresh] = useState(0);
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState('in_stock');
+  const [location, setLocation] = useState('all');
+  const [locationOptions, setLocationOptions] = useState<{ code: string }[]>([]);
   const [sort, setSort] = useState('sku');
   const [offset, setOffset] = useState(0);
   const [list, setList] = useState<List | null>(null);
@@ -72,6 +75,15 @@ export function InventoryPage({
   const pUnfinished = listTab === 'unfinished';
   const hideMoney = associateBrowseOnly && listTab === 'sold';
 
+  useEffect(() => {
+    let active = true;
+    void client.from('store_locations').select('code').eq('store_id', storeId).order('bay_no')
+      .order('row_no').order('bin_no').then(({ data }) => {
+        if (active) setLocationOptions(data || []);
+      });
+    return () => { active = false; };
+  }, [client, storeId]);
+
   async function sign(paths: string[]) {
     const keys = [...new Set(paths.filter(p => /^[0-9a-f-]{36}\//i.test(p)))];
     if (!keys.length) return {} as Record<string, string>;
@@ -85,9 +97,9 @@ export function InventoryPage({
     let active = true;
     const timer = setTimeout(() => { setLoading(true); setError(''); void (async () => {
       try {
-        const { data, error: e } = await client.rpc('portal_inventory_list', {
+        const { data, error: e } = await client.rpc('portal_inventory_list_with_locations', {
           p_query: query, p_status: pStatus, p_unfinished: pUnfinished,
-          p_sort: sort, p_offset: offset, p_limit: 24
+          p_sort: sort, p_offset: offset, p_limit: 24, p_location: location,
         });
         if (e) throw e;
         const next = data as List;
@@ -97,7 +109,7 @@ export function InventoryPage({
       finally { if (active) setLoading(false); }
     })(); }, 200);
     return () => { active = false; clearTimeout(timer); };
-  }, [client, listTab, queue, query, pStatus, pUnfinished, sort, offset, refresh]);
+  }, [client, listTab, queue, query, pStatus, pUnfinished, sort, offset, refresh, location]);
 
   useEffect(() => {
     if (!selected) { setDetail(null); return; }
@@ -141,6 +153,10 @@ export function InventoryPage({
         <option value="delisted">Delisted listing</option><option value="all">All statuses</option><option value="voided">Voided</option>
         <option value="scrapped">Scrapped</option><option value="lost">Lost</option>
       </select></label>}
+      <label>Location<select value={location} onChange={e => change(() => setLocation(e.target.value))}>
+        <option value="all">All locations</option><option value="unassigned">Unassigned stock</option>
+        {locationOptions.map((item) => <option key={item.code} value={item.code}>{item.code}</option>)}
+      </select></label>
       <label>Sort<select value={sort} onChange={e => change(() => setSort(e.target.value))}>
         <option value="sku">SKU (newest)</option>{!hideMoney && <option value="price">Price (low to high)</option>}
         <option value="date">{listTab === 'sold' ? 'Date sold (newest)' : 'Date added (newest)'}</option>
@@ -157,6 +173,7 @@ export function InventoryPage({
         <span className="inventory-photo">{u.photo_path && urls[u.photo_path] ? <img loading="lazy" src={urls[thumb(u.photo_path)] || urls[u.photo_path]} onError={e => { const fallback = urls[u.photo_path!]; if (e.currentTarget.src !== fallback) e.currentTarget.src = fallback; }} alt="" /> : 'No photo'}</span>
         <span className="inventory-identity"><strong>{name(u)}</strong><small>SKU {u.sku}{u.title && u.title !== name(u) ? ` · ${u.title}` : ''}</small></span>
         <span className="inventory-meta">{u.condition || 'No grade'}<small>{u.not_for_sale ? 'Not for sale' : listTab === 'sold' && u.sold_at ? `Sold ${stamp(u.sold_at)}` : label(u.state)}</small>{listTab === 'unfinished' && !!u.missing?.length && <small className="inventory-missing">Missing {missingText(u.missing)}</small>}</span>
+        <span className="inventory-location">{u.locations || 'Unassigned'}</span>
         {hideMoney ? <span className="inventory-money" /> : listTab === 'sold'
           ? <span className="inventory-money"><strong>{u.sold_price_cents == null ? '—' : money(u.sold_price_cents)}</strong><small>{u.acquisition_cost_cents == null ? 'Cost missing' : `Cost ${money(u.acquisition_cost_cents)}`}</small></span>
           : <span className="inventory-money"><strong>{u.ask_cents == null ? 'No price' : money(u.ask_cents)}</strong>{!associateBrowseOnly && <small>Cost {u.acquisition_cost_cents == null ? 'missing' : money(u.acquisition_cost_cents)}</small>}</span>}

@@ -529,6 +529,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   const [form, setForm] = useState<Form>(blank);
   const [files, setFiles] = useState<File[]>([]);
   const [saved, setSaved] = useState<string[]>([]);
+  const [manifestId, setManifestId] = useState('');
+  const [manifests, setManifests] = useState<{ id: string; name: string; manifest_on: string }[]>([]);
   const [last, setLast] = useState<LastReceived | null>(null);
   const [warning, setWarning] = useState('');
   const [error, setError] = useState('');
@@ -551,6 +553,14 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   const missPhotoFile = useRef<HTMLInputElement>(null);
   const missChooseFile = useRef<HTMLInputElement>(null);
   const missPromptedFor = useRef<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void client.from('store_manifests').select('id,name,manifest_on')
+      .eq('store_id', storeId).order('manifest_on', { ascending: false })
+      .then(({ data }) => { if (active) setManifests(data || []); });
+    return () => { active = false; };
+  }, [client, storeId]);
 
   const upcInput = useRef<HTMLInputElement>(null);
   const cameraFile = useRef<HTMLInputElement>(null);
@@ -934,6 +944,10 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       const skus = (data as { skus: string[] }).skus;
       setSaved(skus);
       const warnings: string[] = [];
+      if (manifestId) {
+        const tagged = await client.rpc('portal_tag_manifest', { p_id: manifestId, p_skus: skus });
+        if (tagged.error) warnings.push('Received units were saved, but their manifest tag failed. Use Manifests → Bulk tag to retry.');
+      }
 
       let failed = 0;
       const uploadErrors: string[] = [];
@@ -1456,6 +1470,12 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         </label>
         {manual && <label className="unit-edit-wide">Description / features<textarea rows={3} value={form.description} onChange={e => update('description', e.target.value)} /></label>}
         {manual && <label>Cost (optional)<input inputMode="decimal" placeholder="9.00" value={form.cost} onChange={e => update('cost', e.target.value)} /></label>}
+        <label className="unit-edit-wide">Manifest (optional)
+          <select value={manifestId} onChange={e => setManifestId(e.target.value)}>
+            <option value="">No manifest</option>
+            {manifests.map(m => <option key={m.id} value={m.id}>{m.name} · {m.manifest_on}</option>)}
+          </select>
+        </label>
 
         <div className={`unit-edit-wide${liveMissing.includes('photo') ? ' receive-need' : ''}`}>
           <span className="receive-label">Photo{doNotList || manual ? ' (optional)' : (liveMissing.includes('photo') ? ' (needed to list)' : '')}</span>

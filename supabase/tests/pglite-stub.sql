@@ -30,7 +30,8 @@ $$;
 create table if not exists storage.buckets (
   id text primary key,
   name text not null,
-  public boolean not null default false
+  public boolean not null default false,
+  file_size_limit bigint
 );
 
 create table if not exists storage.objects (

@@ -2,6 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import type { Session, SupabaseClient } from '@supabase/supabase-js';
 import type { StaffSession } from '@floor/cloud';
 import { RegisterPage } from '../RegisterPage';
+import { WithdrawalsPage } from '../WithdrawalsPage';
+import { ManifestsPage } from '../ManifestsPage';
+import { LocationsPage } from '../LocationsPage';
+import { InsightsPage } from '../InsightsPage';
 import { AppInventory } from './AppInventory';
 import { AppItemDetail } from './AppItemDetail';
 import { AppReceive } from './AppReceive';
@@ -19,7 +23,7 @@ import {
 } from './AppMore';
 import type { OnlineCfg, Rule, CommissionOverride } from '../payouts';
 
-export type AppTab = 'inventory' | 'receive' | 'register' | 'orders' | 'more' | 'settings';
+export type AppTab = 'inventory' | 'receive' | 'register' | 'orders' | 'more' | 'settings' | 'locations';
 
 type Props = {
   client: SupabaseClient;
@@ -41,7 +45,7 @@ type Props = {
 };
 
 /** Store associates (e.g. Jacob): Inventory / Receive / Register / Settings. */
-const ASSOCIATE_TABS: AppTab[] = ['inventory', 'receive', 'register', 'settings'];
+const ASSOCIATE_TABS: AppTab[] = ['inventory', 'receive', 'register', 'locations', 'settings'];
 
 const TABS: { id: AppTab; label: string; icon: React.ReactNode; adminOnly?: boolean; associateOnly?: boolean }[] = [
   {
@@ -99,6 +103,16 @@ const TABS: { id: AppTab; label: string; icon: React.ReactNode; adminOnly?: bool
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
         <circle cx="12" cy="12" r="3" />
         <path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4l1.4-1.4M17 7l1.4-1.4" />
+      </svg>
+    ),
+  },
+  {
+    id: 'locations',
+    label: 'Locations',
+    associateOnly: true,
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+        <path d="M3 7h18M5 7v13h14V7M7 12h10M12 7v13" />
       </svg>
     ),
   },
@@ -280,6 +294,11 @@ export function AppModeShell({
             )}
           </div>
         )}
+        {!fullAccess && (
+          <div className="app-tab-panel" data-tab="locations" hidden={tab !== 'locations'}>
+            {tab === 'locations' && <LocationsPage client={client} storeId={storeId} canManage={false} />}
+          </div>
+        )}
 
         {fullAccess && channel && (
           <AppChannel
@@ -305,6 +324,26 @@ export function AppModeShell({
         {fullAccess && morePage === 'reports' && (
           <AppReportsNative onBack={() => setMorePage(null)}>
             {reportsSlot || <p className="app-footer-count">Reports unavailable.</p>}
+          </AppReportsNative>
+        )}
+        {fullAccess && morePage === 'withdrawals' && (
+          <AppReportsNative onBack={() => setMorePage(null)}>
+            <WithdrawalsPage client={client} storeId={storeId} money={money} stamp={stamp} />
+          </AppReportsNative>
+        )}
+        {fullAccess && morePage === 'manifests' && (
+          <AppReportsNative onBack={() => setMorePage(null)}>
+            <ManifestsPage client={client} storeId={storeId} money={money} />
+          </AppReportsNative>
+        )}
+        {fullAccess && morePage === 'locations' && (
+          <AppReportsNative onBack={() => setMorePage(null)}>
+            <LocationsPage client={client} storeId={storeId} />
+          </AppReportsNative>
+        )}
+        {fullAccess && morePage === 'insights' && (
+          <AppReportsNative onBack={() => setMorePage(null)}>
+            <InsightsPage client={client} money={money} />
           </AppReportsNative>
         )}
         {fullAccess && morePage === 'tax' && (

@@ -167,3 +167,7 @@ timeout = 30
 [functions."channel-fee-sync"]
 schedule = "*/15 * * * *"
 timeout = 60
+
+[functions."census-seasonality-sync"]
+schedule = "0 8 1 * *"
+timeout = 30

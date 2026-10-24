@@ -11,6 +11,10 @@ export type MainPage =
   | 'tiktok'
   | 'depop'
   | 'reports'
+  | 'withdrawals'
+  | 'manifests'
+  | 'locations'
+  | 'insights'
   | 'tax'
   | 'cameras'
   | 'remote'
@@ -46,6 +50,11 @@ const LEGACY: Record<string, { page: MainPage; tab?: ReportTab; inventoryTab?: I
   costs: { page: 'inventory', inventoryTab: 'unfinished', section: 'missing-cost' },
   reviews: { page: 'inventory', inventoryTab: 'unfinished', section: 'missing-cost' },
   payouts: { page: 'reports', tab: 'payouts' },
+  withdrawals: { page: 'withdrawals' },
+  manifests: { page: 'manifests' },
+  locations: { page: 'locations' },
+  projections: { page: 'insights' },
+  insights: { page: 'insights' },
   settings: { page: 'settings' },
   marketplaces: { page: 'marketplaces' },
   ebay: { page: 'ebay' },
@@ -79,6 +88,10 @@ const MAIN: MainPage[] = [
   'tiktok',
   'depop',
   'reports',
+  'withdrawals',
+  'manifests',
+  'locations',
+  'insights',
   'tax',
   'cameras',
   'remote',

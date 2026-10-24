@@ -6,6 +6,7 @@ import { type CommissionOverride, type OnlineCfg, type Rule } from './payouts';
 import { ReturnsPage } from './ReturnsPage';
 import { LabelDialog } from './LabelDialog';
 import { errText } from './errText';
+import { loadOrderLocations, locationCompare } from './locationOrder';
 
 function channelAllowsLabels(channel?: string | null) {
   const ch = (channel || 'website').toLowerCase();
@@ -120,6 +121,7 @@ function breakdown(rows: WebOrder[]) {
 
 export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, cfg, commissionOverrides, personName, busy: parentBusy, onCommissionChanged }: Props) {
   const [orders, setOrders] = useState<WebOrder[] | null>(null);
+  const [locations, setLocations] = useState<Record<string, string[]>>({});
   const [error, setError] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
@@ -133,7 +135,8 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
     const { data, error: e } = await client.rpc('portal_web_orders', { p_days: 400 });
     if (e) { setError(e.message); return; }
     setOrders(data as WebOrder[]);
-  }, [client]);
+    setLocations(await loadOrderLocations(client, storeId, (data as WebOrder[]).map(o => o.sku)));
+  }, [client, storeId]);
   useEffect(() => { void load(); const t = setInterval(() => { void load(); }, 30000); return () => clearInterval(t); }, [load]);
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 30000); return () => clearInterval(t); }, []);
 
@@ -330,7 +333,10 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
     };
   }, [orders, statusFilter]);
 
-  const active = groups[view];
+  const active = groups[view].slice().sort((a,b) => {
+    if (view !== 'toShip' && view !== 'pickup') return 0;
+    return locationCompare(locations[a.sku]?.[0] || '99999', locations[b.sku]?.[0] || '99999');
+  });
   const summary = useMemo(() => breakdown(groups[view]), [groups, view]);
 
   const head = (o: WebOrder) => {
@@ -356,6 +362,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
       : (o.marketplace_title || o.title || 'Marketplace sale');
     const skuLabel = linked ? `SKU ${o.sku}` : 'Needs SKU match';
     return <div className="ticket-items"><div>{displayTitle} <span>· {skuLabel}</span></div>
+    <strong className="pick-location">Pick: {locations[o.sku]?.join(', ') || 'Unassigned'}</strong>
     <small>{o.buyer_name}{o.buyer_email ? ` · ${o.buyer_email}` : ''}{o.buyer_phone ? ` · ${o.buyer_phone}` : ''}</small>
     <small>Item {money(o.item_cents)}{orderFee(o) ? ` · Fees ${money(orderFee(o))}` : ''} · {o.fulfillment === 'ship' ? `Buyer ship ${money(o.shipping_cents)}` : 'Store pickup'}{o.fulfillment === 'ship' ? ` · Label ${o.label_cost_cents != null ? money(o.label_cost_cents) : '—'}` : ''} · Tax {money(o.tax_cents)}</small>
     <CommissionOverrideMark overridden={!!ov} />
