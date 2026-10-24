@@ -161,6 +161,14 @@ html.app-mode .app-row-text small {
   color: #8e8e93;
 }
 html.app-mode .app-row-text .warn { color: #ff9f0a; font-weight: 600; }
+html.app-mode .app-row-chevron {
+  flex: 0 0 auto;
+  color: #636366;
+  font-size: 22px;
+  font-weight: 300;
+  line-height: 1;
+  margin-left: 8px;
+}
 html.app-mode .app-row-price {
   font-size: 16px;
   font-weight: 600;

@@ -21,6 +21,8 @@ type Props = {
   onSellInStore: () => void;
   /** Portal admin / manager — show Delete on edit. */
   canDelete?: boolean;
+  /** Nav back label — "Inventory" or "Receive" depending on where we opened from. */
+  backLabel?: string;
 };
 
 const CHANNELS: { key: string; label: string }[] = [
@@ -37,6 +39,7 @@ function titleOf(u: Record<string, unknown>) {
 
 export function AppItemDetail({
   client, storeId, accessToken, sku, money, onBack, onChanged, onSellInStore, canDelete = false,
+  backLabel = 'Inventory',
 }: Props) {
   const [detail, setDetail] = useState<Detail | null>(null);
   const [urls, setUrls] = useState<Record<string, string>>({});
@@ -120,7 +123,7 @@ export function AppItemDetail({
   return (
     <div className="app-stack">
       <div className="app-nav">
-        <button type="button" onClick={onBack}>‹ Inventory</button>
+        <button type="button" onClick={onBack}>‹ {backLabel}</button>
         <div className="app-nav-title">{sku}</div>
         <button type="button" onClick={() => setEditing(true)} disabled={!detail}>Edit</button>
       </div>
