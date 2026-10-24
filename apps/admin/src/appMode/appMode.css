@@ -293,6 +293,7 @@ html.app-mode .app-actions button {
   background: #1c1c1e;
   color: #0a84ff;
 }
+html.app-mode .app-actions .bundle-entry { grid-column: 1 / -1; }
 html.app-mode .app-actions button.danger { color: #ff453a; }
 html.app-mode .app-actions a {
   display: block;

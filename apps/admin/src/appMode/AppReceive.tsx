@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { decodeBarcodeFile, ReceivePanel } from '../ReceivePanel';
+import { BundleReceive } from '../BundleReceive';
 
 type Props = {
   client: SupabaseClient;
@@ -11,7 +12,7 @@ type Props = {
 
 /** Native Receive home; opens the shared ReceivePanel form after scan / camera / manual. */
 export function AppReceive({ client, storeId, accessToken, onSaved }: Props) {
-  const [phase, setPhase] = useState<'home' | 'form'>('home');
+  const [phase, setPhase] = useState<'home' | 'form' | 'bundle'>('home');
   const [manual, setManual] = useState(false);
   const [pendingUpc, setPendingUpc] = useState<string | null>(null);
   const [cameraError, setCameraError] = useState('');
@@ -36,7 +37,7 @@ export function AppReceive({ client, storeId, accessToken, onSaved }: Props) {
     // Bluetooth wedges look like fast keyboard input; stay optimistic green on store phone.
     const t = window.setTimeout(() => setScannerOk(true), 0);
     return () => { alive = false; window.clearTimeout(t); window.removeEventListener('keydown', onHid); };
-  }, [client]);
+  }, [client, phase]);
 
   useEffect(() => {
     let alive = true;
@@ -83,6 +84,17 @@ export function AppReceive({ client, storeId, accessToken, onSaved }: Props) {
     );
   }
 
+  if (phase === 'bundle') {
+    return <div className="app-receive-form">
+      <div className="app-nav receive-app-nav">
+        <button type="button" onClick={() => setPhase('home')}>Receive</button>
+        <div className="app-nav-title">Bundle items</div>
+        <span />
+      </div>
+      <BundleReceive client={client} lastReceived={today[0]?.sku} onSaved={onSaved} />
+    </div>;
+  }
+
   return (
     <>
       <div className="app-large-title app-receive-title">
@@ -127,6 +139,7 @@ export function AppReceive({ client, storeId, accessToken, onSaved }: Props) {
         {/* Must open the file picker in this tap — deferred clicks are blocked on iOS. */}
         <button type="button" onClick={() => homeCamera.current?.click()}>Use camera</button>
         <button type="button" onClick={() => openForm(true)}>No barcode</button>
+        <button type="button" className="bundle-entry" onClick={() => setPhase('bundle')}>Bundle items</button>
       </div>
       {cameraError && <p className="app-inline-error">{cameraError}</p>}
 
