@@ -16,6 +16,7 @@ import {
   type TicketQuote,
   type TicketSummary,
 } from '@floor/cloud';
+import { floorCloud } from '@floor/cloud';
 import { CartProvider, useCart, type CartLine } from './register/cart';
 import { CustomerAttach, formatPoints } from './register/CustomerAttach';
 import { RegisterSettingsModal } from './register/RegisterSettings';
@@ -469,12 +470,27 @@ function RegisterInner({ staffSession, onNeedFullReload, variant = 'desktop' }: 
     }
   }
 
-  function addFromSearch(unit: RegisterUnit) {
-    addUnit(unit);
-    setQ('');
-    setShowHits(false);
-    setError('');
-    searchRef.current?.focus();
+  async function addFromSearch(unit: RegisterUnit) {
+    try {
+      const { data, error: lookupError } = await floorCloud().rpc('portal_bundle_for_sku', { p_sku: unit.sku });
+      if (lookupError) throw lookupError;
+      const bundle = data as { sku: string; components: { sku: string; title: string; quantity: number; isMain: boolean }[] } | null;
+      const sellable = bundle && bundle.sku !== unit.sku
+        ? (await queryAvailableUnits(bundle.sku, 1))[0]
+        : unit;
+      if (!sellable) throw new Error('Bundle is out of stock.');
+      const includes = bundle?.components.filter(c => !c.isMain).map(c => ({
+        sku: c.sku, title: c.title, quantity: c.quantity,
+      }));
+      addUnit(sellable, { bundleIncludes: includes });
+      if (includes?.length) window.alert(`Bundled — comes with FREE ${includes.map(c => `${c.quantity} × ${c.title}`).join(', ')}`);
+      setQ('');
+      setShowHits(false);
+      setError('');
+      searchRef.current?.focus();
+    } catch (err) {
+      setError(authErrorMessage(err));
+    }
   }
 
   function onSearchKey(e: KeyboardEvent<HTMLInputElement>) {
@@ -483,12 +499,12 @@ function RegisterInner({ staffSession, onNeedFullReload, variant = 'desktop' }: 
       const term = q.trim();
       if (!term) return;
       if (hits[0]) {
-        addFromSearch(hits[0]);
+        void addFromSearch(hits[0]);
         return;
       }
       void queryAvailableUnits(term, 1)
         .then(rows => {
-          if (rows[0]) addFromSearch(rows[0]);
+          if (rows[0]) void addFromSearch(rows[0]);
           else setError(`No available unit for “${term}”.`);
         })
         .catch(err => setError(authErrorMessage(err)));
@@ -1013,6 +1029,9 @@ function RegisterInner({ staffSession, onNeedFullReload, variant = 'desktop' }: 
                   <div className="cart-item">
                     <strong>{line.title}</strong>
                     <span className="muted">{line.sku}{line.condition ? ` · ${line.condition}` : ''}{line.askCents != null ? ` · ask ${formatCents(line.askCents)}` : ''}</span>
+                    {line.bundleIncludes?.map(part => (
+                      <span className="muted" key={part.sku}>FREE {part.quantity * line.qty} × {part.title} · SKU {part.sku}</span>
+                    ))}
                     {priceChanged ? (
                       <label className="cart-override">
                         Override reason

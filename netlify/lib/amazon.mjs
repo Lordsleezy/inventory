@@ -6,6 +6,7 @@
  * Listing gated by AMAZON_LISTING_ENABLED=1. Never upload AI images — catalog ASIN offers only.
  */
 import { serviceClient, decryptSecret, encryptSecret, requireEnv } from "./server.mjs";
+import { assertBundlePush } from "./bundle-gate.mjs";
 import { sendInternalAlert, gmailConfigured } from "./mail.mjs";
 
 const LWA_TOKEN = "https://api.amazon.com/auth/o2/token";
@@ -783,6 +784,8 @@ export async function listAmazonOffer(storeId, kit) {
       message: "Set AMAZON_LISTING_ENABLED=1 in Netlify when ready to create offers.",
     };
   }
+  try { await assertBundlePush(storeId, kit?.sku || kit?.unit?.sku, 'amazon'); }
+  catch (error) { return { ok: false, reason: 'bundle_gate', message: error.message }; }
   const unit = kit?.unit || kit;
   const sku = String(unit.sku || kit.sku || "");
   const never = amazonNeverListReason(unit);

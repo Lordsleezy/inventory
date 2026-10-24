@@ -4,6 +4,7 @@
  * Admin-only (portalAdminFromEvent at the function layer). Never marks units sold on end.
  */
 import { serviceClient } from "./server.mjs";
+import { assertBundlePush, bundleMainSku } from "./bundle-gate.mjs";
 import { ebayNeverList, ebayReviewReason } from "./ebay-exclusion.mjs";
 import {
   STORE_DEFAULT,
@@ -98,6 +99,10 @@ async function unitPhotos(storeId, sku) {
   const paths = (data || [])
     .map((r) => r.path)
     .filter((p) => p && !String(p).includes("/official-") && !/ai[-_]?gen/i.test(String(p)));
+  if (!paths.length) {
+    const mainSku = await bundleMainSku(storeId, sku);
+    if (mainSku) return unitPhotos(storeId, mainSku);
+  }
   const urls = [];
   for (const path of paths.slice(0, 12)) {
     const { data: signed } = await sb.storage.from("unit-photos").createSignedUrl(path, 3600);
@@ -499,6 +504,10 @@ export async function patchEbayListing(
   } = {},
 ) {
   if (!offerId && !sku && !itemId) return { ok: false, error: "offer_id_or_sku_required" };
+  if (sku && quantity !== 0) {
+    try { await assertBundlePush(storeId, sku, 'ebay'); }
+    catch (error) { return { ok: false, error: error.message }; }
+  }
   const hint = accountId ? { accountId } : undefined;
   const sb = serviceClient();
   const { data: unit } = sku
@@ -814,6 +823,8 @@ export async function endEbayListing(storeId, { accountId, offerId, sku }) {
 }
 
 export async function relistEbayListing(storeId, { sku, draft = null, accountId = null, offerId = null } = {}) {
+  try { await assertBundlePush(storeId, sku, 'ebay'); }
+  catch (error) { return { ok: false, error: error.message }; }
   if (!sku) return { ok: false, error: "sku_required" };
   const { data: relistUnit, error: relistError } = await serviceClient().from("units").select("*").eq("store_id", storeId).eq("sku", sku).maybeSingle();
   if (relistError) return { ok: false, error: relistError.message };
@@ -1003,6 +1014,8 @@ export async function listDepopListings(storeId = STORE_DEFAULT, { query = "", l
  * No marketplace write.
  */
 export async function buildDepopPack(storeId, { sku } = {}) {
+  try { await assertBundlePush(storeId, sku, 'depop', { intent: false }); }
+  catch (error) { return { ok: false, error: error.message }; }
   const sb = serviceClient();
   const { data: unit, error } = await sb.from("units").select("*").eq("store_id", storeId).eq("sku", sku).maybeSingle();
   if (error) return { ok: false, error: error.message };
@@ -1066,6 +1079,8 @@ export async function buildDepopPack(storeId, { sku } = {}) {
  * Writes a real listings row + listed_on. Never marks sold.
  */
 export async function confirmDepopListed(storeId, { sku, depopUrl = null, markOnly = false } = {}) {
+  try { await assertBundlePush(storeId, sku, 'depop'); }
+  catch (error) { return { ok: false, error: error.message }; }
   const sb = serviceClient();
   const { data: unit } = await sb.from("units").select("sku, state, listed_on").eq("store_id", storeId).eq("sku", sku).maybeSingle();
   if (!unit) return { ok: false, error: "unknown_sku" };

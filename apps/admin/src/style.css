@@ -660,6 +660,15 @@ html.dark .mboard-quarter{background:#1a2028;border-color:#3a4553;color:#e8eef4}
 html.dark .mboard-quarter span{color:#9aa7b5}
 html.dark .mboard-quarter select{color:#e8eef4}
 html.dark .mboard-panel{background:#1a2028;border-color:#2e3846}
+.bundle-receive{display:grid;gap:12px;max-width:820px}
+.bundle-receive summary{cursor:pointer;font-weight:750;font-size:1rem}
+.bundle-receive[open] summary{margin-bottom:14px}
+.bundle-receive label{display:grid;gap:5px;font-size:.82rem;font-weight:650}
+.bundle-receive input{width:100%;max-width:340px}
+.bundle-receive .actions{display:flex;gap:8px;flex-wrap:wrap}
+.bundle-receive p{margin:0 0 10px}
+html.app-mode .bundle-receive{margin:16px;border:0;border-radius:14px;background:var(--app-group-bg,#1c1c1e);box-shadow:none;padding:16px;color:#f5f5f7}
+html.app-mode .bundle-receive input,html.app-mode .bundle-receive button{min-height:44px}
 html.dark .mboard-tabs{border-bottom-color:#2e3846}
 html.dark .mboard-tabs button{color:#9aa7b5}
 html.dark .mboard-tabs button.on{color:#e8eef4;border-bottom-color:#60a5fa}

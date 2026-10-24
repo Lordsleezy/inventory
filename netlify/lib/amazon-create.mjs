@@ -4,6 +4,7 @@
  * Never use Generic/unbranded for a branded Floor unit. Never AI images.
  */
 import { serviceClient } from "./server.mjs";
+import { assertBundlePush } from "./bundle-gate.mjs";
 import {
   STORE_DEFAULT,
   spapiFetch,
@@ -180,6 +181,8 @@ export async function createAmazonCatalogListing(
   sku,
   { overrides = {}, mode = "VALIDATION_PREVIEW", confirmLive = false, productType } = {},
 ) {
+  try { await assertBundlePush(storeId, sku, 'amazon', { intent: false }); }
+  catch (error) { return { ok: false, reason: 'bundle_gate', message: error.message }; }
   const sb = serviceClient();
   const { data: unit, error } = await sb.from("units").select("*").eq("store_id", storeId).eq("sku", sku).maybeSingle();
   if (error) throw new Error(error.message);
@@ -217,6 +220,8 @@ export async function createAmazonCatalogListing(
     if (!confirmLive) {
       return { ok: false, reason: "confirm_required", message: "Pass confirmLive=true after a clean VALIDATION_PREVIEW." };
     }
+    try { await assertBundlePush(storeId, sku, 'amazon'); }
+    catch (error) { return { ok: false, reason: 'bundle_gate', message: error.message }; }
   }
 
   const sellerSku = live ? `AMZ-NEW-${sku}` : `FLOOR-PREVIEW-${sku}`;

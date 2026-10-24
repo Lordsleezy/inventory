@@ -20,6 +20,7 @@
  */
 
 import { createHmac } from "node:crypto";
+import { assertBundlePush, bundleMainSku } from "./bundle-gate.mjs";
 import {
   serviceClient,
   decryptSecret,
@@ -427,7 +428,11 @@ async function realPhotoPaths(storeId, sku) {
     .eq("sku", sku)
     .order("sort_order", { ascending: true });
   const paths = (photos || []).map((p) => p.path).filter(Boolean);
-  if (!paths.length) return { ok: false, reason: "no_photos", paths: [] };
+  if (!paths.length) {
+    const mainSku = await bundleMainSku(storeId, sku);
+    if (mainSku) return realPhotoPaths(storeId, mainSku);
+    return { ok: false, reason: "no_photos", paths: [] };
+  }
   return { ok: true, paths, unitFlags: unit };
 }
 
@@ -441,11 +446,12 @@ export async function prepareTikTokQueueItem(storeId, sku) {
   const never = amazonNeverListReason(unit);
   if (never) return { ok: false, status: "error", last_error: never };
 
-  const { count: photoCount } = await sb
+  const { count: ownPhotoCount } = await sb
     .from("photos")
     .select("id", { count: "exact", head: true })
     .eq("store_id", storeId)
     .eq("sku", sku);
+  const photoCount = ownPhotoCount || (await realPhotoPaths(storeId, sku)).paths.length;
 
   const gate = {
     block_conditions: ["fair", "defective", "for parts", "for_parts"],
@@ -508,6 +514,8 @@ export async function listTikTokProduct(storeId, { unit, sku, priceCents } = {})
   if (!tiktokAppCredsPresent()) {
     return { ok: false, reason: "tiktok_env_missing", message: "TIKTOK_SHOP_APP_KEY / TIKTOK_SHOP_APP_SECRET required." };
   }
+  try { await assertBundlePush(storeId, sku || unit?.sku, 'tiktok'); }
+  catch (error) { return { ok: false, reason: 'bundle_gate', message: error.message }; }
   const sb = serviceClient();
   const code = String(sku || unit?.sku || "").trim();
   let u = unit;
