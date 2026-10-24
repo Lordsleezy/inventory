@@ -58,6 +58,23 @@ assert.equal(depopLabel.price, 1999);
 assert.equal(depopLabel.fee, 136);
 assert.equal(depopLabel.payout, 1863);
 
+const depopPayoutOnly = parseMail({
+  subject: "Your USPS shipping label and sale confirmation for @buyer.",
+  text: "You've made a sale!\nPayment details\nWhat you’ll receive $18.63",
+  from: { address: "sold@alerts.depop.com" },
+});
+assert.equal(depopPayoutOnly.price, null); // payout must not become report gross
+assert.equal(depopPayoutOnly.payout, 1863);
+
+const depopTwoFees = parseMail({
+  subject: "Your USPS shipping label and sale confirmation for @len112255.",
+  text: "You've made a sale!\nItem price\n$25.00\nDepop fee\n$0.00\nPayment fee\n−$1.44\nWhat you’ll receive $23.56",
+  from: { address: "sold@alerts.depop.com" },
+});
+assert.equal(depopTwoFees.price, 2500);
+assert.equal(depopTwoFees.fee, 144);
+assert.equal(depopTwoFees.payout, 2356);
+
 const mercariBody = [
   "You've made a sale!",
   "SKU #11412",

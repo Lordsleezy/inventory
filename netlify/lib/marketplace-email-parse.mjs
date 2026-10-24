@@ -200,12 +200,13 @@ export function parseMail(mail, channels = defaultChannels) {
     // Depop/Mercari listing bodies sometimes bury "SKU 11412" without a colon.
     text.match(/\bSKU\s+(\d{5})\b/i)?.[1] ||
     null;
-  const priceMatch =
-    text.match(
-      /(?:sold\s+for|sale\s+price|item\s+price|item\s+subtotal|you(?:'ve| have) made a sale!?|total\s+(?:sale\s+)?price)\D{0,40}\$\s?([0-9]{1,6}(?:\.[0-9]{2})?)/i,
-    ) ||
-    text.match(/\$\s?([0-9]{1,6}(?:\.[0-9]{2})?)\s*(?:sold|sale price|item price)/i) ||
-    String(mail.subject || '').match(/\$\s?([0-9]{1,6}(?:\.[0-9]{2})?)/);
+  // Depop's "What you'll receive" is a payout, not the item's sale price.
+  // Never take the next dollar amount after "You've made a sale" as a price.
+  const priceMatch = marketplace === 'depop'
+    ? text.match(/(?:sold\s+for|sale\s+price|item\s+price|item\s+subtotal|total\s+(?:sale\s+)?price)\s*[:\-]?\s*\$\s?([0-9]{1,6}(?:\.[0-9]{2})?)/i)
+    : text.match(/(?:sold\s+for|sale\s+price|item\s+price|item\s+subtotal|you(?:'ve| have) made a sale!?|total\s+(?:sale\s+)?price)\D{0,40}\$\s?([0-9]{1,6}(?:\.[0-9]{2})?)/i) ||
+      text.match(/\$\s?([0-9]{1,6}(?:\.[0-9]{2})?)\s*(?:sold|sale price|item price)/i) ||
+      String(mail.subject || '').match(/\$\s?([0-9]{1,6}(?:\.[0-9]{2})?)/);
   const price = priceMatch ? Math.round(Number(priceMatch[1]) * 100) : null;
   // Require number/#/id after "sale" so "sale confirmation" is not an order id.
   const order = cleanOrderId(
@@ -259,9 +260,19 @@ export function parseMail(mail, channels = defaultChannels) {
     const m = financialText.match(re);
     return m ? Math.round(Number(m[1]) * 100) : null;
   };
-  const fee = money(
-    /(?:(?:payment\s+)?processing|selling|transaction|marketplace|final value|platform)\s*(?:fee|commission)[^\d$]{0,30}\$\s?([0-9]{1,6}(?:\.[0-9]{2})?)/i,
-  );
+  const fee = marketplace === 'depop'
+    ? (() => {
+        const seen = new Set();
+        let total = 0;
+        for (const m of financialText.matchAll(/\b(depop|payment(?:\s+processing)?|processing|selling|transaction|marketplace|final value|platform)\s*(?:fee|commission)\s*:?\s*(?:\([^)]*\)\s*)?[-−]?\s*\$\s?([0-9]{1,6}(?:\.[0-9]{2})?)/gi)) {
+          const key = `${m[1].toLowerCase().replace(/\s+/g, ' ')}:${m[2]}`;
+          if (seen.has(key)) continue; // plain text and HTML may contain the same fee
+          seen.add(key);
+          total += Math.round(Number(m[2]) * 100);
+        }
+        return seen.size ? total : null;
+      })()
+    : money(/(?:(?:payment\s+)?processing|selling|transaction|marketplace|final value|platform)\s*(?:fee|commission)[^\d$]{0,30}\$\s?([0-9]{1,6}(?:\.[0-9]{2})?)/i);
   const shipLabel =
     money(/(?:prepaid\s+|shipping\s+)label[^\d$]{0,30}\$\s?([0-9]{1,6}(?:\.[0-9]{2})?)/i) ||
     money(/label\s+cost[^\d$]{0,30}\$\s?([0-9]{1,6}(?:\.[0-9]{2})?)/i);
