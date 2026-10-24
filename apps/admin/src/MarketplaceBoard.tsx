@@ -785,7 +785,7 @@ export function MarketplaceBoard({ channel, accessToken, money }: Props) {
                 <div className="actions">
                   {tab === 'listed' && <>
                     <button type="button" className="secondary" disabled={jobActive || !pickedCatalog.length} onClick={() => {
-                      if (window.confirm(`Delist ${pickedCatalog.length} on ${meta.title}? ${pickedCatalog.length === 1 ? 'The unit stays' : 'Units stay'} available in Floor and move to Not listed.`)) void startJob('delist', pickedCatalog);
+                      if (window.confirm(`Delist ${pickedCatalog.length} on ${meta.title}? ${pickedCatalog.length === 1 ? 'The unit stays' : 'Units stay'} available in Floor and move to Ready to list.`)) void startJob('delist', pickedCatalog);
                     }}>Delist</button>
                     <button type="button" className="secondary" disabled={jobActive || !pickedCatalog.length} onClick={() => {
                       setUseListedPrice(pickedCatalog.length > 1);
