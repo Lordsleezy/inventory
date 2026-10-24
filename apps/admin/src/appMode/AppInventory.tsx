@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { errText } from '../errText';
 
 type Filter = 'in_stock' | 'unfinished' | 'listed' | 'sold';
 
@@ -253,7 +254,7 @@ export function AppInventory({ client, money, onOpen, scrollRef }: Props) {
       });
     } catch (err) {
       setStats(null);
-      setStatsError(err instanceof Error ? err.message : String(err));
+      setStatsError(errText(err) || 'Could not load stats');
     } finally {
       setStatsLoading(false);
     }
