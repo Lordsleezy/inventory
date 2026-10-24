@@ -25,6 +25,11 @@ export function listingTitle(brand, model, unbranded = false) {
 /** Map a floor_products row into upc-lookup's merged shape. */
 export function productToMerged(row) {
   if (!row) return null;
+  const dimSources = row.dim_sources && typeof row.dim_sources === 'object' ? row.dim_sources : {};
+  const estimated = key => /estimat|\bai\b|gemini/i.test(String(dimSources[key] || dimSources[`package_${key}`] || ''));
+  const aspects = { ...(row.aspects && typeof row.aspects === 'object' ? row.aspects : {}) };
+  for (const key of ['product_height_in','product_width_in','product_depth_in','product_weight_lb'])
+    if (estimated(key)) delete aspects[key];
   const model =
     itemSpecificsFromLookup({
       model: row.model,
@@ -40,12 +45,12 @@ export function productToMerged(row) {
     model,
     description: clean(row.description),
     features: Array.isArray(row.features) ? row.features : [],
-    aspects: row.aspects && typeof row.aspects === "object" ? row.aspects : {},
+    aspects,
     package: {
-      length_in: num(row.package_length_in),
-      width_in: num(row.package_width_in),
-      height_in: num(row.package_height_in),
-      weight_lb: num(row.package_weight_lb),
+      length_in: estimated('length_in') ? null : num(row.package_length_in),
+      width_in: estimated('width_in') ? null : num(row.package_width_in),
+      height_in: estimated('height_in') ? null : num(row.package_height_in),
+      weight_lb: estimated('weight_lb') ? null : num(row.package_weight_lb),
     },
     images: Array.isArray(row.images) ? row.images.filter((u) => typeof u === "string") : [],
     category: clean(row.category),
