@@ -999,7 +999,7 @@ html.app-mode .receive-app .receive-confirm select,
 html.app-mode .receive-app .receive-confirm textarea { background: #2c2c2e; color: #fff; border: 1px solid #3a3a3c; border-radius: 9px; min-height: 42px; }
 html.app-mode .receive-app .receive-confirm-details { background: #1c1c1e; border: 0; }
 html.app-mode .receive-app .receive-confirm-details summary { min-height: 44px; box-sizing: border-box; }
-html.app-mode .receive-app .receive-confirm-bottom { position: fixed; left: 0; right: 0; bottom: calc(56px + env(safe-area-inset-bottom, 0px)); background: #111113; border-top: 1px solid #3a3a3c; box-shadow: 0 -6px 24px #0009; margin: 0; padding: 10px 16px; }
+html.app-mode .receive-app .receive-confirm-bottom { position: relative; left: auto; right: auto; bottom: auto; background: #111113; border-top: 1px solid #3a3a3c; box-shadow: 0 -6px 24px #0009; margin: 0; padding: 10px 16px; }
 html.app-mode .receive-app .receive-confirm-bottom > button { background: #0a84ff; color: #fff; border: 0; border-radius: 10px; }
 html.app-mode .receive-app .receive-confirm-prices summary { color: #d1e7ff; }
 html.app-mode .receive-app .receive-confirm-bottom > small { color: #ffb366; }
