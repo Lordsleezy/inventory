@@ -1,7 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { isKioskShell, scannerInputMode } from './kiosk';
+import {
+  bindHidWedgeListener,
+  focusScannerField,
+  isAndroidStoreDevice,
+  isKioskShell,
+  scannerFieldStartsReadOnly,
+  scannerInputMode,
+} from './kiosk';
+import { StoreNumPad } from './StoreNumPad';
+
+/** Store-phone number fields: never focus (readOnly + focus freezes Gboard). */
+function padPointerDown(storePad: boolean, e: React.PointerEvent | React.MouseEvent) {
+  if (!storePad) return;
+  e.preventDefault();
+}
 import { floorFunctionUrl } from './floorApi';
 import { reportClientError } from './clientLog';
 import { categoryDefaultCostCents, priceFloorCents, suggestAskCents } from './scanPricing';
@@ -541,6 +555,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   const missPromptedFor = useRef<string | null>(null);
 
   const upcInput = useRef<HTMLInputElement>(null);
+  const askInput = useRef<HTMLInputElement>(null);
   const cameraFile = useRef<HTMLInputElement>(null);
   const takePhotoFile = useRef<HTMLInputElement>(null);
   const choosePhotoFile = useRef<HTMLInputElement>(null);
@@ -548,6 +563,13 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   /** Stable key for IndexedDB photo stash (survives camera-app process death on store phones). */
   const photoSessionKey = useRef(`manual-${Date.now()}`);
   const [photoBusy, setPhotoBusy] = useState(false);
+  // Android: never use inputMode="none" + focus (freezes Gboard until reboot). Soft keyboard
+  // only after an explicit tap; HID wedges use window-level capture (bindHidWedgeListener).
+  const [upcTyping, setUpcTyping] = useState(() => !scannerFieldStartsReadOnly());
+  const androidStore = isAndroidStoreDevice();
+  /** Store-phone on-screen pad — avoids broken Gboard for price / dims after scan or on first tap. */
+  const [numPadField, setNumPadField] = useState<'ask' | 'length' | 'width' | 'height' | 'weight' | null>(null);
+  const storePad = Boolean(androidStore && appChrome);
 
   function openBarcodeCamera() {
     // Phones / installed PWA: native capture is far more reliable than getUserMedia + BarcodeDetector.
@@ -588,11 +610,14 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   );
   const suggestion = useMemo(() => suggestAskCents(retail?.cents ?? null, floor), [retail, floor]);
 
-  // Only keep the scan box focused when idle. Refocusing during form edit pops the
-  // mobile keyboard every time the user scrolls (body briefly becomes activeElement).
+  // Keep the scan box focused for HID wedges when idle — never on Android (programmatic
+  // focus freezes Gboard until reboot). Android uses bindHidWedgeListener instead.
+  // Never focus while the unit form is open (Price / Brand need a clean IME).
   const focusUpc = () => {
     if (manual || formOpen || modalOpen.current) return;
-    requestAnimationFrame(() => upcInput.current?.focus());
+    if (androidStore) return;
+    if (upcTyping) return;
+    requestAnimationFrame(() => focusScannerField(upcInput.current, { softKeyboard: false }));
   };
   const update = (key: keyof Form, value: string) => {
     if (key === 'ask') askTouched.current = true;
@@ -612,10 +637,31 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   };
 
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
-  useEffect(() => { focusUpc(); }, []);
   useEffect(() => {
-    if (formOpen) upcInput.current?.blur();
-  }, [formOpen, loadedId]);
+    if (!manual && !formOpen) focusUpc();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // Android: capture Bluetooth wedge only while idle on the scan box — never while the
+  // unit form / manual entry is open (first Brand/Price tap was freezing Gboard).
+  useEffect(() => {
+    if (!androidStore || manual || formOpen) return;
+    return bindHidWedgeListener({
+      active: () => !upcTyping && !modalOpen.current && Boolean(accessToken),
+      onScan: (code) => { enqueue(code); },
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [androidStore, manual, formOpen, upcTyping, accessToken]);
+  useEffect(() => {
+    if (!formOpen) return;
+    // Do not blurActiveInput() / effect-blur on Android — that races the associate's
+    // first tap (manual Brand / Price) and freezes Gboard until reboot.
+    if (!androidStore) {
+      const el = upcInput.current;
+      if (el && document.activeElement === el) el.blur();
+    }
+    setUpcTyping(false);
+    setNumPadField(null);
+  }, [formOpen, loadedId, androidStore]);
 
   async function loadOptions() {
     const { data, error: e } = await client.rpc('portal_receive_options');
@@ -763,7 +809,10 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     setReadyToList(false);
     setReadyAmazonTiktok(false);
     setDoNotList(false);
-    upcInput.current?.blur();
+    setUpcTyping(false);
+    setNumPadField(null);
+    // Avoid effect-driven blur on Android (wedges Gboard). Unmount scan box instead when formOpen.
+    if (!androidStore) upcInput.current?.blur();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current?.id, current?.status, manual, loadedId]);
 
@@ -775,13 +824,17 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
 
   function toggleManual() {
     setError(''); setWarning('');
+    setNumPadField(null);
     if (!manual) {
       photoSessionKey.current = `manual-${storeId}`;
+      // Leaving the scan box: drop typing/focus state before unmount so Gboard isn't wedged.
+      setUpcTyping(false);
       setManual(true);
       return;
     }
     setManual(false);
     setLoadedId(null);
+    setUpcTyping(!scannerFieldStartsReadOnly());
     resetEntry();
   }
 
@@ -1259,26 +1312,47 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     <div className="receive-next">
       <div className="receive-sku-block">
         <div><div className="eyebrow">NEXT AVAILABLE SKU</div><strong>{options?.next_sku || 'Loading…'}</strong></div>
-        {!manual && <label className="receive-upc">Scan UPC
+        {!manual && formOpen && androidStore && (
+          <p className="hint receive-scan-idle">Working on {current?.upc || 'this item'} — tap a field below (number pad for price).</p>
+        )}
+        {/* Unmount the scan box on Android once the form is open — a lingering focused/readOnly
+            UPC input is what wedges Gboard on the first Brand/Price tap (scan and manual). */}
+        {!manual && !(androidStore && formOpen) && <label className="receive-upc">Scan UPC
           <input
             ref={upcInput}
             value={draft}
             onChange={e => setDraft(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); enqueue(draft); } }}
+            onClick={() => {
+              if (formOpen) return;
+              // Explicit tap = user wants the soft keyboard.
+              if (androidStore || isKioskShell()) {
+                setUpcTyping(true);
+                requestAnimationFrame(() => focusScannerField(upcInput.current, { softKeyboard: true }));
+              }
+            }}
             onBlur={() => {
-              // Do not steal focus while the unit form is open (scroll would re-open the keyboard).
-              if (formOpen || manual || modalOpen.current) return;
+              // Never steal focus back on Android — that fight freezes the system keyboard.
+              if (androidStore || formOpen || manual || modalOpen.current) return;
               setTimeout(() => {
-                if (modalOpen.current || formOpen) return;
-                if (!document.activeElement || document.activeElement === document.body) upcInput.current?.focus();
+                if (modalOpen.current || formOpen || androidStore) return;
+                if (!document.activeElement || document.activeElement === document.body) {
+                  focusScannerField(upcInput.current);
+                }
               }, 0);
             }}
-            autoFocus={!formOpen}
-            inputMode={scannerInputMode()}
+            autoFocus={!formOpen && !androidStore && !scannerFieldStartsReadOnly()}
+            readOnly={!upcTyping}
+            inputMode={androidStore && !upcTyping ? undefined : (upcTyping ? 'numeric' : scannerInputMode())}
+            data-hid-wedge={androidStore && !upcTyping ? '1' : undefined}
             autoComplete="off"
             enterKeyHint="done"
-            placeholder={isKioskShell() ? 'Scan barcode' : 'Scan or type · Enter'}
-            disabled={!accessToken || formOpen}
+            placeholder={
+              isKioskShell() || androidStore
+                ? (upcTyping ? 'Type UPC · Enter' : 'Scan barcode (tap to type)')
+                : 'Scan or type · Enter'
+            }
+            disabled={!accessToken}
           />
         </label>}
         {!manual && !formOpen && <div className="actions">
@@ -1346,7 +1420,19 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
             : (retail && !askTouched.current
               ? ` (suggested from ${retail.source}${retail.asOf ? ` · ${retail.asOf.slice(0, 10)}` : ''} — edit if needed)`
               : ' (no source price — type it)')}
-          <input inputMode="decimal" placeholder="24.99" value={form.ask} onChange={e => update('ask', e.target.value)} autoComplete="off" />
+          <input
+            ref={askInput}
+            inputMode={storePad ? undefined : 'decimal'}
+            enterKeyHint="done"
+            placeholder="24.99"
+            value={form.ask}
+            onChange={e => update('ask', e.target.value)}
+            onPointerDown={(e) => padPointerDown(storePad, e)}
+            onClick={() => { if (storePad) setNumPadField('ask'); }}
+            autoComplete="off"
+            readOnly={storePad || undefined}
+            tabIndex={storePad ? 0 : undefined}
+          />
         </label>
 
         <div className={`unit-edit-wide receive-cond${liveMissing.includes('condition') ? ' receive-need' : ''}`} role="radiogroup" aria-label="Condition">
@@ -1368,7 +1454,15 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
 
         <label className={liveMissing.includes('brand') ? 'receive-need' : undefined}>
           Brand{liveMissing.includes('brand') ? ' (needed to list)' : ''}
-          <input value={form.unbranded ? 'Unbranded' : form.brand} disabled={form.unbranded} onChange={e => update('brand', e.target.value)} />
+          <input
+            value={form.unbranded ? 'Unbranded' : form.brand}
+            disabled={form.unbranded}
+            onChange={e => update('brand', e.target.value)}
+            autoComplete="off"
+            enterKeyHint="next"
+            autoCapitalize="words"
+            // No programmatic focus on Android — native tap focus only (double-focus froze Gboard).
+          />
         </label>
         <label className="mboard-inline">
           <input type="checkbox" checked={form.unbranded} onChange={e => setForm(p => {
@@ -1409,20 +1503,64 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
 
         <label className={liveMissing.includes('weight + box dimensions') ? 'receive-need' : undefined}>
           Length (in){liveMissing.includes('weight + box dimensions') ? ' (needed to list)' : ''}
-          <input inputMode="decimal" value={form.length} onChange={e => update('length', e.target.value)} />
+          <input
+            inputMode={storePad ? undefined : 'decimal'}
+            value={form.length}
+            onChange={e => update('length', e.target.value)}
+            onPointerDown={(e) => padPointerDown(storePad, e)}
+            onClick={() => { if (storePad) setNumPadField('length'); }}
+            readOnly={storePad || undefined}
+          />
         </label>
         <label className={liveMissing.includes('weight + box dimensions') ? 'receive-need' : undefined}>
           Width (in)
-          <input inputMode="decimal" value={form.width} onChange={e => update('width', e.target.value)} />
+          <input
+            inputMode={storePad ? undefined : 'decimal'}
+            value={form.width}
+            onChange={e => update('width', e.target.value)}
+            onPointerDown={(e) => padPointerDown(storePad, e)}
+            onClick={() => { if (storePad) setNumPadField('width'); }}
+            readOnly={storePad || undefined}
+          />
         </label>
         <label className={liveMissing.includes('weight + box dimensions') ? 'receive-need' : undefined}>
           Height (in)
-          <input inputMode="decimal" value={form.height} onChange={e => update('height', e.target.value)} />
+          <input
+            inputMode={storePad ? undefined : 'decimal'}
+            value={form.height}
+            onChange={e => update('height', e.target.value)}
+            onPointerDown={(e) => padPointerDown(storePad, e)}
+            onClick={() => { if (storePad) setNumPadField('height'); }}
+            readOnly={storePad || undefined}
+          />
         </label>
         <label className={liveMissing.includes('weight + box dimensions') ? 'receive-need' : undefined}>
           Weight (lb)
-          <input inputMode="decimal" value={form.weight} onChange={e => update('weight', e.target.value)} />
+          <input
+            inputMode={storePad ? undefined : 'decimal'}
+            value={form.weight}
+            onChange={e => update('weight', e.target.value)}
+            onPointerDown={(e) => padPointerDown(storePad, e)}
+            onClick={() => { if (storePad) setNumPadField('weight'); }}
+            readOnly={storePad || undefined}
+          />
         </label>
+
+        {storePad && numPadField && (
+          <div className="unit-edit-wide store-num-pad-wrap">
+            <StoreNumPad
+              value={
+                numPadField === 'ask' ? form.ask
+                  : numPadField === 'length' ? form.length
+                  : numPadField === 'width' ? form.width
+                  : numPadField === 'height' ? form.height
+                  : form.weight
+              }
+              onChange={(next) => update(numPadField === 'ask' ? 'ask' : numPadField, next)}
+              ariaLabel={numPadField === 'ask' ? 'Price pad' : `${numPadField} pad`}
+            />
+          </div>
+        )}
 
         <label className={`unit-edit-wide${liveMissing.includes('item specifics') ? ' receive-need' : ''}`}>
           Item specifics{liveMissing.includes('item specifics') ? ' (needed to list)' : (formatAspectsLine(merged?.aspects) && !text(merged?.model) ? ' (from UPC lookup)' : '')}
@@ -1568,7 +1706,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         <p className="hint">Yes receives it with normal show defaults; it moves to Online → Ready once the board criteria are met.
           {form.costEstimate ? ` Cost uses ${floor.costLabel} until you edit it.` : ''}</p>
         <div className="actions">
-          <button type="button" disabled={busy} autoFocus onClick={() => { const p = parse(); if (p) void receive(p, null); }}>Yes — receive &amp; list</button>
+          <button type="button" disabled={busy} autoFocus={!androidStore} onClick={() => { const p = parse(); if (p) void receive(p, null); }}>Yes — receive &amp; list</button>
           <button type="button" className="secondary" disabled={busy} onClick={() => setDialog('reason')}>No</button>
           <button type="button" className="text-button" onClick={() => setDialog(null)}>Back</button>
         </div>
@@ -1612,7 +1750,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           }}
         />
         <div className="actions">
-          <button type="button" disabled={photoIdBusy} autoFocus onClick={() => missPhotoFile.current?.click()}>
+          <button type="button" disabled={photoIdBusy} autoFocus={!androidStore} onClick={() => missPhotoFile.current?.click()}>
             Yes — take photo
           </button>
           <button type="button" className="secondary" disabled={photoIdBusy} onClick={() => setDialog(null)}>
@@ -1647,7 +1785,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
             placeholder="24.99"
             value={form.ask}
             onChange={e => { askTouched.current = true; update('ask', e.target.value); }}
-            autoFocus
+            autoFocus={!androidStore}
           />
         </label>
         <div className="actions">

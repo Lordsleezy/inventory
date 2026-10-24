@@ -236,8 +236,8 @@ export function LookupTestPage({ accessToken }: Props) {
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={onKeyDown}
-            autoFocus
-            inputMode={scannerInputMode() === 'none' ? 'none' : 'numeric'}
+            autoFocus={!isKioskShell()}
+            inputMode={scannerInputMode() || 'numeric'}
             autoComplete="off"
             enterKeyHint="done"
             placeholder={isKioskShell() ? 'Scan barcode' : 'Scan or type · Enter'}
