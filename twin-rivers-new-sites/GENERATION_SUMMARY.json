@@ -1,0 +1,37 @@
+[
+  {
+    "repo": "fencingwestsacramento-site",
+    "domain": "https://fencingwestsacramento.com",
+    "urls": 21,
+    "dest": "/workspace/twin-rivers-new-sites/repos/fencingwestsacramento-site",
+    "doorwayNote": null
+  },
+  {
+    "repo": "deckbuildingsacramento-site",
+    "domain": "https://deckbuildingsacramento.com",
+    "urls": 16,
+    "dest": "/workspace/twin-rivers-new-sites/repos/deckbuildingsacramento-site",
+    "doorwayNote": null
+  },
+  {
+    "repo": "gateinstallationsacramento-site",
+    "domain": "https://gateinstallationsacramento.com",
+    "urls": 16,
+    "dest": "/workspace/twin-rivers-new-sites/repos/gateinstallationsacramento-site",
+    "doorwayNote": null
+  },
+  {
+    "repo": "citrusheightsfencing-site",
+    "domain": "https://citrusheightsfencing.com",
+    "urls": 21,
+    "dest": "/workspace/twin-rivers-new-sites/repos/citrusheightsfencing-site",
+    "doorwayNote": null
+  },
+  {
+    "repo": "fencessacramentoca-site",
+    "domain": "https://fencessacramentoca.com",
+    "urls": 24,
+    "dest": "/workspace/twin-rivers-new-sites/repos/fencessacramentoca-site",
+    "doorwayNote": "RISK FLAG: A Sacramento-wide fencing domain can overlap city sites. This site is intentionally scoped to City of Sacramento neighborhoods + commercial/multifamily, and links users to dedicated Twin Rivers city domains for Roseville/Rocklin/Folsom/Elk Grove/etc. instead of cloning those pages."
+  }
+]

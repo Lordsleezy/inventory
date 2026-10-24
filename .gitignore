@@ -12,7 +12,7 @@ logs/
 !.env.example
 !**/.env.example
 exports/
-data/
+/data/
 *.sqlite
 *.sqlite3
 *.db
@@ -36,3 +36,6 @@ apps/pos/src-tauri/gen/
 
 netlify/.amazon-*.tmp
 
+
+# Generated Twin Rivers site builds
+twin-rivers-new-sites/repos/*/dist/
