@@ -4,7 +4,7 @@ import { errText } from './errText';
 import { shortError } from './appMode/shortError';
 
 export type BoardChannel = 'ebay' | 'amazon' | 'tiktok';
-type Tab = 'listed' | 'not_listed' | 'sold';
+type Tab = 'listed' | 'ready' | 'not_listed' | 'sold';
 
 type CatalogRow = {
   key: string;
@@ -376,7 +376,13 @@ export function MarketplaceBoard({ channel, accessToken, money }: Props) {
     return () => window.clearInterval(timer);
   }, [job, pollJob]);
 
-  const source = tab === 'listed' ? listed : tab === 'not_listed' ? notListed : sold;
+  /** Meet channel requirements, not live yet — split out of Not listed. */
+  const readyToList = useMemo(() => notListed.filter((row) => !row.blocked), [notListed]);
+  const notReady = useMemo(() => notListed.filter((row) => row.blocked), [notListed]);
+  const source = tab === 'listed' ? listed
+    : tab === 'ready' ? readyToList
+    : tab === 'not_listed' ? notReady
+    : sold;
   const filtered = useMemo(() => source.filter((row) => matches(row, query)), [source, query]);
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE));
   const safePage = Math.min(page, pages - 1);
@@ -751,7 +757,8 @@ export function MarketplaceBoard({ channel, accessToken, money }: Props) {
         <div className="mboard-tabs" role="tablist">
           {([
             ['listed', 'Currently listed', listed.length],
-            ['not_listed', 'Not listed', notListed.length],
+            ['ready', 'Ready to list', readyToList.length],
+            ['not_listed', 'Not listed', notReady.length],
             ['sold', 'Sold', sold.length],
           ] as const).map(([id, label, count]) => (
             <button key={id} type="button" role="tab" aria-selected={tab === id} className={tab === id ? 'on' : ''} onClick={() => { setTab(id); setPage(0); setSelected(new Set()); }}>
@@ -787,12 +794,14 @@ export function MarketplaceBoard({ channel, accessToken, money }: Props) {
                     }}>Mark sold</button>
                     <button type="button" className="mboard-danger" disabled={jobActive || !pickedCatalog.length} onClick={() => setConfirmDelete(pickedCatalog)}>Delete</button>
                   </>}
-                  {tab === 'not_listed' && <>
-                    <button type="button" className="mboard-push" disabled={jobActive || !pickedCatalog.some((row) => !row.blocked)} onClick={() => {
-                      const rows = pickedCatalog.filter((row) => !row.blocked);
-                      if (!rows.length) return;
-                      if (window.confirm(`List ${rows.length} on ${meta.title}? They publish one at a time, about 10 seconds apart.`)) void startJob('list', rows);
+                  {tab === 'ready' && <>
+                    <button type="button" className="mboard-push" disabled={jobActive || !pickedCatalog.length} onClick={() => {
+                      if (!pickedCatalog.length) return;
+                      if (window.confirm(`List ${pickedCatalog.length} on ${meta.title}? They publish one at a time, about 10 seconds apart.`)) void startJob('list', pickedCatalog);
                     }}>List selected</button>
+                    <button type="button" className="mboard-danger" disabled={jobActive || !pickedCatalog.length} onClick={() => setConfirmDelete(pickedCatalog)}>Delete</button>
+                  </>}
+                  {tab === 'not_listed' && <>
                     <button type="button" className="mboard-danger" disabled={jobActive || !pickedCatalog.length} onClick={() => setConfirmDelete(pickedCatalog)}>Delete</button>
                   </>}
                   {tab === 'sold' && <>
@@ -815,11 +824,17 @@ export function MarketplaceBoard({ channel, accessToken, money }: Props) {
               <div className="mboard-empty"><strong>Loading…</strong><p>Pulling {meta.title} from Floor and the live marketplace.</p></div>
             ) : visible.length === 0 ? (
               <div className="mboard-empty">
-                <strong>{tab === 'listed' ? `No live ${meta.title} listings` : tab === 'not_listed' ? 'Nothing waiting to list' : `No ${meta.title} sales this quarter`}</strong>
+                <strong>
+                  {tab === 'listed' ? `No live ${meta.title} listings`
+                    : tab === 'ready' ? `Nothing ready to list on ${meta.title}`
+                    : tab === 'not_listed' ? 'Nothing blocked from listing'
+                    : `No ${meta.title} sales this quarter`}
+                </strong>
                 <p>
-                  {tab === 'listed' && channel === 'amazon' && 'Amazon has no live offers right now. Ready units are on Not listed.'}
+                  {tab === 'listed' && channel === 'amazon' && 'Amazon has no live offers right now. Complete units are on Ready to list.'}
                   {tab === 'listed' && channel !== 'amazon' && 'Listings show up here as soon as the marketplace reports them live.'}
-                  {tab === 'not_listed' && 'Units that are not live here show up here. Push is only available when that marketplace’s required fields are filled.'}
+                  {tab === 'ready' && `In stock, not live on ${meta.title}, and every required field is filled — push from here.`}
+                  {tab === 'not_listed' && 'Units missing photos, price, weight, category, or other required fields. Fix in Inventory, then they move to Ready to list.'}
                   {tab === 'sold' && 'Sales for the quarter selected above show up here. Voided sales stay out, same as Reports.'}
                 </p>
               </div>
@@ -850,8 +865,8 @@ export function MarketplaceBoard({ channel, accessToken, money }: Props) {
                   </div>
                   <div className="mboard-actions">
                     {catalog && <button type="button" className="secondary" onClick={() => void openEdit(catalog)}>Edit</button>}
-                    {catalog && tab === 'not_listed' && (
-                      <button type="button" className="mboard-push" disabled={jobActive || catalog.blocked || !catalog.sku} onClick={() => {
+                    {catalog && tab === 'ready' && (
+                      <button type="button" className="mboard-push" disabled={jobActive || !catalog.sku} onClick={() => {
                         if (window.confirm(`Push SKU ${catalog.sku} live on ${meta.title}?`)) void startJob('list', [catalog]);
                       }}>Push</button>
                     )}
