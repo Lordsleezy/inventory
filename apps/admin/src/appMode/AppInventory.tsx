@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { AttentionSection } from '../navigation';
 import { ATTENTION_SECTIONS, NeedsAttentionPanel, useAttentionCounts } from '../NeedsAttentionPanel';
+import { reviewReasonLabel } from '../inventoryReview';
 
 /** Same four subtabs as desktop Inventory. Unfinished replaces the old More → Needs attention. */
 type Filter = 'in_stock' | 'sold' | 'unfinished' | 'defective';
@@ -101,8 +102,10 @@ function needs(u: Row): string | null {
   // Not-for-sale units only ever need a brand.
   if (u.not_for_sale) return u.brand?.trim() ? null : 'No brand';
   if (u.missing) {
-    const first = u.missing.find((k) => MISSING_LABEL[k]);
-    if (first) return MISSING_LABEL[first];
+    const review = u.missing.find((k) => reviewReasonLabel(k));
+    if (review) return reviewReasonLabel(review);
+    const first = u.missing.find((k) => MISSING_LABEL[k] || reviewReasonLabel(k));
+    if (first) return MISSING_LABEL[first] || reviewReasonLabel(first);
   }
   if (u.state === 'sold' || u.defective) return null;
   if (!u.photo_count) return 'No photos';

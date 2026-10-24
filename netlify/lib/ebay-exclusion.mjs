@@ -9,4 +9,13 @@ export function ebayNeverList(unit) {
 
 export function assertEbayListable(unit) {
   if (ebayNeverList(unit)) throw new Error(`SKU ${unit?.sku || ''} is excluded from eBay listing.`);
+  const reason = ebayReviewReason(unit);
+  if (reason) throw new Error(`SKU ${unit?.sku || ''} needs eBay listing review: ${reason}.`);
+}
+
+export function ebayReviewReason(unit) {
+  const specs = typeof unit?.listing_specs === 'string'
+    ? JSON.parse(unit.listing_specs || '{}')
+    : unit?.listing_specs || {};
+  return specs.ebay_review_reason || null;
 }

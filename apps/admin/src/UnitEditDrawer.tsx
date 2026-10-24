@@ -4,6 +4,7 @@ import { floorFunctionUrl } from './floorApi';
 import { scannerInputMode } from './kiosk';
 import { reportClientError } from './clientLog';
 import { errText } from './errText';
+import { reviewReasonLabel } from './inventoryReview';
 
 type Photo = { id: number; path: string; is_primary: boolean };
 type Unit = Record<string, unknown>;
@@ -272,6 +273,17 @@ export function UnitEditDrawer({
     setMsg('Saved.');
   }
 
+  async function clearEbayReview() {
+    if (!canDelete) return;
+    setBusy(true); setError(''); setMsg('');
+    const { data, error: e } = await client.rpc('portal_clear_ebay_review', { p_sku: sku });
+    setBusy(false);
+    if (e) { setError(e.message); return; }
+    const saved = data as { listing_specs?: unknown };
+    onSaved({ ...unit, listing_specs: saved.listing_specs || {} });
+    setMsg('eBay review cleared. Recheck the listing details before publishing.');
+  }
+
   async function removeUnit() {
     if (!canDelete) return;
     if (!window.confirm(`Delete SKU ${sku} permanently?\n\nThis removes it from inventory. Sales history stays. If the unit still has an open sale, void that first.`)) {
@@ -334,6 +346,9 @@ export function UnitEditDrawer({
 
   const conditions = choices(options?.conditions);
   const tests = choices(options?.test_statuses);
+  const specs = typeof unit.listing_specs === 'object' && unit.listing_specs !== null
+    ? unit.listing_specs as Record<string, unknown> : {};
+  const reviewReason = reviewReasonLabel(specs.ebay_review_reason);
   const missing: string[] = [];
   if (blank(form.title)) missing.push('title');
   if (blank(form.model)) missing.push('model');
@@ -364,7 +379,8 @@ export function UnitEditDrawer({
         )}
         {error && <div className="alert" role="alert">{error}</div>}
         {msg && <p className="hint">{msg}</p>}
-        <p className="hint">{missing.length === 0 ? 'Looks complete for listing.' : `Still missing: ${missing.join(', ')}. Scan a UPC to fill blanks.`}</p>
+        <p className="hint">{reviewReason ? `eBay listing needs review: ${reviewReason}.` : missing.length === 0 ? 'Looks complete for listing.' : `Still missing: ${missing.join(', ')}. Scan a UPC to fill blanks.`}</p>
+        {reviewReason && canDelete ? <button type="button" className="secondary" disabled={busy} onClick={() => void clearEbayReview()}>I verified this issue · Clear eBay review</button> : null}
 
         <h3>Photos</h3>
         {photos.length ? (

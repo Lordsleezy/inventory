@@ -14,3 +14,9 @@ test('ordinary units are still listable', () => {
   assert.equal(ebayNeverList(unit), false);
   assert.doesNotThrow(() => assertEbayListable(unit));
 });
+
+test('a unit awaiting eBay review cannot be published before review is cleared', () => {
+  const unit = { sku: '11695', listing_specs: { ready_to_list: true, ebay_review_reason: 'review_hygiene' } };
+  assert.throws(() => assertEbayListable(unit), /needs eBay listing review/);
+  assert.equal(unit.listing_specs.ready_to_list, true);
+});

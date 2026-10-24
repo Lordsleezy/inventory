@@ -8,6 +8,7 @@ import { FloorProductsPage } from './FloorProductsPage';
 import { MarkerMatPage } from './MarkerMatPage';
 import type { AttentionSection, InventoryTab } from './navigation';
 import { errText } from './errText';
+import { reviewReasonLabel } from './inventoryReview';
 
 type Row = {
   sku: string; brand: string; model: string; title: string; condition: string | null;
@@ -37,7 +38,11 @@ type Props = {
 const LIST_TABS: [InventoryTab, string][] = [['in-stock', 'In stock'], ['sold', 'Sold'], ['unfinished', 'Unfinished'], ['defective', 'Defective']];
 const TOOL_TABS: [InventoryTab, string][] = [['receive', 'Receive'], ['lookup-test', 'Lookup test'], ['products', 'Products'], ['measure-mat', 'Measure mat']];
 const MISSING_LABEL: Record<string, string> = { spec: 'weight & box', upc: 'UPC', specifics: 'item specifics' };
-const missingText = (m: string[]) => m.map(k => MISSING_LABEL[k] || k).join(', ');
+const missingText = (m: string[]) => {
+  const fields = m.filter(k => !reviewReasonLabel(k));
+  const reviews = m.map(reviewReasonLabel).filter((x): x is string => Boolean(x));
+  return [fields.length ? `Missing ${fields.map(k => MISSING_LABEL[k] || k).join(', ')}` : '', ...reviews].filter(Boolean).join(' · ');
+};
 
 const label = (s: string) => s === 'available' ? 'In stock' : s.replace(/_/g, ' ').replace(/^./, c => c.toUpperCase());
 const name = (u: Row) => [u.brand, u.model].filter(Boolean).join(' ') || u.title || 'Untitled unit';
@@ -172,7 +177,7 @@ export function InventoryPage({
       {list?.items.map(u => <button type="button" className="inventory-row" key={u.sku} disabled={hideMoney} onClick={() => { if (!hideMoney) setSelected(u.sku); }}>
         <span className="inventory-photo">{u.photo_path && urls[u.photo_path] ? <img loading="lazy" src={urls[thumb(u.photo_path)] || urls[u.photo_path]} onError={e => { const fallback = urls[u.photo_path!]; if (e.currentTarget.src !== fallback) e.currentTarget.src = fallback; }} alt="" /> : 'No photo'}</span>
         <span className="inventory-identity"><strong>{name(u)}</strong><small>SKU {u.sku}{u.title && u.title !== name(u) ? ` · ${u.title}` : ''}</small></span>
-        <span className="inventory-meta">{u.condition || 'No grade'}<small>{u.not_for_sale ? 'Not for sale' : listTab === 'sold' && u.sold_at ? `Sold ${stamp(u.sold_at)}` : label(u.state)}</small>{listTab === 'unfinished' && !!u.missing?.length && <small className="inventory-missing">Missing {missingText(u.missing)}</small>}</span>
+        <span className="inventory-meta">{u.condition || 'No grade'}<small>{u.not_for_sale ? 'Not for sale' : listTab === 'sold' && u.sold_at ? `Sold ${stamp(u.sold_at)}` : label(u.state)}</small>{listTab === 'unfinished' && !!u.missing?.length && <small className="inventory-missing">{missingText(u.missing)}</small>}</span>
         <span className="inventory-location">{u.locations || 'Unassigned'}</span>
         {hideMoney ? <span className="inventory-money" /> : listTab === 'sold'
           ? <span className="inventory-money"><strong>{u.sold_price_cents == null ? '—' : money(u.sold_price_cents)}</strong><small>{u.acquisition_cost_cents == null ? 'Cost missing' : `Cost ${money(u.acquisition_cost_cents)}`}</small></span>
