@@ -84,8 +84,11 @@ export function AppMoreHome({
 
       try {
         const day = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
-        const { data } = await client.rpc('portal_sales', { p_start: day, p_end: day });
-        if (alive) setSalesToday(Array.isArray(data) ? new Set((data as { ticket_id?: string }[]).map((r) => r.ticket_id)).size : 0);
+        const { data } = await client.rpc('portal_sales', salesRange(day, day));
+        if (alive) {
+          const rows = Array.isArray(data) ? data as { ticket_key?: string }[] : [];
+          setSalesToday(new Set(rows.map((r) => r.ticket_key).filter(Boolean)).size);
+        }
       } catch { /* ignore */ }
 
       // Prefetch channel boards in parallel (Floor-fast catalog) so opening eBay is warm.
@@ -257,28 +260,66 @@ export function AppAttention({ client, storeId, money, stamp, onBack }: {
   );
 }
 
+/** LA calendar day → exclusive portal_sales window (p_from / p_to). */
+function salesRange(startDay: string, endDayInclusive: string) {
+  const zone = 'America/Los_Angeles';
+  const midnight = (d: string) => {
+    const [y, m, a] = d.split('-').map(Number);
+    let t = Date.UTC(y, m - 1, a, 8);
+    const partsFmt = new Intl.DateTimeFormat('en-US', {
+      timeZone: zone, year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', hourCycle: 'h23',
+    });
+    for (let i = 0; i < 3; i++) {
+      const p = Object.fromEntries(partsFmt.formatToParts(new Date(t)).map((x) => [x.type, Number(x.value)]));
+      const seen = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute);
+      t += Date.UTC(y, m - 1, a) - seen;
+    }
+    return new Date(t).toISOString();
+  };
+  const nextDay = (d: string) => {
+    const x = new Date(`${d}T12:00:00Z`);
+    x.setUTCDate(x.getUTCDate() + 1);
+    return x.toISOString().slice(0, 10);
+  };
+  return { p_from: midnight(startDay), p_to: midnight(nextDay(endDayInclusive)) };
+}
+
+type LiveSaleLine = {
+  ticket_key: string;
+  sold_at: string;
+  channel: string;
+  price_cents: number;
+  profit_cents?: number | null;
+  actor_name?: string | null;
+  title?: string | null;
+};
+
 export function AppLiveSales({ client, money, stamp, onBack }: {
   client: SupabaseClient; money: (n: number) => string; stamp: (s: string) => string; onBack: () => void;
 }) {
   const [range, setRange] = useState<'today' | 'week' | 'month'>('today');
-  const [rows, setRows] = useState<{ ticket_id: string; sold_at: string; channel: string; total_cents: number; profit_cents?: number; sold_by?: string; title?: string }[]>([]);
+  const [rows, setRows] = useState<LiveSaleLine[]>([]);
   const [error, setError] = useState('');
 
   useEffect(() => {
     let alive = true;
     void (async () => {
+      setError('');
       try {
         const end = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
         const d = new Date();
         if (range === 'week') d.setDate(d.getDate() - 6);
         if (range === 'month') d.setDate(1);
         const start = range === 'today' ? end : d.toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
-        const { data, error: e } = await client.rpc('portal_sales', { p_start: start, p_end: end });
+        const { data, error: e } = await client.rpc('portal_sales', salesRange(start, end));
         if (e) throw e;
         if (!alive) return;
-        setRows((data || []) as typeof rows);
+        setRows((data || []) as LiveSaleLine[]);
       } catch (e) {
-        if (alive) setError(shortError(errText(e)));
+        if (alive) {
+          setRows([]);
+          setError(shortError(errText(e)));
+        }
       }
     })();
     return () => { alive = false; };
@@ -287,9 +328,9 @@ export function AppLiveSales({ client, money, stamp, onBack }: {
   const summary = useMemo(() => {
     const tickets = new Map<string, { total: number; profit: number; channel: string; at: string; who: string; title: string }>();
     for (const r of rows) {
-      const id = r.ticket_id || String(r.sold_at);
-      const cur = tickets.get(id) || { total: 0, profit: 0, channel: r.channel, at: r.sold_at, who: r.sold_by || '', title: r.title || '' };
-      cur.total += r.total_cents || 0;
+      const id = r.ticket_key || String(r.sold_at);
+      const cur = tickets.get(id) || { total: 0, profit: 0, channel: r.channel, at: r.sold_at, who: r.actor_name || '', title: r.title || '' };
+      cur.total += r.price_cents || 0;
       cur.profit += r.profit_cents || 0;
       tickets.set(id, cur);
     }
