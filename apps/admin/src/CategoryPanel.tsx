@@ -13,6 +13,7 @@ export function CategoryPanel({ client, storeId, initialSku, onSaved }: Props) {
   const [rows, setRows] = useState<Row[]>([]);
   const [selected, setSelected] = useState<string[]>(initialSku ? [initialSku] : []);
   const [choices, setChoices] = useState<Partial<Record<Channel, Choice[]>>>({});
+  const [selectedChoices, setSelectedChoices] = useState<Partial<Record<Channel, Choice>>>({});
   const [search, setSearch] = useState('');
   const [channel, setChannel] = useState<Channel>('ebay');
   const [categories, setCategories] = useState<Record<Channel, string>>({ ebay: '', amazon: '', tiktok: '', depop: '' });
@@ -74,14 +75,15 @@ export function CategoryPanel({ client, storeId, initialSku, onSaved }: Props) {
         ? client.from('store_depop_categories').select('category_id,path,required_fields').eq('store_id', storeId).eq('category_id', value)
         : client.from('channel_taxonomy').select('category_id,path,required_fields').eq('channel', channel).eq('category_id', value);
       const { data } = await query.maybeSingle();
-      if (active && data) setChoices((old) => ({ ...old, [channel]: [data as Choice,
-        ...(old[channel] || []).filter((choice) => choice.category_id !== value)] }));
+      if (active && data) setSelectedChoices((old) => ({ ...old, [channel]: data as Choice }));
     })();
     return () => { active = false; };
-  }, [client, storeId, channel, categories[channel]]);
+  }, [client, storeId, channel, categories[channel], reload]);
 
   async function pick(id: Channel, value: string) {
     setCategories((old) => ({ ...old, [id]: value }));
+    const picked = choices[id]?.find((choice) => choice.category_id === value);
+    if (picked) setSelectedChoices((old) => ({ ...old, [id]: picked }));
     if (id !== 'depop' && value) {
       const { data: session } = await client.auth.getSession();
       const token = session.session?.access_token;
@@ -90,8 +92,12 @@ export function CategoryPanel({ client, storeId, initialSku, onSaved }: Props) {
           headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({ store_id: storeId, channel: id, category_id: value }) });
         const result = await response.json();
-        if (response.ok) setChoices((old) => ({ ...old, [id]: (old[id] || []).map((choice) =>
-          choice.category_id === value ? { ...choice, required_fields: result.fields || [] } : choice) }));
+        if (response.ok) {
+          setChoices((old) => ({ ...old, [id]: (old[id] || []).map((choice) =>
+            choice.category_id === value ? { ...choice, required_fields: result.fields || [] } : choice) }));
+          setSelectedChoices((old) => ({ ...old, [id]: { ...(picked || old[id] || {path:value}),
+            category_id: value, required_fields: result.fields || [] } }));
+        }
         else setError(result.error || 'Could not load required category fields.');
       }
     }
@@ -152,7 +158,8 @@ export function CategoryPanel({ client, storeId, initialSku, onSaved }: Props) {
     setBusy(false);
   }
 
-  const activeChoice = choices[channel]?.find((item) => item.category_id === categories[channel]);
+  const activeChoice = selectedChoices[channel]?.category_id === categories[channel] ? selectedChoices[channel]
+    : choices[channel]?.find((item) => item.category_id === categories[channel]);
   return <section className="panel category-panel">
     <h2>Missing Category</h2>
     <p className="hint">Choose a real category for each enabled channel. Required fields appear after you select a category.</p>
