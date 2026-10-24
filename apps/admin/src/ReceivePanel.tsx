@@ -8,6 +8,7 @@ import { categoryDefaultCostCents, priceFloorCents } from './scanPricing';
 import { errText } from './errText';
 import { BundleReceive } from './BundleReceive';
 import { measureMatPhoto } from './matMeasure';
+import { receiveSpecifics, receiveVariant } from '../../../shared/receive-specifics.mjs';
 
 /** iOS/Android PWA: prefer native capture over getUserMedia (more reliable in standalone). */
 function preferNativeCapture() {
@@ -242,36 +243,8 @@ function formatAspectsLine(aspects?: Record<string, string> | null): string {
     .join(' · ');
 }
 
-/** Reject retailer ITM/SKU digit codes; prefer aspects or a pack/variant phrase from the title. */
-function usableModelNumber(raw?: string | null): string {
-  const m = String(raw || '').trim();
-  if (!m) return '';
-  if (/^\d{4,}$/.test(m)) return '';
-  if (/^(itm|art|sku|dpci|tcin)[\s#:-]?\d+/i.test(m)) return '';
-  return m;
-}
-
-function variantFromTitle(title?: string | null, brand?: string | null): string {
-  let t = String(title || '').trim().replace(/\s+/g, ' ');
-  if (!t) return '';
-  const b = String(brand || '').trim();
-  if (b && t.toLowerCase().startsWith(b.toLowerCase())) {
-    t = t.slice(b.length).replace(/^[\s,:\-|–—]+/, '').trim();
-  }
-  const pack = t.match(
-    /(.{0,80}\b\d+\s*(?:-?\s*)?(?:count|ct|pack|pk|heads?|refills?|pieces?|pcs?|oz|fl\s*oz|ml|g)\b[^|/]{0,40})/i,
-  );
-  if (pack) return pack[1].trim().replace(/^[\s,:\-|–—]+/, '');
-  return t.split(/[|/]/)[0].trim().slice(0, 80);
-}
-
 function itemSpecificsFromLookup(m?: Lookup['merged']): string {
-  if (!m) return '';
-  return (
-    usableModelNumber(m.model) ||
-    formatAspectsLine(m.aspects) ||
-    variantFromTitle(m.title, m.brand)
-  );
+  return receiveSpecifics(m || {});
 }
 
 /**
@@ -795,7 +768,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     const defaultCost = categoryDefaultCostCents({
       title: m?.title, brand: m?.brand, model: m?.model, category: m?.category,
     });
-    // Item specifics = pack phrase / aspects / real MPN — never retailer digit codes (e.g. "4610583").
+    // The stored model field is a human type/variant with count, not a manufacturer MPN.
     const specifics = itemSpecificsFromLookup(m);
     const brand = text(m?.brand);
     const initial: Form = {
@@ -804,10 +777,9 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       brand,
       unbranded: false,
       model: specifics,
-      variant: text(m?.aspects?.Variant),
+      variant: receiveVariant(m || {}),
       size: text(m?.aspects?.Size),
-      // Title = brand + model (not Amazon's long catalog title).
-      title: composeListingTitle(brand, specifics, false),
+      title: text(m?.title) || composeListingTitle(brand, specifics, false),
       category: text(m?.category),
       // description falls back to the real feature bullets from the lookup; never invented text
       description: text(m?.description) || featuresText(m?.features),
@@ -822,9 +794,9 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       costEstimate: current.seed?.cost ? false : true,
     };
     // Seed may override brand/model — keep title in sync.
-    initial.title = composeListingTitle(initial.brand, initial.model, initial.unbranded);
+    if (!initial.title) initial.title = composeListingTitle(initial.brand, initial.model, initial.unbranded);
     askTouched.current = Boolean(current.seed && 'ask' in current.seed);
-    titleTouched.current = Boolean(current.seed && 'title' in current.seed);
+    titleTouched.current = Boolean(initial.title);
     setDimensionSources(Object.fromEntries([
       ...(['length_in', 'width_in', 'height_in', 'weight_lb'] as const).map((key, i) => [
         ['package_length_in', 'package_width_in', 'package_height_in', 'package_weight_lb'][i],
@@ -1590,7 +1562,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         </div>
         <div className="receive-confirm-fields">
           <label>Brand<input value={form.brand} onChange={e => update('brand', e.target.value)} /></label>
-          <label>Model / item specifics<input value={form.model} onChange={e => update('model', e.target.value)} /></label>
+          <label>Type / variant<input value={form.model} onChange={e => update('model', e.target.value)} /></label>
           <label>Variant<input value={form.variant} onChange={e => update('variant', e.target.value)} placeholder="Scent, color…" /></label>
           <label>Size<input value={form.size} onChange={e => update('size', e.target.value)} placeholder="8.8 oz" /></label>
           <label>Category<input value={form.category} onChange={e => update('category', e.target.value)} /></label>

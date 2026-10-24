@@ -76,7 +76,7 @@ test("item specifics rejects numeric retailer codes; prefers pack phrase from ti
   assert.doesNotMatch(oralB, /^4610583$/);
   assert.equal(
     itemSpecificsFromLookup({ model: "EB-20", title: "Oral-B Something", brand: "Oral-B" }),
-    "EB-20",
+    "Something",
   );
 });
 

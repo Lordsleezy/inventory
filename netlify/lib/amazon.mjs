@@ -561,16 +561,10 @@ export function usableModelNumber(raw) {
 }
 
 /**
- * Human-facing item specifics for Receive: real MPN, else aspect line, else a short
- * pack/variant phrase from the title (never a bare digit code).
+ * Human-facing item specifics for Receive: type/variant and pack count.
+ * Raw manufacturer model numbers remain in the Amazon catalog response.
  */
-export function itemSpecificsFromLookup({ model, aspects, title, brand } = {}) {
-  const mpn = usableModelNumber(model);
-  if (mpn) return mpn;
-  const aspectsLine = formatAspectsLine(aspects);
-  if (aspectsLine) return aspectsLine;
-  return variantFromTitle(title, brand);
-}
+export { receiveSpecifics as itemSpecificsFromLookup } from '../../shared/receive-specifics.mjs';
 
 /** "Oral-B Replacement Brush Heads, 10 Count" → "Replacement Brush Heads, 10 Count" */
 export function variantFromTitle(title, brand) {

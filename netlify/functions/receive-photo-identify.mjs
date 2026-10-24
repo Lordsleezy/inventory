@@ -9,7 +9,7 @@ import { portalAdminFromEvent } from "../lib/portal-auth.mjs";
 import { identifyFrames, lookupRetail, tokenCost } from "../lib/video-scan.mjs";
 import { medianReference } from "../lib/receive-price.mjs";
 import { lookupReceiveDimensions } from "../lib/receive-dimensions.mjs";
-import { itemSpecificsFromLookup, usableModelNumber, variantFromTitle } from "../lib/amazon.mjs";
+import { receiveSpecifics } from '../../shared/receive-specifics.mjs';
 import { normalizeGtin } from "../lib/gtin-normalize.mjs";
 import {
   attachPhotoIdentityToMiss,
@@ -42,17 +42,7 @@ async function authFromEvent(event) {
 }
 
 function specificsFromIdentity(identity) {
-  const brand = String(identity.brand || "").trim();
-  const title = String(identity.title || "").trim();
-  const rawModel = String(identity.model || "").trim();
-  return (
-    usableModelNumber(rawModel) ||
-    itemSpecificsFromLookup({ model: rawModel, title, brand }) ||
-    variantFromTitle(title, brand) ||
-    String(identity.variant || '').trim() ||
-    rawModel ||
-    ""
-  );
+  return receiveSpecifics(identity);
 }
 
 async function budgetError(ctx) {

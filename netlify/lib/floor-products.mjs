@@ -26,7 +26,6 @@ export function listingTitle(brand, model, unbranded = false) {
 export function productToMerged(row) {
   if (!row) return null;
   const model =
-    usableModelNumber(row.model) ||
     itemSpecificsFromLookup({
       model: row.model,
       aspects: row.aspects,
