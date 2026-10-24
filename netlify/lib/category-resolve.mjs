@@ -182,6 +182,19 @@ export async function resolveUnitCategories(storeId, sku, { network = true } = {
         updates.find((row) => row.channel === channel)?.attributes || current.get(channel)?.attributes || {}])),
       confirmed_at: new Date().toISOString() }, { onConflict: 'store_id,gtin14' });
     if (error) throw new Error(error.message);
+    if (finalIds.ebay) {
+      const { error: mappingError } = await sb.from('store_category_mappings').upsert({ store_id: storeId, ebay_category_id: finalIds.ebay },
+        { onConflict: 'store_id,ebay_category_id', ignoreDuplicates: true });
+      if (mappingError) throw new Error(mappingError.message);
+      for (const [field, value] of Object.entries({ amazon_product_type: finalIds.amazon,
+        tiktok_category_id: finalIds.tiktok, depop_category_id: finalIds.depop,
+        internal_category: product?.category || unit.internal_category || null })) {
+        if (!value) continue;
+        const { error: fillError } = await sb.from('store_category_mappings').update({ [field]: value })
+          .eq('store_id', storeId).eq('ebay_category_id', finalIds.ebay).is(field, null);
+        if (fillError) throw new Error(fillError.message);
+      }
+    }
   }
   return { sku, categories: finalIds, sources, conflict, confirmed: Boolean(confirmed), gaps };
 }
