@@ -48,6 +48,12 @@ assert.equal(allocated.rows[0].quantity, 2);
 await db.query("update public.units set qty_on_hand=2 where sku='12345'");
 allocated = await db.query("select quantity from public.unit_location_stock where sku='12345'");
 assert.equal(allocated.rows[0].quantity, 1);
+const inventory = await db.query("select public.portal_inventory_list_with_locations('', 'in_stock', false, 'sku', 0, 24, 'all') result");
+const inventoryRow = inventory.rows[0].result.items.find((row) => row.sku === '12345');
+assert.match(inventoryRow.locations, /14-2-3/);
+assert.equal(inventoryRow.defective, false);
+assert.equal(inventoryRow.not_for_sale, false);
+assert.ok(Array.isArray(inventoryRow.missing));
 
 const manifest = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 await db.query(
