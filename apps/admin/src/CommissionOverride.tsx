@@ -4,8 +4,6 @@ import {
   commissionProfit,
   defaultCommissionSplit,
   effectiveCommissionSplit,
-  PAYOUT_JACOB_ID,
-  PAYOUT_PAUL_ID,
   payout,
   type CommissionOverride,
   type OnlineCfg,
@@ -68,8 +66,8 @@ export function CommissionOverrideControls({
   const def = defaultCommissionSplit(ticket, rules, cfg);
   const current = effectiveCommissionSplit(ticketWithOv, rules, cfg);
   const base = commissionProfit(ticketWithOv);
-  const paulRule = rules.find(r => r.employee_id === PAYOUT_PAUL_ID) || { employee_id: PAYOUT_PAUL_ID, method: 'percent_profit' as const, rate: current.paulPct };
-  const jacobRule = rules.find(r => r.employee_id === PAYOUT_JACOB_ID) || { employee_id: PAYOUT_JACOB_ID, method: 'percent_profit' as const, rate: current.jacobPct };
+  const paulRule = rules.find(r => r.employee_id === cfg.slots?.paul) || { employee_id: cfg.slots?.paul || '', method: 'percent_profit' as const, rate: current.paulPct };
+  const jacobRule = rules.find(r => r.employee_id === cfg.slots?.jacob) || { employee_id: cfg.slots?.jacob || '', method: 'percent_profit' as const, rate: current.jacobPct };
   const paulCents = payout(ticketWithOv, paulRule, cfg);
   const jacobCents = payout(ticketWithOv, jacobRule, cfg);
 

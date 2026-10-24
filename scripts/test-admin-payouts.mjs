@@ -1,11 +1,18 @@
 // node --experimental-strip-types --test scripts/test-admin-payouts.mjs
 import test from "node:test";
 import assert from "node:assert/strict";
-import { payout, remainingProfit, isOnline, profit, commissionProfit, reportProfitCents, PAYOUT_JACOB_ID, PAYOUT_PAUL_ID } from "../apps/admin/src/payouts.ts";
+import { payout, remainingProfit, isOnline, profit, commissionProfit, reportProfitCents } from "../apps/admin/src/payouts.ts";
+
+// Per-store payout people and SKU rates now come from store_payout_people / store_payout_sku_rates.
+const PAYOUT_PAUL_ID = "f17e6163-b10a-4fe1-a373-75c0094e5363";
+const PAYOUT_JACOB_ID = "c851c8ee-2cc2-490f-935f-1e2d7e093d88";
+const slots = { paul: PAYOUT_PAUL_ID, jacob: PAYOUT_JACOB_ID };
+const skuRates = Object.fromEntries(Object.entries({ "11314": [25, 5], "11386": [20, 10], "11415": [20, 10], "11522": [25, 5],
+  "99694": [0, 30], "11629": [20, 10], "99695": [20, 10] }).map(([sku, [j, p]]) => [sku, { [PAYOUT_JACOB_ID]: j, [PAYOUT_PAUL_ID]: p }]));
 
 const PAUL = "paul", JACOB = "jacob";
 const rules = [{ employee_id: PAUL, method: "percent_sale", rate: 30 }, { employee_id: JACOB, method: "percent_sale", rate: 20 }];
-const cfg = { channels: ["website"], pct: 30, employeeId: PAUL };
+const cfg = { channels: ["website"], pct: 30, employeeId: PAUL, slots, skuRates };
 // Ticket subtotal is merchandise only: sales tax, card fee, shipping charged and label cost are never in it.
 const online = (subtotal, cost) => ({ subtotal, cost, channel: "website" });
 const store = (subtotal, cost) => ({ subtotal, cost, channel: "floor" });
@@ -164,7 +171,7 @@ test("per-sale override replaces defaults for Paul and Jacob", () => {
 test("custom override on online sale can pay Jacob (defaults only pay Paul)", () => {
   const rPaul = { employee_id: PAYOUT_PAUL_ID, method: "percent_profit", rate: 20 };
   const rJacob = { employee_id: PAYOUT_JACOB_ID, method: "percent_profit", rate: 10 };
-  const onlineCfg = { channels: ["website"], pct: 30, employeeId: PAYOUT_PAUL_ID };
+  const onlineCfg = { channels: ["website"], pct: 30, employeeId: PAYOUT_PAUL_ID, slots, skuRates };
   const base = { subtotal: 10000, cost: 4000, channel: "website" };
   assert.equal(payout(base, rPaul, onlineCfg), 1800);
   assert.equal(payout(base, rJacob, onlineCfg), 0);
