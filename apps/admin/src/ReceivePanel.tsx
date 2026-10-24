@@ -529,6 +529,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   const [camera, setCamera] = useState(false);
   const [readyToList, setReadyToList] = useState(false);
   const [readyAmazonTiktok, setReadyAmazonTiktok] = useState(false);
+  /** Store-only / not selling online — photo not required to receive. */
+  const [doNotList, setDoNotList] = useState(false);
   const [photoIdBusy, setPhotoIdBusy] = useState(false);
   const [photoIdStatus, setPhotoIdStatus] = useState('');
   const [photoPrice, setPhotoPrice] = useState<PhotoPriceInfo | null>(null);
@@ -682,6 +684,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     setReasonNote('');
     setReadyToList(false);
     setReadyAmazonTiktok(false);
+    setDoNotList(false);
   }
 
   /* Load the head of the queue into the form once its lookup has settled. */
@@ -756,6 +759,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     });
     setReadyToList(false);
     setReadyAmazonTiktok(false);
+    setDoNotList(false);
     upcInput.current?.blur();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current?.id, current?.status, manual, loadedId]);
@@ -814,7 +818,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     if (!upcReady()) out.push('UPC');
     if (p.dims.some(d => !pos(d))) out.push('weight + box dimensions');
     if (!form.model.trim()) out.push('item specifics');
-    if (!files.length) out.push('photo');
+    if (!doNotList && !files.length) out.push('photo');
     return out;
   }
   const liveMissing = (() => {
@@ -828,7 +832,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     if (!upcReady()) out.push('UPC');
     if (dims.some(d => !pos(d))) out.push('weight + box dimensions');
     if (!form.model.trim()) out.push('item specifics');
-    if (!files.length) out.push('photo');
+    if (!doNotList && !files.length) out.push('photo');
     return out;
   })();
 
@@ -844,7 +848,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       setError('Photos must be images under 15 MB each.'); return;
     }
     if (!manual) {
-      if (!files.length) { setError('Add at least one real photo of this unit before finishing.'); return; }
+      // Do not list for sale: photo is optional — unit stays off the website/marketplaces.
+      if (!doNotList && !files.length) { setError('Add at least one real photo of this unit before finishing, or check Do not list for sale.'); return; }
       if (files.some(f => f.size < PHOTO_MIN_BYTES)) { setError('One of the photos looks empty or too small. Retake it.'); return; }
       if (!form.condition) { setError('Pick a condition: New (sealed), Open box, or Scratch & dent.'); return; }
     }
@@ -858,6 +863,15 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       if (d && d.count > 0) { setDups(d); setError(`You already have ${d.count} of these in stock. Tap "Add another unit" to confirm this is a new one.`); return; }
     }
     const gaps = missingFor(parsed);
+    if (doNotList) {
+      if (gaps.length) {
+        setWarning(`Saving without listing. Still incomplete (ok for store-only): ${gaps.join(', ')}.`);
+      } else {
+        setWarning('Saving without listing — hidden from the website and marketplaces.');
+      }
+      await receive(parsed, null);
+      return;
+    }
     if (readyToList) {
       if (gaps.length) {
         setError(`Ready to list needs: ${gaps.join(', ')}. Uncheck Ready to list to save into Needs attention.`);
@@ -939,9 +953,10 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
 
       // Merge lookup data (and any hold) into the new unit(s).
       const blocked = skus.includes(NEVER_LIST_SKU);
-      const enrichFailed = await enrichUnits(skus, parsed, hold, blocked);
+      const enrichFailed = await enrichUnits(skus, parsed, hold, blocked || doNotList);
       if (enrichFailed) warnings.push(`Could not save lookup details on ${enrichFailed} unit(s).${hold ? ' They have no price, so they will not list.' : ''}`);
       if (blocked) warnings.push(`SKU ${NEVER_LIST_SKU} is a permanent do-not-list item; it was hidden from the website.`);
+      else if (doNotList) warnings.push('Marked Do not list for sale — hidden from the website and marketplaces.');
       if (warnings.length) setWarning(warnings.join(' '));
 
       // Remember product data for "Add another unit".
@@ -972,6 +987,9 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           };
         });
         setFiles([]); setDups(null); setDupAck(false);
+        setReadyToList(false);
+        setReadyAmazonTiktok(false);
+        setDoNotList(false);
       } else {
         const doneId = current?.id;
         setQueue(q => q.filter(s => s.id !== doneId));
@@ -1022,10 +1040,11 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       put('ebay_aspects', { ...existing, UPC: UPC_NOT_APPLICABLE });
       put('upc', UPC_NOT_APPLICABLE);
     }
-    if (readyAmazonTiktok) put('ready_amazon_tiktok', true);
-    if (readyToList) put('ready_to_list', true);
+    if (!doNotList && readyAmazonTiktok) put('ready_amazon_tiktok', true);
+    if (!doNotList && readyToList) put('ready_to_list', true);
+    if (doNotList) put('do_not_list', true);
     if (hold) { put('hold_reason', hold.reason); put('hold_note', hold.note.trim()); }
-    const hide = Boolean(hold) || forceHide;
+    const hide = Boolean(hold) || forceHide || doNotList;
     if (!Object.keys(specs).length && !hide) return 0;
 
     const patch = {
@@ -1429,7 +1448,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         {manual && <label>Cost (optional)<input inputMode="decimal" placeholder="9.00" value={form.cost} onChange={e => update('cost', e.target.value)} /></label>}
 
         <div className={`unit-edit-wide${liveMissing.includes('photo') ? ' receive-need' : ''}`}>
-          <span className="receive-label">Photo{liveMissing.includes('photo') ? ' (needed to list)' : (manual ? ' (optional)' : '')}</span>
+          <span className="receive-label">Photo{doNotList || manual ? ' (optional)' : (liveMissing.includes('photo') ? ' (needed to list)' : '')}</span>
           <div className="actions">
             {/* Buttons + programmatic click — label+sr-only file inputs often do nothing in iOS PWA. */}
             <input
@@ -1481,21 +1500,50 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         </div>
 
         <label className="mboard-inline unit-edit-wide">
-          <input type="checkbox" checked={readyToList} onChange={e => setReadyToList(e.target.checked)} />
+          <input
+            type="checkbox"
+            checked={doNotList}
+            onChange={e => {
+              const on = e.target.checked;
+              setDoNotList(on);
+              if (on) {
+                setReadyToList(false);
+                setReadyAmazonTiktok(false);
+              }
+            }}
+          />
+          Do not list for sale
+        </label>
+        <label className="mboard-inline unit-edit-wide">
+          <input
+            type="checkbox"
+            checked={readyToList}
+            disabled={doNotList}
+            onChange={e => setReadyToList(e.target.checked)}
+          />
           Ready to list
         </label>
         <label className="mboard-inline unit-edit-wide">
-          <input type="checkbox" checked={readyAmazonTiktok} onChange={e => setReadyAmazonTiktok(e.target.checked)} />
+          <input
+            type="checkbox"
+            checked={readyAmazonTiktok}
+            disabled={doNotList}
+            onChange={e => setReadyAmazonTiktok(e.target.checked)}
+          />
           Ready to list Amazon/TikTok
         </label>
       </div>
 
       <p className="hint receive-check">
-        {liveMissing.length === 0
-          ? (readyToList ? 'Complete — will receive as ready to list.' : 'Complete — check Ready to list, or Finish to save without listing pressure.')
-          : readyToList
-            ? `Ready to list still needs: ${liveMissing.join(', ')}.`
-            : `Missing for listing: ${liveMissing.join(', ')}. You can still receive; incomplete units land in Needs attention.`}
+        {doNotList
+          ? (files.length
+            ? 'Store-only — will receive without listing. Photo is optional.'
+            : 'Store-only — photo not required. Unit stays off the website and marketplaces.')
+          : liveMissing.length === 0
+            ? (readyToList ? 'Complete — will receive as ready to list.' : 'Complete — check Ready to list, or Finish to save without listing pressure.')
+            : readyToList
+              ? `Ready to list still needs: ${liveMissing.join(', ')}.`
+              : `Missing for listing: ${liveMissing.join(', ')}. You can still receive; incomplete units land in Needs attention.`}
       </p>
       <div className="actions">
         <button disabled={busy || !options?.next_sku || (dups !== null && dups.count > 0 && !dupAck)}>{busy ? 'Receiving…' : 'Finish & receive'}</button>
