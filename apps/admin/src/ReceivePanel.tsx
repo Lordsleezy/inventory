@@ -1680,9 +1680,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         <label className={liveMissing.includes('price') ? 'receive-need' : undefined}>
           Price{liveMissing.includes('price')
             ? ' (needed to list)'
-            : (retail && !askTouched.current
-              ? ` (suggested from ${retail.source}${retail.asOf ? ` · ${retail.asOf.slice(0, 10)}` : ''} — edit if needed)`
-              : ' (no source price — type it)')}
+            : ((retail || photoPrice?.count) ? ' (reference only — enter your selling price)' : ' (enter your selling price)')}
           <input inputMode="decimal" placeholder="24.99" value={form.ask} onChange={e => update('ask', e.target.value)} autoComplete="off" />
         </label>
 
