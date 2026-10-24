@@ -231,7 +231,8 @@ export function NativeRegisterCart(props: NativeRegisterProps) {
     try {
       const code = await scanBarcode();
       if (!code) {
-        focusScannerField(searchRef.current, { softKeyboard: searchTyping });
+        // Android: never programmatic focus (Gboard freeze). User can tap to type.
+        if (!androidStore) focusScannerField(searchRef.current, { softKeyboard: searchTyping });
         return;
       }
       setQ(code);
@@ -338,7 +339,9 @@ export function NativeRegisterCart(props: NativeRegisterProps) {
             autoCapitalize="off"
             spellCheck={false}
             enterKeyHint="search"
+            readOnly={androidStore && !searchTyping}
             inputMode={searchTyping ? 'search' : scannerInputMode()}
+            data-hid-wedge={androidStore && !searchTyping ? '1' : undefined}
             disabled={!idle || cashOpen}
           />
           <button

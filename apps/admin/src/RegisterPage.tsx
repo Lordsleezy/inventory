@@ -33,7 +33,14 @@ import {
 } from './register/sale';
 import { loadAvailableUnits, queryAvailableUnits, searchUnits, type RegisterUnit } from './register/units';
 import { NativePaySheets, NativeRegisterCart, NativeRegisterDone, SALE_OVERRIDE } from './register/NativeRegister';
-import { focusScannerField, isAndroidStoreDevice, isKioskShell, scannerFieldStartsReadOnly, scannerInputMode } from './kiosk';
+import {
+  bindHidWedgeListener,
+  focusScannerField,
+  isAndroidStoreDevice,
+  isKioskShell,
+  scannerFieldStartsReadOnly,
+  scannerInputMode,
+} from './kiosk';
 import { errText } from './errText';
 
 type ManualPayment = {
@@ -477,17 +484,36 @@ function RegisterInner({ staffSession, onNeedFullReload, variant = 'desktop' }: 
     setQ('');
     setShowHits(false);
     setError('');
-    // Next scan: wedge-friendly focus, no soft keyboard thrash on Android.
+    // Next scan: wedge-friendly focus on desktop; Android uses HID window listener.
     if (androidStore) setSearchTyping(false);
-    requestAnimationFrame(() => focusScannerField(searchRef.current, { softKeyboard: false }));
+    else requestAnimationFrame(() => focusScannerField(searchRef.current, { softKeyboard: false }));
   }
 
   useEffect(() => {
-    if (androidStore || scannerFieldStartsReadOnly()) {
+    if (androidStore) return;
+    if (scannerFieldStartsReadOnly()) {
       focusScannerField(searchRef.current, { softKeyboard: false });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (!androidStore) return;
+    return bindHidWedgeListener({
+      active: () => idle && !cashOpen && !done && !searchTyping,
+      onScan: (code) => {
+        setQ(code);
+        setShowHits(true);
+        void queryAvailableUnits(code, 1)
+          .then((rows) => {
+            if (rows[0]) addFromSearch(rows[0]);
+            else setError(`No available unit for “${code}”.`);
+          })
+          .catch((err) => setError(authErrorMessage(err)));
+      },
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [androidStore, idle, cashOpen, done, searchTyping]);
 
   function onSearchKey(e: KeyboardEvent<HTMLInputElement>) {
     if (e.key === 'Enter') {
@@ -995,7 +1021,9 @@ function RegisterInner({ staffSession, onNeedFullReload, variant = 'desktop' }: 
             autoCapitalize="off"
             spellCheck={false}
             enterKeyHint="search"
+            readOnly={androidStore && !searchTyping}
             inputMode={searchTyping ? 'search' : scannerInputMode()}
+            data-hid-wedge={androidStore && !searchTyping ? '1' : undefined}
             disabled={!idle || cashOpen}
           />
           {showHits && (hits.length || searchBusy) ? (

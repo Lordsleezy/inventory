@@ -1,7 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { focusScannerField, isAndroidStoreDevice, isKioskShell, scannerFieldStartsReadOnly, scannerInputMode } from './kiosk';
+import {
+  bindHidWedgeListener,
+  blurActiveInput,
+  focusScannerField,
+  isAndroidStoreDevice,
+  isKioskShell,
+  scannerFieldStartsReadOnly,
+  scannerInputMode,
+} from './kiosk';
 import { floorFunctionUrl } from './floorApi';
 import { reportClientError } from './clientLog';
 import { categoryDefaultCostCents, priceFloorCents, suggestAskCents } from './scanPricing';
@@ -632,12 +640,14 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   );
   const suggestion = useMemo(() => suggestAskCents(retail?.cents ?? null, floor), [retail, floor]);
 
-  // Keep the scan box focused for HID wedges when idle — never blur→refocus on Android
-  // (that fight freezes Gboard phone-wide until reboot), and never while the unit form is open.
+  // Keep the scan box focused for HID wedges when idle — never on Android (programmatic
+  // focus freezes Gboard until reboot). Android uses bindHidWedgeListener instead.
+  // Never focus while the unit form is open (Price / other fields need a clean IME).
   const focusUpc = () => {
     if (manual || formOpen || modalOpen.current) return;
-    if (androidStore && upcTyping) return;
-    requestAnimationFrame(() => focusScannerField(upcInput.current, { softKeyboard: upcTyping }));
+    if (androidStore) return;
+    if (upcTyping) return;
+    requestAnimationFrame(() => focusScannerField(upcInput.current, { softKeyboard: false }));
   };
   const update = (key: keyof Form, value: string) => {
     if (key === 'ask') askTouched.current = true;
@@ -661,11 +671,21 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     if (!manual && !formOpen) focusUpc();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // Android: capture Bluetooth wedge at window level — never need a focused scan box.
+  useEffect(() => {
+    if (!androidStore) return;
+    return bindHidWedgeListener({
+      active: () => !manual && !formOpen && !upcTyping && !modalOpen.current && Boolean(accessToken),
+      onScan: (code) => { enqueue(code); },
+    });
+    // enqueue is stable enough for wedge digits; rebind when form/typing gates change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [androidStore, manual, formOpen, upcTyping, accessToken]);
   useEffect(() => {
     if (!formOpen) return;
-    // Critical on Android: blur the scan box BEFORE it stays focused while becoming
-    // disabled/readOnly — that transition with a stuck IME wedges Gboard until reboot,
-    // so the Price field then cannot open a keyboard.
+    // Critical on Android: blur BEFORE readOnly/inputMode flip while focused — that
+    // race wedges Gboard until reboot so Price taps show no keyboard.
+    blurActiveInput();
     const el = upcInput.current;
     if (el && document.activeElement === el) el.blur();
     if (document.activeElement instanceof HTMLElement
@@ -828,6 +848,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     setBundleParentSku('');
     setUpcTyping(false);
     // Blur before the form paints so Price taps get a clean soft keyboard on Android.
+    blurActiveInput();
     upcInput.current?.blur();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current?.id, current?.status, manual, loadedId]);
@@ -1422,12 +1443,13 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
                 }
               }, 0);
             }}
-            // Do not HTML-autoFocus on Android (opens/wedges IME). Idle focus uses focusScannerField.
+            // Do not HTML-autoFocus on Android (opens/wedges IME). Desktop idle focus uses focusScannerField.
             autoFocus={!formOpen && !androidStore && !scannerFieldStartsReadOnly()}
             // Never disable the scan box while it may still be focused — disabled+inputMode race
             // freezes Gboard. Use readOnly when the unit form is open instead.
             readOnly={formOpen || !upcTyping}
-            inputMode={formOpen ? undefined : (upcTyping ? 'numeric' : scannerInputMode())}
+            inputMode={formOpen || (androidStore && !upcTyping) ? undefined : (upcTyping ? 'numeric' : scannerInputMode())}
+            data-hid-wedge={androidStore && !formOpen && !upcTyping ? '1' : undefined}
             autoComplete="off"
             enterKeyHint="done"
             placeholder={
