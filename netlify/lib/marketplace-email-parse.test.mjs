@@ -48,6 +48,16 @@ assert.equal(depop.sku, "11410");
 assert.equal(depop.price, 2200);
 assert.equal(depop.order_number, "DEP-ABC123");
 
+const depopLabel = parseMail({
+  subject: "Your USPS shipping label and sale confirmation for @kay_lucha.",
+  text: "You've made a sale!\nOrder details\nimage Bagsmart travel backpack. Open box; see the...\n$19.99\nPayment details\nItem price\n$19.99\nPayment processing fee (?)\n( https://example.com/very-long-information-link-about-the-fee )\n−$1.36\nBuyer paid for shipping\nWhat you’ll receive   $18.63",
+  from: { address: "sold@alerts.depop.com" },
+});
+assert.equal(depopLabel.item_title, "Bagsmart travel backpack. Open box; see the...");
+assert.equal(depopLabel.price, 1999);
+assert.equal(depopLabel.fee, 136);
+assert.equal(depopLabel.payout, 1863);
+
 const mercariBody = [
   "You've made a sale!",
   "SKU #11412",

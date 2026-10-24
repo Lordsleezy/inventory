@@ -62,6 +62,9 @@ export async function invoke(event) {
   if (event.httpMethod !== "POST") return json(405, { ok: false, error: "POST required" });
 
   const ctx = await authFromEvent(event);
+  if (!/^AIza[0-9A-Za-z_-]{30,}$/.test(process.env.GEMINI_API_KEY || "")) {
+    return json(503, { ok: false, error: "photo_identification_unavailable", message: "Photo identification is unavailable: the store's Gemini API key needs to be configured. You can fill the fields by hand or retry after it is fixed." });
+  }
   const body = JSON.parse(event.body || "{}");
   const rawB64 = String(body.image_base64 || "").replace(/^data:[^;]+;base64,/, "");
   if (!rawB64 || rawB64.length < 100) return json(400, { ok: false, error: "image_required" });
@@ -172,6 +175,10 @@ export async function invoke(event) {
   }
 
   if (gtin.ok) {
+    const { data: existingProduct } = await ctx.sb.from("floor_products").select("*").eq("gtin14", gtin.gtin14).maybeSingle();
+    const existingTitle = String(existingProduct?.title || "").trim();
+    const existingBrand = String(existingProduct?.brand || "").trim();
+    const keepTitle = existingTitle && existingTitle.toLowerCase() !== existingBrand.toLowerCase();
     await attachPhotoIdentityToMiss(ctx.sb, {
       gtin14: gtin.gtin14,
       identity: { brand, model, title, confidence: identity.confidence, upc },
@@ -181,16 +188,21 @@ export async function invoke(event) {
       ctx.sb,
       { gtin14: gtin.gtin14, upcA: gtin.upcA, ean13: gtin.ean13 },
       {
-        brand,
-        model,
-        title,
-        description: null,
-        features: [],
-        aspects: identity.color ? { Color: identity.color } : {},
-        package: {},
-        images: [],
-        category: null,
-        asin: null,
+        brand: existingBrand || brand,
+        model: existingProduct?.model || model,
+        title: keepTitle ? existingTitle : title,
+        description: existingProduct?.description || null,
+        features: existingProduct?.features || [],
+        aspects: { ...(existingProduct?.aspects || {}), ...(identity.color && !existingProduct?.aspects?.Color ? { Color: identity.color } : {}) },
+        package: {
+          length_in: existingProduct?.package_length_in,
+          width_in: existingProduct?.package_width_in,
+          height_in: existingProduct?.package_height_in,
+          weight_lb: existingProduct?.package_weight_lb,
+        },
+        images: existingProduct?.images || [],
+        category: existingProduct?.category || null,
+        asin: existingProduct?.asin || null,
       },
       { source: "photo", actorId: ctx.userId },
     );

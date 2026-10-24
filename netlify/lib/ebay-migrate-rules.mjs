@@ -1,6 +1,7 @@
 /** Pure migration eligibility helpers (no network / no server imports). */
 import { prohibitedReason } from "./ebay-eligibility.mjs";
 import { NOT_APPLICABLE, looksLikeBadMpn } from "./ebay-product.mjs";
+import { ebayNeverList } from "./ebay-exclusion.mjs";
 
 export const MIGRATION_SKIP_KEYWORDS = [
   "refrigerator",
@@ -47,6 +48,7 @@ export function isListingRemovedPolicyError(message) {
 }
 
 export function migrationBannedReason(item, unit = null) {
+  if (unit && ebayNeverList(unit)) return "Never list on eBay";
   const banned = prohibitedReason(unit || { title: item?.title, category: item?.categoryName });
   if (banned) return `eBay terms / prohibited (${banned})`;
   // Prefer Floor title/category when matched so a bad eBay category (e.g. jersey misfiled as fridge) does not skip.
