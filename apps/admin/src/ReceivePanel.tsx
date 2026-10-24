@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { isKioskShell, scannerInputMode } from './kiosk';
+import { focusScannerField, isAndroidStoreDevice, isKioskShell, scannerFieldStartsReadOnly, scannerInputMode } from './kiosk';
 import { floorFunctionUrl } from './floorApi';
 import { reportClientError } from './clientLog';
 import { categoryDefaultCostCents, priceFloorCents, suggestAskCents } from './scanPricing';
@@ -550,6 +550,11 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   /** Stable key for IndexedDB photo stash (survives camera-app process death on store phones). */
   const photoSessionKey = useRef(`manual-${Date.now()}`);
   const [photoBusy, setPhotoBusy] = useState(false);
+  // Android: never use inputMode="none" + focus (freezes Gboard until reboot). Soft keyboard
+  // only after an explicit tap; HID wedges use focusScannerField (brief readOnly).
+  const [upcTyping, setUpcTyping] = useState(() => !scannerFieldStartsReadOnly());
+  const androidStore = isAndroidStoreDevice();
+  const askInput = useRef<HTMLInputElement>(null);
 
   function openBarcodeCamera() {
     // Phones / installed PWA: native capture is far more reliable than getUserMedia + BarcodeDetector.
@@ -590,11 +595,12 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   );
   const suggestion = useMemo(() => suggestAskCents(retail?.cents ?? null, floor), [retail, floor]);
 
-  // Only keep the scan box focused when idle. Refocusing during form edit pops the
-  // mobile keyboard every time the user scrolls (body briefly becomes activeElement).
+  // Keep the scan box focused for HID wedges when idle — never blur→refocus on Android
+  // (that fight freezes Gboard phone-wide until reboot), and never while the unit form is open.
   const focusUpc = () => {
     if (manual || formOpen || modalOpen.current) return;
-    requestAnimationFrame(() => upcInput.current?.focus());
+    if (androidStore && upcTyping) return;
+    requestAnimationFrame(() => focusScannerField(upcInput.current, { softKeyboard: upcTyping }));
   };
   const update = (key: keyof Form, value: string) => {
     if (key === 'ask') askTouched.current = true;
@@ -614,10 +620,23 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   };
 
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
-  useEffect(() => { focusUpc(); }, []);
   useEffect(() => {
-    if (formOpen) upcInput.current?.blur();
-  }, [formOpen, loadedId]);
+    if (!manual && !formOpen) focusUpc();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    if (!formOpen) return;
+    // Critical on Android: blur the scan box BEFORE it stays focused while becoming
+    // disabled/readOnly — that transition with a stuck IME wedges Gboard until reboot,
+    // so the Price field then cannot open a keyboard.
+    const el = upcInput.current;
+    if (el && document.activeElement === el) el.blur();
+    if (document.activeElement instanceof HTMLElement
+      && document.activeElement.closest?.('.receive-upc')) {
+      document.activeElement.blur();
+    }
+    if (androidStore) setUpcTyping(false);
+  }, [formOpen, loadedId, androidStore]);
 
   async function loadOptions() {
     const { data, error: e } = await client.rpc('portal_receive_options');
@@ -692,6 +711,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     setDoNotList(false);
     setBundle(false);
     setBundleParentSku('');
+    setUpcTyping(!scannerFieldStartsReadOnly());
   }
 
   /* Load the head of the queue into the form once its lookup has settled. */
@@ -769,6 +789,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     setDoNotList(false);
     setBundle(false);
     setBundleParentSku('');
+    setUpcTyping(false);
+    // Blur before the form paints so Price taps get a clean soft keyboard on Android.
     upcInput.current?.blur();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current?.id, current?.status, manual, loadedId]);
@@ -1328,20 +1350,42 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
             value={draft}
             onChange={e => setDraft(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); enqueue(draft); } }}
+            onClick={() => {
+              if (formOpen) return;
+              // Explicit tap = user wants the soft keyboard.
+              if (androidStore || isKioskShell()) {
+                setUpcTyping(true);
+                requestAnimationFrame(() => focusScannerField(upcInput.current, { softKeyboard: true }));
+              }
+            }}
             onBlur={() => {
-              // Do not steal focus while the unit form is open (scroll would re-open the keyboard).
-              if (formOpen || manual || modalOpen.current) return;
+              // Never steal focus back on Android — that fight freezes the system keyboard.
+              // Also never while the unit form is open (Price / other fields need a clean IME).
+              if (androidStore || formOpen || manual || modalOpen.current) return;
               setTimeout(() => {
-                if (modalOpen.current || formOpen) return;
-                if (!document.activeElement || document.activeElement === document.body) upcInput.current?.focus();
+                if (modalOpen.current || formOpen || androidStore) return;
+                if (!document.activeElement || document.activeElement === document.body) {
+                  focusScannerField(upcInput.current);
+                }
               }, 0);
             }}
-            autoFocus={!formOpen}
-            inputMode={scannerInputMode()}
+            // Do not HTML-autoFocus on Android (opens/wedges IME). Idle focus uses focusScannerField.
+            autoFocus={!formOpen && !androidStore && !scannerFieldStartsReadOnly()}
+            // Never disable the scan box while it may still be focused — disabled+inputMode race
+            // freezes Gboard. Use readOnly when the unit form is open instead.
+            readOnly={formOpen || !upcTyping}
+            inputMode={formOpen ? undefined : (upcTyping ? 'numeric' : scannerInputMode())}
             autoComplete="off"
             enterKeyHint="done"
-            placeholder={isKioskShell() ? 'Scan barcode' : 'Scan or type · Enter'}
-            disabled={!accessToken || formOpen}
+            placeholder={
+              formOpen
+                ? 'Working on this scan…'
+                : (isKioskShell() || androidStore
+                  ? (upcTyping ? 'Type UPC · Enter' : 'Scan barcode (tap to type)')
+                  : 'Scan or type · Enter')
+            }
+            disabled={!accessToken}
+            aria-disabled={formOpen || undefined}
           />
         </label>}
         {!manual && !formOpen && <div className="actions">
@@ -1409,7 +1453,21 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
             : (retail && !askTouched.current
               ? ` (suggested from ${retail.source}${retail.asOf ? ` · ${retail.asOf.slice(0, 10)}` : ''} — edit if needed)`
               : ' (no source price — type it)')}
-          <input inputMode="decimal" placeholder="24.99" value={form.ask} onChange={e => update('ask', e.target.value)} autoComplete="off" />
+          <input
+            ref={askInput}
+            inputMode="decimal"
+            enterKeyHint="done"
+            placeholder="24.99"
+            value={form.ask}
+            onChange={e => update('ask', e.target.value)}
+            onFocus={() => {
+              // If the scan box still holds focus somehow, drop it so Gboard can attach here.
+              if (upcInput.current && document.activeElement === upcInput.current) {
+                upcInput.current.blur();
+              }
+            }}
+            autoComplete="off"
+          />
         </label>
 
         <div className={`unit-edit-wide receive-cond${liveMissing.includes('condition') ? ' receive-need' : ''}`} role="radiogroup" aria-label="Condition">
