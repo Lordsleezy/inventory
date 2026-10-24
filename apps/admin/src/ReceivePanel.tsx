@@ -127,6 +127,12 @@ type Props = {
   /** Prefill / enqueue a UPC from an earlier camera capture. */
   initialUpc?: string | null;
   onAppCancel?: () => void;
+  /**
+   * Store-phone associates (Jacob / local staff): block Finish on manual entry until
+   * brand, model, price, dimensions, condition, and photo are filled.
+   * Admins / scanned lookups keep the existing “save incomplete” path.
+   */
+  requireManualCore?: boolean;
 };
 
 type Pkg = { length_in?: number | null; width_in?: number | null; height_in?: number | null; weight_lb?: number | null };
@@ -557,7 +563,9 @@ function CameraScanner({ onDetect, onFile, onClose }: {
 
 /* ================================================================================================ */
 
-export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome, initialManual, initialUpc, onAppCancel }: Props) {
+export function ReceivePanel({
+  client, storeId, accessToken, onSaved, appChrome, initialManual, initialUpc, onAppCancel, requireManualCore,
+}: Props) {
   const [options, setOptions] = useState<Options | null>(null);
   const [manual, setManual] = useState(!!initialManual);
   const [draft, setDraft] = useState('');
@@ -910,6 +918,22 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     if (!files.length) out.push('photo');
     return out;
   }
+  /** Associate manual entry on the store phone — hard requirements before Finish. */
+  function manualCoreMissing(): string[] {
+    const a = cents(form.ask);
+    const dims = [form.length, form.width, form.height, form.weight].map(v => Number(v.trim()));
+    const out: string[] = [];
+    if (!brandReady()) out.push('brand');
+    if (!form.model.trim()) out.push('model');
+    if (!pos(typeof a === 'number' ? a : null)) out.push('price');
+    if (dims.some(d => !pos(d))) out.push('dimensions');
+    if (!form.condition) out.push('condition');
+    if (!files.length) out.push('photo');
+    else if (files.some(f => f.size < PHOTO_MIN_BYTES)) out.push('photo (retake — too small)');
+    return out;
+  }
+  const enforceManualCore = Boolean(requireManualCore && manual);
+  const coreGaps = enforceManualCore ? manualCoreMissing() : [];
   const liveMissing = (() => {
     const a = cents(form.ask);
     const dims = [form.length, form.width, form.height, form.weight].map(v => Number(v.trim()));
@@ -940,6 +964,13 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       if (!files.length) { setError('Add at least one real photo of this unit before finishing.'); return; }
       if (files.some(f => f.size < PHOTO_MIN_BYTES)) { setError('One of the photos looks empty or too small. Retake it.'); return; }
       if (!form.condition) { setError('Pick a condition: New (sealed), Open box, or Scratch & dent.'); return; }
+    }
+    if (enforceManualCore) {
+      const core = manualCoreMissing();
+      if (core.length) {
+        setError(`Fill these before receiving: ${core.join(', ')}.`);
+        return;
+      }
     }
     if (form.condition === SCRATCH && !form.conditionNote.trim()) { setError('Scratch & dent needs a note describing the damage.'); return; }
     const parsed = parse();
@@ -1409,10 +1440,16 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       <div className="app-nav receive-app-nav">
         <button type="button" onClick={() => onAppCancel?.()}>Cancel</button>
         <div className="app-nav-title">Receive · {options?.next_sku || '…'}</div>
-        <button type="button" disabled={busy || !options?.next_sku} onClick={() => {
-          const formEl = document.getElementById('receive-app-form') as HTMLFormElement | null;
-          formEl?.requestSubmit();
-        }}>Save</button>
+        <button
+          type="button"
+          disabled={busy || !options?.next_sku || (enforceManualCore && coreGaps.length > 0)}
+          onClick={() => {
+            const formEl = document.getElementById('receive-app-form') as HTMLFormElement | null;
+            formEl?.requestSubmit();
+          }}
+        >
+          Save
+        </button>
       </div>
     )}
     <div className="receive-next">
@@ -1522,9 +1559,9 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       {!manual && merged?.never_list_reason && <p className="hint">Amazon will not list this: {merged.never_list_reason}</p>}
 
       <div className="unit-edit-grid">
-        <label className={liveMissing.includes('price') ? 'receive-need' : undefined}>
-          Price{liveMissing.includes('price')
-            ? ' (needed to list)'
+        <label className={(enforceManualCore ? coreGaps.includes('price') : liveMissing.includes('price')) ? 'receive-need' : undefined}>
+          Price{(enforceManualCore ? coreGaps.includes('price') : liveMissing.includes('price'))
+            ? (enforceManualCore ? ' (required)' : ' (needed to list)')
             : (retail && !askTouched.current
               ? ` (suggested from ${retail.source}${retail.asOf ? ` · ${retail.asOf.slice(0, 10)}` : ''} — edit if needed)`
               : ' (no source price — type it)')}
@@ -1545,8 +1582,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           />
         </label>
 
-        <div className={`unit-edit-wide receive-cond${liveMissing.includes('condition') ? ' receive-need' : ''}`} role="radiogroup" aria-label="Condition">
-          <span className="receive-label">Condition{liveMissing.includes('condition') ? ' (needed to list)' : ''}</span>
+        <div className={`unit-edit-wide receive-cond${(enforceManualCore ? coreGaps.includes('condition') : liveMissing.includes('condition')) ? ' receive-need' : ''}`} role="radiogroup" aria-label="Condition">
+          <span className="receive-label">Condition{(enforceManualCore ? coreGaps.includes('condition') : liveMissing.includes('condition')) ? (enforceManualCore ? ' (required)' : ' (needed to list)') : ''}</span>
           {manual
             ? <select value={form.condition} onChange={e => update('condition', e.target.value)}>
               <option value="">—</option>{[...new Set([...choices(options?.conditions), SCRATCH])].map(x => <option key={x} value={x}>{x}</option>)}
@@ -1768,16 +1805,20 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       </div>
 
       <p className="hint receive-check">
-        {doNotList
-          ? "Won't list online — received with no ask price and hidden from the website."
-          : liveMissing.length === 0
-            ? (readyToList ? 'Complete — will receive as ready to list.' : 'Complete — check Ready to list, or Finish to save without listing pressure.')
-            : readyToList
-              ? `Ready to list still needs: ${liveMissing.join(', ')}.`
-              : `Missing for listing: ${liveMissing.join(', ')}. You can still receive; incomplete units land in Needs attention.`}
+        {enforceManualCore
+          ? (coreGaps.length === 0
+            ? 'Required fields complete — you can receive this unit.'
+            : `Required before receive: ${coreGaps.join(', ')}.`)
+          : doNotList
+            ? "Won't list online — received with no ask price and hidden from the website."
+            : liveMissing.length === 0
+              ? (readyToList ? 'Complete — will receive as ready to list.' : 'Complete — check Ready to list, or Finish to save without listing pressure.')
+              : readyToList
+                ? `Ready to list still needs: ${liveMissing.join(', ')}.`
+                : `Missing for listing: ${liveMissing.join(', ')}. You can still receive; incomplete units land in Needs attention.`}
       </p>
       <div className="actions">
-        <button disabled={busy || !options?.next_sku || (dups !== null && dups.count > 0 && !dupAck)}>{busy ? 'Receiving…' : 'Finish & receive'}</button>
+        <button disabled={busy || !options?.next_sku || (dups !== null && dups.count > 0 && !dupAck) || (enforceManualCore && coreGaps.length > 0)}>{busy ? 'Receiving…' : 'Finish & receive'}</button>
         {!manual && current && <button type="button" className="secondary" disabled={busy} onClick={skipCurrent}>Skip this scan</button>}
       </div>
     </form>}

@@ -9,10 +9,12 @@ type Props = {
   onSaved: () => void;
   /** Open inventory item detail / edit for a SKU received today. */
   onOpenItem?: (sku: string) => void;
+  /** Associate / local staff — require core fields on manual receive. */
+  requireManualCore?: boolean;
 };
 
 /** Native Receive home; opens the shared ReceivePanel form after scan / camera / manual. */
-export function AppReceive({ client, storeId, accessToken, onSaved, onOpenItem }: Props) {
+export function AppReceive({ client, storeId, accessToken, onSaved, onOpenItem, requireManualCore }: Props) {
   const [phase, setPhase] = useState<'home' | 'form'>('home');
   const [manual, setManual] = useState(false);
   const [pendingUpc, setPendingUpc] = useState<string | null>(null);
@@ -76,6 +78,7 @@ export function AppReceive({ client, storeId, accessToken, onSaved, onOpenItem }
           appChrome
           initialManual={manual}
           initialUpc={pendingUpc}
+          requireManualCore={requireManualCore}
           onAppCancel={() => {
             setPendingUpc(null);
             setPhase('home');
