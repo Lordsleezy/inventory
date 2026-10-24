@@ -1,0 +1,30 @@
+.connection-cards { display: grid; gap: 18px; }
+.connection-card { padding: 24px; border: 1px solid var(--border, #d8dde5); border-radius: 16px; background: var(--panel, #fff); color: var(--text, #171717); }
+.connection-heading { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.connection-heading h2 { margin: 0; flex: 1; font-size: 22px; }
+.connection-icon { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 12px; background: #0a84ff; color: white; font-size: 28px; font-weight: 700; }
+.connection-amazon .connection-icon { background: #ff9f0a; }
+.connection-tiktok .connection-icon { background: #5ac8fa; color: #111; }
+.connection-status { color: #777; font-size: 14px; font-weight: 600; }
+.connection-status.is-connected { color: #168444; }
+.connection-login { margin-top: 16px; min-height: 44px; }
+.connection-accounts { margin-top: 16px; }
+.connection-account { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 16px 0; border-top: 1px solid #8884; }
+.connection-account > div { flex: 1; min-width: 150px; overflow-wrap: anywhere; }
+.connection-account small { display: block; margin-top: 4px; color: #777; }
+.connection-account .connection-login { margin-top: 0; }
+.connection-error { margin-top: 16px; overflow-wrap: anywhere; color: #c53636; }
+.connection-error button { min-height: 44px; }
+html.app-mode .connections-page { padding: 12px 20px 24px; }
+html.app-mode .connection-card { background: #1c1c1e; color: #fff; border: 0; border-radius: 20px; padding: 20px; }
+html.app-mode .connection-heading { gap: 12px; }
+html.app-mode .connection-heading h2 { font-size: 22px; }
+html.app-mode .connection-status, html.app-mode .connection-account small { color: #98989d; }
+html.app-mode .connection-status.is-connected { color: #30d158; }
+html.app-mode .connection-login { background: #0a84ff; color: #fff; border: 0; border-radius: 12px; padding: 12px 16px; font-size: 16px; font-weight: 600; }
+html.app-mode .connection-login:disabled { opacity: .5; }
+html.app-mode .connection-error { color: #ff6961; }
+@media (max-width: 420px) {
+  .connection-heading > .connection-status { flex-basis: 100%; margin-left: 56px; }
+  .connection-account .connection-login { width: 100%; }
+}
