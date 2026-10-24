@@ -96,7 +96,7 @@ export async function resolveUnitCategories(storeId, sku, { network = true } = {
     const explicit = String(unit.listing_specs?.ebay_category_id || unit.ebay_category || '');
     if (/^\d+$/.test(explicit)) { ids.ebay = explicit; sources.ebay = 'existing_unit'; }
   }
-  if (!cached && network && gtin.ok) {
+  if (network && gtin.ok && (!cached || !ids.amazon)) {
     const amazon = await catalogItemByIdentifier(storeId, gtin.upcA ? 'UPC' : 'GTIN', gtin.upcA || gtin.gtin14)
       .catch(() => ({ found: false }));
     if (amazon.found && amazon.item?.product_type) {
@@ -110,7 +110,7 @@ export async function resolveUnitCategories(storeId, sku, { network = true } = {
       if (matched?.asin === amazon.item.asin) amazonListingId = matched.asin;
     }
   }
-  if (!cached && network) {
+  if (network && (!cached || !ids.ebay)) {
     const ebay = await bestEbayCategory(unit, gtin);
     if (ebay.conflict) conflict = true;
     if (ebay.id) {
@@ -129,7 +129,7 @@ export async function resolveUnitCategories(storeId, sku, { network = true } = {
       }
     }
   }
-  if (!ids.tiktok && network && !cached) {
+  if (!ids.tiktok && network) {
     ids.tiktok = await recommendedTiktok(storeId, unit);
     if (ids.tiktok) sources.tiktok = 'tiktok_recommendation';
   }
@@ -177,7 +177,7 @@ export async function resolveUnitCategories(storeId, sku, { network = true } = {
     updates.find((row) => row.channel === channel)?.category_id || current.get(channel)?.category_id || null]));
   const confirmed = !conflict && !gaps?.length && enabledChannels.length > 0 &&
     enabledChannels.every((channel) => Boolean(finalIds[channel]));
-  if (gtin.ok && confirmed && !cached) {
+  if (gtin.ok && confirmed) {
     const { error } = await sb.from('store_upc_categories').upsert({ store_id: storeId, gtin14: gtin.gtin14,
       ebay_category_id: finalIds.ebay, amazon_product_type: finalIds.amazon, amazon_listing_id: amazonListingId,
       tiktok_category_id: finalIds.tiktok, depop_category_id: finalIds.depop, internal_category: product?.category || unit.internal_category || null,
