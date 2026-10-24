@@ -5,6 +5,7 @@ import { tiktokApiFetch } from './tiktok-shop.mjs';
 import { resolveUnitCategories } from './category-resolve.mjs';
 import { resolveEbayAccount, userTokenForAccount } from './ebay-accounts.mjs';
 import { getTradingItem } from './ebay-trading.mjs';
+import { refreshChannelCategoryFields } from './category-taxonomy.mjs';
 
 const sellerId = () => String(process.env.AMAZON_SELLER_ID || '').trim();
 
@@ -13,9 +14,15 @@ async function adoptLive(storeId, sku, channel, categoryId, attributes = {}) {
   const sb = serviceClient();
   const { data: prior } = await sb.from('unit_channel_categories').select('category_id,attributes,adopted_live')
     .eq('store_id', storeId).eq('sku', sku).eq('channel', channel).maybeSingle();
-  if (prior?.adopted_live && prior.category_id === String(categoryId)) return false;
-  const { data: taxonomy } = channel === 'depop' ? { data: null } : await sb.from('channel_taxonomy')
-    .select('fingerprint,fields_version').eq('channel', channel).eq('category_id', String(categoryId)).maybeSingle();
+  const firstAdoption = !prior?.adopted_live || prior.category_id !== String(categoryId);
+  let { data: taxonomy } = channel === 'depop' ? { data: null } : await sb.from('channel_taxonomy')
+    .select('fingerprint,fields_version,fields_fetched_at,active,leaf').eq('channel', channel).eq('category_id', String(categoryId)).maybeSingle();
+  if (taxonomy?.active && taxonomy.leaf && (!taxonomy.fields_fetched_at
+    || Date.parse(taxonomy.fields_fetched_at) < Date.now()-3*86400000)) {
+    await refreshChannelCategoryFields(channel, storeId, String(categoryId)).catch(() => {});
+    ({ data: taxonomy } = await sb.from('channel_taxonomy').select('fingerprint,fields_version')
+      .eq('channel', channel).eq('category_id', String(categoryId)).maybeSingle());
+  }
   const { error } = await sb.from('unit_channel_categories').upsert({ store_id: storeId, sku, channel,
     category_id: String(categoryId), enabled: true, adopted_live: true, source: 'live_listing',
     attributes: { ...(prior?.category_id === String(categoryId) ? prior.attributes || {} : {}), ...attributes },
@@ -27,7 +34,7 @@ async function adoptLive(storeId, sku, channel, categoryId, attributes = {}) {
       ebay_category_id: String(categoryId) }, { onConflict: 'store_id,ebay_category_id', ignoreDuplicates: true });
     if (mapError) throw new Error(mapError.message);
   }
-  return true;
+  return firstAdoption;
 }
 
 async function adoptListingCategories(storeId, unit) {
