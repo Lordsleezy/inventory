@@ -17,6 +17,7 @@ import { unitThumbUrl } from './units';
 import type { ReceiptPayload } from './sale';
 import { downloadReceiptText, printReceiptHtml, receiptHtml } from './sale';
 import { formatPoints } from './CustomerAttach';
+import { focusScannerField, isAndroidStoreDevice, isKioskShell, scannerFieldStartsReadOnly, scannerInputMode } from '../kiosk';
 
 const moneyEntry = /^\d*(?:\.\d{0,2})?$/;
 const SALE_OVERRIDE = 'Sale price';
@@ -155,6 +156,12 @@ export function NativeRegisterCart(props: NativeRegisterProps) {
   const [swipe, setSwipe] = useState<{ sku: string; x: number } | null>(null);
   const touchOrigin = useRef<{ sku: string; x: number } | null>(null);
   const priceInputRef = useRef<HTMLInputElement>(null);
+  const [searchTyping, setSearchTyping] = useState(() => !scannerFieldStartsReadOnly());
+  const androidStore = isAndroidStoreDevice();
+  const addHit = (unit: RegisterUnit) => {
+    if (androidStore) setSearchTyping(false);
+    addFromSearch(unit);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -224,13 +231,13 @@ export function NativeRegisterCart(props: NativeRegisterProps) {
     try {
       const code = await scanBarcode();
       if (!code) {
-        searchRef.current?.focus();
+        focusScannerField(searchRef.current, { softKeyboard: searchTyping });
         return;
       }
       setQ(code);
       setShowHits(true);
       const rows = await queryUnit(code);
-      if (rows[0]) addFromSearch(rows[0]);
+      if (rows[0]) addHit(rows[0]);
     } finally {
       setScanBusy(false);
     }
@@ -308,20 +315,30 @@ export function NativeRegisterCart(props: NativeRegisterProps) {
           <span className="nr-search-icon" aria-hidden>⌕</span>
           <input
             ref={searchRef}
-            placeholder="Scan or search SKU, title"
+            placeholder={
+              androidStore || isKioskShell()
+                ? (searchTyping ? 'Type SKU or title…' : 'Scan or search (tap to type)')
+                : 'Scan or search SKU, title'
+            }
             value={q}
             onChange={e => {
               setQ(e.target.value);
               setShowHits(Boolean(e.target.value.trim()));
             }}
             onFocus={() => q.trim() && setShowHits(true)}
+            onClick={() => {
+              if (androidStore || isKioskShell()) {
+                setSearchTyping(true);
+                requestAnimationFrame(() => focusScannerField(searchRef.current, { softKeyboard: true }));
+              }
+            }}
             onKeyDown={onSearchKey}
             autoComplete="off"
             autoCorrect="off"
             autoCapitalize="off"
             spellCheck={false}
             enterKeyHint="search"
-            inputMode="search"
+            inputMode={searchTyping ? 'search' : scannerInputMode()}
             disabled={!idle || cashOpen}
           />
           <button
@@ -337,7 +354,7 @@ export function NativeRegisterCart(props: NativeRegisterProps) {
             <div className="nr-hits">
               {searchBusy && !hits.length ? <div className="nr-hit muted">Searching…</div> : null}
               {hits.map(u => (
-                <button key={u.sku} type="button" className="nr-hit" onClick={() => addFromSearch(u)}>
+                <button key={u.sku} type="button" className="nr-hit" onClick={() => addHit(u)}>
                   <span>
                     <strong>{[u.brand, u.model].filter(Boolean).join(' ') || u.title}</strong>
                     <small>SKU {u.sku}{u.condition ? ` · ${u.condition}` : ''}</small>

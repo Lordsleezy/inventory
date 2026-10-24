@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { isKioskShell, scannerInputMode } from './kiosk';
+import { focusScannerField, isAndroidStoreDevice, isKioskShell, scannerFieldStartsReadOnly, scannerInputMode } from './kiosk';
 import { floorFunctionUrl } from './floorApi';
 import { reportClientError } from './clientLog';
 import { categoryDefaultCostCents, priceFloorCents, suggestAskCents } from './scanPricing';
@@ -543,6 +543,10 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   /** Stable key for IndexedDB photo stash (survives camera-app process death on store phones). */
   const photoSessionKey = useRef(`manual-${Date.now()}`);
   const [photoBusy, setPhotoBusy] = useState(false);
+  // Android: soft keyboard only after an explicit tap. Programmatic focus uses focusScannerField
+  // (brief readOnly) so HID wedges work without opening Gboard — inputMode="none" freezes it until reboot.
+  const [upcTyping, setUpcTyping] = useState(() => !scannerFieldStartsReadOnly());
+  const androidStore = isAndroidStoreDevice();
 
   function openBarcodeCamera() {
     // Phones / installed PWA: native capture is far more reliable than getUserMedia + BarcodeDetector.
@@ -583,11 +587,12 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   );
   const suggestion = useMemo(() => suggestAskCents(retail?.cents ?? null, floor), [retail, floor]);
 
-  // Only keep the scan box focused when idle. Refocusing during form edit pops the
-  // mobile keyboard every time the user scrolls (body briefly becomes activeElement).
+  // Keep the scan box focused for HID wedges when idle — but never re-focus on Android
+  // after the user left the field (blur→focus loops wedge Gboard until reboot).
   const focusUpc = () => {
     if (manual || formOpen || modalOpen.current) return;
-    requestAnimationFrame(() => upcInput.current?.focus());
+    if (androidStore && upcTyping) return;
+    requestAnimationFrame(() => focusScannerField(upcInput.current, { softKeyboard: upcTyping }));
   };
   const update = (key: keyof Form, value: string) => {
     if (key === 'ask') askTouched.current = true;
@@ -607,10 +612,19 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   };
 
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
-  useEffect(() => { focusUpc(); }, []);
   useEffect(() => {
-    if (formOpen) upcInput.current?.blur();
-  }, [formOpen, loadedId]);
+    // Autofocus once for the wedge. On Android the field starts readOnly so the soft
+    // keyboard stays closed — do not call focus again from effects after that.
+    if (!manual && !formOpen) focusUpc();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    if (formOpen) {
+      upcInput.current?.blur();
+      // Leaving the form: restore wedge-friendly read-only scan box on Android.
+      if (androidStore) setUpcTyping(false);
+    }
+  }, [formOpen, loadedId, androidStore]);
 
   async function loadOptions() {
     const { data, error: e } = await client.rpc('portal_receive_options');
@@ -1243,19 +1257,33 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
             value={draft}
             onChange={e => setDraft(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); enqueue(draft); } }}
+            onClick={() => {
+              // Explicit tap = user wants the soft keyboard. Safe — not a focus loop.
+              if (androidStore || isKioskShell()) {
+                setUpcTyping(true);
+                requestAnimationFrame(() => focusScannerField(upcInput.current, { softKeyboard: true }));
+              }
+            }}
             onBlur={() => {
-              // Do not steal focus while the unit form is open (scroll would re-open the keyboard).
-              if (formOpen || manual || modalOpen.current) return;
+              // Never steal focus back on Android — that fight freezes the system keyboard.
+              if (androidStore || formOpen || manual || modalOpen.current) return;
               setTimeout(() => {
-                if (modalOpen.current || formOpen) return;
-                if (!document.activeElement || document.activeElement === document.body) upcInput.current?.focus();
+                if (modalOpen.current || formOpen || androidStore) return;
+                if (!document.activeElement || document.activeElement === document.body) {
+                  focusScannerField(upcInput.current);
+                }
               }, 0);
             }}
-            autoFocus={!formOpen}
-            inputMode={scannerInputMode()}
+            // Autofocus via effect + focusScannerField on Android (HTML autoFocus opens Gboard).
+            autoFocus={!formOpen && !androidStore && !scannerFieldStartsReadOnly()}
+            inputMode={upcTyping ? 'numeric' : scannerInputMode()}
             autoComplete="off"
             enterKeyHint="done"
-            placeholder={isKioskShell() ? 'Scan barcode' : 'Scan or type · Enter'}
+            placeholder={
+              isKioskShell() || androidStore
+                ? (upcTyping ? 'Type UPC · Enter' : 'Scan barcode (tap to type)')
+                : 'Scan or type · Enter'
+            }
             disabled={!accessToken || formOpen}
           />
         </label>}
