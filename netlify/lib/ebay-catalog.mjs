@@ -1,4 +1,5 @@
 import { serviceClient } from "./server.mjs";
+import { comparablePrices } from './receive-price.mjs';
 import { requireEbayEnabled } from "./ebay-env.mjs";
 import { ebayHosts } from "./ebay-env.mjs";
 import {
@@ -273,6 +274,33 @@ export async function fetchCategoryTree() {
   const body = await response.json();
   if (!response.ok || !body.rootCategoryNode) throw new Error(body.errors?.[0]?.message || "ebay_tree_failed");
   return { treeId: idBody.categoryTreeId, version: String(body.categoryTreeVersion || ""), root: body.rootCategoryNode };
+}
+
+export async function receiveBrowsePrices(identity) {
+  const { api, token } = await applicationToken();
+  const query = new URLSearchParams({ limit: '30', filter: 'priceCurrency:USD' });
+  const keywords = [identity.brand, identity.model, identity.title, identity.size,
+    Number(identity.unit_count) > 1 ? `${identity.unit_count} pack` : ''].filter(Boolean).join(' ').slice(0, 200);
+  if (/^\d{8,14}$/.test(String(identity.upc || ''))) query.set('gtin', identity.upc);
+  else query.set('q', keywords);
+  const search = async () => {
+    const response = await fetch(`${api}/buy/browse/v1/item_summary/search?${query}`, {
+      headers: { Authorization: `Bearer ${token}`, 'X-EBAY-C-MARKETPLACE-ID': process.env.EBAY_MARKETPLACE_ID || 'EBAY_US' },
+      signal: AbortSignal.timeout(5000),
+    });
+    const body = await response.json();
+    if (!response.ok) throw new Error(`ebay_browse_${response.status}`);
+    return (body.itemSummaries || []).filter(item => item.price?.currency === 'USD').map(item => ({
+      store: `eBay active · ${item.condition || 'listing'}`, product_name: item.title, url: item.itemWebUrl,
+      price_cents: Math.round(Number(item.price.value) * 100),
+    }));
+  };
+  const prices = await search();
+  if (query.has('gtin') && !comparablePrices(prices, identity).length) {
+    query.delete('gtin'); query.set('q', keywords);
+    return [...prices, ...await search()];
+  }
+  return prices;
 }
 
 export async function ebayCategoriesForGtin(gtin) {

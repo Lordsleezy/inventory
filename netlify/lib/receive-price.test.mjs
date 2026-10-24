@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { medianReference, verifyRetailListings } from './receive-price.mjs';
+import { medianReference, verifyRetailListings, upcOfferPrices } from './receive-price.mjs';
 
 const item = { brand: 'Febreze', title: 'Febreze Air Mist Air Freshener Spray, Linen & Sky, 8.8 oz', variant: 'Linen & Sky', size: '8.8 oz', unit_count: 1 };
 const listing = (store, cents, suffix = '') => ({ store, price_cents: cents,
@@ -22,6 +22,25 @@ test('one or two listings do not claim a median', () => {
   const result = medianReference([listing('A', 299), listing('B', 399)], item);
   assert.equal(result.count, 2);
   assert.equal(result.median_cents, null);
+});
+
+test('recorded offers retain distinct merchants behind UPCitemdb redirects and exclude CAD', () => {
+  const offers = [
+    { merchant: 'Canadian store', domain: 'store.ca', price: 7.99, link: 'https://www.upcitemdb.com/offer/ca' },
+    { merchant: 'US A', domain: 'a.example', price: 3.49, link: 'https://www.upcitemdb.com/offer/a' },
+    { merchant: 'US B', domain: 'b.example', price: 4.49, link: 'https://www.upcitemdb.com/offer/b' },
+  ];
+  const prices = upcOfferPrices({ found: true, title: listing('A', 100).product_name, offers }, item);
+  assert.equal(prices.length, 2);
+  assert.deepEqual(prices.map(p => p.price_cents), [349,449]);
+});
+
+test('count printed in a listing establishes whole-package count and rejects a conflicting model', () => {
+  assert.equal(medianReference([{...listing('A', 1999, ' 3 pack'), pack_size: undefined}], item).count, 0);
+  const identity = {brand:'Philips',title:'Philips Sonicare HX7129/02',model:'HX7129/02',unit_count:2};
+  const price = {store:'eBay',price_cents:4445,url:'https://ebay.com/itm/1',product_name:'Philips Sonicare HX9999/01 2 pack'};
+  assert.equal(medianReference([price], identity).count, 0);
+  assert.equal(medianReference([{...price,product_name:'Philips Sonicare HX7129/02 2 pack'}], identity).count, 1);
 });
 
 test('a multipack is priced as the whole package, never divided', () => {

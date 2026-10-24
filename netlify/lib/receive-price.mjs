@@ -3,18 +3,18 @@ const words = value => String(value || '').toLowerCase().replace(/&/g, ' and ')
   .replace(/[^a-z0-9.]+/g, ' ').trim().split(/\s+/).filter(Boolean);
 
 function printedSize(value) {
-  const match = String(value || '').toLowerCase().match(/\b(\d+(?:\.\d+)?)\s*(fl\s*oz|oz|ml|l|g|kg|lb|ct|count)\b/);
+  const match = String(value || '').toLowerCase().match(/\b(\d+(?:\.\d+)?)[\s-]*(fl\s*oz|oz|ml|l|g|kg|lb)\b/);
   return match ? { amount: Number(match[1]), unit: match[2].replace(/\s+/g, '') === 'floz' ? 'oz' : match[2].replace(/\s+/g, '') } : null;
 }
 
 function packCount(value) {
   const text = String(value || '').toLowerCase();
-  const match = text.match(/\b(?:pack|case|box|set)\s*(?:of\s*)?(\d+)\b|\b(\d+)\s*(?:-?\s*pack|pk|cans?|bottles?)\b|\b(\d+)\s*[x×]\s*\d+(?:\.\d+)?\s*(?:fl\s*)?oz\b/);
+  const match = text.match(/\b(?:pack|case|box|set)\s*(?:of\s*)?(\d+)\b|\b(\d+)\s*(?:-?\s*(?:pack|count|ct)|pk|cans?|bottles?|\/\s*carton)\b|\b(\d+)\s*[x×]\s*\d+(?:\.\d+)?\s*(?:fl\s*)?oz\b/);
   return match ? Number(match[1] || match[2] || match[3]) : null;
 }
 
 function identityPack(identity) {
-  return Math.max(1, Number(identity.unit_count) || 1, packCount(identity.title) || 1);
+  return Math.max(1, Number(identity.unit_count) || 1, packCount(identity.title) || 1, packCount(identity.size) || 1);
 }
 
 export function comparablePrices(prices, identity) {
@@ -38,16 +38,33 @@ export function comparablePrices(prices, identity) {
     if (brand && !listed.includes(brand)) return false;
     if (variant.length && !variant.every(word => listedWords.includes(word))) return false;
     if (line.length && !line.some(word => listedWords.includes(word))) return false;
+    const model = String(identity.model || '').toLowerCase().trim();
+    // If the listing prints a manufacturer model, it must agree. GTIN searches may omit it.
+    const listedModels = listed.match(/\b[a-z]{1,4}\d{3,}(?:[/-]\d+)?\b/g) || [];
+    if (model && listedModels.length && !listedModels.includes(model)) return false;
     const size = printedSize(price.product_name) || printedSize(listedUrl);
     if (expectedSize && (!size || expectedSize.unit !== size.unit || Math.abs(expectedSize.amount - size.amount) > 0.05)) return false;
     const namedPack = packCount(price.product_name) || packCount(listedUrl);
     if (namedPack && namedPack !== expectedPack) return false;
-    if (Number(price.pack_size || 1) !== expectedPack) return false;
-    const canonical = new URL(url).hostname.replace(/^www\./, '');
+    if (Number(price.pack_size || namedPack || 1) !== expectedPack) return false;
+    const canonical = String(price.merchant_domain || new URL(url).hostname).toLowerCase().replace(/^www\./, '');
     if (seen.has(canonical)) return false;
     seen.add(canonical);
     return true;
   });
+}
+
+/** Recorded merchant offers for this barcode; never convert a multipack to a unit price. */
+export function upcOfferPrices(catalog, identity) {
+  if (!catalog?.found) return [];
+  return comparablePrices((catalog.offers || []).filter(offer =>
+    (!offer.condition || /^new$/i.test(offer.condition)) &&
+    (!offer.currency || /^USD$/i.test(offer.currency)) &&
+    !/\.ca\b|canada/i.test(`${offer.domain || ''} ${offer.merchant || ''}`)).map(offer => ({
+    store: `UPCitemdb · ${offer.merchant || offer.domain || 'merchant'}`,
+    product_name: offer.title || catalog.title, url: offer.link, merchant_domain: offer.domain || offer.merchant,
+    price_cents: Math.round(Number(offer.price) * 100),
+  })), identity);
 }
 
 export function medianReference(prices, identity) {
