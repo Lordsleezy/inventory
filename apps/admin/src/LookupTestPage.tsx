@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { isKioskShell, scannerInputMode } from './kiosk';
+import { focusScannerField, isAndroidStoreDevice, isKioskShell, scannerFieldStartsReadOnly, scannerInputMode } from './kiosk';
 import { floorFunctionUrl } from './floorApi';
 import { reportClientError } from './clientLog';
 import { errText } from './errText';
@@ -122,9 +122,12 @@ export function LookupTestPage({ accessToken }: Props) {
   const [force, setForce] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const queueRef = useRef<Promise<void>>(Promise.resolve());
+  const [upcTyping, setUpcTyping] = useState(() => !scannerFieldStartsReadOnly());
+  const androidStore = isAndroidStoreDevice();
 
   useEffect(() => {
-    requestAnimationFrame(() => inputRef.current?.focus());
+    requestAnimationFrame(() => focusScannerField(inputRef.current, { softKeyboard: upcTyping }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const totals = useMemo(() => {
@@ -236,11 +239,21 @@ export function LookupTestPage({ accessToken }: Props) {
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={onKeyDown}
-            autoFocus
-            inputMode={scannerInputMode() === 'none' ? 'none' : 'numeric'}
+            onClick={() => {
+              if (androidStore || isKioskShell()) {
+                setUpcTyping(true);
+                requestAnimationFrame(() => focusScannerField(inputRef.current, { softKeyboard: true }));
+              }
+            }}
+            autoFocus={!androidStore && !scannerFieldStartsReadOnly()}
+            inputMode={upcTyping ? 'numeric' : scannerInputMode()}
             autoComplete="off"
             enterKeyHint="done"
-            placeholder={isKioskShell() ? 'Scan barcode' : 'Scan or type · Enter'}
+            placeholder={
+              isKioskShell() || androidStore
+                ? (upcTyping ? 'Type UPC · Enter' : 'Scan barcode (tap to type)')
+                : 'Scan or type · Enter'
+            }
             disabled={!accessToken}
           />
         </label>
