@@ -17,7 +17,8 @@ export function MeasureOnMat({ onApply, onClose }: { onApply: (value: Measuremen
     try { setImage(await rectifyMatPhoto(file)); } catch(e) { setError(e instanceof Error ? e.message : 'Photo could not be measured.'); }
     finally { setBusy(false); }
   }
-  return createPortal(<div style={{position:'fixed',inset:0,zIndex:200,background:'#17232dcc',display:'grid',placeItems:'center',padding:8}}><section role="dialog" aria-modal="true" aria-label="Measure on mat" style={{maxHeight:'95dvh',overflow:'auto',width:'min(95vw,600px)',background:'white',color:'#17232d',borderRadius:16,padding:20,boxSizing:'border-box'}}>
+  return createPortal(<div style={{position:'fixed',inset:0,zIndex:200,background:'#17232dcc',display:'grid',placeItems:'center',padding:8}}><section className="receive-mat-dialog" role="dialog" aria-modal="true" aria-label="Measure on mat" style={{maxHeight:'95dvh',overflow:'auto',width:'min(95vw,600px)',background:'white',color:'#17232d',borderRadius:16,padding:20,boxSizing:'border-box'}}>
+    <style>{`.receive-mat-dialog p{color:#465565!important;font-size:14px}.receive-mat-dialog label{display:grid;gap:5px;color:#17232d!important}.receive-mat-dialog .measure-fields{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.receive-mat-dialog input,.receive-mat-dialog select{width:100%;min-width:0;box-sizing:border-box}.receive-mat-dialog a{color:#284f9b!important}.receive-mat-dialog button{margin:6px 6px 0 0}`}</style>
     <h2 style={{color:'inherit'}}>Measure on mat</h2>
     <p><a href="/floor-aruco-mat.pdf" target="_blank" rel="noreferrer">Print letter-size ArUco mat</a> at 100%. Check the printed scale with a ruler.</p>
     <label>Measuring<select value={target} onChange={e=>{setTarget(e.target.value as 'product'|'package');setValues({length:'',width:'',height:''});setStage('top');setImage('');setPoints([]);}}><option value="product">Product</option><option value="package">Actual shipping package</option></select></label>
@@ -36,7 +37,7 @@ export function MeasureOnMat({ onApply, onClose }: { onApply: (value: Measuremen
       {points.map((p,i)=><span key={i} style={{position:'absolute',pointerEvents:'none',left:`${p.x/8.5*100}%`,top:`${p.y/11*100}%`,transform:'translate(-50%,-50%)',color:'red',fontSize:28}}>+</span>)}
     </div>}
     {stage==='top'&&values.length&&values.width&&<button type="button" onClick={()=>{setStage('side');setImage('');setPoints([]);}}>Next: side photo for height</button>}
-    <div>{(['length','width','height'] as const).map(key=><label key={key}>{key} (in)<input type="number" min="0" step="0.01" inputMode="decimal" value={values[key]} onChange={e=>setValues(v=>({...v,[key]:e.target.value}))}/></label>)}</div>
+    <div className="measure-fields">{(['length','width','height'] as const).map(key=><label key={key}>{key} (in)<input type="number" min="0" step="0.01" inputMode="decimal" value={values[key]} onChange={e=>setValues(v=>({...v,[key]:e.target.value}))}/></label>)}</div>
     <p>Weight is never measured from a photo. Enter scale weight separately.</p>
     <button type="button" disabled={!Object.values(values).every(v=>Number(v)>0)} onClick={()=>onApply(values,target)}>Use reviewed measurements</button>
     <button type="button" className="secondary" onClick={onClose}>Cancel</button>
