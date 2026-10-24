@@ -3,6 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { AttentionSection } from '../navigation';
 import { ATTENTION_SECTIONS, NeedsAttentionPanel, useAttentionCounts } from '../NeedsAttentionPanel';
 import { reviewReasonLabel } from '../inventoryReview';
+import { CategoryPanel } from '../CategoryPanel';
 
 /** Same four subtabs as desktop Inventory. Unfinished replaces the old More → Needs attention. */
 type Filter = 'in_stock' | 'sold' | 'unfinished' | 'defective';
@@ -124,6 +125,7 @@ export function AppInventory({ client, storeId, fullAccess, money, stamp, onOpen
   const [error, setError] = useState('');
   const [unfinishedCount, setUnfinishedCount] = useState<number | null>(null);
   const [queue, setQueue] = useState<Exclude<AttentionSection, 'all'> | null>(null);
+  const [categoryOpen, setCategoryOpen] = useState(false);
   const [queueRefresh, setQueueRefresh] = useState(0);
   const counts = useAttentionCounts(client, fullAccess && filter === 'unfinished', queueRefresh);
   const urlsRef = useRef(urls);
@@ -266,6 +268,11 @@ export function AppInventory({ client, storeId, fullAccess, money, stamp, onOpen
     );
   }
 
+  if (categoryOpen) return <div className="app-stack"><div className="app-nav">
+    <button type="button" onClick={() => setCategoryOpen(false)}>‹ Inventory</button>
+    <div className="app-nav-title">Missing Category</div><span />
+  </div><div className="app-embed-soft"><CategoryPanel client={client} storeId={storeId} /></div></div>;
+
   return (
     <div ref={scrollRef as React.RefObject<HTMLDivElement>}>
       <div className="app-large-title"><h1>Inventory</h1></div>
@@ -301,6 +308,9 @@ export function AppInventory({ client, storeId, fullAccess, money, stamp, onOpen
           </button>
         ))}
       </div>
+      {fullAccess && <div className="app-group"><button type="button" className="app-more-link" onClick={() => setCategoryOpen(true)}>
+        <span className="app-more-left">Missing Category</span><span className="app-chevron">›</span>
+      </button></div>}
 
       {fullAccess && filter === 'unfinished' && (
         <>

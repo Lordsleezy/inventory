@@ -262,6 +262,34 @@ async function applicationToken() {
   return value;
 }
 
+export async function fetchCategoryTree() {
+  const market = process.env.EBAY_MARKETPLACE_ID || "EBAY_US";
+  const { api, token } = await applicationToken();
+  const headers = { Authorization: `Bearer ${token}` };
+  const idResponse = await fetch(`${api}/commerce/taxonomy/v1/get_default_category_tree_id?marketplace_id=${encodeURIComponent(market)}`, { headers });
+  const idBody = await idResponse.json();
+  if (!idResponse.ok || !idBody.categoryTreeId) throw new Error(idBody.errors?.[0]?.message || "ebay_tree_id_failed");
+  const response = await fetch(`${api}/commerce/taxonomy/v1/category_tree/${encodeURIComponent(idBody.categoryTreeId)}`, { headers });
+  const body = await response.json();
+  if (!response.ok || !body.rootCategoryNode) throw new Error(body.errors?.[0]?.message || "ebay_tree_failed");
+  return { treeId: idBody.categoryTreeId, version: String(body.categoryTreeVersion || ""), root: body.rootCategoryNode };
+}
+
+export async function ebayCategoriesForGtin(gtin) {
+  const { api, token } = await applicationToken();
+  const response = await fetch(`${api}/buy/browse/v1/item_summary/search?gtin=${encodeURIComponent(gtin)}&limit=20`, {
+    headers: { Authorization: `Bearer ${token}`, 'X-EBAY-C-MARKETPLACE-ID': process.env.EBAY_MARKETPLACE_ID || 'EBAY_US' },
+  });
+  const body = await response.json();
+  if (!response.ok) throw new Error(body.errors?.[0]?.message || 'ebay_gtin_search_failed');
+  const counts = new Map();
+  for (const item of body.itemSummaries || []) {
+    const id = String(item.leafCategoryIds?.[0] || item.categories?.[0]?.categoryId || '');
+    if (id) counts.set(id, (counts.get(id) || 0) + 1);
+  }
+  return [...counts].sort((a, b) => b[1] - a[1]).map(([categoryId, count]) => ({ categoryId, count }));
+}
+
 const taxonomyCache = new Map();
 async function cachedTaxonomy(key, load) {
   const prior = taxonomyCache.get(key);

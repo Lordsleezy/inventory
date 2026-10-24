@@ -22,6 +22,7 @@ import {
 import { ebayItemViewUrl } from "./ebay-env.mjs";
 import { publicPhotoUrl } from "./ebay-photos.mjs";
 import { suggestCategories } from "./ebay-catalog.mjs";
+import { assertBundlePush } from './bundle-gate.mjs';
 import {
   clipMigrationTitle,
   describeMigrationPlan,
@@ -939,6 +940,10 @@ export async function runEbayMigration(storeId, { mode = "dry_run", createdBy = 
       // LIVE: end on source first so the item is never dual-live.
       try {
         if (!policies || !dest) throw new Error("Destination selling account / policies missing");
+        if (!base.sku) throw new Error('Floor SKU required before migration.');
+        const assigned = await assertBundlePush(storeId, base.sku, 'ebay');
+        if (String(assigned?.category_id || '') !== String(item.categoryId || ''))
+          throw new Error('Confirmed Floor category differs from the live source listing. Adopt its category before migration.');
         let sourceEnded = false;
         try {
           await endTradingItem(sourceToken, item.itemId, "NotAvailable");

@@ -181,7 +181,8 @@ export async function createAmazonCatalogListing(
   sku,
   { overrides = {}, mode = "VALIDATION_PREVIEW", confirmLive = false, productType } = {},
 ) {
-  try { await assertBundlePush(storeId, sku, 'amazon', { intent: false }); }
+  let assignedCategory;
+  try { assignedCategory = await assertBundlePush(storeId, sku, 'amazon', { intent: false }); }
   catch (error) { return { ok: false, reason: 'bundle_gate', message: error.message }; }
   const sb = serviceClient();
   const { data: unit, error } = await sb.from("units").select("*").eq("store_id", storeId).eq("sku", sku).maybeSingle();
@@ -211,7 +212,10 @@ export async function createAmazonCatalogListing(
     ];
   }
 
-  const pt = productType || overrides.product_type || built.productType || "STRING_LIGHT";
+  const pt = assignedCategory.category_id;
+  if ((productType && productType !== pt) || (overrides.product_type && overrides.product_type !== pt)) {
+    return { ok: false, reason: 'category_mismatch', message: `Confirmed Amazon product type is ${pt}.` };
+  }
   const live = mode !== "VALIDATION_PREVIEW";
   if (live) {
     if (!amazonListingEnabled()) {

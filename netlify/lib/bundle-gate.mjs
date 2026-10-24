@@ -2,12 +2,25 @@ import { serviceClient } from './server.mjs';
 
 /** Call immediately before any external channel write, including republish. */
 export async function assertBundlePush(storeId, sku, channel, { intent = true } = {}) {
+  let category = null;
+  if (['ebay', 'amazon', 'tiktok', 'depop'].includes(String(channel).toLowerCase())) {
+    const { error: categoryError } = await serviceClient().rpc('floor_category_pre_push', {
+      p_store: storeId, p_sku: String(sku), p_channel: String(channel).toLowerCase(),
+    });
+    if (categoryError) throw new Error(categoryError.message);
+    const { data, error } = await serviceClient().from('unit_channel_categories')
+      .select('category_id,attributes,validated_version').eq('store_id', storeId)
+      .eq('sku', String(sku)).eq('channel', String(channel).toLowerCase()).single();
+    if (error) throw new Error(error.message);
+    category = data;
+  }
   const { error } = await serviceClient().rpc(intent ? 'floor_bundle_begin_push' : 'floor_bundle_push_gate', {
     p_store: storeId,
     p_sku: String(sku),
     p_channel: String(channel).toLowerCase(),
   });
   if (error) throw new Error(error.message);
+  return category;
 }
 
 export async function bundleMainSku(storeId, sku) {
