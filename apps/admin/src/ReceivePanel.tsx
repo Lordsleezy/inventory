@@ -3,13 +3,14 @@ import { createPortal } from 'react-dom';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   bindHidWedgeListener,
-  blurActiveInput,
+  focusFromUserGesture,
   focusScannerField,
   isAndroidStoreDevice,
   isKioskShell,
   scannerFieldStartsReadOnly,
   scannerInputMode,
 } from './kiosk';
+import { StoreNumPad } from './StoreNumPad';
 import { floorFunctionUrl } from './floorApi';
 import { reportClientError } from './clientLog';
 import { categoryDefaultCostCents, priceFloorCents, suggestAskCents } from './scanPricing';
@@ -608,6 +609,11 @@ export function ReceivePanel({
   const [upcTyping, setUpcTyping] = useState(() => !scannerFieldStartsReadOnly());
   const androidStore = isAndroidStoreDevice();
   const askInput = useRef<HTMLInputElement>(null);
+  /** Store-phone on-screen pad target — avoids broken Gboard for price / dims. */
+  const [numPadField, setNumPadField] = useState<'ask' | 'length' | 'width' | 'height' | 'weight' | null>(
+    () => (isAndroidStoreDevice() ? 'ask' : null),
+  );
+  const storePad = Boolean(androidStore && appChrome);
 
   function openBarcodeCamera() {
     // Phones / installed PWA: native capture is far more reliable than getUserMedia + BarcodeDetector.
@@ -679,28 +685,25 @@ export function ReceivePanel({
     if (!manual && !formOpen) focusUpc();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  // Android: capture Bluetooth wedge at window level — never need a focused scan box.
+  // Android: capture Bluetooth wedge only while idle on the scan box — never while the
+  // unit form / manual entry is open (preventDefault thrash was killing Gboard for Price).
   useEffect(() => {
-    if (!androidStore) return;
+    if (!androidStore || manual || formOpen) return;
     return bindHidWedgeListener({
-      active: () => !manual && !formOpen && !upcTyping && !modalOpen.current && Boolean(accessToken),
+      active: () => !upcTyping && !modalOpen.current && Boolean(accessToken),
       onScan: (code) => { enqueue(code); },
     });
-    // enqueue is stable enough for wedge digits; rebind when form/typing gates change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [androidStore, manual, formOpen, upcTyping, accessToken]);
   useEffect(() => {
     if (!formOpen) return;
-    // Critical on Android: blur BEFORE readOnly/inputMode flip while focused — that
-    // race wedges Gboard until reboot so Price taps show no keyboard.
-    blurActiveInput();
-    const el = upcInput.current;
-    if (el && document.activeElement === el) el.blur();
-    if (document.activeElement instanceof HTMLElement
-      && document.activeElement.closest?.('.receive-upc')) {
-      document.activeElement.blur();
+    // Do not blurActiveInput() from effects on Android — that race with the associate's
+    // first tap (manual Brand / Price) freezes Gboard until reboot.
+    if (!androidStore) {
+      const el = upcInput.current;
+      if (el && document.activeElement === el) el.blur();
     }
-    if (androidStore) setUpcTyping(false);
+    setUpcTyping(false);
   }, [formOpen, loadedId, androidStore]);
 
   async function loadOptions() {
@@ -855,9 +858,8 @@ export function ReceivePanel({
     setBundle(false);
     setBundleParentSku('');
     setUpcTyping(false);
-    // Blur before the form paints so Price taps get a clean soft keyboard on Android.
-    blurActiveInput();
-    upcInput.current?.blur();
+    // Avoid effect-driven blur on Android (wedges Gboard). Unmount scan box instead when formOpen.
+    if (!androidStore) upcInput.current?.blur();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current?.id, current?.status, manual, loadedId]);
 
@@ -1455,7 +1457,12 @@ export function ReceivePanel({
     <div className="receive-next">
       <div className="receive-sku-block">
         <div><div className="eyebrow">NEXT AVAILABLE SKU</div><strong>{options?.next_sku || 'Loading…'}</strong></div>
-        {!manual && <label className="receive-upc">Scan UPC
+        {!manual && formOpen && androidStore && (
+          <p className="hint receive-scan-idle">Working on {current?.upc || 'this scan'} — use the fields below (number pad for price).</p>
+        )}
+        {/* Unmount the scan box on Android once the form is open — a lingering focused/readOnly
+            UPC input is what wedges Gboard for Brand/Price (scan and manual). */}
+        {!manual && !(androidStore && formOpen) && <label className="receive-upc">Scan UPC
           <input
             ref={upcInput}
             value={draft}
@@ -1471,7 +1478,6 @@ export function ReceivePanel({
             }}
             onBlur={() => {
               // Never steal focus back on Android — that fight freezes the system keyboard.
-              // Also never while the unit form is open (Price / other fields need a clean IME).
               if (androidStore || formOpen || manual || modalOpen.current) return;
               setTimeout(() => {
                 if (modalOpen.current || formOpen || androidStore) return;
@@ -1480,24 +1486,18 @@ export function ReceivePanel({
                 }
               }, 0);
             }}
-            // Do not HTML-autoFocus on Android (opens/wedges IME). Desktop idle focus uses focusScannerField.
             autoFocus={!formOpen && !androidStore && !scannerFieldStartsReadOnly()}
-            // Never disable the scan box while it may still be focused — disabled+inputMode race
-            // freezes Gboard. Use readOnly when the unit form is open instead.
-            readOnly={formOpen || !upcTyping}
-            inputMode={formOpen || (androidStore && !upcTyping) ? undefined : (upcTyping ? 'numeric' : scannerInputMode())}
-            data-hid-wedge={androidStore && !formOpen && !upcTyping ? '1' : undefined}
+            readOnly={!upcTyping}
+            inputMode={androidStore && !upcTyping ? undefined : (upcTyping ? 'numeric' : scannerInputMode())}
+            data-hid-wedge={androidStore && !upcTyping ? '1' : undefined}
             autoComplete="off"
             enterKeyHint="done"
             placeholder={
-              formOpen
-                ? 'Working on this scan…'
-                : (isKioskShell() || androidStore
-                  ? (upcTyping ? 'Type UPC · Enter' : 'Scan barcode (tap to type)')
-                  : 'Scan or type · Enter')
+              isKioskShell() || androidStore
+                ? (upcTyping ? 'Type UPC · Enter' : 'Scan barcode (tap to type)')
+                : 'Scan or type · Enter'
             }
             disabled={!accessToken}
-            aria-disabled={formOpen || undefined}
           />
         </label>}
         {!manual && !formOpen && <div className="actions">
@@ -1572,13 +1572,16 @@ export function ReceivePanel({
             placeholder="24.99"
             value={form.ask}
             onChange={e => update('ask', e.target.value)}
-            onFocus={() => {
-              // If the scan box still holds focus somehow, drop it so Gboard can attach here.
-              if (upcInput.current && document.activeElement === upcInput.current) {
-                upcInput.current.blur();
+            onFocus={() => { if (storePad) setNumPadField('ask'); }}
+            onTouchEnd={(e) => {
+              if (storePad) {
+                setNumPadField('ask');
+                // Keep focus for highlight; typing goes through the pad.
+                focusFromUserGesture(e.currentTarget);
               }
             }}
             autoComplete="off"
+            readOnly={storePad || undefined}
           />
         </label>
 
@@ -1599,9 +1602,17 @@ export function ReceivePanel({
           <input value={form.category} onChange={e => update('category', e.target.value)} />
         </label>
 
-        <label className={liveMissing.includes('brand') ? 'receive-need' : undefined}>
-          Brand{liveMissing.includes('brand') ? ' (needed to list)' : ''}
-          <input value={form.unbranded ? 'Unbranded' : form.brand} disabled={form.unbranded} onChange={e => update('brand', e.target.value)} />
+        <label className={(enforceManualCore ? coreGaps.includes('brand') : liveMissing.includes('brand')) ? 'receive-need' : undefined}>
+          Brand{(enforceManualCore ? coreGaps.includes('brand') : liveMissing.includes('brand')) ? (enforceManualCore ? ' (required)' : ' (needed to list)') : ''}
+          <input
+            value={form.unbranded ? 'Unbranded' : form.brand}
+            disabled={form.unbranded}
+            onChange={e => update('brand', e.target.value)}
+            onTouchEnd={(e) => { if (androidStore && !form.unbranded) focusFromUserGesture(e.currentTarget); }}
+            autoComplete="off"
+            enterKeyHint="next"
+            autoCapitalize="words"
+          />
         </label>
         <label className="mboard-inline">
           <input type="checkbox" checked={form.unbranded} onChange={e => setForm(p => {
@@ -1640,28 +1651,85 @@ export function ReceivePanel({
           No UPC / doesn’t have a barcode — marketplaces get “Does not apply”
         </label>
 
-        <label className={liveMissing.includes('weight + box dimensions') ? 'receive-need' : undefined}>
-          Length (in){liveMissing.includes('weight + box dimensions') ? ' (needed to list)' : ''}
-          <input inputMode="decimal" value={form.length} onChange={e => update('length', e.target.value)} />
+        <label className={(enforceManualCore ? coreGaps.includes('dimensions') : liveMissing.includes('weight + box dimensions')) ? 'receive-need' : undefined}>
+          Length (in){(enforceManualCore ? coreGaps.includes('dimensions') : liveMissing.includes('weight + box dimensions')) ? (enforceManualCore ? ' (required)' : ' (needed to list)') : ''}
+          <input
+            inputMode="decimal"
+            value={form.length}
+            onChange={e => update('length', e.target.value)}
+            onFocus={() => { if (storePad) setNumPadField('length'); }}
+            onTouchEnd={() => { if (storePad) setNumPadField('length'); }}
+            readOnly={storePad || undefined}
+          />
         </label>
-        <label className={liveMissing.includes('weight + box dimensions') ? 'receive-need' : undefined}>
+        <label className={(enforceManualCore ? coreGaps.includes('dimensions') : liveMissing.includes('weight + box dimensions')) ? 'receive-need' : undefined}>
           Width (in)
-          <input inputMode="decimal" value={form.width} onChange={e => update('width', e.target.value)} />
+          <input
+            inputMode="decimal"
+            value={form.width}
+            onChange={e => update('width', e.target.value)}
+            onFocus={() => { if (storePad) setNumPadField('width'); }}
+            onTouchEnd={() => { if (storePad) setNumPadField('width'); }}
+            readOnly={storePad || undefined}
+          />
         </label>
-        <label className={liveMissing.includes('weight + box dimensions') ? 'receive-need' : undefined}>
+        <label className={(enforceManualCore ? coreGaps.includes('dimensions') : liveMissing.includes('weight + box dimensions')) ? 'receive-need' : undefined}>
           Height (in)
-          <input inputMode="decimal" value={form.height} onChange={e => update('height', e.target.value)} />
+          <input
+            inputMode="decimal"
+            value={form.height}
+            onChange={e => update('height', e.target.value)}
+            onFocus={() => { if (storePad) setNumPadField('height'); }}
+            onTouchEnd={() => { if (storePad) setNumPadField('height'); }}
+            readOnly={storePad || undefined}
+          />
         </label>
-        <label className={liveMissing.includes('weight + box dimensions') ? 'receive-need' : undefined}>
+        <label className={(enforceManualCore ? coreGaps.includes('dimensions') : liveMissing.includes('weight + box dimensions')) ? 'receive-need' : undefined}>
           Weight (lb)
-          <input inputMode="decimal" value={form.weight} onChange={e => update('weight', e.target.value)} />
+          <input
+            inputMode="decimal"
+            value={form.weight}
+            onChange={e => update('weight', e.target.value)}
+            onFocus={() => { if (storePad) setNumPadField('weight'); }}
+            onTouchEnd={() => { if (storePad) setNumPadField('weight'); }}
+            readOnly={storePad || undefined}
+          />
         </label>
 
-        <label className={`unit-edit-wide${liveMissing.includes('item specifics') ? ' receive-need' : ''}`}>
-          Item specifics{liveMissing.includes('item specifics') ? ' (needed to list)' : (formatAspectsLine(merged?.aspects) && !text(merged?.model) ? ' (from UPC lookup)' : '')}
+        {storePad && numPadField && (
+          <div className="unit-edit-wide store-num-pad-wrap">
+            <span className="receive-label">
+              Number pad · {
+                numPadField === 'ask' ? 'Price'
+                  : numPadField === 'length' ? 'Length'
+                    : numPadField === 'width' ? 'Width'
+                      : numPadField === 'height' ? 'Height'
+                        : 'Weight'
+              }
+            </span>
+            <StoreNumPad
+              value={
+                numPadField === 'ask' ? form.ask
+                  : numPadField === 'length' ? form.length
+                    : numPadField === 'width' ? form.width
+                      : numPadField === 'height' ? form.height
+                        : form.weight
+              }
+              onChange={(v) => update(numPadField, v)}
+              decimal
+              ariaLabel="Receive number pad"
+            />
+          </div>
+        )}
+
+        <label className={`unit-edit-wide${(enforceManualCore ? coreGaps.includes('model') : liveMissing.includes('item specifics')) ? ' receive-need' : ''}`}>
+          Item specifics{(enforceManualCore ? coreGaps.includes('model') : liveMissing.includes('item specifics'))
+            ? (enforceManualCore ? ' (required)' : ' (needed to list)')
+            : (formatAspectsLine(merged?.aspects) && !text(merged?.model) ? ' (from UPC lookup)' : '')}
           <input
             value={form.model}
             onChange={e => update('model', e.target.value)}
+            onTouchEnd={(e) => { if (androidStore) focusFromUserGesture(e.currentTarget); }}
             placeholder="Model, flavor, size, color… (from UPC when available)"
             autoComplete="off"
             enterKeyHint="done"
@@ -1683,8 +1751,10 @@ export function ReceivePanel({
         {manual && <label className="unit-edit-wide">Description / features<textarea rows={3} value={form.description} onChange={e => update('description', e.target.value)} /></label>}
         {manual && <label>Cost (optional)<input inputMode="decimal" placeholder="9.00" value={form.cost} onChange={e => update('cost', e.target.value)} /></label>}
 
-        <div className={`unit-edit-wide${liveMissing.includes('photo') ? ' receive-need' : ''}`}>
-          <span className="receive-label">Photo{liveMissing.includes('photo') ? ' (needed to list)' : (manual ? ' (optional)' : '')}</span>
+        <div className={`unit-edit-wide${(enforceManualCore ? coreGaps.some(g => g.startsWith('photo')) : liveMissing.includes('photo')) ? ' receive-need' : ''}`}>
+          <span className="receive-label">Photo{(enforceManualCore ? coreGaps.some(g => g.startsWith('photo')) : liveMissing.includes('photo'))
+            ? (enforceManualCore ? ' (required)' : ' (needed to list)')
+            : (manual && !enforceManualCore ? ' (optional)' : '')}</span>
           <div className="actions">
             {/* Buttons + programmatic click — label+sr-only file inputs often do nothing in iOS PWA. */}
             <input
@@ -1837,7 +1907,7 @@ export function ReceivePanel({
         <p className="hint">Yes receives it with normal show defaults; it moves to Online → Ready once the board criteria are met.
           {form.costEstimate ? ` Cost uses ${floor.costLabel} until you edit it.` : ''}</p>
         <div className="actions">
-          <button type="button" disabled={busy} autoFocus onClick={() => {
+          <button type="button" disabled={busy} autoFocus={!androidStore} onClick={() => {
             const p = parse();
             if (p) void receive(p, null, { bundleParentSku: bundle ? bundleParentSku.trim() || null : null });
           }}>Yes — receive &amp; list</button>
@@ -1891,7 +1961,7 @@ export function ReceivePanel({
         {error ? <p className="error" role="alert">{error}</p> : null}
         {photoIdBusy ? <p className="hint" role="status">{photoIdStatus || 'Identifying from photo…'}</p> : null}
         <div className="actions">
-          <button type="button" disabled={photoIdBusy} autoFocus onClick={() => missPhotoFile.current?.click()}>
+          <button type="button" disabled={photoIdBusy} autoFocus={!androidStore} onClick={() => missPhotoFile.current?.click()}>
             {photoIdBusy ? 'Working…' : 'Yes — take photo'}
           </button>
           <button type="button" className="secondary" disabled={photoIdBusy} onClick={() => { setError(''); setDialog(null); }}>
@@ -1926,7 +1996,7 @@ export function ReceivePanel({
             placeholder="24.99"
             value={form.ask}
             onChange={e => { askTouched.current = true; update('ask', e.target.value); }}
-            autoFocus
+            autoFocus={!androidStore}
           />
         </label>
         <div className="actions">

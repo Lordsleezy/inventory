@@ -39,8 +39,7 @@ export function isAndroidStoreDevice(): boolean {
  * Soft keyboard hint for scanner/search fields.
  *
  * Never returns "none". Focusing an inputMode=none field on Android Chrome/WebView
- * is a known way to wedge the system IME until reboot. Suppress the soft keyboard
- * with focusScannerField() / bindHidWedgeListener instead.
+ * is a known way to wedge the system IME until reboot.
  */
 export function scannerInputMode(): 'search' | 'numeric' | 'decimal' | undefined {
   if (isKioskShell() || isAndroidStoreDevice()) return undefined;
@@ -52,25 +51,9 @@ export function scannerFieldStartsReadOnly(): boolean {
   return isKioskShell() || isAndroidStoreDevice();
 }
 
-/** Drop focus so the next tap can open Gboard cleanly. */
-export function blurActiveInput(): void {
-  try {
-    const el = document.activeElement;
-    if (el instanceof HTMLElement && el !== document.body && typeof el.blur === 'function') {
-      el.blur();
-    }
-  } catch {
-    /* ignore */
-  }
-}
-
 /**
- * Focus a scanner field without opening Android's soft keyboard, while still
- * accepting HID / Bluetooth wedge keystrokes on non-Android.
- *
- * On Android store phones this is a **no-op** unless softKeyboard=true (explicit
- * user tap). Programmatic focus still wedges Gboard until reboot on these phones —
- * use bindHidWedgeListener() for Bluetooth scanners instead.
+ * Focus a scanner field. On Android store phones this is a **no-op** unless
+ * softKeyboard=true (explicit user tap). Prefer bindHidWedgeListener for wedges.
  */
 export function focusScannerField(
   el: HTMLInputElement | null | undefined,
@@ -78,20 +61,34 @@ export function focusScannerField(
 ): void {
   if (!el) return;
   if (opts?.softKeyboard) {
-    el.focus({ preventScroll: true });
+    try { el.focus({ preventScroll: true }); } catch { /* ignore */ }
     return;
   }
+  // Never programmatically focus on Android — freezes Gboard until reboot.
   if (isAndroidStoreDevice()) return;
   if (!scannerFieldStartsReadOnly()) {
-    el.focus({ preventScroll: true });
+    try { el.focus({ preventScroll: true }); } catch { /* ignore */ }
     return;
   }
   const prev = el.readOnly;
   el.readOnly = true;
-  el.focus({ preventScroll: true });
+  try { el.focus({ preventScroll: true }); } catch { /* ignore */ }
   requestAnimationFrame(() => {
     el.readOnly = prev;
   });
+}
+
+/**
+ * Focus an editable field from a real user gesture (touch/click) only.
+ * Never call from useEffect / timers — that wedges Gboard on store phones.
+ */
+export function focusFromUserGesture(el: HTMLElement | null | undefined): void {
+  if (!el || typeof (el as HTMLInputElement).focus !== 'function') return;
+  try {
+    (el as HTMLInputElement).focus({ preventScroll: true });
+  } catch {
+    try { (el as HTMLInputElement).focus(); } catch { /* ignore */ }
+  }
 }
 
 export type HidWedgeHandlers = {
@@ -101,11 +98,11 @@ export type HidWedgeHandlers = {
 };
 
 /**
- * Capture Bluetooth / HID wedge keystrokes at the window so Android never needs
- * a focused scan input (focused scan inputs are what freeze Gboard).
+ * Capture Bluetooth / HID wedge keystrokes at the window.
  *
- * Scanners send rapid alphanumerics then Enter. Typing into a normal INPUT /
- * TEXTAREA is left alone unless that element has data-hid-wedge="1".
+ * Important: do **not** preventDefault on every digit — that fights Gboard and can
+ * leave the soft keyboard dead for the rest of the session (including manual entry).
+ * We only stopPropagation/preventDefault on the terminating Enter when we accept a scan.
  */
 export function bindHidWedgeListener(handlers: HidWedgeHandlers): () => void {
   let buf = '';
@@ -130,6 +127,7 @@ export function bindHidWedgeListener(handlers: HidWedgeHandlers): () => void {
     if (t instanceof HTMLElement) {
       const tag = t.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || t.isContentEditable) {
+        // Never steal keystrokes from a real form field the associate is typing in.
         if (t.getAttribute('data-hid-wedge') !== '1') return;
       }
     }
@@ -150,7 +148,7 @@ export function bindHidWedgeListener(handlers: HidWedgeHandlers): () => void {
 
     if (e.key.length === 1 && /[0-9A-Za-z\-]/.test(e.key)) {
       buf += e.key;
-      e.preventDefault();
+      // No preventDefault — keeps Gboard usable for the next Price / Brand tap.
       if (resetTimer !== undefined) window.clearTimeout(resetTimer);
       resetTimer = window.setTimeout(clearBuf, RESET_MS);
     }
