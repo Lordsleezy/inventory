@@ -139,7 +139,7 @@ export async function refreshChannelCategoryFields(channel, storeId, categoryId)
 
 async function usedCategoryIds(channel, storeId) {
   const { data, error } = await serviceClient().from("unit_channel_categories").select("category_id")
-    .eq("store_id", storeId).eq("channel", channel).not("category_id", "is", null).limit(10000);
+    .eq("store_id", storeId).eq("channel", channel).eq("enabled", true).not("category_id", "is", null).limit(10000);
   if (error) throw new Error(error.message);
   const ids = [...new Set((data || []).map((x) => x.category_id).filter(Boolean))];
   if (!ids.length) return [];
@@ -149,15 +149,22 @@ async function usedCategoryIds(channel, storeId) {
   return (active || []).map((row) => row.category_id);
 }
 
+// One bad category must not abort the run: the taxonomy snapshot and every other category still refresh.
+async function refreshUsedCategoryFields(channel, storeId) {
+  const fieldFailures = [];
+  for (const categoryId of await usedCategoryIds(channel, storeId)) {
+    try { await refreshChannelCategoryFields(channel, storeId, categoryId); }
+    catch (error) { fieldFailures.push(`${categoryId}: ${String(error?.message || error).slice(0, 120)}`); }
+  }
+  return { fieldFailures };
+}
+
 async function syncEbay(storeId) {
   const tree = await retryLimited(() => fetchCategoryTree());
   const rows = ebayRows(tree.root);
   const version = `${tree.treeId}:${tree.version || digest(rows)}`;
   const result = await upsertSnapshot("ebay", storeId, version, rows);
-  for (const categoryId of await usedCategoryIds("ebay", storeId)) {
-    await refreshChannelCategoryFields('ebay', storeId, categoryId);
-  }
-  return result;
+  return { ...result, ...(await refreshUsedCategoryFields("ebay", storeId)) };
 }
 
 async function syncTiktok(storeId) {
@@ -167,10 +174,7 @@ async function syncTiktok(storeId) {
   const rows = flatRows(json?.data?.categories || [], "id", "local_name", "is_leaf");
   const version = `v2:${digest(rows)}`;
   const result = await upsertSnapshot("tiktok", storeId, version, rows);
-  for (const categoryId of await usedCategoryIds("tiktok", storeId)) {
-    await refreshChannelCategoryFields('tiktok', storeId, categoryId);
-  }
-  return result;
+  return { ...result, ...(await refreshUsedCategoryFields("tiktok", storeId)) };
 }
 
 async function syncAmazon(storeId) {
@@ -186,10 +190,7 @@ async function syncAmazon(storeId) {
   const rows = types.map((item) => ({ category_id: String(item.name || ""), parent_id: null,
     path: String(item.displayName || item.name || ""), leaf: true, active: true }));
   const result = await upsertSnapshot("amazon", storeId, digest(rows), rows);
-  for (const categoryId of await usedCategoryIds("amazon", storeId)) {
-    await refreshChannelCategoryFields('amazon', storeId, categoryId);
-  }
-  return result;
+  return { ...result, ...(await refreshUsedCategoryFields("amazon", storeId)) };
 }
 
 export async function syncChannelTaxonomy(channel, storeId) {
@@ -202,7 +203,9 @@ export async function syncChannelTaxonomy(channel, storeId) {
         : channel === "amazon" ? await syncAmazon(storeId)
           : (() => { throw new Error("unsupported_category_channel"); })();
     await sb.from("category_sync_runs").update({ status: "complete", category_count: result.count,
-      version: result.version, finished_at: new Date().toISOString() }).eq("id", run.id);
+      version: result.version,
+      error: result.fieldFailures?.length ? `field refresh failed: ${result.fieldFailures.join("; ")}`.slice(0, 500) : null,
+      finished_at: new Date().toISOString() }).eq("id", run.id);
     return result;
   } catch (failure) {
     await sb.from("category_sync_runs").update({ status: "error", error: String(failure).slice(0, 500),
