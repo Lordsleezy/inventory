@@ -195,6 +195,22 @@ test("transient errors are not cached; bad codes throw 400", async () => {
   await assert.rejects(() => lookupUpc("s", "123", { deps }), (e) => e.status === 400);
 });
 
+test("clean UPC misses are retried instead of becoming permanent cache hits", async () => {
+  const sb = fakeSb();
+  let calls = 0;
+  const deps = {
+    sb,
+    catalogByIdentifier: async () => { calls++; return { found: false, alternatives: [] }; },
+    priceByAsin: async () => ({}),
+    upcitemdb: async () => ({ found: false, tier: 'trial' }),
+    ebayComps: async () => null,
+  };
+  await lookupUpc('s', '012345678905', { deps });
+  await lookupUpc('s', '012345678905', { deps });
+  assert.equal(calls, 6); // UPC, EAN, GTIN on each scan
+  assert.equal(sb.store.size, 0);
+});
+
 test("upcitemdb uses key headers only when UPCITEMDB_KEY is set", async () => {
   const seen = [];
   const fetchImpl = async (url, init) => {

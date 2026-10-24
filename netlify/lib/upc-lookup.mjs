@@ -419,6 +419,9 @@ async function readCache(sb, gtin14) {
   try {
     const { data, error } = await sb.from("upc_lookup_cache").select("*").eq("gtin14", gtin14).maybeSingle();
     if (error || !data?.payload) return null;
+    // A negative result may reflect temporary catalog coverage or a trial-tier gap.
+    // Recheck sources on the next scan instead of pinning a miss indefinitely.
+    if (!data.payload.amazon?.found && !data.payload.upcitemdb?.found) return null;
     return data;
   } catch {
     return null;
@@ -563,7 +566,7 @@ export async function lookupUpc(storeId, rawCode, opts = {}) {
   // (price_pending) so the next scan still gets title/dims instantly.
   const hardFail = Boolean(amazon.raw_error && !amazon.found) || Boolean(upcitemdb.raw_error && !upcitemdb.found && !amazon.found);
   const pricingOnlyPending = Boolean(amazon.price_pending || amazon.price_error === "amazon_pricing_rate_limited");
-  if (!hardFail) {
+  if (!hardFail && (amazon.found || upcitemdb.found)) {
     if (pricingOnlyPending && !amazon.price_cents) {
       // Cache catalog; leave price null so a later force can refresh pricing.
       const toCache = {

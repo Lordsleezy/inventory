@@ -18,7 +18,8 @@ import sharp from "sharp";
 
 async function authFromEvent(event) {
   try {
-    return await portalAdminFromEvent(event);
+    const storeIdHint = JSON.parse(event.body || '{}').store_id;
+    return await portalAdminFromEvent(event, storeIdHint);
   } catch (adminErr) {
     if (adminErr?.status && adminErr.status !== 403) throw adminErr;
     const token = (event.headers?.authorization || event.headers?.Authorization || "").replace(/^Bearer\s+/i, "");
@@ -52,9 +53,45 @@ function specificsFromIdentity(identity) {
     usableModelNumber(rawModel) ||
     itemSpecificsFromLookup({ model: rawModel, title, brand }) ||
     variantFromTitle(title, brand) ||
+    String(identity.variant || '').trim() ||
     rawModel ||
     ""
   );
+}
+
+async function budgetError(ctx) {
+  const monthStart = new Date();
+  monthStart.setUTCDate(1);
+  monthStart.setUTCHours(0, 0, 0, 0);
+  const settings = await ctx.sb.from('video_scan_settings').select('monthly_cap_usd').eq('store_id', ctx.storeId).maybeSingle();
+  const spend = await ctx.sb.from('video_scan_jobs').select('estimated_cost_usd, reserved_usd')
+    .eq('store_id', ctx.storeId).gte('created_at', monthStart.toISOString());
+  if (settings.error || spend.error) {
+    await floorLog({ level: 'error', event: 'receive_photo.budget_check_failed', message: String(settings.error?.message || spend.error?.message), storeId: ctx.storeId });
+    return json(503, { ok: false, error: 'budget_check_failed', message: 'AI spend could not be checked. Retry or fill the fields by hand.' });
+  }
+  const cap = Number(settings.data?.monthly_cap_usd ?? 30);
+  const spent = (spend.data || []).reduce((n, row) => n + Number(row.estimated_cost_usd || 0) + Number(row.reserved_usd || 0), 0);
+  return spent >= cap ? json(402, { ok: false, error: 'budget_exhausted',
+    message: `AI scan budget reached ($${spent.toFixed(2)} / $${cap.toFixed(2)}). Raise the cap under More → AI scan budget, or fill fields by hand.` }) : null;
+}
+
+function photoFill(identity, brand, model, title) {
+  return { brand, model, title, category: identity.category || '', description: identity.description || '',
+    aspects: { ...(identity.variant ? { Variant: identity.variant } : {}),
+      ...(identity.size ? { Size: identity.size } : {}),
+      ...(identity.color ? { Color: identity.color } : {}), ...(brand ? { Brand: brand } : {}) } };
+}
+
+async function logUsage(ctx, identity, usage, costUsd) {
+  const { error } = await ctx.sb.from('video_scan_jobs').insert({
+    store_id: ctx.storeId, created_by: ctx.userId, status: 'discarded',
+    video_path: `receive-photo/${ctx.storeId}/${Date.now()}.jpg`, still_paths: [],
+    result: { identity: { ...identity, receive_photo: true }, usage },
+    estimated_cost_usd: costUsd, reserved_usd: 0, search_queries: usage.search_queries || 0,
+    error: null, updated_at: new Date().toISOString(),
+  });
+  if (error) await floorLog({ level: 'error', event: 'receive_photo.spend_log_failed', message: error.message, storeId: ctx.storeId });
 }
 
 export async function invoke(event) {
@@ -62,10 +99,79 @@ export async function invoke(event) {
   if (event.httpMethod !== "POST") return json(405, { ok: false, error: "POST required" });
 
   const ctx = await authFromEvent(event);
-  if (!/^AIza[0-9A-Za-z_-]{30,}$/.test(process.env.GEMINI_API_KEY || "")) {
-    return json(503, { ok: false, error: "photo_identification_unavailable", message: "Photo identification is unavailable: the store's Gemini API key needs to be configured. You can fill the fields by hand or retry after it is fixed." });
-  }
   const body = JSON.parse(event.body || "{}");
+  if (body.action === 'confirm') {
+    const gtin = normalizeGtin(String(body.upc || '').trim());
+    if (!gtin.ok) return json(400, { ok: false, error: 'valid_upc_required' });
+    const fields = body.fields || {};
+    const brand = String(fields.brand || '').trim().slice(0, 120);
+    const title = String(fields.title || '').trim().slice(0, 250);
+    if (!brand || !title) return json(400, { ok: false, error: 'product_details_required' });
+    const cleanMeasure = value => { const n = Number(value); return Number.isFinite(n) && n > 0 && n < 10000 ? n : null; };
+    const { data: existing } = await ctx.sb.from('floor_products').select('*').eq('gtin14', gtin.gtin14).maybeSingle();
+    const productDimensions = Object.fromEntries(
+      ['product_height_in', 'product_width_in', 'product_depth_in', 'product_weight_lb']
+        .map(key => [key, cleanMeasure(fields[key])]).filter(([, value]) => value != null),
+    );
+    const aspects = { ...(existing?.aspects || {}), ...(fields.aspects && typeof fields.aspects === 'object' ? fields.aspects : {}) };
+    for (const [key, value] of Object.entries(productDimensions)) aspects[key] = String(value);
+    const saved = await saveFloorProduct(ctx.sb, gtin, {
+      brand, title, model: String(fields.model || '').trim().slice(0, 150),
+      category: String(fields.category || existing?.category || '').trim().slice(0, 150),
+      description: String(fields.description || existing?.description || '').trim().slice(0, 2000),
+      aspects,
+      features: existing?.features || [], asin: existing?.asin || null, images: existing?.images || [],
+      package: {
+        length_in: cleanMeasure(fields.length_in) || existing?.package_length_in,
+        width_in: cleanMeasure(fields.width_in) || existing?.package_width_in,
+        height_in: cleanMeasure(fields.height_in) || existing?.package_height_in,
+        weight_lb: cleanMeasure(fields.weight_lb) || existing?.package_weight_lb,
+      },
+    }, { source: 'photo', actorId: ctx.userId,
+      dimSources: { ...(existing?.dim_sources || {}),
+        ...Object.fromEntries(['length_in','width_in','height_in','weight_lb'].filter(k => cleanMeasure(fields[k])).map(k => [k, 'measured_by_staff'])) } });
+    const skus = Array.isArray(body.skus) ? body.skus.map(String).filter(Boolean).slice(0, 100) : [];
+    if (skus.length && Object.keys(productDimensions).length) {
+      const { error } = await ctx.sb.from('units').update({ ...productDimensions, dims_source: 'measured' })
+        .eq('store_id', ctx.storeId).eq('upc', String(body.upc || '').trim()).in('sku', skus);
+      if (error) await floorLog({ level: 'warn', event: 'receive_photo.measure_save_failed', message: error.message, storeId: ctx.storeId });
+    }
+    return saved ? json(200, { ok: true, gtin14: gtin.gtin14 }) : json(500, { ok: false, error: 'product_save_failed', message: 'The unit was saved, but its UPC product details could not be cached.' });
+  }
+  const apiKey = String(process.env.GEMINI_API_KEY || '').trim();
+  if (!apiKey || /\*{3,}/.test(apiKey)) {
+    await floorLog({ level: 'error', event: 'receive_photo.key_unavailable', message: 'Production GEMINI_API_KEY is empty or masked', storeId: ctx.storeId });
+    return json(503, { ok: false, error: 'photo_identification_unavailable', message: 'Photo identification is temporarily unavailable. Retry or fill the fields by hand.' });
+  }
+  if (body.action === 'prices') {
+    const denied = await budgetError(ctx);
+    if (denied) return denied;
+    const source = body.identity || {};
+    const identity = Object.fromEntries(['title', 'brand', 'model', 'variant', 'size', 'color']
+      .map(key => [key, String(source[key] || '').slice(0, 200)]));
+    if (!identity.title || !identity.brand) return json(400, { ok: false, error: 'product_identity_required' });
+    const started = Date.now();
+    try {
+      const retail = await lookupRetail(ctx.sb, { store_id: ctx.storeId }, identity, { singlePass: true });
+      const fields = retailFields(retail.prices || [], identity);
+      const unitCents = (fields.retail_prices || []).filter(p => !p.approximate && !p.size_mismatch)
+        .map(p => Math.round(p.price_cents / Math.max(1, (Number(p.pack_size) || 1) / Math.max(1, Number(source.unit_count) || 1))));
+      const highest = (fields.retail_prices || [])[0] || null;
+      const costUsd = tokenCost(retail.input || 0, retail.output || 0);
+      await logUsage(ctx, identity, { price_input_tokens: retail.input || 0, price_output_tokens: retail.output || 0,
+        search_queries: retail.queries || 0 }, costUsd);
+      return json(200, { ok: true, price: { kind: 'asking', median_cents: median(unitCents),
+        low_cents: unitCents.length ? Math.min(...unitCents) : null,
+        high_cents: unitCents.length ? Math.max(...unitCents) : null, count: unitCents.length,
+        highest_retail: highest ? { store: highest.store, price_cents: highest.price_cents,
+          url: highest.url, product_name: highest.product_name } : null,
+        listings: (fields.retail_prices || []).slice(0, 8) },
+        timing: { price_ms: Date.now() - started }, cost_usd: costUsd });
+    } catch (e) {
+      await floorLog({ level: 'warn', event: 'receive_photo.retail_fail', message: String(e?.message || e).slice(0, 300), storeId: ctx.storeId });
+      return json(502, { ok: false, error: 'price_lookup_failed', message: 'Online prices could not be found right now. Enter your price by hand.' });
+    }
+  }
   const rawB64 = String(body.image_base64 || "").replace(/^data:[^;]+;base64,/, "");
   if (!rawB64 || rawB64.length < 100) return json(400, { ok: false, error: "image_required" });
 
@@ -85,41 +191,45 @@ export async function invoke(event) {
   const gtin = upc ? normalizeGtin(upc) : { ok: false };
   const t0 = Date.now();
 
-  // Budget gate (same monthly cap as Video Scan). Query directly — RPC needs auth.uid().
-  {
-    const monthStart = new Date();
-    monthStart.setUTCDate(1);
-    monthStart.setUTCHours(0, 0, 0, 0);
-    const settings = await ctx.sb
-      .from("video_scan_settings")
-      .select("monthly_cap_usd")
-      .eq("store_id", ctx.storeId)
-      .maybeSingle();
-    const cap = Number(settings.data?.monthly_cap_usd ?? 30);
-    const spend = await ctx.sb
-      .from("video_scan_jobs")
-      .select("estimated_cost_usd, reserved_usd")
-      .eq("store_id", ctx.storeId)
-      .gte("created_at", monthStart.toISOString());
-    const spent = (spend.data || []).reduce(
-      (n, row) => n + Number(row.estimated_cost_usd || 0) + Number(row.reserved_usd || 0),
-      0,
-    );
-    if (spent >= cap) {
-      return json(402, {
-        ok: false,
-        error: "budget_exhausted",
-        message: `AI scan budget reached ($${spent.toFixed(2)} / $${cap.toFixed(2)}). Raise the cap under More → AI scan budget, or fill fields by hand.`,
-      });
-    }
-  }
+  const denied = await budgetError(ctx);
+  if (denied) return denied;
 
-  const identified = await identifyFrames([bytes]);
+  let identified;
+  try {
+    identified = await identifyFrames([bytes]);
+  } catch (e) {
+    const upstream = String(e?.message || e).slice(0, 400);
+    await floorLog({ level: 'error', event: 'receive_photo.identify_failed', message: upstream, storeId: ctx.storeId,
+      detail: { elapsed_ms: Date.now() - t0, gemini_model: process.env.GEMINI_VIDEO_MODEL || 'gemini-3.8-flash' } });
+    const status = /Gemini 401|Gemini 403|API key|PERMISSION_DENIED/i.test(upstream) ? 502 : /Gemini 429|RESOURCE_EXHAUSTED/i.test(upstream) ? 429 : 502;
+    const message = status === 429 ? 'Photo identification is busy at the AI provider. Retry once or fill the fields by hand.'
+      : /Gemini 404|model.*not found/i.test(upstream) ? 'The photo model is unavailable. Retry later or fill the fields by hand.'
+      : /Gemini 401|Gemini 403|API key|PERMISSION_DENIED/i.test(upstream) ? 'The AI provider rejected the configured key. Retry later or fill the fields by hand.'
+      : `Photo identification failed: ${upstream.replace(/Gemini \d+:\s*/, '').slice(0, 160)}. Retry or fill the fields by hand.`;
+    return json(status, { ok: false, error: 'photo_identification_failed', message, upstream_error: upstream });
+  }
   const identity = identified.result || {};
   const brand = String(identity.brand || "").trim();
   const model = specificsFromIdentity(identity);
-  const title = listingTitle(brand, model) || String(identity.title || "").trim();
+  const rawTitle = String(identity.title || '').trim();
+  const title = rawTitle ? (rawTitle.toLowerCase().startsWith(brand.toLowerCase()) ? rawTitle : `${brand} ${rawTitle}`.trim()) : listingTitle(brand, model);
   const identifyMs = Date.now() - t0;
+
+  if (body.action === 'identify_only') {
+    const costUsd = tokenCost(identified.input || 0, identified.output || 0);
+    await logUsage(ctx, { ...identity, title, brand, model },
+      { identify_input_tokens: identified.input || 0, identify_output_tokens: identified.output || 0,
+        search_queries: 0 }, costUsd);
+    if (gtin.ok) await attachPhotoIdentityToMiss(ctx.sb, {
+      gtin14: gtin.gtin14, identity: { brand, model, title, confidence: identity.confidence, upc },
+      missId: body.miss_id || null,
+    });
+    await floorLog({ level: 'info', event: 'receive_photo.identified', message: title || brand,
+      storeId: ctx.storeId, detail: { upc, identify_ms: identifyMs, cost_usd: costUsd } });
+    return json(200, { ok: true,
+      identity: { ...identity, brand, model, title },
+      fill: photoFill(identity, brand, model, title), timing: { identify_ms: identifyMs }, cost_usd: costUsd });
+  }
 
   // Price lookup in parallel spirit: start after name is known; user can see name first client-side
   // when we stream — for now one response with both.
@@ -127,7 +237,7 @@ export async function invoke(event) {
   let prices = [];
   let retailMeta = { input: 0, output: 0, queries: 0, reused: false };
   try {
-    retailMeta = await lookupRetail(ctx.sb, job, { ...identity, title, brand, model });
+    retailMeta = await lookupRetail(ctx.sb, job, { ...identity, title, brand, model }, { singlePass: true });
     prices = retailMeta.prices || [];
   } catch (e) {
     await floorLog({
@@ -156,56 +266,17 @@ export async function invoke(event) {
     (identified.output || 0) + (retailMeta.output || 0),
   );
   // Record spend against video_scan_jobs so the existing AI scan budget UI counts this.
-  try {
-    await ctx.sb.from("video_scan_jobs").insert({
-      store_id: ctx.storeId,
-      created_by: ctx.userId,
-      status: "discarded",
-      video_path: `receive-photo/${ctx.storeId}/${Date.now()}.jpg`,
-      still_paths: [],
-      result: { identity: { ...identity, title, brand, model, receive_photo: true } },
-      estimated_cost_usd: costUsd,
-      reserved_usd: 0,
-      search_queries: retailMeta.queries || 0,
-      error: null,
-      updated_at: new Date().toISOString(),
-    });
-  } catch (e) {
-    console.log("receive_photo_spend_log_failed", String(e?.message || e));
-  }
+  await logUsage(ctx, { ...identity, title, brand, model },
+    { identify_input_tokens: identified.input || 0, identify_output_tokens: identified.output || 0,
+      price_input_tokens: retailMeta.input || 0, price_output_tokens: retailMeta.output || 0,
+      search_queries: retailMeta.queries || 0 }, costUsd);
 
   if (gtin.ok) {
-    const { data: existingProduct } = await ctx.sb.from("floor_products").select("*").eq("gtin14", gtin.gtin14).maybeSingle();
-    const existingTitle = String(existingProduct?.title || "").trim();
-    const existingBrand = String(existingProduct?.brand || "").trim();
-    const keepTitle = existingTitle && existingTitle.toLowerCase() !== existingBrand.toLowerCase();
     await attachPhotoIdentityToMiss(ctx.sb, {
       gtin14: gtin.gtin14,
       identity: { brand, model, title, confidence: identity.confidence, upc },
       missId: body.miss_id || null,
     });
-    await saveFloorProduct(
-      ctx.sb,
-      { gtin14: gtin.gtin14, upcA: gtin.upcA, ean13: gtin.ean13 },
-      {
-        brand: existingBrand || brand,
-        model: existingProduct?.model || model,
-        title: keepTitle ? existingTitle : title,
-        description: existingProduct?.description || null,
-        features: existingProduct?.features || [],
-        aspects: { ...(existingProduct?.aspects || {}), ...(identity.color && !existingProduct?.aspects?.Color ? { Color: identity.color } : {}) },
-        package: {
-          length_in: existingProduct?.package_length_in,
-          width_in: existingProduct?.package_width_in,
-          height_in: existingProduct?.package_height_in,
-          weight_lb: existingProduct?.package_weight_lb,
-        },
-        images: existingProduct?.images || [],
-        category: existingProduct?.category || null,
-        asin: existingProduct?.asin || null,
-      },
-      { source: "photo", actorId: ctx.userId },
-    );
   }
 
   await floorLog({
@@ -222,17 +293,16 @@ export async function invoke(event) {
       brand,
       model,
       title,
+      variant: identity.variant || '',
+      size: identity.size || '',
+      category: identity.category || '',
+      description: identity.description || '',
       color: identity.color || "",
       confidence: identity.confidence ?? null,
       unit_count: identity.unit_count || 1,
       catalog_title: identity.title || "",
     },
-    fill: {
-      brand,
-      model,
-      title,
-      ask_cents_suggestion: askMedian,
-    },
+    fill: photoFill(identity, brand, model, title),
     price: {
       kind: "asking",
       median_cents: askMedian,

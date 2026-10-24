@@ -4,7 +4,7 @@ import { withLambda } from "@netlify/aws-lambda-compat";
 import { serviceClient } from "./server.mjs";
 
 const traces = new AsyncLocalStorage();
-const SECRET = /(authorization|access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|secret|password|ciphertext|connections[_-]?key|api[_-]?key|cookie|set-cookie|^bearer$|^token$)/i;
+const SECRET = /(authorization|access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|secret|password|ciphertext|connections[_-]?key|api[_-]?key|image[_-]?base64|cookie|set-cookie|^bearer$|^token$)/i;
 
 export function redact(value, depth = 0) {
   if (value == null) return value;

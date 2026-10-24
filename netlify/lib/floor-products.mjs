@@ -89,7 +89,10 @@ export async function saveFloorProduct(sb, gtin, merged, { source = "lookup", ac
     variantFromTitle(merged.title, merged.brand) ||
     null;
   const brand = clean(merged.brand);
-  const title = listingTitle(brand, model) || clean(merged.title);
+  const suppliedTitle = clean(merged.title);
+  const title = suppliedTitle
+    ? (brand && !suppliedTitle.toLowerCase().startsWith(brand.toLowerCase()) ? `${brand} ${suppliedTitle}` : suppliedTitle)
+    : listingTitle(brand, model);
   if (!brand && !model && !title) return null;
 
   const pkg = merged.package || {};

@@ -584,6 +584,7 @@ html.dark .receive-compare-row{border-bottom-color:#2a3340}
 .receive-need .receive-label,.receive-need>span{color:#8a5a12}
 html.dark .receive-need{background:#2a2418;outline-color:#c9852a}
 .receive-modal{position:fixed;inset:0;background:#17232d99;z-index:40;display:flex;align-items:center;justify-content:center;padding:16px}.receive-modal-portal{z-index:10050}.receive-modal-card{background:#fff;border-radius:14px;padding:22px;width:min(480px,100%);display:grid;gap:12px;box-shadow:0 18px 50px #17232d40}.receive-modal-card h3{margin:0}.receive-video{width:100%;border-radius:10px;background:#000;max-height:50vh}
+.receive-modal-card{max-height:calc(100dvh - 32px);overflow-y:auto}.receive-measure-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.receive-measure-grid strong{grid-column:1/-1;margin-top:4px}.receive-measure-grid input{width:100%;min-width:0}
 html.app-mode .receive-file-btn{background:#2c2c2e!important;color:#fff!important;border-color:#3a3a3c!important;min-height:48px;justify-content:center}
 html.dark .receive-modal-card{background:#1c2430;color:#e6edf3}html.dark .receive-chip,html.dark .receive-file-btn{background:#232d3a;color:#e6edf3!important}html.dark .receive-retail,html.dark .receive-flagged{background:#232d3a;color:#e6edf3}html.dark .receive-dup{background:#151a21;border-color:#3a4553;color:#e8eef4}html.dark .receive-dup p{color:#9aa7b5}html.dark .receive-label{color:#9aa7b5}
 @media(max-width:600px){.receive-chip{padding:12px 14px}}

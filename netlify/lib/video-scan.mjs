@@ -4,7 +4,7 @@ import { requireEnv } from './server.mjs';
 
 const model = () => process.env.GEMINI_VIDEO_MODEL || 'gemini-3.8-flash';
 const api = 'https://generativelanguage.googleapis.com/v1beta/models/';
-const identitySchema = {type:'object',properties:{title:{type:'string'},brand:{type:'string'},model:{type:'string'},color:{type:'string'},confidence:{type:'number'},unit_count:{type:'integer'},options:{type:'array',items:{type:'object',properties:{label:{type:'string'},title:{type:'string'},brand:{type:'string'},model:{type:'string'},color:{type:'string'}},required:['label','title','brand','model','color']}}},required:['title','brand','model','color','confidence','options']};
+const identitySchema = {type:'object',properties:{title:{type:'string'},brand:{type:'string'},model:{type:'string'},variant:{type:'string'},category:{type:'string'},description:{type:'string'},size:{type:'string'},color:{type:'string'},confidence:{type:'number'},unit_count:{type:'integer'},options:{type:'array',items:{type:'object',properties:{label:{type:'string'},title:{type:'string'},brand:{type:'string'},model:{type:'string'},color:{type:'string'}},required:['label','title','brand','model','color']}}},required:['title','brand','model','variant','category','description','size','color','confidence','options']};
 const detailSchema = {type:'object',properties:{category:{type:'string'},condition:{type:'string'},condition_notes:{type:'string'},description:{type:'string'},key_features:{type:'array',items:{type:'string'}},upc:{type:'string'},mfr_serial:{type:'string'},ebay_title:{type:'string'},ebay_category:{type:'string'},ebay_item_specifics:{type:'object',additionalProperties:{type:'string'}},
   manufacturer_model:{type:'string'},model_source_url:{type:'string'},dimension_sources:{type:'object',additionalProperties:{type:'string'}},
   dimension_types:{type:'object',additionalProperties:{type:'string',enum:['verified_product','verified_shipping','estimated']}},main_photo_index:{type:'integer'},
@@ -21,9 +21,10 @@ const pricesSchema={type:'object',properties:{prices:{type:'array',items:{type:'
   approximate:{type:'boolean'},product_name:{type:'string'}},
   required:['store','price_cents','url','pack_size','approximate','product_name']}}},required:['prices']};
 
-async function gemini(parts,{schema,search=false,maxOutputTokens=500,signal}={}) {
+async function gemini(parts,{schema,search=false,maxOutputTokens=500,signal,maxAttempts}={}) {
   let input=0,output=0,queries=0;
-  for(let attempt=0;attempt<(schema?2:1);attempt++){
+  const attempts=maxAttempts ?? (schema?2:1);
+  for(let attempt=0;attempt<attempts;attempt++){
     const controller=new AbortController();
     const timeout=setTimeout(()=>controller.abort(),90_000);
     try {
@@ -44,7 +45,7 @@ async function gemini(parts,{schema,search=false,maxOutputTokens=500,signal}={})
       if(schema){try{value=JSON.parse(text)}catch(error){
         console.warn('gemini_structured_response_invalid',JSON.stringify({attempt:attempt+1,
           finishReason:body.candidates?.[0]?.finishReason||'unknown',length:text.length,budget}));
-        if(attempt===0)continue;
+        if(attempt+1<attempts)continue;
         throw new Error(`Gemini returned invalid JSON after retry: ${error.message}`);
       }}else if(!text)throw new Error('Gemini returned no text');
       return {value,input,output,queries,
@@ -64,9 +65,10 @@ export function tokenCost(input,output) {
   return Number(((input*Number(process.env.GEMINI_INPUT_USD_PER_M||0.75)+output*Number(process.env.GEMINI_OUTPUT_USD_PER_M||3.75))/1e6).toFixed(5));
 }
 export async function identifyFrames(stills) {
-  const parts=[{text:'Identify the exact product from these store photos. Read labels, brand, manufacturer model, pack size and color. ITM/ART, retailer item number, UPC, SKU and serial are NOT manufacturer model numbers; leave model empty unless clearly labeled MODEL/MODELO/MPN or verified by manufacturer. unit_count is how many retail items are in the package being sold (default 1), not bulbs or parts. Return a short shopper-facing title. Only offer 2-3 choices if two distinct products are genuinely plausible. No description or specifications.'},
+  const parts=[{text:'Identify the exact product from these ordinary store photos, including angled counter shots. Read the visible label carefully: brand, product line, scent/flavor/color variant, and printed size or count. Title must identify the specific item, e.g. Febreze Air Mist, Linen & Sky, 8.8 oz. Write a factual one-sentence description and a broad category. Variant is the scent/flavor/color or other labeled variant; size is the printed net content or count, NOT shipping weight. ITM/ART, retailer item number, UPC, SKU and serial are NOT manufacturer model numbers; leave model empty unless clearly labeled MODEL/MODELO/MPN or verified by manufacturer. unit_count is how many retail items are in the package being sold (default 1), not bulbs or parts. Never invent measurements, condition or price. Only offer 2-3 choices if two distinct products are genuinely plausible.'},
     ...stills.map(bytes=>({inlineData:{mimeType:'image/jpeg',data:bytes.toString('base64')}}))];
-  const found=await gemini(parts,{schema:identitySchema,maxOutputTokens:1400});
+  // A photo is billed once. Invalid structured output is an error, not a hidden second image call.
+  const found=await gemini(parts,{schema:identitySchema,maxOutputTokens:1700,maxAttempts:1});
   const options=[...new Map((found.value.options||[]).map(option=>[
     [option.brand,option.model,option.color].join('|').toLowerCase(),option])).values()];
   const candidate=String(found.value.model||'').trim();
@@ -132,7 +134,7 @@ async function resolveRetailUrls(prices,signal) {
     return price;
   }));
 }
-async function searchOnce(identity,closer=false,signal) {
+async function searchOnce(identity,closer=false,signal,singlePass=false) {
   const title=String(identity.title||'');
   const query=[!title.toLowerCase().includes(String(identity.brand||'').toLowerCase())?identity.brand:'',
     title||identity.model,
@@ -142,11 +144,12 @@ async function searchOnce(identity,closer=false,signal) {
   const prompt=`Use Google Search now for today's US retail prices of "${query}". Search with one exact product query. Return only verified retailer product pages with current dollar prices, sizes and pack counts. ${closer?'If the exact size is not listed, find a clearly labeled close size or pack and mark approximate=true.':'Include multipacks containing the item, even when a single unit has no listing.'} If the item is a single unit but sold only in a variety pack, give pack_size and mark approximate=true. If no priced product page, return an empty prices array. Do not rely on memory or invent a URL or price.`;
   // One grounded+structured call instead of search-then-parse (cuts ~half the price latency).
   try {
-    const combined=await gemini([{text:prompt}],{search:true,schema:pricesSchema,maxOutputTokens:900,signal});
+    const combined=await gemini([{text:prompt}],{search:true,schema:pricesSchema,maxOutputTokens:900,signal,maxAttempts:singlePass?1:undefined});
     const prices=cleanPrices(combined.value?.prices,identity);
-    if(combined.queries||prices.length)return {prices,input:combined.input,output:combined.output,queries:combined.queries};
+    if(combined.queries||prices.length||singlePass)return {prices,input:combined.input,output:combined.output,queries:combined.queries};
   } catch (error) {
     console.warn('video_scan_retail_combined_failed',String(error.message||error).slice(0,160));
+    if(singlePass)throw error;
   }
   const grounded=await gemini([{text:prompt}],{search:true,maxOutputTokens:1100,signal});
   if(!grounded.queries)return {...grounded,prices:[]};
@@ -155,7 +158,7 @@ async function searchOnce(identity,closer=false,signal) {
   return {prices:cleanPrices(parsed.value.prices,identity),input:grounded.input+parsed.input,
     output:grounded.output+parsed.output,queries:grounded.queries};
 }
-export async function lookupRetail(sb,job,identity,{signal}={}) {
+export async function lookupRetail(sb,job,identity,{signal,singlePass=false}={}) {
   const key=productKey(identity);
   if(key){const cached=await sb.from('video_scan_product_cache').select('lookup,created_at').eq('store_id',job.store_id).eq('product_key',key).maybeSingle();
     if(cached.error)throw cached.error;
@@ -164,9 +167,9 @@ export async function lookupRetail(sb,job,identity,{signal}={}) {
       // Show cached prices immediately; resolve redirect URLs in the background later if needed.
       return {prices:cleanPrices(cached.data.lookup.retail_prices,identity),input:0,output:0,queries:0,reused:true,cachedDetails:cached.data.lookup};
     }}
-  const first=await searchOnce(identity,false,signal);
+  const first=await searchOnce(identity,false,signal,singlePass);
   let prices=first.prices,input=first.input,output=first.output,queries=first.queries;
-  if(!prices.length){const second=await searchOnce(identity,true,signal);prices=second.prices;input+=second.input;output+=second.output;queries+=second.queries}
+  if(!prices.length&&!singlePass){const second=await searchOnce(identity,true,signal);prices=second.prices;input+=second.input;output+=second.output;queries+=second.queries}
   // Skip HEAD redirect resolution on the critical path — grounding links still open in-app.
   if(key){const saved=await sb.from('video_scan_product_cache').upsert({store_id:job.store_id,product_key:key,
     lookup:{retail_prices:prices},created_at:new Date().toISOString()});if(saved.error)throw saved.error}
