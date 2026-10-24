@@ -254,19 +254,20 @@ export function parseMail(mail, channels = defaultChannels) {
     else if (/shipping label and sale confirmation/i.test(item_title)) item_title = 'Depop sale';
   }
   const fulfillment = /local pickup|buyer will pick up|pickup order/i.test(text) ? 'pickup' : 'ship';
+  const financialText = text.replace(/\(\s*https?:\/\/[^)]*\)/gi, ' ');
   const money = (re) => {
-    const m = text.match(re);
+    const m = financialText.match(re);
     return m ? Math.round(Number(m[1]) * 100) : null;
   };
   const fee = money(
-    /(?:selling|transaction|processing|marketplace|final value|platform)\s*(?:fee|commission)[^\d$]{0,30}\$\s?([0-9]{1,6}(?:\.[0-9]{2})?)/i,
+    /(?:(?:payment\s+)?processing|selling|transaction|marketplace|final value|platform)\s*(?:fee|commission)[^\d$]{0,30}\$\s?([0-9]{1,6}(?:\.[0-9]{2})?)/i,
   );
   const shipLabel =
     money(/(?:prepaid\s+|shipping\s+)label[^\d$]{0,30}\$\s?([0-9]{1,6}(?:\.[0-9]{2})?)/i) ||
     money(/label\s+cost[^\d$]{0,30}\$\s?([0-9]{1,6}(?:\.[0-9]{2})?)/i);
   const tax = money(/(?:sales|buyer[\s-]?paid|order)\s*tax[^\d$]{0,30}\$\s?([0-9]{1,6}(?:\.[0-9]{2})?)/i);
   const payout = money(
-    /(?:earnings|payout|net proceeds|you(?:'ll| will) (?:receive|earn)|take[\s-]?home)[^\d$]{0,30}\$\s?([0-9]{1,6}(?:\.[0-9]{2})?)/i,
+    /(?:earnings|payout|net proceeds|you(?:'ll| will) (?:receive|earn)|what you[’']ll receive|take[\s-]?home)[^\d$]{0,30}\$\s?([0-9]{1,6}(?:\.[0-9]{2})?)/i,
   );
   return {
     text,

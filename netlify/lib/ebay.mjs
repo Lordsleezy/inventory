@@ -18,6 +18,7 @@ import { publicPhotoUrl } from "./ebay-photos.mjs";
 import { composeChannelDescription, parseListingSpecs } from "./listing-copy.mjs";
 import { ebayDescription, ebayIdentifiers } from "./ebay-product.mjs";
 import { appendClearanceFooter } from "./ebay-listing-standards.mjs";
+import { assertEbayListable } from "./ebay-exclusion.mjs";
 import { confirmCatalogVisual, matchCatalogPhoto } from "./ebay-catalog-photo.mjs";
 import { parseMeasure, specInches } from "./ebay-aspects.mjs";
 import { listingMeasures, prepareUnitAspects, prepareUnitCondition } from "./ebay-catalog.mjs";
@@ -692,6 +693,7 @@ export async function listSku(storeId, sku, draft = null) {
   const { data: unit, error } = await sb.from("units").select("*").eq("store_id", storeId).eq("sku", sku).maybeSingle();
   if (error) throw new Error(error.message);
   if (!unit) throw new Error(`No unit ${sku}`);
+  assertEbayListable(unit);
   if (unit.state !== "available" && unit.state !== "reserved") {
     throw new Error(`SKU ${sku} is ${unit.state}, not for sale.`);
   }

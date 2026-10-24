@@ -16,6 +16,7 @@ import { ebayDescription, ebayIdentifiers } from "./ebay-product.mjs";
 import { ebayItemViewUrl } from "./ebay-env.mjs";
 import { floorLog } from "./floor-log.mjs";
 import { prohibitedReason } from "./ebay-eligibility.mjs";
+import { ebayNeverList } from "./ebay-exclusion.mjs";
 import { fillAspects } from "./ebay-aspects.mjs";
 import {
   listingMeasures,
@@ -124,6 +125,7 @@ const BLOCKED_TITLE =
 
 export function pickupCandidateBlocked(unit) {
   if (!unit) return "missing_unit";
+  if (ebayNeverList(unit)) return "never_list_on_ebay";
   if (unit.state !== "available") return `state_${unit.state}`;
   if (unit.is_collectible) return "collectible";
   if (unit.is_test) return "test_unit";

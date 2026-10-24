@@ -4,7 +4,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { isKioskShell, scannerInputMode } from './kiosk';
 import { floorFunctionUrl } from './floorApi';
 import { reportClientError } from './clientLog';
-import { categoryDefaultCostCents, priceFloorCents, suggestAskCents } from './scanPricing';
+import { categoryDefaultCostCents, priceFloorCents } from './scanPricing';
 import { errText } from './errText';
 
 /** iOS/Android PWA: prefer native capture over getUserMedia (more reliable in standalone). */
@@ -259,6 +259,15 @@ function isTrueCatalogMiss(r?: Lookup): boolean {
   if (hasCatalog) return false;
   if (catalogLookupFailed(r)) return false;
   return Boolean(m?.not_found || (!r.amazon?.found && !r.upcitemdb?.found));
+}
+
+function missingIdentityFields(r?: Lookup): string[] {
+  if (!r || isTrueCatalogMiss(r) || catalogLookupFailed(r)) return [];
+  const brand = text(r.merged?.brand).toLowerCase();
+  const title = text(r.merged?.title).toLowerCase();
+  const model = text(r.merged?.model);
+  if (!title || title === brand || (!model && title.split(/\s+/).length < 3)) return ['specific product name', 'model'];
+  return [];
 }
 
 function catalogMissMessage(r?: Lookup): string | null {
@@ -536,8 +545,11 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   const [doNotList, setDoNotList] = useState(false);
   const [photoIdBusy, setPhotoIdBusy] = useState(false);
   const [photoIdStatus, setPhotoIdStatus] = useState('');
+  const [photoIdError, setPhotoIdError] = useState('');
+  const [photoNeed, setPhotoNeed] = useState('');
   const [photoPrice, setPhotoPrice] = useState<PhotoPriceInfo | null>(null);
   const missPhotoFile = useRef<HTMLInputElement>(null);
+  const missChooseFile = useRef<HTMLInputElement>(null);
   const missPromptedFor = useRef<string | null>(null);
 
   const upcInput = useRef<HTMLInputElement>(null);
@@ -586,7 +598,6 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     }),
     [costKnown, form.costEstimate, weightNum, form.title, form.brand, form.model, result],
   );
-  const suggestion = useMemo(() => suggestAskCents(retail?.cents ?? null, floor), [retail, floor]);
 
   // Only keep the scan box focused when idle. Refocusing during form edit pops the
   // mobile keyboard every time the user scrolls (body briefly becomes activeElement).
@@ -702,12 +713,6 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     const defaultCost = categoryDefaultCostCents({
       title: m?.title, brand: m?.brand, model: m?.model, category: m?.category,
     });
-    const floorSuggest = priceFloorCents({
-      costCents: null,
-      weightLb: p?.weight_lb ?? null,
-      title: m?.title, brand: m?.brand, model: m?.model, category: m?.category,
-    });
-    const suggested = suggestAskCents(retailNow?.cents ?? null, floorSuggest);
     // Item specifics = pack phrase / aspects / real MPN — never retailer digit codes (e.g. "4610583").
     const specifics = itemSpecificsFromLookup(m);
     const brand = text(m?.brand);
@@ -723,7 +728,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       // description falls back to the real feature bullets from the lookup; never invented text
       description: text(m?.description) || featuresText(m?.features),
       length: num(p?.length_in), width: num(p?.width_in), height: num(p?.height_in), weight: num(p?.weight_lb),
-      ask: suggested ? dollars(suggested) : '',
+      ask: current.seed?.ask || '',
       cost: dollars(defaultCost.cents),
       ...(current.seed || {}),
       costEstimate: current.seed?.cost ? false : true,
@@ -742,8 +747,11 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     photoSessionKey.current = current.id;
     setFiles([]);
     // Instant miss popup (photo fallback). Do not re-prompt the same scan id.
-    if (isTrueCatalogMiss(r) && missPromptedFor.current !== current.id) {
+    const identityNeeds = missingIdentityFields(r);
+    if ((isTrueCatalogMiss(r) || identityNeeds.length > 0) && missPromptedFor.current !== current.id) {
       missPromptedFor.current = current.id;
+      setPhotoNeed(identityNeeds.length ? `Need: ${identityNeeds.join(', ')}. Take a photo of the product label.` : 'No catalog match. Take a clear photo of the box or label.');
+      setPhotoIdError('');
       setDialog('miss-photo');
     } else {
       setDialog(null);
@@ -767,11 +775,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current?.id, current?.status, manual, loadedId]);
 
-  /* Cost changes can move the suggestion (cost floor); only follow it until the user edits price. */
-  useEffect(() => {
-    if (manual || askTouched.current || !suggestion) return;
-    setForm(p => (p.ask === dollars(suggestion) ? p : { ...p, ask: dollars(suggestion) }));
-  }, [suggestion, manual]);
+  /* Suggestions are displayed for reference; only the person receiving enters an ask price. */
 
   function toggleManual() {
     setError(''); setWarning('');
@@ -1166,18 +1170,23 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   }
 
   /** Barcode miss → one product photo → identify + asking-price median popup. */
-  async function identifyMissPhoto(list: FileList | null) {
-    if (!list?.length || !current) return;
-    const raw = list[0];
-    const file = await copyImageFile(raw);
-    if (!file) {
-      setError('Could not read that photo. Try one clear picture of the box or label.');
+  async function identifyMissPhoto(raw: File | null) {
+    if (!current) return;
+    if (!raw) {
+      setPhotoIdError('Camera returned no photo. Try again, or choose a photo from your phone.');
       return;
     }
     setPhotoIdBusy(true);
     setPhotoIdStatus('Identifying product…');
+    setPhotoIdError('');
+    setFiles([raw]);
+    const file = await copyImageFile(raw);
+    if (!file) {
+      setPhotoIdError('Could not read that photo. Try one clear picture of the box or label.');
+      setPhotoIdBusy(false);
+      return;
+    }
     setError('');
-    setDialog(null);
     try {
       setFiles([file]);
       void savePendingPhotos(pendingPhotoKey(storeId, photoSessionKey.current), [file]);
@@ -1194,7 +1203,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       });
       const json = await res.json().catch(() => ({} as { error?: string; message?: string }));
       if (!res.ok) {
-        setError(json.message || json.error || 'Photo identify failed. Fill fields by hand, or retry.');
+        setPhotoIdError(json.message || json.error || 'Photo identify failed. Retry or fill fields by hand.');
         setWarning(catalogMissMessage(current.result) || '');
         return;
       }
@@ -1204,21 +1213,19 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       setPhotoIdStatus(title || 'Product found');
       setForm(prev => ({
         ...prev,
-        brand: brand || prev.brand,
+        brand: prev.brand || brand,
         unbranded: false,
-        model: model || prev.model,
-        title: title || composeListingTitle(brand || prev.brand, model || prev.model, false),
+        model: prev.model || model,
+        title: prev.title && prev.title.trim().toLowerCase() !== prev.brand.trim().toLowerCase()
+          ? prev.title
+          : title || composeListingTitle(prev.brand || brand, prev.model || model, false),
       }));
       const price = json.price as PhotoPriceInfo | undefined;
       setPhotoPrice(price || null);
-      if (price?.median_cents) {
-        askTouched.current = false;
-        setForm(prev => ({ ...prev, ask: dollars(price.median_cents!) }));
-      }
       setDialog('photo-price');
       setWarning('');
     } catch (e) {
-      setError(errText(e) || 'Photo identify failed. Fill fields by hand.');
+      setPhotoIdError(errText(e) || 'Photo identify failed. Retry or fill fields by hand.');
     } finally {
       setPhotoIdBusy(false);
       setPhotoIdStatus('');
@@ -1594,8 +1601,11 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
 
     {dialog === 'miss-photo' && <div className="receive-modal" role="dialog" aria-modal="true" aria-labelledby="miss-photo-title">
       <div className="receive-modal-card">
-        <h3 id="miss-photo-title">Can&apos;t find this item. Scan with camera?</h3>
-        <p>Take <strong>one</strong> clear photo of the box or label. We&apos;ll identify brand, name, and pack size, then show asking prices so you can set the price.</p>
+        <h3 id="miss-photo-title">{photoNeed ? 'More product details needed' : 'Can\'t find this item. Scan with camera?'}</h3>
+        <p>{photoNeed || 'Take one clear photo of the box or label.'} We&apos;ll identify the product and show asking prices so you can set the price.</p>
+        {previews[0] && <img src={previews[0]} alt="Photo being identified" style={{ maxWidth: '100%', maxHeight: 180, objectFit: 'contain' }} />}
+        {photoIdBusy && <p role="status">{photoIdStatus || 'Identifying product…'}</p>}
+        {photoIdError && <p className="alert" role="alert">{photoIdError}</p>}
         <input
           ref={missPhotoFile}
           type="file"
@@ -1606,15 +1616,21 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           tabIndex={-1}
           onChange={e => {
             const input = e.currentTarget;
-            const list = input.files;
+            const file = input.files?.[0] || null;
             input.value = '';
-            void identifyMissPhoto(list);
+            void identifyMissPhoto(file);
           }}
         />
+        <input ref={missChooseFile} type="file" accept="image/*" className="sr-only" aria-label="Choose product photo" onChange={e => {
+          const file = e.currentTarget.files?.[0] || null;
+          e.currentTarget.value = '';
+          void identifyMissPhoto(file);
+        }} />
         <div className="actions">
           <button type="button" disabled={photoIdBusy} autoFocus onClick={() => missPhotoFile.current?.click()}>
-            Yes — take photo
+            {photoIdError ? 'Retry photo' : 'Yes — take photo'}
           </button>
+          <button type="button" className="secondary" disabled={photoIdBusy} onClick={() => missChooseFile.current?.click()}>Choose photo</button>
           <button type="button" className="secondary" disabled={photoIdBusy} onClick={() => setDialog(null)}>
             No — fill by hand
           </button>

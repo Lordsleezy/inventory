@@ -52,6 +52,14 @@ test("title plus price matches one Push-to-Depop row and refuses twins", () => {
   assert.equal(ambiguous, null);
 });
 
+test("shipping-label email extracts the item from Order details", () => {
+  const title = depopItemTitle(
+    "Your USPS shipping label and sale confirmation for @kay_lucha.",
+    "You've made a sale!\nNow it's time to ship\nPrint a label\nOrder details\nimage Bagsmart travel backpack. Open box; see the...\n$19.99\nShip to",
+  );
+  assert.equal(title, "Bagsmart travel backpack. Open box; see the...");
+});
+
 test("a different price without a photo or listing id stays unmatched", () => {
   const hit = matchDepopListing(
     { title: "Bagsmart travel backpack", priceCents: 1999, urls: [], productIds: [] },

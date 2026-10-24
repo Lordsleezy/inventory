@@ -4,6 +4,7 @@
  * Admin-only (portalAdminFromEvent at the function layer). Never marks units sold on end.
  */
 import { serviceClient } from "./server.mjs";
+import { ebayNeverList } from "./ebay-exclusion.mjs";
 import {
   STORE_DEFAULT,
   spapiFetch,
@@ -814,6 +815,10 @@ export async function endEbayListing(storeId, { accountId, offerId, sku }) {
 
 export async function relistEbayListing(storeId, { sku, draft = null, accountId = null, offerId = null } = {}) {
   if (!sku) return { ok: false, error: "sku_required" };
+  const { data: relistUnit, error: relistError } = await serviceClient().from("units").select("*").eq("store_id", storeId).eq("sku", sku).maybeSingle();
+  if (relistError) return { ok: false, error: relistError.message };
+  if (!relistUnit) return { ok: false, error: "unknown_sku" };
+  if (ebayNeverList(relistUnit)) return { ok: false, error: "never_list_on_ebay" };
   // Prefer republishing an existing unpublished Inventory offer (keeps migrate path; avoids category gates).
   if (offerId) {
     const hint = accountId ? { accountId } : undefined;
@@ -1309,6 +1314,9 @@ export async function prefillCreate(storeId, { channel, sku } = {}) {
 }
 
 async function pushReadiness(storeId, unit, channel) {
+  if (channel === "ebay" && ebayNeverList(unit)) {
+    return { ready: false, gaps: [], summary: ["eBay exclusion"], reason: "Never list on eBay", section: "excluded" };
+  }
   const sb = serviceClient();
   const photos = await unitPhotos(storeId, unit.sku);
   let aspectDefs = null;

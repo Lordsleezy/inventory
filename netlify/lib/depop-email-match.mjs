@@ -35,6 +35,15 @@ export function depopItemTitle(subject, text) {
     .split(/\n+/)
     .map((line) => line.replace(/\s+/g, " ").trim())
     .filter(Boolean);
+  const details = lines.findIndex((line) => /^order details$/i.test(line));
+  if (details >= 0) {
+    for (const raw of lines.slice(details + 1, details + 8)) {
+      const line = raw.replace(/^image\s+/i, "").trim();
+      if (line.length >= 8 && line.length <= 140 && !TITLE_LINE_SKIP.test(line) && !/^\$\s?\d/.test(line)) {
+        return line.slice(0, 250);
+      }
+    }
+  }
   const start = lines.findIndex((line) => /you(?:'ve| have) made a sale/i.test(line));
   const window = start >= 0 ? lines.slice(start + 1, start + 10) : lines;
   for (const line of window) {

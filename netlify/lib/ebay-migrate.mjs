@@ -117,7 +117,7 @@ async function loadUnitBySku(storeId, sku) {
   const { data } = await sb
     .from("units")
     .select(
-      "sku,state,title,brand,model,category,ask_cents,condition,defect_notes,listed_on,test_status,package_length_in,package_width_in,package_height_in,package_weight_lb",
+      "sku,state,title,brand,model,category,ask_cents,condition,defect_notes,listed_on,test_status,package_length_in,package_width_in,package_height_in,package_weight_lb,listing_specs",
     )
     .eq("store_id", storeId)
     .eq("sku", String(sku).trim())
