@@ -7,11 +7,12 @@ type Props = {
   client: SupabaseClient;
   storeId: string;
   accessToken: string;
+  staffMode?: boolean;
   onSaved: () => void;
 };
 
 /** Native Receive home; opens the shared ReceivePanel form after scan / camera / manual. */
-export function AppReceive({ client, storeId, accessToken, onSaved }: Props) {
+export function AppReceive({ client, storeId, accessToken, staffMode = false, onSaved }: Props) {
   const [phase, setPhase] = useState<'home' | 'form' | 'bundle'>('home');
   const [manual, setManual] = useState(false);
   const [pendingUpc, setPendingUpc] = useState<string | null>(null);
@@ -29,7 +30,7 @@ export function AppReceive({ client, storeId, accessToken, onSaved }: Props) {
   useEffect(() => {
     let alive = true;
     void (async () => {
-      const { data } = await client.rpc('portal_receive_options');
+      const { data } = await client.rpc(staffMode ? 'staff_receive_options' : 'portal_receive_options');
       if (alive && data?.next_sku) setNextSku(String(data.next_sku));
     })();
     const onHid = () => setScannerOk(true);
@@ -37,7 +38,7 @@ export function AppReceive({ client, storeId, accessToken, onSaved }: Props) {
     // Bluetooth wedges look like fast keyboard input; stay optimistic green on store phone.
     const t = window.setTimeout(() => setScannerOk(true), 0);
     return () => { alive = false; window.clearTimeout(t); window.removeEventListener('keydown', onHid); };
-  }, [client, phase]);
+  }, [client, phase, staffMode]);
 
   useEffect(() => {
     let alive = true;
@@ -45,7 +46,7 @@ export function AppReceive({ client, storeId, accessToken, onSaved }: Props) {
       const start = new Date();
       start.setHours(0, 0, 0, 0);
       const { data } = await client
-        .from('units')
+        .from(staffMode ? 'units_pos' : 'units')
         .select('sku, title, brand, model, received_at')
         .eq('store_id', storeId)
         .gte('received_at', start.toISOString())
@@ -58,7 +59,7 @@ export function AppReceive({ client, storeId, accessToken, onSaved }: Props) {
       })));
     })();
     return () => { alive = false; };
-  }, [client, storeId, phase]);
+  }, [client, storeId, phase, staffMode]);
 
   if (phase === 'form') {
     return (
@@ -67,6 +68,7 @@ export function AppReceive({ client, storeId, accessToken, onSaved }: Props) {
           client={client}
           storeId={storeId}
           accessToken={accessToken}
+          staffMode={staffMode}
           onSaved={() => {
             onSaved();
             setPendingUpc(null);
@@ -139,7 +141,7 @@ export function AppReceive({ client, storeId, accessToken, onSaved }: Props) {
         {/* Must open the file picker in this tap — deferred clicks are blocked on iOS. */}
         <button type="button" onClick={() => homeCamera.current?.click()}>Use camera</button>
         <button type="button" onClick={() => openForm(true)}>No barcode</button>
-        <button type="button" className="bundle-entry" onClick={() => setPhase('bundle')}>Bundle items</button>
+        {!staffMode && <button type="button" className="bundle-entry" onClick={() => setPhase('bundle')}>Bundle items</button>}
       </div>
       {cameraError && <p className="app-inline-error">{cameraError}</p>}
 
