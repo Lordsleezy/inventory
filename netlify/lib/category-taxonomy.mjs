@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { serviceClient } from "./server.mjs";
 import { fetchCategoryTree, fetchLiveAspects } from "./ebay-catalog.mjs";
+import { aspectFieldsFromTaxonomy } from "./ebay-specifics.mjs";
 import { marketplaceId, spapiFetch } from "./amazon.mjs";
 import { tiktokApiFetch } from "./tiktok-shop.mjs";
 
@@ -102,6 +103,9 @@ export async function refreshChannelCategoryFields(channel, storeId, categoryId)
     const live = await retryLimited(() => fetchLiveAspects(categoryId));
     defs = live.filter((d) => d.required).map((d) => ({ name: d.name, required: true,
       allowed: d.selectionOnly ? d.allowed : [] }));
+    const { error: aspectError } = await sb.from('channel_taxonomy').update({ aspect_fields: aspectFieldsFromTaxonomy(live) })
+      .eq('channel', 'ebay').eq('category_id', categoryId);
+    if (aspectError) throw new Error(aspectError.message);
   } else if (channel === 'tiktok') {
     const attrs = await retryLimited(() => tiktokApiFetch(storeId, 'GET', `/product/202309/categories/${encodeURIComponent(categoryId)}/attributes`, null,
       { category_version: 'v2', shop_cipher: process.env.TIKTOK_SHOP_SHOP_CIPHER || undefined }));
