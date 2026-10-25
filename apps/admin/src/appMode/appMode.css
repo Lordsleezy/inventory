@@ -1580,3 +1580,4 @@ html.app-mode .nr-new-sale {
   font-weight: 700;
 }
 html.app-mode .live { color: #30d158 !important; }
+html.app-mode .inventory-summary-app{margin:0 16px 16px;gap:8px;grid-template-columns:repeat(2,minmax(0,1fr))}html.app-mode .inventory-summary-app .inventory-summary-card{background:#1c1c1e;border:0;border-radius:12px;padding:12px 13px;gap:5px}html.app-mode .inventory-summary-app .inventory-summary-card span{color:#a1a1a6;font-size:12px}html.app-mode .inventory-summary-app .inventory-summary-card strong{color:#fff;font-size:23px}html.app-mode .inventory-summary-app .inventory-summary-error{color:#ff9f0a}

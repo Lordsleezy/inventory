@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { ReceivePanel } from './ReceivePanel';
+import { InventorySummary } from './InventorySummary';
 import { ATTENTION_SECTIONS, NeedsAttentionPanel, useAttentionCounts } from './NeedsAttentionPanel';
 import { UnitEditDrawer } from './UnitEditDrawer';
 import { LookupTestPage } from './LookupTestPage';
@@ -141,6 +142,7 @@ export function InventoryPage({
   const total = list?.totals.unit_count || 0;
   return <>
     <header><div><div className="eyebrow">FLOOR INVENTORY</div><h1>Inventory</h1><p>{listTab === 'in-stock' ? 'For-sale units on hand. Click a unit to edit details, price, cost, package size, and photos.' : listTab === 'sold' ? (associateBrowseOnly ? 'Sold units by SKU.' : 'Sold units and what they sold for.') : listTab === 'defective' ? 'Not-for-sale units and anything graded Defective. These only need a brand.' : listTab === 'unfinished' ? 'For-sale units missing a photo, price, or other required info.' : tab === 'receive' ? 'Scan a UPC to look up product data, then receive with a real photo.' : tab === 'lookup-test' ? 'Read-only UPC accuracy test — Amazon vs UPCitemdb. Does not create inventory.' : tab === 'products' ? 'Shared UPC product database — edits stick for future scans. Price/condition stay on each unit.' : tab === 'measure-mat' ? 'Printable 50 mm scale mat for Receive photo measuring.' : ''}</p></div></header>
+    <InventorySummary client={client} refresh={refresh} />
     <div className="inventory-tabs">
       {[...LIST_TABS, ...(associateBrowseOnly ? [] : TOOL_TABS)].map(([id, text]) => <button type="button" key={id} className={(listTab ?? tab) === id ? 'active' : ''} onClick={() => pickTab(id)}>{text}</button>)}
     </div>

@@ -3,6 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { AttentionSection } from '../navigation';
 import { ATTENTION_SECTIONS, NeedsAttentionPanel, useAttentionCounts } from '../NeedsAttentionPanel';
 import { reviewReasonLabel } from '../inventoryReview';
+import { InventorySummary } from '../InventorySummary';
 import { CategoryPanel } from '../CategoryPanel';
 import { shortError } from './shortError';
 
@@ -282,6 +283,7 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
   return (
     <div ref={scrollRef as React.RefObject<HTMLDivElement>}>
       <div className="app-large-title"><h1>Inventory</h1></div>
+      <InventorySummary client={client} appMode />
       <label className="app-search">
         <span aria-hidden>⌕</span>
         <input
