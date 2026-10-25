@@ -1,1 +1,4 @@
 project_id = "floor"
+
+[db]
+major_version = 17

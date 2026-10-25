@@ -21,8 +21,13 @@ else
   $SB db dump --linked --role-only -f "$OUT/roles.sql"
   tmp="$(mktemp)"
   $SB db dump --linked --data-only --schema supabase_migrations -f "$tmp"
-  grep -oiE "insert into \"?supabase_migrations\"?\.\"?schema_migrations\"?[^;]*values *\('[0-9]+'" "$tmp" \
-    | grep -oE "'[0-9]+'$" | tr -d "'" | sort > "$OUT/applied-versions.txt"
+  # pg_dump puts VALUES on its own line and each migration tuple on a new line;
+  # match the first field of each tuple instead of assuming INSERT and VALUES share a line.
+  awk -F"'" '
+    /INSERT INTO .*schema_migrations/ { in_data=1; next }
+    in_data && /^;/ { exit }
+    in_data && /^[[:space:]]*\(/ && $2 ~ /^[0-9]+$/ { print $2 }
+  ' "$tmp" | sort -u > "$OUT/applied-versions.txt"
   rm -f "$tmp"
 fi
 
