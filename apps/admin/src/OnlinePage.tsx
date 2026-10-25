@@ -1,4 +1,5 @@
 ﻿import { useEffect, useMemo, useState } from 'react';
+import { ListingIssuesPanel } from './ChannelCheckboxes';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { OnlineChannel, OnlineTab } from './navigation';
 import { errText } from './errText';
@@ -316,6 +317,7 @@ export function OnlinePage({
 
     {error && <div className="alert" role="alert">{error}<button type="button" onClick={() => setError('')}>Dismiss</button></div>}
 
+    <ListingIssuesPanel client={client} />
     <div className="stats">
       <button type="button" className="stat stat-link" onClick={onInventory}>
         <span>Total inventory</span><strong>{counts.inventory}</strong>

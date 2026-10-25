@@ -6,8 +6,8 @@ import { reviewReasonLabel } from '../inventoryReview';
 import { CategoryPanel } from '../CategoryPanel';
 import { shortError } from './shortError';
 
-/** Same four subtabs as desktop Inventory. Unfinished replaces the old More → Needs attention. */
-type Filter = 'in_stock' | 'sold' | 'unfinished' | 'defective';
+/** Same five subtabs as desktop Inventory. Unfinished replaces the old More → Needs attention. */
+type Filter = 'in_stock' | 'sold' | 'unfinished' | 'needs_check' | 'defective';
 
 type Row = {
   sku: string;
@@ -245,6 +245,7 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
   const rowsNote = pieces !== total ? ` (${total} ${total === 1 ? 'item' : 'items'})` : '';
   const footer = useMemo(() => {
     if (filter === 'unfinished') return `${pieces} units unfinished${rowsNote}`;
+    if (filter === 'needs_check') return `${pieces} units need to be checked${rowsNote}`;
     if (filter === 'sold') return `${pieces} units sold${rowsNote}`;
     if (filter === 'defective') return `${pieces} units defective / not for sale${rowsNote}`;
     const u = unfinishedCount;
@@ -300,6 +301,7 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
           ['in_stock', 'In stock'],
           ['sold', 'Sold'],
           ['unfinished', 'Unfinished'],
+          ['needs_check', 'Needs check'],
           ['defective', 'Defective'],
         ] as const).map(([id, label]) => (
           <button

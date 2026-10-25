@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { ChannelPicker, applyChannelSelections, type ChannelId } from './ChannelCheckboxes';
 import { createPortal } from 'react-dom';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { isKioskShell, scannerInputMode } from './kiosk';
@@ -106,7 +107,7 @@ async function clearPendingPhotos(key: string): Promise<void> {
 /* ------------------------------------------------------------------------------------------------
  * Receive = scan-to-list.
  *   scan UPC -> lookup fills listing fields -> edit requirements (price, condition, category,
- *   brand, UPC, weight+dims, item specifics) + photo -> Ready to list checkboxes ->
+ *   brand, UPC, weight+dims, item specifics) + photo -> channel checkboxes (eBay / Amazon / TikTok Shop) ->
  *   receive (portal_receive_unit) -> photo upload -> merge lookup into listing_specs.
  * "Enter manually" uses the same requirements (plus title/description helpers).
  * ---------------------------------------------------------------------------------------------- */
@@ -571,8 +572,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   const [reason, setReason] = useState('damaged');
   const [reasonNote, setReasonNote] = useState('');
   const [camera, setCamera] = useState(false);
-  const [readyToList, setReadyToList] = useState(false);
-  const [readyAmazonTiktok, setReadyAmazonTiktok] = useState(false);
+  const [channels, setChannels] = useState<ChannelId[]>([]);
   /** Store-only / not selling online — photo not required to receive. */
   const [doNotList, setDoNotList] = useState(false);
   const [photoIdBusy, setPhotoIdBusy] = useState(false);
@@ -757,8 +757,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     setDialog(null);
     setReason('damaged');
     setReasonNote('');
-    setReadyToList(false);
-    setReadyAmazonTiktok(false);
+    setChannels([]);
     setDoNotList(false);
     setPhotoFill(null);
     setPhotoIdentity(null);
@@ -869,8 +868,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       if (!mounted.current || activeScan.current !== scanId || !restored.length) return;
       setFiles(restored);
     });
-    setReadyToList(false);
-    setReadyAmazonTiktok(false);
+    setChannels([]);
     setDoNotList(false);
     upcInput.current?.blur();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -976,7 +974,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       await receive(parsed, null);
       return;
     }
-    if (readyToList) {
+    if (channels.length) {
       if (gaps.length) {
         setWarning(`Saved to Unfinished. Missing: ${gaps.join(', ')}.`);
       }
@@ -1070,12 +1068,9 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
             const categoryResult = await categoryResponse.json();
             if (!categoryResponse.ok) throw new Error(categoryResult.error || 'category_resolve_failed');
             if (categoryResult.gaps?.length) warnings.push(`SKU ${sku} needs category review; open Missing Category below.`);
-            else if (readyToList) {
-              const marked = await client.rpc(staffMode ? 'staff_enrich_received_unit' : 'portal_enrich_received_unit', { p_sku: sku, p_specs: { ready_to_list: true } });
-              if (marked.error) warnings.push(`SKU ${sku} categories are complete, but Ready to list could not be set.`);
-            }
           } catch { warnings.push(`SKU ${sku} category lookup did not finish; use Missing Category below.`); }
         }
+        if (channels.length) warnings.push(...await applyChannelSelections(client, skus, channels));
       }
       if (!manual && current?.upc) {
         try {
@@ -1131,8 +1126,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           };
         });
         setFiles([]); setDups(null); setDupAck(false);
-        setReadyToList(false);
-        setReadyAmazonTiktok(false);
+        setChannels([]);
         setDoNotList(false);
       } else {
         const doneId = current?.id;
@@ -1204,8 +1198,6 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       put('ebay_aspects', { ...existing, UPC: UPC_NOT_APPLICABLE });
       put('upc', UPC_NOT_APPLICABLE);
     }
-    if (!doNotList && readyAmazonTiktok) put('ready_amazon_tiktok', true);
-    if (!doNotList && readyToList && missingFor(parsed).length === 0) put('ready_to_list', true);
     if (doNotList) put('do_not_list', true);
     if (hold) { put('hold_reason', hold.reason); put('hold_note', hold.note.trim()); }
     const hide = Boolean(hold) || forceHide || doNotList;
@@ -1676,7 +1668,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           {photoPrice?.listings?.[0] && <a className="receive-confirm-source" href={photoPrice.listings[0].url} target="_blank" rel="noreferrer">
             {photoPrice.listings[0].store} · {money(photoPrice.listings[0].price_cents)} · source ↗</a>}
           <div className="receive-confirm-bottom-row"><label>Your price<input inputMode="decimal" placeholder="0.00" value={form.ask} onChange={e => update('ask',e.target.value)} /></label>
-            <label className="receive-confirm-ready"><input type="checkbox" checked={readyToList} onChange={e => setReadyToList(e.target.checked)} /> Ready to list</label></div>
+            {!staffMode && <ChannelPicker compact value={channels} onChange={setChannels} />}</div>
           {liveMissing.length > 0 && <small>Missing: {liveMissing.join(', ')} · saves to Unfinished</small>}
           <button type="submit" disabled={busy || !options?.next_sku || (dups !== null && dups.count > 0 && !dupAck)}>{busy ? 'Saving…' : 'Save & next'}</button>
         </div>
@@ -1857,31 +1849,13 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
               const on = e.target.checked;
               setDoNotList(on);
               if (on) {
-                setReadyToList(false);
-                setReadyAmazonTiktok(false);
+                setChannels([]);
               }
             }}
           />
           Do not list for sale
         </label>
-        <label className="mboard-inline unit-edit-wide">
-          <input
-            type="checkbox"
-            checked={readyToList}
-            disabled={doNotList}
-            onChange={e => setReadyToList(e.target.checked)}
-          />
-          Ready to list
-        </label>
-        <label className="mboard-inline unit-edit-wide">
-          <input
-            type="checkbox"
-            checked={readyAmazonTiktok}
-            disabled={doNotList}
-            onChange={e => setReadyAmazonTiktok(e.target.checked)}
-          />
-          Ready to list Amazon/TikTok
-        </label>
+        {!staffMode && <ChannelPicker value={channels} onChange={setChannels} disabled={doNotList} />}
       </div>
 
       <p className="hint receive-check">
@@ -1890,9 +1864,9 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
             ? 'Store-only — will receive without listing. Photo is optional.'
             : 'Store-only — photo not required. Unit stays off the website and marketplaces.')
           : liveMissing.length === 0
-            ? (readyToList ? 'After receiving, categories will be checked before Ready to list is saved.' : 'Complete — check Ready to list, or Finish to save without listing pressure.')
-            : readyToList
-              ? `Ready to list still needs: ${liveMissing.join(', ')}.`
+            ? (channels.length ? 'Complete — the checked channels are queued after receiving.' : 'Complete — check the channels to list on, or Finish to land in Needs to be checked.')
+            : channels.length
+              ? `Before it can list it still needs: ${liveMissing.join(', ')}.`
               : `Missing for listing: ${liveMissing.join(', ')}. You can still receive; incomplete units land in Needs attention.`}
       </p>
       <div className="actions">
@@ -1910,13 +1884,13 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
 
     {dialog === 'ready' && <div className="receive-modal" role="dialog" aria-modal="true" aria-labelledby="ready-title">
       <div className="receive-modal-card">
-        <h3 id="ready-title">Ready to list?</h3>
+        <h3 id="ready-title">Receive this unit?</h3>
         <p><strong>{form.title.trim() || [form.brand, form.model].filter(Boolean).join(' ')}</strong><br />
           Price {money(cents(form.ask) as number | null)} · {form.condition || 'no condition'} · {files.length} photo{files.length === 1 ? '' : 's'}</p>
-        <p className="hint">Yes receives it with normal show defaults; it moves to Online → Ready once the board criteria are met.
+        <p className="hint">Yes receives it with normal show defaults. Tick eBay, Amazon or TikTok Shop on the unit to list it.
           {form.costEstimate ? ` Cost uses ${floor.costLabel} until you edit it.` : ''}</p>
         <div className="actions">
-          <button type="button" disabled={busy} autoFocus onClick={() => { const p = parse(); if (p) void receive(p, null); }}>Yes — receive &amp; list</button>
+          <button type="button" disabled={busy} autoFocus onClick={() => { const p = parse(); if (p) void receive(p, null); }}>Yes — receive</button>
           <button type="button" className="secondary" disabled={busy} onClick={() => setDialog('reason')}>No</button>
           <button type="button" className="text-button" onClick={() => setDialog(null)}>Back</button>
         </div>

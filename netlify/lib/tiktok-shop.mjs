@@ -377,25 +377,13 @@ export async function tiktokConnectionStatus(storeId = STORE_DEFAULT) {
   };
 }
 
-/**
- * Same online rule as Amazon (40% off retail / collectible ask, cover fees + $5 over cost)
- * plus TikTok fee pct + channel return reserve.
- */
-export function suggestTikTokPriceCents(unit, feePct = TIKTOK_DEFAULT_FEE_PCT, returnReservePct = 0) {
-  const retail =
-    Number(unit.retail_cents) ||
-    Number(unit.listing_specs?.retail_cents) ||
-    Number(unit.listing_specs?.marketplace_pricing?.retail_usd) * 100 ||
-    Number(unit.ask_cents) ||
-    0;
+/** List price = the Floor set price (ask_cents), same as Amazon. Buyer pays shipping.
+ * No retail-discount, comps or return-reserve markups. Fee/profit are informational only. */
+export function suggestTikTokPriceCents(unit, feePct = TIKTOK_DEFAULT_FEE_PCT, _returnReservePct = 0) {
+  const list = Math.max(0, Math.round(Number(unit?.ask_cents) || 0));
+  const retail = Number(unit?.retail_cents) || Number(unit?.listing_specs?.retail_cents) || 0;
   const cost = defaultCostCents(unit);
-  const isCollectible = unit?.is_collectible === true;
-  let target = isCollectible && Number(unit.ask_cents) > 0 ? Number(unit.ask_cents) : Math.round(retail * 0.6);
-  if (!Number.isFinite(target) || target <= 0) target = Number(unit.ask_cents) || 0;
   const fee = Number(feePct) || TIKTOK_DEFAULT_FEE_PCT;
-  const minList = Math.ceil((cost + 500) / (1 - fee));
-  let list = Math.max(target, minList);
-  list = applyReturnReserveCents(list, returnReservePct);
   const feeCents = Math.round(list * fee);
   const profit = list - feeCents - cost;
   return {
@@ -405,7 +393,7 @@ export function suggestTikTokPriceCents(unit, feePct = TIKTOK_DEFAULT_FEE_PCT, r
     retailCents: Math.round(retail) || null,
     profitCents: profit,
     feePct: fee,
-    returnReservePct: Number(returnReservePct) || 0,
+    returnReservePct: 0,
     ok: profit >= 500 && list > 0,
   };
 }
@@ -481,14 +469,6 @@ export async function prepareTikTokQueueItem(storeId, sku) {
 
   const returnReservePct = await reservePctForChannel(storeId, "tiktok").catch(() => 10);
   const price = suggestTikTokPriceCents(unit, tiktokFeePct(), returnReservePct);
-  if (!price.ok) {
-    return {
-      ok: false,
-      status: "error",
-      last_error: `price_net_under_$5 (list=$${(price.listCents / 100).toFixed(2)})`,
-      price,
-    };
-  }
 
   const patch = {
     status: "ready",

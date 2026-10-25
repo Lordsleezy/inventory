@@ -248,6 +248,17 @@ async function deleteOffer(storeId, offerId) {
   }
 }
 
+/** Read-only: the published eBay offer for this SKU on the selling account, or null. */
+export async function ebayPublishedListingForSku(storeId, sku) {
+  const offers = await listOffersForSku(storeId, sku);
+  const live = offers.find(
+    (row) => String(row.status || "").toUpperCase() === "PUBLISHED" && (row.listing?.listingId || row.listingId),
+  );
+  if (!live) return null;
+  const listingId = live.listing?.listingId || live.listingId;
+  return { offerId: live.offerId, listingId, url: `https://www.ebay.com/itm/${listingId}` };
+}
+
 async function resetUnpublishedOffers(storeId, sku) {
   const offers = await listOffersForSku(storeId, sku);
   console.log(

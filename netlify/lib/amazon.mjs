@@ -297,27 +297,12 @@ export function amazonConditionFromUnit(unit) {
   };
 }
 
-/** Suggest list price: 40% off retail, cover Amazon fees + $5 profit over cost. Buyer pays ship (template).
- * Optional returnReservePct (from return_settings) bakes a channel return reserve into NEW list prices only —
- * never mutates stored ask_cents / existing listings. */
-export function suggestAmazonPriceCents(unit, feePct = 0.15, returnReservePct = 0) {
-  const retail =
-    Number(unit.retail_cents) ||
-    Number(unit.listing_specs?.retail_cents) ||
-    Number(unit.listing_specs?.marketplace_pricing?.retail_usd) * 100 ||
-    Number(unit.ask_cents) ||
-    0;
+/** List price = the Floor set price (ask_cents). Buyer pays calculated shipping (template).
+ * No retail-discount, comps or return-reserve markups. Fee/profit are informational only. */
+export function suggestAmazonPriceCents(unit, feePct = 0.15, _returnReservePct = 0) {
+  const list = Math.max(0, Math.round(Number(unit?.ask_cents) || 0));
+  const retail = Number(unit?.retail_cents) || Number(unit?.listing_specs?.retail_cents) || 0;
   const cost = defaultCostCents(unit);
-  const isCollectible = unit?.is_collectible === true;
-  let target = isCollectible && Number(unit.ask_cents) > 0 ? Number(unit.ask_cents) : Math.round(retail * 0.6);
-  if (!Number.isFinite(target) || target <= 0) target = Number(unit.ask_cents) || 0;
-  // Ensure net after referral ≥ cost + $5
-  const minList = Math.ceil((cost + 500) / (1 - feePct));
-  let list = Math.max(target, minList);
-  const reserve = Number(returnReservePct) || 0;
-  if (reserve > 0 && list > 0) {
-    list = Math.max(list, Math.ceil((list * (100 + reserve)) / 100));
-  }
   const fee = Math.round(list * feePct);
   const profit = list - fee - cost;
   return {
@@ -326,7 +311,7 @@ export function suggestAmazonPriceCents(unit, feePct = 0.15, returnReservePct = 
     costCents: cost,
     retailCents: Math.round(retail) || null,
     profitCents: profit,
-    returnReservePct: reserve,
+    returnReservePct: 0,
     ok: profit >= 500 && list > 0,
   };
 }
@@ -770,6 +755,23 @@ export async function competitivePriceByAsin(storeId, asin) {
 /**
  * Create FBM offer against existing ASIN. Never uploads images.
  */
+/** Read-only: true when this seller SKU already exists on Amazon (any status). */
+export async function amazonListingExists(storeId, sku) {
+  const sid = sellerId();
+  if (!sid) throw new Error("missing_seller_id");
+  try {
+    const item = await spapiFetch(
+      storeId,
+      "GET",
+      `/listings/2021-08-01/items/${encodeURIComponent(sid)}/${encodeURIComponent(sku)}?marketplaceIds=${marketplaceId()}&includedData=summaries`,
+    );
+    return Boolean(item?.sku || item?.summaries?.length);
+  } catch (e) {
+    if (e?.status === 404) return false;
+    throw e;
+  }
+}
+
 export async function listAmazonOffer(storeId, kit) {
   if (!amazonListingEnabled()) {
     return {
@@ -820,15 +822,6 @@ export async function listAmazonOffer(storeId, kit) {
   const feePct = fees.feeCents / Math.max(kit.priceCents || priceHint.listCents, 1);
   const price = suggestAmazonPriceCents(unit, feePct || 0.15, returnReservePct);
   const listCents = kit.priceCents || price.listCents;
-  if (listCents - fees.feeCents - price.costCents < 500) {
-    return {
-      ok: false,
-      reason: "under_floor",
-      message: `Price $${(listCents / 100).toFixed(2)} would net under $5 after fees/cost.`,
-      listCents,
-      fees,
-    };
-  }
 
   const sid = sellerId();
   if (!sid) return { ok: false, reason: "missing_seller_id", message: "AMAZON_SELLER_ID not set" };

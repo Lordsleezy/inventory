@@ -241,8 +241,7 @@ export function TikTokShopPanel({ client, accessToken, money, connectionOnly = f
         <>
           <h3 style={{ marginTop: '1.25rem' }}>Listing queue</h3>
           <p className="hint">
-            Pricing uses the same online rule as Amazon (≈40% off retail, fees + $5 over cost) plus TikTok fees and the
-            TikTok return reserve.
+            Listings are priced at the Floor set price; the buyer pays shipping.
           </p>
           <div className="actions">
             <input
