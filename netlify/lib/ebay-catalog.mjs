@@ -263,6 +263,68 @@ async function applicationToken() {
   return value;
 }
 
+let catalogTokenCache = null;
+async function catalogToken() {
+  requireEbayEnabled();
+  if (catalogTokenCache && catalogTokenCache.expiresAt > Date.now() + 60_000) return catalogTokenCache.value;
+  const { api } = ebayHosts(process.env.EBAY_ENV);
+  const id = process.env.EBAY_CLIENT_ID;
+  const secret = process.env.EBAY_CLIENT_SECRET;
+  if (!id || !secret) throw new Error("eBay app credentials are missing.");
+  const res = await fetch(`${api}/identity/v1/oauth2/token`, {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${Buffer.from(`${id}:${secret}`).toString("base64")}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams({ grant_type: "client_credentials",
+      scope: "https://api.ebay.com/oauth/api_scope/commerce.catalog.readonly" }),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error_description || json.error || "ebay_catalog_token_failed");
+  const value = { api, token: json.access_token };
+  catalogTokenCache = { value, expiresAt: Date.now() + Math.min(Number(json.expires_in || 7200) * 1000, 30 * 60_000) };
+  return value;
+}
+
+/** eBay product aspects as { Name: [values] } from a Catalog product summary. */
+export function catalogSummaryAspects(summary) {
+  const out = {};
+  for (const a of summary?.aspects || []) {
+    const name = String(a?.localizedName || "").trim();
+    const values = (a?.localizedValues || []).map((v) => String(v).trim()).filter(Boolean);
+    if (name && values.length) out[name] = values;
+  }
+  return out;
+}
+
+/** Pick the exact Catalog match: aspects only when one distinct eBay product (ePID) matches the UPC. */
+export function catalogMatch(body) {
+  const summaries = body?.productSummaries || [];
+  const epids = [...new Set(summaries.map((s) => s.epid).filter(Boolean))];
+  const categoryId = String(body?.refinement?.dominantCategoryId || "") || null;
+  if (epids.length !== 1) return epids.length ? { categoryId: null, aspects: {}, ambiguous: true } : null;
+  const summary = summaries.find((s) => s.epid === epids[0]);
+  return { epid: epids[0], title: summary?.title || "", categoryId, aspects: catalogSummaryAspects(summary) };
+}
+
+/** eBay Catalog API lookup by UPC/EAN/GTIN. Returns null when eBay has no product. */
+export async function catalogProductByGtin(gtin) {
+  const code = String(gtin || "").replace(/\D/g, "");
+  if (!code) return null;
+  return cachedTaxonomy(`catalog:${code}`, async () => {
+    const { api, token } = await catalogToken();
+    const res = await fetch(`${api}/commerce/catalog/v1_beta/product_summary/search?gtin=${encodeURIComponent(code)}` +
+      "&fieldgroups=MATCHING_PRODUCTS,ASPECT_REFINEMENTS&limit=10", {
+      headers: { Authorization: `Bearer ${token}`, "X-EBAY-C-MARKETPLACE-ID": process.env.EBAY_MARKETPLACE_ID || "EBAY_US" },
+    });
+    if (res.status === 204 || res.status === 404) return null;
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.errors?.[0]?.message || `ebay_catalog_search_${res.status}`);
+    return catalogMatch(body);
+  });
+}
+
 export async function fetchCategoryTree() {
   const market = process.env.EBAY_MARKETPLACE_ID || "EBAY_US";
   const { api, token } = await applicationToken();

@@ -34,6 +34,14 @@ begin
   insert into public.photos (store_id, sku, path)
   select v_store, s, 'p/' || s || '.jpg' from unnest(array['97001','97002','97003','97004','97005','97006']) s;
   insert into public.listings (store_id, sku, channel, status) values (v_store, '97005', 'ebay', 'listed'), (v_store, '97006', 'amazon', 'listed');
+  -- Since 20261030200000 an unconfirmed eBay category is Unfinished: give the fixtures a confirmed one.
+  insert into public.channel_taxonomy (channel, category_id, parent_id, path, leaf, active, version, fingerprint,
+      fetched_at, fields_fetched_at, fields_version, required_fields)
+  values ('ebay', '99001', null, 'Test > Leaf', true, true, 'v1', 'fp', now(), now(), 'fv', '[]')
+  on conflict (channel, category_id) do nothing;
+  insert into public.unit_channel_categories (store_id, sku, channel, category_id, enabled, source, validated_version)
+  select v_store, u.sku, 'ebay', '99001', true, 'manual', 'fp:fv' from public.units u where u.store_id = v_store
+  on conflict (store_id, sku, channel) do update set category_id = '99001', validated_version = 'fp:fv', review_reason = null;
   perform set_config('test.store_id', v_store::text, true);
   perform set_config('test.owner_id', v_owner::text, true);
   perform set_config('test.clerk_id', v_clerk::text, true);

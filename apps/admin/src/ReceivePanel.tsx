@@ -11,6 +11,7 @@ import { BundleReceive } from './BundleReceive';
 const MeasureOnMat = lazy(() => import('./MeasureOnMat').then(module => ({ default: module.MeasureOnMat })));
 import { receiveSpecifics, receiveVariant } from '../../../shared/receive-specifics.mjs';
 import { CategoryPanel } from './CategoryPanel';
+import { EbaySpecificsPanel } from './EbaySpecificsPanel';
 
 /** iOS/Android PWA: prefer native capture over getUserMedia (more reliable in standalone). */
 function preferNativeCapture() {
@@ -1560,7 +1561,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     </div>
 
     <BundleReceive client={client} lastReceived={saved[0]} onSaved={onSaved} />
-    {saved.length > 0 && <details className="receive-category-details" open><summary>Categories for received items</summary>
+    {saved.length > 0 && <EbaySpecificsPanel key={saved[0]} client={client} sku={saved[0]} storeId={storeId} appMode={Boolean(appChrome)} />}
+    {saved.length > 0 && !staffMode && <details className="receive-category-details" open><summary>Categories for received items</summary>
       <CategoryPanel client={client} storeId={storeId} initialSku={saved[0]} onSaved={onSaved} />
     </details>}
 

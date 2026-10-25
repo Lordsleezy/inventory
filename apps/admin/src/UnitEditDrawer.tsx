@@ -1,5 +1,6 @@
 ﻿import { useEffect, useRef, useState } from 'react';
 import { ChannelCheckboxes } from './ChannelCheckboxes';
+import { EbaySpecificsPanel } from './EbaySpecificsPanel';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { floorFunctionUrl } from './floorApi';
 import { scannerInputMode } from './kiosk';
@@ -454,6 +455,7 @@ export function UnitEditDrawer({
           <label>Weight (lb)<input inputMode="decimal" value={form.weight} onChange={e => set('weight', e.target.value)} /></label>
           <label className="unit-edit-wide">Notes<textarea rows={3} value={form.notes} onChange={e => set('notes', e.target.value)} /></label>
         </div>
+        <EbaySpecificsPanel client={client} sku={sku} storeId={storeId} appMode={appMode} />
         <ChannelCheckboxes client={client} sku={sku} appMode={appMode} />
         <div className={`actions unit-edit-actions${appMode ? ' app-unit-edit-actions' : ''}`} style={{ marginTop: 16 }}>
           <button type="button" disabled={busy || lookupBusy} onClick={() => void save()}>{busy ? 'Saving…' : 'Save changes'}</button>
