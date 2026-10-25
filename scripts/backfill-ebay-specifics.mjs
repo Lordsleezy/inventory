@@ -22,18 +22,23 @@ if (error) throw new Error(error.message);
 
 const tally = { units: units.length, was_complete: 0, now_complete: 0, became_complete: 0, category_filled: 0,
   still_missing_required: 0, no_category: 0, ebay_disabled: 0, errors: 0 };
-for (const { sku } of units) {
-  try {
-    const row = await deps.loadEbayRow(storeId, sku);
-    const before = row?.category_id ? missingRequired(await ebayAspectFields(storeId, row.category_id), row.attributes || {}) : null;
-    const wasComplete = Array.isArray(before) && before.length === 0;
-    const r = await autofillUnitSpecifics(deps, storeId, sku, { write });
-    if (r.skipped) { tally.ebay_disabled++; continue; }
-    if (wasComplete) tally.was_complete++;
-    if (r.reason === "no_category") { tally.no_category++; continue; }
-    if (r.categorySource) tally.category_filled++;
-    if (r.complete) { tally.now_complete++; if (!wasComplete) tally.became_complete++; }
-    else tally.still_missing_required++;
-  } catch (e) { tally.errors++; console.error(sku, String(e?.message || e)); }
-}
+let cursor = 0;
+const concurrency = write ? 1 : 12; // dry-run is read-only; keep real UPC-memory writes serialized.
+await Promise.all(Array.from({ length: Math.min(concurrency, units.length) }, async () => {
+  while (cursor < units.length) {
+    const { sku } = units[cursor++];
+    try {
+      const row = await deps.loadEbayRow(storeId, sku);
+      const before = row?.category_id ? missingRequired(await ebayAspectFields(storeId, row.category_id), row.attributes || {}) : null;
+      const wasComplete = Array.isArray(before) && before.length === 0;
+      const r = await autofillUnitSpecifics(deps, storeId, sku, { write });
+      if (r.skipped) { tally.ebay_disabled++; continue; }
+      if (wasComplete) tally.was_complete++;
+      if (r.reason === "no_category") { tally.no_category++; continue; }
+      if (r.categorySource) tally.category_filled++;
+      if (r.complete) { tally.now_complete++; if (!wasComplete) tally.became_complete++; }
+      else tally.still_missing_required++;
+    } catch (e) { tally.errors++; console.error(sku, String(e?.message || e)); }
+  }
+}));
 console.log(JSON.stringify({ dry_run: !write, ...tally }, null, 2));
