@@ -1,6 +1,6 @@
 -- pgTAP: eBay required item specifics (20261030200000_ebay_required_specifics.sql).
 begin;
-select plan(12);
+select plan(15);
 do $$
 declare
   v_store uuid;
@@ -65,5 +65,12 @@ select is(public.floor_category_autoconfirm(current_setting('test.store_id')::uu
   'catalog-sourced category is auto-confirmed');
 select is((select review_reason from public.unit_channel_categories where sku = '98002' and channel = 'ebay'), null,
   'auto-confirm clears the review flag');
+update public.unit_channel_categories set validated_version='old' where sku='98002' and channel='ebay';
+select ok('category'=any(public.floor_unit_ebay_gaps(current_setting('test.store_id')::uuid,'98002')),'changed taxonomy category blocks publishing');
+update public.unit_channel_categories set validated_version='fp:fv' where sku='98002' and channel='ebay';
+update public.channel_taxonomy set fields_fetched_at=null where channel='ebay' and category_id='20614';
+select ok('category'=any(public.floor_unit_ebay_gaps(current_setting('test.store_id')::uuid,'98002')),'unsynced category fields block publishing');
+update public.channel_taxonomy set fields_fetched_at=now()-interval '8 days' where channel='ebay' and category_id='20614';
+select ok('category'=any(public.floor_unit_ebay_gaps(current_setting('test.store_id')::uuid,'98002')),'stale category fields block publishing');
 select * from finish();
 rollback;
