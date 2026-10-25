@@ -61,14 +61,6 @@ type Props = {
   onCommissionChanged: (ticketKey: string, next: CommissionOverride | null) => void;
 };
 
-function timeLeft(deadline: string | null, now: number) {
-  if (!deadline) return '';
-  const ms = new Date(deadline).getTime() - now;
-  if (ms <= 0) return 'Deadline passed — auto-cancel pending';
-  const h = Math.floor(ms / 3600000), m = Math.floor((ms % 3600000) / 60000);
-  return h >= 24 ? `${Math.floor(h / 24)}d ${h % 24}h left` : `${h}h ${m}m left`;
-}
-
 function channelLabel(channel?: string | null) {
   if (!channel) return 'Website';
   return CHANNEL_LABEL[channel.toLowerCase()] || channel;
@@ -80,7 +72,7 @@ function otherStores(o: WebOrder) {
   return listed.filter((c) => c !== self && c !== 'website' && c !== 'ebay');
 }
 
-type OrderView = 'all' | 'toShip' | 'shipped' | 'pickup' | 'done' | 'canceled';
+type OrderView = 'all' | 'toShip' | 'shipped' | 'done' | 'canceled';
 type StatusFilter = 'all' | 'paid' | 'canceled' | 'refunded';
 type OrdersSection = 'orders' | 'returns';
 
@@ -88,7 +80,6 @@ const VIEW_LABEL: Record<OrderView, string> = {
   all: 'All orders',
   toShip: 'To ship',
   shipped: 'Shipped',
-  pickup: 'Awaiting pickup',
   done: 'Completed',
   canceled: 'Cancelled / refunded',
 };
@@ -124,7 +115,6 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
   const [locations, setLocations] = useState<Record<string, string[]>>({});
   const [error, setError] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
-  const [now, setNow] = useState(Date.now());
   const [view, setView] = useState<OrderView>('all');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [section, setSection] = useState<OrdersSection>('orders');
@@ -138,7 +128,6 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
     setLocations(await loadOrderLocations(client, storeId, (data as WebOrder[]).map(o => o.sku)));
   }, [client, storeId]);
   useEffect(() => { void load(); const t = setInterval(() => { void load(); }, 30000); return () => clearInterval(t); }, [load]);
-  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 30000); return () => clearInterval(t); }, []);
 
   async function markShipped(o: WebOrder) {
     const ch = (o.channel || '').toLowerCase();
@@ -185,13 +174,6 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
   async function markDelivered(o: WebOrder) {
     setBusy(o.id + 'deliver'); setError('');
     const { error: e } = await client.rpc('portal_mark_order_delivered', { p_order: o.id });
-    if (e) setError(e.message);
-    await load(); setBusy(null);
-  }
-  async function pickedUp(o: WebOrder) {
-    if (!window.confirm(`Hand over ${o.title} (SKU ${o.sku})?\n\nCheck the customer's name (${o.buyer_name}) and order number ${o.order_no}.`)) return;
-    setBusy(o.id + 'pickup'); setError('');
-    const { error: e } = await client.rpc('mark_pickup_complete', { p_order: o.id });
     if (e) setError(e.message);
     await load(); setBusy(null);
   }
@@ -326,7 +308,6 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
         all: byStatus,
         toShip: byStatus.filter(o => o.status === 'paid' && o.fulfillment === 'ship' && !o.shipped_at),
         shipped: byStatus.filter(o => o.status === 'paid' && o.fulfillment === 'ship' && o.shipped_at && !o.delivered_at),
-        pickup: byStatus.filter(o => o.status === 'paid' && o.fulfillment === 'pickup' && !o.picked_up_at),
         done: byStatus.filter(o => o.status === 'paid' && (o.delivered_at || o.picked_up_at)),
         canceled: byStatus.filter(o => o.status === 'refunded' || o.status === 'canceled'),
       } as Record<OrderView, WebOrder[]>,
@@ -394,7 +375,6 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
     const isCanceled = o.status === 'canceled' || o.status === 'refunded';
     const isToShip = o.status === 'paid' && o.fulfillment === 'ship' && !o.shipped_at;
     const isShipped = o.status === 'paid' && o.fulfillment === 'ship' && !!o.shipped_at && !o.delivered_at;
-    const isPickup = o.status === 'paid' && o.fulfillment === 'pickup' && !o.picked_up_at;
     const isDone = o.status === 'paid' && !!(o.delivered_at || o.picked_up_at);
     return (
       <div className="ticket order" key={o.id}>
@@ -459,16 +439,6 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
             </div>}
           </>
         )}
-        {isPickup && (
-          <>
-            <div className={`countdown${o.pickup_deadline && new Date(o.pickup_deadline).getTime() - now < 86400000 ? ' urgent' : ''}`}>Pick up by {o.pickup_deadline ? stamp(o.pickup_deadline) : '—'} · {timeLeft(o.pickup_deadline, now)}</div>
-            {o.refund_requested_at ? <p className="hint">Cancel & refund in progress…</p> : <div className="actions">
-              <button disabled={!!busy} onClick={() => void pickedUp(o)}>Picked up</button>
-              <button className="text-button danger" disabled={!!busy} onClick={() => void cancel(o)}>Cancel & refund</button>
-              <button className="text-button danger" disabled={!!busy} onClick={() => void deleteOrder(o)}>{busy === o.id + 'delete' ? 'Deleting…' : 'Delete'}</button>
-            </div>}
-          </>
-        )}
         {isDone && (
           <>
             <small>{o.picked_up_at ? `Picked up ${stamp(o.picked_up_at)} · ${o.picked_up_by || ''}` : `Delivered ${stamp(o.delivered_at!)}${o.shipped_at ? ` · shipped ${stamp(o.shipped_at)}` : ''}`}</small>
@@ -485,7 +455,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
             </div>
           </>
         )}
-        {!isToShip && !isShipped && !isPickup && !isDone && !isCanceled && (
+        {!isToShip && !isShipped && !isDone && !isCanceled && (
           <div className="actions">
             <button className="text-button danger" disabled={!!busy} onClick={() => void deleteOrder(o)}>{busy === o.id + 'delete' ? 'Deleting…' : 'Delete'}</button>
           </div>
@@ -509,7 +479,6 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
         ['all', groups.all.length],
         ['toShip', groups.toShip.length],
         ['shipped', groups.shipped.length],
-        ['pickup', groups.pickup.length],
         ['done', groups.done.length],
         ['canceled', groups.canceled.length],
       ] as const).map(([key, count]) => (
@@ -573,7 +542,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
       )}
 
       {active.length === 0
-        ? <div className="empty">{view === 'all' ? 'No orders match this filter.' : view === 'toShip' ? 'Nothing to ship.' : view === 'shipped' ? 'None in transit.' : view === 'pickup' ? 'No pickups waiting.' : view === 'done' ? 'No completed orders yet.' : 'None.'}</div>
+        ? <div className="empty">{view === 'all' ? 'No orders match this filter.' : view === 'toShip' ? 'Nothing to ship.' : view === 'shipped' ? 'None in transit.' : view === 'done' ? 'No completed orders yet.' : 'None.'}</div>
         : <div className="ticket-list">{active.map(renderTicket)}</div>}
     </section>
     {labelOrder && (
