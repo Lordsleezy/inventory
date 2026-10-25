@@ -11,98 +11,31 @@ function isNativeCapacitor(): boolean {
   }
 }
 
-function launchedAsApp(): boolean {
-  try {
-    const q = new URLSearchParams(window.location.search);
-    if (q.get('app') === '1') return true;
-    // manifest start_url is /?source=pwa
-    if (q.get('source') === 'pwa') return true;
-    if (q.get('kiosk') === '1') return true;
-    return false;
-  } catch {
-    return false;
-  }
+/** Old sticky flag that forced the phone shell into ordinary tabs; cleared on every load. */
+function clearLegacyAppFlag(): void {
+  try { localStorage.removeItem(APP_MODE_KEY); } catch { /* ignore */ }
 }
 
-/** Persist that this device should use the native app shell (store phone / installed PWA). */
+/** @deprecated The phone shell is decided by launch mode only; kept so old callers compile. */
 export function enableAppShell(): void {
-  try {
-    localStorage.setItem(APP_MODE_KEY, '1');
-  } catch { /* ignore */ }
-}
-
-export function appShellEnabled(): boolean {
-  try {
-    return localStorage.getItem(APP_MODE_KEY) === '1';
-  } catch {
-    return false;
-  }
+  clearLegacyAppFlag();
 }
 
 /**
- * True when this session should run the Floor phone app shell (not desktop chrome).
- * Store phone / kiosk / installed PWA / Capacitor — never the “Add to Home Screen” coach.
+ * True only when Floor was launched as an installed app: home-screen PWA (iOS/Android, display-mode
+ * standalone/fullscreen or navigator.standalone), the store-phone kiosk WebView, or Capacitor.
+ * Desktop and ordinary mobile-browser tabs always get the desktop layout — regardless of width,
+ * role, URL params or anything saved earlier.
  */
 export function isStandaloneApp(): boolean {
   if (typeof window === 'undefined') return false;
-
-  // Explicit desktop QA exit for a browser that previously opened ?app=1.
-  // Clear its remembered app shell so subsequent ordinary tabs stay desktop.
+  clearLegacyAppFlag();
+  if (isKioskShell() || isNativeCapacitor()) return true;
   try {
-    if (new URLSearchParams(window.location.search).get('app') === '0') {
-      localStorage.removeItem(APP_MODE_KEY);
-      return false;
-    }
+    if (window.matchMedia('(display-mode: standalone)').matches) return true;
+    if (window.matchMedia('(display-mode: fullscreen)').matches) return true;
   } catch { /* ignore */ }
-
-  // Store-phone Android kiosk WebView / FloorInventoryShell / ?kiosk=1
-  if (isKioskShell()) {
-    enableAppShell();
-    return true;
-  }
-  if (isNativeCapacitor()) {
-    enableAppShell();
-    return true;
-  }
-
-  try {
-    if (window.matchMedia('(display-mode: standalone)').matches) {
-      enableAppShell();
-      return true;
-    }
-    if (window.matchMedia('(display-mode: fullscreen)').matches) {
-      enableAppShell();
-      return true;
-    }
-    if (window.matchMedia('(display-mode: minimal-ui)').matches) {
-      enableAppShell();
-      return true;
-    }
-  } catch { /* ignore */ }
-
-  const nav = window.navigator as Navigator & { standalone?: boolean };
-  if (nav.standalone === true) {
-    enableAppShell();
-    return true;
-  }
-
-  // Manifest start_url uses ?source=pwa; ?app=1 / ?kiosk=1 for QA and store shell.
-  if (launchedAsApp()) {
-    enableAppShell();
-    return true;
-  }
-
-  // Once this device has been used as the Floor app, stay in app mode.
-  if (appShellEnabled()) return true;
-
-  // Android store phone opens admin in Chrome — treat phone Chrome as the app,
-  // not a browser tab that needs “Add to Home Screen”.
-  if (isAndroid() && isPhoneViewport()) {
-    enableAppShell();
-    return true;
-  }
-
-  return false;
+  return (window.navigator as Navigator & { standalone?: boolean }).standalone === true;
 }
 
 /** Rough phone / small-tablet viewport — used for the install gate only. */
