@@ -13,7 +13,7 @@ Floor can hold more than one eBay OAuth connection per store.
 2. Apply Supabase migration `20261025150000_ebay_multi_account.sql`.
 3. In Admin → Marketplaces:
    - Keep **Connect pgg124-5 (orders only)** connected (backfill may already have it).
-   - **Connect selling account** while logged into the business eBay account in the browser.
+   - **Connect selling account** while logged into the business eBay account in the browser. The selling-account grant includes `sell.marketing` for promoting new listings into the existing campaign.
    - **Create business policies** (Calculated Shipping – Buyer Pays, No Returns – As Is, Payments).
 4. **Dry-run migration** — review will_move / skipped / failed.
 5. **Run migration** — ends each listing on source, recreates on dest at the same price, updates Floor.

@@ -98,6 +98,7 @@ export const EBAY_LISTING_OAUTH_SCOPES = [
   "https://api.ebay.com/oauth/api_scope/sell.fulfillment",
   "https://api.ebay.com/oauth/api_scope/sell.account",
   "https://api.ebay.com/oauth/api_scope/sell.finances",
+  "https://api.ebay.com/oauth/api_scope/sell.marketing",
   "https://api.ebay.com/oauth/api_scope/commerce.notification.subscription",
 ].join(" ");
 
