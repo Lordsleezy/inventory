@@ -822,15 +822,6 @@ export async function listAmazonOffer(storeId, kit) {
   const feePct = fees.feeCents / Math.max(kit.priceCents || priceHint.listCents, 1);
   const price = suggestAmazonPriceCents(unit, feePct || 0.15, returnReservePct);
   const listCents = kit.priceCents || price.listCents;
-  if (listCents - fees.feeCents - price.costCents < 500) {
-    return {
-      ok: false,
-      reason: "under_floor",
-      message: `Price $${(listCents / 100).toFixed(2)} would net under $5 after fees/cost.`,
-      listCents,
-      fees,
-    };
-  }
 
   const sid = sellerId();
   if (!sid) return { ok: false, reason: "missing_seller_id", message: "AMAZON_SELLER_ID not set" };

@@ -469,14 +469,6 @@ export async function prepareTikTokQueueItem(storeId, sku) {
 
   const returnReservePct = await reservePctForChannel(storeId, "tiktok").catch(() => 10);
   const price = suggestTikTokPriceCents(unit, tiktokFeePct(), returnReservePct);
-  if (!price.ok) {
-    return {
-      ok: false,
-      status: "error",
-      last_error: `price_net_under_$5 (list=$${(price.listCents / 100).toFixed(2)})`,
-      price,
-    };
-  }
 
   const patch = {
     status: "ready",

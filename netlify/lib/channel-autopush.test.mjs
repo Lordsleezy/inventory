@@ -100,7 +100,7 @@ test("TikTok approval pending stays queued and visible; hard errors fail; retrie
   assert.equal(last.status, "failed");
 });
 
-test("queue listings are priced at the Floor set price only", async () => {
+test("queue listings: Floor price, +10% under $15", async () => {
   const calls = [];
   const deps = {
     loadUnit: async () => ({ sku: "10", ask_cents: 4999, retail_cents: 20000, is_collectible: true }),
@@ -110,6 +110,11 @@ test("queue listings are priced at the Floor set price only", async () => {
   for (const ch of ["ebay", "amazon", "tiktok"]) await queuePublish(deps, "s1", ch, "10");
   assert.deepEqual(calls.map((c) => c.priceCents), [4999, 4999, 4999]);
   assert.equal(floorListPriceCents({ ask_cents: 0 }), null);
+  assert.equal(floorListPriceCents({ ask_cents: 999 }), 1099);
+  assert.equal(floorListPriceCents({ ask_cents: 1499 }), 1649);
+  assert.equal(floorListPriceCents({ ask_cents: 1001 }), 1101);
+  assert.equal(floorListPriceCents({ ask_cents: 1500 }), 1500);
+  assert.equal(floorListPriceCents({ ask_cents: 2500 }), 2500);
   const none = await queuePublish({ ...deps, loadUnit: async () => ({ ask_cents: null }) }, "s1", "ebay", "10");
   assert.equal(none.ok, false);
   assert.equal(classifyFailure("ebay", none.error).retryable, false);

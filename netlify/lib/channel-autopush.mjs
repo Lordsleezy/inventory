@@ -63,7 +63,7 @@ export async function processRow(db, deps, row, now) {
     if (gaps.length) return { status: "queued", issue: `Missing: ${gaps.join(", ")}`, next_attempt_at: later(now, 60) };
     const r = await deps.publish(storeId, channel, sku);
     if (r?.ok && !r?.needs_confirm) return { status: "done", issue: null, last_error: null, listing_ref: r.url || null };
-    return fail(r?.needs_confirm ? "needs_confirm: price below floor" : r?.error || r?.message || "publish_failed");
+    return fail(r?.needs_confirm ? "needs_confirm: Amazon new product page must be confirmed by hand" : r?.error || r?.message || "publish_failed");
   } catch (e) {
     return fail(e instanceof Error ? e.message : String(e));
   }
@@ -140,14 +140,17 @@ export function supabaseQueueDb(sb) {
   };
 }
 
-/** Queue listings are always priced at the Floor set price; the buyer pays calculated shipping. */
+export const SMALL_PRICE_CUTOFF_CENTS = 1500;
+
+/** New queue listings: Floor price, +10% (to the cent) when the Floor price is under $15. Buyer pays shipping. */
 export function floorListPriceCents(unit) {
   const cents = Math.round(Number(unit?.ask_cents));
-  return Number.isFinite(cents) && cents > 0 ? cents : null;
+  if (!Number.isFinite(cents) || cents <= 0) return null;
+  return cents < SMALL_PRICE_CUTOFF_CENTS ? Math.round((cents * 11) / 10) : cents;
 }
 
 /**
- * Create a new listing at the Floor price. If the SKU already exists on the channel
+ * Create a new listing at floorListPriceCents. If the SKU already exists on the channel
  * (e.g. listed by hand or by Codex), report it as live and never touch it — no reprice, no edit.
  */
 export async function queuePublish({ loadUnit, existingListing, publish }, storeId, channel, sku) {
