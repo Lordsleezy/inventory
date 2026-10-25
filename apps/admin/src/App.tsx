@@ -24,7 +24,7 @@ import { AssociateSettings } from './AssociateSettings';
 import { type MainPage, type NavState, defaultNavState, parseNavFromLocation, writeNavToLocation } from './navigation';
 import { formatLabelWithPending, parseShipCostSource } from './shipCostSource';
 import { errText } from './errText';
-import { enableAppShell, isStandaloneApp, shouldShowInstallGate } from './appMode/isAppMode';
+import { isStandaloneApp, shouldShowInstallGate } from './appMode/isAppMode';
 import { InstallGate } from './appMode/InstallGate';
 import { AppModeShell } from './appMode/AppModeShell';
 import { NeedsAttentionPanel } from './NeedsAttentionPanel';
@@ -659,9 +659,7 @@ export function App() {
     return (
       <InstallGate
         onContinue={() => {
-          // Store phone / staff: use the app shell immediately — do not fall into desktop browser chrome.
-          enableAppShell();
-          setStandaloneApp(true);
+          // Continue in the browser tab: desktop layout. The phone shell is only for the installed app.
           setShowInstallGate(false);
         }}
       />
