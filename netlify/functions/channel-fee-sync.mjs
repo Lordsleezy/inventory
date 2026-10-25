@@ -6,9 +6,11 @@ import { webSquareClient, webSquareEnv } from "../lib/web-square.mjs";
 import { Environment } from "square/legacy";
 import { wrapHandler, asNetlifyFunction } from "../lib/floor-log.mjs";
 import { isNetlifyScheduleEvent } from "../lib/schedule.mjs";
+import { pollTikTokFinances } from "../lib/tiktok-shop.mjs";
 
 // Reconciles REAL fees + eBay-bought shipping labels onto recorded sales.
-//  - eBay Finances SALE → marketplace fee (actual)
+//  - eBay Finances SALE → every marketplace fee line + net (actual)
+//  - eBay Finances NON_SALE_CHARGE → AD_FEE / PREMIUM_AD_FEES etc. matched to their order
 //  - eBay Finances SHIPPING_LABEL → label cost the seller paid on eBay
 //  - Square Payments → card processing fee (register + website)
 // Never touches listings.
@@ -44,22 +46,51 @@ async function syncEbayFeesForAccount(sb, storeId, account, log) {
   const since = new Date(Date.now() - LOOKBACK_DAYS * 86400000).toISOString();
   const hint = account.id ? { accountId: account.id } : {};
 
+  // SALE: every marketplace fee line eBay reports, per order, plus eBay's net amount to the seller.
   for await (const tx of ebayTransactions(storeId, "SALE", since, hint)) {
     const orderId = tx.orderId;
     if (!orderId) continue;
-    let fee = 0;
+    const fees = [];
     for (const item of tx.orderLineItems || []) {
-      for (const f of item.marketplaceFees || []) fee += moneyToCents(f.amount) || 0;
+      for (const f of item.marketplaceFees || []) {
+        const cents = moneyToCents(f.amount);
+        if (cents == null) continue;
+        fees.push({ transaction_id: `${tx.transactionId}:${item.lineItemId || ""}`, fee_type: String(f.feeType || "MARKETPLACE_FEE"),
+          amount_cents: Math.abs(cents), transaction_type: "SALE", occurred_at: tx.transactionDate || null });
+      }
     }
-    const total = moneyToCents(tx.totalFeeAmount);
-    if (total != null && Math.abs(total) > fee) fee = Math.abs(total);
-    if (!fee) continue;
-    const { error } = await sb.rpc("channel_order_update", {
-      p_store: storeId, p_provider: "ebay", p_order_id: orderId,
-      p_fee_cents: fee, p_fee_source: "actual",
+    const net = moneyToCents(tx.amount);
+    const { error } = await sb.rpc("channel_order_record_fees", {
+      p_store: storeId, p_provider: "ebay", p_order_id: orderId, p_fees: fees,
+      p_payout_cents: net == null ? null : Math.abs(net),
     });
     if (error) log.push({ orderId, feeError: error.message });
-    else log.push({ orderId, fee });
+    else log.push({ orderId, fees: fees.length });
+  }
+
+  // NON_SALE_CHARGE: Promoted Listings (AD_FEE, PREMIUM_AD_FEES) and other charges billed separately.
+  // Matched to their order via orderId or an ORDER_ID reference; unmatched lines are kept as orphans.
+  for await (const tx of ebayTransactions(storeId, "NON_SALE_CHARGE", since, hint)) {
+    const refs = Array.isArray(tx.references) ? tx.references : [];
+    const orderId = tx.orderId || refs.find((r) => /ORDER_ID/i.test(String(r.referenceType || "")))?.referenceId || null;
+    const cents = moneyToCents(tx.amount);
+    if (cents == null || cents === 0) continue;
+    const signed = String(tx.bookingEntry || "").toUpperCase() === "CREDIT" ? -Math.abs(cents) : Math.abs(cents);
+    const feeType = String(tx.feeType || tx.transactionMemo || "NON_SALE_CHARGE").toUpperCase();
+    if (!orderId) {
+      await sb.from("channel_fee_orphans").upsert({ store_id: storeId, provider: "ebay", transaction_id: String(tx.transactionId),
+        fee_type: feeType, amount_cents: signed, references_json: refs, memo: tx.transactionMemo || null,
+        occurred_at: tx.transactionDate || null }, { onConflict: "store_id,provider,transaction_id" });
+      log.push({ orphanNonSaleCharge: tx.transactionId, feeType, cents: signed });
+      continue;
+    }
+    const { error } = await sb.rpc("channel_order_record_fees", {
+      p_store: storeId, p_provider: "ebay", p_order_id: orderId,
+      p_fees: [{ transaction_id: String(tx.transactionId), fee_type: feeType, amount_cents: signed,
+        transaction_type: "NON_SALE_CHARGE", memo: tx.transactionMemo || null, occurred_at: tx.transactionDate || null }],
+    });
+    if (error) log.push({ orderId, nonSaleError: error.message });
+    else log.push({ orderId, nonSale: feeType, cents: signed });
   }
 
   // Aggregate label debits/credits per order.
@@ -221,6 +252,7 @@ async function handle(event) {
     out.stores[store.id] = log;
     try { await syncEbayFees(sb, store.id, log); } catch (e) { log.push({ ebay: String(e?.message || e) }); }
     try { await syncSquareFees(sb, store.id, log); } catch (e) { log.push({ square: String(e?.message || e) }); }
+    try { log.push({ tiktok: await pollTikTokFinances(store.id) }); } catch (e) { log.push({ tiktok: String(e?.message || e) }); }
   }
   return json(200, out);
 }

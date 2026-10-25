@@ -1190,7 +1190,6 @@ export async function ingestAmazonOrder(storeId, order) {
   const itemCents = orderItemPriceCents(order, item);
   const shipCents = orderShippingCents(order, item);
   const taxCents = orderTaxCents(item);
-  const feeCents = amazonReferralFeeCents(itemCents);
 
   const { data: sale, error } = await sb.rpc("finalize_sale", {
     p_sku: String(sku),
@@ -1198,7 +1197,7 @@ export async function ingestAmazonOrder(storeId, order) {
     p_price_cents: itemCents,
     p_payment_method: "amazon",
     p_payment_id: `amazon:${orderId}`,
-    p_note: `Amazon order (referral~$${(feeCents / 100).toFixed(2)}; tax remitted by Amazon)`,
+    p_note: "Amazon order (fees pending from Amazon financial events; tax remitted by Amazon)",
     p_tax_cents: taxCents,
     p_approval_id: null,
   });
@@ -1242,7 +1241,7 @@ export async function ingestAmazonOrder(storeId, order) {
     shipping_cents: shipCents,
     tax_cents: taxCents,
     total_cents: itemCents + shipCents + taxCents,
-    marketplace_fee_cents: feeCents,
+    marketplace_fee_cents: null,
     tax_remitted_by: "amazon",
     payment_id: `amazon:${orderId}`,
     order_no: orderId,
@@ -1277,7 +1276,7 @@ export async function ingestAmazonOrder(storeId, order) {
   await withdrawSku(storeId, String(sku)).catch(() => undefined);
   await zeroAmazonQuantityForSku(storeId, String(sku)).catch(() => undefined);
 
-  return { sku, orderId, saleId: sale?.id, feeCents, taxCents, shipCents };
+  return { sku, orderId, saleId: sale?.id, feeCents: null, taxCents, shipCents };
 }
 
 export async function pollAmazonOrders(storeId) {
@@ -1352,16 +1351,34 @@ export async function pollAmazonFinances(storeId) {
         { onConflict: "store_id,event_id" },
       );
       if (!error) inserted += 1;
-      if (orderId && feeTotal) {
+      if (orderId && sku) {
+        // Every Amazon fee line exactly as Amazon reported it (no Floor-side fee math).
+        const fees = [];
+        for (const f of item.ItemFeeList || []) {
+          fees.push({ transaction_id: `${orderId}:${sku}:${ev.PostedDate || ""}`, fee_type: String(f.FeeType || "AMAZON_FEE"),
+            amount_cents: -Math.round(Number(f.FeeAmount?.CurrencyAmount || 0) * 100), transaction_type: "ShipmentEvent",
+            occurred_at: ev.PostedDate || null });
+        }
+        for (const p of item.PromotionList || []) {
+          fees.push({ transaction_id: `${orderId}:${sku}:${ev.PostedDate || ""}`, fee_type: `PROMO_${p.PromotionType || "PROMOTION"}`,
+            amount_cents: -Math.round(Number(p.PromotionAmount?.CurrencyAmount || 0) * 100), transaction_type: "ShipmentEvent",
+            occurred_at: ev.PostedDate || null });
+        }
+        const charge = (t) => (item.ItemChargeList || []).filter((c) => c.ChargeType === t)
+          .reduce((n, c) => n + Math.round(Number(c.ChargeAmount?.CurrencyAmount || 0) * 100), 0);
+        const withheld = (item.ItemTaxWithheldList || []).flatMap((w) => w.TaxesWithheld || [])
+          .reduce((n, c) => n + Math.round(Number(c.ChargeAmount?.CurrencyAmount || 0) * 100), 0);
+        const gross = (item.ItemChargeList || []).reduce((n, c) => n + Math.round(Number(c.ChargeAmount?.CurrencyAmount || 0) * 100), 0);
+        const promo = (item.PromotionList || []).reduce((n, c) => n + Math.round(Number(c.PromotionAmount?.CurrencyAmount || 0) * 100), 0);
         try {
-          await sb
-            .from("web_orders")
-            .update({ marketplace_fee_cents: Math.abs(feeTotal) })
-            .eq("store_id", storeId)
-            .eq("channel", "amazon")
-            .eq("order_no", orderId);
+          await sb.rpc("channel_order_record_fees", {
+            p_store: storeId, p_provider: "amazon", p_order_id: orderId, p_fees: fees,
+            p_payout_cents: gross + promo + withheld + feeTotal,
+            p_tax_cents: charge("Tax") + charge("ShippingTax") || null,
+            p_buyer_shipping_cents: charge("ShippingCharge") || null,
+          });
         } catch {
-          /* optional fee mirror */
+          /* recorded on the next poll */
         }
       }
     }

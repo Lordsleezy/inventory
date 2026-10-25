@@ -686,7 +686,6 @@ export async function ingestTikTokOrder(storeId, order) {
   if (seen.data) return { skipped: true, sku, orderId };
 
   const itemCents = orderPaidCents(order);
-  const feeCents = Math.round(itemCents * tiktokFeePct());
 
   const { data: sale, error } = await sb.rpc("finalize_sale", {
     p_sku: String(sku),
@@ -694,7 +693,7 @@ export async function ingestTikTokOrder(storeId, order) {
     p_price_cents: itemCents,
     p_payment_method: "tiktok",
     p_payment_id: `tiktok:${orderId}`,
-    p_note: `TikTok Shop order (fee~$${(feeCents / 100).toFixed(2)})`,
+    p_note: "TikTok Shop order (fees pending from TikTok settlement)",
     p_tax_cents: 0,
     p_approval_id: null,
   });
@@ -738,7 +737,7 @@ export async function ingestTikTokOrder(storeId, order) {
     shipping_cents: 0,
     tax_cents: 0,
     total_cents: itemCents,
-    marketplace_fee_cents: feeCents,
+    marketplace_fee_cents: null,
     tax_remitted_by: "tiktok",
     payment_id: `tiktok:${orderId}`,
     order_no: orderId,
@@ -759,7 +758,7 @@ export async function ingestTikTokOrder(storeId, order) {
     /* optional */
   }
 
-  return { sku, orderId, saleId: sale?.id, feeCents, itemCents };
+  return { sku, orderId, saleId: sale?.id, feeCents: null, itemCents };
 }
 
 export async function delistTikTokSku(storeId, sku) {
@@ -998,4 +997,55 @@ export async function ensureTikTokTokenFresh(storeId = STORE_DEFAULT) {
   } catch (e) {
     return { ok: false, reason: String(e?.message || e) };
   }
+}
+
+const centsOf = (v) => (v == null || v === "" ? 0 : Math.round(Number(v) * 100));
+
+// Real per-order fees from TikTok Shop Finance (statement transactions). No Floor-side fee math:
+// orders without a settlement yet stay "pending" in the ledger and are retried next run.
+export async function pollTikTokFinances(storeId) {
+  if (!tiktokConfigured()) return { skipped: "tiktok_not_configured" };
+  const sb = serviceClient();
+  const since = new Date(Date.now() - 60 * 24 * 3600 * 1000).toISOString();
+  const { data: sales, error } = await sb.from("sales").select("id,payment_id")
+    .eq("store_id", storeId).eq("channel", "tiktok").is("voided_at", null).gte("sold_at", since).limit(200);
+  if (error) return { error: error.message };
+  const { data: done } = await sb.from("channel_orders").select("order_id")
+    .eq("store_id", storeId).eq("provider", "tiktok").in("fee_source", ["actual", "manual"]);
+  const recorded = new Set((done || []).map((r) => r.order_id));
+  const out = { recorded: 0, pending: 0, errors: [] };
+  for (const s of sales || []) {
+    const orderId = String(s.payment_id || "").replace(/^tiktok:/, "");
+    if (!orderId || recorded.has(orderId)) continue;
+    let api;
+    try {
+      api = await tiktokApiFetch(storeId, "GET", `/finance/202309/orders/${encodeURIComponent(orderId)}/statement_transactions`);
+    } catch (e) {
+      out.errors.push({ orderId, error: String(e?.message || e).slice(0, 200) });
+      continue;
+    }
+    const txns = api?.data?.statement_transactions || [];
+    if (!txns.length) { out.pending += 1; continue; }
+    const fees = [];
+    let payout = 0, tax = 0, shipping = 0;
+    for (const t of txns) {
+      const tid = String(t.id || t.statement_id || orderId);
+      payout += centsOf(t.settlement_amount);
+      tax += centsOf(t.sales_tax_amount);
+      shipping += centsOf(t.shipping_fee_amount ?? t.customer_shipping_fee_amount);
+      for (const [k, v] of Object.entries(t)) {
+        if (!/_(fee|commission)(_amount)?$/.test(k) || /^(shipping_fee|customer_shipping_fee)/.test(k)) continue;
+        const cents = -centsOf(v);
+        if (cents) fees.push({ transaction_id: tid, fee_type: k.replace(/_amount$/, "").toUpperCase(), amount_cents: cents,
+          transaction_type: "STATEMENT_TRANSACTION", occurred_at: t.order_create_time ? new Date(Number(t.order_create_time) * 1000).toISOString() : null });
+      }
+      if (t.shipping_cost_amount) fees.push({ transaction_id: tid, fee_type: "SHIPPING_LABEL", amount_cents: -centsOf(t.shipping_cost_amount), transaction_type: "STATEMENT_TRANSACTION" });
+    }
+    const { error: rpcErr } = await sb.rpc("channel_order_record_fees", {
+      p_store: storeId, p_provider: "tiktok", p_order_id: orderId, p_fees: fees,
+      p_payout_cents: payout, p_tax_cents: tax || null, p_buyer_shipping_cents: shipping || null,
+    });
+    if (rpcErr) out.errors.push({ orderId, error: rpcErr.message }); else out.recorded += 1;
+  }
+  return out;
 }
