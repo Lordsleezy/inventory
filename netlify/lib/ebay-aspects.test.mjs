@@ -2,6 +2,16 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { matchAllowedValue, matchMeasureBucket, pickAspectValue, pickTypeValue, aspectsFromTaxonomy, fillAspects, confidentPhrase, pickCategorySuggestion } from "./ebay-aspects.mjs";
 
+test("descriptive product model names work without a numeric code and do not become MPNs", () => {
+  const defs=[{name:'Model',required:true,allowed:[]},{name:'MPN',required:false,allowed:[]}];
+  const r=fillAspects(defs,{brand:'Cuisinart',model:'Griddler Five Contact Grill'},{matched_model:'GR-5B'});
+  assert.deepEqual(r.aspects.Model,['Griddler Five Contact Grill']);
+  assert.deepEqual(r.aspects.MPN,['GR-5B']);
+  const noPart=fillAspects(defs,{brand:'Cuisinart',model:'Griddler Five Contact Grill'},{});
+  assert.equal(noPart.aspects.MPN,undefined);
+  assert.deepEqual(noPart.missing,[]);
+});
+
 test("Type maps refrigerator to an allowed appliance type, not Air Filter", () => {
   const allowed = ["Air Filter", "Compact Refrigerator", "Refrigerator", "Wine Fridge"];
   assert.equal(matchAllowedValue(allowed, ["Refrigerator", "Air Filter"]), "Refrigerator");
