@@ -27,7 +27,7 @@ type Row = {
   sold_price_cents?: number | null;
 };
 
-type List = { items: Row[]; totals: { unit_count: number } };
+type List = { items: Row[]; totals: { unit_count: number; piece_count?: number } };
 
 type Props = {
   client: SupabaseClient;
@@ -240,13 +240,16 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
   }, [client, staffMode]);
 
   const total = list?.totals.unit_count ?? 0;
+  // Physical pieces (a row of 12 bottles counts 12); falls back to rows until the DB returns piece_count.
+  const pieces = list?.totals.piece_count ?? total;
+  const rowsNote = pieces !== total ? ` (${total} ${total === 1 ? 'item' : 'items'})` : '';
   const footer = useMemo(() => {
-    if (filter === 'unfinished') return `${total} unfinished`;
-    if (filter === 'sold') return `${total} sold`;
-    if (filter === 'defective') return `${total} defective / not for sale`;
+    if (filter === 'unfinished') return `${pieces} units unfinished${rowsNote}`;
+    if (filter === 'sold') return `${pieces} units sold${rowsNote}`;
+    if (filter === 'defective') return `${pieces} units defective / not for sale${rowsNote}`;
     const u = unfinishedCount;
-    return u == null ? `${total} in stock` : `${total} in stock · ${u} unfinished`;
-  }, [filter, total, unfinishedCount]);
+    return u == null ? `${pieces} units in stock${rowsNote}` : `${pieces} units in stock${rowsNote} · ${u} unfinished`;
+  }, [filter, total, pieces, rowsNote, unfinishedCount]);
 
   function setFilterTab(next: Filter) {
     setFilter(next);
