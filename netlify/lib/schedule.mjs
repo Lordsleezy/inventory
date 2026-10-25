@@ -31,7 +31,7 @@ export const SCHEDULED_JOBS = [
   { source: "amazon-sync", everyMin: 10, cron: "*/10 * * * *", label: "Amazon orders + qty" },
   { source: "google-sync", everyMin: 1, cron: "* * * * *", label: "Google Merchant sync" },
   { source: "google-reconcile", everyMin: 360, cron: "0 */6 * * *", label: "Google reconcile" },
-  { source: "channel-fee-sync", everyMin: 15, cron: "*/15 * * * *", label: "eBay/Square fee reconcile" },
+  { source: "channel-fee-sync", everyMin: 15, cron: "*/15 * * * *", label: "eBay/TikTok/Square fee reconcile" },
   { source: "loyalty-email", everyMin: 5, cron: "*/5 * * * *", label: "Loyalty emails" },
   { source: "web-order-email", everyMin: 5, cron: "*/5 * * * *", label: "Web order emails" },
   { source: "web-order-reconcile", everyMin: 5, cron: "*/5 * * * *", label: "Web order reconcile" },

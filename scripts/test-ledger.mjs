@@ -61,14 +61,15 @@ assert.equal(l.tax_owed_cents, 725); assert.equal(l.tax_remitted_by, "us");
 assert.equal(l.variance_cents, 0);
 console.log("in-store cash: profit 6000, tax owed 725 ok");
 
-// 2) In-store card sale → estimated Square fee 2.6% + 15 on (price+tax+card surcharge).
+// 2) In-store card sale → no Square fee estimate; processing stays pending until Square reports it.
 await addUnit("92002", { ask: 12000, cost: 4000 });
 await db.query(`insert into public.sales(store_id,sku,qty,sold_at,price_cents,tax_cents,card_fee_cents,channel,payment_method,receipt_no)
   values('${STORE}','92002',1,now(),10000,725,268,'floor','card','0002')`);
 l = await ledger("92002");
-const expectProc = Math.round((10000 + 725 + 268) * 0.026) + 15;
+const expectProc = 0;
 assert.equal(l.processing_fee_cents, expectProc);
-assert.equal(l.processing_fee_source, "estimated");
+assert.equal(l.processing_fee_source, "pending");
+assert.equal(l.fees_pending, true);
 assert.equal(l.profit_cents, 10000 - expectProc - 4000);
 assert.equal(l.variance_cents, -2000);
 console.log(`in-store card: est. processing ${expectProc}, profit ${l.profit_cents}, variance -2000 ok`);
@@ -87,14 +88,14 @@ assert.equal(floorTotals.gross_cents - floorTotals.fee_cents - floorTotals.ship_
   - floorTotals.processing_fee_cents - floorTotals.tax_collected_cents - floorTotals.cost_cents,
   floorTotals.profit_cents);
 
-// 3) Website shipped: Square online estimate + Shippo label cost via web_orders.
+// 3) Website shipped: no Square estimate (pending) + Shippo label cost via web_orders.
 await addUnit("92003", { ask: 8000, cost: 2000 });
 await db.query(`insert into public.sales(store_id,sku,qty,sold_at,price_cents,tax_cents,card_fee_cents,shipping_cents,channel,payment_method,payment_id,receipt_no)
   values('${STORE}','92003',1,now(),8000,580,0,1200,'website','card','sqpay_web1','W0001')`);
 const { rows: [{ id: webOrderId }] } = await db.query(`insert into public.web_orders(store_id,sku,sale_id,status,fulfillment,item_cents,shipping_cents,tax_cents,total_cents,payment_id,order_no,label_cost_cents)
   values('${STORE}','92003',(select id from public.sales where sku='92003'),'paid','ship',8000,1200,580,9780,'sqpay_web1','WEB-1',1399) returning id`);
 l = await ledger("92003");
-const expectProcWeb = Math.round((8000 + 580) * 0.033) + 30;
+const expectProcWeb = 0;
 assert.equal(l.processing_fee_cents, expectProcWeb);
 assert.equal(l.ship_cost_cents, 1399); assert.equal(l.ship_cost_source, "shippo");
 // Buyer-paid shipping is revenue; Shippo label is the cost.
@@ -103,7 +104,7 @@ assert.equal(l.profit_cents, 8000 + 1200 - expectProcWeb - 1399 - 2000);
 assert.equal(l.tax_owed_cents, 580);
 console.log(`website shipped: +ship-in 1200, label 1399, proc ${expectProcWeb}, profit ${l.profit_cents} ok`);
 
-// 4) eBay: actual fee + baked label from channel_orders; tax remitted by marketplace.
+// 4) eBay: actual fee from channel_orders; a baked label guess is not a cost; tax remitted by marketplace.
 await addUnit("92004", { ask: 13000, cost: 4000 });
 await db.query(`insert into public.sales(store_id,sku,qty,sold_at,price_cents,tax_cents,channel,payment_method,payment_id,receipt_no)
   values('${STORE}','92004',1,now(),12999,0,'ebay','marketplace','ebay:order1','E0001')`);
@@ -111,8 +112,9 @@ await db.query(`insert into public.channel_orders(store_id,provider,order_id,sku
   values('${STORE}','ebay','order1','92004',(select id from public.sales where sku='92004'),12999,1722,'actual',1200,943,true)`);
 l = await ledger("92004");
 assert.equal(l.channel_fee_cents, 1722); assert.equal(l.fee_source, "actual");
-assert.equal(l.ship_cost_cents, 1200); assert.equal(l.ship_cost_source, "estimated");
-assert.equal(l.profit_cents, 12999 - 1722 - 1200 - 4000);
+assert.equal(l.ship_cost_cents, 0); assert.equal(l.ship_cost_source, "none");
+assert.equal(l.profit_cents, 12999 - 1722 - 4000);
+assert.equal(l.fees_pending, false);
 assert.equal(l.tax_collected_cents, 943); assert.equal(l.tax_owed_cents, 0);
 assert.equal(l.tax_remitted_by, "marketplace");
 const { rows: [{ report: ebayReport }] } = await db.query(`
@@ -126,7 +128,7 @@ assert.equal(ebayTotals.tax_owed_cents, 0);
 assert.equal(ebayTotals.gross_cents - ebayTotals.fee_cents - ebayTotals.ship_cost_cents
   - ebayTotals.processing_fee_cents - ebayTotals.tax_collected_cents - ebayTotals.cost_cents,
   ebayTotals.profit_cents);
-console.log(`ebay actuals: fee 1722 ship 1200 profit ${l.profit_cents}, tax remitted by marketplace ok`);
+console.log(`ebay actuals: fee 1722 ship 0 profit ${l.profit_cents}, tax remitted by marketplace ok`);
 
 // 5) Depop via marketplace_ingest_sale: email gave real fee + prepaid label deduction.
 await addUnit("92005", { ask: 8000, cost: 900 });
@@ -143,14 +145,14 @@ assert.equal(l.ship_cost_cents, 999); assert.equal(l.ship_cost_source, "marketpl
 assert.equal(l.profit_cents, 8000 - 309 - 999 - 900);
 console.log(`depop ingest: actual fee 309, label 999, profit ${l.profit_cents} ok`);
 
-// 6) Mercari with no fee info → estimated 10% + 0 from channel_fee_rates.
+// 6) Mercari with no fee info → no estimate; fee pending.
 await addUnit("92006", { ask: 5000, cost: 900 });
 await db.query(`insert into public.sales(store_id,sku,qty,sold_at,price_cents,tax_cents,channel,payment_method,receipt_no)
   values('${STORE}','92006',1,now(),5000,0,'mercari','marketplace','MRC-9')`);
 l = await ledger("92006");
-assert.equal(l.channel_fee_cents, 500); assert.equal(l.fee_source, "estimated");
-assert.equal(l.profit_cents, 5000 - 500 - 900);
-console.log(`mercari estimated: fee 500, profit ${l.profit_cents} ok`);
+assert.equal(l.channel_fee_cents, 0); assert.equal(l.fee_source, "pending");
+assert.equal(l.fees_pending, true);
+console.log("mercari: no fee estimate, pending ok");
 
 // 7) Category without a recorded cost stays missing; defaults cannot create profit or payout.
 await addUnit("92007", { ask: 40000, cost: null, category: "Refrigerators" });
@@ -167,7 +169,7 @@ await db.query(`insert into public.sales(store_id,sku,qty,sold_at,price_cents,ta
   values('${STORE}','92008',1,now(),3000,0,'whatnot','marketplace','WN-1')`);
 l = await ledger("92008");
 assert.equal(l.cost_cents, 0); assert.equal(l.cost_source, "collectible");
-const whatnotFee = Math.round(3000 * 0.109) + 30;
+const whatnotFee = 0;
 assert.equal(l.channel_fee_cents, whatnotFee);
 assert.equal(l.profit_cents, 3000 - whatnotFee);
 console.log(`collectible: $0 cost, profit ${l.profit_cents} ok`);
@@ -190,7 +192,7 @@ await db.query(`select public.channel_order_update('${STORE}','mercari','MRC-1',
 l = await ledger("92006");
 assert.equal(l.channel_fee_cents, 612); assert.equal(l.fee_source, "actual");
 assert.equal(l.profit_cents, 5000 - 612 - 900);
-console.log("fee reconciliation: estimated 500 → actual 612, profit recomputed ok");
+console.log("fee reconciliation: pending → actual 612, profit recomputed ok");
 
 await db.close();
 console.log("ledger tests ok");
