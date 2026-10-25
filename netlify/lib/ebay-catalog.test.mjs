@@ -28,7 +28,7 @@ test("fills required aspects from unit specs, defaults, and remembered choices",
   );
   assert.equal(aspects.Brand[0], "LG");
   assert.equal(aspects.Model[0], "LTCS20020V");
-  assert.equal(aspects["Item Width"][0], "More than 25 in");
+  assert.equal(aspects["Item Width"][0], "32 in");
   assert.equal(aspects.Installation[0], "Freestanding");
   assert.equal(aspects.Color[0], "Stainless Steel");
   assert.equal(aspects.Type[0], "Refrigerator");
