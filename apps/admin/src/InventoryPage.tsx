@@ -23,7 +23,7 @@ type Listing = { channel: string; status: string; listing_id: string | null };
 type Photo = { id: number; path: string; is_primary: boolean };
 type Sale = { sold_at: string; price_cents: number; actor_name: string; receipt_no: string };
 type Detail = { unit: Record<string, unknown>; photos: Photo[]; listings: Listing[]; sales: Sale[] };
-type List = { items: Row[]; totals: { unit_count: number; cost_cents?: number; missing_cost?: number } };
+type List = { items: Row[]; totals: { unit_count: number; piece_count?: number; cost_cents?: number; missing_cost?: number } };
 type Props = {
   client: SupabaseClient; storeId: string; accessToken: string; money: (n: number) => string; stamp: (s: string) => string;
   tab: InventoryTab; onTab: (t: InventoryTab) => void;
@@ -170,7 +170,8 @@ export function InventoryPage({
     </div>
     {error && <div className="alert" role="alert">{error}</div>}
     <div className="stats inventory-stats inventory-stats-one">
-      <div className="stat"><span>Units</span><strong>{total}</strong></div>
+      <div className="stat"><span>Units</span><strong>{list?.totals.piece_count ?? total}</strong></div>
+      {list?.totals.piece_count != null && list.totals.piece_count !== total && <div className="stat"><span>Items (rows)</span><strong>{total}</strong></div>}
     </div>
     <section className="panel inventory-panel">
       {loading && <p className="hint">Loading inventory…</p>}
