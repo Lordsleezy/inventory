@@ -747,7 +747,7 @@ export async function listSku(storeId, sku, draft = null) {
   }
   aspects = { ...aspects, ...Object.fromEntries(Object.entries(assignedCategory.attributes || {})
     .map(([name, value]) => [name, [String(value)]])) };
-  const pkg = draft?.package || packageSize(unit);
+  const pkg = draft?.package || (draft?.pickupOnly ? undefined : packageSize(unit));
   const policies = draft?.policies || (await ensurePolicies(storeId, fetchHint));
   const priceCents = draft?.priceCents ?? unit.ask_cents;
   if (String(selling.username || "").toLowerCase() === "pgg124-5") {

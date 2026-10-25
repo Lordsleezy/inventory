@@ -898,6 +898,13 @@ function policyMode(policy) {
   return null;
 }
 
+function policyHasLocalPickup(policy) {
+  if (policy?.localPickup === true) return true;
+  return (policy?.shippingOptions || []).some((option) =>
+    (option?.shippingServices || []).some((service) =>
+      /^(pickup|localdelivery)$/i.test(String(service?.shippingServiceCode || ""))));
+}
+
 async function listPolicy(storeId, kind) {
   const market = process.env.EBAY_MARKETPLACE_ID || "EBAY_US";
   const json = await ebayFetch(storeId, "GET", `/sell/account/v1/${kind}_policy?marketplace_id=${market}`);
@@ -964,8 +971,8 @@ async function createSandboxPolicies(storeId) {
 export async function resolveBusinessPolicies(storeId, { force = false } = {}) {
   const cached = (await loadEbaySettings(storeId)).policyStatus;
   if (!force && cached?.ok && Date.now() - Date.parse(cached.checked_at || 0) < 10 * 60_000
-    && cached.payment && cached.return && cached.free && cached.calculated) {
-    return { payment: cached.payment, returnP: cached.return, fulfillmentFree: cached.free, fulfillmentCalculated: cached.calculated };
+    && cached.payment && cached.return && cached.free && cached.calculated && cached.calculatedPickup && cached.pickupOnly) {
+    return { payment: cached.payment, returnP: cached.return, fulfillmentFree: cached.free, fulfillmentCalculated: cached.calculated, fulfillmentCalculatedPickup: cached.calculatedPickup, fulfillmentPickupOnly: cached.pickupOnly };
   }
   let payments = [];
   let returns = [];
@@ -981,7 +988,9 @@ export async function resolveBusinessPolicies(storeId, { force = false } = {}) {
     throw new Error(`${POLICY_SETUP}\n\neBay said: ${message}`);
   }
   let free = fulfillments.find((row) => policyMode(row) === "free");
-  let calculated = fulfillments.find((row) => policyMode(row) === "calculated");
+  let calculated = fulfillments.find((row) => policyMode(row) === "calculated" && !policyHasLocalPickup(row));
+  let calculatedPickup = fulfillments.find((row) => policyMode(row) === "calculated" && policyHasLocalPickup(row));
+  let pickupOnly = fulfillments.find((row) => policyHasLocalPickup(row) && policyMode(row) !== "calculated");
   if (process.env.EBAY_ENV !== "production" && (!free || !calculated || !payments[0] || !returns[0])) {
     try {
       if (!payments[0]) {
@@ -1011,6 +1020,8 @@ export async function resolveBusinessPolicies(storeId, { force = false } = {}) {
       ]);
       free = fulfillments.find((row) => policyMode(row) === "free");
       calculated = fulfillments.find((row) => policyMode(row) === "calculated");
+      calculatedPickup = fulfillments.find((row) => policyMode(row) === "calculated" && policyHasLocalPickup(row));
+      pickupOnly = fulfillments.find((row) => policyHasLocalPickup(row) && policyMode(row) !== "calculated");
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       throw new Error(`${POLICY_SETUP}\n\nSandbox setup failed: ${message}`);
@@ -1021,6 +1032,8 @@ export async function resolveBusinessPolicies(storeId, { force = false } = {}) {
   if (!returns[0]) missing.push("return policy");
   if (!free) missing.push("free-shipping policy");
   if (!calculated) missing.push("calculated-shipping policy");
+  if (!calculatedPickup) missing.push("calculated-shipping plus local-pickup policy");
+  if (!pickupOnly) missing.push("local-pickup-only policy");
   const status = {
     ok: missing.length === 0,
     missing,
@@ -1028,6 +1041,8 @@ export async function resolveBusinessPolicies(storeId, { force = false } = {}) {
     return: policyId(returns[0], "return"),
     free: policyId(free, "fulfillment"),
     calculated: policyId(calculated, "fulfillment"),
+    calculatedPickup: policyId(calculatedPickup, "fulfillment"),
+    pickupOnly: policyId(pickupOnly, "fulfillment"),
     checked_at: new Date().toISOString(),
   };
   const sb = serviceClient();
@@ -1038,6 +1053,8 @@ export async function resolveBusinessPolicies(storeId, { force = false } = {}) {
     returnP: status.return,
     fulfillmentFree: status.free,
     fulfillmentCalculated: status.calculated,
+    fulfillmentCalculatedPickup: status.calculatedPickup,
+    fulfillmentPickupOnly: status.pickupOnly,
   };
 }
 
@@ -1059,13 +1076,18 @@ async function pushOne(storeId, sku, { revise = false, getPolicies = () => resol
   row.unit_model = unit?.model;
   row.unit_upc = unit?.upc;
   const wasLive = row.status === "live" || revise;
+  const hasBox = [row.box.length_in, row.box.width_in, row.box.height_in, row.box.weight_lb].every((n) => Number(n) > 0);
+  const pickupOnly = !hasBox;
   withReadiness(row);
-  if (!row.ready) {
-    return { sku, ok: false, error: `Not ready: ${(row.checklist || []).filter((item) => !item.ok).map((item) => item.label).join("; ")}` };
+  const failed = (row.checklist || []).filter((item) => !item.ok && !(pickupOnly && item.label === "Needs box size"));
+  if (failed.length) {
+    return { sku, ok: false, error: `Not ready: ${failed.map((item) => item.label).join("; ")}` };
   }
   try {
     const policies = await getPolicies();
-    const fulfillment = row.shipping_mode === "free" ? policies.fulfillmentFree : policies.fulfillmentCalculated;
+    const fulfillment = pickupOnly
+      ? policies.fulfillmentPickupOnly
+      : (row.shipping_mode === "free" ? policies.fulfillmentFree : policies.fulfillmentCalculatedPickup);
     const published = await listSku(storeId, sku, {
       title: row.title,
       description: row.description,
@@ -1075,7 +1097,8 @@ async function pushOne(storeId, sku, { revise = false, getPolicies = () => resol
       categoryId: row.category_id,
       conditionPayload: row.condition_not_supported ? {} : { condition: row.condition_enum, conditionId: String(row.condition_id) },
       conditionNotes: row.condition_notes || undefined,
-      package: packagePayload(row.box),
+      ...(hasBox ? { package: packagePayload(row.box) } : {}),
+      pickupOnly: true,
       priceCents: row.price_cents,
       policies: { payment: policies.payment, returnP: policies.returnP, fulfillment },
     });
