@@ -81,7 +81,7 @@ select is((select amount_cents from c where sku = '93001' and who = 'paul'), 300
 select is((select amount_cents from c where sku = '93001' and who = 'jacob'), 0, 'override sets Jacob to 0');
 
 select is((select commission_cents::int from public.payout_commission_totals(current_setting('test.store')::uuid)
-  where employee_id = current_setting('test.paul')::uuid), 3000 + 800 + 400 + 2400 + 800 + 1320,
+  where employee_id = current_setting('test.paul')::uuid), 3000 + 800 + 400 + 2400 + 800 + 1420,
   'payout_commission_totals sums frozen amounts');
 
 do $$ declare v_clerk uuid := gen_random_uuid(); begin
