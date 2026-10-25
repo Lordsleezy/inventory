@@ -384,6 +384,9 @@ function coerceValue(def, raw) {
   if (!raw && raw !== 0) return "";
   const text = String(raw).trim();
   if (!text) return "";
+  // A confirmed free-text brand/model must not become a similarly named brand
+  // from eBay's suggestions (for example Infinity X1 -> Infinity Instruments).
+  if (/^(brand|model)$/i.test(def.name || "") && aspectAllowsCustom(def)) return text;
   const kind = itemMeasureKind(String(def.name || "").toLowerCase());
   if (kind && kind !== "capacity") {
     const amount = parseMeasure(text);

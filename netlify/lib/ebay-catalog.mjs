@@ -532,14 +532,14 @@ export async function refreshCategoryConditions(ebayCategoryId) {
 export async function resolveListingCategory(unit) {
   if (unit?.store_id && unit?.sku) {
     const { data: assigned, error } = await serviceClient().from('unit_channel_categories')
-      .select('category_id').eq('store_id', unit.store_id).eq('sku', unit.sku).eq('channel', 'ebay').maybeSingle();
+      .select('category_id,attributes').eq('store_id', unit.store_id).eq('sku', unit.sku).eq('channel', 'ebay').maybeSingle();
     if (error) throw new Error(error.message);
     if (assigned?.category_id) {
       const { data: taxonomy } = await serviceClient().from('channel_taxonomy').select('path,active,leaf')
         .eq('channel', 'ebay').eq('category_id', assigned.category_id).maybeSingle();
       if (!taxonomy?.active || !taxonomy.leaf) throw new Error('Confirmed eBay category is retired or unavailable; open Missing Category.');
       return { slug: `ebay_${assigned.category_id}`, name: taxonomy.path, ebayCategoryId: assigned.category_id,
-        aliases: [], defaults: {}, standalone: false, source: 'confirmed_floor_category' };
+        aliases: [], defaults: {}, confirmedAttributes: assigned.attributes || {}, standalone: false, source: 'confirmed_floor_category' };
     }
   }
   const explicit = String(unit?.ebay_category || "").trim();
@@ -642,7 +642,7 @@ export async function prepareUnitAspects({ storeId, unit, liveCheck = false }) {
       refreshed = true;
     }
   }
-  const specs = listingMeasures(unit);
+  const specs = { ...listingMeasures(unit), ebay_aspects: { ...(unit.listing_specs?.ebay_aspects || {}), ...(floor.confirmedAttributes || {}) } };
   const { remembered } = storeId ? await loadRememberedDefaults(storeId, floor.slug) : { remembered: {} };
   const filled = fillAspects(stored, unit, specs, {
     remembered,

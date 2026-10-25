@@ -3,6 +3,12 @@ import test from "node:test";
 import { aspectsNeedRefresh, fillAspects } from "./ebay-aspects.mjs";
 import { resolveFloorCategory } from "./ebay-catalog.mjs";
 
+test("confirmed free-text brands are not replaced by a similar suggested brand", () => {
+  const result = fillAspects([{ name: "Brand", required: true, allowed: ["Infinity Instruments"], selectionOnly: false }],
+    { brand: "Infinity X1" }, { ebay_aspects: { Brand: "Infinity X1" } });
+  assert.deepEqual(result.aspects.Brand, ["Infinity X1"]);
+});
+
 test("maps store category labels onto Floor eBay categories", () => {
   assert.equal(resolveFloorCategory("Refrigerator")?.ebayCategoryId, "20713");
   assert.equal(resolveFloorCategory("chest freezer")?.slug, "freezers");

@@ -1342,16 +1342,12 @@ async function pushReadiness(storeId, unit, channel) {
   let aspects = null;
   let amazonBlocked = null;
   if (channel === "ebay") {
-    const { data } = await sb
-      .from("ebay_drafts")
-      .select("aspect_defs, aspects, category_id")
-      .eq("store_id", storeId)
-      .eq("sku", unit.sku)
-      .maybeSingle();
-    aspectDefs = data?.aspect_defs || null;
-    aspects = data?.aspects || null;
-    if (data?.category_id && !unit.listing_specs?.ebay_category_id && !unit.category && !unit.ebay_category) {
-      unit = { ...unit, listing_specs: { ...(unit.listing_specs || {}), ebay_category_id: data.category_id } };
+    const { data, error } = await sb.from("unit_channel_categories")
+      .select("category_id,attributes").eq("store_id", storeId).eq("sku", unit.sku).eq("channel", "ebay").maybeSingle();
+    if (error) throw new Error(error.message);
+    if (data?.category_id) {
+      unit = { ...unit, listing_specs: { ...(unit.listing_specs || {}), ebay_category_id: data.category_id,
+        ebay_aspects: { ...(unit.listing_specs?.ebay_aspects || {}), ...(data.attributes || {}) } } };
     }
   }
   if (channel === "amazon") {
