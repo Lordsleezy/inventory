@@ -277,6 +277,20 @@ and refunds. Buyer "shipped" email: `web-order-email` (Resend).
   the unit back to `available`; `write_off` sets `scrapped` (unless restocked). Settings in `ReturnSettingsPanel`;
   reserve % per channel feeds channel pricing (`reservePctForChannel`).
 
+### 5.9 Replacement and giveaway (units that leave without a sale)
+Admin-only (`portal_is_admin()`; the clerk gets a 42501 from every RPC, and the buttons are hidden). Replacement / Given away
+buttons sit on each in-stock unit (Inventory rows, and the phone-app item screen next to Sell). RPCs
+(`20261031100000_replacements_giveaways.sql`): `portal_replacement_sale_search`, `portal_record_replacement`,
+`portal_replacement_bad_unit_returned`, `portal_record_giveaway`, `portal_undo_disposition`, `portal_dispositions_list`,
+`portal_unit_history`. Record table `unit_dispositions`; unit `state` becomes `replaced` / `given_away` (not in stock, not sold).
+* Replacement: cost is read live from the replacement unit (+ extra cost). `sale_ledger.cost_cents` / `profit_cents` add it
+  (`sale_cost_with_replacements`), so every report sees the lower profit. The frozen commission line is recomputed by
+  `payout_sync_replacements`; a replacement unit with no cost makes that sale's commission wait (null). If the person was already
+  paid past their other earnings, a negative `portal_payout_adjustments` row (`replacement_id`) is added; undo adds the opposite row.
+* Giveaway: a `portal_expenses` row (source `giveaway`, category `Giveaways`) is kept in sync with the unit's live cost;
+  no row while the cost is missing. Commissions are untouched.
+* Both delist: open `delist_tasks` for every live listing, listings go `pending_delist`.
+
 ## 6. The database
 
 ### 6.1 Migrations and the recovered ledger
