@@ -278,7 +278,9 @@ async function catalogToken() {
       "Content-Type": "application/x-www-form-urlencoded",
     },
     body: new URLSearchParams({ grant_type: "client_credentials",
-      scope: "https://api.ebay.com/oauth/api_scope/commerce.catalog.readonly" }),
+      // eBay documents sell.inventory for Catalog API calls made by selling apps.
+      // commerce.catalog.readonly is for buying apps and is not granted to this keyset.
+      scope: "https://api.ebay.com/oauth/api_scope/sell.inventory" }),
   });
   const json = await res.json();
   if (!res.ok) throw new Error(json.error_description || json.error || "ebay_catalog_token_failed");
