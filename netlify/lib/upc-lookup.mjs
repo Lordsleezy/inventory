@@ -106,6 +106,8 @@ export function parseUpcitemdbItem(item) {
       .map((o) => ({
         merchant: clean(o.merchant) || clean(o.domain),
         domain: clean(o.domain),
+        title: clean(o.title),
+        currency: clean(o.currency),
         price: o.price,
         list_price: o.list_price,
         condition: clean(o.condition),
@@ -115,8 +117,26 @@ export function parseUpcitemdbItem(item) {
   };
 }
 
+const recentUpcResponses = new Map();
+/** Short warm-function cache shares a barcode request between price and dimensions. */
+export async function upcitemdbLookup(code, options = {}) {
+  if (options.fetchImpl) return fetchUpcitemdb(code, options);
+  const cacheKey = String(code);
+  const prior = recentUpcResponses.get(cacheKey);
+  if (prior && prior.until > Date.now()) return prior.promise;
+  const entry = { until: Date.now() + 60_000, promise: null };
+  entry.promise = fetchUpcitemdb(code, options).then(result => {
+    if (result.raw_error) recentUpcResponses.delete(cacheKey);
+    else entry.until = Date.now() + (result.found ? 900_000 : 60_000);
+    return result;
+  });
+  if (recentUpcResponses.size > 500) recentUpcResponses.delete(recentUpcResponses.keys().next().value);
+  recentUpcResponses.set(cacheKey, entry);
+  return entry.promise;
+}
+
 /** @returns {Promise<object>} { found, ...parsed } or { found:false, raw_error } */
-export async function upcitemdbLookup(code, { fetchImpl = fetch, key = process.env.UPCITEMDB_KEY } = {}) {
+async function fetchUpcitemdb(code, { fetchImpl = fetch, key = process.env.UPCITEMDB_KEY } = {}) {
   const useKey = Boolean(key && String(key).trim());
   const url = `${useKey ? UPCITEMDB_PAID : UPCITEMDB_TRIAL}?upc=${encodeURIComponent(code)}`;
   const headers = { Accept: "application/json" };

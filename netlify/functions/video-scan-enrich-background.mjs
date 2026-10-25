@@ -3,6 +3,7 @@ import { authorizedScan } from '../lib/video-scan-auth.mjs';
 import { enrichVideo, lookupProductSpecs, retailFields, tokenCost } from '../lib/video-scan.mjs';
 import { resolveFloorCategory, loadStoredAspects, refreshCategoryAspects, prepareUnitAspects } from '../lib/ebay-catalog.mjs';
 import { gtinIssue } from '../lib/gtin.mjs';
+import { lookupReceiveDimensions } from '../lib/receive-dimensions.mjs';
 
 const dimensionKeys=['product_height_in','product_width_in','product_depth_in','product_weight_lb',
   'package_length_in','package_width_in','package_height_in','package_weight_lb'];
@@ -53,15 +54,13 @@ export async function invoke(event) {
     if(existing.error)throw existing.error;
     const found=detail.result;
     const desc=goodDescription(found.description,identity.title)||goodDescription(existing.data.ai_description,identity.title);
-    const sources=found.dimension_sources&&typeof found.dimension_sources==='object'?found.dimension_sources:{};
-    const types=found.dimension_types&&typeof found.dimension_types==='object'?found.dimension_types:{};
-    const dimensions=Object.fromEntries(dimensionKeys.map(key=>[key,measure(found[key])]));
-    const accepted=Object.fromEntries(Object.entries(dimensions).filter(([key,value])=>value!==null&&
-      (types[key]==='estimated'&&String(sources[key]||'').startsWith('estimated')||
-       types[key]===(key.startsWith('package_')?'verified_shipping':'verified_product')&&
-       String(sources[key]||'').startsWith('https://'))));
-    const dimsSource=Object.keys(accepted).some(key=>types[key]==='estimated')?'estimated':
-      Object.keys(accepted).length?'verified':null;
+    // AI descriptions/specifics remain unchanged. Measurements require actual catalog data.
+    const catalog=await lookupReceiveDimensions(sb,job.store_id,existing.data.upc||identity.upc,identity)
+      .catch(error=>{console.warn('video_scan_catalog_dimensions_unavailable',job.id,String(error.message||error).slice(0,160));return {values:{},sources:{}}});
+    const sources=catalog.sources;
+    const accepted=Object.fromEntries(dimensionKeys.map(key=>[key,measure(catalog.values[key])]).filter(([,value])=>value!==null));
+    const types=Object.fromEntries(Object.keys(accepted).map(key=>[key,key.startsWith('package_')?'verified_shipping':'verified_product']));
+    const dimsSource=Object.keys(accepted).length?'verified':null;
     const candidate=cleanModel(found.manufacturer_model);
     const exactSource=String(found.model_source_url||'').replace(/\/$/,'')===
       String(job.result?.retail_source_url||'').replace(/\/$/,'');
@@ -114,7 +113,8 @@ export async function invoke(event) {
     if(saved.error)throw saved.error;
     const input=latest.data.input_tokens+research.input+detail.input;
     const output=latest.data.output_tokens+research.output+detail.output;
-    const result={...latest.data.result,...found,details_ready:true,details_at:new Date().toISOString(),
+    const result={...latest.data.result,...found,...Object.fromEntries(dimensionKeys.map(key=>[key,accepted[key]??null])),
+      dimension_types:types,details_ready:true,details_at:new Date().toISOString(),
       details_search_queries:research.queries,spec_sources:research.sources,dimension_sources:sources};
     const updated=await sb.from('video_scan_jobs').update({result,error:null,input_tokens:input,output_tokens:output,
       search_queries:latest.data.search_queries+research.queries,estimated_cost_usd:tokenCost(input,output),

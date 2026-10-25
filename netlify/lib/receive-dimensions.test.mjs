@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mergeDimensions } from './receive-dimensions.mjs';
+import { mergeDimensions, dimensionIdentityMatches } from './receive-dimensions.mjs';
 
-test('Floor values beat Amazon and UPCitemdb; missing carton fields are estimated', () => {
+test('Amazon then UPCitemdb supply dimensions; saved Floor values only fill gaps', () => {
   const result = mergeDimensions(
     { product_width_in: undefined, aspects: { product_height_in: 8, product_width_in: 2 }, package_length_in: 11 },
     { item: { width_in: 3, length_in: 2, weight_lb: 0.7 }, package: { width_in: 4 } },
@@ -14,12 +14,25 @@ test('Floor values beat Amazon and UPCitemdb; missing carton fields are estimate
   assert.equal(result.sources.package_length_in, 'Floor');
   assert.equal(result.values.package_width_in, 4);
   assert.equal(result.sources.package_width_in, 'Amazon');
-  assert.equal(result.values.package_height_in, 10);
-  assert.equal(result.sources.package_height_in, 'estimated');
-  assert.equal(result.values.package_weight_lb, 0.8);
+  assert.equal(result.values.package_height_in, null);
+  assert.equal(result.sources.package_height_in, undefined);
+  assert.equal(result.values.package_weight_lb, null);
 });
 
 test('unknown measurements stay unknown', () => {
   const result = mergeDimensions(null, null, null);
   assert.equal(Object.values(result.values).every(value => value == null), true);
+});
+
+test('a UPC-linked Amazon 24 oz can cannot supply dimensions for the 19.2 oz can', () => {
+  const identity = {brand:'White Claw',title:'White Claw Black Cherry 19.2 fl oz Can',size:'19.2 fl oz',variant:'Black Cherry'};
+  assert.equal(dimensionIdentityMatches({title:'White Claw Hard Seltzer Black Cherry 24 Fl. Oz.'}, identity),false);
+  assert.equal(dimensionIdentityMatches({title:'White Claw Black Cherry Hard Seltzer 19.2 fl oz Can'}, identity),true);
+});
+
+test('old estimated weights cannot become sourced shipping measurements', () => {
+  const result = mergeDimensions({package_weight_lb:4,dim_sources:{weight_lb:'estimated'}},
+    {item:{weight_lb:2}}, null);
+  assert.equal(result.values.product_weight_lb,2);
+  assert.equal(result.values.package_weight_lb,null);
 });

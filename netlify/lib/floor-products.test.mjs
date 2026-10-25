@@ -27,6 +27,15 @@ test("productToMerged drops digit model codes", () => {
   assert.equal(m.package.weight_lb, 0.5);
 });
 
+test('saved estimates never prefill a new receive while real lookups are pending', () => {
+  const result=productToMerged({brand:'Acme',title:'Acme household item',package_weight_lb:2,package_length_in:8,
+    aspects:{product_weight_lb:1,Color:'Blue'},dim_sources:{weight_lb:'estimated',product_weight_lb:'AI estimate',length_in:'staff'}});
+  assert.equal(result.package.weight_lb,null);
+  assert.equal(result.package.length_in,8);
+  assert.equal(result.aspects.product_weight_lb,undefined);
+  assert.equal(result.aspects.Color,'Blue');
+});
+
 test("item specifics from Oral-B style title", () => {
   const s = itemSpecificsFromLookup({
     model: "4610583",

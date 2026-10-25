@@ -30,6 +30,8 @@ export function CategoryPanel({ client, storeId, initialSku, onSaved }: Props) {
   const [notice, setNotice] = useState('');
   const [reload, setReload] = useState(0);
   const [offset, setOffset] = useState(0);
+  const [openSku, setOpenSku] = useState('');
+  const [listingChannels, setListingChannels] = useState<Channel[] | null>(null);
   const first = rows.find((row) => row.sku === selected[0]);
   const identical = useMemo(() => rows.filter((row) => row.upc && row.upc === first?.upc && !row.live), [rows, first]);
 
@@ -46,9 +48,44 @@ export function CategoryPanel({ client, storeId, initialSku, onSaved }: Props) {
   }, [client, reload, offset]);
 
   useEffect(() => {
+    void client.rpc('portal_listing_channels').then(({ data, error: e }) => { if (!e) setListingChannels((data || []) as Channel[]); });
+  }, [client, reload]);
+
+  useEffect(() => {
+    if (initialSku && rows.length && !rows.some((row) => row.sku === initialSku)) void loadSku(initialSku);
+  }, [initialSku, rows]);
+
+  async function loadSku(sku: string) {
+    const value = sku.trim();
+    if (!value) return;
+    const { data, error: e } = await client.rpc('portal_unit_channels', { p_sku: value });
+    if (e) { setError(e.message); return; }
+    if (!data) { setError(`SKU ${value} not found.`); return; }
+    const row = data as Row;
+    setRows((old) => [row, ...old.filter((item) => item.sku !== row.sku)]);
+    setSelected([row.sku]);
+  }
+
+  async function toggleChannel(id: Channel, on: boolean) {
+    setEnabled((old) => ({ ...old, [id]: on }));
+    if (selected.length !== 1) return;
+    const { error: e } = await client.rpc('portal_set_unit_channel', { p_sku: selected[0], p_channel: id, p_enabled: on });
+    if (e) { setError(e.message); setEnabled((old) => ({ ...old, [id]: !on })); return; }
+    const { data } = await client.rpc('portal_unit_channels', { p_sku: selected[0] });
+    if (data) setRows((old) => old.map((row) => row.sku === (data as Row).sku ? data as Row : row));
+  }
+
+  async function toggleListingChannel(id: Channel, on: boolean) {
+    const next = CHANNELS.map(([c]) => c).filter((c) => (c === id ? on : listingChannels?.includes(c)));
+    const { data, error: e } = await client.rpc('portal_set_listing_channels', { p_channels: next });
+    if (e) setError(e.message);
+    else setListingChannels((data || []) as Channel[]);
+  }
+
+  useEffect(() => {
     if (!first) return;
     setCategories(Object.fromEntries(CHANNELS.map(([id]) => [id, first.channels?.[id]?.category_id || ''])) as Record<Channel, string>);
-    setEnabled(Object.fromEntries(CHANNELS.map(([id]) => [id, first.channels?.[id]?.enabled ?? id !== 'depop'])) as Record<Channel, boolean>);
+    setEnabled(Object.fromEntries(CHANNELS.map(([id]) => [id, first.channels?.[id]?.enabled ?? false])) as Record<Channel, boolean>);
     setAttributes(Object.fromEntries(CHANNELS.map(([id]) => [id, first.channels?.[id]?.attributes || {}])) as Record<Channel, Record<string, string>>);
     setInternal('');
     setMapping('');
@@ -163,6 +200,12 @@ export function CategoryPanel({ client, storeId, initialSku, onSaved }: Props) {
   return <section className="panel category-panel">
     <h2>Missing Category</h2>
     <p className="hint">Choose a real category for each enabled channel. Required fields appear after you select a category.</p>
+    {listingChannels && <div className="category-channel-list"><span className="hint">New items start on:</span>
+      {CHANNELS.map(([id, label]) => <label key={id}><input type="checkbox" checked={listingChannels.includes(id)}
+        onChange={(e) => void toggleListingChannel(id, e.target.checked)} /> {label}</label>)}</div>}
+    <form className="category-channel-list" onSubmit={(e) => { e.preventDefault(); void loadSku(openSku); }}>
+      <label>Open any SKU<input value={openSku} onChange={(e) => setOpenSku(e.target.value)} placeholder="SKU" /></label>
+      <button type="submit" className="secondary">Open</button></form>
     {error && <p className="alert" role="alert">{error}</p>}{notice && <p className="hint" role="status">{notice}</p>}
     <div className="category-layout">
       <div className="category-queue">
@@ -183,7 +226,7 @@ export function CategoryPanel({ client, storeId, initialSku, onSaved }: Props) {
         <strong>{first ? `Assign SKU ${first.sku}${selected.length > 1 ? ` and ${selected.length - 1} more` : ''}` : 'Select an item'}</strong>
         {first && <>
           <div className="category-channel-list">{CHANNELS.map(([id, label]) => <label key={id}><input type="checkbox" checked={enabled[id]}
-            onChange={(e) => setEnabled((old) => ({ ...old, [id]: e.target.checked }))} /> {label}</label>)}</div>
+            onChange={(e) => void toggleChannel(id, e.target.checked)} /> {label}</label>)}</div>
           <div className="category-channel-list">{CHANNELS.map(([id, label]) => <button type="button" key={id}
             className={channel === id ? 'active' : 'secondary'} onClick={() => { setChannel(id); setSearch(''); }}>{label}</button>)}</div>
           <label>Search {CHANNELS.find(([id]) => id === channel)?.[1]} categories<input type="search" value={search}

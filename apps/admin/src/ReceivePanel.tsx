@@ -7,7 +7,7 @@ import { reportClientError } from './clientLog';
 import { categoryDefaultCostCents, priceFloorCents } from './scanPricing';
 import { errText } from './errText';
 import { BundleReceive } from './BundleReceive';
-import { measureMatPhoto } from './matMeasure';
+import { MeasureOnMat } from './MeasureOnMat';
 import { receiveSpecifics, receiveVariant } from '../../../shared/receive-specifics.mjs';
 import { CategoryPanel } from './CategoryPanel';
 
@@ -119,6 +119,8 @@ type Props = {
   onSaved: () => void;
   /** App-mode chrome: Cancel / Receive · SKU / Save nav, no instruction paragraphs. */
   appChrome?: boolean;
+  /** Use store staff RPCs and omit portal-only controls. */
+  staffMode?: boolean;
   initialManual?: boolean;
   /** Prefill / enqueue a UPC from an earlier camera capture. */
   initialUpc?: string | null;
@@ -548,7 +550,7 @@ function CameraScanner({ onDetect, onFile, onClose }: {
 
 /* ================================================================================================ */
 
-export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome, initialManual, initialUpc, onAppCancel }: Props) {
+export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome, staffMode = false, initialManual, initialUpc, onAppCancel }: Props) {
   const [options, setOptions] = useState<Options | null>(null);
   const [manual, setManual] = useState(!!initialManual);
   const [draft, setDraft] = useState('');
@@ -580,6 +582,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   const [photoPrice, setPhotoPrice] = useState<PhotoPriceInfo | null>(null);
   const [photoPriceError, setPhotoPriceError] = useState('');
   const [photoPriceBusy, setPhotoPriceBusy] = useState(false);
+  const [matOpen, setMatOpen] = useState(false);
   const [dimensionsBusy, setDimensionsBusy] = useState(false);
   const [dimensionsError, setDimensionsError] = useState('');
   const [dimensionSources, setDimensionSources] = useState<Record<string, string>>({});
@@ -591,11 +594,12 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
 
   useEffect(() => {
     let active = true;
+    if (staffMode) return;
     void client.from('store_manifests').select('id,name,manifest_on')
       .eq('store_id', storeId).order('manifest_on', { ascending: false })
       .then(({ data }) => { if (active) setManifests(data || []); });
     return () => { active = false; };
-  }, [client, storeId]);
+  }, [client, storeId, staffMode]);
 
   const upcInput = useRef<HTMLInputElement>(null);
   const cameraFile = useRef<HTMLInputElement>(null);
@@ -620,6 +624,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   const askTouched = useRef(false);
   const titleTouched = useRef(false);
   const priceRequest = useRef(0);
+  const dimensionTouched = useRef(new Set<string>());
   const activeScan = useRef<string | null>(null);
   const modalOpen = useRef(false);
   modalOpen.current = camera || dialog !== null;
@@ -654,6 +659,12 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     requestAnimationFrame(() => upcInput.current?.focus());
   };
   const update = (key: keyof Form, value: string) => {
+    const dimensionField = ({length:'package_length_in',width:'package_width_in',height:'package_height_in',weight:'package_weight_lb',
+      productHeight:'product_height_in',productWidth:'product_width_in',productDepth:'product_depth_in',productWeight:'product_weight_lb'} as Record<string,string>)[key];
+    if (dimensionField) {
+      dimensionTouched.current.add(key);
+      setDimensionSources(prev => ({...prev,[dimensionField]:'staff'}));
+    }
     if (key === 'ask') askTouched.current = true;
     if (key === 'title') titleTouched.current = true;
     setForm(prev => {
@@ -678,11 +689,11 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   }, [formOpen, loadedId]);
 
   async function loadOptions() {
-    const { data, error: e } = await client.rpc('portal_receive_options');
+    const { data, error: e } = await client.rpc(staffMode ? 'staff_receive_options' : 'portal_receive_options');
     if (e) throw e;
     setOptions(data as Options);
   }
-  useEffect(() => { void loadOptions().catch(e => setError(errText(e))); }, [client]);
+  useEffect(() => { void loadOptions().catch(e => setError(errText(e))); }, [client, staffMode]);
 
   /* ----- photo previews ----- */
   const previews = useMemo(() => files.map(f => URL.createObjectURL(f)), [files]);
@@ -691,7 +702,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   /* ----- duplicate check ----- */
   async function findDups(variants: string[]): Promise<Dups | null> {
     if (!variants.length) return null;
-    const { data, error: e } = await client.from('units').select('sku')
+    const { data, error: e } = await client.from(staffMode ? 'units_pos' : 'units').select('sku')
       .eq('store_id', storeId).in('upc', variants).in('state', IN_STOCK).limit(100);
     if (e || !data) return null;
     return { count: data.length, skus: data.map(r => String((r as { sku: string }).sku)) };
@@ -751,9 +762,13 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     setDoNotList(false);
     setPhotoFill(null);
     setPhotoIdentity(null);
+    priceRequest.current++;
+    setPhotoPriceBusy(false);
+    setMatOpen(false);
     setPhotoPriceError('');
     setPhotoPrice(null);
     setDimensionSources({});
+    dimensionTouched.current.clear();
     setDimensionsError('');
   }
 
@@ -762,6 +777,12 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     if (manual) return;
     if (!current) { if (loadedId !== null) { setLoadedId(null); resetEntry(); } return; }
     if (current.status === 'loading' || loadedId === current.id) return;
+    dimensionTouched.current = new Set(Object.keys(current.seed || {}).filter(key =>
+      ['length','width','height','weight','productHeight','productWidth','productDepth','productWeight'].includes(key)));
+    priceRequest.current++;
+    setPhotoPrice(null);
+    setPhotoPriceBusy(false);
+    setPhotoPriceError('');
     const r = current.result;
     const m = r?.merged;
     const p = m?.package;
@@ -841,7 +862,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     const scanId = current.id;
     if (!isTrueCatalogMiss(r) && [initial.length, initial.width, initial.height, initial.weight,
       initial.productHeight, initial.productWidth, initial.productDepth, initial.productWeight].some(v => !v))
-      void findPhotoDimensions(current.upc, scanId);
+      void findPhotoDimensions(current.upc, scanId, {title:m?.title,brand:m?.brand,model:m?.model,size:initial.size});
     void findDups(upcVariants(current.upc, r)).then(d => { if (mounted.current && activeScan.current === scanId) setDups(d); });
     // Restore photos if the camera app killed the PWA mid-capture for this scan.
     void loadPendingPhotos(pendingPhotoKey(storeId, scanId)).then(restored => {
@@ -986,7 +1007,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       const brandValue = form.unbranded ? 'Unbranded' : form.brand.trim();
       // Scans and manual: title is always brand + item specifics (never catalog junk / digit codes).
       const titleValue = form.title.trim() || composeListingTitle(form.brand, form.model, form.unbranded);
-      const { data, error: e } = await client.rpc('portal_receive_unit', {
+      const { data, error: e } = await client.rpc(staffMode ? 'staff_receive_unit' : 'portal_receive_unit', {
         p_quantity: quantity,
         p_brand: brandValue,
         p_model: form.model.trim(),
@@ -1008,7 +1029,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       if (e) throw e;
       const skus = (data as { skus: string[] }).skus;
       const warnings: string[] = [];
-      if (manifestId) {
+      if (manifestId && !staffMode) {
         const tagged = await client.rpc('portal_tag_manifest', { p_id: manifestId, p_skus: skus });
         if (tagged.error) warnings.push('Received units were saved, but their manifest tag failed. Use Manifests → Bulk tag to retry.');
       }
@@ -1022,7 +1043,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           const contentType = file.type && file.type.startsWith('image/') ? file.type : 'image/jpeg';
           const upload = await client.storage.from('unit-photos').upload(path, file, { contentType, upsert: false });
           if (upload.error) throw upload.error;
-          const linked = await client.rpc('portal_add_unit_photo', { p_sku: sku, p_path: path });
+          const linked = await client.rpc(staffMode ? 'staff_add_unit_photo' : 'portal_add_unit_photo', { p_sku: sku, p_path: path });
           if (linked.error) throw linked.error;
         } catch (err) {
           failed++;
@@ -1040,7 +1061,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       const blocked = skus.includes(NEVER_LIST_SKU);
       const enrichFailed = await enrichUnits(skus, parsed, hold, blocked || doNotList);
       if (enrichFailed) warnings.push(`Could not save lookup details on ${enrichFailed} unit(s).${hold ? ' They have no price, so they will not list.' : ''}`);
-      if (!blocked && !doNotList && !hold) {
+      if (!staffMode && !blocked && !doNotList && !hold) {
         for (const [index, sku] of skus.entries()) {
           try {
             const categoryResponse = await fetch(floorFunctionUrl('category-resolve'), { method: 'POST',
@@ -1050,7 +1071,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
             if (!categoryResponse.ok) throw new Error(categoryResult.error || 'category_resolve_failed');
             if (categoryResult.gaps?.length) warnings.push(`SKU ${sku} needs category review; open Missing Category below.`);
             else if (readyToList) {
-              const marked = await client.rpc('portal_enrich_received_unit', { p_sku: sku, p_specs: { ready_to_list: true } });
+              const marked = await client.rpc(staffMode ? 'staff_enrich_received_unit' : 'portal_enrich_received_unit', { p_sku: sku, p_specs: { ready_to_list: true } });
               if (marked.error) warnings.push(`SKU ${sku} categories are complete, but Ready to list could not be set.`);
             }
           } catch { warnings.push(`SKU ${sku} category lookup did not finish; use Missing Category below.`); }
@@ -1217,11 +1238,14 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     brand: string; model: string; title: string; description: string;
   }): Promise<boolean> {
     // Preferred: RPC (units has no UPDATE policy for authenticated users).
-    const rpc = await client.rpc('portal_enrich_received_unit', {
+    const rpc = await client.rpc(staffMode ? 'staff_enrich_received_unit' : 'portal_enrich_received_unit', {
       p_sku: sku, p_specs: p.specs, p_msrp_cents: p.msrp, p_show: p.show,
       p_brand: p.brand || null, p_model: p.model || null, p_title: p.title || null, p_description: p.description || null,
     });
     if (!rpc.error) return true;
+    // Store staff may enrich only through the scoped RPC; the direct table update
+    // fallback is reserved for the portal's legacy admin path.
+    if (staffMode) return false;
     // Fallback: direct update with client-side coalesce (only works if RLS allows it; verified via returned rows).
     try {
       const cur = await client.from('units').select('listing_specs, msrp_cents, brand, model, title, listing_body')
@@ -1311,16 +1335,31 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     setPhotoPriceBusy(true);
     setPhotoPriceError('');
     try {
-      const response = await fetch(floorFunctionUrl('receive-photo-identify'), {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
-        body: JSON.stringify({ action: 'prices', identity: { ...identity, upc: current?.upc || '' } }),
-        signal: AbortSignal.timeout(10000),
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.message || 'Online prices could not be found.');
-      if (request === priceRequest.current) setPhotoPrice((data.price as PhotoPriceInfo) || null);
-      console.info('receive_price_timing', { price_ms: Math.round(performance.now() - started), listings: data.price?.count || 0 });
+      const failures: string[] = [];
+      for (const source of ['upcitemdb', 'ebay', 'gemini']) {
+        if (request !== priceRequest.current) return;
+        try {
+          const response = await fetch(floorFunctionUrl('receive-photo-identify'), {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
+            body: JSON.stringify({ action: 'prices', source, identity: { ...identity, upc: current?.upc || '' } }),
+            signal: AbortSignal.timeout(source === 'gemini' ? 45000 : 15000),
+          });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(data.message || `${source} unavailable`);
+          if (request !== priceRequest.current) return;
+          if (data.price?.count) {
+            setPhotoPrice(data.price as PhotoPriceInfo);
+            console.info('receive_price_timing', { source, price_ms: Math.round(performance.now() - started), listings: data.price.count });
+            return;
+          }
+        } catch {
+          failures.push(source);
+        }
+      }
+      if (request !== priceRequest.current) return;
+      setPhotoPrice(null);
+      if (failures.length) setPhotoPriceError(`Price search incomplete (${failures.join(', ')} unavailable). Retry prices.`);
     } catch (e) {
       if (request === priceRequest.current) {
         setPhotoPrice(null);
@@ -1331,36 +1370,51 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     }
   }
 
-  async function findPhotoDimensions(upc: string, scanId: string) {
+  async function findPhotoDimensions(upc: string, scanId: string, identity?: Record<string, unknown>) {
     setDimensionsBusy(true);
     setDimensionsError('');
     const started = performance.now();
+    const resolved = new Set<string>();
+    const notices: string[] = [];
+    const map = { product_height_in: 'productHeight', product_width_in: 'productWidth',
+      product_depth_in: 'productDepth', product_weight_lb: 'productWeight',
+      package_length_in: 'length', package_width_in: 'width',
+      package_height_in: 'height', package_weight_lb: 'weight' } as const;
     try {
-      const response = await fetch(floorFunctionUrl('receive-photo-identify'), {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
-        body: JSON.stringify({ action: 'dimensions', upc }),
-        signal: AbortSignal.timeout(10000),
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.message || 'Dimensions could not be found.');
-      if (activeScan.current !== scanId) return;
-      const values = (data.dimensions?.values || {}) as Record<string, number | null>;
-      const sources = (data.dimensions?.sources || {}) as Record<string, string>;
-      const map = { product_height_in: 'productHeight', product_width_in: 'productWidth',
-        product_depth_in: 'productDepth', product_weight_lb: 'productWeight',
-        package_length_in: 'length', package_width_in: 'width',
-        package_height_in: 'height', package_weight_lb: 'weight' } as const;
-      setForm(prev => {
-        const next = { ...prev };
-        for (const [field, formKey] of Object.entries(map) as [keyof typeof map, typeof map[keyof typeof map]][])
-          if (!next[formKey] && values[field] != null) next[formKey] = String(values[field]);
-        return next;
-      });
-      setDimensionSources(prev => ({ ...sources, ...prev }));
-      console.info('receive_dimensions_timing', { dims_ms: Math.round(performance.now() - started), source: sources });
-    } catch (error) {
-      if (activeScan.current === scanId) setDimensionsError(`${errText(error)} Tap dimensions to edit them.`);
+      for (const source of ['amazon', 'upcitemdb']) {
+        if (activeScan.current !== scanId) return;
+        try {
+          const response = await fetch(floorFunctionUrl('receive-photo-identify'), {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
+            body: JSON.stringify({ action: 'dimensions', source, upc, identity }),
+            signal: AbortSignal.timeout(15000),
+          });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(data.message || `${source} dimensions unavailable`);
+          if (activeScan.current !== scanId) return;
+          notices.push(...(data.dimensions?.warnings || []));
+          const values = (data.dimensions?.values || {}) as Record<string, number | null>;
+          const sources = (data.dimensions?.sources || {}) as Record<string, string>;
+          const eligible = Object.entries(map).filter(([field]) => !resolved.has(field));
+          setForm(prev => {
+            const next = { ...prev };
+            for (const [field, formKey] of eligible as [keyof typeof map, typeof map[keyof typeof map]][]) {
+              if (dimensionTouched.current.has(formKey)) continue;
+              if (values[field] != null) next[formKey] = String(values[field]);
+              else if (identity && data.dimensions?.warnings?.length) next[formKey] = '';
+            }
+            return next;
+          });
+          const acceptedSources = Object.fromEntries(eligible.filter(([field]) => sources[field]).map(([field]) => [field, sources[field]]));
+          setDimensionSources(prev => ({...prev, ...acceptedSources, ...Object.fromEntries(Object.entries(prev)
+            .filter(([, value]) => value === 'staff' || value.includes('staff reviewed')))}));
+          for (const [field] of eligible) if (values[field] != null && sources[field] !== 'Floor') resolved.add(field);
+          console.info('receive_dimensions_timing', { source, dims_ms: Math.round(performance.now() - started), fields: resolved.size });
+          if (resolved.size === Object.keys(map).length) break;
+        } catch (error) { notices.push(errText(error)); }
+      }
+      if (activeScan.current === scanId && notices.length) setDimensionsError([...new Set(notices)].join(' '));
     } finally {
       if (activeScan.current === scanId) setDimensionsBusy(false);
     }
@@ -1392,7 +1446,6 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       void savePendingPhotos(pendingPhotoKey(storeId, photoSessionKey.current), [file]);
       const upload = await identificationJpeg(file);
       const compressedMs = performance.now() - photoStarted;
-      const matMeasurement = measureMatPhoto(upload).catch(() => null);
       const image_base64 = await fileToBase64(upload);
       const photoResponse = await postIdentifyPhoto(accessToken, {
           action: 'identify_only',
@@ -1429,20 +1482,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       setDialog(null);
       setWarning('');
       void findPhotoPrices(identity);
-      const scanId = current.id;
-      void findPhotoDimensions(current.upc, scanId).then(async () => {
-        const mat = await matMeasurement;
-        if (!mat || activeScan.current !== scanId) return;
-        setForm(prev => ({ ...prev,
-          productWidth: prev.productWidth || String(mat.product_width_in),
-          productDepth: prev.productDepth || String(mat.product_depth_in),
-        }));
-        setDimensionSources(prev => ({
-          ...prev,
-          ...(!prev.product_width_in ? { product_width_in: 'mat estimated' } : {}),
-          ...(!prev.product_depth_in ? { product_depth_in: 'mat estimated' } : {}),
-        }));
-      });
+      void findPhotoDimensions(current.upc, current.id, identity);
       console.info('receive_photo_timing', { compressed_ms: Math.round(compressedMs), upload_ms: Math.round(photoResponse.uploadMs),
         photo_bytes: upload.size, photo_to_filled_ms: Math.round(performance.now() - photoStarted),
         identify_server_ms: json.timing?.identify_ms || null, request_ms: Math.round(photoResponse.requestMs) });
@@ -1594,10 +1634,10 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         <details className="receive-confirm-details"><summary>Description {form.description ? '· filled' : '· empty'}</summary>
           <textarea rows={3} value={form.description} onChange={e => update('description', e.target.value)} /></details>
         <details className="receive-confirm-details"><summary>Product · {[form.productHeight, form.productWidth, form.productDepth].every(Boolean)
-          ? `${form.productHeight} × ${form.productWidth} × ${form.productDepth} in` : 'Add dimensions'}{form.productWeight ? ` · ${form.productWeight} lb` : ''}
+          ? `${form.productDepth} × ${form.productWidth} × ${form.productHeight} in (L × W × H)` : 'Add dimensions'}{form.productWeight ? ` · ${form.productWeight} lb` : ''}
           {dimensionsBusy ? ' · finding…' : ''} <small>{[...new Set(['product_height_in','product_width_in','product_depth_in','product_weight_lb'].map(k => dimensionSources[k]).filter(Boolean))].join(' / ')}</small></summary>
-          <div className="receive-confirm-dims">{([['productHeight','Height (in)','product_height_in'],['productWidth','Width (in)','product_width_in'],
-            ['productDepth','Depth (in)','product_depth_in'],['productWeight','Weight (lb)','product_weight_lb']] as const).map(([key,label,source]) =>
+          <div className="receive-confirm-dims">{([['productDepth','Length (in)','product_depth_in'],['productWidth','Width (in)','product_width_in'],
+            ['productHeight','Height (in)','product_height_in'],['productWeight','Weight (lb)','product_weight_lb']] as const).map(([key,label,source]) =>
             <label key={key}>{label}<input type="number" min="0" step="any" inputMode="decimal" value={form[key]} onChange={e => { update(key, e.target.value); setDimensionSources(p => ({...p,[source]:'staff'})); }} />
               {form[key] && <small>{dimensionSources[source] || 'staff'}</small>}</label>)}</div></details>
         <details className="receive-confirm-details"><summary>Package · {[form.length, form.width, form.height].every(Boolean)
@@ -1608,6 +1648,17 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
             <label key={key}>{label}<input type="number" min="0" step="any" inputMode="decimal" value={form[key]} onChange={e => { update(key, e.target.value); setDimensionSources(p => ({...p,[source]:'staff'})); }} />
               {form[key] && <small>{dimensionSources[source] || 'staff'}</small>}</label>)}</div></details>
         {dimensionsError && <small className="receive-confirm-note">{dimensionsError}</small>}
+        <button type="button" className="secondary" onClick={() => setMatOpen(true)}>Measure on mat</button>
+        {matOpen && <MeasureOnMat onClose={() => setMatOpen(false)} onApply={(value, target) => {
+          for (const key of target === 'product' ? ['productDepth','productWidth','productHeight'] : ['length','width','height']) dimensionTouched.current.add(key);
+          setForm(prev => target === 'product' ? {...prev, productDepth:value.length, productWidth:value.width, productHeight:value.height}
+            : {...prev, length:value.length, width:value.width, height:value.height});
+          setDimensionSources(prev => ({...prev, ...Object.fromEntries((target === 'product'
+            ? ['product_depth_in','product_width_in','product_height_in'] : ['package_length_in','package_width_in','package_height_in'])
+            .map(key => [key,'ArUco mat · staff reviewed']))}));
+          setMatOpen(false);
+        }} />}
+
         <div className="receive-confirm-photos">
           <input ref={confirmPhotoFile} type="file" accept="image/*" capture="environment" className="sr-only" aria-hidden tabIndex={-1}
             onChange={e => { const input=e.currentTarget; void ingestFiles(input.files).finally(() => {input.value='';}); }} />
@@ -1615,13 +1666,15 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           {files.length > 0 && <span>{files.length} photo{files.length === 1 ? '' : 's'}</span>}
         </div>
         <div className="receive-confirm-bottom">
-          <details className="receive-confirm-prices"><summary>{photoPriceBusy ? 'Finding online prices…' : photoPrice?.median_cents != null
-            ? `Sells online for ~${money(photoPrice.median_cents)} (${photoPrice.count} listings, ${money(photoPrice.low_cents)}–${money(photoPrice.high_cents)})`
-            : photoPrice?.count ? `Only ${photoPrice.count} matching listings · no median yet` : 'No comparable online price found'}</summary>
+          <details className="receive-confirm-prices"><summary>{photoPriceBusy ? 'Searching prices...' : !photoIdentity ? 'Prices available after product identification' : photoPriceError ? 'Price search incomplete' : photoPrice?.median_cents != null
+            ? `Online asking price ~${money(photoPrice.median_cents)} (${photoPrice.count} listings, ${money(photoPrice.low_cents)}–${money(photoPrice.high_cents)})`
+            : photoPrice?.count ? `Online price ${money(photoPrice.low_cents)}${photoPrice.count > 1 ? `–${money(photoPrice.high_cents)}` : ''}` : 'No comparable online price found'}</summary>
             {photoPrice?.listings?.map(listing => <a key={listing.url} href={listing.url} target="_blank" rel="noreferrer">{listing.store} · {money(listing.price_cents)} · {listing.product_name}</a>)}
             {photoPrice?.highest_retail && <small>Highest retail seen: {photoPrice.highest_retail.store} · {money(photoPrice.highest_retail.price_cents)}</small>}
             {photoPriceError && <><span>{photoPriceError}</span>{photoIdentity && <button type="button" className="secondary" onClick={() => void findPhotoPrices(photoIdentity)}>Retry prices</button>}</>}
           </details>
+          {photoPrice?.listings?.[0] && <a className="receive-confirm-source" href={photoPrice.listings[0].url} target="_blank" rel="noreferrer">
+            {photoPrice.listings[0].store} · {money(photoPrice.listings[0].price_cents)} · source ↗</a>}
           <div className="receive-confirm-bottom-row"><label>Your price<input inputMode="decimal" placeholder="0.00" value={form.ask} onChange={e => update('ask',e.target.value)} /></label>
             <label className="receive-confirm-ready"><input type="checkbox" checked={readyToList} onChange={e => setReadyToList(e.target.checked)} /> Ready to list</label></div>
           {liveMissing.length > 0 && <small>Missing: {liveMissing.join(', ')} · saves to Unfinished</small>}
@@ -1633,9 +1686,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         <label className={liveMissing.includes('price') ? 'receive-need' : undefined}>
           Price{liveMissing.includes('price')
             ? ' (needed to list)'
-            : (retail && !askTouched.current
-              ? ` (suggested from ${retail.source}${retail.asOf ? ` · ${retail.asOf.slice(0, 10)}` : ''} — edit if needed)`
-              : ' (no source price — type it)')}
+            : ((retail || photoPrice?.count) ? ' (reference only — enter your selling price)' : ' (enter your selling price)')}
           <input inputMode="decimal" placeholder="24.99" value={form.ask} onChange={e => update('ask', e.target.value)} autoComplete="off" />
         </label>
 
@@ -1738,13 +1789,13 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           <span className="hint">Auto-filled as brand + item specifics (scans and manual).</span>
         </label>
         {manual && <label className="unit-edit-wide">Description / features<textarea rows={3} value={form.description} onChange={e => update('description', e.target.value)} /></label>}
-        {manual && <label>Cost (optional)<input inputMode="decimal" placeholder="9.00" value={form.cost} onChange={e => update('cost', e.target.value)} /></label>}
-        <label className="unit-edit-wide">Manifest (optional)
+        {manual && !staffMode && <label>Cost (optional)<input inputMode="decimal" placeholder="9.00" value={form.cost} onChange={e => update('cost', e.target.value)} /></label>}
+        {!staffMode && <label className="unit-edit-wide">Manifest (optional)
           <select value={manifestId} onChange={e => setManifestId(e.target.value)}>
             <option value="">No manifest</option>
             {manifests.map(m => <option key={m.id} value={m.id}>{m.name} · {m.manifest_on}</option>)}
           </select>
-        </label>
+        </label>}
 
         <div className={`unit-edit-wide${liveMissing.includes('photo') ? ' receive-need' : ''}`}>
           <span className="receive-label">Photo{doNotList || manual ? ' (optional)' : (liveMissing.includes('photo') ? ' (needed to list)' : '')}</span>

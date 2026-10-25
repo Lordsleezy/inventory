@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",
+    "@techstark/opencv-js": "^5.0.0-release.1",
     "bwip-js": "^4.11.4",
     "exceljs": "^4.4.0",
     "react": "^19.1.1",

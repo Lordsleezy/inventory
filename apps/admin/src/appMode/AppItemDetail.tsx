@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { UnitEditDrawer } from '../UnitEditDrawer';
+import { shortError } from './shortError';
 
 type Photo = { id: number; path: string; is_primary: boolean };
 type Listing = { channel: string; status: string; listing_id: string | null; price_cents?: number | null };
@@ -21,6 +22,7 @@ type Props = {
   onSellInStore: () => void;
   /** Portal admin / manager — show Delete on edit. */
   canDelete?: boolean;
+  staffMode?: boolean;
 };
 
 const CHANNELS: { key: string; label: string }[] = [
@@ -36,7 +38,7 @@ function titleOf(u: Record<string, unknown>) {
 }
 
 export function AppItemDetail({
-  client, storeId, accessToken, sku, money, onBack, onChanged, onSellInStore, canDelete = false,
+  client, storeId, accessToken, sku, money, onBack, onChanged, onSellInStore, canDelete = false, staffMode = false,
 }: Props) {
   const [detail, setDetail] = useState<Detail | null>(null);
   const [urls, setUrls] = useState<Record<string, string>>({});
@@ -49,7 +51,7 @@ export function AppItemDetail({
     setDetail(null);
     void (async () => {
       try {
-        const { data, error: e } = await client.rpc('portal_inventory_detail', { p_sku: sku });
+        const { data, error: e } = await client.rpc(staffMode ? 'staff_inventory_detail' : 'portal_inventory_detail', { p_sku: sku });
         if (e) throw e;
         if (!data) throw new Error('Unit not found');
         const next = data as Detail;
@@ -64,13 +66,13 @@ export function AppItemDetail({
         setDetail(next);
         setUrls(signed);
       } catch (err) {
-        if (alive) setError(err instanceof Error ? err.message : String(err));
+        if (alive) setError(shortError(err));
       }
     })();
     return () => {
       alive = false;
     };
-  }, [client, sku, reload]);
+  }, [client, sku, reload, staffMode]);
 
   const unit = detail?.unit;
   const listingsBy = useMemo(() => {
@@ -114,7 +116,7 @@ export function AppItemDetail({
   const H = unit?.package_height_in != null ? Number(unit.package_height_in) : null;
   const box = L != null && W != null && H != null ? `${L}×${W}×${H} in` : null;
   const ask = unit?.ask_cents != null ? Number(unit.ask_cents) : null;
-  const cost = unit?.acquisition_cost_cents != null ? Number(unit.acquisition_cost_cents) : null;
+  const cost = !staffMode && unit?.acquisition_cost_cents != null ? Number(unit.acquisition_cost_cents) : null;
   const photos = detail?.photos || [];
   // Clerk accounts: the server sends no money for sold/out-of-stock units, so show none and don't offer Edit.
   const inStock = ['available', 'reserved', 'repair'].includes(String(unit?.state || ''));
@@ -125,7 +127,7 @@ export function AppItemDetail({
       <div className="app-nav">
         <button type="button" onClick={onBack}>‹ Inventory</button>
         <div className="app-nav-title">{sku}</div>
-        <button type="button" onClick={() => setEditing(true)} disabled={!detail} style={moneyHidden ? { visibility: 'hidden' } : undefined}>Edit</button>
+        <button type="button" onClick={() => setEditing(true)} disabled={!detail || staffMode} style={moneyHidden || staffMode ? { visibility: 'hidden' } : undefined}>Edit</button>
       </div>
 
       {error && <p className="app-footer-count" style={{ color: '#ff453a' }}>{error}</p>}
@@ -179,7 +181,7 @@ export function AppItemDetail({
 
           <div className="app-section-label">Details</div>
           <div className="app-group">
-            {!moneyHidden && <div className="app-kv">
+            {!moneyHidden && !staffMode && <div className="app-kv">
               <span>Cost</span>
               <strong className={cost == null ? 'warn' : undefined}>{cost == null ? 'Add cost' : money(cost)}</strong>
             </div>}

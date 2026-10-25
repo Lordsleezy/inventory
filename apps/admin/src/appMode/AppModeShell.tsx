@@ -209,6 +209,7 @@ export function AppModeShell({
             client={client}
             storeId={storeId}
             fullAccess={fullAccess}
+            staffMode={!fullAccess}
             money={money}
             stamp={stamp}
             onOpen={(sku) => {
@@ -226,6 +227,7 @@ export function AppModeShell({
             sku={itemSku}
             money={money}
             canDelete={fullAccess}
+            staffMode={!fullAccess}
             onBack={() => setItemSku(null)}
             onChanged={() => setInvKey((n) => n + 1)}
             onSellInStore={() => {
@@ -241,6 +243,7 @@ export function AppModeShell({
               client={client}
               storeId={storeId}
               accessToken={session.access_token}
+              staffMode={!fullAccess}
               onSaved={() => setInvKey((n) => n + 1)}
             />
           )}

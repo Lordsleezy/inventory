@@ -4,6 +4,7 @@ import type { AttentionSection } from '../navigation';
 import { ATTENTION_SECTIONS, NeedsAttentionPanel, useAttentionCounts } from '../NeedsAttentionPanel';
 import { reviewReasonLabel } from '../inventoryReview';
 import { CategoryPanel } from '../CategoryPanel';
+import { shortError } from './shortError';
 
 /** Same four subtabs as desktop Inventory. Unfinished replaces the old More → Needs attention. */
 type Filter = 'in_stock' | 'sold' | 'unfinished' | 'defective';
@@ -33,14 +34,15 @@ type Props = {
   storeId: string;
   /** Admin / owner / manager. Clerks get no fix queues, and the server sends them no sold prices. */
   fullAccess: boolean;
+  staffMode?: boolean;
   money: (n: number) => string;
   stamp: (s: string) => string;
   onOpen: (sku: string) => void;
   scrollRef?: React.RefObject<HTMLDivElement | null>;
 };
 
-const CACHE_PREFIX = 'floor_inv_cache_v2_';
-const URL_CACHE_KEY = 'floor_inv_urls_v1';
+const CACHE_PREFIX = 'floor_inv_cache_v3_';
+const URL_CACHE_KEY = 'floor_inv_urls_v2';
 const PAGE = 40;
 /** Signed URLs are minted for 3600s; refresh a bit early. */
 const URL_TTL_MS = 50 * 60 * 1000;
@@ -52,13 +54,13 @@ function thumb(path: string) {
   return `${parts[0]}/${parts[1]}/web/400/${stem}.webp`;
 }
 
-function cacheKey(filter: Filter, query: string, offset: number) {
-  return `${CACHE_PREFIX}${filter}:${query.trim().toLowerCase()}:${offset}`;
+function cacheKey(scope: string, filter: Filter, query: string, offset: number) {
+  return `${CACHE_PREFIX}${scope}:${filter}:${query.trim().toLowerCase()}:${offset}`;
 }
 
-function readCache(filter: Filter, query: string, offset: number): List | null {
+function readCache(scope: string, filter: Filter, query: string, offset: number): List | null {
   try {
-    const raw = sessionStorage.getItem(cacheKey(filter, query, offset));
+    const raw = sessionStorage.getItem(cacheKey(scope, filter, query, offset));
     if (!raw) return null;
     return JSON.parse(raw) as List;
   } catch {
@@ -66,15 +68,15 @@ function readCache(filter: Filter, query: string, offset: number): List | null {
   }
 }
 
-function writeCache(filter: Filter, query: string, offset: number, list: List) {
+function writeCache(scope: string, filter: Filter, query: string, offset: number, list: List) {
   try {
-    sessionStorage.setItem(cacheKey(filter, query, offset), JSON.stringify(list));
+    sessionStorage.setItem(cacheKey(scope, filter, query, offset), JSON.stringify(list));
   } catch { /* quota */ }
 }
 
-function readUrlCache(): Record<string, string> {
+function readUrlCache(scope: string): Record<string, string> {
   try {
-    const raw = sessionStorage.getItem(URL_CACHE_KEY);
+    const raw = sessionStorage.getItem(`${URL_CACHE_KEY}:${scope}`);
     if (!raw) return {};
     const pack = JSON.parse(raw) as { at: number; urls: Record<string, string> };
     if (!pack?.at || Date.now() - pack.at > URL_TTL_MS) return {};
@@ -84,9 +86,9 @@ function readUrlCache(): Record<string, string> {
   }
 }
 
-function writeUrlCache(urls: Record<string, string>) {
+function writeUrlCache(scope: string, urls: Record<string, string>) {
   try {
-    sessionStorage.setItem(URL_CACHE_KEY, JSON.stringify({ at: Date.now(), urls }));
+    sessionStorage.setItem(`${URL_CACHE_KEY}:${scope}`, JSON.stringify({ at: Date.now(), urls }));
   } catch { /* quota */ }
 }
 
@@ -115,12 +117,13 @@ function needs(u: Row): string | null {
   return null;
 }
 
-export function AppInventory({ client, storeId, fullAccess, money, stamp, onOpen, scrollRef }: Props) {
+export function AppInventory({ client, storeId, fullAccess, staffMode = false, money, stamp, onOpen, scrollRef }: Props) {
+  const cacheScope = `${storeId}:${staffMode ? 'staff' : 'admin'}`;
   const [filter, setFilter] = useState<Filter>('in_stock');
   const [query, setQuery] = useState('');
   const [offset, setOffset] = useState(0);
-  const [list, setList] = useState<List | null>(() => readCache('in_stock', '', 0));
-  const [urls, setUrls] = useState<Record<string, string>>(() => readUrlCache());
+  const [list, setList] = useState<List | null>(() => readCache(cacheScope, 'in_stock', '', 0));
+  const [urls, setUrls] = useState<Record<string, string>>(() => readUrlCache(cacheScope));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [unfinishedCount, setUnfinishedCount] = useState<number | null>(null);
@@ -151,7 +154,7 @@ export function AppInventory({ client, storeId, fullAccess, money, stamp, onOpen
     if (!Object.keys(extra).length) return;
     setUrls((prev) => {
       const next = { ...prev, ...extra };
-      writeUrlCache(next);
+      writeUrlCache(cacheScope, next);
       return next;
     });
   }
@@ -172,7 +175,7 @@ export function AppInventory({ client, storeId, fullAccess, money, stamp, onOpen
     const apply = (extra: Record<string, string>) => {
       if (alive) mergeUrls(extra);
     };
-    const cached = readCache(filter, query, offset);
+    const cached = readCache(cacheScope, filter, query, offset);
     if (cached) {
       setList(cached);
       // Warm cache: start signing immediately — don't wait on the revalidate RPC.
@@ -187,7 +190,7 @@ export function AppInventory({ client, storeId, fullAccess, money, stamp, onOpen
         try {
           const status = filter === 'unfinished' ? 'all' : filter;
           const unfinished = filter === 'unfinished';
-          const { data, error: e } = await client.rpc('portal_inventory_list', {
+          const { data, error: e } = await client.rpc(staffMode ? 'staff_inventory_list' : 'portal_inventory_list', {
             p_query: query,
             p_status: status,
             p_unfinished: unfinished,
@@ -199,12 +202,12 @@ export function AppInventory({ client, storeId, fullAccess, money, stamp, onOpen
           const next = data as List;
           if (!alive) return;
           setList(next);
-          writeCache(filter, query, offset, next);
+          writeCache(cacheScope, filter, query, offset, next);
           setLoading(false);
           await signItemPhotos(next.items, apply);
         } catch (err) {
           if (!alive) return;
-          setError(err instanceof Error ? err.message : String(err));
+          setError(shortError(err));
           if (!cached) setList({ items: [], totals: { unit_count: 0 } });
           setLoading(false);
         }
@@ -214,13 +217,13 @@ export function AppInventory({ client, storeId, fullAccess, money, stamp, onOpen
       alive = false;
       clearTimeout(t);
     };
-  }, [client, filter, query, offset]);
+  }, [client, filter, query, offset, staffMode, cacheScope]);
 
   // Unfinished badge once — not after every list refresh.
   useEffect(() => {
     let alive = true;
     void client
-      .rpc('portal_inventory_list', {
+      .rpc(staffMode ? 'staff_inventory_list' : 'portal_inventory_list', {
         p_query: '',
         p_status: 'all',
         p_unfinished: true,
@@ -234,7 +237,7 @@ export function AppInventory({ client, storeId, fullAccess, money, stamp, onOpen
     return () => {
       alive = false;
     };
-  }, [client]);
+  }, [client, staffMode]);
 
   const total = list?.totals.unit_count ?? 0;
   const footer = useMemo(() => {
@@ -249,7 +252,7 @@ export function AppInventory({ client, storeId, fullAccess, money, stamp, onOpen
     setFilter(next);
     setQueue(null);
     setOffset(0);
-    const hit = readCache(next, query, 0);
+    const hit = readCache(cacheScope, next, query, 0);
     setList(hit);
   }
 
