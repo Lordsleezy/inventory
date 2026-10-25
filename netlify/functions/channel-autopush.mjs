@@ -5,6 +5,7 @@ import { publishCreate } from "../lib/listing-manager.mjs";
 import { endOnChannel } from "../lib/marketplace-board.mjs";
 import { ebayPublishedListingForSku } from "../lib/ebay.mjs";
 import { amazonListingExists } from "../lib/amazon.mjs";
+import { wrapHandler, asNetlifyFunction } from "../lib/floor-log.mjs";
 
 function publishDeps(sb) {
   return {
@@ -27,7 +28,7 @@ function publishDeps(sb) {
   };
 }
 
-export const handler = async () => {
+async function handle() {
   const sb = serviceClient();
   const pub = publishDeps(sb);
   const out = await runAutopush({
@@ -38,4 +39,7 @@ export const handler = async () => {
     },
   });
   return { statusCode: 200, headers: { "content-type": "application/json" }, body: JSON.stringify(out) };
-};
+}
+
+export const invoke = wrapHandler("channel-autopush", handle);
+export default asNetlifyFunction(invoke);
