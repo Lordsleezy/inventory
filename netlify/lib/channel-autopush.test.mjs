@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { runAutopush, processRow, classifyFailure, normalizeSetting } from "./channel-autopush.mjs";
+import { readFileSync } from "node:fs";
+import { runAutopush, processRow, classifyFailure, normalizeSetting, queuePublish, floorListPriceCents } from "./channel-autopush.mjs";
 
 function fakeDb({ setting, rows = [], live = {}, never = {}, gaps = {}, selected = true }) {
   const updates = [];
@@ -97,4 +98,37 @@ test("TikTok approval pending stays queued and visible; hard errors fail; retrie
   assert.equal(classifyFailure("amazon", "not_on_amazon").retryable, false);
   const last = await processRow(db, { publish: async () => ({ ok: false, error: "HTTP 500" }) }, row(1, "8", "amazon", "list", 4), now);
   assert.equal(last.status, "failed");
+});
+
+test("queue listings are priced at the Floor set price only", async () => {
+  const calls = [];
+  const deps = {
+    loadUnit: async () => ({ sku: "10", ask_cents: 4999, retail_cents: 20000, is_collectible: true }),
+    existingListing: async () => null,
+    publish: async (_s, args) => { calls.push(args); return { ok: true, url: "u" }; },
+  };
+  for (const ch of ["ebay", "amazon", "tiktok"]) await queuePublish(deps, "s1", ch, "10");
+  assert.deepEqual(calls.map((c) => c.priceCents), [4999, 4999, 4999]);
+  assert.equal(floorListPriceCents({ ask_cents: 0 }), null);
+  const none = await queuePublish({ ...deps, loadUnit: async () => ({ ask_cents: null }) }, "s1", "ebay", "10");
+  assert.equal(none.ok, false);
+  assert.equal(classifyFailure("ebay", none.error).retryable, false);
+});
+
+test("queue never edits or reprices a listing that already exists on the channel", async () => {
+  let published = false;
+  const r = await queuePublish({
+    loadUnit: async () => ({ ask_cents: 1000 }),
+    existingListing: async () => ({ url: "https://www.ebay.com/itm/1" }),
+    publish: async () => { published = true; return { ok: true }; },
+  }, "s1", "ebay", "10");
+  assert.equal(published, false);
+  assert.deepEqual(r, { ok: true, already_live: true, url: "https://www.ebay.com/itm/1" });
+});
+
+test("queue path has no Promoted Listings / Marketing API step", () => {
+  for (const f of ["./channel-autopush.mjs", "../functions/channel-autopush.mjs"]) {
+    const src = readFileSync(new URL(f, import.meta.url), "utf8");
+    assert.doesNotMatch(src, /sell\/marketing|promot|campaign|bidPercentage/i, f);
+  }
 });

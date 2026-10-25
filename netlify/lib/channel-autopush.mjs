@@ -139,3 +139,23 @@ export function supabaseQueueDb(sb) {
     },
   };
 }
+
+/** Queue listings are always priced at the Floor set price; the buyer pays calculated shipping. */
+export function floorListPriceCents(unit) {
+  const cents = Math.round(Number(unit?.ask_cents));
+  return Number.isFinite(cents) && cents > 0 ? cents : null;
+}
+
+/**
+ * Create a new listing at the Floor price. If the SKU already exists on the channel
+ * (e.g. listed by hand or by Codex), report it as live and never touch it — no reprice, no edit.
+ */
+export async function queuePublish({ loadUnit, existingListing, publish }, storeId, channel, sku) {
+  const unit = await loadUnit(storeId, sku);
+  if (!unit) return { ok: false, error: "unknown_sku" };
+  const priceCents = floorListPriceCents(unit);
+  if (!priceCents) return { ok: false, error: "missing price: set the Floor price" };
+  const existing = await existingListing(storeId, channel, sku);
+  if (existing) return { ok: true, already_live: true, url: existing.url || "already_live" };
+  return publish(storeId, { channel, sku, priceCents });
+}

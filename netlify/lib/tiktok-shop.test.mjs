@@ -8,7 +8,6 @@ import {
   TIKTOK_OAUTH_REDIRECT,
   TIKTOK_API_SCOPES,
 } from "./tiktok-shop.mjs";
-import { applyReturnReserveCents } from "./returns.mjs";
 
 test("TikTok mapper marks requested as needs decision", () => {
   const row = mapTikTokReturn({
@@ -25,13 +24,12 @@ test("TikTok mapper marks requested as needs decision", () => {
   assert.equal(row.refund_cents, 1950);
 });
 
-test("TikTok price uses online rule + fee + return reserve", () => {
-  const unit = { retail_cents: 10000, ask_cents: 6000, acquisition_cost_cents: 900, is_collectible: false };
+test("TikTok price is the Floor set price (no retail discount or reserve markup)", () => {
+  const unit = { retail_cents: 10000, ask_cents: 6000, acquisition_cost_cents: 900, is_collectible: true };
   const price = suggestTikTokPriceCents(unit, TIKTOK_DEFAULT_FEE_PCT, 10);
-  assert.ok(price.listCents >= applyReturnReserveCents(6000, 10));
-  assert.equal(price.returnReservePct, 10);
+  assert.equal(price.listCents, 6000);
+  assert.equal(price.returnReservePct, 0);
   assert.ok(price.feeCents > 0);
-  assert.ok(price.ok);
 });
 
 test("signTikTokRequest is stable HMAC", () => {
