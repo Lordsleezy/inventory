@@ -119,6 +119,8 @@ type Props = {
   onSaved: () => void;
   /** App-mode chrome: Cancel / Receive · SKU / Save nav, no instruction paragraphs. */
   appChrome?: boolean;
+  /** Use store staff RPCs and omit portal-only controls. */
+  staffMode?: boolean;
   initialManual?: boolean;
   /** Prefill / enqueue a UPC from an earlier camera capture. */
   initialUpc?: string | null;
@@ -548,7 +550,7 @@ function CameraScanner({ onDetect, onFile, onClose }: {
 
 /* ================================================================================================ */
 
-export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome, initialManual, initialUpc, onAppCancel }: Props) {
+export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome, staffMode = false, initialManual, initialUpc, onAppCancel }: Props) {
   const [options, setOptions] = useState<Options | null>(null);
   const [manual, setManual] = useState(!!initialManual);
   const [draft, setDraft] = useState('');
@@ -592,11 +594,12 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
 
   useEffect(() => {
     let active = true;
+    if (staffMode) return;
     void client.from('store_manifests').select('id,name,manifest_on')
       .eq('store_id', storeId).order('manifest_on', { ascending: false })
       .then(({ data }) => { if (active) setManifests(data || []); });
     return () => { active = false; };
-  }, [client, storeId]);
+  }, [client, storeId, staffMode]);
 
   const upcInput = useRef<HTMLInputElement>(null);
   const cameraFile = useRef<HTMLInputElement>(null);
@@ -686,11 +689,11 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   }, [formOpen, loadedId]);
 
   async function loadOptions() {
-    const { data, error: e } = await client.rpc('portal_receive_options');
+    const { data, error: e } = await client.rpc(staffMode ? 'staff_receive_options' : 'portal_receive_options');
     if (e) throw e;
     setOptions(data as Options);
   }
-  useEffect(() => { void loadOptions().catch(e => setError(errText(e))); }, [client]);
+  useEffect(() => { void loadOptions().catch(e => setError(errText(e))); }, [client, staffMode]);
 
   /* ----- photo previews ----- */
   const previews = useMemo(() => files.map(f => URL.createObjectURL(f)), [files]);
@@ -699,7 +702,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   /* ----- duplicate check ----- */
   async function findDups(variants: string[]): Promise<Dups | null> {
     if (!variants.length) return null;
-    const { data, error: e } = await client.from('units').select('sku')
+    const { data, error: e } = await client.from(staffMode ? 'units_pos' : 'units').select('sku')
       .eq('store_id', storeId).in('upc', variants).in('state', IN_STOCK).limit(100);
     if (e || !data) return null;
     return { count: data.length, skus: data.map(r => String((r as { sku: string }).sku)) };
@@ -1004,7 +1007,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       const brandValue = form.unbranded ? 'Unbranded' : form.brand.trim();
       // Scans and manual: title is always brand + item specifics (never catalog junk / digit codes).
       const titleValue = form.title.trim() || composeListingTitle(form.brand, form.model, form.unbranded);
-      const { data, error: e } = await client.rpc('portal_receive_unit', {
+      const { data, error: e } = await client.rpc(staffMode ? 'staff_receive_unit' : 'portal_receive_unit', {
         p_quantity: quantity,
         p_brand: brandValue,
         p_model: form.model.trim(),
@@ -1026,7 +1029,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       if (e) throw e;
       const skus = (data as { skus: string[] }).skus;
       const warnings: string[] = [];
-      if (manifestId) {
+      if (manifestId && !staffMode) {
         const tagged = await client.rpc('portal_tag_manifest', { p_id: manifestId, p_skus: skus });
         if (tagged.error) warnings.push('Received units were saved, but their manifest tag failed. Use Manifests → Bulk tag to retry.');
       }
@@ -1040,7 +1043,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           const contentType = file.type && file.type.startsWith('image/') ? file.type : 'image/jpeg';
           const upload = await client.storage.from('unit-photos').upload(path, file, { contentType, upsert: false });
           if (upload.error) throw upload.error;
-          const linked = await client.rpc('portal_add_unit_photo', { p_sku: sku, p_path: path });
+          const linked = await client.rpc(staffMode ? 'staff_add_unit_photo' : 'portal_add_unit_photo', { p_sku: sku, p_path: path });
           if (linked.error) throw linked.error;
         } catch (err) {
           failed++;
@@ -1058,7 +1061,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       const blocked = skus.includes(NEVER_LIST_SKU);
       const enrichFailed = await enrichUnits(skus, parsed, hold, blocked || doNotList);
       if (enrichFailed) warnings.push(`Could not save lookup details on ${enrichFailed} unit(s).${hold ? ' They have no price, so they will not list.' : ''}`);
-      if (!blocked && !doNotList && !hold) {
+      if (!staffMode && !blocked && !doNotList && !hold) {
         for (const [index, sku] of skus.entries()) {
           try {
             const categoryResponse = await fetch(floorFunctionUrl('category-resolve'), { method: 'POST',
@@ -1068,7 +1071,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
             if (!categoryResponse.ok) throw new Error(categoryResult.error || 'category_resolve_failed');
             if (categoryResult.gaps?.length) warnings.push(`SKU ${sku} needs category review; open Missing Category below.`);
             else if (readyToList) {
-              const marked = await client.rpc('portal_enrich_received_unit', { p_sku: sku, p_specs: { ready_to_list: true } });
+              const marked = await client.rpc(staffMode ? 'staff_enrich_received_unit' : 'portal_enrich_received_unit', { p_sku: sku, p_specs: { ready_to_list: true } });
               if (marked.error) warnings.push(`SKU ${sku} categories are complete, but Ready to list could not be set.`);
             }
           } catch { warnings.push(`SKU ${sku} category lookup did not finish; use Missing Category below.`); }
@@ -1235,11 +1238,14 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     brand: string; model: string; title: string; description: string;
   }): Promise<boolean> {
     // Preferred: RPC (units has no UPDATE policy for authenticated users).
-    const rpc = await client.rpc('portal_enrich_received_unit', {
+    const rpc = await client.rpc(staffMode ? 'staff_enrich_received_unit' : 'portal_enrich_received_unit', {
       p_sku: sku, p_specs: p.specs, p_msrp_cents: p.msrp, p_show: p.show,
       p_brand: p.brand || null, p_model: p.model || null, p_title: p.title || null, p_description: p.description || null,
     });
     if (!rpc.error) return true;
+    // Store staff may enrich only through the scoped RPC; the direct table update
+    // fallback is reserved for the portal's legacy admin path.
+    if (staffMode) return false;
     // Fallback: direct update with client-side coalesce (only works if RLS allows it; verified via returned rows).
     try {
       const cur = await client.from('units').select('listing_specs, msrp_cents, brand, model, title, listing_body')
@@ -1783,13 +1789,13 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           <span className="hint">Auto-filled as brand + item specifics (scans and manual).</span>
         </label>
         {manual && <label className="unit-edit-wide">Description / features<textarea rows={3} value={form.description} onChange={e => update('description', e.target.value)} /></label>}
-        {manual && <label>Cost (optional)<input inputMode="decimal" placeholder="9.00" value={form.cost} onChange={e => update('cost', e.target.value)} /></label>}
-        <label className="unit-edit-wide">Manifest (optional)
+        {manual && !staffMode && <label>Cost (optional)<input inputMode="decimal" placeholder="9.00" value={form.cost} onChange={e => update('cost', e.target.value)} /></label>}
+        {!staffMode && <label className="unit-edit-wide">Manifest (optional)
           <select value={manifestId} onChange={e => setManifestId(e.target.value)}>
             <option value="">No manifest</option>
             {manifests.map(m => <option key={m.id} value={m.id}>{m.name} · {m.manifest_on}</option>)}
           </select>
-        </label>
+        </label>}
 
         <div className={`unit-edit-wide${liveMissing.includes('photo') ? ' receive-need' : ''}`}>
           <span className="receive-label">Photo{doNotList || manual ? ' (optional)' : (liveMissing.includes('photo') ? ' (needed to list)' : '')}</span>
