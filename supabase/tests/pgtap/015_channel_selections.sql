@@ -1,7 +1,7 @@
 -- pgTAP: channel checkboxes, never-list rules, listing queue, "Needs to be checked" subtab
 -- (20261030190000_channel_selections.sql).
 begin;
-select plan(18);
+select plan(27);
 do $$
 declare
   v_store uuid;
@@ -85,5 +85,18 @@ select is(public.floor_backfill_channel_selections(current_setting('test.store_i
   '{"amazon": 1}'::jsonb, 'backfill ticks only the live channel nobody has decided on');
 select is((select selected from public.unit_channel_selections where sku = '97005' and channel = 'ebay'), false, 'backfill keeps the admin unchecking');
 select is((select count(*)::int from public.listing_queue where sku = '97006'), 0, 'backfill queues nothing');
+-- A missing UPC blocks Amazon/TikTok selections and publishing, never eBay.
+update public.units set upc=null where sku='97001' and store_id=current_setting('test.store_id')::uuid;
+select ok(not ('upc'=any(public.unit_listing_gaps(u))), 'unselected Amazon/TikTok does not make a no-UPC unit Unfinished')
+ from public.units u where u.sku='97001';
+select ok(not ('upc'=any(public.floor_unit_channel_mandatory_gaps(current_setting('test.store_id')::uuid,'97001','ebay'))), 'eBay has no UPC gap');
+select ok('upc'=any(public.floor_unit_channel_mandatory_gaps(current_setting('test.store_id')::uuid,'97001','amazon')), 'Amazon requires a UPC');
+select ok('upc'=any(public.floor_unit_channel_mandatory_gaps(current_setting('test.store_id')::uuid,'97001','tiktok')), 'TikTok requires a UPC');
+select throws_ok($$select public.portal_set_unit_channel_selection('97001','amazon',true)$$,'22023',null,'cannot check Amazon without UPC');
+select throws_ok($$select public.portal_set_unit_channel_selection('97001','tiktok',true)$$,'22023',null,'cannot check TikTok without UPC');
+select is(public.portal_set_unit_channel_selection('97001','ebay',true)->>'queued','list','can check eBay without UPC');
+select ok(not public.floor_valid_upc('000000000000') and not public.floor_valid_upc('012345678906'),'fake and invalid barcodes rejected');
+update public.units set upc='012345678905' where sku='97001' and store_id=current_setting('test.store_id')::uuid;
+select is(public.portal_set_unit_channel_selection('97001','amazon',true)->>'queued','list','valid UPC permits Amazon selection');
 select * from finish();
 rollback;

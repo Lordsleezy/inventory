@@ -1670,7 +1670,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           {photoPrice?.listings?.[0] && <a className="receive-confirm-source" href={photoPrice.listings[0].url} target="_blank" rel="noreferrer">
             {photoPrice.listings[0].store} · {money(photoPrice.listings[0].price_cents)} · source ↗</a>}
           <div className="receive-confirm-bottom-row"><label>Your price<input inputMode="decimal" placeholder="0.00" value={form.ask} onChange={e => update('ask',e.target.value)} /></label>
-            {!staffMode && <ChannelPicker compact value={channels} onChange={setChannels} />}</div>
+            {!staffMode && <ChannelPicker compact value={channels} onChange={setChannels} upc={form.noUpc ? '' : (form.upc || current?.upc || '')} />}</div>
           {liveMissing.length > 0 && <small>Missing: {liveMissing.join(', ')} · saves to Unfinished</small>}
           <button type="submit" disabled={busy || !options?.next_sku || (dups !== null && dups.count > 0 && !dupAck)}>{busy ? 'Saving…' : 'Save & next'}</button>
         </div>
@@ -1857,7 +1857,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           />
           Do not list for sale
         </label>
-        {!staffMode && <ChannelPicker value={channels} onChange={setChannels} disabled={doNotList} />}
+        {!staffMode && <ChannelPicker value={channels} onChange={setChannels} disabled={doNotList} upc={form.noUpc ? '' : (form.upc || current?.upc || '')} />}
       </div>
 
       <p className="hint receive-check">

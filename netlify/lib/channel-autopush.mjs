@@ -59,7 +59,7 @@ export async function processRow(db, deps, row, now) {
     const never = await db.neverReason(storeId, sku, channel);
     if (never) return { status: "failed", attempts: row.attempts, issue: `Never list: ${never}`, retryable: false };
     if (live) return { status: "done", issue: null, last_error: null, listing_ref: "already_live" };
-    const gaps = await db.gaps(storeId, sku);
+    const gaps = await db.gaps(storeId, sku, channel);
     if (gaps.length) return { status: "queued", issue: `Missing: ${gaps.join(", ")}`, next_attempt_at: later(now, 60) };
     const r = await deps.publish(storeId, channel, sku);
     if (r?.ok && !r?.needs_confirm) return { status: "done", issue: null, last_error: null, listing_ref: r.url || null };
@@ -141,7 +141,7 @@ export function supabaseQueueDb(sb) {
     },
     neverReason: (storeId, sku, channel) => rpc("floor_unit_never_list_reason", { p_store: storeId, p_sku: sku, p_channel: channel }),
     live: (storeId, sku, channel) => rpc("floor_unit_live_on", { p_store: storeId, p_sku: sku, p_channel: channel }),
-    gaps: async (storeId, sku) => (await rpc("floor_unit_mandatory_gaps", { p_store: storeId, p_sku: sku })) || [],
+    gaps: async (storeId, sku, channel) => (await rpc("floor_unit_channel_mandatory_gaps", { p_store: storeId, p_sku: sku, p_channel: channel })) || [],
     async listingRow(storeId, sku, channel) {
       const { data } = await sb.from("listings").select("*")
         .eq("store_id", storeId).eq("sku", sku).eq("channel", channel).eq("status", "listed").limit(1).maybeSingle();

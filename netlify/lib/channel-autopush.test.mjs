@@ -103,6 +103,17 @@ test("missing mandatory fields wait in the queue with the reason", async () => {
   assert.equal(patch.issue, "Missing: photo, spec");
 });
 
+test("queue readiness passes the target channel so UPC requirements stay channel-specific", async () => {
+  const db = fakeDb({ setting: {} });
+  db.gaps = async (_s, _sku, channel) => channel === 'ebay' ? [] : ['upc'];
+  let published=0;
+  const deps={publish:async()=>{published++;return {ok:true};}};
+  assert.equal((await processRow(db,deps,row(1,'no-upc','ebay'),now)).status,'done');
+  assert.equal((await processRow(db,deps,row(2,'no-upc','amazon'),now)).issue,'Missing: upc');
+  assert.equal((await processRow(db,deps,row(3,'no-upc','tiktok'),now)).issue,'Missing: upc');
+  assert.equal(published,1);
+});
+
 test("never-list and unchecked units are not published", async () => {
   const deps = { publish: async () => assert.fail("must not publish") };
   const never = await processRow(fakeDb({ setting: {}, never: { "6:ebay": "Holiday Living lights" } }), deps, row(1, "6", "ebay"), now);

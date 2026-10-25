@@ -9,19 +9,25 @@ type ChannelState = {
   selected: boolean;
   live: boolean;
   never_reason: string | null;
+  blocked_reason?: string | null;
   queue: { action: string; status: string; issue: string | null; last_error: string | null } | null;
 };
 
 function niceError(message: string) {
+  if (message.includes('channel_upc_required')) return 'Add a valid UPC before selecting Amazon or TikTok Shop.';
   if (message.startsWith('channel_never_list')) return `Never listed there: ${message.split(':').slice(1).join(':').trim()}`;
   if (message.includes('portal_access_denied')) return 'Only admins can change channels.';
   return message;
 }
 
 /** Receive: pick channels before the unit exists; applied with applyChannelSelections after saving. */
-export function ChannelPicker({ value, onChange, disabled = false, compact = false }: {
-  value: ChannelId[]; onChange: (next: ChannelId[]) => void; disabled?: boolean; compact?: boolean;
+export function ChannelPicker({ value, onChange, disabled = false, compact = false, upc = '' }: {
+  value: ChannelId[]; onChange: (next: ChannelId[]) => void; disabled?: boolean; compact?: boolean; upc?: string;
 }) {
+  const hasUpc = validChannelUpc(upc);
+  useEffect(() => {
+    if (!hasUpc && value.some(id => id !== 'ebay')) onChange(value.filter(id => id === 'ebay'));
+  }, [hasUpc, value, onChange]);
   return (
     <fieldset className={compact ? 'channel-picker channel-picker-compact' : 'channel-picker unit-edit-wide'} disabled={disabled}>
       {!compact && <legend>List on</legend>}
@@ -30,9 +36,10 @@ export function ChannelPicker({ value, onChange, disabled = false, compact = fal
           <input
             type="checkbox"
             checked={value.includes(id)}
+            disabled={id !== 'ebay' && !hasUpc}
             onChange={e => onChange(e.target.checked ? [...value.filter(c => c !== id), id] : value.filter(c => c !== id))}
           />
-          {label}
+          {label}{id !== 'ebay' && !hasUpc && <small> · UPC required</small>}
         </label>
       ))}
     </fieldset>
@@ -81,16 +88,16 @@ export function ChannelCheckboxes({ client, sku, appMode = false }: { client: Su
       <legend>List on</legend>
       {LISTING_CHANNELS.map(([id, label]) => {
         const c = state[id];
-        const status = c.never_reason ? c.never_reason
+        const status = c.never_reason || c.blocked_reason ? c.never_reason || c.blocked_reason
           : c.queue?.status === 'failed' ? `Listing issue: ${c.queue.last_error || c.queue.issue || 'failed'}`
           : c.queue ? `${c.queue.action === 'end' ? 'Ending' : 'Queued to list'}${c.queue.issue ? ` · ${c.queue.issue}` : ''}`
           : c.live ? 'Live' : '';
         return (
-          <label key={id} className="mboard-inline" title={c.never_reason || undefined}>
+          <label key={id} className="mboard-inline" title={c.never_reason || c.blocked_reason || undefined}>
             <input
               type="checkbox"
               checked={c.selected}
-              disabled={busy !== null || (!c.selected && Boolean(c.never_reason))}
+              disabled={busy !== null || (!c.selected && Boolean(c.never_reason || c.blocked_reason))}
               onChange={e => void toggle(id, e.target.checked)}
             />
             {label}{status && <small> · {status}</small>}
@@ -100,6 +107,12 @@ export function ChannelCheckboxes({ client, sku, appMode = false }: { client: Su
       {error && <p className="error">{error}</p>}
     </fieldset>
   );
+}
+
+function validChannelUpc(raw: string) {
+  const value = raw.trim();
+  if (!/^(?:\d{8}|\d{12,14})$/.test(value) || /^0+$/.test(value)) return false;
+  return [...value].reverse().reduce((sum, digit, index) => sum + Number(digit) * (index % 2 ? 3 : 1), 0) % 10 === 0;
 }
 
 type Issue = {
