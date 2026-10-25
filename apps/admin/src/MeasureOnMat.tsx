@@ -1,9 +1,10 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { rectifyMatPhoto } from './matMeasure';
+import { preloadMatMeasure, rectifyMatPhoto } from './matMeasure';
 
 type Measurements = { length: string; width: string; height: string };
 export function MeasureOnMat({ onApply, onClose }: { onApply: (value: Measurements, target: 'product' | 'package') => void; onClose: () => void }) {
+  useEffect(() => { void preloadMatMeasure().catch(() => {}); }, []);
   const [stage, setStage] = useState<'top' | 'side'>('top');
   const [image, setImage] = useState('');
   const [points, setPoints] = useState<{x:number;y:number}[]>([]);

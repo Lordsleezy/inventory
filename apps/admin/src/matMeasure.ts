@@ -1,8 +1,23 @@
-/** Loads OpenCV only when staff choose the measuring step. Coordinates are inches. */
+let openCvPromise: Promise<any> | null = null;
+
+function loadOpenCv(): Promise<any> {
+  if (!openCvPromise) {
+    openCvPromise = import('@techstark/opencv-js')
+      .then(async imported => await imported.default as any)
+      .catch(error => { openCvPromise = null; throw error; });
+  }
+  return openCvPromise;
+}
+
+/** Preload after the measuring dialog opens, never as part of the admin entry bundle. */
+export async function preloadMatMeasure(): Promise<void> {
+  await loadOpenCv();
+}
+
+/** Coordinates are inches. */
 export async function rectifyMatPhoto(file: File): Promise<string> {
-  const imported = await import('@techstark/opencv-js');
   // OpenCV's generated bindings omit the aruco types from the package declarations.
-  const cv = await imported.default as any;
+  const cv = await loadOpenCv();
   const image = new Image();
   const url = URL.createObjectURL(file);
   try {
