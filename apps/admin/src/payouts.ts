@@ -3,12 +3,12 @@
 // Reports / owner "profit after costs":
 //   item + buyer-paid shipping − channel fees − label/shipping cost − card processing − item cost
 //
-// Commission base (every percent-of-profit / online cut):
-//   sale price (merchandise + buyer-paid shipping) − item cost
-//   Tax and ALL fees stay out — commissions never shrink because of Square/eBay/label fees.
+// Commission base (percent-of-profit / online cut):
+//   gross sale + buyer-paid shipping − channel fees − label − processing − sales tax − real item cost.
+// The stored merchandise price is pre-tax, so tax is added and removed once in the helper below.
 //
-// `cost` arrives already resolved (real unit cost, collectible $0, or category default);
-// `costEstimated` marks sales whose profit used a default instead of a real cost.
+// `cost` is a recorded unit cost or an explicitly marked collectible $0. Missing cost is null.
+// `costEstimated` is retained only for legacy rows and never supplies a payout cost.
 export type RuleMethod = 'percent_sale' | 'flat_ticket' | 'percent_profit';
 export type Rule = { employee_id: string; method: RuleMethod; rate: number };
 export type TicketLineLike = {
@@ -19,6 +19,11 @@ export type TicketLineLike = {
   cost_cents?: number | null;
   /** Legacy fee-adjusted ledger profit — ignored for commissions. */
   profit_cents?: number | null;
+  shipping_cents?: number | null;
+  channel_fee_cents?: number | null;
+  ship_cost_cents?: number | null;
+  processing_fee_cents?: number | null;
+  tax_owed_cents?: number | null;
 };
 /** Per-sale Paul/Jacob percent-of-(sale−cost) override. Null/absent = use defaults. */
 export type CommissionOverride = { paulPct: number; jacobPct: number };
@@ -27,6 +32,8 @@ export type TicketLike = {
   feeCents?: number; shipCostCents?: number; processingFeeCents?: number;
   /** Buyer-paid shipping (revenue). Not the label we bought. */
   shippingCents?: number;
+  taxCollectedCents?: number;
+  taxOwedCents?: number;
   // Back-compat aliases from the old eBay-only ledger.
   ebayFeeCents?: number; bakedShipCents?: number;
   costEstimated?: boolean;
@@ -37,28 +44,19 @@ export type TicketLike = {
   /** Admin per-sale commission split override (Paul / Jacob). */
   commissionOverride?: CommissionOverride | null;
 };
-export type OnlineCfg = { channels: string[]; pct: number; employeeId: string | null };
+export type OnlineCfg = {
+  channels: string[]; pct: number; employeeId: string | null;
+  /** Who fills the Paul / Jacob per-sale override columns (store_payout_people). */
+  slots?: { paul?: string | null; jacob?: string | null };
+  /** sku → employee_id → in-store percent-of-profit rate (store_payout_sku_rates). */
+  skuRates?: Record<string, Record<string, number>>;
+};
 export const NO_ONLINE: OnlineCfg = { channels: [], pct: 0, employeeId: null };
 export const isOnline = (t: TicketLike, cfg: OnlineCfg) => cfg.channels.includes((t.channel || '').toLowerCase());
 
-/** Jacob / Paul UUIDs for one-off in-store SKU profit splits (global rules stay 10% / 20%). */
-export const PAYOUT_JACOB_ID = 'c851c8ee-2cc2-490f-935f-1e2d7e093d88';
-export const PAYOUT_PAUL_ID = 'f17e6163-b10a-4fe1-a373-75c0094e5363';
-/** In-store percent-of-profit overrides: sku → employee_id → rate. */
-export const IN_STORE_SKU_PROFIT_OVERRIDES: Record<string, Record<string, number>> = {
-  '11314': { [PAYOUT_JACOB_ID]: 25, [PAYOUT_PAUL_ID]: 5 },
-  '11386': { [PAYOUT_JACOB_ID]: 20, [PAYOUT_PAUL_ID]: 10 },
-  '11415': { [PAYOUT_JACOB_ID]: 20, [PAYOUT_PAUL_ID]: 10 },
-  '11522': { [PAYOUT_JACOB_ID]: 25, [PAYOUT_PAUL_ID]: 5 },
-  // Dan Marjele signed jersey — Paul 30% of (sale − cost); Jacob none on this SKU.
-  '99694': { [PAYOUT_JACOB_ID]: 0, [PAYOUT_PAUL_ID]: 30 },
-  // Same ticket as 99694: Paul 10% / Jacob 20% of (sale − cost).
-  '11629': { [PAYOUT_JACOB_ID]: 20, [PAYOUT_PAUL_ID]: 10 },
-  '99695': { [PAYOUT_JACOB_ID]: 20, [PAYOUT_PAUL_ID]: 10 },
-};
-
-export function inStoreOverrideRate(sku: string, employeeId: string): number | undefined {
-  return IN_STORE_SKU_PROFIT_OVERRIDES[sku]?.[employeeId];
+/** In-store percent-of-profit rate for one SKU and person (store_payout_sku_rates). */
+export function inStoreOverrideRate(sku: string, employeeId: string, cfg: OnlineCfg): number | undefined {
+  return cfg.skuRates?.[sku]?.[employeeId];
 }
 
 const channelFees = (t: TicketLike) => Math.max(0, t.feeCents ?? t.ebayFeeCents ?? 0);
@@ -66,9 +64,8 @@ const shipCosts = (t: TicketLike) => Math.max(0, t.shipCostCents ?? t.bakedShipC
 const processing = (t: TicketLike) => Math.max(0, t.processingFeeCents ?? 0);
 const buyerShipping = (t: TicketLike) => Math.max(0, t.shippingCents ?? 0);
 
-/** Fee-adjusted profit (Reports). Null only when the ticket has no cost at all. */
+/** Item price is stored pre-tax, so tax is pass-through and already outside this base. */
 export function profit(t: TicketLike): number | null {
-  if (t.profitCents != null && Number.isFinite(t.profitCents)) return t.profitCents;
   if (t.cost === null) return null;
   return t.subtotal + buyerShipping(t) - channelFees(t) - shipCosts(t) - processing(t) - t.cost;
 }
@@ -76,7 +73,7 @@ export function profit(t: TicketLike): number | null {
 /**
  * Reports → Profit (all time) is the sum of sale profit minus eBay insertion and
  * store-subscription fees. Those fees are not on a sale row. Commissions stay on
- * sale − cost and are not reduced here. Losses are kept.
+ * the saved formula includes buyer shipping and subtracts fees, taxes and item cost. Losses are kept.
  */
 export function reportProfitCents(saleProfitCents: number | null, ebayOverheadCents: number): number | null {
   if (saleProfitCents == null || !Number.isFinite(saleProfitCents)) return null;
@@ -84,17 +81,19 @@ export function reportProfitCents(saleProfitCents: number | null, ebayOverheadCe
   return saleProfitCents - overhead;
 }
 
-/** Commission base: sale (− tax/fees) minus cost. Buyer shipping counts as sale revenue. */
+/** Commission base: item price + buyer shipping − fees, label, processing, and cost. */
 export function commissionProfit(t: TicketLike): number | null {
   if (t.cost === null) return null;
-  return t.subtotal + buyerShipping(t) - t.cost;
+  return t.subtotal + buyerShipping(t) - channelFees(t) - shipCosts(t) - processing(t) - t.cost;
 }
 
 /** Per-line commission base when price + cost are present. */
 export function lineCommissionProfit(l: TicketLineLike): number | null {
   if (l.price_cents == null || !Number.isFinite(l.price_cents)) return null;
   if (l.cost_cents == null || !Number.isFinite(l.cost_cents)) return null;
-  return l.price_cents - l.cost_cents;
+  return l.price_cents + Math.max(0, l.shipping_cents ?? 0) - Math.max(0, l.channel_fee_cents ?? 0)
+    - Math.max(0, l.ship_cost_cents ?? 0) - Math.max(0, l.processing_fee_cents ?? 0)
+    - l.cost_cents;
 }
 
 /**
@@ -105,8 +104,8 @@ export function defaultCommissionSplit(t: TicketLike, rules: Rule[], cfg: Online
   if (isOnline(t, cfg)) {
     return { paulPct: Number(cfg.pct) || 0, jacobPct: 0 };
   }
-  const paul = rules.find(r => r.employee_id === PAYOUT_PAUL_ID);
-  const jacob = rules.find(r => r.employee_id === PAYOUT_JACOB_ID);
+  const paul = rules.find(r => r.employee_id === cfg.slots?.paul);
+  const jacob = rules.find(r => r.employee_id === cfg.slots?.jacob);
   return {
     paulPct: paul && paul.method === 'percent_profit' ? Number(paul.rate) || 0 : Number(paul?.rate) || 0,
     jacobPct: jacob && jacob.method === 'percent_profit' ? Number(jacob.rate) || 0 : Number(jacob?.rate) || 0,
@@ -123,11 +122,11 @@ export function effectiveCommissionSplit(
   return { ...defaultCommissionSplit(t, rules, cfg), overridden: false };
 }
 
-function overridePayout(t: TicketLike, employeeId: string, ov: CommissionOverride): number | null {
+function overridePayout(t: TicketLike, employeeId: string, ov: CommissionOverride, cfg: OnlineCfg): number | null {
   const p = commissionProfit(t);
   if (p === null) return null;
-  const rate = employeeId === PAYOUT_PAUL_ID ? ov.paulPct
-    : employeeId === PAYOUT_JACOB_ID ? ov.jacobPct
+  const rate = cfg.slots?.paul && employeeId === cfg.slots.paul ? ov.paulPct
+    : cfg.slots?.jacob && employeeId === cfg.slots.jacob ? ov.jacobPct
     : 0;
   return Math.round(Math.max(0, p) * Number(rate) / 100);
 }
@@ -135,8 +134,9 @@ function overridePayout(t: TicketLike, employeeId: string, ov: CommissionOverrid
 /** Cents owed to this rule's person for one ticket. null = cannot be calculated (no cost anywhere). */
 export function payout(t: TicketLike, rule: Rule | undefined, cfg: OnlineCfg): number | null {
   if (!rule) return null;
+  if (t.cost === null) return null;
   if (t.commissionOverride) {
-    return overridePayout(t, rule.employee_id, t.commissionOverride);
+    return overridePayout(t, rule.employee_id, t.commissionOverride, cfg);
   }
   if (isOnline(t, cfg)) {
     if (rule.employee_id !== cfg.employeeId) return 0;
@@ -146,19 +146,19 @@ export function payout(t: TicketLike, rule: Rule | undefined, cfg: OnlineCfg): n
   if (rule.method === 'flat_ticket') return Math.round(Number(rule.rate) * 100);
   if (rule.method === 'percent_profit') {
     const lines = t.lines || [];
-    const touched = lines.some(l => inStoreOverrideRate(l.sku, rule.employee_id) != null);
+    const touched = lines.some(l => inStoreOverrideRate(l.sku, rule.employee_id, cfg) != null);
     if (touched) {
       // Per-line rates so override SKUs can sit on a mixed ticket without changing other lines.
       const lineBases = lines.map(l => lineCommissionProfit(l));
       if (lineBases.some(b => b === null)) {
-        const rates = lines.map(l => inStoreOverrideRate(l.sku, rule.employee_id) ?? Number(rule.rate));
+        const rates = lines.map(l => inStoreOverrideRate(l.sku, rule.employee_id, cfg) ?? Number(rule.rate));
         const p = commissionProfit(t);
         if (p === null) return null;
         if (rates.every(r => r === rates[0])) return Math.round(Math.max(0, p) * rates[0] / 100);
         return null;
       }
       return lines.reduce((n, l, i) => {
-        const rate = inStoreOverrideRate(l.sku, rule.employee_id) ?? Number(rule.rate);
+        const rate = inStoreOverrideRate(l.sku, rule.employee_id, cfg) ?? Number(rule.rate);
         return n + Math.round(Math.max(0, lineBases[i] || 0) * rate / 100);
       }, 0);
     }

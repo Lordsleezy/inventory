@@ -152,14 +152,14 @@ assert.equal(l.channel_fee_cents, 500); assert.equal(l.fee_source, "estimated");
 assert.equal(l.profit_cents, 5000 - 500 - 900);
 console.log(`mercari estimated: fee 500, profit ${l.profit_cents} ok`);
 
-// 7) Category default cost (refrigerator, no unit cost) → flagged default.
+// 7) Category without a recorded cost stays missing; defaults cannot create profit or payout.
 await addUnit("92007", { ask: 40000, cost: null, category: "Refrigerators" });
 await db.query(`insert into public.sales(store_id,sku,qty,sold_at,price_cents,tax_cents,channel,payment_method,receipt_no)
   values('${STORE}','92007',1,now(),38000,0,'facebook','marketplace','FB-1')`);
 l = await ledger("92007");
-assert.equal(l.cost_cents, 25000); assert.equal(l.cost_source, "default");
-assert.ok(l.profit_cents === 38000 - Math.round(38000 * 0.05) - 40 - 25000, `profit ${l.profit_cents}`);
-console.log(`default cost: 25000 flagged, profit ${l.profit_cents} ok`);
+assert.equal(l.cost_cents, null); assert.equal(l.cost_source, "missing");
+assert.equal(l.profit_cents, null);
+console.log("missing real cost: no default, profit withheld ok");
 
 // 8) Collectible → cost locked at $0.
 await addUnit("92008", { ask: 3000, cost: null, collectible: true });
