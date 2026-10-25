@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { ListingManagerPanel, type ListingChannel } from './ListingManagerPanel';
 import { MarketplaceBoard, type BoardChannel } from './MarketplaceBoard';
+import { DepopSaleForm } from './DepopSaleForm';
 
 const TITLES: Record<ListingChannel, { eyebrow: string; title: string; blurb: string }> = {
   ebay: {
@@ -57,6 +58,7 @@ export function ChannelListingPage({ channel, accessToken, money, amazonQueue }:
           <p>{meta.blurb}</p>
         </div>
       </header>
+      <DepopSaleForm accessToken={accessToken} money={money} />
       <ListingManagerPanel accessToken={accessToken} money={money} channel={channel} channelLocked />
     </>
   );
