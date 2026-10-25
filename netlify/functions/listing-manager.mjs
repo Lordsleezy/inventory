@@ -32,6 +32,7 @@ import {
   readSync,
 } from "../lib/listing-manager.mjs";
 import {
+  endEverywhere,
   getBoardJobStatus,
   loadCatalog,
   loadQuarter,
@@ -44,7 +45,7 @@ async function handleStaff(event) {
   const body = typeof event.body === "string" ? JSON.parse(event.body || "{}") : event.body || {};
   const action = String(body.action || "list").trim();
   const channel = String(body.channel || "").trim().toLowerCase();
-  const { storeId, actor } = await portalAdminFromEvent(event, body.store_id || STORE_DEFAULT);
+  const { storeId, actor, userId } = await portalAdminFromEvent(event, body.store_id || STORE_DEFAULT);
   const query = body.query || "";
   const limit = Math.min(2000, Math.max(1, Number(body.limit) || (action === "list" ? 2000 : 50)));
 
@@ -91,6 +92,51 @@ async function handleStaff(event) {
       markOnly: Boolean(body.mark_only),
     });
     return json(result.ok ? 200 : 400, result);
+  }
+
+  if (action === "depop_sale_units") {
+    const q = query.trim().toLowerCase();
+    const { data, error } = await serviceClient()
+      .from("units")
+      .select("sku, title, brand, ask_cents")
+      .eq("store_id", storeId)
+      .eq("state", "available")
+      .order("sku", { ascending: false })
+      .limit(5000);
+    if (error) return json(400, { ok: false, error: error.message });
+    const items = (data || [])
+      .filter((u) => !q || `${u.sku} ${u.title || ""} ${u.brand || ""}`.toLowerCase().includes(q))
+      .slice(0, 25);
+    return json(200, { ok: true, items });
+  }
+
+  if (action === "record_depop_sale") {
+    const sku = String(body.sku || "").trim();
+    const orderNumber = String(body.order_number || "").trim();
+    const cents = (v) => (v == null || v === "" ? 0 : Math.round(Number(v)));
+    const price = Number(body.price_cents);
+    if (!sku) return json(400, { ok: false, error: "sku_required" });
+    if (!orderNumber) return json(400, { ok: false, error: "depop_order_required" });
+    if (!Number.isFinite(price) || price < 0) return json(400, { ok: false, error: "price_required" });
+    const amounts = ["buyer_shipping_cents", "processing_fee_cents", "boosting_fee_cents", "label_cents"].map((k) => cents(body[k]));
+    if (amounts.some((n) => !Number.isFinite(n) || n < 0)) return json(400, { ok: false, error: "invalid_amount" });
+    const soldAt = body.sold_at ? new Date(`${String(body.sold_at).slice(0, 10)}T12:00:00`) : null;
+    const { data, error } = await serviceClient().rpc("depop_record_manual_sale", {
+      p_store: storeId,
+      p_sku: sku,
+      p_price_cents: Math.round(price),
+      p_order_number: orderNumber,
+      p_buyer_shipping_cents: amounts[0],
+      p_processing_fee_cents: amounts[1],
+      p_boosting_fee_cents: amounts[2],
+      p_label_cents: amounts[3],
+      p_sold_at: soldAt && !Number.isNaN(soldAt.getTime()) ? soldAt.toISOString() : null,
+      p_actor: userId || null,
+    });
+    if (error) return json(400, { ok: false, error: error.message });
+    if (data?.duplicate) return json(200, { ...data, pulled: [] });
+    const pulled = await endEverywhere(storeId, sku, "depop", { sku });
+    return json(200, { ...data, pulled });
   }
 
   if (action === "detail") {

@@ -685,7 +685,7 @@ async function endOnChannel(storeId, channel, item) {
   return { ok: false, error: `end_not_supported:${channel}` };
 }
 
-async function endEverywhere(storeId, sku, primaryChannel, item) {
+export async function endEverywhere(storeId, sku, primaryChannel, item) {
   const sb = serviceClient();
   const { data, error } = await sb
     .from("listings")

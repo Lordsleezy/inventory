@@ -526,6 +526,8 @@ export async function ensureUnmatchedWebOrder(sb, {
  * and re-evaluated so a parser fix (or INCLUDE_SEEN rescan) can recover sales that were wrongly
  * discarded or lacked a SKU on the first pass.
  */
+export const DEPOP_FLAG_REASON = 'possible Depop sale, enter it';
+
 export async function ingestMarketplaceMail(sb, { store, channels, parsed, raw }) {
   const p = parseMail(parsed, channels);
   if (
@@ -680,7 +682,10 @@ export async function ingestMarketplaceMail(sb, { store, channels, parsed, raw }
   // Stable order key (never raw Message-ID with <>/@) so payment_id dedupes with unmatched rows.
   const orderKey = orderKeyEarly;
 
-  if (p.sku && p.price) {
+  // Depop is entered by hand (Record Depop sale). Its emails never create a sale or fees:
+  // they only flag the order for review.
+  if (p.marketplace === 'depop') reason = DEPOP_FLAG_REASON;
+  else if (p.sku && p.price) {
     const { data: unit } = await sb
       .from('units')
       .select('sku,title,state')

@@ -3,6 +3,7 @@ import type { Session, SupabaseClient } from '@supabase/supabase-js';
 import type { StaffSession } from '@floor/cloud';
 import { floorFunctionUrl } from '../floorApi';
 import { ListingManagerPanel } from '../ListingManagerPanel';
+import { DepopSaleForm } from '../DepopSaleForm';
 import { ConnectionsPage } from '../ConnectionsPage';
 import { errText } from '../errText';
 import { shortError } from './shortError';
@@ -298,6 +299,7 @@ export function AppDepopNative({ accessToken, money, onBack }: {
         <div className="app-nav-title">Depop</div>
         <button type="button" style={{ visibility: 'hidden' }}>+</button>
       </div>
+      <DepopSaleForm accessToken={accessToken} money={money} app />
       <div className="app-embed-soft">
         <ListingManagerPanel accessToken={accessToken} money={money} channel="depop" channelLocked />
       </div>
