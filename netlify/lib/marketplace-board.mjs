@@ -675,7 +675,7 @@ function paceMs(kind) {
   return 4000 + Math.floor(Math.random() * 2000);
 }
 
-async function endOnChannel(storeId, channel, item) {
+export async function endOnChannel(storeId, channel, item) {
   if (channel === "ebay") {
     return endEbayListing(storeId, { sku: item.sku, offerId: item.offer_id, accountId: item.account_id });
   }

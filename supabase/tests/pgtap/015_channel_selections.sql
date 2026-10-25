@@ -1,7 +1,7 @@
 -- pgTAP: channel checkboxes, never-list rules, listing queue, "Needs to be checked" subtab
 -- (20261030190000_channel_selections.sql).
 begin;
-select plan(14);
+select plan(18);
 do $$
 declare
   v_store uuid;
@@ -33,7 +33,8 @@ begin
     ('97006', 'Acme', 'Acme mixer', 'Mixers', 'Open box')) x(sku, brand, title, cat, cond);
   insert into public.photos (store_id, sku, path)
   select v_store, s, 'p/' || s || '.jpg' from unnest(array['97001','97002','97003','97004','97005','97006']) s;
-  insert into public.listings (store_id, sku, channel, status) values (v_store, '97005', 'ebay', 'listed');
+  insert into public.listings (store_id, sku, channel, status) values (v_store, '97005', 'ebay', 'listed'), (v_store, '97006', 'amazon', 'listed');
+  perform set_config('test.store_id', v_store::text, true);
   perform set_config('test.owner_id', v_owner::text, true);
   perform set_config('test.clerk_id', v_clerk::text, true);
 end $$;
@@ -68,5 +69,13 @@ select is((public.portal_inventory_list('', 'needs_check') -> 'totals' ->> 'piec
 select public.portal_set_unit_channel_selection('97005', 'ebay', true);
 select is(public.portal_set_unit_channel_selection('97005', 'ebay', false) ->> 'queued', 'end', 'unchecking a live channel queues an end');
 select is((select count(*)::int from public.listing_queue where sku = '97005' and action = 'end' and status = 'queued'), 1, 'one end job queued');
+
+-- Backfill: only live channels, never overrides an admin choice, never queues.
+select is(public.floor_backfill_channel_selections(current_setting('test.store_id')::uuid, true) -> 'live',
+  '{"ebay": 1, "amazon": 1}'::jsonb, 'backfill dry run counts live listings');
+select is(public.floor_backfill_channel_selections(current_setting('test.store_id')::uuid, false) -> 'inserted',
+  '{"amazon": 1}'::jsonb, 'backfill ticks only the live channel nobody has decided on');
+select is((select selected from public.unit_channel_selections where sku = '97005' and channel = 'ebay'), false, 'backfill keeps the admin unchecking');
+select is((select count(*)::int from public.listing_queue where sku = '97006'), 0, 'backfill queues nothing');
 select * from finish();
 rollback;

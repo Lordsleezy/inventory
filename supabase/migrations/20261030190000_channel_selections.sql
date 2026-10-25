@@ -555,4 +555,40 @@ end $$;
 revoke all on function public.portal_channel_autopush() from public, anon;
 grant execute on function public.portal_channel_autopush() to authenticated;
 
+-- Service-only helpers for the channel-autopush worker.
+create or replace function public.floor_unit_mandatory_gaps(p_store uuid, p_sku text)
+returns text[] language sql stable security definer set search_path = public as $$
+  select coalesce(array(select g from unnest(public.unit_listing_gaps(u)) g where public.unit_is_unfinished(array[g])), '{}')
+  from public.units u where u.store_id = p_store and u.sku = p_sku;
+$$;
+revoke all on function public.floor_unit_mandatory_gaps(uuid,text) from public, anon, authenticated;
+grant execute on function public.floor_unit_never_list_reason(uuid,text,text) to service_role;
+grant execute on function public.floor_unit_live_on(uuid,text,text) to service_role;
+grant execute on function public.floor_unit_mandatory_gaps(uuid,text) to service_role;
+
+-- One-time backfill: tick a channel only where the unit is live there right now.
+-- Never queues anything and never overrides a choice an admin already made. Dry run by default.
+create or replace function public.floor_backfill_channel_selections(p_store uuid, p_dry_run boolean default true)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare v jsonb;
+begin
+  with live as (
+    select u.sku, c.ch from public.units u cross join unnest(array['ebay','amazon','tiktok']) c(ch)
+    where u.store_id = p_store and u.state in ('available','reserved','repair')
+      and public.floor_unit_live_on(p_store, u.sku, c.ch)
+  ), ins as (
+    insert into public.unit_channel_selections (store_id, sku, channel, selected, source, updated_at)
+    select p_store, l.sku, l.ch, true, 'backfill', now() from live l where not p_dry_run
+    on conflict (store_id, sku, channel) do nothing
+    returning channel
+  )
+  select jsonb_build_object('dry_run', p_dry_run,
+    'live', coalesce((select jsonb_object_agg(ch, n) from (select ch, count(*) n from live group by ch) x), '{}'::jsonb),
+    'inserted', coalesce((select jsonb_object_agg(channel, n) from (select channel, count(*) n from ins group by channel) y), '{}'::jsonb))
+  into v;
+  return v;
+end $$;
+revoke all on function public.floor_backfill_channel_selections(uuid,boolean) from public, anon, authenticated;
+grant execute on function public.floor_backfill_channel_selections(uuid,boolean) to service_role;
+
 commit;
