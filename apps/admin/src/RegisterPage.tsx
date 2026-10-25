@@ -58,8 +58,6 @@ const moneyEntry = /^\d*(?:\.\d{0,2})?$/;
 const cleanMoney = (value: string) => Number(value === '.' ? 0 : value || 0).toFixed(2);
 const sum = (values: number[]) => values.reduce((a, b) => a + b, 0);
 const lineExtendedPrice = (line: CartLine) => line.priceCents * (line.qty || 1);
-const EMPLOYEE_CODES: Record<string, string> = { '0000': 'Paul', '1111': 'Jacob' };
-
 function RegisterInner({ staffSession, onNeedFullReload, variant = 'desktop' }: Props) {
   const app = variant === 'app';
   const { lines, note, setNote, ticketId, addUnit, removeSku, updateLine, setQty, clear } = useCart();
@@ -108,11 +106,6 @@ function RegisterInner({ staffSession, onNeedFullReload, variant = 'desktop' }: 
   const [done, setDone] = useState<DonePanel | null>(null);
   const [doneMsg, setDoneMsg] = useState('');
   const [customerOpen, setCustomerOpen] = useState(false);
-  const [soldByCode, setSoldByCode] = useState<string | null>(null);
-  const [soldByName, setSoldByName] = useState<string | null>(null);
-  const [employeeOpen, setEmployeeOpen] = useState(false);
-  const [employeeDraft, setEmployeeDraft] = useState('');
-  const [employeeError, setEmployeeError] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [receiptLegal, setReceiptLegal] = useState(RECEIPT_LEGAL);
   const [receiptHeader, setReceiptHeader] = useState<string | null>(null);
@@ -271,7 +264,7 @@ function RegisterInner({ staffSession, onNeedFullReload, variant = 'desktop' }: 
       cashTenderedCents: tenderedCents,
       customerEmail: customer?.email ?? null,
       receipt: ticketReceiptPayload(summary, {
-        clerkName: soldByName || staffSession.displayName,
+        clerkName: staffSession.displayName,
         storeName: rewards.storeDisplayName,
         changeCents,
         titles,
@@ -329,7 +322,6 @@ function RegisterInner({ staffSession, onNeedFullReload, variant = 'desktop' }: 
         customerId: customer?.id ?? null,
         redeemPoints,
         note: note.trim() || null,
-        soldByCode,
         lines: ticketLines(approvals),
       });
       setCashOpen(false);
@@ -360,7 +352,6 @@ function RegisterInner({ staffSession, onNeedFullReload, variant = 'desktop' }: 
         redeemPoints,
         cashCents: split?.cashCents ?? 0,
         note: note.trim() || null,
-        soldByCode,
       };
       const quote = await quoteTicketTotals(args);
       if (quote.card_charge_cents <= 0) throw new Error('Cash covers the total. Use Cash instead.');
@@ -615,62 +606,6 @@ function RegisterInner({ staffSession, onNeedFullReload, variant = 'desktop' }: 
         }}
       />
 
-      {employeeOpen ? (
-        <div className={`modal${app ? ' nr-sheet' : ''}`} role="dialog" aria-modal="true" aria-label="Employee ID">
-          <div className={`card grid${app ? ' nr-sheet-card' : ''}`}>
-            <h2>{app ? 'Cashier' : 'Employee ID'}</h2>
-            <p className="muted">Enter your code before ringing up.</p>
-            <label>
-              Code
-              <input
-                autoFocus
-                inputMode="numeric"
-                pattern="[0-9]*"
-                maxLength={8}
-                value={employeeDraft}
-                onChange={e => {
-                  setEmployeeDraft(e.target.value.replace(/\D/g, '').slice(0, 8));
-                  setEmployeeError('');
-                }}
-                onKeyDown={e => {
-                  if (e.key !== 'Enter') return;
-                  e.preventDefault();
-                  const code = employeeDraft.trim();
-                  const name = EMPLOYEE_CODES[code];
-                  if (!name) {
-                    setEmployeeError('Unknown employee ID.');
-                    return;
-                  }
-                  setSoldByCode(code);
-                  setSoldByName(name);
-                  setEmployeeOpen(false);
-                }}
-              />
-            </label>
-            {employeeError ? <p className="error">{employeeError}</p> : null}
-            <div className="row">
-              <button type="button" className="secondary" onClick={() => setEmployeeOpen(false)}>Cancel</button>
-              <button
-                type="button"
-                onClick={() => {
-                  const code = employeeDraft.trim();
-                  const name = EMPLOYEE_CODES[code];
-                  if (!name) {
-                    setEmployeeError('Unknown employee ID.');
-                    return;
-                  }
-                  setSoldByCode(code);
-                  setSoldByName(name);
-                  setEmployeeOpen(false);
-                }}
-              >
-                Set
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
       {customerOpen ? (
         <div className={`modal${app ? ' nr-sheet' : ''}`} role="dialog" aria-modal="true" aria-label="Customer lookup">
           <div className={`card grid${app ? ' nr-sheet-card' : ''}`}>
@@ -865,7 +800,7 @@ function RegisterInner({ staffSession, onNeedFullReload, variant = 'desktop' }: 
         cashOpen={cashOpen}
         error={error}
         loud={loud}
-        soldByName={soldByName}
+        soldByName={staffSession.displayName}
         customer={customer}
         taxRateBps={taxRateBps}
         itemCount={itemCount}
@@ -889,9 +824,6 @@ function RegisterInner({ staffSession, onNeedFullReload, variant = 'desktop' }: 
         setDiscountDraft={setDiscountDraft}
         setNoteOpen={setNoteOpen}
         setCustomerOpen={setCustomerOpen}
-        setEmployeeOpen={setEmployeeOpen}
-        setEmployeeDraft={setEmployeeDraft}
-        setEmployeeError={setEmployeeError}
         onCustomUnit={addCustomPricedUnit}
         queryUnit={term => queryAvailableUnits(term, 8)}
       >
@@ -908,31 +840,6 @@ function RegisterInner({ staffSession, onNeedFullReload, variant = 'desktop' }: 
           <p>Scan items, then cash or card.</p>
         </div>
         <div className="register-center-actions">
-          {soldByName ? (
-            <div className="employee-chip">
-              <span>
-                <strong>{soldByName}</strong>
-                <small className="muted">Employee</small>
-              </span>
-              <button
-                type="button"
-                className="secondary"
-                disabled={!idle || cashOpen}
-                onClick={() => { setSoldByCode(null); setSoldByName(null); }}
-              >
-                Clear
-              </button>
-            </div>
-          ) : (
-            <button
-              type="button"
-              className="employee-id-btn"
-              disabled={!idle || cashOpen}
-              onClick={() => { setEmployeeDraft(''); setEmployeeError(''); setEmployeeOpen(true); }}
-            >
-              Employee ID
-            </button>
-          )}
           {customer ? (
             <div className="customer-chip">
               <span>

@@ -99,7 +99,7 @@ export type NativeRegisterProps = {
   cashOpen: boolean;
   error: string;
   loud: string;
-  soldByName: string | null;
+  soldByName: string;
   customer: Customer | null;
   taxRateBps: number | null;
   itemCount: number;
@@ -123,9 +123,6 @@ export type NativeRegisterProps = {
   setDiscountDraft: (v: string) => void;
   setNoteOpen: (v: boolean) => void;
   setCustomerOpen: (v: boolean) => void;
-  setEmployeeOpen: (v: boolean) => void;
-  setEmployeeDraft: (v: string) => void;
-  setEmployeeError: (v: string) => void;
   onCustomUnit: (unit: RegisterUnit, priceCents: number) => void;
   queryUnit: (term: string) => Promise<RegisterUnit[]>;
   children?: ReactNode; // shared modals from parent
@@ -138,7 +135,7 @@ export function NativeRegisterCart(props: NativeRegisterProps) {
     taxRateBps, itemCount, rawSubtotal, discountCents, discountPct, tax, total, cardFeePreview,
     phase, priceDrafts, setPriceDrafts, commitLinePrice, updateLine, setQty, removeSku, clear,
     startPay, setDiscountOpen, setDiscountDraft, setNoteOpen, setCustomerOpen,
-    setEmployeeOpen, setEmployeeDraft, setEmployeeError, onCustomUnit, queryUnit, children,
+    onCustomUnit, queryUnit, children,
   } = props;
 
   const [thumbs, setThumbs] = useState<Record<string, string | null>>({});
@@ -281,14 +278,7 @@ export function NativeRegisterCart(props: NativeRegisterProps) {
           >
             Clear
           </button>
-          <button
-            type="button"
-            className="nr-cashier-chip"
-            disabled={!idle || cashOpen}
-            onClick={() => { setEmployeeDraft(''); setEmployeeError(''); setEmployeeOpen(true); }}
-          >
-            {soldByName || 'Cashier'} ▾
-          </button>
+          <span className="nr-cashier-chip">{soldByName}</span>
           <button
             type="button"
             className="nr-add-item"
