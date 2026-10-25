@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { DispositionsPanel } from './DispositionDialogs';
 
 export type Expense = {
   id: string; spent_on: string; description: string; category: string; amount_cents: number;
-  needs_reimbursement: boolean; employee_id: string | null; source: 'manual' | 'label'; order_id: string | null; voided_at: string | null;
+  needs_reimbursement: boolean; employee_id: string | null; source: 'manual' | 'label' | 'giveaway'; order_id: string | null; voided_at: string | null;
 };
 type Person = { user_id: string; display_name: string; kind: string };
 type Props = { client: SupabaseClient; money: (n: number) => string; expenses: Expense[]; staff: Person[]; ownerId: string; onChanged: () => Promise<void>; embedded?: boolean; native?: boolean };
@@ -88,6 +89,7 @@ export function ExpensesPage({ client, money, expenses, staff, ownerId, onChange
       {showForm && <section className="native-report-form"><div className="native-report-form-head"><h2>{editing ? 'Edit expense' : 'Add expense'}</h2><button type="button" onClick={() => setShowForm(false)}>Close</button></div><form onSubmit={e => void submit(e)}><label>What<input autoFocus value={f.what} onChange={e => setF({...f,what:e.target.value})} /></label><label>Amount ($)<input inputMode="decimal" value={f.amount} onChange={e => { if (entry.test(e.target.value)) setF({...f,amount:e.target.value}); }} /></label><label>Date<input type="date" value={f.date} onChange={e => setF({...f,date:e.target.value})} /></label><label>Category<select value={f.category} onChange={e => setF({...f,category:e.target.value})}>{CATEGORIES.map(c=><option key={c}>{c}</option>)}</select></label><label><input type="checkbox" checked={f.reimburse} onChange={e=>setF({...f,reimburse:e.target.checked})} /> Reimburse me</label>{f.reimburse && <label>Reimburse to<select value={f.who} onChange={e=>setF({...f,who:e.target.value})}>{staff.map(p=><option key={p.user_id} value={p.user_id}>{p.display_name}</option>)}</select></label>}<button disabled={busy}>{editing ? 'Save changes' : 'Add expense'}</button>{editing && <button type="button" className="danger" disabled={busy} onClick={() => { void remove(editing).then(deleted => { if (deleted) setShowForm(false); }); }}>Delete expense</button>}</form>{error && <p role="alert" className="error">{error}</p>}</section>}
       <h3 className="native-report-section">By category</h3><div className="native-report-group">{categories.length ? categories.sort((a,b)=>b[1]-a[1]).map(([category,cents]) => <div className="native-report-category" key={category}><div className="native-report-row"><span>{category}</span><b>{money(cents)}</b><span className="native-chevron">›</span></div><div className="native-report-progress"><span style={{width:`${total ? cents / total * 100 : 0}%`}} /></div></div>) : <p className="native-report-empty">No expenses in this period.</p>}</div>
       <h3 className="native-report-section">Recent</h3><div className="native-report-group">{shown.slice(0, 30).map(e => <button type="button" className="native-report-row" key={e.id} onClick={() => e.source === 'manual' && edit(e)}><span>{e.description}<small>{e.spent_on} · {name(e.employee_id)} · {e.needs_reimbursement ? 'Reimburse' : 'Paid'}</small></span><b>{money(e.amount_cents)}</b>{e.source === 'manual' && <span className="native-chevron">›</span>}</button>)}</div>
+      <DispositionsPanel client={client} money={money} stamp={s => new Date(s).toLocaleDateString()} kind="giveaway" title="Giveaways" refreshKey={refresh} onChanged={() => { void onChanged(); setRefresh(n => n + 1); }} />
       <p className="native-report-footnote">Reimbursable expenses also appear in Payouts. Automatic label costs are included in Shipping &amp; fees.</p>
     </div>;
   }
@@ -111,10 +113,11 @@ export function ExpensesPage({ client, money, expenses, staff, ownerId, onChange
     <section className="panel"><h2>Recent expenses</h2>
       {expenses.length === 0 ? <div className="empty">No expenses yet.</div> : <table className="tbl"><thead><tr><th>Date</th><th>What</th><th>Category</th><th className="n">Amount</th><th>Reimburse</th><th /></tr></thead><tbody>
         {expenses.slice(0, 150).map(e => <tr key={e.id} style={e.voided_at ? { opacity: 0.5, textDecoration: 'line-through' } : undefined}>
-          <td>{e.spent_on}</td><td>{e.description}{e.source === 'label' && <> <span className="tag">auto</span></>}{e.voided_at && <> <span className="tag warn">voided</span></>}</td><td>{e.category}</td>
+          <td>{e.spent_on}</td><td>{e.description}{e.source === 'label' && <> <span className="tag">auto</span></>}{e.source === 'giveaway' && <> <span className="tag">giveaway</span></>}{e.voided_at && <> <span className="tag warn">voided</span></>}</td><td>{e.category}</td>
           <td className="n">{money(e.amount_cents)}</td><td>{e.needs_reimbursement ? name(e.employee_id) : 'No'}</td>
           <td>{e.source === 'manual' && !e.voided_at && <><button className="text-button" onClick={() => edit(e)}>Edit</button> <button className="text-button danger" onClick={() => void remove(e.id)}>Delete</button></>}</td></tr>)}
       </tbody></table>}
     </section>
+    <DispositionsPanel client={client} money={money} stamp={s => new Date(s).toLocaleDateString()} kind="giveaway" title="Giveaways" hint="Items given away. Their cost posts here as the Giveaways expense category and never touches commissions. Cost missing means no unit cost is entered yet." refreshKey={refresh} onChanged={() => { void onChanged(); setRefresh(n => n + 1); }} />
   </>;
 }

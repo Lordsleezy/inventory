@@ -28,6 +28,8 @@ import { isStandaloneApp, shouldShowInstallGate } from './appMode/isAppMode';
 import { InstallGate } from './appMode/InstallGate';
 import { AppModeShell } from './appMode/AppModeShell';
 import { NeedsAttentionPanel } from './NeedsAttentionPanel';
+import { replacementAddback, replacementLine, type Disposition } from './dispositions';
+import { setReplacementRows, useReplacementsForSale } from './replacementsStore';
 
 /** Store associates (Jacob / clock staff): Inventory, Register, Settings only. */
 const ASSOCIATE_PAGES: MainPage[] = ['register', 'inventory', 'settings'];
@@ -82,7 +84,7 @@ type Person = { user_id: string; display_name: string; kind: string };
 type Payment = { id: string; employee_id: string; amount_cents: number; paid_at: string; paid_by: string; legacy_ticket_key: string | null; note: string | null };
 type PayoutAdjustment = {
   id: string; employee_id: string; amount_cents: number; reason: string;
-  return_id: string | null; sale_id: number | null; ticket_key: string | null;
+  return_id: string | null; replacement_id?: string | null; sale_id: number | null; ticket_key: string | null;
   sale_commission_cents: number | null; created_at: string;
 };
 type Expense = { description: string; category: string; amount_cents: number; needs_reimbursement?: boolean; employee_id?: string };
@@ -90,6 +92,7 @@ type Summary = { sales_cents: number; tax_cents: number; card_fee_cents: number;
 type Report = { id: string; period_type: 'daily' | 'weekly'; period_start: string; period_end: string; summary: Summary; expenses: Expense[]; notes: string; created_at: string; created_by: string; edited_at: string; edited_by: string };
 
 function SaleItem({ line }: { line: Line }) {
+  const replacements = useReplacementsForSale(line.id);
   const overridden = line.list_price_cents !== null && line.override_price_cents !== null
     && line.list_price_cents !== line.override_price_cents;
   return <div>{line.qty > 1 ? `${line.qty}× ` : ''}{line.title} <span>· SKU {line.sku}</span>
@@ -97,6 +100,7 @@ function SaleItem({ line }: { line: Line }) {
       {line.override_by_name && ` · ${line.override_by_name}`}{line.override_reason && ` · ${line.override_reason}`}</small>}
     {line.variance_cents != null && line.variance_cents !== 0 && !overridden &&
       <small className="sale-override">Sold {line.variance_cents > 0 ? '+' : '−'}{money(Math.abs(line.variance_cents))} vs ask</small>}
+    {replacements?.map(d => <small className="sale-override" key={d.id}>{replacementLine(d, money, stamp)}</small>)}
     {line.cost_source === 'default' && <small className="sale-override">cost: category default</small>}
     {line.cost_source === 'collectible' && <small className="sale-override">collectible · $0 cost</small>}
     {line.fee_source === 'estimated' && (line.channel_fee_cents ?? 0) > 0 && <small className="sale-override">{money(line.channel_fee_cents!)} est. channel fee</small>}
@@ -514,6 +518,8 @@ export function App() {
       for (const x of (sr.data || []) as { sku: string; employee_id: string; rate: number }[]) (skuRates[x.sku] ||= {})[x.employee_id] = Number(x.rate);
       setOnlineCfg({ channels: (cfg.online_channels || []).map(s => String(s).toLowerCase()), pct: Number(cfg.online_payout_pct) || 0, employeeId: cfg.online_payout_employee_id, slots, skuRates });
       setError('');
+      // Non-fatal: shows "Replacement sent" on the original sale rows.
+      void Promise.resolve(sb.rpc('portal_dispositions_list', { p_kind: 'replacement' })).then(({ data, error: e }) => { if (!e && Array.isArray(data)) setReplacementRows(data as Disposition[]); });
     } catch (e) { setError(errText(e)); }
   }, [store]);
   const loadPayments = useCallback(async () => {
@@ -770,7 +776,7 @@ export function App() {
     settings: 'Settings',
   } as const)[page];
   const reportSubs: [typeof nav.reportTab, string][] = [['profit', 'Sales & profits'], ['shipping', 'Shipping & fees'], ['expenses', 'Expenses'], ['payouts', 'Payouts'], ['returns', 'Returns'], ['sales-tax', 'Sales tax']];
-  const inventorySubs: [typeof nav.inventoryTab, string][] = [['in-stock', 'In stock'], ['sold', 'Sold'], ['unfinished', 'Unfinished'], ['needs-check', 'Needs to be checked'], ['defective', 'Defective'], ['receive', 'Receive'], ['lookup-test', 'Lookup test'], ['products', 'Products'], ['measure-mat', 'Measure mat']];
+  const inventorySubs: [typeof nav.inventoryTab, string][] = [['in-stock', 'In stock'], ['sold', 'Sold'], ['unfinished', 'Unfinished'], ['needs-check', 'Needs to be checked'], ['defective', 'Defective'], ['left-store', 'Replaced / given away'], ['receive', 'Receive'], ['lookup-test', 'Lookup test'], ['products', 'Products'], ['measure-mat', 'Measure mat']];
   const onlineSubs: [typeof nav.onlineTab, string][] = [
     ['listed', 'Listed'],
     ['reports', 'Reports'],
@@ -1142,6 +1148,10 @@ function PayoutsPage({allSales,ebayFees,staff,rules,payments,adjustments,expense
         detail: a.ticket_key || (a.sale_id != null ? `sale:${a.sale_id}` : 'returned sale'),
         note: 'Prior commission on returned sale (see clawback)',
       }));
+    // Replacement adjustments are visible ledger lines only: the sale's commission already dropped, so each is paired with the opposite add-back.
+    const replacementAddbacks: LedgerEntry[] = personAdjs
+      .filter(a => replacementAddback(a) !== 0)
+      .map(a => ({ at: a.created_at, kind: 'adjustment' as const, amount: replacementAddback(a), detail: a.ticket_key || (a.sale_id != null ? `sale:${a.sale_id}` : 'replaced sale'), note: 'Commission change already counted on the replaced sale (see adjustment)' }));
     const adjEntries: LedgerEntry[] = personAdjs.map(a => ({
       at: a.created_at,
       kind: 'adjustment' as const,
@@ -1158,10 +1168,10 @@ function PayoutsPage({allSales,ebayFees,staff,rules,payments,adjustments,expense
       at: p.paid_at, kind: 'payment' as const, amount: -p.amount_cents,
       detail: `Recorded by ${personName(p.paid_by)}`, note: p.note || (p.legacy_ticket_key ? 'Previous per-sale payment' : undefined)
     }));
-    const entries = [...saleEntries, ...clawbackAddbacks, ...adjEntries, ...reimburseEntries, ...paid].sort((a,b)=>b.at.localeCompare(a.at));
+    const entries = [...saleEntries, ...clawbackAddbacks, ...replacementAddbacks, ...adjEntries, ...reimburseEntries, ...paid].sort((a,b)=>b.at.localeCompare(a.at));
     const commission = saleEntries.reduce((n,e)=>n+(e.amount || 0),0);
     const adjTotal = personAdjs.reduce((n, a) => n + a.amount_cents, 0);
-    const addbackTotal = clawbackAddbacks.reduce((n, e) => n + (e.amount || 0), 0);
+    const addbackTotal = [...clawbackAddbacks, ...replacementAddbacks].reduce((n, e) => n + (e.amount || 0), 0);
     const reimburse = reimburseEntries.reduce((n,e)=>n+(e.amount || 0),0);
     const paidTotal = payments.filter(p => p.employee_id === person.user_id).reduce((n,p)=>n+p.amount_cents,0);
     // Unpaid voids: sale drops only. Paid voids: drop + addback + clawback net to −claw (already paid).

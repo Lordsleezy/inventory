@@ -19,9 +19,9 @@ export type MainPage =
   | 'remote'
   | 'logs'
   | 'settings';
-export type ReportTab = 'profit' | 'shipping' | 'expenses' | 'overhead' | 'payouts' | 'daily' | 'sales-tax' | 'returns';
+export type ReportTab = 'profit' | 'shipping' | 'expenses' | 'overhead' | 'payouts' | 'daily' | 'sales-tax' | 'returns' | 'replacements';
 /** In stock / Sold / Unfinished / Defective are unit lists; the rest are tools. Unfinished replaces the old Needs attention tab. */
-export type InventoryTab = 'in-stock' | 'sold' | 'unfinished' | 'needs-check' | 'defective' | 'missing-category' | 'receive' | 'lookup-test' | 'products' | 'measure-mat';
+export type InventoryTab = 'in-stock' | 'sold' | 'unfinished' | 'needs-check' | 'defective' | 'missing-category' | 'receive' | 'lookup-test' | 'products' | 'measure-mat' | 'left-store';
 export type AttentionSection =
   | 'all'
   | 'missing-cost'
@@ -168,8 +168,8 @@ export function parseNavFromLocation(): NavState {
   if (RETIRED_ONLINE_CHANNELS.has(onlineChannelRaw) || RETIRED_ONLINE_CHANNELS.has(onlineTabRaw)) {
     onlineChannelRaw = 'all';
   }
-  const reportTabs: ReportTab[] = ['profit', 'shipping', 'expenses', 'overhead', 'payouts', 'daily', 'sales-tax', 'returns'];
-  const invTabs: InventoryTab[] = ['in-stock', 'sold', 'unfinished', 'needs-check', 'defective', 'missing-category', 'receive', 'lookup-test', 'products', 'measure-mat'];
+  const reportTabs: ReportTab[] = ['profit', 'shipping', 'expenses', 'overhead', 'payouts', 'daily', 'sales-tax', 'returns', 'replacements'];
+  const invTabs: InventoryTab[] = ['in-stock', 'sold', 'unfinished', 'needs-check', 'defective', 'missing-category', 'receive', 'lookup-test', 'products', 'measure-mat', 'left-store'];
   // Old bookmarks: Browse → In stock, Needs attention → Unfinished.
   const invTab = invTabRaw === 'browse' ? 'in-stock' : invTabRaw === 'attention' ? 'unfinished' : invTabRaw;
   return {

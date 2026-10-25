@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { UnitEditDrawer } from '../UnitEditDrawer';
 import { shortError } from './shortError';
+import { DispositionButtons } from '../DispositionDialogs';
+import { showDispositionButtons } from '../dispositions';
 
 type Photo = { id: number; path: string; is_primary: boolean };
 type Listing = { channel: string; status: string; listing_id: string | null; price_cents?: number | null };
@@ -211,6 +213,7 @@ export function AppItemDetail({
             >
               Mark sold
             </button>
+            {showDispositionButtons({ isAdmin: canDelete && !staffMode, inStock: String(unit?.state || '') === 'available' }) && <DispositionButtons client={client} sku={sku} money={money} stamp={(s) => new Date(s).toLocaleString()} onDone={() => { onChanged(); onBack(); }} />}
           </div>}
         </>
       )}

@@ -1,5 +1,6 @@
 ﻿import { useEffect, useRef, useState } from 'react';
 import { ChannelCheckboxes } from './ChannelCheckboxes';
+import { UnitDispositionHistory } from './DispositionDialogs';
 import { EbaySpecificsPanel } from './EbaySpecificsPanel';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { floorFunctionUrl } from './floorApi';
@@ -457,6 +458,7 @@ export function UnitEditDrawer({
         </div>
         <EbaySpecificsPanel client={client} sku={sku} storeId={storeId} appMode={appMode} />
         <ChannelCheckboxes client={client} sku={sku} appMode={appMode} />
+        {canDelete && <UnitDispositionHistory client={client} sku={sku} stamp={s => new Date(s).toLocaleString()} />}
         <div className={`actions unit-edit-actions${appMode ? ' app-unit-edit-actions' : ''}`} style={{ marginTop: 16 }}>
           <button type="button" disabled={busy || lookupBusy} onClick={() => void save()}>{busy ? 'Saving…' : 'Save changes'}</button>
           <button type="button" className="secondary" disabled={busy} onClick={onClose}>Cancel</button>
