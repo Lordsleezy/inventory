@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { isKioskShell, scannerInputMode } from './kiosk';
@@ -7,7 +7,7 @@ import { reportClientError } from './clientLog';
 import { categoryDefaultCostCents, priceFloorCents } from './scanPricing';
 import { errText } from './errText';
 import { BundleReceive } from './BundleReceive';
-import { MeasureOnMat } from './MeasureOnMat';
+const MeasureOnMat = lazy(() => import('./MeasureOnMat').then(module => ({ default: module.MeasureOnMat })));
 import { receiveSpecifics, receiveVariant } from '../../../shared/receive-specifics.mjs';
 import { CategoryPanel } from './CategoryPanel';
 
@@ -1649,7 +1649,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
               {form[key] && <small>{dimensionSources[source] || 'staff'}</small>}</label>)}</div></details>
         {dimensionsError && <small className="receive-confirm-note">{dimensionsError}</small>}
         <button type="button" className="secondary" onClick={() => setMatOpen(true)}>Measure on mat</button>
-        {matOpen && <MeasureOnMat onClose={() => setMatOpen(false)} onApply={(value, target) => {
+        {matOpen && <Suspense fallback={<p role="status">Opening measuring tools…</p>}><MeasureOnMat onClose={() => setMatOpen(false)} onApply={(value, target) => {
           for (const key of target === 'product' ? ['productDepth','productWidth','productHeight'] : ['length','width','height']) dimensionTouched.current.add(key);
           setForm(prev => target === 'product' ? {...prev, productDepth:value.length, productWidth:value.width, productHeight:value.height}
             : {...prev, length:value.length, width:value.width, height:value.height});
@@ -1657,7 +1657,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
             ? ['product_depth_in','product_width_in','product_height_in'] : ['package_length_in','package_width_in','package_height_in'])
             .map(key => [key,'ArUco mat · staff reviewed']))}));
           setMatOpen(false);
-        }} />}
+        }} /></Suspense>}
 
         <div className="receive-confirm-photos">
           <input ref={confirmPhotoFile} type="file" accept="image/*" capture="environment" className="sr-only" aria-hidden tabIndex={-1}
