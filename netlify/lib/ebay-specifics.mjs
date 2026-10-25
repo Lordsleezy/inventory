@@ -123,11 +123,8 @@ export function supabaseSpecificsDeps(sb, { catalog, aspectFields }) {
     },
     remember: async (gtin14, { categoryId, attributes }) => {
       const now = new Date().toISOString();
-      const existing = must(await sb.from("floor_products").select("gtin14").eq("gtin14", gtin14).maybeSingle());
-      if (existing) must(await sb.from("floor_products").update({ ebay_category_id: categoryId, ebay_aspects: attributes,
-        ebay_confirmed_at: now, updated_at: now }).eq("gtin14", gtin14));
-      else must(await sb.from("floor_products").insert({ gtin14, ebay_category_id: categoryId, ebay_aspects: attributes,
-        ebay_confirmed_at: now, source: "manual" }));
+      must(await sb.from("floor_products").upsert({ gtin14, ebay_category_id: categoryId, ebay_aspects: attributes,
+        ebay_confirmed_at: now, updated_at: now, source: "manual" }, { onConflict: "gtin14" }));
     },
   };
 }

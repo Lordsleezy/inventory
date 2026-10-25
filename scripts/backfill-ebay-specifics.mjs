@@ -23,7 +23,7 @@ if (error) throw new Error(error.message);
 const tally = { units: units.length, was_complete: 0, now_complete: 0, became_complete: 0, category_filled: 0,
   still_missing_required: 0, no_category: 0, ebay_disabled: 0, errors: 0 };
 let cursor = 0;
-const concurrency = write ? 1 : 12; // dry-run is read-only; keep real UPC-memory writes serialized.
+const concurrency = write ? 8 : 12; // UPC memory uses an atomic upsert, so repeated codes stay race-safe.
 await Promise.all(Array.from({ length: Math.min(concurrency, units.length) }, async () => {
   while (cursor < units.length) {
     const { sku } = units[cursor++];
