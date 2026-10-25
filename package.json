@@ -12,6 +12,7 @@
     "test:ledger": "node --experimental-strip-types scripts/test-ledger.mjs",
     "pos": "npm run tauri:dev -w @floor/pos",
     "test:migrations": "node --experimental-strip-types scripts/test-migrations.mjs",
+    "test:migrations:live": "bash scripts/test-migrations-live.sh --start",
     "test:store": "node --experimental-strip-types --test packages/store/src/*.test.ts",
     "export:listings": "node --experimental-strip-types scripts/export-listings.mjs",
     "photos:clean": "node --experimental-strip-types scripts/clean-photos.mjs",

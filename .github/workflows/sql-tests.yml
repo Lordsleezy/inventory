@@ -1,6 +1,7 @@
 name: sql-tests
 
-# PGlite migration suite + Postgres/pgTAP register tests.
+# live-baseline: committed live schema dump + pending migrations (the check that protects live).
+# pglite / pgtap: historical fresh replay from an empty database (NOT what live has).
 on:
   push:
     branches: [register-v1, square-v1, app-nav-v1, master]
@@ -14,7 +15,7 @@ concurrency:
 
 jobs:
   pglite:
-    name: PGlite migrations + ticket tax
+    name: Historical fresh replay (not live) — PGlite migrations + ticket tax
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -45,8 +46,28 @@ jobs:
       - name: PGlite ticket tax / finalize helpers
         run: npm run test:ticket-tax
 
+  live-baseline:
+    name: Live baseline — pending migrations apply on live schema
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.18.0"
+          cache: npm
+
+      - name: Install npm workspaces (Supabase CLI)
+        run: npm ci
+
+      - name: Install psql client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Load live schema baseline and apply pending migrations
+        run: bash scripts/test-migrations-live.sh --start
+
   pgtap:
-    name: Postgres pgTAP
+    name: Historical fresh replay (not live) — Postgres pgTAP
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
