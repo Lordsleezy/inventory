@@ -4,8 +4,8 @@
 --  * People (override slots) and per-SKU in-store rates move from payouts.ts into per-store tables.
 --  * Frozen inputs: sale_payout_tickets (rules/online config/slots/SKU rates at sale time) +
 --    sale_payout_lines (price and resolved cost at sale time). Output: sale_commissions (per line, per person).
---  * Only exceptions that re-run the math: a line frozen without a real cost (null, or a category-default
---    estimate) is filled once when the real unit cost is first entered; a per-sale override (portal_commission_overrides) re-runs on the frozen inputs;
+--  * Only exceptions that re-run the math: a line frozen without a real cost is filled once when the real unit cost
+--    is first entered; a per-sale override (portal_commission_overrides) re-runs on the frozen inputs;
 --    an owner can explicitly re-freeze one sale with portal_payout_refreeze().
 --  * Returns keep the existing adjustment flow (return_apply_commission_clawbacks) but read frozen amounts.
 -- Newest previous definitions: sale_commission_cents (20261021035021), return_apply_commission_clawbacks
@@ -54,6 +54,7 @@ create table if not exists public.sale_payout_lines (
   ticket_key text not null,
   sku text not null,
   price_cents int not null,
+  commission_base_cents int,
   cost_cents int,
   cost_source text,
   frozen_at timestamptz not null default now(),
@@ -86,41 +87,63 @@ create table if not exists public.payout_snapshot_errors (
   created_at timestamptz not null default now()
 );
 
+-- Preserve an explicit review list before removing the historic category/default cost fallback below.
+create table if not exists public.sale_payout_cost_flags (
+  sale_id bigint primary key references public.sales(id) on delete cascade,
+  store_id uuid not null,
+  ticket_key text not null,
+  sku text not null,
+  qty int not null,
+  unit_cost_cents int not null check (unit_cost_cents in (900, 25000, 30000)),
+  cost_source text,
+  flagged_at timestamptz not null default now(),
+  confirmed_at timestamptz,
+  confirmed_by uuid references auth.users(id)
+);
+
 alter table public.store_payout_people enable row level security;
 alter table public.store_payout_sku_rates enable row level security;
 alter table public.sale_payout_tickets enable row level security;
 alter table public.sale_payout_lines enable row level security;
 alter table public.sale_commissions enable row level security;
 alter table public.payout_snapshot_errors enable row level security;
+alter table public.sale_payout_cost_flags enable row level security;
 
 drop policy if exists store_payout_people_admin on public.store_payout_people;
 create policy store_payout_people_admin on public.store_payout_people for all to authenticated
-  using (store_id = public.portal_store_id()) with check (store_id = public.portal_store_id());
+  using (store_id = public.portal_store_id() and public.portal_is_admin())
+  with check (store_id = public.portal_store_id() and public.portal_is_admin());
 drop policy if exists store_payout_sku_rates_admin on public.store_payout_sku_rates;
 create policy store_payout_sku_rates_admin on public.store_payout_sku_rates for all to authenticated
-  using (store_id = public.portal_store_id()) with check (store_id = public.portal_store_id());
+  using (store_id = public.portal_store_id() and public.portal_is_admin())
+  with check (store_id = public.portal_store_id() and public.portal_is_admin());
 drop policy if exists sale_payout_tickets_admin_read on public.sale_payout_tickets;
 create policy sale_payout_tickets_admin_read on public.sale_payout_tickets for select to authenticated
-  using (store_id = public.portal_store_id());
+  using (store_id = public.portal_store_id() and public.portal_is_admin());
 drop policy if exists sale_payout_lines_admin_read on public.sale_payout_lines;
 create policy sale_payout_lines_admin_read on public.sale_payout_lines for select to authenticated
-  using (store_id = public.portal_store_id());
+  using (store_id = public.portal_store_id() and public.portal_is_admin());
 drop policy if exists sale_commissions_admin_read on public.sale_commissions;
 create policy sale_commissions_admin_read on public.sale_commissions for select to authenticated
-  using (store_id = public.portal_store_id());
+  using (store_id = public.portal_store_id() and public.portal_is_admin());
 drop policy if exists payout_snapshot_errors_admin_read on public.payout_snapshot_errors;
 create policy payout_snapshot_errors_admin_read on public.payout_snapshot_errors for select to authenticated
-  using (store_id = public.portal_store_id());
+  using (store_id = public.portal_store_id() and public.portal_is_admin());
+drop policy if exists sale_payout_cost_flags_admin on public.sale_payout_cost_flags;
+create policy sale_payout_cost_flags_admin on public.sale_payout_cost_flags for all to authenticated
+  using (store_id = public.portal_store_id() and public.portal_is_admin())
+  with check (store_id = public.portal_store_id() and public.portal_is_admin());
 
 revoke all on public.store_payout_people, public.store_payout_sku_rates, public.sale_payout_tickets,
-  public.sale_payout_lines, public.sale_commissions, public.payout_snapshot_errors from public, anon;
+  public.sale_payout_lines, public.sale_commissions, public.payout_snapshot_errors, public.sale_payout_cost_flags from public, anon;
 revoke all on public.sale_payout_tickets, public.sale_payout_lines, public.sale_commissions,
   public.payout_snapshot_errors from authenticated;
 grant select, insert, update, delete on public.store_payout_people, public.store_payout_sku_rates to authenticated;
+grant update on public.sale_payout_cost_flags to authenticated;
 grant select on public.sale_payout_tickets, public.sale_payout_lines, public.sale_commissions,
-  public.payout_snapshot_errors to authenticated;
+  public.payout_snapshot_errors, public.sale_payout_cost_flags to authenticated;
 grant all on public.store_payout_people, public.store_payout_sku_rates, public.sale_payout_tickets,
-  public.sale_payout_lines, public.sale_commissions, public.payout_snapshot_errors to service_role;
+  public.sale_payout_lines, public.sale_commissions, public.payout_snapshot_errors, public.sale_payout_cost_flags to service_role;
 grant usage, select on sequence public.payout_snapshot_errors_id_seq to service_role;
 
 -- Seed people + SKU rates from the values that were hardcoded in apps/admin/src/payouts.ts, for every
@@ -146,6 +169,27 @@ from (values
 join public.store_payout_people p on p.slot = v.slot
 on conflict do nothing;
 
+-- Flag every currently resolved sold unit cost that matches one of the retired defaults.
+insert into public.sale_payout_cost_flags
+  (sale_id, store_id, ticket_key, sku, qty, unit_cost_cents, cost_source)
+select l.id, l.store_id, coalesce(l.ticket_id::text, 'sale:' || l.id::text), l.sku,
+  greatest(coalesce(l.qty, 1), 1), l.cost_unit_cents, l.cost_source
+from public.sale_ledger l
+where l.voided_at is null and l.cost_unit_cents in (900, 25000, 30000)
+on conflict (sale_id) do nothing;
+
+-- Retire all inferred category/other defaults. Only a recorded unit acquisition cost or an
+-- explicitly marked collectible (real zero cost) is a payout cost from this point forward.
+create or replace function public.unit_cost_json(p_store uuid, p_category text, p_collectible boolean, p_acq int)
+returns jsonb language plpgsql stable security definer set search_path = public as $$
+begin
+  if coalesce(p_collectible, false) then return jsonb_build_object('cost_cents', 0, 'source', 'collectible'); end if;
+  if p_acq is not null then return jsonb_build_object('cost_cents', p_acq, 'source', 'unit'); end if;
+  return jsonb_build_object('cost_cents', null, 'source', 'missing');
+end $$;
+revoke all on function public.unit_cost_json(uuid, text, boolean, int) from public, anon;
+grant execute on function public.unit_cost_json(uuid, text, boolean, int) to authenticated, service_role;
+
 create or replace function public.payout_slot_employee(p_store uuid, p_slot text)
 returns uuid language sql stable security definer set search_path = public as $$
   select employee_id from public.store_payout_people where store_id = p_store and slot = p_slot;
@@ -163,18 +207,18 @@ declare
   t public.sale_payout_tickets;
   v_ov public.portal_commission_overrides;
   v_has_ov boolean;
-  v_sub bigint; v_cost bigint; v_cost_null boolean; v_base bigint;
+  v_sub bigint; v_cost_null boolean; v_base bigint;
   v_emp uuid; v_method text; v_rate numeric; v_amt int; v_touched boolean;
   v_emps uuid[];
 begin
   select * into t from public.sale_payout_tickets where store_id = p_store and ticket_key = p_ticket;
   if not found then return; end if;
   delete from public.sale_commissions where store_id = p_store and ticket_key = p_ticket;
-  select sum(price_cents), sum(cost_cents), bool_or(cost_cents is null)
-    into v_sub, v_cost, v_cost_null
+  select sum(price_cents), sum(commission_base_cents), bool_or(cost_cents is null)
+    into v_sub, v_base, v_cost_null
   from public.sale_payout_lines where store_id = p_store and ticket_key = p_ticket;
   if v_sub is null then return; end if;
-  v_base := case when v_cost_null then null else v_sub - v_cost end;
+  if v_cost_null then v_base := null; end if;
   select * into v_ov from public.portal_commission_overrides where store_id = p_store and ticket_key = p_ticket;
   v_has_ov := found;
 
@@ -187,7 +231,9 @@ begin
       from jsonb_array_elements(t.rules) r where (r->>'employee_id')::uuid = v_emp limit 1;
     if v_method is null then v_method := 'percent_sale'; v_rate := 0; end if; -- online recipient without a rule
     v_touched := false;
-    if v_has_ov then
+    if v_cost_null then
+      v_amt := null;
+    elsif v_has_ov then
       v_rate := case when v_emp = (t.slots->>'paul')::uuid then v_ov.paul_pct
                      when v_emp = (t.slots->>'jacob')::uuid then v_ov.jacob_pct else 0 end;
       v_amt := case when v_base is null then null
@@ -207,7 +253,7 @@ begin
           -- Per-line rates: each line gets its own amount (payouts.ts sums per-line rounded amounts).
           insert into public.sale_commissions (sale_id, store_id, ticket_key, employee_id, amount_cents)
           select l.sale_id, p_store, p_ticket, v_emp,
-            public.payout_js_round(greatest(0, l.price_cents - l.cost_cents)::float8
+            public.payout_js_round(greatest(0, l.commission_base_cents)::float8
               * coalesce((t.sku_rates->l.sku->>v_emp::text)::numeric, v_rate)::float8 / 100)
           from public.sale_payout_lines l where l.store_id = p_store and l.ticket_key = p_ticket;
           continue;
@@ -232,7 +278,7 @@ begin
         row_number() over (order by l.sale_id) rn
       from public.sale_payout_lines l
       cross join lateral (select case
-        when v_has_ov or t.online or v_method = 'percent_profit' then greatest(0, l.price_cents - coalesce(l.cost_cents, 0))
+        when v_has_ov or t.online or v_method = 'percent_profit' then greatest(0, coalesce(l.commission_base_cents, 0))
         when v_method = 'flat_ticket' then 1
         else greatest(0, l.price_cents) end::numeric weight) x
       where l.store_id = p_store and l.ticket_key = p_ticket
@@ -265,7 +311,11 @@ create or replace function public.payout_snapshot_sale(p_sale_id bigint)
 returns void language plpgsql security definer set search_path = public as $$
 declare l record; v_ticket text; v_old text;
 begin
-  select s.id, s.store_id, s.sku, s.channel, s.price_cents, s.ticket_id, s.voided_at, led.cost_cents, led.cost_source
+  select s.id, s.store_id, s.sku, s.channel, s.price_cents, s.ticket_id, s.voided_at,
+    led.cost_cents, led.cost_source,
+    s.price_cents + coalesce(led.tax_collected_cents, 0) + coalesce(led.shipping_cents, 0) - coalesce(led.channel_fee_cents, 0)
+      - coalesce(led.ship_cost_cents, 0) - coalesce(led.processing_fee_cents, 0)
+      - coalesce(led.tax_collected_cents, 0) - led.cost_cents as commission_base_cents
     into l
   from public.sales s join public.sale_ledger led on led.id = s.id where s.id = p_sale_id;
   if not found then return; end if;
@@ -281,8 +331,15 @@ begin
       and not exists(select 1 from public.sale_payout_lines x where x.store_id = t.store_id and x.ticket_key = t.ticket_key);
   else
     if l.voided_at is not null then return; end if;
-    insert into public.sale_payout_lines (sale_id, store_id, ticket_key, sku, price_cents, cost_cents, cost_source)
-    values (l.id, l.store_id, v_ticket, l.sku, coalesce(l.price_cents, 0), l.cost_cents, l.cost_source);
+    insert into public.sale_payout_cost_flags
+      (sale_id, store_id, ticket_key, sku, qty, unit_cost_cents, cost_source)
+    select led.id, led.store_id, coalesce(led.ticket_id::text, 'sale:' || led.id::text), led.sku,
+      greatest(coalesce(led.qty, 1), 1), led.cost_unit_cents, led.cost_source
+    from public.sale_ledger led where led.id = l.id and led.cost_unit_cents in (900, 25000, 30000)
+    on conflict (sale_id) do nothing;
+    insert into public.sale_payout_lines
+      (sale_id, store_id, ticket_key, sku, price_cents, commission_base_cents, cost_cents, cost_source)
+    values (l.id, l.store_id, v_ticket, l.sku, coalesce(l.price_cents, 0), l.commission_base_cents, l.cost_cents, l.cost_source);
   end if;
   update public.sale_payout_tickets t
      set sku_rates = t.sku_rates || coalesce((select jsonb_object_agg(r.sku, r.rates) from (
@@ -311,8 +368,13 @@ returns trigger language plpgsql security definer set search_path = public as $$
 declare r record;
 begin
   for r in
-    update public.sale_payout_lines pl set cost_cents = led.cost_cents, cost_source = led.cost_source, frozen_at = now()
+    update public.sale_payout_lines pl set cost_cents = led.cost_cents, cost_source = led.cost_source,
+      commission_base_cents = s.price_cents + coalesce(led.tax_collected_cents, 0) + coalesce(led.shipping_cents, 0) - coalesce(led.channel_fee_cents, 0)
+        - coalesce(led.ship_cost_cents, 0) - coalesce(led.processing_fee_cents, 0)
+        - coalesce(led.tax_collected_cents, 0) - led.cost_cents,
+      frozen_at = now()
     from public.sale_ledger led
+    join public.sales s on s.id = led.id
     where pl.store_id = new.store_id and pl.sku = new.sku
       and (pl.cost_cents is null or pl.cost_source = 'default')
       and led.id = pl.sale_id and led.cost_cents is not null
@@ -321,6 +383,14 @@ begin
   loop
     perform public.payout_calc_ticket(r.store_id, r.ticket_key);
   end loop;
+  insert into public.sale_payout_cost_flags
+    (sale_id, store_id, ticket_key, sku, qty, unit_cost_cents, cost_source)
+  select led.id, led.store_id, coalesce(led.ticket_id::text, 'sale:' || led.id::text), led.sku,
+    greatest(coalesce(led.qty, 1), 1), led.cost_unit_cents, led.cost_source
+  from public.sale_ledger led
+  where led.store_id = new.store_id and led.sku = new.sku and led.voided_at is null
+    and led.cost_unit_cents in (900, 25000, 30000)
+  on conflict (sale_id) do nothing;
   return null;
 exception when others then
   insert into public.payout_snapshot_errors (store_id, error) values (new.store_id, 'fill cost ' || new.sku || ': ' || sqlerrm);
@@ -340,8 +410,9 @@ create or replace function public.portal_payout_refreeze(p_ticket_key text)
 returns void language plpgsql security definer set search_path = public as $$
 declare v_store uuid := public.portal_store_id(); v_id bigint;
 begin
-  if v_store is null then raise exception 'portal_access_denied' using errcode = '42501'; end if;
+  if v_store is null or not public.portal_is_admin() then raise exception 'portal_access_denied' using errcode = '42501'; end if;
   delete from public.sale_payout_tickets where store_id = v_store and ticket_key = p_ticket_key;
+  delete from public.sale_payout_lines where store_id = v_store and ticket_key = p_ticket_key;
   for v_id in select id from public.sales where store_id = v_store and voided_at is null
     and coalesce(ticket_id::text, 'sale:' || id::text) = p_ticket_key order by id loop
     perform public.payout_snapshot_sale(v_id);
@@ -355,7 +426,7 @@ returns table (ticket_key text, employee_id uuid, amount_cents int, frozen_at ti
 language plpgsql stable security definer set search_path = public as $$
 declare v_store uuid := public.portal_store_id();
 begin
-  if v_store is null then raise exception 'portal_access_denied' using errcode = '42501'; end if;
+  if v_store is null or not public.portal_is_admin() then raise exception 'portal_access_denied' using errcode = '42501'; end if;
   return query
     select c.ticket_key, c.employee_id,
       case when bool_or(c.amount_cents is null) then null else sum(c.amount_cents)::int end,
@@ -390,7 +461,6 @@ create or replace function public.sale_commission_cents(
 declare
   s public.sales;
   v_cost int;
-  v_ship int;
   v_base int;
   v_ticket text;
   v_channel text;
@@ -412,12 +482,13 @@ begin
   select * into s from public.sales where id = p_sale_id and store_id = p_store;
   if not found then return 0; end if;
 
-  select coalesce(acquisition_cost_cents, case when is_collectible then 0 else null end)
-    into v_cost from public.units where store_id = p_store and sku = s.sku;
+  select cost_cents,
+    greatest(0, price_cents + coalesce(tax_collected_cents, 0) + coalesce(shipping_cents, 0) - coalesce(channel_fee_cents, 0)
+      - coalesce(ship_cost_cents, 0) - coalesce(processing_fee_cents, 0)
+      - coalesce(tax_collected_cents, 0) - cost_cents)
+    into v_cost, v_base
+  from public.sale_ledger where id = s.id;
   if v_cost is null then return null; end if;
-
-  v_ship := coalesce(s.shipping_cents, 0);
-  v_base := greatest(0, s.price_cents + v_ship - v_cost);
   v_ticket := coalesce(s.ticket_id::text, 'sale:' || s.id::text);
   v_channel := lower(coalesce(s.channel, ''));
 
@@ -608,8 +679,12 @@ begin
   loop
     perform public.payout_freeze_ticket_config(r.store_id, r.ticket_key, r.channel, 'backfill');
   end loop;
-  insert into public.sale_payout_lines (sale_id, store_id, ticket_key, sku, price_cents, cost_cents, cost_source)
+  insert into public.sale_payout_lines
+    (sale_id, store_id, ticket_key, sku, price_cents, commission_base_cents, cost_cents, cost_source)
   select l.id, l.store_id, coalesce(l.ticket_id::text, 'sale:' || l.id::text), l.sku, coalesce(l.price_cents, 0),
+    l.price_cents + coalesce(l.tax_collected_cents, 0) + coalesce(l.shipping_cents, 0) - coalesce(l.channel_fee_cents, 0)
+      - coalesce(l.ship_cost_cents, 0) - coalesce(l.processing_fee_cents, 0)
+      - coalesce(l.tax_collected_cents, 0) - l.cost_cents,
     l.cost_cents, l.cost_source
   from public.sale_ledger l where l.voided_at is null
   on conflict (sale_id) do nothing;

@@ -28,7 +28,7 @@ test("online sale with cost: Paul gets 30% of sale − cost, Jacob nothing", () 
 test("online sale missing cost is flagged, not guessed, and pays once cost is filled in", () => {
   const t = online(10000, null);
   assert.equal(payout(t, rules[0], cfg), null);
-  assert.equal(payout(t, rules[1], cfg), 0);
+  assert.equal(payout(t, rules[1], cfg), null);
   assert.equal(remainingProfit(t, rules, cfg), null);
   assert.equal(payout({ ...t, cost: 2500 }, rules[0], cfg), 2250);
 });
@@ -46,42 +46,46 @@ test("Payouts profit matches Reports after eBay insertion and subscription fees"
   assert.equal(reportProfitCents(100, 0), 100);
   assert.equal(reportProfitCents(-50, 10), -60);
 });
-test("Reports profit subtracts fees; commissions ignore fees", () => {
+test("Reports profit and commissions use pre-tax merchandise plus buyer shipping", () => {
   // Depop sale: $80 item, real fee, prepaid label, $9 default cost
   const t = { subtotal: 8000, cost: 900, channel: "depop", feeCents: 309, shipCostCents: 999, processingFeeCents: 0 };
   assert.equal(profit(t), 5792);
-  assert.equal(commissionProfit(t), 8000 - 900);
+  assert.equal(commissionProfit(t), 5792);
   const withCfg = { ...cfg, channels: ["depop"], pct: 30 };
-  assert.equal(payout(t, rules[0], withCfg), Math.round(7100 * 0.3));
+  assert.equal(payout(t, rules[0], withCfg), Math.round(5792 * 0.3));
+  assert.equal(profit({ ...t, taxOwedCents: 500 }), 5792);
+  assert.equal(commissionProfit({ ...t, taxOwedCents: 500 }), 5792);
+  assert.equal(profit({ ...t, taxCollectedCents: 500, taxOwedCents: 500 }), 5792);
+  assert.equal(commissionProfit({ ...t, taxCollectedCents: 500, taxOwedCents: 500 }), 5792);
 });
 test("buyer-paid shipping is revenue for both Reports profit and commissions", () => {
   const t = { subtotal: 8000, cost: 2000, channel: "website", shippingCents: 1200, shipCostCents: 1399, processingFeeCents: 313 };
   assert.equal(profit(t), 8000 + 1200 - 1399 - 313 - 2000);
-  assert.equal(commissionProfit(t), 8000 + 1200 - 2000);
-  // Ledger profit_cents wins for Reports profit only — commissions still use sale − cost.
-  assert.equal(profit({ ...t, profitCents: 9999 }), 9999);
-  assert.equal(commissionProfit({ ...t, profitCents: 9999 }), 7200);
+  assert.equal(commissionProfit(t), 8000 + 1200 - 1399 - 313 - 2000);
+  assert.equal(profit({ ...t, profitCents: 9999 }), 5488);
+  assert.equal(commissionProfit({ ...t, profitCents: 9999 }), 5488);
 });
 test("losses are not floored in profit(); commissions still floor at zero", () => {
   const t = { subtotal: 1000, cost: 5000, channel: "floor", feeCents: 0, shipCostCents: 0, processingFeeCents: 0 };
   assert.equal(profit(t), -4000);
   assert.equal(payout(t, { employee_id: PAUL, method: "percent_profit", rate: 20 }, cfg), 0);
 });
-test("in-store card sale: Square fee lowers Reports profit, not commission base", () => {
-  // $100 sale, $40 cost, $2.75 Square fee → Reports $57.25; commission on $60.00
+test("in-store card sale: Square fee lowers profit and commission base", () => {
+  // $100 sale, $40 cost, $2.75 Square fee → $57.25 profit and commission base.
   const t = { subtotal: 10000, cost: 4000, channel: "floor", processingFeeCents: 275 };
   const r20 = { employee_id: PAUL, method: "percent_profit", rate: 20 };
   const r10 = { employee_id: JACOB, method: "percent_profit", rate: 10 };
-  assert.equal(payout(t, r20, cfg), Math.round(6000 * 0.2)); // $12.00
-  assert.equal(payout(t, r10, cfg), Math.round(6000 * 0.1)); // $6.00
-  assert.equal(remainingProfit(t, [r20, r10], cfg), 5725 - 1200 - 600);
+  assert.equal(payout(t, r20, cfg), Math.round(5725 * 0.2)); // $11.45
+  assert.equal(payout(t, r10, cfg), Math.round(5725 * 0.1)); // $5.73
+  assert.equal(remainingProfit(t, [r20, r10], cfg), 5725 - 1145 - 573);
 });
-test("in-store percent_of_sale and flat rules are unchanged (cost irrelevant)", () => {
+test("in-store percent_of_sale and flat rules still require a real cost", () => {
   const t = store(10000, 4000);
   assert.equal(payout(t, rules[0], cfg), 3000);
   assert.equal(payout(t, rules[1], cfg), 2000);
-  assert.equal(payout(store(10000, null), rules[0], cfg), 3000);
+  assert.equal(payout(store(10000, null), rules[0], cfg), null);
   assert.equal(payout(store(10000, 4000), { employee_id: PAUL, method: "flat_ticket", rate: 5 }, cfg), 500);
+  assert.equal(payout(store(10000, null), { employee_id: PAUL, method: "flat_ticket", rate: 5 }, cfg), null);
   assert.equal(remainingProfit(t, rules, cfg), 6000 - 5000);
 });
 test("negative fees/shipping can never inflate Reports profit", () => {
@@ -147,12 +151,12 @@ test("channel matching is case-insensitive and eBay plugs in by adding the chann
   const withEbay = { ...cfg, channels: ["website", "ebay"] };
   assert.equal(payout({ subtotal: 10000, cost: 4000, channel: "ebay" }, rules[0], withEbay), 1800);
   assert.equal(payout({ subtotal: 10000, cost: 4000, channel: "ebay" }, rules[1], withEbay), 0);
-  // $129.99 item − $40 cost = $89.99 commission base (fees/label excluded)
+  // Fees and label costs are deducted from the $129.99 item amount.
   const ebay = { subtotal: 12999, cost: 4000, channel: "ebay", ebayFeeCents: 1722, bakedShipCents: 1200 };
-  assert.equal(payout(ebay, rules[0], withEbay), Math.round((12999 - 4000) * 0.3));
+  assert.equal(payout(ebay, rules[0], withEbay), Math.round((12999 - 1722 - 1200 - 4000) * 0.3));
   assert.equal(payout({ ...ebay, cost: null }, rules[0], withEbay), null);
   const depop = { subtotal: 12999, cost: 4000, channel: "depop", feeCents: 474, shipCostCents: 800 };
-  assert.equal(payout(depop, rules[0], { ...cfg, channels: ["depop"] }), Math.round((12999 - 4000) * 0.3));
+  assert.equal(payout(depop, rules[0], { ...cfg, channels: ["depop"] }), Math.round((12999 - 474 - 800 - 4000) * 0.3));
 });
 
 test("per-sale override replaces defaults for Paul and Jacob", () => {

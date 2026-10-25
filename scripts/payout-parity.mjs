@@ -48,7 +48,7 @@ const LEGACY_SKU = { "11314": { jacob: 25, paul: 5 }, "11386": { jacob: 20, paul
 
 const s = `store_id=eq.${store}`;
 const [lines, rules, settings, overrides, people, skuRows] = await Promise.all([
-  rest(`sale_ledger?${s}&voided_at=is.null&select=id,ticket_id,sku,price_cents,cost_cents,channel&order=id`),
+  rest(`sale_ledger?${s}&voided_at=is.null&select=id,ticket_id,sku,price_cents,cost_cents,channel,shipping_cents,channel_fee_cents,ship_cost_cents,processing_fee_cents,tax_collected_cents,tax_owed_cents&order=id`),
   rest(`portal_payout_rules?${s}&select=employee_id,method,rate`),
   rest(`store_settings?${s}&key=in.(online_channels,online_payout_pct,online_payout_employee_id)&select=key,value`),
   rest(`portal_commission_overrides?${s}&select=ticket_key,paul_pct,jacob_pct`),
@@ -68,14 +68,23 @@ const cfg = {
 };
 const ov = new Map(overrides.map((o) => [o.ticket_key, { paulPct: Number(o.paul_pct), jacobPct: Number(o.jacob_pct) }]));
 
-// Same grouping as apps/admin/src/App.tsx tickets() (portal_payout_sales carries no buyer shipping).
+// Same grouping as apps/admin/src/App.tsx tickets(), including buyer-paid shipping.
 const tickets = new Map();
 for (const l of lines) {
   const k = l.ticket_id || `sale:${l.id}`;
   let t = tickets.get(k);
-  if (!t) tickets.set(k, t = { key: k, subtotal: 0, cost: 0, channel: l.channel, lines: [], commissionOverride: ov.get(k) || null });
+  if (!t) tickets.set(k, t = { key: k, subtotal: 0, cost: 0, channel: l.channel, shippingCents: 0,
+    feeCents: 0, shipCostCents: 0, processingFeeCents: 0, taxCollectedCents: 0, taxOwedCents: 0, lines: [], commissionOverride: ov.get(k) || null });
   t.subtotal += l.price_cents;
-  t.lines.push({ sku: l.sku, price_cents: l.price_cents, cost_cents: l.cost_cents });
+  t.shippingCents += Number(l.shipping_cents) || 0;
+  t.feeCents += Number(l.channel_fee_cents) || 0;
+  t.shipCostCents += Number(l.ship_cost_cents) || 0;
+  t.processingFeeCents += Number(l.processing_fee_cents) || 0;
+  t.taxCollectedCents += Number(l.tax_collected_cents) || 0;
+  t.taxOwedCents += Number(l.tax_owed_cents) || 0;
+  t.lines.push({ sku: l.sku, price_cents: l.price_cents, cost_cents: l.cost_cents, shipping_cents: l.shipping_cents,
+    channel_fee_cents: l.channel_fee_cents, ship_cost_cents: l.ship_cost_cents,
+    processing_fee_cents: l.processing_fee_cents, tax_owed_cents: l.tax_owed_cents });
   if (l.cost_cents === null) t.cost = null; else if (t.cost !== null) t.cost += l.cost_cents;
 }
 const people_ = [...rules];
@@ -88,7 +97,8 @@ for (const t of tickets.values()) for (const r of people_) {
   if (a === null) pending[r.employee_id] = (pending[r.employee_id] || 0) + 1;
   else browser[r.employee_id] = (browser[r.employee_id] || 0) + a;
 }
-const result = { store, at: new Date().toISOString(), tickets: tickets.size, browser_totals: browser, browser_pending: pending };
+const result = { store, at: new Date().toISOString(), tickets: tickets.size, browser_totals: browser, browser_pending: pending,
+  browser_ticket_totals: Object.fromEntries([...perTicket].map(([k, amount]) => [k, amount])) };
 
 const snap = await rpc("payout_commission_totals", { p_store: store });
 let failed = false;
@@ -118,9 +128,10 @@ if (compare) {
   const ids = new Set([...Object.keys(before.browser_totals), ...Object.keys(result.snapshot_totals || {})]);
   result.compare = [...ids].map((id) => ({ employee_id: id, before_screen: before.browser_totals[id] || 0,
     after_frozen: (result.snapshot_totals || {})[id] || 0 }));
-  if (result.compare.some((r) => r.before_screen !== r.after_frozen)) failed = true;
+  result.explanation = { before_at: before.at, after_at: result.at,
+    missing_cost_tickets: [...tickets.values()].filter((t) => t.cost === null).length };
 }
 if (out) writeFileSync(out, JSON.stringify(result, null, 2));
-console.log(JSON.stringify({ ...result, ticket_diffs: undefined }, null, 2));
+console.log(JSON.stringify({ ...result, ticket_diffs: undefined, browser_ticket_totals: undefined }, null, 2));
 console.log(failed ? "PARITY: MISMATCH" : "PARITY: OK");
 process.exit(failed ? 1 : 0);

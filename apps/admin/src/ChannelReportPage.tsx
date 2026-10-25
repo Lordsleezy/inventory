@@ -58,6 +58,7 @@ export function ChannelReportPage({ client, money, embedded, mode = 'full', nati
   const [showDates, setShowDates] = useState(false);
   const [buyerShipping, setBuyerShipping] = useState<number | null>(null);
   const [buyerShippingError, setBuyerShippingError] = useState(false);
+  const [missingCostCount, setMissingCostCount] = useState<number | null>(null);
 
   const load = useCallback(async (s: string, e: string) => {
     const id = ++requestId.current;
@@ -72,6 +73,25 @@ export function ChannelReportPage({ client, money, embedded, mode = 'full', nati
   }, [client, native]);
 
   useEffect(() => { void load(start, end); }, [load, start, end]);
+
+  useEffect(() => {
+    if (mode !== 'full' || native) return;
+    let alive = true;
+    setMissingCostCount(null);
+    void (async () => {
+      let count = 0;
+      for (let offset = 0;; offset += 1000) {
+        const { data, error: err } = await client.rpc('portal_payout_sales').range(offset, offset + 999);
+        if (err) throw err;
+        const rows = (data || []) as { sold_at: string; cost_cents: number | null; channel: string }[];
+        count += rows.filter(r => r.cost_cents == null && r.sold_at.slice(0, 10) >= start && r.sold_at.slice(0, 10) < end &&
+          (channel === 'all' || r.channel === channel)).length;
+        if (rows.length < 1000) break;
+      }
+      if (alive) setMissingCostCount(count);
+    })().catch(() => { if (alive) setMissingCostCount(null); });
+    return () => { alive = false; };
+  }, [client, start, end, channel, mode, native]);
 
   useEffect(() => {
     if (!native || mode !== 'fees') return;
@@ -183,6 +203,7 @@ export function ChannelReportPage({ client, money, embedded, mode = 'full', nati
     {error && <div className="alert" role="alert">{error}</div>}
     {busy && !report ? <section className="panel"><div className="empty">Loading…</div></section> : report && <>
       {mode === 'full' && totals.unmatched > 0 && <div className="alert" role="status">{unmatchedHint}</div>}
+      {mode === 'full' && missingCostCount != null && missingCostCount > 0 && <div className="alert" role="status">{missingCostCount} sold item{missingCostCount === 1 ? ' has' : 's have'} cost missing. Enter a real cost in Inventory; no default cost is used in profit.</div>}
       {mode === 'full' && channel === 'ebay' && ebayOverhead > 0 && <div className="alert" role="status">Profit is after voided label spend and {money(ebayOverhead)} eBay insertion/subscription (same stack as the eBay tab and Payouts).</div>}
       <div className="stats">
         {mode === 'full' && <Stat name="Gross sales" value={money(totals.gross)} onClick={() => setDrill('gross')} active={drill === 'gross'} note="item + buyer shipping + tax" />}

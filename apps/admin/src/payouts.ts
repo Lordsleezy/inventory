@@ -3,12 +3,12 @@
 // Reports / owner "profit after costs":
 //   item + buyer-paid shipping − channel fees − label/shipping cost − card processing − item cost
 //
-// Commission base (every percent-of-profit / online cut):
-//   sale price (merchandise + buyer-paid shipping) − item cost
-//   Tax and ALL fees stay out — commissions never shrink because of Square/eBay/label fees.
+// Commission base (percent-of-profit / online cut):
+//   gross sale + buyer-paid shipping − channel fees − label − processing − sales tax − real item cost.
+// The stored merchandise price is pre-tax, so tax is added and removed once in the helper below.
 //
-// `cost` arrives already resolved (real unit cost, collectible $0, or category default);
-// `costEstimated` marks sales whose profit used a default instead of a real cost.
+// `cost` is a recorded unit cost or an explicitly marked collectible $0. Missing cost is null.
+// `costEstimated` is retained only for legacy rows and never supplies a payout cost.
 export type RuleMethod = 'percent_sale' | 'flat_ticket' | 'percent_profit';
 export type Rule = { employee_id: string; method: RuleMethod; rate: number };
 export type TicketLineLike = {
@@ -19,6 +19,11 @@ export type TicketLineLike = {
   cost_cents?: number | null;
   /** Legacy fee-adjusted ledger profit — ignored for commissions. */
   profit_cents?: number | null;
+  shipping_cents?: number | null;
+  channel_fee_cents?: number | null;
+  ship_cost_cents?: number | null;
+  processing_fee_cents?: number | null;
+  tax_owed_cents?: number | null;
 };
 /** Per-sale Paul/Jacob percent-of-(sale−cost) override. Null/absent = use defaults. */
 export type CommissionOverride = { paulPct: number; jacobPct: number };
@@ -27,6 +32,8 @@ export type TicketLike = {
   feeCents?: number; shipCostCents?: number; processingFeeCents?: number;
   /** Buyer-paid shipping (revenue). Not the label we bought. */
   shippingCents?: number;
+  taxCollectedCents?: number;
+  taxOwedCents?: number;
   // Back-compat aliases from the old eBay-only ledger.
   ebayFeeCents?: number; bakedShipCents?: number;
   costEstimated?: boolean;
@@ -57,9 +64,8 @@ const shipCosts = (t: TicketLike) => Math.max(0, t.shipCostCents ?? t.bakedShipC
 const processing = (t: TicketLike) => Math.max(0, t.processingFeeCents ?? 0);
 const buyerShipping = (t: TicketLike) => Math.max(0, t.shippingCents ?? 0);
 
-/** Fee-adjusted profit (Reports). Null only when the ticket has no cost at all. */
+/** Item price is stored pre-tax, so tax is pass-through and already outside this base. */
 export function profit(t: TicketLike): number | null {
-  if (t.profitCents != null && Number.isFinite(t.profitCents)) return t.profitCents;
   if (t.cost === null) return null;
   return t.subtotal + buyerShipping(t) - channelFees(t) - shipCosts(t) - processing(t) - t.cost;
 }
@@ -67,7 +73,7 @@ export function profit(t: TicketLike): number | null {
 /**
  * Reports → Profit (all time) is the sum of sale profit minus eBay insertion and
  * store-subscription fees. Those fees are not on a sale row. Commissions stay on
- * sale − cost and are not reduced here. Losses are kept.
+ * the saved formula includes buyer shipping and subtracts fees, taxes and item cost. Losses are kept.
  */
 export function reportProfitCents(saleProfitCents: number | null, ebayOverheadCents: number): number | null {
   if (saleProfitCents == null || !Number.isFinite(saleProfitCents)) return null;
@@ -75,17 +81,19 @@ export function reportProfitCents(saleProfitCents: number | null, ebayOverheadCe
   return saleProfitCents - overhead;
 }
 
-/** Commission base: sale (− tax/fees) minus cost. Buyer shipping counts as sale revenue. */
+/** Commission base: item price + buyer shipping − fees, label, processing, and cost. */
 export function commissionProfit(t: TicketLike): number | null {
   if (t.cost === null) return null;
-  return t.subtotal + buyerShipping(t) - t.cost;
+  return t.subtotal + buyerShipping(t) - channelFees(t) - shipCosts(t) - processing(t) - t.cost;
 }
 
 /** Per-line commission base when price + cost are present. */
 export function lineCommissionProfit(l: TicketLineLike): number | null {
   if (l.price_cents == null || !Number.isFinite(l.price_cents)) return null;
   if (l.cost_cents == null || !Number.isFinite(l.cost_cents)) return null;
-  return l.price_cents - l.cost_cents;
+  return l.price_cents + Math.max(0, l.shipping_cents ?? 0) - Math.max(0, l.channel_fee_cents ?? 0)
+    - Math.max(0, l.ship_cost_cents ?? 0) - Math.max(0, l.processing_fee_cents ?? 0)
+    - l.cost_cents;
 }
 
 /**
@@ -126,6 +134,7 @@ function overridePayout(t: TicketLike, employeeId: string, ov: CommissionOverrid
 /** Cents owed to this rule's person for one ticket. null = cannot be calculated (no cost anywhere). */
 export function payout(t: TicketLike, rule: Rule | undefined, cfg: OnlineCfg): number | null {
   if (!rule) return null;
+  if (t.cost === null) return null;
   if (t.commissionOverride) {
     return overridePayout(t, rule.employee_id, t.commissionOverride, cfg);
   }

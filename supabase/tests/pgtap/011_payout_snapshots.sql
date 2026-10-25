@@ -1,6 +1,6 @@
 -- pgTAP: payout snapshots (20261030150000_payout_snapshots.sql).
 begin;
-select plan(13);
+select plan(17);
 set constraints all immediate;
 
 do $$
@@ -13,7 +13,7 @@ begin
   perform public.seed_store_settings(v_store, 'Payout Store');
   insert into public.store_settings (store_id, key, value) values
     (v_store, 'online_channels', '["website"]'), (v_store, 'online_payout_pct', '30'),
-    (v_store, 'online_payout_employee_id', to_jsonb(v_paul::text)), (v_store, 'cost_defaults', '{}')
+    (v_store, 'online_payout_employee_id', to_jsonb(v_paul::text)), (v_store, 'cost_defaults', '{"other":900}')
   on conflict (store_id, key) do update set value = excluded.value;
   insert into public.store_payout_people (store_id, slot, employee_id) values (v_store, 'paul', v_paul), (v_store, 'jacob', v_jacob);
   insert into public.store_payout_sku_rates (store_id, sku, employee_id, rate) values
@@ -21,21 +21,24 @@ begin
   insert into public.portal_payout_rules (store_id, employee_id, method, rate) values
     (v_store, v_paul, 'percent_profit', 20), (v_store, v_jacob, 'percent_profit', 10);
   insert into public.sku_ledger (sku, issued_at, store_id)
-    select x, now(), v_store from unnest(array['93001','93002','93003','93004','93005','93006']) x;
+    select x, now(), v_store from unnest(array['93001','93002','93003','93004','93005','93006','93007']) x;
   insert into public.units (sku, brand, title, ask_cents, acquisition_cost_cents, state, store_id, received_at, updated_at) values
     ('93001', 'A', 'In store', 10000, 4000, 'sold', v_store, now(), now()),
     ('93002', 'A', 'No cost', 5000, null, 'sold', v_store, now(), now()),
     ('93003', 'A', 'SKU rate', 10000, 2000, 'sold', v_store, now(), now()),
     ('93004', 'A', 'Website', 10000, 2000, 'sold', v_store, now(), now()),
     ('93005', 'A', 'Multi 1', 3000, 1000, 'sold', v_store, now(), now()),
-    ('93006', 'A', 'Multi 2', 2000, 0, 'sold', v_store, now(), now());
-  insert into public.sales (store_id, sku, price_cents, tax_cents, channel, payment_method, sold_at, receipt_no, actor_id, qty, ticket_id) values
-    (v_store, '93001', 10000, 0, 'floor', 'cash', now(), 'PAY-1', v_paul, 1, null),
-    (v_store, '93002', 5000, 0, 'floor', 'cash', now(), 'PAY-2', v_paul, 1, null),
-    (v_store, '93003', 10000, 0, 'floor', 'cash', now(), 'PAY-3', v_paul, 1, null),
-    (v_store, '93004', 10000, 0, 'website', 'card', now(), 'PAY-4', null, 1, null),
-    (v_store, '93005', 3000, 0, 'floor', 'cash', now(), 'PAY-5', v_paul, 1, v_ticket),
-    (v_store, '93006', 2000, 0, 'floor', 'cash', now(), 'PAY-6', v_paul, 1, v_ticket);
+    ('93006', 'A', 'Multi 2', 2000, 0, 'sold', v_store, now(), now()),
+    ('93007', 'A', 'Shipping and tax', 10000, 4000, 'sold', v_store, now(), now());
+  insert into public.sales (store_id, sku, price_cents, tax_cents, channel, payment_method, sold_at, receipt_no, actor_id, qty, ticket_id,
+    shipping_cents, processing_fee_cents, processing_fee_source) values
+    (v_store, '93001', 10000, 0, 'floor', 'cash', now(), 'PAY-1', v_paul, 1, null, 0, 0, 'actual'),
+    (v_store, '93002', 5000, 0, 'floor', 'cash', now(), 'PAY-2', v_paul, 1, null, 0, 0, 'actual'),
+    (v_store, '93003', 10000, 0, 'floor', 'cash', now(), 'PAY-3', v_paul, 1, null, 0, 0, 'actual'),
+    (v_store, '93004', 10000, 0, 'website', 'card', now(), 'PAY-4', null, 1, null, 0, 0, 'actual'),
+    (v_store, '93005', 3000, 0, 'floor', 'cash', now(), 'PAY-5', v_paul, 1, v_ticket, 0, 0, 'actual'),
+    (v_store, '93006', 2000, 0, 'floor', 'cash', now(), 'PAY-6', v_paul, 1, v_ticket, 0, 0, 'actual'),
+    (v_store, '93007', 10000, 500, 'floor', 'cash', now(), 'PAY-7', v_paul, 1, null, 1200, 100, 'actual');
   perform set_config('test.store', v_store::text, true);
   perform set_config('test.paul', v_paul::text, true);
   perform set_config('test.jacob', v_jacob::text, true);
@@ -52,8 +55,12 @@ select is((select amount_cents from c where sku = '93001' and who = 'jacob'), 60
 select is((select amount_cents from c where sku = '93004' and who = 'paul'), 2400, 'online: Paul 30% of sale − cost');
 select is((select amount_cents from c where sku = '93004' and who = 'jacob'), 0, 'online: Jacob nothing');
 select is((select amount_cents from c where sku = '93003' and who = 'jacob'), 2000, 'per-SKU rate from store_payout_sku_rates');
-select is((select amount_cents from c where sku = '93002' and who = 'paul'), 820,
-  'no unit cost: provisional on the ledger''s default estimate (900), like the screen today');
+select ok((select cost_cents is null from public.sale_ledger where sku = '93002' and store_id = current_setting('test.store')::uuid),
+  'category default is not a real cost');
+select ok((select amount_cents is null from c where sku = '93002' and who = 'paul'),
+  'missing real cost has no payout');
+select is((select amount_cents from c where sku = '93007' and who = 'paul'), 1420,
+  'profit includes buyer shipping and subtracts fee, tax and cost');
 select is((select sum(amount_cents)::int from c where sku in ('93005','93006') and who = 'paul'), 800,
   'multi-line ticket: lines sum to the ticket amount');
 
@@ -61,7 +68,7 @@ update public.units set acquisition_cost_cents = 9000 where store_id = current_s
 select is((select amount_cents from c where sku = '93001' and who = 'paul'), 1200, 'editing cost later does not change a frozen payout');
 
 update public.units set acquisition_cost_cents = 1000 where store_id = current_setting('test.store')::uuid and sku = '93002';
-select is((select amount_cents from c where sku = '93002' and who = 'paul'), 800, 'real cost entered later replaces the estimate once');
+select is((select amount_cents from c where sku = '93002' and who = 'paul'), 800, 'real cost entered later enables payout once');
 
 update public.portal_payout_rules set rate = 50 where store_id = current_setting('test.store')::uuid;
 select is((select amount_cents from c where sku = '93001' and who = 'jacob'), 600, 'rule change does not rewrite past sales');
@@ -74,8 +81,21 @@ select is((select amount_cents from c where sku = '93001' and who = 'paul'), 300
 select is((select amount_cents from c where sku = '93001' and who = 'jacob'), 0, 'override sets Jacob to 0');
 
 select is((select commission_cents::int from public.payout_commission_totals(current_setting('test.store')::uuid)
-  where employee_id = current_setting('test.paul')::uuid), 3000 + 800 + 400 + 2400 + 800,
+  where employee_id = current_setting('test.paul')::uuid), 3000 + 800 + 400 + 2400 + 800 + 1320,
   'payout_commission_totals sums frozen amounts');
+
+do $$ declare v_clerk uuid := gen_random_uuid(); begin
+  insert into auth.users (id) values (v_clerk);
+  insert into public.staff (user_id, store_id, display_name, role)
+  values (v_clerk, current_setting('test.store')::uuid, 'Clerk', 'staff');
+  perform set_config('test.clerk', v_clerk::text, true);
+end $$;
+select set_config('request.jwt.claim.sub', current_setting('test.clerk'), true);
+select set_config('request.jwt.claim.role', 'authenticated', true);
+set local role authenticated;
+select is((select count(*)::int from public.sale_commissions where store_id = current_setting('test.store')::uuid), 0, 'clerk cannot read payout amounts');
+select is((select count(*)::int from public.sale_payout_lines where store_id = current_setting('test.store')::uuid), 0, 'clerk cannot read sold payout inputs');
+reset role;
 
 select * from finish();
 rollback;
