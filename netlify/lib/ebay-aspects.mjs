@@ -5,6 +5,8 @@ function norm(value) {
     .trim();
 }
 
+const meaningfulModel = value => Boolean(value && !/^(?:\d+|unknown|generic|n\/?a|does not apply|model)$/i.test(value));
+
 export function candidateParts(...values) {
   const out = [];
   for (const value of values) {
@@ -333,7 +335,6 @@ function candidatesForAspect(name, unit, specs, extras = {}) {
   const lower = name.toLowerCase();
   const brand = String(unit.brand || "").trim();
   const rawModel = String(unit.model || specs?.matched_model || "").trim();
-  const meaningfulModel = value => Boolean(value && !/^(?:\d+|unknown|generic|n\/?a|does not apply|model)$/i.test(value));
   const model = meaningfulModel(rawModel) ? rawModel : "";
   const mpn = String(specs?.manufacturer_model_number || specs?.matched_model || specs?.mpn || "").trim();
   const appliance = String(unit.category || unit.title || "").trim();
@@ -342,7 +343,7 @@ function candidatesForAspect(name, unit, specs, extras = {}) {
   const install = String(specs?.installation || "").trim();
   const condition = String(unit.condition || "").trim();
   if (lower === "brand") return [brand];
-  if (lower === "mpn" || lower === "manufacturer part number") return [model];
+  if (lower === "mpn" || lower === "manufacturer part number") return [mpn];
   if (lower === "model") return [model];
   if (lower === "type") return [layout, appliance];
   if (lower === "color" || lower === "colour") return finishColorCandidates(finish);
@@ -443,8 +444,9 @@ export function confidentPhrase(allowed, texts) {
 }
 
 export function fillAspects(defs, unit, specs, extras = {}) {
-  const rawModel = String(specs?.matched_model || unit.model || "").trim();
-  const model = /\d/.test(rawModel) && !/^\d{5,}$/.test(rawModel) ? rawModel : "";
+  const rawModel = String(unit.model || specs?.matched_model || "").trim();
+  const model = meaningfulModel(rawModel) ? rawModel : "";
+  const mpn = String(specs?.manufacturer_model_number || specs?.matched_model || specs?.mpn || "").trim();
   const overrides = specs?.ebay_aspects && typeof specs.ebay_aspects === "object" ? specs.ebay_aspects : {};
   const remembered = extras.remembered && typeof extras.remembered === "object" ? extras.remembered : {};
   const categoryDefaults = extras.categoryDefaults && typeof extras.categoryDefaults === "object" ? extras.categoryDefaults : {};
