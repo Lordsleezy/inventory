@@ -1,5 +1,5 @@
--- Live schema baseline for CI. Generated 2026-10-25T03:57Z by scripts/refresh-live-baseline.sh.
--- Applied migrations on live: 300. Do not edit by hand.
+-- Live schema baseline for CI. Generated 2026-10-25T04:12Z by scripts/refresh-live-baseline.sh.
+-- Applied migrations on live: 301. Do not edit by hand.
 
 
 
@@ -7941,7 +7941,7 @@ begin
   select jsonb_build_object(
     'items', coalesce((select jsonb_agg(to_jsonb(p) - 'sort_order' order by p.sort_order)
       from page p), '[]'::jsonb),
-    'totals', (select jsonb_build_object('unit_count',count(*),
+    'totals', (select jsonb_build_object('unit_count',count(*),'piece_count',(select coalesce(sum(case when pf.state='sold' then coalesce((select sum(greatest(coalesce(sl.qty,1),1)) from public.sales sl where sl.store_id=v_store and sl.sku=pf.sku and sl.voided_at is null),1) else greatest(coalesce(pu.qty_on_hand,1),0) end),0)::int from filtered pf join public.units pu on pu.store_id=v_store and pu.sku=pf.sku),
       'retail_cents', case when v_admin then coalesce(sum(ask_cents),0) end,
       'cost_cents', case when v_admin then coalesce(sum(acquisition_cost_cents),0) end,
       'missing_cost', case when v_admin then count(*) filter (where acquisition_cost_cents is null) end)
@@ -8043,7 +8043,7 @@ begin
   select jsonb_build_object(
     'items', coalesce((select jsonb_agg(to_jsonb(p) - 'sort_order' order by p.sort_order)
       from page p), '[]'::jsonb),
-    'totals', (select jsonb_build_object('unit_count',count(*),
+    'totals', (select jsonb_build_object('unit_count',count(*),'piece_count',(select coalesce(sum(case when pf.state='sold' then coalesce((select sum(greatest(coalesce(sl.qty,1),1)) from public.sales sl where sl.store_id=v_store and sl.sku=pf.sku and sl.voided_at is null),1) else greatest(coalesce(pu.qty_on_hand,1),0) end),0)::int from filtered pf join public.units pu on pu.store_id=v_store and pu.sku=pf.sku),
       'retail_cents', case when v_admin then coalesce(sum(ask_cents),0) end,
       'cost_cents', case when v_admin then coalesce(sum(acquisition_cost_cents),0) end,
       'missing_cost', case when v_admin then count(*) filter (where acquisition_cost_cents is null) end)
@@ -15560,7 +15560,7 @@ begin
       case when p_sort='date' then received_at end desc nulls last,sku desc offset p_offset limit p_limit
   )
   select jsonb_build_object('items',coalesce((select jsonb_agg(to_jsonb(p)-'sort_order' order by p.sort_order) from page p),'[]'::jsonb),
-    'totals',(select jsonb_build_object('unit_count',count(*)) from filtered)) into v_result;
+    'totals',(select jsonb_build_object('unit_count',count(*),'piece_count',(select coalesce(sum(case when pf.state='sold' then coalesce((select sum(greatest(coalesce(sl.qty,1),1)) from public.sales sl where sl.store_id=v_store and sl.sku=pf.sku and sl.voided_at is null),1) else greatest(coalesce(pu.qty_on_hand,1),0) end),0)::int from filtered pf join public.units pu on pu.store_id=v_store and pu.sku=pf.sku)) from filtered)) into v_result;
   return v_result;
 end $$;
 
