@@ -191,5 +191,5 @@ timeout = 30
 # Channel checkbox queue (listing_queue). Does nothing unless store setting channel_autopush.enabled is true;
 # eBay additionally needs channel_autopush.ebay_enabled. Drips per_run listings per channel per run.
 [functions."channel-autopush"]
-  schedule = "*/10 * * * *"
+  schedule = "* * * * *"
   timeout = 60

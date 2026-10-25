@@ -58,6 +58,35 @@ test("one channel failing does not stop the others; drip limit per channel", asy
   assert.equal(db.updates.find((u) => u.id === 2).listing_ref, "https://x/2");
 });
 
+test("temporary eBay 20/hour cadence expires; Amazon and TikTok remain on 10-minute cadence", async () => {
+  const rows = [row(1, "e", "ebay"), row(2, "a", "amazon"), row(3, "t", "tiktok")];
+  const published = [];
+  const deps = { publish: async (_s, ch, sku) => { published.push(`${ch}:${sku}`); return { ok: true }; }, end: async () => ({ ok: true }) };
+  const setting = { enabled: true, ebay_enabled: true, per_run: { ebay: 1, amazon: 1, tiktok: 1 }, ebay_rate_until: "2026-11-01T12:30:00.000Z" };
+  const boosted = fakeDb({ setting, rows });
+  await runAutopush({ db: boosted, deps, now: new Date("2026-11-01T12:03:00.000Z") });
+  assert.deepEqual(published, ["ebay:e"]);
+  published.length = 0;
+  const normal = fakeDb({ setting, rows });
+  await runAutopush({ db: normal, deps, now: new Date("2026-11-01T12:04:00.000Z") });
+  assert.deepEqual(published, []);
+  const ebayTick = fakeDb({ setting, rows });
+  await runAutopush({ db: ebayTick, deps, now: new Date("2026-11-01T12:09:00.000Z") });
+  assert.deepEqual(published, ["ebay:e"]);
+  published.length = 0;
+  const regularTick = fakeDb({ setting, rows });
+  await runAutopush({ db: regularTick, deps, now: new Date("2026-11-01T12:10:00.000Z") });
+  assert.deepEqual(published, ["amazon:a", "tiktok:t"]);
+  published.length = 0;
+  published.length = 0;
+  const expired = fakeDb({ setting, rows });
+  await runAutopush({ db: expired, deps, now: new Date("2026-11-01T12:33:00.000Z") });
+  assert.deepEqual(published, []);
+  const expiredRegularTick = fakeDb({ setting, rows });
+  await runAutopush({ db: expiredRegularTick, deps, now: new Date("2026-11-01T12:40:00.000Z") });
+  assert.deepEqual(published, ["ebay:e", "amazon:a", "tiktok:t"]);
+});
+
 test("never re-lists a unit that is already live (no duplicates)", async () => {
   let called = false;
   const db = fakeDb({ setting: {}, live: { "9:ebay": true } });

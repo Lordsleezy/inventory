@@ -74,9 +74,19 @@ export async function runAutopush({ db, deps, now = new Date() }) {
   const results = [];
   for (const { store_id: storeId, value } of settings) {
     const s = normalizeSetting(value);
+    const ebayBoostUntil = Date.parse(value?.ebay_rate_until || "");
     if (!s.enabled) { results.push({ storeId, skipped: "disabled" }); continue; }
     for (const channel of CHANNELS) {
       if (channel === "ebay" && !s.ebay_enabled) { results.push({ storeId, channel, skipped: "ebay_not_enabled" }); continue; }
+      // The scheduler runs every minute so the temporary eBay drip can run once
+      // every 3 minutes (20/hour). Keep Amazon/TikTok and normal eBay traffic at
+      // the former 10-minute cadence, and let the boost expire without a reset.
+      const ebayBoostActive = channel === "ebay" && Number.isFinite(ebayBoostUntil) && now.getTime() < ebayBoostUntil;
+      const cadence = ebayBoostActive ? 3 : 10;
+      if (now.getUTCMinutes() % cadence !== 0) {
+        results.push({ storeId, channel, skipped: "normal_cadence" });
+        continue;
+      }
       try {
         const rows = await db.dueRows(storeId, channel, s.per_run[channel], now);
         for (const row of rows) {
