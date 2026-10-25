@@ -810,3 +810,11 @@ html.dark .mboard-progress-bar{background:#2a3340}
 .category-panel input[type=checkbox]{width:24px;min-height:24px;flex-shrink:0}
 .category-panel details{padding:12px;border:1px solid var(--line,#354050);border-radius:10px}
 @media(max-width:700px){.category-panel .category-layout{grid-template-columns:1fr}.category-panel .category-queue{max-height:36vh}.category-panel .category-row,.category-panel .category-results button{min-height:54px}}
+
+.channel-picker { border: 1px solid var(--line, #ddd); border-radius: 10px; padding: 8px 12px; display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 8px 0; }
+.channel-picker legend { font-size: 12px; font-weight: 600; padding: 0 4px; }
+.channel-picker small { opacity: .7; }
+.channel-picker-compact { border: 0; padding: 0; margin: 0; gap: 4px 12px; }
+.app-channel-picker { border-color: rgba(255,255,255,.15); }
+.app-channel-picker input[type=checkbox] { width: 22px; height: 22px; }
+.listing-issues table { width: 100%; }
