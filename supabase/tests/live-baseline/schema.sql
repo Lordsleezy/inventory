@@ -1,5 +1,5 @@
--- Live schema baseline for CI. Generated 2026-10-25T04:12Z by scripts/refresh-live-baseline.sh.
--- Applied migrations on live: 301. Do not edit by hand.
+-- Live schema baseline for CI. Generated 2026-10-26T20:02Z by scripts/refresh-live-baseline.sh.
+-- Applied migrations on live: 314. Do not edit by hand.
 
 
 
@@ -875,6 +875,7 @@ CREATE OR REPLACE FUNCTION "public"."assert_channel_eligible"("p_store" "uuid", 
     AS $$
 declare v_status text; v_reason text; v_source text;
 begin
+  perform public.floor_dns_push_gate(p_store,p_sku,p_channel);
   select e.status, e.reason, e.source into v_status, v_reason, v_source
   from public.evaluate_marketplace_eligibility(p_store, p_sku, p_channel) e;
   if v_status = 'allow' then return; end if;
@@ -2218,6 +2219,62 @@ $$;
 ALTER FUNCTION "public"."delete_unit_photo"("p_id" bigint) OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."depop_purge_sale"("p_sale" bigint, "p_restore" boolean DEFAULT false) RETURNS "jsonb"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  s public.sales; v_orders uuid[]; v_ticket text; v_comm jsonb;
+begin
+  select * into s from public.sales where id = p_sale for update;
+  if not found then return null; end if;
+  if lower(s.channel) <> 'depop' then raise exception 'not_a_depop_sale'; end if;
+  if exists (select 1 from public.unit_dispositions d where d.original_sale_id = p_sale) then raise exception 'sale_has_replacement'; end if;
+  v_ticket := coalesce(s.ticket_id::text, 'sale:' || s.id::text);
+  select coalesce(jsonb_object_agg(c.employee_id, c.amount_cents), '{}'::jsonb) into v_comm
+    from public.sale_commissions c where c.sale_id = p_sale;
+  select array_agg(id) into v_orders from public.web_orders where sale_id = p_sale;
+  if v_orders is not null then
+    delete from public.web_order_emails where order_id = any (v_orders);
+    delete from public.web_order_labels where order_id = any (v_orders);
+    delete from public.web_orders where id = any (v_orders);
+  end if;
+  delete from public.channel_orders where sale_id = p_sale;
+  delete from public.delist_tasks where sale_id = p_sale;
+  update public.reservations set sale_id = null where sale_id = p_sale;
+  update public.marketplace_email_sales set sale_id = null, state = 'ignored' where sale_id = p_sale;
+  delete from public.portal_sale_corrections where sale_id = p_sale;
+  delete from public.portal_commission_overrides where store_id = s.store_id and ticket_key = v_ticket;
+  delete from public.sales where id = p_sale;
+  delete from public.sale_payout_tickets t where t.store_id = s.store_id and t.ticket_key = v_ticket
+    and not exists (select 1 from public.sale_payout_lines l where l.store_id = t.store_id and l.ticket_key = t.ticket_key);
+  if p_restore then
+    update public.units set state = 'available', updated_at = now() where store_id = s.store_id and sku = s.sku and state = 'sold';
+    update public.sku_ledger set fate = 'issued' where sku = s.sku and store_id is not distinct from s.store_id;
+  end if;
+  insert into public.events (store_id, sku, kind, actor, actor_id, note)
+  values (s.store_id, s.sku, case when p_restore then 'depop_sale_deleted' else 'depop_sale_removed' end,
+    coalesce((select display_name from public.staff where user_id = auth.uid()), 'system'), auth.uid(),
+    format('Depop sale %s (%s) removed%s', s.receipt_no, to_char(s.price_cents / 100.0, 'FM999990.00'),
+      case when p_restore then '; unit back in stock' else '; unit stays sold' end));
+  return jsonb_build_object('sale_id', s.id, 'sku', s.sku, 'receipt_no', s.receipt_no, 'sold_at', s.sold_at,
+    'price_cents', s.price_cents, 'voided', s.voided_at is not null, 'commissions', v_comm);
+end $$;
+
+
+ALTER FUNCTION "public"."depop_purge_sale"("p_sale" bigint, "p_restore" boolean) OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."depop_sold_at"("p_day" "date") RETURNS timestamp with time zone
+    LANGUAGE "sql" IMMUTABLE
+    AS $$
+  select ((p_day::timestamp + interval '12 hours') at time zone 'America/Los_Angeles');
+$$;
+
+
+ALTER FUNCTION "public"."depop_sold_at"("p_day" "date") OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."disconnect_provider"("p_provider" "text") RETURNS "void"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -2243,6 +2300,112 @@ $$;
 
 
 ALTER FUNCTION "public"."disconnect_provider"("p_provider" "text") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."disposition_actor_name"("p_uid" "uuid") RETURNS "text"
+    LANGUAGE "sql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+  select coalesce((select s.display_name from public.staff s where s.user_id = p_uid order by s.deactivated_at nulls first limit 1), 'Admin');
+$$;
+
+
+ALTER FUNCTION "public"."disposition_actor_name"("p_uid" "uuid") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."disposition_leave_stock"("p_store" "uuid", "p_sku" "text", "p_state" "text") RETURNS "void"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+begin
+  insert into public.delist_tasks (store_id, sku, channel, sale_id, nag_after)
+  select p_store, l.sku, l.channel, null,
+    now() + make_interval(mins => coalesce((public.store_setting(p_store, 'delistNagMinutes', '15'::jsonb) #>> '{}')::int, 15))
+  from public.listings l
+  where l.store_id is not distinct from p_store and l.sku = p_sku and l.status = 'listed'
+    and not exists (select 1 from public.delist_tasks t
+      where t.store_id is not distinct from p_store and t.sku = l.sku and t.channel = l.channel and t.completed_at is null);
+  update public.listings set status = 'pending_delist'
+   where store_id is not distinct from p_store and sku = p_sku and status = 'listed';
+  update public.units set state = p_state, listed_on = '{}', show_on_website = false, updated_at = now()
+   where store_id = p_store and sku = p_sku;
+end $$;
+
+
+ALTER FUNCTION "public"."disposition_leave_stock"("p_store" "uuid", "p_sku" "text", "p_state" "text") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."disposition_make_bad_unit"("p_id" "uuid") RETURNS "text"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $_$
+declare
+  d public.unit_dispositions; o public.units; v_sku text; v_max bigint; v_digits int; v_receipt text; v_actor text;
+begin
+  select * into d from public.unit_dispositions where id = p_id for update;
+  if not found or d.kind <> 'replacement' then raise exception 'not_a_replacement'; end if;
+  if d.bad_unit_sku is not null then return d.bad_unit_sku; end if;
+  select * into o from public.units where store_id = d.store_id and sku = d.original_sku;
+  select s.receipt_no into v_receipt from public.sales s where s.id = d.original_sale_id;
+  v_actor := public.disposition_actor_name(auth.uid());
+  v_digits := coalesce((public.store_setting(d.store_id, 'skuDigits', '5'::jsonb) #>> '{}')::int, 5);
+  select coalesce(max(case when sku ~ '^[0-9]{5}$' and sku < '90000' then sku::bigint end), 9999) into v_max
+    from public.sku_ledger where store_id = d.store_id;
+  v_sku := lpad((greatest(v_max + 1, 10000))::text, v_digits, '0');
+  insert into public.sku_ledger (store_id, sku, issued_at, label, fate)
+    values (d.store_id, v_sku, now(), coalesce(o.title, ''), 'issued');
+  -- Cost 0 on purpose: this unit's real cost already sits on the original sale; counting it again would double it.
+  insert into public.units (store_id, sku, brand, model, title, category, condition, upc, acquisition_cost_cents,
+    defect_notes, state, show_on_website, received_at, updated_at, listing_specs)
+  values (d.store_id, v_sku, coalesce(o.brand, ''), coalesce(o.model, ''), coalesce(o.title, ''), o.category,
+    'Defective', o.upc, 0,
+    format('Bad unit back from replacement. Original SKU %s, sale %s, replaced by SKU %s.', d.original_sku, v_receipt, d.sku),
+    'available', false, now(), now(),
+    jsonb_build_object('do_not_list', true, 'bad_unit_of', d.original_sku, 'replacement_id', d.id));
+  insert into public.events (store_id, sku, kind, actor, actor_id, note)
+    values (d.store_id, v_sku, 'bad_unit_received', v_actor, auth.uid(),
+      format('Bad unit of SKU %s came back (replacement SKU %s)', d.original_sku, d.sku));
+  insert into public.events (store_id, sku, kind, actor, actor_id, note)
+    values (d.store_id, d.original_sku, 'bad_unit_received', v_actor, auth.uid(), format('Bad unit logged into Defective as SKU %s', v_sku));
+  update public.unit_dispositions set bad_unit_status = 'returned', bad_unit_sku = v_sku where id = d.id;
+  return v_sku;
+end $_$;
+
+
+ALTER FUNCTION "public"."disposition_make_bad_unit"("p_id" "uuid") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."disposition_unit_cost"("p_store" "uuid", "p_sku" "text") RETURNS integer
+    LANGUAGE "sql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+  select (public.unit_cost_json(u.store_id, u.category, u.is_collectible, u.acquisition_cost_cents) ->> 'cost_cents')::int
+  from public.units u where u.store_id = p_store and u.sku = p_sku;
+$$;
+
+
+ALTER FUNCTION "public"."disposition_unit_cost"("p_store" "uuid", "p_sku" "text") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."disposition_unit_cost_trigger"() RETURNS "trigger"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare d record;
+begin
+  for d in select * from public.unit_dispositions
+    where store_id = new.store_id and sku = new.sku and undone_at is null loop
+    if d.kind = 'replacement' then perform public.payout_sync_replacements(d.original_sale_id, d.id);
+    else perform public.giveaway_sync_expense(d.id); end if;
+  end loop;
+  return null;
+exception when others then
+  insert into public.payout_snapshot_errors (store_id, error) values (new.store_id, 'disposition cost ' || new.sku || ': ' || sqlerrm);
+  return null;
+end $$;
+
+
+ALTER FUNCTION "public"."disposition_unit_cost_trigger"() OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."enqueue_delist_nags"() RETURNS integer
@@ -3448,6 +3611,33 @@ end $$;
 ALTER FUNCTION "public"."finish_web_order_refund"("p_store" "uuid", "p_order" "uuid", "p_refund" "text") OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."floor_backfill_channel_selections"("p_store" "uuid", "p_dry_run" boolean DEFAULT true) RETURNS "jsonb"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare v jsonb;
+begin
+  with live as (
+    select u.sku, c.ch from public.units u cross join unnest(array['ebay','amazon','tiktok']) c(ch)
+    where u.store_id = p_store and u.state in ('available','reserved','repair')
+      and public.floor_unit_live_on(p_store, u.sku, c.ch)
+  ), ins as (
+    insert into public.unit_channel_selections (store_id, sku, channel, selected, source, updated_at)
+    select p_store, l.sku, l.ch, true, 'backfill', now() from live l where not p_dry_run
+    on conflict (store_id, sku, channel) do nothing
+    returning channel
+  )
+  select jsonb_build_object('dry_run', p_dry_run,
+    'live', coalesce((select jsonb_object_agg(ch, n) from (select ch, count(*) n from live group by ch) x), '{}'::jsonb),
+    'inserted', coalesce((select jsonb_object_agg(channel, n) from (select channel, count(*) n from ins group by channel) y), '{}'::jsonb))
+  into v;
+  return v;
+end $$;
+
+
+ALTER FUNCTION "public"."floor_backfill_channel_selections"("p_store" "uuid", "p_dry_run" boolean) OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."floor_bundle_begin_push"("p_store" "uuid", "p_sku" "text", "p_channel" "text") RETURNS "void"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -3533,6 +3723,7 @@ CREATE OR REPLACE FUNCTION "public"."floor_bundle_push_gate"("p_store" "uuid", "
     AS $$
 declare v_unit public.units; v_channel text:=lower(btrim(coalesce(p_channel,'')));
 begin
+  perform public.floor_dns_push_gate(p_store,p_sku,p_channel);
   select * into v_unit from public.units where store_id=p_store and sku=p_sku;
   if not found then raise exception 'unknown_sku'; end if;
   if exists(select 1 from public.floor_bundle_components c
@@ -3669,6 +3860,44 @@ end $$;
 ALTER FUNCTION "public"."floor_bundle_sale_guard"() OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."floor_category_autoconfirm"("p_store" "uuid", "p_dry_run" boolean DEFAULT true) RETURNS "jsonb"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare v jsonb;
+begin
+  with cand as (
+    select c.sku, coalesce(t.fingerprint, '') || ':' || coalesce(t.fields_version, '') fp,
+      case when c.adopted_live
+             and exists (select 1 from public.listings l where l.store_id = c.store_id and l.sku = c.sku
+                          and l.channel = 'ebay' and l.status = 'listed') then 'live_on_ebay'
+           when c.source in ('ebay_catalog','confirmed_upc','floor_upc_memory')
+             and c.review_reason is distinct from 'conflicting category sources' then c.source end reason
+    from public.unit_channel_categories c
+    join public.units u on u.store_id = c.store_id and u.sku = c.sku and u.state in ('available','reserved','repair')
+    join public.channel_taxonomy t on t.channel = 'ebay' and t.category_id = c.category_id
+      and t.active and t.leaf and t.fields_fetched_at is not null
+    where c.store_id = p_store and c.channel = 'ebay' and c.enabled and c.category_id is not null
+      and (c.review_reason is not null
+        or c.validated_version is distinct from coalesce(t.fingerprint, '') || ':' || coalesce(t.fields_version, ''))
+  ), picked as (select * from cand where reason is not null),
+  upd as (
+    update public.unit_channel_categories c set review_reason = null, validated_version = p.fp,
+      adopted_live = c.adopted_live or p.reason = 'live_on_ebay', updated_at = now()
+    from picked p where not p_dry_run and c.store_id = p_store and c.sku = p.sku and c.channel = 'ebay'
+    returning c.sku
+  )
+  select jsonb_build_object('dry_run', p_dry_run, 'confirmed', (select count(*) from picked),
+    'updated', (select count(*) from upd),
+    'by_reason', coalesce((select jsonb_object_agg(reason, n) from (select reason, count(*) n from picked group by 1) x), '{}'::jsonb))
+  into v;
+  return v;
+end $$;
+
+
+ALTER FUNCTION "public"."floor_category_autoconfirm"("p_store" "uuid", "p_dry_run" boolean) OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."floor_category_demote_sku"("p_store" "uuid", "p_sku" "text") RETURNS boolean
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -3761,6 +3990,7 @@ CREATE OR REPLACE FUNCTION "public"."floor_category_pre_push"("p_store" "uuid", 
     AS $$
 declare v_gaps jsonb;
 begin
+  perform public.floor_dns_push_gate(p_store,p_sku,p_channel);
   if p_channel not in ('ebay','amazon','tiktok','depop') then
     raise exception 'unknown_channel' using errcode='22023'; end if;
   if not exists(select 1 from public.units where store_id=p_store and sku=p_sku) then
@@ -3775,6 +4005,30 @@ end $$;
 
 
 ALTER FUNCTION "public"."floor_category_pre_push"("p_store" "uuid", "p_sku" "text", "p_channel" "text") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."floor_category_queue_breakdown"("p_store" "uuid") RETURNS "jsonb"
+    LANGUAGE "sql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+                                                                                                                                                                                                                                                                                                                                                                                       with i as (
+                                                                                                                                                                                                                                                                                                                                                                                           select r.sku, r.channel, r.issue from public.floor_category_issue_rows(p_store) r
+                                                                                                                                                                                                                                                                                                                                                                                               join public.units u on u.store_id = p_store and u.sku = r.sku
+                                                                                                                                                                                                                                                                                                                                                                                                   where u.state in ('available','reserved','repair')
+                                                                                                                                                                                                                                                                                                                                                                                                     )
+                                                                                                                                                                                                                                                                                                                                                                                                       select jsonb_build_object(
+                                                                                                                                                                                                                                                                                                                                                                                                           'queue_count', (select count(distinct sku) from i),
+                                                                                                                                                                                                                                                                                                                                                                                                               'by_reason', coalesce((select jsonb_object_agg(k, n) from (
+                                                                                                                                                                                                                                                                                                                                                                                                                       select channel || ': ' || issue k, count(distinct sku) n from i group by 1 order by 2 desc) x), '{}'::jsonb),
+                                                                                                                                                                                                                                                                                                                                                                                                                           'only_reason', coalesce((select jsonb_object_agg(k, n) from (
+                                                                                                                                                                                                                                                                                                                                                                                                                                   select k, count(*) n from (select sku, min(channel || ': ' || issue) k from i group by sku
+                                                                                                                                                                                                                                                                                                                                                                                                                                             having count(distinct channel || ': ' || issue) = 1) s group by k order by 2 desc) x), '{}'::jsonb),
+                                                                                                                                                                                                                                                                                                                                                                                                                                                 'missing_required_ebay_specifics', (select count(distinct sku) from i
+                                                                                                                                                                                                                                                                                                                                                                                                                                                         where channel = 'ebay' and issue = 'missing required field'));
+                                                                                                                                                                                                                                                                                                                                                                                                                                                         $$;
+
+
+ALTER FUNCTION "public"."floor_category_queue_breakdown"("p_store" "uuid") OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."floor_category_ready_guard"() RETURNS "trigger"
@@ -3843,6 +4097,24 @@ end $$;
 ALTER FUNCTION "public"."floor_category_unit_changed"() OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."floor_dns_push_gate"("p_store" "uuid", "p_sku" "text", "p_channel" "text") RETURNS "void"
+    LANGUAGE "plpgsql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+begin
+ if lower(p_channel) in ('ebay','amazon','tiktok','depop') and (
+   exists(select 1 from public.units u where u.store_id=p_store and u.sku=p_sku and public.unit_dns(u.listing_specs))
+   or exists(select 1 from public.floor_bundle_components c join public.units u on u.store_id=c.store_id and u.sku=c.component_sku
+     join public.floor_bundles b on b.store_id=c.store_id and b.sku=c.bundle_sku and b.active
+     where c.store_id=p_store and c.bundle_sku=p_sku and public.unit_dns(u.listing_specs))) then
+   raise exception 'DNS: Do not ship - never list on eBay, Amazon, TikTok Shop or Depop' using errcode='P0001';
+ end if;
+end $$;
+
+
+ALTER FUNCTION "public"."floor_dns_push_gate"("p_store" "uuid", "p_sku" "text", "p_channel" "text") OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."floor_store_listing_channels"("p_store" "uuid") RETURNS "text"[]
     LANGUAGE "sql" STABLE SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -3856,6 +4128,32 @@ $$;
 ALTER FUNCTION "public"."floor_store_listing_channels"("p_store" "uuid") OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."floor_unit_channel_mandatory_gaps"("p_store" "uuid", "p_sku" "text", "p_channel" "text") RETURNS "text"[]
+    LANGUAGE "sql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+ select array_remove(public.floor_unit_mandatory_gaps(p_store,p_sku),'upc') ||
+   case when p_channel in ('amazon','tiktok') and not public.floor_valid_upc(u.upc) then array['upc'] else '{}'::text[] end
+ from public.units u where u.store_id=p_store and u.sku=p_sku;
+$$;
+
+
+ALTER FUNCTION "public"."floor_unit_channel_mandatory_gaps"("p_store" "uuid", "p_sku" "text", "p_channel" "text") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."floor_unit_ebay_gaps"("p_store" "uuid", "p_sku" "text") RETURNS "text"[]
+    LANGUAGE "sql" STABLE
+    SET "search_path" TO 'public'
+    AS $$
+ select coalesce(array_agg(distinct case when i.issue in ('missing required field','channel document required')
+   then 'specifics' else 'category' end),'{}')
+ from public.floor_category_issue_rows(p_store,p_sku,'ebay') i;
+$$;
+
+
+ALTER FUNCTION "public"."floor_unit_ebay_gaps"("p_store" "uuid", "p_sku" "text") OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."floor_unit_headed_to_amazon"("p_store" "uuid", "p_sku" "text") RETURNS boolean
     LANGUAGE "sql" STABLE SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -3867,6 +4165,124 @@ $$;
 
 
 ALTER FUNCTION "public"."floor_unit_headed_to_amazon"("p_store" "uuid", "p_sku" "text") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."floor_unit_live_on"("p_store" "uuid", "p_sku" "text", "p_channel" "text") RETURNS boolean
+    LANGUAGE "sql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+  select exists (select 1 from public.listings l where l.store_id = p_store and l.sku = p_sku
+                   and l.channel = p_channel and l.status = 'listed')
+      or (p_channel = 'amazon' and exists (select 1 from public.amazon_list_items a
+            where a.store_id = p_store and a.sku = p_sku and a.status = 'live'))
+      or (p_channel = 'tiktok' and exists (select 1 from public.tiktok_list_items t
+            where t.store_id = p_store and t.sku = p_sku and t.status = 'live'));
+$$;
+
+
+ALTER FUNCTION "public"."floor_unit_live_on"("p_store" "uuid", "p_sku" "text", "p_channel" "text") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."floor_unit_mandatory_gaps"("p_store" "uuid", "p_sku" "text") RETURNS "text"[]
+    LANGUAGE "sql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+  select coalesce(array(select g from unnest(public.unit_listing_gaps(u)) g where public.unit_is_unfinished(array[g])), '{}')
+  from public.units u where u.store_id = p_store and u.sku = p_sku;
+$$;
+
+
+ALTER FUNCTION "public"."floor_unit_mandatory_gaps"("p_store" "uuid", "p_sku" "text") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."floor_unit_never_list_reason"("p_store" "uuid", "p_sku" "text", "p_channel" "text") RETURNS "text"
+    LANGUAGE "sql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$select case when lower(p_channel) in ('ebay','amazon','tiktok','depop') and exists (select 1 from public.units u where u.store_id=p_store and u.sku=p_sku and public.unit_dns(u.listing_specs)) then 'DNS - Do not ship' else (
+  select r.note from public.units u
+  join public.listing_never_rules r on r.store_id = u.store_id and r.active
+   and (r.channel is null or r.channel = p_channel)
+  where u.store_id = p_store and u.sku = p_sku
+    and case r.rule_type
+      when 'pattern' then concat_ws(' ', u.category, u.internal_category, u.ebay_category, u.brand, u.title) ~* r.value
+      when 'flag' then lower(coalesce(u.listing_specs->>r.value, '')) in ('true','1','yes')
+        or coalesce(u.listing_specs->>'hold_reason', '') = r.value
+      when 'defective' then public.unit_is_defective(u.listing_specs, u.condition)
+      else false end
+  order by r.channel nulls first, r.id
+  limit 1) end$$;
+
+
+ALTER FUNCTION "public"."floor_unit_never_list_reason"("p_store" "uuid", "p_sku" "text", "p_channel" "text") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."floor_valid_upc"("p_code" "text") RETURNS boolean
+    LANGUAGE "plpgsql" IMMUTABLE
+    SET "search_path" TO 'public'
+    AS $_$
+declare v text:=btrim(coalesce(p_code,'')); n int; total int:=0; i int;
+begin
+ n:=length(v); if n not in (8,12,13,14) or v !~ '^[0-9]+$' or v ~ '^0+$' then return false; end if;
+ for i in 1..n loop total:=total+substring(v,n-i+1,1)::int * case when i%2=0 then 3 else 1 end; end loop;
+ return total%10=0;
+end $_$;
+
+
+ALTER FUNCTION "public"."floor_valid_upc"("p_code" "text") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."giveaway_sync_expense"("p_id" "uuid") RETURNS "void"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare d public.unit_dispositions; u public.units; v_cost int; v_exp uuid; v_desc text;
+begin
+  select * into d from public.unit_dispositions where id = p_id;
+  if not found or d.kind <> 'giveaway' then return; end if;
+  select * into u from public.units where store_id = d.store_id and sku = d.sku;
+  v_cost := public.disposition_unit_cost(d.store_id, d.sku);
+  v_desc := format('Giveaway · %s (SKU %s) → %s%s · by %s',
+    coalesce(nullif(btrim(concat_ws(' ', u.brand, u.model)), ''), nullif(u.title, ''), 'Item'), d.sku, d.given_to,
+    case when nullif(btrim(coalesce(d.note, '')), '') is null then '' else ' — ' || d.note end,
+    coalesce(d.recorded_by_name, 'admin'));
+  v_exp := d.expense_id;
+  if d.undone_at is not null or v_cost is null or v_cost <= 0 then
+    if v_exp is not null then
+      update public.portal_expenses set voided_at = coalesce(voided_at, now()),
+        void_reason = case when d.undone_at is not null then 'Giveaway undone' else 'Giveaway cost removed' end
+      where id = v_exp and voided_at is null;
+    end if;
+    return;
+  end if;
+  if v_exp is null then
+    insert into public.portal_expenses (store_id, spent_on, description, category, amount_cents, needs_reimbursement,
+      source, created_by, external_id)
+    values (d.store_id, (d.created_at at time zone 'America/Los_Angeles')::date, v_desc, 'Giveaways', v_cost, false,
+      'giveaway', d.recorded_by, d.id::text)
+    returning id into v_exp;
+    update public.unit_dispositions set expense_id = v_exp where id = d.id;
+  else
+    update public.portal_expenses set amount_cents = v_cost, description = v_desc, voided_at = null, void_reason = null
+    where id = v_exp;
+  end if;
+end $$;
+
+
+ALTER FUNCTION "public"."giveaway_sync_expense"("p_id" "uuid") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."guard_depop_import"() RETURNS "trigger"
+    LANGUAGE "plpgsql"
+    AS $$
+begin
+  if coalesce(current_setting('floor.depop_manual', true), '') <> 'on' then
+    raise exception 'depop_import_disabled: Depop sales are entered by hand on the Depop tab' using errcode = 'P0001';
+  end if;
+  return new;
+end $$;
+
+
+ALTER FUNCTION "public"."guard_depop_import"() OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."guard_online_checkout_hold"() RETURNS "trigger"
@@ -4098,6 +4514,42 @@ end $_$;
 
 
 ALTER FUNCTION "public"."initialize_unit_categories"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."inventory_totals"() RETURNS "jsonb"
+    LANGUAGE "plpgsql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_store uuid := coalesce(public.portal_store_id(), public.current_store_id());
+  v_result jsonb;
+begin
+  if v_store is null or not (public.portal_is_admin() or exists (
+    select 1 from public.staff s where s.user_id = auth.uid() and s.store_id = v_store and s.deactivated_at is null
+  )) then raise exception 'inventory_access_denied' using errcode = '42501'; end if;
+  with u as (
+    select greatest(coalesce(x.qty_on_hand, 1), 0) qty,
+      public.unit_is_defective(x.listing_specs, x.condition) defective, public.unit_dns(x.listing_specs) dns,
+      exists (select 1 from public.listings l
+        where l.store_id=x.store_id and l.sku=x.sku and l.channel='ebay' and l.status='listed'
+          and nullif(btrim(l.listing_id),'') is not null
+          and (l.ebay_account_id is null or exists(select 1 from public.ebay_accounts a
+            where a.id=l.ebay_account_id and a.store_id=x.store_id and a.role='selling'))) live
+    from public.units x
+    where x.store_id = v_store and x.state in ('available', 'reserved', 'repair')
+  )
+  select jsonb_build_object(
+    'total', coalesce(sum(qty), 0)::int,
+    'listed', coalesce(sum(qty) filter (where not dns and not defective and live), 0)::int,
+    'not_listed', coalesce(sum(qty) filter (where not dns and not defective and not live), 0)::int,
+    'defective', coalesce(sum(qty) filter (where not dns and defective), 0)::int,
+    'dns', coalesce(sum(qty) filter (where dns),0)::int
+  ) into v_result from u;
+  return v_result;
+end $$;
+
+
+ALTER FUNCTION "public"."inventory_totals"() OWNER TO "postgres";
 
 
 CREATE TABLE IF NOT EXISTS "public"."staff_invites" (
@@ -5113,6 +5565,67 @@ $$;
 ALTER FUNCTION "public"."pair_pos_reader"("p_pair_code" "text") OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."payout_apply_absorb_setting"("p_store" "uuid", "p_on" boolean, "p_by" "uuid") RETURNS "jsonb"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_before jsonb; v_after jsonb; v_key text; v_t record; v_e record;
+  v_applied bigint; v_cum bigint; v_b bigint; v_a bigint; v_delta bigint; v_n int := 0; v_paid_n int := 0;
+  v_receipts text;
+begin
+  perform pg_advisory_xact_lock(hashtext('absorb_fees:' || p_store::text));
+  select coalesce(jsonb_object_agg(k, amt), '{}'::jsonb) into v_before from (
+    select c.ticket_key || '|' || c.employee_id::text k, coalesce(sum(c.amount_cents), 0) amt
+    from public.sale_commissions c join public.sales s on s.id = c.sale_id and s.voided_at is null
+    where c.store_id = p_store group by 1) x;
+
+  insert into public.store_settings(store_id, key, value) values (p_store, 'commission_store_absorbs_fees', to_jsonb(p_on))
+  on conflict (store_id, key) do update set value = excluded.value;
+
+  for v_t in select ticket_key from public.sale_payout_tickets where store_id = p_store loop
+    perform public.payout_calc_ticket(p_store, v_t.ticket_key);
+  end loop;
+
+  select coalesce(jsonb_object_agg(k, amt), '{}'::jsonb) into v_after from (
+    select c.ticket_key || '|' || c.employee_id::text k, coalesce(sum(c.amount_cents), 0) amt
+    from public.sale_commissions c join public.sales s on s.id = c.sale_id and s.voided_at is null
+    where c.store_id = p_store group by 1) x;
+
+  -- Paid = covered by payments, oldest sale first, after payments went to reimbursements (Payouts screen rule).
+  for v_e in select distinct split_part(k, '|', 2)::uuid as emp from jsonb_object_keys(v_before || v_after) k loop
+    v_applied := greatest(0,
+      coalesce((select sum(amount_cents) from public.portal_payout_payments where store_id = p_store and employee_id = v_e.emp and voided_at is null), 0)
+      - coalesce((select sum(amount_cents) from public.portal_expenses where store_id = p_store and employee_id = v_e.emp and needs_reimbursement and voided_at is null), 0));
+    v_cum := 0;
+    for v_t in
+      select t.ticket_key, t.first_sale, t.sold_at from (
+        select coalesce(s.ticket_id::text, 'sale:' || s.id::text) ticket_key, min(s.id) first_sale, min(s.sold_at) sold_at
+        from public.sales s where s.store_id = p_store and s.voided_at is null group by 1) t
+      order by t.sold_at, t.first_sale
+    loop
+      v_key := v_t.ticket_key || '|' || v_e.emp::text;
+      v_b := coalesce((v_before ->> v_key)::bigint, 0); v_a := coalesce((v_after ->> v_key)::bigint, 0);
+      v_cum := v_cum + v_b;
+      v_delta := v_a - v_b; v_n := v_n + (case when v_delta <> 0 then 1 else 0 end);
+      if v_delta <> 0 and v_cum <= v_applied then
+        select string_agg(s.receipt_no, ', ' order by s.id) into v_receipts from public.sales s
+          where s.store_id = p_store and coalesce(s.ticket_id::text, 'sale:' || s.id::text) = v_t.ticket_key and s.voided_at is null;
+        insert into public.portal_payout_adjustments(store_id, employee_id, amount_cents, reason, sale_id, ticket_key, created_by, fee_rule_change)
+        values (p_store, v_e.emp, v_delta::int,
+          'Fee rule change · store ' || case when p_on then 'now absorbs' else 'no longer absorbs' end || ' fees · ' || coalesce(v_receipts, v_t.ticket_key) || ' (already paid)',
+          v_t.first_sale, v_t.ticket_key, p_by, true);
+        v_paid_n := v_paid_n + 1;
+      end if;
+    end loop;
+  end loop;
+  return jsonb_build_object('absorb_fees', p_on, 'changed_ticket_employee_pairs', v_n, 'adjustment_rows', v_paid_n);
+end $$;
+
+
+ALTER FUNCTION "public"."payout_apply_absorb_setting"("p_store" "uuid", "p_on" boolean, "p_by" "uuid") OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."payout_calc_ticket"("p_store" "uuid", "p_ticket" "text") RETURNS "void"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -5124,11 +5637,12 @@ declare
   v_sub bigint; v_cost_null boolean; v_base bigint;
   v_emp uuid; v_method text; v_rate numeric; v_amt int; v_touched boolean;
   v_emps uuid[];
+  v_absorb boolean := coalesce((public.store_setting(p_store, 'commission_store_absorbs_fees', 'true'::jsonb) #>> '{}')::boolean, true);
 begin
   select * into t from public.sale_payout_tickets where store_id = p_store and ticket_key = p_ticket;
   if not found then return; end if;
   delete from public.sale_commissions where store_id = p_store and ticket_key = p_ticket;
-  select sum(price_cents), sum(commission_base_cents), bool_or(cost_cents is null)
+  select sum(price_cents), sum(commission_base_cents + case when v_absorb then coalesce(fees_cents, 0) else 0 end), bool_or(cost_cents is null)
     into v_sub, v_base, v_cost_null
   from public.sale_payout_lines where store_id = p_store and ticket_key = p_ticket;
   if v_sub is null then return; end if;
@@ -5167,7 +5681,7 @@ begin
           -- Per-line rates: each line gets its own amount (payouts.ts sums per-line rounded amounts).
           insert into public.sale_commissions (sale_id, store_id, ticket_key, employee_id, amount_cents)
           select l.sale_id, p_store, p_ticket, v_emp,
-            public.payout_js_round(greatest(0, l.commission_base_cents)::float8
+            public.payout_js_round(greatest(0, l.commission_base_cents + case when v_absorb then coalesce(l.fees_cents, 0) else 0 end)::float8
               * coalesce((t.sku_rates->l.sku->>v_emp::text)::numeric, v_rate)::float8 / 100)
           from public.sale_payout_lines l where l.store_id = p_store and l.ticket_key = p_ticket;
           continue;
@@ -5192,7 +5706,7 @@ begin
         row_number() over (order by l.sale_id) rn
       from public.sale_payout_lines l
       cross join lateral (select case
-        when v_has_ov or t.online or v_method = 'percent_profit' then greatest(0, coalesce(l.commission_base_cents, 0))
+        when v_has_ov or t.online or v_method = 'percent_profit' then greatest(0, coalesce(l.commission_base_cents + case when v_absorb then coalesce(l.fees_cents, 0) else 0 end, 0))
         when v_method = 'flat_ticket' then 1
         else greatest(0, l.price_cents) end::numeric weight) x
       where l.store_id = p_store and l.ticket_key = p_ticket
@@ -5233,6 +5747,7 @@ begin
       commission_base_cents = s.price_cents + coalesce(led.tax_collected_cents, 0) + coalesce(led.shipping_cents, 0) - coalesce(led.channel_fee_cents, 0)
         - coalesce(led.ship_cost_cents, 0) - coalesce(led.processing_fee_cents, 0)
         - coalesce(led.tax_collected_cents, 0) - led.cost_cents,
+      fees_cents = coalesce(led.channel_fee_cents, 0) + coalesce(led.processing_fee_cents, 0),
       frozen_at = now()
     from public.sale_ledger led
     join public.sales s on s.id = led.id
@@ -5348,7 +5863,8 @@ begin
     led.cost_cents, led.cost_source,
     s.price_cents + coalesce(led.tax_collected_cents, 0) + coalesce(led.shipping_cents, 0) - coalesce(led.channel_fee_cents, 0)
       - coalesce(led.ship_cost_cents, 0) - coalesce(led.processing_fee_cents, 0)
-      - coalesce(led.tax_collected_cents, 0) - led.cost_cents as commission_base_cents
+      - coalesce(led.tax_collected_cents, 0) - led.cost_cents as commission_base_cents,
+    coalesce(led.channel_fee_cents, 0) + coalesce(led.processing_fee_cents, 0) as fees_cents
     into l
   from public.sales s join public.sale_ledger led on led.id = s.id where s.id = p_sale_id;
   if not found then return; end if;
@@ -5371,8 +5887,8 @@ begin
     from public.sale_ledger led where led.id = l.id and led.cost_unit_cents in (900, 25000, 30000)
     on conflict (sale_id) do nothing;
     insert into public.sale_payout_lines
-      (sale_id, store_id, ticket_key, sku, price_cents, commission_base_cents, cost_cents, cost_source)
-    values (l.id, l.store_id, v_ticket, l.sku, coalesce(l.price_cents, 0), l.commission_base_cents, l.cost_cents, l.cost_source);
+      (sale_id, store_id, ticket_key, sku, price_cents, commission_base_cents, cost_cents, cost_source, fees_cents)
+    values (l.id, l.store_id, v_ticket, l.sku, coalesce(l.price_cents, 0), l.commission_base_cents, l.cost_cents, l.cost_source, l.fees_cents);
   end if;
   update public.sale_payout_tickets t
      set sku_rates = t.sku_rates || coalesce((select jsonb_object_agg(r.sku, r.rates) from (
@@ -5384,6 +5900,92 @@ end $$;
 
 
 ALTER FUNCTION "public"."payout_snapshot_sale"("p_sale_id" bigint) OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."payout_sync_replacements"("p_sale_id" bigint, "p_trigger" "uuid") RETURNS "jsonb"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  l public.sale_payout_lines;
+  v_repl int;
+  v_active boolean;
+  b record;
+  v_new int; v_d int; v_target int; v_cur int; v_delta int;
+  v_paid bigint; v_reimb bigint; v_prior bigint; v_covered bigint;
+  v_out jsonb := '[]'::jsonb;
+  v_sku text;
+begin
+  select * into l from public.sale_payout_lines where sale_id = p_sale_id;
+  if not found then return v_out; end if;
+  select s.sku into v_sku from public.sales s where s.id = p_sale_id;
+  v_active := exists (select 1 from public.unit_dispositions d
+    where d.original_sale_id = p_sale_id and d.kind = 'replacement' and d.undone_at is null);
+  v_repl := public.sale_replacement_cost(p_sale_id);
+
+  if v_active and not l.replacement_saved then
+    if l.cost_cents is null then return v_out; end if; -- original cost missing: the normal fill-on-cost path covers it
+    insert into public.sale_replacement_baseline (sale_id, store_id, employee_id, amount_cents)
+      select c.sale_id, c.store_id, c.employee_id, c.amount_cents from public.sale_commissions c where c.sale_id = p_sale_id
+      on conflict (sale_id, employee_id) do nothing;
+    update public.sale_payout_lines set replacement_saved = true,
+      pre_cost_cents = cost_cents, pre_base_cents = commission_base_cents where sale_id = p_sale_id;
+    select * into l from public.sale_payout_lines where sale_id = p_sale_id;
+  end if;
+
+  if l.replacement_saved then
+    if v_active then
+      update public.sale_payout_lines set
+        cost_cents = case when v_repl is null then null else l.pre_cost_cents + v_repl end,
+        commission_base_cents = case when v_repl is null or l.pre_base_cents is null then null else l.pre_base_cents - v_repl end
+      where sale_id = p_sale_id;
+    else
+      update public.sale_payout_lines set cost_cents = l.pre_cost_cents, commission_base_cents = l.pre_base_cents,
+        replacement_saved = false, pre_cost_cents = null, pre_base_cents = null
+      where sale_id = p_sale_id;
+    end if;
+    perform public.payout_calc_ticket(l.store_id, l.ticket_key);
+  end if;
+
+  for b in select * from public.sale_replacement_baseline where sale_id = p_sale_id loop
+    select c.amount_cents into v_new from public.sale_commissions c where c.sale_id = p_sale_id and c.employee_id = b.employee_id;
+    v_target := 0;
+    if v_active and b.amount_cents is not null and v_new is not null and b.amount_cents > v_new then
+      v_d := b.amount_cents - v_new;
+      select coalesce(sum(amount_cents), 0) into v_paid from public.portal_payout_payments
+        where store_id = b.store_id and employee_id = b.employee_id;
+      if v_paid > 0 then
+        select coalesce(sum(amount_cents), 0) into v_reimb from public.portal_expenses
+          where store_id = b.store_id and employee_id = b.employee_id and needs_reimbursement and voided_at is null;
+        select coalesce(sum(c.amount_cents), 0) into v_prior from public.sale_commissions c
+          join public.sales s on s.id = c.sale_id and s.voided_at is null
+          where c.store_id = b.store_id and c.employee_id = b.employee_id and c.ticket_key <> l.ticket_key;
+        v_prior := v_prior + coalesce((select sum(amount_cents) from public.portal_payout_adjustments
+          where store_id = b.store_id and employee_id = b.employee_id and replacement_id is null), 0);
+        v_covered := greatest(0, v_paid - v_reimb - greatest(0, v_prior));
+        v_target := -least(v_d, v_covered::int);
+      end if;
+    end if;
+    select coalesce(sum(amount_cents), 0) into v_cur from public.portal_payout_adjustments
+      where sale_id = p_sale_id and employee_id = b.employee_id and replacement_id is not null;
+    v_delta := v_target - v_cur;
+    if v_delta <> 0 then
+      insert into public.portal_payout_adjustments (store_id, employee_id, amount_cents, reason, sale_id, ticket_key, replacement_id, created_by)
+      values (b.store_id, b.employee_id, v_delta,
+        case when v_delta < 0 then format('Replacement clawback · sale SKU %s (already paid)', v_sku)
+             else format('Replacement reversed · sale SKU %s', v_sku) end,
+        p_sale_id, l.ticket_key, p_trigger, auth.uid());
+    end if;
+    v_out := v_out || jsonb_build_array(jsonb_build_object('employee_id', b.employee_id,
+      'before_cents', b.amount_cents, 'after_cents', v_new, 'adjustment_cents', v_target));
+  end loop;
+
+  if not v_active then delete from public.sale_replacement_baseline where sale_id = p_sale_id; end if;
+  return v_out;
+end $$;
+
+
+ALTER FUNCTION "public"."payout_sync_replacements"("p_sale_id" bigint, "p_trigger" "uuid") OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."peek_alerts"("p_limit" integer DEFAULT 50) RETURNS SETOF "public"."alert_outbox"
@@ -5967,6 +6569,22 @@ $$;
 ALTER FUNCTION "public"."portal_assert_admin"() OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."portal_assert_admin_store"() RETURNS "uuid"
+    LANGUAGE "plpgsql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare v_store uuid := public.portal_store_id();
+begin
+  if v_store is null or not public.portal_is_admin() then
+    raise exception 'portal_access_denied' using errcode = '42501';
+  end if;
+  return v_store;
+end $$;
+
+
+ALTER FUNCTION "public"."portal_assert_admin_store"() OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."portal_bay_list"() RETURNS "jsonb"
     LANGUAGE "plpgsql" STABLE SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -6172,6 +6790,19 @@ end $$;
 
 
 ALTER FUNCTION "public"."portal_category_search"("p_channel" "text", "p_query" "text", "p_limit" integer) OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."portal_channel_autopush"() RETURNS "jsonb"
+    LANGUAGE "plpgsql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare v_store uuid := public.portal_assert_admin_store();
+begin
+  return public.store_setting(v_store, 'channel_autopush', '{"enabled":false,"ebay_enabled":false}'::jsonb);
+end $$;
+
+
+ALTER FUNCTION "public"."portal_channel_autopush"() OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."portal_channel_fees"() RETURNS TABLE("channel" "text", "percent_fee" numeric, "fixed_fee_cents" integer, "notes" "text")
@@ -7077,6 +7708,168 @@ end $$;
 ALTER FUNCTION "public"."portal_depop_category_save"("p_id" "text", "p_path" "text", "p_required" "jsonb", "p_active" boolean) OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."portal_depop_delete_sale"("p_id" "uuid") RETURNS "jsonb"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_store uuid := public.portal_store_id();
+  e public.depop_sale_entries; v_out jsonb;
+begin
+  if v_store is null or not public.portal_is_admin() then raise exception 'portal_access_denied' using errcode = '42501'; end if;
+  select * into e from public.depop_sale_entries where id = p_id and store_id = v_store and deleted_at is null for update;
+  if not found then raise exception 'entry_not_found'; end if;
+  -- A unit that was already Sold before this entry goes back to Sold with no sale; any other goes back in stock.
+  if e.sale_id is not null then v_out := public.depop_purge_sale(e.sale_id, not e.unit_was_sold); end if;
+  update public.depop_sale_entries set deleted_at = now(), updated_at = now() where id = e.id;
+  return coalesce(v_out, '{}'::jsonb);
+end $$;
+
+
+ALTER FUNCTION "public"."portal_depop_delete_sale"("p_id" "uuid") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."portal_depop_entries"("p_limit" integer DEFAULT 50) RETURNS "jsonb"
+    LANGUAGE "plpgsql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare v_store uuid := public.portal_store_id();
+begin
+  if v_store is null or not public.portal_is_admin() then raise exception 'portal_access_denied' using errcode = '42501'; end if;
+  return coalesce((select jsonb_agg(x order by (x->>'sold_on') desc, (x->>'created_at') desc) from (
+    select jsonb_build_object(
+      'id', e.id, 'sku', e.sku, 'item', coalesce(nullif(btrim(concat_ws(' ', u.brand, u.model)), ''), nullif(u.title, ''), 'Item'),
+      'sale_cents', e.sale_cents, 'fee_cents', e.fee_cents, 'payout_cents', e.payout_cents, 'sold_on', e.sold_on, 'note', e.note,
+      'receipt_no', s.receipt_no, 'created_by_name', e.created_by_name, 'created_at', e.created_at,
+      'cost_cents', public.disposition_unit_cost(e.store_id, e.sku),
+      'cost_missing', public.disposition_unit_cost(e.store_id, e.sku) is null,
+      'profit_cents', e.payout_cents - public.disposition_unit_cost(e.store_id, e.sku)
+    ) x
+    from public.depop_sale_entries e
+    left join public.units u on u.store_id = e.store_id and u.sku = e.sku
+    left join public.sales s on s.id = e.sale_id
+    where e.store_id = v_store and e.deleted_at is null
+    order by e.sold_on desc, e.created_at desc limit greatest(1, least(coalesce(p_limit, 50), 200))
+  ) t), '[]'::jsonb);
+end $$;
+
+
+ALTER FUNCTION "public"."portal_depop_entries"("p_limit" integer) OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."portal_depop_find_units"("p_query" "text" DEFAULT ''::"text") RETURNS "jsonb"
+    LANGUAGE "plpgsql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare v_store uuid := public.portal_store_id(); v_q text := btrim(coalesce(p_query, ''));
+begin
+  if v_store is null or not public.portal_is_admin() then raise exception 'portal_access_denied' using errcode = '42501'; end if;
+  return coalesce((select jsonb_agg(x) from (
+    select jsonb_build_object('sku', u.sku, 'brand', u.brand, 'model', u.model, 'title', u.title, 'condition', u.condition,
+      'ask_cents', u.ask_cents, 'acquisition_cost_cents', u.acquisition_cost_cents, 'state', u.state,
+      'sold_no_sale', u.state = 'sold') x
+    from public.units u
+    where u.store_id = v_store
+      and (u.state in ('available', 'reserved')
+        or (u.state = 'sold' and not exists (select 1 from public.sales s where s.store_id = u.store_id and s.sku = u.sku and s.voided_at is null)))
+      and (v_q = '' or u.sku ilike '%' || v_q || '%' or u.brand ilike '%' || v_q || '%' or u.model ilike '%' || v_q || '%' or u.title ilike '%' || v_q || '%')
+    order by (u.state = 'sold') desc, u.sku desc limit 10
+  ) t), '[]'::jsonb);
+end $$;
+
+
+ALTER FUNCTION "public"."portal_depop_find_units"("p_query" "text") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."portal_depop_record_sale"("p_sku" "text", "p_sale_cents" integer, "p_fee_cents" integer, "p_payout_cents" integer DEFAULT NULL::integer, "p_sold_on" "date" DEFAULT NULL::"date", "p_note" "text" DEFAULT NULL::"text") RETURNS "jsonb"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_store uuid := public.portal_store_id();
+  v_admin text; v_id uuid := gen_random_uuid(); v_day date; v_payout int; v_sale public.sales; v_deduct int; v_cost int; v_was_sold boolean := false;
+begin
+  if v_store is null or not public.portal_is_admin() then raise exception 'portal_access_denied' using errcode = '42501'; end if;
+  if p_sale_cents is null or p_sale_cents <= 0 then raise exception 'invalid_sale_price' using errcode = '22023'; end if;
+  if p_fee_cents is null or p_fee_cents < 0 then raise exception 'invalid_fee' using errcode = '22023'; end if;
+  v_payout := coalesce(p_payout_cents, p_sale_cents - p_fee_cents);
+  if v_payout < 0 or v_payout > p_sale_cents then raise exception 'invalid_payout' using errcode = '22023'; end if;
+  v_day := coalesce(p_sold_on, (now() at time zone 'America/Los_Angeles')::date);
+  if v_day > (now() at time zone 'America/Los_Angeles')::date then raise exception 'sale_date_in_future' using errcode = '22023'; end if;
+  -- A unit left Sold by the Depop cleanup (no live sale) can take a new Depop sale; a unit that already has a sale cannot.
+  v_was_sold := exists (select 1 from public.units u where u.store_id = v_store and u.sku = p_sku and u.state = 'sold'
+    and not exists (select 1 from public.sales s where s.store_id = u.store_id and s.sku = u.sku and s.voided_at is null));
+  if not v_was_sold and not exists (select 1 from public.units where store_id = v_store and sku = p_sku and state in ('available', 'reserved')) then
+    raise exception 'unit_not_sellable' using errcode = 'P0001';
+  end if;
+  v_admin := public.disposition_actor_name(auth.uid());
+  perform set_config('floor.depop_manual', 'on', true);
+  if v_was_sold then update public.units set state = 'available' where store_id = v_store and sku = p_sku and state = 'sold'; end if;
+  v_sale := public.finalize_sale(p_sku, 'depop', p_sale_cents, 'depop', 'depop-manual:' || v_id::text,
+    null, null, null, coalesce(nullif(btrim(p_note), ''), 'Depop sale (entered by hand)'), null, 0, null);
+  if v_was_sold then delete from public.delist_tasks where sale_id = v_sale.id; end if; -- nothing is delisted or relisted for an already-sold unit
+  v_deduct := p_sale_cents - v_payout;  -- everything Depop kept: fee, label, anything else
+  update public.sales set sold_at = public.depop_sold_at(v_day) where id = v_sale.id;
+  insert into public.channel_orders (store_id, provider, order_id, sku, sale_id, item_cents, fee_cents, fee_source, baked_ship_cents)
+    values (v_store, 'depop', 'manual:' || v_id::text, p_sku, v_sale.id, p_sale_cents, v_deduct, 'actual', 0);
+  insert into public.web_orders (store_id, sku, sale_id, status, channel, fulfillment, order_no, paid_at, buyer_name,
+      item_cents, shipping_cents, tax_cents, total_cents, payment_id, payment_env, match_status, marketplace_fee_cents,
+      marketplace_title)
+    select v_store, p_sku, v_sale.id, 'paid', 'depop', 'ship', 'DEPOP-' || v_sale.receipt_no, public.depop_sold_at(v_day), 'Depop buyer',
+      p_sale_cents, 0, 0, p_sale_cents, 'depop-manual:' || v_id::text, 'production', 'matched', v_deduct,
+      left(coalesce(nullif(u.title, ''), concat_ws(' ', u.brand, u.model), 'Depop sale'), 250)
+    from public.units u where u.store_id = v_store and u.sku = p_sku;
+  update public.web_order_emails set sent_at = now(), last_error = 'manual Depop entry'
+    where order_id in (select id from public.web_orders where sale_id = v_sale.id) and sent_at is null;
+  update public.listings set status = 'delisted', delisted_at = now()
+    where store_id is not distinct from v_store and sku = p_sku and channel = 'depop' and status <> 'delisted';
+  insert into public.depop_sale_entries (id, store_id, sale_id, sku, sale_cents, fee_cents, payout_cents, sold_on, note, created_by, created_by_name, unit_was_sold)
+    values (v_id, v_store, v_sale.id, p_sku, p_sale_cents, p_fee_cents, v_payout, v_day, nullif(btrim(p_note), ''), auth.uid(), v_admin, v_was_sold);
+  -- finalize_sale already froze the commission before the Depop fee row existed (when the snapshot trigger runs immediately): freeze again with the fee.
+  perform public.portal_payout_refreeze(coalesce(v_sale.ticket_id::text, 'sale:' || v_sale.id::text));
+  v_cost := public.disposition_unit_cost(v_store, p_sku);
+  return jsonb_build_object('id', v_id, 'sale_id', v_sale.id, 'receipt_no', v_sale.receipt_no, 'payout_cents', v_payout,
+    'cost_cents', v_cost, 'cost_missing', v_cost is null);
+end $$;
+
+
+ALTER FUNCTION "public"."portal_depop_record_sale"("p_sku" "text", "p_sale_cents" integer, "p_fee_cents" integer, "p_payout_cents" integer, "p_sold_on" "date", "p_note" "text") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."portal_depop_update_sale"("p_id" "uuid", "p_sale_cents" integer, "p_fee_cents" integer, "p_payout_cents" integer, "p_sold_on" "date", "p_note" "text" DEFAULT NULL::"text") RETURNS "jsonb"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_store uuid := public.portal_store_id();
+  e public.depop_sale_entries; v_deduct int; v_ticket text;
+begin
+  if v_store is null or not public.portal_is_admin() then raise exception 'portal_access_denied' using errcode = '42501'; end if;
+  select * into e from public.depop_sale_entries where id = p_id and store_id = v_store and deleted_at is null for update;
+  if not found or e.sale_id is null then raise exception 'entry_not_found'; end if;
+  if p_sale_cents is null or p_sale_cents <= 0 then raise exception 'invalid_sale_price' using errcode = '22023'; end if;
+  if p_fee_cents is null or p_fee_cents < 0 then raise exception 'invalid_fee' using errcode = '22023'; end if;
+  if p_payout_cents is null or p_payout_cents < 0 or p_payout_cents > p_sale_cents then raise exception 'invalid_payout' using errcode = '22023'; end if;
+  if p_sold_on is null or p_sold_on > (now() at time zone 'America/Los_Angeles')::date then raise exception 'invalid_sale_date' using errcode = '22023'; end if;
+  v_deduct := p_sale_cents - p_payout_cents;
+  update public.sales set price_cents = p_sale_cents, sold_at = public.depop_sold_at(p_sold_on), note = coalesce(nullif(btrim(p_note), ''), note)
+    where id = e.sale_id;
+  update public.channel_orders set item_cents = p_sale_cents, fee_cents = v_deduct where sale_id = e.sale_id and provider = 'depop';
+  update public.web_orders set item_cents = p_sale_cents, total_cents = p_sale_cents, marketplace_fee_cents = v_deduct,
+      paid_at = public.depop_sold_at(p_sold_on)
+    where sale_id = e.sale_id;
+  update public.depop_sale_entries set sale_cents = p_sale_cents, fee_cents = p_fee_cents, payout_cents = p_payout_cents,
+      sold_on = p_sold_on, note = nullif(btrim(p_note), ''), updated_at = now() where id = e.id;
+  -- Commission was frozen from the old numbers: re-freeze this one sale from the corrected ledger (payments are untouched).
+  v_ticket := coalesce((select ticket_id::text from public.sales where id = e.sale_id), 'sale:' || e.sale_id::text);
+  perform public.portal_payout_refreeze(v_ticket);
+  return jsonb_build_object('id', e.id, 'sale_id', e.sale_id);
+end $$;
+
+
+ALTER FUNCTION "public"."portal_depop_update_sale"("p_id" "uuid", "p_sale_cents" integer, "p_fee_cents" integer, "p_payout_cents" integer, "p_sold_on" "date", "p_note" "text") OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."portal_disconnect_provider"("p_provider" "text") RETURNS "void"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -7242,6 +8035,38 @@ end $$;
 
 
 ALTER FUNCTION "public"."portal_disposition_return"("p_return" "uuid", "p_disposition" "text", "p_patch" "jsonb") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."portal_dispositions_list"("p_kind" "text" DEFAULT NULL::"text") RETURNS "jsonb"
+    LANGUAGE "plpgsql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare v_store uuid := public.portal_store_id();
+begin
+  if v_store is null or not public.portal_is_admin() then raise exception 'portal_access_denied' using errcode = '42501'; end if;
+  return coalesce((select jsonb_agg(r order by (r->>'created_at') desc) from (
+    select jsonb_build_object(
+      'id', d.id, 'kind', d.kind, 'sku', d.sku,
+      'item', coalesce(nullif(btrim(concat_ws(' ', u.brand, u.model)), ''), nullif(u.title, ''), 'Item'),
+      'cost_cents', public.disposition_unit_cost(d.store_id, d.sku), 'extra_cost_cents', d.extra_cost_cents,
+      'cost_missing', public.disposition_unit_cost(d.store_id, d.sku) is null,
+      'original_sale_id', d.original_sale_id, 'original_sku', d.original_sku,
+      'original_receipt_no', s.receipt_no, 'original_channel', s.channel, 'original_sold_at', s.sold_at,
+      'bad_unit_status', d.bad_unit_status, 'bad_unit_sku', d.bad_unit_sku,
+      'given_to', d.given_to, 'note', d.note, 'expense_id', d.expense_id,
+      'recorded_by_name', d.recorded_by_name, 'created_at', d.created_at,
+      'undone_at', d.undone_at, 'undone_by_name', d.undone_by_name
+    ) r
+    from public.unit_dispositions d
+    left join public.units u on u.store_id = d.store_id and u.sku = d.sku
+    left join public.sales s on s.id = d.original_sale_id
+    where d.store_id = v_store and (p_kind is null or d.kind = p_kind)
+    order by d.created_at desc limit 500
+  ) t), '[]'::jsonb);
+end $$;
+
+
+ALTER FUNCTION "public"."portal_dispositions_list"("p_kind" "text") OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."portal_eligibility_review_queue"() RETURNS TABLE("id" bigint, "sku" "text", "channel" "text", "reason" "text", "status" "text", "created_at" timestamp with time zone, "title" "text")
@@ -7883,7 +8708,7 @@ begin
       public.unit_is_defective(u.listing_specs, u.condition) as defective,
       public.unit_not_for_sale(u.listing_specs) as not_for_sale,
       ph.photo_path, ph.photo_count,
-      case when p_unfinished then public.unit_listing_gaps(u) end as gaps,
+      case when p_unfinished or p_status = 'needs_check' then public.unit_listing_gaps(u) end as gaps,
       sl.sold_at, sl.sold_price_cents
     from public.units u
     cross join lateral (
@@ -7910,8 +8735,13 @@ begin
       b.sold_at,
       case when v_admin then b.sold_price_cents end as sold_price_cents
     from base b
-    where (p_status = 'all'
+    where ((p_status='dns' and b.state in ('available','reserved','repair') and public.unit_dns(b.listing_specs)) or p_status='all'
         or (p_status = 'in_stock' and b.state in ('available','reserved','repair') and not b.defective)
+        or (p_status = 'needs_check' and b.state in ('available','reserved','repair') and not b.defective
+          and not b.not_for_sale and not public.unit_is_unfinished(b.gaps)
+          and not exists (select 1 from public.units ru where ru.store_id = v_store and ru.sku = b.sku and ru.reviewed_at is not null)
+          and exists (select 1 from unnest(array['ebay','amazon','tiktok']) ch
+            where public.floor_unit_never_list_reason(v_store, b.sku, ch) is null))
         or (p_status = 'defective' and b.state in ('available','reserved','repair') and b.defective)
         or (p_status = 'listed' and b.state in ('available','reserved','repair') and not b.defective
           and exists (
@@ -7921,7 +8751,7 @@ begin
         or (p_status = 'delisted' and exists (select 1 from public.listings l
           where l.store_id = v_store and l.sku = b.sku and l.status = 'delisted'))
         or b.state = p_status)
-      and (not p_unfinished or (b.state in ('available','reserved','repair')
+      and (p_status in ('dns','sold','all','voided') or not public.unit_dns(b.listing_specs)) and (not p_unfinished or not public.unit_dns(b.listing_specs)) and (not p_unfinished or (b.state in ('available','reserved','repair')
         and not b.not_for_sale and public.unit_is_unfinished(b.gaps)))
   ), page as (
     select row_number() over (order by
@@ -7973,7 +8803,7 @@ begin
       public.unit_is_defective(u.listing_specs, u.condition) as defective,
       public.unit_not_for_sale(u.listing_specs) as not_for_sale,
       ph.photo_path, ph.photo_count,
-      case when p_unfinished then public.unit_listing_gaps(u) end as gaps,
+      case when p_unfinished or p_status = 'needs_check' then public.unit_listing_gaps(u) end as gaps,
       sl.sold_at, sl.sold_price_cents
     from public.units u
     cross join lateral (
@@ -8008,8 +8838,13 @@ begin
       b.sold_at,
       case when v_admin then b.sold_price_cents end as sold_price_cents
     from base b
-    where (p_status = 'all'
+    where ((p_status='dns' and b.state in ('available','reserved','repair') and public.unit_dns(b.listing_specs)) or p_status='all'
         or (p_status = 'in_stock' and b.state in ('available','reserved','repair') and not b.defective)
+        or (p_status = 'needs_check' and b.state in ('available','reserved','repair') and not b.defective
+          and not b.not_for_sale and not public.unit_is_unfinished(b.gaps)
+          and not exists (select 1 from public.units ru where ru.store_id = v_store and ru.sku = b.sku and ru.reviewed_at is not null)
+          and exists (select 1 from unnest(array['ebay','amazon','tiktok']) ch
+            where public.floor_unit_never_list_reason(v_store, b.sku, ch) is null))
         or (p_status = 'defective' and b.state in ('available','reserved','repair') and b.defective)
         or (p_status = 'listed' and b.state in ('available','reserved','repair') and not b.defective
           and exists (
@@ -8019,7 +8854,7 @@ begin
         or (p_status = 'delisted' and exists (select 1 from public.listings l
           where l.store_id = v_store and l.sku = b.sku and l.status = 'delisted'))
         or b.state = p_status)
-      and (not p_unfinished or (b.state in ('available','reserved','repair')
+      and (p_status in ('dns','sold','all','voided') or not public.unit_dns(b.listing_specs)) and (not p_unfinished or not public.unit_dns(b.listing_specs)) and (not p_unfinished or (b.state in ('available','reserved','repair')
         and not b.not_for_sale and public.unit_is_unfinished(b.gaps)))
       and (p_location='all' or (p_location='unassigned' and
         b.state in ('available','reserved','repair') and b.assigned<b.qty_on_hand)
@@ -8054,6 +8889,63 @@ end $$;
 
 
 ALTER FUNCTION "public"."portal_inventory_list_with_locations"("p_query" "text", "p_status" "text", "p_unfinished" boolean, "p_sort" "text", "p_offset" integer, "p_limit" integer, "p_location" "text") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."portal_inventory_mark_not_sold"("p_sku" "text", "p_reason" "text", "p_sale_id" bigint DEFAULT NULL::bigint) RETURNS "jsonb"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+ v_store uuid:=public.portal_assert_admin_store(); u public.units; s public.sales; v_qty int; v_active int;
+ v_reason text:=nullif(btrim(coalesce(p_reason,'')),''); v_now timestamptz:=now();
+begin
+ if v_reason is null then raise exception 'reason_required' using errcode='22023'; end if;
+ select * into u from public.units where store_id=v_store and sku=p_sku for update;
+ if not found then raise exception 'unit_not_found'; end if;
+ if u.state<>'sold' then raise exception 'unit_is_not_sold'; end if;
+ if exists(select 1 from public.unit_dispositions d where d.store_id=v_store and d.undone_at is null and d.sku=p_sku) then
+   raise exception 'Use the replacement or giveaway undo action for this item'; end if;
+ if exists(select 1 from public.listing_queue q where q.store_id=v_store and q.sku=p_sku and q.status='working') then
+   raise exception 'A listing job is running for this item; try again after it finishes'; end if;
+ select count(*) into v_active from public.sales where store_id=v_store and sku=p_sku and voided_at is null;
+ if v_active>0 then
+   select * into s from public.sales where store_id=v_store and sku=p_sku and id=p_sale_id and voided_at is null for update;
+   if not found then raise exception 'Select the sale being reversed; the sale may have changed'; end if;
+   if exists(select 1 from public.unit_dispositions d where d.store_id=v_store and d.original_sale_id=s.id and d.undone_at is null)
+     or exists(select 1 from public.returns r where r.store_id=v_store and r.sale_id=s.id) then
+     raise exception 'This sale has a return or replacement; use the Returns workflow'; end if;
+   if exists(select 1 from public.ticket_extras t where t.store_id=v_store and t.ticket_id=s.ticket_id
+       and (t.points_earned<>0 or t.points_redeemed<>0 or t.signup_discount_cents<>0)) then
+     raise exception 'This ticket has customer rewards; void it through Register or Returns'; end if;
+   -- Same Floor-local reversal used by order cancellation. Keep the sale and payment history for audit.
+   update public.sales set voided_at=v_now,void_reason='Inventory correction: '||v_reason where id=s.id;
+   update public.web_orders set status='canceled',canceled_at=coalesce(canceled_at,v_now),
+     cancel_source='inventory_correction',cancel_reason=v_reason,updated_at=v_now
+     where store_id=v_store and sale_id=s.id and status not in ('canceled','refunded');
+   update public.delist_tasks set completed_at=coalesce(completed_at,v_now),completed_by=auth.uid()
+     where store_id=v_store and sale_id=s.id and completed_at is null;
+   v_qty:=greatest(coalesce(u.qty_on_hand,0),greatest(coalesce(s.qty,1),1));
+ else
+   if p_sale_id is not null then raise exception 'Sale changed; reload the item before restoring'; end if;
+   -- A canceled/voided sale can leave Sold with qty already 1. Do not count that unit twice.
+   v_qty:=greatest(coalesce(u.qty_on_hand,0),1);
+ end if;
+ update public.units set state='available',qty_on_hand=v_qty,show_on_website=false,updated_at=v_now where store_id=v_store and sku=p_sku;
+ update public.sku_ledger set fate='issued' where store_id=v_store and sku=p_sku;
+ update public.listing_queue set status='cancelled',issue='Item returned to inventory; review before listing',updated_at=v_now
+   where store_id=v_store and sku=p_sku and status in ('queued','failed');
+ update public.unit_channel_selections set selected=false,updated_at=v_now,updated_by=auth.uid()
+   where store_id=v_store and sku=p_sku and selected;
+ insert into public.events(store_id,sku,kind,field,old_value,new_value,actor,actor_id,note)
+ values(v_store,p_sku,'edit','inventory_restore',
+   jsonb_build_object('state',u.state,'qty',u.qty_on_hand,'sale_id',s.id)::text,
+   jsonb_build_object('state','available','qty',v_qty,'sale_id',s.id)::text,
+   public.disposition_actor_name(auth.uid()),auth.uid(),v_reason);
+ return jsonb_build_object('sku',p_sku,'state','available','qty',v_qty,'voided_sale_id',s.id);
+end $$;
+
+
+ALTER FUNCTION "public"."portal_inventory_mark_not_sold"("p_sku" "text", "p_reason" "text", "p_sale_id" bigint) OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."portal_inventory_next_sku"() RETURNS "text"
@@ -8149,6 +9041,23 @@ $$;
 
 
 ALTER FUNCTION "public"."portal_inventory_receive"("p_sku" "text", "p_brand" "text", "p_model" "text", "p_title" "text", "p_category" "text", "p_condition" "text", "p_ask_cents" integer, "p_cost_cents" integer, "p_floor_cents" integer, "p_notes" "text") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."portal_inventory_restore_options"("p_sku" "text") RETURNS "jsonb"
+    LANGUAGE "plpgsql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare v_store uuid:=public.portal_assert_admin_store(); u public.units;
+begin
+ select * into u from public.units where store_id=v_store and sku=p_sku;
+ if not found then raise exception 'unit_not_found'; end if;
+ return jsonb_build_object('state',u.state,'sales',coalesce((select jsonb_agg(jsonb_build_object(
+   'id',s.id,'receipt_no',s.receipt_no,'sold_at',s.sold_at,'channel',s.channel,'qty',s.qty,'price_cents',s.price_cents)
+   order by s.sold_at desc,s.id desc) from public.sales s where s.store_id=v_store and s.sku=p_sku and s.voided_at is null),'[]'::jsonb));
+end $$;
+
+
+ALTER FUNCTION "public"."portal_inventory_restore_options"("p_sku" "text") OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."portal_inventory_settings"() RETURNS "jsonb"
@@ -8401,6 +9310,24 @@ end $$;
 
 
 ALTER FUNCTION "public"."portal_listing_channels"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."portal_listing_issues"("p_limit" integer DEFAULT 200) RETURNS "jsonb"
+    LANGUAGE "plpgsql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare v_store uuid := public.portal_assert_admin_store();
+begin
+  return coalesce((select jsonb_agg(to_jsonb(x) order by x.updated_at desc) from (
+    select q.id, q.sku, u.title, q.channel, q.action, q.status, q.attempts, q.issue, q.last_error,
+           q.retryable, q.next_attempt_at, q.updated_at
+    from public.listing_queue q join public.units u on u.store_id = q.store_id and u.sku = q.sku
+    where q.store_id = v_store and (q.status = 'failed' or (q.status = 'queued' and q.issue is not null))
+    order by q.updated_at desc limit greatest(1, least(p_limit, 1000))) x), '[]'::jsonb);
+end $$;
+
+
+ALTER FUNCTION "public"."portal_listing_issues"("p_limit" integer) OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."portal_listing_queue"() RETURNS TABLE("id" "uuid", "sku" "text", "reason" "text", "detail" "jsonb", "best_viable_price_cents" integer, "profit_cents" integer, "status" "text", "title" "text", "condition" "text", "ask_cents" integer, "created_at" timestamp with time zone)
@@ -9027,6 +9954,20 @@ end $$;
 
 
 ALTER FUNCTION "public"."portal_move_location_stock"("p_sku" "text", "p_to" "text", "p_quantity" integer, "p_from" "text") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."portal_never_list_rules"() RETURNS "jsonb"
+    LANGUAGE "plpgsql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare v_store uuid := public.portal_assert_admin_store();
+begin
+  return coalesce((select jsonb_agg(to_jsonb(r) - 'store_id' order by r.channel nulls first, r.id)
+    from public.listing_never_rules r where r.store_id = v_store), '[]'::jsonb);
+end $$;
+
+
+ALTER FUNCTION "public"."portal_never_list_rules"() OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."portal_online_board"() RETURNS "jsonb"
@@ -9786,7 +10727,8 @@ begin
   return jsonb_build_object(
     'online_channels', public.store_setting(v_store,'online_channels','["website"]'::jsonb),
     'online_payout_pct', public.store_setting(v_store,'online_payout_pct','30'::jsonb),
-    'online_payout_employee_id', public.store_setting(v_store,'online_payout_employee_id','null'::jsonb));
+    'online_payout_employee_id', public.store_setting(v_store,'online_payout_employee_id','null'::jsonb),
+    'absorb_fees', coalesce((public.store_setting(v_store,'commission_store_absorbs_fees','true'::jsonb) #>> '{}')::boolean, true));
 end $$;
 
 
@@ -10237,6 +11179,75 @@ $_$;
 ALTER FUNCTION "public"."portal_receive_unit"("p_quantity" integer, "p_brand" "text", "p_model" "text", "p_title" "text", "p_description" "text", "p_condition" "text", "p_test_status" "text", "p_ask_cents" integer, "p_cost_cents" integer, "p_notes" "text", "p_upc" "text", "p_shippable" "text", "p_length" numeric, "p_width" numeric, "p_height" numeric, "p_weight" numeric, "p_category" "text") OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."portal_record_giveaway"("p_sku" "text", "p_given_to" "text", "p_note" "text" DEFAULT NULL::"text") RETURNS "jsonb"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $_$
+declare
+  v_store uuid := public.portal_store_id();
+  u public.units; v_id uuid := gen_random_uuid(); v_actor text; v_cost int;
+begin
+  if v_store is null or not public.portal_is_admin() then raise exception 'portal_access_denied' using errcode = '42501'; end if;
+  if nullif(btrim(coalesce(p_given_to, '')), '') is null then raise exception 'given_to_required'; end if;
+  select * into u from public.units where store_id = v_store and sku = p_sku for update;
+  if not found then raise exception 'unit_not_found'; end if;
+  if u.state <> 'available' then raise exception 'unit_not_available'; end if;
+  v_actor := public.disposition_actor_name(auth.uid());
+  insert into public.unit_dispositions (id, store_id, kind, sku, prior_state, given_to, note, recorded_by, recorded_by_name)
+  values (v_id, v_store, 'giveaway', p_sku, u.state, btrim(p_given_to), nullif(btrim(coalesce(p_note, '')), ''), auth.uid(), v_actor);
+  perform public.disposition_leave_stock(v_store, p_sku, 'given_away');
+  v_cost := public.disposition_unit_cost(v_store, p_sku);
+  insert into public.events (store_id, sku, kind, actor, actor_id, note)
+  values (v_store, p_sku, 'given_away', v_actor, auth.uid(),
+    format('Given to %s%s. Cost %s', btrim(p_given_to), case when nullif(btrim(coalesce(p_note, '')), '') is null then '' else ' (' || p_note || ')' end,
+      coalesce('$' || to_char(v_cost / 100.0, 'FM999990.00'), 'missing')));
+  perform public.giveaway_sync_expense(v_id);
+  return jsonb_build_object('id', v_id, 'cost_cents', v_cost, 'cost_missing', v_cost is null);
+end $_$;
+
+
+ALTER FUNCTION "public"."portal_record_giveaway"("p_sku" "text", "p_given_to" "text", "p_note" "text") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."portal_record_replacement"("p_sku" "text", "p_sale_id" bigint, "p_bad_unit_returned" boolean, "p_extra_cost_cents" integer DEFAULT 0, "p_note" "text" DEFAULT NULL::"text") RETURNS "jsonb"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $_$
+declare
+  v_store uuid := public.portal_store_id();
+  u public.units; s public.sales; v_id uuid := gen_random_uuid(); v_actor text; v_extra int := coalesce(p_extra_cost_cents, 0);
+  v_bad text; v_sync jsonb; v_cost int;
+begin
+  if v_store is null or not public.portal_is_admin() then raise exception 'portal_access_denied' using errcode = '42501'; end if;
+  if v_extra < 0 then raise exception 'extra_cost_invalid'; end if;
+  select * into u from public.units where store_id = v_store and sku = p_sku for update;
+  if not found then raise exception 'unit_not_found'; end if;
+  if u.state <> 'available' then raise exception 'unit_not_available'; end if;
+  select * into s from public.sales where id = p_sale_id and store_id = v_store;
+  if not found or s.voided_at is not null then raise exception 'sale_not_found'; end if;
+  if s.sku = p_sku then raise exception 'replacement_is_original_unit'; end if;
+  v_actor := public.disposition_actor_name(auth.uid());
+  insert into public.unit_dispositions (id, store_id, kind, sku, prior_state, original_sale_id, original_sku, extra_cost_cents,
+    bad_unit_status, note, recorded_by, recorded_by_name)
+  values (v_id, v_store, 'replacement', p_sku, u.state, s.id, s.sku, v_extra,
+    case when p_bad_unit_returned then 'returned' else 'pending' end, nullif(btrim(coalesce(p_note, '')), ''), auth.uid(), v_actor);
+  perform public.disposition_leave_stock(v_store, p_sku, 'replaced');
+  if p_bad_unit_returned then v_bad := public.disposition_make_bad_unit(v_id); end if;
+  v_cost := public.disposition_unit_cost(v_store, p_sku);
+  insert into public.events (store_id, sku, kind, actor, actor_id, note) values
+    (v_store, p_sku, 'replacement_sent', v_actor, auth.uid(),
+      format('Sent as a replacement for sale %s (SKU %s). Cost %s', s.receipt_no, s.sku,
+        coalesce('$' || to_char((v_cost + v_extra) / 100.0, 'FM999990.00'), 'missing'))),
+    (v_store, s.sku, 'replacement_sent', v_actor, auth.uid(), format('Replacement SKU %s sent for this sale', p_sku));
+  v_sync := public.payout_sync_replacements(s.id, v_id);
+  return jsonb_build_object('id', v_id, 'bad_unit_sku', v_bad, 'cost_cents', v_cost, 'extra_cost_cents', v_extra,
+    'cost_missing', v_cost is null, 'commissions', v_sync);
+end $_$;
+
+
+ALTER FUNCTION "public"."portal_record_replacement"("p_sku" "text", "p_sale_id" bigint, "p_bad_unit_returned" boolean, "p_extra_cost_cents" integer, "p_note" "text") OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."portal_reject_match"("p_suggestion" "uuid") RETURNS "void"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -10255,6 +11266,57 @@ end $$;
 ALTER FUNCTION "public"."portal_reject_match"("p_suggestion" "uuid") OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."portal_replacement_bad_unit_returned"("p_id" "uuid") RETURNS "jsonb"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare v_store uuid := public.portal_store_id(); d public.unit_dispositions; v_sku text;
+begin
+  if v_store is null or not public.portal_is_admin() then raise exception 'portal_access_denied' using errcode = '42501'; end if;
+  select * into d from public.unit_dispositions where id = p_id and store_id = v_store for update;
+  if not found or d.kind <> 'replacement' or d.undone_at is not null then raise exception 'replacement_not_found'; end if;
+  v_sku := public.disposition_make_bad_unit(p_id);
+  return jsonb_build_object('bad_unit_sku', v_sku);
+end $$;
+
+
+ALTER FUNCTION "public"."portal_replacement_bad_unit_returned"("p_id" "uuid") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."portal_replacement_sale_search"("p_query" "text" DEFAULT ''::"text") RETURNS "jsonb"
+    LANGUAGE "plpgsql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare v_store uuid := public.portal_store_id(); v_q text := btrim(coalesce(p_query, ''));
+begin
+  if v_store is null or not public.portal_is_admin() then raise exception 'portal_access_denied' using errcode = '42501'; end if;
+  return coalesce((select jsonb_agg(x order by (x->>'sold_at') desc) from (
+    select jsonb_build_object(
+      'sale_id', s.id, 'receipt_no', s.receipt_no, 'sku', s.sku,
+      'item', coalesce(nullif(btrim(concat_ws(' ', u.brand, u.model)), ''), nullif(u.title, ''), 'Item'),
+      'channel', s.channel, 'sold_at', s.sold_at, 'price_cents', s.price_cents,
+      'order_ref', coalesce(co.order_id, wo.order_no, nullif(split_part(coalesce(s.payment_id, ''), ':', 3), '')),
+      'buyer', coalesce(nullif(wo.buyer_name, ''), nullif(s.customer_name, ''), nullif(co.buyer_username, '')),
+      'replacements', (select count(*) from public.unit_dispositions d
+        where d.original_sale_id = s.id and d.kind = 'replacement' and d.undone_at is null)
+    ) x
+    from public.sales s
+    left join public.units u on u.store_id = s.store_id and u.sku = s.sku
+    left join lateral (select c.order_id, c.buyer_username from public.channel_orders c where c.sale_id = s.id order by c.created_at desc limit 1) co on true
+    left join lateral (select w.order_no, w.buyer_name from public.web_orders w where w.sale_id = s.id order by w.created_at limit 1) wo on true
+    where s.store_id = v_store and s.voided_at is null
+      and (v_q = '' or s.sku ilike '%' || v_q || '%' or s.receipt_no ilike '%' || v_q || '%'
+        or coalesce(s.payment_id, '') ilike '%' || v_q || '%' or coalesce(co.order_id, '') ilike '%' || v_q || '%'
+        or coalesce(wo.order_no, '') ilike '%' || v_q || '%' or coalesce(u.title, '') ilike '%' || v_q || '%'
+        or coalesce(u.model, '') ilike '%' || v_q || '%')
+    order by s.sold_at desc limit 25
+  ) t), '[]'::jsonb);
+end $$;
+
+
+ALTER FUNCTION "public"."portal_replacement_sale_search"("p_query" "text") OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."portal_resolve_eligibility_review"("p_id" bigint, "p_note" "text" DEFAULT NULL::"text") RETURNS "void"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -10269,6 +11331,20 @@ end $$;
 
 
 ALTER FUNCTION "public"."portal_resolve_eligibility_review"("p_id" bigint, "p_note" "text") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."portal_retry_listing_issue"("p_id" bigint) RETURNS "void"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare v_store uuid := public.portal_assert_admin_store();
+begin
+  update public.listing_queue set status = 'queued', next_attempt_at = now(), issue = null, updated_at = now()
+   where id = p_id and store_id = v_store and status in ('failed','queued');
+end $$;
+
+
+ALTER FUNCTION "public"."portal_retry_listing_issue"("p_id" bigint) OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."portal_return_lookup"("p_query" "text") RETURNS "jsonb"
@@ -10723,6 +11799,23 @@ end $$;
 
 
 ALTER FUNCTION "public"."portal_save_withdrawal"("p_id" "uuid", "p_source" "text", "p_amount_cents" integer, "p_on" "date", "p_reason" "text", "p_note" "text", "p_person" "uuid", "p_performer" "uuid") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."portal_set_absorb_fees"("p_on" boolean) RETURNS "jsonb"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare v_store uuid := public.portal_store_id(); v_now boolean;
+begin
+  if v_store is null or not public.portal_is_admin() then raise exception 'portal_access_denied' using errcode = '42501'; end if;
+  if p_on is null then raise exception 'on_or_off_required' using errcode = '22023'; end if;
+  v_now := coalesce((public.store_setting(v_store, 'commission_store_absorbs_fees', 'true'::jsonb) #>> '{}')::boolean, true);
+  if v_now = p_on then return jsonb_build_object('absorb_fees', p_on, 'changed_ticket_employee_pairs', 0, 'adjustment_rows', 0); end if;
+  return public.payout_apply_absorb_setting(v_store, p_on, auth.uid());
+end $$;
+
+
+ALTER FUNCTION "public"."portal_set_absorb_fees"("p_on" boolean) OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."portal_set_bay"("p_bay" integer, "p_rows" integer[]) RETURNS "void"
@@ -11726,6 +12819,59 @@ end $$;
 ALTER FUNCTION "public"."portal_set_unit_channel"("p_sku" "text", "p_channel" "text", "p_enabled" boolean) OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."portal_set_unit_channel_selection"("p_sku" "text", "p_channel" "text", "p_selected" boolean) RETURNS "jsonb"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_store uuid := public.portal_assert_admin_store();
+  v_reason text;
+  v_live boolean;
+  v_action text;
+begin
+  if p_channel is null or p_channel not in ('ebay','amazon','tiktok') or p_selected is null then
+    raise exception 'invalid_channel' using errcode = '22023';
+  end if;
+  if not exists (select 1 from public.units where store_id = v_store and sku = p_sku) then
+    raise exception 'unit_not_found' using errcode = '22023';
+  end if;
+  if p_selected then
+    if p_channel in ('amazon','tiktok') and not exists (select 1 from public.units u
+      where u.store_id=v_store and u.sku=p_sku and public.floor_valid_upc(u.upc)) then
+      raise exception 'channel_upc_required: Add a valid UPC before selecting Amazon or TikTok Shop' using errcode='22023';
+    end if;
+    v_reason := public.floor_unit_never_list_reason(v_store, p_sku, p_channel);
+    if v_reason is not null then
+      raise exception 'channel_never_list: %', v_reason using errcode = '22023';
+    end if;
+  end if;
+  insert into public.unit_channel_selections (store_id, sku, channel, selected, source, updated_by, updated_at)
+  values (v_store, p_sku, p_channel, p_selected, 'admin', auth.uid(), now())
+  on conflict (store_id, sku, channel) do update
+    set selected = excluded.selected, source = 'admin', updated_by = excluded.updated_by, updated_at = now();
+  if p_selected then
+    insert into public.unit_channel_categories (store_id, sku, channel, enabled, source, updated_at)
+    values (v_store, p_sku, p_channel, true, 'manual', now())
+    on conflict (store_id, sku, channel) do update set enabled = true, updated_at = now();
+  end if;
+
+  v_live := public.floor_unit_live_on(v_store, p_sku, p_channel);
+  delete from public.listing_queue
+   where store_id = v_store and sku = p_sku and channel = p_channel and status in ('queued','failed');
+  v_action := case when p_selected and not v_live then 'list' when not p_selected and v_live then 'end' end;
+  if v_action is not null then
+    insert into public.listing_queue (store_id, sku, channel, action, created_by)
+    values (v_store, p_sku, p_channel, v_action, auth.uid())
+    on conflict do nothing;
+  end if;
+  return jsonb_build_object('sku', p_sku, 'channel', p_channel, 'selected', p_selected,
+    'live', v_live, 'queued', v_action);
+end $$;
+
+
+ALTER FUNCTION "public"."portal_set_unit_channel_selection"("p_sku" "text", "p_channel" "text", "p_selected" boolean) OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."portal_set_unit_cost"("p_sku" "text", "p_cost_cents" integer) RETURNS "void"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -11744,6 +12890,77 @@ end $$;
 
 
 ALTER FUNCTION "public"."portal_set_unit_cost"("p_sku" "text", "p_cost_cents" integer) OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."portal_set_unit_dns"("p_sku" "text", "p_dns" boolean) RETURNS "jsonb"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare v_store uuid:=coalesce(public.portal_store_id(),public.current_store_id()); u public.units;
+begin
+ if v_store is null or not(public.portal_is_admin() or exists(select 1 from public.staff s where s.user_id=auth.uid() and s.store_id=v_store and s.deactivated_at is null)) then raise exception 'store_access_denied' using errcode='42501'; end if;
+ if p_dns is null then raise exception 'dns_required' using errcode='22023'; end if;
+ select * into u from public.units where store_id=v_store and sku=p_sku for update;
+ if not found then raise exception 'unit_not_found'; end if;
+ if not p_dns and public.unit_dns_type(u) then raise exception 'DNS is required for this oversized item type'; end if;
+ update public.units set listing_specs=jsonb_set(coalesce(listing_specs,'{}'::jsonb),'{do_not_ship}',to_jsonb(p_dns)),updated_at=now()
+   where store_id=v_store and sku=p_sku;
+ return public.portal_unit_dns(p_sku);
+end $$;
+
+
+ALTER FUNCTION "public"."portal_set_unit_dns"("p_sku" "text", "p_dns" boolean) OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."portal_set_unit_ebay_category"("p_sku" "text", "p_category_id" "text") RETURNS "jsonb"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+                                                                                                                                                                                                                                                                                                                                 declare v_store uuid; t public.channel_taxonomy;
+                                                                                                                                                                                                                                                                                                                                 begin
+                                                                                                                                                                                                                                                                                                                                   if not public.portal_is_admin() then raise exception 'portal_access_denied' using errcode = '42501'; end if;
+                                                                                                                                                                                                                                                                                                                                     v_store := public.portal_store_id();
+                                                                                                                                                                                                                                                                                                                                       if not exists (select 1 from public.units where store_id = v_store and sku = btrim(p_sku)) then
+                                                                                                                                                                                                                                                                                                                                           raise exception 'unit_not_found' using errcode = '22023'; end if;
+                                                                                                                                                                                                                                                                                                                                             select * into t from public.channel_taxonomy where channel = 'ebay' and category_id = btrim(p_category_id);
+                                                                                                                                                                                                                                                                                                                                               if not found or not t.active or not t.leaf then raise exception 'category_not_active_leaf' using errcode = '22023'; end if;
+                                                                                                                                                                                                                                                                                                                                                 insert into public.unit_channel_categories as c (store_id, sku, channel, category_id, enabled, source,
+                                                                                                                                                                                                                                                                                                                                                       validated_version, review_reason, updated_at)
+                                                                                                                                                                                                                                                                                                                                                         values (v_store, btrim(p_sku), 'ebay', t.category_id, true, 'manual',
+                                                                                                                                                                                                                                                                                                                                                               case when t.fields_fetched_at is not null then coalesce(t.fingerprint, '') || ':' || coalesce(t.fields_version, '') end,
+                                                                                                                                                                                                                                                                                                                                                                     case when t.fields_fetched_at is null then 'missing category or unsynced fields' end, now())
+                                                                                                                                                                                                                                                                                                                                                                       on conflict (store_id, sku, channel) do update set category_id = excluded.category_id, enabled = true,
+                                                                                                                                                                                                                                                                                                                                                                             source = 'manual', validated_version = excluded.validated_version, review_reason = excluded.review_reason,
+                                                                                                                                                                                                                                                                                                                                                                                   updated_at = now();
+                                                                                                                                                                                                                                                                                                                                                                                     return public.floor_category_gaps(v_store, btrim(p_sku), 'ebay');
+                                                                                                                                                                                                                                                                                                                                                                                     end $$;
+
+
+ALTER FUNCTION "public"."portal_set_unit_ebay_category"("p_sku" "text", "p_category_id" "text") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."portal_set_unit_ebay_specifics"("p_sku" "text", "p_attributes" "jsonb") RETURNS "jsonb"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+                                                                                                                                                                                                                                                                                                   declare v_store uuid := coalesce(public.portal_store_id(), public.current_store_id()); v_attrs jsonb; k text; val text;
+                                                                                                                                                                                                                                                                                                   begin
+                                                                                                                                                                                                                                                                                                     if v_store is null then raise exception 'portal_access_denied' using errcode = '42501'; end if;
+                                                                                                                                                                                                                                                                                                       if jsonb_typeof(coalesce(p_attributes, '{}'::jsonb)) <> 'object' then raise exception 'attributes_must_be_object' using errcode = '22023'; end if;
+                                                                                                                                                                                                                                                                                                         select attributes into v_attrs from public.unit_channel_categories
+                                                                                                                                                                                                                                                                                                            where store_id = v_store and sku = btrim(p_sku) and channel = 'ebay' for update;
+                                                                                                                                                                                                                                                                                                              if not found then raise exception 'ebay_category_required' using errcode = '22023'; end if;
+                                                                                                                                                                                                                                                                                                                for k, val in select key, btrim(value #>> '{}') from jsonb_each(coalesce(p_attributes, '{}'::jsonb)) loop
+                                                                                                                                                                                                                                                                                                                    if nullif(val, '') is null then v_attrs := v_attrs - k;
+                                                                                                                                                                                                                                                                                                                        else v_attrs := jsonb_set(coalesce(v_attrs, '{}'::jsonb), array[k], to_jsonb(left(val, 65))); end if;
+                                                                                                                                                                                                                                                                                                                          end loop;
+                                                                                                                                                                                                                                                                                                                            update public.unit_channel_categories set attributes = coalesce(v_attrs, '{}'::jsonb), updated_at = now()
+                                                                                                                                                                                                                                                                                                                               where store_id = v_store and sku = btrim(p_sku) and channel = 'ebay';
+                                                                                                                                                                                                                                                                                                                                 return public.floor_category_gaps(v_store, btrim(p_sku), 'ebay');
+                                                                                                                                                                                                                                                                                                                                 end $$;
+
+
+ALTER FUNCTION "public"."portal_set_unit_ebay_specifics"("p_sku" "text", "p_attributes" "jsonb") OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."portal_set_unit_eligibility_override"("p_sku" "text", "p_channel" "text", "p_decision" "text", "p_note" "text") RETURNS "void"
@@ -12323,6 +13540,70 @@ end $$;
 ALTER FUNCTION "public"."portal_unbundle"("p_bundle" "text") OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."portal_undo_disposition"("p_id" "uuid") RETURNS "jsonb"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_store uuid := public.portal_store_id();
+  d public.unit_dispositions; v_actor text; v_sync jsonb := '[]'::jsonb; v_bad_left boolean := false;
+begin
+  if v_store is null or not public.portal_is_admin() then raise exception 'portal_access_denied' using errcode = '42501'; end if;
+  select * into d from public.unit_dispositions where id = p_id and store_id = v_store for update;
+  if not found then raise exception 'record_not_found'; end if;
+  if d.undone_at is not null then raise exception 'already_undone'; end if;
+  v_actor := public.disposition_actor_name(auth.uid());
+  update public.unit_dispositions set undone_at = now(), undone_by = auth.uid(), undone_by_name = v_actor where id = d.id;
+  update public.units set state = d.prior_state, updated_at = now() where store_id = v_store and sku = d.sku and state in ('replaced', 'given_away');
+  if d.kind = 'replacement' then
+    v_sync := public.payout_sync_replacements(d.original_sale_id, d.id);
+    if d.bad_unit_sku is not null then
+      update public.units set state = 'voided', updated_at = now()
+        where store_id = v_store and sku = d.bad_unit_sku and state = 'available';
+      if found then
+        update public.sku_ledger set fate = 'voided' where store_id = v_store and sku = d.bad_unit_sku;
+      else
+        v_bad_left := true;
+      end if;
+    end if;
+    insert into public.events (store_id, sku, kind, actor, actor_id, note) values
+      (v_store, d.sku, 'replacement_undone', v_actor, auth.uid(), 'Replacement undone; back in stock'),
+      (v_store, d.original_sku, 'replacement_undone', v_actor, auth.uid(), format('Replacement SKU %s undone', d.sku));
+  else
+    perform public.giveaway_sync_expense(d.id);
+    insert into public.events (store_id, sku, kind, actor, actor_id, note)
+    values (v_store, d.sku, 'giveaway_undone', v_actor, auth.uid(), 'Giveaway undone; back in stock');
+  end if;
+  return jsonb_build_object('id', d.id, 'commissions', v_sync, 'bad_unit_left_in_defective', v_bad_left);
+end $$;
+
+
+ALTER FUNCTION "public"."portal_undo_disposition"("p_id" "uuid") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."portal_unit_channel_selections"("p_sku" "text") RETURNS "jsonb"
+    LANGUAGE "plpgsql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare v_store uuid := public.portal_assert_admin_store();
+begin
+  return (select jsonb_object_agg(c.ch, jsonb_build_object(
+      'selected', coalesce(s.selected, false),
+      'blocked_reason', case when c.ch in ('amazon','tiktok') and not exists (select 1 from public.units u
+          where u.store_id=v_store and u.sku=p_sku and public.floor_valid_upc(u.upc)) then 'UPC required' end,
+      'live', public.floor_unit_live_on(v_store, p_sku, c.ch),
+      'never_reason', public.floor_unit_never_list_reason(v_store, p_sku, c.ch),
+      'queue', (select jsonb_build_object('action', q.action, 'status', q.status, 'issue', q.issue, 'last_error', q.last_error)
+                from public.listing_queue q where q.store_id = v_store and q.sku = p_sku and q.channel = c.ch
+                  and q.status in ('queued','working','failed') limit 1)))
+    from unnest(array['ebay','amazon','tiktok']) c(ch)
+    left join public.unit_channel_selections s on s.store_id = v_store and s.sku = p_sku and s.channel = c.ch);
+end $$;
+
+
+ALTER FUNCTION "public"."portal_unit_channel_selections"("p_sku" "text") OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."portal_unit_channels"("p_sku" "text") RETURNS "jsonb"
     LANGUAGE "plpgsql" STABLE SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -12341,6 +13622,49 @@ end $$;
 
 
 ALTER FUNCTION "public"."portal_unit_channels"("p_sku" "text") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."portal_unit_dns"("p_sku" "text") RETURNS "jsonb"
+    LANGUAGE "plpgsql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare v_store uuid:=coalesce(public.portal_store_id(),public.current_store_id()); u public.units;
+begin
+ if v_store is null or not(public.portal_is_admin() or exists(select 1 from public.staff s where s.user_id=auth.uid() and s.store_id=v_store and s.deactivated_at is null)) then raise exception 'store_access_denied' using errcode='42501'; end if;
+ select * into u from public.units where store_id=v_store and sku=p_sku;
+ if not found then raise exception 'unit_not_found'; end if;
+ return jsonb_build_object('dns',public.unit_dns(u.listing_specs),'required',public.unit_dns_type(u));
+end $$;
+
+
+ALTER FUNCTION "public"."portal_unit_dns"("p_sku" "text") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."portal_unit_ebay_specifics"("p_sku" "text") RETURNS "jsonb"
+    LANGUAGE "plpgsql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+                                                                                                                                                                                                                                     declare v_store uuid := coalesce(public.portal_store_id(), public.current_store_id()); v jsonb;
+                                                                                                                                                                                                                                     begin
+                                                                                                                                                                                                                                       if v_store is null then raise exception 'portal_access_denied' using errcode = '42501'; end if;
+                                                                                                                                                                                                                                         select jsonb_build_object('sku', u.sku, 'title', u.title, 'upc', u.upc,
+                                                                                                                                                                                                                                               'enabled', coalesce(c.enabled, false), 'category_id', c.category_id, 'path', t.path,
+                                                                                                                                                                                                                                                     'leaf', coalesce(t.leaf, false), 'fields_fetched_at', t.fields_fetched_at,
+                                                                                                                                                                                                                                                           'aspect_fields', case when jsonb_array_length(coalesce(t.aspect_fields, '[]'::jsonb)) > 0
+                                                                                                                                                                                                                                                                   then t.aspect_fields else coalesce(t.required_fields, '[]'::jsonb) end,
+                                                                                                                                                                                                                                                                         'attributes', coalesce(c.attributes, '{}'::jsonb),
+                                                                                                                                                                                                                                                                               'gaps', public.floor_category_gaps(v_store, u.sku, 'ebay'),
+                                                                                                                                                                                                                                                                                     'can_pick_category', public.portal_is_admin())
+                                                                                                                                                                                                                                                                                         into v
+                                                                                                                                                                                                                                                                                           from public.units u
+                                                                                                                                                                                                                                                                                             left join public.unit_channel_categories c on c.store_id = u.store_id and c.sku = u.sku and c.channel = 'ebay'
+                                                                                                                                                                                                                                                                                               left join public.channel_taxonomy t on t.channel = 'ebay' and t.category_id = c.category_id
+                                                                                                                                                                                                                                                                                                 where u.store_id = v_store and u.sku = btrim(p_sku);
+                                                                                                                                                                                                                                                                                                   return v;
+                                                                                                                                                                                                                                                                                                   end $$;
+
+
+ALTER FUNCTION "public"."portal_unit_ebay_specifics"("p_sku" "text") OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."portal_unit_eligibility"("p_sku" "text") RETURNS "jsonb"
@@ -12393,6 +13717,23 @@ end $$;
 
 
 ALTER FUNCTION "public"."portal_unit_eligibility_for_store"("p_store" "uuid", "p_sku" "text") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."portal_unit_history"("p_sku" "text") RETURNS "jsonb"
+    LANGUAGE "plpgsql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare v_store uuid := public.portal_store_id();
+begin
+  if v_store is null or not public.portal_is_admin() then raise exception 'portal_access_denied' using errcode = '42501'; end if;
+  return coalesce((select jsonb_agg(jsonb_build_object('at', e.at, 'kind', e.kind, 'actor', e.actor, 'note', e.note) order by e.at desc)
+    from public.events e
+    where e.store_id = v_store and e.sku = p_sku
+      and e.kind in ('replacement_sent', 'replacement_undone', 'given_away', 'giveaway_undone', 'bad_unit_received')), '[]'::jsonb);
+end $$;
+
+
+ALTER FUNCTION "public"."portal_unit_history"("p_sku" "text") OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."portal_unit_shipping"("p_sku" "text") RETURNS "jsonb"
@@ -12782,6 +14123,29 @@ end $$;
 
 
 ALTER FUNCTION "public"."portal_upsert_ebay_fee_expense"("p_store" "uuid", "p_external_id" "text", "p_spent_on" "date", "p_description" "text", "p_category" "text", "p_amount_cents" integer) OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."portal_upsert_never_list_rule"("p_id" bigint, "p_channel" "text", "p_rule_type" "text", "p_value" "text", "p_note" "text", "p_active" boolean DEFAULT true) RETURNS bigint
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare v_store uuid := public.portal_assert_admin_store(); v_id bigint;
+begin
+  if p_rule_type = 'pattern' then perform '' ~* p_value; end if;
+  if p_id is null then
+    insert into public.listing_never_rules (store_id, channel, rule_type, value, note, active)
+    values (v_store, nullif(p_channel, ''), p_rule_type, coalesce(p_value, ''), p_note, coalesce(p_active, true))
+    returning id into v_id;
+  else
+    update public.listing_never_rules set channel = nullif(p_channel, ''), rule_type = p_rule_type,
+      value = coalesce(p_value, ''), note = p_note, active = coalesce(p_active, true)
+    where id = p_id and store_id = v_store returning id into v_id;
+  end if;
+  return v_id;
+end $$;
+
+
+ALTER FUNCTION "public"."portal_upsert_never_list_rule"("p_id" bigint, "p_channel" "text", "p_rule_type" "text", "p_value" "text", "p_note" "text", "p_active" boolean) OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."portal_upsert_supplier"("p_payload" "jsonb") RETURNS "jsonb"
@@ -13804,6 +15168,8 @@ CREATE TABLE IF NOT EXISTS "public"."units" (
     "ebay_never_list" boolean DEFAULT false NOT NULL,
     "manifest_id" "uuid",
     "internal_category" "text",
+    "reviewed_at" timestamp with time zone,
+    "reviewed_by" "uuid",
     CONSTRAINT "units_acquisition_cost_cents_check" CHECK ((("acquisition_cost_cents" IS NULL) OR ("acquisition_cost_cents" >= 0))),
     CONSTRAINT "units_ask_cents_check" CHECK ((("ask_cents" IS NULL) OR ("ask_cents" >= 0))),
     CONSTRAINT "units_dims_source_allowed" CHECK ((("dims_source" IS NULL) OR ("dims_source" = ANY (ARRAY['verified'::"text", 'estimated'::"text", 'measured'::"text"])))),
@@ -13812,7 +15178,7 @@ CREATE TABLE IF NOT EXISTS "public"."units" (
     CONSTRAINT "units_msrp_cents_check" CHECK ((("msrp_cents" IS NULL) OR ("msrp_cents" >= 0))),
     CONSTRAINT "units_qty_on_hand_check" CHECK (("qty_on_hand" >= 0)),
     CONSTRAINT "units_shipping_cents_check" CHECK ((("shipping_cents" IS NULL) OR ("shipping_cents" >= 0))),
-    CONSTRAINT "units_state_check" CHECK (("state" = ANY (ARRAY['available'::"text", 'reserved'::"text", 'repair'::"text", 'sold'::"text", 'voided'::"text", 'scrapped'::"text", 'lost'::"text"]))),
+    CONSTRAINT "units_state_check" CHECK (("state" = ANY (ARRAY['available'::"text", 'reserved'::"text", 'repair'::"text", 'sold'::"text", 'voided'::"text", 'scrapped'::"text", 'lost'::"text", 'replaced'::"text", 'given_away'::"text"]))),
     CONSTRAINT "units_upc_valid_gtin" CHECK ("public"."valid_gtin"("upc"))
 );
 
@@ -14835,6 +16201,7 @@ declare
   v_rate numeric;
   v_paul uuid := public.payout_slot_employee(p_store, 'paul');
   v_jacob uuid := public.payout_slot_employee(p_store, 'jacob');
+  v_absorb boolean := coalesce((public.store_setting(p_store, 'commission_store_absorbs_fees', 'true'::jsonb) #>> '{}')::boolean, true);
 begin
   if exists(select 1 from public.sale_payout_lines where sale_id = p_sale_id and store_id = p_store) then
     return coalesce((select amount_cents from public.sale_commissions
@@ -14847,7 +16214,8 @@ begin
   select cost_cents,
     greatest(0, price_cents + coalesce(tax_collected_cents, 0) + coalesce(shipping_cents, 0) - coalesce(channel_fee_cents, 0)
       - coalesce(ship_cost_cents, 0) - coalesce(processing_fee_cents, 0)
-      - coalesce(tax_collected_cents, 0) - cost_cents)
+      - coalesce(tax_collected_cents, 0) - cost_cents
+      + case when v_absorb then coalesce(channel_fee_cents, 0) + coalesce(processing_fee_cents, 0) else 0 end)
     into v_cost, v_base
   from public.sale_ledger where id = s.id;
   if v_cost is null then return null; end if;
@@ -14906,6 +16274,45 @@ end $$;
 
 
 ALTER FUNCTION "public"."sale_commission_cents"("p_store" "uuid", "p_sale_id" bigint, "p_employee" "uuid") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."sale_cost_with_replacements"("p_sale" bigint, "p_cost" integer) RETURNS integer
+    LANGUAGE "plpgsql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare r int;
+begin
+  if p_cost is null then return null; end if;
+  if not exists (select 1 from public.unit_dispositions d
+    where d.original_sale_id = p_sale and d.kind = 'replacement' and d.undone_at is null) then
+    return p_cost;
+  end if;
+  r := public.sale_replacement_cost(p_sale);
+  if r is null then return null; end if;
+  return p_cost + r;
+end $$;
+
+
+ALTER FUNCTION "public"."sale_cost_with_replacements"("p_sale" bigint, "p_cost" integer) OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."sale_replacement_cost"("p_sale" bigint) RETURNS integer
+    LANGUAGE "plpgsql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare r record; c int; v_total int := 0;
+begin
+  for r in select d.store_id, d.sku, d.extra_cost_cents from public.unit_dispositions d
+    where d.original_sale_id = p_sale and d.kind = 'replacement' and d.undone_at is null loop
+    c := public.disposition_unit_cost(r.store_id, r.sku);
+    if c is null then return null; end if;
+    v_total := v_total + c + r.extra_cost_cents;
+  end loop;
+  return v_total;
+end $$;
+
+
+ALTER FUNCTION "public"."sale_replacement_cost"("p_sale" bigint) OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."sale_set_processing_fee"("p_store" "uuid", "p_sale" bigint, "p_fee_cents" integer, "p_source" "text") RETURNS "void"
@@ -15527,7 +16934,7 @@ begin
       public.unit_is_defective(u.listing_specs,u.condition) defective,
       public.unit_not_for_sale(u.listing_specs) not_for_sale,
       ph.photo_path,ph.photo_count,
-      case when p_unfinished then public.unit_listing_gaps(u) end gaps
+      case when p_unfinished or p_status = 'needs_check' then public.unit_listing_gaps(u) end gaps
     from public.units u
     cross join lateral (select count(*)::int photo_count,
       (array_agg(p.path order by p.is_primary desc,p.id))[1] photo_path
@@ -15539,14 +16946,19 @@ begin
       b.defective,b.not_for_sale,coalesce(b.gaps,'{}') missing,
       case when b.state in ('available','reserved','repair') then b.ask_cents end ask_cents,
       null::integer acquisition_cost_cents,null::timestamptz sold_at,null::integer sold_price_cents
-    from base b where (p_status='all'
+    from base b where ((p_status='dns' and b.state in ('available','reserved','repair') and public.unit_dns(b.listing_specs)) or p_status='all'
       or (p_status='in_stock' and b.state in ('available','reserved','repair') and not b.defective)
-      or (p_status='defective' and b.state in ('available','reserved','repair') and b.defective)
+      or (p_status = 'needs_check' and b.state in ('available','reserved','repair') and not b.defective
+          and not b.not_for_sale and not public.unit_is_unfinished(b.gaps)
+          and not exists (select 1 from public.units ru where ru.store_id = v_store and ru.sku = b.sku and ru.reviewed_at is not null)
+          and exists (select 1 from unnest(array['ebay','amazon','tiktok']) ch
+            where public.floor_unit_never_list_reason(v_store, b.sku, ch) is null))
+        or (p_status='defective' and b.state in ('available','reserved','repair') and b.defective)
       or (p_status='listed' and b.state in ('available','reserved','repair') and not b.defective and exists(
         select 1 from public.listings l where l.store_id=v_store and l.sku=b.sku and l.status='listed'))
       or (p_status='delisted' and exists(select 1 from public.listings l where l.store_id=v_store and l.sku=b.sku and l.status='delisted'))
       or b.state=p_status)
-      and (not p_unfinished or (b.state in ('available','reserved','repair') and not b.not_for_sale
+      and (p_status in ('dns','sold','all','voided') or not public.unit_dns(b.listing_specs)) and (not p_unfinished or not public.unit_dns(b.listing_specs)) and (not p_unfinished or (b.state in ('available','reserved','repair') and not b.not_for_sale
         and public.unit_is_unfinished(b.gaps)))
   ), page as (
     select row_number() over(order by
@@ -16211,6 +17623,70 @@ end $$;
 ALTER FUNCTION "public"."unit_cost_json"("p_store" "uuid", "p_category" "text", "p_collectible" boolean, "p_acq" integer) OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."unit_dns"("p_specs" "jsonb") RETURNS boolean
+    LANGUAGE "sql" IMMUTABLE
+    AS $$ select lower(coalesce(p_specs->>'do_not_ship','false')) in ('true','1','yes'); $$;
+
+
+ALTER FUNCTION "public"."unit_dns"("p_specs" "jsonb") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."unit_dns_changed"() RETURNS "trigger"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare v_old boolean:=false;
+begin
+ if tg_op='UPDATE' then v_old:=public.unit_dns(old.listing_specs); end if;
+ if public.unit_dns(new.listing_specs) is not distinct from v_old then return null; end if;
+ if public.unit_dns(new.listing_specs) then
+   update public.unit_channel_selections set selected=false,updated_at=now() where store_id=new.store_id and sku=new.sku and selected;
+   update public.listing_queue set status='cancelled',issue='DNS - Do not ship',updated_at=now()
+     where store_id=new.store_id and sku=new.sku and action='list' and status in ('queued','failed');
+   insert into public.listing_queue(store_id,sku,channel,action)
+     select new.store_id,new.sku,l.channel,'end' from public.listings l where l.store_id=new.store_id and l.sku=new.sku
+       and l.status='listed' and l.channel in ('ebay','amazon','tiktok') on conflict do nothing;
+   insert into public.delist_tasks(store_id,sku,channel,created_at,nag_after)
+     select new.store_id,new.sku,'depop',now(),now() where exists(select 1 from public.listings l
+       where l.store_id=new.store_id and l.sku=new.sku and l.channel='depop' and l.status='listed')
+       and not exists(select 1 from public.delist_tasks d where d.store_id=new.store_id and d.sku=new.sku and d.channel='depop' and d.completed_at is null);
+ end if;
+ insert into public.events(store_id,sku,kind,field,old_value,new_value,actor,actor_id,note)
+ values(new.store_id,new.sku,'edit','DNS',v_old::text,public.unit_dns(new.listing_specs)::text,
+   coalesce((select display_name from public.staff where user_id=auth.uid()),'system'),auth.uid(),
+   'DNS - Do not ship. Store / website pickup only; never list on eBay, Amazon, TikTok Shop or Depop.');
+ return null;
+end $$;
+
+
+ALTER FUNCTION "public"."unit_dns_changed"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."unit_dns_enforce"() RETURNS "trigger"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+begin
+ if public.unit_dns_type(new) then new.listing_specs:=coalesce(new.listing_specs,'{}'::jsonb)||'{"do_not_ship":true}'::jsonb; end if;
+ if public.unit_dns(new.listing_specs) then new.shippable:=false; new.fulfillment_override:='pickup'; end if;
+ return new;
+end $$;
+
+
+ALTER FUNCTION "public"."unit_dns_enforce"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."unit_dns_type"("u" "public"."units") RETURNS boolean
+    LANGUAGE "sql" IMMUTABLE
+    AS $$
+ select concat_ws(' ',u.brand,u.model,u.title,u.category,u.internal_category) ~* '\m(refrigerators?|fridges?|freezers?|dishwashers?|deep\s*fryers?|mattress(es)?|bed\s*frames?|sofas?|couches|couch|scooters?)\M'
+ and concat_ws(' ',u.brand,u.model,u.title) !~* '\m(filters?|covers?|protectors?|pads?|sheets?|hoses?|parts?|magnets?|pillows?|cushions?|toys?|dollhouse)\M';
+$$;
+
+
+ALTER FUNCTION "public"."unit_dns_type"("u" "public"."units") OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."unit_is_defective"("p_specs" "jsonb", "p_condition" "text") RETURNS boolean
     LANGUAGE "sql" IMMUTABLE
     SET "search_path" TO 'public'
@@ -16228,7 +17704,7 @@ CREATE OR REPLACE FUNCTION "public"."unit_is_unfinished"("p_gaps" "text"[]) RETU
     SET "search_path" TO 'public'
     AS $$
   select coalesce(p_gaps, '{}') && array[
-    'photo','price','brand','condition','category','upc','spec','model',
+    'photo','price','brand','condition','category','upc','spec','model','title','description','specifics',
     'review_hygiene','review_supplement','review_quantity','review_contents',
     'review_bundle','review_stove','review_product','review_condition','review_cosmetic'
   ];
@@ -16265,33 +17741,31 @@ ALTER FUNCTION "public"."unit_ledger_cost"("p_store" "uuid", "p_sku" "text") OWN
 CREATE OR REPLACE FUNCTION "public"."unit_listing_gaps"("u" "public"."units") RETURNS "text"[]
     LANGUAGE "sql" STABLE
     SET "search_path" TO 'public'
-    AS $_$
-  with gap as (
-    select public.missing_ebay_aspect_names(d.aspect_defs, d.aspects, u.listing_specs) as names,
-           nullif(btrim(coalesce(d.category_id, '')), '') is not null as has_category
-    from public.ebay_drafts d
-    where d.store_id = u.store_id and d.sku = u.sku
-    limit 1
-  ), f as (
+    AS $_$select case when public.unit_dns(u.listing_specs) then '{}'::text[] else (
+  with f as (
     select public.unit_not_for_sale(u.listing_specs) as nfs,
-      (select names from gap) as names,
-      coalesce((select has_category from gap), false) as has_category
+      public.floor_unit_ebay_gaps(u.store_id, u.sku) as eg,
+      exists (select 1 from public.unit_channel_categories c
+        where c.store_id = u.store_id and c.sku = u.sku and c.channel = 'ebay'
+          and c.category_id is not null and c.enabled) as has_category
   )
   select array_remove(array[
     case when nullif(btrim(coalesce(u.brand, '')), '') is null
            or u.brand ~* '^(generic|unknown|n/?a|does not apply)$' then 'brand' end,
-    case when not f.nfs and nullif(btrim(coalesce(u.category, '')), '') is null
+    case when not f.nfs and ((nullif(btrim(coalesce(u.category, '')), '') is null
            and nullif(btrim(coalesce(u.ebay_category, '')), '') is null
            and nullif(btrim(coalesce(u.listing_specs->>'ebay_category_id', '')), '') is null
-           and not f.has_category then 'category' end,
-    case when not f.nfs and nullif(btrim(coalesce(f.names, '')), '') is not null then 'specifics' end,
+           and not f.has_category) or 'category' = any(f.eg)) then 'category' end,
+    case when not f.nfs and 'specifics' = any(f.eg) then 'specifics' end,
     case when not f.nfs and (coalesce(u.package_weight_lb, 0) <= 0 or coalesce(u.package_length_in, 0) <= 0
            or coalesce(u.package_width_in, 0) <= 0 or coalesce(u.package_height_in, 0) <= 0) then 'spec' end,
-    case when not f.nfs and not public.unit_upc_does_not_apply(u.listing_specs)
-           and (nullif(btrim(coalesce(u.upc, '')), '') is null or btrim(u.upc) !~ '^[0-9]{8,14}$') then 'upc' end,
+    case when not f.nfs and not public.floor_valid_upc(u.upc) and exists (
+           select 1 from public.unit_channel_selections s where s.store_id=u.store_id and s.sku=u.sku
+             and s.selected and s.channel in ('amazon','tiktok')) then 'upc' end,
     case when not f.nfs and not exists (
            select 1 from public.photos p where p.store_id = u.store_id and p.sku = u.sku) then 'photo' end,
     case when not f.nfs and u.ask_cents is null then 'price' end,
+    case when not f.nfs and nullif(btrim(coalesce(u.title, '')), '') is null then 'title' end,
     case when not f.nfs and nullif(btrim(coalesce(u.condition, '')), '') is null then 'condition' end,
     case when not f.nfs and nullif(btrim(coalesce(u.model, '')), '') is null then 'model' end,
     case when not f.nfs and nullif(btrim(coalesce(u.listing_body, '')), '') is null then 'description' end,
@@ -16300,8 +17774,7 @@ CREATE OR REPLACE FUNCTION "public"."unit_listing_gaps"("u" "public"."units") RE
       'review_bundle', 'review_stove', 'review_product', 'review_condition', 'review_cosmetic'
     ) then u.listing_specs->>'ebay_review_reason' end
   ], null)
-  from f;
-$_$;
+  from f) end$_$;
 
 
 ALTER FUNCTION "public"."unit_listing_gaps"("u" "public"."units") OWNER TO "postgres";
@@ -16396,6 +17869,22 @@ $$;
 
 
 ALTER FUNCTION "public"."unit_policy_text"("u" "public"."units") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."unit_selection_mark_reviewed"() RETURNS "trigger"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+begin
+  if new.source = 'admin' then
+    update public.units set reviewed_at = now(), reviewed_by = new.updated_by
+     where store_id = new.store_id and sku = new.sku;
+  end if;
+  return null;
+end $$;
+
+
+ALTER FUNCTION "public"."unit_selection_mark_reviewed"() OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."unit_ship_check"("u" "public"."units") RETURNS "jsonb"
@@ -16558,6 +18047,22 @@ $_$;
 
 
 ALTER FUNCTION "public"."unit_weight_lb"("p_specs" "jsonb") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."units_mark_reviewed_on_admin_save"() RETURNS "trigger"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+begin
+  if auth.uid() is not null and public.portal_is_admin() then
+    new.reviewed_at := now();
+    new.reviewed_by := auth.uid();
+  end if;
+  return new;
+end $$;
+
+
+ALTER FUNCTION "public"."units_mark_reviewed_on_admin_save"() OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."unsubscribe_loyalty"("p_token" "uuid") RETURNS "jsonb"
@@ -17560,6 +19065,7 @@ CREATE TABLE IF NOT EXISTS "public"."channel_taxonomy" (
     "validation_schema" "jsonb",
     "fields_version" "text",
     "permissions" "jsonb" DEFAULT '[]'::"jsonb" NOT NULL,
+    "aspect_fields" "jsonb" DEFAULT '[]'::"jsonb" NOT NULL,
     CONSTRAINT "channel_taxonomy_channel_check" CHECK (("channel" = ANY (ARRAY['ebay'::"text", 'amazon'::"text", 'tiktok'::"text", 'depop'::"text"])))
 );
 
@@ -17628,6 +19134,32 @@ ALTER TABLE "public"."delist_tasks" ALTER COLUMN "id" ADD GENERATED BY DEFAULT A
     CACHE 1
 );
 
+
+
+CREATE TABLE IF NOT EXISTS "public"."depop_sale_entries" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "store_id" "uuid" NOT NULL,
+    "sale_id" bigint,
+    "sku" "text" NOT NULL,
+    "sale_cents" integer NOT NULL,
+    "fee_cents" integer NOT NULL,
+    "payout_cents" integer NOT NULL,
+    "sold_on" "date" NOT NULL,
+    "note" "text",
+    "created_by" "uuid",
+    "created_by_name" "text",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "deleted_at" timestamp with time zone,
+    "unit_was_sold" boolean DEFAULT false NOT NULL,
+    CONSTRAINT "depop_sale_entries_check" CHECK (("payout_cents" <= "sale_cents")),
+    CONSTRAINT "depop_sale_entries_fee_cents_check" CHECK (("fee_cents" >= 0)),
+    CONSTRAINT "depop_sale_entries_payout_cents_check" CHECK (("payout_cents" >= 0)),
+    CONSTRAINT "depop_sale_entries_sale_cents_check" CHECK (("sale_cents" > 0))
+);
+
+
+ALTER TABLE "public"."depop_sale_entries" OWNER TO "postgres";
 
 
 CREATE TABLE IF NOT EXISTS "public"."device_tokens" (
@@ -17944,6 +19476,9 @@ CREATE TABLE IF NOT EXISTS "public"."floor_products" (
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "updated_by" "uuid",
+    "ebay_category_id" "text",
+    "ebay_aspects" "jsonb" DEFAULT '{}'::"jsonb" NOT NULL,
+    "ebay_confirmed_at" timestamp with time zone,
     CONSTRAINT "floor_products_gtin14_check" CHECK (("gtin14" ~ '^[0-9]{14}$'::"text")),
     CONSTRAINT "floor_products_source_check" CHECK (("source" = ANY (ARRAY['amazon'::"text", 'upcitemdb'::"text", 'photo'::"text", 'manual'::"text", 'lookup'::"text"])))
 );
@@ -18065,6 +19600,78 @@ CREATE TABLE IF NOT EXISTS "public"."listing_lots" (
 
 
 ALTER TABLE "public"."listing_lots" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."listing_never_rules" (
+    "id" bigint NOT NULL,
+    "store_id" "uuid" NOT NULL,
+    "channel" "text",
+    "rule_type" "text" NOT NULL,
+    "value" "text" DEFAULT ''::"text" NOT NULL,
+    "note" "text",
+    "active" boolean DEFAULT true NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "listing_never_rules_channel_check" CHECK ((("channel" IS NULL) OR ("channel" = ANY (ARRAY['ebay'::"text", 'amazon'::"text", 'tiktok'::"text"])))),
+    CONSTRAINT "listing_never_rules_rule_type_check" CHECK (("rule_type" = ANY (ARRAY['pattern'::"text", 'flag'::"text", 'defective'::"text"])))
+);
+
+
+ALTER TABLE "public"."listing_never_rules" OWNER TO "postgres";
+
+
+CREATE SEQUENCE IF NOT EXISTS "public"."listing_never_rules_id_seq"
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE "public"."listing_never_rules_id_seq" OWNER TO "postgres";
+
+
+ALTER SEQUENCE "public"."listing_never_rules_id_seq" OWNED BY "public"."listing_never_rules"."id";
+
+
+
+CREATE TABLE IF NOT EXISTS "public"."listing_queue" (
+    "id" bigint NOT NULL,
+    "store_id" "uuid" NOT NULL,
+    "sku" "text" NOT NULL,
+    "channel" "text" NOT NULL,
+    "action" "text" NOT NULL,
+    "status" "text" DEFAULT 'queued'::"text" NOT NULL,
+    "attempts" integer DEFAULT 0 NOT NULL,
+    "next_attempt_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "last_error" "text",
+    "issue" "text",
+    "retryable" boolean DEFAULT true NOT NULL,
+    "listing_ref" "text",
+    "created_by" "uuid",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "listing_queue_action_check" CHECK (("action" = ANY (ARRAY['list'::"text", 'end'::"text"]))),
+    CONSTRAINT "listing_queue_channel_check" CHECK (("channel" = ANY (ARRAY['ebay'::"text", 'amazon'::"text", 'tiktok'::"text"]))),
+    CONSTRAINT "listing_queue_status_check" CHECK (("status" = ANY (ARRAY['queued'::"text", 'working'::"text", 'done'::"text", 'failed'::"text", 'cancelled'::"text"])))
+);
+
+
+ALTER TABLE "public"."listing_queue" OWNER TO "postgres";
+
+
+CREATE SEQUENCE IF NOT EXISTS "public"."listing_queue_id_seq"
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE "public"."listing_queue_id_seq" OWNER TO "postgres";
+
+
+ALTER SEQUENCE "public"."listing_queue_id_seq" OWNED BY "public"."listing_queue"."id";
+
 
 
 CREATE TABLE IF NOT EXISTS "public"."listing_review_queue" (
@@ -18596,7 +20203,7 @@ CREATE TABLE IF NOT EXISTS "public"."portal_expenses" (
     "external_id" "text",
     CONSTRAINT "portal_expenses_amount_cents_check" CHECK (("amount_cents" > 0)),
     CONSTRAINT "portal_expenses_description_check" CHECK (("btrim"("description") <> ''::"text")),
-    CONSTRAINT "portal_expenses_source_check" CHECK (("source" = ANY (ARRAY['manual'::"text", 'label'::"text", 'manual_label'::"text", 'ebay'::"text", 'return'::"text", 'amazon'::"text", 'channel'::"text"])))
+    CONSTRAINT "portal_expenses_source_check" CHECK (("source" = ANY (ARRAY['manual'::"text", 'label'::"text", 'manual_label'::"text", 'ebay'::"text", 'return'::"text", 'amazon'::"text", 'channel'::"text", 'giveaway'::"text"])))
 );
 
 
@@ -18636,6 +20243,8 @@ CREATE TABLE IF NOT EXISTS "public"."portal_payout_adjustments" (
     "sale_commission_cents" integer,
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "created_by" "uuid",
+    "replacement_id" "uuid",
+    "fee_rule_change" boolean DEFAULT false NOT NULL,
     CONSTRAINT "portal_payout_adjustments_amount_cents_check" CHECK (("amount_cents" <> 0))
 );
 
@@ -19065,7 +20674,7 @@ CREATE OR REPLACE VIEW "public"."sale_ledger" AS
     COALESCE("u"."is_collectible", false) AS "is_collectible",
     "u"."acquisition_cost_cents" AS "unit_cost_cents",
     (("cost"."val" ->> 'cost_cents'::"text"))::integer AS "cost_unit_cents",
-    ((("cost"."val" ->> 'cost_cents'::"text"))::integer * GREATEST("s"."qty", 1)) AS "cost_cents",
+    "public"."sale_cost_with_replacements"("s"."id", ((("cost"."val" ->> 'cost_cents'::"text"))::integer * GREATEST("s"."qty", 1))) AS "cost_cents",
     ("cost"."val" ->> 'source'::"text") AS "cost_source",
     COALESCE("co"."fee_cents", "wo"."marketplace_fee_cents", (("fe"."val" ->> 'fee_cents'::"text"))::integer, 0) AS "channel_fee_cents",
         CASE
@@ -19089,11 +20698,11 @@ CREATE OR REPLACE VIEW "public"."sale_ledger" AS
             WHEN (COALESCE("co"."baked_ship_cents", 0) > 0) THEN 'estimated'::"text"
             ELSE 'none'::"text"
         END AS "ship_cost_source",
-    COALESCE("s"."processing_fee_cents",
+    GREATEST(0, (COALESCE("s"."processing_fee_cents",
         CASE
             WHEN ("s"."payment_method" = ANY (ARRAY['card'::"text", 'split'::"text"])) THEN (("cfe"."val" ->> 'fee_cents'::"text"))::integer
             ELSE NULL::integer
-        END, 0) AS "processing_fee_cents",
+        END, 0) - COALESCE("s"."card_fee_cents", 0))) AS "processing_fee_cents",
         CASE
             WHEN ("s"."processing_fee_cents" IS NOT NULL) THEN COALESCE("s"."processing_fee_source", 'actual'::"text")
             WHEN (("s"."payment_method" = ANY (ARRAY['card'::"text", 'split'::"text"])) AND ("cfe"."val" IS NOT NULL)) THEN 'estimated'::"text"
@@ -19117,13 +20726,19 @@ CREATE OR REPLACE VIEW "public"."sale_ledger" AS
         CASE
             WHEN (GREATEST(COALESCE("wo"."label_cost_cents", 0), COALESCE("lbl"."cents", 0), COALESCE("man"."cents", 0), COALESCE("co"."ship_label_cents", 0)) > 0) THEN GREATEST(COALESCE("wo"."label_cost_cents", 0), COALESCE("lbl"."cents", 0), COALESCE("man"."cents", 0), COALESCE("co"."ship_label_cents", 0))
             ELSE COALESCE("co"."baked_ship_cents", 0)
-        END) - COALESCE("s"."processing_fee_cents",
+        END) - GREATEST(0, (COALESCE("s"."processing_fee_cents",
         CASE
             WHEN ("s"."payment_method" = ANY (ARRAY['card'::"text", 'split'::"text"])) THEN (("cfe"."val" ->> 'fee_cents'::"text"))::integer
             ELSE NULL::integer
-        END, 0)) - ((("cost"."val" ->> 'cost_cents'::"text"))::integer * GREATEST("s"."qty", 1))) AS "profit_cents",
+        END, 0) - COALESCE("s"."card_fee_cents", 0)))) - "public"."sale_cost_with_replacements"("s"."id", ((("cost"."val" ->> 'cost_cents'::"text"))::integer * GREATEST("s"."qty", 1)))) AS "profit_cents",
     "wo"."payment_env",
-    "wo"."order_no" AS "web_order_no"
+    "wo"."order_no" AS "web_order_no",
+    COALESCE("s"."processing_fee_cents",
+        CASE
+            WHEN ("s"."payment_method" = ANY (ARRAY['card'::"text", 'split'::"text"])) THEN (("cfe"."val" ->> 'fee_cents'::"text"))::integer
+            ELSE NULL::integer
+        END, 0) AS "processing_fee_gross_cents",
+    COALESCE("s"."card_fee_cents", 0) AS "card_surcharge_cents"
    FROM ((((((((((("public"."sales" "s"
      LEFT JOIN "public"."units" "u" ON ((("u"."store_id" = "s"."store_id") AND ("u"."sku" = "s"."sku"))))
      LEFT JOIN "public"."staff" "st" ON ((("st"."store_id" = "s"."store_id") AND ("st"."user_id" = "s"."actor_id"))))
@@ -19265,7 +20880,11 @@ CREATE TABLE IF NOT EXISTS "public"."sale_payout_lines" (
     "commission_base_cents" integer,
     "cost_cents" integer,
     "cost_source" "text",
-    "frozen_at" timestamp with time zone DEFAULT "now"() NOT NULL
+    "frozen_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "replacement_saved" boolean DEFAULT false NOT NULL,
+    "pre_cost_cents" integer,
+    "pre_base_cents" integer,
+    "fees_cents" integer DEFAULT 0 NOT NULL
 );
 
 
@@ -19373,6 +20992,17 @@ CREATE OR REPLACE VIEW "public"."sale_receipts" WITH ("security_invoker"='false'
 
 
 ALTER VIEW "public"."sale_receipts" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."sale_replacement_baseline" (
+    "sale_id" bigint NOT NULL,
+    "store_id" "uuid" NOT NULL,
+    "employee_id" "uuid" NOT NULL,
+    "amount_cents" integer
+);
+
+
+ALTER TABLE "public"."sale_replacement_baseline" OWNER TO "postgres";
 
 
 ALTER TABLE "public"."sales" ALTER COLUMN "id" ADD GENERATED BY DEFAULT AS IDENTITY (
@@ -19803,6 +21433,53 @@ CREATE TABLE IF NOT EXISTS "public"."unit_channel_categories" (
 ALTER TABLE "public"."unit_channel_categories" OWNER TO "postgres";
 
 
+CREATE TABLE IF NOT EXISTS "public"."unit_channel_selections" (
+    "store_id" "uuid" NOT NULL,
+    "sku" "text" NOT NULL,
+    "channel" "text" NOT NULL,
+    "selected" boolean DEFAULT false NOT NULL,
+    "source" "text" DEFAULT 'admin'::"text" NOT NULL,
+    "updated_by" "uuid",
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "unit_channel_selections_channel_check" CHECK (("channel" = ANY (ARRAY['ebay'::"text", 'amazon'::"text", 'tiktok'::"text"]))),
+    CONSTRAINT "unit_channel_selections_source_check" CHECK (("source" = ANY (ARRAY['admin'::"text", 'backfill'::"text"])))
+);
+
+
+ALTER TABLE "public"."unit_channel_selections" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."unit_dispositions" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "store_id" "uuid" NOT NULL,
+    "kind" "text" NOT NULL,
+    "sku" "text" NOT NULL,
+    "prior_state" "text" NOT NULL,
+    "original_sale_id" bigint,
+    "original_sku" "text",
+    "extra_cost_cents" integer DEFAULT 0 NOT NULL,
+    "bad_unit_status" "text",
+    "bad_unit_sku" "text",
+    "given_to" "text",
+    "note" "text",
+    "expense_id" "uuid",
+    "recorded_by" "uuid",
+    "recorded_by_name" "text",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "undone_at" timestamp with time zone,
+    "undone_by" "uuid",
+    "undone_by_name" "text",
+    CONSTRAINT "unit_dispositions_bad_unit_status_check" CHECK (("bad_unit_status" = ANY (ARRAY['returned'::"text", 'pending'::"text"]))),
+    CONSTRAINT "unit_dispositions_check" CHECK ((("kind" = 'replacement'::"text") = ("original_sale_id" IS NOT NULL))),
+    CONSTRAINT "unit_dispositions_check1" CHECK ((("kind" <> 'giveaway'::"text") OR (NULLIF("btrim"(COALESCE("given_to", ''::"text")), ''::"text") IS NOT NULL))),
+    CONSTRAINT "unit_dispositions_extra_cost_cents_check" CHECK (("extra_cost_cents" >= 0)),
+    CONSTRAINT "unit_dispositions_kind_check" CHECK (("kind" = ANY (ARRAY['replacement'::"text", 'giveaway'::"text"])))
+);
+
+
+ALTER TABLE "public"."unit_dispositions" OWNER TO "postgres";
+
+
 CREATE TABLE IF NOT EXISTS "public"."unit_location_stock" (
     "store_id" "uuid" NOT NULL,
     "sku" "text" NOT NULL,
@@ -20036,6 +21713,14 @@ ALTER TABLE ONLY "public"."email_outbox" ALTER COLUMN "id" SET DEFAULT "nextval"
 
 
 
+ALTER TABLE ONLY "public"."listing_never_rules" ALTER COLUMN "id" SET DEFAULT "nextval"('"public"."listing_never_rules_id_seq"'::"regclass");
+
+
+
+ALTER TABLE ONLY "public"."listing_queue" ALTER COLUMN "id" SET DEFAULT "nextval"('"public"."listing_queue_id_seq"'::"regclass");
+
+
+
 ALTER TABLE ONLY "public"."marketplace_eligibility_review" ALTER COLUMN "id" SET DEFAULT "nextval"('"public"."marketplace_eligibility_review_id_seq"'::"regclass");
 
 
@@ -20143,6 +21828,11 @@ ALTER TABLE ONLY "public"."customers"
 
 ALTER TABLE ONLY "public"."delist_tasks"
     ADD CONSTRAINT "delist_tasks_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."depop_sale_entries"
+    ADD CONSTRAINT "depop_sale_entries_pkey" PRIMARY KEY ("id");
 
 
 
@@ -20278,6 +21968,21 @@ ALTER TABLE ONLY "public"."listing_lots"
 
 ALTER TABLE ONLY "public"."listing_lots"
     ADD CONSTRAINT "listing_lots_store_id_key_key" UNIQUE ("store_id", "key");
+
+
+
+ALTER TABLE ONLY "public"."listing_never_rules"
+    ADD CONSTRAINT "listing_never_rules_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."listing_never_rules"
+    ADD CONSTRAINT "listing_never_rules_store_id_channel_rule_type_value_key" UNIQUE NULLS NOT DISTINCT ("store_id", "channel", "rule_type", "value");
+
+
+
+ALTER TABLE ONLY "public"."listing_queue"
+    ADD CONSTRAINT "listing_queue_pkey" PRIMARY KEY ("id");
 
 
 
@@ -20531,6 +22236,11 @@ ALTER TABLE ONLY "public"."sale_payout_tickets"
 
 
 
+ALTER TABLE ONLY "public"."sale_replacement_baseline"
+    ADD CONSTRAINT "sale_replacement_baseline_pkey" PRIMARY KEY ("sale_id", "employee_id");
+
+
+
 ALTER TABLE ONLY "public"."sales"
     ADD CONSTRAINT "sales_pkey" PRIMARY KEY ("id");
 
@@ -20668,6 +22378,16 @@ ALTER TABLE ONLY "public"."tiktok_list_items"
 
 ALTER TABLE ONLY "public"."unit_channel_categories"
     ADD CONSTRAINT "unit_channel_categories_pkey" PRIMARY KEY ("store_id", "sku", "channel");
+
+
+
+ALTER TABLE ONLY "public"."unit_channel_selections"
+    ADD CONSTRAINT "unit_channel_selections_pkey" PRIMARY KEY ("store_id", "sku", "channel");
+
+
+
+ALTER TABLE ONLY "public"."unit_dispositions"
+    ADD CONSTRAINT "unit_dispositions_pkey" PRIMARY KEY ("id");
 
 
 
@@ -20856,6 +22576,10 @@ CREATE INDEX "ix_delist_open" ON "public"."delist_tasks" USING "btree" ("created
 
 
 
+CREATE INDEX "ix_depop_sale_entries_store" ON "public"."depop_sale_entries" USING "btree" ("store_id", "sold_on" DESC);
+
+
+
 CREATE INDEX "ix_email_outbox_queued" ON "public"."email_outbox" USING "btree" ("status", "created_at") WHERE ("status" = 'queued'::"text");
 
 
@@ -20928,6 +22652,10 @@ CREATE INDEX "ix_ticket_extras_store" ON "public"."ticket_extras" USING "btree" 
 
 
 
+CREATE INDEX "ix_unit_dispositions_sale" ON "public"."unit_dispositions" USING "btree" ("original_sale_id") WHERE ("undone_at" IS NULL);
+
+
+
 CREATE INDEX "ix_units_brand_model" ON "public"."units" USING "btree" ("brand", "model");
 
 
@@ -20965,6 +22693,14 @@ CREATE INDEX "ix_web_orders_store_status" ON "public"."web_orders" USING "btree"
 
 
 CREATE INDEX "listing_lot_members_store_sku_idx" ON "public"."listing_lot_members" USING "btree" ("store_id", "sku");
+
+
+
+CREATE INDEX "listing_queue_due" ON "public"."listing_queue" USING "btree" ("store_id", "channel", "status", "next_attempt_at");
+
+
+
+CREATE UNIQUE INDEX "listing_queue_one_open" ON "public"."listing_queue" USING "btree" ("store_id", "sku", "channel") WHERE ("status" = ANY (ARRAY['queued'::"text", 'working'::"text", 'failed'::"text"]));
 
 
 
@@ -21164,6 +22900,10 @@ CREATE UNIQUE INDEX "ux_pos_devices_pair_code" ON "public"."pos_devices" USING "
 
 
 
+CREATE UNIQUE INDEX "ux_unit_dispositions_active_sku" ON "public"."unit_dispositions" USING "btree" ("store_id", "sku") WHERE ("undone_at" IS NULL);
+
+
+
 CREATE UNIQUE INDEX "ux_units_store_sku" ON "public"."units" USING "btree" ("store_id", "sku") WHERE ("store_id" IS NOT NULL);
 
 
@@ -21216,7 +22956,23 @@ CREATE OR REPLACE TRIGGER "customers_welcome" AFTER INSERT ON "public"."customer
 
 
 
+CREATE OR REPLACE TRIGGER "depop_guard_channel_orders" BEFORE INSERT ON "public"."channel_orders" FOR EACH ROW WHEN (("lower"("new"."provider") = 'depop'::"text")) EXECUTE FUNCTION "public"."guard_depop_import"();
+
+
+
+CREATE OR REPLACE TRIGGER "depop_guard_sales" BEFORE INSERT ON "public"."sales" FOR EACH ROW WHEN (("lower"("new"."channel") = 'depop'::"text")) EXECUTE FUNCTION "public"."guard_depop_import"();
+
+
+
+CREATE OR REPLACE TRIGGER "depop_guard_web_orders" BEFORE INSERT ON "public"."web_orders" FOR EACH ROW WHEN (("lower"("new"."channel") = 'depop'::"text")) EXECUTE FUNCTION "public"."guard_depop_import"();
+
+
+
 CREATE OR REPLACE TRIGGER "dispatch-alerts" AFTER INSERT ON "public"."alert_outbox" FOR EACH ROW EXECUTE FUNCTION "supabase_functions"."http_request"('https://inventoryobi.netlify.app/.netlify/functions/dispatch-alerts', 'POST', '{"Content-type":"application/json","x-webhook-secret":"174749ba1a45f936041a7a4225b1aade63439c7996aa481ced2aa159c8b783b9"}', '{}', '5000');
+
+
+
+CREATE OR REPLACE TRIGGER "disposition_unit_cost" AFTER UPDATE OF "acquisition_cost_cents", "is_collectible" ON "public"."units" FOR EACH ROW WHEN ((("old"."acquisition_cost_cents" IS DISTINCT FROM "new"."acquisition_cost_cents") OR ("old"."is_collectible" IS DISTINCT FROM "new"."is_collectible"))) EXECUTE FUNCTION "public"."disposition_unit_cost_trigger"();
 
 
 
@@ -21345,6 +23101,22 @@ CREATE OR REPLACE TRIGGER "trim_location_stock_on_sale" AFTER UPDATE OF "qty_on_
 
 
 CREATE OR REPLACE TRIGGER "unit_category_ready_guard" AFTER INSERT OR UPDATE OF "listing_specs", "condition", "ask_cents", "qty_on_hand" ON "public"."units" FOR EACH ROW EXECUTE FUNCTION "public"."floor_category_ready_guard"();
+
+
+
+CREATE OR REPLACE TRIGGER "unit_dns_changed" AFTER INSERT OR UPDATE ON "public"."units" FOR EACH ROW EXECUTE FUNCTION "public"."unit_dns_changed"();
+
+
+
+CREATE OR REPLACE TRIGGER "unit_dns_enforce" BEFORE INSERT OR UPDATE ON "public"."units" FOR EACH ROW EXECUTE FUNCTION "public"."unit_dns_enforce"();
+
+
+
+CREATE OR REPLACE TRIGGER "unit_selection_reviewed" AFTER INSERT OR UPDATE ON "public"."unit_channel_selections" FOR EACH ROW EXECUTE FUNCTION "public"."unit_selection_mark_reviewed"();
+
+
+
+CREATE OR REPLACE TRIGGER "units_mark_reviewed" BEFORE UPDATE OF "brand", "model", "title", "category", "condition", "test_status", "location", "defect_notes", "upc", "mfr_serial", "acquisition_cost_cents", "msrp_cents", "ask_cents", "floor_cents", "show_on_website", "listing_body", "listing_specs", "package_length_in", "package_width_in", "package_height_in", "package_weight_lb" ON "public"."units" FOR EACH ROW EXECUTE FUNCTION "public"."units_mark_reviewed_on_admin_save"();
 
 
 
@@ -21482,6 +23254,16 @@ ALTER TABLE ONLY "public"."delist_tasks"
 
 ALTER TABLE ONLY "public"."delist_tasks"
     ADD CONSTRAINT "delist_tasks_store_id_fkey" FOREIGN KEY ("store_id") REFERENCES "public"."stores"("id");
+
+
+
+ALTER TABLE ONLY "public"."depop_sale_entries"
+    ADD CONSTRAINT "depop_sale_entries_sale_id_fkey" FOREIGN KEY ("sale_id") REFERENCES "public"."sales"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."depop_sale_entries"
+    ADD CONSTRAINT "depop_sale_entries_store_id_fkey" FOREIGN KEY ("store_id") REFERENCES "public"."stores"("id") ON DELETE CASCADE;
 
 
 
@@ -21642,6 +23424,16 @@ ALTER TABLE ONLY "public"."listing_lot_members"
 
 ALTER TABLE ONLY "public"."listing_lots"
     ADD CONSTRAINT "listing_lots_store_id_fkey" FOREIGN KEY ("store_id") REFERENCES "public"."stores"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."listing_never_rules"
+    ADD CONSTRAINT "listing_never_rules_store_id_fkey" FOREIGN KEY ("store_id") REFERENCES "public"."stores"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."listing_queue"
+    ADD CONSTRAINT "listing_queue_store_id_fkey" FOREIGN KEY ("store_id") REFERENCES "public"."stores"("id") ON DELETE CASCADE;
 
 
 
@@ -21960,6 +23752,11 @@ ALTER TABLE ONLY "public"."sale_payout_tickets"
 
 
 
+ALTER TABLE ONLY "public"."sale_replacement_baseline"
+    ADD CONSTRAINT "sale_replacement_baseline_sale_id_fkey" FOREIGN KEY ("sale_id") REFERENCES "public"."sales"("id") ON DELETE CASCADE;
+
+
+
 ALTER TABLE ONLY "public"."sales"
     ADD CONSTRAINT "sales_actor_id_fkey" FOREIGN KEY ("actor_id") REFERENCES "auth"."users"("id");
 
@@ -22117,6 +23914,21 @@ ALTER TABLE ONLY "public"."unit_channel_categories"
 
 ALTER TABLE ONLY "public"."unit_channel_categories"
     ADD CONSTRAINT "unit_channel_categories_store_id_fkey" FOREIGN KEY ("store_id") REFERENCES "public"."stores"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."unit_channel_selections"
+    ADD CONSTRAINT "unit_channel_selections_store_id_fkey" FOREIGN KEY ("store_id") REFERENCES "public"."stores"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."unit_dispositions"
+    ADD CONSTRAINT "unit_dispositions_original_sale_id_fkey" FOREIGN KEY ("original_sale_id") REFERENCES "public"."sales"("id");
+
+
+
+ALTER TABLE ONLY "public"."unit_dispositions"
+    ADD CONSTRAINT "unit_dispositions_store_id_fkey" FOREIGN KEY ("store_id") REFERENCES "public"."stores"("id") ON DELETE CASCADE;
 
 
 
@@ -22317,6 +24129,13 @@ ALTER TABLE "public"."customers" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."delist_tasks" ENABLE ROW LEVEL SECURITY;
 
 
+ALTER TABLE "public"."depop_sale_entries" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "depop_sale_entries_admin_read" ON "public"."depop_sale_entries" FOR SELECT TO "authenticated" USING ((("store_id" = "public"."portal_store_id"()) AND "public"."portal_is_admin"()));
+
+
+
 ALTER TABLE "public"."device_tokens" ENABLE ROW LEVEL SECURITY;
 
 
@@ -22395,6 +24214,12 @@ ALTER TABLE "public"."listing_lot_members" ENABLE ROW LEVEL SECURITY;
 
 
 ALTER TABLE "public"."listing_lots" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."listing_never_rules" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."listing_queue" ENABLE ROW LEVEL SECURITY;
 
 
 ALTER TABLE "public"."listing_review_queue" ENABLE ROW LEVEL SECURITY;
@@ -22660,6 +24485,9 @@ CREATE POLICY "sale_payout_tickets_admin_read" ON "public"."sale_payout_tickets"
 
 
 
+ALTER TABLE "public"."sale_replacement_baseline" ENABLE ROW LEVEL SECURITY;
+
+
 ALTER TABLE "public"."sales" ENABLE ROW LEVEL SECURITY;
 
 
@@ -22893,6 +24721,16 @@ ALTER TABLE "public"."unit_channel_categories" ENABLE ROW LEVEL SECURITY;
 
 
 CREATE POLICY "unit_channel_categories_read" ON "public"."unit_channel_categories" FOR SELECT TO "authenticated" USING (("store_id" = COALESCE("public"."portal_store_id"(), "public"."current_store_id"())));
+
+
+
+ALTER TABLE "public"."unit_channel_selections" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."unit_dispositions" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "unit_dispositions_admin_read" ON "public"."unit_dispositions" FOR SELECT TO "authenticated" USING ((("store_id" = "public"."portal_store_id"()) AND "public"."portal_is_admin"()));
 
 
 
@@ -23625,9 +25463,48 @@ GRANT ALL ON FUNCTION "public"."delete_unit_photo"("p_id" bigint) TO "service_ro
 
 
 
+REVOKE ALL ON FUNCTION "public"."depop_purge_sale"("p_sale" bigint, "p_restore" boolean) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."depop_purge_sale"("p_sale" bigint, "p_restore" boolean) TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."depop_sold_at"("p_day" "date") TO "anon";
+GRANT ALL ON FUNCTION "public"."depop_sold_at"("p_day" "date") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."depop_sold_at"("p_day" "date") TO "service_role";
+
+
+
 GRANT ALL ON FUNCTION "public"."disconnect_provider"("p_provider" "text") TO "anon";
 GRANT ALL ON FUNCTION "public"."disconnect_provider"("p_provider" "text") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."disconnect_provider"("p_provider" "text") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."disposition_actor_name"("p_uid" "uuid") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."disposition_actor_name"("p_uid" "uuid") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."disposition_actor_name"("p_uid" "uuid") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."disposition_leave_stock"("p_store" "uuid", "p_sku" "text", "p_state" "text") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."disposition_leave_stock"("p_store" "uuid", "p_sku" "text", "p_state" "text") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."disposition_make_bad_unit"("p_id" "uuid") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."disposition_make_bad_unit"("p_id" "uuid") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."disposition_unit_cost"("p_store" "uuid", "p_sku" "text") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."disposition_unit_cost"("p_store" "uuid", "p_sku" "text") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."disposition_unit_cost"("p_store" "uuid", "p_sku" "text") TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."disposition_unit_cost_trigger"() TO "anon";
+GRANT ALL ON FUNCTION "public"."disposition_unit_cost_trigger"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."disposition_unit_cost_trigger"() TO "service_role";
 
 
 
@@ -23731,6 +25608,11 @@ GRANT ALL ON FUNCTION "public"."finish_web_order_refund"("p_store" "uuid", "p_or
 
 
 
+REVOKE ALL ON FUNCTION "public"."floor_backfill_channel_selections"("p_store" "uuid", "p_dry_run" boolean) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."floor_backfill_channel_selections"("p_store" "uuid", "p_dry_run" boolean) TO "service_role";
+
+
+
 REVOKE ALL ON FUNCTION "public"."floor_bundle_begin_push"("p_store" "uuid", "p_sku" "text", "p_channel" "text") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."floor_bundle_begin_push"("p_store" "uuid", "p_sku" "text", "p_channel" "text") TO "service_role";
 
@@ -23789,6 +25671,11 @@ GRANT ALL ON FUNCTION "public"."floor_bundle_sale_guard"() TO "service_role";
 
 
 
+REVOKE ALL ON FUNCTION "public"."floor_category_autoconfirm"("p_store" "uuid", "p_dry_run" boolean) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."floor_category_autoconfirm"("p_store" "uuid", "p_dry_run" boolean) TO "service_role";
+
+
+
 REVOKE ALL ON FUNCTION "public"."floor_category_demote_sku"("p_store" "uuid", "p_sku" "text") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."floor_category_demote_sku"("p_store" "uuid", "p_sku" "text") TO "service_role";
 
@@ -23806,6 +25693,11 @@ GRANT ALL ON FUNCTION "public"."floor_category_issue_rows"("p_store" "uuid", "p_
 
 REVOKE ALL ON FUNCTION "public"."floor_category_pre_push"("p_store" "uuid", "p_sku" "text", "p_channel" "text") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."floor_category_pre_push"("p_store" "uuid", "p_sku" "text", "p_channel" "text") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."floor_category_queue_breakdown"("p_store" "uuid") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."floor_category_queue_breakdown"("p_store" "uuid") TO "service_role";
 
 
 
@@ -23833,13 +25725,60 @@ GRANT ALL ON FUNCTION "public"."floor_category_unit_changed"() TO "service_role"
 
 
 
+REVOKE ALL ON FUNCTION "public"."floor_dns_push_gate"("p_store" "uuid", "p_sku" "text", "p_channel" "text") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."floor_dns_push_gate"("p_store" "uuid", "p_sku" "text", "p_channel" "text") TO "service_role";
+
+
+
 REVOKE ALL ON FUNCTION "public"."floor_store_listing_channels"("p_store" "uuid") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."floor_store_listing_channels"("p_store" "uuid") TO "service_role";
 
 
 
+REVOKE ALL ON FUNCTION "public"."floor_unit_channel_mandatory_gaps"("p_store" "uuid", "p_sku" "text", "p_channel" "text") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."floor_unit_channel_mandatory_gaps"("p_store" "uuid", "p_sku" "text", "p_channel" "text") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."floor_unit_ebay_gaps"("p_store" "uuid", "p_sku" "text") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."floor_unit_ebay_gaps"("p_store" "uuid", "p_sku" "text") TO "service_role";
+
+
+
 REVOKE ALL ON FUNCTION "public"."floor_unit_headed_to_amazon"("p_store" "uuid", "p_sku" "text") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."floor_unit_headed_to_amazon"("p_store" "uuid", "p_sku" "text") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."floor_unit_live_on"("p_store" "uuid", "p_sku" "text", "p_channel" "text") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."floor_unit_live_on"("p_store" "uuid", "p_sku" "text", "p_channel" "text") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."floor_unit_mandatory_gaps"("p_store" "uuid", "p_sku" "text") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."floor_unit_mandatory_gaps"("p_store" "uuid", "p_sku" "text") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."floor_unit_never_list_reason"("p_store" "uuid", "p_sku" "text", "p_channel" "text") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."floor_unit_never_list_reason"("p_store" "uuid", "p_sku" "text", "p_channel" "text") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."floor_valid_upc"("p_code" "text") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."floor_valid_upc"("p_code" "text") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."floor_valid_upc"("p_code" "text") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."giveaway_sync_expense"("p_id" "uuid") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."giveaway_sync_expense"("p_id" "uuid") TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."guard_depop_import"() TO "anon";
+GRANT ALL ON FUNCTION "public"."guard_depop_import"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."guard_depop_import"() TO "service_role";
 
 
 
@@ -23864,6 +25803,12 @@ GRANT ALL ON FUNCTION "public"."ingest_channel_return"("p_store" "uuid", "p_chan
 GRANT ALL ON FUNCTION "public"."initialize_unit_categories"() TO "anon";
 GRANT ALL ON FUNCTION "public"."initialize_unit_categories"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."initialize_unit_categories"() TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."inventory_totals"() FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."inventory_totals"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."inventory_totals"() TO "service_role";
 
 
 
@@ -24105,6 +26050,11 @@ GRANT ALL ON FUNCTION "public"."pair_pos_reader"("p_pair_code" "text") TO "servi
 
 
 
+REVOKE ALL ON FUNCTION "public"."payout_apply_absorb_setting"("p_store" "uuid", "p_on" boolean, "p_by" "uuid") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."payout_apply_absorb_setting"("p_store" "uuid", "p_on" boolean, "p_by" "uuid") TO "service_role";
+
+
+
 REVOKE ALL ON FUNCTION "public"."payout_calc_ticket"("p_store" "uuid", "p_ticket" "text") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."payout_calc_ticket"("p_store" "uuid", "p_ticket" "text") TO "service_role";
 
@@ -24148,6 +26098,11 @@ GRANT ALL ON FUNCTION "public"."payout_slot_employee"("p_store" "uuid", "p_slot"
 
 REVOKE ALL ON FUNCTION "public"."payout_snapshot_sale"("p_sale_id" bigint) FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."payout_snapshot_sale"("p_sale_id" bigint) TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."payout_sync_replacements"("p_sale_id" bigint, "p_trigger" "uuid") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."payout_sync_replacements"("p_sale_id" bigint, "p_trigger" "uuid") TO "service_role";
 
 
 
@@ -24263,6 +26218,12 @@ GRANT ALL ON FUNCTION "public"."portal_assert_admin"() TO "service_role";
 
 
 
+REVOKE ALL ON FUNCTION "public"."portal_assert_admin_store"() FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."portal_assert_admin_store"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."portal_assert_admin_store"() TO "service_role";
+
+
+
 REVOKE ALL ON FUNCTION "public"."portal_bay_list"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."portal_bay_list"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."portal_bay_list"() TO "service_role";
@@ -24314,6 +26275,12 @@ GRANT ALL ON FUNCTION "public"."portal_category_queue_count"() TO "service_role"
 REVOKE ALL ON FUNCTION "public"."portal_category_search"("p_channel" "text", "p_query" "text", "p_limit" integer) FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."portal_category_search"("p_channel" "text", "p_query" "text", "p_limit" integer) TO "authenticated";
 GRANT ALL ON FUNCTION "public"."portal_category_search"("p_channel" "text", "p_query" "text", "p_limit" integer) TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."portal_channel_autopush"() FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."portal_channel_autopush"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."portal_channel_autopush"() TO "service_role";
 
 
 
@@ -24419,6 +26386,36 @@ GRANT ALL ON FUNCTION "public"."portal_depop_category_save"("p_id" "text", "p_pa
 
 
 
+REVOKE ALL ON FUNCTION "public"."portal_depop_delete_sale"("p_id" "uuid") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."portal_depop_delete_sale"("p_id" "uuid") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."portal_depop_delete_sale"("p_id" "uuid") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."portal_depop_entries"("p_limit" integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."portal_depop_entries"("p_limit" integer) TO "authenticated";
+GRANT ALL ON FUNCTION "public"."portal_depop_entries"("p_limit" integer) TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."portal_depop_find_units"("p_query" "text") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."portal_depop_find_units"("p_query" "text") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."portal_depop_find_units"("p_query" "text") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."portal_depop_record_sale"("p_sku" "text", "p_sale_cents" integer, "p_fee_cents" integer, "p_payout_cents" integer, "p_sold_on" "date", "p_note" "text") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."portal_depop_record_sale"("p_sku" "text", "p_sale_cents" integer, "p_fee_cents" integer, "p_payout_cents" integer, "p_sold_on" "date", "p_note" "text") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."portal_depop_record_sale"("p_sku" "text", "p_sale_cents" integer, "p_fee_cents" integer, "p_payout_cents" integer, "p_sold_on" "date", "p_note" "text") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."portal_depop_update_sale"("p_id" "uuid", "p_sale_cents" integer, "p_fee_cents" integer, "p_payout_cents" integer, "p_sold_on" "date", "p_note" "text") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."portal_depop_update_sale"("p_id" "uuid", "p_sale_cents" integer, "p_fee_cents" integer, "p_payout_cents" integer, "p_sold_on" "date", "p_note" "text") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."portal_depop_update_sale"("p_id" "uuid", "p_sale_cents" integer, "p_fee_cents" integer, "p_payout_cents" integer, "p_sold_on" "date", "p_note" "text") TO "service_role";
+
+
+
 REVOKE ALL ON FUNCTION "public"."portal_disconnect_provider"("p_provider" "text") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."portal_disconnect_provider"("p_provider" "text") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."portal_disconnect_provider"("p_provider" "text") TO "service_role";
@@ -24428,6 +26425,12 @@ GRANT ALL ON FUNCTION "public"."portal_disconnect_provider"("p_provider" "text")
 REVOKE ALL ON FUNCTION "public"."portal_disposition_return"("p_return" "uuid", "p_disposition" "text", "p_patch" "jsonb") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."portal_disposition_return"("p_return" "uuid", "p_disposition" "text", "p_patch" "jsonb") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."portal_disposition_return"("p_return" "uuid", "p_disposition" "text", "p_patch" "jsonb") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."portal_dispositions_list"("p_kind" "text") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."portal_dispositions_list"("p_kind" "text") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."portal_dispositions_list"("p_kind" "text") TO "service_role";
 
 
 
@@ -24530,6 +26533,12 @@ GRANT ALL ON FUNCTION "public"."portal_inventory_list_with_locations"("p_query" 
 
 
 
+REVOKE ALL ON FUNCTION "public"."portal_inventory_mark_not_sold"("p_sku" "text", "p_reason" "text", "p_sale_id" bigint) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."portal_inventory_mark_not_sold"("p_sku" "text", "p_reason" "text", "p_sale_id" bigint) TO "authenticated";
+GRANT ALL ON FUNCTION "public"."portal_inventory_mark_not_sold"("p_sku" "text", "p_reason" "text", "p_sale_id" bigint) TO "service_role";
+
+
+
 GRANT ALL ON FUNCTION "public"."portal_inventory_next_sku"() TO "anon";
 GRANT ALL ON FUNCTION "public"."portal_inventory_next_sku"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."portal_inventory_next_sku"() TO "service_role";
@@ -24539,6 +26548,12 @@ GRANT ALL ON FUNCTION "public"."portal_inventory_next_sku"() TO "service_role";
 GRANT ALL ON FUNCTION "public"."portal_inventory_receive"("p_sku" "text", "p_brand" "text", "p_model" "text", "p_title" "text", "p_category" "text", "p_condition" "text", "p_ask_cents" integer, "p_cost_cents" integer, "p_floor_cents" integer, "p_notes" "text") TO "anon";
 GRANT ALL ON FUNCTION "public"."portal_inventory_receive"("p_sku" "text", "p_brand" "text", "p_model" "text", "p_title" "text", "p_category" "text", "p_condition" "text", "p_ask_cents" integer, "p_cost_cents" integer, "p_floor_cents" integer, "p_notes" "text") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."portal_inventory_receive"("p_sku" "text", "p_brand" "text", "p_model" "text", "p_title" "text", "p_category" "text", "p_condition" "text", "p_ask_cents" integer, "p_cost_cents" integer, "p_floor_cents" integer, "p_notes" "text") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."portal_inventory_restore_options"("p_sku" "text") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."portal_inventory_restore_options"("p_sku" "text") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."portal_inventory_restore_options"("p_sku" "text") TO "service_role";
 
 
 
@@ -24581,6 +26596,12 @@ GRANT ALL ON FUNCTION "public"."portal_ledger_sales"("p_from" timestamp with tim
 REVOKE ALL ON FUNCTION "public"."portal_listing_channels"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."portal_listing_channels"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."portal_listing_channels"() TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."portal_listing_issues"("p_limit" integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."portal_listing_issues"("p_limit" integer) TO "authenticated";
+GRANT ALL ON FUNCTION "public"."portal_listing_issues"("p_limit" integer) TO "service_role";
 
 
 
@@ -24687,6 +26708,12 @@ GRANT ALL ON FUNCTION "public"."portal_match_web_order"("p_order" "uuid", "p_sku
 REVOKE ALL ON FUNCTION "public"."portal_move_location_stock"("p_sku" "text", "p_to" "text", "p_quantity" integer, "p_from" "text") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."portal_move_location_stock"("p_sku" "text", "p_to" "text", "p_quantity" integer, "p_from" "text") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."portal_move_location_stock"("p_sku" "text", "p_to" "text", "p_quantity" integer, "p_from" "text") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."portal_never_list_rules"() FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."portal_never_list_rules"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."portal_never_list_rules"() TO "service_role";
 
 
 
@@ -24804,15 +26831,45 @@ GRANT ALL ON FUNCTION "public"."portal_receive_unit"("p_quantity" integer, "p_br
 
 
 
+REVOKE ALL ON FUNCTION "public"."portal_record_giveaway"("p_sku" "text", "p_given_to" "text", "p_note" "text") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."portal_record_giveaway"("p_sku" "text", "p_given_to" "text", "p_note" "text") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."portal_record_giveaway"("p_sku" "text", "p_given_to" "text", "p_note" "text") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."portal_record_replacement"("p_sku" "text", "p_sale_id" bigint, "p_bad_unit_returned" boolean, "p_extra_cost_cents" integer, "p_note" "text") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."portal_record_replacement"("p_sku" "text", "p_sale_id" bigint, "p_bad_unit_returned" boolean, "p_extra_cost_cents" integer, "p_note" "text") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."portal_record_replacement"("p_sku" "text", "p_sale_id" bigint, "p_bad_unit_returned" boolean, "p_extra_cost_cents" integer, "p_note" "text") TO "service_role";
+
+
+
 REVOKE ALL ON FUNCTION "public"."portal_reject_match"("p_suggestion" "uuid") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."portal_reject_match"("p_suggestion" "uuid") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."portal_reject_match"("p_suggestion" "uuid") TO "service_role";
 
 
 
+REVOKE ALL ON FUNCTION "public"."portal_replacement_bad_unit_returned"("p_id" "uuid") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."portal_replacement_bad_unit_returned"("p_id" "uuid") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."portal_replacement_bad_unit_returned"("p_id" "uuid") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."portal_replacement_sale_search"("p_query" "text") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."portal_replacement_sale_search"("p_query" "text") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."portal_replacement_sale_search"("p_query" "text") TO "service_role";
+
+
+
 REVOKE ALL ON FUNCTION "public"."portal_resolve_eligibility_review"("p_id" bigint, "p_note" "text") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."portal_resolve_eligibility_review"("p_id" bigint, "p_note" "text") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."portal_resolve_eligibility_review"("p_id" bigint, "p_note" "text") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."portal_retry_listing_issue"("p_id" bigint) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."portal_retry_listing_issue"("p_id" bigint) TO "authenticated";
+GRANT ALL ON FUNCTION "public"."portal_retry_listing_issue"("p_id" bigint) TO "service_role";
 
 
 
@@ -24867,6 +26924,12 @@ GRANT ALL ON FUNCTION "public"."portal_sales"("p_from" timestamp with time zone,
 REVOKE ALL ON FUNCTION "public"."portal_save_withdrawal"("p_id" "uuid", "p_source" "text", "p_amount_cents" integer, "p_on" "date", "p_reason" "text", "p_note" "text", "p_person" "uuid", "p_performer" "uuid") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."portal_save_withdrawal"("p_id" "uuid", "p_source" "text", "p_amount_cents" integer, "p_on" "date", "p_reason" "text", "p_note" "text", "p_person" "uuid", "p_performer" "uuid") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."portal_save_withdrawal"("p_id" "uuid", "p_source" "text", "p_amount_cents" integer, "p_on" "date", "p_reason" "text", "p_note" "text", "p_person" "uuid", "p_performer" "uuid") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."portal_set_absorb_fees"("p_on" boolean) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."portal_set_absorb_fees"("p_on" boolean) TO "authenticated";
+GRANT ALL ON FUNCTION "public"."portal_set_absorb_fees"("p_on" boolean) TO "service_role";
 
 
 
@@ -25026,9 +27089,33 @@ GRANT ALL ON FUNCTION "public"."portal_set_unit_channel"("p_sku" "text", "p_chan
 
 
 
+REVOKE ALL ON FUNCTION "public"."portal_set_unit_channel_selection"("p_sku" "text", "p_channel" "text", "p_selected" boolean) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."portal_set_unit_channel_selection"("p_sku" "text", "p_channel" "text", "p_selected" boolean) TO "authenticated";
+GRANT ALL ON FUNCTION "public"."portal_set_unit_channel_selection"("p_sku" "text", "p_channel" "text", "p_selected" boolean) TO "service_role";
+
+
+
 REVOKE ALL ON FUNCTION "public"."portal_set_unit_cost"("p_sku" "text", "p_cost_cents" integer) FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."portal_set_unit_cost"("p_sku" "text", "p_cost_cents" integer) TO "authenticated";
 GRANT ALL ON FUNCTION "public"."portal_set_unit_cost"("p_sku" "text", "p_cost_cents" integer) TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."portal_set_unit_dns"("p_sku" "text", "p_dns" boolean) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."portal_set_unit_dns"("p_sku" "text", "p_dns" boolean) TO "authenticated";
+GRANT ALL ON FUNCTION "public"."portal_set_unit_dns"("p_sku" "text", "p_dns" boolean) TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."portal_set_unit_ebay_category"("p_sku" "text", "p_category_id" "text") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."portal_set_unit_ebay_category"("p_sku" "text", "p_category_id" "text") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."portal_set_unit_ebay_category"("p_sku" "text", "p_category_id" "text") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."portal_set_unit_ebay_specifics"("p_sku" "text", "p_attributes" "jsonb") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."portal_set_unit_ebay_specifics"("p_sku" "text", "p_attributes" "jsonb") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."portal_set_unit_ebay_specifics"("p_sku" "text", "p_attributes" "jsonb") TO "service_role";
 
 
 
@@ -25140,9 +27227,33 @@ GRANT ALL ON FUNCTION "public"."portal_unbundle"("p_bundle" "text") TO "service_
 
 
 
+REVOKE ALL ON FUNCTION "public"."portal_undo_disposition"("p_id" "uuid") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."portal_undo_disposition"("p_id" "uuid") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."portal_undo_disposition"("p_id" "uuid") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."portal_unit_channel_selections"("p_sku" "text") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."portal_unit_channel_selections"("p_sku" "text") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."portal_unit_channel_selections"("p_sku" "text") TO "service_role";
+
+
+
 REVOKE ALL ON FUNCTION "public"."portal_unit_channels"("p_sku" "text") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."portal_unit_channels"("p_sku" "text") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."portal_unit_channels"("p_sku" "text") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."portal_unit_dns"("p_sku" "text") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."portal_unit_dns"("p_sku" "text") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."portal_unit_dns"("p_sku" "text") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."portal_unit_ebay_specifics"("p_sku" "text") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."portal_unit_ebay_specifics"("p_sku" "text") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."portal_unit_ebay_specifics"("p_sku" "text") TO "service_role";
 
 
 
@@ -25155,6 +27266,12 @@ GRANT ALL ON FUNCTION "public"."portal_unit_eligibility"("p_sku" "text") TO "ser
 GRANT ALL ON FUNCTION "public"."portal_unit_eligibility_for_store"("p_store" "uuid", "p_sku" "text") TO "anon";
 GRANT ALL ON FUNCTION "public"."portal_unit_eligibility_for_store"("p_store" "uuid", "p_sku" "text") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."portal_unit_eligibility_for_store"("p_store" "uuid", "p_sku" "text") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."portal_unit_history"("p_sku" "text") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."portal_unit_history"("p_sku" "text") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."portal_unit_history"("p_sku" "text") TO "service_role";
 
 
 
@@ -25202,6 +27319,12 @@ GRANT ALL ON FUNCTION "public"."portal_update_unit"("p_sku" "text", "p_upc" "tex
 
 REVOKE ALL ON FUNCTION "public"."portal_upsert_ebay_fee_expense"("p_store" "uuid", "p_external_id" "text", "p_spent_on" "date", "p_description" "text", "p_category" "text", "p_amount_cents" integer) FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."portal_upsert_ebay_fee_expense"("p_store" "uuid", "p_external_id" "text", "p_spent_on" "date", "p_description" "text", "p_category" "text", "p_amount_cents" integer) TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."portal_upsert_never_list_rule"("p_id" bigint, "p_channel" "text", "p_rule_type" "text", "p_value" "text", "p_note" "text", "p_active" boolean) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."portal_upsert_never_list_rule"("p_id" bigint, "p_channel" "text", "p_rule_type" "text", "p_value" "text", "p_note" "text", "p_active" boolean) TO "authenticated";
+GRANT ALL ON FUNCTION "public"."portal_upsert_never_list_rule"("p_id" bigint, "p_channel" "text", "p_rule_type" "text", "p_value" "text", "p_note" "text", "p_active" boolean) TO "service_role";
 
 
 
@@ -25489,6 +27612,18 @@ GRANT ALL ON FUNCTION "public"."sale_commission_cents"("p_store" "uuid", "p_sale
 
 
 
+REVOKE ALL ON FUNCTION "public"."sale_cost_with_replacements"("p_sale" bigint, "p_cost" integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."sale_cost_with_replacements"("p_sale" bigint, "p_cost" integer) TO "authenticated";
+GRANT ALL ON FUNCTION "public"."sale_cost_with_replacements"("p_sale" bigint, "p_cost" integer) TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."sale_replacement_cost"("p_sale" bigint) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."sale_replacement_cost"("p_sale" bigint) TO "authenticated";
+GRANT ALL ON FUNCTION "public"."sale_replacement_cost"("p_sale" bigint) TO "service_role";
+
+
+
 REVOKE ALL ON FUNCTION "public"."sale_set_processing_fee"("p_store" "uuid", "p_sale" bigint, "p_fee_cents" integer, "p_source" "text") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."sale_set_processing_fee"("p_store" "uuid", "p_sale" bigint, "p_fee_cents" integer, "p_source" "text") TO "service_role";
 
@@ -25722,6 +27857,30 @@ GRANT ALL ON FUNCTION "public"."unit_cost_json"("p_store" "uuid", "p_category" "
 
 
 
+GRANT ALL ON FUNCTION "public"."unit_dns"("p_specs" "jsonb") TO "anon";
+GRANT ALL ON FUNCTION "public"."unit_dns"("p_specs" "jsonb") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."unit_dns"("p_specs" "jsonb") TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."unit_dns_changed"() TO "anon";
+GRANT ALL ON FUNCTION "public"."unit_dns_changed"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."unit_dns_changed"() TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."unit_dns_enforce"() TO "anon";
+GRANT ALL ON FUNCTION "public"."unit_dns_enforce"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."unit_dns_enforce"() TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."unit_dns_type"("u" "public"."units") TO "anon";
+GRANT ALL ON FUNCTION "public"."unit_dns_type"("u" "public"."units") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."unit_dns_type"("u" "public"."units") TO "service_role";
+
+
+
 GRANT ALL ON FUNCTION "public"."unit_is_defective"("p_specs" "jsonb", "p_condition" "text") TO "anon";
 GRANT ALL ON FUNCTION "public"."unit_is_defective"("p_specs" "jsonb", "p_condition" "text") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."unit_is_defective"("p_specs" "jsonb", "p_condition" "text") TO "service_role";
@@ -25769,6 +27928,12 @@ GRANT ALL ON FUNCTION "public"."unit_policy_text"("u" "public"."units") TO "serv
 
 
 
+GRANT ALL ON FUNCTION "public"."unit_selection_mark_reviewed"() TO "anon";
+GRANT ALL ON FUNCTION "public"."unit_selection_mark_reviewed"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."unit_selection_mark_reviewed"() TO "service_role";
+
+
+
 REVOKE ALL ON FUNCTION "public"."unit_ship_check"("u" "public"."units") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."unit_ship_check"("u" "public"."units") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."unit_ship_check"("u" "public"."units") TO "service_role";
@@ -25809,6 +27974,12 @@ GRANT ALL ON FUNCTION "public"."unit_web_buyable"("p_store" "uuid", "p_shippable
 GRANT ALL ON FUNCTION "public"."unit_weight_lb"("p_specs" "jsonb") TO "anon";
 GRANT ALL ON FUNCTION "public"."unit_weight_lb"("p_specs" "jsonb") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."unit_weight_lb"("p_specs" "jsonb") TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."units_mark_reviewed_on_admin_save"() TO "anon";
+GRANT ALL ON FUNCTION "public"."units_mark_reviewed_on_admin_save"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."units_mark_reviewed_on_admin_save"() TO "service_role";
 
 
 
@@ -26046,6 +28217,11 @@ GRANT ALL ON SEQUENCE "public"."delist_tasks_id_seq" TO "service_role";
 
 
 
+GRANT ALL ON TABLE "public"."depop_sale_entries" TO "service_role";
+GRANT SELECT ON TABLE "public"."depop_sale_entries" TO "authenticated";
+
+
+
 GRANT ALL ON TABLE "public"."device_tokens" TO "anon";
 GRANT ALL ON TABLE "public"."device_tokens" TO "authenticated";
 GRANT ALL ON TABLE "public"."device_tokens" TO "service_role";
@@ -26186,6 +28362,26 @@ GRANT ALL ON TABLE "public"."listing_lot_members" TO "service_role";
 GRANT ALL ON TABLE "public"."listing_lots" TO "anon";
 GRANT ALL ON TABLE "public"."listing_lots" TO "authenticated";
 GRANT ALL ON TABLE "public"."listing_lots" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."listing_never_rules" TO "service_role";
+
+
+
+GRANT ALL ON SEQUENCE "public"."listing_never_rules_id_seq" TO "anon";
+GRANT ALL ON SEQUENCE "public"."listing_never_rules_id_seq" TO "authenticated";
+GRANT ALL ON SEQUENCE "public"."listing_never_rules_id_seq" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."listing_queue" TO "service_role";
+
+
+
+GRANT ALL ON SEQUENCE "public"."listing_queue_id_seq" TO "anon";
+GRANT ALL ON SEQUENCE "public"."listing_queue_id_seq" TO "authenticated";
+GRANT ALL ON SEQUENCE "public"."listing_queue_id_seq" TO "service_role";
 
 
 
@@ -26520,6 +28716,10 @@ GRANT ALL ON TABLE "public"."sale_receipts" TO "service_role";
 
 
 
+GRANT ALL ON TABLE "public"."sale_replacement_baseline" TO "service_role";
+
+
+
 GRANT ALL ON SEQUENCE "public"."sales_id_seq" TO "anon";
 GRANT ALL ON SEQUENCE "public"."sales_id_seq" TO "authenticated";
 GRANT ALL ON SEQUENCE "public"."sales_id_seq" TO "service_role";
@@ -26632,6 +28832,15 @@ GRANT ALL ON TABLE "public"."tiktok_list_items" TO "service_role";
 
 GRANT ALL ON TABLE "public"."unit_channel_categories" TO "service_role";
 GRANT SELECT ON TABLE "public"."unit_channel_categories" TO "authenticated";
+
+
+
+GRANT ALL ON TABLE "public"."unit_channel_selections" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."unit_dispositions" TO "service_role";
+GRANT SELECT ON TABLE "public"."unit_dispositions" TO "authenticated";
 
 
 
