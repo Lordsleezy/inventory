@@ -3,12 +3,12 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { AttentionSection } from '../navigation';
 import { ATTENTION_SECTIONS, NeedsAttentionPanel, useAttentionCounts } from '../NeedsAttentionPanel';
 import { reviewReasonLabel } from '../inventoryReview';
-import { CategoryPanel } from '../CategoryPanel';
 import { shortError } from './shortError';
 import { InventoryTotals } from '../InventoryTotals';
+import { INVENTORY_BUCKET_LABELS, inventoryBucketStatus, type InventoryBucket } from '../totalsMath';
 
 /** Same stock subtabs as desktop Inventory. */
-type Filter = 'in_stock' | 'sold' | 'unfinished' | 'needs_check' | 'defective' | 'dns';
+type Filter = 'in_stock' | 'sold' | 'unfinished' | 'needs_check' | 'defective' | 'dns' | InventoryBucket;
 
 type Row = {
   sku: string;
@@ -42,7 +42,7 @@ type Props = {
   scrollRef?: React.RefObject<HTMLDivElement | null>;
 };
 
-const CACHE_PREFIX = 'floor_inv_cache_v3_';
+const CACHE_PREFIX = 'floor_inv_cache_v4_';
 const URL_CACHE_KEY = 'floor_inv_urls_v2';
 const PAGE = 40;
 /** Signed URLs are minted for 3600s; refresh a bit early. */
@@ -99,7 +99,7 @@ function name(u: Row) {
 
 const MISSING_LABEL: Record<string, string> = {
   photo: 'No photos', price: 'No price', brand: 'No brand', condition: 'No condition', category: 'No category',
-  upc: 'No UPC', spec: 'Needs weight', model: 'No model',
+  upc: 'No UPC', spec: 'Needs weight & dimensions', model: 'No model', specifics: 'Missing item specifics', description: 'No description',
 };
 
 function needs(u: Row): string | null {
@@ -127,9 +127,7 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
   const [urls, setUrls] = useState<Record<string, string>>(() => readUrlCache(cacheScope));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [unfinishedCount, setUnfinishedCount] = useState<number | null>(null);
   const [queue, setQueue] = useState<Exclude<AttentionSection, 'all'> | null>(null);
-  const [categoryOpen, setCategoryOpen] = useState(false);
   const [queueRefresh, setQueueRefresh] = useState(0);
   const counts = useAttentionCounts(client, fullAccess && filter === 'unfinished', queueRefresh);
   const urlsRef = useRef(urls);
@@ -189,7 +187,7 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
       setError('');
       void (async () => {
         try {
-          const status = filter === 'unfinished' ? 'all' : filter;
+          const status = filter === 'unfinished' ? 'all' : filter in INVENTORY_BUCKET_LABELS ? inventoryBucketStatus(filter as InventoryBucket) : filter;
           const unfinished = filter === 'unfinished';
           const { data, error: e } = await client.rpc(staffMode ? 'staff_inventory_list' : 'portal_inventory_list', {
             p_query: query,
@@ -220,39 +218,19 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
     };
   }, [client, filter, query, offset, staffMode, cacheScope]);
 
-  // Unfinished badge once — not after every list refresh.
-  useEffect(() => {
-    let alive = true;
-    void client
-      .rpc(staffMode ? 'staff_inventory_list' : 'portal_inventory_list', {
-        p_query: '',
-        p_status: 'all',
-        p_unfinished: true,
-        p_sort: 'sku',
-        p_offset: 0,
-        p_limit: 1,
-      })
-      .then(({ data }) => {
-        if (alive && data) setUnfinishedCount((data as List).totals?.unit_count ?? 0);
-      });
-    return () => {
-      alive = false;
-    };
-  }, [client, staffMode]);
-
   const total = list?.totals.unit_count ?? 0;
   // Physical pieces (a row of 12 bottles counts 12); falls back to rows until the DB returns piece_count.
   const pieces = list?.totals.piece_count ?? total;
   const rowsNote = pieces !== total ? ` (${total} ${total === 1 ? 'item' : 'items'})` : '';
   const footer = useMemo(() => {
+    if (filter in INVENTORY_BUCKET_LABELS) return `${pieces} units · ${INVENTORY_BUCKET_LABELS[filter as InventoryBucket]}${rowsNote}`;
     if (filter === 'unfinished') return `${pieces} units unfinished${rowsNote}`;
     if (filter === 'needs_check') return `${pieces} units need to be checked${rowsNote}`;
     if (filter === 'sold') return `${pieces} units sold${rowsNote}`;
     if (filter === 'dns') return `${pieces} units DNS / Do not ship${rowsNote}`;
     if (filter === 'defective') return `${pieces} units defective / not for sale${rowsNote}`;
-    const u = unfinishedCount;
-    return u == null ? `${pieces} units in stock${rowsNote}` : `${pieces} units in stock${rowsNote} · ${u} unfinished`;
-  }, [filter, total, pieces, rowsNote, unfinishedCount]);
+    return `${pieces} units in stock${rowsNote}`;
+  }, [filter, total, pieces, rowsNote]);
 
   function setFilterTab(next: Filter) {
     setFilter(next);
@@ -277,10 +255,6 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
     );
   }
 
-  if (categoryOpen) return <div className="app-stack"><div className="app-nav">
-    <button type="button" onClick={() => setCategoryOpen(false)}>‹ Inventory</button>
-    <div className="app-nav-title">Missing Category</div><span />
-  </div><div className="app-embed-soft"><CategoryPanel client={client} storeId={storeId} /></div></div>;
 
   return (
     <div ref={scrollRef as React.RefObject<HTMLDivElement>}>
@@ -298,15 +272,12 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
           }}
         />
       </label>
-      <InventoryTotals client={client} variant="app" />
+      <InventoryTotals client={client} variant="app" selected={filter in INVENTORY_BUCKET_LABELS ? filter as InventoryBucket : undefined} onSelect={bucket => { setQuery(''); setFilterTab(bucket); setList(null); }} />
       <div className="app-segment" role="tablist">
         {([
           ['in_stock', 'In stock'],
           ['sold', 'Sold'],
-          ['unfinished', 'Unfinished'],
           ['needs_check', 'Needs check'],
-          ['defective', 'Defective'],
-          ['dns', 'DNS'],
         ] as const).map(([id, label]) => (
           <button
             key={id}
@@ -320,10 +291,9 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
           </button>
         ))}
       </div>
-      {fullAccess && <div className="app-group"><button type="button" className="app-more-link" onClick={() => setCategoryOpen(true)}>
-        <span className="app-more-left">Missing Category</span><span className="app-chevron">›</span>
-      </button></div>}
 
+
+      {filter in INVENTORY_BUCKET_LABELS && <p className="app-section-label">{INVENTORY_BUCKET_LABELS[filter as InventoryBucket]}</p>}
       {fullAccess && filter === 'unfinished' && (
         <>
           <p className="app-section-label">Fix by field</p>
@@ -349,6 +319,7 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
       <div className="app-group">
         {(list?.items || []).map((u, idx) => {
           const warn = filter === 'dns' ? null : needs(u);
+          const missing = filter === 'not_ready' ? (u.missing || []).map(k => reviewReasonLabel(k) || MISSING_LABEL[k] || k).join(', ') : null;
           const thumbPath = u.photo_path ? thumb(u.photo_path) : '';
           // Prefer small derivative when signed; otherwise the original (always exists when photo_path is set).
           const src = u.photo_path
@@ -387,7 +358,7 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
                 <small>
                   {u.sku} · {u.not_for_sale ? 'Not for sale' : u.condition || 'No grade'}
                   {filter === 'sold' && u.sold_at ? <> · Sold {stamp(u.sold_at)}</> : null}
-                  {warn ? <> · <span className="warn">{warn}</span></> : null}
+                  {missing || warn ? <> · <span className="warn">{missing || warn}</span></> : null}
                 </small>
               </span>
               {filter === 'sold'

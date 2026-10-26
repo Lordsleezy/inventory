@@ -27,7 +27,7 @@ select throws_ok($$select public.portal_set_unit_dns('96001',false)$$,'P0001','D
 select is((public.inventory_totals()->>'dns')::int,4,'DNS counts physical quantity');
 select is((public.inventory_totals()->>'total')::int,8,'total physical inventory retained');
 select is((public.inventory_totals()->>'listed')::int,1,'existing eBay item still counted once');
-select is((public.inventory_totals()->>'not_listed')::int,3,'DNS excluded from sellable not-listed count');
+select is((public.inventory_totals()->>'not_ready')::int,3,'DNS excluded from incomplete shipping stock');
 select is((public.staff_inventory_list('','dns',false,'sku',0,24)->'totals'->>'unit_count')::int,2,'clerk has separate DNS tab');
 select ok(not exists(select 1 from jsonb_array_elements(public.staff_inventory_list('','dns',false,'sku',0,24)->'items') i where i->>'acquisition_cost_cents' is not null or i->>'sold_price_cents' is not null),'DNS clerk view reveals no cost or sold prices');
 select is((select count(*)::int from jsonb_array_elements(public.staff_inventory_list('','in_stock',false,'sku',0,24)->'items') i where i->>'sku' in ('96001','96003')),0,'DNS excluded from clerk sellable stock');

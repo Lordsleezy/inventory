@@ -1602,3 +1602,5 @@ html.app-mode .nr-new-sale {
   font-weight: 700;
 }
 html.app-mode .live { color: #30d158 !important; }
+
+html.app-mode .app-total.inventory-total-button { appearance: none; border: 0; color: #fff; }

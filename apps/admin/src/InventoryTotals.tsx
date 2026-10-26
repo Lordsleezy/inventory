@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { totalsBalance, type InventoryTotalsData } from './totalsMath';
+import { INVENTORY_BUCKET_LABELS, totalsBalance, type InventoryBucket, type InventoryTotalsData } from './totalsMath';
 
 /** Unit counts above the Inventory subtabs. Counts only (no money), so clerks see them too. */
-export function InventoryTotals({ client, variant, refreshKey = 0 }: { client: SupabaseClient; variant: 'desktop' | 'app'; refreshKey?: number }) {
+export function InventoryTotals({ client, variant, refreshKey = 0, selected, onSelect }: { client: SupabaseClient; variant: 'desktop' | 'app'; refreshKey?: number; selected?: InventoryBucket; onSelect: (bucket: InventoryBucket) => void }) {
   const [totals, setTotals] = useState<InventoryTotalsData | null>(null);
   const [failed, setFailed] = useState(false);
   useEffect(() => {
@@ -16,17 +16,18 @@ export function InventoryTotals({ client, variant, refreshKey = 0 }: { client: S
     return () => { alive = false; };
   }, [client, refreshKey]);
   if (failed && !totals) return null;
-  const cells: [string, number | undefined, string][] = [
-    ['Total inventory', totals?.total, 'Every unsold unit, including DNS and Defective'],
-    ['Listed on eBay', totals?.listed, 'Stocked units live on the business eBay account, counted once'],
-    ['Not listed on eBay', totals?.not_listed, 'Sellable stocked units without a live eBay listing'],
-    ['DNS — Do not ship', totals?.dns, 'Store / pickup stock; never on eBay, Amazon, TikTok or Depop'],
-    ['Defective / not sellable', totals?.defective, 'Defective and do-not-list stock outside DNS'],
+  const cells: [InventoryBucket, number | undefined, string][] = [
+    ['total', totals?.total, 'Every unsold unit, including DNS and Defective'],
+    ['listed', totals?.listed, 'Stocked units live on the business eBay account, counted once'],
+    ['not_listed', totals?.not_listed, 'Ready items without a live eBay listing'],
+    ['not_ready', totals?.not_ready, 'Unlisted items missing required listing details'],
+    ['dns', totals?.dns, 'Store / pickup stock; never on eBay, Amazon, TikTok or Depop'],
+    ['defective', totals?.defective, 'Defective and do-not-list stock outside DNS'],
   ];
   const off = totals != null && !totalsBalance(totals);
   return <div className={variant === 'app' ? 'app-totals' : 'inventory-totals'} aria-label="Inventory totals (units)" data-balanced={off ? 'no' : 'yes'}>
-    {cells.map(([label, n, hint]) => <div className={variant === 'app' ? 'app-total' : 'stat'} key={label} title={hint}>
-      <span>{label}</span><strong>{n == null ? '…' : n.toLocaleString('en-US')}</strong>
-    </div>)}
+    {cells.map(([bucket, n, hint]) => <button type="button" className={`${variant === 'app' ? 'app-total' : 'stat'} inventory-total-button`} key={bucket} title={hint} aria-pressed={selected === bucket} onClick={() => onSelect(bucket)}>
+      <span>{INVENTORY_BUCKET_LABELS[bucket]}</span><strong>{n == null ? '…' : n.toLocaleString('en-US')}</strong>
+    </button>)}
   </div>;
 }

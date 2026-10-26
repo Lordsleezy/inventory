@@ -777,7 +777,7 @@ export function App() {
     settings: 'Settings',
   } as const)[page];
   const reportSubs: [typeof nav.reportTab, string][] = [['profit', 'Sales & profits'], ['shipping', 'Shipping & fees'], ['expenses', 'Expenses'], ['payouts', 'Payouts'], ['returns', 'Returns'], ['sales-tax', 'Sales tax']];
-  const inventorySubs: [typeof nav.inventoryTab, string][] = [['in-stock', 'In stock'], ['sold', 'Sold'], ['unfinished', 'Unfinished'], ['needs-check', 'Needs to be checked'], ['defective', 'Defective'], ['left-store', 'Replaced / given away'], ['receive', 'Receive'], ['lookup-test', 'Lookup test'], ['products', 'Products'], ['measure-mat', 'Measure mat']];
+  const inventorySubs: [typeof nav.inventoryTab, string][] = [['in-stock', 'In stock'], ['sold', 'Sold'], ['needs-check', 'Needs to be checked'], ['left-store', 'Replaced / given away'], ['receive', 'Receive'], ['lookup-test', 'Lookup test'], ['products', 'Products'], ['measure-mat', 'Measure mat']];
   const onlineSubs: [typeof nav.onlineTab, string][] = [
     ['listed', 'Listed'],
     ['reports', 'Reports'],

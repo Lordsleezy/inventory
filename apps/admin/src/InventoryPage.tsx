@@ -13,6 +13,7 @@ import { reviewReasonLabel } from './inventoryReview';
 import { DispositionButtons, DispositionsPanel } from './DispositionDialogs';
 import { showDispositionButtons } from './dispositions';
 import { InventoryTotals } from './InventoryTotals';
+import { INVENTORY_BUCKET_LABELS, inventoryBucketStatus, type InventoryBucket } from './totalsMath';
 
 type Row = {
   sku: string; brand: string; model: string; title: string; condition: string | null;
@@ -39,8 +40,9 @@ type Props = {
 };
 
 /** Unit-list subtabs, in this order. Everything after them is an admin tool. */
-const LIST_TABS: [InventoryTab, string][] = [['in-stock', 'In stock'], ['sold', 'Sold'], ['unfinished', 'Unfinished'], ['needs-check', 'Needs to be checked'], ['defective', 'Defective'], ['dns', 'DNS — Do not ship']];
-const TOOL_TABS: [InventoryTab, string][] = [['left-store', 'Replaced / given away'], ['missing-category', 'Missing Category'], ['receive', 'Receive'], ['lookup-test', 'Lookup test'], ['products', 'Products'], ['measure-mat', 'Measure mat']];
+const LIST_TABS: [InventoryTab, string][] = [['in-stock', 'In stock'], ['sold', 'Sold'], ['needs-check', 'Needs to be checked']];
+const CARD_TABS: Partial<Record<InventoryTab, InventoryBucket>> = { total: 'total', listed: 'listed', 'not-listed': 'not_listed', 'not-ready': 'not_ready', dns: 'dns', defective: 'defective' };
+const TOOL_TABS: [InventoryTab, string][] = [['left-store', 'Replaced / given away'], ['receive', 'Receive'], ['lookup-test', 'Lookup test'], ['products', 'Products'], ['measure-mat', 'Measure mat']];
 const MISSING_LABEL: Record<string, string> = { spec: 'weight & box', upc: 'UPC', specifics: 'item specifics' };
 const missingText = (m: string[]) => {
   const fields = m.filter(k => !reviewReasonLabel(k));
@@ -76,11 +78,12 @@ export function InventoryPage({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [detailKey, setDetailKey] = useState(0);
-  const listTab = LIST_TABS.some(([id]) => id === tab) ? tab : associateBrowseOnly ? 'in-stock' : null;
+  const listTab = LIST_TABS.some(([id]) => id === tab) || CARD_TABS[tab] || tab === 'unfinished' ? tab : associateBrowseOnly ? 'in-stock' : null;
   const queue = listTab === 'unfinished' && !associateBrowseOnly && attentionSection !== 'all' ? attentionSection : null;
   const counts = useAttentionCounts(client, listTab === 'unfinished' && !associateBrowseOnly, refresh);
   // Status only narrows In stock; the other subtabs have a fixed status.
-  const pStatus = listTab === 'sold' ? 'sold' : listTab === 'defective' ? 'defective' : listTab === 'dns' ? 'dns' : listTab === 'unfinished' ? 'all' : listTab === 'needs-check' ? 'needs_check' : status;
+  const cardBucket = listTab ? CARD_TABS[listTab] : undefined;
+  const pStatus = cardBucket ? inventoryBucketStatus(cardBucket) : listTab === 'sold' ? 'sold' : listTab === 'defective' ? 'defective' : listTab === 'dns' ? 'dns' : listTab === 'unfinished' ? 'all' : listTab === 'needs-check' ? 'needs_check' : status;
   const pUnfinished = listTab === 'unfinished';
   const hideMoney = associateBrowseOnly && listTab === 'sold';
 
@@ -144,7 +147,10 @@ export function InventoryPage({
   const total = list?.totals.unit_count || 0;
   return <>
     <header><div><div className="eyebrow">FLOOR INVENTORY</div><h1>Inventory</h1><p>{listTab === 'in-stock' ? 'For-sale units on hand. Click a unit to edit details, price, cost, package size, and photos.' : listTab === 'dns' ? 'Store / website pickup only. Never listed on eBay, Amazon, TikTok Shop or Depop.' : listTab === 'sold' ? (associateBrowseOnly ? 'Sold units by SKU.' : 'Sold units and what they sold for.') : listTab === 'defective' ? 'Not-for-sale units and anything graded Defective. These only need a brand.' : listTab === 'needs-check' ? 'Complete units with no channel checked yet. Open one and tick eBay, Amazon or TikTok Shop.' : listTab === 'unfinished' ? 'For-sale units missing a photo, price, or other required info.' : tab === 'left-store' ? 'Units that left the store without a sale: replacements sent to customers and items given away. Their cost counts against profit and expenses.' : tab === 'receive' ? 'Scan a UPC to look up product data, then receive with a real photo.' : tab === 'lookup-test' ? 'Read-only UPC accuracy test — Amazon vs UPCitemdb. Does not create inventory.' : tab === 'products' ? 'Shared UPC product database — edits stick for future scans. Price/condition stay on each unit.' : tab === 'measure-mat' ? 'Printable 50 mm scale mat for Receive photo measuring.' : ''}</p></div></header>
-    <InventoryTotals client={client} variant="desktop" refreshKey={refresh} />
+    <InventoryTotals client={client} variant="desktop" refreshKey={refresh} selected={cardBucket} onSelect={bucket => {
+      setQuery(''); setLocation('all');
+      pickTab(bucket === 'not_listed' ? 'not-listed' : bucket === 'not_ready' ? 'not-ready' : bucket);
+    }} />
     <div className="inventory-tabs">
       {[...LIST_TABS, ...(associateBrowseOnly ? [] : TOOL_TABS)].map(([id, text]) => <button type="button" key={id} className={(listTab ?? tab) === id ? 'active' : ''} onClick={() => pickTab(id)}>{text}</button>)}
     </div>
@@ -155,10 +161,11 @@ export function InventoryPage({
       </div>
     )}
     {!listTab && tab === 'left-store' ? <DispositionsPanel client={client} money={money} stamp={stamp} kind={null} title="Replaced and given away" hint="Undo puts a unit back in stock and reverses its cost and commission effects." refreshKey={refresh} onChanged={() => { setRefresh(n => n + 1); onCostChanged(); }} /> : !listTab && tab === 'missing-category' ? <CategoryPanel client={client} storeId={storeId} /> : !listTab && tab === 'lookup-test' ? <LookupTestPage accessToken={accessToken} /> : !listTab && tab === 'products' ? <FloorProductsPage client={client} /> : !listTab && tab === 'measure-mat' ? <MarkerMatPage /> : !listTab && tab === 'receive' ? <ReceivePanel client={client} storeId={storeId} accessToken={accessToken} onSaved={() => setRefresh(n => n + 1)} /> : queue ? <NeedsAttentionPanel client={client} storeId={storeId} money={money} stamp={stamp} section={queue} onCostChanged={() => { setRefresh(n => n + 1); onCostChanged(); }} /> : <>
+    {cardBucket && <h2>{INVENTORY_BUCKET_LABELS[cardBucket]}</h2>}
     <div className="inventory-controls">
       <label>Search<input type="search" placeholder="SKU, brand, model or title" value={query} onChange={e => change(() => setQuery(e.target.value))} /></label>
       {listTab === 'in-stock' && <label>Status<select value={status} onChange={e => change(() => setStatus(e.target.value))}>
-        <option value="in_stock">In stock</option><option value="listed">Listed online</option>
+        <option value="in_stock">In stock</option><option value="inventory_listed">Listed</option>
         <option value="reserved">Reserved</option><option value="repair">Repair</option>
         <option value="delisted">Delisted listing</option><option value="all">All statuses</option><option value="voided">Voided</option>
         <option value="scrapped">Scrapped</option><option value="lost">Lost</option>
@@ -184,7 +191,7 @@ export function InventoryPage({
       const rowButton = <button type="button" className="inventory-row" key={u.sku} disabled={hideMoney} onClick={() => { if (!hideMoney) setSelected(u.sku); }}>
         <span className="inventory-photo">{u.photo_path && urls[u.photo_path] ? <img loading="lazy" src={urls[thumb(u.photo_path)] || urls[u.photo_path]} onError={e => { const fallback = urls[u.photo_path!]; if (e.currentTarget.src !== fallback) e.currentTarget.src = fallback; }} alt="" /> : 'No photo'}</span>
         <span className="inventory-identity"><strong>{name(u)}</strong><small>SKU {u.sku}{u.title && u.title !== name(u) ? ` · ${u.title}` : ''}</small></span>
-        <span className="inventory-meta">{u.condition || 'No grade'}<small>{u.not_for_sale ? 'Not for sale' : listTab === 'sold' && u.sold_at ? `Sold ${stamp(u.sold_at)}` : label(u.state)}</small>{listTab === 'unfinished' && !!u.missing?.length && <small className="inventory-missing">{missingText(u.missing)}</small>}</span>
+        <span className="inventory-meta">{u.condition || 'No grade'}<small>{u.not_for_sale ? 'Not for sale' : listTab === 'sold' && u.sold_at ? `Sold ${stamp(u.sold_at)}` : label(u.state)}</small>{(listTab === 'unfinished' || listTab === 'not-ready') && !!u.missing?.length && <small className="inventory-missing">{missingText(u.missing)}</small>}</span>
         <span className="inventory-location">{u.locations || 'Unassigned'}</span>
         {hideMoney ? <span className="inventory-money" /> : listTab === 'sold'
           ? <span className="inventory-money"><strong>{u.sold_price_cents == null ? '—' : money(u.sold_price_cents)}</strong><small>{u.acquisition_cost_cents == null ? 'Cost missing' : `Cost ${money(u.acquisition_cost_cents)}`}</small></span>
