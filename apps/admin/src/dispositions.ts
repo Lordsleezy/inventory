@@ -58,6 +58,7 @@ export function replacementsBySale(rows: Disposition[]): Map<number, Disposition
  * Payouts screen: a replacement adjustment on a paid-out sale is a visible ledger line only. The commission already
  * dropped with the sale, so the line is paired with an add-back of the opposite sign (same trick as return clawbacks).
  */
-export function replacementAddback(adj: { amount_cents: number; replacement_id?: string | null }): number {
-  return adj.replacement_id ? -adj.amount_cents : 0;
+export function replacementAddback(adj: { amount_cents: number; replacement_id?: string | null; fee_rule_change?: boolean | null }): number {
+  // Fee-rule changes are paired the same way: the commission total already moved, the row is the visible record.
+  return adj.replacement_id || adj.fee_rule_change ? -adj.amount_cents : 0;
 }

@@ -65,7 +65,7 @@ export function CommissionOverrideControls({
   const ticketWithOv = { ...ticket, commissionOverride: override };
   const def = defaultCommissionSplit(ticket, rules, cfg);
   const current = effectiveCommissionSplit(ticketWithOv, rules, cfg);
-  const base = commissionProfit(ticketWithOv);
+  const base = commissionProfit(ticketWithOv, !!cfg.absorbFees);
   const paulRule = rules.find(r => r.employee_id === cfg.slots?.paul) || { employee_id: cfg.slots?.paul || '', method: 'percent_profit' as const, rate: current.paulPct };
   const jacobRule = rules.find(r => r.employee_id === cfg.slots?.jacob) || { employee_id: cfg.slots?.jacob || '', method: 'percent_profit' as const, rate: current.jacobPct };
   const paulCents = payout(ticketWithOv, paulRule, cfg);
@@ -141,7 +141,7 @@ export function CommissionOverrideControls({
           <strong>{jacobCents == null ? 'Needs cost' : money(jacobCents)} <small>({current.jacobPct}%)</small></strong>
         </div>
         <div>
-          <span>Sale − cost</span>
+          <span>Commission profit</span>
           <strong>{base == null ? 'Needs cost' : money(base)}</strong>
         </div>
       </div>
@@ -161,7 +161,7 @@ export function CommissionOverrideControls({
       {editing && (
         <div className="commission-override-panel">
           <p className="hint" style={{ marginTop: 0 }}>
-            Split is a percent of sale − cost (merchandise + buyer shipping). Tax and fees stay out.
+            Split is a percent of commission profit: item + buyer shipping − shipping label − item cost{cfg.absorbFees ? '. The store absorbs channel and card fees.' : ' − channel fee − card fee.'} Tax stays out.
             Defaults for this sale: {pctLabel(def.paulPct, def.jacobPct)}.
             Changing a sale that was already paid just moves the running balance — past payments stay as recorded.
           </p>

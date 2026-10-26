@@ -43,3 +43,9 @@ test('payout adjustment add-back nets a replacement line to zero in both directi
   assert.equal(replacementAddback({ amount_cents: 200, replacement_id: 'x' }), -200);
   assert.equal(replacementAddback({ amount_cents: -200, replacement_id: null }), 0, 'return adjustments keep their own add-back rule');
 });
+
+test('fee-rule adjustments are paired with an add-back so the balance only moves once', () => {
+  assert.equal(replacementAddback({ amount_cents: 700, fee_rule_change: true }), -700);
+  assert.equal(replacementAddback({ amount_cents: -700, fee_rule_change: true }), 700);
+  assert.equal(replacementAddback({ amount_cents: -700, fee_rule_change: false }), 0);
+});

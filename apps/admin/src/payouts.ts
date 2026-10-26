@@ -48,6 +48,8 @@ export type OnlineCfg = {
   channels: string[]; pct: number; employeeId: string | null;
   /** Who fills the Paul / Jacob per-sale override columns (store_payout_people). */
   slots?: { paul?: string | null; jacob?: string | null };
+  /** Store absorbs channel + card fees: they are not subtracted from the profit commissions are paid on. Labels still are. */
+  absorbFees?: boolean;
   /** sku → employee_id → in-store percent-of-profit rate (store_payout_sku_rates). */
   skuRates?: Record<string, Record<string, number>>;
 };
@@ -81,18 +83,38 @@ export function reportProfitCents(saleProfitCents: number | null, ebayOverheadCe
   return saleProfitCents - overhead;
 }
 
-/** Commission base: item price + buyer shipping − fees, label, processing, and cost. */
-export function commissionProfit(t: TicketLike): number | null {
+/**
+ * Commission base: item price + buyer shipping − label − cost, and (unless the store absorbs fees)
+ * − channel fees − card processing.
+ */
+export function commissionProfit(t: TicketLike, absorbFees = false): number | null {
   if (t.cost === null) return null;
-  return t.subtotal + buyerShipping(t) - channelFees(t) - shipCosts(t) - processing(t) - t.cost;
+  const fees = absorbFees ? 0 : channelFees(t) + processing(t);
+  return t.subtotal + buyerShipping(t) - fees - shipCosts(t) - t.cost;
+}
+
+export type CommissionMathRow = { label: string; cents: number; note?: string };
+/** Line-by-line commission profit for display: every fee is listed; absorbed fees are marked and add nothing. */
+export function commissionBreakdown(t: TicketLike, absorbFees: boolean): { rows: CommissionMathRow[]; base: number | null; absorbedCents: number } {
+  const channel = channelFees(t), card = processing(t);
+  const rows: CommissionMathRow[] = [
+    { label: 'Item', cents: t.subtotal },
+    { label: '+ Buyer-paid shipping', cents: buyerShipping(t) },
+    { label: '− Channel / marketplace fee', cents: -channel, note: absorbFees && channel ? 'absorbed by the store' : undefined },
+    { label: '− Card fee (after surcharge)', cents: -card, note: absorbFees && card ? 'absorbed by the store' : undefined },
+    { label: '− Shipping label', cents: -shipCosts(t) },
+    { label: '− Item cost', cents: t.cost === null ? 0 : -t.cost, note: t.cost === null ? 'missing — no payout yet' : undefined },
+  ];
+  return { rows, base: commissionProfit(t, absorbFees), absorbedCents: absorbFees ? channel + card : 0 };
 }
 
 /** Per-line commission base when price + cost are present. */
-export function lineCommissionProfit(l: TicketLineLike): number | null {
+export function lineCommissionProfit(l: TicketLineLike, absorbFees = false): number | null {
   if (l.price_cents == null || !Number.isFinite(l.price_cents)) return null;
   if (l.cost_cents == null || !Number.isFinite(l.cost_cents)) return null;
-  return l.price_cents + Math.max(0, l.shipping_cents ?? 0) - Math.max(0, l.channel_fee_cents ?? 0)
-    - Math.max(0, l.ship_cost_cents ?? 0) - Math.max(0, l.processing_fee_cents ?? 0)
+  const fees = absorbFees ? 0 : Math.max(0, l.channel_fee_cents ?? 0) + Math.max(0, l.processing_fee_cents ?? 0);
+  return l.price_cents + Math.max(0, l.shipping_cents ?? 0) - fees
+    - Math.max(0, l.ship_cost_cents ?? 0)
     - l.cost_cents;
 }
 
@@ -123,7 +145,7 @@ export function effectiveCommissionSplit(
 }
 
 function overridePayout(t: TicketLike, employeeId: string, ov: CommissionOverride, cfg: OnlineCfg): number | null {
-  const p = commissionProfit(t);
+  const p = commissionProfit(t, !!cfg.absorbFees);
   if (p === null) return null;
   const rate = cfg.slots?.paul && employeeId === cfg.slots.paul ? ov.paulPct
     : cfg.slots?.jacob && employeeId === cfg.slots.jacob ? ov.jacobPct
@@ -140,7 +162,7 @@ export function payout(t: TicketLike, rule: Rule | undefined, cfg: OnlineCfg): n
   }
   if (isOnline(t, cfg)) {
     if (rule.employee_id !== cfg.employeeId) return 0;
-    const p = commissionProfit(t);
+    const p = commissionProfit(t, !!cfg.absorbFees);
     return p === null ? null : Math.round(Math.max(0, p) * cfg.pct / 100);
   }
   if (rule.method === 'flat_ticket') return Math.round(Number(rule.rate) * 100);
@@ -149,10 +171,10 @@ export function payout(t: TicketLike, rule: Rule | undefined, cfg: OnlineCfg): n
     const touched = lines.some(l => inStoreOverrideRate(l.sku, rule.employee_id, cfg) != null);
     if (touched) {
       // Per-line rates so override SKUs can sit on a mixed ticket without changing other lines.
-      const lineBases = lines.map(l => lineCommissionProfit(l));
+      const lineBases = lines.map(l => lineCommissionProfit(l, !!cfg.absorbFees));
       if (lineBases.some(b => b === null)) {
         const rates = lines.map(l => inStoreOverrideRate(l.sku, rule.employee_id, cfg) ?? Number(rule.rate));
-        const p = commissionProfit(t);
+        const p = commissionProfit(t, !!cfg.absorbFees);
         if (p === null) return null;
         if (rates.every(r => r === rates[0])) return Math.round(Math.max(0, p) * rates[0] / 100);
         return null;
@@ -162,7 +184,7 @@ export function payout(t: TicketLike, rule: Rule | undefined, cfg: OnlineCfg): n
         return n + Math.round(Math.max(0, lineBases[i] || 0) * rate / 100);
       }, 0);
     }
-    const p = commissionProfit(t);
+    const p = commissionProfit(t, !!cfg.absorbFees);
     return p === null ? null : Math.round(Math.max(0, p) * Number(rule.rate) / 100);
   }
   return Math.round(t.subtotal * Number(rule.rate) / 100);

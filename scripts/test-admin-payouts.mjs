@@ -1,7 +1,7 @@
 // node --experimental-strip-types --test scripts/test-admin-payouts.mjs
 import test from "node:test";
 import assert from "node:assert/strict";
-import { payout, remainingProfit, isOnline, profit, commissionProfit, reportProfitCents } from "../apps/admin/src/payouts.ts";
+import { payout, remainingProfit, isOnline, profit, commissionProfit, commissionBreakdown, reportProfitCents } from "../apps/admin/src/payouts.ts";
 
 // Per-store payout people and SKU rates now come from store_payout_people / store_payout_sku_rates.
 const PAYOUT_PAUL_ID = "f17e6163-b10a-4fe1-a373-75c0094e5363";
@@ -225,4 +225,39 @@ test("sum over 100% is allowed in math (UI warns)", () => {
   assert.equal(payout(t, rPaul, cfg), 3600);
   assert.equal(payout(t, rJacob, cfg), 3000);
   assert.equal(remainingProfit(t, [rPaul, rJacob], cfg), 6000 - 3600 - 3000);
+});
+
+// ---- Store absorbs fees ----
+const ebay = { subtotal: 10000, cost: 4000, channel: "ebay", shippingCents: 1000, feeCents: 1500, shipCostCents: 800, processingFeeCents: 0 };
+const cfgEbay = { ...cfg, channels: ["ebay"] };
+test("fees ON: channel and card fees are not subtracted; label subtracts and buyer shipping adds", () => {
+  // 100.00 + 10.00 ship - 8.00 label - 40.00 cost = 62.00 (the 15.00 channel fee is eaten by the store)
+  assert.equal(commissionProfit(ebay, true), 6200);
+  assert.equal(payout(ebay, rules[0], { ...cfgEbay, absorbFees: true }), 1860);
+});
+test("fees OFF keeps the current rule exactly", () => {
+  assert.equal(commissionProfit(ebay), 4700);
+  assert.equal(commissionProfit(ebay, false), 4700);
+  assert.equal(payout(ebay, rules[0], cfgEbay), 1410);
+  assert.equal(payout(ebay, rules[0], { ...cfgEbay, absorbFees: false }), 1410);
+});
+test("store profit still shows every fee when commissions ignore them", () => {
+  assert.equal(profit(ebay), 4700);
+});
+test("card fee leftover only: in-store card sale with a net card fee", () => {
+  const card = { subtotal: 20000, cost: 5000, channel: "floor", processingFeeCents: 168 }; // 1.68 left after the surcharge
+  assert.equal(commissionProfit(card), 14832);
+  assert.equal(commissionProfit(card, true), 15000);
+});
+test("breakdown lists every fee, marks absorbed ones, and adds up to the commission profit", () => {
+  const on = commissionBreakdown(ebay, true);
+  assert.equal(on.base, 6200);
+  assert.equal(on.absorbedCents, 1500);
+  assert.equal(on.rows.find(r => r.label.includes("Channel")).note, "absorbed by the store");
+  const sumOn = on.rows.reduce((n, r) => n + (r.note?.startsWith("absorbed") ? 0 : r.cents), 0);
+  assert.equal(sumOn, on.base);
+  const off = commissionBreakdown(ebay, false);
+  assert.equal(off.base, 4700);
+  assert.equal(off.rows.reduce((n, r) => n + r.cents, 0), off.base);
+  assert.equal(commissionBreakdown({ ...ebay, cost: null }, true).base, null);
 });
