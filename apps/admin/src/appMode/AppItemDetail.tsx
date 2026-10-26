@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { UnitEditDrawer } from '../UnitEditDrawer';
+import { RestoreInventoryButton } from '../RestoreInventoryButton';
 import { shortError } from './shortError';
 import { DispositionButtons } from '../DispositionDialogs';
 import { showDispositionButtons } from '../dispositions';
@@ -201,6 +202,7 @@ export function AppItemDetail({
             </div>
           </div>
 
+          {canDelete && !staffMode && unit.state === 'sold' && <div className="app-actions"><RestoreInventoryButton client={client} sku={sku} onDone={() => { onChanged(); onBack(); }} /></div>}
           {inStock && <div className="app-actions">
             <button type="button" onClick={onSellInStore}>Sell in store</button>
             <button

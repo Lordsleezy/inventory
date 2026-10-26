@@ -1,5 +1,6 @@
 ﻿import { useEffect, useRef, useState } from 'react';
 import { ChannelCheckboxes } from './ChannelCheckboxes';
+import { RestoreInventoryButton } from './RestoreInventoryButton';
 import { UnitDispositionHistory } from './DispositionDialogs';
 import { EbaySpecificsPanel } from './EbaySpecificsPanel';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -382,6 +383,7 @@ export function UnitEditDrawer({
         )}
         {error && <div className="alert" role="alert">{error}</div>}
         {msg && <p className="hint">{msg}</p>}
+        {canDelete && unit.state === 'sold' && <RestoreInventoryButton client={client} sku={sku} onDone={() => { onSaved({ ...unit, state: 'available' }); onClose(); }} />}
         <p className="hint">{reviewReason ? `eBay listing needs review: ${reviewReason}.` : missing.length === 0 ? 'Looks complete for listing.' : `Still missing: ${missing.join(', ')}. Scan a UPC to fill blanks.`}</p>
         {reviewReason && canDelete ? <button type="button" className="secondary" disabled={busy} onClick={() => void clearEbayReview()}>I verified this issue · Clear eBay review</button> : null}
 

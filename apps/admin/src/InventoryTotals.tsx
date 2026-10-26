@@ -18,8 +18,8 @@ export function InventoryTotals({ client, variant, refreshKey = 0 }: { client: S
   if (failed && !totals) return null;
   const cells: [string, number | undefined, string][] = [
     ['Total inventory', totals?.total, 'Every unsold unit, including Defective'],
-    ['Listed', totals?.listed, 'Live on the website, eBay, Amazon, TikTok Shop or Depop'],
-    ['Not listed', totals?.not_listed, 'Sellable, but not live anywhere'],
+    ['Listed on eBay', totals?.listed, 'Stocked units live on the business eBay account, counted once'],
+    ['Not listed on eBay', totals?.not_listed, 'Sellable stocked units without a live eBay listing'],
     ['Defective / not sellable', totals?.defective, 'Everything in Defective, including do-not-list'],
   ];
   const off = totals != null && !totalsBalance(totals);

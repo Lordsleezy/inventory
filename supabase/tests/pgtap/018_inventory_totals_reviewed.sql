@@ -27,6 +27,7 @@ begin
   insert into public.photos (store_id, sku, path) select v_store, s, 'p/' || s || '.jpg' from unnest(array['98001','98002','98003','98004','98005','98006','98007','98008']) s;
   insert into public.listings (store_id, sku, channel, status) values
     (v_store, '98001', 'ebay', 'listed'), (v_store, '98004', 'depop', 'listed'), (v_store, '98007', 'whatnot', 'listed'), (v_store, '98002', 'ebay', 'delisted');
+  update public.listings set listing_id='verified-ebay-item' where store_id=v_store and sku='98001' and channel='ebay';
   insert into public.channel_taxonomy (channel, category_id, parent_id, path, leaf, active, version, fingerprint, fetched_at, fields_fetched_at, fields_version, required_fields)
   values ('ebay', '99001', null, 'Test > Leaf', true, true, 'v1', 'fp', now(), now(), 'fv', '[]') on conflict (channel, category_id) do nothing;
   insert into public.unit_channel_categories (store_id, sku, channel, category_id, enabled, source, validated_version)
@@ -42,8 +43,8 @@ end $$;
 -- Totals are in units (a row of 12 counts 12), and clerks can read the counts.
 select set_config('request.jwt.claim.sub', current_setting('test.clerk_id'), true);
 select set_config('request.jwt.claim.role', 'authenticated', true);
-select is(public.inventory_totals(), '{"total": 18, "listed": 14, "not_listed": 2, "defective": 2}'::jsonb,
-  'totals in units: eBay x12 + website + Depop listed; delisted and Whatnot-only are not listed; defective and do-not-list are defective');
+select is(public.inventory_totals(), '{"total": 18, "listed": 12, "not_listed": 4, "defective": 2}'::jsonb,
+  'totals in units: eBay x12 only; website, Depop, delisted and Whatnot do not count as eBay listed');
 select is((public.inventory_totals() ->> 'listed')::int + (public.inventory_totals() ->> 'not_listed')::int + (public.inventory_totals() ->> 'defective')::int,
   (public.inventory_totals() ->> 'total')::int, 'listed + not listed + defective = total');
 select set_config('request.jwt.claim.sub', current_setting('test.owner_id'), true);
