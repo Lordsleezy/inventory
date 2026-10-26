@@ -1,3 +1,4 @@
+import { DnsCheckbox } from '../DnsCheckbox';
 import { useEffect, useMemo, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { UnitEditDrawer } from '../UnitEditDrawer';
@@ -202,6 +203,7 @@ export function AppItemDetail({
             </div>
           </div>
 
+          {canDelete && !staffMode && <DnsCheckbox client={client} sku={sku} onChanged={() => { setReload(n => n + 1); onChanged(); }} />}
           {canDelete && !staffMode && unit.state === 'sold' && <div className="app-actions"><RestoreInventoryButton client={client} sku={sku} onDone={() => { onChanged(); onBack(); }} /></div>}
           {inStock && <div className="app-actions">
             <button type="button" onClick={onSellInStore}>Sell in store</button>

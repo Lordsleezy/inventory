@@ -1,3 +1,4 @@
+import { isDnsType } from './dns';
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { ChannelPicker, applyChannelSelections, type ChannelId } from './ChannelCheckboxes';
 import { createPortal } from 'react-dom';
@@ -576,6 +577,9 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   const [channels, setChannels] = useState<ChannelId[]>([]);
   /** Store-only / not selling online — photo not required to receive. */
   const [doNotList, setDoNotList] = useState(false);
+  const [dns, setDns] = useState(false);
+  const dnsRequired = isDnsType(form);
+  const doNotShip = dns || dnsRequired;
   const [photoIdBusy, setPhotoIdBusy] = useState(false);
   const [photoIdStatus, setPhotoIdStatus] = useState('');
   const [photoIdError, setPhotoIdError] = useState('');
@@ -759,7 +763,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     setReason('damaged');
     setReasonNote('');
     setChannels([]);
-    setDoNotList(false);
+    setDoNotList(false); setDns(false);
     setPhotoFill(null);
     setPhotoIdentity(null);
     priceRequest.current++;
@@ -870,7 +874,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       setFiles(restored);
     });
     setChannels([]);
-    setDoNotList(false);
+    setDoNotList(false); setDns(false);
     upcInput.current?.blur();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current?.id, current?.status, manual, loadedId]);
@@ -930,6 +934,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     return out;
   }
   const liveMissing = (() => {
+    if (doNotShip) return [];
     const a = cents(form.ask);
     const dims = [form.length, form.width, form.height, form.weight].map(v => Number(v.trim()));
     const out: string[] = [];
@@ -1058,9 +1063,13 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
 
       // Merge lookup data (and any hold) into the new unit(s).
       const blocked = skus.includes(NEVER_LIST_SKU);
+      if (doNotShip) for (const sku of skus) {
+        const { error: dnsError } = await client.rpc('portal_set_unit_dns', { p_sku: sku, p_dns: true });
+        if (dnsError) throw new Error(`Could not save DNS for SKU ${sku}: ${dnsError.message}`);
+      }
       const enrichFailed = await enrichUnits(skus, parsed, hold, blocked || doNotList);
       if (enrichFailed) warnings.push(`Could not save lookup details on ${enrichFailed} unit(s).${hold ? ' They have no price, so they will not list.' : ''}`);
-      if (!staffMode && !blocked && !doNotList && !hold) {
+      if (!staffMode && !blocked && !doNotList && !doNotShip && !hold) {
         for (const [index, sku] of skus.entries()) {
           try {
             const categoryResponse = await fetch(floorFunctionUrl('category-resolve'), { method: 'POST',
@@ -1094,6 +1103,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       }
       if (blocked) warnings.push(`SKU ${NEVER_LIST_SKU} is a permanent do-not-list item; it was hidden from the website.`);
       else if (doNotList) warnings.push('Marked Do not list for sale — hidden from the website and marketplaces.');
+      else if (doNotShip) warnings.push('Saved under DNS — Do not ship. Store / website pickup only; never listed on eBay, Amazon, TikTok Shop or Depop.');
       if (warnings.length) setWarning(warnings.join(' '));
 
       // Remember product data for "Add another unit".
@@ -1128,7 +1138,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         });
         setFiles([]); setDups(null); setDupAck(false);
         setChannels([]);
-        setDoNotList(false);
+        setDoNotList(false); setDns(false);
       } else {
         const doneId = current?.id;
         setQueue(q => q.filter(s => s.id !== doneId));
@@ -1200,6 +1210,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       put('upc', UPC_NOT_APPLICABLE);
     }
     if (doNotList) put('do_not_list', true);
+    if (doNotShip) put('do_not_ship', true);
     if (hold) { put('hold_reason', hold.reason); put('hold_note', hold.note.trim()); }
     const hide = Boolean(hold) || forceHide || doNotList;
     if (!Object.keys(specs).length && !hide) return 0;
@@ -1607,6 +1618,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
 
       {!manual && merged?.never_list_reason && <p className="hint">Amazon will not list this: {merged.never_list_reason}</p>}
 
+      <label className="mboard-inline"><input type="checkbox" checked={doNotShip} disabled={dnsRequired} onChange={e => { setDns(e.target.checked); if (e.target.checked) setChannels([]); }} /> DNS — Do not ship</label>
+      {doNotShip && <p className="hint">Store / website pickup only. Never listed on eBay, Amazon, TikTok Shop or Depop.</p>}
       {!manual && <div className="receive-confirm">
         <div className="receive-confirm-head">
           {previews[0] ? <img src={previews[0]} alt="Item being received" /> : <div className="receive-confirm-placeholder">No photo</div>}
@@ -1670,7 +1683,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           {photoPrice?.listings?.[0] && <a className="receive-confirm-source" href={photoPrice.listings[0].url} target="_blank" rel="noreferrer">
             {photoPrice.listings[0].store} · {money(photoPrice.listings[0].price_cents)} · source ↗</a>}
           <div className="receive-confirm-bottom-row"><label>Your price<input inputMode="decimal" placeholder="0.00" value={form.ask} onChange={e => update('ask',e.target.value)} /></label>
-            {!staffMode && <ChannelPicker compact value={channels} onChange={setChannels} upc={form.noUpc ? '' : (form.upc || current?.upc || '')} />}</div>
+            {!staffMode && <ChannelPicker compact disabled={doNotShip} value={channels} onChange={setChannels} upc={form.noUpc ? '' : (form.upc || current?.upc || '')} />}</div>
           {liveMissing.length > 0 && <small>Missing: {liveMissing.join(', ')} · saves to Unfinished</small>}
           <button type="submit" disabled={busy || !options?.next_sku || (dups !== null && dups.count > 0 && !dupAck)}>{busy ? 'Saving…' : 'Save & next'}</button>
         </div>
@@ -1857,7 +1870,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           />
           Do not list for sale
         </label>
-        {!staffMode && <ChannelPicker value={channels} onChange={setChannels} disabled={doNotList} upc={form.noUpc ? '' : (form.upc || current?.upc || '')} />}
+        {!staffMode && <ChannelPicker value={channels} onChange={setChannels} disabled={doNotList || doNotShip} upc={form.noUpc ? '' : (form.upc || current?.upc || '')} />}
       </div>
 
       <p className="hint receive-check">
@@ -1865,6 +1878,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           ? (files.length
             ? 'Store-only — will receive without listing. Photo is optional.'
             : 'Store-only — photo not required. Unit stays off the website and marketplaces.')
+          : doNotShip ? 'DNS — store / website pickup only. No marketplace listing will be queued.'
           : liveMissing.length === 0
             ? (channels.length ? 'Complete — the checked channels are queued after receiving.' : 'Complete — check the channels to list on, or Finish to land in Needs to be checked.')
             : channels.length

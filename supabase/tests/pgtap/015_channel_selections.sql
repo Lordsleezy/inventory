@@ -60,7 +60,7 @@ reset role;
 
 -- Owner
 select set_config('request.jwt.claim.sub', current_setting('test.owner_id'), true);
-select throws_ok($$select public.portal_set_unit_channel_selection('97002', 'amazon', true)$$, '22023', 'channel_never_list: Refrigerators', 'refrigerator cannot be checked');
+select throws_ok($$select public.portal_set_unit_channel_selection('97002', 'amazon', true)$$, '22023', 'channel_never_list: DNS - Do not ship', 'refrigerator cannot be checked');
 select throws_ok($$select public.portal_set_unit_channel_selection('97003', 'tiktok', true)$$, '22023', 'channel_never_list: Everything in Defective', 'defective cannot be checked');
 select throws_ok($$select public.portal_set_unit_channel_selection('97004', 'ebay', true)$$, '22023', 'channel_never_list: Holiday Living lights', 'Holiday Living lights never on eBay');
 select is(public.portal_set_unit_channel_selection('97004', 'amazon', true) ->> 'queued', 'list', 'Holiday Living lights allowed on Amazon');

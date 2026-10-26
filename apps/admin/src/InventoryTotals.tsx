@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { totalsBalance, type InventoryTotalsData } from './totalsMath';
 
-/** Four unit counts above the Inventory subtabs. Counts only (no money), so clerks see them too. */
+/** Unit counts above the Inventory subtabs. Counts only (no money), so clerks see them too. */
 export function InventoryTotals({ client, variant, refreshKey = 0 }: { client: SupabaseClient; variant: 'desktop' | 'app'; refreshKey?: number }) {
   const [totals, setTotals] = useState<InventoryTotalsData | null>(null);
   const [failed, setFailed] = useState(false);
@@ -17,10 +17,11 @@ export function InventoryTotals({ client, variant, refreshKey = 0 }: { client: S
   }, [client, refreshKey]);
   if (failed && !totals) return null;
   const cells: [string, number | undefined, string][] = [
-    ['Total inventory', totals?.total, 'Every unsold unit, including Defective'],
+    ['Total inventory', totals?.total, 'Every unsold unit, including DNS and Defective'],
     ['Listed on eBay', totals?.listed, 'Stocked units live on the business eBay account, counted once'],
     ['Not listed on eBay', totals?.not_listed, 'Sellable stocked units without a live eBay listing'],
-    ['Defective / not sellable', totals?.defective, 'Everything in Defective, including do-not-list'],
+    ['DNS — Do not ship', totals?.dns, 'Store / pickup stock; never on eBay, Amazon, TikTok or Depop'],
+    ['Defective / not sellable', totals?.defective, 'Defective and do-not-list stock outside DNS'],
   ];
   const off = totals != null && !totalsBalance(totals);
   return <div className={variant === 'app' ? 'app-totals' : 'inventory-totals'} aria-label="Inventory totals (units)" data-balanced={off ? 'no' : 'yes'}>

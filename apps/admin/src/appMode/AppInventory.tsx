@@ -7,8 +7,8 @@ import { CategoryPanel } from '../CategoryPanel';
 import { shortError } from './shortError';
 import { InventoryTotals } from '../InventoryTotals';
 
-/** Same five subtabs as desktop Inventory. Unfinished replaces the old More → Needs attention. */
-type Filter = 'in_stock' | 'sold' | 'unfinished' | 'needs_check' | 'defective';
+/** Same stock subtabs as desktop Inventory. */
+type Filter = 'in_stock' | 'sold' | 'unfinished' | 'needs_check' | 'defective' | 'dns';
 
 type Row = {
   sku: string;
@@ -248,6 +248,7 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
     if (filter === 'unfinished') return `${pieces} units unfinished${rowsNote}`;
     if (filter === 'needs_check') return `${pieces} units need to be checked${rowsNote}`;
     if (filter === 'sold') return `${pieces} units sold${rowsNote}`;
+    if (filter === 'dns') return `${pieces} units DNS / Do not ship${rowsNote}`;
     if (filter === 'defective') return `${pieces} units defective / not for sale${rowsNote}`;
     const u = unfinishedCount;
     return u == null ? `${pieces} units in stock${rowsNote}` : `${pieces} units in stock${rowsNote} · ${u} unfinished`;
@@ -305,6 +306,7 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
           ['unfinished', 'Unfinished'],
           ['needs_check', 'Needs check'],
           ['defective', 'Defective'],
+          ['dns', 'DNS'],
         ] as const).map(([id, label]) => (
           <button
             key={id}
@@ -346,7 +348,7 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
 
       <div className="app-group">
         {(list?.items || []).map((u, idx) => {
-          const warn = needs(u);
+          const warn = filter === 'dns' ? null : needs(u);
           const thumbPath = u.photo_path ? thumb(u.photo_path) : '';
           // Prefer small derivative when signed; otherwise the original (always exists when photo_path is set).
           const src = u.photo_path
