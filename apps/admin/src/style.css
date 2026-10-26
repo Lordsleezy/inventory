@@ -820,3 +820,5 @@ html.dark .mboard-progress-bar{background:#2a3340}
 .listing-issues table { width: 100%; }
 
 .inventory-row-wrap{display:flex;align-items:center;gap:8px;border-top:1px solid #eef1f3}.inventory-row-wrap>.inventory-row{flex:1;min-width:0;border-top:0!important}.inventory-row-actions{display:flex;gap:6px;flex-shrink:0}.inventory-row-actions button{padding:6px 10px;font-size:.8rem}@media(max-width:750px){.inventory-row-wrap{flex-wrap:wrap}.inventory-row-wrap>.inventory-row{flex-basis:100%}.inventory-row-actions{padding-bottom:8px}}
+
+.inventory-totals{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:0 0 14px}@media(max-width:750px){.inventory-totals{grid-template-columns:repeat(2,minmax(0,1fr))}}

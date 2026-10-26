@@ -5,6 +5,7 @@ import { ATTENTION_SECTIONS, NeedsAttentionPanel, useAttentionCounts } from '../
 import { reviewReasonLabel } from '../inventoryReview';
 import { CategoryPanel } from '../CategoryPanel';
 import { shortError } from './shortError';
+import { InventoryTotals } from '../InventoryTotals';
 
 /** Same five subtabs as desktop Inventory. Unfinished replaces the old More → Needs attention. */
 type Filter = 'in_stock' | 'sold' | 'unfinished' | 'needs_check' | 'defective';
@@ -296,6 +297,7 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
           }}
         />
       </label>
+      <InventoryTotals client={client} variant="app" />
       <div className="app-segment" role="tablist">
         {([
           ['in_stock', 'In stock'],

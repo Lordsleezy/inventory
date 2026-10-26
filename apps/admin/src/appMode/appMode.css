@@ -147,26 +147,48 @@ html.app-mode .app-thumb {
 html.app-mode .app-thumb img { width: 100%; height: 100%; object-fit: cover; }
 html.app-mode .app-row-text { flex: 1; min-width: 0; }
 html.app-mode .app-row-text strong {
-  display: block;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   font-size: 16px;
   font-weight: 600;
-  white-space: nowrap;
+  line-height: 1.25;
   overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
 }
 html.app-mode .app-row-text small {
   display: block;
   margin-top: 2px;
   font-size: 13px;
   color: #8e8e93;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 html.app-mode .app-row-text .warn { color: #ff9f0a; font-weight: 600; }
 html.app-mode .app-row-price {
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   flex: none;
+  min-width: 52px;
+  text-align: right;
 }
+html.app-mode .app-row { min-height: 64px; }
+html.app-mode .app-totals {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 0 16px 12px;
+}
+html.app-mode .app-total {
+  background: #1c1c1e;
+  border-radius: 12px;
+  padding: 10px 12px;
+  min-width: 0;
+}
+html.app-mode .app-total span { display: block; font-size: 12px; color: #8e8e93; }
+html.app-mode .app-total strong { display: block; font-size: 22px; font-variant-numeric: tabular-nums; margin-top: 2px; }
 html.app-mode .app-chevron {
   color: #636366;
   font-size: 18px;
