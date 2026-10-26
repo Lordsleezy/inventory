@@ -2,6 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { redact, runTrace, setTrace, currentTrace, asNetlifyFunction, netlifyHandler } from "./floor-log.mjs";
 
+test("redact removes credentials from signed image URLs", () => {
+  const result = redact({ imageUrls: ["https://example.com/photo?token=private-token&width=800", "https://example.com/photo?p=unit.jpg&sig=private-signature"] });
+  assert.deepEqual(result.imageUrls, ["https://example.com/photo?token=[redacted]&width=800", "https://example.com/photo?p=unit.jpg&sig=[redacted]"]);
+});
+
 test("redact strips tokens and secrets but keeps sku and condition", () => {
   const out = redact({
     sku: "11116",

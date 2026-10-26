@@ -11,7 +11,8 @@ export function redact(value, depth = 0) {
   if (depth > 8) return "[max-depth]";
   if (typeof value === "string") {
     if (/^bearer\s+/i.test(value)) return "[redacted]";
-    return value.length > 8000 ? `${value.slice(0, 8000)}…` : value;
+    const safe = value.replace(/([?&](?:token|access_token|signature|sig)=)[^&#\s"]+/gi, "$1[redacted]");
+    return safe.length > 8000 ? `${safe.slice(0, 8000)}…` : safe;
   }
   if (typeof value !== "object") return value;
   if (Array.isArray(value)) return value.slice(0, 80).map((row) => redact(row, depth + 1));
