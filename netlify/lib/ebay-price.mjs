@@ -46,11 +46,6 @@ export function ebayPriceCents({ floorCents, labelCents = 0, bufferCents = 0, mo
   return roundUpEnding(raw, ending);
 }
 
-export function ebayFeeCents(itemCents, feePct, perOrderCents = 0) {
-  const item = Math.max(0, Math.round(Number(itemCents) || 0));
-  return Math.round(item * (Number(feePct) / 100)) + Math.max(0, Math.round(Number(perOrderCents) || 0));
-}
-
 function toCents(value) {
   const n = Number(value);
   if (!Number.isFinite(n)) return 0;

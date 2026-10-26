@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   draftReadiness,
-  ebayFeeCents,
   ebayOrderAmounts,
   ebayOrderIsLocalPickup,
   ebayPriceCents,
@@ -37,8 +36,7 @@ test("shipping buffer affects only free-shipping price, not cutoff", () => {
   assert.equal(shippingModeForLabel(1500, 1500), "free");
 });
 
-test("eBay fee and order amounts use the item price, not buyer shipping", () => {
-  assert.equal(ebayFeeCents(12999, 13.25, 40), Math.round(12999 * 0.1325) + 40);
+test("eBay order amounts use the item price, not buyer shipping", () => {
   const amounts = ebayOrderAmounts({
     lineItems: [{ sku: "1", lineItemCost: { value: "129.99" }, total: { value: "129.99" } }],
     pricingSummary: { priceSubtotal: { value: "129.99" }, deliveryCost: { value: "0.00" }, total: { value: "129.99" } },

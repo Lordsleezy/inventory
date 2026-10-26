@@ -25,7 +25,7 @@ import { parseMeasure, specInches } from "./ebay-aspects.mjs";
 import { listingMeasures, prepareUnitAspects, prepareUnitCondition } from "./ebay-catalog.mjs";
 import { floorLog, redact, setTrace } from "./floor-log.mjs";
 import { sendResend } from "./receipt.mjs";
-import { ebayFeeCents, ebayOrderAmounts, ebayOrderIsLocalPickup, ebayShipTo } from "./ebay-price.mjs";
+import { ebayOrderAmounts, ebayOrderIsLocalPickup, ebayShipTo } from "./ebay-price.mjs";
 import { fulfillmentPath, ordersWithShipment, shipmentPatch } from "./ebay-shipment.mjs";
 
 export { ebayOrderIsLocalPickup };
@@ -1273,11 +1273,8 @@ export async function ingestEbayOrder(storeId, order) {
     .from("store_settings")
     .select("key,value")
     .eq("store_id", storeId)
-    .in("key", ["ebay_fee_pct", "ebay_per_order_cents", "pickup_hold_hours"]);
+    .in("key", ["pickup_hold_hours"]);
   const setting = Object.fromEntries((settingRows || []).map((row) => [row.key, row.value]));
-  const feePct = Number(setting.ebay_fee_pct ?? 13.25);
-  const perOrder = Number(setting.ebay_per_order_cents ?? 40);
-  const feeCents = ebayFeeCents(itemCents, feePct, perOrder);
   const holdHours = Math.max(1, Number(setting.pickup_hold_hours ?? 48) || 48);
   let baked = 0;
   if (rawSku && !isPickup) {
@@ -1297,7 +1294,9 @@ export async function ingestEbayOrder(storeId, order) {
     sku,
     sale_id: sale?.id ?? null,
     item_cents: itemCents,
-    fee_cents: feeCents,
+    // No fee here: eBay's real fees (final value, ad, label, ...) arrive from the Finances API and are
+    // recorded by ebay-fees.mjs. Commission is held until then.
+    fee_cents: null,
     baked_ship_cents: baked,
     buyer_user_id: order?.buyer?.userId || null,
     buyer_username: order?.buyer?.username || null,
@@ -1339,7 +1338,7 @@ export async function ingestEbayOrder(storeId, order) {
     payment_id: `ebay:${orderId}`,
     payment_env: process.env.EBAY_ENV === "production" ? "production" : "sandbox",
     match_status: matchStatus,
-    marketplace_fee_cents: feeCents,
+    marketplace_fee_cents: null,
     marketplace_title: String(title).slice(0, 250),
     ...(webStatus === "canceled"
       ? {

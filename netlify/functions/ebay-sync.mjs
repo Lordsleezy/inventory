@@ -5,6 +5,7 @@ import { dispatchQueuedPickupListRequests } from "../lib/ebay-pickup-list.mjs";
 import { withLock } from "../lib/bg-guard.mjs";
 import { wrapHandler, asNetlifyFunction, floorLog } from "../lib/floor-log.mjs";
 import { ebayDisabled } from "../lib/ebay-env.mjs";
+import { syncEbayFees } from "../lib/ebay-fees.mjs";
 import { sendInternalAlert, filterDeliverableEmails } from "../lib/mail.mjs";
 import { EBAY_SYNC_LOCK_SECONDS, syncCompletedAt, syncNeedsStallEmail } from "../lib/ebay-sync-health.mjs";
 
@@ -22,6 +23,7 @@ async function handle(event) {
   try {
     const sb = serviceClient();
     // A run that is still going blocks the next one instead of piling on.
+    const startedAt = Date.now();
     const result = await withLock("ebay-sync", EBAY_SYNC_LOCK_SECONDS, async () => {
       // Orders first. The offer scan and open delist tasks used to burn the whole
       // timeout, so the run was killed and the next fire only logged "already running".
@@ -30,6 +32,22 @@ async function handle(event) {
       if (polled) {
         const storeIds = [...new Set(orders.map((store) => store.storeId).filter(Boolean))];
         await markEbaySyncCompleted(sb, storeIds.length ? storeIds : [STORE_ID]);
+      }
+      // Real eBay fees ride the order sync (no extra schedule). It makes no eBay calls unless an order is
+      // still waiting on fees or the 6-hourly reconcile sweep is due, and it stops before the function timeout.
+      let fees = [];
+      if (polled) {
+        const storeIds = [...new Set(orders.map((store) => store.storeId).filter(Boolean))];
+        for (const storeId of storeIds.length ? storeIds : [STORE_ID]) {
+          const budgetMs = 40000 - (Date.now() - startedAt);
+          if (budgetMs < 5000) { fees.push({ storeId, skipped: "no_time_left" }); continue; }
+          try {
+            fees.push({ storeId, ...(await syncEbayFees(sb, storeId, { budgetMs: Math.min(budgetMs, 20000) })) });
+          } catch (err) {
+            fees.push({ storeId, error: err instanceof Error ? err.message : String(err) });
+            await floorLog({ storeId, level: "error", event: "ebay.fees_sync_failed", message: err instanceof Error ? err.message : String(err) });
+          }
+        }
       }
       let migrationDispatch = [];
       let pickupListDispatch = [];
@@ -44,7 +62,7 @@ async function handle(event) {
         pickupListDispatch = [{ ok: false, error: err instanceof Error ? err.message : String(err) }];
       }
       const withdrawn = await withdrawOpenEbayTasks();
-      return { withdrawn, orders, migrationDispatch, pickupListDispatch, completed: polled };
+      return { withdrawn, orders, fees, migrationDispatch, pickupListDispatch, completed: polled };
     }, sb);
     if (result?.skipped || result?.completed === false) await emailIfSyncStalled(sb);
     return json(200, result);

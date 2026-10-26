@@ -4,7 +4,7 @@ import { errText } from './errText';
 import './connections.css';
 
 type Provider = 'ebay' | 'amazon' | 'tiktok';
-type EbayAccount = { id: string; username: string; role: string; status: string };
+type EbayAccount = { id: string; username: string; role: string; status: string; hasFinances?: boolean };
 type Connection = {
   connected: boolean;
   accounts?: EbayAccount[];
@@ -98,6 +98,10 @@ export function ConnectionsPage({ accessToken, standalone = false }: { accessTok
               <div><strong>{account.username}</strong><small>{account.role === 'selling' ? 'Store account' : 'Orders only'}</small></div>
               <span className={`connection-status${account.status === 'connected' ? ' is-connected' : ''}`}>{account.status === 'connected' ? 'Connected' : 'Disconnected'}</span>
               {account.status !== 'connected' && login(key, account.role)}
+              {account.status === 'connected' && account.hasFinances === false && <div className="connection-error" role="alert">
+                Floor can't read this account's real eBay fees yet (sell.finances permission missing). Reconnect once and approve.
+                {login(key, account.role, 'Reconnect for eBay fees')}
+              </div>}
             </div>)}
             {!hasRole('selling') && <div className="connection-account"><div><strong>ikonikdeals2026</strong><small>Store account · Disconnected</small></div>{login(key)}</div>}
             {!hasRole('orders_only') && <div className="connection-account"><div><strong>{connection.requiredUsername || 'pgg124-5'}</strong><small>Orders only · Disconnected</small></div>{login(key, 'orders_only')}</div>}

@@ -36,3 +36,6 @@ apps/pos/src-tauri/gen/
 
 netlify/.amazon-*.tmp
 
+
+# eBay fee history output (live money data; never commit)
+reports/ebay-fee-history-*

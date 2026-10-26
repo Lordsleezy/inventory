@@ -1,163 +1,14 @@
 import { serviceClient, json, corsHeaders } from "../lib/server.mjs";
-import { ebayFetch } from "../lib/ebay.mjs";
-import { listEbayAccounts, resolveEbayAccount } from "../lib/ebay-accounts.mjs";
 import { getStoreSquareAccess, squareClient } from "../lib/square.mjs";
 import { webSquareClient, webSquareEnv } from "../lib/web-square.mjs";
 import { Environment } from "square/legacy";
 import { wrapHandler, asNetlifyFunction } from "../lib/floor-log.mjs";
 import { isNetlifyScheduleEvent } from "../lib/schedule.mjs";
 
-// Reconciles REAL fees + eBay-bought shipping labels onto recorded sales.
-//  - eBay Finances SALE → marketplace fee (actual)
-//  - eBay Finances SHIPPING_LABEL → label cost the seller paid on eBay
-//  - Square Payments → card processing fee (register + website)
-// Never touches listings.
+// Reconciles the REAL Square card processing fee (register + website) onto recorded sales.
+// eBay fees, ad fees and labels now come from the eBay Finances API inside the eBay order sync
+// (netlify/lib/ebay-fees.mjs, called by ebay-sync). Never touches listings.
 const LOOKBACK_DAYS = 90;
-
-function moneyToCents(amount) {
-  if (amount == null) return null;
-  const v = typeof amount === "object" ? amount.value : amount;
-  const n = Number(v);
-  return Number.isFinite(n) ? Math.round(n * 100) : null;
-}
-
-async function* ebayTransactions(storeId, type, since, hint = {}) {
-  // Finances uses apiz host + filter=transactionType:{…} (not a top-level query param).
-  let offset = 0;
-  for (;;) {
-    const filter = encodeURIComponent(`transactionType:{${type}},transactionDate:[${since}..]`);
-    const res = await ebayFetch(storeId, "GET",
-      `/sell/finances/v1/transaction?filter=${filter}&limit=200&offset=${offset}`, undefined, hint);
-    const txns = res?.transactions || [];
-    for (const tx of txns) yield tx;
-    if (txns.length < 200) break;
-    offset += txns.length;
-  }
-}
-
-async function syncEbayFeesForAccount(sb, storeId, account, log) {
-  const scopes = Array.isArray(account.scopes) ? account.scopes : [];
-  if (scopes.length && !scopes.some((s) => String(s).includes("sell.finances"))) {
-    log.push({ ebay: "reconnect_required_for_finances_scope", username: account.username, accountId: account.id });
-    return;
-  }
-  const since = new Date(Date.now() - LOOKBACK_DAYS * 86400000).toISOString();
-  const hint = account.id ? { accountId: account.id } : {};
-
-  for await (const tx of ebayTransactions(storeId, "SALE", since, hint)) {
-    const orderId = tx.orderId;
-    if (!orderId) continue;
-    let fee = 0;
-    for (const item of tx.orderLineItems || []) {
-      for (const f of item.marketplaceFees || []) fee += moneyToCents(f.amount) || 0;
-    }
-    const total = moneyToCents(tx.totalFeeAmount);
-    if (total != null && Math.abs(total) > fee) fee = Math.abs(total);
-    if (!fee) continue;
-    const { error } = await sb.rpc("channel_order_update", {
-      p_store: storeId, p_provider: "ebay", p_order_id: orderId,
-      p_fee_cents: fee, p_fee_source: "actual",
-    });
-    if (error) log.push({ orderId, feeError: error.message });
-    else log.push({ orderId, fee });
-  }
-
-  // Aggregate label debits/credits per order.
-  // eBay sometimes omits orderId — fall back to references.
-  // Wrong-label-then-replace: multiple DEBITs with no CREDIT yet → keep the latest debit only
-  // (e.g. Ninja $110.21 canceled, then $43.51 kept; credit may lag in Finances).
-  const labels = new Map(); // orderId -> { debits: [{cents,date}], creditCents }
-  const orphanLabels = [];
-  for await (const tx of ebayTransactions(storeId, "SHIPPING_LABEL", since, hint)) {
-    if (String(tx.transactionType || "").toUpperCase() !== "SHIPPING_LABEL") continue;
-    const refs = Array.isArray(tx.references) ? tx.references : [];
-    const orderRef = refs.find((r) => /ORDER_ID/i.test(String(r.referenceType || "")));
-    const orderId = tx.orderId || orderRef?.referenceId || null;
-    const entry = String(tx.bookingEntry || "").toUpperCase();
-    if (entry !== "DEBIT" && entry !== "CREDIT") continue;
-    const cents = moneyToCents(tx.amount);
-    if (cents == null || cents === 0) continue;
-    const abs = Math.abs(cents);
-    if (!orderId) {
-      orphanLabels.push({
-        cents: entry === "CREDIT" ? -abs : abs,
-        memo: tx.transactionMemo || null,
-        date: tx.transactionDate || null,
-        refs: refs.map((r) => `${r.referenceType}:${r.referenceId}`).slice(0, 6),
-      });
-      continue;
-    }
-    const cur = labels.get(orderId) || { debits: [], creditCents: 0 };
-    if (entry === "CREDIT") cur.creditCents += abs;
-    else cur.debits.push({ cents: abs, date: tx.transactionDate || "" });
-    labels.set(orderId, cur);
-  }
-  if (orphanLabels.length) log.push({ orphanShippingLabels: orphanLabels });
-  for (const [orderId, agg] of labels) {
-    agg.debits.sort((a, b) => String(a.date).localeCompare(String(b.date)));
-    const debitSum = agg.debits.reduce((n, d) => n + d.cents, 0);
-    const net = debitSum - agg.creditCents;
-    let labelCents = Math.max(0, net);
-    let note = null;
-    // Pending cancel: 2+ purchases, no refund posted yet → keep the replacement (latest).
-    if (agg.creditCents === 0 && agg.debits.length >= 2) {
-      labelCents = agg.debits[agg.debits.length - 1].cents;
-      note = "latest_debit_pending_credit";
-    }
-    if (!labelCents) continue;
-    const { data: co } = await sb.from("channel_orders")
-      .select("item_cents,sale_id").eq("store_id", storeId).eq("provider", "ebay").eq("order_id", orderId).maybeSingle();
-    let item = Number(co?.item_cents || 0);
-    if (!item && co?.sale_id) {
-      const { data: sale } = await sb.from("sales").select("price_cents").eq("id", co.sale_id).maybeSingle();
-      item = Number(sale?.price_cents || 0);
-      if (item > 0) {
-        await sb.from("channel_orders").update({ item_cents: item })
-          .eq("store_id", storeId).eq("provider", "ebay").eq("order_id", orderId);
-      }
-    }
-    if (labelCents > 50000 && item > 0 && labelCents > item * 3) {
-      log.push({ orderId, labelSkipped: labelCents, item, reason: "label_absurd" });
-      continue;
-    }
-    const { error } = await sb.rpc("channel_order_update", {
-      p_store: storeId, p_provider: "ebay", p_order_id: orderId,
-      p_ship_label_cents: labelCents, p_ship_label_source: "ebay",
-    });
-    if (error) log.push({ orderId, labelError: error.message });
-    else {
-      await sb.from("web_orders").update({
-        label_cost_cents: labelCents,
-        label_purchased_at: new Date().toISOString(),
-      }).eq("store_id", storeId).eq("payment_id", `ebay:${orderId}`);
-      log.push({
-        orderId,
-        label: labelCents,
-        username: account.username,
-        ...(note ? { note, debitSum, creditCents: agg.creditCents } : {}),
-      });
-    }
-  }
-}
-
-async function syncEbayFees(sb, storeId, log) {
-  const accounts = await listEbayAccounts(storeId).catch(() => []);
-  const connected = accounts.filter((a) => a.status === "connected");
-  if (connected.length) {
-    for (const account of connected) {
-      try {
-        await syncEbayFeesForAccount(sb, storeId, account, log);
-      } catch (e) {
-        log.push({ ebay: String(e?.message || e), username: account.username, accountId: account.id });
-      }
-    }
-    return;
-  }
-  // Legacy single connection fallback.
-  const legacy = await resolveEbayAccount(storeId).catch(() => null);
-  if (!legacy) return;
-  await syncEbayFeesForAccount(sb, storeId, legacy, log);
-}
 
 async function squareFee(client, paymentId) {
   const { result } = await client.paymentsApi.getPayment(paymentId);
@@ -219,7 +70,6 @@ async function handle(event) {
   for (const store of stores || []) {
     const log = [];
     out.stores[store.id] = log;
-    try { await syncEbayFees(sb, store.id, log); } catch (e) { log.push({ ebay: String(e?.message || e) }); }
     try { await syncSquareFees(sb, store.id, log); } catch (e) { log.push({ square: String(e?.message || e) }); }
   }
   return json(200, out);
