@@ -16,6 +16,7 @@ export function EbaySpecificsPanel({ client, sku, storeId, appMode = false, onSa
   const [query, setQuery] = useState('');
   const [choices, setChoices] = useState<Choice[]>([]);
   const [picked, setPicked] = useState<Choice | null>(null);
+  const [applyingSuggested, setApplyingSuggested] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -36,6 +37,7 @@ export function EbaySpecificsPanel({ client, sku, storeId, appMode = false, onSa
     setForm(next);
     setValues(next.attributes || {});
     setPicked(next.category_id ? null : next.suggestion);
+    setApplyingSuggested(false);
   }
 
   useEffect(() => {
@@ -80,6 +82,12 @@ export function EbaySpecificsPanel({ client, sku, storeId, appMode = false, onSa
     finally { setBusy(false); }
   }
 
+  function toggleSuggestedCategory(checked: boolean) {
+    if (!checked || !picked) { setApplyingSuggested(false); return; }
+    setApplyingSuggested(true);
+    void useCategory(picked).finally(() => setApplyingSuggested(false));
+  }
+
   async function save() {
     if (!form) return;
     setBusy(true); setError(''); setNotice('');
@@ -121,8 +129,11 @@ export function EbaySpecificsPanel({ client, sku, storeId, appMode = false, onSa
     {notice && <p className="hint" role="status">{notice}</p>}
     {form && canPick && <div className="ebay-specifics-category">
       <p className="hint">{form.category_id ? `Category: ${form.path || form.category_id}` : 'No eBay category yet.'}</p>
-      {!form.category_id && picked && <button type="button" disabled={busy} onClick={() => void useCategory(picked)}>
-        Use suggested: {picked.path}</button>}
+      {!form.category_id && picked && <label className="ebay-specifics-suggestion">
+        <input type="checkbox" checked={applyingSuggested} disabled={busy}
+          onChange={(e) => toggleSuggestedCategory(e.currentTarget.checked)} />
+        <span>Use suggested: {picked.path}</span>
+      </label>}
       <label>{form.category_id ? 'Change eBay category' : 'Search eBay categories'}
         <input type="search" value={query} placeholder='e.g. "steamer"' onChange={(e) => setQuery(e.target.value)} /></label>
       {choices.length > 0 && <div className="category-results">{choices.map((c) => <button type="button" key={c.category_id}
