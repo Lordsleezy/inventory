@@ -817,6 +817,9 @@ html.dark .mboard-progress-bar{background:#2a3340}
 .channel-picker-compact { border: 0; padding: 0; margin: 0; gap: 4px 12px; }
 .app-channel-picker { border-color: rgba(255,255,255,.15); }
 .app-channel-picker input[type=checkbox] { width: 22px; height: 22px; }
+.ebay-specifics-suggestion{display:flex;align-items:flex-start;gap:10px;width:100%;padding:12px;border:1px solid var(--line,#354050);border-radius:10px;cursor:pointer}
+.ebay-specifics-suggestion input[type=checkbox]{width:22px;height:22px;min-height:22px;flex:0 0 22px;margin:0}
+.ebay-specifics-suggestion span{line-height:1.35;overflow-wrap:anywhere}
 .listing-issues table { width: 100%; }
 
 .inventory-row-wrap{display:flex;align-items:center;gap:8px;border-top:1px solid #eef1f3}.inventory-row-wrap>.inventory-row{flex:1;min-width:0;border-top:0!important}.inventory-row-actions{display:flex;gap:6px;flex-shrink:0}.inventory-row-actions button{padding:6px 10px;font-size:.8rem}@media(max-width:750px){.inventory-row-wrap{flex-wrap:wrap}.inventory-row-wrap>.inventory-row{flex-basis:100%}.inventory-row-actions{padding-bottom:8px}}
