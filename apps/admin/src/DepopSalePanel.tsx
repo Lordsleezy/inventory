@@ -5,7 +5,7 @@ import { parseDollars } from './dispositions';
 import { dollarsText, payoutDefault, type DepopEntry } from './depopMath';
 
 type Money = (n: number) => string;
-type UnitHit = { sku: string; brand: string; model: string; title: string; ask_cents: number | null; acquisition_cost_cents: number | null; state: string; condition: string | null };
+type UnitHit = { sold_no_sale?: boolean; sku: string; brand: string; model: string; title: string; ask_cents: number | null; acquisition_cost_cents: number | null; state: string; condition: string | null };
 
 const todayLA = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
 const unitName = (u: Pick<UnitHit, 'brand' | 'model' | 'title'>) => [u.brand, u.model].filter(Boolean).join(' ') || u.title || 'Untitled unit';
@@ -37,10 +37,8 @@ export function DepopSalePanel({ client, money, variant }: { client: SupabaseCli
     if (unit || editing || query.trim().length < 2) { setHits([]); return; }
     let alive = true;
     const timer = setTimeout(() => {
-      void Promise.resolve(client.rpc('portal_inventory_list_with_locations', {
-        p_query: query.trim(), p_status: 'in_stock', p_unfinished: false, p_sort: 'sku', p_offset: 0, p_limit: 8, p_location: 'all',
-      })).then(({ data }) => {
-        if (alive) setHits(((data as { items?: UnitHit[] } | null)?.items || []).filter(u => u.state === 'available'));
+      void Promise.resolve(client.rpc('portal_depop_find_units', { p_query: query.trim() })).then(({ data }) => {
+        if (alive) setHits((data || []) as UnitHit[]);
       });
     }, 250);
     return () => { alive = false; clearTimeout(timer); };
@@ -101,11 +99,11 @@ export function DepopSalePanel({ client, money, variant }: { client: SupabaseCli
       <h2>{editing ? `Edit Depop sale · SKU ${editing.sku}` : 'Record a Depop sale'}</h2>
       <form className="depop-form" onSubmit={e => void save(e)}>
         {!editing && (unit
-          ? <div className="depop-picked"><strong>{unitName(unit)}</strong><small>SKU {unit.sku}{unit.acquisition_cost_cents == null ? ' · no cost yet' : ` · cost ${money(unit.acquisition_cost_cents)}`}</small>
+          ? <div className="depop-picked"><strong>{unitName(unit)}</strong><small>SKU {unit.sku}{unit.sold_no_sale ? ' · Sold, no sale recorded' : ''}{unit.acquisition_cost_cents == null ? ' · no cost yet' : ` · cost ${money(unit.acquisition_cost_cents)}`}</small>
               <button type="button" className="text-button" onClick={() => { setUnit(null); setQuery(''); }}>change</button></div>
           : <label>Item (SKU or search)<input type="search" autoFocus value={query} placeholder="SKU, brand, model or title" onChange={e => setQuery(e.target.value)} />
               {hits.length > 0 && <div className="depop-hits">{hits.map(h => <button type="button" key={h.sku} onClick={() => { setUnit(h); setHits([]); if (!sale && h.ask_cents) setSale(dollarsText(h.ask_cents)); }}>
-                <strong>{unitName(h)}</strong><small>SKU {h.sku} · {h.condition || 'No grade'}{h.ask_cents != null ? ` · ${money(h.ask_cents)}` : ''}</small></button>)}</div>}
+                <strong>{unitName(h)}</strong><small>SKU {h.sku} · {h.sold_no_sale ? 'Sold, no sale recorded' : h.condition || 'No grade'}{h.ask_cents != null ? ` · ${money(h.ask_cents)}` : ''}</small></button>)}</div>}
             </label>)}
         <label>Sale price ($)<input inputMode="decimal" value={sale} onChange={e => setSale(e.target.value)} placeholder="0.00" /></label>
         <label>Depop fee ($)<input inputMode="decimal" value={fee} onChange={e => setFee(e.target.value)} placeholder="0.00" /></label>

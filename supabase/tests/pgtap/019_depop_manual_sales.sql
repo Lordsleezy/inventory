@@ -1,6 +1,6 @@
 -- pgTAP: Depop manual sale entry, import guard and removal (20261101100000_depop_manual_sales.sql).
 begin;
-select plan(26);
+select plan(33);
 set constraints all immediate;
 
 do $$
@@ -93,5 +93,13 @@ select ok((select state = 'sold' from public.units where sku = '96003') and not 
   and not exists (select 1 from public.sale_commissions where sale_id = current_setting('test.imported')::bigint)
   and (select sum(amount_cents) from public.portal_payout_payments) = 500, 'unit stays sold, sale and commission gone, payment history untouched');
 
+-- Sold units with no sale record can take a Depop sale; units with a sale cannot.
+select is((select count(*)::int from jsonb_array_elements(public.portal_depop_find_units('96003')) e where (e->>'sold_no_sale')::boolean), 1, 'picker lists a sold unit with no sale');
+select is((select count(*)::int from jsonb_array_elements(public.portal_depop_find_units('96002')) e), 0, 'picker hides a unit that already has a sale');
+select lives_ok($q$select public.portal_depop_record_sale('96003', 4000, 400, null, null, null)$q$, 'sale attaches to the sold unit');
+select is((select state from public.units where sku = '96003'), 'sold', 'unit stays sold');
+select is((select count(*)::int from public.delist_tasks where sku = '96003'), 0, 'nothing delisted');
+select is((select profit_cents from public.sale_ledger where sku = '96003'), 2600, 'profit = payout 3600 - cost 1000');
+select throws_ok($q$select public.portal_depop_record_sale('96003', 4000, 400, null, null, null)$q$, 'P0001', null, 'a unit that now has a sale is blocked');
 select * from finish();
 rollback;
