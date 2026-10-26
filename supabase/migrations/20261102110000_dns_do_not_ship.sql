@@ -101,7 +101,9 @@ grant execute on function public.portal_unit_dns(text),public.portal_set_unit_dn
 
 insert into public.listing_never_rules(store_id,channel,rule_type,value,note)
 select s.id,c,'flag','do_not_ship','DNS - Do not ship: never list on this marketplace' from public.stores s
-cross join unnest(array['ebay','amazon','tiktok','depop']) c on conflict do nothing;
+cross join unnest(array['ebay','amazon','tiktok']) c on conflict do nothing;
+-- Depop is manual and is not an allowed channel in listing_never_rules.
+-- floor_dns_push_gate and floor_unit_never_list_reason above still block it.
 
 -- DNS is a separate stock group, never a shipping-readiness queue.
 do $$ declare f record; v text; hits int:=0; src text; begin
