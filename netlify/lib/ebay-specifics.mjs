@@ -48,6 +48,15 @@ export function productAspects(product) {
     ...(product.model ? { Model: product.model, MPN: product.model } : {}) };
 }
 
+/** Map only explicit Floor unit facts into matching eBay aspects after category selection. */
+export function unitAspects(unit = {}) {
+  const incoming = {};
+  if (unit.brand) incoming.Brand = unit.brand;
+  if (unit.model) { incoming.Model = unit.model; incoming.MPN = unit.model; }
+  if (unit.condition) incoming.Condition = unit.condition;
+  return incoming;
+}
+
 /**
  * deps: loadUnit(storeId, sku), loadEbayRow(storeId, sku), loadProduct(gtin14), catalog(gtin),
  *       aspectFields(categoryId), saveEbayRow(storeId, sku, patch), remember(gtin14, { categoryId, attributes })

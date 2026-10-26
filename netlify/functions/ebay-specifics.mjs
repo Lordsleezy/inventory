@@ -4,7 +4,7 @@ import { json, corsHeaders, serviceClient, staffFromEvent } from "../lib/server.
 import { portalAdminFromEvent } from "../lib/portal-auth.mjs";
 import { catalogProductByGtin, suggestCategories } from "../lib/ebay-catalog.mjs";
 import { refreshChannelCategoryFields } from "../lib/category-taxonomy.mjs";
-import { autofillUnitSpecifics, missingRequired, supabaseSpecificsDeps } from "../lib/ebay-specifics.mjs";
+import { autofillUnitSpecifics, fillMissing, missingRequired, supabaseSpecificsDeps, unitAspects } from "../lib/ebay-specifics.mjs";
 import { normalizeGtin } from "../lib/gtin-normalize.mjs";
 import { wrapHandler, asNetlifyFunction } from "../lib/floor-log.mjs";
 
@@ -34,7 +34,7 @@ export async function ebayAspectFields(storeId, categoryId) {
 }
 
 async function form(sb, storeId, sku) {
-  const { data: unit } = await sb.from("units").select("sku,title,brand,model,upc").eq("store_id", storeId).eq("sku", sku).maybeSingle();
+  const { data: unit } = await sb.from("units").select("sku,title,brand,model,upc,condition,listing_body,defect_notes").eq("store_id", storeId).eq("sku", sku).maybeSingle();
   if (!unit) throw Object.assign(new Error("unknown_sku"), { status: 404 });
   const { data: row } = await sb.from("unit_channel_categories").select("category_id,attributes,enabled")
     .eq("store_id", storeId).eq("sku", sku).eq("channel", "ebay").maybeSingle();
@@ -52,7 +52,9 @@ async function form(sb, storeId, sku) {
     .eq("channel", "ebay").eq("category_id", row.category_id).maybeSingle() : { data: null };
   return { sku, title: unit.title, upc: unit.upc, enabled: row?.enabled ?? false, category_id: row?.category_id || null,
     path: tax?.path || null, suggestion, fields, attributes: row?.attributes || {},
-    missing: missingRequired(fields, row?.attributes || {}) };
+    missing: missingRequired(fields, row?.attributes || {}),
+    item: { title: unit.title, brand: unit.brand, model: unit.model, condition: unit.condition,
+      description: unit.listing_body || "", defect_notes: unit.defect_notes || "" } };
 }
 
 async function handle(event) {
@@ -68,6 +70,16 @@ async function handle(event) {
     if (body.action === "autofill") {
       const result = await autofillUnitSpecifics(deps, storeId, sku);
       return json(200, { ok: true, result, form: await form(sb, storeId, sku) });
+    }
+    if (body.action === "category-selected") {
+      const current = await form(sb, storeId, sku);
+      const { data: unit } = await sb.from("units").select("brand,model,condition").eq("store_id", storeId).eq("sku", sku).maybeSingle();
+      const { attributes, filled } = fillMissing(current.attributes, unitAspects(unit), current.fields);
+      if (filled.length) {
+        const { error } = await sb.rpc("portal_set_unit_ebay_specifics", { p_sku: sku, p_attributes: Object.fromEntries(filled.map((name) => [name, attributes[name]])) });
+        if (error) throw error;
+      }
+      return json(200, { ok: true, filled, form: await form(sb, storeId, sku) });
     }
     if (body.action === "remember") {
       const current = await form(sb, storeId, sku);
