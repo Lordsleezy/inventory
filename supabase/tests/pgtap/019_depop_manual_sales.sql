@@ -1,6 +1,6 @@
 -- pgTAP: Depop manual sale entry, import guard and removal (20261101100000_depop_manual_sales.sql).
 begin;
-select plan(33);
+select plan(36);
 set constraints all immediate;
 
 do $$
@@ -12,6 +12,7 @@ begin
   insert into public.staff (user_id, store_id, display_name, role) values (v_paul, v_store, 'Paul', 'owner'), (v_jacob, v_store, 'Jacob', 'staff');
   perform public.seed_store_settings(v_store, 'Depop Store');
   insert into public.store_settings (store_id, key, value) values
+    (v_store, 'commission_store_absorbs_fees', 'false'),
     (v_store, 'online_channels', '["website","ebay","depop"]'), (v_store, 'online_payout_pct', '30'),
     (v_store, 'online_payout_employee_id', to_jsonb(v_paul::text))
   on conflict (store_id, key) do update set value = excluded.value;
@@ -51,8 +52,8 @@ select is((select payout_cents from public.depop_sale_entries where sku = '96001
 select is((select profit_cents from public.sale_ledger where sku = '96001'), 3500, 'profit = payout - cost');
 select is((select amount_cents from public.sale_commissions c join public.sales s on s.id = c.sale_id where s.sku = '96001' and c.employee_id = current_setting('test.paul')::uuid),
   1050, 'online sale: 30% of profit to Paul');
-select ok((select o.delivered_at is not null and o.status = 'paid' and o.channel = 'depop' from public.web_orders o join public.sales s on s.id = o.sale_id where s.sku = '96001'),
-  'order goes straight to Done');
+select ok((select o.shipped_at is null and o.delivered_at is null and o.status = 'paid' and o.fulfillment='ship' and o.channel = 'depop' from public.web_orders o join public.sales s on s.id = o.sale_id where s.sku = '96001'),
+  'new manual entry goes to To Ship with no invented fulfillment');
 select is((select count(*)::int from public.sales where channel = 'depop' and sku = '96001' and voided_at is null), 1, 'counts as a normal sale');
 
 -- Payout different from sale - fee (label taken out): profit follows the payout
@@ -72,6 +73,15 @@ select is((select c.amount_cents from public.sale_commissions c join public.sale
 -- Edit a typo
 select lives_ok(format($q$select public.portal_depop_update_sale(%L::uuid, 6000, 600, 5400, (now() at time zone 'America/Los_Angeles')::date, null)$q$, (select id from public.depop_sale_entries where sku = '96001')), 'entry can be edited');
 select is((select profit_cents from public.sale_ledger where sku = '96001'), 4400, 'profit follows the corrected payout');
+select ok((select shipped_at is null and delivered_at is null from public.web_orders where sku='96001'),
+  'editing an unshipped entry keeps it in To Ship');
+update public.web_orders set shipped_at='2026-09-01T10:00:00Z', delivered_at='2026-09-02T10:00:00Z', tracking_number='REAL-TRACKING'
+  where sku='96004';
+select lives_ok(format($q$select public.portal_depop_update_sale(%L::uuid, 6000, 600, 5000, (now() at time zone 'America/Los_Angeles')::date, null)$q$,
+  (select id from public.depop_sale_entries where sku='96004')), 'edit a genuinely shipped entry');
+select ok((select shipped_at='2026-09-01T10:00:00Z'::timestamptz and delivered_at='2026-09-02T10:00:00Z'::timestamptz
+  and tracking_number='REAL-TRACKING' from public.web_orders where sku='96004'), 'edit preserves real shipment, delivery and tracking');
+
 
 -- Delete an entry
 select lives_ok(format($q$select public.portal_depop_delete_sale(%L::uuid)$q$, (select id from public.depop_sale_entries where sku = '96001')), 'entry can be deleted');
