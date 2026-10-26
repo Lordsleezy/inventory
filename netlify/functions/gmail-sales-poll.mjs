@@ -8,7 +8,10 @@ import { ingestMarketplaceMail, loadStoreChannels, mailAuthenticatedForMarketpla
 import { normalizeMessageId, planPollUids } from "../lib/gmail-poll-plan.mjs";
 
 /**
- * Gmail inbox reader: every 2 minutes, read new Depop / Mercari mail from the same Gmail account that
+ * DISABLED (Depop/Mercari email import is off for good: sales are entered by hand on the Depop tab; see
+ * supabase 20261101100000_depop_manual_sales.sql). The handler returns immediately and is no longer scheduled.
+ *
+ * Was: Gmail inbox reader: every 2 minutes, read new Depop / Mercari mail from the same Gmail account that
  * sends internal alerts, and run it through the exact ingest path marketplace-email uses
  * (marketplace_ingest_sale / needs_review). Processed mail is marked read.
  *
@@ -24,6 +27,7 @@ import { normalizeMessageId, planPollUids } from "../lib/gmail-poll-plan.mjs";
  *   GMAIL_POLL_EXTRA_USER / GMAIL_POLL_EXTRA_APP_PASSWORD  optional second inbox (e.g. main Gmail)
  */
 
+const EMAIL_IMPORT_DISABLED = true;
 const MAX_PER_RUN = 15;
 const MAX_BYTES = 4_300_000;
 const DEADLINE_MS = 22_000;
@@ -220,6 +224,7 @@ async function pollInbox(sb, { forceIncludeSeen = false, rescan = false } = {}) 
 
 async function handle(event) {
   if (event.httpMethod === "OPTIONS") return { statusCode: 200, headers: corsHeaders(), body: "" };
+  if (EMAIL_IMPORT_DISABLED) return json(200, { disabled: true, reason: "email_sale_import_disabled" });
   if (!(await authorized(event))) return json(401, { error: "unauthorized" });
   try {
     let forceIncludeSeen = false;

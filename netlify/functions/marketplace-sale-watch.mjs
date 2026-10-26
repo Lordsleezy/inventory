@@ -107,7 +107,7 @@ async function runWatch(sb) {
     .select(
       "id,store_id,marketplace,subject,item_title,sale_price_cents,order_number,message_id,buyer,fulfillment,ship_by,state,sale_id,created_at",
     )
-    .in("marketplace", ["depop", "mercari"])
+    .in("marketplace", ["mercari"]) // Depop email import is off; never recreate its orders
     .gte("created_at", since)
     .in("state", ["needs_review", "matched"])
     .order("created_at", { ascending: false })

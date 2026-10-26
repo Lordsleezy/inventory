@@ -3,6 +3,7 @@ import type { Session, SupabaseClient } from '@supabase/supabase-js';
 import type { StaffSession } from '@floor/cloud';
 import { floorFunctionUrl } from '../floorApi';
 import { ListingManagerPanel } from '../ListingManagerPanel';
+import { DepopSalePanel } from '../DepopSalePanel';
 import { ConnectionsPage } from '../ConnectionsPage';
 import { errText } from '../errText';
 import { shortError } from './shortError';
@@ -288,8 +289,8 @@ export function AppReportsNative({ onBack, children, title = 'Reports', action, 
   );
 }
 
-export function AppDepopNative({ accessToken, money, onBack }: {
-  accessToken: string; money: (n: number) => string; onBack: () => void;
+export function AppDepopNative({ client, accessToken, money, onBack }: {
+  client: SupabaseClient; accessToken: string; money: (n: number) => string; onBack: () => void;
 }) {
   return (
     <div className="app-stack">
@@ -299,7 +300,11 @@ export function AppDepopNative({ accessToken, money, onBack }: {
         <button type="button" style={{ visibility: 'hidden' }}>+</button>
       </div>
       <div className="app-embed-soft">
-        <ListingManagerPanel accessToken={accessToken} money={money} channel="depop" channelLocked />
+        <DepopSalePanel client={client} money={money} variant="app" />
+        <details className="mboard-more">
+          <summary>Depop listings (mark a unit as listed on Depop)</summary>
+          <ListingManagerPanel accessToken={accessToken} money={money} channel="depop" channelLocked />
+        </details>
       </div>
     </div>
   );

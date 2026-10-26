@@ -528,6 +528,8 @@ export async function ensureUnmatchedWebOrder(sb, {
  */
 export async function ingestMarketplaceMail(sb, { store, channels, parsed, raw }) {
   const p = parseMail(parsed, channels);
+  // Depop email import is off for good: it must never create sales, orders or fees. Depop sales are typed in on the Depop tab.
+  if (p.marketplace === 'depop') return { state: 'ignored', marketplace: 'depop', reason: 'depop_import_disabled' };
   if (
     p.sale &&
     (!p.sku || !p.buyer.line1 || !p.order_number || !p.ship_by) &&

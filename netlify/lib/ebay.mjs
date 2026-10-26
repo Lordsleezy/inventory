@@ -26,6 +26,7 @@ import { listingMeasures, prepareUnitAspects, prepareUnitCondition } from "./eba
 import { floorLog, redact, setTrace } from "./floor-log.mjs";
 import { sendResend } from "./receipt.mjs";
 import { ebayFeeCents, ebayOrderAmounts, ebayOrderIsLocalPickup, ebayShipTo } from "./ebay-price.mjs";
+import { fulfillmentPath, ordersWithShipment, shipmentPatch } from "./ebay-shipment.mjs";
 
 export { ebayOrderIsLocalPickup };
 import {
@@ -1591,6 +1592,46 @@ async function listingSkuByItemId(storeId) {
   return new Map((listed || []).filter((row) => row.listing_id).map((row) => [String(row.listing_id), row.sku]));
 }
 
+/**
+ * eBay says an order has shipped (a shipping_fulfillment exists) but Floor still shows To ship:
+ * set shipped_at / tracking / carrier. Only paid, not-yet-shipped Floor rows are looked at, so a
+ * normal run makes no extra eBay calls. Marketplace buyers have no email, so the queued
+ * "tracking" mail is closed instead of retrying forever.
+ */
+export async function syncEbayShipments(storeId, orders, hint = {}) {
+  const shipped = ordersWithShipment(orders);
+  if (!shipped.length) return [];
+  const sb = serviceClient();
+  const { data: rows, error } = await sb
+    .from("web_orders")
+    .select("id,order_no")
+    .eq("store_id", storeId)
+    .eq("channel", "ebay")
+    .eq("status", "paid")
+    .is("shipped_at", null)
+    .in("order_no", shipped.map((o) => String(o.orderId)));
+  if (error) throw new Error(error.message);
+  const out = [];
+  for (const row of rows ?? []) {
+    const order = shipped.find((o) => String(o.orderId) === String(row.order_no));
+    const path = fulfillmentPath(order);
+    if (!path) continue;
+    const fulfillment = await ebayFetch(storeId, "GET", path, undefined, hint);
+    const patch = shipmentPatch(fulfillment, new Date().toISOString());
+    if (!patch) continue;
+    const { error: upErr } = await sb.from("web_orders").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", row.id).is("shipped_at", null);
+    if (upErr) throw new Error(upErr.message);
+    await sb
+      .from("web_order_emails")
+      .update({ sent_at: new Date().toISOString(), last_error: "eBay order (no buyer email)" })
+      .eq("order_id", row.id)
+      .eq("kind", "tracking")
+      .is("sent_at", null);
+    out.push({ orderId: row.order_no, ...patch });
+  }
+  return out;
+}
+
 export async function pollEbayOrders(storeId, accountHint = {}) {
   const account = accountHint._account || (await resolveEbayAccount(storeId, accountHint));
   const hint = { _account: account, accountId: account.id };
@@ -1618,6 +1659,13 @@ export async function pollEbayOrders(storeId, accountHint = {}) {
         continue;
       }
       await ingestFrom(storeId, order, "fulfillment", bag);
+    }
+    // Same response: orders eBay already shipped move to Shipped in Floor on their own.
+    try {
+      const moved = await syncEbayShipments(storeId, json?.orders ?? [], hint);
+      if (moved.length) bag.results.push({ source: "shipment_sync", accountId: account.id, shipped: moved });
+    } catch (err) {
+      bag.results.push({ source: "shipment_sync", accountId: account.id, error: err instanceof Error ? err.message : String(err) });
     }
   } catch (err) {
     bag.results.push({

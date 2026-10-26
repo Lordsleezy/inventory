@@ -1,4 +1,6 @@
 import type { ReactNode } from 'react';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { DepopSalePanel } from './DepopSalePanel';
 import { ListingManagerPanel, type ListingChannel } from './ListingManagerPanel';
 import { MarketplaceBoard, type BoardChannel } from './MarketplaceBoard';
 
@@ -21,7 +23,7 @@ const TITLES: Record<ListingChannel, { eyebrow: string; title: string; blurb: st
   depop: {
     eyebrow: 'DEPOP',
     title: 'Depop listings',
-    blurb: 'No listing API — Push pack → post on Depop → paste the link. A unit counts as on Depop only with a listing row. Admin-only.',
+    blurb: 'Type in each Depop sale by hand: item, sale price, Depop fee, payout, date. Nothing is imported from email. Admin-only.',
   },
 };
 
@@ -31,9 +33,11 @@ type Props = {
   money: (n: number) => string;
   /** Optional Amazon queue / create panel rendered under the listing manager. */
   amazonQueue?: ReactNode;
+  /** Needed for the Depop sale form. */
+  client?: SupabaseClient;
 };
 
-export function ChannelListingPage({ channel, accessToken, money, amazonQueue }: Props) {
+export function ChannelListingPage({ channel, accessToken, money, amazonQueue, client }: Props) {
   if (channel !== 'depop') {
     return (
       <>
@@ -57,7 +61,12 @@ export function ChannelListingPage({ channel, accessToken, money, amazonQueue }:
           <p>{meta.blurb}</p>
         </div>
       </header>
-      <ListingManagerPanel accessToken={accessToken} money={money} channel={channel} channelLocked />
+      {client && <DepopSalePanel client={client} money={money} variant="desktop" />}
+      <details className="mboard-more">
+        <summary>Depop listings (mark a unit as listed on Depop)</summary>
+        <p className="hint">No listing API. Push pack, post on Depop, paste the link. A unit counts as on Depop only with a listing row.</p>
+        <ListingManagerPanel accessToken={accessToken} money={money} channel={channel} channelLocked />
+      </details>
     </>
   );
 }

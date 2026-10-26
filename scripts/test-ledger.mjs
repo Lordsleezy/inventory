@@ -128,20 +128,21 @@ assert.equal(ebayTotals.gross_cents - ebayTotals.fee_cents - ebayTotals.ship_cos
   ebayTotals.profit_cents);
 console.log(`ebay actuals: fee 1722 ship 1200 profit ${l.profit_cents}, tax remitted by marketplace ok`);
 
-// 5) Depop via marketplace_ingest_sale: email gave real fee + prepaid label deduction.
+// 5) Depop email import is off for good: the database refuses to create a Depop sale outside the manual entry RPC.
 await addUnit("92005", { ask: 8000, cost: 900 });
 await db.exec(`select set_config('request.jwt.claim.role','service_role',false)`);
-await db.query(`select public.marketplace_ingest_sale(
-  p_store=>'${STORE}',p_sku=>'92005',p_channel=>'depop',p_price_cents=>8000,
-  p_order_number=>'DEPOP-42',p_message_id=>'msg-depop-1',p_marketplace=>'depop',
-  p_item_title=>'Depop unit',p_ship_by=>null,p_fulfillment=>'ship',p_buyer=>'{}'::jsonb,
-  p_confidence=>1,p_fee_cents=>309,p_ship_label_cents=>999,p_tax_cents=>null,p_payout_cents=>6692)`);
+await assert.rejects(
+  db.query(`select public.marketplace_ingest_sale(
+    p_store=>'${STORE}',p_sku=>'92005',p_channel=>'depop',p_price_cents=>8000,
+    p_order_number=>'DEPOP-42',p_message_id=>'msg-depop-1',p_marketplace=>'depop',
+    p_item_title=>'Depop unit',p_ship_by=>null,p_fulfillment=>'ship',p_buyer=>'{}'::jsonb,
+    p_confidence=>1,p_fee_cents=>309,p_ship_label_cents=>999,p_tax_cents=>null,p_payout_cents=>6692)`),
+  /depop_import_disabled/);
 await db.exec(`select set_config('request.jwt.claim.role','authenticated',false)`);
-l = await ledger("92005");
-assert.equal(l.channel_fee_cents, 309); assert.equal(l.fee_source, "actual");
-assert.equal(l.ship_cost_cents, 999); assert.equal(l.ship_cost_source, "marketplace");
-assert.equal(l.profit_cents, 8000 - 309 - 999 - 900);
-console.log(`depop ingest: actual fee 309, label 999, profit ${l.profit_cents} ok`);
+// The unit is sold elsewhere instead, so the later refund checks still have a sale to void.
+await db.query(`insert into public.sales(store_id,sku,qty,sold_at,price_cents,tax_cents,channel,payment_method,receipt_no)
+  values('${STORE}','92005',1,now(),8000,0,'whatnot','marketplace','WN-5')`);
+console.log("depop import: refused by the database ok");
 
 // 6) Mercari with no fee info → estimated 10% + 0 from channel_fee_rates.
 await addUnit("92006", { ask: 5000, cost: 900 });

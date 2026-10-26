@@ -12,10 +12,7 @@
 
 # Internal alerts are sent through Gmail SMTP (GMAIL_SMTP_USER / GMAIL_SMTP_APP_PASSWORD); web_shipped buyer mail stays on Resend.
 
-# Gmail inbox reader: Depop / Mercari sale mail -> marketplace_ingest_sale / needs_review.
-[functions."gmail-sales-poll"]
-  schedule = "*/2 * * * *"
-  timeout = 30
+# Gmail inbox reader for Depop / Mercari sale mail is DISABLED (no schedule); Depop sales are entered by hand.
 [functions."amazon-sync"]
   schedule = "*/10 * * * *"
   timeout = 60
