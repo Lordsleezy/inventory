@@ -1,6 +1,6 @@
 // Static guard: every portal_* SQL function (newest definition in supabase/migrations) that
-// touches money or cost must be gated to admins, either directly with portal_is_admin() or by
-// scoping to portal_store_id() (which returns null unless portal_is_admin()).
+// touches money or cost must be gated to admins, either directly with portal_is_admin(), by
+// scoping to portal_store_id(), or through portal_assert_admin_store().
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
@@ -40,7 +40,7 @@ test("money-touching portal_* functions are admin-gated", () => {
   for (const [name, { file, body }] of defs) {
     if (!name.startsWith("portal_") || name === "portal_store_id" || name === "portal_is_admin") continue;
     if (ALLOW.has(name) || !MONEY.test(body)) continue;
-    if (!/portal_is_admin\(\)|portal_store_id\(\)/.test(body)) bad.push(`${name} (${file})`);
+    if (!/portal_is_admin\(\)|portal_store_id\(\)|portal_assert_admin_store\(\)/.test(body)) bad.push(`${name} (${file})`);
   }
   assert.deepEqual(bad, [], `portal_* functions returning money without an admin gate:\n${bad.join("\n")}`);
 });

@@ -4,6 +4,7 @@ import type { StaffSession } from '@floor/cloud';
 import { floorFunctionUrl } from '../floorApi';
 import { ListingManagerPanel } from '../ListingManagerPanel';
 import { DepopSalePanel } from '../DepopSalePanel';
+import { DepopLiveListingsPanel } from '../DepopLiveListingsPanel';
 import { ConnectionsPage } from '../ConnectionsPage';
 import { errText } from '../errText';
 import { shortError } from './shortError';
@@ -292,6 +293,7 @@ export function AppReportsNative({ onBack, children, title = 'Reports', action, 
 export function AppDepopNative({ client, accessToken, money, onBack }: {
   client: SupabaseClient; accessToken: string; money: (n: number) => string; onBack: () => void;
 }) {
+  const [tab, setTab] = useState<'listed'|'sales'|'manage'>('listed');
   return (
     <div className="app-stack">
       <div className="app-nav">
@@ -300,11 +302,14 @@ export function AppDepopNative({ client, accessToken, money, onBack }: {
         <button type="button" style={{ visibility: 'hidden' }}>+</button>
       </div>
       <div className="app-embed-soft">
-        <DepopSalePanel client={client} money={money} variant="app" />
-        <details className="mboard-more">
-          <summary>Depop listings (mark a unit as listed on Depop)</summary>
-          <ListingManagerPanel accessToken={accessToken} money={money} channel="depop" channelLocked />
-        </details>
+        <nav className="depop-tabs" aria-label="Depop sections">
+          <button type="button" aria-current={tab==='listed'?'page':undefined} onClick={()=>setTab('listed')}>Listed</button>
+          <button type="button" aria-current={tab==='sales'?'page':undefined} onClick={()=>setTab('sales')}>Sales</button>
+          <button type="button" aria-current={tab==='manage'?'page':undefined} onClick={()=>setTab('manage')}>Manage</button>
+        </nav>
+        {tab==='listed'&&<DepopLiveListingsPanel client={client} money={money} variant="app" />}
+        {tab==='sales'&&<DepopSalePanel client={client} money={money} variant="app" />}
+        {tab==='manage'&&<ListingManagerPanel accessToken={accessToken} money={money} channel="depop" channelLocked />}
       </div>
     </div>
   );

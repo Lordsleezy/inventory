@@ -1,6 +1,7 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { DepopSalePanel } from './DepopSalePanel';
+import { DepopLiveListingsPanel } from './DepopLiveListingsPanel';
 import { ListingManagerPanel, type ListingChannel } from './ListingManagerPanel';
 import { MarketplaceBoard, type BoardChannel } from './MarketplaceBoard';
 
@@ -52,6 +53,7 @@ export function ChannelListingPage({ channel, accessToken, money, amazonQueue, c
     );
   }
   const meta = TITLES[channel];
+  const [tab, setTab] = useState<'listed'|'sales'|'manage'>('listed');
   return (
     <>
       <header>
@@ -61,12 +63,14 @@ export function ChannelListingPage({ channel, accessToken, money, amazonQueue, c
           <p>{meta.blurb}</p>
         </div>
       </header>
-      {client && <DepopSalePanel client={client} money={money} variant="desktop" />}
-      <details className="mboard-more">
-        <summary>Depop listings (mark a unit as listed on Depop)</summary>
-        <p className="hint">No listing API. Push pack, post on Depop, paste the link. A unit counts as on Depop only with a listing row.</p>
-        <ListingManagerPanel accessToken={accessToken} money={money} channel={channel} channelLocked />
-      </details>
+      <nav className="depop-tabs" aria-label="Depop sections">
+        <button type="button" aria-current={tab==='listed'?'page':undefined} onClick={()=>setTab('listed')}>Listed on Depop</button>
+        <button type="button" aria-current={tab==='sales'?'page':undefined} onClick={()=>setTab('sales')}>Manual sale entry</button>
+        <button type="button" aria-current={tab==='manage'?'page':undefined} onClick={()=>setTab('manage')}>Listing manager</button>
+      </nav>
+      {client && tab==='listed' && <DepopLiveListingsPanel client={client} money={money} variant="desktop" />}
+      {client && tab==='sales' && <DepopSalePanel client={client} money={money} variant="desktop" />}
+      {tab==='manage' && <><p className="hint">No listing API. Push pack, post on Depop, paste the listing link. A unit counts as on Depop only with a listing row.</p><ListingManagerPanel accessToken={accessToken} money={money} channel={channel} channelLocked /></>}
     </>
   );
 }
