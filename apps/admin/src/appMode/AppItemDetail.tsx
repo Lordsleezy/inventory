@@ -27,6 +27,7 @@ type Props = {
   /** Portal admin / manager — show Delete on edit. */
   canDelete?: boolean;
   staffMode?: boolean;
+  missingFields?: string[];
 };
 
 const CHANNELS: { key: string; label: string }[] = [
@@ -42,12 +43,12 @@ function titleOf(u: Record<string, unknown>) {
 }
 
 export function AppItemDetail({
-  client, storeId, accessToken, sku, money, onBack, onChanged, onSellInStore, canDelete = false, staffMode = false,
+  client, storeId, accessToken, sku, money, onBack, onChanged, onSellInStore, canDelete = false, staffMode = false, missingFields = [],
 }: Props) {
   const [detail, setDetail] = useState<Detail | null>(null);
   const [urls, setUrls] = useState<Record<string, string>>({});
   const [error, setError] = useState('');
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(() => !staffMode && missingFields.length > 0);
   const [reload, setReload] = useState(0);
 
   useEffect(() => {
@@ -92,6 +93,7 @@ export function AppItemDetail({
           client={client}
           storeId={storeId}
           sku={sku}
+          missingFields={missingFields}
           unit={detail.unit}
           photos={detail.photos}
           urls={urls}

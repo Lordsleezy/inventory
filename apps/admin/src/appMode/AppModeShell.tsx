@@ -149,6 +149,7 @@ export function AppModeShell({
   void _onCommissionChanged;
   const [tab, setTab] = useState<AppTab>(() => fullAccess && parseNavFromLocation().page === 'reports' ? 'more' : 'inventory');
   const [itemSku, setItemSku] = useState<string | null>(null);
+  const [itemMissing, setItemMissing] = useState<string[]>([]);
   const [morePage, setMorePage] = useState<MoreId | null>(() => fullAccess && parseNavFromLocation().page === 'reports' ? 'reports' : null);
   const [channel, setChannel] = useState<'ebay' | 'amazon' | 'tiktok' | null>(null);
   const [invKey, setInvKey] = useState(0);
@@ -205,14 +206,15 @@ export function AppModeShell({
         <div className="app-tab-panel" data-tab="inventory" hidden={tab !== 'inventory' || !!itemSku}>
           {/* Keep mounted across tab switches so returning to Inventory is instant. */}
           <AppInventory
-            key={invKey}
+            refreshKey={invKey}
             client={client}
             storeId={storeId}
             fullAccess={fullAccess}
             staffMode={!fullAccess}
             money={money}
             stamp={stamp}
-            onOpen={(sku) => {
+            onOpen={(sku, missingFields) => {
+              setItemMissing(missingFields || []);
               history.pushState({ floorApp: 1, sku }, '');
               setItemSku(sku);
             }}
@@ -225,6 +227,7 @@ export function AppModeShell({
             storeId={storeId}
             accessToken={session.access_token}
             sku={itemSku}
+            missingFields={itemMissing}
             money={money}
             canDelete={fullAccess}
             staffMode={!fullAccess}

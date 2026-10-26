@@ -1,3 +1,4 @@
+import { inventoryMissingText } from './inventoryMissing';
 import { DnsCheckbox } from './DnsCheckbox';
 ﻿import { useEffect, useRef, useState } from 'react';
 import { ChannelCheckboxes } from './ChannelCheckboxes';
@@ -93,7 +94,7 @@ type LookupMerged = {
 
 export function UnitEditDrawer({
   client, storeId, sku, unit, photos, urls, accessToken, onClose, onSaved, onPhotosChanged,
-  canDelete = false, onDeleted, appMode = false,
+  canDelete = false, onDeleted, appMode = false, missingFields = [],
 }: {
   client: SupabaseClient;
   storeId: string;
@@ -110,6 +111,7 @@ export function UnitEditDrawer({
   onDeleted?: () => void;
   /** Standalone Floor app: clear the bottom tab bar; use app chrome. */
   appMode?: boolean;
+  missingFields?: string[];
 }) {
   const [form, setForm] = useState<Form>(() => fromUnit(unit));
   const [options, setOptions] = useState<Options | null>(null);
@@ -385,7 +387,8 @@ export function UnitEditDrawer({
         {error && <div className="alert" role="alert">{error}</div>}
         {msg && <p className="hint">{msg}</p>}
         {canDelete && unit.state === 'sold' && <RestoreInventoryButton client={client} sku={sku} onDone={() => { onSaved({ ...unit, state: 'available' }); onClose(); }} />}
-        <p className="hint">{reviewReason ? `eBay listing needs review: ${reviewReason}.` : missing.length === 0 ? 'Looks complete for listing.' : `Still missing: ${missing.join(', ')}. Scan a UPC to fill blanks.`}</p>
+        {missingFields.length > 0 && <p className="inventory-missing" role="status">{inventoryMissingText(missingFields)}. Fill in the fields below and save.</p>}
+        {missingFields.length === 0 && <p className="hint">{reviewReason ? `eBay listing needs review: ${reviewReason}.` : missing.length === 0 ? 'Looks complete for listing.' : `Still missing: ${missing.join(', ')}. Scan a UPC to fill blanks.`}</p>}
         {reviewReason && canDelete ? <button type="button" className="secondary" disabled={busy} onClick={() => void clearEbayReview()}>I verified this issue · Clear eBay review</button> : null}
 
         <h3>Photos</h3>

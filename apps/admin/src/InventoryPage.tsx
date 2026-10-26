@@ -12,6 +12,7 @@ import { errText } from './errText';
 import { reviewReasonLabel } from './inventoryReview';
 import { DispositionButtons, DispositionsPanel } from './DispositionDialogs';
 import { showDispositionButtons } from './dispositions';
+import { inventoryMissingText } from './inventoryMissing';
 import { InventoryTotals } from './InventoryTotals';
 import { INVENTORY_BUCKET_LABELS, inventoryBucketStatus, type InventoryBucket } from './totalsMath';
 
@@ -191,11 +192,11 @@ export function InventoryPage({
       const rowButton = <button type="button" className="inventory-row" key={u.sku} disabled={hideMoney} onClick={() => { if (!hideMoney) setSelected(u.sku); }}>
         <span className="inventory-photo">{u.photo_path && urls[u.photo_path] ? <img loading="lazy" src={urls[thumb(u.photo_path)] || urls[u.photo_path]} onError={e => { const fallback = urls[u.photo_path!]; if (e.currentTarget.src !== fallback) e.currentTarget.src = fallback; }} alt="" /> : 'No photo'}</span>
         <span className="inventory-identity"><strong>{name(u)}</strong><small>SKU {u.sku}{u.title && u.title !== name(u) ? ` · ${u.title}` : ''}</small></span>
-        <span className="inventory-meta">{u.condition || 'No grade'}<small>{u.not_for_sale ? 'Not for sale' : listTab === 'sold' && u.sold_at ? `Sold ${stamp(u.sold_at)}` : label(u.state)}</small>{(listTab === 'unfinished' || listTab === 'not-ready') && !!u.missing?.length && <small className="inventory-missing">{missingText(u.missing)}</small>}</span>
+        <span className="inventory-meta">{u.condition || 'No grade'}<small>{u.not_for_sale ? 'Not for sale' : listTab === 'sold' && u.sold_at ? `Sold ${stamp(u.sold_at)}` : label(u.state)}</small>{listTab === 'unfinished' && !!u.missing?.length && <small className="inventory-missing">{missingText(u.missing)}</small>}</span>
         <span className="inventory-location">{u.locations || 'Unassigned'}</span>
         {hideMoney ? <span className="inventory-money" /> : listTab === 'sold'
           ? <span className="inventory-money"><strong>{u.sold_price_cents == null ? '—' : money(u.sold_price_cents)}</strong><small>{u.acquisition_cost_cents == null ? 'Cost missing' : `Cost ${money(u.acquisition_cost_cents)}`}</small></span>
-          : <span className="inventory-money"><strong>{u.ask_cents == null ? 'No price' : money(u.ask_cents)}</strong>{!associateBrowseOnly && <small>Cost {u.acquisition_cost_cents == null ? 'missing' : money(u.acquisition_cost_cents)}</small>}</span>}
+          : <span className="inventory-money">{listTab === 'not-ready' && !!u.missing?.length && <small className="inventory-missing">{inventoryMissingText(u.missing)}</small>}<strong>{u.ask_cents == null ? 'No price' : money(u.ask_cents)}</strong>{!associateBrowseOnly && <small>Cost {u.acquisition_cost_cents == null ? 'missing' : money(u.acquisition_cost_cents)}</small>}</span>}
       </button>;
       return actions ? <div className="inventory-row-wrap" key={u.sku}>{rowButton}<div className="inventory-row-actions"><DispositionButtons client={client} sku={u.sku} money={money} stamp={stamp} className="secondary" onDone={() => { setRefresh(n => n + 1); onCostChanged(); }} /></div></div> : rowButton; })}
     </section>
@@ -204,6 +205,7 @@ export function InventoryPage({
       client={client}
       storeId={storeId}
       sku={selected}
+      missingFields={listTab === 'not-ready' ? list?.items.find(u => u.sku === selected)?.missing : undefined}
       unit={detail.unit}
       photos={detail.photos}
       urls={urls}

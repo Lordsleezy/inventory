@@ -5,6 +5,7 @@ import { ATTENTION_SECTIONS, NeedsAttentionPanel, useAttentionCounts } from '../
 import { reviewReasonLabel } from '../inventoryReview';
 import { shortError } from './shortError';
 import { InventoryTotals } from '../InventoryTotals';
+import { inventoryMissingText } from '../inventoryMissing';
 import { INVENTORY_BUCKET_LABELS, inventoryBucketStatus, type InventoryBucket } from '../totalsMath';
 
 /** Same stock subtabs as desktop Inventory. */
@@ -38,7 +39,8 @@ type Props = {
   staffMode?: boolean;
   money: (n: number) => string;
   stamp: (s: string) => string;
-  onOpen: (sku: string) => void;
+  onOpen: (sku: string, missingFields?: string[]) => void;
+  refreshKey?: number;
   scrollRef?: React.RefObject<HTMLDivElement | null>;
 };
 
@@ -118,7 +120,7 @@ function needs(u: Row): string | null {
   return null;
 }
 
-export function AppInventory({ client, storeId, fullAccess, staffMode = false, money, stamp, onOpen, scrollRef }: Props) {
+export function AppInventory({ client, storeId, fullAccess, staffMode = false, money, stamp, onOpen, scrollRef, refreshKey = 0 }: Props) {
   const cacheScope = `${storeId}:${staffMode ? 'staff' : 'admin'}`;
   const [filter, setFilter] = useState<Filter>('in_stock');
   const [query, setQuery] = useState('');
@@ -216,7 +218,7 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
       alive = false;
       clearTimeout(t);
     };
-  }, [client, filter, query, offset, staffMode, cacheScope]);
+  }, [client, filter, query, offset, staffMode, cacheScope, refreshKey]);
 
   const total = list?.totals.unit_count ?? 0;
   // Physical pieces (a row of 12 bottles counts 12); falls back to rows until the DB returns piece_count.
@@ -272,7 +274,7 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
           }}
         />
       </label>
-      <InventoryTotals client={client} variant="app" selected={filter in INVENTORY_BUCKET_LABELS ? filter as InventoryBucket : undefined} onSelect={bucket => { setQuery(''); setFilterTab(bucket); setList(null); }} />
+      <InventoryTotals client={client} variant="app" refreshKey={refreshKey} selected={filter in INVENTORY_BUCKET_LABELS ? filter as InventoryBucket : undefined} onSelect={bucket => { setQuery(''); setFilterTab(bucket); setList(null); }} />
       <div className="app-segment" role="tablist">
         {([
           ['in_stock', 'In stock'],
@@ -319,14 +321,14 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
       <div className="app-group">
         {(list?.items || []).map((u, idx) => {
           const warn = filter === 'dns' ? null : needs(u);
-          const missing = filter === 'not_ready' ? (u.missing || []).map(k => reviewReasonLabel(k) || MISSING_LABEL[k] || k).join(', ') : null;
+          const missing = filter === 'not_ready' ? inventoryMissingText(u.missing || []) : null;
           const thumbPath = u.photo_path ? thumb(u.photo_path) : '';
           // Prefer small derivative when signed; otherwise the original (always exists when photo_path is set).
           const src = u.photo_path
             ? (thumbPath && urls[thumbPath]) || urls[u.photo_path] || ''
             : '';
           return (
-            <button type="button" className="app-row" key={u.sku} onClick={() => onOpen(u.sku)}>
+            <button type="button" className="app-row" key={u.sku} onClick={() => onOpen(u.sku, filter === 'not_ready' ? u.missing : undefined)}>
               <span className="app-thumb">
                 {src ? (
                   <img
@@ -358,12 +360,12 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
                 <small>
                   {u.sku} · {u.not_for_sale ? 'Not for sale' : u.condition || 'No grade'}
                   {filter === 'sold' && u.sold_at ? <> · Sold {stamp(u.sold_at)}</> : null}
-                  {missing || warn ? <> · <span className="warn">{missing || warn}</span></> : null}
+                  {filter !== 'not_ready' && warn ? <> · <span className="warn">{warn}</span></> : null}
                 </small>
               </span>
               {filter === 'sold'
                 ? fullAccess && <span className="app-row-price">{u.sold_price_cents == null ? '—' : money(u.sold_price_cents)}</span>
-                : <span className="app-row-price">{u.ask_cents == null ? '—' : money(u.ask_cents)}</span>}
+                : <span className="app-row-price-stack">{missing && <small className="inventory-missing">{missing}</small>}<span className="app-row-price">{u.ask_cents == null ? '—' : money(u.ask_cents)}</span></span>}
               <span className="app-chevron" aria-hidden>›</span>
             </button>
           );

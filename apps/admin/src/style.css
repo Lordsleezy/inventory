@@ -841,3 +841,5 @@ html.dark .mboard-progress-bar{background:#2a3340}
 .depop-live-app{gap:12px}
 .depop-live-app .depop-live-row>img,.depop-live-app .depop-live-placeholder{width:64px;height:64px;flex-basis:64px}
 .inventory-totals{grid-template-columns:repeat(3,minmax(0,1fr))}.inventory-total-button{cursor:pointer;text-align:left;color:inherit;font:inherit;display:flex;flex-direction:column;align-items:flex-start;gap:6px}.inventory-total-button[aria-pressed="true"]{outline:2px solid #428bff;outline-offset:-2px}.inventory-total-button:focus-visible{outline:3px solid #428bff;outline-offset:2px}@media(max-width:750px){.inventory-totals{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+.inventory-money .inventory-missing{color:#b56300;font-size:10px;line-height:1.25;white-space:normal;overflow-wrap:anywhere}.inventory-detail>p.inventory-missing{color:#b56300;font-size:12px}

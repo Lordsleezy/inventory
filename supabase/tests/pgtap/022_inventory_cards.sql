@@ -21,6 +21,11 @@ end $$;
 select set_config('request.jwt.claim.sub',current_setting('cards.owner'),true);
 select set_config('request.jwt.claim.role','authenticated',true);
 select is(public.inventory_totals(),'{"total":21,"listed":3,"not_listed":3,"not_ready":4,"dns":5,"defective":6}'::jsonb,'ready and not ready split physical quantities; website does not count as Listed');
+insert into public.unit_channel_selections(store_id,sku,channel,selected,source)
+select store_id,sku,'ebay',false,'admin' from public.units where sku='95002';
+select is((select public.unit_inventory_bucket(u) from public.units u where sku='95002'),'not_listed','complete item with eBay unchecked is Not listed');
+update public.unit_channel_selections set selected=true where sku='95002' and channel='ebay';
+select is((select public.unit_inventory_bucket(u) from public.units u where sku='95002'),'not_listed','checked but not live complete item is also Not listed');
 select is(public.portal_inventory_list('',status,false,'sku',0,100)->'totals'->>'piece_count',public.inventory_totals()->>bucket,'admin card matches its count: '||bucket)
 from (values('inventory_total','total'),('inventory_listed','listed'),('inventory_not_listed','not_listed'),('inventory_not_ready','not_ready'),('dns','dns'),('defective','defective')) c(status,bucket);
 select is(public.portal_inventory_list_with_locations('',status,false,'sku',0,100,'all')->'totals'->>'piece_count',public.inventory_totals()->>bucket,'location list matches its count: '||bucket)
