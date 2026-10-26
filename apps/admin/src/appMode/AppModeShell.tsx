@@ -359,7 +359,7 @@ export function AppModeShell({
           </AppReportsNative>
         )}
         {fullAccess && morePage === 'depop' && (
-          <AppDepopNative accessToken={session.access_token} money={money} onBack={() => setMorePage(null)} />
+          <AppDepopNative client={client} accessToken={session.access_token} money={money} onBack={() => setMorePage(null)} />
         )}
         {fullAccess && morePage === 'settings' && (
           <AppSettingsNative

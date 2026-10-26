@@ -6,6 +6,10 @@ import { ingestMarketplaceMail, loadStoreChannels, mailAuthenticatedForMarketpla
 // Raw-email webhook (forwarder -> POST). The Gmail inbox poller (gmail-sales-poll) shares the same parse + ingest code.
 async function handle(event) {
   if (event.httpMethod !== 'POST') return json(405, { error: 'method_not_allowed' });
+  // Depop/Mercari email import is off for good (sales are entered by hand on the Depop tab).
+  return json(200, { disabled: true, reason: 'email_sale_import_disabled' });
+}
+async function handleDisabledLegacy(event) {
   if (!process.env.MARKETPLACE_EMAIL_SECRET) return json(503, { error: 'email_ingest_not_configured' });
   if (event.headers['x-marketplace-secret'] !== process.env.MARKETPLACE_EMAIL_SECRET) return json(401, { error: 'unauthorized' });
   try {

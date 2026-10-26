@@ -97,7 +97,6 @@
   ],
   "schedules": {
     "dispatch-alerts": "*/5 * * * *",
-    "gmail-sales-poll": "*/2 * * * *",
     "amazon-sync": "*/10 * * * *",
     "returns-sync": "*/30 * * * *",
     "tiktok-returns-sync": "*/30 * * * *",
@@ -130,7 +129,6 @@
     "ebay-migrate-dispatch",
     "ebay-sync",
     "enrich-models",
-    "gmail-sales-poll",
     "google-reconcile",
     "google-sync",
     "inventory-reconcile",
