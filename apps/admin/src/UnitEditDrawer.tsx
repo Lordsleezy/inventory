@@ -119,6 +119,9 @@ export function UnitEditDrawer({
   const [lookupBusy, setLookupBusy] = useState(false);
   const [msg, setMsg] = useState('');
   const [error, setError] = useState('');
+  const specificsPersist = useRef<null | (() => Promise<void>)>(null);
+  // The panel can change the description during Save; read it from here, not from the render's stale form.
+  const latestDescription = useRef<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const upcInput = useRef<HTMLInputElement>(null);
   const set = (key: keyof Form, value: string) => setForm(prev => ({ ...prev, [key]: value }));
@@ -214,6 +217,8 @@ export function UnitEditDrawer({
   }
 
   async function save() {
+    // Specifics typed or a generated description ticked in the panel below are saved first, so Save changes never drops them.
+    try { await specificsPersist.current?.(); } catch (e) { setError(e instanceof Error ? e.message : String(e)); return; }
     const ask = cents(form.price);
     const cost = cents(form.cost);
     if (ask === undefined) { setError('Price must look like 24.99 (blank = no price).'); return; }
@@ -243,7 +248,7 @@ export function UnitEditDrawer({
       p_brand: form.brand.trim(),
       p_model: form.model.trim(),
       p_title: title,
-      p_description: form.description,
+      p_description: latestDescription.current ?? form.description,
       p_ask_cents: ask,
       p_cost_cents: cost,
       p_condition: form.condition,
@@ -462,7 +467,7 @@ export function UnitEditDrawer({
           <label>Weight (lb)<input inputMode="decimal" value={form.weight} onChange={e => set('weight', e.target.value)} /></label>
           <label className="unit-edit-wide">Notes<textarea rows={3} value={form.notes} onChange={e => set('notes', e.target.value)} /></label>
         </div>
-        <EbaySpecificsPanel client={client} sku={sku} storeId={storeId} appMode={appMode} />
+        <EbaySpecificsPanel client={client} sku={sku} storeId={storeId} appMode={appMode} onDescription={(t) => { latestDescription.current = t; set('description', t); }} persistRef={specificsPersist} />
         <DnsCheckbox client={client} sku={sku} onChanged={dns => onSaved({ ...unit, listing_specs: { ...specs, do_not_ship: dns }, shippable: dns ? false : unit.shippable, fulfillment_override: dns ? 'pickup' : unit.fulfillment_override })} />
         <ChannelCheckboxes key={JSON.stringify(specs.do_not_ship)} client={client} sku={sku} appMode={appMode} />
         {canDelete && <UnitDispositionHistory client={client} sku={sku} stamp={s => new Date(s).toLocaleString()} />}

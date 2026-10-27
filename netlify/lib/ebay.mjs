@@ -234,6 +234,7 @@ export async function inspectLiveSku(storeId, sku) {
     categoryId: live?.categoryId || null,
     photos: product.imageUrls || [],
     aspects: flattenAspects(product.aspects),
+    rawAspects: product.aspects && typeof product.aspects === "object" ? product.aspects : {},
     viewUrl: ebayItemViewUrl(listingId),
     itemError: item?._error || null,
     offerError,

@@ -48,18 +48,24 @@ export function productAspects(product) {
     ...(product.model ? { Model: product.model, MPN: product.model } : {}) };
 }
 
-/** Map only explicit Floor unit facts into matching eBay aspects after category selection. */
+/** Map only explicit Floor unit facts into matching eBay aspects (applied only where the category asks for them). */
 export function unitAspects(unit = {}) {
   const incoming = {};
   if (unit.brand) incoming.Brand = unit.brand;
   if (unit.model) { incoming.Model = unit.model; incoming.MPN = unit.model; }
   if (unit.condition) incoming.Condition = unit.condition;
+  const upc = text(unit.upc).replace(/\D/g, "");
+  if (upc.length >= 8) incoming.UPC = upc;
   return incoming;
 }
 
 /**
  * deps: loadUnit(storeId, sku), loadEbayRow(storeId, sku), loadProduct(gtin14), catalog(gtin),
- *       aspectFields(categoryId), saveEbayRow(storeId, sku, patch), remember(gtin14, { categoryId, attributes })
+ *       aspectFields(categoryId), saveEbayRow(storeId, sku, patch), remember(gtin14, { categoryId, attributes }),
+ *       optional: loadLive(storeId, sku) -> { categoryId, aspects } from the live eBay listing,
+ *                 loadSiblings(storeId, sku, upc, categoryId) -> [attributes] of other units with the same UPC.
+ * Sources, first one wins per blank aspect (existing values are never touched): live eBay listing, the unit's own
+ * Floor fields, Floor's UPC memory, same-UPC units, eBay Catalog (403s are ignored), Floor's product database.
  */
 export async function autofillUnitSpecifics(deps, storeId, sku, { write = true } = {}) {
   const unit = await deps.loadUnit(storeId, sku);
@@ -68,14 +74,30 @@ export async function autofillUnitSpecifics(deps, storeId, sku, { write = true }
   if (row && row.enabled === false) return { sku, ok: true, skipped: "ebay_disabled" };
   const gtin = normalizeGtin(unit.upc);
   const product = gtin.ok ? await deps.loadProduct(gtin.gtin14) : null;
+  const live = deps.loadLive ? await deps.loadLive(storeId, sku).catch(() => null) : null;
   let categoryId = row?.category_id || null;
   let categorySource = null;
+  if (!categoryId && live?.categoryId) { categoryId = live.categoryId; categorySource = "live_listing"; }
   if (!categoryId && product?.ebay_category_id) { categoryId = product.ebay_category_id; categorySource = "floor_upc_memory"; }
-  const memory = product?.ebay_category_id && product.ebay_category_id === categoryId ? product.ebay_aspects || {} : {};
   const before = { ...(row?.attributes || {}) };
   let fields = categoryId ? await deps.aspectFields(categoryId) : [];
-  let { attributes, filled } = fillMissing(before, memory, fields);
+  let attributes = before;
+  let filled = [];
   let usedCatalog = false;
+  const apply = (incoming) => {
+    if (!categoryId || !incoming) return;
+    const r = fillMissing(attributes, incoming, fields);
+    attributes = r.attributes; filled = [...filled, ...r.filled];
+  };
+  const applyAll = async () => {
+    if (live && (!live.categoryId || live.categoryId === categoryId)) apply(live.aspects);
+    apply(unitAspects(unit));
+    apply(product?.ebay_category_id && product.ebay_category_id === categoryId ? product.ebay_aspects : null);
+    if (deps.loadSiblings && categoryId && unit.upc) {
+      for (const sibling of (await deps.loadSiblings(storeId, sku, unit.upc, categoryId).catch(() => [])) || []) apply(sibling);
+    }
+  };
+  await applyAll();
   if (gtin.ok && (!categoryId || missingRequired(fields, attributes).length)) {
     const hit = await deps.catalog(gtin.upcA || gtin.ean13 || gtin.gtin14).catch(() => null);
     if (hit) {
@@ -83,17 +105,14 @@ export async function autofillUnitSpecifics(deps, storeId, sku, { write = true }
       if (!categoryId && hit.categoryId) {
         categoryId = hit.categoryId; categorySource = "ebay_catalog";
         fields = await deps.aspectFields(categoryId);
-        ({ attributes, filled } = fillMissing(before, memory, fields));
+        attributes = before; filled = [];
+        await applyAll();
       }
-      if (categoryId) {
-        const more = fillMissing(attributes, hit.aspects || {}, fields);
-        attributes = more.attributes; filled = [...filled, ...more.filled];
-      }
+      apply(hit.aspects);
     }
   }
   if (!categoryId) return { sku, ok: true, complete: false, reason: "no_category", usedCatalog, filled: [] };
-  const fromProduct = fillMissing(attributes, productAspects(product), fields);
-  attributes = fromProduct.attributes; filled = [...filled, ...fromProduct.filled];
+  apply(productAspects(product));
   const missing = missingRequired(fields, attributes);
   const complete = fields.length > 0 && missing.length === 0;
   if (write && (filled.length || categorySource)) {
@@ -104,11 +123,22 @@ export async function autofillUnitSpecifics(deps, storeId, sku, { write = true }
 }
 
 /** Supabase-backed deps (service role). */
-export function supabaseSpecificsDeps(sb, { catalog, aspectFields }) {
+export function supabaseSpecificsDeps(sb, { catalog, aspectFields, loadLive }) {
   const must = ({ data, error }) => { if (error) throw new Error(error.message); return data; };
   return {
-    catalog, aspectFields,
-    loadUnit: async (storeId, sku) => must(await sb.from("units").select("sku,upc,brand,model,title")
+    catalog, aspectFields, loadLive,
+    // Other units with the same UPC and eBay category that already have specifics (Floor product memory by unit).
+    loadSiblings: async (storeId, sku, upc, categoryId) => {
+      const digits = text(upc).replace(/\D/g, "");
+      if (!digits) return [];
+      const { data: mates } = await sb.from("units").select("sku").eq("store_id", storeId).eq("upc", upc).neq("sku", sku).limit(25);
+      const skus = (mates || []).map((m) => m.sku);
+      if (!skus.length) return [];
+      const { data } = await sb.from("unit_channel_categories").select("attributes").eq("store_id", storeId).eq("channel", "ebay")
+        .eq("category_id", categoryId).in("sku", skus);
+      return (data || []).map((r) => r.attributes).filter((a) => a && Object.keys(a).length);
+    },
+    loadUnit: async (storeId, sku) => must(await sb.from("units").select("sku,upc,brand,model,title,condition")
       .eq("store_id", storeId).eq("sku", sku).maybeSingle()),
     loadEbayRow: async (storeId, sku) => must(await sb.from("unit_channel_categories")
       .select("category_id,attributes,enabled,source").eq("store_id", storeId).eq("sku", sku).eq("channel", "ebay").maybeSingle()),
