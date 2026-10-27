@@ -121,6 +121,7 @@ function breakdown(rows: WebOrder[]) {
 
 export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, cfg, commissionOverrides, personName, busy: parentBusy, onCommissionChanged }: Props) {
   const [orders, setOrders] = useState<WebOrder[] | null>(null);
+  const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({});
   const [locations, setLocations] = useState<Record<string, string[]>>({});
   const [error, setError] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
@@ -135,7 +136,18 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
     const { data, error: e } = await client.rpc('portal_web_orders', { p_days: 400 });
     if (e) { setError(e.message); return; }
     setOrders(data as WebOrder[]);
-    setLocations(await loadOrderLocations(client, storeId, (data as WebOrder[]).map(o => o.sku)));
+    const skus = [...new Set((data as WebOrder[]).map(o => o.sku).filter(Boolean))];
+    setLocations(await loadOrderLocations(client, storeId, skus));
+    if (skus.length) {
+      const { data: photos } = await client.from('photos').select('sku,path,is_primary,sort_order').eq('store_id', storeId).in('sku', skus.slice(0, 100)).order('is_primary', { ascending: false }).order('sort_order');
+      const bySku = new Map<string, string>();
+      for (const photo of photos || []) if (!bySku.has(photo.sku)) bySku.set(photo.sku, photo.path);
+      const paths = [...bySku.values()];
+      if (paths.length) {
+        const { data: signed } = await client.storage.from('unit-photos').createSignedUrls(paths, 3600);
+        setPhotoUrls(Object.fromEntries([...bySku.keys()].map((sku, i) => [sku, signed?.[i]?.signedUrl || ''])));
+      }
+    }
   }, [client, storeId]);
   useEffect(() => { void load(); const t = setInterval(() => { void load(); }, 30000); return () => clearInterval(t); }, [load]);
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 30000); return () => clearInterval(t); }, []);
@@ -185,6 +197,15 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
   async function markDelivered(o: WebOrder) {
     setBusy(o.id + 'deliver'); setError('');
     const { error: e } = await client.rpc('portal_mark_order_delivered', { p_order: o.id });
+    if (e) setError(e.message);
+    await load(); setBusy(null);
+  }
+  async function stepBack(o: WebOrder) {
+    const step = o.delivered_at ? 'Delivered → Shipped' : o.shipped_at ? 'Shipped → To ship' : o.picked_up_at ? 'Picked up → Awaiting pickup' : '';
+    if (!step) { setError('There is no completed fulfillment step to undo.'); return; }
+    if (!window.confirm(`Are you sure? Move this order back one step (${step}). The sale and money stay unchanged.`)) return;
+    setBusy(o.id + 'step-back'); setError('');
+    const { error: e } = await client.rpc('portal_order_step_back', { p_order: o.id });
     if (e) setError(e.message);
     await load(); setBusy(null);
   }
@@ -362,7 +383,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
       : (o.marketplace_title || o.title || 'Marketplace sale');
     const skuLabel = linked ? `SKU ${o.sku}` : 'Needs SKU match';
     return <div className="ticket-items"><div>{displayTitle} <span>· {skuLabel}</span></div>
-    <strong className="pick-location">Pick: {locations[o.sku]?.join(', ') || 'Unassigned'}</strong>
+    <strong className="pick-location">Pick: {locations[o.sku]?.join(', ') || `SKU ${o.sku}`}</strong>
     <small>{o.buyer_name}{o.buyer_email ? ` · ${o.buyer_email}` : ''}{o.buyer_phone ? ` · ${o.buyer_phone}` : ''}</small>
     <small>Item {money(o.item_cents)}{orderFee(o) ? ` · Fees ${money(orderFee(o))}` : ''} · {o.fulfillment === 'ship' ? `Buyer ship ${money(o.shipping_cents)}` : 'Store pickup'}{o.fulfillment === 'ship' ? ` · Label ${o.label_cost_cents != null ? money(o.label_cost_cents) : '—'}` : ''} · Tax {money(o.tax_cents)}</small>
     <CommissionOverrideMark overridden={!!ov} />
@@ -396,8 +417,13 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
     const isShipped = o.status === 'paid' && o.fulfillment === 'ship' && !!o.shipped_at && !o.delivered_at;
     const isPickup = o.status === 'paid' && o.fulfillment === 'pickup' && !o.picked_up_at;
     const isDone = o.status === 'paid' && !!(o.delivered_at || o.picked_up_at);
+    const lateDays = o.paid_at ? Math.floor((Date.now() - new Date(o.paid_at).getTime()) / 86400000) : 0;
+    const cardStatus = isCanceled ? 'Canceled' : isDone ? o.delivered_at ? 'Delivered' : 'Picked up' : isShipped ? 'Shipped' : isPickup ? 'Ready for pickup' : lateDays > 0 ? `Late · ${lateDays} ${lateDays === 1 ? 'day' : 'days'}` : 'Ship today';
+    const displayTitle = o.match_status === 'matched' || (!!o.sku && o.sku !== 'UNMATCHED' && !!o.sale_id)
+      ? (o.title || o.marketplace_title || 'Item') : (o.marketplace_title || o.title || 'Marketplace sale');
     return (
       <div className="ticket order" key={o.id}>
+        <div className="order-card-summary"><span className="order-card-photo">{photoUrls[o.sku] && <img src={photoUrls[o.sku]} alt="" />}</span><div className="order-card-info"><strong className="order-card-title">{displayTitle}</strong><small>SKU {o.sku} · {money(o.item_cents)}</small><div className="order-card-tags"><b>{channelLabel(o.channel)}</b><b className={isCanceled ? 'muted' : isDone ? 'done' : isShipped ? 'shipped' : 'urgent'}>{cardStatus}</b></div></div></div>
         {head(o)}{item(o)}
         {isToShip && (
           <>
@@ -449,6 +475,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
           <>
             <small>Shipped {stamp(o.shipped_at!)}{o.tracking_number ? ` · ${o.tracking_number}` : ''}</small>
             {o.refund_requested_at ? <p className="hint">Cancel & refund in progress…</p> : <div className="actions">
+              <button type="button" className="secondary" disabled={!!busy} onClick={() => void stepBack(o)}>{busy === o.id + 'step-back' ? 'Saving…' : 'Move back one step'}</button>
               {channelAllowsLabels(o.channel) && o.label_url && (
                 <button type="button" disabled={!!busy} onClick={() => setLabelOrder(o)}>Download / Reprint label</button>
               )}
@@ -473,6 +500,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
           <>
             <small>{o.picked_up_at ? `Picked up ${stamp(o.picked_up_at)} · ${o.picked_up_by || ''}` : `Delivered ${stamp(o.delivered_at!)}${o.shipped_at ? ` · shipped ${stamp(o.shipped_at)}` : ''}`}</small>
             <div className="actions">
+              <button type="button" className="secondary" disabled={!!busy} onClick={() => void stepBack(o)}>{busy === o.id + 'step-back' ? 'Saving…' : 'Move back one step'}</button>
               <button className="text-button danger" disabled={!!busy} onClick={() => void deleteOrder(o)}>{busy === o.id + 'delete' ? 'Deleting…' : 'Delete'}</button>
             </div>
           </>

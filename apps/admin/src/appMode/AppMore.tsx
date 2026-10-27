@@ -42,6 +42,22 @@ function Icon({ tone }: { tone: string }) {
   return <span className="app-more-icon" style={{ background: tone }} />;
 }
 
+function laMidnight(date: string) {
+  const [year, month, day] = date.split('-').map(Number);
+  let time = Date.UTC(year, month - 1, day, 8);
+  const formatter = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', hourCycle: 'h23' });
+  for (let i = 0; i < 3; i++) {
+    const parts = Object.fromEntries(formatter.formatToParts(new Date(time)).map(part => [part.type, Number(part.value)]));
+    time += Date.UTC(year, month - 1, day) - Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute);
+  }
+  return new Date(time).toISOString();
+}
+function addDays(date: string, amount: number) {
+  const d = new Date(`${date}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + amount);
+  return d.toISOString().slice(0, 10);
+}
+
 export function AppMoreHome({
   client, fullAccess, staffSession, session, money, setPage, onOpenChannel,
 }: Pick<Props, 'client' | 'fullAccess' | 'staffSession' | 'session' | 'money' | 'setPage' | 'onOpenChannel'>) {
@@ -57,7 +73,8 @@ export function AppMoreHome({
     void (async () => {
       try {
         const day = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
-        const { data } = await client.rpc('portal_sales', { p_start: day, p_end: day });
+        const { data, error } = await client.rpc('portal_sales', { p_from: laMidnight(day), p_to: laMidnight(addDays(day, 1)) });
+        if (error) throw error;
         if (alive) setSalesToday(Array.isArray(data) ? new Set((data as { ticket_id?: string }[]).map((r) => r.ticket_id)).size : 0);
       } catch { /* ignore */ }
 
@@ -191,7 +208,10 @@ export function AppLiveSales({ client, money, stamp, onBack }: {
         if (range === 'week') d.setDate(d.getDate() - 6);
         if (range === 'month') d.setDate(1);
         const start = range === 'today' ? end : d.toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
-        const { data, error: e } = await client.rpc('portal_sales', { p_start: start, p_end: end });
+        const { data, error: e } = await client.rpc('portal_sales', {
+          p_from: laMidnight(start),
+          p_to: laMidnight(addDays(end, 1)),
+        });
         if (e) throw e;
         if (!alive) return;
         setRows((data || []) as typeof rows);

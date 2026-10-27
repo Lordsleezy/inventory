@@ -11,7 +11,7 @@ const todayLA = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Americ
 const unitName = (u: Pick<UnitHit, 'brand' | 'model' | 'title'>) => [u.brand, u.model].filter(Boolean).join(' ') || u.title || 'Untitled unit';
 
 /** Depop sales are typed in by hand: pick the unit, price, Depop fee, payout, date. Admins only (the server enforces it). */
-export function DepopSalePanel({ client, money, variant }: { client: SupabaseClient; money: Money; variant: 'desktop' | 'app' }) {
+export function DepopSalePanel({ client, money, variant, initialSku, initialSaleCents, onClose, onSaved }: { client: SupabaseClient; money: Money; variant: 'desktop' | 'app'; initialSku?: string; initialSaleCents?: number | null; onClose?: () => void; onSaved?: () => void }) {
   const [query, setQuery] = useState('');
   const [hits, setHits] = useState<UnitHit[]>([]);
   const [unit, setUnit] = useState<UnitHit | null>(null);
@@ -32,6 +32,22 @@ export function DepopSalePanel({ client, money, variant }: { client: SupabaseCli
     setEntries((data || []) as DepopEntry[]);
   }, [client]);
   useEffect(() => { void loadEntries(); }, [loadEntries]);
+
+  useEffect(() => {
+    if (!initialSku) return;
+    let alive = true;
+    void client.rpc('portal_depop_find_units', { p_query: initialSku }).then(({ data, error: e }) => {
+      if (!alive) return;
+      const exact = ((data || []) as UnitHit[]).find(row => row.sku === initialSku);
+      if (e) setError(e.message);
+      else if (!exact) setError(`SKU ${initialSku} could not be loaded.`);
+      else {
+        setUnit(exact);
+        if (initialSaleCents != null) setSale(dollarsText(initialSaleCents));
+      }
+    });
+    return () => { alive = false; };
+  }, [client, initialSku, initialSaleCents]);
 
   useEffect(() => {
     if (unit || editing || query.trim().length < 2) { setHits([]); return; }
@@ -79,6 +95,7 @@ export function DepopSalePanel({ client, money, variant }: { client: SupabaseCli
       }
       reset();
       await loadEntries();
+      onSaved?.();
     } catch (err) { setError(errText(err)); } finally { setBusy(false); }
   }
 
@@ -96,7 +113,7 @@ export function DepopSalePanel({ client, money, variant }: { client: SupabaseCli
   const cls = variant === 'app' ? 'depop-panel depop-app' : 'depop-panel';
   return <div className={cls}>
     <section className="panel">
-      <h2>{editing ? `Edit Depop sale · SKU ${editing.sku}` : 'Record a Depop sale'}</h2>
+      <h2>{initialSku ? 'Mark sold' : editing ? `Edit Depop sale · SKU ${editing.sku}` : 'Record a Depop sale'}</h2>
       <form className="depop-form" onSubmit={e => void save(e)}>
         {!editing && (unit
           ? <div className="depop-picked"><strong>{unitName(unit)}</strong><small>SKU {unit.sku}{unit.sold_no_sale ? ' · Sold, no sale recorded' : ''}{unit.acquisition_cost_cents == null ? ' · no cost yet' : ` · cost ${money(unit.acquisition_cost_cents)}`}</small>
@@ -116,9 +133,10 @@ export function DepopSalePanel({ client, money, variant }: { client: SupabaseCli
       </form>
       {error && <p className="error" role="alert">{error}</p>}
       {notice && <p className="hint" role="status">{notice}</p>}
-      <p className="hint">Profit = payout − cost. The unit is marked sold and delisted everywhere else, and the order goes straight to Done.</p>
+      <p className="hint">Profit = payout − cost. Saving marks the unit sold, removes it from the live Depop list, and puts the order in Orders → To ship.</p>
+      {initialSku && onClose && <button type="button" className="secondary" disabled={busy} onClick={onClose}>Cancel</button>}
     </section>
-    <section className="panel">
+    {!initialSku && <section className="panel">
       <h2>Recent Depop entries</h2>
       {entries === null ? <p className="hint">Loading…</p> : entries.length === 0 ? <div className="empty">No Depop sales entered yet.</div> : <div className="ticket-list">
         {entries.map(e => <div className="ticket" key={e.id}>
@@ -128,6 +146,6 @@ export function DepopSalePanel({ client, money, variant }: { client: SupabaseCli
             <button type="button" className="text-button danger" disabled={busy} onClick={() => void remove(e)}>Delete</button></div>
         </div>)}
       </div>}
-    </section>
+    </section>}
   </div>;
 }

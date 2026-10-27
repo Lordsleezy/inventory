@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { decodeBarcodeFile, ReceivePanel } from '../ReceivePanel';
 import { BundleReceive } from '../BundleReceive';
+import { AppItemDetail } from './AppItemDetail';
 
 type Props = {
   client: SupabaseClient;
@@ -20,6 +21,7 @@ export function AppReceive({ client, storeId, accessToken, staffMode = false, on
   const [scannerOk, setScannerOk] = useState(true);
   const [nextSku, setNextSku] = useState<string | null>(null);
   const [today, setToday] = useState<{ sku: string; title: string }[]>([]);
+  const [editSku, setEditSku] = useState<string | null>(null);
   const homeCamera = useRef<HTMLInputElement>(null);
 
   function openForm(asManual: boolean) {
@@ -86,6 +88,8 @@ export function AppReceive({ client, storeId, accessToken, staffMode = false, on
     );
   }
 
+  if (editSku) return <AppItemDetail client={client} storeId={storeId} accessToken={accessToken} sku={editSku} money={n => `$${(n / 100).toFixed(2)}`} staffMode={staffMode} canDelete={!staffMode} onBack={() => setEditSku(null)} onChanged={() => { onSaved(); setEditSku(null); }} onSellInStore={() => setEditSku(null)} />;
+
   if (phase === 'bundle') {
     return <div className="app-receive-form">
       <div className="app-nav receive-app-nav">
@@ -149,12 +153,12 @@ export function AppReceive({ client, storeId, accessToken, staffMode = false, on
       <div className="app-group">
         {today.length === 0 && <div className="app-empty-row">Nothing yet today</div>}
         {today.map((u) => (
-          <div key={u.sku} className="app-row" style={{ cursor: 'default' }}>
+          <button key={u.sku} type="button" className="app-row" onClick={() => setEditSku(u.sku)}>
             <span className="app-row-text">
               <strong>{u.title}</strong>
               <small>{u.sku}</small>
             </span>
-          </div>
+          </button>
         ))}
       </div>
     </>

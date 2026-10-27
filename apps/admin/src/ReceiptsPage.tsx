@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { errText } from './errText';
 
@@ -17,6 +17,8 @@ type Receipt = {
   needs_sku?: boolean;
   lines: Line[];
 };
+type Financial = { sale_id: number; price_cents: number; shipping_cents: number; tax_cents: number; fee_cents: number; label_cents: number; other_charge_cents: number; cost_cents: number | null };
+type EditRevision = { actor_id: string | null; created_at: string; old_values: Record<string, number | null>; new_values: Record<string, number | null>; commission_delta: Record<string, unknown> };
 
 const LEGAL =
   '7-DAY EXCHANGE ONLY. No returns and no refunds. With this receipt, you may exchange the item or take store credit within 7 days of sale. Goods are sold AS-IS, WHERE-IS, with all faults. Keep this receipt.';
@@ -184,6 +186,12 @@ export function ReceiptsPage({ client, money, stamp }: {
   const [error, setError] = useState('');
   const [scope, setScope] = useState<'all' | 'instore' | 'online'>('all');
   const [viewing, setViewing] = useState<Receipt | null>(null);
+  const [editLine, setEditLine] = useState<Line | null>(null);
+  const [financial, setFinancial] = useState<Financial | null>(null);
+  const [history, setHistory] = useState<EditRevision[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
   const limit = 50;
 
   const load = useCallback(async (q: string, off: number) => {
@@ -208,11 +216,40 @@ export function ReceiptsPage({ client, money, stamp }: {
   }, [load, query, offset]);
 
   const shown = rows.filter(r => {
+    const date = r.sold_at.slice(0, 10);
+    if (startDate && date < startDate) return false;
+    if (endDate && date > endDate) return false;
     const floor = (r.channel || '').toLowerCase() === 'floor';
     if (scope === 'instore') return floor;
     if (scope === 'online') return !floor;
     return true;
   });
+
+  async function beginEdit(line: Line) {
+    setEditLine(line); setFinancial(null); setHistory([]); setError('');
+    const [{ data, error: detailsError }, { data: revisions, error: historyError }] = await Promise.all([
+      client.rpc('portal_sale_financial_details', { p_sale_id: line.id }),
+      client.rpc('portal_sale_edit_history', { p_sale_id: line.id }),
+    ]);
+    if (detailsError || historyError) { setError((detailsError || historyError)?.message || 'Could not load sale details.'); return; }
+    setFinancial(data as Financial); setHistory((revisions || []) as EditRevision[]);
+  }
+
+  async function saveFinancial(event: FormEvent) {
+    event.preventDefault(); if (!financial || saving) return;
+    setSaving(true); setError('');
+    try {
+      const { error: saveError } = await client.rpc('portal_edit_sale_financials', {
+        p_sale_id: financial.sale_id, p_price_cents: financial.price_cents, p_shipping_cents: financial.shipping_cents,
+        p_tax_cents: financial.tax_cents, p_fee_cents: financial.fee_cents, p_label_cents: financial.label_cents,
+        p_other_charge_cents: financial.other_charge_cents, p_cost_cents: financial.cost_cents,
+      });
+      if (saveError) throw saveError;
+      setEditLine(null); setFinancial(null); await load(query, offset);
+      if (viewing) setViewing(null);
+    } catch (e) { setError(errText(e) || 'Could not save receipt changes.'); }
+    finally { setSaving(false); }
+  }
 
   return <>
     <header>
@@ -227,6 +264,8 @@ export function ReceiptsPage({ client, money, stamp }: {
         <input type="search" placeholder="Receipt #, SKU, buyer, channel…"
           value={query} onChange={e => { setQuery(e.target.value); setOffset(0); }} />
       </label>
+      <label>From<input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} /></label>
+      <label>Through<input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} /></label>
       <div className="actions" style={{ alignSelf: 'end' }}>
         <button type="button" className={scope === 'all' ? undefined : 'secondary'} onClick={() => setScope('all')}>All</button>
         <button type="button" className={scope === 'instore' ? undefined : 'secondary'} onClick={() => setScope('instore')}>In person</button>
@@ -277,7 +316,7 @@ export function ReceiptsPage({ client, money, stamp }: {
       <button type="button" className="secondary" disabled={offset + limit >= total || busy} onClick={() => setOffset(offset + limit)}>Next</button>
     </div>}
     {viewing && <div className="inventory-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) setViewing(null); }}>
-      <section className="inventory-detail receipt-viewer" role="dialog" aria-modal="true" aria-label={`Receipt ${viewing.receipt_no}`}>
+        <section className="inventory-detail receipt-viewer" role="dialog" aria-modal="true" aria-label={`Receipt ${viewing.receipt_no}`}>
         <div className="section-head">
           <div><div className="eyebrow">RECEIPT</div><h2>{viewing.receipt_no}</h2></div>
           <div className="actions">
@@ -286,6 +325,19 @@ export function ReceiptsPage({ client, money, stamp }: {
           </div>
         </div>
         <ReceiptDoc r={viewing} money={money} stamp={stamp} />
+        <section className="receipt-edit-lines"><h3>Edit sale details</h3><p>Changes recalculate the sale ledger. Paid commission is preserved; increases are recorded as payout adjustments.</p>
+          {viewing.lines.filter(line => line.id > 0).map(line => <button type="button" className="secondary" key={line.id} onClick={() => void beginEdit(line)}>Edit SKU {line.sku} · {line.title}</button>)}
+        </section>
+      </section>
+    </div>}
+    {editLine && <div className="inventory-backdrop" onMouseDown={e => { if (e.target === e.currentTarget && !saving) setEditLine(null); }}>
+      <section className="inventory-detail receipt-edit-dialog" role="dialog" aria-modal="true" aria-label={`Edit sale SKU ${editLine.sku}`}>
+        <div className="section-head"><div><div className="eyebrow">SALE FINANCIALS</div><h2>SKU {editLine.sku}</h2></div><button type="button" className="secondary" disabled={saving} onClick={() => setEditLine(null)}>Close</button></div>
+        {!financial ? <p>Loading sale details…</p> : <form className="receipt-financial-form" onSubmit={event => void saveFinancial(event)}>
+          {([['price_cents','Sale price'],['shipping_cents','Buyer-paid shipping'],['fee_cents','Fees'],['tax_cents','Sales tax'],['label_cents','Shipping label'],['other_charge_cents','Other charge'],['cost_cents','Cost']] as const).map(([key,label]) => <label key={key}>{label} ($)<input type="number" min="0" step="0.01" value={financial[key] == null ? '' : (financial[key]! / 100).toFixed(2)} onChange={e => { const cents = e.target.value === '' && key === 'cost_cents' ? null : Math.round(Number(e.target.value || 0) * 100); setFinancial({ ...financial, [key]: cents } as Financial); }} /></label>)}
+          <button type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save sale changes'}</button>
+          <h3>Edit history</h3>{history.length ? history.map((revision,index) => <div className="receipt-revision" key={index}><strong>{stamp(revision.created_at)} · {revision.actor_id || 'Unknown admin'}</strong>{Object.keys(revision.new_values || {}).map(key => <small key={key}>{key.replaceAll('_',' ')}: {revision.old_values?.[key] == null ? '—' : money(revision.old_values[key]!)} → {revision.new_values?.[key] == null ? '—' : money(revision.new_values[key]!)}</small>)}{Object.keys(revision.commission_delta || {}).length > 0 && <small>Commission changes: {JSON.stringify(revision.commission_delta)}</small>}</div>) : <p>No prior edits.</p>}
+        </form>}
       </section>
     </div>}
   </>;
