@@ -12,6 +12,7 @@ select set_config('request.jwt.claim.role','service_role',true);select set_confi
 set local role service_role;
 select lives_ok(format($q$select public.floor_depop_record_listing(%L,'93001','https://www.depop.com/products/test-unit/',2500,now(),'test listing agent')$q$,current_setting('depop_test.store')),'service credential records listing without portal identity');
 select lives_ok(format($q$select public.floor_depop_record_listing(%L,'93001',null,null,null,'historical import')$q$,current_setting('depop_test.store')),'retry/import is idempotent and permits unknown metadata');
+select lives_ok($q$select public.portal_depop_add_listing('93001','https://www.depop.com/products/test-unit/',2500,null)$q$,'original Add listing RPC also accepts service-role agents without portal identity');
 reset role;
 select is((select count(*)::int from public.listings where sku='93001'),1,'one canonical row, never duplicated');
 select is((select listing_id from public.listings where sku='93001'),'https://www.depop.com/products/test-unit/','empty metadata does not erase a known URL');
