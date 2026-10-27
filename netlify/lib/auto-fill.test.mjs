@@ -91,3 +91,16 @@ test("a unit with no title or brand/model gets no made-up description", async ()
   const { deps } = fake({ title: "", brand: "", model: "", category_id: "1" });
   assert.equal((await autoFillUnit(deps, "s", "A1")).description, "no_name");
 });
+
+import { pickCandidates } from "./auto-fill.mjs";
+test("sweep candidates: only units still missing a category (new title) or a description; idle means an empty list", () => {
+  const units = [
+    { sku: "1", title: "Lamp", brand: "A", model: "", listing_body: "", tried: "" },
+    { sku: "2", title: "Fan", brand: "A", model: "", listing_body: "text", tried: "Fan" },
+    { sku: "3", title: "Fan2", brand: "A", model: "", listing_body: "text", tried: "" },
+    { sku: "4", title: "", brand: "", model: "", listing_body: "", tried: "" },
+    { sku: "5", title: "Old", brand: "", model: "", listing_body: "text", tried: "Old title" },
+  ];
+  assert.deepEqual(pickCandidates(units, ["3"]).map((u) => u.sku), ["1", "5"], "2 was tried, 3 has a category, 4 has no name");
+  assert.deepEqual(pickCandidates([units[1]], []), []);
+});
