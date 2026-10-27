@@ -11,6 +11,7 @@ export type MainPage =
   | 'tiktok'
   | 'depop'
   | 'reports'
+  | 'books'
   | 'withdrawals'
   | 'manifests'
   | 'locations'
@@ -69,6 +70,7 @@ const LEGACY: Record<string, { page: MainPage; tab?: ReportTab; inventoryTab?: I
   register: { page: 'register' },
   inventory: { page: 'inventory' },
   reports: { page: 'reports' },
+  books: { page: 'books' },
   'your-call': { page: 'inventory', inventoryTab: 'unfinished', section: 'missing-cost' },
   review: { page: 'inventory', inventoryTab: 'unfinished', section: 'missing-cost' },
   'missing-other': { page: 'inventory', inventoryTab: 'unfinished', section: 'missing-cost' },
@@ -87,6 +89,7 @@ const MAIN: MainPage[] = [
   'tiktok',
   'depop',
   'reports',
+  'books',
   'withdrawals',
   'manifests',
   'locations',

@@ -19,6 +19,7 @@ export type MoreId =
   | 'connections'
   | 'reports'
   | 'withdrawals'
+  | 'books'
   | 'manifests'
   | 'locations'
   | 'insights'
@@ -164,6 +165,10 @@ export function AppMoreHome({
             </button>
             <button type="button" className="app-more-link" onClick={() => setPage('withdrawals')}>
               <span className="app-more-left"><Icon tone="#64d2ff" />Withdrawals</span>
+              <span className="app-chevron">›</span>
+            </button>
+            <button type="button" className="app-more-link" onClick={() => setPage('books')}>
+              <span className="app-more-left"><Icon tone="#ff9f0a" />Books</span>
               <span className="app-chevron">›</span>
             </button>
           </div>

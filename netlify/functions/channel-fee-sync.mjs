@@ -6,6 +6,7 @@ import { webSquareClient, webSquareEnv } from "../lib/web-square.mjs";
 import { Environment } from "square/legacy";
 import { wrapHandler, asNetlifyFunction } from "../lib/floor-log.mjs";
 import { isNetlifyScheduleEvent } from "../lib/schedule.mjs";
+import { normalizeBooksPayout, saveBooksPayout } from "../lib/books-payout-import.mjs";
 
 // Reconciles REAL fees + eBay-bought shipping labels onto recorded sales.
 //  - eBay Finances SALE → marketplace fee (actual)
@@ -60,6 +61,22 @@ async function syncEbayFeesForAccount(sb, storeId, account, log) {
     });
     if (error) log.push({ orderId, feeError: error.message });
     else log.push({ orderId, fee });
+  }
+
+  // Pull completed eBay bank payouts inside this existing 15-minute fee-sync schedule.
+  let payoutOffset = 0;
+  for (;;) {
+    const filter = encodeURIComponent(`payoutDate:[${since}..]`);
+    const result = await ebayFetch(storeId, "GET", `/sell/finances/v1/payout?filter=${filter}&limit=200&offset=${payoutOffset}`, undefined, hint);
+    const payouts = result?.payouts || [];
+    for (const payout of payouts) {
+      const normalized = normalizeBooksPayout("ebay", payout);
+      if (!normalized) continue;
+      try { log.push(await saveBooksPayout(sb, storeId, normalized)); }
+      catch (e) { log.push({ ebayPayoutId: normalized.external_payout_id, payoutError: e?.message || String(e) }); }
+    }
+    if (payouts.length < 200) break;
+    payoutOffset += payouts.length;
   }
 
   // Aggregate label debits/credits per order.
@@ -206,6 +223,33 @@ async function syncSquareFees(sb, storeId, log) {
   }
 }
 
+async function syncSquarePayouts(sb, storeId, log) {
+  let access;
+  try { access = await getStoreSquareAccess(storeId); }
+  catch (e) { if (e?.message !== "square_not_connected") log.push({ squarePayouts: e?.message || String(e) }); return; }
+  const base = access.sandbox ? "https://connect.squareupsandbox.com" : "https://connect.squareup.com";
+  const begin = new Date(Date.now() - LOOKBACK_DAYS * 86400000).toISOString();
+  const end = new Date().toISOString();
+  let cursor = null;
+  for (let page = 0; page < 20; page++) {
+    const url = new URL("/v2/payouts", base);
+    url.searchParams.set("begin_time", begin); url.searchParams.set("end_time", end); url.searchParams.set("limit", "100");
+    if (access.locationId) url.searchParams.set("location_id", access.locationId);
+    if (cursor) url.searchParams.set("cursor", cursor);
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${access.accessToken}`, "Square-Version": "2024-01-18", "Content-Type": "application/json" } });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(`square_payouts_http_${res.status}:${JSON.stringify(body.errors || [])}`);
+    for (const payout of body.payouts || []) {
+      const normalized = normalizeBooksPayout("square", payout);
+      if (!normalized) continue;
+      try { log.push(await saveBooksPayout(sb, storeId, normalized)); }
+      catch (e) { log.push({ squarePayoutId: normalized.external_payout_id, payoutError: e?.message || String(e) }); }
+    }
+    if (!body.cursor) break;
+    cursor = body.cursor;
+  }
+}
+
 async function handle(event) {
   if (event?.httpMethod === "OPTIONS") return { statusCode: 200, headers: corsHeaders(), body: "" };
   // Schedule-only by default; allow manual invoke with webhook secret or schedule body.
@@ -221,6 +265,7 @@ async function handle(event) {
     out.stores[store.id] = log;
     try { await syncEbayFees(sb, store.id, log); } catch (e) { log.push({ ebay: String(e?.message || e) }); }
     try { await syncSquareFees(sb, store.id, log); } catch (e) { log.push({ square: String(e?.message || e) }); }
+    try { await syncSquarePayouts(sb, store.id, log); } catch (e) { log.push({ squarePayouts: String(e?.message || e) }); }
   }
   return json(200, out);
 }
