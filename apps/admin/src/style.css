@@ -855,3 +855,13 @@ html.dark .mboard-progress-bar{background:#2a3340}
 .inventory-totals{grid-template-columns:repeat(3,minmax(0,1fr))}.inventory-total-button{cursor:pointer;text-align:left;color:inherit;font:inherit;display:flex;flex-direction:column;align-items:flex-start;gap:6px}.inventory-total-button[aria-pressed="true"]{outline:2px solid #428bff;outline-offset:-2px}.inventory-total-button:focus-visible{outline:3px solid #428bff;outline-offset:2px}@media(max-width:750px){.inventory-totals{grid-template-columns:repeat(2,minmax(0,1fr))}}
 
 .inventory-money .inventory-missing{color:#b56300;font-size:10px;line-height:1.25;white-space:normal;overflow-wrap:anywhere}.inventory-detail>p.inventory-missing{color:#b56300;font-size:12px}
+
+.aspect-picker .aspect-box{position:relative;display:block}.aspect-picker input{width:100%;box-sizing:border-box;padding-right:34px}
+.aspect-clear{position:absolute;right:4px;top:50%;transform:translateY(-50%);width:28px;height:28px;border:0;background:transparent;font-size:20px;line-height:1;cursor:pointer;color:#71808d}
+.aspect-list{position:absolute;z-index:30;left:0;right:0;top:100%;margin:4px 0 0;padding:4px;list-style:none;max-height:260px;overflow:auto;background:#fff;color:#1e2935;border:1px solid #d0d5dd;border-radius:10px;box-shadow:0 10px 28px #17232d33}
+.aspect-list button{display:block;width:100%;min-height:44px;text-align:left;border:0;background:transparent;padding:8px 10px;border-radius:8px;font:inherit;color:inherit;cursor:pointer}
+.aspect-list button:hover,.aspect-list button.is-selected{background:#eef3f7}.aspect-empty{padding:8px 10px;color:#71808d;font-size:.85rem}
+.aspect-suggested{margin-left:8px;font-size:.72rem;font-style:normal;font-weight:600;color:#2f6f4f;background:#e4f3ea;border-radius:6px;padding:1px 6px}
+.category-step{margin:10px 0;padding:12px;border:1px solid #d0d5dd;border-radius:12px}
+.ebay-specifics{padding-bottom:96px}
+html.dark .aspect-list{background:#1c2129;color:#e8eef4;border-color:#354050}html.dark .aspect-list button:hover,html.dark .aspect-list button.is-selected{background:#2a323d}

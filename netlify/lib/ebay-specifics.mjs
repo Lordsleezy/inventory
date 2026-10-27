@@ -4,6 +4,7 @@
  * Never overwrites a value that is already set; never changes an existing category.
  */
 import { normalizeGtin } from "./gtin-normalize.mjs";
+import { commonSiblingValue, textSuggestions } from "./aspect-suggest.mjs";
 
 const text = (value) => String(value ?? "").trim();
 
@@ -96,6 +97,19 @@ export async function autofillUnitSpecifics(deps, storeId, sku, { write = true }
     if (deps.loadSiblings && categoryId && unit.upc) {
       for (const sibling of (await deps.loadSiblings(storeId, sku, unit.upc, categoryId).catch(() => [])) || []) apply(sibling);
     }
+    // Same category + same brand, already complete: the most common answer for each still-blank aspect (e.g. every Foster Grant reader).
+    if (deps.loadBrandSiblings && categoryId && text(unit.brand)) {
+      const mates = (await deps.loadBrandSiblings(storeId, sku, unit.brand, categoryId, fields).catch(() => [])) || [];
+      const incoming = {};
+      for (const def of fields) {
+        if (!(def.required || def.recommended) || text(attributes[def.name]) || /^(brand|mpn|model|upc)$/i.test(def.name)) continue;
+        const v = commonSiblingValue(def, mates);
+        if (v) incoming[def.name] = v;
+      }
+      apply(incoming);
+    }
+    // Words in the title / brand / model that match eBay's allowed values ("women's" -> Women, "black" -> Black).
+    if (categoryId) apply(textSuggestions(fields, attributes, unit.title, unit.brand, unit.model));
   };
   await applyAll();
   if (gtin.ok && (!categoryId || missingRequired(fields, attributes).length)) {
@@ -119,7 +133,7 @@ export async function autofillUnitSpecifics(deps, storeId, sku, { write = true }
     await deps.saveEbayRow(storeId, sku, { attributes, ...(categorySource ? { category_id: categoryId, source: categorySource } : {}) });
   }
   if (write && complete && gtin.ok) await deps.remember(gtin.gtin14, { categoryId, attributes });
-  return { sku, ok: true, categoryId, categorySource, filled, missing, complete, usedCatalog };
+  return { sku, ok: true, categoryId, categorySource, filled, missing, complete, usedCatalog, attributes };
 }
 
 /** Supabase-backed deps (service role). */
@@ -127,6 +141,15 @@ export function supabaseSpecificsDeps(sb, { catalog, aspectFields, loadLive }) {
   const must = ({ data, error }) => { if (error) throw new Error(error.message); return data; };
   return {
     catalog, aspectFields, loadLive,
+    // Complete units in the same category with the same brand (their specifics are the model answer).
+    loadBrandSiblings: async (storeId, sku, brand, categoryId, fields) => {
+      const { data: mates } = await sb.from("units").select("sku").eq("store_id", storeId).ilike("brand", brand).neq("sku", sku).limit(300);
+      const skus = (mates || []).map((m) => m.sku);
+      if (!skus.length) return [];
+      const { data } = await sb.from("unit_channel_categories").select("attributes").eq("store_id", storeId).eq("channel", "ebay")
+        .eq("category_id", categoryId).in("sku", skus);
+      return (data || []).map((r) => r.attributes).filter((a) => a && !missingRequired(fields, a).length);
+    },
     // Other units with the same UPC and eBay category that already have specifics (Floor product memory by unit).
     loadSiblings: async (storeId, sku, upc, categoryId) => {
       const digits = text(upc).replace(/\D/g, "");

@@ -139,3 +139,27 @@ test("a category taken from the live listing is saved as live_listing", async ()
   assert.equal(saved[0].source, "live_listing");
   assert.equal(saved[0].attributes.Type, "Handheld Steamer");
 });
+
+test("autofill fills Department/Type/Color from the title and copies the rest from complete same-brand units", async () => {
+  const F = [
+    { name: "Department", required: true, allowed: ["Men", "Women"], selection_only: true },
+    { name: "Type", required: true, allowed: ["Reading Glasses", "Sunglasses"], selection_only: false },
+    { name: "Frame Color", required: true, allowed: ["Black", "Brown"], selection_only: false },
+    { name: "Lens Color", required: true, allowed: ["Clear", "Tinted"], selection_only: false },
+  ];
+  const saved = [];
+  const deps = {
+    loadUnit: async () => ({ sku: "99837", upc: null, brand: "Foster Grant", model: "", title: "Foster Grant Design Optics +3.00 women's reading glasses black" }),
+    loadEbayRow: async () => ({ category_id: "67670", enabled: true, attributes: {} }), loadProduct: async () => null,
+    catalog: async () => null, aspectFields: async () => F,
+    loadBrandSiblings: async () => [{ Department: "Men", Type: "Reading Glasses", "Frame Color": "Brown", "Lens Color": "Clear" }, { Department: "Men", "Lens Color": "Clear" }],
+    saveEbayRow: async (_s, _sku, patch) => { saved.push(patch); }, remember: async () => {},
+  };
+  const r = await autofillUnitSpecifics(deps, "s", "99837");
+  assert.deepEqual(saved[0].attributes, { Department: "Men", Type: "Reading Glasses", "Frame Color": "Brown", "Lens Color": "Clear" },
+    "same-brand answers win where they exist (copied), words only fill what is left");
+  assert.equal(r.complete, true);
+  const words = await autofillUnitSpecifics({ ...deps, loadBrandSiblings: async () => [] }, "s", "99837");
+  assert.equal(words.missing.join(","), "Lens Color");
+  assert.deepEqual(saved[1].attributes, { Department: "Women", Type: "Reading Glasses", "Frame Color": "Black" });
+});

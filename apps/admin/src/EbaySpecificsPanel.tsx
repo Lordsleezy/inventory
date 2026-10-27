@@ -1,12 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { floorFunctionUrl } from './floorApi';
+import { AspectPicker } from './AspectPicker';
+import { valueIsValid } from './aspectOptions';
 
 type Field = { name: string; required?: boolean; recommended?: boolean; allowed?: string[]; selection_only?: boolean };
 type Form = { sku: string; upc: string | null; enabled: boolean; category_id: string | null; path: string | null;
   suggestion: { category_id: string; path: string } | null; fields: Field[]; attributes: Record<string, string>; missing: string[];
+  usage?: Record<string, string[]>;
   item?: { title?: string; brand?: string; model?: string; condition?: string; description?: string; defect_notes?: string } };
 type Choice = { category_id: string; path: string };
+type Preview = { category_id: string; path: string | null; fields: Field[]; attributes: Record<string, string>; prefilled: string[]; cleared: string[]; usage: Record<string, string[]> };
 type Props = { client: SupabaseClient; sku: string; storeId?: string; appMode?: boolean; onSaved?: () => void;
   /** Item edit passes its Description box so a generated description lands in the form that Save changes writes. */
   onDescription?: (text: string) => void;
@@ -21,7 +25,8 @@ export function EbaySpecificsPanel({ client, sku, storeId, appMode = false, onSa
   const [query, setQuery] = useState('');
   const [choices, setChoices] = useState<Choice[]>([]);
   const [picked, setPicked] = useState<Choice | null>(null);
-  const [applyingSuggested, setApplyingSuggested] = useState(false);
+  const [preview, setPreview] = useState<Preview | null>(null);
+  const [previewValues, setPreviewValues] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -38,14 +43,14 @@ export function EbaySpecificsPanel({ client, sku, storeId, appMode = false, onSa
       body: JSON.stringify({ store_id: storeId, sku, action, ...extra }) });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || 'eBay specifics unavailable.');
-    return result as { form: Form; remembered?: boolean };
+    return result as { form: Form; remembered?: boolean } & Record<string, unknown>;
   }
 
   function show(next: Form) {
     setForm(next);
     setValues(next.attributes || {});
     setPicked(next.category_id ? null : next.suggestion);
-    setApplyingSuggested(false);
+    setPreview(null);
     setUseGeneratedDescription(false);
     setSavedDescription('');
     setGeneratedDescription(next.item?.description?.trim() ? '' : makeDescription(next.item, sku));
@@ -77,29 +82,38 @@ export function EbaySpecificsPanel({ client, sku, storeId, appMode = false, onSa
   const missing = required.filter((f) => !values[f.name]?.trim()
     || (f.selection_only && f.allowed?.length && !f.allowed.includes(values[f.name].trim())));
 
-  async function useCategory(choice: Choice) {
+  /** Tapping a category shows its required questions right here, answered where Floor can (nothing is saved yet). */
+  async function openCategory(choice: Choice) {
+    setBusy(true); setError(''); setNotice('');
+    try {
+      const r = await call('preview-category', { category_id: choice.category_id }) as unknown as Preview & { form?: Form };
+      setPreview({ ...r, path: r.path || choice.path });
+      setPreviewValues({ ...(r.attributes || {}) });
+      setQuery('');
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    finally { setBusy(false); }
+  }
+
+  /** One button: save the category and the chosen answers together. */
+  async function confirmCategory() {
+    if (!preview) return;
     setBusy(true); setError('');
     try {
       const { data } = await client.auth.getSession();
       const token = data.session?.access_token;
       if (token) await fetch(floorFunctionUrl('category-fields'), { method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ store_id: storeId, channel: 'ebay', category_id: choice.category_id }) });
-      const { error: e } = await client.rpc('portal_set_unit_ebay_category', { p_sku: sku, p_category_id: choice.category_id });
+        body: JSON.stringify({ store_id: storeId, channel: 'ebay', category_id: preview.category_id }) });
+      const { error: e } = await client.rpc('portal_set_unit_ebay_category', { p_sku: sku, p_category_id: preview.category_id });
       if (e) throw e;
-      const r = await call('autofill');
+      const answers = Object.fromEntries(preview.fields.map(f => [f.name, (previewValues[f.name] || '').trim()]).filter(([, v]) => v));
+      const r = await call('category-selected', { attributes: answers });
       show(r.form);
-      const mapped = await call('category-selected');
-      show(mapped.form);
-      setQuery('');
+      const cleared = (r.cleared as string[] | undefined) || [];
+      setNotice(cleared.length ? `Category saved. Cleared values that no longer fit: ${cleared.join(', ')}.` : 'Category saved.');
+      onSaved?.();
     } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
     finally { setBusy(false); }
-  }
-
-  function toggleSuggestedCategory(checked: boolean) {
-    if (!checked || !picked) { setApplyingSuggested(false); return; }
-    setApplyingSuggested(true);
-    void useCategory(picked).finally(() => setApplyingSuggested(false));
   }
 
   /** Save the description on the item, then copy it to the live eBay listing (description only). */
@@ -168,16 +182,11 @@ export function EbaySpecificsPanel({ client, sku, storeId, appMode = false, onSa
   }
 
   function input(f: Field) {
-    const id = `aspect-${sku}-${f.name.replace(/\W+/g, '-')}`;
-    const value = values[f.name] || '';
-    const bad = Boolean(value && f.selection_only && f.allowed?.length && !f.allowed.includes(value));
-    return <label key={f.name} className={`ebay-specific-field${f.required && (!value || bad) ? ' is-missing' : ''}`}>
-      <span>{f.name}{f.required ? ' *' : ''}</span>
-      <input value={value} list={f.allowed?.length ? id : undefined} placeholder={f.allowed?.length ? 'Search eBay values' : ''}
-        onChange={(e) => setValues((old) => ({ ...old, [f.name]: e.target.value }))} />
-      {f.allowed?.length ? <datalist id={id}>{f.allowed.map((v) => <option key={v} value={v} />)}</datalist> : null}
-      {bad && <small className="alert">Pick one of eBay&apos;s values.</small>}</label>;
+    return <AspectPicker key={f.name} def={f} value={values[f.name] || ''} usage={form?.usage?.[f.name] || []}
+      onChange={(v) => setValues((old) => ({ ...old, [f.name]: v }))} />;
   }
+
+  const previewMissing = (preview?.fields || []).filter(f => f.required && !valueIsValid(f, previewValues[f.name] || ''));
 
   if (!form && !error) return <p className="hint" role="status">Loading eBay item specifics…</p>;
   if (form && !form.category_id && !canPick) {
@@ -200,15 +209,21 @@ export function EbaySpecificsPanel({ client, sku, storeId, appMode = false, onSa
     </label>}
     {form && canPick && <div className="ebay-specifics-category">
       <p className="hint">{form.category_id ? `Category: ${form.path || form.category_id}` : 'No eBay category yet.'}</p>
-      {!form.category_id && picked && <label className="ebay-specifics-suggestion">
-        <input type="checkbox" checked={applyingSuggested} disabled={busy}
-          onChange={(e) => toggleSuggestedCategory(e.currentTarget.checked)} />
-        <span>Use suggested: {picked.path}</span>
-      </label>}
+      {!form.category_id && picked && !preview && <button type="button" className="ebay-specifics-suggestion" disabled={busy}
+        onClick={() => void openCategory(picked)}>Use suggested: {picked.path}</button>}
       <label>{form.category_id ? 'Change eBay category' : 'Search eBay categories'}
         <input type="search" value={query} placeholder='e.g. "steamer"' onChange={(e) => setQuery(e.target.value)} /></label>
       {choices.length > 0 && <div className="category-results">{choices.map((c) => <button type="button" key={c.category_id}
-        disabled={busy} onClick={() => void useCategory(c)}>{c.path}<small>{c.category_id}</small></button>)}</div>}
+        disabled={busy} onClick={() => void openCategory(c)}>{c.path}<small>{c.category_id}</small></button>)}</div>}
+      {preview && <div className="category-step" role="group" aria-label="New category questions">
+        <p className="hint"><strong>{preview.path || preview.category_id}</strong></p>
+        {preview.cleared.length > 0 && <p className="hint">These current values do not fit this category and will be cleared: {preview.cleared.join(', ')}.</p>}
+        {preview.fields.filter(f => f.required).map(f => <AspectPicker key={f.name} def={f} value={previewValues[f.name] || ''} usage={preview.usage?.[f.name] || []}
+          suggested={preview.prefilled.includes(f.name)} onChange={(v) => setPreviewValues(old => ({ ...old, [f.name]: v }))} />)}
+        {previewMissing.length > 0 && <p className="ebay-specifics-missing" role="status">Still needed before this item can be checked for eBay: {previewMissing.map(f => f.name).join(', ')}.</p>}
+        <div className="actions"><button type="button" disabled={busy} onClick={() => void confirmCategory()}>{busy ? 'Saving…' : 'Use this category'}</button>
+          <button type="button" className="secondary" disabled={busy} onClick={() => setPreview(null)}>Cancel</button></div>
+      </div>}
     </div>}
     {form?.category_id && <>
       {required.map(input)}

@@ -1606,3 +1606,9 @@ html.app-mode .live { color: #30d158 !important; }
 html.app-mode .app-total.inventory-total-button { appearance: none; border: 0; color: #fff; }
 
 html.app-mode .app-row-price-stack{display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex:0 0 auto;max-width:36%;min-width:52px}html.app-mode .app-row-price-stack .inventory-missing{display:block;white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere;text-align:right;color:#ff9f0a;font-size:10px;line-height:1.25;font-weight:500}html.app-mode .app-unit-edit .inventory-missing{color:#ff9f0a}
+
+html.app-mode .aspect-list{background:#1c1c1e;color:#fff;border-color:#38383a}
+html.app-mode .aspect-list button:hover,html.app-mode .aspect-list button.is-selected{background:#2c2c2e}
+html.app-mode .aspect-picker input{font-size:17px;min-height:44px}
+html.app-mode .category-step{border-color:#38383a}
+html.app-mode .app-ebay-specifics{padding-bottom:120px}
