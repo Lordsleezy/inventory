@@ -100,3 +100,42 @@ test("aspect fields list required first, then recommended", () => {
   assert.deepEqual(out.map((f) => f.name), ["Type", "Color", "Notes"]);
   assert.equal(out[0].selection_only, true);
 });
+
+test("autofill pulls live eBay specifics, unit fields and same-UPC specifics, and never overwrites a value", async () => {
+  const FIELDS2 = [
+    { name: "Brand", required: true, allowed: [] }, { name: "Type", required: true, allowed: [] },
+    { name: "Color", required: true, allowed: [] }, { name: "Material", required: true, allowed: [] },
+    { name: "UPC", required: false, allowed: [] },
+  ];
+  const unit = { sku: "99844", upc: "012345678905", brand: "Acme", model: "M1", title: "t" };
+  const rows = new Map([["99844", { category_id: "111", enabled: true, attributes: { Color: "Blue" } }]]);
+  const saved = [];
+  const deps = {
+    loadUnit: async () => unit, loadEbayRow: async (_s, sku) => rows.get(sku) || null, loadProduct: async () => null,
+    catalog: async () => { throw new Error("403"); },
+    aspectFields: async () => FIELDS2,
+    loadLive: async () => ({ categoryId: "111", aspects: { Type: ["Steamer"], Color: ["Red"], Brand: ["Other"] } }),
+    loadSiblings: async () => [{ Material: "Plastic", Type: "Iron" }],
+    saveEbayRow: async (_s, sku, patch) => { saved.push(patch); },
+    remember: async () => {},
+  };
+  const r = await autofillUnitSpecifics(deps, "s", "99844");
+  assert.deepEqual(saved[0].attributes, { Color: "Blue", Type: "Steamer", Brand: "Other", Material: "Plastic", UPC: "012345678905" },
+    "Color was already set; live listing beats the unit field for Brand; sibling only fills what is still blank");
+  assert.equal(r.complete, true);
+  assert.equal(r.usedCatalog, false, "a 403 from the Catalog API never blocks anything");
+});
+
+test("a category taken from the live listing is saved as live_listing", async () => {
+  const saved = [];
+  const deps = {
+    loadUnit: async () => ({ sku: "1", upc: null, brand: "Acme", model: "", title: "t" }), loadEbayRow: async () => null, loadProduct: async () => null,
+    catalog: async () => null, aspectFields: async () => FIELDS,
+    loadLive: async () => ({ categoryId: "222", aspects: { Type: ["Handheld Steamer"] } }),
+    saveEbayRow: async (_s, _sku, patch) => { saved.push(patch); }, remember: async () => {},
+  };
+  const r = await autofillUnitSpecifics(deps, "s", "1");
+  assert.equal(r.categorySource, "live_listing");
+  assert.equal(saved[0].source, "live_listing");
+  assert.equal(saved[0].attributes.Type, "Handheld Steamer");
+});

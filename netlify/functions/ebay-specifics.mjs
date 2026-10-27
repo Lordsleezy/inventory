@@ -4,7 +4,9 @@ import { json, corsHeaders, serviceClient, staffFromEvent } from "../lib/server.
 import { portalAdminFromEvent } from "../lib/portal-auth.mjs";
 import { catalogProductByGtin, suggestCategories } from "../lib/ebay-catalog.mjs";
 import { refreshChannelCategoryFields } from "../lib/category-taxonomy.mjs";
-import { autofillUnitSpecifics, fillMissing, missingRequired, supabaseSpecificsDeps, unitAspects } from "../lib/ebay-specifics.mjs";
+import { autofillUnitSpecifics, missingRequired, supabaseSpecificsDeps } from "../lib/ebay-specifics.mjs";
+import { liveSpecificsForUnit } from "../lib/ebay-live-specifics.mjs";
+import { pushEbayDescription } from "../lib/ebay-description-sync.mjs";
 import { normalizeGtin } from "../lib/gtin-normalize.mjs";
 import { wrapHandler, asNetlifyFunction } from "../lib/floor-log.mjs";
 
@@ -66,20 +68,22 @@ async function handle(event) {
     const sku = String(body.sku || "").trim();
     if (!sku) return json(400, { error: "sku_required" });
     const sb = serviceClient();
-    const deps = supabaseSpecificsDeps(sb, { catalog: catalogProductByGtin, aspectFields: (id) => ebayAspectFields(storeId, id) });
+    const deps = supabaseSpecificsDeps(sb, { catalog: catalogProductByGtin, aspectFields: (id) => ebayAspectFields(storeId, id),
+      loadLive: (sid, s) => liveSpecificsForUnit(sid, s) });
     if (body.action === "autofill") {
       const result = await autofillUnitSpecifics(deps, storeId, sku);
       return json(200, { ok: true, result, form: await form(sb, storeId, sku) });
     }
     if (body.action === "category-selected") {
-      const current = await form(sb, storeId, sku);
-      const { data: unit } = await sb.from("units").select("brand,model,condition").eq("store_id", storeId).eq("sku", sku).maybeSingle();
-      const { attributes, filled } = fillMissing(current.attributes, unitAspects(unit), current.fields);
-      if (filled.length) {
-        const { error } = await sb.rpc("portal_set_unit_ebay_specifics", { p_sku: sku, p_attributes: Object.fromEntries(filled.map((name) => [name, attributes[name]])) });
-        if (error) throw error;
-      }
-      return json(200, { ok: true, filled, form: await form(sb, storeId, sku) });
+      // A new category: run the same no-AI pipeline (live eBay listing, Floor fields, UPC memory, same-UPC units, Catalog).
+      const result = await autofillUnitSpecifics(deps, storeId, sku);
+      return json(200, { ok: true, filled: result.filled || [], result, form: await form(sb, storeId, sku) });
+    }
+    if (body.action === "sync-description") {
+      // Admins only: copies the saved description to the live eBay listing. Price, shipping and promotions are not touched.
+      await portalAdminFromEvent(event, body.store_id);
+      const pushed = await pushEbayDescription(storeId, sku);
+      return json(200, { ok: true, ...pushed });
     }
     if (body.action === "remember") {
       const current = await form(sb, storeId, sku);

@@ -1,11 +1,12 @@
 #!/usr/bin/env node
-// One-time eBay specifics auto-fill for every in-stock unit (no AI): Floor UPC memory, eBay Catalog API by UPC,
-// then Floor's product database. Never overwrites a value that is already set and never changes an existing category.
+// One-time eBay specifics auto-fill for every in-stock unit (no AI): the live eBay listing, the unit's own Floor fields,
+// Floor UPC memory, same-UPC units, eBay Catalog API by UPC (403s ignored), then Floor's product database. Never overwrites a value that is already set and never changes an existing category.
 // Usage (needs Netlify env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, EBAY_CLIENT_ID, EBAY_CLIENT_SECRET, EBAY_ENV):
 //   node scripts/backfill-ebay-specifics.mjs --store <uuid>            # dry run: reports, writes nothing
 //   node scripts/backfill-ebay-specifics.mjs --store <uuid> --write    # fills blanks
 import { serviceClient } from "../netlify/lib/server.mjs";
 import { catalogProductByGtin } from "../netlify/lib/ebay-catalog.mjs";
+import { liveSpecificsForUnit } from "../netlify/lib/ebay-live-specifics.mjs";
 import { ebayAspectFields } from "../netlify/functions/ebay-specifics.mjs";
 import { autofillUnitSpecifics, missingRequired, supabaseSpecificsDeps } from "../netlify/lib/ebay-specifics.mjs";
 
@@ -15,13 +16,15 @@ const write = process.argv.includes("--write");
 if (!storeId) { console.error("--store <uuid> required"); process.exit(2); }
 
 const sb = serviceClient();
-const deps = supabaseSpecificsDeps(sb, { catalog: catalogProductByGtin, aspectFields: (id) => ebayAspectFields(storeId, id) });
+const deps = supabaseSpecificsDeps(sb, { catalog: catalogProductByGtin, aspectFields: (id) => ebayAspectFields(storeId, id),
+  loadLive: (sid, sku) => liveSpecificsForUnit(sid, sku) });
 const { data: units, error } = await sb.from("units").select("sku").eq("store_id", storeId)
   .in("state", ["available", "reserved", "repair"]).order("sku");
 if (error) throw new Error(error.message);
 
+const missingByAspect = {};
 const tally = { units: units.length, was_complete: 0, now_complete: 0, became_complete: 0, category_filled: 0,
-  still_missing_required: 0, no_category: 0, ebay_disabled: 0, errors: 0 };
+  units_with_new_values: 0, values_filled: 0, still_missing_required: 0, no_category: 0, ebay_disabled: 0, errors: 0 };
 let cursor = 0;
 const concurrency = write ? 8 : 12; // UPC memory uses an atomic upsert, so repeated codes stay race-safe.
 await Promise.all(Array.from({ length: Math.min(concurrency, units.length) }, async () => {
@@ -36,9 +39,14 @@ await Promise.all(Array.from({ length: Math.min(concurrency, units.length) }, as
       if (wasComplete) tally.was_complete++;
       if (r.reason === "no_category") { tally.no_category++; continue; }
       if (r.categorySource) tally.category_filled++;
+      if (r.filled?.length) { tally.units_with_new_values++; tally.values_filled += r.filled.length; }
       if (r.complete) { tally.now_complete++; if (!wasComplete) tally.became_complete++; }
-      else tally.still_missing_required++;
+      else {
+        tally.still_missing_required++;
+        for (const name of r.missing || []) missingByAspect[name] = (missingByAspect[name] || 0) + 1;
+      }
     } catch (e) { tally.errors++; console.error(sku, String(e?.message || e)); }
   }
 }));
-console.log(JSON.stringify({ dry_run: !write, ...tally }, null, 2));
+const top_missing = Object.entries(missingByAspect).sort((a, b) => b[1] - a[1]).slice(0, 15).map(([aspect, units]) => ({ aspect, units }));
+console.log(JSON.stringify({ dry_run: !write, ...tally, top_missing }, null, 2));

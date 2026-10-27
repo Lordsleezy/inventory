@@ -7,10 +7,14 @@ type Form = { sku: string; upc: string | null; enabled: boolean; category_id: st
   suggestion: { category_id: string; path: string } | null; fields: Field[]; attributes: Record<string, string>; missing: string[];
   item?: { title?: string; brand?: string; model?: string; condition?: string; description?: string; defect_notes?: string } };
 type Choice = { category_id: string; path: string };
-type Props = { client: SupabaseClient; sku: string; storeId?: string; appMode?: boolean; onSaved?: () => void };
+type Props = { client: SupabaseClient; sku: string; storeId?: string; appMode?: boolean; onSaved?: () => void;
+  /** Item edit passes its Description box so a generated description lands in the form that Save changes writes. */
+  onDescription?: (text: string) => void;
+  /** Item edit calls this before its own Save so unsaved specifics / generated text are never lost. */
+  persistRef?: { current: (() => Promise<void>) | null } };
 
 /** eBay item specifics: required first, eBay's allowed values as searchable lists. No AI. */
-export function EbaySpecificsPanel({ client, sku, storeId, appMode = false, onSaved }: Props) {
+export function EbaySpecificsPanel({ client, sku, storeId, appMode = false, onSaved, onDescription, persistRef }: Props) {
   const [form, setForm] = useState<Form | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
   const [canPick, setCanPick] = useState(false);
@@ -23,6 +27,7 @@ export function EbaySpecificsPanel({ client, sku, storeId, appMode = false, onSa
   const [notice, setNotice] = useState('');
   const [generatedDescription, setGeneratedDescription] = useState('');
   const [useGeneratedDescription, setUseGeneratedDescription] = useState(false);
+  const [savedDescription, setSavedDescription] = useState('');
 
   async function call(action: string, extra: Record<string, unknown> = {}) {
     const { data } = await client.auth.getSession();
@@ -42,6 +47,7 @@ export function EbaySpecificsPanel({ client, sku, storeId, appMode = false, onSa
     setPicked(next.category_id ? null : next.suggestion);
     setApplyingSuggested(false);
     setUseGeneratedDescription(false);
+    setSavedDescription('');
     setGeneratedDescription(next.item?.description?.trim() ? '' : makeDescription(next.item, sku));
   }
 
@@ -96,6 +102,43 @@ export function EbaySpecificsPanel({ client, sku, storeId, appMode = false, onSa
     void useCategory(picked).finally(() => setApplyingSuggested(false));
   }
 
+  /** Save the description on the item, then copy it to the live eBay listing (description only). */
+  async function persistDescription(text: string) {
+    const value = text.trim();
+    if (!value || value === savedDescription) return;
+    const { error: descriptionError } = await client.rpc('portal_set_unit_text', { p_sku: sku, p_field: 'description', p_value: value });
+    if (descriptionError) throw descriptionError;
+    setSavedDescription(value);
+    onDescription?.(value);
+    try { await call('sync-description'); }
+    catch (e) { setNotice(`Description saved. The eBay listing was not updated: ${e instanceof Error ? e.message : String(e)}`); }
+  }
+
+  /** Everything unsaved in this panel (changed specifics, ticked description). */
+  async function persist() {
+    if (!form) return;
+    const changed = Object.fromEntries((form.fields || []).map((f) => [f.name, values[f.name] ?? ''])
+      .filter(([name, value]) => (form.attributes[name] ?? '') !== value));
+    if (Object.keys(changed).length) {
+      const { error: e } = await client.rpc('portal_set_unit_ebay_specifics', { p_sku: sku, p_attributes: changed });
+      if (e) throw e;
+      setForm({ ...form, attributes: { ...form.attributes, ...changed } });
+    }
+    if (useGeneratedDescription && canPick) await persistDescription(generatedDescription);
+  }
+  if (persistRef) persistRef.current = persist;
+
+  async function toggleGenerated(on: boolean) {
+    setUseGeneratedDescription(on);
+    if (!on) return;
+    onDescription?.(generatedDescription);
+    if (!canPick) return; // clerks: the text goes into the Description box and saves with Save changes
+    setBusy(true); setError('');
+    try { await persistDescription(generatedDescription); setNotice('Description saved on the item.'); }
+    catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    finally { setBusy(false); }
+  }
+
   async function save() {
     if (!form) return;
     setBusy(true); setError(''); setNotice('');
@@ -106,12 +149,7 @@ export function EbaySpecificsPanel({ client, sku, storeId, appMode = false, onSa
         const { error: e } = await client.rpc('portal_set_unit_ebay_specifics', { p_sku: sku, p_attributes: changed });
         if (e) throw e;
       }
-      if (useGeneratedDescription && generatedDescription.trim()) {
-        const { error: descriptionError } = await client.rpc('portal_set_unit_text', {
-          p_sku: sku, p_field: 'description', p_value: generatedDescription.trim(),
-        });
-        if (descriptionError) throw descriptionError;
-      }
+      if (useGeneratedDescription && generatedDescription.trim()) await persistDescription(generatedDescription);
       const r = await call('remember');
       show(r.form);
       setNotice(r.form.missing.length ? `Saved. Still needed: ${r.form.missing.join(', ')}.`
@@ -153,12 +191,12 @@ export function EbaySpecificsPanel({ client, sku, storeId, appMode = false, onSa
     {form?.category_id && missing.length > 0 && <p className="ebay-specifics-missing" role="status">
       Fill these required eBay fields before listing: {missing.map((field) => field.name).join(', ')}.
     </p>}
-    {form?.category_id && !form.item?.description?.trim() && <label className="ebay-specifics-description-check">
-      <input type="checkbox" checked={useGeneratedDescription} onChange={(e) => setUseGeneratedDescription(e.currentTarget.checked)} />
+    {form?.category_id && !form.item?.description?.trim() && !savedDescription && <label className="ebay-specifics-description-check">
+      <input type="checkbox" checked={useGeneratedDescription} onChange={(e) => void toggleGenerated(e.currentTarget.checked)} />
       <span>Use generated description</span>
     </label>}
-    {form?.category_id && useGeneratedDescription && <label className="ebay-specifics-generated-description">
-      Review generated description<textarea rows={5} value={generatedDescription} onChange={(e) => setGeneratedDescription(e.currentTarget.value)} />
+    {form?.category_id && useGeneratedDescription && !savedDescription && <label className="ebay-specifics-generated-description">
+      Review generated description<textarea rows={5} value={generatedDescription} onChange={(e) => { setGeneratedDescription(e.currentTarget.value); onDescription?.(e.currentTarget.value); }} />
     </label>}
     {form && canPick && <div className="ebay-specifics-category">
       <p className="hint">{form.category_id ? `Category: ${form.path || form.category_id}` : 'No eBay category yet.'}</p>
