@@ -7,3 +7,5 @@ Arguments: `p_store` (store UUID), `p_sku`, `p_url` (the confirmed Depop product
 This RPC records existing publications only. It does not publish to Depop. Agents must still check the live shop for duplicates, use actual unit photos, obey Depop's current prohibited-items policy, exclude DNS/do-not-list/Defective/sold items, and respect the owner's price, shipping and pacing instructions. Missing URL/date/price may be NULL only when importing an owner-confirmed historical SKU list; never invent values.
 
 The signed-in portal form remains admin-only. Clerks and anonymous clients cannot execute the service-only confirmation function. Recording a Depop sale removes its canonical listing row from the live tracker; deleting/voiding a sale never automatically republishes it.
+
+Confirmed Depop rows are protected from generic legacy imports. Use `floor_depop_remove_listing(p_store,p_sku,p_actor)` to record an actual shop removal; the portal Remove action remains available to admins. Never rewrite the tracker from a stale export. All other channel rows remain independent.

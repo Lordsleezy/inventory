@@ -1104,18 +1104,10 @@ export async function confirmDepopListed(storeId, { sku, depopUrl = null, markOn
     return { ok: false, error: "depop_url_required — paste the Depop product link, or pass mark_only=true" };
   }
 
-  const { error: upErr } = await sb.from("listings").upsert(
-    {
-      store_id: storeId,
-      sku,
-      channel: "depop",
-      status: "listed",
-      listing_id: listingId,
-      listed_at: new Date().toISOString(),
-      delisted_at: null,
-    },
-    { onConflict: "store_id,sku,channel" },
-  );
+  const { error: upErr } = await sb.rpc("floor_depop_record_listing", {
+    p_store: storeId, p_sku: sku, p_url: url, p_price_cents: null,
+    p_listed_at: new Date().toISOString(), p_actor: "Floor Depop confirmation",
+  });
   if (upErr) return { ok: false, error: upErr.message };
 
   const prev = Array.isArray(unit.listed_on) ? unit.listed_on : [];
@@ -1145,13 +1137,10 @@ export async function endDepopListing(storeId, { sku } = {}) {
   const { data: unit } = await sb.from("units").select("sku, listed_on, state").eq("store_id", storeId).eq("sku", sku).maybeSingle();
   if (!unit) return { ok: false, error: "unknown_sku" };
 
-  await sb
-    .from("listings")
-    .update({ status: "delisted", delisted_at: new Date().toISOString() })
-    .eq("store_id", storeId)
-    .eq("sku", sku)
-    .eq("channel", "depop")
-    .eq("status", "listed");
+  const { error: removeError } = await sb.rpc("floor_depop_remove_listing", {
+    p_store: storeId, p_sku: sku, p_actor: "Floor removed-from-Depop confirmation",
+  });
+  if (removeError) return { ok: false, error: removeError.message };
 
   const next = (unit.listed_on || []).filter((c) => c !== "depop");
   await sb

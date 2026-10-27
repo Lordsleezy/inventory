@@ -18,6 +18,14 @@ select is((select count(*)::int from public.listings where sku='93001'),1,'one c
 select is((select listing_id from public.listings where sku='93001'),'https://www.depop.com/products/test-unit/','empty metadata does not erase a known URL');
 select is((select depop_price_cents from public.listings where sku='93001'),2500,'empty metadata does not erase a known price');
 select ok((select 'depop'=any(listed_on) from public.units where sku='93001'),'existing canonical trigger updates listed_on');
+select ok((select depop_confirmed_at is not null from public.listings where sku='93001' and channel='depop'),'backend confirmations get durable ownership');
+update public.listings set status='delisted',delisted_at=now() where sku='93001' and channel='depop';
+select is((select status from public.listings where sku='93001' and channel='depop'),'listed','stale import cannot erase confirmed live status');
+delete from public.listings where sku='93001' and channel='depop';
+select is((select count(*)::int from public.listings where sku='93001' and channel='depop'),1,'stale import cannot delete confirmed tracker entry');
+update public.units set listed_on=array['ebay'] where sku='93001';
+select ok((select 'depop'=any(listed_on) and 'ebay'=any(listed_on) from public.units where sku='93001'),'legacy flag importer cannot erase Depop or alter other channels');
+
 select throws_ok(format($q$select public.floor_depop_record_listing(%L,'93002',null,null,null,'test')$q$,current_setting('depop_test.store')),'22023','depop_unit_not_available: sold','cannot add sold SKU');
 select throws_ok(format($q$select public.floor_depop_record_listing(%L,'93003',null,null,null,'test')$q$,current_setting('depop_test.store')),'P0001','DNS: Do not ship - never list on eBay, Amazon, TikTok Shop or Depop','DNS exclusion remains enforced');
 select throws_ok(format($q$select public.floor_depop_record_listing(%L,'93005','https://example.com/invalid',10,now(),'test')$q$,current_setting('depop_test.store')),'22023','invalid_depop_url','foreign URLs rejected');
@@ -36,4 +44,9 @@ select is((select status from public.listings where sku='93001'),'delisted','sal
 select ok((select not ('depop'=any(listed_on)) from public.units where sku='93001'),'sold SKU channel flag cleared');
 select is((select count(*)::int from public.portal_depop_live_listings()),2,'sold item disappears from portal list');
 select is((select count(*)::int from public.sales where sku='93001'),1,'tracker introduces no duplicate sale');
+update public.listings set status='listed',delisted_at=null where sku='93001' and channel='depop';
+select is((select status from public.listings where sku='93001' and channel='depop'),'delisted','stale import cannot revive a sold unit');
+select lives_ok($q$select public.portal_depop_remove_listing('93005')$q$,'owner can explicitly remove a confirmed listing');
+select is((select status from public.listings where sku='93005' and channel='depop'),'delisted','explicit removal is persisted');
+
 select * from finish();rollback;
