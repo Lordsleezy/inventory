@@ -9,7 +9,7 @@ import {
 import { tiktokAuthorizeUrl } from "./tiktok-shop.mjs";
 
 const SCOPES = {
-  square: "MERCHANT_PROFILE_READ PAYMENTS_WRITE PAYMENTS_WRITE_IN_PERSON",
+  square: "MERCHANT_PROFILE_READ PAYMENTS_WRITE PAYMENTS_WRITE_IN_PERSON PAYOUTS_READ",
   ebay: EBAY_OAUTH_SCOPES,
 };
 
