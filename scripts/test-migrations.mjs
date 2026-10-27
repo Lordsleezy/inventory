@@ -122,6 +122,38 @@ const rest = all.filter((f) => f.name > "0005_private_photos.sql");
     `select 1 from information_schema.tables where table_schema = 'public' and table_name = 'channel_orders'`,
   );
   assert.equal(channelOrders.rows.length, 1, "channel_orders exists");
+  const books = await db.query(
+    `select
+       to_regclass('public.books_periods') is not null as periods,
+       to_regclass('public.books_opening_balances') is not null as openings,
+       to_regclass('public.books_inventory_snapshots') is not null as inventory_snapshots,
+       to_regclass('public.books_prior_month_corrections') is not null as corrections,
+       exists(select 1 from information_schema.columns where table_schema='public' and table_name='web_order_labels' and column_name='refund_received_at') as label_refund_tracking,
+       exists(select 1 from information_schema.triggers where trigger_schema='public' and event_object_table='sales' and trigger_name='books_lock_guard') as sales_lock_guard`,
+  );
+  assert.deepEqual(books.rows[0], { periods: true, openings: true, inventory_snapshots: true, corrections: true, label_refund_tracking: true, sales_lock_guard: true }, "Books accounting schema and lock guard exist");
+  const adminId = "00000000-0000-4000-8000-000000000501";
+  await db.query(`insert into auth.users(id) values($1)`, [adminId]);
+  const { rows: stores } = await db.query(`insert into public.stores default values returning id`);
+  const storeId = stores[0].id;
+  await db.query(`insert into public.staff(user_id,store_id,display_name,role) values($1,$2,'Books Admin','manager')`, [adminId, storeId]);
+  await db.query(`insert into public.portal_admins(user_id,store_id) values($1,$2)`, [adminId, storeId]);
+  await db.query(`select public.seed_store_settings($1,'Books Test')`, [storeId]);
+  await db.query(`select set_config('request.jwt.claim.sub',$1,false)`, [adminId]);
+  await db.query(`select set_config('request.jwt.claim.role','authenticated',false)`);
+  const { rows: bookPeriods } = await db.query(`select public.portal_books_list('2026-01-01',null) as periods`);
+  const currentPeriod = bookPeriods[0].periods.find((p) => p.period_type === "month");
+  assert.ok(currentPeriod, "Books creates a draft month on first load");
+  await db.query(`insert into public.sku_ledger(sku,issued_at,store_id) values('99801',now(),$1)`, [storeId]);
+  const { rows: sales } = await db.query(`insert into public.sales(store_id,sku,price_cents,tax_cents,channel,sold_at,receipt_no) values($1,'99801',10000,0,'ebay',now(),'BOOKS-REPLAY-1') returning id`, [storeId]);
+  await db.query(`insert into public.channel_orders(store_id,provider,order_id,sku,sale_id,item_cents,fee_cents,fee_source,payout_cents) values($1,'ebay','BOOKS-ORDER-1','99801',$2,10000,1200,'actual',8800)`, [storeId, sales[0].id]);
+  await db.query(`select public.portal_books_record_platform_payout('ebay','BOOKS-PAYOUT-1',8800,(now() at time zone 'America/Los_Angeles')::date,'BANK-REF-1','test')`);
+  await db.query(`select public.portal_books_link_sale_payout($1,'ebay','BOOKS-PAYOUT-1','test')`, [sales[0].id]);
+  const { rows: reports } = await db.query(`select public.portal_books_report($1) as report`, [currentPeriod.id]);
+  assert.equal(reports[0].report.sales.length, 1, "Books report returns sale detail");
+  assert.equal(reports[0].report.payout_balances.length, 1, "Books report returns employee balance summaries");
+  assert.equal(reports[0].report.money_trail[0].status, "Matched", "Books money trail connects sale, payout and bank reference");
+  console.log("Books draft, sale report, payout balances and money trail ok");
   const mp = await db.query(
     `select c.relrowsecurity as rls,
             has_table_privilege('anon', 'public.manufacturer_photos', 'INSERT') as anon_insert,

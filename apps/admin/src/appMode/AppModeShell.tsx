@@ -3,6 +3,7 @@ import type { Session, SupabaseClient } from '@supabase/supabase-js';
 import type { StaffSession } from '@floor/cloud';
 import { RegisterPage } from '../RegisterPage';
 import { WithdrawalsPage } from '../WithdrawalsPage';
+import { BooksPage } from '../BooksPage';
 import { ManifestsPage } from '../ManifestsPage';
 import { LocationsPage } from '../LocationsPage';
 import { InsightsPage } from '../InsightsPage';
@@ -147,10 +148,10 @@ export function AppModeShell({
   void _personName;
   void _busy;
   void _onCommissionChanged;
-  const [tab, setTab] = useState<AppTab>(() => fullAccess && parseNavFromLocation().page === 'reports' ? 'more' : 'inventory');
+  const [tab, setTab] = useState<AppTab>(() => fullAccess && ['reports','books'].includes(parseNavFromLocation().page) ? 'more' : 'inventory');
   const [itemSku, setItemSku] = useState<string | null>(null);
   const [itemMissing, setItemMissing] = useState<string[]>([]);
-  const [morePage, setMorePage] = useState<MoreId | null>(() => fullAccess && parseNavFromLocation().page === 'reports' ? 'reports' : null);
+  const [morePage, setMorePage] = useState<MoreId | null>(() => fullAccess && ['reports','books'].includes(parseNavFromLocation().page) ? parseNavFromLocation().page as MoreId : null);
   const [channel, setChannel] = useState<'ebay' | 'amazon' | 'tiktok' | null>(null);
   const [invKey, setInvKey] = useState(0);
   const scrollPos = useRef<Record<string, number>>({});
@@ -344,6 +345,11 @@ export function AppModeShell({
         {fullAccess && morePage === 'withdrawals' && (
           <AppReportsNative onBack={() => setMorePage(null)} title="Withdrawals">
             <WithdrawalsPage client={client} storeId={storeId} money={money} stamp={stamp} />
+          </AppReportsNative>
+        )}
+        {fullAccess && morePage === 'books' && (
+          <AppReportsNative onBack={() => setMorePage(null)} title="Books">
+            <BooksPage client={client} money={money} native />
           </AppReportsNative>
         )}
         {fullAccess && morePage === 'manifests' && (
