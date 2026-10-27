@@ -118,7 +118,7 @@
     "channel-fee-sync": "*/15 * * * *",
     "census-seasonality-sync": "0 8 1 * *",
     "channel-autopush": "* * * * *",
-    "auto-fill-sweep": "*/10 * * * *",
+    "auto-fill-sweep": "0 */6 * * *",
     "enrich-models": "*/2 * * * *"
   },
   "critical": [
