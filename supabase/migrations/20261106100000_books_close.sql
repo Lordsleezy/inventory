@@ -498,19 +498,19 @@ begin
  v_old_day:=coalesce((nullif(v_old->>'sold_at','')::timestamptz at time zone 'America/Los_Angeles')::date,
    (nullif(v_old->>'paid_at','')::timestamptz at time zone 'America/Los_Angeles')::date,
    (nullif(v_old->>'purchased_at','')::timestamptz at time zone 'America/Los_Angeles')::date,
-   (nullif(v_old->>'created_at','')::timestamptz at time zone 'America/Los_Angeles')::date,
    nullif(v_old->>'spent_on','')::date,nullif(v_old->>'moved_on','')::date,
    nullif(v_old->>'withdrawn_on','')::date,nullif(v_old->>'manifest_on','')::date,
    (nullif(v_old->>'received_at','')::timestamptz at time zone 'America/Los_Angeles')::date,
-   (nullif(v_old->>'refunded_at','')::timestamptz at time zone 'America/Los_Angeles')::date);
+   (nullif(v_old->>'refunded_at','')::timestamptz at time zone 'America/Los_Angeles')::date,
+   (nullif(v_old->>'created_at','')::timestamptz at time zone 'America/Los_Angeles')::date);
  v_new_day:=coalesce((nullif(v_new->>'sold_at','')::timestamptz at time zone 'America/Los_Angeles')::date,
    (nullif(v_new->>'paid_at','')::timestamptz at time zone 'America/Los_Angeles')::date,
    (nullif(v_new->>'purchased_at','')::timestamptz at time zone 'America/Los_Angeles')::date,
-   (nullif(v_new->>'created_at','')::timestamptz at time zone 'America/Los_Angeles')::date,
    nullif(v_new->>'spent_on','')::date,nullif(v_new->>'moved_on','')::date,
    nullif(v_new->>'withdrawn_on','')::date,nullif(v_new->>'manifest_on','')::date,
    (nullif(v_new->>'received_at','')::timestamptz at time zone 'America/Los_Angeles')::date,
-   (nullif(v_new->>'refunded_at','')::timestamptz at time zone 'America/Los_Angeles')::date);
+   (nullif(v_new->>'refunded_at','')::timestamptz at time zone 'America/Los_Angeles')::date,
+   (nullif(v_new->>'created_at','')::timestamptz at time zone 'America/Los_Angeles')::date);
  if tg_table_name in ('channel_orders','sale_payout_lines','sale_payout_tickets','sale_commissions','portal_commission_overrides') then
    execute 'select (s.sold_at at time zone ''America/Los_Angeles'')::date from public.sales s where s.store_id=$1 and ($2::bigint is null or s.id=$2) and ($3::text is null or coalesce(s.ticket_id::text,''sale:''||s.id::text)=$3) order by s.sold_at limit 1'
      into v_old_day using v_store,nullif(v_old->>'sale_id','')::bigint,nullif(v_old->>'ticket_key','');

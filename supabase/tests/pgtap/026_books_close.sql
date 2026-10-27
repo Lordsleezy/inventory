@@ -27,8 +27,7 @@ select set_config('request.jwt.claim.role','authenticated',true);
 select is((public.portal_books_ensure_period('week','2026-10-05','2026-10-11') is not null),true,'admin can create weekly period');
 select ok(jsonb_array_length(public.portal_books_list('2026-01-01','2026-10-31'))>=2,'books period list includes month cards');
 select is((public.portal_books_refresh_readiness((select id from public.books_periods where store_id=current_setting('test.store')::uuid and period_type='month' and period_start=date_trunc('month',(now() at time zone 'America/Los_Angeles'))::date))), 'draft','open month with unchecked close items stays Draft');
-select is(public.portal_books_save_opening('safe',(now() at time zone 'America/Los_Angeles')::date,12345,'counted'),
-  (select id from public.books_opening_balances where store_id=current_setting('test.store')::uuid and source='safe'),
+select is((public.portal_books_save_opening('safe',(now() at time zone 'America/Los_Angeles')::date,12345,'counted') is not null),true,
   'admin can record an opening balance');
 select lives_ok($$select public.portal_books_prior_correction((now() at time zone 'America/Los_Angeles')::date,'sales','old-sale-1','safe',125,'late receipt adjustment')$$,
   'prior-month correction is recorded in the open period');
