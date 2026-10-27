@@ -263,6 +263,11 @@ export function UnitEditDrawer({
     setBusy(false);
     if (e) { setError(e.message); return; }
     const saved = data as Record<string, unknown>;
+    if (String(saved.title || '').trim() !== String(unit.title || '').trim()) {
+      // A new title may now get an eBay category suggestion / generated description if those are still blank (never overwrites).
+      void fetch(floorFunctionUrl('ebay-specifics'), { method: 'POST', headers: { Authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ store_id: storeId, sku, action: 'auto-fill' }) }).catch(() => {});
+    }
     onSaved({
       ...unit,
       upc: saved.upc,

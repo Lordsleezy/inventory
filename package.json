@@ -8,7 +8,7 @@
     "apps/*"
   ],
   "scripts": {
-    "test": "node --experimental-strip-types --test packages/store/src/*.test.ts packages/cloud/src/*.test.ts packages/payments/src/*.test.ts packages/channels/src/*.test.ts apps/pos/src/*.test.ts scripts/test-admin-payouts.mjs scripts/test-ledger.mjs netlify/lib/returns.test.mjs netlify/lib/channel-autopush.test.mjs netlify/lib/ebay-specifics.test.mjs netlify/lib/ebay-shipment.test.mjs netlify/lib/aspect-suggest.test.mjs netlify/lib/ebay-live-specifics.test.mjs netlify/lib/ebay-description-sync.test.mjs netlify/lib/amazon-category-validation.test.mjs scripts/test-portal-money-guards.mjs",
+    "test": "node --experimental-strip-types --test packages/store/src/*.test.ts packages/cloud/src/*.test.ts packages/payments/src/*.test.ts packages/channels/src/*.test.ts apps/pos/src/*.test.ts scripts/test-admin-payouts.mjs scripts/test-ledger.mjs netlify/lib/returns.test.mjs netlify/lib/channel-autopush.test.mjs netlify/lib/ebay-specifics.test.mjs netlify/lib/ebay-shipment.test.mjs netlify/lib/aspect-suggest.test.mjs netlify/lib/auto-fill.test.mjs netlify/lib/ebay-live-specifics.test.mjs netlify/lib/ebay-description-sync.test.mjs netlify/lib/amazon-category-validation.test.mjs scripts/test-portal-money-guards.mjs",
     "test:ledger": "node --experimental-strip-types scripts/test-ledger.mjs",
     "pos": "npm run tauri:dev -w @floor/pos",
     "test:migrations": "node --experimental-strip-types scripts/test-migrations.mjs",

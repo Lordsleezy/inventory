@@ -1068,6 +1068,12 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         if (dnsError) throw new Error(`Could not save DNS for SKU ${sku}: ${dnsError.message}`);
       }
       const enrichFailed = await enrichUnits(skus, parsed, hold, blocked || doNotList);
+      // Pick the eBay category and write the description if they are blank. Nothing is checked or listed; the 10-minute sweep covers any miss.
+      void (async () => { for (const sku of skus) {
+        try { await fetch(floorFunctionUrl('ebay-specifics'), { method: 'POST',
+          headers: { Authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
+          body: JSON.stringify({ store_id: storeId, sku, action: 'auto-fill' }) }); } catch { /* the sweep retries */ }
+      } })();
       if (enrichFailed) warnings.push(`Could not save lookup details on ${enrichFailed} unit(s).${hold ? ' They have no price, so they will not list.' : ''}`);
       if (!staffMode && !blocked && !doNotList && !doNotShip && !hold) {
         for (const [index, sku] of skus.entries()) {

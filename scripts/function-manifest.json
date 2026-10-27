@@ -2,6 +2,7 @@
   "functions": [
     "amazon-list",
     "amazon-sync",
+    "auto-fill-sweep",
     "category-backfill",
     "category-backfill-background",
     "category-confirm",
@@ -116,11 +117,13 @@
     "marketplace-sale-watch": "*/5 * * * *",
     "channel-fee-sync": "*/15 * * * *",
     "census-seasonality-sync": "0 8 1 * *",
-    "channel-autopush": "*/10 * * * *",
+    "channel-autopush": "* * * * *",
+    "auto-fill-sweep": "*/10 * * * *",
     "enrich-models": "*/2 * * * *"
   },
   "critical": [
     "amazon-sync",
+    "auto-fill-sweep",
     "category-sync",
     "census-seasonality-sync",
     "channel-autopush",
