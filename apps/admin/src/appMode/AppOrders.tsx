@@ -29,7 +29,10 @@ type Props = {
 function statusPill(o: WebOrder): { text: string; tone: 'warn' | 'ok' | 'muted' } {
   if (o.status === 'canceled' || o.status === 'refunded') return { text: 'Canceled', tone: 'muted' };
   if (o.fulfillment === 'pickup' && !o.picked_up_at) return { text: 'Ready', tone: 'ok' };
-  if (o.fulfillment === 'ship' && !o.shipped_at) return { text: 'Ship today', tone: 'warn' };
+  if (o.fulfillment === 'ship' && !o.shipped_at) {
+    const days = o.paid_at ? Math.floor((Date.now() - new Date(o.paid_at).getTime()) / 86400000) : 0;
+    return days > 0 ? { text: `Late · ${days} ${days === 1 ? 'day' : 'days'}`, tone: 'warn' } : { text: 'Ship today', tone: 'warn' };
+  }
   if (o.shipped_at && !o.delivered_at) return { text: 'Shipped', tone: 'muted' };
   if (o.delivered_at || o.picked_up_at) {
     const d = o.delivered_at || o.picked_up_at;
@@ -147,6 +150,16 @@ export function AppOrders({ client, storeId, accessToken, money, stamp }: Props)
     });
   }
 
+  async function stepBack(o: WebOrder) {
+    const step = o.delivered_at ? 'Delivered → Shipped' : o.shipped_at ? 'Shipped → To ship' : o.picked_up_at ? 'Picked up → Awaiting pickup' : '';
+    if (!step) { setError('There is no completed fulfillment step to undo.'); return; }
+    if (!window.confirm(`Are you sure? Move this order back one step (${step}). The sale and money stay unchanged.`)) return;
+    await runAction('step-back', async () => {
+      const { error: e } = await client.rpc('portal_order_step_back', { p_order: o.id });
+      if (e) throw e;
+    });
+  }
+
   async function markPickup(o: WebOrder) {
     if (!window.confirm(`Hand over ${o.title} (SKU ${o.sku}) to ${o.buyer_name || 'the buyer'}?`)) return;
     await runAction('pickup', async () => {
@@ -229,13 +242,13 @@ export function AppOrders({ client, storeId, accessToken, money, stamp }: Props)
         </div>
         <div className="app-item-head">
           <h1>{open.title}</h1>
-          <p className="meta">{CHANNEL[ch] || open.channel} · {open.order_no || open.id.slice(0, 8)}</p>
+          <p className="meta">SKU {open.sku} · {CHANNEL[ch] || open.channel} · {open.order_no || open.id.slice(0, 8)}</p>
           <p className="price">{money(open.total_cents)}</p>
         </div>
         <div className="app-group">
           <div className="app-kv"><span>Status</span><strong className={pill.tone === 'warn' ? 'warn' : pill.tone === 'ok' ? 'live' : 'muted'}>{pill.text}</strong></div>
           <div className="app-kv"><span>SKU</span><strong>{open.sku}</strong></div>
-          <div className="app-kv"><span>Pick location</span><strong className="pick-location">{locations[open.sku]?.join(', ') || 'Unassigned'}</strong></div>
+          <div className="app-kv"><span>Pick location</span><strong className="pick-location">{locations[open.sku]?.join(', ') || `SKU ${open.sku}`}</strong></div>
           <div className="app-kv"><span>Buyer</span><strong>{open.buyer_name || '—'}</strong></div>
           <div className="app-kv"><span>Placed</span><strong>{stamp(open.created_at)}</strong></div>
           {open.shipped_at && <div className="app-kv"><span>Shipped</span><strong>{stamp(open.shipped_at)}</strong></div>}
@@ -269,6 +282,7 @@ export function AppOrders({ client, storeId, accessToken, money, stamp }: Props)
                 {busy === 'pickup' ? '…' : 'Mark picked up'}
               </button>
             )}
+            {(open.delivered_at || open.shipped_at || open.picked_up_at) && <button type="button" className="secondary" disabled={!!busy} onClick={() => void stepBack(open)}>{busy === 'step-back' ? '…' : 'Move back one step'}</button>}
             {(ch === 'amazon' || ch === 'tiktok') && !open.delivered_at && (
               <>
                 <input
@@ -312,7 +326,7 @@ export function AppOrders({ client, storeId, accessToken, money, stamp }: Props)
 
   return (
     <>
-      <div className="app-large-title"><h1>Orders</h1></div>
+      <div className="app-large-title orders-app-title"><h1>Orders</h1><span>{totals.count} · {money(totals.total)}</span></div>
       <div className="app-segment">
         {([
           ['toShip', 'To ship', buckets.toShip.length],
@@ -345,7 +359,8 @@ export function AppOrders({ client, storeId, accessToken, money, stamp }: Props)
                   <span className="app-thumb">{urls[o.sku] ? <img src={urls[o.sku]} alt="" /> : '+'}</span>
                   <span className="app-row-text">
                     <strong>{o.title}</strong>
-                    <small>{ch} · {o.order_no || o.sku} · Pick {locations[o.sku]?.[0] || 'unassigned'}</small>
+                    <small>SKU {o.sku} · {money(o.item_cents || 0)}</small>
+                    <small>{ch}</small>
                   </span>
                   <span className={`app-pill ${pill.tone}`}>{pill.text}</span>
                   <span className="app-chevron">›</span>
@@ -353,7 +368,7 @@ export function AppOrders({ client, storeId, accessToken, money, stamp }: Props)
               );
             })}
           </div>
-          <p className="app-footer-count">{totals.count} orders · {money(totals.total)}</p>
+
         </>
       )}
     </>

@@ -16,6 +16,7 @@ type Balance = {
   source: Source; sales_less_fees_cents: number; refund_cents: number;
   withdrawn_cents: number; expected_cents: number;
 };
+type BalanceAdjustment = { id: string; source: Source; actual_cents: number; adjusted_on: string; note: string; created_at: string };
 type Person = { user_id: string; display_name: string };
 type Audit = { id: number; action: string; at: string; actor_id: string | null; old_row: Entry | null; new_row: Entry | null };
 type Props = { client: SupabaseClient; storeId: string; money: (cents: number) => string; stamp: (value: string) => string };
@@ -42,6 +43,11 @@ export function WithdrawalsPage({ client, storeId, money, stamp }: Props) {
   const submitting = useRef(false);
   const [entries, setEntries] = useState<Entry[]>([]);
   const [balances, setBalances] = useState<Balance[]>([]);
+  const [adjustments, setAdjustments] = useState<BalanceAdjustment[]>([]);
+  const [adjustFor, setAdjustFor] = useState<Source | null>(null);
+  const [actualAmount, setActualAmount] = useState('');
+  const [actualOn, setActualOn] = useState(today());
+  const [actualNote, setActualNote] = useState('');
   const [people, setPeople] = useState<Person[]>([]);
   const [form, setForm] = useState(empty);
   const [editing, setEditing] = useState<string | null>(null);
@@ -52,17 +58,20 @@ export function WithdrawalsPage({ client, storeId, money, stamp }: Props) {
   const [loaded, setLoaded] = useState(false);
 
   const load = useCallback(async () => {
-    const [entryResult, balanceResult, peopleResult] = await Promise.all([
+    const [entryResult, balanceResult, peopleResult, adjustmentResult] = await Promise.all([
       client.rpc('portal_withdrawal_entries', { p_limit: 1000 }),
       client.rpc('portal_withdrawal_reconciliation'),
       client.from('staff').select('user_id,display_name').eq('store_id', storeId).is('deactivated_at', null).order('display_name'),
+      client.rpc('portal_withdrawal_balance_adjustments'),
     ]);
     if (entryResult.error) throw entryResult.error;
     if (balanceResult.error) throw balanceResult.error;
     if (peopleResult.error) throw peopleResult.error;
+    if (adjustmentResult.error) throw adjustmentResult.error;
     setEntries((entryResult.data || []) as Entry[]);
     setBalances((balanceResult.data || []) as Balance[]);
     setPeople((peopleResult.data || []) as Person[]);
+    setAdjustments((adjustmentResult.data || []) as BalanceAdjustment[]);
     setLoaded(true);
   }, [client, storeId]);
 
@@ -124,6 +133,19 @@ export function WithdrawalsPage({ client, storeId, money, stamp }: Props) {
     setAudit((data || []) as Audit[]); setAuditFor(entry.id);
   }
 
+  async function saveActual(event: FormEvent) {
+    event.preventDefault(); if (!adjustFor || busy) return;
+    const amount = Number(actualAmount); const cents = Math.round(amount * 100);
+    if (!Number.isFinite(amount) || cents < 0 || Math.abs(amount * 100 - cents) > 0.001 || !actualNote.trim()) { setError('Enter an actual balance and a note.'); return; }
+    setBusy(true); setError('');
+    try {
+      const { error: rpcError } = await client.rpc('portal_save_withdrawal_balance_adjustment', { p_source: adjustFor, p_actual_cents: cents, p_on: actualOn, p_note: actualNote.trim() });
+      if (rpcError) throw rpcError;
+      setAdjustFor(null); setActualAmount(''); setActualNote(''); setNotice('Actual balance saved as a dated reconciliation adjustment.'); await load();
+    } catch (e) { setError(String((e as Error).message || e)); }
+    finally { setBusy(false); }
+  }
+
   const visibleSources = SOURCES.filter((source) => balances.some((balance) => balance.source === source.id));
   const totalExpected = balances.reduce((sum, row) => sum + row.expected_cents, 0);
   return <div className="floor-tools withdrawals-page">
@@ -165,7 +187,11 @@ export function WithdrawalsPage({ client, storeId, money, stamp }: Props) {
     <div className="withdrawal-balance-list">
       {SOURCES.map(source => { const row = balances.find(b => b.source === source.id); return <details className="withdrawal-balance" key={source.id}>
         <summary><span className="tool-source-name"><ToolSourceBadge source={source.id}/><strong>{source.label}</strong></span><span className="tool-source-balance"><small>Expected</small><strong>{row ? money(row.expected_cents) : '—'}</strong></span><span aria-hidden="true">›</span></summary>
-        {row ? <div className="withdrawal-parts"><span>Sales less fees</span><b>{money(row.sales_less_fees_cents)}</b><span>Refunds</span><b>−{money(row.refund_cents)}</b><span>Withdrawn</span><b>−{money(row.withdrawn_cents)}</b></div> : <p>Balance not available.</p>}
+        {row ? <div className="withdrawal-parts"><span>Sales less fees</span><b>{money(row.sales_less_fees_cents)}</b><span>Refunds</span><b>−{money(row.refund_cents)}</b><span>Withdrawn</span><b>−{money(row.withdrawn_cents)}</b>
+          {(() => { const actual = adjustments.find(a => a.source === source.id); return actual ? <><span>Actual · {actual.adjusted_on}</span><b>{money(actual.actual_cents)}</b><span>Difference</span><b>{money(actual.actual_cents - row.expected_cents)}</b><small>{actual.note}</small></> : null; })()}
+          <div className="actions"><button type="button" className="secondary" onClick={() => { setAdjustFor(source.id); setActualAmount(((adjustments.find(a => a.source === source.id)?.actual_cents ?? row.expected_cents) / 100).toFixed(2)); setActualOn(today()); setActualNote(''); }}>Adjust actual balance</button></div>
+          {adjustFor === source.id && <form className="withdrawal-actual-form" onSubmit={event => void saveActual(event)}><label>Actual balance ($)<input required type="number" min="0" step="0.01" value={actualAmount} onChange={event => setActualAmount(event.target.value)} /></label><label>Date<input required type="date" value={actualOn} onChange={event => setActualOn(event.target.value)} /></label><label>Note<input required value={actualNote} onChange={event => setActualNote(event.target.value)} /></label><button type="submit" disabled={busy}>{busy ? 'Saving…' : 'Save adjustment'}</button></form>}
+        </div> : <p>Balance not available.</p>}
       </details>; })}
     </div>
     <section className="panel tool-card"><ToolHeading icon="file" title="Withdrawal history" description="Recorded withdrawals and their audit trail." />
