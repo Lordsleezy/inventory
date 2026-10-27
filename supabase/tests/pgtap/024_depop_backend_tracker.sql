@@ -1,0 +1,38 @@
+begin;
+select no_plan();
+do $$ declare s uuid; o uuid:=gen_random_uuid(); c uuid:=gen_random_uuid();begin
+ insert into auth.users(id) values(o),(c);insert into public.stores default values returning id into s;
+ insert into public.staff(user_id,store_id,display_name,role) values(o,s,'Owner','owner'),(c,s,'Clerk','staff');perform public.seed_store_settings(s,'Depop backend');
+ insert into public.sku_ledger(sku,store_id,issued_at) select x,s,now() from unnest(array['93001','93002','93003','93004','93005']) x;
+ insert into public.units(sku,store_id,title,brand,state,qty_on_hand,received_at,updated_at,listing_specs,category)
+ select x,s,'Fixture unit','Acme',case when x='93002' then 'sold' else 'available' end,1,now(),now(),case when x='93003' then '{"do_not_ship":true}'::jsonb else '{}'::jsonb end,case when x='93004' then 'Electronics' else 'Household' end from unnest(array['93001','93002','93003','93004','93005']) x;
+ perform set_config('depop_test.store',s::text,true);perform set_config('depop_test.owner',o::text,true);perform set_config('depop_test.clerk',c::text,true);
+end $$;
+select set_config('request.jwt.claim.role','service_role',true);select set_config('request.jwt.claim.sub','',true);
+set local role service_role;
+select lives_ok(format($q$select public.floor_depop_record_listing(%L,'93001','https://www.depop.com/products/test-unit/',2500,now(),'test listing agent')$q$,current_setting('depop_test.store')),'service credential records listing without portal identity');
+select lives_ok(format($q$select public.floor_depop_record_listing(%L,'93001',null,null,null,'historical import')$q$,current_setting('depop_test.store')),'retry/import is idempotent and permits unknown metadata');
+reset role;
+select is((select count(*)::int from public.listings where sku='93001'),1,'one canonical row, never duplicated');
+select is((select listing_id from public.listings where sku='93001'),'https://www.depop.com/products/test-unit/','empty metadata does not erase a known URL');
+select is((select depop_price_cents from public.listings where sku='93001'),2500,'empty metadata does not erase a known price');
+select ok((select 'depop'=any(listed_on) from public.units where sku='93001'),'existing canonical trigger updates listed_on');
+select throws_ok(format($q$select public.floor_depop_record_listing(%L,'93002',null,null,null,'test')$q$,current_setting('depop_test.store')),'22023','depop_unit_not_available: sold','cannot add sold SKU');
+select throws_ok(format($q$select public.floor_depop_record_listing(%L,'93003',null,null,null,'test')$q$,current_setting('depop_test.store')),'P0001','DNS: Do not ship - never list on eBay, Amazon, TikTok Shop or Depop','DNS exclusion remains enforced');
+select throws_ok(format($q$select public.floor_depop_record_listing(%L,'93005','https://example.com/invalid',10,now(),'test')$q$,current_setting('depop_test.store')),'22023','invalid_depop_url','foreign URLs rejected');
+select lives_ok(format($q$select public.floor_depop_record_listing(%L,'93004',null,null,null,'owner-confirmed historical shop list')$q$,current_setting('depop_test.store')),'tracker can record a confirmed historical listing without publishing it');
+select throws_ok(format($q$select public.floor_bundle_push_gate(%L,'93004','depop')$q$,current_setting('depop_test.store')),'P0001','depop_electronics_blocked','actual publishing policy gate is unchanged');
+select set_config('request.jwt.claim.sub',current_setting('depop_test.clerk'),true);select set_config('request.jwt.claim.role','authenticated',true);
+set local role authenticated;
+select throws_ok(format($q$select public.floor_depop_record_listing(%L,'93005',null,null,null,'test')$q$,current_setting('depop_test.store')),'42501',null,'clerk cannot execute service-only writer');
+select throws_ok($q$select public.portal_depop_add_listing('93005','https://www.depop.com/products/fixture/',1000,(now() at time zone 'America/Los_Angeles')::date)$q$,'42501',null,'portal form remains admin-only');
+reset role;
+select set_config('request.jwt.claim.sub',current_setting('depop_test.owner'),true);
+select lives_ok($q$select public.portal_depop_add_listing('93005','https://www.depop.com/products/fixture/',1000,(now() at time zone 'America/Los_Angeles')::date)$q$,'existing admin form still works');
+select is((select count(*)::int from public.portal_depop_live_listings()),3,'portal reads every canonical listed row including imports without URLs');
+select lives_ok($q$select public.portal_depop_record_sale('93001',2500,200,null,(now() at time zone 'America/Los_Angeles')::date,'fixture')$q$,'manual Depop sale works unchanged');
+select is((select status from public.listings where sku='93001'),'delisted','sale atomically removes SKU from live tracker');
+select ok((select not ('depop'=any(listed_on)) from public.units where sku='93001'),'sold SKU channel flag cleared');
+select is((select count(*)::int from public.portal_depop_live_listings()),2,'sold item disappears from portal list');
+select is((select count(*)::int from public.sales where sku='93001'),1,'tracker introduces no duplicate sale');
+select * from finish();rollback;

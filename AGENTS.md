@@ -6,3 +6,7 @@ The live Supabase project is `floor`. Work from the current `master` branch when
 - Merge the migration file into `master` before applying it. In the same work session, confirm the file is committed and pushed to `master`, apply it through the normal migration workflow, and verify that the live migration ledger and `master` agree.
 - Do not use `supabase migration repair --status reverted` to hide drift. Investigate the live schema and migration ledger, recover the original SQL when possible, and test against a copy of live before changing production.
 - Do not deploy backend or admin from a dirty checkout or a commit behind `origin/master`; use `scripts/lib/deploy-guard.mjs`.
+
+# Depop listing agents
+
+After every confirmed Depop publication, call the service-role floor_depop_record_listing RPC and verify the canonical listings row before publishing the next item. See docs/depop-listing-agent.md. Never mark a draft as listed, and never retry publication when only tracker confirmation failed.
