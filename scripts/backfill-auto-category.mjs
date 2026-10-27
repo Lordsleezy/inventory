@@ -22,10 +22,20 @@ if (!storeId) { console.error("--store <uuid> required"); process.exit(2); }
 if (write && !backupDir) { console.error("--backup <dir> required with --write"); process.exit(2); }
 
 const sb = serviceClient();
+// One unit per call (the all-units version computes every unit's gaps in one statement and times out).
 const snapshot = async () => {
-  const { data, error } = await sb.rpc("floor_auto_fill_snapshot", { p_store: storeId });
+  const { data: units, error } = await sb.from("units").select("sku").eq("store_id", storeId).in("state", ["available", "reserved", "repair"]).limit(5000);
   if (error) throw new Error(error.message);
-  return data || [];
+  const rows = []; let i = 0;
+  await Promise.all(Array.from({ length: 8 }, async () => {
+    while (i < units.length) {
+      const { sku } = units[i++];
+      const { data, error: e } = await sb.rpc("floor_auto_fill_snapshot", { p_store: storeId, p_sku: sku });
+      if (e) throw new Error(`${sku}: ${e.message}`);
+      rows.push(...(data || []));
+    }
+  }));
+  return rows;
 };
 const specificsDeps = supabaseSpecificsDeps(sb, { catalog: catalogProductByGtin, aspectFields: (id) => ebayAspectFields(storeId, id),
   loadLive: (sid, sku) => liveSpecificsForUnit(sid, sku) });

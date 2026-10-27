@@ -197,18 +197,32 @@ export function ReceiptsPage({ client, money, stamp }: {
   const load = useCallback(async (q: string, off: number) => {
     setBusy(true); setError('');
     try {
-      const { data, error: e } = await client.rpc('portal_receipts', {
-        p_query: q.trim() || null, p_limit: limit, p_offset: off,
-      });
-      if (e) throw e;
-      const payload = data as { total: number; rows: Receipt[] };
-      setTotal(payload?.total || 0);
-      setRows(payload?.rows || []);
+      const page = async (pageLimit: number, pageOffset: number) => {
+        const { data, error: e } = await client.rpc('portal_receipts', { p_query: q.trim() || null, p_limit: pageLimit, p_offset: pageOffset });
+        if (e) throw e;
+        return data as { total: number; rows: Receipt[] };
+      };
+      if (startDate || endDate) {
+        // A date range searches every sale: newest first, so stop once a page reaches sales older than the start date.
+        const all: Receipt[] = [];
+        for (let pageNo = 0; pageNo < 60; pageNo++) {
+          const payload = await page(500, all.length);
+          const got = payload?.rows || [];
+          all.push(...got);
+          const last = got[got.length - 1];
+          if (got.length < 500 || all.length >= (payload?.total || 0) || (startDate && last && last.sold_at.slice(0, 10) < startDate)) break;
+        }
+        setTotal(all.length); setRows(all);
+      } else {
+        const payload = await page(limit, off);
+        setTotal(payload?.total || 0);
+        setRows(payload?.rows || []);
+      }
     } catch (e) {
       setError(errText(e) || 'Could not load receipts.');
     }
     finally { setBusy(false); }
-  }, [client]);
+  }, [client, startDate, endDate]);
 
   useEffect(() => {
     const t = setTimeout(() => void load(query, offset), 200);
@@ -264,8 +278,8 @@ export function ReceiptsPage({ client, money, stamp }: {
         <input type="search" placeholder="Receipt #, SKU, buyer, channel…"
           value={query} onChange={e => { setQuery(e.target.value); setOffset(0); }} />
       </label>
-      <label>From<input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} /></label>
-      <label>Through<input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} /></label>
+      <label>From<input type="date" value={startDate} onChange={e => { setStartDate(e.target.value); setOffset(0); }} /></label>
+      <label>Through<input type="date" value={endDate} onChange={e => { setEndDate(e.target.value); setOffset(0); }} /></label>
       <div className="actions" style={{ alignSelf: 'end' }}>
         <button type="button" className={scope === 'all' ? undefined : 'secondary'} onClick={() => setScope('all')}>All</button>
         <button type="button" className={scope === 'instore' ? undefined : 'secondary'} onClick={() => setScope('instore')}>In person</button>
@@ -310,7 +324,7 @@ export function ReceiptsPage({ client, money, stamp }: {
         })}
       </div>
     </section>
-    {scope === 'all' && total > limit && <div className="inventory-pagination">
+    {scope === 'all' && !startDate && !endDate && total > limit && <div className="inventory-pagination">
       <button type="button" className="secondary" disabled={offset === 0 || busy} onClick={() => setOffset(Math.max(0, offset - limit))}>Previous</button>
       <span>{offset + 1}–{Math.min(offset + limit, total)} of {total}</span>
       <button type="button" className="secondary" disabled={offset + limit >= total || busy} onClick={() => setOffset(offset + limit)}>Next</button>
