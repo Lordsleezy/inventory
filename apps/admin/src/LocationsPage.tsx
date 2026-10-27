@@ -1,3 +1,6 @@
+import { ToolCard, ToolHeading, ToolIcon, ToolEmpty, ToolTip } from './design/Tools';
+import { scannerInputMode } from './kiosk';
+import { scanBarcode } from './barcodeCamera';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -18,6 +21,11 @@ function Barcode({ code }: { code: string }) {
 }
 
 export function LocationsPage({ client, storeId, canManage = true }: Props) {
+  const [view, setView] = useState<'overview'|'setup'|'move'>('overview');
+  const [loaded, setLoaded] = useState(false);
+  const [scanBusy, setScanBusy] = useState(false);
+  const submitLock = useRef(false);
+  const skuVersion = useRef(0);
   const [bays, setBays] = useState<Bay[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
   const [bay, setBay] = useState('');
@@ -38,43 +46,45 @@ export function LocationsPage({ client, storeId, canManage = true }: Props) {
     const { data, error: rpcError } = await client.rpc('portal_bay_list');
     if (rpcError) throw rpcError;
     setBays((data?.bays || []) as Bay[]);
-    setLocations((data?.locations || []) as Location[]);
+    setLocations((data?.locations || []) as Location[]); setLoaded(true);
   }, [client]);
   useEffect(() => { void load().catch((e) => setError(String(e.message || e))); }, [load]);
 
   async function saveBay(event: FormEvent) {
-    event.preventDefault(); setError(''); setNotice('');
+    event.preventDefault(); if (submitLock.current) return; setError(''); setNotice('');
     const bayNo = number(bay), layout = rows.map(number);
     if (!Number.isInteger(bayNo) || bayNo < 1 || bayNo > 9999
       || ![3, 4].includes(layout.length) || layout.some((n) => ![0, 2, 3].includes(n))) {
       setError('Use bay 1–9999, three or four rows, and 0, 2 or 3 bins per row.'); return;
     }
-    setBusy(true);
+    submitLock.current = true; setBusy(true);
     try {
       const { error: rpcError } = await client.rpc('portal_set_bay', { p_bay: bayNo, p_rows: layout });
       if (rpcError) throw rpcError;
-      await load(); setNotice(`Bay ${bayNo} saved.`);
+      await load(); setView('overview'); setNotice(`Bay ${bayNo} saved.`);
     } catch (e) { setError(String((e as Error).message || e)); }
-    finally { setBusy(false); }
+    finally { submitLock.current = false; setBusy(false); }
   }
 
   async function loadSku(next: string) {
-    setSku(next); setAllocations([]);
+    const version = ++skuVersion.current; setSku(next); setAllocations([]); setFrom('');
     if (!next.trim()) return;
     const { data, error: queryError } = await client.from('unit_location_stock')
       .select('sku,location_code,quantity').eq('store_id', storeId).eq('sku', next.trim());
+    if (version !== skuVersion.current) return;
     if (queryError) { setError(queryError.message); return; }
     setAllocations((data || []) as Allocation[]);
   }
 
   async function move(event: FormEvent) {
-    event.preventDefault(); setError(''); setNotice('');
+    event.preventDefault(); if (submitLock.current) return; setError(''); setNotice('');
     const qty = number(quantity), code = to.trim(), item = sku.trim();
     if (!Number.isInteger(qty) || qty < 1 || !locations.some((location) => location.code === code)) {
       setError('Scan a valid bay label and enter a positive whole quantity.'); return;
     }
     if (!item) { setError('Scan the item SKU.'); return; }
-    setBusy(true);
+    if (from && qty > (allocations.find(a => a.location_code === from)?.quantity || 0)) { setError('Quantity exceeds the stock at the selected source location.'); return; }
+    submitLock.current = true; setBusy(true);
     try {
       const { error: rpcError } = await client.rpc('portal_move_location_stock', {
         p_sku: item, p_to: code, p_quantity: qty, p_from: from || null,
@@ -82,58 +92,58 @@ export function LocationsPage({ client, storeId, canManage = true }: Props) {
       if (rpcError) throw rpcError;
       setNotice(`${qty} × SKU ${item} placed at ${code}.`);
       await loadSku(item); await load();
-      setSku(''); setFrom('');
+      setSku(''); setFrom(''); setAllocations([]);
       skuInput.current?.focus();
     } catch (e) { setError(String((e as Error).message || e)); }
-    finally { setBusy(false); }
+    finally { submitLock.current = false; setBusy(false); }
   }
 
+  async function camera(target: 'to'|'sku') {
+    if (scanBusy) return; setScanBusy(true); setError('');
+    try { const code = await scanBarcode();
+      if (code) { if (target === 'to') { setTo(code.trim()); skuInput.current?.focus(); } else await loadSku(code.trim()); }
+      else { setNotice('Use your barcode scanner or type the label if camera scanning is unavailable.'); (target === 'to' ? toInput : skuInput).current?.focus(); }
+    } finally { setScanBusy(false); }
+  }
   const printed = locations.filter((location) => location.bay_no === printBay);
-  return <div className="locations-page">
-    <header><div><div className="eyebrow">WAREHOUSE</div><h1>Locations</h1>
-      <p>Create bays, print labels, and scan units into a bay, row, or bin.</p></div></header>
-    {error && <div className="alert" role="alert">{error}<button type="button" onClick={() => setError('')}>×</button></div>}
+  const changeView = (next: 'overview'|'setup'|'move') => { setView(next); setError(''); setNotice(''); };
+  const createBay = () => { setBay(''); setRows(['3','3','3','0']); changeView('setup'); };
+  return <div className="floor-tools locations-page">
+    {view !== 'overview' && <button type="button" className="tool-back" disabled={busy} onClick={() => changeView('overview')}>‹ Locations</button>}
+    <header><div><h1>{view === 'setup' ? 'Bay setup' : view === 'move' ? 'Put away or move' : 'Locations'}</h1><p>{view === 'overview' ? 'Manage your storage bays and locations.' : view === 'setup' ? 'Configure the rows and bins for this bay.' : 'Scan a location, then scan the items to put away.'}</p></div></header>
+    {error && <div className="alert" role="alert">{error}<button type="button" aria-label="Dismiss error" onClick={() => setError('')}>×</button></div>}
     {notice && <div className="notice" role="status">{notice}</div>}
-    {canManage && <section className="panel"><h2>Bay setup</h2><form className="location-bay-form" onSubmit={(event) => void saveBay(event)}>
-      <label>Bay number<input required inputMode="numeric" value={bay} onChange={(event) => setBay(event.target.value)} placeholder="14" /></label>
-      {rows.map((bins, index) => <label key={index}>Row {index + 1}
-        <select value={bins} onChange={(event) => setRows((old) => old.map((value, i) => i === index ? event.target.value : value))}>
-          <option value="0">No bins · large items</option><option value="2">2 bins</option><option value="3">3 bins</option>
-        </select></label>)}
-      <div className="actions"><button disabled={busy}>Save bay</button>
-        <button type="button" className="secondary" onClick={() => setRows((old) => old.length === 3 ? [...old, '0'] : old.slice(0, 3))}>{rows.length === 3 ? 'Add fourth row' : 'Use three rows'}</button></div>
-    </form></section>}
-    <section className="panel"><h2>Put away or move</h2>
-      <p className="hint">Put away: scan a location, then scan item SKUs. To move assigned stock, scan the SKU, choose its current location, then scan the new label.</p>
-      <form className="location-scan-form" onSubmit={(event) => void move(event)}>
-        <label>New location<input ref={toInput} required value={to} onChange={(event) => setTo(event.target.value.trim())}
-          onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); skuInput.current?.focus(); } }} placeholder="Scan 14-2-3" /></label>
-        <label>Item SKU<input ref={skuInput} required value={sku} onChange={(event) => void loadSku(event.target.value)}
-          placeholder="Scan item barcode" /></label>
-        <label>Current location<select value={from} onChange={(event) => setFrom(event.target.value)}>
-          <option value="">Unassigned stock</option>
-          {allocations.map((allocation) => <option key={allocation.location_code} value={allocation.location_code}>
-            {allocation.location_code} · {allocation.quantity} unit(s)</option>)}
-        </select></label>
-        <label>Quantity<input inputMode="numeric" type="number" min="1" step="1" value={quantity} onChange={(event) => setQuantity(event.target.value)} /></label>
-        <button disabled={busy}>Save location</button>
-      </form>
-    </section>
-    <section className="panel"><h2>Bays</h2>{bays.length === 0 ? <p className="empty">No bays set up yet.</p>
-      : <div className="location-bay-list">{bays.map((item) => <details key={item.bay_no} className="location-bay">
-        <summary><strong>Bay {item.bay_no}</strong><span>{locations.filter((location) => location.bay_no === item.bay_no).length} labels · {locations.filter((location) => location.bay_no === item.bay_no).reduce((n, location) => n + location.stock, 0)} units</span></summary>
-        <div className="location-bay-body"><div className="location-code-list">
-          {locations.filter((location) => location.bay_no === item.bay_no).map((location) => <span key={location.code}><b>{location.code}</b><small>{location.stock} unit(s)</small></span>)}
-        </div><div className="actions">
-          {canManage && <button type="button" className="secondary" onClick={() => { setBay(String(item.bay_no)); setRows(item.row_bins.map(String)); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>Edit bay</button>}
-          <button type="button" className="secondary" onClick={() => { setPrintBay(item.bay_no); setTimeout(() => window.print(), 100); }}>Print bay labels</button>
-        </div></div>
-      </details>)}</div>}
-    </section>
-    <div className="location-print-sheet" aria-hidden="true">
-      {printed.map((location) => <div className="location-label" key={location.code}>
-        <strong>{location.code}</strong><Barcode code={location.code} />
-      </div>)}
-    </div>
+    {!loaded && <p role="status">{error ? 'Locations could not be loaded.' : 'Loading locations…'} {error && <button type="button" className="secondary" onClick={() => void load().catch(e => setError(String(e.message || e)))}>Retry</button>}</p>}
+    {view === 'overview' && <>
+      <div className="location-quick-links">
+        {canManage && <button type="button" onClick={() => changeView('setup')}><span className="tool-icon-badge"><ToolIcon name="bay"/></span><span>Bay setup<small>Configure rows and bins for a bay.</small></span></button>}
+        <button type="button" onClick={() => changeView('move')}><span className="tool-icon-badge"><ToolIcon name="move"/></span><span>Put away or move<small>Move inventory to a bay location.</small></span></button>
+      </div>
+      <ToolCard><ToolHeading icon="bay" title="Bays" description="Organize rows, bins and large-item storage." action={canManage && <button type="button" disabled={busy || !loaded} onClick={createBay}><ToolIcon name="plus"/>Create bay</button>}/>
+        {loaded && bays.length === 0 ? <ToolEmpty icon="bay" title="No bays set up yet"><p>Create your first bay to organize rows and bins for storing inventory.</p>{canManage && <button type="button" onClick={createBay}><ToolIcon name="plus"/>Create bay</button>}</ToolEmpty> : <div className="location-bay-list">{bays.map(item => <details key={item.bay_no} className="location-bay">
+          <summary><strong>Bay {item.bay_no}</strong><span>{locations.filter(l => l.bay_no === item.bay_no).reduce((n,l) => n+l.stock,0)} units · {item.row_bins.length} rows <span aria-hidden="true">›</span></span></summary>
+          <div className="location-bay-body"><p className="location-row-summary">{item.row_bins.map((n,i) => `Row ${i+1}: ${n ? `${n} bins` : 'no bins / large items'}`).join(' · ')}</p><div className="location-code-list">
+            {locations.filter(l => l.bay_no === item.bay_no).map(l => <span key={l.code}><b>{l.code}</b><small>{l.stock} units</small></span>)}
+          </div><div className="actions">{canManage && <button type="button" className="secondary" onClick={() => { setBay(String(item.bay_no)); setRows(item.row_bins.map(String)); changeView('setup'); }}>Edit bay</button>}
+            <button type="button" className="secondary" onClick={() => { setPrintBay(item.bay_no); setTimeout(() => window.print(),100); }}>Print bay labels</button></div></div>
+        </details>)}</div>}
+      </ToolCard><ToolTip>Each bay can have three or four rows. Each row supports 2 or 3 bins, or no bins for large items.</ToolTip>
+    </>}
+    {view === 'setup' && canManage && <><ToolCard><ToolHeading icon="bay" title="Bay setup" description="Configure the number of rows and bins for this bay location."/>
+      <form className="location-bay-form" onSubmit={event => void saveBay(event)}>
+        <label>Bay number<input required inputMode="numeric" value={bay} onChange={event => setBay(event.target.value)} placeholder="e.g. 14" disabled={busy}/></label>
+        <div className="location-rows-head"><div><h2>Rows</h2><p>Set up each row in this bay.</p></div><div className="tool-segment" aria-label="Number of rows">{[4,3].map(n => <button key={n} type="button" disabled={busy} aria-pressed={rows.length === n} onClick={() => setRows(old => n === 3 ? old.slice(0,3) : old.length === 4 ? old : [...old,'0'])}>{n} rows</button>)}</div></div>
+        {rows.map((bins,index) => <label className="location-row-config" key={index}><span>Row {index+1}<ToolIcon name="bay"/></span><select disabled={busy} value={bins} onChange={event => setRows(old => old.map((value,i) => i === index ? event.target.value : value))}><option value="0">No bins · large items</option><option value="2">2 bins</option><option value="3">3 bins</option></select></label>)}
+        <div className="actions"><button type="button" className="secondary" disabled={busy} onClick={() => setRows(old => old.length === 3 ? [...old,'0'] : old.slice(0,3))}><ToolIcon name="flip"/>{rows.length === 3 ? 'Add fourth row' : 'Use three rows'}</button><button disabled={busy || !loaded}><ToolIcon name="save"/>{busy ? 'Saving…' : 'Save bay'}</button></div>
+      </form></ToolCard><ToolTip>Choose no bins for a row that holds large items. Existing stock prevents unsafe layout changes.</ToolTip></>}
+    {view === 'move' && <ToolCard><ToolHeading icon="move" title="Put away or move" description="Put away: scan a location, then scan item SKUs. To move assigned stock, scan the SKU, choose its current location, then scan the new label."/>
+      <form className="location-scan-form" onSubmit={event => void move(event)}>
+        <label>New location<small>Scan a location label</small><span className="location-scan-field"><input ref={toInput} required disabled={busy} inputMode={scannerInputMode()} value={to} onChange={event => setTo(event.target.value.trim())} onKeyDown={event => { if(event.key === 'Enter'){event.preventDefault();skuInput.current?.focus();} }} placeholder="Scan 14-2-3"/><button type="button" className="secondary" disabled={busy || scanBusy} aria-label="Scan location with camera" onClick={() => void camera('to')}><ToolIcon name="scan"/></button></span></label>
+        <label>Item SKU<small>Scan item barcode</small><span className="location-scan-field"><input ref={skuInput} required disabled={busy} inputMode={scannerInputMode()} value={sku} onChange={event => void loadSku(event.target.value)} placeholder="Scan item barcode"/><button type="button" className="secondary" disabled={busy || scanBusy} aria-label="Scan item with camera" onClick={() => void camera('sku')}><ToolIcon name="scan"/></button></span></label>
+        <label>Current location<small>Select the item’s current location</small><select disabled={busy} value={from} onChange={event => setFrom(event.target.value)}><option value="">Unassigned stock</option>{allocations.map(a => <option key={a.location_code} value={a.location_code}>{a.location_code} · {a.quantity} unit(s)</option>)}</select></label>
+        <label>Quantity<small>Number of units to move</small><input disabled={busy} required inputMode="numeric" type="number" min="1" step="1" value={quantity} onChange={event => setQuantity(event.target.value)}/></label>
+        <button className="tool-primary" disabled={busy || scanBusy || !loaded}><ToolIcon name="save"/>{busy ? 'Saving…' : scanBusy ? 'Scanning…' : 'Save location'}</button>
+      </form></ToolCard>}
+    <div className="location-print-sheet" aria-hidden="true">{printed.map(location => <div className="location-label" key={location.code}><strong>{location.code}</strong><Barcode code={location.code}/></div>)}</div>
   </div>;
 }

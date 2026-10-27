@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
+import { ToolCard, ToolHeading, ToolIcon, ToolSourceBadge } from './design/Tools';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 type Source = 'safe' | 'square' | 'ebay' | 'amazon' | 'tiktok' | 'depop';
@@ -20,7 +21,7 @@ type Audit = { id: number; action: string; at: string; actor_id: string | null; 
 type Props = { client: SupabaseClient; storeId: string; money: (cents: number) => string; stamp: (value: string) => string };
 
 const SOURCES: { id: Source; label: string }[] = [
-  { id: 'safe', label: 'Safe · cash' }, { id: 'square', label: 'Square' },
+  { id: 'safe', label: 'Safe cash' }, { id: 'square', label: 'Square' },
   { id: 'ebay', label: 'eBay' }, { id: 'amazon', label: 'Amazon' },
   { id: 'tiktok', label: 'TikTok' }, { id: 'depop', label: 'Depop' },
 ];
@@ -36,6 +37,9 @@ const label = (source: Source) => SOURCES.find((item) => item.id === source)?.la
 const reasonLabel = (reason: Reason) => REASONS.find((item) => item.id === reason)?.label || reason;
 
 export function WithdrawalsPage({ client, storeId, money, stamp }: Props) {
+  const [formOpen, setFormOpen] = useState(false);
+  const [notice, setNotice] = useState('');
+  const submitting = useRef(false);
   const [entries, setEntries] = useState<Entry[]>([]);
   const [balances, setBalances] = useState<Balance[]>([]);
   const [people, setPeople] = useState<Person[]>([]);
@@ -66,6 +70,7 @@ export function WithdrawalsPage({ client, storeId, money, stamp }: Props) {
 
   async function save(event: FormEvent) {
     event.preventDefault();
+    if (submitting.current) return;
     const amount = Number(form.amount);
     const cents = Math.round(amount * 100);
     if (!Number.isFinite(amount) || cents <= 0 || Math.abs(amount * 100 - cents) > 0.001) {
@@ -74,7 +79,7 @@ export function WithdrawalsPage({ client, storeId, money, stamp }: Props) {
     if (form.reason === 'person_payout' && !form.person_id) {
       setError('Choose the person receiving this payout.'); return;
     }
-    setBusy(true); setError('');
+    submitting.current = true; setBusy(true); setError('');
     try {
       const { error: rpcError } = await client.rpc('portal_save_withdrawal', {
         p_id: editing, p_source: form.source, p_amount_cents: cents, p_on: form.moved_on,
@@ -82,24 +87,26 @@ export function WithdrawalsPage({ client, storeId, money, stamp }: Props) {
         p_performer: form.performed_by || null,
       });
       if (rpcError) throw rpcError;
-      setEditing(null); setForm(empty()); await load();
+      setEditing(null); setForm(empty()); setFormOpen(false); setNotice('Withdrawal saved. Expected balances updated.'); await load();
     } catch (e) { setError(String((e as Error).message || e)); }
-    finally { setBusy(false); }
+    finally { submitting.current = false; setBusy(false); }
   }
 
   async function remove(entry: Entry) {
+    if (busy || submitting.current) return;
     if (!window.confirm(`Remove ${money(entry.amount_cents)} from ${label(entry.source)}? Its audit history will remain.`)) return;
-    setBusy(true); setError('');
+    submitting.current = true; setBusy(true); setError('');
     try {
       const { error: rpcError } = await client.rpc('portal_void_withdrawal', { p_id: entry.id, p_source: entry.source });
       if (rpcError) throw rpcError;
       if (editing === entry.id) { setEditing(null); setForm(empty()); }
       await load();
     } catch (e) { setError(String((e as Error).message || e)); }
-    finally { setBusy(false); }
+    finally { submitting.current = false; setBusy(false); }
   }
 
   function edit(entry: Entry) {
+    setFormOpen(true); setNotice(''); setError('');
     setEditing(entry.id);
     setForm({
       source: entry.source, amount: (entry.amount_cents / 100).toFixed(2),
@@ -118,45 +125,50 @@ export function WithdrawalsPage({ client, storeId, money, stamp }: Props) {
   }
 
   const visibleSources = SOURCES.filter((source) => balances.some((balance) => balance.source === source.id));
-  return <div className="withdrawals-page">
-    <header><div><div className="eyebrow">MONEY MOVING</div><h1>Withdrawals</h1>
-      <p>Record cash taken from the safe and transfers from each selling account. Withdrawals do not reduce profit.</p></div></header>
-    {error && <div className="alert" role="alert">{error}<button type="button" onClick={() => setError('')}>×</button></div>}
-    <section className="panel">
-      <h2>{editing ? 'Edit withdrawal' : 'Record withdrawal'}</h2>
+  const totalExpected = balances.reduce((sum, row) => sum + row.expected_cents, 0);
+  return <div className="floor-tools withdrawals-page">
+    {formOpen && <button type="button" className="tool-back" disabled={busy} onClick={() => { setFormOpen(false); setEditing(null); setForm(empty()); setError(''); }}>‹ Withdrawals</button>}
+    <header><div><h1>{formOpen ? editing ? 'Edit withdrawal' : 'Record withdrawal' : 'Withdrawals'}</h1>
+      <p>{formOpen ? 'Keep your records up to date and track your expected balance.' : 'Reconciliation · all time'}</p></div>
+      {!formOpen && <span className="tool-all-time"><ToolIcon name="calendar"/>All time</span>}
+    </header>
+    {error && <div className="alert" role="alert">{error}<button type="button" aria-label="Dismiss error" onClick={() => setError('')}>×</button></div>}
+    {notice && <div className="notice" role="status">{notice}</div>}
+    {!loaded && <p role="status">{error ? 'Could not load records.' : 'Loading withdrawal records…'} {error && <button type="button" className="secondary" onClick={() => void load().catch(e => setError(String(e.message || e)))}>Retry</button>}</p>}
+    {formOpen ? <ToolCard>
       <form className="withdrawal-form" onSubmit={(event) => void save(event)}>
-        <label>Source<select value={form.source} disabled={!!editing} onChange={(event) => setForm({ ...form, source: event.target.value as Source })}>
+        <div className="withdrawal-field-icon"><span className="tool-icon-badge"><ToolIcon name="bank"/></span><label>Source<select value={form.source} disabled={!!editing || busy} onChange={(event) => setForm({ ...form, source: event.target.value as Source })}>
           {visibleSources.map((source) => <option key={source.id} value={source.id}>{source.label}</option>)}
-        </select></label>
-        <label>Amount ($)<input required inputMode="decimal" type="number" min="0.01" step="0.01" value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} /></label>
-        <label>Date<input required type="date" value={form.moved_on} onChange={(event) => setForm({ ...form, moved_on: event.target.value })} /></label>
-        <label>Reason<select value={form.reason} onChange={(event) => setForm({ ...form, reason: event.target.value as Reason, person_id: '' })}>
+        </select></label></div>
+        <div className="withdrawal-field-icon"><span className="tool-icon-badge"><ToolIcon name="money"/></span><label>Amount ($)<input required disabled={busy} inputMode="decimal" type="number" min="0.01" step="0.01" placeholder="0.00" value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} /></label></div>
+        <div className="withdrawal-field-icon"><span className="tool-icon-badge"><ToolIcon name="calendar"/></span><label>Date<input required disabled={busy} type="date" value={form.moved_on} onChange={(event) => setForm({ ...form, moved_on: event.target.value })} /></label></div>
+        <div className="withdrawal-field-icon"><span className="tool-icon-badge"><ToolIcon name="file"/></span><label>Reason<select disabled={busy} value={form.reason} onChange={(event) => setForm({ ...form, reason: event.target.value as Reason, person_id: '' })}>
           {REASONS.map((reason) => <option key={reason.id} value={reason.id}>{reason.label}</option>)}
-        </select></label>
-        <label>Who did it<select value={form.performed_by} onChange={(event) => setForm({ ...form, performed_by: event.target.value })}>
+        </select></label></div>
+        <div className="withdrawal-field-icon"><span className="tool-icon-badge"><ToolIcon name="person"/></span><label>Who did it<select disabled={busy} value={form.performed_by} onChange={(event) => setForm({ ...form, performed_by: event.target.value })}>
           <option value="">Me · signed in</option>{people.map((person) => <option key={person.user_id} value={person.user_id}>{person.display_name}</option>)}
-        </select></label>
-        {form.reason === 'person_payout' && <label>Person<select required value={form.person_id} onChange={(event) => setForm({ ...form, person_id: event.target.value })}>
+        </select></label></div>
+        {form.reason === 'person_payout' && <div className="withdrawal-field-icon"><span className="tool-icon-badge"><ToolIcon name="person"/></span><label>Person receiving payout<select disabled={busy} required value={form.person_id} onChange={(event) => setForm({ ...form, person_id: event.target.value })}>
           <option value="">Choose person</option>{people.map((person) => <option key={person.user_id} value={person.user_id}>{person.display_name}</option>)}
-        </select></label>}
-        <label className="withdrawal-note">Note<input value={form.note} maxLength={500} onChange={(event) => setForm({ ...form, note: event.target.value })} placeholder="Optional reference or details" /></label>
-        <div className="actions"><button disabled={busy}>{editing ? 'Save changes' : 'Record'}</button>
-          {editing && <button type="button" className="secondary" onClick={() => { setEditing(null); setForm(empty()); }}>Cancel</button>}</div>
+        </select></label></div>}
+        <div className="withdrawal-field-icon withdrawal-note"><span className="tool-icon-badge"><ToolIcon name="file"/></span><label>Note (optional)<input disabled={busy} value={form.note} maxLength={500} onChange={(event) => setForm({ ...form, note: event.target.value })} placeholder="Add a note or reference…" /></label></div>
+        <div className="actions"><button className="tool-primary" disabled={busy || !loaded}><ToolIcon name="plus"/>{busy ? 'Saving…' : editing ? 'Save changes' : 'Save withdrawal'}</button></div>
       </form>
       {form.reason === 'person_payout' && <p className="hint">Saving also posts one linked payment to this person’s running payout balance.</p>}
-    </section>
-    <section className="panel"><h2>Reconciliation · all time</h2>
-      <p className="hint">Expected balance uses recorded sales less channel fees, refunds and withdrawals. Opening balances, deposits and unmatched external payouts may need separate review.</p>
-      <div className="withdrawal-balance-list">
-        {balances.map((row) => <details className="withdrawal-balance" key={row.source}>
-          <summary><strong>{label(row.source)}</strong><span>Expected {money(row.expected_cents)}</span></summary>
-          <div className="withdrawal-parts"><span>Sales less fees</span><b>{money(row.sales_less_fees_cents)}</b>
-            <span>Refunds</span><b>−{money(row.refund_cents)}</b>
-            <span>Withdrawn</span><b>−{money(row.withdrawn_cents)}</b></div>
-        </details>)}
-      </div>
-    </section>
-    <section className="panel"><h2>History</h2>
+    </ToolCard> : <>
+    <ToolCard className="withdrawal-expected"><span className="tool-icon-badge"><ToolIcon name="bank"/></span><div>
+      <span className="expected-caption">Expected total balance</span><strong className="expected-amount">{loaded ? money(totalExpected) : '—'}</strong>
+      <p>Expected balance uses recorded sales less channel fees, refunds and withdrawals. Opening balances, deposits and unmatched external payouts may need separate review.</p>
+    </div></ToolCard>
+    <div className="withdrawal-overview-action"><button type="button" className="tool-primary" disabled={!loaded || busy} onClick={() => { setEditing(null); setForm(empty()); setNotice(''); setError(''); setFormOpen(true); }}><ToolIcon name="plus"/>Record withdrawal</button></div>
+    <div className="withdrawal-source-head"><h2>By source</h2><span>Expected balance</span></div>
+    <div className="withdrawal-balance-list">
+      {SOURCES.map(source => { const row = balances.find(b => b.source === source.id); return <details className="withdrawal-balance" key={source.id}>
+        <summary><span className="tool-source-name"><ToolSourceBadge source={source.id}/><strong>{source.label}</strong></span><span className="tool-source-balance"><small>Expected</small><strong>{row ? money(row.expected_cents) : '—'}</strong></span><span aria-hidden="true">›</span></summary>
+        {row ? <div className="withdrawal-parts"><span>Sales less fees</span><b>{money(row.sales_less_fees_cents)}</b><span>Refunds</span><b>−{money(row.refund_cents)}</b><span>Withdrawn</span><b>−{money(row.withdrawn_cents)}</b></div> : <p>Balance not available.</p>}
+      </details>; })}
+    </div>
+    <section className="panel tool-card"><ToolHeading icon="file" title="Withdrawal history" description="Recorded withdrawals and their audit trail." />
       {!loaded ? <p>Loading…</p> : entries.length === 0 ? <p className="empty">No withdrawals recorded yet.</p>
         : <div className="withdrawal-list">{entries.map((entry) => <details key={entry.id} className="withdrawal-entry">
           <summary><span><strong>{label(entry.source)} · {money(entry.amount_cents)}</strong>
@@ -179,5 +191,6 @@ export function WithdrawalsPage({ client, storeId, money, stamp }: Props) {
           </div>
         </details>)}</div>}
     </section>
+    </>}
   </div>;
 }

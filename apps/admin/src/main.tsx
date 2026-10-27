@@ -17,3 +17,5 @@ if ('serviceWorker' in navigator) {
     });
   });
 }
+
+import './design/tools.css';

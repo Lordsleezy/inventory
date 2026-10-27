@@ -1,7 +1,9 @@
+import { ToolIcon } from './design/Tools';
 import { useEffect, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   commissionProfit,
+  remainingProfit,
   defaultCommissionSplit,
   effectiveCommissionSplit,
   payout,
@@ -70,6 +72,7 @@ export function CommissionOverrideControls({
   const jacobRule = rules.find(r => r.employee_id === cfg.slots?.jacob) || { employee_id: cfg.slots?.jacob || '', method: 'percent_profit' as const, rate: current.jacobPct };
   const paulCents = payout(ticketWithOv, paulRule, cfg);
   const jacobCents = payout(ticketWithOv, jacobRule, cfg);
+  const ownerCents = remainingProfit(ticketWithOv, rules, cfg);
 
   useEffect(() => {
     if (!editing) return;
@@ -128,33 +131,24 @@ export function CommissionOverrideControls({
   return (
     <div className={`commission-override${current.overridden ? ' is-overridden' : ''}`}>
       <div className="commission-override-head">
-        <div className="eyebrow">COMMISSION</div>
-        <strong>{pctLabel(current.paulPct, current.jacobPct)}{current.overridden ? ' · overridden' : ' · default'}</strong>
+        <h3>Commission split</h3><span className="commission-status"><ToolIcon name="settings"/>{current.overridden ? 'Override active' : 'Default split'}</span>
       </div>
-      <div className="ticket-detail-grid commission-amounts">
-        <div>
-          <span>Paul</span>
-          <strong>{paulCents == null ? 'Needs cost' : money(paulCents)} <small>({current.paulPct}%)</small></strong>
-        </div>
-        <div>
-          <span>Jacob</span>
-          <strong>{jacobCents == null ? 'Needs cost' : money(jacobCents)} <small>({current.jacobPct}%)</small></strong>
-        </div>
-        <div>
-          <span>Commission profit</span>
-          <strong>{base == null ? 'Needs cost' : money(base)}</strong>
-        </div>
-      </div>
+      <p className="commission-split-caption">{pctLabel(current.paulPct, current.jacobPct)} of commission profit</p>
+      <div className="commission-profit-card"><span className="tool-icon-badge"><ToolIcon name="money"/></span><div><small>COMMISSION PROFIT</small><span>Total amount to split</span></div><strong>{base == null ? 'Needs cost' : money(base)}</strong></div>
+      {[{name: 'Paul', pct: current.paulPct, cents: paulCents, tone:'paul'}, {name:'Jacob',pct:current.jacobPct,cents:jacobCents,tone:'jacob'}].map(person => <div className={`commission-person ${person.tone}`} key={person.tone}>
+        <span className="commission-avatar">{person.name.charAt(0)}</span><div><strong>{person.name}</strong><small>{person.pct}% of commission profit</small></div><span className="commission-percent">{person.pct}%</span><strong>{person.cents == null ? 'Needs cost' : money(person.cents)}</strong>
+      </div>)}
+      <div className="commission-person owner"><span className="commission-avatar"><ToolIcon name="bank"/></span><div><strong>Owner</strong><small>Remaining share</small></div><strong>{ownerCents == null ? 'Needs cost' : money(ownerCents)}</strong></div>
       <div className="actions commission-actions">
         <button type="button" disabled={disabled} onClick={() => void apply('flip')}>
-          Flip to {current.jacobPct}% / {current.paulPct}%
+          <ToolIcon name="flip"/>Flip to {current.jacobPct}% / {current.paulPct}%
         </button>
         <button type="button" className="secondary" disabled={disabled} onClick={() => setEditing(e => !e)}>
-          {editing ? 'Hide custom' : 'Change commission'}
+          <ToolIcon name="settings"/>{editing ? 'Hide custom' : 'Change commission'}
         </button>
         {current.overridden && (
           <button type="button" className="secondary" disabled={disabled} onClick={() => void apply('reset')}>
-            Reset to default
+            <ToolIcon name="reset"/>Reset to default
           </button>
         )}
       </div>
