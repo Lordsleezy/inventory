@@ -5,6 +5,7 @@ import { portalAdminFromEvent } from "../lib/portal-auth.mjs";
 import { catalogProductByGtin, suggestCategories } from "../lib/ebay-catalog.mjs";
 import { refreshChannelCategoryFields } from "../lib/category-taxonomy.mjs";
 import { autofillUnitSpecifics, missingRequired, supabaseSpecificsDeps } from "../lib/ebay-specifics.mjs";
+import { canonicalValue, clearInvalid, countUsage, rankValues } from "../lib/aspect-suggest.mjs";
 import { liveSpecificsForUnit } from "../lib/ebay-live-specifics.mjs";
 import { pushEbayDescription } from "../lib/ebay-description-sync.mjs";
 import { normalizeGtin } from "../lib/gtin-normalize.mjs";
@@ -35,6 +36,20 @@ export async function ebayAspectFields(storeId, categoryId) {
   return row?.aspect_fields?.length ? row.aspect_fields : row?.required_fields || [];
 }
 
+/** Values already used in Floor for each aspect of a category, most used first (top 12). Never includes values eBay would reject. */
+async function usageFor(sb, storeId, categoryId, fields) {
+  if (!categoryId) return {};
+  const { data } = await sb.from("unit_channel_categories").select("attributes").eq("store_id", storeId).eq("channel", "ebay")
+    .eq("category_id", categoryId).limit(3000);
+  const counts = countUsage((data || []).map((r) => r.attributes));
+  const out = {};
+  for (const def of fields) {
+    const ranked = rankValues({ ...def, allowed: [] }, counts[def.name]).filter((v) => canonicalValue(def, v) === v).slice(0, 12);
+    if (ranked.length) out[def.name] = ranked;
+  }
+  return out;
+}
+
 async function form(sb, storeId, sku) {
   const { data: unit } = await sb.from("units").select("sku,title,brand,model,upc,condition,listing_body,defect_notes").eq("store_id", storeId).eq("sku", sku).maybeSingle();
   if (!unit) throw Object.assign(new Error("unknown_sku"), { status: 404 });
@@ -54,6 +69,7 @@ async function form(sb, storeId, sku) {
     .eq("channel", "ebay").eq("category_id", row.category_id).maybeSingle() : { data: null };
   return { sku, title: unit.title, upc: unit.upc, enabled: row?.enabled ?? false, category_id: row?.category_id || null,
     path: tax?.path || null, suggestion, fields, attributes: row?.attributes || {},
+    usage: await usageFor(sb, storeId, row?.category_id, fields),
     missing: missingRequired(fields, row?.attributes || {}),
     item: { title: unit.title, brand: unit.brand, model: unit.model, condition: unit.condition,
       description: unit.listing_body || "", defect_notes: unit.defect_notes || "" } };
@@ -74,10 +90,33 @@ async function handle(event) {
       const result = await autofillUnitSpecifics(deps, storeId, sku);
       return json(200, { ok: true, result, form: await form(sb, storeId, sku) });
     }
+    if (body.action === "preview-category") {
+      // Required questions for a category the admin is about to pick, already answered where Floor can (nothing is saved).
+      const categoryId = String(body.category_id || "").trim();
+      if (!categoryId) return json(400, { error: "category_id_required" });
+      const fields = await ebayAspectFields(storeId, categoryId);
+      const { data: row } = await sb.from("unit_channel_categories").select("attributes").eq("store_id", storeId).eq("sku", sku).eq("channel", "ebay").maybeSingle();
+      const { kept, cleared } = clearInvalid(fields, row?.attributes || {});
+      const preview = await autofillUnitSpecifics({ ...deps, aspectFields: async () => fields,
+        loadEbayRow: async () => ({ category_id: categoryId, enabled: true, attributes: kept }) }, storeId, sku, { write: false });
+      const { data: tax } = await sb.from("channel_taxonomy").select("path").eq("channel", "ebay").eq("category_id", categoryId).maybeSingle();
+      return json(200, { ok: true, category_id: categoryId, path: tax?.path || null, fields: fields.filter((f) => f.required || f.recommended),
+        attributes: preview.attributes || kept, prefilled: preview.filled || [], missing: preview.missing || [], cleared,
+        usage: await usageFor(sb, storeId, categoryId, fields) });
+    }
     if (body.action === "category-selected") {
-      // A new category: run the same no-AI pipeline (live eBay listing, Floor fields, UPC memory, same-UPC units, Catalog).
+      // The category was just saved. Drop only the old values that are not valid here, add the answers chosen in the category step, then fill the rest.
+      const current = await form(sb, storeId, sku);
+      const { kept, cleared } = clearInvalid(current.fields, current.attributes);
+      const chosen = {};
+      for (const def of current.fields) {
+        const v = canonicalValue(def, body.attributes?.[def.name]);
+        if (v && !String(kept[def.name] || "").trim()) chosen[def.name] = v;
+      }
+      const merged = { ...kept, ...chosen };
+      if (cleared.length || Object.keys(chosen).length) await deps.saveEbayRow(storeId, sku, { attributes: merged });
       const result = await autofillUnitSpecifics(deps, storeId, sku);
-      return json(200, { ok: true, filled: result.filled || [], result, form: await form(sb, storeId, sku) });
+      return json(200, { ok: true, filled: result.filled || [], cleared, result, form: await form(sb, storeId, sku) });
     }
     if (body.action === "sync-description") {
       // Admins only: copies the saved description to the live eBay listing. Price, shipping and promotions are not touched.
