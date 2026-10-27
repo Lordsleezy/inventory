@@ -190,3 +190,8 @@ timeout = 30
 [functions."channel-autopush"]
   schedule = "* * * * *"
   timeout = 60
+
+# Fills a missing eBay category (eBay's top suggestion for the title) and a missing description on in-stock units.
+[functions."auto-fill-sweep"]
+  schedule = "*/10 * * * *"
+  timeout = 60

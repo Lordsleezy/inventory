@@ -5,7 +5,7 @@ import { AspectPicker } from './AspectPicker';
 import { valueIsValid } from './aspectOptions';
 
 type Field = { name: string; required?: boolean; recommended?: boolean; allowed?: string[]; selection_only?: boolean };
-type Form = { sku: string; upc: string | null; enabled: boolean; category_id: string | null; path: string | null;
+type Form = { sku: string; upc: string | null; enabled: boolean; category_id: string | null; path: string | null; auto_picked?: boolean;
   suggestion: { category_id: string; path: string } | null; fields: Field[]; attributes: Record<string, string>; missing: string[];
   usage?: Record<string, string[]>;
   item?: { title?: string; brand?: string; model?: string; condition?: string; description?: string; defect_notes?: string } };
@@ -208,7 +208,7 @@ export function EbaySpecificsPanel({ client, sku, storeId, appMode = false, onSa
       Review generated description<textarea rows={5} value={generatedDescription} onChange={(e) => { setGeneratedDescription(e.currentTarget.value); onDescription?.(e.currentTarget.value); }} />
     </label>}
     {form && canPick && <div className="ebay-specifics-category">
-      <p className="hint">{form.category_id ? `Category: ${form.path || form.category_id}` : 'No eBay category yet.'}</p>
+      <p className="hint">{form.category_id ? `Category: ${form.path || form.category_id}` : 'No eBay category yet.'}{form.category_id && form.auto_picked ? <em className="aspect-suggested" title="Floor picked this from eBay's suggestion for the title. Look it over; tapping a category yourself clears the tag.">Auto</em> : null}</p>
       {!form.category_id && picked && !preview && <button type="button" className="ebay-specifics-suggestion" disabled={busy}
         onClick={() => void openCategory(picked)}>Use suggested: {picked.path}</button>}
       <label>{form.category_id ? 'Change eBay category' : 'Search eBay categories'}

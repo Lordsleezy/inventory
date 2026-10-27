@@ -7,6 +7,7 @@ import { refreshChannelCategoryFields } from "../lib/category-taxonomy.mjs";
 import { autofillUnitSpecifics, missingRequired, supabaseSpecificsDeps } from "../lib/ebay-specifics.mjs";
 import { canonicalValue, clearInvalid, countUsage, rankValues } from "../lib/aspect-suggest.mjs";
 import { liveSpecificsForUnit } from "../lib/ebay-live-specifics.mjs";
+import { autoFillUnit, supabaseAutoFillDeps } from "../lib/auto-fill.mjs";
 import { pushEbayDescription } from "../lib/ebay-description-sync.mjs";
 import { normalizeGtin } from "../lib/gtin-normalize.mjs";
 import { wrapHandler, asNetlifyFunction } from "../lib/floor-log.mjs";
@@ -53,7 +54,7 @@ async function usageFor(sb, storeId, categoryId, fields) {
 async function form(sb, storeId, sku) {
   const { data: unit } = await sb.from("units").select("sku,title,brand,model,upc,condition,listing_body,defect_notes").eq("store_id", storeId).eq("sku", sku).maybeSingle();
   if (!unit) throw Object.assign(new Error("unknown_sku"), { status: 404 });
-  const { data: row } = await sb.from("unit_channel_categories").select("category_id,attributes,enabled")
+  const { data: row } = await sb.from("unit_channel_categories").select("category_id,attributes,enabled,source")
     .eq("store_id", storeId).eq("sku", sku).eq("channel", "ebay").maybeSingle();
   let suggestion = null;
   if (!row?.category_id) {
@@ -68,7 +69,7 @@ async function form(sb, storeId, sku) {
   const { data: tax } = row?.category_id ? await sb.from("channel_taxonomy").select("path")
     .eq("channel", "ebay").eq("category_id", row.category_id).maybeSingle() : { data: null };
   return { sku, title: unit.title, upc: unit.upc, enabled: row?.enabled ?? false, category_id: row?.category_id || null,
-    path: tax?.path || null, suggestion, fields, attributes: row?.attributes || {},
+    path: tax?.path || null, auto_picked: row?.source === "auto_suggested", suggestion, fields, attributes: row?.attributes || {},
     usage: await usageFor(sb, storeId, row?.category_id, fields),
     missing: missingRequired(fields, row?.attributes || {}),
     item: { title: unit.title, brand: unit.brand, model: unit.model, condition: unit.condition,
@@ -88,6 +89,14 @@ async function handle(event) {
       loadLive: (sid, s) => liveSpecificsForUnit(sid, s) });
     if (body.action === "autofill") {
       const result = await autofillUnitSpecifics(deps, storeId, sku);
+      return json(200, { ok: true, result, form: await form(sb, storeId, sku) });
+    }
+    if (body.action === "auto-fill") {
+      // Receive / title change: pick the category and write the description if they are still blank. Staff may call it; it never ticks a channel.
+      const af = supabaseAutoFillDeps(sb, { suggestCategories, specificsDeps: deps, ebayAspectFields: (id) => ebayAspectFields(storeId, id) });
+      const [eligible] = await sb.rpc("floor_auto_fill_snapshot", { p_store: storeId, p_sku: sku }).then((r) => r.data || []);
+      if (!eligible?.eligible) return json(200, { ok: true, result: { sku, skipped: "not_eligible" }, form: await form(sb, storeId, sku) });
+      const result = await autoFillUnit(af, storeId, sku);
       return json(200, { ok: true, result, form: await form(sb, storeId, sku) });
     }
     if (body.action === "preview-category") {
