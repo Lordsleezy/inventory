@@ -108,11 +108,35 @@ export function supabaseAutoFillDeps(sb, { suggestCategories, specificsDeps, eba
   };
 }
 
-/** Units that still need an auto category (new title, no category) or a description. */
+/** Pure: which in-stock units still need an auto category (new title, none tried yet) or a description. */
+export function pickCandidates(units, categorizedSkus) {
+  const have = new Set(categorizedSkus);
+  return (units || []).filter((u) => {
+    const named = text(u.title) || text(u.brand) || text(u.model);
+    const needsCategory = !have.has(u.sku) && text(u.title) && text(u.tried) !== text(u.title);
+    return needsCategory || (!text(u.listing_body) && named);
+  });
+}
+
+/**
+ * Cheap when idle: two small reads and no per-unit work if nothing needs filling. Only the few picked units get the
+ * (heavier) eligibility check (Defective / do-not-list / never-list).
+ */
 export async function autoFillCandidates(sb, storeId, { sku = null, limit = 8 } = {}) {
-  const { data, error } = await sb.rpc("floor_auto_fill_snapshot", { p_store: storeId, p_sku: sku });
+  let q = sb.from("units").select("sku,title,brand,model,listing_body,tried:listing_specs->>auto_category_tried")
+    .eq("store_id", storeId).in("state", ["available", "reserved", "repair"]);
+  if (sku) q = q.eq("sku", sku);
+  const { data: units, error } = await q.limit(5000);
   if (error) throw new Error(error.message);
-  const rows = (data || []).filter((r) => r.eligible && (
-    (!r.has_category && text(r.title) && text(r.tried_title) !== text(r.title)) || (!r.has_description && r.has_name)));
-  return rows.sort(() => Math.random() - 0.5).slice(0, limit).map((r) => r.sku);
+  const { data: cats, error: cerr } = await sb.from("unit_channel_categories").select("sku").eq("store_id", storeId).eq("channel", "ebay").not("category_id", "is", null).limit(10000);
+  if (cerr) throw new Error(cerr.message);
+  const pool = pickCandidates(units, (cats || []).map((c) => c.sku));
+  if (!pool.length) return [];
+  const out = [];
+  for (const u of pool.sort(() => Math.random() - 0.5)) {
+    if (out.length >= limit) break;
+    const { data } = await sb.rpc("floor_auto_fill_snapshot", { p_store: storeId, p_sku: u.sku });
+    if (data?.[0]?.eligible) out.push(u.sku);
+  }
+  return out;
 }
