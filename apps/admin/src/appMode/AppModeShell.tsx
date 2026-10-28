@@ -152,6 +152,9 @@ export function AppModeShell({
   const [itemSku, setItemSku] = useState<string | null>(null);
   const [itemMissing, setItemMissing] = useState<string[]>([]);
   const [morePage, setMorePage] = useState<MoreId | null>(() => fullAccess && ['reports','books'].includes(parseNavFromLocation().page) ? parseNavFromLocation().page as MoreId : null);
+  const [booksDetail, setBooksDetail] = useState(false);
+  const [booksTitle, setBooksTitle] = useState('Books');
+  const [booksBack, setBooksBack] = useState<() => void>(() => () => setMorePage(null));
   const [channel, setChannel] = useState<'ebay' | 'amazon' | 'tiktok' | null>(null);
   const [invKey, setInvKey] = useState(0);
   const scrollPos = useRef<Record<string, number>>({});
@@ -348,8 +351,8 @@ export function AppModeShell({
           </AppReportsNative>
         )}
         {fullAccess && morePage === 'books' && (
-          <AppReportsNative onBack={() => setMorePage(null)} title="Books">
-            <BooksPage client={client} money={money} native />
+          <AppReportsNative onBack={() => booksBack()} title={booksTitle} backLabel={booksDetail ? 'Books' : 'More'}>
+            <BooksPage client={client} money={money} native onNativeNavigation={(detail, title, back) => { setBooksDetail(detail); setBooksTitle(detail ? (title || 'Books') : 'Books'); setBooksBack(() => back || (() => setMorePage(null))); }} />
           </AppReportsNative>
         )}
         {fullAccess && morePage === 'manifests' && (

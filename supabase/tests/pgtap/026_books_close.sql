@@ -1,5 +1,5 @@
 begin;
-select plan(17);
+select plan(25);
 
 do $$
 declare v_store uuid; v_admin uuid:=gen_random_uuid(); v_clerk uuid:=gen_random_uuid(); v_period uuid;
@@ -29,6 +29,10 @@ select ok(jsonb_array_length(public.portal_books_list('2026-01-01','2026-10-31')
 select is((public.portal_books_refresh_readiness((select id from public.books_periods where store_id=current_setting('test.store')::uuid and period_type='month' and period_start=date_trunc('month',(now() at time zone 'America/Los_Angeles'))::date))), 'draft','open month with unchecked close items stays Draft');
 select is((public.portal_books_save_opening('safe',(now() at time zone 'America/Los_Angeles')::date,12345,'counted') is not null),true,
   'admin can record an opening balance');
+set local role authenticated;
+select is((select count(*) from public.books_opening_balances where store_id=current_setting('test.store')::uuid),1::bigint,
+  'admin can read Books rows through the financial RLS policy');
+reset role;
 select lives_ok($$select public.portal_books_prior_correction((now() at time zone 'America/Los_Angeles')::date,'sales','old-sale-1','safe',125,'late receipt adjustment')$$,
   'prior-month correction is recorded in the open period');
 select ok((public.portal_books_report((select id from public.books_periods where store_id=current_setting('test.store')::uuid and period_type='month' and period_start=date_trunc('month',(now() at time zone 'America/Los_Angeles'))::date))->'prior_corrections') @> '[{"original_record_id":"old-sale-1"}]'::jsonb,
@@ -37,6 +41,8 @@ insert into public.sales(store_id,sku,price_cents,tax_cents,channel,sold_at,rece
   values(current_setting('test.store')::uuid,'99801',10000,0,'ebay',now(),'BOOKS-TRAIL-1') returning id \gset books_sale_
 insert into public.channel_orders(store_id,provider,order_id,sku,sale_id,item_cents,fee_cents,fee_source,payout_cents)
   values(current_setting('test.store')::uuid,'ebay','BOOKS-ORDER-1','99801',:books_sale_id,10000,1200,'actual',8800);
+select ok((select count(*) > 0 from jsonb_array_elements(public.portal_books_list('2026-01-01',(now() at time zone 'America/Los_Angeles')::date)) as periods(item)
+  where item->>'period_type'='week'), 'Books list creates weekly cards for weeks with sales');
 select lives_ok($$select public.portal_books_record_platform_payout('ebay','BOOKS-PAYOUT-1',8800,(now() at time zone 'America/Los_Angeles')::date,'BANK-REF-1','test payout')$$,
   'admin can record an imported payout and bank reference');
 select lives_ok(format('select public.portal_books_link_sale_payout(%s,''ebay'',''BOOKS-PAYOUT-1'',''test link'')',:books_sale_id),
@@ -57,8 +63,29 @@ select throws_ok($$insert into public.store_cash_movements(store_id,kind,amount_
 select throws_ok($$select public.portal_books_finalize((select id from public.books_periods where store_id=current_setting('test.store')::uuid and period_type='week' and period_start='2026-10-05'), '{}'::jsonb,'eA==','eA==')$$,
   'P0001','weekly_period_cannot_lock','weekly periods cannot be locked');
 select is((select relrowsecurity from pg_class where oid='public.books_periods'::regclass),true,'books periods have row-level security');
+select ok(has_function_privilege('authenticated','public.portal_financial_access()','EXECUTE'),
+  'authenticated callers can evaluate Books RLS access policies');
+select ok((select bool_and(has_function_privilege('authenticated',p.oid,'EXECUTE'))
+  from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+  where n.nspname='public' and p.proname in (
+    'portal_books_list','portal_books_ensure_period','portal_books_save_opening',
+    'portal_books_capture_inventory','portal_books_explain','portal_books_prior_correction',
+    'portal_books_record_platform_payout','portal_books_link_sale_payout',
+    'portal_books_link_bank_reference','portal_books_refresh_readiness',
+    'portal_books_label_refund','portal_books_report','portal_books_finalize',
+    'portal_books_unlock','portal_books_frozen_export')),
+  'authenticated admins can execute every public Books RPC');
+select ok(not has_function_privilege('anon','public.portal_financial_access()','EXECUTE'),
+  'anonymous callers cannot evaluate Books access policies');
 
 select set_config('request.jwt.claim.sub',current_setting('test.clerk'),true);
+set local role authenticated;
+select is((select count(*) from public.books_opening_balances where store_id=current_setting('test.store')::uuid),0::bigint,
+  'clerk cannot read protected Books rows through RLS');
+reset role;
+select is(public.portal_financial_access(),false,'clerks do not receive Books financial access');
+select throws_ok($$select public.portal_books_report((select id from public.books_periods where store_id=current_setting('test.store')::uuid and period_type='month' and period_start='2026-09-01'))$$,
+  '42501','portal_access_denied','clerks receive a clean server-side denial for Books reports');
 select throws_ok($$select public.portal_books_list('2026-01-01','2026-12-31')$$,'42501','portal_access_denied','clerks cannot access Books RPCs');
 
 select * from finish();

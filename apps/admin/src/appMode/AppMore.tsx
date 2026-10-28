@@ -294,17 +294,18 @@ export function AppConnections({ accessToken, onBack }: {
   );
 }
 
-export function AppReportsNative({ onBack, children, title = 'Reports', action, onAction }: {
+export function AppReportsNative({ onBack, children, title = 'Reports', backLabel = 'More', action, onAction }: {
   onBack: () => void;
   children: ReactNode;
   title?: string;
+  backLabel?: string;
   action?: 'add' | 'download';
   onAction?: () => void;
 }) {
   return (
     <div className="app-stack">
       <div className="app-nav">
-        <button type="button" onClick={onBack}>‹ More</button>
+        <button type="button" onClick={onBack}>‹ {backLabel}</button>
         <div className="app-nav-title">{title}</div>
         {action ? <button type="button" aria-label={action === 'add' ? 'Add expense' : 'Download report'} onClick={onAction}>{action === 'add' ? '+' : '↓'}</button> : <button type="button" style={{ visibility: 'hidden' }}>·</button>}
       </div>
