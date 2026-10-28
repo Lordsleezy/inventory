@@ -9,7 +9,7 @@ import { inventoryMissingText } from '../inventoryMissing';
 import { INVENTORY_BUCKET_LABELS, inventoryBucketStatus, type InventoryBucket } from '../totalsMath';
 
 /** Same stock subtabs as desktop Inventory. */
-type Filter = 'in_stock' | 'sold' | 'unfinished' | 'needs_check' | 'defective' | 'dns' | InventoryBucket;
+type Filter = 'in_stock' | 'sold' | 'unfinished' | 'needs_check' | 'no_location' | 'defective' | 'dns' | InventoryBucket;
 
 type Row = {
   sku: string;
@@ -131,9 +131,17 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
   const [error, setError] = useState('');
   const [queue, setQueue] = useState<Exclude<AttentionSection, 'all'> | null>(null);
   const [queueRefresh, setQueueRefresh] = useState(0);
+  const [noLocationCount, setNoLocationCount] = useState(0);
   const counts = useAttentionCounts(client, fullAccess && filter === 'unfinished', queueRefresh);
   const urlsRef = useRef(urls);
   urlsRef.current = urls;
+  useEffect(() => {
+    let active = true;
+    void client.rpc('portal_unassigned_inventory_count').then(({ data }) => {
+      if (active && typeof data === 'number') setNoLocationCount(data);
+    });
+    return () => { active = false; };
+  }, [client, storeId, refreshKey]);
 
   /** Sign storage paths; skip missing objects (web/400 often absent for fresh captures). */
   async function signPaths(paths: string[]) {
@@ -189,9 +197,14 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
       setError('');
       void (async () => {
         try {
-          const status = filter === 'unfinished' ? 'all' : filter in INVENTORY_BUCKET_LABELS ? inventoryBucketStatus(filter as InventoryBucket) : filter;
+          const status = filter === 'unfinished' ? 'all' : filter === 'no_location' ? 'in_stock' : filter in INVENTORY_BUCKET_LABELS ? inventoryBucketStatus(filter as InventoryBucket) : filter;
           const unfinished = filter === 'unfinished';
-          const { data, error: e } = await client.rpc(staffMode ? 'staff_inventory_list' : 'portal_inventory_list', {
+          const { data, error: e } = filter === 'no_location'
+            ? await client.rpc('portal_inventory_list_with_locations', {
+                p_query: query, p_status: 'in_stock', p_unfinished: false, p_sort: 'sku',
+                p_offset: offset, p_limit: PAGE, p_location: 'unassigned',
+              })
+            : await client.rpc(staffMode ? 'staff_inventory_list' : 'portal_inventory_list', {
             p_query: query,
             p_status: status,
             p_unfinished: unfinished,
@@ -202,6 +215,7 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
           if (e) throw e;
           const next = data as List;
           if (!alive) return;
+          if (filter === 'no_location') next.items.sort((a,b) => Number(b.state === 'reserved') - Number(a.state === 'reserved') || Number(b.state === 'sold') - Number(a.state === 'sold') || Number(b.sku)-Number(a.sku));
           setList(next);
           writeCache(cacheScope, filter, query, offset, next);
           setLoading(false);
@@ -228,6 +242,7 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
     if (filter in INVENTORY_BUCKET_LABELS) return `${pieces} units · ${INVENTORY_BUCKET_LABELS[filter as InventoryBucket]}${rowsNote}`;
     if (filter === 'unfinished') return `${pieces} units unfinished${rowsNote}`;
     if (filter === 'needs_check') return `${pieces} units need to be checked${rowsNote}`;
+    if (filter === 'no_location') return `${pieces} in-stock units need a location${rowsNote}`;
     if (filter === 'sold') return `${pieces} units sold${rowsNote}`;
     if (filter === 'dns') return `${pieces} units DNS / Do not ship${rowsNote}`;
     if (filter === 'defective') return `${pieces} units defective / not for sale${rowsNote}`;
@@ -280,6 +295,7 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
           ['in_stock', 'In stock'],
           ['sold', 'Sold'],
           ['needs_check', 'Needs check'],
+          ['no_location', `No location ${noLocationCount}`],
         ] as const).map(([id, label]) => (
           <button
             key={id}

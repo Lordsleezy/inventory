@@ -6,6 +6,7 @@ import { RestoreInventoryButton } from '../RestoreInventoryButton';
 import { shortError } from './shortError';
 import { DispositionButtons } from '../DispositionDialogs';
 import { showDispositionButtons } from '../dispositions';
+import { locationParts } from '../locationOrder';
 
 type Photo = { id: number; path: string; is_primary: boolean };
 type Listing = { channel: string; status: string; listing_id: string | null; price_cents?: number | null };
@@ -50,6 +51,7 @@ export function AppItemDetail({
   const [error, setError] = useState('');
   const [editing, setEditing] = useState(() => !staffMode && missingFields.length > 0);
   const [reload, setReload] = useState(0);
+  const [locationCodes, setLocationCodes] = useState<string[]>([]);
 
   useEffect(() => {
     let alive = true;
@@ -60,6 +62,12 @@ export function AppItemDetail({
         if (e) throw e;
         if (!data) throw new Error('Unit not found');
         const next = data as Detail;
+        const [stock, pick] = await Promise.all([
+          client.from('unit_location_stock').select('location_code').eq('store_id',storeId).eq('sku',sku),
+          client.from('unit_pick_locations').select('location_code').eq('store_id',storeId).eq('sku',sku).maybeSingle(),
+        ]);
+        const codes = (stock.data||[]).map(row=>row.location_code as string);
+        if (!codes.length && pick.data?.location_code) codes.push(pick.data.location_code as string);
         const paths = next.photos.map((p) => p.path);
         const keys = paths.filter((p) => /^[0-9a-f-]{36}\//i.test(p));
         let signed: Record<string, string> = {};
@@ -69,6 +77,7 @@ export function AppItemDetail({
         }
         if (!alive) return;
         setDetail(next);
+        setLocationCodes(codes);
         setUrls(signed);
       } catch (err) {
         if (alive) setError(shortError(err));
@@ -77,7 +86,7 @@ export function AppItemDetail({
     return () => {
       alive = false;
     };
-  }, [client, sku, reload, staffMode]);
+  }, [client, storeId, sku, reload, staffMode]);
 
   const unit = detail?.unit;
   const listingsBy = useMemo(() => {
@@ -201,7 +210,9 @@ export function AppItemDetail({
             </div>
             <div className="app-kv">
               <span>Location</span>
-              <strong className="muted">{String(unit.location || unit.bin || '—')}</strong>
+              <strong className="muted">{locationCodes.length ? locationCodes.map(code=>{
+                const parts=locationParts(code); return parts?`${parts.display} · ${parts.slot}`:code;
+              }).join(', ') : String(unit.location || unit.bin || 'Unassigned')}</strong>
             </div>
           </div>
 

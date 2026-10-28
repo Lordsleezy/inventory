@@ -41,7 +41,7 @@ type Props = {
 };
 
 /** Unit-list subtabs, in this order. Everything after them is an admin tool. */
-const LIST_TABS: [InventoryTab, string][] = [['in-stock', 'In stock'], ['sold', 'Sold'], ['needs-check', 'Needs to be checked']];
+const LIST_TABS: [InventoryTab, string][] = [['in-stock', 'In stock'], ['sold', 'Sold'], ['needs-check', 'Needs to be checked'], ['no-location', 'No location']];
 const CARD_TABS: Partial<Record<InventoryTab, InventoryBucket>> = { total: 'total', listed: 'listed', 'not-listed': 'not_listed', 'not-ready': 'not_ready', dns: 'dns', defective: 'defective' };
 const TOOL_TABS: [InventoryTab, string][] = [['left-store', 'Replaced / given away'], ['receive', 'Receive'], ['lookup-test', 'Lookup test'], ['products', 'Products'], ['measure-mat', 'Measure mat']];
 const MISSING_LABEL: Record<string, string> = { spec: 'weight & box', upc: 'UPC', specifics: 'item specifics' };
@@ -79,14 +79,24 @@ export function InventoryPage({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [detailKey, setDetailKey] = useState(0);
+  const [noLocationCount, setNoLocationCount] = useState(0);
   const listTab = LIST_TABS.some(([id]) => id === tab) || CARD_TABS[tab] || tab === 'unfinished' ? tab : associateBrowseOnly ? 'in-stock' : null;
   const queue = listTab === 'unfinished' && !associateBrowseOnly && attentionSection !== 'all' ? attentionSection : null;
   const counts = useAttentionCounts(client, listTab === 'unfinished' && !associateBrowseOnly, refresh);
   // Status only narrows In stock; the other subtabs have a fixed status.
   const cardBucket = listTab ? CARD_TABS[listTab] : undefined;
-  const pStatus = cardBucket ? inventoryBucketStatus(cardBucket) : listTab === 'sold' ? 'sold' : listTab === 'defective' ? 'defective' : listTab === 'dns' ? 'dns' : listTab === 'unfinished' ? 'all' : listTab === 'needs-check' ? 'needs_check' : status;
+  const pStatus = cardBucket ? inventoryBucketStatus(cardBucket) : listTab === 'no-location' ? 'in_stock' : listTab === 'sold' ? 'sold' : listTab === 'defective' ? 'defective' : listTab === 'dns' ? 'dns' : listTab === 'unfinished' ? 'all' : listTab === 'needs-check' ? 'needs_check' : status;
   const pUnfinished = listTab === 'unfinished';
   const hideMoney = associateBrowseOnly && listTab === 'sold';
+  const effectiveLocation = listTab === 'no-location' ? 'unassigned' : location;
+
+  useEffect(() => {
+    let active = true;
+    void client.rpc('portal_unassigned_inventory_count').then(({ data }) => {
+      if (active && typeof data === 'number') setNoLocationCount(data);
+    });
+    return () => { active = false; };
+  }, [client, storeId, refresh]);
 
   useEffect(() => {
     let active = true;
@@ -112,17 +122,20 @@ export function InventoryPage({
       try {
         const { data, error: e } = await client.rpc('portal_inventory_list_with_locations', {
           p_query: query, p_status: pStatus, p_unfinished: pUnfinished,
-          p_sort: sort, p_offset: offset, p_limit: 24, p_location: location,
+          p_sort: listTab === 'no-location' ? 'sku' : sort, p_offset: offset, p_limit: 24, p_location: effectiveLocation,
         });
         if (e) throw e;
         const next = data as List;
         const signed = await sign(next.items.flatMap(x => x.photo_path ? [thumb(x.photo_path), x.photo_path] : [])).catch(() => ({}));
-        if (active) { setList(next); setUrls(prev => ({ ...prev, ...signed })); }
+        if (active) {
+          if (listTab === 'no-location') next.items.sort((a,b) => Number(b.state === 'reserved') - Number(a.state === 'reserved') || Number(b.state === 'sold') - Number(a.state === 'sold') || Number(b.sku)-Number(a.sku));
+          setList(next); setUrls(prev => ({ ...prev, ...signed }));
+        }
       } catch (e) { if (active) setError(errText(e)); }
       finally { if (active) setLoading(false); }
     })(); }, 200);
     return () => { active = false; clearTimeout(timer); };
-  }, [client, listTab, queue, query, pStatus, pUnfinished, sort, offset, refresh, location]);
+  }, [client, listTab, queue, query, pStatus, pUnfinished, sort, offset, refresh, effectiveLocation]);
 
   useEffect(() => {
     if (!selected) { setDetail(null); return; }
@@ -153,7 +166,7 @@ export function InventoryPage({
       pickTab(bucket === 'not_listed' ? 'not-listed' : bucket === 'not_ready' ? 'not-ready' : bucket);
     }} />
     <div className="inventory-tabs">
-      {[...LIST_TABS, ...(associateBrowseOnly ? [] : TOOL_TABS)].map(([id, text]) => <button type="button" key={id} className={(listTab ?? tab) === id ? 'active' : ''} onClick={() => pickTab(id)}>{text}</button>)}
+      {[...LIST_TABS, ...(associateBrowseOnly ? [] : TOOL_TABS)].map(([id, text]) => <button type="button" key={id} className={(listTab ?? tab) === id ? 'active' : ''} onClick={() => pickTab(id)}>{text}{id === 'no-location' && <small className="inventory-tab-count">{noLocationCount}</small>}</button>)}
     </div>
     {listTab === 'unfinished' && !associateBrowseOnly && (
       <div className="inventory-tabs report-tabs online-channel-tabs">

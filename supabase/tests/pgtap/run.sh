@@ -27,6 +27,23 @@ while IFS= read -r f; do
   psql "$DB_URL" -v ON_ERROR_STOP=1 -f "$f" >/dev/null
 done < <(node "$ROOT/scripts/list-replay-migrations.mjs")
 
+# Historical pgTAP cases seed sellable units directly. Keep their fixture
+# behavior isolated to this disposable test database; the dedicated receive
+# guard test opts out so it still exercises the real trigger.
+psql "$DB_URL" -v ON_ERROR_STOP=1 <<'SQL'
+create or replace function public.pgtap_seed_unit_photo_fixture()
+returns trigger language plpgsql as $$
+begin
+  if current_setting('pgtap.require_photo_test',true)='on' then return new; end if;
+  insert into storage.objects(bucket_id,name)
+  values('unit-photos',new.store_id::text||'/'||new.sku||'/pgtap-fixture.jpg');
+  return new;
+end $$;
+drop trigger if exists aaa_pgtap_seed_unit_photo_fixture on public.units;
+create trigger aaa_pgtap_seed_unit_photo_fixture before insert on public.units
+  for each row execute function public.pgtap_seed_unit_photo_fixture();
+SQL
+
 echo "Running pgTAP"
 shopt -s nullglob
 failed=0

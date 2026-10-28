@@ -34,6 +34,11 @@ export function mergeDimensions(floor, amazon, upcitemdb) {
   return { values, sources };
 }
 
+export function dimensionWarnings(values) {
+  return Object.values(values).some(value => value != null)
+    ? [] : ['No size found. Measure on mat.'];
+}
+
 export function dimensionIdentityMatches(catalog, identity) {
   if (!identity?.title || !identity?.brand) return true;
   return comparablePrices([{price_cents:1, url:'https://catalog.example/item',
@@ -53,11 +58,10 @@ export async function lookupReceiveDimensions(sb, storeId, rawUpc, identity, { s
     ? { title:catalog.upcitemdb.title, brand:catalog.upcitemdb.brand } : null;
   const warnings = [];
   for (const source of ['amazon','upcitemdb']) {
-    if (catalog[source]?.raw_error) warnings.push(`${source === 'amazon' ? 'Amazon' : 'UPCitemdb'} measurements unavailable; enter missing measurements manually.`);
     if (catalog[source]?.found && !dimensionIdentityMatches(catalog[source], reference)) {
-      warnings.push(`${source === 'amazon' ? 'Amazon' : 'UPCitemdb'} measurements rejected: product size, count or identity did not match.`);
       catalog[source] = null;
     }
   }
-  return { ...mergeDimensions(floor, catalog.amazon, catalog.upcitemdb), warnings };
+  const merged = mergeDimensions(floor, catalog.amazon, catalog.upcitemdb);
+  return { ...merged, warnings: [...warnings, ...dimensionWarnings(merged.values)] };
 }

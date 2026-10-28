@@ -6,7 +6,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { isKioskShell, scannerInputMode } from './kiosk';
 import { floorFunctionUrl } from './floorApi';
 import { reportClientError } from './clientLog';
-import { categoryDefaultCostCents, priceFloorCents } from './scanPricing';
+import { priceFloorCents } from './scanPricing';
 import { errText } from './errText';
 import { BundleReceive } from './BundleReceive';
 const MeasureOnMat = lazy(() => import('./MeasureOnMat').then(module => ({ default: module.MeasureOnMat })));
@@ -115,6 +115,7 @@ async function clearPendingPhotos(key: string): Promise<void> {
  * ---------------------------------------------------------------------------------------------- */
 
 type Options = { next_sku: string | null; conditions: unknown; test_statuses: unknown };
+type ReceiveLocation = { code: string; bay_no: number; row_no: number; bin_no: number | null };
 type Props = {
   client: SupabaseClient;
   storeId: string;
@@ -141,6 +142,7 @@ type Source = {
   description?: string | null;
   features?: string[];
   aspects?: Record<string, string>;
+  images?: string[];
   package?: Pkg;
   price_cents?: number | null;
   price_source?: string | null;
@@ -162,7 +164,7 @@ type Lookup = {
   merged?: {
     title?: string | null; brand?: string | null; model?: string | null; description?: string | null;
     category?: string | null;
-    features?: string[]; aspects?: Record<string, string>; package?: Pkg; asin?: string | null; msrp_cents?: number | null;
+    features?: string[]; aspects?: Record<string, string>; images?: string[]; package?: Pkg; asin?: string | null; msrp_cents?: number | null;
     retail_cents?: number | null; retail_source?: string | null; retail_as_of?: string | null;
     disagreements?: Disagreement[]; never_list_reason?: string | null;
     not_found?: boolean;
@@ -555,6 +557,12 @@ function CameraScanner({ onDetect, onFile, onClose }: {
 
 export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome, staffMode = false, initialManual, initialUpc, onAppCancel }: Props) {
   const [options, setOptions] = useState<Options | null>(null);
+  const [receiveLocations, setReceiveLocations] = useState<ReceiveLocation[]>([]);
+  const [selectedLocation, setSelectedLocation] = useState(() => {
+    try { return localStorage.getItem(`floor:last-receive-location:${storeId}`) || ''; } catch { return ''; }
+  });
+  const [locationScan, setLocationScan] = useState('');
+  const [stagedPhotoPaths, setStagedPhotoPaths] = useState<string[]>([]);
   const [manual, setManual] = useState(!!initialManual);
   const [draft, setDraft] = useState('');
   const [queue, setQueue] = useState<Scan[]>([]);
@@ -568,6 +576,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   const [warning, setWarning] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [backgroundStatus, setBackgroundStatus] = useState<Record<string, 'working'|'failed'>>({});
   const [dups, setDups] = useState<Dups | null>(null);
   const [dupAck, setDupAck] = useState(false);
   const [dialog, setDialog] = useState<null | 'ready' | 'reason' | 'miss-photo'>(null);
@@ -690,6 +699,25 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   useEffect(() => { focusUpc(); }, []);
   useEffect(() => {
+    const releaseUi = () => {
+      if (document.visibilityState === 'visible') return;
+      const active = document.activeElement;
+      if (active instanceof HTMLElement) active.blur();
+      setCamera(false);
+    };
+    const releaseOnPageHide = () => {
+      const active = document.activeElement;
+      if (active instanceof HTMLElement) active.blur();
+      setCamera(false);
+    };
+    document.addEventListener('visibilitychange', releaseUi);
+    window.addEventListener('pagehide', releaseOnPageHide);
+    return () => {
+      document.removeEventListener('visibilitychange', releaseUi);
+      window.removeEventListener('pagehide', releaseOnPageHide);
+    };
+  }, []);
+  useEffect(() => {
     if (formOpen) upcInput.current?.blur();
   }, [formOpen, loadedId]);
 
@@ -699,6 +727,40 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     setOptions(data as Options);
   }
   useEffect(() => { void loadOptions().catch(e => setError(errText(e))); }, [client, staffMode]);
+  useEffect(() => {
+    let alive = true;
+    void Promise.resolve(client.rpc('portal_bay_list')).then(({ data, error: e }) => {
+      if (e) throw e;
+      if (!alive) return;
+      const locations = (data?.locations || []) as ReceiveLocation[];
+      setReceiveLocations(locations);
+      setSelectedLocation(previous => locations.some(location => location.code === previous)
+        ? previous : '');
+    }).catch(e => { if (alive) setWarning(`Locations unavailable: ${errText(e)}`); });
+    return () => { alive = false; };
+  }, [client]);
+
+  async function stageUnitPhotos(nextFiles: File[], sku: string) {
+    const started=performance.now();
+    if (!sku || !/^\d{5}$/.test(sku)) throw new Error('Next SKU is not ready. Refresh Receive and try again.');
+    const paths: string[] = [];
+    try {
+      for (const file of nextFiles) {
+        const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, '_') || 'unit.jpg';
+        const path = `${storeId}/${sku}/${Date.now()}-${crypto.randomUUID()}-${safe}`;
+        const upload = await client.storage.from('unit-photos').upload(path, file, {
+          contentType: file.type && file.type.startsWith('image/') ? file.type : 'image/jpeg', upsert: false,
+        });
+        if (upload.error) throw upload.error;
+        paths.push(path);
+      }
+    } catch (error) {
+      if (paths.length) await client.storage.from('unit-photos').remove(paths);
+      throw error;
+    }
+    console.info('receive_photo_stage_timing',{upload_ms:Math.round(performance.now()-started),photos:paths.length});
+    return paths;
+  }
 
   /* ----- photo previews ----- */
   const previews = useMemo(() => files.map(f => URL.createObjectURL(f)), [files]);
@@ -751,11 +813,14 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     runLookup(scan.id, scan.upc);
   }
 
-  function resetEntry(keepProduct?: Partial<Form>) {
+  function resetEntry(keepProduct?: Partial<Form>, cleanupPhotos = true) {
     askTouched.current = false;
     titleTouched.current = false;
     setForm({ ...blank, ...keepProduct });
     setFiles([]);
+    const oldPhotoPaths = stagedPhotoPaths.slice();
+    setStagedPhotoPaths([]);
+    if (cleanupPhotos && oldPhotoPaths.length) void client.storage.from('unit-photos').remove(oldPhotoPaths);
     void clearPendingPhotos(pendingPhotoKey(storeId, photoSessionKey.current));
     setDups(null);
     setDupAck(false);
@@ -791,9 +856,6 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     const m = r?.merged;
     const p = m?.package;
     const retailNow = retailOf(r);
-    const defaultCost = categoryDefaultCostCents({
-      title: m?.title, brand: m?.brand, model: m?.model, category: m?.category,
-    });
     // The stored model field is a human type/variant with count, not a manufacturer MPN.
     const specifics = itemSpecificsFromLookup(m);
     const brand = text(m?.brand);
@@ -815,9 +877,9 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       productDepth: num(Number(m?.aspects?.product_depth_in) || null),
       productWeight: num(Number(m?.aspects?.product_weight_lb) || null),
       ask: current.seed?.ask || '',
-      cost: dollars(defaultCost.cents),
+      cost: '',
       ...(current.seed || {}),
-      costEstimate: current.seed?.cost ? false : true,
+      costEstimate: false,
     };
     // Seed may override brand/model — keep title in sync.
     if (!initial.title) initial.title = composeListingTitle(initial.brand, initial.model, initial.unbranded);
@@ -841,6 +903,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     else setWarning('');
     photoSessionKey.current = current.id;
     setFiles([]);
+    setStagedPhotoPaths([]);
     // Instant miss popup (photo fallback). Do not re-prompt the same scan id.
     const identityNeeds = missingIdentityFields(r);
     setPhotoPrice(null);
@@ -930,7 +993,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     if (!upcReady()) out.push('UPC');
     if (p.dims.some(d => !pos(d))) out.push('weight + box dimensions');
     if (!form.model.trim()) out.push('item specifics');
-    if (!doNotList && !files.length) out.push('photo');
+    if (!files.length) out.push('photo');
     return out;
   }
   const liveMissing = (() => {
@@ -946,7 +1009,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     if (!upcReady()) out.push('UPC');
     if (dims.some(d => !pos(d))) out.push('weight + box dimensions');
     if (!form.model.trim()) out.push('item specifics');
-    if (!doNotList && !files.length) out.push('photo');
+    if (!files.length) out.push('photo');
     return out;
   })();
 
@@ -958,6 +1021,9 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     if (!manual && current?.status === 'loading') { setError('Lookup still running…'); return; }
     const quantity = manual ? Number(form.quantity) : 1;
     if (!Number.isInteger(quantity) || quantity < 1 || quantity > 100) { setError('Quantity must be 1–100.'); return; }
+    if (quantity !== 1) { setError('Receive one unit at a time so each unit gets its own photo and location.'); return; }
+    if (!files.length) { setError('Take a photo of the actual unit before saving.'); return; }
+    if (photoBusy) { setError('Wait for the unit photo to finish uploading.'); return; }
     if (files.some(file => (file.type && !file.type.startsWith('image/')) || file.size > PHOTO_MAX_BYTES)) {
       setError('Photos must be images under 15 MB each.'); return;
     }
@@ -1000,8 +1066,22 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     setDialog(null);
     setBusy(true);
     setError('');
+    const receiveStarted = performance.now();
     try {
       const quantity = manual ? Number(form.quantity) : 1;
+      if (!files.length) throw new Error('Take a photo of the actual unit before saving.');
+      const freshOptions = await client.rpc(staffMode ? 'staff_receive_options' : 'portal_receive_options');
+      if (freshOptions.error) throw freshOptions.error;
+      const nextSku = String((freshOptions.data as Options)?.next_sku || '');
+      setOptions(freshOptions.data as Options);
+      let unitPhotoPaths = stagedPhotoPaths;
+      if (!unitPhotoPaths.length || !unitPhotoPaths.every(path => path.startsWith(`${storeId}/${nextSku}/`))) {
+        const obsoletePhotoPaths = unitPhotoPaths;
+        unitPhotoPaths = await stageUnitPhotos(files, nextSku);
+        setStagedPhotoPaths(unitPhotoPaths);
+        if (obsoletePhotoPaths.length) await client.storage.from('unit-photos').remove(obsoletePhotoPaths);
+      }
+      if (!unitPhotoPaths.length) throw new Error('The unit photo did not finish uploading. Retry the photo.');
       const holdLabel = hold ? (HOLD_REASONS.find(([k]) => k === hold.reason)?.[1] || hold.reason) : '';
       const notes = [
         isDefectiveCondition(form.condition) ? `Defective/non-sellable: ${form.conditionNote.trim()}` : '',
@@ -1021,7 +1101,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         p_condition: form.condition || null,
         p_test_status: form.testStatus || null,
         p_ask_cents: hold ? null : parsed.ask, // held units never get an ask; priced incomplete keeps ask
-        p_cost_cents: parsed.cost ?? floor.costCents,
+        p_cost_cents: parsed.cost,
         p_notes: notes || null,
         p_upc: form.noUpc ? null : (form.upc.trim() || current?.upc || null),
         p_shippable: form.shippable || 'auto',
@@ -1031,86 +1111,29 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         p_weight: parsed.dims[3],
       });
       if (e) throw e;
+      const writeMs=performance.now()-receiveStarted;
       const skus = (data as { skus: string[] }).skus;
-      const warnings: string[] = [];
-      if (manifestId && !staffMode) {
-        const tagged = await client.rpc('portal_tag_manifest', { p_id: manifestId, p_skus: skus });
-        if (tagged.error) warnings.push('Received units were saved, but their manifest tag failed. Use Manifests → Bulk tag to retry.');
-      }
-
-      let failed = 0;
-      const uploadErrors: string[] = [];
-      for (const sku of skus) for (const file of files) {
-        const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, '_') || 'photo.jpg';
-        const path = `${storeId}/${sku}/${Date.now()}-${crypto.randomUUID()}-${safe}`;
-        try {
-          const contentType = file.type && file.type.startsWith('image/') ? file.type : 'image/jpeg';
-          const upload = await client.storage.from('unit-photos').upload(path, file, { contentType, upsert: false });
-          if (upload.error) throw upload.error;
-          const linked = await client.rpc(staffMode ? 'staff_add_unit_photo' : 'portal_add_unit_photo', { p_sku: sku, p_path: path });
-          if (linked.error) throw linked.error;
-        } catch (err) {
-          failed++;
-          const msg = errText(err);
-          if (msg && uploadErrors.length < 2) uploadErrors.push(msg);
-        }
-      }
-      if (failed) {
-        warnings.push(`${failed} photo upload(s) did not finish. The unit(s) were received; they will show under Needs attention → Missing photo.${uploadErrors.length ? ` (${uploadErrors.join('; ')})` : ''}`);
-      } else if (files.length) {
-        void clearPendingPhotos(pendingPhotoKey(storeId, photoSessionKey.current));
-      }
-
-      // Merge lookup data (and any hold) into the new unit(s).
+      void clearPendingPhotos(pendingPhotoKey(storeId, photoSessionKey.current));
       const blocked = skus.includes(NEVER_LIST_SKU);
-      if (doNotShip) for (const sku of skus) {
-        const { error: dnsError } = await client.rpc('portal_set_unit_dns', { p_sku: sku, p_dns: true });
-        if (dnsError) throw new Error(`Could not save DNS for SKU ${sku}: ${dnsError.message}`);
-      }
-      const enrichFailed = await enrichUnits(skus, parsed, hold, blocked || doNotList);
-      // Pick the eBay category and write the description if they are blank. Nothing is checked or listed; the 10-minute sweep covers any miss.
-      void (async () => { for (const sku of skus) {
-        try { await fetch(floorFunctionUrl('ebay-specifics'), { method: 'POST',
-          headers: { Authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
-          body: JSON.stringify({ store_id: storeId, sku, action: 'auto-fill' }) }); } catch { /* the sweep retries */ }
-      } })();
-      if (enrichFailed) warnings.push(`Could not save lookup details on ${enrichFailed} unit(s).${hold ? ' They have no price, so they will not list.' : ''}`);
-      if (!staffMode && !blocked && !doNotList && !doNotShip && !hold) {
-        for (const [index, sku] of skus.entries()) {
-          try {
-            const categoryResponse = await fetch(floorFunctionUrl('category-resolve'), { method: 'POST',
-              headers: { Authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
-              body: JSON.stringify({ store_id: storeId, sku, network: index === 0 }) });
-            const categoryResult = await categoryResponse.json();
-            if (!categoryResponse.ok) throw new Error(categoryResult.error || 'category_resolve_failed');
-            if (categoryResult.gaps?.length) warnings.push(`SKU ${sku} needs category review; open Missing Category below.`);
-          } catch { warnings.push(`SKU ${sku} category lookup did not finish; use Missing Category below.`); }
-        }
-        if (channels.length) warnings.push(...await applyChannelSelections(client, skus, channels));
-      }
-      if (!manual && current?.upc) {
+      console.info('receive_save_timing',{write_ms:Math.round(writeMs),sku:skus[0],photo_upload_before_save:true});
+      setBackgroundStatus(prev=>({...prev,[skus[0]]:'working'}));
+      setWarning(`SKU ${skus[0]} saved. Listing details and channel work are finishing in the background.`);
+      void (async()=>{
+        const warnings:string[]=[];
         try {
-          const confirm = await fetch(floorFunctionUrl('receive-photo-identify'), {
-            method: 'POST',
-            headers: { Authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
-            body: JSON.stringify({ action: 'confirm', source: photoFill ? 'photo' : 'manual', upc: current.upc, skus, fields: {
-              brand: brandValue, model: form.model, title: titleValue, category: form.category,
-              description: form.description, aspects: { ...(photoFill?.aspects || {}),
-                ...(form.variant.trim() ? { Variant: form.variant.trim() } : {}),
-                ...(form.size.trim() ? { Size: form.size.trim() } : {}) },
-              dimension_sources: dimensionSources,
-              length_in: parsed.dims[0], width_in: parsed.dims[1], height_in: parsed.dims[2], weight_lb: parsed.dims[3],
-              product_height_in: form.productHeight, product_width_in: form.productWidth,
-              product_depth_in: form.productDepth, product_weight_lb: form.productWeight,
-            } }),
-          });
-          if (!confirm.ok) throw new Error('cache_failed');
-        } catch { warnings.push('Received the unit, but could not save its UPC details for the next scan.'); }
-      }
-      if (blocked) warnings.push(`SKU ${NEVER_LIST_SKU} is a permanent do-not-list item; it was hidden from the website.`);
-      else if (doNotList) warnings.push('Marked Do not list for sale — hidden from the website and marketplaces.');
-      else if (doNotShip) warnings.push('Saved under DNS — Do not ship. Store / website pickup only; never listed on eBay, Amazon, TikTok Shop or Depop.');
-      if (warnings.length) setWarning(warnings.join(' '));
+          if(selectedLocation){const placed=await client.rpc('portal_move_location_stock',{p_sku:skus[0],p_to:selectedLocation,p_quantity:1,p_from:null});if(placed.error)warnings.push('Location did not save. Assign it from Inventory → No location.');}
+          if(manifestId&&!staffMode){const tagged=await client.rpc('portal_tag_manifest',{p_id:manifestId,p_skus:skus});if(tagged.error)warnings.push('Manifest tag failed. Use Manifests → Bulk tag to retry.');}
+          if(doNotShip)for(const sku of skus){const {error:dnsError}=await client.rpc('portal_set_unit_dns',{p_sku:sku,p_dns:true});if(dnsError)warnings.push(`SKU ${sku} DNS setting failed.`);}
+          const enrichFailed=await enrichUnits(skus,parsed,hold,blocked||doNotList);
+          if(enrichFailed)warnings.push(`Lookup details did not save on ${enrichFailed} unit(s).`);
+          for(const sku of skus){try{const response=await fetch(floorFunctionUrl('ebay-specifics'),{method:'POST',headers:{Authorization:`Bearer ${accessToken}`,'content-type':'application/json'},body:JSON.stringify({store_id:storeId,sku,action:'auto-fill'})});if(!response.ok)warnings.push(`SKU ${sku} needs category review; check Missing Category.`);}catch{warnings.push(`SKU ${sku} category auto-fill is pending; the scheduled sweep will retry.`);}}
+          if(!staffMode&&!blocked&&!doNotList&&!doNotShip&&!hold){for(const[index,sku]of skus.entries()){try{const response=await fetch(floorFunctionUrl('category-resolve'),{method:'POST',headers:{Authorization:`Bearer ${accessToken}`,'content-type':'application/json'},body:JSON.stringify({store_id:storeId,sku,network:index===0})});const body=await response.json();if(!response.ok||body.gaps?.length)warnings.push(`SKU ${sku} needs category review; open Missing Category.`);}catch{warnings.push(`SKU ${sku} category lookup is pending.`);}}if(channels.length)warnings.push(...await applyChannelSelections(client,skus,channels));}
+          if(!manual&&current?.upc){try{const response=await fetch(floorFunctionUrl('receive-photo-identify'),{method:'POST',headers:{Authorization:`Bearer ${accessToken}`,'content-type':'application/json'},body:JSON.stringify({action:'confirm',source:photoFill?'photo':'manual',upc:current.upc,skus,fields:{brand:brandValue,model:form.model,title:titleValue,category:form.category,description:form.description,aspects:{...(photoFill?.aspects||{}),...(form.variant.trim()?{Variant:form.variant.trim()}:{}),...(form.size.trim()?{Size:form.size.trim()}:{})},dimension_sources:dimensionSources,length_in:parsed.dims[0],width_in:parsed.dims[1],height_in:parsed.dims[2],weight_lb:parsed.dims[3],product_height_in:form.productHeight,product_width_in:form.productWidth,product_depth_in:form.productDepth,product_weight_lb:form.productWeight}})});if(!response.ok)warnings.push('UPC lookup details did not save for the next scan.');}catch{warnings.push('UPC lookup details did not save for the next scan.');}}
+          if(blocked)warnings.push(`SKU ${NEVER_LIST_SKU} is permanently do-not-list.`);else if(doNotList)warnings.push('Marked Do not list for sale.');else if(doNotShip)warnings.push('Saved under DNS — Do not ship.');
+        }catch(e){warnings.push(`Background work for SKU ${skus[0]} needs attention: ${errText(e)}`);}
+        setBackgroundStatus(prev=>{const next={...prev};if(warnings.length)next[skus[0]]='failed';else delete next[skus[0]];return next;});
+        if(warnings.length)setWarning(warnings.join(' '));
+      })();
 
       // Remember product data for "Add another unit".
       const seed: Partial<Form> = {
@@ -1142,18 +1165,21 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
             title: composeListingTitle(brand, '', unbranded),
           };
         });
-        setFiles([]); setDups(null); setDupAck(false);
+        setFiles([]); setStagedPhotoPaths([]); setDups(null); setDupAck(false);
         setChannels([]);
         setDoNotList(false); setDns(false);
       } else {
         const doneId = current?.id;
         setQueue(q => q.filter(s => s.id !== doneId));
         setLoadedId(null);
-        resetEntry();
+        resetEntry(undefined, false);
+      }
+      if (selectedLocation) {
+        try { localStorage.setItem(`floor:last-receive-location:${storeId}`, selectedLocation); } catch { /* optional device preference */ }
       }
       setSaved(skus);
       onSaved();
-      await loadOptions().catch(() => setWarning(w => `${w} Units were received. Refresh the page to see the next suggested SKU.`.trim()));
+      void loadOptions().catch(() => setWarning(w => `${w} Refresh Receive to see the next suggested SKU.`.trim()));
       focusUpc();
     } catch (e) { setError(errText(e)); }
     finally { setBusy(false); }
@@ -1328,11 +1354,13 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           : 'No photo was returned. Try Take photo again.');
         return;
       }
+      const staged = await stageUnitPhotos(copied, options?.next_sku || '');
       setFiles(prev => {
         const next = [...prev, ...copied];
         void savePendingPhotos(pendingPhotoKey(storeId, photoSessionKey.current), next);
         return next;
       });
+      setStagedPhotoPaths(prev => [...prev, ...staged]);
       if (rejected) setWarning(`${rejected} photo(s) looked empty or too large and were skipped.`);
     } finally {
       setPhotoBusy(false);
@@ -1424,7 +1452,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           if (resolved.size === Object.keys(map).length) break;
         } catch (error) { notices.push(errText(error)); }
       }
-      if (activeScan.current === scanId && notices.length) setDimensionsError([...new Set(notices)].join(' '));
+      if (activeScan.current === scanId && resolved.size === 0) setDimensionsError('No size found. Measure on mat.');
     } finally {
       if (activeScan.current === scanId) setDimensionsBusy(false);
     }
@@ -1453,6 +1481,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     setError('');
     try {
       setFiles([file]);
+      setStagedPhotoPaths(await stageUnitPhotos([file], options?.next_sku || ''));
       void savePendingPhotos(pendingPhotoKey(storeId, photoSessionKey.current), [file]);
       const upload = await identificationJpeg(file);
       const compressedMs = performance.now() - photoStarted;
@@ -1527,9 +1556,9 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   return <section className={`panel receive-panel${appChrome ? ' receive-app' : ''}`}>
     {appChrome && (
       <div className="app-nav receive-app-nav">
-        <button type="button" onClick={() => onAppCancel?.()}>Cancel</button>
+        <button type="button" onClick={() => { if(stagedPhotoPaths.length) void client.storage.from('unit-photos').remove(stagedPhotoPaths); onAppCancel?.(); }}>Cancel</button>
         <div className="app-nav-title">Receive · {options?.next_sku || '…'}</div>
-        <button type="button" disabled={busy || !options?.next_sku} onClick={() => {
+        <button type="button" disabled={busy || photoBusy || photoIdBusy || !files.length || !options?.next_sku} onClick={() => {
           const formEl = document.getElementById('receive-app-form') as HTMLFormElement | null;
           formEl?.requestSubmit();
         }}>Save</button>
@@ -1593,6 +1622,9 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       <p>Write {saved.length === 1 ? 'this number' : 'these numbers'} on the unit{saved.length === 1 ? '' : 's'}. Ready for the next scan.</p>
       {last && <button type="button" className="secondary" onClick={addAnother}>Add another unit</button>}
     </div>}
+    {Object.entries(backgroundStatus).length > 0 && <div className="receive-background-status" role="status">
+      {Object.entries(backgroundStatus).map(([sku, status]) => <p key={sku}>SKU {sku}: {status === 'working' ? 'finishing listing details in background…' : 'background step failed; see the message above.'}</p>)}
+    </div>}
     {warning && <p className="hint">{warning}</p>}
     {error && <div className="alert" role="alert">{error}<button type="button" onClick={() => setError('')}>Dismiss</button></div>}
 
@@ -1624,24 +1656,39 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
 
       {!manual && merged?.never_list_reason && <p className="hint">Amazon will not list this: {merged.never_list_reason}</p>}
 
-      <label className="mboard-inline"><input type="checkbox" checked={doNotShip} disabled={dnsRequired} onChange={e => { setDns(e.target.checked); if (e.target.checked) setChannels([]); }} /> DNS — Do not ship</label>
-      {doNotShip && <p className="hint">Store / website pickup only. Never listed on eBay, Amazon, TikTok Shop or Depop.</p>}
+      <div className="receive-channel-card">
+        {!staffMode && <ChannelPicker value={channels} onChange={setChannels} disabled={doNotList || doNotShip} upc={form.noUpc ? '' : (form.upc || current?.upc || '')} />}
+        <label className="mboard-inline"><input type="checkbox" checked={doNotShip} disabled={dnsRequired} onChange={e => { setDns(e.target.checked); if (e.target.checked) setChannels([]); }} /> DNS — Do not ship</label>
+        {!staffMode && <label className="mboard-inline"><input type="checkbox" checked={doNotList} onChange={e => { setDoNotList(e.target.checked); if (e.target.checked) setChannels([]); }} /> Do not list for sale</label>}
+        {doNotShip && <small>Store / website pickup only. No marketplace listings.</small>}
+      </div>
       {!manual && <div className="receive-confirm">
-        <div className="receive-confirm-head">
-          {previews[0] ? <img src={previews[0]} alt="Item being received" /> : <div className="receive-confirm-placeholder">No photo</div>}
-          <div><small>CONFIRM ITEM · {current?.upc}</small>
-            <label>Title<input value={form.title} onChange={e => update('title', e.target.value)} /></label>
-          </div>
+        <div className="receive-found-bar"><strong>✓ Found</strong><code>UPC {current?.upc}</code>
+          <button type="button" className="text-button" disabled={photoBusy} onClick={() => current && retry(current)}>Rescan</button>
         </div>
+        <div className="receive-photo-first">
+          <input ref={confirmPhotoFile} type="file" accept="image/*" capture="environment" className="sr-only" aria-hidden tabIndex={-1}
+            onChange={e => { const input=e.currentTarget; void ingestFiles(input.files).finally(() => {input.value='';}); }} />
+          <button type="button" className={`receive-unit-photo-tile${files.length ? ' has-photo' : ''}`} disabled={photoBusy || busy} onClick={() => confirmPhotoFile.current?.click()}>
+            {previews[0] ? <img src={previews[0]} alt="Actual unit photo" /> : <><strong>📷 Take photo</strong><span>Required to save</span></>}
+            {photoBusy && <span>Uploading…</span>}
+          </button>
+          <div className="receive-stock-photo">{merged?.images?.[0] ? <img src={merged.images[0]} alt="Catalog stock photo, not the unit" /> : <div aria-hidden="true">▯</div>}<span>Stock photo</span></div>
+        </div>
+        <label className="receive-title-field">Item title
+          <textarea rows={2} value={form.title} onChange={e => update('title', e.target.value)} />
+        </label>
         <div className="receive-confirm-fields">
           <label>Brand<input value={form.brand} onChange={e => update('brand', e.target.value)} /></label>
-          <label>Type / variant<input value={form.model} onChange={e => update('model', e.target.value)} /></label>
+          <label>Model<input value={form.model} onChange={e => update('model', e.target.value)} /></label>
           <label>Variant<input value={form.variant} onChange={e => update('variant', e.target.value)} placeholder="Scent, color…" /></label>
           <label>Size<input value={form.size} onChange={e => update('size', e.target.value)} placeholder="8.8 oz" /></label>
           <label>Category<input value={form.category} onChange={e => update('category', e.target.value)} /></label>
-          <label>Condition<select value={form.condition} onChange={e => update('condition', e.target.value)}>
-            <option value="">Choose condition</option>{CONDITIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-          </select></label>
+          <div className="receive-condition-field"><span>Condition</span><div className="receive-chip-row" role="radiogroup" aria-label="Condition">
+            {CONDITIONS.map(([value, label]) => <label className={`receive-chip${form.condition === value ? ' on' : ''}`} key={value}>
+              <input type="radio" name="receive-condition-main" checked={form.condition === value} onChange={() => update('condition', value)} />{label}
+            </label>)}
+          </div></div>
         </div>
         {isDefectiveCondition(form.condition) && <label className="receive-confirm-full">Defect note<input value={form.conditionNote} onChange={e => update('conditionNote', e.target.value)} /></label>}
         <details className="receive-confirm-details"><summary>Description {form.description ? '· filled' : '· empty'}</summary>
@@ -1672,26 +1719,32 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           setMatOpen(false);
         }} /></Suspense>}
 
-        <div className="receive-confirm-photos">
-          <input ref={confirmPhotoFile} type="file" accept="image/*" capture="environment" className="sr-only" aria-hidden tabIndex={-1}
-            onChange={e => { const input=e.currentTarget; void ingestFiles(input.files).finally(() => {input.value='';}); }} />
-          <button type="button" className="secondary" onClick={() => confirmPhotoFile.current?.click()}>Add unit photo</button>
-          {files.length > 0 && <span>{files.length} photo{files.length === 1 ? '' : 's'}</span>}
-        </div>
         <div className="receive-confirm-bottom">
           <details className="receive-confirm-prices"><summary>{photoPriceBusy ? 'Searching prices...' : !photoIdentity ? 'Prices available after product identification' : photoPriceError ? 'Price search incomplete' : photoPrice?.median_cents != null
             ? `Online asking price ~${money(photoPrice.median_cents)} (${photoPrice.count} listings, ${money(photoPrice.low_cents)}–${money(photoPrice.high_cents)})`
-            : photoPrice?.count ? `Online price ${money(photoPrice.low_cents)}${photoPrice.count > 1 ? `–${money(photoPrice.high_cents)}` : ''}` : 'No comparable online price found'}</summary>
+            : photoPrice?.count ? `Online price ${money(photoPrice.low_cents)}${photoPrice.count > 1 ? `–${money(photoPrice.high_cents)}` : ''}` : 'Price reference unavailable'}</summary>
             {photoPrice?.listings?.map(listing => <a key={listing.url} href={listing.url} target="_blank" rel="noreferrer">{listing.store} · {money(listing.price_cents)} · {listing.product_name}</a>)}
             {photoPrice?.highest_retail && <small>Highest retail seen: {photoPrice.highest_retail.store} · {money(photoPrice.highest_retail.price_cents)}</small>}
             {photoPriceError && <><span>{photoPriceError}</span>{photoIdentity && <button type="button" className="secondary" onClick={() => void findPhotoPrices(photoIdentity)}>Retry prices</button>}</>}
           </details>
           {photoPrice?.listings?.[0] && <a className="receive-confirm-source" href={photoPrice.listings[0].url} target="_blank" rel="noreferrer">
             {photoPrice.listings[0].store} · {money(photoPrice.listings[0].price_cents)} · source ↗</a>}
-          <div className="receive-confirm-bottom-row"><label>Your price<input inputMode="decimal" placeholder="0.00" value={form.ask} onChange={e => update('ask',e.target.value)} /></label>
-            {!staffMode && <ChannelPicker compact disabled={doNotShip} value={channels} onChange={setChannels} upc={form.noUpc ? '' : (form.upc || current?.upc || '')} />}</div>
+          <div className="receive-confirm-bottom-row">
+            <label>Price<input inputMode="decimal" placeholder="0.00" value={form.ask} onChange={e => update('ask',e.target.value)} /></label>
+            {!staffMode && <label>Cost<input inputMode="decimal" placeholder="Leave blank if unknown" value={form.cost} onChange={e => update('cost',e.target.value)} /></label>}
+          </div>
+          <div className="receive-location-card"><label>Location<select value={selectedLocation} onChange={e => setSelectedLocation(e.target.value)}>
+            <option value="">No location yet</option>{receiveLocations.map(location => <option key={location.code} value={location.code}>Bay {location.bay_no} · R{location.row_no}{location.bin_no == null ? '' : `-B${location.bin_no}`}{location.code === selectedLocation ? ' · same as last item' : ''}</option>)}
+          </select></label><label className="receive-location-scan">Scan bin label<input inputMode={scannerInputMode()} value={locationScan} placeholder="Bay 12 · R2-B3" onChange={e => setLocationScan(e.target.value)} onKeyDown={e => {
+            if (e.key !== 'Enter') return; e.preventDefault();
+            const parts = locationScan.trim().match(/(?:bay\s*)?(\d+)\s*[·\s-]+\s*r?(\d+)(?:\s*-\s*b?\s*(\d+))?/i);
+            const code = parts ? `${parts[1]}-${parts[2]}${parts[3] ? `-${parts[3]}` : ''}` : locationScan.trim();
+            const match = receiveLocations.find(location => location.code === code || `Bay ${location.bay_no} · R${location.row_no}${location.bin_no == null ? '' : `-B${location.bin_no}`}`.toLowerCase() === locationScan.trim().toLowerCase());
+            if (match) { setSelectedLocation(match.code); setLocationScan(''); } else setError('That barcode does not match a configured bay, row and bin.');
+          }} /></label><button type="button" className="text-button" onClick={() => { setSelectedLocation(''); setLocationScan(''); }}>Change</button></div>
+          {selectedLocation && <small className="receive-last-location">Bay {receiveLocations.find(l => l.code === selectedLocation)?.bay_no} · same as last item</small>}
           {liveMissing.length > 0 && <small>Missing: {liveMissing.join(', ')} · saves to Unfinished</small>}
-          <button type="submit" disabled={busy || !options?.next_sku || (dups !== null && dups.count > 0 && !dupAck)}>{busy ? 'Saving…' : 'Save & next'}</button>
+          <button className="receive-save-next" type="submit" disabled={busy || photoBusy || photoIdBusy || !files.length || !options?.next_sku || (dups !== null && dups.count > 0 && !dupAck)}>{busy ? 'Saving…' : photoBusy || photoIdBusy ? 'Uploading photo…' : files.length ? 'Save & next' : '📷 Take a photo to save'}</button>
         </div>
       </div>}
 
@@ -1853,6 +1906,9 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           {hasFiles && <div className="receive-photos">{files.map((f, i) => <figure key={`${f.name}-${f.size}-${i}`}>
             <img src={previews[i]} alt={`Photo ${i + 1}`} />
             <button type="button" className="text-button" onClick={() => {
+              const path=stagedPhotoPaths[i];
+              if(path) void client.storage.from('unit-photos').remove([path]);
+              setStagedPhotoPaths(prev=>prev.filter((_,j)=>j!==i));
               setFiles(prev => {
                 const next = prev.filter((_, j) => j !== i);
                 void savePendingPhotos(pendingPhotoKey(storeId, photoSessionKey.current), next);
