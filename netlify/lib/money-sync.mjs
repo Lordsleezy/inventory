@@ -58,7 +58,8 @@ export async function syncMoneyBalances(deps, { now = Date.now() } = {}) {
   const out = {};
   for (const [account, run, compute, reconnectMessage] of [
     ["ebay", deps.fetchEbayFunds, parseEbayFundsSummary, "Reconnect eBay so Floor can read your funds (Finances permission)."],
-    ["square", deps.fetchSquare, computeSquareBalance, "Square rejected the website token for payments/payouts. Grant it Payments and Payouts read access, or use Reconnect Square."],
+    ["ebay_pgg124_5", deps.fetchEbayPersonalFunds, parseEbayFundsSummary, "Reconnect eBay · pgg124-5 so Floor can read its funds (Finances permission)."],
+    ["square", deps.fetchSquare, computeSquareBalance, "Square key not working"],
   ]) {
     if (!run) continue;
     try {
@@ -68,7 +69,8 @@ export async function syncMoneyBalances(deps, { now = Date.now() } = {}) {
     } catch (e) {
       const message = String(e?.message || e);
       const status = /not_connected|not_found/.test(message) ? "not_connected" : isPermissionError(e) ? "reconnect" : "error";
-      await deps.save(account, { status, message: status === "reconnect" ? reconnectMessage : status === "not_connected" ? `${account === "ebay" ? "eBay" : "Square"} is not connected.` : message.slice(0, 300), balance_cents: null, detail: { error: message.slice(0, 400) } }).catch(() => {});
+      const accountName = account === "ebay" ? "eBay business" : account === "ebay_pgg124_5" ? "eBay · pgg124-5" : "Square";
+      await deps.save(account, { status, message: status === "reconnect" ? reconnectMessage : status === "not_connected" ? `${accountName} is not connected.` : message.slice(0, 300), balance_cents: null, detail: { error: message.slice(0, 400) } }).catch(() => {});
       out[account] = { status };
     }
   }
@@ -85,8 +87,14 @@ export async function runMoneySync(sb, storeId) {
     save: async (account, row) => { must(await sb.from("money_account_sync").upsert({ store_id: storeId, account, ...row, synced_at: new Date().toISOString() }, { onConflict: "store_id,account" })); },
     fetchEbayFunds: async () => {
       const { ebayFetch } = await import("./ebay.mjs");
-      const accounts = must(await sb.from("ebay_accounts").select("id,role,status").eq("store_id", storeId).eq("status", "connected").order("role", { ascending: false })) || [];
-      const account = accounts.find((a) => a.role === "selling") || accounts[0];
+      const accounts = must(await sb.from("ebay_accounts").select("id,username,role,status").eq("store_id", storeId).eq("status", "connected").order("role", { ascending: false })) || [];
+      const account = accounts.find((a) => a.username?.toLowerCase() === "ikonikdeals2026") || accounts.find((a) => a.role === "selling");
+      if (!account) throw new Error("not_connected");
+      return ebayFetch(storeId, "GET", "/sell/finances/v1/seller_funds_summary", undefined, { accountId: account.id });
+    },
+    fetchEbayPersonalFunds: async () => {
+      const { ebayFetch } = await import("./ebay.mjs");
+      const account = must(await sb.from("ebay_accounts").select("id,username,status").eq("store_id", storeId).eq("status", "connected").ilike("username", "pgg124-5").maybeSingle());
       if (!account) throw new Error("not_connected");
       return ebayFetch(storeId, "GET", "/sell/finances/v1/seller_funds_summary", undefined, { accountId: account.id });
     },
@@ -112,7 +120,7 @@ export async function runMoneySync(sb, storeId) {
         }
         return all;
       };
-      const begin = "2025-01-01T00:00:00Z";
+      const begin = "2013-01-01T00:00:00Z";
       return {
         payments: await pull("/v2/payments", "payments", { begin_time: begin, location_id: access.locationId }),
         payouts: await pull("/v2/payouts", "payouts", { begin_time: begin, location_id: access.locationId }),

@@ -5,7 +5,7 @@ import { ToolSourceBadge } from './design/Tools';
 import { floorFunctionUrl } from './floorApi';
 
 // Money tab (admin only; every RPC is admin-checked on the server). Data model: supabase/migrations/20261107100000_money_tab.sql.
-type Account = 'safe' | 'square' | 'ebay' | 'depop' | 'amazon' | 'tiktok';
+type Account = 'safe' | 'square' | 'ebay' | 'ebay_pgg124_5' | 'depop' | 'amazon' | 'tiktok';
 type Dir = 'in' | 'out';
 type Sync = { status: 'ok' | 'reconnect' | 'not_connected' | 'error'; message: string; synced_at: string; detail: Record<string, number> } | null;
 type Overview = { account: Account; sales_cents: number; in_cents: number; out_cents: number; floor_cents: number; balance_cents: number; synced: boolean; sync: Sync };
@@ -18,7 +18,7 @@ type Audit = { id: number; action: string; at: string; actor_id: string | null; 
 type Person = { id: string; label: string };
 type Props = { client: SupabaseClient; storeId: string; accessToken: string; money: (cents: number) => string; stamp: (value: string) => string };
 
-const NAMES: Record<Account, string> = { safe: 'Safe cash', square: 'Square', ebay: 'eBay', depop: 'Depop', amazon: 'Amazon', tiktok: 'TikTok' };
+const NAMES: Record<Account, string> = { safe: 'Safe cash', square: 'Square', ebay: 'eBay', ebay_pgg124_5: 'eBay · pgg124-5', depop: 'Depop', amazon: 'Amazon', tiktok: 'TikTok' };
 const REASON: Record<string, string> = {
   starting_cash: 'Starting cash', change_for_drawer: 'Change for drawer', moved_from_square: 'Moved from Square', moved_from_safe: 'Moved from Safe',
   owner_put_in: 'Owner put in', count_correction: 'Count correction', owner_draw: 'Owner draw', person_payout: 'Payout', bank_deposit: 'Bank deposit',
@@ -106,6 +106,15 @@ export function MoneyPage({ client, storeId, accessToken, money, stamp }: Props)
     setConnecting(account); setError('');
     try { await startConnect(accessToken, account); } catch (e) { setError(String((e as Error).message || e)); setConnecting(''); }
   }
+  async function reconnectPersonalEbay() {
+    setConnecting('ebay_pgg124_5'); setError('');
+    try {
+      const response = await fetch(floorFunctionUrl('ebay-connection'), { method: 'POST', headers: { Authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' }, body: JSON.stringify({ action: 'connect_orders_only' }) });
+      const body = await response.json();
+      if (!response.ok || body.ok === false || !body.url) throw new Error(body.message || body.error || 'Could not open the eBay authorization page.');
+      window.location.assign(body.url);
+    } catch (e) { setError(String((e as Error).message || e)); setConnecting(''); }
+  }
   const done = async (message: string) => { setSheet(null); setNotice(message); await load(); if (all) await openAll(all.account); };
 
   const rowsView = (account: Account, rows: Row[]) => rows.map((r) => <ActivityLine key={r.id} row={r} account={account} title={rowTitle(r)} money={money} stamp={stamp}
@@ -119,24 +128,23 @@ export function MoneyPage({ client, storeId, accessToken, money, stamp }: Props)
     {!loaded && !error && <p role="status">Loading money…</p>}
     <div className="money-cards">
       {overview.map((a) => {
-        const off = a.synced ? a.balance_cents - a.floor_cents : 0;
         const detail = a.sync?.detail || {};
+        const personalEbay = a.account === 'ebay_pgg124_5';
         return <section className="money-card" key={a.account} aria-label={NAMES[a.account]}>
           <div className="money-card-top"><ToolSourceBadge source={a.account} /><strong className="money-name">{NAMES[a.account]}</strong><span className="money-balance">{money(a.balance_cents)}</span></div>
-          {(a.account === 'ebay' || a.account === 'square' || a.account === 'amazon' || a.account === 'tiktok') && <p className="money-sync">
+          {(a.account === 'ebay' || personalEbay || a.account === 'square' || a.account === 'amazon' || a.account === 'tiktok') && <p className="money-sync">
             {a.synced
-              ? <>Synced · {stamp(a.sync!.synced_at)}{a.account === 'ebay' && detail.available_cents != null ? ` · Available ${money(detail.available_cents)} · Processing ${money(detail.processing_cents || 0)} · On hold ${money(detail.on_hold_cents || 0)}` : ''}</>
+              ? <>Synced · {stamp(a.sync!.synced_at)}{(a.account === 'ebay' || personalEbay) && detail.available_cents != null ? ` · Available ${money(detail.available_cents)} · Processing ${money(detail.processing_cents || 0)} · On hold ${money(detail.on_hold_cents || 0)}` : ''}</>
               : a.sync?.status === 'reconnect' || a.sync?.status === 'not_connected' || !a.sync
-                ? <>{a.sync?.message || (a.account === 'ebay' || a.account === 'square' ? 'Not synced yet. Floor’s own number is shown.' : 'Manual')}{(a.account === 'ebay' || a.account === 'square') && <> <button type="button" className="money-link" disabled={connecting === a.account} onClick={() => void reconnect(a.account as 'ebay' | 'square')}>{connecting === a.account ? 'Opening…' : a.sync?.status === 'not_connected' ? `Connect ${NAMES[a.account]}` : `Reconnect ${NAMES[a.account]}`}</button></>}</>
+                ? <>{a.sync?.message || (a.account === 'ebay' || personalEbay || a.account === 'square' ? 'Not synced yet.' : 'Manual')}{personalEbay ? <> <button type="button" className="money-link" disabled={connecting === a.account} onClick={() => void reconnectPersonalEbay()}>{connecting === a.account ? 'Opening…' : 'Reconnect pgg124-5'}</button></> : (a.account === 'ebay' || a.account === 'square') && <> <button type="button" className="money-link" disabled={connecting === a.account} onClick={() => void reconnect(a.account as 'ebay' | 'square')}>{connecting === a.account ? 'Opening…' : a.sync?.status === 'not_connected' ? `Connect ${NAMES[a.account]}` : `Reconnect ${NAMES[a.account]}`}</button></>}</>
                 : <>Sync problem: {a.sync.message}</>}
           </p>}
-          {a.synced && <p className="money-floor">Floor expected {money(a.floor_cents)}{off !== 0 ? ` · off by ${money(Math.abs(off))}` : ' · matches'}</p>}
-          <div className="money-buttons">
+          {!personalEbay && <><div className="money-buttons">
             <button type="button" className="money-add" onClick={() => setSheet({ account: a.account, dir: 'in' })}>+ Add money</button>
             <button type="button" className="money-take" onClick={() => setSheet({ account: a.account, dir: 'out' })}>− Take out</button>
           </div>
           <div className="money-activity">{(recent[a.account] || []).length ? rowsView(a.account, recent[a.account]) : <p className="empty">No activity yet.</p>}</div>
-          <button type="button" className="money-link money-all" onClick={() => void openAll(a.account)}>See all activity</button>
+          <button type="button" className="money-link money-all" onClick={() => void openAll(a.account)}>See all activity</button></>}
         </section>;
       })}
     </div>

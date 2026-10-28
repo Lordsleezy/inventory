@@ -27,6 +27,7 @@ function deps(over = {}) {
   const saved = {}; let state = over.state || {};
   return { saved, get state() { return state; }, d: { loadState: async () => state, saveState: async (s) => { state = s; }, save: async (a, row) => { saved[a] = row; },
     fetchEbayFunds: over.fetchEbayFunds || (async () => ({ availableFunds: { value: "10.00" } })),
+    fetchEbayPersonalFunds: over.fetchEbayPersonalFunds || (async () => ({ availableFunds: { value: "496.00" } })),
     fetchSquare: over.fetchSquare || (async () => { throw new Error("square_not_connected"); }) } };
 }
 
@@ -35,6 +36,8 @@ test("saves the real eBay balance, and says Square is not connected without thro
   const r = await syncMoneyBalances(x.d, { now: Date.parse("2026-10-28T00:00:00Z") });
   assert.equal(x.saved.ebay.balance_cents, 1000);
   assert.equal(x.saved.ebay.status, "ok");
+  assert.equal(x.saved.ebay_pgg124_5.balance_cents, 49600);
+  assert.equal(x.saved.ebay_pgg124_5.status, "ok");
   assert.equal(x.saved.square.status, "not_connected");
   assert.equal(r.square.status, "not_connected");
 });
@@ -44,6 +47,13 @@ test("a missing permission becomes a Reconnect status", async () => {
   await syncMoneyBalances(x.d);
   assert.equal(x.saved.ebay.status, "reconnect");
   assert.match(x.saved.ebay.message, /Reconnect eBay/);
+});
+
+test("a Square key failure is saved as a plain message without throwing", async () => {
+  const x = deps({ fetchSquare: async () => { throw new Error("square_401:UNAUTHORIZED"); } });
+  const result = await syncMoneyBalances(x.d);
+  assert.equal(result.square.status, "reconnect");
+  assert.equal(x.saved.square.message, "Square key not working");
 });
 
 test("runs at most every 6 hours; a skipped run writes nothing", async () => {
