@@ -3,6 +3,7 @@
  * POST { upc?, image_base64, mime_type? }
  * Does not set a selling price — returns median/range for the user to choose.
  */
+import { randomUUID } from 'node:crypto';
 import { asNetlifyFunction, floorLog } from "../lib/floor-log.mjs";
 import { json, optionsOk, serviceClient } from "../lib/server.mjs";
 import { receiveAccessFromEvent, staffOwnsReceivedSkus } from "../lib/receive-auth.mjs";
@@ -71,6 +72,61 @@ export async function invoke(event) {
 
   const body = JSON.parse(event.body || "{}");
   const ctx = await receiveAccessFromEvent(event, body.store_id);
+  if (body.action === 'stage_stock_photo') {
+    const gtin = normalizeGtin(String(body.upc || '').trim());
+    const requestId = String(body.request_id || '');
+    if (!gtin.ok || !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(requestId))
+      return json(400, { ok: false, error: 'valid_upc_and_request_required' });
+    let photoUrl;
+    try {
+      photoUrl = new URL(String(body.url || ''));
+    } catch { return json(400, { ok: false, error: 'catalog_photo_required' }); }
+    const host = photoUrl.hostname.toLowerCase();
+    const imageHostAllowed = ['media-amazon.com', 'ssl-images-amazon.com', 'scene7.com', 'target.com',
+      'upcitemdb.com', 'walmartimages.com', 'salsify.com', 'ebayimg.com', 'bestbuy.com', 'homedepot.com']
+      .some(domain => host === domain || host.endsWith(`.${domain}`));
+    if (photoUrl.protocol !== 'https:' || !imageHostAllowed || photoUrl.username || photoUrl.password)
+      return json(400, { ok: false, error: 'unsupported_catalog_photo' });
+    const [product, cached] = await Promise.all([
+      ctx.sb.from('floor_products').select('images').eq('gtin14', gtin.gtin14).maybeSingle(),
+      ctx.sb.from('upc_lookup_cache').select('payload').eq('gtin14', gtin.gtin14).maybeSingle(),
+    ]);
+    const payload = cached.data?.payload || {};
+    const permittedUrls = [
+      ...(product.data?.images || []), ...(payload.merged?.images || []),
+      ...(payload.amazon?.images || []), ...(payload.upcitemdb?.images || []),
+    ];
+    if (!permittedUrls.includes(photoUrl.href)) return json(403, { ok: false, error: 'catalog_photo_mismatch' });
+    try {
+      const response = await fetch(photoUrl, { redirect: 'error', signal: AbortSignal.timeout(12000),
+        headers: { Accept: 'image/avif,image/webp,image/png,image/jpeg' } });
+      const mime = String(response.headers.get('content-type') || '').split(';')[0].toLowerCase();
+      const ext = ({ 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/avif': 'avif' })[mime];
+      if (!response.ok || !ext) throw new Error('catalog_photo_unavailable');
+      const maxBytes = 8 * 1024 * 1024;
+      const declared = Number(response.headers.get('content-length') || 0);
+      if (declared > maxBytes) throw new Error('catalog_photo_too_large');
+      const chunks = [];
+      let total = 0;
+      if (!response.body) throw new Error('catalog_photo_empty');
+      for await (const chunk of response.body) {
+        total += chunk.length;
+        if (total > maxBytes) throw new Error('catalog_photo_too_large');
+        chunks.push(chunk);
+      }
+      const bytes = Buffer.concat(chunks, total);
+      if (bytes.length < 2048 || bytes.length > 8 * 1024 * 1024) throw new Error('catalog_photo_size_invalid');
+      const path = `${ctx.storeId}/receive/${ctx.userId}/${requestId}/stock-${randomUUID()}.${ext}`;
+      const { error } = await ctx.sb.storage.from('unit-photos').upload(path, bytes,
+        { contentType: mime, upsert: false });
+      if (error) throw error;
+      return json(200, { ok: true, path });
+    } catch (error) {
+      await floorLog({ level: 'warn', event: 'receive_photo.stock_stage_failed', storeId: ctx.storeId,
+        message: String(error?.message || error).slice(0, 160) });
+      return json(502, { ok: false, error: 'catalog_photo_unavailable', message: 'Stock photo could not be saved. Add a unit photo to continue.' });
+    }
+  }
   if (body.action === 'confirm') {
     const gtin = normalizeGtin(String(body.upc || '').trim());
     if (!gtin.ok) return json(400, { ok: false, error: 'valid_upc_required' });

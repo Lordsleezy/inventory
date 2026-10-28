@@ -128,6 +128,8 @@ type Props = {
   appChrome?: boolean;
   /** Use store staff RPCs and omit portal-only controls. */
   staffMode?: boolean;
+  /** Phone-only presentation for the Android Chrome-installed clerk app. */
+  storePhoneMode?: boolean;
   initialManual?: boolean;
   /** Prefill / enqueue a UPC from an earlier camera capture. */
   initialUpc?: string | null;
@@ -564,14 +566,18 @@ function CameraScanner({ onDetect, onFile, onClose }: {
 
 /* ================================================================================================ */
 
-export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome, staffMode = false, initialManual, initialUpc, onAppCancel }: Props) {
+export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome, staffMode = false, storePhoneMode = false, initialManual, initialUpc, onAppCancel }: Props) {
   const [options, setOptions] = useState<Options | null>(null);
   const [receiveLocations, setReceiveLocations] = useState<ReceiveLocation[]>([]);
   const [selectedLocation, setSelectedLocation] = useState(() => {
     try { return localStorage.getItem(`floor:last-receive-location:${storeId}`) || ''; } catch { return ''; }
   });
   const [locationScan, setLocationScan] = useState('');
+  const [locationEditOpen, setLocationEditOpen] = useState(false);
   const [stagedPhotoPaths, setStagedPhotoPaths] = useState<string[]>([]);
+  const [stockPhotoPath, setStockPhotoPath] = useState('');
+  const [stockPhotoBusy, setStockPhotoBusy] = useState(false);
+  const [stockPhotoError, setStockPhotoError] = useState('');
   const [manual, setManual] = useState(!!initialManual);
   const [draft, setDraft] = useState('');
   const [queue, setQueue] = useState<Scan[]>([]);
@@ -613,6 +619,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   const [photoIdentity, setPhotoIdentity] = useState<Record<string, unknown> | null>(null);
   const [photoFill, setPhotoFill] = useState<PhotoFill | null>(null);
   const missPhotoFile = useRef<HTMLInputElement>(null);
+  const titleField = useRef<HTMLTextAreaElement>(null);
   const missChooseFile = useRef<HTMLInputElement>(null);
   const missPromptedFor = useRef<string | null>(null);
 
@@ -707,6 +714,11 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   };
 
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  useEffect(() => {
+    if (!storePhoneMode || !titleField.current) return;
+    titleField.current.style.height = 'auto';
+    titleField.current.style.height = `${titleField.current.scrollHeight}px`;
+  }, [form.title, storePhoneMode]);
   useEffect(() => { focusUpc(); }, []);
   useEffect(() => {
     const releaseUi = () => {
@@ -749,6 +761,26 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     }).catch(e => { if (alive) setWarning(`Locations unavailable: ${errText(e)}`); });
     return () => { alive = false; };
   }, [client]);
+
+  async function stageStockPhoto(url: string, upc: string, scanId: string) {
+    setStockPhotoBusy(true);
+    setStockPhotoError('');
+    try {
+      const response = await fetch(floorFunctionUrl('receive-photo-identify'), {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'stage_stock_photo', upc, url, request_id: receiveRequest.current }),
+        signal: AbortSignal.timeout(20000),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || typeof data.path !== 'string') throw new Error(data.message || 'Stock photo unavailable');
+      if (activeScan.current === scanId) setStockPhotoPath(data.path);
+    } catch {
+      if (activeScan.current === scanId) setStockPhotoError('Stock photo could not be saved. Add a unit photo to continue.');
+    } finally {
+      if (activeScan.current === scanId) setStockPhotoBusy(false);
+    }
+  }
 
   async function stageUnitPhotos(nextFiles: File[]) {
     const started=performance.now();
@@ -829,6 +861,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     titleTouched.current = false;
     setForm({ ...blank, ...keepProduct });
     setFiles([]);
+    setStockPhotoPath('');
+    setStockPhotoError('');
     const oldPhotoPaths = stagedPhotoPaths.slice();
     setStagedPhotoPaths([]);
     if (cleanupPhotos) receiveRequest.current = crypto.randomUUID();
@@ -916,6 +950,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     photoSessionKey.current = current.id;
     setFiles([]);
     setStagedPhotoPaths([]);
+    setStockPhotoPath('');
+    setStockPhotoError('');
     // Instant miss popup (photo fallback). Do not re-prompt the same scan id.
     const identityNeeds = missingIdentityFields(r);
     setPhotoPrice(null);
@@ -939,6 +975,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     setLoadedId(current.id);
     activeScan.current = current.id;
     const scanId = current.id;
+    if (m?.images?.[0]) void stageStockPhoto(String(m.images[0]), current.upc, scanId);
     if (!isTrueCatalogMiss(r) && [initial.length, initial.width, initial.height, initial.weight,
       initial.productHeight, initial.productWidth, initial.productDepth, initial.productWeight].some(v => !v))
       void findPhotoDimensions(current.upc, scanId, {title:m?.title,brand:m?.brand,model:m?.model,size:initial.size});
@@ -979,9 +1016,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       const t = v.trim();
       if (!t) return null;
       const n = Number(t);
-      return Number.isFinite(n) && n > 0 ? n : undefined;
+      return Number.isFinite(n) && n > 0 ? n : null;
     });
-    if (dims.some(v => v === undefined)) { setError('Dimensions and weight must be positive numbers (or blank).'); return null; }
     return { ask, cost, dims: dims as (number | null)[] };
   }
   function brandReady() {
@@ -1003,15 +1039,13 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     if (!form.category.trim()) out.push('category');
     if (!brandReady()) out.push('brand');
     if (!upcReady()) out.push('UPC');
-    if (p.dims.some(d => !pos(d))) out.push('weight + box dimensions');
     if (!form.model.trim()) out.push('item specifics');
-    if (!files.length) out.push('photo');
+    if (!files.length && !stockPhotoPath) out.push('photo');
     return out;
   }
   const liveMissing = (() => {
     if (doNotShip) return [];
     const a = cents(form.ask);
-    const dims = [form.length, form.width, form.height, form.weight].map(v => Number(v.trim()));
     const out: string[] = [];
     if (!pos(typeof a === 'number' ? a : null)) out.push('price');
     if (!form.condition) out.push('condition');
@@ -1019,9 +1053,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     if (!form.category.trim()) out.push('category');
     if (!brandReady()) out.push('brand');
     if (!upcReady()) out.push('UPC');
-    if (dims.some(d => !pos(d))) out.push('weight + box dimensions');
     if (!form.model.trim()) out.push('item specifics');
-    if (!files.length) out.push('photo');
+    if (!files.length && !stockPhotoPath) out.push('photo');
     return out;
   })();
 
@@ -1035,7 +1068,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     const quantity = manual ? Number(form.quantity) : 1;
     if (!Number.isInteger(quantity) || quantity < 1 || quantity > 100) { setError('Quantity must be 1–100.'); return; }
     if (quantity !== 1) { setError('Receive one unit at a time so each unit gets its own photo and location.'); return; }
-    if (!files.length) { setError('Take a photo of the actual unit before saving.'); return; }
+    if (!files.length && !stockPhotoPath) { setError('Add a photo before saving.'); return; }
     if (photoBusy) { setError('Wait for the unit photo to finish uploading.'); return; }
     if (files.some(file => (file.type && !file.type.startsWith('image/')) || file.size > PHOTO_MAX_BYTES)) {
       setError('Photos must be images under 15 MB each.'); return;
@@ -1077,8 +1110,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     const receiveStarted = performance.now();
     try {
       const quantity = manual ? Number(form.quantity) : 1;
-      if (!files.length) throw new Error('Take a photo of the actual unit before saving.');
-      const unitPhotoPaths = stagedPhotoPaths;
+      if (!files.length && !stockPhotoPath) throw new Error('Add a photo before saving.');
+      const unitPhotoPaths = [...stagedPhotoPaths, ...(stockPhotoPath ? [stockPhotoPath] : [])];
       if (!unitPhotoPaths.length) throw new Error('The unit photo did not finish uploading. Retry the photo.');
       const holdLabel = hold ? (HOLD_REASONS.find(([k]) => k === hold.reason)?.[1] || hold.reason) : '';
       const notes = [
@@ -1113,7 +1146,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         p_request: receiveRequest.current, p_fields: fields, p_photos: unitPhotoPaths,
         p_extras: { location: selectedLocation || null, manifest: staffMode ? null : manifestId || null,
           dns: !staffMode && doNotShip, do_not_list: !staffMode && doNotList,
-          channels: staffMode ? [] : channels, enrichment },
+          channels: staffMode ? [] : channels, enrichment,
+          stock_photo_paths: stockPhotoPath ? [stockPhotoPath] : [] },
       });
       const skus = data.skus as string[];
       console.info('receive_save_timing', { commit_roundtrip_ms: Math.round(performance.now()-receiveStarted),
@@ -1214,6 +1248,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       if (parsed.dims.some(pos)) put('package_source',
         [...new Set(['package_length_in','package_width_in','package_height_in','package_weight_lb']
           .map(key => dimensionSources[key]).filter(Boolean))].join(', ') || packageSource(parsed));
+      if (channels.includes('ebay') && parsed.dims.some(value => !pos(value))) put('needs_box_size_for_ebay', true);
       if (form.costEstimate || parsed.cost == null) {
         put('cost_estimate', true);
         put('cost_source', floor.costLabel);
@@ -1503,19 +1538,21 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   const waiting = queue.length - (current ? 1 : 0);
   const hasFiles = files.length > 0;
   const needNoteForScratch = isDefectiveCondition(form.condition);
+  const needsEbayBox = channels.includes('ebay') && [form.length,form.width,form.height,form.weight].some(value => !pos(Number(value.trim())));
   const holdReady = reason !== 'other' || reasonNote.trim().length > 0;
   const catalogMiss = !manual && current?.status === 'ready' ? catalogMissMessage(result) : null;
   const trueMiss = !manual && current?.status === 'ready' && isTrueCatalogMiss(result);
 
-  return <section className={`panel receive-panel${appChrome ? ' receive-app' : ''}`}>
+  const hasAnyPhoto = Boolean(files.length || stagedPhotoPaths.length || stockPhotoPath);
+  return <section className={`panel receive-panel${appChrome ? ' receive-app' : ''}${storePhoneMode ? ' receive-store-phone' : ''}`}>
     {appChrome && (
       <div className="app-nav receive-app-nav">
         <button type="button" onClick={() => { onAppCancel?.(); }}>Cancel</button>
         <div className="app-nav-title">Receive · {options?.next_sku || '…'}</div>
-        <button type="button" disabled={busy || photoBusy || photoIdBusy || !files.length || !stagedPhotoPaths.length} onClick={() => {
+        {storePhoneMode ? <span className="receive-phone-scanner"><i />Scanner</span> : <button type="button" disabled={busy || photoBusy || photoIdBusy || !hasAnyPhoto} onClick={() => {
           const formEl = document.getElementById('receive-app-form') as HTMLFormElement | null;
           formEl?.requestSubmit();
-        }}>Save</button>
+        }}>Save</button>}
       </div>
     )}
     <div className="receive-next">
@@ -1560,7 +1597,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       )}
     </div>
 
-    <BundleReceive client={client} lastReceived={saved[0]} onSaved={onSaved} />
+    {!storePhoneMode && <BundleReceive client={client} lastReceived={saved[0]} onSaved={onSaved} />}
     {saved.length > 0 && <EbaySpecificsPanel key={saved[0]} client={client} sku={saved[0]} storeId={storeId} appMode={Boolean(appChrome)} />}
     {saved.length > 0 && !staffMode && <details className="receive-category-details" open><summary>Categories for received items</summary>
       <CategoryPanel client={client} storeId={storeId} initialSku={saved[0]} onSaved={onSaved} />
@@ -1608,33 +1645,45 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
 
       {!manual && merged?.never_list_reason && <p className="hint">Amazon will not list this: {merged.never_list_reason}</p>}
 
-      <div className="receive-channel-card">
+      {!storePhoneMode && <div className="receive-channel-card">
         {!staffMode && <ChannelPicker value={channels} onChange={setChannels} disabled={doNotList || doNotShip} upc={form.noUpc ? '' : (form.upc || current?.upc || '')} />}
-        <label className="mboard-inline"><input type="checkbox" checked={doNotShip} disabled={dnsRequired} onChange={e => { setDns(e.target.checked); if (e.target.checked) setChannels([]); }} /> DNS — Do not ship</label>
+        {!staffMode && <label className="mboard-inline"><input type="checkbox" checked={doNotShip} disabled={dnsRequired} onChange={e => { setDns(e.target.checked); if (e.target.checked) setChannels([]); }} /> DNS — Do not ship</label>}
         {!staffMode && <label className="mboard-inline"><input type="checkbox" checked={doNotList} onChange={e => { setDoNotList(e.target.checked); if (e.target.checked) setChannels([]); }} /> Do not list for sale</label>}
         {doNotShip && <small>Store / website pickup only. No marketplace listings.</small>}
-      </div>
+      </div>}
       {!manual && <div className="receive-confirm">
         <div className="receive-found-bar"><strong>✓ Found</strong><code>UPC {current?.upc}</code>
           <button type="button" className="text-button" disabled={photoBusy} onClick={() => current && retry(current)}>Rescan</button>
         </div>
-        <div className="receive-photo-first">
+        <div className={`receive-photo-first${storePhoneMode && stockPhotoPath ? ' has-stock-photo' : ''}`}>
           <input ref={confirmPhotoFile} type="file" accept="image/*" capture="environment" className="sr-only" aria-hidden tabIndex={-1}
             onChange={e => { const input=e.currentTarget; void ingestFiles(input.files).finally(() => {input.value='';}); }} />
-          <button type="button" className={`receive-unit-photo-tile${files.length ? ' has-photo' : ''}`} disabled={photoBusy || busy} onClick={() => confirmPhotoFile.current?.click()}>
-            {previews[0] ? <img src={previews[0]} alt="Actual unit photo" /> : <><strong>📷 Take photo</strong><span>Required to save</span></>}
-            {photoBusy && <span>Uploading…</span>}
-          </button>
-          <div className="receive-stock-photo">{merged?.images?.[0] ? <img src={merged.images[0]} alt="Catalog stock photo, not the unit" /> : <div aria-hidden="true">▯</div>}<span>Stock photo</span></div>
+          {storePhoneMode ? <>
+            <div className={`receive-stock-photo${stockPhotoPath ? ' stock-photo-ready' : ''}`}>
+              {merged?.images?.[0] ? <img src={merged.images[0]} alt="Catalog stock photo" /> : <div aria-hidden="true">▯</div>}
+              <span>{stockPhotoBusy ? 'Saving stock photo…' : stockPhotoPath ? '✓ Stock photo · ready' : 'Stock photo unavailable'}</span>
+            </div>
+            <button type="button" className={`receive-unit-photo-tile${files.length ? ' has-photo' : ''}`} disabled={photoBusy || busy} onClick={() => confirmPhotoFile.current?.click()}>
+              {previews[0] ? <img src={previews[0]} alt="Actual unit photo" /> : <><strong>📷 Add photo</strong><span>{stockPhotoPath ? 'optional' : 'required to save'}</span></>}
+              {photoBusy && <span>Uploading…</span>}
+            </button>
+          </> : <>
+            <button type="button" className={`receive-unit-photo-tile${files.length ? ' has-photo' : ''}`} disabled={photoBusy || busy} onClick={() => confirmPhotoFile.current?.click()}>
+              {previews[0] ? <img src={previews[0]} alt="Actual unit photo" /> : <><strong>📷 Take photo</strong><span>{stockPhotoPath ? 'Stock photo can save this unit' : 'Required to save'}</span></>}
+              {photoBusy && <span>Uploading…</span>}
+            </button>
+            <div className="receive-stock-photo">{merged?.images?.[0] ? <img src={merged.images[0]} alt="Catalog stock photo, not the unit" /> : <div aria-hidden="true">▯</div>}<span>Stock photo</span></div>
+          </>}
         </div>
+        {stockPhotoError && <small className="receive-confirm-note" role="status">{stockPhotoError}</small>}
         <label className="receive-title-field">Item title
-          <textarea rows={2} value={form.title} onChange={e => update('title', e.target.value)} />
+          <textarea ref={titleField} rows={2} value={form.title} onChange={e => update('title', e.target.value)} />
         </label>
         <div className="receive-confirm-fields">
           <label>Brand<input value={form.brand} onChange={e => update('brand', e.target.value)} /></label>
           <label>Model<input value={form.model} onChange={e => update('model', e.target.value)} /></label>
           <label>Variant<input value={form.variant} onChange={e => update('variant', e.target.value)} placeholder="Scent, color…" /></label>
-          <label>Size<input value={form.size} onChange={e => update('size', e.target.value)} placeholder="8.8 oz" /></label>
+          <label>Size<input value={form.size} onChange={e => update('size', e.target.value)} placeholder="Size or measurements" /></label>
           <label>Category<input value={form.category} onChange={e => update('category', e.target.value)} /></label>
           <div className="receive-condition-field"><span>Condition</span><div className="receive-chip-row" role="radiogroup" aria-label="Condition">
             {CONDITIONS.map(([value, label]) => <label className={`receive-chip${form.condition === value ? ' on' : ''}`} key={value}>
@@ -1643,25 +1692,25 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           </div></div>
         </div>
         {isDefectiveCondition(form.condition) && <label className="receive-confirm-full">Defect note<input value={form.conditionNote} onChange={e => update('conditionNote', e.target.value)} /></label>}
-        <details className="receive-confirm-details"><summary>Description {form.description ? '· filled' : '· empty'}</summary>
-          <textarea rows={3} value={form.description} onChange={e => update('description', e.target.value)} /></details>
-        <details className="receive-confirm-details"><summary>Product · {[form.productHeight, form.productWidth, form.productDepth].every(Boolean)
+        {!storePhoneMode && <details className="receive-confirm-details"><summary>Description {form.description ? '· filled' : '· empty'}</summary>
+          <textarea rows={3} value={form.description} onChange={e => update('description', e.target.value)} /></details>}
+        {!storePhoneMode && <details className="receive-confirm-details"><summary>Product · {[form.productHeight, form.productWidth, form.productDepth].every(Boolean)
           ? `${form.productDepth} × ${form.productWidth} × ${form.productHeight} in (L × W × H)` : 'Add dimensions'}{form.productWeight ? ` · ${form.productWeight} lb` : ''}
           {dimensionsBusy ? ' · finding…' : ''} <small>{[...new Set(['product_height_in','product_width_in','product_depth_in','product_weight_lb'].map(k => dimensionSources[k]).filter(Boolean))].join(' / ')}</small></summary>
           <div className="receive-confirm-dims">{([['productDepth','Length (in)','product_depth_in'],['productWidth','Width (in)','product_width_in'],
             ['productHeight','Height (in)','product_height_in'],['productWeight','Weight (lb)','product_weight_lb']] as const).map(([key,label,source]) =>
             <label key={key}>{label}<input type="number" min="0" step="any" inputMode="decimal" value={form[key]} onChange={e => { update(key, e.target.value); setDimensionSources(p => ({...p,[source]:'staff'})); }} />
-              {form[key] && <small>{dimensionSources[source] || 'staff'}</small>}</label>)}</div></details>
-        <details className="receive-confirm-details"><summary>Package · {[form.length, form.width, form.height].every(Boolean)
+              {form[key] && <small>{dimensionSources[source] || 'staff'}</small>}</label>)}</div></details>}
+        {!storePhoneMode && <details className="receive-confirm-details"><summary>Package · {[form.length, form.width, form.height].every(Boolean)
           ? `${form.length} × ${form.width} × ${form.height} in` : 'Add dimensions'}{form.weight ? ` · ${form.weight} lb` : ''}
           {dimensionsBusy ? ' · finding…' : ''} <small>{[...new Set(['package_length_in','package_width_in','package_height_in','package_weight_lb'].map(k => dimensionSources[k]).filter(Boolean))].join(' / ')}</small></summary>
           <div className="receive-confirm-dims">{([['length','Length (in)','package_length_in'],['width','Width (in)','package_width_in'],
             ['height','Height (in)','package_height_in'],['weight','Weight (lb)','package_weight_lb']] as const).map(([key,label,source]) =>
             <label key={key}>{label}<input type="number" min="0" step="any" inputMode="decimal" value={form[key]} onChange={e => { update(key, e.target.value); setDimensionSources(p => ({...p,[source]:'staff'})); }} />
-              {form[key] && <small>{dimensionSources[source] || 'staff'}</small>}</label>)}</div></details>
-        {dimensionsError && ![form.length,form.width,form.height,form.weight,form.productHeight,form.productWidth,form.productDepth,form.productWeight].some(v => Number(v)>0) && <small className="receive-confirm-note">No size found. Measure on mat.</small>}
-        <button type="button" className="secondary" onClick={() => setMatOpen(true)}>Measure on mat</button>
-        {matOpen && <Suspense fallback={<p role="status">Opening measuring tools…</p>}><MeasureOnMat onClose={() => setMatOpen(false)} onApply={(value, target) => {
+              {form[key] && <small>{dimensionSources[source] || 'staff'}</small>}</label>)}</div></details>}
+        {!storePhoneMode && dimensionsError && ![form.length,form.width,form.height,form.weight,form.productHeight,form.productWidth,form.productDepth,form.productWeight].some(v => Number(v)>0) && <small className="receive-confirm-note">No size found. Measure on mat.</small>}
+        {!storePhoneMode && <button type="button" className="secondary" onClick={() => setMatOpen(true)}>Measure on mat</button>}
+        {!storePhoneMode && matOpen && <Suspense fallback={<p role="status">Opening measuring tools…</p>}><MeasureOnMat onClose={() => setMatOpen(false)} onApply={(value, target) => {
           for (const key of target === 'product' ? ['productDepth','productWidth','productHeight'] : ['length','width','height']) dimensionTouched.current.add(key);
           setForm(prev => target === 'product' ? {...prev, productDepth:value.length, productWidth:value.width, productHeight:value.height}
             : {...prev, length:value.length, width:value.width, height:value.height});
@@ -1672,7 +1721,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         }} /></Suspense>}
 
         <div className="receive-confirm-bottom">
-          <details className="receive-confirm-prices"><summary>{photoPriceBusy ? 'Searching prices...' : !photoIdentity ? 'Prices available after product identification' : photoPriceError ? 'Price search incomplete' : photoPrice?.median_cents != null
+          <details className="receive-confirm-prices" open={storePhoneMode}><summary>{photoPriceBusy ? 'Searching prices...' : !photoIdentity ? 'Price reference unavailable' : photoPriceError ? 'Price search incomplete' : photoPrice?.median_cents != null
             ? `Online asking price ~${money(photoPrice.median_cents)} (${photoPrice.count} listings, ${money(photoPrice.low_cents)}–${money(photoPrice.high_cents)})`
             : photoPrice?.count ? `Online price ${money(photoPrice.low_cents)}${photoPrice.count > 1 ? `–${money(photoPrice.high_cents)}` : ''}` : 'Price reference unavailable'}</summary>
             {photoPrice?.listings?.map(listing => <a key={listing.url} href={listing.url} target="_blank" rel="noreferrer">{listing.store} · {money(listing.price_cents)} · {listing.product_name}</a>)}
@@ -1687,24 +1736,50 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           </div>
           <div className="receive-location-card"><label>Location<select value={selectedLocation} onChange={e => setSelectedLocation(e.target.value)}>
             <option value="">No location yet</option>{receiveLocations.map(location => <option key={location.code} value={location.code}>Bay {location.bay_no} · R{location.row_no}{location.bin_no == null ? '' : `-B${location.bin_no}`}{location.code === selectedLocation ? ' · same as last item' : ''}</option>)}
-          </select></label><label className="receive-location-scan">Scan bin label<input inputMode={scannerInputMode()} value={locationScan} placeholder="Bay 12 · R2-B3" onChange={e => setLocationScan(e.target.value)} onKeyDown={e => {
+          </select></label>{(!storePhoneMode || locationEditOpen) && <label className="receive-location-scan">Scan bin label<input inputMode={scannerInputMode()} value={locationScan} placeholder="Bay 12 · R2-B3" onChange={e => setLocationScan(e.target.value)} onKeyDown={e => {
             if (e.key !== 'Enter') return; e.preventDefault();
             const parts = locationScan.trim().match(/(?:bay\s*)?(\d+)\s*[·\s-]+\s*r?(\d+)(?:\s*-\s*b?\s*(\d+))?/i);
             const code = parts ? `${parts[1]}-${parts[2]}${parts[3] ? `-${parts[3]}` : ''}` : locationScan.trim();
             const match = receiveLocations.find(location => location.code === code || `Bay ${location.bay_no} · R${location.row_no}${location.bin_no == null ? '' : `-B${location.bin_no}`}`.toLowerCase() === locationScan.trim().toLowerCase());
-            if (match) { setSelectedLocation(match.code); setLocationScan(''); } else setError('That barcode does not match a configured bay, row and bin.');
-          }} /></label><button type="button" className="text-button" onClick={() => { setSelectedLocation(''); setLocationScan(''); }}>Change</button></div>
+            if (match) { setSelectedLocation(match.code); setLocationScan(''); setLocationEditOpen(false); } else setError('That barcode does not match a configured bay, row and bin.');
+          }} /></label>}<button type="button" className="text-button" onClick={() => {
+            if (storePhoneMode) setLocationEditOpen(value => !value);
+            else { setSelectedLocation(''); setLocationScan(''); }
+          }}>{storePhoneMode ? locationEditOpen ? 'Done' : 'Change' : 'Change'}</button></div>
           {selectedLocation && <small className="receive-last-location">Bay {receiveLocations.find(l => l.code === selectedLocation)?.bay_no} · same as last item</small>}
+          {storePhoneMode && <details className="receive-phone-fold"><summary>More options</summary>
+          <div className="receive-channel-card">
+            {!staffMode && <ChannelPicker value={channels} onChange={setChannels} disabled={doNotList || doNotShip} upc={form.noUpc ? '' : (form.upc || current?.upc || '')} />}
+            {!staffMode && <label className="mboard-inline"><input type="checkbox" checked={doNotShip} disabled={dnsRequired} onChange={e => { setDns(e.target.checked); if (e.target.checked) setChannels([]); }} /> DNS — Do not ship</label>}
+            {!staffMode && <label className="mboard-inline"><input type="checkbox" checked={doNotList} onChange={e => { setDoNotList(e.target.checked); if (e.target.checked) setChannels([]); }} /> Do not list for sale</label>}
+            {doNotShip && <small>Store / website pickup only. No marketplace listings.</small>}
+          </div>
+          <details className="receive-confirm-details"><summary>Product dimensions · {[form.productDepth,form.productWidth,form.productHeight].every(Boolean)
+            ? `${form.productDepth} × ${form.productWidth} × ${form.productHeight} in` : 'optional'}{form.productWeight ? ` · ${form.productWeight} lb` : ''}{dimensionsBusy ? ' · finding…' : ''}
+            <small>{[...new Set(['product_depth_in','product_width_in','product_height_in','product_weight_lb'].map(key => dimensionSources[key]).filter(Boolean))].join(' / ')}</small></summary>
+            <div className="receive-confirm-dims">{([['productDepth','Length (in)','product_depth_in'],['productWidth','Width (in)','product_width_in'],['productHeight','Height (in)','product_height_in'],['productWeight','Weight (lb)','product_weight_lb']] as const).map(([key,label,source]) =>
+              <label key={key}>{label}<input type="number" min="0" step="any" inputMode="decimal" value={form[key]} placeholder="Optional" onChange={e => { update(key,e.target.value); setDimensionSources(p => ({...p,[source]:'staff'})); }} /></label>)}</div>
+          </details>
+          <details className="receive-confirm-details"><summary>Size & weight {form.length || form.weight ? '· entered' : '· optional'}</summary>
+            <div className="receive-confirm-dims">{([['length','Length (in)','package_length_in'],['width','Width (in)','package_width_in'],['height','Height (in)','package_height_in'],['weight','Weight (lb)','package_weight_lb']] as const).map(([key,label,source]) =>
+              <label key={key}>{label}<input type="number" min="0" step="any" inputMode="decimal" value={form[key]} placeholder="Optional" onChange={e => { update(key,e.target.value); setDimensionSources(p => ({...p,[source]:'staff'})); }} /></label>)}</div>
+            {needsEbayBox && <small className="receive-confirm-note">Needs box size for eBay. Save now and measure later.</small>}
+            <button type="button" className="secondary" onClick={() => setMatOpen(true)}>Measure on mat</button>
+          </details>
+          <details className="receive-confirm-details"><summary>Description {form.description ? '· filled' : '· optional'}</summary><textarea rows={3} value={form.description} onChange={e => update('description',e.target.value)} /></details>
+          {!staffMode && <BundleReceive client={client} lastReceived={saved[0]} onSaved={onSaved} />}
+          </details>}
           {liveMissing.length > 0 && <small>Missing: {liveMissing.join(', ')} · saves to Unfinished</small>}
+          {needsEbayBox && <small className="receive-confirm-note">Needs box size for eBay. You can save now and measure it later.</small>}
           {files.length > 0 && !stagedPhotoPaths.length && !photoBusy && !photoIdBusy && <button type="button" className="secondary" onClick={() => {
             setPhotoBusy(true); setError('');
             void stageUnitPhotos(files).then(setStagedPhotoPaths).catch(e => setError(`Photo upload failed: ${errText(e)}`)).finally(() => setPhotoBusy(false));
           }}>Retry photo upload</button>}
-          <button className="receive-save-next" type="submit" disabled={busy || photoBusy || photoIdBusy || !files.length || !stagedPhotoPaths.length || (dups !== null && dups.count > 0 && !dupAck)}>{busy ? 'Saving…' : photoBusy || photoIdBusy ? 'Uploading photo…' : files.length && stagedPhotoPaths.length ? 'Save & next' : '📷 Take a photo to save'}</button>
+          <button className="receive-save-next" type="submit" disabled={busy || photoBusy || stockPhotoBusy || photoIdBusy || !hasAnyPhoto || (dups !== null && dups.count > 0 && !dupAck)}>{busy ? 'Saving…' : photoBusy || stockPhotoBusy || photoIdBusy ? 'Preparing photo…' : hasAnyPhoto ? 'Save & next' : '📷 Take a photo to save'}</button>
         </div>
       </div>}
 
-      <details className="receive-advanced" open={manual}><summary>{manual ? 'Receive details' : 'More options'}</summary><div className="unit-edit-grid">
+      <details className={`receive-advanced${manual ? ' receive-manual' : ''}`} open={manual}><summary>{manual ? 'Receive details' : 'More options'}</summary><div className="unit-edit-grid">
         <label className={liveMissing.includes('price') ? 'receive-need' : undefined}>
           Price{liveMissing.includes('price')
             ? ' (needed to list)'
@@ -1770,19 +1845,19 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           No UPC / doesn’t have a barcode — marketplaces get “Does not apply”
         </label>
 
-        <label className={liveMissing.includes('weight + box dimensions') ? 'receive-need' : undefined}>
-          Length (in){liveMissing.includes('weight + box dimensions') ? ' (needed to list)' : ''}
+        <label>
+          Length (in)
           <input inputMode="decimal" value={form.length} onChange={e => update('length', e.target.value)} />
         </label>
-        <label className={liveMissing.includes('weight + box dimensions') ? 'receive-need' : undefined}>
+        <label>
           Width (in)
           <input inputMode="decimal" value={form.width} onChange={e => update('width', e.target.value)} />
         </label>
-        <label className={liveMissing.includes('weight + box dimensions') ? 'receive-need' : undefined}>
+        <label>
           Height (in)
           <input inputMode="decimal" value={form.height} onChange={e => update('height', e.target.value)} />
         </label>
-        <label className={liveMissing.includes('weight + box dimensions') ? 'receive-need' : undefined}>
+        <label>
           Weight (lb)
           <input inputMode="decimal" value={form.weight} onChange={e => update('weight', e.target.value)} />
         </label>
@@ -1904,7 +1979,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
               : `Missing for listing: ${liveMissing.join(', ')}. You can still receive; incomplete units land in Needs attention.`}
       </p>
       <div className="actions">
-        <button disabled={busy || photoBusy || photoIdBusy || !files.length || !stagedPhotoPaths.length || (dups !== null && dups.count > 0 && !dupAck)}>{busy ? 'Receiving…' : files.length ? 'Finish & receive' : 'Take a photo to save'}</button>
+        <button disabled={busy || photoBusy || photoIdBusy || !hasAnyPhoto || (dups !== null && dups.count > 0 && !dupAck)}>{busy ? 'Receiving…' : hasAnyPhoto ? 'Finish & receive' : 'Take a photo to save'}</button>
         {!manual && current && <button type="button" className="secondary" disabled={busy} onClick={skipCurrent}>Skip this scan</button>}
       </div>
       </details>
