@@ -61,6 +61,8 @@
     "oauth-start",
     "portal-logs",
     "portal-match-action",
+    "receive-finish",
+    "receive-finish-background",
     "receive-photo-identify",
     "returns-sync",
     "rewards-quote",

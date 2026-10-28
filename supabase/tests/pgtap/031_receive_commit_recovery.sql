@@ -1,0 +1,62 @@
+begin;
+select no_plan();
+set constraints all immediate;
+alter table auth.users add column if not exists email text;
+select set_config('pgtap.require_photo_test','on',true);
+do $$ declare st uuid; own uuid:=gen_random_uuid(); clerk uuid:=gen_random_uuid(); req uuid:=gen_random_uuid(); creq uuid:=gen_random_uuid();begin
+ insert into auth.users(id) values(own),(clerk);
+ insert into public.stores default values returning id into st;
+ insert into public.staff(user_id,store_id,display_name,role) values(own,st,'Receive owner','owner'),(clerk,st,'Receive clerk','staff');
+ insert into public.portal_admins(user_id,store_id) values(own,st);
+ perform public.seed_store_settings(st,'Receive recovery');
+ perform set_config('receive_test.store',st::text,true);perform set_config('receive_test.owner',own::text,true);perform set_config('receive_test.clerk',clerk::text,true);
+ perform set_config('receive_test.request',req::text,true);perform set_config('receive_test.clerk_request',creq::text,true);
+ perform set_config('receive_test.photo',st::text||'/receive/'||own::text||'/'||req::text||'/actual.jpg',true);
+ perform set_config('receive_test.clerk_photo',st::text||'/receive/'||clerk::text||'/'||creq::text||'/actual.jpg',true);
+ insert into storage.objects(bucket_id,name) values('unit-photos',current_setting('receive_test.photo')),('unit-photos',current_setting('receive_test.clerk_photo'));
+end $$;
+select set_config('request.jwt.claim.role','authenticated',true);
+select set_config('request.jwt.claim.sub',current_setting('receive_test.owner'),true);
+select throws_ok($q$select public.receive_commit(gen_random_uuid(),'{}','{}','{}')$q$,'23514','unit_photo_required','server rejects saving without actual-unit photo');
+select throws_ok($q$select public.receive_commit(gen_random_uuid(),'{}',array['https://example.com/stock.jpg'],'{}')$q$,'23514','invalid_unit_photo','stock photo URL does not count');
+select set_config('receive_test.result',public.receive_commit(current_setting('receive_test.request')::uuid,
+ '{"p_title":"Photographed incomplete unit","p_quantity":1}',array[current_setting('receive_test.photo')],
+ '{"location":null,"channels":[],"enrichment":{"specs":{"product_height_in":9.58}}}')::text,true);
+select is((select count(*)::int from public.units where store_id=current_setting('receive_test.store')::uuid),1,'incomplete item saves with one unit');
+select ok((select acquisition_cost_cents is null and ask_cents is null from public.units where store_id=current_setting('receive_test.store')::uuid),'price and cost stay empty without defaults');
+select is((select count(*)::int from public.photos where store_id=current_setting('receive_test.store')::uuid),1,'actual photo links in same transaction');
+select is((select count(*)::int from public.receive_jobs where store_id=current_setting('receive_test.store')::uuid),1,'background job commits with unit');
+select is((select count(*)::int from public.unit_location_stock where store_id=current_setting('receive_test.store')::uuid),0,'location is optional');
+select is((select listing_specs->>'product_height_in' from public.units where store_id=current_setting('receive_test.store')::uuid),'9.58','entered lookup data commits before response');
+select ok((public.receive_commit(current_setting('receive_test.request')::uuid,'{}','{}','{}')->>'replayed')::boolean,'lost response replays same receive');
+select is((select count(*)::int from public.units where store_id=current_setting('receive_test.store')::uuid),1,'retry cannot create duplicate stock');
+select ok((current_setting('receive_test.result')::jsonb->>'server_ms')::numeric>=0,'server timing is returned');
+select throws_ok($q$select public.receive_claim_jobs(null,1)$q$,'42501','service_role_required','browser cannot claim background service work');
+select set_config('request.jwt.claim.sub',current_setting('receive_test.clerk'),true);
+select throws_ok($q$select public.receive_commit(current_setting('receive_test.request')::uuid,'{}','{}','{}')$q$,'42501','receive_access_denied','another receiver cannot replay owner request');
+select throws_ok($q$select public.receive_commit(current_setting('receive_test.clerk_request')::uuid,'{}',array[current_setting('receive_test.clerk_photo')],'{"channels":["ebay"]}')$q$,'42501','admin_options_forbidden','clerk cannot enable channels');
+select lives_ok($q$select public.receive_commit(current_setting('receive_test.clerk_request')::uuid,'{"p_title":"Clerk photographed unit"}',array[current_setting('receive_test.clerk_photo')],'{}')$q$,'clerk can receive incomplete photographed stock');
+select is((select jsonb_array_length(public.receive_work_status())),2,'clerk can see safe receive status');
+select ok(not has_table_privilege('authenticated','public.receive_commits','SELECT'),'raw receiver payloads are not exposed to clerks');
+select ok(not has_table_privilege('authenticated','public.receive_job_audit','SELECT'),'background before-images are service-only');
+select set_config('request.jwt.claim.role','service_role',true);
+select set_config('request.jwt.claim.sub','',true);
+select is((select count(*)::int from public.receive_claim_jobs(current_setting('receive_test.store')::uuid,1)),1,'worker claims a due job');
+select is((select count(*)::int from public.receive_claim_jobs(current_setting('receive_test.store')::uuid,5)),1,'a second worker cannot claim the first lease');
+select throws_ok($q$select public.floor_receive_apply_channel(current_setting('receive_test.store')::uuid,(current_setting('receive_test.result')::jsonb#>>'{skus,0}'),'ebay')$q$,'P0001','channel_not_authorized','worker cannot add a channel the owner never selected');
+insert into public.sku_ledger(sku,store_id,issued_at) values('94399',current_setting('receive_test.store')::uuid,now());
+select throws_ok($q$insert into public.units(sku,store_id,state,qty_on_hand,received_at,updated_at) values('94399',current_setting('receive_test.store')::uuid,'sold',0,now(),now())$q$,'23514','unit_photo_required','imports cannot bypass photo requirement with sold/zero-stock state');
+select set_config('request.jwt.claim.role','authenticated',true);
+select set_config('request.jwt.claim.sub',current_setting('receive_test.owner'),true);
+select public.portal_set_bay(12,array[3,3,3]);
+select set_config('receive_test.loc_request',gen_random_uuid()::text,true);
+insert into storage.objects(bucket_id,name) values('unit-photos',current_setting('receive_test.store')||'/receive/'||current_setting('receive_test.owner')||'/'||current_setting('receive_test.loc_request')||'/actual.jpg');
+select lives_ok($q$select public.receive_commit(current_setting('receive_test.loc_request')::uuid,'{"p_title":"Located unit"}',
+ array[current_setting('receive_test.store')||'/receive/'||current_setting('receive_test.owner')||'/'||current_setting('receive_test.loc_request')||'/actual.jpg'],
+ '{"location":"12-2-3"}')$q$,'chosen location saves atomically with receive');
+select is((select sum(quantity)::int from public.unit_location_stock where store_id=current_setting('receive_test.store')::uuid and location_code='12-2-3'),1,'received unit is assigned to exact bin');
+select is((select count(*)::int from public.unit_location_moves where store_id=current_setting('receive_test.store')::uuid),1,'receive assignment has movement history');
+select set_config('request.jwt.claim.sub',current_setting('receive_test.clerk'),true);
+select is(public.portal_unassigned_inventory_count(),2,'No location count includes incomplete stock and is visible to clerks');
+select * from finish();
+rollback;

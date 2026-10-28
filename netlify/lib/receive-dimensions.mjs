@@ -28,28 +28,31 @@ export function mergeDimensions(floor, amazon, upcitemdb) {
     const storedSource = floor?.dim_sources?.[field.replace(/^package_/, '')] || floor?.dim_sources?.[field];
     if (/estimat|\bai\b|gemini/i.test(String(storedSource || ''))) continue;
     const floorValue = field.startsWith('product_') ? floor?.aspects?.[field] : floor?.[field];
-    put(field, floorValue, 'Floor');
+    put(field, floorValue, storedSource || 'Floor');
   }
   // Product measurements cannot establish shipping-carton dimensions or weight.
   return { values, sources };
 }
 
 export function dimensionWarnings(values) {
-  return Object.values(values).some(value => value != null)
+  return Object.values(values).some(value => num(value) != null)
     ? [] : ['No size found. Measure on mat.'];
 }
 
-export function dimensionIdentityMatches(catalog, identity) {
+export function dimensionIdentityMatches(catalog, identity, { exactBarcode = false } = {}) {
   if (!identity?.title || !identity?.brand) return true;
+  // Barcode catalogs often abbreviate marketing variants ("Linen" vs "Linen & Sky").
+  // Keep size/count checks; don't require every marketing word on an exact-GTIN record.
+  const matchIdentity = exactBarcode ? { ...identity, variant: undefined } : identity;
   return comparablePrices([{price_cents:1, url:'https://catalog.example/item',
-    product_name:[catalog?.title,catalog?.model].filter(Boolean).join(' ')}], identity).length > 0;
+    product_name:[catalog?.brand,catalog?.title,catalog?.model,catalog?.size,catalog?.aspects?.Size].filter(Boolean).join(' ')}], matchIdentity).length > 0;
 }
 
 export async function lookupReceiveDimensions(sb, storeId, rawUpc, identity, { source = 'all' } = {}) {
   const gtin = normalizeGtin(rawUpc);
   if (!gtin.ok) return mergeDimensions(null, null, null);
   let floor = await readFloorProduct(sb, gtin.gtin14);
-  if (!dimensionIdentityMatches(floor, identity)) floor = null;
+  if (!dimensionIdentityMatches(floor, identity, { exactBarcode: true })) floor = null;
   const catalog = await lookupUpc(storeId, rawUpc, { dimensionsOnly: true, deps: { sb,
     ...(source === 'amazon' ? {upcitemdb:async()=>({found:false})} : {}),
     ...(source === 'upcitemdb' ? {catalogByIdentifier:async()=>({found:false})} : {}),
@@ -58,7 +61,7 @@ export async function lookupReceiveDimensions(sb, storeId, rawUpc, identity, { s
     ? { title:catalog.upcitemdb.title, brand:catalog.upcitemdb.brand } : null;
   const warnings = [];
   for (const source of ['amazon','upcitemdb']) {
-    if (catalog[source]?.found && !dimensionIdentityMatches(catalog[source], reference)) {
+    if (catalog[source]?.found && !dimensionIdentityMatches(catalog[source], reference, { exactBarcode: true })) {
       catalog[source] = null;
     }
   }
