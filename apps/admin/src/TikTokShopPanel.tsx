@@ -8,6 +8,9 @@ type TikTokStatus = {
   connected?: boolean;
   healthy?: boolean;
   shopId?: string | null;
+  shopName?: string | null;
+  region?: string | null;
+  sellerType?: string | null;
   listingEnabled?: boolean;
   hasEnvCreds?: boolean;
   hasStoredTokens?: boolean;
@@ -30,6 +33,8 @@ type QueueRow = {
   updated_at: string;
   title: string | null;
 };
+type ReadinessRow = { sku: string; title: string; floor_price_cents: number | null; tiktok_price_cents: number; suggested_category: string; status: string; reasons: string[] };
+type ReadinessResult = { rows: ReadinessRow[]; totals: { units: number; ready: number; blocked: number; byReason: Record<string, number> } };
 
 type Props = {
   client: SupabaseClient;
@@ -57,6 +62,7 @@ export function TikTokShopPanel({ client, accessToken, money, connectionOnly = f
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [readiness, setReadiness] = useState<ReadinessResult | null>(null);
 
   const loadQueue = useCallback(async () => {
     const { data, error: e } = await client.rpc('portal_tiktok_list');
@@ -151,6 +157,20 @@ export function TikTokShopPanel({ client, accessToken, money, connectionOnly = f
     }
   }
 
+  async function loadReadiness() {
+    setBusy(true); setError('');
+    try { setReadiness(await tiktokCall(accessToken, { action: 'readiness' }) as unknown as ReadinessResult); }
+    catch (e) { setError(errText(e)); }
+    finally { setBusy(false); }
+  }
+
+  async function syncTaxonomy() {
+    setBusy(true); setError('');
+    try { const result = await tiktokCall(accessToken, { action: 'sync_taxonomy' }); setNotice(`TikTok rules refreshed: ${Number(result.count || 0)} categories.`); await loadStatus(); }
+    catch (e) { setError(errText(e)); }
+    finally { setBusy(false); }
+  }
+
   const errors = rows.filter((r) => r.status === 'error' || r.last_error);
 
   return (
@@ -185,9 +205,12 @@ export function TikTokShopPanel({ client, accessToken, money, connectionOnly = f
             <span>
               {status?.healthy ? 'API healthy' : status?.lastError || 'Waiting for env / authorize'}
               {status?.shopId ? ` · shop ${status.shopId}` : ''}
+              {status?.shopName ? ` · ${status.shopName}` : ''}
+              {status?.region ? ` · ${status.region}` : ''}
               {status?.listingEnabled === false ? ' · listing OFF' : ''}
             </span>
           </div>
+          {status?.scopes?.length ? <p className="hint">Granted permissions: {status.scopes.join(', ')}</p> : null}
           {status?.redirectUrl && (
             <p className="hint">
               Partner Center redirect URL: <code>{status.redirectUrl}</code>
@@ -236,6 +259,16 @@ export function TikTokShopPanel({ client, accessToken, money, connectionOnly = f
           )}
         </div>
       </div>
+
+      <section className="panel">
+        <h3>Needs for TikTok</h3>
+        <p>Available units blocked by Floor policy, missing data, or unverified TikTok rules. Open-box and used items need TikTok pre-owned approval before they can be considered.</p>
+        <div className="actions"><button type="button" disabled={busy} onClick={() => void loadReadiness()}>Load readiness</button><button type="button" className="secondary" disabled={busy || !status?.healthy} onClick={() => void syncTaxonomy()}>Sync TikTok rules</button><button type="button" className="secondary" disabled={busy || !status?.healthy} onClick={() => void (async () => { setBusy(true); setError(''); try { const result = await tiktokCall(accessToken, { action: 'sync_readonly' }); const counts = result.counts as Record<string, number>; setNotice(`Read-only shop pull saved: ${Object.entries(counts || {}).map(([k,v]) => `${k} ${v}`).join(', ')}.`); } catch (e) { setError(errText(e)); } finally { setBusy(false); } })()}>Pull shop data</button></div>
+        {readiness && <><p className="hint">{readiness.totals.units} available · {readiness.totals.ready} ready now · {readiness.totals.blocked} blocked</p>
+          <p className="hint">Blocked reasons: {Object.entries(readiness.totals.byReason).map(([reason, count]) => `${reason} (${count})`).join(' · ')}</p>
+          <div className="ticket-list">{readiness.rows.filter((r) => r.status !== 'ready').map((r) => <div className="ticket" key={r.sku}><div className="ticket-top"><strong>{r.title}</strong><span>SKU {r.sku} · {r.floor_price_cents == null ? 'No Floor price' : money(r.floor_price_cents)} Floor · {money(r.tiktok_price_cents)} suggested · {r.suggested_category}</span></div><small>{r.reasons.join(' · ')}</small><a className="text-button" href={`/?page=inventory&search=${encodeURIComponent(r.sku)}`}>Open in Inventory</a></div>)}</div>
+        </>}
+      </section>
 
       {!connectionOnly && (
         <>

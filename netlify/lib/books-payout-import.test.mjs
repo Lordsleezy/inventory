@@ -17,6 +17,16 @@ test('imports only positive completed Square payouts and preserves end-to-end re
   assert.equal(normalizeBooksPayout('square', { id: 'sq-3', status: 'PAID', amount_money: { amount: -100 }, arrival_date: '2026-10-28' }), null);
 });
 
+test('TikTok PAID USD settlement is imported by payment id and non-USD is skipped', () => {
+  const row = normalizeBooksPayout('tiktok', { id: 'pay-1', status: 'PAID', amount: { value: '21.42', currency: 'USD' }, paid_time: 1793145600 });
+  assert.equal(row.platform, 'tiktok');
+  assert.equal(row.external_payout_id, 'pay-1');
+  assert.equal(row.amount_cents, 2142);
+  assert.equal(row.bank_reference, null);
+  assert.equal(normalizeBooksPayout('tiktok', { id: 'pay-2', status: 'PAID', amount: { value: '20', currency: 'GBP' }, paid_time: 1793145600 }), null);
+  assert.equal(normalizeBooksPayout('tiktok', { id: 'pay-3', status: 'PROCESSING', amount: { value: '20', currency: 'USD' }, paid_time: 1793145600 }), null);
+});
+
 function booksDb(locked) {
   const writes = [];
   const sb = { from(table) {

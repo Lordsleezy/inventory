@@ -38,6 +38,7 @@ type Props = {
   canDelete?: boolean;
   /** Associates: list tabs only (no Receive / fix queues / Lookup test). The server also withholds sold prices and cost. */
   associateBrowseOnly?: boolean;
+  initialSearch?: string;
 };
 
 /** Unit-list subtabs, in this order. Everything after them is an admin tool. */
@@ -64,9 +65,10 @@ export function InventoryPage({
   client, storeId, accessToken, money, stamp, tab, onTab, attentionSection, onAttentionSection, onCostChanged,
   canDelete = false,
   associateBrowseOnly = false,
+  initialSearch = '',
 }: Props) {
   const [refresh, setRefresh] = useState(0);
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState(initialSearch);
   const [status, setStatus] = useState('in_stock');
   const [location, setLocation] = useState('all');
   const [locationOptions, setLocationOptions] = useState<{ code: string }[]>([]);

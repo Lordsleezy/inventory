@@ -1,23 +1,25 @@
 /** Normalize only completed, positive deposits; failed/negative payout records are not bank deposits. */
 export function normalizeBooksPayout(platform, payout) {
   const source = String(platform || '').toLowerCase();
-  if (!['ebay', 'square'].includes(source) || !payout || typeof payout !== 'object') return null;
+  if (!['ebay', 'square', 'tiktok'].includes(source) || !payout || typeof payout !== 'object') return null;
   const id = String(source === 'ebay' ? payout.payoutId || payout.payout_id || '' : payout.id || '').trim();
   const status = String(source === 'ebay' ? payout.payoutStatus || payout.status || '' : payout.status || '').toUpperCase();
-  const validStatuses = source === 'ebay' ? ['SUCCEEDED'] : ['PAID', 'SENT'];
-  const rawAmount = source === 'ebay' ? payout.amount : payout.amount_money;
+  const validStatuses = source === 'ebay' ? ['SUCCEEDED'] : source === 'square' ? ['PAID', 'SENT'] : ['PAID'];
+  const rawAmount = source === 'ebay' ? payout.amount : source === 'square' ? payout.amount_money : payout.amount;
   const amount = Number(rawAmount && typeof rawAmount === 'object' ? rawAmount.value ?? rawAmount.amount : rawAmount);
+  if (source === 'tiktok' && String(rawAmount?.currency || '').toUpperCase() !== 'USD') return null;
   const cents = source === 'square' ? Math.trunc(amount) : Math.round(amount * 100);
-  const when = source === 'ebay' ? payout.payoutDate || payout.payout_date : payout.arrival_date || payout.updated_at || payout.created_at;
-  const date = typeof when === 'string' ? when.slice(0, 10) : '';
+  const when = source === 'ebay' ? payout.payoutDate || payout.payout_date : source === 'square' ? payout.arrival_date || payout.updated_at || payout.created_at : payout.paid_time;
+  const date = typeof when === 'string' ? when.slice(0, 10) : Number.isFinite(Number(when)) && Number(when) > 0
+    ? new Date(Number(when) * 1000).toISOString().slice(0, 10) : '';
   if (!id || !validStatuses.includes(status) || !Number.isSafeInteger(cents) || cents <= 0 || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
   return {
     platform: source,
     external_payout_id: id,
     amount_cents: cents,
     withdrawn_on: date,
-    bank_reference: String(source === 'ebay' ? payout.bankReference || payout.bank_reference || '' : payout.end_to_end_id || '').trim() || null,
-    note: `Imported from ${source === 'ebay' ? 'eBay Finances' : 'Square'} API`,
+    bank_reference: String(source === 'ebay' ? payout.bankReference || payout.bank_reference || '' : source === 'square' ? payout.end_to_end_id || '' : '').trim() || null,
+    note: `Imported from ${source === 'ebay' ? 'eBay Finances' : source === 'square' ? 'Square' : 'TikTok Shop Finance'} API`,
   };
 }
 

@@ -8,14 +8,15 @@ Floor integration for Open Box Industries / inventoryobi. Keys are **not** in Ne
 |----------|----------|-------|
 | `TIKTOK_SHOP_APP_KEY` | yes | Partner Center app key |
 | `TIKTOK_SHOP_APP_SECRET` | yes | Partner Center app secret (signing + token exchange) |
-| `TIKTOK_SHOP_SERVICE_ID` | optional | Custom app Service ID → authorize URL uses `services.tiktokshop.com/open/authorize` |
-| `TIKTOK_SHOP_SHOP_ID` | yes (for shop-scoped calls) | Seller shop id |
+| `TIKTOK_SHOP_SERVICE_ID` | optional | Partner Center Service ID; US authorize host is `services.us.tiktokshop.com/open/authorize` |
+| `TIKTOK_SHOP_SHOP_ID` | optional bootstrap | Authorized shop IDs are read from TikTok and stored in the service-only `tiktok_shop_accounts` table |
+| `TIKTOK_SHOP_SHOP_CIPHER` | optional bootstrap | Authorized shop cipher is stored server-side after OAuth; do not set unless diagnosing a shop-context issue |
 | `TIKTOK_SHOP_API_BASE` | no | Default `https://open-api.tiktokglobalshop.com` (US partner base if Partner Center says otherwise) |
 | `TIKTOK_SHOP_AUTH_BASE` | no | Default `https://auth.tiktok-shops.com` |
 | `TIKTOK_SHOP_REDIRECT_URL` | no | Defaults to the URL below |
 | `TIKTOK_SHOP_ACCESS_TOKEN` | bootstrap only | Prefer OAuth tokens in `connections` |
-| `TIKTOK_SHOP_LISTING_ENABLED` | no | Set `1` to allow product push |
-| `TIKTOK_SHOP_FEE_PCT` | no | Default `0.08` for list-price bake-in |
+| `TIKTOK_SHOP_LISTING_ENABLED` | no | Leave unset for this preparation job; no listing is performed |
+| `TIKTOK_SHOP_FEE_PCT` | no | Readiness estimate only; default 0.06. Actual fee varies by category and TikTok's current schedule |
 | `TIKTOK_SHOP_WAREHOUSE_ID` | for listing | Required by product create once listing is on |
 | `CONNECTIONS_KEY` | yes | Encrypts tokens at rest (same as Amazon/Square) |
 
@@ -37,28 +38,30 @@ Request under Partner Center → **Manage API** (names vary slightly by console 
 
 - `seller.authorization.info`
 - `seller.shop.info`
-- `seller.product.read`
+- `seller.product.basic`
 - `seller.product.write`
 - `seller.order.info`
-- `seller.order.refund`
 - `seller.return_refund.basic`
 - `seller.fulfillment.basic`
+- `seller.logistics`
+- `seller.finance.info`
 
-Also subscribe webhooks (order + return) to:
+Register this webhook callback URL in Partner Center and subscribe to `ORDER_STATUS_CHANGE`, `CANCELLATION_STATUS_CHANGE`, and `RETURN_STATUS_CHANGE`:
 
 ```
 https://inventoryobi.netlify.app/.netlify/functions/tiktok-webhook
 ```
 
-Scheduled polls remain authoritative (`tiktok-orders-sync` every 10m, `tiktok-returns-sync` / `returns-sync` every 30m).
+The webhook handler verifies the Shop signature and stores deduplicated raw events only. It does not create sales, process cancellations, or apply returns. Existing scheduled jobs are legacy flows and are not used by this preparation job.
 
 ## What Floor builds
 
 1. **OAuth** — `tiktok-oauth-callback`, `oauth-authorize` / `oauth-start` for `tiktok`
 2. **Token refresh** — `netlify/lib/tiktok-shop.mjs` refreshes before expiry; emails `FLOOR_OWNER_EMAIL` on failure
-3. **Product push** — `tiktok-list` + `portal_tiktok_list` / `portal_tiktok_list_add`; pricing = same online rule as Amazon + TikTok fees + return reserve; real photos only; errors in Marketplaces → TikTok Shop panel
-4. **Orders** — webhook + `tiktok-orders-sync` → `finalize_sale` → delist TikTok / eBay / Amazon qty
-5. **Returns** — live `return_refund/.../returns/search` when tokens present → `ingest_channel_return` → `return_decision` alert; **48h** decision window already in `return_settings.decision_hours.tiktok`
+3. **Read-only preparation** — `tiktok-list` admin actions pull shop/warehouse, product, order, and brand snapshots into service-only tables. Global brand listings are not treated as category authorization; mapped categories get category-specific brand snapshots. Shipping choices are retained as observed order options because eligibility depends on a real order and package.
+4. **Money** — the Money tab's explicit TikTok refresh imports PAID USD finance payments by payment ID, idempotently, and shows unsettled funds as an estimate. This account is marked as Paul's personal bank, not Floor business cash.
+5. **Product push** — existing `tiktok-list` and queue controls remain a later job; the preparation flow does not create/edit/delete TikTok products.
+6. **Orders and returns** — existing ingestion paths remain; this preparation webhook only stores notifications, without applying them.
 
 ## Smoke tests (after keys)
 
