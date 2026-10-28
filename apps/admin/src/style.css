@@ -922,3 +922,5 @@ html.dark .aspect-list{background:#1c2129;color:#e8eef4;border-color:#354050}htm
 @media(max-width:600px){.receive-channel-card{margin:10px 12px}.receive-photo-first{grid-template-columns:minmax(0,2fr) minmax(95px,1fr)}.receive-unit-photo-tile,.receive-stock-photo{height:130px}.receive-location-card{grid-template-columns:1fr 1fr}.receive-location-card>.text-button{grid-column:1/-1}.order-pick-location{display:grid;justify-items:start;max-width:100%}.order-pick-location select{max-width:100%}.app-order-location-badge{width:68px;min-height:60px;flex-basis:68px}.app-order-location-badge strong{font-size:18px}}
 
 .receive-background-status{margin-top:8px;padding:8px 12px;border-radius:10px;background:#202733;color:#91a0b4;font-size:.82rem}.receive-background-status p{margin:3px 0}
+
+.receive-stock-photo img{max-width:100%;max-height:112px;object-fit:contain}.receive-stock-photo span{padding:0 4px}

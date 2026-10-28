@@ -142,6 +142,7 @@ type Source = {
   description?: string | null;
   features?: string[];
   aspects?: Record<string, string>;
+  images?: string[];
   package?: Pkg;
   price_cents?: number | null;
   price_source?: string | null;
@@ -163,7 +164,7 @@ type Lookup = {
   merged?: {
     title?: string | null; brand?: string | null; model?: string | null; description?: string | null;
     category?: string | null;
-    features?: string[]; aspects?: Record<string, string>; package?: Pkg; asin?: string | null; msrp_cents?: number | null;
+    features?: string[]; aspects?: Record<string, string>; images?: string[]; package?: Pkg; asin?: string | null; msrp_cents?: number | null;
     retail_cents?: number | null; retail_source?: string | null; retail_as_of?: string | null;
     disagreements?: Disagreement[]; never_list_reason?: string | null;
     not_found?: boolean;
@@ -1672,7 +1673,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
             {previews[0] ? <img src={previews[0]} alt="Actual unit photo" /> : <><strong>📷 Take photo</strong><span>Required to save</span></>}
             {photoBusy && <span>Uploading…</span>}
           </button>
-          <div className="receive-stock-photo"><div aria-hidden="true">▯</div><span>Stock photo</span></div>
+          <div className="receive-stock-photo">{merged?.images?.[0] ? <img src={merged.images[0]} alt="Catalog stock photo, not the unit" /> : <div aria-hidden="true">▯</div>}<span>Stock photo</span></div>
         </div>
         <label className="receive-title-field">Item title
           <textarea rows={2} value={form.title} onChange={e => update('title', e.target.value)} />
