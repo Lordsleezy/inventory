@@ -106,10 +106,10 @@ test("unpaid BIN with no listing soldQuantity is not a Floor sale", () => {
   assert.equal(tradingOrderIsSale(order, { 11150: 0 }), false);
 });
 
-test("sandbox soldQuantity is enough to ingest when Fulfillment is empty", () => {
+test("soldQuantity cannot turn an unpaid order into a sale", () => {
   const [order] = parseTradingOrders(sandboxSoldUnpaidXml);
   assert.equal(tradingOrderIsSale(order, {}), false);
-  assert.equal(tradingOrderIsSale(order, { 11155: 1 }), true);
+  assert.equal(tradingOrderIsSale(order, { 11155: 1 }), false);
   assert.equal(tradingOrderToIngest(order).orderId, "110590746616-10000013654610");
   assert.equal(tradingOrderToIngest(order).pricingSummary.total.value, "199.0");
 });

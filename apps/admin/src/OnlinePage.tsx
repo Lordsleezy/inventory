@@ -2,6 +2,7 @@
 import { ListingIssuesPanel } from './ChannelCheckboxes';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { OnlineChannel, OnlineTab } from './navigation';
+import { InventoryItemDialog } from './InventoryItemDialog';
 import { errText } from './errText';
 
 type Row = {
@@ -64,6 +65,7 @@ type ReportPeriod =
 
 type Props = {
   client: SupabaseClient;
+  storeId: string; accessToken: string;
   money: (n: number) => string;
   tab: OnlineTab;
   onTab: (t: OnlineTab) => void;
@@ -121,8 +123,9 @@ function currentPtPeriod(): ReportPeriod {
 }
 
 export function OnlinePage({
-  client, money, tab, onTab, channel, onChannel, onInventory,
+  client, storeId, accessToken, money, tab, onTab, channel, onChannel, onInventory,
 }: Props) {
+  const [detailSku, setDetailSku] = useState<string | null>(null);
   const [board, setBoard] = useState<Board | null>(null);
   const [report, setReport] = useState<OnlineReport | null>(null);
   const [channelCounts, setChannelCounts] = useState<ChannelCounts>({});
@@ -203,7 +206,7 @@ export function OnlinePage({
   const readyCount = unitCount(board?.ready);
   const notReadyCount = unitCount(board?.not_ready);
   const mscCount = unitCount(board?.msc);
-  const soldCount = unitCount(board?.sold);
+  const soldCount = unitCount((board?.sold || []).filter(r => channel === 'all' || r.sold_channel === channel));
 
   const counts = {
     inventory: board?.inventory_total || 0,
@@ -239,10 +242,10 @@ export function OnlinePage({
     if (tab === 'listed') return listedForChannel.filter(match);
     if (tab === 'ready') return (board?.ready || []).filter(match);
     if (tab === 'not-ready') return (board?.not_ready || []).filter(match);
-    if (tab === 'sold') return (board?.sold || []).filter(match);
+    if (tab === 'sold') return (board?.sold || []).filter(r => (channel === 'all' || r.sold_channel === channel) && match(r));
     if (tab === 'reports') return [];
     return (board?.msc || []).filter(match);
-  }, [board, tab, listedForChannel, query]);
+  }, [board, tab, channel, listedForChannel, query]);
 
   const platformRows = useMemo(() => {
     const fromApi = report?.by_platform || [];
@@ -476,7 +479,7 @@ export function OnlinePage({
             {filtered.map(r => (
               <div className="ticket" key={`${r.sku}-${r.is_lot ? 'lot' : 'unit'}-${r.sold_at || ''}-${r.order_no || ''}`}>
                 <div className="ticket-top">
-                  <strong>{r.title}{r.qty && r.qty > 1 ? ` (×${r.qty})` : ''}{r.needs_sku ? <small className="ticket-profit"> · needs SKU</small> : null}</strong>
+                  <button type="button" className="text-button" disabled={!r.sku || r.needs_sku} onClick={() => setDetailSku(r.sku)}><strong>{r.title}{r.qty && r.qty > 1 ? ` (×${r.qty})` : ''}{r.needs_sku ? <small className="ticket-profit"> · needs SKU</small> : null}</strong></button>
                   <span>
                     {skuLabel(r)}
                     {tab === 'sold'
@@ -509,5 +512,6 @@ export function OnlinePage({
           </div>}
       </section>
     )}
+    {detailSku && <InventoryItemDialog client={client} storeId={storeId} accessToken={accessToken} sku={detailSku} onClose={() => setDetailSku(null)} />}
   </>;
 }

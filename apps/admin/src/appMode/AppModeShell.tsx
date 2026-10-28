@@ -320,12 +320,15 @@ export function AppModeShell({
         )}
 
         {fullAccess && channel && (
+          <div hidden={!!itemSku}>
           <AppChannel
             channel={channel}
             accessToken={session.access_token}
             money={money}
+            onOpenItem={sku => { setItemMissing([]); history.pushState({ floorApp: 1, sku }, ""); setItemSku(sku); }}
             onBack={() => setChannel(null)}
           />
+          </div>
         )}
 
         {fullAccess && morePage === 'sales' && (

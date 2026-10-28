@@ -106,9 +106,10 @@ type Props = {
   accessToken: string;
   money: (n: number) => string;
   onBack: () => void;
+  onOpenItem: (sku: string) => void;
 };
 
-export function AppChannel({ channel, accessToken, money, onBack }: Props) {
+export function AppChannel({ channel, accessToken, money, onBack, onOpenItem }: Props) {
   const cached = useMemo(() => readBoardCache(channel), [channel]);
   const [tab, setTab] = useState<Tab>('listed');
   const [query, setQuery] = useState('');
@@ -311,7 +312,7 @@ export function AppChannel({ channel, accessToken, money, onBack }: Props) {
               type="button"
               className="app-row"
               onClick={() => {
-                if (!selecting) return;
+                if (!selecting) { if (row.sku) onOpenItem(row.sku); return; }
                 setSelected((prev) => {
                   const next = new Set(prev);
                   if (next.has(key)) next.delete(key); else next.add(key);

@@ -36,13 +36,14 @@ type Props = {
   amazonQueue?: ReactNode;
   /** Needed for the Depop sale form. */
   client?: SupabaseClient;
+  storeId?: string;
 };
 
-export function ChannelListingPage({ channel, accessToken, money, amazonQueue, client }: Props) {
+export function ChannelListingPage({ channel, accessToken, money, amazonQueue, client, storeId }: Props) {
   if (channel !== 'depop') {
     return (
       <>
-        <MarketplaceBoard channel={channel as BoardChannel} accessToken={accessToken} money={money} />
+        <MarketplaceBoard client={client} storeId={storeId} channel={channel as BoardChannel} accessToken={accessToken} money={money} />
         {channel === 'amazon' && amazonQueue ? (
           <details className="mboard-more">
             <summary>Amazon create queue and catalog tools</summary>

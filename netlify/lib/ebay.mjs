@@ -1,3 +1,4 @@
+import { ebayOrderState, readEbayOrderPages } from './ebay-order-state.mjs';
 import { createHash } from "node:crypto";
 import { assertBundlePush, bundleMainSku } from "./bundle-gate.mjs";
 import { requireEnv, serviceClient } from "./server.mjs";
@@ -1220,6 +1221,10 @@ export async function ingestEbayOrder(storeId, order) {
     .maybeSingle();
   if (paidDup.data) return { skipped: true, sku, orderId, reason: "web_order_exists" };
 
+  if (order.orderPaymentStatus && !ebayOrderState(order).paid) return { skipped: true, orderId, reason: "not_a_paid_live_order" };
+  const previous = await sb.from("sales").select("id").eq("store_id", storeId).eq("channel", "ebay").eq("payment_id", `ebay:${orderId}`).limit(1);
+  if (previous.error) throw new Error(previous.error.message);
+  if (previous.data?.length) return { skipped: true, orderId, reason: "sale_history_exists" };
   const amounts = ebayOrderAmounts(order);
   const itemCents = amounts.itemCents || orderCents(order) || 0;
   const ship = ebayShipTo(order);
@@ -1413,7 +1418,7 @@ function fulfillmentOrdersPath() {
   const days = Math.max(1, Number(process.env.EBAY_ORDERS_LOOKBACK_DAYS) || 90);
   const start = new Date(end.getTime() - days * 24 * 3600 * 1000);
   const iso = (d) => d.toISOString().replace(/\.\d{3}Z$/, ".000Z");
-  const filter = encodeURIComponent(`creationdate:[${iso(start)}..${iso(end)}]`);
+  const filter = encodeURIComponent(`lastmodifieddate:[${iso(start)}..${iso(end)}]`);
   return `/sell/fulfillment/v1/order?limit=50&filter=${filter}`;
 }
 
@@ -1504,80 +1509,18 @@ async function ingestFrom(storeId, order, source, bag) {
  * Unpaid / reversed cancels are stored as status=canceled (not refunded) so Admin groups them
  * under Cancelled rather than implying a kept seller payout that was then refunded.
  */
-export async function reconcileCanceledEbayOrders(storeId, hint = {}) {
+export async function reconcileCanceledEbayOrders(storeId, hint = {}, orders = null) {
   const sb = serviceClient();
-  const json = await ebayFetch(storeId, "GET", fulfillmentOrdersPath(), undefined, hint);
+  const rows = orders || await readEbayOrderPages(
+    path => ebayFetch(storeId, "GET", path, undefined, hint), fulfillmentOrdersPath());
   const out = [];
-  for (const order of json?.orders ?? []) {
-    const orderId = order?.orderId;
-    if (!orderId) continue;
-    const cancelState = String(order?.cancelStatus?.cancelState || "");
-    const pay = String(order?.orderPaymentStatus || "");
-    const canceled =
-      /CANCELED|CANCELLED/i.test(cancelState) ||
-      /FULLY_REFUNDED/i.test(pay);
-    if (!canceled) continue;
-
-    const paymentDate = order?.paymentSummary?.payments?.[0]?.paymentDate || null;
-    const amountPaid = (order?.paymentSummary?.payments || []).reduce(
-      (n, p) => n + Number(p?.amount?.value || 0),
-      0,
-    );
-    // Managed payments often reverse before seller settlement — show as canceled, not refunded.
-    const status = "canceled";
-    const reason = /FULLY_REFUNDED/i.test(pay)
-      ? "eBay FULLY_REFUNDED / CancelClosed — funds reversed; treat as canceled"
-      : `eBay cancelState=${cancelState}`;
-
-    const { data: wo } = await sb
-      .from("web_orders")
-      .select("id,status,sale_id")
-      .eq("store_id", storeId)
-      .eq("channel", "ebay")
-      .eq("order_no", String(orderId))
-      .maybeSingle();
-    if (!wo || wo.status === "canceled" || wo.status === "refunded") {
-      out.push({ orderId, skipped: true, status: wo?.status || "missing" });
-      continue;
-    }
-    await sb
-      .from("web_orders")
-      .update({
-        status,
-        canceled_at: new Date().toISOString(),
-        cancel_source: "ebay_api",
-        cancel_reason: reason.slice(0, 500),
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", wo.id);
-    if (wo.sale_id) {
-      await sb
-        .from("sales")
-        .update({
-          voided_at: new Date().toISOString(),
-          void_reason: reason.slice(0, 200),
-        })
-        .eq("id", wo.sale_id)
-        .is("voided_at", null);
-    } else {
-      await sb
-        .from("sales")
-        .update({
-          voided_at: new Date().toISOString(),
-          void_reason: reason.slice(0, 200),
-        })
-        .eq("store_id", storeId)
-        .eq("payment_id", `ebay:${orderId}`)
-        .is("voided_at", null);
-    }
-    out.push({
-      orderId,
-      status,
-      paymentDate,
-      amountPaid,
-      cancelState,
-      pay,
+  for (const order of rows) {
+    if (!order?.orderId || !ebayOrderState(order).reversed) continue;
+    const { data, error } = await sb.rpc("floor_reconcile_ebay_reversal", {
+      p_store: storeId, p_order: String(order.orderId), p_evidence: order,
     });
+    if (error) throw new Error(error.message);
+    out.push({ orderId: order.orderId, ...data });
   }
   return out;
 }
@@ -1637,25 +1580,26 @@ export async function pollEbayOrders(storeId, accountHint = {}) {
   const account = accountHint._account || (await resolveEbayAccount(storeId, accountHint));
   const hint = { _account: account, accountId: account.id };
   const bag = { results: [], skus: new Set(), orders: new Set(), skuByItemId: new Map() };
+  let fulfillmentOrders = null;
   try {
     bag.skuByItemId = await listingSkuByItemId(storeId);
   } catch {
     bag.skuByItemId = new Map();
   }
   try {
-    const json = await ebayFetch(storeId, "GET", fulfillmentOrdersPath(), undefined, hint);
-    for (const order of json?.orders ?? []) {
+    fulfillmentOrders = await readEbayOrderPages(path => ebayFetch(storeId, "GET", path, undefined, hint), fulfillmentOrdersPath());
+    for (const order of fulfillmentOrders) {
       // Do not ingest already-canceled / fully-refunded orders as new paid sales.
       const cancelState = String(order?.cancelStatus?.cancelState || "");
       const pay = String(order?.orderPaymentStatus || "");
-      if (/CANCELED|CANCELLED/i.test(cancelState) || /FULLY_REFUNDED/i.test(pay)) {
+      if (!ebayOrderState(order).paid) {
         bag.results.push({
           orderId: order?.orderId,
           source: "fulfillment",
           accountId: account.id,
           username: account.username,
           skipped: true,
-          reason: "canceled_or_refunded",
+          reason: "not_a_paid_live_order",
         });
         continue;
       }
@@ -1663,7 +1607,7 @@ export async function pollEbayOrders(storeId, accountHint = {}) {
     }
     // Same response: orders eBay already shipped move to Shipped in Floor on their own.
     try {
-      const moved = await syncEbayShipments(storeId, json?.orders ?? [], hint);
+      const moved = await syncEbayShipments(storeId, fulfillmentOrders, hint);
       if (moved.length) bag.results.push({ source: "shipment_sync", accountId: account.id, shipped: moved });
     } catch (err) {
       bag.results.push({ source: "shipment_sync", accountId: account.id, error: err instanceof Error ? err.message : String(err) });
@@ -1677,7 +1621,7 @@ export async function pollEbayOrders(storeId, accountHint = {}) {
     });
   }
   try {
-    const reconciled = await reconcileCanceledEbayOrders(storeId, hint);
+    const reconciled = await reconcileCanceledEbayOrders(storeId, hint, fulfillmentOrders);
     if (reconciled.length) bag.results.push({ source: "cancel_reconcile", accountId: account.id, reconciled });
   } catch (err) {
     bag.results.push({
@@ -1687,24 +1631,12 @@ export async function pollEbayOrders(storeId, accountHint = {}) {
     });
   }
 
-  let soldQty = {};
-  let extras = [];
-  const maxOfferChecks = Number.isFinite(Number(accountHint.maxOfferChecks)) ? Number(accountHint.maxOfferChecks) : 8;
-  if (accountHint.soldScan !== false && accountAllowsListing(account)) {
-    try {
-      const listed = await listedSoldBySku(storeId, { maxOfferChecks });
-      soldQty = listed.soldQty;
-      extras = listed.extras;
-    } catch (err) {
-      bag.results.push({ source: "sold_quantity", error: err instanceof Error ? err.message : String(err) });
-    }
-  }
-
+  const reversedIds = new Set((fulfillmentOrders || []).filter(o => ebayOrderState(o).reversed).map(o => String(o.orderId)));
   try {
     const trading = await getSellerOrders(await userTokenForAccount(account));
     for (const order of trading) {
       const withSku = attachListingSku(order, bag.skuByItemId);
-      if (!tradingOrderIsSale(withSku, soldQty)) continue;
+      if (reversedIds.has(String(withSku.orderId)) || !tradingOrderIsSale(withSku)) continue;
       await ingestFrom(storeId, tradingOrderToIngest(withSku), "trading", bag);
     }
   } catch (err) {
@@ -1714,19 +1646,6 @@ export async function pollEbayOrders(storeId, accountHint = {}) {
       username: account.username,
       error: err instanceof Error ? err.message : String(err),
     });
-  }
-
-  for (const row of extras) {
-    await ingestFrom(
-      storeId,
-      {
-        orderId: `ebay-sold:${row.listingId || row.sku}`,
-        lineItems: [{ sku: row.sku, total: { value: String(row.price) } }],
-        pricingSummary: { total: { value: String(row.price) } },
-      },
-      "sold_quantity",
-      bag,
-    );
   }
 
   const sb = serviceClient();

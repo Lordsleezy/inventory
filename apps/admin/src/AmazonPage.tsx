@@ -44,6 +44,7 @@ type AddResult = {
 
 type Props = {
   client: SupabaseClient;
+  storeId?: string;
   accessToken: string;
   money: (n: number) => string;
 };
@@ -150,7 +151,7 @@ async function amazonListCall(token: string, body: Record<string, unknown>) {
   return json;
 }
 
-export function AmazonPage({ client, accessToken, money: moneyFmt }: Props) {
+export function AmazonPage({ client, storeId, accessToken, money: moneyFmt }: Props) {
   const [rows, setRows] = useState<Row[]>([]);
   const [skuDraft, setSkuDraft] = useState('');
   const [upcDraft, setUpcDraft] = useState('');
@@ -944,6 +945,8 @@ export function AmazonPage({ client, accessToken, money: moneyFmt }: Props) {
 
   return (
     <ChannelListingPage
+      client={client}
+      storeId={storeId}
       channel="amazon"
       accessToken={accessToken}
       money={moneyFmt}

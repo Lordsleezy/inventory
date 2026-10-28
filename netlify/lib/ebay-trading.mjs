@@ -135,7 +135,7 @@ export function tradingOrderIsSale(order, soldQtyBySku = {}) {
     Boolean(order.paidTime) ||
     /^complete$/i.test(String(order.checkoutStatus || ""));
   if (paid) return true;
-  return Number(soldQtyBySku[order.sku] || 0) >= 1;
+  return false; // A sold-quantity counter is not proof of payment.
 }
 
 export function tradingOrderToIngest(order) {
