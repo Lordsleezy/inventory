@@ -876,3 +876,38 @@ html.dark .aspect-list{background:#1c2129;color:#e8eef4;border-color:#354050}htm
 .withdrawal-counted{margin-top:10px;display:grid;gap:6px;color:#5d6b7a}
 .withdrawal-counted form{display:flex;flex-wrap:wrap;gap:8px;align-items:end}
 .link-button{background:none;border:0;color:#2f6f9f;padding:0;cursor:pointer;text-align:left;font:inherit}
+/* Money tab */
+.money-page{display:grid;gap:14px;max-width:1100px;margin:0 auto;padding:4px 0 40px}
+.money-head h1{margin:0 0 6px}.money-total-label{font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;opacity:.65}
+.money-total{font-size:2.1rem;font-weight:750;font-variant-numeric:tabular-nums}
+.money-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:14px;align-items:start}
+.money-card{border:1px solid rgba(127,140,155,.28);border-radius:16px;padding:14px;display:grid;gap:10px;background:rgba(127,140,155,.07)}
+.money-card-top{display:flex;align-items:center;gap:10px}.money-name{flex:1;font-size:1.05rem}.money-balance{font-size:1.6rem;font-weight:750;font-variant-numeric:tabular-nums}
+.money-sync,.money-floor{margin:0;font-size:.78rem;opacity:.8}.money-floor{opacity:.65}
+.money-buttons{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.money-buttons button{min-height:44px;border-radius:12px;border:1px solid;font-weight:650;cursor:pointer;background:transparent}
+.money-add{color:#2fbf71;border-color:rgba(47,191,113,.55);background:rgba(47,191,113,.12)!important}.money-take{color:#f0a13a;border-color:rgba(240,161,58,.55);background:rgba(240,161,58,.12)!important}
+.money-activity{display:grid;border-top:1px solid rgba(127,140,155,.25)}
+.money-line{display:flex;justify-content:space-between;align-items:center;gap:12px;width:100%;text-align:left;background:none;border:0;border-bottom:1px solid rgba(127,140,155,.18);padding:10px 2px;color:inherit;font:inherit;cursor:pointer}
+.money-line>div{display:grid;gap:2px;min-width:0}.money-line small{opacity:.65;overflow:hidden;text-overflow:ellipsis}.money-line-title{font-weight:600}
+.money-in{color:#2fbf71;font-variant-numeric:tabular-nums}.money-out{color:#f0a13a;font-variant-numeric:tabular-nums}
+.money-marker{cursor:default;opacity:.8}.money-auto{margin-left:8px;font-size:.68rem;font-style:normal;padding:1px 6px;border-radius:6px;background:rgba(100,150,255,.18)}
+.money-sale-lines{display:grid;gap:4px;padding:6px 8px 10px;font-size:.82rem}.money-sale-lines div{display:flex;justify-content:space-between;opacity:.8}
+.money-link{background:none;border:0;padding:0;color:#4d9bff;cursor:pointer;font:inherit}.money-all{justify-self:center;padding:6px}
+.money-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:flex-end;justify-content:center;z-index:60}
+.money-sheet{width:100%;max-width:520px;max-height:92vh;overflow:auto;background:#151b23;color:#e8eef4;border-radius:22px 22px 0 0;padding:14px 18px 22px;display:grid;gap:12px}
+.money-sheet-head{display:flex;justify-content:space-between;align-items:center}.money-sheet-head h2{margin:0}
+.money-x{background:none;border:0;color:inherit;font-size:1.6rem;cursor:pointer}.money-grab{width:44px;height:4px;border-radius:4px;background:rgba(255,255,255,.25);margin:0 auto}
+.money-toggle{display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:4px;border-radius:14px;background:rgba(255,255,255,.06)}
+.money-toggle button{min-height:42px;border:0;border-radius:10px;background:transparent;color:inherit;font-weight:650;cursor:pointer}
+.money-toggle .on.in{background:rgba(47,191,113,.22);color:#2fbf71}.money-toggle .on.out{background:rgba(240,161,58,.22);color:#f0a13a}
+.money-amount-label{text-align:center;font-size:.8rem;opacity:.9}.money-amount{display:flex;justify-content:center;align-items:center;gap:4px;font-size:2.6rem;font-weight:750;font-family:ui-monospace,Consolas,monospace}
+.money-amount.in{color:#2fbf71}.money-amount.out{color:#f0a13a}.money-amount input{font:inherit;color:inherit;background:transparent;border:0;width:7ch;text-align:left;outline:none}
+.money-after{text-align:center;font-size:.8rem;opacity:.7}.money-reason-label{font-size:.8rem;opacity:.75}
+.money-chips{display:flex;flex-wrap:wrap;gap:8px}.money-chips button{min-height:38px;padding:0 14px;border-radius:999px;border:1px solid rgba(255,255,255,.2);background:transparent;color:inherit;cursor:pointer}
+.money-chips button.on{border-color:#2fbf71;background:rgba(47,191,113,.16)}.money-chip-note{font-size:.75rem;opacity:.7}
+.money-move label{display:grid;gap:5px;font-size:.8rem}.money-move input:not([type=number]){font:inherit;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.18);background:rgba(0,0,0,.25);color:inherit}
+.money-meta{display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:.8rem;opacity:.9}.money-when{display:flex!important;align-items:center;gap:8px}
+.money-go{min-height:52px;border:0;border-radius:14px;font-size:1.05rem;font-weight:750;cursor:pointer;color:#06210f;background:#2fbf71}.money-go.out{background:#f0a13a;color:#2a1700}
+.money-edit-actions{display:flex;gap:10px}.money-history{display:grid;gap:4px;font-size:.8rem;opacity:.85}
+@media(min-width:760px){.money-backdrop{align-items:center}.money-sheet{border-radius:20px}.money-grab{display:none}}

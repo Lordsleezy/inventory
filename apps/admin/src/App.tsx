@@ -5,7 +5,7 @@ import { InventoryPage } from './InventoryPage';
 import { OrdersPage } from './OrdersPage';
 import { ReceiptsPage } from './ReceiptsPage';
 import { RegisterPage } from './RegisterPage';
-import { WithdrawalsPage } from './WithdrawalsPage';
+import { MoneyPage } from './MoneyPage';
 import { BooksPage } from './BooksPage';
 import './books.css';
 import { ManifestsPage } from './ManifestsPage';
@@ -771,7 +771,7 @@ export function App() {
     depop: 'Depop',
     reports: 'Reports',
     books: 'Books',
-    withdrawals: 'Withdrawals',
+    withdrawals: 'Money',
     manifests: 'Manifests',
     locations: 'Locations',
     insights: 'Insights',
@@ -849,7 +849,7 @@ export function App() {
           {reportSubs.map(([tab, label]) => <button type="button" key={tab} className={page === 'reports' && nav.reportTab === tab ? 'active' : ''} onClick={() => goNav({ page: 'reports', reportTab: tab })}>{label}</button>)}
         </div>
       </div>
-      <button type="button" title="Withdrawals" className={page === 'withdrawals' ? 'active' : ''} onClick={() => goNav({ page: 'withdrawals' })}>Withdrawals</button>
+      <button type="button" title="Money" className={page === 'withdrawals' ? 'active' : ''} onClick={() => goNav({ page: 'withdrawals' })}>Money</button>
       <button type="button" title="Books" className={page === 'books' ? 'active' : ''} onClick={() => goNav({ page: 'books' })}>Books</button>
       <button type="button" title="Manifests" className={page === 'manifests' ? 'active' : ''} onClick={() => goNav({ page: 'manifests' })}>Manifests</button>
       <button type="button" title="Locations" className={page === 'locations' ? 'active' : ''} onClick={() => goNav({ page: 'locations' })}>Locations</button>
@@ -963,7 +963,7 @@ export function App() {
   {fullAccess && page === 'logs' && <LogsPage accessToken={session.access_token} stamp={stamp} />}
   {(fullAccess || registerOnly) && page === 'inventory' && <InventoryPage client={sb} storeId={store} accessToken={session.access_token} money={money} stamp={stamp} tab={nav.inventoryTab} onTab={t => go({ inventoryTab: t })} attentionSection={nav.attentionSection} onAttentionSection={s => go({ attentionSection: s, inventoryTab: 'unfinished' })} canDelete={fullAccess} associateBrowseOnly={registerOnly} onCostChanged={() => { void loadPayoutSales(); void loadSales(); }} />}
   {fullAccess && page === 'reports' && <ReportsPage client={sb} money={money} tab={nav.reportTab} onTab={t => go({ reportTab: t })} closeouts={closeouts} expenses={<ExpensesPage client={sb} money={money} expenses={expenses} staff={staff} ownerId={onlineCfg.employeeId || defaultReimbursementId} onChanged={loadCommon} embedded />} payouts={<PayoutsPage allSales={allSales} ebayFees={ebayFees} staff={staff} rules={activeRules} payments={payments} adjustments={payoutAdjustments} expenses={expenses} frozen={frozen} cfg={onlineCfg} personName={personName} busy={busy} recordPayment={recordPayment} onCommissionChanged={setTicketOverride} />} />}
-  {fullAccess && page === 'withdrawals' && <WithdrawalsPage client={sb} storeId={store} money={money} stamp={stamp} />}
+  {fullAccess && page === 'withdrawals' && <MoneyPage client={sb} storeId={store} accessToken={session.access_token} money={money} stamp={stamp} />}
   {fullAccess && page === 'books' && <BooksPage client={sb} money={money} />}
   {fullAccess && page === 'manifests' && <ManifestsPage client={sb} storeId={store} money={money} />}
   {fullAccess && page === 'locations' && <LocationsPage client={sb} storeId={store} />}

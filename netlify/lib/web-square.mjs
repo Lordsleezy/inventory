@@ -21,6 +21,12 @@ export function webSquareConfig(storeId, env = webSquareEnv()) {
   return { application_id: applicationId, location_id: process.env[names[1]].trim(), sandbox: env !== "production", env: env === "production" ? "production" : "sandbox" };
 }
 
+/** The website checkout's Square token + location, for read-only API calls (payouts, payments). */
+export function webSquareAccess(storeId, env = webSquareEnv()) {
+  const cfg = webSquareConfig(storeId, env);
+  return { accessToken: process.env[NAMES[cfg.env][2]].trim(), locationId: cfg.location_id, sandbox: cfg.sandbox };
+}
+
 export function webSquareClient(storeId, env = webSquareEnv()) {
   const cfg = webSquareConfig(storeId, env);
   const token = process.env[NAMES[cfg.env][2]].trim();
