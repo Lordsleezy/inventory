@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { InventoryItemDialog } from './InventoryItemDialog';
 import { floorFunctionUrl } from './floorApi';
 import { errText } from './errText';
 import { shortError } from './appMode/shortError';
@@ -77,6 +79,7 @@ type Job = {
 };
 
 type Props = {
+  client?: SupabaseClient; storeId?: string;
   channel: BoardChannel;
   accessToken: string;
   money: (n: number) => string;
@@ -221,7 +224,8 @@ function downloadCsv(name: string, rows: string[][]) {
   URL.revokeObjectURL(url);
 }
 
-export function MarketplaceBoard({ channel, accessToken, money }: Props) {
+export function MarketplaceBoard({ channel, accessToken, money, client, storeId }: Props) {
+  const [detailSku, setDetailSku] = useState<string | null>(null);
   const meta = NAMES[channel];
   const cached = useMemo(() => readBoardCache(channel), [channel]);
   const [tab, setTab] = useState<Tab>('listed');
@@ -827,11 +831,13 @@ export function MarketplaceBoard({ channel, accessToken, money }: Props) {
               const catalog = 'live' in row ? row as CatalogRow : null;
               const sale = 'sale_id' in row ? row as SoldRow : null;
               return (
-                <div className={`mboard-row${catalog?.blocked ? ' is-blocked' : ''}`} key={row.key}>
+                <div className={`mboard-row${catalog?.blocked ? ' is-blocked' : ''}`} key={row.key} onClick={event => {
+                  if (!(event.target as HTMLElement).closest('button, input, label, a') && row.sku && client && storeId) setDetailSku(row.sku);
+                }}>
                   <label className="mboard-check"><input type="checkbox" checked={selected.has(row.key)} onChange={() => toggleKey(row.key)} aria-label={`Select ${row.sku || row.title}`} /></label>
                   <div className="mboard-photo">{row.photo_url ? <img src={row.photo_url} alt="" loading="lazy" decoding="async" /> : <span>No photo</span>}</div>
                   <div className="mboard-item">
-                    <strong>{row.title}</strong>
+                    {row.sku && client && storeId ? <button type="button" className="text-button" onClick={() => setDetailSku(row.sku)}><strong>{row.title}</strong></button> : <strong>{row.title}</strong>}
                     <small>
                       {catalog && <>SKU {catalog.sku || '—'}{catalog.condition ? ` · ${catalog.condition}` : ''}{catalog.listed_at ? ` · listed ${stamp(catalog.listed_at)}` : ''}</>}
                       {sale && <>SKU {sale.sku || '—'}{sale.order_no ? ` · Order ${sale.order_no}` : ''}{sale.sold_at ? ` · ${stamp(sale.sold_at, true)}` : ''}</>}
@@ -875,6 +881,7 @@ export function MarketplaceBoard({ channel, accessToken, money }: Props) {
         )}
       </section>
 
+      {detailSku && client && storeId && <InventoryItemDialog client={client} storeId={storeId} accessToken={accessToken} sku={detailSku} onClose={() => setDetailSku(null)} />}
       {edit && (
         <div className="mboard-modal">
           <div className="mboard-modal-card">

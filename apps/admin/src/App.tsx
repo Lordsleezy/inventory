@@ -954,11 +954,11 @@ export function App() {
   })()}
   {fullAccess && page === 'orders' && store && <OrdersPage client={sb} accessToken={session.access_token} storeId={store} money={money} stamp={stamp} rules={activeRules} cfg={onlineCfg} commissionOverrides={commissionOverrides} personName={personName} busy={busy} onCommissionChanged={setTicketOverride} />}
   {fullAccess && page === 'receipts' && <ReceiptsPage client={sb} money={money} stamp={stamp} />}
-  {fullAccess && page === 'online' && <OnlinePage client={sb} money={money} tab={nav.onlineTab} onTab={t => go({ onlineTab: t, page: 'online' })} channel={nav.onlineChannel} onChannel={c => go({ onlineChannel: c, onlineTab: 'listed', page: 'online' })} onInventory={() => goNav({ page: 'inventory', inventoryTab: 'in-stock' })} />}
+  {fullAccess && page === 'online' && <OnlinePage storeId={store} accessToken={session.access_token} client={sb} money={money} tab={nav.onlineTab} onTab={t => go({ onlineTab: t, page: 'online' })} channel={nav.onlineChannel} onChannel={c => go({ onlineChannel: c, onlineTab: 'listed', page: 'online' })} onInventory={() => goNav({ page: 'inventory', inventoryTab: 'in-stock' })} />}
   {fullAccess && page === 'marketplaces' && <ConnectionsPage accessToken={session.access_token} />}
-  {fullAccess && page === 'ebay' && <ChannelListingPage channel="ebay" accessToken={session.access_token} money={money} />}
-  {fullAccess && page === 'amazon' && <AmazonPage client={sb} accessToken={session.access_token} money={money} />}
-  {fullAccess && page === 'tiktok' && <ChannelListingPage channel="tiktok" accessToken={session.access_token} money={money} />}
+  {fullAccess && page === 'ebay' && <ChannelListingPage client={sb} storeId={store} channel="ebay" accessToken={session.access_token} money={money} />}
+  {fullAccess && page === 'amazon' && <AmazonPage storeId={store} client={sb} accessToken={session.access_token} money={money} />}
+  {fullAccess && page === 'tiktok' && <ChannelListingPage client={sb} storeId={store} channel="tiktok" accessToken={session.access_token} money={money} />}
   {fullAccess && page === 'depop' && <ChannelListingPage channel="depop" accessToken={session.access_token} money={money} client={sb} />}
   {fullAccess && page === 'logs' && <LogsPage accessToken={session.access_token} stamp={stamp} />}
   {(fullAccess || registerOnly) && page === 'inventory' && <InventoryPage client={sb} storeId={store} accessToken={session.access_token} money={money} stamp={stamp} tab={nav.inventoryTab} onTab={t => go({ inventoryTab: t })} attentionSection={nav.attentionSection} onAttentionSection={s => go({ attentionSection: s, inventoryTab: 'unfinished' })} canDelete={fullAccess} associateBrowseOnly={registerOnly} onCostChanged={() => { void loadPayoutSales(); void loadSales(); }} />}

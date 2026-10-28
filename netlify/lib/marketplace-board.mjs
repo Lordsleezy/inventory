@@ -1,3 +1,4 @@
+import { channelSaleHistory, activeChannelSales } from './channel-sale-history.mjs';
 /**
  * Marketplace board data + paced bulk jobs for eBay, Amazon, and TikTok.
  * Reads the same sale_ledger numbers as Reports. Writes go through the existing
@@ -498,8 +499,8 @@ function orderNumber(sale, channelOrder, webOrder) {
   return sale.receipt_no || "";
 }
 
-async function shapeSold(storeId, sales) {
-  const open = (sales || []).filter((row) => row.voided_at == null);
+async function shapeSold(storeId, sales, channel) {
+  const open = activeChannelSales(sales, channel);
   const skus = open.map((row) => row.sku).filter(Boolean);
   const ids = open.map((row) => row.id).filter((id) => id != null);
   const [units, photos, channelOrders, webOrders] = await Promise.all([
@@ -548,12 +549,12 @@ export async function loadQuarter(storeId, channel, quarterId) {
   const ch = channelOf(channel);
   const id = quarterId || currentQuarter().id;
   const bounds = quarterBounds(id);
-  const salesP = salesInQuarter(storeId, ch, bounds);
+  const salesP = salesInQuarter(storeId, ch, bounds).then(rows => channelSaleHistory(rows, ch));
   const [sales, seeds, insertion, sold] = await Promise.all([
     salesP,
     quarterSeeds(storeId, ch),
     ch === "ebay" ? insertionCents(storeId, bounds) : Promise.resolve(0),
-    salesP.then((rows) => shapeSold(storeId, rows)),
+    salesP.then((rows) => shapeSold(storeId, rows, ch)),
   ]);
   const quarters = collectQuarters(seeds.instants, seeds.dates);
   if (!quarters.some((quarter) => quarter.id === bounds.id)) quarters.unshift({ id: bounds.id, label: bounds.label, year: bounds.year, q: bounds.q });
