@@ -1,6 +1,9 @@
+import { ReceiveWorkStatus } from './ReceiveWorkStatus';
+import { scannerLifecycle } from './scannerLifecycle';
+import { commitReceive } from './receiveCommit';
 import { isDnsType } from './dns';
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
-import { ChannelPicker, applyChannelSelections, type ChannelId } from './ChannelCheckboxes';
+import { ChannelPicker, type ChannelId } from './ChannelCheckboxes';
 import { createPortal } from 'react-dom';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { isKioskShell, scannerInputMode } from './kiosk';
@@ -472,8 +475,8 @@ export async function decodeBarcodeFile(file: File): Promise<string | null> {
   if (!Ctor) return null;
   try {
     const bitmap = await createImageBitmap(file);
-    const codes = await new Ctor({ formats: FORMATS }).detect(bitmap);
-    return codes[0]?.rawValue || null;
+    try { const codes = await new Ctor({ formats: FORMATS }).detect(bitmap); return codes[0]?.rawValue || null; }
+    finally { bitmap.close(); }
   } catch { return null; }
 }
 
@@ -494,6 +497,9 @@ function CameraScanner({ onDetect, onFile, onClose }: {
     let stream: MediaStream | null = null;
     let timer = 0;
     let stopped = false;
+    const lifecycle = scannerLifecycle(document, window, video.current, () => {
+      stopped = true; window.clearInterval(timer); onClose();
+    });
     void (async () => {
       try {
         const Ctor = detectorCtor();
@@ -503,6 +509,7 @@ function CameraScanner({ onDetect, onFile, onClose }: {
           video: { facingMode: { ideal: 'environment' } },
           audio: false,
         });
+        if (!lifecycle.attach(stream)) return;
         if (stopped) { stream.getTracks().forEach(t => t.stop()); return; }
         const el = video.current;
         if (!el) return;
@@ -510,16 +517,18 @@ function CameraScanner({ onDetect, onFile, onClose }: {
         el.setAttribute('playsinline', 'true');
         el.muted = true;
         await el.play();
+        if (stopped || lifecycle.stopped) return;
         const detector = new Ctor({ formats: FORMATS });
         timer = window.setInterval(() => {
+          if (stopped || lifecycle.stopped) return;
           void detector.detect(el).then(codes => {
             const raw = codes[0]?.rawValue;
-            if (raw && !done.current) { done.current = true; detect.current(raw); }
+            if (raw && !stopped && !lifecycle.stopped && !done.current) { done.current = true; detect.current(raw); }
           }).catch(() => undefined);
         }, 250);
       } catch (e) { setErr(errText(e) || 'Camera unavailable. Use Take photo instead.'); }
     })();
-    return () => { stopped = true; window.clearInterval(timer); stream?.getTracks().forEach(t => t.stop()); };
+    return () => { stopped = true; window.clearInterval(timer); lifecycle.stop(); };
   }, []);
   // Portal to body — app-mode uses position:fixed + overflow which clips nested fixed modals on iOS.
   return createPortal(
@@ -576,7 +585,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   const [warning, setWarning] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const [backgroundStatus, setBackgroundStatus] = useState<Record<string, 'working'|'failed'>>({});
+  const receiveRequest = useRef(crypto.randomUUID());
+  const saveTappedAt = useRef(0);
   const [dups, setDups] = useState<Dups | null>(null);
   const [dupAck, setDupAck] = useState(false);
   const [dialog, setDialog] = useState<null | 'ready' | 'reason' | 'miss-photo'>(null);
@@ -669,8 +679,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   // Only keep the scan box focused when idle. Refocusing during form edit pops the
   // mobile keyboard every time the user scrolls (body briefly becomes activeElement).
   const focusUpc = () => {
-    if (manual || formOpen || modalOpen.current) return;
-    requestAnimationFrame(() => upcInput.current?.focus());
+    if (manual || formOpen || modalOpen.current || document.visibilityState !== 'visible') return;
+    requestAnimationFrame(() => { if (document.visibilityState === 'visible' && mounted.current) upcInput.current?.focus(); });
   };
   const update = (key: keyof Form, value: string) => {
     const dimensionField = ({length:'package_length_in',width:'package_width_in',height:'package_height_in',weight:'package_weight_lb',
@@ -740,14 +750,15 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     return () => { alive = false; };
   }, [client]);
 
-  async function stageUnitPhotos(nextFiles: File[], sku: string) {
+  async function stageUnitPhotos(nextFiles: File[]) {
     const started=performance.now();
-    if (!sku || !/^\d{5}$/.test(sku)) throw new Error('Next SKU is not ready. Refresh Receive and try again.');
+    const actor = JSON.parse(atob(accessToken.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).sub;
+    if (!actor) throw new Error('Sign in again before taking a photo.');
     const paths: string[] = [];
     try {
       for (const file of nextFiles) {
         const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, '_') || 'unit.jpg';
-        const path = `${storeId}/${sku}/${Date.now()}-${crypto.randomUUID()}-${safe}`;
+        const path = `${storeId}/receive/${actor}/${receiveRequest.current}/${Date.now()}-${crypto.randomUUID()}-${safe}`;
         const upload = await client.storage.from('unit-photos').upload(path, file, {
           contentType: file.type && file.type.startsWith('image/') ? file.type : 'image/jpeg', upsert: false,
         });
@@ -820,7 +831,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     setFiles([]);
     const oldPhotoPaths = stagedPhotoPaths.slice();
     setStagedPhotoPaths([]);
-    if (cleanupPhotos && oldPhotoPaths.length) void client.storage.from('unit-photos').remove(oldPhotoPaths);
+    if (cleanupPhotos) receiveRequest.current = crypto.randomUUID();
+    void oldPhotoPaths;
     void clearPendingPhotos(pendingPhotoKey(storeId, photoSessionKey.current));
     setDups(null);
     setDupAck(false);
@@ -1015,6 +1027,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
 
   /* ----- finish ----- */
   async function finish(event?: React.FormEvent) {
+    saveTappedAt.current = performance.now();
     event?.preventDefault();
     setError(''); setWarning(''); setSaved([]);
     if (!manual && !current) { setError('Scan a UPC first, or use Enter manually.'); return; }
@@ -1030,12 +1043,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     if (files.some(f => f.size < PHOTO_MIN_BYTES)) { setError('One of the photos looks empty or too small. Retake it.'); return; }
     const parsed = parse();
     if (!parsed) return;
-    // Duplicate check right before create (another device may have received it meanwhile).
-    if (!dupAck) {
-      const upc = (manual ? form.upc : current?.upc || '').trim();
-      const d = await findDups(upcVariants(upc, result));
-      if (d && d.count > 0) { setDups(d); setError(`You already have ${d.count} of these in stock. Tap "Add another unit" to confirm this is a new one.`); return; }
-    }
+    if (!dupAck && dups && dups.count > 0) { setError('Tap Add another unit to confirm this is a new physical item.'); return; }
     const gaps = missingFor(parsed);
     if (doNotList) {
       if (gaps.length) {
@@ -1070,17 +1078,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     try {
       const quantity = manual ? Number(form.quantity) : 1;
       if (!files.length) throw new Error('Take a photo of the actual unit before saving.');
-      const freshOptions = await client.rpc(staffMode ? 'staff_receive_options' : 'portal_receive_options');
-      if (freshOptions.error) throw freshOptions.error;
-      const nextSku = String((freshOptions.data as Options)?.next_sku || '');
-      setOptions(freshOptions.data as Options);
-      let unitPhotoPaths = stagedPhotoPaths;
-      if (!unitPhotoPaths.length || !unitPhotoPaths.every(path => path.startsWith(`${storeId}/${nextSku}/`))) {
-        const obsoletePhotoPaths = unitPhotoPaths;
-        unitPhotoPaths = await stageUnitPhotos(files, nextSku);
-        setStagedPhotoPaths(unitPhotoPaths);
-        if (obsoletePhotoPaths.length) await client.storage.from('unit-photos').remove(obsoletePhotoPaths);
-      }
+      const unitPhotoPaths = stagedPhotoPaths;
       if (!unitPhotoPaths.length) throw new Error('The unit photo did not finish uploading. Retry the photo.');
       const holdLabel = hold ? (HOLD_REASONS.find(([k]) => k === hold.reason)?.[1] || hold.reason) : '';
       const notes = [
@@ -1091,7 +1089,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       const brandValue = form.unbranded ? 'Unbranded' : form.brand.trim();
       // Scans and manual: title is always brand + item specifics (never catalog junk / digit codes).
       const titleValue = form.title.trim() || composeListingTitle(form.brand, form.model, form.unbranded);
-      const { data, error: e } = await client.rpc(staffMode ? 'staff_receive_unit' : 'portal_receive_unit', {
+      const fields = {
         p_quantity: quantity,
         p_brand: brandValue,
         p_model: form.model.trim(),
@@ -1101,7 +1099,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         p_condition: form.condition || null,
         p_test_status: form.testStatus || null,
         p_ask_cents: hold ? null : parsed.ask, // held units never get an ask; priced incomplete keeps ask
-        p_cost_cents: parsed.cost,
+        p_cost_cents: staffMode ? null : parsed.cost,
         p_notes: notes || null,
         p_upc: form.noUpc ? null : (form.upc.trim() || current?.upc || null),
         p_shippable: form.shippable || 'auto',
@@ -1109,33 +1107,23 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         p_width: parsed.dims[1],
         p_height: parsed.dims[2],
         p_weight: parsed.dims[3],
+      };
+      const enrichment = buildReceiveEnrichment(parsed, hold, doNotList);
+      const data = await commitReceive(client, storeId, {
+        p_request: receiveRequest.current, p_fields: fields, p_photos: unitPhotoPaths,
+        p_extras: { location: selectedLocation || null, manifest: staffMode ? null : manifestId || null,
+          dns: !staffMode && doNotShip, do_not_list: !staffMode && doNotList,
+          channels: staffMode ? [] : channels, enrichment },
       });
-      if (e) throw e;
-      const writeMs=performance.now()-receiveStarted;
-      const skus = (data as { skus: string[] }).skus;
+      const skus = data.skus as string[];
+      console.info('receive_save_timing', { commit_roundtrip_ms: Math.round(performance.now()-receiveStarted),
+        validation_ms: Math.round(receiveStarted-saveTappedAt.current), rpc_ms:data.client_rpc_ms, recovery_snapshot_ms:data.snapshot_ms,
+        server_ms: data.server_ms, server_steps:data.server_steps, tap_to_commit_ms: Math.round(performance.now()-saveTappedAt.current), sku: skus[0] });
+      try { sessionStorage.setItem('floor:last-receive-timing', JSON.stringify({ tappedAt: saveTappedAt.current, committedAt: performance.now(), server_ms: data.server_ms })); } catch { /* diagnostics cannot interrupt a saved item */ }
+      receiveRequest.current = crypto.randomUUID();
       void clearPendingPhotos(pendingPhotoKey(storeId, photoSessionKey.current));
-      const blocked = skus.includes(NEVER_LIST_SKU);
-      console.info('receive_save_timing',{write_ms:Math.round(writeMs),sku:skus[0],photo_upload_before_save:true});
-      setBackgroundStatus(prev=>({...prev,[skus[0]]:'working'}));
-      setWarning(`SKU ${skus[0]} saved. Listing details and channel work are finishing in the background.`);
-      void (async()=>{
-        const warnings:string[]=[];
-        try {
-          if(selectedLocation){const placed=await client.rpc('portal_move_location_stock',{p_sku:skus[0],p_to:selectedLocation,p_quantity:1,p_from:null});if(placed.error)warnings.push('Location did not save. Assign it from Inventory → No location.');}
-          if(manifestId&&!staffMode){const tagged=await client.rpc('portal_tag_manifest',{p_id:manifestId,p_skus:skus});if(tagged.error)warnings.push('Manifest tag failed. Use Manifests → Bulk tag to retry.');}
-          if(doNotShip)for(const sku of skus){const {error:dnsError}=await client.rpc('portal_set_unit_dns',{p_sku:sku,p_dns:true});if(dnsError)warnings.push(`SKU ${sku} DNS setting failed.`);}
-          const enrichFailed=await enrichUnits(skus,parsed,hold,blocked||doNotList);
-          if(enrichFailed)warnings.push(`Lookup details did not save on ${enrichFailed} unit(s).`);
-          if(!staffMode)for(const sku of skus){try{const response=await fetch(floorFunctionUrl('ebay-specifics'),{method:'POST',headers:{Authorization:`Bearer ${accessToken}`,'content-type':'application/json'},body:JSON.stringify({store_id:storeId,sku,action:'auto-fill'})});if(!response.ok)warnings.push(`SKU ${sku} needs category review; check Missing Category.`);}catch{warnings.push(`SKU ${sku} category auto-fill is pending; the scheduled sweep will retry.`);}}
-          if(!staffMode&&!blocked&&!doNotList&&!doNotShip&&!hold){for(const[index,sku]of skus.entries()){try{const response=await fetch(floorFunctionUrl('category-resolve'),{method:'POST',headers:{Authorization:`Bearer ${accessToken}`,'content-type':'application/json'},body:JSON.stringify({store_id:storeId,sku,network:index===0})});const body=await response.json();if(!response.ok||body.gaps?.length)warnings.push(`SKU ${sku} needs category review; open Missing Category.`);}catch{warnings.push(`SKU ${sku} category lookup is pending.`);}}if(channels.length)warnings.push(...await applyChannelSelections(client,skus,channels));}
-          if(!manual&&current?.upc){try{const response=await fetch(floorFunctionUrl('receive-photo-identify'),{method:'POST',headers:{Authorization:`Bearer ${accessToken}`,'content-type':'application/json'},body:JSON.stringify({action:'confirm',source:photoFill?'photo':'manual',upc:current.upc,skus,fields:{brand:brandValue,model:form.model,title:titleValue,category:form.category,description:form.description,aspects:{...(photoFill?.aspects||{}),...(form.variant.trim()?{Variant:form.variant.trim()}:{}),...(form.size.trim()?{Size:form.size.trim()}:{})},dimension_sources:dimensionSources,length_in:parsed.dims[0],width_in:parsed.dims[1],height_in:parsed.dims[2],weight_lb:parsed.dims[3],product_height_in:form.productHeight,product_width_in:form.productWidth,product_depth_in:form.productDepth,product_weight_lb:form.productWeight}})});if(!response.ok)warnings.push('UPC lookup details did not save for the next scan.');}catch{warnings.push('UPC lookup details did not save for the next scan.');}}
-          if(blocked)warnings.push(`SKU ${NEVER_LIST_SKU} is permanently do-not-list.`);else if(doNotList)warnings.push('Marked Do not list for sale.');else if(doNotShip)warnings.push('Saved under DNS — Do not ship.');
-        }catch(e){warnings.push(`Background work for SKU ${skus[0]} needs attention: ${errText(e)}`);}
-        setBackgroundStatus(prev=>{const next={...prev};if(warnings.length)next[skus[0]]='failed';else delete next[skus[0]];return next;});
-        if(warnings.length)setWarning(warnings.join(' '));
-      })();
 
-      // Remember product data for "Add another unit".
+      void fetch(floorFunctionUrl('receive-finish'), { method: 'POST', headers: { Authorization: `Bearer ${accessToken}` } }).catch(() => {});      // Remember product data for "Add another unit".
       const seed: Partial<Form> = {
         brand: brandValue, unbranded: form.unbranded, noUpc: form.noUpc,
         model: form.model, variant: form.variant, size: form.size,
@@ -1186,7 +1174,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   }
 
   /** Build listing_specs from the lookup (only real values) and merge into each new unit. */
-  async function enrichUnits(skus: string[], parsed: Parsed, hold: { reason: string; note: string } | null, forceHide: boolean): Promise<number> {
+  function buildReceiveEnrichment(parsed: Parsed, hold: { reason: string; note: string } | null, forceHide: boolean) {
     const specs: Record<string, unknown> = {};
     const put = (k: string, v: unknown) => {
       if (v == null || v === '' || (Array.isArray(v) && !v.length)) return;
@@ -1245,7 +1233,6 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     if (doNotShip) put('do_not_ship', true);
     if (hold) { put('hold_reason', hold.reason); put('hold_note', hold.note.trim()); }
     const hide = Boolean(hold) || forceHide || doNotList;
-    if (!Object.keys(specs).length && !hide) return 0;
 
     const patch = {
       specs, msrp: msrp, show: hide ? false : null,
@@ -1254,9 +1241,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       title: form.title.trim() || composeListingTitle(form.brand, form.model, form.unbranded),
       description: form.description.trim(),
     };
-    let failed = 0;
-    for (const sku of skus) { if (!(await enrichOne(sku, patch))) failed++; }
-    return failed;
+    return patch;
   }
 
   function packageSource(parsed: Parsed): string {
@@ -1267,40 +1252,6 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     const entered = parsed.dims;
     const matches = keys.every((k, i) => (m[k] == null ? entered[i] == null : Number(m[k]) === entered[i]));
     return matches ? cov : 'manual';
-  }
-
-  async function enrichOne(sku: string, p: {
-    specs: Record<string, unknown>; msrp: number | null; show: boolean | null;
-    brand: string; model: string; title: string; description: string;
-  }): Promise<boolean> {
-    // Preferred: RPC (units has no UPDATE policy for authenticated users).
-    const rpc = await client.rpc(staffMode ? 'staff_enrich_received_unit' : 'portal_enrich_received_unit', {
-      p_sku: sku, p_specs: p.specs, p_msrp_cents: p.msrp, p_show: p.show,
-      p_brand: p.brand || null, p_model: p.model || null, p_title: p.title || null, p_description: p.description || null,
-    });
-    if (!rpc.error) return true;
-    // Store staff may enrich only through the scoped RPC; the direct table update
-    // fallback is reserved for the portal's legacy admin path.
-    if (staffMode) return false;
-    // Fallback: direct update with client-side coalesce (only works if RLS allows it; verified via returned rows).
-    try {
-      const cur = await client.from('units').select('listing_specs, msrp_cents, brand, model, title, listing_body')
-        .eq('store_id', storeId).eq('sku', sku).maybeSingle();
-      if (cur.error || !cur.data) return false;
-      const row = cur.data as Record<string, unknown>;
-      const blankVal = (v: unknown) => typeof v !== 'string' || !v.trim();
-      const update: Record<string, unknown> = {
-        listing_specs: { ...((row.listing_specs as Record<string, unknown> | null) || {}), ...p.specs },
-      };
-      if (row.msrp_cents == null && p.msrp != null) update.msrp_cents = p.msrp;
-      if (blankVal(row.brand) && p.brand) update.brand = p.brand;
-      if (blankVal(row.model) && p.model) update.model = p.model;
-      if (blankVal(row.title) && p.title) update.title = p.title;
-      if (blankVal(row.listing_body) && p.description) update.listing_body = p.description;
-      if (p.show === false) update.show_on_website = false;
-      const upd = await client.from('units').update(update).eq('store_id', storeId).eq('sku', sku).select('sku');
-      return !upd.error && (upd.data?.length || 0) > 0;
-    } catch { return false; }
   }
 
   /** Duplicate banner button: this really is another physical unit. */
@@ -1354,14 +1305,18 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           : 'No photo was returned. Try Take photo again.');
         return;
       }
-      const staged = await stageUnitPhotos(copied, options?.next_sku || '');
+      const request = receiveRequest.current;
+      const upload = stageUnitPhotos(copied);
       setFiles(prev => {
         const next = [...prev, ...copied];
         void savePendingPhotos(pendingPhotoKey(storeId, photoSessionKey.current), next);
         return next;
       });
-      setStagedPhotoPaths(prev => [...prev, ...staged]);
+      const staged = await upload;
+      if (receiveRequest.current === request) setStagedPhotoPaths(prev => [...prev, ...staged]);
       if (rejected) setWarning(`${rejected} photo(s) looked empty or too large and were skipped.`);
+    } catch (e) {
+      setError(`Photo upload failed. Your photo is kept on this device. Retry the photo upload. ${errText(e)}`);
     } finally {
       setPhotoBusy(false);
     }
@@ -1440,14 +1395,13 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
             for (const [field, formKey] of eligible as [keyof typeof map, typeof map[keyof typeof map]][]) {
               if (dimensionTouched.current.has(formKey)) continue;
               if (values[field] != null) next[formKey] = String(values[field]);
-              else if (identity && data.dimensions?.warnings?.length) next[formKey] = '';
             }
             return next;
           });
           const acceptedSources = Object.fromEntries(eligible.filter(([field]) => sources[field]).map(([field]) => [field, sources[field]]));
           setDimensionSources(prev => ({...prev, ...acceptedSources, ...Object.fromEntries(Object.entries(prev)
             .filter(([, value]) => value === 'staff' || value.includes('staff reviewed')))}));
-          for (const [field] of eligible) if (values[field] != null && sources[field] !== 'Floor') resolved.add(field);
+          for (const [field] of eligible) if (values[field] != null) resolved.add(field);
           console.info('receive_dimensions_timing', { source, dims_ms: Math.round(performance.now() - started), fields: resolved.size });
           if (resolved.size === Object.keys(map).length) break;
         } catch (error) { notices.push(errText(error)); }
@@ -1481,8 +1435,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     setError('');
     try {
       setFiles([file]);
-      setStagedPhotoPaths(await stageUnitPhotos([file], options?.next_sku || ''));
       void savePendingPhotos(pendingPhotoKey(storeId, photoSessionKey.current), [file]);
+      setStagedPhotoPaths(await stageUnitPhotos([file]));
       const upload = await identificationJpeg(file);
       const compressedMs = performance.now() - photoStarted;
       const image_base64 = await fileToBase64(upload);
@@ -1556,9 +1510,9 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   return <section className={`panel receive-panel${appChrome ? ' receive-app' : ''}`}>
     {appChrome && (
       <div className="app-nav receive-app-nav">
-        <button type="button" onClick={() => { if(stagedPhotoPaths.length) void client.storage.from('unit-photos').remove(stagedPhotoPaths); onAppCancel?.(); }}>Cancel</button>
+        <button type="button" onClick={() => { onAppCancel?.(); }}>Cancel</button>
         <div className="app-nav-title">Receive · {options?.next_sku || '…'}</div>
-        <button type="button" disabled={busy || photoBusy || photoIdBusy || !files.length || !options?.next_sku} onClick={() => {
+        <button type="button" disabled={busy || photoBusy || photoIdBusy || !files.length || !stagedPhotoPaths.length} onClick={() => {
           const formEl = document.getElementById('receive-app-form') as HTMLFormElement | null;
           formEl?.requestSubmit();
         }}>Save</button>
@@ -1577,7 +1531,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
               // Do not steal focus while the unit form is open (scroll would re-open the keyboard).
               if (formOpen || manual || modalOpen.current) return;
               setTimeout(() => {
-                if (modalOpen.current || formOpen) return;
+                if (modalOpen.current || formOpen || document.visibilityState !== 'visible') return;
                 if (!document.activeElement || document.activeElement === document.body) upcInput.current?.focus();
               }, 0);
             }}
@@ -1622,9 +1576,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       <p>Write {saved.length === 1 ? 'this number' : 'these numbers'} on the unit{saved.length === 1 ? '' : 's'}. Ready for the next scan.</p>
       {last && <button type="button" className="secondary" onClick={addAnother}>Add another unit</button>}
     </div>}
-    {Object.entries(backgroundStatus).length > 0 && <div className="receive-background-status" role="status">
-      {Object.entries(backgroundStatus).map(([sku, status]) => <p key={sku}>SKU {sku}: {status === 'working' ? 'finishing listing details in background…' : 'background step failed; see the message above.'}</p>)}
-    </div>}
+    <ReceiveWorkStatus client={client} accessToken={accessToken} />
     {warning && <p className="hint">{warning}</p>}
     {error && <div className="alert" role="alert">{error}<button type="button" onClick={() => setError('')}>Dismiss</button></div>}
 
@@ -1707,7 +1659,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
             ['height','Height (in)','package_height_in'],['weight','Weight (lb)','package_weight_lb']] as const).map(([key,label,source]) =>
             <label key={key}>{label}<input type="number" min="0" step="any" inputMode="decimal" value={form[key]} onChange={e => { update(key, e.target.value); setDimensionSources(p => ({...p,[source]:'staff'})); }} />
               {form[key] && <small>{dimensionSources[source] || 'staff'}</small>}</label>)}</div></details>
-        {dimensionsError && <small className="receive-confirm-note">{dimensionsError}</small>}
+        {dimensionsError && ![form.length,form.width,form.height,form.weight,form.productHeight,form.productWidth,form.productDepth,form.productWeight].some(v => Number(v)>0) && <small className="receive-confirm-note">No size found. Measure on mat.</small>}
         <button type="button" className="secondary" onClick={() => setMatOpen(true)}>Measure on mat</button>
         {matOpen && <Suspense fallback={<p role="status">Opening measuring tools…</p>}><MeasureOnMat onClose={() => setMatOpen(false)} onApply={(value, target) => {
           for (const key of target === 'product' ? ['productDepth','productWidth','productHeight'] : ['length','width','height']) dimensionTouched.current.add(key);
@@ -1744,7 +1696,11 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           }} /></label><button type="button" className="text-button" onClick={() => { setSelectedLocation(''); setLocationScan(''); }}>Change</button></div>
           {selectedLocation && <small className="receive-last-location">Bay {receiveLocations.find(l => l.code === selectedLocation)?.bay_no} · same as last item</small>}
           {liveMissing.length > 0 && <small>Missing: {liveMissing.join(', ')} · saves to Unfinished</small>}
-          <button className="receive-save-next" type="submit" disabled={busy || photoBusy || photoIdBusy || !files.length || !options?.next_sku || (dups !== null && dups.count > 0 && !dupAck)}>{busy ? 'Saving…' : photoBusy || photoIdBusy ? 'Uploading photo…' : files.length ? 'Save & next' : '📷 Take a photo to save'}</button>
+          {files.length > 0 && !stagedPhotoPaths.length && !photoBusy && !photoIdBusy && <button type="button" className="secondary" onClick={() => {
+            setPhotoBusy(true); setError('');
+            void stageUnitPhotos(files).then(setStagedPhotoPaths).catch(e => setError(`Photo upload failed: ${errText(e)}`)).finally(() => setPhotoBusy(false));
+          }}>Retry photo upload</button>}
+          <button className="receive-save-next" type="submit" disabled={busy || photoBusy || photoIdBusy || !files.length || !stagedPhotoPaths.length || (dups !== null && dups.count > 0 && !dupAck)}>{busy ? 'Saving…' : photoBusy || photoIdBusy ? 'Uploading photo…' : files.length && stagedPhotoPaths.length ? 'Save & next' : '📷 Take a photo to save'}</button>
         </div>
       </div>}
 
@@ -1948,7 +1904,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
               : `Missing for listing: ${liveMissing.join(', ')}. You can still receive; incomplete units land in Needs attention.`}
       </p>
       <div className="actions">
-        <button disabled={busy || !options?.next_sku || (dups !== null && dups.count > 0 && !dupAck)}>{busy ? 'Receiving…' : 'Finish & receive'}</button>
+        <button disabled={busy || photoBusy || photoIdBusy || !files.length || !stagedPhotoPaths.length || (dups !== null && dups.count > 0 && !dupAck)}>{busy ? 'Receiving…' : files.length ? 'Finish & receive' : 'Take a photo to save'}</button>
         {!manual && current && <button type="button" className="secondary" disabled={busy} onClick={skipCurrent}>Skip this scan</button>}
       </div>
       </details>

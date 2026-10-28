@@ -47,3 +47,13 @@ test('the plain measurement warning appears only when no usable measurement exis
     ['No size found. Measure on mat.']);
   assert.deepEqual(dimensionWarnings({product_height_in: 5, package_weight_lb: null}), []);
 });
+
+test('exact Febreze barcode accepts abbreviated Linen marketing text, preserving Amazon provenance', () => {
+  const identity = {brand:'Febreze',title:'Febreze Air Effects Air Freshener Spray, Linen & Sky, 8.8 oz',size:'8.8 oz',variant:'Linen & Sky'};
+  const catalog = {brand:'Febreze',title:'Febreze, Air Effects Linen, 8.8 Ounce',aspects:{Size:'8.8 Ounce (Pack of 1)'}};
+  assert.equal(dimensionIdentityMatches(catalog,identity,{exactBarcode:true}),true);
+  assert.equal(dimensionIdentityMatches({...catalog,title:'Febreze Air Effects Linen 17.6 Ounce',aspects:{}},identity,{exactBarcode:true}),false);
+  assert.equal(dimensionIdentityMatches({...catalog,title:'Febreze Air Effects Linen 8.8 oz 3-Pack',aspects:{}},identity,{exactBarcode:true}),false);
+  const merged = mergeDimensions({package_length_in:9.53,dim_sources:{length_in:'Amazon'}},null,null);
+  assert.equal(merged.sources.package_length_in,'Amazon');
+});

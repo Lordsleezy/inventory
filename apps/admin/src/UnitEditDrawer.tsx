@@ -1,5 +1,6 @@
 import { inventoryMissingText } from './inventoryMissing';
 import { DnsCheckbox } from './DnsCheckbox';
+import { ReceiveWorkStatus } from './ReceiveWorkStatus';
 ﻿import { useEffect, useRef, useState } from 'react';
 import { ChannelCheckboxes } from './ChannelCheckboxes';
 import { RestoreInventoryButton } from './RestoreInventoryButton';
@@ -395,6 +396,7 @@ export function UnitEditDrawer({
           </div>
         )}
         {error && <div className="alert" role="alert">{error}</div>}
+        <ReceiveWorkStatus client={client} accessToken={accessToken} sku={sku} />
         {msg && <p className="hint">{msg}</p>}
         {canDelete && unit.state === 'sold' && <RestoreInventoryButton client={client} sku={sku} onDone={() => { onSaved({ ...unit, state: 'available' }); onClose(); }} />}
         {missingFields.length > 0 && <p className="inventory-missing" role="status">{inventoryMissingText(missingFields)}. Fill in the fields below and save.</p>}

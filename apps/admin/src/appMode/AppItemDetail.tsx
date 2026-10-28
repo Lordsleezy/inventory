@@ -1,4 +1,5 @@
 import { DnsCheckbox } from '../DnsCheckbox';
+import { ReceiveWorkStatus } from '../ReceiveWorkStatus';
 import { useEffect, useMemo, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { UnitEditDrawer } from '../UnitEditDrawer';
@@ -146,6 +147,7 @@ export function AppItemDetail({
       </div>
 
       {error && <p className="app-footer-count" style={{ color: '#ff453a' }}>{error}</p>}
+      <ReceiveWorkStatus client={client} accessToken={accessToken} sku={sku} />
       {!detail && !error && <p className="app-footer-count">Loading…</p>}
 
       {detail && unit && (

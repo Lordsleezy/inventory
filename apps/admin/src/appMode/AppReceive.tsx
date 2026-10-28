@@ -3,6 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { decodeBarcodeFile, ReceivePanel } from '../ReceivePanel';
 import { BundleReceive } from '../BundleReceive';
 import { AppItemDetail } from './AppItemDetail';
+import { ReceiveWorkStatus } from '../ReceiveWorkStatus';
 
 type Props = {
   client: SupabaseClient;
@@ -15,6 +16,16 @@ type Props = {
 /** Native Receive home; opens the shared ReceivePanel form after scan / camera / manual. */
 export function AppReceive({ client, storeId, accessToken, staffMode = false, onSaved }: Props) {
   const [phase, setPhase] = useState<'home' | 'form' | 'bundle'>('home');
+  useEffect(() => {
+    if (phase !== 'home') return;
+    const raw = sessionStorage.getItem('floor:last-receive-timing');
+    if (!raw) return;
+    sessionStorage.removeItem('floor:last-receive-timing');
+    const timing = JSON.parse(raw);
+    requestAnimationFrame(() => console.info('receive_next_scan_ready', {
+      tap_to_ready_ms: Math.round(performance.now() - timing.tappedAt), server_ms: timing.server_ms,
+    }));
+  }, [phase]);
   const [manual, setManual] = useState(false);
   const [pendingUpc, setPendingUpc] = useState<string | null>(null);
   const [cameraError, setCameraError] = useState('');
@@ -148,6 +159,7 @@ export function AppReceive({ client, storeId, accessToken, staffMode = false, on
         {!staffMode && <button type="button" className="bundle-entry" onClick={() => setPhase('bundle')}>Bundle items</button>}
       </div>
       {cameraError && <p className="app-inline-error">{cameraError}</p>}
+      <ReceiveWorkStatus client={client} accessToken={accessToken} />
 
       <p className="app-section-label">Received today</p>
       <div className="app-group">
