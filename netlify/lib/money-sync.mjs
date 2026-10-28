@@ -58,7 +58,7 @@ export async function syncMoneyBalances(deps, { now = Date.now() } = {}) {
   const out = {};
   for (const [account, run, compute, reconnectMessage] of [
     ["ebay", deps.fetchEbayFunds, parseEbayFundsSummary, "Reconnect eBay so Floor can read your funds (Finances permission)."],
-    ["square", deps.fetchSquare, computeSquareBalance, "Reconnect Square so Floor can read payments and payouts."],
+    ["square", deps.fetchSquare, computeSquareBalance, "Square rejected the website token for payments/payouts. Grant it Payments and Payouts read access, or use Reconnect Square."],
   ]) {
     if (!run) continue;
     try {
@@ -68,7 +68,7 @@ export async function syncMoneyBalances(deps, { now = Date.now() } = {}) {
     } catch (e) {
       const message = String(e?.message || e);
       const status = /not_connected|not_found/.test(message) ? "not_connected" : isPermissionError(e) ? "reconnect" : "error";
-      await deps.save(account, { status, message: status === "reconnect" ? reconnectMessage : status === "not_connected" ? `${account === "ebay" ? "eBay" : "Square"} is not connected.` : message.slice(0, 300), balance_cents: null, detail: {} }).catch(() => {});
+      await deps.save(account, { status, message: status === "reconnect" ? reconnectMessage : status === "not_connected" ? `${account === "ebay" ? "eBay" : "Square"} is not connected.` : message.slice(0, 300), balance_cents: null, detail: { error: message.slice(0, 400) } }).catch(() => {});
       out[account] = { status };
     }
   }
@@ -91,10 +91,11 @@ export async function runMoneySync(sb, storeId) {
       return ebayFetch(storeId, "GET", "/sell/finances/v1/seller_funds_summary", undefined, { accountId: account.id });
     },
     fetchSquare: async () => {
-      const { getStoreSquareAccess } = await import("./square.mjs");
-      const access = await getStoreSquareAccess(storeId);
-      const token = access?.accessToken || access?.access_token;
-      if (!token || !access?.locationId) throw new Error("square_not_connected");
+      // The website checkout already has a production Square token + location in the Netlify env; use that same token.
+      const { webSquareAccess } = await import("./web-square.mjs");
+      let access;
+      try { access = webSquareAccess(storeId); } catch (e) { throw new Error(`not_connected: ${e?.message || e}`); }
+      const token = access.accessToken;
       const base = access.sandbox ? "https://connect.squareupsandbox.com" : "https://connect.squareup.com";
       const headers = { Authorization: `Bearer ${token}`, "Square-Version": "2024-01-18", "Content-Type": "application/json" };
       const pull = async (path, key, params) => {
