@@ -155,7 +155,8 @@ begin
       public.unit_is_defective(u.listing_specs,u.condition) defective,
       public.unit_not_for_sale(u.listing_specs) not_for_sale,
       ph.photo_path,ph.photo_count,
-      case when p_unfinished then public.unit_listing_gaps(u) end gaps,
+      case when p_unfinished or p_status in ('needs_check','inventory_not_ready')
+        then public.unit_listing_gaps(u) end gaps,
       sl.sold_at,sl.sold_price_cents
     from public.units u
     cross join lateral (select count(*)::int photo_count,
@@ -182,14 +183,30 @@ begin
       b.sold_at,case when v_admin then b.sold_price_cents end sold_price_cents
     from base b
     where (p_status='all'
+      or (p_status='inventory_total' and b.state in ('available','reserved','repair'))
+      or (p_status in ('inventory_listed','inventory_not_listed','inventory_not_ready')
+        and exists(select 1 from public.units card_u where card_u.store_id=v_store
+          and card_u.sku=b.sku and public.unit_inventory_bucket(card_u)=substring(p_status from 11)))
+      or (p_status='dns' and b.state in ('available','reserved','repair')
+        and public.unit_dns(b.listing_specs))
       or (p_status='in_stock' and b.state in ('available','reserved','repair') and not b.defective)
+      or (p_status='needs_check' and b.state in ('available','reserved','repair') and not b.defective
+        and not b.not_for_sale and not public.unit_is_unfinished(b.gaps)
+        and not exists(select 1 from public.unit_channel_selections cs
+          where cs.store_id=v_store and cs.sku=b.sku and cs.selected)
+        and exists(select 1 from unnest(array['ebay','amazon','tiktok']) ch
+          where public.floor_unit_never_list_reason(v_store,b.sku,ch) is null))
+      or (p_status='inventory_not_ready' and b.state in ('available','reserved','repair')
+        and exists(select 1 from public.units card_u where card_u.store_id=v_store
+          and card_u.sku=b.sku and public.unit_inventory_bucket(card_u)='not_ready'))
       or (p_status='defective' and b.state in ('available','reserved','repair') and b.defective)
       or (p_status='listed' and b.state in ('available','reserved','repair') and not b.defective
         and exists(select 1 from public.listings l where l.store_id=v_store and l.sku=b.sku and l.status='listed'))
       or (p_status='delisted' and exists(select 1 from public.listings l where l.store_id=v_store and l.sku=b.sku and l.status='delisted'))
       or b.state=p_status)
-      and (not p_unfinished or (b.state in ('available','reserved','repair') and not b.not_for_sale
-        and public.unit_is_unfinished(b.gaps)))
+      and (not p_unfinished and p_status<>'inventory_not_ready'
+        or (b.state in ('available','reserved','repair') and not b.not_for_sale
+          and public.unit_is_unfinished(b.gaps)))
       and (p_location='all' or (p_location='unassigned' and b.state in ('available','reserved','repair')
         and b.assigned<b.qty_on_hand) or exists(select 1 from public.unit_location_stock x
           where x.store_id=v_store and x.sku=b.sku and x.location_code=p_location))
@@ -209,6 +226,10 @@ begin
   )
   select jsonb_build_object('items',coalesce((select jsonb_agg(to_jsonb(p)-'sort_order' order by p.sort_order)
       from page p),'[]'::jsonb),'totals',(select jsonb_build_object('unit_count',count(*),
+      'piece_count',(select coalesce(sum(case when pf.state='sold' then coalesce((select sum(greatest(coalesce(sl.qty,1),1))
+        from public.sales sl where sl.store_id=v_store and sl.sku=pf.sku and sl.voided_at is null),1)
+        else greatest(coalesce(pu.qty_on_hand,1),0) end),0)::int
+        from filtered pf join public.units pu on pu.store_id=v_store and pu.sku=pf.sku),
       'retail_cents',case when v_admin then coalesce(sum(ask_cents),0) end,
       'cost_cents',case when v_admin then coalesce(sum(acquisition_cost_cents),0) end,
       'missing_cost',case when v_admin then count(*) filter(where acquisition_cost_cents is null) end)

@@ -9,6 +9,8 @@ do $$ declare s uuid; owner_id uuid:=gen_random_uuid(); clerk_id uuid:=gen_rando
  insert into public.units(sku,store_id,title,brand,model,category,condition,state,qty_on_hand,ask_cents,listing_body,package_weight_lb,package_length_in,package_width_in,package_height_in,show_on_website,received_at,updated_at)
  select x.sku,s,x.title,'Acme','Household item','Blenders',x.cond,x.state,x.qty,2500,'Open box household item',2,10,8,6,x.sku='95008',now(),now()
  from (values ('95001','Listed item','Open box','available',3),('95002','Ready item','Open box','available',2),('95003','Missing photo','Open box','available',4),('95004','LG refrigerator','Open box','available',5),('95005','Broken item','Defective','available',6),('95006','Sold item','Open box','sold',7),('95007','Voided item','Open box','voided',8),('95008','Website only','Open box','available',1)) x(sku,title,cond,state,qty);
+-- Model a legacy in-stock unit received before the server-side photo requirement.
+delete from public.photos where store_id=s and sku='95003';
  insert into public.photos(store_id,sku,path) select s,x,'p/'||x||'.jpg' from unnest(array['95002','95008']) x;
  insert into public.channel_taxonomy(channel,category_id,parent_id,path,leaf,active,version,fingerprint,fetched_at,fields_fetched_at,fields_version,required_fields)
  values('ebay','99001',null,'Test > Leaf',true,true,'v1','fp',now(),now(),'fv','[]') on conflict(channel,category_id) do nothing;
