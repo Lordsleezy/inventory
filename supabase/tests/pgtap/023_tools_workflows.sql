@@ -24,6 +24,10 @@ select ok((select voided_at is not null from public.portal_payout_payments where
 select throws_ok($$select public.portal_save_withdrawal(null,'safe',-1,current_date,'other','fixture',null,null)$$,'22023',null,'negative withdrawal rejected');
 select lives_ok($$select public.portal_set_bay(14,array[3,3,3,0])$$,'create bay with no-bin large-item row');
 select is((select row_bins from public.store_bays where store_id=current_setting('tools.store')::uuid and bay_no=14),array[3,3,3,0],'row layout persists');
+select lives_ok($$select public.portal_set_bay(15,array[5,5,5,5,5])$$,'allow five rows with five bins each');
+select is((select count(*)::int from public.store_locations where store_id=current_setting('tools.store')::uuid and bay_no=15),25,'create all 25 locations for a five-by-five bay');
+select throws_ok($$select public.portal_set_bay(16,array[6,3,3])$$,'22023','row_bins_must_be_zero_through_five','reject more than five bins per row');
+select throws_ok($$select public.portal_set_bay(16,array[3,3,3,3,3,3])$$,'22023','bay_layout_invalid','reject more than five rows');
 select lives_ok($$select public.portal_move_location_stock('94001','14-1-1',2,null)$$,'put away two unassigned units');
 select throws_ok($$select public.portal_move_location_stock('94001','14-1-2',3,'14-1-1')$$,'P0001','not_enough_stock_at_source','cannot exceed stock at source');
 select throws_ok($$select public.portal_move_location_stock('94001','14-1-2',2,null)$$,'P0001','not_enough_unassigned_stock','cannot exceed unassigned stock');

@@ -351,11 +351,13 @@ type LastReceived = { upc: string; result?: Lookup; seed: Partial<Form> };
 
 const NEW = 'New';
 const OPEN = 'Open box';
+const USED_GOOD = 'Used - Good';
+const USED_FAIR = 'Used - Fair';
 const SCRATCH = 'Defective/non-sellable';
 /** Legacy condition value — still needs a defect note if somehow selected. */
 const SCRATCH_LEGACY = 'Scratch & dent';
 const isDefectiveCondition = (value: string) => value === SCRATCH || value === SCRATCH_LEGACY;
-const CONDITIONS: [string, string][] = [[NEW, 'New (sealed)'], [OPEN, 'Open box'], [SCRATCH, 'Defective/non-sellable']];
+const CONDITIONS: [string, string][] = [[NEW, 'New (sealed)'], [OPEN, 'Open box'], [USED_GOOD, 'Used · Good'], [USED_FAIR, 'Used · Fair'], [SCRATCH, 'Defective/non-sellable']];
 const HOLD_REASONS: [string, string][] = [
   ['damaged', 'Damaged'], ['needs_testing', 'Needs testing'], ['keep_in_store', 'Keep in store'], ['other', 'Other'],
 ];
@@ -762,7 +764,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     return () => { alive = false; };
   }, [client]);
 
-  async function stageStockPhoto(url: string, upc: string, scanId: string) {
+  async function stageStockPhoto(url: string, upc: string, scanId: string): Promise<string | null> {
     setStockPhotoBusy(true);
     setStockPhotoError('');
     try {
@@ -775,8 +777,10 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       const data = await response.json().catch(() => ({}));
       if (!response.ok || typeof data.path !== 'string') throw new Error(data.message || 'Stock photo unavailable');
       if (activeScan.current === scanId) setStockPhotoPath(data.path);
+      return data.path;
     } catch {
-      if (activeScan.current === scanId) setStockPhotoError('Stock photo could not be saved. Add a unit photo to continue.');
+      if (activeScan.current === scanId) setStockPhotoError('Stock photo could not be saved. Tap the save button to retry, or add a unit photo.');
+      return null;
     } finally {
       if (activeScan.current === scanId) setStockPhotoBusy(false);
     }
@@ -1031,7 +1035,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     return Boolean((form.upc.trim() || current?.upc || '').trim());
   }
   /** Listing requirements only (price, condition, category, brand, UPC, weight+dims, item specifics, photo). */
-  function missingFor(p: Parsed): string[] {
+  function missingFor(p: Parsed, hasAcceptedStockPhoto = Boolean(stockPhotoPath)): string[] {
     const out: string[] = [];
     if (!pos(p.ask)) out.push('price');
     if (!form.condition) out.push('condition');
@@ -1040,7 +1044,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     if (!brandReady()) out.push('brand');
     if (!upcReady()) out.push('UPC');
     if (!form.model.trim()) out.push('item specifics');
-    if (!files.length && !stockPhotoPath) out.push('photo');
+    if (!files.length && !hasAcceptedStockPhoto && !(!manual && merged?.images?.[0])) out.push('photo');
     return out;
   }
   const liveMissing = (() => {
@@ -1054,7 +1058,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     if (!brandReady()) out.push('brand');
     if (!upcReady()) out.push('UPC');
     if (!form.model.trim()) out.push('item specifics');
-    if (!files.length && !stockPhotoPath) out.push('photo');
+    if (!files.length && !stockPhotoPath && !(!manual && merged?.images?.[0])) out.push('photo');
     return out;
   })();
 
@@ -1068,7 +1072,12 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     const quantity = manual ? Number(form.quantity) : 1;
     if (!Number.isInteger(quantity) || quantity < 1 || quantity > 100) { setError('Quantity must be 1–100.'); return; }
     if (quantity !== 1) { setError('Receive one unit at a time so each unit gets its own photo and location.'); return; }
-    if (!files.length && !stockPhotoPath) { setError('Add a photo before saving.'); return; }
+    if (!files.length && !stockPhotoPath && stockPhotoBusy) { setError('Stock photo is still preparing. Wait a moment and try again.'); return; }
+    let acceptedStockPhotoPath = stockPhotoPath;
+    if (!files.length && !acceptedStockPhotoPath && !manual && merged?.images?.[0] && current?.upc) {
+      acceptedStockPhotoPath = await stageStockPhoto(String(merged.images[0]), current.upc, current.id) || '';
+    }
+    if (!files.length && !acceptedStockPhotoPath) { setError('Stock photo could not be saved. Retry it or add a unit photo before saving.'); return; }
     if (photoBusy) { setError('Wait for the unit photo to finish uploading.'); return; }
     if (files.some(file => (file.type && !file.type.startsWith('image/')) || file.size > PHOTO_MAX_BYTES)) {
       setError('Photos must be images under 15 MB each.'); return;
@@ -1077,21 +1086,21 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     const parsed = parse();
     if (!parsed) return;
     if (!dupAck && dups && dups.count > 0) { setError('Tap Add another unit to confirm this is a new physical item.'); return; }
-    const gaps = missingFor(parsed);
+    const gaps = missingFor(parsed, Boolean(acceptedStockPhotoPath));
     if (doNotList) {
       if (gaps.length) {
         setWarning(`Saving without listing. Still incomplete (ok for store-only): ${gaps.join(', ')}.`);
       } else {
         setWarning('Saving without listing — hidden from the website and marketplaces.');
       }
-      await receive(parsed, null);
+      await receive(parsed, null, acceptedStockPhotoPath);
       return;
     }
     if (channels.length) {
       if (gaps.length) {
         setWarning(`Saved to Unfinished. Missing: ${gaps.join(', ')}.`);
       }
-      await receive(parsed, null);
+      await receive(parsed, null, acceptedStockPhotoPath);
       return;
     }
     // Never block save or price for missing listing fields. Incomplete units keep
@@ -1100,18 +1109,18 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     if (gaps.length) {
       setWarning(`Saving now. Still needed for listing (Needs attention): ${gaps.join(', ')}.`);
     }
-    await receive(parsed, null);
+    await receive(parsed, null, acceptedStockPhotoPath);
   }
 
-  async function receive(parsed: Parsed, hold: { reason: string; note: string } | null) {
+  async function receive(parsed: Parsed, hold: { reason: string; note: string } | null, acceptedStockPhotoPath = stockPhotoPath) {
     setDialog(null);
     setBusy(true);
     setError('');
     const receiveStarted = performance.now();
     try {
       const quantity = manual ? Number(form.quantity) : 1;
-      if (!files.length && !stockPhotoPath) throw new Error('Add a photo before saving.');
-      const unitPhotoPaths = [...stagedPhotoPaths, ...(stockPhotoPath ? [stockPhotoPath] : [])];
+      if (!files.length && !acceptedStockPhotoPath) throw new Error('Add a photo before saving.');
+      const unitPhotoPaths = [...stagedPhotoPaths, ...(acceptedStockPhotoPath ? [acceptedStockPhotoPath] : [])];
       if (!unitPhotoPaths.length) throw new Error('The unit photo did not finish uploading. Retry the photo.');
       const holdLabel = hold ? (HOLD_REASONS.find(([k]) => k === hold.reason)?.[1] || hold.reason) : '';
       const notes = [
@@ -1147,7 +1156,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         p_extras: { location: selectedLocation || null, manifest: staffMode ? null : manifestId || null,
           dns: !staffMode && doNotShip, do_not_list: !staffMode && doNotList,
           channels: staffMode ? [] : channels, enrichment,
-          stock_photo_paths: stockPhotoPath ? [stockPhotoPath] : [] },
+          stock_photo_paths: acceptedStockPhotoPath ? [acceptedStockPhotoPath] : [] },
       });
       const skus = data.skus as string[];
       console.info('receive_save_timing', { commit_roundtrip_ms: Math.round(performance.now()-receiveStarted),
@@ -1543,7 +1552,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   const catalogMiss = !manual && current?.status === 'ready' ? catalogMissMessage(result) : null;
   const trueMiss = !manual && current?.status === 'ready' && isTrueCatalogMiss(result);
 
-  const hasAnyPhoto = Boolean(files.length || stagedPhotoPaths.length || stockPhotoPath);
+  const hasCatalogPhoto = Boolean(!manual && merged?.images?.[0]);
+  const hasAnyPhoto = Boolean(files.length || stagedPhotoPaths.length || stockPhotoPath || hasCatalogPhoto);
   return <section className={`panel receive-panel${appChrome ? ' receive-app' : ''}${storePhoneMode ? ' receive-store-phone' : ''}`}>
     {appChrome && (
       <div className="app-nav receive-app-nav">
@@ -1661,10 +1671,10 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           {storePhoneMode ? <>
             <div className={`receive-stock-photo${stockPhotoPath ? ' stock-photo-ready' : ''}`}>
               {merged?.images?.[0] ? <img src={merged.images[0]} alt="Catalog stock photo" /> : <div aria-hidden="true">▯</div>}
-              <span>{stockPhotoBusy ? 'Saving stock photo…' : stockPhotoPath ? '✓ Stock photo · ready' : 'Stock photo unavailable'}</span>
+              <span>{stockPhotoBusy ? 'Saving stock photo…' : stockPhotoPath ? '✓ Stock photo · ready' : merged?.images?.[0] ? stockPhotoError ? 'Stock photo · tap save to retry' : 'Stock photo available' : 'Stock photo unavailable'}</span>
             </div>
             <button type="button" className={`receive-unit-photo-tile${files.length ? ' has-photo' : ''}`} disabled={photoBusy || busy} onClick={() => confirmPhotoFile.current?.click()}>
-              {previews[0] ? <img src={previews[0]} alt="Actual unit photo" /> : <><strong>📷 Add photo</strong><span>{stockPhotoPath ? 'optional' : 'required to save'}</span></>}
+              {previews[0] ? <img src={previews[0]} alt="Actual unit photo" /> : <><strong>📷 Add photo</strong><span>{stockPhotoPath ? 'optional' : merged?.images?.[0] ? 'stock photo can save this unit' : 'required to save'}</span></>}
               {photoBusy && <span>Uploading…</span>}
             </button>
           </> : <>
@@ -1775,7 +1785,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
             setPhotoBusy(true); setError('');
             void stageUnitPhotos(files).then(setStagedPhotoPaths).catch(e => setError(`Photo upload failed: ${errText(e)}`)).finally(() => setPhotoBusy(false));
           }}>Retry photo upload</button>}
-          <button className="receive-save-next" type="submit" disabled={busy || photoBusy || stockPhotoBusy || photoIdBusy || !hasAnyPhoto || (dups !== null && dups.count > 0 && !dupAck)}>{busy ? 'Saving…' : photoBusy || stockPhotoBusy || photoIdBusy ? 'Preparing photo…' : hasAnyPhoto ? 'Save & next' : '📷 Take a photo to save'}</button>
+          <button className="receive-save-next" type="submit" disabled={busy || photoBusy || stockPhotoBusy || photoIdBusy || !hasAnyPhoto || (dups !== null && dups.count > 0 && !dupAck)}>{busy ? 'Saving…' : photoBusy || stockPhotoBusy || photoIdBusy ? 'Preparing photo…' : hasCatalogPhoto && !files.length && !stockPhotoPath ? 'Use stock photo & save' : hasAnyPhoto ? 'Save & next' : '📷 Take a photo to save'}</button>
         </div>
       </div>}
 
@@ -1979,7 +1989,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
               : `Missing for listing: ${liveMissing.join(', ')}. You can still receive; incomplete units land in Needs attention.`}
       </p>
       <div className="actions">
-        <button disabled={busy || photoBusy || photoIdBusy || !hasAnyPhoto || (dups !== null && dups.count > 0 && !dupAck)}>{busy ? 'Receiving…' : hasAnyPhoto ? 'Finish & receive' : 'Take a photo to save'}</button>
+        <button disabled={busy || photoBusy || stockPhotoBusy || photoIdBusy || !hasAnyPhoto || (dups !== null && dups.count > 0 && !dupAck)}>{busy ? 'Receiving…' : stockPhotoBusy || photoIdBusy ? 'Preparing photo…' : hasCatalogPhoto && !files.length && !stockPhotoPath ? 'Use stock photo & receive' : hasAnyPhoto ? 'Finish & receive' : 'Take a photo to save'}</button>
         {!manual && current && <button type="button" className="secondary" disabled={busy} onClick={skipCurrent}>Skip this scan</button>}
       </div>
       </details>

@@ -31,7 +31,7 @@ export function LocationsPage({ client, storeId, canManage = true }: Props) {
   const [locations, setLocations] = useState<Location[]>([]);
   const [recentMoves, setRecentMoves] = useState<LocationMove[]>([]);
   const [bay, setBay] = useState('');
-  const [rows, setRows] = useState<string[]>(['3', '3', '3', '0']);
+  const [rows, setRows] = useState<string[]>(['3', '3', '3']);
   const [sku, setSku] = useState('');
   const [to, setTo] = useState('');
   const [assignBin, setAssignBin] = useState(() => { try { return localStorage.getItem('floor:assign-location-bin') || ''; } catch { return ''; } });
@@ -61,8 +61,8 @@ export function LocationsPage({ client, storeId, canManage = true }: Props) {
     event.preventDefault(); if (submitLock.current) return; setError(''); setNotice('');
     const bayNo = number(bay), layout = rows.map(number);
     if (!Number.isInteger(bayNo) || bayNo < 1 || bayNo > 9999
-      || ![3, 4].includes(layout.length) || layout.some((n) => ![0, 2, 3].includes(n))) {
-      setError('Use bay 1–9999, three or four rows, and 0, 2 or 3 bins per row.'); return;
+      || layout.length < 3 || layout.length > 5 || layout.some((n) => !Number.isInteger(n) || n < 0 || n > 5)) {
+      setError('Use bay 1–9999, three to five rows, and zero to five bins per row.'); return;
     }
     submitLock.current = true; setBusy(true);
     try {
@@ -119,7 +119,8 @@ export function LocationsPage({ client, storeId, canManage = true }: Props) {
   }
   const printed = locations.filter((location) => location.bay_no === printBay);
   const changeView = (next: 'overview'|'setup'|'move'|'assign') => { setView(next); setError(''); setNotice(''); };
-  const createBay = () => { setBay(''); setRows(['3','3','3','0']); changeView('setup'); };
+  const createBay = () => { setBay(''); setRows(['3','3','3']); changeView('setup'); };
+  const resizeRows = (count: number) => setRows(old => Array.from({ length: count }, (_, index) => old[index] ?? '0'));
   return <div className="floor-tools locations-page">
     {view !== 'overview' && <button type="button" className="tool-back" disabled={busy} onClick={() => changeView('overview')}>‹ Locations</button>}
     <header><div><h1>{view === 'setup' ? 'Bay setup' : view === 'move' ? 'Put away or move' : view === 'assign' ? 'Assign locations' : 'Locations'}</h1><p>{view === 'overview' ? 'Manage your storage bays and locations.' : view === 'setup' ? 'Configure the rows and bins for this bay.' : view === 'assign' ? 'Scan a bin once, then scan each item. Every assignment is saved immediately.' : 'Scan a location, then scan the items to put away.'}</p></div></header>
@@ -142,14 +143,14 @@ export function LocationsPage({ client, storeId, canManage = true }: Props) {
         </details>)}</div>}
       </ToolCard>
       {recentMoves.length > 0 && <ToolCard><ToolHeading icon="move" title="Recent location history" description="Latest put-away and move events."/><div className="location-code-list">{recentMoves.map((move,index)=><span key={`${move.sku}-${move.moved_at}-${index}`}><b>SKU {move.sku} · {move.from_location || 'Unassigned'} → {move.to_location}</b><small>{new Date(move.moved_at).toLocaleString()}</small></span>)}</div></ToolCard>}
-      <ToolTip>Each bay can have three or four rows. Each row supports 2 or 3 bins, or no bins for large items.</ToolTip>
+      <ToolTip>Each bay can have three to five rows. Each row supports up to five bins, or no bins for large items.</ToolTip>
     </>}
     {view === 'setup' && canManage && <><ToolCard><ToolHeading icon="bay" title="Bay setup" description="Configure the number of rows and bins for this bay location."/>
       <form className="location-bay-form" onSubmit={event => void saveBay(event)}>
         <label>Bay number<input required inputMode="numeric" value={bay} onChange={event => setBay(event.target.value)} placeholder="e.g. 14" disabled={busy}/></label>
-        <div className="location-rows-head"><div><h2>Rows</h2><p>Set up each row in this bay.</p></div><div className="tool-segment" aria-label="Number of rows">{[4,3].map(n => <button key={n} type="button" disabled={busy} aria-pressed={rows.length === n} onClick={() => setRows(old => n === 3 ? old.slice(0,3) : old.length === 4 ? old : [...old,'0'])}>{n} rows</button>)}</div></div>
-        {rows.map((bins,index) => <label className="location-row-config" key={index}><span>Row {index+1}<ToolIcon name="bay"/></span><select disabled={busy} value={bins} onChange={event => setRows(old => old.map((value,i) => i === index ? event.target.value : value))}><option value="0">No bins · large items</option><option value="2">2 bins</option><option value="3">3 bins</option></select></label>)}
-        <div className="actions"><button type="button" className="secondary" disabled={busy} onClick={() => setRows(old => old.length === 3 ? [...old,'0'] : old.slice(0,3))}><ToolIcon name="flip"/>{rows.length === 3 ? 'Add fourth row' : 'Use three rows'}</button><button disabled={busy || !loaded}><ToolIcon name="save"/>{busy ? 'Saving…' : 'Save bay'}</button></div>
+        <div className="location-rows-head"><div><h2>Rows</h2><p>Set up three to five rows in this bay.</p></div><div className="tool-segment" aria-label="Number of rows">{[3,4,5].map(n => <button key={n} type="button" disabled={busy} aria-pressed={rows.length === n} onClick={() => resizeRows(n)}>{n} rows</button>)}</div></div>
+        {rows.map((bins,index) => <label className="location-row-config" key={index}><span>Row {index+1}<ToolIcon name="bay"/></span><select disabled={busy} value={bins} onChange={event => setRows(old => old.map((value,i) => i === index ? event.target.value : value))}><option value="0">No bins · large items</option>{[1,2,3,4,5].map(count => <option key={count} value={count}>{count} {count === 1 ? 'bin' : 'bins'}</option>)}</select></label>)}
+        <div className="actions"><button disabled={busy || !loaded}><ToolIcon name="save"/>{busy ? 'Saving…' : 'Save bay'}</button></div>
       </form></ToolCard><ToolTip>Choose no bins for a row that holds large items. Existing stock prevents unsafe layout changes.</ToolTip></>}
     {view === 'move' && <ToolCard><ToolHeading icon="move" title="Put away or move" description="Put away: scan a location, then scan item SKUs. To move assigned stock, scan the SKU, choose its current location, then scan the new label."/>
       <form className="location-scan-form" onSubmit={event => void move(event)}>
