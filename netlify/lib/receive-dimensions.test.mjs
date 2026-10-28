@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mergeDimensions, dimensionIdentityMatches } from './receive-dimensions.mjs';
+import { mergeDimensions, dimensionIdentityMatches, dimensionWarnings } from './receive-dimensions.mjs';
 
 test('Amazon then UPCitemdb supply dimensions; saved Floor values only fill gaps', () => {
   const result = mergeDimensions(
@@ -35,4 +35,15 @@ test('old estimated weights cannot become sourced shipping measurements', () => 
     {item:{weight_lb:2}}, null);
   assert.equal(result.values.product_weight_lb,2);
   assert.equal(result.values.package_weight_lb,null);
+});
+
+test('rejecting a non-matching catalog size does not warn when Amazon supplied usable measurements', () => {
+  const result = mergeDimensions(null, { package: { length_in: 9, weight_lb: 0.77 } }, null);
+  assert.deepEqual(dimensionWarnings(result.values), []);
+});
+
+test('the plain measurement warning appears only when no usable measurement exists', () => {
+  assert.deepEqual(dimensionWarnings({package_length_in: null, package_weight_lb: null}),
+    ['No size found. Measure on mat.']);
+  assert.deepEqual(dimensionWarnings({product_height_in: 5, package_weight_lb: null}), []);
 });

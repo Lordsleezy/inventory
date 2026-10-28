@@ -15,6 +15,7 @@ const stubPath = path.join(root, "supabase", "tests", "pglite-stub.sql");
 
 const STORE = "00000000-0000-0000-0000-000000000112";
 const OWNER = "00000000-0000-0000-0000-000000000111";
+const CLERK = "00000000-0000-0000-0000-000000000113";
 
 const db = new PGlite();
 await db.exec(await readFile(stubPath, "utf8"));
@@ -44,9 +45,16 @@ await db.exec(`
 
 const addUnit = async (sku, { ask = 10000, cost = null, category = "other", collectible = false } = {}) => {
   await db.query(`insert into public.sku_ledger(sku,issued_at,store_id) values ($1,now(),'${STORE}')`, [sku]);
+  await db.query(`insert into storage.objects(bucket_id,name) values ('unit-photos',$1)`, [`${STORE}/${sku}/unit.jpg`]);
   await db.query(`insert into public.units(sku,title,ask_cents,floor_cents,state,store_id,received_at,updated_at,category,acquisition_cost_cents,is_collectible)
     values($1,'Unit ' || $1,$2,100,'available','${STORE}',now(),now(),$3,$4,$5)`, [sku, ask, category, cost, collectible]);
 };
+
+// A sellable unit cannot be created directly without an actual-unit photo object.
+await db.query(`insert into public.sku_ledger(sku,issued_at,store_id) values ('91999',now(),'${STORE}')`);
+await assert.rejects(db.query(`insert into public.units(sku,title,state,store_id,qty_on_hand,received_at,updated_at)
+  values ('91999','No photo','available','${STORE}',1,now(),now())`), /unit_photo_required/);
+console.log("new sellable units require a real unit photo at the database boundary ok");
 
 // 1) In-store cash sale, real cost → profit = price − cost; card fee is pass-through.
 await addUnit("92001", { ask: 10000, cost: 4000 });
@@ -192,6 +200,24 @@ l = await ledger("92006");
 assert.equal(l.channel_fee_cents, 612); assert.equal(l.fee_source, "actual");
 assert.equal(l.profit_cents, 5000 - 612 - 900);
 console.log("fee reconciliation: estimated 500 → actual 612, profit recomputed ok");
+
+// Store staff can see bay locations and the location-aware inventory list without cost data.
+await db.exec(`
+  select set_config('request.jwt.claim.role','authenticated',false);
+  select set_config('request.jwt.claim.sub','${OWNER}',false);
+  insert into auth.users(id) values ('${CLERK}');
+  insert into public.staff(user_id,store_id,display_name,role) values ('${CLERK}','${STORE}','Clerk','staff');
+  select public.portal_set_bay(12,array[3,3,3]);
+`);
+await addUnit('92009',{ask:1000,cost:500});
+await db.exec(`select set_config('request.jwt.claim.sub','${CLERK}',false)`);
+const {rows:[{list}]}=await db.query(`select public.portal_inventory_list_with_locations(p_status=>'in_stock') list`);
+const inventoryList=typeof list==='string'?JSON.parse(list):list;
+assert.equal(inventoryList.totals.cost_cents,null);
+assert.ok(inventoryList.items.some(item=>item.sku==='92009'));
+const {rows:[{bays}]}=await db.query(`select public.portal_bay_list()->'bays' bays`);
+assert.ok((typeof bays==='string'?JSON.parse(bays):bays).length>0);
+console.log('clerk can read locations and inventory without financial totals ok');
 
 await db.close();
 console.log("ledger tests ok");

@@ -5,7 +5,7 @@ import { LabelDialog } from '../LabelDialog';
 import { ReturnsPage } from '../ReturnsPage';
 import { errText } from '../errText';
 import { shortError } from './shortError';
-import { loadOrderLocations, locationCompare } from '../locationOrder';
+import { loadOrderLocations, locationCompare, locationParts } from '../locationOrder';
 
 function channelAllowsLabels(channel?: string | null) {
   const ch = (channel || 'website').toLowerCase();
@@ -48,6 +48,7 @@ export function AppOrders({ client, storeId, accessToken, money, stamp }: Props)
   const [open, setOpen] = useState<WebOrder | null>(null);
   const [urls, setUrls] = useState<Record<string, string>>({});
   const [locations, setLocations] = useState<Record<string, string[]>>({});
+  const [locationOptions, setLocationOptions] = useState<{code:string}[]>([]);
   const [busy, setBusy] = useState('');
   const [labelOpen, setLabelOpen] = useState(false);
   const packProofInput = useRef<HTMLInputElement>(null);
@@ -61,6 +62,8 @@ export function AppOrders({ client, storeId, accessToken, money, stamp }: Props)
       setOpen((prev) => (prev ? list.find((o) => o.id === prev.id) || prev : null));
       const skus = [...new Set(list.map((o) => o.sku).filter(Boolean))];
       setLocations(await loadOrderLocations(client, storeId, skus));
+      const { data: bins } = await client.from('store_locations').select('code').eq('store_id',storeId).order('bay_no').order('row_no').order('bin_no');
+      setLocationOptions((bins||[]) as {code:string}[]);
       if (skus.length) {
         const { data: photos } = await client.from('photos').select('sku, path, is_primary').in('sku', skus.slice(0, 80));
         const bySku = new Map<string, string>();
@@ -125,6 +128,14 @@ export function AppOrders({ client, storeId, accessToken, money, stamp }: Props)
     } finally {
       setBusy('');
     }
+  }
+
+  async function setPickLocation(order: WebOrder, code: string) {
+    if (!code) return;
+    await runAction('location', async () => {
+      const { error: e } = await client.rpc('portal_set_unit_pick_location', { p_sku: order.sku, p_location: code });
+      if (e) throw e;
+    });
   }
 
   async function markShipped(o: WebOrder) {
@@ -248,7 +259,12 @@ export function AppOrders({ client, storeId, accessToken, money, stamp }: Props)
         <div className="app-group">
           <div className="app-kv"><span>Status</span><strong className={pill.tone === 'warn' ? 'warn' : pill.tone === 'ok' ? 'live' : 'muted'}>{pill.text}</strong></div>
           <div className="app-kv"><span>SKU</span><strong>{open.sku}</strong></div>
-          <div className="app-kv"><span>Pick location</span><strong className="pick-location">{locations[open.sku]?.join(', ') || `SKU ${open.sku}`}</strong></div>
+          <div className="app-kv"><span>Pick location</span><div className="app-order-location-control">
+            {locationParts(locations[open.sku]?.[0]) ? <strong className="app-pick-location"><small>{locationParts(locations[open.sku]?.[0])?.display}</small>{locationParts(locations[open.sku]?.[0])?.slot}</strong> : <strong className="app-pick-location missing">BAY / None · find it, then tap to set</strong>}
+            <select aria-label={`Set pick location for SKU ${open.sku}`} value={locations[open.sku]?.[0]||''} disabled={!!busy||!locationOptions.length} onChange={event=>void setPickLocation(open,event.target.value)}>
+              <option value="">{locations[open.sku]?.length?'Change location':'Tap to set location'}</option>{locationOptions.map(location=><option key={location.code} value={location.code}>{locationParts(location.code)?.display} · {locationParts(location.code)?.slot}</option>)}
+            </select>
+          </div></div>
           <div className="app-kv"><span>Buyer</span><strong>{open.buyer_name || '—'}</strong></div>
           <div className="app-kv"><span>Placed</span><strong>{stamp(open.created_at)}</strong></div>
           {open.shipped_at && <div className="app-kv"><span>Shipped</span><strong>{stamp(open.shipped_at)}</strong></div>}
@@ -341,6 +357,9 @@ export function AppOrders({ client, storeId, accessToken, money, stamp }: Props)
           </button>
         ))}
       </div>
+      {seg==='toShip' && <button type="button" className="app-pick-list-start" disabled={!rows.length} onClick={()=>{if(rows[0])setOpen(rows[0]);}}>
+        <span><strong>Pick list</strong><small>sorted by bay · row · bin</small></span><b>Start ›</b>
+      </button>}
       {error && <p className="app-inline-error">{error}</p>}
       {seg === 'returns' ? (
         <div className="app-embed-soft">
@@ -356,6 +375,7 @@ export function AppOrders({ client, storeId, accessToken, money, stamp }: Props)
               const ch = CHANNEL[(o.channel || 'website').toLowerCase()] || o.channel || 'Website';
               return (
                 <button key={o.id} type="button" className="app-row" onClick={() => setOpen(o)}>
+                  {locationParts(locations[o.sku]?.[0]) ? <span className="app-order-location-badge"><small>{locationParts(locations[o.sku]?.[0])?.display}</small><strong>{locationParts(locations[o.sku]?.[0])?.slot}</strong></span> : <span className="app-order-location-badge missing"><small>BAY</small><strong>None</strong></span>}
                   <span className="app-thumb">{urls[o.sku] ? <img src={urls[o.sku]} alt="" /> : '+'}</span>
                   <span className="app-row-text">
                     <strong>{o.title}</strong>

@@ -6,7 +6,7 @@ import { type CommissionOverride, type OnlineCfg, type Rule } from './payouts';
 import { ReturnsPage } from './ReturnsPage';
 import { LabelDialog } from './LabelDialog';
 import { errText } from './errText';
-import { loadOrderLocations, locationCompare } from './locationOrder';
+import { loadOrderLocations, locationCompare, locationParts } from './locationOrder';
 
 function channelAllowsLabels(channel?: string | null) {
   const ch = (channel || 'website').toLowerCase();
@@ -123,6 +123,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
   const [orders, setOrders] = useState<WebOrder[] | null>(null);
   const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({});
   const [locations, setLocations] = useState<Record<string, string[]>>({});
+  const [locationOptions, setLocationOptions] = useState<{ code: string }[]>([]);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
@@ -138,6 +139,8 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
     setOrders(data as WebOrder[]);
     const skus = [...new Set((data as WebOrder[]).map(o => o.sku).filter(Boolean))];
     setLocations(await loadOrderLocations(client, storeId, skus));
+    const { data: bins } = await client.from('store_locations').select('code').eq('store_id',storeId).order('bay_no').order('row_no').order('bin_no');
+    setLocationOptions((bins || []) as {code:string}[]);
     if (skus.length) {
       const { data: photos } = await client.from('photos').select('sku,path,is_primary,sort_order').eq('store_id', storeId).in('sku', skus.slice(0, 100)).order('is_primary', { ascending: false }).order('sort_order');
       const bySku = new Map<string, string>();
@@ -163,6 +166,14 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
     if (e) setError(e.message === 'pack_proof_required'
       ? 'Upload a pack-time photo of the actual unit before marking shipped.'
       : e.message);
+    await load(); setBusy(null);
+  }
+
+  async function setPickLocation(o: WebOrder, code: string) {
+    if (!code) return;
+    setBusy(`${o.id}location`); setError('');
+    const { error: e } = await client.rpc('portal_set_unit_pick_location', { p_sku: o.sku, p_location: code });
+    if (e) setError(e.message);
     await load(); setBusy(null);
   }
 
@@ -383,7 +394,12 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
       : (o.marketplace_title || o.title || 'Marketplace sale');
     const skuLabel = linked ? `SKU ${o.sku}` : 'Needs SKU match';
     return <div className="ticket-items"><div>{displayTitle} <span>· {skuLabel}</span></div>
-    <strong className="pick-location">Pick: {locations[o.sku]?.join(', ') || `SKU ${o.sku}`}</strong>
+    {(() => { const code=locations[o.sku]?.[0]||''; const parts=locationParts(code); return <div className={`order-pick-location${parts?'':' missing'}`}>
+      {parts ? <><small>{parts.display}</small><strong>{parts.slot}</strong></> : <strong>BAY / None · find it, then tap to set</strong>}
+      <select aria-label={`Set pick location for SKU ${o.sku}`} value={code} disabled={!!busy||!locationOptions.length} onChange={event=>void setPickLocation(o,event.target.value)}>
+        <option value="">{parts?'Change location':'Tap to set location'}</option>{locationOptions.map(location=><option key={location.code} value={location.code}>{locationParts(location.code)?.display} · {locationParts(location.code)?.slot}</option>)}
+      </select>
+    </div>; })()}
     <small>{o.buyer_name}{o.buyer_email ? ` · ${o.buyer_email}` : ''}{o.buyer_phone ? ` · ${o.buyer_phone}` : ''}</small>
     <small>Item {money(o.item_cents)}{orderFee(o) ? ` · Fees ${money(orderFee(o))}` : ''} · {o.fulfillment === 'ship' ? `Buyer ship ${money(o.shipping_cents)}` : 'Store pickup'}{o.fulfillment === 'ship' ? ` · Label ${o.label_cost_cents != null ? money(o.label_cost_cents) : '—'}` : ''} · Tax {money(o.tax_cents)}</small>
     <CommissionOverrideMark overridden={!!ov} />
@@ -558,6 +574,10 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
       <span className="hint">{rawCount} loaded (no cancelled hide; 400-day window)</span>
     </div>
     {orders === null && <p className="hint">Loading orders…</p>}
+
+    {view==='toShip' && <button type="button" className="desktop-pick-list" disabled={!active.length} onClick={()=>document.querySelector('.ticket.order')?.scrollIntoView({behavior:'smooth',block:'start'})}>
+      <span><strong>Pick list</strong><small>sorted by bay · row · bin</small></span><b>Start ›</b>
+    </button>}
 
     <section className="panel drilldown" aria-live="polite">
       <div className="section-head">
