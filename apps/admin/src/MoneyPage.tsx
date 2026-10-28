@@ -106,6 +106,16 @@ export function MoneyPage({ client, storeId, accessToken, money, stamp }: Props)
     setConnecting(account); setError('');
     try { await startConnect(accessToken, account); } catch (e) { setError(String((e as Error).message || e)); setConnecting(''); }
   }
+  async function syncTikTokFinance() {
+    setConnecting('tiktok'); setError(''); setNotice('');
+    try {
+      const response = await fetch(floorFunctionUrl('tiktok-list'), { method: 'POST', headers: { Authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' }, body: JSON.stringify({ action: 'sync_finance', store_id: storeId }) });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok || body.ok === false) throw new Error(body.error || 'TikTok finance sync failed.');
+      setNotice(`TikTok finance refreshed: ${Number(body.payments || 0)} payment records, ${Number(body.payoutRowsImported || 0)} idempotent payout rows.`); await load();
+    } catch (e) { setError(String((e as Error).message || e)); }
+    finally { setConnecting(''); }
+  }
   const done = async (message: string) => { setSheet(null); setNotice(message); await load(); if (all) await openAll(all.account); };
 
   const rowsView = (account: Account, rows: Row[]) => rows.map((r) => <ActivityLine key={r.id} row={r} account={account} title={rowTitle(r)} money={money} stamp={stamp}
@@ -123,15 +133,17 @@ export function MoneyPage({ client, storeId, accessToken, money, stamp }: Props)
         const detail = a.sync?.detail || {};
         return <section className="money-card" key={a.account} aria-label={NAMES[a.account]}>
           <div className="money-card-top"><ToolSourceBadge source={a.account} /><strong className="money-name">{NAMES[a.account]}</strong><span className="money-balance">{money(a.balance_cents)}</span></div>
+          {a.account === 'tiktok' && <p className="money-sync">TikTok Shop pays to Paul’s personal bank account; not a Floor business bank balance.</p>}
           {(a.account === 'ebay' || a.account === 'square' || a.account === 'amazon' || a.account === 'tiktok') && <p className="money-sync">
             {a.synced
-              ? <>Synced · {stamp(a.sync!.synced_at)}{a.account === 'ebay' && detail.available_cents != null ? ` · Available ${money(detail.available_cents)} · Processing ${money(detail.processing_cents || 0)} · On hold ${money(detail.on_hold_cents || 0)}` : ''}</>
+              ? <>Synced · {stamp(a.sync!.synced_at)}{a.account === 'ebay' && detail.available_cents != null ? ` · Available ${money(detail.available_cents)} · Processing ${money(detail.processing_cents || 0)} · On hold ${money(detail.on_hold_cents || 0)}` : ''}{a.account === 'tiktok' ? ' · unsettled amount is an estimate; actual payouts are imported separately' : ''}</>
               : a.sync?.status === 'reconnect' || a.sync?.status === 'not_connected' || !a.sync
                 ? <>{a.sync?.message || (a.account === 'ebay' || a.account === 'square' ? 'Not synced yet. Floor’s own number is shown.' : 'Manual')}{(a.account === 'ebay' || a.account === 'square') && <> <button type="button" className="money-link" disabled={connecting === a.account} onClick={() => void reconnect(a.account as 'ebay' | 'square')}>{connecting === a.account ? 'Opening…' : a.sync?.status === 'not_connected' ? `Connect ${NAMES[a.account]}` : `Reconnect ${NAMES[a.account]}`}</button></>}</>
                 : <>Sync problem: {a.sync.message}</>}
           </p>}
           {a.synced && <p className="money-floor">Floor expected {money(a.floor_cents)}{off !== 0 ? ` · off by ${money(Math.abs(off))}` : ' · matches'}</p>}
           <div className="money-buttons">
+            {a.account === 'tiktok' && <button type="button" className="money-link" disabled={connecting === 'tiktok'} onClick={() => void syncTikTokFinance()}>{connecting === 'tiktok' ? 'Syncing…' : 'Refresh TikTok finance'}</button>}
             <button type="button" className="money-add" onClick={() => setSheet({ account: a.account, dir: 'in' })}>+ Add money</button>
             <button type="button" className="money-take" onClick={() => setSheet({ account: a.account, dir: 'out' })}>− Take out</button>
           </div>

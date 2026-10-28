@@ -8,7 +8,7 @@
  *   TIKTOK_SHOP_SHOP_ID
  *   TIKTOK_SHOP_API_BASE     (default https://open-api.tiktokglobalshop.com)
  *   TIKTOK_SHOP_AUTH_BASE    (default https://auth.tiktok-shops.com)
- *   TIKTOK_SHOP_FEE_PCT      (default 0.08 — US commission bake-in)
+ *   TIKTOK_SHOP_FEE_PCT      (default 0.06 — readiness estimate only; actual fees vary by category)
  *   TIKTOK_SHOP_LISTING_ENABLED=1 to allow live product push
  *
  * Tokens: encrypted in public.connections (provider='tiktok'), same pattern as Amazon.
@@ -37,8 +37,8 @@ import { amazonNeverListReason, defaultCostCents } from "./amazon.mjs";
 
 export const STORE_DEFAULT = "5487ca47-6147-4fe8-bc6d-46b6472726ba";
 
-/** US TikTok Shop fee baseline for list-price bake-in (override with TIKTOK_SHOP_FEE_PCT). */
-export const TIKTOK_DEFAULT_FEE_PCT = 0.08;
+/** Approximate US referral fee for readiness estimates; actual fee varies by category. */
+export const TIKTOK_DEFAULT_FEE_PCT = 0.06;
 
 export const TIKTOK_OAUTH_REDIRECT =
   process.env.TIKTOK_SHOP_REDIRECT_URL ||
@@ -48,12 +48,13 @@ export const TIKTOK_OAUTH_REDIRECT =
 export const TIKTOK_API_SCOPES = [
   "seller.authorization.info",
   "seller.shop.info",
-  "seller.product.read",
+  "seller.product.basic",
   "seller.product.write",
   "seller.order.info",
-  "seller.order.refund",
   "seller.return_refund.basic",
   "seller.fulfillment.basic",
+  "seller.logistics",
+  "seller.finance.info",
 ];
 
 function apiBase() {
@@ -98,13 +99,12 @@ export function tiktokConfigured() {
 export function tiktokSetupChecklist() {
   return [
     "Create a TikTok Shop Partner account (partner.tiktokshop.com) and a US Custom app.",
-    "Under Manage API, request seller order / product / return-refund scopes (see docs/TIKTOK_SHOP.md).",
+    "Under Manage API, request seller.authorization.info, seller.shop.info, seller.product.basic, seller.product.write, seller.order.info, seller.return_refund.basic, seller.fulfillment.basic, seller.logistics, and seller.finance.info.",
     `Register redirect URL: ${TIKTOK_OAUTH_REDIRECT}`,
-    "Set Netlify env: TIKTOK_SHOP_APP_KEY, TIKTOK_SHOP_APP_SECRET, TIKTOK_SHOP_SHOP_ID (optional TIKTOK_SHOP_SERVICE_ID).",
+    "Set production Netlify env vars TIKTOK_SHOP_APP_KEY and TIKTOK_SHOP_APP_SECRET; TIKTOK_SHOP_SERVICE_ID is optional. OAuth saves the authorized shop ID/cipher.",
     "In Admin → Marketplaces → TikTok Shop, click Authorize TikTok Shop and complete seller consent.",
-    "Optional: TIKTOK_SHOP_API_BASE (default https://open-api.tiktokglobalshop.com), TIKTOK_SHOP_LISTING_ENABLED=1.",
-    "Smoke-test: POST /.netlify/functions/tiktok-returns-sync with {\"action\":\"status\"}.",
-    "Confirm return_decision alerts hit FLOOR_OWNER_EMAIL within minutes of a test RMA (48h decision window).",
+    "Do not set TIKTOK_SHOP_LISTING_ENABLED for readiness preparation. Register the webhook URL in Partner Center and subscribe to order, cancellation, and return events.",
+    "After authorization, use the admin-only Readiness, Sync TikTok rules, Pull shop data, and TikTok Money refresh controls.",
   ];
 }
 
@@ -114,7 +114,7 @@ export function tiktokAuthorizeUrl(state) {
   }
   const svc = serviceId();
   if (svc) {
-    return `https://services.tiktokshop.com/open/authorize?service_id=${encodeURIComponent(svc)}&state=${encodeURIComponent(state)}`;
+    return `https://services.us.tiktokshop.com/open/authorize?service_id=${encodeURIComponent(svc)}&state=${encodeURIComponent(state)}`;
   }
   const appKey = process.env.TIKTOK_SHOP_APP_KEY.trim();
   return `${authBase()}/oauth/authorize?app_key=${encodeURIComponent(appKey)}&state=${encodeURIComponent(state)}`;
@@ -286,6 +286,11 @@ export async function tiktokApiFetch(storeId, method, path, bodyObj, extraParams
     }
   }
   if (shopId()) params.shop_id = shopId();
+  if (!params.shop_cipher && !process.env.TIKTOK_SHOP_SHOP_CIPHER) {
+    const { data: authorizedShop } = await serviceClient().from("tiktok_shop_accounts")
+      .select("shop_cipher").eq("store_id", storeId).order("updated_at", { ascending: false }).limit(1).maybeSingle().catch(() => ({ data: null }));
+    if (authorizedShop?.shop_cipher) params.shop_cipher = authorizedShop.shop_cipher;
+  } else if (!params.shop_cipher && process.env.TIKTOK_SHOP_SHOP_CIPHER) params.shop_cipher = process.env.TIKTOK_SHOP_SHOP_CIPHER;
   const body = bodyObj != null ? JSON.stringify(bodyObj) : "";
   params.sign = signTikTokRequest({ path, params, body });
   const qs = new URLSearchParams(params).toString();
@@ -322,20 +327,32 @@ export async function saveTikTokOAuthTokens(storeId, tokenData) {
     accountLabel: shopId() || tokenData.open_id || tokenData.seller_name || null,
   });
   const sb = serviceClient();
-  await sb.from("channel_config").upsert(
-    {
-      store_id: storeId,
-      channel: "tiktok",
-      mode: "auto",
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: "store_id,channel" },
-  );
+  const shops = await tiktokApiFetch(storeId, "GET", "/authorization/202309/shops");
+  if (shops?.code !== 0) throw new Error(shops?.message || "tiktok_authorized_shops_failed");
+  const rows = shops?.data?.shops || [];
+  if (rows.length) {
+    const accounts = rows.map((shop) => ({ store_id: storeId, shop_id: String(shop.id || shop.shop_id || ""),
+      shop_cipher: String(shop.cipher || shop.shop_cipher || ""), shop_name: shop.name || shop.shop_name || null,
+      region: shop.region || null, seller_type: shop.seller_type || null, updated_at: new Date().toISOString() }))
+      .filter((shop) => shop.shop_id && shop.shop_cipher);
+    if (accounts.length) {
+      const { error } = await sb.from("tiktok_shop_accounts").upsert(accounts, { onConflict: "store_id,shop_id" });
+      if (error) throw new Error(error.message);
+      const { error: snapshotError } = await sb.from("tiktok_shop_snapshots").upsert(accounts.map((shop) => ({
+        store_id: storeId, snapshot_type: "shop", snapshot_key: shop.shop_id,
+        payload: { ...shop, shop_cipher: undefined }, captured_at: new Date().toISOString(),
+      })), { onConflict: "store_id,snapshot_type,snapshot_key" });
+      if (snapshotError) throw new Error(snapshotError.message);
+    }
+  }
 }
 
 export async function tiktokConnectionStatus(storeId = STORE_DEFAULT) {
   const hasEnv = tiktokAppCredsPresent();
   const row = await connectionRow(storeId).catch(() => null);
+  const { data: authorizedShop } = await serviceClient().from("tiktok_shop_accounts")
+    .select("shop_id,shop_name,region,seller_type").eq("store_id", storeId)
+    .order("updated_at", { ascending: false }).limit(1).maybeSingle().catch(() => ({ data: null }));
   const connected = row?.status === "connected" && Boolean(row?.token_ciphertext || row?.refresh_ciphertext);
   let healthy = false;
   let lastError = row?.last_error || null;
@@ -361,13 +378,16 @@ export async function tiktokConnectionStatus(storeId = STORE_DEFAULT) {
   return {
     connected: Boolean(connected || (process.env.TIKTOK_SHOP_ACCESS_TOKEN || "").trim()),
     healthy,
-    shopId: shopId() || row?.account_label || null,
+    shopId: shopId() || authorizedShop?.shop_id || row?.account_label || null,
+    shopName: authorizedShop?.shop_name || null,
+    region: authorizedShop?.region || null,
+    sellerType: authorizedShop?.seller_type || null,
     serviceId: serviceId() || null,
     listingEnabled: tiktokListingEnabled(),
     hasEnvCreds: hasEnv,
     hasStoredTokens: Boolean(row?.token_ciphertext || row?.refresh_ciphertext),
     redirectUrl: TIKTOK_OAUTH_REDIRECT,
-    scopes: TIKTOK_API_SCOPES,
+    scopes: Array.isArray(row?.scopes) ? row.scopes : [],
     checklist: hasEnv && connected ? [] : tiktokSetupChecklist(),
     lastError,
     shops: Array.isArray(shops) ? shops.slice(0, 5) : shops,
@@ -377,10 +397,11 @@ export async function tiktokConnectionStatus(storeId = STORE_DEFAULT) {
   };
 }
 
-/** List price = the Floor set price (ask_cents), same as Amazon. Buyer pays shipping.
+/** List price = Floor ask, with the user's requested 10% premium under $15. Buyer pays shipping.
  * No retail-discount, comps or return-reserve markups. Fee/profit are informational only. */
 export function suggestTikTokPriceCents(unit, feePct = TIKTOK_DEFAULT_FEE_PCT, _returnReservePct = 0) {
-  const list = Math.max(0, Math.round(Number(unit?.ask_cents) || 0));
+  const ask = Math.max(0, Math.round(Number(unit?.ask_cents) || 0));
+  const list = ask > 0 && ask < 1500 ? Math.round(ask * 1.10) : ask;
   const retail = Number(unit?.retail_cents) || Number(unit?.listing_specs?.retail_cents) || 0;
   const cost = defaultCostCents(unit);
   const fee = Number(feePct) || TIKTOK_DEFAULT_FEE_PCT;
