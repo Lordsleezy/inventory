@@ -5,7 +5,7 @@
  */
 import { asNetlifyFunction, floorLog } from "../lib/floor-log.mjs";
 import { json, optionsOk, serviceClient } from "../lib/server.mjs";
-import { portalAdminFromEvent } from "../lib/portal-auth.mjs";
+import { receiveAccessFromEvent, staffOwnsReceivedSkus } from "../lib/receive-auth.mjs";
 import { identifyFrames, lookupRetail, tokenCost } from "../lib/video-scan.mjs";
 import { medianReference, upcOfferPrices } from "../lib/receive-price.mjs";
 import { upcitemdbLookup } from "../lib/upc-lookup.mjs";
@@ -20,28 +20,6 @@ import {
 } from "../lib/floor-products.mjs";
 const receiveModel = () => process.env.GEMINI_RECEIVE_MODEL || 'gemini-3.5-flash-lite';
 const retailModel = () => process.env.GEMINI_RETAIL_MODEL || 'gemini-3.1-flash-lite-preview';
-
-async function authFromEvent(event) {
-  try {
-    const storeIdHint = JSON.parse(event.body || '{}').store_id;
-    return await portalAdminFromEvent(event, storeIdHint);
-  } catch (adminErr) {
-    if (adminErr?.status && adminErr.status !== 403) throw adminErr;
-    const token = (event.headers?.authorization || event.headers?.Authorization || "").replace(/^Bearer\s+/i, "");
-    if (!token) throw Object.assign(new Error("Sign in required"), { status: 401 });
-    const sb = serviceClient();
-    const { data: auth, error } = await sb.auth.getUser(token);
-    if (error || !auth.user) throw Object.assign(new Error("Sign in required"), { status: 401 });
-    const { data: staff } = await sb
-      .from("staff")
-      .select("store_id")
-      .eq("user_id", auth.user.id)
-      .is("deactivated_at", null)
-      .maybeSingle();
-    if (!staff?.store_id) throw Object.assign(new Error("Staff access required"), { status: 403 });
-    return { sb, storeId: staff.store_id, actor: auth.user.email || auth.user.id, userId: auth.user.id };
-  }
-}
 
 function specificsFromIdentity(identity) {
   return receiveSpecifics(identity);
@@ -62,8 +40,11 @@ async function budgetError(ctx) {
   }
   const cap = Number(settings.data?.monthly_cap_usd ?? 30);
   const spent = (spend.data || []).reduce((n, row) => n + Number(row.estimated_cost_usd || 0) + Number(row.reserved_usd || 0), 0);
-  return spent >= cap ? json(402, { ok: false, error: 'budget_exhausted',
-    message: `AI scan budget reached ($${spent.toFixed(2)} / $${cap.toFixed(2)}). Raise the cap under More → AI scan budget, or fill fields by hand.` }) : null;
+  if (spent < cap) return null;
+  return json(402, { ok: false, error: 'budget_exhausted',
+    message: ctx.isAdmin
+      ? `AI scan budget reached ($${spent.toFixed(2)} / $${cap.toFixed(2)}). Raise the cap under More → AI scan budget, or fill fields by hand.`
+      : 'The monthly AI scan limit has been reached. Fill the fields by hand or ask an admin for help.' });
 }
 
 function photoFill(identity, brand, model, title) {
@@ -88,8 +69,8 @@ export async function invoke(event) {
   if (event.httpMethod === "OPTIONS") return optionsOk();
   if (event.httpMethod !== "POST") return json(405, { ok: false, error: "POST required" });
 
-  const ctx = await authFromEvent(event);
   const body = JSON.parse(event.body || "{}");
+  const ctx = await receiveAccessFromEvent(event, body.store_id);
   if (body.action === 'confirm') {
     const gtin = normalizeGtin(String(body.upc || '').trim());
     if (!gtin.ok) return json(400, { ok: false, error: 'valid_upc_required' });
@@ -98,6 +79,9 @@ export async function invoke(event) {
     const title = String(fields.title || '').trim().slice(0, 250);
     if (!brand || !title) return json(400, { ok: false, error: 'product_details_required' });
     const cleanMeasure = value => { const n = Number(value); return Number.isFinite(n) && n > 0 && n < 10000 ? n : null; };
+    const skus = Array.isArray(body.skus) ? body.skus.map(String).filter(Boolean).slice(0, 100) : [];
+    if (!await staffOwnsReceivedSkus(ctx, skus))
+      return json(403, { ok: false, error: 'received_unit_access_required' });
     const { data: existing } = await ctx.sb.from('floor_products').select('*').eq('gtin14', gtin.gtin14).maybeSingle();
     const productDimensions = Object.fromEntries(
       ['product_height_in', 'product_width_in', 'product_depth_in', 'product_weight_lb']
@@ -123,7 +107,6 @@ export async function invoke(event) {
       dimSources: { ...(existing?.dim_sources || {}),
         ...Object.fromEntries(['length_in','width_in','height_in','weight_lb'].filter(k => cleanMeasure(fields[k]))
           .map(k => [k, String(dimensionSources[`package_${k}`] || 'staff_entered').slice(0, 50)])) } });
-    const skus = Array.isArray(body.skus) ? body.skus.map(String).filter(Boolean).slice(0, 100) : [];
     if (skus.length && Object.keys(productDimensions).length) {
       const productSource = Object.keys(productDimensions).some(k => dimensionSources[k] === 'estimated') ? 'estimated' : 'verified';
       const { error } = await ctx.sb.from('units').update({ ...productDimensions, dims_source: productSource })
