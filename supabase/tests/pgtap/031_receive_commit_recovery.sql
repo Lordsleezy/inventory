@@ -45,7 +45,7 @@ select is((select count(*)::int from public.receive_claim_jobs(current_setting('
 select is((select count(*)::int from public.receive_claim_jobs(current_setting('receive_test.store')::uuid,5)),1,'a second worker cannot claim the first lease');
 select throws_ok($q$select public.floor_receive_apply_channel(current_setting('receive_test.store')::uuid,(current_setting('receive_test.result')::jsonb#>>'{skus,0}'),'ebay')$q$,'P0001','channel_not_authorized','worker cannot add a channel the owner never selected');
 insert into public.sku_ledger(sku,store_id,issued_at) values('94399',current_setting('receive_test.store')::uuid,now());
-select throws_ok($q$insert into public.units(sku,store_id,state,qty_on_hand,received_at,updated_at) values('94399',current_setting('receive_test.store')::uuid,'sold',0,now(),now())$q$,'23514','unit_photo_required','imports cannot bypass photo requirement with sold/zero-stock state');
+select throws_ok($q$insert into public.units(sku,store_id,state,qty_on_hand,received_at,updated_at) values('94399',current_setting('receive_test.store')::uuid,'available',1,now(),now())$q$,'23514','unit_photo_required','sellable units cannot bypass the photo requirement');
 select set_config('request.jwt.claim.role','authenticated',true);
 select set_config('request.jwt.claim.sub',current_setting('receive_test.owner'),true);
 select public.portal_set_bay(12,array[3,3,3]);
