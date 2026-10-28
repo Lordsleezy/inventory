@@ -5,7 +5,7 @@ import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 
 type Period = { id: string; period_type: 'month' | 'week'; period_start: string; period_end: string; status: 'draft' | 'ready' | 'locked'; locked_at: string | null; locked_by_name?: string | null };
 type Row = Record<string, unknown>;
-type Report = { period: Period; checks: Check[]; sales: Row[]; fees: Row[]; labels: Row[]; expenses: Row[]; returns: Row[]; dispositions: Row[]; inventory_bought: Row[]; manifests: Row[]; payouts: Row[]; payout_balances: Row[]; payments: Row[]; adjustments: Row[]; prior_corrections: Row[]; withdrawals: Row[]; money_trail: Row[] };
+type Report = { period: Period; checks: Check[]; sales: Row[]; fees: Row[]; labels: Row[]; expenses: Row[]; returns: Row[]; dispositions: Row[]; inventory_bought: Row[]; manifests: Row[]; payouts: Row[]; payout_balances: Row[]; payments: Row[]; square_payments?: Row[]; adjustments: Row[]; prior_corrections: Row[]; withdrawals: Row[]; money_trail: Row[] };
 type Check = { key: string; label: string; ok: boolean; count: number; detail: string; explanation: string | null };
 type Snapshot = { captured_on: string; boundary: string; unit_count: number; cost_value_cents: number };
 type Opening = { source: string; effective_on: string; amount_cents: number; note: string };
@@ -58,10 +58,67 @@ function display(value: unknown, key: string, money: (c: number) => string) {
   if (typeof value === 'object') return JSON.stringify(value);
   return String(value);
 }
+function allocateTicketPayments(rows: Row[]): Row[] {
+  const result = rows.map((row) => ({ ...row }));
+  const groups = new Map<string, number[]>();
+  result.forEach((row, index) => { const ticket = String(row.ticket_id || ''); if (ticket) groups.set(ticket, [...(groups.get(ticket) || []), index]); });
+  for (const indexes of groups.values()) {
+    if (indexes.length < 2) continue;
+    const totals = { cash_cents: Math.max(...indexes.map((i) => Number(result[i].cash_cents || 0))), card_cents: Math.max(...indexes.map((i) => Number(result[i].card_cents || 0))) };
+    const weights = indexes.map((i) => Math.max(0, Number(result[i].price_cents || 0) + Number(result[i].tax_collected_cents ?? result[i].tax_cents ?? 0)));
+    const equal = weights.every((x) => x === 0); const sum = weights.reduce((a, b) => a + b, 0) || indexes.length;
+    for (const key of ['cash_cents', 'card_cents'] as const) {
+      const total = totals[key]; const allocated = weights.map((w) => Math.floor(total * (equal ? 1 : w) / sum));
+      let remainder = total - allocated.reduce((a, b) => a + b, 0); for (let i = 0; remainder > 0; i = (i + 1) % allocated.length, remainder--) allocated[i]++;
+      indexes.forEach((index, i) => { result[index][key] = allocated[i]; });
+    }
+  }
+  return result;
+}
+function applySquareMatchedFees(sales: Row[], payments: Row[] = []) {
+  const result = sales.map((sale) => ({ ...sale }));
+  const indexById = new Map(result.map((sale, index) => [String(sale.id), index]));
+  for (const payment of payments.filter((row) => row.match_status === 'matched' && Array.isArray(row.sale_ids))) {
+    const indexes = (payment.sale_ids as unknown[]).map((id) => indexById.get(String(id))).filter((index): index is number => index !== undefined);
+    if (!indexes.length) continue;
+    const fee = Math.max(0, Number(payment.fee_cents || 0));
+    const weights = indexes.map((index) => Math.max(0, Number(result[index].price_cents || 0) + Number(result[index].tax_collected_cents ?? result[index].tax_cents ?? 0)));
+    const total = weights.reduce((sum, value) => sum + value, 0) || indexes.length;
+    const shares = weights.map((weight) => Math.floor(fee * (weights.every((value) => value === 0) ? 1 : weight) / total));
+    let remainder = fee - shares.reduce((sum, value) => sum + value, 0);
+    for (let i = 0; remainder > 0; i = (i + 1) % shares.length, remainder--) shares[i]++;
+    indexes.forEach((index, i) => {
+      const priorFee = Number(result[index].processing_fee_cents || 0);
+      result[index].processing_fee_cents = shares[i];
+      result[index].processing_fee_source = 'actual';
+      if (typeof result[index].profit_cents === 'number') result[index].profit_cents = Number(result[index].profit_cents) + priorFee - shares[i];
+    });
+  }
+  return result;
+}
+const TEST_NOTE = /\b(test|smoke|demo|live check)\b/i;
+function cleanBookRows(rows: Row[] = []) {
+  return rows.filter((row) => !['note', 'description', 'void_reason', 'transaction_memo', 'reason'].some((key) => typeof row[key] === 'string' && TEST_NOTE.test(String(row[key]))));
+}
 function columns(rows: Row[]) {
   const preferred = ['date', 'sold_at', 'spent_on', 'sku', 'item_title', 'title', 'receipt_no', 'channel', 'price_cents', 'shipping_cents', 'final_value_fee_cents', 'promoted_fee_cents', 'payment_fee_cents', 'other_fee_cents', 'tax_cents', 'ship_cost_cents', 'cost_cents', 'cost_source', 'profit_cents', 'fees_absorbed_by_store', 'id'];
-  const keys = [...new Set(rows.flatMap(Object.keys))];
-  return [...preferred.filter((key) => keys.includes(key)), ...keys.filter((key) => !preferred.includes(key))];
+  const keys = [...new Set(rows.flatMap(Object.keys))].filter((key) => !['store_id', 'employee_id', 'actor_id'].includes(key));
+  return [...preferred.filter((key) => keys.includes(key) && key !== 'id'), ...keys.filter((key) => !preferred.includes(key) && key !== 'id'), ...(keys.includes('id') ? ['id'] : [])];
+}
+const columnTitle = (key: string) => ({ sold_at: 'Sold at', item_title: 'Item', receipt_no: 'Receipt', channel: 'Channel', cost_source: 'Cost source', profit_cents: 'Profit', price_cents: 'Price', sale_count: 'Sale count', id: 'Record ID', amount_cents: 'Amount', employee_id: 'Person' } as Record<string, string>)[key] || key.replace(/_cents$/, '').replaceAll('_', ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+const channelTitle = (value: unknown) => {
+  const raw = String(value ?? '').toLowerCase();
+  if (['floor', 'in_store', 'instore', 'store'].includes(raw)) return 'In-store';
+  return ({ ebay: 'eBay', depop: 'Depop', website: 'Website', amazon: 'Amazon', tiktok: 'TikTok', mercari: 'Mercari', square: 'Square', safe: 'Safe cash' } as Record<string, string>)[raw] || String(value ?? '');
+};
+function exportValue(value: unknown, key: string, money: (c: number) => string) {
+  if (key === 'channel' || key === 'source' || key === 'withdrawal_source') return channelTitle(value);
+  if (key.endsWith('_cents') && typeof value === 'number') return value / 100;
+  if (key === 'cost_source' && value === 'default') return 'Default, needs real cost';
+  if (key === 'commission_breakdown' && Array.isArray(value)) return value.map((entry) => { const x = entry as Row; return `${x.person || 'Staff'}: ${typeof x.amount_cents === 'number' ? money(x.amount_cents) : 'pending'}`; }).join('; ');
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'object') return JSON.stringify(value, (_k, v) => typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f-]{27,}$/i.test(v) ? '[record]' : v);
+  return value;
 }
 
 export function BooksPage({ client, money, native = false, onNativeNavigation }: Props) {
@@ -77,6 +134,8 @@ export function BooksPage({ client, money, native = false, onNativeNavigation }:
   const [section, setSection] = useState<string>('summary');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [exportFiles, setExportFiles] = useState<{ excel: Uint8Array; pdf: Uint8Array } | null>(null);
+  const [exportsPreparing, setExportsPreparing] = useState(false);
   const [openForm, setOpenForm] = useState(false);
   const [openSource, setOpenSource] = useState('safe');
   const [openDate, setOpenDate] = useState('');
@@ -96,7 +155,7 @@ export function BooksPage({ client, money, native = false, onNativeNavigation }:
     await Promise.all(loaded.map(async (p) => {
       const { data: reportData, error: reportError } = await client.rpc('portal_books_report', { p_period: p.id });
       if (reportError) { console.error('Books period preview failed', reportError); return; }
-      const r = reportData as Report; const sales = r.sales || [];
+      const r = reportData as Report; const sales = cleanBookRows(r.sales || []);
       const hasData = [sales, r.fees, r.labels, r.expenses, r.returns, r.dispositions, r.inventory_bought, r.manifests, r.payouts, r.payments, r.adjustments, r.withdrawals, r.money_trail].some((rows) => rows?.length);
       next[p.id] = { sales: sales.reduce((n, row) => n + Number(row.price_cents || 0) + Number(row.shipping_cents || 0), 0), profit: sales.reduce((n, row) => n + Number(row.profit_cents || 0), 0), fees: sales.reduce((n, row) => n + Number(row.channel_fee_cents || 0) + Number(row.processing_fee_cents || 0), 0), checks: r.checks || [], hasData };
     }));
@@ -111,7 +170,7 @@ export function BooksPage({ client, money, native = false, onNativeNavigation }:
   useEffect(() => { void loadPeriods().catch((e) => friendlyError('load periods', e)); }, [loadPeriods]);
 
   const loadPeriod = useCallback(async (p: Period) => {
-    setBusy(true); setError(''); setSelected(p); setSection('summary'); setFilterKind(''); setReport(null); onNativeNavigation?.(true, p.period_type === 'month' ? monthLabel(p.period_start) : `${p.period_start} – ${p.period_end}`, () => { setSelected(null); setReport(null); setFilterKind(''); onNativeNavigation?.(false, 'Books'); void loadPeriods(); });
+    setBusy(true); setError(''); setExportFiles(null); setSelected(p); setSection('summary'); setFilterKind(''); setReport(null); onNativeNavigation?.(true, p.period_type === 'month' ? monthLabel(p.period_start) : `${p.period_start} – ${p.period_end}`, () => { setSelected(null); setReport(null); setExportFiles(null); setFilterKind(''); onNativeNavigation?.(false, 'Books'); void loadPeriods(); });
     try {
       const [r, s, b] = await Promise.all([
         client.rpc('portal_books_report', { p_period: p.id }),
@@ -121,7 +180,9 @@ export function BooksPage({ client, money, native = false, onNativeNavigation }:
       if (r.error) throw r.error; if (s.error) throw s.error; if (b.error) throw b.error;
       const { data: status, error: statusError } = await client.rpc('portal_books_refresh_readiness', { p_period: p.id });
       if (statusError) throw statusError;
-      const next = { ...(r.data as Report), period: { ...(r.data as Report).period, status: status as Period['status'] } };
+      const rawReport = r.data as Report;
+      for (const key of ['sales','fees','labels','expenses','returns','dispositions','inventory_bought','manifests','payouts','payout_balances','payments','adjustments','prior_corrections','withdrawals','money_trail'] as const) rawReport[key] = cleanBookRows(rawReport[key] || []);
+      const next = { ...rawReport, sales: applySquareMatchedFees(allocateTicketPayments((rawReport.sales || []).map((sale) => Number(sale.cost_cents) === 900 ? { ...sale, cost_source: 'default' } : sale)), rawReport.square_payments || []), period: { ...rawReport.period, status: status as Period['status'] } };
       setReport(next); setSelected({ ...p, status: status as Period['status'] }); setSnapshots((s.data || []) as Snapshot[]); setOpenings((b.data || []) as Opening[]);
       void loadPeriods();
     } catch (e) { friendlyError('load this report', e); }
@@ -146,31 +207,44 @@ export function BooksPage({ client, money, native = false, onNativeNavigation }:
       item.revenue += Number(row.price_cents || 0) + Number(row.shipping_cents || 0); item.fees += Number(row.channel_fee_cents || 0) + Number(row.processing_fee_cents || 0);
       item.cost += Number(row.cost_cents || 0); item.profit += Number(row.profit_cents || 0); item.tax += Number(row.tax_collected_cents ?? row.tax_cents ?? 0); item.count += Number(row.qty || 1); item.paul += Number(row.paul_commission_cents || 0); item.jacob += Number(row.jacob_commission_cents || 0); item.shipping += Number(row.ship_cost_cents || 0); channels.set(ch, item);
     }
+    for (const [channel, item] of channels) item.fees = (report?.fees || []).filter((f) => String(f.channel || '').toLowerCase() === channel).reduce((n, f) => n + Number(f.amount_cents || 0), 0);
     const expense = (report?.expenses || []).filter((r) => !r.voided_at).reduce((n, r) => n + Number(r.amount_cents || 0), 0);
     const commission = (report?.payouts || []).reduce((n, r) => n + Number(r.amount_cents || 0), 0);
     const platformDeposits = (report?.withdrawals || []).filter((r) => !r.voided_at && r.payout_id && Number(r.amount_cents) > 0).reduce((n, r) => n + Number(r.amount_cents || 0), 0);
     const employeePayments = (report?.payments || []).reduce((n, r) => n + Number(r.amount_cents || 0), 0);
-    return { channels: [...channels.entries()].sort(([a], [b]) => a.localeCompare(b)), revenue: sales.reduce((n, r) => n + Number(r.price_cents || 0) + Number(r.shipping_cents || 0), 0), fees: sales.reduce((n, r) => n + Number(r.channel_fee_cents || 0) + Number(r.processing_fee_cents || 0), 0), shipping: sales.reduce((n, r) => n + Number(r.ship_cost_cents || 0), 0), cost: sales.reduce((n, r) => n + Number(r.cost_cents || 0), 0), profit: sales.reduce((n, r) => n + Number(r.profit_cents || 0), 0), expense, commission, cashIn: sales.reduce((n, r) => n + Number(r.cash_cents || 0) + Number(r.card_cents || 0), 0), cashOut: (report?.withdrawals || []).filter((r) => !r.voided_at && typeof r.amount_cents === 'number' && Number(r.amount_cents) < 0).reduce((n, r) => n + Math.abs(Number(r.amount_cents)), 0) + expense + employeePayments, platformDeposits, tax: sales.reduce((n, r) => n + Number(r.tax_collected_cents ?? r.tax_cents ?? 0), 0) };
+    return { channels: [...channels.entries()].sort(([a], [b]) => a.localeCompare(b)), revenue: sales.reduce((n, r) => n + Number(r.price_cents || 0) + Number(r.shipping_cents || 0), 0), fees: (report?.fees || []).reduce((n, f) => n + Number(f.amount_cents || 0), 0), shipping: sales.reduce((n, r) => n + Number(r.ship_cost_cents || 0), 0), cost: sales.reduce((n, r) => n + Number(r.cost_cents || 0), 0), profit: sales.reduce((n, r) => n + Number(r.profit_cents || 0), 0), expense, commission, cashIn: sales.reduce((n, r) => n + Number(r.cash_cents || 0) + Number(r.card_cents || 0), 0), cashOut: (report?.withdrawals || []).filter((r) => !r.voided_at && typeof r.amount_cents === 'number' && Number(r.amount_cents) < 0).reduce((n, r) => n + Math.abs(Number(r.amount_cents)), 0) + expense + employeePayments, platformDeposits, tax: sales.reduce((n, r) => n + Number(r.tax_collected_cents ?? r.tax_cents ?? 0), 0) };
   }, [report]);
 
   const generated = useMemo<Record<string, Row[]>>(() => {
     if (!report) return {} as Record<string, Row[]>;
     const trails = report.money_trail || [];
     const pending: Row[] = [
-      ...report.sales.filter((s) => s.cost_cents == null || ['default', 'builtin', 'estimated'].includes(String(s.cost_source))).map((s) => ({ id: s.id, date: s.sold_at, sku: s.sku, issue: 'Sale needs a confirmed item cost', amount_cents: s.price_cents })),
-      ...report.sales.filter((s) => ['pending', 'none'].includes(String(s.fee_source)) && !['in_store', 'website', 'depop'].includes(String(s.channel))).map((s) => ({ id: s.id, date: s.sold_at, sku: s.sku, issue: 'Waiting for marketplace fees', amount_cents: s.price_cents })),
+      ...report.sales.filter((s) => s.cost_cents == null || Number(s.cost_cents) === 900 || ['default', 'builtin', 'estimated'].includes(String(s.cost_source))).map((s) => ({ id: s.id, date: s.sold_at, sku: s.sku, issue: Number(s.cost_cents) === 900 ? 'Default $9 cost, needs real cost' : 'Sale needs a confirmed item cost', amount_cents: s.price_cents })),
+      ...report.sales.filter((s) => ['pending', 'none'].includes(String(s.fee_source)) && !['in_store', 'instore', 'floor', 'store', 'website'].includes(String(s.channel).toLowerCase())).map((s) => ({ id: s.id, date: s.sold_at, sku: s.sku, issue: String(s.channel).toLowerCase() === 'depop' ? 'Depop fee has not been entered' : 'Waiting for marketplace fees', amount_cents: s.price_cents })),
       ...report.labels.filter((l) => l.status === 'refund pending' || l.status === 'voided').map((l) => ({ id: l.id, date: l.date, issue: l.status === 'voided' ? 'Voided label · refund not requested/recorded' : 'Label refund pending', amount_cents: l.refund_amount_cents ?? l.cost_cents })),
       ...trails.filter((s) => s.status !== 'Matched').map((s) => ({ ...s, issue: s.status })),
       ...report.manifests.map((m) => ({ id: m.id, date: m.manifest_on, issue: 'Manifest total paid is not recorded; only unit-level acquisition costs may be available', amount_cents: null })),
     ];
     const reconciliation = SOURCES.map((source) => {
       const opening = openings.find((x) => x.source === source);
-      const sales = report.sales.filter((s) => ['floor','in_store','instore'].includes(String(s.channel).toLowerCase()) ? source === 'safe' : String(s.channel).toLowerCase() === source).reduce((n, s) => n + Number(s.price_cents || 0) + Number(s.shipping_cents || 0) - Number(s.tax_owed_cents || 0), 0);
-      const fees = report.sales.filter((s) => String(s.channel).toLowerCase() === source).reduce((n, s) => n + Number(s.channel_fee_cents || 0) + Number(s.processing_fee_cents || 0), 0);
-      const withdrawals = report.withdrawals.filter((w) => w.source === source && !w.voided_at).reduce((n, w) => n + Number(w.amount_cents || 0), 0);
-      return { source: SOURCE_LABEL[source], opening_balance_cents: opening?.amount_cents ?? null, recorded_sales_cents: sales, recorded_fees_cents: fees, refunds_cents: 0, withdrawals_cents: withdrawals, pending_cents: null, ending_balance_cents: null, gap_cents: null, status: opening ? 'Partial · no payout/deposit matching source' : 'Missing opening balance' };
+      const isStoreSale = (s: Row) => ['floor','in_store','instore','store'].includes(String(s.channel).toLowerCase());
+      const accountSales = report.sales.filter((s) => source === 'safe' ? isStoreSale(s) : source === 'square' ? (isStoreSale(s) && ['card','split'].includes(String(s.payment_method).toLowerCase())) || String(s.channel).toLowerCase() === 'website' : String(s.channel).toLowerCase() === source);
+      const squarePayments = (report.square_payments || []).filter((p) => p.payment_id);
+      const sales = source === 'square'
+        ? squarePayments.reduce((n, p) => n + Number(p.amount_cents || 0), 0)
+        : accountSales.reduce((n, s) => n + (isStoreSale(s) ? Number(source === 'safe' ? s.cash_cents || 0 : s.card_cents || 0) : Number(s.price_cents || 0) + Number(s.shipping_cents || 0) + Number(s.tax_owed_cents || 0)), 0);
+      const fees = source === 'square'
+        ? squarePayments.reduce((n, p) => n + Number(p.fee_cents || 0), 0)
+        : source === 'ebay'
+        ? report.fees.filter((f) => String(f.channel).toLowerCase() === 'ebay').reduce((n, f) => n + Number(f.amount_cents || 0), 0) + report.labels.filter((l) => String(l.carrier).toLowerCase() === 'ebay' || String(l.account).toLowerCase().startsWith('ikonik')).reduce((n, l) => n + Number(l.signed_amount_cents ?? (l.status === 'refunded' ? -Number(l.cost_cents || 0) : l.cost_cents || 0)), 0)
+        : accountSales.reduce((n, s) => n + Number(s.channel_fee_cents || 0) + Number(s.processing_fee_cents || 0), 0);
+      const refunds = source === 'square' ? squarePayments.reduce((n, p) => n + Number(p.refund_cents || 0), 0) : 0;
+      const withdrawals = report.withdrawals.filter((w) => w.source === source && !w.voided_at).reduce((n, w) => n + (source === 'safe' ? Number(w.amount_cents || 0) : -Math.abs(Number(w.amount_cents || 0))), 0);
+      return { source: SOURCE_LABEL[source], opening_balance_cents: opening?.amount_cents ?? null, recorded_sales_cents: sales, recorded_fees_cents: fees, refunds_cents: refunds, withdrawals_cents: withdrawals, pending_cents: null, ending_balance_cents: null, gap_cents: null, status: opening ? 'Partial · no payout/deposit matching source' : 'Missing opening balance' };
     });
-    return { money_trail: trails, pending, sales_tax: report.sales.map((s) => ({ id: s.id, date: s.sold_at, receipt_no: s.receipt_no, sku: s.sku, channel: s.channel, taxable_sales_cents: Number(s.price_cents || 0) + Number(s.shipping_cents || 0), tax_collected_cents: Number(s.tax_collected_cents ?? s.tax_cents ?? 0), tax_owed_cents: Number(s.tax_owed_cents || 0), remitted_by: s.tax_remitted_by, tax_rate: 'Not recorded by source ledger' })), inventory: snapshots.map((s) => ({ ...s, cost_value: s.cost_value_cents })), reconciliation, payments: [...report.payments, ...report.adjustments, ...report.prior_corrections.map((row) => ({ ...row, entry_type: 'Prior-month correction' }))] };
+    const peopleById = Object.fromEntries((report.payout_balances || []).map((p) => [String(p.id || p.user_id), String(p.person || 'Staff')]));
+    const named = (row: Row) => ({ ...row, person: row.person || peopleById[String(row.employee_id || '')] || '' });
+    return { money_trail: trails, pending, sales_tax: report.sales.map((s) => { const inStore = ['floor','in_store','instore','store'].includes(String(s.channel || '').toLowerCase()); return { id: s.id, date: s.sold_at, receipt_no: s.receipt_no, sku: s.sku, channel: channelTitle(s.channel), taxable_sales_cents: Number(s.price_cents || 0) + Number(s.shipping_cents || 0), tax_collected_cents: Number(s.tax_collected_cents ?? s.tax_cents ?? 0), tax_owed_cents: Number(s.tax_owed_cents || 0), remitted_by: s.tax_remitted_by === 'marketplace' ? 'Marketplace remits' : inStore ? 'Store remits · Penryn / Placer County' : 'Store remits', tax_rate: s.tax_cents && s.price_cents ? `${(Number(s.tax_cents) / Number(s.price_cents) * 100).toFixed(3)}% effective` : 'Not available' }; }), inventory: snapshots.map((s) => ({ captured_on: s.captured_on, boundary: s.boundary, unit_count: s.unit_count, cost_value_cents: s.cost_value_cents })), reconciliation, payments: [...report.payments, ...report.adjustments, ...report.prior_corrections.map((row) => ({ ...row, entry_type: 'Prior-month correction' })), ...(report.square_payments || [])].map(named) };
   }, [report, openings, snapshots]);
 
   const visibleSections = mode === 'week' ? SECTIONS.filter(([id]) => WEEK_SECTIONS.has(id)) : SECTIONS;
@@ -219,18 +293,34 @@ export function BooksPage({ client, money, native = false, onNativeNavigation }:
   async function buildExcel() {
     if (!report || !selected) return new ArrayBuffer(0);
     const wb = new ExcelJS.Workbook(); wb.creator = 'Floor Books'; wb.subject = `${selected.period_start} to ${selected.period_end}`;
+    wb.views = [{ x: 0, y: 0, width: 12000, height: 8000, firstSheet: 0, activeTab: 0, visibility: 'visible' }];
     for (const [sheetIndex, sheet] of reportSheets.entries()) {
       const ws = wb.addWorksheet(excelSheetName(sheet.label, sheetIndex));
       const rows = sheet.rows; const keys = columns(rows); if (!keys.length) keys.push('record');
-      ws.addRow(keys.map((k) => k.replaceAll('_', ' ').replace(/\b\w/g, (x) => x.toUpperCase())));
-      ws.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } }; ws.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF253348' } };
-      ws.views = [{ state: 'frozen', ySplit: 1 }]; ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: Math.max(keys.length, 1) } };
-      if (!rows.length) ws.addRow(['No records this period']);
-      for (const row of rows) ws.addRow(keys.map((k) => row[k] ?? ''));
-      ws.addRow([]); ws.addRow(['Period totals', ...keys.slice(1).map((key) => rows.reduce((sum, row) => typeof row[key] === 'number' && (key.endsWith('_cents') || key === 'qty') ? sum + Number(row[key]) : sum, 0))]);
+      let headerRow = 1;
+      if (sheet.key === 'summary') {
+        ws.addRow(['How to read this']); ws.addRow(['Sales are accrual revenue. Cost of goods, fees, labels, commissions and profit are shown separately. Sales tax collected is held and owed, not income. Money out is negative. “In transit” means funds have not yet been matched to a payout or bank deposit. Record ID is the source row to trace.']);
+        ws.mergeCells(2, 1, 2, 6); ws.getRow(2).height = 42; ws.getRow(2).alignment = { wrapText: true, vertical: 'top' };
+        ws.addRow(['October summary', 'Amount']);
+        for (const [label, amount] of [['Sales', totals.revenue], ['Sale count', report!.sales.reduce((n, sale) => n + Number(sale.qty || 1), 0)], ['Cost of goods', totals.cost], ['Fees + labels', totals.fees + totals.shipping], ['Commissions', totals.commission], ['Profit', totals.profit]] as [string, number][]) { const row = ws.addRow([label, label === 'Sale count' ? amount : amount / 100]); if (label !== 'Sale count') row.getCell(2).numFmt = '$#,##0.00;[Red]-$#,##0.00'; }
+        ws.addRow([]); ws.addRow(['Sales by channel', 'Sale count', 'Revenue', 'Fees', 'Labels', 'Profit']);
+        for (const [channel, t] of totals.channels) { const row = ws.addRow([channelTitle(channel), t.count, t.revenue / 100, t.fees / 100, t.shipping / 100, t.profit / 100]); for (let c = 3; c <= 6; c++) row.getCell(c).numFmt = '$#,##0.00;[Red]-$#,##0.00'; }
+        ws.addRow([]); ws.addRow(['Close checklist', 'Status', 'Items']);
+        for (const check of report.checks) ws.addRow([check.label, check.ok || check.explanation ? 'Done / explained' : 'Needs work', check.count]);
+        ws.addRow([]); ws.addRow(['Detailed channel lines']);
+        ws.addRow(keys.map(columnTitle)); headerRow = ws.rowCount;
+      } else {
+        ws.addRow(keys.map(columnTitle));
+      }
+      const tableHeader = ws.getRow(headerRow); tableHeader.font = { bold: true, color: { argb: 'FFFFFFFF' } }; tableHeader.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF253348' } }; tableHeader.alignment = { wrapText: true, vertical: 'middle' }; tableHeader.height = 32;
+      ws.views = [{ state: 'frozen', ySplit: headerRow }]; ws.autoFilter = { from: { row: headerRow, column: 1 }, to: { row: headerRow, column: Math.max(keys.length, 1) } };
+      if (!rows.length) ws.addRow(['Nothing this month']);
+      for (const row of rows) ws.addRow(keys.map((k) => exportValue(row[k], k, money)));
+      const totalRow = ws.addRow(['Period totals', ...keys.slice(1).map((key) => rows.reduce((sum, row) => typeof row[key] === 'number' && (key.endsWith('_cents') || key === 'qty' || key === 'sale_count') ? sum + Number(row[key]) : sum, 0) / (key.endsWith('_cents') ? 100 : 1))]);
+      totalRow.font = { bold: true }; totalRow.eachCell((cell, col) => { const key = keys[col - 1]; if (key?.endsWith('_cents')) cell.numFmt = '$#,##0.00;[Red]-$#,##0.00'; });
       ws.addRow(['Period', `${selected.period_start} through ${selected.period_end}`]);
-      ws.columns = keys.map((key) => ({ key, width: Math.min(34, Math.max(12, key.length + 3)), style: key.endsWith('_cents') ? { numFmt: '$#,##0.00;[Red]-$#,##0.00' } : {} }));
-      ws.eachRow((row, number) => { if (number > 1) row.eachCell((cell, col) => { const key = keys[col - 1]; if (key?.endsWith('_cents') && typeof cell.value === 'number') cell.value = cell.value / 100; else if (key && /(date|_at|_on)$/.test(key) && typeof cell.value === 'string' && !Number.isNaN(Date.parse(cell.value))) { cell.value = new Date(cell.value); cell.numFmt = key.endsWith('_at') ? 'yyyy-mm-dd hh:mm' : 'yyyy-mm-dd'; } }); });
+      ws.columns = keys.map((key) => ({ key, width: Math.min(42, Math.max(12, columnTitle(key).length + 3)), style: key.endsWith('_cents') ? { numFmt: '$#,##0.00;[Red]-$#,##0.00', alignment: { horizontal: 'right' } } : {} }));
+      ws.eachRow((row, number) => { if (number > headerRow) row.eachCell((cell, col) => { const key = keys[col - 1]; if (key && /(date|_at|_on)$/.test(key) && typeof cell.value === 'string' && !Number.isNaN(Date.parse(cell.value))) { cell.value = new Date(cell.value); cell.numFmt = key.endsWith('_at') ? 'mmm d, yyyy h:mm AM/PM' : 'mmm d, yyyy'; } }); });
     }
     return wb.xlsx.writeBuffer();
   }
@@ -251,34 +341,61 @@ export function BooksPage({ client, money, native = false, onNativeNavigation }:
     };
     page.drawText('Open Box Industries · Books', { x: margin, y, size: 18, font: bold }); y -= 25;
     page.drawText(`${monthLabel(selected!.period_start)} · ${selected!.period_start} to ${selected!.period_end}`, { x: margin, y, size: 11, font }); y -= 25;
-    line(`Revenue ${money(totals.revenue)}   Fees ${money(totals.fees)}   Cost of goods ${money(totals.cost)}   Profit ${money(totals.profit)}`, true);
-    line(`Expenses ${money(totals.expense)}   Commissions ${money(totals.commission)}   Sales tax ${money(totals.tax)}`); y -= 8;
+    line('How to read this: sales tax collected is held and owed, not income. Money out is negative. In transit means funds are not yet matched to a payout or bank deposit. Record IDs identify source rows.', true);
+    line(`Sales ${money(totals.revenue)}   Cost of goods ${money(totals.cost)}   Fees + labels ${money(totals.fees + report!.labels.reduce((n, r) => n + Number(r.cost_cents || 0), 0))}   Commissions ${money(totals.commission)}   Profit ${money(totals.profit)}`, true);
+    line(`Sale count ${report!.sales.reduce((n, sale) => n + Number(sale.qty || 1), 0)}`);
+    line(`Expenses ${money(totals.expense)}   Sales tax collected and owed ${money(totals.tax)}`); y -= 8;
+    line(`Close checklist ${report!.checks.filter((c) => c.ok || c.explanation).length} of ${report!.checks.length} done`, true);
     for (const sheet of reportSheets) {
-      newPage(sheet.label); const rows = sheet.rows; if (!rows.length) { line('No records in this period.'); continue; }
+      newPage(sheet.label); const rows = sheet.rows; if (!rows.length) { line('Nothing this month.'); continue; }
       const keys = columns(rows);
       for (const row of rows) {
-        for (const key of keys) line(`${key.replaceAll('_', ' ')}: ${display(row[key], key, money)}`);
+        for (const key of keys) {
+          const raw = row[key];
+          const value = key.endsWith('_cents') && typeof raw === 'number' ? money(Number(raw)) : key === 'channel' || key === 'source' ? channelTitle(raw) : key === 'cost_source' && raw === 'default' ? 'Default, needs real cost' : key === 'commission_breakdown' ? exportValue(raw, key, money) : /(date|_at|_on)$/.test(key) && typeof raw === 'string' && !Number.isNaN(Date.parse(raw)) ? new Date(raw).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : display(raw, key, money);
+          line(`${columnTitle(key)}: ${value}`);
+        }
         line('');
       }
+      const sum = keys.filter((key) => key.endsWith('_cents')).map((key) => `${columnTitle(key)} ${money(rows.reduce((n, r) => n + Number(r[key] || 0), 0))}`).join(' · ');
+      if (sum) line(`Period totals · ${sum}`, true);
     }
     const pages = pdf.getPages(); pages.forEach((p, i) => p.drawText(`Page ${i + 1} of ${pages.length} · ${selected!.period_start}–${selected!.period_end}`, { x: margin, y: 14, size: 8, font }));
     return pdf.save();
   }
-  async function exportFile(format: 'excel' | 'pdf') {
-    if (!report || !selected) return;
-    try {
-      if (selected.status === 'locked') {
-        const { data, error: e } = await client.rpc('portal_books_frozen_export', { p_period: selected.id, p_format: format });
-        if (e) throw e;
-        if (typeof data !== 'string' || !data) throw new Error('Frozen export returned no file data');
-        const binary = atob(data); const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
-        download(`Books-${selected.period_start}.${format === 'excel' ? 'xlsx' : 'pdf'}`, bytes, format === 'excel' ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : 'application/pdf'); return;
-      }
-      const buffer = format === 'excel' ? await buildExcel() : await buildPdf();
-      download(`Books-${selected.period_start}.${format === 'excel' ? 'xlsx' : 'pdf'}`, buffer, format === 'excel' ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : 'application/pdf');
-    } catch (e) {
-      friendlyError('download this report', e);
-    }
+  useEffect(() => {
+    if (!report || !selected) { setExportFiles(null); return; }
+    let cancelled = false;
+    setExportsPreparing(true); setExportFiles(null);
+    void (async () => {
+      try {
+        let excel: Uint8Array; let pdf: Uint8Array;
+        if (selected.status === 'locked') {
+          const [x, p] = await Promise.all([
+            client.rpc('portal_books_frozen_export', { p_period: selected.id, p_format: 'excel' }),
+            client.rpc('portal_books_frozen_export', { p_period: selected.id, p_format: 'pdf' }),
+          ]);
+          if (x.error) throw x.error; if (p.error) throw p.error;
+          if (typeof x.data !== 'string' || !x.data || typeof p.data !== 'string' || !p.data) throw new Error('Frozen export returned no file data');
+          const decode = (value: string) => { const binary = atob(value); return Uint8Array.from(binary, (c) => c.charCodeAt(0)); };
+          excel = decode(x.data); pdf = decode(p.data);
+        } else {
+          const [x, p] = await Promise.all([buildExcel(), buildPdf()]);
+          excel = x instanceof Uint8Array ? x : new Uint8Array(x); pdf = p instanceof Uint8Array ? p : new Uint8Array(p);
+        }
+        if (!cancelled) setExportFiles({ excel, pdf });
+      } catch (e) {
+        if (!cancelled) friendlyError('prepare report downloads', e);
+      } finally { if (!cancelled) setExportsPreparing(false); }
+    })();
+    return () => { cancelled = true; };
+  // Export data is prepared before the tap so iOS home-screen browsers retain the user gesture
+  // when the file is handed to the browser's download/open flow.
+  }, [client, report, selected, mode, totals, generated, snapshots, openings]);
+  function exportFile(format: 'excel' | 'pdf') {
+    if (!report || !selected || !exportFiles) return;
+    const isExcel = format === 'excel';
+    download(`Books-${selected.period_start}.${isExcel ? 'xlsx' : 'pdf'}`, exportFiles[format], isExcel ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : 'application/pdf');
   }
   async function finalize() {
     if (!report || !selected || !window.confirm(`Lock ${selected.period_start}–${selected.period_end}? This freezes the report and blocks dated edits.`)) return;
@@ -336,13 +453,13 @@ export function BooksPage({ client, money, native = false, onNativeNavigation }:
       <div className="books-toolbar"><div className="books-segmented" role="tablist" aria-label="Book periods"><button type="button" aria-selected={mode === 'month'} className={mode === 'month' ? 'active' : ''} onClick={() => setMode('month')}>Monthly</button><button type="button" aria-selected={mode === 'week'} className={mode === 'week' ? 'active' : ''} onClick={() => setMode('week')}>Weekly</button></div></div>
       {!cards.length && <div className="books-empty panel">No {mode === 'month' ? 'monthly' : 'weekly'} periods with recorded activity.</div>}
       <div className="books-period-grid">{cards.map((p) => { const preview = previews[p.id]; const isHero = mode === 'month' && p.id === latestCard?.id; const done = checkDone(p); const fixes = fixCount(p); const cardStatus = p.status === 'locked' ? 'locked' : preview && fixes === 0 ? 'ready' : 'draft'; return <button type="button" className={`books-period-card${isHero ? ' hero' : ''}`} key={`${p.period_type}:${p.period_start}`} disabled={busy} onClick={() => void loadPeriod(p)}>
-        <span className={`books-status ${cardStatus}`}>{cardStatus === 'locked' ? '🔒 Locked' : cardStatus === 'ready' ? 'Ready to close' : `Draft · ${fixes} to fix`}</span>
+        {mode === 'month' && <span className={`books-status ${cardStatus}`}>{cardStatus === 'locked' ? '🔒 Locked' : cardStatus === 'ready' ? 'Ready to close' : `Draft · ${fixes} to fix`}</span>}
         <strong>{p.period_type === 'month' ? monthLabel(p.period_start) : `${p.period_start} – ${p.period_end}`}</strong>
-        {isHero ? <><small className="books-card-dates">{p.period_start} – {p.period_end}</small><div className="books-card-metrics"><span>Sales <b>{money(preview?.sales || 0)}</b></span><span>Profit <b className="positive">{money(preview?.profit || 0)}</b></span>{mode === 'month' && <span>Fees <b className="warning-text">{money(preview?.fees || 0)}</b></span>}</div><div className="books-progress-label"><span>{cardStatus === 'ready' ? 'Ready to close' : 'Close checks'}</span><span>{done} of 6 checks</span></div><div className="books-progress"><i className={cardStatus === 'ready' ? 'ready' : ''} style={{ width: `${Math.round(done / 6 * 100)}%` }} /></div><div className="books-check-chips">{(preview?.checks || []).filter((c) => !c.ok && !c.explanation).map((c) => <span key={c.key}>{c.count ? `${c.count} ` : ''}{c.label}</span>)}</div></> : <><span className="books-card-compact">Sales {money(preview?.sales || 0)} · Profit <b className="positive">{money(preview?.profit || 0)}</b></span>{p.status === 'locked' ? <small>Closed {p.locked_at ? new Date(p.locked_at).toLocaleDateString() : ''}{p.locked_by_name ? ` by ${p.locked_by_name}` : ''}</small> : <div className="books-progress-label"><span>{cardStatus === 'ready' ? 'All checks done' : `${fixes} to fix`}</span><span>{p.period_type === 'month' ? `${done}/6` : ''}</span></div>}<div className="books-progress"><i className={cardStatus === 'ready' ? 'ready' : ''} style={{ width: `${mode === 'week' ? 100 : Math.round(done / 6 * 100)}%` }} /></div></>}
+        {isHero ? <><small className="books-card-dates">{p.period_start} – {p.period_end}</small><div className="books-card-metrics"><span>Sales <b>{money(preview?.sales || 0)}</b></span><span>Profit <b className="positive">{money(preview?.profit || 0)}</b></span>{mode === 'month' && <span>Fees <b className="warning-text">{money(preview?.fees || 0)}</b></span>}</div><div className="books-progress-label"><span>{cardStatus === 'ready' ? 'Ready to close' : 'Close checks'}</span><span>{done} of 6 checks</span></div><div className="books-progress"><i className={cardStatus === 'ready' ? 'ready' : ''} style={{ width: `${Math.round(done / 6 * 100)}%` }} /></div><div className="books-check-chips">{(preview?.checks || []).filter((c) => !c.ok && !c.explanation).map((c) => <span key={c.key}>{c.count ? `${c.count} ` : ''}{c.label}</span>)}</div></> : <><span className="books-card-compact">Sales {money(preview?.sales || 0)} · Profit <b className="positive">{money(preview?.profit || 0)}</b></span>{mode === 'month' && <>{p.status === 'locked' ? <small>Closed {p.locked_at ? new Date(p.locked_at).toLocaleDateString() : ''}{p.locked_by_name ? ` by ${p.locked_by_name}` : ''}</small> : <div className="books-progress-label"><span>{cardStatus === 'ready' ? 'All checks done' : `${fixes} to fix`}</span><span>{done}/6</span></div>}<div className="books-progress"><i className={cardStatus === 'ready' ? 'ready' : ''} style={{ width: `${Math.round(done / 6 * 100)}%` }} /></div></>}</>}
         <span className="books-period-arrow">›</span>
       </button>; })}</div>
     </> : <>
-      <div className="books-detail-head"><button type="button" className="books-back" onClick={() => { setSelected(null); setReport(null); setFilterKind(''); onNativeNavigation?.(false); void loadPeriods(); }}>‹ Books</button><div className="books-detail-title"><h2>{selected.period_type === 'month' ? monthLabel(selected.period_start) : `${selected.period_start} – ${selected.period_end}`}</h2><span className={`books-status ${selected.status}`}>{periodStatus(selected)}</span><small>{selected.period_start} – {selected.period_end} · updated {report ? new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : 'loading'}</small></div><div className="books-export-actions"><button type="button" className="books-download" disabled={!report || busy} onClick={() => void exportFile('excel')}>↓ Excel</button><button type="button" className="books-download" disabled={!report || busy} onClick={() => void exportFile('pdf')}>↓ PDF</button></div></div>
+      <div className="books-detail-head"><button type="button" className="books-back" onClick={() => { setSelected(null); setReport(null); setExportFiles(null); setFilterKind(''); onNativeNavigation?.(false); void loadPeriods(); }}>‹ Books</button><div className="books-detail-title"><h2>{selected.period_type === 'month' ? monthLabel(selected.period_start) : `${selected.period_start} – ${selected.period_end}`}</h2><span className={`books-status ${selected.status}`}>{periodStatus(selected)}</span><small>{selected.period_start} – {selected.period_end} · updated {report ? new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : 'loading'}</small></div><div className="books-export-actions"><button type="button" className="books-download" disabled={!report || !exportFiles} aria-label={exportsPreparing ? 'Preparing Excel download' : 'Download Excel'} onClick={() => exportFile('excel')}>↓ {exportsPreparing ? 'Preparing…' : 'Excel'}</button><button type="button" className="books-download" disabled={!report || !exportFiles} aria-label={exportsPreparing ? 'Preparing PDF download' : 'Download PDF'} onClick={() => exportFile('pdf')}>↓ {exportsPreparing ? 'Preparing…' : 'PDF'}</button></div></div>
       {busy && <p>Loading books…</p>}{report && <>
          {section === 'summary' && <>
            <section className="books-summary-card"><small>Profit</small><strong className="books-profit">{money(totals.profit)}</strong><div className="books-summary-tiles"><div><small>Sales</small><b>{money(totals.revenue)}</b></div><div><small>Cost of goods</small><b>{money(totals.cost)}</b></div><div><small>Fees + labels</small><b className="warning-text">{money(totals.fees + totals.shipping)}</b></div><div><small>Commissions</small><b>{money(totals.commission)}</b></div></div></section>

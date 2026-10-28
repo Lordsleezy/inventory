@@ -2,11 +2,12 @@ import { serviceClient, json, corsHeaders } from "../lib/server.mjs";
 import { ebayFetch } from "../lib/ebay.mjs";
 import { listEbayAccounts, resolveEbayAccount } from "../lib/ebay-accounts.mjs";
 import { getStoreSquareAccess, squareClient } from "../lib/square.mjs";
-import { webSquareClient, webSquareEnv } from "../lib/web-square.mjs";
+import { webSquareClient, webSquareEnv, webSquareAccess } from "../lib/web-square.mjs";
 import { Environment } from "square/legacy";
 import { wrapHandler, asNetlifyFunction } from "../lib/floor-log.mjs";
 import { isNetlifyScheduleEvent } from "../lib/schedule.mjs";
 import { normalizeBooksPayout, saveBooksPayout } from "../lib/books-payout-import.mjs";
+import { matchSquarePaymentsToTickets } from "../lib/square-books-match.mjs";
 
 // Reconciles REAL fees + eBay-bought shipping labels onto recorded sales.
 //  - eBay Finances SALE → marketplace fee (actual)
@@ -36,6 +37,36 @@ async function* ebayTransactions(storeId, type, since, hint = {}) {
   }
 }
 
+async function* ebayAllTransactions(storeId, since, hint = {}) {
+  let offset = 0;
+  for (;;) {
+    const filter = encodeURIComponent(`transactionDate:[${since}..]`);
+    const res = await ebayFetch(storeId, "GET", `/sell/finances/v1/transaction?filter=${filter}&limit=200&offset=${offset}`, undefined, hint);
+    const txns = res?.transactions || [];
+    for (const tx of txns) yield tx;
+    if (txns.length < 200) break;
+    offset += txns.length;
+  }
+}
+
+async function saveEbayTransactionLedger(sb, storeId, account, since, hint) {
+  const rows = [];
+  for await (const tx of ebayAllTransactions(storeId, since, hint)) {
+    if (!tx?.transactionId || !tx?.transactionDate) continue;
+    const marketplaceFees = (tx.orderLineItems || []).flatMap((item) => item.marketplaceFees || []).flat().map((fee) => ({ type: fee.feeType || null, amount_cents: moneyToCents(fee.amount) }));
+    rows.push({ store_id: storeId, account_id: String(account.id || account.username), account_username: account.username,
+      transaction_id: String(tx.transactionId), transaction_type: String(tx.transactionType || "UNKNOWN").toUpperCase(),
+      booking_entry: tx.bookingEntry || null, transaction_date: tx.transactionDate, order_id: tx.orderId || null,
+      amount_cents: moneyToCents(tx.amount), total_fee_cents: moneyToCents(tx.totalFeeAmount), marketplace_fees: marketplaceFees,
+      transaction_memo: tx.transactionMemo || null, refs: tx.references || [], updated_at: new Date().toISOString() });
+    if (rows.length >= 200) {
+      const { error } = await sb.from("books_ebay_transactions").upsert(rows.splice(0), { onConflict: "store_id,account_id,transaction_id" });
+      if (error) throw error;
+    }
+  }
+  if (rows.length) { const { error } = await sb.from("books_ebay_transactions").upsert(rows, { onConflict: "store_id,account_id,transaction_id" }); if (error) throw error; }
+}
+
 async function syncEbayFeesForAccount(sb, storeId, account, log) {
   const scopes = Array.isArray(account.scopes) ? account.scopes : [];
   if (scopes.length && !scopes.some((s) => String(s).includes("sell.finances"))) {
@@ -44,6 +75,8 @@ async function syncEbayFeesForAccount(sb, storeId, account, log) {
   }
   const since = new Date(Date.now() - LOOKBACK_DAYS * 86400000).toISOString();
   const hint = account.id ? { accountId: account.id } : {};
+
+  await saveEbayTransactionLedger(sb, storeId, account, since, hint);
 
   for await (const tx of ebayTransactions(storeId, "SALE", since, hint)) {
     const orderId = tx.orderId;
@@ -225,8 +258,8 @@ async function syncSquareFees(sb, storeId, log) {
 
 async function syncSquarePayouts(sb, storeId, log) {
   let access;
-  try { access = await getStoreSquareAccess(storeId); }
-  catch (e) { if (e?.message !== "square_not_connected") log.push({ squarePayouts: e?.message || String(e) }); return; }
+  try { access = webSquareAccess(storeId, webSquareEnv()); }
+  catch (e) { log.push({ squarePayouts: "Square key not working" }); return; }
   const base = access.sandbox ? "https://connect.squareupsandbox.com" : "https://connect.squareup.com";
   const begin = new Date(Date.now() - LOOKBACK_DAYS * 86400000).toISOString();
   const end = new Date().toISOString();
@@ -238,7 +271,7 @@ async function syncSquarePayouts(sb, storeId, log) {
     if (cursor) url.searchParams.set("cursor", cursor);
     const res = await fetch(url, { headers: { Authorization: `Bearer ${access.accessToken}`, "Square-Version": "2024-01-18", "Content-Type": "application/json" } });
     const body = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(`square_payouts_http_${res.status}:${JSON.stringify(body.errors || [])}`);
+    if (!res.ok) { log.push({ squarePayouts: res.status === 401 || res.status === 403 ? "Square key not working" : `Square payouts request failed (HTTP ${res.status})` }); return; }
     for (const payout of body.payouts || []) {
       const normalized = normalizeBooksPayout("square", payout);
       if (!normalized) continue;
@@ -248,6 +281,38 @@ async function syncSquarePayouts(sb, storeId, log) {
     if (!body.cursor) break;
     cursor = body.cursor;
   }
+}
+
+async function syncSquarePaymentMatches(sb, storeId, log) {
+  const { error: ledgerError } = await sb.from("books_square_payments").select("payment_id").eq("store_id", storeId).limit(1);
+  if (ledgerError) {
+    log.push({ squareMatches: ledgerError.code === "PGRST205" || ledgerError.code === "42P01" ? "Books Square ledger is not available yet" : "Could not read the Books Square ledger" });
+    return;
+  }
+  let access;
+  try { access = webSquareAccess(storeId, webSquareEnv()); }
+  catch (e) { log.push({ squareMatches: "Square key not working" }); return; }
+  const base = access.sandbox ? "https://connect.squareupsandbox.com" : "https://connect.squareup.com";
+  const payments = []; let cursor = "";
+  for (let page = 0; page < 200; page++) {
+    const url = new URL("/v2/payments", base);
+    for (const [k,v] of Object.entries({ begin_time: "2013-01-01T00:00:00Z", end_time: new Date().toISOString(), location_id: access.locationId || access.location_id || "", limit: "100", ...(cursor ? { cursor } : {}) })) if (v) url.searchParams.set(k,v);
+    const res = await fetch(url,{headers:{Authorization:`Bearer ${access.accessToken || access.access_token}`,"Square-Version":"2024-01-18","Content-Type":"application/json"}});
+    const body = await res.json().catch(()=>({}));
+    if (!res.ok) { log.push({ squareMatches: res.status === 401 || res.status === 403 ? "Square key not working" : `Square payments request failed (HTTP ${res.status})` }); return; }
+    payments.push(...(body.payments||[])); cursor=body.cursor||""; if(!cursor)break;
+  }
+  const [saleRes, extraRes] = await Promise.all([
+    sb.from("sales").select("id,ticket_id,sku,sold_at,price_cents,tax_cents,channel,payment_method,voided_at").eq("store_id",storeId).is("voided_at",null).in("payment_method",["card","split"]).limit(10000),
+    sb.from("ticket_extras").select("ticket_id,card_cents").eq("store_id",storeId).limit(10000),
+  ]);
+  if(saleRes.error)throw saleRes.error;if(extraRes.error)throw extraRes.error;
+  const extras=new Map((extraRes.data||[]).map(x=>[String(x.ticket_id),Number(x.card_cents||0)]));
+  const grouped=new Map();for(const s of saleRes.data||[]){if(!s.ticket_id||!['floor','in_store','instore','store'].includes(String(s.channel||'').toLowerCase()))continue;const key=String(s.ticket_id);grouped.set(key,[...(grouped.get(key)||[]),s]);}
+  const tickets=[...grouped.entries()].map(([ticket_id,rows])=>({ticket_id,sold_at:rows.map(s=>s.sold_at).sort()[0],card_cents:extras.get(ticket_id)||0,sale_ids:rows.map(s=>s.id),weights:rows.map(s=>Math.max(0,Number(s.price_cents||0)+Number(s.tax_cents||0)))})).filter(t=>t.card_cents>0);
+  const matched=matchSquarePaymentsToTickets(payments,tickets);
+  for(let i=0;i<matched.length;i+=200){const batch=matched.slice(i,i+200).map(x=>({store_id:storeId,payment_id:x.payment_id,created_at:x.created_at,amount_cents:x.amount_cents,fee_cents:x.fee_cents,refund_cents:x.refund_cents,status:'COMPLETED',source_type:'CARD',match_status:x.status,ticket_id:x.ticket_id,sale_ids:x.sale_ids,candidate_ticket_ids:x.candidates,updated_at:new Date().toISOString()}));const {error}=await sb.from('books_square_payments').upsert(batch,{onConflict:'store_id,payment_id'});if(error)throw error;}
+  log.push({squareMatches:{payments:matched.length,matched:matched.filter(x=>x.status==='matched').length,unmatched:matched.filter(x=>x.status==='unmatched').length,ambiguous:matched.filter(x=>x.status==='ambiguous').length,tickets:tickets.length}});
 }
 
 async function handle(event) {
@@ -265,6 +330,7 @@ async function handle(event) {
     out.stores[store.id] = log;
     try { await syncEbayFees(sb, store.id, log); } catch (e) { log.push({ ebay: String(e?.message || e) }); }
     try { await syncSquareFees(sb, store.id, log); } catch (e) { log.push({ square: String(e?.message || e) }); }
+    try { await syncSquarePaymentMatches(sb, store.id, log); } catch (e) { log.push({ squareMatches: String(e?.message || e) }); }
     try { await syncSquarePayouts(sb, store.id, log); } catch (e) { log.push({ squarePayouts: String(e?.message || e) }); }
     // Real eBay / Square balances for the Money tab: self-throttled to once per 6 hours (most runs only read one setting).
     try { log.push({ money: await (await import("../lib/money-sync.mjs")).runMoneySync(sb, store.id) }); } catch (e) { log.push({ money: String(e?.message || e) }); }

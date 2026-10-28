@@ -880,12 +880,12 @@ html.dark .aspect-list{background:#1c2129;color:#e8eef4;border-color:#354050}htm
 .money-page{display:grid;gap:14px;max-width:1100px;margin:0 auto;padding:4px 0 40px}
 .money-head h1{margin:0 0 6px}.money-total-label{font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;opacity:.65}
 .money-total{font-size:2.1rem;font-weight:750;font-variant-numeric:tabular-nums}
-.money-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:14px;align-items:start}
-.money-card{border:1px solid rgba(127,140,155,.28);border-radius:16px;padding:14px;display:grid;gap:10px;background:rgba(127,140,155,.07)}
-.money-card-top{display:flex;align-items:center;gap:10px}.money-name{flex:1;font-size:1.05rem}.money-balance{font-size:1.6rem;font-weight:750;font-variant-numeric:tabular-nums}
+.money-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr));gap:14px;align-items:start;min-width:0}
+.money-card{box-sizing:border-box;min-width:0;max-width:100%;border:1px solid rgba(127,140,155,.28);border-radius:16px;padding:14px;display:grid;gap:10px;background:rgba(127,140,155,.07)}
+.money-card-top{display:flex;align-items:center;gap:8px;min-width:0}.money-name{flex:1 1 auto;min-width:0;font-size:1.05rem;overflow-wrap:anywhere}.money-balance{flex:0 1 auto;min-width:0;font-size:clamp(1.05rem,5.2vw,1.6rem);font-weight:750;font-variant-numeric:tabular-nums;white-space:nowrap}
 .money-sync,.money-floor{margin:0;font-size:.78rem;opacity:.8}.money-floor{opacity:.65}
-.money-buttons{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.money-buttons button{min-height:44px;border-radius:12px;border:1px solid;font-weight:650;cursor:pointer;background:transparent}
+.money-buttons{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;min-width:0}
+.money-buttons button{box-sizing:border-box;min-width:0;width:100%;padding:8px 5px;min-height:44px;border-radius:12px;border:1px solid;font-weight:650;cursor:pointer;background:transparent;white-space:normal;overflow-wrap:anywhere}
 .money-add{color:#2fbf71;border-color:rgba(47,191,113,.55);background:rgba(47,191,113,.12)!important}.money-take{color:#f0a13a;border-color:rgba(240,161,58,.55);background:rgba(240,161,58,.12)!important}
 .money-activity{display:grid;border-top:1px solid rgba(127,140,155,.25)}
 .money-line{display:flex;justify-content:space-between;align-items:center;gap:12px;width:100%;text-align:left;background:none;border:0;border-bottom:1px solid rgba(127,140,155,.18);padding:10px 2px;color:inherit;font:inherit;cursor:pointer}
