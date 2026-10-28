@@ -73,6 +73,7 @@ for (const [method, sku, cash, expectedCard, expectedFee] of [
   ['split', '91002', 3000, 7918, 193],
 ]) {
   await db.query(`insert into public.sku_ledger(sku,issued_at,store_id) values ($1,now(),'00000000-0000-0000-0000-000000000112')`, [sku]);
+  await db.query(`insert into storage.objects(bucket_id,name) values ('unit-photos',$1)`, [`00000000-0000-0000-0000-000000000112/${sku}/unit.jpg`]);
   await db.query(`insert into public.units(sku,title,ask_cents,floor_cents,state,store_id,received_at,updated_at)
     values($1,'Manual unit',10000,100,'available','00000000-0000-0000-0000-000000000112',now(),now())`, [sku]);
   const lines = JSON.stringify([{sku,price_cents:10000}]);
@@ -105,6 +106,7 @@ assert.equal((await db.query('select count(*)::int n from public.card_charges'))
 await db.exec(`
   insert into public.sku_ledger(sku,issued_at,store_id) values
     ('91003',now(),'00000000-0000-0000-0000-000000000112');
+  insert into storage.objects(bucket_id,name) values ('unit-photos','00000000-0000-0000-0000-000000000112/91003/unit.jpg');
   insert into public.units(sku,title,ask_cents,floor_cents,state,store_id,received_at,updated_at)
     values('91003','Negotiated unit',89900,100,'available','00000000-0000-0000-0000-000000000112',now(),now());
 `);
@@ -129,6 +131,7 @@ console.log('negotiated price: tax, fee, sale snapshot and audit ok');
 await db.exec(`
   insert into public.sku_ledger(sku,issued_at,store_id) values
     ('91004',now(),'00000000-0000-0000-0000-000000000112');
+  insert into storage.objects(bucket_id,name) values ('unit-photos','00000000-0000-0000-0000-000000000112/91004/unit.jpg');
   insert into public.units(sku,title,ask_cents,floor_cents,state,store_id,received_at,updated_at)
     values('91004','Phone unit',89900,100,'available','00000000-0000-0000-0000-000000000112',now(),now());
 `);
