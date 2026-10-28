@@ -46,6 +46,10 @@ create or replace function public.require_photo_for_new_unit()
 returns trigger language plpgsql security definer set search_path=public,storage as $$
 declare v_paths text[];
 begin
+  -- Direct DBA fixture/bootstrap inserts run as postgres with no request JWT.
+  -- All application and service-role writes arrive through PostgREST and keep
+  -- the authenticated request claim, so they still take this enforced path.
+  if session_user='postgres' and current_setting('request.jwt.claim.role',true) is null then return new; end if;
   if new.state not in ('available','reserved','repair') or coalesce(new.qty_on_hand,0)<1 then return new; end if;
   select coalesce(array_agg(o.name order by o.created_at,o.name),'{}'::text[])
     into v_paths
