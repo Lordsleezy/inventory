@@ -10,6 +10,7 @@ begin
     ('93001',v_store,now()),('93002',v_store,now());
   perform set_config('request.jwt.claim.role','authenticated',true);
   perform set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000000111',true);
+  perform set_config('pgtap.require_photo_test','on',true);
   perform set_config('pgtap.receive_store',v_store::text,true);
 end $$;
 
