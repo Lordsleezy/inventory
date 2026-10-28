@@ -6,7 +6,10 @@ create or replace function public.require_photo_for_new_unit()
 returns trigger language plpgsql security definer set search_path=public,storage as $$
 declare paths text[]; supplied text; stock_paths text[]; supplied_stock text;
 begin
- if new.state not in ('available','reserved','repair') or coalesce(new.qty_on_hand,0)<1 then return new; end if;
+ if new.state not in ('available','reserved','repair') then
+  raise exception 'unit_photo_required' using errcode='23514';
+ end if;
+ if coalesce(new.qty_on_hand,0)<1 then return new; end if;
  supplied:=nullif(current_setting('floor.receive_photo_paths',true),'');
  supplied_stock:=nullif(current_setting('floor.receive_stock_photo_paths',true),'');
  stock_paths:=case when supplied_stock is null then '{}'::text[] else array(select jsonb_array_elements_text(supplied_stock::jsonb)) end;

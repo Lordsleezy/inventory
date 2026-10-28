@@ -18,9 +18,13 @@ fi
 if [ "${1:-}" = "--start" ]; then
   # Empty workdir so the CLI does not auto-apply supabase/migrations on start.
   WORK="$(mktemp -d)"; mkdir -p "$WORK/supabase"; cp "$ROOT/supabase/config.toml" "$WORK/supabase/"
+  # pgTAP uses host port 54322 in parallel CI jobs. Keep the live-baseline
+  # replay isolated on its own ephemeral local database port.
+  TEST_DB_PORT="${FLOOR_LIVE_BASELINE_PORT:-54323}"
+  sed -i "/^\[db\]$/a port = $TEST_DB_PORT" "$WORK/supabase/config.toml"
   (cd "$ROOT" && $SB db start --workdir "$WORK")
   trap '(cd "$ROOT" && $SB stop --workdir "$WORK" --no-backup >/dev/null 2>&1 || true)' EXIT
-  DATABASE_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+  DATABASE_URL="postgresql://postgres:postgres@127.0.0.1:$TEST_DB_PORT/postgres"
 fi
 DB="${DATABASE_URL:?set DATABASE_URL or pass --start}"
 
