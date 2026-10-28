@@ -3,23 +3,30 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import ExcelJS from 'exceljs';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 
-type Period = { id: string; period_type: 'month' | 'week'; period_start: string; period_end: string; status: 'draft' | 'ready' | 'locked'; locked_at: string | null };
+type Period = { id: string; period_type: 'month' | 'week'; period_start: string; period_end: string; status: 'draft' | 'ready' | 'locked'; locked_at: string | null; locked_by_name?: string | null };
 type Row = Record<string, unknown>;
 type Report = { period: Period; checks: Check[]; sales: Row[]; fees: Row[]; labels: Row[]; expenses: Row[]; returns: Row[]; dispositions: Row[]; inventory_bought: Row[]; manifests: Row[]; payouts: Row[]; payout_balances: Row[]; payments: Row[]; adjustments: Row[]; prior_corrections: Row[]; withdrawals: Row[]; money_trail: Row[] };
 type Check = { key: string; label: string; ok: boolean; count: number; detail: string; explanation: string | null };
 type Snapshot = { captured_on: string; boundary: string; unit_count: number; cost_value_cents: number };
 type Opening = { source: string; effective_on: string; amount_cents: number; note: string };
-type Props = { client: SupabaseClient; money: (cents: number) => string; native?: boolean };
+type Props = { client: SupabaseClient; money: (cents: number) => string; native?: boolean; onNativeNavigation?: (inReport: boolean, title?: string, back?: () => void) => void };
 
 const SOURCES = ['safe', 'square', 'ebay', 'depop', 'website', 'amazon', 'tiktok'];
 const SOURCE_LABEL: Record<string, string> = { safe: 'Safe cash', square: 'Square', ebay: 'eBay', depop: 'Depop', website: 'Website', amazon: 'Amazon', tiktok: 'TikTok' };
 const SECTIONS = [
   ['summary', 'Summary'], ['sales', 'Sales · accrual'], ['fees', 'Fees'], ['labels', 'Shipping'], ['returns', 'Refunds, returns & dispositions'],
+  ['expenses', 'Expenses'], ['inventory_bought', 'Inventory bought'], ['payouts', 'Payouts, payments & adjustments'],
+  ['withdrawals', 'Withdrawals · cash view'], ['money_trail', 'Money trail'], ['pending', 'Pending / open items'], ['sales_tax', 'Sales tax'],
+  ['inventory', 'Inventory snapshot'], ['reconciliation', 'Reconciliation'],
+] as const;
+const WEEK_SECTIONS = new Set(['summary', 'sales', 'payouts', 'withdrawals', 'pending', 'reconciliation']);
+const EXPORT_SECTIONS = [
+  ['summary', 'Summary'], ['sales', 'Sales · accrual'], ['fees', 'Fees'], ['labels', 'Shipping'], ['returns', 'Refunds, returns & dispositions'],
   ['expenses', 'Expenses'], ['inventory_bought', 'Inventory bought'], ['payouts', 'Payouts earned'], ['payments', 'Payout payments & adjustments'],
   ['withdrawals', 'Withdrawals · cash view'], ['money_trail', 'Money trail'], ['pending', 'Pending / open items'], ['sales_tax', 'Sales tax'],
   ['inventory', 'Inventory snapshot'], ['reconciliation', 'Reconciliation'],
 ] as const;
-const WEEK_SECTIONS = new Set(['summary', 'sales', 'payouts', 'payments', 'withdrawals', 'pending', 'reconciliation']);
+const EXPORT_WEEK_SECTIONS = new Set(['summary', 'sales', 'payouts', 'payments', 'withdrawals', 'pending', 'reconciliation']);
 const asDate = (d: Date) => d.toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
 const addDays = (s: string, n: number) => { const d = new Date(`${s}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
 const monthLabel = (s: string) => new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(`${s}T12:00:00Z`));
@@ -48,9 +55,12 @@ function columns(rows: Row[]) {
   return [...preferred.filter((key) => keys.includes(key)), ...keys.filter((key) => !preferred.includes(key))];
 }
 
-export function BooksPage({ client, money, native = false }: Props) {
+export function BooksPage({ client, money, native = false, onNativeNavigation }: Props) {
   const [mode, setMode] = useState<'month' | 'week'>('month');
   const [periods, setPeriods] = useState<Period[]>([]);
+  const [previews, setPreviews] = useState<Record<string, { sales: number; profit: number; fees: number; checks: Check[]; hasData: boolean }>>({});
+  const [showAllSections, setShowAllSections] = useState(false);
+  const [filterKind, setFilterKind] = useState('');
   const [selected, setSelected] = useState<Period | null>(null);
   const [report, setReport] = useState<Report | null>(null);
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
@@ -71,12 +81,28 @@ export function BooksPage({ client, money, native = false }: Props) {
   const loadPeriods = useCallback(async () => {
     const { data, error: e } = await client.rpc('portal_books_list', { p_from: '2026-01-01', p_to: asDate(new Date()) });
     if (e) throw e;
-    setPeriods((data || []) as Period[]);
+    const loaded = (data || []) as Period[];
+    setPeriods(loaded);
+    const next: typeof previews = {};
+    await Promise.all(loaded.map(async (p) => {
+      const { data: reportData, error: reportError } = await client.rpc('portal_books_report', { p_period: p.id });
+      if (reportError) { console.error('Books period preview failed', reportError); return; }
+      const r = reportData as Report; const sales = r.sales || [];
+      const hasData = [sales, r.fees, r.labels, r.expenses, r.returns, r.dispositions, r.inventory_bought, r.manifests, r.payouts, r.payments, r.adjustments, r.withdrawals, r.money_trail].some((rows) => rows?.length);
+      next[p.id] = { sales: sales.reduce((n, row) => n + Number(row.price_cents || 0) + Number(row.shipping_cents || 0), 0), profit: sales.reduce((n, row) => n + Number(row.profit_cents || 0), 0), fees: sales.reduce((n, row) => n + Number(row.channel_fee_cents || 0) + Number(row.processing_fee_cents || 0), 0), checks: r.checks || [], hasData };
+    }));
+    setPreviews(next);
+    setPeriods(loaded.filter((p) => p.status === 'locked' || next[p.id]?.hasData));
   }, [client]);
-  useEffect(() => { void loadPeriods().catch((e) => setError(e.message || String(e))); }, [loadPeriods]);
+  const friendlyError = (context: string, error: unknown) => {
+    console.error(`Books ${context} failed`, error);
+    const raw = error as { code?: string; message?: string } | null;
+    setError(raw?.code === '42501' || /portal_access_denied|admins only/i.test(raw?.message || '') ? 'Admins only' : `Couldn't ${context}. Try again`);
+  };
+  useEffect(() => { void loadPeriods().catch((e) => friendlyError('load periods', e)); }, [loadPeriods]);
 
   const loadPeriod = useCallback(async (p: Period) => {
-    setBusy(true); setError(''); setSelected(p); setSection('summary'); setReport(null);
+    setBusy(true); setError(''); setSelected(p); setSection('summary'); setFilterKind(''); setReport(null); onNativeNavigation?.(true, p.period_type === 'month' ? monthLabel(p.period_start) : `${p.period_start} – ${p.period_end}`, () => { setSelected(null); setReport(null); setFilterKind(''); onNativeNavigation?.(false, 'Books'); void loadPeriods(); });
     try {
       const [r, s, b] = await Promise.all([
         client.rpc('portal_books_report', { p_period: p.id }),
@@ -89,9 +115,9 @@ export function BooksPage({ client, money, native = false }: Props) {
       const next = { ...(r.data as Report), period: { ...(r.data as Report).period, status: status as Period['status'] } };
       setReport(next); setSelected({ ...p, status: status as Period['status'] }); setSnapshots((s.data || []) as Snapshot[]); setOpenings((b.data || []) as Opening[]);
       void loadPeriods();
-    } catch (e) { setError((e as Error).message || String(e)); }
+    } catch (e) { friendlyError('load this report', e); }
     finally { setBusy(false); }
-  }, [client]);
+  }, [client, onNativeNavigation]);
 
   const makePeriod = async (type: 'month' | 'week', start: string, end: string) => {
     const { data, error: e } = await client.rpc('portal_books_ensure_period', { p_type: type, p_start: start, p_end: end });
@@ -99,23 +125,10 @@ export function BooksPage({ client, money, native = false }: Props) {
     const p: Period = { id: data, period_type: type, period_start: start, period_end: end, status: 'draft', locked_at: null };
     return p;
   };
-  const cards = useMemo(() => {
-    const today = asDate(new Date());
-    if (mode === 'month') {
-      const currentMonth = new Date(`${today}T12:00:00Z`); currentMonth.setUTCDate(1);
-      return Array.from({ length: 24 }, (_, i) => {
-        const d = new Date(currentMonth); d.setUTCMonth(d.getUTCMonth() - i); const start = d.toISOString().slice(0, 10);
-        const end = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).toISOString().slice(0, 10);
-        return periods.find((p) => p.period_type === 'month' && p.period_start === start) || { id: '', period_type: 'month' as const, period_start: start, period_end: end, status: 'draft' as const, locked_at: null };
-      });
-    }
-    const mondayOffset = (new Date(`${today}T12:00:00Z`).getUTCDay() + 6) % 7;
-    const start = addDays(today, -mondayOffset);
-    return Array.from({ length: 12 }, (_, i) => {
-      const s = addDays(start, -7 * i); const existing = periods.find((p) => p.period_type === 'week' && p.period_start === s);
-      return existing || { id: '', period_type: 'week' as const, period_start: s, period_end: addDays(s, 6), status: 'draft' as const, locked_at: null };
-    });
-  }, [mode, periods]);
+  const cards = useMemo(() => periods.filter((p) => p.period_type === mode).sort((a,b) => b.period_start.localeCompare(a.period_start)), [mode, periods]);
+  const latestCard = cards.find((p) => p.status !== 'locked') || cards[0];
+  const checkDone = (p: Period) => (previews[p.id]?.checks || []).filter((c) => c.ok || c.explanation).length;
+  const fixCount = (p: Period) => (previews[p.id]?.checks || []).filter((c) => !c.ok && !c.explanation).length;
 
   const totals = useMemo(() => {
     const sales = report?.sales || []; const channels = new Map<string, { revenue: number; fees: number; cost: number; profit: number; tax: number; count: number; paul: number; jacob: number; shipping: number }>();
@@ -160,7 +173,7 @@ export function BooksPage({ client, money, native = false }: Props) {
     if (key === 'returns') return [...(report?.returns || []).map((r) => ({ ...r, entry_type: 'Return/refund' })), ...(report?.dispositions || []).map((r) => ({ ...r, entry_type: 'Replacement/giveaway' }))];
     if (key === 'expenses') return report?.expenses || [];
     if (key === 'inventory_bought') return [...(report?.inventory_bought || []).map((r) => ({ ...r, entry_type: 'Unit received' })), ...(report?.manifests || []).map((r) => ({ ...r, entry_type: 'Manifest' }))];
-    if (key === 'payouts') return [...(report?.payouts || []), ...(report?.payout_balances || []).map((r) => ({ ...r, entry_type: 'Period balance summary' }))];
+    if (key === 'payouts') return [...(report?.payouts || []), ...(report?.payout_balances || []).map((r) => ({ ...r, entry_type: 'Period balance summary' })), ...(generated.payments || [])];
     if (key === 'withdrawals') return report?.withdrawals || [];
     return generated[key] || [];
   };
@@ -171,17 +184,17 @@ export function BooksPage({ client, money, native = false }: Props) {
     try {
       const { error: e } = await client.rpc('portal_books_save_opening', { p_source: openSource, p_on: openDate, p_amount_cents: Math.round(amount * 100), p_note: openNote });
       if (e) throw e; setOpenForm(false); setOpenAmount(''); setOpenNote(''); if (selected) await loadPeriod(selected);
-    } catch (e) { setError((e as Error).message || String(e)); } finally { setBusy(false); }
+    } catch (e) { friendlyError('save this balance', e); } finally { setBusy(false); }
   }
   async function capture(boundary: 'start' | 'end') {
     if (!selected) return;
     setBusy(true); setError('');
     try { const { error: e } = await client.rpc('portal_books_capture_inventory', { p_on: asDate(new Date()), p_boundary: boundary }); if (e) throw e; await loadPeriod(selected); }
-    catch (e) { setError((e as Error).message || String(e)); } finally { setBusy(false); }
+    catch (e) { friendlyError('save the inventory count', e); } finally { setBusy(false); }
   }
   async function explain(check: Check, text: string) {
     if (!selected) return; const { error: e } = await client.rpc('portal_books_explain', { p_period: selected.id, p_check_key: check.key, p_explanation: text });
-    if (e) setError(e.message); else await loadPeriod(selected);
+    if (e) friendlyError('save the explanation', e); else await loadPeriod(selected);
   }
   async function labelRefund(row: Row) {
     const requested = window.prompt('Refund requested date/time (ISO date or timestamp; blank if not requested):', String(row.refund_requested_at || ''));
@@ -189,10 +202,11 @@ export function BooksPage({ client, money, native = false }: Props) {
     const amount = window.prompt('Refund amount in dollars (blank if unknown):', row.refund_amount_cents == null ? '' : (Number(row.refund_amount_cents) / 100).toFixed(2)); if (amount === null) return;
     const received = window.prompt('Refund received date/time (blank if pending):', String(row.refund_received_at || '')); if (received === null) return;
     const { error: e } = await client.rpc('portal_books_label_refund', { p_label: row.id, p_requested: requested || null, p_amount_cents: amount ? Math.round(Number(amount) * 100) : null, p_received: received || null });
-    if (e) setError(e.message); else if (selected) await loadPeriod(selected);
+    if (e) friendlyError('update the label refund', e); else if (selected) await loadPeriod(selected);
   }
 
-  const reportSheets = visibleSections.map(([key, label]) => ({ key, label, rows: sectionRows(key) }));
+  const exportVisibleSections = mode === 'week' ? EXPORT_SECTIONS.filter(([id]) => EXPORT_WEEK_SECTIONS.has(id)) : EXPORT_SECTIONS;
+  const reportSheets: { key: string; label: string; rows: Row[] }[] = exportVisibleSections.map(([key, label]) => ({ key, label, rows: key === 'payouts' ? [...(report?.payouts || []), ...(report?.payout_balances || []).map((r) => ({ ...r, entry_type: 'Period balance summary' }))] : key === 'payments' ? generated.payments || [] : sectionRows(key) }));
   async function buildExcel() {
     if (!report || !selected) return new ArrayBuffer(0);
     const wb = new ExcelJS.Workbook(); wb.creator = 'Floor Books'; wb.subject = `${selected.period_start} to ${selected.period_end}`;
@@ -245,7 +259,7 @@ export function BooksPage({ client, money, native = false }: Props) {
     if (!report || !selected) return;
     if (selected.status === 'locked') {
       const { data, error: e } = await client.rpc('portal_books_frozen_export', { p_period: selected.id, p_format: format });
-      if (e) { setError(e.message); return; }
+      if (e) { friendlyError('download this report', e); return; }
       const binary = atob(data); const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
       download(`Books-${selected.period_start}.${format === 'excel' ? 'xlsx' : 'pdf'}`, bytes, format === 'excel' ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : 'application/pdf'); return;
     }
@@ -259,11 +273,11 @@ export function BooksPage({ client, money, native = false }: Props) {
       const [excel, pdf] = await Promise.all([buildExcel(), buildPdf()]);
       const { error: e } = await client.rpc('portal_books_finalize', { p_period: selected.id, p_report: report, p_excel_base64: bytesBase64(excel), p_pdf_base64: bytesBase64(pdf) });
       if (e) throw e; await loadPeriods(); await loadPeriod({ ...selected, status: 'locked', locked_at: new Date().toISOString() });
-    } catch (e) { setError((e as Error).message || String(e)); } finally { setBusy(false); }
+    } catch (e) { friendlyError('close this period', e); } finally { setBusy(false); }
   }
   async function unlock() {
     if (!selected) return; const reason = window.prompt('Required reason to unlock this closed month (at least 8 characters):'); if (!reason) return;
-    const { error: e } = await client.rpc('portal_books_unlock', { p_period: selected.id, p_reason: reason }); if (e) setError(e.message); else { await loadPeriods(); await loadPeriod({ ...selected, status: 'ready', locked_at: null }); }
+    const { error: e } = await client.rpc('portal_books_unlock', { p_period: selected.id, p_reason: reason }); if (e) friendlyError('unlock this period', e); else { await loadPeriods(); await loadPeriod({ ...selected, status: 'ready', locked_at: null }); }
   }
   async function saveCorrection() {
     if (!selected || !correction.originalTable.trim() || !correction.originalId.trim() || !correction.description.trim() || !correction.amount || Number.isNaN(Number(correction.amount))) { setError('Fill in the original record, source, amount, and correction reason.'); return; }
@@ -271,7 +285,7 @@ export function BooksPage({ client, money, native = false }: Props) {
     try {
       const { error: e } = await client.rpc('portal_books_prior_correction', { p_on: asDate(new Date()), p_original_table: correction.originalTable, p_original_id: correction.originalId, p_source: correction.source, p_amount_cents: Math.round(Number(correction.amount) * 100), p_description: correction.description });
       if (e) throw e; setCorrectionForm(false); setCorrection({ originalTable: '', originalId: '', source: 'safe', amount: '', description: '' }); await loadPeriod(selected);
-    } catch (e) { setError((e as Error).message || String(e)); } finally { setBusy(false); }
+    } catch (e) { friendlyError('save the correction', e); } finally { setBusy(false); }
   }
   async function savePayout() {
     const amount = Number(payout.amount);
@@ -280,7 +294,7 @@ export function BooksPage({ client, money, native = false }: Props) {
     try {
       const { error: e } = await client.rpc('portal_books_record_platform_payout', { p_source: payout.source, p_payout_id: payout.payoutId, p_amount_cents: Math.round(amount * 100), p_paid_on: payout.date, p_bank_reference: payout.bankReference, p_note: payout.note });
       if (e) throw e; setPayoutForm(false); setPayout({ source: 'ebay', payoutId: '', amount: '', date: '', bankReference: '', note: '' }); if (selected) await loadPeriod(selected);
-    } catch (e) { setError((e as Error).message || String(e)); } finally { setBusy(false); }
+    } catch (e) { friendlyError('save the payout', e); } finally { setBusy(false); }
   }
   async function linkSalePayout(row: Row) {
     const channel = String(row.channel || '').toLowerCase();
@@ -291,37 +305,45 @@ export function BooksPage({ client, money, native = false }: Props) {
     const payoutId = window.prompt(`Platform payout ID for sale ${row.receipt_no || row.sale_id || row.id}:`, String(row.payout_id || ''));
     if (!payoutId?.trim()) return;
     const { error: e } = await client.rpc('portal_books_link_sale_payout', { p_sale_id: Number(row.sale_id ?? row.id), p_source: source, p_payout_id: payoutId, p_note: '' });
-    if (e) setError(e.message); else if (selected) await loadPeriod(selected);
+    if (e) friendlyError('link the sale payout', e); else if (selected) await loadPeriod(selected);
   }
   async function linkBankReference(row: Row) {
     const reference = window.prompt(`Bank deposit/reference for payout ${row.payout_id || row.id}:`, String(row.bank_reference || ''));
     if (reference === null) return;
     const { error: e } = await client.rpc('portal_books_link_bank_reference', { p_withdrawal: row.id, p_reference: reference });
-    if (e) setError(e.message); else if (selected) await loadPeriod(selected);
+    if (e) friendlyError('match the bank reference', e); else if (selected) await loadPeriod(selected);
   }
 
-  const periodStatus = (p: Period) => p.status === 'locked' ? 'Locked' : p.status === 'ready' ? 'Ready to close' : 'Draft';
+  const periodStatus = (p: Period) => p.status === 'locked' ? 'Locked' : previews[p.id] ? (fixCount(p) === 0 ? 'Ready to close' : 'Draft') : p.status === 'ready' ? 'Ready to close' : 'Draft';
   return <div className={`books-page${native ? ' books-native' : ''}`}>
     {!native && <header><div><div className="eyebrow">ACCOUNTING</div><h1>Books</h1><p>Period reports, close checks and frozen month-end records.</p></div></header>}
     {error && <div className="alert" role="alert">{error}<button type="button" onClick={() => setError('')}>Dismiss</button></div>}
     {!selected ? <>
-      <div className="books-toolbar"><div className="inventory-tabs" role="tablist" aria-label="Book periods"><button type="button" aria-selected={mode === 'month'} className={mode === 'month' ? 'active' : ''} onClick={() => setMode('month')}>Monthly</button><button type="button" aria-selected={mode === 'week'} className={mode === 'week' ? 'active' : ''} onClick={() => setMode('week')}>Weekly</button></div></div>
-      <div className="books-period-grid">{cards.map((p) => <button type="button" className="books-period-card" key={`${p.period_type}:${p.period_start}`} disabled={busy} onClick={async () => { try { const loaded = p.id ? p : await makePeriod(p.period_type, p.period_start, p.period_end); if (!p.id) await loadPeriods(); await loadPeriod(loaded); } catch (e) { setError((e as Error).message || String(e)); } }}>
-        <span className={`books-status ${p.status}`}>{periodStatus(p)}</span><strong>{p.period_type === 'month' ? monthLabel(p.period_start) : `${p.period_start} – ${p.period_end}`}</strong><small>{p.period_start} to {p.period_end}</small><span className="books-period-arrow">›</span>
-      </button>)}</div>
+      <div className="books-toolbar"><div className="books-segmented" role="tablist" aria-label="Book periods"><button type="button" aria-selected={mode === 'month'} className={mode === 'month' ? 'active' : ''} onClick={() => setMode('month')}>Monthly</button><button type="button" aria-selected={mode === 'week'} className={mode === 'week' ? 'active' : ''} onClick={() => setMode('week')}>Weekly</button></div></div>
+      {!cards.length && <div className="books-empty panel">No {mode === 'month' ? 'monthly' : 'weekly'} periods with recorded activity.</div>}
+      <div className="books-period-grid">{cards.map((p) => { const preview = previews[p.id]; const isHero = mode === 'month' && p.id === latestCard?.id; const done = checkDone(p); const fixes = fixCount(p); const cardStatus = p.status === 'locked' ? 'locked' : preview && fixes === 0 ? 'ready' : 'draft'; return <button type="button" className={`books-period-card${isHero ? ' hero' : ''}`} key={`${p.period_type}:${p.period_start}`} disabled={busy} onClick={() => void loadPeriod(p)}>
+        <span className={`books-status ${cardStatus}`}>{cardStatus === 'locked' ? '🔒 Locked' : cardStatus === 'ready' ? 'Ready to close' : `Draft · ${fixes} to fix`}</span>
+        <strong>{p.period_type === 'month' ? monthLabel(p.period_start) : `${p.period_start} – ${p.period_end}`}</strong>
+        {isHero ? <><small className="books-card-dates">{p.period_start} – {p.period_end}</small><div className="books-card-metrics"><span>Sales <b>{money(preview?.sales || 0)}</b></span><span>Profit <b className="positive">{money(preview?.profit || 0)}</b></span>{mode === 'month' && <span>Fees <b className="warning-text">{money(preview?.fees || 0)}</b></span>}</div><div className="books-progress-label"><span>{cardStatus === 'ready' ? 'Ready to close' : 'Close checks'}</span><span>{done} of 6 checks</span></div><div className="books-progress"><i className={cardStatus === 'ready' ? 'ready' : ''} style={{ width: `${Math.round(done / 6 * 100)}%` }} /></div><div className="books-check-chips">{(preview?.checks || []).filter((c) => !c.ok && !c.explanation).map((c) => <span key={c.key}>{c.count ? `${c.count} ` : ''}{c.label}</span>)}</div></> : <><span className="books-card-compact">Sales {money(preview?.sales || 0)} · Profit <b className="positive">{money(preview?.profit || 0)}</b></span>{p.status === 'locked' ? <small>Closed {p.locked_at ? new Date(p.locked_at).toLocaleDateString() : ''}{p.locked_by_name ? ` by ${p.locked_by_name}` : ''}</small> : <div className="books-progress-label"><span>{cardStatus === 'ready' ? 'All checks done' : `${fixes} to fix`}</span><span>{p.period_type === 'month' ? `${done}/6` : ''}</span></div>}<div className="books-progress"><i className={cardStatus === 'ready' ? 'ready' : ''} style={{ width: `${mode === 'week' ? 100 : Math.round(done / 6 * 100)}%` }} /></div></>}
+        <span className="books-period-arrow">›</span>
+      </button>; })}</div>
     </> : <>
-      <div className="books-detail-head"><button type="button" className="secondary" onClick={() => { setSelected(null); setReport(null); void loadPeriods(); }}>‹ All periods</button><div><span className={`books-status ${selected.status}`}>{periodStatus(selected)}</span><h2>{selected.period_type === 'month' ? monthLabel(selected.period_start) : `${selected.period_start} – ${selected.period_end}`}</h2><small>{selected.period_start} through {selected.period_end}</small></div><div className="books-export-actions"><button type="button" className="secondary" disabled={!report || busy} onClick={() => void exportFile('excel')}>Download Excel</button><button type="button" className="secondary" disabled={!report || busy} onClick={() => void exportFile('pdf')}>Download PDF</button></div></div>
+      <div className="books-detail-head"><button type="button" className="books-back" onClick={() => { setSelected(null); setReport(null); setFilterKind(''); onNativeNavigation?.(false); void loadPeriods(); }}>‹ Books</button><div className="books-detail-title"><h2>{selected.period_type === 'month' ? monthLabel(selected.period_start) : `${selected.period_start} – ${selected.period_end}`}</h2><span className={`books-status ${selected.status}`}>{periodStatus(selected)}</span><small>{selected.period_start} – {selected.period_end} · updated {report ? new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : 'loading'}</small></div><div className="books-export-actions"><button type="button" className="books-download" disabled={!report || busy} onClick={() => void exportFile('excel')}>↓ Excel</button><button type="button" className="books-download" disabled={!report || busy} onClick={() => void exportFile('pdf')}>↓ PDF</button></div></div>
       {busy && <p>Loading books…</p>}{report && <>
-        {section === 'summary' && <><div className="books-metrics">{[['Revenue incl. buyer shipping',totals.revenue],['Fees',totals.fees],['Shipping labels',totals.shipping],['Cost of goods',totals.cost],['Profit',totals.profit],['Expenses',totals.expense],['Commissions',totals.commission],['Register cash/card tender',totals.cashIn],['Platform deposits to bank',totals.platformDeposits],['Recorded outflow',totals.cashOut],['Sales tax',totals.tax]].map(([label, value]) => <div key={String(label)}><small>{label}</small><strong>{money(Number(value))}</strong></div>)}</div><div className="books-section-title"><h3>By channel</h3><p>Revenue includes buyer-paid shipping. The cash view separately shows register tender, platform bank deposits, expenses and payout payments.</p></div></>}
-        {section === 'summary' && <DataTable rows={sectionRows(section)} money={money} />}
+         {section === 'summary' && <>
+           <section className="books-summary-card"><small>Profit</small><strong className="books-profit">{money(totals.profit)}</strong><div className="books-summary-tiles"><div><small>Sales</small><b>{money(totals.revenue)}</b></div><div><small>Cost of goods</small><b>{money(totals.cost)}</b></div><div><small>Fees + labels</small><b className="warning-text">{money(totals.fees + totals.shipping)}</b></div><div><small>Commissions</small><b>{money(totals.commission)}</b></div></div></section>
+           <h3 className="books-kicker">Sales by channel</h3><section className="books-channel-card">{totals.channels.length ? totals.channels.map(([channel, t]) => <div className="books-channel-row" key={channel}><span>{SOURCE_LABEL[channel] || channel}</span><div className="books-channel-track"><i style={{ width: `${Math.max(4, Math.round(t.revenue / Math.max(1, ...totals.channels.map(([, x]) => x.revenue)) * 100))}%` }} /></div><b>{money(t.revenue)}</b></div>) : <p>No sales recorded.</p>}</section>
+         <section className="panel books-checks books-checks-redesign"><h3>Before you can close · {report.checks.filter((c) => c.ok || c.explanation).length} of 6 done</h3>{report.checks.map((c) => <div className="books-check" key={c.key}><div className="books-check-content"><strong className={c.ok ? 'ok' : c.key === 'reconciliation' ? 'reconcile-bad' : 'not-ok'}>{c.ok ? '✓' : c.key === 'reconciliation' ? '×' : '!'}</strong><span>{c.label}<small>{c.detail}{!c.ok && c.count ? ` · ${c.count} items` : ''}</small></span>{!c.ok && <button type="button" className="books-fix" onClick={() => { setSection(c.key === 'fees' ? 'sales' : c.key === 'payouts' ? 'money_trail' : 'reconciliation'); setFilterKind(c.key === 'fees' ? 'fees' : c.key === 'payouts' ? 'unmatched' : ''); if (c.key === 'safe_count') { setOpenSource('safe'); setOpenDate(selected.period_end); setOpenForm(true); } }}> {c.key === 'fees' ? 'Fix' : c.key === 'payouts' ? 'Review' : c.key === 'safe_count' ? 'Count' : 'See why'}</button>}</div>{!c.ok && selected.status !== 'locked' && <label className="books-explain-label">Or explain<textarea defaultValue={c.explanation || ''} placeholder="Add a written explanation" onBlur={(e) => { if (e.target.value.trim() && e.target.value !== c.explanation) void explain(c, e.target.value); }} /></label>}{c.explanation && <p className="books-explanation">{c.explanation}</p>}</div>)}</section>
+           <h3 className="books-kicker">What's inside</h3><section className="books-inside">{(showAllSections ? visibleSections : visibleSections.slice(0, 6)).map(([key,label]) => { const rows = sectionRows(key); const metric = key === 'sales' ? `${rows.length} lines` : key === 'fees' ? money(totals.fees) : key === 'labels' ? `${rows.length} labels` : `${rows.length} lines`; return <button type="button" key={key} onClick={() => { setSection(key); setFilterKind(''); }}><span>{label}</span><small>{metric} ›</small></button>; })}<button type="button" className="books-all-sections" onClick={() => setShowAllSections((v) => !v)}>{showAllSections ? 'Show fewer sections' : `All ${visibleSections.length} sections`} <span>›</span></button></section>
+         </>}
         {section === 'checks' && <section className="panel books-checks"><h3>Close checklist</h3>{report.checks.map((c) => <div className="books-check" key={c.key}><div><strong className={c.ok ? 'ok' : 'not-ok'}>{c.ok ? '✓' : '!'}</strong><span>{c.label}<small>{c.detail}{!c.ok && c.count ? ` · ${c.count} line(s)` : ''}</small></span></div>{!c.ok && selected.status !== 'locked' && <label>Explanation for close<textarea defaultValue={c.explanation || ''} placeholder="Explain why this remains open or how it is carried forward." onBlur={(e) => { if (e.target.value.trim() && e.target.value !== c.explanation) void explain(c, e.target.value); }} /></label>}{c.explanation && <p className="books-explanation">{c.explanation}</p>}</div>)}</section>}
         {section === 'inventory' && <div className="books-snapshot-actions"><p>Snapshots store exact units and recorded acquisition costs at the time you capture them. Historical dates cannot be reconstructed from today's inventory rows. Start/end capture is enabled only on the matching period boundary.</p><button type="button" className="secondary" disabled={busy || selected.status === 'locked' || selected.period_start !== asDate(new Date())} onClick={() => void capture('start')}>Capture start snapshot today</button><button type="button" className="secondary" disabled={busy || selected.status === 'locked' || selected.period_end !== asDate(new Date())} onClick={() => void capture('end')}>Capture end snapshot today</button></div>}
         {section === 'reconciliation' && <><div className="books-opening-actions"><button type="button" className="secondary" disabled={busy || selected.status === 'locked'} onClick={() => { setOpenDate(selected.period_start); setOpenForm((x) => !x); }}>Add opening balance</button><button type="button" className="secondary" disabled={busy || selected.status === 'locked'} onClick={() => { setOpenSource('safe'); setOpenDate(selected.period_end); setOpenForm((x) => !x); }}>Record end-of-month safe count</button><button type="button" className="secondary" disabled={busy || selected.status === 'locked'} onClick={() => setCorrectionForm((x) => !x)}>Prior-month correction</button>{openForm && <div className="books-opening-form"><label>Source<select value={openSource} onChange={(e) => setOpenSource(e.target.value)}>{SOURCES.map((s) => <option key={s} value={s}>{SOURCE_LABEL[s]}</option>)}</select></label><label>As of<input type="date" value={openDate} onChange={(e) => setOpenDate(e.target.value)} /></label><label>Balance ($)<input type="number" step="0.01" value={openAmount} onChange={(e) => setOpenAmount(e.target.value)} /></label><label>Note<input value={openNote} onChange={(e) => setOpenNote(e.target.value)} /></label><button type="button" disabled={busy} onClick={() => void saveOpening()}>Save balance</button></div>}{correctionForm && <div className="books-opening-form"><label>Original table<input value={correction.originalTable} onChange={(e) => setCorrection({ ...correction, originalTable: e.target.value })} placeholder="sales" /></label><label>Original record ID<input value={correction.originalId} onChange={(e) => setCorrection({ ...correction, originalId: e.target.value })} /></label><label>Source<select value={correction.source} onChange={(e) => setCorrection({ ...correction, source: e.target.value })}>{SOURCES.map((s) => <option key={s} value={s}>{SOURCE_LABEL[s]}</option>)}</select></label><label>Correction amount ($)<input type="number" step="0.01" value={correction.amount} onChange={(e) => setCorrection({ ...correction, amount: e.target.value })} /></label><label>Reason<input value={correction.description} onChange={(e) => setCorrection({ ...correction, description: e.target.value })} /></label><button type="button" disabled={busy} onClick={() => void saveCorrection()}>Save prior-month correction</button></div>}</div><p className="books-caveat">The reconciliation gap stays open until each source has a verified opening balance, payout-to-bank matches, and pending amounts accounted for. No amount is inferred. Tax rate is not currently stored in the source ledger.</p></>}
         {section === 'labels' && <p className="books-caveat">Refund-request, refund-amount and refund-received dates are recorded separately. Update a row to carry a label refund forward or resolve it.</p>}
         {section === 'withdrawals' && <div className="books-opening-actions"><button type="button" className="secondary" disabled={busy || selected.status === 'locked'} onClick={() => { setPayout({ ...payout, date: selected.period_start }); setPayoutForm((x) => !x); }}>Record imported platform payout</button>{payoutForm && <div className="books-opening-form"><label>Platform<select value={payout.source} onChange={(e) => setPayout({ ...payout, source: e.target.value })}>{SOURCES.filter((s) => s !== 'safe').map((s) => <option key={s} value={s}>{SOURCE_LABEL[s]}</option>)}</select></label><label>Payout ID<input value={payout.payoutId} onChange={(e) => setPayout({ ...payout, payoutId: e.target.value })} /></label><label>Amount ($)<input type="number" step="0.01" value={payout.amount} onChange={(e) => setPayout({ ...payout, amount: e.target.value })} /></label><label>Paid date<input type="date" value={payout.date} onChange={(e) => setPayout({ ...payout, date: e.target.value })} /></label><label>Bank reference<input value={payout.bankReference} onChange={(e) => setPayout({ ...payout, bankReference: e.target.value })} /></label><label>Note<input value={payout.note} onChange={(e) => setPayout({ ...payout, note: e.target.value })} /></label><button type="button" disabled={busy} onClick={() => void savePayout()}>Save payout record</button></div>}</div>}
-        {section !== 'summary' && <DataTable rows={sectionRows(section)} money={money} onLabelRefund={section === 'labels' && selected.status !== 'locked' ? labelRefund : undefined} onLinkSale={section === 'sales' && selected.status !== 'locked' ? linkSalePayout : undefined} onLinkBank={section === 'withdrawals' && selected.status !== 'locked' ? linkBankReference : undefined} />}
+         {section !== 'summary' && <><div className="books-section-title"><h3>{SECTIONS.find(([key]) => key === section)?.[1] || 'Close checklist'}</h3>{filterKind && <button type="button" className="books-clear-filter" onClick={() => setFilterKind('')}>Clear filter</button>}</div><DataTable rows={(() => { const rows = sectionRows(section); if (filterKind === 'fees') return rows.filter((r) => ['pending','none'].includes(String(r.fee_source))); if (filterKind === 'unmatched') return rows.filter((r) => String(r.status) !== 'Matched'); return rows; })()} money={money} onLabelRefund={section === 'labels' && selected.status !== 'locked' ? labelRefund : undefined} onLinkSale={section === 'sales' && selected.status !== 'locked' ? linkSalePayout : undefined} onLinkBank={section === 'withdrawals' && selected.status !== 'locked' ? linkBankReference : undefined} /></>}
         <div className="books-section-nav">{visibleSections.map(([key, label]) => <button type="button" key={key} className={section === key ? 'active' : ''} onClick={() => setSection(key)}>{label}</button>)}<button type="button" className={section === 'checks' ? 'active' : ''} onClick={() => setSection('checks')}>Close checklist</button></div>
-        {selected.status === 'locked' ? <div className="books-lock-footer"><span>Frozen exports are stored with this locked report.</span><button type="button" className="secondary" onClick={() => void unlock()}>Unlock with reason</button></div> : <div className="books-lock-footer"><span>{report.checks.filter((c) => !c.ok && !c.explanation).length ? 'Resolve each check or add a written explanation before locking.' : 'The month is ready for your review.'}</span><button type="button" disabled={busy || selected.period_type !== 'month'} onClick={() => void finalize()}>Finalize month</button></div>}
+        {selected.status === 'locked' ? <div className="books-lock-footer"><span>Frozen exports are stored with this locked report.</span><button type="button" className="secondary" onClick={() => void unlock()}>Unlock with reason</button></div> : <div className="books-lock-footer"><span>{report.checks.filter((c) => !c.ok && !c.explanation).length ? `Fix ${report.checks.filter((c) => !c.ok && !c.explanation).length} first` : 'Ready to close'}</span><button type="button" disabled={busy || selected.period_type !== 'month' || report.checks.some((c) => !c.ok && !c.explanation)} onClick={() => void finalize()}>Close {monthLabel(selected.period_start)}</button></div>}
       </>}
     </>}
   </div>;
