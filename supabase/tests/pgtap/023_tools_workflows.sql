@@ -26,8 +26,13 @@ select lives_ok($$select public.portal_set_bay(14,array[3,3,3,0])$$,'create bay 
 select is((select row_bins from public.store_bays where store_id=current_setting('tools.store')::uuid and bay_no=14),array[3,3,3,0],'row layout persists');
 select lives_ok($$select public.portal_set_bay(15,array[5,5,5,5,5])$$,'allow five rows with five bins each');
 select is((select count(*)::int from public.store_locations where store_id=current_setting('tools.store')::uuid and bay_no=15),25,'create all 25 locations for a five-by-five bay');
+select lives_ok($$select public.portal_set_bay(16,array[5])$$,'allow a one-row bay');
+select is((select count(*)::int from public.store_locations where store_id=current_setting('tools.store')::uuid and bay_no=16),5,'create five bins in a one-row bay');
+select lives_ok($$select public.portal_set_bay(17,array[2,0])$$,'allow a two-row bay with a large-item row');
+select is((select count(*)::int from public.store_locations where store_id=current_setting('tools.store')::uuid and bay_no=17),3,'create bins and the large-item slot in a two-row bay');
 select throws_ok($$select public.portal_set_bay(16,array[6,3,3])$$,'22023','row_bins_must_be_zero_through_five','reject more than five bins per row');
 select throws_ok($$select public.portal_set_bay(16,array[3,3,3,3,3,3])$$,'22023','bay_layout_invalid','reject more than five rows');
+select throws_ok($$select public.portal_set_bay(18,array[]::int[])$$,'22023','bay_layout_invalid','reject a bay with no rows');
 select lives_ok($$select public.portal_move_location_stock('94001','14-1-1',2,null)$$,'put away two unassigned units');
 select throws_ok($$select public.portal_move_location_stock('94001','14-1-2',3,'14-1-1')$$,'P0001','not_enough_stock_at_source','cannot exceed stock at source');
 select throws_ok($$select public.portal_move_location_stock('94001','14-1-2',2,null)$$,'P0001','not_enough_unassigned_stock','cannot exceed unassigned stock');

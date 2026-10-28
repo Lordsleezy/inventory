@@ -61,8 +61,8 @@ export function LocationsPage({ client, storeId, canManage = true }: Props) {
     event.preventDefault(); if (submitLock.current) return; setError(''); setNotice('');
     const bayNo = number(bay), layout = rows.map(number);
     if (!Number.isInteger(bayNo) || bayNo < 1 || bayNo > 9999
-      || layout.length < 3 || layout.length > 5 || layout.some((n) => !Number.isInteger(n) || n < 0 || n > 5)) {
-      setError('Use bay 1–9999, three to five rows, and zero to five bins per row.'); return;
+      || layout.length < 1 || layout.length > 5 || layout.some((n) => !Number.isInteger(n) || n < 0 || n > 5)) {
+      setError('Use bay 1–9999, one to five rows, and zero to five bins per row.'); return;
     }
     submitLock.current = true; setBusy(true);
     try {
@@ -143,12 +143,12 @@ export function LocationsPage({ client, storeId, canManage = true }: Props) {
         </details>)}</div>}
       </ToolCard>
       {recentMoves.length > 0 && <ToolCard><ToolHeading icon="move" title="Recent location history" description="Latest put-away and move events."/><div className="location-code-list">{recentMoves.map((move,index)=><span key={`${move.sku}-${move.moved_at}-${index}`}><b>SKU {move.sku} · {move.from_location || 'Unassigned'} → {move.to_location}</b><small>{new Date(move.moved_at).toLocaleString()}</small></span>)}</div></ToolCard>}
-      <ToolTip>Each bay can have three to five rows. Each row supports up to five bins, or no bins for large items.</ToolTip>
+      <ToolTip>Each bay can have one to five rows. Each row supports up to five bins, or no bins for large items.</ToolTip>
     </>}
     {view === 'setup' && canManage && <><ToolCard><ToolHeading icon="bay" title="Bay setup" description="Configure the number of rows and bins for this bay location."/>
       <form className="location-bay-form" onSubmit={event => void saveBay(event)}>
         <label>Bay number<input required inputMode="numeric" value={bay} onChange={event => setBay(event.target.value)} placeholder="e.g. 14" disabled={busy}/></label>
-        <div className="location-rows-head"><div><h2>Rows</h2><p>Set up three to five rows in this bay.</p></div><div className="tool-segment" aria-label="Number of rows">{[3,4,5].map(n => <button key={n} type="button" disabled={busy} aria-pressed={rows.length === n} onClick={() => resizeRows(n)}>{n} rows</button>)}</div></div>
+        <div className="location-rows-head"><div><h2>Rows</h2><p>Set up one to five rows in this bay.</p></div><div className="tool-segment" aria-label="Number of rows">{[1,2,3,4,5].map(n => <button key={n} type="button" disabled={busy} aria-pressed={rows.length === n} onClick={() => resizeRows(n)}>{n} {n === 1 ? 'row' : 'rows'}</button>)}</div></div>
         {rows.map((bins,index) => <label className="location-row-config" key={index}><span>Row {index+1}<ToolIcon name="bay"/></span><select disabled={busy} value={bins} onChange={event => setRows(old => old.map((value,i) => i === index ? event.target.value : value))}><option value="0">No bins · large items</option>{[1,2,3,4,5].map(count => <option key={count} value={count}>{count} {count === 1 ? 'bin' : 'bins'}</option>)}</select></label>)}
         <div className="actions"><button disabled={busy || !loaded}><ToolIcon name="save"/>{busy ? 'Saving…' : 'Save bay'}</button></div>
       </form></ToolCard><ToolTip>Choose no bins for a row that holds large items. Existing stock prevents unsafe layout changes.</ToolTip></>}
