@@ -846,6 +846,17 @@ html.app-mode .app-scanner-status.ok { color: #30d158; }
 html.app-mode .app-scanner-status.ok i { background: #30d158; }
 html.app-mode .app-scanner-status.warn { color: #ff9f0a; }
 html.app-mode .app-scanner-status.warn i { background: #ff9f0a; }
+html.app-mode .app-item-scanner-status {
+  flex: 0 0 auto;
+  max-width: 92px;
+  padding: 5px 7px;
+  border: 1px solid #283245;
+  border-radius: 999px;
+  font-size: 10px;
+  line-height: 1.15;
+  white-space: normal;
+  text-align: center;
+}
 html.app-mode .app-scan-card {
   display: grid;
   gap: 6px;

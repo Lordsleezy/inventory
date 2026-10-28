@@ -14,6 +14,9 @@ import { receiveBrowsePrices } from "../lib/ebay-catalog.mjs";
 import { lookupReceiveDimensions } from "../lib/receive-dimensions.mjs";
 import { receiveSpecifics } from '../../shared/receive-specifics.mjs';
 import { normalizeGtin } from "../lib/gtin-normalize.mjs";
+import { searchCatalogAsin, catalogItemByIdentifier } from "../lib/amazon.mjs";
+import { dimensionIdentityMatches } from "../lib/receive-dimensions.mjs";
+import { isCompleteReceiveTitle } from "../../shared/store-barcode.mjs";
 import {
   attachPhotoIdentityToMiss,
   listingTitle,
@@ -53,6 +56,22 @@ function photoFill(identity, brand, model, title) {
     aspects: { ...(identity.variant ? { Variant: identity.variant } : {}),
       ...(identity.size ? { Size: identity.size } : {}),
       ...(identity.color ? { Color: identity.color } : {}), ...(brand ? { Brand: brand } : {}) } };
+}
+
+function photoSpecifics(identity) {
+  const parts = [identity.item_type, identity.pattern, identity.variant, identity.size, identity.color]
+    .map(value => String(value || '').trim()).filter(Boolean);
+  const unique = [];
+  for (const part of parts) if (!unique.some(value => value.toLowerCase().includes(part.toLowerCase())
+    || part.toLowerCase().includes(value.toLowerCase()))) unique.push(part);
+  return unique.join(', ');
+}
+
+function completePhotoTitle(identity, brand, model) {
+  if (!String(identity.item_type || '').trim()) return '';
+  const specifics = photoSpecifics(identity) || model;
+  const composed = [brand, specifics].filter(Boolean).join(' ').trim();
+  return isCompleteReceiveTitle(composed, brand) ? composed : '';
 }
 
 async function logUsage(ctx, identity, usage, costUsd) {
@@ -171,6 +190,49 @@ export async function invoke(event) {
     }
     return saved ? json(200, { ok: true, gtin14: gtin.gtin14 }) : json(500, { ok: false, error: 'product_save_failed', message: 'The unit was saved, but its UPC product details could not be cached.' });
   }
+  if (body.action === 'confirm_identity') {
+    const gtin = normalizeGtin(String(body.upc || '').trim());
+    if (!gtin.ok) return json(400, { ok: false, error: 'valid_upc_required' });
+    const fields = body.fields || {};
+    const brand = String(fields.brand || '').trim().slice(0, 120);
+    const title = String(fields.title || '').trim().slice(0, 250);
+    const itemType = String(fields.item_type || '').trim().slice(0, 100);
+    const model = String(fields.model || '').trim().slice(0, 180);
+    if (!brand || !itemType || !title.toLowerCase().includes(itemType.toLowerCase()) || !isCompleteReceiveTitle(title, brand))
+      return json(422, { ok: false, error: 'complete_product_title_required', message: 'Enter the full brand and product title before confirming.' });
+
+    // Search by the photo-confirmed identity, never by a suspected retailer code.
+    // Persist images only when Amazon returns a matching brand/title candidate.
+    let matched = null;
+    try {
+      const candidate = await searchCatalogAsin(ctx.storeId, { upc: '', brand, model, title });
+      const summary = { brand: candidate?.brand || '', title: candidate?.title || '' };
+      const requested = { brand, title, model, size: fields.size || '', variant: fields.variant || '', color: fields.color || '' };
+      if (candidate?.asin && dimensionIdentityMatches(summary, requested)) {
+        const detail = await catalogItemByIdentifier(ctx.storeId, 'ASIN', candidate.asin);
+        if (detail?.found && dimensionIdentityMatches(detail.item, requested)) matched = detail.item;
+      }
+    } catch (error) {
+      await floorLog({ level: 'warn', event: 'receive_photo.confirmed_catalog_unavailable',
+        message: String(error?.message || error).slice(0, 180), storeId: ctx.storeId });
+    }
+    const aspects = { ...(fields.aspects && typeof fields.aspects === 'object' ? fields.aspects : {}) };
+    for (const key of ['size', 'color', 'variant']) if (fields[key])
+      aspects[key === 'size' ? 'Size' : key === 'color' ? 'Color' : 'Variant'] = String(fields[key]).slice(0, 100);
+    const saved = await saveFloorProduct(ctx.sb, gtin, {
+      brand, title, model, category: String(fields.category || '').trim().slice(0, 150),
+      description: String(fields.description || '').trim().slice(0, 2000),
+      aspects: { ...(matched?.aspects || {}), ...aspects },
+      features: matched?.features || [], asin: matched?.asin || null,
+      images: matched?.images || [], package: matched?.package || {},
+    }, { source: 'photo', actorId: ctx.userId,
+      dimSources: matched ? { length_in: 'Amazon', width_in: 'Amazon', height_in: 'Amazon', weight_lb: 'Amazon' } : {} });
+    if (!saved) return json(500, { ok: false, error: 'product_save_failed', message: 'Could not save the confirmed product to the UPC catalog.' });
+    return json(200, { ok: true, gtin14: gtin.gtin14, product: {
+      brand, title, model, category: String(fields.category || ''), images: saved.images || [],
+      stock_photo_found: Boolean(saved.images?.length), asin: saved.asin || null,
+    } });
+  }
   if (body.action === 'dimensions') {
     const started = Date.now();
     try {
@@ -263,9 +325,9 @@ export async function invoke(event) {
   }
   const identity = identified.result || {};
   const brand = String(identity.brand || "").trim();
-  const model = specificsFromIdentity(identity);
-  const rawTitle = String(identity.title || '').trim();
-  const title = rawTitle ? (rawTitle.toLowerCase().startsWith(brand.toLowerCase()) ? rawTitle : `${brand} ${rawTitle}`.trim()) : listingTitle(brand, model);
+  const model = photoSpecifics(identity) || specificsFromIdentity(identity);
+  const title = completePhotoTitle(identity, brand, model) || listingTitle(brand, model);
+  const titleComplete = Boolean(completePhotoTitle(identity, brand, model));
   const identifyMs = Date.now() - t0;
 
   if (body.action === 'identify_only') {
@@ -280,8 +342,8 @@ export async function invoke(event) {
     await floorLog({ level: 'info', event: 'receive_photo.identified', message: title || brand,
       storeId: ctx.storeId, detail: { upc, identify_ms: identifyMs, cost_usd: costUsd } });
     return json(200, { ok: true,
-      identity: { ...identity, brand, model, title },
-      fill: photoFill(identity, brand, model, title), timing: { identify_ms: identifyMs }, cost_usd: costUsd });
+      identity: { ...identity, brand, model, title, title_complete: titleComplete },
+      fill: photoFill(identity, brand, model, titleComplete ? title : ''), timing: { identify_ms: identifyMs }, cost_usd: costUsd });
   }
 
   // Price lookup in parallel spirit: start after name is known; user can see name first client-side
@@ -333,6 +395,7 @@ export async function invoke(event) {
       brand,
       model,
       title,
+      title_complete: titleComplete,
       variant: identity.variant || '',
       size: identity.size || '',
       category: identity.category || '',
@@ -342,7 +405,7 @@ export async function invoke(event) {
       unit_count: identity.unit_count || 1,
       catalog_title: identity.title || "",
     },
-    fill: photoFill(identity, brand, model, title),
+    fill: photoFill(identity, brand, model, titleComplete ? title : ''),
     price: reference,
     timing: { identify_ms: identifyMs, total_ms: Date.now() - t0 },
     cost_usd: costUsd,

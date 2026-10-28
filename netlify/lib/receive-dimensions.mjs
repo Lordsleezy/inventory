@@ -2,6 +2,8 @@ import { readFloorProduct } from './floor-products.mjs';
 import { normalizeGtin } from './gtin-normalize.mjs';
 import { lookupUpc } from './upc-lookup.mjs';
 import { comparablePrices } from './receive-price.mjs';
+import { searchCatalogAsin, catalogItemByIdentifier } from './amazon.mjs';
+import { isStoreLabelBarcode } from '../../shared/store-barcode.mjs';
 
 const fields = ['product_height_in', 'product_width_in', 'product_depth_in', 'product_weight_lb',
   'package_length_in', 'package_width_in', 'package_height_in', 'package_weight_lb'];
@@ -44,13 +46,39 @@ export function dimensionIdentityMatches(catalog, identity, { exactBarcode = fal
   // Barcode catalogs often abbreviate marketing variants ("Linen" vs "Linen & Sky").
   // Keep size/count checks; don't require every marketing word on an exact-GTIN record.
   const matchIdentity = exactBarcode ? { ...identity, variant: undefined } : identity;
-  return comparablePrices([{price_cents:1, url:'https://catalog.example/item',
-    product_name:[catalog?.brand,catalog?.title,catalog?.model,catalog?.size,catalog?.aspects?.Size].filter(Boolean).join(' ')}], matchIdentity).length > 0;
+  const name = [catalog?.brand,catalog?.title,catalog?.model,catalog?.size,catalog?.aspects?.Size]
+    .filter(Boolean).join(' ');
+  if (!comparablePrices([{price_cents:1, url:'https://catalog.example/item', product_name:name}], matchIdentity).length) return false;
+  const expectedSize = String(identity.size || '').trim();
+  if (/(?:\bin\b|inch|\")/i.test(expectedSize)) {
+    const measurements = expectedSize.match(/\d+(?:\.\d+)?/g) || [];
+    const catalogName = String(name).toLowerCase();
+    if (measurements.length >= 2 && !measurements.every(value =>
+      new RegExp(`(?<!\\d)${value.replace('.', '\\.')}(?!\\d)`).test(catalogName))) return false;
+  }
+  return true;
 }
 
-export async function lookupReceiveDimensions(sb, storeId, rawUpc, identity, { source = 'all' } = {}) {
+export async function lookupReceiveDimensions(sb, storeId, rawUpc, identity, {
+  source = 'all', searchCatalog = searchCatalogAsin, itemByIdentifier = catalogItemByIdentifier,
+} = {}) {
   const gtin = normalizeGtin(rawUpc);
   if (!gtin.ok) return mergeDimensions(null, null, null);
+  if (isStoreLabelBarcode(rawUpc)) {
+    // Store labels are never dimension identifiers. Search by the confirmed
+    // photo identity instead, and don't consult UPCitemdb for the sticker.
+    if (source === 'upcitemdb' || !identity?.title || !identity?.brand) return mergeDimensions(null, null, null);
+    try {
+      const candidate = await searchCatalog(storeId, { upc: '', brand: identity.brand,
+        title: identity.title, model: identity.model || '' });
+      if (!candidate?.asin || !dimensionIdentityMatches(candidate, identity)) return mergeDimensions(null, null, null);
+      const detail = await itemByIdentifier(storeId, 'ASIN', candidate.asin);
+      if (!detail?.found || !dimensionIdentityMatches(detail.item, identity)) return mergeDimensions(null, null, null);
+      return { ...mergeDimensions(null, detail.item, null), warnings: [] };
+    } catch {
+      return mergeDimensions(null, null, null);
+    }
+  }
   let floor = await readFloorProduct(sb, gtin.gtin14);
   if (!dimensionIdentityMatches(floor, identity, { exactBarcode: true })) floor = null;
   const catalog = await lookupUpc(storeId, rawUpc, { dimensionsOnly: true, deps: { sb,
