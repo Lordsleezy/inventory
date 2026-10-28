@@ -44,11 +44,7 @@ async function handle(event) {
         pickupListDispatch = [{ ok: false, error: err instanceof Error ? err.message : String(err) }];
       }
       const withdrawn = await withdrawOpenEbayTasks();
-      // eBay / Square payouts to the bank become withdrawals; self-throttled to once per 6 hours, so most runs only read one setting.
-      let payouts = null;
-      try { payouts = await (await import("../lib/payout-import-live.mjs")).runPayoutImport(sb, STORE_ID); }
-      catch (err) { payouts = { error: err instanceof Error ? err.message : String(err) }; }
-      return { withdrawn, orders, migrationDispatch, pickupListDispatch, payouts, completed: polled };
+      return { withdrawn, orders, migrationDispatch, pickupListDispatch, completed: polled };
     }, sb);
     if (result?.skipped || result?.completed === false) await emailIfSyncStalled(sb);
     return json(200, result);

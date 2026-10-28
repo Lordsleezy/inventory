@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { Session, SupabaseClient } from '@supabase/supabase-js';
 import type { StaffSession } from '@floor/cloud';
 import { RegisterPage } from '../RegisterPage';
-import { WithdrawalsPage } from '../WithdrawalsPage';
+import { MoneyPage } from '../MoneyPage';
 import { BooksPage } from '../BooksPage';
 import { ManifestsPage } from '../ManifestsPage';
 import { LocationsPage } from '../LocationsPage';
@@ -343,8 +343,8 @@ export function AppModeShell({
           </AppReportsNative>
         )}
         {fullAccess && morePage === 'withdrawals' && (
-          <AppReportsNative onBack={() => setMorePage(null)} title="Withdrawals">
-            <WithdrawalsPage client={client} storeId={storeId} money={money} stamp={stamp} />
+          <AppReportsNative onBack={() => setMorePage(null)} title="Money">
+            <MoneyPage client={client} storeId={storeId} accessToken={session.access_token} money={money} stamp={stamp} />
           </AppReportsNative>
         )}
         {fullAccess && morePage === 'books' && (

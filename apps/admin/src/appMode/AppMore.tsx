@@ -164,7 +164,7 @@ export function AppMoreHome({
               <span className="app-chevron">›</span>
             </button>
             <button type="button" className="app-more-link" onClick={() => setPage('withdrawals')}>
-              <span className="app-more-left"><Icon tone="#64d2ff" />Withdrawals</span>
+              <span className="app-more-left"><Icon tone="#64d2ff" />Money</span>
               <span className="app-chevron">›</span>
             </button>
             <button type="button" className="app-more-link" onClick={() => setPage('books')}>

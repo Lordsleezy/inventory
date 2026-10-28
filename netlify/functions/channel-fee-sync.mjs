@@ -266,6 +266,8 @@ async function handle(event) {
     try { await syncEbayFees(sb, store.id, log); } catch (e) { log.push({ ebay: String(e?.message || e) }); }
     try { await syncSquareFees(sb, store.id, log); } catch (e) { log.push({ square: String(e?.message || e) }); }
     try { await syncSquarePayouts(sb, store.id, log); } catch (e) { log.push({ squarePayouts: String(e?.message || e) }); }
+    // Real eBay / Square balances for the Money tab: self-throttled to once per 6 hours (most runs only read one setting).
+    try { log.push({ money: await (await import("../lib/money-sync.mjs")).runMoneySync(sb, store.id) }); } catch (e) { log.push({ money: String(e?.message || e) }); }
   }
   return json(200, out);
 }

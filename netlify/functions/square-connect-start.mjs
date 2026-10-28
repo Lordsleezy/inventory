@@ -25,7 +25,7 @@ async function handle(event) {
     (process.env.SQUARE_ENVIRONMENT || "sandbox").toLowerCase() === "production"
       ? "https://connect.squareup.com"
       : "https://connect.squareupsandbox.com";
-  const scope = "MERCHANT_PROFILE_READ PAYMENTS_WRITE PAYMENTS_WRITE_IN_PERSON PAYOUTS_READ";
+  const scope = "MERCHANT_PROFILE_READ PAYMENTS_WRITE PAYMENTS_WRITE_IN_PERSON PAYMENTS_READ PAYOUTS_READ";
   const url =
     `${host}/oauth2/authorize?client_id=${encodeURIComponent(appId)}` +
     `&scope=${encodeURIComponent(scope)}&session=false` +
