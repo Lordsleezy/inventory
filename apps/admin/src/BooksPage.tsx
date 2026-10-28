@@ -40,7 +40,16 @@ function arrayBuffer(data: ArrayBuffer | Uint8Array): ArrayBuffer {
   const copy = new Uint8Array(data.byteLength); copy.set(data); return copy.buffer as ArrayBuffer;
 }
 function download(name: string, data: ArrayBuffer | Uint8Array, type: string) {
-  const url = URL.createObjectURL(new Blob([arrayBuffer(data)], { type })); const a = document.createElement('a'); a.href = url; a.download = name; a.click(); URL.revokeObjectURL(url);
+  const url = URL.createObjectURL(new Blob([arrayBuffer(data)], { type })); const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove(); window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+function excelSheetName(label: string, index: number) {
+  return label.replace(/[\\/*?:\[\]]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 31) || `Section ${index + 1}`;
+}
+function pdfText(value: unknown) {
+  return String(value).normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[→➜]/g, '->').replace(/[←]/g, '<-').replace(/[·•]/g, '|')
+    .replace(/[–—]/g, '-').replace(/[“”]/g, '"').replace(/[‘’]/g, "'")
+    .replace(/[^\x20-\x7E\n\r\t]/g, '?');
 }
 function display(value: unknown, key: string, money: (c: number) => string) {
   if (value === null || value === undefined || value === '') return '—';
@@ -210,8 +219,8 @@ export function BooksPage({ client, money, native = false, onNativeNavigation }:
   async function buildExcel() {
     if (!report || !selected) return new ArrayBuffer(0);
     const wb = new ExcelJS.Workbook(); wb.creator = 'Floor Books'; wb.subject = `${selected.period_start} to ${selected.period_end}`;
-    for (const sheet of reportSheets) {
-      const ws = wb.addWorksheet(sheet.label.slice(0, 31));
+    for (const [sheetIndex, sheet] of reportSheets.entries()) {
+      const ws = wb.addWorksheet(excelSheetName(sheet.label, sheetIndex));
       const rows = sheet.rows; const keys = columns(rows); if (!keys.length) keys.push('record');
       ws.addRow(keys.map((k) => k.replaceAll('_', ' ').replace(/\b\w/g, (x) => x.toUpperCase())));
       ws.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } }; ws.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF253348' } };
@@ -230,7 +239,7 @@ export function BooksPage({ client, money, native = false, onNativeNavigation }:
     const pageWidth = 792; const pageHeight = 612; const margin = 34; let page = pdf.addPage([pageWidth, pageHeight]); let y = pageHeight - margin; let pageNo = 1; let currentTitle = 'Summary';
     const newPage = (title = currentTitle) => { currentTitle = title || currentTitle; page = pdf.addPage([pageWidth, pageHeight]); pageNo++; y = pageHeight - margin; page.drawText('Open Box Industries · Books', { x: margin, y, size: 10, font: bold }); y -= 20; page.drawText(currentTitle, { x: margin, y, size: 14, font: bold }); y -= 22; };
     const line = (text: string, strong = false) => {
-      const activeFont = strong ? bold : font; const words = String(text).split(/\s+/); let current = '';
+      const activeFont = strong ? bold : font; const words = pdfText(text).split(/\s+/); let current = '';
       for (const word of words) {
         const candidate = current ? `${current} ${word}` : word;
         if (activeFont.widthOfTextAtSize(candidate, 7.5) > pageWidth - margin * 2 && current) {
@@ -257,14 +266,19 @@ export function BooksPage({ client, money, native = false, onNativeNavigation }:
   }
   async function exportFile(format: 'excel' | 'pdf') {
     if (!report || !selected) return;
-    if (selected.status === 'locked') {
-      const { data, error: e } = await client.rpc('portal_books_frozen_export', { p_period: selected.id, p_format: format });
-      if (e) { friendlyError('download this report', e); return; }
-      const binary = atob(data); const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
-      download(`Books-${selected.period_start}.${format === 'excel' ? 'xlsx' : 'pdf'}`, bytes, format === 'excel' ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : 'application/pdf'); return;
+    try {
+      if (selected.status === 'locked') {
+        const { data, error: e } = await client.rpc('portal_books_frozen_export', { p_period: selected.id, p_format: format });
+        if (e) throw e;
+        if (typeof data !== 'string' || !data) throw new Error('Frozen export returned no file data');
+        const binary = atob(data); const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+        download(`Books-${selected.period_start}.${format === 'excel' ? 'xlsx' : 'pdf'}`, bytes, format === 'excel' ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : 'application/pdf'); return;
+      }
+      const buffer = format === 'excel' ? await buildExcel() : await buildPdf();
+      download(`Books-${selected.period_start}.${format === 'excel' ? 'xlsx' : 'pdf'}`, buffer, format === 'excel' ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : 'application/pdf');
+    } catch (e) {
+      friendlyError('download this report', e);
     }
-    const buffer = format === 'excel' ? await buildExcel() : await buildPdf();
-    download(`Books-${selected.period_start}.${format === 'excel' ? 'xlsx' : 'pdf'}`, buffer, format === 'excel' ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : 'application/pdf');
   }
   async function finalize() {
     if (!report || !selected || !window.confirm(`Lock ${selected.period_start}–${selected.period_end}? This freezes the report and blocks dated edits.`)) return;
