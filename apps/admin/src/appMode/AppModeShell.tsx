@@ -48,7 +48,7 @@ type Props = {
   onReportsAction?: () => void;
 };
 
-/** Store associates (e.g. Jacob): Inventory / Receive / Register / Settings. */
+/** Clerk-visible tabs; admins also get the shared Locations tab. */
 const ASSOCIATE_TABS: AppTab[] = ['inventory', 'receive', 'register', 'locations', 'settings'];
 
 const TABS: { id: AppTab; label: string; icon: React.ReactNode; adminOnly?: boolean; associateOnly?: boolean }[] = [
@@ -113,7 +113,6 @@ const TABS: { id: AppTab; label: string; icon: React.ReactNode; adminOnly?: bool
   {
     id: 'locations',
     label: 'Locations',
-    associateOnly: true,
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
         <path d="M3 7h18M5 7v13h14V7M7 12h10M12 7v13" />
@@ -313,11 +312,9 @@ export function AppModeShell({
             )}
           </div>
         )}
-        {!fullAccess && (
-          <div className="app-tab-panel" data-tab="locations" hidden={tab !== 'locations'}>
-            {tab === 'locations' && <LocationsPage client={client} storeId={storeId} canManage={false} />}
-          </div>
-        )}
+        <div className="app-tab-panel" data-tab="locations" hidden={tab !== 'locations'}>
+          {tab === 'locations' && <LocationsPage client={client} storeId={storeId} canManage={fullAccess} />}
+        </div>
 
         {fullAccess && channel && (
           <div hidden={!!itemSku}>

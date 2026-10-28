@@ -4,6 +4,7 @@ import { decodeBarcodeFile, ReceivePanel } from '../ReceivePanel';
 import { BundleReceive } from '../BundleReceive';
 import { AppItemDetail } from './AppItemDetail';
 import { ReceiveWorkStatus } from '../ReceiveWorkStatus';
+import { isAndroid, isStandaloneApp } from './isAppMode';
 
 type Props = {
   client: SupabaseClient;
@@ -15,6 +16,9 @@ type Props = {
 
 /** Native Receive home; opens the shared ReceivePanel form after scan / camera / manual. */
 export function AppReceive({ client, storeId, accessToken, staffMode = false, onSaved }: Props) {
+  // Scope this layout to the store phone: an installed Android PWA signed in as
+  // an active clerk. iPhone and desktop/admin Receive keep their current UI.
+  const storePhoneMode = staffMode && isAndroid() && isStandaloneApp();
   const [phase, setPhase] = useState<'home' | 'form' | 'bundle'>('home');
   useEffect(() => {
     if (phase !== 'home') return;
@@ -82,6 +86,7 @@ export function AppReceive({ client, storeId, accessToken, staffMode = false, on
           storeId={storeId}
           accessToken={accessToken}
           staffMode={staffMode}
+          storePhoneMode={storePhoneMode}
           onSaved={() => {
             onSaved();
             setPendingUpc(null);
