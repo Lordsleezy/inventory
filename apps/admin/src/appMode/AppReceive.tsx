@@ -33,7 +33,6 @@ export function AppReceive({ client, storeId, accessToken, staffMode = false, on
   const [manual, setManual] = useState(false);
   const [pendingUpc, setPendingUpc] = useState<string | null>(null);
   const [cameraError, setCameraError] = useState('');
-  const [scannerOk, setScannerOk] = useState(true);
   const [nextSku, setNextSku] = useState<string | null>(null);
   const [today, setToday] = useState<{ sku: string; title: string }[]>([]);
   const [editSku, setEditSku] = useState<string | null>(null);
@@ -50,11 +49,7 @@ export function AppReceive({ client, storeId, accessToken, staffMode = false, on
       const { data } = await client.rpc(staffMode ? 'staff_receive_options' : 'portal_receive_options');
       if (alive && data?.next_sku) setNextSku(String(data.next_sku));
     })();
-    const onHid = () => setScannerOk(true);
-    window.addEventListener('keydown', onHid, { once: true });
-    // Bluetooth wedges look like fast keyboard input; stay optimistic green on store phone.
-    const t = window.setTimeout(() => setScannerOk(true), 0);
-    return () => { alive = false; window.clearTimeout(t); window.removeEventListener('keydown', onHid); };
+    return () => { alive = false; };
   }, [client, phase, staffMode]);
 
   useEffect(() => {
@@ -104,7 +99,7 @@ export function AppReceive({ client, storeId, accessToken, staffMode = false, on
     );
   }
 
-  if (editSku) return <AppItemDetail client={client} storeId={storeId} accessToken={accessToken} sku={editSku} money={n => `$${(n / 100).toFixed(2)}`} staffMode={staffMode} canDelete={!staffMode} scannerOk={scannerOk} onBack={() => setEditSku(null)} onChanged={() => { onSaved(); setEditSku(null); }} onSellInStore={() => setEditSku(null)} />;
+  if (editSku) return <AppItemDetail client={client} storeId={storeId} accessToken={accessToken} sku={editSku} money={n => `$${(n / 100).toFixed(2)}`} staffMode={staffMode} canDelete={!staffMode} scannerInputReady onBack={() => setEditSku(null)} onChanged={() => { onSaved(); setEditSku(null); }} onSellInStore={() => setEditSku(null)} />;
 
   if (phase === 'bundle') {
     return <div className="app-receive-form">
@@ -121,9 +116,9 @@ export function AppReceive({ client, storeId, accessToken, staffMode = false, on
     <>
       <div className="app-large-title app-receive-title">
         <h1>Receive</h1>
-        <span className={`app-scanner-status ${scannerOk ? 'ok' : 'warn'}`}>
+        <span className="app-scanner-status ok" title="Bluetooth keyboard scanner status is not exposed to Floor. Scan into the barcode field to test it.">
           <i />
-          {scannerOk ? 'Scanner connected' : 'Scanner not connected'}
+          Scanner input ready
         </span>
       </div>
 

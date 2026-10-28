@@ -1636,7 +1636,6 @@ html.app-mode .receive-store-phone .receive-app-nav > button { min-width:44px; m
 html.app-mode .receive-store-phone .receive-app-nav .app-nav-title { flex:1; text-align:center; color:#f3f4f8; font-weight:650; }
 html.app-mode .receive-store-phone .receive-phone-scanner { display:flex; align-items:center; gap:7px; color:#41d98a; font-size:13px; white-space:nowrap; }
 html.app-mode .receive-store-phone .receive-phone-scanner i { width:8px; height:8px; border-radius:50%; background:#41d98a; }
-html.app-mode .receive-store-phone > .receive-next { display:none; }
 html.app-mode .receive-store-phone .receive-confirm { display:grid; gap:12px; margin:0; padding:0 0 12px; background:transparent; border:0; color:#f3f4f8; }
 html.app-mode .receive-store-phone .receive-found-bar { min-height:46px; box-sizing:border-box; border:1px solid #175b3d; border-radius:14px; background:#0c2a1d; color:#41d98a; padding:8px 12px; }
 html.app-mode .receive-store-phone .receive-found-bar code { color:#a5adba; }
