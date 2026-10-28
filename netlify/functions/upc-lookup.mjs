@@ -1,38 +1,16 @@
 /**
- * UPC lookup HTTP endpoint (portal admin only, read-only — never lists).
+ * UPC lookup HTTP endpoint (portal admins and active store staff; read-only — never lists).
  *
  * POST { action: "lookup", upc, force?, compare_upcitemdb?, store_id? }
  * POST { action: "batch_status", upcs?: string[] }   → cache coverage for the given codes (no external calls)
  */
-import { json, optionsOk, serviceClient } from "../lib/server.mjs";
-import { portalAdminFromEvent } from "../lib/portal-auth.mjs";
+import { json, optionsOk } from "../lib/server.mjs";
+import { receiveAccessFromEvent } from "../lib/receive-auth.mjs";
 import { netlifyHandler, floorLog } from "../lib/floor-log.mjs";
 import { lookupUpc } from "../lib/upc-lookup.mjs";
 import { normalizeGtin } from "../lib/gtin-normalize.mjs";
 
 const BATCH_MAX = 100;
-
-/** Portal admin, or any active Floor staff (receive / lookup test on phone). */
-async function authFromEvent(event, storeIdHint) {
-  try {
-    return await portalAdminFromEvent(event, storeIdHint);
-  } catch (adminErr) {
-    if (adminErr?.status && adminErr.status !== 403) throw adminErr;
-    const token = (event.headers?.authorization || event.headers?.Authorization || "").replace(/^Bearer\s+/i, "");
-    if (!token) throw Object.assign(new Error("Sign in required"), { status: 401 });
-    const sb = serviceClient();
-    const { data: auth, error } = await sb.auth.getUser(token);
-    if (error || !auth.user) throw Object.assign(new Error("Sign in required"), { status: 401 });
-    const { data: staff } = await sb
-      .from("staff")
-      .select("store_id")
-      .eq("user_id", auth.user.id)
-      .is("deactivated_at", null)
-      .maybeSingle();
-    if (!staff?.store_id) throw Object.assign(new Error("Staff access required"), { status: 403 });
-    return { sb, storeId: staff.store_id, actor: auth.user.email || auth.user.id, userId: auth.user.id };
-  }
-}
 
 async function actions(event, ctx) {
   const body = JSON.parse(event.body || "{}");
@@ -97,7 +75,7 @@ async function handle(event) {
   if (event.httpMethod !== "POST") return json(405, { ok: false, error: "method_not_allowed" });
   try {
     const preview = JSON.parse(event.body || "{}");
-    const ctx = await authFromEvent(event, preview.store_id);
+    const ctx = await receiveAccessFromEvent(event, preview.store_id);
     return await actions(event, ctx);
   } catch (err) {
     const status = err.status || 500;
