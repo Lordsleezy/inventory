@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mergeDimensions, dimensionIdentityMatches, dimensionWarnings } from './receive-dimensions.mjs';
+import { lookupReceiveDimensions, mergeDimensions, dimensionIdentityMatches, dimensionWarnings } from './receive-dimensions.mjs';
 
 test('Amazon then UPCitemdb supply dimensions; saved Floor values only fill gaps', () => {
   const result = mergeDimensions(
@@ -56,4 +56,28 @@ test('exact Febreze barcode accepts abbreviated Linen marketing text, preserving
   assert.equal(dimensionIdentityMatches({...catalog,title:'Febreze Air Effects Linen 8.8 oz 3-Pack',aspects:{}},identity,{exactBarcode:true}),false);
   const merged = mergeDimensions({package_length_in:9.53,dim_sources:{length_in:'Amazon'}},null,null);
   assert.equal(merged.sources.package_length_in,'Amazon');
+});
+
+test('store-label dimensions use the confirmed identity, never the retailer barcode', async () => {
+  let searchInput;
+  const identity = { brand:'ACHIM', title:'ACHIM Buffalo Check Window Curtain Panel 42 x 84 in Sage/Cream',
+    model:'Buffalo Check Window Curtain Panel', size:'42 x 84 in', color:'Sage/Cream', variant:'Buffalo Check' };
+  const detail = { found:true, item:{ brand:'ACHIM', title:identity.title,
+    item:{ height_in:84, width_in:42, length_in:null, weight_lb:null },
+    package:{ length_in:11.65, width_in:8.98, height_in:1.5, weight_lb:1.01 } } };
+  const result = await lookupReceiveDimensions(null,'store','490680352443',identity,{source:'amazon',
+    searchCatalog:async (_store,input)=>{ searchInput=input; return {asin:'B0EXAMPLE',brand:'ACHIM',title:identity.title}; },
+    itemByIdentifier:async()=>detail,
+  });
+  assert.equal(searchInput.upc,'');
+  assert.equal(result.values.product_width_in,42);
+  assert.equal(result.values.product_height_in,84);
+  assert.equal(result.values.package_weight_lb,1.01);
+});
+
+test('photo-confirmed curtain dimensions reject a same-pattern wrong length', () => {
+  const identity = {brand:'ACHIM',title:'ACHIM Buffalo Check Window Curtain Panel 42 x 84 in Sage/Cream',
+    variant:'Buffalo Check',size:'42 x 84 in'};
+  assert.equal(dimensionIdentityMatches({brand:'ACHIM',title:'ACHIM Buffalo Check Window Curtain Panel 42 x 63 in Sage'},identity),false);
+  assert.equal(dimensionIdentityMatches({brand:'ACHIM',title:'ACHIM Buffalo Check Window Curtain Panel 42 x 84 in Sage'},identity),true);
 });

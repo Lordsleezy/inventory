@@ -590,6 +590,7 @@ html.dark .receive-need{background:#2a2418;outline-color:#c9852a}
 @media(max-width:390px){.receive-confirm-fields{grid-template-columns:repeat(2,minmax(0,1fr))}.receive-confirm-fields>.receive-confirm-full{grid-column:1/-1}}
 html.app-mode .receive-file-btn{background:#2c2c2e!important;color:#fff!important;border-color:#3a3a3c!important;min-height:48px;justify-content:center}
 html.dark .receive-modal-card{background:#1c2430;color:#e6edf3}html.dark .receive-chip,html.dark .receive-file-btn{background:#232d3a;color:#e6edf3!important}html.dark .receive-retail,html.dark .receive-flagged{background:#232d3a;color:#e6edf3}html.dark .receive-dup{background:#151a21;border-color:#3a4553;color:#e8eef4}html.dark .receive-dup p{color:#9aa7b5}html.dark .receive-label{color:#9aa7b5}
+.receive-photo-candidate{display:grid;gap:4px;padding:10px 12px;border:1px solid #3a465b;border-radius:10px;background:#f5f7fa}.receive-photo-candidate strong{font-size:15px}.receive-photo-candidate span{font-size:12px;color:#64748b}html.dark .receive-photo-candidate{background:#111722;border-color:#3a465b}html.dark .receive-photo-candidate span{color:#9aa7b5}
 @media(max-width:600px){.receive-chip{padding:12px 14px}}
 
 .sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}

@@ -211,6 +211,23 @@ test("clean UPC misses are retried instead of becoming permanent cache hits", as
   assert.equal(sb.store.size, 0);
 });
 
+test('retailer store-label UPC bypasses public product lookups until Floor has a confirmed match', async () => {
+  let amazonCalls = 0;
+  let upcCalls = 0;
+  const result = await lookupUpc('store', '490680352443', { deps: {
+    sb: fakeSb(),
+    catalogByIdentifier: async () => { amazonCalls++; return { found: true, item: parseCatalogItem(catalogItem) }; },
+    priceByAsin: async () => ({}),
+    upcitemdb: async () => { upcCalls++; return { found: true, title: 'wrong product' }; },
+    ebayComps: async () => null,
+  } });
+  assert.equal(result.store_label, true);
+  assert.match(result.warning, /store sticker/i);
+  assert.equal(result.merged.not_found, true);
+  assert.equal(amazonCalls, 0);
+  assert.equal(upcCalls, 0);
+});
+
 test("upcitemdb uses key headers only when UPCITEMDB_KEY is set", async () => {
   const seen = [];
   const fetchImpl = async (url, init) => {

@@ -11,6 +11,7 @@
  */
 import { serviceClient } from "./server.mjs";
 import { normalizeGtin } from "./gtin-normalize.mjs";
+import { isStoreLabelBarcode } from "../../shared/store-barcode.mjs";
 import {
   catalogItemByIdentifier,
   competitivePriceByAsin,
@@ -534,6 +535,23 @@ export async function lookupUpc(storeId, rawCode, opts = {}) {
         looked_up_at: owned.updated_at || new Date().toISOString(),
       };
     }
+  }
+
+  // A store label can collide with an unrelated manufacturer's UPC in public
+  // catalogs. Trust an explicit Floor correction above; otherwise require a
+  // photo/manufacturer barcode instead of returning a plausible wrong product.
+  if (isStoreLabelBarcode(rawCode)) {
+    return {
+      gtin: gtinOut,
+      cached: false,
+      store_label: true,
+      true_miss: true,
+      warning: "This looks like a store sticker. Scan the manufacturer barcode if there is one.",
+      merged: { not_found: true },
+      amazon: { found: false, skipped: "store_label_barcode" },
+      upcitemdb: { found: false, skipped: "store_label_barcode" },
+      ebay: null,
+    };
   }
 
   if (!opts.force) {

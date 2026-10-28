@@ -29,6 +29,7 @@ type Props = {
   /** Portal admin / manager — show Delete on edit. */
   canDelete?: boolean;
   staffMode?: boolean;
+  scannerOk?: boolean;
   missingFields?: string[];
 };
 
@@ -45,7 +46,8 @@ function titleOf(u: Record<string, unknown>) {
 }
 
 export function AppItemDetail({
-  client, storeId, accessToken, sku, money, onBack, onChanged, onSellInStore, canDelete = false, staffMode = false, missingFields = [],
+  client, storeId, accessToken, sku, money, onBack, onChanged, onSellInStore, canDelete = false, staffMode = false, scannerOk,
+  missingFields = [],
 }: Props) {
   const [detail, setDetail] = useState<Detail | null>(null);
   const [urls, setUrls] = useState<Record<string, string>>({});
@@ -144,6 +146,7 @@ export function AppItemDetail({
         <button type="button" onClick={onBack}>‹ Inventory</button>
         <div className="app-nav-title">{sku}</div>
         <button type="button" onClick={() => setEditing(true)} disabled={!detail || staffMode} style={moneyHidden || staffMode ? { visibility: 'hidden' } : undefined}>Edit</button>
+        {scannerOk !== undefined && <span className={`app-scanner-status app-item-scanner-status ${scannerOk ? 'ok' : 'warn'}`}><i />{`Scanner · ${scannerOk ? 'connected' : 'disconnected'}`}</span>}
       </div>
 
       {error && <p className="app-footer-count" style={{ color: '#ff453a' }}>{error}</p>}
