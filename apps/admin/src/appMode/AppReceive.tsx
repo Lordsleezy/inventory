@@ -4,6 +4,8 @@ import { decodeBarcodeFile, ReceivePanel } from '../ReceivePanel';
 import { BundleReceive } from '../BundleReceive';
 import { AppItemDetail } from './AppItemDetail';
 import { ReceiveWorkStatus } from '../ReceiveWorkStatus';
+import { ReceiveTypingPad } from '../ReceiveTypingPad';
+import { scannerInputMode } from '../kiosk';
 import { isAndroid, isStandaloneApp } from './isAppMode';
 
 type Props = {
@@ -22,10 +24,12 @@ export function AppReceive({ client, storeId, accessToken, staffMode = false, on
   const [phase, setPhase] = useState<'home' | 'form' | 'bundle'>('home');
   useEffect(() => {
     if (phase !== 'home') return;
-    const raw = sessionStorage.getItem('floor:last-receive-timing');
+    let raw: string | null = null;
+    try { raw = sessionStorage.getItem('floor:last-receive-timing'); } catch { return; }
     if (!raw) return;
     sessionStorage.removeItem('floor:last-receive-timing');
-    const timing = JSON.parse(raw);
+    let timing: { tappedAt: number; server_ms?: number };
+    try { timing = JSON.parse(raw); } catch { return; }
     requestAnimationFrame(() => console.info('receive_next_scan_ready', {
       tap_to_ready_ms: Math.round(performance.now() - timing.tappedAt), server_ms: timing.server_ms,
     }));
@@ -113,7 +117,7 @@ export function AppReceive({ client, storeId, accessToken, staffMode = false, on
   }
 
   return (
-    <>
+    <ReceiveTypingPad>
       <div className="app-large-title app-receive-title">
         <h1>Receive</h1>
         <span className="app-scanner-status ok" title="Bluetooth keyboard scanner status is not exposed to Floor. Scan into the barcode field to test it.">
@@ -152,6 +156,13 @@ export function AppReceive({ client, storeId, accessToken, staffMode = false, on
         }}
       />
 
+      <label className="app-actions" style={{ paddingTop: 0 }}>Scan barcode
+        <input data-receive-scan autoFocus aria-label="Scan barcode to receive" placeholder="Scanner ready" inputMode={scannerInputMode()}
+          onKeyDown={event => { if (event.key === 'Enter') {
+            const code = event.currentTarget.value.trim(); event.currentTarget.value = '';
+            if (code) { setPendingUpc(code); openForm(false); }
+          } }} />
+      </label>
       <div className="app-actions" style={{ paddingTop: 0 }}>
         {/* Must open the file picker in this tap — deferred clicks are blocked on iOS. */}
         <button type="button" onClick={() => homeCamera.current?.click()}>Use camera</button>
@@ -159,7 +170,7 @@ export function AppReceive({ client, storeId, accessToken, staffMode = false, on
         {!staffMode && <button type="button" className="bundle-entry" onClick={() => setPhase('bundle')}>Bundle items</button>}
       </div>
       {cameraError && <p className="app-inline-error">{cameraError}</p>}
-      <ReceiveWorkStatus client={client} accessToken={accessToken} />
+      <ReceiveWorkStatus client={client} accessToken={accessToken} storeId={storeId} />
 
       <p className="app-section-label">Received today</p>
       <div className="app-group">
@@ -173,6 +184,6 @@ export function AppReceive({ client, storeId, accessToken, staffMode = false, on
           </button>
         ))}
       </div>
-    </>
+    </ReceiveTypingPad>
   );
 }

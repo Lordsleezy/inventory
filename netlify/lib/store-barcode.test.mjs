@@ -13,3 +13,17 @@ test('only accepts complete, branded photo-identification titles', () => {
   assert.equal(isCompleteReceiveTitle('ACHIM Rustic', 'ACHIM'), false);
   assert.equal(isCompleteReceiveTitle('Threshold Linen Curtain Panel 54 x 84 in Cream', 'ACHIM'), false);
 });
+
+
+test('descriptive unbranded titles are normal; branded/style stubs stay rejected', async () => {
+  const { receivePhotoIdentity, isNoBrand } = await import('../../shared/store-barcode.mjs');
+  for (const brand of ['', 'Unbranded', 'No brand', 'unknown']) {
+    assert.equal(isNoBrand(brand), true);
+    assert.equal(isCompleteReceiveTitle('Jewelry Organizer Box with Necklace Stand, White and Gold',brand),true);
+  }
+  assert.equal(isCompleteReceiveTitle('ACHIM Rustic','ACHIM'),false);
+  assert.equal(isCompleteReceiveTitle('Rustic','Unbranded'),false);
+  const identity=receivePhotoIdentity({title:'Jewelry Organizer Box, White and Gold',brand:'',no_brand:true});
+  assert.equal(identity.brand,'Unbranded'); assert.equal(identity.item_type,'Jewelry Organizer Box');
+  assert.equal(receivePhotoIdentity({title:'ACHIM Rustic',brand:'ACHIM'}).item_type,'');
+});

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { build } from 'esbuild';
 import { pathToFileURL } from 'node:url';
 const { chromium } = await import(process.env.MANIFEST_PLAYWRIGHT_PATH ? pathToFileURL(process.env.MANIFEST_PLAYWRIGHT_PATH).href : 'playwright');
-const { outputFiles } = await build({
+const { outputFiles } = await build({ outfile: '/tmp/floor-receive-test.js',
   stdin: { resolveDir: process.cwd(), loader: 'tsx', contents: `
     import React from 'react';
     import { createRoot } from 'react-dom/client';

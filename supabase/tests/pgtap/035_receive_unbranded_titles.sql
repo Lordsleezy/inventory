@@ -1,0 +1,10 @@
+begin;
+select no_plan();
+select ok(public.receive_title_is_complete('Jewelry Organizer Box with Necklace Stand, White and Gold','Unbranded','Jewelry Organizer Box'),'No brand is accepted without a brand prefix');
+select ok(public.receive_title_is_complete('jewelry organizer box, White and Gold','','jewelry organizer box'),'legacy blank brand can use a descriptive photo title');
+select ok(not public.receive_title_is_complete('ACHIM Rustic','ACHIM','Curtain'),'short branded stub is still rejected');
+select ok(not public.receive_title_is_complete('Rustic','Unbranded','Curtain'),'No brand cannot bypass title quality');
+select ok(not public.receive_title_is_complete('Jewelry Organizer Box, White and Gold','ACHIM','Jewelry Organizer Box'),'real brands still have to match');
+select ok(not public.receive_title_is_complete('Jewelry Organizer Box, White and Gold','Unbranded','Curtain'),'item type still has to match');
+select * from finish();
+rollback;

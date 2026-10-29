@@ -11,13 +11,14 @@ import { floorFunctionUrl } from './floorApi';
 import { reportClientError } from './clientLog';
 import { priceFloorCents } from './scanPricing';
 import { errText } from './errText';
+import { ReceiveTypingPad } from './ReceiveTypingPad';
 import { ManifestReceiveReference, useManifestReceiveReference } from './ManifestReceiveReference';
 import { BundleReceive } from './BundleReceive';
 const MeasureOnMat = lazy(() => import('./MeasureOnMat').then(module => ({ default: module.MeasureOnMat })));
 import { receiveSpecifics, receiveVariant } from '../../../shared/receive-specifics.mjs';
 import { CategoryPanel } from './CategoryPanel';
 import { EbaySpecificsPanel } from './EbaySpecificsPanel';
-import { isCompleteReceiveTitle, isStoreLabelBarcode, storeLabelWarning } from '../../../shared/store-barcode.mjs';
+import { isCompleteReceiveTitle, isNoBrand, receivePhotoIdentity, isStoreLabelBarcode, storeLabelWarning } from '../../../shared/store-barcode.mjs';
 
 /** iOS/Android PWA: prefer native capture over getUserMedia (more reliable in standalone). */
 function preferNativeCapture() {
@@ -281,7 +282,7 @@ function itemSpecificsFromLookup(m?: Lookup['merged']): string {
  * Example: brand "Oral-B" + model "Replacement Brush Heads 10 Pack" → title.
  */
 function composeListingTitle(brand: string, model: string, unbranded: boolean): string {
-  const b = unbranded ? 'Unbranded' : brand.trim();
+  const b = unbranded ? '' : brand.trim();
   const m = model.trim();
   return [b, m].filter(Boolean).join(' ');
 }
@@ -610,6 +611,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const receiveRequest = useRef(crypto.randomUUID());
+  const entryEpoch = useRef(0);
   const saveTappedAt = useRef(0);
   const [dups, setDups] = useState<Dups | null>(null);
   const [dupAck, setDupAck] = useState(false);
@@ -724,6 +726,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     if (key === 'title') titleTouched.current = true;
     setForm(prev => {
       const next = { ...prev, [key]: value };
+      if (key === 'brand') next.unbranded = isNoBrand(value) && !!value.trim();
       if (key === 'cost') next.costEstimate = false;
       // Title is always brand + item specifics (scans and manual).
       if ((key === 'brand' || key === 'model') && !titleTouched.current) {
@@ -787,6 +790,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   }, [client]);
 
   async function stageStockPhoto(url: string, upc: string, scanId: string): Promise<string | null> {
+    const epoch = entryEpoch.current;
     setStockPhotoBusy(true);
     setStockPhotoError('');
     try {
@@ -797,18 +801,20 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         signal: AbortSignal.timeout(20000),
       });
       const data = await response.json().catch(() => ({}));
+      if (entryEpoch.current !== epoch || !mounted.current) return null;
       if (!response.ok || typeof data.path !== 'string') throw new Error(data.message || 'Stock photo unavailable');
-      if (activeScan.current === scanId) setStockPhotoPath(data.path);
+      if (activeScan.current === scanId && entryEpoch.current === epoch && mounted.current) setStockPhotoPath(data.path);
       return data.path;
     } catch {
-      if (activeScan.current === scanId) setStockPhotoError('Stock photo could not be saved. Tap the save button to retry, or add a unit photo.');
+      if (activeScan.current === scanId && entryEpoch.current === epoch && mounted.current) setStockPhotoError('Stock photo could not be saved. Tap the save button to retry, or add a unit photo.');
       return null;
     } finally {
-      if (activeScan.current === scanId) setStockPhotoBusy(false);
+      if (activeScan.current === scanId && entryEpoch.current === epoch && mounted.current) setStockPhotoBusy(false);
     }
   }
 
   async function stageUnitPhotos(nextFiles: File[]) {
+    const requestId = receiveRequest.current;
     const started=performance.now();
     const actor = JSON.parse(atob(accessToken.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).sub;
     if (!actor) throw new Error('Sign in again before taking a photo.');
@@ -816,7 +822,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     try {
       for (const file of nextFiles) {
         const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, '_') || 'unit.jpg';
-        const path = `${storeId}/receive/${actor}/${receiveRequest.current}/${Date.now()}-${crypto.randomUUID()}-${safe}`;
+        const path = `${storeId}/receive/${actor}/${requestId}/${Date.now()}-${crypto.randomUUID()}-${safe}`;
         const upload = await client.storage.from('unit-photos').upload(path, file, {
           contentType: file.type && file.type.startsWith('image/') ? file.type : 'image/jpeg', upsert: false,
         });
@@ -877,12 +883,14 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   }, [initialUpc, manual]);
 
   function retry(scan: Scan) {
+    entryEpoch.current++; setPhotoCandidate(null); setDialog(null); setPhotoVerifyPending(false); setPhotoIdBusy(false);
     setQueue(q => q.map(s => (s.id === scan.id ? { ...s, status: 'loading', error: undefined } : s)));
     setLoadedId(null);
     runLookup(scan.id, scan.upc);
   }
 
   function resetEntry(keepProduct?: Partial<Form>, cleanupPhotos = true) {
+    entryEpoch.current++;
     askTouched.current = false;
     titleTouched.current = false;
     setForm({ ...blank, ...keepProduct });
@@ -915,6 +923,19 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     setDimensionSources({});
     dimensionTouched.current.clear();
     setDimensionsError('');
+  }
+
+  function cancelReceive() {
+    activeScan.current = null;
+    resetEntry(); setQueue([]); setLoadedId(null); setManual(false); setDraft('');
+    setCamera(false); setBusy(false); setPhotoBusy(false); setPhotoIdBusy(false); setStockPhotoBusy(false);
+    setError(''); setWarning(''); setPhotoIdError(''); setPhotoNeed(''); setSaved([]);
+    // An uncertain save keeps its own durable recovery record; never delete a server item.
+    requestAnimationFrame(() => upcInput.current?.focus());
+  }
+
+  function noBrand() {
+    setForm(prev => ({ ...prev, brand: 'Unbranded', unbranded: true }));
   }
 
   /* Load the head of the queue into the form once its lookup has settled. */
@@ -1095,10 +1116,11 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     saveTappedAt.current = performance.now();
     event?.preventDefault();
     setError(''); setWarning(''); setSaved([]);
+    const epoch = entryEpoch.current;
     if (!manual && !current) { setError('Scan a UPC first, or use Enter manually.'); return; }
     if (photoVerifyPending) { setError('Choose whether the photo or barcode product is correct before saving.'); setDialog('miss-photo'); return; }
     if (photoTitleConfirmed && !isCompleteReceiveTitle(form.title, form.brand)) {
-      setError('Enter the full product title, including the brand and what the item is, before saving.'); return;
+      setError('Enter a descriptive product title: what it is plus color, size or material. Choose No brand for an unbranded item.'); return;
     }
     if (!manual && current?.status === 'loading') { setError('Lookup still running…'); return; }
     const quantity = manual ? Number(form.quantity) : 1;
@@ -1108,6 +1130,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     let acceptedStockPhotoPath = stockPhotoPath;
     if (!files.length && !acceptedStockPhotoPath && !manual && merged?.images?.[0] && current?.upc) {
       acceptedStockPhotoPath = await stageStockPhoto(String(merged.images[0]), current.upc, current.id) || '';
+      if (entryEpoch.current !== epoch || !mounted.current) return;
     }
     if (!files.length && !acceptedStockPhotoPath) { setError('Stock photo could not be saved. Retry it or add a unit photo before saving.'); return; }
     if (photoBusy) { setError('Wait for the unit photo to finish uploading.'); return; }
@@ -1148,6 +1171,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     setDialog(null);
     setBusy(true);
     setError('');
+    const epoch = entryEpoch.current;
     const receiveStarted = performance.now();
     try {
       const quantity = manual ? Number(form.quantity) : 1;
@@ -1197,6 +1221,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         validation_ms: Math.round(receiveStarted-saveTappedAt.current), rpc_ms:data.client_rpc_ms, recovery_snapshot_ms:data.snapshot_ms,
         server_ms: data.server_ms, server_steps:data.server_steps, tap_to_commit_ms: Math.round(performance.now()-saveTappedAt.current), sku: skus[0] });
       try { sessionStorage.setItem('floor:last-receive-timing', JSON.stringify({ tappedAt: saveTappedAt.current, committedAt: performance.now(), server_ms: data.server_ms })); } catch { /* diagnostics cannot interrupt a saved item */ }
+      if (entryEpoch.current !== epoch || !mounted.current) return;
+      setBusy(false);
       receiveRequest.current = crypto.randomUUID();
       void clearPendingPhotos(pendingPhotoKey(storeId, photoSessionKey.current));
 
@@ -1246,8 +1272,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       onSaved();
       void loadOptions().catch(() => setWarning(w => `${w} Refresh Receive to see the next suggested SKU.`.trim()));
       focusUpc();
-    } catch (e) { setError(errText(e)); }
-    finally { setBusy(false); }
+    } catch (e) { if (entryEpoch.current === epoch && mounted.current) setError(errText(e)); }
+    finally { if (entryEpoch.current === epoch && mounted.current) setBusy(false); }
   }
 
   /** Build listing_specs from the lookup (only real values) and merge into each new unit. */
@@ -1366,6 +1392,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   async function ingestFiles(list: FileList | null) {
     if (!list || !list.length) return;
     // Snapshot the list before any await — FileList is live and clears with the input.
+    const epoch = entryEpoch.current;
     const raw = Array.from(list);
     setPhotoBusy(true);
     setError('');
@@ -1374,6 +1401,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       let rejected = 0;
       for (const file of raw) {
         const next = await copyImageFile(file);
+        if (entryEpoch.current !== epoch || !mounted.current) return;
         if (next) copied.push(next);
         else rejected++;
       }
@@ -1391,6 +1419,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         return next;
       });
       const staged = await upload;
+      if (entryEpoch.current !== epoch || !mounted.current) return;
       if (receiveRequest.current === request) setStagedPhotoPaths(prev => [...prev, ...staged]);
       if (rejected) setWarning(`${rejected} photo(s) looked empty or too large and were skipped.`);
       if (!manual && current && photoCheckedFor.current !== current.id) {
@@ -1401,9 +1430,9 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         void identifyMissPhoto(copied[0], true);
       }
     } catch (e) {
-      setError(`Photo upload failed. Your photo is kept on this device. Retry the photo upload. ${errText(e)}`);
+      if (entryEpoch.current === epoch && mounted.current) setError(`Photo upload failed. Your photo is kept on this device. Retry the photo upload. ${errText(e)}`);
     } finally {
-      setPhotoBusy(false);
+      if (entryEpoch.current === epoch && mounted.current) setPhotoBusy(false);
     }
   }
 
@@ -1449,6 +1478,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   }
 
   async function findPhotoDimensions(upc: string, scanId: string, identity?: Record<string, unknown>) {
+    const epoch = entryEpoch.current;
     setDimensionsBusy(true);
     setDimensionsError('');
     const started = performance.now();
@@ -1460,7 +1490,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       package_height_in: 'height', package_weight_lb: 'weight' } as const;
     try {
       for (const source of ['amazon', 'upcitemdb']) {
-        if (activeScan.current !== scanId) return;
+        if (activeScan.current !== scanId || entryEpoch.current !== epoch || !mounted.current) return;
         try {
           const response = await fetch(floorFunctionUrl('receive-photo-identify'), {
             method: 'POST',
@@ -1470,7 +1500,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           });
           const data = await response.json().catch(() => ({}));
           if (!response.ok) throw new Error(data.message || `${source} dimensions unavailable`);
-          if (activeScan.current !== scanId) return;
+          if (activeScan.current !== scanId || entryEpoch.current !== epoch || !mounted.current) return;
           notices.push(...(data.dimensions?.warnings || []));
           const values = (data.dimensions?.values || {}) as Record<string, number | null>;
           const sources = (data.dimensions?.sources || {}) as Record<string, string>;
@@ -1491,15 +1521,16 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           if (resolved.size === Object.keys(map).length) break;
         } catch (error) { notices.push(errText(error)); }
       }
-      if (activeScan.current === scanId && resolved.size === 0) setDimensionsError('No size found. Measure on mat.');
+      if (activeScan.current === scanId && entryEpoch.current === epoch && mounted.current && resolved.size === 0) setDimensionsError('No size found. Measure on mat.');
     } finally {
-      if (activeScan.current === scanId) setDimensionsBusy(false);
+      if (activeScan.current === scanId && entryEpoch.current === epoch && mounted.current) setDimensionsBusy(false);
     }
   }
 
   /** Verify barcode identity against the actual unit photo. */
   async function identifyMissPhoto(raw: File | null, alreadyStaged = false) {
     if (!current) return;
+    const epoch = entryEpoch.current;
     if (!raw) {
       setPhotoIdError('Camera returned no photo. Try again, or choose a photo from your phone.');
       return;
@@ -1512,6 +1543,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     setPhotoPriceError('');
     if (!alreadyStaged) setFiles([raw]);
     const file = await copyImageFile(raw);
+    if (entryEpoch.current !== epoch || !mounted.current) return;
     if (!file) {
       setPhotoIdError('Could not read that photo. Try one clear picture of the box or label.');
       setPhotoIdBusy(false);
@@ -1521,7 +1553,11 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     try {
       if (!alreadyStaged) setFiles([file]);
       if (!alreadyStaged) void savePendingPhotos(pendingPhotoKey(storeId, photoSessionKey.current), [file]);
-      if (!alreadyStaged) setStagedPhotoPaths(await stageUnitPhotos([file]));
+      if (!alreadyStaged) {
+        const paths = await stageUnitPhotos([file]);
+        if (entryEpoch.current !== epoch || !mounted.current) return;
+        setStagedPhotoPaths(paths);
+      }
       const upload = await identificationJpeg(file);
       const compressedMs = performance.now() - photoStarted;
       const image_base64 = await fileToBase64(upload);
@@ -1532,20 +1568,21 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           image_base64,
           mime_type: upload.type || 'image/jpeg',
       });
+      if (entryEpoch.current !== epoch || !mounted.current) return;
       const json = photoResponse.data;
       if (photoResponse.status < 200 || photoResponse.status >= 300) {
         setPhotoIdError(json.message || json.error || 'Photo identify failed. Retry or fill fields by hand.');
         setWarning(catalogMissMessage(current.result) || '');
         return;
       }
-      const brand = text(json.fill?.brand || json.identity?.brand);
+      const normalized = receivePhotoIdentity({ ...(json.identity || {}), ...(json.fill || {}) });
+      const brand = normalized.brand;
       const model = text(json.fill?.model || json.identity?.model);
       const identity = (json.identity || {}) as Record<string, unknown>;
-      const title = text(json.fill?.title) || composeListingTitle(brand, model, false);
+      const title = normalized.title || composeListingTitle(brand, model, normalized.no_brand);
       if (identity.title_complete === false || !isCompleteReceiveTitle(title, brand)) {
-        setPhotoIdError('Photo identification returned only a partial title. Enter the full brand and product name before saving.');
+        setPhotoIdError('Add what the product is and a visible color, size or material, or choose Enter details myself.');
         setWarning('A short AI title cannot be saved. Add the item type and key size, color, or pattern.');
-        return;
       }
       const barcode = current.result?.merged;
       const barcodeBrand = text(barcode?.brand);
@@ -1557,7 +1594,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         : current.result?.store_label
           ? `Photo identifies ${title}. Confirm this is the right product for the store sticker.`
           : `Photo identifies ${title}. Confirm the product details before saving.`);
-      setPhotoCandidate({ ...identity, brand, model, title,
+      setPhotoCandidate({ ...identity, ...normalized, brand, model, title,
         category: text(json.fill?.category || identity.category),
         description: text(json.fill?.description || identity.description),
         aspects: json.fill?.aspects || {},
@@ -1572,77 +1609,66 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         photo_bytes: upload.size, photo_to_filled_ms: Math.round(performance.now() - photoStarted),
         identify_server_ms: json.timing?.identify_ms || null, request_ms: Math.round(photoResponse.requestMs) });
     } catch (e) {
-      setPhotoIdError(errText(e) || 'Photo identify failed. Retry or fill fields by hand.');
+      if (entryEpoch.current === epoch && mounted.current) setPhotoIdError(errText(e) || 'Photo identify failed. Retry or fill fields by hand.');
     } finally {
-      setPhotoIdBusy(false);
-      setPhotoIdStatus('');
+      if (entryEpoch.current === epoch && mounted.current) { setPhotoIdBusy(false); setPhotoIdStatus(''); }
     }
   }
 
   async function choosePhotoIdentity(usePhoto: boolean) {
     if (!usePhoto) {
-      setPhotoCandidate(null);
-      setPhotoConflictText('');
-      setPhotoVerifyPending(false);
-      setDialog(null);
-      setWarning('Kept the barcode product details.');
-      return;
+      setPhotoCandidate(null); setPhotoConflictText(''); setPhotoVerifyPending(false);
+      setPhotoTitleConfirmed(false); setDialog(null); setPhotoIdBusy(false);
+      setWarning('Kept the barcode product details.'); return;
     }
     if (!current || !photoCandidate) return;
-    setPhotoIdBusy(true);
-    setPhotoIdError('');
-    setPhotoIdStatus('Saving confirmed barcode match…');
+    const candidate = receivePhotoIdentity(photoCandidate);
+    if (!isCompleteReceiveTitle(candidate.title, candidate.brand) || !candidate.item_type
+      || !candidate.title.toLowerCase().includes(candidate.item_type.toLowerCase())) {
+      setPhotoIdError('Use a descriptive title: what it is plus color, size or material. No brand is OK.'); return;
+    }
+    entryEpoch.current++;
+    const epoch = entryEpoch.current, scan = current;
+    titleTouched.current = true;
+    setForm(prev => {
+      const next = { ...prev, brand: candidate.brand, unbranded: candidate.no_brand,
+        title: candidate.title, model: text(candidate.model) || candidate.item_type,
+        variant: text(candidate.variant) || prev.variant, size: text(candidate.size) || prev.size,
+        category: text(candidate.category) || prev.category, description: text(candidate.description) || prev.description };
+      for (const key of ['length','width','height','weight','productHeight','productWidth','productDepth','productWeight'] as const)
+        if (!dimensionTouched.current.has(key)) next[key] = '';
+      return next;
+    });
+    setDimensionSources(prev => Object.fromEntries(Object.entries(prev).filter(([, value]) => /staff/i.test(value))));
+    setStockPhotoPath(''); setStockPhotoBusy(false);
+    setPhotoIdentity(candidate); setPhotoTitleConfirmed(true); setPhotoVerifyPending(false);
+    setPhotoCandidate(null); setPhotoConflictText(''); setDialog(null); setPhotoIdBusy(false); setPhotoIdError('');
+    setWarning('Photo product selected. You can save this unit.');
+    // Catalog caching is optional. An unavailable cache must never hold receiving hostage.
     try {
       const response = await fetch(floorFunctionUrl('receive-photo-identify'), {
         method: 'POST', headers: { Authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
-        body: JSON.stringify({ action: 'confirm_identity', upc: current.upc, fields: photoCandidate }),
-        signal: AbortSignal.timeout(25000),
+        body: JSON.stringify({ action: 'confirm_identity', upc: scan.upc, fields: candidate }), signal: AbortSignal.timeout(25000),
       });
       const data = await response.json().catch(() => ({}));
-      if (!response.ok || !data.ok) throw new Error(data.message || 'Could not save the confirmed product match.');
-      const product = data.product || {};
-      const brand = text(photoCandidate.brand);
-      const title = text(photoCandidate.title);
-      const model = text(photoCandidate.model);
-      const dimFields = ['length','width','height','weight','productHeight','productWidth','productDepth','productWeight'] as const;
-      setForm(prev => {
-        const next = { ...prev, brand, unbranded: false, model,
-        variant: text(photoCandidate.variant) || prev.variant, size: text(photoCandidate.size) || prev.size,
-        category: text(photoCandidate.category) || prev.category,
-        description: text(photoCandidate.description) || prev.description, title };
-        for (const key of dimFields) if (!dimensionTouched.current.has(key)) next[key] = '';
-        return next;
-      });
-      setDimensionSources(prev => Object.fromEntries(Object.entries(prev).filter(([, value]) => /staff/i.test(value))));
-      setPhotoTitleConfirmed(true);
-      setPhotoVerifyPending(false);
-      setStockPhotoPath('');
-      if (Array.isArray(product.images) && product.images[0]) {
-        const staged = await stageStockPhoto(String(product.images[0]), current.upc, current.id);
-        if (!staged) setWarning('Product confirmed and saved to the UPC catalog, but its matching stock photo could not be saved. Your actual photo will be used.');
-        else setWarning('Product confirmed. Its matching stock photo will be photo #1, followed by your unit photo.');
-      } else setWarning('Product confirmed and saved to the UPC catalog. No matching stock photo was found; your unit photo will be used.');
-      setPhotoCandidate(null);
-      setPhotoConflictText('');
-      setDialog(null);
-      setPhotoIdentity({ ...photoCandidate, asin: product.asin || null, upc: current.upc });
-      void findPhotoDimensions(current.upc, current.id, photoCandidate);
-    } catch (error) {
-      setPhotoIdError(errText(error) || 'Could not save the confirmed product match.');
-    } finally {
-      setPhotoIdBusy(false);
-      setPhotoIdStatus('');
+      if (entryEpoch.current !== epoch || !mounted.current) return;
+      if (!response.ok || !data.ok) throw new Error('Catalog cache unavailable');
+      void findPhotoDimensions(scan.upc, scan.id, candidate);
+    } catch {
+      if (entryEpoch.current === epoch && mounted.current) setWarning('Photo details kept. UPC catalog update is unavailable; you can still save this unit.');
     }
   }
 
   function dismissPhotoCheck() {
+    entryEpoch.current++;
+    priceRequest.current++;
     if (photoVerifyPending) {
       setForm(prev => ({ ...prev, brand:'', model:'', variant:'', size:'', title:'', category:'', description:'' }));
       setStockPhotoPath('');
       setPhotoTitleConfirmed(false);
     }
-    setPhotoVerifyPending(false);
-    setDialog(null);
+    setPhotoVerifyPending(false); setPhotoCandidate(null); setPhotoIdBusy(false); setPhotoBusy(false);
+    setPhotoTitleConfirmed(false); setPhotoIdError(''); setDialog(null);
   }
 
   // Manual entry: restore any stashed photos after a camera-app kill.
@@ -1668,10 +1694,10 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
 
   const hasCatalogPhoto = Boolean(!manual && merged?.images?.[0]);
   const hasAnyPhoto = Boolean(files.length || stagedPhotoPaths.length || stockPhotoPath || hasCatalogPhoto);
-  return <section className={`panel receive-panel${appChrome ? ' receive-app' : ''}${storePhoneMode ? ' receive-store-phone' : ''}`}>
+  return <ReceiveTypingPad><section className={`panel receive-panel${appChrome ? ' receive-app' : ''}${storePhoneMode ? ' receive-store-phone' : ''}`}>
     {appChrome && (
       <div className="app-nav receive-app-nav">
-        <button type="button" onClick={() => { onAppCancel?.(); }}>Cancel</button>
+        <button type="button" onClick={cancelReceive}>Cancel</button>
         <div className="app-nav-title">Receive · {options?.next_sku || '…'}</div>
         {storePhoneMode ? <span className="receive-phone-scanner"><i />Scanner</span> : <button type="button" disabled={busy || photoBusy || photoIdBusy || !hasAnyPhoto} onClick={() => {
           const formEl = document.getElementById('receive-app-form') as HTMLFormElement | null;
@@ -1679,11 +1705,13 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         }}>Save</button>}
       </div>
     )}
+    <div className="receive-escape-actions"><button type="button" onClick={cancelReceive}>Cancel item — scan next</button><button type="button" onClick={cancelReceive}>Discard current draft</button></div>
     <div className="receive-next">
       <div className="receive-sku-block">
         <div><div className="eyebrow">NEXT AVAILABLE SKU</div><strong>{options?.next_sku || 'Loading…'}</strong></div>
         {!manual && <label className="receive-upc">Scan UPC
           <input
+            data-receive-scan
             ref={upcInput}
             value={draft}
             onChange={e => setDraft(e.target.value)}
@@ -1737,7 +1765,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       <p>Write {saved.length === 1 ? 'this number' : 'these numbers'} on the unit{saved.length === 1 ? '' : 's'}. Ready for the next scan.</p>
       {last && <button type="button" className="secondary" onClick={addAnother}>Add another unit</button>}
     </div>}
-    <ReceiveWorkStatus client={client} accessToken={accessToken} />
+    <ReceiveWorkStatus client={client} accessToken={accessToken} storeId={storeId} />
     {warning && <p className="hint">{warning}</p>}
     {error && <div className="alert" role="alert">{error}<button type="button" onClick={() => setError('')}>Dismiss</button></div>}
 
@@ -1804,7 +1832,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           <textarea ref={titleField} rows={2} value={form.title} onChange={e => update('title', e.target.value)} />
         </label>
         <div className="receive-confirm-fields">
-          <label>Brand<input value={form.brand} onChange={e => update('brand', e.target.value)} /></label>
+          <label>Brand<input value={form.unbranded ? 'Unbranded' : form.brand} onChange={e => update('brand', e.target.value)} /><button type="button" aria-pressed={form.unbranded} onClick={noBrand}>No brand</button></label>
           <label>Model<input value={form.model} onChange={e => update('model', e.target.value)} /></label>
           <label>Variant<input value={form.variant} onChange={e => update('variant', e.target.value)} placeholder="Scent, color…" /></label>
           <label>Size<input value={form.size} onChange={e => update('size', e.target.value)} placeholder="Size or measurements" /></label>
@@ -1836,7 +1864,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
               {form[key] && <small>{dimensionSources[source] || 'staff'}</small>}</label>)}</div></details>}
         {!storePhoneMode && dimensionsError && ![form.length,form.width,form.height,form.weight,form.productHeight,form.productWidth,form.productDepth,form.productWeight].some(v => Number(v)>0) && <small className="receive-confirm-note">No size found. Measure on mat.</small>}
         {!storePhoneMode && <button type="button" className="secondary" onClick={() => setMatOpen(true)}>Measure on mat</button>}
-        {!storePhoneMode && matOpen && <Suspense fallback={<p role="status">Opening measuring tools…</p>}><MeasureOnMat onClose={() => setMatOpen(false)} onApply={(value, target) => {
+        {!storePhoneMode && matOpen && <Suspense fallback={<p role="status">Opening measuring tools…</p>}><MeasureOnMat onClose={cancelReceive} onApply={(value, target) => {
           for (const key of target === 'product' ? ['productDepth','productWidth','productHeight'] : ['length','width','height']) dimensionTouched.current.add(key);
           setForm(prev => target === 'product' ? {...prev, productDepth:value.length, productWidth:value.width, productHeight:value.height}
             : {...prev, length:value.length, width:value.width, height:value.height});
@@ -1899,7 +1927,10 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           {needsEbayBox && <small className="receive-confirm-note">Needs box size for eBay. You can save now and measure it later.</small>}
           {files.length > 0 && !stagedPhotoPaths.length && !photoBusy && !photoIdBusy && <button type="button" className="secondary" onClick={() => {
             setPhotoBusy(true); setError('');
-            void stageUnitPhotos(files).then(setStagedPhotoPaths).catch(e => setError(`Photo upload failed: ${errText(e)}`)).finally(() => setPhotoBusy(false));
+            const epoch = entryEpoch.current;
+            void stageUnitPhotos(files).then(paths => { if (entryEpoch.current === epoch && mounted.current) setStagedPhotoPaths(paths); })
+              .catch(e => { if (entryEpoch.current === epoch && mounted.current) setError(`Photo upload failed: ${errText(e)}`); })
+              .finally(() => { if (entryEpoch.current === epoch && mounted.current) setPhotoBusy(false); });
           }}>Retry photo upload</button>}
           <button className="receive-save-next" type="submit" disabled={busy || photoBusy || stockPhotoBusy || photoIdBusy || !hasAnyPhoto || (dups !== null && dups.count > 0 && !dupAck)}>{busy ? 'Saving…' : photoBusy || stockPhotoBusy || photoIdBusy ? 'Preparing photo…' : hasCatalogPhoto && !files.length && !stockPhotoPath ? 'Use stock photo & save' : hasAnyPhoto ? 'Save & next' : '📷 Take a photo to save'}</button>
         </div>
@@ -1942,10 +1973,10 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
             return {
               ...p,
               unbranded,
-              title: composeListingTitle(p.brand, p.model, unbranded),
+              title: p.title || composeListingTitle(p.brand, p.model, unbranded),
             };
           })} />
-          Unbranded — no brand anywhere on the product or packaging
+          No brand — unbranded item
         </label>
 
         <label className={liveMissing.includes('UPC') ? 'receive-need' : undefined}>
@@ -2114,13 +2145,14 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     </form>}
 
     {camera && <CameraScanner
-      onClose={() => { setCamera(false); focusUpc(); }}
+      onClose={cancelReceive}
       onDetect={code => { setCamera(false); enqueue(code); }}
       onFile={file => { void decodeFile(file).then(code => { setCamera(false); if (code) enqueue(code); else { setError('Could not read a barcode from that photo. Type the digits instead.'); focusUpc(); } }); }}
     />}
 
     {dialog === 'ready' && <div className="receive-modal" role="dialog" aria-modal="true" aria-labelledby="ready-title">
       <div className="receive-modal-card">
+        <button type="button" onClick={cancelReceive}>Cancel item — scan next</button>
         <h3 id="ready-title">Receive this unit?</h3>
         <p><strong>{form.title.trim() || [form.brand, form.model].filter(Boolean).join(' ')}</strong><br />
           Price {money(cents(form.ask) as number | null)} · {form.condition || 'no condition'} · {files.length} photo{files.length === 1 ? '' : 's'}</p>
@@ -2136,6 +2168,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
 
     {dialog === 'reason' && <div className="receive-modal" role="dialog" aria-modal="true" aria-labelledby="reason-title">
       <div className="receive-modal-card">
+        <button type="button" onClick={cancelReceive}>Cancel item — scan next</button>
         <h3 id="reason-title">Why not list it?</h3>
         <div className="receive-cond-row">{HOLD_REASONS.map(([value, text2]) => <label key={value} className={reason === value ? 'receive-chip on' : 'receive-chip'}>
           <input type="radio" name="hold-reason" value={value} checked={reason === value} onChange={() => setReason(value)} />{text2}
@@ -2153,13 +2186,16 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
 
     {dialog === 'miss-photo' && <div className="receive-modal" role="dialog" aria-modal="true" aria-labelledby="miss-photo-title">
       <div className="receive-modal-card">
+        <div className="receive-escape-actions"><button type="button" onClick={cancelReceive}>Cancel item — scan next</button><button type="button" onClick={cancelReceive}>Discard current draft</button><button type="button" onClick={dismissPhotoCheck}>Enter details myself</button></div>
         <h3 id="miss-photo-title">{photoCandidate ? 'Confirm product from photo' : photoNeed ? 'More product details needed' : 'Can\'t find this item. Scan with camera?'}</h3>
         <p>{photoCandidate ? photoConflictText : `${photoNeed || 'Take one clear photo of the box or label.'} We\'ll identify the product and show asking prices so you can set the price.`}</p>
         {previews[0] && <img src={previews[0]} alt="Photo being identified" style={{ maxWidth: '100%', maxHeight: 180, objectFit: 'contain' }} />}
         {photoIdBusy && <p role="status">{photoIdStatus || 'Identifying product…'}</p>}
         {photoIdError && <p className="alert" role="alert">{photoIdError}</p>}
         {photoCandidate && <div className="receive-photo-candidate">
-          <strong>{text(photoCandidate.title)}</strong>
+          <label>Photo product title<textarea rows={2} value={text(photoCandidate.title)} onChange={event => setPhotoCandidate(prev => prev ? { ...prev, title: event.target.value, title_complete: undefined } : prev)} /></label>
+          <label>Photo product brand<input value={text(photoCandidate.brand)} onChange={event => setPhotoCandidate(prev => prev ? { ...prev, brand: event.target.value, no_brand: false } : prev)} /></label>
+          <button type="button" aria-pressed={isNoBrand(photoCandidate.brand)} onClick={() => setPhotoCandidate(prev => prev ? { ...prev, brand: 'Unbranded', no_brand: true } : prev)}>No brand</button>
           <span>{[text(photoCandidate.brand), text(photoCandidate.model), text(photoCandidate.size), text(photoCandidate.color)].filter(Boolean).join(' · ')}</span>
         </div>}
         <input
@@ -2198,5 +2234,5 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       </div>
     </div>}
 
-  </section>;
+  </section></ReceiveTypingPad>;
 }

@@ -16,7 +16,7 @@ import { receiveSpecifics } from '../../shared/receive-specifics.mjs';
 import { normalizeGtin } from "../lib/gtin-normalize.mjs";
 import { searchCatalogAsin, catalogItemByIdentifier } from "../lib/amazon.mjs";
 import { dimensionIdentityMatches } from "../lib/receive-dimensions.mjs";
-import { isCompleteReceiveTitle } from "../../shared/store-barcode.mjs";
+import { isCompleteReceiveTitle, isNoBrand, receivePhotoIdentity } from "../../shared/store-barcode.mjs";
 import {
   attachPhotoIdentityToMiss,
   listingTitle,
@@ -70,7 +70,9 @@ function photoSpecifics(identity) {
 function completePhotoTitle(identity, brand, model) {
   if (!String(identity.item_type || '').trim()) return '';
   const specifics = photoSpecifics(identity) || model;
-  const composed = [brand, specifics].filter(Boolean).join(' ').trim();
+  const supplied = String(identity.title || '').trim();
+  if (isCompleteReceiveTitle(supplied, brand) && supplied.toLowerCase().includes(String(identity.item_type).toLowerCase())) return supplied;
+  const composed = [isNoBrand(brand) ? '' : brand, specifics].filter(Boolean).join(' ').trim();
   return isCompleteReceiveTitle(composed, brand) ? composed : '';
 }
 
@@ -149,7 +151,7 @@ export async function invoke(event) {
   if (body.action === 'confirm') {
     const gtin = normalizeGtin(String(body.upc || '').trim());
     if (!gtin.ok) return json(400, { ok: false, error: 'valid_upc_required' });
-    const fields = body.fields || {};
+    const fields = receivePhotoIdentity(body.fields || {});
     const brand = String(fields.brand || '').trim().slice(0, 120);
     const title = String(fields.title || '').trim().slice(0, 250);
     if (!brand || !title) return json(400, { ok: false, error: 'product_details_required' });
@@ -193,19 +195,19 @@ export async function invoke(event) {
   if (body.action === 'confirm_identity') {
     const gtin = normalizeGtin(String(body.upc || '').trim());
     if (!gtin.ok) return json(400, { ok: false, error: 'valid_upc_required' });
-    const fields = body.fields || {};
+    const fields = receivePhotoIdentity(body.fields || {});
     const brand = String(fields.brand || '').trim().slice(0, 120);
     const title = String(fields.title || '').trim().slice(0, 250);
     const itemType = String(fields.item_type || '').trim().slice(0, 100);
     const model = String(fields.model || '').trim().slice(0, 180);
     if (!brand || !itemType || !title.toLowerCase().includes(itemType.toLowerCase()) || !isCompleteReceiveTitle(title, brand))
-      return json(422, { ok: false, error: 'complete_product_title_required', message: 'Enter the full brand and product title before confirming.' });
+      return json(422, { ok: false, error: 'complete_product_title_required', message: 'Enter what the item is plus color, size or material. Choose No brand for an unbranded item.' });
 
     // Search by the photo-confirmed identity, never by a suspected retailer code.
     // Persist images only when Amazon returns a matching brand/title candidate.
     let matched = null;
     try {
-      const candidate = await searchCatalogAsin(ctx.storeId, { upc: '', brand, model, title });
+      const candidate = isNoBrand(brand) ? null : await searchCatalogAsin(ctx.storeId, { upc: '', brand, model, title });
       const summary = { brand: candidate?.brand || '', title: candidate?.title || '' };
       const requested = { brand, title, model, size: fields.size || '', variant: fields.variant || '', color: fields.color || '' };
       if (candidate?.asin && dimensionIdentityMatches(summary, requested)) {
@@ -323,7 +325,7 @@ export async function invoke(event) {
       : `Photo identification failed: ${upstream.replace(/Gemini \d+:\s*/, '').slice(0, 160)}. Retry or fill the fields by hand.`;
     return json(status, { ok: false, error: 'photo_identification_failed', message, upstream_error: upstream });
   }
-  const identity = identified.result || {};
+  const identity = receivePhotoIdentity(identified.result || {});
   const brand = String(identity.brand || "").trim();
   const model = photoSpecifics(identity) || specificsFromIdentity(identity);
   const title = completePhotoTitle(identity, brand, model) || listingTitle(brand, model);

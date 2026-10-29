@@ -1,0 +1,15 @@
+.receive-escape-actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 0; }
+.receive-escape-actions button, .receive-photo-candidate button { min-height: 44px; }
+.receive-escape-actions { position: sticky; top: 0; z-index: 12; background: inherit; }
+.receive-pad-launch { min-height: 44px; margin: 12px 0; }
+.receive-typing-pad { position: fixed; bottom: 0; left: 50%; transform: translateX(-50%); width: min(100%, 640px); background: #1c1c1e; color: #fff; border-top: 1px solid #68686d; padding: 8px 6px calc(8px + env(safe-area-inset-bottom)); z-index: 2147483646; font: 16px system-ui; box-shadow: 0 -5px 25px #0006; }
+.receive-pad-header { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.receive-pad-header strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.receive-typing-pad output { display: block; min-height: 32px; max-height: 60px; overflow: auto; overflow-wrap: anywhere; padding: 6px; color: #fff; }
+.receive-pad-row { display: flex; gap: 4px; margin-top: 4px; }
+.receive-typing-pad button { flex: 1; min-width: 0; min-height: 36px; padding: 5px 2px; border: 0; border-radius: 6px; background: #48484a; color: #fff; font-size: 17px; }
+.receive-typing-pad button:active { background: #0a84ff; }
+.receive-typing-pad .receive-pad-space { flex: 3; }
+.receive-photo-candidate label { display: grid; gap: 4px; margin: 8px 0; }
+.receive-photo-candidate input, .receive-photo-candidate textarea { width: 100%; font-size: 16px; }
+.receive-modal-card { max-height: calc(100dvh - 24px); overflow: auto; }

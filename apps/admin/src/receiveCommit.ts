@@ -8,9 +8,13 @@ export async function commitReceive(client: SupabaseClient, store: string, reque
   const legacy = pendingReceiveKey(store);
   const legacyValue = localStorage.getItem(legacy);
   if (legacyValue) {
-    const saved = JSON.parse(legacyValue) as ReceiveRequest;
-    localStorage.setItem(legacy + ':' + saved.p_request, legacyValue);
-    localStorage.removeItem(legacy);
+    try {
+      const saved = JSON.parse(legacyValue) as ReceiveRequest;
+      if (typeof saved?.p_request === 'string' && saved.p_request) {
+        localStorage.setItem(legacy + ':' + saved.p_request, legacyValue);
+        localStorage.removeItem(legacy);
+      }
+    } catch { /* Retain malformed legacy data for explicit Discard; it cannot block a new request. */ }
   }
   const key = legacy + ':' + request.p_request;
   const existing = localStorage.getItem(key);

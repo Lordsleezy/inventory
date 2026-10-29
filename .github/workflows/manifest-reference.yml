@@ -22,6 +22,11 @@ jobs:
         run: node --experimental-strip-types apps/admin/src/manifestLines.test.ts
       - name: Database RPCs, atomic upload, tenant isolation and clerk permissions
         run: node --experimental-strip-types scripts/test-manifest-reference.mjs
+      - name: Receive recovery, unbranded and idempotency tests
+        run: |
+          node --experimental-strip-types apps/admin/src/receiveRecovery.test.ts
+          node --experimental-strip-types apps/admin/src/receiveCommit.test.ts
+          node netlify/lib/store-barcode.test.mjs
       - name: Admin typecheck and local-mode bundle (no deployment)
         run: |
           npm exec -w @floor/admin -- tsc --noEmit
@@ -34,3 +39,8 @@ jobs:
         env:
           MANIFEST_PLAYWRIGHT_PATH: /tmp/floor-playwright/node_modules/playwright/index.mjs
         run: node scripts/test-manifest-receive.mjs
+
+      - name: Android clerk Receive escape, no-brand, typing and restart regressions
+        env:
+          MANIFEST_PLAYWRIGHT_PATH: /tmp/floor-playwright/node_modules/playwright/index.mjs
+        run: node scripts/test-receive-escape.mjs
