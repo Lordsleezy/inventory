@@ -8,6 +8,7 @@ export function ReceiveWorkStatus({ client, accessToken, sku }: { client: Supaba
   const [rows, setRows] = useState<Work[]>([]);
   const [pending, setPending] = useState<ReceiveRequest | null>(null);
   const [recovery, setRecovery] = useState('');
+  const [pendingKey, setPendingKey] = useState('');
   useEffect(() => {
     let alive = true;
     const load = async () => {
@@ -20,7 +21,7 @@ export function ReceiveWorkStatus({ client, accessToken, sku }: { client: Supaba
         if (!key?.startsWith('floor:pending-receive:')) continue;
         try { const saved = JSON.parse(localStorage.getItem(key) || '{}') as ReceiveRequest;
           const actor = session.data.session?.user?.id;
-          if (actor && saved.p_photos?.some(p => p.includes(`/receive/${actor}/`))) recovered = saved;
+          if (actor && saved.p_photos?.some(p => p.includes(`/receive/${actor}/`)) && !sku) { recovered = saved; if (alive) setPendingKey(key); }
         } catch { /* ignore unrelated device cache */ }
       }
       if (alive) setPending(recovered);
@@ -47,7 +48,10 @@ export function ReceiveWorkStatus({ client, accessToken, sku }: { client: Supaba
     } catch (e) { setRecovery((e as Error).message); }
   }
   return rows.length || pending || recovery ? <div className="receive-background-status" role="status">
-    {pending && <p>A receive save was interrupted. Its photo and entered fields are preserved. <button type="button" onClick={() => void recover()}>Recover interrupted save</button></p>}
+    {pending && <p>A receive save was interrupted for {String(pending.p_fields.p_title || pending.p_fields.p_model || pending.p_request)}. Its photo and entered fields are preserved. You can receive other items. <button type="button" onClick={() => void recover()}>Recover interrupted save</button> <button type="button" onClick={() => {
+      if (!window.confirm('Discard this recovery record? Uploaded photos are retained. Any item already saved on the server will not be deleted.')) return;
+      localStorage.removeItem(pendingKey); setPending(null); setRecovery('Recovery record discarded. Ready for the next item.');
+    }}>Discard</button></p>}
     {recovery && <p>{recovery}</p>}
     {rows.map(row => <p key={row.sku}>
     SKU {row.sku}: {row.status === 'done' ? 'Receive processing complete' : row.status === 'retry'

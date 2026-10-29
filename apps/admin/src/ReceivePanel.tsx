@@ -1308,7 +1308,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       put('upc', UPC_NOT_APPLICABLE);
     }
     if (doNotList) put('do_not_list', true);
-    if (doNotShip) put('do_not_ship', true);
+    if (!staffMode && doNotShip) put('do_not_ship', true); // Server derives automatic appliance DNS for clerks.
     if (hold) { put('hold_reason', hold.reason); put('hold_note', hold.note.trim()); }
     const hide = Boolean(hold) || forceHide || doNotList;
 

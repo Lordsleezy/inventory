@@ -363,6 +363,9 @@ export function AppSettingsNative({
         <button type="button" style={{ visibility: 'hidden' }}>·</button>
       </div>
       <div className="app-embed-soft">{settingsSlot}</div>
+      <button type="button" className="app-primary" onClick={() => {
+        if (window.confirm('Restart Floor? Unsaved form edits will be lost. Preserved interrupted saves remain recoverable.')) window.location.reload();
+      }}>Restart app</button>
       <button
         type="button"
         className="app-primary"

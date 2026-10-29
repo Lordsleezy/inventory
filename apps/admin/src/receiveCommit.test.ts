@@ -21,3 +21,15 @@ test('lost commit response retries the same snapshot with one RPC and no second 
   assert.equal(result.replayed, true); assert.equal(cache.size, 0);
   assert.deepEqual(requests, [original, original]);
 });
+
+test('an interrupted legacy item never blocks a different receive request', async () => {
+  const cache = new Map<string,string>();
+  Object.defineProperty(globalThis,'localStorage',{configurable:true,value:{getItem:(k:string)=>cache.get(k)||null,setItem:(k:string,v:string)=>cache.set(k,v),removeItem:(k:string)=>cache.delete(k)}});
+  const old = {p_request:'fridge',p_fields:{p_title:'Fridge'},p_photos:['store/receive/actor/fridge/a.jpg'],p_extras:{}};
+  cache.set('floor:pending-receive:store',JSON.stringify(old));
+  const next={...old,p_request:'next',p_fields:{p_title:'Next item'}};
+  const client={rpc:async (_:string,payload:unknown)=>{assert.deepEqual(payload,next);return {data:{skus:['99873']},error:null}}} as unknown as SupabaseClient;
+  await commitReceive(client,'store',next);
+  assert.deepEqual(JSON.parse(cache.get('floor:pending-receive:store:fridge')!),old);
+  assert.equal(cache.size,1);
+});
