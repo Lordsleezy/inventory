@@ -1,13 +1,14 @@
-import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import { PGlite } from '@electric-sql/pglite';
 import { replayMigrationPaths } from './lib/replay-migrations.mjs';
 import { parseManifestLines } from '../apps/admin/src/manifestLines.ts';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const fixture = parseManifestLines(await readFile(new URL('../apps/admin/test-fixtures/bstock.csv', import.meta.url), 'utf8'));
+const receiveFixture = parseManifestLines(await readFile(new URL('../apps/admin/test-fixtures/manifest-receive-upcs.csv', import.meta.url), 'utf8'));
 const store = '10000000-0000-0000-0000-000000000001';
 const otherStore = '10000000-0000-0000-0000-000000000002';
 const admin = '20000000-0000-0000-0000-000000000001';
@@ -16,6 +17,7 @@ const outsider = '20000000-0000-0000-0000-000000000003';
 const id = '30000000-0000-0000-0000-000000000001';
 const newerId = '30000000-0000-0000-0000-000000000002';
 const oldId = '30000000-0000-0000-0000-000000000003';
+const receiveFixtureId = '30000000-0000-0000-0000-000000000004';
 
 test('manifest upload, lookup, store isolation, and server permissions', { timeout: 120000 }, async () => {
   const db = new PGlite();
@@ -80,14 +82,28 @@ test('manifest upload, lookup, store isolation, and server permissions', { timeo
     for (const condition of ['NEW','LIKE_NEW','USED_GOOD','UNDAMAGED']) {
       assert.equal((await db.query('select public.manifest_condition_defective($1) as yes',[condition])).rows[0].yes, false, condition);
     }
+    await create(receiveFixtureId, receiveFixture, '2026-10-30', 'B-Stock UPC coverage');
+    for (const [upc, cents] of [['199268613418',4999],['096801681609',9899],['810180401883',4999],['493240033691',3999]]) {
+      assert.equal((await ref(upc)).retail_cents, cents, `admin retail for ${upc}`);
+    }
+    assert.equal((await ref('0096801681609')).retail_cents, 9899, 'leading-zero UPC-A matches as admin');
+    assert.equal((await ref('810180401883')).warnings[0].conditions[0], 'SALVAGE', 'admin sees Pura warning');
+    assert.equal((await ref('493240033691')).retail_cents, 3999, '49-prefix sticker UPC matches as admin');
     const list = (await db.query('select public.portal_manifest_list() as value')).rows[0].value;
     assert.equal(list.find(m => m.id === id).line_count, 3);
+    assert.equal(list.find(m => m.id === receiveFixtureId).line_count, receiveFixture.length);
     await db.exec('reset role');
     await db.query(`insert into storage.objects(bucket_id,name) values ('floor-manifests',$1)`,[`${store}/${id}/load.csv`]);
     await login(clerk);
     const clerkReference = await ref('096801681609');
-    assert.equal(clerkReference.retail_cents, 3000);
+    assert.equal(clerkReference.retail_cents, 9899);
     assert.equal(clerkReference.warnings[0].defective_qty, 2);
+    for (const [upc, cents] of [['199268613418',4999],['096801681609',9899],['810180401883',4999],['493240033691',3999]]) {
+      assert.equal((await ref(upc)).retail_cents, cents, `clerk retail for ${upc}`);
+    }
+    assert.equal((await ref('0096801681609')).retail_cents, 9899, 'leading-zero UPC-A matches for clerk');
+    assert.equal((await ref('810180401883')).warnings[0].conditions[0], 'SALVAGE', 'clerk sees Pura warning');
+    assert.equal((await ref('493240033691')).retail_cents, 3999, '49-prefix sticker UPC matches for clerk');
     assert.deepEqual(Object.keys(clerkReference).sort(), ['expected','manifest_name','manifest_on','received','retail_cents','warnings']);
     assert.doesNotMatch(JSON.stringify(clerkReference), /cost|profit|pallet|lot_id|description|brand|tcin/i);
     assert.equal((await db.query('select * from public.store_manifests')).rows.length, 0);
@@ -106,7 +122,7 @@ test('manifest upload, lookup, store isolation, and server permissions', { timeo
     await db.exec('reset role');
     await db.query('update public.staff set store_id=$1 where user_id=$2', [otherStore,admin]);
     await login(admin);
-    assert.equal((await ref('096801681609')).retail_cents, 3000, 'admin reference uses the portal store, matching Receive');
+    assert.equal((await ref('096801681609')).retail_cents, 9899, 'admin reference uses the portal store, matching Receive');
     await login('');
     await assert.rejects(ref('096801681609'), /staff_access_denied/);
     // Read-only lookup creates no units and changes no item prices, costs, or conditions.

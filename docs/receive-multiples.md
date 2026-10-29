@@ -19,3 +19,5 @@ Current channel sync is keyed by the individual SKU/listing. It does not consoli
 ## Tests
 
 Added pgTAP coverage for clerk Qty 11, all-or-nothing late failure, full recovery replay, copied details/photos/manifest, admin costs, group expansion/counts, add more, independent edits, group edit authorization, per-row before-images and a real local register finalization with per-SKU ledger, commissions and Books entries. Existing receive recovery/stock-photo/title tests and manifest regressions remain in CI. Chromium tests exercise tap-only quantity, repeat group choice, group expansion and clerk/admin controls.
+
+The newer master not-for-sale intake exception is preserved: brand-only not-for-sale stock may be received without photos or finishing jobs, including multiple units. Normal sale stock keeps its existing photo rules.

@@ -31,6 +31,7 @@ AS $function$
 declare
  st uuid:=coalesce(public.portal_store_id(),public.current_store_id()); adm boolean:=public.portal_is_admin();
  old public.receive_commits; result jsonb; sku text; fun text; started timestamptz:=clock_timestamp(); checkpoint timestamptz; v_timings jsonb;
+ v_do_not_list boolean:=coalesce((p_extras->>'do_not_list')::boolean,false);
  group_id uuid; job_id uuid; group_manifest uuid; v_skus jsonb; source_specs jsonb; qty int:=coalesce((p_fields->>'p_quantity')::int,1); member public.units;
  stock_paths text[]:=array(select jsonb_array_elements_text(coalesce(p_extras->'stock_photo_paths','[]'::jsonb)));
 begin
@@ -43,7 +44,8 @@ begin
   return jsonb_build_object('skus',coalesce((select jsonb_agg(c.sku order by c.sku) from public.receive_commits c where c.store_id=st and (c.id=p_request or c.extras->>'batch_request'=p_request::text)),jsonb_build_array(old.sku)),'group_id',old.extras->>'group_id','replayed',true,'server_ms',0,'server_steps',old.timings);
  end if;
  if qty<1 or qty>100 then raise exception 'quantity_must_be_1_to_100' using errcode='22023';end if;
- if coalesce(cardinality(p_photos),0)=0 then raise exception 'unit_photo_required' using errcode='23514';end if;
+ if v_do_not_list and not public.receive_not_for_sale_brand_is_valid(p_fields->>'p_brand') then raise exception 'Brand required' using errcode='22023';end if;
+ if coalesce(cardinality(p_photos),0)=0 and not v_do_not_list then raise exception 'unit_photo_required' using errcode='23514';end if;
  if exists(select 1 from unnest(stock_paths) p where not p=any(p_photos)) then raise exception 'invalid_stock_photo' using errcode='23514';end if;
  if exists(select 1 from unnest(p_photos) p where p not like st::text||'/receive/'||auth.uid()::text||'/'||p_request::text||'/%'
    or not exists(select 1 from storage.objects o where o.bucket_id='unit-photos' and o.name=p)
@@ -56,8 +58,9 @@ begin
    p_extras:=p_extras #- '{enrichment,specs,do_not_ship}';
  end if;
  if not adm and (coalesce(p_extras->'channels','[]')<>'[]'::jsonb or coalesce((p_extras->>'dns')::boolean,false)
-   or coalesce((p_extras->>'do_not_list')::boolean,false) or nullif(p_extras->>'manifest','') is not null
-   or coalesce(p_extras#>'{enrichment,specs}','{}') ?| array['do_not_ship','do_not_list','ebay_never_list','hold_reason','hold_note']) then
+   or nullif(p_extras->>'manifest','') is not null
+   or coalesce(p_extras#>'{enrichment,specs}','{}') ?| array['do_not_ship','ebay_never_list','hold_reason','hold_note']
+   or (coalesce(p_extras#>'{enrichment,specs}','{}') ? 'do_not_list' and not v_do_not_list)) then
   raise exception 'admin_options_forbidden' using errcode='42501';end if;
  group_id:=nullif(p_extras->>'group_id','')::uuid;
  if group_id is not null then
@@ -89,6 +92,7 @@ begin
  p_extras:=p_extras||jsonb_build_object('group_id',group_id,'batch_request',p_request);
  perform set_config('floor.receive_photo_paths',to_jsonb(p_photos)::text,true);
  perform set_config('floor.receive_stock_photo_paths',to_jsonb(stock_paths)::text,true);
+ perform set_config('floor.receive_not_for_sale',case when v_do_not_list then 'true' else '' end,true);
  fun:=case when adm then 'portal_receive_unit' else 'staff_receive_unit' end;
  execute 'select public.'||fun||'($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)' into result
  using qty,coalesce(p_fields->>'p_brand',''),coalesce(p_fields->>'p_model',''),coalesce(p_fields->>'p_title',''),
@@ -97,6 +101,7 @@ begin
   (p_fields->>'p_length')::numeric,(p_fields->>'p_width')::numeric,(p_fields->>'p_height')::numeric,(p_fields->>'p_weight')::numeric,p_fields->>'p_category';
  perform set_config('floor.receive_photo_paths','',true);
  perform set_config('floor.receive_stock_photo_paths','',true);
+ perform set_config('floor.receive_not_for_sale','',true);
  v_skus:=result->'skus';
  for sku in select jsonb_array_elements_text(v_skus) loop
  job_id:=case when sku=result#>>'{skus,0}' then p_request else gen_random_uuid() end;
@@ -114,7 +119,7 @@ begin
  v_timings:=v_timings||jsonb_build_object('entered_details_location_dns_ms',round(extract(epoch from clock_timestamp()-checkpoint)*1000));
  checkpoint:=clock_timestamp();
  insert into public.receive_commits(id,store_id,actor_id,sku,fields,extras,photo_paths) values(job_id,st,auth.uid(),sku,p_fields,p_extras,p_photos);
- insert into public.receive_jobs(id,store_id,sku) values(job_id,st,sku);
+ if not v_do_not_list then insert into public.receive_jobs(id,store_id,sku) values(job_id,st,sku);end if;
  v_timings:=v_timings||jsonb_build_object('durable_job_ms',round(extract(epoch from clock_timestamp()-checkpoint)*1000));
  update public.receive_commits set timings=v_timings where id=job_id;
  if group_id is not null then insert into public.receive_group_members(group_id,store_id,sku) values(group_id,st,sku);end if;

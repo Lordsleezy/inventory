@@ -141,6 +141,71 @@ const rest = all.filter((f) => f.name > "0005_private_photos.sql");
   await db.query(`select public.seed_store_settings($1,'Books Test')`, [storeId]);
   await db.query(`select set_config('request.jwt.claim.sub',$1,false)`, [adminId]);
   await db.query(`select set_config('request.jwt.claim.role','authenticated',false)`);
+  await db.query(`alter table auth.users add column if not exists email text`);
+  const nfsFields = { p_quantity: 1, p_brand: 'Acme', p_model: '', p_title: 'Acme' };
+  const nfsExtras = { do_not_list: true, enrichment: { specs: { do_not_list: true } } };
+  const adminReceiveId = '00000000-0000-4000-8000-000000000601';
+  const { rows: nfsAdminRows } = await db.query(
+    `select public.receive_commit($1, $2, ARRAY[]::text[], $3) as result`,
+    [adminReceiveId, JSON.stringify(nfsFields), JSON.stringify(nfsExtras)],
+  );
+  const nfsAdminSku = nfsAdminRows[0].result.skus[0];
+  const { rows: nfsAdminUnit } = await db.query(
+    `select listing_specs->>'do_not_list' as do_not_list, show_on_website, ask_cents,
+            public.unit_listing_gaps(u) as gaps
+       from public.units u where store_id = $1 and sku = $2`, [storeId, nfsAdminSku],
+  );
+  assert.deepEqual(nfsAdminUnit[0], { do_not_list: 'true', show_on_website: false, ask_cents: null, gaps: [] },
+    "admin not-for-sale Receive persists hidden with only a brand and no listing gaps");
+  await db.query(`update public.units set listing_specs=listing_specs-'do_not_list' where store_id=$1 and sku=$2`, [storeId,nfsAdminSku]);
+  const { rows: reenabledUnit } = await db.query(
+    `select public.unit_listing_gaps(u) as gaps from public.units u where store_id=$1 and sku=$2`, [storeId,nfsAdminSku],
+  );
+  assert.ok(reenabledUnit[0].gaps.includes('photo') && reenabledUnit[0].gaps.includes('price'),
+    "unchecking not-for-sale restores normal photo and listing requirements");
+  assert.equal((await db.query(`select count(*)::int as count from public.receive_jobs where id=$1`, [adminReceiveId])).rows[0].count, 0,
+    "admin not-for-sale Receive does not queue photo or listing jobs");
+  await assert.rejects(
+    db.query(`select public.receive_commit($1,$2,ARRAY[]::text[],$3)`, [
+      '00000000-0000-4000-8000-000000000602', JSON.stringify({ ...nfsFields, p_brand: '' }), JSON.stringify(nfsExtras),
+    ]),
+    /Brand required/,
+    "admin not-for-sale commit rejects a missing brand",
+  );
+  const clerkId = '00000000-0000-4000-8000-000000000502';
+  await db.query(`insert into auth.users(id) values($1)`, [clerkId]);
+  await db.query(`insert into public.staff(user_id,store_id,display_name,role) values($1,$2,'Clerk','staff')`, [clerkId,storeId]);
+  await db.query(`select set_config('request.jwt.claim.sub',$1,false)`, [clerkId]);
+  const clerkReceiveId = '00000000-0000-4000-8000-000000000603';
+  const { rows: nfsStaffRows } = await db.query(
+    `select public.receive_commit($1, $2, ARRAY[]::text[], $3) as result`,
+    [clerkReceiveId, JSON.stringify(nfsFields), JSON.stringify(nfsExtras)],
+  );
+  const nfsStaffSku = nfsStaffRows[0].result.skus[0];
+  const { rows: nfsStaffUnit } = await db.query(
+    `select listing_specs->>'do_not_list' as do_not_list, show_on_website,
+            public.unit_listing_gaps(u) as gaps
+       from public.units u where store_id = $1 and sku = $2`, [storeId, nfsStaffSku],
+  );
+  assert.deepEqual(nfsStaffUnit[0], { do_not_list: 'true', show_on_website: false, gaps: [] },
+    "staff not-for-sale Receive persists hidden with only a brand and no listing gaps");
+  await assert.rejects(
+    db.query(`select public.receive_commit($1,$2,ARRAY[]::text[],$3)`, [
+      '00000000-0000-4000-8000-000000000604', JSON.stringify({ ...nfsFields, p_brand: '' }), JSON.stringify(nfsExtras),
+    ]),
+    /Brand required/,
+    "staff not-for-sale commit rejects a missing brand",
+  );
+  await db.query(`select set_config('request.jwt.claim.sub',$1,false)`, [adminId]);
+  await assert.rejects(
+    db.query(`select public.receive_commit($1,$2,ARRAY[]::text[],'{}'::jsonb)`, [
+      '00000000-0000-4000-8000-000000000605', JSON.stringify(nfsFields),
+    ]),
+    /unit_photo_required/,
+    "for-sale receive still requires a photo server-side",
+  );
+  await db.query(`update public.staff set deactivated_at=now() where user_id=$1 and store_id=$2`, [clerkId,storeId]);
+  console.log("not-for-sale Receive commit: admin and clerk brand-only save ok");
   const { rows: bookPeriods } = await db.query(`select public.portal_books_list('2026-01-01',null) as periods`);
   const currentPeriod = bookPeriods[0].periods.find((p) => p.period_type === "month");
   assert.ok(currentPeriod, "Books creates a draft month on first load");

@@ -85,6 +85,11 @@ select ok(exists(select 1 from jsonb_array_elements(public.portal_books_report(c
 select is((select count(*)::int from jsonb_array_elements(public.portal_books_report(current_setting('groups.period')::uuid)->'inventory_bought') v where v->>'sku' in(select jsonb_array_elements_text(current_setting('groups.owner_result')::jsonb->'skus'))),2,'Books intake lists both separate units');
 select set_config('request.jwt.claim.sub',current_setting('groups.clerk'),true);
 select ok(not (public.receive_group_lookup('096801681609')->0->'fields' ? 'cost'),'repeat UPC still omits admin cost for clerk');
+
+select set_config('groups.not_for_sale',gen_random_uuid()::text,true);
+select lives_ok($q$select public.receive_commit(current_setting('groups.not_for_sale')::uuid,'{"p_quantity":2,"p_brand":"Example"}','{}','{"do_not_list":true,"enrichment":{"specs":{"do_not_list":true}}}')$q$,'new master brand-only not-for-sale path also accepts a clerk batch');
+select is((select count(*)::int from public.receive_group_members m join public.units u on u.sku=m.sku where m.group_id=current_setting('groups.not_for_sale')::uuid and public.unit_not_for_sale(u.listing_specs) and not u.show_on_website),2,'not-for-sale batch stays hidden with its own two units');
+select is((select count(*)::int from public.receive_jobs where id in(select id from public.receive_commits where extras->>'batch_request'=current_setting('groups.not_for_sale'))),0,'not-for-sale batch preserves no-background-job behavior');
 select * from finish();
 rollback;
 
