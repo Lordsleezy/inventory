@@ -176,4 +176,3 @@ export function ManifestsPage({ client, storeId, money }: Props) {
     </ToolCard>
   </div>;
 }
-

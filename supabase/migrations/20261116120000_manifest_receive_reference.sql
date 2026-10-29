@@ -33,14 +33,14 @@ grant select on public.manifest_lines to authenticated;
 grant all on public.manifest_lines to service_role;
 
 -- Clerk receives only the narrow reference RPC below, never files, totals, or lines.
-drop policy store_manifests_read on public.store_manifests;
+drop policy if exists store_manifests_read on public.store_manifests;
 create policy store_manifests_read on public.store_manifests for select to authenticated
   using (public.portal_is_admin() and store_id = public.portal_store_id());
-drop policy floor_manifests_read on storage.objects;
+drop policy if exists floor_manifests_read on storage.objects;
 create policy floor_manifests_read on storage.objects for select to authenticated
   using (bucket_id = 'floor-manifests' and public.portal_is_admin()
     and split_part(name,'/',1) = public.portal_store_id()::text);
-drop policy floor_manifests_upload on storage.objects;
+drop policy if exists floor_manifests_upload on storage.objects;
 create policy floor_manifests_upload on storage.objects for insert to authenticated
   with check (bucket_id = 'floor-manifests' and public.portal_is_admin()
     and split_part(name,'/',1) = public.portal_store_id()::text);

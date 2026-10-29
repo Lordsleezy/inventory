@@ -21,6 +21,10 @@ test('manifest upload, lookup, store isolation, and server permissions', { timeo
   try {
     await db.exec(await readFile(new URL('../supabase/tests/pglite-stub.sql', import.meta.url), 'utf8'));
     for (const file of replayMigrationPaths(root)) {
+      if (file.endsWith('20261116120000_manifest_receive_reference.sql')) {
+        // Live's storage policies can differ from the historical replay.
+        await db.exec('drop policy if exists floor_manifests_read on storage.objects; drop policy if exists floor_manifests_upload on storage.objects');
+      }
       try { await db.exec((await readFile(file, 'utf8')).replace(/create extension if not exists pgcrypto;/gi, '-- stub')); }
       catch (error) { throw new Error(`${file}: ${error.message}`); }
     }

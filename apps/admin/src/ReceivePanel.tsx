@@ -2200,4 +2200,3 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
 
   </section>;
 }
-

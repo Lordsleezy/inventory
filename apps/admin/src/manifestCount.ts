@@ -48,4 +48,3 @@ export async function countManifestFile(file: File): Promise<{ count: number; au
   }
   return { count: 0, automatic: false };
 }
-
