@@ -3,9 +3,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { countManifestFile } from './manifestCount';
+import { parseManifestLines } from './manifestLines';
+import { backfillManifestFiles } from './manifestBackfill';
 
 type Manifest = {
-  id: string; name: string; source: string; manifest_on: string; item_count: number;
+  line_count: number; id: string; name: string; source: string; manifest_on: string; item_count: number;
   count_source: string; storage_path: string; received_count: number; sold_count: number;
   stock_count: number; revenue_cents: number; profit_cents: number;
 };
@@ -31,11 +33,15 @@ export function ManifestsPage({ client, storeId, money }: Props) {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [loaded, setLoaded] = useState(false);
+  const [backfills, setBackfills] = useState<Record<string, string>>({});
 
   const load = useCallback(async () => {
     const { data, error: rpcError } = await client.rpc('portal_manifest_list');
     if (rpcError) throw rpcError;
-    setRows((data || []) as Manifest[]); setLoaded(true);
+    const manifests = (data || []) as Manifest[];
+    setRows(manifests); setLoaded(true);
+    // Backfill stored CSVs in the background; files and existing lines are never replaced.
+    void backfillManifestFiles(client, manifests).then(setBackfills);
   }, [client]);
   useEffect(() => { void load().catch((e) => setError(String(e.message || e))); }, [load]);
   const bulkSkus = useMemo(() => [...new Set(bulk.split(/[\s,;]+/).map(sku => sku.trim()).filter(Boolean))], [bulk]);
@@ -51,10 +57,11 @@ export function ManifestsPage({ client, storeId, money }: Props) {
     if (next.size > 50 * 1024 * 1024) { setError('Manifest files must be 50 MB or less.'); return; }
     try {
       setCounting(true);
+      if (ext === 'csv') parseManifestLines(await next.text());
       const result = await countManifestFile(next);
       if (version !== fileVersion.current) return;
       setCount(String(result.count)); setAutomatic(result.automatic);
-    } catch (e) { if (version === fileVersion.current) setError(`Could not count spreadsheet rows: ${String((e as Error).message || e)}`); }
+    } catch (e) { if (version === fileVersion.current) setError(`${String((e as Error).message || e)}`); }
     finally { if (version === fileVersion.current) setCounting(false); }
   }
 
@@ -71,18 +78,21 @@ export function ManifestsPage({ client, storeId, money }: Props) {
     const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120);
     const path = `${storeId}/${id}/${safe}`;
     try {
+      // Validate before storing anything. CSV metadata and all lines commit together.
+      const lines = ext === 'csv' ? parseManifestLines(await file.text()) : null;
       const result = await client.storage.from('floor-manifests').upload(path, file, {
         contentType: file.type || 'application/octet-stream', upsert: false,
       });
       if (result.error) throw result.error;
-      const { error: rpcError } = await client.rpc('portal_create_manifest', {
+      const { error: rpcError } = await client.rpc(lines ? 'portal_create_manifest_with_lines' : 'portal_create_manifest', {
         p_id: id, p_name: name.trim(), p_source: source.trim(), p_on: date,
         p_count: itemCount, p_count_source: automatic ? 'spreadsheet' : 'manual',
         p_path: path, p_content_type: file.type || 'application/octet-stream', p_size: file.size,
+        ...(lines ? { p_lines: lines } : {}),
       });
       if (rpcError) throw rpcError;
       setName(''); setSource(''); setFile(null); setCount('0'); setAutomatic(false); if (fileInput.current) fileInput.current.value = '';
-      setNotice('Manifest saved. You can tag units during receiving or in bulk below.');
+      setNotice(lines ? `Manifest saved with ${lines.length} lines for receive retail and defect warnings.` : 'Manifest saved. Line references require a CSV upload.');
       await load();
     } catch (e) { setError(String((e as Error).message || e)); }
     finally { submitLock.current = false; setBusy(false); }
@@ -152,7 +162,7 @@ export function ManifestsPage({ client, storeId, money }: Props) {
       {!loaded ? <p role="status">{error ? 'Could not load saved manifests.' : 'Loading manifests…'} {error && <button type="button" className="secondary" onClick={() => void load().catch(e => setError(String(e.message || e)))}>Retry</button>}</p> : rows.length === 0 ? <ToolEmpty icon="file" title="No manifests uploaded yet."><p>Upload a manifest above to start tracking inventory and manage your manifests here.</p></ToolEmpty>
         : <div className="manifest-list">{rows.map(row => <details className="manifest-row" key={row.id}>
           <summary><span><strong>{row.name}</strong><small>{row.manifest_on}{row.source ? ` · ${row.source}` : ''}</small></span><b>{row.item_count} items <span aria-hidden="true">›</span></b></summary>
-          <div className="manifest-detail"><div className="manifest-metrics"><span>Received<b>{row.received_count}</b></span><span>Sold<b>{row.sold_count}</b></span><span>In stock<b>{row.stock_count}</b></span><span>Revenue<b>{money(row.revenue_cents)}</b></span><span>Profit<b>{money(row.profit_cents)}</b></span></div><div className="actions"><button type="button" className="secondary" onClick={() => void open(row)}>Open file</button><button type="button" className="secondary" disabled={busy} onClick={() => void changeCount(row)}>Edit item count</button></div></div>
+          <div className="manifest-detail"><p>{backfills[row.id] || (row.line_count ? `${row.line_count} line items saved.` : /\.csv$/i.test(row.storage_path) ? 'Checking stored CSV for line items…' : 'Original file retained. Upload a CSV to add line references.')}</p><div className="manifest-metrics"><span>Received<b>{row.received_count}</b></span><span>Sold<b>{row.sold_count}</b></span><span>In stock<b>{row.stock_count}</b></span><span>Revenue<b>{money(row.revenue_cents)}</b></span><span>Profit<b>{money(row.profit_cents)}</b></span></div><div className="actions"><button type="button" className="secondary" onClick={() => void open(row)}>Open file</button><button type="button" className="secondary" disabled={busy} onClick={() => void changeCount(row)}>Edit item count</button></div></div>
         </details>)}</div>}
       <div className="tool-total-row"><span>Total manifested items</span><strong>{loaded ? total : '—'}</strong></div>
     </ToolCard>
