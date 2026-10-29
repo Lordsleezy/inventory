@@ -1,3 +1,4 @@
+import { ReceiveGroupRow, type GroupedInventory } from '../ReceiveGroupRow';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { AttentionSection } from '../navigation';
@@ -11,7 +12,7 @@ import { INVENTORY_BUCKET_LABELS, inventoryBucketStatus, type InventoryBucket } 
 /** Same stock subtabs as desktop Inventory. */
 type Filter = 'in_stock' | 'sold' | 'unfinished' | 'needs_check' | 'no_location' | 'defective' | 'dns' | InventoryBucket;
 
-type Row = {
+type Row = GroupedInventory & {
   sku: string;
   brand: string;
   model: string;
@@ -29,7 +30,7 @@ type Row = {
   sold_price_cents?: number | null;
 };
 
-type List = { items: Row[]; totals: { unit_count: number; piece_count?: number } };
+type List = { items: Row[]; totals: { unit_count: number; row_count?: number; piece_count?: number } };
 
 type Props = {
   client: SupabaseClient;
@@ -44,7 +45,7 @@ type Props = {
   scrollRef?: React.RefObject<HTMLDivElement | null>;
 };
 
-const CACHE_PREFIX = 'floor_inv_cache_v4_';
+const CACHE_PREFIX = 'floor_inv_cache_v5_';
 const URL_CACHE_KEY = 'floor_inv_urls_v2';
 const PAGE = 40;
 /** Signed URLs are minted for 3600s; refresh a bit early. */
@@ -199,18 +200,9 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
         try {
           const status = filter === 'unfinished' ? 'all' : filter === 'no_location' ? 'in_stock' : filter in INVENTORY_BUCKET_LABELS ? inventoryBucketStatus(filter as InventoryBucket) : filter;
           const unfinished = filter === 'unfinished';
-          const { data, error: e } = filter === 'no_location'
-            ? await client.rpc('portal_inventory_list_with_locations', {
-                p_query: query, p_status: 'in_stock', p_unfinished: false, p_sort: 'sku',
-                p_offset: offset, p_limit: PAGE, p_location: 'unassigned',
-              })
-            : await client.rpc(staffMode ? 'staff_inventory_list' : 'portal_inventory_list', {
-            p_query: query,
-            p_status: status,
-            p_unfinished: unfinished,
-            p_sort: 'sku',
-            p_offset: offset,
-            p_limit: PAGE,
+          const { data, error: e } = await client.rpc('receive_inventory_list', {
+            p_query: query, p_status: status, p_unfinished: unfinished, p_sort:'sku',
+            p_offset:offset,p_limit:PAGE,p_location:filter==='no_location'?'unassigned':'all',
           });
           if (e) throw e;
           const next = data as List;
@@ -232,10 +224,11 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
       alive = false;
       clearTimeout(t);
     };
-  }, [client, filter, query, offset, staffMode, cacheScope, refreshKey]);
+  }, [client, filter, query, offset, staffMode, cacheScope, refreshKey, queueRefresh]);
 
   const total = list?.totals.unit_count ?? 0;
   // Physical pieces (a row of 12 bottles counts 12); falls back to rows until the DB returns piece_count.
+  const pageRows = list?.totals.row_count ?? total;
   const pieces = list?.totals.piece_count ?? total;
   const rowsNote = pieces !== total ? ` (${total} ${total === 1 ? 'item' : 'items'})` : '';
   const footer = useMemo(() => {
@@ -336,6 +329,7 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
 
       <div className="app-group">
         {(list?.items || []).map((u, idx) => {
+          if(u.group_id) return <ReceiveGroupRow key={u.group_id} item={u} client={client} admin={fullAccess} money={money} onOpen={onOpen} onChanged={()=>{setList(null);setQueueRefresh(n=>n+1)}} />;
           const warn = filter === 'dns' ? null : needs(u);
           const missing = filter === 'not_ready' ? inventoryMissingText(u.missing || []) : null;
           const thumbPath = u.photo_path ? thumb(u.photo_path) : '';
@@ -394,10 +388,10 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
       </div>
 
       <div className="app-footer-count">{footer}</div>
-      {total > PAGE && (
+      {pageRows > PAGE && (
         <div className="app-actions" style={{ gridTemplateColumns: '1fr 1fr' }}>
           <button type="button" disabled={offset === 0 || loading} onClick={() => setOffset(Math.max(0, offset - PAGE))}>Previous</button>
-          <button type="button" disabled={offset + PAGE >= total || loading} onClick={() => setOffset(offset + PAGE)}>Next</button>
+          <button type="button" disabled={offset + PAGE >= pageRows || loading} onClick={() => setOffset(offset + PAGE)}>Next</button>
         </div>
       )}
     </div>

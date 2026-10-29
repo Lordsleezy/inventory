@@ -1,5 +1,5 @@
 export type ManifestReference = {
-  retail_cents: number; manifest_name: string; manifest_on: string;
+  received?: number; expected?: number; retail_cents: number; manifest_name: string; manifest_on: string;
   warnings: { manifest_name: string; total_qty: number; defective_qty: number; conditions: string[] }[];
 };
 

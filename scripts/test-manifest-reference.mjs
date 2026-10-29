@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFile } from 'node:fs/promises';
@@ -5,7 +6,7 @@ import { PGlite } from '@electric-sql/pglite';
 import { replayMigrationPaths } from './lib/replay-migrations.mjs';
 import { parseManifestLines } from '../apps/admin/src/manifestLines.ts';
 
-const root = new URL('../', import.meta.url).pathname;
+const root = fileURLToPath(new URL('../', import.meta.url));
 const fixture = parseManifestLines(await readFile(new URL('../apps/admin/test-fixtures/bstock.csv', import.meta.url), 'utf8'));
 const store = '10000000-0000-0000-0000-000000000001';
 const otherStore = '10000000-0000-0000-0000-000000000002';
@@ -87,7 +88,7 @@ test('manifest upload, lookup, store isolation, and server permissions', { timeo
     const clerkReference = await ref('096801681609');
     assert.equal(clerkReference.retail_cents, 3000);
     assert.equal(clerkReference.warnings[0].defective_qty, 2);
-    assert.deepEqual(Object.keys(clerkReference).sort(), ['manifest_name','manifest_on','retail_cents','warnings']);
+    assert.deepEqual(Object.keys(clerkReference).sort(), ['expected','manifest_name','manifest_on','received','retail_cents','warnings']);
     assert.doesNotMatch(JSON.stringify(clerkReference), /cost|profit|pallet|lot_id|description|brand|tcin/i);
     assert.equal((await db.query('select * from public.store_manifests')).rows.length, 0);
     assert.equal((await db.query('select * from public.manifest_lines')).rows.length, 0);

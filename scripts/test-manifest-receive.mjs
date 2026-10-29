@@ -17,6 +17,7 @@ const { outputFiles } = await build({
           if (scenario.delayed) return new Promise(resolve => { window.__release = () => resolve({ data: scenario.reference }); });
           return { data: scenario.reference, error: scenario.failed ? { message: 'unavailable' } : null };
         }
+        if (name === 'receive_group_lookup') return { data: scenario.groups || [] };
         if (name === 'portal_receive_options' || name === 'staff_receive_options') return { data: { next_sku: '10001', categories: ['Home'], conditions: ['New'], test_statuses: ['untested'] } };
         return { data: null };
       },
@@ -87,5 +88,11 @@ try {
   assert.equal(await staff.locator('input[placeholder="0.00"]').inputValue(), '');
   assert.equal(await staff.locator('input[placeholder="Leave blank if unknown"]').count(), 0, 'clerk cost control stays hidden');
   assert.equal(await staff.evaluate(() => window.__calls.filter(call => call.table === 'store_manifests').length), 0, 'clerk needs only the narrow reference RPC');
+  for(let i=0;i<10;i++) await staff.getByRole('button',{name:'Increase receive quantity'}).click();
+  assert.equal(await staff.locator('.receive-quantity output').innerText(),'11','clerk can set Qty 11 without typing');
+  const repeat=await open({staff:true,reference:ref,groups:[{id:'group-radio',title:'Portable Radio',in_stock:8,fields:{brand:'Example',model:'Portable Radio',title:'Example Portable Radio',ask:'24.99',description:'Portable radio details',cost:'999.00'}}]});
+  await repeat.getByRole('button',{name:'Add more to this group'}).click();
+  assert.equal(await repeat.locator('input[placeholder="0.00"]').inputValue(),'24.99','repeat UPC fills group price');
+  assert.equal(await repeat.locator('input[placeholder="Leave blank if unknown"]').count(),0,'group reuse cannot expose clerk cost');
   console.log('PASS: manifest retail, no-match, catalog miss → photo prompt, all fields isolated, SALVAGE/mixed warnings, manual price, slow/failing sidecar.');
 } finally { await browser.close(); }
