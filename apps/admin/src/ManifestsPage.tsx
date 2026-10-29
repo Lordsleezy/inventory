@@ -4,11 +4,11 @@ import type { FormEvent } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { countManifestFile } from './manifestCount';
 import { parseManifestLines } from './manifestLines';
-import { backfillManifestFiles } from './manifestBackfill';
+import { backfillManifestFiles, isCsvManifestFile } from './manifestBackfill';
 
 type Manifest = {
   line_count: number; id: string; name: string; source: string; manifest_on: string; item_count: number;
-  count_source: string; storage_path: string; received_count: number; sold_count: number;
+  count_source: string; storage_path: string; content_type?: string; received_count: number; sold_count: number;
   stock_count: number; revenue_cents: number; profit_cents: number;
 };
 type Props = { client: SupabaseClient; storeId: string; money: (cents: number) => string };
@@ -162,7 +162,7 @@ export function ManifestsPage({ client, storeId, money }: Props) {
       {!loaded ? <p role="status">{error ? 'Could not load saved manifests.' : 'Loading manifests…'} {error && <button type="button" className="secondary" onClick={() => void load().catch(e => setError(String(e.message || e)))}>Retry</button>}</p> : rows.length === 0 ? <ToolEmpty icon="file" title="No manifests uploaded yet."><p>Upload a manifest above to start tracking inventory and manage your manifests here.</p></ToolEmpty>
         : <div className="manifest-list">{rows.map(row => <details className="manifest-row" key={row.id}>
           <summary><span><strong>{row.name}</strong><small>{row.manifest_on}{row.source ? ` · ${row.source}` : ''}</small></span><b>{row.item_count} items <span aria-hidden="true">›</span></b></summary>
-          <div className="manifest-detail"><p>{backfills[row.id] || (row.line_count ? `${row.line_count} line items saved.` : /\.csv$/i.test(row.storage_path) ? 'Checking stored CSV for line items…' : 'Original file retained. Upload a CSV to add line references.')}</p><div className="manifest-metrics"><span>Received<b>{row.received_count}</b></span><span>Sold<b>{row.sold_count}</b></span><span>In stock<b>{row.stock_count}</b></span><span>Revenue<b>{money(row.revenue_cents)}</b></span><span>Profit<b>{money(row.profit_cents)}</b></span></div><div className="actions"><button type="button" className="secondary" onClick={() => void open(row)}>Open file</button><button type="button" className="secondary" disabled={busy} onClick={() => void changeCount(row)}>Edit item count</button></div></div>
+          <div className="manifest-detail"><p>{backfills[row.id] || (row.line_count ? `${row.line_count} line items saved.` : isCsvManifestFile(row) ? 'Checking stored CSV for line items…' : 'Original file retained. Upload a CSV to add line references.')}</p><div className="manifest-metrics"><span>Received<b>{row.received_count}</b></span><span>Sold<b>{row.sold_count}</b></span><span>In stock<b>{row.stock_count}</b></span><span>Revenue<b>{money(row.revenue_cents)}</b></span><span>Profit<b>{money(row.profit_cents)}</b></span></div><div className="actions"><button type="button" className="secondary" onClick={() => void open(row)}>Open file</button><button type="button" className="secondary" disabled={busy} onClick={() => void changeCount(row)}>Edit item count</button></div></div>
         </details>)}</div>}
       <div className="tool-total-row"><span>Total manifested items</span><strong>{loaded ? total : '—'}</strong></div>
     </ToolCard>

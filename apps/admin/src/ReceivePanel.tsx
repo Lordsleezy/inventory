@@ -2155,6 +2155,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       <div className="receive-modal-card">
         <h3 id="miss-photo-title">{photoCandidate ? 'Confirm product from photo' : photoNeed ? 'More product details needed' : 'Can\'t find this item. Scan with camera?'}</h3>
         <p>{photoCandidate ? photoConflictText : `${photoNeed || 'Take one clear photo of the box or label.'} We\'ll identify the product and show asking prices so you can set the price.`}</p>
+        <ManifestReceiveReference result={manifestReference} />
         {previews[0] && <img src={previews[0]} alt="Photo being identified" style={{ maxWidth: '100%', maxHeight: 180, objectFit: 'contain' }} />}
         {photoIdBusy && <p role="status">{photoIdStatus || 'Identifying product…'}</p>}
         {photoIdError && <p className="alert" role="alert">{photoIdError}</p>}

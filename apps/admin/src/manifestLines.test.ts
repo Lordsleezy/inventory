@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { parseManifestLines, normalizeManifestUpc } from './manifestLines.ts';
 import { parseManifestCsv } from './manifestCount.ts';
 import { manifestDefectWarnings } from './manifestReference.ts';
-import { backfillManifestFiles } from './manifestBackfill.ts';
+import { backfillManifestFiles, isCsvManifestFile } from './manifestBackfill.ts';
 import type { SupabaseClient } from '@supabase/supabase-js';
 const fixture = readFileSync(new URL('../test-fixtures/bstock.csv', import.meta.url), 'utf8');
 
@@ -64,10 +64,15 @@ test('existing CSV files backfill in place; imported lines and originals are not
     { id: 'a', name: 'Load', storage_path: 'a.csv', line_count: 0 },
     { id: 'b', name: 'Already saved', storage_path: 'b.csv', line_count: 174 },
     { id: 'c', name: 'Missing file', storage_path: 'missing.csv', line_count: 0 },
+    { id: 'e', name: 'Extensionless CSV', storage_path: 'store/e/long-upload-name-without-extension', content_type: 'text/csv', line_count: 0 },
     { id: 'd', name: 'PDF', storage_path: 'd.pdf', line_count: 0 },
   ]);
-  assert.deepEqual(downloads, ['a.csv', 'missing.csv']);
-  assert.equal(imports.length, 1);
+  assert.deepEqual(downloads, ['a.csv', 'missing.csv', 'store/e/long-upload-name-without-extension']);
+  assert.equal(imports.length, 2);
   assert.match(states.a, /3 lines saved/);
   assert.match(states.c, /re-upload/);
+  assert.match(states.e, /3 lines saved/);
+  assert.equal(isCsvManifestFile({ storage_path: 'store/a/manifest', content_type: 'text/csv' }), true);
+  assert.equal(isCsvManifestFile({ storage_path: 'store/a/manifest.csv', content_type: 'application/pdf' }), true);
+  assert.equal(isCsvManifestFile({ storage_path: 'store/a/manifest', content_type: 'application/pdf' }), false);
 });
