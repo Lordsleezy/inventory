@@ -1806,7 +1806,9 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           <label>Model<input value={form.model} onChange={e => update('model', e.target.value)} /></label>
           <label>Variant<input value={form.variant} onChange={e => update('variant', e.target.value)} placeholder="Scent, color…" /></label>
           <label>Size<input value={form.size} onChange={e => update('size', e.target.value)} placeholder="Size or measurements" /></label>
-          <label>Category<input value={form.category} onChange={e => update('category', e.target.value)} /></label>
+          <label>Floor category<input value={form.category} onChange={e => update('category', e.target.value)} />
+            <small>Online store categories are set after saving. Floor fills a suggested eBay category when it finds a match; otherwise search the channel categories below.</small>
+          </label>
           <div className="receive-condition-field"><span>Condition</span><div className="receive-chip-row" role="radiogroup" aria-label="Condition">
             {CONDITIONS.map(([value, label]) => <label className={`receive-chip${form.condition === value ? ' on' : ''}`} key={value}>
               <input type="radio" name="receive-condition-main" checked={form.condition === value} onChange={() => update('condition', value)} />{label}
@@ -1922,8 +1924,9 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         {needNoteForScratch && <label className="unit-edit-wide">What is defective / why non-sellable? (required)<textarea rows={2} value={form.conditionNote} onChange={e => update('conditionNote', e.target.value)} /></label>}
 
         <label className={liveMissing.includes('category') ? 'receive-need' : undefined}>
-          Category{liveMissing.includes('category') ? ' (needed to list)' : ''}
+          Floor category{liveMissing.includes('category') ? ' (needed to list)' : ''}
           <input value={form.category} onChange={e => update('category', e.target.value)} />
+          <small>Online store categories are set after saving. Floor fills a suggested eBay category when it finds a match; otherwise search the channel categories below.</small>
         </label>
 
         <label className={liveMissing.includes('brand') ? 'receive-need' : undefined}>
