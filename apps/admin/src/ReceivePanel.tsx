@@ -15,6 +15,7 @@ import { ManifestReceiveReference, useManifestReceiveReference } from './Manifes
 import { BundleReceive } from './BundleReceive';
 const MeasureOnMat = lazy(() => import('./MeasureOnMat').then(module => ({ default: module.MeasureOnMat })));
 import { receiveSpecifics, receiveVariant } from '../../../shared/receive-specifics.mjs';
+import { notForSaleBrandError, receiveMissingFields } from './receive-validation';
 import { CategoryPanel } from './CategoryPanel';
 import { EbaySpecificsPanel } from './EbaySpecificsPanel';
 import { isCompleteReceiveTitle, isStoreLabelBarcode, storeLabelWarning } from '../../../shared/store-barcode.mjs';
@@ -55,6 +56,20 @@ async function copyImageFile(file: File): Promise<File | null> {
 
 function pendingPhotoKey(storeId: string, scanKey: string) {
   return `${storeId}:${scanKey}`;
+}
+
+function manualPhotoSession(storeId: string, rotate = false) {
+  const key = `floor-receive-manual-photo-session:${storeId}`;
+  try {
+    const existing = !rotate ? sessionStorage.getItem(key) : null;
+    if (existing) return existing;
+    const next = `manual-${storeId}-${crypto.randomUUID()}`;
+    sessionStorage.setItem(key, next);
+    return next;
+  } catch {
+    // Without session storage, prefer losing crash recovery over reusing a prior entry's photo.
+    return `manual-${storeId}-${crypto.randomUUID()}`;
+  }
 }
 
 function openPendingPhotoDb(): Promise<IDBDatabase> {
@@ -662,7 +677,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   const choosePhotoFile = useRef<HTMLInputElement>(null);
   const consumedInitialUpc = useRef(false);
   /** Stable key for IndexedDB photo stash (survives camera-app process death on store phones). */
-  const photoSessionKey = useRef(`manual-${Date.now()}`);
+  const photoSessionKey = useRef(manualPhotoSession(storeId));
   const [photoBusy, setPhotoBusy] = useState(false);
 
   function openBarcodeCamera() {
@@ -1028,18 +1043,20 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   function toggleManual() {
     setError(''); setWarning('');
     if (!manual) {
-      photoSessionKey.current = `manual-${storeId}`;
+      photoSessionKey.current = manualPhotoSession(storeId);
       setManual(true);
       return;
     }
     setManual(false);
     setLoadedId(null);
     resetEntry();
+    photoSessionKey.current = manualPhotoSession(storeId, true);
   }
 
   /* ----- validation / completeness ----- */
   type Parsed = { ask: number | null; cost: number | null; dims: (number | null)[] };
   function parse(): Parsed | null {
+    if (doNotList) return { ask: null, cost: null, dims: [null, null, null, null] };
     const ask = cents(form.ask);
     const cost = cents(form.cost);
     if (ask === undefined) { setError('Price must look like 24.99.'); return null; }
@@ -1064,6 +1081,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   }
   /** Listing requirements only (price, condition, category, brand, UPC, weight+dims, item specifics, photo). */
   function missingFor(p: Parsed, hasAcceptedStockPhoto = Boolean(stockPhotoPath)): string[] {
+    if (doNotList) return receiveMissingFields({ doNotList: true, brandReady: brandReady(), hasPhoto: true });
     const out: string[] = [];
     if (!pos(p.ask)) out.push('price');
     if (!form.condition) out.push('condition');
@@ -1072,11 +1090,12 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     if (!brandReady()) out.push('brand');
     if (!upcReady()) out.push('UPC');
     if (!form.model.trim()) out.push('item specifics');
-    if (!files.length && !hasAcceptedStockPhoto && !(!manual && merged?.images?.[0])) out.push('photo');
-    return out;
+    return receiveMissingFields({ doNotList: false, brandReady: brandReady(), otherGaps: out,
+      hasPhoto: Boolean(files.length || hasAcceptedStockPhoto || (!manual && merged?.images?.[0])) });
   }
   const liveMissing = (() => {
     if (doNotShip) return [];
+    if (doNotList) return receiveMissingFields({ doNotList: true, brandReady: brandReady(), hasPhoto: true });
     const a = cents(form.ask);
     const out: string[] = [];
     if (!pos(typeof a === 'number' ? a : null)) out.push('price');
@@ -1086,8 +1105,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     if (!brandReady()) out.push('brand');
     if (!upcReady()) out.push('UPC');
     if (!form.model.trim()) out.push('item specifics');
-    if (!files.length && !stockPhotoPath && !(!manual && merged?.images?.[0])) out.push('photo');
-    return out;
+    return receiveMissingFields({ doNotList: false, brandReady: brandReady(), otherGaps: out,
+      hasPhoto: Boolean(files.length || stockPhotoPath || (!manual && merged?.images?.[0])) });
   })();
 
   /* ----- finish ----- */
@@ -1096,28 +1115,30 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     event?.preventDefault();
     setError(''); setWarning(''); setSaved([]);
     if (!manual && !current) { setError('Scan a UPC first, or use Enter manually.'); return; }
-    if (photoVerifyPending) { setError('Choose whether the photo or barcode product is correct before saving.'); setDialog('miss-photo'); return; }
-    if (photoTitleConfirmed && !isCompleteReceiveTitle(form.title, form.brand)) {
+    const brandError = notForSaleBrandError(doNotList, brandReady());
+    if (brandError) { setError(brandError); return; }
+    if (!doNotList && photoVerifyPending) { setError('Choose whether the photo or barcode product is correct before saving.'); setDialog('miss-photo'); return; }
+    if (!doNotList && photoTitleConfirmed && !isCompleteReceiveTitle(form.title, form.brand)) {
       setError('Enter the full product title, including the brand and what the item is, before saving.'); return;
     }
     if (!manual && current?.status === 'loading') { setError('Lookup still running…'); return; }
     const quantity = manual ? Number(form.quantity) : 1;
     if (!Number.isInteger(quantity) || quantity < 1 || quantity > 100) { setError('Quantity must be 1–100.'); return; }
     if (quantity !== 1) { setError('Receive one unit at a time so each unit gets its own photo and location.'); return; }
-    if (!files.length && !stockPhotoPath && stockPhotoBusy) { setError('Stock photo is still preparing. Wait a moment and try again.'); return; }
-    let acceptedStockPhotoPath = stockPhotoPath;
-    if (!files.length && !acceptedStockPhotoPath && !manual && merged?.images?.[0] && current?.upc) {
+    let acceptedStockPhotoPath = doNotList ? '' : stockPhotoPath;
+    if (!doNotList && !files.length && !acceptedStockPhotoPath && stockPhotoBusy) { setError('Stock photo is still preparing. Wait a moment and try again.'); return; }
+    if (!doNotList && !files.length && !acceptedStockPhotoPath && !manual && merged?.images?.[0] && current?.upc) {
       acceptedStockPhotoPath = await stageStockPhoto(String(merged.images[0]), current.upc, current.id) || '';
     }
-    if (!files.length && !acceptedStockPhotoPath) { setError('Stock photo could not be saved. Retry it or add a unit photo before saving.'); return; }
-    if (photoBusy) { setError('Wait for the unit photo to finish uploading.'); return; }
-    if (files.some(file => (file.type && !file.type.startsWith('image/')) || file.size > PHOTO_MAX_BYTES)) {
+    if (!doNotList && !files.length && !acceptedStockPhotoPath) { setError('Stock photo could not be saved. Retry it or add a unit photo before saving.'); return; }
+    if (photoBusy && files.length) { setError('Wait for the unit photo to finish uploading.'); return; }
+    if (!doNotList && files.some(file => (file.type && !file.type.startsWith('image/')) || file.size > PHOTO_MAX_BYTES)) {
       setError('Photos must be images under 15 MB each.'); return;
     }
-    if (files.some(f => f.size < PHOTO_MIN_BYTES)) { setError('One of the photos looks empty or too small. Retake it.'); return; }
+    if (!doNotList && files.some(f => f.size < PHOTO_MIN_BYTES)) { setError('One of the photos looks empty or too small. Retake it.'); return; }
     const parsed = parse();
     if (!parsed) return;
-    if (!dupAck && dups && dups.count > 0) { setError('Tap Add another unit to confirm this is a new physical item.'); return; }
+    if (!doNotList && !dupAck && dups && dups.count > 0) { setError('Tap Add another unit to confirm this is a new physical item.'); return; }
     const gaps = missingFor(parsed, Boolean(acceptedStockPhotoPath));
     if (doNotList) {
       if (gaps.length) {
@@ -1151,9 +1172,9 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     const receiveStarted = performance.now();
     try {
       const quantity = manual ? Number(form.quantity) : 1;
-      if (!files.length && !acceptedStockPhotoPath) throw new Error('Add a photo before saving.');
+      if (!doNotList && !files.length && !acceptedStockPhotoPath) throw new Error('Add a photo before saving.');
       const unitPhotoPaths = [...(acceptedStockPhotoPath ? [acceptedStockPhotoPath] : []), ...stagedPhotoPaths];
-      if (!unitPhotoPaths.length) throw new Error('The unit photo did not finish uploading. Retry the photo.');
+      if (!doNotList && !unitPhotoPaths.length) throw new Error('The unit photo did not finish uploading. Retry the photo.');
       const holdLabel = hold ? (HOLD_REASONS.find(([k]) => k === hold.reason)?.[1] || hold.reason) : '';
       const notes = [
         isDefectiveCondition(form.condition) ? `Defective/non-sellable: ${form.conditionNote.trim()}` : '',
@@ -1172,8 +1193,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         p_description: form.description.trim() || null,
         p_condition: form.condition || null,
         p_test_status: form.testStatus || null,
-        p_ask_cents: hold ? null : parsed.ask, // held units never get an ask; priced incomplete keeps ask
-        p_cost_cents: staffMode ? null : parsed.cost,
+        p_ask_cents: hold || doNotList ? null : parsed.ask, // held and store-only units never get an ask
+        p_cost_cents: staffMode || doNotList ? null : parsed.cost,
         p_notes: notes || null,
         p_upc: form.noUpc ? null : (form.upc.trim() || current?.upc || null),
         p_shippable: form.shippable || 'auto',
@@ -1186,7 +1207,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       const data = await commitReceive(client, storeId, {
         p_request: receiveRequest.current, p_fields: fields, p_photos: unitPhotoPaths,
         p_extras: { location: selectedLocation || null, manifest: staffMode ? null : manifestId || null,
-          dns: !staffMode && doNotShip, do_not_list: !staffMode && doNotList,
+          dns: !staffMode && doNotShip, do_not_list: doNotList,
           channels: staffMode ? [] : channels, enrichment,
           stock_photo_paths: acceptedStockPhotoPath ? [acceptedStockPhotoPath] : [],
           photo_identity_confirmed: photoTitleConfirmed,
@@ -1198,9 +1219,9 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         server_ms: data.server_ms, server_steps:data.server_steps, tap_to_commit_ms: Math.round(performance.now()-saveTappedAt.current), sku: skus[0] });
       try { sessionStorage.setItem('floor:last-receive-timing', JSON.stringify({ tappedAt: saveTappedAt.current, committedAt: performance.now(), server_ms: data.server_ms })); } catch { /* diagnostics cannot interrupt a saved item */ }
       receiveRequest.current = crypto.randomUUID();
-      void clearPendingPhotos(pendingPhotoKey(storeId, photoSessionKey.current));
-
-      void fetch(floorFunctionUrl('receive-finish'), { method: 'POST', headers: { Authorization: `Bearer ${accessToken}` } }).catch(() => {});      // Remember product data for "Add another unit".
+      await clearPendingPhotos(pendingPhotoKey(storeId, photoSessionKey.current));
+      if (!doNotList) void fetch(floorFunctionUrl('receive-finish'), { method: 'POST', headers: { Authorization: `Bearer ${accessToken}` } }).catch(() => {});
+      // Remember product data for "Add another unit".
       const seed: Partial<Form> = {
         brand: brandValue, unbranded: form.unbranded, noUpc: form.noUpc,
         model: form.model, variant: form.variant, size: form.size,
@@ -1231,6 +1252,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           };
         });
         setFiles([]); setStagedPhotoPaths([]); setDups(null); setDupAck(false);
+        photoSessionKey.current = manualPhotoSession(storeId, true);
         setChannels([]);
         setDoNotList(false); setDns(false);
       } else {
@@ -1648,10 +1670,11 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   // Manual entry: restore any stashed photos after a camera-app kill.
   useEffect(() => {
     if (!manual) return;
-    photoSessionKey.current = `manual-${storeId}`;
+    const sessionKey = manualPhotoSession(storeId);
+    photoSessionKey.current = sessionKey;
     let alive = true;
-    void loadPendingPhotos(pendingPhotoKey(storeId, photoSessionKey.current)).then(restored => {
-      if (!alive || !restored.length) return;
+    void loadPendingPhotos(pendingPhotoKey(storeId, sessionKey)).then(restored => {
+      if (!alive || photoSessionKey.current !== sessionKey || !restored.length) return;
       setFiles(prev => (prev.length ? prev : restored));
     });
     return () => { alive = false; };
@@ -1660,7 +1683,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   const showForm = manual || (current && current.status !== 'loading' && loadedId === current.id);
   const waiting = queue.length - (current ? 1 : 0);
   const hasFiles = files.length > 0;
-  const needNoteForScratch = isDefectiveCondition(form.condition);
+  const needNoteForScratch = !doNotList && isDefectiveCondition(form.condition);
   const needsEbayBox = channels.includes('ebay') && [form.length,form.width,form.height,form.weight].some(value => !pos(Number(value.trim())));
   const holdReady = reason !== 'other' || reasonNote.trim().length > 0;
   const catalogMiss = !manual && current?.status === 'ready' ? catalogMissMessage(result) : null;
@@ -1715,7 +1738,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       </div>
       {!appChrome && (
         <div>
-          <p>{manual ? 'Manual entry: fill listing fields, add a photo, then receive.' : 'Scan a UPC, edit the listing fields, add a photo, then receive.'}</p>
+          <p>{doNotList ? 'Store-only: brand is required; all other fields and the photo are optional.' : manual ? 'Manual entry: fill listing fields, add a photo, then receive.' : 'Scan a UPC, edit the listing fields, add a photo, then receive.'}</p>
           <button type="button" className="text-button" onClick={toggleManual}>{manual ? '← Back to scan' : 'Enter manually'}</button>
         </div>
       )}
@@ -1772,7 +1795,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       {!storePhoneMode && <div className="receive-channel-card">
         {!staffMode && <ChannelPicker value={channels} onChange={setChannels} disabled={doNotList || doNotShip} upc={form.noUpc ? '' : (form.upc || current?.upc || '')} />}
         {!staffMode && <label className="mboard-inline"><input type="checkbox" checked={doNotShip} disabled={dnsRequired} onChange={e => { setDns(e.target.checked); if (e.target.checked) setChannels([]); }} /> DNS — Do not ship</label>}
-        {!staffMode && <label className="mboard-inline"><input type="checkbox" checked={doNotList} onChange={e => { setDoNotList(e.target.checked); if (e.target.checked) setChannels([]); }} /> Do not list for sale</label>}
+        <label className="mboard-inline"><input type="checkbox" checked={doNotList} onChange={e => { setDoNotList(e.target.checked); if (e.target.checked) setChannels([]); }} /> Do not list for sale</label>
         {doNotShip && <small>Store / website pickup only. No marketplace listings.</small>}
       </div>}
       {!manual && <div className="receive-confirm">
@@ -1788,12 +1811,12 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
               <span>{stockPhotoBusy ? 'Saving stock photo…' : stockPhotoPath ? '✓ Stock photo · ready' : merged?.images?.[0] ? stockPhotoError ? 'Stock photo · tap save to retry' : 'Stock photo available' : 'Stock photo unavailable'}</span>
             </div>
             <button type="button" className={`receive-unit-photo-tile${files.length ? ' has-photo' : ''}`} disabled={photoBusy || busy} onClick={() => confirmPhotoFile.current?.click()}>
-              {previews[0] ? <img src={previews[0]} alt="Actual unit photo" /> : <><strong>📷 Add photo</strong><span>{stockPhotoPath ? 'optional' : merged?.images?.[0] ? 'stock photo can save this unit' : 'required to save'}</span></>}
+              {previews[0] ? <img src={previews[0]} alt="Actual unit photo" /> : <><strong>📷 Add photo</strong><span>{doNotList ? 'optional for store-only' : stockPhotoPath ? 'optional' : merged?.images?.[0] ? 'stock photo can save this unit' : 'required to save'}</span></>}
               {photoBusy && <span>Uploading…</span>}
             </button>
           </> : <>
             <button type="button" className={`receive-unit-photo-tile${files.length ? ' has-photo' : ''}`} disabled={photoBusy || busy} onClick={() => confirmPhotoFile.current?.click()}>
-              {previews[0] ? <img src={previews[0]} alt="Actual unit photo" /> : <><strong>📷 Take photo</strong><span>{stockPhotoPath ? 'Stock photo can save this unit' : 'Required to save'}</span></>}
+              {previews[0] ? <img src={previews[0]} alt="Actual unit photo" /> : <><strong>📷 Take photo</strong><span>{doNotList ? 'Optional for store-only' : stockPhotoPath ? 'Stock photo can save this unit' : 'Required to save'}</span></>}
               {photoBusy && <span>Uploading…</span>}
             </button>
             <div className="receive-stock-photo">{merged?.images?.[0] ? <img src={merged.images[0]} alt="Catalog stock photo, not the unit" /> : <div aria-hidden="true">▯</div>}<span>Stock photo</span></div>
@@ -1877,7 +1900,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           <div className="receive-channel-card">
             {!staffMode && <ChannelPicker value={channels} onChange={setChannels} disabled={doNotList || doNotShip} upc={form.noUpc ? '' : (form.upc || current?.upc || '')} />}
             {!staffMode && <label className="mboard-inline"><input type="checkbox" checked={doNotShip} disabled={dnsRequired} onChange={e => { setDns(e.target.checked); if (e.target.checked) setChannels([]); }} /> DNS — Do not ship</label>}
-            {!staffMode && <label className="mboard-inline"><input type="checkbox" checked={doNotList} onChange={e => { setDoNotList(e.target.checked); if (e.target.checked) setChannels([]); }} /> Do not list for sale</label>}
+            <label className="mboard-inline"><input type="checkbox" checked={doNotList} onChange={e => { setDoNotList(e.target.checked); if (e.target.checked) setChannels([]); }} /> Do not list for sale</label>
             {doNotShip && <small>Store / website pickup only. No marketplace listings.</small>}
           </div>
           <details className="receive-confirm-details"><summary>Product dimensions · {[form.productDepth,form.productWidth,form.productHeight].every(Boolean)
@@ -1895,13 +1918,13 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           <details className="receive-confirm-details"><summary>Description {form.description ? '· filled' : '· optional'}</summary><textarea rows={3} value={form.description} onChange={e => update('description',e.target.value)} /></details>
           {!staffMode && <BundleReceive client={client} lastReceived={saved[0]} onSaved={onSaved} />}
           </details>}
-          {liveMissing.length > 0 && <small>Missing: {liveMissing.join(', ')} · saves to Unfinished</small>}
+          {liveMissing.length > 0 && <small>{doNotList ? 'Brand required before saving.' : `Missing: ${liveMissing.join(', ')} · saves to Unfinished`}</small>}
           {needsEbayBox && <small className="receive-confirm-note">Needs box size for eBay. You can save now and measure it later.</small>}
           {files.length > 0 && !stagedPhotoPaths.length && !photoBusy && !photoIdBusy && <button type="button" className="secondary" onClick={() => {
             setPhotoBusy(true); setError('');
             void stageUnitPhotos(files).then(setStagedPhotoPaths).catch(e => setError(`Photo upload failed: ${errText(e)}`)).finally(() => setPhotoBusy(false));
           }}>Retry photo upload</button>}
-          <button className="receive-save-next" type="submit" disabled={busy || photoBusy || stockPhotoBusy || photoIdBusy || !hasAnyPhoto || (dups !== null && dups.count > 0 && !dupAck)}>{busy ? 'Saving…' : photoBusy || stockPhotoBusy || photoIdBusy ? 'Preparing photo…' : hasCatalogPhoto && !files.length && !stockPhotoPath ? 'Use stock photo & save' : hasAnyPhoto ? 'Save & next' : '📷 Take a photo to save'}</button>
+          <button className="receive-save-next" type="submit" disabled={busy || (doNotList ? (photoBusy && hasAnyPhoto) : photoBusy || stockPhotoBusy || photoIdBusy || !hasAnyPhoto) || (dups !== null && dups.count > 0 && !dupAck)}>{busy ? 'Saving…' : doNotList ? 'Save store-only unit' : photoBusy || stockPhotoBusy || photoIdBusy ? 'Preparing photo…' : hasCatalogPhoto && !files.length && !stockPhotoPath ? 'Use stock photo & save' : hasAnyPhoto ? 'Save & next' : '📷 Take a photo to save'}</button>
         </div>
       </div>}
 
@@ -1933,7 +1956,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         </label>
 
         <label className={liveMissing.includes('brand') ? 'receive-need' : undefined}>
-          Brand{liveMissing.includes('brand') ? ' (needed to list)' : ''}
+          Brand{liveMissing.includes('brand') ? (doNotList ? ' (required to save)' : ' (needed to list)') : ''}
           <input value={form.unbranded ? 'Unbranded' : form.brand} disabled={form.unbranded} onChange={e => update('brand', e.target.value)} />
         </label>
         <label className="mboard-inline">
@@ -2107,7 +2130,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
               : `Missing for listing: ${liveMissing.join(', ')}. You can still receive; incomplete units land in Needs attention.`}
       </p>
       <div className="actions">
-        <button disabled={busy || photoBusy || stockPhotoBusy || photoIdBusy || !hasAnyPhoto || (dups !== null && dups.count > 0 && !dupAck)}>{busy ? 'Receiving…' : stockPhotoBusy || photoIdBusy ? 'Preparing photo…' : hasCatalogPhoto && !files.length && !stockPhotoPath ? 'Use stock photo & receive' : hasAnyPhoto ? 'Finish & receive' : 'Take a photo to save'}</button>
+        <button disabled={busy || (doNotList ? (photoBusy && hasAnyPhoto) : photoBusy || stockPhotoBusy || photoIdBusy || !hasAnyPhoto) || (dups !== null && dups.count > 0 && !dupAck)}>{busy ? 'Receiving…' : doNotList ? 'Receive store-only unit' : stockPhotoBusy || photoIdBusy ? 'Preparing photo…' : hasCatalogPhoto && !files.length && !stockPhotoPath ? 'Use stock photo & receive' : hasAnyPhoto ? 'Finish & receive' : 'Take a photo to save'}</button>
         {!manual && current && <button type="button" className="secondary" disabled={busy} onClick={skipCurrent}>Skip this scan</button>}
       </div>
       </details>
