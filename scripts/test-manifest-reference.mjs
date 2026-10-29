@@ -94,8 +94,14 @@ test('manifest upload, lookup, store isolation, and server permissions', { timeo
     await assert.rejects(db.query('select public.portal_set_manifest_count($1,10)', [id]), /portal_access_denied/);
     await assert.rejects(db.query('select public.portal_import_manifest_lines($1,$2::jsonb)', [id, JSON.stringify(fixture)]), /portal_access_denied/);
     await assert.rejects(create('30000000-0000-0000-0000-000000000009',fixture), /portal_access_denied/);
+    await assert.rejects(db.query('select public.staff_receive_unit(p_cost_cents => 100)'), /not_manager/);
+    await assert.rejects(db.query("insert into storage.objects(bucket_id,name) values ('floor-manifests',$1)", [`${store}/clerk.csv`]), /row-level security/);
     await login(outsider);
     assert.equal(await ref('096801681609'), null);
+    await db.exec('reset role');
+    await db.query('update public.staff set store_id=$1 where user_id=$2', [otherStore,admin]);
+    await login(admin);
+    assert.equal((await ref('096801681609')).retail_cents, 3000, 'admin reference uses the portal store, matching Receive');
     await login('');
     await assert.rejects(ref('096801681609'), /staff_access_denied/);
     // Read-only lookup creates no units and changes no item prices, costs, or conditions.

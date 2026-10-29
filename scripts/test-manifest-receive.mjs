@@ -17,10 +17,11 @@ const { outputFiles } = await build({
           if (scenario.delayed) return new Promise(resolve => { window.__release = () => resolve({ data: scenario.reference }); });
           return { data: scenario.reference, error: scenario.failed ? { message: 'unavailable' } : null };
         }
-        if (name === 'portal_receive_options') return { data: { next_sku: '10001', categories: ['Home'], conditions: ['New'], test_statuses: ['untested'] } };
+        if (name === 'portal_receive_options' || name === 'staff_receive_options') return { data: { next_sku: '10001', categories: ['Home'], conditions: ['New'], test_statuses: ['untested'] } };
         return { data: null };
       },
-      from: () => {
+      from: table => {
+        window.__calls.push({ table });
         const chain = new Proxy({}, { get: (_, key) => key === 'then' ? resolve => resolve({ data: [] }) : () => chain });
         return chain;
       },
@@ -32,14 +33,16 @@ const { outputFiles } = await build({
         : { amazon: { found: true }, merged: { title: 'Catalog Brand Model Lamp', brand: 'Catalog Brand', model: 'Catalog Model', category: 'Home' } }), { status: 200 });
       return new Response(JSON.stringify({ ok: true, price: { count: 0 }, fields: [], aspects: [] }), { status: 200 });
     };
-    createRoot(document.getElementById('root')).render(<ReceivePanel client={client} storeId="10000000-0000-0000-0000-000000000001" accessToken="test-only" onSaved={() => {}} initialUpc="096801681609" />);
+    createRoot(document.getElementById('root')).render(<ReceivePanel client={client} storeId="10000000-0000-0000-0000-000000000001" accessToken="test-only" onSaved={() => {}} staffMode={!!scenario.staff} storePhoneMode={!!scenario.staff} appChrome={!!scenario.staff} initialUpc="096801681609" />);
   ` }, bundle: true, write: false, platform: 'browser', format: 'iife', external: ['@techstark/opencv-js'], jsx: 'automatic', define: { 'import.meta.env': '{}' },
 });
 const browser = await chromium.launch({ headless: true, ...(process.env.MANIFEST_CHROMIUM_PATH ? { executablePath: process.env.MANIFEST_CHROMIUM_PATH } : {}), args: ['--no-sandbox'] });
 const ref = { retail_cents: 4999, manifest_name: 'Oct 28 B-Stock load', manifest_on: '2026-10-28', warnings: [] };
 async function open(scenario) {
   const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
-  await page.setContent('<div id="root"></div>');
+  page.on('pageerror', error => console.error('Receive test page error:', error.message));
+  await page.route('**/*', route => route.fulfill({ contentType: 'text/html', body: '<div id="root"></div>' }));
+  await page.goto('https://floor-receive.test/');
   await page.evaluate(value => { window.__scenario = value; }, scenario);
   await page.addScriptTag({ content: outputFiles[0].text });
   await page.locator('input[placeholder="0.00"]').waitFor();
@@ -78,5 +81,11 @@ try {
   const failed = await open({ reference: null, failed: true });
   await failed.getByText('Manifest reference unavailable. Keep receiving or retry the scan.', { exact: true }).first().waitFor();
   assert.deepEqual(await fields(failed), baselineFields);
+  const staff = await open({ staff: true, reference: { ...ref, warnings: [{ manifest_name: ref.manifest_name, total_qty: 14, defective_qty: 2, conditions: ['SALVAGE'] }] } });
+  await staff.locator('.manifest-receive-reference').filter({ hasText: 'Manifest retail: $49.99' }).first().waitFor();
+  assert.match(await staff.locator('.manifest-receive-reference').first().innerText(), /2 of 14/);
+  assert.equal(await staff.locator('input[placeholder="0.00"]').inputValue(), '');
+  assert.equal(await staff.locator('input[placeholder="Leave blank if unknown"]').count(), 0, 'clerk cost control stays hidden');
+  assert.equal(await staff.evaluate(() => window.__calls.filter(call => call.table === 'store_manifests').length), 0, 'clerk needs only the narrow reference RPC');
   console.log('PASS: manifest retail, no-match, catalog miss → photo prompt, all fields isolated, SALVAGE/mixed warnings, manual price, slow/failing sidecar.');
 } finally { await browser.close(); }

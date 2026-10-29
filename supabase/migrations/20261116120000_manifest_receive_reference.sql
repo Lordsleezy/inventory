@@ -102,7 +102,7 @@ $$;
 -- lot totals, pallet IDs, TCINs, or financial metadata in this response.
 create or replace function public.portal_manifest_receive_reference(p_upc text)
 returns jsonb language plpgsql stable security definer set search_path = public as $$
-declare v_store uuid := coalesce(public.current_store_id(),public.portal_store_id()); v_result jsonb;
+declare v_store uuid := coalesce(public.portal_store_id(),public.current_store_id()); v_result jsonb;
 begin
   if auth.uid() is null or v_store is null then
     raise exception 'staff_access_denied' using errcode = '42501';
