@@ -6,6 +6,7 @@ on:
       - 'apps/admin/**'
       - 'supabase/migrations/**'
       - 'scripts/test-manifest-*.mjs'
+      - 'scripts/test-receive-multiples.mjs'
       - '.github/workflows/manifest-reference.yml'
   workflow_dispatch:
 jobs:
@@ -33,4 +34,6 @@ jobs:
       - name: Real ReceivePanel interactions with mocked APIs (no live traffic)
         env:
           MANIFEST_PLAYWRIGHT_PATH: /tmp/floor-playwright/node_modules/playwright/index.mjs
-        run: node scripts/test-manifest-receive.mjs
+        run: |
+          node scripts/test-manifest-receive.mjs
+          node scripts/test-receive-multiples.mjs

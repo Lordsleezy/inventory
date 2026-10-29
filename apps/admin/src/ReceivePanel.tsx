@@ -1,3 +1,4 @@
+import { ReceiveQuantity, ReceiveGroupPicker } from './ReceiveQuantity';
 import { ReceiveWorkStatus } from './ReceiveWorkStatus';
 import { scannerLifecycle } from './scannerLifecycle';
 import { commitReceive } from './receiveCommit';
@@ -619,6 +620,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   const [files, setFiles] = useState<File[]>([]);
   const [saved, setSaved] = useState<string[]>([]);
   const [manifestId, setManifestId] = useState('');
+  const [receiveGroup, setReceiveGroup] = useState<string | null>(null);
   const [manifests, setManifests] = useState<{ id: string; name: string; manifest_on: string }[]>([]);
   const [last, setLast] = useState<LastReceived | null>(null);
   const [warning, setWarning] = useState('');
@@ -699,6 +701,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   modalOpen.current = camera || dialog !== null;
 
   const current = manual ? undefined : queue[0];
+  useEffect(()=>{setReceiveGroup(null)},[current?.upc,manual,manual ? form.upc : null]);
   const manifestReference = useManifestReceiveReference(client, manual ? form.upc : current?.upc || '');
   const result = current?.result;
   const merged = result?.merged;
@@ -1122,9 +1125,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       setError('Enter the full product title, including the brand and what the item is, before saving.'); return;
     }
     if (!manual && current?.status === 'loading') { setError('Lookup still running…'); return; }
-    const quantity = manual ? Number(form.quantity) : 1;
+    const quantity = Number(form.quantity);
     if (!Number.isInteger(quantity) || quantity < 1 || quantity > 100) { setError('Quantity must be 1–100.'); return; }
-    if (quantity !== 1) { setError('Receive one unit at a time so each unit gets its own photo and location.'); return; }
     let acceptedStockPhotoPath = doNotList ? '' : stockPhotoPath;
     if (!doNotList && !files.length && !acceptedStockPhotoPath && stockPhotoBusy) { setError('Stock photo is still preparing. Wait a moment and try again.'); return; }
     if (!doNotList && !files.length && !acceptedStockPhotoPath && !manual && merged?.images?.[0] && current?.upc) {
@@ -1171,7 +1173,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     setError('');
     const receiveStarted = performance.now();
     try {
-      const quantity = manual ? Number(form.quantity) : 1;
+      const quantity = Number(form.quantity);
       if (!doNotList && !files.length && !acceptedStockPhotoPath) throw new Error('Add a photo before saving.');
       const unitPhotoPaths = [...(acceptedStockPhotoPath ? [acceptedStockPhotoPath] : []), ...stagedPhotoPaths];
       if (!doNotList && !unitPhotoPaths.length) throw new Error('The unit photo did not finish uploading. Retry the photo.');
@@ -1206,9 +1208,9 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       const enrichment = buildReceiveEnrichment(parsed, hold, doNotList);
       const data = await commitReceive(client, storeId, {
         p_request: receiveRequest.current, p_fields: fields, p_photos: unitPhotoPaths,
-        p_extras: { location: selectedLocation || null, manifest: staffMode ? null : manifestId || null,
+        p_extras: { group_id: receiveGroup, location: selectedLocation || null, manifest: staffMode ? null : manifestId || null,
           dns: !staffMode && doNotShip, do_not_list: doNotList,
-          channels: staffMode ? [] : channels, enrichment,
+          channels: staffMode || quantity > 1 || receiveGroup ? [] : channels, enrichment,
           stock_photo_paths: acceptedStockPhotoPath ? [acceptedStockPhotoPath] : [],
           photo_identity_confirmed: photoTitleConfirmed,
           photo_identity_type: photoTitleConfirmed ? text(photoIdentity?.item_type) : '' },
@@ -1268,7 +1270,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       if (selectedLocation) {
         try { localStorage.setItem(`floor:last-receive-location:${storeId}`, selectedLocation); } catch { /* optional device preference */ }
       }
-      setSaved(skus);
+      setSaved(skus); setReceiveGroup(null);
       onSaved();
       void loadOptions().catch(() => setWarning(w => `${w} Refresh Receive to see the next suggested SKU.`.trim()));
       focusUpc();
@@ -1772,10 +1774,16 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     {!manual && current?.status === 'loading' && <div className="empty">Looking up {current.upc}…</div>}
 
     {showForm && <form id={appChrome ? 'receive-app-form' : undefined} onSubmit={e => void finish(e)}>
+      <ReceiveQuantity value={form.quantity} onChange={value=>update('quantity',value)} disabled={busy} />
+      {(Number(form.quantity)>1 || receiveGroup) && <p role="status">Intake only: these units will not be published to any channel.</p>}
+      <ReceiveGroupPicker client={client} upc={manual ? form.upc : current?.upc || ''} selected={receiveGroup} onChoose={group=>{
+        setReceiveGroup(group?.id || null);
+        if(group){setForm(prev=>({...prev,...Object.fromEntries(Object.entries(group.fields).filter(([key])=>!staffMode||key!=='cost').map(([key,v])=>[key,v==null?'':String(v)])),quantity:prev.quantity}));setDupAck(true);}
+      }} />
       {dups && dups.count > 0 && <div className="receive-dup" role="status">
         <strong>You have {dups.count} of these</strong>{dups.skus.length ? <> (SKU {dups.skus.slice(0, 8).join(', ')}{dups.skus.length > 8 ? '…' : ''})</> : null}
         {!dupAck ? <> <button type="button" className="secondary" onClick={confirmDup}>Add another unit</button></> : <span className="tag on">confirmed — new unit</span>}
-        <p>A new unit gets a new SKU and needs its own photo and condition.</p>
+        <p>Each received unit gets a new SKU. Confirm that the batch shares the same condition and representative photos.</p>
       </div>}
 
       {!manual && current?.status === 'error' && <div className="alert" role="alert">
@@ -2029,7 +2037,6 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           />
         </label>
 
-        {manual && <label>Quantity<input type="number" min="1" max="100" step="1" value={form.quantity} onChange={e => update('quantity', e.target.value)} required /></label>}
         <label className="unit-edit-wide">
           Title
           <input

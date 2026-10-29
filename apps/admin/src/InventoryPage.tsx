@@ -1,3 +1,4 @@
+import { ReceiveGroupRow, type GroupedInventory } from './ReceiveGroupRow';
 import { useEffect, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { ReceivePanel } from './ReceivePanel';
@@ -16,7 +17,7 @@ import { inventoryMissingText } from './inventoryMissing';
 import { InventoryTotals } from './InventoryTotals';
 import { INVENTORY_BUCKET_LABELS, inventoryBucketStatus, type InventoryBucket } from './totalsMath';
 
-type Row = {
+type Row = GroupedInventory & {
   sku: string; brand: string; model: string; title: string; condition: string | null;
   ask_cents: number | null; acquisition_cost_cents: number | null; state: string;
   received_at: string; photo_path: string | null; photo_count: number;
@@ -28,7 +29,7 @@ type Listing = { channel: string; status: string; listing_id: string | null };
 type Photo = { id: number; path: string; is_primary: boolean };
 type Sale = { sold_at: string; price_cents: number; actor_name: string; receipt_no: string };
 type Detail = { unit: Record<string, unknown>; photos: Photo[]; listings: Listing[]; sales: Sale[] };
-type List = { items: Row[]; totals: { unit_count: number; piece_count?: number; cost_cents?: number; missing_cost?: number } };
+type List = { items: Row[]; totals: { unit_count: number; row_count?: number; piece_count?: number; cost_cents?: number; missing_cost?: number } };
 type Props = {
   client: SupabaseClient; storeId: string; accessToken: string; money: (n: number) => string; stamp: (s: string) => string;
   tab: InventoryTab; onTab: (t: InventoryTab) => void;
@@ -120,7 +121,7 @@ export function InventoryPage({
     let active = true;
     const timer = setTimeout(() => { setLoading(true); setError(''); void (async () => {
       try {
-        const { data, error: e } = await client.rpc('portal_inventory_list_with_locations', {
+        const { data, error: e } = await client.rpc('receive_inventory_list', {
           p_query: query, p_status: pStatus, p_unfinished: pUnfinished,
           p_sort: listTab === 'no-location' ? 'sku' : sort, p_offset: offset, p_limit: 24, p_location: effectiveLocation,
         });
@@ -158,7 +159,7 @@ export function InventoryPage({
 
   const change = (set: () => void) => { set(); setOffset(0); setList(null); };
   const pickTab = (t: InventoryTab) => { setOffset(0); setList(null); onTab(t); };
-  const total = list?.totals.unit_count || 0;
+  const total = list?.totals.row_count ?? list?.totals.unit_count ?? 0;
   return <>
     <header><div><div className="eyebrow">FLOOR INVENTORY</div><h1>Inventory</h1><p>{listTab === 'in-stock' ? 'For-sale units on hand. Click a unit to edit details, price, cost, package size, and photos.' : listTab === 'dns' ? 'Store / website pickup only. Never listed on eBay, Amazon, TikTok Shop or Depop.' : listTab === 'sold' ? (associateBrowseOnly ? 'Sold units by SKU.' : 'Sold units and what they sold for.') : listTab === 'defective' ? 'Not-for-sale units and anything graded Defective. These only need a brand.' : listTab === 'needs-check' ? 'Complete units with no channel checked yet. Open one and tick eBay, Amazon or TikTok Shop.' : listTab === 'unfinished' ? 'For-sale units missing a photo, price, or other required info.' : tab === 'left-store' ? 'Units that left the store without a sale: replacements sent to customers and items given away. Their cost counts against profit and expenses.' : tab === 'receive' ? 'Scan a UPC to look up product data, then receive with a real photo.' : tab === 'lookup-test' ? 'Read-only UPC accuracy test — Amazon vs UPCitemdb. Does not create inventory.' : tab === 'products' ? 'Shared UPC product database — edits stick for future scans. Price/condition stay on each unit.' : tab === 'measure-mat' ? 'Printable 50 mm scale mat for Receive photo measuring.' : ''}</p></div></header>
     <InventoryTotals client={client} variant="desktop" refreshKey={refresh} selected={cardBucket} onSelect={bucket => {
@@ -201,7 +202,7 @@ export function InventoryPage({
     <section className="panel inventory-panel">
       {loading && <p className="hint">Loading inventory…</p>}
       {!loading && list?.items.length === 0 && <div className="empty">{listTab === 'in-stock' && query.trim() ? 'No for-sale units match. Not-for-sale and defective units are under Defective.' : 'No units match this filter.'}</div>}
-      {list?.items.map(u => { const actions = showDispositionButtons({ isAdmin: canDelete, associateBrowseOnly, inStock: listTab === 'in-stock' && u.state === 'available' });
+      {list?.items.map(u => { if(u.group_id) return <ReceiveGroupRow key={u.group_id} item={u} client={client} admin={canDelete} money={money} onOpen={setSelected} onChanged={()=>{setRefresh(n=>n+1);onCostChanged()}} />; const actions = showDispositionButtons({ isAdmin: canDelete, associateBrowseOnly, inStock: listTab === 'in-stock' && u.state === 'available' });
       const rowButton = <button type="button" className="inventory-row" key={u.sku} disabled={hideMoney} onClick={() => { if (!hideMoney) setSelected(u.sku); }}>
         <span className="inventory-photo">{u.photo_path && urls[u.photo_path] ? <img loading="lazy" src={urls[thumb(u.photo_path)] || urls[u.photo_path]} onError={e => { const fallback = urls[u.photo_path!]; if (e.currentTarget.src !== fallback) e.currentTarget.src = fallback; }} alt="" /> : 'No photo'}</span>
         <span className="inventory-identity"><strong>{name(u)}</strong><small>SKU {u.sku}{u.title && u.title !== name(u) ? ` · ${u.title}` : ''}</small></span>

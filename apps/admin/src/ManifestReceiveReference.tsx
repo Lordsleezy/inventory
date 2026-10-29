@@ -31,6 +31,7 @@ export function ManifestReceiveReference({ result }: { result: ReturnType<typeof
       Manifest retail: {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(reference.retail_cents / 100)}
       <small style={{ display: 'block', fontWeight: 400 }}>from {reference.manifest_name} · {reference.manifest_on}</small>
     </span>
+    {reference.expected != null && <small style={{display:'block'}}>{reference.received || 0} of {reference.expected} received for this UPC</small>}
     {manifestDefectWarnings(reference).map((warning, i) => <span key={i} role="alert" style={{ display: 'block', color: '#b45309', background: '#fff3cd', padding: 10, borderRadius: 8, margin: '6px 0' }}>
       {warning}{reference.warnings.length > 1 ? ` (${reference.warnings[i].manifest_name})` : ''}
     </span>)}
