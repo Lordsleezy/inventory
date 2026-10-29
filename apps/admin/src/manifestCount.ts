@@ -28,6 +28,7 @@ export function parseManifestCsv(source: string): string[][] {
       row.push(cell); rows.push(row); row = []; cell = '';
     } else cell += char;
   }
+  if (quoted) throw new Error('Unclosed quoted field in manifest CSV.');
   if (cell !== '' || row.length) { row.push(cell); rows.push(row); }
   return rows;
 }
@@ -47,3 +48,4 @@ export async function countManifestFile(file: File): Promise<{ count: number; au
   }
   return { count: 0, automatic: false };
 }
+

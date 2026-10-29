@@ -11,6 +11,7 @@ import { floorFunctionUrl } from './floorApi';
 import { reportClientError } from './clientLog';
 import { priceFloorCents } from './scanPricing';
 import { errText } from './errText';
+import { ManifestReceiveReference, useManifestReceiveReference } from './ManifestReceiveReference';
 import { BundleReceive } from './BundleReceive';
 const MeasureOnMat = lazy(() => import('./MeasureOnMat').then(module => ({ default: module.MeasureOnMat })));
 import { receiveSpecifics, receiveVariant } from '../../../shared/receive-specifics.mjs';
@@ -683,6 +684,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   modalOpen.current = camera || dialog !== null;
 
   const current = manual ? undefined : queue[0];
+  const manifestReference = useManifestReceiveReference(client, manual ? form.upc : current?.upc || '');
   const result = current?.result;
   const merged = result?.merged;
   const A = result?.amazon;
@@ -1855,7 +1857,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           {photoPrice?.listings?.[0] && <a className="receive-confirm-source" href={photoPrice.listings[0].url} target="_blank" rel="noreferrer">
             {photoPrice.listings[0].store} · {money(photoPrice.listings[0].price_cents)} · source ↗</a>}
           <div className="receive-confirm-bottom-row">
-            <label>Price<input inputMode="decimal" placeholder="0.00" value={form.ask} onChange={e => update('ask',e.target.value)} /></label>
+            <label>Price<ManifestReceiveReference result={manifestReference} /><input inputMode="decimal" placeholder="0.00" value={form.ask} onChange={e => update('ask',e.target.value)} /></label>
             {!staffMode && <label>Cost<input inputMode="decimal" placeholder="Leave blank if unknown" value={form.cost} onChange={e => update('cost',e.target.value)} /></label>}
           </div>
           <div className="receive-location-card"><label>Location<select value={selectedLocation} onChange={e => setSelectedLocation(e.target.value)}>
@@ -1908,6 +1910,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           Price{liveMissing.includes('price')
             ? ' (needed to list)'
             : ((retail || photoPrice?.count) ? ' (reference only — enter your selling price)' : ' (enter your selling price)')}
+          <ManifestReceiveReference result={manifestReference} />
           <input inputMode="decimal" placeholder="24.99" value={form.ask} onChange={e => update('ask', e.target.value)} autoComplete="off" />
         </label>
 
@@ -2197,3 +2200,4 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
 
   </section>;
 }
+

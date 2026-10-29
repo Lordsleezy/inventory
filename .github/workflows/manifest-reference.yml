@@ -1,0 +1,36 @@
+name: Manifest receive reference
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - 'apps/admin/**'
+      - 'supabase/migrations/**'
+      - 'scripts/test-manifest-*.mjs'
+      - '.github/workflows/manifest-reference.yml'
+  workflow_dispatch:
+jobs:
+  manifest-reference:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+          cache: npm
+      - run: npm ci
+      - name: CSV and stored-file backfill tests
+        run: node --experimental-strip-types apps/admin/src/manifestLines.test.ts
+      - name: Database RPCs, atomic upload, tenant isolation and clerk permissions
+        run: node --experimental-strip-types scripts/test-manifest-reference.mjs
+      - name: Admin typecheck and local-mode bundle (no deployment)
+        run: |
+          npm exec -w @floor/admin -- tsc --noEmit
+          npm exec -w @floor/admin -- vite build --mode development
+      - name: Install isolated browser test runtime
+        run: |
+          npm install --prefix /tmp/floor-playwright --ignore-scripts --no-audit --no-fund playwright@1.56.1
+          /tmp/floor-playwright/node_modules/.bin/playwright install --with-deps chromium
+      - name: Real ReceivePanel interactions with mocked APIs (no live traffic)
+        env:
+          MANIFEST_PLAYWRIGHT_PATH: /tmp/floor-playwright/node_modules/playwright/index.mjs
+        run: node scripts/test-manifest-receive.mjs
