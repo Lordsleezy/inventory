@@ -1,8 +1,19 @@
 /** Real ReceivePanel in Chromium with mocked catalog and manifest APIs. No live requests. */
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
+import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
+import { parseManifestLines } from '../apps/admin/src/manifestLines.ts';
 const { chromium } = await import(process.env.MANIFEST_PLAYWRIGHT_PATH ? pathToFileURL(process.env.MANIFEST_PLAYWRIGHT_PATH).href : 'playwright');
+const manifestLines = parseManifestLines(await readFile(new URL('../apps/admin/test-fixtures/manifest-receive-upcs.csv', import.meta.url), 'utf8'));
+function fixtureReference(upc) {
+  const matches = manifestLines.filter(line => line.upc_normalized === upc);
+  if (!matches.length) return null;
+  const defective = matches.filter(line => /SALVAGE|DAMAGED|DEFECTIVE|FOR_PARTS/i.test(line.condition));
+  return { retail_cents: matches[0].unit_retail_cents, manifest_name: 'B-Stock 316-unit test manifest', manifest_on: '2026-10-28',
+    warnings: defective.length ? [{ manifest_name: 'B-Stock 316-unit test manifest', total_qty: matches.reduce((n, line) => n + line.qty, 0),
+      defective_qty: defective.reduce((n, line) => n + line.qty, 0), conditions: [...new Set(defective.map(line => line.condition))] }] : [] };
+}
 const { outputFiles } = await build({
   stdin: { resolveDir: process.cwd(), loader: 'tsx', contents: `
     import React from 'react';
@@ -14,8 +25,9 @@ const { outputFiles } = await build({
       rpc: async (name, args) => {
         window.__calls.push({ name, args });
         if (name === 'portal_manifest_receive_reference') {
-          if (scenario.delayed) return new Promise(resolve => { window.__release = () => resolve({ data: scenario.reference }); });
-          return { data: scenario.reference, error: scenario.failed ? { message: 'unavailable' } : null };
+          const reference = scenario.useFixtureReference ? scenario.fixtureReferences?.[args?.p_upc] || null : scenario.reference;
+          if (scenario.delayed) return new Promise(resolve => { window.__release = () => resolve({ data: reference }); });
+          return { data: reference, error: scenario.failed ? { message: 'unavailable' } : null };
         }
         if (name === 'portal_receive_options' || name === 'staff_receive_options') return { data: { next_sku: '10001', categories: ['Home'], conditions: ['New'], test_statuses: ['untested'] } };
         return { data: null };
@@ -28,12 +40,15 @@ const { outputFiles } = await build({
     };
     window.fetch = async (url, options) => {
       window.__calls.push({ url, body: JSON.parse(options?.body || '{}') });
-      if (String(url).includes('upc-lookup')) return new Response(JSON.stringify(scenario.miss
+      if (String(url).includes('upc-lookup')) return new Response(JSON.stringify(scenario.storeLabel
+        ? { store_label: true, true_miss: true, amazon: { found: false }, upcitemdb: { found: false }, merged: { not_found: true } }
+        : scenario.miss
         ? { true_miss: true, amazon: { found: false }, upcitemdb: { found: false }, merged: { not_found: true } }
         : { amazon: { found: true }, merged: { title: 'Catalog Brand Model Lamp', brand: 'Catalog Brand', model: 'Catalog Model', category: 'Home' } }), { status: 200 });
       return new Response(JSON.stringify({ ok: true, price: { count: 0 }, fields: [], aspects: [] }), { status: 200 });
     };
-    createRoot(document.getElementById('root')).render(<ReceivePanel client={client} storeId="10000000-0000-0000-0000-000000000001" accessToken="test-only" onSaved={() => {}} staffMode={!!scenario.staff} storePhoneMode={!!scenario.staff} appChrome={!!scenario.staff} initialUpc="096801681609" />);
+    const initialUpc = Object.prototype.hasOwnProperty.call(scenario, 'initialUpc') ? scenario.initialUpc : '096801681609';
+    createRoot(document.getElementById('root')).render(<ReceivePanel client={client} storeId="10000000-0000-0000-0000-000000000001" accessToken="test-only" onSaved={() => {}} staffMode={!!scenario.staff} storePhoneMode={!!scenario.staff} appChrome={!!scenario.staff} initialUpc={initialUpc} />);
   ` }, bundle: true, write: false, platform: 'browser', format: 'iife', external: ['@techstark/opencv-js'], jsx: 'automatic', define: { 'import.meta.env': '{}' },
 });
 const browser = await chromium.launch({ headless: true, ...(process.env.MANIFEST_CHROMIUM_PATH ? { executablePath: process.env.MANIFEST_CHROMIUM_PATH } : {}), args: ['--no-sandbox'] });
@@ -43,9 +58,19 @@ async function open(scenario) {
   page.on('pageerror', error => console.error('Receive test page error:', error.message));
   await page.route('**/*', route => route.fulfill({ contentType: 'text/html', body: '<div id="root"></div>' }));
   await page.goto('https://floor-receive.test/');
-  await page.evaluate(value => { window.__scenario = value; }, scenario);
+  const fixtureReferences = Object.fromEntries(manifestLines.map(line => [line.upc_normalized, fixtureReference(line.upc_normalized)]));
+  await page.evaluate(value => { window.__scenario = value; }, { ...scenario, fixtureReferences });
   await page.addScriptTag({ content: outputFiles[0].text });
+  await page.locator(scenario.initialUpc === null ? 'input[placeholder="Scan or type · Enter"]' : 'input[placeholder="0.00"]').waitFor();
+  return page;
+}
+async function scan(upc, scenario) {
+  const page = await open({ ...scenario, initialUpc: null });
+  const input = page.getByPlaceholder('Scan or type · Enter');
+  await input.fill(upc);
+  await input.press('Enter');
   await page.locator('input[placeholder="0.00"]').waitFor();
+  await page.waitForFunction(code => window.__calls.some(call => call.name === 'portal_manifest_receive_reference' && call.args?.p_upc === code), upc);
   return page;
 }
 async function fields(page) {
@@ -87,5 +112,24 @@ try {
   assert.equal(await staff.locator('input[placeholder="0.00"]').inputValue(), '');
   assert.equal(await staff.locator('input[placeholder="Leave blank if unknown"]').count(), 0, 'clerk cost control stays hidden');
   assert.equal(await staff.evaluate(() => window.__calls.filter(call => call.table === 'store_manifests').length), 0, 'clerk needs only the narrow reference RPC');
-  console.log('PASS: manifest retail, no-match, catalog miss → photo prompt, all fields isolated, SALVAGE/mixed warnings, manual price, slow/failing sidecar.');
+  for (const isStaff of [false, true]) {
+    for (const testCase of [
+      { upc: '199268613418', price: '$49.99' },
+      { upc: '096801681609', price: '$98.99' },
+      { upc: '810180401883', price: '$49.99', warning: 'SALVAGE' },
+      { upc: '493240033691', price: '$39.99', storeLabel: true },
+    ]) {
+      const page = await scan(testCase.upc, { staff: isStaff, useFixtureReference: true, storeLabel: testCase.storeLabel });
+      await page.locator('.manifest-receive-reference').filter({ hasText: `Manifest retail: ${testCase.price}` }).first().waitFor();
+      if (testCase.storeLabel) await page.getByRole('dialog').waitFor();
+      assert.equal(await page.locator('input[placeholder="0.00"]').inputValue(), '', `${testCase.upc} does not set the selling price`);
+      if (testCase.warning) assert.match(await page.locator('.manifest-receive-reference').first().innerText(), new RegExp(testCase.warning));
+      if (isStaff) assert.equal(await page.locator('input[placeholder="Leave blank if unknown"]').count(), 0, 'clerk cost control stays hidden');
+      await page.close();
+    }
+    const noMatch = await scan('999999999999', { staff: isStaff, useFixtureReference: true });
+    assert.equal(await noMatch.locator('.manifest-receive-reference').count(), 0, 'unlisted UPC has no manifest retail row');
+    await noMatch.close();
+  }
+  console.log('PASS: clerk/admin scan each manifest UPC (including leading-zero and 49-prefix codes), SALVAGE warning, and no-match; all prior receive-sidecar checks pass.');
 } finally { await browser.close(); }
