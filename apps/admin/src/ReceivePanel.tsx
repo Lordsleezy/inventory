@@ -1251,7 +1251,11 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
             title: composeListingTitle(brand, '', unbranded),
           };
         });
-        setFiles([]); setStagedPhotoPaths([]); setDups(null); setDupAck(false);
+        setFiles([]); setStockPhotoPath(''); setStockPhotoError(''); setStagedPhotoPaths([]);
+        setPhotoFill(null); setPhotoIdentity(null); setPhotoCandidate(null); setPhotoConflictText('');
+        setPhotoTitleConfirmed(false); setPhotoVerifyPending(false); setPhotoIdError(''); setPhotoNeed('');
+        setPhotoPrice(null); setPhotoPriceError(''); setPhotoPriceBusy(false); priceRequest.current++;
+        setDups(null); setDupAck(false);
         photoSessionKey.current = manualPhotoSession(storeId, true);
         setChannels([]);
         setDoNotList(false); setDns(false);
