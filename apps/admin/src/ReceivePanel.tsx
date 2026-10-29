@@ -67,7 +67,8 @@ function manualPhotoSession(storeId: string, rotate = false) {
     sessionStorage.setItem(key, next);
     return next;
   } catch {
-    return `manual-${storeId}`;
+    // Without session storage, prefer losing crash recovery over reusing a prior entry's photo.
+    return `manual-${storeId}-${crypto.randomUUID()}`;
   }
 }
 

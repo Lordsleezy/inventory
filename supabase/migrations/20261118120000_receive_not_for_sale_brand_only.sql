@@ -14,7 +14,10 @@ returns trigger language plpgsql security definer set search_path=public,storage
 declare
   paths text[];
   supplied text;
+  stock_paths text[];
+  supplied_stock text;
 begin
+  if new.state not in ('available','reserved','repair') or coalesce(new.qty_on_hand,0)<1 then return new; end if;
   if current_setting('floor.receive_not_for_sale', true) = 'true' then
     if not public.receive_not_for_sale_brand_is_valid(new.brand) then
       raise exception 'Brand required' using errcode='23514';
@@ -24,6 +27,8 @@ begin
     return new;
   end if;
   supplied := nullif(current_setting('floor.receive_photo_paths', true), '');
+  supplied_stock := nullif(current_setting('floor.receive_stock_photo_paths', true), '');
+  stock_paths := case when supplied_stock is null then '{}'::text[] else array(select jsonb_array_elements_text(supplied_stock::jsonb)) end;
   if supplied is not null then
     select array_agg(value) into paths from jsonb_array_elements_text(supplied::jsonb);
   else
@@ -42,8 +47,12 @@ begin
   ) then
     raise exception 'unit_photo_required' using errcode='23514';
   end if;
-  insert into public.photos(store_id, sku, path, original_path, is_primary)
-  select new.store_id, new.sku, p, p, n=1 from unnest(paths) with ordinality t(p,n);
+  if exists(select 1 from unnest(stock_paths) p where not p=any(paths)) then
+    raise exception 'invalid_stock_photo' using errcode='23514';
+  end if;
+  insert into public.photos(store_id, sku, path, original_path, is_primary, source)
+  select new.store_id, new.sku, p, p, n=1, case when p=any(stock_paths) then 'stock' else 'camera' end from unnest(paths) with ordinality t(p,n);
+  if cardinality(stock_paths)>0 then new.has_stock_photos:=true; end if;
   return new;
 end;
 $$;
@@ -60,6 +69,7 @@ declare
   started timestamptz := clock_timestamp();
   checkpoint timestamptz;
   v_timings jsonb;
+  stock_paths text[] := array(select jsonb_array_elements_text(coalesce(p_extras->'stock_photo_paths','[]'::jsonb)));
   v_do_not_list boolean := coalesce((p_extras->>'do_not_list')::boolean, false);
 begin
   if st is null or auth.uid() is null or (not adm and not exists (
@@ -78,12 +88,18 @@ begin
   if coalesce(cardinality(p_photos), 0) = 0 and not v_do_not_list then
     raise exception 'unit_photo_required' using errcode='23514';
   end if;
+  if exists (select 1 from unnest(stock_paths) p where not p=any(p_photos)) then raise exception 'invalid_stock_photo' using errcode='23514'; end if;
   if exists (
     select 1 from unnest(p_photos) p
      where p not like st::text||'/receive/'||auth.uid()::text||'/'||p_request::text||'/%'
         or not exists (select 1 from storage.objects o where o.bucket_id='unit-photos' and o.name=p)
         or exists (select 1 from public.photos ph where ph.path=p)
   ) then raise exception 'invalid_unit_photo' using errcode='23514'; end if;
+  if not adm and p_extras#>'{enrichment,specs,do_not_ship}'='true'::jsonb
+    and public.unit_dns_type(jsonb_populate_record(null::public.units,jsonb_build_object(
+      'brand',p_fields->>'p_brand','model',p_fields->>'p_model','title',p_fields->>'p_title','category',p_fields->>'p_category'))) then
+    p_extras:=p_extras #- '{enrichment,specs,do_not_ship}';
+  end if;
   if not adm and (
     coalesce(p_extras->'channels','[]') <> '[]'::jsonb
     or coalesce((p_extras->>'dns')::boolean,false)
@@ -92,6 +108,7 @@ begin
     or (coalesce(p_extras#>'{enrichment,specs}','{}') ? 'do_not_list' and not v_do_not_list)
   ) then raise exception 'admin_options_forbidden' using errcode='42501'; end if;
   perform set_config('floor.receive_photo_paths', to_jsonb(p_photos)::text, true);
+  perform set_config('floor.receive_stock_photo_paths',to_jsonb(stock_paths)::text,true);
   perform set_config('floor.receive_not_for_sale', case when v_do_not_list then 'true' else '' end, true);
   fun := case when adm then 'portal_receive_unit' else 'staff_receive_unit' end;
   execute 'select public.'||fun||'($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)' into result
@@ -101,6 +118,7 @@ begin
     (p_fields->>'p_length')::numeric, (p_fields->>'p_width')::numeric, (p_fields->>'p_height')::numeric,
     (p_fields->>'p_weight')::numeric, p_fields->>'p_category';
   perform set_config('floor.receive_photo_paths','',true);
+  perform set_config('floor.receive_stock_photo_paths','',true);
   perform set_config('floor.receive_not_for_sale','',true);
   sku := result#>>'{skus,0}';
   v_timings := jsonb_build_object('unit_and_photo_ms',round(extract(epoch from clock_timestamp()-started)*1000));
