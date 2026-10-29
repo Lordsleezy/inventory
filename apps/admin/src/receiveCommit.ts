@@ -5,11 +5,17 @@ export const pendingReceiveKey = (store: string) => `floor:pending-receive:${sto
 
 /** Keep the same request ID after a lost response. The database commits it at most once. */
 export async function commitReceive(client: SupabaseClient, store: string, request: ReceiveRequest) {
-  const key = pendingReceiveKey(store);
+  const legacy = pendingReceiveKey(store);
+  const legacyValue = localStorage.getItem(legacy);
+  if (legacyValue) {
+    const saved = JSON.parse(legacyValue) as ReceiveRequest;
+    localStorage.setItem(legacy + ':' + saved.p_request, legacyValue);
+    localStorage.removeItem(legacy);
+  }
+  const key = legacy + ':' + request.p_request;
   const existing = localStorage.getItem(key);
   if (existing) {
     const pending = JSON.parse(existing) as ReceiveRequest;
-    if (pending.p_request !== request.p_request) throw new Error('Recover the interrupted save shown above before receiving another item.');
     request = pending;
   }
   // If a device cannot persist the recovery record, keep the form open instead of risking a lost receive.

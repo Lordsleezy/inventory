@@ -35,7 +35,10 @@ select throws_ok($q$select public.receive_claim_jobs(null,1)$q$,'42501','service
 select set_config('request.jwt.claim.sub',current_setting('receive_test.clerk'),true);
 select throws_ok($q$select public.receive_commit(current_setting('receive_test.request')::uuid,'{}','{}','{}')$q$,'42501','receive_access_denied','another receiver cannot replay owner request');
 select throws_ok($q$select public.receive_commit(current_setting('receive_test.clerk_request')::uuid,'{}',array[current_setting('receive_test.clerk_photo')],'{"channels":["ebay"]}')$q$,'42501','admin_options_forbidden','clerk cannot enable channels');
-select lives_ok($q$select public.receive_commit(current_setting('receive_test.clerk_request')::uuid,'{"p_title":"Clerk photographed unit"}',array[current_setting('receive_test.clerk_photo')],'{}')$q$,'clerk can receive incomplete photographed stock');
+select throws_ok($q$select public.receive_commit(current_setting('receive_test.clerk_request')::uuid,'{"p_title":"Toothbrush"}',array[current_setting('receive_test.clerk_photo')],'{"enrichment":{"specs":{"do_not_ship":true}}}')$q$,'42501','admin_options_forbidden','clerk cannot manually DNS an ordinary item');
+select throws_ok($q$select public.receive_commit(current_setting('receive_test.clerk_request')::uuid,'{"p_title":"Fridge"}',array[current_setting('receive_test.clerk_photo')],'{"dns":true}')$q$,'42501','admin_options_forbidden','clerk still cannot set admin DNS toggle');
+select lives_ok($q$select public.receive_commit(current_setting('receive_test.clerk_request')::uuid,'{"p_title":"Fridge","p_upc":"836321007035"}',array[current_setting('receive_test.clerk_photo')],'{"enrichment":{"specs":{"do_not_ship":true}}}')$q$,'clerk can receive never-list appliance with legacy automatic DNS');
+select ok((select public.unit_dns(listing_specs) and not shippable from public.units where store_id=current_setting('receive_test.store')::uuid and title='Fridge'),'server enforces appliance DNS for clerk receive');
 select is((select jsonb_array_length(public.receive_work_status())),2,'clerk can see safe receive status');
 select ok(not has_table_privilege('authenticated','public.receive_commits','SELECT'),'raw receiver payloads are not exposed to clerks');
 select ok(not has_table_privilege('authenticated','public.receive_job_audit','SELECT'),'background before-images are service-only');
