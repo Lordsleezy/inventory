@@ -87,6 +87,31 @@ async function handle(event) {
     const sb = serviceClient();
     const deps = supabaseSpecificsDeps(sb, { catalog: catalogProductByGtin, aspectFields: (id) => ebayAspectFields(storeId, id),
       loadLive: (sid, s) => liveSpecificsForUnit(sid, s) });
+    if (body.action === "suggest-category") {
+      let current = await form(sb, storeId, sku);
+      // Category suggestions never enable eBay. Only fill a category for a unit
+      // that is already selected for eBay, and preserve any category already set.
+      if (!current.enabled || current.category_id) return json(200, { ok: true, form: current });
+
+      // Prefer an exact Floor/UPC/live-listing match before a title suggestion.
+      await autofillUnitSpecifics(deps, storeId, sku);
+      current = await form(sb, storeId, sku);
+      if (!current.category_id) {
+        const query = current.item?.title || [current.item?.brand, current.item?.model].filter(Boolean).join(" ");
+        for (const suggestion of await suggestCategories(query).catch(() => [])) {
+          const { data: tax } = await sb.from("channel_taxonomy").select("category_id,path,active,leaf")
+            .eq("channel", "ebay").eq("category_id", suggestion.categoryId).maybeSingle();
+          if (!tax?.active || !tax?.leaf) continue;
+          await ebayAspectFields(storeId, tax.category_id);
+          await deps.saveEbayRow(storeId, sku, { category_id: tax.category_id,
+            source: "auto_suggested", attributes: current.attributes || {} });
+          break;
+        }
+      }
+      current = await form(sb, storeId, sku);
+      if (current.category_id) await autofillUnitSpecifics(deps, storeId, sku);
+      return json(200, { ok: true, form: await form(sb, storeId, sku) });
+    }
     if (body.action === "autofill") {
       const result = await autofillUnitSpecifics(deps, storeId, sku);
       return json(200, { ok: true, result, form: await form(sb, storeId, sku) });

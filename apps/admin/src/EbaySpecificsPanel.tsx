@@ -62,7 +62,7 @@ export function EbaySpecificsPanel({ client, sku, storeId, appMode = false, onSa
     void client.rpc('portal_unit_ebay_specifics', { p_sku: sku }).then(({ data }) => {
       if (active) setCanPick(Boolean((data as { can_pick_category?: boolean } | null)?.can_pick_category));
     });
-    void call('autofill').then((r) => { if (active) show(r.form); })
+    void call('suggest-category').then((r) => { if (active) show(r.form); })
       .catch((e) => { if (active) setError(e instanceof Error ? e.message : String(e)); });
     return () => { active = false; };
   }, [client, sku]);
@@ -208,7 +208,7 @@ export function EbaySpecificsPanel({ client, sku, storeId, appMode = false, onSa
       Review generated description<textarea rows={5} value={generatedDescription} onChange={(e) => { setGeneratedDescription(e.currentTarget.value); onDescription?.(e.currentTarget.value); }} />
     </label>}
     {form && canPick && <div className="ebay-specifics-category">
-      <p className="hint">{form.category_id ? `Category: ${form.path || form.category_id}` : 'No eBay category yet.'}{form.category_id && form.auto_picked ? <em className="aspect-suggested" title="Floor picked this from eBay's suggestion for the title. Look it over; tapping a category yourself clears the tag.">Auto</em> : null}</p>
+      <p className="hint">{form.category_id ? `Category: ${form.path || form.category_id}` : 'Floor could not match an eBay category automatically. Choose a suggestion or search below.'}{form.category_id && form.auto_picked ? <em className="aspect-suggested" title="Floor picked this from eBay's suggestion for the title. Look it over; tapping a category yourself clears the tag.">Auto</em> : null}</p>
       {!form.category_id && picked && !preview && <button type="button" className="ebay-specifics-suggestion" disabled={busy}
         onClick={() => void openCategory(picked)}>Use suggested: {picked.path}</button>}
       <label>{form.category_id ? 'Change eBay category' : 'Search eBay categories'}
