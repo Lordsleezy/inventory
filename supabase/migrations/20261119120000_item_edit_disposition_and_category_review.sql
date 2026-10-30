@@ -16,7 +16,7 @@ returns text[] language sql stable set search_path=public as $$
         and c.sku=u.sku and c.channel='ebay' and c.category_id is not null and c.enabled
         and c.review_reason is not null) as needs_category_review
   )
-  select array_remove(array[
+  select case when public.unit_dns(u.listing_specs) then '{}'::text[] else array_remove(array[
     case when nullif(btrim(coalesce(u.brand,'')),'') is null
       or u.brand ~* '^(generic|unknown|n/?a|does not apply)$' then 'brand' end,
     case when not f.nfs and not f.has_category
@@ -39,7 +39,7 @@ returns text[] language sql stable set search_path=public as $$
     case when not f.nfs and u.listing_specs->>'ebay_review_reason' in
       ('review_hygiene','review_supplement','review_quantity','review_contents','review_bundle',
        'review_stove','review_product','review_condition','review_cosmetic') then u.listing_specs->>'ebay_review_reason' end
-  ],null) from f;
+  ],null) end from f;
 $$;
 revoke all on function public.unit_listing_gaps(public.units) from public,anon,authenticated;
 
