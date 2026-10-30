@@ -28,7 +28,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const confirm = process.argv.includes("--confirm-prod");
 if (process.env.FLOOR_EMERGENCY_DEPLOY !== "yes-paul-approved") {
   fail("manual_deploy_disabled", {
-    hint: "Merge to master is the only production deploy. Paul-approved emergency recovery requires FLOOR_EMERGENCY_DEPLOY=yes-paul-approved.",
+    hint: "Production publishes from the release branch (daily 6:00 Pacific, or Release now). This script stays disabled unless FLOOR_EMERGENCY_DEPLOY=yes-paul-approved.",
   });
 }
 const site = process.env.NETLIFY_SITE_ID || "458b95f4-4adb-4721-97bc-400f8bb97597";

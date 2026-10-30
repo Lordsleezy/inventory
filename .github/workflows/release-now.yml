@@ -1,0 +1,21 @@
+name: Release now
+
+# Manual production release. In the GitHub mobile app:
+# repository → Actions → Release now → Run workflow.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  checks: read
+
+concurrency:
+  group: floor-production-release
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    uses: ./.github/workflows/promote-release.yml
+    secrets: inherit
+    with:
+      reason: manual

@@ -4,15 +4,13 @@ Project **floor**: `https://zoukmsmbztcuyoslvikp.supabase.co`
 
 ## Production migrations
 
-The Supabase CLI is pinned in the root `package.json`. After `npm ci`, run
-`npx supabase login` once, then `npx supabase link --project-ref zoukmsmbztcuyoslvikp`
-in this repo. Review `npx supabase migration list --linked` and
-`npx supabase db push --linked --dry-run --skip-vault` before applying pending
-migrations with `npx supabase db push --linked --skip-vault`. CLI login stays in
-the machine's credential manager; the local project link is ignored by Git.
+Agents do not apply migrations to the live project. The daily release job
+(`scripts/release/promote.mjs`) runs `supabase db push --project-ref zoukmsmbztcuyoslvikp --yes --skip-vault`
+against `master` before it fast-forwards `release`. The Supabase GitHub
+integration's production branch is `release`, not `master`.
 
-GitHub (`Lordsleezy/inventory`, `master`) tracks `migrations/`; the CLI applies
-pending versions to production.
+The Supabase CLI is pinned in the root `package.json`. `npx supabase migration list --project-ref zoukmsmbztcuyoslvikp`
+is read-only and is safe for checking drift. Do not run `supabase db push` against this project from a workstation.
 
 ## After migrate
 

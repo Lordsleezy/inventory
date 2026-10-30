@@ -25,6 +25,9 @@ jobs:
           node-version: "22.18.0"
           cache: npm
 
+      - name: Release plan
+        run: node --test scripts/test-release-plan.mjs
+
       - name: Install npm workspaces
         run: npm ci
 

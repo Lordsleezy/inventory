@@ -1,0 +1,7 @@
+# Production
+
+Merge to master. Never push to or merge into release. Never run netlify deploy, the Netlify CLI deploy, or scripts/deploy-prod-netlify.mjs. Never apply migrations to live. Production updates once a day at 6 AM via the release job, or when Paul runs Release now.
+
+In your report, say "merged to master, ships at the next release" instead of claiming it's live.
+
+The same rules are in `AGENTS.md`.
