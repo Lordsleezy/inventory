@@ -7,6 +7,7 @@ import { ReturnsPage } from './ReturnsPage';
 import { LabelDialog } from './LabelDialog';
 import { errText } from './errText';
 import { loadOrderLocations, locationCompare, locationParts } from './locationOrder';
+import { useVisibleInterval } from './useVisibleInterval';
 
 function channelAllowsLabels(channel?: string | null) {
   const ch = (channel || 'website').toLowerCase();
@@ -152,7 +153,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
       }
     }
   }, [client, storeId]);
-  useEffect(() => { void load(); const t = setInterval(() => { void load(); }, 30000); return () => clearInterval(t); }, [load]);
+  useVisibleInterval(load, 60_000);
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 30000); return () => clearInterval(t); }, []);
 
   async function markShipped(o: WebOrder) {

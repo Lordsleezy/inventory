@@ -43,12 +43,16 @@ export function PickupsScreen() {
   }, []);
 
   useEffect(() => {
-    void load().catch((err) => setError(authErrorMessage(err)));
-    const t = setInterval(() => {
-      setNow(Date.now());
-      void load().catch(() => undefined);
-    }, 30000);
-    return () => clearInterval(t);
+    let timer: number | null = null;
+    const start = () => {
+      if (document.visibilityState !== 'visible' || timer !== null) return;
+      void load().catch((err) => setError(authErrorMessage(err)));
+      timer = window.setInterval(() => { setNow(Date.now()); void load().catch(() => undefined); }, 60_000);
+    };
+    const stop = () => { if (timer !== null) window.clearInterval(timer); timer = null; };
+    const onVisibility = () => document.visibilityState === 'visible' ? start() : stop();
+    start(); document.addEventListener('visibilitychange', onVisibility);
+    return () => { stop(); document.removeEventListener('visibilitychange', onVisibility); };
   }, [load]);
 
   async function handOver(p: Pickup) {

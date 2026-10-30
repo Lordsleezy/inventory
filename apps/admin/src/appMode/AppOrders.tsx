@@ -6,6 +6,7 @@ import { ReturnsPage } from '../ReturnsPage';
 import { errText } from '../errText';
 import { shortError } from './shortError';
 import { loadOrderLocations, locationCompare, locationParts } from '../locationOrder';
+import { useVisibleInterval } from '../useVisibleInterval';
 
 function channelAllowsLabels(channel?: string | null) {
   const ch = (channel || 'website').toLowerCase();
@@ -86,7 +87,7 @@ export function AppOrders({ client, storeId, accessToken, money, stamp }: Props)
     }
   }, [client, storeId]);
 
-  useEffect(() => { void load(); const t = setInterval(() => void load(), 30000); return () => clearInterval(t); }, [load]);
+  useVisibleInterval(load, 60_000);
 
   const buckets = useMemo(() => {
     const list = orders || [];

@@ -1,8 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { reportClientError } from './clientLog';
 import { errText } from './errText';
+import { useVisibleInterval } from './useVisibleInterval';
 
 const functionsBase = (import.meta.env.VITE_FLOOR_FUNCTIONS_URL || 'https://inventoryobi.netlify.app').replace(/\/$/, '');
+
+async function waitForVisible(ms: number) {
+  while (document.visibilityState !== 'visible') {
+    await new Promise<void>((resolve) => {
+      const onVisibility = () => {
+        if (document.visibilityState !== 'visible') return;
+        document.removeEventListener('visibilitychange', onVisibility);
+        resolve();
+      };
+      document.addEventListener('visibilitychange', onVisibility);
+    });
+  }
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 type Fail = string;
 type Summary = {
@@ -154,15 +169,11 @@ export function EbayDraftsPage({ accessToken, userId, money, active }: Props) {
     if (data.backfill) setBackfill(data.backfill);
   }, [accessToken]);
 
-  useEffect(() => { if (!active) return; void load().catch((e) => setError(e.message)); const timer = setInterval(() => { void load().catch(() => undefined); }, 60_000); return () => clearInterval(timer); }, [active, load]);
+  useVisibleInterval(() => { void load().catch(() => undefined); }, 60_000, active);
   useEffect(() => { if (!rows) return; setCounts({ total: rows.length, ready: rows.filter((row) => row.ready && row.status !== 'live').length, needsBox: rows.filter((row) => row.fails.includes('Needs box size')).length, live: rows.filter((row) => row.status === 'live').length }); }, [rows]);
-  useEffect(() => {
-    if (backfill?.status !== 'running') return undefined;
-    const timer = setInterval(() => {
-      void call(accessToken, { action: 'backfill_status' }).then((data) => setBackfill(data.backfill)).catch(() => undefined);
-    }, 8000);
-    return () => clearInterval(timer);
-  }, [accessToken, backfill?.status]);
+  useVisibleInterval(() => {
+    void call(accessToken, { action: 'backfill_status' }).then((data) => setBackfill(data.backfill)).catch(() => undefined);
+  }, 8000, backfill?.status === 'running');
 
   async function run(fn: () => Promise<void>) {
     setBusy(true); setError('');
@@ -196,7 +207,8 @@ export function EbayDraftsPage({ accessToken, userId, money, active }: Props) {
       const pending = new Set<string>(first.queued || []);
       const deadline = Date.now() + 6 * 60_000;
       while (pending.size && Date.now() < deadline) {
-        await new Promise((resolve) => setTimeout(resolve, 2500));
+        await waitForVisible(2500);
+        if (document.visibilityState !== 'visible') continue;
         const status = await call(accessToken, { action: 'push_status', skus: [...pending] });
         for (const row of (status.states || []) as { sku: string; push_state: string | null; status: string; ebay_error: string | null }[]) {
           if (row.push_state === 'done') { results.push({ sku: row.sku, ok: true }); pending.delete(row.sku); }

@@ -58,9 +58,20 @@ export function UnitScreen() {
   }, [admin, online, sku]);
 
   useEffect(() => {
-    void loadEnriched();
-    const timer = window.setInterval(() => void loadEnriched(), 5000);
-    return () => window.clearInterval(timer);
+    let timer: number | null = null;
+    const start = () => {
+      if (document.visibilityState !== 'visible' || timer !== null) return;
+      void loadEnriched();
+      timer = window.setInterval(() => void loadEnriched(), 60_000);
+    };
+    const stop = () => {
+      if (timer !== null) window.clearInterval(timer);
+      timer = null;
+    };
+    const onVisibility = () => document.visibilityState === 'visible' ? start() : stop();
+    start();
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => { stop(); document.removeEventListener('visibilitychange', onVisibility); };
   }, [loadEnriched, cacheEpoch]);
 
   async function editCloud(field: string, value: string | number | null) {

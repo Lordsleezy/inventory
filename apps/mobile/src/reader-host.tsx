@@ -512,6 +512,7 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let stop = false;
+    let timer: number | null = null;
     async function tick() {
       try {
         if (!online) {
@@ -530,11 +531,18 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
         if (!stop) setError(authErrorMessage(err));
       }
     }
-    void tick();
-    const t = setInterval(() => void tick(), 3000);
+    const schedule = () => {
+      if (timer !== null) window.clearInterval(timer);
+      if (stop) return;
+      void tick();
+      timer = window.setInterval(() => void tick(), document.visibilityState === 'visible' ? 3000 : 60_000);
+    };
+    schedule();
+    document.addEventListener('visibilitychange', schedule);
     return () => {
       stop = true;
-      clearInterval(t);
+      if (timer !== null) window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', schedule);
     };
   }, [online, ensureDevice, loadPending, flushPendingCapture]);
 

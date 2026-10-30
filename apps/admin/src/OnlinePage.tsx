@@ -184,8 +184,13 @@ export function OnlinePage({
   }, [period, tab, client]);
 
   useEffect(() => {
-    const quiet = () => { void load({ quiet: true }); };
-    const timer = window.setInterval(quiet, 30000);
+    const quiet = () => { if (document.visibilityState === 'visible') void load({ quiet: true }); };
+    let timer: number | null = null;
+    const start = () => { if (document.visibilityState === 'visible' && timer === null) timer = window.setInterval(quiet, 60_000); };
+    const stop = () => { if (timer !== null) window.clearInterval(timer); timer = null; };
+    const onVisibility = () => { if (document.visibilityState === 'visible') { start(); quiet(); } else stop(); };
+    start();
+    document.addEventListener('visibilitychange', onVisibility);
     const channelLive = client
       .channel('online-board-live')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'sales' }, quiet)
@@ -194,7 +199,8 @@ export function OnlinePage({
       .on('postgres_changes', { event: '*', schema: 'public', table: 'web_orders' }, quiet)
       .subscribe();
     return () => {
-      window.clearInterval(timer);
+      stop();
+      document.removeEventListener('visibilitychange', onVisibility);
       void client.removeChannel(channelLive);
     };
   }, [client]);

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { errText } from './errText';
+import { useVisibleInterval } from './useVisibleInterval';
 
 export type ReturnRow = {
   id: string;
@@ -98,11 +99,7 @@ export function ReturnsPage({ client, storeId, money, stamp }: Props) {
     setRows((data as ReturnRow[]) || []);
   }, [client, filter]);
 
-  useEffect(() => {
-    void load();
-    const t = setInterval(() => void load(), 30000);
-    return () => clearInterval(t);
-  }, [load]);
+  useVisibleInterval(load, 60_000);
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 15000);
     return () => clearInterval(t);
