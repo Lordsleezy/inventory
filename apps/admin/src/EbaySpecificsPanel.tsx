@@ -190,7 +190,7 @@ export function EbaySpecificsPanel({ client, sku, storeId, appMode = false, onSa
       <h3>eBay item specifics</h3><p className="hint">An admin needs to pick this item&apos;s eBay category first.</p></section>;
   }
   return <section className={`ebay-specifics${appMode ? ' app-ebay-specifics' : ''}`} aria-label="eBay item specifics">
-    <h3>eBay item specifics{form?.category_id ? ` · ${missing.length ? `${missing.length} required missing` : 'complete'}` : ''}</h3>
+    <h3>{form?.category_id && missing.length ? `eBay needs: ${missing.map((field) => field.name).join(', ')} for this category` : `eBay item specifics${form?.category_id ? ' · complete' : ''}`}</h3>
     {error && <p className="alert" role="alert">{error}</p>}
     {notice && <p className="hint" role="status">{notice}</p>}
     {form?.category_id && missing.length > 0 && <p className="ebay-specifics-missing" role="status">

@@ -130,7 +130,18 @@ export function UnitEditDrawer({
   const cameraInput = useRef<HTMLInputElement>(null);
   const [viewPhoto, setViewPhoto] = useState<Photo | null>(null);
   const upcInput = useRef<HTMLInputElement>(null);
+  const onlineDetails = useRef<HTMLDetailsElement>(null);
   const set = (key: keyof Form, value: string) => setForm(prev => ({ ...prev, [key]: value }));
+  const jumpToGap = (gap: string) => {
+    if (gap === 'category' || gap === 'category_review' || gap === 'specifics' || gap.startsWith('review_')) {
+      if (onlineDetails.current) onlineDetails.current.open = true;
+      window.setTimeout(() => document.querySelector('.unit-edit-online .ebay-specifics')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 80);
+      return;
+    }
+    const target = gap === 'spec' ? 'unit-package-size' : document.querySelector(`[data-gap-target="${gap}"]`)?.id;
+    if (target) document.getElementById(target)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  };
+  const gapLabel: Record<string,string> = { photo:'photos', price:'price', brand:'brand', condition:'condition', category:'eBay category', category_review:'eBay category review', specifics:'eBay item specifics', spec:'package size for shipping', upc:'UPC', model:'model', title:'title', description:'description' };
   const cancel = () => {
     const initial = fromUnit(unit);
     const hasChanges = JSON.stringify(form) !== JSON.stringify(initial) || latestDescription.current != null;
@@ -382,7 +393,7 @@ export function UnitEditDrawer({
   const notForSale = String(specs.do_not_list || '').toLowerCase() === 'true' || String(specs.hold_reason || '') === 'do_not_list';
   const unsold = ['available', 'reserved', 'repair'].includes(String(unit.state || ''));
   const orderedPhotos = [...photos].sort((a, b) => Number(b.is_primary) - Number(a.is_primary) || (a.sort_order ?? a.id) - (b.sort_order ?? b.id));
-  const statusLabel = notForSale ? 'Not for sale' : String(unit.state || '').replace(/_/g, ' ').replace(/^./, c => c.toUpperCase());
+  const statusLabel = notForSale ? 'Not for sale' : /^\s*(defective|scratch)/i.test(String(unit.condition||'')) ? 'Defective' : String(unit.state || '').replace(/_/g, ' ').replace(/^./, c => c.toUpperCase());
 
   return (
     <div
@@ -405,13 +416,13 @@ export function UnitEditDrawer({
         <ReceiveWorkStatus client={client} accessToken={accessToken} sku={sku} />
         {msg && <p className="hint">{msg}</p>}
         {canDelete && unit.state === 'sold' && <RestoreInventoryButton client={client} sku={sku} onDone={() => { onSaved({ ...unit, state: 'available' }); onClose(); }} />}
-        {missingFields.length > 0 && <p className="inventory-missing" role="status">{inventoryMissingText(missingFields)}. Fill in the fields below and save.</p>}
+        {missingFields.length > 0 && <div className="inventory-missing" role="status"><p>{inventoryMissingText(missingFields)}. Fill in the named fields and save.</p><div className="unit-edit-gap-links">{missingFields.map(gap=><button type="button" className="text-button" key={gap} onClick={()=>jumpToGap(gap)}>Go to {gapLabel[gap] || reviewReasonLabel(gap) || gap}</button>)}</div></div>}
         {missingFields.length === 0 && reviewReason && <p className="hint">eBay listing needs review: {reviewReason}.</p>}
         {reviewReason && canDelete ? <button type="button" className="secondary" disabled={busy} onClick={() => void clearEbayReview()}>I verified this issue · Clear eBay review</button> : null}
 
         <div className="unit-edit-status"><strong>{statusLabel}</strong><span>{locationLabel || String(unit.location || unit.bin || 'Unassigned')}</span></div>
         {canDelete && unsold && <DispositionButtons client={client} sku={sku} money={n => `$${(n / 100).toFixed(2)}`} stamp={s => new Date(s).toLocaleDateString()} className="secondary" onDone={() => { onReadinessChanged?.(); onDeleted?.(); onClose(); }} />}
-        <h3 className={missingFields.includes('photo') ? 'unit-edit-required' : ''}>Photos{missingFields.includes('photo') ? ' · Required' : ''}</h3>
+        <h3 id="unit-edit-photos" className={missingFields.includes('photo') ? 'unit-edit-required' : ''}>Photos{missingFields.includes('photo') ? ' · Required' : ''}</h3>
         <div className="unit-edit-photo-strip">
           {orderedPhotos.map((p, i) => <button type="button" className="unit-edit-photo-open" key={p.id} onClick={() => setViewPhoto(p)} aria-label={`View photo ${i + 1}`}>
             {urls[p.path] ? <img src={urls[p.path]} alt={`Unit ${sku}, photo ${i + 1}`} loading="lazy" /> : <span>Photo unavailable</span>}{(p.is_primary || p.source === 'stock') && <small>{p.source === 'stock' ? 'STOCK' : 'Primary'}</small>}
@@ -447,19 +458,19 @@ export function UnitEditDrawer({
               {lookupBusy ? 'Looking up…' : 'Look up UPC & fill blanks'}
             </button>
           </div>
-          <label className={missingFields.includes('brand') ? 'unit-edit-required' : ''}>Brand<input value={form.brand} onChange={e => set('brand', e.target.value)} />{missingFields.includes('brand') && <small>Required</small>}{form.brand.trim() && form.brand.trim().toLowerCase() === form.title.trim().toLowerCase() && <small className="unit-edit-brand-hint">Looks like a product name, not a brand · <button type="button" onClick={() => set('brand', 'Unbranded')}>No brand</button></small>}</label>
-          <label className={missingFields.includes('model') ? 'unit-edit-required' : ''}>Model<input value={form.model} onChange={e => set('model', e.target.value)} />{missingFields.includes('model') && <small>Required</small>}</label>
-          <label className={`unit-edit-wide${missingFields.includes('title') ? ' unit-edit-required' : ''}`}>Title<input value={form.title} onChange={e => set('title', e.target.value)} />{missingFields.includes('title') && <small>Required</small>}</label>
-          <label className={`unit-edit-wide${missingFields.includes('description') ? ' unit-edit-required' : ''}`}>Description<textarea rows={3} value={form.description} onChange={e => set('description', e.target.value)} />{missingFields.includes('description') && <small>Required</small>}</label>
+          <label data-gap-target="brand" id="unit-edit-brand" className={missingFields.includes('brand') ? 'unit-edit-required' : ''}>Brand<input value={form.brand} onChange={e => set('brand', e.target.value)} />{missingFields.includes('brand') && <small>Required</small>}{form.brand.trim() && form.brand.trim().toLowerCase() === form.title.trim().toLowerCase() && <small className="unit-edit-brand-hint">Looks like a product name, not a brand · <button type="button" onClick={() => set('brand', 'Unbranded')}>No brand</button></small>}</label>
+          <label data-gap-target="model" id="unit-edit-model" className={missingFields.includes('model') ? 'unit-edit-required' : ''}>Model<input value={form.model} onChange={e => set('model', e.target.value)} />{missingFields.includes('model') && <small>Required</small>}</label>
+          <label data-gap-target="title" id="unit-edit-title" className={`unit-edit-wide${missingFields.includes('title') ? ' unit-edit-required' : ''}`}>Title<input value={form.title} onChange={e => set('title', e.target.value)} />{missingFields.includes('title') && <small>Required</small>}</label>
+          <label data-gap-target="description" id="unit-edit-description" className={`unit-edit-wide${missingFields.includes('description') ? ' unit-edit-required' : ''}`}>Description<textarea rows={3} value={form.description} onChange={e => set('description', e.target.value)} />{missingFields.includes('description') && <small>Required</small>}</label>
         </div>
         <h3>Pricing</h3>
         <div className="unit-edit-grid">
-          <label className={missingFields.includes('price') ? 'unit-edit-required' : ''}>Price<input inputMode="decimal" placeholder="24.99" value={form.price} onChange={e => set('price', e.target.value)} />{missingFields.includes('price') && <small>Required</small>}</label>
+          <label data-gap-target="price" id="unit-edit-price" className={missingFields.includes('price') ? 'unit-edit-required' : ''}>Price<input inputMode="decimal" placeholder="24.99" value={form.price} onChange={e => set('price', e.target.value)} />{missingFields.includes('price') && <small>Required</small>}</label>
           {canDelete && <label>Cost<input inputMode="decimal" placeholder="Add actual cost" value={form.cost} onChange={e => set('cost', e.target.value)} /></label>}
         </div>
         <h3>Condition</h3>
         <div className="unit-edit-grid">
-          <label className={missingFields.includes('condition') ? 'unit-edit-required' : ''}>Condition
+          <label data-gap-target="condition" id="unit-edit-condition" className={missingFields.includes('condition') ? 'unit-edit-required' : ''}>Condition
             <select value={form.condition} onChange={e => set('condition', e.target.value)}>
               <option value="">—</option>
               {conditions.map(c => <option key={c} value={c}>{c}</option>)}
@@ -475,7 +486,7 @@ export function UnitEditDrawer({
             </select>
           </label>
         </div>
-        <h3>Shipping &amp; size</h3>
+        <h3 id="unit-package-size">Package size for shipping</h3>
         <div className="unit-edit-grid">
           <label>Shippable
             <select value={form.shippable} onChange={e => set('shippable', e.target.value)}>
@@ -484,13 +495,13 @@ export function UnitEditDrawer({
               <option value="pickup">No — pickup only</option>
             </select>
           </label>
-          <label>Length (in)<input inputMode="decimal" value={form.length} onChange={e => set('length', e.target.value)} /></label>
-          <label>Width (in)<input inputMode="decimal" value={form.width} onChange={e => set('width', e.target.value)} /></label>
-          <label>Height (in)<input inputMode="decimal" value={form.height} onChange={e => set('height', e.target.value)} /></label>
-          <label>Weight (lb)<input inputMode="decimal" value={form.weight} onChange={e => set('weight', e.target.value)} /></label>
+          <div className="unit-edit-wide unit-edit-grid unit-edit-dimensions"><label>Package length (in)<input inputMode="decimal" value={form.length} onChange={e => set('length', e.target.value)} /></label>
+          <label>Package width (in)<input inputMode="decimal" value={form.width} onChange={e => set('width', e.target.value)} /></label>
+          <label>Package height (in)<input inputMode="decimal" value={form.height} onChange={e => set('height', e.target.value)} /></label>
+          <label>Package weight (lb)<input inputMode="decimal" value={form.weight} onChange={e => set('weight', e.target.value)} /></label></div>
         </div>
-        <label className="unit-edit-wide">Notes<textarea rows={3} value={form.notes} onChange={e => set('notes', e.target.value)} /></label>
-        {canDelete && !notForSale && <details className="unit-edit-online"><summary>Selling online</summary><EbaySpecificsPanel client={client} sku={sku} storeId={storeId} appMode={appMode} hideSaveButton onDescription={(t) => { latestDescription.current = t; set('description', t); }} persistRef={specificsPersist} onSaved={onReadinessChanged} /><DnsCheckbox client={client} sku={sku} onChanged={() => onReadinessChanged?.()} /><ChannelCheckboxes key={JSON.stringify(specs.do_not_ship)} client={client} sku={sku} appMode={appMode} /></details>}
+        <label className="unit-edit-wide unit-edit-notes">Notes<textarea rows={3} value={form.notes} onChange={e => set('notes', e.target.value)} /></label>
+        {!notForSale && <details ref={onlineDetails} className="unit-edit-online"><summary>Selling online</summary><EbaySpecificsPanel client={client} sku={sku} storeId={storeId} appMode={appMode} hideSaveButton onDescription={(t) => { latestDescription.current = t; set('description', t); }} persistRef={specificsPersist} onSaved={onReadinessChanged} />{canDelete&&<><DnsCheckbox client={client} sku={sku} onChanged={() => onReadinessChanged?.()} /><ChannelCheckboxes key={JSON.stringify(specs.do_not_ship)} client={client} sku={sku} appMode={appMode} /></>}</details>}
         {canDelete && <UnitDispositionHistory client={client} sku={sku} stamp={s => new Date(s).toLocaleString()} />}
         {canDelete && <button type="button" className="text-button danger unit-edit-delete" disabled={busy || lookupBusy} onClick={() => void removeUnit()}>Delete item</button>}
         {viewPhoto && <div className="unit-photo-lightbox" role="dialog" aria-modal="true" aria-label="Photo controls"><button type="button" className="unit-photo-lightbox-close" onClick={() => setViewPhoto(null)}>Close</button>{urls[viewPhoto.path] && <img src={urls[viewPhoto.path]} alt={`Unit ${sku}`} />}<div><button type="button" disabled={busy} onClick={async () => { const { error: e } = await client.rpc('set_primary_photo', { p_id: viewPhoto.id }); if (e) setError(e.message); else { setViewPhoto(null); onPhotosChanged(); } }}>Make primary</button><button type="button" disabled={busy} onClick={async () => { const { error: e } = await client.rpc('delete_unit_photo', { p_id: viewPhoto.id }); if (e) setError(e.message); else { await client.storage.from('unit-photos').remove([viewPhoto.path]); setViewPhoto(null); onPhotosChanged(); } }}>Delete photo</button><button type="button" className="secondary" disabled={busy} onClick={async () => { const ordered = [...orderedPhotos]; const i = ordered.findIndex(p => p.id === viewPhoto.id); if (i > 0) { [ordered[i - 1], ordered[i]] = [ordered[i], ordered[i - 1]]; const { error: e } = await client.rpc('reorder_unit_photos', { p_sku: sku, p_ids: ordered.map(p => p.id) }); if (e) setError(e.message); else onPhotosChanged(); } }}>Move earlier</button></div></div>}

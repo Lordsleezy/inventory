@@ -840,6 +840,7 @@ html.dark .mboard-progress-bar{background:#2a3340}
 /* Payouts: line-by-line commission math on each sale. */
 .commission-math{width:100%;border-collapse:collapse;margin:8px 0 4px;font-size:.84rem}.commission-math td{padding:2px 0}.commission-math .amt{text-align:right;white-space:nowrap;padding-left:12px;font-variant-numeric:tabular-nums}.commission-math .note{color:#7a5b21;font-size:.76rem;padding-left:10px}.commission-math .absorbed td:first-child{color:#7a5b21}.commission-math .total td{border-top:1px solid #dfe6ea;font-weight:700;padding-top:4px}.commission-math .person td{font-weight:600}
 .inventory-totals{grid-template-columns:repeat(5,minmax(0,1fr))}@media(max-width:750px){.inventory-totals{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.receive-group-match{outline:2px solid #0a84ff;outline-offset:-2px}.receive-group-action{display:grid;gap:10px;max-width:420px;padding:12px 0}.receive-group-action label{display:grid;gap:5px}.unit-edit-gap-links{display:flex;flex-wrap:wrap;gap:5px 12px}.unit-edit-gap-links button{min-height:36px}
 
 .depop-tabs{display:flex;gap:8px;overflow-x:auto;margin:16px 0;border-bottom:1px solid var(--line,#ddd)}
 .depop-tabs button{white-space:nowrap;background:transparent;color:inherit;border:0;border-bottom:2px solid transparent;border-radius:0;padding:10px 12px}
