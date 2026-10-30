@@ -102,7 +102,7 @@ function name(u: Row) {
 
 const MISSING_LABEL: Record<string, string> = {
   photo: 'No photos', price: 'No price', brand: 'No brand', condition: 'No condition', category: 'No category',
-  upc: 'No UPC', spec: 'Needs weight & dimensions', model: 'No model', specifics: 'Missing item specifics', description: 'No description',
+  upc: 'No UPC', spec: 'Package size for shipping', model: 'No model', specifics: 'eBay item specifics', description: 'No description',
 };
 
 function needs(u: Row): string | null {
@@ -329,7 +329,7 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
 
       <div className="app-group">
         {(list?.items || []).map((u, idx) => {
-          if(u.group_id) return <ReceiveGroupRow key={u.group_id} item={u} client={client} admin={fullAccess} money={money} onOpen={onOpen} onChanged={()=>{setList(null);setQueueRefresh(n=>n+1)}} />;
+          if(u.group_id) return <ReceiveGroupRow key={u.group_id} item={u} client={client} admin={fullAccess} money={money} onOpen={onOpen} searchQuery={query} onChanged={()=>{setList(null);setQueueRefresh(n=>n+1)}} />;
           const warn = filter === 'dns' ? null : needs(u);
           const missing = filter === 'not_ready' ? inventoryMissingText(u.missing || []) : null;
           const thumbPath = u.photo_path ? thumb(u.photo_path) : '';

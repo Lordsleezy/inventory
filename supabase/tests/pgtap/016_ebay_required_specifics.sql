@@ -1,6 +1,6 @@
 -- pgTAP: eBay required item specifics (20261030200000_ebay_required_specifics.sql).
 begin;
-select plan(17);
+select plan(19);
 do $$
 declare
   v_store uuid;
@@ -13,13 +13,14 @@ begin
     (v_owner, v_store, 'Owner', 'owner'), (v_clerk, v_store, 'Clerk', 'staff');
   perform public.seed_store_settings(v_store, 'Specifics Store');
   insert into public.sku_ledger (sku, issued_at, store_id)
-  select s, now(), v_store from unnest(array['98001','98002']) s;
+  select s, now(), v_store from unnest(array['98001','98002','98003']) s;
   insert into public.units (sku, brand, model, title, category, condition, upc, listing_body, ask_cents,
       package_weight_lb, package_length_in, package_width_in, package_height_in, state, store_id, received_at, updated_at)
   select s, 'Acme', 'M1', 'Acme garment steamer', 'Steamers', 'Open box', '012345678905', 'Body', 2500, 2, 10, 8, 6,
          'available', v_store, now(), now()
-  from unnest(array['98001','98002']) s;
-  insert into public.photos (store_id, sku, path) select v_store, s, 'p/' || s || '.jpg' from unnest(array['98001','98002']) s;
+  from unnest(array['98001','98002','98003']) s;
+  update public.units set category = null where sku = '98003' and store_id = v_store;
+  insert into public.photos (store_id, sku, path) select v_store, s, 'p/' || s || '.jpg' from unnest(array['98001','98002','98003']) s;
   insert into public.channel_taxonomy (channel, category_id, parent_id, path, leaf, active, version, fingerprint,
       fetched_at, fields_fetched_at, fields_version, required_fields, aspect_fields)
   values ('ebay', '20614', null, 'Home > Garment Steamers', true, true, 'v1', 'fp', now(), now(), 'fv',
@@ -32,6 +33,8 @@ begin
          (v_store, '98002', 'ebay', '20614', true, '{"Brand":"Acme","Type":"Garment Steamer"}', 'ebay_catalog', 'fp:fv')
   on conflict (store_id, sku, channel) do update set category_id = excluded.category_id, enabled = true,
     attributes = excluded.attributes, source = excluded.source, validated_version = excluded.validated_version, review_reason = null;
+  insert into public.unit_channel_selections(store_id,sku,channel,selected)
+  values(v_store,'98001','ebay',true),(v_store,'98002','ebay',true);
   perform set_config('test.store_id', v_store::text, true);
   perform set_config('test.owner_id', v_owner::text, true);
   perform set_config('test.clerk_id', v_clerk::text, true);
@@ -63,6 +66,10 @@ select ok('category_review'=any(public.unit_listing_gaps(u)) and not ('category'
   'selected category conflict is labeled category review, not missing category') from public.units u where sku='98002';
 select ok(public.unit_is_unfinished(public.unit_listing_gaps(u)), 'selected category needing review remains Unfinished')
   from public.units u where sku='98002';
+select ok(not ('category'=any(public.unit_listing_gaps(u))) and not ('specifics'=any(public.unit_listing_gaps(u))),
+  'unselected eBay category and specifics gaps do not appear on an unchecked unit') from public.units u where sku='98003';
+select ok(not public.unit_is_unfinished(public.unit_listing_gaps(u)),
+  'unchecked eBay-only gaps do not keep an otherwise complete unit Unfinished') from public.units u where sku='98003';
 update public.unit_channel_categories set review_reason=null where sku='98002' and channel='ebay';
 
 -- Auto-confirm backfill: exact eBay Catalog source is confirmed; dry run writes nothing.
