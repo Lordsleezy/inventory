@@ -11,14 +11,14 @@ type Form = { sku: string; upc: string | null; enabled: boolean; category_id: st
   item?: { title?: string; brand?: string; model?: string; condition?: string; description?: string; defect_notes?: string } };
 type Choice = { category_id: string; path: string };
 type Preview = { category_id: string; path: string | null; fields: Field[]; attributes: Record<string, string>; prefilled: string[]; cleared: string[]; usage: Record<string, string[]> };
-type Props = { client: SupabaseClient; sku: string; storeId?: string; appMode?: boolean; onSaved?: () => void;
+type Props = { client: SupabaseClient; sku: string; storeId?: string; appMode?: boolean; onSaved?: () => void; hideSaveButton?: boolean;
   /** Item edit passes its Description box so a generated description lands in the form that Save changes writes. */
   onDescription?: (text: string) => void;
   /** Item edit calls this before its own Save so unsaved specifics / generated text are never lost. */
   persistRef?: { current: (() => Promise<void>) | null } };
 
 /** eBay item specifics: required first, eBay's allowed values as searchable lists. No AI. */
-export function EbaySpecificsPanel({ client, sku, storeId, appMode = false, onSaved, onDescription, persistRef }: Props) {
+export function EbaySpecificsPanel({ client, sku, storeId, appMode = false, onSaved, hideSaveButton = false, onDescription, persistRef }: Props) {
   const [form, setForm] = useState<Form | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
   const [canPick, setCanPick] = useState(false);
@@ -146,11 +146,7 @@ export function EbaySpecificsPanel({ client, sku, storeId, appMode = false, onSa
     setUseGeneratedDescription(on);
     if (!on) return;
     onDescription?.(generatedDescription);
-    if (!canPick) return; // clerks: the text goes into the Description box and saves with Save changes
-    setBusy(true); setError('');
-    try { await persistDescription(generatedDescription); setNotice('Description saved on the item.'); }
-    catch (e) { setError(e instanceof Error ? e.message : String(e)); }
-    finally { setBusy(false); }
+    // Item edit defers this until its single Save action.
   }
 
   async function save() {
@@ -228,7 +224,7 @@ export function EbaySpecificsPanel({ client, sku, storeId, appMode = false, onSa
     {form?.category_id && <>
       {required.map(input)}
       {optional.length > 0 && <details><summary>Recommended (optional)</summary>{optional.map(input)}</details>}
-      <button type="button" disabled={busy} onClick={() => void save()}>{busy ? 'Saving…' : 'Save item specifics'}</button>
+      {!hideSaveButton && <button type="button" disabled={busy} onClick={() => void save()}>{busy ? 'Saving…' : 'Save item specifics'}</button>}
     </>}
   </section>;
 }

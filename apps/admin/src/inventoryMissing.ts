@@ -1,6 +1,6 @@
 import { reviewReasonLabel } from './inventoryReview';
 const FIELD_LABELS: Record<string, string> = {
-  title: 'title', brand: 'brand', model: 'model', category: 'category', specifics: 'item specifics',
+  title: 'title', brand: 'brand', model: 'model', category: 'category', category_review: 'category review', specifics: 'item specifics',
   price: 'price', condition: 'condition', photo: 'photo', spec: 'weight & dimensions',
   upc: 'UPC', description: 'description',
 };

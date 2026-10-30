@@ -112,6 +112,8 @@ export function AppItemDetail({
           accessToken={accessToken}
           appMode
           canDelete={canDelete}
+          locationLabel={locationCodes.length ? locationCodes.map(code => { const parts = locationParts(code); return parts ? `${parts.display} · ${parts.slot}` : code; }).join(', ') : 'Unassigned'}
+          onReadinessChanged={() => { setReload(n => n + 1); onChanged(); }}
           onClose={() => setEditing(false)}
           onSaved={() => {
             setEditing(false);
@@ -235,8 +237,8 @@ export function AppItemDetail({
             >
               Mark sold
             </button>
-            {showDispositionButtons({ isAdmin: canDelete && !staffMode, inStock: String(unit?.state || '') === 'available' }) && <DispositionButtons client={client} sku={sku} money={money} stamp={(s) => new Date(s).toLocaleString()} onDone={() => { onChanged(); onBack(); }} />}
           </div>}
+          {showDispositionButtons({ isAdmin: canDelete && !staffMode, unsold: ['available', 'reserved', 'repair'].includes(String(unit?.state || '')) }) && <div className="app-actions"><DispositionButtons client={client} sku={sku} money={money} stamp={(s) => new Date(s).toLocaleString()} onDone={() => { onChanged(); onBack(); }} /></div>}
         </>
       )}
     </div>
