@@ -1,3 +1,4 @@
+import { StockControls } from './StockControls';
 import { inventoryMissingText } from './inventoryMissing';
 import { DnsCheckbox } from './DnsCheckbox';
 import { ReceiveWorkStatus } from './ReceiveWorkStatus';
@@ -422,7 +423,7 @@ export function UnitEditDrawer({
           <div className="app-nav app-unit-edit-nav"><button type="button" onClick={cancel}>Cancel</button><div className="app-nav-title">SKU {sku}</div><button type="button" disabled={busy || lookupBusy} onClick={() => void save()}>{busy ? '…' : 'Save'}</button></div>
         )}
         {error && <div className="alert" role="alert">{error}</div>}
-        <ReceiveWorkStatus client={client} accessToken={accessToken} sku={sku} />
+        <StockControls client={client} sku={sku} admin={canDelete} onChanged={()=>{onPhotosChanged();onReadinessChanged?.()}} /><ReceiveWorkStatus client={client} accessToken={accessToken} sku={sku} />
         {msg && <p className="hint">{msg}</p>}
         {canDelete && unit.state === 'sold' && <RestoreInventoryButton client={client} sku={sku} onDone={() => { onSaved({ ...unit, state: 'available' }); onClose(); }} />}
         {currentMissing.length > 0 && <div className="inventory-missing" role="status"><p>{inventoryMissingText(currentMissing)}. Fill in the named fields and save.</p><div className="unit-edit-gap-links">{currentMissing.map(gap=><button type="button" className="text-button" key={gap} onClick={()=>jumpToGap(gap)}>Go to {gapLabel[gap] || reviewReasonLabel(gap) || gap}</button>)}</div></div>}
@@ -474,8 +475,8 @@ export function UnitEditDrawer({
         </div>
         <h3>Pricing</h3>
         <div className="unit-edit-grid">
-          <label data-gap-target="price" id="unit-edit-price" className={currentMissing.includes('price') ? 'unit-edit-required' : ''}>Price<input inputMode="decimal" placeholder="24.99" value={form.price} onChange={e => set('price', e.target.value)} />{currentMissing.includes('price') && <small>Required</small>}</label>
-          {canDelete && <label>Cost<input inputMode="decimal" placeholder="Add actual cost" value={form.cost} onChange={e => set('cost', e.target.value)} /></label>}
+          <label data-gap-target="price" id="unit-edit-price" className={currentMissing.includes('price') ? 'unit-edit-required' : ''}>Price (each)<input inputMode="decimal" placeholder="24.99" value={form.price} onChange={e => set('price', e.target.value)} />{currentMissing.includes('price') && <small>Required</small>}</label>
+          {canDelete && <label>Cost (each)<input inputMode="decimal" placeholder="Add actual cost" value={form.cost} onChange={e => set('cost', e.target.value)} /></label>}
         </div>
         <h3>Condition</h3>
         <div className="unit-edit-grid">

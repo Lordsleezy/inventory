@@ -1,3 +1,4 @@
+-- Legacy #189 data remains valid; the private old writer simulates pre-conversion groups.
 begin;
 select no_plan();
 set constraints all immediate;
@@ -17,13 +18,13 @@ do $$ declare st uuid; own uuid:=gen_random_uuid(); clerk uuid:=gen_random_uuid(
 end $$;
 select set_config('request.jwt.claim.role','authenticated',true);
 select set_config('request.jwt.claim.sub',current_setting('groups.clerk'),true);
-select throws_ok($q$select public.receive_commit(current_setting('groups.request')::uuid,'{"p_quantity":11,"p_cost_cents":900}',array[current_setting('groups.photo')],'{}')$q$,'42501','not_manager','clerk cannot set a batch acquisition cost');
+select throws_ok($q$select public.floor_receive_single_sku(current_setting('groups.request')::uuid,'{"p_quantity":11,"p_cost_cents":900}',array[current_setting('groups.photo')],'{}')$q$,'42501','not_manager','clerk cannot set a batch acquisition cost');
 select is((select count(*)::int from public.units where store_id=current_setting('groups.store')::uuid),0,'forbidden batch leaves no units');
-select throws_ok($q$select public.receive_commit(current_setting('groups.request')::uuid,'{"p_quantity":11}',array[current_setting('groups.photo')],'{"channels":["ebay"]}')$q$,'42501','admin_options_forbidden','clerk cannot enable channels for a batch');
-select throws_ok($q$select public.receive_commit(current_setting('groups.request')::uuid,'{"p_quantity":11,"p_title":"Radio"}',array[current_setting('groups.photo')],'{"location":"99-9-9"}')$q$,'P0002',null,'late location failure rolls back the entire batch');
+select throws_ok($q$select public.floor_receive_single_sku(current_setting('groups.request')::uuid,'{"p_quantity":11}',array[current_setting('groups.photo')],'{"channels":["ebay"]}')$q$,'42501','admin_options_forbidden','clerk cannot enable channels for a batch');
+select throws_ok($q$select public.floor_receive_single_sku(current_setting('groups.request')::uuid,'{"p_quantity":11,"p_title":"Radio"}',array[current_setting('groups.photo')],'{"location":"99-9-9"}')$q$,'P0002',null,'late location failure rolls back the entire batch');
 select is((select count(*)::int from public.receive_groups where store_id=current_setting('groups.store')::uuid),0,'late failure leaves no group');
 select is((select count(*)::int from public.units where store_id=current_setting('groups.store')::uuid),0,'late failure leaves no partial stock');
-select set_config('groups.result',public.receive_commit(current_setting('groups.request')::uuid,
+select set_config('groups.result',public.floor_receive_single_sku(current_setting('groups.request')::uuid,
  '{"p_quantity":11,"p_brand":"Example","p_model":"Portable AM FM Radio","p_title":"Example Portable AM FM Radio","p_description":"A portable radio","p_category":"Radios","p_condition":"New","p_ask_cents":2000,"p_upc":"096801681609","p_length":4,"p_width":3,"p_height":2,"p_weight":1}',array[current_setting('groups.photo')],'{"enrichment":{"specs":{"color":"Black","product_height_in":2}}}')::text,true);
 select is(jsonb_array_length(current_setting('groups.result')::jsonb->'skus'),11,'clerk batch returns eleven SKUs');
 select is((select count(distinct sku)::int from public.units where store_id=current_setting('groups.store')::uuid),11,'eleven individual units');
@@ -32,11 +33,11 @@ select ok((select bool_and(acquisition_cost_cents is null and qty_on_hand=1 and 
 select is((select count(*)::int from public.photos where store_id=current_setting('groups.store')::uuid),11,'photo linked separately to every SKU');
 select is((select count(*)::int from public.receive_jobs where store_id=current_setting('groups.store')::uuid),11,'each unit has durable finishing work');
 select ok((select bool_and(extras->'channels'='[]'::jsonb and extras#>'{enrichment,show}'='false'::jsonb) from public.receive_commits where store_id=current_setting('groups.store')::uuid),'background jobs cannot publish the batch');
-select is(jsonb_array_length(public.receive_commit(current_setting('groups.request')::uuid,'{}','{}','{}')->'skus'),11,'interrupted group replay returns all original SKUs');
+select is(jsonb_array_length(public.floor_receive_single_sku(current_setting('groups.request')::uuid,'{}','{}','{}')->'skus'),11,'interrupted group replay returns all original SKUs');
 select is((select count(*)::int from public.units where store_id=current_setting('groups.store')::uuid),11,'group replay creates no duplicates');
 select is((public.receive_inventory_list()->'totals'->>'unit_count')::int,11,'inventory counts eleven units');
-select is((public.receive_inventory_list()->'totals'->>'row_count')::int,1,'inventory displays one collapsed group');
-select is(jsonb_array_length(public.receive_inventory_list()->'items'->0->'group_members'),11,'group expands to eleven individual SKU rows');
+select is((public.receive_inventory_list()->'totals'->>'row_count')::int,11,'legacy groups display independent SKU rows until reviewed merge');
+select is((public.receive_inventory_list()->'items'->0->>'qty_on_hand')::int,1,'legacy group members retain their individual balances before approved merge');
 select ok(not (public.receive_group_lookup('096801681609')->0->'fields' ? 'cost'),'clerk template omits cost');
 select is((public.receive_group_lookup('096801681609')->0->>'in_stock')::int,11,'repeat UPC finds in-stock group');
 select is((public.portal_manifest_receive_reference('096801681609')->>'received')::int,11,'manifest progress counts every received unit');
@@ -54,7 +55,7 @@ select is((select count(*)::int from public.receive_group_audit where store_id=c
 -- Add another photographed batch to the existing UPC group.
 select set_config('groups.more_request',gen_random_uuid()::text,true);
 insert into storage.objects(bucket_id,name) values('unit-photos',current_setting('groups.store')||'/receive/'||current_setting('groups.owner')||'/'||current_setting('groups.more_request')||'/actual.jpg');
-select set_config('groups.more',public.receive_commit(current_setting('groups.more_request')::uuid,
+select set_config('groups.more',public.floor_receive_single_sku(current_setting('groups.more_request')::uuid,
  '{"p_quantity":2,"p_brand":"Example","p_title":"Example Portable AM FM Radio","p_upc":"096801681609","p_ask_cents":3000}',
  array[current_setting('groups.store')||'/receive/'||current_setting('groups.owner')||'/'||current_setting('groups.more_request')||'/actual.jpg'],jsonb_build_object('group_id',current_setting('groups.request')))::text,true);
 select is((select count(*)::int from public.receive_group_members where group_id=current_setting('groups.request')::uuid and detached_at is null),12,'add more appends new SKUs to the original group');
@@ -64,7 +65,7 @@ select throws_ok($q$select public.receive_group_apply(current_setting('groups.re
 -- Normal register sale against one independently tracked, costed admin unit.
 select set_config('groups.owner_request',gen_random_uuid()::text,true);
 insert into storage.objects(bucket_id,name) values('unit-photos',current_setting('groups.store')||'/receive/'||current_setting('groups.owner')||'/'||current_setting('groups.owner_request')||'/actual.jpg');
-select set_config('groups.owner_result',public.receive_commit(current_setting('groups.owner_request')::uuid,
+select set_config('groups.owner_result',public.floor_receive_single_sku(current_setting('groups.owner_request')::uuid,
  '{"p_quantity":2,"p_brand":"Example","p_title":"Costed radios","p_ask_cents":10000,"p_cost_cents":2000}',array[current_setting('groups.store')||'/receive/'||current_setting('groups.owner')||'/'||current_setting('groups.owner_request')||'/actual.jpg'],'{}')::text,true);
 select ok((select bool_and(acquisition_cost_cents=2000) from public.units where sku in(select jsonb_array_elements_text(current_setting('groups.owner_result')::jsonb->'skus'))),'admin cost is copied per new unit');
 insert into public.store_settings(store_id,key,value) values(current_setting('groups.store')::uuid,'taxRateBps','0') on conflict(store_id,key) do update set value=excluded.value;
@@ -87,7 +88,7 @@ select set_config('request.jwt.claim.sub',current_setting('groups.clerk'),true);
 select ok(not (public.receive_group_lookup('096801681609')->0->'fields' ? 'cost'),'repeat UPC still omits admin cost for clerk');
 
 select set_config('groups.not_for_sale',gen_random_uuid()::text,true);
-select lives_ok($q$select public.receive_commit(current_setting('groups.not_for_sale')::uuid,'{"p_quantity":2,"p_brand":"Example"}','{}','{"do_not_list":true,"enrichment":{"specs":{"do_not_list":true}}}')$q$,'new master brand-only not-for-sale path also accepts a clerk batch');
+select lives_ok($q$select public.floor_receive_single_sku(current_setting('groups.not_for_sale')::uuid,'{"p_quantity":2,"p_brand":"Example"}','{}','{"do_not_list":true,"enrichment":{"specs":{"do_not_list":true}}}')$q$,'new master brand-only not-for-sale path also accepts a clerk batch');
 select is((select count(*)::int from public.receive_group_members m join public.units u on u.sku=m.sku where m.group_id=current_setting('groups.not_for_sale')::uuid and public.unit_not_for_sale(u.listing_specs) and not u.show_on_website),2,'not-for-sale batch stays hidden with its own two units');
 select is((select count(*)::int from public.receive_jobs where id in(select id from public.receive_commits where extras->>'batch_request'=current_setting('groups.not_for_sale'))),0,'not-for-sale batch preserves no-background-job behavior');
 select * from finish();

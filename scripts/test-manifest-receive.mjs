@@ -29,7 +29,8 @@ const { outputFiles } = await build({
           if (scenario.delayed) return new Promise(resolve => { window.__release = () => resolve({ data: reference }); });
           return { data: reference, error: scenario.failed ? { message: 'unavailable' } : null };
         }
-        if (name === 'receive_group_lookup') return { data: scenario.groups || [] };
+        if (name === 'stock_find_matches') return { data: args?.p_condition && args?.p_price != null ? scenario.stocked_matches || [] : [] };
+        if (name === 'receive_commit') return { data: { skus:['10001'], on_hand:10, server_ms:1 } };
         if (name === 'portal_receive_options' || name === 'staff_receive_options') return { data: { next_sku: '10001', categories: ['Home'], conditions: ['New'], test_statuses: ['untested'] } };
         return { data: null };
       },
@@ -115,10 +116,13 @@ try {
   assert.equal(await staff.evaluate(() => window.__calls.filter(call => call.table === 'store_manifests').length), 0, 'clerk needs only the narrow reference RPC');
   for(let i=0;i<10;i++) await staff.getByRole('button',{name:'Increase receive quantity'}).click();
   assert.equal(await staff.locator('.receive-quantity output').innerText(),'11','clerk can set Qty 11 without typing');
-  const repeat=await open({staff:true,reference:ref,groups:[{id:'group-radio',title:'Portable Radio',in_stock:8,fields:{brand:'Example',model:'Portable Radio',title:'Example Portable Radio',ask:'24.99',description:'Portable radio details',cost:'999.00'}}]});
-  await repeat.getByRole('button',{name:'Add more to this group'}).click();
-  assert.equal(await repeat.locator('input[placeholder="0.00"]').inputValue(),'24.99','repeat UPC fills group price');
-  assert.equal(await repeat.locator('input[placeholder="Leave blank if unknown"]').count(),0,'group reuse cannot expose clerk cost');
+  const repeat=await open({staff:true,reference:ref,stocked_matches:[{sku:'10001',title:'Catalog Brand Model Lamp',on_hand:8,stocked:true,price:2499,condition:'New',upc:'096801681609'}]});
+  await repeat.locator('input[placeholder="0.00"]').fill('24.99');
+  await repeat.getByText('New (sealed)',{exact:true}).first().click();
+  await repeat.getByRole('button',{name:'Add 1 to SKU 10001'}).click();
+  await repeat.waitForFunction(()=>window.__calls.some(c=>c.name==='receive_commit'));
+  assert.equal(await repeat.evaluate(()=>window.__calls.find(c=>c.name==='receive_commit').args.p_extras.target_sku),'10001','repeat UPC adds to existing stocked SKU');
+  assert.equal(await repeat.locator('input[placeholder="Leave blank if unknown"]').count(),0,'stock reuse cannot expose clerk cost');
   console.log('PASS: manifest retail, no-match, catalog miss → photo prompt, all fields isolated, SALVAGE/mixed warnings, manual price, slow/failing sidecar.');
   for (const isStaff of [false, true]) {
     for (const testCase of [
@@ -141,3 +145,5 @@ try {
   }
   console.log('PASS: clerk/admin scan each manifest UPC (including leading-zero and 49-prefix codes), SALVAGE warning, and no-match; all prior receive-sidecar checks pass.');
 } finally { await browser.close(); }
+
+

@@ -11,6 +11,7 @@ export type CartLine = {
   approvalId: string | null;
   qty: number;
   qtyOnHand: number;
+  stocked?: boolean;
   photoUrl: string | null;
   bundleIncludes?: { sku: string; title: string; quantity: number }[];
 };
@@ -50,6 +51,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
 
   const addUnit = useCallback((unit: RegisterUnit, opts?: { priceCents?: number; overrideReason?: string; bundleIncludes?: CartLine['bundleIncludes'] }) => {
     setLines(prev => {
+      if(unit.qtyOnHand<=0)return prev;
       const existing = prev.find(l => l.sku === unit.sku);
       const maxQty = unit.qtyOnHand > 1 ? unit.qtyOnHand : 1;
       const priceCents = opts?.priceCents ?? unit.askCents ?? 0;
@@ -79,6 +81,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
           approvalId: null,
           qty: 1,
           qtyOnHand: maxQty,
+          stocked: unit.stocked,
           photoUrl: unit.photoUrl,
           bundleIncludes: opts?.bundleIncludes,
         },

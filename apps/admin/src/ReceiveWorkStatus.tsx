@@ -21,7 +21,7 @@ export function ReceiveWorkStatus({ client, accessToken, sku }: { client: Supaba
         if (!key?.startsWith('floor:pending-receive:')) continue;
         try { const saved = JSON.parse(localStorage.getItem(key) || '{}') as ReceiveRequest;
           const actor = session.data.session?.user?.id;
-          if (actor && saved.p_photos?.some(p => p.includes(`/receive/${actor}/`)) && !sku) { recovered = saved; if (alive) setPendingKey(key); }
+          if (actor && (saved.p_photos?.some(p => p.includes(`/receive/${actor}/`)) || saved.p_extras?.recovery_actor === actor) && !sku) { recovered = saved; if (alive) setPendingKey(key); }
         } catch { /* ignore unrelated device cache */ }
       }
       if (alive) setPending(recovered);
@@ -41,7 +41,7 @@ export function ReceiveWorkStatus({ client, accessToken, sku }: { client: Supaba
   async function recover() {
     if (!pending) return;
     try {
-      const store = pending.p_photos[0].split('/')[0];
+      const store = pendingKey.slice('floor:pending-receive:'.length).split(':')[0];
       const result = await commitReceive(client, store, pending);
       setRecovery(`Saved SKU ${result.skus.join(', ')}. Ready for the next scan.`); setPending(null);
       void fetch(floorFunctionUrl('receive-finish'), { method: 'POST', headers: { Authorization: `Bearer ${accessToken}` } }).catch(() => {});

@@ -43,6 +43,9 @@ jobs:
       - name: PGlite apply all migrations
         run: npm run test:migrations
 
+      - name: Stocked SKU quantities, money, returns and reviewed merges
+        run: npm run test:stocked
+
       - name: PGlite ticket tax / finalize helpers
         run: npm run test:ticket-tax
 

@@ -1,0 +1,8 @@
+import { useEffect,useState } from 'react';import type {SupabaseClient} from '@supabase/supabase-js';
+export type StockMatch={sku:string;title:string;on_hand:number;stocked:boolean;price:number|null;condition:string|null;upc:string|null};
+export function ReceiveStockPicker({client,upc,title,condition,price,quantity,admin,selected,onChoose,onMatches}:{client:SupabaseClient;upc:string;title:string;condition:string;price:number|null;quantity:number;admin:boolean;selected:string|null;onChoose:(m:StockMatch|null)=>void;onMatches?:()=>void}){
+ const [matches,setMatches]=useState<StockMatch[]>([]);
+ useEffect(()=>{let alive=true;const t=setTimeout(()=>{void Promise.resolve(client.rpc('stock_find_matches',{p_upc:upc,p_title:title,p_condition:condition||null,p_price:price})).then(({data,error})=>{if(alive){setMatches(error?[]:data||[]);if(!error&&data?.length)onMatches?.()}}).catch(()=>{});},150);return()=>{alive=false;clearTimeout(t)}},[client,upc,title,condition,price]);
+ if(!matches.length)return null;
+ return <section className="stock-match-card"><h3>You already stock this</h3>{matches.map(m=><div key={m.sku}><b>{m.title} · SKU {m.sku}</b><p>{m.on_hand} on hand · {m.price==null?'No price':`$${(m.price/100).toFixed(2)} each`} · {m.condition}</p>{(m.stocked||admin)&&<><p>SKU {m.sku} goes to {m.on_hand+quantity} on hand</p><button type="button" onClick={()=>onChoose(m)}>{selected===m.sku?'Selected: ':''}{m.stocked?`Add ${quantity} to SKU ${m.sku}`:`Convert to stocked and add ${quantity}`}</button></>}{!m.stocked&&!admin&&<small>One-of-one item. An admin can convert it; receive a new SKU instead.</small>}</div>)}<button type="button" onClick={()=>onChoose(null)}>Different item, new SKU</button></section>
+}

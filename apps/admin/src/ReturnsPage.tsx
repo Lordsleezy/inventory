@@ -85,6 +85,7 @@ export function ReturnsPage({ client, storeId, money, stamp }: Props) {
   const [refund, setRefund] = useState('');
   const [labelCost, setLabelCost] = useState('');
   const [fees, setFees] = useState('');
+  const [returnQuantity,setReturnQuantity]=useState('1');
 
   const load = useCallback(async () => {
     const { data, error: e } = await client.rpc('portal_returns', {
@@ -151,6 +152,7 @@ export function ReturnsPage({ client, storeId, money, stamp }: Props) {
       p_return: selected.id,
       p_status: status,
       p_patch: {
+        quantity: Number(returnQuantity),
         refund_cents: cents(refund),
         return_label_cents: cents(labelCost),
         unrecovered_fees_cents: cents(fees),
@@ -226,6 +228,7 @@ export function ReturnsPage({ client, storeId, money, stamp }: Props) {
     if (!window.confirm(`Disposition ${selected.sku} as “${disp.replace(/_/g, ' ')}”?\n\nPhotos are required. Relist goes through normal sync / double-sale protection.`)) {
       return;
     }
+    if (!Number.isInteger(Number(returnQuantity)) || Number(returnQuantity)<1){setError('Enter a positive return quantity');return;}
     setBusy(disp);
     setError('');
     const { data, error: e } = await client.rpc('portal_disposition_return', {
@@ -388,7 +391,7 @@ export function ReturnsPage({ client, storeId, money, stamp }: Props) {
                 </button>
               </div>
 
-              <div className="number-grid">
+              <label>Quantity to return (stocked item)<input type="number" min="1" value={returnQuantity} onChange={e=>setReturnQuantity(e.target.value)} /></label><div className="number-grid">
                 <label>
                   Refund ($)
                   <input value={refund} onChange={(e) => setRefund(e.target.value)} />

@@ -1,3 +1,4 @@
+import './stock.css';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { floorCloud, loadStaffSession, staffSignInAttempts, type StaffSession } from '@floor/cloud';

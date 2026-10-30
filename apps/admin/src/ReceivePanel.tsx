@@ -1,4 +1,5 @@
-import { ReceiveQuantity, ReceiveGroupPicker } from './ReceiveQuantity';
+import { ReceiveStockPicker, type StockMatch } from './ReceiveStockPicker';
+import { ReceiveQuantity } from './ReceiveQuantity';
 import { ReceiveWorkStatus } from './ReceiveWorkStatus';
 import { scannerLifecycle } from './scannerLifecycle';
 import { commitReceive } from './receiveCommit';
@@ -621,6 +622,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   const [saved, setSaved] = useState<string[]>([]);
   const [manifestId, setManifestId] = useState('');
   const [receiveGroup, setReceiveGroup] = useState<string | null>(null);
+  const [stockTarget,setStockTarget]=useState<StockMatch|null>(null);
+  const [stockSubmit,setStockSubmit]=useState(false);
   const [manifests, setManifests] = useState<{ id: string; name: string; manifest_on: string }[]>([]);
   const [last, setLast] = useState<LastReceived | null>(null);
   const [warning, setWarning] = useState('');
@@ -701,7 +704,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   modalOpen.current = camera || dialog !== null;
 
   const current = manual ? undefined : queue[0];
-  useEffect(()=>{setReceiveGroup(null)},[current?.upc,manual,manual ? form.upc : null]);
+  useEffect(()=>{setReceiveGroup(null);setStockTarget(null)},[current?.upc,manual,manual ? form.upc : null]);
+  useEffect(()=>{if(stockSubmit&&stockTarget){setStockSubmit(false);void finish()}},[stockSubmit,stockTarget]);
   const manifestReference = useManifestReceiveReference(client, manual ? form.upc : current?.upc || '');
   const result = current?.result;
   const merged = result?.merged;
@@ -1120,21 +1124,21 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     if (!manual && !current) { setError('Scan a UPC first, or use Enter manually.'); return; }
     const brandError = notForSaleBrandError(doNotList, brandReady());
     if (brandError) { setError(brandError); return; }
-    if (!doNotList && photoVerifyPending) { setError('Choose whether the photo or barcode product is correct before saving.'); setDialog('miss-photo'); return; }
-    if (!doNotList && photoTitleConfirmed && !isCompleteReceiveTitle(form.title, form.brand)) {
+    if (!stockTarget && !doNotList && photoVerifyPending) { setError('Choose whether the photo or barcode product is correct before saving.'); setDialog('miss-photo'); return; }
+    if (!stockTarget && !doNotList && photoTitleConfirmed && !isCompleteReceiveTitle(form.title, form.brand)) {
       setError('Enter the full product title, including the brand and what the item is, before saving.'); return;
     }
     if (!manual && current?.status === 'loading') { setError('Lookup still running…'); return; }
     const quantity = Number(form.quantity);
-    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 100) { setError('Quantity must be 1–100.'); return; }
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 1000) { setError('Quantity must be 1–1000.'); return; }
     let acceptedStockPhotoPath = doNotList ? '' : stockPhotoPath;
-    if (!doNotList && !files.length && !acceptedStockPhotoPath && stockPhotoBusy) { setError('Stock photo is still preparing. Wait a moment and try again.'); return; }
-    if (!doNotList && !files.length && !acceptedStockPhotoPath && !manual && merged?.images?.[0] && current?.upc) {
+    if (!stockTarget && !doNotList && !files.length && !acceptedStockPhotoPath && stockPhotoBusy) { setError('Stock photo is still preparing. Wait a moment and try again.'); return; }
+    if (!stockTarget && !doNotList && !files.length && !acceptedStockPhotoPath && !manual && merged?.images?.[0] && current?.upc) {
       acceptedStockPhotoPath = await stageStockPhoto(String(merged.images[0]), current.upc, current.id) || '';
     }
-    if (!doNotList && !files.length && !acceptedStockPhotoPath) { setError('Stock photo could not be saved. Retry it or add a unit photo before saving.'); return; }
+    if (!stockTarget && !doNotList && !files.length && !acceptedStockPhotoPath) { setError('Stock photo could not be saved. Retry it or add a unit photo before saving.'); return; }
     if (photoBusy && files.length) { setError('Wait for the unit photo to finish uploading.'); return; }
-    if (!doNotList && files.some(file => (file.type && !file.type.startsWith('image/')) || file.size > PHOTO_MAX_BYTES)) {
+    if (!stockTarget && !doNotList && files.some(file => (file.type && !file.type.startsWith('image/')) || file.size > PHOTO_MAX_BYTES)) {
       setError('Photos must be images under 15 MB each.'); return;
     }
     if (!doNotList && files.some(f => f.size < PHOTO_MIN_BYTES)) { setError('One of the photos looks empty or too small. Retake it.'); return; }
@@ -1174,9 +1178,9 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     const receiveStarted = performance.now();
     try {
       const quantity = Number(form.quantity);
-      if (!doNotList && !files.length && !acceptedStockPhotoPath) throw new Error('Add a photo before saving.');
+      if (!stockTarget && !doNotList && !files.length && !acceptedStockPhotoPath) throw new Error('Add a photo before saving.');
       const unitPhotoPaths = [...(acceptedStockPhotoPath ? [acceptedStockPhotoPath] : []), ...stagedPhotoPaths];
-      if (!doNotList && !unitPhotoPaths.length) throw new Error('The unit photo did not finish uploading. Retry the photo.');
+      if (!stockTarget && !doNotList && !unitPhotoPaths.length) throw new Error('The unit photo did not finish uploading. Retry the photo.');
       const holdLabel = hold ? (HOLD_REASONS.find(([k]) => k === hold.reason)?.[1] || hold.reason) : '';
       const notes = [
         isDefectiveCondition(form.condition) ? `Defective/non-sellable: ${form.conditionNote.trim()}` : '',
@@ -1208,7 +1212,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       const enrichment = buildReceiveEnrichment(parsed, hold, doNotList);
       const data = await commitReceive(client, storeId, {
         p_request: receiveRequest.current, p_fields: fields, p_photos: unitPhotoPaths,
-        p_extras: { group_id: receiveGroup, location: selectedLocation || null, manifest: staffMode ? null : manifestId || null,
+        p_extras: { target_sku: stockTarget?.sku || null, convert_stocked: !!stockTarget && !stockTarget.stocked, location: selectedLocation || null, manifest: staffMode ? null : manifestId || null,
           dns: !staffMode && doNotShip, do_not_list: doNotList,
           channels: staffMode || quantity > 1 || receiveGroup ? [] : channels, enrichment,
           stock_photo_paths: acceptedStockPhotoPath ? [acceptedStockPhotoPath] : [],
@@ -1270,7 +1274,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       if (selectedLocation) {
         try { localStorage.setItem(`floor:last-receive-location:${storeId}`, selectedLocation); } catch { /* optional device preference */ }
       }
-      setSaved(skus); setReceiveGroup(null);
+      setSaved(skus); setReceiveGroup(null);setStockTarget(null);
       onSaved();
       void loadOptions().catch(() => setWarning(w => `${w} Refresh Receive to see the next suggested SKU.`.trim()));
       focusUpc();
@@ -1696,7 +1700,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   const trueMiss = !manual && current?.status === 'ready' && isTrueCatalogMiss(result);
 
   const hasCatalogPhoto = Boolean(!manual && merged?.images?.[0]);
-  const hasAnyPhoto = Boolean(files.length || stagedPhotoPaths.length || stockPhotoPath || hasCatalogPhoto);
+  const hasAnyPhoto = Boolean(stockTarget || files.length || stagedPhotoPaths.length || stockPhotoPath || hasCatalogPhoto);
   return <section className={`panel receive-panel${appChrome ? ' receive-app' : ''}${storePhoneMode ? ' receive-store-phone' : ''}`}>
     {appChrome && (
       <div className="app-nav receive-app-nav">
@@ -1775,11 +1779,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
 
     {showForm && <form id={appChrome ? 'receive-app-form' : undefined} onSubmit={e => void finish(e)}>
       <ReceiveQuantity value={form.quantity} onChange={value=>update('quantity',value)} disabled={busy} />
-      {(Number(form.quantity)>1 || receiveGroup) && <p role="status">Intake only: these units will not be published to any channel.</p>}
-      <ReceiveGroupPicker client={client} upc={manual ? form.upc : current?.upc || ''} selected={receiveGroup} onChoose={group=>{
-        setReceiveGroup(group?.id || null);
-        if(group){setForm(prev=>({...prev,...Object.fromEntries(Object.entries(group.fields).filter(([key])=>!staffMode||key!=='cost').map(([key,v])=>[key,v==null?'':String(v)])),quantity:prev.quantity}));setDupAck(true);}
-      }} />
+      {(Number(form.quantity)>1 || receiveGroup) && <p role="status">One stocked SKU with a quantity. Marketplace sync is unchanged.</p>}
+      <ReceiveStockPicker client={client} upc={form.noUpc?'':form.upc||current?.upc||''} title={form.title} condition={form.condition} price={form.ask?Math.round(Number(form.ask)*100):null} quantity={Number(form.quantity)||1} admin={!staffMode} onMatches={()=>setDialog(null)} selected={stockTarget?.sku||null} onChoose={m=>{setStockTarget(m);setStockSubmit(!!m);if(m){setDupAck(true);setForm(f=>({...f,title:m.title,ask:m.price==null?'':(m.price/100).toFixed(2),condition:m.condition||'',upc:m.upc||''}))}}} />
       {dups && dups.count > 0 && <div className="receive-dup" role="status">
         <strong>You have {dups.count} of these</strong>{dups.skus.length ? <> (SKU {dups.skus.slice(0, 8).join(', ')}{dups.skus.length > 8 ? '…' : ''})</> : null}
         {!dupAck ? <> <button type="button" className="secondary" onClick={confirmDup}>Add another unit</button></> : <span className="tag on">confirmed — new unit</span>}
@@ -1936,7 +1937,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
             setPhotoBusy(true); setError('');
             void stageUnitPhotos(files).then(setStagedPhotoPaths).catch(e => setError(`Photo upload failed: ${errText(e)}`)).finally(() => setPhotoBusy(false));
           }}>Retry photo upload</button>}
-          <button className="receive-save-next" type="submit" disabled={busy || (doNotList ? (photoBusy && hasAnyPhoto) : photoBusy || stockPhotoBusy || photoIdBusy || !hasAnyPhoto) || (dups !== null && dups.count > 0 && !dupAck)}>{busy ? 'Saving…' : doNotList ? 'Save store-only unit' : photoBusy || stockPhotoBusy || photoIdBusy ? 'Preparing photo…' : hasCatalogPhoto && !files.length && !stockPhotoPath ? 'Use stock photo & save' : hasAnyPhoto ? 'Save & next' : '📷 Take a photo to save'}</button>
+          <button className="receive-save-next" type="submit" disabled={busy || (doNotList ? (photoBusy && hasAnyPhoto) : photoBusy || stockPhotoBusy || photoIdBusy || !hasAnyPhoto) || (dups !== null && dups.count > 0 && !dupAck)}>{busy ? 'Saving…' : doNotList ? 'Save store-only unit' : photoBusy || stockPhotoBusy || photoIdBusy ? 'Preparing photo…' : hasCatalogPhoto && !files.length && !stockPhotoPath ? 'Use stock photo & save' : stockTarget ? `Add ${form.quantity} to SKU ${stockTarget.sku}` : hasAnyPhoto ? 'Save & next' : '📷 Take a photo to save'}</button>
         </div>
       </div>}
 
@@ -2235,3 +2236,4 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
 
   </section>;
 }
+

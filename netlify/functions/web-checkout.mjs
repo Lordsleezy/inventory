@@ -79,7 +79,7 @@ async function handle(event) {
     const fulfillment = body.fulfillment === "ship" ? "ship" : "pickup";
     const buyer = { ...buyerFrom(body), country: "US" };
     const { data, error } = await sb.rpc("begin_online_checkout", {
-      p_store: body.store_id, p_sku: String(body.sku || "").trim(), p_buyer: buyer, p_fulfillment: fulfillment,
+      p_quantity: Math.trunc(Number(body.quantity ?? 1)), p_store: body.store_id, p_sku: String(body.sku || "").trim(), p_buyer: buyer, p_fulfillment: fulfillment,
       p_quote: fulfillment === "ship" ? body.quote_id || null : null,
       p_rate: fulfillment === "ship" ? String(body.rate_id || "") : null,
       p_redeem_points: Math.max(0, Math.min(2147483647, Math.trunc(Number(body.redeem_points) || 0))),

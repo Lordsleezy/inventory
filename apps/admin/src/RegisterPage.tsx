@@ -61,6 +61,7 @@ const lineExtendedPrice = (line: CartLine) => line.priceCents * (line.qty || 1);
 function RegisterInner({ staffSession, onNeedFullReload, variant = 'desktop' }: Props) {
   const app = variant === 'app';
   const { lines, note, setNote, ticketId, addUnit, removeSku, updateLine, setQty, clear } = useCart();
+  useEffect(()=>{const load=()=>{const sku=sessionStorage.getItem('floor:register-add-sku');if(!sku)return;sessionStorage.removeItem('floor:register-add-sku');void queryAvailableUnits(sku,1).then(rows=>{if(rows[0])addUnit(rows[0])})};load();window.addEventListener('floor:sell-sku',load);return()=>window.removeEventListener('floor:sell-sku',load)},[addUnit]);
   const isAdmin = staffSession.role === 'owner' || staffSession.role === 'manager';
   const manualKey = `floor_manual_${staffSession.storeId}_${staffSession.userId}`;
 
@@ -954,7 +955,7 @@ function RegisterInner({ staffSession, onNeedFullReload, variant = 'desktop' }: 
                   </div>
                 </td>
                 <td>
-                  {line.qtyOnHand > 1 ? (
+                  {line.stocked || line.qtyOnHand > 1 ? (
                     <div className="qty-stepper">
                       <button type="button" className="secondary" disabled={!idle || cashOpen || line.qty <= 1} onClick={() => setQty(line.sku, line.qty - 1)}>−</button>
                       <span>{line.qty}</span>

@@ -4,7 +4,7 @@ import { INVENTORY_BUCKET_LABELS, totalsBalance, type InventoryBucket, type Inve
 
 /** Unit counts above the Inventory subtabs. Counts only (no money), so clerks see them too. */
 export function InventoryTotals({ client, variant, refreshKey = 0, selected, onSelect }: { client: SupabaseClient; variant: 'desktop' | 'app'; refreshKey?: number; selected?: InventoryBucket; onSelect: (bucket: InventoryBucket) => void }) {
-  const [totals, setTotals] = useState<InventoryTotalsData | null>(null);
+  const [totals, setTotals] = useState<(InventoryTotalsData & {sku_counts?:Record<string,number>}) | null>(null);
   const [failed, setFailed] = useState(false);
   useEffect(() => {
     let alive = true;
@@ -27,7 +27,7 @@ export function InventoryTotals({ client, variant, refreshKey = 0, selected, onS
   const off = totals != null && !totalsBalance(totals);
   return <div className={variant === 'app' ? 'app-totals' : 'inventory-totals'} aria-label="Inventory totals (units)" data-balanced={off ? 'no' : 'yes'}>
     {cells.map(([bucket, n, hint]) => <button type="button" className={`${variant === 'app' ? 'app-total' : 'stat'} inventory-total-button`} key={bucket} title={hint} aria-pressed={selected === bucket} onClick={() => onSelect(bucket)}>
-      <span>{INVENTORY_BUCKET_LABELS[bucket]}</span><strong>{n == null ? '…' : n.toLocaleString('en-US')}</strong>
+      <span>{INVENTORY_BUCKET_LABELS[bucket]}</span><strong>{n == null ? '…' : n.toLocaleString('en-US')}</strong>{totals?.sku_counts?.[bucket]!=null&&<small>{n} units · {totals.sku_counts[bucket]} SKUs</small>}
     </button>)}
   </div>;
 }

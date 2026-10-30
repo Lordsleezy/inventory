@@ -1,3 +1,4 @@
+import { StockMergeReview } from '../StockMergeReview';
 import { ReceiveGroupRow, type GroupedInventory } from '../ReceiveGroupRow';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -13,6 +14,7 @@ import { INVENTORY_BUCKET_LABELS, inventoryBucketStatus, type InventoryBucket } 
 type Filter = 'in_stock' | 'sold' | 'unfinished' | 'needs_check' | 'no_location' | 'defective' | 'dns' | InventoryBucket;
 
 type Row = GroupedInventory & {
+  stocked?: boolean; qty_on_hand?: number; sold_quantity?: number;
   sku: string;
   brand: string;
   model: string;
@@ -45,7 +47,7 @@ type Props = {
   scrollRef?: React.RefObject<HTMLDivElement | null>;
 };
 
-const CACHE_PREFIX = 'floor_inv_cache_v5_';
+const CACHE_PREFIX = 'floor_inv_cache_v6_';
 const URL_CACHE_KEY = 'floor_inv_urls_v2';
 const PAGE = 40;
 /** Signed URLs are minted for 3600s; refresh a bit early. */
@@ -328,8 +330,8 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
       {loading && list ? <p className="app-footer-count">Updating…</p> : null}
 
       <div className="app-group">
+        {fullAccess&&<StockMergeReview client={client} onChanged={()=>{setQueueRefresh(n=>n+1);setList(null)}} />}
         {(list?.items || []).map((u, idx) => {
-          if(u.group_id) return <ReceiveGroupRow key={u.group_id} item={u} client={client} admin={fullAccess} money={money} onOpen={onOpen} searchQuery={query} onChanged={()=>{setList(null);setQueueRefresh(n=>n+1)}} />;
           const warn = filter === 'dns' ? null : needs(u);
           const missing = filter === 'not_ready' ? inventoryMissingText(u.missing || []) : null;
           const thumbPath = u.photo_path ? thumb(u.photo_path) : '';
@@ -366,7 +368,7 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
                 ) : '+'}
               </span>
               <span className="app-row-text">
-                <strong>{name(u)}</strong>
+                <strong>{name(u)}</strong><span className={`stock-quantity-badge${u.stocked?'':' single'}`}>{u.stocked?`×${filter==='sold'?u.sold_quantity:u.qty_on_hand}`:'1'}</span>
                 <small>
                   {u.sku} · {u.not_for_sale ? 'Not for sale' : u.condition || 'No grade'}
                   {filter === 'sold' && u.sold_at ? <> · Sold {stamp(u.sold_at)}</> : null}

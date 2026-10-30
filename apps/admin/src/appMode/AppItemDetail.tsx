@@ -1,3 +1,4 @@
+import { StockControls } from '../StockControls';
 import { DnsCheckbox } from '../DnsCheckbox';
 import { ReceiveWorkStatus } from '../ReceiveWorkStatus';
 import { useEffect, useMemo, useState } from 'react';
@@ -104,7 +105,7 @@ export function AppItemDetail({
         <UnitEditDrawer
           client={client}
           storeId={storeId}
-          sku={sku}
+          sku={String(unit?.sku||sku)}
           missingFields={missingFields}
           unit={detail.unit}
           photos={detail.photos}
@@ -146,13 +147,13 @@ export function AppItemDetail({
     <div className="app-stack">
       <div className="app-nav">
         <button type="button" onClick={onBack}>‹ Inventory</button>
-        <div className="app-nav-title">{sku}</div>
+        <div className="app-nav-title">SKU {String(unit?.sku||sku)}</div>
         <button type="button" onClick={() => setEditing(true)} disabled={!detail || staffMode} style={moneyHidden || staffMode ? { visibility: 'hidden' } : undefined}>Edit</button>
         {scannerInputReady && <span className="app-scanner-status app-item-scanner-status ok" title="Bluetooth keyboard scanner status is not exposed to Floor."><i />Scanner input ready</span>}
       </div>
 
       {error && <p className="app-footer-count" style={{ color: '#ff453a' }}>{error}</p>}
-      <ReceiveWorkStatus client={client} accessToken={accessToken} sku={sku} />
+      <StockControls client={client} sku={sku} admin={canDelete} onChanged={()=>{setReload(n=>n+1);onChanged()}} onSell={onSellInStore} /><ReceiveWorkStatus client={client} accessToken={accessToken} sku={sku} />
       {!detail && !error && <p className="app-footer-count">Loading…</p>}
 
       {detail && unit && (

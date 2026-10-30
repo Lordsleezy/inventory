@@ -1,3 +1,4 @@
+import { StockMergeReview } from './StockMergeReview';
 import { ReceiveGroupRow, type GroupedInventory } from './ReceiveGroupRow';
 import { useEffect, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -18,6 +19,7 @@ import { InventoryTotals } from './InventoryTotals';
 import { INVENTORY_BUCKET_LABELS, inventoryBucketStatus, type InventoryBucket } from './totalsMath';
 
 type Row = GroupedInventory & {
+  stocked?: boolean; qty_on_hand?: number; sold_quantity?: number;
   sku: string; brand: string; model: string; title: string; condition: string | null;
   ask_cents: number | null; acquisition_cost_cents: number | null; state: string;
   received_at: string; photo_path: string | null; photo_count: number;
@@ -200,13 +202,13 @@ export function InventoryPage({
       <div className="stat"><span>Units</span><strong>{list?.totals.piece_count ?? total}</strong></div>
       {list?.totals.piece_count != null && list.totals.piece_count !== total && <div className="stat"><span>Items (rows)</span><strong>{total}</strong></div>}
     </div>
-    <section className="panel inventory-panel">
+    <section className="panel inventory-panel">{canDelete&&<StockMergeReview client={client} onChanged={()=>setRefresh(n=>n+1)} />}
       {loading && <p className="hint">Loading inventory…</p>}
       {!loading && list?.items.length === 0 && <div className="empty">{listTab === 'in-stock' && query.trim() ? 'No for-sale units match. Not-for-sale and defective units are under Defective.' : 'No units match this filter.'}</div>}
-      {list?.items.map(u => { if(u.group_id) return <ReceiveGroupRow key={u.group_id} item={u} client={client} admin={canDelete} money={money} onOpen={(sku,missing)=>{setSelected(sku);setSelectedMissing(missing||[])}} searchQuery={query} onChanged={()=>{setRefresh(n=>n+1);onCostChanged()}} />; const actions = showDispositionButtons({ isAdmin: canDelete, associateBrowseOnly, unsold: ['available', 'reserved', 'repair'].includes(u.state) });
+      {list?.items.map(u => { const actions = showDispositionButtons({ isAdmin: canDelete, associateBrowseOnly, unsold: ['available', 'reserved', 'repair'].includes(u.state) });
       const rowButton = <button type="button" className="inventory-row" key={u.sku} disabled={hideMoney} onClick={() => { if (!hideMoney) {setSelected(u.sku);setSelectedMissing(u.missing||[]);} }}>
         <span className="inventory-photo">{u.photo_path && urls[u.photo_path] ? <img loading="lazy" src={urls[thumb(u.photo_path)] || urls[u.photo_path]} onError={e => { const fallback = urls[u.photo_path!]; if (e.currentTarget.src !== fallback) e.currentTarget.src = fallback; }} alt="" /> : 'No photo'}</span>
-        <span className="inventory-identity"><strong>{name(u)}</strong><small>SKU {u.sku}{u.title && u.title !== name(u) ? ` · ${u.title}` : ''}</small></span>
+        <span className="inventory-identity"><strong>{name(u)}</strong><span className={`stock-quantity-badge${u.stocked?'':' single'}`}>{u.stocked?`×${listTab==='sold'?u.sold_quantity:u.qty_on_hand}`:'1'}</span><small>SKU {u.sku}{u.title && u.title !== name(u) ? ` · ${u.title}` : ''}</small></span>
         <span className="inventory-meta">{u.condition || 'No grade'}<small>{u.not_for_sale ? 'Not for sale' : listTab === 'sold' && u.sold_at ? `Sold ${stamp(u.sold_at)}` : label(u.state)}</small>{listTab === 'unfinished' && !!u.missing?.length && <small className="inventory-missing">{missingText(u.missing)}</small>}</span>
         <span className="inventory-location">{u.locations || 'Unassigned'}</span>
         {hideMoney ? <span className="inventory-money" /> : listTab === 'sold'

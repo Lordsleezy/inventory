@@ -5,6 +5,9 @@ export const pendingReceiveKey = (store: string) => `floor:pending-receive:${sto
 
 /** Keep the same request ID after a lost response. The database commits it at most once. */
 export async function commitReceive(client: SupabaseClient, store: string, request: ReceiveRequest) {
+  const session = await client.auth?.getSession?.();
+  const actor = session?.data.session?.user.id;
+  if (actor) request = {...request,p_extras:{...request.p_extras,recovery_actor:actor}};
   const legacy = pendingReceiveKey(store);
   const legacyValue = localStorage.getItem(legacy);
   if (legacyValue) {

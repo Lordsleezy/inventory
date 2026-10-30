@@ -10,11 +10,12 @@ export type RegisterUnit = {
   askCents: number | null;
   state: string;
   qtyOnHand: number;
+  stocked?: boolean;
   photoUrl: string | null;
 };
 
 const BASE_COLUMNS = 'sku, title, brand, model, category, condition, ask_cents, state';
-const SELECT = `${BASE_COLUMNS}, qty_on_hand`;
+const SELECT = `${BASE_COLUMNS}, qty_on_hand, stocked`;
 
 function toUnit(row: Record<string, unknown>): RegisterUnit {
   const clean = stripCostFromUnit(row);
@@ -28,7 +29,8 @@ function toUnit(row: Record<string, unknown>): RegisterUnit {
     condition: clean.condition ? String(clean.condition) : null,
     askCents: typeof clean.ask_cents === 'number' ? clean.ask_cents : null,
     state: String(clean.state ?? 'available'),
-    qtyOnHand: typeof qty === 'number' && qty > 0 ? qty : 1,
+    qtyOnHand: typeof qty === 'number' ? Math.max(0,qty) : 1,
+    stocked: row.stocked === true,
     photoUrl: null,
   };
 }
@@ -59,7 +61,8 @@ export async function loadAvailableUnits(limit = 80): Promise<RegisterUnit[]> {
 
 /** Server-side search for scan / typeahead. Prefer exact SKU, then ilike. */
 export async function queryAvailableUnits(query: string, limit = 16): Promise<RegisterUnit[]> {
-  const q = query.trim();
+  let q = query.trim();
+  if (/^\d{5}$/.test(q)){const {data,error}=await floorCloud().rpc('stock_resolve_sku',{p_sku:q});if(!error&&data)q=String(data)}
   if (!q) return [];
   const sb = floorCloud();
 
