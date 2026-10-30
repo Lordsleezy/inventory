@@ -170,6 +170,7 @@ const rest = all.filter((f) => f.name > "0005_private_photos.sql");
   await db.query(`insert into public.store_locations(store_id,code,bay_no,row_no) values($1,'1-1',1,1)`, [storeId]);
   const stockedFields = { ...nfsFields, p_quantity: 12, p_title: 'Acme Holiday Lights', p_ask: 2500 };
   const stockedExtras = { ...nfsExtras, location: '1-1' };
+  const receivedBeforeStock = (await db.query(`select public.portal_inventory_received_total() as total`)).rows[0].total;
   const { rows: stockedRows } = await db.query(
     `select public.portal_receive_stocked_commit($1,$2,ARRAY[]::text[],$3) as result`,
     [stockedReceiveId, JSON.stringify(stockedFields), JSON.stringify(stockedExtras)],
@@ -182,6 +183,8 @@ const rest = all.filter((f) => f.name > "0005_private_photos.sql");
   );
   assert.deepEqual(stockBalance[0], { qty_on_hand: 12, is_stocked: true, movement_balance: 12 },
     'one stocked SKU carries its quantity and matches the movement ledger');
+  assert.equal((await db.query(`select public.portal_inventory_received_total() as total`)).rows[0].total - receivedBeforeStock, 12,
+    'all-time inventoried total counts stocked receive quantity, not SKU rows');
   assert.equal((await db.query(`select quantity from public.unit_location_stock where store_id=$1 and sku=$2 and location_code='1-1'`, [storeId,stockedSku])).rows[0].quantity, 12,
     'stocked receive assigns the full quantity to its selected location');
   const { rows: replayedStock } = await db.query(
@@ -202,6 +205,8 @@ const rest = all.filter((f) => f.name > "0005_private_photos.sql");
   assert.equal(stockAddReplay[0].result.replayed, true, 'replayed receive-to-stock request does not add quantity twice');
   assert.equal((await db.query(`select qty_on_hand from public.units where store_id=$1 and sku=$2`, [storeId,stockedSku])).rows[0].qty_on_hand, 14,
     'existing-stock receive commits once');
+  assert.equal((await db.query(`select public.portal_inventory_received_total() as total`)).rows[0].total - receivedBeforeStock, 14,
+    'all-time inventoried total adds quantities received into an existing stocked SKU');
   await db.query(`update public.units set qty_on_hand=qty_on_hand-3,state='available' where store_id=$1 and sku=$2`, [storeId,stockedSku]);
   const { rows: stockSale } = await db.query(
     `insert into public.sales(store_id,sku,price_cents,tax_cents,channel,sold_at,receipt_no,qty)
@@ -214,9 +219,13 @@ const rest = all.filter((f) => f.name > "0005_private_photos.sql");
     'full sale reversal restores the recorded quantity');
   assert.equal((await db.query(`select movement_type from public.stock_movements where store_id=$1 and sku=$2 order by id desc limit 1`, [storeId,stockedSku])).rows[0].movement_type, 'returned',
     'sale reversal is recorded as a return movement');
+  assert.equal((await db.query(`select public.portal_inventory_received_total() as total`)).rows[0].total - receivedBeforeStock, 14,
+    'sales and returns do not change the historical received total');
   await db.query(`select public.portal_stock_add($1,3,250)`, [stockedSku]);
   assert.equal((await db.query(`select qty_on_hand from public.units where store_id=$1 and sku=$2`, [storeId,stockedSku])).rows[0].qty_on_hand, 17,
     'stock add updates on-hand atomically');
+  assert.equal((await db.query(`select public.portal_inventory_received_total() as total`)).rows[0].total - receivedBeforeStock, 17,
+    'all-time inventoried total includes stock added after receipt');
   assert.equal((await db.query(`select public.portal_stock_adjust($1,'set',13,'count_correction')`, [stockedSku])).rows[0].portal_stock_adjust, 13,
     'count correction can set a non-negative balance');
   const setHistory = (await db.query(`select public.portal_stock_history($1) history`, [stockedSku])).rows[0].history;
@@ -247,6 +256,8 @@ const rest = all.filter((f) => f.name > "0005_private_photos.sql");
   const { rows: pulledUnit } = await db.query(`select state,condition,is_stocked,qty_on_hand,show_on_website,listing_specs->>'do_not_list' do_not_list from public.units where store_id=$1 and sku=$2`, [storeId,defectiveSku]);
   assert.deepEqual(pulledUnit[0], { state: 'available', condition: 'Defective', is_stocked: false, qty_on_hand: 1, show_on_website: false, do_not_list: 'true' },
     'pulled unit is a hidden, defective, one-of-one record');
+  assert.equal((await db.query(`select public.portal_inventory_received_total() as total`)).rows[0].total - receivedBeforeStock, 17,
+    'pulling a defective unit transfers it without double-counting it as newly received');
   assert.equal((await db.query(`select qty_on_hand from public.units where store_id=$1 and sku=$2`, [storeId,stockedSku])).rows[0].qty_on_hand, 10,
     'giveaway and defective pull subtract from stocked on-hand');
   assert.equal((await db.query(`select coalesce(sum(quantity_delta),0)::int balance from public.stock_movements where store_id=$1 and sku=$2`, [storeId,stockedSku])).rows[0].balance, 10,
@@ -310,18 +321,18 @@ const rest = all.filter((f) => f.name > "0005_private_photos.sql");
   assert.equal(reports[0].report.money_trail[0].status, "Matched", "Books money trail connects sale, payout and bank reference");
   console.log("Books draft, sale report, payout balances and money trail ok");
   await db.query(`insert into public.channel_taxonomy(channel,category_id,path,leaf,active,version) values
-    ('ebay','100','Home & Garden > Home Décor > Frames',true,true,'test'),
-    ('ebay','200','Baby > Nursery Décor > Picture Frames',true,true,'test'),
-    ('ebay','201','Collectibles > Animals > Fish > Dolphins > Picture Frames',true,true,'test'),
-    ('ebay','300','Home & Garden > Home Décor > Candles & Candle Holders',true,true,'test'),
-    ('ebay','301','Collectibles > Animals > Fish > Dolphins > Candles & Candleholders',true,true,'test')`);
+    ('ebay','100','Root > Home & Garden > Home Décor > Frames',true,true,'test'),
+    ('ebay','200','Root > Baby > Nursery Décor > Picture Frames',true,true,'test'),
+    ('ebay','201','Root > Collectibles > Animals > Fish > Dolphins > Picture Frames',true,true,'test'),
+    ('ebay','300','Root > Home & Garden > Home Décor > Candles & Candle Holders',true,true,'test'),
+    ('ebay','301','Root > Collectibles > Animals > Fish > Dolphins > Candles & Candleholders',true,true,'test')`);
   const { rows: frameSearch } = await db.query(`select public.portal_category_search('ebay','Picture frame',60) as results`);
   assert.equal(frameSearch[0].results[0].category_id, '100', 'picture-frame search ranks the Home & Garden Frames path first');
   assert.ok(frameSearch[0].results.some((row) => row.category_id === '201'), 'niche matching categories remain available lower in the results');
   const { rows: candleSearch } = await db.query(`select public.portal_category_search('ebay','Holiday candle',3) as results`);
   assert.equal(candleSearch[0].results[0].category_id, '300', 'mainstream Home & Garden candle category ranks ahead of collectible niches');
   const { rows: directCategory } = await db.query(`select public.portal_category_search('ebay','100',3) as results`);
-  assert.equal(directCategory[0].results[0].path, 'Home & Garden > Home Décor > Frames', 'category search accepts a pasted eBay category ID');
+  assert.equal(directCategory[0].results[0].path, 'Root > Home & Garden > Home Décor > Frames', 'category search accepts a pasted eBay category ID');
   console.log("eBay category search synonyms, mainstream ranking and direct IDs ok");
   const mp = await db.query(
     `select c.relrowsecurity as rls,

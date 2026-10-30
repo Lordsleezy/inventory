@@ -21,6 +21,7 @@ export function ManifestsPage({ client, storeId, money }: Props) {
   const fileInput = useRef<HTMLInputElement>(null);
   const [counting, setCounting] = useState(false);
   const [rows, setRows] = useState<Manifest[]>([]);
+  const [allTimeReceived, setAllTimeReceived] = useState<number | null>(null);
   const [name, setName] = useState('');
   const [source, setSource] = useState('');
   const [date, setDate] = useState(today);
@@ -36,10 +37,15 @@ export function ManifestsPage({ client, storeId, money }: Props) {
   const [backfills, setBackfills] = useState<Record<string, string>>({});
 
   const load = useCallback(async () => {
-    const { data, error: rpcError } = await client.rpc('portal_manifest_list');
-    if (rpcError) throw rpcError;
-    const manifests = (data || []) as Manifest[];
+    const [manifestResult, receivedResult] = await Promise.all([
+      client.rpc('portal_manifest_list'),
+      client.rpc('portal_inventory_received_total'),
+    ]);
+    if (manifestResult.error) throw manifestResult.error;
+    if (receivedResult.error) throw receivedResult.error;
+    const manifests = (manifestResult.data || []) as Manifest[];
     setRows(manifests); setLoaded(true);
+    setAllTimeReceived(Number(receivedResult.data || 0));
     // Backfill stored CSVs in the background; files and existing lines are never replaced.
     void backfillManifestFiles(client, manifests).then(setBackfills);
   }, [client]);
@@ -165,6 +171,9 @@ export function ManifestsPage({ client, storeId, money }: Props) {
           <div className="manifest-detail"><p>{backfills[row.id] || (row.line_count ? `${row.line_count} line items saved.` : isCsvManifestFile(row) ? 'Checking stored CSV for line items…' : 'Original file retained. Upload a CSV to add line references.')}</p><div className="manifest-metrics"><span>Received<b>{row.received_count}</b></span><span>Sold<b>{row.sold_count}</b></span><span>In stock<b>{row.stock_count}</b></span><span>Revenue<b>{money(row.revenue_cents)}</b></span><span>Profit<b>{money(row.profit_cents)}</b></span></div><div className="actions"><button type="button" className="secondary" onClick={() => void open(row)}>Open file</button><button type="button" className="secondary" disabled={busy} onClick={() => void changeCount(row)}>Edit item count</button></div></div>
         </details>)}</div>}
       <div className="tool-total-row"><span>Total manifested items</span><strong>{loaded ? total : '—'}</strong></div>
+      <div className="tool-total-row"><span>Total inventoried (all time)</span><strong>{allTimeReceived == null ? '—' : allTimeReceived}</strong></div>
+      <hr className="manifest-total-divider" />
+      <div className="tool-total-row"><span>Difference</span><strong>{allTimeReceived == null ? '—' : `${total - allTimeReceived >= 0 ? '+' : '−'}${Math.abs(total - allTimeReceived)}`}</strong></div>
     </ToolCard>
     <ToolCard><ToolHeading icon="tag" title="Bulk tag inventory" description="Paste SKUs separated by commas, spaces or new lines to tag inventory to a manifest."/>
       <form onSubmit={e => void bulkTag(e)} className="manifest-bulk">

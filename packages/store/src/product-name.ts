@@ -1,7 +1,7 @@
 const SELLER_BRAND = /\b(?:gallery\s*(?:&|and)\s* gifts?|store|shop|outlet|llc|incorporated|inc|wholesale|deals?|retailer|seller)\b/i;
 const RETAIL_TAIL = /\b(?:\d+\s*)?(?:ea(?:ch)?|ct|pk)\b/gi;
 const TRAILING_SEPARATORS = /[\s,;|/\-–—]+$/;
-const ACRONYMS = new Set(["AI", "HD", "LED", "USB", "TV", "USB-C", "XL", "XXL", "UPC", "MPN"]);
+const ACRONYMS = new Set(["AI", "HD", "LED", "USB", "TV", "USB-C", "XL", "XXL", "UPC", "MPN", "LG", "GE", "HP", "RCA", "JBL"]);
 const GENERIC_PRODUCT_WORDS = new Set(["lamp", "lights", "light", "desk", "chair", "table", "frame", "frames", "diffuser", "device", "home", "mini", "smart", "fragrance", "product", "item", "new", "the", "this"]);
 
 function titleCase(value: string): string {
@@ -9,7 +9,8 @@ function titleCase(value: string): string {
     if (!part.trim()) return part;
     return part.split(/([-/'’])/).map(bit => {
       if (!bit || /^[-/'’]$/.test(bit)) return bit;
-        if (/[A-Z]/.test(bit) && /\d/.test(bit) && /^[A-Z0-9-]+$/.test(bit)) return bit;
+      if (/[A-Z]/.test(bit) && /\d/.test(bit) && /^[A-Z0-9-]+$/.test(bit)) return bit;
+      if (/^[A-Z]{2,3}$/.test(bit)) return bit;
       if (ACRONYMS.has(bit.toUpperCase())) return bit.toUpperCase();
       return bit.charAt(0).toUpperCase() + bit.slice(1).toLowerCase();
     }).join("");
@@ -18,6 +19,11 @@ function titleCase(value: string): string {
 
 function cleanWords(value: unknown): string {
   let text = String(value ?? "")
+    .replace(/â€™|â€˜/g, "'")
+    .replace(/â€œ|â€/g, '"')
+    .replace(/â€“/g, "–")
+    .replace(/â€”/g, "—")
+    .replace(/â€¦/g, "…")
     .replace(/[™®©]/g, "")
     .normalize("NFKC")
     .replace(/[\uFFFD\u00C2\u00A0]/g, " ")
@@ -31,7 +37,7 @@ function cleanWords(value: unknown): string {
     unique.push(word);
   }
   text = unique.join(" ").replace(TRAILING_SEPARATORS, "").trim();
-  return titleCase(text);
+  return titleCase(text).replace(/'S\b/g, "'s").replace(/’S\b/g, "’s");
 }
 
 function brandIsSeller(value: string): boolean {
@@ -66,6 +72,10 @@ function limitTitle(value: string, max = 80): string {
   return (boundary > 0 ? clipped.slice(0, boundary) : clipped.slice(0, max)).trim();
 }
 
+function looksLikeBareModelCode(value: string): boolean {
+  return /^[A-Z0-9/-]{5,}$/.test(value) && /[A-Z]/i.test(value) && /\d/.test(value);
+}
+
 export type ProductIdentity = { brand: string; model: string; title: string; review: boolean; reasons: string[] };
 
 /** Clean lookup/AI identity fields conservatively. `review` means a person should verify the result. */
@@ -85,10 +95,13 @@ export function cleanProductIdentity(input: {
     brand = inferBrand(`${rawTitle} ${description}`, description, rawTitle);
   }
   if (!brand) reasons.push("brand_needs_review");
-  let model = withoutBrand(rawModel || rawTitle, brand);
-  model = cleanWords(model);
-  if (!model) model = withoutBrand(rawTitle, brand);
+  const titleSource = brandIsSeller(rawBrand) ? withoutBrand(rawTitle, rawBrand) : rawTitle;
+  let model = cleanWords(withoutBrand(titleSource, brand));
+  if (!model) model = cleanWords(withoutBrand(rawModel, brand));
   if (!model) reasons.push("model_missing");
+  const priorModel = cleanWords(withoutBrand(rawModel, brand));
+  if (priorModel && priorModel !== model) reasons.push("model_rebuilt_from_title");
+  if (looksLikeBareModelCode(model)) reasons.push("model_code_needs_review");
   let title = cleanWords([brand, model].filter(Boolean).join(" ") || rawTitle);
   title = limitTitle(title);
   if (title.split(/\s+/).filter(Boolean).length < 3) reasons.push("title_too_short");
