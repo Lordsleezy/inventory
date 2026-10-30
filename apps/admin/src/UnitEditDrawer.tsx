@@ -115,7 +115,7 @@ export function UnitEditDrawer({
   appMode?: boolean;
   missingFields?: string[];
   locationLabel?: string;
-  onReadinessChanged?: () => void;
+  onReadinessChanged?: (gaps?: string[]) => void;
 }) {
   const [form, setForm] = useState<Form>(() => fromUnit(unit));
   const [options, setOptions] = useState<Options | null>(null);
@@ -131,6 +131,7 @@ export function UnitEditDrawer({
   const [viewPhoto, setViewPhoto] = useState<Photo | null>(null);
   const upcInput = useRef<HTMLInputElement>(null);
   const onlineDetails = useRef<HTMLDetailsElement>(null);
+  const [currentMissing, setCurrentMissing] = useState(missingFields);
   const set = (key: keyof Form, value: string) => setForm(prev => ({ ...prev, [key]: value }));
   const jumpToGap = (gap: string) => {
     if (gap === 'category' || gap === 'category_review' || gap === 'specifics' || gap.startsWith('review_')) {
@@ -149,7 +150,8 @@ export function UnitEditDrawer({
     onClose();
   };
 
-  useEffect(() => { setForm(fromUnit(unit)); setMsg(''); setError(''); }, [sku]);
+  useEffect(() => { setForm(fromUnit(unit)); setMsg(''); setError(''); setCurrentMissing(missingFields); }, [sku]);
+  useEffect(() => { setCurrentMissing(missingFields); }, [missingFields.join('|')]);
   useEffect(() => {
     void client.rpc('portal_receive_options').then(({ data, error: e }) => {
       if (!e && data) setOptions(data as Options);
@@ -286,6 +288,13 @@ export function UnitEditDrawer({
     setBusy(false);
     if (e) { setError(e.message); return; }
     const saved = data as Record<string, unknown>;
+    const { data: gaps, error: readinessError } = await client.rpc('portal_unit_readiness_gaps', { p_sku: sku });
+    if (readinessError) {
+      reportClientError(accessToken, { message: `Readiness refresh failed: ${readinessError.message}`, page: 'inventory/unit', action_name: 'readiness_refresh', sku });
+    } else if (Array.isArray(gaps)) {
+      setCurrentMissing(gaps as string[]);
+      onReadinessChanged?.(gaps as string[]);
+    }
     if (String(saved.title || '').trim() !== String(unit.title || '').trim()) {
       // A new title may now get an eBay category suggestion / generated description if those are still blank (never overwrites).
       void fetch(floorFunctionUrl('ebay-specifics'), { method: 'POST', headers: { Authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
@@ -416,13 +425,13 @@ export function UnitEditDrawer({
         <ReceiveWorkStatus client={client} accessToken={accessToken} sku={sku} />
         {msg && <p className="hint">{msg}</p>}
         {canDelete && unit.state === 'sold' && <RestoreInventoryButton client={client} sku={sku} onDone={() => { onSaved({ ...unit, state: 'available' }); onClose(); }} />}
-        {missingFields.length > 0 && <div className="inventory-missing" role="status"><p>{inventoryMissingText(missingFields)}. Fill in the named fields and save.</p><div className="unit-edit-gap-links">{missingFields.map(gap=><button type="button" className="text-button" key={gap} onClick={()=>jumpToGap(gap)}>Go to {gapLabel[gap] || reviewReasonLabel(gap) || gap}</button>)}</div></div>}
-        {missingFields.length === 0 && reviewReason && <p className="hint">eBay listing needs review: {reviewReason}.</p>}
+        {currentMissing.length > 0 && <div className="inventory-missing" role="status"><p>{inventoryMissingText(currentMissing)}. Fill in the named fields and save.</p><div className="unit-edit-gap-links">{currentMissing.map(gap=><button type="button" className="text-button" key={gap} onClick={()=>jumpToGap(gap)}>Go to {gapLabel[gap] || reviewReasonLabel(gap) || gap}</button>)}</div></div>}
+        {currentMissing.length === 0 && reviewReason && <p className="hint">eBay listing needs review: {reviewReason}.</p>}
         {reviewReason && canDelete ? <button type="button" className="secondary" disabled={busy} onClick={() => void clearEbayReview()}>I verified this issue · Clear eBay review</button> : null}
 
         <div className="unit-edit-status"><strong>{statusLabel}</strong><span>{locationLabel || String(unit.location || unit.bin || 'Unassigned')}</span></div>
         {canDelete && unsold && <DispositionButtons client={client} sku={sku} money={n => `$${(n / 100).toFixed(2)}`} stamp={s => new Date(s).toLocaleDateString()} className="secondary" onDone={() => { onReadinessChanged?.(); onDeleted?.(); onClose(); }} />}
-        <h3 id="unit-edit-photos" className={missingFields.includes('photo') ? 'unit-edit-required' : ''}>Photos{missingFields.includes('photo') ? ' · Required' : ''}</h3>
+        <h3 id="unit-edit-photos" className={currentMissing.includes('photo') ? 'unit-edit-required' : ''}>Photos{currentMissing.includes('photo') ? ' · Required' : ''}</h3>
         <div className="unit-edit-photo-strip">
           {orderedPhotos.map((p, i) => <button type="button" className="unit-edit-photo-open" key={p.id} onClick={() => setViewPhoto(p)} aria-label={`View photo ${i + 1}`}>
             {urls[p.path] ? <img src={urls[p.path]} alt={`Unit ${sku}, photo ${i + 1}`} loading="lazy" /> : <span>Photo unavailable</span>}{(p.is_primary || p.source === 'stock') && <small>{p.source === 'stock' ? 'STOCK' : 'Primary'}</small>}
@@ -458,25 +467,25 @@ export function UnitEditDrawer({
               {lookupBusy ? 'Looking up…' : 'Look up UPC & fill blanks'}
             </button>
           </div>
-          <label data-gap-target="brand" id="unit-edit-brand" className={missingFields.includes('brand') ? 'unit-edit-required' : ''}>Brand<input value={form.brand} onChange={e => set('brand', e.target.value)} />{missingFields.includes('brand') && <small>Required</small>}{form.brand.trim() && form.brand.trim().toLowerCase() === form.title.trim().toLowerCase() && <small className="unit-edit-brand-hint">Looks like a product name, not a brand · <button type="button" onClick={() => set('brand', 'Unbranded')}>No brand</button></small>}</label>
-          <label data-gap-target="model" id="unit-edit-model" className={missingFields.includes('model') ? 'unit-edit-required' : ''}>Model<input value={form.model} onChange={e => set('model', e.target.value)} />{missingFields.includes('model') && <small>Required</small>}</label>
-          <label data-gap-target="title" id="unit-edit-title" className={`unit-edit-wide${missingFields.includes('title') ? ' unit-edit-required' : ''}`}>Title<input value={form.title} onChange={e => set('title', e.target.value)} />{missingFields.includes('title') && <small>Required</small>}</label>
-          <label data-gap-target="description" id="unit-edit-description" className={`unit-edit-wide${missingFields.includes('description') ? ' unit-edit-required' : ''}`}>Description<textarea rows={3} value={form.description} onChange={e => set('description', e.target.value)} />{missingFields.includes('description') && <small>Required</small>}</label>
+          <label data-gap-target="brand" id="unit-edit-brand" className={currentMissing.includes('brand') ? 'unit-edit-required' : ''}>Brand<input value={form.brand} onChange={e => set('brand', e.target.value)} />{currentMissing.includes('brand') && <small>Required</small>}{form.brand.trim() && form.brand.trim().toLowerCase() === form.title.trim().toLowerCase() && <small className="unit-edit-brand-hint">Looks like a product name, not a brand · <button type="button" onClick={() => set('brand', 'Unbranded')}>No brand</button></small>}</label>
+          <label data-gap-target="model" id="unit-edit-model" className={currentMissing.includes('model') ? 'unit-edit-required' : ''}>Model<input value={form.model} onChange={e => set('model', e.target.value)} />{currentMissing.includes('model') && <small>Required</small>}</label>
+          <label data-gap-target="title" id="unit-edit-title" className={`unit-edit-wide${currentMissing.includes('title') ? ' unit-edit-required' : ''}`}>Title<input value={form.title} onChange={e => set('title', e.target.value)} />{currentMissing.includes('title') && <small>Required</small>}</label>
+          <label data-gap-target="description" id="unit-edit-description" className={`unit-edit-wide${currentMissing.includes('description') ? ' unit-edit-required' : ''}`}>Description<textarea rows={3} value={form.description} onChange={e => set('description', e.target.value)} />{currentMissing.includes('description') && <small>Required</small>}</label>
         </div>
         <h3>Pricing</h3>
         <div className="unit-edit-grid">
-          <label data-gap-target="price" id="unit-edit-price" className={missingFields.includes('price') ? 'unit-edit-required' : ''}>Price<input inputMode="decimal" placeholder="24.99" value={form.price} onChange={e => set('price', e.target.value)} />{missingFields.includes('price') && <small>Required</small>}</label>
+          <label data-gap-target="price" id="unit-edit-price" className={currentMissing.includes('price') ? 'unit-edit-required' : ''}>Price<input inputMode="decimal" placeholder="24.99" value={form.price} onChange={e => set('price', e.target.value)} />{currentMissing.includes('price') && <small>Required</small>}</label>
           {canDelete && <label>Cost<input inputMode="decimal" placeholder="Add actual cost" value={form.cost} onChange={e => set('cost', e.target.value)} /></label>}
         </div>
         <h3>Condition</h3>
         <div className="unit-edit-grid">
-          <label data-gap-target="condition" id="unit-edit-condition" className={missingFields.includes('condition') ? 'unit-edit-required' : ''}>Condition
+          <label data-gap-target="condition" id="unit-edit-condition" className={currentMissing.includes('condition') ? 'unit-edit-required' : ''}>Condition
             <select value={form.condition} onChange={e => set('condition', e.target.value)}>
               <option value="">—</option>
               {conditions.map(c => <option key={c} value={c}>{c}</option>)}
               {form.condition && !conditions.includes(form.condition) && <option value={form.condition}>{form.condition}</option>}
             </select>
-            {missingFields.includes('condition') && <small>Required</small>}
+            {currentMissing.includes('condition') && <small>Required</small>}
           </label>
           <label>Test status
             <select value={form.testStatus} onChange={e => set('testStatus', e.target.value)}>
