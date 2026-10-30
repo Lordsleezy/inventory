@@ -1,0 +1,42 @@
+name: Roll back release
+
+# Points production at the previous release commit.
+# Netlify restore does not rebuild. Migrations are not rolled back.
+# This is the only workflow that moves release backwards (force-with-lease).
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type rollback to move production back one release"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: floor-production-release
+  cancel-in-progress: false
+
+jobs:
+  rollback:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: release
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.18.0"
+
+      - name: Roll production back to the previous release
+        env:
+          ROLLBACK_CONFIRM: ${{ inputs.confirm }}
+          GH_TOKEN: ${{ github.token }}
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          RESEND_FROM: ${{ secrets.RESEND_FROM }}
+          RESEND_REPLY_TO: ${{ secrets.RESEND_REPLY_TO }}
+        run: node scripts/release/rollback.mjs

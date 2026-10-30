@@ -402,11 +402,9 @@ sync-now, listing-check, listing-manager, video-scan, video-scan-enrich. `ebay-d
 
 ## 10. Deploy and migration rules
 
-**Functions site (inventoryobi)** — `scripts/DEPLOY.md`:
-1. From a clean checkout equal to `origin/master`: `node scripts/deploy-prod-netlify.mjs` (dry run: runs the
-   deploy guard `scripts/lib/deploy-guard.mjs`, builds, checks env var *names*, prints the plan).
-2. `node scripts/deploy-prod-netlify.mjs --confirm-prod` publishes (`netlify deploy --prod --no-build`) and
-   health-checks. Needs Paul's approval. Rollback: `scripts/rollback-prod-netlify.mjs`.
+**Production** publishes from the `release` branch once a day at 6:00 Pacific, or when Paul runs the Release now workflow. Merging to `master` does not deploy and does not migrate live. See `AGENTS.md`.
+
+**Functions site (inventoryobi)** — `scripts/DEPLOY.md`. Manual `scripts/deploy-prod-netlify.mjs` is emergency-only and stays behind `FLOOR_EMERGENCY_DEPLOY=yes-paul-approved`. It runs the deploy guard `scripts/lib/deploy-guard.mjs`, builds, and checks env var *names*. `--confirm-prod` publishes. Rollback of a single Netlify deploy: `scripts/rollback-prod-netlify.mjs` (same emergency flag). The normal rollback is the Roll back release workflow.
 3. The guard fails on: a function missing from `scripts/function-manifest.json` (or vice versa), schedule
    mismatch, missing critical functions, legacy `export const handler`, oversized/missing artifacts, missing
    required env names. Regenerate the manifest with `scripts/write-function-manifest.mjs`.
@@ -414,10 +412,8 @@ sync-now, listing-check, listing-manager, video-scan, video-scan-enrich. `ebay-d
 **Admin site** — separate Netlify site built from `apps/admin/netlify.toml` (`npm run build -w @floor/admin`,
 publish `apps/admin/dist`, Node 22). Build needs `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY`.
 
-**Migrations** — `AGENTS.md` (repo rule, verbatim intent):
-* Never apply a migration to the live database from an unmerged branch.
-* Production DB work starts from current `master`; the migration file is committed and pushed to `master` in the
-  same session it is applied; then verify the ledger (`supabase migration list`) matches.
+**Migrations** — `AGENTS.md`:
+* Agents never apply migrations to live. The release job applies pending files from `master` before it fast-forwards `release`.
 * Never `supabase migration repair --status reverted` to hide drift.
 * Never batch-apply `supabase/unapplied-legacy-migrations`.
 

@@ -1,0 +1,23 @@
+name: Daily release
+
+# Release clock lives in scripts/release/schedule.mjs (6:00 America/Los_Angeles).
+# GitHub cron is UTC, so this wakes at 13:00 UTC (PDT) and 14:00 UTC (PST).
+# The job exits immediately unless local Pacific time is in the 6:00 hour.
+on:
+  schedule:
+    - cron: "0 13,14 * * *"
+
+permissions:
+  contents: write
+  checks: read
+
+concurrency:
+  group: floor-production-release
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    uses: ./.github/workflows/promote-release.yml
+    secrets: inherit
+    with:
+      reason: schedule

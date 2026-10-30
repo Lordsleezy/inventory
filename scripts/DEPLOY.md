@@ -10,7 +10,7 @@ Functions that export `handler` run in Netlify's old Lambda compatibility mode. 
 
 ## Emergency recovery only
 
-The merge to `master` is the only routine production deploy. Do not run a manual Netlify deploy to publish application changes. The guarded scripts below exist only for Paul-approved emergency recovery.
+Routine production deploys happen when `release` moves (daily at 6:00 Pacific, or Release now). Do not run a manual Netlify deploy to publish application changes. The guarded scripts below exist only for Paul-approved emergency recovery.
 
 For an emergency recovery, from a clean checkout of the latest `origin/master`:
 
