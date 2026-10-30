@@ -30,6 +30,7 @@ const { outputFiles } = await build({
           return { data: reference, error: scenario.failed ? { message: 'unavailable' } : null };
         }
         if (name === 'receive_group_lookup') return { data: scenario.groups || [] };
+        if (name === 'portal_receive_stock_match') return { data: scenario.stockMatches || [], error: null };
         if (name === 'portal_receive_options' || name === 'staff_receive_options') return { data: { next_sku: '10001', categories: ['Home'], conditions: ['New'], test_statuses: ['untested'] } };
         return { data: null };
       },
@@ -115,10 +116,12 @@ try {
   assert.equal(await staff.evaluate(() => window.__calls.filter(call => call.table === 'store_manifests').length), 0, 'clerk needs only the narrow reference RPC');
   for(let i=0;i<10;i++) await staff.getByRole('button',{name:'Increase receive quantity'}).click();
   assert.equal(await staff.locator('.receive-quantity output').innerText(),'11','clerk can set Qty 11 without typing');
-  const repeat=await open({staff:true,reference:ref,groups:[{id:'group-radio',title:'Portable Radio',in_stock:8,fields:{brand:'Example',model:'Portable Radio',title:'Example Portable Radio',ask:'24.99',description:'Portable radio details',cost:'999.00'}}]});
-  await repeat.getByRole('button',{name:'Add more to this group'}).click();
-  assert.equal(await repeat.locator('input[placeholder="0.00"]').inputValue(),'24.99','repeat UPC fills group price');
-  assert.equal(await repeat.locator('input[placeholder="Leave blank if unknown"]').count(),0,'group reuse cannot expose clerk cost');
+  const repeat=await open({staff:true,reference:ref,stockMatches:[{sku:'11500',title:'Example Portable Radio',quantity:8,condition:'New',is_stocked:true,can_convert:false}]});
+  await repeat.locator('input[placeholder="0.00"]').fill('24.99');
+  await repeat.getByRole('button',{name:'Add to this SKU'}).waitFor();
+  await repeat.getByRole('button',{name:'Add to this SKU'}).click();
+  await repeat.getByText('SKU 11500 goes to 9 on hand').waitFor();
+  assert.equal(await repeat.locator('input[placeholder="Leave blank if unknown"]').count(),0,'stock reuse cannot expose clerk cost');
   console.log('PASS: manifest retail, no-match, catalog miss → photo prompt, all fields isolated, SALVAGE/mixed warnings, manual price, slow/failing sidecar.');
   for (const isStaff of [false, true]) {
     for (const testCase of [

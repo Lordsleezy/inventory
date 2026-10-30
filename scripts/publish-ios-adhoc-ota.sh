@@ -8,6 +8,11 @@
 # Required: CODEMAGIC_TOKEN, NETLIFY_AUTH_TOKEN, NETLIFY_SITE_ID
 set -euo pipefail
 
+if [ "${FLOOR_EMERGENCY_DEPLOY:-}" != "yes-paul-approved" ]; then
+  echo "Manual Netlify deploy disabled: merge to master is the only production deploy. Paul-approved emergency recovery requires FLOOR_EMERGENCY_DEPLOY=yes-paul-approved." >&2
+  exit 1
+fi
+
 BUNDLE_ID="${BUNDLE_ID:-com.openboxindustries.floor}"
 APP_NAME="${OTA_APP_NAME:-Floor}"
 TAG="${CM_TAG:-${CM_BRANCH:-adhoc}}"

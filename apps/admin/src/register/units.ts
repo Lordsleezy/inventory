@@ -63,11 +63,17 @@ export async function queryAvailableUnits(query: string, limit = 16): Promise<Re
   if (!q) return [];
   const sb = floorCloud();
 
+  // Retired barcode stickers remain usable after a stock merge. Alias lookup is
+  // server scoped to the signed-in store and returns the current canonical SKU.
+  let canonical = q;
+  const alias = await sb.rpc('portal_resolve_stock_sku', { p_sku: q });
+  if (!alias.error && typeof alias.data === 'string') canonical = alias.data;
+
   const exact = await sb
     .from('units_pos')
     .select(SELECT)
     .eq('state', 'available')
-    .eq('sku', q)
+    .eq('sku', canonical)
     .maybeSingle();
   if (!exact.error && exact.data) return [toUnit(exact.data as Record<string, unknown>)];
 
@@ -76,7 +82,7 @@ export async function queryAvailableUnits(query: string, limit = 16): Promise<Re
       .from('units_pos')
       .select(BASE_COLUMNS)
       .eq('state', 'available')
-      .eq('sku', q)
+      .eq('sku', canonical)
       .maybeSingle();
     if (!exactFallback.error && exactFallback.data) return [toUnit(exactFallback.data as Record<string, unknown>)];
   }

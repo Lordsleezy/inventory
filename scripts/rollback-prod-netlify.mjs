@@ -17,6 +17,14 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const site = process.env.NETLIFY_SITE_ID || "458b95f4-4adb-4721-97bc-400f8bb97597";
 const args = process.argv.slice(2);
 const confirm = args.includes("--confirm");
+if (confirm && process.env.FLOOR_EMERGENCY_DEPLOY !== "yes-paul-approved") {
+  console.error(JSON.stringify({
+    ok: false,
+    error: "manual_deploy_disabled",
+    hint: "Production rollback is emergency recovery. Set FLOOR_EMERGENCY_DEPLOY=yes-paul-approved only with Paul's approval.",
+  }, null, 2));
+  process.exit(1);
+}
 const listOnly = args.includes("--list");
 const idIdx = args.indexOf("--deploy-id");
 const deployId = idIdx >= 0 ? args[idIdx + 1] : "";

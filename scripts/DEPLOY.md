@@ -8,9 +8,11 @@ The live functions site is `inventoryobi` (`admin` calls it through `inventoryob
 
 Functions that export `handler` run in Netlify's old Lambda compatibility mode. That mode still has AWS's 4KB cap on the combined size of environment variables. If the cap is exceeded, Netlify cannot create those functions. If every function fails, the deploy can go live with none. Removing variables gets the total back under 4KB, which is why that looked like a fix. The current Netlify runtime does not have that cap. A function reaches it by exporting `default` and not exporting `handler`. This repo's functions now do that.
 
-## Publish
+## Emergency recovery only
 
-From a clean checkout of the latest `origin/master`:
+The merge to `master` is the only routine production deploy. Do not run a manual Netlify deploy to publish application changes. The guarded scripts below exist only for Paul-approved emergency recovery.
+
+For an emergency recovery, from a clean checkout of the latest `origin/master`:
 
 ```
 node scripts/deploy-prod-netlify.mjs
@@ -18,9 +20,10 @@ node scripts/deploy-prod-netlify.mjs
 
 That builds and checks the function bundle, then stops. It does not publish.
 
-To publish after that check says ok, and only when you have said to:
+To publish after that check says ok, only with Paul's approval and this explicit environment flag:
 
 ```
+FLOOR_EMERGENCY_DEPLOY=yes-paul-approved
 node scripts/deploy-prod-netlify.mjs --confirm-prod
 ```
 
