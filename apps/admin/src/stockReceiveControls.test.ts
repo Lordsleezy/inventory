@@ -32,10 +32,25 @@ test('receive matching popup shows field differences and lets a clerk add to sto
 test('stock quantity editor confirms admin conversion and blocks reserved-unit counts', async () => {
   const controls = await source('UnitEditDrawer.tsx');
   const migration = await readFile(path.resolve(root, '../../../supabase/migrations/20261201090000_receive_match_quantity_controls.sql'), 'utf8');
-  assert.match(controls, /canDelete && !isStocked/);
-  assert.match(controls, /Convert to stocked item with \{convertQty\} on hand/);
+  assert.match(controls, /disabled=\{!canDelete \|\| busy \|\| Number\(quantityDraft\)>=999\}/);
+  assert.match(controls, /Convert to stocked item with \$\{q\} on hand/);
+  assert.match(controls, /role="dialog" aria-modal="true" aria-label="Quantity on hand"/);
   assert.match(controls, /QuantityPicker/);
   assert.match(migration, /if target<reserved then raise exception 'quantity_below_reserved:%'/);
   assert.match(migration, /Quantity edited from %s to %s/);
   assert.match(migration, /target=0 then 'available'/);
+});
+
+test('item editor stages UPC, category, listing switches, quantity, and location until its header Save', async () => {
+  const controls = await source('UnitEditDrawer.tsx');
+  const specifics = await source('EbaySpecificsPanel.tsx');
+  assert.match(controls, /upcEnrichment\.current =/);
+  assert.match(controls, /if\(upcEnrichment\.current\).*portal_enrich_received_unit/s);
+  assert.match(controls, /onClick=\{\(\)\s*=>\s*void save\(\)\}/);
+  assert.match(controls, /window\.confirm\('Discard unsaved changes\?'\)/);
+  assert.match(controls, /portal_move_location_stock/);
+  assert.match(controls, /portal_unit_readiness_gaps/);
+  assert.match(specifics, /pendingCategory\.current =/);
+  assert.match(specifics, /Category and answers will be saved with the item/);
+  assert.match(specifics, /dirtyRef\?\.current/);
 });

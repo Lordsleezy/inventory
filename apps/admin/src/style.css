@@ -939,3 +939,45 @@ html.dark .aspect-list{background:#1c2129;color:#e8eef4;border-color:#354050}htm
 .receive-typing-row{display:flex;justify-content:center;gap:4px}
 .receive-typing-row button{flex:1;min-width:0;min-height:42px;padding:6px 3px!important;color:#f8fafc!important;background:#344253!important;border-color:#526277!important;font-size:15px}
 .receive-typing-row .receive-typing-space{flex:3}
+
+/* Redesigned item editor */
+html.app-mode .app-unit-edit .inventory-detail{max-width:760px;margin:0 auto;padding:0 14px calc(100px + env(safe-area-inset-bottom,0px));font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif}
+html.app-mode .app-unit-edit .inventory-detail>h3{margin:18px 4px 8px;padding:0!important;color:#8e8e93;font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase}
+html.app-mode .app-unit-edit .unit-edit-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 12px;margin:0;padding:0 12px;border-radius:14px;background:#1c1c1e;min-width:0}
+html.app-mode .app-unit-edit .unit-edit-grid>label{display:flex;align-items:center;justify-content:space-between;gap:8px;min-width:0;min-height:49px;padding:8px 0;border-bottom:1px solid #38383a;color:#f5f5f7;font-size:14px}
+html.app-mode .app-unit-edit .unit-edit-grid>label input,html.app-mode .app-unit-edit .unit-edit-grid>label select,html.app-mode .app-unit-edit .unit-edit-grid>label textarea{width:auto;max-width:62%;min-width:0;margin:0;padding:5px 2px;border:0;border-radius:0;background:transparent;color:#f5f5f7;text-align:right;font-size:14px}
+html.app-mode .app-unit-edit .unit-edit-grid>label textarea{text-align:left}
+html.app-mode .app-unit-edit .unit-edit-grid>label:has(textarea),html.app-mode .app-unit-edit .unit-edit-grid>label#unit-edit-description{display:grid;grid-template-columns:1fr;justify-items:stretch}
+html.app-mode .app-unit-edit .unit-edit-grid>label#unit-edit-description textarea{max-width:100%;min-height:70px;text-align:left;white-space:pre-wrap}
+html.app-mode .app-unit-edit .unit-edit-grid .unit-edit-wide{grid-column:1/-1}
+html.app-mode .app-unit-edit .unit-edit-grid .unit-edit-box-fields{display:flex;justify-content:flex-end;gap:6px;width:62%;min-width:0}
+html.app-mode .app-unit-edit .unit-edit-box-fields input{width:33%;max-width:none!important;text-align:right!important}
+html.app-mode .app-unit-edit .unit-stock-card{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:8px 0;padding:12px;border-radius:14px;background:#1c1c1e;color:#fff}
+html.app-mode .app-unit-edit .unit-edit-quantity-display{display:inline-block;border:0;background:transparent;color:#0a84ff;font-size:26px;font-weight:700;cursor:pointer}
+html.app-mode .app-unit-edit .unit-edit-quantity-display:disabled{color:#0a84ff;opacity:1;cursor:default}
+html.app-mode .app-unit-edit .unit-quantity-step{width:36px;height:36px;border:0;border-radius:50%;background:#29292b;color:#0a84ff;font-size:22px}
+html.app-mode .app-unit-edit .unit-edit-description{display:grid;gap:5px;grid-column:1/-1;padding:10px 12px;border-radius:14px;background:#1c1c1e;color:#f5f5f7}
+html.app-mode .app-unit-edit .unit-edit-description p{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden;margin:0;color:#c7c7cc;font-size:13px;white-space:pre-wrap}
+.unit-description-sheet{position:relative;display:flex;flex-direction:column;width:min(100%,720px);height:min(92dvh,900px);margin:auto;padding:12px;border-radius:18px;background:#1c1c1e;color:#f5f5f7}
+.unit-description-sheet header{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:8px 4px 14px}
+.unit-description-sheet header button{justify-self:start;border:0;background:none;color:#0a84ff;font:inherit}
+.unit-description-sheet header span{min-width:36px}
+.unit-description-sheet textarea{flex:1;resize:none;border:0;border-radius:10px;background:#29292b;padding:12px;color:inherit;font:inherit;line-height:1.5}
+html.app-mode .app-unit-edit .unit-edit-status{display:flex;align-items:center;justify-content:flex-start;flex-wrap:wrap;gap:7px;margin:8px 0;padding:0;border:0;background:transparent}
+html.app-mode .app-unit-edit .unit-edit-status>strong,html.app-mode .unit-edit-location-pill,html.app-mode .unit-edit-gap-pill{padding:5px 9px;border:0;border-radius:999px;background:#1c1c1e;color:#dedee3;font-size:11px}
+html.app-mode .unit-edit-location-pill{cursor:pointer}.unit-edit-gap-pill{background:#3a2b11!important;color:#ffb340!important}
+html.app-mode .app-unit-edit .unit-edit-photo-strip{display:flex;gap:8px;overflow-x:auto;padding-bottom:3px}
+html.app-mode .app-unit-edit .unit-edit-photo-open,html.app-mode .app-unit-edit .unit-edit-photo-add{position:relative;flex:0 0 84px;width:84px;height:84px;border-radius:12px}
+html.app-mode .app-unit-edit .unit-edit-photo-open img{width:100%;height:100%;object-fit:cover}
+html.app-mode .app-unit-edit .unit-edit-delete{display:block;width:100%;margin:28px 0 10px;padding:12px;border:0;border-radius:12px;background:#1c1c1e;color:#ff453a;text-align:center}
+html.app-mode .app-unit-edit .unit-edit-online{padding:0 12px;border-radius:14px;background:#1c1c1e;color:#fff}
+html.app-mode .app-unit-edit .unit-edit-online .ebay-specifics-category,html.app-mode .app-unit-edit .unit-edit-online .ebay-specific-field,html.app-mode .app-unit-edit .unit-edit-online .ebay-specifics-missing{color:#fff}
+html.app-mode .app-unit-edit .unit-edit-reference-row{display:flex;justify-content:space-between;grid-column:1/-1;padding:12px;color:#8e8e93}
+html.app-mode .app-unit-edit .unit-edit-dismiss-banner{width:100%;margin:8px 0;padding:10px;border:0;border-radius:10px;background:#0d2c1a;color:#34c759;text-align:left}
+html.app-mode .unit-edit-amber-dot{display:inline-block;width:7px;height:7px;margin-left:5px;border-radius:50%;background:#ff9f0a}
+.unit-quantity-backdrop{position:fixed;inset:0;z-index:13000;display:flex;align-items:flex-end;justify-content:center;background:#0009}
+.unit-quantity-sheet{box-sizing:border-box;width:min(100%,620px);max-height:min(90dvh,760px);overflow:auto;padding:12px 16px calc(18px + env(safe-area-inset-bottom,0px));border-radius:20px 20px 0 0;background:#1c1c1e;color:#fff}
+.unit-quantity-grabber{width:38px;height:4px;margin:0 auto 16px;border-radius:9px;background:#6b6b70}.unit-quantity-sheet h2{margin:4px 0}.unit-quantity-sheet p,.unit-quantity-sheet small{color:#a1a1a8}.unit-quantity-sheet>label{display:grid;gap:6px;margin-top:12px;color:#a1a1a8}.unit-quantity-sheet input,.unit-quantity-sheet select{box-sizing:border-box;width:100%;min-height:48px;padding:10px;border:0;border-radius:10px;background:#2c2c2e;color:#fff;font:inherit;font-size:16px}.unit-quantity-wheel{height:146px;overflow:hidden;margin:12px 0;border-radius:12px;background:#2c2c2e}.unit-quantity-wheel select{height:146px;text-align:center;font-size:18px}.unit-quantity-wheel option{padding:9px}.unit-quantity-actions{display:flex;gap:10px;margin-top:16px}.unit-quantity-actions button{flex:1;min-height:48px;border:0;border-radius:12px;background:#0a84ff;color:#fff;font:inherit;font-weight:600}.unit-quantity-actions .secondary{background:#333;color:#0a84ff}
+.unit-edit-box-fields{display:flex;gap:6px}.unit-edit-box-fields input{min-width:0;width:33%}.unit-edit-reference-row{display:flex;justify-content:space-between;grid-column:1/-1;padding:12px;color:#778394}.unit-edit-amber-dot{display:inline-block;width:7px;height:7px;margin-left:5px;border-radius:50%;background:#e5a018}
+@media(max-width:600px){html.app-mode .app-unit-edit .unit-edit-grid{grid-template-columns:minmax(0,1fr)}html.app-mode .app-unit-edit .unit-edit-grid .unit-edit-wide{grid-column:1}.unit-quantity-sheet{width:100%}}
+@media(min-width:900px){.app-unit-edit .inventory-detail{width:min(100% - 40px,920px)}.app-unit-edit .unit-edit-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
