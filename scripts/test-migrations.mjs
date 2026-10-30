@@ -168,7 +168,7 @@ const rest = all.filter((f) => f.name > "0005_private_photos.sql");
   const stockedReceiveId = '00000000-0000-4000-8000-000000000606';
   await db.query(`insert into public.store_bays(store_id,bay_no,row_bins) values($1,1,ARRAY[3,3,3])`, [storeId]);
   await db.query(`insert into public.store_locations(store_id,code,bay_no,row_no) values($1,'1-1',1,1)`, [storeId]);
-  const stockedFields = { ...nfsFields, p_quantity: 12, p_title: 'Acme Holiday Lights' };
+  const stockedFields = { ...nfsFields, p_quantity: 12, p_title: 'Acme Holiday Lights', p_ask: 2500 };
   const stockedExtras = { ...nfsExtras, location: '1-1' };
   const { rows: stockedRows } = await db.query(
     `select public.portal_receive_stocked_commit($1,$2,ARRAY[]::text[],$3) as result`,
@@ -190,10 +190,12 @@ const rest = all.filter((f) => f.name > "0005_private_photos.sql");
   );
   assert.equal(replayedStock[0].result.skus.length, 1, 'replayed multi-quantity receive keeps one SKU');
   const { rows: stockMatches } = await db.query(
-    `select public.portal_receive_stock_match(null,'Acme Holiday Lights',null,null) as matches`,
+    `select public.portal_receive_stock_match(null,'Acme Holiday Lights',9999,'Used') as matches`,
   );
   assert.ok(stockMatches[0].matches.some((match) => match.sku === stockedSku && match.is_stocked),
     'exact no-UPC title lookup finds the existing stocked SKU');
+  assert.ok(stockMatches[0].matches.some((match) => match.sku === stockedSku && match.price_diff && match.condition_diff),
+    'receive matcher retains identity matches when price and condition differ');
   const stockAddRequest = '00000000-0000-4000-8000-000000000607';
   await db.query(`select public.portal_stock_receive_add($1,$2,2,null)`, [stockAddRequest, stockedSku]);
   const { rows: stockAddReplay } = await db.query(`select public.portal_stock_receive_add($1,$2,2,null) as result`, [stockAddRequest, stockedSku]);
@@ -217,6 +219,21 @@ const rest = all.filter((f) => f.name > "0005_private_photos.sql");
     'stock add updates on-hand atomically');
   assert.equal((await db.query(`select public.portal_stock_adjust($1,'set',13,'count_correction')`, [stockedSku])).rows[0].portal_stock_adjust, 13,
     'count correction can set a non-negative balance');
+  const setHistory = (await db.query(`select public.portal_stock_history($1) history`, [stockedSku])).rows[0].history;
+  assert.equal(setHistory[0].reason, 'Quantity edited from 17 to 13', 'count changes record the exact before/after movement reason');
+  assert.equal(setHistory[0].actor, 'Books Admin', 'count changes record the editor');
+  const { rows: reservation } = await db.query(
+    `insert into public.reservations(store_id,sku,channel,expires_at) values($1,$2,'test',now()+interval '1 hour') returning id`,
+    [storeId, stockedSku],
+  );
+  await assert.rejects(db.query(`select public.portal_stock_adjust($1,'set',0,'count_correction')`, [stockedSku]), /quantity_below_reserved/,
+    'count cannot be lowered below a live reservation');
+  await db.query(`update public.reservations set released_at=now() where id=$1`, [reservation[0].id]);
+  await db.query(`select public.portal_stock_adjust($1,'set',0,'count_correction')`, [stockedSku]);
+  const { rows: zeroCount } = await db.query(`select qty_on_hand,state from public.units where store_id=$1 and sku=$2`, [storeId, stockedSku]);
+  assert.deepEqual(zeroCount[0], { qty_on_hand: 0, state: 'available' }, 'zero quantity remains available/out-of-stock rather than sold');
+  await db.query(`select public.portal_stock_adjust($1,'set',13,'count_correction')`, [stockedSku]);
+  await db.query(`update public.unit_location_stock set quantity=12 where store_id=$1 and sku=$2 and location_code='1-1'`, [storeId,stockedSku]);
   await assert.rejects(db.query(`select public.portal_stock_adjust($1,'set',-1,'count_correction')`, [stockedSku]), /stock_cannot_be_negative/,
     'stock adjustment refuses negative on-hand');
   assert.equal((await db.query(`select coalesce(sum(quantity_delta),0)::int balance from public.stock_movements where store_id=$1 and sku=$2`, [storeId,stockedSku])).rows[0].balance, 13,
@@ -234,9 +251,9 @@ const rest = all.filter((f) => f.name > "0005_private_photos.sql");
     'giveaway and defective pull subtract from stocked on-hand');
   assert.equal((await db.query(`select coalesce(sum(quantity_delta),0)::int balance from public.stock_movements where store_id=$1 and sku=$2`, [storeId,stockedSku])).rows[0].balance, 10,
     'giveaway and defective pull preserve the movement balance invariant');
-  assert.equal((await db.query(`select coalesce(sum(quantity),0)::int quantity from public.unit_location_stock where store_id=$1 and sku=$2 and location_code='1-1'`, [storeId,stockedSku])).rows[0].quantity, 2,
+  assert.equal((await db.query(`select coalesce(sum(quantity),0)::int quantity from public.unit_location_stock where store_id=$1 and sku=$2 and location_code='1-1'`, [storeId,stockedSku])).rows[0].quantity, 0,
     'giveaway and defective pull keep source location allocations in sync');
-  assert.equal((await db.query(`select quantity from public.unit_location_stock where store_id=$1 and sku=$2 and location_code='1-1'`, [storeId,defectiveSku])).rows[0].quantity, 1,
+  assert.equal((await db.query(`select coalesce(sum(quantity),0)::int quantity from public.unit_location_stock where store_id=$1 and sku=$2 and location_code='1-1'`, [storeId,defectiveSku])).rows[0].quantity, 0,
     'defective pull assigns the moved unit to its new SKU at the same location');
   await assert.rejects(
     db.query(`select public.receive_commit($1,$2,ARRAY[]::text[],$3)`, [

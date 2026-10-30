@@ -13,6 +13,7 @@ import { reportClientError } from './clientLog';
 import { errText } from './errText';
 import { reviewReasonLabel } from './inventoryReview';
 import { DispositionButtons } from './DispositionDialogs';
+import { QuantityPicker } from './ReceiveQuantity';
 import { printUnitLabels } from './ReceiveGroupRow';
 
 type Photo = { id: number; path: string; is_primary: boolean; sort_order?: number; source?: string; source_url?: string };
@@ -130,9 +131,10 @@ export function UnitEditDrawer({
   const [error, setError] = useState('');
   const [stockHistory, setStockHistory] = useState<StockMovement[]>([]);
   const [stockAddQty, setStockAddQty] = useState('1');
+  const [convertQty, setConvertQty] = useState('2');
   const [stockAddCost, setStockAddCost] = useState('');
   const [stockAdjustMode, setStockAdjustMode] = useState<'set'|'delta'>('set');
-  const [stockAdjustQty, setStockAdjustQty] = useState('');
+  const [stockAdjustQty, setStockAdjustQty] = useState(String(Number(unit.qty_on_hand ?? 1) || 0));
   const [stockAdjustReason, setStockAdjustReason] = useState('count_correction');
   const [stockGiveQty, setStockGiveQty] = useState('1');
   const [stockGiveTo, setStockGiveTo] = useState('');
@@ -163,7 +165,7 @@ export function UnitEditDrawer({
     onClose();
   };
 
-  useEffect(() => { setForm(fromUnit(unit)); setMsg(''); setError(''); setCurrentMissing(missingFields); }, [sku]);
+  useEffect(() => { setForm(fromUnit(unit)); setStockAdjustQty(String(Number(unit.qty_on_hand ?? 1) || 0)); setMsg(''); setError(''); setCurrentMissing(missingFields); }, [sku]);
   useEffect(() => { setCurrentMissing(missingFields); }, [missingFields.join('|')]);
   useEffect(() => {
     void client.rpc('portal_receive_options').then(({ data, error: e }) => {
@@ -448,7 +450,7 @@ export function UnitEditDrawer({
   async function addStock() {
     const quantity = Number(stockAddQty);
     const cost = cents(stockAddCost);
-    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 1000 || cost === undefined) { setError('Enter a whole quantity and a valid optional cost each.'); return; }
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 999 || cost === undefined) { setError('Enter a whole quantity from 1 to 999 and a valid optional cost each.'); return; }
     setBusy(true); setError('');
     const { data, error: e } = await client.rpc('portal_stock_add', { p_sku: sku, p_quantity: quantity, p_cost_cents: stockAddCost.trim() ? cost : null });
     setBusy(false);
@@ -459,13 +461,25 @@ export function UnitEditDrawer({
 
   async function adjustStock() {
     const quantity = Number(stockAdjustQty);
-    if (!Number.isInteger(quantity) || (stockAdjustMode === 'set' && quantity < 0) || !stockAdjustReason) { setError('Enter a valid adjustment and reason.'); return; }
+    if (!Number.isInteger(quantity) || (stockAdjustMode === 'set' && (quantity < 0 || quantity > 999)) || (stockAdjustMode === 'delta' && (quantity < -999 || quantity > 999)) || !stockAdjustReason) { setError('Enter a whole adjustment from 0 to 999 for a count, or −999 to 999 for a change.'); return; }
     setBusy(true); setError('');
     const { data, error: e } = await client.rpc('portal_stock_adjust', { p_sku: sku, p_mode: stockAdjustMode, p_quantity: quantity, p_reason: stockAdjustReason });
     setBusy(false);
     if (e) { setError(e.message); return; }
     onSaved({ ...unit, qty_on_hand: Number(data), state: Number(data) > 0 ? 'available' : 'voided' });
-    setStockAdjustQty(''); setMsg(`Adjusted. ${Number(data)} on hand.`); await refreshStockHistory(); onReadinessChanged?.();
+    setStockAdjustQty(String(Number(data))); setMsg(`Adjusted. ${Number(data)} on hand.`); await refreshStockHistory(); onReadinessChanged?.();
+  }
+
+  async function convertToStockedAtQuantity() {
+    const quantity = Number(convertQty);
+    if (!Number.isInteger(quantity) || quantity < 2 || quantity > 999) { setError('Enter a whole quantity from 2 to 999.'); return; }
+    if (!window.confirm(`Convert to stocked item with ${quantity} on hand?`)) return;
+    setBusy(true); setError('');
+    const { data, error: e } = await client.rpc('portal_stock_add', { p_sku: sku, p_quantity: quantity - stockQuantity, p_cost_cents: null });
+    setBusy(false);
+    if (e) { setError(e.message); return; }
+    onSaved({ ...unit, qty_on_hand: Number(data), is_stocked: true, state: 'available' });
+    setConvertQty('2'); setMsg(`Converted to stocked item with ${Number(data)} on hand.`); await refreshStockHistory(); onReadinessChanged?.();
   }
 
   async function giveStockAway() {
@@ -539,12 +553,12 @@ export function UnitEditDrawer({
           <div><span>ON HAND</span><strong>{stockQuantity}</strong><small>{stockHistory.filter(m => m.type === 'sold').reduce((n,m) => n + Math.abs(m.delta),0)} sold · {stockHistory.filter(m => ['received','opening_balance','added'].includes(m.type)).reduce((n,m) => n + Math.max(m.delta,0),0)} received</small></div>
           <button type="button" className="secondary" disabled={!stockQuantity} onClick={() => void printUnitLabels(Array.from({ length: Math.min(stockQuantity,1000) }, () => sku), String(unit.title || `SKU ${sku}`)).catch(e => setError(e.message))}>Labels · {stockQuantity}</button>
           {canDelete && <button type="button" className="secondary" disabled={busy || stockQuantity !== 1} onClick={() => void toggleStocked()}>Convert to one-of-one</button>}
-          {canDelete && <div className="unit-stock-actions"><label>Add quantity<input type="number" min="1" max="1000" value={stockAddQty} onChange={e => setStockAddQty(e.target.value)} /></label><label>Optional cost each<input inputMode="decimal" placeholder="No cost change" value={stockAddCost} onChange={e => setStockAddCost(e.target.value)} /></label><button type="button" disabled={busy} onClick={() => void addStock()}>Add stock</button></div>}
-          {canDelete && <div className="unit-stock-actions"><select aria-label="Adjustment mode" value={stockAdjustMode} onChange={e => setStockAdjustMode(e.target.value as 'set'|'delta')}><option value="set">Set quantity</option><option value="delta">Add or remove</option></select><input type="number" value={stockAdjustQty} onChange={e => setStockAdjustQty(e.target.value)} aria-label="Adjustment quantity" /><select aria-label="Adjustment reason" value={stockAdjustReason} onChange={e => setStockAdjustReason(e.target.value)}><option value="count_correction">Count correction</option><option value="damaged">Damaged</option><option value="lost">Lost</option><option value="other">Other</option></select><button type="button" disabled={busy} onClick={() => void adjustStock()}>Adjust</button></div>}
-          {canDelete && <div className="unit-stock-actions"><label>Give away quantity<input type="number" min="1" max={stockQuantity} value={stockGiveQty} onChange={e => setStockGiveQty(e.target.value)} /></label><label>Given to<input value={stockGiveTo} onChange={e => setStockGiveTo(e.target.value)} /></label><button type="button" disabled={busy || !stockQuantity} onClick={() => void giveStockAway()}>Give away</button><button type="button" className="secondary" disabled={busy || !stockQuantity} onClick={() => void pullDefective()}>Pull 1 as defective</button></div>}
-          <details className="unit-stock-history"><summary>Stock movement history</summary>{stockHistory.map(move => <div className="ledger-row" key={move.id}><strong>{move.type.replaceAll('_',' ')} · {move.delta > 0 ? '+' : ''}{move.delta}</strong><span>{move.reference || move.reason || ''} · {new Date(move.at).toLocaleString()}</span></div>)}</details>
+          {canDelete && <div className="unit-stock-actions"><QuantityPicker value={stockAddQty} onChange={setStockAddQty} maximum={999} label="Add quantity"/><label>Optional cost each<input inputMode="decimal" placeholder="No cost change" value={stockAddCost} onChange={e => setStockAddCost(e.target.value)} /></label><button type="button" disabled={busy} onClick={() => void addStock()}>Add stock</button></div>}
+          {canDelete && <div className="unit-stock-actions"><select aria-label="Adjustment mode" value={stockAdjustMode} onChange={e => { const next=e.target.value as 'set'|'delta';setStockAdjustMode(next);setStockAdjustQty(next==='delta'?'0':String(stockQuantity)); }}><option value="set">Set quantity</option><option value="delta">Add or remove</option></select><QuantityPicker value={stockAdjustQty} onChange={setStockAdjustQty} minimum={stockAdjustMode==='set'?0:-999} maximum={999} label="Adjustment quantity"/><select aria-label="Adjustment reason" value={stockAdjustReason} onChange={e => setStockAdjustReason(e.target.value)}><option value="count_correction">Count correction</option><option value="damaged">Damaged</option><option value="lost">Lost</option><option value="other">Other</option></select><button type="button" disabled={busy} onClick={() => void adjustStock()}>Adjust</button></div>}
+          {canDelete && <div className="unit-stock-actions"><QuantityPicker value={stockGiveQty} onChange={setStockGiveQty} maximum={Math.min(999,stockQuantity)} label="Give away quantity"/><label>Given to<input value={stockGiveTo} onChange={e => setStockGiveTo(e.target.value)} /></label><button type="button" disabled={busy || !stockQuantity} onClick={() => void giveStockAway()}>Give away</button><button type="button" className="secondary" disabled={busy || !stockQuantity} onClick={() => void pullDefective()}>Pull 1 as defective</button></div>}
+          <details className="unit-stock-history"><summary>Stock movement history</summary>{stockHistory.map(move => <div className="ledger-row" key={move.id}><strong>{move.type.replaceAll('_',' ')} · {move.delta > 0 ? '+' : ''}{move.delta}</strong><span>{move.actor || 'System'} · {move.reference || move.reason || ''} · {new Date(move.at).toLocaleString()}</span></div>)}</details>
         </section>}
-        {canDelete && !isStocked && ['available','reserved','repair'].includes(String(unit.state||'')) && <button type="button" className="secondary" disabled={busy} onClick={() => void toggleStocked()}>Convert to stocked SKU</button>}
+        {canDelete && !isStocked && ['available','reserved','repair'].includes(String(unit.state||'')) && <div className="unit-stock-actions"><QuantityPicker value={convertQty} onChange={setConvertQty} minimum={2} maximum={999} label="Quantity on hand"/><button type="button" className="secondary" disabled={busy || Number(convertQty)<2} onClick={() => void convertToStockedAtQuantity()}>Convert to stocked item with {convertQty} on hand</button></div>}
         {currentMissing.length > 0 && <div className="inventory-missing" role="status"><p>{inventoryMissingText(currentMissing)}. Fill in the named fields and save.</p><div className="unit-edit-gap-links">{currentMissing.map(gap=><button type="button" className="text-button" key={gap} onClick={()=>jumpToGap(gap)}>Go to {gapLabel[gap] || reviewReasonLabel(gap) || gap}</button>)}</div></div>}
         {currentMissing.length === 0 && reviewReason && <p className="hint">eBay listing needs review: {reviewReason}.</p>}
         {reviewReason && canDelete ? <button type="button" className="secondary" disabled={busy} onClick={() => void clearEbayReview()}>I verified this issue · Clear eBay review</button> : null}
