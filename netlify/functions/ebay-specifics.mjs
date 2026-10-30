@@ -55,7 +55,7 @@ async function usageFor(sb, storeId, categoryId, fields) {
 async function form(sb, storeId, sku) {
   const { data: unit } = await sb.from("units").select("sku,title,brand,model,upc,condition,listing_body,defect_notes").eq("store_id", storeId).eq("sku", sku).maybeSingle();
   if (!unit) throw Object.assign(new Error("unknown_sku"), { status: 404 });
-  const { data: row } = await sb.from("unit_channel_categories").select("category_id,attributes,enabled,source")
+  const { data: row } = await sb.from("unit_channel_categories").select("category_id,attributes,enabled,source,review_reason")
     .eq("store_id", storeId).eq("sku", sku).eq("channel", "ebay").maybeSingle();
   let suggestion = null;
   if (!row?.category_id) {
@@ -70,7 +70,8 @@ async function form(sb, storeId, sku) {
   const { data: tax } = row?.category_id ? await sb.from("channel_taxonomy").select("path")
     .eq("channel", "ebay").eq("category_id", row.category_id).maybeSingle() : { data: null };
   return { sku, title: unit.title, upc: unit.upc, enabled: row?.enabled ?? false, category_id: row?.category_id || null,
-    path: tax?.path || null, auto_picked: row?.source === "auto_suggested", suggestion, fields, attributes: row?.attributes || {},
+    path: tax?.path || null, auto_picked: Boolean(row?.source && !['manual', 'existing', 'live_listing'].includes(row.source)),
+    review_reason: row?.review_reason || null, suggestion, fields, attributes: row?.attributes || {},
     usage: await usageFor(sb, storeId, row?.category_id, fields),
     missing: missingRequired(fields, row?.attributes || {}),
     item: { title: unit.title, brand: unit.brand, model: unit.model, condition: unit.condition,

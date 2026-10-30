@@ -3,22 +3,25 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { floorFunctionUrl } from './floorApi';
 import { AspectPicker } from './AspectPicker';
 import { valueIsValid } from './aspectOptions';
+import { categoryReview } from './categoryReview';
 
 type Field = { name: string; required?: boolean; recommended?: boolean; allowed?: string[]; selection_only?: boolean };
 type Form = { sku: string; upc: string | null; enabled: boolean; category_id: string | null; path: string | null; auto_picked?: boolean;
+  review_reason?: string | null;
   suggestion: { category_id: string; path: string } | null; fields: Field[]; attributes: Record<string, string>; missing: string[];
   usage?: Record<string, string[]>;
   item?: { title?: string; brand?: string; model?: string; condition?: string; description?: string; defect_notes?: string } };
 type Choice = { category_id: string; path: string };
 type Preview = { category_id: string; path: string | null; fields: Field[]; attributes: Record<string, string>; prefilled: string[]; cleared: string[]; usage: Record<string, string[]> };
 type Props = { client: SupabaseClient; sku: string; storeId?: string; appMode?: boolean; onSaved?: () => void; hideSaveButton?: boolean;
+  onJumpToCondition?: () => void;
   /** Item edit passes its Description box so a generated description lands in the form that Save changes writes. */
   onDescription?: (text: string) => void;
   /** Item edit calls this before its own Save so unsaved specifics / generated text are never lost. */
   persistRef?: { current: (() => Promise<void>) | null } };
 
 /** eBay item specifics: required first, eBay's allowed values as searchable lists. No AI. */
-export function EbaySpecificsPanel({ client, sku, storeId, appMode = false, onSaved, hideSaveButton = false, onDescription, persistRef }: Props) {
+export function EbaySpecificsPanel({ client, sku, storeId, appMode = false, onSaved, hideSaveButton = false, onDescription, onJumpToCondition, persistRef }: Props) {
   const [form, setForm] = useState<Form | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
   const [canPick, setCanPick] = useState(false);
@@ -108,9 +111,26 @@ export function EbaySpecificsPanel({ client, sku, storeId, appMode = false, onSa
       if (e) throw e;
       const answers = Object.fromEntries(preview.fields.map(f => [f.name, (previewValues[f.name] || '').trim()]).filter(([, v]) => v));
       const r = await call('category-selected', { attributes: answers });
-      show(r.form);
+      // The same category is a valid manual confirmation too. Keep the final
+      // category row marked manual after specifics autofill has finished.
+      const confirmed = await client.rpc('portal_set_unit_ebay_category', { p_sku: sku, p_category_id: preview.category_id });
+      if (confirmed.error) throw confirmed.error;
+      show((await call('get')).form);
       const cleared = (r.cleared as string[] | undefined) || [];
       setNotice(cleared.length ? `Category saved. Cleared values that no longer fit: ${cleared.join(', ')}.` : 'Category saved.');
+      onSaved?.();
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    finally { setBusy(false); }
+  }
+
+  async function confirmCurrentCategory() {
+    if (!canPick || !form?.category_id) return;
+    setBusy(true); setError(''); setNotice('');
+    try {
+      const { error: e } = await client.rpc('portal_set_unit_ebay_category', { p_sku: sku, p_category_id: form.category_id });
+      if (e) throw e;
+      show((await call('get')).form);
+      setNotice('Category confirmed. Floor will check the remaining listing details.');
       onSaved?.();
     } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
     finally { setBusy(false); }
@@ -183,6 +203,7 @@ export function EbaySpecificsPanel({ client, sku, storeId, appMode = false, onSa
   }
 
   const previewMissing = (preview?.fields || []).filter(f => f.required && !valueIsValid(f, previewValues[f.name] || ''));
+  const review = categoryReview(form);
 
   if (!form && !error) return <p className="hint" role="status">Loading eBay item specifics…</p>;
   if (form && !form.category_id && !canPick) {
@@ -205,6 +226,11 @@ export function EbaySpecificsPanel({ client, sku, storeId, appMode = false, onSa
     </label>}
     {form && canPick && <div className="ebay-specifics-category">
       <p className="hint">{form.category_id ? `Category: ${form.path || form.category_id}` : 'Floor could not match an eBay category automatically. Choose a suggestion or search below.'}{form.category_id && form.auto_picked ? <em className="aspect-suggested" title="Floor picked this from eBay's suggestion for the title. Look it over; tapping a category yourself clears the tag.">Auto</em> : null}</p>
+      {review && <div className="ebay-specifics-missing" role="status"><p>{review.message}</p>
+        {review.action === 'confirm' && <button type="button" disabled={busy} onClick={() => void confirmCurrentCategory()}>{busy ? 'Confirming…' : 'Category looks right'}</button>}
+        {review.action === 'condition' && <button type="button" disabled={busy} onClick={onJumpToCondition}>Go to Condition</button>}
+        {review.action === 'specifics' && <button type="button" disabled={busy} onClick={() => document.querySelector('.ebay-specifics .ebay-specific-field.is-missing')?.scrollIntoView({ behavior: 'smooth', block: 'center' })}>Go to item specifics</button>}
+      </div>}
       {!form.category_id && picked && !preview && <button type="button" className="ebay-specifics-suggestion" disabled={busy}
         onClick={() => void openCategory(picked)}>Use suggested: {picked.path}</button>}
       <label>{form.category_id ? 'Change eBay category' : 'Search eBay categories'}
