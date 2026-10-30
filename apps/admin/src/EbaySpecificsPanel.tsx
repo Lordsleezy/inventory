@@ -8,6 +8,7 @@ import { categoryReview } from './categoryReview';
 type Field = { name: string; required?: boolean; recommended?: boolean; allowed?: string[]; selection_only?: boolean };
 type Form = { sku: string; upc: string | null; enabled: boolean; category_id: string | null; path: string | null; auto_picked?: boolean;
   review_reason?: string | null;
+  category_issues?: string[];
   suggestion: { category_id: string; path: string } | null; fields: Field[]; attributes: Record<string, string>; missing: string[];
   usage?: Record<string, string[]>;
   item?: { title?: string; brand?: string; model?: string; condition?: string; description?: string; defect_notes?: string } };

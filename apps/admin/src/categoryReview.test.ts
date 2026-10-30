@@ -16,6 +16,7 @@ test('condition conflict points to Condition instead of clearing the category', 
 test('required specifics point to specifics; stale taxonomy requires a category check', () => {
   assert.equal(categoryReview({ category_id: '19258', review_reason: 'conflicting category sources', missing: ['Brand'] })?.action, 'specifics');
   assert.equal(categoryReview({ category_id: '19258', review_reason: 'category taxonomy stale', missing: [] })?.action, 'category');
+  assert.equal(categoryReview({ category_id: '19258', category_issues: ['category changed; recheck'], missing: [] })?.action, 'category');
 });
 
 test('unconfirmed auto pick is confirmable and confirmed category has no prompt', () => {

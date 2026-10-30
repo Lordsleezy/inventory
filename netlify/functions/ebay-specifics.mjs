@@ -69,9 +69,12 @@ async function form(sb, storeId, sku) {
   const fields = row?.category_id ? await ebayAspectFields(storeId, row.category_id) : [];
   const { data: tax } = row?.category_id ? await sb.from("channel_taxonomy").select("path")
     .eq("channel", "ebay").eq("category_id", row.category_id).maybeSingle() : { data: null };
+  const { data: gaps, error: gapsError } = await sb.rpc("floor_category_gaps", { p_store: storeId, p_sku: sku, p_channel: "ebay" });
+  if (gapsError) throw new Error(gapsError.message);
   return { sku, title: unit.title, upc: unit.upc, enabled: row?.enabled ?? false, category_id: row?.category_id || null,
     path: tax?.path || null, auto_picked: Boolean(row?.source && !['manual', 'existing', 'live_listing'].includes(row.source)),
-    review_reason: row?.review_reason || null, suggestion, fields, attributes: row?.attributes || {},
+    review_reason: row?.review_reason || null, category_issues: (gaps || []).map(g => String(g.issue || '')).filter(Boolean),
+    suggestion, fields, attributes: row?.attributes || {},
     usage: await usageFor(sb, storeId, row?.category_id, fields),
     missing: missingRequired(fields, row?.attributes || {}),
     item: { title: unit.title, brand: unit.brand, model: unit.model, condition: unit.condition,

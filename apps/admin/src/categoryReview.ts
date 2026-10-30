@@ -1,6 +1,7 @@
 export type CategoryReviewInput = {
   category_id?: string | null;
   review_reason?: string | null;
+  category_issues?: string[];
   auto_picked?: boolean;
   missing?: string[];
   item?: { condition?: string };
@@ -12,7 +13,7 @@ export type CategoryReview = { message: string; action: CategoryReviewAction };
 /** Translate the stored eBay category blocker into the field the owner can fix. */
 export function categoryReview(input: CategoryReviewInput | null): CategoryReview | null {
   if (!input?.category_id) return null;
-  const reason = String(input.review_reason || '').trim();
+  const reason = String(input.review_reason || input.category_issues?.find(x => !/^(missing required field|channel document required)$/i.test(x)) || '').trim();
   const missing = input.missing || [];
   const condition = String(input.item?.condition || '').trim();
   if (/condition/i.test(reason) || missing.some(x => /^condition$/i.test(x))) {
