@@ -45,7 +45,7 @@ type Props = {
 const LIST_TABS: [InventoryTab, string][] = [['in-stock', 'In stock'], ['sold', 'Sold'], ['needs-check', 'Needs to be checked'], ['no-location', 'No location']];
 const CARD_TABS: Partial<Record<InventoryTab, InventoryBucket>> = { total: 'total', listed: 'listed', 'not-listed': 'not_listed', 'not-ready': 'not_ready', dns: 'dns', defective: 'defective' };
 const TOOL_TABS: [InventoryTab, string][] = [['left-store', 'Replaced / given away'], ['receive', 'Receive'], ['lookup-test', 'Lookup test'], ['products', 'Products'], ['measure-mat', 'Measure mat']];
-const MISSING_LABEL: Record<string, string> = { spec: 'weight & box', upc: 'UPC', specifics: 'item specifics' };
+const MISSING_LABEL: Record<string, string> = { spec: 'weight & box', upc: 'UPC', specifics: 'item specifics', category_review: 'category review' };
 const missingText = (m: string[]) => {
   const fields = m.filter(k => !reviewReasonLabel(k));
   const reviews = m.map(reviewReasonLabel).filter((x): x is string => Boolean(x));
@@ -202,7 +202,7 @@ export function InventoryPage({
     <section className="panel inventory-panel">
       {loading && <p className="hint">Loading inventory…</p>}
       {!loading && list?.items.length === 0 && <div className="empty">{listTab === 'in-stock' && query.trim() ? 'No for-sale units match. Not-for-sale and defective units are under Defective.' : 'No units match this filter.'}</div>}
-      {list?.items.map(u => { if(u.group_id) return <ReceiveGroupRow key={u.group_id} item={u} client={client} admin={canDelete} money={money} onOpen={setSelected} onChanged={()=>{setRefresh(n=>n+1);onCostChanged()}} />; const actions = showDispositionButtons({ isAdmin: canDelete, associateBrowseOnly, inStock: listTab === 'in-stock' && u.state === 'available' });
+      {list?.items.map(u => { if(u.group_id) return <ReceiveGroupRow key={u.group_id} item={u} client={client} admin={canDelete} money={money} onOpen={setSelected} onChanged={()=>{setRefresh(n=>n+1);onCostChanged()}} />; const actions = showDispositionButtons({ isAdmin: canDelete, associateBrowseOnly, unsold: ['available', 'reserved', 'repair'].includes(u.state) });
       const rowButton = <button type="button" className="inventory-row" key={u.sku} disabled={hideMoney} onClick={() => { if (!hideMoney) setSelected(u.sku); }}>
         <span className="inventory-photo">{u.photo_path && urls[u.photo_path] ? <img loading="lazy" src={urls[thumb(u.photo_path)] || urls[u.photo_path]} onError={e => { const fallback = urls[u.photo_path!]; if (e.currentTarget.src !== fallback) e.currentTarget.src = fallback; }} alt="" /> : 'No photo'}</span>
         <span className="inventory-identity"><strong>{name(u)}</strong><small>SKU {u.sku}{u.title && u.title !== name(u) ? ` · ${u.title}` : ''}</small></span>
@@ -232,6 +232,8 @@ export function InventoryPage({
         onCostChanged();
       }}
       onPhotosChanged={() => setDetailKey(k => k + 1)}
+      onReadinessChanged={() => { setRefresh(n => n + 1); setDetailKey(k => k + 1); }}
+      locationLabel={detail.unit.location_code ? String(detail.unit.location_code) : undefined}
       onDeleted={() => {
         setSelected(null);
         setDetail(null);

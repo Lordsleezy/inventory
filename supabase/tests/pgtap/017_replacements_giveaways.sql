@@ -1,6 +1,6 @@
 -- pgTAP: replacements and giveaways (20261031100000_replacements_giveaways.sql).
 begin;
-select plan(48);
+select plan(52);
 set constraints all immediate;
 
 do $$
@@ -139,6 +139,10 @@ select is((select amount_cents from c where receipt_no = 'RG-1' and who = 'paul'
 select lives_ok($q$select public.portal_record_giveaway('94005', 'Kim', null)$q$, 'giveaway with no cost is recorded anyway');
 select ok((select (e->>'cost_missing')::boolean from jsonb_array_elements(public.portal_dispositions_list('giveaway')) e where e->>'sku' = '94005'),
   'giveaway without a cost shows cost missing');
+select is((select amount_cents from public.portal_expenses where category='Giveaways' and description like '%94005%'), 0,
+  'giveaway without cost records a zero-dollar expense');
+select ok((select description like '%cost missing%' from public.portal_expenses where category='Giveaways' and description like '%94005%'),
+  'zero-dollar giveaway expense says cost missing');
 update public.units set acquisition_cost_cents = 700 where sku = '94005';
 select is((select amount_cents from public.portal_expenses where category = 'Giveaways' and description like '%94005%'), 700,
   'cost entered later posts the expense');
@@ -148,6 +152,10 @@ select lives_ok(format($q$select public.portal_undo_disposition(%L::uuid)$q$,
   (select id from public.unit_dispositions where sku = '94004')), 'undo giveaway');
 select is((select count(*)::int from public.portal_expenses where description like '%94004%' and voided_at is null), 0, 'undo giveaway voids the expense');
 select is((select state from public.units where sku = '94004'), 'available', 'undo giveaway: back in stock');
+
+update public.units set state='repair' where sku='94008';
+select lives_ok($q$select public.portal_record_giveaway('94008', 'Pat', null)$q$, 'admin can give away an unsold repair unit');
+select is((select state from public.units where sku='94008'), 'given_away', 'repair unit leaves inventory through disposition');
 
 select * from finish();
 rollback;

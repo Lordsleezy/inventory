@@ -11,10 +11,10 @@ const base: Disposition = {
 };
 
 test('buttons are admin-only and only on in-stock units', () => {
-  assert.equal(showDispositionButtons({ isAdmin: true, inStock: true }), true);
-  assert.equal(showDispositionButtons({ isAdmin: false, inStock: true }), false, 'clerk / local account');
-  assert.equal(showDispositionButtons({ isAdmin: true, associateBrowseOnly: true, inStock: true }), false, 'associate browse view');
-  assert.equal(showDispositionButtons({ isAdmin: true, inStock: false }), false);
+  assert.equal(showDispositionButtons({ isAdmin: true, unsold: true }), true);
+  assert.equal(showDispositionButtons({ isAdmin: false, unsold: true }), false, 'clerk / local account');
+  assert.equal(showDispositionButtons({ isAdmin: true, associateBrowseOnly: true, unsold: true }), false, 'associate browse view');
+  assert.equal(showDispositionButtons({ isAdmin: true, unsold: false }), false, 'sold items cannot leave stock again');
 });
 
 test('dollar entry', () => {

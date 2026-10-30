@@ -1,6 +1,6 @@
 -- pgTAP: eBay required item specifics (20261030200000_ebay_required_specifics.sql).
 begin;
-select plan(15);
+select plan(17);
 do $$
 declare
   v_store uuid;
@@ -57,6 +57,13 @@ select is(jsonb_array_length(public.portal_set_unit_ebay_specifics('98001', '{"T
 select set_config('request.jwt.claim.sub', '', true);
 select ok(not ('specifics' = any(public.unit_listing_gaps(u))), 'filled unit is no longer Unfinished')
   from public.units u where sku = '98001';
+
+update public.unit_channel_categories set review_reason='conflicting category sources' where sku='98002' and channel='ebay';
+select ok('category_review'=any(public.unit_listing_gaps(u)) and not ('category'=any(public.unit_listing_gaps(u))),
+  'selected category conflict is labeled category review, not missing category') from public.units u where sku='98002';
+select ok(public.unit_is_unfinished(public.unit_listing_gaps(u)), 'selected category needing review remains Unfinished')
+  from public.units u where sku='98002';
+update public.unit_channel_categories set review_reason=null where sku='98002' and channel='ebay';
 
 -- Auto-confirm backfill: exact eBay Catalog source is confirmed; dry run writes nothing.
 update public.unit_channel_categories set review_reason = 'missing category or unsynced fields' where sku = '98002' and channel = 'ebay';

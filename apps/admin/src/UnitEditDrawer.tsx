@@ -12,8 +12,9 @@ import { scannerInputMode } from './kiosk';
 import { reportClientError } from './clientLog';
 import { errText } from './errText';
 import { reviewReasonLabel } from './inventoryReview';
+import { DispositionButtons } from './DispositionDialogs';
 
-type Photo = { id: number; path: string; is_primary: boolean };
+type Photo = { id: number; path: string; is_primary: boolean; sort_order?: number; source?: string };
 type Unit = Record<string, unknown>;
 type Options = { conditions: unknown; test_statuses: unknown };
 
@@ -95,7 +96,7 @@ type LookupMerged = {
 
 export function UnitEditDrawer({
   client, storeId, sku, unit, photos, urls, accessToken, onClose, onSaved, onPhotosChanged,
-  canDelete = false, onDeleted, appMode = false, missingFields = [],
+  canDelete = false, onDeleted, appMode = false, missingFields = [], locationLabel, onReadinessChanged,
 }: {
   client: SupabaseClient;
   storeId: string;
@@ -113,6 +114,8 @@ export function UnitEditDrawer({
   /** Standalone Floor app: clear the bottom tab bar; use app chrome. */
   appMode?: boolean;
   missingFields?: string[];
+  locationLabel?: string;
+  onReadinessChanged?: () => void;
 }) {
   const [form, setForm] = useState<Form>(() => fromUnit(unit));
   const [options, setOptions] = useState<Options | null>(null);
@@ -124,10 +127,18 @@ export function UnitEditDrawer({
   // The panel can change the description during Save; read it from here, not from the render's stale form.
   const latestDescription = useRef<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  const cameraInput = useRef<HTMLInputElement>(null);
+  const [viewPhoto, setViewPhoto] = useState<Photo | null>(null);
   const upcInput = useRef<HTMLInputElement>(null);
   const set = (key: keyof Form, value: string) => setForm(prev => ({ ...prev, [key]: value }));
+  const cancel = () => {
+    const initial = fromUnit(unit);
+    const hasChanges = JSON.stringify(form) !== JSON.stringify(initial) || latestDescription.current != null;
+    if (hasChanges && !window.confirm('Discard unsaved changes?')) return;
+    onClose();
+  };
 
-  useEffect(() => { setForm(fromUnit(unit)); setMsg(''); setError(''); }, [unit, sku]);
+  useEffect(() => { setForm(fromUnit(unit)); setMsg(''); setError(''); }, [sku]);
   useEffect(() => {
     void client.rpc('portal_receive_options').then(({ data, error: e }) => {
       if (!e && data) setOptions(data as Options);
@@ -251,7 +262,7 @@ export function UnitEditDrawer({
       p_title: title,
       p_description: latestDescription.current ?? form.description,
       p_ask_cents: ask,
-      p_cost_cents: cost,
+      p_cost_cents: canDelete ? cost : (unit.acquisition_cost_cents == null ? null : Number(unit.acquisition_cost_cents)),
       p_condition: form.condition,
       p_test_status: form.testStatus,
       p_shippable: form.shippable,
@@ -357,6 +368,7 @@ export function UnitEditDrawer({
     }
     setBusy(false);
     if (fileInput.current) fileInput.current.value = '';
+    if (cameraInput.current) cameraInput.current.value = '';
     if (failed) setError(`${failed} photo(s) failed to upload.`);
     else setMsg('Photo(s) added.');
     onPhotosChanged();
@@ -367,56 +379,50 @@ export function UnitEditDrawer({
   const specs = typeof unit.listing_specs === 'object' && unit.listing_specs !== null
     ? unit.listing_specs as Record<string, unknown> : {};
   const reviewReason = reviewReasonLabel(specs.ebay_review_reason);
-  const missing: string[] = [];
-  if (blank(form.title)) missing.push('title');
-  if (blank(form.model)) missing.push('model');
-  if (!cents(form.price)) missing.push('price');
-  if (blank(form.description)) missing.push('description');
-  if ([form.length, form.width, form.height, form.weight].some(blank)) missing.push('package L/W/H/weight');
-  if (!photos.length) missing.push('photo');
+  const notForSale = String(specs.do_not_list || '').toLowerCase() === 'true' || String(specs.hold_reason || '') === 'do_not_list';
+  const unsold = ['available', 'reserved', 'repair'].includes(String(unit.state || ''));
+  const orderedPhotos = [...photos].sort((a, b) => Number(b.is_primary) - Number(a.is_primary) || (a.sort_order ?? a.id) - (b.sort_order ?? b.id));
+  const statusLabel = notForSale ? 'Not for sale' : String(unit.state || '').replace(/_/g, ' ').replace(/^./, c => c.toUpperCase());
 
   return (
     <div
       className={`inventory-backdrop${appMode ? ' app-unit-edit' : ''}`}
-      onMouseDown={e => { if (!appMode && e.target === e.currentTarget) onClose(); }}
+      onMouseDown={e => { if (!appMode && e.target === e.currentTarget) cancel(); }}
     >
       <section className="inventory-detail" role="dialog" aria-modal="true" aria-label={`Edit unit ${sku}`}>
         {appMode ? (
           <div className="app-nav app-unit-edit-nav">
-            <button type="button" onClick={onClose}>Cancel</button>
-            <div className="app-nav-title">Edit · {sku}</div>
+            <button type="button" onClick={cancel}>Cancel</button>
+            <div className="app-nav-title">SKU {sku}</div>
             <button type="button" disabled={busy || lookupBusy} onClick={() => void save()}>
               {busy ? '…' : 'Save'}
             </button>
           </div>
         ) : (
-          <div className="section-head">
-            <div><div className="eyebrow">EDIT UNIT</div><h2>SKU {sku}</h2></div>
-            <button type="button" className="secondary" onClick={onClose}>Close</button>
-          </div>
+          <div className="app-nav app-unit-edit-nav"><button type="button" onClick={cancel}>Cancel</button><div className="app-nav-title">SKU {sku}</div><button type="button" disabled={busy || lookupBusy} onClick={() => void save()}>{busy ? '…' : 'Save'}</button></div>
         )}
         {error && <div className="alert" role="alert">{error}</div>}
         <ReceiveWorkStatus client={client} accessToken={accessToken} sku={sku} />
         {msg && <p className="hint">{msg}</p>}
         {canDelete && unit.state === 'sold' && <RestoreInventoryButton client={client} sku={sku} onDone={() => { onSaved({ ...unit, state: 'available' }); onClose(); }} />}
         {missingFields.length > 0 && <p className="inventory-missing" role="status">{inventoryMissingText(missingFields)}. Fill in the fields below and save.</p>}
-        {missingFields.length === 0 && <p className="hint">{reviewReason ? `eBay listing needs review: ${reviewReason}.` : missing.length === 0 ? 'Looks complete for listing.' : `Still missing: ${missing.join(', ')}. Scan a UPC to fill blanks.`}</p>}
+        {missingFields.length === 0 && reviewReason && <p className="hint">eBay listing needs review: {reviewReason}.</p>}
         {reviewReason && canDelete ? <button type="button" className="secondary" disabled={busy} onClick={() => void clearEbayReview()}>I verified this issue · Clear eBay review</button> : null}
 
-        <h3>Photos</h3>
-        {photos.length ? (
-          <div className="inventory-gallery">
-            {photos.map(p => urls[p.path]
-              ? <img src={urls[p.path]} alt={`Unit ${sku}`} key={p.id} loading="lazy" />
-              : <div className="inventory-photo" key={p.id}>Photo unavailable</div>)}
-          </div>
-        ) : <p className="hint">No photos yet.</p>}
-        <label className="unit-edit-photo">Add photos
-          <input ref={fileInput} type="file" accept="image/*" multiple disabled={busy}
-            onChange={e => void addPhotos(e.target.files)} />
-        </label>
+        <div className="unit-edit-status"><strong>{statusLabel}</strong><span>{locationLabel || String(unit.location || unit.bin || 'Unassigned')}</span></div>
+        {canDelete && unsold && <DispositionButtons client={client} sku={sku} money={n => `$${(n / 100).toFixed(2)}`} stamp={s => new Date(s).toLocaleDateString()} className="secondary" onDone={() => { onReadinessChanged?.(); onDeleted?.(); onClose(); }} />}
+        <h3 className={missingFields.includes('photo') ? 'unit-edit-required' : ''}>Photos{missingFields.includes('photo') ? ' · Required' : ''}</h3>
+        <div className="unit-edit-photo-strip">
+          {orderedPhotos.map((p, i) => <button type="button" className="unit-edit-photo-open" key={p.id} onClick={() => setViewPhoto(p)} aria-label={`View photo ${i + 1}`}>
+            {urls[p.path] ? <img src={urls[p.path]} alt={`Unit ${sku}, photo ${i + 1}`} loading="lazy" /> : <span>Photo unavailable</span>}{(p.is_primary || p.source === 'stock') && <small>{p.source === 'stock' ? 'STOCK' : 'Primary'}</small>}
+          </button>)}
+          <button type="button" className="unit-edit-photo-add" onClick={() => cameraInput.current?.click()} disabled={busy}>＋<small>Camera</small></button>
+          <button type="button" className="unit-edit-photo-add" onClick={() => fileInput.current?.click()} disabled={busy}>▧<small>Library</small></button>
+        </div>
+        <input ref={cameraInput} type="file" accept="image/*" capture="environment" multiple hidden disabled={busy} onChange={e => void addPhotos(e.target.files)} />
+        <input ref={fileInput} type="file" accept="image/*" multiple hidden disabled={busy} onChange={e => void addPhotos(e.target.files)} />
 
-        <h3>Details</h3>
+        <h3>Product</h3>
         <div className="unit-edit-grid">
           <label>SKU<input value={sku} readOnly /></label>
           <label>UPC
@@ -441,18 +447,25 @@ export function UnitEditDrawer({
               {lookupBusy ? 'Looking up…' : 'Look up UPC & fill blanks'}
             </button>
           </div>
-          <label>Brand<input value={form.brand} onChange={e => set('brand', e.target.value)} /></label>
-          <label>Model<input value={form.model} onChange={e => set('model', e.target.value)} /></label>
-          <label className="unit-edit-wide">Title<input value={form.title} onChange={e => set('title', e.target.value)} /></label>
-          <label className="unit-edit-wide">Description<textarea rows={3} value={form.description} onChange={e => set('description', e.target.value)} /></label>
-          <label>Price<input inputMode="decimal" placeholder="24.99" value={form.price} onChange={e => set('price', e.target.value)} /></label>
-          <label>Cost<input inputMode="decimal" placeholder="9.00" value={form.cost} onChange={e => set('cost', e.target.value)} /></label>
-          <label>Condition
+          <label className={missingFields.includes('brand') ? 'unit-edit-required' : ''}>Brand<input value={form.brand} onChange={e => set('brand', e.target.value)} />{missingFields.includes('brand') && <small>Required</small>}{form.brand.trim() && form.brand.trim().toLowerCase() === form.title.trim().toLowerCase() && <small className="unit-edit-brand-hint">Looks like a product name, not a brand · <button type="button" onClick={() => set('brand', 'Unbranded')}>No brand</button></small>}</label>
+          <label className={missingFields.includes('model') ? 'unit-edit-required' : ''}>Model<input value={form.model} onChange={e => set('model', e.target.value)} />{missingFields.includes('model') && <small>Required</small>}</label>
+          <label className={`unit-edit-wide${missingFields.includes('title') ? ' unit-edit-required' : ''}`}>Title<input value={form.title} onChange={e => set('title', e.target.value)} />{missingFields.includes('title') && <small>Required</small>}</label>
+          <label className={`unit-edit-wide${missingFields.includes('description') ? ' unit-edit-required' : ''}`}>Description<textarea rows={3} value={form.description} onChange={e => set('description', e.target.value)} />{missingFields.includes('description') && <small>Required</small>}</label>
+        </div>
+        <h3>Pricing</h3>
+        <div className="unit-edit-grid">
+          <label className={missingFields.includes('price') ? 'unit-edit-required' : ''}>Price<input inputMode="decimal" placeholder="24.99" value={form.price} onChange={e => set('price', e.target.value)} />{missingFields.includes('price') && <small>Required</small>}</label>
+          {canDelete && <label>Cost<input inputMode="decimal" placeholder="Add actual cost" value={form.cost} onChange={e => set('cost', e.target.value)} /></label>}
+        </div>
+        <h3>Condition</h3>
+        <div className="unit-edit-grid">
+          <label className={missingFields.includes('condition') ? 'unit-edit-required' : ''}>Condition
             <select value={form.condition} onChange={e => set('condition', e.target.value)}>
               <option value="">—</option>
               {conditions.map(c => <option key={c} value={c}>{c}</option>)}
               {form.condition && !conditions.includes(form.condition) && <option value={form.condition}>{form.condition}</option>}
             </select>
+            {missingFields.includes('condition') && <small>Required</small>}
           </label>
           <label>Test status
             <select value={form.testStatus} onChange={e => set('testStatus', e.target.value)}>
@@ -461,6 +474,9 @@ export function UnitEditDrawer({
               {form.testStatus && !tests.includes(form.testStatus) && <option value={form.testStatus}>{form.testStatus}</option>}
             </select>
           </label>
+        </div>
+        <h3>Shipping &amp; size</h3>
+        <div className="unit-edit-grid">
           <label>Shippable
             <select value={form.shippable} onChange={e => set('shippable', e.target.value)}>
               <option value="auto">Automatic (rules)</option>
@@ -472,26 +488,12 @@ export function UnitEditDrawer({
           <label>Width (in)<input inputMode="decimal" value={form.width} onChange={e => set('width', e.target.value)} /></label>
           <label>Height (in)<input inputMode="decimal" value={form.height} onChange={e => set('height', e.target.value)} /></label>
           <label>Weight (lb)<input inputMode="decimal" value={form.weight} onChange={e => set('weight', e.target.value)} /></label>
-          <label className="unit-edit-wide">Notes<textarea rows={3} value={form.notes} onChange={e => set('notes', e.target.value)} /></label>
         </div>
-        <EbaySpecificsPanel client={client} sku={sku} storeId={storeId} appMode={appMode} onDescription={(t) => { latestDescription.current = t; set('description', t); }} persistRef={specificsPersist} />
-        <DnsCheckbox client={client} sku={sku} onChanged={dns => onSaved({ ...unit, listing_specs: { ...specs, do_not_ship: dns }, shippable: dns ? false : unit.shippable, fulfillment_override: dns ? 'pickup' : unit.fulfillment_override })} />
-        <ChannelCheckboxes key={JSON.stringify(specs.do_not_ship)} client={client} sku={sku} appMode={appMode} />
+        <label className="unit-edit-wide">Notes<textarea rows={3} value={form.notes} onChange={e => set('notes', e.target.value)} /></label>
+        {canDelete && !notForSale && <details className="unit-edit-online"><summary>Selling online</summary><EbaySpecificsPanel client={client} sku={sku} storeId={storeId} appMode={appMode} hideSaveButton onDescription={(t) => { latestDescription.current = t; set('description', t); }} persistRef={specificsPersist} onSaved={onReadinessChanged} /><DnsCheckbox client={client} sku={sku} onChanged={() => onReadinessChanged?.()} /><ChannelCheckboxes key={JSON.stringify(specs.do_not_ship)} client={client} sku={sku} appMode={appMode} /></details>}
         {canDelete && <UnitDispositionHistory client={client} sku={sku} stamp={s => new Date(s).toLocaleString()} />}
-        <div className={`actions unit-edit-actions${appMode ? ' app-unit-edit-actions' : ''}`} style={{ marginTop: 16 }}>
-          <button type="button" disabled={busy || lookupBusy} onClick={() => void save()}>{busy ? 'Saving…' : 'Save changes'}</button>
-          <button type="button" className="secondary" disabled={busy} onClick={onClose}>Cancel</button>
-          {canDelete ? (
-            <button
-              type="button"
-              className="danger"
-              disabled={busy || lookupBusy}
-              onClick={() => void removeUnit()}
-            >
-              {busy ? 'Working…' : 'Delete'}
-            </button>
-          ) : null}
-        </div>
+        {canDelete && <button type="button" className="text-button danger unit-edit-delete" disabled={busy || lookupBusy} onClick={() => void removeUnit()}>Delete item</button>}
+        {viewPhoto && <div className="unit-photo-lightbox" role="dialog" aria-modal="true" aria-label="Photo controls"><button type="button" className="unit-photo-lightbox-close" onClick={() => setViewPhoto(null)}>Close</button>{urls[viewPhoto.path] && <img src={urls[viewPhoto.path]} alt={`Unit ${sku}`} />}<div><button type="button" disabled={busy} onClick={async () => { const { error: e } = await client.rpc('set_primary_photo', { p_id: viewPhoto.id }); if (e) setError(e.message); else { setViewPhoto(null); onPhotosChanged(); } }}>Make primary</button><button type="button" disabled={busy} onClick={async () => { const { error: e } = await client.rpc('delete_unit_photo', { p_id: viewPhoto.id }); if (e) setError(e.message); else { await client.storage.from('unit-photos').remove([viewPhoto.path]); setViewPhoto(null); onPhotosChanged(); } }}>Delete photo</button><button type="button" className="secondary" disabled={busy} onClick={async () => { const ordered = [...orderedPhotos]; const i = ordered.findIndex(p => p.id === viewPhoto.id); if (i > 0) { [ordered[i - 1], ordered[i]] = [ordered[i], ordered[i - 1]]; const { error: e } = await client.rpc('reorder_unit_photos', { p_sku: sku, p_ids: ordered.map(p => p.id) }); if (e) setError(e.message); else onPhotosChanged(); } }}>Move earlier</button></div></div>}
       </section>
     </div>
   );

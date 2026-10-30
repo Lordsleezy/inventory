@@ -19,9 +19,9 @@ export type SaleHit = {
   price_cents: number; order_ref: string | null; buyer: string | null; replacements: number;
 };
 
-/** Only admins (portal owner/manager) get the buttons, and only on in-stock units. The server enforces it too. */
-export function showDispositionButtons(opts: { isAdmin: boolean; associateBrowseOnly?: boolean; inStock: boolean }): boolean {
-  return opts.isAdmin && !opts.associateBrowseOnly && opts.inStock;
+/** Admin-only actions are available for every unsold unit, including repair/Defective stock. */
+export function showDispositionButtons(opts: { isAdmin: boolean; associateBrowseOnly?: boolean; unsold: boolean }): boolean {
+  return opts.isAdmin && !opts.associateBrowseOnly && opts.unsold;
 }
 
 /** "12.50" -> 1250. Blank is 0 (optional field). Returns null for anything that is not a non-negative amount. */
