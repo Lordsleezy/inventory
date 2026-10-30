@@ -736,6 +736,7 @@ html.dark .mboard-progress-bar{background:#2a3340}
 .manifest-row summary::-webkit-details-marker{display:none}
 .manifest-row summary span{display:grid;gap:3px}.manifest-row summary small{font-size:.8rem;color:#71808d}
 .manifest-detail{padding:8px 4px 16px}
+.manifest-total-divider{border:0;border-top:1px solid var(--tool-border,#394454);margin:10px 0}
 .manifest-metrics{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
 .manifest-metrics span{border:1px solid #e5e9ee;border-radius:8px;padding:8px 10px;font-size:.8rem}
 .manifest-bulk{display:grid;gap:10px}.manifest-bulk button{justify-self:start}

@@ -55,3 +55,34 @@ test("strips trademark symbols before compatibility normalization and removes a 
   assert.equal(result.title, 'Hearth & Hand With Magnolia 8"x10" Rounded Corner Wood Wall Hanging Frame');
   assert.ok(!/™|®|\btm\b/i.test(`${result.brand} ${result.model} ${result.title}`));
 });
+
+test("keeps real short brand acronyms and leaves an already-clean SKU 99880 style product alone", () => {
+  const refrigerator = cleanProductIdentity({
+    brand: "LG", model: "LRFLC2716S French-door refrigerator", title: "LG LRFLC2716S French-door refrigerator",
+  });
+  assert.equal(refrigerator.brand, "LG");
+  assert.equal(refrigerator.title, "LG LRFLC2716S French-Door Refrigerator");
+  const candleHolder = cleanProductIdentity({
+    brand: "Creative Co-Op", model: '16" H Hand-Forged Cast Metal Footed Taper Holder, Black',
+    title: 'Creative Co-Op 16" H Hand-Forged Cast Metal Footed Taper Holder, Black',
+  });
+  assert.equal(candleHolder.title, 'Creative Co-Op 16" H Hand-Forged Cast Metal Footed Taper Holder, Black');
+  assert.equal(candleHolder.review, false);
+});
+
+test("repairs common UTF-8 punctuation mojibake", () => {
+  const result = cleanProductIdentity({ brand: "Acme", model: "Menâ€™s Jacket 1 EA", title: "Acme Menâ€™s Jacket 1 EA" });
+  assert.equal(result.title, "Acme Men's Jacket");
+  assert.ok(!/â€™|1 EA/.test(result.title));
+});
+
+test("rebuilds a code-only model from the product title and flags an unrecognizable bare title code", () => {
+  const result = cleanProductIdentity({
+    brand: "Samsung", model: "RF28T5001SG", title: "Samsung French-door refrigerator",
+  });
+  assert.equal(result.model, "French-Door Refrigerator");
+  assert.equal(result.title, "Samsung French-Door Refrigerator");
+  assert.ok(result.reasons.includes("model_rebuilt_from_title"));
+  const bareCode = cleanProductIdentity({ brand: "Samsung", model: "RF28T5001SG", title: "Samsung RF28T5001SG" });
+  assert.ok(bareCode.reasons.includes("model_code_needs_review"));
+});
