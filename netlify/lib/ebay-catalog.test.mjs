@@ -1,7 +1,20 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { aspectsNeedRefresh, fillAspects } from "./ebay-aspects.mjs";
-import { resolveFloorCategory } from "./ebay-catalog.mjs";
+import { catalogMatch, resolveFloorCategory } from "./ebay-catalog.mjs";
+
+test("only one exact eBay product match contributes its catalog images", () => {
+  const single = catalogMatch({ productSummaries: [{ epid: "123", title: "Exact item",
+    image: { imageUrl: "https://i.ebayimg.com/front.jpg" },
+    images: [{ imageUrl: "https://i.ebayimg.com/back.jpg" }, { imageUrl: "http://bad.example/x.jpg" }] }] });
+  assert.deepEqual(single.imageUrls, ["https://i.ebayimg.com/front.jpg", "https://i.ebayimg.com/back.jpg"]);
+  const ambiguous = catalogMatch({ productSummaries: [
+    { epid: "123", image: { imageUrl: "https://i.ebayimg.com/one.jpg" } },
+    { epid: "456", image: { imageUrl: "https://i.ebayimg.com/two.jpg" } },
+  ] });
+  assert.equal(ambiguous.ambiguous, true);
+  assert.equal(ambiguous.imageUrls, undefined);
+});
 
 test("confirmed free-text brands are not replaced by a similar suggested brand", () => {
   const result = fillAspects([{ name: "Brand", required: true, allowed: ["Infinity Instruments"], selectionOnly: false }],

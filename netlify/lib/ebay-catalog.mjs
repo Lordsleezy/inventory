@@ -307,7 +307,9 @@ export function catalogMatch(body) {
   const categoryId = String(body?.refinement?.dominantCategoryId || "") || null;
   if (epids.length !== 1) return epids.length ? { categoryId: null, aspects: {}, ambiguous: true } : null;
   const summary = summaries.find((s) => s.epid === epids[0]);
-  return { epid: epids[0], title: summary?.title || "", categoryId, aspects: catalogSummaryAspects(summary) };
+  const imageUrls = [summary?.image?.imageUrl, ...(summary?.images || []).map((image) => image?.imageUrl)]
+    .filter((url) => typeof url === "string" && /^https:\/\//i.test(url));
+  return { epid: epids[0], title: summary?.title || "", categoryId, aspects: catalogSummaryAspects(summary), imageUrls };
 }
 
 /** eBay Catalog API lookup by UPC/EAN/GTIN. Returns null when eBay has no product. */

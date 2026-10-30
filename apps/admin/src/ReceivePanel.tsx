@@ -183,6 +183,7 @@ type Lookup = {
   store_label?: boolean;
   true_miss?: boolean;
   miss_id?: string | null;
+  stock_photos?: { url: string; source: string }[];
   amazon?: Source;
   upcitemdb?: Source;
   merged?: {
@@ -610,6 +611,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   const [locationEditOpen, setLocationEditOpen] = useState(false);
   const [stagedPhotoPaths, setStagedPhotoPaths] = useState<string[]>([]);
   const [stockPhotoPath, setStockPhotoPath] = useState('');
+  const [stockPhotoSourceUrl, setStockPhotoSourceUrl] = useState('');
+  const [stockPhotoUrls, setStockPhotoUrls] = useState<{ url: string; source: string }[]>([]);
   const [stockPhotoBusy, setStockPhotoBusy] = useState(false);
   const [stockPhotoError, setStockPhotoError] = useState('');
   const [manual, setManual] = useState(!!initialManual);
@@ -856,13 +859,31 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || typeof data.path !== 'string') throw new Error(data.message || 'Stock photo unavailable');
-      if (activeScan.current === scanId) setStockPhotoPath(data.path);
+      if (activeScan.current === scanId) { setStockPhotoPath(data.path); setStockPhotoSourceUrl(url); }
       return data.path;
     } catch {
       if (activeScan.current === scanId) setStockPhotoError('Stock photo could not be saved. Tap the save button to retry, or add a unit photo.');
       return null;
     } finally {
       if (activeScan.current === scanId) setStockPhotoBusy(false);
+    }
+  }
+
+  async function attachStockPhotoSources(skus: string[], upc: string, firstPath: string, firstUrl: string, rest: { url: string; source: string }[]) {
+    if (!skus.length || !upc || !firstPath || !firstUrl) return;
+    try {
+      const response = await fetch(floorFunctionUrl('receive-photo-identify'), {
+        method: 'POST', headers: { Authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'attach_stock_photos', skus, upc, first_path: firstPath,
+          photos: [{ url: firstUrl, source: 'catalog' }, ...rest].slice(0, 6) }),
+        signal: AbortSignal.timeout(55000),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        console.warn('receive_stock_photo_background_failed', { sku: skus[0], message: data.message || data.error || response.status });
+      }
+    } catch (error) {
+      console.warn('receive_stock_photo_background_failed', { sku: skus[0], message: errText(error) });
     }
   }
 
@@ -1039,6 +1060,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     setFiles([]);
     setStagedPhotoPaths([]);
     setStockPhotoPath('');
+    setStockPhotoSourceUrl('');
+    setStockPhotoUrls((r?.stock_photos || m?.images?.map(url => ({ url: String(url), source: 'catalog' })) || []).slice(0, 6));
     setStockPhotoError('');
     // Instant miss popup (photo fallback). Do not re-prompt the same scan id.
     const identityNeeds = missingIdentityFields(r);
@@ -1260,6 +1283,10 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           photo_identity_type: photoTitleConfirmed ? text(photoIdentity?.item_type) : '' },
       });
       const skus = data.skus as string[];
+      if (acceptedStockPhotoPath && stockPhotoSourceUrl) {
+        void attachStockPhotoSources(skus, String(form.upc || current?.upc || ''), acceptedStockPhotoPath,
+          stockPhotoSourceUrl, stockPhotoUrls.filter(photo => photo.url !== stockPhotoSourceUrl).slice(0, 5));
+      }
       console.info('receive_save_timing', { commit_roundtrip_ms: Math.round(performance.now()-receiveStarted),
         validation_ms: Math.round(receiveStarted-saveTappedAt.current), rpc_ms:data.client_rpc_ms, recovery_snapshot_ms:data.snapshot_ms,
         server_ms: data.server_ms, server_steps:data.server_steps, tap_to_commit_ms: Math.round(performance.now()-saveTappedAt.current), sku: skus[0] });
@@ -1706,6 +1733,9 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       setPhotoVerifyPending(false);
       setStockPhotoPath('');
       if (Array.isArray(product.images) && product.images[0]) {
+        const productPhotos = Array.isArray(product.stock_photos) ? product.stock_photos as { url: string; source: string }[]
+          : product.images.map((url: string) => ({ url, source: 'amazon' }));
+        setStockPhotoUrls(productPhotos.slice(0, 6));
         const staged = await stageStockPhoto(String(product.images[0]), current.upc, current.id);
         if (!staged) setWarning('Product confirmed and saved to the UPC catalog, but its matching stock photo could not be saved. Your actual photo will be used.');
         else setWarning('Product confirmed. Its matching stock photo will be photo #1, followed by your unit photo.');

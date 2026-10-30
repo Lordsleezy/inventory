@@ -137,6 +137,7 @@ export async function syncLiveChannels(storeId, sku, change = {}) {
           title: content.title,
           description: content.description,
           conditionNote: content.conditionNote,
+          imageUrls: content.imageUrls,
           syncFloorAsk: false,
         });
       } else if (channel === "tiktok" && (touch || priceCents != null)) {
@@ -146,6 +147,7 @@ export async function syncLiveChannels(storeId, sku, change = {}) {
           priceCents,
           title: content.title,
           description: content.description,
+          imageUrls: content.imageUrls,
           syncFloorAsk: false,
         });
       }
