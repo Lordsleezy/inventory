@@ -22,6 +22,7 @@ import {
 import { ebayItemViewUrl } from "./ebay-env.mjs";
 import { publicPhotoUrl } from "./ebay-photos.mjs";
 import { suggestCategories } from "./ebay-catalog.mjs";
+import { pickCategorySuggestion } from "./ebay-aspects.mjs";
 import { assertBundlePush } from './bundle-gate.mjs';
 import {
   clipMigrationTitle,
@@ -331,7 +332,7 @@ async function suggestEbayCategory(title, unitCategory) {
   if (!query) return { categoryId: "", categoryName: "" };
   try {
     const suggestions = await suggestCategories(query);
-    const pick = suggestions[0] || null;
+    const pick = pickCategorySuggestion(suggestions, [title, unitCategory]);
     return {
       categoryId: pick?.categoryId || "",
       categoryName: pick?.categoryName || "",

@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useState } from 'react';
 import { floorFunctionUrl } from './floorApi';
 import { errText } from './errText';
+import { useVisibleInterval } from './useVisibleInterval';
 
 type Log = { id: number; created_at: string; sku: string | null; trace_id: string; source: string; level: string; event: string; message: string | null; detail: unknown };
 type Stalled = { trace_id: string; created_at: string; source: string; sku: string | null; action: string | null };
@@ -62,7 +63,7 @@ export function LogsPage({ accessToken, stamp }: Props) {
   }, [fetchLogs]);
 
   useEffect(() => { const t = setTimeout(() => { void load(); }, 250); return () => clearTimeout(t); }, [load]);
-  useEffect(() => { if (!auto) return; const t = setInterval(() => { void load(); }, 15000); return () => clearInterval(t); }, [auto, load]);
+  useVisibleInterval(load, 60_000, auto, false);
 
   async function older() {
     const last = logs[logs.length - 1]; if (!last) return;

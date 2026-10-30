@@ -29,8 +29,17 @@ export function ReceiveWorkStatus({ client, accessToken, sku }: { client: Supaba
       if (alive && !error) setRows(data || []);
       } catch { /* status polling must not interrupt receiving or authentication changes */ }
     };
-    void load(); const timer = setInterval(() => void load(), 10000);
-    return () => { alive = false; clearInterval(timer); };
+    let timer: number | null = null;
+    const start = () => {
+      if (document.visibilityState !== 'visible' || timer !== null) return;
+      void load();
+      timer = window.setInterval(() => void load(), 60_000);
+    };
+    const stop = () => { if (timer !== null) window.clearInterval(timer); timer = null; };
+    const onVisibility = () => document.visibilityState === 'visible' ? start() : stop();
+    start();
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => { alive = false; stop(); document.removeEventListener('visibilitychange', onVisibility); };
   }, [client, sku]);
   async function retry(row: Work) {
     const { error } = await client.rpc('receive_retry', { p_sku: row.sku });

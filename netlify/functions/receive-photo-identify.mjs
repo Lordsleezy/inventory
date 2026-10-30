@@ -17,6 +17,7 @@ import { normalizeGtin } from "../lib/gtin-normalize.mjs";
 import { searchCatalogAsin, catalogItemByIdentifier } from "../lib/amazon.mjs";
 import { dimensionIdentityMatches } from "../lib/receive-dimensions.mjs";
 import { isCompleteReceiveTitle } from "../../shared/store-barcode.mjs";
+import { productQuery, searchProductImages } from "../lib/visual-product-search.mjs";
 import {
   attachPhotoIdentityToMiss,
   listingTitle,
@@ -24,6 +25,54 @@ import {
 } from "../lib/floor-products.mjs";
 const receiveModel = () => process.env.GEMINI_RECEIVE_MODEL || 'gemini-3.5-flash-lite';
 const retailModel = () => process.env.GEMINI_RETAIL_MODEL || 'gemini-3.1-flash-lite-preview';
+const STOCK_IMAGE_HOSTS = ['media-amazon.com', 'ssl-images-amazon.com', 'ebayimg.com', 'upcitemdb.com',
+  'salsify.com', 'walmartimages.com', 'target.com', 'bestbuy.com', 'homedepot.com', 'lowes.com', 'costco.com',
+  'walmart.com', 'amazon.com', 'amazonaws.com', 'scene7.com', 'kohls.com', 'macys.com', 'wayfair.com',
+  'kohler.com', 'hasbro.com', 'mattel.com', 'lg.com', 'samsung.com', 'ninja.com', 'cuisinart.com'];
+const riskyImageText = /(?:watermark|collage|infographic|dimension(?:s)?|comparison|price|sticker|coupon|sale|logo|icon|banner|swatch|size.?chart)/i;
+const stockPhotoHash = async (bytes) => {
+  const { default: sharp } = await import('sharp');
+  const pixels = await sharp(bytes).rotate().resize(9, 8, { fit: 'fill' }).grayscale().raw().toBuffer();
+  let hash = 0n;
+  for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) hash = (hash << 1n) | (pixels[y * 9 + x] > pixels[y * 9 + x + 1] ? 1n : 0n);
+  return hash;
+};
+function hashDistance(a, b) {
+  let bits = a ^ b, count = 0;
+  while (bits) { bits &= bits - 1n; count++; }
+  return count;
+}
+async function downloadStockImage(url) {
+  const parsed = new URL(url);
+  const host = parsed.hostname.toLowerCase();
+  if (parsed.protocol !== 'https:' || parsed.username || parsed.password ||
+      !STOCK_IMAGE_HOSTS.some(domain => host === domain || host.endsWith(`.${domain}`)) || riskyImageText.test(parsed.pathname)) {
+    throw new Error('stock_photo_source_or_quality_rejected');
+  }
+  const response = await fetch(parsed.href, { redirect: 'error', signal: AbortSignal.timeout(12000),
+    headers: { Accept: 'image/avif,image/webp,image/png,image/jpeg' } });
+  const mime = String(response.headers.get('content-type') || '').split(';')[0].toLowerCase();
+  const ext = ({ 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/avif': 'avif' })[mime];
+  if (!response.ok || !ext) throw new Error('stock_photo_unavailable');
+  const maxBytes = 8 * 1024 * 1024;
+  if (Number(response.headers.get('content-length') || 0) > maxBytes) throw new Error('stock_photo_too_large');
+  const chunks = []; let total = 0;
+  if (!response.body) throw new Error('stock_photo_empty');
+  for await (const chunk of response.body) { total += chunk.length; if (total > maxBytes) throw new Error('stock_photo_too_large'); chunks.push(chunk); }
+  const bytes = Buffer.concat(chunks, total);
+  const { default: sharp } = await import('sharp');
+  const info = await sharp(bytes).metadata();
+  if (bytes.length < 2048 || Math.max(info.width || 0, info.height || 0) < 500) throw new Error('stock_photo_below_500px');
+  return { bytes, mime, ext, hash: await stockPhotoHash(bytes) };
+}
+
+function catalogPhotoUrls(product, payload) {
+  return new Set([
+    ...(product?.images || []), ...(payload?.stock_photos || []).map(row => row?.url),
+    ...(payload?.merged?.images || []), ...(payload?.amazon?.images || []),
+    ...(payload?.upcitemdb?.images || []), ...(payload?.ebay_catalog?.imageUrls || []),
+  ].filter(Boolean));
+}
 
 function specificsFromIdentity(identity) {
   return receiveSpecifics(identity);
@@ -100,50 +149,153 @@ export async function invoke(event) {
     try {
       photoUrl = new URL(String(body.url || ''));
     } catch { return json(400, { ok: false, error: 'catalog_photo_required' }); }
-    const host = photoUrl.hostname.toLowerCase();
-    const imageHostAllowed = ['media-amazon.com', 'ssl-images-amazon.com', 'scene7.com', 'target.com',
-      'upcitemdb.com', 'walmartimages.com', 'salsify.com', 'ebayimg.com', 'bestbuy.com', 'homedepot.com']
-      .some(domain => host === domain || host.endsWith(`.${domain}`));
-    if (photoUrl.protocol !== 'https:' || !imageHostAllowed || photoUrl.username || photoUrl.password)
+    if (photoUrl.protocol !== 'https:' || photoUrl.username || photoUrl.password)
       return json(400, { ok: false, error: 'unsupported_catalog_photo' });
     const [product, cached] = await Promise.all([
       ctx.sb.from('floor_products').select('images').eq('gtin14', gtin.gtin14).maybeSingle(),
       ctx.sb.from('upc_lookup_cache').select('payload').eq('gtin14', gtin.gtin14).maybeSingle(),
     ]);
     const payload = cached.data?.payload || {};
-    const permittedUrls = [
-      ...(product.data?.images || []), ...(payload.merged?.images || []),
-      ...(payload.amazon?.images || []), ...(payload.upcitemdb?.images || []),
-    ];
-    if (!permittedUrls.includes(photoUrl.href)) return json(403, { ok: false, error: 'catalog_photo_mismatch' });
+    if (!catalogPhotoUrls(product.data, payload).has(photoUrl.href))
+      return json(403, { ok: false, error: 'catalog_photo_mismatch' });
     try {
-      const response = await fetch(photoUrl, { redirect: 'error', signal: AbortSignal.timeout(12000),
-        headers: { Accept: 'image/avif,image/webp,image/png,image/jpeg' } });
-      const mime = String(response.headers.get('content-type') || '').split(';')[0].toLowerCase();
-      const ext = ({ 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/avif': 'avif' })[mime];
-      if (!response.ok || !ext) throw new Error('catalog_photo_unavailable');
-      const maxBytes = 8 * 1024 * 1024;
-      const declared = Number(response.headers.get('content-length') || 0);
-      if (declared > maxBytes) throw new Error('catalog_photo_too_large');
-      const chunks = [];
-      let total = 0;
-      if (!response.body) throw new Error('catalog_photo_empty');
-      for await (const chunk of response.body) {
-        total += chunk.length;
-        if (total > maxBytes) throw new Error('catalog_photo_too_large');
-        chunks.push(chunk);
-      }
-      const bytes = Buffer.concat(chunks, total);
-      if (bytes.length < 2048 || bytes.length > 8 * 1024 * 1024) throw new Error('catalog_photo_size_invalid');
-      const path = `${ctx.storeId}/receive/${ctx.userId}/${requestId}/stock-${randomUUID()}.${ext}`;
-      const { error } = await ctx.sb.storage.from('unit-photos').upload(path, bytes,
-        { contentType: mime, upsert: false });
+      const image = await downloadStockImage(photoUrl.href);
+      const path = `${ctx.storeId}/receive/${ctx.userId}/${requestId}/stock-${randomUUID()}.${image.ext}`;
+      const { error } = await ctx.sb.storage.from('unit-photos').upload(path, image.bytes,
+        { contentType: image.mime, upsert: false });
       if (error) throw error;
       return json(200, { ok: true, path });
     } catch (error) {
       await floorLog({ level: 'warn', event: 'receive_photo.stock_stage_failed', storeId: ctx.storeId,
         message: String(error?.message || error).slice(0, 160) });
       return json(502, { ok: false, error: 'catalog_photo_unavailable', message: 'Stock photo could not be saved. Add a unit photo to continue.' });
+    }
+  }
+  if (body.action === 'attach_stock_photos') {
+    const skus = Array.isArray(body.skus) ? [...new Set(body.skus.map(String).filter(Boolean))].slice(0, 20) : [];
+    if (!skus.length || !await staffOwnsReceivedSkus(ctx, skus))
+      return json(403, { ok: false, error: 'received_unit_access_required' });
+    const gtin = normalizeGtin(String(body.upc || '').trim());
+    if (!gtin.ok) return json(400, { ok: false, error: 'valid_upc_required' });
+    const [{ data: product }, { data: cached }] = await Promise.all([
+      ctx.sb.from('floor_products').select('images').eq('gtin14', gtin.gtin14).maybeSingle(),
+      ctx.sb.from('upc_lookup_cache').select('payload').eq('gtin14', gtin.gtin14).maybeSingle(),
+    ]);
+    const permitted = catalogPhotoUrls(product, cached?.payload || {});
+    const requested = Array.isArray(body.photos) ? body.photos.slice(0, 6) : [];
+    if (!requested.length || requested.some(row => !permitted.has(String(row?.url || ''))))
+      return json(403, { ok: false, error: 'catalog_photo_mismatch' });
+    const firstPath = String(body.first_path || '');
+    const { data: first } = await ctx.sb.from('photos').select('id,sku,path,source,sort_order')
+      .eq('store_id', ctx.storeId).in('sku', skus).eq('path', firstPath).eq('source', 'stock').maybeSingle();
+    if (!first) return json(409, { ok: false, error: 'first_stock_photo_not_attached' });
+    const firstSource = await ctx.sb.from('photos').update({ source_url: String(requested[0].url) })
+      .eq('store_id', ctx.storeId).eq('id', first.id);
+    if (firstSource.error) return json(500, { ok: false, error: 'stock_photo_source_not_saved' });
+    if (skus.length !== 1) return json(200, { ok: true, attached: 1, skipped_group: true });
+    const sku = skus[0];
+    const { data: existing } = await ctx.sb.from('photos').select('id,path,source,sort_order,is_primary')
+      .eq('store_id', ctx.storeId).eq('sku', sku).order('sort_order').order('id');
+    const stockRows = (existing || []).filter(row => row.source === 'stock');
+    const fingerprints = [];
+    for (const row of stockRows) {
+      const { data: file } = await ctx.sb.storage.from('unit-photos').download(row.path);
+      if (file) try { fingerprints.push(await stockPhotoHash(Buffer.from(await file.arrayBuffer()))); } catch { /* Ignore old unsupported formats. */ }
+    }
+    let added = 0;
+    for (const candidate of requested.slice(1, Math.max(1, 7 - stockRows.length))) {
+      if (stockRows.some(row => row.source_url === candidate.url)) continue;
+      try {
+        const image = await downloadStockImage(String(candidate.url));
+        if (fingerprints.some(hash => hashDistance(hash, image.hash) <= 5)) continue;
+        const path = `${ctx.storeId}/${sku}/stock-${randomUUID()}.${image.ext}`;
+        const uploaded = await ctx.sb.storage.from('unit-photos').upload(path, image.bytes,
+          { contentType: image.mime, upsert: false });
+        if (uploaded.error) throw uploaded.error;
+        const sortOrder = (existing || []).reduce((max, row) => Math.max(max, Number(row.sort_order || 0)), -1) + added + 1;
+        const inserted = await ctx.sb.from('photos').insert({ store_id: ctx.storeId, sku, path, original_path: path,
+          source: 'stock', source_url: String(candidate.url), sort_order: sortOrder, is_primary: false });
+        if (inserted.error) { await ctx.sb.storage.from('unit-photos').remove([path]); throw inserted.error; }
+        fingerprints.push(image.hash); added++;
+      } catch (error) {
+        await floorLog({ level: 'warn', event: 'receive_photo.extra_stock_failed', storeId: ctx.storeId,
+          message: String(error?.message || error).slice(0, 160) });
+      }
+    }
+    // Keep every stock image ahead of actual unit photos, without changing the
+    // relative order of the customer's original photos.
+    const { data: allPhotos } = await ctx.sb.from('photos').select('id,source,is_primary')
+      .eq('store_id', ctx.storeId).eq('sku', sku);
+    const reordered = [...(allPhotos || []).filter(row => row.source === 'stock'),
+      ...(allPhotos || []).filter(row => row.source !== 'stock')];
+    for (let i = 0; i < reordered.length; i++) {
+      await ctx.sb.from('photos').update({ sort_order: i, is_primary: i === 0 })
+        .eq('store_id', ctx.storeId).eq('id', reordered[i].id);
+    }
+    return json(200, { ok: true, attached: 1 + added });
+  }
+  if (body.action === 'find_more_stock_photos') {
+    if (!ctx.isAdmin) return json(403, { ok: false, error: 'Admins only' });
+    const sku = String(body.sku || '').trim();
+    const { data: unit, error } = await ctx.sb.from('units')
+      .select('sku,brand,model,title,description,upc').eq('store_id', ctx.storeId).eq('sku', sku).maybeSingle();
+    if (error || !unit) return json(404, { ok: false, error: 'Unit not found' });
+    const query = productQuery(unit);
+    if (!query) return json(400, { ok: false, error: 'Product details are required' });
+    try {
+      const candidates = await searchProductImages(query);
+      return json(200, { ok: true, candidates: candidates.slice(0, 12).map(row => ({
+        image_url: row.image, source_url: row.url, title: row.title, score: row.text_score,
+      })) });
+    } catch (error) {
+      await floorLog({ level: 'warn', event: 'receive_photo.more_images_search_failed', storeId: ctx.storeId,
+        message: String(error?.message || error).slice(0, 160) });
+      return json(502, { ok: false, error: 'Image search unavailable' });
+    }
+  }
+  if (body.action === 'add_more_stock_photo') {
+    if (!ctx.isAdmin) return json(403, { ok: false, error: 'Admins only' });
+    const sku = String(body.sku || '').trim();
+    const [{ data: unit }, { data: currentPhotos }] = await Promise.all([
+      ctx.sb.from('units').select('sku,brand,model,title,description,upc').eq('store_id', ctx.storeId).eq('sku', sku).maybeSingle(),
+      ctx.sb.from('photos').select('id,path,source,source_url,sort_order,is_primary')
+        .eq('store_id', ctx.storeId).eq('sku', sku).order('sort_order').order('id'),
+    ]);
+    if (!unit) return json(404, { ok: false, error: 'Unit not found' });
+    if ((currentPhotos || []).filter(row => row.source === 'stock').length >= 6)
+      return json(409, { ok: false, error: 'This item already has six stock photos' });
+    const query = productQuery(unit);
+    const sourceUrl = String(body.source_url || ''), imageUrl = String(body.image_url || '');
+    const candidates = await searchProductImages(query);
+    if (!candidates.some(row => row.url === sourceUrl && row.image === imageUrl && !riskyImageText.test(row.title)))
+      return json(403, { ok: false, error: 'Photo search result expired; search again' });
+    try {
+      const image = await downloadStockImage(imageUrl);
+      const existingHashes = [];
+      for (const row of (currentPhotos || []).filter(p => p.source === 'stock')) {
+        const { data: file } = await ctx.sb.storage.from('unit-photos').download(row.path);
+        if (file) try { existingHashes.push(await stockPhotoHash(Buffer.from(await file.arrayBuffer()))); } catch { /* Unsupported prior image. */ }
+      }
+      if (existingHashes.some(hash => hashDistance(hash, image.hash) <= 5))
+        return json(409, { ok: false, error: 'That image is a duplicate or near-duplicate' });
+      const path = `${ctx.storeId}/${sku}/stock-${randomUUID()}.${image.ext}`;
+      const uploaded = await ctx.sb.storage.from('unit-photos').upload(path, image.bytes,
+        { contentType: image.mime, upsert: false });
+      if (uploaded.error) throw uploaded.error;
+      const stock = (currentPhotos || []).filter(row => row.source === 'stock');
+      const units = (currentPhotos || []).filter(row => row.source !== 'stock');
+      const rows = [...stock, { id: null, path, source: 'stock', source_url: sourceUrl }, ...units];
+      const insert = await ctx.sb.from('photos').insert({ store_id: ctx.storeId, sku, path, original_path: path,
+        source: 'stock', source_url: sourceUrl, sort_order: stock.length, is_primary: stock.length === 0 });
+      if (insert.error) { await ctx.sb.storage.from('unit-photos').remove([path]); throw insert.error; }
+      for (let i = 0; i < rows.length; i++) if (rows[i].id)
+        await ctx.sb.from('photos').update({ sort_order: i, is_primary: i === 0 })
+          .eq('store_id', ctx.storeId).eq('id', rows[i].id);
+      return json(200, { ok: true });
+    } catch (error) {
+      await floorLog({ level: 'warn', event: 'receive_photo.more_image_attach_failed', storeId: ctx.storeId,
+        message: String(error?.message || error).slice(0, 160) });
+      return json(502, { ok: false, error: 'Could not add that photo' });
     }
   }
   if (body.action === 'confirm') {

@@ -590,6 +590,14 @@ html.app-mode .unit-edit-photo-strip { display:flex; gap:8px; overflow-x:auto; }
 html.app-mode .unit-edit-photo-open,html.app-mode .unit-edit-photo-add { position:relative; flex:0 0 84px; height:84px; padding:0; overflow:hidden; border:0; border-radius:12px; background:#1c1c1e; color:#0a84ff; }
 html.app-mode .unit-edit-photo-open img { width:100%; height:100%; object-fit:cover; }
 html.app-mode .unit-edit-photo-open small,html.app-mode .unit-edit-photo-add small { display:block; font-size:11px; }
+html.app-mode .unit-edit-stock-candidates { display:grid; grid-template-columns:repeat(auto-fill,minmax(92px,1fr)); gap:8px; margin-top:10px; }
+html.app-mode .unit-edit-stock-candidates button { min-width:0; padding:4px; border:1px solid #3a3a3c; border-radius:8px; background:#1c1c1e; color:inherit; }
+html.app-mode .unit-edit-stock-candidates img { display:block; width:100%; height:84px; object-fit:contain; background:#fff; border-radius:5px; }
+html.app-mode .unit-edit-stock-candidates span { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:11px; }
+.unit-edit-stock-candidates { display:grid; grid-template-columns:repeat(auto-fill,minmax(112px,1fr)); gap:10px; margin-top:10px; }
+.unit-edit-stock-candidates button { min-width:0; padding:6px; border:1px solid #98a2b3; border-radius:8px; background:#fff; color:#101828; }
+.unit-edit-stock-candidates img { display:block; width:100%; height:100px; object-fit:contain; background:#fff; border-radius:5px; }
+.unit-edit-stock-candidates span { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; }
 html.app-mode .unit-edit-photo-open small { position:absolute; bottom:2px; left:2px; right:2px; color:#fff; background:#0009; }
 html.app-mode .unit-edit-online { margin:12px 0; padding:0 14px; border-radius:14px; background:#1c1c1e; }
 html.app-mode .unit-edit-online summary { padding:14px 0; }

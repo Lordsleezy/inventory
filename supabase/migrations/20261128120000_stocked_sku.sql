@@ -332,7 +332,7 @@ declare r jsonb;st uuid:=coalesce(public.portal_store_id(),public.current_store_
 begin
  if p_query~'^[0-9]{5}$' then q:=public.stock_resolve_sku(p_query);end if;
  r:=public.portal_inventory_list_with_locations(q,p_status,p_unfinished,p_sort,p_offset,p_limit,p_location);
- return jsonb_set(r,'{items}',coalesce((select jsonb_agg(x||jsonb_build_object('stocked',u.stocked,'qty_on_hand',u.qty_on_hand,'sold_quantity',coalesce((select sum(s.qty) from public.sales s where s.store_id=st and s.sku=u.sku and s.voided_at is null),0))) from jsonb_array_elements(r->'items') x join public.units u on u.sku=x->>'sku' and u.store_id=st),'[]'));
+ return jsonb_set(r,'{items}',coalesce((select jsonb_agg(x||jsonb_build_object('stocked',u.stocked,'qty_on_hand',u.qty_on_hand,'sold_quantity',greatest(0,coalesce((select sum(s.qty) from public.sales s where s.store_id=st and s.sku=u.sku and s.voided_at is null),0)-coalesce((select sum(ret.stock_quantity) from public.returns ret where ret.store_id=st and ret.sku=u.sku and ret.refunded_at is not null),0)))) from jsonb_array_elements(r->'items') x join public.units u on u.sku=x->>'sku' and u.store_id=st),'[]'));
 end $$;
 do $$ declare src text;begin
  select pg_get_functiondef('public.portal_inventory_list_with_locations(text,text,boolean,text,integer,integer,text)'::regprocedure) into src;

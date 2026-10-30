@@ -15,7 +15,8 @@ import { errText } from './errText';
 import { reviewReasonLabel } from './inventoryReview';
 import { DispositionButtons } from './DispositionDialogs';
 
-type Photo = { id: number; path: string; is_primary: boolean; sort_order?: number; source?: string };
+type Photo = { id: number; path: string; is_primary: boolean; sort_order?: number; source?: string; source_url?: string };
+type StockCandidate = { image_url: string; source_url: string; title: string; score: number };
 type Unit = Record<string, unknown>;
 type Options = { conditions: unknown; test_statuses: unknown };
 
@@ -122,6 +123,8 @@ export function UnitEditDrawer({
   const [options, setOptions] = useState<Options | null>(null);
   const [busy, setBusy] = useState(false);
   const [lookupBusy, setLookupBusy] = useState(false);
+  const [stockSearchBusy, setStockSearchBusy] = useState(false);
+  const [stockCandidates, setStockCandidates] = useState<StockCandidate[]>([]);
   const [msg, setMsg] = useState('');
   const [error, setError] = useState('');
   const specificsPersist = useRef<null | (() => Promise<void>)>(null);
@@ -395,6 +398,36 @@ export function UnitEditDrawer({
     onPhotosChanged();
   }
 
+  async function findMoreStockPhotos() {
+    setStockSearchBusy(true); setError(''); setStockCandidates([]);
+    try {
+      const response = await fetch(floorFunctionUrl('receive-photo-identify'), {
+        method: 'POST', headers: { Authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'find_more_stock_photos', sku }), signal: AbortSignal.timeout(30000),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Could not search for product photos');
+      setStockCandidates(Array.isArray(data.candidates) ? data.candidates : []);
+      if (!data.candidates?.length) setMsg('No matching product photos found.');
+    } catch (e) { setError(errText(e)); }
+    finally { setStockSearchBusy(false); }
+  }
+
+  async function addStockCandidate(candidate: StockCandidate) {
+    setBusy(true); setError(''); setMsg('');
+    try {
+      const response = await fetch(floorFunctionUrl('receive-photo-identify'), {
+        method: 'POST', headers: { Authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'add_more_stock_photo', sku, ...candidate }), signal: AbortSignal.timeout(45000),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Could not add this photo');
+      setStockCandidates(rows => rows.filter(row => row.image_url !== candidate.image_url));
+      setMsg('Stock photo added.'); onPhotosChanged();
+    } catch (e) { setError(errText(e)); }
+    finally { setBusy(false); }
+  }
+
   const conditions = choices(options?.conditions);
   const tests = choices(options?.test_statuses);
   const specs = typeof unit.listing_specs === 'object' && unit.listing_specs !== null
@@ -442,6 +475,18 @@ export function UnitEditDrawer({
         </div>
         <input ref={cameraInput} type="file" accept="image/*" capture="environment" multiple hidden disabled={busy} onChange={e => void addPhotos(e.target.files)} />
         <input ref={fileInput} type="file" accept="image/*" multiple hidden disabled={busy} onChange={e => void addPhotos(e.target.files)} />
+        {canDelete && <div className="unit-edit-stock-search">
+          <button type="button" className="secondary" disabled={busy || stockSearchBusy} onClick={() => void findMoreStockPhotos()}>
+            {stockSearchBusy ? 'Searching product photos…' : 'Find more stock photos'}
+          </button>
+          {stockCandidates.length > 0 && <div className="unit-edit-stock-candidates" aria-label="Choose matching stock photo">
+            {stockCandidates.map(candidate => <button type="button" key={candidate.image_url} disabled={busy}
+              onClick={() => void addStockCandidate(candidate)} title={`${candidate.title} · Add this photo`}>
+              <img src={candidate.image_url} alt={candidate.title || 'Possible product photo'} loading="lazy" />
+              <span>{candidate.title || 'Possible match'} · Add</span>
+            </button>)}
+          </div>}
+        </div>}
 
         <h3>Product</h3>
         <div className="unit-edit-grid">
@@ -511,7 +556,7 @@ export function UnitEditDrawer({
           <label>Package weight (lb)<input inputMode="decimal" value={form.weight} onChange={e => set('weight', e.target.value)} /></label></div>
         </div>
         <label className="unit-edit-wide unit-edit-notes">Notes<textarea rows={3} value={form.notes} onChange={e => set('notes', e.target.value)} /></label>
-        {!notForSale && <details ref={onlineDetails} className="unit-edit-online"><summary>Selling online</summary><EbaySpecificsPanel client={client} sku={sku} storeId={storeId} appMode={appMode} hideSaveButton onDescription={(t) => { latestDescription.current = t; set('description', t); }} persistRef={specificsPersist} onSaved={onReadinessChanged} />{canDelete&&<><DnsCheckbox client={client} sku={sku} onChanged={() => onReadinessChanged?.()} /><ChannelCheckboxes key={JSON.stringify(specs.do_not_ship)} client={client} sku={sku} appMode={appMode} /></>}</details>}
+        {!notForSale && <details ref={onlineDetails} className="unit-edit-online"><summary>Selling online</summary><EbaySpecificsPanel client={client} sku={sku} storeId={storeId} appMode={appMode} hideSaveButton onDescription={(t) => { latestDescription.current = t; set('description', t); }} onJumpToCondition={() => jumpToGap('condition')} persistRef={specificsPersist} onSaved={onReadinessChanged} />{canDelete&&<><DnsCheckbox client={client} sku={sku} onChanged={() => onReadinessChanged?.()} /><ChannelCheckboxes key={JSON.stringify(specs.do_not_ship)} client={client} sku={sku} appMode={appMode} /></>}</details>}
         {canDelete && <UnitDispositionHistory client={client} sku={sku} stamp={s => new Date(s).toLocaleString()} />}
         {canDelete && <button type="button" className="text-button danger unit-edit-delete" disabled={busy || lookupBusy} onClick={() => void removeUnit()}>Delete item</button>}
         {viewPhoto && <div className="unit-photo-lightbox" role="dialog" aria-modal="true" aria-label="Photo controls"><button type="button" className="unit-photo-lightbox-close" onClick={() => setViewPhoto(null)}>Close</button>{urls[viewPhoto.path] && <img src={urls[viewPhoto.path]} alt={`Unit ${sku}`} />}<div><button type="button" disabled={busy} onClick={async () => { const { error: e } = await client.rpc('set_primary_photo', { p_id: viewPhoto.id }); if (e) setError(e.message); else { setViewPhoto(null); onPhotosChanged(); } }}>Make primary</button><button type="button" disabled={busy} onClick={async () => { const { error: e } = await client.rpc('delete_unit_photo', { p_id: viewPhoto.id }); if (e) setError(e.message); else { await client.storage.from('unit-photos').remove([viewPhoto.path]); setViewPhoto(null); onPhotosChanged(); } }}>Delete photo</button><button type="button" className="secondary" disabled={busy} onClick={async () => { const ordered = [...orderedPhotos]; const i = ordered.findIndex(p => p.id === viewPhoto.id); if (i > 0) { [ordered[i - 1], ordered[i]] = [ordered[i], ordered[i - 1]]; const { error: e } = await client.rpc('reorder_unit_photos', { p_sku: sku, p_ids: ordered.map(p => p.id) }); if (e) setError(e.message); else onPhotosChanged(); } }}>Move earlier</button></div></div>}

@@ -105,11 +105,19 @@ export function MarketplacesPage({client,accessToken,money,stamp}:Props){
  const [reviewEdit,setReviewEdit]=useState<{row:Review;sku:string;channel:string;price:string}|null>(null);
  const [ebayError,setEbayError]=useState('');
  const [syncPolling,setSyncPolling]=useState(false);
+ const waitForVisible=async(ms:number)=>{
+   while(document.visibilityState!=='visible')await new Promise<void>(resolve=>{
+     const onVisibility=()=>{if(document.visibilityState==='visible'){document.removeEventListener('visibilitychange',onVisibility);resolve();}};
+     document.addEventListener('visibilitychange',onVisibility);
+   });
+   await new Promise(resolve=>setTimeout(resolve,ms));
+ };
  const pollEbaySync=useCallback(async()=>{
    setSyncPolling(true);
    try{
      for(let i=0;i<90;i++){
-       await new Promise(r=>setTimeout(r,2000));
+       await waitForVisible(2000);
+       if(document.visibilityState!=='visible')continue;
        const latest=await ebayCall(accessToken,'sync_latest');
        setEbay(latest);
        const sync=latest.syncNow;

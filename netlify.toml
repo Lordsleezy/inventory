@@ -2,6 +2,7 @@
   command = "npm install --prefix netlify --omit=dev"
   publish = "netlify/public"
   functions = "netlify/functions"
+  ignore = 'if [ -z "$CACHED_COMMIT_REF" ]; then exit 1; fi; if git diff --quiet "$CACHED_COMMIT_REF" "$COMMIT_REF" -- netlify shared netlify.toml package.json package-lock.json; then exit 0; else exit 1; fi'
 
 [functions]
   node_bundler = "esbuild"
@@ -82,7 +83,7 @@
 
 # Orders-only sync: pull eBay sales into Floor every few minutes. Never pushes listings.
 [functions."ebay-sync"]
-  schedule = "*/3 * * * *"
+  schedule = "*/5 * * * *"
   timeout = 60
 
 # Dispatch queued ebay_migration_request → ebay-migrate-background (agent/SQL can queue without secrets).
@@ -176,9 +177,9 @@ schedule = "0 16 * * *"
 schedule = "*/5 * * * *"
 timeout = 30
 
-# Reconcile real eBay marketplace fees and Square processing fees onto sales.
+# Reconcile real eBay marketplace fees and Square processing fees onto sales. Hourly is sufficient for report freshness.
 [functions."channel-fee-sync"]
-schedule = "*/15 * * * *"
+  schedule = "0 * * * *"
 timeout = 60
 
 [functions."census-seasonality-sync"]

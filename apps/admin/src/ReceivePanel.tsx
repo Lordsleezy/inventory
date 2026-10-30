@@ -184,6 +184,7 @@ type Lookup = {
   store_label?: boolean;
   true_miss?: boolean;
   miss_id?: string | null;
+  stock_photos?: { url: string; source: string }[];
   amazon?: Source;
   upcitemdb?: Source;
   merged?: {
@@ -298,7 +299,7 @@ function itemSpecificsFromLookup(m?: Lookup['merged']): string {
  * Example: brand "Oral-B" + model "Replacement Brush Heads 10 Pack" → title.
  */
 function composeListingTitle(brand: string, model: string, unbranded: boolean): string {
-  const b = unbranded ? 'Unbranded' : brand.trim();
+  const b = unbranded ? '' : brand.trim();
   const m = model.trim();
   return [b, m].filter(Boolean).join(' ');
 }
@@ -611,6 +612,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   const [locationEditOpen, setLocationEditOpen] = useState(false);
   const [stagedPhotoPaths, setStagedPhotoPaths] = useState<string[]>([]);
   const [stockPhotoPath, setStockPhotoPath] = useState('');
+  const [stockPhotoSourceUrl, setStockPhotoSourceUrl] = useState('');
+  const [stockPhotoUrls, setStockPhotoUrls] = useState<{ url: string; source: string }[]>([]);
   const [stockPhotoBusy, setStockPhotoBusy] = useState(false);
   const [stockPhotoError, setStockPhotoError] = useState('');
   const [manual, setManual] = useState(!!initialManual);
@@ -664,6 +667,10 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   const titleField = useRef<HTMLTextAreaElement>(null);
   const missChooseFile = useRef<HTMLInputElement>(null);
   const missPromptedFor = useRef<string | null>(null);
+  const photoIdentifyRequest = useRef(0);
+  const typingTarget = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null);
+  const [typingOpen, setTypingOpen] = useState(false);
+  const [typingShift, setTypingShift] = useState(false);
   const photoCheckedFor = useRef<string | null>(null);
 
   useEffect(() => {
@@ -684,6 +691,18 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   /** Stable key for IndexedDB photo stash (survives camera-app process death on store phones). */
   const photoSessionKey = useRef(manualPhotoSession(storeId));
   const [photoBusy, setPhotoBusy] = useState(false);
+
+  useEffect(() => {
+    if (!dialog) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      if (dialog === 'miss-photo') dismissPhotoCheck();
+      else setDialog(null);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [dialog]);
 
   function openBarcodeCamera() {
     // Phones / installed PWA: native capture is far more reliable than getUserMedia + BarcodeDetector.
@@ -735,6 +754,30 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     if (manual || formOpen || modalOpen.current || document.visibilityState !== 'visible') return;
     requestAnimationFrame(() => { if (document.visibilityState === 'visible' && mounted.current) upcInput.current?.focus(); });
   };
+  function chooseNoBrand() {
+    setForm(prev => ({ ...prev, brand: '', unbranded: true,
+      title: prev.title && prev.title !== composeListingTitle(prev.brand, prev.model, false) ? prev.title : prev.model }));
+    setPhotoTitleConfirmed(false);
+  }
+  function suppressPhotoPrompt(upc = current?.upc) {
+    if (!upc) return;
+    try { sessionStorage.setItem(`floor:receive-photo-dismissed:${storeId}:${upc}`, '1'); } catch { /* suppression is best-effort */ }
+  }
+  function typeReceiveKey(key: string) {
+    const target = typingTarget.current;
+    if (!target) return;
+    const start = target.selectionStart ?? target.value.length;
+    const end = target.selectionEnd ?? start;
+    const insertion = key === 'SPACE' ? ' ' : key;
+    const next = key === 'BACKSPACE'
+      ? (start === end ? target.value.slice(0, Math.max(0, start - 1)) + target.value.slice(end) : target.value.slice(0, start) + target.value.slice(end))
+      : target.value.slice(0, start) + insertion + target.value.slice(end);
+    const caret = key === 'BACKSPACE' ? Math.max(0, start - (start === end ? 1 : 0)) : start + insertion.length;
+    const prototype = target instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    Object.getOwnPropertyDescriptor(prototype, 'value')?.set?.call(target, next);
+    target.dispatchEvent(new Event('input', { bubbles: true }));
+    requestAnimationFrame(() => { target.focus(); target.setSelectionRange(caret, caret); });
+  }
   const update = (key: keyof Form, value: string) => {
     const dimensionField = ({length:'package_length_in',width:'package_width_in',height:'package_height_in',weight:'package_weight_lb',
       productHeight:'product_height_in',productWidth:'product_width_in',productDepth:'product_depth_in',productWeight:'product_weight_lb'} as Record<string,string>)[key];
@@ -820,13 +863,31 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || typeof data.path !== 'string') throw new Error(data.message || 'Stock photo unavailable');
-      if (activeScan.current === scanId) setStockPhotoPath(data.path);
+      if (activeScan.current === scanId) { setStockPhotoPath(data.path); setStockPhotoSourceUrl(url); }
       return data.path;
     } catch {
       if (activeScan.current === scanId) setStockPhotoError('Stock photo could not be saved. Tap the save button to retry, or add a unit photo.');
       return null;
     } finally {
       if (activeScan.current === scanId) setStockPhotoBusy(false);
+    }
+  }
+
+  async function attachStockPhotoSources(skus: string[], upc: string, firstPath: string, firstUrl: string, rest: { url: string; source: string }[]) {
+    if (!skus.length || !upc || !firstPath || !firstUrl) return;
+    try {
+      const response = await fetch(floorFunctionUrl('receive-photo-identify'), {
+        method: 'POST', headers: { Authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'attach_stock_photos', skus, upc, first_path: firstPath,
+          photos: [{ url: firstUrl, source: 'catalog' }, ...rest].slice(0, 6) }),
+        signal: AbortSignal.timeout(55000),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        console.warn('receive_stock_photo_background_failed', { sku: skus[0], message: data.message || data.error || response.status });
+      }
+    } catch (error) {
+      console.warn('receive_stock_photo_background_failed', { sku: skus[0], message: errText(error) });
     }
   }
 
@@ -1003,6 +1064,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     setFiles([]);
     setStagedPhotoPaths([]);
     setStockPhotoPath('');
+    setStockPhotoSourceUrl('');
+    setStockPhotoUrls((r?.stock_photos || m?.images?.map(url => ({ url: String(url), source: 'catalog' })) || []).slice(0, 6));
     setStockPhotoError('');
     // Instant miss popup (photo fallback). Do not re-prompt the same scan id.
     const identityNeeds = missingIdentityFields(r);
@@ -1013,7 +1076,11 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       setPhotoIdentity(priceIdentity);
       void findPhotoPrices(priceIdentity);
     }
-    if ((isTrueCatalogMiss(r) || identityNeeds.length > 0) && missPromptedFor.current !== current.id) {
+    const photoDismissed = (() => {
+      try { return sessionStorage.getItem(`floor:receive-photo-dismissed:${storeId}:${current.upc}`) === '1'; }
+      catch { return false; }
+    })();
+    if ((isTrueCatalogMiss(r) || identityNeeds.length > 0) && missPromptedFor.current !== current.id && !photoDismissed) {
       missPromptedFor.current = current.id;
       setPhotoNeed(r?.store_label ? storeLabelWarning()
         : identityNeeds.length ? `Need: ${identityNeeds.join(', ')}. Take a photo of the product label.`
@@ -1126,7 +1193,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     if (brandError) { setError(brandError); return; }
     if (!stockTarget && !doNotList && photoVerifyPending) { setError('Choose whether the photo or barcode product is correct before saving.'); setDialog('miss-photo'); return; }
     if (!stockTarget && !doNotList && photoTitleConfirmed && !isCompleteReceiveTitle(form.title, form.brand)) {
-      setError('Enter the full product title, including the brand and what the item is, before saving.'); return;
+      setError('Enter a descriptive product title with the item type and visible size, color, or material before saving.'); return;
     }
     if (!manual && current?.status === 'loading') { setError('Lookup still running…'); return; }
     const quantity = Number(form.quantity);
@@ -1220,6 +1287,10 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           photo_identity_type: photoTitleConfirmed ? text(photoIdentity?.item_type) : '' },
       });
       const skus = data.skus as string[];
+      if (acceptedStockPhotoPath && stockPhotoSourceUrl) {
+        void attachStockPhotoSources(skus, String(form.upc || current?.upc || ''), acceptedStockPhotoPath,
+          stockPhotoSourceUrl, stockPhotoUrls.filter(photo => photo.url !== stockPhotoSourceUrl).slice(0, 5));
+      }
       console.info('receive_save_timing', { commit_roundtrip_ms: Math.round(performance.now()-receiveStarted),
         validation_ms: Math.round(receiveStarted-saveTappedAt.current), rpc_ms:data.client_rpc_ms, recovery_snapshot_ms:data.snapshot_ms,
         server_ms: data.server_ms, server_steps:data.server_steps, tap_to_commit_ms: Math.round(performance.now()-saveTappedAt.current), sku: skus[0] });
@@ -1532,6 +1603,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   /** Verify barcode identity against the actual unit photo. */
   async function identifyMissPhoto(raw: File | null, alreadyStaged = false) {
     if (!current) return;
+    const identifyRequest = ++photoIdentifyRequest.current;
     if (!raw) {
       setPhotoIdError('Camera returned no photo. Try again, or choose a photo from your phone.');
       return;
@@ -1544,6 +1616,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     setPhotoPriceError('');
     if (!alreadyStaged) setFiles([raw]);
     const file = await copyImageFile(raw);
+    if (identifyRequest !== photoIdentifyRequest.current) return;
     if (!file) {
       setPhotoIdError('Could not read that photo. Try one clear picture of the box or label.');
       setPhotoIdBusy(false);
@@ -1553,7 +1626,11 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     try {
       if (!alreadyStaged) setFiles([file]);
       if (!alreadyStaged) void savePendingPhotos(pendingPhotoKey(storeId, photoSessionKey.current), [file]);
-      if (!alreadyStaged) setStagedPhotoPaths(await stageUnitPhotos([file]));
+      if (!alreadyStaged) {
+        const staged = await stageUnitPhotos([file]);
+        if (identifyRequest !== photoIdentifyRequest.current) return;
+        setStagedPhotoPaths(staged);
+      }
       const upload = await identificationJpeg(file);
       const compressedMs = performance.now() - photoStarted;
       const image_base64 = await fileToBase64(upload);
@@ -1564,6 +1641,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           image_base64,
           mime_type: upload.type || 'image/jpeg',
       });
+      if (identifyRequest !== photoIdentifyRequest.current) return;
       const json = photoResponse.data;
       if (photoResponse.status < 200 || photoResponse.status >= 300) {
         setPhotoIdError(json.message || json.error || 'Photo identify failed. Retry or fill fields by hand.');
@@ -1574,9 +1652,9 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       const model = text(json.fill?.model || json.identity?.model);
       const identity = (json.identity || {}) as Record<string, unknown>;
       const title = text(json.fill?.title) || composeListingTitle(brand, model, false);
-      if (identity.title_complete === false || !isCompleteReceiveTitle(title, brand)) {
-        setPhotoIdError('Photo identification returned only a partial title. Enter the full brand and product name before saving.');
-        setWarning('A short AI title cannot be saved. Add the item type and key size, color, or pattern.');
+    if (identity.title_complete === false || !isCompleteReceiveTitle(title, brand)) {
+      setPhotoIdError('Photo identification returned only a partial title. Enter the item type and visible details before saving.');
+      setWarning('A short AI title cannot be saved. Add the item type and key size, color, or pattern.');
         return;
       }
       const barcode = current.result?.merged;
@@ -1597,7 +1675,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       setPhotoIdStatus(title || 'Product found');
       setPhotoFill({ aspects: json.fill?.aspects || {} });
       setPhotoIdentity(identity);
-      void findPhotoPrices(identity);
+      if (brand) void findPhotoPrices(identity);
+      else { setPhotoPrice(null); setPhotoPriceBusy(false); setPhotoPriceError('No brand was visible; set the selling price from the item itself.'); }
       photoCheckedFor.current = current.id;
       setDialog('miss-photo');
       console.info('receive_photo_timing', { compressed_ms: Math.round(compressedMs), upload_ms: Math.round(photoResponse.uploadMs),
@@ -1606,13 +1685,16 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     } catch (e) {
       setPhotoIdError(errText(e) || 'Photo identify failed. Retry or fill fields by hand.');
     } finally {
-      setPhotoIdBusy(false);
-      setPhotoIdStatus('');
+      if (identifyRequest === photoIdentifyRequest.current) {
+        setPhotoIdBusy(false);
+        setPhotoIdStatus('');
+      }
     }
   }
 
-  async function choosePhotoIdentity(usePhoto: boolean) {
+  async function choosePhotoIdentity(usePhoto: boolean, chooseUnbranded = false) {
     if (!usePhoto) {
+      suppressPhotoPrompt();
       setPhotoCandidate(null);
       setPhotoConflictText('');
       setPhotoVerifyPending(false);
@@ -1621,24 +1703,29 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       return;
     }
     if (!current || !photoCandidate) return;
+    suppressPhotoPrompt(current.upc);
+    const unbranded = chooseUnbranded || !text(photoCandidate.brand);
     setPhotoIdBusy(true);
     setPhotoIdError('');
-    setPhotoIdStatus('Saving confirmed barcode match…');
+    setPhotoIdStatus(unbranded ? 'Using unbranded product details…' : 'Saving confirmed barcode match…');
     try {
-      const response = await fetch(floorFunctionUrl('receive-photo-identify'), {
-        method: 'POST', headers: { Authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
-        body: JSON.stringify({ action: 'confirm_identity', upc: current.upc, fields: photoCandidate }),
-        signal: AbortSignal.timeout(25000),
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok || !data.ok) throw new Error(data.message || 'Could not save the confirmed product match.');
-      const product = data.product || {};
-      const brand = text(photoCandidate.brand);
+      let product: Record<string, unknown> = {};
+      const brand = unbranded ? '' : text(photoCandidate.brand);
+      if (!unbranded) {
+        const response = await fetch(floorFunctionUrl('receive-photo-identify'), {
+          method: 'POST', headers: { Authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
+          body: JSON.stringify({ action: 'confirm_identity', upc: current.upc, fields: photoCandidate }),
+          signal: AbortSignal.timeout(25000),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data.ok) throw new Error(data.message || 'Could not save the confirmed product match.');
+        product = data.product || {};
+      }
       const title = text(photoCandidate.title);
       const model = text(photoCandidate.model);
       const dimFields = ['length','width','height','weight','productHeight','productWidth','productDepth','productWeight'] as const;
       setForm(prev => {
-        const next = { ...prev, brand, unbranded: false, model,
+        const next = { ...prev, brand, unbranded, model,
         variant: text(photoCandidate.variant) || prev.variant, size: text(photoCandidate.size) || prev.size,
         category: text(photoCandidate.category) || prev.category,
         description: text(photoCandidate.description) || prev.description, title };
@@ -1646,14 +1733,19 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         return next;
       });
       setDimensionSources(prev => Object.fromEntries(Object.entries(prev).filter(([, value]) => /staff/i.test(value))));
-      setPhotoTitleConfirmed(true);
+      setPhotoTitleConfirmed(!unbranded);
       setPhotoVerifyPending(false);
       setStockPhotoPath('');
       if (Array.isArray(product.images) && product.images[0]) {
+        const productPhotos = Array.isArray(product.stock_photos) ? product.stock_photos as { url: string; source: string }[]
+          : product.images.map((url: string) => ({ url, source: 'amazon' }));
+        setStockPhotoUrls(productPhotos.slice(0, 6));
         const staged = await stageStockPhoto(String(product.images[0]), current.upc, current.id);
         if (!staged) setWarning('Product confirmed and saved to the UPC catalog, but its matching stock photo could not be saved. Your actual photo will be used.');
         else setWarning('Product confirmed. Its matching stock photo will be photo #1, followed by your unit photo.');
-      } else setWarning('Product confirmed and saved to the UPC catalog. No matching stock photo was found; your unit photo will be used.');
+      } else setWarning(unbranded
+        ? 'Using the descriptive unbranded photo details. Your actual unit photo will be used.'
+        : 'Product confirmed and saved to the UPC catalog. No matching stock photo was found; your unit photo will be used.');
       setPhotoCandidate(null);
       setPhotoConflictText('');
       setDialog(null);
@@ -1668,13 +1760,16 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   }
 
   function dismissPhotoCheck() {
-    if (photoVerifyPending) {
-      setForm(prev => ({ ...prev, brand:'', model:'', variant:'', size:'', title:'', category:'', description:'' }));
-      setStockPhotoPath('');
-      setPhotoTitleConfirmed(false);
-    }
+    photoIdentifyRequest.current++;
+    suppressPhotoPrompt();
+    if (photoVerifyPending) setPhotoTitleConfirmed(false);
     setPhotoVerifyPending(false);
+    setPhotoCandidate(null);
+    setPhotoConflictText('');
+    setPhotoIdBusy(false);
+    setPhotoIdStatus('');
     setDialog(null);
+    setWarning('Photo help closed. You can enter details yourself or reopen photo help from this scan.');
   }
 
   // Manual entry: restore any stashed photos after a camera-app kill.
@@ -1702,6 +1797,16 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   const hasCatalogPhoto = Boolean(!manual && merged?.images?.[0]);
   const hasAnyPhoto = Boolean(stockTarget || files.length || stagedPhotoPaths.length || stockPhotoPath || hasCatalogPhoto);
   return <section className={`panel receive-panel${appChrome ? ' receive-app' : ''}${storePhoneMode ? ' receive-store-phone' : ''}`}>
+    {(appChrome || storePhoneMode) && <button type="button" className="receive-keyboard-trigger" onClick={() => setTypingOpen(open => !open)} aria-expanded={typingOpen}>
+      {typingOpen ? 'Hide Floor keyboard' : '⌨ Floor keyboard'}
+    </button>}
+    {typingOpen && <div className="receive-typing-pad" role="group" aria-label="Floor typing pad">
+      <div className="receive-typing-row">{'1234567890'.split('').map(key => <button type="button" key={key} onPointerDown={e => e.preventDefault()} onClick={() => typeReceiveKey(key)}>{key}</button>)}</div>
+      <div className="receive-typing-row">{'qwertyuiop'.split('').map(key => <button type="button" key={key} onPointerDown={e => e.preventDefault()} onClick={() => { typeReceiveKey(typingShift ? key.toUpperCase() : key); setTypingShift(false); }}>{typingShift ? key.toUpperCase() : key}</button>)}</div>
+      <div className="receive-typing-row">{'asdfghjkl'.split('').map(key => <button type="button" key={key} onPointerDown={e => e.preventDefault()} onClick={() => { typeReceiveKey(typingShift ? key.toUpperCase() : key); setTypingShift(false); }}>{typingShift ? key.toUpperCase() : key}</button>)}</div>
+      <div className="receive-typing-row"><button type="button" onPointerDown={e => e.preventDefault()} onClick={() => setTypingShift(value => !value)}>⇧</button>{'zxcvbnm'.split('').map(key => <button type="button" key={key} onPointerDown={e => e.preventDefault()} onClick={() => { typeReceiveKey(typingShift ? key.toUpperCase() : key); setTypingShift(false); }}>{typingShift ? key.toUpperCase() : key}</button>)}<button type="button" onPointerDown={e => e.preventDefault()} onClick={() => typeReceiveKey('BACKSPACE')}>⌫</button></div>
+      <div className="receive-typing-row">{[',', '.', '&', '/'].map(key => <button type="button" key={key} onPointerDown={e => e.preventDefault()} onClick={() => typeReceiveKey(key)}>{key}</button>)}<button type="button" className="receive-typing-space" onPointerDown={e => e.preventDefault()} onClick={() => typeReceiveKey('SPACE')}>Space</button><button type="button" onPointerDown={e => e.preventDefault()} onClick={() => { setTypingOpen(false); requestAnimationFrame(() => { upcInput.current?.focus(); }); }}>Done · scan</button></div>
+    </div>}
     {appChrome && (
       <div className="app-nav receive-app-nav">
         <button type="button" onClick={() => { onAppCancel?.(); }}>Cancel</button>
@@ -1719,6 +1824,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           <input
             ref={upcInput}
             value={draft}
+            onFocus={e => { typingTarget.current = e.currentTarget; }}
             onChange={e => setDraft(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); enqueue(draft); } }}
             onBlur={() => {
@@ -1795,7 +1901,10 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       {catalogMiss && current && <div className="alert" role="alert">
         <span>{catalogMiss}</span>
         {trueMiss && (
-          <button type="button" disabled={photoIdBusy} onClick={() => setDialog('miss-photo')}>
+          <button type="button" disabled={photoIdBusy} onClick={() => {
+            try { if (current) sessionStorage.removeItem(`floor:receive-photo-dismissed:${storeId}:${current.upc}`); } catch { /* manual reopen still works */ }
+            setDialog('miss-photo');
+          }}>
             Scan with camera
           </button>
         )}
@@ -1837,14 +1946,15 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         </div>
         {stockPhotoError && <small className="receive-confirm-note" role="status">{stockPhotoError}</small>}
         <label className="receive-title-field">Item title
-          <textarea ref={titleField} rows={2} value={form.title} onChange={e => update('title', e.target.value)} />
+          <textarea ref={titleField} rows={2} value={form.title} onFocus={e => { typingTarget.current = e.currentTarget; }} onChange={e => update('title', e.target.value)} />
         </label>
         <div className="receive-confirm-fields">
-          <label>Brand<input value={form.brand} onChange={e => update('brand', e.target.value)} /></label>
-          <label>Model<input value={form.model} onChange={e => update('model', e.target.value)} /></label>
-          <label>Variant<input value={form.variant} onChange={e => update('variant', e.target.value)} placeholder="Scent, color…" /></label>
-          <label>Size<input value={form.size} onChange={e => update('size', e.target.value)} placeholder="Size or measurements" /></label>
-          <label>Floor category<input value={form.category} onChange={e => update('category', e.target.value)} />
+          <label>Brand<input value={form.unbranded ? 'Unbranded' : form.brand} disabled={form.unbranded} onFocus={e => { typingTarget.current = e.currentTarget; }} onChange={e => update('brand', e.target.value)} />
+            <button type="button" className="text-button" onClick={chooseNoBrand}>No brand</button></label>
+          <label>Model<input value={form.model} onFocus={e => { typingTarget.current = e.currentTarget; }} onChange={e => update('model', e.target.value)} /></label>
+          <label>Variant<input value={form.variant} onFocus={e => { typingTarget.current = e.currentTarget; }} onChange={e => update('variant', e.target.value)} placeholder="Scent, color…" /></label>
+          <label>Size<input value={form.size} onFocus={e => { typingTarget.current = e.currentTarget; }} onChange={e => update('size', e.target.value)} placeholder="Size or measurements" /></label>
+          <label>Floor category<input value={form.category} onFocus={e => { typingTarget.current = e.currentTarget; }} onChange={e => update('category', e.target.value)} />
             <small>Online store categories are set after saving. Floor fills a suggested eBay category when it finds a match; otherwise search the channel categories below.</small>
           </label>
           <div className="receive-condition-field"><span>Condition</span><div className="receive-chip-row" role="radiogroup" aria-label="Condition">
@@ -1853,7 +1963,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
             </label>)}
           </div></div>
         </div>
-        {isDefectiveCondition(form.condition) && <label className="receive-confirm-full">Defect note<input value={form.conditionNote} onChange={e => update('conditionNote', e.target.value)} /></label>}
+        {isDefectiveCondition(form.condition) && <label className="receive-confirm-full">Defect note<input value={form.conditionNote} onFocus={e => { typingTarget.current = e.currentTarget; }} onChange={e => update('conditionNote', e.target.value)} /></label>}
         {!storePhoneMode && <details className="receive-confirm-details"><summary>Description {form.description ? '· filled' : '· empty'}</summary>
           <textarea rows={3} value={form.description} onChange={e => update('description', e.target.value)} /></details>}
         {!storePhoneMode && <details className="receive-confirm-details"><summary>Product · {[form.productHeight, form.productWidth, form.productDepth].every(Boolean)
@@ -1893,7 +2003,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           {photoPrice?.listings?.[0] && <a className="receive-confirm-source" href={photoPrice.listings[0].url} target="_blank" rel="noreferrer">
             {photoPrice.listings[0].store} · {money(photoPrice.listings[0].price_cents)} · source ↗</a>}
           <div className="receive-confirm-bottom-row">
-            <label>Price<ManifestReceiveReference result={manifestReference} /><input inputMode="decimal" placeholder="0.00" value={form.ask} onChange={e => update('ask',e.target.value)} /></label>
+            <label>Price<ManifestReceiveReference result={manifestReference} /><input inputMode="decimal" placeholder="0.00" value={form.ask} onFocus={e => { typingTarget.current = e.currentTarget; }} onChange={e => update('ask',e.target.value)} /></label>
             {!staffMode && <label>Cost<input inputMode="decimal" placeholder="Leave blank if unknown" value={form.cost} onChange={e => update('cost',e.target.value)} /></label>}
           </div>
           <div className="receive-location-card"><label>Location<select value={selectedLocation} onChange={e => setSelectedLocation(e.target.value)}>
@@ -1947,7 +2057,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
             ? ' (needed to list)'
             : ((retail || photoPrice?.count) ? ' (reference only — enter your selling price)' : ' (enter your selling price)')}
           <ManifestReceiveReference result={manifestReference} />
-          <input inputMode="decimal" placeholder="24.99" value={form.ask} onChange={e => update('ask', e.target.value)} autoComplete="off" />
+          <input inputMode="decimal" placeholder="24.99" value={form.ask} onFocus={e => { typingTarget.current = e.currentTarget; }} onChange={e => update('ask', e.target.value)} autoComplete="off" />
         </label>
 
         <div className={`unit-edit-wide receive-cond${liveMissing.includes('condition') ? ' receive-need' : ''}`} role="radiogroup" aria-label="Condition">
@@ -1960,17 +2070,18 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
               <input type="radio" name="receive-condition" value={value} checked={form.condition === value} onChange={() => update('condition', value)} />{text2}
             </label>)}</div>}
         </div>
-        {needNoteForScratch && <label className="unit-edit-wide">What is defective / why non-sellable? (required)<textarea rows={2} value={form.conditionNote} onChange={e => update('conditionNote', e.target.value)} /></label>}
+        {needNoteForScratch && <label className="unit-edit-wide">What is defective / why non-sellable? (required)<textarea rows={2} value={form.conditionNote} onFocus={e => { typingTarget.current = e.currentTarget; }} onChange={e => update('conditionNote', e.target.value)} /></label>}
 
         <label className={liveMissing.includes('category') ? 'receive-need' : undefined}>
           Floor category{liveMissing.includes('category') ? ' (needed to list)' : ''}
-          <input value={form.category} onChange={e => update('category', e.target.value)} />
+          <input value={form.category} onFocus={e => { typingTarget.current = e.currentTarget; }} onChange={e => update('category', e.target.value)} />
           <small>Online store categories are set after saving. Floor fills a suggested eBay category when it finds a match; otherwise search the channel categories below.</small>
         </label>
 
         <label className={liveMissing.includes('brand') ? 'receive-need' : undefined}>
           Brand{liveMissing.includes('brand') ? (doNotList ? ' (required to save)' : ' (needed to list)') : ''}
-          <input value={form.unbranded ? 'Unbranded' : form.brand} disabled={form.unbranded} onChange={e => update('brand', e.target.value)} />
+          <input value={form.unbranded ? 'Unbranded' : form.brand} disabled={form.unbranded} onFocus={e => { typingTarget.current = e.currentTarget; }} onChange={e => update('brand', e.target.value)} />
+          <button type="button" className="text-button" onClick={chooseNoBrand}>No brand</button>
         </label>
         <label className="mboard-inline">
           <input type="checkbox" checked={form.unbranded} onChange={e => setForm(p => {
@@ -1989,6 +2100,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           <input
             value={form.noUpc ? UPC_NOT_APPLICABLE : form.upc}
             disabled={form.noUpc}
+            onFocus={e => { typingTarget.current = e.currentTarget; }}
             onChange={e => {
               const v = e.target.value;
               setForm(p => ({ ...p, upc: v, noUpc: false }));
@@ -2030,6 +2142,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           Item specifics{liveMissing.includes('item specifics') ? ' (needed to list)' : (formatAspectsLine(merged?.aspects) && !text(merged?.model) ? ' (from UPC lookup)' : '')}
           <input
             value={form.model}
+            onFocus={e => { typingTarget.current = e.currentTarget; }}
             onChange={e => update('model', e.target.value)}
             placeholder="Model, flavor, size, color… (from UPC when available)"
             autoComplete="off"
@@ -2042,13 +2155,14 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           Title
           <input
             value={form.title}
+            onFocus={e => { typingTarget.current = e.currentTarget; }}
             onChange={e => update('title', e.target.value)}
             placeholder="Brand + item specifics"
             autoComplete="off"
           />
           <span className="hint">Auto-filled as brand + item specifics (scans and manual).</span>
         </label>
-        {manual && <label className="unit-edit-wide">Description / features<textarea rows={3} value={form.description} onChange={e => update('description', e.target.value)} /></label>}
+        {manual && <label className="unit-edit-wide">Description / features<textarea rows={3} value={form.description} onFocus={e => { typingTarget.current = e.currentTarget; }} onChange={e => update('description', e.target.value)} /></label>}
         {manual && !staffMode && <label>Cost (optional)<input inputMode="decimal" placeholder="9.00" value={form.cost} onChange={e => update('cost', e.target.value)} /></label>}
         {!staffMode && <label className="unit-edit-wide">Manifest (optional)
           <select value={manifestId} onChange={e => setManifestId(e.target.value)}>
@@ -2165,6 +2279,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           <button type="button" disabled={busy} autoFocus onClick={() => { const p = parse(); if (p) void receive(p, null); }}>Yes — receive</button>
           <button type="button" className="secondary" disabled={busy} onClick={() => setDialog('reason')}>No</button>
           <button type="button" className="text-button" onClick={() => setDialog(null)}>Back</button>
+          <button type="button" className="text-button" onClick={() => setDialog(null)}>Cancel</button>
         </div>
       </div>
     </div>}
@@ -2182,6 +2297,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         <div className="actions">
           <button type="button" disabled={busy || !holdReady} onClick={() => { const p = parse(); if (p) void receive(p, { reason, note: reasonNote }); }}>Receive without listing</button>
           <button type="button" className="text-button" onClick={() => setDialog('ready')}>Back</button>
+          <button type="button" className="text-button" onClick={() => setDialog(null)}>Cancel</button>
         </div>
       </div>
     </div>}
@@ -2196,9 +2312,9 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         {photoIdError && <p className="alert" role="alert">{photoIdError}</p>}
         {photoCandidate && <div className="receive-photo-candidate">
           <strong>{text(photoCandidate.title)}</strong>
-          <span>{[text(photoCandidate.brand), text(photoCandidate.model), text(photoCandidate.size), text(photoCandidate.color)].filter(Boolean).join(' · ')}</span>
+          <span>{[text(photoCandidate.brand) || 'No visible brand', text(photoCandidate.model), text(photoCandidate.size), text(photoCandidate.color)].filter(Boolean).join(' · ')}</span>
         </div>}
-        <input
+          <input
           ref={missPhotoFile}
           type="file"
           accept="image/*"
@@ -2220,16 +2336,20 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         }} />
         {photoCandidate ? <div className="actions">
           <button type="button" disabled={photoIdBusy} autoFocus onClick={() => void choosePhotoIdentity(true)}>Use photo product</button>
+          {text(photoCandidate.brand) && <button type="button" className="secondary" disabled={photoIdBusy} onClick={() => void choosePhotoIdentity(true, true)}>No brand</button>}
           {!current?.result?.store_label && current?.result?.merged?.title && <button type="button" className="secondary" disabled={photoIdBusy} onClick={() => void choosePhotoIdentity(false)}>Keep barcode product</button>}
+          <button type="button" className="secondary" disabled={photoIdBusy} onClick={dismissPhotoCheck}>Enter details myself</button>
+          <button type="button" className="text-button" onClick={dismissPhotoCheck}>Cancel</button>
+          <button type="button" className="text-button" onClick={skipCurrent}>Discard this scan</button>
         </div> : <div className="actions">
           <button type="button" disabled={photoIdBusy} autoFocus onClick={() => missPhotoFile.current?.click()}>
             {photoIdError ? 'Retry photo' : 'Yes — take photo'}
           </button>
           <button type="button" className="secondary" disabled={photoIdBusy} onClick={() => missChooseFile.current?.click()}>Choose photo</button>
           {photoVerifyPending && current?.result?.merged?.title && <button type="button" className="secondary" disabled={photoIdBusy} onClick={() => void choosePhotoIdentity(false)}>Keep barcode product</button>}
-          <button type="button" className="secondary" disabled={photoIdBusy} onClick={dismissPhotoCheck}>
-            No — fill by hand
-          </button>
+          <button type="button" className="secondary" onClick={dismissPhotoCheck}>Enter details myself</button>
+          <button type="button" className="text-button" onClick={dismissPhotoCheck}>Cancel</button>
+          <button type="button" className="text-button" onClick={skipCurrent}>Discard this scan</button>
         </div>}
       </div>
     </div>}

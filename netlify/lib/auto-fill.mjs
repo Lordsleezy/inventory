@@ -6,6 +6,7 @@
  * Never checks a channel, never lists, never changes a category or description that is already set.
  */
 import { autofillUnitSpecifics } from "./ebay-specifics.mjs";
+import { pickCategorySuggestion } from "./ebay-aspects.mjs";
 
 export const AUTO_SOURCE = "auto_suggested";
 const text = (v) => String(v ?? "").trim();
@@ -84,7 +85,9 @@ export function supabaseAutoFillDeps(sb, { suggestCategories, specificsDeps, eba
       return { ...u, category_id: row?.category_id || null, tried_title: u.listing_specs?.auto_category_tried || "" };
     },
     suggest: async (unit) => {
-      for (const s of await suggestCategories(text(unit.title))) {
+      const suggestions = await suggestCategories(text(unit.title));
+      const picked = pickCategorySuggestion(suggestions, [unit.title, unit.brand, unit.model]);
+      for (const s of [picked, ...suggestions.filter((row) => row !== picked)].filter(Boolean)) {
         const t = must(await sb.from("channel_taxonomy").select("category_id").eq("channel", "ebay").eq("category_id", s.categoryId)
           .eq("active", true).eq("leaf", true).maybeSingle());
         if (t) return t.category_id;

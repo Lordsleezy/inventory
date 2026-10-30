@@ -1,8 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { reportClientError } from './clientLog';
 import { errText } from './errText';
+import { useVisibleInterval } from './useVisibleInterval';
 
 const functionsBase = (import.meta.env.VITE_FLOOR_FUNCTIONS_URL || 'https://inventoryobi.netlify.app').replace(/\/$/, '');
+
+async function waitForVisible(ms: number) {
+  while (document.visibilityState !== 'visible') {
+    await new Promise<void>((resolve) => {
+      const onVisibility = () => {
+        if (document.visibilityState !== 'visible') return;
+        document.removeEventListener('visibilitychange', onVisibility);
+        resolve();
+      };
+      document.addEventListener('visibilitychange', onVisibility);
+    });
+  }
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 type Fail = string;
 type Summary = {
@@ -14,9 +29,9 @@ type Summary = {
 };
 type Aspect = { name: string; required: boolean; recommended: boolean; allowed: string[]; selectionOnly: boolean };
 type Draft = Summary & {
-  description: string | null; condition_id: string | null; condition_not_supported: boolean; condition_notes: string | null;
+  description: string | null; condition_id: string | null; condition_used?: string | null; condition_not_supported: boolean; condition_notes: string | null;
   upc: string; rejected_upc: string | null;
-  suggestions: { categoryId: string; categoryName: string }[];
+  suggestions: { categoryId: string; categoryName: string; categoryPath?: string }[];
   conditions: { conditionId: string; name: string }[];
   aspect_defs: Aspect[]; aspects: Record<string, string>;
   photos: { path: string; url: string }[];
@@ -154,15 +169,11 @@ export function EbayDraftsPage({ accessToken, userId, money, active }: Props) {
     if (data.backfill) setBackfill(data.backfill);
   }, [accessToken]);
 
-  useEffect(() => { if (!active) return; void load().catch((e) => setError(e.message)); const timer = setInterval(() => { void load().catch(() => undefined); }, 60_000); return () => clearInterval(timer); }, [active, load]);
+  useVisibleInterval(() => { void load().catch(() => undefined); }, 60_000, active);
   useEffect(() => { if (!rows) return; setCounts({ total: rows.length, ready: rows.filter((row) => row.ready && row.status !== 'live').length, needsBox: rows.filter((row) => row.fails.includes('Needs box size')).length, live: rows.filter((row) => row.status === 'live').length }); }, [rows]);
-  useEffect(() => {
-    if (backfill?.status !== 'running') return undefined;
-    const timer = setInterval(() => {
-      void call(accessToken, { action: 'backfill_status' }).then((data) => setBackfill(data.backfill)).catch(() => undefined);
-    }, 8000);
-    return () => clearInterval(timer);
-  }, [accessToken, backfill?.status]);
+  useVisibleInterval(() => {
+    void call(accessToken, { action: 'backfill_status' }).then((data) => setBackfill(data.backfill)).catch(() => undefined);
+  }, 8000, backfill?.status === 'running');
 
   async function run(fn: () => Promise<void>) {
     setBusy(true); setError('');
@@ -196,7 +207,8 @@ export function EbayDraftsPage({ accessToken, userId, money, active }: Props) {
       const pending = new Set<string>(first.queued || []);
       const deadline = Date.now() + 6 * 60_000;
       while (pending.size && Date.now() < deadline) {
-        await new Promise((resolve) => setTimeout(resolve, 2500));
+        await waitForVisible(2500);
+        if (document.visibilityState !== 'visible') continue;
         const status = await call(accessToken, { action: 'push_status', skus: [...pending] });
         for (const row of (status.states || []) as { sku: string; push_state: string | null; status: string; ebay_error: string | null }[]) {
           if (row.push_state === 'done') { results.push({ sku: row.sku, ok: true }); pending.delete(row.sku); }
@@ -265,8 +277,8 @@ export function EbayDraftsPage({ accessToken, userId, money, active }: Props) {
         <p className="hint">Removing a photo here only removes it from this eBay listing. The Floor photo stays in inventory.</p>
         <label className="notes">Title<input value={draft.title || ''} maxLength={80} onChange={(e) => editDraft('title', { ...draft, title: e.target.value })} onBlur={() => void save({ title: draft.title })} /></label>
         <label className="notes">Description<textarea rows={5} value={draft.description || ''} onChange={(e) => editDraft('description', { ...draft, description: e.target.value })} onBlur={() => void save({ description: draft.description })} /></label>
-        <label className="notes">Category<select value={draft.category_id || ''} onChange={(e) => void save({ category_id: e.target.value })}><option value="">Choose…</option>{(draft.suggestions || []).map((s) => <option key={s.categoryId} value={s.categoryId}>{s.categoryName}</option>)}{draft.category_id && !(draft.suggestions || []).some((s) => s.categoryId === draft.category_id) && <option value={draft.category_id}>{draft.category_name || draft.category_id}</option>}</select></label>
-        {draft.condition_not_supported ? <p className="hint">This eBay category does not use a condition field. Describe the condition below.</p> : <label className="notes">Condition<select value={draft.condition_id || ''} onChange={(e) => void save({ condition_id: e.target.value })}><option value="">Choose…</option>{(draft.conditions || []).map((c) => <option key={c.conditionId} value={c.conditionId}>{c.name}</option>)}</select><small>Floor condition: {draft.floor_condition || '—'}</small></label>}
+        <label className="notes">Category<select value={draft.category_id || ''} onChange={(e) => void save({ category_id: e.target.value })}><option value="">Choose…</option>{(draft.suggestions || []).map((s) => <option key={s.categoryId} value={s.categoryId}>{s.categoryPath || s.categoryName}</option>)}{draft.category_id && !(draft.suggestions || []).some((s) => s.categoryId === draft.category_id) && <option value={draft.category_id}>{draft.category_name || draft.category_id}</option>}</select></label>
+        {draft.condition_not_supported ? <p className="hint">This eBay category does not use a condition field. Describe the condition below.</p> : <label className="notes">Condition<select value={draft.condition_id || ''} onChange={(e) => void save({ condition_id: e.target.value })}><option value="">Choose…</option>{(draft.conditions || []).map((c) => <option key={c.conditionId} value={c.conditionId}>{c.name}</option>)}</select><small>Floor condition: {draft.floor_condition || '—'} · eBay condition used: {draft.condition_used || 'not set'}</small></label>}
         <label className="notes">Condition notes<textarea rows={3} value={draft.condition_notes || ''} onChange={(e) => editDraft('condition_notes', { ...draft, condition_notes: e.target.value })} onBlur={() => void save({ condition_notes: draft.condition_notes })} /></label>
         <label className="notes">UPC / EAN / GTIN<input inputMode="numeric" value={draft.upc || ''} placeholder="Leave blank if unknown" onChange={(e) => editDraft('aspects', { ...draft, upc: e.target.value, aspects: { ...draft.aspects, UPC: e.target.value } })} onBlur={() => void save({ aspects: { ...draft.aspects, UPC: draft.upc || '' } })} /></label>
         {draft.rejected_upc && !draft.upc && <p className="bad-text">UPC from the scan looks wrong (bad check digit); check the barcode or leave blank. Scan read: {draft.rejected_upc}</p>}
