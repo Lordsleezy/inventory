@@ -58,7 +58,7 @@ export async function applyChannelSelections(client: SupabaseClient, skus: strin
 }
 
 /** Item edit: live checkboxes. Renders nothing for anyone the database refuses (clerks). */
-export function ChannelCheckboxes({ client, sku, appMode = false }: { client: SupabaseClient; sku: string; appMode?: boolean }) {
+export function ChannelCheckboxes({ client, sku, appMode = false, pendingSelections, onPendingChange }: { client: SupabaseClient; sku: string; appMode?: boolean; pendingSelections?: { current: Record<ChannelId, boolean> | null }; onPendingChange?: (value: Record<ChannelId, boolean>) => void }) {
   const [state, setState] = useState<Record<ChannelId, ChannelState> | null>(null);
   const [denied, setDenied] = useState(false);
   const [busy, setBusy] = useState<ChannelId | null>(null);
@@ -75,6 +75,12 @@ export function ChannelCheckboxes({ client, sku, appMode = false }: { client: Su
   if (denied || !state) return null;
 
   async function toggle(channel: ChannelId, on: boolean) {
+    if (pendingSelections && onPendingChange) {
+      const next = { ...(pendingSelections.current || Object.fromEntries(LISTING_CHANNELS.map(([id]) => [id, state![id].selected])) as Record<ChannelId, boolean>), [channel]: on };
+      pendingSelections.current = next;
+      onPendingChange(next);
+      return;
+    }
     setBusy(channel);
     setError('');
     const { error: e } = await client.rpc('portal_set_unit_channel_selection', { p_sku: sku, p_channel: channel, p_selected: on });
@@ -96,7 +102,7 @@ export function ChannelCheckboxes({ client, sku, appMode = false }: { client: Su
           <label key={id} className="mboard-inline" title={c.never_reason || c.blocked_reason || undefined}>
             <input
               type="checkbox"
-              checked={c.selected}
+              checked={pendingSelections?.current?.[id] ?? c.selected}
               disabled={busy !== null || (!c.selected && Boolean(c.never_reason || c.blocked_reason))}
               onChange={e => void toggle(id, e.target.checked)}
             />

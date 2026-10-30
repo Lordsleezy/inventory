@@ -1,4 +1,3 @@
-import { inventoryMissingText } from './inventoryMissing';
 import { DnsCheckbox } from './DnsCheckbox';
 import { ReceiveWorkStatus } from './ReceiveWorkStatus';
 ﻿import { useEffect, useRef, useState } from 'react';
@@ -15,6 +14,7 @@ import { reviewReasonLabel } from './inventoryReview';
 import { DispositionButtons } from './DispositionDialogs';
 import { QuantityPicker } from './ReceiveQuantity';
 import { printUnitLabels } from './ReceiveGroupRow';
+import { locationParts } from './locationOrder';
 
 type Photo = { id: number; path: string; is_primary: boolean; sort_order?: number; source?: string; source_url?: string };
 type StockCandidate = { image_url: string; source_url: string; title: string; score: number };
@@ -27,6 +27,8 @@ type Form = {
   price: string; cost: string; condition: string; testStatus: string;
   shippable: string; notes: string; length: string; width: string; height: string; weight: string;
 };
+type ChannelChoice = 'ebay' | 'amazon' | 'tiktok';
+const CHANNELS: ChannelChoice[] = ['ebay','amazon','tiktok'];
 
 function choices(value: unknown): string[] {
   if (Array.isArray(value)) return value.map(String).filter(Boolean);
@@ -138,7 +140,19 @@ export function UnitEditDrawer({
   const [stockAdjustReason, setStockAdjustReason] = useState('count_correction');
   const [stockGiveQty, setStockGiveQty] = useState('1');
   const [stockGiveTo, setStockGiveTo] = useState('');
+  const [quantitySheetOpen, setQuantitySheetOpen] = useState(false);
+  const [descriptionOpen, setDescriptionOpen] = useState(false);
+  const [quantityDraft, setQuantityDraft] = useState(String(Math.max(1, Number(unit.qty_on_hand ?? 1) || 1)));
+  const [onlineExpanded, setOnlineExpanded] = useState(false);
+  const [channelSelections, setChannelSelections] = useState<Record<ChannelChoice, boolean> | null>(null);
+  const [dnsPending, setDnsPending] = useState<boolean | null>(null);
+  const [quantityLocations, setQuantityLocations] = useState<string[]>([]);
+  const [locationOptions, setLocationOptions] = useState<{code:string;label:string}[]>([]);
+  const [locationDraft, setLocationDraft] = useState('');
+  const specificsDirty = useRef(false);
   const specificsPersist = useRef<null | (() => Promise<void>)>(null);
+  const upcEnrichment = useRef<{ specs: Record<string, unknown>; msrp: number | null; brand: string | null; model: string | null; title: string | null; description: string | null } | null>(null);
+  const channelBaseline = useRef<Record<ChannelChoice, boolean> | null>(null);
   // The panel can change the description during Save; read it from here, not from the render's stale form.
   const latestDescription = useRef<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -160,13 +174,30 @@ export function UnitEditDrawer({
   const gapLabel: Record<string,string> = { photo:'photos', price:'price', brand:'brand', condition:'condition', category:'eBay category', category_review:'eBay category review', specifics:'eBay item specifics', spec:'package size for shipping', upc:'UPC', model:'model', title:'title', description:'description' };
   const cancel = () => {
     const initial = fromUnit(unit);
-    const hasChanges = JSON.stringify(form) !== JSON.stringify(initial) || latestDescription.current != null;
+    const hasChanges = JSON.stringify(form) !== JSON.stringify(initial) || latestDescription.current != null || specificsDirty.current || (channelSelections !== null && JSON.stringify(channelSelections)!==JSON.stringify(channelBaseline.current)) || dnsPending !== null || quantityDraft !== String(Math.max(1, Number(unit.qty_on_hand ?? 1) || 1)) || locationDraft !== (quantityLocations[0]||'') || upcEnrichment.current !== null;
     if (hasChanges && !window.confirm('Discard unsaved changes?')) return;
     onClose();
   };
 
-  useEffect(() => { setForm(fromUnit(unit)); setStockAdjustQty(String(Number(unit.qty_on_hand ?? 1) || 0)); setMsg(''); setError(''); setCurrentMissing(missingFields); }, [sku]);
+  useEffect(() => { setForm(fromUnit(unit)); setStockAdjustQty(String(Number(unit.qty_on_hand ?? 1) || 0)); setQuantityDraft(String(Math.max(1,Number(unit.qty_on_hand??1)||1)));setChannelSelections(null);setDnsPending(null);channelBaseline.current=null;upcEnrichment.current=null;setMsg(''); setError(''); setCurrentMissing(missingFields); }, [sku]);
   useEffect(() => { setCurrentMissing(missingFields); }, [missingFields.join('|')]);
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      const [stock, pick, bins, selection, dns] = await Promise.all([
+        client.from('unit_location_stock').select('location_code').eq('store_id',storeId).eq('sku',sku),
+        client.from('unit_pick_locations').select('location_code').eq('store_id',storeId).eq('sku',sku).maybeSingle(),
+        client.from('store_locations').select('code').eq('store_id',storeId).order('code'),
+        client.rpc('portal_unit_channel_selections',{p_sku:sku}), client.rpc('portal_unit_dns',{p_sku:sku}),
+      ]);
+      if (!live) return;
+      const assigned=(stock.data||[]).map(row=>String(row.location_code));
+      if(!assigned.length&&pick.data?.location_code)assigned.push(String(pick.data.location_code));
+      setQuantityLocations(assigned);setLocationDraft(assigned[0]||'');
+      setLocationOptions((bins.data||[]).map(row=>{const code=String(row.code);const parts=locationParts(code);return {code,label:parts?`${parts.display} · ${parts.slot}`:code};}));
+      if(!selection.error&&selection.data){const src=selection.data as Record<string,{selected:boolean}>;channelBaseline.current=Object.fromEntries(CHANNELS.map(ch=>[ch,Boolean(src[ch]?.selected)])) as Record<ChannelChoice,boolean>;}
+    })();return()=>{live=false;};
+  },[client,storeId,sku]);
   useEffect(() => {
     void client.rpc('portal_receive_options').then(({ data, error: e }) => {
       if (!e && data) setOptions(data as Options);
@@ -226,7 +257,6 @@ export function UnitEditDrawer({
         return next;
       });
 
-      // Persist UPC + blank fills via enrich (never overwrites non-blank) then update UPC/cost fields.
       const specs: Record<string, unknown> = {
         upc,
         gtin: json.gtin?.upcA || upc,
@@ -236,15 +266,11 @@ export function UnitEditDrawer({
         retail_as_of: m.retail_as_of || undefined,
         features: (m.features || []).filter(Boolean),
       };
-      await client.rpc('portal_enrich_received_unit', {
-        p_sku: sku,
-        p_specs: specs,
-        p_msrp_cents: m.msrp_cents ?? null,
-        p_brand: blank(form.brand) ? (m.brand || null) : null,
-        p_model: blank(form.model) ? (m.model || null) : null,
-        p_title: blank(form.title) ? (m.title || null) : null,
-        p_description: blank(form.description) ? ((m.description || '').trim() || featuresText(m.features) || null) : null,
-      });
+      upcEnrichment.current = { specs, msrp: m.msrp_cents ?? null,
+        brand: blank(form.brand) ? (m.brand || null) : null,
+        model: blank(form.model) ? (m.model || null) : null,
+        title: blank(form.title) ? (m.title || null) : null,
+        description: blank(form.description) ? ((m.description || '').trim() || featuresText(m.features) || null) : null };
 
       setMsg(filled.length
         ? `Attached UPC ${upc}. Filled blank: ${filled.join(', ')}. Review and Save if price/cost look right.`
@@ -257,8 +283,6 @@ export function UnitEditDrawer({
   }
 
   async function save() {
-    // Specifics typed or a generated description ticked in the panel below are saved first, so Save changes never drops them.
-    try { await specificsPersist.current?.(); } catch (e) { setError(e instanceof Error ? e.message : String(e)); return; }
     const ask = cents(form.price);
     const cost = cents(form.cost);
     if (ask === undefined) { setError('Price must look like 24.99 (blank = no price).'); return; }
@@ -272,6 +296,11 @@ export function UnitEditDrawer({
     if (dims.some(v => v === undefined)) {
       setError('Dimensions and weight must be positive numbers (or blank).');
       return;
+    }
+    if (quantityDraft.trim()) {
+      const q=Number(quantityDraft);
+      if(!Number.isInteger(q)||q<1||q>999){setError('Quantity must be a whole number from 1 to 999.');return;}
+      if(!isStocked&&canDelete&&q>1&&!window.confirm(`Convert to stocked item with ${q} on hand?`)){setError('Quantity change cancelled.');return;}
     }
     // units.title is NOT NULL — never send blank/null. Prefer typed title, else brand + model, else SKU.
     const title = form.title.trim()
@@ -300,9 +329,29 @@ export function UnitEditDrawer({
       p_height: dims[2],
       p_weight: dims[3],
     });
-    setBusy(false);
-    if (e) { setError(e.message); return; }
+    if (e) { setBusy(false);setError(e.message); return; }
     const saved = data as Record<string, unknown>;
+    try {
+      if(upcEnrichment.current){const payload=upcEnrichment.current;const {error:enrichError}=await client.rpc('portal_enrich_received_unit',{p_sku:sku,p_specs:payload.specs,p_msrp_cents:payload.msrp,p_brand:payload.brand,p_model:payload.model,p_title:payload.title,p_description:payload.description});if(enrichError)throw enrichError;upcEnrichment.current=null;}
+      await specificsPersist.current?.();
+      if(channelSelections)for(const channel of CHANNELS){if(channelBaseline.current?.[channel]===channelSelections[channel])continue;const {error:channelError}=await client.rpc('portal_set_unit_channel_selection',{p_sku:sku,p_channel:channel,p_selected:channelSelections[channel]});if(channelError)throw channelError;}
+      if(dnsPending!==null){const {error:dnsError}=await client.rpc('portal_set_unit_dns',{p_sku:sku,p_dns:dnsPending});if(dnsError)throw dnsError;}
+      if(quantityDraft.trim()){
+        const target=Number(quantityDraft);
+        if(target!==stockQuantity){
+          if(isStocked){const {error:qtyError}=await client.rpc('portal_stock_adjust',{p_sku:sku,p_mode:'set',p_quantity:target,p_reason:'count_correction'});if(qtyError)throw qtyError;}
+          else if(canDelete&&target>1){const {error:qtyError}=await client.rpc('portal_stock_add',{p_sku:sku,p_quantity:target-stockQuantity,p_cost_cents:null});if(qtyError)throw qtyError;}
+        }
+      }
+      if(locationDraft!==(quantityLocations[0]||'')){
+        if(quantityLocations.length>1)throw new Error('This SKU has stock in multiple locations. Use the Locations page to move it safely.');
+        if(!locationDraft)throw new Error('Choose a location. To unassign stock, use the Locations page.');
+        const current=quantityLocations[0]||'';
+        if(current){const {data:row}=await client.from('unit_location_stock').select('quantity').eq('store_id',storeId).eq('sku',sku).eq('location_code',current).maybeSingle();const {error:moveError}=await client.rpc('portal_move_location_stock',{p_sku:sku,p_to:locationDraft,p_quantity:Math.max(1,Number(row?.quantity)||1),p_from:current});if(moveError)throw moveError;}
+        else {const {error:moveError}=await client.rpc('portal_move_location_stock',{p_sku:sku,p_to:locationDraft,p_quantity:Math.max(1,stockQuantity),p_from:null});if(moveError)throw moveError;}
+      }
+    } catch(saveError){setBusy(false);setError(errText(saveError));return;}
+    setBusy(false);
     const { data: gaps, error: readinessError } = await client.rpc('portal_unit_readiness_gaps', { p_sku: sku });
     if (readinessError) {
       reportClientError(accessToken, { message: `Readiness refresh failed: ${readinessError.message}`, page: 'inventory/unit', action_name: 'readiness_refresh', sku });
@@ -334,7 +383,7 @@ export function UnitEditDrawer({
       fulfillment_override: saved.fulfillment_override,
       shippable: saved.shippable,
     });
-    setMsg('Saved.');
+    specificsDirty.current=false;setChannelSelections(null);setDnsPending(null);setQuantityDraft(String(Math.max(1,Number(quantityDraft)||1)));setMsg('Saved.');
   }
 
   async function clearEbayReview() {
@@ -525,7 +574,7 @@ export function UnitEditDrawer({
   const reviewReason = reviewReasonLabel(specs.ebay_review_reason);
   const notForSale = String(specs.do_not_list || '').toLowerCase() === 'true' || String(specs.hold_reason || '') === 'do_not_list';
   const unsold = ['available', 'reserved', 'repair'].includes(String(unit.state || ''));
-  const orderedPhotos = [...photos].sort((a, b) => Number(b.is_primary) - Number(a.is_primary) || (a.sort_order ?? a.id) - (b.sort_order ?? b.id));
+  const orderedPhotos = [...photos].sort((a, b) => Number(b.source === 'stock') - Number(a.source === 'stock') || Number(b.is_primary) - Number(a.is_primary) || (a.sort_order ?? a.id) - (b.sort_order ?? b.id));
   const statusLabel = notForSale ? 'Not for sale' : /^\s*(defective|scratch)/i.test(String(unit.condition||'')) ? 'Defective' : String(unit.state || '').replace(/_/g, ' ').replace(/^./, c => c.toUpperCase());
 
   return (
@@ -550,7 +599,9 @@ export function UnitEditDrawer({
         {msg && <p className="hint">{msg}</p>}
         {canDelete && unit.state === 'sold' && <RestoreInventoryButton client={client} sku={sku} onDone={() => { onSaved({ ...unit, state: 'available' }); onClose(); }} />}
         {isStocked && <section className="unit-stock-card" aria-label="Stock quantity">
-          <div><span>ON HAND</span><strong>{stockQuantity}</strong><small>{stockHistory.filter(m => m.type === 'sold').reduce((n,m) => n + Math.abs(m.delta),0)} sold · {stockHistory.filter(m => ['received','opening_balance','added'].includes(m.type)).reduce((n,m) => n + Math.max(m.delta,0),0)} received</small></div>
+          <button type="button" className="unit-quantity-step" aria-label="Decrease quantity" disabled={!canDelete || busy || Number(quantityDraft)<=0} onClick={()=>setQuantityDraft(String(Math.max(0,Number(quantityDraft||stockQuantity)-1)))}>−</button>
+          <div><span>ON HAND</span><button type="button" className="unit-edit-quantity-display" disabled={!canDelete} onClick={()=>{setQuantityDraft(String(stockQuantity));setQuantitySheetOpen(true);}}>{quantityDraft}</button><small>{stockHistory.filter(m => m.type === 'sold').reduce((n,m) => n + Math.abs(m.delta),0)} sold · {stockHistory.filter(m => ['received','opening_balance','added'].includes(m.type)).reduce((n,m) => n + Math.max(m.delta,0),0)} received</small></div>
+          <button type="button" className="unit-quantity-step" aria-label="Increase quantity" disabled={!canDelete || busy || Number(quantityDraft)>=999} onClick={()=>setQuantityDraft(String(Math.min(999,Number(quantityDraft||stockQuantity)+1)))}>+</button>
           <button type="button" className="secondary" disabled={!stockQuantity} onClick={() => void printUnitLabels(Array.from({ length: Math.min(stockQuantity,1000) }, () => sku), String(unit.title || `SKU ${sku}`)).catch(e => setError(e.message))}>Labels · {stockQuantity}</button>
           {canDelete && <button type="button" className="secondary" disabled={busy || stockQuantity !== 1} onClick={() => void toggleStocked()}>Convert to one-of-one</button>}
           {canDelete && <div className="unit-stock-actions"><QuantityPicker value={stockAddQty} onChange={setStockAddQty} maximum={999} label="Add quantity"/><label>Optional cost each<input inputMode="decimal" placeholder="No cost change" value={stockAddCost} onChange={e => setStockAddCost(e.target.value)} /></label><button type="button" disabled={busy} onClick={() => void addStock()}>Add stock</button></div>}
@@ -558,13 +609,15 @@ export function UnitEditDrawer({
           {canDelete && <div className="unit-stock-actions"><QuantityPicker value={stockGiveQty} onChange={setStockGiveQty} maximum={Math.min(999,stockQuantity)} label="Give away quantity"/><label>Given to<input value={stockGiveTo} onChange={e => setStockGiveTo(e.target.value)} /></label><button type="button" disabled={busy || !stockQuantity} onClick={() => void giveStockAway()}>Give away</button><button type="button" className="secondary" disabled={busy || !stockQuantity} onClick={() => void pullDefective()}>Pull 1 as defective</button></div>}
           <details className="unit-stock-history"><summary>Stock movement history</summary>{stockHistory.map(move => <div className="ledger-row" key={move.id}><strong>{move.type.replaceAll('_',' ')} · {move.delta > 0 ? '+' : ''}{move.delta}</strong><span>{move.actor || 'System'} · {move.reference || move.reason || ''} · {new Date(move.at).toLocaleString()}</span></div>)}</details>
         </section>}
-        {canDelete && !isStocked && ['available','reserved','repair'].includes(String(unit.state||'')) && <div className="unit-stock-actions"><QuantityPicker value={convertQty} onChange={setConvertQty} minimum={2} maximum={999} label="Quantity on hand"/><button type="button" className="secondary" disabled={busy || Number(convertQty)<2} onClick={() => void convertToStockedAtQuantity()}>Convert to stocked item with {convertQty} on hand</button></div>}
-        {currentMissing.length > 0 && <div className="inventory-missing" role="status"><p>{inventoryMissingText(currentMissing)}. Fill in the named fields and save.</p><div className="unit-edit-gap-links">{currentMissing.map(gap=><button type="button" className="text-button" key={gap} onClick={()=>jumpToGap(gap)}>Go to {gapLabel[gap] || reviewReasonLabel(gap) || gap}</button>)}</div></div>}
+        {!isStocked&&<section className="unit-stock-card"><button type="button" className="unit-quantity-step" aria-label="Decrease quantity" disabled={!canDelete || busy || Number(quantityDraft)<=1} onClick={()=>setQuantityDraft(String(Math.max(1,Number(quantityDraft||stockQuantity)-1)))}>−</button><div><span>ON HAND</span><button type="button" className="unit-edit-quantity-display" disabled={!canDelete} onClick={()=>{setQuantityDraft(String(stockQuantity));setQuantitySheetOpen(true);}}>{quantityDraft}</button><small>one-of-one item</small>{canDelete&&<small>Saving more than 1 converts it to a stocked SKU.</small>}</div><button type="button" className="unit-quantity-step" aria-label="Increase quantity" disabled={!canDelete || busy || Number(quantityDraft)>=999} onClick={()=>setQuantityDraft(String(Math.min(999,Number(quantityDraft||stockQuantity)+1)))}>+</button></section>}
+        {quantitySheetOpen&&<div className="unit-quantity-backdrop" role="presentation" onMouseDown={e=>{if(e.target===e.currentTarget)setQuantitySheetOpen(false);}}><section className="unit-quantity-sheet" role="dialog" aria-modal="true" aria-label="Quantity on hand"><div className="unit-quantity-grabber"/><h2>Quantity on hand</h2><p>{String(unit.title||`SKU ${sku}`)} · SKU {sku}</p><div className="unit-quantity-wheel"><select aria-label="Quantity 1 to 100" size={5} value={Number(quantityDraft)<=100?quantityDraft:''} onChange={e=>e.target.value&&setQuantityDraft(e.target.value)}>{Array.from({length:100},(_,i)=>i+1).map(n=><option key={n} value={n}>{n}</option>)}</select></div><label>Or type a number (up to 999)<input aria-label="Typed on hand quantity" type="number" inputMode="numeric" min="1" max="999" step="1" value={quantityDraft} onChange={e=>setQuantityDraft(e.target.value)}/></label>{!isStocked&&<small>This item is one-of-one. Saving more than 1 converts it to a stocked SKU and logs the change.</small>}<div className="unit-quantity-actions"><button type="button" className="secondary" onClick={()=>setQuantitySheetOpen(false)}>Cancel</button><button type="button" onClick={()=>{setQuantitySheetOpen(false);void save();}}>Set {quantityDraft||'0'} on hand</button></div></section></div>}
+        {descriptionOpen&&<div className="unit-quantity-backdrop" role="presentation" onMouseDown={e=>{if(e.target===e.currentTarget)setDescriptionOpen(false);}}><section className="unit-description-sheet" role="dialog" aria-modal="true" aria-label="Edit description"><header><button type="button" onClick={()=>setDescriptionOpen(false)}>Done</button><strong>Description</strong><span/></header><textarea autoFocus value={form.description} onChange={e=>set('description',e.target.value)} /></section></div>}
         {currentMissing.length === 0 && reviewReason && <p className="hint">eBay listing needs review: {reviewReason}.</p>}
         {reviewReason && canDelete ? <button type="button" className="secondary" disabled={busy} onClick={() => void clearEbayReview()}>I verified this issue · Clear eBay review</button> : null}
 
-        <div className="unit-edit-status"><strong>{statusLabel}</strong><span>{locationLabel || String(unit.location || unit.bin || 'Unassigned')}</span></div>
+        <div className="unit-edit-status"><strong>{statusLabel}</strong><button type="button" className="unit-edit-location-pill" onClick={()=>document.getElementById('unit-edit-location')?.scrollIntoView({behavior:'smooth',block:'center'})}>{locationLabel || String(unit.location || unit.bin || 'Unassigned')} · edit</button>{currentMissing.map(gap=><button type="button" className="unit-edit-gap-pill" key={gap} onClick={()=>jumpToGap(gap)}>Needs {gapLabel[gap]||reviewReasonLabel(gap)||gap}</button>)}</div>
         {canDelete && unsold && <DispositionButtons client={client} sku={sku} money={n => `$${(n / 100).toFixed(2)}`} stamp={s => new Date(s).toLocaleDateString()} className="secondary" onDone={() => { onReadinessChanged?.(); onDeleted?.(); onClose(); }} />}
+        {msg.toLowerCase().includes('receive')&&<button type="button" className="unit-edit-dismiss-banner" onClick={()=>setMsg('')}>✓ {msg} <span>×</span></button>}
         <h3 id="unit-edit-photos" className={currentMissing.includes('photo') ? 'unit-edit-required' : ''}>Photos{currentMissing.includes('photo') ? ' · Required' : ''}</h3>
         <div className="unit-edit-photo-strip">
           {orderedPhotos.map((p, i) => <button type="button" className="unit-edit-photo-open" key={p.id} onClick={() => setViewPhoto(p)} aria-label={`View photo ${i + 1}`}>
@@ -615,17 +668,19 @@ export function UnitEditDrawer({
           </div>
           <label data-gap-target="brand" id="unit-edit-brand" className={currentMissing.includes('brand') ? 'unit-edit-required' : ''}>Brand<input value={form.brand} onChange={e => set('brand', e.target.value)} />{currentMissing.includes('brand') && <small>Required</small>}{form.brand.trim() && form.brand.trim().toLowerCase() === form.title.trim().toLowerCase() && <small className="unit-edit-brand-hint">Looks like a product name, not a brand · <button type="button" onClick={() => set('brand', 'Unbranded')}>No brand</button></small>}</label>
           <label data-gap-target="model" id="unit-edit-model" className={currentMissing.includes('model') ? 'unit-edit-required' : ''}>Model<input value={form.model} onChange={e => set('model', e.target.value)} />{currentMissing.includes('model') && <small>Required</small>}</label>
-          <label data-gap-target="title" id="unit-edit-title" className={`unit-edit-wide${currentMissing.includes('title') ? ' unit-edit-required' : ''}`}>Title<input value={form.title} onChange={e => set('title', e.target.value)} />{currentMissing.includes('title') && <small>Required</small>}</label>
-          <label data-gap-target="description" id="unit-edit-description" className={`unit-edit-wide${currentMissing.includes('description') ? ' unit-edit-required' : ''}`}>Description<textarea rows={3} value={form.description} onChange={e => set('description', e.target.value)} />{currentMissing.includes('description') && <small>Required</small>}</label>
+          <label data-gap-target="title" id="unit-edit-title" className={`unit-edit-wide${currentMissing.includes('title') ? ' unit-edit-required' : ''}`}>Title<input maxLength={80} value={form.title} onChange={e => set('title', e.target.value)} />{currentMissing.includes('title') && <small>Required</small>}<small>{form.title.length} / 80 characters</small></label>
+          <div data-gap-target="description" id="unit-edit-description" className={`unit-edit-wide unit-edit-description${currentMissing.includes('description') ? ' unit-edit-required' : ''}`}><span>Description</span><p>{form.description ? `${form.description.slice(0,180)}${form.description.length>180?'…':''}` : 'Add a product description'}</p>{currentMissing.includes('description')&&<small>Required</small>}<button type="button" className="text-button" onClick={()=>setDescriptionOpen(true)}>{form.description.length>180?'Show all · Edit':'Edit description'}</button></div>
+          <label id="unit-edit-location">Location<select value={locationDraft} onChange={e=>setLocationDraft(e.target.value)}><option value="">Choose location</option>{locationOptions.map(o=><option key={o.code} value={o.code}>{o.label}</option>)}</select></label>
         </div>
         <h3>Pricing</h3>
         <div className="unit-edit-grid">
           <label data-gap-target="price" id="unit-edit-price" className={currentMissing.includes('price') ? 'unit-edit-required' : ''}>Price{isStocked ? ' (each)' : ''}<input inputMode="decimal" placeholder="24.99" value={form.price} onChange={e => set('price', e.target.value)} />{currentMissing.includes('price') && <small>Required</small>}</label>
           {canDelete && <label>Cost{isStocked ? ' (each)' : ''}<input inputMode="decimal" placeholder="Add actual cost" value={form.cost} onChange={e => set('cost', e.target.value)} /></label>}
+          {typeof specs.retail_cents==='number'&&<div className="unit-edit-reference-row"><span>Manifest retail</span><strong>${(Number(specs.retail_cents)/100).toFixed(2)}{specs.retail_as_of?` · ${String(specs.retail_as_of)}`:''}</strong></div>}
         </div>
         <h3>Condition</h3>
         <div className="unit-edit-grid">
-          <label data-gap-target="condition" id="unit-edit-condition" className={currentMissing.includes('condition') ? 'unit-edit-required' : ''}>Condition
+          <label data-gap-target="condition" id="unit-edit-condition" className={currentMissing.includes('condition') ? 'unit-edit-required' : ''}>Condition{currentMissing.includes('condition')&&!form.condition&&<i className="unit-edit-amber-dot"/>}
             <select value={form.condition} onChange={e => set('condition', e.target.value)}>
               <option value="">—</option>
               {conditions.map(c => <option key={c} value={c}>{c}</option>)}
@@ -633,7 +688,7 @@ export function UnitEditDrawer({
             </select>
             {currentMissing.includes('condition') && <small>Required</small>}
           </label>
-          <label>Test status
+          <label>Test status{currentMissing.includes('test_status')&&!form.testStatus&&<i className="unit-edit-amber-dot"/>}
             <select value={form.testStatus} onChange={e => set('testStatus', e.target.value)}>
               <option value="">—</option>
               {tests.map(c => <option key={c} value={c}>{c}</option>)}
@@ -650,13 +705,12 @@ export function UnitEditDrawer({
               <option value="pickup">No — pickup only</option>
             </select>
           </label>
-          <div className="unit-edit-wide unit-edit-grid unit-edit-dimensions"><label>Package length (in)<input inputMode="decimal" value={form.length} onChange={e => set('length', e.target.value)} /></label>
-          <label>Package width (in)<input inputMode="decimal" value={form.width} onChange={e => set('width', e.target.value)} /></label>
-          <label>Package height (in)<input inputMode="decimal" value={form.height} onChange={e => set('height', e.target.value)} /></label>
+          <div className="unit-edit-wide unit-edit-grid unit-edit-dimensions"><label>Box L × W × H (in)<div className="unit-edit-box-fields"><input aria-label="Box length in" inputMode="decimal" value={form.length} onChange={e => set('length', e.target.value)} /><input aria-label="Box width in" inputMode="decimal" value={form.width} onChange={e => set('width', e.target.value)} /><input aria-label="Box height in" inputMode="decimal" value={form.height} onChange={e => set('height', e.target.value)} /></div></label>
           <label>Package weight (lb)<input inputMode="decimal" value={form.weight} onChange={e => set('weight', e.target.value)} /></label></div>
         </div>
+        <small className="unit-edit-wide">The shipping box, not the product. Buyers pay shipping from these measurements.</small>
         <label className="unit-edit-wide unit-edit-notes">Notes<textarea rows={3} value={form.notes} onChange={e => set('notes', e.target.value)} /></label>
-        {!notForSale && <details ref={onlineDetails} className="unit-edit-online"><summary>Selling online</summary><EbaySpecificsPanel client={client} sku={sku} storeId={storeId} appMode={appMode} hideSaveButton onDescription={(t) => { latestDescription.current = t; set('description', t); }} onJumpToCondition={() => jumpToGap('condition')} persistRef={specificsPersist} onSaved={onReadinessChanged} />{canDelete&&<><DnsCheckbox client={client} sku={sku} onChanged={() => onReadinessChanged?.()} /><ChannelCheckboxes key={JSON.stringify(specs.do_not_ship)} client={client} sku={sku} appMode={appMode} /></>}</details>}
+        {canDelete&&<details ref={onlineDetails} className="unit-edit-online" open={onlineExpanded} onToggle={e=>setOnlineExpanded(e.currentTarget.open)}><summary>{notForSale?'Not listed online':'Selling online'}</summary>{!notForSale&&<><EbaySpecificsPanel client={client} sku={sku} storeId={storeId} appMode={appMode} hideSaveButton onDescription={(t) => { latestDescription.current = t; set('description', t); }} onJumpToCondition={() => jumpToGap('condition')} persistRef={specificsPersist} dirtyRef={specificsDirty} onDirtyChange={()=>{}} onSaved={onReadinessChanged} /><DnsCheckbox client={client} sku={sku} pendingValue={dnsPending??undefined} onPendingChange={setDnsPending} onChanged={() => onReadinessChanged?.()} /><ChannelCheckboxes key={sku} client={client} sku={sku} appMode={appMode} pendingSelections={{current:channelSelections}} onPendingChange={setChannelSelections}/></>}</details>}
         {canDelete && <UnitDispositionHistory client={client} sku={sku} stamp={s => new Date(s).toLocaleString()} />}
         {canDelete && <button type="button" className="text-button danger unit-edit-delete" disabled={busy || lookupBusy} onClick={() => void removeUnit()}>Delete item</button>}
         {viewPhoto && <div className="unit-photo-lightbox" role="dialog" aria-modal="true" aria-label="Photo controls"><button type="button" className="unit-photo-lightbox-close" onClick={() => setViewPhoto(null)}>Close</button>{urls[viewPhoto.path] && <img src={urls[viewPhoto.path]} alt={`Unit ${sku}`} />}<div><button type="button" disabled={busy} onClick={async () => { const { error: e } = await client.rpc('set_primary_photo', { p_id: viewPhoto.id }); if (e) setError(e.message); else { setViewPhoto(null); onPhotosChanged(); } }}>Make primary</button><button type="button" disabled={busy} onClick={async () => { const { error: e } = await client.rpc('delete_unit_photo', { p_id: viewPhoto.id }); if (e) setError(e.message); else { await client.storage.from('unit-photos').remove([viewPhoto.path]); setViewPhoto(null); onPhotosChanged(); } }}>Delete photo</button><button type="button" className="secondary" disabled={busy} onClick={async () => { const ordered = [...orderedPhotos]; const i = ordered.findIndex(p => p.id === viewPhoto.id); if (i > 0) { [ordered[i - 1], ordered[i]] = [ordered[i], ordered[i - 1]]; const { error: e } = await client.rpc('reorder_unit_photos', { p_sku: sku, p_ids: ordered.map(p => p.id) }); if (e) setError(e.message); else onPhotosChanged(); } }}>Move earlier</button></div></div>}
