@@ -10,7 +10,7 @@ test('lost commit response retries the same snapshot with one RPC and no second 
   } });
   const requests: unknown[] = [];
   const client = { rpc: async (name: string, payload: unknown) => {
-    assert.equal(name, 'receive_commit'); requests.push(payload);
+    assert.equal(name, 'portal_receive_stocked_commit'); requests.push(payload);
     return requests.length === 1 ? { data: null, error: { message: 'network lost after commit' } }
       : { data: { skus: ['54001'], server_ms: 12, replayed: true }, error: null };
   } } as unknown as SupabaseClient;
@@ -34,9 +34,9 @@ test('an interrupted legacy item never blocks a different receive request', asyn
   assert.equal(cache.size,1);
 });
 
-test('a group save preserves one recovery snapshot and replays all eleven SKUs', async () => {
+test('a multi-quantity stock save preserves one recovery snapshot and replays one SKU', async () => {
  const cache=new Map<string,string>();Object.defineProperty(globalThis,'localStorage',{configurable:true,value:{getItem:(k:string)=>cache.get(k)||null,setItem:(k:string,v:string)=>cache.set(k,v),removeItem:(k:string)=>cache.delete(k)}});
- const skus=Array.from({length:11},(_,i)=>String(12000+i));let tries=0;
+ const skus=['12000'];let tries=0;
  const request={p_request:'batch',p_fields:{p_quantity:11,p_title:'Portable Radio'},p_photos:['store/receive/actor/batch/a.jpg'],p_extras:{}};
  const client={rpc:async (_:string,payload:unknown)=>{assert.deepEqual(payload,request);return ++tries===1?{error:{message:'response lost'}}:{data:{skus,replayed:true},error:null}}} as unknown as SupabaseClient;
  await assert.rejects(commitReceive(client,'store',request));assert.equal(cache.size,1);

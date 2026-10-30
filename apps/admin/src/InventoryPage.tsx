@@ -16,10 +16,13 @@ import { showDispositionButtons } from './dispositions';
 import { inventoryMissingText } from './inventoryMissing';
 import { InventoryTotals } from './InventoryTotals';
 import { INVENTORY_BUCKET_LABELS, inventoryBucketStatus, type InventoryBucket } from './totalsMath';
+import { StockMergePage } from './StockMergePage';
+import { FixTitlesPage } from './FixTitlesPage';
 
 type Row = GroupedInventory & {
   sku: string; brand: string; model: string; title: string; condition: string | null;
   ask_cents: number | null; acquisition_cost_cents: number | null; state: string;
+  qty_on_hand?: number; is_stocked?: boolean; sold_qty?: number;
   received_at: string; photo_path: string | null; photo_count: number;
   defective?: boolean; not_for_sale?: boolean; missing?: string[];
   sold_at?: string | null; sold_price_cents?: number | null;
@@ -44,7 +47,7 @@ type Props = {
 /** Unit-list subtabs, in this order. Everything after them is an admin tool. */
 const LIST_TABS: [InventoryTab, string][] = [['in-stock', 'In stock'], ['sold', 'Sold'], ['needs-check', 'Needs to be checked'], ['no-location', 'No location']];
 const CARD_TABS: Partial<Record<InventoryTab, InventoryBucket>> = { total: 'total', listed: 'listed', 'not-listed': 'not_listed', 'not-ready': 'not_ready', dns: 'dns', defective: 'defective' };
-const TOOL_TABS: [InventoryTab, string][] = [['left-store', 'Replaced / given away'], ['receive', 'Receive'], ['lookup-test', 'Lookup test'], ['products', 'Products'], ['measure-mat', 'Measure mat']];
+const TOOL_TABS: [InventoryTab, string][] = [['left-store', 'Replaced / given away'], ['merge-duplicates', 'Merge duplicates'], ['fix-titles', 'Fix titles'], ['receive', 'Receive'], ['lookup-test', 'Lookup test'], ['products', 'Products'], ['measure-mat', 'Measure mat']];
 const MISSING_LABEL: Record<string, string> = { spec: 'weight & box', upc: 'UPC', specifics: 'item specifics', category_review: 'category review' };
 const missingText = (m: string[]) => {
   const fields = m.filter(k => !reviewReasonLabel(k));
@@ -176,7 +179,7 @@ export function InventoryPage({
         {ATTENTION_SECTIONS.map(([id, text]) => <button type="button" key={id} className={queue === id ? 'active' : ''} onClick={() => onAttentionSection(id)}>{text}{counts[id] !== undefined && <small>{counts[id]}</small>}</button>)}
       </div>
     )}
-    {!listTab && tab === 'left-store' ? <DispositionsPanel client={client} money={money} stamp={stamp} kind={null} title="Replaced and given away" hint="Undo puts a unit back in stock and reverses its cost and commission effects." refreshKey={refresh} onChanged={() => { setRefresh(n => n + 1); onCostChanged(); }} /> : !listTab && tab === 'missing-category' ? <CategoryPanel client={client} storeId={storeId} /> : !listTab && tab === 'lookup-test' ? <LookupTestPage accessToken={accessToken} /> : !listTab && tab === 'products' ? <FloorProductsPage client={client} /> : !listTab && tab === 'measure-mat' ? <MarkerMatPage /> : !listTab && tab === 'receive' ? <ReceivePanel client={client} storeId={storeId} accessToken={accessToken} onSaved={() => setRefresh(n => n + 1)} /> : queue ? <NeedsAttentionPanel client={client} storeId={storeId} money={money} stamp={stamp} section={queue} onCostChanged={() => { setRefresh(n => n + 1); onCostChanged(); }} /> : <>
+    {!listTab && tab === 'merge-duplicates' ? <StockMergePage client={client} money={money} /> : !listTab && tab === 'fix-titles' ? <FixTitlesPage client={client} onChanged={() => { setRefresh(n => n + 1); onCostChanged(); }} /> : !listTab && tab === 'left-store' ? <DispositionsPanel client={client} money={money} stamp={stamp} kind={null} title="Replaced and given away" hint="Undo puts a unit back in stock and reverses its cost and commission effects." refreshKey={refresh} onChanged={() => { setRefresh(n => n + 1); onCostChanged(); }} /> : !listTab && tab === 'missing-category' ? <CategoryPanel client={client} storeId={storeId} /> : !listTab && tab === 'lookup-test' ? <LookupTestPage accessToken={accessToken} /> : !listTab && tab === 'products' ? <FloorProductsPage client={client} /> : !listTab && tab === 'measure-mat' ? <MarkerMatPage /> : !listTab && tab === 'receive' ? <ReceivePanel client={client} storeId={storeId} accessToken={accessToken} onSaved={() => setRefresh(n => n + 1)} /> : queue ? <NeedsAttentionPanel client={client} storeId={storeId} money={money} stamp={stamp} section={queue} onCostChanged={() => { setRefresh(n => n + 1); onCostChanged(); }} /> : <>
     {cardBucket && <h2>{INVENTORY_BUCKET_LABELS[cardBucket]}</h2>}
     <div className="inventory-controls">
       <label>Search<input type="search" placeholder="SKU, brand, model or title" value={query} onChange={e => change(() => setQuery(e.target.value))} /></label>
@@ -203,11 +206,11 @@ export function InventoryPage({
     <section className="panel inventory-panel">
       {loading && <p className="hint">Loading inventory…</p>}
       {!loading && list?.items.length === 0 && <div className="empty">{listTab === 'in-stock' && query.trim() ? 'No for-sale units match. Not-for-sale and defective units are under Defective.' : 'No units match this filter.'}</div>}
-      {list?.items.map(u => { if(u.group_id) return <ReceiveGroupRow key={u.group_id} item={u} client={client} admin={canDelete} money={money} onOpen={(sku,missing)=>{setSelected(sku);setSelectedMissing(missing||[])}} searchQuery={query} onChanged={()=>{setRefresh(n=>n+1);onCostChanged()}} />; const actions = showDispositionButtons({ isAdmin: canDelete, associateBrowseOnly, unsold: ['available', 'reserved', 'repair'].includes(u.state) });
+      {list?.items.map(u => { if(u.group_id && (u.group_total || 0) > 1) return <ReceiveGroupRow key={u.group_id} item={u} client={client} admin={canDelete} money={money} onOpen={(sku,missing)=>{setSelected(sku);setSelectedMissing(missing||[])}} searchQuery={query} onChanged={()=>{setRefresh(n=>n+1);onCostChanged()}} />; const actions = showDispositionButtons({ isAdmin: canDelete, associateBrowseOnly, unsold: ['available', 'reserved', 'repair'].includes(u.state) });
       const rowButton = <button type="button" className="inventory-row" key={u.sku} disabled={hideMoney} onClick={() => { if (!hideMoney) {setSelected(u.sku);setSelectedMissing(u.missing||[]);} }}>
         <span className="inventory-photo">{u.photo_path && urls[u.photo_path] ? <img loading="lazy" src={urls[thumb(u.photo_path)] || urls[u.photo_path]} onError={e => { const fallback = urls[u.photo_path!]; if (e.currentTarget.src !== fallback) e.currentTarget.src = fallback; }} alt="" /> : 'No photo'}</span>
         <span className="inventory-identity"><strong>{name(u)}</strong><small>SKU {u.sku}{u.title && u.title !== name(u) ? ` · ${u.title}` : ''}</small></span>
-        <span className="inventory-meta">{u.condition || 'No grade'}<small>{u.not_for_sale ? 'Not for sale' : listTab === 'sold' && u.sold_at ? `Sold ${stamp(u.sold_at)}` : label(u.state)}</small>{listTab === 'unfinished' && !!u.missing?.length && <small className="inventory-missing">{missingText(u.missing)}</small>}</span>
+        <span className="inventory-meta">{u.condition || 'No grade'}<small>{u.not_for_sale ? 'Not for sale' : listTab === 'sold' && u.sold_at ? `Sold ${stamp(u.sold_at)}` : label(u.state)}{(u.is_stocked || (u.qty_on_hand ?? 1) > 1) && <b className="stock-quantity-badge">×{listTab === 'sold' ? (u.sold_qty ?? 0) : u.qty_on_hand}</b>}</small>{listTab === 'unfinished' && !!u.missing?.length && <small className="inventory-missing">{missingText(u.missing)}</small>}</span>
         <span className="inventory-location">{u.locations || 'Unassigned'}</span>
         {hideMoney ? <span className="inventory-money" /> : listTab === 'sold'
           ? <span className="inventory-money"><strong>{u.sold_price_cents == null ? '—' : money(u.sold_price_cents)}</strong><small>{u.acquisition_cost_cents == null ? 'Cost missing' : `Cost ${money(u.acquisition_cost_cents)}`}</small></span>

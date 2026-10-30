@@ -20,6 +20,7 @@ type Row = GroupedInventory & {
   condition: string | null;
   ask_cents: number | null;
   state: string;
+  qty_on_hand?: number; is_stocked?: boolean; sold_qty?: number;
   photo_path: string | null;
   photo_count: number;
   package_weight_lb?: number | null;
@@ -329,7 +330,7 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
 
       <div className="app-group">
         {(list?.items || []).map((u, idx) => {
-          if(u.group_id) return <ReceiveGroupRow key={u.group_id} item={u} client={client} admin={fullAccess} money={money} onOpen={onOpen} searchQuery={query} onChanged={()=>{setList(null);setQueueRefresh(n=>n+1)}} />;
+          if(u.group_id && (u.group_total || 0) > 1) return <ReceiveGroupRow key={u.group_id} item={u} client={client} admin={fullAccess} money={money} onOpen={onOpen} searchQuery={query} onChanged={()=>{setList(null);setQueueRefresh(n=>n+1)}} />;
           const warn = filter === 'dns' ? null : needs(u);
           const missing = filter === 'not_ready' ? inventoryMissingText(u.missing || []) : null;
           const thumbPath = u.photo_path ? thumb(u.photo_path) : '';
@@ -370,6 +371,7 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
                 <small>
                   {u.sku} · {u.not_for_sale ? 'Not for sale' : u.condition || 'No grade'}
                   {filter === 'sold' && u.sold_at ? <> · Sold {stamp(u.sold_at)}</> : null}
+                  {(u.is_stocked || (u.qty_on_hand ?? 1) > 1) && <b className="stock-quantity-badge">×{filter === 'sold' ? (u.sold_qty ?? 0) : u.qty_on_hand}</b>}
                   {filter !== 'not_ready' && warn ? <> · <span className="warn">{warn}</span></> : null}
                 </small>
               </span>

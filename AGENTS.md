@@ -1,3 +1,7 @@
+# Production deploys
+
+Never run `netlify deploy --prod`, `netlify deploy`, `scripts/deploy-prod-netlify.mjs`, or any other manual Netlify deploy. The merge to master is the only deploy. Batch work into one merge. Manual deploys are for Paul-approved emergency recovery only and require `FLOOR_EMERGENCY_DEPLOY=yes-paul-approved`.
+
 # Production database migrations
 
 The live Supabase project is `floor`. Work from the current `master` branch when releasing database changes.

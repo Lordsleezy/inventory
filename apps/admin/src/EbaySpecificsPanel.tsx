@@ -28,6 +28,7 @@ export function EbaySpecificsPanel({ client, sku, storeId, appMode = false, onSa
   const [canPick, setCanPick] = useState(false);
   const [query, setQuery] = useState('');
   const [choices, setChoices] = useState<Choice[]>([]);
+  const [suggestions, setSuggestions] = useState<Choice[]>([]);
   const [picked, setPicked] = useState<Choice | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [previewValues, setPreviewValues] = useState<Record<string, string>>({});
@@ -75,11 +76,21 @@ export function EbaySpecificsPanel({ client, sku, storeId, appMode = false, onSa
     if (!canPick || !query.trim()) { setChoices([]); return; }
     let active = true;
     const timer = setTimeout(() => {
-      void client.rpc('portal_category_search', { p_channel: 'ebay', p_query: query.trim(), p_limit: 30 })
+      void client.rpc('portal_category_search', { p_channel: 'ebay', p_query: query.trim(), p_limit: 60 })
         .then(({ data, error: e }) => { if (active) { if (e) setError(e.message); else setChoices((data || []) as Choice[]); } });
     }, 200);
     return () => { active = false; clearTimeout(timer); };
   }, [client, canPick, query]);
+
+  useEffect(() => {
+    if (!canPick || !form?.item) { setSuggestions([]); return; }
+    let active = true;
+    const itemQuery = [form.item.brand, form.item.model, form.item.title].filter(Boolean).join(' ');
+    if (!itemQuery.trim()) { setSuggestions([]); return; }
+    void client.rpc('portal_category_search', { p_channel: 'ebay', p_query: itemQuery, p_limit: 3 })
+      .then(({ data, error: e }) => { if (active) setSuggestions(e ? [] : (data || []) as Choice[]); });
+    return () => { active = false; };
+  }, [client, canPick, form?.item?.brand, form?.item?.model, form?.item?.title]);
 
   const required = useMemo(() => (form?.fields || []).filter((f) => f.required), [form]);
   const optional = useMemo(() => (form?.fields || []).filter((f) => !f.required && f.recommended), [form]);
@@ -236,7 +247,9 @@ export function EbaySpecificsPanel({ client, sku, storeId, appMode = false, onSa
         onClick={() => void openCategory(picked)}>Use suggested: {picked.path}</button>}
       <label>{form.category_id ? 'Change eBay category' : 'Search eBay categories'}
         <input type="search" value={query} placeholder='e.g. "steamer"' onChange={(e) => setQuery(e.target.value)} /></label>
-      {choices.length > 0 && <div className="category-results">{choices.map((c) => <button type="button" key={c.category_id}
+      {!query.trim() && suggestions.length > 0 && <><strong className="category-results-label">Suggested for this item</strong><div className="category-results">{suggestions.map((c) => <button type="button" key={c.category_id}
+        disabled={busy} onClick={() => void openCategory(c)}>{c.path}<small>{c.category_id}</small></button>)}</div></>}
+      {query.trim() && choices.length > 0 && <div className="category-results">{choices.map((c) => <button type="button" key={c.category_id}
         disabled={busy} onClick={() => void openCategory(c)}>{c.path}<small>{c.category_id}</small></button>)}</div>}
       {preview && <div className="category-step" role="group" aria-label="New category questions">
         <p className="hint"><strong>{preview.path || preview.category_id}</strong></p>

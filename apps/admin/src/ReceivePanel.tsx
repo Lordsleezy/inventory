@@ -1,4 +1,4 @@
-import { ReceiveQuantity, ReceiveGroupPicker } from './ReceiveQuantity';
+import { ReceiveQuantity } from './ReceiveQuantity';
 import { ReceiveWorkStatus } from './ReceiveWorkStatus';
 import { scannerLifecycle } from './scannerLifecycle';
 import { commitReceive } from './receiveCommit';
@@ -20,6 +20,7 @@ import { notForSaleBrandError, receiveMissingFields } from './receive-validation
 import { CategoryPanel } from './CategoryPanel';
 import { EbaySpecificsPanel } from './EbaySpecificsPanel';
 import { isCompleteReceiveTitle, isStoreLabelBarcode, storeLabelWarning } from '../../../shared/store-barcode.mjs';
+import { cleanProductIdentity } from '@floor/store';
 
 /** iOS/Android PWA: prefer native capture over getUserMedia (more reliable in standalone). */
 function preferNativeCapture() {
@@ -380,6 +381,7 @@ type Scan = {
   again?: boolean;
 };
 type Dups = { count: number; skus: string[] };
+type StockMatch = { sku: string; title: string; quantity: number; price_cents: number | null; condition: string | null; is_stocked: boolean; can_convert: boolean; fields?: Record<string, unknown> };
 type LastReceived = { upc: string; result?: Lookup; seed: Partial<Form> };
 
 const NEW = 'New';
@@ -623,7 +625,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   const [files, setFiles] = useState<File[]>([]);
   const [saved, setSaved] = useState<string[]>([]);
   const [manifestId, setManifestId] = useState('');
-  const [receiveGroup, setReceiveGroup] = useState<string | null>(null);
+  const [stockMatches, setStockMatches] = useState<StockMatch[]>([]);
+  const [selectedStockMatch, setSelectedStockMatch] = useState<StockMatch | null>(null);
   const [manifests, setManifests] = useState<{ id: string; name: string; manifest_on: string }[]>([]);
   const [last, setLast] = useState<LastReceived | null>(null);
   const [warning, setWarning] = useState('');
@@ -720,12 +723,23 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   modalOpen.current = camera || dialog !== null;
 
   const current = manual ? undefined : queue[0];
-  useEffect(()=>{setReceiveGroup(null)},[current?.upc,manual,manual ? form.upc : null]);
+  const formOpen = Boolean(manual || (current && current.status !== 'loading' && loadedId === current.id));
+  useEffect(() => {
+    let active = true;
+    setStockMatches([]); setSelectedStockMatch(null);
+    const upc = manual ? (form.noUpc ? '' : form.upc.trim()) : current?.upc || '';
+    const title = form.title.trim() || [form.brand, form.model].filter(Boolean).join(' ');
+    const price = cents(form.ask);
+    if (!formOpen || doNotList || price == null || price === undefined) return () => { active = false; };
+    void Promise.resolve(client.rpc('portal_receive_stock_match', { p_upc: upc || null, p_title: title || null, p_price_cents: price, p_condition: form.condition || null }))
+      .then(({ data, error: e }) => { if (active && !e) setStockMatches(Array.isArray(data) ? data as StockMatch[] : []); })
+      .catch(() => {});
+    return () => { active = false; };
+  }, [client, manual, formOpen, form.upc, form.noUpc, form.title, form.brand, form.model, form.ask, form.condition, doNotList, current?.upc]);
   const manifestReference = useManifestReceiveReference(client, manual ? form.upc : current?.upc || '');
   const result = current?.result;
   const merged = result?.merged;
   const A = result?.amazon;
-  const formOpen = Boolean(manual || (current && current.status !== 'loading' && loadedId === current.id));
   const retail = useMemo(() => retailOf(result), [result]);
   const msrp = useMemo(() => msrpOf(result), [result]);
   const costParsed = cents(form.cost);
@@ -1250,13 +1264,19 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         hold ? `Not listing — ${holdLabel}${hold.note.trim() ? `: ${hold.note.trim()}` : ''}` : '',
         form.notes.trim(),
       ].filter(Boolean).join('\n');
-      const brandValue = form.unbranded ? 'Unbranded' : form.brand.trim();
-      // Scans and manual: title is always brand + item specifics (never catalog junk / digit codes).
-      const titleValue = form.title.trim() || composeListingTitle(form.brand, form.model, form.unbranded);
+      // Every lookup path (UPC, Floor catalog and AI photo identity) passes the
+      // same conservative cleanup before persistence. Uncertain identities carry
+      // a review flag rather than silently asserting a seller name as a brand.
+      const rawBrand = form.unbranded ? '' : form.brand.trim();
+      const rawTitle = form.title.trim() || composeListingTitle(form.brand, form.model, form.unbranded);
+      const productIdentity = cleanProductIdentity({ brand: rawBrand, model: form.model, title: rawTitle, description: form.description });
+      const brandValue = form.unbranded ? 'Unbranded' : productIdentity.brand || 'No brand';
+      const modelValue = productIdentity.model;
+      const titleValue = productIdentity.title;
       const fields = {
         p_quantity: quantity,
         p_brand: brandValue,
-        p_model: form.model.trim(),
+        p_model: modelValue,
         p_title: titleValue,
         p_category: form.category.trim() || null,
         p_description: form.description.trim() || null,
@@ -1273,11 +1293,16 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         p_weight: parsed.dims[3],
       };
       const enrichment = buildReceiveEnrichment(parsed, hold, doNotList);
+      if (productIdentity.review) {
+        enrichment.specs.product_name_review = true;
+        enrichment.specs.product_name_review_reasons = productIdentity.reasons;
+      }
+      enrichment.brand = brandValue; enrichment.model = modelValue; enrichment.title = titleValue;
       const data = await commitReceive(client, storeId, {
         p_request: receiveRequest.current, p_fields: fields, p_photos: unitPhotoPaths,
-        p_extras: { group_id: receiveGroup, location: selectedLocation || null, manifest: staffMode ? null : manifestId || null,
+        p_extras: { location: selectedLocation || null, manifest: staffMode ? null : manifestId || null,
           dns: !staffMode && doNotShip, do_not_list: doNotList,
-          channels: staffMode || quantity > 1 || receiveGroup ? [] : channels, enrichment,
+          channels: staffMode || quantity > 1 ? [] : channels, enrichment,
           stock_photo_paths: acceptedStockPhotoPath ? [acceptedStockPhotoPath] : [],
           photo_identity_confirmed: photoTitleConfirmed,
           photo_identity_type: photoTitleConfirmed ? text(photoIdentity?.item_type) : '' },
@@ -1297,7 +1322,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       // Remember product data for "Add another unit".
       const seed: Partial<Form> = {
         brand: brandValue, unbranded: form.unbranded, noUpc: form.noUpc,
-        model: form.model, variant: form.variant, size: form.size,
+        model: modelValue, variant: form.variant, size: form.size,
         title: titleValue, category: form.category, description: form.description,
         ask: hold ? '' : form.ask, testStatus: '', shippable: form.shippable,
         length: form.length, width: form.width, height: form.height, weight: form.weight,
@@ -1341,10 +1366,25 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       if (selectedLocation) {
         try { localStorage.setItem(`floor:last-receive-location:${storeId}`, selectedLocation); } catch { /* optional device preference */ }
       }
-      setSaved(skus); setReceiveGroup(null);
+      setSaved(skus);
       onSaved();
       void loadOptions().catch(() => setWarning(w => `${w} Refresh Receive to see the next suggested SKU.`.trim()));
       focusUpc();
+    } catch (e) { setError(errText(e)); }
+    finally { setBusy(false); }
+  }
+
+  async function addToExistingStock(match: StockMatch) {
+    const quantity = Number(form.quantity);
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 100) { setError('Enter a valid quantity.'); return; }
+    setBusy(true); setError('');
+    try {
+      const { data, error: e } = await client.rpc(match.is_stocked ? 'portal_stock_receive_add' : 'portal_stock_convert_and_add', { p_request: receiveRequest.current, p_sku: match.sku, p_quantity: quantity, p_location: selectedLocation || null });
+      if (e) throw e;
+      receiveRequest.current = crypto.randomUUID();
+      setSaved([match.sku]); setSelectedStockMatch(null); setStockMatches([]); setLast(null);
+      setForm(prev => ({ ...prev, quantity: '1' }));
+      onSaved();
     } catch (e) { setError(errText(e)); }
     finally { setBusy(false); }
   }
@@ -1881,15 +1921,17 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
 
     {showForm && <form id={appChrome ? 'receive-app-form' : undefined} onSubmit={e => void finish(e)}>
       <ReceiveQuantity value={form.quantity} onChange={value=>update('quantity',value)} disabled={busy} />
-      {(Number(form.quantity)>1 || receiveGroup) && <p role="status">Intake only: these units will not be published to any channel.</p>}
-      <ReceiveGroupPicker client={client} upc={manual ? form.upc : current?.upc || ''} selected={receiveGroup} onChoose={group=>{
-        setReceiveGroup(group?.id || null);
-        if(group){setForm(prev=>({...prev,...Object.fromEntries(Object.entries(group.fields).filter(([key])=>!staffMode||key!=='cost').map(([key,v])=>[key,v==null?'':String(v)])),quantity:prev.quantity}));setDupAck(true);}
-      }} />
+      {stockMatches.length > 0 && <div className="receive-dup" role="status"><strong>Matching inventory</strong>{stockMatches.map(match => <p key={match.sku}>{match.title} · SKU {match.sku} · {match.quantity} on hand · {match.condition || 'condition unset'}{match.is_stocked
+        ? <> <button type="button" disabled={busy} onClick={() => setSelectedStockMatch(match)}>{selectedStockMatch?.sku === match.sku ? 'Selected' : 'Add to this SKU'}</button></>
+        : match.can_convert && !staffMode ? <> <button type="button" disabled={busy} onClick={() => setSelectedStockMatch(match)}>Convert to stocked SKU and add</button></>
+          : <> <button type="button" disabled={busy} onClick={() => setSelectedStockMatch(match)}>Different item, new SKU</button></>}</p>)}
+        {selectedStockMatch && <div><p>SKU {selectedStockMatch.sku} goes to {selectedStockMatch.quantity + Number(form.quantity || 0)} on hand.</p><button type="button" disabled={busy} onClick={() => void addToExistingStock(selectedStockMatch)}>Add {Number(form.quantity || 0)} to SKU {selectedStockMatch.sku}</button><button type="button" className="secondary" onClick={() => setSelectedStockMatch(null)}>Different item, new SKU</button></div>}
+        <small>Matches require the same UPC (or exact no-UPC title), price and condition.</small></div>}
+      {Number(form.quantity)>1 && <p role="status">Intake only: these units will not be published to any channel.</p>}
       {dups && dups.count > 0 && <div className="receive-dup" role="status">
         <strong>You have {dups.count} of these</strong>{dups.skus.length ? <> (SKU {dups.skus.slice(0, 8).join(', ')}{dups.skus.length > 8 ? '…' : ''})</> : null}
         {!dupAck ? <> <button type="button" className="secondary" onClick={confirmDup}>Add another unit</button></> : <span className="tag on">confirmed — new unit</span>}
-        <p>Each received unit gets a new SKU. Confirm that the batch shares the same condition and representative photos.</p>
+        <p>Check the exact UPC, price and condition above. Matching items can be added to the existing stocked SKU; confirm only if this is a different item.</p>
       </div>}
 
       {!manual && current?.status === 'error' && <div className="alert" role="alert">

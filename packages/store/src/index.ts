@@ -6,3 +6,4 @@ export * from "./csv.ts";
 export * from "./backup.ts";
 export * from "./receipt.ts";
 export * from "./listing-copy.ts";
+export * from "./product-name.ts";

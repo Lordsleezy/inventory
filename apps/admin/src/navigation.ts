@@ -22,7 +22,7 @@ export type MainPage =
   | 'settings';
 export type ReportTab = 'profit' | 'shipping' | 'expenses' | 'overhead' | 'payouts' | 'daily' | 'sales-tax' | 'returns' | 'replacements' | 'sold';
 /** In stock / Sold / Unfinished / Defective are unit lists; the rest are tools. Unfinished replaces the old Needs attention tab. */
-export type InventoryTab = 'total' | 'listed' | 'not-listed' | 'not-ready' | 'in-stock' | 'sold' | 'unfinished' | 'needs-check' | 'no-location' | 'defective' | 'dns' | 'missing-category' | 'receive' | 'lookup-test' | 'products' | 'measure-mat' | 'left-store';
+export type InventoryTab = 'total' | 'listed' | 'not-listed' | 'not-ready' | 'in-stock' | 'sold' | 'unfinished' | 'needs-check' | 'no-location' | 'defective' | 'dns' | 'missing-category' | 'receive' | 'lookup-test' | 'products' | 'measure-mat' | 'left-store' | 'merge-duplicates' | 'fix-titles';
 export type AttentionSection =
   | 'all'
   | 'missing-cost'
@@ -172,7 +172,7 @@ export function parseNavFromLocation(): NavState {
     onlineChannelRaw = 'all';
   }
   const reportTabs: ReportTab[] = ['profit', 'shipping', 'expenses', 'overhead', 'payouts', 'daily', 'sales-tax', 'returns', 'replacements', 'sold'];
-  const invTabs: InventoryTab[] = ['total', 'listed', 'not-listed', 'not-ready', 'in-stock', 'sold', 'unfinished', 'needs-check', 'no-location', 'defective', 'dns', 'missing-category', 'receive', 'lookup-test', 'products', 'measure-mat', 'left-store'];
+  const invTabs: InventoryTab[] = ['total', 'listed', 'not-listed', 'not-ready', 'in-stock', 'sold', 'unfinished', 'needs-check', 'no-location', 'defective', 'dns', 'missing-category', 'receive', 'lookup-test', 'products', 'measure-mat', 'left-store', 'merge-duplicates', 'fix-titles'];
   // Old bookmarks: Browse → In stock, Needs attention → Unfinished.
   const invTab = invTabRaw === 'browse' ? 'in-stock' : invTabRaw === 'attention' ? 'unfinished' : invTabRaw;
   return {
