@@ -18,8 +18,8 @@ function titleCase(value: string): string {
 
 function cleanWords(value: unknown): string {
   let text = String(value ?? "")
-    .normalize("NFKC")
     .replace(/[™®©]/g, "")
+    .normalize("NFKC")
     .replace(/[\uFFFD\u00C2\u00A0]/g, " ")
     .replace(RETAIL_TAIL, " ")
     .replace(/\s+/g, " ")
@@ -55,7 +55,8 @@ function inferBrand(candidate: string, description: string, sourceTitle: string)
 
 function withoutBrand(value: string, brand: string): string {
   if (!brand) return value;
-  return value.replace(new RegExp(`^\\s*${brand.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b[\s:,-]*`, "i"), "").trim();
+  const escaped = brand.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return value.replace(new RegExp(`(?:^|[\\s,;:/\\-–—])${escaped}(?=$|[\\s,;:/\\-–—])`, "gi"), " ").trim();
 }
 
 function limitTitle(value: string, max = 80): string {

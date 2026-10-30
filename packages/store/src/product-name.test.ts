@@ -44,3 +44,14 @@ test("does not report an empty brand as a rejected seller", () => {
   assert.ok(result.reasons.includes("brand_needs_review"));
   assert.ok(!result.reasons.includes("seller_brand_rejected"));
 });
+
+test("strips trademark symbols before compatibility normalization and removes a repeated trailing brand", () => {
+  const result = cleanProductIdentity({
+    brand: "Hearth & Hand with Magnolia",
+    model: "8\"x10\" Rounded Corner Wood Wall Hanging Frame - Hearth & Hand™ with Magnolia",
+    title: "8\"x10\" Rounded Corner Wood Wall Hanging Frame - Hearth & Hand™ with Magnolia",
+  });
+  assert.equal(result.model, '8"x10" Rounded Corner Wood Wall Hanging Frame');
+  assert.equal(result.title, 'Hearth & Hand With Magnolia 8"x10" Rounded Corner Wood Wall Hanging Frame');
+  assert.ok(!/™|®|\btm\b/i.test(`${result.brand} ${result.model} ${result.title}`));
+});
