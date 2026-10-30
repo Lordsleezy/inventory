@@ -156,12 +156,14 @@ begin
    return new;
  end if;
  if old.voided_at is null and new.voided_at is not null then
-   restock:=coalesce(nullif(current_setting('floor.stock_return_restock',true),''),'true')::boolean;
+   restock:=coalesce(nullif(current_setting('floor.stock_return_restock',true),''),
+     nullif(current_setting('floor.bundle_restock',true),''),'true')::boolean;
    if restock then
      delta:=greatest(coalesce(new.qty,1),1);
      perform set_config('floor.stock_movement_type','returned',true);
      perform set_config('floor.stock_movement_reason','Sale void/return '||coalesce(new.receipt_no,'Sale '||new.id),true);
-     update public.units set qty_on_hand=qty_on_hand+delta,state='available',updated_at=now()
+     update public.units set qty_on_hand=case when state='sold' then greatest(qty_on_hand,delta) else qty_on_hand+delta end,
+       state='available',updated_at=now()
        where store_id=new.store_id and sku=new.sku;
      update public.stock_movements m set reference_id=new.id::text,
        reference_label=coalesce(new.receipt_no,'Sale '||new.id),reason='Sale void/return'
