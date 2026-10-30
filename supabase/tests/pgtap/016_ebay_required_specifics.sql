@@ -1,6 +1,6 @@
 -- pgTAP: eBay required item specifics (20261030200000_ebay_required_specifics.sql).
 begin;
-select plan(19);
+select plan(22);
 do $$
 declare
   v_store uuid;
@@ -50,6 +50,10 @@ select ok('specifics' = any(public.floor_unit_mandatory_gaps(current_setting('te
 -- Clerk can fill specifics but never sees money and cannot pick categories.
 select set_config('request.jwt.claim.sub', current_setting('test.clerk_id'), true);
 select set_config('request.jwt.claim.role', 'authenticated', true);
+select ok('specifics'=any(public.portal_unit_readiness_gaps('98001')),
+  'clerk can refresh current readiness gaps for an eBay-selected item');
+select ok(not ('spec'=any(public.portal_unit_readiness_gaps('98001'))),
+  'populated package dimensions and weight are not reported missing');
 select is(public.portal_unit_ebay_specifics('98001') -> 'attributes' ->> 'Brand', 'Acme', 'clerk can read the specifics form');
 select ok(not (public.portal_unit_ebay_specifics('98001') ?| array['ask_cents','msrp_cents','acquisition_cost_cents','cost_cents']),
   'specifics form returns no money fields');
@@ -57,6 +61,8 @@ select is(public.portal_unit_ebay_specifics('98001') ->> 'can_pick_category', 'f
 select throws_ok($$select public.portal_set_unit_ebay_category('98001', '20614')$$, '42501', null, 'clerk cannot set the eBay category');
 select is(jsonb_array_length(public.portal_set_unit_ebay_specifics('98001', '{"Type":"Garment Steamer"}')), 0,
   'clerk fills the required aspect; no gaps left');
+select ok(not ('specifics'=any(public.portal_unit_readiness_gaps('98001'))),
+  'readiness refresh clears the specifics gap immediately after save');
 select set_config('request.jwt.claim.sub', '', true);
 select ok(not ('specifics' = any(public.unit_listing_gaps(u))), 'filled unit is no longer Unfinished')
   from public.units u where sku = '98001';
