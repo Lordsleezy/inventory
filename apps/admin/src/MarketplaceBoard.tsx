@@ -3,6 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { InventoryItemDialog } from './InventoryItemDialog';
 import { floorFunctionUrl } from './floorApi';
 import { errText } from './errText';
+import { useVisibleInterval } from './useVisibleInterval';
 import { shortError } from './appMode/shortError';
 
 export type BoardChannel = 'ebay' | 'amazon' | 'tiktok';
@@ -374,11 +375,7 @@ export function MarketplaceBoard({ channel, accessToken, money, client, storeId 
     }).catch(() => undefined);
   }, [accessToken]);
 
-  useEffect(() => {
-    if (!job || (job.status !== 'running' && job.status !== 'queued')) return;
-    const timer = window.setInterval(() => { void pollJob(); }, 2000);
-    return () => window.clearInterval(timer);
-  }, [job, pollJob]);
+  useVisibleInterval(pollJob, 2000, Boolean(job && (job.status === 'running' || job.status === 'queued')));
 
   const source = tab === 'listed' ? listed : tab === 'not_listed' ? notListed : sold;
   const filtered = useMemo(() => source.filter((row) => matches(row, query)), [source, query]);
