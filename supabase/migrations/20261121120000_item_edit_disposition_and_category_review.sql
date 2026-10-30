@@ -65,8 +65,13 @@ begin
     src:=pg_get_functiondef(f.oid);
     changed:=replace(src,'if u.state <> ''available'' then raise exception ''unit_not_available''; end if;',
       'if u.state not in (''available'',''reserved'',''repair'') then raise exception ''unit_not_available''; end if;');
-    if changed=src then raise exception 'Could not update unsold eligibility for %',f.proname; end if;
-    execute changed;
+    if changed=src then
+      if strpos(src,'if u.state not in')=0 then
+        raise exception 'Could not update unsold eligibility for %',f.proname;
+      end if;
+    else
+      execute changed;
+    end if;
   end loop;
 end $$;
 
