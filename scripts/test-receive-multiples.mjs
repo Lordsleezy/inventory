@@ -13,7 +13,7 @@ const browser=await chromium.launch({headless:true,...(process.env.MANIFEST_CHRO
 try{
  for(const admin of [false,true]){
  const page=await browser.newPage({viewport:{width:390,height:844}});await page.route('**/*',r=>r.fulfill({contentType:'text/html',body:'<div id="root"></div>'}));await page.goto('https://floor-group.test');await page.evaluate(v=>window.admin=v,admin);await page.addScriptTag({content:outputFiles[0].text});
- const plus=page.getByRole('button',{name:'Increase receive quantity'});for(let i=0;i<10;i++)await plus.click();assert.equal(await page.locator('output').innerText(),'11');assert.equal(await page.locator('.receive-quantity input').count(),0);
+ await page.getByLabel('Quantity to receive quick select').selectOption('11');assert.equal(await page.getByLabel('Quantity to receive quick select').inputValue(),'11');assert.equal(await page.locator('.receive-quantity input').count(),0);
  await page.getByText('Portable Radio ×11 (8 in stock)',{exact:true}).click();await page.getByRole('button',{name:'SKU 10001',exact:false}).click();assert.equal(await page.evaluate(()=>window.opened),'10001');
  assert.equal(await page.getByRole('button',{name:'Apply price / details',exact:false}).count(),admin?1:0);
  if(admin){await page.getByRole('button',{name:'Apply price / details',exact:false}).click();await page.getByLabel('Price ($)',{exact:true}).fill('24.99');page.once('dialog',d=>d.accept());await page.getByRole('button',{name:'Apply to group',exact:true}).click();await page.waitForFunction(()=>window.changed);assert.deepEqual(await page.evaluate(()=>window.calls.find(c=>c.name==='receive_group_apply').args),{p_group:'group',p_patch:{ask_cents:2499}})}
