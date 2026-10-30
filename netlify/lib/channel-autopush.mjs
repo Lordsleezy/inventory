@@ -2,7 +2,7 @@
 // OFF unless store setting channel_autopush.enabled; eBay also needs channel_autopush.ebay_enabled.
 
 export const CHANNELS = ["ebay", "amazon", "tiktok"];
-export const MAX_ATTEMPTS = 5;
+export const MAX_ATTEMPTS = 3;
 const DEFAULT_PER_RUN = { ebay: 1, amazon: 1, tiktok: 1 };
 
 export function normalizeSetting(value) {
@@ -20,14 +20,11 @@ export function backoffMinutes(attempts) {
 }
 
 export function classifyFailure(channel, error) {
-  const msg = String(error || "listing_failed");
-  if (channel === "tiktok" && /identity|approv|not[\s_]*authori[sz]ed|seller[\s_]*(review|verification)|pending/i.test(msg)) {
-    return { keepQueued: true, retryable: true, waitMinutes: 360, issue: "TikTok Shop approval pending" };
-  }
-  if (/never_list|not_on_amazon|unknown_sku|listing_not_ready|needs_confirm|missing|invalid|forbidden|policy/i.test(msg)) {
-    return { keepQueued: false, retryable: false, issue: msg };
-  }
-  return { keepQueued: false, retryable: true, issue: msg };
+  const msg = String(typeof error === "string" ? error : error?.message || error?.error || error || "listing_failed");
+  const status = Number(error?.status || error?.statusCode || 0);
+  const temporary = status === 408 || status === 429 ||
+    /\b(rate[ -]?limit|too many requests|timed? ?out|timeout|etimedout|aborterror)\b/i.test(msg);
+  return { keepQueued: false, retryable: temporary, issue: temporary ? msg : (msg.startsWith("Needs fix:") ? msg : `Needs fix: ${msg}`) };
 }
 
 function later(now, minutes) {
@@ -37,15 +34,16 @@ function later(now, minutes) {
 export async function processRow(db, deps, row, now) {
   const { store_id: storeId, sku, channel } = row;
   const fail = (error) => {
-    const attempts = row.attempts + 1;
+    const attempts = (Number(row.attempts) || 0) + 1;
+    const detail = String(typeof error === "string" ? error : error?.message || error?.error || "listing_failed");
     const c = classifyFailure(channel, error);
     if (c.keepQueued) {
-      return { status: "queued", attempts, issue: c.issue, last_error: String(error), retryable: true, next_attempt_at: later(now, c.waitMinutes) };
+      return { status: "queued", attempts, issue: c.issue, last_error: detail, retryable: true, next_attempt_at: later(now, c.waitMinutes) };
     }
     if (c.retryable && attempts < MAX_ATTEMPTS) {
-      return { status: "queued", attempts, issue: `Retrying: ${c.issue}`, last_error: String(error), retryable: true, next_attempt_at: later(now, backoffMinutes(attempts)) };
+      return { status: "queued", attempts, issue: `Retrying: ${c.issue}`, last_error: detail, retryable: true, next_attempt_at: later(now, backoffMinutes(attempts)) };
     }
-    return { status: "failed", attempts, issue: c.issue, last_error: String(error), retryable: c.retryable };
+    return { status: "failed", attempts, issue: c.issue, last_error: detail, retryable: c.retryable };
   };
   try {
     const live = await db.live(storeId, sku, channel);
@@ -63,9 +61,9 @@ export async function processRow(db, deps, row, now) {
     if (gaps.length) return { status: "queued", issue: `Missing: ${gaps.join(", ")}`, next_attempt_at: later(now, 60) };
     const r = await deps.publish(storeId, channel, sku);
     if (r?.ok && !r?.needs_confirm) return { status: "done", issue: null, last_error: null, listing_ref: r.url || null };
-    return fail(r?.needs_confirm ? "needs_confirm: Amazon new product page must be confirmed by hand" : r?.error || r?.message || "publish_failed");
+    return fail({ message: r?.needs_confirm ? "Amazon new product page must be confirmed by hand" : r?.error || r?.message || "publish_failed", status: r?.status });
   } catch (e) {
-    return fail(e instanceof Error ? e.message : String(e));
+    return fail(e);
   }
 }
 

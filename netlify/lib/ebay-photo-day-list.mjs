@@ -27,7 +27,7 @@ import {
   resolveFloorCategory,
   suggestCategories,
 } from "./ebay-catalog.mjs";
-import { fillAspects } from "./ebay-aspects.mjs";
+import { fillAspects, pickCategorySuggestion } from "./ebay-aspects.mjs";
 import { listingConditionPayload } from "./ebay-conditions.mjs";
 
 export const PHOTO_DAY_REQUEST_KEY = "ebay_photo_day_list_request";
@@ -209,7 +209,7 @@ async function prepareListingMetaPreferNew(storeId, unit) {
   if (!categoryId) {
     const query = [unit.brand, unit.model, unit.title, unit.category].filter(Boolean).join(" ");
     const suggestions = await suggestCategories(query);
-    const picked = suggestions[0] || null;
+    const picked = pickCategorySuggestion(suggestions, [unit.brand, unit.model, unit.title, unit.category]);
     if (!picked?.categoryId) throw new Error(`No eBay category suggestion for SKU ${unit.sku}`);
     categoryId = String(picked.categoryId);
     categoryName = picked.categoryName || null;

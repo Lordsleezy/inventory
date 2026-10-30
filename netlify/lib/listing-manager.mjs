@@ -1408,7 +1408,7 @@ export async function publishCreate(
         result,
       };
     } catch (e) {
-      return { ok: false, error: e instanceof Error ? e.message : String(e), warning: warn };
+      return { ok: false, error: e instanceof Error ? e.message : String(e), status: e?.status || null, warning: warn };
     }
   }
 

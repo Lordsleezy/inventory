@@ -90,13 +90,25 @@ function byName(allowed, test) {
 }
 
 /**
- * Open box when the category offers it. Otherwise the closest New other.
- * Returns null when neither exists — callers leave the current condition and log it.
+ * Open box when offered. Otherwise, use New for Floor New and Used for all other grades.
+ * Returns null when the category does not offer an honest fallback.
  */
-export function clearanceCondition(allowed) {
+export function clearanceCondition(allowed, floorCondition = "") {
   const list = allowed || [];
   const open = byName(list, (n) => n.includes("open box"));
   if (open) return { conditionId: String(open.conditionId), name: open.name, fallback: false, reason: "open_box" };
+  const grade = norm(floorCondition);
+  if (grade) {
+    if (grade === "new") {
+      const fresh = byName(list, (n) => n === "new") || byName(list, (n) => n.includes("new other"));
+      if (fresh) return { conditionId: String(fresh.conditionId), name: fresh.name, fallback: true, reason: "new" };
+      return null;
+    }
+    const used = byName(list, (n) => n === "used" || n === "pre owned" || n.includes("used ") || n.includes("pre owned")) ||
+      list.find((row) => ["3000", "4000", "5000", "6000"].includes(String(row.conditionId))) ||
+      byName(list, (n) => /\b(good|fair|acceptable|excellent|very good)\b/.test(n));
+    if (used) return { conditionId: String(used.conditionId), name: used.name, fallback: true, reason: "used" };
+  }
   const namedOther = byName(list, (n) => n.includes("new other") || n.includes("new  other"));
   if (namedOther) {
     return { conditionId: String(namedOther.conditionId), name: namedOther.name, fallback: true, reason: "new_other" };

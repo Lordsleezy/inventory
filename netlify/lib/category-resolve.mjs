@@ -5,6 +5,7 @@ import { ebayCategoriesForGtin, suggestCategories } from './ebay-catalog.mjs';
 import { tiktokApiFetch } from './tiktok-shop.mjs';
 import { refreshChannelCategoryFields } from './category-taxonomy.mjs';
 import { validateAmazonUnitCategory } from './amazon-category-validation.mjs';
+import { pickCategorySuggestion } from './ebay-aspects.mjs';
 
 const CHANNELS = ['ebay', 'amazon', 'tiktok', 'depop'];
 
@@ -23,7 +24,7 @@ async function bestEbayCategory(unit, gtin) {
   const query = [unit.brand, unit.model, unit.title].filter(Boolean).join(' ');
   if (!query) return { id: null, source: 'ebay_suggestion', conflict: false };
   const suggestions = await suggestCategories(query).catch(() => []);
-  return { id: suggestions[0]?.categoryId || null, source: 'ebay_title_suggestion', conflict: false };
+  return { id: pickCategorySuggestion(suggestions, [unit.brand, unit.model, unit.title, unit.category])?.categoryId || null, source: 'ebay_title_suggestion', conflict: false };
 }
 
 async function recommendedTiktok(storeId, unit) {

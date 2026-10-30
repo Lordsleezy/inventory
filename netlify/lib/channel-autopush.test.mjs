@@ -52,9 +52,9 @@ test("one channel failing does not stop the others; drip limit per channel", asy
   }, end: async () => ({}) }, now });
   assert.deepEqual(published, ["1:ebay", "2:amazon", "3:tiktok"]);
   const ebay = db.updates.find((u) => u.id === 1);
-  assert.equal(ebay.status, "queued");
+  assert.equal(ebay.status, "failed");
   assert.equal(ebay.attempts, 1);
-  assert.match(ebay.issue, /Retrying/);
+  assert.match(ebay.issue, /^Needs fix: HTTP 503/);
   assert.equal(db.updates.find((u) => u.id === 2).listing_ref, "https://x/2");
 });
 
@@ -130,14 +130,23 @@ test("unchecking a live channel ends that listing", async () => {
   assert.deepEqual(ended, [["tiktok", "7", "offer-7"]]);
 });
 
-test("TikTok approval pending stays queued and visible; hard errors fail; retries stop at the limit", async () => {
+test("permanent errors stop immediately and temporary rate limits retry at most three times", async () => {
   const db = fakeDb({ setting: {} });
   const tk = await processRow(db, { publish: async () => ({ ok: false, error: "seller identity verification pending" }) }, row(1, "8", "tiktok"), now);
-  assert.equal(tk.status, "queued");
-  assert.equal(tk.issue, "TikTok Shop approval pending");
+  assert.equal(tk.status, "failed");
+  assert.equal(tk.issue, "Needs fix: seller identity verification pending");
   assert.equal(classifyFailure("amazon", "not_on_amazon").retryable, false);
-  const last = await processRow(db, { publish: async () => ({ ok: false, error: "HTTP 500" }) }, row(1, "8", "amazon", "list", 4), now);
+  assert.match(classifyFailure("ebay", "policy category condition rejected").issue, /^Needs fix:/);
+  assert.equal(classifyFailure("ebay", { status: 429, message: "rate limited" }).retryable, true);
+  assert.equal(classifyFailure("ebay", "HTTP 503").retryable, false);
+  const transient = await processRow(db, { publish: async () => ({ ok: false, error: "HTTP 429 rate limit" }) }, row(1, "8", "ebay"), now);
+  assert.equal(transient.status, "queued");
+  assert.equal(transient.attempts, 1);
+  assert.match(transient.issue, /^Retrying:/);
+  const last = await processRow(db, { publish: async () => ({ ok: false, error: "HTTP 429 rate limit" }) }, row(1, "8", "ebay", "list", 2), now);
   assert.equal(last.status, "failed");
+  assert.equal(last.attempts, 3);
+  assert.equal(last.retryable, true);
 });
 
 test("queue listings: Floor price, +10% under $15", async () => {

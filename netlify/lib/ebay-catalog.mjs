@@ -6,6 +6,8 @@ import {
   aspectsNeedRefresh,
   fillAspects,
   normalizeTaxonomyAspects,
+  pickCategorySuggestion,
+  rankCategorySuggestions,
   unitSpecificAspect,
 } from "./ebay-aspects.mjs";
 import { parseListingSpecs } from "./listing-copy.mjs";
@@ -434,13 +436,17 @@ export async function suggestCategories(query) {
   );
   const json = await res.json();
   if (!res.ok) throw new Error(json.errors?.[0]?.message || "ebay_category_suggestions_failed");
-  return (json.categorySuggestions || [])
-    .slice(0, 8)
+  const suggestions = (json.categorySuggestions || [])
     .map((row) => ({
       categoryId: String(row.category?.categoryId || ""),
       categoryName: String(row.category?.categoryName || ""),
+      categoryPath: [
+        ...(row.categoryTreeNodeAncestors || []).map((node) => String(node.categoryName || "").trim()).filter(Boolean),
+        String(row.category?.categoryName || "").trim(),
+      ].filter(Boolean).join(" > "),
     }))
     .filter((row) => row.categoryId);
+  return rankCategorySuggestions(suggestions, [q]).slice(0, 8);
 }
 
 export async function fetchLiveAspects(ebayCategoryId) {
@@ -564,7 +570,7 @@ export async function resolveListingCategory(unit) {
   if (floor) return { ...floor, source: "floor_map" };
   const query = [unit?.brand, unit?.model, unit?.title, unit?.category, explicit].filter(Boolean).join(" ");
   const suggestions = await suggestCategories(query);
-  const picked = suggestions[0] || null;
+  const picked = pickCategorySuggestion(suggestions, [unit?.brand, unit?.model, unit?.title, unit?.category, explicit]);
   if (!picked?.categoryId) {
     const err = new Error(
       query
@@ -601,14 +607,16 @@ export async function prepareUnitCondition({ unit, liveCheck = false }) {
     }
   }
   const collectible = isCollectible(unit);
-  const mapped = collectible ? mapFloorCondition(unit.condition, stored) : clearanceCondition(stored);
+  const mapped = collectible
+    ? (mapFloorCondition(unit.condition, stored) || clearanceCondition(stored, unit.condition))
+    : clearanceCondition(stored, unit.condition);
   const payload = listingConditionPayload(mapped);
   if (!mapped || !payload) {
     const allowed = stored.map((row) => `${row.name} (${row.conditionId})`).join(", ") || "none";
     const err = new Error(
       collectible
         ? `eBay category ${floor.name} has no honest match for Floor grade “${unit.condition || "(blank)"}”. Allowed: ${allowed}. The unit grade was not changed.`
-        : `eBay category ${floor.name} has no Open box or New other condition. Allowed: ${allowed}. Condition was left unset.`,
+        : `eBay category ${floor.name} has no Open box, New, or Used condition matching Floor grade “${unit.condition || "(blank)"}”. Allowed: ${allowed}.`,
     );
     err.code = "ebay_condition_unmapped";
     err.allowed = stored;

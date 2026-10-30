@@ -72,6 +72,19 @@ export function formatEbayError(json, fallback = "eBay rejected the listing.") {
   return summary;
 }
 
+export function isTemporaryEbayFailure(error) {
+  const status = Number(error?.status || error?.statusCode || 0);
+  const message = String(error?.message || error?.error || error || "");
+  return status === 408 || status === 429 ||
+    /\b(rate[ -]?limit|too many requests|timed? ?out|timeout|etimedout|aborterror)\b/i.test(message);
+}
+
+export function ebayFailureLabel(error, message = "eBay did not accept this listing.") {
+  const text = String(message || "eBay did not accept this listing.");
+  if (isTemporaryEbayFailure(error)) return `Temporary eBay issue: ${text}`;
+  return text.startsWith("Needs fix:") ? text : `Needs fix: ${text}`;
+}
+
 function expandBareInvalid(text) {
   const t = decodeEbayText(text).trim();
   if (!t || /^invalid\.?$/i.test(t) || /^invalid data\.?$/i.test(t)) {

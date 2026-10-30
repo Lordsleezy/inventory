@@ -1,6 +1,6 @@
 -- pgTAP: eBay required item specifics (20261030200000_ebay_required_specifics.sql).
 begin;
-select plan(22);
+select plan(25);
 do $$
 declare
   v_store uuid;
@@ -72,6 +72,14 @@ select ok('category_review'=any(public.unit_listing_gaps(u)) and not ('category'
   'selected category conflict is labeled category review, not missing category') from public.units u where sku='98002';
 select ok(public.unit_is_unfinished(public.unit_listing_gaps(u)), 'selected category needing review remains Unfinished')
   from public.units u where sku='98002';
+select set_config('request.jwt.claim.sub', current_setting('test.owner_id'), true);
+select is(public.portal_set_unit_ebay_category('98002', '20614')::text, '[]',
+  'confirming the same category clears its review gap');
+select is((select review_reason from public.unit_channel_categories where sku='98002' and channel='ebay'), null,
+  'category review reason is cleared by confirmation');
+select is((select source from public.unit_channel_categories where sku='98002' and channel='ebay'), 'manual',
+  'same-category selection records manual confirmation');
+select set_config('request.jwt.claim.sub', '', true);
 select ok(not ('category'=any(public.unit_listing_gaps(u))) and not ('specifics'=any(public.unit_listing_gaps(u))),
   'unselected eBay category and specifics gaps do not appear on an unchecked unit') from public.units u where sku='98003';
 select ok(not public.unit_is_unfinished(public.unit_listing_gaps(u)),
@@ -79,7 +87,7 @@ select ok(not public.unit_is_unfinished(public.unit_listing_gaps(u)),
 update public.unit_channel_categories set review_reason=null where sku='98002' and channel='ebay';
 
 -- Auto-confirm backfill: exact eBay Catalog source is confirmed; dry run writes nothing.
-update public.unit_channel_categories set review_reason = 'missing category or unsynced fields' where sku = '98002' and channel = 'ebay';
+update public.unit_channel_categories set source='ebay_catalog', review_reason = 'missing category or unsynced fields' where sku = '98002' and channel = 'ebay';
 select is(public.floor_category_autoconfirm(current_setting('test.store_id')::uuid, true) ->> 'updated', '0', 'dry run updates nothing');
 select is(public.floor_category_autoconfirm(current_setting('test.store_id')::uuid, false) -> 'by_reason' ->> 'ebay_catalog', '1',
   'catalog-sourced category is auto-confirmed');

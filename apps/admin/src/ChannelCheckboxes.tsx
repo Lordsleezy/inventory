@@ -89,7 +89,7 @@ export function ChannelCheckboxes({ client, sku, appMode = false }: { client: Su
       {LISTING_CHANNELS.map(([id, label]) => {
         const c = state[id];
         const status = c.never_reason || c.blocked_reason ? c.never_reason || c.blocked_reason
-          : c.queue?.status === 'failed' ? `Listing issue: ${c.queue.last_error || c.queue.issue || 'failed'}`
+          : c.queue?.status === 'failed' ? `Listing issue: ${String(c.queue.issue || '').startsWith('Needs fix:') ? c.queue.issue : c.queue.last_error || c.queue.issue || 'failed'}`
           : c.queue ? `${c.queue.action === 'end' ? 'Ending' : 'Queued to list'}${c.queue.issue ? ` · ${c.queue.issue}` : ''}`
           : c.live ? 'Live' : '';
         return (
@@ -141,7 +141,7 @@ export function ListingIssuesPanel({ client }: { client: SupabaseClient }) {
               <td>{i.title}</td>
               <td>{LISTING_CHANNELS.find(([id]) => id === i.channel)?.[1] ?? i.channel}</td>
               <td>{i.action}{i.attempts ? ` · ${i.attempts} tries` : ''}</td>
-              <td>{i.last_error || i.issue}</td>
+              <td>{String(i.issue || '').startsWith('Needs fix:') ? i.issue : i.last_error || i.issue}</td>
               <td><button type="button" className="secondary" onClick={async () => {
                 await client.rpc('portal_retry_listing_issue', { p_id: i.id }); await load();
               }}>Retry now</button></td>

@@ -916,16 +916,8 @@ export async function listSku(storeId, sku, draft = null) {
       published = await ebayFetch(storeId, "POST", `/sell/inventory/v1/offer/${offerId}/publish`);
     } catch (err) {
       const first = formatEbayError(err.body, err instanceof Error ? err.message : String(err));
-      console.log("ebay_publish_retry", JSON.stringify({ offerId, error: first, ebay: err.body }));
-      await deleteOffer(storeId, offerId);
-      const retry = await ebayFetch(storeId, "POST", "/sell/inventory/v1/offer", offerBody);
-      offerId = retry.offerId;
-      try {
-        published = await ebayFetch(storeId, "POST", `/sell/inventory/v1/offer/${offerId}/publish`);
-      } catch (again) {
-        await inspectOfferChain(storeId, sku, offerId, loc, policies);
-        throw again;
-      }
+      console.log("ebay_publish_stopped", JSON.stringify({ offerId, status: err?.status || null, error: first }));
+      throw err;
     }
   }
   const listingId = published.listingId || published.listing?.listingId || null;
