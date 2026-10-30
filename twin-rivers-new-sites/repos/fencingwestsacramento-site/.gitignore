@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.tools/
+_legacy/
+*.zip
+.DS_Store
+.env
+.env.*
+!.env.example
