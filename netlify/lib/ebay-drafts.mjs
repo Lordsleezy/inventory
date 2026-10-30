@@ -2,12 +2,12 @@ import { floorLog } from "./floor-log.mjs";
 import { dbBusy, sleep } from "./bg-guard.mjs";
 import { serviceClient } from "./server.mjs";
 import { ebayFetch, listSku, userToken, withdrawSku } from "./ebay.mjs";
-import { formatEbayError } from "./ebay-errors.mjs";
+import { ebayFailureLabel, formatEbayError } from "./ebay-errors.mjs";
 import { publicPhotoUrl } from "./ebay-photos.mjs";
 import { composeChannelDescription, parseListingSpecs } from "./listing-copy.mjs";
 import { ebayDescription } from "./ebay-product.mjs";
 import { gtinIssue } from "./gtin.mjs";
-import { fillAspects, pickCategorySuggestion } from "./ebay-aspects.mjs";
+import { fillAspects, pickCategorySuggestion, rankCategorySuggestions } from "./ebay-aspects.mjs";
 import {
   fetchLiveAspects,
   fetchLiveConditions,
@@ -465,6 +465,7 @@ function detail(row, unit) {
     description: row.description,
     condition_id: row.condition_id,
     condition_enum: row.condition_enum,
+    condition_used: (row.conditions || []).find((condition) => String(condition.conditionId) === String(row.condition_id))?.name || row.condition_enum || null,
     condition_not_supported: Boolean(row.category_id && row.aspect_defs?.length && !row.conditions?.length),
     condition_notes: row.condition_notes,
     suggestions: row.suggestions || [],
@@ -554,8 +555,8 @@ function draftCondition(unit, row, conditions) {
     is_collectible: unit?.is_collectible,
     aspects: row?.aspects,
   });
-  if (collectible) return mapFloorCondition(unit?.condition, conditions);
-  return clearanceCondition(conditions);
+  if (collectible) return mapFloorCondition(unit?.condition, conditions) || clearanceCondition(conditions, unit?.condition);
+  return clearanceCondition(conditions, unit?.condition);
 }
 
 function stringsToAspects(aspects) {
@@ -612,7 +613,7 @@ async function repairCategoryRules(row, unit) {
   const previousId = row.category_id;
   const previousName = row.category_name;
   const query = [unit?.brand, unit?.title || row.title, unit?.category].filter(Boolean).join(" ");
-  const suggestions = row.suggestions?.length ? row.suggestions : await suggestCategories(query);
+  const suggestions = rankCategorySuggestions(row.suggestions?.length ? row.suggestions : await suggestCategories(query), [unit?.brand, unit?.title || row.title, unit?.category]);
   row.suggestions = suggestions;
   for (const suggestion of suggestions.slice(0, 6)) {
     if (!suggestion.categoryId || String(suggestion.categoryId) === String(previousId)) continue;
@@ -1081,7 +1082,10 @@ async function pushOne(storeId, sku, { revise = false, getPolicies = () => resol
   withReadiness(row);
   const failed = (row.checklist || []).filter((item) => !item.ok && !(pickupOnly && item.label === "Needs box size"));
   if (failed.length) {
-    return { sku, ok: false, error: `Not ready: ${failed.map((item) => item.label).join("; ")}` };
+    const message = `Needs fix: Not ready: ${failed.map((item) => item.label).join("; ")}`;
+    await sb.from("ebay_drafts").update({ ebay_error: message, updated_at: new Date().toISOString() })
+      .eq("store_id", storeId).eq("sku", sku);
+    return { sku, ok: false, error: message };
   }
   try {
     const policies = await getPolicies();
@@ -1113,12 +1117,13 @@ async function pushOne(storeId, sku, { revise = false, getPolicies = () => resol
     return { sku, ok: true, listingId: published.listingId, viewUrl: published.viewUrl };
   } catch (err) {
     const message = formatEbayError(err.body, err instanceof Error ? err.message : String(err));
+    const failure = ebayFailureLabel(err, message);
     await sb.from("ebay_drafts").update({
       status: wasLive ? "live" : "draft",
-      ebay_error: message,
+      ebay_error: failure,
       updated_at: new Date().toISOString(),
     }).eq("store_id", storeId).eq("sku", sku);
-    return { sku, ok: false, error: message };
+    return { sku, ok: false, error: failure };
   }
 }
 
@@ -1236,7 +1241,10 @@ export async function runPushQueue(storeId, skus) {
       await floorLog({ event: "ebay.push.start", sku, storeId, message: `pushing ${sku}` });
       let result;
       try { result = await pushOne(storeId, sku, { getPolicies }); }
-      catch (err) { result = { sku, ok: false, error: err instanceof Error ? err.message : String(err), crashed: true }; }
+      catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        result = { sku, ok: false, error: ebayFailureLabel(err, message), crashed: true };
+      }
       const patch = { push_state: result.ok ? "done" : "failed", push_finished_at: new Date().toISOString() };
       if (!result.ok) patch.ebay_error = String(result.error || "eBay did not accept this listing.").slice(0, 2000);
       await sb.from("ebay_drafts").update(patch).eq("store_id", storeId).eq("sku", sku);

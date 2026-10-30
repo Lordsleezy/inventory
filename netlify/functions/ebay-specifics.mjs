@@ -3,6 +3,7 @@
 import { json, corsHeaders, serviceClient, staffFromEvent } from "../lib/server.mjs";
 import { portalAdminFromEvent } from "../lib/portal-auth.mjs";
 import { catalogProductByGtin, suggestCategories } from "../lib/ebay-catalog.mjs";
+import { rankCategorySuggestions } from "../lib/ebay-aspects.mjs";
 import { refreshChannelCategoryFields } from "../lib/category-taxonomy.mjs";
 import { autofillUnitSpecifics, missingRequired, supabaseSpecificsDeps } from "../lib/ebay-specifics.mjs";
 import { canonicalValue, clearInvalid, countUsage, rankValues } from "../lib/aspect-suggest.mjs";
@@ -59,7 +60,7 @@ async function form(sb, storeId, sku) {
   let suggestion = null;
   if (!row?.category_id) {
     const query = unit.title || [unit.brand, unit.model].filter(Boolean).join(" ");
-    for (const s of await suggestCategories(query).catch(() => [])) {
+    for (const s of rankCategorySuggestions(await suggestCategories(query).catch(() => []), [unit.title, unit.brand, unit.model, unit.category])) {
       const { data: t } = await sb.from("channel_taxonomy").select("category_id,path")
         .eq("channel", "ebay").eq("category_id", s.categoryId).eq("active", true).eq("leaf", true).maybeSingle();
       if (t) { suggestion = t; break; }
@@ -89,19 +90,20 @@ async function handle(event) {
       loadLive: (sid, s) => liveSpecificsForUnit(sid, s) });
     if (body.action === "suggest-category") {
       let current = await form(sb, storeId, sku);
-      // Category suggestions never enable eBay. Only fill a category for a unit
-      // that is already selected for eBay, and preserve any category already set.
-      if (!current.enabled || current.category_id) return json(200, { ok: true, form: current });
+      // Suggestions never enable eBay. Preserve confirmed categories, but refresh
+      // a stale automatic suggestion when the item has not been explicitly categorized.
+      if (!current.enabled || (current.category_id && !current.auto_picked)) return json(200, { ok: true, form: current });
 
       // Prefer an exact Floor/UPC/live-listing match before a title suggestion.
       await autofillUnitSpecifics(deps, storeId, sku);
       current = await form(sb, storeId, sku);
-      if (!current.category_id) {
+      if (!current.category_id || current.auto_picked) {
         const query = current.item?.title || [current.item?.brand, current.item?.model].filter(Boolean).join(" ");
-        for (const suggestion of await suggestCategories(query).catch(() => [])) {
+        for (const suggestion of rankCategorySuggestions(await suggestCategories(query).catch(() => []), [current.item?.title, current.item?.brand, current.item?.model])) {
           const { data: tax } = await sb.from("channel_taxonomy").select("category_id,path,active,leaf")
             .eq("channel", "ebay").eq("category_id", suggestion.categoryId).maybeSingle();
           if (!tax?.active || !tax?.leaf) continue;
+          if (current.category_id && String(current.category_id) === String(tax.category_id)) break;
           await ebayAspectFields(storeId, tax.category_id);
           await deps.saveEbayRow(storeId, sku, { category_id: tax.category_id,
             source: "auto_suggested", attributes: current.attributes || {} });

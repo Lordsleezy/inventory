@@ -17,7 +17,7 @@ import { ebayItemViewUrl } from "./ebay-env.mjs";
 import { floorLog } from "./floor-log.mjs";
 import { prohibitedReason } from "./ebay-eligibility.mjs";
 import { ebayNeverList, ebayReviewReason } from "./ebay-exclusion.mjs";
-import { fillAspects } from "./ebay-aspects.mjs";
+import { fillAspects, pickCategorySuggestion } from "./ebay-aspects.mjs";
 import {
   listingMeasures,
   refreshCategoryAspects,
@@ -150,7 +150,7 @@ export async function preparePickupListingMeta(storeId, unit) {
   if (!categoryId) {
     const query = [unit.brand, unit.model, unit.title, unit.category].filter(Boolean).join(" ");
     const suggestions = await suggestCategories(query);
-    const picked = suggestions[0] || null;
+    const picked = pickCategorySuggestion(suggestions, [unit.brand, unit.model, unit.title, unit.category]);
     if (!picked?.categoryId) {
       throw new Error(`No eBay category suggestion for SKU ${unit.sku} (${query || "no query"})`);
     }

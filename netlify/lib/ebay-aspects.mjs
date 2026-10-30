@@ -414,19 +414,45 @@ function softenPhrase(value) {
     .join(" ");
 }
 
+function suggestionPath(row) {
+  return String(row?.categoryPath || row?.path || row?.categoryName || "");
+}
+
+const NICHE_CATEGORY_PATH = /(^|\s>\s)(collectibles|toys\s*&\s*hobbies|collectible\s*memorabilia)(\s>\s|$)/i;
+const MAINSTREAM_PATH = /(^|\s>\s)(home\s*&\s*garden|home\s*&\s*living|home\s*d[ée]cor|kitchen\s*&\s*dining)(\s>\s|$)/i;
+const COLLECTIBLE_PRODUCT = /\b(collectibles?|trading cards?|sports cards?|pokemon|pok[eé]mon|yu-?gi-?oh|magic\s*: ?the gathering|\bmtg\b|comic books?|\bcomics?\b|funko|action figures?|figurines?|vinyl records?|phonograph|\blps?\b|33\s*rpm|45\s*rpm)\b/i;
+
+/** Prefer ordinary retail categories over niche Collectibles paths for everyday goods. */
+export function rankCategorySuggestions(suggestions, texts = []) {
+  const blob = (texts || []).filter(Boolean).join(" ");
+  const normalized = softenPhrase(blob);
+  const collectible = COLLECTIBLE_PRODUCT.test(blob);
+  return (suggestions || []).map((row, index) => {
+    const phrase = softenPhrase(row?.categoryName);
+    const tokens = phrase.split(" ").filter((token) => token.length >= 3);
+    const hit = tokens.filter((token) => normalized.includes(token)).length;
+    const path = suggestionPath(row);
+    const nichePenalty = !collectible && NICHE_CATEGORY_PATH.test(path) ? 100 : 0;
+    const mainstreamBonus = !collectible && MAINSTREAM_PATH.test(path) ? 8 : 0;
+    return { row, index, score: hit * 10 + mainstreamBonus - nichePenalty };
+  }).sort((a, b) => b.score - a.score || a.index - b.index).map(({ row }) => row);
+}
+
 /** One allowed value, only when the text contains that phrase and not a rival. */
 export function pickCategorySuggestion(suggestions, texts) {
   const blob = softenPhrase((texts || []).filter(Boolean).join(" "));
+  const ranked = rankCategorySuggestions(suggestions, texts);
   let best = null;
-  for (const row of suggestions || []) {
+  for (const row of ranked) {
     const phrase = softenPhrase(row?.categoryName);
     const tokens = phrase.split(" ").filter((token) => token.length >= 3);
     if (!tokens.length) continue;
     const hit = tokens.filter((token) => blob.includes(token)).length;
     if (!hit || (tokens.length >= 2 && hit < 2)) continue;
-    if (!best || hit > best.hit || (hit === best.hit && phrase.length > best.phrase.length)) best = { row, hit, phrase };
+    const score = hit - (NICHE_CATEGORY_PATH.test(suggestionPath(row)) && !COLLECTIBLE_PRODUCT.test(blob) ? 100 : 0);
+    if (!best || score > best.score || (score === best.score && phrase.length > best.phrase.length)) best = { row, score, phrase };
   }
-  return best?.row || suggestions?.[0] || null;
+  return best?.row || ranked[0] || null;
 }
 
 export function confidentPhrase(allowed, texts) {
