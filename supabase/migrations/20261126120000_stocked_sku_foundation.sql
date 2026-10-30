@@ -101,11 +101,24 @@ begin
 end $$;
 revoke all on function public.stock_movement_balance_guard() from public,anon,authenticated;
 drop trigger if exists stock_balance_after_unit on public.units;
-create constraint trigger stock_balance_after_unit after insert or update of qty_on_hand on public.units
-deferrable initially deferred for each row execute function public.stock_movement_balance_guard();
 drop trigger if exists stock_balance_after_movement on public.stock_movements;
-create constraint trigger stock_balance_after_movement after insert on public.stock_movements
+create constraint trigger stock_balance_after_movement after insert or update on public.stock_movements
 deferrable initially deferred for each row execute function public.stock_movement_balance_guard();
+
+create or replace function public.stock_movement_protect_balance()
+returns trigger language plpgsql security definer set search_path=public as $$
+begin
+ if tg_op='DELETE' then raise exception 'stock_movement_ledger_is_append_only'; end if;
+ if old.store_id is distinct from new.store_id or old.sku is distinct from new.sku
+   or old.quantity_delta is distinct from new.quantity_delta then
+   raise exception 'stock_movement_quantity_is_immutable';
+ end if;
+ return new;
+end $$;
+revoke all on function public.stock_movement_protect_balance() from public,anon,authenticated;
+drop trigger if exists stock_movement_protect_balance on public.stock_movements;
+create trigger stock_movement_protect_balance before update or delete on public.stock_movements
+for each row execute function public.stock_movement_protect_balance();
 
 create or replace function public.stock_movement_label_sale()
 returns trigger language plpgsql security definer set search_path=public as $$

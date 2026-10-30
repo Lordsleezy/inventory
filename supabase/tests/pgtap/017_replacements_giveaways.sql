@@ -2,9 +2,6 @@
 begin;
 select plan(52);
 set constraints all immediate;
--- The stock movement ledger is a deferred invariant; validate it after the
--- fixture's unit and sale triggers have both populated their movements.
-set constraints stock_balance_after_unit, stock_balance_after_movement deferred;
 
 do $$
 declare
@@ -33,17 +30,17 @@ begin
     select x, now(), v_store from unnest(array['94001','94002','94003','94004','94005','94006','94007','94008']) x;
   insert into public.sku_ledger (sku, issued_at, store_id)
     select x, now(), v_store2 from unnest(array['95001','95002']) x;
-  insert into public.units (sku, brand, title, ask_cents, acquisition_cost_cents, state, store_id, received_at, updated_at, qty_on_hand) values
-    ('94001', 'A', 'Sold one', 10000, 4000, 'sold', v_store, now(), now(), 0),
-    ('94002', 'A', 'Replacement unit', 10000, 1500, 'available', v_store, now(), now(), 1),
-    ('94003', 'A', 'Replacement no cost', 5000, null, 'available', v_store, now(), now(), 1),
-    ('94004', 'A', 'Giveaway', 5000, 3000, 'available', v_store, now(), now(), 1),
-    ('94005', 'A', 'Giveaway no cost', 5000, null, 'available', v_store, now(), now(), 1),
-    ('94006', 'A', 'Clerk target', 5000, 100, 'available', v_store, now(), now(), 1),
-    ('94007', 'A', 'Sold two', 5000, 1000, 'sold', v_store, now(), now(), 0),
-    ('94008', 'A', 'Spare', 5000, 100, 'available', v_store, now(), now(), 1),
-    ('95001', 'A', 'Paid sold', 10000, 4000, 'sold', v_store2, now(), now(), 0),
-    ('95002', 'A', 'Paid replacement', 10000, 1000, 'available', v_store2, now(), now(), 1);
+  insert into public.units (sku, brand, title, ask_cents, acquisition_cost_cents, state, store_id, received_at, updated_at) values
+    ('94001', 'A', 'Sold one', 10000, 4000, 'sold', v_store, now(), now()),
+    ('94002', 'A', 'Replacement unit', 10000, 1500, 'available', v_store, now(), now()),
+    ('94003', 'A', 'Replacement no cost', 5000, null, 'available', v_store, now(), now()),
+    ('94004', 'A', 'Giveaway', 5000, 3000, 'available', v_store, now(), now()),
+    ('94005', 'A', 'Giveaway no cost', 5000, null, 'available', v_store, now(), now()),
+    ('94006', 'A', 'Clerk target', 5000, 100, 'available', v_store, now(), now()),
+    ('94007', 'A', 'Sold two', 5000, 1000, 'sold', v_store, now(), now()),
+    ('94008', 'A', 'Spare', 5000, 100, 'available', v_store, now(), now()),
+    ('95001', 'A', 'Paid sold', 10000, 4000, 'sold', v_store2, now(), now()),
+    ('95002', 'A', 'Paid replacement', 10000, 1000, 'available', v_store2, now(), now());
   insert into public.sales (store_id, sku, price_cents, tax_cents, channel, payment_method, sold_at, receipt_no, actor_id, qty, ticket_id,
     shipping_cents, processing_fee_cents, processing_fee_source) values
     (v_store, '94001', 10000, 0, 'floor', 'cash', now(), 'RG-1', v_paul, 1, null, 0, 0, 'actual'),
@@ -61,8 +58,6 @@ begin
   perform set_config('test.sale2', (select id::text from public.sales where receipt_no = 'RG-2'), true);
   perform set_config('test.sale3', (select id::text from public.sales where receipt_no = 'RG-3'), true);
 end $$;
-
-set constraints stock_balance_after_unit, stock_balance_after_movement immediate;
 
 create temp view c as
   select s.receipt_no, case when sc.employee_id = current_setting('test.jacob')::uuid then 'jacob' else 'paul' end who, sc.amount_cents

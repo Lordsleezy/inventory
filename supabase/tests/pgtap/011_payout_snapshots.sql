@@ -22,14 +22,14 @@ begin
     (v_store, v_paul, 'percent_profit', 20), (v_store, v_jacob, 'percent_profit', 10);
   insert into public.sku_ledger (sku, issued_at, store_id)
     select x, now(), v_store from unnest(array['93001','93002','93003','93004','93005','93006','93007']) x;
-  insert into public.units (sku, brand, title, ask_cents, acquisition_cost_cents, state, store_id, received_at, updated_at, qty_on_hand) values
-    ('93001', 'A', 'In store', 10000, 4000, 'sold', v_store, now(), now(), 0),
-    ('93002', 'A', 'No cost', 5000, null, 'sold', v_store, now(), now(), 0),
-    ('93003', 'A', 'SKU rate', 10000, 2000, 'sold', v_store, now(), now(), 0),
-    ('93004', 'A', 'Website', 10000, 2000, 'sold', v_store, now(), now(), 0),
-    ('93005', 'A', 'Multi 1', 3000, 1000, 'sold', v_store, now(), now(), 0),
-    ('93006', 'A', 'Multi 2', 2000, 0, 'sold', v_store, now(), now(), 0),
-    ('93007', 'A', 'Shipping and tax', 10000, 4000, 'sold', v_store, now(), now(), 0);
+  insert into public.units (sku, brand, title, ask_cents, acquisition_cost_cents, state, store_id, received_at, updated_at) values
+    ('93001', 'A', 'In store', 10000, 4000, 'sold', v_store, now(), now()),
+    ('93002', 'A', 'No cost', 5000, null, 'sold', v_store, now(), now()),
+    ('93003', 'A', 'SKU rate', 10000, 2000, 'sold', v_store, now(), now()),
+    ('93004', 'A', 'Website', 10000, 2000, 'sold', v_store, now(), now()),
+    ('93005', 'A', 'Multi 1', 3000, 1000, 'sold', v_store, now(), now()),
+    ('93006', 'A', 'Multi 2', 2000, 0, 'sold', v_store, now(), now()),
+    ('93007', 'A', 'Shipping and tax', 10000, 4000, 'sold', v_store, now(), now());
   insert into public.sales (store_id, sku, price_cents, tax_cents, channel, payment_method, sold_at, receipt_no, actor_id, qty, ticket_id,
     shipping_cents, processing_fee_cents, processing_fee_source) values
     (v_store, '93001', 10000, 0, 'floor', 'cash', now(), 'PAY-1', v_paul, 1, null, 0, 0, 'actual'),
