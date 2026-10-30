@@ -53,7 +53,12 @@ grant all on public.stock_receive_requests to service_role;
 -- Opening balances make the invariant true without inventing historical movements.
 insert into public.stock_movements(store_id,sku,movement_type,quantity_delta,reason,created_at)
 select store_id,sku,'opening_balance',qty_on_hand,'balance at ledger introduction',now()
-from public.units
+from public.units u
+where not exists (
+  select 1 from public.stock_movements m
+  where m.store_id=u.store_id and m.sku=u.sku and m.movement_type='opening_balance'
+    and m.reason='balance at ledger introduction'
+)
 on conflict do nothing;
 
 create or replace function public.stock_movement_on_unit_change()
@@ -646,13 +651,15 @@ do $$
 declare definition text;
 begin
  definition:=pg_get_functiondef('public.receive_inventory_list(text,text,boolean,text,integer,integer,text)'::regprocedure);
- definition:=replace(definition,'u.ask_cents,u.acquisition_cost_cents,u.listing_specs,u.qty_on_hand,loc.locations,loc.assigned,',
-   'u.ask_cents,u.acquisition_cost_cents,u.listing_specs,u.qty_on_hand,u.is_stocked,loc.locations,loc.assigned,coalesce((select sum(greatest(coalesce(s.qty,1),1))::int from public.sales s where s.store_id=u.store_id and s.sku=u.sku and s.voided_at is null),0)::int sold_qty,');
- definition:=replace(definition,'b.photo_path,b.photo_count,b.defective','b.photo_path,b.photo_count,b.qty_on_hand,b.is_stocked,b.defective');
- definition:=replace(definition,'b.qty_on_hand,b.is_stocked,b.defective,b.not_for_sale','b.qty_on_hand,b.is_stocked,b.sold_qty,b.defective,b.not_for_sale');
- definition:=replace(definition,'condition,ask_cents,acquisition_cost_cents,state,received_at','condition,qty_on_hand,is_stocked,ask_cents,acquisition_cost_cents,state,received_at');
- definition:=replace(definition,'condition,qty_on_hand,is_stocked,ask_cents,acquisition_cost_cents,state,received_at','condition,qty_on_hand,is_stocked,sold_qty,ask_cents,acquisition_cost_cents,state,received_at');
- if definition=pg_get_functiondef('public.receive_inventory_list(text,text,boolean,text,integer,integer,text)'::regprocedure) then
+ if position('u.is_stocked' in definition)=0 then
+   definition:=replace(definition,'u.ask_cents,u.acquisition_cost_cents,u.listing_specs,u.qty_on_hand,loc.locations,loc.assigned,',
+     'u.ask_cents,u.acquisition_cost_cents,u.listing_specs,u.qty_on_hand,u.is_stocked,loc.locations,loc.assigned,coalesce((select sum(greatest(coalesce(s.qty,1),1))::int from public.sales s where s.store_id=u.store_id and s.sku=u.sku and s.voided_at is null),0)::int sold_qty,');
+   definition:=replace(definition,'b.photo_path,b.photo_count,b.defective','b.photo_path,b.photo_count,b.qty_on_hand,b.is_stocked,b.defective');
+   definition:=replace(definition,'b.qty_on_hand,b.is_stocked,b.defective,b.not_for_sale','b.qty_on_hand,b.is_stocked,b.sold_qty,b.defective,b.not_for_sale');
+   definition:=replace(definition,'condition,ask_cents,acquisition_cost_cents,state,received_at','condition,qty_on_hand,is_stocked,ask_cents,acquisition_cost_cents,state,received_at');
+   definition:=replace(definition,'condition,qty_on_hand,is_stocked,ask_cents,acquisition_cost_cents,state,received_at','condition,qty_on_hand,is_stocked,sold_qty,ask_cents,acquisition_cost_cents,state,received_at');
+ end if;
+ if position('u.is_stocked' in definition)=0 or position('sold_qty' in definition)=0 then
    raise exception 'could_not_extend_receive_inventory_list';
  end if;
  execute definition;
