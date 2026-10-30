@@ -2,7 +2,7 @@
  * UPC / GTIN product lookup for Floor ("scan to list").
  *
  * Sources (in order of trust): Amazon SP-API Catalog + Pricing → UPCitemdb (fills gaps only)
- * → optional eBay sold comps. Nothing is invented: a field is null/[] unless a source returned it.
+ * → optional eBay sold comps. eBay catalog images are separately checked by exact GTIN.
  *
  * Cache: public.upc_lookup_cache (service_role only), keyed by gtin14. A hit returns the stored
  * result with cached:true and makes NO external calls unless { force: true }.
@@ -521,6 +521,7 @@ export async function lookupUpc(storeId, rawCode, opts = {}) {
         upcitemdb: { found: false, skipped: "floor_product" },
         ebay: null,
         merged,
+        stock_photos: (merged.images || []).slice(0, 6).map((url) => ({ url, source: "catalog" })),
         fieldCoverage: {
           title: "floor_product",
           brand: "floor_product",
@@ -571,7 +572,32 @@ export async function lookupUpc(storeId, rawCode, opts = {}) {
 
   const ebay = opts.skipEbay ? null : await deps.ebayComps(storeId, gtin).catch(() => null);
 
+  // ePID images are keyed by the scanned GTIN and take precedence over Amazon
+  // catalog alternates. A result without one unambiguous ePID contributes none.
+  let ebayCatalog = null;
+  if (!opts.skipEbay) {
+    try {
+      const { catalogProductByGtin } = await import("./ebay-catalog.mjs");
+      ebayCatalog = await catalogProductByGtin(gtin.upcA || gtin.ean13 || gtin.gtin14);
+    } catch { /* Catalog image lookup is optional; the barcode catalog still resolves normally. */ }
+  }
+
   const { merged, fieldCoverage } = mergeLookup(amazon, upcitemdb);
+  const photoRows = [
+    ...(ebayCatalog?.epid ? (ebayCatalog.imageUrls || []).map((url) => ({ url, source: "ebay_catalog" })) : []),
+    ...(amazon.images || []).map((url) => ({ url, source: "amazon" })),
+    ...(upcitemdb.images || []).map((url) => ({ url, source: "upcitemdb" })),
+  ];
+  const seenPhotoUrls = new Set();
+  const stock_photos = photoRows.filter((row) => {
+    if (!row.url || seenPhotoUrls.has(row.url)) return false;
+    seenPhotoUrls.add(row.url);
+    return true;
+  }).slice(0, 6);
+  if (stock_photos.length) {
+    merged.images = stock_photos.map((row) => row.url);
+    fieldCoverage.images = stock_photos[0].source;
+  }
   // Prefer pack/variant phrase over bare digit retailer codes for item specifics.
   const specifics = itemSpecificsFromLookup({
     model: merged.model,
@@ -589,6 +615,8 @@ export async function lookupUpc(storeId, rawCode, opts = {}) {
     amazon,
     upcitemdb,
     ebay,
+    ebay_catalog: ebayCatalog,
+    stock_photos,
     merged,
     fieldCoverage,
     looked_up_at: new Date().toISOString(),

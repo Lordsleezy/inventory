@@ -15,6 +15,7 @@ import {
   listAmazonOffer,
 } from "./amazon.mjs";
 import { createAmazonCatalogListing } from "./amazon-create.mjs";
+import { amazonImageLocatorPatches, tiktokMainImagePayload } from "./listing-image-payloads.mjs";
 import { ebayFetch, listEbayAccounts, loadEbayAccount, listSku, withdrawSku, photoUrls } from "./ebay.mjs";
 import { resolveEbayAccount, userTokenForAccount } from "./ebay-accounts.mjs";
 import { getMyEbaySellingActive, getSellerListActive, reviseTradingFixedPrice } from "./ebay-trading.mjs";
@@ -249,6 +250,7 @@ export async function patchAmazonListing(
     bullets,
     description,
     conditionNote,
+    imageUrls,
     productType: productTypeIn,
     syncFloorAsk = true,
   } = {},
@@ -293,7 +295,12 @@ export async function patchAmazonListing(
   if (conditionNote) {
     attributes.condition_note = [{ value: String(conditionNote).slice(0, 1000), language_tag: LANG, marketplace_id: mp }];
   }
-  if (!Object.keys(attributes).length) return { ok: false, error: "nothing_to_patch" };
+  let imagePatches = [];
+  if (Array.isArray(imageUrls) && imageUrls.length) {
+    try { imagePatches = amazonImageLocatorPatches(imageUrls, mp); }
+    catch (error) { return { ok: false, error: error.message || 'image_urls_must_be_https' }; }
+  }
+  if (!Object.keys(attributes).length && !imagePatches.length) return { ok: false, error: "nothing_to_patch" };
 
   const { data: listing } = await sb
     .from("listings")
@@ -314,13 +321,15 @@ export async function patchAmazonListing(
     `?marketplaceIds=${mp}`;
   let json;
   try {
+    const patches = Object.entries(attributes).map(([name, value]) => ({
+      op: "replace",
+      path: `/attributes/${name}`,
+      value,
+    }));
+    patches.push(...imagePatches);
     json = await spapiFetch(storeId, "PATCH", path, {
       productType,
-      patches: Object.entries(attributes).map(([name, value]) => ({
-        op: "replace",
-        path: `/attributes/${name}`,
-        value,
-      })),
+      patches,
     });
   } catch (e) {
     return {
@@ -889,7 +898,7 @@ export async function relistEbayListing(storeId, { sku, draft = null, accountId 
 
 export async function patchTikTokListing(
   storeId,
-  { productId, sku, priceCents, title, description, syncFloorAsk = true } = {},
+  { productId, sku, priceCents, title, description, imageUrls, syncFloorAsk = true } = {},
 ) {
   if (!productId) return { ok: false, error: "product_id_required" };
   const body = {
@@ -897,6 +906,17 @@ export async function patchTikTokListing(
   };
   if (title) body.title = String(title).slice(0, 255);
   if (description) body.description = String(description).slice(0, 5000);
+  if (Array.isArray(imageUrls) && imageUrls.length) {
+    const imageUris = [];
+    for (const url of imageUrls.filter(value => typeof value === 'string' && /^https:\/\//i.test(value)).slice(0, 9)) {
+      const result = await tiktokApiFetch(storeId, "POST", "/product/202309/images/upload", { data: url, use_case: "MAIN_IMAGE" });
+      if (result?.code !== 0 || !(result?.data?.uri || result?.data?.url || result?.data?.img_id))
+        return { ok: false, error: result?.message || result?.msg || 'tiktok_image_upload_failed' };
+      imageUris.push({ uri: result.data.uri || result.data.url || result.data.img_id });
+    }
+    if (!imageUris.length) return { ok: false, error: 'image_urls_must_be_https' };
+    body.main_images = tiktokMainImagePayload(imageUris.map(image => image.uri));
+  }
   if (priceCents != null) {
     body.skus = [{ price: { amount: (priceCents / 100).toFixed(2), currency: "USD" } }];
   }
