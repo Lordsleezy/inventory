@@ -2,6 +2,9 @@
 begin;
 select plan(52);
 set constraints all immediate;
+-- The stock movement ledger is a deferred invariant; validate it after the
+-- fixture's unit and sale triggers have both populated their movements.
+set constraints stock_balance_after_unit, stock_balance_after_movement deferred;
 
 do $$
 declare
@@ -58,6 +61,8 @@ begin
   perform set_config('test.sale2', (select id::text from public.sales where receipt_no = 'RG-2'), true);
   perform set_config('test.sale3', (select id::text from public.sales where receipt_no = 'RG-3'), true);
 end $$;
+
+set constraints stock_balance_after_unit, stock_balance_after_movement immediate;
 
 create temp view c as
   select s.receipt_no, case when sc.employee_id = current_setting('test.jacob')::uuid then 'jacob' else 'paul' end who, sc.amount_cents
