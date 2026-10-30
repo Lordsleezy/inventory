@@ -26,7 +26,7 @@ try {
     page.on('pageerror',e=>console.error('browser page error:',e.message));
     await page.goto('https://floor-inventory-edit.test');await page.addScriptTag({content:outputFiles[0].text});
     const dialog=page.getByRole('dialog',{name:'Edit unit 99871'});await dialog.waitFor({timeout:5000}).catch(async()=>{console.error('Editor DOM:',await page.locator('body').innerText());throw new Error('Edit drawer did not render');});
-    assert.equal(await page.getByLabel('Cost',{exact:true}).count(),1,'admin can see cost');
+    assert.equal(await page.getByLabel('Cost (each)',{exact:true}).count(),1,'admin can see per-unit cost');
     assert.equal(await page.locator('#unit-package-size').count(),1,'package shipping-size fields are visible');
     assert.equal(await page.locator('.unit-edit-dimensions input').count(),4,'package length, width, height and weight fields are shown');
     assert.equal(await page.getByRole('button',{name:/package size for shipping/i}).count(),0,'filled package dimensions do not show a false missing warning');

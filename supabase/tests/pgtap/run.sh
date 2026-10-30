@@ -34,6 +34,9 @@ psql "$DB_URL" -v ON_ERROR_STOP=1 <<'SQL'
 create or replace function public.pgtap_seed_unit_photo_fixture()
 returns trigger language plpgsql as $$
 begin
+  -- Older pgTAP fixtures represent stocked inventory as one row with a
+  -- quantity but predate the stocked flag. Mirror the post-migration model.
+  if new.qty_on_hand>1 then new.stocked:=true; end if;
   if current_setting('pgtap.require_photo_test',true)='on' then return new; end if;
   insert into storage.objects(bucket_id,name)
   values('unit-photos',new.store_id::text||'/'||new.sku||'/pgtap-fixture.jpg');
