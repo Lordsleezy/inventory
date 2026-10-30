@@ -4,6 +4,8 @@ Merge to master. Never push to or merge into release. Never run netlify deploy, 
 
 In your report, say "merged to master, ships at the next release" instead of claiming it's live.
 
+<!-- Proof comment: merging this to master must not deploy. -->
+
 Manual Netlify deploys stay disabled unless `FLOOR_EMERGENCY_DEPLOY=yes-paul-approved`. That flag is only for Paul-approved emergency recovery.
 
 # Production database migrations
