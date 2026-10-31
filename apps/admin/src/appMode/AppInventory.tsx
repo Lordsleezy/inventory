@@ -29,6 +29,7 @@ type Row = GroupedInventory & {
   missing?: string[];
   sold_at?: string | null;
   sold_price_cents?: number | null;
+  acquisition_cost_cents?: number | null;
 };
 
 type List = { items: Row[]; totals: { unit_count: number; row_count?: number; piece_count?: number } };
@@ -46,7 +47,7 @@ type Props = {
   scrollRef?: React.RefObject<HTMLDivElement | null>;
 };
 
-const CACHE_PREFIX = 'floor_inv_cache_v5_';
+const CACHE_PREFIX = 'floor_inv_cache_v6_';
 const URL_CACHE_KEY = 'floor_inv_urls_v2';
 const PAGE = 40;
 /** Signed URLs are minted for 3600s; refresh a bit early. */
@@ -105,6 +106,8 @@ const MISSING_LABEL: Record<string, string> = {
   photo: 'No photos', price: 'No price', brand: 'No brand', condition: 'No condition', category: 'No category',
   upc: 'No UPC', spec: 'Package size for shipping', model: 'No model', specifics: 'eBay item specifics', description: 'No description',
 };
+
+const missingCostRank = (u: Row) => u.acquisition_cost_cents == null ? (u.state === 'sold' ? 0 : 1) : 2;
 
 function needs(u: Row): string | null {
   // Not-for-sale units only ever need a brand.
@@ -208,7 +211,7 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
           if (e) throw e;
           const next = data as List;
           if (!alive) return;
-          if (filter === 'no_location') next.items.sort((a,b) => Number(b.state === 'reserved') - Number(a.state === 'reserved') || Number(b.state === 'sold') - Number(a.state === 'sold') || Number(b.sku)-Number(a.sku));
+          if (filter === 'no_location') next.items.sort((a, b) => missingCostRank(a) - missingCostRank(b) || Number(b.state === 'reserved') - Number(a.state === 'reserved') || Number(b.state === 'sold') - Number(a.state === 'sold') || Number(b.sku) - Number(a.sku));
           setList(next);
           writeCache(cacheScope, filter, query, offset, next);
           setLoading(false);
@@ -372,6 +375,7 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
                   {u.sku} · {u.not_for_sale ? 'Not for sale' : u.condition || 'No grade'}
                   {filter === 'sold' && u.sold_at ? <> · Sold {stamp(u.sold_at)}</> : null}
                   {(u.is_stocked || (u.qty_on_hand ?? 1) > 1) && <b className="stock-quantity-badge">×{filter === 'sold' ? (u.sold_qty ?? 0) : u.qty_on_hand}</b>}
+                  {fullAccess && u.acquisition_cost_cents === null ? <> · <span className="warn">Cost missing</span></> : null}
                   {filter !== 'not_ready' && warn ? <> · <span className="warn">{warn}</span></> : null}
                 </small>
               </span>

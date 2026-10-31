@@ -58,6 +58,9 @@ const missingText = (m: string[]) => {
 };
 
 const label = (s: string) => s === 'available' ? 'In stock' : s.replace(/_/g, ' ').replace(/^./, c => c.toUpperCase());
+/** Sold units with no cost first, then any other missing cost, ahead of the tab's own order. */
+const missingCostRank = (u: { acquisition_cost_cents: number | null; state: string }) =>
+  u.acquisition_cost_cents == null ? (u.state === 'sold' ? 0 : 1) : 2;
 const name = (u: Row) => [u.brand, u.model].filter(Boolean).join(' ') || u.title || 'Untitled unit';
 function thumb(path: string) {
   const parts = path.split('/');
@@ -135,7 +138,7 @@ export function InventoryPage({
         const next = data as List;
         const signed = await sign(next.items.flatMap(x => x.photo_path ? [thumb(x.photo_path), x.photo_path] : [])).catch(() => ({}));
         if (active) {
-          if (listTab === 'no-location') next.items.sort((a,b) => Number(b.state === 'reserved') - Number(a.state === 'reserved') || Number(b.state === 'sold') - Number(a.state === 'sold') || Number(b.sku)-Number(a.sku));
+          if (listTab === 'no-location') next.items.sort((a, b) => missingCostRank(a) - missingCostRank(b) || Number(b.state === 'reserved') - Number(a.state === 'reserved') || Number(b.state === 'sold') - Number(a.state === 'sold') || Number(b.sku) - Number(a.sku));
           setList(next); setUrls(prev => ({ ...prev, ...signed }));
         }
       } catch (e) { if (active) setError(errText(e)); }
@@ -205,9 +208,10 @@ export function InventoryPage({
       </select></label>
     </div>
     {error && <div className="alert" role="alert">{error}</div>}
-    <div className="stats inventory-stats inventory-stats-one">
+    <div className={`stats inventory-stats${(list?.totals.piece_count != null && list.totals.piece_count !== total) || (!associateBrowseOnly && list?.totals.missing_cost != null) ? '' : ' inventory-stats-one'}`}>
       <div className="stat"><span>Units</span><strong>{list?.totals.piece_count ?? total}</strong></div>
       {list?.totals.piece_count != null && list.totals.piece_count !== total && <div className="stat"><span>Items (rows)</span><strong>{total}</strong></div>}
+      {!associateBrowseOnly && list?.totals.missing_cost != null && <div className="stat"><span>Missing cost</span><strong>{list.totals.missing_cost}</strong></div>}
     </div>
     <section className="panel inventory-panel">
       {loading && <p className="hint">Loading inventory…</p>}
@@ -219,8 +223,8 @@ export function InventoryPage({
         <span className="inventory-meta">{u.condition || 'No grade'}<small>{u.not_for_sale ? 'Not for sale' : listTab === 'sold' && u.sold_at ? `Sold ${stamp(u.sold_at)}` : label(u.state)}{(u.is_stocked || (u.qty_on_hand ?? 1) > 1) && <b className="stock-quantity-badge">×{listTab === 'sold' ? (u.sold_qty ?? 0) : u.qty_on_hand}</b>}</small>{listTab === 'unfinished' && !!u.missing?.length && <small className="inventory-missing">{missingText(u.missing)}</small>}</span>
         <span className="inventory-location">{u.locations || 'Unassigned'}</span>
         {hideMoney ? <span className="inventory-money" /> : listTab === 'sold'
-          ? <span className="inventory-money"><strong>{u.sold_price_cents == null ? '—' : money(u.sold_price_cents)}</strong><small>{u.acquisition_cost_cents == null ? 'Cost missing' : `Cost ${money(u.acquisition_cost_cents)}`}</small></span>
-          : <span className="inventory-money">{listTab === 'not-ready' && !!u.missing?.length && <small className="inventory-missing">{inventoryMissingText(u.missing)}</small>}<strong>{u.ask_cents == null ? 'No price' : money(u.ask_cents)}</strong>{!associateBrowseOnly && <small>Cost {u.acquisition_cost_cents == null ? 'missing' : money(u.acquisition_cost_cents)}</small>}</span>}
+          ? <span className="inventory-money"><strong>{u.sold_price_cents == null ? '—' : money(u.sold_price_cents)}</strong><small className={u.acquisition_cost_cents == null ? 'inventory-missing' : undefined}>{u.acquisition_cost_cents == null ? 'Cost missing' : `Cost ${money(u.acquisition_cost_cents)}`}</small></span>
+          : <span className="inventory-money">{listTab === 'not-ready' && !!u.missing?.length && <small className="inventory-missing">{inventoryMissingText(u.missing)}</small>}<strong>{u.ask_cents == null ? 'No price' : money(u.ask_cents)}</strong>{!associateBrowseOnly && <small className={u.acquisition_cost_cents == null ? 'inventory-missing' : undefined}>{u.acquisition_cost_cents == null ? 'Cost missing' : `Cost ${money(u.acquisition_cost_cents)}`}</small>}</span>}
       </button>;
       return actions ? <div className="inventory-row-wrap" key={u.sku}>{rowButton}<div className="inventory-row-actions"><DispositionButtons client={client} sku={u.sku} money={money} stamp={stamp} className="secondary" onDone={() => { setRefresh(n => n + 1); onCostChanged(); }} /></div></div> : rowButton; })}
     </section>
