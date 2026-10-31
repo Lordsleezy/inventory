@@ -27,5 +27,12 @@ insert into public.sales(store_id,sku,price_cents,channel,payment_method,receipt
   values(current_setting('tools.store')::uuid,'95002',1000,'floor','cash','DEL-95002',1,now(),now());
 select throws_ok($$select public.delete_unit('95002',null)$$,'P0001','unit_has_sales_history','sales history blocks delete');
 
+insert into public.sku_ledger(sku,store_id,issued_at) values('95003',current_setting('tools.store')::uuid,now());
+insert into public.units(sku,store_id,title,brand,state,qty_on_hand,received_at,updated_at)
+  values('95003',current_setting('tools.store')::uuid,'Listed','Acme','available',1,now(),now());
+insert into public.listings(store_id,sku,channel,status,listed_at)
+  values(current_setting('tools.store')::uuid,'95003','ebay','listed',now());
+select throws_ok($$select public.delete_unit('95003',null)$$,'P0001','unit_still_listed:ebay','live listing blocks delete');
+
 select * from finish();
 rollback;

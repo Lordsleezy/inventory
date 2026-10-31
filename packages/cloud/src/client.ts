@@ -241,6 +241,24 @@ export function authErrorMessage(err: unknown): string {
     return "This item has sales history. Mark it sold or given away instead of deleting it.";
   }
   if (/unit_in_bundle/i.test(text)) return "This SKU is part of a bundle. Remove it from the bundle first.";
+  if (/unit_listing_in_progress/i.test(text)) {
+    return "A listing is still being published for this item. Wait a minute and try again.";
+  }
+  if (/unit_still_listed:(\w+)/i.test(text)) {
+    const m = text.match(/unit_still_listed:(\w+)/i);
+    const ch = (m?.[1] || "online").toLowerCase();
+    const label =
+      ch === "ebay" ? "eBay"
+      : ch === "depop" ? "Depop"
+      : ch === "whatnot" ? "Whatnot"
+      : ch === "mercari" ? "Mercari"
+      : ch === "amazon" ? "Amazon"
+      : ch === "tiktok" ? "TikTok Shop"
+      : ch === "facebook" ? "Facebook"
+      : ch === "website" ? "the website"
+      : ch.charAt(0).toUpperCase() + ch.slice(1);
+    return `This item is still listed on ${label}. End the listing first.`;
+  }
   if (/manager_approval_required/i.test(text)) return "Only store admins can delete inventory.";
   if (/violates foreign key constraint|foreign key/i.test(text)) {
     return "Couldn't delete this item because something is still linked to it. Refresh and try again.";
