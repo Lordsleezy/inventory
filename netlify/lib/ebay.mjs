@@ -24,7 +24,7 @@ import { assertEbayListable } from "./ebay-exclusion.mjs";
 import { ebayInventoryQuantityBody, ebayOfferQuantityBody, orderLineQty, saleLeavesStock } from "./channel-qty-sync.mjs";
 import { shippablePackage } from "./ebay-package.mjs";
 import { confirmCatalogVisual, matchCatalogPhoto } from "./ebay-catalog-photo.mjs";
-import { parseMeasure, specInches } from "./ebay-aspects.mjs";
+import { ebayModelValue, parseMeasure, specInches } from "./ebay-aspects.mjs";
 import { listingMeasures, prepareUnitAspects, prepareUnitCondition } from "./ebay-catalog.mjs";
 import { floorLog, redact, setTrace } from "./floor-log.mjs";
 import { sendResend } from "./receipt.mjs";
@@ -770,6 +770,9 @@ export async function listSku(storeId, sku, draft = null) {
   }
   aspects = { ...aspects, ...Object.fromEntries(Object.entries(assignedCategory.attributes || {})
     .map(([name, value]) => [name, [String(value)]])) };
+  // Saved Floor attributes can still carry title-length Model values. eBay
+  // rejects Model over 65 characters (errorId 25002), so always recompute it.
+  aspects = { ...aspects, Model: [ebayModelValue(unit, parseListingSpecs(unit.listing_specs) || {})] };
   const pkg = draft?.package || (draft?.pickupOnly ? undefined : packageSize(unit));
   const policies = draft?.policies || (await ensurePolicies(storeId, fetchHint));
   const priceCents = draft?.priceCents ?? unit.ask_cents;
