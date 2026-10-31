@@ -2,10 +2,20 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { matchAllowedValue, matchMeasureBucket, pickAspectValue, pickTypeValue, aspectsFromTaxonomy, fillAspects, confidentPhrase, pickCategorySuggestion } from "./ebay-aspects.mjs";
 
+test("Model is a short product line, never the full title, and never over 65 characters", () => {
+  const defs = [{ name: "Model", required: true, allowed: [] }];
+  const title = "Speckled Dot Peel & Stick Wallpaper Metallic Gold - Opalhouse™: Removable, Repositionable, Self-Adhesive Vinyl";
+  const r = fillAspects(defs, { brand: "Opalhouse", model: title, title }, { ebay_aspects: { Model: title } });
+  assert.ok(r.aspects.Model[0].length <= 65);
+  assert.notEqual(r.aspects.Model[0], title);
+  const numbered = fillAspects(defs, { brand: "GE", model: "GTS18HGNRWW", title: "GE refrigerator" }, {});
+  assert.deepEqual(numbered.aspects.Model, ["GTS18HGNRWW"]);
+});
+
 test("descriptive product model names work without a numeric code and do not become MPNs", () => {
   const defs=[{name:'Model',required:true,allowed:[]},{name:'MPN',required:false,allowed:[]}];
   const r=fillAspects(defs,{brand:'Cuisinart',model:'Griddler Five Contact Grill'},{matched_model:'GR-5B'});
-  assert.deepEqual(r.aspects.Model,['Griddler Five Contact Grill']);
+  assert.deepEqual(r.aspects.Model,['GR-5B']);
   assert.deepEqual(r.aspects.MPN,['GR-5B']);
   const noPart=fillAspects(defs,{brand:'Cuisinart',model:'Griddler Five Contact Grill'},{});
   assert.equal(noPart.aspects.MPN,undefined);

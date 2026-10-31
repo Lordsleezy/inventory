@@ -123,3 +123,10 @@ export function takeStock({ onHand, qty, holds = 0 }) {
   }
   return { ok: true, onHand: have - need };
 }
+
+/** A sale of one from a stocked listing leaves the SKU for sale. Do not end the eBay listing. */
+export function saleLeavesStock(unit) {
+  const qty = Math.trunc(Number(unit?.qty_on_hand));
+  const state = String(unit?.state || "");
+  return Number.isInteger(qty) && qty > 0 && (state === "available" || state === "reserved");
+}

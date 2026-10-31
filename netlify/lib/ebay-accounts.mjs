@@ -208,7 +208,16 @@ export async function userTokenForAccount(account) {
   return access;
 }
 
-export async function ebayFetchAccount(account, method, path, body, { _retried401 = false } = {}) {
+function ebayInternalError(status, json, text) {
+  const blob = `${status} ${text || ""} ${JSON.stringify(json?.errors || json || "")}`;
+  return status >= 500 || /25001|internal server error/i.test(blob);
+}
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export async function ebayFetchAccount(account, method, path, body, { _retried401 = false, _attempt = 1 } = {}) {
   requireEbayEnabled();
   const hosts = ebayHosts(process.env.EBAY_ENV);
   const base = String(path).startsWith("/sell/finances/") ? hosts.finances : hosts.api;
@@ -246,7 +255,13 @@ export async function ebayFetchAccount(account, method, path, body, { _retried40
     // Access token can be marked valid by expires_at but rejected by eBay — force one refresh retry.
     if (res.status === 401 && !_retried401 && account.refresh_ciphertext) {
       account.expires_at = new Date(0).toISOString();
-      return ebayFetchAccount(account, method, path, body, { _retried401: true });
+      return ebayFetchAccount(account, method, path, body, { _retried401: true, _attempt });
+    }
+    if (ebayInternalError(res.status, json, text) && _attempt < 3) {
+      const delay = 1000 * 2 ** (_attempt - 1);
+      console.log("ebay_25001_retry", JSON.stringify({ method, path, status: res.status, attempt: _attempt, delay }));
+      await wait(delay);
+      return ebayFetchAccount(account, method, path, body, { _retried401, _attempt: _attempt + 1 });
     }
     const payload = {
       method,
@@ -257,6 +272,7 @@ export async function ebayFetchAccount(account, method, path, body, { _retried40
       errors: json?.errors ?? null,
       body: json,
       raw: text?.slice?.(0, 8000) || text || null,
+      attempts: _attempt,
     };
     console.log("ebay_api_error_full", JSON.stringify(payload));
     await floorLog({

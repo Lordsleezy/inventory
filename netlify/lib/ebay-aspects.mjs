@@ -7,6 +7,41 @@ function norm(value) {
 
 const meaningfulModel = value => Boolean(value && !/^(?:\d+|unknown|generic|n\/?a|does not apply|model)$/i.test(value));
 
+export const EBAY_MODEL_MAX = 65;
+
+/** A short product-line name when Floor has no real model or part number. */
+export function shortProductLine(title, brand) {
+  let text = String(title || "").replace(/\s+/g, " ").trim();
+  const brandText = String(brand || "").trim();
+  if (brandText && text.toLowerCase().startsWith(brandText.toLowerCase())) {
+    text = text.slice(brandText.length).replace(/^[\s\-–—:]+/, "").trim();
+  }
+  text = text
+    .replace(/\b\d+(?:\.\d+)?\s*(?:["”″]|in(?:ch(?:es)?)?|ft|')\s*(?:x|×)\s*\d+\S*/gi, " ")
+    .replace(/\s+/g, " ")
+    .replace(/^[\s,\-–—:]+|[\s,\-–—:]+$/g, "");
+  const line = text.split(" ").filter(Boolean).slice(0, 6).join(" ");
+  return (line || "See title").slice(0, EBAY_MODEL_MAX);
+}
+
+/**
+ * eBay Model is a part number or a short product line, never the listing title.
+ * Hard cap is 65 characters (eBay rejects longer Model values).
+ */
+export function ebayModelValue(unit = {}, specs = {}) {
+  const title = String(unit?.title || "").trim();
+  const brand = String(unit?.brand || "").trim();
+  const raws = [specs?.manufacturer_model_number, specs?.mpn, specs?.matched_model, unit?.model];
+  for (const raw of raws) {
+    const value = String(raw || "").trim();
+    if (!meaningfulModel(value) || value.length > EBAY_MODEL_MAX) continue;
+    if (title && value.toLowerCase() === title.toLowerCase()) continue;
+    if (title && value.length > 50 && title.toLowerCase().includes(value.toLowerCase())) continue;
+    return value;
+  }
+  return shortProductLine(title, brand);
+}
+
 export function candidateParts(...values) {
   const out = [];
   for (const value of values) {
@@ -334,8 +369,7 @@ function finishColorCandidates(finish) {
 function candidatesForAspect(name, unit, specs, extras = {}) {
   const lower = name.toLowerCase();
   const brand = String(unit.brand || "").trim();
-  const rawModel = String(unit.model || specs?.matched_model || "").trim();
-  const model = meaningfulModel(rawModel) ? rawModel : "";
+  const model = ebayModelValue(unit, specs);
   const mpn = String(specs?.manufacturer_model_number || specs?.matched_model || specs?.mpn || "").trim();
   const appliance = String(unit.category || unit.title || "").trim();
   const layout = String(specs?.configuration || "").trim();
@@ -473,8 +507,7 @@ export function confidentPhrase(allowed, texts) {
 }
 
 export function fillAspects(defs, unit, specs, extras = {}) {
-  const rawModel = String(unit.model || specs?.matched_model || "").trim();
-  const model = meaningfulModel(rawModel) ? rawModel : "";
+  const model = ebayModelValue(unit, specs);
   const mpn = String(specs?.manufacturer_model_number || specs?.matched_model || specs?.mpn || "").trim();
   const overrides = specs?.ebay_aspects && typeof specs.ebay_aspects === "object" ? specs.ebay_aspects : {};
   const remembered = extras.remembered && typeof extras.remembered === "object" ? extras.remembered : {};
@@ -492,7 +525,9 @@ export function fillAspects(defs, unit, specs, extras = {}) {
     let source = "";
     const override = coerceValue(def, overrides[name]);
     const modelAspect = lower === "model";
-    const fakeModel = modelAspect && override && !meaningfulModel(override);
+    const title = String(unit?.title || "").trim();
+    const overrideIsTitle = modelAspect && override && title && override.trim().toLowerCase() === title.toLowerCase();
+    const fakeModel = modelAspect && override && (!meaningfulModel(override) || override.length > EBAY_MODEL_MAX || overrideIsTitle);
     const kind = installKind(specs?.installation || categoryDefaults.Installation) ||
       (extras.standalone === false ? "" : "freestanding");
     if (override && !fakeModel && !(lower === "type" && typeConflictsInstall(override, kind))) {

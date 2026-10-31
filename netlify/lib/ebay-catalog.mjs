@@ -16,6 +16,7 @@ import {
   listingConditionPayload,
   mapFloorCondition,
   parseItemConditions,
+  ungradedCardPayload,
 } from "./ebay-conditions.mjs";
 import { clearanceCondition, isCollectible } from "./ebay-listing-standards.mjs";
 
@@ -612,8 +613,13 @@ export async function prepareUnitCondition({ unit, liveCheck = false }) {
   const mapped = collectible
     ? (mapFloorCondition(unit.condition, stored) || clearanceCondition(stored, unit.condition))
     : clearanceCondition(stored, unit.condition);
-  const payload = listingConditionPayload(mapped);
-  if (!mapped || !payload) {
+  const cardCategory = /^(183454|183050|183453|261328|182982)$/.test(String(floor.ebayCategoryId || ""))
+    || /\b(pok[eé]mon|trading cards?|\btcg\b|yu-?gi-?oh|magic\s*:?\s*the\s*gathering)\b/i.test([unit?.title, unit?.category, floor?.name].filter(Boolean).join(" "));
+  const card = cardCategory
+    ? (ungradedCardPayload(unit.condition, stored) || ungradedCardPayload(unit.condition, [{ conditionId: "4000", name: "Ungraded" }]))
+    : null;
+  const payload = card || listingConditionPayload(mapped);
+  if ((!mapped && !card) || !payload) {
     const allowed = stored.map((row) => `${row.name} (${row.conditionId})`).join(", ") || "none";
     const err = new Error(
       collectible

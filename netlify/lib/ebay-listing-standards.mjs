@@ -100,7 +100,11 @@ export function clearanceCondition(allowed, floorCondition = "") {
   const grade = norm(floorCondition);
   if (grade) {
     if (grade === "new") {
-      const fresh = byName(list, (n) => n === "new") || byName(list, (n) => n.includes("new other"));
+      const fresh =
+        byName(list, (n) => n === "new") ||
+        byName(list, (n) => n.includes("new other")) ||
+        byName(list, (n) => n.includes("new without tags")) ||
+        byName(list, (n) => n.includes("new with tags"));
       if (fresh) return { conditionId: String(fresh.conditionId), name: fresh.name, fallback: true, reason: "new" };
       return null;
     }

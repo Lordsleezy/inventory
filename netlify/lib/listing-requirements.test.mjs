@@ -45,6 +45,16 @@ test("missing brand and weight are named, and Generic is not a brand", () => {
   assert.equal(result.section, "missing-brand");
 });
 
+test("an Amazon catalog error does not block the eBay push", () => {
+  const result = channelGaps(ready, {
+    channel: "ebay",
+    photoCount: 1,
+    amazonBlocked: "Not on Amazon — UPC/brand GS1 mismatch",
+  });
+  assert.equal(result.ready, true);
+  assert.equal(result.reason, null);
+});
+
 test("Amazon catalog block stays even when the other fields are filled", () => {
   const result = channelGaps(ready, {
     channel: "amazon",

@@ -3,8 +3,10 @@ import test from "node:test";
 import {
   conditionsNeedRefresh,
   gradeMapForCategory,
+  cardConditionDescriptorId,
   listingConditionPayload,
   mapFloorCondition,
+  ungradedCardPayload,
 } from "./ebay-conditions.mjs";
 
 const APPLIANCE = [
@@ -75,6 +77,17 @@ test("grade map reports closest Used for mid grades on appliances", () => {
   assert.equal(rows.find((r) => r.floor === "Open box").ebayName, "Open box");
   assert.equal(rows.find((r) => r.floor === "Fair").ebayName, "Used");
   assert.equal(rows.every((r) => !r.unmapped), true);
+});
+
+test("trading cards send Ungraded plus the Floor grade's card condition", () => {
+  const allowed = [{ conditionId: "4000", name: "Ungraded" }, { conditionId: "3000", name: "Used" }];
+  assert.equal(cardConditionDescriptorId("Excellent"), "400015");
+  assert.equal(cardConditionDescriptorId("Good"), "400016");
+  assert.equal(cardConditionDescriptorId("New"), "400010");
+  const payload = ungradedCardPayload("Excellent", allowed);
+  assert.equal(payload.conditionId, "4000");
+  assert.deepEqual(payload.conditionDescriptors, [{ name: "40001", values: ["400015"] }]);
+  assert.equal(ungradedCardPayload("Excellent", [{ conditionId: "3000", name: "Used" }]), null);
 });
 
 test("condition catalogs refresh when eBay adds or renames IDs", () => {
