@@ -22,7 +22,10 @@ delete from public.photos where store_id=s and sku='95003';
 end $$;
 select set_config('request.jwt.claim.sub',current_setting('cards.owner'),true);
 select set_config('request.jwt.claim.role','authenticated',true);
-select is(public.inventory_totals(),'{"total":21,"listed":3,"not_listed":3,"not_ready":4,"dns":5,"defective":6}'::jsonb,'ready and not ready split physical quantities; website does not count as Listed');
+select is(public.inventory_totals() - 'not_listed_skus' - 'not_listed_pieces' - 'never_list','{"total":21,"listed":3,"not_listed":3,"not_ready":4,"dns":5,"defective":6}'::jsonb,'ready and not ready split physical quantities; website does not count as Listed');
+select is((public.inventory_totals()->>'not_listed_pieces')::int, 3, 'not listed pieces match the card');
+select is((public.inventory_totals()->>'not_listed_skus')::int, 2, 'not listed counts SKUs separately from pieces');
+select is((public.inventory_totals()->>'never_list')::int, 0, 'never-list stock is not in these fixtures');
 insert into public.unit_channel_selections(store_id,sku,channel,selected,source)
 select store_id,sku,'ebay',false,'admin' from public.units where sku='95002';
 select is((select public.unit_inventory_bucket(u) from public.units u where sku='95002'),'not_listed','complete item with eBay unchecked is Not listed');

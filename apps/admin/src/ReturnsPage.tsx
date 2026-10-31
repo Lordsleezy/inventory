@@ -77,6 +77,7 @@ export function ReturnsPage({ client, storeId, money, stamp }: Props) {
   const [scan, setScan] = useState('');
   const [selected, setSelected] = useState<ReturnRow | null>(null);
   const [error, setError] = useState('');
+  const [returnQty, setReturnQty] = useState('1');
   const [flash, setFlash] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
@@ -441,7 +442,30 @@ export function ReturnsPage({ client, storeId, money, stamp }: Props) {
               <p className="hint">Photos required before closing. They attach to the unit for relist sync.</p>
 
               <h3>Disposition</h3>
+              <label>Partial quantity
+                <input aria-label="Return quantity" inputMode="numeric" min={1} value={returnQty} onChange={e => setReturnQty(e.target.value)} />
+              </label>
               <div className="actions">
+                <button type="button" className="secondary" disabled={!!busy} onClick={() => void (async () => {
+                  const qty = Math.trunc(Number(returnQty));
+                  if (!Number.isInteger(qty) || qty < 1) { setError('Enter a whole quantity of at least 1.'); return; }
+                  setBusy('partial'); setError('');
+                  const { error: e } = await client.rpc('portal_return_partial', { p_return_id: selected.id, p_qty: qty, p_defective: false });
+                  setBusy(null);
+                  if (e) { setError(errText(e)); return; }
+                  setFlash(`Restocked ${qty}. Channels update within about a minute.`);
+                  await load();
+                })()}>Restock this many</button>
+                <button type="button" className="secondary" disabled={!!busy} onClick={() => void (async () => {
+                  const qty = Math.trunc(Number(returnQty));
+                  if (!Number.isInteger(qty) || qty < 1) { setError('Enter a whole quantity of at least 1.'); return; }
+                  setBusy('partial'); setError('');
+                  const { error: e } = await client.rpc('portal_return_partial', { p_return_id: selected.id, p_qty: qty, p_defective: true });
+                  setBusy(null);
+                  if (e) { setError(errText(e)); return; }
+                  setFlash(`${qty} recorded as Defective. Sellable quantity was not increased.`);
+                  await load();
+                })()}>This many came back defective</button>
                 <button type="button" disabled={!!busy} onClick={() => void disposition('relist')}>
                   Relist (same channels)
                 </button>

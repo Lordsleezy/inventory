@@ -127,7 +127,7 @@ type Issue = {
 };
 
 /** Admin "Listing issues": failed or blocked queue jobs with the reason. */
-export function ListingIssuesPanel({ client }: { client: SupabaseClient }) {
+export function ListingIssuesPanel({ client, onOpen }: { client: SupabaseClient; onOpen?: (sku: string) => void }) {
   const [issues, setIssues] = useState<Issue[] | null>(null);
   const load = useCallback(async () => {
     const { data, error } = await client.rpc('portal_listing_issues', { p_limit: 200 });
@@ -148,7 +148,7 @@ export function ListingIssuesPanel({ client }: { client: SupabaseClient }) {
               <td>{LISTING_CHANNELS.find(([id]) => id === i.channel)?.[1] ?? i.channel}</td>
               <td>{i.action}{i.attempts ? ` · ${i.attempts} tries` : ''}</td>
               <td>{String(i.issue || '').startsWith('Needs fix:') ? i.issue : i.last_error || i.issue}</td>
-              <td><button type="button" className="secondary" onClick={async () => {
+              <td>{onOpen && <button type="button" className="text-button" onClick={() => onOpen(i.sku)}>Open</button>}<button type="button" className="secondary" onClick={async () => {
                 await client.rpc('portal_retry_listing_issue', { p_id: i.id }); await load();
               }}>Retry now</button></td>
             </tr>

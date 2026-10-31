@@ -55,6 +55,6 @@ select is((select sum(qty_on_hand)::int from public.units),8,'quantity unchanged
 select is((select count(*)::int from public.sales),0,'no sales created or modified');
 select is((select count(*)::int from public.events where field='DNS'),4,'DNS changes audited');
 select is(public.unit_dns_type(jsonb_populate_record(null::public.units,jsonb_build_object('title',title))),expected,'classification: '||title)
-from (values ('French door fridge',true),('Chest freezer',true),('Deep fryer',true),('Dishwasher',true),('Queen mattress',true),('Metal bed frame',true),('Sectional sofa',true),('Electric scooter',true),('Air fryer',false),('Mattress protector',false),('Dishwasher hose',false)) t(title,expected);
+from (values ('French door fridge',true),('Chest freezer',true),('Deep fryer',true),('Dishwasher',true),('Queen mattress',true),('Metal bed frame',true),('Sectional sofa',true),('Electric scooter',true),('Air fryer',false),('Mattress protector',false),('Mattress pad',false),('Mattress topper',false),('Dishwasher hose',false)) t(title,expected);
 select * from finish();
 rollback;

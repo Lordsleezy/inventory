@@ -853,7 +853,7 @@ export async function relistEbayListing(storeId, { sku, draft = null, accountId 
             ...(inv.availability || {}),
             shipToLocationAvailability: {
               ...(inv.availability?.shipToLocationAvailability || {}),
-              quantity: 1,
+              quantity: Math.max(1, Math.trunc(Number(draft?.quantity || 1))),
             },
           },
         };
@@ -1402,6 +1402,12 @@ export async function publishCreate(
   const sb = serviceClient();
   const { data: unit } = await sb.from("units").select("*").eq("store_id", storeId).eq("sku", sku).maybeSingle();
   if (!unit) return { ok: false, error: "unknown_sku" };
+  const { data: availableQty, error: availableError } = await sb.rpc("channel_available_qty", { p_store: storeId, p_sku: sku });
+  const stockQty = !availableError && Number.isFinite(Number(availableQty))
+    ? Math.max(0, Math.trunc(Number(availableQty)))
+    : Math.max(0, Math.trunc(Number(unit.qty_on_hand ?? 1)));
+  if (stockQty < 1) return { ok: false, error: "no_available_quantity" };
+  const listedUnit = { ...unit, qty_on_hand: stockQty };
   if (["ebay", "amazon", "tiktok"].includes(ch)) {
     const ready = await pushReadiness(storeId, unit, ch);
     if (!ready.ready) {
@@ -1418,6 +1424,7 @@ export async function publishCreate(
         priceCents: priceCents ?? undefined,
         imageUrls: imageUrls?.length ? imageUrls : undefined,
         aspects: aspects || undefined,
+        quantity: stockQty,
       });
       return {
         ok: true,
@@ -1440,10 +1447,11 @@ export async function publishCreate(
     if (prep.asin && (prep.status === "ready" || prep.status === "needs_review" || prep.status === "error")) {
       try {
         const listed = await listAmazonOffer(storeId, {
-          unit,
+          unit: listedUnit,
           sku,
           asin: prep.asin,
           priceCents: priceCents || prep.amazon_price_cents || unit.ask_cents,
+          quantity: stockQty,
         });
         return {
           ok: Boolean(listed?.ok),
@@ -1491,7 +1499,7 @@ export async function publishCreate(
   }
 
   if (ch === "tiktok") {
-    const listed = await listTikTokProduct(storeId, { unit, sku, priceCents });
+    const listed = await listTikTokProduct(storeId, { unit: listedUnit, sku, priceCents });
     return {
       ok: Boolean(listed?.ok),
       channel: "tiktok",

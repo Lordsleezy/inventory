@@ -20,10 +20,12 @@ async function shippingSettings(sb, storeId) {
 }
 
 export async function quoteRates(sb, storeId, sku, buyer, deps = {}) {
+  const qty = Math.max(1, Math.min(999, Math.trunc(Number(deps.qty) || 1)));
   if (!shippingKeyOk(deps.env ?? webSquareEnv())) return { status: 200, body: { ship: false, pickup: true, reason: "Shipping is not available yet. Choose store pickup." } };
   const { data: unit, error } = await sb.rpc("web_unit_fulfillment", { p_store: storeId, p_sku: sku });
   if (error) throw error;
   if (!unit?.listed) return { status: 409, body: { error: "held_or_unavailable" } };
+  if (Number.isFinite(Number(unit.quantity)) && qty > Number(unit.quantity)) return { status: 409, body: { error: "held_or_unavailable" } };
   if (!unit.ship) return { status: 200, body: { ship: false, reason: unit.reason, pickup: true } };
   if (!buyer.line1 || !buyer.city || !/^[A-Za-z]{2}$/.test(buyer.region) || !/^\d{5}(-?\d{4})?$/.test(buyer.postal)) {
     return { status: 400, body: { error: "Enter a full US shipping address (street, city, 2-letter state, ZIP)." } };
@@ -33,7 +35,8 @@ export async function quoteRates(sb, storeId, sku, buyer, deps = {}) {
   let messages = [];
   if (shippoMode() === "live") {
     try {
-      const live = await (deps.liveRates || liveRates)({ shipFrom: unit.ship_from, to: addressTo(buyer), pkg: unit.package, carriers: await allowedCarriers(sb, storeId) });
+      const pkg = { ...(unit.package || {}), weight_lb: Number(unit.package?.weight_lb || 0) * qty };
+      const live = await (deps.liveRates || liveRates)({ shipFrom: unit.ship_from, to: addressTo(buyer), pkg, carriers: await allowedCarriers(sb, storeId) });
       rates = live.rates;
       messages = live.messages;
       if (!rates.length && !live.allRates?.length && messages.length) messages = live.messages;
@@ -44,7 +47,7 @@ export async function quoteRates(sb, storeId, sku, buyer, deps = {}) {
   }
   if (!rates.length) {
     // Missing/test/failing Shippo key: current USPS zone-8 tiers, never $0.
-    const fb = fallbackRate(await shippingSettings(sb, storeId), unit.package, unit.shipping_cents_override);
+    const fb = fallbackRate(await shippingSettings(sb, storeId), { ...(unit.package || {}), weight_lb: Number(unit.package?.weight_lb || 0) * qty }, unit.shipping_cents_override);
     if (!fb) return { status: 200, body: { ship: false, pickup: true, reason: "This package exceeds the manual shipping limits. Choose store pickup or contact us for a shipping quote.", messages } };
     rates = [fb];
     source = "manual";
@@ -69,7 +72,7 @@ async function handle(event) {
     return json(200, { ...webSquareConfig(body.store_id), shipping: shippoMode() === "live" ? "live" : "manual" });
   }
   if (body.action === "rates") {
-    const r = await quoteRates(sb, body.store_id, String(body.sku || "").trim(), buyerFrom(body));
+    const r = await quoteRates(sb, body.store_id, String(body.sku || "").trim(), buyerFrom(body), { qty: body.qty });
     return json(r.status, r.body);
   }
   if (body.action === "begin") {
@@ -78,11 +81,13 @@ async function handle(event) {
     if (!(await ownerEmails(sb, body.store_id)).length) return json(503, { error: "missing_owner_emails" });
     const fulfillment = body.fulfillment === "ship" ? "ship" : "pickup";
     const buyer = { ...buyerFrom(body), country: "US" };
+    const qty = Math.max(1, Math.min(999, Math.trunc(Number(body.qty) || 1)));
     const { data, error } = await sb.rpc("begin_online_checkout", {
       p_store: body.store_id, p_sku: String(body.sku || "").trim(), p_buyer: buyer, p_fulfillment: fulfillment,
       p_quote: fulfillment === "ship" ? body.quote_id || null : null,
       p_rate: fulfillment === "ship" ? String(body.rate_id || "") : null,
       p_redeem_points: Math.max(0, Math.min(2147483647, Math.trunc(Number(body.redeem_points) || 0))),
+      p_qty: qty,
     });
     if (error) {
       const status = /held_or_unavailable/.test(error.message) ? 409 : 400;

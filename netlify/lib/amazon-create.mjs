@@ -112,7 +112,7 @@ export function buildStringLightAttributes(unit, { listCents, retailCents } = {}
         },
       ],
       fulfillment_availability: [
-        { fulfillment_channel_code: "DEFAULT", quantity: 1, marketplace_id: mp },
+        { fulfillment_channel_code: "DEFAULT", quantity: Math.max(1, Math.trunc(Number(unit.qty_on_hand ?? 1))), marketplace_id: mp },
       ],
       ...(Number(unit.package_length_in || specs.package_length_in) > 0
         && Number(unit.package_width_in || specs.package_width_in) > 0

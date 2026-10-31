@@ -43,7 +43,7 @@ end $$;
 -- Totals are in units (a row of 12 counts 12), and clerks can read the counts.
 select set_config('request.jwt.claim.sub', current_setting('test.clerk_id'), true);
 select set_config('request.jwt.claim.role', 'authenticated', true);
-select is(public.inventory_totals(), '{"total": 18, "listed": 12, "not_listed": 4, "not_ready": 0, "defective": 2, "dns": 0}'::jsonb,
+select is(public.inventory_totals() - 'not_listed_skus' - 'not_listed_pieces' - 'never_list', '{"total": 18, "listed": 12, "not_listed": 4, "not_ready": 0, "defective": 2, "dns": 0}'::jsonb,
   'totals in units: eBay x12 only; website, Depop, delisted and Whatnot do not count as eBay listed');
 select is((public.inventory_totals() ->> 'listed')::int + (public.inventory_totals() ->> 'not_listed')::int + (public.inventory_totals() ->> 'defective')::int,
   (public.inventory_totals() ->> 'total')::int, 'listed + not listed + defective = total');

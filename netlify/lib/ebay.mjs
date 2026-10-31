@@ -21,6 +21,7 @@ import { composeChannelDescription, parseListingSpecs } from "./listing-copy.mjs
 import { ebayDescription, ebayIdentifiers } from "./ebay-product.mjs";
 import { appendClearanceFooter } from "./ebay-listing-standards.mjs";
 import { assertEbayListable } from "./ebay-exclusion.mjs";
+import { ebayInventoryQuantityBody, ebayOfferQuantityBody, orderLineQty } from "./channel-qty-sync.mjs";
 import { confirmCatalogVisual, matchCatalogPhoto } from "./ebay-catalog-photo.mjs";
 import { parseMeasure, specInches } from "./ebay-aspects.mjs";
 import { listingMeasures, prepareUnitAspects, prepareUnitCondition } from "./ebay-catalog.mjs";
@@ -723,6 +724,9 @@ export async function listSku(storeId, sku, draft = null) {
   if (unit.ask_cents == null || unit.ask_cents <= 0) {
     throw new Error(`SKU ${sku} needs a price before it can go on eBay.`);
   }
+  const requestedQty = draft?.quantity == null ? Number(unit.qty_on_hand ?? 1) : Number(draft.quantity);
+  const listQty = Math.trunc(requestedQty);
+  if (!Number.isInteger(listQty) || listQty < 1) throw new Error(`SKU ${sku} has no available quantity to list.`);
   const { error: policyError } = await sb.rpc("assert_channel_eligible", {
     p_store: storeId,
     p_sku: sku,
@@ -831,8 +835,8 @@ export async function listSku(storeId, sku, draft = null) {
   // eBay rejects fulfillmentTime.value 0 (errorId 25709). Same-day pickup = 1 HOUR.
   const shipQty = {
     shipToLocationAvailability: {
-      quantity: 1,
-      availabilityDistributions: [{ merchantLocationKey: loc, quantity: 1 }],
+      quantity: listQty,
+      availabilityDistributions: [{ merchantLocationKey: loc, quantity: listQty }],
     },
   };
   const availability = pickupOnly
@@ -843,7 +847,7 @@ export async function listSku(storeId, sku, draft = null) {
             availabilityType: "IN_STOCK",
             fulfillmentTime: { value: 1, unit: "HOUR" },
             merchantLocationKey: loc,
-            quantity: 1,
+            quantity: listQty,
           },
         ],
       }
@@ -882,7 +886,7 @@ export async function listSku(storeId, sku, draft = null) {
     sku,
     marketplaceId: marketplaceId(),
     format: "FIXED_PRICE",
-    availableQuantity: 1,
+    availableQuantity: listQty,
     categoryId: cat,
     listingDescription: copy.description,
     listingPolicies: {
@@ -936,6 +940,26 @@ export async function listSku(storeId, sku, draft = null) {
     { onConflict: "store_id,sku,channel" },
   );
   return { sku, offerId, listingId, viewUrl: ebayItemViewUrl(listingId), accountId: selling.id, username: selling.username };
+}
+
+/** Change only the available quantity on an existing offer. Price, title, photos, and policies are copied back unchanged. */
+export async function setEbayAvailableQuantity(storeId, sku, quantity, { offerId = null } = {}) {
+  const qty = Math.max(0, Math.trunc(Number(quantity) || 0));
+  if (qty < 1) return withdrawSku(storeId, sku);
+  const inv = await ebayFetch(storeId, "GET", `/sell/inventory/v1/inventory_item/${encodeURIComponent(sku)}`);
+  await ebayFetch(storeId, "PUT", `/sell/inventory/v1/inventory_item/${encodeURIComponent(sku)}`, ebayInventoryQuantityBody(inv, qty));
+  let resolved = offerId;
+  if (!resolved) {
+    const found = await ebayFetch(storeId, "GET", `/sell/inventory/v1/offer?sku=${encodeURIComponent(sku)}`).catch(() => null);
+    resolved = found?.offers?.[0]?.offerId || null;
+  }
+  if (!resolved) return { ok: false, error: "no_ebay_offer" };
+  const offer = await ebayFetch(storeId, "GET", `/sell/inventory/v1/offer/${resolved}`);
+  await ebayFetch(storeId, "PUT", `/sell/inventory/v1/offer/${resolved}`, ebayOfferQuantityBody(offer, qty));
+  if (String(offer?.status || "").toUpperCase() !== "PUBLISHED") {
+    await ebayFetch(storeId, "POST", `/sell/inventory/v1/offer/${resolved}/publish`);
+  }
+  return { ok: true, quantity: qty, offerId: resolved };
 }
 
 export async function withdrawSku(storeId, sku) {
@@ -1236,10 +1260,11 @@ export async function ingestEbayOrder(storeId, order) {
       .eq("sku", rawSku)
       .maybeSingle();
     if (unit?.state === "available" || unit?.state === "reserved") {
-      const { data, error } = await sb.rpc("finalize_sale", {
+      const { data, error } = await sb.rpc("finalize_sale_qty", {
         p_sku: rawSku,
         p_channel: "ebay",
         p_price_cents: itemCents,
+        p_qty: orderLineQty("ebay", order),
         p_payment_method: "ebay",
         p_payment_id: `ebay:${orderId}`,
         p_note: isPickup ? "eBay LOCAL PICKUP" : "eBay order",
