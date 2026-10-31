@@ -35,6 +35,17 @@ test("authErrorMessage unwraps PostgREST unique failures into a SKU sentence", (
   );
 });
 
+test("authErrorMessage maps delete_unit guardrails", () => {
+  assert.match(
+    authErrorMessage({ message: "unit_has_sales_history" }),
+    /sales history/i,
+  );
+  assert.match(
+    authErrorMessage({ message: 'update or delete on table "units" violates foreign key constraint "unit_location_stock_sku_fkey"' }),
+    /Couldn't delete/i,
+  );
+});
+
 test("authErrorMessage maps WebKit/network failures to a reachability sentence", () => {
   const msg = authErrorMessage(new TypeError("Load failed"));
   assert.match(msg, /Can't reach Floor cloud/);
