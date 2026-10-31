@@ -427,7 +427,7 @@ export function UnitEditDrawer({
 
   async function removeUnit() {
     if (!canDelete) return;
-    if (!window.confirm(`Delete SKU ${sku} permanently?\n\nThis removes it from inventory. Sales history stays. If the unit still has an open sale, void that first.`)) {
+    if (!window.confirm(`Delete SKU ${sku} permanently?\n\nThis removes it from inventory. Items with any sales history cannot be deleted.`)) {
       return;
     }
     setBusy(true);
@@ -439,14 +439,7 @@ export function UnitEditDrawer({
       onDeleted?.();
       onClose();
     } catch (err) {
-      const text = errText(err);
-      if (/void_the_sale_first/i.test(text)) {
-        setError('This item has an open sale. Void the sale first, then delete.');
-      } else if (/manager_approval_required/i.test(text)) {
-        setError('Only store admins can delete inventory.');
-      } else {
-        setError(text);
-      }
+      setError(errText(err));
     } finally {
       setBusy(false);
     }

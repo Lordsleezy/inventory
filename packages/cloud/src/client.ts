@@ -237,6 +237,15 @@ export function authErrorMessage(err: unknown): string {
   if (/upc_required/i.test(text)) return "UPC is required to save a price. Clear the price to receive into Needs attention.";
   if (/package_required/i.test(text)) return "Package size/weight is required to save a price. Clear the price to receive into Needs attention.";
   if (/portal_access_denied/i.test(text)) return "Not signed in to a store — sign in again, then retry.";
+  if (/unit_has_sales_history|void_the_sale_first/i.test(text)) {
+    return "This item has sales history. Mark it sold or given away instead of deleting it.";
+  }
+  if (/unit_in_bundle/i.test(text)) return "This SKU is part of a bundle. Remove it from the bundle first.";
+  if (/manager_approval_required/i.test(text)) return "Only store admins can delete inventory.";
+  if (/violates foreign key constraint|foreign key/i.test(text)) {
+    return "Couldn't delete this item because something is still linked to it. Refresh and try again.";
+  }
+  if (/sku_not_found/i.test(text)) return "That item is no longer in inventory.";
   if (/quantity_must_be_1_to_100/i.test(text)) return "Quantity must be 1–100.";
   if (/dims_must_be_positive/i.test(text)) return "Dimensions and weight must be positive numbers (or blank).";
   if (/invalid_shippable/i.test(text)) return "Shippable must be Automatic, Yes, or Pickup only.";

@@ -18,7 +18,13 @@ export function friendlyRpc(err: unknown): string {
   if (/manager_approval_required/i.test(msg)) return "A manager PIN is required.";
   if (/held_by_online_order/i.test(msg)) return "Someone is paying for this item online right now. Try again in a few minutes.";
   if (/pickup_not_open/i.test(msg)) return "That pickup was already handed over or canceled.";
-  if (/void_the_sale_first/i.test(msg)) return "This item has a sale. Void the sale first to delete it.";
+  if (/unit_has_sales_history|void_the_sale_first/i.test(msg)) {
+    return "This item has sales history. Mark it sold or given away instead of deleting it.";
+  }
+  if (/unit_in_bundle/i.test(msg)) return "This SKU is part of a bundle. Remove it from the bundle first.";
+  if (/violates foreign key|foreign key/i.test(msg)) {
+    return "Couldn't delete this item because something is still linked to it. Refresh and try again.";
+  }
   if (/sale_not_voidable/i.test(msg)) return "That sale cannot be voided.";
   if (/void_needs_reason/i.test(msg)) return "Enter a reason to void.";
   if (/pin_locked/i.test(msg)) return "PIN locked after 5 tries. Wait a few minutes.";
