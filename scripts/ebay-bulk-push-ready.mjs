@@ -32,7 +32,7 @@ import {
   resolveFloorCategory,
 } from "../netlify/lib/ebay-catalog.mjs";
 import { ebayModelValue, fillAspects } from "../netlify/lib/ebay-aspects.mjs";
-import { listingConditionPayload } from "../netlify/lib/ebay-conditions.mjs";
+import { listingConditionPayload, mapFloorCondition } from "../netlify/lib/ebay-conditions.mjs";
 import { ebayItemViewUrl } from "../netlify/lib/ebay-env.mjs";
 
 const SELLING_USER = "ikonikdeals2026";
@@ -176,13 +176,16 @@ async function prepareMeta(storeId, unit, assigned) {
   const defs = await refreshCategoryAspects(categoryId);
   const conditions = await refreshCategoryConditions(categoryId);
   const open = clearanceCondition(conditions, unit.condition || "Open box");
-  if (!open) throw new Error(`no_open_box_or_honest_condition for category ${categoryId}`);
+  const mapped = open || mapFloorCondition(unit.condition || "Open box", conditions)
+    || mapFloorCondition("Used - Good", conditions)
+    || mapFloorCondition("New", conditions);
+  if (!mapped) throw new Error(`no_open_box_or_honest_condition for category ${categoryId}`);
   const conditionPayload =
     listingConditionPayload({
-      conditionId: String(open.conditionId),
-      conditionEnum: open.conditionEnum || null,
-      name: open.name,
-    }) || { conditionId: String(open.conditionId) };
+      conditionId: String(mapped.conditionId),
+      conditionEnum: mapped.conditionEnum || null,
+      name: mapped.name,
+    }) || { conditionId: String(mapped.conditionId) };
 
   const specs = listingMeasures(unit);
   const filled = fillAspects(defs, unit, specs, {
@@ -222,8 +225,8 @@ async function prepareMeta(storeId, unit, assigned) {
     categoryId,
     aspects,
     conditionPayload,
-    conditionName: open.name,
-    conditionReason: open.reason,
+    conditionName: mapped.name,
+    conditionReason: mapped.reason || (open ? "open_box" : "floor_map"),
   };
 }
 
