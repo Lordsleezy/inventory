@@ -56,3 +56,13 @@ test('item editor stages UPC, category, listing switches, quantity, and location
   assert.match(specifics, /Category and answers will be saved with the item/);
   assert.match(specifics, /dirtyRef\?\.current/);
 });
+
+test('store-phone match list lets a clerk add identical stock to the existing SKU', async () => {
+  const panel = await source('ReceivePanel.tsx');
+  const migration = await readFile(path.resolve(root, '../../../supabase/migrations/20261207090000_clerk_receive_add_to_existing_sku.sql'), 'utf8');
+  assert.match(panel, /match\.is_stocked \|\| match\.can_convert/);
+  assert.doesNotMatch(panel, /setSelectedStockMatch\(match\)}>Different item, new SKU/);
+  assert.match(panel, /quantity > 999\) \{ setError\('Enter a valid quantity\.'\)/);
+  assert.match(migration, /not public\.portal_is_admin\(\) and not exists\(\s*select 1 from public\.staff s/);
+  assert.match(migration, /p_quantity>999 then raise exception 'invalid_stock_quantity'/);
+});

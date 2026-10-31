@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { commitReceive } from './receiveCommit.ts';
+import { commitReceive, isDefiniteRejection, ReceiveRejectedError } from './receiveCommit.ts';
 
 test('lost commit response retries the same snapshot with one RPC and no second upload', async () => {
   const cache = new Map<string, string>();
@@ -41,4 +41,39 @@ test('a multi-quantity stock save preserves one recovery snapshot and replays on
  const client={rpc:async (_:string,payload:unknown)=>{assert.deepEqual(payload,request);return ++tries===1?{error:{message:'response lost'}}:{data:{skus,replayed:true},error:null}}} as unknown as SupabaseClient;
  await assert.rejects(commitReceive(client,'store',request));assert.equal(cache.size,1);
  const result=await commitReceive(client,'store',request);assert.deepEqual(result.skus,skus);assert.equal(cache.size,0);
+});
+
+test('a server refusal (sku_exhausted) saves nothing, drops the snapshot and sends the corrected form next time', async () => {
+  const cache = new Map<string,string>();
+  Object.defineProperty(globalThis,'localStorage',{configurable:true,value:{getItem:(k:string)=>cache.get(k)||null,setItem:(k:string,v:string)=>cache.set(k,v),removeItem:(k:string)=>cache.delete(k)}});
+  const sent: unknown[] = [];
+  const client = { rpc: async (_: string, payload: unknown) => { sent.push(payload);
+    return sent.length === 1 ? { data: null, error: { message: 'sku_exhausted', code: '22023' } } : { data: { skus: ['12001'] }, error: null }; } } as unknown as SupabaseClient;
+  const first = { p_request: 'curtain', p_fields: { p_title: 'Curtain' }, p_photos: ['store/receive/actor/curtain/a.jpg'], p_extras: {} };
+  await assert.rejects(commitReceive(client, 'store', first), (e: Error) => e instanceof ReceiveRejectedError && /Nothing was saved/.test(e.message) && !/Recover interrupted save/.test(e.message));
+  assert.equal(cache.size, 0, 'no stuck "interrupted save" record after a definite refusal');
+  const corrected = { ...first, p_fields: { p_title: 'Curtain, corrected' } };
+  await commitReceive(client, 'store', corrected);
+  assert.deepEqual(sent[1], corrected);
+});
+
+test('Recover keeps the record on a refusal and succeeds once the server is fixed', async () => {
+  const cache = new Map<string,string>();
+  Object.defineProperty(globalThis,'localStorage',{configurable:true,value:{getItem:(k:string)=>cache.get(k)||null,setItem:(k:string,v:string)=>cache.set(k,v),removeItem:(k:string)=>cache.delete(k)}});
+  let fixed = false;
+  const client = { rpc: async () => fixed ? { data: { skus: ['12002'] }, error: null } : { data: null, error: { message: 'sku_exhausted', code: '22023' } } } as unknown as SupabaseClient;
+  const pending = { p_request: 'stuck', p_fields: { p_title: 'Curtain' }, p_photos: ['store/receive/actor/stuck/a.jpg'], p_extras: {} };
+  await assert.rejects(commitReceive(client, 'store', pending, { keepOnReject: true }), ReceiveRejectedError);
+  assert.equal(cache.size, 1);
+  fixed = true;
+  assert.deepEqual((await commitReceive(client, 'store', pending, { keepOnReject: true })).skus, ['12002']);
+  assert.equal(cache.size, 0);
+});
+
+test('only SQLSTATE / PostgREST codes count as definite refusals', () => {
+  assert.equal(isDefiniteRejection({ code: '22023' }), true);
+  assert.equal(isDefiniteRejection({ code: '57014' }), true);
+  assert.equal(isDefiniteRejection({ code: 'PGRST301' }), true);
+  assert.equal(isDefiniteRejection({ code: '' }), false);
+  assert.equal(isDefiniteRejection(undefined), false);
 });
