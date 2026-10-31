@@ -136,8 +136,9 @@ export function ListingIssuesPanel({ client, onOpen }: { client: SupabaseClient;
   useEffect(() => { void load(); }, [load]);
   if (!issues?.length) return null;
   return (
-    <section className="panel listing-issues">
-      <h2>Listing issues ({issues.length})</h2>
+    <details className="panel listing-issues">
+      <summary>Listing issues ({issues.length})</summary>
+      <div className="listing-issues-scroll">
       <table>
         <thead><tr><th>SKU</th><th>Item</th><th>Channel</th><th>Action</th><th>Reason</th><th /></tr></thead>
         <tbody>
@@ -155,6 +156,7 @@ export function ListingIssuesPanel({ client, onOpen }: { client: SupabaseClient;
           ))}
         </tbody>
       </table>
-    </section>
+      </div>
+    </details>
   );
 }
