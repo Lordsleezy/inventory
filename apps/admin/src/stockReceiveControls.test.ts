@@ -43,12 +43,14 @@ test('stock quantity editor confirms admin conversion and blocks reserved-unit c
 
 test('item editor stages UPC, category, listing switches, quantity, and location until its header Save', async () => {
   const controls = await source('UnitEditDrawer.tsx');
+  const locationStock = await source('locationStock.ts');
   const specifics = await source('EbaySpecificsPanel.tsx');
   assert.match(controls, /upcEnrichment\.current =/);
   assert.match(controls, /if\(upcEnrichment\.current\).*portal_enrich_received_unit/s);
   assert.match(controls, /onClick=\{\(\)\s*=>\s*void save\(\)\}/);
   assert.match(controls, /window\.confirm\('Discard unsaved changes\?'\)/);
-  assert.match(controls, /portal_move_location_stock/);
+  assert.match(controls, /applySimpleLocationChange|applyPartialLocationMove/);
+  assert.match(locationStock, /portal_move_location_stock/);
   assert.match(controls, /portal_unit_readiness_gaps/);
   assert.match(specifics, /pendingCategory\.current =/);
   assert.match(specifics, /Category and answers will be saved with the item/);
