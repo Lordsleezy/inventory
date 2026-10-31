@@ -687,6 +687,29 @@ export async function endOnChannel(storeId, channel, item) {
   return { ok: false, error: `end_not_supported:${channel}` };
 }
 
+/** After channel APIs end, clear Floor rows that delete_unit treats as still live. */
+async function clearFloorListingFlags(storeId, sku) {
+  const sb = serviceClient();
+  const now = new Date().toISOString();
+  await sb
+    .from("listings")
+    .update({ status: "delisted", delisted_at: now })
+    .eq("store_id", storeId)
+    .eq("sku", sku)
+    .in("status", ["listed", "pending_delist"]);
+  await sb
+    .from("units")
+    .update({ listed_on: [], show_on_website: false, updated_at: now })
+    .eq("store_id", storeId)
+    .eq("sku", sku);
+  await sb
+    .from("amazon_list_items")
+    .update({ status: "removed" })
+    .eq("store_id", storeId)
+    .eq("sku", sku)
+    .eq("status", "live");
+}
+
 async function endEverywhere(storeId, sku, primaryChannel, item) {
   const sb = serviceClient();
   const { data, error } = await sb
@@ -764,6 +787,12 @@ async function runOne(storeId, channel, kind, item) {
   }
   if (kind === "delete") {
     const pulled = await endEverywhere(storeId, item.sku, channel, item);
+    const endFailed = pulled.some((row) => !row.ok);
+    if (endFailed) {
+      const pullError = pulled.filter((row) => !row.ok).map((row) => `${row.channel}: ${row.error}`).join(" · ");
+      return { sku: item.sku, ok: false, error: pullError || "end_listing_failed", pulled };
+    }
+    await clearFloorListingFlags(storeId, item.sku);
     const sb = serviceClient();
     const { error } = await sb.rpc("delete_unit", { p_sku: item.sku, p_approval_id: null });
     if (error) {

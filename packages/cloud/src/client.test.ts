@@ -41,6 +41,10 @@ test("authErrorMessage maps delete_unit guardrails", () => {
     /sales history/i,
   );
   assert.match(
+    authErrorMessage({ message: "unit_still_listed:ebay" }),
+    /still listed on eBay/i,
+  );
+  assert.match(
     authErrorMessage({ message: 'update or delete on table "units" violates foreign key constraint "unit_location_stock_sku_fkey"' }),
     /Couldn't delete/i,
   );
