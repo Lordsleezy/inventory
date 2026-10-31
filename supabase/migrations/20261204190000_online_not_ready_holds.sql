@@ -6,11 +6,16 @@ begin;
 
 do $$
 declare src text;
+  fn oid := to_regprocedure('public.portal_online_board()');
   hold text := ' and not exists (select 1 from public.units hold where hold.store_id = v_store and hold.sku = s.display_sku and ('
     || 'public.unit_dns(hold.listing_specs) or public.unit_is_defective(hold.listing_specs, hold.condition) or coalesce(hold.ebay_never_list, false) '
     || 'or public.floor_unit_never_list_reason(hold.store_id, hold.sku, ''ebay'') is not null))';
 begin
-  select pg_get_functiondef('public.portal_online_board()'::regprocedure) into src;
+  -- Historical replay omits the recovered live migration that creates this function.
+  if fn is null then
+    return;
+  end if;
+  select pg_get_functiondef(fn) into src;
   if position('Missing cost' in src) = 0 then
     raise exception 'portal_online_board Missing cost marker not found';
   end if;
