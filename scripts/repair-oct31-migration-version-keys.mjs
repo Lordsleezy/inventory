@@ -31,4 +31,4 @@ for (const [oldV, newV] of RENAMES) {
   console.log(`repair ${newV} -> applied`);
   run(["migration", "repair", newV, "--status", "applied", "--project-ref", PROJECT_REF]);
 }
-console.log("done — apply 20261126126000_delete_unit_listing_guard on next release");
+console.log("done — apply 20261205161000_delete_unit_listing_guard on next release");
