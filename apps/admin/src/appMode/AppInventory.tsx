@@ -137,6 +137,11 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
   const [queue, setQueue] = useState<Exclude<AttentionSection, 'all'> | null>(null);
   const [queueRefresh, setQueueRefresh] = useState(0);
   const [noLocationCount, setNoLocationCount] = useState(0);
+  const [noLocSelecting, setNoLocSelecting] = useState(false);
+  const [noLocSelected, setNoLocSelected] = useState<Set<string>>(() => new Set());
+  const [noLocBins, setNoLocBins] = useState<string[]>([]);
+  const [noLocBin, setNoLocBin] = useState('');
+  const [noLocBulkBusy, setNoLocBulkBusy] = useState(false);
   const counts = useAttentionCounts(client, fullAccess && filter === 'unfinished', queueRefresh);
   const urlsRef = useRef(urls);
   urlsRef.current = urls;
@@ -147,6 +152,48 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
     });
     return () => { active = false; };
   }, [client, storeId, refreshKey]);
+
+  useEffect(() => {
+    if (filter !== 'no_location') {
+      setNoLocSelecting(false);
+      setNoLocSelected(new Set());
+      return;
+    }
+    let active = true;
+    void client.rpc('portal_bay_list').then(({ data, error: e }) => {
+      if (!active || e) return;
+      const codes = ((data?.locations || []) as { code: string }[]).map((row) => row.code).sort();
+      setNoLocBins(codes);
+    });
+    return () => { active = false; };
+  }, [client, filter]);
+
+  async function bulkAssignNoLocation() {
+    const skus = [...noLocSelected];
+    const bin = noLocBin.trim();
+    if (!skus.length || !bin) return;
+    setNoLocBulkBusy(true);
+    setError('');
+    try {
+      const { data, error: e } = await client.rpc('portal_bulk_assign_unassigned', { p_skus: skus, p_to: bin });
+      if (e) throw e;
+      const summary = data as { assigned?: number; skipped?: number; failed?: unknown[] };
+      setNoLocSelected(new Set());
+      setNoLocSelecting(false);
+      setList(null);
+      setOffset(0);
+      void client.rpc('portal_unassigned_inventory_count').then(({ data: count }) => {
+        if (typeof count === 'number') setNoLocationCount(count);
+      });
+      if ((summary.failed as unknown[])?.length) {
+        setError(`Assigned ${summary.assigned ?? 0}; ${(summary.failed as unknown[]).length} failed.`);
+      }
+    } catch (err) {
+      setError(shortError(String((err as Error).message || err)));
+    } finally {
+      setNoLocBulkBusy(false);
+    }
+  }
 
   /** Sign storage paths; skip missing objects (web/400 often absent for fresh captures). */
   async function signPaths(paths: string[]) {
@@ -307,6 +354,13 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
         ))}
       </div>
 
+      {filter === 'no_location' && (
+        <div className="app-actions" style={{ marginBottom: 8 }}>
+          <button type="button" className="secondary" onClick={() => { setNoLocSelecting((v) => !v); setNoLocSelected(new Set()); }}>
+            {noLocSelecting ? 'Cancel select' : 'Select items'}
+          </button>
+        </div>
+      )}
 
       {filter in INVENTORY_BUCKET_LABELS && <p className="app-section-label">{INVENTORY_BUCKET_LABELS[filter as InventoryBucket]}</p>}
       {fullAccess && filter === 'unfinished' && (
@@ -341,8 +395,22 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
           const src = u.photo_path
             ? (thumbPath && urls[thumbPath]) || urls[u.photo_path] || ''
             : '';
+          const bulkPick = filter === 'no_location' && noLocSelecting;
+          const checked = noLocSelected.has(u.sku);
           return (
-            <button type="button" className="app-row" key={u.sku} onClick={() => onOpen(u.sku, filter === 'not_ready' ? u.missing : undefined)}>
+            <button type="button" className={`app-row${bulkPick && checked ? ' is-selected' : ''}`} key={u.sku} onClick={() => {
+              if (bulkPick) {
+                setNoLocSelected((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(u.sku)) next.delete(u.sku);
+                  else next.add(u.sku);
+                  return next;
+                });
+                return;
+              }
+              onOpen(u.sku, filter === 'not_ready' ? u.missing : undefined);
+            }}>
+              {bulkPick && <span className="app-row-check" aria-hidden>{checked ? '☑' : '☐'}</span>}
               <span className="app-thumb">
                 {src ? (
                   <img
@@ -392,6 +460,19 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
           </div>
         )}
       </div>
+
+      {noLocSelecting && noLocSelected.size > 0 && (
+        <div className="app-bulk-bar">
+          <select value={noLocBin} onChange={(e) => setNoLocBin(e.target.value)} aria-label="Assign location">
+            <option value="">Choose location…</option>
+            {noLocBins.map((code) => <option key={code} value={code}>{code}</option>)}
+          </select>
+          <button type="button" disabled={noLocBulkBusy || !noLocBin.trim()} onClick={() => void bulkAssignNoLocation()}>
+            {noLocBulkBusy ? 'Assigning…' : 'Assign location'}
+          </button>
+          <span>{noLocSelected.size} selected</span>
+        </div>
+      )}
 
       <div className="app-footer-count">{footer}</div>
       {pageRows > PAGE && (

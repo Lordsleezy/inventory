@@ -9,7 +9,7 @@ import bwipjs from 'bwip-js/browser';
 type Bay = { bay_no: number; row_bins: number[] };
 type Location = { code: string; bay_no: number; row_no: number; bin_no: number | null; stock: number };
 type Allocation = { sku: string; location_code: string; quantity: number };
-type LocationMove = { sku: string; from_location: string | null; to_location: string; quantity: number; moved_at: string };
+type LocationMove = { sku: string; from_location: string | null; to_location: string | null; quantity: number; moved_at: string };
 type Props = { client: SupabaseClient; storeId: string; canManage?: boolean };
 const number = (raw: string) => Number(raw.trim());
 
@@ -36,6 +36,8 @@ export function LocationsPage({ client, storeId, canManage = true }: Props) {
   const [to, setTo] = useState('');
   const [assignBin, setAssignBin] = useState(() => { try { return localStorage.getItem('floor:assign-location-bin') || ''; } catch { return ''; } });
   const [from, setFrom] = useState('');
+  const [unassign, setUnassign] = useState(false);
+  const [onHand, setOnHand] = useState(0);
   const [quantity, setQuantity] = useState('1');
   const [allocations, setAllocations] = useState<Allocation[]>([]);
   const [printBay, setPrintBay] = useState<number | null>(null);
@@ -74,32 +76,57 @@ export function LocationsPage({ client, storeId, canManage = true }: Props) {
   }
 
   async function loadSku(next: string) {
-    const version = ++skuVersion.current; setSku(next); setAllocations([]); setFrom('');
+    const version = ++skuVersion.current; setSku(next); setAllocations([]); setFrom(''); setUnassign(false); setOnHand(0);
     if (!next.trim()) return;
-    const { data, error: queryError } = await client.from('unit_location_stock')
-      .select('sku,location_code,quantity').eq('store_id', storeId).eq('sku', next.trim());
+    const item = next.trim();
+    const [{ data, error: queryError }, unitRow] = await Promise.all([
+      client.from('unit_location_stock').select('sku,location_code,quantity').eq('store_id', storeId).eq('sku', item),
+      client.from('units').select('qty_on_hand').eq('store_id', storeId).eq('sku', item).maybeSingle(),
+    ]);
     if (version !== skuVersion.current) return;
     if (queryError) { setError(queryError.message); return; }
-    setAllocations((data || []) as Allocation[]);
+    const rows = (data || []) as Allocation[];
+    setAllocations(rows);
+    const hand = Math.max(1, Number(unitRow.data?.qty_on_hand) || 1);
+    setOnHand(hand);
+    const assigned = rows.reduce((sum, row) => sum + row.quantity, 0);
+    const loose = Math.max(0, hand - assigned);
+    if (rows.length === 1 && loose <= 0) setFrom(rows[0].location_code);
+    else if (rows.length === 1 && loose > 0) setFrom('');
+    else if (rows.length > 1) setFrom(rows[0]?.location_code || '');
+    setQuantity(String(rows.length === 1 && loose <= 0 ? rows[0].quantity : 1));
   }
 
   async function move(event: FormEvent) {
     event.preventDefault(); if (submitLock.current) return; setError(''); setNotice('');
     const qty = number(quantity), code = to.trim(), item = sku.trim();
-    if (!Number.isInteger(qty) || qty < 1 || !locations.some((location) => location.code === code)) {
-      setError('Scan a valid bay label and enter a positive whole quantity.'); return;
-    }
+    const assigned = allocations.reduce((sum, row) => sum + row.quantity, 0);
+    const loose = Math.max(0, onHand - assigned);
+    if (!Number.isInteger(qty) || qty < 1) { setError('Enter a positive whole quantity.'); return; }
     if (!item) { setError('Scan the item SKU.'); return; }
-    if (from && qty > (allocations.find(a => a.location_code === from)?.quantity || 0)) { setError('Quantity exceeds the stock at the selected source location.'); return; }
+    if (unassign) {
+      if (!from) { setError('Choose the current location to return to unassigned stock.'); return; }
+      if (qty > (allocations.find((a) => a.location_code === from)?.quantity || 0)) { setError('Quantity exceeds the stock at the selected source location.'); return; }
+    } else {
+      if (!locations.some((location) => location.code === code)) { setError('Scan a valid bay label for the new location.'); return; }
+      if (from) {
+        if (qty > (allocations.find((a) => a.location_code === from)?.quantity || 0)) { setError('Quantity exceeds the stock at the selected source location.'); return; }
+      } else if (qty > loose) {
+        setError(`Only ${loose} unassigned unit(s) available. Choose the item’s current location if it is already in a bin.`); return;
+      }
+    }
     submitLock.current = true; setBusy(true);
     try {
       const { error: rpcError } = await client.rpc('portal_move_location_stock', {
-        p_sku: item, p_to: code, p_quantity: qty, p_from: from || null,
+        p_sku: item,
+        p_to: unassign ? '' : code,
+        p_quantity: qty,
+        p_from: from || null,
       });
       if (rpcError) throw rpcError;
-      setNotice(`${qty} × SKU ${item} placed at ${code}.`);
+      setNotice(unassign ? `${qty} × SKU ${item} returned to unassigned.` : `${qty} × SKU ${item} placed at ${code}.`);
       await loadSku(item); await load();
-      setSku(''); setFrom(''); setAllocations([]);
+      setSku(''); setFrom(''); setAllocations([]); setUnassign(false); setTo('');
       skuInput.current?.focus();
     } catch (e) { setError(String((e as Error).message || e)); }
     finally { submitLock.current = false; setBusy(false); }
@@ -142,7 +169,7 @@ export function LocationsPage({ client, storeId, canManage = true }: Props) {
             <button type="button" className="secondary" onClick={() => { setPrintBay(item.bay_no); setTimeout(() => window.print(),100); }}>Print bay labels</button></div></div>
         </details>)}</div>}
       </ToolCard>
-      {recentMoves.length > 0 && <ToolCard><ToolHeading icon="move" title="Recent location history" description="Latest put-away and move events."/><div className="location-code-list">{recentMoves.map((move,index)=><span key={`${move.sku}-${move.moved_at}-${index}`}><b>SKU {move.sku} · {move.from_location || 'Unassigned'} → {move.to_location}</b><small>{new Date(move.moved_at).toLocaleString()}</small></span>)}</div></ToolCard>}
+      {recentMoves.length > 0 && <ToolCard><ToolHeading icon="move" title="Recent location history" description="Latest put-away and move events."/><div className="location-code-list">{recentMoves.map((move,index)=><span key={`${move.sku}-${move.moved_at}-${index}`}><b>SKU {move.sku} · {move.from_location || 'Unassigned'} → {move.to_location || 'Unassigned'}</b><small>{new Date(move.moved_at).toLocaleString()}</small></span>)}</div></ToolCard>}
       <ToolTip>Each bay can have one to five rows. Each row supports up to five bins, or no bins for large items.</ToolTip>
     </>}
     {view === 'setup' && canManage && <><ToolCard><ToolHeading icon="bay" title="Bay setup" description="Configure the number of rows and bins for this bay location."/>
@@ -152,13 +179,15 @@ export function LocationsPage({ client, storeId, canManage = true }: Props) {
         {rows.map((bins,index) => <label className="location-row-config" key={index}><span>Row {index+1}<ToolIcon name="bay"/></span><select disabled={busy} value={bins} onChange={event => setRows(old => old.map((value,i) => i === index ? event.target.value : value))}><option value="0">No bins · large items</option>{[1,2,3,4,5].map(count => <option key={count} value={count}>{count} {count === 1 ? 'bin' : 'bins'}</option>)}</select></label>)}
         <div className="actions"><button disabled={busy || !loaded}><ToolIcon name="save"/>{busy ? 'Saving…' : 'Save bay'}</button></div>
       </form></ToolCard><ToolTip>Choose no bins for a row that holds large items. Existing stock prevents unsafe layout changes.</ToolTip></>}
-    {view === 'move' && <ToolCard><ToolHeading icon="move" title="Put away or move" description="Put away: scan a location, then scan item SKUs. To move assigned stock, scan the SKU, choose its current location, then scan the new label."/>
+    {view === 'move' && <ToolCard><ToolHeading icon="move" title="Put away or move" description="Scan the SKU first. If it is already in a bin, pick that bin under Current location. Put away uses Unassigned stock; moves between bins pick the source bin."/>
       <form className="location-scan-form" onSubmit={event => void move(event)}>
-        <label>New location<small>Scan a location label</small><span className="location-scan-field"><input ref={toInput} required disabled={busy} inputMode={scannerInputMode()} value={to} onChange={event => setTo(event.target.value.trim())} onKeyDown={event => { if(event.key === 'Enter'){event.preventDefault();skuInput.current?.focus();} }} placeholder="Scan 14-2-3"/><button type="button" className="secondary" disabled={busy || scanBusy} aria-label="Scan location with camera" onClick={() => void camera('to')}><ToolIcon name="scan"/></button></span></label>
         <label>Item SKU<small>Scan item barcode</small><span className="location-scan-field"><input ref={skuInput} required disabled={busy} inputMode={scannerInputMode()} value={sku} onChange={event => void loadSku(event.target.value)} placeholder="Scan item barcode"/><button type="button" className="secondary" disabled={busy || scanBusy} aria-label="Scan item with camera" onClick={() => void camera('sku')}><ToolIcon name="scan"/></button></span></label>
-        <label>Current location<small>Select the item’s current location</small><select disabled={busy} value={from} onChange={event => setFrom(event.target.value)}><option value="">Unassigned stock</option>{allocations.map(a => <option key={a.location_code} value={a.location_code}>{a.location_code} · {a.quantity} unit(s)</option>)}</select></label>
+        {allocations.length > 0 && <p className="location-row-summary">{allocations.map((a) => `${a.quantity} at ${a.location_code}`).join(' · ')}{onHand > allocations.reduce((n, a) => n + a.quantity, 0) ? ` · ${onHand - allocations.reduce((n, a) => n + a.quantity, 0)} unassigned` : ''}</p>}
+        <label>Current location<small>Where the units are now</small><select disabled={busy} value={from} onChange={event => setFrom(event.target.value)}><option value="">Unassigned stock</option>{allocations.map(a => <option key={a.location_code} value={a.location_code}>{a.location_code} · {a.quantity} unit(s)</option>)}</select></label>
+        <label className="location-unassign-toggle"><input type="checkbox" checked={unassign} disabled={busy || !from} onChange={(event) => setUnassign(event.target.checked)}/> Return to unassigned (no bin)</label>
+        {!unassign && <label>New location<small>Scan a location label</small><span className="location-scan-field"><input ref={toInput} required={!unassign} disabled={busy} inputMode={scannerInputMode()} value={to} onChange={event => setTo(event.target.value.trim())} onKeyDown={event => { if(event.key === 'Enter'){event.preventDefault();skuInput.current?.focus();} }} placeholder="Scan 14-2-3"/><button type="button" className="secondary" disabled={busy || scanBusy} aria-label="Scan location with camera" onClick={() => void camera('to')}><ToolIcon name="scan"/></button></span></label>}
         <label>Quantity<small>Number of units to move</small><input disabled={busy} required inputMode="numeric" type="number" min="1" step="1" value={quantity} onChange={event => setQuantity(event.target.value)}/></label>
-        <button className="tool-primary" disabled={busy || scanBusy || !loaded}><ToolIcon name="save"/>{busy ? 'Saving…' : scanBusy ? 'Scanning…' : 'Save location'}</button>
+        <button type="submit" className="tool-primary" disabled={busy || scanBusy || !loaded}><ToolIcon name="save"/>{busy ? 'Saving…' : scanBusy ? 'Scanning…' : unassign ? 'Return to unassigned' : 'Save location'}</button>
       </form></ToolCard>}
     {view === 'assign' && <ToolCard><ToolHeading icon="scan" title="Fast assign" description="Scan or choose a bin once. Then scan each SKU; successful assignments leave the No location list immediately."/>
       <form className="location-scan-form" onSubmit={event=>{event.preventDefault();void (async()=>{
