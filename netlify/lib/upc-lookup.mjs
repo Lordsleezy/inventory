@@ -227,11 +227,14 @@ async function amazonLookup(storeId, gtin, deps) {
   } catch (e) {
     return emptyAmazon({ raw_error: String(e?.message || e).slice(0, 300), amazon_attempts: attempts });
   }
-  if (!res?.found) return emptyAmazon({ alternatives: res?.alternatives || [], amazon_attempts: attempts });
+  if (!res?.found || res.identifier_match === false) {
+    return emptyAmazon({ alternatives: res?.alternatives || [], amazon_attempts: attempts, identifier_match: false });
+  }
 
   const it = res.item;
   const out = emptyAmazon({
     found: true,
+    identifier_match: res.identifier_match !== false,
     asin: it.asin,
     title: it.title,
     brand: it.brand,
@@ -318,8 +321,52 @@ function mergePackage(a, u) {
   return { package: out, coverage };
 }
 
+function wordTokens(value) {
+  return new Set(norm(value).split(/[^a-z0-9]+/).filter((token) => token.length > 3));
+}
+
+/** Brand and title share no real word — a mattress topper and a baseball tee, for example. */
+function unrelatedProduct(a, b) {
+  const brandA = clean(a?.brand);
+  const brandB = clean(b?.brand);
+  const titleA = clean(a?.title);
+  const titleB = clean(b?.title);
+  if (!brandA || !brandB || !titleA || !titleB) return false;
+  if (norm(brandA) === norm(brandB)) return false;
+  const left = wordTokens(titleA);
+  const right = wordTokens(titleB);
+  if (!left.size || !right.size) return false;
+  for (const token of left) if (right.has(token)) return false;
+  return true;
+}
+
+/**
+ * Amazon search can return a different product for a barcode. Use that hit only when
+ * its identifiers were accepted and its brand/title does not contradict the UPC lookup.
+ */
+function amazonAgrees(amazon, upc) {
+  if (!amazon?.found) return false;
+  if (amazon.identifier_match === false) return false;
+  if (upc?.found && unrelatedProduct(amazon, upc)) return false;
+  return true;
+}
+
+function titlesOverlap(a, b) {
+  const left = norm(a);
+  const right = norm(b);
+  if (!left || !right) return false;
+  return left === right || left.includes(right) || right.includes(left);
+}
+
+/** A saved catalog row that repeats an Amazon hit the UPC lookup contradicted. */
+function savedCatalogContradicts(owned, payload) {
+  if (!owned?.title || !payload?.amazon || !payload?.upcitemdb) return false;
+  if (!unrelatedProduct(payload.amazon, payload.upcitemdb)) return false;
+  return titlesOverlap(owned.title, payload.amazon.title) || norm(owned.brand) === norm(payload.amazon.brand);
+}
+
 export function mergeLookup(amazon, upc) {
-  const A = amazon?.found ? amazon : null;
+  const A = amazonAgrees(amazon, upc) ? amazon : null;
   const U = upc?.found ? upc : null;
   const pick = (field) => {
     const a = clean(A?.[field]);
@@ -385,6 +432,7 @@ export function mergeLookup(amazon, upc) {
       : {};
 
   return {
+    amazonAccepted: Boolean(A),
     merged: {
       title,
       brand,
@@ -509,9 +557,14 @@ export async function lookupUpc(storeId, rawCode, opts = {}) {
   }
 
   // Own product DB first (shared across stores) — permanent edits beat cache/API.
+  // A saved row that repeats a contradicted Amazon hit is left in place and not shown.
+  let preserveContradictedSave = false;
+  let cachedHit = null;
   if (!opts.force) {
     const owned = await readFloorProduct(sb, gtin.gtin14);
-    if (owned && (owned.brand || owned.model || owned.title)) {
+    cachedHit = await readCache(sb, gtin.gtin14);
+    preserveContradictedSave = savedCatalogContradicts(owned, cachedHit?.payload);
+    if (!preserveContradictedSave && owned && (owned.brand || owned.model || owned.title)) {
       const merged = productToMerged(owned);
       return {
         gtin: gtinOut,
@@ -555,9 +608,8 @@ export async function lookupUpc(storeId, rawCode, opts = {}) {
     };
   }
 
-  if (!opts.force) {
-    const hit = await readCache(sb, gtin.gtin14);
-    if (hit) return { ...hit.payload, gtin: gtinOut, cached: true, looked_up_at: hit.looked_up_at || hit.payload?.looked_up_at || null };
+  if (!opts.force && !preserveContradictedSave && cachedHit) {
+    return { ...cachedHit.payload, gtin: gtinOut, cached: true, looked_up_at: cachedHit.looked_up_at || cachedHit.payload?.looked_up_at || null };
   }
 
   const amazon = await amazonLookup(storeId, gtin, deps);
@@ -582,10 +634,15 @@ export async function lookupUpc(storeId, rawCode, opts = {}) {
     } catch { /* Catalog image lookup is optional; the barcode catalog still resolves normally. */ }
   }
 
-  const { merged, fieldCoverage } = mergeLookup(amazon, upcitemdb);
+  const { merged, fieldCoverage, amazonAccepted } = mergeLookup(amazon, upcitemdb);
+  const acceptedAmazon = amazonAccepted ? amazon : {
+    ...amazon,
+    found: false,
+    skipped: amazon?.found ? "unrelated_product" : amazon?.skipped,
+  };
   const photoRows = [
     ...(ebayCatalog?.epid ? (ebayCatalog.imageUrls || []).map((url) => ({ url, source: "ebay_catalog" })) : []),
-    ...(amazon.images || []).map((url) => ({ url, source: "amazon" })),
+    ...(acceptedAmazon.found ? (acceptedAmazon.images || []).map((url) => ({ url, source: "amazon" })) : []),
     ...(upcitemdb.images || []).map((url) => ({ url, source: "upcitemdb" })),
   ];
   const seenPhotoUrls = new Set();
@@ -612,7 +669,7 @@ export async function lookupUpc(storeId, rawCode, opts = {}) {
   const result = {
     gtin: gtinOut,
     cached: false,
-    amazon,
+    amazon: acceptedAmazon,
     upcitemdb,
     ebay,
     ebay_catalog: ebayCatalog,
@@ -634,8 +691,8 @@ export async function lookupUpc(storeId, rawCode, opts = {}) {
     });
     if (missId) result.miss_id = missId;
     result.true_miss = !amazon.raw_error && !upcitemdb.raw_error;
-  } else if (merged.title || merged.brand) {
-    const src = amazon.found ? "amazon" : "upcitemdb";
+  } else if (!preserveContradictedSave && (merged.title || merged.brand)) {
+    const src = amazonAccepted && amazon.found ? "amazon" : "upcitemdb";
     await saveFloorProduct(sb, gtin, merged, { source: src });
   }
 
@@ -643,7 +700,7 @@ export async function lookupUpc(storeId, rawCode, opts = {}) {
   // (price_pending) so the next scan still gets title/dims instantly.
   const hardFail = Boolean(amazon.raw_error && !amazon.found) || Boolean(upcitemdb.raw_error && !upcitemdb.found && !amazon.found);
   const pricingOnlyPending = Boolean(amazon.price_pending || amazon.price_error === "amazon_pricing_rate_limited");
-  if (!hardFail && (amazon.found || upcitemdb.found)) {
+  if (!preserveContradictedSave && !hardFail && (amazon.found || upcitemdb.found)) {
     if (pricingOnlyPending && !amazon.price_cents) {
       // Cache catalog; leave price null so a later force can refresh pricing.
       const toCache = {

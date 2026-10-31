@@ -3,7 +3,7 @@ import { ReceiveWorkStatus } from './ReceiveWorkStatus';
 import { scannerLifecycle } from './scannerLifecycle';
 import { commitReceive } from './receiveCommit';
 import { isDnsType } from './dns';
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type FocusEvent } from 'react';
 import { ChannelPicker, type ChannelId } from './ChannelCheckboxes';
 import { createPortal } from 'react-dom';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -16,6 +16,7 @@ import { ManifestReceiveReference, useManifestReceiveReference } from './Manifes
 import { BundleReceive } from './BundleReceive';
 const MeasureOnMat = lazy(() => import('./MeasureOnMat').then(module => ({ default: module.MeasureOnMat })));
 import { receiveSpecifics, receiveVariant } from '../../../shared/receive-specifics.mjs';
+import { filterCategoryOptions, isMattressAccessory, matchReceiveCategory } from '../../../shared/receive-category.mjs';
 import { notForSaleBrandError, receiveMissingFields } from './receive-validation';
 import { CategoryPanel } from './CategoryPanel';
 import { EbaySpecificsPanel } from './EbaySpecificsPanel';
@@ -136,7 +137,7 @@ async function clearPendingPhotos(key: string): Promise<void> {
  * "Enter manually" uses the same requirements (plus title/description helpers).
  * ---------------------------------------------------------------------------------------------- */
 
-type Options = { next_sku: string | null; conditions: unknown; test_statuses: unknown };
+type Options = { next_sku: string | null; categories?: unknown; conditions: unknown; test_statuses: unknown };
 type ReceiveLocation = { code: string; bay_no: number; row_no: number; bin_no: number | null };
 type Props = {
   client: SupabaseClient;
@@ -403,6 +404,42 @@ function choices(value: unknown): string[] {
   if (Array.isArray(value)) return value.map(String).filter(Boolean);
   if (typeof value === 'string') { try { return choices(JSON.parse(value)); } catch { return []; } }
   return [];
+}
+
+function CategoryField({ label, needed, value, options, hint, onChange, onFocus }: {
+  label: string; needed?: boolean; value: string; options: string[]; hint?: string;
+  onChange: (value: string) => void;
+  onFocus?: (event: FocusEvent<HTMLInputElement>) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const matches = filterCategoryOptions(options, value);
+  return (
+    <label className={`receive-category-field${needed ? ' receive-need' : ''}`}>
+      {label}
+      <input
+        value={value}
+        autoComplete="off"
+        onChange={e => onChange(e.target.value)}
+        onFocus={e => { onFocus?.(e); setOpen(true); }}
+        onBlur={() => { window.setTimeout(() => setOpen(false), 180); }}
+      />
+      {open && options.length > 0 && (
+        <div className="receive-category-options" role="listbox">
+          {matches.length > 0
+            ? matches.slice(0, 20).map(name => (
+              <button
+                type="button"
+                key={name}
+                role="option"
+                onPointerDown={e => { e.preventDefault(); onChange(name); setOpen(false); }}
+              >{name}</button>
+            ))
+            : <span className="hint">No matching category</span>}
+        </div>
+      )}
+      {hint ? <small>{hint}</small> : null}
+    </label>
+  );
 }
 
 function cents(input: string): number | null | undefined {
@@ -716,6 +753,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   const mounted = useRef(true);
   const askTouched = useRef(false);
   const titleTouched = useRef(false);
+  const categoryTouched = useRef(false);
   const priceRequest = useRef(0);
   const dimensionTouched = useRef(new Set<string>());
   const activeScan = useRef<string | null>(null);
@@ -797,6 +835,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     }
     if (key === 'ask') askTouched.current = true;
     if (key === 'title') titleTouched.current = true;
+    if (key === 'category') categoryTouched.current = true;
     setForm(prev => {
       const next = { ...prev, [key]: value };
       if (key === 'cost') next.costEstimate = false;
@@ -978,6 +1017,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   function resetEntry(keepProduct?: Partial<Form>, cleanupPhotos = true) {
     askTouched.current = false;
     titleTouched.current = false;
+    categoryTouched.current = false;
     setForm({ ...blank, ...keepProduct });
     setFiles([]);
     setStockPhotoPath('');
@@ -1037,7 +1077,9 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       variant: receiveVariant(m || {}),
       size: text(m?.aspects?.Size),
       title: text(m?.title) || composeListingTitle(brand, specifics, false),
-      category: text(m?.category),
+      category: matchReceiveCategory(choices(options?.categories), {
+        category: m?.category, title: m?.title, brand, model: specifics,
+      }),
       // description falls back to the real feature bullets from the lookup; never invented text
       description: text(m?.description) || featuresText(m?.features),
       length: num(p?.length_in), width: num(p?.width_in), height: num(p?.height_in), weight: num(p?.weight_lb),
@@ -1054,6 +1096,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     if (!initial.title) initial.title = composeListingTitle(initial.brand, initial.model, initial.unbranded);
     askTouched.current = Boolean(current.seed && 'ask' in current.seed);
     titleTouched.current = Boolean(initial.title);
+    categoryTouched.current = Boolean(text(current.seed?.category));
     setDimensionSources(Object.fromEntries([
       ...(['length_in', 'width_in', 'height_in', 'weight_lb'] as const).map((key, i) => [
         ['package_length_in', 'package_width_in', 'package_height_in', 'package_weight_lb'][i],
@@ -1121,6 +1164,23 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     upcInput.current?.blur();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current?.id, current?.status, manual, loadedId]);
+
+  /* Store categories arrive with receive options. Fill a matching one if the person has not typed a category. */
+  useEffect(() => {
+    const list = choices(options?.categories);
+    if (!list.length || categoryTouched.current) return;
+    const m = manual ? undefined : current?.result?.merged;
+    if (!manual && !current) return;
+    setForm(prev => {
+      const accessory = isMattressAccessory(`${m?.category || ''} ${prev.title} ${prev.brand} ${prev.model}`);
+      const already = list.some(name => name.toLowerCase() === prev.category.trim().toLowerCase());
+      if (already && !(accessory && /^mattress(?:es)?$/i.test(prev.category.trim()))) return prev;
+      const next = matchReceiveCategory(list, {
+        category: m?.category || prev.category, title: prev.title, brand: prev.brand, model: prev.model,
+      });
+      return next !== prev.category ? { ...prev, category: next } : prev;
+    });
+  }, [options, loadedId, manual, current?.id, current?.status]);
 
   /* Suggestions are displayed for reference; only the person receiving enters an ask price. */
 
@@ -1763,7 +1823,9 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       setForm(prev => {
         const next = { ...prev, brand, unbranded, model,
         variant: text(photoCandidate.variant) || prev.variant, size: text(photoCandidate.size) || prev.size,
-        category: text(photoCandidate.category) || prev.category,
+        category: categoryTouched.current ? prev.category : (matchReceiveCategory(choices(options?.categories), {
+          category: text(photoCandidate.category), title, brand, model,
+        }) || prev.category),
         description: text(photoCandidate.description) || prev.description, title };
         for (const key of dimFields) if (!dimensionTouched.current.has(key)) next[key] = '';
         return next;
@@ -1995,9 +2057,14 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           <label>Model<input value={form.model} onFocus={e => { typingTarget.current = e.currentTarget; }} onChange={e => update('model', e.target.value)} /></label>
           <label>Variant<input value={form.variant} onFocus={e => { typingTarget.current = e.currentTarget; }} onChange={e => update('variant', e.target.value)} placeholder="Scent, color…" /></label>
           <label>Size<input value={form.size} onFocus={e => { typingTarget.current = e.currentTarget; }} onChange={e => update('size', e.target.value)} placeholder="Size or measurements" /></label>
-          <label>Floor category<input value={form.category} onFocus={e => { typingTarget.current = e.currentTarget; }} onChange={e => update('category', e.target.value)} />
-            <small>Online store categories are set after saving. Floor fills a suggested eBay category when it finds a match; otherwise search the channel categories below.</small>
-          </label>
+          <CategoryField
+            label="Floor category"
+            value={form.category}
+            options={choices(options?.categories)}
+            hint="Online store categories are set after saving. Floor fills a suggested eBay category when it finds a match; otherwise search the channel categories below."
+            onChange={v => update('category', v)}
+            onFocus={e => { typingTarget.current = e.currentTarget; }}
+          />
           <div className="receive-condition-field"><span>Condition</span><div className="receive-chip-row" role="radiogroup" aria-label="Condition">
             {CONDITIONS.map(([value, label]) => <label className={`receive-chip${form.condition === value ? ' on' : ''}`} key={value}>
               <input type="radio" name="receive-condition-main" checked={form.condition === value} onChange={() => update('condition', value)} />{label}
@@ -2113,11 +2180,15 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         </div>
         {needNoteForScratch && <label className="unit-edit-wide">What is defective / why non-sellable? (required)<textarea rows={2} value={form.conditionNote} onFocus={e => { typingTarget.current = e.currentTarget; }} onChange={e => update('conditionNote', e.target.value)} /></label>}
 
-        <label className={liveMissing.includes('category') ? 'receive-need' : undefined}>
-          Floor category{liveMissing.includes('category') ? ' (needed to list)' : ''}
-          <input value={form.category} onFocus={e => { typingTarget.current = e.currentTarget; }} onChange={e => update('category', e.target.value)} />
-          <small>Online store categories are set after saving. Floor fills a suggested eBay category when it finds a match; otherwise search the channel categories below.</small>
-        </label>
+        <CategoryField
+          label={`Floor category${liveMissing.includes('category') ? ' (needed to list)' : ''}`}
+          needed={liveMissing.includes('category')}
+          value={form.category}
+          options={choices(options?.categories)}
+          hint="Online store categories are set after saving. Floor fills a suggested eBay category when it finds a match; otherwise search the channel categories below."
+          onChange={v => update('category', v)}
+          onFocus={e => { typingTarget.current = e.currentTarget; }}
+        />
 
         <label className={liveMissing.includes('brand') ? 'receive-need' : undefined}>
           Brand{liveMissing.includes('brand') ? (doNotList ? ' (required to save)' : ' (needed to list)') : ''}
