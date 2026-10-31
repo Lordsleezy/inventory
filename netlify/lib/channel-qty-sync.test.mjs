@@ -7,6 +7,7 @@ import {
   ebayOfferQuantityBody,
   orderLineQty,
   planChannelQuantity,
+  saleLeavesStock,
   takeStock,
 } from "./channel-qty-sync.mjs";
 
@@ -110,6 +111,12 @@ test("one minute of changes becomes one update per SKU", () => {
   const later = debounceQtyRow({ ...second, status: "done" }, 12, new Date("2026-10-30T12:02:00Z"));
   assert.equal(later.available_qty, 12);
   assert.notEqual(later.not_before, first.not_before);
+});
+
+test("a sale of one from a stocked listing leaves the rest for sale", () => {
+  assert.equal(saleLeavesStock({ qty_on_hand: 4, state: "available" }), true);
+  assert.equal(saleLeavesStock({ qty_on_hand: 0, state: "available" }), false);
+  assert.equal(saleLeavesStock({ qty_on_hand: 1, state: "sold" }), false);
 });
 
 test("Depop is a manual quantity flag", () => {

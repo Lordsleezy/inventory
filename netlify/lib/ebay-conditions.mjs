@@ -173,6 +173,42 @@ export function listingConditionPayload(mapped) {
   return { condition, conditionId: String(mapped.conditionId) };
 }
 
+/** eBay descriptor 40001 (Card Condition) on Ungraded trading cards. */
+const CARD_CONDITION_DESCRIPTOR = {
+  nearMint: "400010",
+  lightlyPlayed: "400015",
+  moderatelyPlayed: "400016",
+  heavilyPlayed: "400017",
+};
+
+/**
+ * Floor grade → Ungraded card condition. Excellent is lightly played;
+ * Good is moderately played. Sealed New is near mint or better.
+ */
+export function cardConditionDescriptorId(floorGrade) {
+  const grade = normalizeConditionName(floorGrade);
+  if (!grade) return CARD_CONDITION_DESCRIPTOR.lightlyPlayed;
+  if (grade === "new" || grade.includes("mint") || grade.includes("sealed")) return CARD_CONDITION_DESCRIPTOR.nearMint;
+  if (grade.includes("excellent") || grade.includes("very good") || grade.includes("light")) return CARD_CONDITION_DESCRIPTOR.lightlyPlayed;
+  if (grade === "good" || grade.includes("moderate")) return CARD_CONDITION_DESCRIPTOR.moderatelyPlayed;
+  if (grade.includes("fair") || grade.includes("poor") || grade.includes("heavy") || grade.includes("damage")) {
+    return CARD_CONDITION_DESCRIPTOR.heavilyPlayed;
+  }
+  return CARD_CONDITION_DESCRIPTOR.lightlyPlayed;
+}
+
+/** Trading-card categories (and any category whose allowed conditions include Ungraded). */
+export function ungradedCardPayload(floorGrade, allowed) {
+  const ungraded = (allowed || []).find((row) => /ungraded/i.test(row?.name || "") || String(row?.conditionId) === "4000");
+  if (!ungraded) return null;
+  const base = listingConditionPayload({ conditionId: String(ungraded.conditionId), name: ungraded.name || "Ungraded" });
+  if (!base) return null;
+  return {
+    ...base,
+    conditionDescriptors: [{ name: "40001", values: [cardConditionDescriptorId(floorGrade)] }],
+  };
+}
+
 export function gradeMapForCategory(allowed) {
   return FLOOR_CONDITION_GRADES.map((grade) => {
     const mapped = mapFloorCondition(grade, allowed);

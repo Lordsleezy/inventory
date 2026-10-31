@@ -21,7 +21,8 @@ import { composeChannelDescription, parseListingSpecs } from "./listing-copy.mjs
 import { ebayDescription, ebayIdentifiers } from "./ebay-product.mjs";
 import { appendClearanceFooter } from "./ebay-listing-standards.mjs";
 import { assertEbayListable } from "./ebay-exclusion.mjs";
-import { ebayInventoryQuantityBody, ebayOfferQuantityBody, orderLineQty } from "./channel-qty-sync.mjs";
+import { ebayInventoryQuantityBody, ebayOfferQuantityBody, orderLineQty, saleLeavesStock } from "./channel-qty-sync.mjs";
+import { shippablePackage } from "./ebay-package.mjs";
 import { confirmCatalogVisual, matchCatalogPhoto } from "./ebay-catalog-photo.mjs";
 import { parseMeasure, specInches } from "./ebay-aspects.mjs";
 import { listingMeasures, prepareUnitAspects, prepareUnitCondition } from "./ebay-catalog.mjs";
@@ -659,24 +660,28 @@ async function itemAspects(storeId, unit) {
 
 function packageSize(unit) {
   const specs = listingMeasures(unit);
-  const length = Number(unit?.package_length_in) || specInches(specs, "depth") || parseMeasure(specs.depth_in) || parseMeasure(specs.length_in);
-  const width = Number(unit?.package_width_in) || specInches(specs, "width") || parseMeasure(specs.width_in);
-  const height = Number(unit?.package_height_in) || specInches(specs, "height") || parseMeasure(specs.height_in);
-  const weight = Number(unit?.package_weight_lb) || parseMeasure(specs.weight_lb || specs.weight_lbs);
-  if (!(length > 0 && width > 0 && height > 0 && weight > 0)) {
-    const err = new Error("Package weight and dimensions are required before pushing to eBay.");
-    err.code = "package_required";
+  const measured = {
+    ...unit,
+    package_length_in: Number(unit?.package_length_in) || specInches(specs, "depth") || parseMeasure(specs.depth_in) || parseMeasure(specs.length_in) || unit?.package_length_in,
+    package_width_in: Number(unit?.package_width_in) || specInches(specs, "width") || parseMeasure(specs.width_in) || unit?.package_width_in,
+    package_height_in: Number(unit?.package_height_in) || specInches(specs, "height") || parseMeasure(specs.height_in) || unit?.package_height_in,
+    package_weight_lb: Number(unit?.package_weight_lb) || parseMeasure(specs.weight_lb || specs.weight_lbs) || unit?.package_weight_lb,
+  };
+  const packed = shippablePackage(measured);
+  if (!packed.ok) {
+    const err = new Error(packed.reason || "Package is over the carrier limit.");
+    err.code = "package_over_limit";
     throw err;
   }
   return {
     dimensions: {
-      length: String(length),
-      width: String(width),
-      height: String(height),
+      length: String(packed.length),
+      width: String(packed.width),
+      height: String(packed.height),
       unit: "INCH",
     },
     weight: {
-      value: String(weight),
+      value: String(packed.weight),
       unit: "POUND",
     },
   };
@@ -1395,7 +1400,13 @@ export async function ingestEbayOrder(storeId, order) {
     }
   }
 
+  let leavesStock = false;
   if (matchStatus === "matched" && rawSku) {
+    const { data: after } = await sb.from("units").select("qty_on_hand,state").eq("store_id", storeId).eq("sku", rawSku).maybeSingle();
+    leavesStock = saleLeavesStock(after);
+  }
+
+  if (matchStatus === "matched" && rawSku && !leavesStock) {
     await sb.from("ebay_drafts").delete().eq("store_id", storeId).eq("sku", rawSku);
     await sb.from("listings").upsert(
       {

@@ -49,6 +49,17 @@ test("open box is preferred and new other is the fallback", () => {
   assert.equal(other.reason, "new_other");
   assert.equal(other.fallback, true);
   assert.equal(clearanceCondition([{ conditionId: "1000", name: "New" }, { conditionId: "3000", name: "Used" }]), null);
+  const tagged = clearanceCondition(
+    [
+      { conditionId: "1000", name: "New with tags" },
+      { conditionId: "1500", name: "New without tags" },
+      { conditionId: "1750", name: "New with defects" },
+      { conditionId: "3000", name: "Pre-owned" },
+    ],
+    "New",
+  );
+  assert.equal(tagged.conditionId, "1500");
+  assert.equal(tagged.reason, "new");
 });
 
 test("catalog pick requires the same UPC or the same brand and model", () => {
