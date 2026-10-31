@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { lookupUpc, mergeLookup, parseUpcitemdbDimension, parseUpcitemdbWeight, upcitemdbLookup } from "./upc-lookup.mjs";
 import {
+  amazonNeverListReason,
+  catalogIdentifierMatches,
   extractCatalogAspects,
   formatAspectsLine,
   itemSpecificsFromLookup,
@@ -10,6 +12,7 @@ import {
   usableModelNumber,
   variantFromTitle,
 } from "./amazon.mjs";
+import { filterCategoryOptions, matchReceiveCategory } from "../../shared/receive-category.mjs";
 
 const catalogItem = {
   asin: "B0TESTASIN",
@@ -241,4 +244,171 @@ test("upcitemdb uses key headers only when UPCITEMDB_KEY is set", async () => {
   await upcitemdbLookup("012345678905", { fetchImpl, key: "abc" });
   assert.equal(seen[1].headers.user_key, "abc");
   assert.equal(seen[1].headers.key_type, "3scale");
+});
+
+test("a catalog hit must list the scanned barcode", () => {
+  const topper = [{ type: "EAN", value: "0617014003691" }];
+  const tee = [{ type: "UPC", value: "195949111111" }];
+  assert.equal(catalogIdentifierMatches(topper, "617014003691"), true);
+  assert.equal(catalogIdentifierMatches(topper, "00617014003691"), true);
+  assert.equal(catalogIdentifierMatches(tee, "617014003691"), false);
+});
+
+test("unrelated amazon product does not replace the UPC item", () => {
+  const amazon = {
+    found: true,
+    identifier_match: true,
+    asin: "B09GZVNLN2",
+    title: "#istandwithniki, Niki, Niki M Raglan Baseball Tee",
+    brand: "Niki",
+    category: "Women",
+    package: {},
+    images: ["tee.jpg"],
+  };
+  const upc = {
+    found: true,
+    title: 'Twin 2" Cool Touch Memory Foam Mattress Topper - Threshold',
+    brand: "Threshold",
+    package: {},
+    images: ["topper.jpg"],
+  };
+  const { merged, amazonAccepted, fieldCoverage } = mergeLookup(amazon, upc);
+  assert.equal(amazonAccepted, false);
+  assert.equal(merged.brand, "Threshold");
+  assert.match(merged.title, /Mattress Topper/);
+  assert.equal(merged.images[0], "topper.jpg");
+  assert.equal(fieldCoverage.title, "upcitemdb");
+  assert.equal(fieldCoverage.brand, "upcitemdb");
+});
+
+test("exact identifier match still wins when the other source describes the same product", () => {
+  const { merged, amazonAccepted } = mergeLookup(
+    { found: true, identifier_match: true, title: "Threshold Farrah Curtain Panel", brand: "Threshold", package: {}, images: [] },
+    { found: true, title: "Farrah Window Curtain Panel White - Threshold", brand: "Threshold", package: {}, images: [] },
+  );
+  assert.equal(amazonAccepted, true);
+  assert.equal(merged.title, "Threshold Farrah Curtain Panel");
+});
+
+test("lookup keeps the UPC product when Amazon returns a different brand and title", async () => {
+  const sb = fakeSb();
+  const deps = {
+    sb,
+    catalogByIdentifier: async () => ({
+      found: true,
+      identifier_match: true,
+      item: {
+        asin: "B09GZVNLN2",
+        title: "#istandwithniki, Niki, Niki M Raglan Baseball Tee",
+        brand: "Niki",
+        model: null,
+        category: "Women",
+        description: null,
+        features: [],
+        aspects: {},
+        package: {},
+        images: [],
+      },
+    }),
+    priceByAsin: async () => ({ price_cents: 1999, source: "buybox", as_of: "2026-10-30T00:00:00.000Z" }),
+    upcitemdb: async () => ({
+      found: true,
+      title: 'Twin 2" Cool Touch Memory Foam Mattress Topper - Threshold',
+      brand: "Threshold",
+      description: "Cool touch memory foam",
+      package: {},
+      images: [],
+    }),
+    ebayComps: async () => null,
+  };
+  const result = await lookupUpc("s", "617014003691", { deps, compareUpcitemdb: true, skipEbay: true });
+  assert.equal(result.amazon.found, false);
+  assert.equal(result.amazon.skipped, "unrelated_product");
+  assert.equal(result.merged.brand, "Threshold");
+  assert.match(result.merged.title, /Mattress Topper/);
+  assert.equal(result.merged.retail_cents, null);
+  assert.equal(result.merged.never_list_reason, undefined);
+});
+
+test("a saved contradicted catalog row is not shown and is not rewritten", async () => {
+  let writes = 0;
+  const owned = {
+    gtin14: "00617014003691",
+    brand: "Niki",
+    title: "Niki #istandwithniki, Niki, Niki M Raglan Baseball Tee",
+    model: "Classic",
+    category: "Women",
+    updated_at: "2026-10-30T21:41:38.389Z",
+  };
+  const payload = {
+    amazon: { found: true, brand: "Niki", title: "#istandwithniki, Niki, Niki M Raglan Baseball Tee" },
+    upcitemdb: { found: true, brand: "Threshold", title: 'Twin 2" Cool Touch Memory Foam Mattress Topper - Threshold' },
+    merged: { title: owned.title, brand: "Niki" },
+  };
+  const sb = {
+    from(table) {
+      const row = table === "floor_products" ? owned : table === "upc_lookup_cache" ? { payload, looked_up_at: owned.updated_at } : null;
+      return {
+        select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: row, error: null }) }) }),
+        upsert() { writes += 1; return { select: () => ({ maybeSingle: async () => ({ data: null, error: null }) }) }; },
+        insert: () => ({ select: () => ({ maybeSingle: async () => ({ data: null, error: null }) }) }),
+      };
+    },
+  };
+  const result = await lookupUpc("s", "617014003691", {
+    deps: {
+      sb,
+      catalogByIdentifier: async () => ({
+        found: true,
+        identifier_match: true,
+        item: { asin: "B09GZVNLN2", title: payload.amazon.title, brand: "Niki", category: "Women", features: [], aspects: {}, package: {}, images: [] },
+      }),
+      priceByAsin: async () => ({ price_cents: null, source: null, as_of: "2026-10-30T00:00:00.000Z" }),
+      upcitemdb: async () => ({ found: true, title: payload.upcitemdb.title, brand: "Threshold", package: {}, images: [] }),
+      ebayComps: async () => null,
+    },
+    compareUpcitemdb: true,
+    skipEbay: true,
+  });
+  assert.equal(writes, 0);
+  assert.equal(result.floor_product, undefined);
+  assert.equal(result.merged.brand, "Threshold");
+  assert.match(result.merged.title, /Mattress Topper/);
+});
+
+const STORE_CATEGORIES = ["Uncategorized", "Mattresses", "Mattress Pads & Toppers", "Bedding", "Apparel", "Refrigerator"];
+const LIVE_STORE_CATEGORIES = ["Uncategorized", "Mattresses", "Apparel", "Refrigerator"];
+
+test("mattress pads, toppers, and protectors do not map to Mattresses or get never-listed for that reason", () => {
+  const accessories = [
+    { title: "Threshold Memory Foam Mattress Topper, Twin" },
+    { title: "Waterproof Mattress Pad, Queen" },
+    { title: "Quiet Night Mattress Protector, King" },
+  ];
+  for (const item of accessories) {
+    assert.equal(matchReceiveCategory(STORE_CATEGORIES, item), "Mattress Pads & Toppers");
+    assert.equal(matchReceiveCategory(LIVE_STORE_CATEGORIES, item), "");
+    assert.equal(amazonNeverListReason({ ...item, category: "Mattresses" }), null);
+    assert.equal(amazonNeverListReason({ ...item, category: "Mattress Pads & Toppers" }), null);
+  }
+  assert.equal(matchReceiveCategory(["Uncategorized", "Mattresses", "Bedding"], {
+    title: "Cool Touch Mattress Topper",
+  }), "Bedding");
+  assert.equal(matchReceiveCategory(STORE_CATEGORIES, {
+    title: "Threshold Queen Memory Foam Mattress",
+  }), "Mattresses");
+  assert.equal(amazonNeverListReason({
+    title: "Threshold Queen Memory Foam Mattress",
+    category: "Mattresses",
+  }), "Appliance/mattress — never list online");
+  assert.equal(matchReceiveCategory(STORE_CATEGORIES, { category: "Refrigerator", title: "LG top freezer" }), "Refrigerator");
+  assert.equal(matchReceiveCategory(STORE_CATEGORIES, {
+    category: "Women",
+    title: "Niki Raglan Baseball Tee",
+    brand: "Niki",
+  }), "");
+  assert.deepEqual(filterCategoryOptions(STORE_CATEGORIES, "matt"), ["Mattresses", "Mattress Pads & Toppers"]);
+  assert.deepEqual(filterCategoryOptions(STORE_CATEGORIES, ""), STORE_CATEGORIES);
+  assert.deepEqual(filterCategoryOptions(STORE_CATEGORIES, "Mattresses"), STORE_CATEGORIES);
+  assert.deepEqual(filterCategoryOptions(STORE_CATEGORIES, "zzz"), []);
 });

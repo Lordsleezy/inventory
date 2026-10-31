@@ -8,6 +8,7 @@
 import { serviceClient, decryptSecret, encryptSecret, requireEnv } from "./server.mjs";
 import { assertBundlePush } from "./bundle-gate.mjs";
 import { sendInternalAlert, gmailConfigured } from "./mail.mjs";
+import { isMattressAccessory } from "../../shared/receive-category.mjs";
 
 const LWA_TOKEN = "https://api.amazon.com/auth/o2/token";
 /** US marketplace — not a secret; keep out of Netlify env to save Lambda budget / clutter. */
@@ -40,9 +41,15 @@ function sellerId() {
 export function amazonNeverListReason(unit = {}) {
   const sku = String(unit.sku || "").trim();
   if (sku && NEVER_LIST_SKUS.has(sku)) return "SKU 11284 scooter — never list online";
-  const blob = `${unit.category || ""} ${unit.title || ""} ${unit.brand || ""} ${unit.model || ""} ${unit.listing_body || ""}`.toLowerCase();
+  const product = `${unit.title || ""} ${unit.brand || ""} ${unit.model || ""} ${unit.listing_body || ""}`.toLowerCase();
+  const blob = `${unit.category || ""} ${product}`.toLowerCase();
+  // A pad, topper, or protector is not a mattress. Its category must not trip this rule.
+  const mattressBlob = (isMattressAccessory(product) ? product : blob)
+    .replace(/\bmattress\s+(?:pads?|toppers?|protectors?)\b/g, " ");
   if (/\bscooter\b|m365|segway|hoverboard/.test(blob)) return "Electric scooter — never list online";
-  if (/fridge|refrigerator|dishwasher|freezer|mattress|box.?spring/.test(blob)) return "Appliance/mattress — never list online";
+  if (/fridge|refrigerator|dishwasher|freezer/.test(blob) || /mattress|box.?spring/.test(mattressBlob)) {
+    return "Appliance/mattress — never list online";
+  }
   if (/\brug\b|carpet|area\s*rug/.test(blob)) return "Rug/carpet — never list online";
   if (/washer(?!\s*fluid)|clothes.?dryer|\brange\b|\bstove\b|\boven\b|cooktop|\bsofa\b|\bcouch\b|loveseat|sectional|recliner|armoire|dresser|wardrobe/.test(blob)) {
     return "Oversized furniture/appliance — never list online";
@@ -613,8 +620,38 @@ export function parseCatalogItem(item) {
   };
 }
 
+/** Digit forms of one barcode (UPC-A, EAN-13, GTIN-14, and the same code without leading zeros). */
+export function identifierForms(raw) {
+  const d = String(raw ?? "").replace(/\D/g, "");
+  const forms = new Set();
+  if (!d) return forms;
+  const add = (v) => { if (v) forms.add(v); };
+  add(d);
+  const stripped = d.replace(/^0+/, "");
+  add(stripped);
+  for (const body of [d, stripped]) {
+    if (!body || body.length > 14) continue;
+    add(body.padStart(12, "0"));
+    add(body.padStart(13, "0"));
+    add(body.padStart(14, "0"));
+  }
+  return forms;
+}
+
+/** True when a catalog item lists the barcode that was scanned, not a nearby search hit. */
+export function catalogIdentifierMatches(identifiers, queried) {
+  const wanted = identifierForms(queried);
+  if (!wanted.size) return false;
+  for (const id of identifiers || []) {
+    const forms = identifierForms(id?.value ?? id);
+    for (const form of forms) if (wanted.has(form)) return true;
+  }
+  return false;
+}
+
 /**
  * Catalog lookup by barcode. Returns { found, item (parsed), alternatives }.
+ * Items whose own identifiers do not include the scanned code are not a match.
  * @param {string} identifierType UPC | EAN | GTIN
  */
 export async function catalogItemByIdentifier(storeId, identifierType, value) {
@@ -627,10 +664,12 @@ export async function catalogItemByIdentifier(storeId, identifierType, value) {
   const json = await spapiFetch(storeId, "GET", path);
   const items = json?.items || json?.payload?.items || [];
   const parsed = items.map(parseCatalogItem).filter(Boolean);
+  const matched = parsed.filter((item) => catalogIdentifierMatches(item.identifiers, digits));
   return {
-    found: parsed.length > 0,
-    item: parsed[0] || null,
-    alternatives: parsed.slice(1).map((p) => ({ asin: p.asin, title: p.title })),
+    found: matched.length > 0,
+    identifier_match: matched.length > 0,
+    item: matched[0] || null,
+    alternatives: matched.slice(1).map((p) => ({ asin: p.asin, title: p.title })),
   };
 }
 
