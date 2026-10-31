@@ -15,6 +15,13 @@ import { DispositionButtons } from './DispositionDialogs';
 import { QuantityPicker } from './ReceiveQuantity';
 import { printUnitLabels } from './ReceiveGroupRow';
 import { locationParts } from './locationOrder';
+import {
+  applyPartialLocationMove,
+  applySimpleLocationChange,
+  formatLocationSummary,
+  singleBinOrUnassigned,
+  unassignedQty,
+} from './locationStock';
 
 type Photo = { id: number; path: string; is_primary: boolean; sort_order?: number; source?: string; source_url?: string };
 type StockCandidate = { image_url: string; source_url: string; title: string; score: number };
@@ -146,9 +153,13 @@ export function UnitEditDrawer({
   const [onlineExpanded, setOnlineExpanded] = useState(false);
   const [channelSelections, setChannelSelections] = useState<Record<ChannelChoice, boolean> | null>(null);
   const [dnsPending, setDnsPending] = useState<boolean | null>(null);
-  const [quantityLocations, setQuantityLocations] = useState<string[]>([]);
+  const [locationAllocations, setLocationAllocations] = useState<{ location_code: string; quantity: number }[]>([]);
   const [locationOptions, setLocationOptions] = useState<{code:string;label:string}[]>([]);
   const [locationDraft, setLocationDraft] = useState('');
+  const [locationMoveQty, setLocationMoveQty] = useState('1');
+  const [locationMoveFrom, setLocationMoveFrom] = useState('__unassigned__');
+  const [locationMoveTo, setLocationMoveTo] = useState('');
+  const locationBaseline = useRef('');
   const specificsDirty = useRef(false);
   const specificsPersist = useRef<null | (() => Promise<void>)>(null);
   const upcEnrichment = useRef<{ specs: Record<string, unknown>; msrp: number | null; brand: string | null; model: string | null; title: string | null; description: string | null } | null>(null);
@@ -174,7 +185,7 @@ export function UnitEditDrawer({
   const gapLabel: Record<string,string> = { photo:'photos', price:'price', brand:'brand', condition:'condition', category:'eBay category', category_review:'eBay category review', specifics:'eBay item specifics', spec:'package size for shipping', upc:'UPC', model:'model', title:'title', description:'description' };
   const cancel = () => {
     const initial = fromUnit(unit);
-    const hasChanges = JSON.stringify(form) !== JSON.stringify(initial) || latestDescription.current != null || specificsDirty.current || (channelSelections !== null && JSON.stringify(channelSelections)!==JSON.stringify(channelBaseline.current)) || dnsPending !== null || quantityDraft !== String(Math.max(1, Number(unit.qty_on_hand ?? 1) || 1)) || locationDraft !== (quantityLocations[0]||'') || upcEnrichment.current !== null;
+    const hasChanges = JSON.stringify(form) !== JSON.stringify(initial) || latestDescription.current != null || specificsDirty.current || (channelSelections !== null && JSON.stringify(channelSelections)!==JSON.stringify(channelBaseline.current)) || dnsPending !== null || quantityDraft !== String(Math.max(1, Number(unit.qty_on_hand ?? 1) || 1)) || locationDraft !== locationBaseline.current || locationMoveTo.trim() !== '' || upcEnrichment.current !== null;
     if (hasChanges && !window.confirm('Discard unsaved changes?')) return;
     onClose();
   };
@@ -186,15 +197,20 @@ export function UnitEditDrawer({
     void (async () => {
       const canQueryTables=typeof client.from==='function';
       const [stock, pick, bins, selection, dns] = await Promise.all([
-        canQueryTables?client.from('unit_location_stock').select('location_code').eq('store_id',storeId).eq('sku',sku):Promise.resolve({data:[]}),
+        canQueryTables?client.from('unit_location_stock').select('location_code,quantity').eq('store_id',storeId).eq('sku',sku):Promise.resolve({data:[]}),
         canQueryTables?client.from('unit_pick_locations').select('location_code').eq('store_id',storeId).eq('sku',sku).maybeSingle():Promise.resolve({data:null}),
         canQueryTables?client.from('store_locations').select('code').eq('store_id',storeId).order('code'):Promise.resolve({data:[]}),
         client.rpc('portal_unit_channel_selections',{p_sku:sku}), client.rpc('portal_unit_dns',{p_sku:sku}),
       ]);
       if (!live) return;
-      const assigned=(stock.data||[]).map(row=>String(row.location_code));
-      if(!assigned.length&&pick.data?.location_code)assigned.push(String(pick.data.location_code));
-      setQuantityLocations(assigned);setLocationDraft(assigned[0]||'');
+      const allocations=(stock.data||[]).map(row=>({location_code:String(row.location_code),quantity:Number(row.quantity)||0}));
+      const primary=allocations.length===1?allocations[0].location_code:(pick.data?.location_code?String(pick.data.location_code):'');
+      setLocationAllocations(allocations);
+      setLocationDraft(primary);
+      locationBaseline.current=primary;
+      setLocationMoveQty('1');
+      setLocationMoveFrom(allocations[0]?.location_code || '__unassigned__');
+      setLocationMoveTo('');
       setLocationOptions((bins.data||[]).map(row=>{const code=String(row.code);const parts=locationParts(code);return {code,label:parts?`${parts.display} · ${parts.slot}`:code};}));
       if(!selection.error&&selection.data){const src=selection.data as Record<string,{selected:boolean}>;channelBaseline.current=Object.fromEntries(CHANNELS.map(ch=>[ch,Boolean(src[ch]?.selected)])) as Record<ChannelChoice,boolean>;}
     })();return()=>{live=false;};
@@ -344,12 +360,23 @@ export function UnitEditDrawer({
           else if(canDelete&&target>1){const {error:qtyError}=await client.rpc('portal_stock_add',{p_sku:sku,p_quantity:target-stockQuantity,p_cost_cents:null});if(qtyError)throw qtyError;}
         }
       }
-      if(locationDraft!==(quantityLocations[0]||'')){
-        if(quantityLocations.length>1)throw new Error('This SKU has stock in multiple locations. Use the Locations page to move it safely.');
-        if(!locationDraft)throw new Error('Choose a location. To unassign stock, use the Locations page.');
-        const current=quantityLocations[0]||'';
-        if(current){const {data:row}=await client.from('unit_location_stock').select('quantity').eq('store_id',storeId).eq('sku',sku).eq('location_code',current).maybeSingle();const {error:moveError}=await client.rpc('portal_move_location_stock',{p_sku:sku,p_to:locationDraft,p_quantity:Math.max(1,Number(row?.quantity)||1),p_from:current});if(moveError)throw moveError;}
-        else {const {error:moveError}=await client.rpc('portal_move_location_stock',{p_sku:sku,p_to:locationDraft,p_quantity:Math.max(1,stockQuantity),p_from:null});if(moveError)throw moveError;}
+      const onHand=Math.max(1,Number(stockQuantity)||1);
+      if(locationMoveTo.trim()){
+        const qty=Number(locationMoveQty);
+        if(!Number.isInteger(qty)||qty<1)throw new Error('Move quantity must be a whole number.');
+        await applyPartialLocationMove(client,sku,qty,locationMoveFrom,locationMoveTo,locationAllocations,onHand);
+      } else if(locationDraft!==locationBaseline.current){
+        await applySimpleLocationChange(client,sku,onHand,locationAllocations,locationDraft);
+      }
+      if(locationMoveTo.trim() || locationDraft!==locationBaseline.current){
+        const { data: stockRows } = await client.from('unit_location_stock').select('location_code,quantity').eq('store_id', storeId).eq('sku', sku);
+        const nextAlloc=(stockRows||[]).map(row=>({location_code:String(row.location_code),quantity:Number(row.quantity)||0}));
+        const primary=nextAlloc.length===1?nextAlloc[0].location_code:'';
+        setLocationAllocations(nextAlloc);
+        setLocationDraft(primary);
+        locationBaseline.current=primary;
+        setLocationMoveTo('');
+        setLocationMoveFrom(nextAlloc[0]?.location_code || '__unassigned__');
       }
     } catch(saveError){setBusy(false);setError(errText(saveError));return;}
     setBusy(false);
@@ -679,7 +706,30 @@ export function UnitEditDrawer({
           <label data-gap-target="model" id="unit-edit-model" className={currentMissing.includes('model') ? 'unit-edit-required' : ''}>Model<input value={form.model} onChange={e => set('model', e.target.value)} />{currentMissing.includes('model') && <small>Required</small>}</label>
           <label data-gap-target="title" id="unit-edit-title" className={`unit-edit-wide${currentMissing.includes('title') ? ' unit-edit-required' : ''}`}>Title<input maxLength={80} value={form.title} onChange={e => set('title', e.target.value)} />{currentMissing.includes('title') && <small>Required</small>}<small>{form.title.length} / 80 characters</small></label>
           <div data-gap-target="description" id="unit-edit-description" className={`unit-edit-wide unit-edit-description${currentMissing.includes('description') ? ' unit-edit-required' : ''}`}><span>Description</span><p>{form.description ? `${form.description.slice(0,180)}${form.description.length>180?'…':''}` : 'Add a product description'}</p>{currentMissing.includes('description')&&<small>Required</small>}<button type="button" className="text-button" onClick={()=>setDescriptionOpen(true)}>{form.description.length>180?'Show all · Edit':'Edit description'}</button></div>
-          <label id="unit-edit-location">Location<select value={locationDraft} onChange={e=>setLocationDraft(e.target.value)}><option value="">Choose location</option>{locationOptions.map(o=><option key={o.code} value={o.code}>{o.label}</option>)}</select></label>
+          <div id="unit-edit-location" className="unit-edit-wide unit-edit-location">
+            <span>Stock locations</span>
+            <p>{formatLocationSummary(Math.max(1, Number(stockQuantity) || 1), locationAllocations)}</p>
+            {singleBinOrUnassigned(locationAllocations, Math.max(1, Number(stockQuantity) || 1)) ? (
+              <label>Location<select value={locationDraft} onChange={(e) => setLocationDraft(e.target.value)}>
+                <option value="">Unassigned</option>
+                {locationOptions.map((o) => <option key={o.code} value={o.code}>{o.label}</option>)}
+              </select></label>
+            ) : (
+              <div className="unit-edit-grid">
+                <label>Move quantity<input inputMode="numeric" type="number" min="1" step="1" value={locationMoveQty} onChange={(e) => setLocationMoveQty(e.target.value)} /></label>
+                <label>From<select value={locationMoveFrom} onChange={(e) => setLocationMoveFrom(e.target.value)}>
+                  {unassignedQty(Math.max(1, Number(stockQuantity) || 1), locationAllocations) > 0 && <option value="__unassigned__">Unassigned</option>}
+                  {locationAllocations.map((row) => <option key={row.location_code} value={row.location_code}>{row.location_code} · {row.quantity}</option>)}
+                </select></label>
+                <label>To<select value={locationMoveTo} onChange={(e) => setLocationMoveTo(e.target.value)}>
+                  <option value="">—</option>
+                  <option value="__unassigned__">Unassigned</option>
+                  {locationOptions.map((o) => <option key={o.code} value={o.code}>{o.label}</option>)}
+                </select></label>
+                <small className="unit-edit-wide">Choose From/To and save to move units. Same history as the Locations tab.</small>
+              </div>
+            )}
+          </div>
         </div>
         <h3>Pricing</h3>
         <div className="unit-edit-grid">

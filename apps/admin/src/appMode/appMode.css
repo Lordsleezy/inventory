@@ -844,6 +844,9 @@ html.app-mode .app-bulk-bar button {
   font-size: 14px;
 }
 html.app-mode .app-bulk-bar span { margin-left: auto; color: #8e8e93; font-size: 13px; }
+html.app-mode .app-row.is-selected { background: #2c2c2e; }
+html.app-mode .app-row-check { width: 28px; flex: 0 0 28px; text-align: center; font-size: 18px; color: #0a84ff; }
+html.app-mode .location-unassign-toggle { display: flex; align-items: center; gap: 8px; grid-column: 1 / -1; font-size: 0.9rem; }
 
 html.app-mode .app-more-left {
   display: flex;

@@ -38,6 +38,10 @@ select throws_ok($$select public.portal_move_location_stock('94001','14-1-2',3,'
 select throws_ok($$select public.portal_move_location_stock('94001','14-1-2',2,null)$$,'P0001','not_enough_unassigned_stock','cannot exceed unassigned stock');
 select throws_ok($$select public.portal_move_location_stock('94001','14-1-2',1,'14-2-1')$$,'P0001','not_enough_stock_at_source','cannot move from incorrect source');
 select lives_ok($$select public.portal_move_location_stock('94001','14-1-2',1,'14-1-1')$$,'move from verified source');
+select lives_ok($$select public.portal_move_location_stock('94001','',1,'14-1-2')$$,'unassign one unit from bin');
+select is((select to_location from public.unit_location_moves where store_id=current_setting('tools.store')::uuid and sku='94001' order by id desc limit 1),null,'unassign move records null destination');
+select is((select sum(quantity)::int from public.unit_location_stock where store_id=current_setting('tools.store')::uuid),1,'unassign reduces assigned quantity');
+select lives_ok($$select public.portal_move_location_stock('94001','14-1-1',1,null)$$,'put away unassigned unit after unassign');
 select is((select sum(quantity)::int from public.unit_location_stock where store_id=current_setting('tools.store')::uuid),2,'move conserves assigned quantity');
 select is((select qty_on_hand from public.units where store_id=current_setting('tools.store')::uuid and sku='94001'),3,'movement never changes total inventory quantity');
 select * from finish();
