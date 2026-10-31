@@ -90,8 +90,8 @@ export function DepopSalePanel({ client, money, variant, initialSku, initialSale
         if (e) throw e;
         const r = data as { cost_missing: boolean };
         setNotice(r.cost_missing
-          ? `Saved. SKU ${unit.sku} is sold, but it has no cost yet, so Paul's payout waits until you enter one.`
-          : `Saved. SKU ${unit.sku} is sold and delisted everywhere else.`);
+          ? `Saved. SKU ${unit.sku} is recorded, but it has no cost yet, so Paul's payout waits until you enter one.`
+          : `Saved. The Depop sale for SKU ${unit.sku} is recorded.`);
       }
       reset();
       await loadEntries();
