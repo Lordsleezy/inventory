@@ -168,5 +168,5 @@ export async function queuePublish({ loadUnit, existingListing, publish }, store
   if (!priceCents) return { ok: false, error: "missing price: set the Floor price" };
   const existing = await existingListing(storeId, channel, sku);
   if (existing) return { ok: true, already_live: true, url: existing.url || "already_live" };
-  return publish(storeId, { channel, sku, priceCents });
+  return publish(storeId, { channel, sku, priceCents, quantity: Math.max(0, Math.trunc(Number(unit.qty_on_hand ?? unit.available_qty ?? 1))) });
 }

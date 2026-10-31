@@ -43,6 +43,9 @@ test("rugs stay eligible and appliances, mattresses, and the scooter do not", ()
   assert.deepEqual(marketplaceBlocks({ title: "Compact fridge" }), ["fridge"]);
   assert.deepEqual(marketplaceBlocks({ category: "Dishwashers", title: "Bosch" }), ["dishwasher"]);
   assert.deepEqual(marketplaceBlocks({ title: "Queen mattress" }), ["mattress"]);
+  assert.deepEqual(marketplaceBlocks({ title: "Queen mattress pad" }), []);
+  assert.deepEqual(marketplaceBlocks({ title: "Memory foam mattress topper" }), []);
+  assert.deepEqual(marketplaceBlocks({ title: "Waterproof mattress protector" }), []);
   assert.deepEqual(marketplaceBlocks({ title: "Box spring" }), ["mattress"]);
   assert.deepEqual(marketplaceBlocks({ sku: "11284", title: "Bike" }), ["scooter"]);
   assert.deepEqual(marketplaceBlocks({ title: "Segway hoverboard" }), ["scooter"]);

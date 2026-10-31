@@ -27,6 +27,7 @@ import {
   encryptSecret,
 } from "./server.mjs";
 import { sendInternalAlert, gmailConfigured } from "./mail.mjs";
+import { orderLineQty } from "./channel-qty-sync.mjs";
 import { ingestReturnRow, reservePctForChannel, applyReturnReserveCents } from "./returns.mjs";
 import {
   evaluateMarketplaceEligibility,
@@ -556,7 +557,7 @@ export async function listTikTokProduct(storeId, { unit, sku, priceCents } = {})
       {
         seller_sku: code,
         price: { amount: (listCents / 100).toFixed(2), currency: "USD" },
-        inventory: [{ warehouse_id: process.env.TIKTOK_SHOP_WAREHOUSE_ID || undefined, quantity: 1 }],
+        inventory: [{ warehouse_id: process.env.TIKTOK_SHOP_WAREHOUSE_ID || undefined, quantity: Math.max(1, Math.trunc(Number(u?.qty_on_hand ?? 1))) }],
       },
     ],
     listing_platforms: ["TIKTOK_SHOP"],
@@ -668,10 +669,11 @@ export async function ingestTikTokOrder(storeId, order) {
   const itemCents = orderPaidCents(order);
   const feeCents = Math.round(itemCents * tiktokFeePct());
 
-  const { data: sale, error } = await sb.rpc("finalize_sale", {
+  const { data: sale, error } = await sb.rpc("finalize_sale_qty", {
     p_sku: String(sku),
     p_channel: "tiktok",
     p_price_cents: itemCents,
+    p_qty: orderLineQty("tiktok", order),
     p_payment_method: "tiktok",
     p_payment_id: `tiktok:${orderId}`,
     p_note: `TikTok Shop order (fee~$${(feeCents / 100).toFixed(2)})`,
@@ -740,6 +742,25 @@ export async function ingestTikTokOrder(storeId, order) {
   }
 
   return { sku, orderId, saleId: sale?.id, feeCents, itemCents };
+}
+
+/** Stock update only. Price and product content stay on the existing product. */
+export async function setTikTokAvailableQuantity(storeId, sku, quantity) {
+  const qty = Math.max(0, Math.trunc(Number(quantity) || 0));
+  const sb = serviceClient();
+  const { data: row } = await sb.from("tiktok_list_items").select("product_id").eq("store_id", storeId).eq("sku", sku).maybeSingle();
+  if (!row?.product_id) return { ok: false, reason: "not_listed" };
+  if (!tiktokAppCredsPresent()) return { ok: false, reason: "tiktok_env_missing" };
+  const api = await tiktokApiFetch(storeId, "POST", `/product/202309/products/${encodeURIComponent(row.product_id)}/inventory/update`, {
+    skus: [{ seller_sku: String(sku), inventory: [{ quantity: qty, warehouse_id: process.env.TIKTOK_SHOP_WAREHOUSE_ID || undefined }] }],
+  });
+  if (qty < 1) {
+    await tiktokApiFetch(storeId, "POST", "/product/202309/products/deactivate", { product_ids: [row.product_id] }).catch(() => null);
+  } else {
+    await tiktokApiFetch(storeId, "POST", "/product/202309/products/activate", { product_ids: [row.product_id] }).catch(() => null);
+  }
+  const ok = api?.code === 0 || api?.code === "0";
+  return ok ? { ok: true, quantity: qty } : { ok: false, reason: "tiktok_qty_failed", message: api?.message || api?.msg || "tiktok_qty_failed" };
 }
 
 export async function delistTikTokSku(storeId, sku) {

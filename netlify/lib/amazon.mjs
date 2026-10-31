@@ -9,6 +9,7 @@ import { serviceClient, decryptSecret, encryptSecret, requireEnv } from "./serve
 import { assertBundlePush } from "./bundle-gate.mjs";
 import { sendInternalAlert, gmailConfigured } from "./mail.mjs";
 import { isMattressAccessory } from "../../shared/receive-category.mjs";
+import { orderLineQty } from "./channel-qty-sync.mjs";
 
 const LWA_TOKEN = "https://api.amazon.com/auth/o2/token";
 /** US marketplace — not a secret; keep out of Netlify env to save Lambda budget / clutter. */
@@ -896,7 +897,7 @@ export async function listAmazonOffer(storeId, kit) {
       fulfillment_availability: [
         {
           fulfillment_channel_code: "DEFAULT",
-          quantity: 1,
+          quantity: Math.max(1, Math.trunc(Number(kit?.quantity ?? unit?.qty_on_hand ?? 1))),
           marketplace_id: marketplaceId(),
         },
       ],
@@ -1114,17 +1115,17 @@ export async function syncAmazonOfferQuantity(storeId, offerSku) {
   const floorSku = listing?.sku || sku;
   const { data: unit } = await sb
     .from("units")
-    .select("sku,state")
+    .select("sku,state,qty_on_hand")
     .eq("store_id", storeId)
     .eq("sku", floorSku)
     .maybeSingle();
-  const qty = unit && (unit.state === "available" || unit.state === "reserved") ? 1 : 0;
+  const { data: available, error: availableError } = await sb.rpc("channel_available_qty", { p_store: storeId, p_sku: floorSku });
+  const fromLedger = !availableError && Number.isInteger(Number(available)) ? Number(available) : null;
+  const sellable = unit && (unit.state === "available" || unit.state === "reserved");
+  const qty = fromLedger != null ? Math.max(0, fromLedger) : (sellable ? Math.max(0, Math.trunc(Number(unit?.qty_on_hand ?? 1))) : 0);
   if (!listing || listing.status !== "listed") {
     if (qty === 0) return { ok: true, sku: floorSku, offerSku: sku, quantity: 0, skipped: "not_listed" };
     return { ok: false, reason: "not_listed", sku: floorSku, offerSku: sku };
-  }
-  if (qty === 0) {
-    return { ...(await zeroAmazonQuantityForSku(storeId, floorSku)), quantity: 0, offerSku: sku };
   }
   try {
     await spapiFetch(
@@ -1224,10 +1225,11 @@ export async function ingestAmazonOrder(storeId, order) {
   const taxCents = orderTaxCents(item);
   const feeCents = amazonReferralFeeCents(itemCents);
 
-  const { data: sale, error } = await sb.rpc("finalize_sale", {
+  const { data: sale, error } = await sb.rpc("finalize_sale_qty", {
     p_sku: String(sku),
     p_channel: "amazon",
     p_price_cents: itemCents,
+    p_qty: orderLineQty("amazon", order),
     p_payment_method: "amazon",
     p_payment_id: `amazon:${orderId}`,
     p_note: `Amazon order (referral~$${(feeCents / 100).toFixed(2)}; tax remitted by Amazon)`,

@@ -226,6 +226,17 @@ const rest = all.filter((f) => f.name > "0005_private_photos.sql");
     'stock add updates on-hand atomically');
   assert.equal((await db.query(`select public.portal_inventory_received_total() as total`)).rows[0].total - receivedBeforeStock, 17,
     'all-time inventoried total includes stock added after receipt');
+  assert.equal(Number((await db.query(`select public.channel_available_qty($1,$2) as q`, [storeId, stockedSku])).rows[0].q), 17,
+    'channel available quantity equals on-hand when nothing is held');
+  const mattressRule = String.raw`\mmattress(es)?\M(?!\s+(pads?|toppers?|protectors?))`;
+  assert.equal((await db.query(`select count(*)::int as n from public.listing_never_rules where note='Mattresses' and value = $1`, [String.raw`\mmattress(es)?\M`])).rows[0].n, 0,
+    'the mattress never-list rule no longer treats every mattress word as a mattress');
+  for (const title of ['Queen mattress pad', 'mattress topper', 'mattress protector']) {
+    assert.equal((await db.query(`select $1 ~* $2 as blocked`, [title, mattressRule])).rows[0].blocked, false, `${title} is not a never-list mattress`);
+  }
+  assert.equal((await db.query(`select $1 ~* $2 as blocked`, ['Queen mattress', mattressRule])).rows[0].blocked, true,
+    'an actual mattress stays never-list');
+  await db.query(`update public.units set show_on_website=true where store_id=$1 and sku=$2`, [storeId, stockedSku]);
   assert.equal((await db.query(`select public.portal_stock_adjust($1,'set',13,'count_correction')`, [stockedSku])).rows[0].portal_stock_adjust, 13,
     'count correction can set a non-negative balance');
   const setHistory = (await db.query(`select public.portal_stock_history($1) history`, [stockedSku])).rows[0].history;
@@ -241,6 +252,8 @@ const rest = all.filter((f) => f.name > "0005_private_photos.sql");
   await db.query(`select public.portal_stock_adjust($1,'set',0,'count_correction')`, [stockedSku]);
   const { rows: zeroCount } = await db.query(`select qty_on_hand,state from public.units where store_id=$1 and sku=$2`, [storeId, stockedSku]);
   assert.deepEqual(zeroCount[0], { qty_on_hand: 0, state: 'available' }, 'zero quantity remains available/out-of-stock rather than sold');
+  assert.equal((await db.query(`select show_on_website from public.units where store_id=$1 and sku=$2`, [storeId, stockedSku])).rows[0].show_on_website, false,
+    'zero stock hides the website listing');
   await db.query(`select public.portal_stock_adjust($1,'set',13,'count_correction')`, [stockedSku]);
   await db.query(`update public.unit_location_stock set quantity=12 where store_id=$1 and sku=$2 and location_code='1-1'`, [storeId,stockedSku]);
   await assert.rejects(db.query(`select public.portal_stock_adjust($1,'set',-1,'count_correction')`, [stockedSku]), /stock_cannot_be_negative/,

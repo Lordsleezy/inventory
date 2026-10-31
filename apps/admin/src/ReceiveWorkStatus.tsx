@@ -25,8 +25,11 @@ export function ReceiveWorkStatus({ client, accessToken, sku }: { client: Supaba
         } catch { /* ignore unrelated device cache */ }
       }
       if (alive) setPending(recovered);
-      const { data, error } = await client.rpc('receive_work_status', { p_sku: sku || null });
-      if (alive && !error) setRows(data || []);
+      if (!sku) { if (alive) setRows([]); }
+      else {
+        const { data, error } = await client.rpc('receive_work_status', { p_sku: sku });
+        if (alive && !error) setRows(data || []);
+      }
       } catch { /* status polling must not interrupt receiving or authentication changes */ }
     };
     let timer: number | null = null;
@@ -67,4 +70,22 @@ export function ReceiveWorkStatus({ client, accessToken, sku }: { client: Supaba
       ? `Needs attention: ${row.last_error || row.step}. Will retry automatically.` : `Finishing ${row.step} in background…`}
     {row.status === 'retry' && <button type="button" className="text-button" onClick={() => void retry(row)}>Retry now</button>}
   </p>)}</div> : null;
+}
+
+/** Receive and listing errors for other SKUs belong on Inventory, with a jump to the item. */
+export function ReceiveIssueLinks({ client, onOpen }: { client: SupabaseClient; onOpen: (sku: string) => void }) {
+  const [rows, setRows] = useState<Work[]>([]);
+  useEffect(() => {
+    let alive = true;
+    void client.rpc('receive_work_status', { p_sku: null }).then(({ data, error }) => {
+      if (!alive || error) return;
+      setRows(((data || []) as Work[]).filter(row => row.status === 'retry' || row.last_error));
+    });
+    return () => { alive = false; };
+  }, [client]);
+  if (!rows.length) return null;
+  return <section className="panel" aria-label="Receive issues">
+    <h2>Receive issues</h2>
+    <ul>{rows.map(row => <li key={row.sku}><button type="button" className="text-button" onClick={() => onOpen(row.sku)}>SKU {row.sku}</button> {row.last_error || row.step}</li>)}</ul>
+  </section>;
 }

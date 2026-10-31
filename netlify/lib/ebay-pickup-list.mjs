@@ -135,7 +135,8 @@ export function pickupCandidateBlocked(unit) {
   const banned = prohibitedReason(unit);
   if (banned) return `prohibited_${banned}`;
   const blob = [unit.title, unit.brand, unit.model, unit.category].filter(Boolean).join(" ");
-  if (BLOCKED_TITLE.test(blob)) return "blocked_category_or_title";
+  const checked = blob.replace(/\bmattress\s+(?:pads?|toppers?|protectors?)\b/gi, " ");
+  if (BLOCKED_TITLE.test(checked)) return "blocked_category_or_title";
   return null;
 }
 

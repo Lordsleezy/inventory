@@ -3,6 +3,7 @@
  * Selects and signed photo URLs only. No inserts, updates, deletes, or RPCs.
  */
 import { createHash, timingSafeEqual } from "node:crypto";
+import { isMattressAccessory } from "../../shared/receive-category.mjs";
 
 export const PHOTO_TTL_SECONDS = 3600;
 export const DEFAULT_LIMIT = 25;
@@ -132,7 +133,8 @@ export function marketplaceBlocks(unit = {}) {
   if (SCOOTER_SKUS.has(sku) || /\b(scooters?|hoverboards?|m365|segway)\b/i.test(blob)) reasons.push("scooter");
   if (/\b(fridges?|refrigerators?)\b/i.test(blob)) reasons.push("fridge");
   if (/\bdishwashers?\b/i.test(blob)) reasons.push("dishwasher");
-  if (/\bmattress(?:es)?\b|\bbox\s*springs?\b/i.test(blob)) reasons.push("mattress");
+  const mattressBlob = isMattressAccessory(blob) ? blob.replace(/\bmattress\s+(?:pads?|toppers?|protectors?)\b/gi, " ") : blob;
+  if (/\bmattress(?:es)?\b|\bbox\s*springs?\b/i.test(mattressBlob)) reasons.push("mattress");
   return reasons;
 }
 

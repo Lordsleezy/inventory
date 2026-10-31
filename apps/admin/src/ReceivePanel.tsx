@@ -1362,7 +1362,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         p_request: receiveRequest.current, p_fields: fields, p_photos: unitPhotoPaths,
         p_extras: { location: selectedLocation || null, manifest: staffMode ? null : manifestId || null,
           dns: !staffMode && doNotShip, do_not_list: doNotList,
-          channels: staffMode || quantity > 1 ? [] : channels, enrichment,
+          channels: staffMode ? [] : channels, enrichment,
           stock_photo_paths: acceptedStockPhotoPath ? [acceptedStockPhotoPath] : [],
           photo_identity_confirmed: photoTitleConfirmed,
           photo_identity_type: photoTitleConfirmed ? text(photoIdentity?.item_type) : '' },
@@ -1989,7 +1989,6 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           : <> <button type="button" disabled={busy} onClick={() => setSelectedStockMatch(match)}>Different item, new SKU</button></>}</p>)}
         {selectedStockMatch && <div><p>SKU {selectedStockMatch.sku} goes to {selectedStockMatch.quantity + Number(form.quantity || 0)} on hand.</p><button type="button" disabled={busy} onClick={() => void addToExistingStock(selectedStockMatch)}>Add {Number(form.quantity || 0)} to SKU {selectedStockMatch.sku}</button><button type="button" className="secondary" onClick={() => setSelectedStockMatch(null)}>Different item, new SKU</button></div>}
         <small>Matches require the same UPC (or exact no-UPC title), price and condition.</small></div>}
-      {Number(form.quantity)>1 && <p role="status">Intake only: these units will not be published to any channel.</p>}
       {dups && dups.count > 0 && <div className="receive-dup" role="status">
         <strong>You have {dups.count} of these</strong>{dups.skus.length ? <> (SKU {dups.skus.slice(0, 8).join(', ')}{dups.skus.length > 8 ? '…' : ''})</> : null}
         {!dupAck ? <> <button type="button" className="secondary" onClick={confirmDup}>Add another unit</button></> : <span className="tag on">confirmed — new unit</span>}

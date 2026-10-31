@@ -491,6 +491,13 @@ export function UnitEditDrawer({
 
   const stockQuantity = Math.max(0, Number(unit.qty_on_hand ?? 1) || 0);
   const isStocked = Boolean(unit.is_stocked) || stockQuantity > 1;
+  const [depopHint, setDepopHint] = useState<{ live?: boolean; quantity?: number; stale?: boolean } | null>(null);
+  useEffect(() => {
+    if (!isStocked) { setDepopHint(null); return; }
+    let alive = true;
+    void client.rpc('portal_depop_quantity_hint', { p_sku: sku }).then(({ data }) => { if (alive) setDepopHint((data || null) as { live?: boolean; quantity?: number; stale?: boolean } | null); });
+    return () => { alive = false; };
+  }, [client, sku, isStocked, stockQuantity]);
   const refreshStockHistory = async () => {
     const { data, error: e } = await client.rpc('portal_stock_history', { p_sku: sku });
     if (!e) setStockHistory((data || []) as StockMovement[]);
@@ -601,7 +608,7 @@ export function UnitEditDrawer({
         {canDelete && unit.state === 'sold' && <RestoreInventoryButton client={client} sku={sku} onDone={() => { onSaved({ ...unit, state: 'available' }); onClose(); }} />}
         {isStocked && <section className="unit-stock-card" aria-label="Stock quantity">
           <button type="button" className="unit-quantity-step" aria-label="Decrease quantity" disabled={!canDelete || busy || Number(quantityDraft)<=0} onClick={()=>setQuantityDraft(String(Math.max(0,Number(quantityDraft||stockQuantity)-1)))}>−</button>
-          <div><span>ON HAND</span><button type="button" className="unit-edit-quantity-display" disabled={!canDelete} onClick={()=>{setQuantityDraft(String(stockQuantity));setQuantitySheetOpen(true);}}>{quantityDraft}</button><small>{stockHistory.filter(m => m.type === 'sold').reduce((n,m) => n + Math.abs(m.delta),0)} sold · {stockHistory.filter(m => ['received','opening_balance','added'].includes(m.type)).reduce((n,m) => n + Math.max(m.delta,0),0)} received</small></div>
+          <div><span>ON HAND</span><button type="button" className="unit-edit-quantity-display" disabled={!canDelete} onClick={()=>{setQuantityDraft(String(stockQuantity));setQuantitySheetOpen(true);}}>{quantityDraft}</button><small>{stockHistory.filter(m => m.type === 'sold').reduce((n,m) => n + Math.abs(m.delta),0)} sold · {stockHistory.filter(m => ['received','opening_balance','added'].includes(m.type)).reduce((n,m) => n + Math.max(m.delta,0),0)} received</small>{depopHint?.live && <p role="status">Depop: set quantity to {depopHint.quantity ?? stockQuantity}.{depopHint.stale ? ' Floor count changed — update Depop.' : ''}</p>}</div>
           <button type="button" className="unit-quantity-step" aria-label="Increase quantity" disabled={!canDelete || busy || Number(quantityDraft)>=999} onClick={()=>setQuantityDraft(String(Math.min(999,Number(quantityDraft||stockQuantity)+1)))}>+</button>
           <button type="button" className="secondary" disabled={!stockQuantity} onClick={() => void printUnitLabels(Array.from({ length: Math.min(stockQuantity,1000) }, () => sku), String(unit.title || `SKU ${sku}`)).catch(e => setError(e.message))}>Labels · {stockQuantity}</button>
           {canDelete && <button type="button" className="secondary" disabled={busy || stockQuantity !== 1} onClick={() => void toggleStocked()}>Convert to one-of-one</button>}
