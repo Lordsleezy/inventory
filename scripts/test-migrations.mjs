@@ -357,6 +357,90 @@ const rest = all.filter((f) => f.name > "0005_private_photos.sql");
   );
   assert.deepEqual(mp.rows[0], { rls: true, anon_insert: false, anon_select: false, auth_update: false, auth_select: true }, "manufacturer_photos locked down");
   await db.query(`select public.anon_can_read_unit_photo('not-a-path')`);
+
+  await db.query(
+    `insert into public.store_settings(store_id,key,value) values($1,'taxRateBps','0')
+     on conflict (store_id,key) do update set value=excluded.value`,
+    [storeId],
+  );
+  await db.query(
+    `insert into public.sku_ledger(sku,issued_at,store_id) values
+      ('98111',now(),$1),('98112',now(),$1),('98113',now(),$1),('98114',now(),$1),('98115',now(),$1),('98116',now(),$1)`,
+    [storeId],
+  );
+  await db.query(`select set_config('floor.receive_not_for_sale','true',false)`);
+  await db.query(
+    `insert into public.units(sku,brand,title,ask_cents,acquisition_cost_cents,state,qty_on_hand,is_stocked,show_on_website,store_id,received_at,updated_at) values
+      ('98111','Acme','Register stock',1000,100,'available',8,true,true,$1,now(),now()),
+      ('98112','Acme','eBay stock',1000,100,'available',5,true,true,$1,now(),now()),
+      ('98113','Acme','Amazon stock',1000,100,'available',5,true,true,$1,now(),now()),
+      ('98114','Acme','Website stock',1000,100,'available',5,true,true,$1,now(),now()),
+      ('98115','Acme','Depop stock',1000,100,'available',5,true,true,$1,now(),now()),
+      ('98116','Acme','One of one',1000,100,'available',1,false,true,$1,now(),now())`,
+    [storeId],
+  );
+  await db.query(`select set_config('floor.receive_not_for_sale','',false)`);
+  await db.query(
+    `update public.units set listing_specs=coalesce(listing_specs,'{}'::jsonb)-'do_not_list', show_on_website=true
+      where store_id=$1 and sku in ('98111','98112','98113','98114','98115','98116')`,
+    [storeId],
+  );
+  await db.query(
+    `insert into public.listings(store_id,sku,channel,status) values
+      ($1,'98112','ebay','listed'),($1,'98115','ebay','listed'),($1,'98115','depop','listed')`,
+    [storeId],
+  );
+  const stockRow = async (sku) => (await db.query(
+    `select u.qty_on_hand,u.state,u.show_on_website,
+            (select coalesce(sum(m.quantity_delta),0)::int from public.stock_movements m where m.store_id=u.store_id and m.sku=u.sku) movement_sum,
+            (select s.qty from public.sales s where s.store_id=u.store_id and s.sku=u.sku and s.voided_at is null order by s.id desc limit 1) sale_qty
+       from public.units u where u.store_id=$1 and u.sku=$2`,
+    [storeId, sku],
+  )).rows[0];
+  await db.query(
+    `select public.finalize_ticket($1::uuid,$2::jsonb,'cash',null,null,'floor')`,
+    ['00000000-0000-4000-8000-000000000701', JSON.stringify([{ sku: '98111', price_cents: 1000, qty: 2 }])],
+  );
+  assert.deepEqual(await stockRow('98111'), { qty_on_hand: 6, state: 'available', show_on_website: true, movement_sum: 6, sale_qty: 2 },
+    'register sale of 2 reduces on-hand by 2 and leaves the SKU for sale');
+  assert.equal((await db.query(`select count(*)::int n from public.delist_tasks where store_id=$1 and sku='98111'`, [storeId])).rows[0].n, 0,
+    'register sale does not delist a stocked SKU that still has quantity');
+  await db.query(
+    `select public.finalize_sale_qty('98112','ebay',1000,1,'ebay','ebay:98112',null,null,null,null,null,0,null)`,
+  );
+  assert.deepEqual(await stockRow('98112'), { qty_on_hand: 4, state: 'available', show_on_website: true, movement_sum: 4, sale_qty: 1 },
+    'eBay sale of 1 reduces on-hand by 1');
+  assert.equal((await db.query(`select status from public.listings where store_id=$1 and sku='98112' and channel='ebay'`, [storeId])).rows[0].status, 'listed',
+    'eBay sale leaves the listing up while quantity remains');
+  await db.query(
+    `select public.finalize_sale_qty('98113','amazon',2000,2,'amazon','amazon:98113',null,null,null,null,null,0,null)`,
+  );
+  assert.deepEqual(await stockRow('98113'), { qty_on_hand: 3, state: 'available', show_on_website: true, movement_sum: 3, sale_qty: 2 },
+    'Amazon sale of 2 reduces on-hand by 2');
+  await db.query(`select set_config('request.jwt.claim.role','service_role',false)`);
+  await db.query(`select set_config('floor.store_id',$1,false)`, [storeId]);
+  await db.query(
+    `select public.web_finalize_ticket($1,$2::uuid,$3::jsonb,'pay-web',null,0,null)`,
+    [storeId, '00000000-0000-4000-8000-000000000702', JSON.stringify([{ sku: '98114', price_cents: 1000, qty: 1 }])],
+  );
+  await db.query(`select set_config('request.jwt.claim.role','authenticated',false)`);
+  assert.deepEqual(await stockRow('98114'), { qty_on_hand: 4, state: 'available', show_on_website: true, movement_sum: 4, sale_qty: 1 },
+    'website sale of 1 reduces on-hand by 1 and leaves the SKU for sale');
+  await db.query(`select public.portal_depop_record_sale('98115',1000,100,null,null,null)`);
+  assert.deepEqual(await stockRow('98115'), { qty_on_hand: 4, state: 'available', show_on_website: true, movement_sum: 4, sale_qty: 1 },
+    'manual Depop sale of 1 reduces on-hand by 1');
+  assert.equal((await db.query(`select status from public.listings where store_id=$1 and sku='98115' and channel='ebay'`, [storeId])).rows[0].status, 'listed',
+    'manual Depop sale does not withdraw the eBay listing');
+  await db.query(`select public.finalize_sale('98116','floor',1000,'cash',null,null,null,null,null,null,0,null)`);
+  assert.equal((await stockRow('98116')).state, 'sold', 'a one-of-one sale still marks the unit sold');
+  await assert.rejects(
+    db.query(`update public.units set state='sold' where store_id=$1 and sku='98111'`, [storeId]),
+    /Sell the quantity on the register/,
+    'a stocked SKU with quantity left cannot be marked sold',
+  );
+  assert.equal((await stockRow('98111')).qty_on_hand, 6, 'rejected wipe leaves on-hand unchanged');
+  console.log('stocked sales reduce on-hand by the quantity sold');
+
   console.log("historical fresh replay (not live): empty → latest ok");
 }
 

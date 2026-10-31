@@ -25,6 +25,7 @@ import {
   shippingTag,
 } from "./marketplace-board-math.mjs";
 import { channelGaps } from "./listing-requirements.mjs";
+import { saleLeavesStock } from "./channel-qty-sync.mjs";
 
 const JOB_KEY = "marketplace_board_job";
 const CHANNELS = new Set(["ebay", "amazon", "tiktok"]);
@@ -746,6 +747,10 @@ async function runOne(storeId, channel, kind, item) {
       p_approval_id: null,
     });
     if (error) return { sku: item.sku, ok: false, error: error.message };
+    const { data: afterSale } = await sb.from("units").select("qty_on_hand,state").eq("store_id", storeId).eq("sku", item.sku).maybeSingle();
+    if (saleLeavesStock(afterSale)) {
+      return { sku: item.sku, ok: true, error: null, sale_id: data?.id || null, receipt_no: data?.receipt_no || null, pulled: [] };
+    }
     const pulled = await endEverywhere(storeId, item.sku, channel, item);
     const pullError = pulled.filter((row) => !row.ok).map((row) => `${row.channel}: ${row.error}`).join(" · ");
     return {
