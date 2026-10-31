@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { floorFunctionUrl } from './floorApi';
-import { commitReceive, type ReceiveRequest } from './receiveCommit';
+import { commitReceive, ReceiveRejectedError, type ReceiveRequest } from './receiveCommit';
 
 type Work = { sku: string; status: string; step: string; attempts: number; last_error: string | null };
 export function ReceiveWorkStatus({ client, accessToken, sku }: { client: SupabaseClient; accessToken: string; sku?: string }) {
@@ -54,10 +54,16 @@ export function ReceiveWorkStatus({ client, accessToken, sku }: { client: Supaba
     if (!pending) return;
     try {
       const store = pending.p_photos[0].split('/')[0];
-      const result = await commitReceive(client, store, pending);
-      setRecovery(`Saved SKU ${result.skus.join(', ')}. Ready for the next scan.`); setPending(null);
+      setRecovery('Recovering…');
+      const result = await commitReceive(client, store, pending, { keepOnReject: true });
+      setRecovery(`Saved SKU ${result.skus.join(', ')}. Ready for the next scan.`); setPending(null); setPendingKey('');
       void fetch(floorFunctionUrl('receive-finish'), { method: 'POST', headers: { Authorization: `Bearer ${accessToken}` } }).catch(() => {});
-    } catch (e) { setRecovery((e as Error).message); }
+    } catch (e) {
+      // A server refusal saved nothing: say so plainly and keep Recover/Discard usable instead of a dead end.
+      setRecovery(e instanceof ReceiveRejectedError
+        ? `${e.message} Recover again once that is fixed, or Discard and receive the item again.`
+        : (e as Error).message);
+    }
   }
   return rows.length || pending || recovery ? <div className="receive-background-status" role="status">
     {pending && <p>A receive save was interrupted for {String(pending.p_fields.p_title || pending.p_fields.p_model || pending.p_request)}. Its photo and entered fields are preserved. You can receive other items. <button type="button" onClick={() => void recover()}>Recover interrupted save</button> <button type="button" onClick={() => {
