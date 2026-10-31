@@ -318,6 +318,17 @@ const rest = all.filter((f) => f.name > "0005_private_photos.sql");
     /unit_photo_required/,
     "for-sale receive still requires a photo server-side",
   );
+  // Legacy 9xxxx stock (even 99999) must not push clerk receives into sku_exhausted.
+  await db.query(`select set_config('request.jwt.claim.sub',$1,false)`, [clerkId]);
+  await db.query(`insert into public.sku_ledger(sku,issued_at,store_id,label,fate) values('99999',now(),$1,'legacy 9xxxx','issued') on conflict do nothing`, [storeId]);
+  const regularNext = (await db.query(`select public.staff_receive_options()->>'next_sku' as sku`)).rows[0].sku;
+  assert.ok(regularNext && regularNext < '90000', `clerk Next SKU stays in the regular range (got ${regularNext})`);
+  await db.query(`select set_config('floor.receive_not_for_sale','true',false)`);
+  const regularSkus = (await db.query(`select public.staff_receive_unit(p_quantity=>1,p_brand=>'Threshold',p_title=>'Curtain',p_ask_cents=>1500)->'skus' as skus`)).rows[0].skus;
+  await db.query(`select set_config('floor.receive_not_for_sale','',false)`);
+  assert.deepEqual(regularSkus, [regularNext], 'clerk receive allocates the advertised regular Next SKU despite a 99999 ledger row');
+  console.log('clerk receive allocates from the regular SKU range');
+  await db.query(`select set_config('request.jwt.claim.sub',$1,false)`, [adminId]);
   await db.query(`update public.staff set deactivated_at=now() where user_id=$1 and store_id=$2`, [clerkId,storeId]);
   console.log("not-for-sale Receive commit: admin and clerk brand-only save ok");
   const { rows: bookPeriods } = await db.query(`select public.portal_books_list('2026-01-01',null) as periods`);
