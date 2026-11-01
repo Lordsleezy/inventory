@@ -22,6 +22,7 @@ import {
   singleBinOrUnassigned,
   unassignedQty,
 } from './locationStock';
+import { acquisitionCostCents as cents } from './missingCost';
 
 type Photo = { id: number; path: string; is_primary: boolean; sort_order?: number; source?: string; source_url?: string };
 type StockCandidate = { image_url: string; source_url: string; title: string; score: number };
@@ -43,15 +44,6 @@ function choices(value: unknown): string[] {
     try { return choices(JSON.parse(value)); } catch { return []; }
   }
   return [];
-}
-
-function cents(input: string): number | null | undefined {
-  const text = input.trim().replace(/^\$/, '').replace(/,/g, '');
-  if (!text) return null;
-  if (!/^\d+(\.\d{0,2})?$/.test(text)) return undefined;
-  const [whole, fraction = ''] = text.split('.');
-  const value = Number(whole) * 100 + Number(fraction.padEnd(2, '0'));
-  return Number.isSafeInteger(value) ? value : undefined;
 }
 
 function moneyText(centsVal: unknown): string {
