@@ -208,3 +208,60 @@ export function remainingProfit(t: TicketLike, rules: Rule[], cfg: OnlineCfg): n
   // Commissions only take from non-negative commission base; owner share can still reflect a loss.
   return p - commissions;
 }
+
+/** Recorded Paul/Jacob cents from sale_commissions (null amount = waiting on cost). */
+export type FrozenCommissionCuts = {
+  paulCents: number | null;
+  jacobCents: number | null;
+};
+
+/** True when sale_commissions has at least one row for this ticket. */
+export function ticketIsFrozen(
+  frozen: Map<string, number | null> | undefined | null,
+  ticketKey: string,
+): boolean {
+  if (!frozen || !ticketKey) return false;
+  const prefix = `${ticketKey}|`;
+  for (const k of frozen.keys()) {
+    if (k.startsWith(prefix)) return true;
+  }
+  return false;
+}
+
+/**
+ * Frozen Paul/Jacob cuts for display. Null when the ticket is not in sale_commissions yet
+ * (browser math still applies). Missing employee rows on a frozen ticket count as $0.
+ */
+export function frozenCutsForTicket(
+  frozen: Map<string, number | null> | undefined | null,
+  ticketKey: string,
+  cfg: OnlineCfg,
+): FrozenCommissionCuts | null {
+  if (!ticketIsFrozen(frozen, ticketKey)) return null;
+  const cut = (emp: string | null | undefined): number | null => {
+    if (!emp || !frozen) return 0;
+    const k = `${ticketKey}|${emp}`;
+    return frozen.has(k) ? frozen.get(k) ?? null : 0;
+  };
+  return { paulCents: cut(cfg.slots?.paul), jacobCents: cut(cfg.slots?.jacob) };
+}
+
+/** Reconstruct frozen commission-profit base from recorded cuts + split %. */
+export function frozenCommissionBase(
+  cuts: FrozenCommissionCuts,
+  paulPct: number,
+  jacobPct: number,
+): number | null {
+  if (paulPct > 0 && cuts.paulCents != null) return Math.round(cuts.paulCents * 100 / paulPct);
+  if (jacobPct > 0 && cuts.jacobCents != null) return Math.round(cuts.jacobCents * 100 / jacobPct);
+  if (cuts.paulCents == null && cuts.jacobCents == null) return null;
+  return (cuts.paulCents ?? 0) + (cuts.jacobCents ?? 0);
+}
+
+/** Owner share using recorded commission cuts instead of live browser math. */
+export function frozenOwnerShare(t: TicketLike, cuts: FrozenCommissionCuts): number | null {
+  const p = profit(t);
+  if (p === null) return null;
+  if (cuts.paulCents == null || cuts.jacobCents == null) return null;
+  return p - cuts.paulCents - cuts.jacobCents;
+}

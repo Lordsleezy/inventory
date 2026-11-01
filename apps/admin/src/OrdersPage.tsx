@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { floorFunctionUrl } from './floorApi';
 import { CommissionOverrideControls, CommissionOverrideMark } from './CommissionOverride';
-import { type CommissionOverride, type OnlineCfg, type Rule } from './payouts';
+import { frozenCutsForTicket, type CommissionOverride, type OnlineCfg, type Rule } from './payouts';
 import { ReturnsPage } from './ReturnsPage';
 import { LabelDialog } from './LabelDialog';
 import { errText } from './errText';
@@ -58,6 +58,8 @@ export type WebOrder = {
 type Props = {
   client: SupabaseClient; accessToken: string; storeId: string; money: (n: number) => string; stamp: (s: string) => string;
   rules: Rule[]; cfg: OnlineCfg; commissionOverrides: Map<string, CommissionOverride>;
+  /** `${ticket_key}|${employee_id}` → frozen commission cents from sale_commissions. */
+  frozen?: Map<string, number | null>;
   personName: (id: string) => string; busy: boolean;
   onCommissionChanged: (ticketKey: string, next: CommissionOverride | null) => void;
 };
@@ -120,7 +122,7 @@ function breakdown(rows: WebOrder[]) {
   };
 }
 
-export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, cfg, commissionOverrides, personName, busy: parentBusy, onCommissionChanged }: Props) {
+export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, cfg, commissionOverrides, frozen, personName, busy: parentBusy, onCommissionChanged }: Props) {
   const [orders, setOrders] = useState<WebOrder[] | null>(null);
   const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({});
   const [locations, setLocations] = useState<Record<string, string[]>>({});
@@ -412,6 +414,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
         rules={rules}
         cfg={cfg}
         override={ov}
+        frozenCuts={frozenCutsForTicket(frozen, o.ticket_key, cfg)}
         personName={personName}
         stamp={stamp}
         money={money}
