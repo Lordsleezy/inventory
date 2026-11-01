@@ -1,7 +1,7 @@
 // node --experimental-strip-types --test scripts/test-admin-payouts.mjs
 import test from "node:test";
 import assert from "node:assert/strict";
-import { payout, remainingProfit, isOnline, profit, commissionProfit, commissionBreakdown, reportProfitCents } from "../apps/admin/src/payouts.ts";
+import { payout, payoutCardIncludesSale, remainingProfit, isOnline, profit, commissionProfit, commissionBreakdown, reportProfitCents } from "../apps/admin/src/payouts.ts";
 
 // Per-store payout people and SKU rates now come from store_payout_people / store_payout_sku_rates.
 const PAYOUT_PAUL_ID = "f17e6163-b10a-4fe1-a373-75c0094e5363";
@@ -31,6 +31,18 @@ test("online sale missing cost is flagged, not guessed, and pays once cost is fi
   assert.equal(payout(t, rules[1], cfg), null);
   assert.equal(remainingProfit(t, rules, cfg), null);
   assert.equal(payout({ ...t, cost: 2500 }, rules[0], cfg), 2250);
+});
+test("eBay sale of a sold unit stays on the Payouts card, including when cost is missing", () => {
+  const ebay = { channels: ["ebay"], pct: 30, employeeId: PAUL, absorbFees: true, slots };
+  const rule = { employee_id: PAUL, method: "percent_profit", rate: 20 };
+  const missing = { subtotal: 1452, cost: null, channel: "ebay", shippingCents: 922, feeCents: 373, shipCostCents: 0, processingFeeCents: 0 };
+  assert.equal(payout(missing, rule, ebay), null);
+  assert.equal(payoutCardIncludesSale(payout(missing, rule, ebay)), true);
+  const sold = { ...missing, cost: 400 };
+  assert.equal(commissionProfit(sold, true), 1452 + 922 - 400);
+  const owed = payout(sold, rule, ebay);
+  assert.equal(owed, Math.round((1452 + 922 - 400) * 0.3));
+  assert.equal(payoutCardIncludesSale(owed), true);
 });
 test("online: zero cost is a real cost; selling below cost pays nothing", () => {
   assert.equal(payout(online(5000, 0), rules[0], cfg), 1500);
