@@ -8,9 +8,11 @@ import { shortError } from './shortError';
 import { InventoryTotals } from '../InventoryTotals';
 import { inventoryMissingText } from '../inventoryMissing';
 import { INVENTORY_BUCKET_LABELS, inventoryBucketStatus, type InventoryBucket } from '../totalsMath';
+import { inventoryChipLabels } from '../missingCost';
+import { MissingCostList } from './MissingCostList';
 
 /** Same stock subtabs as desktop Inventory. */
-type Filter = 'in_stock' | 'sold' | 'unfinished' | 'needs_check' | 'no_location' | 'defective' | 'dns' | InventoryBucket;
+type Filter = 'in_stock' | 'sold' | 'unfinished' | 'needs_check' | 'no_location' | 'missing_cost' | 'defective' | 'dns' | InventoryBucket;
 
 type Row = GroupedInventory & {
   sku: string;
@@ -137,6 +139,7 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
   const [queue, setQueue] = useState<Exclude<AttentionSection, 'all'> | null>(null);
   const [queueRefresh, setQueueRefresh] = useState(0);
   const [noLocationCount, setNoLocationCount] = useState(0);
+  const [missingCostCount, setMissingCostCount] = useState<number | null>(null);
   const [noLocSelecting, setNoLocSelecting] = useState(false);
   const [noLocSelected, setNoLocSelected] = useState<Set<string>>(() => new Set());
   const [noLocBins, setNoLocBins] = useState<string[]>([]);
@@ -150,8 +153,19 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
     void client.rpc('portal_unassigned_inventory_count').then(({ data }) => {
       if (active && typeof data === 'number') setNoLocationCount(data);
     });
+    if (fullAccess) {
+      void Promise.all([
+        client.rpc('receive_inventory_list', { p_query: '', p_status: 'in_stock', p_unfinished: false, p_sort: 'sku', p_offset: 0, p_limit: 1, p_location: 'all' }),
+        client.rpc('receive_inventory_list', { p_query: '', p_status: 'sold', p_unfinished: false, p_sort: 'sku', p_offset: 0, p_limit: 1, p_location: 'all' }),
+      ]).then(([stock, sold]) => {
+        if (!active) return;
+        const stockMissing = (stock.data as { totals?: { missing_cost?: number | null } } | null)?.totals?.missing_cost;
+        const soldMissing = (sold.data as { totals?: { missing_cost?: number | null } } | null)?.totals?.missing_cost;
+        if (typeof stockMissing === 'number' && typeof soldMissing === 'number') setMissingCostCount(stockMissing + soldMissing);
+      });
+    }
     return () => { active = false; };
-  }, [client, storeId, refreshKey]);
+  }, [client, storeId, refreshKey, fullAccess]);
 
   useEffect(() => {
     if (filter !== 'no_location') {
@@ -236,6 +250,10 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
     const apply = (extra: Record<string, string>) => {
       if (alive) mergeUrls(extra);
     };
+    if (filter === 'missing_cost') {
+      setLoading(false);
+      return;
+    }
     const cached = readCache(cacheScope, filter, query, offset);
     if (cached) {
       setList(cached);
@@ -287,11 +305,12 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
     if (filter === 'unfinished') return `${pieces} units unfinished${rowsNote}`;
     if (filter === 'needs_check') return `${pieces} units need to be checked${rowsNote}`;
     if (filter === 'no_location') return `${pieces} in-stock units need a location${rowsNote}`;
+    if (filter === 'missing_cost') return `${missingCostCount ?? 0} units missing a cost`;
     if (filter === 'sold') return `${pieces} units sold${rowsNote}`;
     if (filter === 'dns') return `${pieces} units DNS / Do not ship${rowsNote}`;
     if (filter === 'defective') return `${pieces} units defective / not for sale${rowsNote}`;
     return `${pieces} units in stock${rowsNote}`;
-  }, [filter, total, pieces, rowsNote]);
+  }, [filter, total, pieces, rowsNote, missingCostCount]);
 
   function setFilterTab(next: Filter) {
     setFilter(next);
@@ -334,20 +353,15 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
         />
       </label>
       <InventoryTotals client={client} variant="app" refreshKey={refreshKey} selected={filter in INVENTORY_BUCKET_LABELS ? filter as InventoryBucket : undefined} onSelect={bucket => { setQuery(''); setFilterTab(bucket); setList(null); }} />
-      <div className="app-segment" role="tablist">
-        {([
-          ['in_stock', 'In stock'],
-          ['sold', 'Sold'],
-          ['needs_check', 'Needs check'],
-          ['no_location', `No location ${noLocationCount}`],
-        ] as const).map(([id, label]) => (
+      <div className="app-segment app-segment-scroll" role="tablist">
+        {inventoryChipLabels({ noLocation: noLocationCount, missingCost: missingCostCount, showMissingCost: fullAccess }).map(([id, label]) => (
           <button
             key={id}
             type="button"
             role="tab"
             className={filter === id ? 'active' : ''}
             aria-selected={filter === id}
-            onClick={() => setFilterTab(id)}
+            onClick={() => setFilterTab(id as Filter)}
           >
             {label}
           </button>
@@ -381,11 +395,22 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
         </>
       )}
 
-      {error && <p className="app-inline-error">{error}</p>}
-      {loading && !list && <p className="app-footer-count">Loading…</p>}
-      {loading && list ? <p className="app-footer-count">Updating…</p> : null}
+      {filter === 'missing_cost' && fullAccess && (
+        <MissingCostList
+          client={client}
+          query={query}
+          stamp={stamp}
+          refreshKey={refreshKey}
+          onOpen={sku => onOpen(sku)}
+          onCount={setMissingCostCount}
+        />
+      )}
 
-      <div className="app-group">
+      {filter !== 'missing_cost' && error && <p className="app-inline-error">{error}</p>}
+      {filter !== 'missing_cost' && loading && !list && <p className="app-footer-count">Loading…</p>}
+      {filter !== 'missing_cost' && loading && list ? <p className="app-footer-count">Updating…</p> : null}
+
+      {filter !== 'missing_cost' && <div className="app-group">
         {(list?.items || []).map((u, idx) => {
           if(u.group_id && (u.group_total || 0) > 1) return <ReceiveGroupRow key={u.group_id} item={u} client={client} admin={fullAccess} money={money} onOpen={onOpen} searchQuery={query} onChanged={()=>{setList(null);setQueueRefresh(n=>n+1)}} />;
           const warn = filter === 'dns' ? null : needs(u);
@@ -459,9 +484,9 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
             {error ? 'Couldn’t load inventory — reopen the tab to retry.' : 'Nothing matches this filter.'}
           </div>
         )}
-      </div>
+      </div>}
 
-      {noLocSelecting && noLocSelected.size > 0 && (
+      {filter !== 'missing_cost' && noLocSelecting && noLocSelected.size > 0 && (
         <div className="app-bulk-bar">
           <select value={noLocBin} onChange={(e) => setNoLocBin(e.target.value)} aria-label="Assign location">
             <option value="">Choose location…</option>
@@ -474,8 +499,8 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
         </div>
       )}
 
-      <div className="app-footer-count">{footer}</div>
-      {pageRows > PAGE && (
+      {filter !== 'missing_cost' && <div className="app-footer-count">{footer}</div>}
+      {filter !== 'missing_cost' && pageRows > PAGE && (
         <div className="app-actions" style={{ gridTemplateColumns: '1fr 1fr' }}>
           <button type="button" disabled={offset === 0 || loading} onClick={() => setOffset(Math.max(0, offset - PAGE))}>Previous</button>
           <button type="button" disabled={offset + PAGE >= pageRows || loading} onClick={() => setOffset(offset + PAGE)}>Next</button>

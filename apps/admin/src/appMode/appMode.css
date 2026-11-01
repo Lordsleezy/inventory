@@ -109,6 +109,79 @@ html.app-mode .app-segment button {
 html.app-mode .app-segment button.active {
   background: #636366;
 }
+html.app-mode .app-segment.app-segment-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  flex-wrap: nowrap;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  min-width: 0;
+}
+html.app-mode .app-segment.app-segment-scroll::-webkit-scrollbar { display: none; }
+html.app-mode .app-segment.app-segment-scroll button {
+  flex: 1 0 auto;
+  white-space: nowrap;
+  padding: 8px 12px;
+}
+html.app-mode .app-row.app-row-cost {
+  gap: 8px;
+  align-items: center;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  padding: 8px 8px 8px 12px;
+}
+html.app-mode button.app-cost-open {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  padding: 0;
+}
+html.app-mode .app-cost-entry {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+}
+html.app-mode .app-cost-entry input {
+  width: 4.25rem;
+  box-sizing: border-box;
+  border: 0;
+  border-radius: 8px;
+  background: #2c2c2e;
+  color: #fff;
+  font-size: 16px;
+  line-height: 1.2;
+  padding: 8px;
+  min-height: 36px;
+}
+html.app-mode .app-cost-entry input::placeholder { color: #8e8e93; }
+html.app-mode .app-cost-entry button {
+  border: 0;
+  border-radius: 8px;
+  background: #0a84ff;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.2;
+  padding: 8px 8px;
+  min-height: 36px;
+  white-space: nowrap;
+}
+html.app-mode .app-cost-entry button:disabled { opacity: 0.55; }
+html.app-mode .app-cost-error {
+  margin: 0;
+  padding: 0 14px 10px;
+  color: #ff453a;
+  font-size: 13px;
+  font-weight: 600;
+}
 
 html.app-mode .app-group {
   margin: 0 16px 16px;
