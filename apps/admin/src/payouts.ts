@@ -56,6 +56,14 @@ export type OnlineCfg = {
 export const NO_ONLINE: OnlineCfg = { channels: [], pct: 0, employeeId: null };
 export const isOnline = (t: TicketLike, cfg: OnlineCfg) => cfg.channels.includes((t.channel || '').toLowerCase());
 
+/**
+ * The Payouts card lists every completed sale the payout query returns.
+ * Null means the row shows as Needs cost and adds nothing to the balance.
+ */
+export function payoutCardIncludesSale(amount: number | null): boolean {
+  return amount === null || Number.isFinite(amount);
+}
+
 /** In-store percent-of-profit rate for one SKU and person (store_payout_sku_rates). */
 export function inStoreOverrideRate(sku: string, employeeId: string, cfg: OnlineCfg): number | undefined {
   return cfg.skuRates?.[sku]?.[employeeId];

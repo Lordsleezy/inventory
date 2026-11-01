@@ -13,7 +13,7 @@ import { LocationsPage } from './LocationsPage';
 import { InsightsPage } from './InsightsPage';
 import { LogsPage } from './LogsPage';
 import { ClientErrorReporter } from './clientLog';
-import { effectiveCommissionSplit, inStoreOverrideRate, isOnline, NO_ONLINE, payout, profit, remainingProfit, reportProfitCents, type CommissionOverride, type OnlineCfg, type Rule } from './payouts';
+import { effectiveCommissionSplit, inStoreOverrideRate, isOnline, NO_ONLINE, payout, payoutCardIncludesSale, profit, remainingProfit, reportProfitCents, type CommissionOverride, type OnlineCfg, type Rule } from './payouts';
 import { CommissionOverrideControls, CommissionOverrideMark } from './CommissionOverride';
 import { ExpensesPage, type Expense as StoreExpense } from './ExpensesPage';
 import { ConnectionsPage } from './ConnectionsPage';
@@ -1127,8 +1127,9 @@ function PayoutsPage({allSales,ebayFees,staff,rules,payments,adjustments,expense
         shipping_cents: l.shipping_cents, channel_fee_cents: l.channel_fee_cents, ship_cost_cents: l.ship_cost_cents,
         processing_fee_cents: l.processing_fee_cents, tax_owed_cents: l.tax_owed_cents })), commissionOverride: t.commissionOverride };
       const amount = cut(t.key, ticket, rule);
-      if (amount === null) return [];
+      if (!payoutCardIncludesSale(amount)) return [];
       // Default online: only the online recipient. Override: anyone with a non-zero cut.
+      // A missing cost stays on the card as Needs cost and is not added to the balance.
       if (online && !t.commissionOverride && person.user_id !== cfg.employeeId) return [];
       if (online && t.commissionOverride && person.user_id !== cfg.employeeId) {
         const rate = person.user_id === cfg.slots?.paul ? t.commissionOverride.paulPct
@@ -1235,7 +1236,7 @@ function PayoutsPage({allSales,ebayFees,staff,rules,payments,adjustments,expense
       <Stat name="Owner share" value={ownerShare === null ? 'Pending cost' : money(ownerShare)} />
       {needsCost > 0 && <Stat name="Sales needing cost" value={String(needsCost)} />}
     </div>
-    {needsCost > 0 && <div className="alert" role="status">{needsCost} sale{needsCost === 1 ? '' : 's'} have cost missing. They are excluded from Payouts until you enter a real unit cost or mark the item collectible.</div>}
+    {needsCost > 0 && <div className="alert" role="status">{needsCost} sale{needsCost === 1 ? '' : 's'} have cost missing. They stay on the payout card as Needs cost and are not added to the balance until you enter a real unit cost or mark the item collectible.</div>}
     {costFlags.length > 0 && <section className="panel"><h2>Old default costs to confirm</h2><p>These sold items have a recorded cost equal to an old default. No cost was changed automatically. Check the real cost in Inventory before confirming it here.</p>{costFlagError && <p className="error" role="alert">{costFlagError}</p>}<div className="ledger-list">{costFlags.map(flag => <div className="ledger-row" key={flag.sale_id}><div><strong>SKU {flag.sku} · {flag.qty} unit{flag.qty === 1 ? '' : 's'}</strong><span>Sale {flag.ticket_key} · {money(flag.unit_cost_cents)} per unit · {flag.cost_source || 'previous default'}</span></div><button type="button" className="secondary" onClick={() => void confirmCostFlag(flag.sale_id)}>Confirm cost</button></div>)}</div></section>}
     {owedSplits.length === 0 && <section className="panel"><Empty>No employee payout rules set.</Empty></section>}
     {owedSplits.map(card => <PayoutCard key={card.person.user_id} {...card} frozenCut={frozenCut} pctFor={pctFor} busy={busy} recordPayment={recordPayment} rules={rules} cfg={cfg} personName={personName} onCommissionChanged={onCommissionChanged} />)}
