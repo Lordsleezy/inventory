@@ -1,7 +1,10 @@
 // node --experimental-strip-types --test scripts/test-admin-payouts.mjs
 import test from "node:test";
 import assert from "node:assert/strict";
-import { payout, payoutCardIncludesSale, remainingProfit, isOnline, profit, commissionProfit, commissionBreakdown, reportProfitCents } from "../apps/admin/src/payouts.ts";
+import {
+  payout, payoutCardIncludesSale, remainingProfit, isOnline, profit, commissionProfit, commissionBreakdown, reportProfitCents,
+  frozenCutsForTicket, frozenCommissionBase, frozenOwnerShare, ticketIsFrozen,
+} from "../apps/admin/src/payouts.ts";
 
 // Per-store payout people and SKU rates now come from store_payout_people / store_payout_sku_rates.
 const PAYOUT_PAUL_ID = "f17e6163-b10a-4fe1-a373-75c0094e5363";
@@ -272,4 +275,25 @@ test("breakdown lists every fee, marks absorbed ones, and adds up to the commiss
   assert.equal(off.base, 4700);
   assert.equal(off.rows.reduce((n, r) => n + r.cents, 0), off.base);
   assert.equal(commissionBreakdown({ ...ebay, cost: null }, true).base, null);
+});
+
+// Sale 99785-style: frozen ledger cut stays put while live math inflates on unpaid label.
+test("frozen commission helpers prefer recorded sale_commissions over live label-pending math", () => {
+  const ticketKey = "sale:154";
+  const frozen = new Map([
+    [`${ticketKey}|${PAYOUT_PAUL_ID}`, 330],
+  ]);
+  assert.equal(ticketIsFrozen(frozen, ticketKey), true);
+  assert.equal(ticketIsFrozen(frozen, "sale:999"), false);
+  const cuts = frozenCutsForTicket(frozen, ticketKey, cfg);
+  assert.deepEqual(cuts, { paulCents: 330, jacobCents: 0 });
+  assert.equal(frozenCommissionBase(cuts, 30, 0), 1100);
+  // Live absorb pool with buyer ship and $0 label is much larger than the frozen base.
+  const live = {
+    subtotal: 1999, cost: 900, channel: "ebay", shippingCents: 3862,
+    feeCents: 260, shipCostCents: 0, processingFeeCents: 0,
+  };
+  assert.equal(commissionProfit(live, true), 4961);
+  assert.equal(Math.round(4961 * 0.3), 1488);
+  assert.equal(frozenOwnerShare(live, cuts), profit(live) - 330);
 });
