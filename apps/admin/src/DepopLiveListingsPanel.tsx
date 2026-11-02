@@ -77,7 +77,7 @@ export function DepopLiveListingsPanel({ client, money, variant }: { client: Sup
         const sold = ['sold', 'replaced', 'given_away'].includes(row.unit_state);
         return <div className={`depop-sku-row${sold ? ' sold-elsewhere' : ''}`} key={row.sku}>
           <button type="button" className="depop-sku-open" onClick={() => { setError(''); setSelected(row); }}><strong>{row.sku}</strong>{sold && <span>Sold elsewhere</span>}<b aria-hidden="true">›</b></button>
-          <button type="button" className="text-button depop-remove" disabled={busy} onClick={() => void remove(row)}>Removed</button>
+          <button type="button" className="text-button depop-remove" disabled={busy} onClick={() => void remove(row)}>Remove</button>
         </div>;
       })}</div>}
     </section>}

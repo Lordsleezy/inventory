@@ -10,6 +10,7 @@ export type MainPage =
   | 'amazon'
   | 'tiktok'
   | 'depop'
+  | 'mercari'
   | 'reports'
   | 'books'
   | 'withdrawals'
@@ -37,8 +38,8 @@ export type AttentionSection =
   | 'missing-model'
   | 'missing-description';
 export type OnlineTab = 'listed' | 'ready' | 'not-ready' | 'msc' | 'reports' | 'sold';
-/** Listing subtabs: eBay, Depop, Amazon, TikTok (+ Facebook-only oversized). Sale history may still show Mercari/Whatnot. */
-export type OnlineChannel = 'all' | 'ebay' | 'depop' | 'amazon' | 'tiktok' | 'facebook';
+/** Listing subtabs: eBay, Depop, Mercari, Amazon, TikTok (+ Facebook-only oversized). */
+export type OnlineChannel = 'all' | 'ebay' | 'depop' | 'mercari' | 'amazon' | 'tiktok' | 'facebook';
 
 const LEGACY: Record<string, { page: MainPage; tab?: ReportTab; inventoryTab?: InventoryTab; section?: AttentionSection; onlineTab?: OnlineTab; onlineChannel?: OnlineChannel }> = {
   eligibility: { page: 'settings' },
@@ -61,6 +62,7 @@ const LEGACY: Record<string, { page: MainPage; tab?: ReportTab; inventoryTab?: I
   amazon: { page: 'amazon' },
   tiktok: { page: 'tiktok' },
   depop: { page: 'depop' },
+  mercari: { page: 'mercari' },
   cameras: { page: 'cameras' },
   remote: { page: 'remote' },
   logs: { page: 'logs' },
@@ -88,6 +90,7 @@ const MAIN: MainPage[] = [
   'amazon',
   'tiktok',
   'depop',
+  'mercari',
   'reports',
   'books',
   'withdrawals',
@@ -114,10 +117,10 @@ const SECTIONS: AttentionSection[] = [
   'missing-description',
 ];
 const ONLINE_TABS: OnlineTab[] = ['listed', 'ready', 'not-ready', 'msc', 'reports', 'sold'];
-const ONLINE_CHANNELS: OnlineChannel[] = ['all', 'ebay', 'depop', 'amazon', 'tiktok', 'facebook'];
+const ONLINE_CHANNELS: OnlineChannel[] = ['all', 'ebay', 'depop', 'mercari', 'amazon', 'tiktok', 'facebook'];
 const ONLINE_CHANNELS_SET = new Set<string>(ONLINE_CHANNELS);
 /** Retired list targets — old bookmarks fall back to all. */
-const RETIRED_ONLINE_CHANNELS = new Set(['mercari', 'vendoo', 'whatnot']);
+const RETIRED_ONLINE_CHANNELS = new Set(['vendoo', 'whatnot']);
 
 export type NavState = {
   page: MainPage;

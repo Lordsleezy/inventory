@@ -8,7 +8,7 @@ type Census = { year: number; quarter: number; not_adjusted_millions: number; fe
 type Manifest = { id: string; name: string; item_count: number; revenue_cents: number; profit_cents: number };
 type Insights = { first_sale_on: string | null; periods: SalePeriod[]; categories: Category[]; aging: { days_30: number; days_60: number; days_90_plus: number } };
 type Props = { client: SupabaseClient; money: (cents: number) => string };
-const CHANNELS = ['all', 'in-store', 'online', 'ebay', 'amazon', 'tiktok', 'depop', 'website'];
+const CHANNELS = ['all', 'in-store', 'online', 'ebay', 'amazon', 'tiktok', 'depop', 'mercari', 'website'];
 
 function seasonality(rows: Census[]) {
   const years = new Map<number, Record<number, number>>();

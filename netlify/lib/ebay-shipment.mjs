@@ -1,6 +1,5 @@
-// Pure helpers: read "shipped" from eBay so Floor orders leave To ship on their own.
-// eBay's Fulfillment API lists a shipping_fulfillment href on an order once a label/tracking exists
-// (orderFulfillmentStatus FULFILLED, or IN_PROGRESS for a partly shipped order).
+// Pure helpers for eBay fulfillment polling and label sync.
+// eBay adds a shipping_fulfillment href once a label/tracking exists; Floor still moves to Shipped only when staff marks it.
 
 /** Orders that eBay says have a shipment and are not canceled/refunded. */
 export function ordersWithShipment(orders) {
@@ -25,14 +24,28 @@ export function fulfillmentPath(order) {
   }
 }
 
-/** web_orders columns to set from an eBay shipping_fulfillment; null when eBay has no usable shipment. */
-export function shipmentPatch(fulfillment, nowIso) {
+/** Tracking/carrier only — does not set shipped_at (staff mark shipped on Orders). */
+export function trackingPatch(fulfillment) {
   if (!fulfillment || typeof fulfillment !== "object") return null;
-  const shipped = Date.parse(fulfillment.shippedDate || "");
-  const patch = { shipped_at: Number.isFinite(shipped) ? new Date(shipped).toISOString() : nowIso };
+  const patch = {};
   const tracking = String(fulfillment.shipmentTrackingNumber || "").trim();
   if (tracking) patch.tracking_number = tracking.slice(0, 80);
   const carrier = String(fulfillment.shippingCarrierCode || "").trim();
   if (carrier) patch.carrier = carrier.slice(0, 80);
-  return patch;
+  return Object.keys(patch).length ? patch : null;
+}
+
+/** Legacy: includes shipped_at. Not used for eBay order poll sync. */
+export function shipmentPatch(fulfillment, nowIso) {
+  const tracking = trackingPatch(fulfillment);
+  if (!tracking) {
+    if (!fulfillment || typeof fulfillment !== "object") return null;
+    const shipped = Date.parse(fulfillment.shippedDate || "");
+    return { shipped_at: Number.isFinite(shipped) ? new Date(shipped).toISOString() : nowIso };
+  }
+  const shipped = Date.parse(fulfillment.shippedDate || "");
+  return {
+    ...tracking,
+    shipped_at: Number.isFinite(shipped) ? new Date(shipped).toISOString() : nowIso,
+  };
 }

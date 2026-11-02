@@ -152,8 +152,13 @@ await db.query(`insert into public.sales(store_id,sku,qty,sold_at,price_cents,ta
   values('${STORE}','92005',1,now(),8000,0,'whatnot','marketplace','WN-5')`);
 console.log("depop import: refused by the database ok");
 
-// 6) Mercari with no fee info → estimated 10% + 0 from channel_fee_rates.
+// 6) Mercari sales are manual-only (same guard as Depop). With the flag on, estimated fee = 10% of item.
 await addUnit("92006", { ask: 5000, cost: 900 });
+await assert.rejects(
+  db.query(`insert into public.sales(store_id,sku,qty,sold_at,price_cents,tax_cents,channel,payment_method,receipt_no)
+    values('${STORE}','92006',1,now(),5000,0,'mercari','marketplace','MRC-9')`),
+  /mercari_import_disabled/);
+await db.exec(`select set_config('floor.mercari_manual','on',false)`);
 await db.query(`insert into public.sales(store_id,sku,qty,sold_at,price_cents,tax_cents,channel,payment_method,receipt_no)
   values('${STORE}','92006',1,now(),5000,0,'mercari','marketplace','MRC-9')`);
 l = await ledger("92006");

@@ -198,6 +198,11 @@ export function payout(t: TicketLike, rule: Rule | undefined, cfg: OnlineCfg): n
   return Math.round(t.subtotal * Number(rule.rate) / 100);
 }
 
+/** Expense category that is paid as commission, in full, instead of as a reimbursement. */
+export function isBonusCategory(category: string | null | undefined): boolean {
+  return (category || "").trim().toLowerCase() === "bonus";
+}
+
 /** Owner share: fee-adjusted profit minus every commission cut. Null if unsettled. */
 export function remainingProfit(t: TicketLike, rules: Rule[], cfg: OnlineCfg): number | null {
   const p = profit(t);

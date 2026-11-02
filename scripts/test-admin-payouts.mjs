@@ -2,7 +2,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  payout, payoutCardIncludesSale, remainingProfit, isOnline, profit, commissionProfit, commissionBreakdown, reportProfitCents,
+  payout, payoutCardIncludesSale, remainingProfit, isOnline, profit, commissionProfit, commissionBreakdown, reportProfitCents, isBonusCategory,
   frozenCutsForTicket, frozenCommissionBase, frozenOwnerShare, ticketIsFrozen,
 } from "../apps/admin/src/payouts.ts";
 
@@ -263,6 +263,12 @@ test("card fee leftover only: in-store card sale with a net card fee", () => {
   const card = { subtotal: 20000, cost: 5000, channel: "floor", processingFeeCents: 168 }; // 1.68 left after the surcharge
   assert.equal(commissionProfit(card), 14832);
   assert.equal(commissionProfit(card, true), 15000);
+});
+test("bonus is a commission category, not a reimbursement label", () => {
+  assert.equal(isBonusCategory("Bonus"), true);
+  assert.equal(isBonusCategory(" bonus "), true);
+  assert.equal(isBonusCategory("Supplies"), false);
+  assert.equal(isBonusCategory(null), false);
 });
 test("breakdown lists every fee, marks absorbed ones, and adds up to the commission profit", () => {
   const on = commissionBreakdown(ebay, true);

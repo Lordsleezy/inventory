@@ -37,7 +37,10 @@ type Eligible = {
   condition: string | null;
 };
 
-export type ListingChannel = 'amazon' | 'ebay' | 'tiktok' | 'depop';
+export type ListingChannel = 'amazon' | 'ebay' | 'tiktok' | 'depop' | 'mercari';
+
+const isManualChannel = (c: ListingChannel) => c === 'depop' || c === 'mercari';
+const manualChannelLabel = (c: ListingChannel) => c === 'mercari' ? 'Mercari' : c === 'depop' ? 'Depop' : c;
 
 type DepopPack = {
   title?: string;
@@ -232,7 +235,7 @@ export function ListingManagerPanel({ accessToken, money, channel: channelProp, 
         product_id: row.product_id,
       });
       setNotice(
-        row.channel === 'depop'
+        isManualChannel(row.channel as ListingChannel)
           ? 'Depop Floor row cleared (listed_on + listings). End the listing on Depop Seller yourself — unit not marked sold.'
           : 'Listing ended via marketplace API. Floor unit was not marked sold.',
       );
@@ -307,14 +310,14 @@ export function ListingManagerPanel({ accessToken, money, channel: channelProp, 
     setBusy(true);
     setError('');
     try {
-      if (channel === 'depop') {
+      if (isManualChannel(channel)) {
         const body = await lm(accessToken, { action: 'depop_pack', sku });
         setDepopSku(sku);
         setDepopPack((body.pack || {}) as DepopPack);
         setDepopUrl('');
         setDraft(null);
         setDraftSku('');
-        setNotice(`Push pack ready for SKU ${sku} — copy into Depop, then paste the listing URL below.`);
+        setNotice(`Push pack ready for SKU ${sku} — copy into ${manualChannelLabel(channel)}, then paste the listing URL below.`);
         return;
       }
       const body = await lm(accessToken, { action: 'prefill', channel, sku });
@@ -334,23 +337,29 @@ export function ListingManagerPanel({ accessToken, money, channel: channelProp, 
     }
   }
 
-  async function confirmDepop(markOnly = false) {
+  async function confirmManualListing(markOnly = false) {
     if (!depopSku) return;
     setBusy(true);
     setError('');
     try {
-      const body = await lm(accessToken, {
-        action: 'depop_confirm',
-        sku: depopSku,
-        depop_url: markOnly ? null : depopUrl || null,
-        mark_only: markOnly,
-      });
-      setNotice(String(body.message || `Depop listing recorded for SKU ${depopSku}.`));
+      const body = await lm(accessToken, channel === 'mercari'
+        ? {
+            action: 'mercari_confirm',
+            sku: depopSku,
+            mercari_url: markOnly ? null : depopUrl || null,
+            mark_only: markOnly,
+          }
+        : {
+            action: 'depop_confirm',
+            sku: depopSku,
+            depop_url: markOnly ? null : depopUrl || null,
+            mark_only: markOnly,
+          });
+      setNotice(String(body.message || `${manualChannelLabel(channel)} listing recorded for SKU ${depopSku}.`));
       setShowAdd(false);
       setDepopPack(null);
       setDepopSku('');
       setDepopUrl('');
-      setChannel('depop');
       await load();
     } catch (e) {
       setError(errText(e));
@@ -499,7 +508,7 @@ export function ListingManagerPanel({ accessToken, money, channel: channelProp, 
           <div className="eyebrow">LIVE LISTINGS</div>
           <h2>{channelLocked ? `${channelLabel} listing manager` : 'Listing manager'}</h2>
           <p className="hint" style={{ margin: 0 }}>
-            {channel === 'depop'
+            {isManualChannel(channel)
               ? 'Push pack → post on Depop → paste link. Admin-only. Real photos only — no AI. Ending clears Floor only (never marks sold).'
               : 'Add, edit, end, and bulk via the marketplace API. Admin-only. Real photos only — no AI. Ending never marks a unit sold.'}
           </p>
@@ -509,7 +518,7 @@ export function ListingManagerPanel({ accessToken, money, channel: channelProp, 
             Refresh
           </button>
           <button type="button" disabled={busy} onClick={() => void openAdd()}>
-            {channel === 'depop' ? 'Push to Depop' : 'Add listing'}
+            {isManualChannel(channel) ? `Push to ${manualChannelLabel(channel)}` : 'Add listing'}
           </button>
           {channel === 'ebay' && (
             <button type="button" className="secondary" disabled={busy} onClick={() => void openMigrate()}>
@@ -606,7 +615,7 @@ export function ListingManagerPanel({ accessToken, money, channel: channelProp, 
               {!row.editable && row.api === 'legacy_floor_only' && (
                 <p className="hint">Not editable via API yet — Trading-era listing. Use Migrate legacy eBay.</p>
               )}
-              {row.channel === 'depop' && (
+              {isManualChannel(row.channel as ListingChannel) && (
                 <p className="hint">{row.manual_update || 'Manual Depop row — edit on Depop Seller. End here clears Floor only (does not mark sold).'}</p>
               )}
               <div className="actions">
@@ -620,7 +629,7 @@ export function ListingManagerPanel({ accessToken, money, channel: channelProp, 
                     Edit
                   </button>
                 )}
-                {(row.editable || row.channel === 'depop') && (
+                {(row.editable || isManualChannel(row.channel as ListingChannel)) && (
                   <button type="button" className="text-button danger" disabled={busy} onClick={() => void endListing(row)}>
                     End
                   </button>
@@ -699,10 +708,10 @@ export function ListingManagerPanel({ accessToken, money, channel: channelProp, 
       {showAdd && (
         <div className="modal-backdrop">
           <div className="panel modal" style={{ maxWidth: 720 }}>
-            <h2>{channel === 'depop' ? 'Push to Depop' : `Add ${channel} listing from Floor`}</h2>
-            {channel === 'depop' && depopPack ? (
+            <h2>{isManualChannel(channel) ? `Push to ${manualChannelLabel(channel)}` : `Add ${channel} listing from Floor`}</h2>
+            {isManualChannel(channel) && depopPack ? (
               <>
-                <p className="hint">SKU {depopSku} — copy into Depop Seller, then paste the live listing URL. Real photos only.</p>
+                <p className="hint">SKU {depopSku} — copy into {manualChannelLabel(channel)}, then paste the live listing URL. Real photos only.</p>
                 {(depopPack.instructions || []).map((line) => (
                   <p key={line} className="hint" style={{ margin: '2px 0' }}>
                     {line}
@@ -743,7 +752,7 @@ export function ListingManagerPanel({ accessToken, money, channel: channelProp, 
                     Copy price
                   </button>
                 </div>
-                <h3>Photos (download → upload on Depop)</h3>
+                <h3>Photos (download → upload on {manualChannelLabel(channel)})</h3>
                 <div className="ticket-list">
                   {(depopPack.photos || []).map((p) => (
                     <div className="ticket ticket-top" key={p.path}>
@@ -755,19 +764,19 @@ export function ListingManagerPanel({ accessToken, money, channel: channelProp, 
                   ))}
                 </div>
                 <label>
-                  Depop listing URL
+                  {manualChannelLabel(channel)} listing URL
                   <input
                     value={depopUrl}
-                    placeholder="https://www.depop.com/products/…"
+                    placeholder={channel === 'mercari' ? 'https://www.mercari.com/us/item/…' : 'https://www.depop.com/products/…'}
                     onChange={(e) => setDepopUrl(e.target.value)}
                   />
                 </label>
                 <div className="actions">
-                  <button type="button" disabled={busy || !depopUrl.trim()} onClick={() => void confirmDepop(false)}>
+                  <button type="button" disabled={busy || !depopUrl.trim()} onClick={() => void confirmManualListing(false)}>
                     Save listing link
                   </button>
-                  <button type="button" className="secondary" disabled={busy} onClick={() => void confirmDepop(true)}>
-                    Listed on Depop
+                  <button type="button" className="secondary" disabled={busy} onClick={() => void confirmManualListing(true)}>
+                    Listed on {manualChannelLabel(channel)}
                   </button>
                   <button
                     type="button"
@@ -803,7 +812,7 @@ export function ListingManagerPanel({ accessToken, money, channel: channelProp, 
                   <button type="button" className="secondary" disabled={busy} onClick={() => void loadEligible()}>
                     Search
                   </button>
-                  {channel !== 'depop' && (
+                  {!isManualChannel(channel) && (
                     <button type="button" disabled={busy || selected.size < 2} onClick={() => void bulkPublish()}>
                       Bulk publish selected ({selected.size})
                     </button>
@@ -823,7 +832,7 @@ export function ListingManagerPanel({ accessToken, money, channel: channelProp, 
                         </span>
                       </div>
                       <div className="actions">
-                        {channel !== 'depop' && (
+                        {!isManualChannel(channel) && (
                           <label>
                             <input
                               type="checkbox"
@@ -839,7 +848,7 @@ export function ListingManagerPanel({ accessToken, money, channel: channelProp, 
                           </label>
                         )}
                         <button type="button" disabled={busy} onClick={() => void pickForDraft(u.sku)}>
-                          {channel === 'depop' ? 'Build push pack' : 'Review & publish'}
+                          {isManualChannel(channel) ? 'Build push pack' : 'Review & publish'}
                         </button>
                       </div>
                     </div>
