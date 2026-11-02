@@ -18,6 +18,7 @@ import {
   AppConnections,
   AppReportsNative,
   AppDepopNative,
+  AppMercariNative,
   AppSettingsNative,
   type MoreId,
 } from './AppMore';
@@ -372,6 +373,9 @@ export function AppModeShell({
         )}
         {fullAccess && morePage === 'depop' && (
           <AppDepopNative client={client} accessToken={session.access_token} money={money} onBack={() => setMorePage(null)} />
+        )}
+        {fullAccess && morePage === 'mercari' && (
+          <AppMercariNative client={client} accessToken={session.access_token} money={money} onBack={() => setMorePage(null)} />
         )}
         {fullAccess && morePage === 'settings' && (
           <AppSettingsNative

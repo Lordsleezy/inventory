@@ -20,6 +20,7 @@ import {
   listDepopListings,
   buildDepopPack,
   confirmDepopListed,
+  confirmMercariListed,
   endDepopListing,
   listEligibleUnits,
   prefillCreate,
@@ -88,6 +89,16 @@ async function handleStaff(event) {
     const result = await confirmDepopListed(storeId, {
       sku: String(body.sku).trim(),
       depopUrl: body.depop_url || body.url || null,
+      markOnly: Boolean(body.mark_only),
+    });
+    return json(result.ok ? 200 : 400, result);
+  }
+
+  if (action === "mercari_confirm") {
+    if (!body.sku) return json(400, { ok: false, error: "sku_required" });
+    const result = await confirmMercariListed(storeId, {
+      sku: String(body.sku).trim(),
+      mercariUrl: body.mercari_url || body.url || null,
       markOnly: Boolean(body.mark_only),
     });
     return json(result.ok ? 200 : 400, result);

@@ -2,6 +2,8 @@ import { useState, type ReactNode } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { DepopSalePanel } from './DepopSalePanel';
 import { DepopLiveListingsPanel } from './DepopLiveListingsPanel';
+import { MercariSalePanel } from './MercariSalePanel';
+import { MercariLiveListingsPanel } from './MercariLiveListingsPanel';
 import { ListingManagerPanel, type ListingChannel } from './ListingManagerPanel';
 import { MarketplaceBoard, type BoardChannel } from './MarketplaceBoard';
 
@@ -26,6 +28,11 @@ const TITLES: Record<ListingChannel, { eyebrow: string; title: string; blurb: st
     title: 'Depop listings',
     blurb: 'Type in each Depop sale by hand: item, sale price, Depop fee, payout, date. Nothing is imported from email. Admin-only.',
   },
+  mercari: {
+    eyebrow: 'MERCARI',
+    title: 'Mercari listings',
+    blurb: 'Type in each Mercari sale by hand: item, sale price, buyer shipping, label, fee (10% of item + shipping), payout, date. Admin-only.',
+  },
 };
 
 type Props = {
@@ -40,7 +47,7 @@ type Props = {
 };
 
 export function ChannelListingPage({ channel, accessToken, money, amazonQueue, client, storeId }: Props) {
-  if (channel !== 'depop') {
+  if (channel !== 'depop' && channel !== 'mercari') {
     return (
       <>
         <MarketplaceBoard client={client} storeId={storeId} channel={channel as BoardChannel} accessToken={accessToken} money={money} />
@@ -55,6 +62,7 @@ export function ChannelListingPage({ channel, accessToken, money, amazonQueue, c
   }
   const meta = TITLES[channel];
   const [tab, setTab] = useState<'listed'|'sales'|'manage'>('listed');
+  const label = channel === 'mercari' ? 'Mercari' : 'Depop';
   return (
     <>
       <header>
@@ -64,14 +72,16 @@ export function ChannelListingPage({ channel, accessToken, money, amazonQueue, c
           <p>{meta.blurb}</p>
         </div>
       </header>
-      <nav className="depop-tabs" aria-label="Depop sections">
-        <button type="button" aria-current={tab==='listed'?'page':undefined} onClick={()=>setTab('listed')}>Listed on Depop</button>
+      <nav className="depop-tabs" aria-label={`${label} sections`}>
+        <button type="button" aria-current={tab==='listed'?'page':undefined} onClick={()=>setTab('listed')}>Listed on {label}</button>
         <button type="button" aria-current={tab==='sales'?'page':undefined} onClick={()=>setTab('sales')}>Manual sale entry</button>
         <button type="button" aria-current={tab==='manage'?'page':undefined} onClick={()=>setTab('manage')}>Listing manager</button>
       </nav>
-      {client && tab==='listed' && <DepopLiveListingsPanel client={client} money={money} variant="desktop" />}
-      {client && tab==='sales' && <DepopSalePanel client={client} money={money} variant="desktop" />}
-      {tab==='manage' && <><p className="hint">No listing API. Push pack, post on Depop, paste the listing link. A unit counts as on Depop only with a listing row.</p><ListingManagerPanel accessToken={accessToken} money={money} channel={channel} channelLocked /></>}
+      {client && tab==='listed' && channel === 'depop' && <DepopLiveListingsPanel client={client} money={money} variant="desktop" />}
+      {client && tab==='listed' && channel === 'mercari' && <MercariLiveListingsPanel client={client} money={money} variant="desktop" />}
+      {client && tab==='sales' && channel === 'depop' && <DepopSalePanel client={client} money={money} variant="desktop" />}
+      {client && tab==='sales' && channel === 'mercari' && <MercariSalePanel client={client} money={money} variant="desktop" />}
+      {tab==='manage' && <><p className="hint">No listing API. Push pack, post on {label}, paste the listing link. A unit counts as on {label} only with a listing row.</p><ListingManagerPanel accessToken={accessToken} money={money} channel={channel} channelLocked /></>}
     </>
   );
 }

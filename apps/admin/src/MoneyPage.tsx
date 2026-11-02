@@ -5,7 +5,7 @@ import { ToolSourceBadge } from './design/Tools';
 import { floorFunctionUrl } from './floorApi';
 
 // Money tab (admin only; every RPC is admin-checked on the server). Data model: supabase/migrations/20261107100000_money_tab.sql.
-type Account = 'safe' | 'square' | 'ebay' | 'ebay_pgg124_5' | 'depop' | 'amazon' | 'tiktok';
+type Account = 'safe' | 'square' | 'ebay' | 'ebay_pgg124_5' | 'depop' | 'mercari' | 'amazon' | 'tiktok';
 type Dir = 'in' | 'out';
 type Sync = { status: 'ok' | 'reconnect' | 'not_connected' | 'error'; message: string; synced_at: string; detail: Record<string, number> } | null;
 type Overview = { account: Account; sales_cents: number; in_cents: number; out_cents: number; floor_cents: number; balance_cents: number; synced: boolean; sync: Sync };
@@ -18,7 +18,7 @@ type Audit = { id: number; action: string; at: string; actor_id: string | null; 
 type Person = { id: string; label: string };
 type Props = { client: SupabaseClient; storeId: string; accessToken: string; money: (cents: number) => string; stamp: (value: string) => string };
 
-const NAMES: Record<Account, string> = { safe: 'Safe cash', square: 'Square', ebay: 'eBay', ebay_pgg124_5: 'eBay · pgg124-5', depop: 'Depop', amazon: 'Amazon', tiktok: 'TikTok' };
+const NAMES: Record<Account, string> = { safe: 'Safe cash', square: 'Square', ebay: 'eBay', ebay_pgg124_5: 'eBay · pgg124-5', depop: 'Depop', mercari: 'Mercari', amazon: 'Amazon', tiktok: 'TikTok' }; // pragma: allowlist secret
 const REASON: Record<string, string> = {
   starting_cash: 'Starting cash', change_for_drawer: 'Change for drawer', moved_from_square: 'Moved from Square', moved_from_safe: 'Moved from Safe',
   owner_put_in: 'Owner put in', count_correction: 'Count correction', owner_draw: 'Owner draw', person_payout: 'Payout', bank_deposit: 'Bank deposit',
@@ -29,7 +29,7 @@ function chips(account: Account, dir: Dir): string[] {
   if (dir === 'in') {
     if (account === 'safe') return ['starting_cash', 'change_for_drawer', 'moved_from_square', 'owner_put_in', 'count_correction'];
     if (account === 'square') return ['moved_from_safe', 'owner_put_in', 'count_correction'];
-    return account === 'depop' ? ['starting_cash', 'owner_put_in', 'count_correction'] : ['owner_put_in', 'count_correction'];
+    return account === 'depop' || account === 'mercari' ? ['starting_cash', 'owner_put_in', 'count_correction'] : ['owner_put_in', 'count_correction'];
   }
   const base = ['owner_draw', 'PAYOUTS', 'bank_deposit', 'supplies'];
   const move = account === 'safe' ? ['move_to_square'] : account === 'square' ? ['move_to_safe'] : [];
