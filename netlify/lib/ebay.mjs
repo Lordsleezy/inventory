@@ -29,7 +29,7 @@ import { listingMeasures, prepareUnitAspects, prepareUnitCondition } from "./eba
 import { floorLog, redact, setTrace } from "./floor-log.mjs";
 import { sendResend } from "./receipt.mjs";
 import { ebayFeeCents, ebayOrderAmounts, ebayOrderIsLocalPickup, ebayShipTo } from "./ebay-price.mjs";
-import { fulfillmentPath, ordersWithShipment, shipmentPatch } from "./ebay-shipment.mjs";
+import { fulfillmentPath, ordersWithShipment, trackingPatch } from "./ebay-shipment.mjs";
 
 export { ebayOrderIsLocalPickup };
 import {
@@ -1565,10 +1565,8 @@ async function listingSkuByItemId(storeId) {
 }
 
 /**
- * eBay says an order has shipped (a shipping_fulfillment exists) but Floor still shows To ship:
- * set shipped_at / tracking / carrier. Only paid, not-yet-shipped Floor rows are looked at, so a
- * normal run makes no extra eBay calls. Marketplace buyers have no email, so the queued
- * "tracking" mail is closed instead of retrying forever.
+ * eBay has a shipping_fulfillment (label/tracking on their side): copy tracking + carrier onto
+ * Floor web_orders but keep shipped_at null until staff marks shipped on Orders.
  */
 export async function syncEbayShipments(storeId, orders, hint = {}) {
   const shipped = ordersWithShipment(orders);
@@ -1589,7 +1587,7 @@ export async function syncEbayShipments(storeId, orders, hint = {}) {
     const path = fulfillmentPath(order);
     if (!path) continue;
     const fulfillment = await ebayFetch(storeId, "GET", path, undefined, hint);
-    const patch = shipmentPatch(fulfillment, new Date().toISOString());
+    const patch = trackingPatch(fulfillment);
     if (!patch) continue;
     const { error: upErr } = await sb.from("web_orders").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", row.id).is("shipped_at", null);
     if (upErr) throw new Error(upErr.message);
@@ -1633,7 +1631,7 @@ export async function pollEbayOrders(storeId, accountHint = {}) {
       }
       await ingestFrom(storeId, order, "fulfillment", bag);
     }
-    // Same response: orders eBay already shipped move to Shipped in Floor on their own.
+    // Same response: pull eBay tracking onto To-ship rows without changing Orders tab stage.
     try {
       const moved = await syncEbayShipments(storeId, fulfillmentOrders, hint);
       if (moved.length) bag.results.push({ source: "shipment_sync", accountId: account.id, shipped: moved });
