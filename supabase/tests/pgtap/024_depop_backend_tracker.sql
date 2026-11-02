@@ -27,7 +27,7 @@ update public.units set listed_on=array['ebay'] where sku='93001';
 select ok((select 'depop'=any(listed_on) and 'ebay'=any(listed_on) from public.units where sku='93001'),'legacy flag importer cannot erase Depop or alter other channels');
 
 select throws_ok(format($q$select public.floor_depop_record_listing(%L,'93002',null,null,null,'test')$q$,current_setting('depop_test.store')),'22023','depop_unit_not_available: sold','cannot add sold SKU');
-select throws_ok(format($q$select public.floor_depop_record_listing(%L,'93003',null,null,null,'test')$q$,current_setting('depop_test.store')),'P0001','DNS: Do not ship - never list on eBay, Amazon, TikTok Shop or Depop','DNS exclusion remains enforced');
+select throws_ok(format($q$select public.floor_depop_record_listing(%L,'93003',null,null,null,'test')$q$,current_setting('depop_test.store')),'P0001','DNS: Do not ship - never list on eBay, Amazon, TikTok Shop, Depop or Mercari','DNS exclusion remains enforced');
 select throws_ok(format($q$select public.floor_depop_record_listing(%L,'93005','https://example.com/invalid',10,now(),'test')$q$,current_setting('depop_test.store')),'22023','invalid_depop_url','foreign URLs rejected');
 select lives_ok(format($q$select public.floor_depop_record_listing(%L,'93004',null,null,null,'owner-confirmed historical shop list')$q$,current_setting('depop_test.store')),'tracker can record a confirmed historical listing without publishing it');
 select throws_ok(format($q$select public.floor_bundle_push_gate(%L,'93004','depop')$q$,current_setting('depop_test.store')),'P0001','depop_electronics_blocked','actual publishing policy gate is unchanged');
