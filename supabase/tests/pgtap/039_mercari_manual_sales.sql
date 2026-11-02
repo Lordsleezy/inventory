@@ -1,6 +1,6 @@
 -- pgTAP: Mercari manual sale entry, import guard, fee (10% of item+ship), listing cap.
 begin;
-select plan(28);
+select plan(26);
 set constraints all immediate;
 
 do $$
