@@ -907,6 +907,8 @@ declare
   s public.sales;
   v_fee int;
   v_entry uuid;
+  v_ticket text;
+  v_id bigint;
 begin
   select * into s from public.sales where id = 80 and lower(channel) = 'mercari' and voided_at is null;
   if found then
@@ -934,7 +936,25 @@ begin
         'Backfilled from existing Mercari sale #80', 'system', false
       ) returning id into v_entry;
     end if;
-    perform public.portal_payout_refreeze(coalesce(s.ticket_id::text, 'sale:' || s.id::text));
+    -- Migrations have no portal session. portal_payout_refreeze() denies that
+    -- (portal_store_id / portal_is_admin). Repeat the wrapper's steps on this
+    -- sale's store: drop the frozen ticket, snapshot each open sale, mark refreeze.
+    -- Sale 80 amounts are not rewritten here.
+    v_ticket := coalesce(s.ticket_id::text, 'sale:' || s.id::text);
+    delete from public.sale_payout_tickets where store_id = s.store_id and ticket_key = v_ticket;
+    delete from public.sale_payout_lines where store_id = s.store_id and ticket_key = v_ticket;
+    for v_id in
+      select id from public.sales
+      where store_id = s.store_id
+        and voided_at is null
+        and coalesce(ticket_id::text, 'sale:' || id::text) = v_ticket
+      order by id
+    loop
+      perform public.payout_snapshot_sale(v_id);
+    end loop;
+    update public.sale_payout_tickets
+      set source = 'refreeze'
+    where store_id = s.store_id and ticket_key = v_ticket;
   end if;
 
   -- Voided false-match (#92): keep voided, ignore email match, ensure no live entry/commission impact.
