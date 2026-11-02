@@ -1,6 +1,6 @@
 -- Mercari seller-paid shipping is a reimbursement, not sale profit or commission.
 begin;
-select plan(12);
+select plan(13);
 set constraints all immediate;
 
 do $$
@@ -13,7 +13,7 @@ begin
     (v_paul, v_store, 'Paul', 'owner'), (v_jacob, v_store, 'Jacob', 'staff');
   perform public.seed_store_settings(v_store, 'Mercari Store');
   insert into public.store_settings (store_id, key, value) values
-    (v_store, 'commission_store_absorbs_fees', 'true'),
+    (v_store, 'commission_store_absorbs_fees', to_jsonb(true)),
     (v_store, 'online_channels', '["website","ebay","mercari"]'),
     (v_store, 'online_payout_pct', '30'),
     (v_store, 'online_payout_employee_id', to_jsonb(v_paul::text))
@@ -40,6 +40,19 @@ select is((select fee_cents from public.channel_orders where sku = '11482'), 199
 select is((select payout_cents from public.channel_orders where sku = '11482'), 808, 'payout is stored on its own');
 select is((select ship_cost_cents from public.sale_ledger where sku = '11482'), 0, 'ledger ship cost ignores Mercari labels');
 select is((select profit_cents from public.sale_ledger where sku = '11482'), 900, 'profit is sale - fee - cost');
+-- Same rebuild the migration runs: drop the sale-time snapshot and freeze from the ledger.
+select lives_ok(
+  $q$do $body$
+    declare v_id bigint;
+    begin
+      select id into v_id from public.sales where sku = '11482';
+      delete from public.sale_commissions where sale_id = v_id;
+      delete from public.sale_payout_lines where sale_id = v_id;
+      perform public.payout_snapshot_sale(v_id);
+    end
+  $body$$q$,
+  'rebuild the frozen commission the way the migration does');
+
 select is((select amount_cents from public.sale_commissions c join public.sales s on s.id = c.sale_id
   where s.sku = '11482' and c.employee_id = current_setting('test.paul')::uuid), 330,
   'commission is 30% of sale - cost; the lower payout is not a shipping deduction');
