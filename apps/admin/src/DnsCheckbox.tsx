@@ -17,7 +17,7 @@ export function DnsCheckbox({ client, sku, onChanged, pendingValue, onPendingCha
   }
   return <div className="unit-edit-wide">
     <label className="mboard-inline"><input type="checkbox" checked={pendingValue ?? !!value?.dns} disabled={busy || !value || value.required} onChange={e => void change(e.target.checked)} /> DNS — Do not ship</label>
-    <p className="hint">Store / website pickup only. Never listed on eBay, Amazon, TikTok Shop or Depop.{value?.required ? ' Required for this oversized item type.' : ''}</p>
+    <p className="hint">Store / website pickup only. Never listed on eBay, Amazon, TikTok Shop, Depop or Mercari.{value?.required ? ' Required for this oversized item type.' : ''}</p>
     {error && <p className="error" role="alert">{error}</p>}
   </div>;
 }

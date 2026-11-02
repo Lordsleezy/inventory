@@ -132,6 +132,53 @@ begin
   end if;
 end $$;
 
+-- When DNS flips on, open a Mercari manual-pull reminder the same way Depop does.
+create or replace function public.unit_dns_changed()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare v_old boolean := false;
+begin
+  if tg_op = 'UPDATE' then v_old := public.unit_dns(old.listing_specs); end if;
+  if public.unit_dns(new.listing_specs) is not distinct from v_old then return null; end if;
+  if public.unit_dns(new.listing_specs) then
+    update public.unit_channel_selections set selected = false, updated_at = now()
+      where store_id = new.store_id and sku = new.sku and selected;
+    update public.listing_queue set status = 'cancelled', issue = 'DNS - Do not ship', updated_at = now()
+      where store_id = new.store_id and sku = new.sku and action = 'list' and status in ('queued', 'failed');
+    insert into public.listing_queue(store_id, sku, channel, action)
+      select new.store_id, new.sku, l.channel, 'end' from public.listings l
+      where l.store_id = new.store_id and l.sku = new.sku
+        and l.status = 'listed' and l.channel in ('ebay', 'amazon', 'tiktok')
+      on conflict do nothing;
+    insert into public.delist_tasks(store_id, sku, channel, created_at, nag_after)
+      select new.store_id, new.sku, 'depop', now(), now()
+      where exists (
+        select 1 from public.listings l
+        where l.store_id = new.store_id and l.sku = new.sku and l.channel = 'depop' and l.status = 'listed'
+      )
+      and not exists (
+        select 1 from public.delist_tasks d
+        where d.store_id = new.store_id and d.sku = new.sku and d.channel = 'depop' and d.completed_at is null
+      );
+    insert into public.delist_tasks(store_id, sku, channel, created_at, nag_after)
+      select new.store_id, new.sku, 'mercari', now(), now()
+      where exists (
+        select 1 from public.listings l
+        where l.store_id = new.store_id and l.sku = new.sku and l.channel = 'mercari' and l.status = 'listed'
+      )
+      and not exists (
+        select 1 from public.delist_tasks d
+        where d.store_id = new.store_id and d.sku = new.sku and d.channel = 'mercari' and d.completed_at is null
+      );
+  end if;
+  insert into public.events(store_id, sku, kind, field, old_value, new_value, actor, actor_id, note)
+  values (
+    new.store_id, new.sku, 'edit', 'DNS', v_old::text, public.unit_dns(new.listing_specs)::text,
+    coalesce((select display_name from public.staff where user_id = auth.uid()), 'system'), auth.uid(),
+    'DNS - Do not ship. Store / website pickup only; never list on eBay, Amazon, TikTok Shop, Depop or Mercari.'
+  );
+  return null;
+end $$;
+
 -- Bundle listing guard: Mercari tracker confirmation uses a local flag like Depop.
 create or replace function public.floor_bundle_listing_guard()
 returns trigger language plpgsql security definer set search_path = public as $$
