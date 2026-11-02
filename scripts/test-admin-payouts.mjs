@@ -1,7 +1,7 @@
 // node --experimental-strip-types --test scripts/test-admin-payouts.mjs
 import test from "node:test";
 import assert from "node:assert/strict";
-import { payout, payoutCardIncludesSale, remainingProfit, isOnline, profit, commissionProfit, commissionBreakdown, reportProfitCents } from "../apps/admin/src/payouts.ts";
+import { payout, payoutCardIncludesSale, remainingProfit, isOnline, profit, commissionProfit, commissionBreakdown, reportProfitCents, isBonusCategory } from "../apps/admin/src/payouts.ts";
 
 // Per-store payout people and SKU rates now come from store_payout_people / store_payout_sku_rates.
 const PAYOUT_PAUL_ID = "f17e6163-b10a-4fe1-a373-75c0094e5363";
@@ -260,6 +260,12 @@ test("card fee leftover only: in-store card sale with a net card fee", () => {
   const card = { subtotal: 20000, cost: 5000, channel: "floor", processingFeeCents: 168 }; // 1.68 left after the surcharge
   assert.equal(commissionProfit(card), 14832);
   assert.equal(commissionProfit(card, true), 15000);
+});
+test("bonus is a commission category, not a reimbursement label", () => {
+  assert.equal(isBonusCategory("Bonus"), true);
+  assert.equal(isBonusCategory(" bonus "), true);
+  assert.equal(isBonusCategory("Supplies"), false);
+  assert.equal(isBonusCategory(null), false);
 });
 test("breakdown lists every fee, marks absorbed ones, and adds up to the commission profit", () => {
   const on = commissionBreakdown(ebay, true);
