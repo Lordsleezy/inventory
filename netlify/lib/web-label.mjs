@@ -378,7 +378,6 @@ export async function buyLabelForOrder(sb, storeId, orderId, { rateId, box, acto
       .eq("id", label.id);
 
     await sb.from("web_order_emails").delete().eq("order_id", order.id).eq("kind", "tracking");
-    const isMarketplace = channel === "ebay" || channel === "amazon" || channel === "tiktok";
     const orderPatch = {
       tracking_number: bought.tracking_number,
       tracking_url: bought.tracking_url,
@@ -394,9 +393,7 @@ export async function buyLabelForOrder(sb, storeId, orderId, { rateId, box, acto
       label_buying_at: null,
       updated_at: now,
     };
-    // Marketplace: Floor + channel show shipped once tracking exists. Website keeps prior behavior
-    // (tracking email; staff marks shipped separately if desired).
-    if (isMarketplace && !order.shipped_at) orderPatch.shipped_at = now;
+    // Tracking is pushed to the marketplace; Orders tab stays To ship until staff taps Mark shipped.
     const { data: saved, error: saveError } = await sb
       .from("web_orders")
       .update(orderPatch)
