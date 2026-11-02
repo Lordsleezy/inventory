@@ -6,8 +6,11 @@ import {
   remainingProfit,
   defaultCommissionSplit,
   effectiveCommissionSplit,
+  frozenCommissionBase,
+  frozenOwnerShare,
   payout,
   type CommissionOverride,
+  type FrozenCommissionCuts,
   type OnlineCfg,
   type Rule,
   type TicketLike,
@@ -36,6 +39,8 @@ type Props = {
   rules: Rule[];
   cfg: OnlineCfg;
   override: CommissionOverride | null;
+  /** When set, show recorded sale_commissions amounts instead of live browser math. */
+  frozenCuts?: FrozenCommissionCuts | null;
   personName: (id: string) => string;
   stamp: (iso: string) => string;
   money: (cents: number) => string;
@@ -53,7 +58,7 @@ export function CommissionOverrideMark({ overridden }: { overridden: boolean }) 
 }
 
 export function CommissionOverrideControls({
-  client, ticketKey, ticket, rules, cfg, override, personName, stamp, money, busy, onChanged,
+  client, ticketKey, ticket, rules, cfg, override, frozenCuts, personName, stamp, money, busy, onChanged,
 }: Props) {
   const [editing, setEditing] = useState(false);
   const [paulText, setPaulText] = useState('');
@@ -67,12 +72,19 @@ export function CommissionOverrideControls({
   const ticketWithOv = { ...ticket, commissionOverride: override };
   const def = defaultCommissionSplit(ticket, rules, cfg);
   const current = effectiveCommissionSplit(ticketWithOv, rules, cfg);
-  const base = commissionProfit(ticketWithOv, !!cfg.absorbFees);
+  const liveBase = commissionProfit(ticketWithOv, !!cfg.absorbFees);
   const paulRule = rules.find(r => r.employee_id === cfg.slots?.paul) || { employee_id: cfg.slots?.paul || '', method: 'percent_profit' as const, rate: current.paulPct };
   const jacobRule = rules.find(r => r.employee_id === cfg.slots?.jacob) || { employee_id: cfg.slots?.jacob || '', method: 'percent_profit' as const, rate: current.jacobPct };
-  const paulCents = payout(ticketWithOv, paulRule, cfg);
-  const jacobCents = payout(ticketWithOv, jacobRule, cfg);
-  const ownerCents = remainingProfit(ticketWithOv, rules, cfg);
+  const livePaul = payout(ticketWithOv, paulRule, cfg);
+  const liveJacob = payout(ticketWithOv, jacobRule, cfg);
+  const liveOwner = remainingProfit(ticketWithOv, rules, cfg);
+  const frozen = !!frozenCuts;
+  const base = frozen
+    ? frozenCommissionBase(frozenCuts, current.paulPct, current.jacobPct)
+    : liveBase;
+  const paulCents = frozen ? frozenCuts.paulCents : livePaul;
+  const jacobCents = frozen ? frozenCuts.jacobCents : liveJacob;
+  const ownerCents = frozen ? frozenOwnerShare(ticketWithOv, frozenCuts) : liveOwner;
 
   useEffect(() => {
     if (!editing) return;
@@ -131,10 +143,10 @@ export function CommissionOverrideControls({
   return (
     <div className={`commission-override${current.overridden ? ' is-overridden' : ''}`}>
       <div className="commission-override-head">
-        <h3>Commission split</h3><span className="commission-status"><ToolIcon name="settings"/>{current.overridden ? 'Override active' : 'Default split'}</span>
+        <h3>Commission split</h3><span className="commission-status"><ToolIcon name="settings"/>{frozen ? 'Frozen at sale' : current.overridden ? 'Override active' : 'Default split'}</span>
       </div>
-      <p className="commission-split-caption">{pctLabel(current.paulPct, current.jacobPct)} of commission profit</p>
-      <div className="commission-profit-card"><span className="tool-icon-badge"><ToolIcon name="money"/></span><div><small>COMMISSION PROFIT</small><span>Total amount to split</span></div><strong>{base == null ? 'Needs cost' : money(base)}</strong></div>
+      <p className="commission-split-caption">{pctLabel(current.paulPct, current.jacobPct)} of commission profit{frozen ? ' · recorded payout' : ''}</p>
+      <div className="commission-profit-card"><span className="tool-icon-badge"><ToolIcon name="money"/></span><div><small>COMMISSION PROFIT</small><span>{frozen ? 'Frozen amount to split' : 'Total amount to split'}</span></div><strong>{base == null ? 'Needs cost' : money(base)}</strong></div>
       {[{name: 'Paul', pct: current.paulPct, cents: paulCents, tone:'paul'}, {name:'Jacob',pct:current.jacobPct,cents:jacobCents,tone:'jacob'}].map(person => <div className={`commission-person ${person.tone}`} key={person.tone}>
         <span className="commission-avatar">{person.name.charAt(0)}</span><div><strong>{person.name}</strong><small>{person.pct}% of commission profit</small></div><span className="commission-percent">{person.pct}%</span><strong>{person.cents == null ? 'Needs cost' : money(person.cents)}</strong>
       </div>)}
