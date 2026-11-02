@@ -16,12 +16,13 @@ declare
   v_def text;
   v_new text;
   v_n int;
-  v_pat constant text := 'case\s+when\s+\(\s*greatest\(\s*coalesce\(\s*wo\.label_cost_cents\s*,\s*0(?:\s*::integer)?\s*\)\s*,\s*coalesce\(\s*lbl\.cents\s*,\s*0(?:\s*::integer)?\s*\)\s*,\s*coalesce\(\s*man\.cents\s*,\s*0(?:\s*::integer)?\s*\)\s*,\s*coalesce\(\s*co\.ship_label_cents\s*,\s*0(?:\s*::integer)?\s*\)\s*\)\s*>\s*0\s*\)\s+then\s+greatest\(\s*coalesce\(\s*wo\.label_cost_cents\s*,\s*0(?:\s*::integer)?\s*\)\s*,\s*coalesce\(\s*lbl\.cents\s*,\s*0(?:\s*::integer)?\s*\)\s*,\s*coalesce\(\s*man\.cents\s*,\s*0(?:\s*::integer)?\s*\)\s*,\s*coalesce\(\s*co\.ship_label_cents\s*,\s*0(?:\s*::integer)?\s*\)\s*\)\s+else\s+coalesce\(\s*co\.baked_ship_cents\s*,\s*0(?:\s*::integer)?\s*\)\s+end';
+  v_pat constant text := 'case\s+when\s+\(+\s*greatest\s*\(\s*coalesce\s*\(\s*wo\.label_cost_cents\s*,\s*0(?:\s*::integer)?\s*\)\s*,\s*coalesce\s*\(\s*lbl\.cents\s*,\s*0(?:\s*::integer)?\s*\)\s*,\s*coalesce\s*\(\s*man\.cents\s*,\s*0(?:\s*::integer)?\s*\)\s*,\s*coalesce\s*\(\s*co\.ship_label_cents\s*,\s*0(?:\s*::integer)?\s*\)\s*\)\s*>\s*0(?:\s*::integer)?\s*\)+\s*then\s+greatest\s*\(\s*coalesce\s*\(\s*wo\.label_cost_cents\s*,\s*0(?:\s*::integer)?\s*\)\s*,\s*coalesce\s*\(\s*lbl\.cents\s*,\s*0(?:\s*::integer)?\s*\)\s*,\s*coalesce\s*\(\s*man\.cents\s*,\s*0(?:\s*::integer)?\s*\)\s*,\s*coalesce\s*\(\s*co\.ship_label_cents\s*,\s*0(?:\s*::integer)?\s*\)\s*\)\s+else\s+coalesce\s*\(\s*co\.baked_ship_cents\s*,\s*0(?:\s*::integer)?\s*\)\s+end';
 begin
-  v_def := pg_get_viewdef('public.sale_ledger'::regclass, true);
+  v_def := pg_get_viewdef('public.sale_ledger'::regclass, false);
   select count(*) into v_n from regexp_matches(v_def, v_pat, 'gi');
   if v_n <> 2 then
-    raise exception 'sale_ledger ship terms not found as expected (% matches)', v_n;
+    raise exception 'sale_ledger ship terms not found as expected (% matches) near %', v_n,
+      substr(v_def, greatest(position('baked_ship' in v_def) - 120, 1), 360);
   end if;
   v_new := regexp_replace(regexp_replace(v_def, ';\s*$', ''), '(' || v_pat || ')', 'public.ledger_ship_cents(s.channel, \1)', 'gi');
   execute 'create or replace view public.sale_ledger as ' || v_new;
