@@ -32,7 +32,7 @@ select set_config('request.jwt.claim.sub', current_setting('test.paul'), true);
 select set_config('request.jwt.claim.role', 'authenticated', true);
 
 select lives_ok(
-  $q$select public.portal_mercari_record_sale('11482', 1999, 199, 808, current_date, null)$q$,
+  $q$select public.portal_mercari_record_sale('11482', 1999, 199, 808, (now() at time zone 'America/Los_Angeles')::date, null)$q$,
   'Mercari tab records sale price, fee, and payout');
 
 select is((select ship_label_cents from public.channel_orders where sku = '11482'), null, 'the sale stores no seller shipping');
