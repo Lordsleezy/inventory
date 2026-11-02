@@ -2,7 +2,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  payout, payoutCardIncludesSale, remainingProfit, isOnline, profit, commissionProfit, commissionBreakdown, reportProfitCents, isBonusCategory,
+  payout, payoutCardIncludesSale, remainingProfit, isOnline, profit, commissionProfit, commissionBreakdown, reportProfitCents, isBonusCategory, reimbursementStillOwed,
   frozenCutsForTicket, frozenCommissionBase, frozenOwnerShare, ticketIsFrozen,
 } from "../apps/admin/src/payouts.ts";
 
@@ -269,6 +269,21 @@ test("bonus is a commission category, not a reimbursement label", () => {
   assert.equal(isBonusCategory(" bonus "), true);
   assert.equal(isBonusCategory("Supplies"), false);
   assert.equal(isBonusCategory(null), false);
+});
+test("each payment covers reimbursements already owed, and a later expense stays unpaid", () => {
+  const still = reimbursementStillOwed(
+    [
+      { at: "2026-10-01", amount: 10000 },
+      { at: "2026-10-10T12:00:00", amount: 500 },
+      { at: "2026-10-30", amount: 2000 },
+    ],
+    [{ at: "2026-10-10T19:00:00+00:00", amount: 12000 }],
+  );
+  assert.equal(still, 2000);
+  assert.equal(reimbursementStillOwed(
+    [{ at: "2026-10-01", amount: 1000 }, { at: "2026-11-01T12:00:00", amount: 400 }],
+    [{ at: "2026-10-02T19:00:00Z", amount: 5000 }],
+  ), 400);
 });
 test("breakdown lists every fee, marks absorbed ones, and adds up to the commission profit", () => {
   const on = commissionBreakdown(ebay, true);

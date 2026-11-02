@@ -203,6 +203,37 @@ export function isBonusCategory(category: string | null | undefined): boolean {
   return (category || "").trim().toLowerCase() === "bonus";
 }
 
+/** Calendar day for a payout event. Expense dates are stored as YYYY-MM-DD or noon with no zone. */
+function payoutDay(at: string): string {
+  const trimmed = (at || "").trim();
+  const dateOnly = /^(\d{4}-\d{2}-\d{2})/.exec(trimmed);
+  if (dateOnly && (!trimmed.includes("T") || /T12:00:00$/.test(trimmed))) return dateOnly[1];
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) return dateOnly?.[1] || "";
+  return parsed.toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
+}
+
+/**
+ * Unpaid reimbursements after each payment covers reimbursements outstanding that day, then commission.
+ * A later expense is not prepaid by an earlier surplus.
+ */
+export function reimbursementStillOwed(
+  reimbursements: { at: string; amount: number }[],
+  payments: { at: string; amount: number }[],
+): number {
+  const events = [
+    ...reimbursements.map((row) => ({ day: payoutDay(row.at), kind: 0, amount: Math.max(0, row.amount || 0) })),
+    ...payments.map((row) => ({ day: payoutDay(row.at), kind: 1, amount: Math.max(0, row.amount || 0) })),
+  ].filter((row) => row.day && row.amount > 0);
+  events.sort((a, b) => a.day.localeCompare(b.day) || a.kind - b.kind);
+  let open = 0;
+  for (const row of events) {
+    if (row.kind === 0) open += row.amount;
+    else open = Math.max(0, open - row.amount);
+  }
+  return open;
+}
+
 /** Owner share: fee-adjusted profit minus every commission cut. Null if unsettled. */
 export function remainingProfit(t: TicketLike, rules: Rule[], cfg: OnlineCfg): number | null {
   const p = profit(t);
