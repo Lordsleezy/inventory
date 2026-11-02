@@ -83,6 +83,7 @@ type UnmatchedOrder = {
 type OverrideMap = Map<string, CommissionOverride>;
 /** `${ticket_key}|${employee_id}` → frozen commission cents (null = waiting on cost). */
 type FrozenMap = Map<string, number | null>;
+type FrozenBaseMap = Map<string, number | null>;
 type Person = { user_id: string; display_name: string; kind: string };
 type Payment = { id: string; employee_id: string; amount_cents: number; paid_at: string; paid_by: string; legacy_ticket_key: string | null; note: string | null };
 type PayoutAdjustment = {
@@ -269,6 +270,19 @@ async function frozenCommissions(): Promise<FrozenMap> {
     if (batch.length < 1000) return map;
   }
 }
+async function frozenTicketBases(): Promise<FrozenBaseMap> {
+  const map: FrozenBaseMap = new Map();
+  for (let offset = 0;; offset += 1000) {
+    const res = await sb.rpc('portal_payout_frozen_bases').range(offset, offset + 999);
+    if (res.error) {
+      if (/portal_payout_frozen_bases|PGRST202|404|does not exist/i.test(res.error.message)) return map;
+      throw new Error(res.error.message);
+    }
+    const batch = (res.data || []) as { ticket_key: string; commission_base_cents: number | null }[];
+    for (const row of batch) map.set(row.ticket_key, row.commission_base_cents);
+    if (batch.length < 1000) return map;
+  }
+}
 async function storedPayments(storeId: string) {
   const payments: Payment[] = [];
   for (let offset = 0;; offset += 1000) {
@@ -347,6 +361,7 @@ export function App() {
   const [onlineCfg, setOnlineCfg] = useState<OnlineCfg>(NO_ONLINE);
   const [commissionOverrides, setCommissionOverrides] = useState<OverrideMap>(new Map());
   const [frozen, setFrozen] = useState<FrozenMap>(new Map());
+  const [frozenBases, setFrozenBases] = useState<FrozenBaseMap>(new Map());
   const [editing, setEditing] = useState<Report | 'daily' | 'weekly' | null>(null);
   const [reportReadOnly, setReportReadOnly] = useState(false);
   const [email, setEmail] = useState(''); const [password, setPassword] = useState('');
@@ -563,14 +578,17 @@ export function App() {
     try {
       const overrides = await storedCommissionOverrides(store);
       setCommissionOverrides(overrides);
-      const [salesRows, fees, frozen] = await Promise.all([payoutSales(overrides), ebayInsertionFees(store), frozenCommissions()]);
+      const [salesRows, fees, frozen, bases] = await Promise.all([
+        payoutSales(overrides), ebayInsertionFees(store), frozenCommissions(), frozenTicketBases(),
+      ]);
       setAllSales(salesRows);
       setFrozen(frozen);
+      setFrozenBases(bases);
       setEbayFees(fees);
     } catch (e) { setError(errText(e)); }
   }, [store]);
   const setTicketOverride = useCallback((ticketKey: string, next: CommissionOverride | null) => {
-    void frozenCommissions().then(setFrozen).catch(() => undefined);
+    void Promise.all([frozenCommissions(), frozenTicketBases()]).then(([f, b]) => { setFrozen(f); setFrozenBases(b); }).catch(() => undefined);
     setCommissionOverrides(prev => {
       const map = new Map(prev);
       if (next) map.set(ticketKey, next); else map.delete(ticketKey);
@@ -729,7 +747,7 @@ export function App() {
             onOrderLinked={() => { void Promise.all([loadPayoutSales(), loadSales()]); }}
             closeouts={closeouts}
             expenses={<ExpensesPage client={sb} money={money} expenses={expenses} staff={staff} ownerId={onlineCfg.employeeId || defaultReimbursementId} onChanged={loadCommon} embedded native />}
-            payouts={<PayoutsPage allSales={allSales} ebayFees={ebayFees} staff={staff} rules={activeRules} payments={payments} adjustments={payoutAdjustments} expenses={expenses} frozen={frozen} cfg={onlineCfg} personName={personName} busy={busy} recordPayment={recordPayment} onCommissionChanged={setTicketOverride} native loading={reportsLoading} />}
+            payouts={<PayoutsPage allSales={allSales} ebayFees={ebayFees} staff={staff} rules={activeRules} payments={payments} adjustments={payoutAdjustments} expenses={expenses} frozen={frozen} frozenBases={frozenBases} cfg={onlineCfg} personName={personName} busy={busy} recordPayment={recordPayment} onCommissionChanged={setTicketOverride} native loading={reportsLoading} />}
           />
         ) : null}
         onReportsOpen={() => { setReportsLoading(true); void Promise.all([loadCommon(), loadPayments(), loadPayoutSales(), loadSales()]).finally(() => setReportsLoading(false)); }}
@@ -962,7 +980,7 @@ export function App() {
   {fullAccess && page === 'depop' && <ChannelListingPage channel="depop" accessToken={session.access_token} money={money} client={sb} />}
   {fullAccess && page === 'logs' && <LogsPage accessToken={session.access_token} stamp={stamp} />}
   {(fullAccess || registerOnly) && page === 'inventory' && <InventoryPage client={sb} storeId={store} accessToken={session.access_token} money={money} stamp={stamp} tab={nav.inventoryTab} onTab={t => go({ inventoryTab: t })} attentionSection={nav.attentionSection} onAttentionSection={s => go({ attentionSection: s, inventoryTab: 'unfinished' })} canDelete={fullAccess} associateBrowseOnly={registerOnly} onCostChanged={() => { void loadPayoutSales(); void loadSales(); }} />}
-  {fullAccess && page === 'reports' && <ReportsPage client={sb} money={money} tab={nav.reportTab} onTab={t => go({ reportTab: t })} closeouts={closeouts} expenses={<ExpensesPage client={sb} money={money} expenses={expenses} staff={staff} ownerId={onlineCfg.employeeId || defaultReimbursementId} onChanged={loadCommon} embedded />} payouts={<PayoutsPage allSales={allSales} ebayFees={ebayFees} staff={staff} rules={activeRules} payments={payments} adjustments={payoutAdjustments} expenses={expenses} frozen={frozen} cfg={onlineCfg} personName={personName} busy={busy} recordPayment={recordPayment} onCommissionChanged={setTicketOverride} />} />}
+  {fullAccess && page === 'reports' && <ReportsPage client={sb} money={money} tab={nav.reportTab} onTab={t => go({ reportTab: t })} closeouts={closeouts} expenses={<ExpensesPage client={sb} money={money} expenses={expenses} staff={staff} ownerId={onlineCfg.employeeId || defaultReimbursementId} onChanged={loadCommon} embedded />} payouts={<PayoutsPage allSales={allSales} ebayFees={ebayFees} staff={staff} rules={activeRules} payments={payments} adjustments={payoutAdjustments} expenses={expenses} frozen={frozen} frozenBases={frozenBases} cfg={onlineCfg} personName={personName} busy={busy} recordPayment={recordPayment} onCommissionChanged={setTicketOverride} />} />}
   {fullAccess && page === 'withdrawals' && <MoneyPage client={sb} storeId={store} accessToken={session.access_token} money={money} stamp={stamp} />}
   {fullAccess && page === 'books' && <BooksPage client={sb} money={money} />}
   {fullAccess && page === 'manifests' && <ManifestsPage client={sb} storeId={store} money={money} />}
@@ -1076,7 +1094,22 @@ type LedgerEntry = {
   at: string; kind: 'sale' | 'online' | 'reimbursement' | 'payment' | 'adjustment'; amount: number | null;
   detail: string; note?: string; ticketKey?: string; ticket?: Ticket; overridden?: boolean;
 };
-function PayoutsPage({allSales,ebayFees,staff,rules,payments,adjustments,expenses,cfg,personName,busy,recordPayment,onCommissionChanged,native,loading,frozen}:{allSales:Ticket[];ebayFees:number;staff:Person[];rules:Rule[];payments:Payment[];adjustments:PayoutAdjustment[];expenses:StoreExpense[];cfg:OnlineCfg;personName:(id:string)=>string;busy:boolean;recordPayment:(id:string,amount:number,paidAt:string,note:string)=>Promise<string | null>;onCommissionChanged:(ticketKey:string,next:CommissionOverride|null)=>void;native?:boolean;loading?:boolean;frozen?:FrozenMap}) {
+function payoutSplitPeople(
+  cfg: OnlineCfg,
+  personName: (id: string) => string,
+  ticketKey: string,
+  ticket: Ticket,
+  cardPersonId: string,
+  entryAmount: number | null,
+  frozenCut: (key: string, emp: string) => number | null,
+  pctFor: (t: Ticket, emp: string) => string,
+) {
+  return [{ name: personName(cfg.slots?.paul || ''), id: cfg.slots?.paul }, { name: personName(cfg.slots?.jacob || ''), id: cfg.slots?.jacob }]
+    .filter((x): x is { name: string; id: string } => !!x.id)
+    .map(x => ({ name: x.name, pct: pctFor(ticket, x.id), cents: x.id === cardPersonId ? entryAmount : frozenCut(ticketKey, x.id) }));
+}
+
+function PayoutsPage({allSales,ebayFees,staff,rules,payments,adjustments,expenses,cfg,personName,busy,recordPayment,onCommissionChanged,native,loading,frozen,frozenBases}:{allSales:Ticket[];ebayFees:number;staff:Person[];rules:Rule[];payments:Payment[];adjustments:PayoutAdjustment[];expenses:StoreExpense[];cfg:OnlineCfg;personName:(id:string)=>string;busy:boolean;recordPayment:(id:string,amount:number,paidAt:string,note:string)=>Promise<string | null>;onCommissionChanged:(ticketKey:string,next:CommissionOverride|null)=>void;native?:boolean;loading?:boolean;frozen?:FrozenMap;frozenBases?:FrozenBaseMap}) {
   type CostFlag = { sale_id: number; ticket_key: string; sku: string; qty: number; unit_cost_cents: number; cost_source: string | null; confirmed_at: string | null };
   const [costFlags, setCostFlags] = useState<CostFlag[]>([]);
   const [costFlagError, setCostFlagError] = useState('');
@@ -1221,7 +1254,7 @@ function PayoutsPage({allSales,ebayFees,staff,rules,payments,adjustments,expense
   const hasEbaySale = allSales.some(t => (t.channel || '').toLowerCase() === 'ebay');
   const profitAfterCosts = reportProfitCents(saleProfit, hasEbaySale ? ebayFees : 0);
   const ownerShare = profitAfterCosts === null ? null : profitAfterCosts - totalCommission;
-  if (native) return <div className="native-report-body"><div className="native-report-hero"><small>Owed right now</small><strong>{loading ? <span className="native-skeleton" /> : money(commissionBalanceOwed + reimburseBalanceOwed)}</strong><span>{loading ? "Loading payouts…" : `${money(totalPaid)} paid out all time`}</span></div>{loading && <div className="native-report-group"><div className="native-report-row"><span>Loading balances…</span></div></div>}{!loading && owedSplits.map(card => <PayoutCard key={card.person.user_id} {...card} frozenCut={frozenCut} pctFor={pctFor} busy={busy} recordPayment={recordPayment} rules={rules} cfg={cfg} personName={personName} onCommissionChanged={onCommissionChanged} native />)}{!loading && <><h3 className="native-report-section">Totals</h3><div className="native-report-group"><div className="native-report-row"><span>Total paid</span><b>{money(totalPaid)}</b></div><div className="native-report-row"><span>Reimbursements</span><b>{money(totalReimburse)}</b></div><div className="native-report-row"><span>Reimbursements owed</span><b>{money(reimburseBalanceOwed)}</b></div><div className="native-report-row"><span>Return adjustments</span><b>{money(totalAdj)}</b></div><div className="native-report-row strong"><span>Owner share</span><b>{ownerShare === null ? 'Pending cost' : money(ownerShare)}</b></div></div>{needsCost > 0 && <p className="native-report-footnote">{needsCost} online sales need item cost before payout.</p>}</>}</div>;
+  if (native) return <div className="native-report-body"><div className="native-report-hero"><small>Owed right now</small><strong>{loading ? <span className="native-skeleton" /> : money(commissionBalanceOwed + reimburseBalanceOwed)}</strong><span>{loading ? "Loading payouts…" : `${money(totalPaid)} paid out all time`}</span></div>{loading && <div className="native-report-group"><div className="native-report-row"><span>Loading balances…</span></div></div>}{!loading && owedSplits.map(card => <PayoutCard key={card.person.user_id} {...card} frozenCut={frozenCut} frozenTickets={frozenTickets} frozenBases={frozenBases} pctFor={pctFor} busy={busy} recordPayment={recordPayment} rules={rules} cfg={cfg} personName={personName} onCommissionChanged={onCommissionChanged} native />)}{!loading && <><h3 className="native-report-section">Totals</h3><div className="native-report-group"><div className="native-report-row"><span>Total paid</span><b>{money(totalPaid)}</b></div><div className="native-report-row"><span>Reimbursements</span><b>{money(totalReimburse)}</b></div><div className="native-report-row"><span>Reimbursements owed</span><b>{money(reimburseBalanceOwed)}</b></div><div className="native-report-row"><span>Return adjustments</span><b>{money(totalAdj)}</b></div><div className="native-report-row strong"><span>Owner share</span><b>{ownerShare === null ? 'Pending cost' : money(ownerShare)}</b></div></div>{needsCost > 0 && <p className="native-report-footnote">{needsCost} online sales need item cost before payout.</p>}</>}</div>;
   return <>
     <header><div><div className="eyebrow">TEAM EARNINGS</div><h1>Payouts</h1><p>Store profit is sale price + buyer-paid shipping − every fee − shipping label − cost. Commissions are paid on commission profit: {cfg.absorbFees ? 'the store absorbs channel and card fees, so only the shipping label and cost come off' : 'channel fees, card fees, label and cost all come off'}. Commissions are frozen per sale. Payments count against expense reimbursements first, then commission. Return adjustments stay separate; payment history is never rewritten.</p></div></header>
     <div className="stats payout-stats">
@@ -1238,10 +1271,10 @@ function PayoutsPage({allSales,ebayFees,staff,rules,payments,adjustments,expense
     {needsCost > 0 && <div className="alert" role="status">{needsCost} sale{needsCost === 1 ? '' : 's'} have cost missing. They are excluded from Payouts until you enter a real unit cost or mark the item collectible.</div>}
     {costFlags.length > 0 && <section className="panel"><h2>Old default costs to confirm</h2><p>These sold items have a recorded cost equal to an old default. No cost was changed automatically. Check the real cost in Inventory before confirming it here.</p>{costFlagError && <p className="error" role="alert">{costFlagError}</p>}<div className="ledger-list">{costFlags.map(flag => <div className="ledger-row" key={flag.sale_id}><div><strong>SKU {flag.sku} · {flag.qty} unit{flag.qty === 1 ? '' : 's'}</strong><span>Sale {flag.ticket_key} · {money(flag.unit_cost_cents)} per unit · {flag.cost_source || 'previous default'}</span></div><button type="button" className="secondary" onClick={() => void confirmCostFlag(flag.sale_id)}>Confirm cost</button></div>)}</div></section>}
     {owedSplits.length === 0 && <section className="panel"><Empty>No employee payout rules set.</Empty></section>}
-    {owedSplits.map(card => <PayoutCard key={card.person.user_id} {...card} frozenCut={frozenCut} pctFor={pctFor} busy={busy} recordPayment={recordPayment} rules={rules} cfg={cfg} personName={personName} onCommissionChanged={onCommissionChanged} />)}
+    {owedSplits.map(card => <PayoutCard key={card.person.user_id} {...card} frozenCut={frozenCut} frozenTickets={frozenTickets} frozenBases={frozenBases} pctFor={pctFor} busy={busy} recordPayment={recordPayment} rules={rules} cfg={cfg} personName={personName} onCommissionChanged={onCommissionChanged} />)}
   </>;
 }
-function PayoutCard({person,balance,entries,commissionOwed,reimburseOwed,busy,recordPayment,rules,cfg,personName,onCommissionChanged,native,frozenCut,pctFor}:{frozenCut:(key:string,emp:string)=>number|null;pctFor:(t:Ticket,emp:string)=>string;person:Person;balance:number;commission?:number;reimburse?:number;paidTotal?:number;entries:LedgerEntry[];commissionOwed:number;reimburseOwed:number;busy:boolean;recordPayment:(id:string,amount:number,paidAt:string,note:string)=>Promise<string | null>;rules:Rule[];cfg:OnlineCfg;personName:(id:string)=>string;onCommissionChanged:(ticketKey:string,next:CommissionOverride|null)=>void;native?:boolean}) {
+function PayoutCard({person,balance,entries,commissionOwed,reimburseOwed,busy,recordPayment,rules,cfg,personName,onCommissionChanged,native,frozenCut,frozenTickets,frozenBases,pctFor}:{frozenCut:(key:string,emp:string)=>number|null;frozenTickets:Set<string>;frozenBases?:FrozenBaseMap;pctFor:(t:Ticket,emp:string)=>string;person:Person;balance:number;commission?:number;reimburse?:number;paidTotal?:number;entries:LedgerEntry[];commissionOwed:number;reimburseOwed:number;busy:boolean;recordPayment:(id:string,amount:number,paidAt:string,note:string)=>Promise<string | null>;rules:Rule[];cfg:OnlineCfg;personName:(id:string)=>string;onCommissionChanged:(ticketKey:string,next:CommissionOverride|null)=>void;native?:boolean}) {
   const [amount,setAmount] = useState('');
   const [paidOn,setPaidOn] = useState(today);
   const [note,setNote] = useState('');
@@ -1259,12 +1292,19 @@ function PayoutCard({person,balance,entries,commissionOwed,reimburseOwed,busy,re
   }
   const pending = entries.filter(x => (x.kind === 'sale' || x.kind === 'online') && x.amount === null).length;
   const kindLabel = (k: LedgerEntry['kind']) => k === 'sale' ? 'In-store sale' : k === 'online' ? 'Online sale' : k === 'payment' ? 'Payment' : k === 'adjustment' ? 'Adjustment' : 'Reimbursement';
+  const saleMath = (e: LedgerEntry) => {
+    if (!e.ticket || !e.ticketKey || (e.kind !== 'sale' && e.kind !== 'online')) return null;
+    const isFrozen = frozenTickets.has(e.ticketKey);
+    return <CommissionMath ticket={e.ticket} absorbFees={!!cfg.absorbFees} money={money} frozen={isFrozen}
+      recordedBaseCents={isFrozen ? frozenBases?.get(e.ticketKey) : undefined}
+      people={payoutSplitPeople(cfg, personName, e.ticketKey, e.ticket, person.user_id, e.amount, frozenCut, pctFor)} />;
+  };
   if (native) {
     const rule = rules.find(r => r.employee_id === person.user_id);
     const rate = rule ? `${rule.rate}${rule.method === 'flat_ticket' ? ' flat per sale' : rule.method === 'percent_profit' ? '% of commission profit' : '% of sale'}` : 'Reimbursements';
-    return <section className="native-payout-card"><div className="native-payout-head"><span className="native-payout-avatar">{person.display_name.charAt(0)}</span><span className="native-payout-name"><strong>{person.display_name}</strong><small>{rate}{cfg.employeeId === person.user_id ? ` · ${cfg.pct}% online` : ''}</small></span><span className="native-payout-balance"><strong>{money(balance)}</strong><small>OWED</small></span></div><form className="native-payout-form" onSubmit={e => void submit(e)}><input aria-label={`Payment amount for ${person.display_name}`} placeholder="$ Amount" inputMode="decimal" value={amount} onChange={e => { if (moneyEntry.test(e.target.value)) setAmount(e.target.value); }} required /><input aria-label={`Payment date for ${person.display_name}`} type="date" value={paidOn} onChange={e => setPaidOn(e.target.value)} required /><button disabled={busy || !amount}>Pay</button></form>{paymentError && <p className="error" role="alert">{paymentError}</p>}<details className="native-payout-breakdown"><summary>Balance breakdown · {entries.filter(e => e.kind === 'sale' || e.kind === 'online').length} sales <span>›</span></summary><p className="native-report-footnote">Commission {money(commissionOwed)} · Reimbursement {money(reimburseOwed)}{pending ? ` · ${pending} need cost` : ''}</p><label className="native-payout-note">Payment note<input value={note} onChange={e => setNote(e.target.value.slice(0,500))} placeholder="Optional note for next payment" /></label><div className="ledger-list">{entries.map((e,i) => <div className="ledger-row" key={i}><div><strong>{kindLabel(e.kind)} · {stamp(e.at)}</strong><span>{e.detail}</span>{e.note && <small>{e.note}</small>}{e.ticket && (e.kind === 'sale' || e.kind === 'online') && <CommissionMath ticket={e.ticket} absorbFees={!!cfg.absorbFees} money={money} people={[{ name: personName(cfg.slots?.paul || ''), id: cfg.slots?.paul }, { name: personName(cfg.slots?.jacob || ''), id: cfg.slots?.jacob }].filter(x => x.id).map(x => ({ name: x.name, cents: frozenCut(e.ticketKey!, x.id!), pct: pctFor(e.ticket!, x.id!) }))} />}{e.ticketKey && e.ticket && (e.kind === 'sale' || e.kind === 'online') && <CommissionOverrideControls client={sb} ticketKey={e.ticketKey} ticket={e.ticket} rules={rules} cfg={cfg} override={e.ticket.commissionOverride} personName={personName} stamp={stamp} money={money} busy={busy} onChanged={next => onCommissionChanged(e.ticketKey!, next)} />}</div><b>{e.amount === null ? 'Needs cost' : (e.amount < 0 ? '−' : '+') + money(Math.abs(e.amount))}</b></div>)}</div></details></section>;
+    return <section className="native-payout-card"><div className="native-payout-head"><span className="native-payout-avatar">{person.display_name.charAt(0)}</span><span className="native-payout-name"><strong>{person.display_name}</strong><small>{rate}{cfg.employeeId === person.user_id ? ` · ${cfg.pct}% online` : ''}</small></span><span className="native-payout-balance"><strong>{money(balance)}</strong><small>{reimburseOwed > 0 ? `${money(commissionOwed)} comm · ${money(reimburseOwed)} reimb` : 'Total owed'}</small></span></div><form className="native-payout-form" onSubmit={e => void submit(e)}><input aria-label={`Payment amount for ${person.display_name}`} placeholder="$ Amount" inputMode="decimal" value={amount} onChange={e => { if (moneyEntry.test(e.target.value)) setAmount(e.target.value); }} required /><input aria-label={`Payment date for ${person.display_name}`} type="date" value={paidOn} onChange={e => setPaidOn(e.target.value)} required /><button disabled={busy || !amount}>Pay</button></form>{paymentError && <p className="error" role="alert">{paymentError}</p>}<details className="native-payout-breakdown"><summary>Balance breakdown · {entries.filter(e => e.kind === 'sale' || e.kind === 'online').length} sales <span>›</span></summary><p className="native-report-footnote">Commission {money(commissionOwed)} · Reimbursement {money(reimburseOwed)}{pending ? ` · ${pending} need cost` : ''}</p><label className="native-payout-note">Payment note<input value={note} onChange={e => setNote(e.target.value.slice(0,500))} placeholder="Optional note for next payment" /></label><div className="ledger-list">{entries.map((e,i) => <div className="ledger-row" key={i}><div><strong>{kindLabel(e.kind)} · {stamp(e.at)}</strong><span>{e.detail}</span>{e.note && <small>{e.note}</small>}{saleMath(e)}{e.ticketKey && e.ticket && (e.kind === 'sale' || e.kind === 'online') && <CommissionOverrideControls client={sb} ticketKey={e.ticketKey} ticket={e.ticket} rules={rules} cfg={cfg} override={e.ticket.commissionOverride} personName={personName} stamp={stamp} money={money} busy={busy} onChanged={next => onCommissionChanged(e.ticketKey!, next)} />}</div><b>{e.amount === null ? 'Needs cost' : (e.amount < 0 ? '−' : '+') + money(Math.abs(e.amount))}</b></div>)}</div></details></section>;
   }
-  return <section className="panel payout-card"><div className="payout-card-top"><div><h2>{person.display_name}</h2><strong>{money(balance)} owed</strong><small className="payout-owed-split">Commission {money(commissionOwed)} · Reimbursement {money(reimburseOwed)}</small>{pending > 0 && <div className="hint">{pending} sale{pending === 1 ? '' : 's'} need cost</div>}</div><form className="payment-form" onSubmit={e=>void submit(e)}><label>Amount<input type="text" inputMode="decimal" value={amount} onChange={e=>{ if (moneyEntry.test(e.target.value)) setAmount(e.target.value); }} onBlur={() => { if (amount) setAmount(cleanMoney(amount)); }} required /></label><label>Date<input type="date" value={paidOn} onChange={e=>setPaidOn(e.target.value)} required /></label><label className="payment-note">Note<input type="text" value={note} onChange={e=>setNote(e.target.value.slice(0,500))} placeholder="Optional" /></label><button disabled={busy || !amount}>Paid</button></form></div>{paymentError && <p className="error" role="alert">{paymentError}</p>}<details><summary>Balance breakdown ({entries.length})</summary><div className="ledger-list">{entries.map((e,i)=><div className={`ledger-row${e.overridden ? ' ledger-override' : ''}${e.kind === 'adjustment' ? ' ledger-adjustment' : ''}`} key={i}><div><strong>{kindLabel(e.kind)} · {stamp(e.at)}{e.overridden ? ' · split overridden' : ''}</strong><span>{e.detail}</span>{e.note && <small>{e.note}</small>}{e.ticket && (e.kind === 'sale' || e.kind === 'online') && <CommissionMath ticket={e.ticket} absorbFees={!!cfg.absorbFees} money={money} people={[{ name: personName(cfg.slots?.paul || ''), id: cfg.slots?.paul }, { name: personName(cfg.slots?.jacob || ''), id: cfg.slots?.jacob }].filter(x => x.id).map(x => ({ name: x.name, cents: frozenCut(e.ticketKey!, x.id!), pct: pctFor(e.ticket!, x.id!) }))} />}{e.ticketKey && e.ticket && (e.kind === 'sale' || e.kind === 'online') && <CommissionOverrideControls client={sb} ticketKey={e.ticketKey} ticket={e.ticket} rules={rules} cfg={cfg} override={e.ticket.commissionOverride} personName={personName} stamp={stamp} money={money} busy={busy} onChanged={next => onCommissionChanged(e.ticketKey!, next)} />}</div><b>{e.amount === null ? 'Needs cost' : (e.amount < 0 ? '−' : '+') + money(Math.abs(e.amount))}</b></div>)}</div></details></section>;
+  return <section className="panel payout-card"><div className="payout-card-top"><div><h2>{person.display_name}</h2><strong>{money(balance)} owed</strong><small className="payout-owed-split">Commission {money(commissionOwed)} · Reimbursement {money(reimburseOwed)}</small>{pending > 0 && <div className="hint">{pending} sale{pending === 1 ? '' : 's'} need cost</div>}</div><form className="payment-form" onSubmit={e=>void submit(e)}><label>Amount<input type="text" inputMode="decimal" value={amount} onChange={e=>{ if (moneyEntry.test(e.target.value)) setAmount(e.target.value); }} onBlur={() => { if (amount) setAmount(cleanMoney(amount)); }} required /></label><label>Date<input type="date" value={paidOn} onChange={e=>setPaidOn(e.target.value)} required /></label><label className="payment-note">Note<input type="text" value={note} onChange={e=>setNote(e.target.value.slice(0,500))} placeholder="Optional" /></label><button disabled={busy || !amount}>Paid</button></form></div>{paymentError && <p className="error" role="alert">{paymentError}</p>}<details><summary>Balance breakdown ({entries.length})</summary><div className="ledger-list">{entries.map((e,i)=><div className={`ledger-row${e.overridden ? ' ledger-override' : ''}${e.kind === 'adjustment' ? ' ledger-adjustment' : ''}`} key={i}><div><strong>{kindLabel(e.kind)} · {stamp(e.at)}{e.overridden ? ' · split overridden' : ''}</strong><span>{e.detail}</span>{e.note && <small>{e.note}</small>}{saleMath(e)}{e.ticketKey && e.ticket && (e.kind === 'sale' || e.kind === 'online') && <CommissionOverrideControls client={sb} ticketKey={e.ticketKey} ticket={e.ticket} rules={rules} cfg={cfg} override={e.ticket.commissionOverride} personName={personName} stamp={stamp} money={money} busy={busy} onChanged={next => onCommissionChanged(e.ticketKey!, next)} />}</div><b>{e.amount === null ? 'Needs cost' : (e.amount < 0 ? '−' : '+') + money(Math.abs(e.amount))}</b></div>)}</div></details></section>;
 }
 function RuleEditor({person,rule,save,busy}:{person:Person;rule?:Rule;save:(id:string,m:Rule['method'],r:number)=>Promise<void>;busy:boolean}) { const [method,setMethod]=useState<Rule['method']>(rule?.method||'percent_sale'); const [rate,setRate]=useState(String(rule?.rate??'')); useEffect(()=>{setMethod(rule?.method||'percent_sale');setRate(String(rule?.rate??''));},[rule]); return <form className="rule-row" onSubmit={e=>{e.preventDefault();void save(person.user_id,method,Number(rate));}}><strong>{person.display_name}</strong><select aria-label={`Cut type for ${person.display_name}`} value={method} onChange={e=>setMethod(e.target.value as Rule['method'])}><option value="percent_sale">Percent of sale</option><option value="flat_ticket">Flat per sale</option><option value="percent_profit">Percent of profit</option></select><label><input type={method==='flat_ticket'?'text':'number'} inputMode="decimal" min={method==='flat_ticket'?undefined:0} max={method==='flat_ticket'?undefined:100} step="0.01" required value={rate} onChange={e=>{ if (method!=='flat_ticket' || moneyEntry.test(e.target.value)) setRate(e.target.value); }} onBlur={() => { if (method==='flat_ticket' && rate) setRate(cleanMoney(rate)); }} />{method==='flat_ticket'?'$':'%'}</label><button disabled={busy}>Save</button></form>; }
 
