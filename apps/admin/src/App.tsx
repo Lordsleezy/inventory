@@ -751,6 +751,7 @@ export function App() {
         ['amazon', 'Amazon'],
         ['tiktok', 'TikTok'],
         ['depop', 'Depop'],
+        ['mercari', 'Mercari'],
         ['books', 'Books'],
         ['marketplaces', 'Connections & sync'],
         ['cameras', 'Cameras'],
@@ -769,6 +770,7 @@ export function App() {
     amazon: 'Amazon',
     tiktok: 'TikTok',
     depop: 'Depop',
+    mercari: 'Mercari',
     reports: 'Reports',
     books: 'Books',
     withdrawals: 'Money',
@@ -837,7 +839,7 @@ export function App() {
         </div>
       </div>
       {mainNav
-        .filter(([id]) => id === 'ebay' || id === 'amazon' || id === 'tiktok' || id === 'depop' || id === 'marketplaces')
+        .filter(([id]) => id === 'ebay' || id === 'amazon' || id === 'tiktok' || id === 'depop' || id === 'mercari' || id === 'marketplaces')
         .map(([id, label]) => (
           <button type="button" className={page === id ? 'active' : ''} key={id} title={label} onClick={() => goNav({ page: id })}>
             {label}
@@ -960,6 +962,7 @@ export function App() {
   {fullAccess && page === 'amazon' && <AmazonPage storeId={store} client={sb} accessToken={session.access_token} money={money} />}
   {fullAccess && page === 'tiktok' && <ChannelListingPage client={sb} storeId={store} channel="tiktok" accessToken={session.access_token} money={money} />}
   {fullAccess && page === 'depop' && <ChannelListingPage channel="depop" accessToken={session.access_token} money={money} client={sb} />}
+  {fullAccess && page === 'mercari' && <ChannelListingPage channel="mercari" accessToken={session.access_token} money={money} client={sb} />}
   {fullAccess && page === 'logs' && <LogsPage accessToken={session.access_token} stamp={stamp} />}
   {(fullAccess || registerOnly) && page === 'inventory' && <InventoryPage client={sb} storeId={store} accessToken={session.access_token} money={money} stamp={stamp} tab={nav.inventoryTab} onTab={t => go({ inventoryTab: t })} attentionSection={nav.attentionSection} onAttentionSection={s => go({ attentionSection: s, inventoryTab: 'unfinished' })} canDelete={fullAccess} associateBrowseOnly={registerOnly} onCostChanged={() => { void loadPayoutSales(); void loadSales(); }} />}
   {fullAccess && page === 'reports' && <ReportsPage client={sb} money={money} tab={nav.reportTab} onTab={t => go({ reportTab: t })} closeouts={closeouts} expenses={<ExpensesPage client={sb} money={money} expenses={expenses} staff={staff} ownerId={onlineCfg.employeeId || defaultReimbursementId} onChanged={loadCommon} embedded />} payouts={<PayoutsPage allSales={allSales} ebayFees={ebayFees} staff={staff} rules={activeRules} payments={payments} adjustments={payoutAdjustments} expenses={expenses} frozen={frozen} cfg={onlineCfg} personName={personName} busy={busy} recordPayment={recordPayment} onCommissionChanged={setTicketOverride} />} />}
@@ -1277,6 +1280,6 @@ function OnlinePayoutSettings({cfg,staff,busy,save,absorbFees,toggleAbsorb}:{cfg
     <form className="rule-row" onSubmit={e=>{e.preventDefault();void save(channels.split(/[,\s]+/).map(x=>x.trim().toLowerCase()).filter(Boolean),Number(pct),who);}}>
       <label>Paid to<select value={who} onChange={e=>setWho(e.target.value)} required><option value="" disabled>Choose…</option>{staff.map(p=><option key={p.user_id} value={p.user_id}>{p.display_name}</option>)}</select></label>
       <label>Percent of profit<input type="number" min={0} max={100} step="0.01" required value={pct} onChange={e=>setPct(e.target.value)} />%</label>
-      <label>Online channels (comma separated)<input value={channels} onChange={e=>setChannels(e.target.value)} placeholder="website, ebay, depop, amazon, tiktok" /></label>
+      <label>Online channels (comma separated)<input value={channels} onChange={e=>setChannels(e.target.value)} placeholder="website, ebay, depop, mercari, amazon, tiktok" /></label>
       <button disabled={busy||!who}>Save</button></form></section>;
 }

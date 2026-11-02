@@ -1131,7 +1131,8 @@ export async function confirmDepopListed(storeId, { sku, depopUrl = null, markOn
   if (upErr) return { ok: false, error: upErr.message };
 
   const prev = Array.isArray(unit.listed_on) ? unit.listed_on : [];
-  const next = [...new Set([...prev.filter((c) => c !== "vendoo" && c !== "mercari"), "depop"])];
+  // Never strip other active channels (Mercari included) when confirming Depop.
+  const next = [...new Set([...prev.filter((c) => c !== "vendoo"), "depop"])];
   const { error: unitErr } = await sb
     .from("units")
     .update({ listed_on: next, updated_at: new Date().toISOString() })
@@ -1147,6 +1148,69 @@ export async function confirmDepopListed(storeId, { sku, depopUrl = null, markOn
     url,
     listed_on: next,
     message: url ? `Depop listing recorded: ${url}` : "Marked listed on Depop (no URL — paste the link later to attach it).",
+  };
+}
+
+function parseMercariListingRef(raw) {
+  const text = String(raw || "").trim();
+  if (!text) return { ok: false, error: "mercari_url_required" };
+  if (!/^https?:\/\/(www\.)?mercari\.com\//i.test(text)) {
+    return { ok: false, error: "invalid_mercari_url — paste a mercari.com listing link" };
+  }
+  try {
+    const u = new URL(text);
+    return { ok: true, url: u.toString(), listingId: u.toString() };
+  } catch {
+    return { ok: false, error: "invalid_mercari_url" };
+  }
+}
+
+/** After you post on Mercari: paste URL (preferred) or mark listed without URL. */
+export async function confirmMercariListed(storeId, { sku, mercariUrl = null, markOnly = false } = {}) {
+  try { await assertBundlePush(storeId, sku, 'mercari'); }
+  catch (error) { return { ok: false, error: error.message }; }
+  const sb = serviceClient();
+  const { data: unit } = await sb.from("units").select("sku, state, listed_on").eq("store_id", storeId).eq("sku", sku).maybeSingle();
+  if (!unit) return { ok: false, error: "unknown_sku" };
+  if (unit.state !== "available" && unit.state !== "reserved") {
+    return { ok: false, error: `unit_not_sellable:${unit.state}` };
+  }
+
+  let listingId = null;
+  let url = null;
+  if (!markOnly && mercariUrl) {
+    const parsed = parseMercariListingRef(mercariUrl);
+    if (!parsed.ok) return parsed;
+    listingId = parsed.listingId;
+    url = parsed.url;
+  }
+  if (!markOnly && !listingId) {
+    return { ok: false, error: "mercari_url_required — paste the Mercari item link, or pass mark_only=true" };
+  }
+
+  const { error: upErr } = await sb.rpc("floor_mercari_record_listing", {
+    p_store: storeId, p_sku: sku, p_url: url, p_price_cents: null,
+    p_listed_at: new Date().toISOString(), p_actor: "Floor Mercari confirmation",
+  });
+  if (upErr) return { ok: false, error: upErr.message };
+
+  const prev = Array.isArray(unit.listed_on) ? unit.listed_on : [];
+  const next = [...new Set([...prev.filter((c) => c !== "vendoo"), "mercari"])];
+  const { error: unitErr } = await sb
+    .from("units")
+    .update({ listed_on: next, updated_at: new Date().toISOString() })
+    .eq("store_id", storeId)
+    .eq("sku", sku);
+  if (unitErr) return { ok: false, error: unitErr.message };
+
+  return {
+    ok: true,
+    channel: "mercari",
+    sku,
+    listing_id: listingId,
+    url,
+    listed_on: next,
+    message: url ? `Mercari listing recorded: ${url}` : "Marked listed on Mercari (no URL — paste the link later to attach it).",
   };
 }
 

@@ -16,7 +16,7 @@ function channelAllowsLabels(channel?: string | null) {
 type Seg = 'toShip' | 'shipped' | 'pickup' | 'done' | 'canceled' | 'returns';
 
 const CHANNEL: Record<string, string> = {
-  website: 'Website', ebay: 'eBay', amazon: 'Amazon', tiktok: 'TikTok', depop: 'Depop',
+  website: 'Website', ebay: 'eBay', amazon: 'Amazon', tiktok: 'TikTok', depop: 'Depop', mercari: 'Mercari',
 };
 
 type Props = {

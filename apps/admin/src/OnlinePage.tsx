@@ -77,6 +77,7 @@ type Props = {
 const CHANNELS: { key: Exclude<OnlineChannel, 'all'>; label: string }[] = [
   { key: 'ebay', label: 'eBay' },
   { key: 'depop', label: 'Depop' },
+  { key: 'mercari', label: 'Mercari' },
   { key: 'amazon', label: 'Amazon' },
   { key: 'tiktok', label: 'TikTok' },
   { key: 'facebook', label: 'Facebook' },
@@ -86,10 +87,10 @@ const CHANNELS: { key: Exclude<OnlineChannel, 'all'>; label: string }[] = [
 const REPORT_CHANNELS: { key: string; label: string }[] = [
   { key: 'ebay', label: 'eBay' },
   { key: 'depop', label: 'Depop' },
+  { key: 'mercari', label: 'Mercari' },
   { key: 'amazon', label: 'Amazon' },
   { key: 'tiktok', label: 'TikTok' },
   { key: 'website', label: 'Website' },
-  { key: 'mercari', label: 'Mercari' },
   { key: 'whatnot', label: 'Whatnot' },
   { key: 'facebook', label: 'Facebook' },
 ];

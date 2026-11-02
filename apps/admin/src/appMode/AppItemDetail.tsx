@@ -39,6 +39,7 @@ const CHANNELS: { key: string; label: string }[] = [
   { key: 'amazon', label: 'Amazon' },
   { key: 'tiktok', label: 'TikTok' },
   { key: 'depop', label: 'Depop' },
+  { key: 'mercari', label: 'Mercari' },
 ];
 
 function titleOf(u: Record<string, unknown>) {

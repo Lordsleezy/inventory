@@ -5,6 +5,8 @@ import { floorFunctionUrl } from '../floorApi';
 import { ListingManagerPanel } from '../ListingManagerPanel';
 import { DepopSalePanel } from '../DepopSalePanel';
 import { DepopLiveListingsPanel } from '../DepopLiveListingsPanel';
+import { MercariSalePanel } from '../MercariSalePanel';
+import { MercariLiveListingsPanel } from '../MercariLiveListingsPanel';
 import { ConnectionsPage } from '../ConnectionsPage';
 import { errText } from '../errText';
 import { shortError } from './shortError';
@@ -16,6 +18,7 @@ export type MoreId =
   | 'amazon'
   | 'tiktok'
   | 'depop'
+  | 'mercari'
   | 'connections'
   | 'reports'
   | 'withdrawals'
@@ -67,6 +70,7 @@ export function AppMoreHome({
   const [amazonN, setAmazonN] = useState<string>('…');
   const [tiktokN, setTiktokN] = useState<string>('Connect');
   const [depopN, setDepopN] = useState<string>('…');
+  const [mercariN, setMercariN] = useState<string>('…');
   const [sync, setSync] = useState('…');
 
   useEffect(() => {
@@ -108,8 +112,21 @@ export function AppMoreHome({
       } catch { /* ignore */ }
 
       void money;
-      void depopN;
-      setDepopN('Live');
+      try {
+        const [depopLive, mercariLive] = await Promise.all([
+          client.rpc('portal_depop_live_listings'),
+          client.rpc('portal_mercari_live_count'),
+        ]);
+        if (!alive) return;
+        if (!depopLive.error) setDepopN(String(((depopLive.data || []) as unknown[]).length));
+        else setDepopN('Live');
+        if (!mercariLive.error && mercariLive.data) {
+          const c = mercariLive.data as { live: number; cap: number };
+          setMercariN(`${c.live}/${c.cap}`);
+        } else setMercariN('Live');
+      } catch {
+        if (alive) { setDepopN('Live'); setMercariN('Live'); }
+      }
     })();
     return () => { alive = false; };
   }, [client, session.access_token, money]);
@@ -146,6 +163,10 @@ export function AppMoreHome({
             <button type="button" className="app-more-link" onClick={() => setPage('depop')}>
               <span className="app-more-left"><Icon tone="#bf5af2" />Depop</span>
               <span className="app-more-right">{depopN}<span className="app-chevron">›</span></span>
+            </button>
+            <button type="button" className="app-more-link" onClick={() => setPage('mercari')}>
+              <span className="app-more-left"><Icon tone="#ff375f" />Mercari</span>
+              <span className="app-more-right">{mercariN}<span className="app-chevron">›</span></span>
             </button>
             <button type="button" className="app-more-link" onClick={() => setPage('connections')}>
               <span className="app-more-left"><Icon tone="#8e8e93" />Connections & sync</span>
@@ -336,6 +357,31 @@ export function AppDepopNative({ client, accessToken, money, onBack }: {
         {tab==='listed'&&<DepopLiveListingsPanel client={client} money={money} variant="app" />}
         {tab==='sales'&&<DepopSalePanel client={client} money={money} variant="app" />}
         {tab==='manage'&&<ListingManagerPanel accessToken={accessToken} money={money} channel="depop" channelLocked />}
+      </div>
+    </div>
+  );
+}
+
+export function AppMercariNative({ client, accessToken, money, onBack }: {
+  client: SupabaseClient; accessToken: string; money: (n: number) => string; onBack: () => void;
+}) {
+  const [tab, setTab] = useState<'listed'|'sales'|'manage'>('listed');
+  return (
+    <div className="app-stack">
+      <div className="app-nav">
+        <button type="button" onClick={onBack}>‹ More</button>
+        <div className="app-nav-title">Mercari</div>
+        <button type="button" style={{ visibility: 'hidden' }}>+</button>
+      </div>
+      <div className="app-embed-soft">
+        <nav className="depop-tabs" aria-label="Mercari sections">
+          <button type="button" aria-current={tab==='listed'?'page':undefined} onClick={()=>setTab('listed')}>Listed</button>
+          <button type="button" aria-current={tab==='sales'?'page':undefined} onClick={()=>setTab('sales')}>Sales</button>
+          <button type="button" aria-current={tab==='manage'?'page':undefined} onClick={()=>setTab('manage')}>Manage</button>
+        </nav>
+        {tab==='listed'&&<MercariLiveListingsPanel client={client} money={money} variant="app" />}
+        {tab==='sales'&&<MercariSalePanel client={client} money={money} variant="app" />}
+        {tab==='manage'&&<ListingManagerPanel accessToken={accessToken} money={money} channel="mercari" channelLocked />}
       </div>
     </div>
   );
