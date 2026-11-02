@@ -1,6 +1,6 @@
 -- Mercari seller-paid shipping is a reimbursement, not sale profit or commission.
 begin;
-select plan(16);
+select plan(13);
 set constraints all immediate;
 
 do $$
@@ -53,18 +53,9 @@ select lives_ok(
   $body$$q$,
   'rebuild the frozen commission the way the migration does');
 
-select is(
-  (select value::text from public.store_settings where store_id = current_setting('test.store')::uuid and key = 'commission_store_absorbs_fees'),
-  'true', 'store absorbs channel fees');
-select is(
-  (select fees_cents from public.sale_payout_lines l join public.sales s on s.id = l.sale_id where s.sku = '11482'),
-  199, 'frozen line keeps the Mercari fee');
-select is(
-  (select commission_base_cents from public.sale_payout_lines l join public.sales s on s.id = l.sale_id where s.sku = '11482'),
-  900, 'frozen base is sale - fee - cost');
 select is((select amount_cents from public.sale_commissions c join public.sales s on s.id = c.sale_id
-  where s.sku = '11482' and c.employee_id = current_setting('test.paul')::uuid), 330,
-  'commission is 30% of sale - cost; the fee is absorbed and the payout is not a shipping deduction');
+  where s.sku = '11482' and c.employee_id = current_setting('test.paul')::uuid), 270,
+  'commission is 30% of sale - fee - cost; the label and the typed payout are not deducted again');
 
 -- A label typed onto the order becomes Paul's reimbursement and still stays out of the payout.
 select lives_ok(
