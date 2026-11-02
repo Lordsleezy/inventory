@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { fulfillmentPath, ordersWithShipment, shipmentPatch } from "./ebay-shipment.mjs";
+import { fulfillmentPath, ordersWithShipment, shipmentPatch, trackingPatch } from "./ebay-shipment.mjs";
 
 const shipped = { orderId: "A", orderPaymentStatus: "PAID", orderFulfillmentStatus: "FULFILLED", fulfillmentHrefs: ["https://api.ebay.com/sell/fulfillment/v1/order/A/shipping_fulfillment/F1"] };
 
@@ -18,6 +18,13 @@ test("only shipped, live orders are picked", () => {
 test("fulfillment href becomes an API path", () => {
   assert.equal(fulfillmentPath(shipped), "/sell/fulfillment/v1/order/A/shipping_fulfillment/F1");
   assert.equal(fulfillmentPath({ fulfillmentHrefs: [] }), null);
+});
+
+test("tracking patch never sets shipped_at", () => {
+  assert.deepEqual(trackingPatch({ shipmentTrackingNumber: "9400", shippingCarrierCode: "USPS" }),
+    { tracking_number: "9400", carrier: "USPS" });
+  assert.equal(trackingPatch({}), null);
+  assert.equal(trackingPatch(null), null);
 });
 
 test("shipment patch uses eBay's ship date and tracking", () => {
