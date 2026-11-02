@@ -333,7 +333,9 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
     }
     const current = o.label_cost_cents != null ? (o.label_cost_cents / 100).toFixed(2) : '';
     const raw = window.prompt(
-      `Label cost for ${channelLabel(o.channel)} order ${o.order_no || o.id} (USD).\n\nUse this for Pirate Ship, USPS, eBay labels, Depop, Amazon, TikTok — whatever you paid to ship.`,
+      (o.channel || '').toLowerCase() === 'mercari'
+        ? `Label cost for Mercari order ${o.order_no || o.id} (USD).\n\nThis is reimbursed to you. It is not deducted from the sale or from payouts.`
+        : `Label cost for ${channelLabel(o.channel)} order ${o.order_no || o.id} (USD).\n\nUse this for Pirate Ship, USPS, eBay labels, Depop, Amazon, TikTok — whatever you paid to ship.`,
       current,
     );
     if (raw == null) return;

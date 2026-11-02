@@ -253,10 +253,11 @@ export function ReceiptsPage({ client, money, stamp }: {
     event.preventDefault(); if (!financial || saving) return;
     setSaving(true); setError('');
     try {
+      const mercari = (viewing?.channel || '').toLowerCase() === 'mercari';
       const { error: saveError } = await client.rpc('portal_edit_sale_financials', {
-        p_sale_id: financial.sale_id, p_price_cents: financial.price_cents, p_shipping_cents: financial.shipping_cents,
-        p_tax_cents: financial.tax_cents, p_fee_cents: financial.fee_cents, p_label_cents: financial.label_cents,
-        p_other_charge_cents: financial.other_charge_cents, p_cost_cents: financial.cost_cents,
+        p_sale_id: financial.sale_id, p_price_cents: financial.price_cents, p_shipping_cents: mercari ? 0 : financial.shipping_cents,
+        p_tax_cents: mercari ? 0 : financial.tax_cents, p_fee_cents: financial.fee_cents, p_label_cents: mercari ? 0 : financial.label_cents,
+        p_other_charge_cents: mercari ? 0 : financial.other_charge_cents, p_cost_cents: financial.cost_cents,
       });
       if (saveError) throw saveError;
       setEditLine(null); setFinancial(null); await load(query, offset);
@@ -348,7 +349,11 @@ export function ReceiptsPage({ client, money, stamp }: {
       <section className="inventory-detail receipt-edit-dialog" role="dialog" aria-modal="true" aria-label={`Edit sale SKU ${editLine.sku}`}>
         <div className="section-head"><div><div className="eyebrow">SALE FINANCIALS</div><h2>SKU {editLine.sku}</h2></div><button type="button" className="secondary" disabled={saving} onClick={() => setEditLine(null)}>Close</button></div>
         {!financial ? <p>Loading sale details…</p> : <form className="receipt-financial-form" onSubmit={event => void saveFinancial(event)}>
-          {([['price_cents','Sale price'],['shipping_cents','Buyer-paid shipping'],['fee_cents','Fees'],['tax_cents','Sales tax'],['label_cents','Shipping label'],['other_charge_cents','Other charge'],['cost_cents','Cost']] as const).map(([key,label]) => <label key={key}>{label} ($)<input type="number" min="0" step="0.01" value={financial[key] == null ? '' : (financial[key]! / 100).toFixed(2)} onChange={e => { const cents = e.target.value === '' && key === 'cost_cents' ? null : Math.round(Number(e.target.value || 0) * 100); setFinancial({ ...financial, [key]: cents } as Financial); }} /></label>)}
+          {((viewing?.channel || '').toLowerCase() === 'mercari'
+            ? [['price_cents','Sale price'],['fee_cents','Mercari fee'],['cost_cents','Cost']]
+            : [['price_cents','Sale price'],['shipping_cents','Buyer-paid shipping'],['fee_cents','Fees'],['tax_cents','Sales tax'],['label_cents','Shipping label'],['other_charge_cents','Other charge'],['cost_cents','Cost']]
+          ).map(([key,label]) => <label key={key}>{label} ($)<input type="number" min="0" step="0.01" value={financial[key as keyof Financial] == null ? '' : ((financial[key as keyof Financial] as number) / 100).toFixed(2)} onChange={e => { const cents = e.target.value === '' && key === 'cost_cents' ? null : Math.round(Number(e.target.value || 0) * 100); setFinancial({ ...financial, [key]: cents } as Financial); }} /></label>)}
+          {(viewing?.channel || '').toLowerCase() === 'mercari' && <p className="hint">A Mercari label you paid is a reimbursement on Payouts. It is not part of this sale.</p>}
           <button type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save sale changes'}</button>
           <h3>Edit history</h3>{history.length ? history.map((revision,index) => <div className="receipt-revision" key={index}><strong>{stamp(revision.created_at)} · {revision.actor_id || 'Unknown admin'}</strong>{Object.keys(revision.new_values || {}).map(key => <small key={key}>{key.replaceAll('_',' ')}: {revision.old_values?.[key] == null ? '—' : money(revision.old_values[key]!)} → {revision.new_values?.[key] == null ? '—' : money(revision.new_values[key]!)}</small>)}{Object.keys(revision.commission_delta || {}).length > 0 && <small>Commission changes: {JSON.stringify(revision.commission_delta)}</small>}</div>) : <p>No prior edits.</p>}
         </form>}

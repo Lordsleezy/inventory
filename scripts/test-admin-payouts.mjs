@@ -285,6 +285,17 @@ test("each payment covers reimbursements already owed, and a later expense stays
     [{ at: "2026-10-02T19:00:00Z", amount: 5000 }],
   ), 400);
 });
+test("Mercari seller-paid shipping is left out of profit and commission", () => {
+  const t = { subtotal: 1999, cost: 900, channel: "mercari", feeCents: 199, shipCostCents: 992, processingFeeCents: 0 };
+  assert.equal(profit(t), 1999 - 199 - 900);
+  assert.equal(commissionProfit(t, true), 1999 - 900);
+  assert.equal(commissionProfit(t, false), 1999 - 199 - 900);
+  const shown = commissionBreakdown(t, true);
+  const label = shown.rows.find(r => r.label.includes("Shipping label"));
+  assert.equal(label.cents, 0);
+  assert.match(label.note, /reimbursed/);
+});
+
 test("breakdown lists every fee, marks absorbed ones, and adds up to the commission profit", () => {
   const on = commissionBreakdown(ebay, true);
   assert.equal(on.base, 6200);

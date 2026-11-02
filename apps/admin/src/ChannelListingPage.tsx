@@ -31,7 +31,7 @@ const TITLES: Record<ListingChannel, { eyebrow: string; title: string; blurb: st
   mercari: {
     eyebrow: 'MERCARI',
     title: 'Mercari listings',
-    blurb: 'Type in each Mercari sale by hand: item, sale price, buyer shipping, label, fee (10% of item + shipping), payout, date. Admin-only.',
+    blurb: 'Type in each Mercari sale by hand: sale price, Mercari fee, and payout. A label you paid is reimbursed on Payouts and is not part of the sale. Admin-only.',
   },
 };
 

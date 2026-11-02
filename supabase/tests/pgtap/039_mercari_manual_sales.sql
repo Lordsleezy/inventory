@@ -1,6 +1,6 @@
 -- pgTAP: Mercari manual sale entry, import guard, fee (10% of item+ship), listing cap.
 begin;
-select plan(26);
+select plan(27);
 set constraints all immediate;
 
 do $$
@@ -46,11 +46,12 @@ select lives_ok($q$select public.portal_mercari_add_listing('97001','https://www
 select is((select count(*)::int from public.portal_mercari_live_listings()), 2, 'live listings include seed + new');
 select is((public.portal_mercari_live_count()->>'cap')::int, 200, 'cap is 200');
 
-select lives_ok($q$select public.portal_mercari_record_sale('97001', 5000, null, null, current_date - 1, 'test', 1000, 400)$q$, 'admin records Mercari sale with ship+label');
+select lives_ok($q$select public.portal_mercari_record_sale('97001', 5000, null, null, current_date - 1, 'test', 1000, 400)$q$, 'admin records Mercari sale; shipping and label are not sale fields');
 select is((select state from public.units where sku = '97001'), 'sold', 'unit is sold');
-select is((select fee_cents from public.mercari_sale_entries where sku = '97001'), 600, 'fee defaults to 10% of 5000+1000');
-select is((select payout_cents from public.mercari_sale_entries where sku = '97001'), 5000, 'payout = 5000+1000-600-400');
-select is((select shipping_cents from public.sales where sku = '97001'), 1000, 'buyer shipping stored on sale');
+select is((select fee_cents from public.mercari_sale_entries where sku = '97001'), 500, 'fee defaults to 10% of the sale price');
+select is((select payout_cents from public.mercari_sale_entries where sku = '97001'), 4500, 'payout defaults to sale minus fee');
+select is((select shipping_cents from public.sales where sku = '97001'), 0, 'buyer shipping is not stored on a Mercari sale');
+select is((select amount_cents from public.portal_expenses where external_id = 'mercari-label:' || (select id::text from public.sales where sku = '97001')), 400, 'a passed label is reimbursed, not kept on the sale');
 select is((select status from public.listings where sku = '97001' and channel = 'mercari'), 'delisted', 'cleared from Mercari tracker');
 select is((select count(*)::int from public.delist_tasks where sku = '97003' and channel = 'ebay' and completed_at is null), 0, 'sanity: unrelated SKU unchanged');
 
