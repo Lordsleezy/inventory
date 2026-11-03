@@ -831,6 +831,7 @@ export function App() {
         ? <>
       <button type="button" className={page === 'register' ? 'active' : ''} key="register" title="Register" onClick={() => goNav({ page: 'register' })}>Register</button>
       <button type="button" className={page === 'inventory' ? 'active' : ''} title="Inventory" onClick={() => goNav({ page: 'inventory', inventoryTab: 'in-stock' })}>Inventory</button>
+      <button type="button" title="Locations" className={page === 'locations' ? 'active' : ''} onClick={() => goNav({ page: 'locations' })}>Locations</button>
       <button type="button" title="Settings" className={page === 'settings' ? 'active' : ''} onClick={() => goNav({ page: 'settings' })}>Settings</button>
         </>
         : <>
@@ -979,7 +980,15 @@ export function App() {
   {fullAccess && page === 'withdrawals' && <MoneyPage client={sb} storeId={store} accessToken={session.access_token} money={money} stamp={stamp} />}
   {fullAccess && page === 'books' && <BooksPage client={sb} money={money} />}
   {fullAccess && page === 'manifests' && <ManifestsPage client={sb} storeId={store} money={money} />}
-  {fullAccess && page === 'locations' && <LocationsPage client={sb} storeId={store} />}
+  {(fullAccess || registerOnly) && page === 'locations' && (
+    <LocationsPage
+      client={sb}
+      storeId={store}
+      canManage={fullAccess}
+      accessToken={session.access_token}
+      money={money}
+    />
+  )}
   {fullAccess && page === 'insights' && <InsightsPage client={sb} money={money} />}
   {fullAccess && page === 'settings' && <SettingsPage client={sb} accessToken={session.access_token} stamp={stamp} money={money} busy={busy} run={run} onLedgerChanged={async () => { await loadSales(); await loadPayoutSales(); }} ruleEditor={<>{staff.map(p => <RuleEditor key={p.user_id} person={p} rule={ruleMap.get(p.user_id)} save={setRule} busy={busy} />)}</>} onlinePayoutSettings={<OnlinePayoutSettings absorbFees={!!onlineCfg.absorbFees} toggleAbsorb={async (on) => { await run(async () => { check(await sb.rpc('portal_set_absorb_fees', { p_on: on })); await loadCommon(); await loadPayoutSales(); await loadPayments(); }); }} cfg={onlineCfg} staff={staff} busy={busy} save={async (channels, pct, who) => { await run(async () => { check(await sb.rpc('portal_set_payout_config', { p_channels: channels, p_pct: pct, p_employee: who })); await loadCommon(); await loadPayoutSales(); }); }} />} />}
   {registerOnly && page === 'settings' && <AssociateSettings client={sb} displayName={staffSession?.displayName || 'Associate'} />}

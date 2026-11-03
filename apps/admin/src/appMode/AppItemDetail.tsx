@@ -5,7 +5,8 @@ import { RestoreInventoryButton } from '../RestoreInventoryButton';
 import { shortError } from './shortError';
 import { DispositionButtons } from '../DispositionDialogs';
 import { showDispositionButtons } from '../dispositions';
-import { locationParts } from '../locationOrder';
+import { locationPhrase } from '../locationPlace';
+import { LocationPicker } from '../LocationPicker';
 import { ReceiveWorkStatus } from '../ReceiveWorkStatus';
 import { ChannelCheckboxes } from '../ChannelCheckboxes';
 import { printUnitLabels } from '../ReceiveGroupRow';
@@ -110,6 +111,7 @@ export function AppItemDetail({
   const [ebay, setEbay] = useState<EbayInfo | null>(null);
   const [history, setHistory] = useState<HistoryRow[]>([]);
   const [actionMsg, setActionMsg] = useState('');
+  const [locationOpen, setLocationOpen] = useState(false);
   const heroRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -210,10 +212,7 @@ export function AppItemDetail({
           appMode
           initialSection={editJump}
           canDelete={canDelete}
-          locationLabel={locationCodes.length ? locationCodes.map((code) => {
-            const parts = locationParts(code);
-            return parts ? `${parts.display} · ${parts.slot}` : code;
-          }).join(', ') : 'Unassigned'}
+          locationLabel={locationCodes.length ? locationCodes.map((code) => locationPhrase(code) || code).join(', ') : 'Unassigned'}
           onReadinessChanged={() => { setReload((n) => n + 1); onChanged(); }}
           onClose={() => { setEditing(false); setEditJump(undefined); }}
           onSaved={() => {
@@ -249,10 +248,7 @@ export function AppItemDetail({
     return row && String(row.status).toLowerCase() === 'listed';
   }).length;
   const locationText = locationCodes.length
-    ? locationCodes.map((code) => {
-      const parts = locationParts(code);
-      return parts ? `${parts.display} · ${parts.slot}` : code;
-    }).join(', ')
+    ? locationCodes.map((code) => locationPhrase(code) || code).join(', ')
     : String(unit?.location || unit?.bin || '');
   const hasLocation = Boolean(locationText.trim());
   const attrs = ebay?.attributes || {};
@@ -542,14 +538,18 @@ export function AppItemDetail({
               label="On hand"
               value={`${qty || 1}${isStocked ? ' · Stocked SKU' : ' · One-of-one'}`}
             />
-            <div className="app-kv">
-              <span>Location</span>
-              {hasLocation
-                ? <strong>{locationText}</strong>
-                : canDelete && !staffMode
-                  ? <button type="button" className="app-text-link warn" onClick={() => openEdit('stock')}>Unassigned · Assign</button>
-                  : <strong className="warn">Unassigned</strong>}
-            </div>
+            <button
+              type="button"
+              className="app-row"
+              disabled={!inStock}
+              onClick={() => inStock && setLocationOpen(true)}
+            >
+              <span className="app-row-text">
+                <strong>Location</strong>
+                <small className={hasLocation ? undefined : 'warn'}>{hasLocation ? locationText : 'Unassigned'}</small>
+              </span>
+              {inStock && <span className="app-chevron" aria-hidden="true">›</span>}
+            </button>
           </div>
 
           {history.length > 0 && (
@@ -597,6 +597,15 @@ export function AppItemDetail({
             </div>
           )}
         </>
+      )}
+      {locationOpen && inStock && (
+        <LocationPicker
+          client={client}
+          storeId={storeId}
+          sku={sku}
+          onClose={() => setLocationOpen(false)}
+          onSaved={() => { setLocationOpen(false); setReload((n) => n + 1); onChanged(); }}
+        />
       )}
     </div>
   );

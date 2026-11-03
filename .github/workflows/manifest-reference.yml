@@ -8,6 +8,7 @@ on:
       - 'scripts/test-manifest-*.mjs'
       - 'scripts/test-receive-multiples.mjs'
       - 'scripts/test-inventory-edit.mjs'
+      - 'scripts/test-locations-phone.mjs'
       - '.github/workflows/manifest-reference.yml'
   workflow_dispatch:
 jobs:
@@ -39,3 +40,4 @@ jobs:
           node scripts/test-manifest-receive.mjs
           node scripts/test-receive-multiples.mjs
           node scripts/test-inventory-edit.mjs
+          node scripts/test-locations-phone.mjs

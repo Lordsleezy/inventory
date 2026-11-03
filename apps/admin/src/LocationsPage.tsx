@@ -1,17 +1,48 @@
-import { ToolCard, ToolHeading, ToolIcon, ToolEmpty, ToolTip } from './design/Tools';
-import { scannerInputMode } from './kiosk';
-import { scanBarcode } from './barcodeCamera';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import bwipjs from 'bwip-js/browser';
+import { scanBarcode } from './barcodeCamera';
+import { errText } from './errText';
+import { scannerInputMode } from './kiosk';
+import { AppItemDetail } from './appMode/AppItemDetail';
+import { UnitEditDrawer } from './UnitEditDrawer';
+import { rpcMoveLocationStock } from './locationStock';
+import { layoutBlocked, locationPhrase, planPlaceInBin, unitsLabel, type LocationAllocation } from './locationPlace';
 
 type Bay = { bay_no: number; row_bins: number[] };
 type Location = { code: string; bay_no: number; row_no: number; bin_no: number | null; stock: number };
-type Allocation = { sku: string; location_code: string; quantity: number };
-type LocationMove = { sku: string; from_location: string | null; to_location: string | null; quantity: number; moved_at: string };
-type Props = { client: SupabaseClient; storeId: string; canManage?: boolean };
-const number = (raw: string) => Number(raw.trim());
+type BinItem = { sku: string; title: string; quantity: number; qty_on_hand: number; is_stocked: boolean };
+type FoundUnit = {
+  sku: string;
+  title: string;
+  qty_on_hand: number;
+  is_stocked: boolean;
+  allocations: LocationAllocation[];
+};
+type Props = {
+  client: SupabaseClient;
+  storeId: string;
+  canManage?: boolean;
+  variant?: 'app' | 'desktop';
+  onBack?: () => void;
+  backLabel?: string;
+  accessToken?: string;
+  money?: (n: number) => string;
+  onOpenSku?: (sku: string) => void;
+  onSellInStore?: () => void;
+};
+
+function friendly(err: unknown) {
+  const raw = errText(err);
+  if (raw.includes('move_stock_before_removing_location')) return 'Move the stock out before removing that bin.';
+  if (raw.includes('not_enough_stock_at_source')) return 'That bin does not have that many.';
+  if (raw.includes('not_enough_unassigned')) return 'Not enough unassigned stock.';
+  if (raw.includes('sku_not_found')) return 'No item with that SKU.';
+  if (raw.includes('manager_required')) return 'Only an admin can change a bay.';
+  if (raw.includes('location_not_found')) return 'That bin is not set up.';
+  return raw;
+}
 
 function Barcode({ code }: { code: string }) {
   const svg = useMemo(() => bwipjs.toSVG({
@@ -21,186 +52,500 @@ function Barcode({ code }: { code: string }) {
   return <div className="location-barcode" aria-label={`Barcode for ${code}`} dangerouslySetInnerHTML={{ __html: svg }} />;
 }
 
-export function LocationsPage({ client, storeId, canManage = true }: Props) {
-  const [view, setView] = useState<'overview'|'setup'|'move'|'assign'>('overview');
-  const [loaded, setLoaded] = useState(false);
-  const [scanBusy, setScanBusy] = useState(false);
-  const submitLock = useRef(false);
-  const skuVersion = useRef(0);
+function rowsLabel(count: number) {
+  return `${count} row${count === 1 ? '' : 's'}`;
+}
+
+export function LocationsPage({
+  client, storeId, canManage = true, variant = 'desktop', onBack, backLabel = 'More',
+  accessToken, money, onOpenSku, onSellInStore,
+}: Props) {
+  const phone = variant === 'app';
   const [bays, setBays] = useState<Bay[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
-  const [recentMoves, setRecentMoves] = useState<LocationMove[]>([]);
-  const [bay, setBay] = useState('');
-  const [rows, setRows] = useState<string[]>(['3', '3', '3']);
-  const [sku, setSku] = useState('');
-  const [to, setTo] = useState('');
-  const [assignBin, setAssignBin] = useState(() => { try { return localStorage.getItem('floor:assign-location-bin') || ''; } catch { return ''; } });
-  const [from, setFrom] = useState('');
-  const [unassign, setUnassign] = useState(false);
-  const [onHand, setOnHand] = useState(0);
-  const [quantity, setQuantity] = useState('1');
-  const [allocations, setAllocations] = useState<Allocation[]>([]);
-  const [printBay, setPrintBay] = useState<number | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [screen, setScreen] = useState<'list' | 'bay' | 'bin' | 'edit' | 'scan'>('list');
+  const [bayNo, setBayNo] = useState<number | null>(null);
+  const [binCode, setBinCode] = useState<string | null>(null);
+  const [items, setItems] = useState<BinItem[]>([]);
+  const [itemSku, setItemSku] = useState<string | null>(null);
+  const [deskDetail, setDeskDetail] = useState<{ unit: Record<string, unknown>; photos: { id: number; path: string; is_primary: boolean }[] } | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [editNo, setEditNo] = useState('1');
+  const [editRows, setEditRows] = useState<number[]>([3]);
+  const [scanValue, setScanValue] = useState('');
+  const [pending, setPending] = useState<FoundUnit | null>(null);
+  const [scanQty, setScanQty] = useState('1');
+  const [printing, setPrinting] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const toInput = useRef<HTMLInputElement>(null);
-  const skuInput = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const scanRef = useRef<HTMLInputElement>(null);
+  const lock = useRef(false);
 
-  const load = useCallback(async () => {
+  async function refresh() {
     const { data, error: rpcError } = await client.rpc('portal_bay_list');
     if (rpcError) throw rpcError;
-    setBays((data?.bays || []) as Bay[]);
-    setLocations((data?.locations || []) as Location[]);
-    const moves = await client.from('unit_location_moves').select('sku,from_location,to_location,quantity,moved_at')
-      .eq('store_id',storeId).order('moved_at',{ascending:false}).limit(12);
-    if (moves.error) throw moves.error;
-    setRecentMoves((moves.data || []) as LocationMove[]); setLoaded(true);
+    const body = (data || {}) as { bays?: Bay[]; locations?: Location[] };
+    setBays(body.bays || []);
+    setLocations(body.locations || []);
+    setLoaded(true);
+  }
+
+  useEffect(() => {
+    let alive = true;
+    void refresh().catch((err) => { if (alive) setError(friendly(err)); });
+    return () => { alive = false; };
+    // The bay list is reloaded after each save as well.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client]);
-  useEffect(() => { void load().catch((e) => setError(String(e.message || e))); }, [load]);
 
-  async function saveBay(event: FormEvent) {
-    event.preventDefault(); if (submitLock.current) return; setError(''); setNotice('');
-    const bayNo = number(bay), layout = rows.map(number);
-    if (!Number.isInteger(bayNo) || bayNo < 1 || bayNo > 9999
-      || layout.length < 1 || layout.length > 5 || layout.some((n) => !Number.isInteger(n) || n < 0 || n > 5)) {
-      setError('Use bay 1–9999, one to five rows, and zero to five bins per row.'); return;
+  useEffect(() => {
+    if (!binCode) return;
+    let alive = true;
+    void (async () => {
+      const { data, error: rpcError } = await client.rpc('portal_location_units', { p_code: binCode });
+      if (!alive) return;
+      if (rpcError) setError(friendly(rpcError));
+      else setItems((data || []) as BinItem[]);
+    })();
+    return () => { alive = false; };
+  }, [client, binCode, screen]);
+
+  useEffect(() => {
+    if (screen === 'scan') scanRef.current?.focus();
+  }, [screen]);
+
+  useEffect(() => {
+    if (!itemSku || phone) {
+      setDeskDetail(null);
+      return;
     }
-    submitLock.current = true; setBusy(true);
-    try {
-      const { error: rpcError } = await client.rpc('portal_set_bay', { p_bay: bayNo, p_rows: layout });
-      if (rpcError) throw rpcError;
-      await load(); setView('overview'); setNotice(`Bay ${bayNo} saved.`);
-    } catch (e) { setError(String((e as Error).message || e)); }
-    finally { submitLock.current = false; setBusy(false); }
-  }
-
-  async function loadSku(next: string) {
-    const version = ++skuVersion.current; setSku(next); setAllocations([]); setFrom(''); setUnassign(false); setOnHand(0);
-    if (!next.trim()) return;
-    const item = next.trim();
-    const [{ data, error: queryError }, unitRow] = await Promise.all([
-      client.from('unit_location_stock').select('sku,location_code,quantity').eq('store_id', storeId).eq('sku', item),
-      client.from('units').select('qty_on_hand').eq('store_id', storeId).eq('sku', item).maybeSingle(),
-    ]);
-    if (version !== skuVersion.current) return;
-    if (queryError) { setError(queryError.message); return; }
-    const rows = (data || []) as Allocation[];
-    setAllocations(rows);
-    const hand = Math.max(1, Number(unitRow.data?.qty_on_hand) || 1);
-    setOnHand(hand);
-    const assigned = rows.reduce((sum, row) => sum + row.quantity, 0);
-    const loose = Math.max(0, hand - assigned);
-    if (rows.length === 1 && loose <= 0) setFrom(rows[0].location_code);
-    else if (rows.length === 1 && loose > 0) setFrom('');
-    else if (rows.length > 1) setFrom(rows[0]?.location_code || '');
-    setQuantity(String(rows.length === 1 && loose <= 0 ? rows[0].quantity : 1));
-  }
-
-  async function move(event: FormEvent) {
-    event.preventDefault(); if (submitLock.current) return; setError(''); setNotice('');
-    const qty = number(quantity), code = to.trim(), item = sku.trim();
-    const assigned = allocations.reduce((sum, row) => sum + row.quantity, 0);
-    const loose = Math.max(0, onHand - assigned);
-    if (!Number.isInteger(qty) || qty < 1) { setError('Enter a positive whole quantity.'); return; }
-    if (!item) { setError('Scan the item SKU.'); return; }
-    if (unassign) {
-      if (!from) { setError('Choose the current location to return to unassigned stock.'); return; }
-      if (qty > (allocations.find((a) => a.location_code === from)?.quantity || 0)) { setError('Quantity exceeds the stock at the selected source location.'); return; }
-    } else {
-      if (!locations.some((location) => location.code === code)) { setError('Scan a valid bay label for the new location.'); return; }
-      if (from) {
-        if (qty > (allocations.find((a) => a.location_code === from)?.quantity || 0)) { setError('Quantity exceeds the stock at the selected source location.'); return; }
-      } else if (qty > loose) {
-        setError(`Only ${loose} unassigned unit(s) available. Choose the item’s current location if it is already in a bin.`); return;
+    let alive = true;
+    void (async () => {
+      const { data, error: rpcError } = await client.rpc(canManage ? 'portal_inventory_detail' : 'staff_inventory_detail', { p_sku: itemSku });
+      if (!alive) return;
+      if (rpcError || !data) {
+        setError(rpcError ? friendly(rpcError) : 'Unit not found');
+        setItemSku(null);
+        return;
       }
-    }
-    submitLock.current = true; setBusy(true);
-    try {
-      const { error: rpcError } = await client.rpc('portal_move_location_stock', {
-        p_sku: item,
-        p_to: unassign ? '' : code,
-        p_quantity: qty,
-        p_from: from || null,
-      });
-      if (rpcError) throw rpcError;
-      setNotice(unassign ? `${qty} × SKU ${item} returned to unassigned.` : `${qty} × SKU ${item} placed at ${code}.`);
-      await loadSku(item); await load();
-      setSku(''); setFrom(''); setAllocations([]); setUnassign(false); setTo('');
-      skuInput.current?.focus();
-    } catch (e) { setError(String((e as Error).message || e)); }
-    finally { submitLock.current = false; setBusy(false); }
+      setDeskDetail(data as { unit: Record<string, unknown>; photos: { id: number; path: string; is_primary: boolean }[] });
+    })();
+    return () => { alive = false; };
+  }, [itemSku, phone, client, canManage]);
+
+  const bay = bays.find((row) => row.bay_no === bayNo) || null;
+  const bayStock = (no: number) => locations.filter((row) => row.bay_no === no).reduce((sum, row) => sum + Number(row.stock || 0), 0);
+  const spot = locations.find((row) => row.code === binCode) || null;
+
+  function openBay(no: number) {
+    setError('');
+    setNotice('');
+    setBayNo(no);
+    setBinCode(null);
+    setScreen('bay');
   }
 
-  async function camera(target: 'to'|'sku') {
-    if (scanBusy) return; setScanBusy(true); setError('');
-    try { const code = await scanBarcode();
-      if (code) { if (target === 'to') {
-        const value=code.trim();
-        if(view==='assign'){setAssignBin(value);try{localStorage.setItem('floor:assign-location-bin',value);}catch{/* optional */}}
-        else setTo(value);
-        skuInput.current?.focus();
-      } else await loadSku(code.trim()); }
-      else { setNotice('Use your barcode scanner or type the label if camera scanning is unavailable.'); (target === 'to' ? toInput : skuInput).current?.focus(); }
-    } finally { setScanBusy(false); }
+  function openBin(code: string) {
+    setError('');
+    setNotice('');
+    setItems([]);
+    setBinCode(code);
+    setScreen('bin');
   }
-  const printed = locations.filter((location) => location.bay_no === printBay);
-  const changeView = (next: 'overview'|'setup'|'move'|'assign') => { setView(next); setError(''); setNotice(''); };
-  const createBay = () => { setBay(''); setRows(['3','3','3']); changeView('setup'); };
-  const resizeRows = (count: number) => setRows(old => Array.from({ length: count }, (_, index) => old[index] ?? '0'));
-  return <div className="floor-tools locations-page">
-    {view !== 'overview' && <button type="button" className="tool-back" disabled={busy} onClick={() => changeView('overview')}>‹ Locations</button>}
-    <header><div><h1>{view === 'setup' ? 'Bay setup' : view === 'move' ? 'Put away or move' : view === 'assign' ? 'Assign locations' : 'Locations'}</h1><p>{view === 'overview' ? 'Manage your storage bays and locations.' : view === 'setup' ? 'Configure the rows and bins for this bay.' : view === 'assign' ? 'Scan a bin once, then scan each item. Every assignment is saved immediately.' : 'Scan a location, then scan the items to put away.'}</p></div></header>
-    {error && <div className="alert" role="alert">{error}<button type="button" aria-label="Dismiss error" onClick={() => setError('')}>×</button></div>}
-    {notice && <div className="notice" role="status">{notice}</div>}
-    {!loaded && <p role="status">{error ? 'Locations could not be loaded.' : 'Loading locations…'} {error && <button type="button" className="secondary" onClick={() => void load().catch(e => setError(String(e.message || e)))}>Retry</button>}</p>}
-    {view === 'overview' && <>
-      <div className="location-quick-links">
-        {canManage && <button type="button" onClick={() => changeView('setup')}><span className="tool-icon-badge"><ToolIcon name="bay"/></span><span>Bay setup<small>Configure rows and bins for a bay.</small></span></button>}
-        <button type="button" onClick={() => changeView('assign')}><span className="tool-icon-badge"><ToolIcon name="scan"/></span><span>Assign locations<small>Scan a bin, then items one after another.</small></span></button>
-        <button type="button" onClick={() => changeView('move')}><span className="tool-icon-badge"><ToolIcon name="move"/></span><span>Put away or move<small>Move inventory to a bay location.</small></span></button>
+
+  function startCreate() {
+    const next = bays.reduce((max, row) => Math.max(max, row.bay_no), 0) + 1;
+    setCreating(true);
+    setEditNo(String(next));
+    setEditRows([3]);
+    setError('');
+    setScreen('edit');
+  }
+
+  function startEdit() {
+    if (!bay) return;
+    setCreating(false);
+    setEditNo(String(bay.bay_no));
+    setEditRows(bay.row_bins.map((count) => Number(count)));
+    setError('');
+    setScreen('edit');
+  }
+
+  async function saveBay() {
+    const no = Number(editNo);
+    if (!Number.isInteger(no) || no < 1 || no > 9999) {
+      setError('Bay number has to be from 1 to 9999.');
+      return;
+    }
+    if (creating && bays.some((row) => row.bay_no === no)) {
+      setError('That bay already exists. Open it and tap Edit.');
+      return;
+    }
+    if (!editRows.length || editRows.length > 5 || editRows.some((count) => count < 0 || count > 5)) {
+      setError('A bay has 1 to 5 rows, and each row has 0 to 5 bins.');
+      return;
+    }
+    const blocked = layoutBlocked(no, editRows, locations);
+    if (blocked) {
+      setError(blocked);
+      return;
+    }
+    setBusy(true);
+    setError('');
+    try {
+      const { error: rpcError } = await client.rpc('portal_set_bay', { p_bay: no, p_rows: editRows });
+      if (rpcError) throw rpcError;
+      await refresh();
+      setBayNo(no);
+      setCreating(false);
+      setScreen('bay');
+    } catch (err) {
+      setError(friendly(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteBay() {
+    if (bayNo == null) return;
+    if (bayStock(bayNo) > 0) {
+      setError('Move everything out before deleting this bay.');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    try {
+      const { error: rpcError } = await client.rpc('portal_delete_bay', { p_bay: bayNo });
+      if (rpcError) throw rpcError;
+      await refresh();
+      setBayNo(null);
+      setScreen('list');
+    } catch (err) {
+      setError(friendly(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function openItem(sku: string) {
+    if (accessToken && (money || !phone)) {
+      setItemSku(sku);
+      return;
+    }
+    onOpenSku?.(sku);
+  }
+
+  async function lookup(raw: string) {
+    const code = raw.trim();
+    if (!code || !binCode) return;
+    const { data, error: rpcError } = await client.rpc('portal_location_unit', { p_sku: code });
+    if (rpcError) throw rpcError;
+    if (!data) throw new Error('No in-stock item with that SKU.');
+    const unit = data as FoundUnit;
+    unit.allocations = unit.allocations || [];
+    const here = unit.allocations.find((row) => row.location_code === binCode)?.quantity ?? 0;
+    const outside = Math.max(0, Number(unit.qty_on_hand) - here);
+    if (outside < 1) throw new Error('Those units are already in this bin.');
+    if (unit.is_stocked || Number(unit.qty_on_hand) > 1) {
+      setPending(unit);
+      setScanQty(String(Math.min(outside, Number(unit.qty_on_hand))));
+      return;
+    }
+    await commit(unit, 1);
+  }
+
+  async function commit(unit: FoundUnit, quantity: number) {
+    if (!binCode) return;
+    const moves = planPlaceInBin(unit.qty_on_hand, unit.allocations || [], binCode, quantity);
+    for (const move of moves) await rpcMoveLocationStock(client, unit.sku, move.quantity, move.from, move.to);
+    setPending(null);
+    setScanValue('');
+    setNotice(`SKU ${unit.sku} · ${unitsLabel(quantity)} put in ${locationPhrase(binCode)}.`);
+    await refresh();
+    const { data, error: rpcError } = await client.rpc('portal_location_units', { p_code: binCode });
+    if (rpcError) throw rpcError;
+    setItems((data || []) as BinItem[]);
+    scanRef.current?.focus();
+  }
+
+  async function submitScan(raw?: string) {
+    if (lock.current) return;
+    lock.current = true;
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      if (pending) {
+        const count = Number(scanQty);
+        await commit(pending, count);
+      } else {
+        await lookup(raw ?? scanValue);
+      }
+    } catch (err) {
+      setError(err instanceof Error && !('code' in err) ? err.message : friendly(err));
+    } finally {
+      lock.current = false;
+      setBusy(false);
+    }
+  }
+
+  async function camera() {
+    setError('');
+    const code = await scanBarcode();
+    if (!code) {
+      setError('No barcode found. Type the SKU instead.');
+      return;
+    }
+    setScanValue(code);
+    await submitScan(code);
+  }
+
+  function printLabels() {
+    setPrinting(true);
+    window.setTimeout(() => {
+      window.print();
+      setPrinting(false);
+    }, 50);
+  }
+
+  if (itemSku && !phone) {
+    if (!deskDetail) return <p className="hint">Loading item…</p>;
+    return (
+      <UnitEditDrawer
+        client={client}
+        storeId={storeId}
+        sku={itemSku}
+        unit={deskDetail.unit}
+        photos={deskDetail.photos || []}
+        urls={{}}
+        accessToken={accessToken || ''}
+        canDelete={canManage}
+        onClose={() => setItemSku(null)}
+        onSaved={() => { void refresh(); }}
+        onPhotosChanged={() => undefined}
+        onDeleted={() => { setItemSku(null); void refresh(); }}
+      />
+    );
+  }
+
+  if (itemSku && phone && accessToken && money) {
+    return (
+      <AppItemDetail
+        client={client}
+        storeId={storeId}
+        accessToken={accessToken}
+        sku={itemSku}
+        money={money}
+        canDelete={canManage}
+        staffMode={!canManage}
+        onBack={() => setItemSku(null)}
+        onChanged={() => { void refresh(); }}
+        onSellInStore={onSellInStore || (() => undefined)}
+      />
+    );
+  }
+
+  const printSheet = (
+    <div className="location-print-sheet">
+      {printing && locations.filter((row) => row.bay_no === bayNo).map((row) => (
+        <div className="location-label" key={row.code}>
+          <strong>{row.code}</strong>
+          <Barcode code={row.code} />
+        </div>
+      ))}
+    </div>
+  );
+  const group = phone ? 'app-group' : 'loc-group';
+  const section = phone ? 'app-section-label' : 'loc-section';
+  const rowCls = phone ? 'app-row' : 'loc-row';
+  const textCls = phone ? 'app-row-text' : 'loc-row-text';
+  const sideCls = phone ? 'app-row-price' : 'loc-row-side';
+  const chevron = phone ? 'app-chevron' : 'loc-chevron';
+
+  function frame(title: string, subtitle: string | undefined, action: ReactNode, body: ReactNode, back?: () => void, backText?: string) {
+    const nav = (
+      <div className={phone ? 'app-nav' : 'loc-desk-nav'}>
+        {back ? <button type="button" onClick={back}>‹ {backText}</button> : <span />}
+        {action || <span />}
       </div>
-      <ToolCard><ToolHeading icon="bay" title="Bays" description="Organize rows, bins and large-item storage." action={canManage && <button type="button" disabled={busy || !loaded} onClick={createBay}><ToolIcon name="plus"/>Create bay</button>}/>
-        {loaded && bays.length === 0 ? <ToolEmpty icon="bay" title="No bays set up yet"><p>Create your first bay to organize rows and bins for storing inventory.</p>{canManage && <button type="button" onClick={createBay}><ToolIcon name="plus"/>Create bay</button>}</ToolEmpty> : <div className="location-bay-list">{bays.map(item => <details key={item.bay_no} className="location-bay">
-          <summary><strong>Bay {item.bay_no}</strong><span>{locations.filter(l => l.bay_no === item.bay_no).reduce((n,l) => n+l.stock,0)} units · {item.row_bins.length} rows <span aria-hidden="true">›</span></span></summary>
-          <div className="location-bay-body"><p className="location-row-summary">{item.row_bins.map((n,i) => `Row ${i+1}: ${n ? `${n} bins` : 'no bins / large items'}`).join(' · ')}</p><div className="location-code-list">
-            {locations.filter(l => l.bay_no === item.bay_no).map(l => <span key={l.code}><b>{l.code}</b><small>{l.stock} units</small></span>)}
-          </div><div className="actions">{canManage && <button type="button" className="secondary" onClick={() => { setBay(String(item.bay_no)); setRows(item.row_bins.map(String)); changeView('setup'); }}>Edit bay</button>}
-            <button type="button" className="secondary" onClick={() => { setPrintBay(item.bay_no); setTimeout(() => window.print(),100); }}>Print bay labels</button></div></div>
-        </details>)}</div>}
-      </ToolCard>
-      {recentMoves.length > 0 && <ToolCard><ToolHeading icon="move" title="Recent location history" description="Latest put-away and move events."/><div className="location-code-list">{recentMoves.map((move,index)=><span key={`${move.sku}-${move.moved_at}-${index}`}><b>SKU {move.sku} · {move.from_location || 'Unassigned'} → {move.to_location || 'Unassigned'}</b><small>{new Date(move.moved_at).toLocaleString()}</small></span>)}</div></ToolCard>}
-      <ToolTip>Each bay can have one to five rows. Each row supports up to five bins, or no bins for large items.</ToolTip>
-    </>}
-    {view === 'setup' && canManage && <><ToolCard><ToolHeading icon="bay" title="Bay setup" description="Configure the number of rows and bins for this bay location."/>
-      <form className="location-bay-form" onSubmit={event => void saveBay(event)}>
-        <label>Bay number<input required inputMode="numeric" value={bay} onChange={event => setBay(event.target.value)} placeholder="e.g. 14" disabled={busy}/></label>
-        <div className="location-rows-head"><div><h2>Rows</h2><p>Set up one to five rows in this bay.</p></div><div className="tool-segment" aria-label="Number of rows">{[1,2,3,4,5].map(n => <button key={n} type="button" disabled={busy} aria-pressed={rows.length === n} onClick={() => resizeRows(n)}>{n} {n === 1 ? 'row' : 'rows'}</button>)}</div></div>
-        {rows.map((bins,index) => <label className="location-row-config" key={index}><span>Row {index+1}<ToolIcon name="bay"/></span><select disabled={busy} value={bins} onChange={event => setRows(old => old.map((value,i) => i === index ? event.target.value : value))}><option value="0">No bins · large items</option>{[1,2,3,4,5].map(count => <option key={count} value={count}>{count} {count === 1 ? 'bin' : 'bins'}</option>)}</select></label>)}
-        <div className="actions"><button disabled={busy || !loaded}><ToolIcon name="save"/>{busy ? 'Saving…' : 'Save bay'}</button></div>
-      </form></ToolCard><ToolTip>Choose no bins for a row that holds large items. Existing stock prevents unsafe layout changes.</ToolTip></>}
-    {view === 'move' && <ToolCard><ToolHeading icon="move" title="Put away or move" description="Scan the SKU first. If it is already in a bin, pick that bin under Current location. Put away uses Unassigned stock; moves between bins pick the source bin."/>
-      <form className="location-scan-form" onSubmit={event => void move(event)}>
-        <label>Item SKU<small>Scan item barcode</small><span className="location-scan-field"><input ref={skuInput} required disabled={busy} inputMode={scannerInputMode()} value={sku} onChange={event => void loadSku(event.target.value)} placeholder="Scan item barcode"/><button type="button" className="secondary" disabled={busy || scanBusy} aria-label="Scan item with camera" onClick={() => void camera('sku')}><ToolIcon name="scan"/></button></span></label>
-        {allocations.length > 0 && <p className="location-row-summary">{allocations.map((a) => `${a.quantity} at ${a.location_code}`).join(' · ')}{onHand > allocations.reduce((n, a) => n + a.quantity, 0) ? ` · ${onHand - allocations.reduce((n, a) => n + a.quantity, 0)} unassigned` : ''}</p>}
-        <label>Current location<small>Where the units are now</small><select disabled={busy} value={from} onChange={event => setFrom(event.target.value)}><option value="">Unassigned stock</option>{allocations.map(a => <option key={a.location_code} value={a.location_code}>{a.location_code} · {a.quantity} unit(s)</option>)}</select></label>
-        <label className="location-unassign-toggle"><input type="checkbox" checked={unassign} disabled={busy || !from} onChange={(event) => setUnassign(event.target.checked)}/> Return to unassigned (no bin)</label>
-        {!unassign && <label>New location<small>Scan a location label</small><span className="location-scan-field"><input ref={toInput} required={!unassign} disabled={busy} inputMode={scannerInputMode()} value={to} onChange={event => setTo(event.target.value.trim())} onKeyDown={event => { if(event.key === 'Enter'){event.preventDefault();skuInput.current?.focus();} }} placeholder="Scan 14-2-3"/><button type="button" className="secondary" disabled={busy || scanBusy} aria-label="Scan location with camera" onClick={() => void camera('to')}><ToolIcon name="scan"/></button></span></label>}
-        <label>Quantity<small>Number of units to move</small><input disabled={busy} required inputMode="numeric" type="number" min="1" step="1" value={quantity} onChange={event => setQuantity(event.target.value)}/></label>
-        <button type="submit" className="tool-primary" disabled={busy || scanBusy || !loaded}><ToolIcon name="save"/>{busy ? 'Saving…' : scanBusy ? 'Scanning…' : unassign ? 'Return to unassigned' : 'Save location'}</button>
-      </form></ToolCard>}
-    {view === 'assign' && <ToolCard><ToolHeading icon="scan" title="Fast assign" description="Scan or choose a bin once. Then scan each SKU; successful assignments leave the No location list immediately."/>
-      <form className="location-scan-form" onSubmit={event=>{event.preventDefault();void (async()=>{
-        const item=sku.trim(), code=assignBin.trim(); if(!item||!locations.some(location=>location.code===code)){setError('Scan a configured bin first, then scan a SKU.');return;}
-        if(submitLock.current)return;submitLock.current=true;setBusy(true);setError('');
-        try{const result=await client.rpc('portal_move_location_stock',{p_sku:item,p_to:code,p_quantity:1,p_from:null});if(result.error)throw result.error;
-          setNotice(`✓ SKU ${item} assigned to ${code}.`);setSku('');skuInput.current?.focus();await load();
-        }catch(e){setError(String((e as Error).message||e));}finally{submitLock.current=false;setBusy(false);}
-      })();}}>
-        <label>Bin label<small>Scan once; retained for each item</small><span className="location-scan-field"><input ref={toInput} required disabled={busy} inputMode={scannerInputMode()} value={assignBin} onChange={event=>setAssignBin(event.target.value.trim())} onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();const value=event.currentTarget.value.trim();if(locations.some(location=>location.code===value)){setAssignBin(value);try{localStorage.setItem('floor:assign-location-bin',value);}catch{/* optional */}skuInput.current?.focus();}else setError('That scan is not a configured location label.');}}} placeholder="12-2-3"/><button type="button" className="secondary" disabled={busy||scanBusy} onClick={()=>void camera('to')} aria-label="Scan bin label"><ToolIcon name="scan"/></button></span></label>
-        <label>Item SKU<small>Scan one item; it saves immediately</small><input ref={skuInput} required disabled={busy} inputMode={scannerInputMode()} value={sku} onChange={event=>setSku(event.target.value.trim())} placeholder="Scan SKU" onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();event.currentTarget.form?.requestSubmit();}}}/></label>
-        <button className="tool-primary" disabled={busy||!locations.some(location=>location.code===assignBin)}><ToolIcon name="save"/>{busy?'Saving…':'Assign this item'}</button>
-      </form></ToolCard>}
-    <div className="location-print-sheet" aria-hidden="true">{printed.map(location => <div className="location-label" key={location.code}><strong>Bay {location.bay_no} · R{location.row_no}{location.bin_no == null ? '' : `-B${location.bin_no}`}</strong><Barcode code={location.code}/></div>)}</div>
-  </div>;
+    );
+    const heading = (
+      <div className={phone ? 'app-large-title loc-bay-title' : 'loc-desk-title'}>
+        <h1>{title}</h1>
+        {subtitle && <p>{subtitle}</p>}
+      </div>
+    );
+    return phone ? (
+      <div className="app-stack loc-screen">
+        {nav}{heading}
+        {error && <p className="loc-error" role="alert">{error}</p>}
+        {notice && <p className="loc-notice" role="status">{notice}</p>}
+        {body}
+        {printSheet}
+      </div>
+    ) : (
+      <section className="locations-simple">
+        {nav}{heading}
+        {error && <p className="error" role="alert">{error}</p>}
+        {notice && <p className="hint" role="status">{notice}</p>}
+        {body}
+        {printSheet}
+      </section>
+    );
+  }
+
+  function rowButton(label: string, title: string, sub: string | undefined, side: string | undefined, onClick: () => void) {
+    return (
+      <button type="button" className={rowCls} aria-label={label} onClick={onClick}>
+        <span className={textCls}><strong>{title}</strong>{sub && <small>{sub}</small>}</span>
+        {side && <span className={sideCls}>{side}</span>}
+        <span className={chevron} aria-hidden="true">›</span>
+      </button>
+    );
+  }
+
+  if (screen === 'edit' && canManage) {
+    const no = Number(editNo);
+    const blocked = Number.isInteger(no) ? layoutBlocked(no, editRows, locations) : null;
+    return frame(creating ? 'New bay' : `Edit bay ${editNo}`, '0 bins makes the row a Floor spot for large items.', (
+      <button type="button" className="loc-action" disabled={busy} onClick={() => void saveBay()}>{busy ? 'Saving…' : 'Save'}</button>
+    ), (
+      <>
+        <div className={group}>
+          <label className="loc-edit-line">
+            <span>Bay number</span>
+            <input inputMode="numeric" value={editNo} disabled={!creating || busy} onChange={(event) => setEditNo(event.target.value)} />
+          </label>
+        </div>
+        <div className={section}>ROWS</div>
+        <div className={group}>
+          {editRows.map((bins, index) => (
+            <div className={rowCls} key={index}>
+              <span className={textCls}>
+                <strong>Row {index + 1}</strong>
+                <small>{bins === 0 ? 'Floor · large items' : `${bins} bin${bins === 1 ? '' : 's'}`}</small>
+              </span>
+              <span className="loc-stepper">
+                <button type="button" aria-label={`Fewer bins in row ${index + 1}`} disabled={busy || bins <= 0} onClick={() => setEditRows((rows) => rows.map((value, i) => i === index ? value - 1 : value))}>−</button>
+                <button type="button" aria-label={`More bins in row ${index + 1}`} disabled={busy || bins >= 5} onClick={() => setEditRows((rows) => rows.map((value, i) => i === index ? value + 1 : value))}>+</button>
+              </span>
+            </div>
+          ))}
+        </div>
+        <div className="loc-edit-actions">
+          {editRows.length < 5 && <button type="button" disabled={busy} onClick={() => setEditRows((rows) => [...rows, 1])}>Add row</button>}
+          {editRows.length > 1 && <button type="button" disabled={busy} onClick={() => setEditRows((rows) => rows.slice(0, -1))}>Remove last row</button>}
+          {!creating && <button type="button" disabled={busy} onClick={printLabels}>Print labels</button>}
+          {!creating && <button type="button" className="danger" disabled={busy || bayStock(no) > 0} onClick={() => void deleteBay()}>Delete bay</button>}
+        </div>
+        {blocked && <p className={phone ? 'loc-error' : 'error'}>{blocked}</p>}
+        {!creating && bayStock(no) > 0 && <p className={phone ? 'loc-notice' : 'hint'}>Move the {unitsLabel(bayStock(no))} out before deleting this bay.</p>}
+      </>
+    ), () => { setError(''); setScreen(creating ? 'list' : 'bay'); }, creating ? 'Locations' : `Bay ${editNo}`);
+  }
+
+  if (screen === 'scan' && binCode) {
+    return frame('Scan items here', locationPhrase(binCode), null, (
+      <>
+        <label className="loc-field">SKU
+          <span className="loc-scan-line">
+            <input
+              ref={scanRef}
+              value={scanValue}
+              inputMode={scannerInputMode()}
+              disabled={busy}
+              placeholder="Scan or type a SKU"
+              onChange={(event) => { setScanValue(event.target.value); setPending(null); }}
+              onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void submitScan(); } }}
+            />
+            <button type="button" disabled={busy} onClick={() => void camera()}>Scan</button>
+          </span>
+        </label>
+        {pending && (
+          <label className="loc-field">How many are going into this bin
+            <input inputMode="numeric" type="number" min={1} step={1} value={scanQty} disabled={busy} onChange={(event) => setScanQty(event.target.value)} />
+            <small>{pending.title} · SKU {pending.sku} · {unitsLabel(pending.qty_on_hand)} on hand</small>
+          </label>
+        )}
+        <button type="button" className="loc-primary" disabled={busy || (!pending && !scanValue.trim())} onClick={() => void submitScan()}>
+          {busy ? 'Saving…' : pending ? 'Put them here' : 'Look up SKU'}
+        </button>
+      </>
+    ), () => { setPending(null); setError(''); setScreen('bin'); }, spot?.bin_no == null ? 'Floor' : `Bin ${binCode}`);
+  }
+
+  if (screen === 'bin' && binCode) {
+    const count = items.reduce((sum, item) => sum + Number(item.quantity || 0), 0) || Number(spot?.stock || 0);
+    const title = spot?.bin_no == null ? 'Floor' : `Bin ${binCode}`;
+    return frame(title, `${locationPhrase(binCode)} · ${unitsLabel(count)}`, (
+      <button type="button" className="loc-action" onClick={() => { setPending(null); setScanValue(''); setError(''); setScreen('scan'); }}>Scan items here</button>
+    ), (
+      items.length ? (
+        <div className={group}>
+          {items.map((item) => rowButton(
+            `${item.title}, SKU ${item.sku}, ×${item.quantity}`,
+            item.title,
+            `SKU ${item.sku}`,
+            `×${item.quantity}`,
+            () => openItem(item.sku),
+          ))}
+        </div>
+      ) : <p className={phone ? 'app-footer-count' : 'hint'}>Nothing in this bin yet.</p>
+    ), () => { setBinCode(null); setScreen('bay'); }, `Bay ${spot?.bay_no ?? bayNo ?? ''}`);
+  }
+
+  if (screen === 'bay' && bay) {
+    return frame(`Bay ${bay.bay_no}`, `${unitsLabel(bayStock(bay.bay_no))} · ${rowsLabel(bay.row_bins.length)}`, canManage ? (
+      <button type="button" className="loc-action" onClick={startEdit}>Edit</button>
+    ) : null, (
+      <>
+        {bay.row_bins.map((bins, index) => {
+          const rowNo = index + 1;
+          const slots = bins === 0
+            ? [locations.find((row) => row.bay_no === bay.bay_no && row.row_no === rowNo && row.bin_no == null)
+              || { code: `${bay.bay_no}-${rowNo}`, bay_no: bay.bay_no, row_no: rowNo, bin_no: null, stock: 0 }]
+            : Array.from({ length: bins }, (_, binIndex) => locations.find((row) => row.bay_no === bay.bay_no && row.row_no === rowNo && row.bin_no === binIndex + 1)
+              || { code: `${bay.bay_no}-${rowNo}-${binIndex + 1}`, bay_no: bay.bay_no, row_no: rowNo, bin_no: binIndex + 1, stock: 0 });
+          return (
+            <div key={rowNo}>
+              <div className={section}>{bins === 0 ? `ROW ${rowNo} · LARGE ITEMS` : `ROW ${rowNo}`}</div>
+              <div className={group}>
+                {slots.map((slot) => rowButton(
+                  slot.bin_no == null ? `Floor, ${unitsLabel(slot.stock)}` : `Bin ${slot.code}, ${unitsLabel(slot.stock)}`,
+                  slot.bin_no == null ? 'Floor' : `Bin ${slot.bin_no}`,
+                  undefined,
+                  unitsLabel(slot.stock),
+                  () => openBin(slot.code),
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </>
+    ), () => { setBayNo(null); setScreen('list'); }, 'Locations');
+  }
+
+  return (
+    <>
+      {frame('Locations', undefined, canManage ? (
+        <button type="button" className="loc-action" disabled={!loaded || busy} onClick={startCreate}>New bay</button>
+      ) : null, (
+        loaded && bays.length === 0 ? (
+          <p className={phone ? 'app-footer-count' : 'hint'}>No bays yet.{canManage ? ' Tap New bay to add the first one.' : ''}</p>
+        ) : (
+          <div className={group}>
+            {bays.map((item) => rowButton(
+              `Bay ${item.bay_no}, ${rowsLabel(item.row_bins.length)}, ${unitsLabel(bayStock(item.bay_no))}`,
+              `Bay ${item.bay_no}`,
+              rowsLabel(item.row_bins.length),
+              unitsLabel(bayStock(item.bay_no)),
+              () => openBay(item.bay_no),
+            ))}
+          </div>
+        )
+      ), onBack, backLabel)}
+    </>
+  );
 }
