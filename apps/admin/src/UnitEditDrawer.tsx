@@ -1,6 +1,6 @@
 import { DnsCheckbox } from './DnsCheckbox';
 import { ReceiveWorkStatus } from './ReceiveWorkStatus';
-﻿import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ChannelCheckboxes } from './ChannelCheckboxes';
 import { RestoreInventoryButton } from './RestoreInventoryButton';
 import { UnitDispositionHistory } from './DispositionDialogs';
@@ -23,6 +23,15 @@ import {
   unassignedQty,
 } from './locationStock';
 import { acquisitionCostCents as cents } from './missingCost';
+import { profitAfterFeesCents } from './scanPricing';
+
+const EDIT_SECTIONS = [
+  { id: 'basics', label: 'Basics' },
+  { id: 'price', label: 'Price' },
+  { id: 'shipping', label: 'Shipping' },
+  { id: 'ebay', label: 'eBay' },
+  { id: 'stock', label: 'Stock' },
+] as const;
 
 type Photo = { id: number; path: string; is_primary: boolean; sort_order?: number; source?: string; source_url?: string };
 type StockCandidate = { image_url: string; source_url: string; title: string; score: number };
@@ -102,6 +111,7 @@ type LookupMerged = {
 export function UnitEditDrawer({
   client, storeId, sku, unit, photos, urls, accessToken, onClose, onSaved, onPhotosChanged,
   canDelete = false, onDeleted, appMode = false, missingFields = [], locationLabel, onReadinessChanged,
+  initialSection,
 }: {
   client: SupabaseClient;
   storeId: string;
@@ -121,6 +131,8 @@ export function UnitEditDrawer({
   missingFields?: string[];
   locationLabel?: string;
   onReadinessChanged?: (gaps?: string[]) => void;
+  /** App item page can open Edit scrolled to a named section (photos/price/stock/ebay). */
+  initialSection?: string;
 }) {
   const [form, setForm] = useState<Form>(() => fromUnit(unit));
   const [options, setOptions] = useState<Options | null>(null);
@@ -140,7 +152,6 @@ export function UnitEditDrawer({
   const [stockGiveQty, setStockGiveQty] = useState('1');
   const [stockGiveTo, setStockGiveTo] = useState('');
   const [quantitySheetOpen, setQuantitySheetOpen] = useState(false);
-  const [descriptionOpen, setDescriptionOpen] = useState(false);
   const [quantityDraft, setQuantityDraft] = useState(String(Math.max(1, Number(unit.qty_on_hand ?? 1) || 1)));
   const [onlineExpanded, setOnlineExpanded] = useState(false);
   const [channelSelections, setChannelSelections] = useState<Record<ChannelChoice, boolean> | null>(null);
@@ -161,25 +172,60 @@ export function UnitEditDrawer({
   const fileInput = useRef<HTMLInputElement>(null);
   const cameraInput = useRef<HTMLInputElement>(null);
   const [viewPhoto, setViewPhoto] = useState<Photo | null>(null);
+  const [activeSection, setActiveSection] = useState<string>('basics');
+  const [dragPhotoId, setDragPhotoId] = useState<number | null>(null);
+  const [specificsTouched, setSpecificsTouched] = useState(false);
   const upcInput = useRef<HTMLInputElement>(null);
   const onlineDetails = useRef<HTMLDetailsElement>(null);
+  const detailScroll = useRef<HTMLElement | null>(null);
   const [currentMissing, setCurrentMissing] = useState(missingFields);
   const set = (key: keyof Form, value: string) => setForm(prev => ({ ...prev, [key]: value }));
   const jumpToGap = (gap: string) => {
     if (gap === 'category' || gap === 'category_review' || gap === 'specifics' || gap.startsWith('review_')) {
       if (onlineDetails.current) onlineDetails.current.open = true;
-      window.setTimeout(() => document.querySelector('.unit-edit-online .ebay-specifics')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 80);
+      window.setTimeout(() => document.getElementById('unit-edit-section-ebay')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        || document.querySelector('.unit-edit-online .ebay-specifics')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 80);
+      return;
+    }
+    if (gap === 'photo' || gap === 'photos') {
+      document.getElementById('unit-edit-section-basics')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       return;
     }
     const target = gap === 'spec' ? 'unit-package-size' : document.querySelector(`[data-gap-target="${gap}"]`)?.id;
     if (target) document.getElementById(target)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   };
   const gapLabel: Record<string,string> = { photo:'photos', price:'price', brand:'brand', condition:'condition', category:'eBay category', category_review:'eBay category review', specifics:'eBay item specifics', spec:'package size for shipping', upc:'UPC', model:'model', title:'title', description:'description' };
-  const cancel = () => {
+  const baselineQty = String(Math.max(1, Number(unit.qty_on_hand ?? 1) || 1));
+  const hasChanges = JSON.stringify(form) !== JSON.stringify(fromUnit(unit))
+    || latestDescription.current != null
+    || specificsDirty.current
+    || specificsTouched
+    || (channelSelections !== null && JSON.stringify(channelSelections) !== JSON.stringify(channelBaseline.current))
+    || dnsPending !== null
+    || quantityDraft !== baselineQty
+    || locationDraft !== locationBaseline.current
+    || locationMoveTo.trim() !== ''
+    || upcEnrichment.current !== null;
+  const unsavedCount = (() => {
+    let n = 0;
     const initial = fromUnit(unit);
-    const hasChanges = JSON.stringify(form) !== JSON.stringify(initial) || latestDescription.current != null || specificsDirty.current || (channelSelections !== null && JSON.stringify(channelSelections)!==JSON.stringify(channelBaseline.current)) || dnsPending !== null || quantityDraft !== String(Math.max(1, Number(unit.qty_on_hand ?? 1) || 1)) || locationDraft !== locationBaseline.current || locationMoveTo.trim() !== '' || upcEnrichment.current !== null;
+    for (const key of Object.keys(initial) as (keyof Form)[]) if (form[key] !== initial[key]) n += 1;
+    if (latestDescription.current != null && latestDescription.current !== initial.description) n += 1;
+    if (specificsDirty.current || specificsTouched) n += 1;
+    if (channelSelections !== null && JSON.stringify(channelSelections) !== JSON.stringify(channelBaseline.current)) n += 1;
+    if (dnsPending !== null) n += 1;
+    if (quantityDraft !== baselineQty) n += 1;
+    if (locationDraft !== locationBaseline.current || locationMoveTo.trim() !== '') n += 1;
+    if (upcEnrichment.current !== null) n += 1;
+    return Math.max(n, hasChanges ? 1 : 0);
+  })();
+  const cancel = () => {
     if (hasChanges && !window.confirm('Discard unsaved changes?')) return;
     onClose();
+  };
+  const scrollToSection = (id: string) => {
+    setActiveSection(id);
+    document.getElementById(`unit-edit-section-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
   useEffect(() => { setForm(fromUnit(unit)); setStockAdjustQty(String(Number(unit.qty_on_hand ?? 1) || 0)); setQuantityDraft(String(Math.max(1,Number(unit.qty_on_hand??1)||1)));setChannelSelections(null);setDnsPending(null);channelBaseline.current=null;upcEnrichment.current=null;setMsg(''); setError(''); setCurrentMissing(missingFields); }, [sku]);
@@ -403,7 +449,7 @@ export function UnitEditDrawer({
       fulfillment_override: saved.fulfillment_override,
       shippable: saved.shippable,
     });
-    specificsDirty.current=false;setChannelSelections(null);setDnsPending(null);setQuantityDraft(String(Math.max(1,Number(quantityDraft)||1)));setMsg('Saved.');
+    specificsDirty.current=false;setSpecificsTouched(false);setChannelSelections(null);setDnsPending(null);setQuantityDraft(String(Math.max(1,Number(quantityDraft)||1)));setMsg('Saved.');
   }
 
   async function clearEbayReview() {
@@ -596,62 +642,112 @@ export function UnitEditDrawer({
   const unsold = ['available', 'reserved', 'repair'].includes(String(unit.state || ''));
   const orderedPhotos = [...photos].sort((a, b) => Number(b.source === 'stock') - Number(a.source === 'stock') || Number(b.is_primary) - Number(a.is_primary) || (a.sort_order ?? a.id) - (b.sort_order ?? b.id));
   const statusLabel = notForSale ? 'Not for sale' : /^\s*(defective|scratch)/i.test(String(unit.condition||'')) ? 'Defective' : String(unit.state || '').replace(/_/g, ' ').replace(/^./, c => c.toUpperCase());
+  const liveProfit = profitAfterFeesCents(cents(form.price) ?? null, cents(form.cost) ?? null);
+  const locationEmpty = !(locationLabel || '').trim() || /unassigned/i.test(locationLabel || '');
+
+  useEffect(() => {
+    if (!appMode || !initialSection) return;
+    const map: Record<string, string> = { photos: 'basics', photo: 'basics', price: 'price', shipping: 'shipping', ebay: 'ebay', stock: 'stock', location: 'stock' };
+    const id = map[initialSection] || initialSection;
+    const t = window.setTimeout(() => scrollToSection(id), 120);
+    return () => window.clearTimeout(t);
+  }, [appMode, initialSection, sku]);
+
+  useEffect(() => {
+    if (!appMode) return;
+    const root = detailScroll.current;
+    if (!root) return;
+    const nodes = EDIT_SECTIONS.map((s) => document.getElementById(`unit-edit-section-${s.id}`)).filter(Boolean) as HTMLElement[];
+    if (!nodes.length) return;
+    const obs = new IntersectionObserver((entries) => {
+      const visible = entries.filter((e) => e.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+      if (!visible?.target?.id) return;
+      const id = visible.target.id.replace('unit-edit-section-', '');
+      setActiveSection(id);
+    }, { root: null, rootMargin: '-20% 0px -55% 0px', threshold: [0.1, 0.4, 0.7] });
+    for (const n of nodes) obs.observe(n);
+    return () => obs.disconnect();
+  }, [appMode, sku, isStocked]);
+
+  async function reorderPhotos(fromId: number, toId: number) {
+    if (fromId === toId) return;
+    const ordered = [...orderedPhotos];
+    const from = ordered.findIndex((p) => p.id === fromId);
+    const to = ordered.findIndex((p) => p.id === toId);
+    if (from < 0 || to < 0) return;
+    const [moved] = ordered.splice(from, 1);
+    ordered.splice(to, 0, moved);
+    const { error: e } = await client.rpc('reorder_unit_photos', { p_sku: sku, p_ids: ordered.map((p) => p.id) });
+    if (e) setError(e.message);
+    else onPhotosChanged();
+  }
 
   return (
     <div
       className={`inventory-backdrop${appMode ? ' app-unit-edit' : ''}`}
       onMouseDown={e => { if (!appMode && e.target === e.currentTarget) cancel(); }}
     >
-      <section className="inventory-detail" role="dialog" aria-modal="true" aria-label={`Edit unit ${sku}`}>
-        {appMode ? (
-          <div className="app-nav app-unit-edit-nav">
-            <button type="button" onClick={cancel}>Cancel</button>
-            <div className="app-nav-title">SKU {sku}</div>
-            <button type="button" disabled={busy || lookupBusy} onClick={() => void save()}>
-              {busy ? '…' : 'Save'}
-            </button>
-          </div>
-        ) : (
-          <div className="app-nav app-unit-edit-nav"><button type="button" onClick={cancel}>Cancel</button><div className="app-nav-title">SKU {sku}</div><button type="button" disabled={busy || lookupBusy} onClick={() => void save()}>{busy ? '…' : 'Save'}</button></div>
-        )}
-        {error && <div className="alert" role="alert">{error}</div>}
-        <ReceiveWorkStatus client={client} accessToken={accessToken} sku={sku} />
-        {msg && <p className="hint">{msg}</p>}
-        {canDelete && unit.state === 'sold' && <RestoreInventoryButton client={client} sku={sku} onDone={() => { onSaved({ ...unit, state: 'available' }); onClose(); }} />}
-        {isStocked && <section className="unit-stock-card" aria-label="Stock quantity">
-          <button type="button" className="unit-quantity-step" aria-label="Decrease quantity" disabled={!canDelete || busy || Number(quantityDraft)<=0} onClick={()=>setQuantityDraft(String(Math.max(0,Number(quantityDraft||stockQuantity)-1)))}>−</button>
-          <div><span>ON HAND</span><button type="button" className="unit-edit-quantity-display" disabled={!canDelete} onClick={()=>{setQuantityDraft(String(stockQuantity));setQuantitySheetOpen(true);}}>{quantityDraft}</button><small>{stockHistory.filter(m => m.type === 'sold').reduce((n,m) => n + Math.abs(m.delta),0)} sold · {stockHistory.filter(m => ['received','opening_balance','added'].includes(m.type)).reduce((n,m) => n + Math.max(m.delta,0),0)} received</small>{depopHint?.live && <p role="status">Depop: set quantity to {depopHint.quantity ?? stockQuantity}.{depopHint.stale ? ' Floor count changed — update Depop.' : ''}</p>}</div>
-          <button type="button" className="unit-quantity-step" aria-label="Increase quantity" disabled={!canDelete || busy || Number(quantityDraft)>=999} onClick={()=>setQuantityDraft(String(Math.min(999,Number(quantityDraft||stockQuantity)+1)))}>+</button>
-          <button type="button" className="secondary" disabled={!stockQuantity} onClick={() => void printUnitLabels(Array.from({ length: Math.min(stockQuantity,1000) }, () => sku), String(unit.title || `SKU ${sku}`)).catch(e => setError(e.message))}>Labels · {stockQuantity}</button>
-          {canDelete && <button type="button" className="secondary" disabled={busy || stockQuantity !== 1} onClick={() => void toggleStocked()}>Convert to one-of-one</button>}
-          {canDelete && <div className="unit-stock-actions"><QuantityPicker value={stockAddQty} onChange={setStockAddQty} maximum={999} label="Add quantity"/><label>Optional cost each<input inputMode="decimal" placeholder="No cost change" value={stockAddCost} onChange={e => setStockAddCost(e.target.value)} /></label><button type="button" disabled={busy} onClick={() => void addStock()}>Add stock</button></div>}
-          {canDelete && <div className="unit-stock-actions"><select aria-label="Adjustment mode" value={stockAdjustMode} onChange={e => { const next=e.target.value as 'set'|'delta';setStockAdjustMode(next);setStockAdjustQty(next==='delta'?'0':String(stockQuantity)); }}><option value="set">Set quantity</option><option value="delta">Add or remove</option></select><QuantityPicker value={stockAdjustQty} onChange={setStockAdjustQty} minimum={stockAdjustMode==='set'?0:-999} maximum={999} label="Adjustment quantity"/><select aria-label="Adjustment reason" value={stockAdjustReason} onChange={e => setStockAdjustReason(e.target.value)}><option value="count_correction">Count correction</option><option value="damaged">Damaged</option><option value="lost">Lost</option><option value="other">Other</option></select><button type="button" disabled={busy} onClick={() => void adjustStock()}>Adjust</button></div>}
-          {canDelete && <div className="unit-stock-actions"><QuantityPicker value={stockGiveQty} onChange={setStockGiveQty} maximum={Math.min(999,stockQuantity)} label="Give away quantity"/><label>Given to<input value={stockGiveTo} onChange={e => setStockGiveTo(e.target.value)} /></label><button type="button" disabled={busy || !stockQuantity} onClick={() => void giveStockAway()}>Give away</button><button type="button" className="secondary" disabled={busy || !stockQuantity} onClick={() => void pullDefective()}>Pull 1 as defective</button></div>}
-          <details className="unit-stock-history"><summary>Stock movement history</summary>{stockHistory.map(move => <div className="ledger-row" key={move.id}><strong>{move.type.replaceAll('_',' ')} · {move.delta > 0 ? '+' : ''}{move.delta}</strong><span>{move.actor || 'System'} · {move.reference || move.reason || ''} · {new Date(move.at).toLocaleString()}</span></div>)}</details>
-        </section>}
-        {!isStocked&&<section className="unit-stock-card"><button type="button" className="unit-quantity-step" aria-label="Decrease quantity" disabled={!canDelete || busy || Number(quantityDraft)<=1} onClick={()=>setQuantityDraft(String(Math.max(1,Number(quantityDraft||stockQuantity)-1)))}>−</button><div><span>ON HAND</span><button type="button" className="unit-edit-quantity-display" disabled={!canDelete} onClick={()=>{setQuantityDraft(String(stockQuantity));setQuantitySheetOpen(true);}}>{quantityDraft}</button><small>one-of-one item</small>{canDelete&&<small>Saving more than 1 converts it to a stocked SKU.</small>}</div><button type="button" className="unit-quantity-step" aria-label="Increase quantity" disabled={!canDelete || busy || Number(quantityDraft)>=999} onClick={()=>setQuantityDraft(String(Math.min(999,Number(quantityDraft||stockQuantity)+1)))}>+</button></section>}
-        {quantitySheetOpen&&<div className="unit-quantity-backdrop" role="presentation" onMouseDown={e=>{if(e.target===e.currentTarget)setQuantitySheetOpen(false);}}><section className="unit-quantity-sheet" role="dialog" aria-modal="true" aria-label="Quantity on hand"><div className="unit-quantity-grabber"/><h2>Quantity on hand</h2><p>{String(unit.title||`SKU ${sku}`)} · SKU {sku}</p><div className="unit-quantity-wheel"><select aria-label="Quantity 1 to 100" size={5} value={Number(quantityDraft)<=100?quantityDraft:''} onChange={e=>e.target.value&&setQuantityDraft(e.target.value)}>{Array.from({length:100},(_,i)=>i+1).map(n=><option key={n} value={n}>{n}</option>)}</select></div><label>Or type a number (up to 999)<input aria-label="Typed on hand quantity" type="number" inputMode="numeric" min="1" max="999" step="1" value={quantityDraft} onChange={e=>setQuantityDraft(e.target.value)}/></label>{!isStocked&&<small>This item is one-of-one. Saving more than 1 converts it to a stocked SKU and logs the change.</small>}<div className="unit-quantity-actions"><button type="button" className="secondary" onClick={()=>setQuantitySheetOpen(false)}>Cancel</button><button type="button" onClick={()=>{setQuantitySheetOpen(false);void save();}}>Set {quantityDraft||'0'} on hand</button></div></section></div>}
-        {descriptionOpen&&<div className="unit-quantity-backdrop" role="presentation" onMouseDown={e=>{if(e.target===e.currentTarget)setDescriptionOpen(false);}}><section className="unit-description-sheet" role="dialog" aria-modal="true" aria-label="Edit description"><header><button type="button" onClick={()=>setDescriptionOpen(false)}>Done</button><strong>Description</strong><span/></header><textarea autoFocus value={form.description} onChange={e=>set('description',e.target.value)} /></section></div>}
-        {currentMissing.length > 0 && <div className="inventory-missing" role="status"><p>{currentMissing.length} listing details need attention. Fill the named fields and save.</p><div className="unit-edit-gap-links">{currentMissing.map(gap=><button type="button" className="text-button" key={gap} onClick={()=>jumpToGap(gap)}>Go to {gap==='specifics'?'eBay item specifics':gapLabel[gap] || reviewReasonLabel(gap) || gap}</button>)}</div></div>}
-        {currentMissing.length === 0 && reviewReason && <p className="hint">eBay listing needs review: {reviewReason}.</p>}
-        {reviewReason && canDelete ? <button type="button" className="secondary" disabled={busy} onClick={() => void clearEbayReview()}>I verified this issue · Clear eBay review</button> : null}
+      <section ref={detailScroll} className="inventory-detail" role="dialog" aria-modal="true" aria-label={`Edit unit ${sku}`}>
+        <div className="app-nav app-unit-edit-nav">
+          <button type="button" onClick={cancel}>Cancel</button>
+          <div className="app-nav-title">{appMode ? `Edit ${sku}` : `SKU ${sku}`}</div>
+          <button type="button" disabled={busy || lookupBusy} onClick={() => void save()}>
+            {busy ? '…' : 'Save'}
+          </button>
+        </div>
 
-        <div className="unit-edit-status"><strong>{statusLabel}</strong><button type="button" className="unit-edit-location-pill" onClick={()=>document.getElementById('unit-edit-location')?.scrollIntoView({behavior:'smooth',block:'center'})}>{locationLabel || String(unit.location || unit.bin || 'Unassigned')} · edit</button>{currentMissing.map(gap=><button type="button" className="unit-edit-gap-pill" key={gap} onClick={()=>jumpToGap(gap)}>Needs {gapLabel[gap]||reviewReasonLabel(gap)||gap}</button>)}</div>
-        {canDelete && unsold && <DispositionButtons client={client} sku={sku} money={n => `$${(n / 100).toFixed(2)}`} stamp={s => new Date(s).toLocaleDateString()} className="secondary" onDone={() => { onReadinessChanged?.(); onDeleted?.(); onClose(); }} />}
-        {msg.toLowerCase().includes('receive')&&<button type="button" className="unit-edit-dismiss-banner" onClick={()=>setMsg('')}>✓ {msg} <span>×</span></button>}
-        <h3 id="unit-edit-photos" className={currentMissing.includes('photo') ? 'unit-edit-required' : ''}>Photos{currentMissing.includes('photo') ? ' · Required' : ''}</h3>
-        <div className="unit-edit-photo-strip">
-          {orderedPhotos.map((p, i) => <button type="button" className="unit-edit-photo-open" key={p.id} onClick={() => setViewPhoto(p)} aria-label={`View photo ${i + 1}`}>
-            {urls[p.path] ? <img src={urls[p.path]} alt={`Unit ${sku}, photo ${i + 1}`} loading="lazy" /> : <span>Photo unavailable</span>}{(p.is_primary || p.source === 'stock') && <small>{p.source === 'stock' ? 'STOCK' : 'Primary'}</small>}
-          </button>)}
-          <button type="button" className="unit-edit-photo-add" onClick={() => cameraInput.current?.click()} disabled={busy}>＋<small>Camera</small></button>
-          <button type="button" className="unit-edit-photo-add" onClick={() => fileInput.current?.click()} disabled={busy}>▧<small>Library</small></button>
+        {appMode && (
+          <div className="app-edit-section-chips" role="tablist" aria-label="Edit sections">
+            {EDIT_SECTIONS.map((s) => (
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeSection === s.id}
+                className={activeSection === s.id ? 'is-active' : undefined}
+                key={s.id}
+                onClick={() => scrollToSection(s.id)}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {error && <div className="alert" role="alert">{error}</div>}
+        <div className="app-item-banner-slot"><ReceiveWorkStatus client={client} accessToken={accessToken} sku={sku} /></div>
+        {msg && <p className="hint">{msg}</p>}
+
+        {/* —— Photos / Basics —— */}
+        <h3 id="unit-edit-section-basics" className={currentMissing.includes('photo') ? 'unit-edit-required' : ''}>Photos{currentMissing.includes('photo') ? ' · Required' : ''}{appMode ? ' · Drag to reorder' : ''}</h3>
+        <div className={appMode ? 'unit-edit-photo-grid' : 'unit-edit-photo-strip'}>
+          {orderedPhotos.map((p, i) => (
+            <button
+              type="button"
+              className="unit-edit-photo-open"
+              key={p.id}
+              draggable={appMode}
+              onDragStart={() => setDragPhotoId(p.id)}
+              onDragOver={(e) => { if (appMode) e.preventDefault(); }}
+              onDrop={(e) => {
+                e.preventDefault();
+                if (dragPhotoId != null) void reorderPhotos(dragPhotoId, p.id);
+                setDragPhotoId(null);
+              }}
+              onClick={() => setViewPhoto(p)}
+              aria-label={`View photo ${i + 1}`}
+            >
+              {urls[p.path] ? <img src={urls[p.path]} alt={`Unit ${sku}, photo ${i + 1}`} loading="lazy" /> : <span>Photo unavailable</span>}
+              {(p.is_primary || p.source === 'stock') && <small>{p.source === 'stock' ? 'STOCK' : 'Primary'}</small>}
+            </button>
+          ))}
+          <button type="button" className="unit-edit-photo-add" onClick={() => cameraInput.current?.click()} disabled={busy}>＋<small>{appMode ? 'Camera' : 'Camera'}</small></button>
+          <button type="button" className="unit-edit-photo-add" onClick={() => fileInput.current?.click()} disabled={busy}>▧<small>{appMode ? 'Library' : 'Library'}</small></button>
         </div>
         <input ref={cameraInput} type="file" accept="image/*" capture="environment" multiple hidden disabled={busy} onChange={e => void addPhotos(e.target.files)} />
         <input ref={fileInput} type="file" accept="image/*" multiple hidden disabled={busy} onChange={e => void addPhotos(e.target.files)} />
         {canDelete && <div className="unit-edit-stock-search">
           <button type="button" className="secondary" disabled={busy || stockSearchBusy} onClick={() => void findMoreStockPhotos()}>
-            {stockSearchBusy ? 'Searching product photos…' : 'Find more stock photos'}
+            {stockSearchBusy ? 'Searching product photos…' : (appMode ? 'Find stock photos' : 'Find more stock photos')}
           </button>
           {stockCandidates.length > 0 && <div className="unit-edit-stock-candidates" aria-label="Choose matching stock photo">
             {stockCandidates.map(candidate => <button type="button" key={candidate.image_url} disabled={busy}
@@ -662,38 +758,186 @@ export function UnitEditDrawer({
           </div>}
         </div>}
 
+        {currentMissing.length > 0 && <div className="inventory-missing" role="status"><p>{currentMissing.length} listing details need attention. Fill the named fields and save.</p><div className="unit-edit-gap-links">{currentMissing.map(gap=><button type="button" className="text-button" key={gap} onClick={()=>jumpToGap(gap)}>Go to {gap==='specifics'?'eBay item specifics':gapLabel[gap] || reviewReasonLabel(gap) || gap}</button>)}</div></div>}
+        {currentMissing.length === 0 && reviewReason && <p className="hint">eBay listing needs review: {reviewReason}.</p>}
+        {reviewReason && canDelete ? <button type="button" className="secondary" disabled={busy} onClick={() => void clearEbayReview()}>I verified this issue · Clear eBay review</button> : null}
+
         <h3>Product</h3>
         <div className="unit-edit-grid">
-          <label>SKU<input value={sku} readOnly /></label>
-          <label>UPC
-            <input
-              ref={upcInput}
-              value={form.upc}
-              onChange={e => set('upc', e.target.value)}
-              onKeyDown={e => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  void attachUpc(form.upc);
-                }
-              }}
-              inputMode={scannerInputMode()}
-              autoComplete="off"
-              placeholder="Scan to attach & fill blanks"
-              disabled={lookupBusy}
-            />
+          <label>SKU<input value={sku} readOnly className={appMode ? 'is-locked' : undefined} /></label>
+          <label className="unit-edit-upc-row">UPC
+            <div className="unit-edit-upc-fields">
+              <input
+                ref={upcInput}
+                value={form.upc}
+                onChange={e => set('upc', e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    void attachUpc(form.upc);
+                  }
+                }}
+                inputMode={scannerInputMode()}
+                autoComplete="off"
+                placeholder="Scan or type UPC"
+                disabled={lookupBusy}
+              />
+              <button type="button" className="secondary" disabled={lookupBusy || !form.upc.trim()} onClick={() => void attachUpc(form.upc)}>
+                {lookupBusy ? '…' : 'Look up'}
+              </button>
+            </div>
+            <small className="unit-edit-helper">Look up fills only blank fields</small>
           </label>
-          <div className="unit-edit-wide actions" style={{ marginTop: 0 }}>
-            <button type="button" className="secondary" disabled={lookupBusy || !form.upc.trim()} onClick={() => void attachUpc(form.upc)}>
-              {lookupBusy ? 'Looking up…' : 'Look up UPC & fill blanks'}
-            </button>
-          </div>
           <label data-gap-target="brand" id="unit-edit-brand" className={currentMissing.includes('brand') ? 'unit-edit-required' : ''}>Brand<input value={form.brand} onChange={e => set('brand', e.target.value)} />{currentMissing.includes('brand') && <small>Required</small>}{form.brand.trim() && form.brand.trim().toLowerCase() === form.title.trim().toLowerCase() && <small className="unit-edit-brand-hint">Looks like a product name, not a brand · <button type="button" onClick={() => set('brand', 'Unbranded')}>No brand</button></small>}</label>
           <label data-gap-target="model" id="unit-edit-model" className={currentMissing.includes('model') ? 'unit-edit-required' : ''}>Model<input value={form.model} onChange={e => set('model', e.target.value)} />{currentMissing.includes('model') && <small>Required</small>}</label>
-          <label data-gap-target="title" id="unit-edit-title" className={`unit-edit-wide${currentMissing.includes('title') ? ' unit-edit-required' : ''}`}>Title<input maxLength={80} value={form.title} onChange={e => set('title', e.target.value)} />{currentMissing.includes('title') && <small>Required</small>}<small>{form.title.length} / 80 characters</small></label>
-          <div data-gap-target="description" id="unit-edit-description" className={`unit-edit-wide unit-edit-description${currentMissing.includes('description') ? ' unit-edit-required' : ''}`}><span>Description</span><p>{form.description ? `${form.description.slice(0,180)}${form.description.length>180?'…':''}` : 'Add a product description'}</p>{currentMissing.includes('description')&&<small>Required</small>}<button type="button" className="text-button" onClick={()=>setDescriptionOpen(true)}>{form.description.length>180?'Show all · Edit':'Edit description'}</button></div>
+          <label data-gap-target="title" id="unit-edit-title" className={`unit-edit-wide unit-edit-title-field${currentMissing.includes('title') ? ' unit-edit-required' : ''}`}>
+            <span className="unit-edit-label-line">Title <small>{form.title.length} / 80</small></span>
+            <textarea rows={appMode ? 3 : 2} maxLength={80} value={form.title} onChange={e => set('title', e.target.value)} />
+            {currentMissing.includes('title') && <small>Required</small>}
+          </label>
+          <label data-gap-target="description" id="unit-edit-description" className={`unit-edit-wide unit-edit-notes${currentMissing.includes('description') ? ' unit-edit-required' : ''}`}>
+            Description
+            <textarea rows={appMode ? 6 : 4} value={form.description} onChange={e => { latestDescription.current = e.target.value; set('description', e.target.value); }} />
+            {currentMissing.includes('description') && <small>Required</small>}
+          </label>
+        </div>
+
+        <h3>Condition</h3>
+        {appMode ? (
+          <div className="unit-edit-segmented" role="group" aria-label="Condition" data-gap-target="condition" id="unit-edit-condition">
+            {conditions.map((c) => (
+              <button type="button" key={c} className={form.condition === c ? 'is-active' : undefined} onClick={() => set('condition', c)}>{c}</button>
+            ))}
+            {form.condition && !conditions.includes(form.condition) && (
+              <button type="button" className="is-active" onClick={() => undefined}>{form.condition}</button>
+            )}
+          </div>
+        ) : (
+          <div className="unit-edit-grid">
+            <label data-gap-target="condition" id="unit-edit-condition" className={currentMissing.includes('condition') ? 'unit-edit-required' : ''}>Condition{currentMissing.includes('condition')&&!form.condition&&<i className="unit-edit-amber-dot"/>}
+              <select value={form.condition} onChange={e => set('condition', e.target.value)}>
+                <option value="">—</option>
+                {conditions.map(c => <option key={c} value={c}>{c}</option>)}
+                {form.condition && !conditions.includes(form.condition) && <option value={form.condition}>{form.condition}</option>}
+              </select>
+              {currentMissing.includes('condition') && <small>Required</small>}
+            </label>
+          </div>
+        )}
+        <div className="unit-edit-grid">
+          <label>Test status{currentMissing.includes('test_status')&&!form.testStatus&&<i className="unit-edit-amber-dot"/>}
+            <select value={form.testStatus} onChange={e => set('testStatus', e.target.value)}>
+              <option value="">Not set</option>
+              {tests.map(c => <option key={c} value={c}>{c}</option>)}
+              {form.testStatus && !tests.includes(form.testStatus) && <option value={form.testStatus}>{form.testStatus}</option>}
+            </select>
+          </label>
+        </div>
+
+        {/* —— Price —— */}
+        <h3 id="unit-edit-section-price">Price</h3>
+        <div className={`unit-edit-grid${appMode ? ' unit-edit-price-pair' : ''}`}>
+          <label data-gap-target="price" id="unit-edit-price" className={currentMissing.includes('price') ? 'unit-edit-required' : ''}>Price{isStocked ? ' (each)' : ''}<input inputMode="decimal" placeholder="24.99" value={form.price} onChange={e => set('price', e.target.value)} />{currentMissing.includes('price') && <small>Required</small>}</label>
+          {canDelete && <label className={!form.cost.trim() ? 'unit-edit-cost-empty' : undefined}>Cost{isStocked ? ' (each)' : ''}<input inputMode="decimal" placeholder="Add actual cost" value={form.cost} onChange={e => set('cost', e.target.value)} /></label>}
+          {typeof specs.retail_cents==='number'&&<div className="unit-edit-reference-row"><span>Manifest retail</span><strong>${(Number(specs.retail_cents)/100).toFixed(2)}{specs.retail_as_of?` · ${String(specs.retail_as_of)}`:''}</strong></div>}
+        </div>
+        {canDelete && (
+          <p className={`unit-edit-profit-line${!form.cost.trim() ? ' warn' : ''}`}>
+            Profit after fees · {liveProfit == null ? 'Add cost to see' : `$${(liveProfit / 100).toFixed(2)}`}
+          </p>
+        )}
+
+        {/* —— Shipping —— */}
+        <h3 id="unit-edit-section-shipping">Shipping box</h3>
+        <div className="unit-edit-grid">
+          <label>Shippable
+            <select value={form.shippable} onChange={e => set('shippable', e.target.value)}>
+              <option value="auto">Automatic (rules)</option>
+              <option value="ship">Yes — can ship</option>
+              <option value="pickup">No — pickup only</option>
+            </select>
+          </label>
+        </div>
+        <div id="unit-package-size" className={`unit-edit-dim-row${appMode ? '' : ' unit-edit-grid unit-edit-dimensions'}`}>
+          <label>L in<input aria-label="Box length in" inputMode="decimal" value={form.length} onChange={e => set('length', e.target.value)} /></label>
+          <label>W in<input aria-label="Box width in" inputMode="decimal" value={form.width} onChange={e => set('width', e.target.value)} /></label>
+          <label>H in<input aria-label="Box height in" inputMode="decimal" value={form.height} onChange={e => set('height', e.target.value)} /></label>
+          <label>lb<input aria-label="Package weight lb" inputMode="decimal" value={form.weight} onChange={e => set('weight', e.target.value)} /></label>
+        </div>
+        <small className="unit-edit-wide unit-edit-helper">The packed box, not the product. Buyers pay shipping from this.</small>
+        {canDelete && appMode && (
+          <DnsCheckbox
+            client={client}
+            sku={sku}
+            pendingValue={dnsPending ?? undefined}
+            onPendingChange={setDnsPending}
+            onChanged={() => onReadinessChanged?.()}
+            variant="switch"
+          />
+        )}
+        <label className="unit-edit-wide unit-edit-notes">Notes<textarea rows={3} value={form.notes} onChange={e => set('notes', e.target.value)} /></label>
+
+        {/* —— eBay —— */}
+        {canDelete && (
+          <div id="unit-edit-section-ebay" className={appMode ? 'unit-edit-ebay-block' : undefined}>
+            {appMode ? <h3>eBay listing</h3> : null}
+            {appMode ? (
+              <div className="unit-edit-online app-ebay-open">
+                {!notForSale && (
+                  <>
+                    <EbaySpecificsPanel client={client} sku={sku} storeId={storeId} appMode={appMode} hideSaveButton onDescription={(t) => { latestDescription.current = t; set('description', t); }} onJumpToCondition={() => jumpToGap('condition')} persistRef={specificsPersist} dirtyRef={specificsDirty} onDirtyChange={setSpecificsTouched} onSaved={onReadinessChanged} />
+                    <ChannelCheckboxes key={sku} client={client} sku={sku} appMode={appMode} pendingSelections={{current:channelSelections}} onPendingChange={setChannelSelections}/>
+                  </>
+                )}
+                {notForSale && <p className="hint">Not listed online (do not list).</p>}
+              </div>
+            ) : (
+              <details ref={onlineDetails} className="unit-edit-online" open={onlineExpanded} onToggle={e=>setOnlineExpanded(e.currentTarget.open)}>
+                <summary>{notForSale?'Not listed online':'Selling online'}</summary>
+                {!notForSale&&<>
+                  <EbaySpecificsPanel client={client} sku={sku} storeId={storeId} appMode={appMode} hideSaveButton onDescription={(t) => { latestDescription.current = t; set('description', t); }} onJumpToCondition={() => jumpToGap('condition')} persistRef={specificsPersist} dirtyRef={specificsDirty} onDirtyChange={setSpecificsTouched} onSaved={onReadinessChanged} />
+                  <DnsCheckbox client={client} sku={sku} pendingValue={dnsPending??undefined} onPendingChange={setDnsPending} onChanged={() => onReadinessChanged?.()} />
+                  <ChannelCheckboxes key={sku} client={client} sku={sku} appMode={appMode} pendingSelections={{current:channelSelections}} onPendingChange={setChannelSelections}/>
+                </>}
+              </details>
+            )}
+          </div>
+        )}
+
+        {/* —— Stock —— */}
+        <h3 id="unit-edit-section-stock">Stock</h3>
+        <section className={`unit-stock-card${appMode ? ' unit-stock-card-clean' : ''}`} aria-label="Stock quantity">
+          <button type="button" className="unit-quantity-step" aria-label="Decrease quantity" disabled={!canDelete || busy || Number(quantityDraft)<= (isStocked ? 0 : 1)} onClick={()=>setQuantityDraft(String(Math.max(isStocked ? 0 : 1, Number(quantityDraft||stockQuantity)-1)))}>−</button>
+          <div className="unit-stock-center">
+            <span className="unit-stock-label">On hand</span>
+            <button type="button" className="unit-edit-quantity-display" disabled={!canDelete} onClick={()=>{setQuantityDraft(String(stockQuantity));setQuantitySheetOpen(true);}}>{quantityDraft}</button>
+            <small className="unit-stock-helper">
+              {isStocked
+                ? <>{stockHistory.filter(m => m.type === 'sold').reduce((n,m) => n + Math.abs(m.delta),0)} sold · {stockHistory.filter(m => ['received','opening_balance','added'].includes(m.type)).reduce((n,m) => n + Math.max(m.delta,0),0)} received</>
+                : <>One-of-one. Above 1 makes it a stocked SKU.</>}
+            </small>
+            {depopHint?.live && <p role="status">Depop: set quantity to {depopHint.quantity ?? stockQuantity}.{depopHint.stale ? ' Floor count changed — update Depop.' : ''}</p>}
+          </div>
+          <button type="button" className="unit-quantity-step" aria-label="Increase quantity" disabled={!canDelete || busy || Number(quantityDraft)>=999} onClick={()=>setQuantityDraft(String(Math.min(999,Number(quantityDraft||stockQuantity)+1)))}>+</button>
+          {!appMode && <button type="button" className="secondary" disabled={!stockQuantity} onClick={() => void printUnitLabels(Array.from({ length: Math.min(stockQuantity,1000) }, () => sku), String(unit.title || `SKU ${sku}`)).catch(e => setError(e.message))}>Labels · {stockQuantity}</button>}
+          {!appMode && isStocked && canDelete && <button type="button" className="secondary" disabled={busy || stockQuantity !== 1} onClick={() => void toggleStocked()}>Convert to one-of-one</button>}
+          {!appMode && isStocked && canDelete && <div className="unit-stock-actions"><QuantityPicker value={stockAddQty} onChange={setStockAddQty} maximum={999} label="Add quantity"/><label>Optional cost each<input inputMode="decimal" placeholder="No cost change" value={stockAddCost} onChange={e => setStockAddCost(e.target.value)} /></label><button type="button" disabled={busy} onClick={() => void addStock()}>Add stock</button></div>}
+          {!appMode && isStocked && canDelete && <div className="unit-stock-actions"><select aria-label="Adjustment mode" value={stockAdjustMode} onChange={e => { const next=e.target.value as 'set'|'delta';setStockAdjustMode(next);setStockAdjustQty(next==='delta'?'0':String(stockQuantity)); }}><option value="set">Set quantity</option><option value="delta">Add or remove</option></select><QuantityPicker value={stockAdjustQty} onChange={setStockAdjustQty} minimum={stockAdjustMode==='set'?0:-999} maximum={999} label="Adjustment quantity"/><select aria-label="Adjustment reason" value={stockAdjustReason} onChange={e => setStockAdjustReason(e.target.value)}><option value="count_correction">Count correction</option><option value="damaged">Damaged</option><option value="lost">Lost</option><option value="other">Other</option></select><button type="button" disabled={busy} onClick={() => void adjustStock()}>Adjust</button></div>}
+          {!appMode && isStocked && canDelete && <div className="unit-stock-actions"><QuantityPicker value={stockGiveQty} onChange={setStockGiveQty} maximum={Math.min(999,stockQuantity)} label="Give away quantity"/><label>Given to<input value={stockGiveTo} onChange={e => setStockGiveTo(e.target.value)} /></label><button type="button" disabled={busy || !stockQuantity} onClick={() => void giveStockAway()}>Give away</button><button type="button" className="secondary" disabled={busy || !stockQuantity} onClick={() => void pullDefective()}>Pull 1 as defective</button></div>}
+          {isStocked && <details className="unit-stock-history"><summary>Stock movement history</summary>{stockHistory.map(move => <div className="ledger-row" key={move.id}><strong>{move.type.replaceAll('_',' ')} · {move.delta > 0 ? '+' : ''}{move.delta}</strong><span>{move.actor || 'System'} · {move.reference || move.reason || ''} · {new Date(move.at).toLocaleString()}</span></div>)}</details>}
+        </section>
+
+        <div className="unit-edit-grid">
+          <div className="unit-edit-wide unit-edit-status-row">
+            <span>Status</span>
+            <strong>{statusLabel}</strong>
+          </div>
           <div id="unit-edit-location" className="unit-edit-wide unit-edit-location">
-            <span>Stock locations</span>
-            <p>{formatLocationSummary(Math.max(1, Number(stockQuantity) || 1), locationAllocations)}</p>
+            <span>Location</span>
+            <p className={locationEmpty ? 'warn' : undefined}>
+              {locationEmpty ? 'Unassigned' : formatLocationSummary(Math.max(1, Number(stockQuantity) || 1), locationAllocations)}
+              {locationEmpty ? ' · Assign' : ''}
+            </p>
             {singleBinOrUnassigned(locationAllocations, Math.max(1, Number(stockQuantity) || 1)) ? (
               <label>Location<select value={locationDraft} onChange={(e) => setLocationDraft(e.target.value)}>
                 <option value="">Unassigned</option>
@@ -716,47 +960,24 @@ export function UnitEditDrawer({
             )}
           </div>
         </div>
-        <h3>Pricing</h3>
-        <div className="unit-edit-grid">
-          <label data-gap-target="price" id="unit-edit-price" className={currentMissing.includes('price') ? 'unit-edit-required' : ''}>Price{isStocked ? ' (each)' : ''}<input inputMode="decimal" placeholder="24.99" value={form.price} onChange={e => set('price', e.target.value)} />{currentMissing.includes('price') && <small>Required</small>}</label>
-          {canDelete && <label>Cost{isStocked ? ' (each)' : ''}<input inputMode="decimal" placeholder="Add actual cost" value={form.cost} onChange={e => set('cost', e.target.value)} /></label>}
-          {typeof specs.retail_cents==='number'&&<div className="unit-edit-reference-row"><span>Manifest retail</span><strong>${(Number(specs.retail_cents)/100).toFixed(2)}{specs.retail_as_of?` · ${String(specs.retail_as_of)}`:''}</strong></div>}
+
+        {quantitySheetOpen&&<div className="unit-quantity-backdrop" role="presentation" onMouseDown={e=>{if(e.target===e.currentTarget)setQuantitySheetOpen(false);}}><section className="unit-quantity-sheet" role="dialog" aria-modal="true" aria-label="Quantity on hand"><div className="unit-quantity-grabber"/><h2>Quantity on hand</h2><p>{String(unit.title||`SKU ${sku}`)} · SKU {sku}</p><div className="unit-quantity-wheel"><select aria-label="Quantity 1 to 100" size={5} value={Number(quantityDraft)<=100?quantityDraft:''} onChange={e=>e.target.value&&setQuantityDraft(e.target.value)}>{Array.from({length:100},(_,i)=>i+1).map(n=><option key={n} value={n}>{n}</option>)}</select></div><label>Or type a number (up to 999)<input aria-label="Typed on hand quantity" type="number" inputMode="numeric" min="1" max="999" step="1" value={quantityDraft} onChange={e=>setQuantityDraft(e.target.value)}/></label>{!isStocked&&<small>This item is one-of-one. Saving more than 1 converts it to a stocked SKU and logs the change.</small>}<div className="unit-quantity-actions"><button type="button" className="secondary" onClick={()=>setQuantitySheetOpen(false)}>Cancel</button><button type="button" onClick={()=>{setQuantitySheetOpen(false);void save();}}>Set {quantityDraft||'0'} on hand</button></div></section></div>}
+
+        <h3>Actions</h3>
+        <div className="unit-edit-bottom-actions">
+          {canDelete && unit.state === 'sold' && <RestoreInventoryButton client={client} sku={sku} onDone={() => { onSaved({ ...unit, state: 'available' }); onClose(); }} />}
+          {canDelete && unsold && <DispositionButtons client={client} sku={sku} money={n => `$${(n / 100).toFixed(2)}`} stamp={s => new Date(s).toLocaleDateString()} className="secondary" onDone={() => { onReadinessChanged?.(); onDeleted?.(); onClose(); }} />}
+          {canDelete && <button type="button" className="text-button danger unit-edit-delete" disabled={busy || lookupBusy} onClick={() => void removeUnit()}>Delete item</button>}
         </div>
-        <h3>Condition</h3>
-        <div className="unit-edit-grid">
-          <label data-gap-target="condition" id="unit-edit-condition" className={currentMissing.includes('condition') ? 'unit-edit-required' : ''}>Condition{currentMissing.includes('condition')&&!form.condition&&<i className="unit-edit-amber-dot"/>}
-            <select value={form.condition} onChange={e => set('condition', e.target.value)}>
-              <option value="">—</option>
-              {conditions.map(c => <option key={c} value={c}>{c}</option>)}
-              {form.condition && !conditions.includes(form.condition) && <option value={form.condition}>{form.condition}</option>}
-            </select>
-            {currentMissing.includes('condition') && <small>Required</small>}
-          </label>
-          <label>Test status{currentMissing.includes('test_status')&&!form.testStatus&&<i className="unit-edit-amber-dot"/>}
-            <select value={form.testStatus} onChange={e => set('testStatus', e.target.value)}>
-              <option value="">—</option>
-              {tests.map(c => <option key={c} value={c}>{c}</option>)}
-              {form.testStatus && !tests.includes(form.testStatus) && <option value={form.testStatus}>{form.testStatus}</option>}
-            </select>
-          </label>
-        </div>
-        <h3 id="unit-package-size">Package size for shipping</h3>
-        <div className="unit-edit-grid">
-          <label>Shippable
-            <select value={form.shippable} onChange={e => set('shippable', e.target.value)}>
-              <option value="auto">Automatic (rules)</option>
-              <option value="ship">Yes — can ship</option>
-              <option value="pickup">No — pickup only</option>
-            </select>
-          </label>
-          <div className="unit-edit-wide unit-edit-grid unit-edit-dimensions"><label>Box L × W × H (in)<div className="unit-edit-box-fields"><input aria-label="Box length in" inputMode="decimal" value={form.length} onChange={e => set('length', e.target.value)} /><input aria-label="Box width in" inputMode="decimal" value={form.width} onChange={e => set('width', e.target.value)} /><input aria-label="Box height in" inputMode="decimal" value={form.height} onChange={e => set('height', e.target.value)} /></div></label>
-          <label>Package weight (lb)<input inputMode="decimal" value={form.weight} onChange={e => set('weight', e.target.value)} /></label></div>
-        </div>
-        <small className="unit-edit-wide">The shipping box, not the product. Buyers pay shipping from these measurements.</small>
-        <label className="unit-edit-wide unit-edit-notes">Notes<textarea rows={3} value={form.notes} onChange={e => set('notes', e.target.value)} /></label>
-        {canDelete&&<details ref={onlineDetails} className="unit-edit-online" open={onlineExpanded} onToggle={e=>setOnlineExpanded(e.currentTarget.open)}><summary>{notForSale?'Not listed online':'Selling online'}</summary>{!notForSale&&<><EbaySpecificsPanel client={client} sku={sku} storeId={storeId} appMode={appMode} hideSaveButton onDescription={(t) => { latestDescription.current = t; set('description', t); }} onJumpToCondition={() => jumpToGap('condition')} persistRef={specificsPersist} dirtyRef={specificsDirty} onDirtyChange={()=>{}} onSaved={onReadinessChanged} /><DnsCheckbox client={client} sku={sku} pendingValue={dnsPending??undefined} onPendingChange={setDnsPending} onChanged={() => onReadinessChanged?.()} /><ChannelCheckboxes key={sku} client={client} sku={sku} appMode={appMode} pendingSelections={{current:channelSelections}} onPendingChange={setChannelSelections}/></>}</details>}
         {canDelete && <UnitDispositionHistory client={client} sku={sku} stamp={s => new Date(s).toLocaleString()} />}
-        {canDelete && <button type="button" className="text-button danger unit-edit-delete" disabled={busy || lookupBusy} onClick={() => void removeUnit()}>Delete item</button>}
+
+        {appMode && hasChanges && (
+          <div className="app-sticky-save" role="status">
+            <span>{unsavedCount} unsaved change{unsavedCount === 1 ? '' : 's'}</span>
+            <button type="button" disabled={busy || lookupBusy} onClick={() => void save()}>{busy ? 'Saving…' : 'Save'}</button>
+          </div>
+        )}
+
         {viewPhoto && <div className="unit-photo-lightbox" role="dialog" aria-modal="true" aria-label="Photo controls"><button type="button" className="unit-photo-lightbox-close" onClick={() => setViewPhoto(null)}>Close</button>{urls[viewPhoto.path] && <img src={urls[viewPhoto.path]} alt={`Unit ${sku}`} />}<div><button type="button" disabled={busy} onClick={async () => { const { error: e } = await client.rpc('set_primary_photo', { p_id: viewPhoto.id }); if (e) setError(e.message); else { setViewPhoto(null); onPhotosChanged(); } }}>Make primary</button><button type="button" disabled={busy} onClick={async () => { const { error: e } = await client.rpc('delete_unit_photo', { p_id: viewPhoto.id }); if (e) setError(e.message); else { await client.storage.from('unit-photos').remove([viewPhoto.path]); setViewPhoto(null); onPhotosChanged(); } }}>Delete photo</button><button type="button" className="secondary" disabled={busy} onClick={async () => { const ordered = [...orderedPhotos]; const i = ordered.findIndex(p => p.id === viewPhoto.id); if (i > 0) { [ordered[i - 1], ordered[i]] = [ordered[i], ordered[i - 1]]; const { error: e } = await client.rpc('reorder_unit_photos', { p_sku: sku, p_ids: ordered.map(p => p.id) }); if (e) setError(e.message); else onPhotosChanged(); } }}>Move earlier</button></div></div>}
       </section>
     </div>

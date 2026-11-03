@@ -59,14 +59,16 @@ export function ReceiveWorkStatus({ client, accessToken, sku }: { client: Supaba
       void fetch(floorFunctionUrl('receive-finish'), { method: 'POST', headers: { Authorization: `Bearer ${accessToken}` } }).catch(() => {});
     } catch (e) { setRecovery((e as Error).message); }
   }
-  return rows.length || pending || recovery ? <div className="receive-background-status" role="status">
+  // "done" is historical noise on the item page and was getting clipped under the nav.
+  const active = rows.filter((row) => row.status !== 'done');
+  return active.length || pending || recovery ? <div className="receive-background-status" role="status">
     {pending && <p>A receive save was interrupted for {String(pending.p_fields.p_title || pending.p_fields.p_model || pending.p_request)}. Its photo and entered fields are preserved. You can receive other items. <button type="button" onClick={() => void recover()}>Recover interrupted save</button> <button type="button" onClick={() => {
       if (!window.confirm('Discard this recovery record? Uploaded photos are retained. Any item already saved on the server will not be deleted.')) return;
       localStorage.removeItem(pendingKey); setPending(null); setRecovery('Recovery record discarded. Ready for the next item.');
     }}>Discard</button></p>}
     {recovery && <p>{recovery}</p>}
-    {rows.map(row => <p key={row.sku}>
-    SKU {row.sku}: {row.status === 'done' ? 'Receive processing complete' : row.status === 'retry'
+    {active.map(row => <p key={row.sku}>
+    SKU {row.sku}: {row.status === 'retry'
       ? `Needs attention: ${row.last_error || row.step}. Will retry automatically.` : `Finishing ${row.step} in background…`}
     {row.status === 'retry' && <button type="button" className="text-button" onClick={() => void retry(row)}>Retry now</button>}
   </p>)}</div> : null;
