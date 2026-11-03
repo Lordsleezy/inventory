@@ -771,6 +771,28 @@ html.dark .mboard-progress-bar{background:#2a3340}
 .app-mode .locations-page header h1{font-size:1.5rem}
 .app-mode .locations-page .panel{border:0;border-radius:14px;background:var(--app-group-bg,#1c1c1e);box-shadow:none;padding:16px;margin:0 0 16px}
 .app-mode .locations-page .panel h2{margin:0 0 12px}
+.locations-simple{max-width:720px;overflow-x:hidden}
+.locations-simple h1{margin:0;font-size:32px}
+.loc-desk-nav{display:flex;justify-content:space-between;align-items:center;gap:12px;min-height:44px}
+.loc-desk-nav button{border:0;background:transparent;color:#0a84ff;font:inherit;font-size:16px;padding:8px 0;white-space:nowrap}
+.loc-desk-title p{margin:4px 0 16px;color:#8e8e93}
+.loc-section{margin:16px 0 6px;color:#8e8e93;font-size:13px}
+.loc-group{border:1px solid var(--line,#354050);border-radius:12px;overflow:hidden;background:transparent}
+.loc-row{display:flex;align-items:center;gap:12px;width:100%;text-align:left;border:0;border-bottom:1px solid var(--line,#354050);background:transparent;color:inherit;padding:14px 16px;font:inherit;min-width:0}
+.loc-group .loc-row:last-child{border-bottom:0}
+.loc-row-text{flex:1;min-width:0}
+.loc-row-text strong{display:block;overflow-wrap:anywhere}
+.loc-row-text small{display:block;color:#8e8e93;margin-top:2px}
+.loc-row-side{flex:none;color:#8e8e93;white-space:nowrap}
+.loc-chevron{flex:none;color:#8e8e93}
+.locations-simple .loc-field{display:grid;gap:6px;margin:12px 0;min-width:0}
+.locations-simple .loc-field input,.locations-simple .loc-edit-line input{box-sizing:border-box;width:100%;min-width:0;font:inherit;padding:10px 12px}
+.locations-simple .loc-edit-line{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 16px}
+.locations-simple .loc-edit-line input{width:96px}
+.locations-simple .loc-scan-line{display:flex;gap:8px}
+.locations-simple .loc-primary{margin-top:8px}
+.locations-simple .loc-stepper{display:flex;gap:8px}
+.locations-simple .loc-edit-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
 .app-mode .location-bay{border-color:var(--app-separator,#38383a)}
 .app-mode .location-scan-form input,.app-mode .location-scan-form select{min-height:50px;font-size:1rem}
 .pick-location{font-size:1.2rem;font-weight:900;letter-spacing:.03em;color:#0f766e}

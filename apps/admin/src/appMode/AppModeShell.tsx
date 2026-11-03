@@ -76,6 +76,7 @@ const TABS: { id: AppTab; label: string; icon: React.ReactNode; adminOnly?: bool
   {
     id: 'register',
     label: 'Register',
+    associateOnly: true,
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
         <circle cx="12" cy="12" r="8" /><path d="M12 7v10M9.5 9.5c.8-1 4.2-1 5 1s-1.5 2.5-2.5 2.5 3 1 2.5 3-3.5 1.2-4.5.2" />
@@ -126,6 +127,7 @@ const TABS: { id: AppTab; label: string; icon: React.ReactNode; adminOnly?: bool
   {
     id: 'locations',
     label: 'Locations',
+    associateOnly: true,
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
         <path d="M3 7h18M5 7v13h14V7M7 12h10M12 7v13" />
@@ -340,7 +342,17 @@ export function AppModeShell({
           </div>
         )}
         <div className="app-tab-panel" data-tab="locations" hidden={tab !== 'locations' || fullAccess}>
-          {tab === 'locations' && !fullAccess && <LocationsPage client={client} storeId={storeId} canManage={fullAccess} />}
+          {tab === 'locations' && !fullAccess && (
+            <LocationsPage
+              client={client}
+              storeId={storeId}
+              canManage={false}
+              variant="app"
+              accessToken={session.access_token}
+              money={money}
+              onSellInStore={() => switchTab('register')}
+            />
+          )}
         </div>
 
         {fullAccess && channel && (
@@ -388,9 +400,17 @@ export function AppModeShell({
           </AppReportsNative>
         )}
         {fullAccess && morePage === 'locations' && (
-          <AppReportsNative onBack={() => setMorePage(null)} title="Locations">
-            <LocationsPage client={client} storeId={storeId} />
-          </AppReportsNative>
+          <LocationsPage
+            client={client}
+            storeId={storeId}
+            canManage
+            variant="app"
+            onBack={() => setMorePage(null)}
+            backLabel="More"
+            accessToken={session.access_token}
+            money={money}
+            onSellInStore={() => setMorePage('register')}
+          />
         )}
         {fullAccess && morePage === 'insights' && (
           <AppReportsNative onBack={() => setMorePage(null)} title="Insights">

@@ -2526,3 +2526,87 @@ html.app-mode .returns-field input {
   padding: 10px 12px;
   font-size: 17px;
 }
+
+html.app-mode .loc-screen { overflow-x: hidden; }
+html.app-mode .loc-screen .app-nav button.loc-action {
+  white-space: nowrap;
+  min-width: 0;
+  flex: 0 1 auto;
+  text-align: right;
+}
+html.app-mode .loc-bay-title p {
+  margin: 4px 0 0;
+  color: #8e8e93;
+  font-size: 15px;
+}
+html.app-mode .loc-error,
+html.app-mode .loc-notice {
+  margin: 0 16px 12px;
+  font-size: 14px;
+}
+html.app-mode .loc-error { color: #ff453a; }
+html.app-mode .loc-notice { color: #8e8e93; }
+html.app-mode .loc-field {
+  display: grid;
+  gap: 6px;
+  margin: 0 16px 12px;
+  color: #8e8e93;
+  font-size: 13px;
+  min-width: 0;
+}
+html.app-mode .loc-field input,
+html.app-mode .loc-edit-line input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  border-radius: 12px;
+  background: #1c1c1e;
+  color: #fff;
+  font: inherit;
+  font-size: 17px;
+  padding: 12px 14px;
+}
+html.app-mode .loc-edit-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  color: #fff;
+  font-size: 17px;
+}
+html.app-mode .loc-edit-line input { width: 96px; text-align: right; background: #2c2c2e; }
+html.app-mode .loc-scan-line { display: flex; gap: 8px; min-width: 0; }
+html.app-mode .loc-scan-line input { flex: 1; }
+html.app-mode .loc-scan-line button,
+html.app-mode .loc-stepper button,
+html.app-mode .loc-edit-actions button {
+  border: 0;
+  border-radius: 10px;
+  background: #2c2c2e;
+  color: #0a84ff;
+  font: inherit;
+  font-size: 17px;
+  padding: 10px 14px;
+  flex: none;
+}
+html.app-mode .loc-stepper { display: flex; gap: 8px; flex: none; }
+html.app-mode .loc-stepper button { width: 36px; height: 36px; padding: 0; color: #fff; }
+html.app-mode .loc-edit-actions { display: grid; gap: 8px; margin: 8px 16px 16px; }
+html.app-mode .loc-edit-actions button.danger { color: #ff453a; }
+html.app-mode .loc-primary {
+  display: block;
+  box-sizing: border-box;
+  width: calc(100% - 32px);
+  margin: 8px 16px 16px;
+  border: 0;
+  border-radius: 12px;
+  background: #0a84ff;
+  color: #fff;
+  font: inherit;
+  font-size: 17px;
+  font-weight: 600;
+  padding: 14px;
+}
+html.app-mode .loc-field small { color: #8e8e93; }
