@@ -2,6 +2,7 @@ export type MainPage =
   | 'register'
   | 'sales'
   | 'orders'
+  | 'returns'
   | 'receipts'
   | 'inventory'
   | 'online'
@@ -68,6 +69,7 @@ const LEGACY: Record<string, { page: MainPage; tab?: ReportTab; inventoryTab?: I
   logs: { page: 'logs' },
   sales: { page: 'sales' },
   orders: { page: 'orders' },
+  returns: { page: 'returns' },
   receipts: { page: 'receipts' },
   register: { page: 'register' },
   inventory: { page: 'inventory' },
@@ -82,6 +84,7 @@ const MAIN: MainPage[] = [
   'register',
   'sales',
   'orders',
+  'returns',
   'receipts',
   'inventory',
   'online',

@@ -3,6 +3,7 @@ import type { Session } from '@supabase/supabase-js';
 import { floorCloud, loadStaffSession, staffSignInAttempts, type StaffSession } from '@floor/cloud';
 import { InventoryPage } from './InventoryPage';
 import { OrdersPage } from './OrdersPage';
+import { ReturnsPage } from './ReturnsPage';
 import { ReceiptsPage } from './ReceiptsPage';
 import { RegisterPage } from './RegisterPage';
 import { MoneyPage } from './MoneyPage';
@@ -751,6 +752,7 @@ export function App() {
         ['register', 'Register'],
         ['sales', 'Live Sales'],
         ['orders', 'Orders'],
+        ['returns', 'Returns'],
         ['receipts', 'Receipts'],
         ['online', 'Online'],
         ['ebay', 'eBay'],
@@ -768,6 +770,7 @@ export function App() {
     register: 'Register',
     sales: 'Live Sales',
     orders: 'Orders',
+    returns: 'Returns',
     receipts: 'Receipts',
     inventory: 'Inventory',
     online: 'Online',
@@ -831,7 +834,7 @@ export function App() {
       <button type="button" title="Settings" className={page === 'settings' ? 'active' : ''} onClick={() => goNav({ page: 'settings' })}>Settings</button>
         </>
         : <>
-      {mainNav.slice(0, 4).map(([id, label]) => <button type="button" className={page === id ? 'active' : ''} key={id} title={label} onClick={() => goNav({ page: id })}>{label}</button>)}
+      {mainNav.slice(0, 5).map(([id, label]) => <button type="button" className={page === id ? 'active' : ''} key={id} title={label} onClick={() => goNav({ page: id })}>{label}</button>)}
       <div className={`nav-group${navGroup === 'inventory' ? ' open' : ''}${page === 'inventory' ? ' on' : ''}`}>
         <button type="button" title="Inventory" className={`nav-parent${page === 'inventory' ? ' active' : ''}`} onClick={() => { setNavGroup(g => g === 'inventory' ? null : 'inventory'); go({ page: 'inventory' }); setEditing(null); }}>Inventory</button>
         <div className="nav-sub">
@@ -961,6 +964,7 @@ export function App() {
     </section></>;
   })()}
   {fullAccess && page === 'orders' && store && <OrdersPage client={sb} accessToken={session.access_token} storeId={store} money={money} stamp={stamp} rules={activeRules} cfg={onlineCfg} commissionOverrides={commissionOverrides} frozen={frozen} personName={personName} busy={busy} onCommissionChanged={setTicketOverride} />}
+  {fullAccess && page === 'returns' && store && <ReturnsPage client={sb} storeId={store} money={money} stamp={stamp} />}
   {fullAccess && page === 'receipts' && <ReceiptsPage client={sb} money={money} stamp={stamp} />}
   {fullAccess && page === 'online' && <OnlinePage storeId={store} accessToken={session.access_token} client={sb} money={money} tab={nav.onlineTab} onTab={t => go({ onlineTab: t, page: 'online' })} channel={nav.onlineChannel} onChannel={c => go({ onlineChannel: c, onlineTab: 'listed', page: 'online' })} onInventory={() => goNav({ page: 'inventory', inventoryTab: 'in-stock' })} />}
   {fullAccess && page === 'marketplaces' && <ConnectionsPage accessToken={session.access_token} />}

@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { type WebOrder } from '../OrdersPage';
 import { LabelDialog } from '../LabelDialog';
-import { ReturnsPage } from '../ReturnsPage';
 import { errText } from '../errText';
 import { shortError } from './shortError';
 import { loadOrderLocations, locationCompare, locationParts } from '../locationOrder';
@@ -13,7 +12,7 @@ function channelAllowsLabels(channel?: string | null) {
   return ch === 'website' || ch === 'web' || ch === 'ebay' || ch === 'amazon' || ch === 'tiktok';
 }
 
-type Seg = 'toShip' | 'shipped' | 'pickup' | 'done' | 'canceled' | 'returns';
+type Seg = 'toShip' | 'shipped' | 'pickup' | 'done' | 'canceled';
 
 const CHANNEL: Record<string, string> = {
   website: 'Website', ebay: 'eBay', amazon: 'Amazon', tiktok: 'TikTok', depop: 'Depop', mercari: 'Mercari',
@@ -111,7 +110,7 @@ export function AppOrders({ client, storeId, accessToken, money, stamp }: Props)
               return locationCompare(locations[a.sku]?.[0] || '99999', locations[b.sku]?.[0] || '99999');
             });
   const totals = useMemo(() => {
-    const src = seg === 'returns' ? [] : rows;
+    const src = rows;
     return {
       count: src.length,
       total: src.reduce((n, o) => n + (o.total_cents || 0), 0),
@@ -351,7 +350,6 @@ export function AppOrders({ client, storeId, accessToken, money, stamp }: Props)
           ['pickup', 'Pickup', buckets.pickup.length],
           ['done', 'Done', buckets.done.length],
           ['canceled', 'Canceled', buckets.canceled.length],
-          ['returns', 'Returns', null],
         ] as const).map(([id, label, n]) => (
           <button key={id} type="button" className={seg === id ? 'active' : ''} onClick={() => setSeg(id)}>
             {label}{n != null ? ` ${n}` : ''}
@@ -362,12 +360,6 @@ export function AppOrders({ client, storeId, accessToken, money, stamp }: Props)
         <span><strong>Pick list</strong><small>sorted by bay · row · bin</small></span><b>Start ›</b>
       </button>}
       {error && <p className="app-inline-error">{error}</p>}
-      {seg === 'returns' ? (
-        <div className="app-embed-soft">
-          <ReturnsPage client={client} storeId={storeId} money={money} stamp={stamp} />
-        </div>
-      ) : (
-        <>
           <div className="app-group">
             {!orders && <div className="app-empty-row">Loading…</div>}
             {orders && rows.length === 0 && <div className="app-empty-row">None right now</div>}
@@ -389,9 +381,6 @@ export function AppOrders({ client, storeId, accessToken, money, stamp }: Props)
               );
             })}
           </div>
-
-        </>
-      )}
     </>
   );
 }

@@ -3,7 +3,6 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { floorFunctionUrl } from './floorApi';
 import { CommissionOverrideControls, CommissionOverrideMark } from './CommissionOverride';
 import { frozenCutsForTicket, type CommissionOverride, type OnlineCfg, type Rule } from './payouts';
-import { ReturnsPage } from './ReturnsPage';
 import { LabelDialog } from './LabelDialog';
 import { errText } from './errText';
 import { loadOrderLocations, locationCompare, locationParts } from './locationOrder';
@@ -85,7 +84,6 @@ function otherStores(o: WebOrder) {
 
 type OrderView = 'all' | 'toShip' | 'shipped' | 'pickup' | 'done' | 'canceled';
 type StatusFilter = 'all' | 'paid' | 'canceled' | 'refunded';
-type OrdersSection = 'orders' | 'returns';
 
 const VIEW_LABEL: Record<OrderView, string> = {
   all: 'All orders',
@@ -132,7 +130,6 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
   const [now, setNow] = useState(Date.now());
   const [view, setView] = useState<OrderView>('all');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
-  const [section, setSection] = useState<OrdersSection>('orders');
   const [labelOrder, setLabelOrder] = useState<WebOrder | null>(null);
 
   const load = useCallback(async () => {
@@ -545,14 +542,8 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
   };
 
   return <>
-    <header><div><div className="eyebrow">WEBSITE AND MARKETPLACES</div><h1>Orders</h1><p>Every online order since day one. Returns live under this page for garage scan/inspect. No customer emails. Refreshes every 30 seconds.</p></div>
+    <header><div><div className="eyebrow">WEBSITE AND MARKETPLACES</div><h1>Orders</h1><p>Every online order since day one. Returns, refunds, and replacements are on the Returns tab. No customer emails. Refreshes every 30 seconds.</p></div>
       <div className="actions"><button className="secondary" onClick={() => void load()}>Refresh</button></div></header>
-    <div className="inventory-tabs" role="tablist" aria-label="Orders sections">
-      <button type="button" className={section === 'orders' ? 'active' : ''} onClick={() => setSection('orders')}>Fulfillment</button>
-      <button type="button" className={section === 'returns' ? 'active' : ''} onClick={() => setSection('returns')}>Returns</button>
-    </div>
-    {section === 'returns' && <ReturnsPage client={client} storeId={storeId} money={money} stamp={stamp} />}
-    {section === 'orders' && <>
     {error && <div className="alert" role="alert">{error}<button onClick={() => setError('')}>Dismiss</button></div>}
     <div className="stats">
       {([
@@ -639,6 +630,5 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
         onDone={() => { setLabelOrder(null); void load(); }}
       />
     )}
-    </>}
   </>;
 }
