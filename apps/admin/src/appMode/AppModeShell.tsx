@@ -50,8 +50,9 @@ type Props = {
   onReportsAction?: () => void;
 };
 
-/** Clerk-visible tabs; admins also get the shared Locations tab. */
+/** Clerk tab bar (max five). Admins use INVENTORY / RECEIVE / ORDERS / RETURNS / MORE. */
 const ASSOCIATE_TABS: AppTab[] = ['inventory', 'receive', 'register', 'locations', 'settings'];
+const ADMIN_TAB_IDS: AppTab[] = ['inventory', 'receive', 'orders', 'returns', 'more'];
 
 const TABS: { id: AppTab; label: string; icon: React.ReactNode; adminOnly?: boolean; associateOnly?: boolean }[] = [
   {
@@ -213,12 +214,7 @@ export function AppModeShell({
     });
   }
 
-  // Associates: Inventory / Receive / Register / Settings. Admins also get Orders + More.
-  const tabs = TABS.filter((t) => {
-    if (t.adminOnly && !fullAccess) return false;
-    if (t.associateOnly && fullAccess) return false;
-    return true;
-  });
+  const tabs = TABS.filter((t) => (fullAccess ? ADMIN_TAB_IDS : ASSOCIATE_TABS).includes(t.id));
   const stackOpen = !!(itemSku || morePage || channel);
 
   return (
@@ -256,7 +252,12 @@ export function AppModeShell({
             onChanged={() => setInvKey((n) => n + 1)}
             onSellInStore={() => {
               setItemSku(null);
-              switchTab('register');
+              if (fullAccess) {
+                switchTab('more');
+                setMorePage('register');
+              } else {
+                switchTab('register');
+              }
             }}
           />
         )}
@@ -273,8 +274,8 @@ export function AppModeShell({
           )}
         </div>
 
-        <div className="app-tab-panel app-register" data-tab="register" hidden={tab !== 'register'}>
-          {tab === 'register' && (
+        <div className="app-tab-panel app-register" data-tab="register" hidden={tab !== 'register' || fullAccess}>
+          {tab === 'register' && !fullAccess && (
             staffSession
               ? <RegisterPage staffSession={staffSession} variant="app" />
               : <p className="app-footer-count">This login can’t ring sales. Ask an owner to add a staff row.</p>
@@ -298,7 +299,7 @@ export function AppModeShell({
         {fullAccess && (
           <div className="app-tab-panel" data-tab="returns" hidden={tab !== 'returns'}>
             {tab === 'returns' && (
-              <ReturnsPage client={client} storeId={storeId} money={money} stamp={stamp} variant="app" />
+              <ReturnsPage client={client} storeId={storeId} money={money} stamp={stamp} variant="app" accessToken={session.access_token} />
             )}
           </div>
         )}
@@ -338,8 +339,8 @@ export function AppModeShell({
             )}
           </div>
         )}
-        <div className="app-tab-panel" data-tab="locations" hidden={tab !== 'locations'}>
-          {tab === 'locations' && <LocationsPage client={client} storeId={storeId} canManage={fullAccess} />}
+        <div className="app-tab-panel" data-tab="locations" hidden={tab !== 'locations' || fullAccess}>
+          {tab === 'locations' && !fullAccess && <LocationsPage client={client} storeId={storeId} canManage={fullAccess} />}
         </div>
 
         {fullAccess && channel && (
@@ -401,6 +402,13 @@ export function AppModeShell({
         )}
         {fullAccess && morePage === 'mercari' && (
           <AppMercariNative client={client} accessToken={session.access_token} money={money} onBack={() => setMorePage(null)} />
+        )}
+        {fullAccess && morePage === 'register' && (
+          <AppReportsNative onBack={() => setMorePage(null)} title="Register">
+            {staffSession
+              ? <RegisterPage staffSession={staffSession} variant="app" />
+              : <p className="app-footer-count">This login can’t ring sales. Ask an owner to add a staff row.</p>}
+          </AppReportsNative>
         )}
         {fullAccess && morePage === 'settings' && (
           <AppSettingsNative

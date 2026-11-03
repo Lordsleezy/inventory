@@ -2316,3 +2316,213 @@ html.app-mode .ebay-recommended-toggle {
 html.app-mode .app-unit-edit .inventory-detail {
   padding-bottom: calc(140px + env(safe-area-inset-bottom, 0px));
 }
+
+/* —— Returns (phone-first) —— */
+html.app-mode .returns-root {
+  padding: 0 16px calc(24px + env(safe-area-inset-bottom, 0px));
+  max-width: 100%;
+  overflow-x: hidden;
+  box-sizing: border-box;
+}
+html.app-mode .returns-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+html.app-mode .returns-title-row h1 { margin: 0; font-size: 34px; }
+html.app-mode .returns-text-btn {
+  border: 0;
+  background: transparent;
+  color: #0a84ff;
+  font-size: 17px;
+  font-weight: 500;
+  padding: 8px 0;
+}
+html.app-mode .returns-text-btn.danger { color: #ff453a; }
+html.app-mode .returns-search {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 48px;
+  border: 0;
+  border-radius: 12px;
+  background: #1c1c1e;
+  color: #fff;
+  padding: 12px 14px;
+  font-size: 17px;
+  margin-bottom: 12px;
+}
+html.app-mode .returns-segment { margin-bottom: 12px; max-width: 100%; }
+html.app-mode .returns-segment-inline { flex: 0 0 auto; min-width: 0; }
+html.app-mode .returns-rows { display: grid; gap: 8px; }
+html.app-mode .returns-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  box-sizing: border-box;
+  border: 0;
+  border-radius: 14px;
+  background: #1c1c1e;
+  color: inherit;
+  text-align: left;
+  padding: 14px 14px;
+  min-height: 64px;
+}
+html.app-mode .returns-row-main { flex: 1; min-width: 0; display: grid; gap: 4px; }
+html.app-mode .returns-row-main strong {
+  font-size: 17px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+html.app-mode .returns-row-main small { color: #8e8e93; font-size: 14px; }
+html.app-mode .returns-row-status {
+  flex: 0 0 auto;
+  font-size: 15px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+html.app-mode .returns-status-warn { color: #ffd60a; }
+html.app-mode .returns-status-ok { color: #30d158; }
+html.app-mode .returns-status-info { color: #0a84ff; }
+html.app-mode .returns-status-muted { color: #8e8e93; }
+html.app-mode .returns-sheet { display: grid; gap: 12px; padding-bottom: 24px; }
+html.app-mode .returns-nav-bar {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  min-height: 44px;
+  margin-bottom: 4px;
+}
+html.app-mode .returns-nav-bar strong { text-align: center; font-size: 17px; }
+html.app-mode .returns-nav-bar .returns-text-btn:last-child { justify-self: end; }
+html.app-mode .returns-pick-list { display: grid; gap: 8px; }
+html.app-mode .returns-pick-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  box-sizing: border-box;
+  border: 0;
+  border-radius: 14px;
+  background: #1c1c1e;
+  color: inherit;
+  text-align: left;
+  padding: 14px;
+}
+html.app-mode .returns-pick-card.on { outline: 2px solid #0a84ff; }
+html.app-mode .returns-pick-card strong { display: block; font-size: 17px; }
+html.app-mode .returns-pick-card small { color: #8e8e93; font-size: 14px; }
+html.app-mode .returns-check { color: #0a84ff; font-size: 20px; font-weight: 700; }
+html.app-mode .returns-field-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+html.app-mode .returns-kv-group {
+  display: grid;
+  gap: 0;
+  border-radius: 14px;
+  overflow: hidden;
+  background: #1c1c1e;
+}
+html.app-mode .returns-kv {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid #2c2c2e;
+  min-width: 0;
+}
+html.app-mode .returns-kv:last-child { border-bottom: 0; }
+html.app-mode .returns-kv span { color: #fff; font-size: 17px; flex: 0 0 auto; }
+html.app-mode .returns-kv input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: #8e8e93;
+  text-align: right;
+  font-size: 17px;
+}
+html.app-mode .returns-kv.readonly strong { color: #8e8e93; font-weight: 500; font-size: 17px; }
+html.app-mode .returns-hint { color: #636366; font-size: 13px; margin: 0; line-height: 1.35; }
+html.app-mode .returns-primary {
+  width: 100%;
+  min-height: 52px;
+  border: 0;
+  border-radius: 14px;
+  background: #0a84ff;
+  color: #fff;
+  font-size: 17px;
+  font-weight: 600;
+}
+html.app-mode .returns-secondary {
+  width: 100%;
+  min-height: 48px;
+  border: 0;
+  border-radius: 14px;
+  background: #2c2c2e;
+  color: #fff;
+  font-size: 16px;
+  font-weight: 600;
+}
+html.app-mode .returns-meta { color: #8e8e93; font-size: 15px; margin: 0 0 4px; }
+html.app-mode .returns-detail-title { font-size: 28px; letter-spacing: -.02em; margin: 0 0 6px; line-height: 1.15; }
+html.app-mode .returns-status-line { font-size: 17px; font-weight: 600; margin: 0 0 14px; }
+html.app-mode .returns-timeline-card {
+  background: #1c1c1e;
+  border-radius: 14px;
+  padding: 14px;
+  margin-bottom: 12px;
+}
+html.app-mode .returns-timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 14px;
+}
+html.app-mode .returns-timeline li {
+  display: grid;
+  grid-template-columns: 16px 1fr;
+  gap: 10px;
+  align-items: start;
+  color: #fff;
+}
+html.app-mode .returns-timeline li.pending { opacity: .35; }
+html.app-mode .returns-timeline li.current .returns-dot { background: #0a84ff; box-shadow: 0 0 0 4px rgba(10,132,255,.25); }
+html.app-mode .returns-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #30d158;
+  margin-top: 5px;
+}
+html.app-mode .returns-timeline small { display: block; color: #8e8e93; font-size: 13px; margin-top: 2px; }
+html.app-mode .returns-tracking-note { color: #ff9f0a; font-size: 12px; margin: 10px 0 0; }
+html.app-mode .returns-decide {
+  margin-top: 16px;
+  padding: 14px;
+  border-radius: 14px;
+  background: #1c1c1e;
+}
+html.app-mode .returns-decide-actions { display: grid; gap: 8px; margin-top: 10px; }
+html.app-mode .returns-field { display: grid; gap: 6px; font-size: 15px; color: #8e8e93; }
+html.app-mode .returns-field input {
+  min-height: 44px;
+  border-radius: 12px;
+  border: 0;
+  background: #1c1c1e;
+  color: #fff;
+  padding: 10px 12px;
+  font-size: 17px;
+}

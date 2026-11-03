@@ -170,3 +170,27 @@ export function fallbackRate(settings, pkg, overrideCents) {
   const billableLabel = dimWeight > Math.ceil(actual) ? ` (dimensional weight ${dimWeight} lb)` : "";
   return { id: "manual_usps_zone8", amount_cents: cents, carrier: "USPS", service: `Ground Advantage · up to ${Number(tier.max_lb)} lb${billableLabel}`, token: null, days: null, source: "manual" };
 }
+
+/** Guess Shippo carrier token from a tracking number (USPS / UPS / FedEx). */
+export function guessShippoCarrier(trackingNumber) {
+  const t = String(trackingNumber || "").replace(/\s+/g, "").toUpperCase();
+  if (!t) return null;
+  if (/^1Z/.test(t)) return "ups";
+  if (/^(94|93|92|91|82|83|84|85|70|61|62|63|64|65|66|67|68|69)/.test(t)) return "usps";
+  if (/^\d{12,22}$/.test(t)) return "fedex";
+  return "usps";
+}
+
+export async function registerTrack(carrier, trackingNumber, fetchImpl = fetch) {
+  const c = (carrier || guessShippoCarrier(trackingNumber) || "usps").toLowerCase();
+  return call("/tracks/", {
+    method: "POST",
+    body: { carrier: c, tracking_number: String(trackingNumber).trim() },
+    fetchImpl,
+  });
+}
+
+export async function getTrack(carrier, trackingNumber, fetchImpl = fetch) {
+  const c = (carrier || guessShippoCarrier(trackingNumber) || "usps").toLowerCase();
+  return call(`/tracks/${c}/${encodeURIComponent(String(trackingNumber).trim())}/`, { fetchImpl });
+}

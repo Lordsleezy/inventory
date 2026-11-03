@@ -13,6 +13,7 @@ import { shortError } from './shortError';
 
 /** Needs attention moved to Inventory → Unfinished; it is not a More page. */
 export type MoreId =
+  | 'register'
   | 'sales'
   | 'ebay'
   | 'amazon'
@@ -140,6 +141,12 @@ export function AppMoreHome({
           <button type="button" className="app-more-link" onClick={() => setPage('sales')}>
             <span className="app-more-left"><Icon tone="#30d158" />Live sales</span>
             <span className="app-more-right">{salesToday ?? '…'}<span className="app-chevron">›</span></span>
+          </button>
+        )}
+        {staffSession && (
+          <button type="button" className="app-more-link" onClick={() => setPage('register')}>
+            <span className="app-more-left"><Icon tone="#0a84ff" />Register</span>
+            <span className="app-chevron">›</span>
           </button>
         )}
       </div>

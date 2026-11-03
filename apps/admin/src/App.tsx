@@ -964,7 +964,7 @@ export function App() {
     </section></>;
   })()}
   {fullAccess && page === 'orders' && store && <OrdersPage client={sb} accessToken={session.access_token} storeId={store} money={money} stamp={stamp} rules={activeRules} cfg={onlineCfg} commissionOverrides={commissionOverrides} frozen={frozen} personName={personName} busy={busy} onCommissionChanged={setTicketOverride} />}
-  {fullAccess && page === 'returns' && store && <ReturnsPage client={sb} storeId={store} money={money} stamp={stamp} />}
+  {fullAccess && page === 'returns' && store && <ReturnsPage client={sb} storeId={store} money={money} stamp={stamp} accessToken={session.access_token} />}
   {fullAccess && page === 'receipts' && <ReceiptsPage client={sb} money={money} stamp={stamp} />}
   {fullAccess && page === 'online' && <OnlinePage storeId={store} accessToken={session.access_token} client={sb} money={money} tab={nav.onlineTab} onTab={t => go({ onlineTab: t, page: 'online' })} channel={nav.onlineChannel} onChannel={c => go({ onlineChannel: c, onlineTab: 'listed', page: 'online' })} onInventory={() => goNav({ page: 'inventory', inventoryTab: 'in-stock' })} />}
   {fullAccess && page === 'marketplaces' && <ConnectionsPage accessToken={session.access_token} />}
