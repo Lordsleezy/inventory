@@ -382,7 +382,7 @@ type Scan = {
   again?: boolean;
 };
 type Dups = { count: number; skus: string[] };
-type StockMatch = { sku: string; title: string; quantity: number; price_cents: number | null; condition: string | null; is_stocked: boolean; can_convert: boolean; fields?: Record<string, unknown> };
+type StockMatch = { sku: string; title: string; quantity: number; price_cents: number | null; condition: string | null; is_stocked: boolean; can_convert: boolean; price_diff?: boolean; condition_diff?: boolean; fields?: Record<string, unknown> };
 type LastReceived = { upc: string; result?: Lookup; seed: Partial<Form> };
 
 const NEW = 'New';
@@ -768,7 +768,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     const upc = manual ? (form.noUpc ? '' : form.upc.trim()) : current?.upc || '';
     const title = form.title.trim() || [form.brand, form.model].filter(Boolean).join(' ');
     const price = cents(form.ask);
-    if (!formOpen || doNotList || price == null || price === undefined) return () => { active = false; };
+    // Matching is by identity (UPC, or exact title without a UPC); price and condition only flag differences.
+    if (!formOpen || doNotList || price === undefined) return () => { active = false; };
     void Promise.resolve(client.rpc('portal_receive_stock_match', { p_upc: upc || null, p_title: title || null, p_price_cents: price, p_condition: form.condition || null }))
       .then(({ data, error: e }) => { if (active && !e) setStockMatches(Array.isArray(data) ? data as StockMatch[] : []); })
       .catch(() => {});
@@ -1436,14 +1437,15 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
 
   async function addToExistingStock(match: StockMatch) {
     const quantity = Number(form.quantity);
-    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 100) { setError('Enter a valid quantity.'); return; }
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 999) { setError('Enter a valid quantity.'); return; }
     setBusy(true); setError('');
     try {
-      const { data, error: e } = await client.rpc(match.is_stocked ? 'portal_stock_receive_add' : 'portal_stock_convert_and_add', { p_request: receiveRequest.current, p_sku: match.sku, p_quantity: quantity, p_location: selectedLocation || null });
+      const { error: e } = await client.rpc(match.is_stocked ? 'portal_stock_receive_add' : 'portal_stock_convert_and_add', { p_request: receiveRequest.current, p_sku: match.sku, p_quantity: quantity, p_location: selectedLocation || null });
       if (e) throw e;
-      receiveRequest.current = crypto.randomUUID();
       setSaved([match.sku]); setSelectedStockMatch(null); setStockMatches([]); setLast(null);
-      setForm(prev => ({ ...prev, quantity: '1' }));
+      // The scan is done: clear it like a normal save so the next scan starts clean (new request id).
+      if (!manual) { const doneId = current?.id; setQueue(q => q.filter(s => s.id !== doneId)); setLoadedId(null); }
+      resetEntry();
       onSaved();
     } catch (e) { setError(errText(e)); }
     finally { setBusy(false); }
@@ -1983,16 +1985,19 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
 
     {showForm && <form id={appChrome ? 'receive-app-form' : undefined} onSubmit={e => void finish(e)}>
       <ReceiveQuantity value={form.quantity} onChange={value=>update('quantity',value)} disabled={busy} />
-      {stockMatches.length > 0 && <div className="receive-dup" role="status"><strong>Matching inventory</strong>{stockMatches.map(match => <p key={match.sku}>{match.title} · SKU {match.sku} · {match.quantity} on hand · {match.condition || 'condition unset'}{match.is_stocked
-        ? <> <button type="button" disabled={busy} onClick={() => setSelectedStockMatch(match)}>{selectedStockMatch?.sku === match.sku ? 'Selected' : 'Add to this SKU'}</button></>
-        : match.can_convert && !staffMode ? <> <button type="button" disabled={busy} onClick={() => setSelectedStockMatch(match)}>Convert to stocked SKU and add</button></>
-          : <> <button type="button" disabled={busy} onClick={() => setSelectedStockMatch(match)}>Different item, new SKU</button></>}</p>)}
+      {stockMatches.length > 0 && <div className="receive-dup" role="status"><strong>Matching inventory</strong>{stockMatches.map(match => <p key={match.sku}>{match.title} · SKU {match.sku} · {match.quantity} on hand · {match.condition || 'condition unset'} · {match.price_cents == null ? 'no price' : `$${(match.price_cents / 100).toFixed(2)}`}
+        {(match.price_diff || match.condition_diff) && <> · <em>{match.price_diff ? 'Price differs. ' : ''}{match.condition_diff ? 'Condition differs.' : ''}</em></>}
+        {match.is_stocked || match.can_convert
+          ? <> <button type="button" disabled={busy} onClick={() => setSelectedStockMatch(match)}>{selectedStockMatch?.sku === match.sku ? 'Selected' : 'Add to this SKU'}</button></>
+          : null}</p>)}
         {selectedStockMatch && <div><p>SKU {selectedStockMatch.sku} goes to {selectedStockMatch.quantity + Number(form.quantity || 0)} on hand.</p><button type="button" disabled={busy} onClick={() => void addToExistingStock(selectedStockMatch)}>Add {Number(form.quantity || 0)} to SKU {selectedStockMatch.sku}</button><button type="button" className="secondary" onClick={() => setSelectedStockMatch(null)}>Different item, new SKU</button></div>}
-        <small>Matches require the same UPC (or exact no-UPC title), price and condition.</small></div>}
+        <small>Same UPC (or exact no-UPC title). If this is the same item, add it to that SKU; the saved price and condition stay as they are.</small></div>}
       {dups && dups.count > 0 && <div className="receive-dup" role="status">
         <strong>You have {dups.count} of these</strong>{dups.skus.length ? <> (SKU {dups.skus.slice(0, 8).join(', ')}{dups.skus.length > 8 ? '…' : ''})</> : null}
-        {!dupAck ? <> <button type="button" className="secondary" onClick={confirmDup}>Add another unit</button></> : <span className="tag on">confirmed — new unit</span>}
-        <p>Check the exact UPC, price and condition above. Matching items can be added to the existing stocked SKU; confirm only if this is a different item.</p>
+        {!dupAck ? <> <button type="button" className="secondary" onClick={confirmDup}>{stockMatches.some(m => m.is_stocked || m.can_convert) ? 'Different item, new SKU' : 'Add another unit'}</button></> : <span className="tag on">confirmed — new unit</span>}
+        <p>{stockMatches.some(m => m.is_stocked || m.can_convert)
+          ? 'Same item? Use Add to this SKU above so it stays one SKU with a quantity. Only choose a new SKU if this is a different item.'
+          : 'Check the exact UPC, price and condition above. Confirm only if this is a different item.'}</p>
       </div>}
 
       {!manual && current?.status === 'error' && <div className="alert" role="alert">
