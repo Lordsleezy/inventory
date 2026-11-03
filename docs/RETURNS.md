@@ -1,7 +1,7 @@
 # Returns system (Floor)
 
 Channel-agnostic returns for Amazon, TikTok Shop, website, eBay, Depop, and the rest (historical Mercari sales still label correctly).
-Garage receiving lives under **Admin → Orders → Returns**.
+Garage receiving lives under **Admin → Returns** (its own tab on desktop and on the phone).
 
 ## What you must do by hand
 
@@ -38,7 +38,7 @@ Full setup (redirect URL, Manage API scopes, env list): **[docs/TIKTOK_SHOP.md](
 ### Ops
 
 1. Open **Settings → Returns**: reserve % (Amazon/TikTok default 10%), refund-without-return threshold.
-2. Train garage flow: **Orders → Returns** → scan SKU/order → inspect → photo → disposition.
+2. Train garage flow: **Returns** → find the SKU or order → inspect → photo → disposition.
 3. For Amazon/TikTok ship-outs: pack-time photo (serial optional) is required before **Mark shipped**.
 
 ## Architecture notes

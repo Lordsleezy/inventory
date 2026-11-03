@@ -15,6 +15,16 @@ for (const url of ['https://floor.test/?page=tax', 'https://floor.test/?page=tax
   });
 }
 
+test('Returns is its own page', () => {
+  const history = { replaceState: (_: unknown, __: string, next: string) => { location = new URL(next, location); } };
+  let location = new URL('https://floor.test/?page=returns');
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: { get location() { return location; }, history } });
+  const state = parseNavFromLocation();
+  assert.equal(state.page, 'returns');
+  writeNavToLocation(state);
+  assert.equal(new URLSearchParams(location.search).get('page'), 'returns');
+});
+
 test('Reports → Overhead bookmark opens Overhead (not Profit)', () => {
   const history = { replaceState: (_: unknown, __: string, next: string) => { location = new URL(next, location); } };
   let location = new URL('https://floor.test/?page=reports&tab=overhead');

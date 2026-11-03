@@ -11,6 +11,7 @@ import { AppInventory } from './AppInventory';
 import { AppItemDetail } from './AppItemDetail';
 import { AppReceive } from './AppReceive';
 import { AppOrders } from './AppOrders';
+import { ReturnsPage } from '../ReturnsPage';
 import { AppChannel } from './AppChannel';
 import {
   AppMoreHome,
@@ -25,7 +26,7 @@ import {
 import type { OnlineCfg, Rule, CommissionOverride } from '../payouts';
 import { parseNavFromLocation } from '../navigation';
 
-export type AppTab = 'inventory' | 'receive' | 'register' | 'orders' | 'more' | 'settings' | 'locations';
+export type AppTab = 'inventory' | 'receive' | 'register' | 'orders' | 'returns' | 'more' | 'settings' | 'locations';
 
 type Props = {
   client: SupabaseClient;
@@ -91,6 +92,16 @@ const TABS: { id: AppTab; label: string; icon: React.ReactNode; adminOnly?: bool
     ),
   },
   {
+    id: 'returns',
+    label: 'Returns',
+    adminOnly: true,
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+        <path d="M4 12a8 8 0 1 0 2.3-5.6" /><path d="M4 4v5h5" />
+      </svg>
+    ),
+  },
+  {
     id: 'more',
     label: 'More',
     adminOnly: true,
@@ -148,7 +159,13 @@ export function AppModeShell({
   void _personName;
   void _busy;
   void _onCommissionChanged;
-  const [tab, setTab] = useState<AppTab>(() => fullAccess && ['reports','books'].includes(parseNavFromLocation().page) ? 'more' : 'inventory');
+  const [tab, setTab] = useState<AppTab>(() => {
+    if (!fullAccess) return 'inventory';
+    const page = parseNavFromLocation().page;
+    if (page === 'returns') return 'returns';
+    if (page === 'reports' || page === 'books') return 'more';
+    return 'inventory';
+  });
   const [itemSku, setItemSku] = useState<string | null>(null);
   const [itemMissing, setItemMissing] = useState<string[]>([]);
   const [morePage, setMorePage] = useState<MoreId | null>(() => fullAccess && ['reports','books'].includes(parseNavFromLocation().page) ? parseNavFromLocation().page as MoreId : null);
@@ -274,6 +291,14 @@ export function AppModeShell({
                 money={money}
                 stamp={stamp}
               />
+            )}
+          </div>
+        )}
+
+        {fullAccess && (
+          <div className="app-tab-panel" data-tab="returns" hidden={tab !== 'returns'}>
+            {tab === 'returns' && (
+              <ReturnsPage client={client} storeId={storeId} money={money} stamp={stamp} variant="app" />
             )}
           </div>
         )}
