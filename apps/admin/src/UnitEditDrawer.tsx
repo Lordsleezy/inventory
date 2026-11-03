@@ -858,7 +858,7 @@ export function UnitEditDrawer({
             </select>
           </label>
         </div>
-        <div id="unit-package-size" className={`unit-edit-dim-row${appMode ? '' : ' unit-edit-grid unit-edit-dimensions'}`}>
+        <div id="unit-package-size" className={`unit-edit-dim-row unit-edit-dimensions${appMode ? '' : ' unit-edit-grid'}`}>
           <label>L in<input aria-label="Box length in" inputMode="decimal" value={form.length} onChange={e => set('length', e.target.value)} /></label>
           <label>W in<input aria-label="Box width in" inputMode="decimal" value={form.width} onChange={e => set('width', e.target.value)} /></label>
           <label>H in<input aria-label="Box height in" inputMode="decimal" value={form.height} onChange={e => set('height', e.target.value)} /></label>
@@ -881,26 +881,22 @@ export function UnitEditDrawer({
         {canDelete && (
           <div id="unit-edit-section-ebay" className={appMode ? 'unit-edit-ebay-block' : undefined}>
             {appMode ? <h3>eBay listing</h3> : null}
-            {appMode ? (
-              <div className="unit-edit-online app-ebay-open">
-                {!notForSale && (
-                  <>
-                    <EbaySpecificsPanel client={client} sku={sku} storeId={storeId} appMode={appMode} hideSaveButton onDescription={(t) => { latestDescription.current = t; set('description', t); }} onJumpToCondition={() => jumpToGap('condition')} persistRef={specificsPersist} dirtyRef={specificsDirty} onDirtyChange={setSpecificsTouched} onSaved={onReadinessChanged} />
-                    <ChannelCheckboxes key={sku} client={client} sku={sku} appMode={appMode} pendingSelections={{current:channelSelections}} onPendingChange={setChannelSelections}/>
-                  </>
-                )}
-                {notForSale && <p className="hint">Not listed online (do not list).</p>}
-              </div>
-            ) : (
-              <details ref={onlineDetails} className="unit-edit-online" open={onlineExpanded} onToggle={e=>setOnlineExpanded(e.currentTarget.open)}>
-                <summary>{notForSale?'Not listed online':'Selling online'}</summary>
-                {!notForSale&&<>
-                  <EbaySpecificsPanel client={client} sku={sku} storeId={storeId} appMode={appMode} hideSaveButton onDescription={(t) => { latestDescription.current = t; set('description', t); }} onJumpToCondition={() => jumpToGap('condition')} persistRef={specificsPersist} dirtyRef={specificsDirty} onDirtyChange={setSpecificsTouched} onSaved={onReadinessChanged} />
-                  <DnsCheckbox client={client} sku={sku} pendingValue={dnsPending??undefined} onPendingChange={setDnsPending} onChanged={() => onReadinessChanged?.()} />
-                  <ChannelCheckboxes key={sku} client={client} sku={sku} appMode={appMode} pendingSelections={{current:channelSelections}} onPendingChange={setChannelSelections}/>
-                </>}
-              </details>
-            )}
+            <details
+              ref={onlineDetails}
+              className={`unit-edit-online${appMode ? ' app-ebay-open' : ''}`}
+              open={appMode ? true : onlineExpanded}
+              onToggle={(e) => {
+                if (!appMode) setOnlineExpanded(e.currentTarget.open);
+              }}
+            >
+              <summary>{notForSale ? 'Not listed online' : (appMode ? 'eBay & channels' : 'Selling online')}</summary>
+              {!notForSale && <>
+                <EbaySpecificsPanel client={client} sku={sku} storeId={storeId} appMode={appMode} hideSaveButton onDescription={(t) => { latestDescription.current = t; set('description', t); }} onJumpToCondition={() => jumpToGap('condition')} persistRef={specificsPersist} dirtyRef={specificsDirty} onDirtyChange={setSpecificsTouched} onSaved={onReadinessChanged} />
+                {!appMode && <DnsCheckbox client={client} sku={sku} pendingValue={dnsPending??undefined} onPendingChange={setDnsPending} onChanged={() => onReadinessChanged?.()} />}
+                <ChannelCheckboxes key={sku} client={client} sku={sku} appMode={appMode} pendingSelections={{current:channelSelections}} onPendingChange={setChannelSelections}/>
+              </>}
+              {notForSale && <p className="hint">Not listed online (do not list).</p>}
+            </details>
           </div>
         )}
 
