@@ -1813,3 +1813,506 @@ html.app-mode .receive-store-phone .bundle-receive { background:#141b28; border:
   html.app-mode .receive-store-phone .receive-chip { padding:6px 9px; font-size:12px; }
 }
 .receipt-edit-lines,.receipt-financial-form,.withdrawal-actual-form{display:grid;gap:12px;margin-top:18px}.receipt-financial-form label,.withdrawal-actual-form label{display:grid;gap:6px}.receipt-financial-form pre{white-space:pre-wrap;overflow-wrap:anywhere}.withdrawal-parts .actions,.withdrawal-actual-form{grid-column:1/-1}
+
+/* —— Item detail redesign —— */
+html.app-mode .app-item-banner-slot {
+  margin: 0 16px 8px;
+  max-width: 100%;
+  overflow: visible;
+}
+html.app-mode .app-item-banner-slot .receive-background-status {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #1c1c1e;
+  color: #aeaeb2;
+  font-size: 13px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+html.app-mode .app-item-banner-slot .receive-background-status p { margin: 0; }
+html.app-mode .app-item-photo-block { margin: 0 0 8px; }
+html.app-mode .app-photo-counter {
+  text-align: center;
+  color: #8e8e93;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  margin: 6px 0 8px;
+}
+html.app-mode .app-photo-thumbs {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 0 16px 4px;
+  -webkit-overflow-scrolling: touch;
+}
+html.app-mode .app-photo-thumb {
+  flex: 0 0 56px;
+  width: 56px;
+  height: 56px;
+  min-height: 44px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #1c1c1e;
+  color: #0a84ff;
+}
+html.app-mode .app-photo-thumb.is-active { border-color: #0a84ff; }
+html.app-mode .app-photo-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+html.app-mode .app-photo-thumb-add { font-size: 28px; font-weight: 300; }
+html.app-mode .app-item-identity { overflow-wrap: anywhere; }
+html.app-mode .app-item-price-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+html.app-mode .app-item-price-row .price { margin: 0; }
+html.app-mode .app-item-profit { color: #30d158; font-size: 15px; font-weight: 600; }
+html.app-mode .app-text-link {
+  border: 0;
+  background: none;
+  color: #0a84ff;
+  font: inherit;
+  font-weight: 600;
+  padding: 8px 0;
+  min-height: 44px;
+  text-align: right;
+}
+html.app-mode .app-text-link.warn { color: #ff9f0a; }
+html.app-mode .app-status-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 16px 12px;
+}
+html.app-mode .app-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  background: #2c2c2e;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+}
+html.app-mode .app-chip.good { background: rgba(48, 209, 88, 0.18); color: #30d158; }
+html.app-mode .app-chip.warn { background: rgba(255, 159, 10, 0.18); color: #ff9f0a; }
+html.app-mode .app-chip.muted { color: #8e8e93; }
+html.app-mode .app-chip.inline { display: inline-flex; margin-top: 6px; }
+html.app-mode .app-quick-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 4px 16px 16px;
+}
+html.app-mode .app-quick-actions button {
+  min-height: 44px;
+  border: 0;
+  border-radius: 12px;
+  background: #1c1c1e;
+  color: #0a84ff;
+  font-size: 15px;
+  font-weight: 600;
+  padding: 10px 8px;
+}
+html.app-mode .app-selling-on .app-channel-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  padding: 12px 14px;
+  border-bottom: 0.5px solid rgba(84, 84, 88, 0.65);
+  min-height: 48px;
+}
+html.app-mode .app-selling-on .app-channel-row:last-child { border-bottom: 0; }
+html.app-mode .app-channel-name { color: #fff; font-size: 16px; }
+html.app-mode .app-pill {
+  justify-self: start;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: #3a3a3c;
+  color: #aeaeb2;
+}
+html.app-mode .app-pill.live { background: rgba(48, 209, 88, 0.18); color: #30d158; }
+html.app-mode .app-pill.delisted { background: rgba(255, 159, 10, 0.15); color: #ff9f0a; }
+html.app-mode .app-channel-action {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+}
+html.app-mode .app-channel-action a,
+html.app-mode .app-channel-action .app-text-link { min-height: 44px; display: inline-flex; align-items: center; color: #0a84ff; text-decoration: none; font-weight: 600; }
+html.app-mode .app-channel-action strong { font-weight: 600; }
+html.app-mode .app-channel-action .muted { color: #636366; }
+html.app-mode .app-card-body { padding: 14px; }
+html.app-mode .app-description-text {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: #fff;
+  font-size: 15px;
+  line-height: 1.45;
+}
+html.app-mode .app-kv-stack { flex-direction: column; align-items: flex-start; }
+html.app-mode .app-kv-stack strong { text-align: left; overflow-wrap: anywhere; }
+html.app-mode .app-item-bottom-actions {
+  padding: 8px 16px calc(28px + env(safe-area-inset-bottom, 0px));
+}
+html.app-mode .app-item-bottom-actions > button,
+html.app-mode .app-item-bottom-actions .secondary {
+  width: 100%;
+  min-height: 48px;
+  border-radius: 12px;
+  border: 0;
+  background: #1c1c1e;
+  color: #0a84ff;
+  font-size: 17px;
+  font-weight: 600;
+}
+html.app-mode .app-disposition-row { padding-bottom: 8px; }
+html.app-mode .app-sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: #000a;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+html.app-mode .app-sheet {
+  width: min(560px, 100%);
+  max-height: 80vh;
+  overflow: auto;
+  background: #1c1c1e;
+  border-radius: 16px 16px 0 0;
+  padding: 16px 16px calc(16px + env(safe-area-inset-bottom, 0px));
+  color: #fff;
+}
+html.app-mode .app-sheet header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+html.app-mode .app-sheet header button {
+  border: 0;
+  background: none;
+  color: #0a84ff;
+  font-size: 17px;
+  font-weight: 600;
+  min-height: 44px;
+}
+
+/* —— Edit redesign —— */
+html.app-mode .app-edit-section-chips {
+  position: sticky;
+  top: 52px;
+  z-index: 5;
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 8px 12px;
+  background: #000;
+  border-bottom: 0.5px solid #2c2c2e;
+  -webkit-overflow-scrolling: touch;
+}
+html.app-mode .app-edit-section-chips button {
+  flex: 0 0 auto;
+  min-height: 36px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 0;
+  background: #2c2c2e;
+  color: #aeaeb2;
+  font-size: 14px;
+  font-weight: 600;
+}
+html.app-mode .app-edit-section-chips button.is-active {
+  background: #0a84ff;
+  color: #fff;
+}
+html.app-mode .unit-edit-photo-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  padding: 0 12px;
+}
+html.app-mode .unit-edit-photo-grid .unit-edit-photo-open,
+html.app-mode .unit-edit-photo-grid .unit-edit-photo-add {
+  flex: none;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1;
+  min-height: 96px;
+}
+html.app-mode .unit-edit-upc-row .unit-edit-upc-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  width: 100%;
+  align-items: center;
+}
+html.app-mode .unit-edit-upc-row .unit-edit-upc-fields button {
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: 10px;
+}
+html.app-mode .unit-edit-helper {
+  display: block;
+  color: #8e8e93;
+  font-size: 12px;
+  font-weight: 400;
+  margin-top: 4px;
+}
+html.app-mode .unit-edit-title-field .unit-edit-label-line {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  gap: 8px;
+}
+html.app-mode .unit-edit-title-field textarea {
+  display: block;
+  width: 100%;
+  min-height: 72px;
+  box-sizing: border-box;
+  background: #1c1c1e;
+  border: 1px solid #3a3a3c;
+  border-radius: 10px;
+  color: #fff;
+  font: inherit;
+  padding: 10px;
+  resize: vertical;
+}
+html.app-mode .app-unit-edit .unit-edit-grid input.is-locked {
+  color: #8e8e93;
+  opacity: 1;
+}
+html.app-mode .unit-edit-segmented {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 12px 8px;
+}
+html.app-mode .unit-edit-segmented button {
+  min-height: 44px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid #3a3a3c;
+  background: #1c1c1e;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+}
+html.app-mode .unit-edit-segmented button.is-active {
+  border-color: #0a84ff;
+  background: rgba(10, 132, 255, 0.18);
+  color: #0a84ff;
+}
+html.app-mode .unit-edit-price-pair {
+  grid-template-columns: 1fr 1fr !important;
+}
+html.app-mode .unit-edit-cost-empty input {
+  border-color: #ff9f0a !important;
+  box-shadow: 0 0 0 1px rgba(255, 159, 10, 0.35);
+}
+html.app-mode .unit-edit-profit-line {
+  margin: 0 16px 12px;
+  color: #aeaeb2;
+  font-size: 14px;
+}
+html.app-mode .unit-edit-profit-line.warn { color: #ff9f0a; }
+html.app-mode .unit-edit-dim-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  padding: 0 12px;
+  margin-bottom: 6px;
+}
+html.app-mode .unit-edit-dim-row label {
+  display: grid;
+  gap: 4px;
+  color: #aeaeb2;
+  font-size: 12px;
+  border-bottom: 0 !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+}
+html.app-mode .unit-edit-dim-row input {
+  width: 100%;
+  min-height: 44px;
+  box-sizing: border-box;
+  text-align: center;
+  background: #1c1c1e;
+  border: 1px solid #3a3a3c;
+  border-radius: 10px;
+  color: #fff;
+  font: inherit;
+}
+html.app-mode .dns-switch-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  margin: 12px;
+  padding: 14px;
+  border-radius: 14px;
+  background: #1c1c1e;
+}
+html.app-mode .dns-switch-copy strong { display: block; color: #fff; margin-bottom: 4px; }
+html.app-mode .dns-switch-copy .hint {
+  margin: 0;
+  color: #aeaeb2;
+  font-size: 13px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+html.app-mode .ios-switch {
+  width: 51px;
+  height: 31px;
+  min-height: 31px;
+  border-radius: 999px;
+  border: 0;
+  padding: 2px;
+  background: #39393d;
+  position: relative;
+  flex: 0 0 auto;
+}
+html.app-mode .ios-switch.is-on { background: #30d158; }
+html.app-mode .ios-switch-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 27px;
+  height: 27px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.18s ease;
+  box-shadow: 0 1px 3px #0006;
+}
+html.app-mode .ios-switch.is-on .ios-switch-knob { transform: translateX(20px); }
+html.app-mode .unit-edit-ebay-block { margin-top: 8px; }
+html.app-mode .app-ebay-open {
+  margin: 8px 12px 16px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: #1c1c1e;
+}
+html.app-mode .unit-stock-card-clean {
+  display: grid !important;
+  grid-template-columns: 48px minmax(0, 1fr) 48px;
+  align-items: center;
+  gap: 8px;
+}
+html.app-mode .unit-stock-center {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  text-align: center;
+}
+html.app-mode .unit-stock-label {
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #8e8e93;
+}
+html.app-mode .unit-stock-helper {
+  display: block;
+  color: #8e8e93;
+  font-size: 12px;
+  line-height: 1.35;
+  max-width: 220px;
+}
+html.app-mode .unit-edit-status-row,
+html.app-mode .unit-edit-location {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+}
+html.app-mode .unit-edit-location p.warn { color: #ff9f0a; margin: 0; font-weight: 600; }
+html.app-mode .unit-edit-bottom-actions {
+  display: grid;
+  gap: 10px;
+  padding: 8px 16px 24px;
+}
+html.app-mode .unit-edit-bottom-actions > button.secondary,
+html.app-mode .unit-edit-bottom-actions > button {
+  width: 100%;
+  min-height: 48px;
+  border-radius: 12px;
+  border: 0;
+  background: #1c1c1e;
+  color: #0a84ff;
+  font-size: 17px;
+  font-weight: 600;
+}
+html.app-mode .unit-edit-bottom-actions .unit-edit-delete {
+  color: #ff453a;
+  background: transparent;
+  margin: 8px 0 0;
+}
+html.app-mode .app-sticky-save {
+  position: sticky;
+  bottom: calc(58px + env(safe-area-inset-bottom, 0px));
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 12px 12px 20px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: #1c1c1e;
+  border: 1px solid #3a3a3c;
+  box-shadow: 0 8px 24px #0008;
+}
+html.app-mode .app-sticky-save span { color: #ff9f0a; font-size: 14px; font-weight: 600; }
+html.app-mode .app-sticky-save button {
+  min-height: 44px;
+  min-width: 110px;
+  border: 0;
+  border-radius: 12px;
+  background: #0a84ff;
+  color: #fff;
+  font-size: 17px;
+  font-weight: 700;
+  padding: 0 18px;
+}
+html.app-mode .ebay-category-current { display: grid; gap: 10px; margin-bottom: 10px; }
+html.app-mode .ebay-category-path { display: grid; gap: 4px; margin: 0; color: #8e8e93; font-size: 13px; }
+html.app-mode .ebay-category-path strong { color: #fff; font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
+html.app-mode .ebay-category-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+html.app-mode .ebay-category-actions button { min-height: 44px; }
+html.app-mode .ebay-required-wrap { position: relative; }
+html.app-mode .ebay-field-required-tag {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  color: #ff9f0a;
+  font-size: 11px;
+  font-weight: 700;
+}
+html.app-mode .ebay-recommended-toggle {
+  width: 100%;
+  min-height: 48px;
+  margin: 8px 0;
+  border: 0;
+  border-radius: 12px;
+  background: #2c2c2e;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+  text-align: left;
+  padding: 0 14px;
+}
+html.app-mode .app-unit-edit .inventory-detail {
+  padding-bottom: calc(140px + env(safe-area-inset-bottom, 0px));
+}

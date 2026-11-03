@@ -40,6 +40,8 @@ export function EbaySpecificsPanel({ client, sku, storeId, appMode = false, onSa
   const [generatedDescription, setGeneratedDescription] = useState('');
   const [useGeneratedDescription, setUseGeneratedDescription] = useState(false);
   const [savedDescription, setSavedDescription] = useState('');
+  const [changingCategory, setChangingCategory] = useState(false);
+  const [recommendedOpen, setRecommendedOpen] = useState(false);
   const pendingCategory = useRef<null | { category_id: string; values: Record<string,string> }>(null);
 
   async function call(action: string, extra: Record<string, unknown> = {}) {
@@ -61,6 +63,7 @@ export function EbaySpecificsPanel({ client, sku, storeId, appMode = false, onSa
     setPreview(null);
     setUseGeneratedDescription(false);
     setSavedDescription('');
+    setChangingCategory(!next.category_id);
     pendingCategory.current = null;
     setGeneratedDescription(next.item?.description?.trim() ? '' : makeDescription(next.item, sku));
     if (dirtyRef) dirtyRef.current = false;
@@ -253,34 +256,70 @@ export function EbaySpecificsPanel({ client, sku, storeId, appMode = false, onSa
       Review generated description<textarea rows={5} value={generatedDescription} onChange={(e) => { setGeneratedDescription(e.currentTarget.value); onDescription?.(e.currentTarget.value); }} />
     </label>}
     {form && canPick && <div className="ebay-specifics-category">
-      <p className="hint">{form.category_id ? `Category: ${form.path || form.category_id}` : 'Floor could not match an eBay category automatically. Choose a suggestion or search below.'}{form.category_id && form.auto_picked ? <em className="aspect-suggested" title="Floor picked this from eBay's suggestion for the title. Look it over; tapping a category yourself clears the tag.">Auto</em> : null}</p>
-      {review && <div className="ebay-specifics-missing" role="status"><p>{review.message}</p>
-        {review.action === 'confirm' && <button type="button" disabled={busy} onClick={() => void confirmCurrentCategory()}>{busy ? '…' : '✓ Category looks right'}</button>}
+      {form.category_id ? (
+        <div className="ebay-category-current">
+          <p className="ebay-category-path">
+            <span>Category{form.auto_picked ? ' · picked automatically' : ''}</span>
+            <strong>{form.path || form.category_id}</strong>
+            {form.auto_picked ? <em className="aspect-suggested">Auto</em> : null}
+          </p>
+          <div className="ebay-category-actions">
+            {(review?.action === 'confirm' || form.auto_picked) && (
+              <button type="button" disabled={busy} onClick={() => void confirmCurrentCategory()}>
+                {busy ? '…' : 'Looks right'}
+              </button>
+            )}
+            <button type="button" className="secondary" disabled={busy} onClick={() => { setChangingCategory(true); setQuery(''); }}>
+              Change…
+            </button>
+          </div>
+        </div>
+      ) : (
+        <p className="hint">Floor could not match an eBay category automatically. Choose a suggestion or search below.</p>
+      )}
+      {review && review.action !== 'confirm' && <div className="ebay-specifics-missing" role="status"><p>{review.message}</p>
         {review.action === 'condition' && <button type="button" disabled={busy} onClick={onJumpToCondition}>Go to Condition</button>}
         {review.action === 'specifics' && <button type="button" disabled={busy} onClick={() => document.querySelector('.ebay-specifics .ebay-specific-field.is-missing')?.scrollIntoView({ behavior: 'smooth', block: 'center' })}>Go to item specifics</button>}
       </div>}
-      {!form.category_id && picked && !preview && <button type="button" className="ebay-specifics-suggestion" disabled={busy}
-        onClick={() => void openCategory(picked)}>Use suggested: {picked.path}</button>}
-      <label>{form.category_id ? 'Change eBay category' : 'Search eBay categories'}
-        <input type="search" value={query} placeholder='e.g. "steamer"' onChange={(e) => setQuery(e.target.value)} />
-      </label>
-      {!query.trim() && suggestions.length > 0 && <><strong className="category-results-label">Suggested for this item</strong><div className="category-results">{suggestions.map((c) => <button type="button" key={c.category_id}
-        disabled={busy} onClick={() => void openCategory(c)}>{c.path}<small>{c.category_id}</small></button>)}</div></>}
-      {query.trim() && choices.length > 0 && <div className="category-results">{choices.map((c) => <button type="button" key={c.category_id}
-        disabled={busy} onClick={() => void openCategory(c)}>{c.path}<small>{c.category_id}</small></button>)}</div>}
+      {changingCategory && <>
+        {!form.category_id && picked && !preview && <button type="button" className="ebay-specifics-suggestion" disabled={busy}
+          onClick={() => void openCategory(picked)}>Use suggested: {picked.path}</button>}
+        <label>{form.category_id ? 'Search a different eBay category' : 'Search eBay categories'}
+          <input type="search" value={query} placeholder='e.g. "curtains"' onChange={(e) => setQuery(e.target.value)} />
+        </label>
+        {!query.trim() && suggestions.length > 0 && <><strong className="category-results-label">Suggested for this item</strong><div className="category-results">{suggestions.map((c) => <button type="button" key={c.category_id}
+          disabled={busy} onClick={() => void openCategory(c)}>{c.path}<small>{c.category_id}</small></button>)}</div></>}
+        {query.trim() && choices.length > 0 && <div className="category-results">{choices.map((c) => <button type="button" key={c.category_id}
+          disabled={busy} onClick={() => void openCategory(c)}>{c.path}<small>{c.category_id}</small></button>)}</div>}
+        {form.category_id && !preview && <button type="button" className="secondary" onClick={() => { setChangingCategory(false); setQuery(''); setPreview(null); }}>Keep current category</button>}
+      </>}
       {preview && <div className="category-step" role="group" aria-label="New category questions">
         <p className="hint"><strong>{preview.path || preview.category_id}</strong></p>
         {preview.cleared.length > 0 && <p className="hint">These current values do not fit this category and will be cleared: {preview.cleared.join(', ')}.</p>}
         {preview.fields.filter(f => f.required).map(f => <AspectPicker key={f.name} def={f} value={previewValues[f.name] || ''} usage={preview.usage?.[f.name] || []}
           suggested={preview.prefilled.includes(f.name)} onChange={(v) => setPreviewValues(old => ({ ...old, [f.name]: v }))} />)}
         {previewMissing.length > 0 && <p className="ebay-specifics-missing" role="status">Still needed before this item can be checked for eBay: {previewMissing.map(f => f.name).join(', ')}.</p>}
-        <div className="actions"><button type="button" disabled={busy} onClick={() => void confirmCategory()}>{busy ? 'Preparing…' : 'Use this category'}</button>
+        <div className="actions"><button type="button" disabled={busy} onClick={() => { void confirmCategory().then(() => setChangingCategory(false)); }}>{busy ? 'Preparing…' : 'Use this category'}</button>
           <button type="button" className="secondary" disabled={busy} onClick={() => setPreview(null)}>Cancel</button></div>
       </div>}
     </div>}
     {form?.category_id && <>
-      {required.map(input)}
-      {optional.length > 0 && <details><summary>Recommended (optional) · {optional.length} fields</summary>{optional.map(input)}</details>}
+      {required.map((f) => (
+        <div key={f.name} className="ebay-required-wrap">
+          {input(f)}
+          <small className="ebay-field-required-tag">Required</small>
+        </div>
+      ))}
+      {optional.length > 0 && (
+        <button
+          type="button"
+          className="ebay-recommended-toggle"
+          onClick={() => setRecommendedOpen((v) => !v)}
+        >
+          Recommended fields · {optional.filter((f) => values[f.name]?.trim()).length} of {optional.length} ›
+        </button>
+      )}
+      {recommendedOpen && optional.map(input)}
       {!hideSaveButton && <button type="button" disabled={busy} onClick={() => void save()}>{busy ? 'Saving…' : 'Save item specifics'}</button>}
     </>}
   </section>;

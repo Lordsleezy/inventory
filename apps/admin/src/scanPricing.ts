@@ -90,3 +90,16 @@ export function suggestAskCents(retailCents: number | null, floor: PriceFloor): 
   if (price >= retailCents) price = retailCents - 1;
   return price > 0 ? price : null;
 }
+
+/** Rough eBay marketplace fee on an ask price (same rate/fixed cents as the listing floor). */
+export function ebayFeeCents(askCents: number): number {
+  if (!Number.isFinite(askCents) || askCents <= 0) return 0;
+  return Math.round(askCents * EBAY_RATE) + EBAY_FIXED_CENTS;
+}
+
+/** Ask minus cost minus estimated eBay fees. Null when cost is unknown. */
+export function profitAfterFeesCents(askCents: number | null | undefined, costCents: number | null | undefined): number | null {
+  if (askCents == null || !Number.isFinite(askCents) || askCents <= 0) return null;
+  if (costCents == null || !Number.isFinite(costCents)) return null;
+  return Math.round(askCents) - Math.round(costCents) - ebayFeeCents(askCents);
+}
