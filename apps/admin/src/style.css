@@ -1025,3 +1025,4 @@ html.app-mode .unit-edit-amber-dot{display:inline-block;width:7px;height:7px;mar
 .unit-edit-photo-grid .unit-edit-photo-open,.unit-edit-photo-grid .unit-edit-photo-add{width:100%;height:auto;aspect-ratio:1}
 .unit-edit-bottom-actions{display:grid;gap:10px;margin:16px 0}
 html.app-mode .aspect-suggested{color:#30d158;background:rgba(48,209,88,.18)}
+.returns-root-desktop{max-width:720px}.returns-root-desktop .returns-search{width:100%;max-width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #d0d5dd;border-radius:10px;margin-bottom:12px}.returns-root-desktop .returns-row{border:1px solid #e5e9ee;border-radius:12px;background:#fff;padding:12px 14px}.returns-root-desktop .returns-kv-group{border:1px solid #e5e9ee;border-radius:12px;background:#fff}.returns-root-desktop .returns-timeline-card{border:1px solid #e5e9ee;background:#fafbfc}.returns-title-row-desktop{display:flex;align-items:center;justify-content:space-between;gap:12px}

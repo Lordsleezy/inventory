@@ -41,6 +41,17 @@ Full setup (redirect URL, Manage API scopes, env list): **[docs/TIKTOK_SHOP.md](
 2. Train garage flow: **Returns** → find the SKU or order → inspect → photo → disposition.
 3. For Amazon/TikTok ship-outs: pack-time photo (serial optional) is required before **Mark shipped**.
 
+### Shippo return tracking (inbound)
+
+1. In [Shippo](https://goshippo.com/) → **Settings → API → Webhooks**, add endpoint  
+   `https://inventoryobi.netlify.app/.netlify/functions/shippo-tracking-webhook`  
+   and subscribe to **track_updated** (all carriers you use for returns: USPS, UPS, FedEx).
+2. No extra env vars beyond the existing live **`SHIPPO_API_KEY`** (`shippo_live_…`).
+3. Optional smoke test (admin bearer token):  
+   `POST /.netlify/functions/return-track-sync` with `{"return_id":"<uuid>"}`  
+   Poll fallback for open returns: same function with `{"action":"poll_open"}` (can be scheduled in Netlify).
+4. Return detail in Admin refreshes the timeline from `return_tracking_events`; carrier scans also move status to **In transit** / **Received** automatically.
+
 ## Architecture notes
 
 - Same SKU reopens on restock; never mint a new SKU for a returned unit.
