@@ -81,7 +81,13 @@ export function AppMoreHome({
         const day = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
         const { data, error } = await client.rpc('portal_sales', { p_from: laMidnight(day), p_to: laMidnight(addDays(day, 1)) });
         if (error) throw error;
-        if (alive) setSalesToday(Array.isArray(data) ? new Set((data as { ticket_id?: string }[]).map((r) => r.ticket_id)).size : 0);
+        if (alive) {
+          setSalesToday(
+            Array.isArray(data)
+              ? new Set((data as { ticket_key?: string }[]).map((r) => r.ticket_key).filter(Boolean)).size
+              : 0,
+          );
+        }
       } catch { /* ignore */ }
 
       // Prefetch channel boards in parallel (Floor-fast catalog) so opening eBay is warm.
@@ -225,11 +231,30 @@ export function AppMoreHome({
   );
 }
 
+/** Rows from `portal_sales` (see supabase migrations) — not the mistaken ticket_id/total_cents shape. */
+type PortalSalesLine = {
+  id?: number;
+  ticket_key: string;
+  sold_at: string;
+  channel: string | null;
+  title: string | null;
+  price_cents: number | null;
+  tax_cents: number | null;
+  card_fee_cents: number | null;
+  profit_cents: number | null;
+  actor_name: string | null;
+};
+
+function liveChannelLabel(channel: string | null | undefined) {
+  const c = (channel || 'floor').toLowerCase();
+  return c === 'floor' ? 'In store' : channel || 'online';
+}
+
 export function AppLiveSales({ client, money, stamp, onBack }: {
   client: SupabaseClient; money: (n: number) => string; stamp: (s: string) => string; onBack: () => void;
 }) {
   const [range, setRange] = useState<'today' | 'week' | 'month'>('today');
-  const [rows, setRows] = useState<{ ticket_id: string; sold_at: string; channel: string; total_cents: number; profit_cents?: number; sold_by?: string; title?: string }[]>([]);
+  const [rows, setRows] = useState<PortalSalesLine[]>([]);
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -247,7 +272,7 @@ export function AppLiveSales({ client, money, stamp, onBack }: {
         });
         if (e) throw e;
         if (!alive) return;
-        setRows((data || []) as typeof rows);
+        setRows((data || []) as PortalSalesLine[]);
       } catch (e) {
         if (alive) setError(shortError(errText(e)));
       }
@@ -258,11 +283,22 @@ export function AppLiveSales({ client, money, stamp, onBack }: {
   const summary = useMemo(() => {
     const tickets = new Map<string, { total: number; profit: number; channel: string; at: string; who: string; title: string }>();
     for (const r of rows) {
-      const id = r.ticket_id || String(r.sold_at);
-      const cur = tickets.get(id) || { total: 0, profit: 0, channel: r.channel, at: r.sold_at, who: r.sold_by || '', title: r.title || '' };
-      cur.total += r.total_cents || 0;
-      cur.profit += r.profit_cents || 0;
-      tickets.set(id, cur);
+      const id = r.ticket_key || String(r.id ?? r.sold_at);
+      const lineTotal = (r.price_cents ?? 0) + (r.tax_cents ?? 0) + (r.card_fee_cents ?? 0);
+      const existing = tickets.get(id);
+      if (!existing) {
+        tickets.set(id, {
+          total: lineTotal,
+          profit: r.profit_cents ?? 0,
+          channel: r.channel || 'floor',
+          at: r.sold_at,
+          who: r.actor_name || '',
+          title: r.title || '',
+        });
+      } else {
+        existing.total += lineTotal;
+        existing.profit += r.profit_cents ?? 0;
+      }
     }
     const list = [...tickets.values()];
     return {
@@ -296,7 +332,7 @@ export function AppLiveSales({ client, money, stamp, onBack }: {
         {summary.list.map((t, i) => (
           <div key={i} className="app-row" style={{ cursor: 'default' }}>
             <span className="app-row-text">
-              <strong>{money(t.total)} · {t.channel || 'floor'}</strong>
+              <strong>{money(t.total)} · {liveChannelLabel(t.channel)}</strong>
               <small>{stamp(t.at)}{t.who ? ` · ${t.who}` : ''}</small>
               <small className="live">Pulled everywhere</small>
             </span>
