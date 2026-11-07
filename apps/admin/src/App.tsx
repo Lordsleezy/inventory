@@ -14,7 +14,7 @@ import { LocationsPage } from './LocationsPage';
 import { InsightsPage } from './InsightsPage';
 import { LogsPage } from './LogsPage';
 import { ClientErrorReporter } from './clientLog';
-import { displayPaymentNote, effectiveCommissionSplit, frozenCommissionBase, frozenCutsForTicket, inStoreOverrideRate, isBonusCategory, isOnline, NO_ONLINE, ownerPayoutSummary, payout, payoutCardIncludesSale, profit, reimbursementStillOwed, remainingProfit, reportProfitCents, withCommissionPaymentTag, type CommissionOverride, type OnlineCfg, type Rule } from './payouts';
+import { displayPaymentNote, effectiveCommissionSplit, frozenCommissionBase, frozenCutsForTicket, inStoreOverrideRate, isBonusCategory, isOnline, NO_ONLINE, ownerPayoutSummary, paymentAllocation, payout, payoutCardIncludesSale, profit, reimbursementStillOwed, remainingProfit, reportProfitCents, withCommissionPaymentTag, type CommissionOverride, type OnlineCfg, type Rule } from './payouts';
 import { CommissionOverrideControls, CommissionOverrideMark } from './CommissionOverride';
 import { ExpensesPage, type Expense as StoreExpense } from './ExpensesPage';
 import { ConnectionsPage } from './ConnectionsPage';
@@ -1239,7 +1239,6 @@ function PayoutsPage({allSales,ebayFees,staff,rules,payments,adjustments,expense
     return {person,balance,commission,bonus,reimburse,paidTotal,adjTotal,addbackTotal,entries};
   });
   const totalCommission = cards.reduce((n,c)=>n+c.commission,0);
-  const totalPaid = cards.reduce((n,c)=>n+c.paidTotal,0);
   const totalAdj = cards.reduce((n,c)=>n+(c.adjTotal || 0),0);
   // Each payment covers reimbursements outstanding that day, then commission — unless tagged [commission].
   const owedSplits = cards.map(c => {
@@ -1254,6 +1253,17 @@ function PayoutsPage({allSales,ebayFees,staff,rules,payments,adjustments,expense
   });
   const commissionBalanceOwed = owedSplits.reduce((n, c) => n + c.commissionOwed, 0);
   const reimburseBalanceOwed = owedSplits.reduce((n, c) => n + c.reimburseOwed, 0);
+  const paidSplit = cards.reduce((n, c) => {
+    const personPays = payments.filter(p => p.employee_id === c.person.user_id);
+    const part = paymentAllocation(
+      c.entries.filter(e => e.kind === 'reimbursement').map(e => ({ at: e.at, amount: e.amount || 0 })),
+      personPays.map(p => ({ at: p.paid_at, amount: p.amount_cents, note: p.note })),
+    );
+    return {
+      commissionPaid: n.commissionPaid + part.commissionPaid,
+      reimbursePaid: n.reimbursePaid + part.reimbursePaid,
+    };
+  }, { commissionPaid: 0, reimbursePaid: 0 });
   // Sale rows omit eBay insertion/subscription. Profit tab subtracts them once on the eBay channel.
   const saleProfit = allSales.every(t => t.profitCents != null)
     ? allSales.reduce((n, t) => n + (t.profitCents || 0), 0)
@@ -1297,17 +1307,18 @@ function PayoutsPage({allSales,ebayFees,staff,rules,payments,adjustments,expense
         : <div className="native-report-group">{ownerSummary.weeks.map(w => <div className="native-report-row" key={w.weekStart}><span>{weekLabel(w.weekStart, w.weekEnd)}<small>{w.saleCount} sale{w.saleCount === 1 ? '' : 's'}{w.pendingCost ? ` · ${w.pendingCost} need cost` : ''}{w.commissionCents ? ` · commissions ${money(w.commissionCents)}` : ''}</small></span><b>{w.ownerCents == null ? 'Pending' : money(w.ownerCents)}</b></div>)}</div>}
     </div>;
   }
-  if (native) return <div className="native-report-body"><div className="native-report-hero"><small>Owed right now</small><strong>{loading ? <span className="native-skeleton" /> : money(commissionBalanceOwed + reimburseBalanceOwed)}</strong><span>{loading ? "Loading payouts…" : `${money(totalPaid)} paid out all time`}</span></div>{loading && <div className="native-report-group"><div className="native-report-row"><span>Loading balances…</span></div></div>}{!loading && owedSplits.map(card => <PayoutCard key={card.person.user_id} {...card} frozen={frozen} frozenCut={frozenCut} pctFor={pctFor} busy={busy} recordPayment={recordPayment} rules={rules} cfg={cfg} personName={personName} onCommissionChanged={onCommissionChanged} native />)}{!loading && <><h3 className="native-report-section">Totals</h3><div className="native-report-group"><div className="native-report-row"><span>Total paid</span><b>{money(totalPaid)}</b></div><div className="native-report-row"><span>Reimbursements</span><b>{money(reimburseBalanceOwed)}</b></div><div className="native-report-row"><span>Return adjustments</span><b>{money(totalAdj)}</b></div><div className="native-report-row strong"><span>Owner share</span><b>{ownerShare === null ? 'Pending cost' : money(ownerShare)}</b></div></div>{needsCost > 0 && <p className="native-report-footnote">{needsCost} online sales need item cost before payout.</p>}</>}</div>;
+  if (native) return <div className="native-report-body"><div className="native-report-hero"><small>Owed right now</small><strong>{loading ? <span className="native-skeleton" /> : money(commissionBalanceOwed + reimburseBalanceOwed)}</strong><span>{loading ? "Loading payouts…" : `${money(paidSplit.commissionPaid)} commission paid · ${money(paidSplit.reimbursePaid)} reimbursements repaid`}</span></div>{loading && <div className="native-report-group"><div className="native-report-row"><span>Loading balances…</span></div></div>}{!loading && owedSplits.map(card => <PayoutCard key={card.person.user_id} {...card} frozen={frozen} frozenCut={frozenCut} pctFor={pctFor} busy={busy} recordPayment={recordPayment} rules={rules} cfg={cfg} personName={personName} onCommissionChanged={onCommissionChanged} native />)}{!loading && <><h3 className="native-report-section">Totals</h3><div className="native-report-group"><div className="native-report-row strong"><span>Owner share</span><b>{ownerShare === null ? 'Pending cost' : money(ownerShare)}</b></div><div className="native-report-row"><span>Team commissions earned</span><b>{money(totalCommission)}</b></div><div className="native-report-row"><span>Commission paid</span><b>{money(paidSplit.commissionPaid)}</b></div><div className="native-report-row"><span>Reimbursements repaid</span><b>{money(paidSplit.reimbursePaid)}</b></div><div className="native-report-row"><span>Reimbursements owed</span><b>{money(reimburseBalanceOwed)}</b></div><div className="native-report-row"><span>Return adjustments</span><b>{money(totalAdj)}</b></div></div><p className="native-report-footnote">Owner share is store profit after team commissions. Reimbursements repaid are expense paybacks — they are not commissions and are not compared to owner share.</p>{needsCost > 0 && <p className="native-report-footnote">{needsCost} online sales need item cost before payout.</p>}</>}</div>;
   return <>
     <header><div><div className="eyebrow">TEAM EARNINGS</div><h1>Payouts</h1><p>Store profit is sale price + buyer-paid shipping − every fee − shipping label − cost. Commissions are paid on commission profit: {cfg.absorbFees ? 'the store absorbs channel and card fees, so only the shipping label and cost come off' : 'channel fees, card fees, label and cost all come off'}. Mercari seller-paid shipping is a reimbursement and stays out of that math. Commissions are frozen per sale. Each payment covers reimbursements outstanding that day, then commission — check “Apply to commission” to skip reimbursements. Later reimbursements stay unpaid. Return adjustments stay separate; payment history is never rewritten.</p></div></header>
     <div className="stats payout-stats">
-      <Stat name="Profit after costs" hint={hasEbaySale && ebayFees > 0 ? `includes ${money(ebayFees)} eBay insertion/subscription` : undefined} value={profitAfterCosts === null ? 'Pending cost' : money(profitAfterCosts)} />
-      <Stat name="Commission earned" value={money(totalCommission)} />
-      <Stat name="Reimbursements" value={money(reimburseBalanceOwed)} />
-      <Stat name="Return adjustments" value={money(totalAdj)} />
-      <Stat name="Total paid" value={money(totalPaid)} />
-      <Stat name="Commissions balance owed" value={money(commissionBalanceOwed)} />
       <Stat name="Owner share" value={ownerShare === null ? 'Pending cost' : money(ownerShare)} />
+      <Stat name="Profit after costs" hint={hasEbaySale && ebayFees > 0 ? `includes ${money(ebayFees)} eBay insertion/subscription` : undefined} value={profitAfterCosts === null ? 'Pending cost' : money(profitAfterCosts)} />
+      <Stat name="Team commissions earned" value={money(totalCommission)} />
+      <Stat name="Commission paid" value={money(paidSplit.commissionPaid)} />
+      <Stat name="Reimbursements repaid" value={money(paidSplit.reimbursePaid)} />
+      <Stat name="Reimbursements owed" value={money(reimburseBalanceOwed)} />
+      <Stat name="Return adjustments" value={money(totalAdj)} />
+      <Stat name="Commissions balance owed" value={money(commissionBalanceOwed)} />
       {needsCost > 0 && <Stat name="Sales needing cost" value={String(needsCost)} />}
     </div>
     {needsCost > 0 && <div className="alert" role="status">{needsCost} sale{needsCost === 1 ? '' : 's'} have cost missing. They stay on the payout card as Needs cost and are not added to the balance until you enter a real unit cost or mark the item collectible.</div>}

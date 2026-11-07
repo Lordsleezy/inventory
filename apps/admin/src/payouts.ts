@@ -245,19 +245,48 @@ export function reimbursementStillOwed(
   reimbursements: { at: string; amount: number }[],
   payments: { at: string; amount: number; note?: string | null; commissionOnly?: boolean }[],
 ): number {
-  const events = [
-    ...reimbursements.map((row) => ({ day: payoutDay(row.at), kind: 0, amount: Math.max(0, row.amount || 0) })),
-    ...payments
-      .filter((row) => !row.commissionOnly && !paymentAppliesToCommission(row.note))
-      .map((row) => ({ day: payoutDay(row.at), kind: 1, amount: Math.max(0, row.amount || 0) })),
+  return paymentAllocation(reimbursements, payments).reimburseOwed;
+}
+
+/**
+ * How payments split between reimbursements and commission (date order).
+ * Commission-tagged payments never touch reimbursements.
+ */
+export function paymentAllocation(
+  reimbursements: { at: string; amount: number }[],
+  payments: { at: string; amount: number; note?: string | null; commissionOnly?: boolean }[],
+): { reimbursePaid: number; commissionPaid: number; reimburseOwed: number } {
+  type Ev =
+    | { day: string; kind: 0; amount: number }
+    | { day: string; kind: 1; amount: number; commissionOnly: boolean };
+  const events: Ev[] = [
+    ...reimbursements.map((row) => ({ day: payoutDay(row.at), kind: 0 as const, amount: Math.max(0, row.amount || 0) })),
+    ...payments.map((row) => ({
+      day: payoutDay(row.at),
+      kind: 1 as const,
+      amount: Math.max(0, row.amount || 0),
+      commissionOnly: !!(row.commissionOnly || paymentAppliesToCommission(row.note)),
+    })),
   ].filter((row) => row.day && row.amount > 0);
   events.sort((a, b) => a.day.localeCompare(b.day) || a.kind - b.kind);
   let open = 0;
+  let reimbursePaid = 0;
+  let commissionPaid = 0;
   for (const row of events) {
-    if (row.kind === 0) open += row.amount;
-    else open = Math.max(0, open - row.amount);
+    if (row.kind === 0) {
+      open += row.amount;
+      continue;
+    }
+    let left = row.amount;
+    if (!row.commissionOnly && open > 0) {
+      const toReimburse = Math.min(left, open);
+      open -= toReimburse;
+      reimbursePaid += toReimburse;
+      left -= toReimburse;
+    }
+    commissionPaid += left;
   }
-  return open;
+  return { reimbursePaid, commissionPaid, reimburseOwed: open };
 }
 
 /** Owner share: fee-adjusted profit minus every commission cut. Null if unsettled. */

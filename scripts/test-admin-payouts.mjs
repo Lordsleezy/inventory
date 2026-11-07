@@ -3,7 +3,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   payout, payoutCardIncludesSale, remainingProfit, isOnline, profit, commissionProfit, commissionBreakdown, reportProfitCents, isBonusCategory, reimbursementStillOwed,
-  paymentAppliesToCommission, withCommissionPaymentTag, displayPaymentNote, ownerPayoutSummary, ownerWeekStart,
+  paymentAppliesToCommission, withCommissionPaymentTag, displayPaymentNote, ownerPayoutSummary, ownerWeekStart, paymentAllocation,
   frozenCutsForTicket, frozenCommissionBase, frozenOwnerShare, ticketIsFrozen,
 } from "../apps/admin/src/payouts.ts";
 
@@ -294,6 +294,23 @@ test("commission-tagged payments do not reduce reimbursements", () => {
     [{ at: "2026-11-01T12:00:00", amount: 5000 }, { at: "2026-11-05T12:00:00", amount: 15686 }],
     [{ at: "2026-11-07T20:00:00Z", amount: 10000, note: "[commission] Commission payout" }],
   ), 20686);
+});
+test("payment allocation separates commission paid from reimbursements repaid", () => {
+  const split = paymentAllocation(
+    [
+      { at: "2026-10-01", amount: 400000 },
+      { at: "2026-11-05T12:00:00", amount: 20000 },
+    ],
+    [
+      { at: "2026-10-10T19:00:00Z", amount: 326000 },
+      { at: "2026-10-22T19:00:00Z", amount: 229000 },
+      { at: "2026-11-07T20:00:00Z", amount: 10000, note: "[commission] Commission payout" },
+    ],
+  );
+  // Oct payments clear $4000 reimburse and put $1550 into commission; Nov expense stays open; tagged pay is commission.
+  assert.equal(split.reimbursePaid, 400000);
+  assert.equal(split.commissionPaid, 155000 + 10000);
+  assert.equal(split.reimburseOwed, 20000);
 });
 test("owner payout rolls up all-time and week-by-week", () => {
   assert.equal(ownerWeekStart("2026-11-07"), "2026-11-02");
