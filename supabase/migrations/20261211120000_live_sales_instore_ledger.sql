@@ -38,7 +38,9 @@ end $$;
 
 grant select on public.sale_ledger to authenticated, service_role;
 
-create or replace function public.portal_sales(p_from timestamp with time zone, p_to timestamp with time zone)
+drop function if exists public.portal_sales(timestamptz, timestamptz);
+
+create function public.portal_sales(p_from timestamp with time zone, p_to timestamp with time zone)
 returns table (
   id bigint, ticket_key text, sku text, title text, qty integer,
   sold_at timestamp with time zone, price_cents integer, tax_cents integer,
@@ -77,17 +79,14 @@ begin
       s.channel, s.receipt_no,
       s.list_price_cents, s.override_price_cents, s.override_reason,
       coalesce(st_override.display_name, 'Unknown')::text,
-      case when lower(s.channel) = 'ebay' then coalesce(l.channel_fee_cents, 0) else 0 end,
-      case when lower(s.channel) = 'ebay' then coalesce(l.ship_cost_cents, 0) else 0 end,
-      l.cost_source, coalesce(l.channel_fee_cents, 0), l.fee_source,
-      coalesce(l.ship_cost_cents, 0), l.ship_cost_source,
-      coalesce(l.processing_fee_cents, coalesce(s.processing_fee_cents, 0)),
-      coalesce(l.processing_fee_source, s.processing_fee_source),
-      l.tax_remitted_by,
-      coalesce(l.tax_collected_cents, s.tax_cents),
-      coalesce(l.tax_owed_cents, s.tax_cents),
+      case when lower(s.channel) = 'ebay' then l.channel_fee_cents else 0 end,
+      case when lower(s.channel) = 'ebay' then l.ship_cost_cents else 0 end,
+      l.cost_source, l.channel_fee_cents, l.fee_source,
+      l.ship_cost_cents, l.ship_cost_source,
+      l.processing_fee_cents, l.processing_fee_source,
+      l.tax_remitted_by, l.tax_collected_cents, l.tax_owed_cents,
       l.ask_cents, l.variance_cents, l.profit_cents,
-      coalesce(l.shipping_cents, s.shipping_cents, 0)
+      coalesce(l.shipping_cents, 0)
     from public.sales s
     left join public.sale_ledger l on l.id = s.id
     left join public.units u on u.store_id = s.store_id and u.sku = s.sku
@@ -97,5 +96,8 @@ begin
     where s.store_id = v_store and s.voided_at is null and s.sold_at >= p_from and s.sold_at < p_to
     order by s.sold_at desc, s.id desc;
 end $function$;
+
+revoke all on function public.portal_sales(timestamptz, timestamptz) from public, anon;
+grant execute on function public.portal_sales(timestamptz, timestamptz) to authenticated;
 
 commit;
