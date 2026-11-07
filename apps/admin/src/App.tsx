@@ -31,6 +31,7 @@ import { isStandaloneApp, shouldShowInstallGate } from './appMode/isAppMode';
 import { InstallGate } from './appMode/InstallGate';
 import { AppModeShell } from './appMode/AppModeShell';
 import { NeedsAttentionPanel } from './NeedsAttentionPanel';
+import { isInStoreChannel } from './channels';
 import { replacementAddback, replacementLine, type Disposition } from './dispositions';
 import { CommissionMath } from './CommissionMath';
 import { setReplacementRows, useReplacementsForSale } from './replacementsStore';
@@ -920,9 +921,9 @@ export function App() {
     }
 
     const liveShown = live.filter(t => {
-      const floor = (t.channel || '').toLowerCase() === 'floor';
-      if (salesScope === 'instore') return floor;
-      if (salesScope === 'online') return !floor;
+      const instore = isInStoreChannel(t.channel);
+      if (salesScope === 'instore') return instore;
+      if (salesScope === 'online') return !instore;
       return true;
     });
     const liveSum = sum(liveShown);
@@ -938,8 +939,8 @@ export function App() {
     const profitTotal = liveShown.every(t => t.profitCents != null)
       ? liveShown.reduce((n, t) => n + (t.profitCents || 0), 0)
       : null;
-    const onlineN = liveShown.filter(t => (t.channel || '').toLowerCase() !== 'floor').length;
-    const instoreN = liveShown.filter(t => (t.channel || '').toLowerCase() === 'floor').length;
+    const onlineN = liveShown.filter(t => !isInStoreChannel(t.channel)).length;
+    const instoreN = liveShown.filter(t => isInStoreChannel(t.channel)).length;
     const unmatchedN = liveShown.filter(t => t.needsMatch).length;
     return <><header><div><div className="eyebrow">REGISTER ACTIVITY</div><h1>Live Sales</h1><p>Click a sale for profit, fees, cost, and shipping. Online totals use the same ledger math as Reports.{unmatchedN > 0 ? ` ${unmatchedN} marketplace sale${unmatchedN === 1 ? '' : 's'} still need a Floor SKU link.` : ''}</p></div>
       {salesFilters}
@@ -1002,7 +1003,7 @@ function Stat({ name, value, hint }: { name: string; value: string; hint?: strin
 function Empty({children}:{children:React.ReactNode}) { return <div className="empty">{children}</div>; }
 function VoidedTicket({ r, money, stamp }: { r: VoidedLine; money: (n: number) => string; stamp: (s: string) => string }) {
   const amount = r.price_cents + (r.shipping_cents || 0);
-  const online = (r.channel || '').toLowerCase() !== 'floor';
+  const online = !isInStoreChannel(r.channel);
   return <div className="ticket">
     <div className="ticket-top">
       <strong>{money(amount)}<small className="ticket-profit"> · cancelled</small></strong>
@@ -1024,7 +1025,7 @@ function LiveTicket({ t, money, stamp, rules, cfg, frozen, personName, busy, onC
   onMatchSku?: () => void;
 }) {
   const [open, setOpen] = useState(!!t.needsMatch);
-  const online = (t.channel || '').toLowerCase() !== 'floor';
+  const online = !isInStoreChannel(t.channel);
   const feeEst = t.lines.some(l => l.fee_source === 'estimated' && (l.channel_fee_cents ?? 0) > 0);
   const costEst = t.costEstimated;
   const profit = t.profitCents;

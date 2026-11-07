@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { isInStoreChannel } from './channels';
 import { errText } from './errText';
 
 type Line = {
@@ -24,13 +25,21 @@ const LEGAL =
   '7-DAY EXCHANGE ONLY. No returns and no refunds. With this receipt, you may exchange the item or take store credit within 7 days of sale. Goods are sold AS-IS, WHERE-IS, with all faults. Keep this receipt.';
 
 const CHANNEL: Record<string, string> = {
-  floor: 'In person', website: 'Website', ebay: 'eBay', depop: 'Depop',
-  amazon: 'Amazon', whatnot: 'Whatnot', mercari: 'Mercari', facebook: 'Facebook',
+  floor: 'In person',
+  store: 'In person',
+  in_store: 'In person',
+  instore: 'In person',
+  website: 'Website',
+  ebay: 'eBay',
+  depop: 'Depop',
+  amazon: 'Amazon',
+  whatnot: 'Whatnot',
+  mercari: 'Mercari',
+  facebook: 'Facebook',
 };
 
 function isOnline(channel: string) {
-  const ch = (channel || '').toLowerCase();
-  return ch !== 'floor';
+  return !isInStoreChannel(channel);
 }
 
 function feeName(channel: string) {
@@ -43,7 +52,7 @@ function feeName(channel: string) {
 
 function tender(r: Receipt) {
   const ch = (r.channel || '').toLowerCase();
-  if (ch !== 'floor' && ch !== 'website') return CHANNEL[ch] || ch;
+  if (!isInStoreChannel(r.channel) && ch !== 'website') return CHANNEL[ch] || ch;
   const method = (r.payment_method || 'other').toUpperCase();
   const card = [r.card_brand, r.card_last4 ? `•••• ${r.card_last4}` : null].filter(Boolean).join(' ');
   if (method === 'SPLIT') {
@@ -233,9 +242,9 @@ export function ReceiptsPage({ client, money, stamp }: {
     const date = r.sold_at.slice(0, 10);
     if (startDate && date < startDate) return false;
     if (endDate && date > endDate) return false;
-    const floor = (r.channel || '').toLowerCase() === 'floor';
-    if (scope === 'instore') return floor;
-    if (scope === 'online') return !floor;
+    const instore = isInStoreChannel(r.channel);
+    if (scope === 'instore') return instore;
+    if (scope === 'online') return !instore;
     return true;
   });
 
@@ -296,9 +305,9 @@ export function ReceiptsPage({ client, money, stamp }: {
       {!busy && shown.length === 0 && <div className="empty">No receipts match.</div>}
       <div className="ticket-list">
         {shown.map(r => {
-          const floor = (r.channel || '').toLowerCase() === 'floor';
+          const instore = isInStoreChannel(r.channel);
           const label = CHANNEL[(r.channel || '').toLowerCase()] || r.channel;
-          const marketplace = !floor && (r.channel || '').toLowerCase() !== 'website';
+          const marketplace = !instore && (r.channel || '').toLowerCase() !== 'website';
           const displayTotal = marketplace ? depositCents(r) : r.total_cents;
           const title = r.lines.map(l => l.title).filter(Boolean).slice(0, 2).join(' · ')
             + (r.lines.length > 2 ? ` +${r.lines.length - 2} more` : '');
@@ -311,7 +320,7 @@ export function ReceiptsPage({ client, money, stamp }: {
             </div>
             <div className="ticket-items"><div><strong>{title || 'Sale'}</strong>
               <small> · Receipt {r.receipt_no}{r.order_no && r.order_no !== r.receipt_no ? ` · Order ${r.order_no}` : ''}
-                {r.buyer_name ? ` · ${r.buyer_name}` : floor ? ` · ${actorLabel(r.channel, r.actor_name)}` : ''}
+                {r.buyer_name ? ` · ${r.buyer_name}` : instore ? ` · ${actorLabel(r.channel, r.actor_name)}` : ''}
               </small>
             </div></div>
             <div className="ticket-bottom">
