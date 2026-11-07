@@ -245,19 +245,48 @@ export function reimbursementStillOwed(
   reimbursements: { at: string; amount: number }[],
   payments: { at: string; amount: number; note?: string | null; commissionOnly?: boolean }[],
 ): number {
-  const events = [
-    ...reimbursements.map((row) => ({ day: payoutDay(row.at), kind: 0, amount: Math.max(0, row.amount || 0) })),
-    ...payments
-      .filter((row) => !row.commissionOnly && !paymentAppliesToCommission(row.note))
-      .map((row) => ({ day: payoutDay(row.at), kind: 1, amount: Math.max(0, row.amount || 0) })),
+  return paymentAllocation(reimbursements, payments).reimburseOwed;
+}
+
+/**
+ * How payments split between reimbursements and commission (date order).
+ * Commission-tagged payments never touch reimbursements.
+ */
+export function paymentAllocation(
+  reimbursements: { at: string; amount: number }[],
+  payments: { at: string; amount: number; note?: string | null; commissionOnly?: boolean }[],
+): { reimbursePaid: number; commissionPaid: number; reimburseOwed: number } {
+  type Ev =
+    | { day: string; kind: 0; amount: number }
+    | { day: string; kind: 1; amount: number; commissionOnly: boolean };
+  const events: Ev[] = [
+    ...reimbursements.map((row) => ({ day: payoutDay(row.at), kind: 0 as const, amount: Math.max(0, row.amount || 0) })),
+    ...payments.map((row) => ({
+      day: payoutDay(row.at),
+      kind: 1 as const,
+      amount: Math.max(0, row.amount || 0),
+      commissionOnly: !!(row.commissionOnly || paymentAppliesToCommission(row.note)),
+    })),
   ].filter((row) => row.day && row.amount > 0);
   events.sort((a, b) => a.day.localeCompare(b.day) || a.kind - b.kind);
   let open = 0;
+  let reimbursePaid = 0;
+  let commissionPaid = 0;
   for (const row of events) {
-    if (row.kind === 0) open += row.amount;
-    else open = Math.max(0, open - row.amount);
+    if (row.kind === 0) {
+      open += row.amount;
+      continue;
+    }
+    let left = row.amount;
+    if (!row.commissionOnly && open > 0) {
+      const toReimburse = Math.min(left, open);
+      open -= toReimburse;
+      reimbursePaid += toReimburse;
+      left -= toReimburse;
+    }
+    commissionPaid += left;
   }
-  return open;
+  return { reimbursePaid, commissionPaid, reimburseOwed: open };
 }
 
 /** Owner share: fee-adjusted profit minus every commission cut. Null if unsettled. */
@@ -269,6 +298,108 @@ export function remainingProfit(t: TicketLike, rules: Rule[], cfg: OnlineCfg): n
   const commissions = cuts.reduce<number>((n, x) => n + (x || 0), 0);
   // Commissions only take from non-negative commission base; owner share can still reflect a loss.
   return p - commissions;
+}
+
+/** Monday (YYYY-MM-DD) for a calendar day in the store's week. */
+export function ownerWeekStart(day: string): string {
+  const [y, m, d] = day.split("-").map(Number);
+  const utc = new Date(Date.UTC(y, m - 1, d, 12));
+  const back = (utc.getUTCDay() + 6) % 7;
+  utc.setUTCDate(utc.getUTCDate() - back);
+  return utc.toISOString().slice(0, 10);
+}
+
+export function ownerWeekEnd(weekStart: string): string {
+  const [y, m, d] = weekStart.split("-").map(Number);
+  const utc = new Date(Date.UTC(y, m - 1, d, 12));
+  utc.setUTCDate(utc.getUTCDate() + 6);
+  return utc.toISOString().slice(0, 10);
+}
+
+export type OwnerSaleInput = {
+  at: string;
+  /** Fee-adjusted profit for the sale. Null while cost is missing. */
+  profitCents: number | null;
+  /** Sum of commission cuts on this sale. Null while cost is missing. */
+  commissionCents: number | null;
+};
+
+export type OwnerWeekRow = {
+  weekStart: string;
+  weekEnd: string;
+  saleCount: number;
+  pendingCost: number;
+  profitCents: number | null;
+  commissionCents: number;
+  ownerCents: number | null;
+};
+
+/**
+ * Owner share by week (Mon–Sun): sale profit − commissions − bonuses that week.
+ * All-time owner is reportProfitCents(sum profits, ebayFees) − commissions − bonuses.
+ */
+export function ownerPayoutSummary(
+  sales: OwnerSaleInput[],
+  bonuses: { at: string; amountCents: number }[],
+  ebayFeesCents = 0,
+): { allTimeOwnerCents: number | null; weeks: OwnerWeekRow[] } {
+  const byWeek = new Map<string, OwnerWeekRow>();
+  let profitTotal: number | null = 0;
+  let commissionTotal = 0;
+  let bonusTotal = 0;
+
+  const ensure = (weekStart: string): OwnerWeekRow => {
+    let row = byWeek.get(weekStart);
+    if (!row) {
+      row = {
+        weekStart,
+        weekEnd: ownerWeekEnd(weekStart),
+        saleCount: 0,
+        pendingCost: 0,
+        profitCents: 0,
+        commissionCents: 0,
+        ownerCents: 0,
+      };
+      byWeek.set(weekStart, row);
+    }
+    return row;
+  };
+
+  for (const sale of sales) {
+    const day = payoutDay(sale.at);
+    if (!day) continue;
+    const row = ensure(ownerWeekStart(day));
+    row.saleCount += 1;
+    if (sale.profitCents == null || sale.commissionCents == null) {
+      row.pendingCost += 1;
+      row.profitCents = null;
+      row.ownerCents = null;
+      profitTotal = null;
+      continue;
+    }
+    if (row.profitCents != null) row.profitCents += sale.profitCents;
+    row.commissionCents += sale.commissionCents;
+    if (row.ownerCents != null) row.ownerCents += sale.profitCents - sale.commissionCents;
+    if (profitTotal != null) profitTotal += sale.profitCents;
+    commissionTotal += sale.commissionCents;
+  }
+
+  for (const bonus of bonuses) {
+    const day = payoutDay(bonus.at);
+    if (!day || !Number.isFinite(bonus.amountCents)) continue;
+    const amount = Math.max(0, bonus.amountCents);
+    const row = ensure(ownerWeekStart(day));
+    row.commissionCents += amount;
+    if (row.ownerCents != null) row.ownerCents -= amount;
+    bonusTotal += amount;
+    commissionTotal += amount;
+  }
+
+  const weeks = [...byWeek.values()].sort((a, b) => b.weekStart.localeCompare(a.weekStart));
+  const allTimeOwnerCents = profitTotal == null
+    ? null
+    : reportProfitCents(profitTotal, ebayFeesCents)! - commissionTotal;
+  return { allTimeOwnerCents, weeks };
 }
 
 /** Recorded Paul/Jacob cents from sale_commissions (null amount = waiting on cost). */

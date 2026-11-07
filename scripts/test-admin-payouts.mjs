@@ -3,7 +3,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   payout, payoutCardIncludesSale, remainingProfit, isOnline, profit, commissionProfit, commissionBreakdown, reportProfitCents, isBonusCategory, reimbursementStillOwed,
-  paymentAppliesToCommission, withCommissionPaymentTag, displayPaymentNote,
+  paymentAppliesToCommission, withCommissionPaymentTag, displayPaymentNote, ownerPayoutSummary, ownerWeekStart, paymentAllocation,
   frozenCutsForTicket, frozenCommissionBase, frozenOwnerShare, ticketIsFrozen,
 } from "../apps/admin/src/payouts.ts";
 
@@ -294,6 +294,41 @@ test("commission-tagged payments do not reduce reimbursements", () => {
     [{ at: "2026-11-01T12:00:00", amount: 5000 }, { at: "2026-11-05T12:00:00", amount: 15686 }],
     [{ at: "2026-11-07T20:00:00Z", amount: 10000, note: "[commission] Commission payout" }],
   ), 20686);
+});
+test("payment allocation separates commission paid from reimbursements repaid", () => {
+  const split = paymentAllocation(
+    [
+      { at: "2026-10-01", amount: 400000 },
+      { at: "2026-11-05T12:00:00", amount: 20000 },
+    ],
+    [
+      { at: "2026-10-10T19:00:00Z", amount: 326000 },
+      { at: "2026-10-22T19:00:00Z", amount: 229000 },
+      { at: "2026-11-07T20:00:00Z", amount: 10000, note: "[commission] Commission payout" },
+    ],
+  );
+  // Oct payments clear $4000 reimburse and put $1550 into commission; Nov expense stays open; tagged pay is commission.
+  assert.equal(split.reimbursePaid, 400000);
+  assert.equal(split.commissionPaid, 155000 + 10000);
+  assert.equal(split.reimburseOwed, 20000);
+});
+test("owner payout rolls up all-time and week-by-week", () => {
+  assert.equal(ownerWeekStart("2026-11-07"), "2026-11-02");
+  const summary = ownerPayoutSummary(
+    [
+      { at: "2026-10-28T19:00:00Z", profitCents: 10000, commissionCents: 3000 },
+      { at: "2026-11-04T19:00:00Z", profitCents: 5000, commissionCents: 1000 },
+      { at: "2026-11-05T19:00:00Z", profitCents: 2000, commissionCents: 500 },
+    ],
+    [{ at: "2026-11-07T12:00:00", amountCents: 10000 }],
+    200,
+  );
+  assert.equal(summary.allTimeOwnerCents, 10000 + 5000 + 2000 - 200 - 3000 - 1000 - 500 - 10000);
+  assert.equal(summary.weeks.length, 2);
+  assert.equal(summary.weeks[0].weekStart, "2026-11-02");
+  assert.equal(summary.weeks[0].ownerCents, 5000 + 2000 - 1000 - 500 - 10000);
+  assert.equal(summary.weeks[1].weekStart, "2026-10-26");
+  assert.equal(summary.weeks[1].ownerCents, 7000);
 });
 test("Mercari seller-paid shipping is left out of profit and commission", () => {
   const t = { subtotal: 1999, cost: 900, channel: "mercari", feeCents: 199, shipCostCents: 992, processingFeeCents: 0 };

@@ -46,7 +46,7 @@ type Props = {
   /** Full ReportsPage (profit / shipping / expenses / payouts / returns). */
   reportsSlot?: React.ReactNode;
   onReportsOpen?: () => void;
-  reportsAction?: 'add' | 'download';
+  reportsAction?: 'add' | 'download' | 'owner';
   onReportsAction?: () => void;
 };
 

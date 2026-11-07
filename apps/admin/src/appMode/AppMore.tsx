@@ -363,15 +363,19 @@ export function AppReportsNative({ onBack, children, title = 'Reports', backLabe
   children: ReactNode;
   title?: string;
   backLabel?: string;
-  action?: 'add' | 'download';
+  action?: 'add' | 'download' | 'owner';
   onAction?: () => void;
 }) {
+  const actionLabel = action === 'add' ? '+' : action === 'download' ? '↓' : action === 'owner' ? 'Owner payout' : null;
+  const actionAria = action === 'add' ? 'Add expense' : action === 'download' ? 'Download report' : action === 'owner' ? 'Owner payout' : undefined;
   return (
     <div className="app-stack">
       <div className="app-nav">
         <button type="button" onClick={onBack}>‹ {backLabel}</button>
         <div className="app-nav-title">{title}</div>
-        {action ? <button type="button" aria-label={action === 'add' ? 'Add expense' : 'Download report'} onClick={onAction}>{action === 'add' ? '+' : '↓'}</button> : <button type="button" style={{ visibility: 'hidden' }}>·</button>}
+        {actionLabel
+          ? <button type="button" className={action === 'owner' ? 'app-nav-text-action' : undefined} aria-label={actionAria} onClick={onAction}>{actionLabel}</button>
+          : <button type="button" style={{ visibility: 'hidden' }}>·</button>}
       </div>
       <div className="app-embed-soft app-reports">
         {children}
