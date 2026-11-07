@@ -3,6 +3,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   payout, payoutCardIncludesSale, remainingProfit, isOnline, profit, commissionProfit, commissionBreakdown, reportProfitCents, isBonusCategory, reimbursementStillOwed,
+  paymentAppliesToCommission, withCommissionPaymentTag, displayPaymentNote,
   frozenCutsForTicket, frozenCommissionBase, frozenOwnerShare, ticketIsFrozen,
 } from "../apps/admin/src/payouts.ts";
 
@@ -284,6 +285,15 @@ test("each payment covers reimbursements already owed, and a later expense stays
     [{ at: "2026-10-01", amount: 1000 }, { at: "2026-11-01T12:00:00", amount: 400 }],
     [{ at: "2026-10-02T19:00:00Z", amount: 5000 }],
   ), 400);
+});
+test("commission-tagged payments do not reduce reimbursements", () => {
+  assert.equal(paymentAppliesToCommission("[commission] Venmo"), true);
+  assert.equal(displayPaymentNote("[commission] Venmo"), "Venmo");
+  assert.equal(withCommissionPaymentTag("Venmo", true), "[commission] Venmo");
+  assert.equal(reimbursementStillOwed(
+    [{ at: "2026-11-01T12:00:00", amount: 5000 }, { at: "2026-11-05T12:00:00", amount: 15686 }],
+    [{ at: "2026-11-07T20:00:00Z", amount: 10000, note: "[commission] Commission payout" }],
+  ), 20686);
 });
 test("Mercari seller-paid shipping is left out of profit and commission", () => {
   const t = { subtotal: 1999, cost: 900, channel: "mercari", feeCents: 199, shipCostCents: 992, processingFeeCents: 0 };

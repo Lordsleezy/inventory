@@ -207,6 +207,25 @@ export function isBonusCategory(category: string | null | undefined): boolean {
   return (category || "").trim().toLowerCase() === "bonus";
 }
 
+/** Payment note tag: count this payment against commission, not reimbursement. */
+export const COMMISSION_PAYMENT_TAG = '[commission]';
+
+export function paymentAppliesToCommission(note: string | null | undefined): boolean {
+  return /\[[\s]*commission[\s]*\]/i.test(note || '');
+}
+
+export function withCommissionPaymentTag(note: string, applyToCommission: boolean): string | null {
+  const cleaned = note.replace(/\[[\s]*commission[\s]*\]/ig, '').trim();
+  if (!applyToCommission) return cleaned || null;
+  return cleaned ? `${COMMISSION_PAYMENT_TAG} ${cleaned}` : COMMISSION_PAYMENT_TAG;
+}
+
+export function displayPaymentNote(note: string | null | undefined): string | undefined {
+  if (!note) return undefined;
+  const cleaned = note.replace(/\[[\s]*commission[\s]*\]/ig, '').trim();
+  return cleaned || undefined;
+}
+
 /** Calendar day for a payout event. Expense dates are stored as YYYY-MM-DD or noon with no zone. */
 function payoutDay(at: string): string {
   const trimmed = (at || "").trim();
@@ -220,14 +239,17 @@ function payoutDay(at: string): string {
 /**
  * Unpaid reimbursements after each payment covers reimbursements outstanding that day, then commission.
  * A later expense is not prepaid by an earlier surplus.
+ * Payments with `commissionOnly` (or a [commission] note) never reduce reimbursements.
  */
 export function reimbursementStillOwed(
   reimbursements: { at: string; amount: number }[],
-  payments: { at: string; amount: number }[],
+  payments: { at: string; amount: number; note?: string | null; commissionOnly?: boolean }[],
 ): number {
   const events = [
     ...reimbursements.map((row) => ({ day: payoutDay(row.at), kind: 0, amount: Math.max(0, row.amount || 0) })),
-    ...payments.map((row) => ({ day: payoutDay(row.at), kind: 1, amount: Math.max(0, row.amount || 0) })),
+    ...payments
+      .filter((row) => !row.commissionOnly && !paymentAppliesToCommission(row.note))
+      .map((row) => ({ day: payoutDay(row.at), kind: 1, amount: Math.max(0, row.amount || 0) })),
   ].filter((row) => row.day && row.amount > 0);
   events.sort((a, b) => a.day.localeCompare(b.day) || a.kind - b.kind);
   let open = 0;
