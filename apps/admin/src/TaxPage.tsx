@@ -1,5 +1,6 @@
 ﻿import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { isInStoreChannel } from './channels';
 
 type SaleTaxRow = {
   id: number;
@@ -53,8 +54,8 @@ export function TaxPage({ client, money, stamp, embedded, native }: Props) {
     if (e) { setError(e.message); setRows(null); return; }
     const body = data as { rows?: SaleTaxRow[] };
     // In-person (floor) only — marketplaces remit their own sales tax.
-    const floor = (body?.rows || []).filter(r => (r.channel || '').toLowerCase() === 'floor');
-    setRows(floor);
+    const instore = (body?.rows || []).filter(r => isInStoreChannel(r.channel));
+    setRows(instore);
   }, [client, start, end]);
 
   useEffect(() => { void load(); void loadPayments(); }, [load, loadPayments]);

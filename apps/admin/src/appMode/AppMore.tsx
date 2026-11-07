@@ -8,6 +8,7 @@ import { DepopLiveListingsPanel } from '../DepopLiveListingsPanel';
 import { MercariSalePanel } from '../MercariSalePanel';
 import { MercariLiveListingsPanel } from '../MercariLiveListingsPanel';
 import { ConnectionsPage } from '../ConnectionsPage';
+import { isInStoreChannel } from '../channels';
 import { errText } from '../errText';
 import { shortError } from './shortError';
 
@@ -246,8 +247,7 @@ type PortalSalesLine = {
 };
 
 function liveChannelLabel(channel: string | null | undefined) {
-  const c = (channel || 'floor').toLowerCase();
-  return c === 'floor' ? 'In store' : channel || 'online';
+  return isInStoreChannel(channel) ? 'In store' : (channel || 'online');
 }
 
 export function AppLiveSales({ client, money, stamp, onBack }: {
