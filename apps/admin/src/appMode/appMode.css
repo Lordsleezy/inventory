@@ -298,6 +298,13 @@ html.app-mode .app-nav button {
 }
 html.app-mode .app-nav button:disabled { opacity: 0.4; }
 html.app-mode .app-nav button.danger { color: #ff453a; }
+html.app-mode .app-nav button.app-nav-text-action {
+  min-width: 0;
+  padding: 8px 6px;
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+}
 html.app-mode .app-nav-title {
   flex: 1;
   text-align: center;

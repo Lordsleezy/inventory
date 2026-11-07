@@ -14,7 +14,7 @@ import { LocationsPage } from './LocationsPage';
 import { InsightsPage } from './InsightsPage';
 import { LogsPage } from './LogsPage';
 import { ClientErrorReporter } from './clientLog';
-import { displayPaymentNote, effectiveCommissionSplit, frozenCommissionBase, frozenCutsForTicket, inStoreOverrideRate, isBonusCategory, isOnline, NO_ONLINE, payout, payoutCardIncludesSale, profit, reimbursementStillOwed, remainingProfit, reportProfitCents, withCommissionPaymentTag, type CommissionOverride, type OnlineCfg, type Rule } from './payouts';
+import { displayPaymentNote, effectiveCommissionSplit, frozenCommissionBase, frozenCutsForTicket, inStoreOverrideRate, isBonusCategory, isOnline, NO_ONLINE, ownerPayoutSummary, payout, payoutCardIncludesSale, profit, reimbursementStillOwed, remainingProfit, reportProfitCents, withCommissionPaymentTag, type CommissionOverride, type OnlineCfg, type Rule } from './payouts';
 import { CommissionOverrideControls, CommissionOverrideMark } from './CommissionOverride';
 import { ExpensesPage, type Expense as StoreExpense } from './ExpensesPage';
 import { ConnectionsPage } from './ConnectionsPage';
@@ -741,7 +741,7 @@ export function App() {
           />
         ) : null}
         onReportsOpen={() => { setReportsLoading(true); void Promise.all([loadCommon(), loadPayments(), loadPayoutSales(), loadSales()]).finally(() => setReportsLoading(false)); }}
-        reportsAction={nav.reportTab === 'expenses' ? 'add' : nav.reportTab === 'daily' || nav.reportTab === 'sales-tax' ? 'download' : undefined}
+        reportsAction={nav.reportTab === 'expenses' ? 'add' : nav.reportTab === 'daily' || nav.reportTab === 'sales-tax' ? 'download' : nav.reportTab === 'payouts' ? 'owner' : undefined}
         onReportsAction={() => { if (nav.reportTab === 'daily') { if (reports.length) void downloadReports(reports, true); } else window.dispatchEvent(new Event('floor:reports-action')); }}
       />
     </>;
@@ -1101,10 +1101,17 @@ type LedgerEntry = {
   at: string; kind: 'sale' | 'online' | 'reimbursement' | 'bonus' | 'payment' | 'adjustment'; amount: number | null;
   detail: string; note?: string; ticketKey?: string; ticket?: Ticket; overridden?: boolean;
 };
-function PayoutsPage({allSales,ebayFees,staff,rules,payments,adjustments,expenses,cfg,personName,busy,recordPayment,onCommissionChanged,native,loading,frozen}:{allSales:Ticket[];ebayFees:number;staff:Person[];rules:Rule[];payments:Payment[];adjustments:PayoutAdjustment[];expenses:StoreExpense[];cfg:OnlineCfg;personName:(id:string)=>string;busy:boolean;recordPayment:(id:string,amount:number,paidAt:string,note:string)=>Promise<string | null>;onCommissionChanged:(ticketKey:string,next:CommissionOverride|null)=>void;native?:boolean;loading?:boolean;frozen?:FrozenMap}) {
+function PayoutsPage({allSales,ebayFees,staff,rules,payments,adjustments,expenses,cfg,personName,busy,recordPayment,onCommissionChanged,native,loading,frozen}:{allSales:Ticket[];ebayFees:number;staff:Person[];rules:Rule[];payments:Payment[];adjustments:PayoutAdjustment[];expenses:StoreExpense[];cfg:OnlineCfg;personName:(id:string)=>string;busy:boolean;recordPayment:(id:string,amount:number,paidAt:string,note:string,applyToCommission?:boolean)=>Promise<string | null>;onCommissionChanged:(ticketKey:string,next:CommissionOverride|null)=>void;native?:boolean;loading?:boolean;frozen?:FrozenMap}) {
   type CostFlag = { sale_id: number; ticket_key: string; sku: string; qty: number; unit_cost_cents: number; cost_source: string | null; confirmed_at: string | null };
   const [costFlags, setCostFlags] = useState<CostFlag[]>([]);
   const [costFlagError, setCostFlagError] = useState('');
+  const [ownerView, setOwnerView] = useState(false);
+  useEffect(() => {
+    if (!native) return;
+    const open = () => setOwnerView(true);
+    window.addEventListener('floor:reports-action', open);
+    return () => window.removeEventListener('floor:reports-action', open);
+  }, [native]);
   useEffect(() => {
     let current = true;
     void sb.from('sale_payout_cost_flags').select('sale_id,ticket_key,sku,qty,unit_cost_cents,cost_source,confirmed_at')
@@ -1257,6 +1264,39 @@ function PayoutsPage({allSales,ebayFees,staff,rules,payments,adjustments,expense
   const hasEbaySale = allSales.some(t => (t.channel || '').toLowerCase() === 'ebay');
   const profitAfterCosts = reportProfitCents(saleProfit, hasEbaySale ? ebayFees : 0);
   const ownerShare = profitAfterCosts === null ? null : profitAfterCosts - totalCommission;
+  const ownerSales = allSales.map(t => {
+    const ticket = { ...t, lines: t.lines.map(l => ({ sku: l.sku, price_cents: l.price_cents, cost_cents: l.cost_cents,
+      shipping_cents: l.shipping_cents, channel_fee_cents: l.channel_fee_cents, ship_cost_cents: l.ship_cost_cents,
+      processing_fee_cents: l.processing_fee_cents, tax_owed_cents: l.tax_owed_cents })), commissionOverride: t.commissionOverride };
+    const p = profit({ ...ticket, shippingCents: t.shippingCents, profitCents: t.profitCents });
+    const cuts = rules.map(r => cut(t.key, ticket, r));
+    const commissionCents = cuts.some(x => x === null) ? null : cuts.reduce<number>((n, x) => n + (x || 0), 0);
+    return { at: t.at, profitCents: p, commissionCents };
+  });
+  const ownerBonuses = expenses
+    .filter(e => !e.voided_at && isBonusCategory(e.category))
+    .map(e => ({ at: `${e.spent_on}T12:00:00`, amountCents: e.amount_cents }));
+  const ownerSummary = ownerPayoutSummary(ownerSales, ownerBonuses, hasEbaySale ? ebayFees : 0);
+  const weekLabel = (start: string, end: string) => {
+    const fmt = (d: string) => new Intl.DateTimeFormat('en-US', { timeZone: zone, month: 'short', day: 'numeric' }).format(new Date(`${d}T12:00:00Z`));
+    const y = end.slice(0, 4);
+    return `${fmt(start)} – ${fmt(end)}, ${y}`;
+  };
+  if (native && ownerView) {
+    return <div className="native-report-body">
+      <button type="button" className="native-report-period" onClick={() => setOwnerView(false)}>‹ Payouts</button>
+      <div className="native-report-hero">
+        <small>Owner profit · All time</small>
+        <strong>{loading ? <span className="native-skeleton" /> : ownerSummary.allTimeOwnerCents == null ? 'Pending cost' : money(ownerSummary.allTimeOwnerCents)}</strong>
+        <span>{loading ? 'Loading…' : `${ownerSummary.weeks.length} week${ownerSummary.weeks.length === 1 ? '' : 's'} since the first sale`}</span>
+      </div>
+      {hasEbaySale && ebayFees > 0 && <p className="native-report-footnote">All-time total subtracts {money(ebayFees)} eBay insertion/subscription. Weekly rows are sale profit − commissions for that week.</p>}
+      <h3 className="native-report-section">By week</h3>
+      {loading ? <div className="native-report-group"><div className="native-report-row"><span>Loading weeks…</span></div></div>
+        : ownerSummary.weeks.length === 0 ? <div className="native-report-group"><p className="native-report-empty">No sales yet.</p></div>
+        : <div className="native-report-group">{ownerSummary.weeks.map(w => <div className="native-report-row" key={w.weekStart}><span>{weekLabel(w.weekStart, w.weekEnd)}<small>{w.saleCount} sale{w.saleCount === 1 ? '' : 's'}{w.pendingCost ? ` · ${w.pendingCost} need cost` : ''}{w.commissionCents ? ` · commissions ${money(w.commissionCents)}` : ''}</small></span><b>{w.ownerCents == null ? 'Pending' : money(w.ownerCents)}</b></div>)}</div>}
+    </div>;
+  }
   if (native) return <div className="native-report-body"><div className="native-report-hero"><small>Owed right now</small><strong>{loading ? <span className="native-skeleton" /> : money(commissionBalanceOwed + reimburseBalanceOwed)}</strong><span>{loading ? "Loading payouts…" : `${money(totalPaid)} paid out all time`}</span></div>{loading && <div className="native-report-group"><div className="native-report-row"><span>Loading balances…</span></div></div>}{!loading && owedSplits.map(card => <PayoutCard key={card.person.user_id} {...card} frozen={frozen} frozenCut={frozenCut} pctFor={pctFor} busy={busy} recordPayment={recordPayment} rules={rules} cfg={cfg} personName={personName} onCommissionChanged={onCommissionChanged} native />)}{!loading && <><h3 className="native-report-section">Totals</h3><div className="native-report-group"><div className="native-report-row"><span>Total paid</span><b>{money(totalPaid)}</b></div><div className="native-report-row"><span>Reimbursements</span><b>{money(reimburseBalanceOwed)}</b></div><div className="native-report-row"><span>Return adjustments</span><b>{money(totalAdj)}</b></div><div className="native-report-row strong"><span>Owner share</span><b>{ownerShare === null ? 'Pending cost' : money(ownerShare)}</b></div></div>{needsCost > 0 && <p className="native-report-footnote">{needsCost} online sales need item cost before payout.</p>}</>}</div>;
   return <>
     <header><div><div className="eyebrow">TEAM EARNINGS</div><h1>Payouts</h1><p>Store profit is sale price + buyer-paid shipping − every fee − shipping label − cost. Commissions are paid on commission profit: {cfg.absorbFees ? 'the store absorbs channel and card fees, so only the shipping label and cost come off' : 'channel fees, card fees, label and cost all come off'}. Mercari seller-paid shipping is a reimbursement and stays out of that math. Commissions are frozen per sale. Each payment covers reimbursements outstanding that day, then commission — check “Apply to commission” to skip reimbursements. Later reimbursements stay unpaid. Return adjustments stay separate; payment history is never rewritten.</p></div></header>
