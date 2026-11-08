@@ -56,19 +56,19 @@ select lives_ok(
   'a partial refund is logged on the sale that still stands');
 
 select is(
-  (select coalesce(sum((x->>'sales_cents')::int), 0)
+  (select coalesce(sum((x->>'sales_cents')::int), 0)::int
      from jsonb_array_elements(public.portal_tax_report((timezone('America/Los_Angeles', now()))::date) -> 'rows') x),
   1999,
   'voided sales are left out of sales');
 
 select is(
-  (select coalesce(sum((x->>'refund_sales_cents')::int), 0)
+  (select coalesce(sum((x->>'refund_sales_cents')::int), 0)::int
      from jsonb_array_elements(public.portal_tax_report((timezone('America/Los_Angeles', now()))::date) -> 'rows') x),
   400,
   'only the logged refund is a refund');
 
 select is(
-  (select coalesce(sum((x->>'tax_cents')::int), 0)
+  (select coalesce(sum((x->>'tax_cents')::int), 0)::int
      from jsonb_array_elements(public.portal_tax_report((timezone('America/Los_Angeles', now()))::date) -> 'rows') x),
   coalesce((select tax_cents from public.sales where sku = '94611'), 0),
   'tax on a voided sale is not tax collected');
