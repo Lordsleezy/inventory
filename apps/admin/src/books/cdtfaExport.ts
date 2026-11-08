@@ -14,6 +14,8 @@ export async function addCdtfaExcelSheet(bytes: Uint8Array, model: CdtfaPrintMod
   const existing = book.getWorksheet(name);
   if (existing) book.removeWorksheet(existing.id);
   const sheet = book.addWorksheet(name);
+  if (model.optionTitle) sheet.addRow([model.optionTitle]);
+  if (model.optionHint) sheet.addRow([model.optionHint]);
   if (model.recordsNote) sheet.addRow([model.recordsNote]);
   sheet.addRow([model.open ? 'DRAFT — PERIOD OPEN' : 'CDTFA-401-A', model.periodLabel]);
   sheet.addRow(['Period', model.periodStart, model.periodEnd, 'Due', model.dueOn]);
@@ -48,6 +50,8 @@ export async function addCdtfaPdfPages(bytes: Uint8Array, model: CdtfaPrintModel
     page.drawText(text.replace(/—/g, '-').slice(0, 110), { x: 36, y, size: 9, font: strong ? bold : font, color: rgb(0, 0, 0) });
     y -= 12;
   };
+  if (model.optionTitle) write(model.optionTitle, true);
+  if (model.optionHint) write(model.optionHint);
   if (model.recordsNote) write(model.recordsNote, true);
   if (model.open) write('DRAFT — PERIOD OPEN', true);
   write('CDTFA-401-A REV. 126 (1-26)', true);

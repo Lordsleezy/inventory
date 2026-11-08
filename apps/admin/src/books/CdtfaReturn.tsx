@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { fillCdtfaPdf } from './cdtfaPdf';
+import { fillCdtfaPdf, paperToCdtfaDoc } from './cdtfaPdf';
 import { CdtfaPaper, type PaperLine, type PaperSale, type PaperSigner } from './CdtfaPaper';
 import { dueOn, periodChoices, periodLabel, resolveCdtfaDollars, type CdtfaFrequency } from './cdtfaResolve';
-import { formKind, recordsStamp, spanFrequency } from './booksSpan';
+import { filingOption, formKind, parseFiling, recordsStamp, spanFrequency } from './booksSpan';
 import { loadCdtfaRoundingNote } from './cdtfaLoad';
 
 type Check = { id: string; ok: boolean; detail: string; sales?: PaperSale[] };
@@ -24,7 +24,7 @@ type Props = {
   periodStart: string;
   periodEnd: string;
   onPeriod: (start: string) => void;
-  onFiling?: (frequency: CdtfaFrequency) => void;
+  onFiling?: (frequency: CdtfaFrequency | null) => void;
 };
 
 const FREQUENCIES: [CdtfaFrequency, string][] = [['monthly', 'Monthly'], ['quarterly', 'Quarterly'], ['yearly', 'Yearly']];
@@ -35,7 +35,7 @@ function emptySigner(): PaperSigner {
 }
 
 export function CdtfaReturn({ client, money, periodStart, periodEnd, onPeriod, onFiling }: Props) {
-  const [frequency, setFrequency] = useState<CdtfaFrequency>('quarterly');
+  const [frequency, setFrequency] = useState<CdtfaFrequency | null>(null);
   const [doc, setDoc] = useState<Doc | null>(null);
   const [edits, setEdits] = useState<Record<string, number | undefined>>({});
   const [signer, setSigner] = useState<PaperSigner>(emptySigner());
@@ -72,7 +72,7 @@ export function CdtfaReturn({ client, money, periodStart, periodEnd, onPeriod, o
     setError('');
     const filing = await client.rpc('portal_cdtfa_filing');
     if (filing.error) { setError(filing.error.message); return; }
-    const next = (filing.data as CdtfaFrequency) || 'quarterly';
+    const next = parseFiling(filing.data);
     setFrequency(next);
     onFiling?.(next);
     await loadPeriod(periodStart, periodEnd);
@@ -98,6 +98,7 @@ export function CdtfaReturn({ client, money, periodStart, periodEnd, onPeriod, o
   const editsLocked = !!doc?.locked;
   const label = doc ? periodLabel(doc.period_start, doc.period_end, spanFrequency(kind), doc.due_on) : '';
   const recordsNote = recordsStamp(kind, frequency);
+  const option = filingOption(kind, frequency);
 
   async function chooseFrequency(next: CdtfaFrequency) {
     setBusy(true); setError('');
@@ -137,15 +138,18 @@ export function CdtfaReturn({ client, money, periodStart, periodEnd, onPeriod, o
     if (!doc) return;
     setBusy(true); setError('');
     try {
-      const bytes = await fillCdtfaPdf({
-        period_start: doc.period_start,
-        period_end: doc.period_end,
-        due_on: doc.due_on,
+      const bytes = await fillCdtfaPdf(paperToCdtfaDoc({
+        periodStart: doc.period_start,
+        periodEnd: doc.period_end,
+        dueOn: doc.due_on,
         open: doc.open,
         recordsNote,
-        lines: lines.map((line) => ({ id: line.id, dollars: line.dollars })),
+        optionTitle: option?.title,
+        optionHint: option?.hint,
+        districtMeasure: edits.A4 ?? 0,
+        lines,
         signer,
-      });
+      }));
       const blob = new Blob([Uint8Array.from(bytes)], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -209,6 +213,8 @@ export function CdtfaReturn({ client, money, periodStart, periodEnd, onPeriod, o
             districtMeasure={edits.A4 ?? 0}
             districtMeasureEdited={edits.A4 != null}
             recordsNote={recordsNote}
+            optionTitle={option?.title}
+            optionHint={option?.hint}
             roundingNote={roundGap}
             money={money}
             readOnly={editsLocked}

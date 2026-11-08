@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { PaperLine, PaperSale, PaperSigner } from './CdtfaPaper';
 import { dueOn, periodLabel, resolveCdtfaDollars, type CdtfaFrequency } from './cdtfaResolve';
-import { formKind, monthsInRange, recordsStamp, spanBounds, spanFrequency } from './booksSpan';
+import { filingOption, formKind, monthsInRange, parseFiling, recordsStamp, spanBounds, spanFrequency } from './booksSpan';
 import { roundingNote } from './cdtfaRoundNote';
 
 export type CdtfaPrintModel = {
@@ -17,6 +17,8 @@ export type CdtfaPrintModel = {
   districtMeasure: number;
   districtMeasureEdited: boolean;
   recordsNote: string | null;
+  optionTitle: string | null;
+  optionHint: string | null;
   roundingNote: string | null;
 };
 
@@ -35,7 +37,7 @@ const SIGNER = ['name', 'title', 'date', 'email', 'phone', 'account'] as const;
 export async function loadCdtfaPrintModel(client: SupabaseClient, periodStart: string, periodEnd: string): Promise<CdtfaPrintModel | null> {
   const filing = await client.rpc('portal_cdtfa_filing');
   if (filing.error) return null;
-  const frequency = (filing.data as CdtfaFrequency) || 'quarterly';
+  const frequency = parseFiling(filing.data);
   const kind = formKind(periodStart, periodEnd);
   const [result, saved] = await Promise.all([
     client.rpc('portal_cdtfa_return', { p_start: periodStart, p_end: periodEnd }),
@@ -69,6 +71,8 @@ export async function loadCdtfaPrintModel(client: SupabaseClient, periodStart: s
     districtMeasure: edits.A4 ?? 0,
     districtMeasureEdited: edits.A4 != null,
     recordsNote: recordsStamp(kind, frequency),
+    optionTitle: filingOption(kind, frequency)?.title ?? null,
+    optionHint: filingOption(kind, frequency)?.hint ?? null,
     roundingNote: roundGap,
   };
 }

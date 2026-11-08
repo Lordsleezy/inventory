@@ -17,12 +17,28 @@ export function formKind(start: string, end: string): BooksSpan {
   return 'month';
 }
 
-/** The copy stamped on a form that is not this store's assigned filing schedule. */
-export function recordsStamp(kind: BooksSpan, filing: CdtfaFrequency): string | null {
+export type FilingSchedule = CdtfaFrequency | null;
+
+export function parseFiling(value: unknown): FilingSchedule {
+  return value === 'monthly' || value === 'quarterly' || value === 'yearly' ? value : null;
+}
+
+/** The copy stamped on a form that is not this store's assigned filing schedule. Blank until a schedule is saved. */
+export function recordsStamp(kind: BooksSpan, filing: FilingSchedule): string | null {
+  if (!filing) return null;
   const assigned = filing === 'monthly' ? 'month' : filing === 'yearly' ? 'year' : 'quarter';
   if (kind === assigned) return null;
   const word = filing === 'monthly' ? 'monthly' : filing === 'yearly' ? 'yearly' : 'quarterly';
   return `FOR RECORDS — DO NOT FILE (this store files ${word})`;
+}
+
+const OPTION_HINT = 'File only one schedule — whichever CDTFA assigned.';
+
+/** Neutral label used only while no filing schedule has been saved. */
+export function filingOption(kind: BooksSpan, filing: FilingSchedule): { title: string; hint: string } | null {
+  if (filing) return null;
+  const title = kind === 'month' ? 'Monthly filing option' : kind === 'quarter' ? 'Quarterly filing option' : 'Yearly filing option';
+  return { title, hint: OPTION_HINT };
 }
 
 export function quarterStart(monthStart: string) {

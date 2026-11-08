@@ -189,8 +189,11 @@ body.books-printing .cdtfa-paper input{background:#fff;color:#000;border-color:#
 .cdtfa-toolbar label{display:grid;gap:4px;color:#9a9a9a;font-size:.85rem}
 .cdtfa-toolbar select{background:#000;color:#fff;border:1px solid #4a4a4a;min-height:44px;font-size:16px;padding:0 8px}
 .cdtfa-draft,.cdtfa-records{border:2px solid #fff;color:#fff;font-weight:800;letter-spacing:.04em;padding:8px 10px;margin:0 0 12px}
+.cdtfa-option{font-weight:800;margin:0 0 2px}
+.cdtfa-option-hint{margin:0 0 12px;color:#c8c8c8}
 .cdtfa-round{color:#c8c8c8;font-size:.85rem}
 body.cdtfa-printing .cdtfa-draft,body.cdtfa-printing .cdtfa-records,body.books-printing .cdtfa-draft,body.books-printing .cdtfa-records{border-color:#000;color:#000}
+body.cdtfa-printing .cdtfa-option,body.cdtfa-printing .cdtfa-option-hint,body.books-printing .cdtfa-option,body.books-printing .cdtfa-option-hint{color:#000}
 body.cdtfa-printing .cdtfa-round,body.books-printing .cdtfa-round{color:#333}
 .cdtfa-paper{border:1px solid #4a4a4a;padding:16px 18px;background:#000}
 .cdtfa-banner{display:flex;justify-content:space-between;gap:18px;border-bottom:2px solid #fff;padding-bottom:12px;margin-bottom:8px}
