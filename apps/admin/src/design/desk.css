@@ -222,6 +222,21 @@ html.desk:not(.app-mode) .login {
 }
 html.desk:not(.app-mode) .login button { background: #fff; color: #000; border-color: #fff; }
 
+html.desk:not(.app-mode) .returns-root-desktop,
+html.desk:not(.app-mode) .returns-root-desktop .returns-row-main strong,
+html.desk:not(.app-mode) .returns-root-desktop .returns-kv-row span,
+html.desk:not(.app-mode) .returns-root-desktop .returns-detail-title,
+html.desk:not(.app-mode) .returns-root-desktop .returns-btn,
+html.desk:not(.app-mode) .returns-root-desktop .returns-text-btn,
+html.desk:not(.app-mode) .returns-root-desktop .returns-search {
+  color: #fff;
+  background: #000;
+  border-color: #4a4a4a;
+}
+html.desk:not(.app-mode) .returns-root-desktop .returns-tabs button { color: #a0a0a0; background: transparent; }
+html.desk:not(.app-mode) .returns-root-desktop .returns-tabs button.active { color: #fff; border-bottom-color: #fff; }
+html.desk:not(.app-mode) .returns-root-desktop .returns-attention,
+html.desk:not(.app-mode) .returns-root-desktop .returns-attention-btn { color: #ff453a; }
 html.desk:not(.app-mode) .locations-simple,
 html.desk:not(.app-mode) .returns-root-desktop,
 html.desk:not(.app-mode) .dropship-page,
