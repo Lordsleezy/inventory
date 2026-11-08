@@ -22,6 +22,8 @@ type Props = {
   districtMeasure: number;
   districtMeasureEdited: boolean;
   recordsNote?: string | null;
+  optionTitle?: string | null;
+  optionHint?: string | null;
   roundingNote?: string | null;
   money: (cents: number) => string;
   readOnly?: boolean;
@@ -126,6 +128,8 @@ export function CdtfaPaper(props: Props) {
   );
   return (
     <article className="cdtfa-paper">
+      {props.optionTitle && <p className="cdtfa-option">{props.optionTitle}</p>}
+      {props.optionHint && <p className="cdtfa-option-hint">{props.optionHint}</p>}
       {props.recordsNote && <p className="cdtfa-records">{props.recordsNote}</p>}
       {props.open && <p className="cdtfa-draft">DRAFT — PERIOD OPEN</p>}
       <header className="cdtfa-banner">

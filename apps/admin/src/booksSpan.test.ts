@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { formKind, monthsInRange, quarterStart, recordsStamp, spanBounds, spanTitle } from './books/booksSpan.ts';
+import { filingOption, formKind, monthsInRange, parseFiling, quarterStart, recordsStamp, spanBounds, spanTitle } from './books/booksSpan.ts';
 import { roundingNote } from './books/cdtfaRoundNote.ts';
 
 test('a month report and a quarter report are different forms', () => {
@@ -10,6 +10,14 @@ test('a month report and a quarter report are different forms', () => {
   assert.equal(recordsStamp('month', 'yearly'), 'FOR RECORDS — DO NOT FILE (this store files yearly)');
   assert.equal(recordsStamp('quarter', 'yearly'), 'FOR RECORDS — DO NOT FILE (this store files yearly)');
   assert.equal(recordsStamp('year', 'yearly'), null);
+  assert.equal(recordsStamp('month', null), null);
+  assert.equal(recordsStamp('quarter', null), null);
+  assert.equal(parseFiling(''), null);
+  assert.equal(parseFiling('quarterly'), 'quarterly');
+  assert.equal(filingOption('month', null)?.title, 'Monthly filing option');
+  assert.equal(filingOption('quarter', null)?.title, 'Quarterly filing option');
+  assert.equal(filingOption('month', null)?.hint, 'File only one schedule — whichever CDTFA assigned.');
+  assert.equal(filingOption('month', 'quarterly'), null);
 });
 
 test('October sits in Q4 and the quarter covers three months', () => {

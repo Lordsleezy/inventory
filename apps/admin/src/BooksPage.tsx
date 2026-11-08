@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import ExcelJS from 'exceljs';
 import { BooksViews, type Sheet } from './books/BooksViews';
 import { normalizeReport } from './books/booksMath';
 import { addCdtfaExcelSheet, addCdtfaPdfPages } from './books/cdtfaExport';
 import { loadCdtfaPrintModel, type CdtfaPrintModel } from './books/cdtfaLoad';
-import { monthsInRange, spanBounds, spanTitle, type BooksSpan } from './books/booksSpan';
+import { monthsInRange, parseFiling, spanBounds, spanTitle, type BooksSpan } from './books/booksSpan';
+import { addArchiveSheet, appendPdf, archivePlan, periodHasActivity, zipStore } from './books/booksArchive';
+import { fillCdtfaPdfBytes, loadCdtfaTemplate, paperToCdtfaDoc } from './books/cdtfaPdf';
 import { combineMonthWorkbooks, type BooksSlice } from './books/combineBooks';
 import type { CdtfaFrequency } from './books/cdtfaResolve';
 import { monthLabel } from './books/booksMath';
@@ -77,7 +80,8 @@ export function BooksPage({ client, money, native = false, onNativeNavigation }:
   const [exportFiles, setExportFiles] = useState<{ excel: Uint8Array; pdf: Uint8Array } | null>(null);
   const [taxForm, setTaxForm] = useState<CdtfaPrintModel | null>(null);
   const [span, setSpan] = useState<BooksSpan>('month');
-  const [filing, setFiling] = useState<CdtfaFrequency>('quarterly');
+  const [filing, setFiling] = useState<CdtfaFrequency | null>(null);
+  const [archiveBusy, setArchiveBusy] = useState(false);
   const [parts, setParts] = useState<{ label: string; period: Period; report: Report; inventory: InventorySummary; received: ReceivedItem[]; money: Awaited<ReturnType<typeof loadBooksMoney>>; decisions: Record<string, 'keep' | 'remove'> }[]>([]);
   const [sheet, setSheet] = useState<Sheet>('hub');
   const [desktopTab, setDesktopTab] = useState<Sheet>('sales');
@@ -222,7 +226,7 @@ export function BooksPage({ client, money, native = false, onNativeNavigation }:
 
   useEffect(() => {
     void client.rpc('portal_cdtfa_filing').then((res) => {
-      if (!res.error && res.data) setFiling(res.data as CdtfaFrequency);
+      if (!res.error) setFiling(parseFiling(res.data));
     });
   }, [client]);
   useEffect(() => { if (span === 'year' && filing !== 'yearly') setSpan('quarter'); }, [span, filing]);
@@ -294,6 +298,79 @@ export function BooksPage({ client, money, native = false, onNativeNavigation }:
     window.setTimeout(() => document.body.classList.remove('books-printing'), 500);
   }
 
+  async function downloadAll() {
+    if (!payoutCtx || archiveBusy) return;
+    setArchiveBusy(true);
+    setError('');
+    try {
+      const loaded = new Map<string, BooksSlice>();
+      for (const month of periods) {
+        const piece = await loadOneMonth(client, month);
+        const saved = localStorage.getItem(`books-dup-${month.id}`);
+        const decisions = saved ? JSON.parse(saved) as Record<string, 'keep' | 'remove'> : {};
+        const moneyMonth = await loadBooksMoney(client, month.period_start);
+        const hidden = new Set(Object.entries(decisions).filter(([, value]) => value === 'remove').map(([key]) => key));
+        loaded.set(month.id, {
+          label: monthLabel(month.period_start),
+          workbook: buildBooksWorkbook({
+            report: piece.report,
+            inventory: piece.inventory,
+            received: piece.received,
+            payoutCtx,
+            overrides,
+            money: moneyMonth,
+            duplicateHidden: hidden,
+            duplicateDecisions: decisions,
+            ledgerBalances: ledgerBalances || undefined,
+            paulIds: staffPersonIds.paulIds,
+            jacobIds: staffPersonIds.jacobIds,
+            costFlagSaleIds,
+          }),
+        });
+      }
+      const template = await loadCdtfaTemplate();
+      const files: { name: string; bytes: Uint8Array }[] = [];
+      const book = new ExcelJS.Workbook();
+      const included = new Set<string>();
+      for (const item of archivePlan(periods)) {
+        const slices = item.months.map((month) => loaded.get(month.id)).filter((slice): slice is BooksSlice => !!slice);
+        if (!slices.length) continue;
+        if (item.kind === 'month') {
+          const tax = await loadCdtfaPrintModel(client, item.start, item.end);
+          if (!tax || !periodHasActivity(slices[0].workbook, tax.lines)) continue;
+          included.add(item.months[0].id);
+          await pack(item, slices, tax);
+        } else if (item.months.some((month) => included.has(month.id))) {
+          const tax = await loadCdtfaPrintModel(client, item.start, item.end);
+          if (tax) await pack(item, slices, tax);
+        }
+      }
+      if (!files.length) throw new Error('No periods with activity to export.');
+      const excelOut = await book.xlsx.writeBuffer();
+      files.push({ name: 'Books-all-periods.xlsx', bytes: new Uint8Array(excelOut) });
+      downloadBytes('Books-all.zip', zipStore(files), 'application/zip');
+
+      async function pack(item: ReturnType<typeof archivePlan>[number], slices: BooksSlice[], tax: CdtfaPrintModel) {
+        const workbook = slices.length > 1 ? combineMonthWorkbooks(slices) : slices[0].workbook;
+        const period = { ...item.months[item.months.length - 1], period_start: item.start, period_end: item.end };
+        const built = await buildBooksPdf(period, workbook, money, {
+          title: item.title,
+          slices: slices.length > 1 ? slices : [],
+          word: item.kind === 'quarter' ? 'quarter' : 'month',
+        });
+        const reportPdf = built instanceof Uint8Array ? built : new Uint8Array(built);
+        const formPdf = await fillCdtfaPdfBytes(template, paperToCdtfaDoc(tax));
+        const pdf = await appendPdf(reportPdf, formPdf);
+        files.push({ name: `${item.title.replace(/\s+/g, '-')}.pdf`, bytes: pdf });
+        addArchiveSheet(book, item.title, workbook, tax);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not export every period.');
+    } finally {
+      setArchiveBusy(false);
+    }
+  }
+
   const fileStem = viewPeriod ? spanTitle(viewPeriod.period_start, span).replace(/\s+/g, '-') : 'Books';
   const downloadExcel = () => exportFiles && downloadBytes(`Books-${fileStem}.xlsx`, exportFiles.excel, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   const downloadPdf = () => exportFiles && downloadBytes(`Books-${fileStem}.pdf`, exportFiles.pdf, 'application/pdf');
@@ -355,6 +432,8 @@ export function BooksPage({ client, money, native = false, onNativeNavigation }:
           slices={slices}
           spanWord={span === 'year' ? 'year' : span === 'quarter' ? 'quarter' : 'month'}
           showLock={span === 'month'}
+          onDownloadAll={native ? undefined : () => void downloadAll()}
+          archiveBusy={archiveBusy}
         />
       )}
     </div>

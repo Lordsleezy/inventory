@@ -62,8 +62,10 @@ export type ViewProps = {
   taxForm?: CdtfaPrintModel | null;
   span: BooksSpan;
   setSpan: (span: BooksSpan) => void;
-  filing: CdtfaFrequency;
-  onFiling: (frequency: CdtfaFrequency) => void;
+  filing: CdtfaFrequency | null;
+  onFiling: (frequency: CdtfaFrequency | null) => void;
+  onDownloadAll?: () => void;
+  archiveBusy?: boolean;
   spanOptions: { value: string; label: string }[];
   spanValue: string;
   onSpanValue: (start: string) => void;
@@ -217,6 +219,7 @@ function BooksDesktop(p: ViewProps) {
           <button type="button" className="books-download" disabled={!p.exportFiles || p.exportsPreparing} onClick={p.onExcel}>Download Excel</button>
           <button type="button" className="books-download secondary" disabled={!p.exportFiles || p.exportsPreparing} onClick={p.onPdf}>PDF</button>
           <button type="button" className="books-download secondary" disabled={!p.workbook} onClick={p.onPrint}>Print</button>
+          {p.onDownloadAll && <button type="button" className="books-download secondary" disabled={p.archiveBusy || !p.periods.length} onClick={p.onDownloadAll}>{p.archiveBusy ? 'Preparing…' : 'Download all'}</button>}
         </div>
       </div>
       <SummaryCard money={p.money} totals={p.totals} absorbFees={p.absorbFees} onlineChannels={p.onlineChannels} />
