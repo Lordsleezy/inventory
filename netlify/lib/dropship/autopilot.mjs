@@ -315,7 +315,20 @@ export async function recomputeHealth(storeId) {
     }
   }
   if (settings) await checkKeepAlive(storeId, settings);
-  return { latePct, trackingPct, defectPct, sample: sample.length };
+  try {
+    const { refreshTikTokShopHealth } = await import("./tiktok-health.mjs");
+    await refreshTikTokShopHealth(storeId);
+  } catch {
+    /* optional */
+  }
+  try {
+    const { recomputeSupplierReliability, flagHighReturnProducts } = await import("./reliability.mjs");
+    await recomputeSupplierReliability(storeId);
+    await flagHighReturnProducts(storeId);
+  } catch {
+    /* optional */
+  }
+  return { latePct, trackingPct, defectPct, returnPct, sample: sample.length };
 }
 
 /** Hard-block: Depop / Mercari must never list DS- SKUs. */

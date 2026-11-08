@@ -351,6 +351,32 @@ export function DropshipPage({ session, money, onBack, backLabel = 'Other', embe
               void run('fees', () => call('save_settings', { settings: { ...settings, channel_fees } }).then(() => undefined));
             }}
           />
+          <ReturnPolicyTable
+            policies={settings.return_policies || {}}
+            onChange={(return_policies) => {
+              void run('return policies', () =>
+                call('save_settings', { settings: { ...settings, return_policies } }).then(() => undefined),
+              );
+            }}
+          />
+          <label className="dropship-label">
+            Refund-and-keep under ($)
+            <input
+              className="dropship-input"
+              type="number"
+              defaultValue={((settings.refund_keep_threshold_cents ?? 2500) / 100)}
+              onBlur={(e) =>
+                void run('threshold', () =>
+                  call('save_settings', {
+                    settings: {
+                      ...settings,
+                      refund_keep_threshold_cents: Math.round(Number(e.target.value) * 100) || 2500,
+                    },
+                  }).then(() => undefined),
+                )
+              }
+            />
+          </label>
           <label className="dropship-check">
             <input
               type="checkbox"
@@ -406,19 +432,27 @@ export function DropshipPage({ session, money, onBack, backLabel = 'Other', embe
                     className="dropship-btn outline"
                     disabled={!!busy}
                     onClick={() =>
-                      run('sample', () =>
-                        call('order_sample', {
+                      run('sample', async () => {
+                        const addrRes = await call('sample_address');
+                        const a = addrRes.address || {};
+                        const address = {
+                          name: a.name || a.company || 'Open Box Industries',
+                          line1: a.line1 || a.address1 || a.street || '',
+                          line2: a.line2 || a.address2 || null,
+                          city: a.city || '',
+                          region: a.region || a.state || '',
+                          postal: a.postal || a.zip || '',
+                          country: a.country || 'US',
+                          phone: a.phone || null,
+                        };
+                        if (!address.line1 || !address.city || !address.postal) {
+                          throw new Error('Set store ship_from address first (used as sample ship-to)');
+                        }
+                        await call('order_sample', {
                           catalog_item_id: (p as any).catalog_item_id,
-                          address: {
-                            name: 'Open Box Industries',
-                            line1: 'PROMPT_PAUL_ADDRESS',
-                            city: 'Penryn',
-                            region: 'CA',
-                            postal: '95663',
-                            country: 'US',
-                          },
-                        }).then(() => undefined),
-                      )
+                          address,
+                        });
+                      })
                     }
                   >
                     Order sample
@@ -721,6 +755,60 @@ function FeeTable({ fees, onChange }: { fees: Record<string, any>; onChange: (f:
               ¢
             </span>
           </label>
+        );
+      })}
+    </div>
+  );
+}
+
+function ReturnPolicyTable({
+  policies,
+  onChange,
+}: {
+  policies: Record<string, any>;
+  onChange: (p: Record<string, any>) => void;
+}) {
+  const rows = ['ebay', 'website', 'tiktok', 'amazon'];
+  return (
+    <div className="dropship-fees">
+      <p className="dropship-muted">
+        Return policies (verify each). Free returns can help conversion/search — flipping them on is your call.
+      </p>
+      {rows.map((ch) => {
+        const p = policies[ch] || {};
+        return (
+          <div key={ch} className="dropship-supplier">
+            <div className="dropship-list-title">{ch} returns {p.verify ? '(verify)' : ''}</div>
+            <label className="dropship-check">
+              <input
+                type="checkbox"
+                checked={p.returns_accepted !== false}
+                onChange={(e) =>
+                  onChange({ ...policies, [ch]: { ...p, returns_accepted: e.target.checked, verify: true } })
+                }
+              />
+              Returns accepted
+            </label>
+            <label className="dropship-check">
+              <input
+                type="checkbox"
+                checked={p.free_returns === true}
+                onChange={(e) =>
+                  onChange({
+                    ...policies,
+                    [ch]: {
+                      ...p,
+                      free_returns: e.target.checked,
+                      buyer_pays_return_shipping: !e.target.checked,
+                      verify: true,
+                    },
+                  })
+                }
+              />
+              Free returns (off by default)
+            </label>
+            {p.note ? <p className="dropship-muted">{String(p.note)}</p> : null}
+          </div>
         );
       })}
     </div>

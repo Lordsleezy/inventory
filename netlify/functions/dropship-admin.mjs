@@ -221,6 +221,21 @@ async function handler(event) {
     return json(200, await receiveReturnedDropshipAsUnit(storeId, { ...body, userId: user.id }));
   }
 
+  if (action === "end_product_all_channels") {
+    const { endDropshipProductAllChannels } = await import("../lib/dropship/reliability.mjs");
+    return json(200, await endDropshipProductAllChannels(storeId, body.product_id));
+  }
+
+  if (action === "sample_address") {
+    const { data } = await sb
+      .from("store_settings")
+      .select("value")
+      .eq("store_id", storeId)
+      .eq("key", "ship_from")
+      .maybeSingle();
+    return json(200, { address: data?.value || null });
+  }
+
   if (action === "list_orders") {
     const { data } = await sb
       .from("dropship_orders")

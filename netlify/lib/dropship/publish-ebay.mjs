@@ -83,6 +83,12 @@ export async function publishDropshipToEbay(storeId, productId, opts = {}) {
   const images = product.image_url ? [product.image_url] : cat.image_url ? [cat.image_url] : [];
   if (!images.length) throw fail("no_image");
 
+  // Honest listings only: aspects from supplier/catalog data + cached category form — never invent.
+  const aspects = await buildHonestAspects(storeId, cat, opts.categoryId);
+  if (aspects.missingRequired?.length) {
+    throw fail(`missing_required_aspects:${aspects.missingRequired.join(",")}`);
+  }
+
   await ebayFetch(storeId, "PUT", `/sell/inventory/v1/inventory_item/${encodeURIComponent(product.sku)}`, {
     availability: {
       shipToLocationAvailability: {
@@ -95,7 +101,7 @@ export async function publishDropshipToEbay(storeId, productId, opts = {}) {
       title,
       description: websiteStyleDescription(product, cat, handlingDays),
       imageUrls: images,
-      aspects: { Brand: ["Unbranded"], Type: [cat.category || "Item"] },
+      aspects: aspects.values,
     },
   });
 
@@ -285,6 +291,40 @@ function fail(message) {
   const err = new Error(message);
   err.code = "dropship_publish_blocked";
   return err;
+}
+
+/** Build aspects only from known supplier fields + cached category aspects. No invented claims. */
+async function buildHonestAspects(storeId, cat, categoryId) {
+  const values = {};
+  if (cat.brand) values.Brand = [String(cat.brand)];
+  else values.Brand = ["Unbranded"];
+  if (cat.category) values.Type = [String(cat.category)];
+  if (cat.upc) values.UPC = [String(cat.upc)];
+
+  const missingRequired = [];
+  if (categoryId) {
+    try {
+      const sb = serviceClient();
+      const { data: form } = await sb
+        .from("ebay_category_aspects")
+        .select("aspects")
+        .eq("category_id", String(categoryId))
+        .maybeSingle();
+      const aspects = form?.aspects || [];
+      for (const a of aspects) {
+        const name = a.name || a.localizedAspectName;
+        if (!name) continue;
+        const required = a.aspectConstraint?.aspectRequired || a.required;
+        if (required && !values[name]) {
+          // Only fill when we have a clear supplier mapping; otherwise leave missing.
+          missingRequired.push(name);
+        }
+      }
+    } catch {
+      /* cache optional */
+    }
+  }
+  return { values, missingRequired };
 }
 
 export { getEbayPrivileges };
