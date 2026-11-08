@@ -108,7 +108,7 @@ function pickupDescription(unit, hours) {
     "LOCAL PICKUP ONLY — no shipping.",
     `Pick up at Open Box Industries, ${STORE_ADDRESS}. Phone ${STORE_PHONE}.`,
     "Bring your eBay order confirmation (order number + name on the order).",
-    "Sold as-is. No returns.",
+    "Sold as-is.",
     "",
     "Store hours:",
     hoursBlock,

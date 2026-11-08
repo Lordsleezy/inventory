@@ -54,7 +54,7 @@ import {
   resolveEbayAccount,
   userTokenForAccount,
 } from "./ebay-accounts.mjs";
-import { ensureBusinessPolicies } from "./ebay-policies.mjs";
+import { applyBuyerPaysReturnPolicy, buyerPaysReturnPolicyBody, ensureBusinessPolicies } from "./ebay-policies.mjs";
 
 export { EBAY_OAUTH_SCOPES, ebayHosts, ebayItemViewUrl, ebayOrderViewUrl, ebayRuName, formatEbayError, getSellerUsername };
 export { listEbayAccounts, resolveEbayAccount, loadEbayAccount };
@@ -517,9 +517,16 @@ async function ensurePolicies(storeId, accountHint = {}) {
     const selling = await resolveEbayAccount(storeId, { role: "selling", ...accountHint });
     if (selling.role === "selling") {
       if (selling.payment_policy_id && selling.return_policy_id && selling.fulfillment_policy_id) {
+        const applied = await applyBuyerPaysReturnPolicy(selling);
+        if (applied.returnPolicyId && applied.returnPolicyId !== selling.return_policy_id) {
+          await serviceClient().from("ebay_accounts").update({
+            return_policy_id: applied.returnPolicyId,
+            updated_at: new Date().toISOString(),
+          }).eq("id", selling.id);
+        }
         return {
           payment: selling.payment_policy_id,
-          returnP: selling.return_policy_id,
+          returnP: applied.returnPolicyId || selling.return_policy_id,
           fulfillment: selling.fulfillment_policy_id,
         };
       }
@@ -536,6 +543,10 @@ async function ensurePolicies(storeId, accountHint = {}) {
 
   let returnP = policyIdOf(returns[0], "return");
   const payment = await ensurePaymentPolicy(storeId, market, payments[0]);
+  if (returnP && returns[0]?.returnsAccepted === false) {
+    const updated = await ebayFetch(storeId, "PUT", `/sell/account/v1/return_policy/${returnP}`, buyerPaysReturnPolicyBody(market));
+    returnP = updated.returnPolicyId || updated.id || returnP;
+  }
   if (!returnP) {
     const created = await ebayFetch(storeId, "POST", "/sell/account/v1/return_policy", {
       name: "Floor returns",

@@ -1,7 +1,7 @@
 /**
  * Business policies for the store selling account.
  * Required: Calculated Shipping – Buyer Pays (no free shipping, no local pickup),
- * NO returns (as-is), and a payment policy.
+ * 30-day returns with the buyer paying return shipping, and a payment policy.
  */
 import { ebayFetchAccount, markAccountPolicies, userTokenForAccount } from "./ebay-accounts.mjs";
 import { marketplaceIdFromEnv } from "./ebay-env.mjs";
@@ -13,11 +13,26 @@ import {
 
 const POLICY_NAMES = {
   payment: "OBI Payments",
-  returnP: "OBI No Returns – As Is",
+  returnP: "OBI Returns – 30 Day Buyer Pays",
+  /** Previous name. Updated in place so listings already on this policy pick up the new terms. */
+  returnPLegacy: "OBI No Returns – As Is",
   fulfillment: "OBI Calculated Shipping – Buyer Pays",
   /** Separate from calculated shipping — used only for local-pickup listings. */
   localPickup: "OBI Local Pickup Only",
 };
+
+/** Returns accepted, 30 days, buyer pays the return label. Original outbound shipping is not part of this policy. */
+export function buyerPaysReturnPolicyBody(market) {
+  return {
+    name: POLICY_NAMES.returnP,
+    marketplaceId: market,
+    categoryTypes: [{ name: "ALL_EXCLUDING_MOTORS_VEHICLES", default: true }],
+    returnsAccepted: true,
+    returnPeriod: { value: 30, unit: "DAY" },
+    returnShippingCostPayer: "BUYER",
+    refundMethod: "MONEY_BACK",
+  };
+}
 
 function policyIdOf(row, kind) {
   return row?.[`${kind}PolicyId`] || row?.policyId || row?.id || null;
@@ -77,20 +92,18 @@ async function ensurePayment(account, market, existing) {
   return String(created.paymentPolicyId || created.id);
 }
 
-async function ensureNoReturns(account, market, existing) {
-  const named = findNamed(existing, "return", POLICY_NAMES.returnP) || null;
+async function ensureBuyerPaysReturns(account, market, existing) {
+  const named =
+    findNamed(existing, "return", POLICY_NAMES.returnP) ||
+    findNamed(existing, "return", POLICY_NAMES.returnPLegacy) ||
+    (existing || []).find((row) => String(row?.returnPolicyId || row?.policyId || "") === String(account.return_policy_id || "")) ||
+    null;
   const id = policyIdOf(named, "return");
-  const body = {
-    name: POLICY_NAMES.returnP,
-    marketplaceId: market,
-    categoryTypes: [{ name: "ALL_EXCLUDING_MOTORS_VEHICLES", default: true }],
-    returnsAccepted: false,
-  };
+  const body = buyerPaysReturnPolicyBody(market);
   if (id) {
     const updated = await ebayFetchAccount(account, "PUT", `/sell/account/v1/return_policy/${id}`, body);
     return String(updated.returnPolicyId || updated.id || id);
   }
-  // Prefer creating the named no-returns policy even if other return policies exist.
   const created = await ebayFetchAccount(account, "POST", "/sell/account/v1/return_policy", body);
   return String(created.returnPolicyId || created.id);
 }
@@ -179,7 +192,7 @@ export async function ensureBusinessPolicies(account) {
     listPolicies(account, "fulfillment"),
   ]);
   const payment = await ensurePayment(account, market, payments);
-  const returnP = await ensureNoReturns(account, market, returns);
+  const returnP = await ensureBuyerPaysReturns(account, market, returns);
   const fulfillment = await ensureFulfillment(account, market, fulfillments);
   if (!payment || !returnP || !fulfillment) {
     throw new Error("eBay did not return payment, return, and fulfillment policy IDs after create.");
@@ -252,7 +265,7 @@ export async function ensureLocalPickupFulfillmentPolicy(account) {
 }
 
 /**
- * Reuse existing payment + no-returns policies and attach the pickup fulfillment policy.
+ * Reuse existing payment + buyer-pays return policies and attach the pickup fulfillment policy.
  * Never creates duplicate payment/return policies.
  */
 export async function policiesForLocalPickup(account) {
@@ -273,4 +286,14 @@ export async function policiesForLocalPickup(account) {
   };
 }
 
-export { POLICY_NAMES, isLocalPickupOnlyPolicy, pickupOnlyFulfillmentBody };
+/** Update or create the buyer-pays return policy. Does not touch payment or shipping policies. */
+export async function applyBuyerPaysReturnPolicy(account) {
+  if (!account) throw new Error("eBay account required");
+  const market = marketplaceIdFromEnv();
+  await optIn(account);
+  const returns = await listPolicies(account, "return");
+  const returnPolicyId = await ensureBuyerPaysReturns(account, market, returns);
+  return { returnPolicyId, name: POLICY_NAMES.returnP, previousIds: (returns || []).map((row) => policyIdOf(row, "return")).filter(Boolean) };
+}
+
+export { POLICY_NAMES, ensureBuyerPaysReturns, isLocalPickupOnlyPolicy, pickupOnlyFulfillmentBody };

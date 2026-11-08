@@ -207,7 +207,7 @@ export function MarketplacesPage({client,accessToken,money,stamp}:Props){
        <button className="text-button" disabled={busy||syncPolling} onClick={()=>void (async()=>{setBusy(true);try{const s=await ebayCall(accessToken,'sync_latest');setEbay(s);if(!syncNowRunning(s.syncNow))setNotice(formatSyncNotice(s.syncNow));}catch(e){setError(errText(e));}finally{setBusy(false);}})()}>Refresh sync status</button>
      </div>
    </div>}
-   {selling && !selling.policiesReady && <p className="hint">After connecting the business account, create its business policies (calculated shipping buyer-pays, no returns, payment). No local pickup.</p>}
+   {selling && !selling.policiesReady && <p className="hint">After connecting the business account, create its business policies (calculated shipping buyer-pays, 30-day returns with the buyer paying return shipping, payment). No local pickup.</p>}
    {ebay?.lastError && <p className="hint">Last sync error: {ebay.lastError}</p>}
   </>}
  </section>

@@ -13,6 +13,9 @@ import {
   pickCatalogProduct,
   reviseStandardsXml,
   withCatalogMainPhoto,
+  descriptionWithReturns,
+  reviseReturnPolicyXml,
+  CLEARANCE_FOOTER_TEXT,
   CLEARANCE_FOOTER_MARK,
 } from "./ebay-listing-standards.mjs";
 
@@ -26,9 +29,20 @@ test("footer is small, exact, and added once", () => {
   const once = appendClearanceFooter("Features of the lamp.\n\n99105");
   assert.equal(once.includes(CLEARANCE_FOOTER_MARK), true);
   assert.match(once, /font-size:12px/);
+  assert.match(once, /buyer pays return shipping/);
   assert.equal(appendClearanceFooter(once), once);
   assert.equal(once.startsWith("Features of the lamp."), true);
   assert.equal((once.match(/Open-box clearance item/g) || []).length, 1);
+});
+
+test("old no-returns wording is replaced and the revise cannot change price or shipping", () => {
+  const next = descriptionWithReturns("Lamp details.\n\nSold as-is. No returns.\n<div style=\"font-size:12px\">Open-box clearance item. Item may show signs of use or handling, although it shouldn't. If there are any issues, please reach out.</div>");
+  assert.equal(/no returns/i.test(next), false);
+  assert.equal(next.includes(CLEARANCE_FOOTER_TEXT), true);
+  assert.equal((next.match(/Open-box clearance item/g) || []).length, 1);
+  const xml = reviseReturnPolicyXml({ itemId: "123", description: next, returnPolicyId: "999" });
+  assert.match(xml, /<ReturnProfileID>999<\/ReturnProfileID>/);
+  assert.doesNotMatch(xml, /<StartPrice|<ShippingDetails|<ConditionID|<Title/);
 });
 
 test("collectibles are recognized and ordinary goods are not", () => {

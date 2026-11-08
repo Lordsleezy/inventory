@@ -419,7 +419,7 @@ export async function migrationPrerequisites(storeId) {
     blockers: [
       !selling ? "Connect the business eBay account as the selling account." : null,
       selling && !selling.policiesReady
-        ? "Create business policies on the selling account (Calculated shipping / No returns / Payment)."
+        ? "Create business policies on the selling account (Calculated shipping / 30-day buyer-pays returns / Payment)."
         : null,
       !source ? "Keep pgg124-5 connected in orders-only mode as the migration source." : null,
       selling && source && selling.id === source.id
