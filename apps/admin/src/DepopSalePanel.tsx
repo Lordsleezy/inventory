@@ -69,7 +69,8 @@ export function DepopSalePanel({ client, money, variant, initialSku, initialSale
   const suggested = payoutDefault(saleCents, feeCents);
   const shownPayout = payoutTouched ? payout : suggested == null ? '' : dollarsText(suggested);
   const payoutCents = parseDollars(shownPayout);
-  const valid = !!(unit || editing) && !!saleCents && saleCents > 0 && feeCents != null && payoutCents != null && payoutCents <= saleCents && !!day;
+  const feeOk = feeCents != null && saleCents != null && feeCents <= saleCents;
+  const valid = !!(unit || editing) && !!saleCents && saleCents > 0 && feeCents != null && feeOk && payoutCents != null && payoutCents <= saleCents && !!day;
 
   function reset() {
     setUnit(null); setEditing(null); setQuery(''); setSale(''); setFee(''); setPayout(''); setPayoutTouched(false); setDay(todayLA()); setLabelFile(null);
@@ -169,6 +170,7 @@ export function DepopSalePanel({ client, money, variant, initialSku, initialSale
           )}
         </div>}
         {payoutCents != null && saleCents != null && payoutCents > saleCents && <p className="error" role="alert">The payout can&apos;t be more than the sale price.</p>}
+        {feeCents != null && saleCents != null && feeCents > saleCents && <p className="error" role="alert">The Depop fee can&apos;t be more than the sale price. Check you didn&apos;t swap sale and fee.</p>}
         {(sale && saleCents == null) || (fee && feeCents == null) || (shownPayout && payoutCents == null) ? <p className="error" role="alert">Enter amounts as dollars, like 24.99.</p> : null}
         <div className="actions"><button className="primary" disabled={busy || !valid}>{busy ? 'Saving…' : editing ? 'Save changes' : 'Record sale'}</button>
           {(editing || unit) && <button type="button" className="secondary" disabled={busy} onClick={reset}>Cancel</button>}</div>
