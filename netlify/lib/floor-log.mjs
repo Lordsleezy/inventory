@@ -1,7 +1,14 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
-import { withLambda } from "@netlify/aws-lambda-compat";
 import { serviceClient } from "./server.mjs";
+
+let withLambdaPromise;
+function loadWithLambda() {
+  if (!withLambdaPromise) {
+    withLambdaPromise = import("@netlify/aws-lambda-compat").then((mod) => mod.withLambda);
+  }
+  return withLambdaPromise;
+}
 
 const traces = new AsyncLocalStorage();
 const SECRET = /(authorization|access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|secret|password|ciphertext|connections[_-]?key|api[_-]?key|image[_-]?base64|cookie|set-cookie|^bearer$|^token$)/i;
@@ -169,19 +176,24 @@ export function wrapHandler(source, fn) {
 /** Raw Lambda-style handler → modern Netlify default export. */
 export function asNetlifyFunction(handler) {
   // withLambda turns a 204 with body "" into `new Response("")`, which Node rejects.
-  const wrapped = withLambda(async (event, context) => {
-    const result = await handler(event, context);
-    if (result && result.statusCode === 204) {
-      return {
-        ...result,
-        statusCode: 200,
-        body: "",
-        headers: { ...(result.headers || {}), "x-floor-empty": "204" },
-      };
-    }
-    return result;
-  });
+  // Loaded on call so unit tests can import this file without the Netlify package.
+  let wrapped;
   return async (request, context) => {
+    if (!wrapped) {
+      const withLambda = await loadWithLambda();
+      wrapped = withLambda(async (event, ctx) => {
+        const result = await handler(event, ctx);
+        if (result && result.statusCode === 204) {
+          return {
+            ...result,
+            statusCode: 200,
+            body: "",
+            headers: { ...(result.headers || {}), "x-floor-empty": "204" },
+          };
+        }
+        return result;
+      });
+    }
     const response = await wrapped(request, context ?? {});
     if (response.headers.get("x-floor-empty") === "204") {
       const headers = new Headers(response.headers);

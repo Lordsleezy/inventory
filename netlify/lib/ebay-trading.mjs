@@ -1,4 +1,4 @@
-import { assertEbaySellerWrite } from "./ebay-accounts.mjs";
+import { assertEbaySellerWrite } from "./ebay-write-guard.mjs";
 import { ebayHosts } from "./ebay-env.mjs";
 import { classifyEbayStoreCategory, storeCategoryNames } from "./ebay-store-categories.mjs";
 
