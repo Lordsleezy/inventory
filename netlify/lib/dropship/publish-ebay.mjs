@@ -295,6 +295,7 @@ function fail(message) {
 
 /** Build aspects only from known supplier fields + cached category aspects. No invented claims. */
 async function buildHonestAspects(storeId, cat, categoryId) {
+  void storeId;
   const values = {};
   if (cat.brand) values.Brand = [String(cat.brand)];
   else values.Brand = ["Unbranded"];
@@ -304,24 +305,15 @@ async function buildHonestAspects(storeId, cat, categoryId) {
   const missingRequired = [];
   if (categoryId) {
     try {
-      const sb = serviceClient();
-      const { data: form } = await sb
-        .from("ebay_category_aspects")
-        .select("aspects")
-        .eq("category_id", String(categoryId))
-        .maybeSingle();
-      const aspects = form?.aspects || [];
-      for (const a of aspects) {
-        const name = a.name || a.localizedAspectName;
-        if (!name) continue;
-        const required = a.aspectConstraint?.aspectRequired || a.required;
-        if (required && !values[name]) {
-          // Only fill when we have a clear supplier mapping; otherwise leave missing.
-          missingRequired.push(name);
-        }
+      const { loadStoredAspects } = await import("../ebay-catalog.mjs");
+      const defs = await loadStoredAspects(categoryId);
+      for (const a of defs || []) {
+        const name = a.name;
+        if (!name || !a.required) continue;
+        if (!values[name]) missingRequired.push(name);
       }
     } catch {
-      /* cache optional */
+      /* cache optional — without a category id we still publish Brand/Type only */
     }
   }
   return { values, missingRequired };
