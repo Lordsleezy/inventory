@@ -158,7 +158,6 @@ export function AppMoreOther({
   const [amazonN, setAmazonN] = useState('…');
   const [tiktokN, setTiktokN] = useState('Connect');
   const [depopN, setDepopN] = useState('…');
-  const [mercariN, setMercariN] = useState('…');
   const [sync, setSync] = useState('…');
 
   useEffect(() => {
@@ -191,19 +190,12 @@ export function AppMoreOther({
         setTiktokN(tiktok?.connected === false ? 'Connect' : String(tiktok?.listed?.length ?? 0));
       } catch { /* ignore */ }
       try {
-        const [depopLive, mercariLive] = await Promise.all([
-          client.rpc('portal_depop_live_listings'),
-          client.rpc('portal_mercari_live_count'),
-        ]);
+        const depopLive = await client.rpc('portal_depop_live_listings');
         if (!alive) return;
         if (!depopLive.error) setDepopN(String(((depopLive.data || []) as unknown[]).length));
         else setDepopN('Live');
-        if (!mercariLive.error && mercariLive.data) {
-          const c = mercariLive.data as { live: number; cap: number };
-          setMercariN(`${c.live}/${c.cap}`);
-        } else setMercariN('Live');
       } catch {
-        if (alive) { setDepopN('Live'); setMercariN('Live'); }
+        if (alive) setDepopN('Live');
       }
     })();
     return () => { alive = false; };
@@ -234,10 +226,6 @@ export function AppMoreOther({
         <button type="button" className="app-more-link" onClick={() => setPage('depop')}>
           <span className="app-more-left"><Icon tone="#bf5af2" />Depop</span>
           <span className="app-more-right">{depopN}<span className="app-chevron">›</span></span>
-        </button>
-        <button type="button" className="app-more-link" onClick={() => setPage('mercari')}>
-          <span className="app-more-left"><Icon tone="#ff375f" />Mercari</span>
-          <span className="app-more-right">{mercariN}<span className="app-chevron">›</span></span>
         </button>
         <button type="button" className="app-more-link" onClick={() => setPage('connections')}>
           <span className="app-more-left"><Icon tone="#8e8e93" />Connections & sync</span>

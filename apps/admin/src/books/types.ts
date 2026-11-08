@@ -153,6 +153,7 @@ export type InventoryOwner = {
   listed?: { channel: string; units: number; cost_cents: number }[];
   listed_once?: { units: number; cost_cents: number };
   unlisted?: { reason: string; units: number; cost_cents: number }[];
+  defective_shelf?: { units: number; cost_cents: number };
   aging?: { bucket: string; units: number; cost_cents: number }[];
   movement?: Record<string, number>;
   slowest?: { sku: string; title: string; days: number | null; cost_cents: number; floor_cents: number; listed: string }[];

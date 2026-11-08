@@ -60,7 +60,6 @@ type Props = {
 const CHANNELS: { key: string; label: string; listable: boolean }[] = [
   { key: 'ebay', label: 'eBay', listable: true },
   { key: 'depop', label: 'Depop', listable: false },
-  { key: 'mercari', label: 'Mercari', listable: false },
   { key: 'website', label: 'Website', listable: false },
   { key: 'tiktok', label: 'TikTok Shop', listable: true },
   { key: 'amazon', label: 'Amazon', listable: true },
