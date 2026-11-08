@@ -21,13 +21,30 @@ function niceError(message: string) {
 }
 
 /** Receive: pick channels before the unit exists; applied with applyChannelSelections after saving. */
-export function ChannelPicker({ value, onChange, disabled = false, compact = false, upc = '' }: {
-  value: ChannelId[]; onChange: (next: ChannelId[]) => void; disabled?: boolean; compact?: boolean; upc?: string;
+export function ChannelPicker({ value, onChange, disabled = false, compact = false, bare = false, upc = '' }: {
+  value: ChannelId[]; onChange: (next: ChannelId[]) => void; disabled?: boolean; compact?: boolean; bare?: boolean; upc?: string;
 }) {
   const hasUpc = validChannelUpc(upc);
   useEffect(() => {
     if (!hasUpc && value.some(id => id !== 'ebay')) onChange(value.filter(id => id === 'ebay'));
   }, [hasUpc, value, onChange]);
+  const boxes = (
+    <>
+      {LISTING_CHANNELS.map(([id, label]) => (
+        <label key={id} className="rcv-check">
+          <input
+            type="checkbox"
+            checked={value.includes(id)}
+            disabled={disabled || (id !== 'ebay' && !hasUpc)}
+            onChange={e => onChange(e.target.checked ? [...value.filter(c => c !== id), id] : value.filter(c => c !== id))}
+          />
+          {label}
+          {id !== 'ebay' && !hasUpc ? <small>Needs a UPC</small> : null}
+        </label>
+      ))}
+    </>
+  );
+  if (bare) return <div className="rcv-checks">{boxes}</div>;
   return (
     <fieldset className={compact ? 'channel-picker channel-picker-compact' : 'channel-picker unit-edit-wide'} disabled={disabled}>
       {!compact && <legend>List on</legend>}

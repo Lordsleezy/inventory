@@ -113,6 +113,10 @@ export function AppMoreHome({
               <span className="app-more-left"><Icon tone="#0a84ff" />Register</span>
               <span className="app-chevron">›</span>
             </button>
+            <button type="button" className="app-more-link" onClick={() => setPage('withdrawals')}>
+              <span className="app-more-left"><Icon tone="#8e8e93" />Safe</span>
+              <span className="app-chevron">›</span>
+            </button>
             <button type="button" className="app-more-link" onClick={() => setPage('reports')}>
               <span className="app-more-left"><Icon tone="#30d158" />Reports</span>
               <span className="app-chevron">›</span>
@@ -235,14 +239,10 @@ export function AppMoreOther({
         </button>
       </div>
 
-      <p className="app-section-label">Safe</p>
+      <p className="app-section-label">Other tools</p>
       <div className="app-group">
         <button type="button" className="app-more-link" onClick={() => setPage('insights')}>
           <span className="app-more-left"><Icon tone="#5e5ce6" />Insights</span>
-          <span className="app-chevron">›</span>
-        </button>
-        <button type="button" className="app-more-link" onClick={() => setPage('withdrawals')}>
-          <span className="app-more-left"><Icon tone="#64d2ff" />Safe</span>
           <span className="app-chevron">›</span>
         </button>
       </div>
