@@ -1,0 +1,244 @@
+/* Shared black-and-white system. Loaded last. Dark only.
+   Palette: #000, #fff, #9a9a9a, #2a2a2a, #4a4a4a, #FF453A. */
+
+html.dark,
+html.app-mode {
+  --bw-bg: #000;
+  --bw-ink: #fff;
+  --bw-muted: #9a9a9a;
+  --bw-line: #2a2a2a;
+  --bw-field: #4a4a4a;
+  --bw-danger: #FF453A;
+  --btn-bg: transparent;
+  --btn-bg-hover: #111;
+  --btn-bg-active: #000;
+  --btn-text: #fff;
+  --btn-border: #fff;
+  --btn-border-strong: #fff;
+  --focus: #4a4a4a;
+  color-scheme: dark;
+}
+
+html.dark,
+html.dark body,
+html.dark .app,
+html.dark aside,
+html.dark .content,
+html.dark .panel,
+html.dark .stat,
+html.dark .login,
+html.dark .inventory-detail,
+html.dark .cart-panel,
+html.dark .checkout-bar,
+html.dark .modal .card,
+html.dark .search-results,
+html.dark .customer-dropdown,
+html.app-mode,
+html.app-mode body,
+html.app-mode .app-mode-root,
+html.app-mode .app-mode-main,
+html.app-mode .app-tab-panel {
+  background: #000 !important;
+  color: #fff;
+}
+
+html.dark p,
+html.dark .hint,
+html.dark .muted,
+html.dark small,
+html.dark .eyebrow,
+html.dark .account small,
+html.app-mode .hint,
+html.app-mode .app-footer-count,
+html.app-mode .app-row-text .meta,
+html.app-mode .app-item-head .meta {
+  color: #9a9a9a;
+}
+
+html.dark h1,
+html.dark h2,
+html.dark h3,
+html.dark strong,
+html.app-mode .app-large-title h1 {
+  color: #fff;
+}
+
+html.dark input,
+html.dark select,
+html.dark textarea,
+html.app-mode input,
+html.app-mode select,
+html.app-mode textarea,
+html.app-mode .app-search {
+  background: #000;
+  color: #fff;
+  border: 1px solid #4a4a4a;
+  border-radius: 10px;
+  min-height: 44px;
+  font-size: 16px;
+}
+
+html.dark .panel,
+html.dark .stat,
+html.dark .ticket,
+html.dark .report-row,
+html.dark .inventory-row,
+html.dark aside,
+html.app-mode .app-row {
+  border-color: #2a2a2a !important;
+  box-shadow: none !important;
+  background: transparent !important;
+}
+
+html.dark button.primary,
+html.app-mode button.primary,
+html.app-mode .app-actions button.primary {
+  background: #fff !important;
+  color: #000 !important;
+  border: 1px solid #fff !important;
+  border-radius: 10px;
+  min-height: 44px;
+  font-weight: 600;
+}
+
+html.dark .actions button.secondary,
+html.dark button.secondary,
+html.app-mode .order-actions button:not(.primary),
+html.app-mode .app-actions button:not(.primary),
+html.app-mode .actions button:not(.primary) {
+  background: transparent !important;
+  color: #fff !important;
+  border: 1px solid #fff !important;
+  border-radius: 10px;
+  min-height: 44px;
+  font-weight: 400;
+}
+
+html.dark .inventory-row,
+html.dark .report-row,
+html.app-mode .app-row,
+html.app-mode .app-more-link,
+html.app-mode .app-tabbar button,
+html.app-mode .app-nav button {
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  min-height: 44px;
+  box-shadow: none;
+}
+
+html.app-mode .app-row + .app-row,
+html.app-mode .app-more-link + .app-more-link,
+html.dark .inventory-row + .inventory-row {
+  border-top: 1px solid #2a2a2a !important;
+}
+
+html.dark .text-button.danger,
+html.dark button.danger,
+html.app-mode .danger,
+html.app-mode .app-inline-error {
+  color: #FF453A !important;
+}
+
+html.dark .badge,
+html.dark .badge-warn,
+html.dark .notice,
+html.app-mode .app-chip,
+html.app-mode .app-pill,
+html.app-mode .app-pill.live,
+html.app-mode .app-pill.warn,
+html.app-mode .app-pill.ok,
+html.app-mode .app-pill.muted {
+  background: transparent !important;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  color: #fff;
+  font-weight: 700;
+}
+
+html.app-mode .app-chip.warn,
+html.app-mode .app-pill.warn,
+html.dark .badge-warn,
+html.dark .bad-text,
+html.dark .error,
+html.app-mode .app-row-text .warn {
+  color: #FF453A !important;
+}
+
+html.app-mode .app-chip.muted,
+html.app-mode .app-pill.muted {
+  color: #9a9a9a !important;
+  font-weight: 400;
+}
+
+html.app-mode .app-more-icon { display: none !important; }
+
+html.app-mode .app-tabbar button.active {
+  color: #fff !important;
+  box-shadow: inset 0 2px 0 #fff;
+  background: transparent !important;
+}
+
+html.dark nav button.active,
+html.dark .inventory-tabs button.active,
+html.dark .report-tabs button.active {
+  color: #fff !important;
+  box-shadow: inset 0 -2px 0 #fff;
+  background: transparent !important;
+}
+
+html.app-mode .app-total,
+html.dark .stat {
+  background: transparent !important;
+  border: 0;
+  box-shadow: none;
+}
+
+html.app-mode .app-large-title h1 { font-size: 30px; }
+
+html.dark .alert {
+  background: rgba(255, 69, 58, 0.12);
+  border: 1px solid #FF453A;
+  color: #fff;
+}
+
+html.dark .theme-toggle { display: none !important; }
+
+html.dark .money-card,
+html.dark .withdrawal-card,
+html.dark .money-page .panel {
+  border: 0 !important;
+  background: transparent !important;
+  padding: 0 !important;
+}
+
+html.dark .money-in,
+html.dark .money-out,
+html.app-mode .money-in,
+html.app-mode .money-out {
+  color: #fff !important;
+}
+
+html.dark .money-add,
+html.dark .money-take,
+html.dark .money-go {
+  background: transparent !important;
+  color: #fff !important;
+  border: 1px solid #fff !important;
+}
+
+.receive-panel.receive-v2 .receive-v2-req,
+.receive-panel.receive-v2 .receive-v2-msg,
+.receive-panel.receive-v2 .receive-v2-invalid {
+  --receive-danger: #FF453A;
+}
+
+.receive-panel.receive-v2 .receive-v2-req,
+.receive-panel.receive-v2 .receive-v2-msg { color: #FF453A; }
+.receive-panel.receive-v2 .receive-v2-invalid { outline-color: #FF453A; background: rgba(255, 69, 58, 0.08); }
+.receive-panel.receive-v2 .receive-v2-banner { border-color: #FF453A; background: rgba(255, 69, 58, 0.12); }
+
+.scan-out-panel { background: #000; color: #fff; }
+.scan-out-panel .scan-out-ok { color: #fff; border: 1px solid #2a2a2a; }
+.scan-out-panel .scan-out-err { color: #FF453A; }

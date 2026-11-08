@@ -1,7 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { FormEvent } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { ToolSourceBadge } from './design/Tools';
 import { floorFunctionUrl } from './floorApi';
 
 // Money tab (admin only; every RPC is admin-checked on the server). Data model: supabase/migrations/20261107100000_money_tab.sql.
@@ -66,6 +65,26 @@ export function MoneyPage({ client, storeId, accessToken, money, stamp }: Props)
   const [notice, setNotice] = useState('');
   const [connecting, setConnecting] = useState('');
   const [syncing, setSyncing] = useState(false);
+  type OpenAcc = Account | 'withdrawals' | null;
+  const OPEN_KEY = 'floor_safe_open';
+  const [openAcc, setOpenAcc] = useState<OpenAcc>(() => {
+    try {
+      const v = sessionStorage.getItem(OPEN_KEY);
+      if (v === 'withdrawals') return 'withdrawals';
+      if (v && v in NAMES) return v as Account;
+    } catch { /* ignore */ }
+    return null;
+  });
+  const toggleAcc = (id: OpenAcc) => {
+    setOpenAcc((cur) => {
+      const next = cur === id ? null : id;
+      try {
+        if (next) sessionStorage.setItem(OPEN_KEY, next);
+        else sessionStorage.removeItem(OPEN_KEY);
+      } catch { /* ignore */ }
+      return next;
+    });
+  };
 
   const load = useCallback(async () => {
     const over = await client.rpc('portal_money_overview');
@@ -139,7 +158,24 @@ export function MoneyPage({ client, storeId, accessToken, money, stamp }: Props)
   const rowsView = (account: Account, rows: Row[]) => rows.map((r) => <ActivityLine key={r.id} row={r} account={account} title={rowTitle(r)} money={money} stamp={stamp}
     who={r.by_user ? names[r.by_user] || '' : ''} client={client} onOpen={() => setSheet({ account, dir: r.direction === 'in' ? 'in' : 'out', row: r })} setError={setError} />);
 
-  return <div className="money-page">
+  const accSubline = (a: Overview): { line: ReactNode; danger?: boolean } => {
+    const personalEbay = a.account === 'ebay_pgg124_5';
+    if (a.synced && a.sync?.synced_at) return { line: <>Synced · {stamp(a.sync.synced_at)}</> };
+    if (a.sync?.status === 'reconnect' || a.sync?.status === 'error') {
+      return {
+        line: <>{a.sync.message || 'Sync problem'} · <button type="button" className="money-link" disabled={connecting === a.account}
+          onClick={(e) => { e.stopPropagation(); void (personalEbay ? reconnectPersonalEbay() : reconnect(a.account as 'ebay' | 'square')); }}>Reconnect</button></>,
+        danger: true,
+      };
+    }
+    if (a.sync?.status === 'not_connected' || !a.sync) {
+      return { line: <>Not synced · <button type="button" className="money-link" disabled={connecting === a.account}
+        onClick={(e) => { e.stopPropagation(); void (a.account === 'ebay' || a.account === 'square' ? reconnect(a.account) : undefined); }}>Connect</button></> };
+    }
+    return { line: a.account === 'safe' ? 'Manual count' : 'Manual' };
+  };
+
+  return <div className="money-page safe-v2">
     <header className="money-head"><h1>Safe</h1><div className="money-total-label">All accounts</div>
       <div className="money-total">{loaded ? money(total) : '—'}</div>
       <div className="money-buttons">
@@ -149,30 +185,43 @@ export function MoneyPage({ client, storeId, accessToken, money, stamp }: Props)
     </header>
     {error && <div className="alert" role="alert">{error}<button type="button" aria-label="Dismiss error" onClick={() => setError('')}>×</button></div>}
     {notice && <div className="notice" role="status">{notice}</div>}
-    {!loaded && !error && <p role="status">Loading money…</p>}
-    {loaded && <WithdrawalsLog client={client} money={money} stamp={stamp} onChanged={load} />}
-    <div className="money-cards">
+    {!loaded && !error && <p role="status">Loading…</p>}
+    {loaded && <div className="money-accord" role="list">
       {overview.map((a) => {
+        const open = openAcc === a.account;
         const detail = a.sync?.detail || {};
+        const sub = accSubline(a);
         const personalEbay = a.account === 'ebay_pgg124_5';
-        return <section className="money-card" key={a.account} aria-label={NAMES[a.account]}>
-          <div className="money-card-top"><ToolSourceBadge source={a.account} /><strong className="money-name">{NAMES[a.account]}</strong><span className="money-balance">{money(a.balance_cents)}</span></div>
-          {(a.account === 'ebay' || personalEbay || a.account === 'square' || a.account === 'amazon' || a.account === 'tiktok') && <p className="money-sync">
-            {a.synced
-              ? <>Synced · {stamp(a.sync!.synced_at)}{(a.account === 'ebay' || personalEbay) && detail.available_cents != null ? ` · Available ${money(detail.available_cents)} · Processing ${money(detail.processing_cents || 0)} · On hold ${money(detail.on_hold_cents || 0)}` : ''}</>
-              : a.sync?.status === 'reconnect' || a.sync?.status === 'not_connected' || !a.sync
-                ? <>{a.sync?.message || (a.account === 'ebay' || personalEbay || a.account === 'square' ? 'Not synced yet.' : 'Manual')}{personalEbay ? <> <button type="button" className="money-link" disabled={connecting === a.account} onClick={() => void reconnectPersonalEbay()}>{connecting === a.account ? 'Opening…' : 'Reconnect pgg124-5'}</button></> : (a.account === 'ebay' || a.account === 'square') && <> <button type="button" className="money-link" disabled={connecting === a.account} onClick={() => void reconnect(a.account as 'ebay' | 'square')}>{connecting === a.account ? 'Opening…' : a.sync?.status === 'not_connected' ? `Connect ${NAMES[a.account]}` : `Reconnect ${NAMES[a.account]}`}</button></>}</>
-                : <>Sync problem: {a.sync.message}</>}
-          </p>}
-          {!personalEbay && <><div className="money-buttons">
-            <button type="button" className="money-add" onClick={() => setSheet({ account: a.account, dir: 'in' })}>+ Add money</button>
-            <button type="button" className="money-take" onClick={() => setSheet({ account: a.account, dir: 'out' })}>− Take out</button>
-          </div>
-          <div className="money-activity">{(recent[a.account] || []).length ? rowsView(a.account, recent[a.account]) : <p className="empty">No activity yet.</p>}</div>
-          <button type="button" className="money-link money-all" onClick={() => void openAll(a.account)}>See all activity</button></>}
-        </section>;
+        return <div className="money-acc-group" key={a.account} role="listitem">
+          <button type="button" className="money-acc-row" aria-expanded={open} onClick={() => toggleAcc(a.account)}>
+            <span className="money-acc-name">{NAMES[a.account]}</span>
+            <span className="money-acc-balance">{money(a.balance_cents)}</span>
+            <span className="money-acc-chev" aria-hidden="true">{open ? '▾' : '▸'}</span>
+            <span className={`money-acc-sub${sub.danger ? ' danger' : ''}`}>{sub.line}</span>
+          </button>
+          {open && !personalEbay && <div className="money-acc-body">
+            {(a.account === 'ebay' || a.account === 'square') && detail.available_cents != null && (
+              <div className="money-breakdown">
+                <div><span>Available</span><strong>{money(detail.available_cents)}</strong></div>
+                <div><span>Processing</span><strong>{money(detail.processing_cents || 0)}</strong></div>
+                <div><span>On hold</span><strong>{money(detail.on_hold_cents || 0)}</strong></div>
+              </div>
+            )}
+            <div className="money-page-actions">
+              <button type="button" className="secondary" onClick={() => setSheet({ account: a.account, dir: 'in' })}>+ Add money</button>
+              <button type="button" className="secondary" onClick={() => setSheet({ account: a.account, dir: 'out' })}>− Take out</button>
+            </div>
+            <div className="money-activity">{(recent[a.account] || []).length ? rowsView(a.account, recent[a.account]) : <p className="empty">No activity yet.</p>}</div>
+            <button type="button" className="money-link money-all" onClick={() => void openAll(a.account)}>See all activity</button>
+          </div>}
+          {open && personalEbay && <div className="money-acc-body">
+            <p className="hint">Orders-only eBay connection for personal account.</p>
+            <button type="button" className="secondary" disabled={connecting === a.account} onClick={() => void reconnectPersonalEbay()}>Reconnect pgg124-5</button>
+          </div>}
+        </div>;
       })}
-    </div>
+      <WithdrawalsLog client={client} money={money} stamp={stamp} onChanged={load} open={openAcc === 'withdrawals'} onToggle={() => toggleAcc('withdrawals')} />
+    </div>}
     {all && <div className="money-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) setAll(null); }}>
       <section className="money-sheet" role="dialog" aria-modal="true" aria-label={`${NAMES[all.account]} activity`}>
         <div className="money-sheet-head"><h2>{NAMES[all.account]} activity</h2><button type="button" className="money-x" aria-label="Close" onClick={() => setAll(null)}>×</button></div>
@@ -186,7 +235,7 @@ export function MoneyPage({ client, storeId, accessToken, money, stamp }: Props)
 
 type Wd = { id: string; account: string; amount_cents: number; at: string; on_date?: string; reason: string; note: string; auto: boolean; reference: string | null; bank_last4?: string | null; duplicate: boolean };
 
-function WithdrawalsLog({ client, money, stamp, onChanged }: { client: SupabaseClient; money: (c: number) => string; stamp: (v: string) => string; onChanged: () => Promise<void> }) {
+function WithdrawalsLog({ client, money, stamp, onChanged, open, onToggle }: { client: SupabaseClient; money: (c: number) => string; stamp: (v: string) => string; onChanged: () => Promise<void>; open: boolean; onToggle: () => void }) {
   const [source, setSource] = useState('');
   const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const [rows, setRows] = useState<Wd[]>([]);
@@ -242,17 +291,31 @@ function WithdrawalsLog({ client, money, stamp, onChanged }: { client: SupabaseC
     await load(); await onChanged();
   }
 
-  return <section className="panel" aria-label="Withdrawals">
-    <h2>Withdrawals</h2>
-    <p>Every dollar that left a source this month. eBay and Square payouts sync automatically (Open Box eBay only). Safe cash still uses Take out on the Safe card.</p>
-    <div className="money-buttons">
+  const monthLabel = new Date(`${month}-01T12:00:00`).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  const monthTotal = shown.reduce((n, r) => n + r.amount_cents, 0);
+  const payoutCount = shown.length;
+
+  return <div className="money-acc-group" role="listitem">
+    <button type="button" className="money-acc-row" aria-expanded={open} onClick={onToggle}>
+      <span className="money-acc-name">Withdrawals · {monthLabel} · {payoutCount} payout{payoutCount === 1 ? '' : 's'}</span>
+      <span className="money-acc-balance">−{money(monthTotal)}</span>
+      <span className="money-acc-chev" aria-hidden="true">{open ? '▾' : '▸'}</span>
+      <span className="money-acc-sub">Every dollar that left a source</span>
+    </button>
+    {open && <div className="money-acc-body">
+    <div className="money-wd-filters">
       <select aria-label="Source" value={source} onChange={(e) => setSource(e.target.value)}>
         <option value="">All sources</option>
         {sources.map((s) => <option key={s} value={s}>{NAMES[s] || s}</option>)}
       </select>
       <input aria-label="Month" type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
-      <button type="button" className="money-take" onClick={() => setForm(true)}>Add withdrawal</button>
     </div>
+    <button type="button" className="secondary" style={{ width: '100%', marginBottom: 12 }} onClick={() => setForm(true)}>+ Add withdrawal</button>
+    {sources.length > 0 && (
+      <p className="money-wd-totals">
+        {[...bySource.entries()].map(([acct, cents]) => <span key={acct}>{NAMES[acct] || acct} <strong>{money(cents)}</strong></span>)}
+      </p>
+    )}
     {error && <p className="alert" role="alert">{error}</p>}
     {form && <form onSubmit={(e) => void add(e)} className="money-sheet" style={{ position: 'static', margin: '8px 0' }}>
       <label>Source
@@ -292,9 +355,8 @@ function WithdrawalsLog({ client, money, stamp, onChanged }: { client: SupabaseC
       </div>
       <b className="money-out">−{money(r.amount_cents)}</b>
     </div>; })}
-    {[...bySource.entries()].map(([acct, cents]) => <p key={acct}>{NAMES[acct] || acct} total {money(cents)}</p>)}
-    <p className="hint">Saved {stamp(new Date().toISOString())}</p>
-  </section>;
+    </div>}
+  </div>;
 }
 
 function ActivityLine({ row, account, title, who, money, stamp, client, onOpen, setError }: { row: Row; account: Account; title: string; who: string; money: (c: number) => string;
@@ -303,7 +365,6 @@ function ActivityLine({ row, account, title, who, money, stamp, client, onOpen, 
   const [lines, setLines] = useState<SaleLine[] | null>(null);
   if (row.kind === 'marker') return <div className="money-line money-marker"><div><span className="money-line-title">Counted {money(row.amount_cents)}</span>
     <small>{shortDate(row.at)}{row.note ? ` · ${row.note}` : ''} · note only, balance unchanged</small></div></div>;
-  const green = row.direction === 'in';
   if (row.kind === 'sales') {
     const toggle = async () => {
       setOpen(!open);
@@ -314,14 +375,14 @@ function ActivityLine({ row, account, title, who, money, stamp, client, onOpen, 
     };
     return <div className="money-line-wrap"><button type="button" className="money-line money-sales" onClick={() => void toggle()} aria-expanded={open}>
       <div><span className="money-line-title">{row.label} · {weekLabel(row.week || row.at)}</span><small>{row.n ? `${row.n} sale${row.n === 1 ? '' : 's'}` : 'adjustment'}</small></div>
-      <b className={green ? 'money-in' : 'money-out'}>{green ? '+' : '−'}{money(Math.abs(row.amount_cents))}</b></button>
+      <b className="money-in">{row.amount_cents >= 0 ? '+' : '−'}{money(Math.abs(row.amount_cents))}</b></button>
       {open && <div className="money-sale-lines">{lines === null ? <small>Loading…</small> : lines.length === 0 ? <small>No individual sales.</small> : lines.map((l, i) => <div key={i}><span>{shortDate(l.at)} · {l.receipt_no || l.sku || 'sale'}</span><span>{money(l.cents)}</span></div>)}</div>}
     </div>;
   }
   return <button type="button" className="money-line" onClick={onOpen}>
     <div><span className="money-line-title">{title}{row.auto && <em className="money-auto">Auto</em>}</span>
       <small>{shortDate(row.at)}{who ? ` · ${who}` : ''}{row.note && !/imported from (square api|ebay finances api)/i.test(row.note) ? ` · “${row.note}”` : ''}{row.transfer_id ? ' · transfer' : ''}</small></div>
-    <b className={green ? 'money-in' : 'money-out'}>{green ? '+' : '−'}{money(row.amount_cents)}</b></button>;
+    <b className={row.direction === 'in' ? 'money-in' : 'money-out'}>{row.direction === 'in' ? '+' : '−'}{money(row.amount_cents)}</b></button>;
 }
 
 function MoneySheet({ client, sheet, overview, people, meName, meId, money, stamp, names, onClose, onDone }: { client: SupabaseClient; sheet: { account: Account; dir: Dir; row?: Row };

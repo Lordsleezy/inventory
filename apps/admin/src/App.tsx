@@ -369,7 +369,7 @@ export function App() {
   /** Keeps hover-peek rail open after clicking a nav group (collapsed desktop). */
   const [navPeekSticky, setNavPeekSticky] = useState(false);
   const [darkMode, setDarkMode] = useState(() => {
-    try { return localStorage.getItem('floor_admin_dark') === '1'; } catch { return false; }
+    try { return localStorage.getItem('floor_admin_dark') !== '0'; } catch { return true; }
   });
   const [navGroup, setNavGroup] = useState<'reports' | 'inventory' | 'other' | null>(null);
   const [showInstallGate, setShowInstallGate] = useState(() => shouldShowInstallGate());
