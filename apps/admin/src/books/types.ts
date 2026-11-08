@@ -139,6 +139,24 @@ export type InventorySummary = {
   replacements: Row[];
   returns: Row[];
   defective_moves: Row[];
+  owner?: InventoryOwner;
+};
+
+export type InventoryOwner = {
+  value?: {
+    start_units?: number; end_units?: number;
+    start_cost_cents?: number; end_cost_cents?: number;
+    start_floor_cents?: number | null; end_floor_cents?: number;
+    start_source?: string; end_source?: string; start_note?: string;
+  };
+  categories?: { category: string; units: number; cost_cents: number; floor_cents: number; sold_units: number; sell_through: number }[];
+  listed?: { channel: string; units: number; cost_cents: number }[];
+  listed_once?: { units: number; cost_cents: number };
+  unlisted?: { reason: string; units: number; cost_cents: number }[];
+  aging?: { bucket: string; units: number; cost_cents: number }[];
+  movement?: Record<string, number>;
+  slowest?: { sku: string; title: string; days: number | null; cost_cents: number; floor_cents: number; listed: string }[];
+  returns?: { sku: string; title: string; channel: string; status: string; refund_cents: number }[];
 };
 
 export type ReceivedItem = Row;

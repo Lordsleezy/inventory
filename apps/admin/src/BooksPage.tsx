@@ -116,6 +116,8 @@ export function BooksPage({ client, money, native = false, onNativeNavigation }:
         if (invRes.error) throw invRes.error;
         if (recRes.error) throw recRes.error;
         inv = { ...emptyInventory(), ...(invRes.data as InventorySummary) };
+        const ownerRes = await client.rpc('portal_books_inventory_owner', { p_period: p.id });
+        if (!ownerRes.error && ownerRes.data) inv = { ...inv, owner: ownerRes.data as InventorySummary['owner'] };
         recv = (recRes.data || []) as ReceivedItem[];
       }
       const next = { ...normalizeReport(rawReport), inventory_summary: inv, items_received: recv };

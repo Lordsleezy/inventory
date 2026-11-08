@@ -515,6 +515,8 @@ function PayoutsBody({ money, workbook, native }: { money: (c: number) => string
 }
 
 function InventoryBody({ money, inventory, native }: { money: (c: number) => string; inventory: InventorySummary; native?: boolean }) {
+  const o = inventory.owner;
+  const v = o?.value;
   const rows = [
     ['Start of month', inventory.start_unit_count, ''],
     ['Received', inventory.received_units, '+'],
@@ -525,8 +527,94 @@ function InventoryBody({ money, inventory, native }: { money: (c: number) => str
     ['Moved to Defective', inventory.defective_units, '-'],
     ['End of month', inventory.end_unit_count, ''],
   ] as const;
+  const move = o?.movement || {};
   return (
     <>
+      {v && (
+        <div className={native ? 'native-report-group' : 'books-table-wrap'}>
+          <p className="native-report-section">ON THE SHELF</p>
+          <div className="native-report-row"><span>Units now</span><b>{v.end_units ?? inventory.end_unit_count}</b></div>
+          <div className="native-report-row"><span>Cost value</span><b>{money(Number(v.end_cost_cents || 0))}</b></div>
+          <div className="native-report-row"><span>Floor price value</span><b>{money(Number(v.end_floor_cents || 0))}</b></div>
+          <div className="native-report-row"><span>Start units{v.start_source === 'snapshot' ? '' : ' (estimated)'}</span><b>{v.start_units ?? inventory.start_unit_count}</b></div>
+          <div className="native-report-row"><span>Start cost{v.start_source === 'snapshot' ? '' : ' (estimated)'}</span><b>{money(Number(v.start_cost_cents || 0))}</b></div>
+          {v.start_note && <p className="books-proof-audit">{v.start_note}</p>}
+          {o?.listed_once && <div className="native-report-row"><span>Listed somewhere (counted once)</span><b>{o.listed_once.units} · {money(Number(o.listed_once.cost_cents || 0))}</b></div>}
+        </div>
+      )}
+      {(o?.categories || []).length > 0 && (
+        <>
+          <p className="native-report-section">BY CATEGORY</p>
+          <div className="native-report-group">
+            {o!.categories!.map((c) => (
+              <div key={c.category} className="native-report-row">
+                <span><strong>{c.category}</strong><small>{c.units} on hand · sold {c.sold_units} · {c.sell_through}% sell-through</small></span>
+                <b>{money(c.cost_cents)}</b>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+      {(o?.listed || []).length > 0 && (
+        <>
+          <p className="native-report-section">LISTED BY CHANNEL</p>
+          <div className="native-report-group">
+            {o!.listed!.map((c) => (
+              <div key={c.channel} className="native-report-row"><span>{c.channel}</span><b>{c.units} · {money(c.cost_cents)}</b></div>
+            ))}
+          </div>
+        </>
+      )}
+      {(o?.unlisted || []).length > 0 && (
+        <>
+          <p className="native-report-section">NOT LISTED</p>
+          <div className="native-report-group">
+            {o!.unlisted!.map((c) => (
+              <div key={c.reason} className="native-report-row"><span>{c.reason}</span><b>{c.units} · {money(c.cost_cents)}</b></div>
+            ))}
+          </div>
+        </>
+      )}
+      {(o?.aging || []).length > 0 && (
+        <>
+          <p className="native-report-section">AGING</p>
+          <div className="native-report-group">
+            {o!.aging!.map((c) => (
+              <div key={c.bucket} className="native-report-row"><span>{c.bucket}</span><b>{c.units} · {money(c.cost_cents)}</b></div>
+            ))}
+          </div>
+        </>
+      )}
+      {o?.movement && (
+        <>
+          <p className="native-report-section">THIS MONTH AT COST</p>
+          <div className="native-report-group">
+            {[
+              ['Received', move.received_units, move.received_cost_cents],
+              ['Sold', move.sold_units, move.sold_cost_cents],
+              ['Returned to stock', move.return_to_stock_units, move.return_to_stock_cost_cents],
+              ['Given away', move.giveaway_units, move.giveaway_cost_cents],
+              ['Replacements', move.replacement_units, move.replacement_cost_cents],
+              ['Moved to Defective', move.defective_units, move.defective_cost_cents],
+            ].map(([label, units, cents]) => (
+              <div key={String(label)} className="native-report-row"><span>{label}</span><b>{units} · {money(Number(cents || 0))}</b></div>
+            ))}
+          </div>
+        </>
+      )}
+      {(o?.slowest || []).length > 0 && (
+        <>
+          <p className="native-report-section">SLOWEST</p>
+          <div className="native-report-group">
+            {o!.slowest!.map((s) => (
+              <div key={s.sku} className="native-report-row">
+                <span><strong>{s.title}</strong><small>SKU {s.sku} · {s.days == null ? 'no received date' : `${s.days} days`} · {s.listed || 'not listed'}</small></span>
+                <b>{money(s.cost_cents)}</b>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
       <div className={`${native ? 'native-report-group' : 'books-table-wrap books-inventory-flow'}`}>
         {rows.map(([label, value, sign]) => (
           native
@@ -536,13 +624,13 @@ function InventoryBody({ money, inventory, native }: { money: (c: number) => str
       </div>
       <DetailBlock title="GIVEN AWAY" items={(inventory.giveaways || []).map((g) => ({ t: String(g.title), s: `${shortDate(String(g.date))} · SKU ${g.sku} · ${g.given_to}`, r: money(Number(g.cost_cents || 0)) }))} />
       <DetailBlock title="REPLACEMENTS" items={(inventory.replacements || []).map((r) => ({ t: String(r.title), s: `Sale #${r.original_sale_id} · SKU ${r.sku}`, r: r.bad_unit_status === 'returned' ? 'Bad unit back' : String(r.bad_unit_status || '—') }))} />
-      <DetailBlock title="RETURNS" items={(inventory.returns || []).map((r) => ({ t: `${r.sku} · ${r.channel}`, s: `Refund ${money(Number(r.refund_cents || 0))} · Label ${money(Number(r.label_cents || 0))}${r.buyer_keeps_item ? ' · Buyer kept item' : ''}`, r: String(r.status || '') }))} />
+      <DetailBlock title="RETURNS" items={(o?.returns?.length ? o.returns : inventory.returns || []).map((r) => ({ t: String(r.title || r.sku), s: `${r.channel} · SKU ${r.sku} · Refund ${money(Number(r.refund_cents || 0))}`, r: String(r.status || '') }))} />
     </>
   );
 }
 
 function DetailBlock({ title, items }: { title: string; items: { t: string; s: string; r: string }[] }) {
-  if (!items.length) return null;
+  if (!items.length) return <><p className="native-report-section">{title}</p><p className="empty">None this month</p></>;
   return (
     <>
       <p className="native-report-section">{title}</p>

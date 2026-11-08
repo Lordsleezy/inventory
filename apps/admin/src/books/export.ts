@@ -220,6 +220,61 @@ export async function buildBooksExcel(period: Period, wb: BooksWorkbook, label: 
   bandRows(wsI, mStart, wsI.rowCount);
   wrapDataRows(wsI, mStart, wsI.rowCount, 3);
   fitWrappedRowHeights(wsI, mStart, wsI.rowCount, invWidths);
+  const own = inv.owner;
+  if (own?.value) {
+    wsI.addRow([]);
+    const shelf = wsI.addRow(['Shelf value']);
+    mergeLabelRow(wsI, shelf.number, 1, invCols, 'Shelf value');
+    shelf.font = { bold: true };
+    wsI.addRow(['', 'Units', 'Cost', 'Floor price']);
+    const endRow = wsI.addRow(['End of month', own.value.end_units, moneyCell(own.value.end_cost_cents), moneyCell(own.value.end_floor_cents)]);
+    endRow.getCell(3).numFmt = MONEY_FMT;
+    endRow.getCell(4).numFmt = MONEY_FMT;
+    const startRow = wsI.addRow(['Start of month', own.value.start_units, moneyCell(own.value.start_cost_cents), moneyCell(own.value.start_floor_cents ?? null)]);
+    startRow.getCell(3).numFmt = MONEY_FMT;
+    if (own.value.start_floor_cents != null) startRow.getCell(4).numFmt = MONEY_FMT;
+    if (own.value.start_note) {
+      const note = wsI.addRow([own.value.start_note]);
+      mergeLabelRow(wsI, note.number, 1, invCols, own.value.start_note);
+    }
+  }
+  const writePairs = (title: string, headers: string[], rows: (string | number | null)[][]) => {
+    wsI.addRow([]);
+    const b = wsI.addRow([title]);
+    mergeLabelRow(wsI, b.number, 1, invCols, title);
+    b.font = { bold: true };
+    if (!rows.length) { wsI.addRow(['None']); return; }
+    wsI.addRow(headers);
+    for (const cells of rows) {
+      const row = wsI.addRow(cells);
+      cells.forEach((cell, i) => {
+        if (typeof cell === 'number' && headers[i]?.toLowerCase().includes('cost') || (typeof cell === 'number' && String(headers[i] || '').toLowerCase().includes('floor'))) {
+          row.getCell(i + 1).numFmt = MONEY_FMT;
+        }
+      });
+    }
+  };
+  if (own) {
+    writePairs('By category', ['Category', 'Units', 'Cost', 'Floor', 'Sold', 'Sell-through %'],
+      (own.categories || []).map((c) => [c.category, c.units, (c.cost_cents || 0) / 100, (c.floor_cents || 0) / 100, c.sold_units, c.sell_through]));
+    writePairs('Listed by channel (an item on several channels is listed under each)', ['Channel', 'Units', 'Cost'],
+      (own.listed || []).map((c) => [c.channel, c.units, (c.cost_cents || 0) / 100]));
+    writePairs('Not listed', ['Reason', 'Units', 'Cost'],
+      (own.unlisted || []).map((c) => [c.reason, c.units, (c.cost_cents || 0) / 100]));
+    writePairs('Aging', ['Bucket', 'Units', 'Cost'],
+      (own.aging || []).map((c) => [c.bucket, c.units, (c.cost_cents || 0) / 100]));
+    const mv = own.movement || {};
+    writePairs('This month at cost', ['Movement', 'Units', 'Cost'], [
+      ['Received', mv.received_units || 0, (mv.received_cost_cents || 0) / 100],
+      ['Sold', mv.sold_units || 0, (mv.sold_cost_cents || 0) / 100],
+      ['Returned to stock', mv.return_to_stock_units || 0, (mv.return_to_stock_cost_cents || 0) / 100],
+      ['Given away', mv.giveaway_units || 0, (mv.giveaway_cost_cents || 0) / 100],
+      ['Replacements', mv.replacement_units || 0, (mv.replacement_cost_cents || 0) / 100],
+      ['Moved to Defective', mv.defective_units || 0, (mv.defective_cost_cents || 0) / 100],
+    ]);
+    writePairs('Slowest movers', ['SKU', 'Item', 'Days', 'Cost', 'Floor', 'Listed'],
+      (own.slowest || []).map((s) => [s.sku, s.title, s.days ?? '', (s.cost_cents || 0) / 100, (s.floor_cents || 0) / 100, s.listed || 'not listed']));
+  }
   const sectionBanner = (title: string) => {
     wsI.addRow([]);
     const row = wsI.addRow([title]);

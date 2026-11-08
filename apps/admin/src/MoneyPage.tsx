@@ -18,7 +18,8 @@ type Audit = { id: number; action: string; at: string; actor_id: string | null; 
 type Person = { id: string; label: string };
 type Props = { client: SupabaseClient; storeId: string; accessToken: string; money: (cents: number) => string; stamp: (value: string) => string };
 
-const NAMES: Record<Account, string> = { safe: 'Safe cash', square: 'Square', ebay: 'eBay', ebay_pgg124_5: 'eBay · pgg124-5', depop: 'Depop', mercari: 'Mercari', amazon: 'Amazon', tiktok: 'TikTok' }; // pragma: allowlist secret
+const NAMES: Record<string, string> = { safe: 'Safe cash', square: 'Square', ebay: 'eBay', ebay_pgg124_5: 'eBay · pgg124-5', depop: 'Depop', mercari: 'Mercari', amazon: 'Amazon', tiktok: 'TikTok', other: 'Other' }; // pragma: allowlist secret
+const MANUAL_SOURCES = ['depop', 'mercari', 'tiktok', 'amazon', 'other'] as const;
 const REASON: Record<string, string> = {
   starting_cash: 'Starting cash', change_for_drawer: 'Change for drawer', moved_from_square: 'Moved from Square', moved_from_safe: 'Moved from Safe',
   owner_put_in: 'Owner put in', count_correction: 'Count correction', owner_draw: 'Owner draw', person_payout: 'Payout', bank_deposit: 'Bank deposit',
@@ -126,7 +127,7 @@ export function MoneyPage({ client, storeId, accessToken, money, stamp }: Props)
     {error && <div className="alert" role="alert">{error}<button type="button" aria-label="Dismiss error" onClick={() => setError('')}>×</button></div>}
     {notice && <div className="notice" role="status">{notice}</div>}
     {!loaded && !error && <p role="status">Loading money…</p>}
-    {loaded && <WithdrawalsLog overview={overview} recent={recent} money={money} names={NAMES} />}
+    {loaded && <WithdrawalsLog client={client} money={money} stamp={stamp} onChanged={load} />}
     <div className="money-cards">
       {overview.map((a) => {
         const detail = a.sync?.detail || {};
@@ -160,33 +161,102 @@ export function MoneyPage({ client, storeId, accessToken, money, stamp }: Props)
   </div>;
 }
 
-function WithdrawalsLog({ overview, recent, money, names }: { overview: Overview[]; recent: Record<string, Row[]>; money: (c: number) => string; names: Record<Account, string> }) {
-  const [source, setSource] = useState<Account | ''>('');
-  const [month, setMonth] = useState('');
-  const lines = overview.flatMap((a) => (recent[a.account] || [])
-    .filter((r) => r.kind === 'entry' && r.direction === 'out')
-    .map((r) => ({ ...r, account: a.account })))
-    .filter((r) => (!source || r.account === source) && (!month || r.at.slice(0, 7) === month))
-    .sort((a, b) => b.at.localeCompare(a.at));
+type Wd = { id: string; account: string; amount_cents: number; at: string; reason: string; note: string; auto: boolean; reference: string | null; duplicate: boolean };
+
+function WithdrawalsLog({ client, money, stamp, onChanged }: { client: SupabaseClient; money: (c: number) => string; stamp: (v: string) => string; onChanged: () => Promise<void> }) {
+  const [source, setSource] = useState('');
+  const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const [rows, setRows] = useState<Wd[]>([]);
+  const [error, setError] = useState('');
+  const [form, setForm] = useState(false);
+  const [account, setAccount] = useState<string>('depop');
+  const [amount, setAmount] = useState('');
+  const [note, setNote] = useState('');
+  const [day, setDay] = useState(() => new Date().toISOString().slice(0, 10));
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    const [y, m] = month.split('-').map(Number);
+    const from = `${month}-01`;
+    const to = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+    const { data, error: e } = await client.rpc('portal_money_withdrawals', { p_from: from, p_to: to });
+    if (e) { setError(e.message); return; }
+    setRows((data || []) as Wd[]);
+    setError('');
+  }, [client, month]);
+
+  useEffect(() => { void load(); }, [load]);
+
+  const shown = rows.filter((r) => !source || r.account === source);
   const bySource = new Map<string, number>();
-  for (const r of lines) bySource.set(r.account, (bySource.get(r.account) || 0) + r.amount_cents);
+  for (const r of shown) bySource.set(r.account, (bySource.get(r.account) || 0) + r.amount_cents);
+  const sources = [...new Set(rows.map((r) => r.account))].sort();
+
+  async function add(event: FormEvent) {
+    event.preventDefault();
+    const cents = Math.round(Number(amount) * 100);
+    if (!Number.isFinite(cents) || cents <= 0) { setError('Enter an amount.'); return; }
+    setBusy(true);
+    const { error: e } = await client.rpc('portal_money_save', {
+      p_id: null, p_account: account, p_direction: 'out', p_amount_cents: cents, p_reason: 'other',
+      p_note: note.trim(), p_at: new Date(`${day}T12:00:00`).toISOString(), p_person: null, p_performer: null,
+    });
+    setBusy(false);
+    if (e) { setError(e.message); return; }
+    setForm(false); setAmount(''); setNote('');
+    await load(); await onChanged();
+  }
+  async function resolve(id: string, keep: boolean) {
+    const { error: e } = await client.rpc('portal_money_resolve_duplicate', { p_id: id, p_keep: keep });
+    if (e) { setError(e.message); return; }
+    await load(); await onChanged();
+  }
+  async function remove(id: string) {
+    if (!window.confirm('Delete this withdrawal? The history stays.')) return;
+    const { error: e } = await client.rpc('portal_money_delete', { p_id: id });
+    if (e) { setError(e.message); return; }
+    await load(); await onChanged();
+  }
+
   return <section className="panel" aria-label="Withdrawals">
     <h2>Withdrawals</h2>
-    <p>Every dollar that left a source. eBay and Square bank payouts sync on the existing money job (Open Box eBay only). A matching hand-entered line is flagged, not deleted.</p>
+    <p>Every dollar that left a source this month. eBay and Square payouts sync automatically (Open Box eBay only). Safe cash still uses Take out on the Safe card.</p>
     <div className="money-buttons">
-      <select aria-label="Source" value={source} onChange={(e) => setSource(e.target.value as Account | '')}>
+      <select aria-label="Source" value={source} onChange={(e) => setSource(e.target.value)}>
         <option value="">All sources</option>
-        {overview.map((a) => <option key={a.account} value={a.account}>{names[a.account]}</option>)}
+        {sources.map((s) => <option key={s} value={s}>{NAMES[s] || s}</option>)}
       </select>
       <input aria-label="Month" type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
+      <button type="button" className="money-take" onClick={() => setForm(true)}>Add withdrawal</button>
     </div>
-    {!lines.length && <p className="empty">No withdrawals in this view. Open a card and choose See all activity for older rows.</p>}
-    {lines.map((r) => <div className="money-line" key={`${r.account}-${r.id}`}>
-      <div><span className="money-line-title">{names[r.account]}{r.auto ? ' · Auto' : ''}{String(r.note || '').toLowerCase().includes('possible duplicate') ? ' · Possible duplicate' : ''}</span>
-        <small>{shortDate(r.at)}{r.note ? ` · ${r.note}` : ''}</small></div>
+    {error && <p className="alert" role="alert">{error}</p>}
+    {form && <form onSubmit={(e) => void add(e)} className="money-sheet" style={{ position: 'static', margin: '8px 0' }}>
+      <label>Source
+        <select value={account} onChange={(e) => setAccount(e.target.value)}>
+          {MANUAL_SOURCES.map((s) => <option key={s} value={s}>{NAMES[s]}</option>)}
+        </select>
+      </label>
+      <label>Date<input type="date" value={day} onChange={(e) => setDay(e.target.value)} /></label>
+      <label>Amount<input inputMode="decimal" type="number" min="0.01" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} /></label>
+      <label>Note<input value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} placeholder="Reference, optional" /></label>
+      <button className="money-go out" disabled={busy}>{busy ? 'Saving…' : 'Save withdrawal'}</button>
+      <button type="button" className="secondary" onClick={() => setForm(false)}>Cancel</button>
+    </form>}
+    {!shown.length && <p className="empty">No withdrawals this month.</p>}
+    {shown.map((r) => <div className="money-line" key={r.id}>
+      <div>
+        <span className="money-line-title">{NAMES[r.account] || r.account}{r.auto ? ' · Auto' : ''}{r.duplicate ? ' · Possible duplicate' : ''}</span>
+        <small>{shortDate(r.at)}{r.reference ? ` · ${r.reference}` : ''}{r.note ? ` · ${r.note}` : ''}</small>
+        {r.duplicate && !r.auto && <span>
+          <button type="button" className="money-link" onClick={() => void resolve(r.id, true)}>Keep both</button>
+          <button type="button" className="money-link" onClick={() => void resolve(r.id, false)}>Remove duplicate</button>
+        </span>}
+        {!r.auto && <button type="button" className="money-link" onClick={() => void remove(r.id)}>Delete</button>}
+      </div>
       <b className="money-out">−{money(r.amount_cents)}</b>
     </div>)}
-    {[...bySource.entries()].map(([acct, cents]) => <p key={acct}>{names[acct as Account]} total {money(cents)}</p>)}
+    {[...bySource.entries()].map(([acct, cents]) => <p key={acct}>{NAMES[acct] || acct} total {money(cents)}</p>)}
+    <p className="hint">Saved {stamp(new Date().toISOString())}</p>
   </section>;
 }
 
