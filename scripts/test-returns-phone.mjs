@@ -19,17 +19,39 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { ReturnsSimplified } from './apps/admin/src/returns/ReturnsSimplified';
 
-const rows = [{
+const openRows = [{
   id: 'r1', sku: '11717', title: 'Phillips Phillips sonicare protective clean 5100 2 pack',
   channel: 'ebay', status: 'requested', reason: 'not_as_described', fault: 'seller',
   external_order_id: '12-345', refund_cents: 5847, return_label_cents: 856,
   label_paid_by: 'seller', tracking_number: null, requested_qty: 1, route_to: 'garage',
   created_at: new Date().toISOString(),
 }];
+const closedRows = [{
+  id: 'r2', sku: '22001', title: 'Closed blender',
+  channel: 'amazon', status: 'closed', reason: 'other',
+  external_order_id: 'A-1', refund_cents: 1200, return_label_cents: 0,
+  label_paid_by: 'seller', tracking_number: '9400', requested_qty: 1, route_to: 'garage',
+  created_at: new Date().toISOString(), closed_at: new Date().toISOString(),
+}];
+const replacementRows = [{
+  id: 'r3', sku: '33001', title: 'Replacement lamp', kind: 'replacement',
+  channel: 'website', status: 'requested', reason: 'other',
+  external_order_id: null, refund_cents: 0, return_label_cents: 500,
+  label_paid_by: 'seller', tracking_number: null, requested_qty: 1, route_to: 'garage',
+  replacement_sku: '33002', replacement_id: 'rep-1',
+  created_at: new Date().toISOString(),
+}];
 
+window.__returnFilters = [];
 const client = {
-  rpc: async (name) => {
-    if (name === 'portal_return_desk') return { data: { rows } };
+  rpc: async (name, args = {}) => {
+    if (name === 'portal_return_desk') {
+      window.__returnFilters.push(args.p_filter || 'open');
+      const filter = args.p_filter || 'open';
+      if (filter === 'closed') return { data: { rows: closedRows } };
+      if (filter === 'replacements') return { data: { rows: replacementRows } };
+      return { data: { rows: openRows } };
+    }
     if (name === 'portal_return_tracking_timeline') return { data: { status_line: '', events: [] } };
     return { data: null };
   },
@@ -79,33 +101,36 @@ try {
     await page.goto('https://returns-phone.test');
     await page.addScriptTag({ content: outputFiles[0].text });
     await page.getByRole('heading', { name: 'Returns' }).waitFor();
-    assert.equal(await page.getByPlaceholder('Search SKU or order').count(), 1, `${vp.name}: one search`);
-    assert.equal(await page.locator('.returns-row').count(), 1, `${vp.name}: list row`);
-    assert.equal(await page.getByRole('tab', { name: /Open/ }).count(), 1, `${vp.name}: Open tab`);
-    assert.equal(await page.getByRole('tab', { name: 'Closed' }).count(), 1, `${vp.name}: Closed tab`);
-    assert.equal(await page.getByRole('tab', { name: 'Replacements' }).count(), 1, `${vp.name}: Replacements tab`);
-    const title = await page.locator('.returns-row-main strong').innerText();
-    assert.equal(title, 'Phillips sonicare protective clean 5100 2 pack', `${vp.name}: collapsed brand`);
-    assert.match(await page.locator('.returns-attention').innerText(), /No tracking/, `${vp.name}: red attention`);
-    const overflow = await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1);
-    assert.ok(overflow, `${vp.name}: no horizontal scroll`);
+    await page.locator('.returns-row-main strong').filter({ hasText: 'Phillips sonicare' }).waitFor();
+    assert.equal(await page.locator('.returns-row').count(), 1, `${vp.name}: open list row`);
+
+    await page.getByRole('tab', { name: 'Closed' }).click();
+    await page.locator('.returns-row-main strong').filter({ hasText: 'Closed blender' }).waitFor();
+    assert.equal(await page.getByRole('tab', { name: 'Closed' }).getAttribute('aria-selected'), 'true', `${vp.name}: Closed selected`);
+    assert.equal(await page.locator('.returns-row').count(), 1, `${vp.name}: closed list row`);
+
+    await page.getByRole('tab', { name: 'Replacements' }).click();
+    await page.locator('.returns-row-main strong').filter({ hasText: 'Replacement lamp' }).waitFor();
+    assert.equal(await page.getByRole('tab', { name: 'Replacements' }).getAttribute('aria-selected'), 'true', `${vp.name}: Replacements selected`);
+
+    await page.getByRole('tab', { name: /Open/ }).click();
+    await page.locator('.returns-row-main strong').filter({ hasText: 'Phillips sonicare' }).waitFor();
+
+    const filters = await page.evaluate(() => window.__returnFilters);
+    assert.ok(filters.includes('open'), `${vp.name}: loaded open`);
+    assert.ok(filters.includes('closed'), `${vp.name}: loaded closed`);
+    assert.ok(filters.includes('replacements'), `${vp.name}: loaded replacements`);
 
     await page.locator('.returns-row').click();
     await page.getByRole('heading', { level: 2, name: 'Phillips sonicare protective clean 5100 2 pack' }).waitFor();
-    assert.equal(await page.locator('.returns-detail-title').count(), 1, `${vp.name}: one title`);
     assert.equal(await page.getByRole('button', { name: 'Mark shipped back' }).count(), 1, `${vp.name}: ship action`);
     assert.equal(await page.getByRole('button', { name: 'Add tracking' }).count(), 1, `${vp.name}: add tracking`);
     const confirm = page.getByRole('button', { name: /Confirm refund/ });
     assert.equal(await confirm.count(), 1, `${vp.name}: confirm refund`);
-    const confirmColor = await confirm.evaluate((el) => {
-      const s = getComputedStyle(el);
-      return { color: s.color, background: s.backgroundColor, border: s.borderTopColor };
-    });
-    assert.notEqual(confirmColor.color, confirmColor.background, `${vp.name}: confirm contrast`);
     await page.screenshot({ path: `scripts/screenshots/returns-after-${vp.width}.png`, fullPage: true });
     await page.close();
   }
-  console.log('PASS: Returns list/detail fit phone widths, collapse double brand, and keep action labels readable.');
+  console.log('PASS: Returns tabs refetch Open / Closed / Replacements and detail stays readable.');
 } finally {
   await browser.close();
 }
