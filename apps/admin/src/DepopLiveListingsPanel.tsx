@@ -35,9 +35,17 @@ export function DepopLiveListingsPanel({ client, money, variant }: { client: Sup
     return () => { alive = false; clearTimeout(timer); };
   }, [client, query]);
 
-  const soldElsewhere = useMemo(() => (rows || []).filter(row => ['sold', 'replaced', 'given_away'].includes(row.unit_state)).length, [rows]);
+  const isSoldElsewhere = (row: Row) => ['sold', 'replaced', 'given_away'].includes(row.unit_state);
+  const soldElsewhere = useMemo(() => (rows || []).filter(isSoldElsewhere).length, [rows]);
   const listedThisWeek = useMemo(() => (rows || []).filter(row => row.listed_at && row.listed_at.slice(0, 10) >= startOfWeekLA()).length, [rows]);
-  const shown = (rows || []).filter(row => row.sku.toLowerCase().includes(search.trim().toLowerCase()));
+  // Sold elsewhere (eBay etc.) first so pull-now work sits at the top of Listed.
+  const shown = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return (rows || [])
+      .filter(row => !q || row.sku.toLowerCase().includes(q))
+      .slice()
+      .sort((a, b) => Number(isSoldElsewhere(b)) - Number(isSoldElsewhere(a)) || a.sku.localeCompare(b.sku));
+  }, [rows, search]);
   async function add(e: React.FormEvent) {
     e.preventDefault(); if (!picked) return;
     const cents = Math.round(Number(price) * 100);
@@ -74,9 +82,9 @@ export function DepopLiveListingsPanel({ client, money, variant }: { client: Sup
     </section>
     {!adding && !selected && <section className="panel"><label>Search SKU<input type="search" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search SKU" /></label>
       {rows === null ? <p className="hint">Loading Depop SKUs…</p> : shown.length === 0 ? <div className="empty">No matching live Depop SKUs.</div> : <div className="depop-sku-list">{shown.map(row => {
-        const sold = ['sold', 'replaced', 'given_away'].includes(row.unit_state);
+        const sold = isSoldElsewhere(row);
         return <div className={`depop-sku-row${sold ? ' sold-elsewhere' : ''}`} key={row.sku}>
-          <button type="button" className="depop-sku-open" onClick={() => { setError(''); setSelected(row); }}><strong>{row.sku}</strong>{sold && <span>Sold elsewhere</span>}<b aria-hidden="true">›</b></button>
+          <button type="button" className="depop-sku-open" onClick={() => { setError(''); setSelected(row); }}><strong>{row.sku}</strong>{sold && <span>Needs remove</span>}<b aria-hidden="true">›</b></button>
           <button type="button" className="text-button depop-remove" disabled={busy} onClick={() => void remove(row)}>Remove</button>
         </div>;
       })}</div>}
