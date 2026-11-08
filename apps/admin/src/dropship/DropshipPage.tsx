@@ -401,6 +401,28 @@ export function DropshipPage({ session, money, onBack, backLabel = 'Other', embe
                   <button type="button" className="dropship-btn outline" disabled={!!busy} onClick={() => run('reject', () => call('decide_pick', { pick_id: p.id, decision: 'rejected' }).then(() => undefined))}>
                     Reject
                   </button>
+                  <button
+                    type="button"
+                    className="dropship-btn outline"
+                    disabled={!!busy}
+                    onClick={() =>
+                      run('sample', () =>
+                        call('order_sample', {
+                          catalog_item_id: (p as any).catalog_item_id,
+                          address: {
+                            name: 'Open Box Industries',
+                            line1: 'PROMPT_PAUL_ADDRESS',
+                            city: 'Penryn',
+                            region: 'CA',
+                            postal: '95663',
+                            country: 'US',
+                          },
+                        }).then(() => undefined),
+                      )
+                    }
+                  >
+                    Order sample
+                  </button>
                 </div>
               </div>
             ))}
@@ -454,7 +476,11 @@ export function DropshipPage({ session, money, onBack, backLabel = 'Other', embe
             <div><span>Late</span><b>{desk?.health ? `${Number(desk.health.late_pct).toFixed(2)}%` : '—'}</b></div>
             <div><span>Tracking</span><b>{desk?.health ? `${Number(desk.health.tracking_pct).toFixed(2)}%` : '—'}</b></div>
             <div><span>Defects</span><b>{desk?.health ? `${Number(desk.health.defect_pct).toFixed(2)}%` : '—'}</b></div>
+            <div><span>Returns</span><b>{desk?.health && (desk.health as any).return_pct != null ? `${Number((desk.health as any).return_pct).toFixed(2)}%` : '—'}</b></div>
           </div>
+          <p className="dropship-muted">
+            CJ dispute claim window: {settings.cj_dispute_window_unverified !== false ? 'UNVERIFIED — Paul files claims by hand in CJ Disputes' : `${settings.cj_dispute_window_days}d`}
+          </p>
           <p className="dropship-muted">
             CJ balance: {cj?.balance_cents != null ? money(cj.balance_cents) : '—'} · Points: {cj?.points_remaining ?? '—'}
           </p>
