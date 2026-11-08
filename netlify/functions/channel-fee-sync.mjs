@@ -363,6 +363,9 @@ async function handle(event) {
   }
   const scheduled = isNetlifyScheduleEvent(event);
   if (!scheduled && !(await callerIsAdmin(event))) return json(401, { error: "admin_required" });
+  let body = {};
+  try { body = typeof event.body === "string" ? JSON.parse(event.body || "{}") : (event.body || {}); } catch { body = {}; }
+  const forceMoney = !scheduled || body.force === true;
   const sb = serviceClient();
   const { data: stores, error } = await sb.from("stores").select("id");
   if (error) throw error;
@@ -370,7 +373,7 @@ async function handle(event) {
   for (const store of stores || []) {
     const log = [];
     out.stores[store.id] = log;
-    await syncStoreChannels(sb, store.id, log, { forceMoney: !scheduled });
+    await syncStoreChannels(sb, store.id, log, { forceMoney });
   }
   return json(200, out);
 }
