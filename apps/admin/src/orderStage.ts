@@ -172,6 +172,16 @@ export function orderTimeline(o: StageOrder & {
       at: o.packaged_at,
     });
   }
+  const scannedOut = (o as { scanned_out_at?: string | null; scanned_out_by_name?: string | null }).scanned_out_at;
+  if (scannedOut) {
+    rows.push({
+      title: 'Scanned out',
+      detail: (o as { scanned_out_by_name?: string | null }).scanned_out_by_name
+        ? `by ${(o as { scanned_out_by_name?: string | null }).scanned_out_by_name}`
+        : '',
+      at: scannedOut,
+    });
+  }
   if (o.shipped_at) {
     rows.push({
       title: 'Shipped',

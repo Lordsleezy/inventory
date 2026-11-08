@@ -1,0 +1,174 @@
+/* Receive form v2 — dark mockup: black field, white text, gray borders; red = required * and errors only */
+
+html.dark .receive-panel.receive-v2,
+.receive-panel.receive-v2 {
+  background: #000;
+  color: #fff;
+}
+
+.receive-panel.receive-v2 .receive-need {
+  outline: none;
+  background: transparent;
+  padding: 0;
+}
+
+.receive-panel.receive-v2 .receive-v2-invalid {
+  outline: 1px solid #e5484d;
+  outline-offset: 2px;
+  border-radius: 8px;
+  padding: 6px 8px;
+  background: rgba(229, 72, 77, 0.08);
+}
+
+.receive-panel.receive-v2 .receive-v2-invalid input,
+.receive-panel.receive-v2 .receive-v2-invalid select,
+.receive-panel.receive-v2 .receive-v2-invalid textarea {
+  border-color: #e5484d;
+}
+
+.receive-panel.receive-v2 .receive-v2-msg {
+  color: #e5484d;
+  display: block;
+  font-size: 0.85rem;
+  margin-top: 4px;
+}
+
+.receive-panel.receive-v2 .receive-v2-req {
+  color: #e5484d;
+}
+
+.receive-panel.receive-v2 .receive-v2-banner {
+  background: rgba(229, 72, 77, 0.2);
+  border: 1px solid #e5484d;
+  color: #fff;
+  padding: 10px 12px;
+  border-radius: 8px;
+  margin-bottom: 12px;
+}
+
+.receive-panel.receive-v2 input,
+.receive-panel.receive-v2 select,
+.receive-panel.receive-v2 textarea {
+  min-height: 48px;
+  font-size: 16px;
+  border: 1px solid #555;
+  background: #000;
+  color: #fff;
+  border-radius: 8px;
+}
+
+.receive-panel.receive-v2 .receive-v2-pin {
+  position: sticky;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 12px 0 calc(12px + env(safe-area-inset-bottom));
+  background: linear-gradient(transparent, #000 24%);
+  z-index: 4;
+}
+
+.receive-panel.receive-v2 .receive-v2-pin button.receive-v2-save {
+  width: 100%;
+  min-height: 48px;
+  background: #fff;
+  color: #000;
+  border: none;
+  border-radius: 10px;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.receive-panel.receive-v2 .receive-v2-pin button.receive-v2-save:disabled {
+  opacity: 0.35;
+}
+
+.receive-panel.receive-v2 .receive-v2-footnote {
+  text-align: center;
+  font-size: 0.85rem;
+  color: #aaa;
+  margin-top: 6px;
+}
+
+.receive-panel.receive-v2 .app-nav button:last-child:disabled {
+  opacity: 0.35;
+}
+
+.receive-panel.receive-v2 .receive-aspects-head {
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #888;
+  margin: 16px 0 8px;
+}
+
+.receive-panel.receive-v2 .ebay-specific-field.is-missing,
+.receive-panel.receive-v2 .receive-aspect-missing {
+  outline: 1px solid #e5484d;
+  background: rgba(229, 72, 77, 0.08);
+  border-radius: 8px;
+  padding: 6px 8px;
+}
+
+@media (min-width: 900px) {
+  .receive-panel.receive-v2 .receive-v2-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px 16px;
+  }
+  .receive-panel.receive-v2 .receive-v2-span2 {
+    grid-column: 1 / -1;
+  }
+}
+
+.scan-out-panel {
+  background: #000;
+  color: #fff;
+  max-width: 520px;
+}
+
+.scan-out-counter {
+  font-size: 1.75rem;
+  font-weight: 700;
+  margin: 0 0 8px;
+}
+
+.scan-out-input input {
+  width: 100%;
+  min-height: 52px;
+  font-size: 18px;
+  border: 1px solid #555;
+  background: #111;
+  color: #fff;
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+
+.scan-out-flash {
+  border-radius: 10px;
+  padding: 12px;
+  margin: 12px 0;
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.scan-out-flash--ok {
+  background: rgba(48, 164, 108, 0.15);
+  border: 1px solid #30a46c;
+}
+
+.scan-out-flash--err {
+  background: rgba(229, 72, 77, 0.12);
+  border: 1px solid #e5484d;
+}
+
+.scan-out-list {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0;
+}
+
+.scan-out-list li {
+  padding: 8px 0;
+  border-bottom: 1px solid #333;
+}

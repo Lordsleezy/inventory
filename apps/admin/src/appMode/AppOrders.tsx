@@ -12,6 +12,7 @@ import { fileToBase64, labelFileUrl, orderAdmin } from '../orderLabel';
 import { openShippingLabel } from '../labelPrint';
 import { canBuyLabel, hasLabel, orderChip, orderNeedsLabel, orderStage, orderTimeline, packagedStale, shippedStale, trackingTail, type OrderStage } from '../orderStage';
 import { useVisibleInterval } from '../useVisibleInterval';
+import { ScanOutPanel } from '../ScanOutPanel';
 
 type Seg = 'needsLabel' | 'toShip' | 'packaged' | 'shipped' | 'delivered' | 'canceled';
 
@@ -46,6 +47,7 @@ function when(iso?: string | null) {
 
 export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin = false }: Props) {
   const [seg, setSeg] = useState<Seg>('toShip');
+  const [scanOut, setScanOut] = useState(false);
   const [orders, setOrders] = useState<WebOrder[] | null>(null);
   const [error, setError] = useState('');
   const [open, setOpen] = useState<WebOrder | null>(null);
@@ -372,6 +374,9 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
 
   const stale = buckets.packaged.filter((o) => packagedStale(o)).length;
   const late = buckets.shipped.filter((o) => shippedStale(o)).length;
+  if (scanOut) {
+    return <ScanOutPanel client={client} storeId={storeId} stamp={stamp} appMode onClose={() => setScanOut(false)} />;
+  }
   return (
     <>
       <div className="app-large-title orders-app-title"><h1>Orders</h1></div>
@@ -392,7 +397,10 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
       </div>
       <p className="app-footer-count orders-seg-note">{SEG_NOTE[seg]}</p>
       {seg === 'packaged' && (
-        <p className="app-flag">{stale > 0 ? `${stale} packaged over 2 days and not marked shipped.` : 'Flags anything packaged over 2 days and not marked shipped.'}</p>
+        <>
+          <p className="app-flag">{stale > 0 ? `${stale} packaged over 2 days and not marked shipped.` : 'Flags anything packaged over 2 days and not marked shipped.'}</p>
+          <button type="button" className="secondary" onClick={() => setScanOut(true)}>Scan out pickup</button>
+        </>
       )}
       {seg === 'shipped' && (
         <p className="app-flag">{late > 0 ? `${late} shipped over 10 days and not marked delivered.` : 'Flags anything shipped over 10 days and not marked delivered.'}</p>
