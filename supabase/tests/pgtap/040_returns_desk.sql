@@ -82,26 +82,19 @@ select lives_ok(
        where s.sku = '11483';
       insert into public.portal_payout_payments (store_id, employee_id, amount_cents, paid_by, legacy_ticket_key)
       values (current_setting('test.store')::uuid, current_setting('test.paul')::uuid, v_comm, current_setting('test.paul')::uuid, 'paid-11483');
-      insert into public.returns (store_id, sku, sale_id, channel, reason, status, refund_cents, requested_qty)
-      values (current_setting('test.store')::uuid, '11483', v_sale, 'mercari', 'defective', 'received', 1999, 1)
+      insert into public.returns (store_id, sku, sale_id, channel, reason, status, refund_cents, requested_qty, refunded_at)
+      values (current_setting('test.store')::uuid, '11483', v_sale, 'mercari', 'defective', 'closed', 1999, 1, now())
       returning id into v_return;
-      perform public.return_apply_commission_clawbacks(v_return);
-      perform public.return_reverse_sale(current_setting('test.store')::uuid, v_sale, 'Return disposition: relist', true);
+      perform public.return_apply_owner_profit_refund(v_return);
       perform set_config('test.return83', v_return::text, true);
     end
   $body$$q$,
-  'a paid commission is clawed back when the sale is fully returned');
+  'a full refund hits owner profit without clawing paid commission');
 
-select is((select a.amount_cents from public.portal_payout_adjustments a where a.return_id = current_setting('test.return83')::uuid
-    and a.employee_id = current_setting('test.paul')::uuid),
-  -(select c.amount_cents from public.sale_commissions c join public.sales s on s.id = c.sale_id
-    where s.sku = '11483' and c.employee_id = current_setting('test.paul')::uuid),
-  'the clawback is the commission that was already paid');
-select is((select a.sale_commission_cents from public.portal_payout_adjustments a where a.return_id = current_setting('test.return83')::uuid),
-  (select c.amount_cents from public.sale_commissions c join public.sales s on s.id = c.sale_id
-    where s.sku = '11483' and c.employee_id = current_setting('test.paul')::uuid),
-  'the payout screen can add that commission back beside the clawback');
-select is((select voided_at is not null from public.sales where sku = '11483'), true, 'a full physical return voids the sale');
+select is((select count(*)::int from public.portal_payout_adjustments a where a.return_id = current_setting('test.return83')::uuid),
+  0, 'full refund does not create commission clawbacks');
+select is((select buyer_keep_refund_cents from public.sales where sku = '11483'), 1999, 'owner profit keep-refund takes the full refund');
+select is((select voided_at is null from public.sales where sku = '11483'), true, 'owner-profit refund leaves the sale unvoided so commissions stand');
 
 select * from finish();
 rollback;
