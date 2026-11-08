@@ -184,8 +184,10 @@ td{padding:6px 0;vertical-align:top}.box{border-top:1px solid #ccc;margin-top:14
   return true;
 }
 
-export function ReceiptsPage({ client, money, stamp }: {
+export function ReceiptsPage({ client, money, stamp, variant = 'desktop' }: {
   client: SupabaseClient; money: (n: number) => string; stamp: (s: string) => string;
+  /** Phone More → Receipts: skip the desktop page chrome (nav already says Receipts). */
+  variant?: 'desktop' | 'app';
 }) {
   const [query, setQuery] = useState('');
   const [rows, setRows] = useState<Receipt[]>([]);
@@ -276,13 +278,18 @@ export function ReceiptsPage({ client, money, stamp }: {
   }
 
   return <>
-    <header>
-      <div>
-        <div className="eyebrow">SALES HISTORY</div>
-        <h1>Receipts</h1>
-        <p>Every purchase — in person and online. View in the browser or print.</p>
-      </div>
-    </header>
+    {variant !== 'app' && (
+      <header>
+        <div>
+          <div className="eyebrow">SALES HISTORY</div>
+          <h1>Receipts</h1>
+          <p>Every purchase — in person and online. View in the browser or print.</p>
+        </div>
+      </header>
+    )}
+    {variant === 'app' && (
+      <p className="hint" style={{ margin: '0 16px 10px' }}>In person and online. Use Online to filter marketplace sales.</p>
+    )}
     <div className="inventory-controls">
       <label>Search
         <input type="search" placeholder="Receipt #, SKU, buyer, channel…"

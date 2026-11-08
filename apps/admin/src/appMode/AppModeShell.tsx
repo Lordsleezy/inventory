@@ -15,6 +15,7 @@ import { ReturnsPage } from '../ReturnsPage';
 import { AppChannel } from './AppChannel';
 import {
   AppMoreHome,
+  AppMoreOther,
   AppLiveSales,
   AppConnections,
   AppReportsNative,
@@ -23,6 +24,7 @@ import {
   AppSettingsNative,
   type MoreId,
 } from './AppMore';
+import { ReceiptsPage } from '../ReceiptsPage';
 import type { OnlineCfg, Rule, CommissionOverride } from '../payouts';
 import { parseNavFromLocation } from '../navigation';
 
@@ -171,10 +173,20 @@ export function AppModeShell({
   const [itemSku, setItemSku] = useState<string | null>(null);
   const [itemMissing, setItemMissing] = useState<string[]>([]);
   const [morePage, setMorePage] = useState<MoreId | null>(() => fullAccess && ['reports','books'].includes(parseNavFromLocation().page) ? parseNavFromLocation().page as MoreId : null);
+  /** When a page was opened from Other, Back returns there instead of More home. */
+  const [moreReturnTo, setMoreReturnTo] = useState<MoreId | null>(null);
   const [booksDetail, setBooksDetail] = useState(false);
   const [booksTitle, setBooksTitle] = useState('Books');
   const [booksBack, setBooksBack] = useState<() => void>(() => () => setMorePage(null));
   const [channel, setChannel] = useState<'ebay' | 'amazon' | 'tiktok' | null>(null);
+  const leaveMorePage = () => {
+    if (moreReturnTo) {
+      setMorePage(moreReturnTo);
+      setMoreReturnTo(null);
+      return;
+    }
+    setMorePage(null);
+  };
   const [invKey, setInvKey] = useState(0);
   const scrollPos = useRef<Record<string, number>>({});
   const reportsOpenRef = useRef(onReportsOpen);
@@ -194,12 +206,16 @@ export function AppModeShell({
     const onPop = () => {
       if (itemSku) { setItemSku(null); history.pushState({ floorApp: 1 }, ''); return; }
       if (channel) { setChannel(null); history.pushState({ floorApp: 1 }, ''); return; }
-      if (morePage) { setMorePage(null); history.pushState({ floorApp: 1 }, ''); }
+      if (morePage) {
+        if (moreReturnTo) { setMorePage(moreReturnTo); setMoreReturnTo(null); }
+        else setMorePage(null);
+        history.pushState({ floorApp: 1 }, '');
+      }
     };
     history.pushState({ floorApp: 1 }, '');
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
-  }, [itemSku, morePage, channel]);
+  }, [itemSku, morePage, moreReturnTo, channel]);
 
   function switchTab(next: AppTab) {
     if (!fullAccess && !ASSOCIATE_TABS.includes(next)) next = 'inventory';
@@ -208,6 +224,7 @@ export function AppModeShell({
     setTab(next);
     setItemSku(null);
     setMorePage(null);
+    setMoreReturnTo(null);
     setChannel(null);
     requestAnimationFrame(() => {
       const el = document.querySelector(`.app-tab-panel[data-tab="${next}"]`) as HTMLElement | null;
@@ -315,10 +332,12 @@ export function AppModeShell({
                 money={money}
                 setPage={(p) => {
                   history.pushState({ floorApp: 1, more: p }, '');
+                  setMoreReturnTo(null);
                   setMorePage(p);
                 }}
                 onOpenChannel={(ch) => {
                   history.pushState({ floorApp: 1, channel: ch }, '');
+                  setMoreReturnTo(null);
                   setChannel(ch);
                 }}
               />
@@ -360,13 +379,40 @@ export function AppModeShell({
             accessToken={session.access_token}
             money={money}
             onOpenItem={sku => { setItemMissing([]); history.pushState({ floorApp: 1, sku }, ""); setItemSku(sku); }}
-            onBack={() => setChannel(null)}
+            onBack={() => {
+              setChannel(null);
+              // Stay on Other when the board was opened from there.
+              if (moreReturnTo === 'other') setMorePage('other');
+            }}
           />
           </div>
         )}
 
         {fullAccess && morePage === 'sales' && (
-          <AppLiveSales client={client} money={money} stamp={stamp} onBack={() => setMorePage(null)} />
+          <AppLiveSales client={client} money={money} stamp={stamp} onBack={leaveMorePage} />
+        )}
+        {fullAccess && morePage === 'receipts' && (
+          <AppReportsNative onBack={leaveMorePage} title="Receipts">
+            <ReceiptsPage client={client} money={money} stamp={stamp} variant="app" />
+          </AppReportsNative>
+        )}
+        {fullAccess && morePage === 'other' && !channel && !itemSku && (
+          <AppMoreOther
+            client={client}
+            session={session}
+            onBack={() => { setMoreReturnTo(null); setMorePage(null); }}
+            setPage={(p) => {
+              history.pushState({ floorApp: 1, more: p }, '');
+              setMoreReturnTo('other');
+              setMorePage(p);
+            }}
+            onOpenChannel={(ch) => {
+              history.pushState({ floorApp: 1, channel: ch }, '');
+              setMoreReturnTo('other');
+              setMorePage('other');
+              setChannel(ch);
+            }}
+          />
         )}
         {fullAccess && morePage === 'connections' && (
           <AppConnections
@@ -374,26 +420,27 @@ export function AppModeShell({
             accessToken={session.access_token}
             money={money}
             stamp={stamp}
-            onBack={() => setMorePage(null)}
+            onBack={leaveMorePage}
+            backLabel={moreReturnTo === 'other' ? 'Other' : 'More'}
           />
         )}
         {fullAccess && morePage === 'reports' && (
-          <AppReportsNative onBack={() => setMorePage(null)} action={reportsAction} onAction={onReportsAction}>
+          <AppReportsNative onBack={leaveMorePage} action={reportsAction} onAction={onReportsAction}>
             {reportsSlot || <p className="app-footer-count">Reports unavailable.</p>}
           </AppReportsNative>
         )}
         {fullAccess && morePage === 'withdrawals' && (
-          <AppReportsNative onBack={() => setMorePage(null)} title="Money">
+          <AppReportsNative onBack={leaveMorePage} title="Money">
             <MoneyPage client={client} storeId={storeId} accessToken={session.access_token} money={money} stamp={stamp} />
           </AppReportsNative>
         )}
         {fullAccess && morePage === 'books' && (
-          <AppReportsNative onBack={() => booksBack()} title={booksTitle} backLabel={booksDetail ? 'Books' : 'More'}>
-            <BooksPage client={client} money={money} native onNativeNavigation={(detail, title, back) => { setBooksDetail(detail); setBooksTitle(detail ? (title || 'Books') : 'Books'); setBooksBack(() => back || (() => setMorePage(null))); }} />
+          <AppReportsNative onBack={() => booksBack()} title={booksTitle} backLabel={booksDetail ? 'Books' : (moreReturnTo === 'other' ? 'Other' : 'More')}>
+            <BooksPage client={client} money={money} native onNativeNavigation={(detail, title, back) => { setBooksDetail(detail); setBooksTitle(detail ? (title || 'Books') : 'Books'); setBooksBack(() => back || leaveMorePage); }} />
           </AppReportsNative>
         )}
         {fullAccess && morePage === 'manifests' && (
-          <AppReportsNative onBack={() => setMorePage(null)} title="Manifests">
+          <AppReportsNative onBack={leaveMorePage} title="Manifests" backLabel={moreReturnTo === 'other' ? 'Other' : 'More'}>
             <ManifestsPage client={client} storeId={storeId} money={money} />
           </AppReportsNative>
         )}
@@ -403,26 +450,26 @@ export function AppModeShell({
             storeId={storeId}
             canManage
             variant="app"
-            onBack={() => setMorePage(null)}
-            backLabel="More"
+            onBack={leaveMorePage}
+            backLabel={moreReturnTo === 'other' ? 'Other' : 'More'}
             accessToken={session.access_token}
             money={money}
-            onSellInStore={() => setMorePage('register')}
+            onSellInStore={() => { setMoreReturnTo(null); setMorePage('register'); }}
           />
         )}
         {fullAccess && morePage === 'insights' && (
-          <AppReportsNative onBack={() => setMorePage(null)} title="Insights">
+          <AppReportsNative onBack={leaveMorePage} title="Insights" backLabel={moreReturnTo === 'other' ? 'Other' : 'More'}>
             <InsightsPage client={client} money={money} />
           </AppReportsNative>
         )}
         {fullAccess && morePage === 'depop' && (
-          <AppDepopNative client={client} accessToken={session.access_token} money={money} onBack={() => setMorePage(null)} />
+          <AppDepopNative client={client} accessToken={session.access_token} money={money} onBack={leaveMorePage} backLabel={moreReturnTo === 'other' ? 'Other' : 'More'} />
         )}
         {fullAccess && morePage === 'mercari' && (
-          <AppMercariNative client={client} accessToken={session.access_token} money={money} onBack={() => setMorePage(null)} />
+          <AppMercariNative client={client} accessToken={session.access_token} money={money} onBack={leaveMorePage} backLabel={moreReturnTo === 'other' ? 'Other' : 'More'} />
         )}
         {fullAccess && morePage === 'register' && (
-          <AppReportsNative onBack={() => setMorePage(null)} title="Register">
+          <AppReportsNative onBack={leaveMorePage} title="Register">
             {staffSession
               ? <RegisterPage staffSession={staffSession} variant="app" />
               : <p className="app-footer-count">This login can’t ring sales. Ask an owner to add a staff row.</p>}
@@ -435,7 +482,8 @@ export function AppModeShell({
             staffSession={staffSession}
             session={session}
             settingsSlot={settingsSlot || <p className="app-footer-count">Settings unavailable.</p>}
-            onBack={() => setMorePage(null)}
+            onBack={leaveMorePage}
+            backLabel={moreReturnTo === 'other' ? 'Other' : 'More'}
           />
         )}
 
