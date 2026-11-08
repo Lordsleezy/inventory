@@ -600,7 +600,7 @@ export function App() {
     setLive(list => list.map(t => t.key === ticketKey ? { ...t, commissionOverride: next } : t));
     setAllSales(list => list.map(t => t.key === ticketKey ? { ...t, commissionOverride: next } : t));
   }, []);
-  useEffect(() => { if (page === 'reports' || page === 'settings') void loadCommon(); }, [page, loadCommon]);
+  useEffect(() => { if (fullAccess && (page === 'reports' || page === 'settings')) void loadCommon(); }, [page, fullAccess, loadCommon]);
   useEffect(() => { if (page === 'reports' && nav.reportTab === 'payouts') void loadPayments(); }, [page, nav.reportTab, loadPayments]);
   useEffect(() => { if (page === 'sales' || (page === 'reports' && nav.reportTab === 'profit')) void loadSales(); }, [page, nav.reportTab, loadSales]);
   useEffect(() => { if (page === 'sales' && salesScope === 'voided') void loadVoided(); }, [page, salesScope, loadVoided]);
@@ -903,7 +903,7 @@ export function App() {
       {liveShown.length === 0 ? <Empty>No {salesScope === 'all' ? '' : salesScope === 'instore' ? 'in-store ' : 'online '}sales for {selectedDay === today() ? 'today' : selectedDay}. Use the date control above to check another day.</Empty> : <div className="ticket-list">{liveShown.map(t => <LiveTicket key={t.key} t={t} money={money} stamp={stamp} rules={activeRules} cfg={onlineCfg} frozen={frozen} personName={personName} busy={busy} onCommissionChanged={setTicketOverride} onMatchSku={t.needsMatch ? () => void matchLiveSku(t) : undefined} />)}</div>}
     </section></>;
   })()}
-  {fullAccess && page === 'orders' && store && <OrdersPage client={sb} accessToken={session.access_token} storeId={store} money={money} stamp={stamp} rules={activeRules} cfg={onlineCfg} commissionOverrides={commissionOverrides} frozen={frozen} personName={personName} busy={busy} onCommissionChanged={setTicketOverride} />}
+  {(fullAccess || registerOnly) && page === 'orders' && store && <OrdersPage client={sb} accessToken={session.access_token} storeId={store} money={money} stamp={stamp} rules={activeRules} cfg={onlineCfg} commissionOverrides={commissionOverrides} frozen={frozen} personName={personName} busy={busy} onCommissionChanged={setTicketOverride} packOnly={registerOnly} />}
   {fullAccess && page === 'returns' && store && <ReturnsPage client={sb} storeId={store} money={money} stamp={stamp} accessToken={session.access_token} />}
   {fullAccess && page === 'receipts' && <ReceiptsPage client={sb} money={money} stamp={stamp} />}
   {fullAccess && page === 'online' && <OnlinePage storeId={store} accessToken={session.access_token} client={sb} money={money} tab={nav.onlineTab} onTab={t => go({ onlineTab: t, page: 'online' })} channel={nav.onlineChannel} onChannel={c => go({ onlineChannel: c, onlineTab: 'listed', page: 'online' })} onInventory={() => goNav({ page: 'inventory', inventoryTab: 'in-stock' })} />}
@@ -923,6 +923,7 @@ export function App() {
       client={sb}
       storeId={store}
       canManage={fullAccess}
+      canAddBay={fullAccess || registerOnly}
       accessToken={session.access_token}
       money={money}
     />

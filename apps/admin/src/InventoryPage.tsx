@@ -97,15 +97,22 @@ export function InventoryPage({
   const [error, setError] = useState('');
   const [detailKey, setDetailKey] = useState(0);
   const [noLocationCount, setNoLocationCount] = useState(0);
-  const listTab = LIST_TABS.some(([id]) => id === tab) || CARD_TABS[tab] || tab === 'unfinished' ? tab : associateBrowseOnly ? 'in-stock' : null;
+  const staffTabs = associateBrowseOnly;
+  const listTab = staffTabs
+    ? (tab === 'receive' ? null : 'in-stock')
+    : ((LIST_TABS.some(([id]) => id === tab) || CARD_TABS[tab] || tab === 'unfinished') ? tab : null);
   const queue = listTab === 'unfinished' && !associateBrowseOnly && attentionSection !== 'all' ? attentionSection : null;
   const counts = useAttentionCounts(client, listTab === 'unfinished' && !associateBrowseOnly, refresh);
   // Status only narrows In stock; the other subtabs have a fixed status.
   const cardBucket = listTab ? CARD_TABS[listTab] : undefined;
-  const pStatus = listTab === 'never-list' ? 'inventory_never_list' : cardBucket ? inventoryBucketStatus(cardBucket) : listTab === 'no-location' ? 'in_stock' : listTab === 'sold' ? 'sold' : listTab === 'defective' ? 'defective' : listTab === 'dns' ? 'dns' : listTab === 'unfinished' ? 'all' : listTab === 'needs-check' ? 'needs_check' : status;
+  const pStatus = staffTabs && listTab === 'in-stock' ? 'in_stock' : listTab === 'never-list' ? 'inventory_never_list' : cardBucket ? inventoryBucketStatus(cardBucket) : listTab === 'no-location' ? 'in_stock' : listTab === 'sold' ? 'sold' : listTab === 'defective' ? 'defective' : listTab === 'dns' ? 'dns' : listTab === 'unfinished' ? 'all' : listTab === 'needs-check' ? 'needs_check' : status;
   const pUnfinished = listTab === 'unfinished';
   const hideMoney = associateBrowseOnly && listTab === 'sold';
   const effectiveLocation = listTab === 'no-location' ? 'unassigned' : location;
+
+  useEffect(() => {
+    if (staffTabs && tab !== 'in-stock' && tab !== 'receive') onTab('in-stock');
+  }, [staffTabs, tab, onTab]);
 
   useEffect(() => {
     let active = true;
@@ -171,17 +178,18 @@ export function InventoryPage({
   const pickTab = (t: InventoryTab) => { setOffset(0); setList(null); onTab(t); };
   const total = list?.totals.row_count ?? list?.totals.unit_count ?? 0;
   return <>
-    <header><div><div className="eyebrow">FLOOR INVENTORY</div><h1>Inventory</h1><p>{listTab === 'in-stock' ? 'For-sale units on hand. Click a unit to edit details, price, cost, package size, and photos.' : listTab === 'dns' ? 'Store / website pickup only. Never listed on eBay, Amazon, TikTok Shop, Depop or Mercari.' : listTab === 'sold' ? (associateBrowseOnly ? 'Sold units by SKU.' : 'Sold units and what they sold for.') : listTab === 'defective' ? 'Not-for-sale units and anything graded Defective. These only need a brand.' : listTab === 'needs-check' ? 'Complete units with no channel checked yet. Open one and tick eBay, Amazon or TikTok Shop.' : listTab === 'unfinished' && queue === 'missing-cost' ? 'What we paid for each unit. Sold units are first. Saving a cost updates that sale’s payout.' : listTab === 'unfinished' ? 'For-sale units missing a photo, price, or other required info.' : tab === 'left-store' ? 'Units that left the store without a sale: replacements sent to customers and items given away. Their cost counts against profit and expenses.' : tab === 'receive' ? 'Scan a UPC to look up product data, then receive with a real photo.' : tab === 'lookup-test' ? 'Read-only UPC accuracy test — Amazon vs UPCitemdb. Does not create inventory.' : tab === 'products' ? 'Shared UPC product database — edits stick for future scans. Price/condition stay on each unit.' : tab === 'measure-mat' ? 'Printable 50 mm scale mat for Receive photo measuring.' : ''}</p></div></header>
-    {(listTab ?? tab) !== 'receive' && <>
+    <header><div><div className="eyebrow">FLOOR INVENTORY</div><h1>Inventory</h1><p>{listTab === 'in-stock' ? (staffTabs ? 'Units in stock.' : 'For-sale units on hand. Click a unit to edit details, price, cost, package size, and photos.') : listTab === 'dns' ? 'Store / website pickup only. Never listed on eBay, Amazon, TikTok Shop, Depop or Mercari.' : listTab === 'sold' ? (associateBrowseOnly ? 'Sold units by SKU.' : 'Sold units and what they sold for.') : listTab === 'defective' ? 'Not-for-sale units and anything graded Defective. These only need a brand.' : listTab === 'needs-check' ? 'Complete units with no channel checked yet. Open one and tick eBay, Amazon or TikTok Shop.' : listTab === 'unfinished' && queue === 'missing-cost' ? 'What we paid for each unit. Sold units are first. Saving a cost updates that sale’s payout.' : listTab === 'unfinished' ? 'For-sale units missing a photo, price, or other required info.' : tab === 'left-store' ? 'Units that left the store without a sale: replacements sent to customers and items given away. Their cost counts against profit and expenses.' : tab === 'receive' ? 'Scan a UPC to look up product data, then receive with a real photo.' : tab === 'lookup-test' ? 'Read-only UPC accuracy test — Amazon vs UPCitemdb. Does not create inventory.' : tab === 'products' ? 'Shared UPC product database — edits stick for future scans. Price/condition stay on each unit.' : tab === 'measure-mat' ? 'Printable 50 mm scale mat for Receive photo measuring.' : ''}</p></div></header>
+    {!staffTabs && (listTab ?? tab) !== 'receive' && <>
       <ListingIssuesPanel variant="bar" client={client} onOpen={sku => { setSelected(sku); setSelectedMissing([]); }} />
       <ReceiveIssueLinks client={client} onOpen={sku => { setSelected(sku); setSelectedMissing([]); }} />
     </>}
-    <InventoryTotals client={client} variant="desktop" refreshKey={refresh} selected={cardBucket} onSelect={bucket => {
+    <InventoryTotals client={client} variant="desktop" totalOnly={staffTabs} refreshKey={refresh} selected={cardBucket} onSelect={bucket => {
+      if (staffTabs) return;
       setQuery(''); setLocation('all');
       pickTab(bucket === 'not_listed' ? 'not-listed' : bucket === 'not_ready' ? 'not-ready' : bucket);
     }} />
     <div className="inventory-tabs">
-      {[...LIST_TABS, ...(associateBrowseOnly ? [] : TOOL_TABS)].map(([id, text]) => <button type="button" key={id} className={(listTab ?? tab) === id ? 'active' : ''} onClick={() => pickTab(id)}>{text}{id === 'no-location' && <small className="inventory-tab-count">{noLocationCount}</small>}</button>)}
+      {(staffTabs ? ([['in-stock', 'In stock'], ['receive', 'Receive']] as [InventoryTab, string][]) : [...LIST_TABS, ...TOOL_TABS]).map(([id, text]) => <button type="button" key={id} className={(listTab ?? tab) === id ? 'active' : ''} onClick={() => pickTab(id)}>{text}{id === 'no-location' && <small className="inventory-tab-count">{noLocationCount}</small>}</button>)}
     </div>
     {listTab === 'unfinished' && !associateBrowseOnly && (
       <div className="inventory-tabs report-tabs online-channel-tabs">
@@ -189,11 +197,11 @@ export function InventoryPage({
         {ATTENTION_SECTIONS.map(([id, text]) => <button type="button" key={id} className={queue === id ? 'active' : ''} onClick={() => onAttentionSection(id)}>{text}{counts[id] !== undefined && <small>{counts[id]}</small>}</button>)}
       </div>
     )}
-    {!listTab && tab === 'merge-duplicates' ? <StockMergePage client={client} money={money} /> : !listTab && tab === 'fix-titles' ? <FixTitlesPage client={client} onChanged={() => { setRefresh(n => n + 1); onCostChanged(); }} /> : !listTab && tab === 'left-store' ? <DispositionsPanel client={client} money={money} stamp={stamp} kind={null} title="Replaced and given away" hint="Undo puts a unit back in stock and reverses its cost and commission effects." refreshKey={refresh} onChanged={() => { setRefresh(n => n + 1); onCostChanged(); }} /> : !listTab && tab === 'missing-category' ? <CategoryPanel client={client} storeId={storeId} /> : !listTab && tab === 'lookup-test' ? <LookupTestPage accessToken={accessToken} /> : !listTab && tab === 'products' ? <FloorProductsPage client={client} /> : !listTab && tab === 'measure-mat' ? <MarkerMatPage /> : !listTab && tab === 'receive' ? <ReceivePanel client={client} storeId={storeId} accessToken={accessToken} onSaved={() => setRefresh(n => n + 1)} /> : queue ? <NeedsAttentionPanel client={client} storeId={storeId} money={money} stamp={stamp} section={queue} onCostChanged={() => { setRefresh(n => n + 1); onCostChanged(); }} /> : <>
+    {!listTab && tab === 'merge-duplicates' ? <StockMergePage client={client} money={money} /> : !listTab && tab === 'fix-titles' ? <FixTitlesPage client={client} onChanged={() => { setRefresh(n => n + 1); onCostChanged(); }} /> : !listTab && tab === 'left-store' ? <DispositionsPanel client={client} money={money} stamp={stamp} kind={null} title="Replaced and given away" hint="Undo puts a unit back in stock and reverses its cost and commission effects." refreshKey={refresh} onChanged={() => { setRefresh(n => n + 1); onCostChanged(); }} /> : !listTab && tab === 'missing-category' ? <CategoryPanel client={client} storeId={storeId} /> : !listTab && tab === 'lookup-test' ? <LookupTestPage accessToken={accessToken} /> : !listTab && tab === 'products' ? <FloorProductsPage client={client} /> : !listTab && tab === 'measure-mat' ? <MarkerMatPage /> : !listTab && tab === 'receive' ? <ReceivePanel client={client} storeId={storeId} accessToken={accessToken} staffMode={staffTabs} onSaved={() => setRefresh(n => n + 1)} /> : queue ? <NeedsAttentionPanel client={client} storeId={storeId} money={money} stamp={stamp} section={queue} onCostChanged={() => { setRefresh(n => n + 1); onCostChanged(); }} /> : <>
     {cardBucket && <h2>{INVENTORY_BUCKET_LABELS[cardBucket]}</h2>}
     <div className="inventory-controls">
       <label>Search<input type="search" placeholder="SKU, brand, model or title" value={query} onChange={e => change(() => setQuery(e.target.value))} /></label>
-      {listTab === 'in-stock' && <label>Status<select value={status} onChange={e => change(() => setStatus(e.target.value))}>
+      {listTab === 'in-stock' && !staffTabs && <label>Status<select value={status} onChange={e => change(() => setStatus(e.target.value))}>
         <option value="in_stock">In stock</option><option value="inventory_listed">Listed</option>
         <option value="reserved">Reserved</option><option value="repair">Repair</option>
         <option value="delisted">Delisted listing</option><option value="all">All statuses</option><option value="voided">Voided</option>
@@ -216,7 +224,7 @@ export function InventoryPage({
     </div>
     <section className="panel inventory-panel">
       {loading && <p className="hint">Loading inventory…</p>}
-      {!loading && list?.items.length === 0 && <div className="empty">{listTab === 'in-stock' && query.trim() ? 'No for-sale units match. Not-for-sale and defective units are under Defective.' : 'No units match this filter.'}</div>}
+      {!loading && list?.items.length === 0 && <div className="empty">{staffTabs ? 'No in-stock units match.' : listTab === 'in-stock' && query.trim() ? 'No for-sale units match. Not-for-sale and defective units are under Defective.' : 'No units match this filter.'}</div>}
       {list?.items.map((u, idx) => { if(u.group_id && (u.group_total || 0) > 1) return <ReceiveGroupRow key={u.group_id} item={u} client={client} admin={canDelete} money={money} onOpen={(sku,missing)=>{setSelected(sku);setSelectedMissing(missing||[])}} searchQuery={query} onChanged={()=>{setRefresh(n=>n+1);onCostChanged()}} />;
       return <button type="button" className="inventory-row" key={u.sku} disabled={hideMoney} onClick={() => { if (!hideMoney) {setSelected(u.sku);setSelectedMissing(u.missing||[]);} }}>
         <span className="inventory-photo"><UnitListThumb client={client} photoPath={u.photo_path} urls={urls} onUrl={(p, url) => mergeUrls({ [p]: url })} eager={idx < 16} placeholder="No photo" /></span>
