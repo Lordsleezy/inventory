@@ -203,6 +203,14 @@ html.dark .alert {
   color: #fff;
 }
 
+.inv-pair-desk { display: grid; grid-template-columns: 1fr 1fr; max-width: 520px; margin: 0 0 16px; }
+.inv-pair-desk > div { display: grid; gap: 2px; padding: 8px 16px; }
+.inv-pair-desk > div + div { border-left: 1px solid #2a2a2a; }
+.inv-pair-desk span { color: #9a9a9a; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; }
+.inv-pair-desk strong { font-size: 32px; color: #fff; }
+.inv-pair-desk small { color: #9a9a9a; }
+.inv-pair-alert { color: #FF453A; }
+
 html.dark .theme-toggle { display: none !important; }
 
 html.dark .money-card,
@@ -242,3 +250,20 @@ html.dark .money-go {
 .scan-out-panel { background: #000; color: #fff; }
 .scan-out-panel .scan-out-ok { color: #fff; border: 1px solid #2a2a2a; }
 .scan-out-panel .scan-out-err { color: #FF453A; }
+
+html.dark a,
+html.dark .text-button,
+html.dark .loc-desk-nav button,
+html.dark .unit-description-sheet header button {
+  color: #fff;
+}
+html.dark .actions button.primary,
+html.dark .unit-quantity-actions button:not(.secondary) {
+  background: #fff;
+  color: #000;
+  border-color: #fff;
+}
+html.dark .order-stepper li.current { color: #fff; }
+html.dark .order-stepper li.current span { background: #fff; color: #000; }
+html.dark .unit-edit-segmented button.is-active { border-color: #fff; color: #fff; background: transparent; }
+html.dark .depop-label-drop { background: transparent; color: #fff; border-color: #4a4a4a; }

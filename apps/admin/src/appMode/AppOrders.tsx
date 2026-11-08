@@ -404,8 +404,7 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
           ['canceled', 'Canceled', buckets.canceled.length],
         ] as const).map(([id, label, n]) => (
           <button key={id} type="button" className={seg === id ? 'active' : ''} onClick={() => setSeg(id)}>
-            <span>{label}</span>
-            <strong>{n}</strong>
+            {label} {n}
           </button>
         ))}
       </div>
@@ -431,20 +430,21 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
           const thumbPhoto = listThumbPhoto(photoMap[o.sku] || []);
           const thumbPath = thumbPhoto ? derivativePath(thumbPhoto.path, 400) : null;
           const thumb = thumbPath ? photoUrls[thumbPath] : '';
+          const problem = orderNeedsLabel(o) || chip.tone === 'warn';
           return (
             <div key={o.id} className="app-row app-order-row">
             <button type="button" className="app-order-open" onClick={() => setOpen(o)}>
               {thumb ? <img className="app-order-thumb" src={thumb} alt="" /> : <span className="app-order-thumb empty" aria-hidden="true" />}
-              {loc
-                ? <span className="app-order-location-badge"><small>{loc.display}</small><strong>{loc.slot}</strong></span>
-                : <span className="app-order-location-badge missing"><small>BAY</small><strong>None</strong></span>}
               <span className="app-order-main">
                 <strong>{o.title || 'Item'}</strong>
                 <small>{chName} · {money(o.item_cents || 0)}{tail ? ` · ${tail}` : ''}</small>
-                <span className={`app-chip ${chip.tone}`}>{chip.text}</span>
+                <strong className={loc ? 'app-order-bay' : 'app-order-bay missing'}>{loc ? `${loc.display} · ${loc.slot}` : 'NO LOCATION'}</strong>
+                {problem && <small className="app-order-problem">{orderNeedsLabel(o) ? 'Needs label' : chip.text}</small>}
               </span>
-              <span className="app-chevron">›</span>
             </button>
+            {hasLabel(o) && (
+              <button type="button" className="app-order-print" onClick={() => void printLabel(o)}>Print</button>
+            )}
             {isAdmin && orderNeedsLabel(o) && (
               <label className="app-row-upload" onClick={(e) => e.stopPropagation()}>
                 Upload

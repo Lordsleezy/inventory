@@ -91,23 +91,30 @@ html.app-mode .app-search input::placeholder { color: #8e8e93; }
 html.app-mode .app-segment {
   display: flex;
   margin: 0 16px 14px;
-  padding: 2px;
-  background: #1c1c1e;
-  border-radius: 10px;
-  gap: 2px;
+  padding: 0;
+  background: transparent;
+  border-radius: 0;
+  gap: 16px;
+  overflow-x: auto;
+  flex-wrap: nowrap;
+  scrollbar-width: none;
 }
 html.app-mode .app-segment button {
-  flex: 1;
+  flex: 0 0 auto;
   border: 0;
   background: transparent;
-  color: #fff;
-  font-size: 13px;
+  color: #9a9a9a;
+  font-size: 15px;
   font-weight: 600;
-  padding: 8px 4px;
-  border-radius: 8px;
+  padding: 10px 0;
+  border-radius: 0;
+  min-height: 44px;
+  white-space: nowrap;
 }
 html.app-mode .app-segment button.active {
-  background: #636366;
+  background: transparent;
+  color: #fff;
+  box-shadow: inset 0 -2px 0 #fff;
 }
 html.app-mode .app-segment.app-segment-scroll {
   overflow-x: auto;
@@ -165,7 +172,7 @@ html.app-mode .app-cost-entry input::placeholder { color: #8e8e93; }
 html.app-mode .app-cost-entry button {
   border: 0;
   border-radius: 8px;
-  background: #0a84ff;
+  background: #fff; color: #000;
   color: #fff;
   font-size: 14px;
   font-weight: 600;
@@ -238,7 +245,7 @@ html.app-mode .app-row-text small {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-html.app-mode .app-row-text .warn { color: #ff9f0a; font-weight: 600; }
+html.app-mode .app-row-text .warn { color: #FF453A; font-weight: 600; }
 html.app-mode .app-row-price {
   font-size: 14px;
   font-weight: 600;
@@ -290,7 +297,7 @@ html.app-mode .app-nav {
 html.app-mode .app-nav button {
   border: 0;
   background: transparent;
-  color: #0a84ff;
+  color: #fff;
   font-size: 17px;
   font-weight: 500;
   padding: 8px 10px;
@@ -377,9 +384,9 @@ html.app-mode .app-kv {
 html.app-mode .app-kv:last-child { border-bottom: 0; }
 html.app-mode .app-kv span { color: #8e8e93; }
 html.app-mode .app-kv strong { font-weight: 500; color: #fff; text-align: right; }
-html.app-mode .app-kv strong.live { color: #30d158; }
+html.app-mode .app-kv strong.live { color: #9a9a9a; }
 html.app-mode .app-kv strong.muted { color: #8e8e93; font-weight: 400; }
-html.app-mode .app-kv strong.warn { color: #ff9f0a; }
+html.app-mode .app-kv strong.warn { color: #FF453A; }
 html.app-mode .app-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -393,7 +400,7 @@ html.app-mode .app-actions button {
   font-size: 17px;
   font-weight: 600;
   background: #1c1c1e;
-  color: #0a84ff;
+  color: #fff;
 }
 html.app-mode .app-actions .bundle-entry { grid-column: 1 / -1; }
 html.app-mode .app-actions button.danger { color: #ff453a; }
@@ -406,7 +413,7 @@ html.app-mode .app-actions a {
   font-size: 17px;
   font-weight: 600;
   background: #1c1c1e;
-  color: #0a84ff;
+  color: #fff;
 }
 html.app-mode .app-label-panel .number-grid {
   display: grid;
@@ -446,7 +453,7 @@ html.app-mode .app-label-panel .rate-row {
   background: #1c1c1e;
   color: #fff;
 }
-html.app-mode .app-label-panel .rate-row.picked { outline: 1px solid #0a84ff; }
+html.app-mode .app-label-panel .rate-row.picked { outline: 1px solid #fff; }
 html.app-mode .app-label-panel .rate-row span { flex: 1; display: grid; }
 html.app-mode .app-label-panel .rate-row small { color: #8e8e93; }
 html.app-mode .app-label-panel .text-button {
@@ -454,7 +461,7 @@ html.app-mode .app-label-panel .text-button {
   margin: 8px 16px;
   border: 0;
   background: transparent;
-  color: #0a84ff;
+  color: #fff;
   font-size: 15px;
   text-align: left;
   padding: 0;
@@ -468,7 +475,7 @@ html.app-mode .app-primary {
   padding: 16px;
   font-size: 17px;
   font-weight: 600;
-  background: #0a84ff;
+  background: #fff; color: #000;
   color: #fff;
 }
 html.app-mode .app-primary:disabled { opacity: 0.45; }
@@ -499,7 +506,7 @@ html.app-mode .app-tabbar button {
   font-weight: 500;
   padding: 6px 2px 4px;
 }
-html.app-mode .app-tabbar button.active { color: #0a84ff; }
+html.app-mode .app-tabbar button.active { color: #fff; box-shadow: inset 0 2px 0 #fff; }
 html.app-mode .app-tabbar svg { width: 26px; height: 26px; }
 
 /* More list */
@@ -637,12 +644,12 @@ html.app-mode .app-unit-edit-actions button {
   font-weight: 600;
 }
 html.app-mode .app-unit-edit-actions button:not(.secondary):not(.danger) {
-  background: #0a84ff;
+  background: #fff; color: #000;
   color: #fff;
 }
 html.app-mode .app-unit-edit-actions button.secondary {
   background: #1c1c1e;
-  color: #0a84ff;
+  color: #fff;
 }
 html.app-mode .app-unit-edit-actions button.danger {
   grid-column: 1 / -1;
@@ -660,14 +667,14 @@ html.app-mode .app-unit-edit .unit-edit-grid { grid-template-columns:repeat(auto
 html.app-mode .app-unit-edit .unit-edit-grid>* { min-width:0; }
 html.app-mode .app-unit-edit .unit-edit-notes textarea { display:block; box-sizing:border-box; width:100%; min-width:0; min-height:96px; background:#1c1c1e; border:1px solid #3a3a3c; border-radius:10px; color:#fff; font:inherit; padding:10px; }
 html.app-mode .app-unit-edit .unit-edit-gap-links { display:flex; flex-wrap:wrap; gap:5px 12px; }
-html.app-mode .app-unit-edit .unit-edit-gap-links .text-button { color:#0a84ff; }
-html.app-mode .app-unit-edit .receive-group-match { outline:2px solid #0a84ff; outline-offset:-2px; }
+html.app-mode .app-unit-edit .unit-edit-gap-links .text-button { color:#fff; }
+html.app-mode .app-unit-edit .receive-group-match { outline:2px solid #fff; outline-offset:-2px; }
 html.app-mode .app-unit-edit .unit-edit-dimensions { grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr)); padding:0; background:transparent; }
 html.app-mode .app-unit-edit .unit-edit-delete { margin-bottom:18px; }
 html.app-mode .app-unit-edit .inventory-detail > h3 { margin:20px 0 8px; color:#8e8e93; font-size:12px; font-weight:500; text-transform:uppercase; }
 html.app-mode .unit-edit-status { display:flex; justify-content:space-between; gap:12px; margin:12px 0; padding:10px 12px; border-radius:12px; background:#1c1c1e; color:#8e8e93; }
 html.app-mode .unit-edit-photo-strip { display:flex; gap:8px; overflow-x:auto; }
-html.app-mode .unit-edit-photo-open,html.app-mode .unit-edit-photo-add { position:relative; flex:0 0 84px; height:84px; padding:0; overflow:hidden; border:0; border-radius:12px; background:#1c1c1e; color:#0a84ff; }
+html.app-mode .unit-edit-photo-open,html.app-mode .unit-edit-photo-add { position:relative; flex:0 0 84px; height:84px; padding:0; overflow:hidden; border:0; border-radius:12px; background:#1c1c1e; color:#fff; }
 html.app-mode .unit-edit-photo-open img { width:100%; height:100%; object-fit:cover; }
 html.app-mode .unit-edit-photo-open small,html.app-mode .unit-edit-photo-add small { display:block; font-size:11px; }
 html.app-mode .unit-edit-stock-candidates { display:grid; grid-template-columns:repeat(auto-fill,minmax(92px,1fr)); gap:8px; margin-top:10px; }
@@ -686,9 +693,9 @@ html.app-mode .unit-photo-lightbox { position:fixed; inset:0; z-index:30; displa
 html.app-mode .unit-photo-lightbox img { max-width:90vw; max-height:65vh; object-fit:contain; }
 html.app-mode .unit-photo-lightbox > div { display:flex; flex-wrap:wrap; gap:8px; justify-content:center; }
 html.app-mode .unit-photo-lightbox-close { justify-self:end; }
-html.app-mode .unit-edit-required { color:#ff9f0a!important; }
-html.app-mode .unit-edit-brand-hint { color:#ff9f0a; font-size:11px; }
-html.app-mode .unit-edit-brand-hint button { color:#0a84ff; border:0; background:none; padding:0; }
+html.app-mode .unit-edit-required { color:#FF453A!important; }
+html.app-mode .unit-edit-brand-hint { color:#FF453A; font-size:11px; }
+html.app-mode .unit-edit-brand-hint button { color:#fff; border:0; background:none; padding:0; }
 html.app-mode .unit-edit-groups { display:grid; gap:12px; }
 html.app-mode .app-unit-edit .inventory-detail > h3:not(:first-of-type) { padding:8px 4px 4px; }
 html.app-mode .app-unit-edit .unit-edit-grid { padding:0 12px; border-radius:12px; background:#1c1c1e; }
@@ -760,7 +767,7 @@ html.app-mode .app-unit-edit .unit-edit-grid input,html.app-mode .app-unit-edit 
   padding: 16px;
   font-size: 17px;
   font-weight: 600;
-  background: #0a84ff;
+  background: #fff; color: #000;
   color: #fff;
 }
 .install-gate-hint {
@@ -778,7 +785,7 @@ html.app-mode .app-unit-edit .unit-edit-grid input,html.app-mode .app-unit-edit 
   text-decoration: underline;
 }
 .install-gate-arrow {
-  color: #0a84ff;
+  color: #fff;
   display: grid;
   justify-items: center;
   gap: 4px;
@@ -844,8 +851,8 @@ html.app-mode .app-pill {
   border-radius: 999px;
   flex: none;
 }
-html.app-mode .app-pill.warn { background: rgba(255, 159, 10, 0.2); color: #ff9f0a; }
-html.app-mode .app-pill.ok { background: rgba(48, 209, 88, 0.2); color: #30d158; }
+html.app-mode .app-pill.warn { background: rgba(255, 159, 10, 0.2); color: #FF453A; }
+html.app-mode .app-pill.ok { background: rgba(48, 209, 88, 0.2); color: #9a9a9a; }
 html.app-mode .app-pill.muted { background: #2c2c2e; color: #aeaeb2; }
 
 html.app-mode .app-stat-grid {
@@ -866,7 +873,7 @@ html.app-mode .app-stat-grid > div {
 }
 html.app-mode .app-stat-grid span { color: #8e8e93; font-size: 12px; }
 html.app-mode .app-stat-grid strong { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
-html.app-mode .app-stat-grid strong.pos { color: #30d158; }
+html.app-mode .app-stat-grid strong.pos { color: #9a9a9a; }
 
 html.app-mode .app-channel-tools {
   display: flex;
@@ -877,7 +884,7 @@ html.app-mode .app-channel-tools {
 html.app-mode .app-quarter {
   border: 0;
   background: transparent;
-  color: #0a84ff;
+  color: #fff;
   font-size: 15px;
   font-weight: 600;
   padding: 6px 0;
@@ -885,7 +892,7 @@ html.app-mode .app-quarter {
 html.app-mode .app-nav-plus {
   border: 0;
   background: transparent;
-  color: #0a84ff;
+  color: #fff;
   font-size: 28px;
   line-height: 1;
   padding: 0 4px;
@@ -901,7 +908,7 @@ html.app-mode .app-check {
   color: #fff;
   flex: none;
 }
-html.app-mode .app-check.on { background: #0a84ff; border-color: #0a84ff; }
+html.app-mode .app-check.on { background: #fff; color: #000; border-color: #fff; }
 html.app-mode .app-bulk-bar {
   position: sticky;
   bottom: calc(56px + env(safe-area-inset-bottom, 0px));
@@ -916,7 +923,7 @@ html.app-mode .app-bulk-bar {
 }
 html.app-mode .app-bulk-bar button {
   border: 0;
-  background: #0a84ff;
+  background: #fff; color: #000;
   color: #fff;
   border-radius: 10px;
   padding: 10px 12px;
@@ -925,7 +932,7 @@ html.app-mode .app-bulk-bar button {
 }
 html.app-mode .app-bulk-bar span { margin-left: auto; color: #8e8e93; font-size: 13px; }
 html.app-mode .app-row.is-selected { background: #2c2c2e; }
-html.app-mode .app-row-check { width: 28px; flex: 0 0 28px; text-align: center; font-size: 18px; color: #0a84ff; }
+html.app-mode .app-row-check { width: 28px; flex: 0 0 28px; text-align: center; font-size: 18px; color: #fff; }
 html.app-mode .location-unassign-toggle { display: flex; align-items: center; gap: 8px; grid-column: 1 / -1; font-size: 0.9rem; }
 
 html.app-mode .app-more-left {
@@ -940,7 +947,7 @@ html.app-mode .app-more-right {
   color: #8e8e93;
   font-size: 16px;
 }
-html.app-mode .app-more-right .warn { color: #ff9f0a; font-weight: 600; }
+html.app-mode .app-more-right .warn { color: #FF453A; font-weight: 600; }
 html.app-mode .app-more-icon {
   width: 28px;
   height: 28px;
@@ -970,10 +977,10 @@ html.app-mode .app-scanner-status i {
   border-radius: 50%;
   background: #8e8e93;
 }
-html.app-mode .app-scanner-status.ok { color: #30d158; }
-html.app-mode .app-scanner-status.ok i { background: #30d158; }
-html.app-mode .app-scanner-status.warn { color: #ff9f0a; }
-html.app-mode .app-scanner-status.warn i { background: #ff9f0a; }
+html.app-mode .app-scanner-status.ok { color: #9a9a9a; }
+html.app-mode .app-scanner-status.ok i { background: #fff; }
+html.app-mode .app-scanner-status.warn { color: #FF453A; }
+html.app-mode .app-scanner-status.warn i { background: #FF453A; }
 html.app-mode .app-item-scanner-status {
   flex: 0 0 auto;
   max-width: 92px;
@@ -1064,7 +1071,7 @@ html.app-mode .app-reports .inventory-tabs.report-tabs::-webkit-scrollbar { disp
 html.app-mode .app-reports .inventory-tabs.report-tabs button { min-height: 40px; padding: 8px 12px !important; background: #202022 !important; color: #d4d4d7 !important; border-radius: 999px !important; border-bottom: 0 !important; font-size: 12px; }
 html.app-mode .app-reports .inventory-tabs.report-tabs button.active { background: #fff !important; color: #111 !important; }
 html.app-mode .app-reports .native-report-body { padding: 0 12px 24px; min-width: 0; color: #f5f5f7; font-size: 13px; }
-html.app-mode .app-reports .native-report-action { position: absolute; top: 8px; right: 9px; z-index: 7; border: 0; background: transparent; color: #0a84ff; font-size: 24px; line-height: 1; width: 44px; height: 40px; }
+html.app-mode .app-reports .native-report-action { position: absolute; top: 8px; right: 9px; z-index: 7; border: 0; background: transparent; color: #fff; font-size: 24px; line-height: 1; width: 44px; height: 40px; }
 html.app-mode .app-reports .native-report-action:disabled { opacity: .45; }
 html.app-mode .app-reports .native-report-segment { display: flex; background: #1c1c1e; padding: 2px; border-radius: 7px; margin: 0 0 8px; }
 html.app-mode .app-reports .native-report-segment button { flex: 1; min-width: 0; min-height: 40px; border: 0; border-radius: 5px; background: transparent; color: #ccc; font-size: 11px; padding: 4px 2px; }
@@ -1093,17 +1100,17 @@ html.app-mode .app-reports .native-report-row small { display: block; color: #8e
 html.app-mode .app-reports .native-report-row b { font-weight: 500; white-space: nowrap; font-variant-numeric: tabular-nums; }
 html.app-mode .app-reports .native-report-row.strong, html.app-mode .app-reports .native-report-row.strong b { font-weight: 700; }
 html.app-mode .app-reports .native-report-row .minus { color: #ff453a; }
-html.app-mode .app-reports .native-report-row .plus { color: #30d158; }
+html.app-mode .app-reports .native-report-row .plus { color: #9a9a9a; }
 html.app-mode .app-reports .native-chevron { color: #666; font-size: 19px; line-height: 1; }
 html.app-mode .app-reports .native-report-footnote { color: #8e8e93; font-size: 10px; line-height: 1.4; padding: 0 10px; }
 html.app-mode .app-reports .native-report-empty { padding: 15px 12px; color: #8e8e93; margin: 0; }
-html.app-mode .app-reports .native-channel-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 7px; vertical-align: 2px; background: #0a84ff; }
+html.app-mode .app-reports .native-channel-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 7px; vertical-align: 2px; background: #fff; color: #000; }
 html.app-mode .app-reports .native-channel-dot.channel-depop { background: #bf5af2; }
 html.app-mode .app-reports .native-channel-dot.channel-tiktok { background: #ff375f; }
-html.app-mode .app-reports .native-channel-dot.channel-floor { background: #30d158; }
+html.app-mode .app-reports .native-channel-dot.channel-floor { background: #fff; }
 html.app-mode .app-reports .native-report-category .native-report-row { border-bottom: 0; padding-bottom: 2px; }
 html.app-mode .app-reports .native-report-progress { height: 3px; margin: 0 11px 8px; border-radius: 2px; background: #303034; }
-html.app-mode .app-reports .native-report-progress span { display: block; height: 100%; background: #0a84ff; border-radius: inherit; }
+html.app-mode .app-reports .native-report-progress span { display: block; height: 100%; background: #fff; color: #000; border-radius: inherit; }
 html.app-mode .app-reports .native-report-form, html.app-mode .app-reports .native-report-detail, html.app-mode .app-reports .native-report-expand { display: block; background: #1c1c1e; border-radius: 10px; padding: 12px; margin: 8px 0; }
 html.app-mode .app-reports .native-report-form-head { display: flex; justify-content: space-between; align-items: center; }
 html.app-mode .app-reports .native-report-form h2, html.app-mode .app-reports .native-report-detail h2 { font-size: 18px; margin: 0; }
@@ -1120,7 +1127,7 @@ html.app-mode .app-reports .native-payout-balance { text-align: right; font-vari
 html.app-mode .app-reports .native-payout-balance strong { font-size: 18px; }
 html.app-mode .app-reports .native-payout-form { display: flex; gap: 6px; padding: 2px 10px 10px; }
 html.app-mode .app-reports .native-payout-form input { min-width: 0; flex: 1; width: 0; border: 0; border-radius: 6px; padding: 6px; }
-html.app-mode .app-reports .native-payout-form button { min-width: 52px; min-height: 38px; border: 0; border-radius: 6px; background: #30d158; color: #081b0e; font-weight: 700; }
+html.app-mode .app-reports .native-payout-form button { min-width: 52px; min-height: 38px; border: 0; border-radius: 6px; background: #fff; color: #081b0e; font-weight: 700; }
 html.app-mode .app-reports .native-payout-breakdown { border-top: 1px solid #333336; }
 html.app-mode .app-reports .native-payout-breakdown summary { list-style: none; padding: 12px 10px; min-height: 42px; box-sizing: border-box; }
 html.app-mode .app-reports .native-payout-breakdown summary::-webkit-details-marker { display: none; }
@@ -1129,10 +1136,10 @@ html.app-mode .app-reports .native-payout-note { display: block; color: #8e8e93;
 html.app-mode .app-reports .native-payout-note input { display: block; width: 100%; box-sizing: border-box; min-height: 40px; }
 html.app-mode .app-reports .native-week-chart { height: 43px; display: flex; align-items: end; gap: 4px; margin: 2px 2px 14px; }
 html.app-mode .app-reports .native-week-chart div { flex: 1; background: #304c70; border-radius: 2px 2px 0 0; }
-html.app-mode .app-reports .native-week-chart div.today { background: #0a84ff; }
+html.app-mode .app-reports .native-week-chart div.today { background: #fff; color: #000; }
 html.app-mode .app-reports .native-closeout-buttons { display: flex; gap: 8px; }
-html.app-mode .app-reports .native-closeout-buttons button { flex: 1; min-width: 0; min-height: 45px; border: 0; border-radius: 8px; background: #0a84ff; color: white; font-weight: 600; }
-html.app-mode .app-reports .native-closeout-buttons button + button { background: #2c2c2e; color: #0a84ff; }
+html.app-mode .app-reports .native-closeout-buttons button { flex: 1; min-width: 0; min-height: 45px; border: 0; border-radius: 8px; background: #fff; color: #000; color: white; font-weight: 600; }
+html.app-mode .app-reports .native-closeout-buttons button + button { background: #2c2c2e; color: #fff; }
 html.app-mode .app-reports .native-report-date { margin-top: 10px; border-radius: 9px; background: #1c1c1e; }
 html.app-mode .app-reports .native-report-date input { width: auto; max-width: 55%; border: 0; text-align: right; }
 html.app-mode .app-reports .native-closeout-editor header { display: none; }
@@ -1161,7 +1168,7 @@ html.app-mode .receive-app .receive-confirm textarea { background: #2c2c2e; colo
 html.app-mode .receive-app .receive-confirm-details { background: #1c1c1e; border: 0; }
 html.app-mode .receive-app .receive-confirm-details summary { min-height: 44px; box-sizing: border-box; }
 html.app-mode .receive-app .receive-confirm-bottom { position: relative; left: auto; right: auto; bottom: auto; background: #111113; border-top: 1px solid #3a3a3c; box-shadow: 0 -6px 24px #0009; margin: 0; padding: 10px 16px; }
-html.app-mode .receive-app .receive-confirm-bottom > button { background: #0a84ff; color: #fff; border: 0; border-radius: 10px; }
+html.app-mode .receive-app .receive-confirm-bottom > button { background: #fff; color: #000; border: 0; border-radius: 10px; }
 html.app-mode .receive-app .receive-confirm-prices summary { color: #d1e7ff; }
 html.app-mode .receive-app .receive-confirm-bottom > small { color: #ffb366; }
 html.app-mode .receive-app .receive-advanced { margin: 12px 16px; }
@@ -1251,7 +1258,7 @@ html.app-mode .nr-cashier-chip {
 html.app-mode .nr-add-item {
   border: 0;
   background: transparent;
-  color: #0a84ff;
+  color: #fff;
   font-size: 17px;
   font-weight: 600;
   min-height: 44px;
@@ -1301,7 +1308,7 @@ html.app-mode .nr-search input::placeholder { color: #8e8e93; }
 html.app-mode .nr-scan-btn {
   border: 0;
   background: #2c2c2e;
-  color: #0a84ff;
+  color: #fff;
   font-size: 13px;
   font-weight: 600;
   border-radius: 8px;
@@ -1407,7 +1414,7 @@ html.app-mode .nr-stepper button {
   height: 32px;
   border: 0;
   background: transparent;
-  color: #0a84ff;
+  color: #fff;
   font-size: 20px;
   font-weight: 600;
 }
@@ -1433,13 +1440,13 @@ html.app-mode .nr-price-btn {
   padding: 0 2px;
   position: relative;
 }
-html.app-mode .nr-price-btn.is-override { color: #ffd60a; }
+html.app-mode .nr-price-btn.is-override { color: #FF453A; }
 html.app-mode .nr-price-btn i {
   position: absolute;
   top: 8px;
   right: -6px;
   font-style: normal;
-  color: #ffd60a;
+  color: #FF453A;
   font-size: 10px;
 }
 html.app-mode .nr-price-input {
@@ -1457,7 +1464,7 @@ html.app-mode .nr-price-input {
 html.app-mode .nr-reset-price {
   border: 0;
   background: transparent;
-  color: #0a84ff;
+  color: #fff;
   font-size: 12px;
   font-weight: 600;
   min-height: 28px;
@@ -1484,7 +1491,7 @@ html.app-mode .nr-tools {
 html.app-mode .nr-tools button {
   border: 0;
   background: #1c1c1e;
-  color: #0a84ff;
+  color: #fff;
   font-size: 14px;
   font-weight: 600;
   border-radius: 12px;
@@ -1517,7 +1524,7 @@ html.app-mode .nr-totals > div {
   border-bottom: 0.5px solid rgba(84,84,88,0.65);
 }
 html.app-mode .nr-totals > div:last-child { border-bottom: 0; }
-html.app-mode .nr-totals .discount { color: #30d158; }
+html.app-mode .nr-totals .discount { color: #9a9a9a; }
 html.app-mode .nr-totals .total {
   font-size: 20px;
   font-weight: 700;
@@ -1541,11 +1548,11 @@ html.app-mode .nr-card {
   text-align: left;
 }
 html.app-mode .nr-cash {
-  background: #30d158;
+  background: #fff;
   color: #003a10;
 }
 html.app-mode .nr-card {
-  background: #0a84ff;
+  background: #fff; color: #000;
   color: #fff;
 }
 html.app-mode .nr-cash span,
@@ -1565,7 +1572,7 @@ html.app-mode .nr-split {
   margin-top: 8px;
   border: 0;
   background: transparent;
-  color: #0a84ff;
+  color: #fff;
   font-size: 16px;
   font-weight: 600;
   min-height: 44px;
@@ -1633,7 +1640,7 @@ html.app-mode .nr-change-huge {
 }
 html.app-mode .nr-change-huge span { color: #8e8e93; }
 html.app-mode .nr-change-huge strong {
-  color: #30d158;
+  color: #9a9a9a;
   font-size: 36px;
   font-weight: 800;
   font-variant-numeric: tabular-nums;
@@ -1657,7 +1664,7 @@ html.app-mode .nr-card-finish {
   border: 0;
   border-radius: 14px;
   min-height: 52px;
-  background: #0a84ff;
+  background: #fff; color: #000;
   color: #fff;
   font-size: 17px;
   font-weight: 700;
@@ -1697,7 +1704,7 @@ html.app-mode .nr-check {
   height: 72px;
   margin: 0 auto 16px;
   border-radius: 50%;
-  background: #30d158;
+  background: #fff;
   color: #003a10;
   display: grid;
   place-items: center;
@@ -1717,7 +1724,7 @@ html.app-mode .nr-done-amount {
   margin-bottom: 6px;
 }
 html.app-mode .nr-done-hero p { color: #8e8e93; margin: 4px 0; }
-html.app-mode .nr-change { color: #30d158 !important; }
+html.app-mode .nr-change { color: #9a9a9a !important; }
 html.app-mode .nr-receipt-actions { text-align: left; }
 html.app-mode .nr-receipt-actions .app-row {
   width: 100%;
@@ -1735,18 +1742,18 @@ html.app-mode .nr-new-sale {
   border: 0;
   border-radius: 14px;
   min-height: 52px;
-  background: #0a84ff;
+  background: #fff; color: #000;
   color: #fff;
   font-size: 17px;
   font-weight: 700;
 }
-html.app-mode .live { color: #30d158 !important; }
+html.app-mode .live { color: #9a9a9a !important; }
 
 html.app-mode .app-total.inventory-total-button { appearance: none; border: 0; color: #fff; }
 
 html.app-mode .depop-live-top{display:flex;align-items:baseline;gap:8px}html.app-mode .depop-live-top .depop-live-count{font-size:42px}html.app-mode .depop-live-top>span{color:#9b9ba2}html.app-mode .depop-live-top>button{margin-left:auto;font-size:18px}html.app-mode .depop-live-metrics{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}html.app-mode .depop-live-metrics>div{display:grid;gap:4px;padding:14px;border-radius:16px;background:#1d1d1f}html.app-mode .depop-live-metrics strong{font-size:25px}html.app-mode .depop-live-metrics span{color:#a1a1a8;font-size:13px}html.app-mode .depop-live-metrics .depop-live-sold{background:#321819;border:1px solid #883d3d;color:#ff8585}html.app-mode .depop-sku-list{margin-top:12px;border-radius:16px;overflow:hidden;background:#1d1d1f}html.app-mode .depop-sku-row{display:flex;align-items:center;border-bottom:1px solid #343438}html.app-mode .depop-sku-open{display:flex;align-items:center;gap:10px;flex:1;min-height:64px;padding:12px 16px;background:transparent;border:0;color:inherit;text-align:left}html.app-mode .depop-sku-open strong{font-size:21px;letter-spacing:.03em}html.app-mode .depop-sku-open span{margin-left:auto;color:#ff8585;background:#401f20;border-radius:9px;padding:5px 9px;font-size:13px}html.app-mode .depop-sku-open b{color:#777;font-size:25px}html.app-mode .depop-sku-row.sold-elsewhere .depop-sku-open{color:#ff8a8a}html.app-mode .depop-needs-head{margin:12px 0 0;padding:10px 14px;background:#8f1218;color:#fff;font-weight:750;border-radius:16px 16px 0 0}html.app-mode .depop-sku-list.has-needs{margin-top:0;border-top-left-radius:0;border-top-right-radius:0}html.app-mode .depop-sku-row.needs-removal{background:#5a1014}html.app-mode .depop-sku-row.needs-removal .depop-sku-open{color:#ffd6d6}html.app-mode .depop-sku-row.needs-removal .depop-sku-open span{color:#fff;background:#e10600;font-weight:750}html.app-mode .depop-remove{margin-right:8px}html.app-mode .depop-live-summary .depop-form{margin-top:16px}html.app-mode .orders-app-title{display:flex;align-items:baseline;justify-content:space-between;gap:10px}html.app-mode .orders-app-title>span{font-size:14px;color:#a1a1a8;font-weight:500}html.app-mode .order-card-summary{display:flex;gap:12px;align-items:center;margin:4px 0 12px}html.app-mode .order-card-photo{width:64px;height:64px;flex:0 0 64px;border-radius:12px;background:#2b2b2e;overflow:hidden}html.app-mode .order-card-photo img{width:100%;height:100%;object-fit:cover}html.app-mode .order-card-info{display:grid;gap:5px;min-width:0}html.app-mode .order-card-title{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;line-height:1.25;white-space:normal}html.app-mode .order-card-info>small{color:#a1a1a8}html.app-mode .order-card-tags{display:flex;flex-wrap:wrap;gap:6px}html.app-mode .order-card-tags b{font-size:12px;padding:4px 8px;border-radius:99px;background:#18304a;color:#9dcbff}html.app-mode .order-card-tags b.urgent{background:#443014;color:#ffc66d}html.app-mode .order-card-tags b.shipped,html.app-mode .order-card-tags b.done{background:#1b3327;color:#8ce0a7}html.app-mode .order-card-tags b.muted{background:#343438;color:#c3c3c8}
 
-html.app-mode .app-row-price-stack{display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex:0 0 auto;max-width:36%;min-width:52px}html.app-mode .app-row-price-stack .inventory-missing{display:block;white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere;text-align:right;color:#ff9f0a;font-size:10px;line-height:1.25;font-weight:500}html.app-mode .app-unit-edit .inventory-missing{color:#ff9f0a}
+html.app-mode .app-row-price-stack{display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex:0 0 auto;max-width:36%;min-width:52px}html.app-mode .app-row-price-stack .inventory-missing{display:block;white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere;text-align:right;color:#FF453A;font-size:10px;line-height:1.25;font-weight:500}html.app-mode .app-unit-edit .inventory-missing{color:#FF453A}
 
 html.app-mode .aspect-list{background:#1c1c1e;color:#fff;border-color:#38383a}
 html.app-mode .aspect-list button:hover,html.app-mode .aspect-list button.is-selected{background:#2c2c2e}
@@ -1863,9 +1870,9 @@ html.app-mode .app-photo-thumb {
   border-radius: 10px;
   overflow: hidden;
   background: #1c1c1e;
-  color: #0a84ff;
+  color: #fff;
 }
-html.app-mode .app-photo-thumb.is-active { border-color: #0a84ff; }
+html.app-mode .app-photo-thumb.is-active { border-color: #fff; }
 html.app-mode .app-photo-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 html.app-mode .app-photo-thumb-add { font-size: 28px; font-weight: 300; }
 html.app-mode .app-item-identity { overflow-wrap: anywhere; }
@@ -1877,18 +1884,18 @@ html.app-mode .app-item-price-row {
   flex-wrap: wrap;
 }
 html.app-mode .app-item-price-row .price { margin: 0; }
-html.app-mode .app-item-profit { color: #30d158; font-size: 15px; font-weight: 600; }
+html.app-mode .app-item-profit { color: #9a9a9a; font-size: 15px; font-weight: 600; }
 html.app-mode .app-text-link {
   border: 0;
   background: none;
-  color: #0a84ff;
+  color: #fff;
   font: inherit;
   font-weight: 600;
   padding: 8px 0;
   min-height: 44px;
   text-align: right;
 }
-html.app-mode .app-text-link.warn { color: #ff9f0a; }
+html.app-mode .app-text-link.warn { color: #FF453A; }
 html.app-mode .app-status-chips {
   display: flex;
   flex-wrap: wrap;
@@ -1906,8 +1913,8 @@ html.app-mode .app-chip {
   font-size: 13px;
   font-weight: 600;
 }
-html.app-mode .app-chip.good { background: rgba(48, 209, 88, 0.18); color: #30d158; }
-html.app-mode .app-chip.warn { background: rgba(255, 159, 10, 0.18); color: #ff9f0a; }
+html.app-mode .app-chip.good { background: rgba(48, 209, 88, 0.18); color: #9a9a9a; }
+html.app-mode .app-chip.warn { background: rgba(255, 159, 10, 0.18); color: #FF453A; }
 html.app-mode .app-chip.muted { color: #8e8e93; }
 html.app-mode .app-chip.inline { display: inline-flex; margin-top: 6px; }
 html.app-mode .app-quick-actions {
@@ -1921,7 +1928,7 @@ html.app-mode .app-quick-actions button {
   border: 0;
   border-radius: 12px;
   background: #1c1c1e;
-  color: #0a84ff;
+  color: #fff;
   font-size: 15px;
   font-weight: 600;
   padding: 10px 8px;
@@ -1946,8 +1953,8 @@ html.app-mode .app-pill {
   background: #3a3a3c;
   color: #aeaeb2;
 }
-html.app-mode .app-pill.live { background: rgba(48, 209, 88, 0.18); color: #30d158; }
-html.app-mode .app-pill.delisted { background: rgba(255, 159, 10, 0.15); color: #ff9f0a; }
+html.app-mode .app-pill.live { background: rgba(48, 209, 88, 0.18); color: #9a9a9a; }
+html.app-mode .app-pill.delisted { background: rgba(255, 159, 10, 0.15); color: #FF453A; }
 html.app-mode .app-channel-action {
   display: flex;
   justify-content: flex-end;
@@ -1956,7 +1963,7 @@ html.app-mode .app-channel-action {
   min-height: 44px;
 }
 html.app-mode .app-channel-action a,
-html.app-mode .app-channel-action .app-text-link { min-height: 44px; display: inline-flex; align-items: center; color: #0a84ff; text-decoration: none; font-weight: 600; }
+html.app-mode .app-channel-action .app-text-link { min-height: 44px; display: inline-flex; align-items: center; color: #fff; text-decoration: none; font-weight: 600; }
 html.app-mode .app-channel-action strong { font-weight: 600; }
 html.app-mode .app-channel-action .muted { color: #636366; }
 html.app-mode .app-card-body { padding: 14px; }
@@ -1980,7 +1987,7 @@ html.app-mode .app-item-bottom-actions .secondary {
   border-radius: 12px;
   border: 0;
   background: #1c1c1e;
-  color: #0a84ff;
+  color: #fff;
   font-size: 17px;
   font-weight: 600;
 }
@@ -2012,7 +2019,7 @@ html.app-mode .app-sheet header {
 html.app-mode .app-sheet header button {
   border: 0;
   background: none;
-  color: #0a84ff;
+  color: #fff;
   font-size: 17px;
   font-weight: 600;
   min-height: 44px;
@@ -2043,7 +2050,7 @@ html.app-mode .app-edit-section-chips button {
   font-weight: 600;
 }
 html.app-mode .app-edit-section-chips button.is-active {
-  background: #0a84ff;
+  background: #fff; color: #000;
   color: #fff;
 }
 html.app-mode .unit-edit-photo-grid {
@@ -2119,15 +2126,15 @@ html.app-mode .unit-edit-segmented button {
   font-weight: 600;
 }
 html.app-mode .unit-edit-segmented button.is-active {
-  border-color: #0a84ff;
+  border-color: #fff;
   background: rgba(10, 132, 255, 0.18);
-  color: #0a84ff;
+  color: #fff;
 }
 html.app-mode .unit-edit-price-pair {
   grid-template-columns: 1fr 1fr !important;
 }
 html.app-mode .unit-edit-cost-empty input {
-  border-color: #ff9f0a !important;
+  border-color: #FF453A !important;
   box-shadow: 0 0 0 1px rgba(255, 159, 10, 0.35);
 }
 html.app-mode .unit-edit-profit-line {
@@ -2135,7 +2142,7 @@ html.app-mode .unit-edit-profit-line {
   color: #aeaeb2;
   font-size: 14px;
 }
-html.app-mode .unit-edit-profit-line.warn { color: #ff9f0a; }
+html.app-mode .unit-edit-profit-line.warn { color: #FF453A; }
 html.app-mode .unit-edit-dim-row {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -2192,7 +2199,7 @@ html.app-mode .ios-switch {
   position: relative;
   flex: 0 0 auto;
 }
-html.app-mode .ios-switch.is-on { background: #30d158; }
+html.app-mode .ios-switch.is-on { background: #fff; }
 html.app-mode .ios-switch-knob {
   position: absolute;
   top: 2px;
@@ -2244,7 +2251,7 @@ html.app-mode .unit-edit-location {
   gap: 6px;
   padding: 12px 14px;
 }
-html.app-mode .unit-edit-location p.warn { color: #ff9f0a; margin: 0; font-weight: 600; }
+html.app-mode .unit-edit-location p.warn { color: #FF453A; margin: 0; font-weight: 600; }
 html.app-mode .unit-edit-bottom-actions {
   display: grid;
   gap: 10px;
@@ -2257,7 +2264,7 @@ html.app-mode .unit-edit-bottom-actions > button {
   border-radius: 12px;
   border: 0;
   background: #1c1c1e;
-  color: #0a84ff;
+  color: #fff;
   font-size: 17px;
   font-weight: 600;
 }
@@ -2281,13 +2288,13 @@ html.app-mode .app-sticky-save {
   border: 1px solid #3a3a3c;
   box-shadow: 0 8px 24px #0008;
 }
-html.app-mode .app-sticky-save span { color: #ff9f0a; font-size: 14px; font-weight: 600; }
+html.app-mode .app-sticky-save span { color: #FF453A; font-size: 14px; font-weight: 600; }
 html.app-mode .app-sticky-save button {
   min-height: 44px;
   min-width: 110px;
   border: 0;
   border-radius: 12px;
-  background: #0a84ff;
+  background: #fff; color: #000;
   color: #fff;
   font-size: 17px;
   font-weight: 700;
@@ -2303,7 +2310,7 @@ html.app-mode .ebay-field-required-tag {
   position: absolute;
   top: 10px;
   right: 10px;
-  color: #ff9f0a;
+  color: #FF453A;
   font-size: 11px;
   font-weight: 700;
 }
@@ -2342,7 +2349,7 @@ html.app-mode .returns-title-row h1 { margin: 0; font-size: 34px; }
 html.app-mode .returns-text-btn {
   border: 0;
   background: transparent;
-  color: #0a84ff;
+  color: #fff;
   font-size: 17px;
   font-weight: 500;
   padding: 8px 0;
@@ -2394,9 +2401,12 @@ html.app-mode .returns-row-status {
   align-items: center;
   gap: 2px;
 }
-html.app-mode .returns-status-warn { color: #ffd60a; }
-html.app-mode .returns-status-ok { color: #30d158; }
-html.app-mode .returns-status-info { color: #0a84ff; }
+html.app-mode .returns-status-warn { color: #fff; font-weight: 700; }
+html.app-mode .returns-status-ok { color: #9a9a9a; }
+html.app-mode .returns-status-warn { color: #fff; font-weight: 700; background: none; }
+html.app-mode .returns-status-ok { color: #9a9a9a; background: none; }
+html.app-mode .returns-status-info { color: #fff; background: none; }
+html.app-mode .returns-status-muted { color: #9a9a9a; }
 html.app-mode .returns-status-muted { color: #8e8e93; }
 html.app-mode .returns-sheet { display: grid; gap: 12px; padding-bottom: 24px; }
 html.app-mode .returns-nav-bar {
@@ -2422,10 +2432,10 @@ html.app-mode .returns-pick-card {
   text-align: left;
   padding: 14px;
 }
-html.app-mode .returns-pick-card.on { outline: 2px solid #0a84ff; }
+html.app-mode .returns-pick-card.on { outline: 2px solid #fff; }
 html.app-mode .returns-pick-card strong { display: block; font-size: 17px; }
 html.app-mode .returns-pick-card small { color: #8e8e93; font-size: 14px; }
-html.app-mode .returns-check { color: #0a84ff; font-size: 20px; font-weight: 700; }
+html.app-mode .returns-check { color: #fff; font-size: 20px; font-weight: 700; }
 html.app-mode .returns-field-row {
   display: flex;
   align-items: center;
@@ -2467,7 +2477,7 @@ html.app-mode .returns-primary {
   min-height: 52px;
   border: 0;
   border-radius: 14px;
-  background: #0a84ff;
+  background: #fff; color: #000;
   color: #fff;
   font-size: 17px;
   font-weight: 600;
@@ -2506,16 +2516,16 @@ html.app-mode .returns-timeline li {
   color: #fff;
 }
 html.app-mode .returns-timeline li.pending { opacity: .35; }
-html.app-mode .returns-timeline li.current .returns-dot { background: #0a84ff; box-shadow: 0 0 0 4px rgba(10,132,255,.25); }
+html.app-mode .returns-timeline li.current .returns-dot { background: #fff; color: #000; box-shadow: 0 0 0 4px rgba(10,132,255,.25); }
 html.app-mode .returns-dot {
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: #30d158;
+  background: #fff;
   margin-top: 5px;
 }
 html.app-mode .returns-timeline small { display: block; color: #8e8e93; font-size: 13px; margin-top: 2px; }
-html.app-mode .returns-tracking-note { color: #ff9f0a; font-size: 12px; margin: 10px 0 0; }
+html.app-mode .returns-tracking-note { color: #FF453A; font-size: 12px; margin: 10px 0 0; }
 html.app-mode .returns-decide {
   margin-top: 16px;
   padding: 14px;
@@ -2592,7 +2602,7 @@ html.app-mode .loc-edit-actions button {
   border: 0;
   border-radius: 10px;
   background: #2c2c2e;
-  color: #0a84ff;
+  color: #fff;
   font: inherit;
   font-size: 17px;
   padding: 10px 14px;
@@ -2609,7 +2619,7 @@ html.app-mode .loc-primary {
   margin: 8px 16px 16px;
   border: 0;
   border-radius: 12px;
-  background: #0a84ff;
+  background: #fff; color: #000;
   color: #fff;
   font: inherit;
   font-size: 17px;
@@ -2620,43 +2630,51 @@ html.app-mode .loc-field small { color: #8e8e93; }
 
 /* Order stages, label chips, Depop upload — phone shell */
 html.app-mode .orders-segment button {
-  display: grid;
-  gap: 1px;
-  font-size: 11px;
-  line-height: 1.15;
-  padding: 7px 2px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 15px;
+  line-height: 1.2;
+  padding: 10px 0;
   min-width: 0;
+  white-space: nowrap;
 }
 html.app-mode .orders-segment button strong { font-size: 15px; font-weight: 700; }
-html.app-mode .orders-segment button.active { background: #0a84ff; color: #fff; }
+html.app-mode .orders-segment button.active { background: transparent; color: #fff; box-shadow: inset 0 -2px 0 #fff; }
 html.app-mode .orders-seg-note { margin: -6px 16px 10px; }
 html.app-mode .app-flag {
   margin: 0 16px 12px;
-  padding: 10px 12px;
-  border-radius: 10px;
-  background: rgba(255, 159, 10, 0.16);
-  color: #ffd60a;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #FF453A;
   font-size: 13px;
 }
 html.app-mode .app-order-row { align-items: stretch; }
 html.app-mode .app-order-open { flex: 1; display: flex; gap: 10px; align-items: flex-start; background: none; border: 0; color: inherit; text-align: left; padding: 0; min-width: 0; }
 html.app-mode .app-row-upload { position: relative; display: flex; align-items: center; font-size: 13px; font-weight: 700; color: #8eb7ff; padding: 0 4px; cursor: pointer; }
 html.app-mode .app-row-upload input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
-html.app-mode .app-order-location-badge {
-  width: 64px;
-  flex: none;
-  display: grid;
-  justify-items: center;
-  align-content: center;
-  gap: 2px;
-  background: #2c2c2e;
-  border-radius: 8px;
-  padding: 8px 4px;
-  line-height: 1.05;
+html.app-mode .app-order-bay {
+  display: block;
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+  margin-top: 2px;
 }
-html.app-mode .app-order-location-badge small { font-size: 9px; letter-spacing: 0.04em; color: #8e8e93; text-transform: uppercase; }
-html.app-mode .app-order-location-badge strong { font-size: 13px; font-weight: 700; }
-html.app-mode .app-order-location-badge.missing { opacity: 0.7; }
+html.app-mode .app-order-bay.missing { color: #FF453A; }
+html.app-mode .app-order-main strong { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+html.app-mode .app-order-problem { color: #FF453A; font-weight: 700; }
+html.app-mode .app-order-print {
+  align-self: center;
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 1px solid #fff;
+  background: transparent;
+  color: #fff;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 400;
+}
 html.app-mode .app-order-main { flex: 1; min-width: 0; display: grid; gap: 3px; }
 html.app-mode .app-order-main > strong { font-size: 16px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 html.app-mode .app-order-main > small { color: #8e8e93; font-size: 13px; }
@@ -2669,8 +2687,8 @@ html.app-mode .app-chip {
   background: #2c2c2e;
   color: #fff;
 }
-html.app-mode .app-chip.warn { background: rgba(255, 159, 10, 0.18); color: #ff9f0a; }
-html.app-mode .app-chip.ok { background: rgba(48, 209, 88, 0.16); color: #30d158; }
+html.app-mode .app-chip.warn { background: rgba(255, 159, 10, 0.18); color: #FF453A; }
+html.app-mode .app-chip.ok { background: rgba(48, 209, 88, 0.16); color: #9a9a9a; }
 html.app-mode .app-chip.blue { background: rgba(10, 132, 255, 0.22); color: #64b5ff; }
 html.app-mode .app-chip.muted { color: #8e8e93; background: #2c2c2e; }
 html.app-mode .app-kv select {
@@ -2685,7 +2703,7 @@ html.app-mode .app-kv select {
 html.app-mode .app-actions.stack { grid-template-columns: 1fr; }
 html.app-mode .app-actions button.primary,
 html.app-mode .app-actions button.primary:hover {
-  background: #0a84ff;
+  background: #fff; color: #000;
   color: #fff;
 }
 html.app-mode .app-actions button.secondary { color: #fff; background: #2c2c2e; }
@@ -2704,17 +2722,17 @@ html.app-mode .order-stepper li span {
   display: grid; place-items: center;
   background: #2c2c2e; color: #8e8e93; font-size: 11px; font-weight: 700;
 }
-html.app-mode .order-stepper li.current { color: #0a84ff; }
-html.app-mode .order-stepper li.current span { background: #0a84ff; color: #fff; }
-html.app-mode .order-stepper li.done span { background: #30d158; color: #fff; }
+html.app-mode .order-stepper li.current { color: #fff; }
+html.app-mode .order-stepper li.current span { background: #fff; color: #000; }
+html.app-mode .order-stepper li.done span { background: #fff; color: #fff; }
 html.app-mode .order-timeline { list-style: none; margin: 0; padding: 4px 14px 8px; }
 html.app-mode .order-timeline li {
   display: grid; gap: 2px; padding: 8px 0 8px 14px;
   border-left: 2px solid #3a3a3c;
 }
-html.app-mode .order-timeline li.current { border-left-color: #0a84ff; }
-html.app-mode .order-timeline li.ok { border-left-color: #30d158; }
-html.app-mode .order-timeline li.warn { border-left-color: #ff9f0a; }
+html.app-mode .order-timeline li.current { border-left-color: #fff; }
+html.app-mode .order-timeline li.ok { border-left-color: #9a9a9a; }
+html.app-mode .order-timeline li.warn { border-left-color: #FF453A; }
 html.app-mode .order-timeline span { color: #8e8e93; font-size: 13px; }
 html.app-mode .app-track-box {
   margin: 0 16px 12px;
@@ -2738,7 +2756,7 @@ html.app-mode .depop-label-field { display: grid; gap: 6px; }
 html.app-mode .depop-label-drop {
   display: grid; gap: 2px; justify-items: center; text-align: center;
   border: 1.5px dashed #3a3a3c; border-radius: 12px; padding: 18px;
-  color: #0a84ff; background: #1c1c1e; cursor: pointer;
+  color: #fff; background: #1c1c1e; cursor: pointer;
 }
 html.app-mode .depop-label-drop input { display: none; }
 html.app-mode .depop-label-drop small { color: #8e8e93; }
@@ -2746,9 +2764,9 @@ html.app-mode .depop-label-file {
   display: grid; gap: 2px; padding: 12px 14px; border-radius: 12px;
   background: #12301c; color: #fff;
 }
-html.app-mode .depop-label-file small { color: #30d158; }
+html.app-mode .depop-label-file small { color: #9a9a9a; }
 html.app-mode .depop-form .actions button.primary {
-  background: #0a84ff;
+  background: #fff; color: #000;
   color: #fff;
   border: 0;
   border-radius: 12px;
@@ -2768,14 +2786,49 @@ html.app-mode .order-title { color: #fff; font-size: 20px; }
 html.app-mode .order-detail-copy p { color: #8e8e93; }
 html.app-mode .order-find { margin: 8px 16px 10px; }
 html.app-mode .order-sku-block { background: #2c2c2e; color: #fff; }
-html.app-mode .order-facts { margin: 0 16px 10px; background: #1c1c1e; }
+html.app-mode .order-facts { margin: 0 16px 10px; background: transparent; border: 0; }
 html.app-mode .order-facts > div + div { border-top-color: #3a3a3c; }
 html.app-mode .order-facts span { color: #8e8e93; }
 html.app-mode .order-facts strong { color: #fff; }
-html.app-mode .order-facts strong.ok { color: #30d158; }
-html.app-mode .order-facts strong.warn { color: #ff9f0a; }
+html.app-mode .order-facts strong.ok { color: #9a9a9a; }
+html.app-mode .order-facts strong.warn { color: #FF453A; }
 html.app-mode .order-actions { margin: 0 16px 8px; }
 html.app-mode .order-actions button { background: #2c2c2e; color: #fff; }
-html.app-mode .order-actions button.primary { background: #0a84ff; color: #fff; }
+html.app-mode .order-actions button.primary { background: #fff; color: #000; }
+html.app-mode .inv-pair { display: grid; grid-template-columns: 1fr 1fr; margin: 4px 16px 8px; }
+html.app-mode .inv-pair > div { display: grid; gap: 2px; padding: 8px 12px; }
+html.app-mode .inv-pair > div + div { border-left: 1px solid #2a2a2a; }
+html.app-mode .inv-pair span { color: #9a9a9a; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; }
+html.app-mode .inv-pair strong { font-size: 28px; font-weight: 700; }
+html.app-mode .inv-pair small { color: #9a9a9a; font-size: 13px; }
+html.app-mode .inv-pair-alert, html.app-mode .inv-tab-alert { color: #FF453A; }
+html.app-mode .app-title-row { display: flex; align-items: baseline; justify-content: space-between; }
+html.app-mode .app-title-link { border: 0; background: none; color: #fff; text-decoration: underline; min-height: 44px; font-size: 16px; }
+html.app-mode .inv-missing-line { display: block; color: #FF453A; font-size: 13px; }
+html.app-mode .returns-title-row { display: flex; align-items: center; gap: 16px; flex-wrap: nowrap; }
+html.app-mode .returns-title-row h1 { flex: 1; margin: 0; }
+html.app-mode .returns-text-btn { color: #fff; text-decoration: underline; background: none; border: 0; white-space: nowrap; min-height: 44px; }
+html.app-mode fieldset, html.app-mode .channel-picker, html.dark .channel-picker, html.dark fieldset.channel-picker { background: transparent; color: #fff; }
+html.app-mode .app-group { background: transparent; }
+html.app-mode .receipt-tabs { align-items: center; }
+html.app-mode .receipt-filters-toggle { margin-left: auto; color: #fff; }
+html.app-mode .receipt-date-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 0 16px 12px; }
+html.app-mode .receipt-date-row input { min-height: 44px; }
+html.app-mode .receipt-summary { display: flex; justify-content: space-between; margin: 0 16px 8px; color: #9a9a9a; font-size: 13px; }
+html.app-mode .receipt-summary strong { color: #fff; }
+html.app-mode .receipt-compact-row { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: center; width: 100%; min-height: 56px; padding: 6px 16px; border: 0; border-bottom: 1px solid #2a2a2a; background: transparent; color: #fff; text-align: left; }
+html.app-mode .receipt-compact-row strong, html.app-mode .receipt-compact-row small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+html.app-mode .receipt-compact-row small, html.app-mode .receipt-compact-row i { color: #9a9a9a; font-style: normal; }
+html.app-mode .receipt-detail { padding: 12px 20px 32px; }
+html.app-mode .receipt-detail-head { display: flex; justify-content: space-between; align-items: center; }
+html.app-mode .receipt-detail h3 { margin: 18px 0 8px; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: #9a9a9a; }
+html.app-mode .receipt-detail-row { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid #2a2a2a; }
+html.app-mode .money-backdrop-full { align-items: stretch; background: #000; }
+html.app-mode .money-sheet-full, html.dark .money-sheet-full { max-width: none; max-height: none; height: 100%; border-radius: 0; background: #000; color: #fff; padding: 16px 20px 96px; }
+html.app-mode .money-sheet-full .money-go, html.dark .money-sheet-full .money-go { position: sticky; bottom: 0; background: #fff; color: #000; border: 0; min-height: 48px; font-weight: 700; }
+html.app-mode .money-chips button, html.dark .money-chips button { border: 1px solid #4a4a4a; background: transparent; color: #fff; min-height: 36px; border-radius: 999px; }
+html.app-mode .money-chips button.on, html.dark .money-chips button.on { border-color: #fff; }
+html.app-mode .money-missing small, .req { color: #FF453A; }
+html.app-mode .app-more-icon { display: none; }
 html.app-mode .app-order-thumb { width: 44px; height: 44px; flex-basis: 44px; border-radius: 8px; }
 html.app-mode .app-order-thumb.empty { background: #2c2c2e; }

@@ -49,7 +49,7 @@ type Props = {
 };
 
 /** Unit-list subtabs, in this order. Everything after them is an admin tool. */
-const LIST_TABS: [InventoryTab, string][] = [['in-stock', 'In stock'], ['sold', 'Sold'], ['needs-check', 'Needs to be checked'], ['no-location', 'No location']];
+const LIST_TABS: [InventoryTab, string][] = [['in-stock', 'In stock'], ['listed', 'Listed'], ['not-ready', 'Not ready'], ['sold', 'Sold'], ['needs-check', 'Needs check'], ['no-location', 'No location'], ['dns', 'DNS'], ['defective', 'Defective'], ['never-list', 'Never list']];
 const CARD_TABS: Partial<Record<InventoryTab, InventoryBucket>> = { total: 'total', listed: 'listed', 'not-listed': 'not_listed', 'not-ready': 'not_ready', dns: 'dns', defective: 'defective' };
 const TOOL_TABS: [InventoryTab, string][] = [['left-store', 'Replaced / given away'], ['merge-duplicates', 'Merge duplicates'], ['fix-titles', 'Fix titles'], ['receive', 'Receive'], ['lookup-test', 'Lookup test'], ['products', 'Products'], ['measure-mat', 'Measure mat']];
 const MISSING_LABEL: Record<string, string> = { spec: 'weight & box', upc: 'UPC', specifics: 'item specifics', category_review: 'category review' };
@@ -102,7 +102,7 @@ export function InventoryPage({
   const counts = useAttentionCounts(client, listTab === 'unfinished' && !associateBrowseOnly, refresh);
   // Status only narrows In stock; the other subtabs have a fixed status.
   const cardBucket = listTab ? CARD_TABS[listTab] : undefined;
-  const pStatus = cardBucket ? inventoryBucketStatus(cardBucket) : listTab === 'no-location' ? 'in_stock' : listTab === 'sold' ? 'sold' : listTab === 'defective' ? 'defective' : listTab === 'dns' ? 'dns' : listTab === 'unfinished' ? 'all' : listTab === 'needs-check' ? 'needs_check' : status;
+  const pStatus = listTab === 'never-list' ? 'inventory_never_list' : cardBucket ? inventoryBucketStatus(cardBucket) : listTab === 'no-location' ? 'in_stock' : listTab === 'sold' ? 'sold' : listTab === 'defective' ? 'defective' : listTab === 'dns' ? 'dns' : listTab === 'unfinished' ? 'all' : listTab === 'needs-check' ? 'needs_check' : status;
   const pUnfinished = listTab === 'unfinished';
   const hideMoney = associateBrowseOnly && listTab === 'sold';
   const effectiveLocation = listTab === 'no-location' ? 'unassigned' : location;

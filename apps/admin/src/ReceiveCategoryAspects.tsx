@@ -26,6 +26,7 @@ type Props = {
   onChange: (next: ReceiveAspectState) => void;
   showErrors: boolean;
   channels: string[];
+  onChannelValues?: (values: Record<string, string>, missing: number) => void;
 };
 
 function aspectFilled(def: AspectDef, attributes: Record<string, string>, na: Record<string, boolean>) {
@@ -36,7 +37,7 @@ function aspectFilled(def: AspectDef, attributes: Record<string, string>, na: Re
 }
 
 export function ReceiveCategoryAspects({
-  client, storeId, accessToken, disabled, doNotList, identity, value, onChange, showErrors, channels,
+  client, storeId, accessToken, disabled, doNotList, identity, value, onChange, showErrors, channels, onChannelValues,
 }: Props) {
   const [query, setQuery] = useState('');
   const [choices, setChoices] = useState<Choice[]>([]);
@@ -44,6 +45,9 @@ export function ReceiveCategoryAspects({
   const [busy, setBusy] = useState(false);
   const [recommendedOpen, setRecommendedOpen] = useState(false);
   const [clearedNote, setClearedNote] = useState('');
+  const [channelFields, setChannelFields] = useState<{ channel: 'amazon' | 'tiktok'; name: string; label: string; allowed?: string[] }[]>([]);
+  const [channelValues, setChannelValues] = useState<Record<string, string>>({});
+  const [channelNote, setChannelNote] = useState('');
 
   useEffect(() => {
     if (!query.trim()) { setChoices([]); return; }
@@ -63,6 +67,42 @@ export function ReceiveCategoryAspects({
       .then(({ data }) => { if (active) setSuggestions((data || []) as Choice[]); });
     return () => { active = false; };
   }, [client, identity.brand, identity.model, identity.title]);
+
+  useEffect(() => {
+    const wantAmazon = channels.includes('amazon');
+    const wantTikTok = channels.includes('tiktok');
+    if (!value.categoryId || (!wantAmazon && !wantTikTok)) { setChannelFields([]); setChannelNote(''); return; }
+    let active = true;
+    void (async () => {
+      const { data, error } = await client.from('store_category_mappings').select('amazon_product_type,tiktok_category_id')
+        .eq('store_id', storeId).eq('ebay_category_id', value.categoryId).maybeSingle();
+      if (!active) return;
+      if (error || !data) { setChannelFields([]); setChannelNote('No Amazon or TikTok category is mapped from this eBay category yet.'); return; }
+      const lookups: { channel: 'amazon' | 'tiktok'; id: string }[] = [];
+      if (wantAmazon && data.amazon_product_type) lookups.push({ channel: 'amazon', id: data.amazon_product_type });
+      if (wantTikTok && data.tiktok_category_id) lookups.push({ channel: 'tiktok', id: data.tiktok_category_id });
+      if (!lookups.length) { setChannelFields([]); setChannelNote('This eBay category has no saved Amazon product type or TikTok category.'); return; }
+      const loaded: { channel: 'amazon' | 'tiktok'; name: string; label: string; allowed?: string[] }[] = [];
+      for (const lookup of lookups) {
+        const res = await client.from('channel_taxonomy').select('required_fields')
+          .eq('channel', lookup.channel).eq('category_id', lookup.id).maybeSingle();
+        const fields = (res.data?.required_fields || []) as { name?: string; label?: string; required?: boolean; allowed?: string[] }[];
+        for (const field of fields) {
+          if (field.required === false || !field.name) continue;
+          loaded.push({ channel: lookup.channel, name: field.name, label: field.label || field.name, allowed: field.allowed });
+        }
+      }
+      if (!active) return;
+      setChannelFields(loaded);
+      setChannelNote(loaded.length ? '' : 'The mapped Amazon or TikTok category has no cached required attributes yet. They still validate at list time.');
+    })();
+    return () => { active = false; };
+  }, [client, storeId, value.categoryId, channels]);
+
+  useEffect(() => {
+    const missing = channelFields.filter(field => !(channelValues[`${field.channel}:${field.name}`] || '').trim()).length;
+    onChannelValues?.(channelValues, missing);
+  }, [channelValues, channelFields, onChannelValues]);
 
   const required = useMemo(() => value.fields.filter(f => f.required), [value.fields]);
   const recommended = useMemo(() => value.fields.filter(f => !f.required && f.recommended), [value.fields]);
@@ -188,8 +228,23 @@ export function ReceiveCategoryAspects({
               </div>
             </details>
           )}
-          {(channels.includes('amazon') || channels.includes('tiktok')) && (
-            <p className="hint">Amazon and TikTok category attributes still validate at list time in Floor (UPC required when those channels are checked).</p>
+          {(channels.includes('amazon') || channels.includes('tiktok')) && channelFields.length > 0 && (
+            <div className="receive-v2-grid receive-aspects-fields">
+              {channelFields.map(field => {
+                const key = `${field.channel}:${field.name}`;
+                const missing = !(channelValues[key] || '').trim();
+                return <label key={key} className={missing ? 'receive-aspect-missing' : undefined}>
+                  <span className="receive-v2-label">{field.label} <span className="receive-v2-req">*</span> <small className="receive-channel-tag">{field.channel === 'amazon' ? 'Amazon' : 'TikTok'}</small></span>
+                  {field.allowed && field.allowed.length
+                    ? <select value={channelValues[key] || ''} onChange={e => setChannelValues(v => ({ ...v, [key]: e.target.value }))}><option value="">Select</option>{field.allowed.map(opt => <option key={opt} value={opt}>{opt}</option>)}</select>
+                    : <input value={channelValues[key] || ''} onChange={e => setChannelValues(v => ({ ...v, [key]: e.target.value }))} />}
+                  {missing && <span className="receive-v2-msg">Required</span>}
+                </label>;
+              })}
+            </div>
+          )}
+          {(channels.includes('amazon') || channels.includes('tiktok')) && !channelFields.length && (
+            <p className="hint">{channelNote || 'Amazon and TikTok required attributes load from the saved category mapping. None are cached for this category yet, so they still validate at list time. UPC stays required when those channels are checked.'}</p>
           )}
         </>
       )}
