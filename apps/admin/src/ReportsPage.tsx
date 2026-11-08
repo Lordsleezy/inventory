@@ -8,6 +8,7 @@ import { ReturnsReportPanel } from './ReturnsReportPanel';
 import { TaxPage } from './TaxPage';
 import { DispositionsPanel } from './DispositionDialogs';
 import { ReceiptsPage } from './ReceiptsPage';
+import './reports.css';
 
 type Props = {
   client: SupabaseClient;
@@ -20,9 +21,10 @@ type Props = {
   native?: boolean;
   nativeCloseouts?: ReactNode;
   onOrderLinked?: () => void;
+  renderSplit?: (args: { start: string; end: string; profitCents: number }) => ReactNode;
 };
 
-export function ReportsPage({ client, money, tab, onTab, closeouts, expenses, payouts, native, nativeCloseouts, onOrderLinked }: Props) {
+export function ReportsPage({ client, money, tab, onTab, closeouts, expenses, payouts, native, nativeCloseouts, onOrderLinked, renderSplit }: Props) {
   const [showSkuLinks, setShowSkuLinks] = useState(false);
   const [reportVersion, setReportVersion] = useState(0);
   const tabsRef = useRef<HTMLDivElement>(null);
@@ -33,8 +35,8 @@ export function ReportsPage({ client, money, tab, onTab, closeouts, expenses, pa
     if (selected) list.scrollTo({ left: selected.offsetLeft - (list.clientWidth - selected.clientWidth) / 2, behavior: 'smooth' });
   }, [tab, native]);
   const tabs: { id: ReportTab; label: string }[] = native
-    ? [{id:'profit',label:'Profit'},{id:'shipping',label:'Shipping & fees'},{id:'expenses',label:'Expenses'},{id:'overhead',label:'Overhead'},{id:'payouts',label:'Payouts'},{id:'daily',label:'Daily & weekly'},{id:'sales-tax',label:'Sales tax'},{id:'sold',label:'Sold'}]
-    : [{id:'profit',label:'Profit'},{id:'shipping',label:'Shipping & fees'},{id:'expenses',label:'Expenses'},{id:'overhead',label:'Overhead'},{id:'payouts',label:'Payouts'},{id:'returns',label:'Returns'},{id:'replacements',label:'Replacements'},{id:'sales-tax',label:'Sales tax'},{id:'sold',label:'Sold'}];
+    ? [{id:'profit',label:'Profit'},{id:'shipping',label:'Fees'},{id:'expenses',label:'Expenses'},{id:'payouts',label:'Payouts'},{id:'sales-tax',label:'Tax'},{id:'sold',label:'Sold'}]
+    : [{id:'profit',label:'Profit'},{id:'shipping',label:'Fees'},{id:'expenses',label:'Expenses'},{id:'payouts',label:'Payouts'},{id:'returns',label:'Returns'},{id:'replacements',label:'Replacements'},{id:'sales-tax',label:'Sales tax'},{id:'sold',label:'Sold'}];
   return <>
     {!native && <header><div><div className="eyebrow">STORE LEDGER</div><h1>Reports</h1>
       <p>Profit, shipping and fees, expenses, payouts, and period closeouts.</p></div></header>}
@@ -42,7 +44,7 @@ export function ReportsPage({ client, money, tab, onTab, closeouts, expenses, pa
       {tabs.map(t => <button key={t.id} type="button" role="tab" aria-selected={tab === t.id} className={tab === t.id ? 'active' : ''} onClick={() => onTab(t.id)}>{t.label}</button>)}
     </div>
     {tab === 'profit' && <>
-      <ChannelReportPage key={reportVersion} client={client} money={money} embedded native={native} onLinkSku={() => setShowSkuLinks(true)} />
+      <ChannelReportPage key={reportVersion} client={client} money={money} embedded native={native} onLinkSku={() => setShowSkuLinks(true)} renderSplit={renderSplit} />
       {!native && closeouts}
     </>}
     {tab === 'shipping' && <>
@@ -55,7 +57,7 @@ export function ReportsPage({ client, money, tab, onTab, closeouts, expenses, pa
     {tab === 'sales-tax' && <><TaxReportPage client={client} money={money} embedded native={native} /><TaxPage client={client} money={money} stamp={s => new Date(s).toLocaleDateString()} embedded={native} native={native} /></>}
     {tab === 'returns' && <ReturnsReportPanel client={client} money={money} />}
     {tab === 'replacements' && <DispositionsPanel client={client} money={money} stamp={s => new Date(s).toLocaleDateString()} kind="replacement" title="Replacements" hint="Units sent to customers to replace a bad one. Each replacement's cost comes off the original sale's profit and commission." />}
-    {tab === 'sold' && <ReceiptsPage client={client} money={money} stamp={s => new Date(s).toLocaleDateString()} />}
+    {tab === 'sold' && <ReceiptsPage client={client} money={money} stamp={s => new Date(s).toLocaleDateString()} variant={native ? 'app' : 'desktop'} />}
     {native && showSkuLinks && <LinkSkuSheet client={client} money={money} onClose={() => setShowSkuLinks(false)} onLinked={() => { setReportVersion(v => v + 1); onOrderLinked?.(); }} />}
   </>;
 }

@@ -46,6 +46,8 @@ type Props = {
   money: (cents: number) => string;
   busy?: boolean;
   onChanged: (next: CommissionOverride | null) => void;
+  /** Phone payout row: three text links, no card. */
+  appearance?: 'card' | 'links';
 };
 
 function pctLabel(paul: number, jacob: number) {
@@ -58,7 +60,7 @@ export function CommissionOverrideMark({ overridden }: { overridden: boolean }) 
 }
 
 export function CommissionOverrideControls({
-  client, ticketKey, ticket, rules, cfg, override, frozenCuts, personName, stamp, money, busy, onChanged,
+  client, ticketKey, ticket, rules, cfg, override, frozenCuts, personName, stamp, money, busy, onChanged, appearance = 'card',
 }: Props) {
   const [editing, setEditing] = useState(false);
   const [paulText, setPaulText] = useState('');
@@ -139,6 +141,30 @@ export function CommissionOverrideControls({
   const sum = (Number.isFinite(paulN) ? paulN : 0) + (Number.isFinite(jacobN) ? jacobN : 0);
   const over100 = sum > 100;
   const disabled = !!busy || saving;
+
+  if (appearance === 'links') {
+    return (
+      <>
+        <button type="button" disabled={disabled} onClick={() => void apply('flip')}>Flip split</button>
+        <button type="button" disabled={disabled} onClick={() => setEditing(open => !open)}>{editing ? 'Close' : 'Commission'}</button>
+        {editing && (
+          <form className="rpt-pay" onSubmit={e => {
+            e.preventDefault();
+            if (!Number.isFinite(paulN) || !Number.isFinite(jacobN) || paulN < 0 || jacobN < 0 || over100) {
+              setError(over100 ? 'Paul and Jacob cannot total more than 100%.' : 'Enter valid percentages.');
+              return;
+            }
+            void apply('set', paulN, jacobN);
+          }}>
+            <input inputMode="decimal" aria-label="Paul percent" placeholder="Paul %" value={paulText} onChange={e => setPaulText(e.target.value)} />
+            <input inputMode="decimal" aria-label="Jacob percent" placeholder="Jacob %" value={jacobText} onChange={e => setJacobText(e.target.value)} />
+            <button type="submit" disabled={disabled}>Save</button>
+          </form>
+        )}
+        {error && <p className="rpt-note" role="alert">{error}</p>}
+      </>
+    );
+  }
 
   return (
     <div className={`commission-override${current.overridden ? ' is-overridden' : ''}`}>
