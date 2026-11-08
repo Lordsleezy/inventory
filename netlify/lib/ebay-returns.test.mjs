@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { deductionRefundCents, ebayRefundPlan, mapEbayReturn } from "./ebay-returns.mjs";
+import {
+  deductionRefundCents,
+  ebayActualRefundCents,
+  ebayLabelCostCents,
+  ebayRefundPlan,
+  ebayReturnKind,
+  mapEbayReturn,
+} from "./ebay-returns.mjs";
 import { ebayAccountFeedsFloorOrders } from "./ebay-accounts.mjs";
 import { assertEbaySellerWrite } from "./ebay-write-guard.mjs";
 
@@ -50,10 +57,36 @@ test("not as described refunds the item plus original shipping and hides the ded
   assert.equal(defective.label_paid_by, "seller");
 });
 
-test("a listing or policy write aimed at pgg124-5 or any non-selling account is refused", () => {
+test("seller-paid return and replacement label costs are read from detail", () => {
+  assert.equal(
+    ebayLabelCostCents({
+      detail: { returnShipmentInfo: { shippingLabelCost: { totalAmount: { value: "8.56" }, labelPaidBy: "SELLER" } } },
+    }).cents,
+    856,
+  );
+  assert.equal(
+    ebayLabelCostCents({
+      detail: { replacementShipmentInfo: { shippingLabelCost: { totalAmount: { value: "7.50" } } } },
+    }).cents,
+    750,
+  );
+});
+
+test("actual refund totals prefer eBay posted amounts", () => {
+  assert.equal(
+    ebayActualRefundCents({
+      detail: { refundInfo: { actualRefundDetail: { totalAmount: { value: "58.47" } } } },
+    }, 100),
+    5847,
+  );
+  assert.equal(ebayReturnKind({ detail: { returnType: "REPLACEMENT" } }), "replacement");
+  assert.equal(ebayReturnKind({ detail: { returnType: "MONEY_BACK" } }), "return");
+});
+
+test("a listing or policy write aimed at [REDACTED] or any non-selling account is refused", () => {
   assert.throws(
-    () => assertEbaySellerWrite({ username: "pgg124-5", role: "orders" }),
-    /pgg124-5 is read-only/,
+    () => assertEbaySellerWrite({ username: "[REDACTED]", role: "orders" }),
+    /Refusing to change eBay listings|read-only|ikonikdeals2026/i,
   );
   assert.throws(
     () => assertEbaySellerWrite({ username: "someone-else", role: "selling" }),
@@ -65,6 +98,6 @@ test("a listing or policy write aimed at pgg124-5 or any non-selling account is 
   );
   assert.equal(assertEbaySellerWrite({ username: "ikonikdeals2026", role: "selling" }).username, "ikonikdeals2026");
   assert.equal(ebayAccountFeedsFloorOrders({ username: "ikonikdeals2026", role: "selling" }), true);
-  assert.equal(ebayAccountFeedsFloorOrders({ username: "pgg124-5", role: "orders_only" }), false);
-  assert.equal(ebayAccountFeedsFloorOrders({ username: "pgg124-5", role: "selling" }), false);
+  assert.equal(ebayAccountFeedsFloorOrders({ username: "[REDACTED]", role: "orders_only" }), false);
+  assert.equal(ebayAccountFeedsFloorOrders({ username: "[REDACTED]", role: "selling" }), false);
 });

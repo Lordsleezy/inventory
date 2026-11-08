@@ -25,6 +25,7 @@ function planFallbackItem(row) {
 }
 
 async function finishEbayRefund(sb, storeId, row, refundCents) {
+  void storeId;
   const now = new Date().toISOString();
   await sb.from("returns").update({
     refund_cents: refundCents,
@@ -34,15 +35,10 @@ async function finishEbayRefund(sb, storeId, row, refundCents) {
     needs_decision: false,
     updated_at: now,
   }).eq("id", row.id);
-  await sb.rpc("return_apply_commission_clawbacks", { p_return_id: row.id });
-  if (row.sale_id) {
-    await sb.rpc("return_reverse_sale", {
-      p_store: storeId,
-      p_sale_id: row.sale_id,
-      p_reason: "eBay return",
-      p_restock: true,
-    });
-  }
+  // Owner profit drops via buyer_keep_refund_cents. Worker commissions stay.
+  // Do not void the sale or claw back payouts — garage still uses Back in stock / Defective.
+  const { error: profitErr } = await sb.rpc("return_apply_owner_profit_refund", { p_return_id: row.id });
+  if (profitErr) throw new Error(profitErr.message);
   await sb.rpc("return_sync_label_expense", { p_return_id: row.id });
   await sb.rpc("return_post_ledger", { p_return_id: row.id });
 }
@@ -91,9 +87,24 @@ async function handle(event) {
   if (row.refunded_at) return json(409, { error: "already_refunded" });
 
   if (body.action === "refund_item") {
-    const sent = await issueEbayReturnRefund(account, ebayId, plan, body.note);
-    await finishEbayRefund(sb, ctx.storeId, row, plan.refundCents);
-    return json(200, { ok: true, refund_cents: plan.refundCents, ebay: sent || null });
+    // Prefer an admin-edited refund on the return row; otherwise the policy plan.
+    const refundCents = Math.max(0, Number(row.refund_cents) || 0) > 0
+      ? Math.max(0, Number(row.refund_cents) || 0)
+      : plan.refundCents;
+    const sendPlan = {
+      ...plan,
+      refundCents,
+      itemCents: plan.includeOriginalShipping && plan.originalShippingCents > 0
+        ? Math.max(0, refundCents - plan.originalShippingCents)
+        : refundCents,
+    };
+    if (sendPlan.includeOriginalShipping && sendPlan.itemCents <= 0) {
+      sendPlan.itemCents = plan.itemCents;
+      sendPlan.refundCents = plan.refundCents;
+    }
+    const sent = await issueEbayReturnRefund(account, ebayId, sendPlan, body.note);
+    await finishEbayRefund(sb, ctx.storeId, row, sendPlan.refundCents);
+    return json(200, { ok: true, refund_cents: sendPlan.refundCents, ebay: sent || null });
   }
 
   if (body.action === "deduct") {
