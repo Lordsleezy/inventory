@@ -1,4 +1,6 @@
-import type { BookTotals, Report, Row } from './types';
+import { applySaleFeeAdjustments } from './saleAdjustments';
+import { saleFeeExtras } from './saleAdjustments';
+import type { BookTotals, Report, Row, SalesLine } from './types';
 
 const TEST_NOTE = /\b(test|smoke|demo|live check)\b/i;
 
@@ -63,29 +65,64 @@ export function normalizeReport(raw: Report): Report {
     allocateTicketPayments((next.sales || []).map((sale) => Number(sale.cost_cents) === 900 ? { ...sale, cost_source: 'default' } : sale)),
     raw.square_payments || [],
   );
-  return next;
+  return applySaleFeeAdjustments(next);
 }
 
 /**
- * Single source of truth for Books month summary (hub card, sales sheet, exports).
- * Uses normalizeReport (Square matched card fees + ticket payment split). Older period
- * cards summed raw sale_ledger profit_cents and overstated profit by ~$76 on Oct 2026.
+ * Books summary math: profit always equals sales − fees & labels − COGS (visible on the hub).
+ * Fees use sale-level marketplace, card, and label columns — not the raw fees ledger total
+ * (that ledger includes duplicate channel_fee rows and orphan charges).
  */
-export function computeBookTotals(report: Report): BookTotals {
-  const sales = report.sales || [];
-  const fees = (report.fees || []).reduce((n, f) => n + Number(f.amount_cents || 0), 0);
-  const labelCostsOnSales = sales.reduce((n, r) => n + Number(r.ship_cost_cents || 0), 0);
-  const expense = (report.expenses || []).filter((r) => !r.voided_at).reduce((n, r) => n + Number(r.amount_cents || 0), 0);
+export function computeBookTotals(report: Report, opts?: { salesLines?: SalesLine[]; otherExpensesCents?: number }): BookTotals {
+  const salesLines = opts?.salesLines;
+  let revenue = 0;
+  let cost = 0;
+  let feesAndLabels = 0;
+  let labelCostsOnSales = 0;
+  let ledgerProfit = 0;
+  let shippingSurplus = 0;
+
+  const tally = (mp: number, card: number, label: number, price: number, ship: number, cogs: number | null, profit: number | null) => {
+    revenue += price + ship;
+    cost += cogs ?? 0;
+    feesAndLabels += mp + card + label;
+    labelCostsOnSales += label;
+    ledgerProfit += profit ?? 0;
+    if (label > 0) shippingSurplus += Math.max(0, ship - label);
+  };
+
+  if (salesLines?.length) {
+    for (const s of salesLines) {
+      tally(s.marketplace_fees_cents, s.card_fees_cents, s.label_cost_cents, s.price_cents, s.buyer_shipping_cents, s.cost_cents, s.profit_cents);
+    }
+  } else {
+    for (const r of report.sales || []) {
+      const extra = saleFeeExtras(r);
+      const mp = Number(r.channel_fee_cents || 0) + Number(r.final_value_fee_cents || 0) + extra.promoted_cents + extra.channel_extra_cents;
+      const card = Number(r.processing_fee_cents || 0);
+      const label = Number(r.ship_cost_cents || 0);
+      tally(mp, card, label, Number(r.price_cents || 0), Number(r.shipping_cents || 0), r.cost_cents == null ? null : Number(r.cost_cents), r.profit_cents == null ? null : Number(r.profit_cents));
+    }
+  }
+
+  const profit = revenue - cost - feesAndLabels;
   const commission = (report.payouts || []).reduce((n, r) => n + Number(r.amount_cents || 0), 0);
+  const otherExpenses = opts?.otherExpensesCents ?? 0;
+  const ownerKeeps = profit - commission - otherExpenses;
+
   return {
-    revenue: sales.reduce((n, r) => n + Number(r.price_cents || 0) + Number(r.shipping_cents || 0), 0),
-    cost: sales.reduce((n, r) => n + Number(r.cost_cents || 0), 0),
-    fees,
+    revenue,
+    cost,
+    fees: feesAndLabels,
     labelCostsOnSales,
-    feesAndLabels: fees + labelCostsOnSales,
+    feesAndLabels,
     commission,
-    profit: sales.reduce((n, r) => n + Number(r.profit_cents || 0), 0),
-    expense,
+    profit,
+    expense: otherExpenses,
+    otherExpenses,
+    ownerKeeps,
+    shippingSurplus,
+    ledgerProfitGap: ledgerProfit - profit,
   };
 }
 
@@ -100,5 +137,5 @@ export const OCTOBER_2026_TARGETS = {
 } as const;
 
 export function formatSanityLine(totals: BookTotals) {
-  return `sales ${(totals.revenue / 100).toFixed(2)} | COGS ${(totals.cost / 100).toFixed(2)} | fees+labels ${(totals.feesAndLabels / 100).toFixed(2)} | commission ${(totals.commission / 100).toFixed(2)} | profit ${(totals.profit / 100).toFixed(2)}`;
+  return `sales ${(totals.revenue / 100).toFixed(2)} | COGS ${(totals.cost / 100).toFixed(2)} | fees+labels ${(totals.feesAndLabels / 100).toFixed(2)} | commission ${(totals.commission / 100).toFixed(2)} | profit ${(totals.profit / 100).toFixed(2)} | owner ${(totals.ownerKeeps / 100).toFixed(2)}`;
 }

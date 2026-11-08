@@ -28,8 +28,17 @@
 .books-mockup{color:#ecf2fb}
 .books-summary-card-v2{background:#141c29;border:1px solid #273448;border-radius:18px;padding:18px 20px;margin:12px 0 20px;color:#e9eff8}
 .books-summary-card-v2.native{background:#1c1c1e;border-color:#333336;margin:8px 0 16px}
-.books-summary-profit small{display:block;color:#97a4b6;text-transform:uppercase;letter-spacing:.05em;font-size:.72rem}
-.books-summary-profit strong{font-size:2.4rem;line-height:1.1}
+.books-summary-owner{text-align:right;margin-bottom:12px}
+.books-summary-owner small{display:block;color:#97a4b6;text-transform:uppercase;letter-spacing:.05em;font-size:.72rem}
+.books-summary-owner strong{font-size:2.2rem;line-height:1.1}
+.books-summary-stack{display:grid;gap:6px}
+.books-summary-stack.compact{gap:4px}
+.books-summary-line{display:flex;justify-content:space-between;align-items:baseline;gap:12px;font-size:.88rem}
+.books-summary-line span{color:#aab6c8}
+.books-summary-line b{color:#f4f7fc;font-weight:650}
+.books-summary-line.profit-line span,.books-summary-line.profit-line b{font-weight:750;color:#f4f7fc}
+.books-summary-line .warning-text{color:#ff9f0a!important}
+.books-summary-line .positive{color:#30d158!important}
 .books-summary-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:12px}
 .books-summary-grid small{color:#96a3b6;font-size:.76rem}
 .books-summary-grid b{font-size:1rem;color:#f4f7fc}
@@ -38,7 +47,17 @@
 .books-month-field span{font-size:1.35rem;font-weight:650}
 .books-month-field .native-chevron{position:absolute;right:14px;top:50%;transform:translateY(-50%)}
 .books-report-link{align-items:center!important;gap:10px!important;padding:12px 10px!important}
-.books-report-icon{width:34px;height:34px;border-radius:8px;display:grid;place-items:center;font-size:18px;flex:none}
+.books-report-icon{width:34px;height:34px;border-radius:8px;display:grid;place-items:center;flex:none;overflow:hidden}
+.books-expense-hero{display:flex;justify-content:space-between;gap:16px;margin:8px 0 14px}
+.books-expense-hero small{display:block;color:#8e8e93;font-size:.72rem;text-transform:uppercase}
+.books-expense-hero strong{font-size:1.45rem}
+.books-cat-head b.cat-total{color:#f4f7fc!important}
+.books-reimb-tag{font-style:normal;font-size:.62rem;font-weight:700;color:#ff9f0a;background:#3a2a14;border-radius:6px;padding:2px 6px;margin-left:6px;vertical-align:middle}
+.books-dup-alert{border:1px solid #ff9f0a55;border-radius:12px;padding:10px 12px;margin:12px 4px;color:#ffbf66;font-size:.82rem}
+.books-owner-card{margin:12px 0;padding:14px 16px!important}
+.native-report-row.indent{padding-left:22px!important}
+.native-report-row.dimmed,.books-table tr.dimmed{opacity:.55}
+.native-report-row.pending b.warning-text{color:#ff9f0a}
 .books-native-export-row{display:flex;gap:10px;margin:18px 0 8px}
 .books-native-export{flex:1;min-height:48px;border:0;border-radius:12px;background:#2c2c2e;color:#0a84ff;font-weight:700;font-size:.95rem}
 .books-native-export:disabled{opacity:.45}

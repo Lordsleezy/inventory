@@ -1,0 +1,104 @@
+import type { Report, Row } from './types';
+
+/** Fee rows from Books report that are not yet in sale_ledger profit. */
+export type SaleFeeExtra = { promoted_cents: number; label_extra_cents: number; channel_extra_cents: number };
+
+export function saleFeeExtras(row: Row): SaleFeeExtra {
+  const x = row.books_fee_extra as SaleFeeExtra | undefined;
+  return x || { promoted_cents: 0, label_extra_cents: 0, channel_extra_cents: 0 };
+}
+
+function normOrder(v: unknown) {
+  return String(v ?? '').trim().toLowerCase().replace(/[^a-z0-9-]/g, '');
+}
+
+function saleOrderKeys(s: Row): string[] {
+  const keys = new Set<string>();
+  for (const raw of [s.receipt_no, s.order_id, s.web_order_no, s.order_no]) {
+    const n = normOrder(raw);
+    if (n) keys.add(n);
+  }
+  return [...keys];
+}
+
+function feeAlreadyOnSale(s: Row, f: Row, amount: number): boolean {
+  const kind = String(f.type || '').toLowerCase();
+  if (kind === 'channel_fee' || kind.includes('final value')) {
+    return Math.abs(Number(s.channel_fee_cents || 0) - amount) < 2;
+  }
+  if (kind.includes('payment') || kind.includes('processing')) {
+    return Math.abs(Number(s.processing_fee_cents || 0) - amount) < 2;
+  }
+  return false;
+}
+
+function applyFee(s: Row, f: Row, amount: number) {
+  if (amount === 0 || feeAlreadyOnSale(s, f, amount)) return;
+  const kind = String(f.type || '').toLowerCase();
+  const memo = String(f.memo || f.type || '').toLowerCase();
+  const extra = saleFeeExtras(s);
+  if (kind.includes('promoted') || kind.includes('ad') || memo.includes('promoted')) {
+    extra.promoted_cents += amount;
+    if (s.profit_cents != null) s.profit_cents = Number(s.profit_cents) - amount;
+  } else if (
+    kind.includes('underpaid')
+    || kind.includes('postage')
+    || memo.includes('underpaid')
+    || memo.includes('postage')
+    || (kind.includes('shipping') && f.order_id)
+  ) {
+    extra.label_extra_cents += amount;
+    s.ship_cost_cents = Number(s.ship_cost_cents || 0) + amount;
+    if (s.profit_cents != null) s.profit_cents = Number(s.profit_cents) - amount;
+  } else if (kind.includes('payment') || kind.includes('processing')) {
+    const prior = Number(s.processing_fee_cents || 0);
+    s.processing_fee_cents = prior + amount;
+    if (s.profit_cents != null) s.profit_cents = Number(s.profit_cents) - amount;
+  } else if (f.sale_id || f.order_id) {
+    extra.channel_extra_cents += amount;
+    s.channel_fee_cents = Number(s.channel_fee_cents || 0) + amount;
+    if (s.profit_cents != null) s.profit_cents = Number(s.profit_cents) - amount;
+  }
+  s.books_fee_extra = extra;
+}
+
+/**
+ * Attach order-linked fees (underpaid postage, promoted listing charges, etc.)
+ * to the matching sale so profit and the Sales sheet stay aligned with Expenses.
+ */
+export function applySaleFeeAdjustments(report: Report): Report {
+  const sales = (report.sales || []).map((s) => ({ ...s }));
+  const byId = new Map<string, number>();
+  const byOrder = new Map<string, number>();
+  sales.forEach((s, i) => {
+    byId.set(String(s.id), i);
+    for (const key of saleOrderKeys(s)) byOrder.set(key, i);
+  });
+
+  const attributedFeeIds = new Set<string>();
+  for (const f of report.fees || []) {
+    const amount = Number(f.amount_cents || 0);
+    if (!amount) continue;
+    const id = String(f.id || '');
+    let idx: number | undefined;
+    if (f.sale_id != null && byId.has(String(f.sale_id))) idx = byId.get(String(f.sale_id));
+    else {
+      const order = normOrder(f.order_id);
+      if (order && byOrder.has(order)) idx = byOrder.get(order);
+    }
+    if (idx == null) continue;
+    applyFee(sales[idx], f, amount);
+    if (id) attributedFeeIds.add(id);
+  }
+  return { ...report, sales, books_attributed_fee_ids: [...attributedFeeIds] };
+}
+
+export function promotedOnSales(report: Report): Set<string> {
+  const ids = new Set<string>();
+  for (const f of report.fees || []) {
+    const type = String(f.type || '').toLowerCase();
+    if (!type.includes('promoted') && !type.includes('ad')) continue;
+    if (f.sale_id) ids.add(String(f.id || `${f.sale_id}:${f.date}`));
+  }
+  return ids;
+}

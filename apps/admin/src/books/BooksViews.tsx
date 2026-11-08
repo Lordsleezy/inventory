@@ -1,19 +1,21 @@
 import { Fragment, useMemo, useState, type ReactNode } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { BookTotals, BooksWorkbook, InventorySummary, Period, ReceivedItem, Report, Row, SalesLine } from './types';
+import type { BookTotals, BooksWorkbook, ExpenseDisplayLine, InventorySummary, Period, ReceivedItem, Report, Row, SalesLine } from './types';
 import { groupExpensesByCategory, groupReceivedByDay, receivedMonthStats } from './workbook';
 import { monthLabel } from './booksMath';
 import { periodPickerLabel, periodStatusLabel, periodUiStatus } from './periodStatus';
 import { saleWhyLines } from './saleNotes';
 import { BooksLock } from './BooksLock';
+import { BooksIconExpenses, BooksIconInventory, BooksIconPayouts, BooksIconReceived, BooksIconSales } from './reportIcons';
 
-export type Sheet = 'hub' | 'sales' | 'expenses' | 'inventory' | 'received';
+export type Sheet = 'hub' | 'sales' | 'expenses' | 'payouts' | 'inventory' | 'received';
 
-const REPORT_ROWS: { id: Sheet; title: string; sub: string; icon: string; hue: string }[] = [
-  { id: 'sales', title: 'Sales', sub: 'Each item sold, by SKU', icon: '📈', hue: '#0a84ff' },
-  { id: 'expenses', title: 'Expenses', sub: 'Every dollar out, itemized', icon: '💸', hue: '#ff9f0a' },
-  { id: 'inventory', title: 'Inventory', sub: 'Stock, giveaways, replacements, returns', icon: '📦', hue: '#30d158' },
-  { id: 'received', title: 'Items received', sub: 'Everything inventoried this month', icon: '📥', hue: '#bf5af2' },
+const REPORT_ROWS: { id: Sheet; title: string; sub: string; hue: string; Icon: (p: { color: string }) => ReactNode }[] = [
+  { id: 'sales', title: 'Sales', sub: 'Each item sold, by SKU', hue: '#0a84ff', Icon: BooksIconSales },
+  { id: 'expenses', title: 'Expenses', sub: "Money out that isn't in a sale", hue: '#ff9f0a', Icon: BooksIconExpenses },
+  { id: 'payouts', title: 'Payouts', sub: "Store payouts, commissions, owner's take", hue: '#30d158', Icon: BooksIconPayouts },
+  { id: 'inventory', title: 'Inventory', sub: 'Stock, giveaways, replacements, returns', hue: '#5ac8fa', Icon: BooksIconInventory },
+  { id: 'received', title: 'Items received', sub: 'Everything inventoried this month', hue: '#bf5af2', Icon: BooksIconReceived },
 ];
 
 export type ViewProps = {
@@ -58,6 +60,7 @@ function BooksNative(p: ViewProps) {
         <p className="books-sheet-period">{monthLabel(p.period.period_start)}</p>
         {p.sheet === 'sales' && <SalesBody money={p.money} workbook={p.workbook} report={p.report} native />}
         {p.sheet === 'expenses' && <ExpensesBody money={p.money} workbook={p.workbook} native />}
+        {p.sheet === 'payouts' && <PayoutsBody money={p.money} workbook={p.workbook} native />}
         {p.sheet === 'inventory' && <InventoryBody money={p.money} inventory={p.inventory} native />}
         {p.sheet === 'received' && <ReceivedBody money={p.money} items={p.workbook.received} native />}
       </div>
@@ -76,7 +79,7 @@ function BooksNative(p: ViewProps) {
       <div className="native-report-group">
         {REPORT_ROWS.map((r) => (
           <button key={r.id} type="button" className="native-report-row books-report-link" onClick={() => p.setSheet(r.id)}>
-            <span className="books-report-icon" style={{ background: r.hue }} aria-hidden>{r.icon}</span>
+            <span className="books-report-icon" aria-hidden><r.Icon color={r.hue} /></span>
             <span>{r.title}<small>{r.sub}</small></span>
             <i className="native-chevron">›</i>
           </button>
@@ -120,6 +123,7 @@ function BooksDesktop(p: ViewProps) {
       <div className="books-desktop-panel">
         {tab === 'sales' && <SalesTable money={p.money} workbook={p.workbook} totals={p.totals} />}
         {tab === 'expenses' && <ExpensesTable money={p.money} workbook={p.workbook} />}
+        {tab === 'payouts' && <PayoutsBody money={p.money} workbook={p.workbook} />}
         {tab === 'inventory' && <InventoryBody money={p.money} inventory={p.inventory} />}
         {tab === 'received' && <ReceivedBody money={p.money} items={p.workbook.received} />}
       </div>
@@ -127,6 +131,7 @@ function BooksDesktop(p: ViewProps) {
       <div className="books-print-sheets" aria-hidden>
         <section><h2>Sales</h2><SalesTable money={p.money} workbook={p.workbook} totals={p.totals} /></section>
         <section><h2>Expenses</h2><ExpensesTable money={p.money} workbook={p.workbook} /></section>
+        <section><h2>Payouts</h2><PayoutsBody money={p.money} workbook={p.workbook} /></section>
         <section><h2>Inventory</h2><InventoryBody money={p.money} inventory={p.inventory} /></section>
         <section><h2>Items received</h2><ReceivedBody money={p.money} items={p.workbook.received} /></section>
       </div>
@@ -140,17 +145,27 @@ function Block({ className, children }: { className?: string; children: ReactNod
 }
 
 function SummaryCard({ money, totals, native }: { money: (c: number) => string; totals: BookTotals; native?: boolean }) {
+  const lines = [
+    { label: 'Sales', value: money(totals.revenue), className: '' },
+    { label: '− Fees + labels', value: money(totals.feesAndLabels), className: 'warning-text' },
+    { label: '− Cost of goods', value: money(totals.cost), className: '' },
+    { label: '= Profit', value: money(totals.profit), className: 'strong' },
+    { label: '− Commissions', value: money(totals.commission), className: '' },
+    { label: '− Other expenses', value: money(totals.otherExpenses), className: '' },
+  ];
   return (
     <div className={`books-summary-card-v2${native ? ' native' : ''}`}>
-      <div className="books-summary-profit">
-        <small>Profit</small>
-        <strong className="positive">{money(totals.profit)}</strong>
+      <div className="books-summary-owner">
+        <small>Owner keeps</small>
+        <strong className="positive">{money(totals.ownerKeeps)}</strong>
       </div>
-      <div className="books-summary-grid">
-        <div><small>Sales</small><b>{money(totals.revenue)}</b></div>
-        <div><small>Fees</small><b className="warning-text">{money(totals.feesAndLabels)}</b></div>
-        <div><small>Cost</small><b>{money(totals.cost)}</b></div>
-        <div><small>Payouts</small><b>{money(totals.commission)}</b></div>
+      <div className="books-summary-stack">
+        {lines.map((row) => (
+          <div key={row.label} className={`books-summary-line${row.className === 'strong' ? ' profit-line' : ''}`}>
+            <span>{row.label}</span>
+            <b className={row.className}>{row.value}</b>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -254,55 +269,151 @@ function SaleTitle({ label, sub }: { label: string; sub: string }) {
 }
 
 function ExpensesBody({ money, workbook, native }: { money: (c: number) => string; workbook: BooksWorkbook; native?: boolean }) {
+  const [openPromo, setOpenPromo] = useState<string | null>(null);
   const groups = groupExpensesByCategory(workbook.expenses.rows);
-  const head = (
+  const head = native ? (
     <div className="books-expense-hero native-report-form">
-      <small>Total out</small>
-      <strong className="warning-text">{money(workbook.expenses.total_cents)}</strong>
+      <div><small>Total out</small><strong className="warning-text">{money(workbook.expenses.total_cents)}</strong></div>
+      <div><small>To reimburse</small><strong>{money(workbook.expenses.reimburse_cents)}</strong></div>
     </div>
+  ) : (
+    <p className="books-expense-grand">Total out {money(workbook.expenses.total_cents)} · To reimburse {money(workbook.expenses.reimburse_cents)}</p>
   );
+
+  const rowList = (r: ExpenseDisplayLine) => {
+    const isRollup = Boolean(r.children?.length);
+    const expanded = openPromo === r.id;
+  const sub = (
+      <small>
+        {isRollup ? r.meta : shortDate(r.date)}
+        {r.needs_reimbursement && !isRollup && <em className="books-reimb-tag">REIMBURSE</em>}
+        {!isRollup && r.sourceDisplay ? ` · ${r.sourceDisplay}` : ''}
+        {!isRollup && r.sku_or_order && !r.title.includes(r.sku_or_order) ? ` · ${r.sku_or_order}` : ''}
+      </small>
+    );
+    if (isRollup && native) {
+      return (
+        <button key={r.id} type="button" className="native-report-row books-expense-row" onClick={() => setOpenPromo(expanded ? null : r.id)}>
+          <span><strong>{r.title}</strong>{sub}</span>
+          <b>{money(r.amount_cents)}<i className="native-chevron">{expanded ? '⌄' : '›'}</i></b>
+        </button>
+      );
+    }
+    return (
+      <div key={r.id} className={`native-report-row books-expense-row${r.duplicateFlag ? ' dimmed' : ''}`}>
+        <span><strong>{r.title}</strong>{sub}</span>
+        <b>{r.excludeFromTotals ? '—' : money(r.amount_cents)}</b>
+      </div>
+    );
+  };
+
   const body = groups.map(([cat, rows]) => (
     <div key={cat}>
       <div className="native-report-section books-cat-head">
         <span>{cat.toUpperCase()}</span>
-        <b>{money(rows.reduce((n, r) => n + r.amount_cents, 0))}</b>
+        <b className="cat-total">{money(rows.filter((r) => !r.excludeFromTotals).reduce((n, r) => n + r.amount_cents, 0))}</b>
       </div>
       <div className="native-report-group">
         {rows.map((r) => (
-          <div key={`${r.date}-${r.description}-${r.amount_cents}`} className="native-report-row books-expense-row">
-            <span>{r.description}<small>{shortDate(r.date)}{r.sku_or_order ? ` · ${r.sku_or_order}` : ''}{r.paid_by !== 'manual' ? ` · ${r.paid_by}` : ''}</small></span>
-            <b>{money(r.amount_cents)}{r.needs_reimbursement === 'Yes' && <em className="books-reimb">REIMBURSE</em>}</b>
-          </div>
+          <Fragment key={r.id}>
+            {rowList(r)}
+            {r.children?.length && openPromo === r.id ? r.children.map((c) => rowList(c)) : null}
+          </Fragment>
         ))}
       </div>
     </div>
   ));
+
+  const dupes = workbook.expenses.duplicates.map((d) => (
+    <div key={d.lineIds.join('-')} className="books-dup-alert" role="status">
+      {d.message}
+    </div>
+  ));
+
+  const foot = <p className="native-report-footnote">Labels bought through eBay, TikTok or Amazon live in Sales, not here.</p>;
+
   if (!native) {
     return (
       <>
+        {head}
         {groups.map(([cat, rows]) => (
           <section key={cat} className="books-spreadsheet">
             <h2 className="books-kicker">{cat}</h2>
             <div className="books-table-wrap">
               <table className="books-table">
-                <thead><tr><th>Date</th><th>Description</th><th>SKU / order</th><th>Paid by</th><th>Reimb?</th><th>Amount</th></tr></thead>
+                <thead><tr><th>Date</th><th>Description</th><th>SKU / order</th><th>Source</th><th>Reimb?</th><th>Amount</th></tr></thead>
                 <tbody>
                   {rows.map((r) => (
-                    <tr key={`${r.date}-${r.description}`}>
-                      <td>{shortDate(r.date)}</td><td>{r.description}</td><td>{r.sku_or_order}</td><td>{r.paid_by}</td><td>{r.needs_reimbursement}</td><td>{money(r.amount_cents)}</td>
+                    <tr key={r.id} className={r.duplicateFlag ? 'dimmed' : ''}>
+                      <td>{shortDate(r.date)}</td><td>{r.title}{r.meta ? ` · ${r.meta}` : ''}</td><td>{r.sku_or_order}</td><td>{r.sourceDisplay}</td><td>{r.needs_reimbursement ? 'Yes' : ''}</td><td>{r.excludeFromTotals ? '—' : money(r.amount_cents)}</td>
                     </tr>
                   ))}
-                  <tr className="books-total-row"><td colSpan={5}>{cat} subtotal</td><td>{money(rows.reduce((n, r) => n + r.amount_cents, 0))}</td></tr>
+                  <tr className="books-total-row"><td colSpan={5}>{cat} subtotal</td><td>{money(rows.filter((x) => !x.excludeFromTotals).reduce((n, x) => n + x.amount_cents, 0))}</td></tr>
                 </tbody>
               </table>
             </div>
           </section>
         ))}
-        <p className="books-expense-grand">Grand total {money(workbook.expenses.total_cents)}</p>
+        {dupes}
+        {foot}
       </>
     );
   }
-  return <>{head}{body}</>;
+  return <>{head}{body}{dupes}{foot}</>;
+}
+
+function PayoutsBody({ money, workbook, native }: { money: (c: number) => string; workbook: BooksWorkbook; native?: boolean }) {
+  const [openStore, setOpenStore] = useState<string | null>(null);
+  const p = workbook.payouts;
+  const section = (title: string, total: number, children: ReactNode) => (
+    <div className="books-payout-section">
+      <div className="native-report-section books-cat-head"><span>{title}</span><b className="cat-total">{money(total)}</b></div>
+      <div className="native-report-group">{children}</div>
+    </div>
+  );
+  return (
+    <>
+      {section('PAID OUT BY STORES', p.storePaidTotal_cents, (
+        <>
+          {p.stores.map((s) => (
+            <div key={s.channel}>
+              <button type="button" className="native-report-row" onClick={() => native && setOpenStore(openStore === s.channel ? null : s.channel)}>
+                <span>{s.channel}<small>{s.count} payout{s.count === 1 ? '' : 's'}</small></span>
+                <b>{money(s.total_cents)}{native && <i className="native-chevron">›</i>}</b>
+              </button>
+              {openStore === s.channel && s.payouts.map((w) => (
+                <div key={String(w.id)} className="native-report-row indent">
+                  <span><small>{shortDate(String(w.date || ''))}{w.payout_id ? ` · ${w.payout_id}` : ''}{w.bank_reference ? ` · ${w.bank_reference}` : ''}</small></span>
+                  <b>{money(Number(w.amount_cents || 0))}</b>
+                </div>
+              ))}
+            </div>
+          ))}
+          <div className="native-report-row pending"><span>Not paid out yet</span><b className="warning-text">{money(p.notPaidYet_cents)}</b></div>
+        </>
+      ))}
+      {section('COMMISSIONS', p.commission_total_cents, (
+        <>
+          {p.commissions.map((c) => (
+            <div key={c.person} className="native-report-row">
+              <span>{c.person}{c.paid_cents ? <small>paid {money(c.paid_cents)}</small> : null}</span>
+              <b>{money(c.earned_cents)}</b>
+            </div>
+          ))}
+          <div className="native-report-row pending"><span>Still owed</span><b className="warning-text">{money(p.stillOwed_cents)}</b></div>
+        </>
+      ))}
+      <div className="books-owner-card native-report-form">
+        <div className="books-summary-stack compact">
+          <div className="books-summary-line"><span>Profit</span><b>{money(p.owner.profit)}</b></div>
+          <div className="books-summary-line"><span>− Commissions</span><b>{money(p.owner.commission)}</b></div>
+          <div className="books-summary-line"><span>− Other expenses</span><b>{money(p.owner.otherExpenses)}</b></div>
+          <div className="books-summary-line profit-line"><span>Owner keeps</span><b className="positive">{money(p.owner.ownerKeeps)}</b></div>
+        </div>
+        <p className="native-report-footnote">Other expenses = Expenses page minus anything already counted in profit.</p>
+      </div>
+    </>
+  );
 }
 
 function InventoryBody({ money, inventory, native }: { money: (c: number) => string; inventory: InventorySummary; native?: boolean }) {

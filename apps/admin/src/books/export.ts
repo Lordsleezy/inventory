@@ -30,7 +30,7 @@ export async function buildBooksExcel(period: Period, wb: BooksWorkbook, label: 
 
   const wsE = x.addWorksheet('Expenses');
   header(wsE, ['Date', 'Category', 'Description', 'Amount', 'SKU / order', 'Paid by', 'Reimburse?', 'Source']);
-  for (const r of wb.expenses.rows) {
+  for (const r of wb.expenses.exportRows) {
     const row = wsE.addRow([r.date, r.category, r.description, moneyCell(r.amount_cents), r.sku_or_order, r.paid_by, r.needs_reimbursement, r.source]);
     row.getCell(4).numFmt = moneyFmt;
   }
@@ -91,6 +91,32 @@ export async function buildBooksExcel(period: Period, wb: BooksWorkbook, label: 
     row.getCell(5).numFmt = moneyFmt; row.getCell(6).numFmt = moneyFmt;
   }
 
+  const wsP = x.addWorksheet('Payouts');
+  header(wsP, ['Section', 'Detail', 'Count', 'Amount']);
+  const p = wb.payouts;
+  wsP.addRow(['Paid out by stores', '', '', moneyCell(p.storePaidTotal_cents)]);
+  for (const s of p.stores) {
+    const row = wsP.addRow(['', s.channel, s.count, moneyCell(s.total_cents)]);
+    row.getCell(4).numFmt = moneyFmt;
+  }
+  const pending = wsP.addRow(['', 'Not paid out yet', '', moneyCell(p.notPaidYet_cents)]);
+  pending.getCell(4).numFmt = moneyFmt;
+  wsP.addRow([]);
+  wsP.addRow(['Commissions', '', '', moneyCell(p.commission_total_cents)]);
+  for (const c of p.commissions) {
+    const row = wsP.addRow(['', c.person, `paid ${(c.paid_cents / 100).toFixed(2)}`, moneyCell(c.earned_cents)]);
+    row.getCell(4).numFmt = moneyFmt;
+  }
+  const owed = wsP.addRow(['', 'Still owed', '', moneyCell(p.stillOwed_cents)]);
+  owed.getCell(4).numFmt = moneyFmt;
+  wsP.addRow([]);
+  wsP.addRow(['Owner', 'Profit', '', moneyCell(p.owner.profit)]);
+  wsP.addRow(['', '− Commissions', '', moneyCell(p.owner.commission)]);
+  wsP.addRow(['', '− Other expenses', '', moneyCell(p.owner.otherExpenses)]);
+  const ok = wsP.addRow(['', 'Owner keeps', '', moneyCell(p.owner.ownerKeeps)]);
+  ok.getCell(4).numFmt = moneyFmt;
+  ok.font = { bold: true };
+
   const wsR = x.addWorksheet('Received');
   header(wsR, ['Received', 'SKU', 'Title', 'Brand', 'Category', 'Condition', 'Qty', 'Cost', 'Floor price', 'Location', 'Receiver', 'Listing / status']);
   for (const r of wb.received) {
@@ -121,10 +147,11 @@ export async function buildBooksPdf(period: Period, wb: BooksWorkbook, money: (c
   page.drawText('Open Box Industries · Books', { x: margin, y, size: 16, font: bold }); y -= 20;
   page.drawText(`${title} · ${period.period_start} to ${period.period_end}`, { x: margin, y, size: 10, font }); y -= 16;
   const t = wb.sales.totals;
-  line(`Sales ${money(t.revenue)} · COGS ${money(t.cost)} · Fees+labels ${money(t.feesAndLabels)} · Commission ${money(t.commission)} · Profit ${money(t.profit)}`, true);
+  const p = wb.payouts;
+  line(`Sales ${money(t.revenue)} · COGS ${money(t.cost)} · Fees+labels ${money(t.feesAndLabels)} · Profit ${money(t.profit)} · Commission ${money(t.commission)} · Other expenses ${money(t.otherExpenses)} · Owner keeps ${money(t.ownerKeeps)}`, true);
 
   newPage('Expenses');
-  for (const r of wb.expenses.rows.slice(0, 80)) line(`${r.date} · ${r.category} · ${r.description} · ${money(r.amount_cents)}`);
+  for (const r of wb.expenses.exportRows.slice(0, 80)) line(`${r.date} · ${r.category} · ${r.description} · ${money(r.amount_cents)}`);
   line(`Grand total ${money(wb.expenses.total_cents)}`, true);
 
   newPage('Sales');
@@ -133,6 +160,12 @@ export async function buildBooksPdf(period: Period, wb: BooksWorkbook, money: (c
   newPage('Inventory summary');
   line(`Start ${invMetric(wb.inventory.start_unit_count)} (${wb.inventory.start_source}) · End ${invMetric(wb.inventory.end_unit_count)} (${wb.inventory.end_source})`);
   line(`Sold ${wb.inventory.sold_units} · Received ${wb.inventory.received_units} · Giveaways ${wb.inventory.giveaway_units} · Replacements ${wb.inventory.replacement_units} · Returns ${wb.inventory.return_count} · Defective ${wb.inventory.defective_units}`);
+
+  newPage('Payouts');
+  line(`Stores paid out ${money(p.storePaidTotal_cents)} · Not paid yet ${money(p.notPaidYet_cents)}`, true);
+  for (const s of p.stores) line(`${s.channel} · ${s.count} payouts · ${money(s.total_cents)}`);
+  for (const c of p.commissions) line(`${c.person} earned ${money(c.earned_cents)} · paid ${money(c.paid_cents)} · owed ${money(c.owed_cents)}`);
+  line(`Owner keeps ${money(p.owner.ownerKeeps)} (profit ${money(p.owner.profit)} − commission ${money(p.owner.commission)} − other ${money(p.owner.otherExpenses)})`, true);
 
   newPage('Items received');
   for (const r of wb.received.slice(0, 100)) line(`${String(r.received_at || '').slice(0, 10)} · ${r.sku} · ${r.title} · qty ${r.qty_on_hand}`);
