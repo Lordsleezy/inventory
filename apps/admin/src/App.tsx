@@ -366,6 +366,8 @@ export function App() {
     try { return !window.matchMedia('(pointer: coarse)').matches; } catch { return true; }
   });
   const [navHoverOpen, setNavHoverOpen] = useState(false);
+  /** Keeps hover-peek rail open after clicking a nav group (collapsed desktop). */
+  const [navPeekSticky, setNavPeekSticky] = useState(false);
   const [darkMode, setDarkMode] = useState(() => {
     try { return localStorage.getItem('floor_admin_dark') === '1'; } catch { return false; }
   });
@@ -402,6 +404,7 @@ export function App() {
           setNavHoverPeek(false);
         }
         setNavHoverOpen(false);
+        setNavPeekSticky(false);
       }
     });
     return () => data.subscription.unsubscribe();
@@ -445,10 +448,24 @@ export function App() {
     return () => mq.removeEventListener?.('change', sync);
   }, []);
   const closeMenu = () => setMenuOpen(false);
+  const desktopExpandedNav = () => {
+    try { return window.matchMedia('(min-width: 901px)').matches; } catch { return true; }
+  };
+  const openCollapsedNavGroup = (group: 'reports' | 'inventory' | 'other') => {
+    setNavGroup(group);
+    if (navCollapsed && desktopExpandedNav()) {
+      setNavHoverOpen(true);
+      setNavPeekSticky(true);
+    }
+  };
   const goNav = (patch: Partial<NavState>) => {
     go(patch);
     setEditing(null);
     closeMenu();
+    if (navPeekSticky) {
+      setNavPeekSticky(false);
+      if (navCollapsed) setNavHoverOpen(false);
+    }
     if (patch.page === 'register') {
       let narrow = false;
       try { narrow = window.matchMedia('(max-width: 900px)').matches; } catch { /* ignore */ }
@@ -461,6 +478,7 @@ export function App() {
   const pinNavManual = () => {
     setNavHoverPeek(false);
     setNavHoverOpen(false);
+    setNavPeekSticky(false);
     setNavCollapsed(c => !c);
   };
   const userId = session?.user.id;
@@ -812,7 +830,7 @@ export function App() {
   <aside
     id="admin-nav"
     onMouseEnter={() => { if (navCollapsed && navHoverPeek) setNavHoverOpen(true); }}
-    onMouseLeave={() => { if (navHoverPeek) setNavHoverOpen(false); }}
+    onMouseLeave={() => { if (navHoverPeek && !navPeekSticky) setNavHoverOpen(false); }}
   >
     <div className="aside-brand">
       <div className="brand">OPEN BOX <span>INDUSTRIES</span></div>
@@ -859,7 +877,14 @@ export function App() {
           type="button"
           title="Other"
           className={`nav-parent${DESKTOP_OTHER_PAGES.includes(page) ? ' active' : ''}`}
-          onClick={() => { setNavGroup(g => g === 'other' ? null : 'other'); setEditing(null); }}
+          onClick={() => {
+            if (navGroup === 'other') {
+              setNavGroup(null);
+              setNavPeekSticky(false);
+              if (navCollapsed && navHoverPeek) setNavHoverOpen(false);
+            } else openCollapsedNavGroup('other');
+            setEditing(null);
+          }}
         >
           Other
         </button>
