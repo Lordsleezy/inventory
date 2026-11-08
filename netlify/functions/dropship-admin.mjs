@@ -26,7 +26,7 @@ async function requireAdmin(event) {
   return { user, staff, storeId: staff.store_id };
 }
 
-async function handler(event) {
+async function dropshipAdmin(event) {
   if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: corsHeaders(event), body: "" };
   if (event.httpMethod !== "POST") return json(405, { error: "method" });
 
@@ -352,4 +352,4 @@ async function assembleDesk(storeId) {
   };
 }
 
-export const handler = netlifyHandler("dropship-admin", handler);
+export default netlifyHandler("dropship-admin", dropshipAdmin);

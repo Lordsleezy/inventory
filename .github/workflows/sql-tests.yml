@@ -36,6 +36,12 @@ jobs:
           npm test
           npm run build -w @floor/pos
 
+      - name: Netlify functions bundle check (no deploy)
+        run: |
+          node --test scripts/test-deploy-guard.mjs
+          npm install --prefix netlify --omit=dev
+          node scripts/check-functions-bundle.mjs
+
       - name: Admin tests and build (compile-only, no keys baked)
         env:
           FLOOR_CI_BUILD: "1"

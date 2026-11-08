@@ -21,7 +21,8 @@
     "photos:upload": "node --experimental-strip-types scripts/upload-clean-photos.mjs --go",
     "photos:web-backfill": "node --experimental-strip-types scripts/backfill-web-photos.mjs",
     "mobile": "npm run build -w @floor/mobile",
-    "test:ticket-tax": "node --experimental-strip-types scripts/test-ticket-tax.mjs"
+    "test:ticket-tax": "node --experimental-strip-types scripts/test-ticket-tax.mjs",
+    "test:functions-bundle": "node --test scripts/test-deploy-guard.mjs && node scripts/check-functions-bundle.mjs"
   },
   "engines": {
     "node": ">=22"

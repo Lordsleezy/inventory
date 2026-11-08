@@ -24,4 +24,4 @@ async function handle(event) {
   return json(200, { ok: true, results: out });
 }
 
-export const handler = netlifyHandler("dropship-hunter", handle);
+export default netlifyHandler("dropship-hunter", handle);

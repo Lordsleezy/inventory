@@ -15,5 +15,5 @@ async function handle(event) {
   return json(200, { ok: true, returns, orders });
 }
 
-export const handler = asNetlifyFunction(handle);
+export default asNetlifyFunction(handle);
 export const invoke = wrapHandler("shippo-tracking-webhook", handle);

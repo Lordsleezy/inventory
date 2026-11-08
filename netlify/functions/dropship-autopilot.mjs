@@ -45,4 +45,4 @@ async function handle(event) {
   return json(200, { ok: true, results });
 }
 
-export const handler = netlifyHandler("dropship-autopilot", handle);
+export default netlifyHandler("dropship-autopilot", handle);
