@@ -52,6 +52,7 @@ export type InventorySummary = {
   giveaway_units: number;
   replacement_units: number;
   return_count: number;
+  return_to_stock_units: number;
   defective_units: number;
   giveaways: Row[];
   replacements: Row[];
@@ -84,6 +85,7 @@ export type ExpenseLine = {
 };
 
 export type SalesLine = {
+  sale_id: string;
   date: string;
   sku: string;
   title: string;

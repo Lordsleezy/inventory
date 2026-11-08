@@ -1,0 +1,435 @@
+import { Fragment, useMemo, useState, type ReactNode } from 'react';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import type { BookTotals, BooksWorkbook, InventorySummary, Period, ReceivedItem, Report, Row, SalesLine } from './types';
+import { groupExpensesByCategory, groupReceivedByDay, receivedMonthStats } from './workbook';
+import { monthLabel } from './booksMath';
+import { periodPickerLabel, periodStatusLabel, periodUiStatus } from './periodStatus';
+import { saleWhyLines } from './saleNotes';
+import { BooksLock } from './BooksLock';
+
+export type Sheet = 'hub' | 'sales' | 'expenses' | 'inventory' | 'received';
+
+const REPORT_ROWS: { id: Sheet; title: string; sub: string; icon: string; hue: string }[] = [
+  { id: 'sales', title: 'Sales', sub: 'Each item sold, by SKU', icon: '📈', hue: '#0a84ff' },
+  { id: 'expenses', title: 'Expenses', sub: 'Every dollar out, itemized', icon: '💸', hue: '#ff9f0a' },
+  { id: 'inventory', title: 'Inventory', sub: 'Stock, giveaways, replacements, returns', icon: '📦', hue: '#30d158' },
+  { id: 'received', title: 'Items received', sub: 'Everything inventoried this month', icon: '📥', hue: '#bf5af2' },
+];
+
+export type ViewProps = {
+  native: boolean;
+  money: (c: number) => string;
+  period: Period;
+  periods: Period[];
+  periodId: string;
+  setPeriodId: (id: string) => void;
+  totals: BookTotals;
+  workbook: BooksWorkbook;
+  inventory: InventorySummary;
+  report: Report;
+  received: ReceivedItem[];
+  sheet: Sheet;
+  setSheet: (s: Sheet) => void;
+  pickerOpen: boolean;
+  setPickerOpen: (v: boolean) => void;
+  exportsPreparing: boolean;
+  exportFiles: { excel: Uint8Array; pdf: Uint8Array } | null;
+  onExcel: () => void;
+  onPdf: () => void;
+  onPrint: () => void;
+  client: SupabaseClient;
+  busy: boolean;
+  setBusy: (b: boolean) => void;
+  onError: (msg: string) => void;
+  onReload: () => Promise<void>;
+  desktopTab: Sheet;
+  setDesktopTab: (s: Sheet) => void;
+};
+
+export function BooksViews(props: ViewProps) {
+  return props.native ? <BooksNative {...props} /> : <BooksDesktop {...props} />;
+}
+
+function BooksNative(p: ViewProps) {
+  if (p.sheet !== 'hub') {
+    return (
+      <div className="native-report-body books-sheet">
+        <button type="button" className="native-report-action" aria-label="Download" disabled={!p.exportFiles} onClick={p.onExcel}>↓</button>
+        <p className="books-sheet-period">{monthLabel(p.period.period_start)}</p>
+        {p.sheet === 'sales' && <SalesBody money={p.money} workbook={p.workbook} report={p.report} native />}
+        {p.sheet === 'expenses' && <ExpensesBody money={p.money} workbook={p.workbook} native />}
+        {p.sheet === 'inventory' && <InventoryBody money={p.money} inventory={p.inventory} native />}
+        {p.sheet === 'received' && <ReceivedBody money={p.money} items={p.workbook.received} native />}
+      </div>
+    );
+  }
+  const ui = periodUiStatus(p.period);
+  return (
+    <div className="native-report-body books-native-hub">
+      <button type="button" className="books-month-field" onClick={() => p.setPickerOpen(true)}>
+        <small>MONTH</small>
+        <span>{periodPickerLabel(p.period)}</span>
+        <i className="native-chevron">›</i>
+      </button>
+      <SummaryCard money={p.money} totals={p.totals} native />
+      <p className="native-report-section">REPORTS</p>
+      <div className="native-report-group">
+        {REPORT_ROWS.map((r) => (
+          <button key={r.id} type="button" className="native-report-row books-report-link" onClick={() => p.setSheet(r.id)}>
+            <span className="books-report-icon" style={{ background: r.hue }} aria-hidden>{r.icon}</span>
+            <span>{r.title}<small>{r.sub}</small></span>
+            <i className="native-chevron">›</i>
+          </button>
+        ))}
+      </div>
+      <div className="books-native-export-row">
+        <button type="button" className="books-native-export" disabled={!p.exportFiles || p.exportsPreparing} onClick={p.onExcel}>Download Excel</button>
+        <button type="button" className="books-native-export" disabled={!p.exportFiles || p.exportsPreparing} onClick={p.onPdf}>Print / PDF</button>
+      </div>
+      <BooksLock native client={p.client} money={p.money} period={p.period} report={p.report} inventory={p.inventory} received={p.received} uiStatus={ui} busy={p.busy} setBusy={p.setBusy} onError={p.onError} onReload={p.onReload} />
+      {p.pickerOpen && <MonthPickerSheet {...p} />}
+    </div>
+  );
+}
+
+function BooksDesktop(p: ViewProps) {
+  const ui = periodUiStatus(p.period);
+  const tab = p.desktopTab === 'hub' ? 'sales' : p.desktopTab;
+  return (
+    <div className="books-desktop">
+      <div className="books-desktop-toolbar">
+        <label className="books-month-picker">
+          Month
+          <select value={p.periodId} onChange={(e) => p.setPeriodId(e.target.value)}>
+            {p.periods.map((m) => <option key={m.id} value={m.id}>{periodPickerLabel(m)}</option>)}
+          </select>
+        </label>
+        <span className={`books-status-pill books-status-${ui}`}>{periodStatusLabel(ui)}</span>
+        <div className="books-export-actions">
+          <button type="button" className="books-download" disabled={!p.exportFiles || p.exportsPreparing} onClick={p.onExcel}>Download Excel</button>
+          <button type="button" className="books-download secondary" disabled={!p.exportFiles || p.exportsPreparing} onClick={p.onPdf}>PDF</button>
+          <button type="button" className="books-download secondary" disabled={!p.workbook} onClick={p.onPrint}>Print</button>
+        </div>
+      </div>
+      <SummaryCard money={p.money} totals={p.totals} />
+      <nav className="books-desktop-tabs" aria-label="Books reports">
+        {REPORT_ROWS.map((t) => (
+          <button key={t.id} type="button" className={tab === t.id ? 'active' : ''} onClick={() => p.setDesktopTab(t.id)}>{t.title}</button>
+        ))}
+      </nav>
+      <div className="books-desktop-panel">
+        {tab === 'sales' && <SalesTable money={p.money} workbook={p.workbook} totals={p.totals} />}
+        {tab === 'expenses' && <ExpensesTable money={p.money} workbook={p.workbook} />}
+        {tab === 'inventory' && <InventoryBody money={p.money} inventory={p.inventory} />}
+        {tab === 'received' && <ReceivedBody money={p.money} items={p.workbook.received} />}
+      </div>
+      <BooksLock client={p.client} money={p.money} period={p.period} report={p.report} inventory={p.inventory} received={p.received} uiStatus={ui} busy={p.busy} setBusy={p.setBusy} onError={p.onError} onReload={p.onReload} />
+      <div className="books-print-sheets" aria-hidden>
+        <section><h2>Sales</h2><SalesTable money={p.money} workbook={p.workbook} totals={p.totals} /></section>
+        <section><h2>Expenses</h2><ExpensesTable money={p.money} workbook={p.workbook} /></section>
+        <section><h2>Inventory</h2><InventoryBody money={p.money} inventory={p.inventory} /></section>
+        <section><h2>Items received</h2><ReceivedBody money={p.money} items={p.workbook.received} /></section>
+      </div>
+      <p className="books-print-hint">Prints landscape · headers repeat · no sidebar</p>
+    </div>
+  );
+}
+
+function Block({ className, children }: { className?: string; children: ReactNode }) {
+  return <div className={className}>{children}</div>;
+}
+
+function SummaryCard({ money, totals, native }: { money: (c: number) => string; totals: BookTotals; native?: boolean }) {
+  return (
+    <div className={`books-summary-card-v2${native ? ' native' : ''}`}>
+      <div className="books-summary-profit">
+        <small>Profit</small>
+        <strong className="positive">{money(totals.profit)}</strong>
+      </div>
+      <div className="books-summary-grid">
+        <div><small>Sales</small><b>{money(totals.revenue)}</b></div>
+        <div><small>Fees</small><b className="warning-text">{money(totals.feesAndLabels)}</b></div>
+        <div><small>Cost</small><b>{money(totals.cost)}</b></div>
+        <div><small>Payouts</small><b>{money(totals.commission)}</b></div>
+      </div>
+    </div>
+  );
+}
+
+function MonthPickerSheet(p: ViewProps) {
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+  const years = [...new Set(p.periods.map((m) => m.period_start.slice(0, 4)))];
+  return (
+    <div className="books-picker-scrim" role="presentation" onClick={() => p.setPickerOpen(false)}>
+      <div className="books-picker-sheet" role="dialog" aria-label="Pick a month" onClick={(e) => e.stopPropagation()}>
+        <div className="books-picker-head">
+          <strong>Pick a month</strong>
+          <button type="button" onClick={() => p.setPickerOpen(false)}>Done</button>
+        </div>
+        {years.map((y) => (
+          <div key={y}>
+            <p className="books-picker-year">{y}</p>
+            <div className="native-report-group">
+              {p.periods.filter((m) => m.period_start.startsWith(y)).map((m) => {
+                const st = periodUiStatus(m, today);
+                const selected = m.id === p.periodId;
+                return (
+                  <button key={m.id} type="button" className={`native-report-row books-picker-row${selected ? ' selected' : ''}`} onClick={() => { p.setPeriodId(m.id); p.setPickerOpen(false); }}>
+                    <span>{periodPickerLabel(m)}</span>
+                    <b className={`books-picker-status books-picker-${st}`}>{selected ? '✓ ' : ''}{periodStatusLabel(st)}</b>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+        <p className="native-report-footnote">Only months with sales or inventory show up here.</p>
+      </div>
+    </div>
+  );
+}
+
+function SalesBody({ money, workbook, report, native }: { money: (c: number) => string; workbook: BooksWorkbook; report: Report; native?: boolean }) {
+  const [open, setOpen] = useState<string | null>(null);
+  const byId = useMemo(() => {
+    const map = new Map<string, Row>();
+    for (const s of report.sales || []) map.set(String(s.id), s);
+    return map;
+  }, [report]);
+  return (
+    <>
+      <div className="native-report-group">
+        {workbook.sales.channelTotals.map((c) => (
+          <div key={c.channel} className="native-report-row"><span>{c.channel}</span><b>{money(c.revenue_cents)}</b></div>
+        ))}
+        <div className="native-report-row strong"><span>Total sales</span><b>{money(workbook.sales.totals.revenue)}</b></div>
+        <div className="native-report-row strong"><span>Profit</span><b className="plus">{money(workbook.sales.totals.profit)}</b></div>
+      </div>
+      {native && <>
+        <p className="native-report-section">ITEMS SOLD</p>
+        <p className="native-report-footnote">Tap a row for every column.</p>
+      </>}
+      {workbook.sales.rows.map((row) => (
+        <SaleRow key={row.sale_id || row.sku + row.date} row={row} raw={byId.get(row.sale_id)} report={report} money={money} open={open} setOpen={setOpen} native={native} />
+      ))}
+    </>
+  );
+}
+
+function SaleRow({ row, raw, report, money, open, setOpen, native }: { row: SalesLine; raw?: Row; report: Report; money: (c: number) => string; open: string | null; setOpen: (v: string | null) => void; native?: boolean }) {
+  const key = row.sale_id || `${row.sku}:${row.order_no}`;
+  const expanded = open === key;
+  const whys = raw ? saleWhyLines(raw, report) : [];
+  const extraShip = row.label_cost_cents > 0 && row.buyer_shipping_cents > row.label_cost_cents;
+  const lessShip = row.label_cost_cents > 0 && row.label_cost_cents > row.buyer_shipping_cents;
+  if (!native) {
+    return null;
+  }
+  return (
+    <div className="books-sale-card native-report-form">
+      <button type="button" className="books-sale-head" onClick={() => setOpen(expanded ? null : key)}>
+        <SaleTitle label={row.title} sub={`${row.sku} · ${row.channel} · ${shortDate(row.date)}`} />
+        <b className={row.profit_cents == null ? '' : 'plus'}>{row.profit_cents == null ? '—' : money(row.profit_cents)}</b>
+      </button>
+      <p className="books-sale-line">Sold {money(row.price_cents)}</p>
+      <p className="books-sale-line muted">
+        Fees {money(row.marketplace_fees_cents + row.card_fees_cents)}
+        {lessShip ? ` · We paid ${money(row.label_cost_cents - row.buyer_shipping_cents)} extra ship` : extraShip ? ' · Buyer paid ship' : row.label_cost_cents ? ` · Label ${money(row.label_cost_cents)}` : ''}
+        {' · '}Cost {row.cost_cents == null ? <em className="fix">missing</em> : money(row.cost_cents)}
+      </p>
+      {whys.map((w) => <p key={w.text} className={`books-why books-why-${w.tone}`}>{w.tag ? `${w.tag} · ` : ''}{w.text}</p>)}
+      {expanded && (
+        <dl className="books-sale-detail">
+          {[['Order', row.order_no], ['Qty', row.qty], ['Tax', money(row.tax_cents)], ['Buyer shipping', money(row.buyer_shipping_cents)], ['Label cost', money(row.label_cost_cents)], ['Commission', row.commission_cents == null ? '—' : money(row.commission_cents)]].map(([k, v]) => (
+            <div key={String(k)}><dt>{k}</dt><dd>{v}</dd></div>
+          ))}
+        </dl>
+      )}
+    </div>
+  );
+}
+
+function SaleTitle({ label, sub }: { label: string; sub: string }) {
+  return <div><strong>{label}</strong><small>{sub}</small></div>;
+}
+
+function ExpensesBody({ money, workbook, native }: { money: (c: number) => string; workbook: BooksWorkbook; native?: boolean }) {
+  const groups = groupExpensesByCategory(workbook.expenses.rows);
+  const head = (
+    <div className="books-expense-hero native-report-form">
+      <small>Total out</small>
+      <strong className="warning-text">{money(workbook.expenses.total_cents)}</strong>
+    </div>
+  );
+  const body = groups.map(([cat, rows]) => (
+    <div key={cat}>
+      <div className="native-report-section books-cat-head">
+        <span>{cat.toUpperCase()}</span>
+        <b>{money(rows.reduce((n, r) => n + r.amount_cents, 0))}</b>
+      </div>
+      <div className="native-report-group">
+        {rows.map((r) => (
+          <div key={`${r.date}-${r.description}-${r.amount_cents}`} className="native-report-row books-expense-row">
+            <span>{r.description}<small>{shortDate(r.date)}{r.sku_or_order ? ` · ${r.sku_or_order}` : ''}{r.paid_by !== 'manual' ? ` · ${r.paid_by}` : ''}</small></span>
+            <b>{money(r.amount_cents)}{r.needs_reimbursement === 'Yes' && <em className="books-reimb">REIMBURSE</em>}</b>
+          </div>
+        ))}
+      </div>
+    </div>
+  ));
+  if (!native) {
+    return (
+      <>
+        {groups.map(([cat, rows]) => (
+          <section key={cat} className="books-spreadsheet">
+            <h2 className="books-kicker">{cat}</h2>
+            <div className="books-table-wrap">
+              <table className="books-table">
+                <thead><tr><th>Date</th><th>Description</th><th>SKU / order</th><th>Paid by</th><th>Reimb?</th><th>Amount</th></tr></thead>
+                <tbody>
+                  {rows.map((r) => (
+                    <tr key={`${r.date}-${r.description}`}>
+                      <td>{shortDate(r.date)}</td><td>{r.description}</td><td>{r.sku_or_order}</td><td>{r.paid_by}</td><td>{r.needs_reimbursement}</td><td>{money(r.amount_cents)}</td>
+                    </tr>
+                  ))}
+                  <tr className="books-total-row"><td colSpan={5}>{cat} subtotal</td><td>{money(rows.reduce((n, r) => n + r.amount_cents, 0))}</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        ))}
+        <p className="books-expense-grand">Grand total {money(workbook.expenses.total_cents)}</p>
+      </>
+    );
+  }
+  return <>{head}{body}</>;
+}
+
+function InventoryBody({ money, inventory, native }: { money: (c: number) => string; inventory: InventorySummary; native?: boolean }) {
+  const rows = [
+    ['Start of month', inventory.start_unit_count, ''],
+    ['Received', inventory.received_units, '+'],
+    ['Returned to stock', inventory.return_to_stock_units ?? 0, '+'],
+    ['Sold', inventory.sold_units, '-'],
+    ['Given away', inventory.giveaway_units, '-'],
+    ['Sent as replacements', inventory.replacement_units, '-'],
+    ['Moved to Defective', inventory.defective_units, '-'],
+    ['End of month', inventory.end_unit_count, ''],
+  ] as const;
+  return (
+    <>
+      <div className={`${native ? 'native-report-group' : 'books-table-wrap books-inventory-flow'}`}>
+        {rows.map(([label, value, sign]) => (
+          native
+            ? <div key={label} className={`native-report-row${label === 'End of month' ? ' strong' : ''}`}><span>{label}</span><b className={sign === '+' ? 'plus' : sign === '-' ? 'minus' : ''}>{sign ? `${sign}${value}` : value}</b></div>
+            : <div key={label} className="books-flow-row"><span>{label}</span><b>{value}</b></div>
+        ))}
+      </div>
+      <DetailBlock title="GIVEN AWAY" items={(inventory.giveaways || []).map((g) => ({ t: String(g.title), s: `${shortDate(String(g.date))} · SKU ${g.sku} · ${g.given_to}`, r: money(Number(g.cost_cents || 0)) }))} />
+      <DetailBlock title="REPLACEMENTS" items={(inventory.replacements || []).map((r) => ({ t: String(r.title), s: `Sale #${r.original_sale_id} · SKU ${r.sku}`, r: r.bad_unit_status === 'returned' ? 'Bad unit back' : String(r.bad_unit_status || '—') }))} />
+      <DetailBlock title="RETURNS" items={(inventory.returns || []).map((r) => ({ t: `${r.sku} · ${r.channel}`, s: `Refund ${money(Number(r.refund_cents || 0))} · Label ${money(Number(r.label_cents || 0))}${r.buyer_keeps_item ? ' · Buyer kept item' : ''}`, r: String(r.status || '') }))} />
+    </>
+  );
+}
+
+function DetailBlock({ title, items }: { title: string; items: { t: string; s: string; r: string }[] }) {
+  if (!items.length) return null;
+  return (
+    <>
+      <p className="native-report-section">{title}</p>
+      <div className="native-report-group">
+        {items.map((it) => (
+          <div key={it.t + it.s} className="native-report-row">
+            <span><strong>{it.t}</strong><small>{it.s}</small></span>
+            <b>{it.r}</b>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+function ReceivedBody({ money, items, native }: { money: (c: number) => string; items: ReceivedItem[]; native?: boolean }) {
+  const stats = receivedMonthStats(items);
+  const groups = groupReceivedByDay(items);
+  return (
+    <>
+      <div className="books-received-stats">
+        <div><small>Units</small><b>{stats.units}</b></div>
+        <div><small>SKUs</small><b>{stats.skus}</b></div>
+        <div><small>Total cost</small><b>{money(stats.cost_cents)}</b></div>
+      </div>
+      {groups.map(([day, rows]) => (
+        <div key={day}>
+          <p className="native-report-section">{dayHeader(day)}</p>
+          <div className={native ? 'native-report-group' : 'books-table-wrap'}>
+            {rows.map((r) => native ? (
+              <div key={String(r.sku)} className="native-report-row books-received-row">
+                <span>
+                  <strong>{String(r.title)}</strong>
+                  <small>SKU {String(r.sku)} · {String(r.category || '—')} · {String(r.condition || '—')}{r.cost_cents ? ` · Cost ${money(Number(r.cost_cents))}` : ' · Cost —'}{r.ask_cents ? ` · Floor ${money(Number(r.ask_cents))}` : ''}</small>
+                  <small className={!r.cost_cents ? 'fix' : ''}>{String(r.listing_status || r.unit_state || 'In stock')}{r.receiver_name ? ` · by ${r.receiver_name}` : ''}</small>
+                </span>
+                <b>×{Number(r.qty_on_hand || 1)}</b>
+              </div>
+            ) : (
+              <table key={String(r.sku)} className="books-table"><tbody><tr>
+                <td>{shortDate(String(r.received_at || ''))}</td><td>{String(r.sku)}</td><td>{String(r.title)}</td><td>{Number(r.qty_on_hand || 1)}</td>
+                <td>{r.cost_cents ? money(Number(r.cost_cents)) : '—'}</td><td>{String(r.listing_status || '')}</td>
+              </tr></tbody></table>
+            ))}
+          </div>
+        </div>
+      ))}
+    </>
+  );
+}
+
+function SalesTable({ money, workbook, totals }: { money: (c: number) => string; workbook: BooksWorkbook; totals: BookTotals }) {
+  const headers = ['Date', 'SKU', 'Item', 'Channel', 'Order', 'Sale', 'Tax', 'Fees', 'Label', 'Buyer ship', 'Cost', 'Profit', 'Payout', 'Why'];
+  return (
+    <>
+      <p className="books-channel-line">
+        {workbook.sales.channelTotals.map((c) => <span key={c.channel}>{c.channel} {money(c.revenue_cents)}</span>)}
+      </p>
+      <div className="books-table-wrap">
+        <table className="books-table">
+          <thead><tr>{headers.map((h) => <th key={h}>{h}</th>)}</tr></thead>
+          <tbody>
+            {workbook.sales.rows.map((r) => (
+              <tr key={r.sale_id + r.sku}>
+                <td>{shortDate(r.date)}</td><td>{r.sku}</td><td>{r.title}</td><td>{r.channel}</td><td>{r.order_no}</td>
+                <td>{money(r.price_cents)}</td><td>{money(r.tax_cents)}</td><td>{money(r.marketplace_fees_cents + r.card_fees_cents)}</td>
+                <td>{money(r.label_cost_cents)}</td><td>{money(r.buyer_shipping_cents)}</td>
+                <td className={r.cost_cents == null ? 'fix' : ''}>{r.cost_cents == null ? 'missing' : money(r.cost_cents)}</td>
+                <td>{r.profit_cents == null ? '—' : money(r.profit_cents)}</td>
+                <td>{r.commission_cents == null ? '—' : money(r.commission_cents)}</td>
+                <td className="why">{r.profit_notes}</td>
+              </tr>
+            ))}
+            <tr className="books-total-row">
+              <td colSpan={5}>Totals</td>
+              <td>{money(totals.revenue)}</td><td /><td /><td>{money(totals.labelCostsOnSales)}</td><td /><td>{money(totals.cost)}</td>
+              <td>{money(totals.profit)}</td><td>{money(totals.commission)}</td><td />
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+}
+
+function ExpensesTable({ money, workbook }: { money: (c: number) => string; workbook: BooksWorkbook }) {
+  return <ExpensesBody money={money} workbook={workbook} native={false} />;
+}
+
+// noop helper to avoid fragment lint noise in expense desktop layout
+
+function shortDate(iso: string) {
+  if (!iso) return '—';
+  return new Date(`${iso.slice(0, 10)}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+}
+
+function dayHeader(iso: string) {
+  return shortDate(iso).toUpperCase();
+}
