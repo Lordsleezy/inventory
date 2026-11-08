@@ -581,6 +581,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
         {isShipped && (
           <>
             <small>Shipped {stamp(o.shipped_at!)}{o.shipped_by_name ? ` · ${o.shipped_by_name}` : ''}{shippedStale(o) ? ' · not marked delivered for 10 days' : ''}</small>
+            {o.scanned_out_at && <small>Scanned out {stamp(o.scanned_out_at)}{o.scanned_out_by_name ? ` by ${o.scanned_out_by_name}` : ''}</small>}
             {o.refund_requested_at ? <p className="hint">Cancel & refund in progress…</p> : <div className="actions">
               <button type="button" className="primary" disabled={!!busy} onClick={() => void markDelivered(o)}>{busy === o.id + 'delivered' ? 'Saving…' : 'Mark delivered'}</button>
               <button type="button" className="secondary" disabled={!!busy} onClick={() => void stepBack(o)}>{busy === o.id + 'step-back' ? 'Saving…' : 'Move back one step'}</button>

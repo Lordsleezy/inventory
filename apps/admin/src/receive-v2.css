@@ -153,13 +153,15 @@ html.dark .receive-panel.receive-v2,
 }
 
 .scan-out-flash--ok {
-  background: rgba(48, 164, 108, 0.15);
-  border: 1px solid #30a46c;
+  background: #000;
+  border: 1px solid #fff;
+  color: #fff;
 }
 
 .scan-out-flash--err {
-  background: rgba(229, 72, 77, 0.12);
-  border: 1px solid #e5484d;
+  background: rgba(255, 69, 58, 0.12);
+  border: 1px solid #FF453A;
+  color: #fff;
 }
 
 .scan-out-list {

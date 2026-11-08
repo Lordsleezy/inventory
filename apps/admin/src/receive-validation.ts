@@ -17,18 +17,24 @@ export function receiveMissingFields({
   brandReady,
   otherGaps = [],
   hasPhoto,
+  quantityOk = true,
 }: {
   doNotList: boolean;
   brandReady: boolean;
   otherGaps?: string[];
   hasPhoto: boolean;
+  quantityOk?: boolean;
 }): string[] {
   if (doNotList) {
     const out: string[] = [];
     if (!hasPhoto) out.push('photo');
+    if (!quantityOk) out.push('quantity');
     return out;
   }
-  return [...otherGaps, ...(hasPhoto ? [] : ['photo'])];
+  const out = [...otherGaps];
+  if (!quantityOk && !out.includes('quantity')) out.unshift('quantity');
+  if (!hasPhoto) out.push('photo');
+  return out;
 }
 
 export function notForSaleBrandError(_doNotList: boolean, _brandReady: boolean): string | null {

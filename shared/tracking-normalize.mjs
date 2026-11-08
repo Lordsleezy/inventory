@@ -1,8 +1,12 @@
 /** Normalize carrier barcodes for lookup (USPS 420+ZIP wrappers, whitespace). */
 export function compactTracking(value) {
-  const n = String(value || "").replace(/\s+/g, "").toUpperCase();
+  let n = String(value || "").replace(/\s+/g, "").toUpperCase();
   const wrapped = n.match(/^420\d{5}(9[2-5]\d{18,24})$/) || n.match(/^420\d{9}(9[2-5]\d{18,24})$/);
-  return wrapped ? wrapped[1] : n;
+  if (wrapped) n = wrapped[1];
+  const ups = n.match(/1Z[0-9A-Z]{16}/);
+  if (ups) return ups[0];
+  if (/^\d{34}$/.test(n)) return n.slice(-12);
+  return n;
 }
 
 export function trackingSuffix(value) {

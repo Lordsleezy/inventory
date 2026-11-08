@@ -44,7 +44,15 @@ test("a price and a zip are not a tracking number", () => {
 
 test("a 420 ZIP wrapper is the same USPS number", () => {
   assert.equal(compactTracking("420956639400111899001234567891"), DEPOP);
+  assert.equal(compactTracking("420956631234" + DEPOP), DEPOP);
   assert.equal(compactTracking(DEPOP), DEPOP);
+});
+
+test("UPS and FedEx label barcodes collapse to the tracking number", () => {
+  assert.equal(compactTracking("1Z999AA10123456784"), "1Z999AA10123456784");
+  assert.equal(compactTracking("961102098765431Z999AA10123456784"), "1Z999AA10123456784");
+  const fedex12 = "123456789012";
+  assert.equal(compactTracking("9622001900000000000000" + fedex12), fedex12);
 });
 
 test("PDF text extraction reads the tracking line", async () => {

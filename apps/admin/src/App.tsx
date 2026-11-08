@@ -368,9 +368,7 @@ export function App() {
   const [navHoverOpen, setNavHoverOpen] = useState(false);
   /** Keeps hover-peek rail open after clicking a nav group (collapsed desktop). */
   const [navPeekSticky, setNavPeekSticky] = useState(false);
-  const [darkMode, setDarkMode] = useState(() => {
-    try { return localStorage.getItem('floor_admin_dark') !== '0'; } catch { return true; }
-  });
+  const darkMode = true;
   const [navGroup, setNavGroup] = useState<'reports' | 'inventory' | 'other' | null>(null);
   const [showInstallGate, setShowInstallGate] = useState(() => shouldShowInstallGate());
   // Re-check on mount so store-phone Chrome / kiosk / persisted app mode win over the install coach.
@@ -382,10 +380,9 @@ export function App() {
     try { localStorage.setItem('floor_admin_nav_collapsed', navCollapsed ? '1' : '0'); } catch { /* ignore */ }
   }, [navCollapsed]);
   useEffect(() => {
-    try { localStorage.setItem('floor_admin_dark', darkMode ? '1' : '0'); } catch { /* ignore */ }
-    document.documentElement.classList.toggle('dark', darkMode);
+    document.documentElement.classList.add('dark');
     return () => { document.documentElement.classList.remove('dark'); };
-  }, [darkMode]);
+  }, []);
 
   useEffect(() => {
     void sb.auth.getSession().then(({ data }) => setSession((current) => current ?? data.session));
@@ -900,16 +897,6 @@ export function App() {
     <div className="account">
       <small>{staffSession?.displayName || session.user.email}</small>
       <button type="button" onClick={() => { closeMenu(); void sb.auth.signOut({ scope: 'local' }); }}>Sign out</button>
-      <label className="theme-toggle" title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}>
-        <span>{darkMode ? 'Dark' : 'Light'}</span>
-        <input
-          type="checkbox"
-          checked={darkMode}
-          onChange={e => setDarkMode(e.target.checked)}
-          aria-label="Dark mode"
-        />
-        <span className="theme-switch" aria-hidden="true" />
-      </label>
     </div>
   </aside>
   <main className="content">{error && <div className="alert" role="alert">{error}<button onClick={() => setError('')}>Dismiss</button></div>}
