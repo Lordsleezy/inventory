@@ -16,6 +16,8 @@ import { shortError } from './shortError';
 export type MoreId =
   | 'register'
   | 'sales'
+  | 'receipts'
+  | 'other'
   | 'ebay'
   | 'amazon'
   | 'tiktok'
@@ -67,15 +69,12 @@ function addDays(date: string, amount: number) {
 export function AppMoreHome({
   client, fullAccess, staffSession, session, money, setPage, onOpenChannel,
 }: Pick<Props, 'client' | 'fullAccess' | 'staffSession' | 'session' | 'money' | 'setPage' | 'onOpenChannel'>) {
+  void onOpenChannel;
+  void money;
   const [salesToday, setSalesToday] = useState<number | null>(null);
-  const [ebayN, setEbayN] = useState<string>('…');
-  const [amazonN, setAmazonN] = useState<string>('…');
-  const [tiktokN, setTiktokN] = useState<string>('Connect');
-  const [depopN, setDepopN] = useState<string>('…');
-  const [mercariN, setMercariN] = useState<string>('…');
-  const [sync, setSync] = useState('…');
 
   useEffect(() => {
+    if (!fullAccess) return;
     let alive = true;
     void (async () => {
       try {
@@ -90,8 +89,81 @@ export function AppMoreHome({
           );
         }
       } catch { /* ignore */ }
+    })();
+    return () => { alive = false; };
+  }, [client, fullAccess]);
 
-      // Prefetch channel boards in parallel (Floor-fast catalog) so opening eBay is warm.
+  return (
+    <>
+      <div className="app-large-title"><h1>More</h1></div>
+
+      {fullAccess ? (
+        <>
+          <div className="app-group">
+            <button type="button" className="app-more-link" onClick={() => setPage('sales')}>
+              <span className="app-more-left"><Icon tone="#30d158" />Live sales</span>
+              <span className="app-more-right">{salesToday ?? '…'}<span className="app-chevron">›</span></span>
+            </button>
+            <button type="button" className="app-more-link" onClick={() => setPage('receipts')}>
+              <span className="app-more-left"><Icon tone="#ffd60a" />Receipts</span>
+              <span className="app-chevron">›</span>
+            </button>
+            <button type="button" className="app-more-link" onClick={() => setPage('register')}>
+              <span className="app-more-left"><Icon tone="#0a84ff" />Register</span>
+              <span className="app-chevron">›</span>
+            </button>
+            <button type="button" className="app-more-link" onClick={() => setPage('reports')}>
+              <span className="app-more-left"><Icon tone="#30d158" />Reports</span>
+              <span className="app-chevron">›</span>
+            </button>
+            <button type="button" className="app-more-link" onClick={() => setPage('books')}>
+              <span className="app-more-left"><Icon tone="#ff9f0a" />Books</span>
+              <span className="app-chevron">›</span>
+            </button>
+            <button type="button" className="app-more-link" onClick={() => setPage('locations')}>
+              <span className="app-more-left"><Icon tone="#30d158" />Locations</span>
+              <span className="app-chevron">›</span>
+            </button>
+            <button type="button" className="app-more-link" onClick={() => setPage('other')}>
+              <span className="app-more-left"><Icon tone="#8e8e93" />Other</span>
+              <span className="app-chevron">›</span>
+            </button>
+          </div>
+        </>
+      ) : staffSession ? (
+        <div className="app-group">
+          <button type="button" className="app-more-link" onClick={() => setPage('register')}>
+            <span className="app-more-left"><Icon tone="#0a84ff" />Register</span>
+            <span className="app-chevron">›</span>
+          </button>
+        </div>
+      ) : null}
+
+      <p className="app-footer-count">{staffSession?.displayName || session.user.email}</p>
+    </>
+  );
+}
+
+/** Everything that used to sit on More home, now one tap behind Other. */
+export function AppMoreOther({
+  client, session, setPage, onOpenChannel, onBack,
+}: {
+  client: SupabaseClient;
+  session: Session;
+  setPage: (p: MoreId) => void;
+  onOpenChannel: (ch: 'ebay' | 'amazon' | 'tiktok') => void;
+  onBack: () => void;
+}) {
+  const [ebayN, setEbayN] = useState('…');
+  const [amazonN, setAmazonN] = useState('…');
+  const [tiktokN, setTiktokN] = useState('Connect');
+  const [depopN, setDepopN] = useState('…');
+  const [mercariN, setMercariN] = useState('…');
+  const [sync, setSync] = useState('…');
+
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
       try {
         const token = session.access_token;
         const headers = { Authorization: `Bearer ${token}`, 'content-type': 'application/json' };
@@ -118,8 +190,6 @@ export function AppMoreHome({
         else if (amazon?.listed) setAmazonN(String(amazon.listed.length));
         setTiktokN(tiktok?.connected === false ? 'Connect' : String(tiktok?.listed?.length ?? 0));
       } catch { /* ignore */ }
-
-      void money;
       try {
         const [depopLive, mercariLive] = await Promise.all([
           client.rpc('portal_depop_live_listings'),
@@ -137,89 +207,63 @@ export function AppMoreHome({
       }
     })();
     return () => { alive = false; };
-  }, [client, session.access_token, money]);
+  }, [client, session.access_token]);
 
   return (
-    <>
-      <div className="app-large-title"><h1>More</h1></div>
-
-      <div className="app-group">
-        {fullAccess && (
-          <button type="button" className="app-more-link" onClick={() => setPage('sales')}>
-            <span className="app-more-left"><Icon tone="#30d158" />Live sales</span>
-            <span className="app-more-right">{salesToday ?? '…'}<span className="app-chevron">›</span></span>
-          </button>
-        )}
-        {staffSession && (
-          <button type="button" className="app-more-link" onClick={() => setPage('register')}>
-            <span className="app-more-left"><Icon tone="#0a84ff" />Register</span>
-            <span className="app-chevron">›</span>
-          </button>
-        )}
+    <div className="app-stack">
+      <div className="app-nav">
+        <button type="button" onClick={onBack}>‹ More</button>
+        <div className="app-nav-title">Other</div>
+        <button type="button" style={{ visibility: 'hidden' }}>·</button>
       </div>
 
-      {fullAccess && (
-        <>
-          <p className="app-section-label">Sell online</p>
-          <div className="app-group">
-            <button type="button" className="app-more-link" onClick={() => onOpenChannel('ebay')}>
-              <span className="app-more-left"><Icon tone="#0a84ff" />eBay</span>
-              <span className="app-more-right">{ebayN}<span className="app-chevron">›</span></span>
-            </button>
-            <button type="button" className="app-more-link" onClick={() => onOpenChannel('amazon')}>
-              <span className="app-more-left"><Icon tone="#ff9f0a" />Amazon</span>
-              <span className="app-more-right">{amazonN}<span className="app-chevron">›</span></span>
-            </button>
-            <button type="button" className="app-more-link" onClick={() => onOpenChannel('tiktok')}>
-              <span className="app-more-left"><Icon tone="#64d2ff" />TikTok</span>
-              <span className="app-more-right">{tiktokN}<span className="app-chevron">›</span></span>
-            </button>
-            <button type="button" className="app-more-link" onClick={() => setPage('depop')}>
-              <span className="app-more-left"><Icon tone="#bf5af2" />Depop</span>
-              <span className="app-more-right">{depopN}<span className="app-chevron">›</span></span>
-            </button>
-            <button type="button" className="app-more-link" onClick={() => setPage('mercari')}>
-              <span className="app-more-left"><Icon tone="#ff375f" />Mercari</span>
-              <span className="app-more-right">{mercariN}<span className="app-chevron">›</span></span>
-            </button>
-            <button type="button" className="app-more-link" onClick={() => setPage('connections')}>
-              <span className="app-more-left"><Icon tone="#8e8e93" />Connections & sync</span>
-              <span className="app-more-right">{sync}<span className="app-chevron">›</span></span>
-            </button>
-          </div>
+      <p className="app-section-label">Sell online</p>
+      <div className="app-group">
+        <button type="button" className="app-more-link" onClick={() => onOpenChannel('ebay')}>
+          <span className="app-more-left"><Icon tone="#0a84ff" />eBay</span>
+          <span className="app-more-right">{ebayN}<span className="app-chevron">›</span></span>
+        </button>
+        <button type="button" className="app-more-link" onClick={() => onOpenChannel('amazon')}>
+          <span className="app-more-left"><Icon tone="#ff9f0a" />Amazon</span>
+          <span className="app-more-right">{amazonN}<span className="app-chevron">›</span></span>
+        </button>
+        <button type="button" className="app-more-link" onClick={() => onOpenChannel('tiktok')}>
+          <span className="app-more-left"><Icon tone="#64d2ff" />TikTok</span>
+          <span className="app-more-right">{tiktokN}<span className="app-chevron">›</span></span>
+        </button>
+        <button type="button" className="app-more-link" onClick={() => setPage('depop')}>
+          <span className="app-more-left"><Icon tone="#bf5af2" />Depop</span>
+          <span className="app-more-right">{depopN}<span className="app-chevron">›</span></span>
+        </button>
+        <button type="button" className="app-more-link" onClick={() => setPage('mercari')}>
+          <span className="app-more-left"><Icon tone="#ff375f" />Mercari</span>
+          <span className="app-more-right">{mercariN}<span className="app-chevron">›</span></span>
+        </button>
+        <button type="button" className="app-more-link" onClick={() => setPage('connections')}>
+          <span className="app-more-left"><Icon tone="#8e8e93" />Connections & sync</span>
+          <span className="app-more-right">{sync}<span className="app-chevron">›</span></span>
+        </button>
+      </div>
 
-          <p className="app-section-label">Money</p>
-          <div className="app-group">
-            <button type="button" className="app-more-link" onClick={() => setPage('reports')}>
-              <span className="app-more-left"><Icon tone="#30d158" />Reports</span>
-              <span className="app-chevron">›</span>
-            </button>
-            <button type="button" className="app-more-link" onClick={() => setPage('insights')}>
-              <span className="app-more-left"><Icon tone="#5e5ce6" />Insights</span>
-              <span className="app-chevron">›</span>
-            </button>
-            <button type="button" className="app-more-link" onClick={() => setPage('withdrawals')}>
-              <span className="app-more-left"><Icon tone="#64d2ff" />Money</span>
-              <span className="app-chevron">›</span>
-            </button>
-            <button type="button" className="app-more-link" onClick={() => setPage('books')}>
-              <span className="app-more-left"><Icon tone="#ff9f0a" />Books</span>
-              <span className="app-chevron">›</span>
-            </button>
-          </div>
-          <p className="app-section-label">Inventory records</p>
-          <div className="app-group">
-            <button type="button" className="app-more-link" onClick={() => setPage('manifests')}>
-              <span className="app-more-left"><Icon tone="#ff9f0a" />Manifests</span>
-              <span className="app-chevron">›</span>
-            </button>
-            <button type="button" className="app-more-link" onClick={() => setPage('locations')}>
-              <span className="app-more-left"><Icon tone="#30d158" />Locations</span>
-              <span className="app-chevron">›</span>
-            </button>
-          </div>
-        </>
-      )}
+      <p className="app-section-label">Money</p>
+      <div className="app-group">
+        <button type="button" className="app-more-link" onClick={() => setPage('insights')}>
+          <span className="app-more-left"><Icon tone="#5e5ce6" />Insights</span>
+          <span className="app-chevron">›</span>
+        </button>
+        <button type="button" className="app-more-link" onClick={() => setPage('withdrawals')}>
+          <span className="app-more-left"><Icon tone="#64d2ff" />Money</span>
+          <span className="app-chevron">›</span>
+        </button>
+      </div>
+
+      <p className="app-section-label">Inventory records</p>
+      <div className="app-group">
+        <button type="button" className="app-more-link" onClick={() => setPage('manifests')}>
+          <span className="app-more-left"><Icon tone="#ff9f0a" />Manifests</span>
+          <span className="app-chevron">›</span>
+        </button>
+      </div>
 
       <div className="app-group">
         <button type="button" className="app-more-link" onClick={() => setPage('settings')}>
@@ -227,8 +271,7 @@ export function AppMoreHome({
           <span className="app-chevron">›</span>
         </button>
       </div>
-      <p className="app-footer-count">{staffSession?.displayName || session.user.email}</p>
-    </>
+    </div>
   );
 }
 
@@ -343,13 +386,13 @@ export function AppLiveSales({ client, money, stamp, onBack }: {
   );
 }
 
-export function AppConnections({ accessToken, onBack }: {
-  client: SupabaseClient; accessToken: string; money: (n: number) => string; stamp: (s: string) => string; onBack: () => void;
+export function AppConnections({ accessToken, onBack, backLabel = 'More' }: {
+  client: SupabaseClient; accessToken: string; money: (n: number) => string; stamp: (s: string) => string; onBack: () => void; backLabel?: string;
 }) {
   return (
     <div className="app-stack">
       <div className="app-nav">
-        <button type="button" onClick={onBack}>‹ More</button>
+        <button type="button" onClick={onBack}>‹ {backLabel}</button>
         <div className="app-nav-title">Connections & sync</div>
         <button type="button" style={{ visibility: 'hidden' }}>·</button>
       </div>
@@ -384,14 +427,14 @@ export function AppReportsNative({ onBack, children, title = 'Reports', backLabe
   );
 }
 
-export function AppDepopNative({ client, accessToken, money, onBack }: {
-  client: SupabaseClient; accessToken: string; money: (n: number) => string; onBack: () => void;
+export function AppDepopNative({ client, accessToken, money, onBack, backLabel = 'More' }: {
+  client: SupabaseClient; accessToken: string; money: (n: number) => string; onBack: () => void; backLabel?: string;
 }) {
   const [tab, setTab] = useState<'listed'|'sales'|'manage'>('listed');
   return (
     <div className="app-stack">
       <div className="app-nav">
-        <button type="button" onClick={onBack}>‹ More</button>
+        <button type="button" onClick={onBack}>‹ {backLabel}</button>
         <div className="app-nav-title">Depop</div>
         <button type="button" style={{ visibility: 'hidden' }}>+</button>
       </div>
@@ -409,14 +452,14 @@ export function AppDepopNative({ client, accessToken, money, onBack }: {
   );
 }
 
-export function AppMercariNative({ client, accessToken, money, onBack }: {
-  client: SupabaseClient; accessToken: string; money: (n: number) => string; onBack: () => void;
+export function AppMercariNative({ client, accessToken, money, onBack, backLabel = 'More' }: {
+  client: SupabaseClient; accessToken: string; money: (n: number) => string; onBack: () => void; backLabel?: string;
 }) {
   const [tab, setTab] = useState<'listed'|'sales'|'manage'>('listed');
   return (
     <div className="app-stack">
       <div className="app-nav">
-        <button type="button" onClick={onBack}>‹ More</button>
+        <button type="button" onClick={onBack}>‹ {backLabel}</button>
         <div className="app-nav-title">Mercari</div>
         <button type="button" style={{ visibility: 'hidden' }}>+</button>
       </div>
@@ -435,7 +478,7 @@ export function AppMercariNative({ client, accessToken, money, onBack }: {
 }
 
 export function AppSettingsNative({
-  client, fullAccess, staffSession, session, settingsSlot, onBack,
+  client, fullAccess, staffSession, session, settingsSlot, onBack, backLabel = 'More',
 }: {
   client: SupabaseClient;
   fullAccess: boolean;
@@ -444,13 +487,14 @@ export function AppSettingsNative({
   settingsSlot: React.ReactNode;
   /** Omit when Settings is a root tab (associates). */
   onBack?: () => void;
+  backLabel?: string;
 }) {
   void fullAccess;
   return (
     <div className="app-stack">
       <div className="app-nav">
         {onBack
-          ? <button type="button" onClick={onBack}>‹ More</button>
+          ? <button type="button" onClick={onBack}>‹ {backLabel}</button>
           : <button type="button" style={{ visibility: 'hidden' }}>·</button>}
         <div className="app-nav-title">Settings</div>
         <button type="button" style={{ visibility: 'hidden' }}>·</button>
