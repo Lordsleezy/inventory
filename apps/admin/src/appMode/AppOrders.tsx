@@ -2,12 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { type WebOrder } from '../OrdersPage';
 import { LabelDialog } from '../LabelDialog';
-import { OrderStepper, OrderTimelineList } from '../OrderFulfillment';
+import { OrderStepper, OrderTimelineList, OrderTrackLine } from '../OrderFulfillment';
 import { errText } from '../errText';
 import { shortError } from './shortError';
 import { loadOrderLocations, locationCompare, locationParts } from '../locationOrder';
 import { fileToBase64, labelFileUrl, orderAdmin } from '../orderLabel';
-import { canBuyLabel, hasLabel, orderChip, orderNeedsLabel, orderStage, orderTimeline, packagedStale, trackingTail, type OrderStage } from '../orderStage';
+import { canBuyLabel, hasLabel, orderChip, orderNeedsLabel, orderStage, orderTimeline, packagedStale, shippedStale, trackingTail, type OrderStage } from '../orderStage';
 import { useVisibleInterval } from '../useVisibleInterval';
 
 type Seg = 'needsLabel' | 'toShip' | 'packaged' | 'shipped' | 'delivered' | 'canceled';
@@ -19,8 +19,8 @@ const CHANNEL: Record<string, string> = {
 const SEG_NOTE: Record<Seg, string> = {
   needsLabel: 'Buy the eBay label in eBay, or grab the Depop label, then upload the PDF. The warehouse sees it after that.',
   toShip: 'Pick it, print the label, then tap Packaged.',
-  packaged: 'Boxed and waiting for the carrier. Moves to Shipped on its own at the first carrier scan.',
-  shipped: 'Updates on its own. Moves to Delivered when the carrier says so.',
+  packaged: 'Boxed. Tap Mark shipped when it leaves.',
+  shipped: 'On the way. An admin taps Mark delivered when it arrives.',
   delivered: 'Carrier confirmed, or picked up before the store closed.',
   canceled: 'Canceled in Floor. Marketplace refunds stay manual.',
 };
@@ -121,6 +121,20 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
     await runAction('location', async () => {
       const { error: e } = await client.rpc('portal_set_unit_pick_location', { p_sku: order.sku, p_location: code });
       if (e) throw e;
+    });
+  }
+
+  async function markShipped(o: WebOrder) {
+    await runAction('shipped', async () => {
+      const { error: e } = await client.rpc('portal_mark_order_shipped', { p_order: o.id });
+      if (e) throw new Error(e.message === 'order_not_packaged' ? 'Tap Packaged before marking it shipped.' : e.message);
+    });
+  }
+
+  async function markDelivered(o: WebOrder) {
+    await runAction('delivered', async () => {
+      const { error: e } = await client.rpc('portal_mark_order_delivered', { p_order: o.id });
+      if (e) throw new Error(e.message === 'portal_access_denied' ? 'Only an admin can mark an order delivered.' : e.message);
     });
   }
 
@@ -299,6 +313,7 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
               {open.tracking_number && <button type="button" className="text-button" onClick={() => void navigator.clipboard.writeText(open.tracking_number || '')}>Copy</button>}
             </strong>
           </div>
+          <OrderTrackLine order={open} />
         </div>
         {open.tracking_exception && <p className="app-inline-error">Carrier exception: {open.tracking_exception}</p>}
         {open.tracking_needs_entry && (
@@ -337,6 +352,16 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
                 {busy === 'packaged' ? '…' : 'Packaged'}
               </button>
             )}
+            {stage === 'packaged' && (
+              <button type="button" className="primary" disabled={!!busy} onClick={() => void markShipped(open)}>
+                {busy === 'shipped' ? '…' : 'Mark shipped'}
+              </button>
+            )}
+            {stage === 'shipped' && isAdmin && (
+              <button type="button" className="primary" disabled={!!busy} onClick={() => void markDelivered(open)}>
+                {busy === 'delivered' ? '…' : 'Mark delivered'}
+              </button>
+            )}
             {open.label_origin === 'bought' && !open.delivered_at && (
               <button type="button" className="secondary" disabled={!!busy} onClick={() => void voidLabel(open)}>{busy === 'void' ? '…' : 'Void label'}</button>
             )}
@@ -356,14 +381,15 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
             )}
           </div>
         )}
-        {stage === 'toShip' && <p className="app-footer-count">Tap once it's boxed and labeled. Tracking takes over from there.</p>}
-        {stage === 'packaged' && <p className="app-footer-count">Waiting on the first carrier scan. That moves it to Shipped.</p>}
-        {stage === 'shipped' && <p className="app-footer-count">Updates on its own. Moves to Delivered when the carrier says so.</p>}
+        {stage === 'toShip' && <p className="app-footer-count">Tap once it's boxed and labeled.</p>}
+        {stage === 'packaged' && <p className="app-footer-count">Tap Mark shipped when it leaves. That records who and when.</p>}
+        {stage === 'shipped' && <p className="app-footer-count">{isAdmin ? 'Tap Mark delivered when it arrives.' : 'An admin marks this delivered.'}</p>}
       </div>
     );
   }
 
   const stale = buckets.packaged.filter((o) => packagedStale(o)).length;
+  const late = buckets.shipped.filter((o) => shippedStale(o)).length;
   return (
     <>
       <div className="app-large-title orders-app-title"><h1>Orders</h1></div>
@@ -384,7 +410,10 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
       </div>
       <p className="app-footer-count orders-seg-note">{SEG_NOTE[seg]}</p>
       {seg === 'packaged' && (
-        <p className="app-flag">{stale > 0 ? `${stale} packaged over 2 days with no carrier scan.` : 'Flags anything packaged over 2 days with no carrier scan.'}</p>
+        <p className="app-flag">{stale > 0 ? `${stale} packaged over 2 days and not marked shipped.` : 'Flags anything packaged over 2 days and not marked shipped.'}</p>
+      )}
+      {seg === 'shipped' && (
+        <p className="app-flag">{late > 0 ? `${late} shipped over 10 days and not marked delivered.` : 'Flags anything shipped over 10 days and not marked delivered.'}</p>
       )}
       {error && <p className="app-inline-error">{error}</p>}
       <div className="app-group">

@@ -8,6 +8,23 @@ export function shippoMode() {
   return null;
 }
 
+/**
+ * Paid Shippo tracking (register + webhook) stays in the code and stays off.
+ * store_settings key shippo_tracking = true turns it back on. No code change.
+ * Label purchase does not read this. Missing or false means no tracking calls.
+ */
+export async function shippoTrackingEnabled(sb) {
+  if (!sb?.from) return false;
+  try {
+    const query = sb.from("store_settings").select("value").eq("key", "shippo_tracking");
+    const { data, error } = await (typeof query.limit === "function" ? query.limit(8) : query);
+    if (error || !Array.isArray(data)) return false;
+    return data.some((row) => row?.value === true || String(row?.value).toLowerCase() === "true" || row?.value === "on");
+  } catch {
+    return false;
+  }
+}
+
 /** Soft plan note for UI. Shippo API Starter is pay-as-you-go (not a hard monthly cut-off). */
 export function shippoPlanNote() {
   const custom = (process.env.SHIPPO_PLAN_NOTE || "").trim();

@@ -1,4 +1,4 @@
-import { getTrack, guessShippoCarrier, registerTrack, shippoMode } from "./shippo.mjs";
+import { getTrack, guessShippoCarrier, registerTrack, shippoMode, shippoTrackingEnabled } from "./shippo.mjs";
 
 function mapShippoStatus(track) {
   const st = String(track?.tracking_status?.status || track?.tracking_status?.status_details || "").toLowerCase();
@@ -24,6 +24,7 @@ export async function syncReturnTracking(sb, storeId, returnId) {
   const { data: row, error } = await sb.from("returns").select("*").eq("store_id", storeId).eq("id", returnId).maybeSingle();
   if (error) throw error;
   if (!row?.tracking_number) return { ok: true, skipped: "no_tracking" };
+  if (!(await shippoTrackingEnabled(sb))) return { ok: true, skipped: "tracking_off" };
   const carrier = (row.carrier || guessShippoCarrier(row.tracking_number) || "usps").toLowerCase();
   let track = null;
   if (shippoMode()) {
@@ -71,6 +72,7 @@ export async function syncReturnTracking(sb, storeId, returnId) {
 
 /** Shippo track_updated webhook payload → same sync path when return_id is embedded in metadata. */
 export async function applyShippoTrackWebhook(sb, payload) {
+  if (!(await shippoTrackingEnabled(sb))) return { ok: true, skipped: "tracking_off" };
   const data = payload?.data || payload;
   const trackingNumber = data?.tracking_number;
   if (!trackingNumber) return { ok: false, error: "no_tracking_number" };

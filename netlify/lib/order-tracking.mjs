@@ -3,7 +3,7 @@
  * PRE_TRANSIT stays put. The first real scan sets shipped_at.
  * DELIVERED sets delivered_at. FAILURE / RETURNED flags the order.
  */
-import { guessShippoCarrier, registerTrack, shippoMode } from "./shippo.mjs";
+import { guessShippoCarrier, registerTrack, shippoMode, shippoTrackingEnabled } from "./shippo.mjs";
 
 export function patchFromShippoStatus(order, { status, statusDate, statusDetails } = {}) {
   const st = String(status || "").toUpperCase();
@@ -79,6 +79,7 @@ export async function applyTrackToOrder(sb, order, track) {
 export async function registerOrderTracking(sb, order, deps = {}) {
   const tracking = String(order?.tracking_number || "").replace(/\s+/g, "");
   if (!tracking) return { ok: false, skipped: "no_tracking" };
+  if (!(await shippoTrackingEnabled(sb))) return { ok: false, skipped: "tracking_off" };
   if (!deps.registerTrack && !shippoMode()) return { ok: false, skipped: "shippo_offline" };
   const token = guessShippoCarrier(tracking) || "usps";
   const reg = await (deps.registerTrack || registerTrack)(token, tracking);
@@ -97,6 +98,7 @@ export async function registerOrderTracking(sb, order, deps = {}) {
 
 /** Match a Shippo track_updated payload to Floor orders and move their stage. */
 export async function applyOrderShippoWebhook(sb, payload) {
+  if (!(await shippoTrackingEnabled(sb))) return { ok: true, skipped: "tracking_off" };
   const data = payload?.data || payload || {};
   const trackingNumber = String(data.tracking_number || "").replace(/\s+/g, "");
   if (!trackingNumber) return { ok: false, error: "no_tracking_number" };
@@ -112,6 +114,7 @@ export async function applyOrderShippoWebhook(sb, payload) {
  * Skips anything already registered or already delivered. Not a status poll.
  */
 export async function registerPendingOrderTracks(sb, limit = 20) {
+  if (!(await shippoTrackingEnabled(sb))) return { ok: true, skipped: "tracking_off", registered: 0 };
   if (!shippoMode()) return { ok: true, skipped: "shippo_offline", registered: 0 };
   const { data: rows, error } = await sb.from("web_orders")
     .select("id,store_id,sku,tracking_number,carrier,shipped_at,delivered_at,packaged_at,tracking_status,order_no,channel")

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { patchFromShippoStatus } from "./order-tracking.mjs";
+import { patchFromShippoStatus, registerOrderTracking } from "./order-tracking.mjs";
 import { attachUploadedLabel, resolveUploadedTracking } from "./order-label.mjs";
 
 const order = { id: "o1", shipped_at: null, delivered_at: null, packaged_at: "2026-11-07T18:00:00Z", carrier: "USPS" };
@@ -26,6 +26,43 @@ test("delivered sets both timestamps once", () => {
   const patch = patchFromShippoStatus(order, { status: "DELIVERED", statusDate: "2026-11-10T15:00:00Z", statusDetails: "Delivered" });
   assert.equal(patch.delivered_at, "2026-11-10T15:00:00Z");
   assert.ok(patch.shipped_at);
+});
+
+test("Shippo tracking registration stays off until the store setting is on", async () => {
+  const calls = [];
+  const off = {
+    from() {
+      const chain = {
+        select() { return chain; },
+        eq() { return chain; },
+        limit: async () => ({ data: [{ value: false }], error: null }),
+      };
+      return chain;
+    },
+  };
+  const skipped = await registerOrderTracking(off, { id: "o1", tracking_number: "9400111899223344556677" }, {
+    registerTrack: async () => { calls.push("register"); return { object_id: "trk" }; },
+  });
+  assert.equal(skipped.skipped, "tracking_off");
+  assert.equal(calls.length, 0);
+
+  const on = {
+    from(table) {
+      const chain = {
+        select() { return chain; },
+        eq() { return chain; },
+        update() { return chain; },
+        limit: async () => ({ data: [{ value: true }], error: null }),
+      };
+      if (table === "web_orders") chain.limit = undefined;
+      return chain;
+    },
+  };
+  const registered = await registerOrderTracking(on, { id: "o1", tracking_number: "9400111899223344556677" }, {
+    registerTrack: async () => { calls.push("register"); return { object_id: "trk" }; },
+  });
+  assert.equal(registered.ok, true);
+  assert.deepEqual(calls, ["register"]);
 });
 
 test("return to sender flags the order and does not mark it delivered", () => {

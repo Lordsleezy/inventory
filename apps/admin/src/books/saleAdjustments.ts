@@ -150,6 +150,11 @@ export function applySaleLabelCosts(report: Report): Report {
 
   for (const l of report.labels || []) {
     if (l.voided_at) continue;
+    // pgg124-5 postage is already on the sale's ship cost. Do not list it again.
+    if (String(l.account || '').toLowerCase() === 'pgg124-5') {
+      if (l.order_id) dedupLabelIds.add(String(l.id));
+      continue;
+    }
     if (storeCheckoutLabel({}, l)) continue;
     const cents = Math.abs(Number(l.signed_amount_cents ?? l.cost_cents ?? 0));
     if (!cents) continue;
