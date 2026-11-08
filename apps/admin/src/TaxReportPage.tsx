@@ -121,7 +121,7 @@ export function TaxReportPage({ client, money, embedded, native }: Props) {
   const monthControl = <div className="report-actions"><label className="date-control">Month<input type="month" value={month} onChange={e => setMonth(e.target.value || thisMonth())} /></label>
     <div className="actions"><button className="secondary" disabled={!rows.length} onClick={csv}>Download CSV</button></div></div>;
   return <>
-    {!embedded && <header><div><div className="eyebrow">REPORTS</div><h1>Sales tax</h1><p>Sales, taxable sales and tax collected for the month, split by how it was sold. Refunds are sales canceled that month. Shipping fees are shown separately.</p></div>{monthControl}</header>}
+    {!embedded && <header><div><div className="eyebrow">REPORTS</div><h1>Sales tax</h1><p>Sales, taxable sales and tax collected for the month, split by how it was sold. Voided sales are left out. Shipping fees are shown separately.</p></div>{monthControl}</header>}
     {embedded && <div className="section-head" style={{ marginBottom: 12, flexWrap: 'wrap' }}><div><h2>Sales tax</h2><p className="hint" style={{ margin: 0 }}>Monthly tax collected and amount we owe (excluding marketplace-remitted).</p></div>{monthControl}</div>}
     {error && <div className="alert" role="alert">{error}</div>}
     {rows.length > 0 && <div className="stats"><div className="stat"><span>Tax we owe this month</span><strong>{money(taxWeOwe)}</strong></div><div className="stat"><span>Marketplace-remitted</span><strong>{money(sum('tax_cents') - taxWeOwe)}</strong></div><div className="stat"><span>Net sales</span><strong>{money(sum('sales_cents') - sum('refund_sales_cents'))}</strong></div></div>}
@@ -131,12 +131,12 @@ export function TaxReportPage({ client, money, embedded, native }: Props) {
         <tr className="total"><td>Total</td><td className="n">{money(sum('sales_cents'))}</td><td className="n">{money(sum('taxable_cents'))}</td><td className="n">{money(sum('sales_cents') - sum('taxable_cents'))}</td><td className="n">{money(sum('tax_cents'))}</td><td className="n">{money(sum('shipping_cents'))}</td></tr>
       </tbody></table>}
     </section>
-    <section className="panel"><h2>Refunds and cancellations</h2>
+    <section className="panel"><h2>Refunds</h2>
       {!rows.some(r => r.refund_count) ? <div className="empty">No refunds this month.</div> : <table className="tbl"><thead><tr><th>Sold as</th><th className="n">Refunds</th><th className="n">Refunded sales</th><th className="n">Refunded taxable</th><th className="n">Tax refunded</th><th className="n">Net tax</th></tr></thead><tbody>
         {rows.filter(r => r.refund_count).map(r => <tr key={r.category}><td>{label(r.category)}</td><td className="n">{r.refund_count}</td><td className="n">{money(r.refund_sales_cents)}</td><td className="n">{money(r.refund_taxable_cents)}</td><td className="n">{money(r.refund_tax_cents)}</td><td className="n">{money(net(r).tax)}</td></tr>)}
         <tr className="total"><td>Net after refunds</td><td className="n">{sum('refund_count')}</td><td className="n">{money(sum('sales_cents') - sum('refund_sales_cents'))} net sales</td><td className="n">{money(sum('taxable_cents') - sum('refund_taxable_cents'))} net taxable</td><td className="n">{money(sum('refund_tax_cents'))}</td><td className="n">{money(sum('tax_cents') - sum('refund_tax_cents'))}</td></tr>
       </tbody></table>}
-      <p className="hint">Taxable = sales that were charged sales tax. Website orders shipped out of state are charged no California tax. Confirm with your accountant how to report out-of-state and district tax.</p>
+      <p className="hint">A refund is money sent back on a sale that still stands. A void is left out of sales and out of this list. Taxable = sales that were charged sales tax. Website orders shipped out of state are charged no California tax. Confirm with your accountant how to report out-of-state and district tax.</p>
     </section>
   </>;
 }
