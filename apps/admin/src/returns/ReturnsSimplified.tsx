@@ -129,6 +129,13 @@ export function ReturnsSimplified({ client, storeId: _storeId, money, stamp, var
   useEffect(() => { void load(); }, [load]);
   useVisibleInterval(load, 60_000, true, false);
 
+  function selectSeg(next: Seg) {
+    if (next === seg) return;
+    setError('');
+    setRows(null);
+    setSeg(next);
+  }
+
   const loadTracking = useCallback(async (returnId: string) => {
     try {
       if (accessToken) {
@@ -414,14 +421,14 @@ export function ReturnsSimplified({ client, storeId: _storeId, money, stamp, var
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
-        <div className="returns-tabs" role="tablist">
-          <button type="button" role="tab" aria-selected={seg === 'open'} className={seg === 'open' ? 'active' : ''} onClick={() => setSeg('open')}>
+        <div className="returns-tabs" role="tablist" aria-label="Return filters">
+          <button type="button" role="tab" aria-selected={seg === 'open'} className={seg === 'open' ? 'active' : ''} onClick={() => selectSeg('open')}>
             Open{openCount > 0 ? ` ${openCount}` : ''}
           </button>
-          <button type="button" role="tab" aria-selected={seg === 'closed'} className={seg === 'closed' ? 'active' : ''} onClick={() => setSeg('closed')}>
+          <button type="button" role="tab" aria-selected={seg === 'closed'} className={seg === 'closed' ? 'active' : ''} onClick={() => selectSeg('closed')}>
             Closed
           </button>
-          <button type="button" role="tab" aria-selected={seg === 'replacements'} className={seg === 'replacements' ? 'active' : ''} onClick={() => setSeg('replacements')}>
+          <button type="button" role="tab" aria-selected={seg === 'replacements'} className={seg === 'replacements' ? 'active' : ''} onClick={() => selectSeg('replacements')}>
             Replacements
           </button>
         </div>
