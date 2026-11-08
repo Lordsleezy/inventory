@@ -25,7 +25,6 @@ export function addReportTitle(
   periodLabel: string,
   generated: Date,
   colCount: number,
-  tieWarning?: string,
 ) {
   const title = `Open Box Industries — ${sheetName} — ${periodLabel}`;
   ws.addRow([title]);
@@ -37,13 +36,6 @@ export function addReportTitle(
   const gen = ws.addRow([`Generated ${generated.toLocaleString('en-US', { timeZone: 'America/Los_Angeles' })}`]);
   ws.mergeCells(2, 1, 2, colCount);
   gen.getCell(1).alignment = { wrapText: true, vertical: 'middle', horizontal: 'left' };
-  if (tieWarning) {
-    const w = ws.addRow([`These numbers don't tie: ${tieWarning}`]);
-    ws.mergeCells(w.number, 1, w.number, colCount);
-    w.getCell(1).alignment = { wrapText: true, vertical: 'top' };
-    w.font = { bold: true, color: { argb: 'FFFF9F0A' } };
-    w.height = Math.min(120, 15 + tieWarning.length / 8);
-  }
   ws.addRow([]);
 }
 

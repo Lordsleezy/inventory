@@ -32,7 +32,6 @@ export async function buildBooksExcel(period: Period, wb: BooksWorkbook, label: 
   x.subject = label;
   const periodLabel = formatPeriodTitle(period.period_start);
   const generated = new Date();
-  const warn = tieWarning(wb);
 
   const wsS = x.addWorksheet('Sales');
   const salesHeader = [
@@ -42,7 +41,7 @@ export async function buildBooksExcel(period: Period, wb: BooksWorkbook, label: 
   const salesCols = salesHeader.length;
   const salesWidths = [14, 10, 38, 14, 16, 12, 11, 18, 12, 20, 20, 11, 11, 12, 40];
   setColumnWidths(wsS, salesWidths);
-  addReportTitle(wsS, 'Sales', periodLabel, generated, salesCols, warn);
+  addReportTitle(wsS, 'Sales', periodLabel, generated, salesCols);
   fitTitleRows(wsS, salesCols, salesWidths);
   const hS = wsS.rowCount + 1;
   wsS.addRow(salesHeader);
