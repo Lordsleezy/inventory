@@ -48,22 +48,20 @@ export function AssociateSettings({ client, displayName }: Props) {
         <p>Signed in as {displayName}. Change your portal password here.</p>
       </div>
     </header>
-    <section className="panel">
+    <section className="panel associate-settings">
       <h2>Change password</h2>
-      <form className="payment-form" style={{ maxWidth: 360 }} onSubmit={e => void save(e)}>
+      <form className="associate-password" noValidate onSubmit={e => void save(e)}>
         <label>New password
-          <input type="password" autoComplete="new-password" value={password} onChange={e => setPassword(e.target.value)} required />
+          <input type="password" autoComplete="new-password" value={password} onChange={e => setPassword(e.target.value)} />
         </label>
         <label>Confirm password
-          <input type="password" autoComplete="new-password" value={confirm} onChange={e => setConfirm(e.target.value)} required />
+          <input type="password" autoComplete="new-password" value={confirm} onChange={e => setConfirm(e.target.value)} />
         </label>
-        <button disabled={busy}>{busy ? 'Saving…' : 'Update password'}</button>
+        <button type="submit" disabled={busy}>{busy ? 'Saving…' : 'Update password'}</button>
       </form>
-      {error && <p className="error" style={{ marginTop: 12 }}>{error}</p>}
-      {ok && <p className="hint" style={{ marginTop: 12 }}>{ok}</p>}
-      <p className="hint" style={{ marginTop: 16 }}>
-        Sign in with clock number <strong>1111</strong> and your password (no email needed).
-      </p>
+      {error && <p className="error">{error}</p>}
+      {ok && <p className="hint">{ok}</p>}
+      <p className="hint">Sign in with clock number <strong>1111</strong> and your password. No email is needed.</p>
     </section>
   </>;
 }

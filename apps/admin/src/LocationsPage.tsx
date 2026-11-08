@@ -24,6 +24,8 @@ type Props = {
   client: SupabaseClient;
   storeId: string;
   canManage?: boolean;
+  /** Staff may add a new bay. Editing or deleting an existing bay stays with an admin. */
+  canAddBay?: boolean;
   variant?: 'app' | 'desktop';
   onBack?: () => void;
   backLabel?: string;
@@ -57,7 +59,7 @@ function rowsLabel(count: number) {
 }
 
 export function LocationsPage({
-  client, storeId, canManage = true, variant = 'desktop', onBack, backLabel = 'More',
+  client, storeId, canManage = true, canAddBay = false, variant = 'desktop', onBack, backLabel = 'More',
   accessToken, money, onOpenSku, onSellInStore,
 }: Props) {
   const phone = variant === 'app';
@@ -406,7 +408,7 @@ export function LocationsPage({
     );
   }
 
-  if (screen === 'edit' && canManage) {
+  if (screen === 'edit' && (canManage || (canAddBay && creating))) {
     const no = Number(editNo);
     const blocked = Number.isInteger(no) ? layoutBlocked(no, editRows, locations) : null;
     return frame(creating ? 'New bay' : `Edit bay ${editNo}`, '0 bins makes the row a Floor spot for large items.', (
@@ -529,11 +531,11 @@ export function LocationsPage({
 
   return (
     <>
-      {frame('Locations', undefined, canManage ? (
+      {frame('Locations', undefined, (canManage || canAddBay) ? (
         <button type="button" className="loc-action" disabled={!loaded || busy} onClick={startCreate}>New bay</button>
       ) : null, (
         loaded && bays.length === 0 ? (
-          <p className={phone ? 'app-footer-count' : 'hint'}>No bays yet.{canManage ? ' Tap New bay to add the first one.' : ''}</p>
+          <p className={phone ? 'app-footer-count' : 'hint'}>No bays yet.{(canManage || canAddBay) ? ' Tap New bay to add the first one.' : ''}</p>
         ) : (
           <div className={group}>
             {bays.map((item) => rowButton(

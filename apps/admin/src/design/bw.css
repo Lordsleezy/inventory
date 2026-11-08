@@ -204,6 +204,24 @@ html.dark .alert {
 }
 
 .inv-pair-desk { display: grid; grid-template-columns: 1fr 1fr; max-width: 520px; margin: 0 0 16px; }
+.inv-pair-desk.inv-pair-one { grid-template-columns: max-content; }
+
+.associate-settings { max-width: 420px; }
+.associate-password {
+  display: grid;
+  gap: 16px;
+  margin-top: 8px;
+}
+.associate-password label {
+  display: grid;
+  gap: 6px;
+  color: #9a9a9a;
+  font-size: 0.85rem;
+}
+.associate-password input { width: 100%; box-sizing: border-box; }
+.associate-password button { justify-self: start; min-height: 44px; }
+.associate-settings .error,
+.associate-settings .hint { margin-top: 14px; }
 .inv-pair-desk > div { display: grid; gap: 2px; padding: 8px 16px; }
 .inv-pair-desk > div + div { border-left: 1px solid #2a2a2a; }
 .inv-pair-desk span { color: #9a9a9a; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; }

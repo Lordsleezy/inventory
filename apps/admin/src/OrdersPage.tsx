@@ -71,6 +71,8 @@ type Props = {
   frozen?: Map<string, number | null>;
   personName: (id: string) => string; busy: boolean;
   onCommissionChanged: (ticketKey: string, next: CommissionOverride | null) => void;
+  /** Staff desk: To ship and Packaged only. Mark packaged, print a label, scan out. */
+  packOnly?: boolean;
 };
 
 function timeLeft(deadline: string | null, now: number) {
@@ -131,7 +133,7 @@ function breakdown(rows: WebOrder[]) {
   };
 }
 
-export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, cfg, commissionOverrides, frozen, personName, busy: parentBusy, onCommissionChanged }: Props) {
+export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, cfg, commissionOverrides, frozen, personName, busy: parentBusy, onCommissionChanged, packOnly = false }: Props) {
   const [orders, setOrders] = useState<WebOrder[] | null>(null);
   const [photoMap, setPhotoMap] = useState<Record<string, UnitPhoto[]>>({});
   const [photoUrls, setPhotoUrls] = useState<Record<string, string>>(() => {
@@ -151,7 +153,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
   const [error, setError] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
-  const [view, setView] = useState<OrderView>('all');
+  const [view, setView] = useState<OrderView>(packOnly ? 'toShip' : 'all');
   const [openId, setOpenId] = useState<string | null>(null);
   const [revealed, setRevealed] = useState<Set<string>>(() => new Set());
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
@@ -175,6 +177,9 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
     }
   }, [client, storeId]);
   const sign = useCallback((paths: string[]) => signPhotoUrls(client, paths), [client]);
+  useEffect(() => {
+    if (packOnly && view !== 'toShip' && view !== 'packaged') setView('toShip');
+  }, [packOnly, view]);
   useVisibleInterval(load, 60_000);
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 30000); return () => clearInterval(t); }, []);
 
@@ -474,7 +479,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
       : <button type="button" className="text-button" onClick={() => setRevealed((prev) => new Set(prev).add(o.id))}>Reveal</button>)}
     <small>Item {money(o.item_cents)}{orderFee(o) ? ` · Fees ${money(orderFee(o))}` : ''} · {o.fulfillment === 'ship' ? `Buyer ship ${money(o.shipping_cents)}` : 'Store pickup'}{o.fulfillment === 'ship' ? ` · Label ${o.label_cost_cents != null ? money(o.label_cost_cents) : '—'}` : ''} · Tax {money(o.tax_cents)}</small>
     <CommissionOverrideMark overridden={!!ov} />
-    {canOverride && o.ticket_key && (
+    {!packOnly && canOverride && o.ticket_key && (
       <details>
         <summary>Commission split</summary>
         <CommissionOverrideControls
@@ -532,14 +537,33 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
           <OrderTitle title={displayTitle} />
           <p>{channelLabel(o.channel)} · {money(o.item_cents)} · {o.paid_at ? stamp(o.paid_at) : stamp(o.created_at)}</p>
         </div>
-        <OrderFindRow picker="button" sku={o.sku} code={locations[o.sku]?.[0] || ''} options={locationOptions} disabled={!!busy} onChange={(code) => void setPickLocation(o, code)} />
+        <OrderFindRow picker="button" sku={o.sku} code={locations[o.sku]?.[0] || ''} options={locationOptions} disabled={!!busy || packOnly} onChange={(code) => void setPickLocation(o, code)} />
         <div className="order-card-summary">{thumb && <img className="app-order-thumb" src={thumb} alt="" />}<div className="order-card-info"><small>{channelLabel(o.channel)} · {money(o.item_cents)} · SKU {o.sku}</small><div className="order-card-tags"><b className={chip.tone === 'warn' ? 'badge-warn' : ''}>{cardStatus}</b></div></div></div>
         {o.fulfillment === 'ship' && !isCanceled && <OrderStepper stage={stage} />}
         <OrderFacts label={labelText} labeled={labeled} order={o} />
         {o.tracking_exception && <div className="alert" role="status">Carrier exception: {o.tracking_exception}</div>}
         {(isPackaged || isShipped || isDone) && <OrderTimelineList rows={orderTimeline(o, trackEvents[o.id])} stamp={stamp} />}
         {head(o)}{item(o)}
-        {isToShip && (
+        {isToShip && packOnly && (
+          <>
+            <div className="order-address">{[o.buyer_name, o.ship_line1, o.ship_line2, [o.ship_city, o.ship_region, o.ship_postal].filter(Boolean).join(', ')].filter(Boolean).join(' · ')}</div>
+            {((o.channel || '').toLowerCase() === 'amazon' || (o.channel || '').toLowerCase() === 'tiktok') && (
+              <div className="actions">
+                <span className="hint">Pack proof (required)</span>
+                <label className="secondary" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 14px', border: '1px solid var(--btn-border)', borderRadius: 8, cursor: 'pointer' }}>
+                  {busy === o.id + 'proof' ? 'Uploading…' : o.pack_proof_photo_path ? 'Replace unit photo' : 'Photo of unit'}
+                  <input type="file" accept="image/*" capture="environment" hidden disabled={!!busy} onChange={(e) => { const f = e.target.files?.[0]; if (f) void uploadPackProof(o, f); e.target.value = ''; }} />
+                </label>
+              </div>
+            )}
+            <div className="actions">
+              {labeled && <button type="button" disabled={!!busy} onClick={() => void printOrderLabel(o)}>Print 4×6</button>}
+              <button className="primary" disabled={!!busy} onClick={() => void markPackaged(o)}>{busy === o.id + 'packaged' ? 'Saving…' : 'Packaged'}</button>
+            </div>
+            <p className="hint">Print the label, then mark it packaged. Scan it out from Packaged when it is picked up.</p>
+          </>
+        )}
+        {isToShip && !packOnly && (
           <>
             <div className="order-address">{[o.buyer_name, o.ship_line1, o.ship_line2, [o.ship_city, o.ship_region, o.ship_postal].filter(Boolean).join(', ')].filter(Boolean).join(' · ')}</div>
             {o.refund_requested_at ? <p className="hint">Cancel & refund in progress…</p> : <>
@@ -587,7 +611,16 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
             <p className="hint">Tap Packaged once it's boxed and labeled. Then tap Mark shipped when it leaves.</p></>}
           </>
         )}
-        {isPackaged && (
+        {isPackaged && packOnly && (
+          <>
+            <small>Packaged {o.packaged_at ? stamp(o.packaged_at) : ''}{o.packaged_by_name ? ` · ${o.packaged_by_name}` : ''}</small>
+            <div className="actions">
+              {labeled && <button type="button" disabled={!!busy} onClick={() => void printOrderLabel(o)}>Print 4×6</button>}
+            </div>
+            <p className="hint">Use Scan out pickup when someone picks the packages up.</p>
+          </>
+        )}
+        {isPackaged && !packOnly && (
           <>
             <small>Packaged {o.packaged_at ? stamp(o.packaged_at) : ''}{o.packaged_by_name ? ` · ${o.packaged_by_name}` : ''}{packagedStale(o) ? ' · not marked shipped for 2 days' : ''}</small>
             <div className="actions">
@@ -598,7 +631,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
             <p className="hint">Mark shipped when it leaves the building. That records who tapped it.</p>
           </>
         )}
-        {isShipped && (
+        {!packOnly && isShipped && (
           <>
             <small>Shipped {stamp(o.shipped_at!)}{o.shipped_by_name ? ` · ${o.shipped_by_name}` : ''}{shippedStale(o) ? ' · not marked delivered for 10 days' : ''}</small>
             {o.scanned_out_at && <small>Scanned out {stamp(o.scanned_out_at)}{o.scanned_out_by_name ? ` by ${o.scanned_out_by_name}` : ''}</small>}
@@ -611,7 +644,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
             </div>}
           </>
         )}
-        {isPickup && (
+        {!packOnly && isPickup && (
           <>
             <div className={`countdown${o.pickup_deadline && new Date(o.pickup_deadline).getTime() - now < 86400000 ? ' urgent' : ''}`}>Pick up by {o.pickup_deadline ? stamp(o.pickup_deadline) : '—'} · {timeLeft(o.pickup_deadline, now)}</div>
             {o.refund_requested_at ? <p className="hint">Cancel & refund in progress…</p> : <div className="actions">
@@ -621,7 +654,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
             </div>}
           </>
         )}
-        {isDone && (
+        {!packOnly && isDone && (
           <>
             <small>{o.picked_up_at ? `Picked up ${stamp(o.picked_up_at)} · ${o.picked_up_by || ''}` : `Delivered ${stamp(o.delivered_at!)}${o.delivered_by_name ? ` · ${o.delivered_by_name}` : ''}${o.shipped_at ? ` · shipped ${stamp(o.shipped_at)}` : ''}`}</small>
             <div className="actions">
@@ -630,7 +663,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
             </div>
           </>
         )}
-        {isCanceled && (
+        {!packOnly && isCanceled && (
           <>
             <small>{o.cancel_source === 'pickup_expired' ? 'Not picked up by the deadline' : o.cancel_source === 'admin' ? `Canceled in admin${o.cancel_reason ? `: ${o.cancel_reason}` : ''}` : o.cancel_source === 'ebay_api' ? `Canceled on eBay${o.cancel_reason ? `: ${o.cancel_reason}` : ''}` : o.status === 'refunded' ? 'Refunded' : o.status === 'canceled' ? `Canceled${o.cancel_reason ? `: ${o.cancel_reason}` : ''}` : 'Could not complete; refunded automatically'}{o.canceled_at ? ` · ${stamp(o.canceled_at)}` : ''}</small>
             <div className="actions">
@@ -638,7 +671,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
             </div>
           </>
         )}
-        {isNeeds && (
+        {!packOnly && isNeeds && (
           <div className="actions">
             <label className="primary" style={{ display: 'inline-flex', alignItems: 'center', padding: '10px 14px', borderRadius: 8, cursor: 'pointer' }}>
               {busy === o.id + 'upload' ? 'Uploading…' : o.label_storage_path ? 'Replace label' : 'Upload label'}
@@ -648,7 +681,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
             {o.marketplace_tracking_number && !o.label_storage_path && <span className="hint">eBay already has tracking {o.marketplace_tracking_number}. Upload the PDF.</span>}
           </div>
         )}
-        {!isNeeds && !isToShip && !isPackaged && !isShipped && !isPickup && !isDone && !isCanceled && (
+        {!packOnly && !isNeeds && !isToShip && !isPackaged && !isShipped && !isPickup && !isDone && !isCanceled && (
           <div className="actions">
             <button className="text-button danger" disabled={!!busy} onClick={() => void deleteOrder(o)}>{busy === o.id + 'delete' ? 'Deleting…' : 'Delete'}</button>
           </div>
@@ -662,11 +695,14 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
   }
 
   return <>
-    <header><div><div className="eyebrow">WEBSITE AND MARKETPLACES</div><h1>Orders</h1><p>Every online order since day one. Returns, refunds, and replacements are on the Returns tab. No customer emails. Refreshes every 30 seconds.</p></div>
+    <header><div><div className="eyebrow">WEBSITE AND MARKETPLACES</div><h1>Orders</h1><p>{packOnly ? 'To ship and packaged only. Mark packaged, print the label, then scan out when the packages are picked up.' : 'Every online order since day one. Returns, refunds, and replacements are on the Returns tab. No customer emails. Refreshes every 30 seconds.'}</p></div>
       <div className="actions"><button className="secondary" onClick={() => void load()}>Refresh</button></div></header>
     {error && <div className="alert" role="alert">{error}<button onClick={() => setError('')}>Dismiss</button></div>}
     <div className="inventory-tabs" role="tablist" aria-label="Order status">
-      {([
+      {(packOnly ? [
+        ['toShip', groups.toShip.length],
+        ['packaged', groups.packaged.length],
+      ] as const : [
         ['all', groups.all.length],
         ['needsLabel', groups.needsLabel.length],
         ['toShip', groups.toShip.length],
@@ -680,7 +716,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
         </button>
       ))}
     </div>
-    <div className="actions" style={{ marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+    {!packOnly && <div className="actions" style={{ marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
       <label>Status{' '}
         <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as StatusFilter)} aria-label="Order status filter">
           <option value="all">All statuses</option>
@@ -690,7 +726,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
         </select>
       </label>
       <span className="hint">{rawCount} loaded (no cancelled hide; 400-day window)</span>
-    </div>
+    </div>}
     {orders === null && <p className="hint">Loading orders…</p>}
 
     {view === 'packaged' && (
