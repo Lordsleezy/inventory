@@ -63,4 +63,4 @@ async function handle(event) {
   });
 }
 
-export const handler = netlifyHandler("dropship-everyday-deals", handle);
+export default netlifyHandler("dropship-everyday-deals", handle);

@@ -1,4 +1,5 @@
 import { formatCents, formatCentsTotal } from "./money.ts";
+import { displayProductTitle } from "./product-name.ts";
 import type { Sale, Settings, Unit } from "./store.ts";
 
 export type Receipt = {
@@ -32,8 +33,12 @@ export function buildReceipt(sale: Sale, unit: Unit | null, settings: Settings):
     customerName: sale.customerName,
     customerPhone: sale.customerPhone,
     sku: sale.sku,
-    description:
-      [unit?.brand, unit?.model].filter(Boolean).join(" ") || unit?.title || "Item",
+    description: displayProductTitle({
+      title: unit?.title,
+      brand: unit?.brand,
+      model: unit?.model,
+      fallback: "Item",
+    }),
     condition: unit?.condition ?? null,
     priceCents: sale.priceCents,
     taxCents,

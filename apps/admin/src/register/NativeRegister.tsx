@@ -9,7 +9,7 @@ import {
   type RefObject,
   type SetStateAction,
 } from 'react';
-import { centsToInput, formatCents, formatCentsTotal, parseMoneyToCents } from '@floor/store';
+import { centsToInput, displayProductTitle, formatCents, formatCentsTotal, parseMoneyToCents } from '@floor/store';
 import type { Customer, TicketQuote, TicketSummary } from '@floor/cloud';
 import { cardFeeCents } from '@floor/cloud';
 import type { CartLine } from './cart';
@@ -302,7 +302,7 @@ export function NativeRegisterCart(props: NativeRegisterProps) {
               {hits.map(u => (
                 <button key={u.sku} type="button" className="nr-hit" onClick={() => addFromSearch(u)}>
                   <span>
-                    <strong>{[u.brand, u.model].filter(Boolean).join(' ') || u.title}</strong>
+                    <strong>{displayProductTitle({ title: u.title, brand: u.brand, model: u.model })}</strong>
                     <small>SKU {u.sku}{u.condition ? ` · ${u.condition}` : ''}</small>
                   </span>
                   <span>{formatCents(u.askCents) || '—'}</span>

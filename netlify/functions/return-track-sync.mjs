@@ -37,5 +37,5 @@ async function handle(event) {
   return json(200, result);
 }
 
-export const handler = asNetlifyFunction(handle);
+export default asNetlifyFunction(handle);
 export const invoke = wrapHandler("return-track-sync", handle);

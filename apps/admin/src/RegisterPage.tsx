@@ -1,5 +1,5 @@
 import React, { Component, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
-import { centsToInput, formatCents, formatCentsTotal, parseMoneyToCents } from '@floor/store';
+import { centsToInput, displayProductTitle, formatCents, formatCentsTotal, parseMoneyToCents } from '@floor/store';
 import {
   SellError,
   allocateLineTaxes,
@@ -906,7 +906,7 @@ function RegisterInner({ staffSession, onNeedFullReload, variant = 'desktop' }: 
                 <button key={u.sku} type="button" className="search-hit" onClick={() => addFromSearch(u)}>
                   <span>
                     <strong>{u.sku}</strong>
-                    <div>{[u.brand, u.model].filter(Boolean).join(' ') || u.title}</div>
+                    <div>{displayProductTitle({ title: u.title, brand: u.brand, model: u.model })}</div>
                   </span>
                   <span className="price">{formatCents(u.askCents) || '—'}</span>
                 </button>

@@ -134,5 +134,5 @@ async function handle(event) {
   return json(400, { error: "unknown_action" });
 }
 
-export const handler = asNetlifyFunction(handle);
+export default asNetlifyFunction(handle);
 export const invoke = wrapHandler("ebay-returns", handle);

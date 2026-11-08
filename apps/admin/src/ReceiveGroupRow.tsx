@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { displayProductTitle } from '@floor/store';
 import bwipjs from 'bwip-js/browser';
 export type GroupMember = { sku: string; title: string; state: string; condition: string | null; ask_cents: number | null; sold_price_cents?: number | null; missing?: string[]; defective?: boolean; not_for_sale?: boolean };
 export type GroupedInventory = { group_id?: string | null; group_total?: number; group_in_stock?: number; group_skus?: string[]; group_members?: GroupMember[] };
@@ -55,7 +56,7 @@ export function ReceiveGroupRow({item,client,admin,money,onOpen,onChanged,search
     }
     setBusy(false);if(done){setGroupAction(null);setGivenTo('');onChanged();}
   }
-  return <details className="receive-inventory-group" style={{padding:16,borderBottom:'1px solid #444'}} open={expanded} onToggle={e=>{if(e.currentTarget.open)void loadMembers();else setExpanded(false)}}><summary style={{cursor:'pointer',minHeight:48,fontWeight:700}}>{item.title || [item.brand,item.model].filter(Boolean).join(' ')} ×{item.group_total} ({item.group_in_stock} in stock)</summary>
+  return <details className="receive-inventory-group" style={{padding:16,borderBottom:'1px solid #444'}} open={expanded} onToggle={e=>{if(e.currentTarget.open)void loadMembers();else setExpanded(false)}}><summary style={{cursor:'pointer',minHeight:48,fontWeight:700}}>{displayProductTitle({ title: item.title, brand: item.brand, model: item.model })} ×{item.group_total} ({item.group_in_stock} in stock)</summary>
     <small>{members.length} of {groupTotal} group units shown. Each SKU sells and edits separately.</small>
     {busy&&members.length<groupTotal&&<p role="status">Loading all units…</p>}
     {members.map(unit=><button type="button" className={`app-row inventory-row${unit.sku===matchingSku?' receive-group-match':''}`} key={unit.sku} onClick={()=>onOpen(unit.sku,unit.missing)}><span>SKU {unit.sku} · {unit.condition||'No grade'} · {unit.state}{unit.sku===matchingSku&&<small>Search match</small>}<small style={{display:'block',color:'#f59e0b'}}>{unit.missing?.length ? 'Missing: '+unit.missing.join(', ') : ''}</small></span><span>{unit.state==='sold' ? admin && unit.sold_price_cents != null ? money(unit.sold_price_cents) : '' : unit.ask_cents==null?'—':money(unit.ask_cents)}</span></button>)}

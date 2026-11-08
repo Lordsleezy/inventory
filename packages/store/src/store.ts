@@ -1,6 +1,7 @@
 import { DEFAULT_SETTINGS, PRAGMAS, SCHEMA, SCHEMA_VERSION } from "./schema.ts";
 import { FloorError, translateDbError, type Db, type SqlValue } from "./db.ts";
 import { needsWebsiteWeight } from "./listing-copy.ts";
+import { displayProductTitle } from "./product-name.ts";
 
 export type UnitState =
   | "available"
@@ -371,7 +372,12 @@ export async function receiveUnit(db: Db, input: ReceiveInput): Promise<Unit> {
   const digits = (await loadSettings(db)).skuDigits || 5;
   if (!isSku(sku, digits)) throw new FloorError(`A SKU is ${digits} digits.`, "invalid");
 
-  const label = [input.brand, input.model].filter(Boolean).join(" ") || input.title || "";
+  const label = displayProductTitle({
+    title: input.title,
+    brand: input.brand,
+    model: input.model,
+    fallback: "",
+  });
   const stamp = now();
 
   try {

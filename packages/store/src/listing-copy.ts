@@ -1,3 +1,5 @@
+import { displayProductTitle } from "./product-name.ts";
+
 export type ListingSpecs = {
   matched_model?: string | null;
   height_in?: string | null;
@@ -118,9 +120,13 @@ export function composeChannelDescription(input: {
   const parts: string[] = [];
   if (body) parts.push(body);
   else {
-    const name = [input.brand, input.model].filter((p) => String(p || "").trim()).join(" ").trim();
+    const name = displayProductTitle({
+      title: input.title,
+      brand: input.brand,
+      model: input.model,
+      fallback: "",
+    });
     if (name) parts.push(name);
-    if (input.title?.trim() && input.title.trim() !== name) parts.push(input.title.trim());
     const specLines: string[] = [];
     const cap = capacityLine(input.specs);
     const size = sizeLine(input.specs);

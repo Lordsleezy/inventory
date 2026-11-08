@@ -23,7 +23,7 @@ import { ReceiveCategoryAspects, type ReceiveAspectState } from './ReceiveCatego
 import { CategoryPanel } from './CategoryPanel';
 import { EbaySpecificsPanel } from './EbaySpecificsPanel';
 import { isCompleteReceiveTitle, isStoreLabelBarcode, storeLabelWarning } from '../../../shared/store-barcode.mjs';
-import { cleanProductIdentity } from '@floor/store';
+import { cleanProductIdentity, withoutBrand } from '@floor/store';
 
 /** iOS/Android PWA: prefer native capture over getUserMedia (more reliable in standalone). */
 function preferNativeCapture() {
@@ -303,7 +303,7 @@ function itemSpecificsFromLookup(m?: Lookup['merged']): string {
  */
 function composeListingTitle(brand: string, model: string, unbranded: boolean): string {
   const b = unbranded ? '' : brand.trim();
-  const m = model.trim();
+  const m = withoutBrand(model.trim(), b).replace(/\s+/g, ' ').trim();
   return [b, m].filter(Boolean).join(' ');
 }
 
