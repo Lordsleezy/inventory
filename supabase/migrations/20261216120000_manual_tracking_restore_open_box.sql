@@ -18,7 +18,7 @@ alter table public.web_orders
   add column if not exists delivered_by_name text;
 
 create or replace function public.portal_mark_order_shipped(p_order uuid)
-returns jsonb language plpgsql security definer set search_path = public as $$
+returns void language plpgsql security definer set search_path = public as $$
 declare
   v_store uuid := coalesce(public.portal_store_id(), public.current_store_id());
   o public.web_orders;
@@ -34,7 +34,7 @@ begin
   if o.packaged_at is null then raise exception 'order_not_packaged' using errcode = 'P0001'; end if;
   if o.delivered_at is not null then raise exception 'order_already_delivered' using errcode = 'P0001'; end if;
   if o.shipped_at is not null then
-    return jsonb_build_object('id', o.id, 'shipped_at', o.shipped_at, 'shipped_by_name', o.shipped_by_name, 'already', true);
+    return;
   end if;
   v_name := public.disposition_actor_name(auth.uid());
   update public.web_orders set
@@ -47,11 +47,10 @@ begin
   insert into public.events(store_id, sku, kind, field, new_value, actor, actor_id, note)
   values (v_store, o.sku, 'edit', 'order_marked_shipped', v_at::text, v_name, auth.uid(),
     format('Order %s marked shipped.', coalesce(o.order_no, o.id::text)));
-  return jsonb_build_object('id', o.id, 'shipped_at', v_at, 'shipped_by_name', v_name, 'already', false);
 end $$;
 
 create or replace function public.portal_mark_order_delivered(p_order uuid)
-returns jsonb language plpgsql security definer set search_path = public as $$
+returns void language plpgsql security definer set search_path = public as $$
 declare
   v_store uuid := public.portal_store_id();
   o public.web_orders;
@@ -68,7 +67,7 @@ begin
   end if;
   if o.shipped_at is null then raise exception 'order_not_shipped' using errcode = 'P0001'; end if;
   if o.delivered_at is not null then
-    return jsonb_build_object('id', o.id, 'delivered_at', o.delivered_at, 'delivered_by_name', o.delivered_by_name, 'already', true);
+    return;
   end if;
   v_name := public.disposition_actor_name(auth.uid());
   update public.web_orders set
@@ -81,7 +80,6 @@ begin
   insert into public.events(store_id, sku, kind, field, new_value, actor, actor_id, note)
   values (v_store, o.sku, 'edit', 'order_marked_delivered', v_at::text, v_name, auth.uid(),
     format('Order %s marked delivered.', coalesce(o.order_no, o.id::text)));
-  return jsonb_build_object('id', o.id, 'delivered_at', v_at, 'delivered_by_name', v_name, 'already', false);
 end $$;
 
 revoke all on function public.portal_mark_order_shipped(uuid) from public, anon;
