@@ -28,6 +28,7 @@ export type StageOrder = {
 };
 
 const TWO_DAYS = 2 * 86400000;
+const TEN_DAYS = 10 * 86400000;
 
 export function canBuyLabel(channel?: string | null) {
   const ch = (channel || 'website').toLowerCase();
@@ -74,6 +75,30 @@ export function packagedStale(o: StageOrder, now = Date.now()) {
   return now - at > TWO_DAYS;
 }
 
+export function shippedStale(o: StageOrder, now = Date.now()) {
+  if (!o.shipped_at || o.delivered_at) return false;
+  const at = new Date(o.shipped_at).getTime();
+  if (!Number.isFinite(at)) return false;
+  return now - at > TEN_DAYS;
+}
+
+/** Public carrier page. A person opens it. Floor does not call a tracking API. */
+export function carrierTrackUrl(tracking?: string | null, carrier?: string | null) {
+  const raw = String(tracking || '').replace(/\s+/g, '');
+  if (raw.length < 8) return null;
+  const n = encodeURIComponent(raw);
+  const t = raw.toUpperCase();
+  const named = String(carrier || '').toLowerCase();
+  if (named.includes('ups') || /^1Z/.test(t)) return `https://www.ups.com/track?tracknum=${n}`;
+  if (named.includes('fedex')) return `https://www.fedex.com/fedextrack/?trknbr=${n}`;
+  if (named.includes('usps') || named.includes('postal')) return `https://tools.usps.com/go/TrackConfirmAction?tLabels=${n}`;
+  if (/^(94|93|92|91|82|83|84|85|70|61|62|63|64|65|66|67|68|69|420)/.test(t)) {
+    return `https://tools.usps.com/go/TrackConfirmAction?tLabels=${n}`;
+  }
+  if (/^\d{12,22}$/.test(t)) return `https://www.fedex.com/fedextrack/?trknbr=${n}`;
+  return `https://tools.usps.com/go/TrackConfirmAction?tLabels=${n}`;
+}
+
 export function trackingTail(o: StageOrder) {
   const n = String(o.tracking_number || '').replace(/\s+/g, '');
   if (n.length < 4) return '';
@@ -95,7 +120,10 @@ export function orderChip(o: StageOrder, now = Date.now()): { text: string; tone
   if (stage === 'delivered') {
     return { text: o.picked_up_at && !o.delivered_at ? 'Picked up' : 'Delivered', tone: 'muted' };
   }
-  if (stage === 'shipped') return { text: 'Shipped', tone: 'ok' };
+  if (stage === 'shipped') {
+    if (shippedStale(o, now)) return { text: 'Not delivered · 10+ days', tone: 'warn' };
+    return { text: 'Shipped', tone: 'ok' };
+  }
   if (stage === 'needsLabel') {
     if (o.label_tracking_mismatch) return { text: "Wrong label · doesn't match eBay", tone: 'warn' };
     const ch = (o.channel || '').toLowerCase();
@@ -103,9 +131,9 @@ export function orderChip(o: StageOrder, now = Date.now()): { text: string; tone
     return { text: 'Upload label', tone: 'warn' };
   }
   if (stage === 'packaged') {
-    if (packagedStale(o, now)) return { text: 'No scan · 2+ days', tone: 'warn' };
+    if (packagedStale(o, now)) return { text: 'Not marked shipped · 2+ days', tone: 'warn' };
     const t = o.packaged_at ? clock(o.packaged_at) : '';
-    return { text: t ? `Packaged ${t} · waiting on scan` : 'Packaged · waiting on scan', tone: 'blue' };
+    return { text: t ? `Packaged ${t}` : 'Packaged', tone: 'blue' };
   }
   if (hasLabel(o)) return { text: 'Label ready · Print', tone: 'ok' };
   if (canBuyLabel(o.channel)) return { text: 'Buy label', tone: 'warn' };
@@ -117,6 +145,8 @@ export type TimelineRow = { title: string; detail: string; at: string | null; to
 export function orderTimeline(o: StageOrder & {
   label_file_name?: string | null;
   packaged_by_name?: string | null;
+  shipped_by_name?: string | null;
+  delivered_by_name?: string | null;
   service?: string | null;
 }, events: { status?: string; status_detail?: string | null; location?: string | null; occurred_at?: string | null }[] = []): TimelineRow[] {
   const rows: TimelineRow[] = [];
@@ -142,6 +172,13 @@ export function orderTimeline(o: StageOrder & {
       at: o.packaged_at,
     });
   }
+  if (o.shipped_at) {
+    rows.push({
+      title: 'Shipped',
+      detail: o.shipped_by_name ? `by ${o.shipped_by_name}` : 'Marked shipped',
+      at: o.shipped_at,
+    });
+  }
   for (const ev of events) {
     const status = String(ev.status || '').toUpperCase();
     const title = status === 'DELIVERED' ? 'Delivered'
@@ -157,7 +194,12 @@ export function orderTimeline(o: StageOrder & {
     });
   }
   if (o.delivered_at && !rows.some((r) => r.title === 'Delivered')) {
-    rows.push({ title: 'Delivered', detail: 'Carrier confirmed', at: o.delivered_at, tone: 'ok' });
+    rows.push({
+      title: 'Delivered',
+      detail: o.delivered_by_name ? `by ${o.delivered_by_name}` : 'Marked delivered',
+      at: o.delivered_at,
+      tone: 'ok',
+    });
   }
   return rows.sort((a, b) => {
     const ta = a.at ? new Date(a.at).getTime() : 0;

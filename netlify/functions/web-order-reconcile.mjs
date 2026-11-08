@@ -26,8 +26,7 @@ async function handle(event) {
       results.push({ id: order.id, status: 503 });
     }
   }
-  // Register tracking numbers with Shippo so track_updated webhooks can move
-  // Packaged → Shipped → Delivered. This does not poll carrier status.
+  // Shippo tracking registration. No-ops while store setting shippo_tracking is off.
   const orderTracks = await registerPendingOrderTracks(sb, 20).catch((err) => ({ ok: false, error: err.message }));
   const labelDigest = await sendLabelNeededDigest(sb).catch((err) => ({ ok: false, error: err.message }));
   return json(200, { results, order_tracks: orderTracks, label_digest: labelDigest, schedule: isNetlifyScheduleEvent(event) });
