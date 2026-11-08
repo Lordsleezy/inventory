@@ -25,6 +25,9 @@ import { ReportsPage } from './ReportsPage';
 import { SettingsPage } from './SettingsPage';
 import { AssociateSettings } from './AssociateSettings';
 import { type MainPage, type NavState, defaultNavState, parseNavFromLocation, writeNavToLocation } from './navigation';
+
+/** Desktop sidebar only — channel tools, connections, and store ops not on the phone More tab. */
+const DESKTOP_OTHER_PAGES: MainPage[] = ['ebay', 'depop', 'amazon', 'tiktok', 'marketplaces', 'manifests', 'insights', 'locations', 'logs'];
 import { formatLabelWithPending, parseShipCostSource } from './shipCostSource';
 import { errText } from './errText';
 import { isStandaloneApp, shouldShowInstallGate } from './appMode/isAppMode';
@@ -366,7 +369,7 @@ export function App() {
   const [darkMode, setDarkMode] = useState(() => {
     try { return localStorage.getItem('floor_admin_dark') === '1'; } catch { return false; }
   });
-  const [navGroup, setNavGroup] = useState<'reports' | 'inventory' | 'online' | null>(null);
+  const [navGroup, setNavGroup] = useState<'reports' | 'inventory' | 'other' | null>(null);
   const [showInstallGate, setShowInstallGate] = useState(() => shouldShowInstallGate());
   // Re-check on mount so store-phone Chrome / kiosk / persisted app mode win over the install coach.
   const [standaloneApp, setStandaloneApp] = useState(() => isStandaloneApp());
@@ -412,7 +415,7 @@ export function App() {
   useEffect(() => {
     if (page === 'reports') setNavGroup('reports');
     else if (page === 'inventory') setNavGroup('inventory');
-    else if (page === 'online') setNavGroup('online');
+    else if (DESKTOP_OTHER_PAGES.includes(page)) setNavGroup('other');
     if (page === 'register') {
       // Desktop: collapse sidebar for POS. Mobile uses the hamburger drawer — keep labels visible.
       let narrow = false;
@@ -756,17 +759,8 @@ export function App() {
         ['orders', 'Orders'],
         ['returns', 'Returns'],
         ['receipts', 'Receipts'],
-        ['online', 'Online'],
-        ['ebay', 'eBay'],
-        ['amazon', 'Amazon'],
-        ['tiktok', 'TikTok'],
-        ['depop', 'Depop'],
-        ['mercari', 'Mercari'],
         ['books', 'Books'],
-        ['marketplaces', 'Connections & sync'],
         ['cameras', 'Cameras'],
-        ['remote', 'Remote'],
-        ['logs', 'Logs'],
       ];
   const pageLabel = ({
     register: 'Register',
@@ -795,9 +789,16 @@ export function App() {
   } as const)[page];
   const reportSubs: [typeof nav.reportTab, string][] = [['profit', 'Sales & profits'], ['shipping', 'Shipping & fees'], ['expenses', 'Expenses'], ['payouts', 'Payouts'], ['returns', 'Returns'], ['sales-tax', 'Sales tax'], ['sold', 'Sold']];
   const inventorySubs: [typeof nav.inventoryTab, string][] = [['in-stock', 'In stock'], ['sold', 'Sold'], ['needs-check', 'Needs to be checked'], ['left-store', 'Replaced / given away'], ['receive', 'Receive'], ['lookup-test', 'Lookup test'], ['products', 'Products'], ['measure-mat', 'Measure mat']];
-  const onlineSubs: [typeof nav.onlineTab, string][] = [
-    ['listed', 'Listed'],
-    ['reports', 'Reports'],
+  const otherSubs: [MainPage, string][] = [
+    ['ebay', 'eBay'],
+    ['depop', 'Depop'],
+    ['amazon', 'Amazon'],
+    ['tiktok', 'TikTok'],
+    ['marketplaces', 'Connections'],
+    ['manifests', 'Manifests'],
+    ['insights', 'Insights'],
+    ['locations', 'Locations'],
+    ['logs', 'Logs'],
   ];
   return <div className={`app${menuOpen ? ' menu-open' : ''}${navCollapsed ? ' nav-collapsed' : ''}${navCollapsed && navHoverPeek && navHoverOpen ? ' nav-peek-open' : ''}${page === 'register' ? ' register-mode' : ''}${darkMode ? ' dark' : ''}`}><ClientErrorReporter token={session.access_token} />
   <header className="mobile-top">
@@ -844,19 +845,25 @@ export function App() {
           {inventorySubs.map(([tab, label]) => <button type="button" key={tab} className={page === 'inventory' && nav.inventoryTab === tab ? 'active' : ''} onClick={() => goNav({ page: 'inventory', inventoryTab: tab, ...(tab === 'unfinished' ? { attentionSection: 'all' as const } : {}) })}>{label}</button>)}
         </div>
       </div>
-      <div className={`nav-group${navGroup === 'online' ? ' open' : ''}${page === 'online' ? ' on' : ''}`}>
-        <button type="button" title="Online" className={`nav-parent${page === 'online' ? ' active' : ''}`} onClick={() => { setNavGroup(g => g === 'online' ? null : 'online'); go({ page: 'online' }); setEditing(null); }}>Online</button>
+      <div className={`nav-group${navGroup === 'other' ? ' open' : ''}${otherSubs.some(([id]) => id === page) ? ' on' : ''}`}>
+        <button
+          type="button"
+          title="Other"
+          className={`nav-parent${otherSubs.some(([id]) => id === page) ? ' active' : ''}`}
+          onClick={() => {
+            setNavGroup(g => g === 'other' ? null : 'other');
+            if (!otherSubs.some(([id]) => id === page)) go({ page: 'ebay' });
+            setEditing(null);
+          }}
+        >
+          Other
+        </button>
         <div className="nav-sub">
-          {onlineSubs.map(([tab, label]) => <button type="button" key={tab} className={page === 'online' && nav.onlineTab === tab ? 'active' : ''} onClick={() => goNav({ page: 'online', onlineTab: tab })}>{label}</button>)}
+          {otherSubs.map(([id, label]) => (
+            <button type="button" key={id} className={page === id ? 'active' : ''} onClick={() => goNav({ page: id })}>{label}</button>
+          ))}
         </div>
       </div>
-      {mainNav
-        .filter(([id]) => id === 'ebay' || id === 'amazon' || id === 'tiktok' || id === 'depop' || id === 'mercari' || id === 'marketplaces')
-        .map(([id, label]) => (
-          <button type="button" className={page === id ? 'active' : ''} key={id} title={label} onClick={() => goNav({ page: id })}>
-            {label}
-          </button>
-        ))}
       <div className={`nav-group${navGroup === 'reports' ? ' open' : ''}${page === 'reports' ? ' on' : ''}`}>
         <button type="button" title="Reports" className={`nav-parent${page === 'reports' ? ' active' : ''}`} onClick={() => { setNavGroup(g => g === 'reports' ? null : 'reports'); go({ page: 'reports' }); setEditing(null); }}>Reports</button>
         <div className="nav-sub">
@@ -865,10 +872,7 @@ export function App() {
       </div>
       <button type="button" title="Money" className={page === 'withdrawals' ? 'active' : ''} onClick={() => goNav({ page: 'withdrawals' })}>Money</button>
       <button type="button" title="Books" className={page === 'books' ? 'active' : ''} onClick={() => goNav({ page: 'books' })}>Books</button>
-      <button type="button" title="Manifests" className={page === 'manifests' ? 'active' : ''} onClick={() => goNav({ page: 'manifests' })}>Manifests</button>
-      <button type="button" title="Locations" className={page === 'locations' ? 'active' : ''} onClick={() => goNav({ page: 'locations' })}>Locations</button>
-      <button type="button" title="Insights" className={page === 'insights' ? 'active' : ''} onClick={() => goNav({ page: 'insights' })}>Insights</button>
-      {mainNav.filter(([id]) => id === 'cameras' || id === 'remote' || id === 'logs').map(([id, label]) => <button type="button" className={page === id ? 'active' : ''} key={id} title={label} onClick={() => goNav({ page: id })}>{label}</button>)}
+      {mainNav.filter(([id]) => id === 'cameras').map(([id, label]) => <button type="button" className={page === id ? 'active' : ''} key={id} title={label} onClick={() => goNav({ page: id })}>{label}</button>)}
       <button type="button" title="Settings" className={page === 'settings' ? 'active' : ''} onClick={() => goNav({ page: 'settings' })}>Settings</button>
         </>}
     </nav>
@@ -995,7 +999,6 @@ export function App() {
   {fullAccess && page === 'settings' && <SettingsPage client={sb} accessToken={session.access_token} stamp={stamp} money={money} busy={busy} run={run} onLedgerChanged={async () => { await loadSales(); await loadPayoutSales(); }} ruleEditor={<>{staff.map(p => <RuleEditor key={p.user_id} person={p} rule={ruleMap.get(p.user_id)} save={setRule} busy={busy} />)}</>} onlinePayoutSettings={<OnlinePayoutSettings absorbFees={!!onlineCfg.absorbFees} toggleAbsorb={async (on) => { await run(async () => { check(await sb.rpc('portal_set_absorb_fees', { p_on: on })); await loadCommon(); await loadPayoutSales(); await loadPayments(); }); }} cfg={onlineCfg} staff={staff} busy={busy} save={async (channels, pct, who) => { await run(async () => { check(await sb.rpc('portal_set_payout_config', { p_channels: channels, p_pct: pct, p_employee: who })); await loadCommon(); await loadPayoutSales(); }); }} />} />}
   {registerOnly && page === 'settings' && <AssociateSettings client={sb} displayName={staffSession?.displayName || 'Associate'} />}
   {fullAccess && page === 'cameras' && <><header><div><div className="eyebrow">FUTURE INTEGRATION</div><h1>Cameras</h1></div></header><section className="panel"><Empty>Camera feeds coming soon</Empty></section></>}
-  {fullAccess && page === 'remote' && <><header><div><div className="eyebrow">FUTURE INTEGRATION</div><h1>Remote</h1><p>Connect to the store computer from here later.</p></div></header><section className="panel"><Empty>Remote access coming soon</Empty></section></>}
   </main></div>;
 }
 function Stat({ name, value, hint }: { name: string; value: string; hint?: string }) {
