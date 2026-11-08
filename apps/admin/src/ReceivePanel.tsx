@@ -1247,13 +1247,14 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   /** Listing requirements only (price, condition, category, brand, UPC, weight+dims, item specifics, photo). */
   function missingFor(p: Parsed, hasAcceptedStockPhoto = Boolean(stockPhotoPath)): string[] {
     const photo = hasPhotoForSave(hasAcceptedStockPhoto);
-    if (doNotList) return receiveMissingFields({ doNotList: true, brandReady: brandReady(), hasPhoto: photo });
+    const quantityOk = Number(form.quantity) >= 1;
+    if (doNotList) return receiveMissingFields({ doNotList: true, brandReady: brandReady(), hasPhoto: photo, quantityOk });
     const gaps = listingGaps(p);
     const out = [...gaps.map(g => (g === 'ebay_category' ? 'category' : g === 'ebay_aspects' ? 'item specifics' : g))];
     if (isDefectiveCondition(form.condition) && !form.conditionNote.trim()) out.push('defect note' as typeof out[number]);
     if (!form.category.trim()) out.push('category');
     if (!ebayAspects.categoryId && !form.model.trim()) out.push('item specifics');
-    return receiveMissingFields({ doNotList: false, brandReady: brandReady(), otherGaps: out, hasPhoto: photo });
+    return receiveMissingFields({ doNotList: false, brandReady: brandReady(), otherGaps: out, hasPhoto: photo, quantityOk });
   }
   const liveMissing = missingFor(parse() || { ask: null, cost: null, dims: [null, null, null, null] });
   const formValid = doNotList

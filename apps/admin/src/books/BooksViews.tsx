@@ -86,7 +86,7 @@ function BooksNative(p: ViewProps) {
       <div className="native-report-group">
         {REPORT_ROWS.map((r) => (
           <button key={r.id} type="button" className="native-report-row books-report-link" onClick={() => p.setSheet(r.id)}>
-            <span className="books-report-icon" aria-hidden><r.Icon color={r.hue} /></span>
+            <span className="books-report-icon" aria-hidden><r.Icon color="#ffffff" /></span>
             <span>{r.title}<small>{r.sub}</small></span>
             <i className="native-chevron">›</i>
           </button>

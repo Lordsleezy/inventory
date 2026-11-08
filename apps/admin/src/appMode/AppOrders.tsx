@@ -303,6 +303,7 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
         <OrderFindRow sku={open.sku} code={locations[open.sku]?.[0] || ''} options={locationOptions} disabled={!!busy} onChange={(code) => void setPickLocation(open, code)} />
         {ship && stage !== 'canceled' && <OrderStepper stage={stage} />}
         <OrderFacts label={labelText} labeled={labeled} order={open} />
+        {open.scanned_out_at && <p className="app-footer-count">Scanned out {stamp(open.scanned_out_at)}{open.scanned_out_by_name ? ` by ${open.scanned_out_by_name}` : ''}</p>}
         {open.tracking_exception && <p className="app-inline-error">Carrier exception: {open.tracking_exception}</p>}
         {open.tracking_needs_entry && (
           <form className="app-track-box" onSubmit={(e) => { e.preventDefault(); void saveTracking(open); }}>
