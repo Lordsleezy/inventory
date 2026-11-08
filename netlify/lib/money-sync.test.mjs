@@ -61,4 +61,7 @@ test("runs at most every 6 hours; a skipped run writes nothing", async () => {
   const x = deps({ state: { at: new Date(now - 60000).toISOString() } });
   assert.deepEqual(await syncMoneyBalances(x.d, { now }), { skipped: "not_due" });
   assert.deepEqual(x.saved, {});
+  const forced = await syncMoneyBalances(x.d, { now, force: true });
+  assert.equal(forced.skipped, undefined);
+  assert.equal(x.saved.ebay.status, "ok");
 });

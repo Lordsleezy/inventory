@@ -8,26 +8,41 @@ export function normalizeBooksPayout(platform, payout) {
   const rawAmount = source === 'ebay' ? payout.amount : payout.amount_money;
   const amount = Number(rawAmount && typeof rawAmount === 'object' ? rawAmount.value ?? rawAmount.amount : rawAmount);
   const cents = source === 'square' ? Math.trunc(amount) : Math.round(amount * 100);
-  const when = source === 'ebay' ? payout.payoutDate || payout.payout_date : payout.arrival_date || payout.updated_at || payout.created_at;
+  const when = source === 'ebay'
+    ? payout.payoutDate || payout.payout_date
+    : payout.arrival_date || payout.created_at;
   const date = typeof when === 'string' ? when.slice(0, 10) : '';
   if (!id || !validStatuses.includes(status) || !Number.isSafeInteger(cents) || cents <= 0 || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  const last4raw = source === 'ebay'
+    ? payout.payoutInstrument?.accountLastFourDigits || payout.payoutInstrument?.accountLastFour || ''
+    : payout.destination?.account_number_suffix || '';
+  const last4 = String(last4raw).replace(/\D/g, '').slice(-4);
   return {
     platform: source,
     external_payout_id: id,
     amount_cents: cents,
     withdrawn_on: date,
+    // Noon Pacific so the calendar day stays the payout day, not the import day.
+    occurred_at: `${date}T20:00:00.000Z`,
     bank_reference: String(source === 'ebay' ? payout.bankReference || payout.bank_reference || '' : payout.end_to_end_id || '').trim() || null,
-    note: `Imported from ${source === 'ebay' ? 'eBay Finances' : 'Square'} API`,
+    bank_last4: last4 || null,
   };
 }
 
 export async function saveBooksPayout(sb, storeId, payout) {
   if (!payout || !storeId) return { skipped: true };
-  const { data: locked, error: periodError } = await sb.from('books_periods').select('id')
-    .eq('store_id', storeId).eq('period_type', 'month').eq('status', 'locked')
-    .lte('period_start', payout.withdrawn_on).gte('period_end', payout.withdrawn_on).maybeSingle();
-  if (periodError) throw new Error(periodError.message);
-  if (locked) return { skipped: true, reason: 'books_period_locked', platform: payout.platform, payoutId: payout.external_payout_id };
+  // Re-dating an existing payout id is a correction, so a locked month must not keep the import day.
+  const { data: existing, error: existingError } = await sb.from('platform_withdrawals').select('id')
+    .eq('store_id', storeId).eq('platform', payout.platform)
+    .eq('external_payout_id', payout.external_payout_id).maybeSingle();
+  if (existingError) throw new Error(existingError.message);
+  if (!existing) {
+    const { data: locked, error: periodError } = await sb.from('books_periods').select('id')
+      .eq('store_id', storeId).eq('period_type', 'month').eq('status', 'locked')
+      .lte('period_start', payout.withdrawn_on).gte('period_end', payout.withdrawn_on).maybeSingle();
+    if (periodError) throw new Error(periodError.message);
+    if (locked) return { skipped: true, reason: 'books_period_locked', platform: payout.platform, payoutId: payout.external_payout_id };
+  }
   const { error } = await sb.from('platform_withdrawals').upsert(
     { store_id: storeId, ...payout, created_by: null },
     { onConflict: 'store_id,platform,external_payout_id' },

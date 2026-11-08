@@ -23,7 +23,7 @@ const MANUAL_SOURCES = ['depop', 'mercari', 'tiktok', 'amazon', 'other'] as cons
 const REASON: Record<string, string> = {
   starting_cash: 'Starting cash', change_for_drawer: 'Change for drawer', moved_from_square: 'Moved from Square', moved_from_safe: 'Moved from Safe',
   owner_put_in: 'Owner put in', count_correction: 'Count correction', owner_draw: 'Owner draw', person_payout: 'Payout', bank_deposit: 'Bank deposit',
-  supplies: 'Supplies', move_to_square: 'Move to Square', move_to_safe: 'Move to Safe', other: 'Withdrawal', counted: 'Counted',
+  supplies: 'Bought supplies', gave_change: 'Gave change', move_to_square: 'Move to Square', move_to_safe: 'Move to Safe', other: 'Other', counted: 'Counted',
 };
 /** Reason chips per account and direction. Payout chips are added from the Paul / Jacob people settings. */
 function chips(account: Account, dir: Dir): string[] {
@@ -32,8 +32,9 @@ function chips(account: Account, dir: Dir): string[] {
     if (account === 'square') return ['moved_from_safe', 'owner_put_in', 'count_correction'];
     return account === 'depop' || account === 'mercari' ? ['starting_cash', 'owner_put_in', 'count_correction'] : ['owner_put_in', 'count_correction'];
   }
-  const base = ['owner_draw', 'PAYOUTS', 'bank_deposit', 'supplies'];
-  const move = account === 'safe' ? ['move_to_square'] : account === 'square' ? ['move_to_safe'] : [];
+  if (account === 'safe') return ['PAYOUTS', 'supplies', 'gave_change', 'bank_deposit', 'other'];
+  const base = ['owner_draw', 'PAYOUTS', 'bank_deposit', 'supplies', 'other'];
+  const move = account === 'square' ? ['move_to_safe'] : [];
   return [...base, ...move, 'count_correction'];
 }
 const localInput = (d = new Date()) => { const p = (n: number) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; };
@@ -64,6 +65,7 @@ export function MoneyPage({ client, storeId, accessToken, money, stamp }: Props)
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [connecting, setConnecting] = useState('');
+  const [syncing, setSyncing] = useState(false);
 
   const load = useCallback(async () => {
     const over = await client.rpc('portal_money_overview');
@@ -117,13 +119,34 @@ export function MoneyPage({ client, storeId, accessToken, money, stamp }: Props)
     } catch (e) { setError(String((e as Error).message || e)); setConnecting(''); }
   }
   const done = async (message: string) => { setSheet(null); setNotice(message); await load(); if (all) await openAll(all.account); };
+  const lastSynced = overview.map((a) => a.sync?.synced_at).filter((v): v is string => Boolean(v)).sort().at(-1) || '';
+  async function syncNow() {
+    setSyncing(true); setError('');
+    try {
+      const response = await fetch(floorFunctionUrl('channel-fee-sync'), {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
+        body: '{}',
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || 'Sync failed.');
+      setNotice('Synced eBay and Square payouts.');
+      await load();
+    } catch (e) { setError(String((e as Error).message || e)); }
+    finally { setSyncing(false); }
+  }
 
   const rowsView = (account: Account, rows: Row[]) => rows.map((r) => <ActivityLine key={r.id} row={r} account={account} title={rowTitle(r)} money={money} stamp={stamp}
     who={r.by_user ? names[r.by_user] || '' : ''} client={client} onOpen={() => setSheet({ account, dir: r.direction === 'in' ? 'in' : 'out', row: r })} setError={setError} />);
 
   return <div className="money-page">
     <header className="money-head"><h1>Money</h1><div className="money-total-label">All accounts</div>
-      <div className="money-total">{loaded ? money(total) : '—'}</div></header>
+      <div className="money-total">{loaded ? money(total) : '—'}</div>
+      <div className="money-buttons">
+        <button type="button" className="secondary" disabled={syncing || !loaded} onClick={() => void syncNow()}>{syncing ? 'Syncing…' : 'Sync now'}</button>
+        {lastSynced ? <span className="hint">Last synced {stamp(lastSynced)}</span> : null}
+      </div>
+    </header>
     {error && <div className="alert" role="alert">{error}<button type="button" aria-label="Dismiss error" onClick={() => setError('')}>×</button></div>}
     {notice && <div className="notice" role="status">{notice}</div>}
     {!loaded && !error && <p role="status">Loading money…</p>}
@@ -161,7 +184,7 @@ export function MoneyPage({ client, storeId, accessToken, money, stamp }: Props)
   </div>;
 }
 
-type Wd = { id: string; account: string; amount_cents: number; at: string; reason: string; note: string; auto: boolean; reference: string | null; duplicate: boolean };
+type Wd = { id: string; account: string; amount_cents: number; at: string; on_date?: string; reason: string; note: string; auto: boolean; reference: string | null; bank_last4?: string | null; duplicate: boolean };
 
 function WithdrawalsLog({ client, money, stamp, onChanged }: { client: SupabaseClient; money: (c: number) => string; stamp: (v: string) => string; onChanged: () => Promise<void> }) {
   const [source, setSource] = useState('');
@@ -174,6 +197,7 @@ function WithdrawalsLog({ client, money, stamp, onChanged }: { client: SupabaseC
   const [note, setNote] = useState('');
   const [day, setDay] = useState(() => new Date().toISOString().slice(0, 10));
   const [busy, setBusy] = useState(false);
+  const [openRef, setOpenRef] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const [y, m] = month.split('-').map(Number);
@@ -243,10 +267,23 @@ function WithdrawalsLog({ client, money, stamp, onChanged }: { client: SupabaseC
       <button type="button" className="secondary" onClick={() => setForm(false)}>Cancel</button>
     </form>}
     {!shown.length && <p className="empty">No withdrawals this month.</p>}
-    {shown.map((r) => <div className="money-line" key={r.id}>
+    {shown.map((r) => {
+      const importNote = /imported from (square api|ebay finances api)/i.test(r.note || '');
+      const note = importNote ? '' : r.note;
+      const ref = r.reference || '';
+      const shortRef = ref.length > 6 ? `…${ref.slice(-6)}` : ref;
+      const when = r.on_date && /^\d{4}-\d{2}-\d{2}$/.test(r.on_date)
+        ? new Date(Number(r.on_date.slice(0, 4)), Number(r.on_date.slice(5, 7)) - 1, Number(r.on_date.slice(8, 10))).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+        : shortDate(r.at);
+      return <div className="money-line" key={r.id}>
       <div>
-        <span className="money-line-title">{NAMES[r.account] || r.account}{r.auto ? ' · Auto' : ''}{r.duplicate ? ' · Possible duplicate' : ''}</span>
-        <small>{shortDate(r.at)}{r.reference ? ` · ${r.reference}` : ''}{r.note ? ` · ${r.note}` : ''}</small>
+        <span className="money-line-title">{NAMES[r.account] || r.account} · {when}{r.auto ? <em className="money-auto">Auto</em> : null}{r.duplicate ? ' · Possible duplicate' : ''}</span>
+        <small>
+          {ref ? <button type="button" className="money-link" onClick={() => setOpenRef(openRef === r.id ? null : r.id)}>{openRef === r.id ? ref : shortRef}</button> : null}
+          {r.bank_last4 ? ` · bank ·${r.bank_last4}` : ''}
+          {note ? ` · ${note}` : ''}
+          {!r.auto && r.reason && r.reason !== 'other' ? ` · ${REASON[r.reason] || r.reason}` : ''}
+        </small>
         {r.duplicate && !r.auto && <span>
           <button type="button" className="money-link" onClick={() => void resolve(r.id, true)}>Keep both</button>
           <button type="button" className="money-link" onClick={() => void resolve(r.id, false)}>Remove duplicate</button>
@@ -254,7 +291,7 @@ function WithdrawalsLog({ client, money, stamp, onChanged }: { client: SupabaseC
         {!r.auto && <button type="button" className="money-link" onClick={() => void remove(r.id)}>Delete</button>}
       </div>
       <b className="money-out">−{money(r.amount_cents)}</b>
-    </div>)}
+    </div>; })}
     {[...bySource.entries()].map(([acct, cents]) => <p key={acct}>{NAMES[acct] || acct} total {money(cents)}</p>)}
     <p className="hint">Saved {stamp(new Date().toISOString())}</p>
   </section>;
@@ -283,7 +320,7 @@ function ActivityLine({ row, account, title, who, money, stamp, client, onOpen, 
   }
   return <button type="button" className="money-line" onClick={onOpen}>
     <div><span className="money-line-title">{title}{row.auto && <em className="money-auto">Auto</em>}</span>
-      <small>{shortDate(row.at)}{who ? ` · ${who}` : ''}{row.note ? ` · “${row.note}”` : ''}{row.transfer_id ? ' · transfer' : ''}</small></div>
+      <small>{shortDate(row.at)}{who ? ` · ${who}` : ''}{row.note && !/imported from (square api|ebay finances api)/i.test(row.note) ? ` · “${row.note}”` : ''}{row.transfer_id ? ' · transfer' : ''}</small></div>
     <b className={green ? 'money-in' : 'money-out'}>{green ? '+' : '−'}{money(row.amount_cents)}</b></button>;
 }
 
@@ -307,7 +344,7 @@ function MoneySheet({ client, sheet, overview, people, meName, meId, money, stam
   const key = reason === 'person_payout' ? `payout:${payee}` : reason;
   const delta = valid ? (dir === 'in' ? cents : -cents) - (editing ? (editing.direction === 'in' ? editing.amount_cents : -editing.amount_cents) : 0) : 0;
   const after = overview.balance_cents + delta;
-  const available = chips(sheet.account, dir).flatMap((c) => c === 'PAYOUTS' ? people.map((p) => ({ key: `payout:${p.id}`, label: `Payout to ${p.label}` })) : [{ key: c, label: REASON[c] }]);
+  const available = chips(sheet.account, dir).flatMap((c) => c === 'PAYOUTS' ? people.map((p) => ({ key: `payout:${p.id}`, label: `Paid ${p.label}` })) : [{ key: c, label: REASON[c] }]);
 
   async function save(event: FormEvent) {
     event.preventDefault();

@@ -53,8 +53,8 @@ export const isPermissionError = (e) => /\b(401|403)\b|insufficient|scope|unauth
  * deps: loadState(), saveState(state), save(account, row), fetchEbayFunds() -> raw response, fetchSquare() -> { payments, payouts }.
  * fetchers throw Error("not_connected") when there is no connection. Never throws.
  */
-export async function syncMoneyBalances(deps, { now = Date.now() } = {}) {
-  if (!dueForMoneySync(await deps.loadState(), now)) return { skipped: "not_due" };
+export async function syncMoneyBalances(deps, { now = Date.now(), force = false } = {}) {
+  if (!force && !dueForMoneySync(await deps.loadState(), now)) return { skipped: "not_due" };
   const out = {};
   for (const [account, run, compute, reconnectMessage] of [
     ["ebay", deps.fetchEbayFunds, parseEbayFundsSummary, "Reconnect eBay so Floor can read your funds (Finances permission)."],
@@ -78,7 +78,7 @@ export async function syncMoneyBalances(deps, { now = Date.now() } = {}) {
 }
 
 /** Real calls (lazy imports keep the pure parts dependency-free for tests). */
-export async function runMoneySync(sb, storeId) {
+export async function runMoneySync(sb, storeId, { force = false } = {}) {
   const must = ({ data, error }) => { if (error) throw new Error(error.message); return data; };
   return syncMoneyBalances({
     loadState: async () => must(await sb.from("store_settings").select("value").eq("store_id", storeId).eq("key", STATE_KEY).maybeSingle())?.value || {},
@@ -119,5 +119,5 @@ export async function runMoneySync(sb, storeId) {
         payouts: await pull("/v2/payouts", "payouts", { begin_time: begin, location_id: access.locationId }),
       };
     },
-  });
+  }, { force });
 }

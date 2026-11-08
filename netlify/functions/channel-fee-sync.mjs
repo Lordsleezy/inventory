@@ -1,4 +1,5 @@
-import { serviceClient, json, corsHeaders } from "../lib/server.mjs";
+import { createClient } from "@supabase/supabase-js";
+import { serviceClient, json, corsHeaders, requireEnv } from "../lib/server.mjs";
 import { ebayFetch } from "../lib/ebay.mjs";
 import { ebayAccountFeedsFloorOrders, listEbayAccounts, resolveEbayAccount } from "../lib/ebay-accounts.mjs";
 import { getStoreSquareAccess, squareClient } from "../lib/square.mjs";
@@ -268,6 +269,18 @@ async function syncSquarePayouts(sb, storeId, log) {
   try { access = webSquareAccess(storeId, webSquareEnv()); }
   catch (e) { log.push({ squarePayouts: "Square key not working" }); return; }
   const base = access.sandbox ? "https://connect.squareupsandbox.com" : "https://connect.squareup.com";
+  const headers = { Authorization: `Bearer ${access.accessToken}`, "Square-Version": "2024-01-18", "Content-Type": "application/json" };
+  const bankLast4 = new Map();
+  try {
+    const bankRes = await fetch(new URL("/v2/bank-accounts", base), { headers });
+    const bankBody = await bankRes.json().catch(() => ({}));
+    if (bankRes.ok) {
+      for (const bank of bankBody.bank_accounts || []) {
+        const suffix = String(bank.account_number_suffix || "").replace(/\D/g, "").slice(-4);
+        if (bank.id && suffix) bankLast4.set(bank.id, suffix);
+      }
+    }
+  } catch { /* last 4 is optional */ }
   const begin = PAYOUT_HISTORY_SINCE;
   const end = new Date().toISOString();
   let cursor = null;
@@ -276,10 +289,12 @@ async function syncSquarePayouts(sb, storeId, log) {
     url.searchParams.set("begin_time", begin); url.searchParams.set("end_time", end); url.searchParams.set("limit", "100");
     if (access.locationId) url.searchParams.set("location_id", access.locationId);
     if (cursor) url.searchParams.set("cursor", cursor);
-    const res = await fetch(url, { headers: { Authorization: `Bearer ${access.accessToken}`, "Square-Version": "2024-01-18", "Content-Type": "application/json" } });
+    const res = await fetch(url, { headers });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) { log.push({ squarePayouts: res.status === 401 || res.status === 403 ? "Square key not working" : `Square payouts request failed (HTTP ${res.status})` }); return; }
     for (const payout of body.payouts || []) {
+      const suffix = bankLast4.get(payout.destination?.id);
+      if (suffix && payout.destination && !payout.destination.account_number_suffix) payout.destination.account_number_suffix = suffix;
       const normalized = normalizeBooksPayout("square", payout);
       if (!normalized) continue;
       try { log.push(await saveBooksPayout(sb, storeId, normalized)); }
@@ -322,25 +337,40 @@ async function syncSquarePaymentMatches(sb, storeId, log) {
   log.push({squareMatches:{payments:matched.length,matched:matched.filter(x=>x.status==='matched').length,unmatched:matched.filter(x=>x.status==='unmatched').length,ambiguous:matched.filter(x=>x.status==='ambiguous').length,tickets:tickets.length}});
 }
 
+async function callerIsAdmin(event) {
+  const token = String(event?.headers?.authorization || event?.headers?.Authorization || "").replace(/^Bearer\s+/i, "");
+  if (!token) return false;
+  const user = createClient(requireEnv("SUPABASE_URL"), requireEnv("SUPABASE_ANON_KEY"), {
+    global: { headers: { Authorization: `Bearer ${token}` } },
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+  const { data, error } = await user.rpc("portal_is_admin");
+  return !error && data === true;
+}
+
+export async function syncStoreChannels(sb, storeId, log, { forceMoney = false } = {}) {
+  try { await syncEbayFees(sb, storeId, log); } catch (e) { log.push({ ebay: String(e?.message || e) }); }
+  try { await syncSquareFees(sb, storeId, log); } catch (e) { log.push({ square: String(e?.message || e) }); }
+  try { await syncSquarePaymentMatches(sb, storeId, log); } catch (e) { log.push({ squareMatches: String(e?.message || e) }); }
+  try { await syncSquarePayouts(sb, storeId, log); } catch (e) { log.push({ squarePayouts: String(e?.message || e) }); }
+  try { log.push({ money: await (await import("../lib/money-sync.mjs")).runMoneySync(sb, storeId, { force: forceMoney }) }); } catch (e) { log.push({ money: String(e?.message || e) }); }
+}
+
 async function handle(event) {
   if (event?.httpMethod === "OPTIONS") return { statusCode: 200, headers: corsHeaders(), body: "" };
-  // Schedule-only by default; allow manual invoke with webhook secret or schedule body.
   if (event?.httpMethod && event.httpMethod !== "POST" && event.httpMethod !== "GET") {
     return json(405, { error: "method_not_allowed" });
   }
+  const scheduled = isNetlifyScheduleEvent(event);
+  if (!scheduled && !(await callerIsAdmin(event))) return json(401, { error: "admin_required" });
   const sb = serviceClient();
   const { data: stores, error } = await sb.from("stores").select("id");
   if (error) throw error;
-  const out = { schedule: isNetlifyScheduleEvent(event), stores: {} };
+  const out = { schedule: scheduled, stores: {} };
   for (const store of stores || []) {
     const log = [];
     out.stores[store.id] = log;
-    try { await syncEbayFees(sb, store.id, log); } catch (e) { log.push({ ebay: String(e?.message || e) }); }
-    try { await syncSquareFees(sb, store.id, log); } catch (e) { log.push({ square: String(e?.message || e) }); }
-    try { await syncSquarePaymentMatches(sb, store.id, log); } catch (e) { log.push({ squareMatches: String(e?.message || e) }); }
-    try { await syncSquarePayouts(sb, store.id, log); } catch (e) { log.push({ squarePayouts: String(e?.message || e) }); }
-    // Real eBay / Square balances for the Money tab: self-throttled to once per 6 hours (most runs only read one setting).
-    try { log.push({ money: await (await import("../lib/money-sync.mjs")).runMoneySync(sb, store.id) }); } catch (e) { log.push({ money: String(e?.message || e) }); }
+    await syncStoreChannels(sb, store.id, log, { forceMoney: !scheduled });
   }
   return json(200, out);
 }

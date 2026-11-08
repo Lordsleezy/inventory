@@ -3,16 +3,17 @@ import assert from 'node:assert/strict';
 import { normalizeBooksPayout, saveBooksPayout } from './books-payout-import.mjs';
 
 test('imports only successful eBay payout deposits with the bank reference', () => {
-  assert.deepEqual(normalizeBooksPayout('ebay', { payoutId: 'p-1', payoutStatus: 'SUCCEEDED', amount: { value: '123.45' }, payoutDate: '2026-10-28T10:00:00Z', bankReference: 'bank-1' }), {
-    platform: 'ebay', external_payout_id: 'p-1', amount_cents: 12345, withdrawn_on: '2026-10-28', bank_reference: 'bank-1', note: 'Imported from eBay Finances API',
+  assert.deepEqual(normalizeBooksPayout('ebay', { payoutId: 'p-1', payoutStatus: 'SUCCEEDED', amount: { value: '123.45' }, payoutDate: '2026-10-28T10:00:00Z', bankReference: 'bank-1', payoutInstrument: { accountLastFourDigits: '4412' } }), {
+    platform: 'ebay', external_payout_id: 'p-1', amount_cents: 12345, withdrawn_on: '2026-10-28', occurred_at: '2026-10-28T20:00:00.000Z', bank_reference: 'bank-1', bank_last4: '4412',
   });
   assert.equal(normalizeBooksPayout('ebay', { payoutId: 'p-2', payoutStatus: 'TERMINAL_FAILED', amount: { value: '12.00' }, payoutDate: '2026-10-28' }), null);
 });
 
 test('imports only positive completed Square payouts and preserves end-to-end reference', () => {
-  assert.deepEqual(normalizeBooksPayout('square', { id: 'sq-1', status: 'PAID', amount_money: { amount: 9812, currency_code: 'USD' }, arrival_date: '2026-10-28', end_to_end_id: 'e2e-1' }), {
-    platform: 'square', external_payout_id: 'sq-1', amount_cents: 9812, withdrawn_on: '2026-10-28', bank_reference: 'e2e-1', note: 'Imported from Square API',
+  assert.deepEqual(normalizeBooksPayout('square', { id: 'sq-1', status: 'PAID', amount_money: { amount: 9812, currency_code: 'USD' }, arrival_date: '2026-10-28', created_at: '2026-10-27T08:00:00Z', end_to_end_id: 'e2e-1', destination: { account_number_suffix: '0364' } }), {
+    platform: 'square', external_payout_id: 'sq-1', amount_cents: 9812, withdrawn_on: '2026-10-28', occurred_at: '2026-10-28T20:00:00.000Z', bank_reference: 'e2e-1', bank_last4: '0364',
   });
+  assert.equal(normalizeBooksPayout('square', { id: 'sq-4', status: 'PAID', amount_money: { amount: 500 }, created_at: '2026-10-02T15:00:00Z' }).withdrawn_on, '2026-10-02');
   assert.equal(normalizeBooksPayout('square', { id: 'sq-2', status: 'FAILED', amount_money: { amount: 1000 }, arrival_date: '2026-10-28' }), null);
   assert.equal(normalizeBooksPayout('square', { id: 'sq-3', status: 'PAID', amount_money: { amount: -100 }, arrival_date: '2026-10-28' }), null);
 });
@@ -27,6 +28,7 @@ function booksDb(locked) {
     const chain = {
       async upsert(row, options) { writes.push({ row, options }); return { error: null }; },
       select() { return this; }, eq() { return this; }, is() { return this; },
+      async maybeSingle() { return { data: null, error: null }; },
       then(resolve) { resolve({ data: [], error: null }); },
     };
     return chain;
