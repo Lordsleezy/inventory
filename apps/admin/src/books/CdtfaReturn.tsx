@@ -1,89 +1,138 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { fillCdtfaPdf } from './cdtfaPdf';
+import { CdtfaPaper, type PaperLine, type PaperSale, type PaperSigner } from './CdtfaPaper';
+import { dueOn, filingBounds, periodChoices, periodLabel, resolveCdtfaDollars, type CdtfaFrequency } from './cdtfaResolve';
 
-type Sale = {
-  id: number; sold_on: string; sku: string; title: string; channel: string;
-  measure_cents: number; tax_cents: number; ship: string | null; bucket: string; kind?: string;
-};
-type Line = { id: string; label: string; dollars: number; cents: number | null; note: string; sales: Sale[] };
-type Check = { id: string; ok: boolean; detail: string; sales?: Sale[] };
+type Check = { id: string; ok: boolean; detail: string; sales?: PaperSale[] };
+type FloorLine = { id: string; label: string; dollars: number; note: string; sales: PaperSale[] };
 type Doc = {
-  form: string; frequency: 'monthly' | 'quarterly' | 'yearly';
+  frequency: CdtfaFrequency;
   period_start: string; period_end: string; due_on: string; due_note: string;
-  open: boolean; locked: boolean; legacy_lock: boolean; ready: boolean; place: string;
-  lines: Line[]; checks: Check[];
-  schedule_a2: { a1: number; a2: number; a4: number; note: string };
-  signer: { preparer: string };
+  open: boolean; locked: boolean; ready: boolean; place: string;
+  lines: FloorLine[]; checks: Check[];
+  schedule_a2: { note: string };
+  collected_cents?: number;
+  months?: { locked: boolean }[];
 };
 
 type Props = { client: SupabaseClient; money: (cents: number) => string; monthStart: string };
 
-const FREQUENCIES = [
-  ['monthly', 'Monthly'],
-  ['quarterly', 'Quarterly'],
-  ['yearly', 'Yearly'],
-] as const;
+const FREQUENCIES: [CdtfaFrequency, string][] = [['monthly', 'Monthly'], ['quarterly', 'Quarterly'], ['yearly', 'Yearly']];
+const SIGNER_FIELDS = ['name', 'title', 'date', 'email', 'phone', 'account'] as const;
 
-function pad(n: number) { return String(n).padStart(2, '0'); }
-function lastDay(year: number, month: number) {
-  return new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
-}
-export function filingBounds(monthStart: string, frequency: 'monthly' | 'quarterly' | 'yearly') {
-  const [year, month] = monthStart.slice(0, 7).split('-').map(Number);
-  if (frequency === 'yearly') return { start: `${year}-01-01`, end: `${year}-12-31` };
-  if (frequency === 'monthly') return { start: `${year}-${pad(month)}-01`, end: lastDay(year, month) };
-  const startMonth = Math.floor((month - 1) / 3) * 3 + 1;
-  return { start: `${year}-${pad(startMonth)}-01`, end: lastDay(year, startMonth + 2) };
-}
-function pretty(iso: string) {
-  const [y, m, d] = iso.split('-').map(Number);
-  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
-}
-function dollars(n: number) {
-  const sign = n < 0 ? '-' : '';
-  return `${sign}$${Math.abs(n).toLocaleString('en-US')}.00`;
+function emptySigner(): PaperSigner {
+  return { name: '', title: '', date: '', email: '', phone: '', account: '' };
 }
 
 export function CdtfaReturn({ client, money, monthStart }: Props) {
-  const [frequency, setFrequency] = useState<Doc['frequency']>('quarterly');
+  const [frequency, setFrequency] = useState<CdtfaFrequency>('quarterly');
+  const [periodStart, setPeriodStart] = useState('');
   const [doc, setDoc] = useState<Doc | null>(null);
-  const [openId, setOpenId] = useState('');
+  const [edits, setEdits] = useState<Record<string, number | undefined>>({});
+  const [signer, setSigner] = useState<PaperSigner>(emptySigner());
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const bounds = filingBounds(monthStart, frequency);
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+  const choices = periodChoices(frequency, today);
+
+  const loadPeriod = useCallback(async (start: string, end: string) => {
+    const [result, saved] = await Promise.all([
+      client.rpc('portal_cdtfa_return', { p_start: start, p_end: end }),
+      client.rpc('portal_cdtfa_edits', { p_start: start, p_end: end }),
+    ]);
+    if (result.error) { setError(result.error.message); setDoc(null); return; }
+    if (saved.error) { setError(saved.error.message); return; }
+    const next = result.data as Doc;
+    const raw = (saved.data || {}) as Record<string, { dollars: number | null; text: string | null }>;
+    const amounts: Record<string, number | undefined> = {};
+    const person = emptySigner();
+    for (const [field, value] of Object.entries(raw)) {
+      if (SIGNER_FIELDS.includes(field as typeof SIGNER_FIELDS[number])) person[field as keyof PaperSigner] = value.text || '';
+      else if (value.dollars != null) amounts[field] = value.dollars;
+    }
+    setDoc(next);
+    setEdits(amounts);
+    setSigner(person);
+    setPeriodStart(start);
+  }, [client]);
 
   const load = useCallback(async () => {
     setError('');
     const filing = await client.rpc('portal_cdtfa_filing');
     if (filing.error) { setError(filing.error.message); return; }
-    const next = (filing.data as Doc['frequency']) || 'quarterly';
+    const next = (filing.data as CdtfaFrequency) || 'quarterly';
     setFrequency(next);
     const period = filingBounds(monthStart, next);
-    const result = await client.rpc('portal_cdtfa_return', { p_start: period.start, p_end: period.end });
-    if (result.error) { setError(result.error.message); setDoc(null); return; }
-    setDoc(result.data as Doc);
-  }, [client, monthStart]);
+    await loadPeriod(period.start, period.end);
+  }, [client, loadPeriod, monthStart]);
 
   useEffect(() => { void load(); }, [load]);
 
-  async function choose(next: Doc['frequency']) {
+  const resolved = useMemo(() => {
+    if (!doc) return [];
+    const collected = Math.round(Number(doc.collected_cents || 0) / 100);
+    return resolveCdtfaDollars(doc.lines, edits, collected);
+  }, [doc, edits]);
+
+  const lines: PaperLine[] = useMemo(() => {
+    if (!doc) return [];
+    const byId = new Map(resolved.map((row) => [row.id, row]));
+    return doc.lines.map((line) => {
+      const row = byId.get(line.id);
+      return { ...line, dollars: row?.dollars ?? line.dollars, floor: line.dollars, edited: !!row?.edited, sales: line.sales || [] };
+    });
+  }, [doc, resolved]);
+
+  const editsLocked = !!doc && ((doc.months || []).some((month) => month.locked) || doc.locked);
+  const label = doc ? periodLabel(doc.period_start, doc.period_end, frequency, doc.due_on) : '';
+
+  async function chooseFrequency(next: CdtfaFrequency) {
     setBusy(true); setError('');
     const saved = await client.rpc('portal_set_cdtfa_filing', { p_frequency: next });
     setBusy(false);
     if (saved.error) { setError(saved.error.message); return; }
     setFrequency(next);
     const period = filingBounds(monthStart, next);
-    const result = await client.rpc('portal_cdtfa_return', { p_start: period.start, p_end: period.end });
+    await loadPeriod(period.start, period.end);
+  }
+
+  async function save(field: string, dollars: number | null, text: string | null) {
+    if (!doc || editsLocked) return;
+    setError('');
+    const result = await client.rpc('portal_set_cdtfa_edit', {
+      p_start: doc.period_start, p_end: doc.period_end, p_field: field, p_dollars: dollars, p_text: text,
+    });
     if (result.error) { setError(result.error.message); return; }
-    setDoc(result.data as Doc);
+    if (SIGNER_FIELDS.includes(field as typeof SIGNER_FIELDS[number])) {
+      setSigner((prev) => ({ ...prev, [field]: text || '' }));
+      return;
+    }
+    setEdits((prev) => {
+      const next = { ...prev };
+      if (dollars == null) delete next[field];
+      else next[field] = dollars;
+      return next;
+    });
+  }
+
+  function printSheet() {
+    document.body.classList.add('cdtfa-printing');
+    window.print();
+    window.setTimeout(() => document.body.classList.remove('cdtfa-printing'), 500);
   }
 
   async function downloadPdf() {
     if (!doc) return;
     setBusy(true); setError('');
     try {
-      const bytes = await fillCdtfaPdf(doc);
+      const bytes = await fillCdtfaPdf({
+        period_start: doc.period_start,
+        period_end: doc.period_end,
+        due_on: doc.due_on,
+        lines: lines.map((line) => ({ id: line.id, dollars: line.dollars })),
+        signer,
+      });
       const blob = new Blob([Uint8Array.from(bytes)], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -96,47 +145,38 @@ export function CdtfaReturn({ client, money, monthStart }: Props) {
     } finally { setBusy(false); }
   }
 
-  function printSheet() {
-    document.body.classList.add('cdtfa-printing');
-    window.print();
-    window.setTimeout(() => document.body.classList.remove('cdtfa-printing'), 500);
-  }
-
-  const shownStart = doc?.period_start || bounds.start;
-  const shownEnd = doc?.period_end || bounds.end;
-  const periodEnded = shownEnd < new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
-
   return (
     <section className="cdtfa-sheet">
-      <header className="cdtfa-head">
-        <p className="cdtfa-kicker">CDTFA-401-A · REV. 126 (1-26)</p>
-        <h2>Sales tax return</h2>
-        <p>{pretty(shownStart)} – {pretty(shownEnd)}</p>
-        <p className="cdtfa-due">Due on or before <strong>{doc ? pretty(doc.due_on) : '…'}</strong></p>
-        <p className="cdtfa-note">{doc?.due_note || 'Floor prepares this worksheet. A person files it. Floor does not store a CDTFA login.'}</p>
-      </header>
-      <div className="cdtfa-freq" role="group" aria-label="Filing frequency">
-        {FREQUENCIES.map(([id, label]) => (
-          <button key={id} type="button" className={frequency === id ? 'on' : ''} disabled={busy} onClick={() => void choose(id)}>{label}</button>
-        ))}
+      <div className="cdtfa-toolbar">
+        <label>Filing period
+          <select aria-label="Filing period" value={periodStart} disabled={!choices.length || busy} onChange={(e) => {
+            const choice = choices.find((row) => row.start === e.target.value);
+            if (choice) void loadPeriod(choice.start, choice.end);
+          }}>
+            {choices.map((choice) => <option key={choice.start} value={choice.start}>{choice.label}</option>)}
+          </select>
+        </label>
+        <div className="cdtfa-freq" role="group" aria-label="Filing frequency">
+          {FREQUENCIES.map(([id, name]) => (
+            <button key={id} type="button" className={frequency === id ? 'on' : ''} disabled={busy} onClick={() => void chooseFrequency(id)}>{name}</button>
+          ))}
+        </div>
       </div>
       {error && <p className="cdtfa-bad" role="alert">{error}</p>}
       {doc && (
         <>
           <p className={doc.ready ? 'cdtfa-status' : 'cdtfa-status cdtfa-bad'}>
             {doc.ready ? 'Ready to review' : doc.open ? 'Not ready — this period is still open' : 'Not ready'}
-            {doc.locked ? ' · Locked with Books' : ''}
-            {doc.legacy_lock ? ' · A locked month was saved before this worksheet existed, so those sales are read from the ledger.' : ''}
           </p>
           <ul className="cdtfa-checks">
             {doc.checks.map((check) => (
               <li key={check.id} className={check.ok ? '' : 'cdtfa-bad'}>
                 {check.detail}
-                {(check.sales || []).length > 0 && (
+                {(check.sales || []).length > 0 && !check.ok && (
                   <ul className="cdtfa-sales">
                     {check.sales!.map((sale, index) => (
                       <li key={`${sale.id}-${index}`}>
-                        <span>{sale.title}<small>{sale.sold_on} · SKU {sale.sku} · {sale.channel}{sale.ship ? ` · ${sale.ship}` : ''}{sale.bucket === 'missing_state' ? ' · ship-to state missing' : ''}{check.id === 'collected' ? ` · tax ${money(sale.tax_cents)}` : ''}</small></span>
+                        <span>{sale.title}<small>{sale.sold_on} · SKU {sale.sku} · {sale.channel}{sale.ship ? ` · ${sale.ship}` : ''}{sale.bucket === 'missing_state' ? ' · ship-to state missing' : ''}</small></span>
                         <b>{money(sale.measure_cents)}</b>
                       </li>
                     ))}
@@ -145,58 +185,31 @@ export function CdtfaReturn({ client, money, monthStart }: Props) {
               </li>
             ))}
           </ul>
-          <p className="cdtfa-note">{doc.place}</p>
-          <div className="cdtfa-lines">
-            {doc.lines.map((row) => {
-              const sales = row.sales || [];
-              const opened = openId === row.id;
-              return (
-                <div key={row.id} className="cdtfa-line">
-                  <button type="button" className="cdtfa-line-main" onClick={() => sales.length && setOpenId(opened ? '' : row.id)} aria-expanded={opened}>
-                    <span className="cdtfa-id">{row.id}</span>
-                    <span>
-                      <strong>{row.label}</strong>
-                      <small>{row.note}{row.cents != null ? ` Cent total ${money(row.cents)}.` : ''}</small>
-                    </span>
-                    <b>{dollars(row.dollars)}</b>
-                  </button>
-                  {opened && (
-                    <ul className="cdtfa-sales">
-                      {sales.map((sale, index) => (
-                        <li key={`${sale.id}-${index}`} className={sale.bucket === 'missing_state' ? 'cdtfa-bad' : ''}>
-                          <span>{sale.title}<small>{sale.sold_on} · SKU {sale.sku} · {sale.channel}{sale.ship ? ` · ${sale.ship}` : ''}{sale.bucket === 'missing_state' ? ' · ship-to state missing' : ''}</small></span>
-                          <b>{money(sale.measure_cents)}</b>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-          <section className="cdtfa-a2">
-            <h3>Schedule A2 — district tax</h3>
-            <p>A1 taxable transactions {dollars(doc.schedule_a2.a1)}</p>
-            <p>A2/A3 subject only to 7.25% {dollars(doc.schedule_a2.a2)}</p>
-            <p>A4 subject to district tax {dollars(doc.schedule_a2.a4)}</p>
-            <p className="cdtfa-note">{doc.schedule_a2.note}</p>
-          </section>
-          <section className="cdtfa-sign">
-            <h3>Signature</h3>
-            <p className="cdtfa-note">Left blank for Steve. Type them here to print. Floor does not save them.</p>
-            <label>Name<input aria-label="Signer name" /></label>
-            <label>Title<input aria-label="Signer title" /></label>
-            <label>Date<input aria-label="Signer date" /></label>
-            <label>Email<input aria-label="Signer email" /></label>
-            <label>Phone<input aria-label="Signer phone" /></label>
-            <p>Preparer <strong>{doc.signer.preparer}</strong></p>
-            <p className="cdtfa-note">Account number stays blank. It is on the CDTFA letter, and Floor does not store it.</p>
-          </section>
+          <CdtfaPaper
+            lines={lines}
+            signer={signer}
+            open={doc.open}
+            locked={editsLocked}
+            periodLabel={label}
+            periodStart={doc.period_start}
+            periodEnd={doc.period_end}
+            dueOn={doc.due_on || dueOn(doc.period_end)}
+            scheduleNote={doc.schedule_a2?.note || doc.place}
+            districtMeasure={edits.A4 ?? 0}
+            districtMeasureEdited={edits.A4 != null}
+            money={money}
+            readOnly={editsLocked}
+            onDollars={(id, dollars) => {
+              const floor = doc.lines.find((line) => line.id === id)?.dollars;
+              void save(id, dollars != null && dollars === floor ? null : dollars, null);
+            }}
+            onSigner={(field, value) => void save(field, null, value)}
+          />
+          <p className="cdtfa-note">{doc.due_note}</p>
           <div className="cdtfa-actions">
-            <button type="button" onClick={printSheet}>Print worksheet</button>
+            <button type="button" onClick={printSheet}>Print</button>
             <button type="button" onClick={() => void downloadPdf()} disabled={busy}>Download filled CDTFA-401-A</button>
           </div>
-          <p className="cdtfa-note">The download is the official CDTFA-401-A REV. 126 with the dollar lines filled in. The signature is blank. This is not a filing. {periodEnded ? 'This filing period has ended.' : 'This filing period is still open.'}</p>
         </>
       )}
     </section>

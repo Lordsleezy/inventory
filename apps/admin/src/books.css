@@ -172,5 +172,35 @@ body.cdtfa-printing .cdtfa-sheet,body.cdtfa-printing .cdtfa-sheet *{visibility:v
 body.cdtfa-printing .cdtfa-sheet{position:absolute;left:0;top:0;width:100%;background:#fff;color:#000}
 body.cdtfa-printing .cdtfa-note,body.cdtfa-printing .cdtfa-id,body.cdtfa-printing .cdtfa-line-main small,body.cdtfa-printing .cdtfa-kicker{color:#333}
 body.cdtfa-printing .cdtfa-bad,body.cdtfa-printing .cdtfa-bad small{color:#b00000}
-body.cdtfa-printing .cdtfa-freq,body.cdtfa-printing .cdtfa-actions{display:none}
-body.cdtfa-printing .cdtfa-sign input{background:#fff;color:#000;border-bottom-color:#000}
+body.cdtfa-printing .cdtfa-freq,body.cdtfa-printing .cdtfa-actions,body.cdtfa-printing .cdtfa-toolbar,body.cdtfa-printing .cdtfa-checks,body.cdtfa-printing .cdtfa-status{display:none}
+body.cdtfa-printing .cdtfa-paper,body.cdtfa-printing .cdtfa-paper input{background:#fff;color:#000;border-color:#000}
+body.cdtfa-printing .cdtfa-box-id,body.cdtfa-printing .cdtfa-box-label p,body.cdtfa-printing .cdtfa-kicker{color:#333}
+body.books-printing .books-desktop-panel .cdtfa-sheet{display:none!important}
+body.books-printing .cdtfa-paper{background:#fff;color:#000;border-color:#000}
+body.books-printing .cdtfa-paper input{background:#fff;color:#000;border-color:#000}
+
+.cdtfa-toolbar{display:flex;flex-wrap:wrap;gap:16px;align-items:end;margin-bottom:12px}
+.cdtfa-toolbar label{display:grid;gap:4px;color:#9a9a9a;font-size:.85rem}
+.cdtfa-toolbar select{background:#000;color:#fff;border:1px solid #4a4a4a;min-height:44px;font-size:16px;padding:0 8px}
+.cdtfa-draft{border:2px solid #FF453A;color:#FF453A;font-weight:700;letter-spacing:.04em;padding:8px 10px;margin:0 0 12px}
+.cdtfa-paper{border:1px solid #4a4a4a;padding:16px 18px;background:#000}
+.cdtfa-banner{display:flex;justify-content:space-between;gap:18px;border-bottom:2px solid #fff;padding-bottom:12px;margin-bottom:8px}
+.cdtfa-banner h2{font-size:1.15rem;margin:4px 0}
+.cdtfa-period-label{font-size:1.05rem;margin:0}
+.cdtfa-idgrid{min-width:220px;display:grid;gap:6px}
+.cdtfa-idgrid label,.cdtfa-a2line{display:grid;gap:4px}
+.cdtfa-idgrid input,.cdtfa-amt input,.cdtfa-a2line input,.cdtfa-sign input{background:#000;color:#fff;border:1px solid #fff;min-height:44px;font-size:16px;padding:6px 8px;text-align:right;width:100%}
+.cdtfa-block{margin-top:16px;border-top:2px solid #fff;padding-top:8px}
+.cdtfa-block h3,.cdtfa-sign h3{margin:0 0 8px;font-size:.95rem;letter-spacing:.03em;text-transform:uppercase}
+.cdtfa-box{display:grid;grid-template-columns:3.4rem minmax(0,1fr) 8.5rem;gap:10px;align-items:start;border-bottom:1px solid #3a3a3a;padding:8px 0}
+.cdtfa-box-id{color:#9a9a9a;padding-top:10px}
+.cdtfa-box-name{background:none;border:0;color:#fff;text-align:left;padding:8px 0;min-height:44px;font-size:16px}
+.cdtfa-box-label p{margin:0;color:#9a9a9a;font-size:.8rem;line-height:1.35}
+.cdtfa-floor button,.cdtfa-a2line button{background:none;border:0;color:#fff;text-decoration:underline;min-height:44px;font-size:16px;margin-left:8px}
+.cdtfa-amt input{font-variant-numeric:tabular-nums}
+.cdtfa-box.edited .cdtfa-amt input{border-style:dashed}
+.cdtfa-explain,.cdtfa-lock{color:#9a9a9a;font-size:.85rem}
+.cdtfa-a2line{grid-template-columns:1fr 8.5rem;display:grid;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid #3a3a3a}
+.cdtfa-a2line b{text-align:right}
+.cdtfa-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+@media(max-width:640px){.cdtfa-banner{flex-direction:column}.cdtfa-box{grid-template-columns:2.4rem minmax(0,1fr)}}
