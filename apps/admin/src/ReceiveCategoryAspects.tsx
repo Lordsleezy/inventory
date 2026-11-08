@@ -29,6 +29,14 @@ type Props = {
   onChannelValues?: (values: Record<string, string>, missing: number) => void;
 };
 
+function categoryParts(path: string) {
+  return path.split(/\s*>\s*/).map(part => part.trim()).filter(part => part && !/^root$/i.test(part));
+}
+function shortCategory(path: string) {
+  const parts = categoryParts(path);
+  return parts.slice(-2).join(' · ') || path;
+}
+
 function aspectFilled(def: AspectDef, attributes: Record<string, string>, na: Record<string, boolean>) {
   if (na[def.name]) return true;
   const v = (attributes[def.name] || '').trim();
@@ -159,13 +167,11 @@ export function ReceiveCategoryAspects({
     });
   }
 
-  if (doNotList) return null;
-
   return (
     <div className="receive-v2-span2 receive-aspects-block">
       <label className={showErrors && !value.categoryId ? 'receive-v2-invalid' : undefined}>
-        <span>Category<span className="receive-v2-req"> *</span></span>
-        {value.path ? <p className="hint">{value.path}</p> : null}
+        <span>Category{!doNotList && <span className="receive-v2-req"> *</span>}</span>
+        {value.path ? <p className="rcv-cat-full">{categoryParts(value.path).join(' › ')}</p> : null}
         <input
           value={query}
           disabled={disabled || busy}
@@ -179,8 +185,9 @@ export function ReceiveCategoryAspects({
         <div className="receive-aspect-suggestions">
           <span className="hint">Suggested</span>
           {suggestions.map(s => (
-            <button key={s.category_id} type="button" className="text-button" disabled={busy} onClick={() => void pickCategory(s)}>
-              {s.path}
+            <button key={s.category_id} type="button" className="rcv-cat" disabled={busy} onClick={() => void pickCategory(s)}>
+              <strong>{shortCategory(s.path)}</strong>
+              <small>{categoryParts(s.path).join(' › ')}</small>
             </button>
           ))}
         </div>
@@ -189,7 +196,10 @@ export function ReceiveCategoryAspects({
         <ul className="scan-out-list">
           {choices.slice(0, 8).map(c => (
             <li key={c.category_id}>
-              <button type="button" className="text-button" disabled={busy} onClick={() => void pickCategory(c)}>{c.path}</button>
+              <button type="button" className="rcv-cat" disabled={busy} onClick={() => void pickCategory(c)}>
+                <strong>{shortCategory(c.path)}</strong>
+                <small>{categoryParts(c.path).join(' › ')}</small>
+              </button>
             </li>
           ))}
         </ul>

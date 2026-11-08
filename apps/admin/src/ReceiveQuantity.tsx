@@ -14,8 +14,8 @@ export function QuantityPicker({ value, onChange, disabled = false, minimum = 1,
 }
 
 export function ReceiveQuantity({ value, onChange, disabled = false }: { value: string; onChange: (n: string) => void; disabled?: boolean }) {
-  return <fieldset disabled={disabled} className="receive-quantity"><legend>Quantity · one SKU with a count</legend>
-    <QuantityPicker value={value} onChange={onChange} disabled={disabled} label="Quantity to receive" />
-    <small>Price and entered cost are per unit. Use photos representative of every unit in this batch.</small>
-  </fieldset>;
+  return <div className="receive-quantity">
+    <QuantityPicker value={value} onChange={onChange} disabled={disabled} label="Quantity" />
+    <small className="rcv-note">Price and cost are per unit. Use photos representative of every unit.</small>
+  </div>;
 }
