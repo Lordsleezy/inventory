@@ -5,7 +5,7 @@ import { portalAdminFromEvent } from "../lib/portal-auth.mjs";
 import { catalogProductByGtin, suggestCategories } from "../lib/ebay-catalog.mjs";
 import { rankCategorySuggestions } from "../lib/ebay-aspects.mjs";
 import { refreshChannelCategoryFields } from "../lib/category-taxonomy.mjs";
-import { autofillUnitSpecifics, missingRequired, supabaseSpecificsDeps } from "../lib/ebay-specifics.mjs";
+import { autofillUnitSpecifics, fillMissing, missingRequired, productAspects, unitAspects, supabaseSpecificsDeps } from "../lib/ebay-specifics.mjs";
 import { canonicalValue, clearInvalid, countUsage, rankValues } from "../lib/aspect-suggest.mjs";
 import { liveSpecificsForUnit } from "../lib/ebay-live-specifics.mjs";
 import { autoFillUnit, supabaseAutoFillDeps } from "../lib/auto-fill.mjs";
@@ -129,6 +129,24 @@ async function handle(event) {
       if (!eligible?.eligible) return json(200, { ok: true, result: { sku, skipped: "not_eligible" }, form: await form(sb, storeId, sku) });
       const result = await autoFillUnit(af, storeId, sku);
       return json(200, { ok: true, result, form: await form(sb, storeId, sku) });
+    }
+    if (body.action === "preview-receive") {
+      const categoryId = String(body.category_id || "").trim();
+      if (!categoryId) return json(400, { error: "category_id_required" });
+      const fields = await ebayAspectFields(storeId, categoryId);
+      const identity = body.identity || {};
+      const seed = {
+        ...productAspects({ brand: identity.brand, model: identity.model }),
+        ...unitAspects({ brand: identity.brand, model: identity.model, condition: identity.condition, upc: identity.upc }),
+      };
+      const { attributes, filled } = fillMissing(body.attributes || {}, seed, fields);
+      const { data: tax } = await sb.from("channel_taxonomy").select("path").eq("channel", "ebay").eq("category_id", categoryId).maybeSingle();
+      return json(200, {
+        ok: true, category_id: categoryId, path: tax?.path || null,
+        fields: fields.filter((f) => f.required || f.recommended),
+        attributes, prefilled: filled, missing: missingRequired(fields, attributes),
+        usage: await usageFor(sb, storeId, categoryId, fields),
+      });
     }
     if (body.action === "preview-category") {
       // Required questions for a category the admin is about to pick, already answered where Floor can (nothing is saved).

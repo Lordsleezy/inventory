@@ -17,7 +17,8 @@ import { BundleReceive } from './BundleReceive';
 const MeasureOnMat = lazy(() => import('./MeasureOnMat').then(module => ({ default: module.MeasureOnMat })));
 import { receiveSpecifics, receiveVariant } from '../../../shared/receive-specifics.mjs';
 import { filterCategoryOptions, isMattressAccessory, matchReceiveCategory } from '../../../shared/receive-category.mjs';
-import { notForSaleBrandError, receiveMissingFields } from './receive-validation';
+import { notForSaleBrandError, receiveMissingFields, missingEbayAspects, upcRequired, receiveFieldMessage, type ReceiveFieldKey } from './receive-validation';
+import { ReceiveCategoryAspects, type ReceiveAspectState } from './ReceiveCategoryAspects';
 import { CategoryPanel } from './CategoryPanel';
 import { EbaySpecificsPanel } from './EbaySpecificsPanel';
 import { isCompleteReceiveTitle, isStoreLabelBarcode, storeLabelWarning } from '../../../shared/store-barcode.mjs';
@@ -680,6 +681,11 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   const [channels, setChannels] = useState<ChannelId[]>([]);
   /** Store-only / not selling online — photo not required to receive. */
   const [doNotList, setDoNotList] = useState(false);
+  const [showSaveValidation, setShowSaveValidation] = useState(false);
+  const [ebayAspects, setEbayAspects] = useState<ReceiveAspectState>({
+    categoryId: null, path: null, fields: [], attributes: {}, na: {},
+  });
+  const fieldRefs = useRef<Partial<Record<ReceiveFieldKey, HTMLElement | null>>>({});
   const [dns, setDns] = useState(false);
   const dnsRequired = isDnsType(form);
   const doNotShip = dns || dnsRequired;
@@ -1223,35 +1229,36 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     if (form.noUpc) return true;
     return Boolean((form.upc.trim() || current?.upc || '').trim());
   }
+  function hasPhotoForSave(hasAcceptedStockPhoto = Boolean(stockPhotoPath)) {
+    return Boolean(files.length || hasAcceptedStockPhoto || (!manual && merged?.images?.[0]));
+  }
+  function listingGaps(p: Parsed | null): ReceiveFieldKey[] {
+    if (doNotList || doNotShip) return [];
+    const out: ReceiveFieldKey[] = [];
+    if (!pos(p?.ask ?? null)) out.push('price');
+    if (!form.condition) out.push('condition');
+    if (!brandReady()) out.push('brand');
+    if (!ebayAspects.categoryId) out.push('ebay_category');
+    else if (missingEbayAspects(ebayAspects.fields, ebayAspects.attributes, ebayAspects.na).length) out.push('ebay_aspects');
+    if (upcRequired(channels) && !upcReady()) out.push('upc');
+    else if (channels.includes('ebay') && !upcReady() && !form.noUpc) out.push('upc');
+    return out;
+  }
   /** Listing requirements only (price, condition, category, brand, UPC, weight+dims, item specifics, photo). */
   function missingFor(p: Parsed, hasAcceptedStockPhoto = Boolean(stockPhotoPath)): string[] {
-    if (doNotList) return receiveMissingFields({ doNotList: true, brandReady: brandReady(), hasPhoto: true });
-    const out: string[] = [];
-    if (!pos(p.ask)) out.push('price');
-    if (!form.condition) out.push('condition');
-    if (isDefectiveCondition(form.condition) && !form.conditionNote.trim()) out.push('defect note');
+    const photo = hasPhotoForSave(hasAcceptedStockPhoto);
+    if (doNotList) return receiveMissingFields({ doNotList: true, brandReady: brandReady(), hasPhoto: photo });
+    const gaps = listingGaps(p);
+    const out = [...gaps.map(g => (g === 'ebay_category' ? 'category' : g === 'ebay_aspects' ? 'item specifics' : g))];
+    if (isDefectiveCondition(form.condition) && !form.conditionNote.trim()) out.push('defect note' as typeof out[number]);
     if (!form.category.trim()) out.push('category');
-    if (!brandReady()) out.push('brand');
-    if (!upcReady()) out.push('UPC');
-    if (!form.model.trim()) out.push('item specifics');
-    return receiveMissingFields({ doNotList: false, brandReady: brandReady(), otherGaps: out,
-      hasPhoto: Boolean(files.length || hasAcceptedStockPhoto || (!manual && merged?.images?.[0])) });
+    if (!ebayAspects.categoryId && !form.model.trim()) out.push('item specifics');
+    return receiveMissingFields({ doNotList: false, brandReady: brandReady(), otherGaps: out, hasPhoto: photo });
   }
-  const liveMissing = (() => {
-    if (doNotShip) return [];
-    if (doNotList) return receiveMissingFields({ doNotList: true, brandReady: brandReady(), hasPhoto: true });
-    const a = cents(form.ask);
-    const out: string[] = [];
-    if (!pos(typeof a === 'number' ? a : null)) out.push('price');
-    if (!form.condition) out.push('condition');
-    if (isDefectiveCondition(form.condition) && !form.conditionNote.trim()) out.push('defect note');
-    if (!form.category.trim()) out.push('category');
-    if (!brandReady()) out.push('brand');
-    if (!upcReady()) out.push('UPC');
-    if (!form.model.trim()) out.push('item specifics');
-    return receiveMissingFields({ doNotList: false, brandReady: brandReady(), otherGaps: out,
-      hasPhoto: Boolean(files.length || stockPhotoPath || (!manual && merged?.images?.[0])) });
-  })();
+  const liveMissing = missingFor(parse() || { ask: null, cost: null, dims: [null, null, null, null] });
+  const formValid = doNotList
+    ? hasPhotoForSave() && Number(form.quantity) >= 1
+    : listingGaps(parse()).length === 0 && hasPhotoForSave() && brandReady() && Boolean(form.condition);
 
   /* ----- finish ----- */
   async function finish(event?: React.FormEvent) {
@@ -1281,6 +1288,21 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     if (!doNotList && files.some(f => f.size < PHOTO_MIN_BYTES)) { setError('One of the photos looks empty or too small. Retake it.'); return; }
     const parsed = parse();
     if (!parsed) return;
+    const listingKeys = listingGaps(parsed);
+    const needsPhoto = !hasPhotoForSave(Boolean(acceptedStockPhotoPath));
+    const blockKeys: ReceiveFieldKey[] = [
+      ...(needsPhoto ? ['photo' as const] : []),
+      ...(doNotList ? [] : listingKeys),
+      ...(!doNotList && !brandReady() ? ['brand' as const] : []),
+      ...(!doNotList && !form.condition ? ['condition' as const] : []),
+    ];
+    if (blockKeys.length) {
+      setShowSaveValidation(true);
+      setError(`${blockKeys.length} required field${blockKeys.length === 1 ? '' : 's'} missing. Fill the red boxes to save.`);
+      const first = blockKeys[0];
+      fieldRefs.current[first]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
     if (!doNotList && !dupAck && dups && dups.count > 0) { setError('Tap Add another unit to confirm this is a new physical item.'); return; }
     const gaps = missingFor(parsed, Boolean(acceptedStockPhotoPath));
     if (doNotList) {
@@ -1368,6 +1390,19 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           photo_identity_type: photoTitleConfirmed ? text(photoIdentity?.item_type) : '' },
       });
       const skus = data.skus as string[];
+      if (ebayAspects.categoryId && skus[0] && !doNotList) {
+        try {
+          await client.rpc('portal_set_unit_ebay_category', { p_sku: skus[0], p_category_id: ebayAspects.categoryId });
+          await fetch(floorFunctionUrl('ebay-specifics'), {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              store_id: storeId, sku: skus[0], action: 'category-selected',
+              attributes: ebayAspects.attributes,
+            }),
+          });
+        } catch { /* receive succeeded; specifics can be finished in item edit */ }
+      }
       if (acceptedStockPhotoPath && stockPhotoSourceUrl) {
         void attachStockPhotoSources(skus, String(form.upc || current?.upc || ''), acceptedStockPhotoPath,
           stockPhotoSourceUrl, stockPhotoUrls.filter(photo => photo.url !== stockPhotoSourceUrl).slice(0, 5));
@@ -1894,7 +1929,10 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
 
   const hasCatalogPhoto = Boolean(!manual && merged?.images?.[0]);
   const hasAnyPhoto = Boolean(files.length || stagedPhotoPaths.length || stockPhotoPath || hasCatalogPhoto);
-  return <section className={`panel receive-panel${appChrome ? ' receive-app' : ''}${storePhoneMode ? ' receive-store-phone' : ''}`}>
+  const invalid = (key: ReceiveFieldKey) => showSaveValidation && liveMissing.includes(
+    key === 'ebay_category' ? 'category' : key === 'ebay_aspects' ? 'item specifics' : key === 'upc' ? 'UPC' : key,
+  );
+  return <section className={`panel receive-panel receive-v2${appChrome ? ' receive-app' : ''}${storePhoneMode ? ' receive-store-phone' : ''}`}>
     {(appChrome || storePhoneMode) && <button type="button" className="receive-keyboard-trigger" onClick={() => setTypingOpen(open => !open)} aria-expanded={typingOpen}>
       {typingOpen ? 'Hide Floor keyboard' : '⌨ Floor keyboard'}
     </button>}
@@ -1909,7 +1947,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       <div className="app-nav receive-app-nav">
         <button type="button" onClick={() => { onAppCancel?.(); }}>Cancel</button>
         <div className="app-nav-title">Receive · {options?.next_sku || '…'}</div>
-        {storePhoneMode ? <span className="receive-phone-scanner"><i />Scanner</span> : <button type="button" disabled={busy || photoBusy || photoIdBusy || !hasAnyPhoto} onClick={() => {
+        {storePhoneMode ? <span className="receive-phone-scanner"><i />Scanner</span> : <button type="button" disabled={busy || !formValid} onClick={() => {
           const formEl = document.getElementById('receive-app-form') as HTMLFormElement | null;
           formEl?.requestSubmit();
         }}>Save</button>}
@@ -1976,6 +2014,9 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     </div>}
     <ReceiveWorkStatus client={client} accessToken={accessToken} />
     {warning && <p className="hint">{warning}</p>}
+    {showSaveValidation && liveMissing.length > 0 && (
+      <div className="receive-v2-banner" role="alert">{liveMissing.length} required field{liveMissing.length === 1 ? '' : 's'} missing. Fill the red boxes to save.</div>
+    )}
     {error && <div className="alert" role="alert">{error}<button type="button" onClick={() => setError('')}>Dismiss</button></div>}
 
     {!appChrome && !manual && !current && <div className="empty">Scan a UPC to start. Rapid scans are queued.</div>}
@@ -2179,18 +2220,41 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         </div>
         {needNoteForScratch && <label className="unit-edit-wide">What is defective / why non-sellable? (required)<textarea rows={2} value={form.conditionNote} onFocus={e => { typingTarget.current = e.currentTarget; }} onChange={e => update('conditionNote', e.target.value)} /></label>}
 
+        <ReceiveCategoryAspects
+          client={client}
+          storeId={storeId}
+          accessToken={accessToken}
+          doNotList={doNotList}
+          channels={channels}
+          disabled={busy}
+          showErrors={showSaveValidation || Boolean(ebayAspects.categoryId)}
+          identity={{
+            brand: form.unbranded ? 'Unbranded' : form.brand,
+            model: form.model,
+            title: form.title,
+            condition: form.condition,
+            upc: form.noUpc ? '' : (form.upc || current?.upc || ''),
+          }}
+          value={ebayAspects}
+          onChange={next => {
+            setEbayAspects(next);
+            const modelGuess = next.attributes.Model || next.attributes.Type || next.attributes['Model Number'] || '';
+            if (modelGuess && !form.model.trim()) update('model', modelGuess);
+          }}
+        />
+
         <CategoryField
           label={`Floor category${liveMissing.includes('category') ? ' (needed to list)' : ''}`}
           needed={liveMissing.includes('category')}
           value={form.category}
           options={choices(options?.categories)}
-          hint="Online store categories are set after saving. Floor fills a suggested eBay category when it finds a match; otherwise search the channel categories below."
+          hint="Website category for openboxindustries.com."
           onChange={v => update('category', v)}
           onFocus={e => { typingTarget.current = e.currentTarget; }}
         />
 
-        <label className={liveMissing.includes('brand') ? 'receive-need' : undefined}>
-          Brand{liveMissing.includes('brand') ? (doNotList ? ' (required to save)' : ' (needed to list)') : ''}
+        <label ref={el => { fieldRefs.current.brand = el; }} className={invalid('brand') ? 'receive-v2-invalid' : undefined}>
+          Brand{!doNotList && <span className="receive-v2-req"> *</span>}
           <input value={form.unbranded ? 'Unbranded' : form.brand} disabled={form.unbranded} onFocus={e => { typingTarget.current = e.currentTarget; }} onChange={e => update('brand', e.target.value)} />
           <button type="button" className="text-button" onClick={chooseNoBrand}>No brand</button>
         </label>
@@ -2249,18 +2313,19 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           <input inputMode="decimal" value={form.weight} onChange={e => update('weight', e.target.value)} />
         </label>
 
-        <label className={`unit-edit-wide${liveMissing.includes('item specifics') ? ' receive-need' : ''}`}>
-          Item specifics{liveMissing.includes('item specifics') ? ' (needed to list)' : (formatAspectsLine(merged?.aspects) && !text(merged?.model) ? ' (from UPC lookup)' : '')}
-          <input
-            value={form.model}
-            onFocus={e => { typingTarget.current = e.currentTarget; }}
-            onChange={e => update('model', e.target.value)}
-            placeholder="Model, flavor, size, color… (from UPC when available)"
-            autoComplete="off"
-            enterKeyHint="done"
-            autoCapitalize="sentences"
-          />
-        </label>
+        {!ebayAspects.categoryId && (
+          <label ref={el => { fieldRefs.current.ebay_aspects = el; }} className={`unit-edit-wide${invalid('ebay_aspects') ? ' receive-v2-invalid' : ''}`}>
+            Item specifics{!doNotList && <span className="receive-v2-req"> *</span>}
+            <input
+              value={form.model}
+              onFocus={e => { typingTarget.current = e.currentTarget; }}
+              onChange={e => update('model', e.target.value)}
+              placeholder="Model, size, color"
+              autoComplete="off"
+            />
+            {invalid('ebay_aspects') && <span className="receive-v2-msg">{receiveFieldMessage('ebay_aspects')}</span>}
+          </label>
+        )}
 
         <label className="unit-edit-wide">
           Title
@@ -2282,8 +2347,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           </select>
         </label>}
 
-        <div className={`unit-edit-wide${liveMissing.includes('photo') ? ' receive-need' : ''}`}>
-          <span className="receive-label">Photo{doNotList || manual ? ' (optional)' : (liveMissing.includes('photo') ? ' (needed to list)' : '')}</span>
+        <div ref={el => { fieldRefs.current.photo = el; }} className={`unit-edit-wide${invalid('photo') ? ' receive-v2-invalid' : ''}`}>
+          <span className="receive-label">Photos<span className="receive-v2-req"> *</span></span>
           <div className="actions">
             {/* Buttons + programmatic click — label+sr-only file inputs often do nothing in iOS PWA. */}
             <input
@@ -2366,10 +2431,13 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
               ? `Before it can list it still needs: ${liveMissing.join(', ')}.`
               : `Missing for listing: ${liveMissing.join(', ')}. You can still receive; incomplete units land in Needs attention.`}
       </p>
-      <div className="actions">
-        <button disabled={busy || (doNotList ? (photoBusy && hasAnyPhoto) : photoBusy || stockPhotoBusy || photoIdBusy || !hasAnyPhoto) || (dups !== null && dups.count > 0 && !dupAck)}>{busy ? 'Receiving…' : doNotList ? 'Receive store-only unit' : stockPhotoBusy || photoIdBusy ? 'Preparing photo…' : hasCatalogPhoto && !files.length && !stockPhotoPath ? 'Use stock photo & receive' : hasAnyPhoto ? 'Finish & receive' : 'Take a photo to save'}</button>
-        {!manual && current && <button type="button" className="secondary" disabled={busy} onClick={skipCurrent}>Skip this scan</button>}
+      <div className="receive-v2-pin">
+        <button type="submit" className="receive-v2-save" disabled={busy || photoBusy || stockPhotoBusy || photoIdBusy || (dups !== null && dups.count > 0 && !dupAck)}>
+          {busy ? 'Saving…' : 'Save item'}
+        </button>
+        <p className="receive-v2-footnote"><span className="receive-v2-req">*</span> Required</p>
       </div>
+      {!manual && current && <button type="button" className="secondary" disabled={busy} onClick={skipCurrent}>Skip this scan</button>}
       </details>
     </form>}
 

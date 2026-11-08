@@ -13,6 +13,7 @@ import { openShippingLabel } from './labelPrint';
 import { canBuyLabel, hasLabel, orderChip, orderNeedsLabel, orderStage, orderTimeline, packagedStale, shippedStale } from './orderStage';
 import { loadOrderLocations, locationCompare } from './locationOrder';
 import { useVisibleInterval } from './useVisibleInterval';
+import { ScanOutPanel } from './ScanOutPanel';
 
 const CHANNEL_LABEL: Record<string, string> = {
   website: 'Website',
@@ -37,6 +38,7 @@ export type WebOrder = {
   shipped_at: string | null; delivered_at: string | null;
   packaged_at?: string | null; packaged_by?: string | null; packaged_by_name?: string | null;
   shipped_by_name?: string | null; delivered_by_name?: string | null;
+  scanned_out_at?: string | null; scanned_out_by_name?: string | null;
   tracking_number: string | null; tracking_url: string | null; carrier: string | null; service: string | null;
   label_url: string | null; label_purchased_at: string | null; label_cost_cents: number | null;
   label_storage_path?: string | null; label_file_name?: string | null; label_mime?: string | null;
@@ -141,6 +143,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [labelOrder, setLabelOrder] = useState<WebOrder | null>(null);
   const [trackEvents, setTrackEvents] = useState<Record<string, { status?: string; status_detail?: string | null; location?: string | null; occurred_at?: string | null }[]>>({});
+  const [scanOut, setScanOut] = useState(false);
 
   const load = useCallback(async () => {
     // No practical date hide: cover store day-one history (portal still clamps to p_days).
@@ -633,6 +636,10 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
     );
   };
 
+  if (scanOut) {
+    return <ScanOutPanel client={client} storeId={storeId} stamp={stamp} onClose={() => setScanOut(false)} />;
+  }
+
   return <>
     <header><div><div className="eyebrow">WEBSITE AND MARKETPLACES</div><h1>Orders</h1><p>Every online order since day one. Returns, refunds, and replacements are on the Returns tab. No customer emails. Refreshes every 30 seconds.</p></div>
       <div className="actions"><button className="secondary" onClick={() => void load()}>Refresh</button></div></header>
@@ -665,6 +672,11 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
     </div>
     {orders === null && <p className="hint">Loading orders…</p>}
 
+    {view === 'packaged' && (
+      <div className="actions" style={{ marginBottom: 12 }}>
+        <button type="button" className="secondary" onClick={() => setScanOut(true)}>Scan out pickup</button>
+      </div>
+    )}
     {view==='toShip' && <button type="button" className="desktop-pick-list" disabled={!active.length} onClick={()=>document.querySelector('.ticket.order')?.scrollIntoView({behavior:'smooth',block:'start'})}>
       <span><strong>Pick list</strong><small>sorted by bay · row · bin</small></span><b>Start ›</b>
     </button>}
