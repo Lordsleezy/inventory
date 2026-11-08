@@ -183,8 +183,8 @@ export function LocationsPage({
       setError('That bay already exists. Open it and tap Edit.');
       return;
     }
-    if (!editRows.length || editRows.length > 5 || editRows.some((count) => count < 0 || count > 5)) {
-      setError('A bay has 1 to 5 rows, and each row has 0 to 5 bins.');
+    if (!editRows.length || editRows.length > 10 || editRows.some((count) => count < 0 || count > 10)) {
+      setError('A bay has 1 to 10 rows, and each row has 0 to 10 bins.');
       return;
     }
     const blocked = layoutBlocked(no, editRows, locations);
@@ -429,13 +429,13 @@ export function LocationsPage({
               </span>
               <span className="loc-stepper">
                 <button type="button" aria-label={`Fewer bins in row ${index + 1}`} disabled={busy || bins <= 0} onClick={() => setEditRows((rows) => rows.map((value, i) => i === index ? value - 1 : value))}>−</button>
-                <button type="button" aria-label={`More bins in row ${index + 1}`} disabled={busy || bins >= 5} onClick={() => setEditRows((rows) => rows.map((value, i) => i === index ? value + 1 : value))}>+</button>
+                <button type="button" aria-label={`More bins in row ${index + 1}`} disabled={busy || bins >= 10} onClick={() => setEditRows((rows) => rows.map((value, i) => i === index ? value + 1 : value))}>+</button>
               </span>
             </div>
           ))}
         </div>
         <div className="loc-edit-actions">
-          {editRows.length < 5 && <button type="button" disabled={busy} onClick={() => setEditRows((rows) => [...rows, 1])}>Add row</button>}
+          {editRows.length < 10 && <button type="button" disabled={busy} onClick={() => setEditRows((rows) => [...rows, 1])}>Add row</button>}
           {editRows.length > 1 && <button type="button" disabled={busy} onClick={() => setEditRows((rows) => rows.slice(0, -1))}>Remove last row</button>}
           {!creating && <button type="button" disabled={busy} onClick={printLabels}>Print labels</button>}
           {!creating && <button type="button" className="danger" disabled={busy || bayStock(no) > 0} onClick={() => void deleteBay()}>Delete bay</button>}
