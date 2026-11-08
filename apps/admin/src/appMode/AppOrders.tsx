@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { type WebOrder } from '../OrdersPage';
 import { LabelDialog } from '../LabelDialog';
-import { OrderStepper, OrderTimelineList, OrderTrackLine } from '../OrderFulfillment';
+import { OrderStepper, OrderTimelineList } from '../OrderFulfillment';
+import { OrderFacts, OrderFindRow, OrderPhotoCarousel, OrderTitle } from '../OrderPhotos';
+import { derivativePath, listThumbPhoto, loadUnitPhotos, signPhotoUrls, type UnitPhoto } from '../unitPhotos';
 import { errText } from '../errText';
 import { shortError } from './shortError';
 import { loadOrderLocations, locationCompare, locationParts } from '../locationOrder';
@@ -48,6 +50,8 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
   const [open, setOpen] = useState<WebOrder | null>(null);
   const [events, setEvents] = useState<TrackEvent[]>([]);
   const [locations, setLocations] = useState<Record<string, string[]>>({});
+  const [photoMap, setPhotoMap] = useState<Record<string, UnitPhoto[]>>({});
+  const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({});
   const [locationOptions, setLocationOptions] = useState<{ code: string }[]>([]);
   const [busy, setBusy] = useState('');
   const [labelOpen, setLabelOpen] = useState(false);
@@ -64,6 +68,11 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
       setOpen((prev) => (prev ? list.find((o) => o.id === prev.id) || prev : null));
       const skus = [...new Set(list.map((o) => o.sku).filter(Boolean))];
       setLocations(await loadOrderLocations(client, storeId, skus));
+      const photos = await loadUnitPhotos(client, storeId, skus).catch(() => ({} as Record<string, UnitPhoto[]>));
+      setPhotoMap(photos);
+      const thumbs = Object.values(photos).map((rows) => listThumbPhoto(rows)).filter((row): row is UnitPhoto => Boolean(row))
+        .map((row) => derivativePath(row.path, 400)).filter((path): path is string => Boolean(path));
+      setPhotoUrls(await signPhotoUrls(client, thumbs));
       const { data: bins } = await client.from('store_locations').select('code').eq('store_id', storeId).order('bay_no').order('row_no').order('bin_no');
       setLocationOptions((bins || []) as { code: string }[]);
     } catch (e) {
@@ -72,6 +81,7 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
   }, [client, storeId]);
 
   useVisibleInterval(load, 60_000);
+  const sign = useCallback((paths: string[]) => signPhotoUrls(client, paths), [client]);
 
   const loadEvents = useCallback(async (id: string) => {
     const { data, error: e } = await client.rpc('portal_order_timeline', { p_order: id });
@@ -262,7 +272,6 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
     const ship = open.fulfillment === 'ship';
     const buy = canBuyLabel(ch);
     const labeled = hasLabel(open);
-    const parts = locationParts(locations[open.sku]?.[0]);
     const timeline = orderTimeline(open, events);
     if (labelOpen && buy && ship && paid) {
       return (
@@ -289,32 +298,14 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
           <div className="app-nav-title">Order</div>
           <button type="button" style={{ visibility: 'hidden' }}>·</button>
         </div>
-        <div className="app-item-head">
-          <h1>{open.title}</h1>
-          <p className="meta">{open.sku} · {CHANNEL[ch] || open.channel} · {money(open.item_cents || 0)} · {when(open.paid_at || open.created_at)}</p>
+        <OrderPhotoCarousel photos={photoMap[open.sku] || []} urls={photoUrls} sign={sign} />
+        <div className="order-detail-copy">
+          <OrderTitle title={open.title || 'Item'} />
+          <p>{CHANNEL[ch] || open.channel} · {money(open.item_cents || 0)} · {when(open.paid_at || open.created_at)}</p>
         </div>
+        <OrderFindRow sku={open.sku} code={locations[open.sku]?.[0] || ''} options={locationOptions} disabled={!!busy} onChange={(code) => void setPickLocation(open, code)} />
         {ship && stage !== 'canceled' && <OrderStepper stage={stage} />}
-        <div className="app-group">
-          <div className="app-kv">
-            <span>Pick</span>
-            <select aria-label={`Set pick location for SKU ${open.sku}`} value={locations[open.sku]?.[0] || ''} disabled={!!busy || !locationOptions.length} onChange={(event) => void setPickLocation(open, event.target.value)}>
-              <option value="">{parts ? 'Change location' : 'Set location'}</option>
-              {locationOptions.map((location) => {
-                const bit = locationParts(location.code);
-                return <option key={location.code} value={location.code}>{bit ? `${bit.display} · ${bit.slot}` : location.code}</option>;
-              })}
-            </select>
-          </div>
-          <div className="app-kv"><span>Label</span><strong className={labeled ? 'live' : 'warn'}>{labelText}</strong></div>
-          <div className="app-kv">
-            <span>Tracking</span>
-            <strong>
-              {open.tracking_number ? trackingTail(open) : '—'}
-              {open.tracking_number && <button type="button" className="text-button" onClick={() => void navigator.clipboard.writeText(open.tracking_number || '')}>Copy</button>}
-            </strong>
-          </div>
-          <OrderTrackLine order={open} />
-        </div>
+        <OrderFacts label={labelText} labeled={labeled} order={open} />
         {open.tracking_exception && <p className="app-inline-error">Carrier exception: {open.tracking_exception}</p>}
         {open.tracking_needs_entry && (
           <form className="app-track-box" onSubmit={(e) => { e.preventDefault(); void saveTracking(open); }}>
@@ -324,61 +315,57 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
             <button type="submit" disabled={!!busy || trackingDraft.trim().length < 8}>{busy === 'tracking' ? 'Saving…' : 'Save tracking'}</button>
           </form>
         )}
-        {timeline.length > 0 && (
-          <div className="app-group order-timeline-wrap">
-            <OrderTimelineList rows={timeline} stamp={stamp} />
-          </div>
-        )}
         {error && <p className="app-inline-error">{error}</p>}
         {paid && ship && stage !== 'canceled' && (
-          <div className="app-actions stack">
-            {labeled && (
-              <>
-                <button type="button" disabled={!!busy} onClick={() => void printLabel(open)}>{busy === 'print' ? '…' : 'Print label'}</button>
-                <button type="button" className="secondary" disabled={!!busy} onClick={() => void printLabel(open, true)}>Save PDF</button>
-              </>
-            )}
-            {!labeled && buy && (
-              <button type="button" disabled={!!busy || open.pack_condition === 'not_as_listed'} onClick={() => setLabelOpen(true)}>Buy label</button>
-            )}
-            {orderNeedsLabel(open) && (
-              <>
-                <input ref={labelInput} className="sr-only" type="file" accept="application/pdf,image/*" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void uploadLabel(open, f); }} />
+          <>
+            <div className="order-actions">
+              {labeled && <button type="button" disabled={!!busy} onClick={() => void printLabel(open)}>{busy === 'print' ? '…' : 'Print label'}</button>}
+              {!labeled && buy && !orderNeedsLabel(open) && (
+                <button type="button" disabled={!!busy || open.pack_condition === 'not_as_listed'} onClick={() => setLabelOpen(true)}>Buy label</button>
+              )}
+              {orderNeedsLabel(open) && (
                 <button type="button" className="primary" disabled={!!busy} onClick={() => labelInput.current?.click()}>{busy === 'upload-label' ? '…' : open.label_storage_path ? 'Replace label' : 'Upload label'}</button>
-              </>
-            )}
-            {stage === 'toShip' && (
-              <button type="button" className="primary" disabled={!!busy} onClick={() => void markPackaged(open)}>
-                {busy === 'packaged' ? '…' : 'Packaged'}
-              </button>
-            )}
-            {stage === 'packaged' && (
-              <button type="button" className="primary" disabled={!!busy} onClick={() => void markShipped(open)}>
-                {busy === 'shipped' ? '…' : 'Mark shipped'}
-              </button>
-            )}
-            {stage === 'shipped' && isAdmin && (
-              <button type="button" className="primary" disabled={!!busy} onClick={() => void markDelivered(open)}>
-                {busy === 'delivered' ? '…' : 'Mark delivered'}
-              </button>
-            )}
-            {open.label_origin === 'bought' && !open.delivered_at && (
-              <button type="button" className="secondary" disabled={!!busy} onClick={() => void voidLabel(open)}>{busy === 'void' ? '…' : 'Void label'}</button>
-            )}
-            {(ch === 'amazon' || ch === 'tiktok') && !open.delivered_at && (
-              <>
-                <input ref={packProofInput} type="file" accept="image/*" capture="environment" className="sr-only" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void uploadPackProof(open, f); }} />
+              )}
+              {stage === 'toShip' && (
+                <button type="button" className="primary" disabled={!!busy} onClick={() => void markPackaged(open)}>
+                  {busy === 'packaged' ? '…' : 'Packaged'}
+                </button>
+              )}
+              {stage === 'packaged' && (
+                <button type="button" className="primary" disabled={!!busy} onClick={() => void markShipped(open)}>
+                  {busy === 'shipped' ? '…' : 'Mark shipped'}
+                </button>
+              )}
+              {stage === 'shipped' && isAdmin && (
+                <button type="button" className="primary" disabled={!!busy} onClick={() => void markDelivered(open)}>
+                  {busy === 'delivered' ? '…' : 'Mark delivered'}
+                </button>
+              )}
+            </div>
+            <div className="order-actions more">
+              {labeled && <button type="button" className="secondary" disabled={!!busy} onClick={() => void printLabel(open, true)}>Save PDF</button>}
+              {open.label_origin === 'bought' && !open.delivered_at && (
+                <button type="button" className="secondary" disabled={!!busy} onClick={() => void voidLabel(open)}>{busy === 'void' ? '…' : 'Void label'}</button>
+              )}
+              {(ch === 'amazon' || ch === 'tiktok') && !open.delivered_at && (
                 <button type="button" className="secondary" disabled={!!busy} onClick={() => packProofInput.current?.click()}>
                   {open.pack_proof_photo_path ? 'Replace pack photo' : 'Add pack photo'}
                 </button>
-              </>
-            )}
-            {(open.delivered_at || open.shipped_at || open.packaged_at) && (
-              <button type="button" className="secondary" disabled={!!busy} onClick={() => void stepBack(open)}>Move back one step</button>
-            )}
-            {!open.delivered_at && !open.picked_up_at && (
-              <button type="button" className="secondary" disabled={!!busy} onClick={() => void floorCancel(open)}>Cancel in Floor</button>
-            )}
+              )}
+              {(open.delivered_at || open.shipped_at || open.packaged_at) && (
+                <button type="button" className="secondary" disabled={!!busy} onClick={() => void stepBack(open)}>Move back one step</button>
+              )}
+              {!open.delivered_at && !open.picked_up_at && (
+                <button type="button" className="secondary" disabled={!!busy} onClick={() => void floorCancel(open)}>Cancel in Floor</button>
+              )}
+            </div>
+            <input ref={labelInput} className="sr-only" type="file" accept="application/pdf,image/*" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void uploadLabel(open, f); }} />
+            <input ref={packProofInput} type="file" accept="image/*" capture="environment" className="sr-only" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void uploadPackProof(open, f); }} />
+          </>
+        )}
+        {timeline.length > 0 && (
+          <div className="app-group order-timeline-wrap">
+            <OrderTimelineList rows={timeline} stamp={stamp} />
           </div>
         )}
         {stage === 'toShip' && <p className="app-footer-count">Tap once it's boxed and labeled.</p>}
@@ -424,9 +411,13 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
           const chName = CHANNEL[(o.channel || 'website').toLowerCase()] || o.channel || 'Website';
           const loc = locationParts(locations[o.sku]?.[0]);
           const tail = trackingTail(o);
+          const thumbPhoto = listThumbPhoto(photoMap[o.sku] || []);
+          const thumbPath = thumbPhoto ? derivativePath(thumbPhoto.path, 400) : null;
+          const thumb = thumbPath ? photoUrls[thumbPath] : '';
           return (
             <div key={o.id} className="app-row app-order-row">
             <button type="button" className="app-order-open" onClick={() => setOpen(o)}>
+              {thumb ? <img className="app-order-thumb" src={thumb} alt="" /> : <span className="app-order-thumb empty" aria-hidden="true" />}
               {loc
                 ? <span className="app-order-location-badge"><small>{loc.display}</small><strong>{loc.slot}</strong></span>
                 : <span className="app-order-location-badge missing"><small>BAY</small><strong>None</strong></span>}

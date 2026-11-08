@@ -4,11 +4,13 @@ import { floorFunctionUrl } from './floorApi';
 import { CommissionOverrideControls, CommissionOverrideMark } from './CommissionOverride';
 import { frozenCutsForTicket, type CommissionOverride, type OnlineCfg, type Rule } from './payouts';
 import { LabelDialog } from './LabelDialog';
-import { OrderStepper, OrderTimelineList, OrderTrackLine } from './OrderFulfillment';
+import { OrderStepper, OrderTimelineList } from './OrderFulfillment';
+import { OrderFacts, OrderFindRow, OrderPhotoCarousel, OrderTitle } from './OrderPhotos';
+import { derivativePath, listThumbPhoto, loadUnitPhotos, signPhotoUrls, type UnitPhoto } from './unitPhotos';
 import { errText } from './errText';
 import { fileToBase64, labelFileUrl, orderAdmin } from './orderLabel';
-import { canBuyLabel, carrierTrackUrl, hasLabel, orderChip, orderNeedsLabel, orderStage, orderTimeline, packagedStale, shippedStale } from './orderStage';
-import { loadOrderLocations, locationCompare, locationParts } from './locationOrder';
+import { canBuyLabel, hasLabel, orderChip, orderNeedsLabel, orderStage, orderTimeline, packagedStale, shippedStale } from './orderStage';
+import { loadOrderLocations, locationCompare } from './locationOrder';
 import { useVisibleInterval } from './useVisibleInterval';
 
 const CHANNEL_LABEL: Record<string, string> = {
@@ -127,6 +129,7 @@ function breakdown(rows: WebOrder[]) {
 
 export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, cfg, commissionOverrides, frozen, personName, busy: parentBusy, onCommissionChanged }: Props) {
   const [orders, setOrders] = useState<WebOrder[] | null>(null);
+  const [photoMap, setPhotoMap] = useState<Record<string, UnitPhoto[]>>({});
   const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({});
   const [locations, setLocations] = useState<Record<string, string[]>>({});
   const [locationOptions, setLocationOptions] = useState<{ code: string }[]>([]);
@@ -148,16 +151,13 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
     const { data: bins } = await client.from('store_locations').select('code').eq('store_id',storeId).order('bay_no').order('row_no').order('bin_no');
     setLocationOptions((bins || []) as {code:string}[]);
     if (skus.length) {
-      const { data: photos } = await client.from('photos').select('sku,path,is_primary,sort_order').eq('store_id', storeId).in('sku', skus.slice(0, 100)).order('is_primary', { ascending: false }).order('sort_order');
-      const bySku = new Map<string, string>();
-      for (const photo of photos || []) if (!bySku.has(photo.sku)) bySku.set(photo.sku, photo.path);
-      const paths = [...bySku.values()];
-      if (paths.length) {
-        const { data: signed } = await client.storage.from('unit-photos').createSignedUrls(paths, 3600);
-        setPhotoUrls(Object.fromEntries([...bySku.keys()].map((sku, i) => [sku, signed?.[i]?.signedUrl || ''])));
-      }
+      const photos = await loadUnitPhotos(client, storeId, skus).catch(() => ({} as Record<string, UnitPhoto[]>));
+      setPhotoMap(photos);
+      const thumbs = Object.values(photos).flatMap((rows) => rows.map((row) => derivativePath(row.path, 400)).filter((path): path is string => Boolean(path)));
+      setPhotoUrls(await signPhotoUrls(client, thumbs));
     }
   }, [client, storeId]);
+  const sign = useCallback((paths: string[]) => signPhotoUrls(client, paths), [client]);
   useVisibleInterval(load, 60_000);
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 30000); return () => clearInterval(t); }, []);
 
@@ -446,16 +446,9 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
     const canOverride = !!o.ticket_key && (o.status === 'paid' || !!o.paid_at);
     // Matched: Floor unit title. Unmatched: email/listing title until Link SKU.
     const linked = o.match_status === 'matched' || (!!o.sku && o.sku !== 'UNMATCHED' && !!o.sale_id);
-    const displayTitle = linked
-      ? (o.title || o.marketplace_title || 'Item')
-      : (o.marketplace_title || o.title || 'Marketplace sale');
     const skuLabel = linked ? `SKU ${o.sku}` : 'Needs SKU match';
-    return <div className="ticket-items"><div>{displayTitle} <span>· {skuLabel}</span></div>
-    {(() => { const code=locations[o.sku]?.[0]||''; const parts=locationParts(code); return <div className={`order-pick-location${parts?'':' missing'}`}>
-      <select aria-label={`Set pick location for SKU ${o.sku}`} value={code} disabled={!!busy||!locationOptions.length} onChange={event=>void setPickLocation(o,event.target.value)}>
-        <option value="">{parts?'Change location':'Tap to set location'}</option>{locationOptions.map(location=><option key={location.code} value={location.code}>{locationParts(location.code)?.display} · {locationParts(location.code)?.slot}</option>)}
-      </select>
-    </div>; })()}
+    return <div className="ticket-items">
+    <small>{skuLabel}</small>
     <small>{o.buyer_name}{o.buyer_email ? ` · ${o.buyer_email}` : ''}{o.buyer_phone ? ` · ${o.buyer_phone}` : ''}</small>
     <small>Item {money(o.item_cents)}{orderFee(o) ? ` · Fees ${money(orderFee(o))}` : ''} · {o.fulfillment === 'ship' ? `Buyer ship ${money(o.shipping_cents)}` : 'Store pickup'}{o.fulfillment === 'ship' ? ` · Label ${o.label_cost_cents != null ? money(o.label_cost_cents) : '—'}` : ''} · Tax {money(o.tax_cents)}</small>
     <CommissionOverrideMark overridden={!!ov} />
@@ -499,10 +492,25 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
     const cardStatus = chip.text;
     const displayTitle = o.match_status === 'matched' || (!!o.sku && o.sku !== 'UNMATCHED' && !!o.sale_id)
       ? (o.title || o.marketplace_title || 'Item') : (o.marketplace_title || o.title || 'Marketplace sale');
+    const thumbPhoto = listThumbPhoto(photoMap[o.sku] || []);
+    const thumbPath = thumbPhoto ? derivativePath(thumbPhoto.path, 400) : null;
+    const thumb = thumbPath ? photoUrls[thumbPath] : '';
+    const labelText = o.label_origin === 'upload'
+      ? `Uploaded · ${channelLabel(o.channel)}`
+      : o.label_origin === 'bought' || o.label_purchased_at
+        ? `Bought${o.label_cost_cents != null ? ` · ${money(o.label_cost_cents)}` : ''}`
+        : orderNeedsLabel(o) ? 'Upload label' : buy ? 'Buy label' : '—';
     return (
       <div className="ticket order" key={o.id}>
-        <div className="order-card-summary">{photoUrls[o.sku] && <img src={photoUrls[o.sku]} alt="" width={48} height={48} style={{ objectFit: 'cover', borderRadius: 8 }} />}<div className="order-card-info"><strong className="order-card-title">{displayTitle}</strong><small>{channelLabel(o.channel)} · {money(o.item_cents)} · SKU {o.sku}</small><div className="order-card-tags"><b className={chip.tone === 'warn' ? 'badge-warn' : ''}>{cardStatus}</b></div></div></div>
+        <OrderPhotoCarousel photos={photoMap[o.sku] || []} urls={photoUrls} sign={sign} />
+        <div className="order-detail-copy">
+          <OrderTitle title={displayTitle} />
+          <p>{channelLabel(o.channel)} · {money(o.item_cents)} · {o.paid_at ? stamp(o.paid_at) : stamp(o.created_at)}</p>
+        </div>
+        <OrderFindRow sku={o.sku} code={locations[o.sku]?.[0] || ''} options={locationOptions} disabled={!!busy} onChange={(code) => void setPickLocation(o, code)} />
+        <div className="order-card-summary">{thumb && <img className="app-order-thumb" src={thumb} alt="" />}<div className="order-card-info"><small>{channelLabel(o.channel)} · {money(o.item_cents)} · SKU {o.sku}</small><div className="order-card-tags"><b className={chip.tone === 'warn' ? 'badge-warn' : ''}>{cardStatus}</b></div></div></div>
         {o.fulfillment === 'ship' && !isCanceled && <OrderStepper stage={stage} />}
+        <OrderFacts label={labelText} labeled={labeled} order={o} />
         {o.tracking_exception && <div className="alert" role="status">Carrier exception: {o.tracking_exception}</div>}
         {(isPackaged || isShipped || isDone) && <OrderTimelineList rows={orderTimeline(o, trackEvents[o.id])} stamp={stamp} />}
         {head(o)}{item(o)}
@@ -556,7 +564,6 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
         {isPackaged && (
           <>
             <small>Packaged {o.packaged_at ? stamp(o.packaged_at) : ''}{o.packaged_by_name ? ` · ${o.packaged_by_name}` : ''}{packagedStale(o) ? ' · not marked shipped for 2 days' : ''}</small>
-            <OrderTrackLine order={o} />
             <div className="actions">
               {labeled && <button type="button" disabled={!!busy} onClick={() => void printOrderLabel(o)}>Print 4×6</button>}
               <button type="button" className="primary" disabled={!!busy} onClick={() => void markShipped(o)}>{busy === o.id + 'shipped' ? 'Saving…' : 'Mark shipped'}</button>
@@ -568,7 +575,6 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
         {isShipped && (
           <>
             <small>Shipped {stamp(o.shipped_at!)}{o.shipped_by_name ? ` · ${o.shipped_by_name}` : ''}{shippedStale(o) ? ' · not marked delivered for 10 days' : ''}</small>
-            <OrderTrackLine order={o} />
             {o.refund_requested_at ? <p className="hint">Cancel & refund in progress…</p> : <div className="actions">
               <button type="button" className="primary" disabled={!!busy} onClick={() => void markDelivered(o)}>{busy === o.id + 'delivered' ? 'Saving…' : 'Mark delivered'}</button>
               <button type="button" className="secondary" disabled={!!busy} onClick={() => void stepBack(o)}>{busy === o.id + 'step-back' ? 'Saving…' : 'Move back one step'}</button>
@@ -591,7 +597,6 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
         {isDone && (
           <>
             <small>{o.picked_up_at ? `Picked up ${stamp(o.picked_up_at)} · ${o.picked_up_by || ''}` : `Delivered ${stamp(o.delivered_at!)}${o.delivered_by_name ? ` · ${o.delivered_by_name}` : ''}${o.shipped_at ? ` · shipped ${stamp(o.shipped_at)}` : ''}`}</small>
-            {!o.picked_up_at && <OrderTrackLine order={o} />}
             <div className="actions">
               <button type="button" className="secondary" disabled={!!busy} onClick={() => void stepBack(o)}>{busy === o.id + 'step-back' ? 'Saving…' : 'Move back one step'}</button>
               <button className="text-button danger" disabled={!!busy} onClick={() => void deleteOrder(o)}>{busy === o.id + 'delete' ? 'Deleting…' : 'Delete'}</button>

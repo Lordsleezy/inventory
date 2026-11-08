@@ -2692,17 +2692,17 @@ html.app-mode .app-actions button.secondary { color: #fff; background: #2c2c2e; 
 html.app-mode .order-stepper {
   display: flex;
   list-style: none;
-  margin: 0 16px 14px;
-  padding: 12px 8px;
-  gap: 4px;
+  margin: 0 16px 10px;
+  padding: 8px 4px;
+  gap: 2px;
   background: #1c1c1e;
   border-radius: 12px;
 }
-html.app-mode .order-stepper li { flex: 1; display: grid; justify-items: center; gap: 4px; color: #8e8e93; font-size: 11px; }
+html.app-mode .order-stepper li { flex: 1; display: flex; align-items: center; justify-content: center; gap: 4px; color: #8e8e93; font-size: 11px; white-space: nowrap; }
 html.app-mode .order-stepper li span {
-  width: 22px; height: 22px; border-radius: 50%;
+  width: 18px; height: 18px; border-radius: 50%; flex: 0 0 18px;
   display: grid; place-items: center;
-  background: #2c2c2e; color: #8e8e93; font-size: 12px; font-weight: 700;
+  background: #2c2c2e; color: #8e8e93; font-size: 11px; font-weight: 700;
 }
 html.app-mode .order-stepper li.current { color: #0a84ff; }
 html.app-mode .order-stepper li.current span { background: #0a84ff; color: #fff; }
@@ -2757,3 +2757,25 @@ html.app-mode .depop-form .actions button.primary {
   font-size: 17px;
   font-weight: 650;
 }
+html.app-mode .order-photos { margin: 0 16px 8px; }
+html.app-mode .order-photo-frame { background: #1c1c1e; }
+html.app-mode .order-photo-slide img,
+html.app-mode .order-zoom img { background: #1c1c1e; }
+html.app-mode .order-photo-empty,
+html.app-mode .order-photo-wait { background: #1c1c1e; color: #8e8e93; }
+html.app-mode .order-detail-copy { padding: 0 16px; }
+html.app-mode .order-title { color: #fff; font-size: 20px; }
+html.app-mode .order-detail-copy p { color: #8e8e93; }
+html.app-mode .order-find { margin: 8px 16px 10px; }
+html.app-mode .order-sku-block { background: #2c2c2e; color: #fff; }
+html.app-mode .order-facts { margin: 0 16px 10px; background: #1c1c1e; }
+html.app-mode .order-facts > div + div { border-top-color: #3a3a3c; }
+html.app-mode .order-facts span { color: #8e8e93; }
+html.app-mode .order-facts strong { color: #fff; }
+html.app-mode .order-facts strong.ok { color: #30d158; }
+html.app-mode .order-facts strong.warn { color: #ff9f0a; }
+html.app-mode .order-actions { margin: 0 16px 8px; }
+html.app-mode .order-actions button { background: #2c2c2e; color: #fff; }
+html.app-mode .order-actions button.primary { background: #0a84ff; color: #fff; }
+html.app-mode .app-order-thumb { width: 44px; height: 44px; flex-basis: 44px; border-radius: 8px; }
+html.app-mode .app-order-thumb.empty { background: #2c2c2e; }
