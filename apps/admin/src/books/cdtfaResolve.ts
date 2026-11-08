@@ -2,7 +2,7 @@ export type CdtfaFrequency = 'monthly' | 'quarterly' | 'yearly';
 
 export type FloorLine = { id: string; label: string; dollars: number; note?: string; sales?: unknown[] };
 
-const DERIVED = new Set(['3', 'A11', 'B5', '11', '12', '13', '14', '15', '17', '18', '19', '20e', '21', '23', '26']);
+const DERIVED = new Set(['3', 'A11', 'B5', '11', '12', '13', '14', '15', '17', '19', '20e', '21', '23', '26']);
 
 export function isDerivedLine(id: string) {
   return DERIVED.has(id);
@@ -16,7 +16,7 @@ function roundDollars(n: number) {
 export function resolveCdtfaDollars(
   floor: { id: string; dollars: number }[],
   edits: Record<string, number | undefined>,
-  collectedDollars: number,
+  _collectedDollars = 0,
 ): { id: string; dollars: number; floor: number; edited: boolean }[] {
   const floorOf = new Map(floor.map((row) => [row.id, row.dollars]));
   const seen = new Set<string>();
@@ -36,7 +36,6 @@ export function resolveCdtfaDollars(
       case '14': dollars = roundDollars(v('12') * 0.0025); break;
       case '15': dollars = roundDollars(v('12') * 0.01); break;
       case '17': dollars = v('13') + v('14') + v('15') + v('16'); break;
-      case '18': dollars = Math.max(0, collectedDollars - v('17')); break;
       case '19': dollars = v('17') + v('18'); break;
       case '20e': dollars = v('20a') + v('20b') + v('20c') + v('20d'); break;
       case '21': dollars = v('19') - v('20e'); break;

@@ -18,6 +18,7 @@ test('editing line 11 rebuilds taxable sales and the tax lines', () => {
   assert.equal(at('13').dollars, Math.round(1263 * 0.06));
   assert.equal(at('26').dollars, at('23').dollars);
   assert.equal(at('1').dollars, 1363);
+  assert.equal(at('18').dollars, 0);
 });
 
 test('Q3 2026 is the quarter that contains September', () => {
