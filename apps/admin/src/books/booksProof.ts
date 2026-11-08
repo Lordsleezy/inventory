@@ -2,7 +2,7 @@ import type { BooksWorkbook, Report, SalesLine } from './types';
 import type { PersonBalance } from './payoutLedger';
 
 export type BooksIntegrityIssue = {
-  kind: 'commission' | 'owner' | 'owed_paul' | 'owed_jacob' | 'in_store_fee';
+  kind: 'commission' | 'owner' | 'owed_paul' | 'owed_jacob' | 'in_store_fee' | 'unmatched_label';
   message: string;
   cents?: number;
   saleId?: string;
@@ -103,12 +103,21 @@ export function verifyBooksIntegrity(
     issues.push({ kind: 'in_store_fee', message: a.message, saleId: a.ticketKey });
   }
 
+  const unmatched = report?.books_unmatched_labels || [];
+  for (const u of unmatched) {
+    issues.push({
+      kind: 'unmatched_label',
+      message: `Label not matched to a sale — ${u.title} — ${u.date} — $${(u.amount_cents / 100).toFixed(2)}`,
+      cents: u.amount_cents,
+    });
+  }
+
   const ticketOk = commissionGap === 0 && ownerGap === 0
     && (owedPaulGap === null || owedPaulGap === 0)
     && (owedJacobGap === null || owedJacobGap === 0);
 
   return {
-    ok: ticketOk && workbook.audit.length === 0,
+    ok: ticketOk && workbook.audit.length === 0 && unmatched.length === 0,
     commissionGap_cents: commissionGap,
     ownerGap_cents: ownerGap,
     owedPaulGap_cents: owedPaulGap,

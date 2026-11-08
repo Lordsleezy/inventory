@@ -11,6 +11,7 @@ import {
   type TicketLike,
 } from '../payouts';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { loadAllPortalExpenses } from '../payoutExpenses';
 import { mergeEmployeeIds } from './personMerge';
 import type { FrozenMap } from './types';
 
@@ -99,10 +100,7 @@ export async function loadPayoutLedgerData(client: SupabaseClient, storeId: stri
   let adjustments: LedgerAdjustment[] = [];
   const adjRes = await client.rpc('portal_payout_adjustments');
   if (!adjRes.error) adjustments = (adjRes.data || []) as LedgerAdjustment[];
-  const expRes = await client.from('portal_expenses').select('*').eq('store_id', storeId)
-    .order('spent_on', { ascending: false }).order('created_at', { ascending: false }).limit(500);
-  if (expRes.error) throw expRes.error;
-  const expenses = (expRes.data || []) as LedgerExpense[];
+  const expenses = await loadAllPortalExpenses<LedgerExpense>(client, storeId);
   const allSales = linesToPayoutTickets(lines, overrides);
   return { allSales, payments, adjustments, expenses };
 }

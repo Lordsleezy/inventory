@@ -33,6 +33,7 @@ import { AppModeShell } from './appMode/AppModeShell';
 import { NeedsAttentionPanel } from './NeedsAttentionPanel';
 import { isInStoreChannel } from './channels';
 import { replacementAddback, replacementLine, type Disposition } from './dispositions';
+import { loadAllPortalExpenses } from './payoutExpenses';
 import { CommissionMath } from './CommissionMath';
 import { setReplacementRows, useReplacementsForSale } from './replacementsStore';
 
@@ -511,12 +512,12 @@ export function App() {
       const [p, r, a, x, c, sp, sr] = await Promise.all([
         sb.rpc('portal_people'), sb.from('portal_payout_rules').select('employee_id,method,rate').eq('store_id', store),
         storedReports(store),
-        sb.from('portal_expenses').select('*').eq('store_id', store).order('spent_on', { ascending: false }).order('created_at', { ascending: false }).limit(500),
+        loadAllPortalExpenses<StoreExpense>(sb, store),
         sb.rpc('portal_payout_config'),
         sb.from('store_payout_people').select('slot,employee_id').eq('store_id', store),
         sb.from('store_payout_sku_rates').select('sku,employee_id,rate').eq('store_id', store),
       ]);
-      setPeople(check<Person[]>(p)); setRules(check<Rule[]>(r)); setReports(a); setExpenses(check<StoreExpense[]>(x));
+      setPeople(check<Person[]>(p)); setRules(check<Rule[]>(r)); setReports(a); setExpenses(x);
       const cfg = check<{ online_channels: string[]; online_payout_pct: number; online_payout_employee_id: string | null; absorb_fees?: boolean }>(c);
       const slots = Object.fromEntries(((sp.data || []) as { slot: string; employee_id: string }[]).map(x => [x.slot, x.employee_id]));
       const skuRates: Record<string, Record<string, number>> = {};

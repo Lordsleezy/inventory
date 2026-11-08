@@ -1,4 +1,12 @@
+import { storeCheckoutLabel } from './expenseBuild';
 import type { Report, Row } from './types';
+
+export type UnmatchedLabel = {
+  id: string;
+  date: string;
+  amount_cents: number;
+  title: string;
+};
 
 /** Fee rows from Books report that are not yet in sale_ledger profit. */
 export type SaleFeeExtra = { promoted_cents: number; label_extra_cents: number; channel_extra_cents: number };
@@ -128,6 +136,10 @@ export function applySaleLabelCosts(report: Report): Report {
   const maps = saleIndexMaps(sales);
   const dedupExpenseIds = new Set<string>();
   const dedupLabelIds = new Set<string>();
+  const unmatched: UnmatchedLabel[] = [];
+  const pushUnmatched = (id: string, date: string, cents: number, title: string) => {
+    unmatched.push({ id, date: String(date || '').slice(0, 10), amount_cents: cents, title });
+  };
 
   const addShip = (idx: number, cents: number) => {
     if (cents <= 0) return;
@@ -137,10 +149,18 @@ export function applySaleLabelCosts(report: Report): Report {
 
   for (const l of report.labels || []) {
     if (l.voided_at) continue;
+    if (storeCheckoutLabel({}, l)) continue;
     const cents = Math.abs(Number(l.signed_amount_cents ?? l.cost_cents ?? 0));
     if (!cents) continue;
+    const order = String(l.order_id || l.transaction_id || '');
+    const title = String(l.carrier || '').toLowerCase() === 'ebay'
+      ? `eBay label${order ? ` · ${order}` : ''}`
+      : ['Shipping label', order].filter(Boolean).join(' · ');
     const idx = pickSaleIndex(sales, maps, { orderId: l.order_id || l.transaction_id, sku: l.sku, channel: String(l.carrier || '') });
-    if (idx == null) continue;
+    if (idx == null) {
+      pushUnmatched(String(l.id), String(l.date || l.purchased_at || ''), cents, title);
+      continue;
+    }
     const already = Number(sales[idx].ship_cost_cents || 0);
     if (already >= cents) {
       dedupLabelIds.add(String(l.id));
@@ -158,7 +178,10 @@ export function applySaleLabelCosts(report: Report): Report {
     const cents = Number(e.amount_cents || 0);
     if (!cents) continue;
     const idx = pickSaleIndex(sales, maps, { saleId: e.sale_id, orderId: e.order_id, sku: e.sku, channel: String(e.channel || e.source || '') });
-    if (idx == null) continue;
+    if (idx == null) {
+      pushUnmatched(String(e.id), String(e.spent_on || e.date || ''), cents, String(e.description || 'Shipping label'));
+      continue;
+    }
     if (Number(sales[idx].ship_cost_cents || 0) < cents) addShip(idx, cents - Number(sales[idx].ship_cost_cents || 0));
     dedupExpenseIds.add(String(e.id));
   }
@@ -168,6 +191,7 @@ export function applySaleLabelCosts(report: Report): Report {
     sales,
     books_label_dedup_expense_ids: [...dedupExpenseIds],
     books_label_dedup_label_ids: [...dedupLabelIds],
+    books_unmatched_labels: unmatched,
   };
 }
 

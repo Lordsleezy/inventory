@@ -163,15 +163,18 @@ function feePolicyLine(absorbFees?: boolean, channels?: string[]) {
 function BooksProofBar({ money, workbook }: { money: (c: number) => string; workbook: BooksWorkbook }) {
   const [open, setOpen] = useState(false);
   const integrity = workbook.integrity;
-  const auditOnly = integrity && !integrity.ok && integrity.commissionGap_cents === 0 && integrity.ownerGap_cents === 0;
+  const hasUnmatched = integrity?.issues.some((i) => i.kind === 'unmatched_label');
+  const auditOnly = integrity && !integrity.ok && integrity.commissionGap_cents === 0 && integrity.ownerGap_cents === 0 && !hasUnmatched;
   const gap = integrity ? Math.max(Math.abs(integrity.commissionGap_cents), Math.abs(integrity.ownerGap_cents)) : 0;
   const owedGap = integrity?.issues.find((i) => i.kind === 'owed_paul' || i.kind === 'owed_jacob');
   if (!integrity) return null;
   const status = integrity.ok
     ? '✓ Ties to per-sale payouts'
-    : auditOnly
-      ? '⚠ In-store sale with marketplace fees'
-      : `✗ Off by ${money(gap || Math.abs(owedGap?.cents || 0))}`;
+    : hasUnmatched
+      ? '⚠ Unmatched shipping label'
+      : auditOnly
+        ? '⚠ In-store sale with marketplace fees'
+        : `✗ Off by ${money(gap || Math.abs(owedGap?.cents || 0))}`;
   return (
     <div className="books-proof-bar">
       <button type="button" className={`books-proof-status${integrity.ok ? ' ok' : ' warn'}`} onClick={() => setOpen(!open)}>

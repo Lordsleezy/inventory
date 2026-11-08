@@ -102,6 +102,7 @@ export type Report = {
   books_attributed_fee_ids?: string[];
   books_label_dedup_expense_ids?: string[];
   books_label_dedup_label_ids?: string[];
+  books_unmatched_labels?: { id: string; date: string; amount_cents: number; title: string }[];
   sales: Row[];
   fees: Row[];
   labels: Row[];

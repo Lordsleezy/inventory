@@ -186,6 +186,11 @@ timeout = 60
 schedule = "0 8 1 * *"
 timeout = 30
 
+# Prior-month Money balances for Books (sync platforms, then books_capture_money_month_snapshots). 08:05 UTC ≈ 00:05 Pacific.
+[functions."books-month-snapshot"]
+  schedule = "5 8 1 * *"
+  timeout = 120
+
 # Channel checkbox queue (listing_queue). Does nothing unless store setting channel_autopush.enabled is true;
 # eBay additionally needs channel_autopush.ebay_enabled. Drips per_run listings per channel per run.
 [functions."channel-autopush"]

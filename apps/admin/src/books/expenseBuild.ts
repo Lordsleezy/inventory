@@ -29,7 +29,7 @@ function cleanTitle(description: string, source: string, sku?: string, order?: s
   return title || 'Expense';
 }
 
-function storeCheckoutLabel(e: Row, l?: Row): boolean {
+export function storeCheckoutLabel(e: Row, l?: Row): boolean {
   const src = String(e?.source || l?.carrier || '').toLowerCase();
   if (src !== 'label' && src !== 'manual_label') {
     const carrier = String(l?.carrier || '').toLowerCase();
