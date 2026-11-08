@@ -1,5 +1,6 @@
 import { ReceiveGroupRow, type GroupedInventory } from './ReceiveGroupRow';
 import { useEffect, useState } from 'react';
+import { displayProductTitle } from '@floor/store';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { ReceivePanel } from './ReceivePanel';
 import { ATTENTION_SECTIONS, NeedsAttentionPanel, useAttentionCounts } from './NeedsAttentionPanel';
@@ -63,7 +64,7 @@ const label = (s: string) => s === 'available' ? 'In stock' : s.replace(/_/g, ' 
 /** Sold units with no cost first, then any other missing cost, ahead of the tab's own order. */
 const missingCostRank = (u: { acquisition_cost_cents: number | null; state: string }) =>
   u.acquisition_cost_cents == null ? (u.state === 'sold' ? 0 : 1) : 2;
-const name = (u: Row) => [u.brand, u.model].filter(Boolean).join(' ') || u.title || 'Untitled unit';
+const name = (u: Row) => displayProductTitle({ title: u.title, brand: u.brand, model: u.model, fallback: 'Untitled unit' });
 
 export function InventoryPage({
   client, storeId, accessToken, money, stamp, tab, onTab, attentionSection, onAttentionSection, onCostChanged,

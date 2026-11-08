@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { displayProductTitle } from '@floor/store';
 import { errText } from './errText';
 
 type Product = {
@@ -55,7 +56,7 @@ export function FloorProductsPage({ client }: Props) {
     setBusy(true);
     setError('');
     try {
-      const title = [edit.brand, edit.model].filter(Boolean).join(' ').trim() || edit.title || '';
+      const title = displayProductTitle({ title: edit.title, brand: edit.brand, model: edit.model, fallback: '' });
       const { error: e } = await client.rpc('portal_floor_product_upsert', {
         p_product: {
           gtin14: edit.gtin14,
@@ -115,7 +116,7 @@ export function FloorProductsPage({ client }: Props) {
         {rows.map((r) => (
           <li key={r.gtin14}>
             <button type="button" className="text-button" onClick={() => setEdit({ ...r })}>
-              <strong>{r.title || [r.brand, r.model].filter(Boolean).join(' ') || r.gtin14}</strong>
+              <strong>{displayProductTitle({ title: r.title, brand: r.brand, model: r.model, fallback: r.gtin14 })}</strong>
               <span className="muted">
                 {' '}
                 · {r.upc_a || r.gtin14}
@@ -150,7 +151,7 @@ export function FloorProductsPage({ client }: Props) {
               />
             </label>
             <p className="hint">
-              Title will be: {[edit.brand, edit.model].filter(Boolean).join(' ') || '—'}
+              Title will be: {displayProductTitle({ title: edit.title, brand: edit.brand, model: edit.model, fallback: '—' })}
             </p>
             <label>
               Category

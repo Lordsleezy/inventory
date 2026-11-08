@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { displayProductTitle } from '@floor/store';
 import {
   acquisitionCostCents,
   mergeMissingCost,
@@ -23,7 +24,7 @@ const PAGE_SIZE = 40;
 const RPC_LIMIT = 100;
 
 function itemName(unit: MissingCostSource) {
-  return [unit.brand, unit.model].filter(Boolean).join(' ') || unit.title || 'Untitled';
+  return displayProductTitle({ title: unit.title, brand: unit.brand, model: unit.model });
 }
 
 async function loadStatus(client: SupabaseClient, status: 'in_stock' | 'sold', query: string) {

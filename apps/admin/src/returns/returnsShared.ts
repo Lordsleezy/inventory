@@ -1,3 +1,5 @@
+import { displayProductTitle } from '@floor/store';
+
 export type Refund = {
   id: string;
   amount_cents: number;
@@ -46,19 +48,49 @@ export function isReplacementReturn(row: Pick<ReturnRow, 'replacement_sku' | 're
   return String(row.external_return_id || '').startsWith('replacement:');
 }
 
-export function returnListTitle(row: ReturnRow) {
-  if (isReplacementReturn(row)) return 'Replacement';
-  return row.title || `SKU ${row.sku}`;
+export function isBuyerKeeps(row: Pick<ReturnRow, 'route_to' | 'status'>) {
+  return row.route_to === 'buyer_keeps' || row.status === 'refunded_no_return';
 }
 
-export function returnListSubtitle(row: ReturnRow) {
-  const bits = [`SKU ${row.sku}`];
+export function returnListTitle(row: ReturnRow) {
+  return displayProductTitle({ title: row.title, fallback: `SKU ${row.sku}` });
+}
+
+export function returnListSubtitle(row: ReturnRow, channelLabel: string, reasonLabel?: string) {
+  const bits = [`SKU ${row.sku}`, channelLabel];
   if (isReplacementReturn(row)) {
-    if (row.title) bits.push(row.title);
     if (row.replacement_sku) bits.push(`sent ${row.replacement_sku}`);
-    return bits.join(' · ');
+  } else if (reasonLabel) {
+    bits.push(reasonLabel);
   }
   return bits.join(' · ');
+}
+
+/** Short red note for list rows that need owner action. */
+export function returnAttentionNote(row: ReturnRow): string | null {
+  if (isBuyerKeeps(row)) {
+    if (!(row.refund_cents > 0) && !row.refunded_at) return 'Missing refund amount';
+    return null;
+  }
+  if (['closed', 'canceled', 'denied', 'dispositioned'].includes(row.status)) return null;
+  if (!String(row.tracking_number || '').trim()) return 'No tracking';
+  if (!(row.refund_cents > 0) && !row.refunded_at && !isReplacementReturn(row)) return 'Missing refund amount';
+  return null;
+}
+
+export const RETURN_STEPS = [
+  { id: 'requested', label: 'Requested' },
+  { id: 'shipped', label: 'Shipped back' },
+  { id: 'received', label: 'Received' },
+  { id: 'refunded', label: 'Refunded' },
+] as const;
+
+/** Index into RETURN_STEPS for the horizontal status line. */
+export function returnStepIndex(row: ReturnRow): number {
+  if (row.refunded_at || ['closed', 'dispositioned', 'refunded_no_return'].includes(row.status)) return 3;
+  if (['received', 'inspected'].includes(row.status)) return 2;
+  if (row.status === 'in_transit' || row.in_transit_at) return 1;
+  return 0;
 }
 
 export type Candidate = {
@@ -96,7 +128,7 @@ export const STATUS_LABEL: Record<string, string> = {
   requested: 'Requested',
   label_sent: 'Label sent',
   approved: 'Label sent',
-  in_transit: 'In transit',
+  in_transit: 'Shipped back',
   received: 'Received',
   inspected: 'Received',
   dispositioned: 'Closed',

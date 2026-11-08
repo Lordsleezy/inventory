@@ -59,10 +59,52 @@ function inferBrand(candidate: string, description: string, sourceTitle: string)
   return "";
 }
 
-function withoutBrand(value: string, brand: string): string {
+/** Strip whole-word brand tokens from a title/model so we never get "Phillips Phillips …". */
+export function withoutBrand(value: string, brand: string): string {
   if (!brand) return value;
   const escaped = brand.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return value.replace(new RegExp(`(?:^|[\\s,;:/\\-–—])${escaped}(?=$|[\\s,;:/\\-–—])`, "gi"), " ").trim();
+}
+
+function collapseDuplicateWords(value: string): string {
+  const parts = value.replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
+  const unique: string[] = [];
+  for (const word of parts) {
+    if (unique.length && unique[unique.length - 1].toLowerCase() === word.toLowerCase()) continue;
+    unique.push(word);
+  }
+  return unique.join(" ");
+}
+
+/**
+ * One display title for inventory / orders / returns lists.
+ * Prefers stored title, strips a duplicated brand, else builds brand + model without doubling.
+ * Keeps original casing (unlike cleanProductIdentity).
+ */
+export function displayProductTitle(input: {
+  title?: string | null;
+  brand?: string | null;
+  model?: string | null;
+  fallback?: string;
+}): string {
+  const brand = String(input.brand ?? "").replace(/\s+/g, " ").trim();
+  const model = String(input.model ?? "").replace(/\s+/g, " ").trim();
+  const title = collapseDuplicateWords(String(input.title ?? ""));
+  const fallback = input.fallback || "Untitled";
+
+  if (title) {
+    if (brand) {
+      const rest = collapseDuplicateWords(withoutBrand(title, brand));
+      return [brand, rest].filter(Boolean).join(" ") || title;
+    }
+    return title;
+  }
+
+  if (brand || model) {
+    const rest = collapseDuplicateWords(withoutBrand(model, brand));
+    return [brand, rest].filter(Boolean).join(" ") || fallback;
+  }
+  return fallback;
 }
 
 function limitTitle(value: string, max = 80): string {

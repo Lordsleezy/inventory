@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { cleanProductIdentity } from "./product-name.ts";
+import { cleanProductIdentity, displayProductTitle } from "./product-name.ts";
 
 test("cleans seller brand, duplicate words and retail unit junk with corroborated brand", () => {
   const result = cleanProductIdentity({
@@ -85,4 +85,27 @@ test("rebuilds a code-only model from the product title and flags an unrecogniza
   assert.ok(result.reasons.includes("model_rebuilt_from_title"));
   const bareCode = cleanProductIdentity({ brand: "Samsung", model: "RF28T5001SG", title: "Samsung RF28T5001SG" });
   assert.ok(bareCode.reasons.includes("model_code_needs_review"));
+});
+
+test("displayProductTitle collapses Phillips Phillips and brand+model doubles", () => {
+  assert.equal(
+    displayProductTitle({ title: "Phillips Phillips sonicare protective clean 5100 2 pack" }),
+    "Phillips sonicare protective clean 5100 2 pack",
+  );
+  assert.equal(
+    displayProductTitle({ brand: "Phillips", title: "Phillips Phillips sonicare protective clean 5100 2 pack" }),
+    "Phillips sonicare protective clean 5100 2 pack",
+  );
+  assert.equal(
+    displayProductTitle({ brand: "Phillips", model: "Phillips sonicare protective clean 5100 2 pack" }),
+    "Phillips sonicare protective clean 5100 2 pack",
+  );
+  assert.equal(
+    displayProductTitle({ brand: "Acme", model: "LED Desk Lamp", title: "" }),
+    "Acme LED Desk Lamp",
+  );
+  assert.equal(
+    displayProductTitle({ title: "Acme LED Desk Lamp", brand: "Acme" }),
+    "Acme LED Desk Lamp",
+  );
 });

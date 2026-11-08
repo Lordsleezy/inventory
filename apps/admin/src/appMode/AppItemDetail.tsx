@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { displayProductTitle } from '@floor/store';
 import { UnitEditDrawer } from '../UnitEditDrawer';
 import { RestoreInventoryButton } from '../RestoreInventoryButton';
 import { shortError } from './shortError';
@@ -66,7 +67,11 @@ const CHANNELS: { key: string; label: string; listable: boolean }[] = [
 ];
 
 function titleOf(u: Record<string, unknown>) {
-  return String(u.title || '').trim() || [u.brand, u.model].filter(Boolean).join(' ') || 'Untitled';
+  return displayProductTitle({
+    title: u.title == null ? '' : String(u.title),
+    brand: u.brand == null ? '' : String(u.brand),
+    model: u.model == null ? '' : String(u.model),
+  });
 }
 
 function attrOf(attrs: Record<string, string>, ...names: string[]) {

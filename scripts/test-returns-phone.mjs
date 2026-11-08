@@ -20,15 +20,17 @@ import { createRoot } from 'react-dom/client';
 import { ReturnsSimplified } from './apps/admin/src/returns/ReturnsSimplified';
 
 const rows = [{
-  id: 'r1', sku: '11804', title: 'Ninja 12-cup coffee maker', channel: 'ebay', status: 'in_transit',
-  reason: 'other', external_order_id: '12-345', refund_cents: 2500, return_label_cents: 1240,
-  label_paid_by: 'seller', tracking_number: '9400111899223344556677', requested_qty: 1, route_to: 'garage', created_at: new Date().toISOString(),
+  id: 'r1', sku: '11717', title: 'Phillips Phillips sonicare protective clean 5100 2 pack',
+  channel: 'ebay', status: 'requested', reason: 'not_as_described', fault: 'seller',
+  external_order_id: '12-345', refund_cents: 5847, return_label_cents: 856,
+  label_paid_by: 'seller', tracking_number: null, requested_qty: 1, route_to: 'garage',
+  created_at: new Date().toISOString(),
 }];
 
 const client = {
   rpc: async (name) => {
     if (name === 'portal_return_desk') return { data: { rows } };
-    if (name === 'portal_return_tracking_timeline') return { data: { status_line: 'In transit · arriving Thu', events: [] } };
+    if (name === 'portal_return_tracking_timeline') return { data: { status_line: '', events: [] } };
     return { data: null };
   },
 };
@@ -64,7 +66,7 @@ const browser = await chromium.launch({
 const viewports = [
   { name: 'iphone-13', width: 390, height: 844 },
   { name: 'iphone-14-pro-max', width: 430, height: 932 },
-  { ...devices['Pixel 7'], name: 'moto-class' },
+  { name: 'moto-class', width: devices['Pixel 7']?.viewport?.width || 412, height: devices['Pixel 7']?.viewport?.height || 915 },
 ];
 
 try {
@@ -79,12 +81,31 @@ try {
     await page.getByRole('heading', { name: 'Returns' }).waitFor();
     assert.equal(await page.getByPlaceholder('Search SKU or order').count(), 1, `${vp.name}: one search`);
     assert.equal(await page.locator('.returns-row').count(), 1, `${vp.name}: list row`);
+    assert.equal(await page.getByRole('tab', { name: /Open/ }).count(), 1, `${vp.name}: Open tab`);
+    assert.equal(await page.getByRole('tab', { name: 'Closed' }).count(), 1, `${vp.name}: Closed tab`);
+    assert.equal(await page.getByRole('tab', { name: 'Replacements' }).count(), 1, `${vp.name}: Replacements tab`);
+    const title = await page.locator('.returns-row-main strong').innerText();
+    assert.equal(title, 'Phillips sonicare protective clean 5100 2 pack', `${vp.name}: collapsed brand`);
+    assert.match(await page.locator('.returns-attention').innerText(), /No tracking/, `${vp.name}: red attention`);
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1);
     assert.ok(overflow, `${vp.name}: no horizontal scroll`);
+
+    await page.locator('.returns-row').click();
+    await page.getByRole('heading', { level: 2, name: 'Phillips sonicare protective clean 5100 2 pack' }).waitFor();
+    assert.equal(await page.locator('.returns-detail-title').count(), 1, `${vp.name}: one title`);
+    assert.equal(await page.getByRole('button', { name: 'Mark shipped back' }).count(), 1, `${vp.name}: ship action`);
+    assert.equal(await page.getByRole('button', { name: 'Add tracking' }).count(), 1, `${vp.name}: add tracking`);
+    const confirm = page.getByRole('button', { name: /Confirm refund/ });
+    assert.equal(await confirm.count(), 1, `${vp.name}: confirm refund`);
+    const confirmColor = await confirm.evaluate((el) => {
+      const s = getComputedStyle(el);
+      return { color: s.color, background: s.backgroundColor, border: s.borderTopColor };
+    });
+    assert.notEqual(confirmColor.color, confirmColor.background, `${vp.name}: confirm contrast`);
     await page.screenshot({ path: `scripts/screenshots/returns-after-${vp.width}.png`, fullPage: true });
     await page.close();
   }
-  console.log('PASS: Returns list fits 390 / 430 / Moto-class widths with a single search and no horizontal overflow.');
+  console.log('PASS: Returns list/detail fit phone widths, collapse double brand, and keep action labels readable.');
 } finally {
   await browser.close();
 }
