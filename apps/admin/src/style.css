@@ -131,6 +131,22 @@ nav .nav-parent{background:transparent;border:0;text-align:left;border-radius:9p
 nav .nav-parent:hover{background:var(--btn-bg)}
 nav .nav-parent.active{background:var(--btn-bg-active);color:var(--btn-text);font-weight:700}
 
+/* Desktop expanded sidebar: Inventory / Reports / Other submenus (mobile drawer rules are below). */
+@media (min-width:901px){
+  .app:not(.nav-collapsed) nav .nav-group{display:grid;gap:2px}
+  .app:not(.nav-collapsed) nav .nav-parent{position:relative;padding-right:36px!important}
+  .app:not(.nav-collapsed) nav .nav-parent::after{content:"";position:absolute;right:14px;top:50%;width:7px;height:7px;border-right:2px solid #7a8792;border-bottom:2px solid #7a8792;transform:translateY(-60%) rotate(45deg);transition:transform .15s ease}
+  .app:not(.nav-collapsed) nav .nav-group.open .nav-parent::after{transform:translateY(-30%) rotate(225deg)}
+  .app:not(.nav-collapsed) nav .nav-group .nav-sub{display:none;gap:2px;padding:2px 0 6px 8px;border-left:2px solid #d7e4e8;margin:0 0 4px 12px}
+  .app:not(.nav-collapsed) nav .nav-group.open .nav-sub{display:grid}
+  .app:not(.nav-collapsed) nav .nav-sub button{padding:10px 12px!important;font-size:.92rem;color:#5a6b7a}
+  .app:not(.nav-collapsed) nav .nav-sub button.active{background:var(--btn-bg-active);color:var(--btn-text);font-weight:700}
+  .app.nav-collapsed.nav-peek-open aside nav .nav-group{display:grid;gap:2px}
+  .app.nav-collapsed.nav-peek-open aside nav .nav-group .nav-sub{display:none;gap:2px;padding:2px 0 6px 8px;border-left:2px solid #d7e4e8;margin:0 0 4px 12px}
+  .app.nav-collapsed.nav-peek-open aside nav .nav-group.open .nav-sub{display:grid!important}
+  .app.nav-collapsed.nav-peek-open aside nav .nav-sub button{padding:10px 12px!important;font-size:.92rem;color:#5a6b7a}
+}
+
 /* Phones + tablets — hamburger drawer. Flex shell so fixed aside/scrim never steal height (grid tracks did → white screen on Register). */
 @media(max-width:900px){
   body.menu-lock{overflow:hidden;touch-action:none}
