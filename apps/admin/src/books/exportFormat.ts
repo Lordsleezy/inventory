@@ -57,7 +57,11 @@ export function styleHeaderRow(ws: Worksheet, rowNum: number, colCount: number) 
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2F3E54' } };
     cell.border = { bottom: { style: 'thin', color: { argb: 'FF1A2230' } } };
   }
-  ws.views = [{ state: 'frozen', ySplit: rowNum, xSplit: 1, activeCell: `B${rowNum + 1}` }];
+}
+
+/** Default view — no frozen panes (Excel wheel scroll breaks with programatic freeze). */
+export function setNormalSheetView(ws: Worksheet) {
+  ws.views = [{ state: 'normal', zoomScale: 100, activeCell: 'A1', showGridLines: true }];
 }
 
 export function setColumnWidths(ws: Worksheet, widths: number[]) {
