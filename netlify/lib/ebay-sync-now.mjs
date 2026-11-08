@@ -5,7 +5,7 @@
  */
 import { requireEnv, serviceClient } from "./server.mjs";
 import { pollEbayOrders, ebayConnectionStatus } from "./ebay.mjs";
-import { listEbayAccounts } from "./ebay-accounts.mjs";
+import { ebayAccountFeedsFloorOrders, listEbayAccounts } from "./ebay-accounts.mjs";
 
 export const STORE_DEFAULT = "5487ca47-6147-4fe8-bc6d-46b6472726ba";
 export const SYNC_NOW_KEY = "ebay_sync_now_request";
@@ -173,7 +173,7 @@ export async function runEbaySyncNow(
   });
 
   let accounts = await listEbayAccounts(storeId);
-  accounts = accounts.filter((a) => a.status === "connected");
+  accounts = accounts.filter((a) => a.status === "connected" && ebayAccountFeedsFloorOrders(a));
   if (accountId) accounts = accounts.filter((a) => a.id === accountId);
   if (!accounts.length) {
     return write({

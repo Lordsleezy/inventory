@@ -68,9 +68,8 @@ async function handle(event) {
     });
   }
 
-  // Legacy "connect" → orders_only (keeps pgg124-5 path). Prefer connect_selling / connect_orders_only.
   if (action === "connect" || action === "connect_orders_only") {
-    return startConnect(ctx, event, "orders_only");
+    return json(410, { ok: false, error: "pgg124-5 is unlinked. Floor only connects the Open Box selling account." });
   }
   if (action === "connect_selling") {
     return startConnect(ctx, event, "selling");

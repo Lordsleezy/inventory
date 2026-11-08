@@ -49,7 +49,7 @@ async function handle(event) {
     ebayRole === "selling"
       ? `<p><strong>Use the store business eBay account</strong> — not pgg124-5. If eBay shows the personal seller, choose Switch accounts / Not you and sign into the business account.</p>`
       : ebayRole === "orders_only"
-        ? `<p class="quiet">Orders-only reconnect expects the personal seller (pgg124-5).</p>`
+        ? `<p class="quiet">The personal eBay account is unlinked. Close this page and connect the Open Box selling account.</p>`
         : "";
   const heading =
     data.provider === "ebay" && ebayRole === "selling"

@@ -67,7 +67,7 @@ export function MoneyPage({ client, storeId, accessToken, money, stamp }: Props)
   const load = useCallback(async () => {
     const over = await client.rpc('portal_money_overview');
     if (over.error) throw over.error;
-    const accounts = (over.data || []) as Overview[];
+    const accounts = ((over.data || []) as Overview[]).filter((a) => a.account !== 'ebay_pgg124_5');
     const [people_, staff, user, ...activity] = await Promise.all([
       client.from('store_payout_people').select('slot,employee_id').eq('store_id', storeId),
       client.from('staff').select('user_id,display_name').eq('store_id', storeId),

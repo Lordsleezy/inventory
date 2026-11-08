@@ -267,16 +267,14 @@ async function handle(event) {
     if (state.provider === "ebay") {
       const username = String((await getSellerUsername(access)) || "").trim();
       if (!username) throw new Error("Could not read the eBay seller username after OAuth.");
+      if (username.toLowerCase() === "pgg124-5") {
+        throw new Error("pgg124-5 is unlinked from Floor. Tokens were not saved. Sign in with the Open Box selling account.");
+      }
       const meta = state.meta && typeof state.meta === "object" ? state.meta : {};
       const role = meta.role === "selling" ? "selling" : "orders_only";
       const required = ebayRequiredUsername();
-      // orders_only reconnect still prefers the known personal seller unless meta.allowAnyUsername.
-      if (role === "orders_only" && !meta.allowAnyUsername) {
-        if (username.toLowerCase() !== required) {
-          throw new Error(
-            `Connected eBay account was "${username}". Orders-only reconnect expects ${required}. For the business store account, use “Connect selling account”. Tokens were not saved.`,
-          );
-        }
+      if (role === "orders_only") {
+        throw new Error("pgg124-5 is unlinked from Floor. Tokens were not saved. Use Connect selling account for ikonikdeals2026.");
       }
       // Selling must be the store business account — never the personal cutover seller.
       if (role === "selling" && username.toLowerCase() === required) {
