@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { PDFDocument, degrees } from 'pdf-lib';
-import { LABEL_H, LABEL_W, PAPER_H, PAPER_W, fitLabelBox, normalizeLabelPdf } from './labelPrint.ts';
+import { LABEL_H, LABEL_W, PAPER_H, PAPER_W, fitLabelBox, labelPlacement, normalizeLabelPdf } from './labelPrint.ts';
 
 test('a letter page shrinks into the 4x6 box and a small page enlarges', () => {
   const letter = fitLabelBox(8.5 * 72, 11 * 72);
@@ -17,6 +17,12 @@ test('a letter page shrinks into the 4x6 box and a small page enlarges', () => {
   const small = fitLabelBox(100, 100);
   assert.ok(small.scale > 1);
   assert.ok(Math.abs(small.width - LABEL_W) < 0.01);
+
+  const corner = labelPlacement(LABEL_W, LABEL_H);
+  assert.equal(corner.x, 0);
+  assert.equal(corner.y, PAPER_H - LABEL_H);
+  assert.equal(corner.width, LABEL_W);
+  assert.equal(corner.height, LABEL_H);
 });
 
 test('normalized labels are a letter sheet so 4x6 stays 4x6 on 8.5x11 paper', async () => {

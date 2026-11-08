@@ -218,6 +218,7 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
   }
 
   async function printLabel(o: WebOrder, download = false) {
+    setBusy(download ? 'save-label' : 'print');
     setError('');
     try {
       const url = await labelFileUrl(client, o);
@@ -225,6 +226,8 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
       await openShippingLabel(url, download);
     } catch (e) {
       setError(shortError(errText(e)));
+    } finally {
+      setBusy('');
     }
   }
 

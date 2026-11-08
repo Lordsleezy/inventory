@@ -189,12 +189,14 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
   }
 
   async function printOrderLabel(o: WebOrder) {
+    setBusy(o.id + 'print');
     setError('');
     try {
       const url = await labelFileUrl(client, o);
       if (!url) { setError('No label file on this order yet.'); return; }
       await openShippingLabel(url);
     } catch (e) { setError(errText(e)); }
+    finally { setBusy(''); }
   }
 
   async function uploadOrderLabel(o: WebOrder, file: File) {
