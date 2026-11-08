@@ -127,9 +127,9 @@ function GiveawayDialog({ client, sku, onClose, onDone }: { client: SupabaseClie
 }
 
 /** List of replacements and/or giveaways with Undo (admins) and "Bad unit came back". */
-export function DispositionsPanel({ client, money, stamp, kind, title, hint, refreshKey, onChanged }: {
+export function DispositionsPanel({ client, money, stamp, kind, title, hint, refreshKey, onChanged, presentation = 'panel' }: {
   client: SupabaseClient; money: Money; stamp: Stamp; kind: DispositionKind | null; title: string; hint?: string;
-  refreshKey?: number; onChanged?: () => void;
+  refreshKey?: number; onChanged?: () => void; presentation?: 'panel' | 'rows';
 }) {
   const [rows, setRows] = useState<Disposition[] | null>(null);
   const [showUndone, setShowUndone] = useState(false);
@@ -152,6 +152,22 @@ export function DispositionsPanel({ client, money, stamp, kind, title, hint, ref
   }
 
   const shown = (rows || []).filter(r => showUndone || !r.undone_at);
+  if (presentation === 'rows') {
+    const total = shown.reduce((n, row) => n + (row.cost_cents || 0) + (row.extra_cost_cents || 0), 0);
+    return <section>
+      <div className="rpt-give-head">
+        <strong>{title.toUpperCase()} · {shown.length} · {money(total)}</strong>
+        <label><input type="checkbox" checked={showUndone} onChange={e => setShowUndone(e.target.checked)} /> Show undone</label>
+      </div>
+      {error && <p className="rpt-note" role="alert">{error}</p>}
+      {rows === null ? <p className="rpt-note">Loading…</p> : shown.length === 0 ? <p className="rpt-note">Nothing recorded.</p> : <div className="rpt-rows">
+        {shown.map(d => <div className="rpt-line" key={d.id} style={d.undone_at ? { opacity: 0.55 } : undefined}>
+          <span><span className="rpt-name">{d.item}</span><small>{stamp(d.created_at)} · SKU {d.sku}{d.given_to ? ` · to ${d.given_to}` : ''}</small></span>
+          <span className="rpt-side"><b>{costLabel(d, money)}</b>{!d.undone_at && <button type="button" className="rpt-undo" disabled={busy === d.id} onClick={() => void run(d.id, 'portal_undo_disposition', `Undo this ${d.kind}? SKU ${d.sku} goes back to stock and the cost and commission effects reverse.`)}>Undo</button>}</span>
+        </div>)}
+      </div>}
+    </section>;
+  }
   return <section className="panel">
     <h2>{title}</h2>
     {hint && <p className="hint">{hint}</p>}

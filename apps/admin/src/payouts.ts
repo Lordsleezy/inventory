@@ -223,8 +223,15 @@ export function displayPaymentNote(note: string | null | undefined): string | un
   return cleaned || undefined;
 }
 
+/** Cents the listed profit rows sit above the headline. Positive means the headline is lower than those rows. */
+export function profitHeadlineGap(parts: {
+  gross: number; fees: number; ship: number; processing: number; tax: number; cost: number; profit: number;
+}): number {
+  return parts.gross - parts.fees - parts.ship - parts.processing - parts.tax - parts.cost - parts.profit;
+}
+
 /** Calendar day for a payout event. Expense dates are stored as YYYY-MM-DD or noon with no zone. */
-function payoutDay(at: string): string {
+export function payoutDay(at: string): string {
   const trimmed = (at || "").trim();
   const dateOnly = /^(\d{4}-\d{2}-\d{2})/.exec(trimmed);
   if (dateOnly && (!trimmed.includes("T") || /T12:00:00$/.test(trimmed))) return dateOnly[1];
