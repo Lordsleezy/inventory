@@ -11,6 +11,7 @@ import { ConnectionsPage } from '../ConnectionsPage';
 import { isInStoreChannel } from '../channels';
 import { errText } from '../errText';
 import { shortError } from './shortError';
+import { BuildStamp } from '../BuildStamp';
 
 /** Needs attention moved to Inventory → Unfinished; it is not a More page. */
 export type MoreId =
@@ -140,6 +141,7 @@ export function AppMoreHome({
       ) : null}
 
       <p className="app-footer-count">{staffSession?.displayName || session.user.email}</p>
+      <BuildStamp />
     </>
   );
 }

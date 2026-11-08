@@ -1920,6 +1920,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   }, [manual, storeId]);
 
   const showForm = manual || (current && current.status !== 'loading' && loadedId === current.id);
+  const unifiedV2 = true;
   const waiting = queue.length - (current ? 1 : 0);
   const hasFiles = files.length > 0;
   const needNoteForScratch = !doNotList && isDefectiveCondition(form.condition);
@@ -2024,7 +2025,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     {!manual && current?.status === 'loading' && <div className="empty">Looking up {current.upc}…</div>}
 
     {showForm && <form id={appChrome ? 'receive-app-form' : undefined} onSubmit={e => void finish(e)}>
-      <ReceiveQuantity value={form.quantity} onChange={value=>update('quantity',value)} disabled={busy} />
+      {!unifiedV2 && <ReceiveQuantity value={form.quantity} onChange={value=>update('quantity',value)} disabled={busy} />}
       {stockMatches.length > 0 && <div className="receive-dup" role="status"><strong>Matching inventory</strong>{stockMatches.map(match => <p key={match.sku}>{match.title} · SKU {match.sku} · {match.quantity} on hand · {match.condition || 'condition unset'}{match.is_stocked
         ? <> <button type="button" disabled={busy} onClick={() => setSelectedStockMatch(match)}>{selectedStockMatch?.sku === match.sku ? 'Selected' : 'Add to this SKU'}</button></>
         : match.can_convert && !staffMode ? <> <button type="button" disabled={busy} onClick={() => setSelectedStockMatch(match)}>Convert to stocked SKU and add</button></>
@@ -2058,13 +2059,13 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
 
       {!manual && merged?.never_list_reason && <p className="hint">Amazon will not list this: {merged.never_list_reason}</p>}
 
-      {!storePhoneMode && <div className="receive-channel-card">
+      {!unifiedV2 && !storePhoneMode && <div className="receive-channel-card">
         {!staffMode && <ChannelPicker value={channels} onChange={setChannels} disabled={doNotList || doNotShip} upc={form.noUpc ? '' : (form.upc || current?.upc || '')} />}
         {!staffMode && <label className="mboard-inline"><input type="checkbox" checked={doNotShip} disabled={dnsRequired} onChange={e => { setDns(e.target.checked); if (e.target.checked) setChannels([]); }} /> DNS — Do not ship</label>}
         <label className="mboard-inline"><input type="checkbox" checked={doNotList} onChange={e => { setDoNotList(e.target.checked); if (e.target.checked) setChannels([]); }} /> Do not list for sale</label>
         {doNotShip && <small>Store / website pickup only. No marketplace listings.</small>}
       </div>}
-      {!manual && <div className="receive-confirm">
+      {!unifiedV2 && !manual && <div className="receive-confirm">
         <div className="receive-found-bar"><strong>✓ Found</strong><code>UPC {current?.upc}</code>
           <button type="button" className="text-button" disabled={photoBusy} onClick={() => current && retry(current)}>Rescan</button>
         </div>
@@ -2200,17 +2201,38 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         </div>
       </div>}
 
-      <details className={`receive-advanced${manual ? ' receive-manual' : ''}`} open={manual}><summary>{manual ? 'Receive details' : 'More options'}</summary><div className="unit-edit-grid">
-        <label className={liveMissing.includes('price') ? 'receive-need' : undefined}>
-          Price{liveMissing.includes('price')
-            ? ' (needed to list)'
-            : ((retail || photoPrice?.count) ? ' (reference only — enter your selling price)' : ' (enter your selling price)')}
-          <ManifestReceiveReference result={manifestReference} />
-          <input inputMode="decimal" placeholder="24.99" value={form.ask} onFocus={e => { typingTarget.current = e.currentTarget; }} onChange={e => update('ask', e.target.value)} autoComplete="off" />
-        </label>
+      <details className={`receive-advanced${manual ? ' receive-manual' : ''}`} open={unifiedV2 || manual}><summary>{unifiedV2 ? 'Item details' : manual ? 'Receive details' : 'More options'}</summary><div className="unit-edit-grid receive-v2-grid">
+        {!manual && current && unifiedV2 && <p className="receive-v2-found receive-v2-span2">Found · UPC {current.upc}</p>}
+        {unifiedV2 && <div ref={el => { fieldRefs.current.photo = el; }} className={`unit-edit-wide receive-v2-span2${invalid('photo') ? ' receive-v2-invalid' : ''}`}>
+          <span className="receive-v2-label">Photos<span className="receive-v2-req"> *</span></span>
+          <div className="receive-v2-photo-actions">
+            <input ref={takePhotoFile} type="file" accept="image/*" capture="environment" className="sr-only" aria-hidden tabIndex={-1}
+              onChange={e => { const input = e.currentTarget; void ingestFiles(input.files).finally(() => { input.value = ''; }); }} />
+            <input ref={choosePhotoFile} type="file" accept="image/*" multiple className="sr-only" aria-hidden tabIndex={-1}
+              onChange={e => { const input = e.currentTarget; void ingestFiles(input.files).finally(() => { input.value = ''; }); }} />
+            <button type="button" className="secondary" disabled={photoBusy || busy} onClick={() => takePhotoFile.current?.click()}>{photoBusy ? 'Saving…' : 'Take photo'}</button>
+            <button type="button" className="secondary" disabled={photoBusy || busy} onClick={() => choosePhotoFile.current?.click()}>Choose photos</button>
+          </div>
+          {hasFiles && <div className="receive-photos">{files.map((f, i) => <figure key={`${f.name}-${f.size}-${i}`}>
+            <img src={previews[i]} alt={`Photo ${i + 1}`} />
+            <button type="button" className="text-button" onClick={() => {
+              const path = stagedPhotoPaths[i];
+              if (path) void client.storage.from('unit-photos').remove([path]);
+              setStagedPhotoPaths(prev => prev.filter((_, j) => j !== i));
+              setFiles(prev => {
+                const next = prev.filter((_, j) => j !== i);
+                void savePendingPhotos(pendingPhotoKey(storeId, photoSessionKey.current), next);
+                return next;
+              });
+            }}>Remove</button>
+          </figure>)}</div>}
+          {invalid('photo') && <span className="receive-v2-msg">{receiveFieldMessage('photo')}</span>}
+        </div>}
 
-        <div className={`unit-edit-wide receive-cond${liveMissing.includes('condition') ? ' receive-need' : ''}`} role="radiogroup" aria-label="Condition">
-          <span className="receive-label">Condition{liveMissing.includes('condition') ? ' (needed to list)' : ''}</span>
+        <div className="receive-v2-row2 receive-v2-span2">
+        <ReceiveQuantity value={form.quantity} onChange={value => update('quantity', value)} disabled={busy} />
+        <div className={`receive-cond-field${invalid('condition') ? ' receive-v2-invalid' : ''}`} role="radiogroup" aria-label="Condition">
+          <span className="receive-v2-label">Condition{!doNotList && <span className="receive-v2-req"> *</span>}</span>
           {manual
             ? <select value={form.condition} onChange={e => update('condition', e.target.value)}>
               <option value="">—</option>{[...new Set([...choices(options?.conditions), SCRATCH])].map(x => <option key={x} value={x}>{x}</option>)}
@@ -2219,7 +2241,17 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
               <input type="radio" name="receive-condition" value={value} checked={form.condition === value} onChange={() => update('condition', value)} />{text2}
             </label>)}</div>}
         </div>
-        {needNoteForScratch && <label className="unit-edit-wide">What is defective / why non-sellable? (required)<textarea rows={2} value={form.conditionNote} onFocus={e => { typingTarget.current = e.currentTarget; }} onChange={e => update('conditionNote', e.target.value)} /></label>}
+        </div>
+        {needNoteForScratch && <label className="unit-edit-wide receive-v2-span2">Defect note<textarea rows={2} value={form.conditionNote} onChange={e => update('conditionNote', e.target.value)} /></label>}
+
+        <label ref={el => { fieldRefs.current.brand = el; }} className={`receive-v2-span2${invalid('brand') ? ' receive-v2-invalid' : ''}`}>
+          <span className="receive-v2-label">Brand{!doNotList && <span className="receive-v2-req"> *</span>}</span>
+          <input placeholder="Type brand" value={form.unbranded ? 'Unbranded' : form.brand} disabled={form.unbranded} onChange={e => update('brand', e.target.value)} />
+        </label>
+        <label className="mboard-inline receive-v2-span2">
+          <input type="checkbox" checked={form.unbranded} onChange={e => setForm(p => ({ ...p, unbranded: e.target.checked, title: composeListingTitle(p.brand, p.model, e.target.checked) }))} />
+          No brand
+        </label>
 
         <ReceiveCategoryAspects
           client={client}
@@ -2244,35 +2276,20 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           }}
         />
 
-        <CategoryField
-          label={`Floor category${liveMissing.includes('category') ? ' (needed to list)' : ''}`}
-          needed={liveMissing.includes('category')}
-          value={form.category}
-          options={choices(options?.categories)}
-          hint="Website category for openboxindustries.com."
-          onChange={v => update('category', v)}
-          onFocus={e => { typingTarget.current = e.currentTarget; }}
-        />
-
-        <label ref={el => { fieldRefs.current.brand = el; }} className={invalid('brand') ? 'receive-v2-invalid' : undefined}>
-          Brand{!doNotList && <span className="receive-v2-req"> *</span>}
-          <input value={form.unbranded ? 'Unbranded' : form.brand} disabled={form.unbranded} onFocus={e => { typingTarget.current = e.currentTarget; }} onChange={e => update('brand', e.target.value)} />
-          <button type="button" className="text-button" onClick={chooseNoBrand}>No brand</button>
+        <div className="receive-v2-row2 receive-v2-span2">
+        <label className={invalid('price') ? 'receive-v2-invalid' : undefined}>
+          <span className="receive-v2-label">Price{!doNotList && <span className="receive-v2-req"> *</span>}</span>
+          <ManifestReceiveReference result={manifestReference} />
+          <input inputMode="decimal" placeholder="0.00" value={form.ask} onChange={e => update('ask', e.target.value)} autoComplete="off" />
         </label>
-        <label className="mboard-inline">
-          <input type="checkbox" checked={form.unbranded} onChange={e => setForm(p => {
-            const unbranded = e.target.checked;
-            return {
-              ...p,
-              unbranded,
-              title: composeListingTitle(p.brand, p.model, unbranded),
-            };
-          })} />
-          Unbranded — no brand anywhere on the product or packaging
-        </label>
+        {!staffMode && <label>
+          <span className="receive-v2-label">Cost <span className="receive-v2-opt">optional</span></span>
+          <input inputMode="decimal" placeholder="Leave blank if unknown" value={form.cost} onChange={e => update('cost', e.target.value)} />
+        </label>}
+        </div>
 
-        <label className={liveMissing.includes('UPC') ? 'receive-need' : undefined}>
-          UPC{liveMissing.includes('UPC') ? ' (needed to list)' : ''}
+        <label className={invalid('upc') ? 'receive-v2-invalid' : undefined}>
+          <span className="receive-v2-label">UPC{upcRequired(channels) && !doNotList && <span className="receive-v2-req"> *</span>}</span>
           <input
             value={form.noUpc ? UPC_NOT_APPLICABLE : form.upc}
             disabled={form.noUpc}
@@ -2282,10 +2299,9 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
               setForm(p => ({ ...p, upc: v, noUpc: false }));
               setDups(null); setDupAck(false);
             }}
-            /* Always allow the soft keyboard on the form UPC field (kiosk mode hides it only on the scan box). */
             inputMode="numeric"
             autoComplete="off"
-            placeholder="optional — or mark No UPC below"
+            placeholder="Scan or type UPC"
           />
         </label>
         <label className="mboard-inline">
@@ -2294,25 +2310,15 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
             setForm(p => ({ ...p, noUpc: on, upc: on ? '' : p.upc }));
             setDups(null); setDupAck(false);
           }} />
-          No UPC / doesn’t have a barcode — marketplaces get “Does not apply”
+          No UPC
         </label>
 
-        <label>
-          Length (in)
-          <input inputMode="decimal" value={form.length} onChange={e => update('length', e.target.value)} />
-        </label>
-        <label>
-          Width (in)
-          <input inputMode="decimal" value={form.width} onChange={e => update('width', e.target.value)} />
-        </label>
-        <label>
-          Height (in)
-          <input inputMode="decimal" value={form.height} onChange={e => update('height', e.target.value)} />
-        </label>
-        <label>
-          Weight (lb)
-          <input inputMode="decimal" value={form.weight} onChange={e => update('weight', e.target.value)} />
-        </label>
+        {!staffMode && unifiedV2 && <div className="receive-v2-span2 receive-sell-on">
+          <span className="receive-v2-section">Sell on</span>
+          <ChannelPicker value={channels} onChange={setChannels} disabled={doNotList || doNotShip} upc={form.noUpc ? '' : (form.upc || current?.upc || '')} />
+          {!staffMode && <label className="mboard-inline"><input type="checkbox" checked={doNotShip} disabled={dnsRequired} onChange={e => { setDns(e.target.checked); if (e.target.checked) setChannels([]); }} /> Do not ship</label>}
+          <label className="mboard-inline"><input type="checkbox" checked={doNotList} onChange={e => { setDoNotList(e.target.checked); if (e.target.checked) setChannels([]); }} /> Do not list for sale</label>
+        </div>}
 
         {!ebayAspects.categoryId && (
           <label ref={el => { fieldRefs.current.ebay_aspects = el; }} className={`unit-edit-wide${invalid('ebay_aspects') ? ' receive-v2-invalid' : ''}`}>
@@ -2328,96 +2334,46 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           </label>
         )}
 
+        {!unifiedV2 && <>
         <label className="unit-edit-wide">
           Title
-          <input
-            value={form.title}
-            onFocus={e => { typingTarget.current = e.currentTarget; }}
-            onChange={e => update('title', e.target.value)}
-            placeholder="Brand + item specifics"
-            autoComplete="off"
-          />
-          <span className="hint">Auto-filled as brand + item specifics (scans and manual).</span>
+          <input value={form.title} onFocus={e => { typingTarget.current = e.currentTarget; }} onChange={e => update('title', e.target.value)} placeholder="Brand + item specifics" autoComplete="off" />
         </label>
-        {manual && <label className="unit-edit-wide">Description / features<textarea rows={3} value={form.description} onFocus={e => { typingTarget.current = e.currentTarget; }} onChange={e => update('description', e.target.value)} /></label>}
-        {manual && !staffMode && <label>Cost (optional)<input inputMode="decimal" placeholder="9.00" value={form.cost} onChange={e => update('cost', e.target.value)} /></label>}
-        {!staffMode && <label className="unit-edit-wide">Manifest (optional)
-          <select value={manifestId} onChange={e => setManifestId(e.target.value)}>
-            <option value="">No manifest</option>
-            {manifests.map(m => <option key={m.id} value={m.id}>{m.name} · {m.manifest_on}</option>)}
-          </select>
-        </label>}
+        {manual && <label className="unit-edit-wide">Description<textarea rows={3} value={form.description} onChange={e => update('description', e.target.value)} /></label>}
+        {manual && !staffMode && <label>Cost<input inputMode="decimal" value={form.cost} onChange={e => update('cost', e.target.value)} /></label>}
+        {!staffMode && <label className="unit-edit-wide">Manifest<select value={manifestId} onChange={e => setManifestId(e.target.value)}><option value="">No manifest</option>{manifests.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select></label>}
+        </>}
 
-        <div ref={el => { fieldRefs.current.photo = el; }} className={`unit-edit-wide${invalid('photo') ? ' receive-v2-invalid' : ''}`}>
-          <span className="receive-label">Photos<span className="receive-v2-req"> *</span></span>
-          <div className="actions">
-            {/* Buttons + programmatic click — label+sr-only file inputs often do nothing in iOS PWA. */}
-            <input
-              ref={takePhotoFile}
-              type="file"
-              accept="image/*"
-              capture="environment"
-              className="sr-only"
-              aria-hidden
-              tabIndex={-1}
-              onChange={e => {
-                const input = e.currentTarget;
-                const list = input.files;
-                // Copy bytes before clearing — clearing first empties the File on some Android PWAs.
-                void ingestFiles(list).finally(() => { input.value = ''; });
-              }}
-            />
-            <input
-              ref={choosePhotoFile}
-              type="file"
-              accept="image/*"
-              multiple
-              className="sr-only"
-              aria-hidden
-              tabIndex={-1}
-              onChange={e => {
-                const input = e.currentTarget;
-                const list = input.files;
-                void ingestFiles(list).finally(() => { input.value = ''; });
-              }}
-            />
-            <button type="button" className="secondary receive-file-btn" disabled={photoBusy || busy} onClick={() => takePhotoFile.current?.click()}>
-              {photoBusy ? 'Saving photo…' : 'Take photo'}
-            </button>
-            <button type="button" className="secondary receive-file-btn" disabled={photoBusy || busy} onClick={() => choosePhotoFile.current?.click()}>
-              Choose photos
-            </button>
+        {!unifiedV2 && <div ref={el => { fieldRefs.current.photo = el; }} className={`unit-edit-wide${invalid('photo') ? ' receive-v2-invalid' : ''}`}>
+          <span className="receive-v2-label">Photos<span className="receive-v2-req"> *</span></span>
+          <div className="receive-v2-photo-actions">
+            <button type="button" className="secondary" disabled={photoBusy || busy} onClick={() => takePhotoFile.current?.click()}>Take photo</button>
+            <button type="button" className="secondary" disabled={photoBusy || busy} onClick={() => choosePhotoFile.current?.click()}>Choose photos</button>
           </div>
-          {hasFiles && <div className="receive-photos">{files.map((f, i) => <figure key={`${f.name}-${f.size}-${i}`}>
-            <img src={previews[i]} alt={`Photo ${i + 1}`} />
-            <button type="button" className="text-button" onClick={() => {
-              const path=stagedPhotoPaths[i];
-              if(path) void client.storage.from('unit-photos').remove([path]);
-              setStagedPhotoPaths(prev=>prev.filter((_,j)=>j!==i));
-              setFiles(prev => {
-                const next = prev.filter((_, j) => j !== i);
-                void savePendingPhotos(pendingPhotoKey(storeId, photoSessionKey.current), next);
-                return next;
-              });
-            }}>Remove</button>
-          </figure>)}</div>}
-        </div>
+        </div>}
 
+        {!unifiedV2 && <>
         <label className="mboard-inline unit-edit-wide">
-          <input
-            type="checkbox"
-            checked={doNotList}
-            onChange={e => {
-              const on = e.target.checked;
-              setDoNotList(on);
-              if (on) {
-                setChannels([]);
-              }
-            }}
-          />
+          <input type="checkbox" checked={doNotList} onChange={e => { const on = e.target.checked; setDoNotList(on); if (on) setChannels([]); }} />
           Do not list for sale
         </label>
         {!staffMode && <ChannelPicker value={channels} onChange={setChannels} disabled={doNotList || doNotShip} upc={form.noUpc ? '' : (form.upc || current?.upc || '')} />}
+        </>}
+        {unifiedV2 && <details className="receive-v2-optional receive-v2-span2">
+          <summary>Optional</summary>
+          <label className="unit-edit-wide">Title<input value={form.title} onChange={e => update('title', e.target.value)} placeholder="Brand + specifics" autoComplete="off" /></label>
+          {!staffMode && <label>Cost <span className="receive-v2-opt">optional</span><input inputMode="decimal" placeholder="Leave blank if unknown" value={form.cost} onChange={e => update('cost', e.target.value)} /></label>}
+          <label className="unit-edit-wide">Description<textarea rows={2} value={form.description} onChange={e => update('description', e.target.value)} /></label>
+          <CategoryField label="Website category" value={form.category} options={choices(options?.categories)} onChange={v => update('category', v)} onFocus={e => { typingTarget.current = e.currentTarget; }} />
+          <div className="receive-v2-dims">
+            <label>Length (in)<input inputMode="decimal" value={form.length} onChange={e => update('length', e.target.value)} /></label>
+            <label>Width (in)<input inputMode="decimal" value={form.width} onChange={e => update('width', e.target.value)} /></label>
+            <label>Height (in)<input inputMode="decimal" value={form.height} onChange={e => update('height', e.target.value)} /></label>
+            <label>Weight (lb)<input inputMode="decimal" value={form.weight} onChange={e => update('weight', e.target.value)} /></label>
+          </div>
+          {!staffMode && <label className="unit-edit-wide">Manifest<select value={manifestId} onChange={e => setManifestId(e.target.value)}><option value="">No manifest</option>{manifests.map(m => <option key={m.id} value={m.id}>{m.name} · {m.manifest_on}</option>)}</select></label>}
+          {!staffMode && <BundleReceive client={client} lastReceived={saved[0]} onSaved={onSaved} />}
+        </details>}
       </div>
 
       <p className="hint receive-check">

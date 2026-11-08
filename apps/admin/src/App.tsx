@@ -7,6 +7,7 @@ import { ReturnsPage } from './ReturnsPage';
 import { ReceiptsPage } from './ReceiptsPage';
 import { RegisterPage } from './RegisterPage';
 import { MoneyPage } from './MoneyPage';
+import { BuildStamp } from './BuildStamp';
 import { BooksPage } from './BooksPage';
 import './books.css';
 import { ManifestsPage } from './ManifestsPage';
@@ -897,6 +898,7 @@ export function App() {
     <div className="account">
       <small>{staffSession?.displayName || session.user.email}</small>
       <button type="button" onClick={() => { closeMenu(); void sb.auth.signOut({ scope: 'local' }); }}>Sign out</button>
+      <BuildStamp />
     </div>
   </aside>
   <main className="content">{error && <div className="alert" role="alert">{error}<button onClick={() => setError('')}>Dismiss</button></div>}

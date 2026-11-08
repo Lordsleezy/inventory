@@ -1,3 +1,5 @@
+import { writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 
@@ -19,12 +21,25 @@ export default defineConfig(({ mode }) => {
   // FLOOR_CI_BUILD=1: compile-only check in CI (no keys baked, never deployed). Real deploys still require both.
   const ciCompileOnly = process.env.FLOOR_CI_BUILD === '1';
   if (mode === 'production' && !ciCompileOnly && (!url || !anon)) throw new Error('Admin build requires Supabase URL and anon key');
+  const buildSha = process.env.COMMIT_REF || process.env.GITHUB_SHA || 'dev';
+  const buildDate = process.env.BUILD_DATE || new Date().toISOString();
   return {
-    plugins: [react()],
+    plugins: [
+      react(),
+      {
+        name: 'floor-build-json',
+        closeBundle() {
+          const out = resolve(process.cwd(), 'dist/build.json');
+          writeFileSync(out, `${JSON.stringify({ sha: buildSha, builtAt: buildDate }, null, 0)}\n`);
+        },
+      },
+    ],
     base: '/',
     define: {
       'import.meta.env.VITE_SUPABASE_URL': JSON.stringify(url || ''),
-      'import.meta.env.VITE_SUPABASE_ANON_KEY': JSON.stringify(anon || '')
-    }
+      'import.meta.env.VITE_SUPABASE_ANON_KEY': JSON.stringify(anon || ''),
+      'import.meta.env.VITE_FLOOR_BUILD_SHA': JSON.stringify(buildSha),
+      'import.meta.env.VITE_FLOOR_BUILD_DATE': JSON.stringify(buildDate),
+    },
   };
 });
