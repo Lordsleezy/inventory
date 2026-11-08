@@ -23,16 +23,21 @@ import { rollupRareCategories } from './inventoryCategories';
 import { liveListedChannels, notListedLines } from './sheetChannels';
 import type { BooksWorkbook, ExpenseDisplayLine, Period } from './types';
 
+type SpanSlice = { label: string; workbook: BooksWorkbook };
+type ExportOptions = { title?: string; slices?: SpanSlice[]; word?: string };
+
 function tieWarning(wb: BooksWorkbook) {
   const issues = wb.exportTieIssues ?? verifyExportTies(wb);
   return issues.length ? issues.map((i) => i.message).join('; ') : undefined;
 }
 
-export async function buildBooksExcel(period: Period, wb: BooksWorkbook, label: string) {
+export async function buildBooksExcel(period: Period, wb: BooksWorkbook, label: string, options?: ExportOptions) {
   const x = new ExcelJS.Workbook();
   x.creator = 'Floor Books';
   x.subject = label;
-  const periodLabel = formatPeriodTitle(period.period_start);
+  const periodLabel = options?.title || formatPeriodTitle(period.period_start);
+  const slices = options?.slices && options.slices.length > 1 ? options.slices : null;
+  const word = options?.word || 'month';
   const generated = new Date();
 
   const wsS = x.addWorksheet('Sales');
@@ -49,7 +54,13 @@ export async function buildBooksExcel(period: Period, wb: BooksWorkbook, label: 
   wsS.addRow(salesHeader);
   styleHeaderRow(wsS, hS, salesHeader.length);
   const dataStartS = hS + 1;
-  for (const r of wb.sales.rows) {
+  const salesGroups = slices || [{ label: '', workbook: wb }];
+  for (const group of salesGroups) {
+    if (group.label) {
+      const head = wsS.addRow([group.label]);
+      head.font = { bold: true };
+    }
+    for (const r of group.workbook.sales.rows) {
     wsS.addRow([
       excelDate(r.date),
       r.sku,
@@ -67,6 +78,14 @@ export async function buildBooksExcel(period: Period, wb: BooksWorkbook, label: 
       moneyCell(r.commission_cents),
       r.profit_notes,
     ]);
+    }
+    if (group.label) {
+      const sub = group.workbook.sales.totals;
+      const row = wsS.addRow(['', '', '', '', '', '', moneyCell(sub.revenue), '', '', '', '', moneyCell(sub.cost), moneyCell(sub.profit), moneyCell(sub.commission), '']);
+      mergeLabelRow(wsS, row.number, 1, 6, `${group.label} subtotal`);
+      row.font = { bold: true };
+      for (const c of [7, 12, 13, 14]) row.getCell(c).numFmt = MONEY_FMT;
+    }
   }
   const dataEndS = wsS.rowCount;
   bandRows(wsS, dataStartS, dataEndS);
@@ -139,7 +158,13 @@ export async function buildBooksExcel(period: Period, wb: BooksWorkbook, label: 
   styleHeaderRow(wsE, hE, expHeader.length);
   const dupLines: ExpenseDisplayLine[] = wb.expenses.rows.filter((r) => r.duplicateFlag || (r.excludeFromTotals && r.duplicateFlag));
   const startE = hE + 1;
-  for (const r of wb.expenses.exportRows) {
+  const expenseGroups = slices || [{ label: '', workbook: wb }];
+  for (const group of expenseGroups) {
+    if (group.label) {
+      const head = wsE.addRow([group.label]);
+      head.font = { bold: true };
+    }
+    for (const r of group.workbook.expenses.exportRows) {
     const row = wsE.addRow([
       excelDate(r.date),
       r.category,
@@ -151,6 +176,13 @@ export async function buildBooksExcel(period: Period, wb: BooksWorkbook, label: 
     ]);
     row.getCell(1).numFmt = 'mmm d, yyyy';
     row.getCell(4).numFmt = MONEY_FMT;
+    }
+    if (group.label) {
+      const row = wsE.addRow(['', '', '', moneyCell(group.workbook.expenses.total_cents)]);
+      mergeLabelRow(wsE, row.number, 1, 3, `${group.label} subtotal`);
+      row.font = { bold: true };
+      row.getCell(4).numFmt = MONEY_FMT;
+    }
   }
   const expDataEnd = wsE.rowCount;
   bandRows(wsE, startE, expDataEnd);
@@ -204,7 +236,7 @@ export async function buildBooksExcel(period: Period, wb: BooksWorkbook, label: 
   fitTitleRows(wsI, invCols, invWidths);
   const inv = wb.inventory;
   const metrics: [string, number, string][] = [
-    ['Units in stock at start of month', inv.start_unit_count, inv.start_source === 'snapshot' ? 'Month snapshot' : 'Estimated: end of month minus this month\'s movement, because no start snapshot exists yet'],
+    [`Units in stock at start of ${word}`, inv.start_unit_count, inv.start_source === 'snapshot' ? 'Snapshot' : 'Estimated from movement, because no start snapshot exists yet'],
     ['Units received', inv.received_units, ''],
     ['Units sold', inv.sold_units, ''],
     ['Returned to stock', inv.return_to_stock_units ?? 0, ''],
@@ -212,7 +244,7 @@ export async function buildBooksExcel(period: Period, wb: BooksWorkbook, label: 
     ['Sent as replacements', inv.replacement_units, ''],
     ['Moved to Defective', inv.defective_units, 'Units pulled into defective this month'],
     ['Defective items on hand', inv.owner?.defective_shelf?.units ?? 0, 'Same count as Inventory → Defective'],
-    ['Units in stock at end of month', inv.end_unit_count, inv.end_source === 'snapshot' ? 'Month snapshot' : 'Estimated: current on-hand count, because this month is not closed'],
+    [`Units in stock at end of ${word}`, inv.end_unit_count, inv.end_source === 'snapshot' ? 'Snapshot' : 'Estimated: current on-hand count, because this period is not closed'],
   ];
   const hI = wsI.rowCount + 1;
   wsI.addRow(['Metric', 'Units', 'Note']);
@@ -399,6 +431,16 @@ export async function buildBooksExcel(period: Period, wb: BooksWorkbook, label: 
     }
   }
   wsP.addRow([]);
+  if (slices) {
+    wsP.addRow(['Month subtotals']).font = { bold: true, size: 12 };
+    for (const slice of slices) {
+      const row = wsP.addRow([slice.label, moneyCell(slice.workbook.payouts.commission_total_cents), moneyCell(slice.workbook.sales.totals.profit), moneyCell(slice.workbook.payouts.owner.ownerKeeps)]);
+      row.getCell(2).numFmt = MONEY_FMT;
+      row.getCell(3).numFmt = MONEY_FMT;
+      row.getCell(4).numFmt = MONEY_FMT;
+    }
+    wsP.addRow([]);
+  }
   wsP.addRow(['Commissions (Paul & Jacob)']).font = { bold: true, size: 12 };
   wsP.addRow(['Person', 'Earned this month', 'Paid this month', 'Still owed (all time)']);
   styleHeaderRow(wsP, wsP.rowCount, 4);
@@ -438,7 +480,13 @@ export async function buildBooksExcel(period: Period, wb: BooksWorkbook, label: 
   wsR.addRow(recHeader);
   styleHeaderRow(wsR, hR, recHeader.length);
   const rStart = hR + 1;
-  for (const r of wb.received) {
+  const receivedGroups = slices || [{ label: '', workbook: wb }];
+  for (const group of receivedGroups) {
+    if (group.label) {
+      const head = wsR.addRow([group.label]);
+      head.font = { bold: true };
+    }
+    for (const r of group.workbook.received) {
     wsR.addRow([
       excelDate(String(r.received_at || '')),
       r.sku,
@@ -453,6 +501,7 @@ export async function buildBooksExcel(period: Period, wb: BooksWorkbook, label: 
       r.receiver_name,
       r.listing_status,
     ]);
+    }
   }
   bandRows(wsR, rStart, wsR.rowCount);
   wrapDataRows(wsR, hR, wsR.rowCount, recHeader.length);
@@ -474,7 +523,7 @@ function pdfText(value: unknown) {
     .replace(/[^\x20-\x7E\n\r\t]/g, '?');
 }
 
-export async function buildBooksPdf(period: Period, wb: BooksWorkbook, money: (c: number) => string) {
+export async function buildBooksPdf(period: Period, wb: BooksWorkbook, money: (c: number) => string, options?: ExportOptions) {
   const pdf = await PDFDocument.create();
   const font = await pdf.embedFont(StandardFonts.Helvetica);
   const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
@@ -483,7 +532,8 @@ export async function buildBooksPdf(period: Period, wb: BooksWorkbook, money: (c
   const margin = 34;
   let page = pdf.addPage([pageWidth, pageHeight]);
   let y = pageHeight - margin;
-  const title = formatPeriodTitle(period.period_start);
+  const title = options?.title || formatPeriodTitle(period.period_start);
+  const slices = options?.slices && options.slices.length > 1 ? options.slices : null;
   const newPage = (section: string) => {
     page = pdf.addPage([pageWidth, pageHeight]);
     y = pageHeight - margin;
@@ -506,6 +556,12 @@ export async function buildBooksPdf(period: Period, wb: BooksWorkbook, money: (c
   const t = wb.sales.totals;
   const p = wb.payouts;
   line(`Sales ${money(t.revenue)} · COGS ${money(t.cost)} · Fees+labels ${money(t.feesAndLabels)} · Profit ${money(t.profit)} · Commission ${money(t.commission)} · Other expenses ${money(t.otherExpenses)} · Owner keeps ${money(p.owner.ownerKeeps)}`, true);
+  if (slices) {
+    for (const slice of slices) {
+      const s = slice.workbook.sales.totals;
+      line(`${slice.label}: sales ${money(s.revenue)} · profit ${money(s.profit)} · commission ${money(s.commission)} · owner keeps ${money(slice.workbook.payouts.owner.ownerKeeps)}`);
+    }
+  }
 
   newPage('Expenses');
   for (const r of wb.expenses.exportRows.slice(0, 80)) line(`${r.date} · ${r.category} · ${r.description} · ${money(r.amount_cents)}`);

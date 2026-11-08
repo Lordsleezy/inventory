@@ -1,4 +1,4 @@
-import { PDFDocument } from 'pdf-lib';
+import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 
 type Line = { id: string; dollars: number };
 type ReturnDoc = {
@@ -7,6 +7,8 @@ type ReturnDoc = {
   due_on: string;
   lines: Line[];
   signer?: { name?: string; title?: string; date?: string; email?: string; phone?: string; account?: string };
+  open?: boolean;
+  recordsNote?: string | null;
 };
 
 const money = (n: number) => String(Math.round(n));
@@ -56,5 +58,15 @@ export async function fillCdtfaPdf(doc: ReturnDoc): Promise<Uint8Array> {
     try { if (value) form.getTextField(name).setText(value); } catch { /* leave a field blank if this revision renamed it */ }
   }
   try { form.updateFieldAppearances(); } catch { /* the official form keeps its own font */ }
+  if (doc.recordsNote || doc.open) {
+    const font = await pdf.embedFont(StandardFonts.HelveticaBold);
+    const page = pdf.getPage(0);
+    let y = page.getHeight() - 18;
+    if (doc.recordsNote) {
+      page.drawText(doc.recordsNote.replace(/—/g, '-'), { x: 28, y, size: 8, font, color: rgb(0, 0, 0) });
+      y -= 12;
+    }
+    if (doc.open) page.drawText('DRAFT - PERIOD OPEN', { x: 28, y, size: 8, font, color: rgb(0, 0, 0) });
+  }
   return pdf.save();
 }

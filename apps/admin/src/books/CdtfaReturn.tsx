@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { fillCdtfaPdf } from './cdtfaPdf';
 import { CdtfaPaper, type PaperLine, type PaperSale, type PaperSigner } from './CdtfaPaper';
-import { dueOn, filingBounds, periodChoices, periodLabel, resolveCdtfaDollars, type CdtfaFrequency } from './cdtfaResolve';
+import { dueOn, periodChoices, periodLabel, resolveCdtfaDollars, type CdtfaFrequency } from './cdtfaResolve';
+import { formKind, recordsStamp, spanFrequency } from './booksSpan';
+import { loadCdtfaRoundingNote } from './cdtfaLoad';
 
 type Check = { id: string; ok: boolean; detail: string; sales?: PaperSale[] };
 type FloorLine = { id: string; label: string; dollars: number; note: string; sales: PaperSale[] };
@@ -16,7 +18,14 @@ type Doc = {
   months?: { locked: boolean }[];
 };
 
-type Props = { client: SupabaseClient; money: (cents: number) => string; monthStart: string };
+type Props = {
+  client: SupabaseClient;
+  money: (cents: number) => string;
+  periodStart: string;
+  periodEnd: string;
+  onPeriod: (start: string) => void;
+  onFiling?: (frequency: CdtfaFrequency) => void;
+};
 
 const FREQUENCIES: [CdtfaFrequency, string][] = [['monthly', 'Monthly'], ['quarterly', 'Quarterly'], ['yearly', 'Yearly']];
 const SIGNER_FIELDS = ['name', 'title', 'date', 'email', 'phone', 'account'] as const;
@@ -25,16 +34,17 @@ function emptySigner(): PaperSigner {
   return { name: '', title: '', date: '', email: '', phone: '', account: '' };
 }
 
-export function CdtfaReturn({ client, money, monthStart }: Props) {
+export function CdtfaReturn({ client, money, periodStart, periodEnd, onPeriod, onFiling }: Props) {
   const [frequency, setFrequency] = useState<CdtfaFrequency>('quarterly');
-  const [periodStart, setPeriodStart] = useState('');
   const [doc, setDoc] = useState<Doc | null>(null);
   const [edits, setEdits] = useState<Record<string, number | undefined>>({});
   const [signer, setSigner] = useState<PaperSigner>(emptySigner());
+  const [roundGap, setRoundGap] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
-  const choices = periodChoices(frequency, today);
+  const kind = formKind(periodStart, periodEnd);
+  const choices = periodChoices(spanFrequency(kind), today);
 
   const loadPeriod = useCallback(async (start: string, end: string) => {
     const [result, saved] = await Promise.all([
@@ -54,7 +64,8 @@ export function CdtfaReturn({ client, money, monthStart }: Props) {
     setDoc(next);
     setEdits(amounts);
     setSigner(person);
-    setPeriodStart(start);
+    const gap = await loadCdtfaRoundingNote(client, next.lines, start, end);
+    setRoundGap(gap);
   }, [client]);
 
   const load = useCallback(async () => {
@@ -63,9 +74,9 @@ export function CdtfaReturn({ client, money, monthStart }: Props) {
     if (filing.error) { setError(filing.error.message); return; }
     const next = (filing.data as CdtfaFrequency) || 'quarterly';
     setFrequency(next);
-    const period = filingBounds(monthStart, next);
-    await loadPeriod(period.start, period.end);
-  }, [client, loadPeriod, monthStart]);
+    onFiling?.(next);
+    await loadPeriod(periodStart, periodEnd);
+  }, [client, loadPeriod, onFiling, periodStart, periodEnd]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -84,8 +95,9 @@ export function CdtfaReturn({ client, money, monthStart }: Props) {
     });
   }, [doc, resolved]);
 
-  const editsLocked = !!doc && ((doc.months || []).some((month) => month.locked) || doc.locked);
-  const label = doc ? periodLabel(doc.period_start, doc.period_end, frequency, doc.due_on) : '';
+  const editsLocked = !!doc?.locked;
+  const label = doc ? periodLabel(doc.period_start, doc.period_end, spanFrequency(kind), doc.due_on) : '';
+  const recordsNote = recordsStamp(kind, frequency);
 
   async function chooseFrequency(next: CdtfaFrequency) {
     setBusy(true); setError('');
@@ -93,8 +105,7 @@ export function CdtfaReturn({ client, money, monthStart }: Props) {
     setBusy(false);
     if (saved.error) { setError(saved.error.message); return; }
     setFrequency(next);
-    const period = filingBounds(monthStart, next);
-    await loadPeriod(period.start, period.end);
+    onFiling?.(next);
   }
 
   async function save(field: string, dollars: number | null, text: string | null) {
@@ -130,6 +141,8 @@ export function CdtfaReturn({ client, money, monthStart }: Props) {
         period_start: doc.period_start,
         period_end: doc.period_end,
         due_on: doc.due_on,
+        open: doc.open,
+        recordsNote,
         lines: lines.map((line) => ({ id: line.id, dollars: line.dollars })),
         signer,
       });
@@ -149,14 +162,12 @@ export function CdtfaReturn({ client, money, monthStart }: Props) {
     <section className="cdtfa-sheet">
       <div className="cdtfa-toolbar">
         <label>Filing period
-          <select aria-label="Filing period" value={periodStart} disabled={!choices.length || busy} onChange={(e) => {
-            const choice = choices.find((row) => row.start === e.target.value);
-            if (choice) void loadPeriod(choice.start, choice.end);
-          }}>
+          <select aria-label="Filing period" value={periodStart} disabled={!choices.length || busy} onChange={(e) => onPeriod(e.target.value)}>
             {choices.map((choice) => <option key={choice.start} value={choice.start}>{choice.label}</option>)}
           </select>
         </label>
-        <div className="cdtfa-freq" role="group" aria-label="Filing frequency">
+        <div className="cdtfa-freq" role="group" aria-label="Assigned filing schedule">
+          <span>Assigned schedule</span>
           {FREQUENCIES.map(([id, name]) => (
             <button key={id} type="button" className={frequency === id ? 'on' : ''} disabled={busy} onClick={() => void chooseFrequency(id)}>{name}</button>
           ))}
@@ -197,6 +208,8 @@ export function CdtfaReturn({ client, money, monthStart }: Props) {
             scheduleNote={doc.schedule_a2?.note || doc.place}
             districtMeasure={edits.A4 ?? 0}
             districtMeasureEdited={edits.A4 != null}
+            recordsNote={recordsNote}
+            roundingNote={roundGap}
             money={money}
             readOnly={editsLocked}
             onDollars={(id, dollars) => {
