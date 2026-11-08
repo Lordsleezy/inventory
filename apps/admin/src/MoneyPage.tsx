@@ -123,7 +123,7 @@ export function MoneyPage({ client, storeId, accessToken, money, stamp }: Props)
   async function syncNow() {
     setSyncing(true); setError('');
     try {
-      const response = await fetch(floorFunctionUrl('channel-fee-sync'), {
+      const response = await fetch(floorFunctionUrl('money-sync-now'), {
         method: 'POST',
         headers: { Authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
         body: '{}',

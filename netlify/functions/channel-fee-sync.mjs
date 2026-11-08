@@ -264,11 +264,22 @@ async function syncSquareFees(sb, storeId, log) {
   }
 }
 
+async function squarePayoutAccess(storeId) {
+  const attempts = [];
+  try { attempts.push(webSquareAccess(storeId, webSquareEnv())); } catch { /* website token missing */ }
+  try {
+    const oauth = await getStoreSquareAccess(storeId);
+    attempts.push({ accessToken: oauth.accessToken, locationId: oauth.locationId, sandbox: oauth.sandbox });
+  } catch { /* register Square is not connected */ }
+  return attempts;
+}
+
 async function syncSquarePayouts(sb, storeId, log) {
-  let access;
-  try { access = webSquareAccess(storeId, webSquareEnv()); }
-  catch (e) { log.push({ squarePayouts: "Square key not working" }); return; }
-  const base = access.sandbox ? "https://connect.squareupsandbox.com" : "https://connect.squareup.com";
+  const attempts = await squarePayoutAccess(storeId);
+  if (!attempts.length) { log.push({ squarePayouts: "Square key not working" }); return; }
+  let access = attempts[0];
+  const baseFor = (row) => row.sandbox ? "https://connect.squareupsandbox.com" : "https://connect.squareup.com";
+  let base = baseFor(access);
   const headers = { Authorization: `Bearer ${access.accessToken}`, "Square-Version": "2024-01-18", "Content-Type": "application/json" };
   const bankLast4 = new Map();
   try {
@@ -291,7 +302,13 @@ async function syncSquarePayouts(sb, storeId, log) {
     if (cursor) url.searchParams.set("cursor", cursor);
     const res = await fetch(url, { headers });
     const body = await res.json().catch(() => ({}));
-    if (!res.ok) { log.push({ squarePayouts: res.status === 401 || res.status === 403 ? "Square key not working" : `Square payouts request failed (HTTP ${res.status})` }); return; }
+    if (res.status === 401 || res.status === 403) {
+      const next = attempts[attempts.indexOf(access) + 1];
+      if (next && page === 0) { access = next; base = baseFor(access); headers.Authorization = `Bearer ${access.accessToken}`; cursor = null; continue; }
+      log.push({ squarePayouts: "Square key not working" });
+      return;
+    }
+    if (!res.ok) { log.push({ squarePayouts: `Square payouts request failed (HTTP ${res.status})` }); return; }
     for (const payout of body.payouts || []) {
       const suffix = bankLast4.get(payout.destination?.id);
       if (suffix && payout.destination && !payout.destination.account_number_suffix) payout.destination.account_number_suffix = suffix;

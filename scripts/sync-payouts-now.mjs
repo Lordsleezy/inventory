@@ -3,11 +3,27 @@
  * Matches on payout id (upsert). Never touches pgg124-5.
  *
  *   node scripts/sync-payouts-now.mjs
- * Reads .env.local / .env (SUPABASE_URL + SUPABASE_SERVICE_ROLE).
+ * Reads .env.local / .env, then a cached Netlify env file if one is already on this PC.
  */
-import "./load-env.mjs";
-import { createClient } from "@supabase/supabase-js";
-import { syncStoreChannels } from "../netlify/functions/channel-fee-sync.mjs";
+import fs from "node:fs";
+import path from "node:path";
+
+function loadNetlifyCache() {
+  const envPath = path.join(process.env.TEMP || "", "netlify-env-inventoryobi.json");
+  if (!fs.existsSync(envPath)) return false;
+  const rows = JSON.parse(fs.readFileSync(envPath, "utf8"));
+  for (const row of rows) {
+    if (!row?.key || process.env[row.key]) continue;
+    const values = Array.isArray(row.values) ? row.values : [];
+    const picked = values.find((v) => v?.context === "production") || values[0];
+    if (picked?.value != null && picked.value !== "") process.env[row.key] = String(picked.value);
+  }
+  return true;
+}
+const usedNetlifyCache = loadNetlifyCache();
+await import("./load-env.mjs");
+const { createClient } = await import("@supabase/supabase-js");
+const { syncStoreChannels } = await import("../netlify/functions/channel-fee-sync.mjs");
 
 const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const key = process.env.SUPABASE_SERVICE_ROLE || process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -15,7 +31,8 @@ if (!url || !key) {
   console.log(JSON.stringify({
     ok: false,
     reason: "no_local_credentials",
-    detail: "No .env.local or .env with SUPABASE_URL and SUPABASE_SERVICE_ROLE. The next scheduled channel-fee-sync will re-date payouts from the APIs.",
+    detail: "No .env.local, .env, or cached Netlify env with SUPABASE_URL and SUPABASE_SERVICE_ROLE. The next scheduled channel-fee-sync will re-date payouts from the APIs.",
+    looked_for_netlify_cache: usedNetlifyCache,
   }));
   process.exit(2);
 }
