@@ -24,7 +24,12 @@ function booksDb(locked) {
       const query = { select() { return this; }, eq() { return this; }, lte() { return this; }, gte() { return this; }, async maybeSingle() { return { data: locked ? { id: 'locked' } : null, error: null }; } };
       return query;
     }
-    return { async upsert(row, options) { writes.push({ row, options }); return { error: null }; } };
+    const chain = {
+      async upsert(row, options) { writes.push({ row, options }); return { error: null }; },
+      select() { return this; }, eq() { return this; }, is() { return this; },
+      then(resolve) { resolve({ data: [], error: null }); },
+    };
+    return chain;
   } };
   return { sb, writes };
 }

@@ -3,6 +3,13 @@ import { channelTitle } from './booksMath';
 import type { DuplicateNote, ExpenseDisplayLine, ExpenseLine, Report, Row } from './types';
 
 const STORE_CHECKOUT = new Set(['ebay', 'tiktok', 'amazon']);
+const MARKETPLACE = new Set(['ebay', 'depop', 'mercari', 'tiktok', 'amazon']);
+
+function marketplaceBalance(channel: string) {
+  const c = channel.toLowerCase();
+  if (!MARKETPLACE.has(c)) return '';
+  return `${channelTitle(c)} balance`;
+}
 const SKIP_SOURCES = new Set(['fee']); // promoted with sale_id — counted on Sales
 
 function normText(s: string) {
@@ -13,17 +20,22 @@ function isUuid(s: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 }
 
+function publicRef(order?: string, sku?: string) {
+  const o = String(order || '').trim();
+  if (!o || isUuid(o)) return sku ? `SKU ${sku}` : '';
+  return o;
+}
+
 function cleanTitle(description: string, source: string, sku?: string, order?: string) {
   const src = String(source || '').toLowerCase();
+  const ref = publicRef(order, sku);
   if (src === 'manual_label' || src === 'label') {
-    const ch = channelTitle(src === 'manual_label' ? description.split(' ')[0] : 'mercari');
-    const skuBit = sku ? `SKU ${sku}` : order ? `order ${order}` : '';
     if (description.toLowerCase().includes('mercari') || src === 'manual_label') {
-      return ['Mercari label', skuBit].filter(Boolean).join(' · ');
+      return ['Mercari label', ref].filter(Boolean).join(' · ');
     }
   }
-  let title = description.trim();
-  if (isUuid(title)) title = sku ? `SKU ${sku}` : 'Expense';
+  let title = description.trim().replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '').replace(/\s+/g, ' ').trim();
+  if (isUuid(title) || !title) title = sku ? `SKU ${sku}` : 'Expense';
   title = title.replace(/\bmanual_label\b/gi, '').replace(/\s+/g, ' ').trim();
   if (/^shipping label\b/i.test(title) && sku) return `Mercari label · SKU ${sku}`;
   return title || 'Expense';
@@ -102,7 +114,7 @@ function detectDuplicates(lines: ExpenseDisplayLine[]): DuplicateNote[] {
   return notes;
 }
 
-export function buildExpenses(report: Report, attributedPromotedIds: Set<string>): BuiltExpenses {
+export function buildExpenses(report: Report, attributedPromotedIds: Set<string>, staffNames: Map<string, string> = new Map()): BuiltExpenses {
   const onSaleExpenseIds = new Set((report.books_label_dedup_expense_ids || []).map(String));
   const onSaleLabelIds = new Set((report.books_label_dedup_label_ids || []).map(String));
   const rows: ExpenseDisplayLine[] = [];
@@ -130,18 +142,25 @@ export function buildExpenses(report: Report, attributedPromotedIds: Set<string>
     const category = expenseCategory(String(e.category || ''), source, String(e.description || ''));
     const title = cleanTitle(String(e.description || ''), source, sku, String(e.order_id || ''));
     const isBonus = category === 'Bonus' || isBonusCategory(String(e.category || ''));
-    const reimburse = Boolean(e.needs_reimbursement) && !isBonus;
-    const onSale = onSaleExpenseIds.has(String(e.id || ''));
+    const person = staffNames.get(String(e.employee_id || '')) || '';
+    const desc = String(e.description || '').toLowerCase();
+    const namedMarket = [...MARKETPLACE].find((c) => desc.includes(c) || String(e.channel || '').toLowerCase() === c) || '';
+    const fromBalance = (desc.includes('return label') || source === 'return') && namedMarket
+      ? `${channelTitle(namedMarket)} balance`
+      : marketplaceBalance(String(e.channel || ''));
+    const labelOnSale = source === 'manual_label' || source === 'label';
+    const reimburse = Boolean(e.needs_reimbursement) && !isBonus && !fromBalance;
+    const onSale = onSaleExpenseIds.has(String(e.id || '')) || labelOnSale;
     rows.push({
       id: String(e.id || `${e.date}-${title}`),
       date: String(e.date ?? e.spent_on ?? ''),
-      category,
+      category: fromBalance && category === 'Out-of-pocket shipping' ? 'Returns' : category,
       title,
       amount_cents: Number(e.amount_cents || 0),
-      sourceDisplay: source === 'manual' ? '' : channelTitle(source) || source,
-      sku_or_order: sku || String(e.order_id || e.external_id || ''),
+      sourceDisplay: fromBalance || (reimburse ? (person || 'Person') : (source === 'manual' ? 'Store' : channelTitle(source) || 'Store')),
+      sku_or_order: publicRef(String(e.order_id || e.external_id || ''), sku),
       needs_reimbursement: reimburse,
-      countsInProfit: onSale,
+      countsInProfit: onSale || Boolean(fromBalance),
       kindKey: category,
       excludeFromTotals: false,
     });
@@ -259,17 +278,20 @@ export function buildExpenses(report: Report, attributedPromotedIds: Set<string>
     const key = `return-label:${r.id}`;
     if (returnExpenseKeys.has(key) || returnExpenseKeys.has(String(r.id))) continue;
     const labelCents = Number(r.return_label_cents || 0);
-    if (labelCents <= 0 || String(r.label_paid_by || 'seller') !== 'seller') continue;
+    if (labelCents <= 0) continue;
+    const ch = String(r.channel || '').toLowerCase();
+    const fromBalance = MARKETPLACE.has(ch);
+    if (!fromBalance && String(r.label_paid_by || 'seller') !== 'seller') continue;
     rows.push({
       id: key,
       date: String(r.created_at || r.date || '').slice(0, 10),
-      category: 'Out-of-pocket shipping',
+      category: fromBalance ? 'Returns' : 'Out-of-pocket shipping',
       title: `Return label · ${channelTitle(r.channel)} · SKU ${r.sku}`,
       amount_cents: labelCents,
-      sourceDisplay: channelTitle(r.channel),
-      sku_or_order: String(r.sku || r.external_order_id || ''),
-      needs_reimbursement: true,
-      countsInProfit: false,
+      sourceDisplay: fromBalance ? `${channelTitle(ch)} balance` : 'Person',
+      sku_or_order: publicRef(String(r.external_order_id || ''), String(r.sku || '')),
+      needs_reimbursement: !fromBalance,
+      countsInProfit: true,
       kindKey: 'return-label',
       excludeFromTotals: false,
     });

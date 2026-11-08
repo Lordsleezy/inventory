@@ -126,6 +126,7 @@ export function MoneyPage({ client, storeId, accessToken, money, stamp }: Props)
     {error && <div className="alert" role="alert">{error}<button type="button" aria-label="Dismiss error" onClick={() => setError('')}>×</button></div>}
     {notice && <div className="notice" role="status">{notice}</div>}
     {!loaded && !error && <p role="status">Loading money…</p>}
+    {loaded && <WithdrawalsLog overview={overview} recent={recent} money={money} names={NAMES} />}
     <div className="money-cards">
       {overview.map((a) => {
         const detail = a.sync?.detail || {};
@@ -157,6 +158,36 @@ export function MoneyPage({ client, storeId, accessToken, money, stamp }: Props)
     {sheet && <MoneySheet key={`${sheet.account}${sheet.dir}${sheet.row?.id || 'new'}`} client={client} sheet={sheet} overview={overview.find((o) => o.account === sheet.account)!}
       people={people} meName={me.name} meId={me.id} money={money} stamp={stamp} names={names} onClose={() => setSheet(null)} onDone={done} />}
   </div>;
+}
+
+function WithdrawalsLog({ overview, recent, money, names }: { overview: Overview[]; recent: Record<string, Row[]>; money: (c: number) => string; names: Record<Account, string> }) {
+  const [source, setSource] = useState<Account | ''>('');
+  const [month, setMonth] = useState('');
+  const lines = overview.flatMap((a) => (recent[a.account] || [])
+    .filter((r) => r.kind === 'entry' && r.direction === 'out')
+    .map((r) => ({ ...r, account: a.account })))
+    .filter((r) => (!source || r.account === source) && (!month || r.at.slice(0, 7) === month))
+    .sort((a, b) => b.at.localeCompare(a.at));
+  const bySource = new Map<string, number>();
+  for (const r of lines) bySource.set(r.account, (bySource.get(r.account) || 0) + r.amount_cents);
+  return <section className="panel" aria-label="Withdrawals">
+    <h2>Withdrawals</h2>
+    <p>Every dollar that left a source. eBay and Square bank payouts sync on the existing money job (Open Box eBay only). A matching hand-entered line is flagged, not deleted.</p>
+    <div className="money-buttons">
+      <select aria-label="Source" value={source} onChange={(e) => setSource(e.target.value as Account | '')}>
+        <option value="">All sources</option>
+        {overview.map((a) => <option key={a.account} value={a.account}>{names[a.account]}</option>)}
+      </select>
+      <input aria-label="Month" type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
+    </div>
+    {!lines.length && <p className="empty">No withdrawals in this view. Open a card and choose See all activity for older rows.</p>}
+    {lines.map((r) => <div className="money-line" key={`${r.account}-${r.id}`}>
+      <div><span className="money-line-title">{names[r.account]}{r.auto ? ' · Auto' : ''}{String(r.note || '').toLowerCase().includes('possible duplicate') ? ' · Possible duplicate' : ''}</span>
+        <small>{shortDate(r.at)}{r.note ? ` · ${r.note}` : ''}</small></div>
+      <b className="money-out">−{money(r.amount_cents)}</b>
+    </div>)}
+    {[...bySource.entries()].map(([acct, cents]) => <p key={acct}>{names[acct as Account]} total {money(cents)}</p>)}
+  </section>;
 }
 
 function ActivityLine({ row, account, title, who, money, stamp, client, onOpen, setError }: { row: Row; account: Account; title: string; who: string; money: (c: number) => string;

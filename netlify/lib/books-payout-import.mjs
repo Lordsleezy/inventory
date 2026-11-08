@@ -33,5 +33,17 @@ export async function saveBooksPayout(sb, storeId, payout) {
     { onConflict: 'store_id,platform,external_payout_id' },
   );
   if (error) throw new Error(error.message);
-  return { imported: true, platform: payout.platform, payoutId: payout.external_payout_id };
+  // Same money entered by hand (no payout id) must not also count. Flag it; do not delete.
+  const { data: manuals } = await sb.from('platform_withdrawals').select('id,note')
+    .eq('store_id', storeId).eq('platform', payout.platform)
+    .eq('withdrawn_on', payout.withdrawn_on).eq('amount_cents', payout.amount_cents)
+    .is('external_payout_id', null).is('voided_at', null);
+  for (const row of manuals || []) {
+    const note = String(row.note || '');
+    if (/possible duplicate/i.test(note)) continue;
+    await sb.from('platform_withdrawals').update({
+      note: `Possible duplicate of imported ${payout.platform} payout ${payout.external_payout_id}. ${note}`.trim(),
+    }).eq('id', row.id);
+  }
+  return { imported: true, platform: payout.platform, payoutId: payout.external_payout_id, flaggedManual: (manuals || []).length };
 }

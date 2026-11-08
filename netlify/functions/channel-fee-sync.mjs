@@ -15,6 +15,8 @@ import { matchSquarePaymentsToTickets } from "../lib/square-books-match.mjs";
 //  - Square Payments → card processing fee (register + website)
 // Never touches listings.
 const LOOKBACK_DAYS = 90;
+/** Bank payouts: pull from when Open Box started selling, not the fee lookback. */
+const PAYOUT_HISTORY_SINCE = "2026-01-01T00:00:00.000Z";
 
 function moneyToCents(amount) {
   if (amount == null) return null;
@@ -79,6 +81,7 @@ async function syncEbayFeesForAccount(sb, storeId, account, log) {
   }
 
   const since = new Date(Date.now() - LOOKBACK_DAYS * 86400000).toISOString();
+  const payoutSince = PAYOUT_HISTORY_SINCE;
   const hint = account.id ? { accountId: account.id } : {};
 
   await saveEbayTransactionLedger(sb, storeId, account, since, hint);
@@ -104,7 +107,7 @@ async function syncEbayFeesForAccount(sb, storeId, account, log) {
   // Pull completed eBay bank payouts inside this existing 15-minute fee-sync schedule.
   let payoutOffset = 0;
   for (;;) {
-    const filter = encodeURIComponent(`payoutDate:[${since}..]`);
+    const filter = encodeURIComponent(`payoutDate:[${payoutSince}..]`);
     const result = await ebayFetch(storeId, "GET", `/sell/finances/v1/payout?filter=${filter}&limit=200&offset=${payoutOffset}`, undefined, hint);
     const payouts = result?.payouts || [];
     for (const payout of payouts) {
@@ -265,7 +268,7 @@ async function syncSquarePayouts(sb, storeId, log) {
   try { access = webSquareAccess(storeId, webSquareEnv()); }
   catch (e) { log.push({ squarePayouts: "Square key not working" }); return; }
   const base = access.sandbox ? "https://connect.squareupsandbox.com" : "https://connect.squareup.com";
-  const begin = new Date(Date.now() - LOOKBACK_DAYS * 86400000).toISOString();
+  const begin = PAYOUT_HISTORY_SINCE;
   const end = new Date().toISOString();
   let cursor = null;
   for (let page = 0; page < 20; page++) {

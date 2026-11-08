@@ -31,11 +31,6 @@ function inMonth(iso: string, start: string, end: string) {
   return d >= start && d <= end;
 }
 
-function isBankPayout(row: MoneyActivityRow) {
-  const r = row.reason.toLowerCase();
-  return row.direction === 'out' && (row.auto || r.includes('bank') || r === 'other' || r === 'person_payout');
-}
-
 export type MoneyOverviewRow = { account: string; balance_cents: number };
 export type MoneyMonthSnapshot = { account: string; balance_cents: number };
 
@@ -50,14 +45,15 @@ export function buildMoneyMonths(
   for (const acct of ACTIVE_ACCOUNTS) {
     const rows = (activityByAccount[acct] || []).filter((r) => inMonth(r.at, periodStart, periodEnd));
     const moneyIn = rows.filter((r) => r.direction === 'in').reduce((n, r) => n + r.amount_cents, 0);
-    const paidOut = rows.filter((r) => isBankPayout(r)).reduce((n, r) => n + r.amount_cents, 0);
+    const outs = rows.filter((r) => r.direction === 'out');
+    const paidOut = outs.reduce((n, r) => n + r.amount_cents, 0);
     const ov = overview.find((o) => o.account === acct);
     const snapEnd = snapshots?.end?.find((s) => s.account === acct);
     const snapStart = snapshots?.start?.find((s) => s.account === acct);
     const endBal = snapEnd?.balance_cents ?? ov?.balance_cents ?? null;
     const startFromSnap = snapStart?.balance_cents ?? null;
     const startBal = startFromSnap ?? (endBal == null ? null : endBal - moneyIn + paidOut);
-    const transfers = rows.filter((r) => isBankPayout(r) || r.direction === 'out');
+    const transfers = outs;
     stores.push({
       account: acct,
       label: MONEY_NAMES[acct] || channelTitle(acct),

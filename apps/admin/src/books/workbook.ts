@@ -52,7 +52,8 @@ export function buildBooksWorkbook(input: WorkbookInput): BooksWorkbook {
     flaggedDefaults: listFlaggedDefaultCostSales(report.sales || [], costFlagSaleIds || new Set()),
   };
   const attributed = new Set(report.books_attributed_fee_ids || []);
-  let built = buildExpenses(report, attributed);
+  const staffNames = new Map(payoutCtx.staff.map((s) => [s.user_id, s.display_name]));
+  let built = buildExpenses(report, attributed, staffNames);
 
   const visible = visibleExpenseRows(built.rows, duplicateHidden, duplicateDecisions);
   const counting = visible.filter((r) => !r.excludeFromTotals || duplicateDecisions[r.id] === 'keep');
