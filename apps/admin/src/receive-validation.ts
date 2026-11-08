@@ -11,7 +11,8 @@ export type ReceiveFieldKey =
   | 'price'
   | 'upc'
   | 'title'
-  | 'dimensions';
+  | 'dimensions'
+  | 'location';
 
 /** Defective or Do not list waives the photo and the dimensions. Either flag is enough. */
 export function receiveMediaWaived(doNotList: boolean, defective: boolean) {
@@ -26,6 +27,7 @@ export function receiveMissingFields({
   quantityOk = true,
   defective = false,
   hasDimensions = true,
+  hasLocation = true,
   titleOnly = false,
   titleReady = true,
 }: {
@@ -36,6 +38,7 @@ export function receiveMissingFields({
   quantityOk?: boolean;
   defective?: boolean;
   hasDimensions?: boolean;
+  hasLocation?: boolean;
   /** Staff DNL: a title is the only field. */
   titleOnly?: boolean;
   titleReady?: boolean;
@@ -52,6 +55,7 @@ export function receiveMissingFields({
   if (!quantityOk && !out.includes('quantity')) out.unshift('quantity');
   if (!waive && !hasDimensions && !out.includes('dimensions')) out.push('dimensions');
   if (!waive && !hasPhoto && !out.includes('photo')) out.push('photo');
+  if (!hasLocation && !out.includes('location')) out.push('location');
   return out;
 }
 
@@ -88,6 +92,7 @@ export function receiveFieldMessage(key: ReceiveFieldKey): string {
     upc: 'Enter UPC or tick No UPC',
     title: 'Enter a title',
     dimensions: 'Enter length, width, height, and weight',
+    location: 'Pick a location',
   };
   return map[key] || 'Required';
 }
@@ -97,6 +102,7 @@ export function receiveSectionForGap(gap: string): string {
   const key = gap.toLowerCase();
   if (key.includes('photo')) return 'photos';
   if (key.includes('dimension') || key === 'spec' || key.includes('weight') || key.includes('size')) return 'size';
+  if (key.includes('location')) return 'size';
   if (key.includes('price') || key.includes('condition') || key.includes('quantity')) return 'price';
   if (key.includes('upc')) return 'upc';
   return 'item';

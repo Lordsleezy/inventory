@@ -1807,8 +1807,8 @@ html.app-mode .receive-store-phone .receive-confirm select,
 html.app-mode .receive-store-phone .receive-confirm textarea { min-height:50px; box-sizing:border-box; color:#f3f4f8; background:#141b28; border:1px solid #293548; border-radius:14px; font-size:16px; padding:10px 12px; }
 html.app-mode .receive-store-phone .receive-confirm-fields .receive-condition-field { gap:6px; }
 html.app-mode .receive-store-phone .receive-chip-row { flex-wrap:nowrap; gap:7px; }
-html.app-mode .receive-store-phone .receive-chip { min-height:40px; padding:6px 12px; border:1px solid #293548; border-radius:999px; color:#e4e7ed; white-space:nowrap; font-size:14px; }
-html.app-mode .receive-store-phone .receive-chip.on { color:#4da3ff; background:#102b3b; border-color:#2789df; }
+html.app-mode .receive-store-phone .receive-chip { min-height:32px; padding:6px 10px; border:1px solid #4a4a4a; border-radius:8px; color:#9a9a9a; background:transparent; white-space:nowrap; font-size:13px; }
+html.app-mode .receive-store-phone .receive-chip.on { color:#fff; background:transparent; border-color:#fff; font-weight:700; }
 html.app-mode .receive-store-phone .receive-confirm-details,
 html.app-mode .receive-store-phone .receive-phone-fold { color:#e8eaf0; background:#141b28; border:1px solid #273246; border-radius:14px; padding:0 12px; }
 html.app-mode .receive-store-phone .receive-confirm-details summary,
@@ -2036,33 +2036,55 @@ html.app-mode .app-sheet header button {
   min-height: 44px;
 }
 
-/* —— Edit redesign —— */
+/* —— Edit redesign (phone UnitEditDrawer only) —— */
 html.app-mode .app-edit-section-chips {
   position: sticky;
   top: 52px;
   z-index: 5;
   display: flex;
-  gap: 8px;
+  gap: 0;
   overflow-x: auto;
-  padding: 8px 12px;
+  padding: 4px 8px 0;
   background: #000;
-  border-bottom: 0.5px solid #2c2c2e;
+  border-bottom: 1px solid #2a2a2a;
   -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
 }
+html.app-mode .app-edit-section-chips::-webkit-scrollbar { display: none; }
 html.app-mode .app-edit-section-chips button {
-  flex: 0 0 auto;
+  flex: 1 1 0;
+  min-width: 0;
   min-height: 36px;
-  padding: 6px 14px;
-  border-radius: 999px;
-  border: 0;
-  background: #2c2c2e;
-  color: #aeaeb2;
-  font-size: 14px;
+  padding: 8px 6px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  border-bottom: 2px solid transparent !important;
+  background: transparent !important;
+  color: #9a9a9a !important;
+  font-size: 13px;
   font-weight: 600;
+  white-space: nowrap;
 }
 html.app-mode .app-edit-section-chips button.is-active {
-  background: #fff; color: #000;
+  background: transparent !important;
+  color: #fff !important;
+  border-bottom-color: #fff !important;
+}
+html.app-mode .app-edit-quick-adds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 12px 4px;
+}
+html.app-mode .app-edit-quick-adds button {
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid #fff;
+  border-radius: 8px;
+  background: transparent;
   color: #fff;
+  font-size: 13px;
+  font-weight: 600;
 }
 html.app-mode .unit-edit-photo-grid {
   display: grid;
@@ -2127,26 +2149,27 @@ html.app-mode .unit-edit-segmented {
   padding: 0 12px 8px;
 }
 html.app-mode .unit-edit-segmented button {
-  min-height: 44px;
-  padding: 8px 12px;
-  border-radius: 10px;
-  border: 1px solid #3a3a3c;
-  background: #1c1c1e;
-  color: #fff;
-  font-size: 14px;
-  font-weight: 600;
+  min-height: 32px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid #4a4a4a;
+  background: transparent;
+  color: #9a9a9a;
+  font-size: 13px;
+  font-weight: 500;
 }
 html.app-mode .unit-edit-segmented button.is-active {
   border-color: #fff;
-  background: rgba(10, 132, 255, 0.18);
+  background: transparent;
   color: #fff;
+  font-weight: 700;
 }
 html.app-mode .unit-edit-price-pair {
   grid-template-columns: 1fr 1fr !important;
 }
 html.app-mode .unit-edit-cost-empty input {
-  border-color: #FF453A !important;
-  box-shadow: 0 0 0 1px rgba(255, 159, 10, 0.35);
+  border-color: #4a4a4a !important;
+  box-shadow: none;
 }
 html.app-mode .unit-edit-profit-line {
   margin: 0 16px 12px;
@@ -2186,10 +2209,11 @@ html.app-mode .dns-switch-row {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 12px;
   align-items: center;
-  margin: 12px;
-  padding: 14px;
-  border-radius: 14px;
-  background: #1c1c1e;
+  margin: 8px 12px;
+  padding: 10px 0;
+  border-radius: 0;
+  background: transparent;
+  border-bottom: 1px solid #2a2a2a;
 }
 html.app-mode .dns-switch-copy strong { display: block; color: #fff; margin-bottom: 4px; }
 html.app-mode .dns-switch-copy .hint {
@@ -2225,16 +2249,100 @@ html.app-mode .ios-switch-knob {
 html.app-mode .ios-switch.is-on .ios-switch-knob { transform: translateX(20px); }
 html.app-mode .unit-edit-ebay-block { margin-top: 8px; }
 html.app-mode .app-ebay-open {
-  margin: 8px 12px 16px;
-  padding: 12px 14px;
-  border-radius: 14px;
-  background: #1c1c1e;
+  margin: 8px 0 16px;
+  padding: 0 12px;
+  border-radius: 0;
+  background: transparent;
+  border: 0;
+}
+html.app-mode .app-ebay-specifics .aspect-suggested,
+html.app-mode .ebay-category-current .aspect-suggested { display: none !important; }
+html.app-mode .app-ebay-specifics .ebay-category-actions button,
+html.app-mode .ebay-category-actions button {
+  border: 0 !important;
+  background: none !important;
+  color: #9a9a9a !important;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  padding: 0 !important;
+  min-height: 0 !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
 }
 html.app-mode .unit-stock-card-clean {
-  display: grid !important;
-  grid-template-columns: 48px minmax(0, 1fr) 48px;
+  display: block !important;
+  margin: 8px 12px;
+  padding: 8px 0;
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+html.app-mode .unit-stock-onhand-row {
+  display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: space-between;
+  gap: 12px;
+}
+html.app-mode .unit-edit-stock-meta {
+  background: transparent !important;
+  padding: 0 12px !important;
+}
+html.app-mode .unit-edit-notes-block {
+  display: grid;
+  gap: 6px;
+  margin: 12px;
+  color: #9a9a9a;
+  font-size: 12px;
+}
+html.app-mode .unit-edit-notes-block textarea {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 96px;
+  background: transparent !important;
+  border: 1px solid #4a4a4a !important;
+  border-radius: 8px !important;
+  color: #fff !important;
+  padding: 10px !important;
+  font: inherit;
+}
+html.app-mode .unit-edit-location-picker {
+  display: grid;
+  gap: 4px;
+  padding: 8px 0 12px;
+}
+html.app-mode .unit-stock-card-clean .unit-quantity-step {
+  border: 1px solid #fff !important;
+  background: transparent !important;
+  color: #fff !important;
+  border-radius: 6px !important;
+  min-width: 36px;
+  min-height: 36px;
+}
+html.app-mode .app-unit-edit .unit-stock-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  border: 1px solid #fff;
+  border-radius: 8px;
+  overflow: hidden;
+}
+html.app-mode .app-unit-edit .unit-stock-stepper button {
+  min-width: 40px;
+  min-height: 36px;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  color: #fff !important;
+  font-size: 18px;
+}
+html.app-mode .app-unit-edit .unit-stock-stepper .unit-edit-quantity-display {
+  min-width: 36px;
+  text-align: center;
+  color: #fff;
+  font-weight: 700;
+  border: 0;
+  background: transparent;
 }
 html.app-mode .unit-stock-center {
   display: grid;
@@ -2256,33 +2364,48 @@ html.app-mode .unit-stock-helper {
   max-width: 220px;
 }
 html.app-mode .unit-edit-status-row,
-html.app-mode .unit-edit-location {
+html.app-mode .unit-edit-location-row,
+html.app-mode .unit-edit-nav-row {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 12px 14px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 0;
+  margin: 0;
+  border: 0;
+  border-bottom: 1px solid #2a2a2a;
+  border-radius: 0;
+  background: transparent;
+  color: #fff;
+  text-align: left;
+  font: inherit;
+  box-sizing: border-box;
 }
-html.app-mode .unit-edit-location p.warn { color: #FF453A; margin: 0; font-weight: 600; }
+html.app-mode .unit-edit-status-row span,
+html.app-mode .unit-edit-location-row span,
+html.app-mode .unit-edit-nav-row span { color: #9a9a9a; font-size: 13px; }
+html.app-mode .unit-edit-status-row strong,
+html.app-mode .unit-edit-location-row strong,
+html.app-mode .unit-edit-nav-row strong { color: #fff; font-weight: 600; }
+html.app-mode .unit-edit-location-row .warn { color: #FF453A; }
 html.app-mode .unit-edit-bottom-actions {
   display: grid;
-  gap: 10px;
-  padding: 8px 16px 24px;
+  gap: 0;
+  padding: 8px 12px 28px;
 }
-html.app-mode .unit-edit-bottom-actions > button.secondary,
-html.app-mode .unit-edit-bottom-actions > button {
-  width: 100%;
-  min-height: 48px;
-  border-radius: 12px;
-  border: 0;
-  background: #1c1c1e;
-  color: #fff;
-  font-size: 17px;
-  font-weight: 600;
-}
+html.app-mode .unit-edit-bottom-actions .unit-edit-nav-row { width: 100%; }
 html.app-mode .unit-edit-bottom-actions .unit-edit-delete {
-  color: #ff453a;
+  display: block;
+  width: 100%;
+  margin: 16px 0 0;
+  padding: 12px 0;
+  border: 0;
   background: transparent;
-  margin: 8px 0 0;
+  color: #FF453A;
+  font-size: 16px;
+  font-weight: 600;
+  text-align: center;
 }
 html.app-mode .app-sticky-save {
   position: sticky;
@@ -2294,22 +2417,153 @@ html.app-mode .app-sticky-save {
   gap: 12px;
   margin: 12px 12px 20px;
   padding: 12px 14px;
-  border-radius: 14px;
-  background: #1c1c1e;
-  border: 1px solid #3a3a3c;
-  box-shadow: 0 8px 24px #0008;
+  border-radius: 10px;
+  background: #111;
+  border: 1px solid #4a4a4a;
+  box-shadow: none;
 }
 html.app-mode .app-sticky-save span { color: #FF453A; font-size: 14px; font-weight: 600; }
 html.app-mode .app-sticky-save button {
   min-height: 44px;
   min-width: 110px;
-  border: 0;
-  border-radius: 12px;
-  background: #fff; color: #000;
+  border: 1px solid #fff;
+  border-radius: 8px;
+  background: transparent;
   color: #fff;
   font-size: 17px;
   font-weight: 700;
   padding: 0 18px;
+}
+html.app-mode .app-unit-edit .inventory-detail {
+  padding-bottom: 24px;
+}
+html.app-mode .app-unit-edit .unit-edit-grid {
+  display: grid;
+  grid-template-columns: 1fr !important;
+  gap: 0;
+  padding: 0 12px;
+  margin: 0;
+}
+html.app-mode .app-unit-edit .unit-edit-grid > label,
+html.app-mode .app-unit-edit .unit-edit-field {
+  display: grid;
+  gap: 4px;
+  padding: 10px 0;
+  border-bottom: 1px solid #2a2a2a;
+  min-height: 0;
+}
+html.app-mode .app-unit-edit .unit-edit-grid > label > :is(input, textarea, select),
+html.app-mode .app-unit-edit .unit-edit-field :is(input, textarea, select) {
+  width: 100%;
+  box-sizing: border-box;
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  color: #fff !important;
+  padding: 2px 0 !important;
+  min-height: 28px;
+  font-size: 16px;
+}
+html.app-mode .app-unit-edit .unit-edit-grid > label,
+html.app-mode .app-unit-edit .unit-edit-field {
+  color: #9a9a9a;
+  font-size: 12px;
+  font-weight: 500;
+}
+html.app-mode .app-unit-edit .unit-edit-sku-hidden { display: none !important; }
+html.app-mode .app-unit-edit .unit-edit-photo-tools {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px 10px;
+  color: #9a9a9a;
+  font-size: 13px;
+}
+html.app-mode .app-unit-edit .unit-edit-photo-tools button {
+  border: 0;
+  background: none;
+  color: #9a9a9a;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  padding: 0;
+  font: inherit;
+  min-height: 0;
+}
+html.app-mode .app-unit-edit .unit-edit-upc-row .unit-edit-upc-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+html.app-mode .app-unit-edit .unit-edit-upc-row .unit-edit-upc-fields button {
+  border: 0 !important;
+  background: none !important;
+  color: #fff !important;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  padding: 0 !important;
+  min-height: 0 !important;
+  font-size: 14px !important;
+  font-weight: 500 !important;
+}
+html.app-mode .app-unit-edit .unit-edit-upc-row .unit-edit-helper { display: none; }
+html.app-mode .app-unit-edit .unit-edit-price-pair {
+  display: grid !important;
+  grid-template-columns: 1fr 1fr !important;
+  gap: 10px !important;
+  padding: 0 12px;
+}
+html.app-mode .app-unit-edit .unit-edit-price-pair > label {
+  border: 1px solid #4a4a4a;
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+html.app-mode .app-unit-edit .unit-edit-price-pair > label input {
+  border: 0 !important;
+  padding: 4px 0 !important;
+}
+html.app-mode .app-unit-edit .unit-edit-reference-row {
+  padding: 6px 12px;
+  color: #9a9a9a;
+  font-size: 13px;
+  border: 0;
+  background: transparent;
+}
+html.app-mode .app-unit-edit .unit-edit-reference-row strong { color: #9a9a9a; font-weight: 500; }
+html.app-mode .app-unit-edit .unit-edit-desc-clamp {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  color: #fff;
+  font-size: 16px;
+  white-space: pre-wrap;
+}
+html.app-mode .app-unit-edit .unit-edit-show-all {
+  border: 0;
+  background: none;
+  color: #9a9a9a;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  padding: 4px 0 0;
+  font-size: 13px;
+}
+html.app-mode .app-unit-edit h3 {
+  margin: 18px 12px 6px;
+  color: #9a9a9a;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+html.app-mode .app-unit-edit .unit-edit-dim-row {
+  padding: 0 12px;
+}
+html.app-mode .app-unit-edit .unit-edit-dim-row input {
+  background: #000 !important;
+  border: 1px solid #4a4a4a !important;
+  border-radius: 6px !important;
 }
 html.app-mode .ebay-category-current { display: grid; gap: 10px; margin-bottom: 10px; }
 html.app-mode .ebay-category-path { display: grid; gap: 4px; margin: 0; color: #8e8e93; font-size: 13px; }
@@ -2327,16 +2581,28 @@ html.app-mode .ebay-field-required-tag {
 }
 html.app-mode .ebay-recommended-toggle {
   width: 100%;
-  min-height: 48px;
+  min-height: 44px;
   margin: 8px 0;
   border: 0;
-  border-radius: 12px;
-  background: #2c2c2e;
+  border-radius: 0;
+  border-bottom: 1px solid #2a2a2a;
+  background: transparent;
   color: #fff;
   font-size: 15px;
   font-weight: 600;
   text-align: left;
-  padding: 0 14px;
+  padding: 10px 0;
+}
+html.app-mode .app-ebay-open > summary { display: none; }
+html.app-mode .ebay-specific-field.is-missing input,
+html.app-mode .ebay-specific-field.is-missing select,
+html.app-mode .ebay-required-wrap.is-missing input,
+html.app-mode .ebay-required-wrap:has(.ebay-field-required-tag) input,
+html.app-mode .ebay-required-wrap:has(.ebay-field-required-tag) select {
+  border: 1px solid #FF453A !important;
+  border-radius: 8px !important;
+  padding: 8px !important;
+  background: #111 !important;
 }
 html.app-mode .app-unit-edit .inventory-detail {
   padding-bottom: calc(140px + env(safe-area-inset-bottom, 0px));

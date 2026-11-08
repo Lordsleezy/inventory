@@ -15,6 +15,8 @@ type Form = { sku: string; upc: string | null; enabled: boolean; category_id: st
 type Choice = { category_id: string; path: string };
 type Preview = { category_id: string; path: string | null; fields: Field[]; attributes: Record<string, string>; prefilled: string[]; cleared: string[]; usage: Record<string, string[]> };
 type Props = { client: SupabaseClient; sku: string; storeId?: string; appMode?: boolean; onSaved?: () => void; hideSaveButton?: boolean;
+  /** Phone edit already has Brand under Basics — hide the duplicate eBay Brand aspect. */
+  hideBrandAspect?: boolean;
   onJumpToCondition?: () => void;
   /** Item edit passes its Description box so a generated description lands in the form that Save changes writes. */
   onDescription?: (text: string) => void;
@@ -24,7 +26,7 @@ type Props = { client: SupabaseClient; sku: string; storeId?: string; appMode?: 
   onDirtyChange?: (dirty: boolean) => void };
 
 /** eBay item specifics: required first, eBay's allowed values as searchable lists. No AI. */
-export function EbaySpecificsPanel({ client, sku, storeId, appMode = false, onSaved, hideSaveButton = false, onDescription, onJumpToCondition, persistRef, dirtyRef, onDirtyChange }: Props) {
+export function EbaySpecificsPanel({ client, sku, storeId, appMode = false, onSaved, hideSaveButton = false, hideBrandAspect = false, onDescription, onJumpToCondition, persistRef, dirtyRef, onDirtyChange }: Props) {
   const [form, setForm] = useState<Form | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
   const [canPick, setCanPick] = useState(false);
@@ -101,8 +103,12 @@ export function EbaySpecificsPanel({ client, sku, storeId, appMode = false, onSa
     return () => { active = false; };
   }, [client, canPick, form?.item?.brand, form?.item?.model, form?.item?.title]);
 
-  const required = useMemo(() => (form?.fields || []).filter((f) => f.required), [form]);
-  const optional = useMemo(() => (form?.fields || []).filter((f) => !f.required && f.recommended), [form]);
+  const visibleFields = useMemo(
+    () => (form?.fields || []).filter((f) => !(hideBrandAspect && /^brand$/i.test(f.name))),
+    [form, hideBrandAspect],
+  );
+  const required = useMemo(() => visibleFields.filter((f) => f.required), [visibleFields]);
+  const optional = useMemo(() => visibleFields.filter((f) => !f.required && f.recommended), [visibleFields]);
   const missing = required.filter((f) => !values[f.name]?.trim()
     || (f.selection_only && f.allowed?.length && !f.allowed.includes(values[f.name].trim())));
 
@@ -270,7 +276,7 @@ export function EbaySpecificsPanel({ client, sku, storeId, appMode = false, onSa
               </button>
             )}
             <button type="button" className="secondary" disabled={busy} onClick={() => { setChangingCategory(true); setQuery(''); }}>
-              Change…
+              {appMode ? 'Change' : 'Change…'}
             </button>
           </div>
         </div>

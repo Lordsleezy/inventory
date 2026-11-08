@@ -7,13 +7,20 @@ type Money = (n: number) => string;
 type Stamp = (s: string) => string;
 
 /** Replacement + Given away buttons for one in-stock unit. Render only for admins; the server rejects everyone else. */
-export function DispositionButtons({ client, sku, money, stamp, onDone, className }: {
+export function DispositionButtons({ client, sku, money, stamp, onDone, className, presentation = 'buttons' }: {
   client: SupabaseClient; sku: string; money: Money; stamp: Stamp; onDone: () => void; className?: string;
+  /** Phone edit uses plain chevron rows; desktop keeps outlined buttons. */
+  presentation?: 'buttons' | 'rows';
 }) {
   const [open, setOpen] = useState<DispositionKind | null>(null);
+  const row = presentation === 'rows';
   return <>
-    <button type="button" className={className} onClick={() => setOpen('replacement')}>Replacement</button>
-    <button type="button" className={className} onClick={() => setOpen('giveaway')}>Given away</button>
+    <button type="button" className={row ? 'unit-edit-nav-row' : className} onClick={() => setOpen('replacement')}>
+      {row ? <><span>Replacement</span><strong>›</strong></> : 'Replacement'}
+    </button>
+    <button type="button" className={row ? 'unit-edit-nav-row' : className} onClick={() => setOpen('giveaway')}>
+      {row ? <><span>Given away</span><strong>›</strong></> : 'Given away'}
+    </button>
     {open === 'replacement' && <ReplacementDialog client={client} sku={sku} money={money} stamp={stamp} onClose={() => setOpen(null)} onDone={() => { setOpen(null); onDone(); }} />}
     {open === 'giveaway' && <GiveawayDialog client={client} sku={sku} onClose={() => setOpen(null)} onDone={() => { setOpen(null); onDone(); }} />}
   </>;
