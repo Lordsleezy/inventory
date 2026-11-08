@@ -168,11 +168,16 @@ export function MoneyPage({ client, storeId, accessToken, money, stamp }: Props)
         danger: true,
       };
     }
+    if (a.account === 'safe') return { line: 'Manual count' };
+    // Depop/TikTok/Amazon have no live balance API in Floor — ledger from sales − withdrawals.
+    if (a.account === 'depop' || a.account === 'tiktok' || a.account === 'amazon' || a.account === 'mercari') {
+      return { line: 'Manual ledger · not live from the app' };
+    }
     if (a.sync?.status === 'not_connected' || !a.sync) {
       return { line: <>Not synced · <button type="button" className="money-link" disabled={connecting === a.account}
         onClick={(e) => { e.stopPropagation(); void (a.account === 'ebay' || a.account === 'square' ? reconnect(a.account) : undefined); }}>Connect</button></> };
     }
-    return { line: a.account === 'safe' ? 'Manual count' : 'Manual' };
+    return { line: 'Manual' };
   };
 
   return <div className="money-page safe-v2">
