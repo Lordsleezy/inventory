@@ -268,6 +268,6 @@ export function computePayoutPersonBalances(input: {
 }
 
 export function paulJacobOwed(balances: PersonBalance[], paulIds: string[], jacobIds: string[]): { paul: number; jacob: number } {
-  const sum = (ids: string[]) => ids.reduce((n, id) => n + (balances.find((b) => b.user_id === id)?.commissionOwed || 0), 0);
+  const sum = (ids: string[]) => ids.reduce((n, id) => n + (balances.find((b) => b.user_id === id)?.balance || 0), 0);
   return { paul: sum(paulIds), jacob: sum(jacobIds) };
 }

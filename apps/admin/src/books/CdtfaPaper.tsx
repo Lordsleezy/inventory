@@ -29,12 +29,17 @@ type Props = {
   readOnly?: boolean;
   onDollars?: (id: string, dollars: number | null) => void;
   onSigner?: (field: keyof PaperSigner, value: string) => void;
+  layout?: 'desk' | 'phone';
+  showQuiet?: boolean;
 };
+
+const CALCULATED = new Set(['3', 'A11', 'B5', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20a', '20b', '20c', '20d', '20e', '21', '22', '23', '24', '25', '26']);
 
 const TOP = ['1', '2', '3'];
 const SECTION_A = ['4', '5', '6', '7', '8', '9', '10', 'A11'];
 const SECTION_B = ['B1', 'B2', 'B3', 'B4', 'B5'];
-const TAX = ['11', '12', '13', '14', '15', '16', '17', '18', '19', '20a', '20b', '20c', '20d', '20e', '21', '22', '23', '24', '25', '26'];
+const TAX = ['11', '12', '13', '14', '15', '16', '17', '18', '19'];
+const CREDITS = ['20a', '20b', '20c', '20d', '20e', '21', '22', '23', '24', '25', '26'];
 
 function pretty(iso: string) {
   const [y, m, d] = iso.split('-').map(Number);
@@ -67,7 +72,7 @@ function Box({ line, money, readOnly, onDollars }: { line: PaperLine; money: (ce
   const [open, setOpen] = useState(false);
   const shown = text ?? dollars(line.dollars);
   return (
-    <div className={`cdtfa-box${line.edited ? ' edited' : ''}`}>
+    <div className={`cdtfa-box${line.edited ? ' edited' : ''}${CALCULATED.has(line.id) ? ' calculated' : ''}`}>
       <div className="cdtfa-box-id">{line.id}</div>
       <div className="cdtfa-box-label">
         <button type="button" className="cdtfa-box-name" onClick={() => line.sales.length && setOpen(!open)} aria-expanded={open}>
@@ -110,8 +115,9 @@ function Box({ line, money, readOnly, onDollars }: { line: PaperLine; money: (ce
   );
 }
 
-function Block({ title, ids, lines, money, readOnly, onDollars }: { title: string; ids: string[]; lines: PaperLine[]; money: Props['money']; readOnly?: boolean; onDollars?: Props['onDollars'] }) {
-  const rows = ids.map((id) => lines.find((line) => line.id === id)).filter((line): line is PaperLine => !!line);
+function Block({ title, ids, lines, money, readOnly, onDollars, quiet }: { title: string; ids: string[]; lines: PaperLine[]; money: Props['money']; readOnly?: boolean; onDollars?: Props['onDollars']; quiet?: boolean }) {
+  const rows = ids.map((id) => lines.find((line) => line.id === id)).filter((line): line is PaperLine => !!line).filter((line) => !quiet || line.dollars !== 0 || line.edited);
+  if (!rows.length) return null;
   return (
     <section className="cdtfa-block">
       <h3>{title}</h3>
@@ -121,6 +127,7 @@ function Block({ title, ids, lines, money, readOnly, onDollars }: { title: strin
 }
 
 export function CdtfaPaper(props: Props) {
+  const quiet = props.layout === 'phone' && !props.showQuiet;
   const a1 = props.lines.find((line) => line.id === '12')?.dollars ?? 0;
   const [a4Text, setA4Text] = useState<string | null>(null);
   const field = (key: keyof PaperSigner, label: string) => (
@@ -145,11 +152,13 @@ export function CdtfaPaper(props: Props) {
         </div>
       </header>
       {props.locked && <p className="cdtfa-lock">Locked with Books. The numbers and edits on this period no longer change.</p>}
-      <Block title="Sales" ids={TOP} lines={props.lines} money={props.money} readOnly={props.readOnly} onDollars={props.onDollars} />
-      <Block title="Section A — deductions" ids={SECTION_A} lines={props.lines} money={props.money} readOnly={props.readOnly} onDollars={props.onDollars} />
-      <p className="cdtfa-explain">Line 10, other: marketplace facilitator sales (eBay, TikTok Shop, Amazon, Depop, Mercari). Those sales are included in line 1. The marketplace collects and pays that tax.</p>
-      <Block title="Section B — deductions" ids={SECTION_B} lines={props.lines} money={props.money} readOnly={props.readOnly} onDollars={props.onDollars} />
-      <Block title="Tax" ids={TAX} lines={props.lines} money={props.money} readOnly={props.readOnly} onDollars={props.onDollars} />
+      <Block title="Sales" ids={TOP} lines={props.lines} money={props.money} readOnly={props.readOnly} onDollars={props.onDollars} quiet={quiet} />
+      <Block title="Section A — deductions" ids={SECTION_A} lines={props.lines} money={props.money} readOnly={props.readOnly} onDollars={props.onDollars} quiet={quiet} />
+      {!quiet && <p className="cdtfa-explain">Line 10, other: marketplace facilitator sales (eBay, TikTok Shop, Amazon, Depop, Mercari). Those sales are included in line 1. The marketplace collects and pays that tax.</p>}
+      <Block title="Section B — deductions" ids={SECTION_B} lines={props.lines} money={props.money} readOnly={props.readOnly} onDollars={props.onDollars} quiet={quiet} />
+      <Block title="Tax" ids={TAX} lines={props.lines} money={props.money} readOnly={props.readOnly} onDollars={props.onDollars} quiet={quiet} />
+      <Block title="Credits & totals" ids={CREDITS} lines={props.lines} money={props.money} readOnly={props.readOnly} onDollars={props.onDollars} quiet={quiet} />
+      {!quiet && <>
       <section className="cdtfa-block">
         <h3>Schedule A2 — district tax</h3>
         <div className="cdtfa-a2line"><span>A1 Transactions subject to tax (line 12)</span><b>{dollars(a1)}</b></div>
@@ -183,6 +192,7 @@ export function CdtfaPaper(props: Props) {
         <p>Preparer <strong>Floor</strong>. Floor does not file this return.</p>
         {props.roundingNote && <p className="cdtfa-round">{props.roundingNote}</p>}
       </section>
+      </>}
     </article>
   );
 }

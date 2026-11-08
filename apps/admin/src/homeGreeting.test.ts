@@ -25,4 +25,5 @@ test('name falls back to the email local-part', () => {
   assert.equal(firstName('', 'jacob.store@employees.floor.local'), 'Jacob');
   assert.equal(firstName(null, 'steve@openboxindustries.com'), 'Steve');
   assert.equal(firstName('  ', ''), 'there');
+  assert.equal(firstName('Admin', 'admin@admin.com'), 'Paul');
 });

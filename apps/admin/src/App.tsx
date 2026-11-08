@@ -815,7 +815,7 @@ export function App() {
     />
   </aside>
   <main className="content">{error && <div className="alert" role="alert">{error}<button onClick={() => setError('')}>Dismiss</button></div>}
-  {page === 'home' && <HomePage displayName={staffSession?.displayName || null} email={session.user.email || null} fullAccess={fullAccess} pulse={pulse} onOpen={goNav} />}
+  {page === 'home' && <HomePage displayName={staffSession?.displayName || null} email={session.user.email || null} fullAccess={fullAccess} pulse={pulse} client={sb} accessToken={session.access_token} storeId={store || ''} money={money} onOpen={goNav} />}
   {page === 'register' && (staffSession
     ? <RegisterPage staffSession={staffSession} onNeedFullReload={() => { void loadSales(); }} />
     : <section className="panel"><Empty>This login can view Floor Admin but is not on the Floor staff list, so it cannot ring sales. Ask an owner to add a staff row for this account.</Empty></section>)}

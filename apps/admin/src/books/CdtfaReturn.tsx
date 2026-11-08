@@ -25,6 +25,7 @@ type Props = {
   periodEnd: string;
   onPeriod: (start: string) => void;
   onFiling?: (frequency: CdtfaFrequency | null) => void;
+  layout?: 'desk' | 'phone';
 };
 
 const FREQUENCIES: [CdtfaFrequency, string][] = [['monthly', 'Monthly'], ['quarterly', 'Quarterly'], ['yearly', 'Yearly']];
@@ -34,7 +35,7 @@ function emptySigner(): PaperSigner {
   return { name: '', title: '', date: '', email: '', phone: '', account: '' };
 }
 
-export function CdtfaReturn({ client, money, periodStart, periodEnd, onPeriod, onFiling }: Props) {
+export function CdtfaReturn({ client, money, periodStart, periodEnd, onPeriod, onFiling, layout = 'desk' }: Props) {
   const [frequency, setFrequency] = useState<CdtfaFrequency | null>(null);
   const [doc, setDoc] = useState<Doc | null>(null);
   const [edits, setEdits] = useState<Record<string, number | undefined>>({});
@@ -42,6 +43,7 @@ export function CdtfaReturn({ client, money, periodStart, periodEnd, onPeriod, o
   const [roundGap, setRoundGap] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [showAll, setShowAll] = useState(false);
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
   const kind = formKind(periodStart, periodEnd);
   const choices = periodChoices(spanFrequency(kind), today);
@@ -162,8 +164,31 @@ export function CdtfaReturn({ client, money, periodStart, periodEnd, onPeriod, o
     } finally { setBusy(false); }
   }
 
+  const due = lines.find((line) => line.id === '26')?.dollars ?? 0;
+  const actions = doc && (
+    <div className="cdtfa-actions">
+      <button type="button" onClick={printSheet}>Print</button>
+      <button type="button" className="primary" onClick={() => void downloadPdf()} disabled={busy}>Download PDF</button>
+    </div>
+  );
+  const summary = doc && (
+    <div className="cdtfa-summary">
+      {option?.title && <p className="cdtfa-option">{option.title}</p>}
+      {option?.hint && <p className="cdtfa-option-hint">{option.hint}</p>}
+      <p className="cdtfa-due-label">Total due</p>
+      <strong className="cdtfa-due-figure">${due.toLocaleString('en-US')}</strong>
+      <span className="cdtfa-badge">{doc.open ? 'Draft — period open' : doc.locked ? 'Locked' : 'Ready'}</span>
+      <ul className="cdtfa-checks">
+        {doc.checks.map((check) => (
+          <li key={check.id} className={check.ok ? 'ok' : 'cdtfa-bad'}>{check.ok ? '✓ ' : ''}{check.detail}</li>
+        ))}
+      </ul>
+      {layout !== 'phone' && actions}
+    </div>
+  );
+
   return (
-    <section className="cdtfa-sheet">
+    <section className={`cdtfa-sheet cdtfa-layout-${layout}`}>
       <div className="cdtfa-toolbar">
         <label>Filing period
           <select aria-label="Filing period" value={periodStart} disabled={!choices.length || busy} onChange={(e) => onPeriod(e.target.value)}>
@@ -179,57 +204,41 @@ export function CdtfaReturn({ client, money, periodStart, periodEnd, onPeriod, o
       </div>
       {error && <p className="cdtfa-bad" role="alert">{error}</p>}
       {doc && (
-        <>
-          <p className={doc.ready ? 'cdtfa-status' : 'cdtfa-status cdtfa-bad'}>
-            {doc.ready ? 'Ready to review' : doc.open ? 'Not ready — this period is still open' : 'Not ready'}
-          </p>
-          <ul className="cdtfa-checks">
-            {doc.checks.map((check) => (
-              <li key={check.id} className={check.ok ? '' : 'cdtfa-bad'}>
-                {check.detail}
-                {(check.sales || []).length > 0 && !check.ok && (
-                  <ul className="cdtfa-sales">
-                    {check.sales!.map((sale, index) => (
-                      <li key={`${sale.id}-${index}`}>
-                        <span>{sale.title}<small>{sale.sold_on} · SKU {sale.sku} · {sale.channel}{sale.ship ? ` · ${sale.ship}` : ''}{sale.bucket === 'missing_state' ? ' · ship-to state missing' : ''}</small></span>
-                        <b>{money(sale.measure_cents)}</b>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </li>
-            ))}
-          </ul>
-          <CdtfaPaper
-            lines={lines}
-            signer={signer}
-            open={doc.open}
-            locked={editsLocked}
-            periodLabel={label}
-            periodStart={doc.period_start}
-            periodEnd={doc.period_end}
-            dueOn={doc.due_on || dueOn(doc.period_end)}
-            scheduleNote={doc.schedule_a2?.note || doc.place}
-            districtMeasure={edits.A4 ?? 0}
-            districtMeasureEdited={edits.A4 != null}
-            recordsNote={recordsNote}
-            optionTitle={option?.title}
-            optionHint={option?.hint}
-            roundingNote={roundGap}
-            money={money}
-            readOnly={editsLocked}
-            onDollars={(id, dollars) => {
-              const floor = doc.lines.find((line) => line.id === id)?.dollars;
-              void save(id, dollars != null && dollars === floor ? null : dollars, null);
-            }}
-            onSigner={(field, value) => void save(field, null, value)}
-          />
-          <p className="cdtfa-note">{doc.due_note}</p>
-          <div className="cdtfa-actions">
-            <button type="button" onClick={printSheet}>Print</button>
-            <button type="button" onClick={() => void downloadPdf()} disabled={busy}>Download filled CDTFA-401-A</button>
+        <div className="cdtfa-split">
+          {layout === 'phone' && summary}
+          <div className="cdtfa-form">
+            <CdtfaPaper
+              lines={lines}
+              signer={signer}
+              open={doc.open}
+              locked={editsLocked}
+              periodLabel={label}
+              periodStart={doc.period_start}
+              periodEnd={doc.period_end}
+              dueOn={doc.due_on || dueOn(doc.period_end)}
+              scheduleNote={doc.schedule_a2?.note || doc.place}
+              districtMeasure={edits.A4 ?? 0}
+              districtMeasureEdited={edits.A4 != null}
+              recordsNote={recordsNote}
+              optionTitle={null}
+              optionHint={null}
+              roundingNote={roundGap}
+              money={money}
+              readOnly={editsLocked}
+              layout={layout}
+              showQuiet={showAll}
+              onDollars={(id, dollars) => {
+                const floor = doc.lines.find((line) => line.id === id)?.dollars;
+                void save(id, dollars != null && dollars === floor ? null : dollars, null);
+              }}
+              onSigner={(field, value) => void save(field, null, value)}
+            />
+            {layout === 'phone' && !showAll && <button type="button" className="cdtfa-show-all" onClick={() => setShowAll(true)}>Show all lines</button>}
+            <p className="cdtfa-note">{doc.due_note}</p>
+            {layout === 'phone' && actions}
           </div>
-        </>
+          {layout === 'desk' && summary}
+        </div>
       )}
     </section>
   );

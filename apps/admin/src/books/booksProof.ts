@@ -18,6 +18,11 @@ export type BooksIntegrity = {
   issues: BooksIntegrityIssue[];
 };
 
+function dollars(cents: number) {
+  const sign = cents < 0 ? '-' : '';
+  return `${sign}$${(Math.abs(cents) / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
 function sumLineCommission(rows: SalesLine[]) {
   let sum = 0;
   for (const s of rows) sum += s.commission_cents ?? 0;
@@ -82,7 +87,7 @@ export function verifyBooksIntegrity(
       if (owedPaulGap !== 0) {
         issues.push({
           kind: 'owed_paul',
-          message: `Paul owed: Books ${(paulRow.owed_all_time_cents / 100).toFixed(2)} vs Payouts tab ${(ledger.paulOwed / 100).toFixed(2)}`,
+          message: `Paul owed doesn't match: Books ${dollars(paulRow.owed_all_time_cents)} · Payouts tab ${dollars(ledger.paulOwed)}`,
           cents: owedPaulGap,
         });
       }
@@ -92,7 +97,7 @@ export function verifyBooksIntegrity(
       if (owedJacobGap !== 0) {
         issues.push({
           kind: 'owed_jacob',
-          message: `Jacob owed: Books ${(jacobRow.owed_all_time_cents / 100).toFixed(2)} vs Payouts tab ${(ledger.jacobOwed / 100).toFixed(2)}`,
+          message: `Jacob owed doesn't match: Books ${dollars(jacobRow.owed_all_time_cents)} · Payouts tab ${dollars(ledger.jacobOwed)}`,
           cents: owedJacobGap,
         });
       }
@@ -131,6 +136,7 @@ export function ledgerOwedFromBalances(
   paulIds: string[],
   jacobIds: string[],
 ): { paulOwed: number; jacobOwed: number } {
-  const pick = (ids: string[]) => ids.reduce((n, id) => n + (balances.find((b) => b.user_id === id)?.commissionOwed || 0), 0);
+  // The Payouts card says "owed" for the full balance (commission still unpaid plus reimbursements).
+  const pick = (ids: string[]) => ids.reduce((n, id) => n + (balances.find((b) => b.user_id === id)?.balance || 0), 0);
   return { paulOwed: pick(paulIds), jacobOwed: pick(jacobIds) };
 }
