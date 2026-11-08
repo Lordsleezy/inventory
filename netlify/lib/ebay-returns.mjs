@@ -1,9 +1,13 @@
 /**
  * eBay Post-Order returns for the selling account.
- * Change-of-mind refunds are the item price only. A used or damaged return
- * can deduct up to 50% after a note and a photo are on file.
+ * Not-as-described refunds include the original shipping and the seller pays
+ * the return label. Change-of-mind refunds are the item price only, and a
+ * used or damaged remorse return can deduct up to 50% after a note and photo.
+ * https://developer.ebay.com/api-docs/user-guides/static/post-order-user-guide/post-order-returns.html
+ * https://developer.ebay.com/devzone/post-order/types/RefundFeeTypeEnum.html
+ * https://www.ebay.com/help/policies/return-policy/return-policy?id=4210
  */
-import { userTokenForAccount } from "./ebay-accounts.mjs";
+import { assertEbaySellerWrite, userTokenForAccount } from "./ebay-accounts.mjs";
 import { ebayHosts } from "./ebay-env.mjs";
 import { ingestReturnRow } from "./returns.mjs";
 import { serviceClient } from "./server.mjs";
@@ -32,6 +36,36 @@ function firstMoney(row, keys) {
   return 0;
 }
 
+export function ebayRefundPlan({ reason, fault, itemCents, shippingCents }) {
+  const blob = `${reason || ""} ${fault || ""}`;
+  const snad = SNAD.test(blob) || fault === "seller";
+  const remorse = !snad && (REMORSE.test(blob) || reason === "buyer_remorse" || fault === "buyer");
+  const item = Math.max(0, Math.round(Number(itemCents) || 0));
+  const shipping = Math.max(0, Math.round(Number(shippingCents) || 0));
+  if (remorse) {
+    return {
+      kind: "remorse",
+      reasonLabel: "Change of mind",
+      refundCents: item,
+      itemCents: item,
+      originalShippingCents: shipping,
+      includeOriginalShipping: false,
+      labelPaidBy: "buyer",
+      deductionAllowed: true,
+    };
+  }
+  return {
+    kind: "snad",
+    reasonLabel: "Not as described",
+    refundCents: item + shipping,
+    itemCents: item,
+    originalShippingCents: shipping,
+    includeOriginalShipping: shipping > 0,
+    labelPaidBy: "seller",
+    deductionAllowed: false,
+  };
+}
+
 export function mapEbayReturn(row) {
   const reason = String(row?.creationInfo?.reason || row?.reason || "");
   const reasonType = String(row?.creationInfo?.reasonType || row?.reasonType || "");
@@ -41,6 +75,12 @@ export function mapEbayReturn(row) {
     moneyValue(row?.sellerTotalRefund?.estimatedRefundAmount) ||
     moneyValue(row?.buyerTotalRefund?.estimatedRefundAmount);
   const shippingCents = firstMoney(row, ["shippingPrice", "originalShipping"]);
+  const plan = ebayRefundPlan({
+    reason: remorse ? "buyer_remorse" : SNAD.test(blob) ? "not_as_described" : reason,
+    fault: remorse ? "buyer" : SNAD.test(blob) ? "seller" : "unknown",
+    itemCents,
+    shippingCents,
+  });
   const state = String(row?.state || row?.status || "RETURN_REQUESTED").toLowerCase();
   let status = "requested";
   if (/in_transit|shipped/.test(state) && !/ready_to_ship|ready_for_shipping/.test(state)) status = "in_transit";
@@ -57,10 +97,10 @@ export function mapEbayReturn(row) {
     fault: remorse ? "buyer" : SNAD.test(blob) ? "seller" : "unknown",
     status,
     needs_decision: !/closed|refunded|rejected/.test(state),
-    refund_cents: remorse ? itemCents : itemCents,
+    refund_cents: plan.refundCents,
     item_cents: itemCents,
     shipping_cents: shippingCents,
-    label_paid_by: "buyer",
+    label_paid_by: plan.labelPaidBy,
     return_label_cents: 0,
     buyer_name: row?.buyerLoginName || null,
     tracking_number: row?.returnShipmentInfo?.shipmentTracking?.trackingNumber || null,
@@ -70,7 +110,16 @@ export function mapEbayReturn(row) {
   };
 }
 
+function refundLineCents(detail, feeType) {
+  const lines = detail?.detail?.refundInfo?.estimatedRefundDetail?.itemizedRefundDetails
+    || detail?.refundInfo?.estimatedRefundDetail?.itemizedRefundDetails
+    || [];
+  const hit = lines.find((line) => String(line?.refundFeeType || "").toUpperCase() === feeType);
+  return moneyValue(hit?.estimatedAmount);
+}
+
 async function postOrder(account, method, path, body) {
+  if (String(method || "GET").toUpperCase() !== "GET") assertEbaySellerWrite(account);
   const token = await userTokenForAccount(account);
   const { api } = ebayHosts(process.env.EBAY_ENV);
   const res = await fetch(`${api}${path}`, {
@@ -114,7 +163,10 @@ export async function syncEbayReturns(storeId, account) {
   const saved = [];
   for (const row of rows) {
     const detail = await postOrder(account, "GET", `/post-order/v2/return/${encodeURIComponent(row.external_return_id)}`, null).catch(() => null);
-    const itemCents = moneyValue(detail?.detail?.itemDetail?.itemPrice) || row.item_cents;
+    const itemCents = refundLineCents(detail, "PURCHASE_PRICE") || moneyValue(detail?.detail?.itemDetail?.itemPrice) || row.item_cents;
+    const shippingCents = refundLineCents(detail, "ORIGINAL_SHIPPING") || row.shipping_cents;
+    const labelCents = moneyValue(detail?.detail?.returnShipmentInfo?.shippingLabelCost?.totalAmount);
+    const plan = ebayRefundPlan({ reason: row.reason, fault: row.fault, itemCents, shippingCents });
     const title = String(detail?.detail?.itemDetail?.itemTitle || "");
     const titleSku = (title.match(/\bSKU\s+([A-Za-z0-9-]+)\b/) || [])[1] || "";
     const sku = row.sku || await skuForItem(storeId, row.ebay_item_id) || titleSku;
@@ -122,28 +174,47 @@ export async function syncEbayReturns(storeId, account) {
       ...row,
       sku,
       item_cents: itemCents,
-      refund_cents: itemCents,
+      shipping_cents: shippingCents,
+      refund_cents: plan.refundCents,
+      label_paid_by: plan.labelPaidBy,
+      return_label_cents: plan.labelPaidBy === "seller" ? labelCents : 0,
       force_physical_return: true,
     }));
   }
   return { ok: true, count: saved.length, username: account.username };
 }
 
-function refundBody(cents, note) {
-  const value = (Math.max(0, cents) / 100).toFixed(2);
-  return {
+function dollars(cents) {
+  return (Math.max(0, Math.round(Number(cents) || 0)) / 100).toFixed(2);
+}
+
+export async function issueEbayReturnRefund(account, returnId, plan, note) {
+  const lines = [
+    { refundFeeType: "PURCHASE_PRICE", refundAmount: { value: dollars(plan.itemCents), currency: "USD" } },
+  ];
+  if (plan.includeOriginalShipping && plan.originalShippingCents > 0) {
+    lines.push({
+      refundFeeType: "ORIGINAL_SHIPPING",
+      refundAmount: { value: dollars(plan.originalShippingCents), currency: "USD" },
+    });
+  }
+  const total = lines.reduce((sum, line) => sum + Math.round(Number(line.refundAmount.value) * 100), 0);
+  return postOrder(account, "POST", `/post-order/v2/return/${encodeURIComponent(returnId)}/issue_refund`, {
     comments: note ? { content: String(note).slice(0, 1000) } : undefined,
     refundDetail: {
-      itemizedRefundDetail: [
-        { refundFeeType: "PURCHASE_PRICE", refundAmount: { value, currency: "USD" } },
-      ],
-      totalAmount: { value, currency: "USD" },
+      itemizedRefundDetail: lines,
+      totalAmount: { value: dollars(total), currency: "USD" },
     },
-  };
+  });
 }
 
 export async function issueEbayItemRefund(account, returnId, itemCents, note) {
-  return postOrder(account, "POST", `/post-order/v2/return/${encodeURIComponent(returnId)}/issue_refund`, refundBody(itemCents, note || "Refund of the item price. Original shipping is not refunded."));
+  return issueEbayReturnRefund(account, returnId, ebayRefundPlan({
+    reason: "buyer_remorse",
+    fault: "buyer",
+    itemCents,
+    shippingCents: 0,
+  }), note || "Refund of the item price. Original shipping is not refunded.");
 }
 
 export async function offerEbayPartialRefund(account, returnId, itemCents, percent, note) {
@@ -160,6 +231,7 @@ export async function offerEbayPartialRefund(account, returnId, itemCents, perce
 }
 
 export async function uploadEbayReturnFile(account, returnId, { filename, contentType, bytes }) {
+  assertEbaySellerWrite(account);
   const token = await userTokenForAccount(account);
   const { api } = ebayHosts(process.env.EBAY_ENV);
   const form = new FormData();

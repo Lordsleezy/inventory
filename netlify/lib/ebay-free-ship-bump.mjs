@@ -270,7 +270,7 @@ async function updateViaTrading(account, token, { itemId, newCents, policies }) 
     fulfillmentPolicyId: policies.fulfillmentPolicyId,
     paymentPolicyId: policies.paymentPolicyId,
     returnPolicyId: policies.returnPolicyId,
-  });
+  }, account);
   return { ok: true, path: "trading", listingId: itemId };
 }
 

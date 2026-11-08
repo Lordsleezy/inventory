@@ -256,7 +256,7 @@ try {
       return;
     }
     try {
-      await reviseFixedPriceStandards(token, change);
+      await reviseFixedPriceStandards(token, change, selling);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       if (!/inventory-based listing management/i.test(message)) throw err;
@@ -321,19 +321,19 @@ try {
         const item = await getTradingItem(token, row.itemId);
         let urls = row.imageUrls;
         try {
-          await reviseFixedPriceStandards(token, { itemId: row.itemId, pictureUrls: urls });
+          await reviseFixedPriceStandards(token, { itemId: row.itemId, pictureUrls: urls }, selling);
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           if (!/picture|photo|image/i.test(message)) throw err;
           const hosted = [];
           for (const url of row.catalogImages || []) {
-            hosted.push(await uploadSiteHostedPicture(token, url));
+            hosted.push(await uploadSiteHostedPicture(token, url, selling));
             await sleep(1500);
           }
           const existing = (item.imageUrls || []).filter(Boolean);
           urls = existing.length ? [hosted[0], ...existing].slice(0, 12) : hosted.slice(0, 2);
           if (urls.length < 2) throw new Error("could not keep two photos");
-          await reviseFixedPriceStandards(token, { itemId: row.itemId, pictureUrls: urls });
+          await reviseFixedPriceStandards(token, { itemId: row.itemId, pictureUrls: urls }, selling);
         }
         state.photos[row.itemId] = { ...(state.photos[row.itemId] || {}), applied: true, imageUrls: urls };
         state.counts.photo += 1;

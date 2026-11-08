@@ -17,7 +17,7 @@ for (const row of rows) {
   if (picked?.value != null && picked.value !== "") process.env[row.key] = String(picked.value);
 }
 
-const { listEbayAccounts, loadEbayAccount, userTokenForAccount } = await import("../netlify/lib/ebay-accounts.mjs");
+const { assertEbaySellerWrite, listEbayAccounts, loadEbayAccount, userTokenForAccount } = await import("../netlify/lib/ebay-accounts.mjs");
 const { ebayHosts, marketplaceIdFromEnv } = await import("../netlify/lib/ebay-env.mjs");
 const { descriptionWithReturns, reviseReturnPolicyXml } = await import("../netlify/lib/ebay-listing-standards.mjs");
 
@@ -164,10 +164,12 @@ for (const row of (await listEbayAccounts(STORE)).filter((row) => row.status ===
   accounts.push(await loadEbayAccount(STORE, { id: row.id }));
 }
 accounts.sort((a, b) => Number(b.role === "selling") - Number(a.role === "selling"));
+for (const account of accounts) assertEbaySellerWrite(account);
 const market = marketplaceIdFromEnv();
 const summary = [];
 
 for (const account of accounts) {
+  assertEbaySellerWrite(account);
   let token;
   try {
     token = await withTimeout(userTokenForAccount(account), 30000, "token");

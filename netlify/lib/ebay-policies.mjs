@@ -3,7 +3,7 @@
  * Required: Calculated Shipping – Buyer Pays (no free shipping, no local pickup),
  * 30-day returns with the buyer paying return shipping, and a payment policy.
  */
-import { ebayFetchAccount, markAccountPolicies, userTokenForAccount } from "./ebay-accounts.mjs";
+import { assertEbaySellerWrite, ebayFetchAccount, markAccountPolicies, userTokenForAccount } from "./ebay-accounts.mjs";
 import { marketplaceIdFromEnv } from "./ebay-env.mjs";
 import {
   compactShippingCatalog,
@@ -289,6 +289,7 @@ export async function policiesForLocalPickup(account) {
 /** Update or create the buyer-pays return policy. Does not touch payment or shipping policies. */
 export async function applyBuyerPaysReturnPolicy(account) {
   if (!account) throw new Error("eBay account required");
+  assertEbaySellerWrite(account);
   const market = marketplaceIdFromEnv();
   await optIn(account);
   const returns = await listPolicies(account, "return");

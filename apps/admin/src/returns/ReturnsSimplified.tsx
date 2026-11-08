@@ -37,6 +37,17 @@ function toneClass(tone: ReturnType<typeof statusTone>) {
   return 'returns-status-muted';
 }
 
+function ebayRules(row: ReturnRow) {
+  const snad = row.fault === 'seller' || /not_as_described|defective|wrong_item|damaged/.test(row.reason || '');
+  const remorse = !snad && (row.reason === 'buyer_remorse' || row.fault === 'buyer');
+  return {
+    snad,
+    remorse,
+    reason: remorse ? 'Change of mind' : snad ? 'Not as described' : (row.reason || 'Return'),
+    deduction: remorse,
+  };
+}
+
 export function ReturnsSimplified({ client, storeId: _storeId, money, stamp, variant, accessToken }: Props) {
   void _storeId;
   const app = variant === 'app';
@@ -345,7 +356,7 @@ export function ReturnsSimplified({ client, storeId: _storeId, money, stamp, var
           <button key={r.id} type="button" className="returns-row" onClick={() => openDetail(r)}>
             <span className="returns-row-main">
               <strong>{r.title || `SKU ${r.sku}`}</strong>
-              <small>SKU {r.sku}{r.replacement_sku ? ` · replacement ${r.replacement_sku}` : ''}</small>
+              <small>SKU {r.sku}{r.channel === 'ebay' ? ` · ${ebayRules(r).reason}` : ''}{r.replacement_sku ? ` · replacement ${r.replacement_sku}` : ''}</small>
             </span>
             <span className={`returns-row-status ${toneClass(statusTone(r.status, r.route_to))}`}>
               {statusLabel(r.status, r.route_to)}
@@ -459,7 +470,7 @@ export function ReturnsSimplified({ client, storeId: _storeId, money, stamp, var
         <button type="button" className="returns-text-btn" onClick={openEdit}>Edit</button>
       </div>
       {error && <div className="app-inline-error" role="alert">{error}</div>}
-      <p className="returns-meta">SKU {selected.sku} · {CHANNEL[selected.channel] || selected.channel}</p>
+      <p className="returns-meta">SKU {selected.sku} · {CHANNEL[selected.channel] || selected.channel}{selected.channel === 'ebay' ? ` · ${ebayRules(selected).reason}` : ''}</p>
       <h2 className="returns-detail-title">{selected.title || `SKU ${selected.sku}`}</h2>
       <p className={`returns-status-line ${toneClass(statusTone(selected.status, selected.route_to))}`}>
         {tracking?.status_line || statusLabel(selected.status, selected.route_to)}
@@ -487,44 +498,52 @@ export function ReturnsSimplified({ client, storeId: _storeId, money, stamp, var
         </div>
       )}
       <div className="returns-kv-group">
-        <div className="returns-kv readonly"><span>Refunded</span><strong>{money(selected.refund_cents || 0)}</strong></div>
+        <div className="returns-kv readonly"><span>{selected.refunded_at || selected.status === 'closed' ? 'Refunded' : 'Refund'}</span><strong>{money(selected.refund_cents || 0)}</strong></div>
         <div className="returns-kv readonly"><span>Label (I paid)</span><strong>{money(selected.return_label_cents || 0)}</strong></div>
         <div className="returns-kv readonly"><span>Tracking #</span><strong>{selected.tracking_number || '—'}</strong></div>
       </div>
-      {selected.channel === 'ebay' && selected.status !== 'closed' && selected.status !== 'canceled' && (
+      {selected.channel === 'ebay' && selected.status !== 'closed' && selected.status !== 'canceled' && !selected.refunded_at && (
         <div className="returns-decide">
-          <p>eBay refund. Change-of-mind returns refund the item price only. Original shipping stays with eBay.</p>
+          {ebayRules(selected).snad ? (
+            <p>Not as described. The refund is the item price plus the original shipping the buyer paid. The return label is on us. Nothing is sent until you tap confirm.</p>
+          ) : (
+            <p>Change of mind. The refund is the item price. The buyer pays return shipping, and original shipping stays out of the refund. Nothing is sent until you tap confirm.</p>
+          )}
           <div className="returns-decide-actions">
-            <button type="button" className="returns-primary" disabled={!!busy} onClick={() => void ebayAction('refund_item', { note: 'Item price only. Buyer paid the original shipping and the return label.' })}>
-              {busy === 'refund_item' ? 'Sending…' : `Refund item ${money(selected.refund_cents || 0)}`}
+            <button type="button" className="returns-primary" disabled={!!busy} onClick={() => void ebayAction('refund_item', { note: ebayRules(selected).snad ? 'Full refund including original shipping.' : 'Item price only. Buyer paid return shipping.' })}>
+              {busy === 'refund_item' ? 'Sending…' : `Refund ${money(selected.refund_cents || 0)}`}
             </button>
           </div>
-          <p>If it came back used or damaged, deduct up to 50%. A photo and a note are required. {deductPct && Number(deductPct) > 0 ? `That refunds ${money(Math.round((selected.refund_cents || 0) * (100 - Math.min(50, Number(deductPct))) / 100))}.` : ''}</p>
-          <div className="returns-kv-group">
-            <label className="returns-kv">
-              <span>Deduct %</span>
-              <input inputMode="numeric" value={deductPct} onChange={(e) => {
-                const n = e.target.value.replace(/[^\d]/g, '').slice(0, 2);
-                setDeductPct(n === '' ? '' : String(Math.min(50, Number(n))));
-              }} />
-            </label>
-            <label className="returns-kv">
-              <span>Condition note</span>
-              <input value={deductNote} onChange={(e) => setDeductNote(e.target.value)} />
-            </label>
-            <label className="returns-kv">
-              <span>Photo</span>
-              <input type="file" accept="image/*" onChange={(e) => readDeductPhoto(e.target.files?.[0] || null)} />
-            </label>
-          </div>
-          <button
-            type="button"
-            className="returns-secondary"
-            disabled={!!busy || !deductNote.trim() || !deductPhoto || !(Number(deductPct) > 0)}
-            onClick={() => void ebayAction('deduct', { percent: Math.min(50, Number(deductPct) || 0), note: deductNote.trim(), photo_base64: deductPhoto, photo_type: deductType })}
-          >
-            {busy === 'deduct' ? 'Sending…' : 'Submit deduction'}
-          </button>
+          {ebayRules(selected).deduction && (
+            <>
+              <p>If it came back used or damaged, deduct up to 50%. A photo and a note are required, and the photo is uploaded to eBay first. {deductPct && Number(deductPct) > 0 ? `That refunds ${money(Math.round((selected.refund_cents || 0) * (100 - Math.min(50, Number(deductPct))) / 100))}.` : ''}</p>
+              <div className="returns-kv-group">
+                <label className="returns-kv">
+                  <span>Deduct %</span>
+                  <input inputMode="numeric" value={deductPct} onChange={(e) => {
+                    const n = e.target.value.replace(/[^\d]/g, '').slice(0, 2);
+                    setDeductPct(n === '' ? '' : String(Math.min(50, Number(n))));
+                  }} />
+                </label>
+                <label className="returns-kv">
+                  <span>Condition note</span>
+                  <input value={deductNote} onChange={(e) => setDeductNote(e.target.value)} />
+                </label>
+                <label className="returns-kv">
+                  <span>Photo</span>
+                  <input type="file" accept="image/*" onChange={(e) => readDeductPhoto(e.target.files?.[0] || null)} />
+                </label>
+              </div>
+              <button
+                type="button"
+                className="returns-secondary"
+                disabled={!!busy || !deductNote.trim() || !deductPhoto || !(Number(deductPct) > 0)}
+                onClick={() => void ebayAction('deduct', { percent: Math.min(50, Number(deductPct) || 0), note: deductNote.trim(), photo_base64: deductPhoto, photo_type: deductType })}
+              >
+                {busy === 'deduct' ? 'Sending…' : 'Submit deduction'}
+              </button>
+            </>
+          )}
         </div>
       )}
       {showDecide && (

@@ -87,7 +87,7 @@ export async function applyEbayShippingMode(storeId, { sku, itemId, offerId, mod
       fulfillmentPolicyId: fulfillment,
       paymentPolicyId: payment,
       returnPolicyId: returnP,
-    });
+    }, account);
     return { ok: true, mode: shipping, via: "trading", policyId: fulfillment };
   }
   return { ok: false, error: "no_live_ebay_listing" };

@@ -18,7 +18,7 @@ for (const row of rows) {
 }
 
 const { applyBuyerPaysReturnPolicy } = await import("../netlify/lib/ebay-policies.mjs");
-const { listEbayAccounts, loadEbayAccount } = await import("../netlify/lib/ebay-accounts.mjs");
+const { assertEbaySellerWrite, listEbayAccounts, loadEbayAccount } = await import("../netlify/lib/ebay-accounts.mjs");
 const { serviceClient } = await import("../netlify/lib/server.mjs");
 
 const STORE = "5487ca47-6147-4fe8-bc6d-46b6472726ba";
@@ -27,6 +27,7 @@ const accounts = [];
 for (const row of (await listEbayAccounts(STORE)).filter((row) => row.status === "connected")) {
   accounts.push(await loadEbayAccount(STORE, { id: row.id }));
 }
+for (const account of accounts) assertEbaySellerWrite(account);
 const summary = [];
 for (const account of accounts) {
   try {
@@ -37,6 +38,11 @@ for (const account of accounts) {
     }).eq("id", account.id);
     summary.push({ username: account.username, role: account.role, returnPolicyId: policy.returnPolicyId, name: policy.name });
   } catch (err) {
+    if (err?.code === "ebay_write_refused") {
+      console.error(err.message);
+      process.exitCode = 1;
+      throw err;
+    }
     summary.push({ username: account.username, role: account.role, error: String(err.message || err).slice(0, 300) });
   }
 }
