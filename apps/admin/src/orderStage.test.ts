@@ -4,11 +4,15 @@ import { orderChip, orderStage, orderTimeline, packagedStale } from './orderStag
 
 const day = '2026-11-07T21:14:00Z';
 
-test('to-ship chips follow the label', () => {
-  assert.equal(orderChip({ status: 'paid', fulfillment: 'ship', channel: 'ebay' }).text, 'Buy label');
-  assert.equal(orderChip({ status: 'paid', fulfillment: 'ship', channel: 'depop' }).text, 'Add label');
-  assert.equal(orderChip({ status: 'paid', fulfillment: 'ship', channel: 'depop', label_storage_path: 'a/b.pdf' }).text, 'Label ready · Print');
+test('ebay and unlabeled depop wait in Needs label; other channels still buy', () => {
+  assert.equal(orderStage({ status: 'paid', fulfillment: 'ship', channel: 'ebay' }), 'needsLabel');
+  assert.equal(orderChip({ status: 'paid', fulfillment: 'ship', channel: 'ebay' }).text, 'Upload label');
+  assert.equal(orderChip({ status: 'paid', fulfillment: 'ship', channel: 'ebay', marketplace_tracking_number: '9400111899001234567891' }).text, 'Label bought in eBay — upload PDF');
+  assert.equal(orderChip({ status: 'paid', fulfillment: 'ship', channel: 'ebay', label_storage_path: 'a/b.pdf', label_tracking_mismatch: true }).text, "Wrong label · doesn't match eBay");
+  assert.equal(orderStage({ status: 'paid', fulfillment: 'ship', channel: 'depop' }), 'needsLabel');
+  assert.equal(orderChip({ status: 'paid', fulfillment: 'ship', channel: 'depop', label_storage_path: 'a/b.pdf', label_origin: 'upload' }).text, 'Label ready · Print');
   assert.equal(orderChip({ status: 'paid', fulfillment: 'ship', channel: 'tiktok' }).text, 'Buy label');
+  assert.equal(orderStage({ status: 'paid', fulfillment: 'ship', channel: 'ebay', ebay_seller_username: 'pgg124-5' }), 'toShip');
 });
 
 test('packaged over two days with no scan is flagged', () => {

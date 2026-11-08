@@ -7,7 +7,7 @@ import { LabelDialog } from './LabelDialog';
 import { OrderStepper, OrderTimelineList } from './OrderFulfillment';
 import { errText } from './errText';
 import { fileToBase64, labelFileUrl, orderAdmin } from './orderLabel';
-import { canBuyLabel, hasLabel, orderChip, orderStage, orderTimeline, packagedStale } from './orderStage';
+import { canBuyLabel, hasLabel, orderChip, orderNeedsLabel, orderStage, orderTimeline, packagedStale } from './orderStage';
 import { loadOrderLocations, locationCompare, locationParts } from './locationOrder';
 import { useVisibleInterval } from './useVisibleInterval';
 
@@ -38,6 +38,7 @@ export type WebOrder = {
   label_storage_path?: string | null; label_file_name?: string | null; label_mime?: string | null;
   label_uploaded_at?: string | null; label_origin?: 'bought' | 'upload' | null;
   tracking_status?: string | null; tracking_exception?: string | null; tracking_needs_entry?: boolean | null;
+  marketplace_tracking_number?: string | null; label_tracking_mismatch?: boolean | null; ebay_seller_username?: string | null;
   pack_condition?: 'ok' | 'not_as_listed' | null;
   pack_proof_photo_path?: string | null;
   pack_proof_serial?: string | null;
@@ -84,11 +85,12 @@ function otherStores(o: WebOrder) {
   return listed.filter((c) => c !== self && c !== 'website' && c !== 'ebay');
 }
 
-type OrderView = 'all' | 'toShip' | 'packaged' | 'shipped' | 'delivered' | 'canceled';
+type OrderView = 'all' | 'needsLabel' | 'toShip' | 'packaged' | 'shipped' | 'delivered' | 'canceled';
 type StatusFilter = 'all' | 'paid' | 'canceled' | 'refunded';
 
 const VIEW_LABEL: Record<OrderView, string> = {
   all: 'All orders',
+  needsLabel: 'Needs label',
   toShip: 'To ship',
   packaged: 'Packaged',
   shipped: 'Shipped',
@@ -187,7 +189,8 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
         file_base64: await fileToBase64(file), file_name: file.name,
         mime: file.type || (file.name.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'image/jpeg'),
       });
-      if (data.needs_tracking) setError('Label saved. Type the tracking number — it was not clear on the file.');
+      if (data.mismatch) setError(String(data.exception || 'That tracking number does not match eBay. The order stays in Needs label.'));
+      else if (data.needs_tracking) setError('Label saved. Type the tracking number — it was not clear on the file.');
       await load();
     } catch (e) { setError(errText(e)); }
     setBusy(null);
@@ -379,6 +382,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
       rawCount: list.length,
       groups: {
         all: byStatus,
+        needsLabel: byStatus.filter(o => orderStage(o) === 'needsLabel'),
         toShip: byStatus.filter(o => orderStage(o) === 'toShip'),
         packaged: byStatus.filter(o => orderStage(o) === 'packaged'),
         shipped: byStatus.filter(o => orderStage(o) === 'shipped'),
@@ -389,7 +393,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
   }, [orders, statusFilter]);
 
   const active = groups[view].slice().sort((a,b) => {
-    if (view !== 'toShip' && view !== 'packaged') return 0;
+    if (view !== 'needsLabel' && view !== 'toShip' && view !== 'packaged') return 0;
     return locationCompare(locations[a.sku]?.[0] || '99999', locations[b.sku]?.[0] || '99999');
   });
   const summary = useMemo(() => breakdown(groups[view]), [groups, view]);
@@ -469,6 +473,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
     const stage = orderStage(o);
     const chip = orderChip(o);
     const isCanceled = stage === 'canceled';
+    const isNeeds = stage === 'needsLabel';
     const isToShip = stage === 'toShip';
     const isPackaged = stage === 'packaged';
     const isShipped = stage === 'shipped';
@@ -581,7 +586,17 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
             </div>
           </>
         )}
-        {!isToShip && !isPackaged && !isShipped && !isPickup && !isDone && !isCanceled && (
+        {isNeeds && (
+          <div className="actions">
+            <label className="primary" style={{ display: 'inline-flex', alignItems: 'center', padding: '10px 14px', borderRadius: 8, cursor: 'pointer' }}>
+              {busy === o.id + 'upload' ? 'Uploading…' : o.label_storage_path ? 'Replace label' : 'Upload label'}
+              <input type="file" accept="application/pdf,image/*" hidden disabled={!!busy} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void uploadOrderLabel(o, f); }} />
+            </label>
+            {o.label_tracking_mismatch && <span className="hint">This PDF does not match the tracking number on eBay.</span>}
+            {o.marketplace_tracking_number && !o.label_storage_path && <span className="hint">eBay already has tracking {o.marketplace_tracking_number}. Upload the PDF.</span>}
+          </div>
+        )}
+        {!isNeeds && !isToShip && !isPackaged && !isShipped && !isPickup && !isDone && !isCanceled && (
           <div className="actions">
             <button className="text-button danger" disabled={!!busy} onClick={() => void deleteOrder(o)}>{busy === o.id + 'delete' ? 'Deleting…' : 'Delete'}</button>
           </div>
@@ -597,6 +612,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
     <div className="stats orders-stats">
       {([
         ['all', groups.all.length],
+        ['needsLabel', groups.needsLabel.length],
         ['toShip', groups.toShip.length],
         ['packaged', groups.packaged.length],
         ['shipped', groups.shipped.length],
@@ -667,7 +683,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
       )}
 
       {active.length === 0
-        ? <div className="empty">{view === 'all' ? 'No orders match this filter.' : view === 'toShip' ? 'Nothing to ship.' : view === 'packaged' ? 'Nothing is waiting on a carrier scan.' : view === 'shipped' ? 'None in transit.' : view === 'delivered' ? 'No delivered orders yet.' : 'None.'}</div>
+        ? <div className="empty">{view === 'all' ? 'No orders match this filter.' : view === 'needsLabel' ? 'No orders are waiting on a label.' : view === 'toShip' ? 'Nothing to ship.' : view === 'packaged' ? 'Nothing is waiting on a carrier scan.' : view === 'shipped' ? 'None in transit.' : view === 'delivered' ? 'No delivered orders yet.' : 'None.'}</div>
         : <div className="ticket-list">{active.map(renderTicket)}</div>}
     </section>
     {labelOrder && (

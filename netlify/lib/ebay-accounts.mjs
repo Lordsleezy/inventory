@@ -52,6 +52,15 @@ export function accountAllowsListing(account) {
 
 export { assertEbaySellerWrite, EBAY_ORDERS_ONLY_USERNAME, EBAY_SELLING_USERNAME };
 
+/** Floor orders, Needs label, and sale records come from the Open Box selling account. */
+export function ebayAccountFeedsFloorOrders(account) {
+  const username = String(account?.username || "").trim().toLowerCase();
+  if (username === EBAY_ORDERS_ONLY_USERNAME) return false;
+  if (username === EBAY_SELLING_USERNAME) return true;
+  if (!username && String(account?.role || "") === "selling") return true;
+  return false;
+}
+
 export async function listEbayAccounts(storeId) {
   const sb = serviceClient();
   const { data, error } = await sb

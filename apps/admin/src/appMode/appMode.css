@@ -2638,7 +2638,10 @@ html.app-mode .app-flag {
   color: #ffd60a;
   font-size: 13px;
 }
-html.app-mode .app-order-row { align-items: flex-start; }
+html.app-mode .app-order-row { align-items: stretch; }
+html.app-mode .app-order-open { flex: 1; display: flex; gap: 10px; align-items: flex-start; background: none; border: 0; color: inherit; text-align: left; padding: 0; min-width: 0; }
+html.app-mode .app-row-upload { position: relative; display: flex; align-items: center; font-size: 13px; font-weight: 700; color: #8eb7ff; padding: 0 4px; cursor: pointer; }
+html.app-mode .app-row-upload input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 html.app-mode .app-order-location-badge {
   width: 64px;
   flex: none;

@@ -1,6 +1,6 @@
 import { serviceClient, json, corsHeaders } from "../lib/server.mjs";
 import { ebayFetch } from "../lib/ebay.mjs";
-import { listEbayAccounts, resolveEbayAccount } from "../lib/ebay-accounts.mjs";
+import { ebayAccountFeedsFloorOrders, listEbayAccounts, resolveEbayAccount } from "../lib/ebay-accounts.mjs";
 import { getStoreSquareAccess, squareClient } from "../lib/square.mjs";
 import { webSquareClient, webSquareEnv, webSquareAccess } from "../lib/web-square.mjs";
 import { Environment } from "square/legacy";
@@ -77,6 +77,11 @@ async function syncEbayFeesForAccount(sb, storeId, account, log) {
   const hint = account.id ? { accountId: account.id } : {};
 
   await saveEbayTransactionLedger(sb, storeId, account, since, hint);
+
+  if (!ebayAccountFeedsFloorOrders(account)) {
+    log.push({ ebay: "personal_account_not_applied_to_floor", username: account.username });
+    return;
+  }
 
   for await (const tx of ebayTransactions(storeId, "SALE", since, hint)) {
     const orderId = tx.orderId;
@@ -178,7 +183,6 @@ async function syncEbayFeesForAccount(sb, storeId, account, log) {
     else {
       await sb.from("web_orders").update({
         label_cost_cents: labelCents,
-        label_purchased_at: new Date().toISOString(),
       }).eq("store_id", storeId).eq("payment_id", `ebay:${orderId}`);
       log.push({
         orderId,

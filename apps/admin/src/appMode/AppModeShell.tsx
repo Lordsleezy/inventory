@@ -291,6 +291,7 @@ export function AppModeShell({
               accessToken={session.access_token}
               money={money}
               stamp={stamp}
+              isAdmin={fullAccess}
             />
           )}
         </div>

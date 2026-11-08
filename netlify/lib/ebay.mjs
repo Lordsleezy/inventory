@@ -30,6 +30,7 @@ import { floorLog, redact, setTrace } from "./floor-log.mjs";
 import { sendResend } from "./receipt.mjs";
 import { ebayFeeCents, ebayOrderAmounts, ebayOrderIsLocalPickup, ebayShipTo } from "./ebay-price.mjs";
 import { fulfillmentPath, ordersWithShipment, trackingPatch } from "./ebay-shipment.mjs";
+import { compactTracking } from "./tracking-extract.mjs";
 
 export { ebayOrderIsLocalPickup };
 import {
@@ -53,6 +54,7 @@ import {
   loadEbayAccount,
   resolveEbayAccount,
   userTokenForAccount,
+  ebayAccountFeedsFloorOrders,
 } from "./ebay-accounts.mjs";
 import { applyBuyerPaysReturnPolicy, buyerPaysReturnPolicyBody, ensureBusinessPolicies } from "./ebay-policies.mjs";
 
@@ -1232,7 +1234,7 @@ export async function cancelEbayOrderForSoldElsewhere(storeId, orderId, reason =
   }
 }
 
-export async function ingestEbayOrder(storeId, order) {
+export async function ingestEbayOrder(storeId, order, seller = {}) {
   const orderId = order?.orderId;
   if (!orderId) return { skipped: true, reason: "missing_order_id" };
   const rawSku = orderSku(order);
@@ -1378,6 +1380,7 @@ export async function ingestEbayOrder(storeId, order) {
     total_cents: itemCents + (isPickup ? 0 : amounts.shipCents),
     payment_id: `ebay:${orderId}`,
     payment_env: process.env.EBAY_ENV === "production" ? "production" : "sandbox",
+    ebay_seller_username: seller.username || null,
     match_status: matchStatus,
     marketplace_fee_cents: feeCents,
     marketplace_title: String(title).slice(0, 250),
@@ -1528,8 +1531,13 @@ async function ingestFrom(storeId, order, source, bag) {
   const orderId = order?.orderId;
   if (!orderId) return;
   if (bag.orders.has(orderId)) return;
+  if (bag.skipFloor) {
+    bag.results.push({ orderId, sku, source, skipped: true, reason: "personal_account" });
+    bag.orders.add(orderId);
+    return;
+  }
   try {
-    const row = await ingestEbayOrder(storeId, order);
+    const row = await ingestEbayOrder(storeId, order, { username: bag.sellerUsername });
     bag.results.push({ ...row, source });
     bag.orders.add(orderId);
     if (row?.sku) bag.skus.add(row.sku);
@@ -1586,7 +1594,7 @@ export async function syncEbayShipments(storeId, orders, hint = {}) {
   const sb = serviceClient();
   const { data: rows, error } = await sb
     .from("web_orders")
-    .select("id,order_no")
+    .select("id,order_no,tracking_number,label_storage_path,marketplace_tracking_number")
     .eq("store_id", storeId)
     .eq("channel", "ebay")
     .eq("status", "paid")
@@ -1600,8 +1608,22 @@ export async function syncEbayShipments(storeId, orders, hint = {}) {
     if (!path) continue;
     const fulfillment = await ebayFetch(storeId, "GET", path, undefined, hint);
     const patch = trackingPatch(fulfillment);
-    if (!patch) continue;
-    const { error: upErr } = await sb.from("web_orders").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", row.id).is("shipped_at", null);
+    if (!patch?.tracking_number) continue;
+    const ebayNumber = compactTracking(patch.tracking_number);
+    const next = {
+      marketplace_tracking_number: ebayNumber,
+      carrier: patch.carrier || null,
+      updated_at: new Date().toISOString(),
+    };
+    const uploaded = compactTracking(row.tracking_number);
+    if (row.label_storage_path && uploaded && uploaded !== ebayNumber) {
+      next.label_tracking_mismatch = true;
+      next.tracking_exception = `Uploaded label ${uploaded} does not match eBay ${ebayNumber}`;
+    } else if (!row.label_storage_path) {
+      next.tracking_number = ebayNumber;
+      next.label_tracking_mismatch = false;
+    }
+    const { error: upErr } = await sb.from("web_orders").update(next).eq("id", row.id).is("shipped_at", null);
     if (upErr) throw new Error(upErr.message);
     await sb
       .from("web_order_emails")
@@ -1617,7 +1639,24 @@ export async function syncEbayShipments(storeId, orders, hint = {}) {
 export async function pollEbayOrders(storeId, accountHint = {}) {
   const account = accountHint._account || (await resolveEbayAccount(storeId, accountHint));
   const hint = { _account: account, accountId: account.id };
-  const bag = { results: [], skus: new Set(), orders: new Set(), skuByItemId: new Map() };
+  const feedsFloor = ebayAccountFeedsFloorOrders(account);
+  const bag = {
+    results: [],
+    skus: new Set(),
+    orders: new Set(),
+    skuByItemId: new Map(),
+    skipFloor: !feedsFloor,
+    sellerUsername: account.username || null,
+  };
+  if (!feedsFloor) {
+    bag.results.push({
+      source: "account",
+      accountId: account.id,
+      username: account.username,
+      skipped: true,
+      reason: "personal_account",
+    });
+  }
   let fulfillmentOrders = null;
   try {
     bag.skuByItemId = await listingSkuByItemId(storeId);

@@ -2,7 +2,7 @@
  * Store a 4×6 (or uploaded) label in the order-labels bucket and,
  * for uploads, read the tracking number. Uploads never post a shipping expense.
  */
-import { extractTrackingFromFile, trackingUrlFor } from "./tracking-extract.mjs";
+import { compactTracking, extractTrackingFromFile, trackingUrlFor } from "./tracking-extract.mjs";
 import { registerOrderTracking } from "./order-tracking.mjs";
 
 const MAX_BYTES = 8_000_000;
@@ -41,9 +41,42 @@ export async function archiveRemoteLabel(sb, { storeId, orderId, url, filename, 
 }
 
 /**
- * Attach a buyer-provided label (Depop PDF or screenshot).
+ * Decide which tracking number an uploaded label should keep.
+ * eBay's fulfillment number wins when the PDF can't be read.
+ * A PDF that disagrees with eBay is a mismatch and stays in Needs label.
+ */
+export function resolveUploadedTracking(order, extracted) {
+  const ebay = compactTracking(order?.marketplace_tracking_number);
+  const pdf = extracted?.confident ? compactTracking(extracted.number) : "";
+  if (pdf && ebay && pdf !== ebay) {
+    return {
+      mismatch: true,
+      tracking: pdf,
+      carrier: extracted.carrier || null,
+      needsEntry: false,
+      exception: `Uploaded label ${pdf} does not match eBay ${ebay}`,
+    };
+  }
+  if (pdf) {
+    return { mismatch: false, tracking: pdf, carrier: extracted.carrier || null, needsEntry: false, exception: null };
+  }
+  if (ebay) {
+    return {
+      mismatch: false,
+      tracking: ebay,
+      carrier: order.carrier || "USPS",
+      needsEntry: false,
+      exception: null,
+      usedEbay: true,
+    };
+  }
+  return { mismatch: false, tracking: null, carrier: null, needsEntry: true, exception: null };
+}
+
+/**
+ * Attach a buyer-provided or eBay-downloaded label PDF.
  * Confident tracking is saved and registered with Shippo. Otherwise the order asks for the number.
- * No portal_expenses row and no label_cost_cents — Depop shipping is paid by the buyer.
+ * Depop uploads do not post a label expense. An eBay finances cost already on the order is left in place.
  */
 export async function attachUploadedLabel(sb, storeId, order, file, deps = {}) {
   if (!order || order.store_id && order.store_id !== storeId) return { ok: false, status: 404, error: "Order not found." };
@@ -74,27 +107,29 @@ export async function attachUploadedLabel(sb, storeId, order, file, deps = {}) {
   }
 
   const now = new Date().toISOString();
+  const resolved = resolveUploadedTracking(order, extracted);
   const patch = {
     label_storage_path: stored?.path || null,
     label_file_name: stored?.fileName || safeLabelName(file.name),
     label_mime: mime,
     label_uploaded_at: now,
     label_origin: "upload",
-    label_cost_cents: null,
-    tracking_needs_entry: !extracted.confident,
+    label_tracking_mismatch: resolved.mismatch,
+    tracking_exception: resolved.exception,
+    tracking_needs_entry: resolved.needsEntry,
     updated_at: now,
   };
-  if (extracted.confident) {
-    patch.tracking_number = extracted.number;
-    patch.carrier = extracted.carrier;
-    patch.tracking_url = trackingUrlFor(extracted.carrier, extracted.number);
-    patch.tracking_needs_entry = false;
+  if (String(order.channel || "").toLowerCase() !== "ebay") patch.label_cost_cents = null;
+  if (resolved.tracking) {
+    patch.tracking_number = resolved.tracking;
+    patch.carrier = resolved.carrier;
+    patch.tracking_url = trackingUrlFor(resolved.carrier, resolved.tracking);
   }
   const { data: saved, error } = await sb.from("web_orders").update(patch).eq("id", order.id).eq("store_id", storeId).select("*").single();
   if (error) return { ok: false, status: 500, error: error.message };
 
   let registered = null;
-  if (extracted.confident && typeof sb.storage?.from === "function") {
+  if (resolved.tracking && !resolved.mismatch && typeof sb.storage?.from === "function") {
     try {
       registered = await (deps.registerTrack || registerOrderTracking)(sb, saved);
     } catch (err) {
@@ -105,9 +140,11 @@ export async function attachUploadedLabel(sb, storeId, order, file, deps = {}) {
     ok: true,
     status: 200,
     order: saved,
-    needs_tracking: !extracted.confident,
-    tracking_number: extracted.confident ? extracted.number : null,
-    carrier: extracted.confident ? extracted.carrier : null,
+    needs_tracking: resolved.needsEntry,
+    mismatch: resolved.mismatch,
+    exception: resolved.exception,
+    tracking_number: resolved.tracking,
+    carrier: resolved.carrier,
     reason: extracted.reason || null,
     engine: extracted.engine || null,
     registered,

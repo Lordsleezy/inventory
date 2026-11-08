@@ -118,6 +118,13 @@ export async function extractTrackingFromFile(bytes, mime) {
   return { ...parseTracking(ocr.text), engine: ocr.engine, text: String(ocr.text || "").slice(0, 2000) };
 }
 
+/** Compare eBay's number and a PDF number. A 420+ZIP wrapper is the same USPS number. */
+export function compactTracking(value) {
+  const n = String(value || "").replace(/\s+/g, "").toUpperCase();
+  const wrapped = n.match(/^420\d{5}(9[2-5]\d{18,24})$/) || n.match(/^420\d{9}(9[2-5]\d{18,24})$/);
+  return wrapped ? wrapped[1] : n;
+}
+
 export function trackingUrlFor(carrier, tracking) {
   const n = encodeURIComponent(String(tracking || "").replace(/\s+/g, ""));
   const c = String(carrier || "").toLowerCase();

@@ -7,16 +7,17 @@ import { errText } from '../errText';
 import { shortError } from './shortError';
 import { loadOrderLocations, locationCompare, locationParts } from '../locationOrder';
 import { fileToBase64, labelFileUrl, orderAdmin } from '../orderLabel';
-import { canBuyLabel, hasLabel, orderChip, orderStage, orderTimeline, packagedStale, trackingTail, type OrderStage } from '../orderStage';
+import { canBuyLabel, hasLabel, orderChip, orderNeedsLabel, orderStage, orderTimeline, packagedStale, trackingTail, type OrderStage } from '../orderStage';
 import { useVisibleInterval } from '../useVisibleInterval';
 
-type Seg = 'toShip' | 'packaged' | 'shipped' | 'delivered' | 'canceled';
+type Seg = 'needsLabel' | 'toShip' | 'packaged' | 'shipped' | 'delivered' | 'canceled';
 
 const CHANNEL: Record<string, string> = {
   website: 'Website', ebay: 'eBay', amazon: 'Amazon', tiktok: 'TikTok', depop: 'Depop', mercari: 'Mercari',
 };
 
 const SEG_NOTE: Record<Seg, string> = {
+  needsLabel: 'Buy the eBay label in eBay, or grab the Depop label, then upload the PDF. The warehouse sees it after that.',
   toShip: 'Pick it, print the label, then tap Packaged.',
   packaged: 'Boxed and waiting for the carrier. Moves to Shipped on its own at the first carrier scan.',
   shipped: 'Updates on its own. Moves to Delivered when the carrier says so.',
@@ -30,6 +31,7 @@ type Props = {
   accessToken: string;
   money: (n: number) => string;
   stamp: (s: string) => string;
+  isAdmin?: boolean;
 };
 
 type TrackEvent = { status?: string; status_detail?: string | null; location?: string | null; occurred_at?: string | null };
@@ -39,7 +41,7 @@ function when(iso?: string | null) {
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'America/Los_Angeles' });
 }
 
-export function AppOrders({ client, storeId, accessToken, money, stamp }: Props) {
+export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin = false }: Props) {
   const [seg, setSeg] = useState<Seg>('toShip');
   const [orders, setOrders] = useState<WebOrder[] | null>(null);
   const [error, setError] = useState('');
@@ -87,6 +89,7 @@ export function AppOrders({ client, storeId, accessToken, money, stamp }: Props)
     const list = orders || [];
     const put = (stage: OrderStage) => list.filter((o) => orderStage(o) === stage);
     return {
+      needsLabel: put('needsLabel'),
       toShip: put('toShip'),
       packaged: put('packaged'),
       shipped: put('shipped'),
@@ -96,7 +99,7 @@ export function AppOrders({ client, storeId, accessToken, money, stamp }: Props)
   }, [orders]);
 
   const rows = (buckets[seg] || []).slice().sort((a, b) => {
-    if (seg !== 'toShip' && seg !== 'packaged') return 0;
+    if (seg !== 'needsLabel' && seg !== 'toShip' && seg !== 'packaged') return 0;
     return locationCompare(locations[a.sku]?.[0] || '99999', locations[b.sku]?.[0] || '99999');
   });
 
@@ -220,7 +223,8 @@ export function AppOrders({ client, storeId, accessToken, money, stamp }: Props)
         file_name: file.name,
         mime: file.type || (file.name.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'image/jpeg'),
       });
-      if (data.needs_tracking) setError('Label saved. Type the tracking number — it was not clear on the file.');
+      if (data.mismatch) setError(String(data.exception || 'That tracking number does not match eBay. The order stays in Needs label.'));
+      else if (data.needs_tracking) setError('Label saved. Type the tracking number — it was not clear on the file.');
     });
   }
 
@@ -263,7 +267,7 @@ export function AppOrders({ client, storeId, accessToken, money, stamp }: Props)
       ? `Uploaded · ${CHANNEL[ch] || open.channel || 'Label'}`
       : open.label_origin === 'bought' || open.label_purchased_at
         ? `Bought${open.label_cost_cents != null ? ` · ${money(open.label_cost_cents)}` : ''}`
-        : buy ? 'Buy label' : 'Add label';
+        : orderNeedsLabel(open) ? 'Upload label' : buy ? 'Buy label' : '—';
     return (
       <div className="app-stack">
         <div className="app-nav">
@@ -322,10 +326,10 @@ export function AppOrders({ client, storeId, accessToken, money, stamp }: Props)
             {!labeled && buy && (
               <button type="button" disabled={!!busy || open.pack_condition === 'not_as_listed'} onClick={() => setLabelOpen(true)}>Buy label</button>
             )}
-            {!labeled && !buy && (
+            {orderNeedsLabel(open) && (
               <>
                 <input ref={labelInput} className="sr-only" type="file" accept="application/pdf,image/*" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void uploadLabel(open, f); }} />
-                <button type="button" disabled={!!busy} onClick={() => labelInput.current?.click()}>{busy === 'upload-label' ? '…' : 'Add label'}</button>
+                <button type="button" className="primary" disabled={!!busy} onClick={() => labelInput.current?.click()}>{busy === 'upload-label' ? '…' : open.label_storage_path ? 'Replace label' : 'Upload label'}</button>
               </>
             )}
             {stage === 'toShip' && (
@@ -365,6 +369,7 @@ export function AppOrders({ client, storeId, accessToken, money, stamp }: Props)
       <div className="app-large-title orders-app-title"><h1>Orders</h1></div>
       <div className="app-segment app-segment-scroll orders-segment">
         {([
+          ...(isAdmin ? [['needsLabel', 'Needs label', buckets.needsLabel.length] as const] : []),
           ['toShip', 'To ship', buckets.toShip.length],
           ['packaged', 'Packaged', buckets.packaged.length],
           ['shipped', 'Shipped', buckets.shipped.length],
@@ -391,7 +396,8 @@ export function AppOrders({ client, storeId, accessToken, money, stamp }: Props)
           const loc = locationParts(locations[o.sku]?.[0]);
           const tail = trackingTail(o);
           return (
-            <button key={o.id} type="button" className="app-row app-order-row" onClick={() => setOpen(o)}>
+            <div key={o.id} className="app-row app-order-row">
+            <button type="button" className="app-order-open" onClick={() => setOpen(o)}>
               {loc
                 ? <span className="app-order-location-badge"><small>{loc.display}</small><strong>{loc.slot}</strong></span>
                 : <span className="app-order-location-badge missing"><small>BAY</small><strong>None</strong></span>}
@@ -402,6 +408,13 @@ export function AppOrders({ client, storeId, accessToken, money, stamp }: Props)
               </span>
               <span className="app-chevron">›</span>
             </button>
+            {isAdmin && orderNeedsLabel(o) && (
+              <label className="app-row-upload" onClick={(e) => e.stopPropagation()}>
+                Upload
+                <input type="file" accept="application/pdf,image/*" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void uploadLabel(o, f); }} />
+              </label>
+            )}
+            </div>
           );
         })}
       </div>

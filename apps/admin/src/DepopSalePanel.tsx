@@ -173,7 +173,7 @@ export function DepopSalePanel({ client, money, variant, initialSku, initialSale
       </form>
       {error && <p className="error" role="alert">{error}</p>}
       {notice && <p className="hint" role="status">{notice}</p>}
-      <p className="hint">Goes to Orders → To ship, label ready to print. Pulled from every other channel. The label is optional — without one the order shows Add label. Depop shipping is paid by the buyer, so no label expense is posted.</p>
+      <p className="hint">Pulled from every other channel. With a label it goes to Orders → To ship, ready to print. Without one it stays in Needs label until you upload it. Depop shipping is paid by the buyer, so no label expense is posted.</p>
       {initialSku && onClose && <button type="button" className="secondary" disabled={busy} onClick={onClose}>Cancel</button>}
     </section>
     {!initialSku && <section className="panel">
