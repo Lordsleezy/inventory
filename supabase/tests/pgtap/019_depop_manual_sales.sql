@@ -59,7 +59,8 @@ select is((select count(*)::int from public.sales where channel = 'depop' and sk
 -- Payout different from sale - fee (label taken out): profit follows the payout
 select lives_ok($q$select public.portal_depop_record_sale('96004', 6000, 600, 5000, null, null)$q$, 'payout can differ from sale - fee');
 select is((select profit_cents from public.sale_ledger where sku = '96004'), 4000, 'profit = payout 5000 - cost 1000');
-select is((select status from public.listings where sku = '96004' and channel = 'depop'), 'delisted', 'delisted on Depop');
+select is((select status from public.listings where sku = '96004' and channel = 'depop'), 'listed', 'Depop sale stays on the live list');
+select is((select depop_needs_removal from public.listings where sku = '96004' and channel = 'depop'), true, 'Depop sale needs the shop listing removed');
 select is((select count(*)::int from public.delist_tasks where sku = '96004' and channel = 'ebay' and completed_at is null), 1, 'delist task for eBay');
 
 -- No cost yet: payout waits
