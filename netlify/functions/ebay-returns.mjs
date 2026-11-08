@@ -1,17 +1,51 @@
-/** Pull eBay return requests and send item-only or partial refunds. */
+/** Pull eBay return requests. Refunds go out only when an admin confirms. */
 import { json, corsHeaders, serviceClient } from "../lib/server.mjs";
 import { wrapHandler, asNetlifyFunction } from "../lib/floor-log.mjs";
 import { portalAdminFromEvent } from "../lib/portal-auth.mjs";
-import { loadEbayAccount } from "../lib/ebay-accounts.mjs";
+import { assertEbaySellerWrite, loadEbayAccount } from "../lib/ebay-accounts.mjs";
 import {
   deductionRefundCents,
-  issueEbayItemRefund,
+  ebayRefundPlan,
+  issueEbayReturnRefund,
   offerEbayPartialRefund,
   syncEbayReturns,
   uploadEbayReturnFile,
 } from "../lib/ebay-returns.mjs";
 
 const SELLING = "ikonikdeals2026";
+
+function planFallbackItem(row) {
+  const refund = Math.max(0, Number(row.refund_cents) || 0);
+  const shipping = Math.max(0, Number(row.raw?.shipping_cents) || 0);
+  const stored = Math.max(0, Number(row.raw?.item_cents) || 0);
+  if (stored > 0) return stored;
+  const snad = row.fault === "seller" || /not_as_described|defective|wrong_item|damaged/.test(String(row.reason || ""));
+  if (snad && shipping > 0 && refund > shipping) return refund - shipping;
+  return refund;
+}
+
+async function finishEbayRefund(sb, storeId, row, refundCents) {
+  const now = new Date().toISOString();
+  await sb.from("returns").update({
+    refund_cents: refundCents,
+    status: "closed",
+    refunded_at: now,
+    closed_at: now,
+    needs_decision: false,
+    updated_at: now,
+  }).eq("id", row.id);
+  await sb.rpc("return_apply_commission_clawbacks", { p_return_id: row.id });
+  if (row.sale_id) {
+    await sb.rpc("return_reverse_sale", {
+      p_store: storeId,
+      p_sale_id: row.sale_id,
+      p_reason: "eBay return",
+      p_restock: true,
+    });
+  }
+  await sb.rpc("return_sync_label_expense", { p_return_id: row.id });
+  await sb.rpc("return_post_ledger", { p_return_id: row.id });
+}
 
 async function handle(event) {
   if (event.httpMethod === "OPTIONS") return { statusCode: 200, headers: corsHeaders(), body: "" };
@@ -22,7 +56,8 @@ async function handle(event) {
   catch (err) { return json(err.status || 401, { error: err.message }); }
 
   const account = await loadEbayAccount(ctx.storeId, { username: SELLING });
-  if (String(account.role) !== "selling") return json(400, { error: "selling_account_required" });
+  try { assertEbaySellerWrite(account); }
+  catch (err) { return json(400, { error: err.message, code: err.code || "ebay_write_refused" }); }
 
   if (body.action === "sync" || !body.action) {
     const result = await syncEbayReturns(ctx.storeId, account);
@@ -32,36 +67,37 @@ async function handle(event) {
   const returnId = String(body.return_id || "");
   if (!returnId) return json(400, { error: "return_id_required" });
   const sb = serviceClient();
-  const { data: row, error } = await sb.from("returns").select("id,external_return_id,refund_cents,raw,channel").eq("store_id", ctx.storeId).eq("id", returnId).maybeSingle();
+  const { data: row, error } = await sb.from("returns").select("id,external_return_id,refund_cents,raw,channel,reason,fault,sale_id,refunded_at,sku,return_label_cents,label_paid_by").eq("store_id", ctx.storeId).eq("id", returnId).maybeSingle();
   if (error) return json(500, { error: error.message });
   if (!row || row.channel !== "ebay") return json(404, { error: "ebay_return_not_found" });
   const ebayId = row.external_return_id;
-  const itemCents = Math.max(0, Number(row.raw?.item_cents) || Number(row.refund_cents) || 0);
+  const itemCents = Math.max(0, Number(row.raw?.item_cents) || 0);
+  const shippingCents = Math.max(0, Number(row.raw?.shipping_cents) || 0);
+  const plan = ebayRefundPlan({
+    reason: row.reason || row.raw?.reason,
+    fault: row.fault || row.raw?.fault,
+    itemCents: itemCents || (planFallbackItem(row)),
+    shippingCents,
+  });
 
   if (body.action === "quote") {
     return json(200, {
-      item_cents: itemCents,
-      shipping_cents: Math.max(0, Number(row.raw?.shipping_cents) || 0),
-      remorse: row.raw?.fault === "buyer" || row.raw?.reason === "buyer_remorse",
-      max_deduction_percent: 50,
-      suggested_refund_cents: itemCents,
+      ...plan,
+      max_deduction_percent: plan.deductionAllowed ? 50 : 0,
+      suggested_refund_cents: plan.refundCents,
     });
   }
 
+  if (row.refunded_at) return json(409, { error: "already_refunded" });
+
   if (body.action === "refund_item") {
-    const sent = await issueEbayItemRefund(account, ebayId, itemCents, body.note);
-    await sb.from("returns").update({
-      refund_cents: itemCents,
-      status: "closed",
-      refunded_at: new Date().toISOString(),
-      closed_at: new Date().toISOString(),
-      needs_decision: false,
-      updated_at: new Date().toISOString(),
-    }).eq("id", row.id);
-    return json(200, { ok: true, refund_cents: itemCents, ebay: sent || null });
+    const sent = await issueEbayReturnRefund(account, ebayId, plan, body.note);
+    await finishEbayRefund(sb, ctx.storeId, row, plan.refundCents);
+    return json(200, { ok: true, refund_cents: plan.refundCents, ebay: sent || null });
   }
 
   if (body.action === "deduct") {
+    if (!plan.deductionAllowed) return json(400, { error: "deduction_not_allowed", message: "Not-as-described returns are a full refund. No deduction." });
     const note = String(body.note || "").trim();
     const photo = String(body.photo_base64 || "").trim();
     if (!note) return json(400, { error: "condition_note_required" });
@@ -70,8 +106,8 @@ async function handle(event) {
     if (bytes.length < 32) return json(400, { error: "condition_photo_required" });
     const contentType = String(body.photo_type || "image/jpeg");
     await uploadEbayReturnFile(account, ebayId, { filename: "condition.jpg", contentType, bytes });
-    const money = deductionRefundCents(itemCents, body.percent);
-    await offerEbayPartialRefund(account, ebayId, itemCents, money.percent, note);
+    const money = deductionRefundCents(plan.itemCents, body.percent);
+    await offerEbayPartialRefund(account, ebayId, plan.itemCents, money.percent, note);
     const photoPath = `${ctx.storeId}/returns/${row.id}/condition.jpg`;
     await sb.storage.from("unit-photos").upload(photoPath, bytes, { contentType, upsert: true }).catch(() => null);
     await sb.from("return_photos").insert({
@@ -80,12 +116,7 @@ async function handle(event) {
     await sb.from("return_notes").insert({
       store_id: ctx.storeId, return_id: row.id, body: note, kind: "note", created_by: ctx.userId || null,
     });
-    await sb.from("returns").update({
-      refund_cents: money.refundCents,
-      inspection_notes: note,
-      needs_decision: false,
-      updated_at: new Date().toISOString(),
-    }).eq("id", row.id);
+    await finishEbayRefund(sb, ctx.storeId, row, money.refundCents);
     return json(200, { ok: true, ...money });
   }
 

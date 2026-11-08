@@ -794,9 +794,10 @@ export async function listSku(storeId, sku, draft = null) {
       title: copy.title,
       category: unit.category,
       priceCents,
-    });
+    }, selling);
     storeCategoryNamesForOffer = resolved.names;
   } catch (err) {
+    if (err?.code === "ebay_write_refused") throw err;
     await floorLog({
       level: "warn",
       storeId,
@@ -1030,7 +1031,7 @@ export async function withdrawSku(storeId, sku) {
         // Trading EndItem fallback for listings created outside Inventory API (migration / Vendoo).
         if (row?.listing_id && account) {
           const token = await userTokenForAccount(account);
-          await endTradingItem(token, row.listing_id, "NotAvailable");
+          await endTradingItem(token, row.listing_id, "NotAvailable", account);
         } else {
           throw err;
         }
@@ -1039,7 +1040,7 @@ export async function withdrawSku(storeId, sku) {
   } else if (row?.listing_id && account) {
     const token = await userTokenForAccount(account);
     try {
-      await endTradingItem(token, row.listing_id, "NotAvailable");
+      await endTradingItem(token, row.listing_id, "NotAvailable", account);
     } catch (err) {
       if (!/already|ended|not found|invalid item/i.test(err.message)) throw err;
     }

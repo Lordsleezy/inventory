@@ -34,6 +34,7 @@ export type ReturnRow = {
   in_transit_at?: string | null;
   received_at?: string | null;
   closed_at?: string | null;
+  refunded_at?: string | null;
   refunds?: Refund[];
 };
 

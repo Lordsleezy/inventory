@@ -491,7 +491,7 @@ async function reviseTradingEraListing(storeId, { accountId, itemId, priceCents,
     conditionDescription,
     pictureUrls: imageUrls,
     aspects,
-  });
+  }, account);
   return { ok: true, via: "trading", itemId: tradingId, ack: revised.ack };
 }
 

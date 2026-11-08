@@ -610,10 +610,11 @@ async function createOnDestination(destAccount, item, policies, { storeId } = {}
         paymentPolicyId: policies.payment,
         returnPolicyId: policies.returnP,
         fulfillmentPolicyId: policies.fulfillment,
-      });
+      }, destAccount);
       return created.listingId;
     } catch (err) {
       lastErr = err;
+      if (err?.code === "ebay_write_refused") throw err;
       const message = err instanceof Error ? err.message : String(err);
       const missing = parseMissingAspectNames(message);
       if (missing.length) {
@@ -947,7 +948,7 @@ export async function runEbayMigration(storeId, { mode = "dry_run", createdBy = 
           throw new Error('Confirmed Floor category differs from the live source listing. Adopt its category before migration.');
         let sourceEnded = false;
         try {
-          await endTradingItem(sourceToken, item.itemId, "NotAvailable");
+          await endTradingItem(sourceToken, item.itemId, "NotAvailable", source);
           sourceEnded = true;
         } catch (endErr) {
           const endMsg = endErr instanceof Error ? endErr.message : String(endErr);

@@ -1,3 +1,4 @@
+import { assertEbaySellerWrite } from "./ebay-accounts.mjs";
 import { ebayHosts } from "./ebay-env.mjs";
 import { classifyEbayStoreCategory, storeCategoryNames } from "./ebay-store-categories.mjs";
 
@@ -239,7 +240,12 @@ export async function getShippingServiceDetails(token) {
   return parseShippingServiceDetails(xml);
 }
 
-async function tradingCall(token, callName, innerXml) {
+function tradingCallWrites(callName) {
+  return /^(Revise|End|Add|Set|Upload|Relist|VerifyAdd|CompleteSale)/i.test(String(callName || ""));
+}
+
+async function tradingCall(token, callName, innerXml, account) {
+  if (tradingCallWrites(callName)) assertEbaySellerWrite(account);
   const { api } = ebayHosts(process.env.EBAY_ENV);
   const body = `<?xml version="1.0" encoding="utf-8"?>
 <${callName}Request xmlns="urn:ebay:apis:eBLBaseComponents">
@@ -558,9 +564,9 @@ export async function getTradingItem(token, itemId) {
 }
 
 /** In-place revise of condition, description, and pictures only. */
-export async function reviseFixedPriceStandards(token, change) {
+export async function reviseFixedPriceStandards(token, change, account) {
   const { reviseStandardsXml } = await import("./ebay-listing-standards.mjs");
-  const xml = await tradingCall(token, "ReviseFixedPriceItem", reviseStandardsXml(change));
+  const xml = await tradingCall(token, "ReviseFixedPriceItem", reviseStandardsXml(change), account);
   return { itemId: String(change.itemId), ack: xmlTag(xml, "Ack"), xml };
 }
 
@@ -569,7 +575,7 @@ export async function reviseFixedPriceStandards(token, change) {
  * When fulfillmentPolicyId is set, payment + return profile IDs should also be provided
  * (eBay expects the SellerProfiles block as a set).
  */
-export async function reviseFixedPricePriceAndShipping(token, change) {
+export async function reviseFixedPricePriceAndShipping(token, change, account) {
   const itemId = String(change.itemId || "").trim();
   if (!/^\d+$/.test(itemId)) throw new Error("revise price/shipping needs a numeric item id");
   const price = change.price != null ? Number(change.price) : null;
@@ -595,6 +601,7 @@ export async function reviseFixedPricePriceAndShipping(token, change) {
   <Item>
     ${parts.join("\n    ")}
   </Item>`,
+    account,
   );
   return { itemId, ack: xmlTag(xml, "Ack"), fees: xmlTag(xml, "Fee"), xml };
 }
@@ -648,28 +655,30 @@ export function tradingReviseItemXml(change) {
 }
 
 /** In-place revise of price, title, description, photos, or quantity. Does not change shipping profiles. */
-export async function reviseTradingFixedPrice(token, change) {
-  const xml = await tradingCall(token, "ReviseFixedPriceItem", tradingReviseItemXml(change));
+export async function reviseTradingFixedPrice(token, change, account) {
+  const xml = await tradingCall(token, "ReviseFixedPriceItem", tradingReviseItemXml(change), account);
   return { itemId: String(change.itemId), ack: xmlTag(xml, "Ack"), via: "trading", xml };
 }
 
-export async function uploadSiteHostedPicture(token, externalUrl) {
+export async function uploadSiteHostedPicture(token, externalUrl, account) {
   const xml = await tradingCall(
     token,
     "UploadSiteHostedPictures",
     `<ExternalPictureURL>${xmlEsc(externalUrl)}</ExternalPictureURL>`,
+    account,
   );
   const url = xmlTag(xml, "FullURL") || xmlTag(xml, "PictureURL");
   if (!url) throw new Error("UploadSiteHostedPictures returned no URL");
   return url;
 }
 
-export async function endTradingItem(token, itemId, reason = "NotAvailable") {
+export async function endTradingItem(token, itemId, reason = "NotAvailable", account) {
   const xml = await tradingCall(
     token,
     "EndItem",
     `<ItemID>${xmlEsc(itemId)}</ItemID>
 <EndingReason>${xmlEsc(reason)}</EndingReason>`,
+    account,
   );
   return { itemId: String(itemId), endTime: xmlTag(xml, "EndTime"), xml };
 }
@@ -726,14 +735,14 @@ export async function getStoreCategoryMap(token, { force = false } = {}) {
   return map;
 }
 
-async function ensureStoreCategoryIds(token, names) {
+async function ensureStoreCategoryIds(token, names, account) {
   let map = await getStoreCategoryMap(token);
   const missing = names.filter((name) => name && !map.has(name));
   if (!missing.length) return map;
   const blocks = missing
     .map((name) => `<CustomCategory><Name>${xmlEsc(name)}</Name></CustomCategory>`)
     .join("");
-  await tradingCall(token, "SetStoreCategories", `<Action>Add</Action><StoreCategories>${blocks}</StoreCategories>`);
+  await tradingCall(token, "SetStoreCategories", `<Action>Add</Action><StoreCategories>${blocks}</StoreCategories>`, account);
   return getStoreCategoryMap(token, { force: true });
 }
 
@@ -742,11 +751,11 @@ async function ensureStoreCategoryIds(token, names) {
  * then return the names and store category IDs. Never throws for a missing
  * department — callers skip the storefront rather than block a listing.
  */
-export async function ensureListingStoreCategories(token, input) {
+export async function ensureListingStoreCategories(token, input, account) {
   const classified = classifyEbayStoreCategory(input);
   const names = storeCategoryNames(classified);
   if (!names.length) return { names: [], ids: [], classified };
-  const map = await ensureStoreCategoryIds(token, names);
+  const map = await ensureStoreCategoryIds(token, names, account);
   const resolved = names
     .map((name) => ({ name, id: map.get(name) }))
     .filter((row) => row.id && row.id !== "1");
@@ -757,7 +766,7 @@ export function invalidateStoreCategoryCache() {
   storeCategoryCache = { at: 0, map: null };
 }
 
-export async function setStoreCategories(token, action, categories) {
+export async function setStoreCategories(token, action, categories, account) {
   const allowed = new Set(["Add", "Delete", "Rename", "Move"]);
   if (!allowed.has(action)) throw new Error(`unsupported store category action ${action}`);
   const blocks = (categories || []).map((cat) => {
@@ -770,13 +779,14 @@ export async function setStoreCategories(token, action, categories) {
     token,
     "SetStoreCategories",
     `<Action>${action}</Action><StoreCategories>${blocks}</StoreCategories>`,
+    account,
   );
   invalidateStoreCategoryCache();
   return xml;
 }
 
 /** Change only the store categories on a live fixed-price listing. Does not send price, title, photos, quantity, or shipping. */
-export async function reviseItemStoreCategories(token, itemId, categoryId, category2Id = "0") {
+export async function reviseItemStoreCategories(token, itemId, categoryId, category2Id = "0", account) {
   const id = String(itemId || "").trim();
   const primary = String(categoryId || "").trim();
   if (!/^\d+$/.test(id) || !/^\d+$/.test(primary)) throw new Error("store category revise needs a numeric item id and category id");
@@ -791,19 +801,21 @@ export async function reviseItemStoreCategories(token, itemId, categoryId, categ
         <StoreCategory2ID>${xmlEsc(second)}</StoreCategory2ID>
       </Storefront>
     </Item>`,
+    account,
   );
 }
 
-export async function setEbayStoreProfile(token, { name, description, logoUrl } = {}) {
+export async function setEbayStoreProfile(token, { name, description, logoUrl } = {}, account) {
   const parts = [];
   if (name) parts.push(`<Name>${xmlEsc(name)}</Name>`);
   if (description) parts.push(`<Description><![CDATA[${String(description).replace(/\]\]>/g, "")}]]></Description>`);
   if (logoUrl) parts.push(`<Logo><URL>${xmlEsc(logoUrl)}</URL></Logo>`);
   if (!parts.length) throw new Error("setEbayStoreProfile needs a name, description, or logo");
-  return tradingCall(token, "SetStore", `<Store>${parts.join("")}</Store>`);
+  return tradingCall(token, "SetStore", `<Store>${parts.join("")}</Store>`, account);
 }
 
-export async function uploadEbayPicture(token, { filename, bytes, pictureName }) {
+export async function uploadEbayPicture(token, { filename, bytes, pictureName }, account) {
+  assertEbaySellerWrite(account);
   const { api } = ebayHosts(process.env.EBAY_ENV);
   const boundary = `ebaypic${Date.now()}`;
   const xml = `<?xml version="1.0" encoding="utf-8"?>
@@ -836,7 +848,7 @@ export async function uploadEbayPicture(token, { filename, bytes, pictureName })
   return xmlTag(text, "FullURL") || xmlTag(text, "PictureURL") || "";
 }
 
-export async function setEbayStoreCustomPage(token, { name, content, order = 1 }) {
+export async function setEbayStoreCustomPage(token, { name, content, order = 1 }, account) {
   return tradingCall(
     token,
     "SetStoreCustomPage",
@@ -847,6 +859,7 @@ export async function setEbayStoreCustomPage(token, { name, content, order = 1 }
       <LeftNav>true</LeftNav>
       <Order>${xmlEsc(order)}</Order>
     </CustomPage>`,
+    account,
   );
 }
 
@@ -855,7 +868,7 @@ export async function setEbayStoreCustomPage(token, { name, content, order = 1 }
  * Uses Seller Profiles (business policies) when policy IDs are provided; otherwise embeds
  * calculated buyer-pays shipping and no-returns inline (accounts without policy opt-in).
  */
-export async function addFixedPriceItem(token, item) {
+export async function addFixedPriceItem(token, item, account) {
   const pictures = (item.imageUrls || [])
     .map((url) => `<PictureURL>${xmlEsc(url)}</PictureURL>`)
     .join("");
@@ -915,11 +928,12 @@ export async function addFixedPriceItem(token, item) {
         title: item.title,
         category: item.floorCategory || "",
         priceCents: Math.round(Number(item.price) * 100),
-      });
+      }, account);
       if (resolved.ids[0]) {
         storefrontXml = `<Storefront><StoreCategoryID>${xmlEsc(resolved.ids[0])}</StoreCategoryID><StoreCategory2ID>${xmlEsc(resolved.ids[1] || "0")}</StoreCategory2ID></Storefront>`;
       }
     } catch (err) {
+      if (err?.code === "ebay_write_refused") throw err;
       console.warn("ebay_store_category_skip", err instanceof Error ? err.message : String(err));
     }
   } else if (item.storeCategoryId) {
@@ -950,7 +964,7 @@ export async function addFixedPriceItem(token, item) {
     <ShipToLocations>US</ShipToLocations>
   </Item>`;
   const send = async (body) => {
-    const xml = await tradingCall(token, "AddFixedPriceItem", body);
+    const xml = await tradingCall(token, "AddFixedPriceItem", body, account);
     const itemId = xmlTag(xml, "ItemID");
     if (!itemId) throw new Error("AddFixedPriceItem succeeded without ItemID");
     return { listingId: itemId, xml };

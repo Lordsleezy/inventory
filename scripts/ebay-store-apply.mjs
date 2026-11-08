@@ -317,6 +317,7 @@ if (missing.length) {
     token,
     "Add",
     missing.map((name) => ({ name, order: categoryNames.indexOf(name) + 1 })),
+    account,
   );
   map = await getStoreCategoryMap(token, { force: true });
 }
@@ -327,13 +328,13 @@ console.log([...map.entries()].map(([name, id]) => `${id} ${name}`).join("\n"));
 
 let profile = { name: null, description: null, logo: null, aboutPage: null };
 try {
-  await setEbayStoreProfile(token, { name: STORE_NAME, description: ABOUT });
+  await setEbayStoreProfile(token, { name: STORE_NAME, description: ABOUT }, account);
   profile.name = "set";
   profile.description = "set";
 } catch (err) {
   profile.name = err instanceof Error ? err.message : String(err);
   try {
-    await setEbayStoreProfile(token, { description: ABOUT });
+    await setEbayStoreProfile(token, { description: ABOUT }, account);
     profile.description = "set";
   } catch (again) {
     profile.description = again instanceof Error ? again.message : String(again);
@@ -349,7 +350,7 @@ for (const row of plans) {
   let lastError = "";
   for (let attempt = 1; attempt <= 3 && !done; attempt += 1) {
     try {
-      await reviseItemStoreCategories(token, row.itemId, primaryId, secondId);
+      await reviseItemStoreCategories(token, row.itemId, primaryId, secondId, account);
       assigned += 1;
       done = true;
     } catch (err) {
@@ -369,12 +370,12 @@ console.log(`assigned ${assigned} failed ${failures.length}`);
 
 let other = "left";
 try {
-  await setStoreCategories(token, "Delete", [{ id: "1" }]);
+  await setStoreCategories(token, "Delete", [{ id: "1" }], account);
   other = "deleted";
 } catch (err) {
   other = err instanceof Error ? err.message : String(err);
   try {
-    await setStoreCategories(token, "Move", [{ id: "1", order: 99 }]);
+    await setStoreCategories(token, "Move", [{ id: "1", order: 99 }], account);
     other = `${other} | moved to end`;
   } catch {
     /* default Other category often cannot be removed */
@@ -388,8 +389,8 @@ if (fs.existsSync(logoPath)) {
       filename: "open-box-logo.png",
       pictureName: "open-box-logo",
       bytes: fs.readFileSync(logoPath),
-    });
-    await setEbayStoreProfile(token, { logoUrl: url });
+    }, account);
+    await setEbayStoreProfile(token, { logoUrl: url }, account);
     profile.logo = url;
   } catch (err) {
     profile.logo = err instanceof Error ? err.message : String(err);
@@ -402,7 +403,7 @@ if (featured.length) {
     .join("");
   const content = `<p>${ABOUT.replace(/\n+/g, "</p><p>")}</p><h3>Worth a look</h3>${lines}`;
   try {
-    await setEbayStoreCustomPage(token, { name: "About", content, order: 1 });
+    await setEbayStoreCustomPage(token, { name: "About", content, order: 1 }, account);
     profile.aboutPage = "set";
   } catch (err) {
     profile.aboutPage = err instanceof Error ? err.message : String(err);
