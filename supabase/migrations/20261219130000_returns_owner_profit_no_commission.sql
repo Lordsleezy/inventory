@@ -1,6 +1,6 @@
 -- Returns: refunds reduce owner profit (buyer_keep_refund_cents / sale_ledger)
--- and never claw back worker commissions. Replacement returns can carry the
--- replacement shipping/extra cost as Label (I paid).
+-- and never claw back worker commissions. A replacement's extra cost stays on
+-- the sale. It is not posted again as a Returns expense.
 
 begin;
 
@@ -119,9 +119,6 @@ begin
         raw = coalesce(raw, '{}'::jsonb) || jsonb_build_object('return_kind', 'replacement'),
         updated_at = now()
        where store_id = new.store_id and raw->>'replacement_id' = new.id::text;
-      perform public.return_sync_label_expense(x.id)
-        from public.returns x
-       where x.store_id = new.store_id and x.raw->>'replacement_id' = new.id::text;
     end if;
     return new;
   end if;
@@ -149,9 +146,6 @@ begin
   ) returning id into v_id;
   insert into public.return_notes (store_id, return_id, body, kind, created_by)
   values (new.store_id, v_id, 'Replacement SKU ' || new.sku || ' sent for this sale', 'status', new.recorded_by);
-  if v_label > 0 then
-    perform public.return_sync_label_expense(v_id);
-  end if;
   return new;
 end $$;
 
@@ -169,12 +163,6 @@ where d.kind = 'replacement'
   and r.raw->>'replacement_id' = d.id::text
   and coalesce(d.extra_cost_cents, 0) > 0
   and coalesce(r.return_label_cents, 0) = 0;
-
-select public.return_sync_label_expense(r.id)
-  from public.returns r
- where r.raw ? 'replacement_id'
-   and r.label_paid_by = 'seller'
-   and coalesce(r.return_label_cents, 0) > 0;
 
 -- Desk: mark replacement rows and expose external_return_id for the phone UI.
 create or replace function public.portal_return_desk(

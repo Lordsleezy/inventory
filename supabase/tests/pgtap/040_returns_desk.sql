@@ -80,6 +80,10 @@ select lives_ok(
         from public.sales s
         join public.sale_commissions c on c.sale_id = s.id and c.employee_id = current_setting('test.paul')::uuid
        where s.sku = '11483';
+      select coalesce(sum(public.sale_commission_cents(current_setting('test.store')::uuid, s.id, current_setting('test.paul')::uuid)), 0)
+        into v_comm
+        from public.sales s
+       where s.store_id = current_setting('test.store')::uuid and s.voided_at is null;
       insert into public.portal_payout_payments (store_id, employee_id, amount_cents, paid_by, legacy_ticket_key)
       values (current_setting('test.store')::uuid, current_setting('test.paul')::uuid, v_comm, current_setting('test.paul')::uuid, 'paid-11483');
       insert into public.returns (store_id, sku, sale_id, channel, reason, status, refund_cents, requested_qty, refunded_at)
