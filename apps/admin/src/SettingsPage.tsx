@@ -96,11 +96,19 @@ export function SettingsPage({ accessToken, busy, run, staff, rules, saveRule, r
       <p>Commission split and who can sign in.</p></div></header>
     {error && <p className="error" role="alert">{error}</p>}
     <section className="panel">
+      <h2>Commission split</h2>
+      <p className="hint">A percent puts the person on the payouts screen. User only keeps the login and leaves them off payouts.</p>
+      {commissionPeople.map((person) => {
+        const rule = rules.find((row) => row.employee_id === person.user_id);
+        return <CommissionRow key={person.user_id} person={person} rule={rule} busy={busy} save={saveRule} />;
+      })}
+    </section>
+    <section className="panel">
       <div className="section-head">
-        <h2>Commission split</h2>
+        <h2>Users</h2>
         <button type="button" className="secondary" onClick={() => setAdding((open) => !open)}>{adding ? 'Close' : 'Add'}</button>
       </div>
-      <p className="hint">A percent puts the person on the payouts screen. User only keeps the login and leaves them off payouts.</p>
+      <p className="hint">Staff can use the register. Admins can use the whole portal. admin@admin.com cannot be removed.</p>
       {adding && <form className="rule-row" onSubmit={(event) => void addPerson(event)}>
         <label>Name<input value={name} onChange={(e) => setName(e.target.value)} required /></label>
         <label>Username<input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="off" required /></label>
@@ -115,14 +123,6 @@ export function SettingsPage({ accessToken, busy, run, staff, rules, saveRule, r
         </label>
         <button disabled={busy || !name.trim() || !username.trim() || password.length < 6}>Add</button>
       </form>}
-      {commissionPeople.map((person) => {
-        const rule = rules.find((row) => row.employee_id === person.user_id);
-        return <CommissionRow key={person.user_id} person={person} rule={rule} busy={busy} save={saveRule} />;
-      })}
-    </section>
-    <section className="panel">
-      <h2>Users</h2>
-      <p className="hint">Staff can use the register. Admins can use the whole portal. admin@admin.com cannot be removed.</p>
       {employees.map((row) => {
         const locked = (row.email || '').toLowerCase() === PROTECTED_ADMIN_EMAIL;
         const signIn = row.email?.endsWith('@employees.floor.local') ? row.email.replace(/@employees\.floor\.local$/, '') : (row.email || '');
