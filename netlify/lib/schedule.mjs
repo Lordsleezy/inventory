@@ -25,6 +25,7 @@ export function isNetlifyScheduleEvent(event) {
 /** Expected cadence for the Jobs health panel (minutes). Keep in sync with root netlify.toml. */
 export const SCHEDULED_JOBS = [
   { source: "census-seasonality-sync", everyMin: 43200, cron: "0 8 1 * *", label: "Census e-commerce seasonality (monthly)" },
+  { source: "books-month-snapshot", everyMin: 43200, cron: "5 8 1 * *", label: "Books month-end money balances (1st 00:05 Pacific)" },
   { source: "dispatch-alerts", everyMin: 5, cron: "*/5 * * * *", label: "Sale / delist alert emails (Gmail SMTP)" },
   { source: "ebay-sync", everyMin: 3, cron: "*/3 * * * *", label: "eBay orders + withdraw" },
   { source: "amazon-sync", everyMin: 10, cron: "*/10 * * * *", label: "Amazon orders + qty" },

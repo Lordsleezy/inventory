@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { BooksViews, type Sheet } from './books/BooksViews';
-import { formatSanityLine, normalizeReport, OCTOBER_2026_TARGETS } from './books/booksMath';
+import { normalizeReport } from './books/booksMath';
 import { buildBooksExcel, buildBooksPdf, downloadBytes } from './books/export';
-import { buildBooksWorkbook } from './books/workbook';
-import type { InventorySummary, Period, ReceivedItem, Report } from './books/types';
+import { loadBooksPayoutContext, loadCommissionOverrides } from './books/loadPayoutContext';
+import { computePayoutPersonBalances, loadPayoutLedgerData, BOOKS_WORKBOOK_VERSION, type PersonBalance } from './books/payoutLedger';
+import { canonicalPersonKey, mergeEmployeeIds } from './books/personMerge';
+import { buildBooksWorkbook, loadBooksMoney } from './books/workbook';
+import type { BooksPayoutContext, InventorySummary, Period, ReceivedItem, Report } from './books/types';
+import type { CommissionOverride } from './payouts';
 
 type Props = {
   client: SupabaseClient;
@@ -28,8 +32,14 @@ export function BooksPage({ client, money, native = false, onNativeNavigation }:
   const [periods, setPeriods] = useState<Period[]>([]);
   const [periodId, setPeriodId] = useState('');
   const [report, setReport] = useState<Report | null>(null);
-  const [inventory, setInventory] = useState<InventorySummary>(emptyInventory);
+  const [inventory, setInventory] = useState<InventorySummary>(emptyInventory());
   const [received, setReceived] = useState<ReceivedItem[]>([]);
+  const [payoutCtx, setPayoutCtx] = useState<BooksPayoutContext | null>(null);
+  const [overrides, setOverrides] = useState<Map<string, CommissionOverride>>(new Map());
+  const [moneyData, setMoneyData] = useState<Awaited<ReturnType<typeof loadBooksMoney>> | null>(null);
+  const [ledgerBalances, setLedgerBalances] = useState<PersonBalance[] | null>(null);
+  const [staffPersonIds, setStaffPersonIds] = useState<{ paulIds: string[]; jacobIds: string[] }>({ paulIds: [], jacobIds: [] });
+  const [duplicateDecisions, setDuplicateDecisions] = useState<Record<string, 'keep' | 'remove'>>({});
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [exportsPreparing, setExportsPreparing] = useState(false);
@@ -49,9 +59,44 @@ export function BooksPage({ client, money, native = false, onNativeNavigation }:
     setPeriodId((cur) => (cur && loaded.some((p) => p.id === cur) ? cur : loaded[0]?.id || ''));
   }, [client]);
 
+  const loadPayoutSide = useCallback(async (storeId: string, periodStart: string) => {
+    const ctx = await loadBooksPayoutContext(client, storeId);
+    const ov = await loadCommissionOverrides(client, storeId);
+    const [md, ledgerRaw] = await Promise.all([
+      loadBooksMoney(client, periodStart),
+      loadPayoutLedgerData(client, storeId, ov),
+    ]);
+    const balances = computePayoutPersonBalances({
+      staff: ctx.staff,
+      peopleSlots: ctx.peopleSlots,
+      rules: ctx.rules,
+      cfg: ctx.cfg,
+      frozen: ctx.frozen,
+      ...ledgerRaw,
+    });
+    setPayoutCtx(ctx);
+    setOverrides(ov);
+    setMoneyData(md);
+    setLedgerBalances(balances);
+    const ids = mergeEmployeeIds(ctx.staff, ctx.peopleSlots);
+    const paulList: string[] = [];
+    const jacobList: string[] = [];
+    for (const s of ctx.staff) {
+      if (canonicalPersonKey(s.display_name, s.email) === 'paul') paulList.push(s.user_id);
+      if (canonicalPersonKey(s.display_name, s.email) === 'jacob') jacobList.push(s.user_id);
+    }
+    if (ids.paulId && !paulList.includes(ids.paulId)) paulList.push(ids.paulId);
+    if (ids.jacobId && !jacobList.includes(ids.jacobId)) jacobList.push(ids.jacobId);
+    setStaffPersonIds({ paulIds: paulList, jacobIds: jacobList });
+  }, [client]);
+
   const loadMonth = useCallback(async (p: Period) => {
     setBusy(true); setError(''); setExportFiles(null);
     try {
+      const staffRes = await client.from('staff').select('store_id').limit(1).maybeSingle();
+      const storeId = String(staffRes.data?.store_id || '');
+      if (storeId) await loadPayoutSide(storeId, p.period_start);
+
       const { data: raw, error: re } = await client.rpc('portal_books_report', { p_period: p.id });
       if (re) throw re;
       let inv = emptyInventory();
@@ -70,26 +115,55 @@ export function BooksPage({ client, money, native = false, onNativeNavigation }:
         inv = { ...emptyInventory(), ...(invRes.data as InventorySummary) };
         recv = (recRes.data || []) as ReceivedItem[];
       }
-      const next = normalizeReport({ ...rawReport, inventory_summary: inv, items_received: recv });
+      const next = { ...normalizeReport(rawReport), inventory_summary: inv, items_received: recv };
       setReport(next);
       setInventory(inv);
       setReceived(recv);
-      if (p.period_start === OCTOBER_2026_TARGETS.period_start) {
-        const wb = buildBooksWorkbook(next, inv, recv);
-        console.info('[Books October sanity]', formatSanityLine(wb.sales.totals), 'targets', OCTOBER_2026_TARGETS);
-      }
+
+      const saved = localStorage.getItem(`books-dup-${p.id}`);
+      if (saved) setDuplicateDecisions(JSON.parse(saved) as Record<string, 'keep' | 'remove'>);
+
     } catch (e) {
       console.error('Books load failed', e);
       setError("Couldn't load this month. Try again.");
     } finally { setBusy(false); }
-  }, [client]);
+  }, [client, loadPayoutSide]);
 
   useEffect(() => { void loadPeriods().catch(() => setError("Couldn't load periods")); }, [loadPeriods]);
   useEffect(() => { if (selected) void loadMonth(selected); }, [selected, loadMonth]);
   useEffect(() => { setSheet('hub'); }, [periodId]);
 
-  const workbook = useMemo(() => (report ? buildBooksWorkbook(report, inventory, received) : null), [report, inventory, received]);
+  const duplicateHidden = useMemo(
+    () => new Set(Object.entries(duplicateDecisions).filter(([, v]) => v === 'remove').map(([k]) => k)),
+    [duplicateDecisions],
+  );
+
+  const workbook = useMemo(() => {
+    if (!report || !payoutCtx || !moneyData) return null;
+    return buildBooksWorkbook({
+      report,
+      inventory,
+      received,
+      payoutCtx,
+      overrides,
+      money: moneyData,
+      duplicateHidden,
+      duplicateDecisions,
+      ledgerBalances: ledgerBalances || undefined,
+      paulIds: staffPersonIds.paulIds,
+      jacobIds: staffPersonIds.jacobIds,
+    });
+  }, [report, inventory, received, payoutCtx, overrides, moneyData, duplicateHidden, duplicateDecisions, ledgerBalances, staffPersonIds]);
+
   const totals = useMemo(() => workbook?.sales.totals ?? null, [workbook]);
+
+  const lockedStaleMath = useMemo(() => {
+    if (!selected || selected.status !== 'locked' || !report) return false;
+    const v = Number(report.books_workbook_version || 0);
+    return v < BOOKS_WORKBOOK_VERSION;
+  }, [selected, report]);
+
+  const lockedMonths = useMemo(() => periods.filter((p) => p.status === 'locked').map((p) => p.period_start), [periods]);
 
   useEffect(() => {
     if (!workbook || !selected) { setExportFiles(null); return; }
@@ -128,6 +202,15 @@ export function BooksPage({ client, money, native = false, onNativeNavigation }:
     if (sheet === 'hub') onNativeNavigation(false, 'Books');
     else onNativeNavigation(true, SHEET_TITLES[sheet], () => setSheet('hub'));
   }, [native, onNativeNavigation, sheet]);
+
+  function saveDuplicateDecision(lineId: string, decision: 'keep' | 'remove') {
+    if (!selected) return;
+    setDuplicateDecisions((prev) => {
+      const next = { ...prev, [lineId]: decision };
+      localStorage.setItem(`books-dup-${selected.id}`, JSON.stringify(next));
+      return next;
+    });
+  }
 
   function printReports() {
     document.body.classList.add('books-printing');
@@ -179,6 +262,11 @@ export function BooksPage({ client, money, native = false, onNativeNavigation }:
           onReload={async () => { await loadPeriods(); if (selected) await loadMonth(selected); }}
           desktopTab={desktopTab}
           setDesktopTab={setDesktopTab}
+          onDuplicateDecision={saveDuplicateDecision}
+          absorbFees={!!payoutCtx?.cfg.absorbFees}
+          onlineChannels={payoutCtx?.cfg.channels || []}
+          lockedStaleMath={lockedStaleMath}
+          lockedMonths={lockedMonths}
         />
       )}
     </div>

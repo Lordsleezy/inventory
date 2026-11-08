@@ -1,8 +1,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { buildBooksExcel, buildBooksPdf, bytesBase64 } from './export';
-import { buildBooksWorkbook } from './workbook';
+import { BOOKS_WORKBOOK_VERSION } from './payoutLedger';
 import { monthLabel } from './booksMath';
-import type { InventorySummary, Period, ReceivedItem, Report } from './types';
+import type { BooksWorkbook, InventorySummary, Period, ReceivedItem, Report } from './types';
 
 type Props = {
   client: SupabaseClient;
@@ -11,23 +11,25 @@ type Props = {
   report: Report;
   inventory: InventorySummary;
   received: ReceivedItem[];
+  workbook: BooksWorkbook | null;
   uiStatus: 'locked' | 'in_progress' | 'draft';
   busy: boolean;
   setBusy: (b: boolean) => void;
   onError: (msg: string) => void;
   onReload: () => Promise<void>;
   native?: boolean;
+  lockedStaleMath?: boolean;
 };
 
-export function BooksLock({ client, money, period, report, inventory, received, uiStatus, busy, setBusy, onError, onReload, native }: Props) {
+export function BooksLock({ client, money, period, report, inventory, received, workbook, uiStatus, busy, setBusy, onError, onReload, native, lockedStaleMath }: Props) {
   const label = monthLabel(period.period_start);
 
   async function lock() {
     if (!window.confirm(`Lock ${label}? Numbers for this month will be frozen.`)) return;
     setBusy(true);
     try {
-      const workbook = buildBooksWorkbook(report, inventory, received);
-      const payload = { ...report, inventory_summary: inventory, items_received: received };
+      if (!workbook) throw new Error('workbook_missing');
+      const payload = { ...report, inventory_summary: inventory, items_received: received, books_workbook_version: BOOKS_WORKBOOK_VERSION };
       const [excel, pdf] = await Promise.all([
         buildBooksExcel(period, workbook, `${period.period_start} Books`),
         buildBooksPdf(period, workbook, money),
@@ -59,13 +61,43 @@ export function BooksLock({ client, money, period, report, inventory, received, 
     } catch { onError("Couldn't unlock this month."); } finally { setBusy(false); }
   }
 
+  async function refreeze() {
+    if (!workbook || !window.confirm(`Re-freeze ${label} with current payout math? This replaces the locked Excel/PDF.`)) return;
+    setBusy(true);
+    try {
+      const payload = { ...report, inventory_summary: inventory, items_received: received, books_workbook_version: BOOKS_WORKBOOK_VERSION };
+      const [excel, pdf] = await Promise.all([
+        buildBooksExcel(period, workbook, `${period.period_start} Books`),
+        buildBooksPdf(period, workbook, money),
+      ]);
+      const { error: e } = await client.rpc('portal_books_refreeze', {
+        p_period: period.id,
+        p_report: payload,
+        p_excel_base64: bytesBase64(excel),
+        p_pdf_base64: bytesBase64(pdf),
+      });
+      if (e) throw e;
+      await onReload();
+    } catch {
+      onError("Couldn't re-freeze this month.");
+    } finally { setBusy(false); }
+  }
+
   if (uiStatus === 'locked') {
     return (
-      <p className={`books-lock-foot${native ? ' native' : ''}`}>
-        Locked{period.locked_at ? ` · ${new Date(period.locked_at).toLocaleDateString()}` : ''}
-        {' · '}
-        <button type="button" className="books-lock-link" disabled={busy} onClick={() => void unlock()}>Unlock</button>
-      </p>
+      <div className={`books-lock-foot${native ? ' native' : ''}`}>
+        <p>
+          Locked{period.locked_at ? ` · ${new Date(period.locked_at).toLocaleDateString()}` : ''}
+          {' · '}
+          <button type="button" className="books-lock-link" disabled={busy} onClick={() => void unlock()}>Unlock</button>
+        </p>
+        {lockedStaleMath && (
+          <p className="books-stale-lock">
+            Locked with old math —{' '}
+            <button type="button" className="books-lock-link" disabled={busy || !workbook} onClick={() => void refreeze()}>recalculate?</button>
+          </p>
+        )}
+      </div>
     );
   }
 

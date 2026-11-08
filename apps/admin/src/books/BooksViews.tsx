@@ -46,6 +46,11 @@ export type ViewProps = {
   onReload: () => Promise<void>;
   desktopTab: Sheet;
   setDesktopTab: (s: Sheet) => void;
+  onDuplicateDecision?: (lineId: string, decision: 'keep' | 'remove') => void;
+  absorbFees?: boolean;
+  onlineChannels?: string[];
+  lockedStaleMath?: boolean;
+  lockedMonths?: string[];
 };
 
 export function BooksViews(props: ViewProps) {
@@ -59,7 +64,7 @@ function BooksNative(p: ViewProps) {
         <button type="button" className="native-report-action" aria-label="Download" disabled={!p.exportFiles} onClick={p.onExcel}>↓</button>
         <p className="books-sheet-period">{monthLabel(p.period.period_start)}</p>
         {p.sheet === 'sales' && <SalesBody money={p.money} workbook={p.workbook} report={p.report} native />}
-        {p.sheet === 'expenses' && <ExpensesBody money={p.money} workbook={p.workbook} native />}
+        {p.sheet === 'expenses' && <ExpensesBody money={p.money} workbook={p.workbook} native onDuplicateDecision={p.onDuplicateDecision} />}
         {p.sheet === 'payouts' && <PayoutsBody money={p.money} workbook={p.workbook} native />}
         {p.sheet === 'inventory' && <InventoryBody money={p.money} inventory={p.inventory} native />}
         {p.sheet === 'received' && <ReceivedBody money={p.money} items={p.workbook.received} native />}
@@ -69,12 +74,13 @@ function BooksNative(p: ViewProps) {
   const ui = periodUiStatus(p.period);
   return (
     <div className="native-report-body books-native-hub">
-      <button type="button" className="books-month-field" onClick={() => p.setPickerOpen(true)}>
+      <button type="button" className="books-month-field" aria-haspopup="listbox" aria-expanded={p.pickerOpen} onClick={() => p.setPickerOpen(true)}>
         <small>MONTH</small>
         <span>{periodPickerLabel(p.period)}</span>
-        <i className="native-chevron">›</i>
+        <i className="native-chevron books-month-chevron" aria-hidden>›</i>
       </button>
-      <SummaryCard money={p.money} totals={p.totals} native />
+      <SummaryCard money={p.money} totals={p.totals} native absorbFees={p.absorbFees} onlineChannels={p.onlineChannels} />
+      <BooksProofBar money={p.money} workbook={p.workbook} />
       <p className="native-report-section">REPORTS</p>
       <div className="native-report-group">
         {REPORT_ROWS.map((r) => (
@@ -89,7 +95,7 @@ function BooksNative(p: ViewProps) {
         <button type="button" className="books-native-export" disabled={!p.exportFiles || p.exportsPreparing} onClick={p.onExcel}>Download Excel</button>
         <button type="button" className="books-native-export" disabled={!p.exportFiles || p.exportsPreparing} onClick={p.onPdf}>Print / PDF</button>
       </div>
-      <BooksLock native client={p.client} money={p.money} period={p.period} report={p.report} inventory={p.inventory} received={p.received} uiStatus={ui} busy={p.busy} setBusy={p.setBusy} onError={p.onError} onReload={p.onReload} />
+      <BooksLock native client={p.client} money={p.money} period={p.period} report={p.report} inventory={p.inventory} received={p.received} workbook={p.workbook} uiStatus={ui} busy={p.busy} setBusy={p.setBusy} onError={p.onError} onReload={p.onReload} lockedStaleMath={p.lockedStaleMath} />
       {p.pickerOpen && <MonthPickerSheet {...p} />}
     </div>
   );
@@ -114,7 +120,8 @@ function BooksDesktop(p: ViewProps) {
           <button type="button" className="books-download secondary" disabled={!p.workbook} onClick={p.onPrint}>Print</button>
         </div>
       </div>
-      <SummaryCard money={p.money} totals={p.totals} />
+      <SummaryCard money={p.money} totals={p.totals} absorbFees={p.absorbFees} onlineChannels={p.onlineChannels} />
+      <BooksProofBar money={p.money} workbook={p.workbook} />
       <nav className="books-desktop-tabs" aria-label="Books reports">
         {REPORT_ROWS.map((t) => (
           <button key={t.id} type="button" className={tab === t.id ? 'active' : ''} onClick={() => p.setDesktopTab(t.id)}>{t.title}</button>
@@ -127,7 +134,7 @@ function BooksDesktop(p: ViewProps) {
         {tab === 'inventory' && <InventoryBody money={p.money} inventory={p.inventory} />}
         {tab === 'received' && <ReceivedBody money={p.money} items={p.workbook.received} />}
       </div>
-      <BooksLock client={p.client} money={p.money} period={p.period} report={p.report} inventory={p.inventory} received={p.received} uiStatus={ui} busy={p.busy} setBusy={p.setBusy} onError={p.onError} onReload={p.onReload} />
+      <BooksLock client={p.client} money={p.money} period={p.period} report={p.report} inventory={p.inventory} received={p.received} workbook={p.workbook} uiStatus={ui} busy={p.busy} setBusy={p.setBusy} onError={p.onError} onReload={p.onReload} lockedStaleMath={p.lockedStaleMath} />
       <div className="books-print-sheets" aria-hidden>
         <section><h2>Sales</h2><SalesTable money={p.money} workbook={p.workbook} totals={p.totals} /></section>
         <section><h2>Expenses</h2><ExpensesTable money={p.money} workbook={p.workbook} /></section>
@@ -144,7 +151,51 @@ function Block({ className, children }: { className?: string; children: ReactNod
   return <div className={className}>{children}</div>;
 }
 
-function SummaryCard({ money, totals, native }: { money: (c: number) => string; totals: BookTotals; native?: boolean }) {
+function feePolicyLine(absorbFees?: boolean, channels?: string[]) {
+  const ch = (channels?.length ? channels : ['website', 'ebay', 'depop', 'mercari', 'amazon', 'tiktok']).join(', ');
+  const owner = 'Store profit: marketplace fees on online sales are paid by the owner (in-store has none).';
+  const comm = absorbFees !== false
+    ? 'Commissions: store absorbs marketplace + card fees (they stay off the commission base).'
+    : 'Commissions: marketplace + card fees reduce the commission base.';
+  return `${owner} ${comm} Online: ${ch}.`;
+}
+
+function BooksProofBar({ money, workbook }: { money: (c: number) => string; workbook: BooksWorkbook }) {
+  const [open, setOpen] = useState(false);
+  const integrity = workbook.integrity;
+  const hasUnmatched = integrity?.issues.some((i) => i.kind === 'unmatched_label');
+  const auditOnly = integrity && !integrity.ok && integrity.commissionGap_cents === 0 && integrity.ownerGap_cents === 0 && !hasUnmatched;
+  const gap = integrity ? Math.max(Math.abs(integrity.commissionGap_cents), Math.abs(integrity.ownerGap_cents)) : 0;
+  const owedGap = integrity?.issues.find((i) => i.kind === 'owed_paul' || i.kind === 'owed_jacob');
+  if (!integrity) return null;
+  const status = integrity.ok
+    ? '✓ Ties to per-sale payouts'
+    : hasUnmatched
+      ? '⚠ Unmatched shipping label'
+      : auditOnly
+        ? '⚠ In-store sale with marketplace fees'
+        : `✗ Off by ${money(gap || Math.abs(owedGap?.cents || 0))}`;
+  return (
+    <div className="books-proof-bar">
+      <button type="button" className={`books-proof-status${integrity.ok ? ' ok' : ' warn'}`} onClick={() => setOpen(!open)}>
+        {status}
+      </button>
+      {workbook.audit.length > 0 && integrity.ok && (
+        <p className="books-proof-audit">⚠ In-store sale with marketplace fees — tap for detail</p>
+      )}
+      {open && (
+        <div className="books-proof-detail">
+          {integrity.issues.map((i, idx) => (
+            <p key={`${i.kind}-${idx}`}>{i.message}</p>
+          ))}
+          {integrity.issues.length === 0 && <p>All ticket totals match the hub and Payouts tab balances.</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SummaryCard({ money, totals, native, absorbFees, onlineChannels }: { money: (c: number) => string; totals: BookTotals; native?: boolean; absorbFees?: boolean; onlineChannels?: string[] }) {
   const lines = [
     { label: 'Sales', value: money(totals.revenue), className: '' },
     { label: '− Fees + labels', value: money(totals.feesAndLabels), className: 'warning-text' },
@@ -167,6 +218,7 @@ function SummaryCard({ money, totals, native }: { money: (c: number) => string; 
           </div>
         ))}
       </div>
+      <p className="books-fee-policy">{feePolicyLine(absorbFees, onlineChannels)}</p>
     </div>
   );
 }
@@ -268,7 +320,7 @@ function SaleTitle({ label, sub }: { label: string; sub: string }) {
   return <div><strong>{label}</strong><small>{sub}</small></div>;
 }
 
-function ExpensesBody({ money, workbook, native }: { money: (c: number) => string; workbook: BooksWorkbook; native?: boolean }) {
+function ExpensesBody({ money, workbook, native, onDuplicateDecision }: { money: (c: number) => string; workbook: BooksWorkbook; native?: boolean; onDuplicateDecision?: (lineId: string, decision: 'keep' | 'remove') => void }) {
   const [openPromo, setOpenPromo] = useState<string | null>(null);
   const groups = groupExpensesByCategory(workbook.expenses.rows);
   const head = native ? (
@@ -281,6 +333,7 @@ function ExpensesBody({ money, workbook, native }: { money: (c: number) => strin
   );
 
   const rowList = (r: ExpenseDisplayLine) => {
+    if (r.excludeFromTotals && r.duplicateFlag) return null;
     const isRollup = Boolean(r.children?.length);
     const expanded = openPromo === r.id;
   const sub = (
@@ -324,11 +377,21 @@ function ExpensesBody({ money, workbook, native }: { money: (c: number) => strin
     </div>
   ));
 
-  const dupes = workbook.expenses.duplicates.map((d) => (
-    <div key={d.lineIds.join('-')} className="books-dup-alert" role="status">
-      {d.message}
-    </div>
-  ));
+  const dupes = workbook.expenses.duplicates.filter((d) => d.pair).map((d) => {
+    const a = d.pair!.primary;
+    const b = d.pair!.duplicate;
+    return (
+      <div key={d.lineIds.join('-')} className="books-dup-card">
+        <p className="books-dup-title">Possible duplicate</p>
+        <p>{a.title} · {shortDate(a.date)} · {money(a.amount_cents)}</p>
+        <p>{b.title} · {shortDate(b.date)} · {money(b.amount_cents)}</p>
+        <div className="books-dup-actions">
+          <button type="button" onClick={() => onDuplicateDecision?.(b.id, 'keep')}>Keep both</button>
+          <button type="button" onClick={() => onDuplicateDecision?.(b.id, 'remove')}>Remove duplicate</button>
+        </div>
+      </div>
+    );
+  });
 
   const foot = <p className="native-report-footnote">Labels bought through eBay, TikTok or Amazon live in Sales, not here.</p>;
 
@@ -365,50 +428,73 @@ function ExpensesBody({ money, workbook, native }: { money: (c: number) => strin
 function PayoutsBody({ money, workbook, native }: { money: (c: number) => string; workbook: BooksWorkbook; native?: boolean }) {
   const [openStore, setOpenStore] = useState<string | null>(null);
   const p = workbook.payouts;
-  const section = (title: string, total: number, children: ReactNode) => (
+  const section = (title: string, total: number | null, children: ReactNode) => (
     <div className="books-payout-section">
-      <div className="native-report-section books-cat-head"><span>{title}</span><b className="cat-total">{money(total)}</b></div>
+      <div className="native-report-section books-cat-head"><span>{title}</span>{total != null && <b className="cat-total">{money(total)}</b>}</div>
       <div className="native-report-group">{children}</div>
     </div>
   );
   return (
     <>
-      {section('PAID OUT BY STORES', p.storePaidTotal_cents, (
+      {section('STORE BALANCES (MONEY TAB)', p.bankPaidTotal_cents, (
         <>
+          <p className="native-report-footnote">From Withdrawals / Money · bank payouts and balances for this month.</p>
           {p.stores.map((s) => (
-            <div key={s.channel}>
-              <button type="button" className="native-report-row" onClick={() => native && setOpenStore(openStore === s.channel ? null : s.channel)}>
-                <span>{s.channel}<small>{s.count} payout{s.count === 1 ? '' : 's'}</small></span>
-                <b>{money(s.total_cents)}{native && <i className="native-chevron">›</i>}</b>
+            <div key={s.account}>
+              <button type="button" className="native-report-row books-store-row" onClick={() => setOpenStore(openStore === s.account ? null : s.account)}>
+                <span>
+                  <strong>{s.label}</strong>
+                  <small>
+                    Start {s.start_balance_cents == null ? '—' : money(s.start_balance_cents)}{s.start_balance_estimated ? ' (est.)' : ''}
+                    {' · In '}{money(s.money_in_cents)}
+                    {' · To bank '}{money(s.paid_to_bank_cents)}
+                    {' · End '}{s.end_balance_cents == null ? '—' : money(s.end_balance_cents)}{s.end_balance_estimated ? ' (est.)' : ''}
+                  </small>
+                </span>
+                <i className="native-chevron">{openStore === s.account ? '⌄' : '›'}</i>
               </button>
-              {openStore === s.channel && s.payouts.map((w) => (
-                <div key={String(w.id)} className="native-report-row indent">
-                  <span><small>{shortDate(String(w.date || ''))}{w.payout_id ? ` · ${w.payout_id}` : ''}{w.bank_reference ? ` · ${w.bank_reference}` : ''}</small></span>
-                  <b>{money(Number(w.amount_cents || 0))}</b>
+              {openStore === s.account && s.transfers.map((w) => (
+                <div key={w.id} className="native-report-row indent">
+                  <span><small>{shortDate(w.at)} · {w.reason}{w.note ? ` · ${w.note}` : ''}</small></span>
+                  <b className={w.direction === 'out' ? 'minus' : 'plus'}>{money(w.amount_cents)}</b>
                 </div>
               ))}
             </div>
           ))}
-          <div className="native-report-row pending"><span>Not paid out yet</span><b className="warning-text">{money(p.notPaidYet_cents)}</b></div>
         </>
       ))}
       {section('COMMISSIONS', p.commission_total_cents, (
         <>
           {p.commissions.map((c) => (
             <div key={c.person} className="native-report-row">
-              <span>{c.person}{c.paid_cents ? <small>paid {money(c.paid_cents)}</small> : null}</span>
-              <b>{money(c.earned_cents)}</b>
+              <span>
+                <strong>{c.person}</strong>
+                {c.role === 'owner' ? (
+                  <small>Owner share this month</small>
+                ) : (
+                  <small>
+                    Earned {money(c.earned_cents)}
+                    {c.paid_cents ? ` · Paid ${money(c.paid_cents)}` : ''}
+                    {' · All-time owed '}{money(c.owed_all_time_cents)}
+                  </small>
+                )}
+              </span>
+              <b className={c.role === 'owner' ? 'positive' : ''}>{money(c.role === 'owner' ? c.earned_cents : c.earned_cents)}</b>
             </div>
           ))}
-          <div className="native-report-row pending"><span>Still owed</span><b className="warning-text">{money(p.stillOwed_cents)}</b></div>
+          <div className="native-report-row pending">
+            <span>Still owed (all-time, Paul + Jacob)</span>
+            <b className="warning-text">{money(p.stillOwed_all_time_cents)}</b>
+          </div>
         </>
       ))}
       <div className="books-owner-card native-report-form">
-        <div className="books-summary-stack compact">
+        <p className="native-report-section">OWNER</p>
+        <div className="books-summary-stack owner-stack">
           <div className="books-summary-line"><span>Profit</span><b>{money(p.owner.profit)}</b></div>
           <div className="books-summary-line"><span>− Commissions</span><b>{money(p.owner.commission)}</b></div>
           <div className="books-summary-line"><span>− Other expenses</span><b>{money(p.owner.otherExpenses)}</b></div>
-          <div className="books-summary-line profit-line"><span>Owner keeps</span><b className="positive">{money(p.owner.ownerKeeps)}</b></div>
+          <div className="books-summary-line profit-line"><span>= Owner keeps</span><b className="positive">{money(p.owner.ownerKeeps)}</b></div>
         </div>
         <p className="native-report-footnote">Other expenses = Expenses page minus anything already counted in profit.</p>
       </div>

@@ -1,4 +1,4 @@
-import { applySaleFeeAdjustments } from './saleAdjustments';
+import { applySaleFeeAdjustments, applySaleLabelCosts } from './saleAdjustments';
 import { saleFeeExtras } from './saleAdjustments';
 import type { BookTotals, Report, Row, SalesLine } from './types';
 
@@ -65,7 +65,7 @@ export function normalizeReport(raw: Report): Report {
     allocateTicketPayments((next.sales || []).map((sale) => Number(sale.cost_cents) === 900 ? { ...sale, cost_source: 'default' } : sale)),
     raw.square_payments || [],
   );
-  return applySaleFeeAdjustments(next);
+  return applySaleLabelCosts(applySaleFeeAdjustments(next));
 }
 
 /**

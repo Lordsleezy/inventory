@@ -330,15 +330,14 @@ test("owner payout rolls up all-time and week-by-week", () => {
   assert.equal(summary.weeks[1].weekStart, "2026-10-26");
   assert.equal(summary.weeks[1].ownerCents, 7000);
 });
-test("Mercari seller-paid shipping is left out of profit and commission", () => {
+test("Mercari out-of-pocket label counts on sale profit and commission", () => {
   const t = { subtotal: 1999, cost: 900, channel: "mercari", feeCents: 199, shipCostCents: 992, processingFeeCents: 0 };
-  assert.equal(profit(t), 1999 - 199 - 900);
-  assert.equal(commissionProfit(t, true), 1999 - 900);
-  assert.equal(commissionProfit(t, false), 1999 - 199 - 900);
+  assert.equal(profit(t), 1999 - 199 - 992 - 900);
+  assert.equal(commissionProfit(t, true), 1999 - 992 - 900);
+  assert.equal(commissionProfit(t, false), 1999 - 199 - 992 - 900);
   const shown = commissionBreakdown(t, true);
   const label = shown.rows.find(r => r.label.includes("Shipping label"));
-  assert.equal(label.cents, 0);
-  assert.match(label.note, /reimbursed/);
+  assert.equal(label.cents, -992);
 });
 
 test("breakdown lists every fee, marks absorbed ones, and adds up to the commission profit", () => {

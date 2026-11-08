@@ -46,7 +46,21 @@
 .books-month-field small{color:#8e8e93;font-size:.68rem;font-weight:600;letter-spacing:.06em}
 .books-month-field span{font-size:1.35rem;font-weight:650}
 .books-month-field .native-chevron{position:absolute;right:14px;top:50%;transform:translateY(-50%)}
-.books-report-link{align-items:center!important;gap:10px!important;padding:12px 10px!important}
+.books-report-link{align-items:center!important;justify-content:flex-start!important;text-align:left!important;gap:12px!important;padding:12px 14px!important;width:100%}
+.books-report-link>span:last-of-type{flex:1;min-width:0;text-align:left}
+.books-report-link .native-chevron{margin-left:auto;flex:none}
+.books-report-link:active,.books-report-link:focus,.books-report-link:hover{background:transparent!important}
+html.app-mode .books-native-hub .books-report-link.active{background:transparent!important}
+.books-month-field{width:100%;text-align:left;cursor:pointer}
+.books-month-chevron{position:absolute;right:14px;top:50%;transform:translateY(-50%)}
+.books-native-export{white-space:nowrap;font-size:.88rem}
+.books-lock-foot button.books-lock-link,.books-lock-foot .books-lock-link{display:inline;border:0!important;background:transparent!important;padding:0!important;min-height:0!important;box-shadow:none!important;font-size:inherit;color:#0a84ff;text-decoration:underline}
+.books-dup-card{border:1px solid #ff9f0a55;border-radius:12px;padding:12px;margin:12px 4px;color:#e9eff8}
+.books-dup-title{font-size:.72rem;text-transform:uppercase;color:#ff9f0a;margin:0 0 6px}
+.books-dup-actions{display:flex;gap:10px;margin-top:10px}
+.books-dup-actions button{border:0;background:#2c2c2e;color:#0a84ff;border-radius:8px;padding:8px 12px;font-weight:600}
+.books-owner-stack .books-summary-line{display:flex;justify-content:space-between;width:100%}
+.books-store-row{text-align:left}
 .books-report-icon{width:34px;height:34px;border-radius:8px;display:grid;place-items:center;flex:none;overflow:hidden}
 .books-expense-hero{display:flex;justify-content:space-between;gap:16px;margin:8px 0 14px}
 .books-expense-hero small{display:block;color:#8e8e93;font-size:.72rem;text-transform:uppercase}
@@ -64,6 +78,14 @@
 .books-lock-foot{text-align:center;color:#8e8e93;font-size:.82rem;margin:16px 0 8px}
 .books-lock-foot.native{color:#636366}
 .books-lock-link{border:0;background:transparent;color:#0a84ff;text-decoration:underline;font:inherit;padding:0;cursor:pointer}
+.books-fee-policy{margin:10px 0 0;font-size:.72rem;line-height:1.35;color:#8e8e93}
+.books-proof-bar{margin:14px 4px 8px}
+.books-proof-status{display:block;width:100%;text-align:left;border:0;background:transparent;font:inherit;padding:8px 0;color:#30d158;font-weight:650}
+.books-proof-status.warn{color:#ff9f0a}
+.books-proof-detail{font-size:.82rem;color:#c5c5c7;padding:0 4px 8px}
+.books-proof-detail p{margin:4px 0}
+.books-proof-audit{font-size:.75rem;color:#ff9f0a;margin:0 0 6px;padding:0 4px}
+.books-stale-lock{margin:6px 0 0;font-size:.8rem;color:#ff9f0a}
 .books-picker-scrim{position:fixed;inset:0;background:#0009;z-index:40;display:flex;align-items:flex-end;justify-content:center}
 .books-picker-sheet{background:#1c1c1e;border-radius:14px 14px 0 0;width:min(100%,520px);max-height:70vh;overflow:auto;padding:16px 14px 28px;color:#f5f5f7}
 .books-picker-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}

@@ -70,11 +70,8 @@ export function inStoreOverrideRate(sku: string, employeeId: string, cfg: Online
 }
 
 const channelFees = (t: TicketLike) => Math.max(0, t.feeCents ?? t.ebayFeeCents ?? 0);
-/** Mercari seller-paid labels are reimbursements. They never reduce sale profit or commission. */
-const shipCosts = (t: TicketLike) => {
-  if ((t.channel || '').toLowerCase() === 'mercari') return 0;
-  return Math.max(0, t.shipCostCents ?? t.bakedShipCents ?? 0);
-};
+/** Out-of-pocket labels on the sale row reduce profit and commission; reimbursement stays on Expenses. */
+const shipCosts = (t: TicketLike) => Math.max(0, t.shipCostCents ?? t.bakedShipCents ?? 0);
 const processing = (t: TicketLike) => Math.max(0, t.processingFeeCents ?? 0);
 const buyerShipping = (t: TicketLike) => Math.max(0, t.shippingCents ?? 0);
 
@@ -114,7 +111,7 @@ export function commissionBreakdown(t: TicketLike, absorbFees: boolean): { rows:
     { label: '+ Buyer-paid shipping', cents: buyerShipping(t) },
     { label: '− Channel / marketplace fee', cents: -channel, note: absorbFees && channel ? 'absorbed by the store' : undefined },
     { label: '− Card fee (after surcharge)', cents: -card, note: absorbFees && card ? 'absorbed by the store' : undefined },
-    { label: '− Shipping label', cents: -shipCosts(t) || 0, note: (t.channel || '').toLowerCase() === 'mercari' ? 'reimbursed separately' : undefined },
+    { label: '− Shipping label', cents: -shipCosts(t) || 0, note: shipCosts(t) > 0 && (t.channel || '').toLowerCase() === 'mercari' ? 'out-of-pocket — reimburse on Expenses' : undefined },
     { label: '− Item cost', cents: t.cost === null ? 0 : -t.cost, note: t.cost === null ? 'missing — no payout yet' : undefined },
   ];
   return { rows, base: commissionProfit(t, absorbFees), absorbedCents: absorbFees ? channel + card : 0 };
