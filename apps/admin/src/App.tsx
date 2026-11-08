@@ -419,7 +419,7 @@ export function App() {
     if (!session?.access_token || !fullAccess) return;
     let alive = true;
     const dayKey = today();
-    const span = range(dayKey, dayKey);
+    const span = range(dayKey, datePlus(dayKey, 1));
     void loadDeskPulse(sb, session.access_token, span.p_from, span.p_to).then((next) => { if (alive) setPulse(next); });
     return () => { alive = false; };
   }, [session?.access_token, fullAccess]);
@@ -917,7 +917,7 @@ export function App() {
   {fullAccess && page === 'reports' && <ReportsPage client={sb} money={money} tab={nav.reportTab} onTab={t => go({ reportTab: t })} closeouts={closeouts} renderSplit={({ start, end, profitCents }) => <ProfitSplit start={start} end={end} profitCents={profitCents} sales={allSales} rules={activeRules} cfg={onlineCfg} frozen={frozen} expenses={expenses} personName={personName} money={money} />} expenses={<ExpensesPage client={sb} money={money} expenses={expenses} staff={staff} ownerId={onlineCfg.employeeId || defaultReimbursementId} onChanged={loadCommon} embedded />} payouts={<PayoutsPage allSales={allSales} ebayFees={ebayFees} staff={staff} rules={activeRules} payments={payments} adjustments={payoutAdjustments} expenses={expenses} frozen={frozen} cfg={onlineCfg} personName={personName} busy={busy} recordPayment={recordPayment} onCommissionChanged={setTicketOverride} onReload={() => { void loadPayoutSales(); }} />} />}
   {fullAccess && page === 'withdrawals' && <MoneyPage client={sb} storeId={store} accessToken={session.access_token} money={money} stamp={stamp} />}
   {fullAccess && page === 'books' && <BooksPage client={sb} money={money} />}
-  {fullAccess && page === 'manifests' && <ManifestsPage client={sb} storeId={store} money={money} />}
+  {fullAccess && page === 'manifests' && <ManifestsPage client={sb} storeId={store} money={money} layout="desktop" />}
   {(fullAccess || registerOnly) && page === 'locations' && (
     <LocationsPage
       client={sb}

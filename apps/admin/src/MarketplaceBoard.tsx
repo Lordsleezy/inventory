@@ -671,31 +671,31 @@ export function MarketplaceBoard({ channel, accessToken, money, client, storeId 
   }
 
   const jobActive = job?.status === 'running' || job?.status === 'queued';
-  const feeLabel = meta.fee;
   const showConnect = !connected && tab !== 'sold';
   const accountLine = accounts.length
-    ? accounts.map((a) => `${a.username || 'account'} ${a.error ? 'failed' : a.live_count ?? 0}`).join(' · ')
+    ? accounts.map((a) => (a.error ? `${a.username || 'account'} failed` : (a.username || 'account'))).join(' · ')
     : '';
 
   return (
     <div className="mboard">
       <header className="mboard-head">
         <div>
-          <div className="eyebrow">MARKETPLACE</div>
           <h1>{meta.title}</h1>
-          {accountLine ? <p className="mboard-accounts">{accountLine}{lastSynced ? ` · synced ${stamp(lastSynced, true)}` : ''}</p> : null}
+          <p className="mboard-accounts">{accountLine
+            ? `${accountLine}${lastSynced ? ` · synced ${stamp(lastSynced, true)}` : ''}`
+            : !connected ? 'Not connected' : channel === 'amazon' && !catalogBusy && listed.length === 0 ? 'Connected · no live offers' : ''}</p>
         </div>
         <div className="mboard-head-side">
           <label className="mboard-quarter">
-            <span>Quarter</span>
+            <span className="sr">Quarter</span>
             <select value={quarter} onChange={(e) => { setQuarter(e.target.value); setPage(0); setSelected(new Set()); }}>
-              {quarters.map((q) => <option key={q.id} value={q.id}>{q.label}</option>)}
+              {quarters.map((q) => <option key={q.id} value={q.id}>{q.label.replace(/\s*\([^)]*\)\s*$/, '')}</option>)}
             </select>
           </label>
           <div className="actions">
-            <button type="button" className="secondary" onClick={() => { setError(''); setNotice(''); void loadCatalog({ force: true }); void loadQuarter(quarter); }}>Refresh</button>
-            <button type="button" onClick={() => void openAdd()} disabled={!connected}>Add listing</button>
-            {channel === 'ebay' && <button type="button" className="secondary" onClick={() => void openMigrate()}>Migrate legacy eBay</button>}
+            <button type="button" className="secondary" disabled={!connected} onClick={() => { setError(''); setNotice(''); void loadCatalog({ force: true }); void loadQuarter(quarter); }}>Refresh</button>
+            {channel === 'ebay' && <button type="button" className="secondary" onClick={() => void openMigrate()}>Migrate legacy</button>}
+            <button type="button" className="primary" onClick={() => void openAdd()} disabled={!connected}>Add listing</button>
           </div>
         </div>
       </header>
@@ -703,29 +703,29 @@ export function MarketplaceBoard({ channel, accessToken, money, client, storeId 
       <div className="mboard-stats">
         <article className="mboard-card">
           <span>Gross sales</span>
-          <strong>{!stats ? (quarterBusy ? '…' : money(0)) : money(stats.gross_cents)}</strong>
-          <small>{stats ? `${stats.orders} order${stats.orders === 1 ? '' : 's'} this quarter` : ' '}</small>
+          <strong>{!connected ? '—' : !stats ? (quarterBusy ? '…' : money(0)) : money(stats.gross_cents)}</strong>
+          {connected && <small>{stats ? `${stats.orders} order${stats.orders === 1 ? '' : 's'} this quarter` : ' '}</small>}
         </article>
-        <article className="mboard-card neg">
-          <span>{feeLabel}</span>
-          <strong>{!stats ? (quarterBusy ? '…' : money(0)) : stats.fee_cents ? `−${money(stats.fee_cents)}` : money(0)}</strong>
-          <small>{stats && stats.gross_cents ? `${stats.fee_pct.toFixed(1)}% of gross` : 'marketplace fees'}</small>
+        <article className="mboard-card">
+          <span>Fees</span>
+          <strong>{!connected ? '—' : !stats ? (quarterBusy ? '…' : money(0)) : stats.fee_cents ? `−${money(stats.fee_cents)}` : money(0)}</strong>
+          {connected && <small>{stats && stats.gross_cents ? `${stats.fee_pct.toFixed(1)}% of gross` : 'marketplace fees'}</small>}
         </article>
-        <article className="mboard-card neg">
-          <span>Shipping cost</span>
-          <strong>{!stats ? (quarterBusy ? '…' : money(0)) : stats.ship_cents ? `−${money(stats.ship_cents)}` : money(0)}</strong>
-          <small>labels paid by you</small>
+        <article className="mboard-card">
+          <span>Shipping</span>
+          <strong>{!connected ? '—' : !stats ? (quarterBusy ? '…' : money(0)) : stats.ship_cents ? `−${money(stats.ship_cents)}` : money(0)}</strong>
+          {connected && <small>labels paid by you</small>}
         </article>
-        <article className="mboard-card pos">
+        <article className="mboard-card">
           <span>Profit</span>
-          <strong>{!stats ? (quarterBusy ? '…' : money(0)) : money(stats.profit_cents)}</strong>
-          <small>
+          <strong>{!connected ? '—' : !stats ? (quarterBusy ? '…' : money(0)) : money(stats.profit_cents)}</strong>
+          {connected && <small>
             after fees, shipping & item cost
             {channel === 'ebay' && stats && stats.insertion_cents > 0 ? ` · includes ${money(stats.insertion_cents)} insertion & subscription` : ''}
-          </small>
+          </small>}
         </article>
       </div>
-      {stats && stats.voided_count > 0 && (
+      {connected && stats && stats.voided_count > 0 && (
         <p className="mboard-note">{stats.voided_count} voided this quarter — left out of gross, fees, and profit. Label cost on those sales still counts, same as Reports.</p>
       )}
 
@@ -733,7 +733,7 @@ export function MarketplaceBoard({ channel, accessToken, money, client, storeId 
         <span className="sr">Search</span>
         <input
           value={query}
-          placeholder={channel === 'amazon' ? 'Search all tabs — SKU, title, UPC, ASIN…' : 'Search all tabs — SKU, title, UPC…'}
+          placeholder={channel === 'amazon' ? 'Search SKU, title, UPC, ASIN' : 'Search SKU, title, UPC'}
           onChange={(e) => { setQuery(e.target.value); setPage(0); }}
         />
       </label>
@@ -763,9 +763,9 @@ export function MarketplaceBoard({ channel, accessToken, money, client, storeId 
 
         {showConnect ? (
           <div className="mboard-empty">
-            <strong>Connect TikTok</strong>
-            <p>{connectMessage || 'TikTok Shop is waiting on Partner keys. The page is ready — listings, push, and sales will fill in after you authorize.'}</p>
-            <a className="mboard-connect" href="/?page=marketplaces">Connect TikTok in Marketplaces</a>
+            <strong>{channel === 'tiktok' ? "TikTok Shop isn't connected" : `${meta.title} isn't connected`}</strong>
+            <p>{connectMessage || 'Partner keys are still pending. Numbers and listings show here once it\'s connected.'}</p>
+            <button type="button" className="primary" onClick={() => { window.location.href = '/?page=marketplaces'; }}>Connect</button>
           </div>
         ) : (
           <>
@@ -818,11 +818,12 @@ export function MarketplaceBoard({ channel, accessToken, money, client, storeId 
               <div className="mboard-empty">
                 <strong>{tab === 'listed' ? `No live ${meta.title} listings` : tab === 'not_listed' ? 'Nothing waiting to list' : `No ${meta.title} sales this quarter`}</strong>
                 <p>
-                  {tab === 'listed' && channel === 'amazon' && 'Amazon has no live offers right now. Ready units are on Not listed.'}
+                  {tab === 'listed' && channel === 'amazon' && `${notListed.length.toLocaleString('en-US')} ready units are on Not listed.`}
                   {tab === 'listed' && channel !== 'amazon' && 'Listings show up here as soon as the marketplace reports them live.'}
                   {tab === 'not_listed' && 'Units that are not live here show up here. Push is only available when that marketplace’s required fields are filled.'}
                   {tab === 'sold' && 'Sales for the quarter selected above show up here. Voided sales stay out, same as Reports.'}
                 </p>
+                {tab === 'listed' && channel === 'amazon' && <button type="button" onClick={() => { setTab('not_listed'); setPage(0); }}>View Not listed</button>}
               </div>
             ) : visible.map((row) => {
               const catalog = 'live' in row ? row as CatalogRow : null;
@@ -848,7 +849,9 @@ export function MarketplaceBoard({ channel, accessToken, money, client, storeId 
                   </div>
                   <div className="mboard-price">{row.price_cents != null ? money(row.price_cents) : '—'}</div>
                   <div className="mboard-ship">
-                    {catalog?.live && <span className={`mboard-tag ${catalog.shipping === 'free' ? 'free' : catalog.shipping === 'buyer' ? 'buyer' : 'unknown'}`}>{catalog.shipping === 'free' ? 'Free shipping' : catalog.shipping === 'buyer' ? 'Buyer pays' : 'Shipping unknown'}</span>}
+                    {catalog?.live && (catalog.shipping === 'unknown' || !catalog.shipping
+                      ? <span className="mboard-ship-problem">Shipping unknown</span>
+                      : <span>{catalog.shipping === 'free' ? 'Free shipping' : 'Buyer pays'}</span>)}
                     {sale && <span className="mboard-fees">Fees {money(sale.fee_cents)} · Label {money(sale.label_cents)} · Net {sale.net_cents == null ? '—' : money(sale.net_cents)}</span>}
                   </div>
                   <div className="mboard-actions">

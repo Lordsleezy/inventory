@@ -155,9 +155,9 @@ html.desk:not(.app-mode) button:not(nav button, .account button, .text-button, .
   font-weight: 600;
 }
 html.desk:not(.app-mode) button.primary {
-  background: #fff;
-  color: #000;
-  border-color: #fff;
+  background: #fff !important;
+  color: #000 !important;
+  border-color: #fff !important;
 }
 html.desk:not(.app-mode) input,
 html.desk:not(.app-mode) select,
@@ -384,3 +384,142 @@ html.desk:not(.app-mode) .listing-issues-bar .listing-issues-scroll { grid-colum
   html.desk:not(.app-mode) .desk-attention { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   html.desk:not(.app-mode) .content { padding: 24px 20px 48px; }
 }
+
+html.desk:not(.app-mode) .mobile-top,
+html.desk:not(.app-mode) .mobile-scrim { display: none; }
+html.desk:not(.app-mode) aside { grid-column: 1; grid-row: 1; transform: none; left: auto; }
+html.desk:not(.app-mode) .content { grid-column: 2; grid-row: 1; min-width: 0; }
+html.desk:not(.app-mode) button.desk-drawer-scrim {
+  border: 0 !important; border-radius: 0 !important; min-height: 0 !important; background: #00000088 !important;
+}
+
+html.desk:not(.app-mode) .manifests-desk-head,
+html.desk:not(.app-mode) .books-desk-head,
+html.desk:not(.app-mode) .mboard-head {
+  display: flex; justify-content: space-between; align-items: flex-start; gap: 16px;
+}
+html.desk:not(.app-mode) .manifests-desk-head h1,
+html.desk:not(.app-mode) .books-desk-head h1,
+html.desk:not(.app-mode) .mboard-head h1 { margin: 0; }
+html.desk:not(.app-mode) .manifests-desk-head p,
+html.desk:not(.app-mode) .books-desk-head p,
+html.desk:not(.app-mode) .mboard-accounts { margin: 4px 0 0; color: #a0a0a0; }
+html.desk:not(.app-mode) .manifests-desk-head .actions,
+html.desk:not(.app-mode) .books-desk-actions,
+html.desk:not(.app-mode) .mboard-head-side,
+html.desk:not(.app-mode) .mboard-head .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: flex-end; }
+html.desk:not(.app-mode) .manifests-drop {
+  display: block; margin: 18px 0; padding: 22px; text-align: center; color: #a0a0a0;
+  border: 1px dashed #4a4a4a; border-radius: 10px; cursor: pointer;
+}
+html.desk:not(.app-mode) .manifests-drop span { color: #fff; text-decoration: underline; }
+html.desk:not(.app-mode) .manifests-drop.slim { margin: 0 0 12px; padding: 14px; }
+html.desk:not(.app-mode) .manifests-table th { text-transform: uppercase; letter-spacing: .06em; font-size: 11px; }
+html.desk:not(.app-mode) .manifests-table td.num,
+html.desk:not(.app-mode) .manifests-table th.num { text-align: right; font-variant-numeric: tabular-nums; }
+html.desk:not(.app-mode) .manifests-actions { display: flex; gap: 6px; justify-content: flex-end; white-space: nowrap; }
+html.desk:not(.app-mode) .manifests-actions button {
+  min-height: 28px !important; padding: 2px 10px !important; font-size: 13px;
+}
+html.desk:not(.app-mode) .manifests-drawer h2 { margin: 0 0 12px; }
+html.desk:not(.app-mode) .manifests-drawer-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+html.desk:not(.app-mode) .manifests-form { display: grid; gap: 10px; margin-top: 18px; }
+html.desk:not(.app-mode) .manifests-form label { display: grid; gap: 4px; color: #a0a0a0; font-size: 13px; }
+html.desk:not(.app-mode) .manifests-form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+html.desk:not(.app-mode) .manifests-form-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+html.desk:not(.app-mode) .manifests-metrics { list-style: none; margin: 12px 0; padding: 0; display: grid; gap: 6px; }
+html.desk:not(.app-mode) .manifests-metrics li { display: flex; justify-content: space-between; border-top: 1px solid #2a2a2a; padding-top: 6px; }
+
+html.desk:not(.app-mode) .books-desk-strip,
+html.desk:not(.app-mode) .books-account-strip {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-top: 1px solid #2a2a2a; border-bottom: 1px solid #2a2a2a; margin: 8px 0 16px;
+}
+html.desk:not(.app-mode) .books-desk-strip { grid-template-columns: 1.25fr repeat(6, minmax(0, 1fr)); }
+html.desk:not(.app-mode) .books-desk-strip div,
+html.desk:not(.app-mode) .books-account-strip div { padding: 12px 14px 12px 0; border-right: 1px solid #2a2a2a; }
+html.desk:not(.app-mode) .books-desk-strip div:last-child,
+html.desk:not(.app-mode) .books-account-strip div:last-child { border-right: 0; }
+html.desk:not(.app-mode) .books-desk-strip span,
+html.desk:not(.app-mode) .books-account-strip span {
+  display: block; color: #a0a0a0; font-size: 11px; letter-spacing: .06em; text-transform: uppercase;
+}
+html.desk:not(.app-mode) .books-desk-strip strong,
+html.desk:not(.app-mode) .books-account-strip strong { color: #fff; font-variant-numeric: tabular-nums; font-size: 1.15rem; }
+html.desk:not(.app-mode) .books-desk-strip .lead strong { font-size: 1.7rem; }
+html.desk:not(.app-mode) .books-desk-alert {
+  display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  border: 1px solid #ff453a; border-radius: 8px; padding: 10px 12px; margin: 14px 0;
+}
+html.desk:not(.app-mode) .books-desk-alert strong,
+html.desk:not(.app-mode) .books-desk-alert p { color: #ff453a; margin: 0; }
+html.desk:not(.app-mode) .books-desktop .books-span-switch {
+  display: flex; gap: 0; border: 1px solid #fff; border-radius: 8px; overflow: hidden;
+}
+html.desk:not(.app-mode) .books-desktop .books-span-switch button {
+  border: 0 !important; border-radius: 0 !important; min-height: 32px !important; padding: 0 12px !important;
+  background: transparent !important; color: #fff !important;
+}
+html.desk:not(.app-mode) .books-desktop .books-span-switch button.on { background: #fff !important; color: #000 !important; }
+html.desk:not(.app-mode) .books-desktop-tabs {
+  display: flex; gap: 20px; border-bottom: 1px solid #2a2a2a; margin: 4px 0 14px;
+}
+html.desk:not(.app-mode) .books-desktop-tabs button {
+  border: 0 !important; border-radius: 0 !important; border-bottom: 2px solid transparent !important;
+  background: transparent !important; min-height: 0 !important; padding: 8px 0 !important; color: #a0a0a0 !important;
+}
+html.desk:not(.app-mode) .books-desktop-tabs button.active { color: #fff !important; border-bottom-color: #fff !important; }
+html.desk:not(.app-mode) .books-sales-table th { text-transform: uppercase; letter-spacing: .05em; font-size: 11px; color: #a0a0a0; }
+html.desk:not(.app-mode) .books-sales-table td,
+html.desk:not(.app-mode) .books-sales-table th { padding: 8px 8px; line-height: 1.3; vertical-align: middle; }
+html.desk:not(.app-mode) .books-sales-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+html.desk:not(.app-mode) .books-item { display: grid; }
+html.desk:not(.app-mode) .books-item strong { color: #fff; }
+html.desk:not(.app-mode) .books-channel-chip {
+  display: inline-flex; border: 1px solid #4a4a4a; border-radius: 999px; padding: 1px 8px; color: #fff; font-size: 12px;
+}
+
+html.desk:not(.app-mode) .mboard-quarter {
+  background: transparent !important; border: 1px solid #4a4a4a !important; border-radius: 8px !important; color: #fff;
+}
+html.desk:not(.app-mode) .mboard-quarter select { color: #fff; background: transparent; }
+html.desk:not(.app-mode) .mboard-stats {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0;
+  border-top: 1px solid #2a2a2a; border-bottom: 1px solid #2a2a2a; margin: 4px 0 8px;
+}
+html.desk:not(.app-mode) .mboard-card {
+  background: transparent !important; border: 0 !important; border-radius: 0 !important; box-shadow: none !important;
+  border-right: 1px solid #2a2a2a !important; padding: 12px 16px 12px 0;
+}
+html.desk:not(.app-mode) .mboard-card:last-child { border-right: 0 !important; }
+html.desk:not(.app-mode) .mboard-card span {
+  text-transform: uppercase; letter-spacing: .06em; font-size: 11px; color: #a0a0a0 !important;
+}
+html.desk:not(.app-mode) .mboard-card strong,
+html.desk:not(.app-mode) .mboard-card.neg strong,
+html.desk:not(.app-mode) .mboard-card.pos strong { color: #fff !important; }
+html.desk:not(.app-mode) .mboard-panel { background: transparent !important; border: 0 !important; border-radius: 0 !important; }
+html.desk:not(.app-mode) .mboard-tabs { border-bottom: 1px solid #2a2a2a; gap: 18px; padding: 0; background: transparent; }
+html.desk:not(.app-mode) .mboard-tabs button {
+  border: 0 !important; border-radius: 0 !important; border-bottom: 2px solid transparent !important;
+  background: transparent !important; min-height: 0 !important; padding: 10px 0 !important; color: #a0a0a0 !important;
+}
+html.desk:not(.app-mode) .mboard-tabs button.on { color: #fff !important; border-bottom-color: #fff !important; }
+html.desk:not(.app-mode) .mboard-tabs em { background: transparent !important; color: #a0a0a0 !important; border-radius: 0; padding: 0; }
+html.desk:not(.app-mode) .mboard-search input { max-width: 360px; border-radius: 8px; }
+html.desk:not(.app-mode) .mboard-columns,
+html.desk:not(.app-mode) .mboard-row { border-color: #2a2a2a; }
+html.desk:not(.app-mode) .mboard-item { text-align: left; }
+html.desk:not(.app-mode) .mboard-item strong { color: #fff; }
+html.desk:not(.app-mode) .mboard-price { text-align: right; }
+html.desk:not(.app-mode) .mboard-ship-problem { color: #ff453a; font-weight: 650; }
+html.desk:not(.app-mode) .mboard-actions button,
+html.desk:not(.app-mode) .mboard-push,
+html.desk:not(.app-mode) .mboard-danger {
+  background: transparent !important; color: #fff !important; border: 1px solid #fff !important;
+  min-height: 28px; padding: 2px 10px; font-size: 13px;
+}
+html.desk:not(.app-mode) .mboard-danger { color: #ff453a !important; border-color: #ff453a !important; }
+html.desk:not(.app-mode) .mboard-photo { background: #1a1a1a; border-radius: 6px; }
+html.desk:not(.app-mode) .mboard-progress-bar { background: #2a2a2a; }
+html.desk:not(.app-mode) .mboard-progress-bar span { background: #fff; }
