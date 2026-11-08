@@ -8,7 +8,6 @@ import { ReturnsReportPanel } from './ReturnsReportPanel';
 import { TaxPage } from './TaxPage';
 import { DispositionsPanel } from './DispositionDialogs';
 import { ReceiptsPage } from './ReceiptsPage';
-import './reports.css';
 
 type Props = {
   client: SupabaseClient;

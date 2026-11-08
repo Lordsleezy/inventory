@@ -145,8 +145,11 @@ export function CommissionOverrideControls({
   if (appearance === 'links') {
     return (
       <>
-        <button type="button" disabled={disabled} onClick={() => void apply('flip')}>Flip split</button>
         <button type="button" disabled={disabled} onClick={() => setEditing(open => !open)}>{editing ? 'Close' : 'Commission'}</button>
+        <button type="button" disabled={disabled || frozen} onClick={() => void apply('flip')}>Flip split</button>
+        {current.overridden && !frozen && (
+          <button type="button" disabled={disabled} onClick={() => void apply('reset')}>Reset to default</button>
+        )}
         {editing && (
           <form className="rpt-pay" onSubmit={e => {
             e.preventDefault();

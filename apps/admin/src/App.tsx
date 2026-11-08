@@ -765,7 +765,7 @@ export function App() {
           />
         ) : null}
         onReportsOpen={() => { setReportsLoading(true); void Promise.all([loadCommon(), loadPayments(), loadPayoutSales(), loadSales()]).finally(() => setReportsLoading(false)); }}
-        reportsAction={nav.reportTab === 'expenses' ? 'add' : nav.reportTab === 'daily' || nav.reportTab === 'sales-tax' ? 'download' : nav.reportTab === 'payouts' ? 'owner' : undefined}
+        reportsAction={nav.reportTab === 'expenses' ? 'add' : nav.reportTab === 'daily' || nav.reportTab === 'sales-tax' ? 'download' : undefined}
         onReportsAction={() => { if (nav.reportTab === 'daily') { if (reports.length) void downloadReports(reports, true); } else window.dispatchEvent(new Event('floor:reports-action')); }}
       />
     </>;
@@ -1239,7 +1239,7 @@ function PayoutsPage({allSales,ebayFees,staff,rules,payments,adjustments,expense
     const assignedExpenses = expenses.filter(e => !e.voided_at && e.employee_id === person.user_id);
     const bonusEntries: LedgerEntry[] = assignedExpenses.filter(e => isBonusCategory(e.category)).map(e => ({
       at: `${e.spent_on}T12:00:00`, kind: 'bonus' as const, amount: e.amount_cents,
-      detail: e.description, note: 'Bonus · commission',
+      detail: e.description, note: 'Added to commission',
     }));
     const reimburseEntries: LedgerEntry[] = assignedExpenses.filter(e => e.needs_reimbursement && !isBonusCategory(e.category)).map(e => ({
       at: `${e.spent_on}T12:00:00`, kind: 'reimbursement' as const, amount: e.amount_cents,
@@ -1330,7 +1330,10 @@ function PayoutsPage({allSales,ebayFees,staff,rules,payments,adjustments,expense
         : <div className="native-report-group">{ownerSummary.weeks.map(w => <div className="native-report-row" key={w.weekStart}><span>{weekLabel(w.weekStart, w.weekEnd)}<small>{w.saleCount} sale{w.saleCount === 1 ? '' : 's'}{w.pendingCost ? ` · ${w.pendingCost} need cost` : ''}{w.commissionCents ? ` · commissions ${money(w.commissionCents)}` : ''}</small></span><b>{w.ownerCents == null ? 'Pending' : money(w.ownerCents)}</b></div>)}</div>}
     </div>;
   }
-  if (native) return <NativePayouts money={money} loading={loading} owedLabel={money(commissionBalanceOwed + reimburseBalanceOwed)} paidLine={`Paid so far: ${money(paidSplit.commissionPaid)} commission · ${money(paidSplit.reimbursePaid)} reimbursements`} cards={owedSplits} rules={rules} cfg={cfg} personName={personName} frozen={frozen} busy={busy} recordPayment={recordPayment} onCommissionChanged={onCommissionChanged} client={sb} onReload={onReload || (() => {})} />;
+  const paidLine = paidSplit.reimbursePaid
+    ? `Paid so far: ${money(paidSplit.commissionPaid)} commission · ${money(paidSplit.reimbursePaid)} reimbursements`
+    : `Paid so far: ${money(paidSplit.commissionPaid)} commission`;
+  if (native) return <NativePayouts money={money} loading={loading} owedLabel={money(commissionBalanceOwed + reimburseBalanceOwed)} paidLine={paidLine} cards={owedSplits} rules={rules} cfg={cfg} personName={personName} frozen={frozen} busy={busy} recordPayment={recordPayment} onCommissionChanged={onCommissionChanged} client={sb} onReload={onReload || (() => {})} />;
   return <>
     <header><div><div className="eyebrow">TEAM EARNINGS</div><h1>Payouts</h1><p>Store profit is sale price + buyer-paid shipping − every fee − shipping label − cost. Commissions are paid on commission profit: {cfg.absorbFees ? 'the store absorbs channel and card fees, so only the shipping label and cost come off' : 'channel fees, card fees, label and cost all come off'}. Mercari out-of-pocket labels count on the sale like other shipping costs; reimbursement is separate on Expenses. Commissions are frozen per sale. Each payment covers reimbursements outstanding that day, then commission — check “Apply to commission” to skip reimbursements. Later reimbursements stay unpaid. Return adjustments stay separate; payment history is never rewritten.</p></div></header>
     <div className="stats payout-stats">

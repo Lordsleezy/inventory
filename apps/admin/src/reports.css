@@ -15,16 +15,19 @@
   padding: 8px 0;
   border: 0;
   border-bottom: 1px solid #2a2a2a;
+  border-radius: 0;
   background: transparent;
   color: #fff;
   text-align: left;
   font: inherit;
+  font-weight: 400;
   box-sizing: border-box;
 }
 .rpt-row small, .rpt-line small, .rpt-sub { display: block; color: #9a9a9a; font-size: 13px; font-weight: 400; margin-top: 2px; }
 .rpt-row b, .rpt-line b { font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .rpt-row .deduct, .rpt-line .deduct { color: #fff; font-weight: 500; }
 .rpt-need { color: #FF453A; font-weight: 700; white-space: nowrap; }
+.rpt-override { color: #fff; font-weight: 700; }
 .rpt-section { margin: 22px 0 6px; color: #9a9a9a; font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
 .rpt-note { color: #9a9a9a; font-size: 13px; margin: 8px 0 0; }
 .rpt-bar { height: 3px; margin: -4px 0 8px; background: #2a2a2a; }
@@ -34,53 +37,116 @@
 
 .rpt-person { padding: 14px 0; border-bottom: 1px solid #2a2a2a; }
 .rpt-person-top { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: start; }
-.rpt-person-top strong { font-size: 17px; }
-.rpt-person-top b { font-size: 22px; font-variant-numeric: tabular-nums; }
-.rpt-person-top small, .rpt-owed { color: #9a9a9a; font-size: 12px; letter-spacing: .04em; }
-.rpt-pay { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) auto; gap: 8px; margin-top: 10px; }
+.rpt-person-top > span { display: grid; gap: 2px; min-width: 0; }
+.rpt-person-top > span:last-child { justify-items: end; text-align: right; }
+.rpt-person-top strong { display: block; font-size: 17px; font-weight: 700; color: #fff; }
+.rpt-person-top b { display: block; font-size: 22px; font-variant-numeric: tabular-nums; font-weight: 700; color: #fff; }
+.rpt-person-top small, .rpt-owed {
+  display: block;
+  color: #9a9a9a;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: .04em;
+}
+.rpt-owed { text-transform: uppercase; }
+.rpt-pay {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 7.25rem) auto;
+  gap: 6px;
+  margin-top: 10px;
+  min-width: 0;
+  align-items: stretch;
+}
 .rpt-pay input, .rpt-note-field {
-  width: 100%; min-width: 0; box-sizing: border-box; min-height: 44px;
-  background: transparent; color: #fff; border: 1px solid #4a4a4a; border-radius: 8px; padding: 8px 10px; font-size: 16px;
+  width: 100%; min-width: 0; box-sizing: border-box; min-height: 40px;
+  background: #000; color: #fff; border: 1px solid #4a4a4a; border-radius: 6px; padding: 6px 8px; font-size: 16px;
+}
+.rpt-pay input[type="date"] { padding-left: 6px; padding-right: 2px; font-size: 13px; }
+.rpt-pay input[type="date"]::-webkit-calendar-picker-indicator {
+  margin: 0; padding: 0; width: 14px; height: 14px; cursor: pointer; opacity: .7;
 }
 .rpt-pay button {
-  min-height: 44px; padding: 0 16px; border-radius: 8px; border: 1px solid #fff;
-  background: transparent; color: #fff; font-weight: 700;
+  min-height: 40px; min-width: 48px; padding: 0 12px; border-radius: 6px; border: 1px solid #fff;
+  background: transparent; color: #fff; font-weight: 700; font-size: 14px;
 }
+.rpt-note-field { display: block; margin-top: 8px; }
 .rpt-break-link {
   display: flex; justify-content: space-between; align-items: center; width: 100%;
-  margin-top: 10px; padding: 8px 0 0; border: 0; background: none; color: #fff; font: inherit; text-align: left;
+  margin-top: 10px; padding: 8px 0 0; border: 0; border-radius: 0; background: none; color: #fff;
+  font: inherit; font-weight: 400; text-align: left; min-height: 0;
 }
-.rpt-filters { display: flex; gap: 14px; overflow-x: auto; padding: 4px 0 8px; }
-.rpt-filters button { border: 0; background: none; color: #9a9a9a; font-size: 15px; padding: 6px 0; white-space: nowrap; }
+.rpt-break-link > span { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.rpt-break-link .native-chevron { color: #666; flex: none; }
+.rpt-filters {
+  display: flex; gap: 14px; overflow-x: auto; padding: 10px 0 8px; margin: 4px 0 0;
+  scrollbar-width: none; -webkit-overflow-scrolling: touch;
+}
+.rpt-filters::-webkit-scrollbar { display: none; }
+.rpt-filters button {
+  border: 0; border-radius: 0; background: none; color: #9a9a9a; font-size: 15px; font-weight: 500;
+  padding: 6px 0; white-space: nowrap; min-height: 0; box-shadow: none;
+}
 .rpt-filters button.on { color: #fff; font-weight: 700; box-shadow: inset 0 -2px 0 #fff; }
-.rpt-filters button.rpt-need, .rpt-filters button.rpt-need.on { color: #FF453A; box-shadow: inset 0 -2px 0 #FF453A; }
-.rpt-day { margin: 16px 0 4px; color: #9a9a9a; font-size: 12px; font-weight: 700; letter-spacing: .04em; }
+.rpt-filters button.rpt-need { color: #FF453A; }
+.rpt-filters button.rpt-need.on { color: #FF453A; box-shadow: inset 0 -2px 0 #FF453A; }
+.rpt-day { margin: 16px 0 4px; color: #9a9a9a; font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
 .rpt-open { padding: 0 0 10px; border-bottom: 1px solid #2a2a2a; }
 .rpt-open p { margin: 0 0 6px; color: #9a9a9a; font-size: 13px; }
 .rpt-links { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; }
 .rpt-links form { flex: 1 0 100%; }
 .rpt-links > button, .rpt-undo {
-  border: 0; background: none; color: #fff; text-decoration: underline; text-underline-offset: 3px;
-  padding: 0; font-size: 13px; white-space: nowrap;
+  border: 0; border-radius: 0; background: none; color: #fff; text-decoration: underline; text-underline-offset: 3px;
+  padding: 0; font-size: 13px; font-weight: 400; white-space: nowrap; min-height: 0;
 }
 .rpt-side { display: grid; justify-items: end; gap: 2px; }
 .rpt-give-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 18px; }
 .rpt-give-head strong { font-size: 13px; letter-spacing: .04em; }
 .rpt-give-head label { display: flex; align-items: center; gap: 6px; color: #9a9a9a; font-size: 13px; }
 .rpt-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rpt-owner-link {
+  display: inline-block; margin-top: 10px; border: 0; background: none; color: #9a9a9a;
+  font: inherit; font-size: 13px; text-decoration: underline; text-underline-offset: 3px; padding: 0;
+}
+.rpt-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  overflow-y: auto;
+  background: #000;
+  padding: 0 12px calc(64px + env(safe-area-inset-bottom, 0px));
+  box-sizing: border-box;
+}
+.rpt-sheet .app-nav { margin: 0 -12px 8px; }
+.rpt-sheet .native-report-hero { padding-left: 0; padding-right: 0; }
+.rpt-more { display: block; width: 100%; margin: 16px 0 8px; border: 0; background: none; color: #9a9a9a; font: inherit; text-align: center; }
 
 html.app-mode .app-reports .inventory-tabs.report-tabs { overflow-x: hidden; gap: 0; padding-left: 8px; padding-right: 8px; }
 html.app-mode .app-reports .inventory-tabs.report-tabs button {
   flex: 1 1 0; min-width: 0; background: transparent !important; color: #9a9a9a !important;
-  border-radius: 0 !important; border-bottom: 2px solid transparent !important;
+  border-radius: 0 !important; border: 0 !important; border-bottom: 2px solid transparent !important;
   padding: 8px 2px !important; font-size: 13px; min-height: 36px;
 }
 html.app-mode .app-reports .inventory-tabs.report-tabs button.active {
   background: transparent !important; color: #fff !important; border-bottom-color: #fff !important;
 }
 html.app-mode .app-reports .native-report-group { background: transparent; border-radius: 0; }
-html.app-mode .app-reports .native-report-row { border-bottom-color: #2a2a2a; }
+html.app-mode .app-reports .native-report-row { border-bottom-color: #2a2a2a; border-radius: 0; }
 html.app-mode .app-reports .native-report-row .minus { color: #fff; }
 html.app-mode .app-reports .native-payout-card { background: transparent; border-radius: 0; margin: 0; }
 html.app-mode .app-reports .native-channel-dot { background: #fff; }
 html.app-mode .app-reports .commission-override { border: 0; background: transparent; padding: 8px 0 0; margin: 0; }
+html.app-mode .app-reports .native-report-form,
+html.app-mode .app-reports .native-report-detail,
+html.app-mode .app-reports .native-report-expand {
+  background: transparent; border-radius: 0; padding: 8px 0; margin: 0;
+}
+html.app-mode .app-reports .native-report-warning {
+  border-radius: 0; background: transparent; color: #FF453A; border: 0; padding: 8px 0;
+}
+
+@media (max-width: 370px) {
+  .rpt-pay { grid-template-columns: minmax(0, 1fr) minmax(0, 6.5rem) auto; gap: 4px; }
+  .rpt-pay button { min-width: 44px; padding: 0 10px; }
+  .rpt-filters { gap: 10px; }
+  .rpt-filters button { font-size: 13px; }
+}
