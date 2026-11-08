@@ -1,6 +1,6 @@
 -- New-receive photo and dimension rules. Defective and do-not-list waive both.
 begin;
-select plan(4);
+select plan(6);
 
 select throws_ok(
   $$select public.receive_require_new_item('{}'::jsonb, '{}'::text[], '{}'::jsonb)$$,
@@ -26,6 +26,16 @@ select lives_ok(
   $$select public.receive_require_new_item(
       '{"p_condition":"Defective/non-sellable"}'::jsonb, '{}'::text[], '{}'::jsonb)$$,
   'defective condition waives the photo and the dimensions'
+);
+
+select lives_ok(
+  $$select public.receive_require_new_item('{}'::jsonb, '{}'::text[], '{"defective":"true"}'::jsonb)$$,
+  'the defective flag waives the photo and the dimensions'
+);
+
+select lives_ok(
+  $$select public.receive_require_new_item('{}'::jsonb, '{}'::text[], '{"do_not_list":"true"}'::jsonb)$$,
+  'do not list waives the photo and the dimensions'
 );
 
 select * from finish();

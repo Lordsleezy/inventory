@@ -1324,9 +1324,9 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     const receiveStarted = performance.now();
     try {
       const quantity = Number(form.quantity);
-      if (!doNotList && !files.length && !acceptedStockPhotoPath) throw new Error('Add a photo before saving.');
+      if (!mediaWaived && !files.length && !stagedPhotoPaths.length) throw new Error('Add a photo you took or chose before saving. A stock photo does not count.');
+      if (files.length && !stagedPhotoPaths.length) throw new Error('The unit photo did not finish uploading. Retry the photo.');
       const unitPhotoPaths = [...(acceptedStockPhotoPath ? [acceptedStockPhotoPath] : []), ...stagedPhotoPaths];
-      if (!doNotList && !unitPhotoPaths.length) throw new Error('The unit photo did not finish uploading. Retry the photo.');
       const holdLabel = hold ? (HOLD_REASONS.find(([k]) => k === hold.reason)?.[1] || hold.reason) : '';
       const notes = [
         isDefectiveCondition(form.condition) ? `Defective/non-sellable: ${form.conditionNote.trim()}` : '',
