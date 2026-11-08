@@ -36,8 +36,7 @@ test("saves the real eBay balance, and says Square is not connected without thro
   const r = await syncMoneyBalances(x.d, { now: Date.parse("2026-10-28T00:00:00Z") });
   assert.equal(x.saved.ebay.balance_cents, 1000);
   assert.equal(x.saved.ebay.status, "ok");
-  assert.equal(x.saved.ebay_pgg124_5.balance_cents, 49600);
-  assert.equal(x.saved.ebay_pgg124_5.status, "ok");
+  assert.equal(x.saved.ebay_pgg124_5, undefined);
   assert.equal(x.saved.square.status, "not_connected");
   assert.equal(r.square.status, "not_connected");
 });

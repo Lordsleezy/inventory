@@ -1776,6 +1776,16 @@ export async function pollAllStores() {
   for (const [storeId, rows] of byStore) {
     const accountResults = [];
     for (const row of rows) {
+      if (!ebayAccountFeedsFloorOrders(row)) {
+        accountResults.push({
+          accountId: row.id,
+          username: row.username,
+          role: row.role,
+          skipped: true,
+          reason: "personal_account_unlinked",
+        });
+        continue;
+      }
       try {
         const hint = row.id ? { accountId: row.id } : {};
         accountResults.push({

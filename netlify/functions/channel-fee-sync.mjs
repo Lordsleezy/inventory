@@ -73,15 +73,15 @@ async function syncEbayFeesForAccount(sb, storeId, account, log) {
     log.push({ ebay: "reconnect_required_for_finances_scope", username: account.username, accountId: account.id });
     return;
   }
+  if (!ebayAccountFeedsFloorOrders(account)) {
+    log.push({ ebay: "personal_account_unlinked", username: account.username });
+    return;
+  }
+
   const since = new Date(Date.now() - LOOKBACK_DAYS * 86400000).toISOString();
   const hint = account.id ? { accountId: account.id } : {};
 
   await saveEbayTransactionLedger(sb, storeId, account, since, hint);
-
-  if (!ebayAccountFeedsFloorOrders(account)) {
-    log.push({ ebay: "personal_account_not_applied_to_floor", username: account.username });
-    return;
-  }
 
   for await (const tx of ebayTransactions(storeId, "SALE", since, hint)) {
     const orderId = tx.orderId;
