@@ -124,7 +124,10 @@ export function ReturnsSimplified({ client, storeId: _storeId, money, stamp, var
     setSelected((cur) => (cur ? next.find((r) => r.id === cur.id) || cur : null));
   }, [client, query, seg]);
 
-  useVisibleInterval(load, 60_000);
+  // Tab / search changes must refetch immediately. useVisibleInterval only
+  // polls on an interval and does not re-run when `load` deps change.
+  useEffect(() => { void load(); }, [load]);
+  useVisibleInterval(load, 60_000, true, false);
 
   const loadTracking = useCallback(async (returnId: string) => {
     try {
