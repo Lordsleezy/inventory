@@ -541,6 +541,7 @@ function InventoryBody({ money, inventory, native }: { money: (c: number) => str
           <div className="native-report-row"><span>Start cost{v.start_source === 'snapshot' ? '' : ' (estimated)'}</span><b>{money(Number(v.start_cost_cents || 0))}</b></div>
           {v.start_note && <p className="books-proof-audit">{v.start_note}</p>}
           {o?.listed_once && <div className="native-report-row"><span>Listed somewhere (counted once)</span><b>{o.listed_once.units} · {money(Number(o.listed_once.cost_cents || 0))}</b></div>}
+          <div className="native-report-row"><span>Defective items on hand</span><b>{o?.defective_shelf?.units ?? 0} · {money(Number(o?.defective_shelf?.cost_cents || 0))}</b></div>
         </div>
       )}
       {(o?.categories || []).length > 0 && (
