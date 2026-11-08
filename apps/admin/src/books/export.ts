@@ -210,7 +210,8 @@ export async function buildBooksExcel(period: Period, wb: BooksWorkbook, label: 
     ['Returned to stock', inv.return_to_stock_units ?? 0, ''],
     ['Given away', inv.giveaway_units, ''],
     ['Sent as replacements', inv.replacement_units, ''],
-    ['Moved to Defective', inv.defective_units, ''],
+    ['Moved to Defective', inv.defective_units, 'Units pulled into defective this month'],
+    ['Defective items on hand', inv.owner?.defective_shelf?.units ?? 0, 'Same count as Inventory → Defective'],
     ['Units in stock at end of month', inv.end_unit_count, inv.end_source === 'snapshot' ? 'Month snapshot' : 'Estimated: current on-hand count, because this month is not closed'],
   ];
   const hI = wsI.rowCount + 1;
