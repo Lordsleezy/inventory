@@ -16,6 +16,7 @@ type Report = {
   refunds: { channel: string; count: number; sales_cents: number; profit_reversed_cents: number }[];
   expenses: { category: string; cents: number }[];
   expense_cents: number; label_expense_cents: number;
+  return_label_expense_cents?: number;
   ebay_overhead_cents?: number;
 };
 type DetailRow = {
@@ -24,7 +25,7 @@ type DetailRow = {
   order_no: string | null; amount_cents: number; detail: string | null;
   reason: string | null; source: string | null;
 };
-type MetricKey = 'gross' | 'fees' | 'ship' | 'processing' | 'cost' | 'profit' | 'expenses' | 'tax_collected' | 'refunds';
+type MetricKey = 'gross' | 'fees' | 'ship' | 'processing' | 'cost' | 'profit' | 'expenses' | 'label_expenses' | 'tax_collected' | 'refunds';
 
 const METRIC_LABELS: Record<MetricKey, string> = {
   gross: 'Gross sales',
@@ -34,6 +35,7 @@ const METRIC_LABELS: Record<MetricKey, string> = {
   cost: 'Item cost',
   profit: 'Profit',
   expenses: 'Expenses',
+  label_expenses: 'Labels & return labels',
   tax_collected: 'Sales tax collected',
   refunds: 'Refunded',
 };
@@ -195,7 +197,7 @@ export function ChannelReportPage({ client, money, embedded, mode = 'full', nati
         {row('Gross sales', totals.gross, 'gross')}{row('Channel fees', totals.fees, 'fees', 'minus')}{row('Labels & shipping', totals.ship, 'ship', 'minus')}{row('Card processing', totals.proc, 'processing', 'minus')}{row('Sales tax collected', totals.taxCollected, 'tax_collected', 'minus', false, 'Pass-through, including marketplace-remitted tax')}{row('Item cost', totals.cost, 'cost', 'minus')}
         {gap !== 0 && <div className="rpt-line"><span>{gapLabel}<small>{gapLabel === 'eBay insertion & subscription' ? 'Taken out of the headline. Not part of Channel fees.' : overhead > 0 ? `eBay insertion and subscription this period is ${money(overhead)}. This line is the rest of the difference.` : 'Included in the headline and missing from the rows above.'}</small></span><b className="deduct">{gap < 0 ? '+' : '−'}{money(Math.abs(gap))}</b></div>}
       </div>{renderSplit && renderSplit({ start, end, profitCents: totals.profit })}<p className="native-report-footnote">Gross includes item price, buyer-paid shipping and tax. Tax is removed before profit. The headline is those rows minus the line under item cost, when that line is showing.</p><h3 className="native-report-section">By channel</h3><div className="native-report-group">{channels.map(c => <button type="button" className="native-report-row" key={c.channel} onClick={() => { setChannel(c.channel); setDrill('profit'); }}><span><i className={`native-channel-dot channel-${c.channel.toLowerCase()}`} />{c.channel}<small>{c.channel === 'ebay' && ebayOverhead > 0 ? `Includes ${money(ebayOverhead)} insertion/subscription` : `${c.sales_count} sales`}</small></span><b>{money(c.profit_cents)}</b><span className="native-chevron">›</span></button>)}</div></>}
-      {report && mode === 'fees' && <><h3 className="native-report-section">Shipping</h3><div className="native-report-group">{row('Labels bought', totals.ship, 'ship', 'minus')}{buyerShipping !== null && <div className="native-report-row"><span>{totals.unmatched ? 'Buyer shipping · linked sales' : 'Shipping paid by buyers'}</span><b className="plus">+{money(buyerShipping)}</b></div>}{buyerShipping !== null && totals.unmatched === 0 && <div className="native-report-row strong"><span>Shipping net</span><b className={buyerShipping >= totals.ship ? 'plus' : 'minus'}>{buyerShipping >= totals.ship ? '+' : '−'}{money(Math.abs(buyerShipping - totals.ship))}</b></div>}</div>{totals.unmatched > 0 && <p className="native-report-footnote">Shipping paid by buyers excludes {totals.unmatched} unmatched order{totals.unmatched === 1 ? '' : 's'}. A net figure would mix different sets of sales.</p>}{buyerShippingError && <p className="native-report-footnote">Buyer-paid shipping is unavailable from sale rows for this period.</p>}<h3 className="native-report-section">Channel fees</h3><div className="native-report-group">{channels.filter(c => c.fee_cents).map(c => <button type="button" className="native-report-row" key={c.channel} onClick={() => { setChannel(c.channel); setDrill('fees'); }}><span><i className={`native-channel-dot channel-${c.channel.toLowerCase()}`} />{c.channel}{c.channel === 'ebay' && ebayOverhead > 0 && <small>Includes {money(ebayOverhead)} insertion/subscription</small>}</span><b>{money(c.fee_cents)}</b><span className="native-chevron">›</span></button>)}</div><h3 className="native-report-section">Card processing</h3><div className="native-report-group">{row('Square', totals.proc, 'processing', 'minus')}</div></>}
+      {report && mode === 'fees' && <><h3 className="native-report-section">Shipping</h3><div className="native-report-group">{row('Labels bought', totals.ship, 'ship', 'minus')}{(report.return_label_expense_cents || 0) > 0 && row('Return labels · marketplace balance', report.return_label_expense_cents || 0, 'label_expenses', 'minus')}{buyerShipping !== null && <div className="native-report-row"><span>{totals.unmatched ? 'Buyer shipping · linked sales' : 'Shipping paid by buyers'}</span><b className="plus">+{money(buyerShipping)}</b></div>}{buyerShipping !== null && totals.unmatched === 0 && <div className="native-report-row strong"><span>Shipping net</span><b className={buyerShipping >= totals.ship ? 'plus' : 'minus'}>{buyerShipping >= totals.ship ? '+' : '−'}{money(Math.abs(buyerShipping - totals.ship))}</b></div>}</div>{totals.unmatched > 0 && <p className="native-report-footnote">Shipping paid by buyers excludes {totals.unmatched} unmatched order{totals.unmatched === 1 ? '' : 's'}. A net figure would mix different sets of sales.</p>}{buyerShippingError && <p className="native-report-footnote">Buyer-paid shipping is unavailable from sale rows for this period.</p>}<p className="native-report-footnote">Return labels paid from eBay/Depop balance are Fees, not Expenses or reimbursements.</p><h3 className="native-report-section">Channel fees</h3><div className="native-report-group">{channels.filter(c => c.fee_cents).map(c => <button type="button" className="native-report-row" key={c.channel} onClick={() => { setChannel(c.channel); setDrill('fees'); }}><span><i className={`native-channel-dot channel-${c.channel.toLowerCase()}`} />{c.channel}{c.channel === 'ebay' && ebayOverhead > 0 && <small>Includes {money(ebayOverhead)} insertion/subscription</small>}</span><b>{money(c.fee_cents)}</b><span className="native-chevron">›</span></button>)}</div><h3 className="native-report-section">Card processing</h3><div className="native-report-group">{row('Square', totals.proc, 'processing', 'minus')}</div></>}
       {drill && <section className="native-report-detail"><button type="button" onClick={() => { setDrill(null); setChannel('all'); }}>‹ Back to report</button><h2>{METRIC_LABELS[drill]}</h2>{detailError && <p role="alert">{detailError}</p>}{detailBusy ? <div className="native-skeleton" /> : detailRows.length ? detailRows.map((r, i) => <div className="native-report-row" key={`${r.id}-${i}`}><span>{r.title || r.sku || r.channel}<small>{r.at ? stamp(r.at) : ''} · {r.detail || r.reason || ''}</small></span><b>{money(r.amount_cents || 0)}</b></div>) : <p>No rows in this range.</p>}</section>}
     </div>;
   }
@@ -221,7 +223,7 @@ export function ChannelReportPage({ client, money, embedded, mode = 'full', nati
           <Stat name="Profit" value={money(totals.profit)} onClick={() => setDrill('profit')} active={drill === 'profit'} />
         </>}
         {mode === 'full' && refundTotal > 0 && <Stat name="Refunded" value={money(refundTotal)} onClick={() => setDrill('refunds')} active={drill === 'refunds'} />}
-        {mode === 'fees' && channel === 'all' && report.label_expense_cents > 0 && <Stat name="Label expenses (ledger)" value={money(report.label_expense_cents)} onClick={() => setDrill('expenses')} active={drill === 'expenses'} />}
+        {mode === 'fees' && channel === 'all' && report.label_expense_cents > 0 && <Stat name="Label expenses (ledger)" value={money(report.label_expense_cents)} onClick={() => setDrill('label_expenses')} active={drill === 'label_expenses'} note={(report.return_label_expense_cents || 0) > 0 ? `includes ${money(report.return_label_expense_cents || 0)} return labels` : undefined} />}
       </div>
       {mode === 'full' && (() => {
         const gap = profitHeadlineGap({ gross: totals.gross, fees: totals.fees, ship: totals.ship, processing: totals.proc, tax: totals.taxCollected, cost: totals.cost, profit: totals.profit });

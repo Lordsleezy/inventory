@@ -1158,7 +1158,12 @@ function PayoutsPage({allSales,ebayFees,staff,rules,payments,adjustments,expense
       at: `${e.spent_on}T12:00:00`, kind: 'bonus' as const, amount: e.amount_cents,
       detail: e.description, note: 'Added to commission',
     }));
-    const reimburseEntries: LedgerEntry[] = assignedExpenses.filter(e => e.needs_reimbursement && !isBonusCategory(e.category)).map(e => ({
+    const reimburseEntries: LedgerEntry[] = assignedExpenses.filter(e =>
+      e.needs_reimbursement
+      && !isBonusCategory(e.category)
+      && e.source !== 'return'
+      && e.source !== 'ebay'
+    ).map(e => ({
       at: `${e.spent_on}T12:00:00`, kind: 'reimbursement' as const, amount: e.amount_cents,
       detail: e.description, note: e.category || undefined,
     }));

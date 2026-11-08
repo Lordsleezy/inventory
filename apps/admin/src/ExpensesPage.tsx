@@ -6,7 +6,9 @@ import { rangeLabel, ReportsRange } from './ReportsRange';
 
 export type Expense = {
   id: string; spent_on: string; description: string; category: string; amount_cents: number;
-  needs_reimbursement: boolean; employee_id: string | null; source: 'manual' | 'label' | 'giveaway'; order_id: string | null; voided_at: string | null;
+  needs_reimbursement: boolean; employee_id: string | null;
+  source: 'manual' | 'label' | 'manual_label' | 'ebay' | 'return' | 'giveaway' | string;
+  order_id: string | null; voided_at: string | null;
 };
 type Person = { user_id: string; display_name: string; kind: string };
 type Props = { client: SupabaseClient; money: (n: number) => string; expenses: Expense[]; staff: Person[]; ownerId: string; onChanged: () => Promise<void>; embedded?: boolean; native?: boolean };
@@ -33,8 +35,12 @@ export function ExpensesPage({ client, money, expenses, staff, ownerId, onChange
   const name = (id: string | null) => staff.find(p => p.user_id === id)?.display_name || '';
   const month = todayLA().slice(0, 7);
   const live = useMemo(() => expenses.filter(e => !e.voided_at), [expenses]);
-  const monthTotal = live.filter(e => e.spent_on.startsWith(month)).reduce((n, e) => n + e.amount_cents, 0);
-  const owed = live.filter(e => e.needs_reimbursement && !isBonusCategory(e.category)).reduce((n, e) => n + e.amount_cents, 0);
+  const storeSpend = useMemo(
+    () => live.filter(e => !['label', 'manual_label', 'ebay', 'return'].includes(String(e.source || ''))),
+    [live],
+  );
+  const monthTotal = storeSpend.filter(e => e.spent_on.startsWith(month)).reduce((n, e) => n + e.amount_cents, 0);
+  const owed = live.filter(e => e.needs_reimbursement && !isBonusCategory(e.category) && e.source !== 'return' && e.source !== 'ebay').reduce((n, e) => n + e.amount_cents, 0);
   const now = todayLA();
   const week = new Date(); week.setDate(week.getDate() - ((week.getDay() + 6) % 7));
   const start = range === 'custom' ? customStart : range === 'day' ? now : range === 'week' ? week.toLocaleDateString('en-CA', { timeZone: zone }) : range === 'month' ? `${month}-01` : '2020-01-01';
@@ -85,13 +91,13 @@ export function ExpensesPage({ client, money, expenses, staff, ownerId, onChange
   }
 
   if (native) {
-    const shown = live.filter(e => e.spent_on >= start && e.spent_on <= end && !['label','manual_label','ebay'].includes(e.source));
+    const shown = live.filter(e => e.spent_on >= start && e.spent_on <= end && !['label','manual_label','ebay','return'].includes(e.source));
     const total = summary?.expense_cents ?? shown.reduce((n, e) => n + e.amount_cents, 0);
     const categories = summary?.expenses?.map(e => [e.category || 'Other', e.cents] as [string,number]) || Array.from(shown.reduce((m, e) => m.set(e.category || 'Other', (m.get(e.category || 'Other') || 0) + e.amount_cents), new Map<string, number>()));
     return <div className="native-report-body">
       <ReportsRange range={range} label={rangeLabel(start, new Date(new Date(`${end}T12:00:00Z`).getTime() + 86400000).toISOString().slice(0, 10))} onPick={setRange} />
       <button type="button" className="native-report-period" onClick={() => setShowDates(v => !v)} aria-expanded={showDates}>Custom dates</button>{showDates && <div className="native-report-dates"><label>From<input type="date" value={customStart} onChange={e => { setRange('custom'); setCustomStart(e.target.value); }} /></label><label>To<input type="date" value={customEnd} onChange={e => { setRange('custom'); setCustomEnd(e.target.value); }} /></label></div>}
-      <div className="native-report-hero"><small>Expenses · {range === 'all' ? 'All time' : range === 'month' ? month : range === 'week' ? 'This week' : 'Today'}</small><strong>{summary || summaryError ? money(total) : <span className="native-skeleton" />}</strong><span>{summaryError ? 'Showing loaded expenses only' : 'Excludes labels already in Shipping & fees'}</span></div>
+      <div className="native-report-hero"><small>Expenses · {range === 'all' ? 'All time' : range === 'month' ? month : range === 'week' ? 'This week' : 'Today'}</small><strong>{summary || summaryError ? money(total) : <span className="native-skeleton" />}</strong><span>{summaryError ? 'Showing loaded expenses only' : 'Excludes labels & marketplace return labels (see Fees)'}</span></div>
       {showForm && <section className="native-report-form"><div className="native-report-form-head"><h2>{editing ? 'Edit expense' : 'Add expense'}</h2><button type="button" onClick={() => setShowForm(false)}>Close</button></div><form onSubmit={e => void submit(e)}><label>What<input autoFocus value={f.what} onChange={e => setF({...f,what:e.target.value})} /></label><label>Amount ($)<input inputMode="decimal" value={f.amount} onChange={e => { if (entry.test(e.target.value)) setF({...f,amount:e.target.value}); }} /></label><label>Date<input type="date" value={f.date} onChange={e => setF({...f,date:e.target.value})} /></label><label>Category<select value={f.category} onChange={e => setF({...f,category:e.target.value})}>{CATEGORIES.map(c=><option key={c}>{c}</option>)}</select></label>{isBonusCategory(f.category) ? <label>Pay bonus to<select value={f.who} onChange={e=>setF({...f,who:e.target.value})}>{staff.map(p=><option key={p.user_id} value={p.user_id}>{p.display_name}</option>)}</select></label> : <><label><input type="checkbox" checked={f.reimburse} onChange={e=>setF({...f,reimburse:e.target.checked})} /> Reimburse me</label>{f.reimburse && <label>Reimburse to<select value={f.who} onChange={e=>setF({...f,who:e.target.value})}>{staff.map(p=><option key={p.user_id} value={p.user_id}>{p.display_name}</option>)}</select></label>}</>}<button disabled={busy}>{editing ? 'Save changes' : 'Add expense'}</button>{editing && <button type="button" className="danger" disabled={busy} onClick={() => { void remove(editing).then(deleted => { if (deleted) setShowForm(false); }); }}>Delete expense</button>}</form>{error && <p role="alert" className="error">{error}</p>}</section>}
       <h3 className="rpt-section">By category</h3><div className="rpt-rows">{categories.length ? categories.sort((a,b)=>b[1]-a[1]).map(([category,cents]) => <div key={category}><div className="rpt-line rpt-cat"><span>{category}</span><em>{total ? Math.round(cents / total * 100) : 0}%</em><b>{money(cents)}</b></div><div className="rpt-bar"><span style={{width:`${total ? cents / total * 100 : 0}%`}} /></div></div>) : <p className="rpt-note">No expenses in this period.</p>}</div>
       <h3 className="rpt-section">Recent</h3><div className="rpt-rows">{shown.slice(0, 30).map(e => {
@@ -101,7 +107,7 @@ export function ExpensesPage({ client, money, expenses, staff, ownerId, onChange
         return <button type="button" className="rpt-row" key={e.id} onClick={() => e.source === 'manual' && edit(e)}><span className="rpt-name">{e.description}<small>{[when, who, e.category, status].filter(Boolean).join(' · ')}</small></span><b>{money(e.amount_cents)}</b></button>;
       })}</div>
       <DispositionsPanel client={client} money={money} stamp={s => new Date(s).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'America/Los_Angeles' })} kind="giveaway" title="Giveaways" presentation="rows" refreshKey={refresh} onChanged={() => { void onChanged(); setRefresh(n => n + 1); }} />
-      <p className="rpt-note">Reimbursable expenses also appear in Payouts. Automatic label costs are included in Fees.</p>
+      <p className="rpt-note">Reimbursable expenses also appear in Payouts. Shippo labels and marketplace return labels (paid from eBay/Depop balance) are under Fees, not here.</p>
     </div>;
   }
 
