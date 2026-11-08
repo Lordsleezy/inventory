@@ -19,6 +19,7 @@ import {
   styleHeaderRow,
 } from './exportFormat';
 import { verifyExportTies } from './exportChecks';
+import { rollupRareCategories } from './inventoryCategories';
 import type { BooksWorkbook, ExpenseDisplayLine, Period } from './types';
 
 function tieWarning(wb: BooksWorkbook) {
@@ -32,7 +33,6 @@ export async function buildBooksExcel(period: Period, wb: BooksWorkbook, label: 
   x.subject = label;
   const periodLabel = formatPeriodTitle(period.period_start);
   const generated = new Date();
-  const warn = tieWarning(wb);
 
   const wsS = x.addWorksheet('Sales');
   const salesHeader = [
@@ -42,7 +42,7 @@ export async function buildBooksExcel(period: Period, wb: BooksWorkbook, label: 
   const salesCols = salesHeader.length;
   const salesWidths = [14, 10, 38, 14, 16, 12, 11, 18, 12, 20, 20, 11, 11, 12, 40];
   setColumnWidths(wsS, salesWidths);
-  addReportTitle(wsS, 'Sales', periodLabel, generated, salesCols, warn);
+  addReportTitle(wsS, 'Sales', periodLabel, generated, salesCols);
   fitTitleRows(wsS, salesCols, salesWidths);
   const hS = wsS.rowCount + 1;
   wsS.addRow(salesHeader);
@@ -256,7 +256,7 @@ export async function buildBooksExcel(period: Period, wb: BooksWorkbook, label: 
   };
   if (own) {
     writePairs('By category', ['Category', 'Units', 'Cost', 'Floor', 'Sold', 'Sell-through %'],
-      (own.categories || []).map((c) => [c.category, c.units, (c.cost_cents || 0) / 100, (c.floor_cents || 0) / 100, c.sold_units, c.sell_through]));
+      rollupRareCategories(own.categories || []).map((c) => [c.category, c.units, (c.cost_cents || 0) / 100, (c.floor_cents || 0) / 100, c.sold_units, c.sell_through]));
     writePairs('Listed by channel (an item on several channels is listed under each)', ['Channel', 'Units', 'Cost'],
       (own.listed || []).map((c) => [c.channel, c.units, (c.cost_cents || 0) / 100]));
     writePairs('Not listed', ['Reason', 'Units', 'Cost'],
