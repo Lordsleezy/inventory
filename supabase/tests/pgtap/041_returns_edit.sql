@@ -1,6 +1,6 @@
--- Return edits re-flow label expense, keep-refund profit, and paid commission deltas.
+-- Return edits re-flow label expense and owner keep-refund profit (no commission clawbacks).
 begin;
-select plan(15);
+select plan(16);
 set constraints all immediate;
 
 do $$
@@ -74,15 +74,12 @@ select lives_ok(
       perform public.portal_return_edit(v_return, jsonb_build_object('refund_cents', 900));
     end
   $body$$q$,
-  'edit refund after commission paid posts delta adjustment');
+  'edit refund after commission paid still works');
 
-select cmp_ok(
-  (select a.amount_cents from public.portal_payout_adjustments a
-    join public.returns r on r.id = a.return_id where r.sku = '11501' and a.employee_id = current_setting('test.paul')::uuid
-    order by a.created_at desc limit 1),
-  '<',
-  0,
-  'post-payout refund increase adds negative adjustment');
+select is((select count(*)::int from public.portal_payout_adjustments a
+    join public.returns r on r.id = a.return_id where r.sku = '11501'),
+  0, 'refund edits do not claw worker commissions');
+select is((select buyer_keep_refund_cents from public.sales where sku = '11501'), 900, 'owner profit keep-refund follows the higher refund');
 
 select lives_ok(
   $q$select public.portal_return_edit(

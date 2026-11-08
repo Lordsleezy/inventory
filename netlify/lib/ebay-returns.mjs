@@ -114,9 +114,66 @@ export function mapEbayReturn(row) {
 function refundLineCents(detail, feeType) {
   const lines = detail?.detail?.refundInfo?.estimatedRefundDetail?.itemizedRefundDetails
     || detail?.refundInfo?.estimatedRefundDetail?.itemizedRefundDetails
+    || detail?.detail?.refundInfo?.actualRefundDetail?.itemizedRefundDetails
+    || detail?.refundInfo?.actualRefundDetail?.itemizedRefundDetails
     || [];
   const hit = lines.find((line) => String(line?.refundFeeType || "").toUpperCase() === feeType);
-  return moneyValue(hit?.estimatedAmount);
+  return moneyValue(hit?.estimatedAmount ?? hit?.actualAmount ?? hit?.refundAmount);
+}
+
+/** Seller-paid return / replacement label from Post-Order detail. */
+export function ebayLabelCostCents(detail) {
+  const shipment =
+    detail?.detail?.returnShipmentInfo
+    || detail?.returnShipmentInfo
+    || detail?.detail?.replacementShipmentInfo
+    || detail?.replacementShipmentInfo
+    || {};
+  const paidBy = String(
+    shipment?.labelPaidBy
+    || shipment?.shippingLabelCost?.labelPaidBy
+    || detail?.detail?.sellerReturnLabel?.labelPaidBy
+    || "",
+  ).toLowerCase();
+  const cents =
+    moneyValue(shipment?.shippingLabelCost?.totalAmount)
+    || moneyValue(shipment?.shippingLabelCost)
+    || moneyValue(detail?.detail?.sellerReturnLabel?.labelCost)
+    || moneyValue(detail?.detail?.sellerReturnLabel?.totalAmount)
+    || 0;
+  return { cents, paidBy: paidBy || (cents > 0 ? "seller" : "") };
+}
+
+/** Prefer eBay's actual/estimated refund total when present. */
+export function ebayActualRefundCents(detail, fallback = 0) {
+  const actual =
+    moneyValue(detail?.detail?.refundInfo?.actualRefundDetail?.totalAmount)
+    || moneyValue(detail?.refundInfo?.actualRefundDetail?.totalAmount);
+  if (actual > 0) return actual;
+  const estimated =
+    moneyValue(detail?.detail?.refundInfo?.estimatedRefundDetail?.estimatedAmount)
+    || moneyValue(detail?.detail?.refundInfo?.estimatedRefundDetail?.totalAmount)
+    || moneyValue(detail?.refundInfo?.estimatedRefundDetail?.estimatedAmount)
+    || moneyValue(detail?.sellerTotalRefund?.actualRefundAmount)
+    || moneyValue(detail?.sellerTotalRefund?.estimatedRefundAmount)
+    || moneyValue(detail?.buyerTotalRefund?.actualRefundAmount)
+    || moneyValue(detail?.buyerTotalRefund?.estimatedRefundAmount);
+  if (estimated > 0) return estimated;
+  const purchase = refundLineCents(detail, "PURCHASE_PRICE");
+  const shipping = refundLineCents(detail, "ORIGINAL_SHIPPING");
+  if (purchase + shipping > 0) return purchase + shipping;
+  return Math.max(0, Math.round(Number(fallback) || 0));
+}
+
+export function ebayReturnKind(detail, summary = {}) {
+  const blob = JSON.stringify({
+    type: detail?.detail?.returnType || detail?.returnType || summary?.returnType || "",
+    state: detail?.detail?.state || detail?.state || summary?.raw_state || "",
+    outcome: detail?.detail?.outcome || detail?.outcome || "",
+    decide: detail?.detail?.sellerResponseDue?.activityDue || "",
+  }).toLowerCase();
+  if (/replac/.test(blob)) return "replacement";
+  return "return";
 }
 
 async function postOrder(account, method, path, body) {
@@ -166,19 +223,40 @@ export async function syncEbayReturns(storeId, account) {
     const detail = await postOrder(account, "GET", `/post-order/v2/return/${encodeURIComponent(row.external_return_id)}`, null).catch(() => null);
     const itemCents = refundLineCents(detail, "PURCHASE_PRICE") || moneyValue(detail?.detail?.itemDetail?.itemPrice) || row.item_cents;
     const shippingCents = refundLineCents(detail, "ORIGINAL_SHIPPING") || row.shipping_cents;
-    const labelCents = moneyValue(detail?.detail?.returnShipmentInfo?.shippingLabelCost?.totalAmount);
     const plan = ebayRefundPlan({ reason: row.reason, fault: row.fault, itemCents, shippingCents });
+    const label = ebayLabelCostCents(detail);
+    const sellerPaidLabel = label.paidBy === "seller" || (!label.paidBy && plan.labelPaidBy === "seller");
+    const labelCents = sellerPaidLabel ? label.cents : (label.paidBy === "seller" ? label.cents : 0);
+    // Keep seller-paid label whenever eBay reports a cost (SNAD and replacements).
+    const returnLabelCents = label.cents > 0 && (sellerPaidLabel || plan.labelPaidBy === "seller")
+      ? label.cents
+      : (plan.labelPaidBy === "seller" ? labelCents : 0);
+    const kind = ebayReturnKind(detail, row);
+    const refundCents = ebayActualRefundCents(detail, plan.refundCents);
     const title = String(detail?.detail?.itemDetail?.itemTitle || "");
     const titleSku = (title.match(/\bSKU\s+([A-Za-z0-9-]+)\b/) || [])[1] || "";
     const sku = row.sku || await skuForItem(storeId, row.ebay_item_id) || titleSku;
+    const tracking =
+      row.tracking_number
+      || detail?.detail?.returnShipmentInfo?.shipmentTracking?.trackingNumber
+      || detail?.detail?.replacementShipmentInfo?.shipmentTracking?.trackingNumber
+      || null;
+    const carrier =
+      row.carrier
+      || detail?.detail?.returnShipmentInfo?.shipmentTracking?.carrierEnum
+      || detail?.detail?.replacementShipmentInfo?.shipmentTracking?.carrierEnum
+      || null;
     saved.push(await ingestReturnRow(storeId, {
       ...row,
       sku,
       item_cents: itemCents,
       shipping_cents: shippingCents,
-      refund_cents: plan.refundCents,
-      label_paid_by: plan.labelPaidBy,
-      return_label_cents: plan.labelPaidBy === "seller" ? labelCents : 0,
+      refund_cents: refundCents,
+      label_paid_by: returnLabelCents > 0 ? "seller" : plan.labelPaidBy,
+      return_label_cents: returnLabelCents,
+      tracking_number: tracking,
+      carrier,
+      return_kind: kind,
       force_physical_return: true,
     }));
   }

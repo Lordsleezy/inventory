@@ -10,7 +10,10 @@ import {
   type TrackingBundle,
   cents,
   dollars,
+  isReplacementReturn,
   laToday,
+  returnListSubtitle,
+  returnListTitle,
   statusLabel,
   statusTone,
 } from './returnsShared';
@@ -208,7 +211,35 @@ export function ReturnsSimplified({ client, storeId: _storeId, money, stamp, var
 
   function openDetail(r: ReturnRow) {
     setSelected(r);
+    setEditKeeps(r.route_to === 'buyer_keeps' || r.status === 'refunded_no_return');
+    setEditRefund(r.refund_cents ? dollars(r.refund_cents) : '');
+    setEditLabel(r.return_label_cents ? dollars(r.return_label_cents) : '');
+    setEditTracking(r.tracking_number || '');
+    setEditQty(String(r.requested_qty || 1));
     setScreen('detail');
+  }
+
+  async function saveMoneyFields() {
+    if (!selected) return;
+    setBusy('money');
+    setError('');
+    const { data, error: e } = await client.rpc('portal_return_edit', {
+      p_return: selected.id,
+      p_patch: {
+        buyer_keeps: selected.route_to === 'buyer_keeps' || selected.status === 'refunded_no_return',
+        refund_cents: cents(editRefund),
+        return_label_cents: cents(editLabel),
+        tracking_number: editTracking.trim() || selected.tracking_number || null,
+        requested_qty: Math.max(1, selected.requested_qty || 1),
+      },
+    });
+    setBusy('');
+    if (e) {
+      setError(errText(e));
+      return;
+    }
+    setSelected(data as ReturnRow);
+    await load();
   }
 
   function openEdit() {
@@ -380,8 +411,11 @@ export function ReturnsSimplified({ client, storeId: _storeId, money, stamp, var
         {rows?.map((r) => (
           <button key={r.id} type="button" className="returns-row" onClick={() => openDetail(r)}>
             <span className="returns-row-main">
-              <strong>{r.title || `SKU ${r.sku}`}</strong>
-              <small>SKU {r.sku}{r.channel === 'ebay' ? ` · ${ebayRules(r).reason}` : ''}{r.replacement_sku ? ` · replacement ${r.replacement_sku}` : ''}</small>
+              <strong>{returnListTitle(r)}</strong>
+              <small>
+                {returnListSubtitle(r)}
+                {!isReplacementReturn(r) && r.channel === 'ebay' ? ` · ${ebayRules(r).reason}` : ''}
+              </small>
             </span>
             <span className={`returns-row-status ${toneClass(statusTone(r.status, r.route_to))}`}>
               {statusLabel(r.status, r.route_to)}
@@ -495,8 +529,22 @@ export function ReturnsSimplified({ client, storeId: _storeId, money, stamp, var
         <button type="button" className="returns-text-btn" onClick={openEdit}>Edit</button>
       </div>
       {error && <div className="app-inline-error" role="alert">{error}</div>}
-      <p className="returns-meta">SKU {selected.sku} · {CHANNEL[selected.channel] || selected.channel}{selected.channel === 'ebay' ? ` · ${ebayRules(selected).reason}` : ''}</p>
-      <h2 className="returns-detail-title">{selected.title || `SKU ${selected.sku}`}</h2>
+      <p className="returns-meta">
+        SKU {selected.sku} · {CHANNEL[selected.channel] || selected.channel}
+        {isReplacementReturn(selected)
+          ? (selected.replacement_sku ? ` · sent ${selected.replacement_sku}` : ' · replacement')
+          : (selected.channel === 'ebay' ? ` · ${ebayRules(selected).reason}` : '')}
+      </p>
+      <h2 className="returns-detail-title">{returnListTitle(selected)}</h2>
+      {!isReplacementReturn(selected) && selected.title && (
+        <p className="returns-hint">{selected.title}</p>
+      )}
+      {isReplacementReturn(selected) && (
+        <p className="returns-hint">
+          {selected.title || `SKU ${selected.sku}`}
+          {selected.replacement_sku ? ` · replacement SKU ${selected.replacement_sku}` : ''}
+        </p>
+      )}
       <p className={`returns-status-line ${toneClass(statusTone(selected.status, selected.route_to))}`}>
         {tracking?.status_line || statusLabel(selected.status, selected.route_to)}
       </p>
@@ -528,10 +576,28 @@ export function ReturnsSimplified({ client, storeId: _storeId, money, stamp, var
         </div>
       )}
       <div className="returns-kv-group">
-        <div className="returns-kv readonly"><span>{selected.refunded_at || selected.status === 'closed' ? 'Refunded' : 'Refund'}</span><strong>{money(selected.refund_cents || 0)}</strong></div>
-        <div className="returns-kv readonly"><span>Label (I paid)</span><strong>{money(selected.return_label_cents || 0)}</strong></div>
-        <div className="returns-kv readonly"><span>Tracking #</span><strong>{trackHref(selected) ? <a href={trackHref(selected) || undefined} target="_blank" rel="noreferrer">{selected.tracking_number}</a> : (selected.tracking_number || '—')}</strong></div>
+        <label className="returns-kv">
+          <span>{selected.refunded_at || selected.status === 'closed' ? 'Refunded' : 'Refund'}</span>
+          <input inputMode="decimal" value={editRefund} onChange={(e) => setEditRefund(e.target.value)} placeholder="0.00" />
+        </label>
+        <label className="returns-kv">
+          <span>Label (I paid)</span>
+          <input inputMode="decimal" value={editLabel} onChange={(e) => setEditLabel(e.target.value)} placeholder="0.00" />
+        </label>
+        <div className="returns-kv readonly">
+          <span>Tracking #</span>
+          <strong>{trackHref(selected) ? <a href={trackHref(selected) || undefined} target="_blank" rel="noreferrer">{selected.tracking_number}</a> : (selected.tracking_number || '—')}</strong>
+        </div>
       </div>
+      <p className="returns-hint">
+        {isReplacementReturn(selected)
+          ? 'Replacement: enter label shipping you paid. Refund stays $0 unless you also refunded money.'
+          : 'Refund comes from eBay when available — edit if wrong. Label (I paid) is the seller return label from eBay.'}
+        {' '}Owner profit drops by the refund; worker commissions do not.
+      </p>
+      <button type="button" className="returns-secondary" disabled={!!busy} onClick={() => void saveMoneyFields()}>
+        {busy === 'money' ? 'Saving…' : 'Save refund & label'}
+      </button>
       {selected.route_to !== 'buyer_keeps' && selected.status !== 'refunded_no_return' && !['closed', 'canceled', 'received', 'dispositioned'].includes(selected.status) && (
         <div className="returns-decide-actions">
           {['requested', 'label_sent', 'approved'].includes(selected.status) && (

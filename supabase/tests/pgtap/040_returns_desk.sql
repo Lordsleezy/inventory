@@ -1,5 +1,5 @@
--- Buyer-keeps refunds reduce profit and do not void the sale.
--- A commission that was already paid is clawed back without rewriting the payment.
+-- Buyer-keeps refunds reduce owner profit and do not void the sale.
+-- Worker commissions are not clawed back on returns.
 begin;
 select plan(15);
 set constraints all immediate;
@@ -65,14 +65,12 @@ select is((select amount_cents from public.portal_expenses where external_id = '
   250, 'a label I paid is a Returns expense');
 select is((select count(*) from public.portal_expenses where source = 'return' and amount_cents = 400 and voided_at is null),
   0::bigint, 'the refund itself is not a second expense');
-select is((select sale_commission_cents from public.portal_payout_adjustments a
-    join public.sales s on s.id = a.sale_id where s.sku = '11482' and a.employee_id = current_setting('test.paul')::uuid),
-  0, 'a keep-refund adjustment does not pretend the sale was voided');
-select is((select a.amount_cents from public.portal_payout_adjustments a
-    join public.sales s on s.id = a.sale_id where s.sku = '11482' and a.employee_id = current_setting('test.paul')::uuid),
-  -round((select c.amount_cents from public.sale_commissions c join public.sales s on s.id = c.sale_id
-    where s.sku = '11482' and c.employee_id = current_setting('test.paul')::uuid) * 400.0 / 1999)::int,
-  'commission drops by the refunded fraction');
+select is((select count(*)::int from public.portal_payout_adjustments a
+    join public.sales s on s.id = a.sale_id where s.sku = '11482'),
+  0, 'keep-refund does not claw worker commissions');
+select is((select c.amount_cents from public.sale_commissions c join public.sales s on s.id = c.sale_id
+    where s.sku = '11482' and c.employee_id = current_setting('test.paul')::uuid) > 0, true,
+  'worker commission on the sale stays intact');
 
 select lives_ok(
   $q$do $body$

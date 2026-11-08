@@ -19,6 +19,7 @@ export type ReturnRow = {
   reason: string;
   fault?: string | null;
   external_order_id: string | null;
+  external_return_id?: string | null;
   buyer_name?: string | null;
   refund_cents: number;
   return_label_cents: number;
@@ -27,6 +28,7 @@ export type ReturnRow = {
   carrier?: string | null;
   requested_qty?: number;
   replacement_sku?: string | null;
+  replacement_id?: string | null;
   sale_id?: number | null;
   route_to?: string;
   created_at: string;
@@ -37,6 +39,27 @@ export type ReturnRow = {
   refunded_at?: string | null;
   refunds?: Refund[];
 };
+
+export function isReplacementReturn(row: Pick<ReturnRow, 'replacement_sku' | 'replacement_id' | 'external_return_id' | 'kind'>) {
+  if (row.kind === 'replacement') return true;
+  if (row.replacement_sku || row.replacement_id) return true;
+  return String(row.external_return_id || '').startsWith('replacement:');
+}
+
+export function returnListTitle(row: ReturnRow) {
+  if (isReplacementReturn(row)) return 'Replacement';
+  return row.title || `SKU ${row.sku}`;
+}
+
+export function returnListSubtitle(row: ReturnRow) {
+  const bits = [`SKU ${row.sku}`];
+  if (isReplacementReturn(row)) {
+    if (row.title) bits.push(row.title);
+    if (row.replacement_sku) bits.push(`sent ${row.replacement_sku}`);
+    return bits.join(' · ');
+  }
+  return bits.join(' · ');
+}
 
 export type Candidate = {
   sale_id: number;
