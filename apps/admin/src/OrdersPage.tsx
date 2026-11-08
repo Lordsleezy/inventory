@@ -4,10 +4,10 @@ import { floorFunctionUrl } from './floorApi';
 import { CommissionOverrideControls, CommissionOverrideMark } from './CommissionOverride';
 import { frozenCutsForTicket, type CommissionOverride, type OnlineCfg, type Rule } from './payouts';
 import { LabelDialog } from './LabelDialog';
-import { OrderStepper, OrderTimelineList } from './OrderFulfillment';
+import { OrderStepper, OrderTimelineList, OrderTrackLine } from './OrderFulfillment';
 import { errText } from './errText';
 import { fileToBase64, labelFileUrl, orderAdmin } from './orderLabel';
-import { canBuyLabel, hasLabel, orderChip, orderNeedsLabel, orderStage, orderTimeline, packagedStale } from './orderStage';
+import { canBuyLabel, carrierTrackUrl, hasLabel, orderChip, orderNeedsLabel, orderStage, orderTimeline, packagedStale, shippedStale } from './orderStage';
 import { loadOrderLocations, locationCompare, locationParts } from './locationOrder';
 import { useVisibleInterval } from './useVisibleInterval';
 
@@ -33,6 +33,7 @@ export type WebOrder = {
   created_at: string; paid_at: string | null; pickup_deadline: string | null; picked_up_at: string | null; picked_up_by: string | null;
   shipped_at: string | null; delivered_at: string | null;
   packaged_at?: string | null; packaged_by?: string | null; packaged_by_name?: string | null;
+  shipped_by_name?: string | null; delivered_by_name?: string | null;
   tracking_number: string | null; tracking_url: string | null; carrier: string | null; service: string | null;
   label_url: string | null; label_purchased_at: string | null; label_cost_cents: number | null;
   label_storage_path?: string | null; label_file_name?: string | null; label_mime?: string | null;
@@ -169,6 +170,20 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
     setBusy(o.id + 'packaged'); setError('');
     const { error: e } = await client.rpc('portal_mark_order_packaged', { p_order: o.id });
     if (e) setError(e.message === 'pack_proof_required' ? 'Upload a pack photo of the unit before marking it packaged.' : e.message);
+    await load(); setBusy(null);
+  }
+
+  async function markShipped(o: WebOrder) {
+    setBusy(o.id + 'shipped'); setError('');
+    const { error: e } = await client.rpc('portal_mark_order_shipped', { p_order: o.id });
+    if (e) setError(e.message === 'order_not_packaged' ? 'Tap Packaged before marking it shipped.' : e.message);
+    await load(); setBusy(null);
+  }
+
+  async function markDelivered(o: WebOrder) {
+    setBusy(o.id + 'delivered'); setError('');
+    const { error: e } = await client.rpc('portal_mark_order_delivered', { p_order: o.id });
+    if (e) setError(e.message === 'portal_access_denied' ? 'Only an admin can mark an order delivered.' : e.message);
     await load(); setBusy(null);
   }
 
@@ -535,23 +550,27 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
               {(!o.channel || o.channel === 'website') && <button className="text-button danger" disabled={!!busy} onClick={() => void cancel(o)}>Cancel & refund</button>}
               <button className="text-button danger" disabled={!!busy} onClick={() => void deleteOrder(o)}>{busy === o.id + 'delete' ? 'Deleting…' : 'Delete'}</button>
             </div>
-            <p className="hint">Tap Packaged once it's boxed and labeled. Tracking takes over from there.</p></>}
+            <p className="hint">Tap Packaged once it's boxed and labeled. Then tap Mark shipped when it leaves.</p></>}
           </>
         )}
         {isPackaged && (
           <>
-            <small>Packaged {o.packaged_at ? stamp(o.packaged_at) : ''}{o.packaged_by_name ? ` · ${o.packaged_by_name}` : ''}{packagedStale(o) ? ' · no carrier scan for 2 days' : ' · waiting on scan'}</small>
+            <small>Packaged {o.packaged_at ? stamp(o.packaged_at) : ''}{o.packaged_by_name ? ` · ${o.packaged_by_name}` : ''}{packagedStale(o) ? ' · not marked shipped for 2 days' : ''}</small>
+            <OrderTrackLine order={o} />
             <div className="actions">
               {labeled && <button type="button" disabled={!!busy} onClick={() => void printOrderLabel(o)}>Print 4×6</button>}
+              <button type="button" className="primary" disabled={!!busy} onClick={() => void markShipped(o)}>{busy === o.id + 'shipped' ? 'Saving…' : 'Mark shipped'}</button>
               <button type="button" className="secondary" disabled={!!busy} onClick={() => void stepBack(o)}>Move back one step</button>
             </div>
-            <p className="hint">Moves to Shipped on its own at the first carrier scan.</p>
+            <p className="hint">Mark shipped when it leaves the building. That records who tapped it.</p>
           </>
         )}
         {isShipped && (
           <>
-            <small>Shipped {stamp(o.shipped_at!)}{o.tracking_number ? ` · ${o.tracking_number}` : ''}</small>
+            <small>Shipped {stamp(o.shipped_at!)}{o.shipped_by_name ? ` · ${o.shipped_by_name}` : ''}{shippedStale(o) ? ' · not marked delivered for 10 days' : ''}</small>
+            <OrderTrackLine order={o} />
             {o.refund_requested_at ? <p className="hint">Cancel & refund in progress…</p> : <div className="actions">
+              <button type="button" className="primary" disabled={!!busy} onClick={() => void markDelivered(o)}>{busy === o.id + 'delivered' ? 'Saving…' : 'Mark delivered'}</button>
               <button type="button" className="secondary" disabled={!!busy} onClick={() => void stepBack(o)}>{busy === o.id + 'step-back' ? 'Saving…' : 'Move back one step'}</button>
               {labeled && <button type="button" disabled={!!busy} onClick={() => void printOrderLabel(o)}>Print 4×6</button>}
               {(!o.channel || o.channel === 'website') && <button className="text-button danger" disabled={!!busy} onClick={() => void cancel(o)}>Cancel & refund</button>}
@@ -571,7 +590,8 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
         )}
         {isDone && (
           <>
-            <small>{o.picked_up_at ? `Picked up ${stamp(o.picked_up_at)} · ${o.picked_up_by || ''}` : `Delivered ${stamp(o.delivered_at!)}${o.shipped_at ? ` · shipped ${stamp(o.shipped_at)}` : ''}`}</small>
+            <small>{o.picked_up_at ? `Picked up ${stamp(o.picked_up_at)} · ${o.picked_up_by || ''}` : `Delivered ${stamp(o.delivered_at!)}${o.delivered_by_name ? ` · ${o.delivered_by_name}` : ''}${o.shipped_at ? ` · shipped ${stamp(o.shipped_at)}` : ''}`}</small>
+            {!o.picked_up_at && <OrderTrackLine order={o} />}
             <div className="actions">
               <button type="button" className="secondary" disabled={!!busy} onClick={() => void stepBack(o)}>{busy === o.id + 'step-back' ? 'Saving…' : 'Move back one step'}</button>
               <button className="text-button danger" disabled={!!busy} onClick={() => void deleteOrder(o)}>{busy === o.id + 'delete' ? 'Deleting…' : 'Delete'}</button>

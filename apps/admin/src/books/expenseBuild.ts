@@ -150,6 +150,7 @@ export function buildExpenses(report: Report, attributedPromotedIds: Set<string>
   for (const l of report.labels || []) {
     if (labelIdsInExpenses.has(String(l.id))) continue;
     if (storeCheckoutLabel({}, l)) continue;
+    // Already on the Open Box sale's ship cost. A second expense line would count it twice.
     if (String(l.account || '').toLowerCase() === 'pgg124-5') continue;
     const cents = Math.abs(Number(l.signed_amount_cents ?? l.cost_cents ?? 0));
     if (!cents) continue;

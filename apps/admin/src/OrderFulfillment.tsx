@@ -1,5 +1,5 @@
 import type { OrderStage, TimelineRow } from './orderStage';
-import { STAGE_INDEX } from './orderStage';
+import { STAGE_INDEX, carrierTrackUrl } from './orderStage';
 
 const STEPS = ['To ship', 'Packaged', 'Shipped', 'Delivered'] as const;
 
@@ -18,6 +18,17 @@ export function OrderStepper({ stage }: { stage: OrderStage }) {
         );
       })}
     </ol>
+  );
+}
+
+export function OrderTrackLine({ order }: { order: { tracking_number?: string | null; carrier?: string | null } }) {
+  const href = carrierTrackUrl(order.tracking_number, order.carrier);
+  if (!order.tracking_number) return null;
+  return (
+    <p className="hint">
+      {order.carrier ? `${order.carrier} ` : ''}{order.tracking_number}
+      {href && <> · <a href={href} target="_blank" rel="noreferrer">Track</a></>}
+    </p>
   );
 }
 

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { errText } from '../errText';
+import { carrierTrackUrl } from '../orderStage';
 import { useVisibleInterval } from '../useVisibleInterval';
 import { floorFunctionUrl } from '../floorApi';
 import {
@@ -13,6 +14,10 @@ import {
   statusLabel,
   statusTone,
 } from './returnsShared';
+
+function trackHref(row: { tracking_number?: string | null; carrier?: string | null }) {
+  return carrierTrackUrl(row.tracking_number, row.carrier);
+}
 
 type Screen = 'list' | 'new' | 'detail' | 'edit';
 type Seg = 'open' | 'closed';
@@ -291,6 +296,26 @@ export function ReturnsSimplified({ client, storeId: _storeId, money, stamp, var
     reader.readAsDataURL(file);
   }
 
+  async function setReturnStatus(status: 'in_transit' | 'received') {
+    if (!selected) return;
+    setBusy(status);
+    const { error: e } = await client.rpc('portal_set_return_status', {
+      p_return: selected.id,
+      p_status: status,
+      p_patch: {},
+    });
+    setBusy('');
+    if (e) {
+      setError(e.message === 'portal_access_denied' ? 'Only an admin can update a return.' : errText(e));
+      return;
+    }
+    await load();
+    const { data } = await client.rpc('portal_return_desk', { p_filter: 'open', p_query: selected.sku, p_from: null, p_to: laToday() });
+    const body = (data || {}) as { rows?: ReturnRow[] };
+    const fresh = body.rows?.find((r) => r.id === selected.id);
+    if (fresh) setSelected(fresh);
+  }
+
   async function resolveDelivered(defective: boolean) {
     if (!selected) return;
     const qty = Math.max(1, Math.trunc(Number(selected.requested_qty) || 1));
@@ -447,7 +472,7 @@ export function ReturnsSimplified({ client, storeId: _storeId, money, stamp, var
           <p className="returns-hint">
             {buyerKeeps
               ? 'No shipment to track. Profit on this sale drops by the refund.'
-              : 'Status updates on its own from the tracking number.'}
+              : 'After it ships, tap Mark in transit, then Mark received. Track opens the carrier page.'}
           </p>
           <button type="button" className="returns-primary" disabled={!!busy} onClick={() => void submitNew()}>
             {busy ? 'Saving…' : buyerKeeps ? 'Save refund' : 'Start return'}
@@ -478,7 +503,7 @@ export function ReturnsSimplified({ client, storeId: _storeId, money, stamp, var
       {selected.route_to !== 'buyer_keeps' && selected.status !== 'refunded_no_return' && (
         <div className="returns-timeline-card">
           {(tracking?.events || []).length === 0 && (
-            <p className="returns-hint">Tracking will appear once the carrier reports scans.</p>
+            <p className="returns-hint">No carrier scans are pulled in. Use the buttons below.</p>
           )}
           <ol className="returns-timeline">
             {(tracking?.events || []).map((ev, i) => (
@@ -492,16 +517,35 @@ export function ReturnsSimplified({ client, storeId: _storeId, money, stamp, var
               </li>
             ))}
           </ol>
-          {tracking?.tracking_source && (
-            <p className="returns-tracking-note">Updated automatically from {tracking.tracking_source}.</p>
+          {selected.tracking_number && (
+            <p className="returns-tracking-note">
+              {selected.tracking_number}
+              {trackHref(selected) && (
+                <> · <a href={trackHref(selected) || undefined} target="_blank" rel="noreferrer">Track</a></>
+              )}
+            </p>
           )}
         </div>
       )}
       <div className="returns-kv-group">
         <div className="returns-kv readonly"><span>{selected.refunded_at || selected.status === 'closed' ? 'Refunded' : 'Refund'}</span><strong>{money(selected.refund_cents || 0)}</strong></div>
         <div className="returns-kv readonly"><span>Label (I paid)</span><strong>{money(selected.return_label_cents || 0)}</strong></div>
-        <div className="returns-kv readonly"><span>Tracking #</span><strong>{selected.tracking_number || '—'}</strong></div>
+        <div className="returns-kv readonly"><span>Tracking #</span><strong>{trackHref(selected) ? <a href={trackHref(selected) || undefined} target="_blank" rel="noreferrer">{selected.tracking_number}</a> : (selected.tracking_number || '—')}</strong></div>
       </div>
+      {selected.route_to !== 'buyer_keeps' && selected.status !== 'refunded_no_return' && !['closed', 'canceled', 'received', 'dispositioned'].includes(selected.status) && (
+        <div className="returns-decide-actions">
+          {['requested', 'label_sent', 'approved'].includes(selected.status) && (
+            <button type="button" className="returns-primary" disabled={!!busy} onClick={() => void setReturnStatus('in_transit')}>
+              {busy === 'in_transit' ? 'Saving…' : 'Mark in transit'}
+            </button>
+          )}
+          {['requested', 'label_sent', 'approved', 'in_transit'].includes(selected.status) && (
+            <button type="button" className="returns-secondary" disabled={!!busy} onClick={() => void setReturnStatus('received')}>
+              {busy === 'received' ? 'Saving…' : 'Mark received'}
+            </button>
+          )}
+        </div>
+      )}
       {selected.channel === 'ebay' && selected.status !== 'closed' && selected.status !== 'canceled' && !selected.refunded_at && (
         <div className="returns-decide">
           {ebayRules(selected).snad ? (
