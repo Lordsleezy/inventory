@@ -430,7 +430,7 @@ export function AppModeShell({
           </AppReportsNative>
         )}
         {fullAccess && morePage === 'withdrawals' && (
-          <AppReportsNative onBack={leaveMorePage} title="Money">
+          <AppReportsNative onBack={leaveMorePage} title="Safe">
             <MoneyPage client={client} storeId={storeId} accessToken={session.access_token} money={money} stamp={stamp} />
           </AppReportsNative>
         )}

@@ -86,7 +86,7 @@ function BooksNative(p: ViewProps) {
       <div className="native-report-group">
         {REPORT_ROWS.map((r) => (
           <button key={r.id} type="button" className="native-report-row books-report-link" onClick={() => p.setSheet(r.id)}>
-            <span className="books-report-icon" aria-hidden><r.Icon color={r.hue} /></span>
+            <span className="books-report-icon" aria-hidden><r.Icon color="#ffffff" /></span>
             <span>{r.title}<small>{r.sub}</small></span>
             <i className="native-chevron">›</i>
           </button>
@@ -450,7 +450,7 @@ function PayoutsBody({ money, workbook, native }: { money: (c: number) => string
     <>
       {section('STORE BALANCES (MONEY TAB)', p.bankPaidTotal_cents, (
         <>
-          <p className="native-report-footnote">From Withdrawals / Money · bank payouts and balances for this month.</p>
+          <p className="native-report-footnote">From Safe · bank payouts and balances for this month.</p>
           {p.stores.map((s) => (
             <div key={s.account}>
               <button type="button" className="native-report-row books-store-row" onClick={() => setOpenStore(openStore === s.account ? null : s.account)}>

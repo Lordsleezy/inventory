@@ -245,14 +245,14 @@ export function AppMoreOther({
         </button>
       </div>
 
-      <p className="app-section-label">Money</p>
+      <p className="app-section-label">Safe</p>
       <div className="app-group">
         <button type="button" className="app-more-link" onClick={() => setPage('insights')}>
           <span className="app-more-left"><Icon tone="#5e5ce6" />Insights</span>
           <span className="app-chevron">›</span>
         </button>
         <button type="button" className="app-more-link" onClick={() => setPage('withdrawals')}>
-          <span className="app-more-left"><Icon tone="#64d2ff" />Money</span>
+          <span className="app-more-left"><Icon tone="#64d2ff" />Safe</span>
           <span className="app-chevron">›</span>
         </button>
       </div>
