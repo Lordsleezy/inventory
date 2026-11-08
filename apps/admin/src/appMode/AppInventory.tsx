@@ -10,6 +10,8 @@ import { inventoryMissingText } from '../inventoryMissing';
 import { INVENTORY_BUCKET_LABELS, inventoryBucketStatus, type InventoryBucket } from '../totalsMath';
 import { inventoryChipLabels } from '../missingCost';
 import { MissingCostList } from './MissingCostList';
+import { hydratePhotoUrlCache, listThumbPathsFromOriginals, persistPhotoUrlCache, signPhotoUrls } from '../unitPhotos';
+import { UnitListThumb } from '../UnitListThumb';
 
 /** Same stock subtabs as desktop Inventory. */
 type Filter = 'in_stock' | 'sold' | 'unfinished' | 'needs_check' | 'no_location' | 'missing_cost' | 'defective' | 'dns' | InventoryBucket;
@@ -50,17 +52,7 @@ type Props = {
 };
 
 const CACHE_PREFIX = 'floor_inv_cache_v6_';
-const URL_CACHE_KEY = 'floor_inv_urls_v2';
 const PAGE = 40;
-/** Signed URLs are minted for 3600s; refresh a bit early. */
-const URL_TTL_MS = 50 * 60 * 1000;
-
-function thumb(path: string) {
-  const parts = path.split('/');
-  if (parts.length < 3 || parts[1] === 'archive' || parts[2] === 'web') return path;
-  const stem = parts[parts.length - 1].replace(/\.[^.]+$/, '');
-  return `${parts[0]}/${parts[1]}/web/400/${stem}.webp`;
-}
 
 function cacheKey(scope: string, filter: Filter, query: string, offset: number) {
   return `${CACHE_PREFIX}${scope}:${filter}:${query.trim().toLowerCase()}:${offset}`;
@@ -79,24 +71,6 @@ function readCache(scope: string, filter: Filter, query: string, offset: number)
 function writeCache(scope: string, filter: Filter, query: string, offset: number, list: List) {
   try {
     sessionStorage.setItem(cacheKey(scope, filter, query, offset), JSON.stringify(list));
-  } catch { /* quota */ }
-}
-
-function readUrlCache(scope: string): Record<string, string> {
-  try {
-    const raw = sessionStorage.getItem(`${URL_CACHE_KEY}:${scope}`);
-    if (!raw) return {};
-    const pack = JSON.parse(raw) as { at: number; urls: Record<string, string> };
-    if (!pack?.at || Date.now() - pack.at > URL_TTL_MS) return {};
-    return pack.urls || {};
-  } catch {
-    return {};
-  }
-}
-
-function writeUrlCache(scope: string, urls: Record<string, string>) {
-  try {
-    sessionStorage.setItem(`${URL_CACHE_KEY}:${scope}`, JSON.stringify({ at: Date.now(), urls }));
   } catch { /* quota */ }
 }
 
@@ -133,7 +107,10 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
   const [query, setQuery] = useState('');
   const [offset, setOffset] = useState(0);
   const [list, setList] = useState<List | null>(() => readCache(cacheScope, 'in_stock', '', 0));
-  const [urls, setUrls] = useState<Record<string, string>>(() => readUrlCache(cacheScope));
+  const [urls, setUrls] = useState<Record<string, string>>(() => {
+    hydratePhotoUrlCache(cacheScope);
+    return {};
+  });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [queue, setQueue] = useState<Exclude<AttentionSection, 'all'> | null>(null);
@@ -209,40 +186,19 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
     }
   }
 
-  /** Sign storage paths; skip missing objects (web/400 often absent for fresh captures). */
-  async function signPaths(paths: string[]) {
-    const keys = [...new Set(paths.filter((p) => /^[0-9a-f-]{36}\//i.test(p) && !urlsRef.current[p]))];
-    if (!keys.length) return {} as Record<string, string>;
-    const out: Record<string, string> = {};
-    for (let i = 0; i < keys.length; i += 50) {
-      const chunk = keys.slice(i, i + 50);
-      const { data, error: e } = await client.storage.from('unit-photos').createSignedUrls(chunk, 3600);
-      if (e) throw e;
-      for (const row of data || []) {
-        if (row?.path && row.signedUrl && !row.error) out[row.path] = row.signedUrl;
-      }
-    }
-    return out;
-  }
-
   function mergeUrls(extra: Record<string, string>) {
     if (!Object.keys(extra).length) return;
     setUrls((prev) => {
       const next = { ...prev, ...extra };
-      writeUrlCache(cacheScope, next);
+      persistPhotoUrlCache(cacheScope, next);
       return next;
     });
   }
 
-  /**
-   * Sign original photo paths for list previews.
-   * Fresh captures usually have no web/400 derivative yet — createSignedUrls on missing
-   * keys is slow (~2s) and returns no URL, which left every row stuck on "+".
-   */
   async function signItemPhotos(items: Row[], apply: (urls: Record<string, string>) => void) {
-    const originals = items.map((x) => x.photo_path).filter((p): p is string => Boolean(p));
-    if (!originals.length) return;
-    apply(await signPaths(originals).catch(() => ({})));
+    const need = listThumbPathsFromOriginals(items.map((x) => x.photo_path)).filter((p) => !urlsRef.current[p]);
+    if (!need.length) return;
+    apply(await signPhotoUrls(client, need).catch(() => ({})));
   }
 
   useEffect(() => {
@@ -415,11 +371,6 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
           if(u.group_id && (u.group_total || 0) > 1) return <ReceiveGroupRow key={u.group_id} item={u} client={client} admin={fullAccess} money={money} onOpen={onOpen} searchQuery={query} onChanged={()=>{setList(null);setQueueRefresh(n=>n+1)}} />;
           const warn = filter === 'dns' ? null : needs(u);
           const missing = filter === 'not_ready' ? inventoryMissingText(u.missing || []) : null;
-          const thumbPath = u.photo_path ? thumb(u.photo_path) : '';
-          // Prefer small derivative when signed; otherwise the original (always exists when photo_path is set).
-          const src = u.photo_path
-            ? (thumbPath && urls[thumbPath]) || urls[u.photo_path] || ''
-            : '';
           const bulkPick = filter === 'no_location' && noLocSelecting;
           const checked = noLocSelected.has(u.sku);
           return (
@@ -437,30 +388,14 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
             }}>
               {bulkPick && <span className="app-row-check" aria-hidden>{checked ? '☑' : '☐'}</span>}
               <span className="app-thumb">
-                {src ? (
-                  <img
-                    src={src}
-                    alt=""
-                    loading={idx < 12 ? 'eager' : 'lazy'}
-                    decoding="async"
-                    onError={(e) => {
-                      // web/400 URL can 404 if Storage signed a missing key — swap to original once.
-                      if (!u.photo_path || e.currentTarget.dataset.fallback === '1') return;
-                      e.currentTarget.dataset.fallback = '1';
-                      const original = urls[u.photo_path];
-                      if (original && original !== e.currentTarget.src) {
-                        e.currentTarget.src = original;
-                        return;
-                      }
-                      void client.storage.from('unit-photos').createSignedUrl(u.photo_path, 3600).then(({ data }) => {
-                        if (data?.signedUrl) {
-                          mergeUrls({ [u.photo_path!]: data.signedUrl });
-                          e.currentTarget.src = data.signedUrl;
-                        }
-                      });
-                    }}
-                  />
-                ) : '+'}
+                <UnitListThumb
+                  client={client}
+                  photoPath={u.photo_path}
+                  urls={urls}
+                  onUrl={(p, url) => mergeUrls({ [p]: url })}
+                  eager={idx < 12}
+                  placeholder="+"
+                />
               </span>
               <span className="app-row-text">
                 <strong>{name(u)}</strong>

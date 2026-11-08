@@ -2,6 +2,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { ChannelListingPage } from './ChannelListingPage';
 import { isKioskShell } from './kiosk';
+import { derivativePath, listThumbPathsFromOriginals, signPhotoUrls } from './unitPhotos';
 
 const base = (import.meta.env.VITE_FLOOR_FUNCTIONS_URL || 'https://inventoryobi.netlify.app').replace(/\/$/, '');
 const money = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n / 100);
@@ -198,18 +199,20 @@ export function AmazonPage({ client, storeId, accessToken, money: moneyFmt }: Pr
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+  const pending = rows.filter((r) => r.photo_path && !thumbs[r.sku]);
+    if (!pending.length) return;
+    void signPhotoUrls(client, listThumbPathsFromOriginals(pending.map((r) => r.photo_path))).then((signed) => {
+      if (cancelled) return;
       const next: Record<string, string> = {};
-      for (const r of rows) {
-        if (!r.photo_path || thumbs[r.sku]) continue;
-        const { data } = await client.storage.from('unit-photos').createSignedUrl(r.photo_path, 3600);
-        if (data?.signedUrl) next[r.sku] = data.signedUrl;
+      for (const r of pending) {
+        if (!r.photo_path) continue;
+        const thumb = derivativePath(r.photo_path, 400);
+        const url = (thumb && signed[thumb]) || signed[r.photo_path];
+        if (url) next[r.sku] = url;
       }
-      if (!cancelled && Object.keys(next).length) setThumbs((t) => ({ ...t, ...next }));
-    })().catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
+      if (Object.keys(next).length) setThumbs((t) => ({ ...t, ...next }));
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
   }, [rows, client, thumbs]);
 
   async function addCodes(codes: string[], clear: 'sku' | 'upc' | 'both') {

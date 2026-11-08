@@ -6,7 +6,7 @@ import { frozenCutsForTicket, type CommissionOverride, type OnlineCfg, type Rule
 import { LabelDialog } from './LabelDialog';
 import { OrderStepper, OrderTimelineList } from './OrderFulfillment';
 import { OrderFacts, OrderFindRow, OrderPhotoCarousel, OrderTitle } from './OrderPhotos';
-import { derivativePath, listThumbPhoto, loadUnitPhotos, signPhotoUrls, type UnitPhoto } from './unitPhotos';
+import { derivativePath, hydratePhotoUrlCache, listThumbPhoto, listThumbPathsFromPhotoMap, loadUnitPhotos, persistPhotoUrlCache, signPhotoUrls, type UnitPhoto } from './unitPhotos';
 import { errText } from './errText';
 import { fileToBase64, labelFileUrl, orderAdmin } from './orderLabel';
 import { openShippingLabel } from './labelPrint';
@@ -14,6 +14,7 @@ import { canBuyLabel, hasLabel, orderChip, orderNeedsLabel, orderStage, orderTim
 import { loadOrderLocations, locationCompare } from './locationOrder';
 import { useVisibleInterval } from './useVisibleInterval';
 import { ScanOutPanel } from './ScanOutPanel';
+import { PackLabelScan } from './PackLabelScan';
 
 const CHANNEL_LABEL: Record<string, string> = {
   website: 'Website',
@@ -133,7 +134,18 @@ function breakdown(rows: WebOrder[]) {
 export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, cfg, commissionOverrides, frozen, personName, busy: parentBusy, onCommissionChanged }: Props) {
   const [orders, setOrders] = useState<WebOrder[] | null>(null);
   const [photoMap, setPhotoMap] = useState<Record<string, UnitPhoto[]>>({});
-  const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({});
+  const [photoUrls, setPhotoUrls] = useState<Record<string, string>>(() => {
+    hydratePhotoUrlCache(`${storeId}:orders`);
+    return {};
+  });
+  const mergePhotoUrls = (extra: Record<string, string>) => {
+    if (!Object.keys(extra).length) return;
+    setPhotoUrls((prev) => {
+      const next = { ...prev, ...extra };
+      persistPhotoUrlCache(`${storeId}:orders`, next);
+      return next;
+    });
+  };
   const [locations, setLocations] = useState<Record<string, string[]>>({});
   const [locationOptions, setLocationOptions] = useState<{ code: string }[]>([]);
   const [error, setError] = useState('');
@@ -157,8 +169,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
     if (skus.length) {
       const photos = await loadUnitPhotos(client, storeId, skus).catch(() => ({} as Record<string, UnitPhoto[]>));
       setPhotoMap(photos);
-      const thumbs = Object.values(photos).flatMap((rows) => rows.map((row) => derivativePath(row.path, 400)).filter((path): path is string => Boolean(path)));
-      setPhotoUrls(await signPhotoUrls(client, thumbs));
+      mergePhotoUrls(await signPhotoUrls(client, listThumbPathsFromPhotoMap(photos)));
     }
   }, [client, storeId]);
   const sign = useCallback((paths: string[]) => signPhotoUrls(client, paths), [client]);
@@ -552,6 +563,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
                 {o.pack_proof_at && <small className="ok-text">Proof saved {stamp(o.pack_proof_at)}{o.pack_proof_serial ? ` · S/N ${o.pack_proof_serial}` : ''}</small>}
               </div>
             )}
+            {labeled && <PackLabelScan client={client} disabled={!!busy} onDone={() => void load()} />}
             <div className="actions">
               {labeled && <button type="button" disabled={!!busy} onClick={() => void printOrderLabel(o)}>Print 4×6</button>}
               {!labeled && buy && <button type="button" disabled={!!busy || o.pack_condition === 'not_as_listed'} onClick={() => setLabelOrder(o)}>Buy label</button>}

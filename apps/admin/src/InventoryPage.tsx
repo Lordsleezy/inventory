@@ -20,6 +20,8 @@ import { ReceiveIssueLinks } from './ReceiveWorkStatus';
 import { INVENTORY_BUCKET_LABELS, inventoryBucketStatus, type InventoryBucket } from './totalsMath';
 import { StockMergePage } from './StockMergePage';
 import { FixTitlesPage } from './FixTitlesPage';
+import { hydratePhotoUrlCache, listThumbPathsFromOriginals, persistPhotoUrlCache, signPhotoUrls } from './unitPhotos';
+import { UnitListThumb } from './UnitListThumb';
 
 type Row = GroupedInventory & {
   sku: string; brand: string; model: string; title: string; condition: string | null;
@@ -62,12 +64,6 @@ const label = (s: string) => s === 'available' ? 'In stock' : s.replace(/_/g, ' 
 const missingCostRank = (u: { acquisition_cost_cents: number | null; state: string }) =>
   u.acquisition_cost_cents == null ? (u.state === 'sold' ? 0 : 1) : 2;
 const name = (u: Row) => [u.brand, u.model].filter(Boolean).join(' ') || u.title || 'Untitled unit';
-function thumb(path: string) {
-  const parts = path.split('/');
-  if (parts.length < 3 || parts[1] === 'archive' || parts[2] === 'web') return path;
-  const stem = parts[parts.length - 1].replace(/\.[^.]+$/, '');
-  return `${parts[0]}/${parts[1]}/web/400/${stem}.webp`;
-}
 
 export function InventoryPage({
   client, storeId, accessToken, money, stamp, tab, onTab, attentionSection, onAttentionSection, onCostChanged,
@@ -85,7 +81,18 @@ export function InventoryPage({
   const [selected, setSelected] = useState<string | null>(null);
   const [selectedMissing, setSelectedMissing] = useState<string[]>([]);
   const [detail, setDetail] = useState<Detail | null>(null);
-  const [urls, setUrls] = useState<Record<string, string>>({});
+  const [urls, setUrls] = useState<Record<string, string>>(() => {
+    hydratePhotoUrlCache(storeId);
+    return {};
+  });
+  const mergeUrls = (extra: Record<string, string>) => {
+    if (!Object.keys(extra).length) return;
+    setUrls((prev) => {
+      const next = { ...prev, ...extra };
+      persistPhotoUrlCache(storeId, next);
+      return next;
+    });
+  };
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [detailKey, setDetailKey] = useState(0);
@@ -117,14 +124,6 @@ export function InventoryPage({
     return () => { active = false; };
   }, [client, storeId]);
 
-  async function sign(paths: string[]) {
-    const keys = [...new Set(paths.filter(p => /^[0-9a-f-]{36}\//i.test(p)))];
-    if (!keys.length) return {} as Record<string, string>;
-    const { data, error: e } = await client.storage.from('unit-photos').createSignedUrls(keys, 3600);
-    if (e) throw e;
-    return Object.fromEntries((data || []).map((x, i) => [keys[i], x.signedUrl || '']));
-  }
-
   useEffect(() => {
     if (!listTab || queue) return;
     let active = true;
@@ -136,11 +135,13 @@ export function InventoryPage({
         });
         if (e) throw e;
         const next = data as List;
-        const signed = await sign(next.items.flatMap(x => x.photo_path ? [thumb(x.photo_path), x.photo_path] : [])).catch(() => ({}));
         if (active) {
           if (listTab === 'no-location') next.items.sort((a, b) => missingCostRank(a) - missingCostRank(b) || Number(b.state === 'reserved') - Number(a.state === 'reserved') || Number(b.state === 'sold') - Number(a.state === 'sold') || Number(b.sku) - Number(a.sku));
-          setList(next); setUrls(prev => ({ ...prev, ...signed }));
+          setList(next);
+          setLoading(false);
         }
+        const signed = await signPhotoUrls(client, listThumbPathsFromOriginals(next.items.map((x) => x.photo_path))).catch(() => ({}));
+        if (active) mergeUrls(signed);
       } catch (e) { if (active) setError(errText(e)); }
       finally { if (active) setLoading(false); }
     })(); }, 200);
@@ -156,7 +157,7 @@ export function InventoryPage({
         if (e) throw e;
         if (!data) throw new Error('Unit not found');
         const next = data as Detail;
-        const signed = await sign(next.photos.map(x => x.path)).catch(() => ({}));
+        const signed = await signPhotoUrls(client, next.photos.map((x) => x.path)).catch(() => ({}));
         if (active) {
           setDetail(next);
           setUrls(prev => ({ ...prev, ...signed }));
@@ -216,9 +217,9 @@ export function InventoryPage({
     <section className="panel inventory-panel">
       {loading && <p className="hint">Loading inventory…</p>}
       {!loading && list?.items.length === 0 && <div className="empty">{listTab === 'in-stock' && query.trim() ? 'No for-sale units match. Not-for-sale and defective units are under Defective.' : 'No units match this filter.'}</div>}
-      {list?.items.map(u => { if(u.group_id && (u.group_total || 0) > 1) return <ReceiveGroupRow key={u.group_id} item={u} client={client} admin={canDelete} money={money} onOpen={(sku,missing)=>{setSelected(sku);setSelectedMissing(missing||[])}} searchQuery={query} onChanged={()=>{setRefresh(n=>n+1);onCostChanged()}} />; const actions = showDispositionButtons({ isAdmin: canDelete, associateBrowseOnly, unsold: ['available', 'reserved', 'repair'].includes(u.state) });
+      {list?.items.map((u, idx) => { if(u.group_id && (u.group_total || 0) > 1) return <ReceiveGroupRow key={u.group_id} item={u} client={client} admin={canDelete} money={money} onOpen={(sku,missing)=>{setSelected(sku);setSelectedMissing(missing||[])}} searchQuery={query} onChanged={()=>{setRefresh(n=>n+1);onCostChanged()}} />; const actions = showDispositionButtons({ isAdmin: canDelete, associateBrowseOnly, unsold: ['available', 'reserved', 'repair'].includes(u.state) });
       const rowButton = <button type="button" className="inventory-row" key={u.sku} disabled={hideMoney} onClick={() => { if (!hideMoney) {setSelected(u.sku);setSelectedMissing(u.missing||[]);} }}>
-        <span className="inventory-photo">{u.photo_path && urls[u.photo_path] ? <img loading="lazy" src={urls[thumb(u.photo_path)] || urls[u.photo_path]} onError={e => { const fallback = urls[u.photo_path!]; if (e.currentTarget.src !== fallback) e.currentTarget.src = fallback; }} alt="" /> : 'No photo'}</span>
+        <span className="inventory-photo"><UnitListThumb client={client} photoPath={u.photo_path} urls={urls} onUrl={(p, url) => mergeUrls({ [p]: url })} eager={idx < 16} placeholder="No photo" /></span>
         <span className="inventory-identity"><strong>{name(u)}</strong><small>SKU {u.sku}{u.title && u.title !== name(u) ? ` · ${u.title}` : ''}</small></span>
         <span className="inventory-meta">{u.condition || 'No grade'}<small>{u.not_for_sale ? 'Not for sale' : listTab === 'sold' && u.sold_at ? `Sold ${stamp(u.sold_at)}` : label(u.state)}{(u.is_stocked || (u.qty_on_hand ?? 1) > 1) && <b className="stock-quantity-badge">×{listTab === 'sold' ? (u.sold_qty ?? 0) : u.qty_on_hand}</b>}</small>{listTab === 'unfinished' && !!u.missing?.length && <small className="inventory-missing">{missingText(u.missing)}</small>}</span>
         <span className="inventory-location">{u.locations || 'Unassigned'}</span>

@@ -9,12 +9,55 @@ export type UnitPhoto = {
   sort_order: number | null;
 };
 
+/** Signed URLs are minted for 3600s; refresh before expiry. */
+const URL_TTL_MS = 50 * 60 * 1000;
+const SESSION_KEY = 'floor_photo_urls_v1';
+const memoryCache = new Map<string, { url: string; at: number }>();
+
+function cacheGet(path: string): string | null {
+  const row = memoryCache.get(path);
+  if (!row) return null;
+  if (Date.now() - row.at > URL_TTL_MS) {
+    memoryCache.delete(path);
+    return null;
+  }
+  return row.url;
+}
+
+function cacheSet(path: string, url: string) {
+  memoryCache.set(path, { url, at: Date.now() });
+}
+
+/** Hydrate memory cache from sessionStorage (per browser tab). */
+export function hydratePhotoUrlCache(scope: string) {
+  try {
+    const raw = sessionStorage.getItem(`${SESSION_KEY}:${scope}`);
+    if (!raw) return;
+    const pack = JSON.parse(raw) as { at: number; urls: Record<string, string> };
+    if (!pack?.at || Date.now() - pack.at > URL_TTL_MS) return;
+    for (const [path, url] of Object.entries(pack.urls || {})) {
+      if (url) cacheSet(path, url);
+    }
+  } catch { /* quota / private mode */ }
+}
+
+export function persistPhotoUrlCache(scope: string, urls: Record<string, string>) {
+  try {
+    const merged: Record<string, string> = {};
+    for (const [path, row] of memoryCache.entries()) {
+      if (Date.now() - (row?.at || 0) <= URL_TTL_MS && row?.url) merged[path] = row.url;
+    }
+    Object.assign(merged, urls);
+    sessionStorage.setItem(`${SESSION_KEY}:${scope}`, JSON.stringify({ at: Date.now(), urls: merged }));
+  } catch { /* quota */ }
+}
+
 /** Stock shots are manufacturer/pro photos. Everything else is a photo of this unit. */
 export function isStockPhoto(photo: { source?: string | null }) {
   return String(photo.source || '').toLowerCase() === 'stock';
 }
 
-export function photoKind(photo: { source?: string | null }): 'Real photo' | 'Stock photo' {
+export function photoKind(photo: { source?: string | null }) {
   return isStockPhoto(photo) ? 'Stock photo' : 'Real photo';
 }
 
@@ -46,6 +89,22 @@ export function derivativePath(path: string, size: 400 | 1200): string | null {
   return `${parts[0]}/${parts[1]}/web/${size}/${stem}.webp`;
 }
 
+/** List-view storage path: prefer 400px WebP derivative key (fallback at render if missing). */
+export function listThumbStoragePath(originalPath: string | null | undefined): string | null {
+  if (!originalPath) return null;
+  return derivativePath(originalPath, 400) || originalPath;
+}
+
+export function listThumbPathsFromOriginals(paths: (string | null | undefined)[]): string[] {
+  return [...new Set(paths.map(listThumbStoragePath).filter((p): p is string => Boolean(p)))];
+}
+
+export function listThumbPathsFromPhotoMap(photos: Record<string, UnitPhoto[]>): string[] {
+  return listThumbPathsFromOriginals(
+    Object.values(photos).map((rows) => listThumbPhoto(rows)?.path),
+  );
+}
+
 export async function loadUnitPhotos(client: SupabaseClient, storeId: string, skus: string[]) {
   const unique = [...new Set(skus.filter((sku) => sku && sku !== 'UNMATCHED'))];
   const grouped: Record<string, UnitPhoto[]> = {};
@@ -65,15 +124,36 @@ export async function loadUnitPhotos(client: SupabaseClient, storeId: string, sk
   return grouped;
 }
 
-/** Signed URLs for the paths that exist. Missing derivatives come back without a URL. */
+export async function signOnePhotoUrl(client: SupabaseClient, path: string) {
+  const hit = cacheGet(path);
+  if (hit) return hit;
+  const { data, error } = await client.storage.from('unit-photos').createSignedUrl(path, 3600);
+  if (error) return null;
+  const url = data?.signedUrl || null;
+  if (url) cacheSet(path, url);
+  return url;
+}
+
+/** Signed URLs for storage paths that exist. Uses an in-memory cache so tabs do not re-sign every navigation. */
 export async function signPhotoUrls(client: SupabaseClient, paths: string[]) {
   const keys = [...new Set(paths.filter(Boolean))];
   const out: Record<string, string> = {};
-  for (let i = 0; i < keys.length; i += 40) {
-    const chunk = keys.slice(i, i + 40);
-    const { data } = await client.storage.from('unit-photos').createSignedUrls(chunk, 3600);
+  const need: string[] = [];
+  for (const key of keys) {
+    const hit = cacheGet(key);
+    if (hit) out[key] = hit;
+    else need.push(key);
+  }
+  if (!need.length) return out;
+  for (let i = 0; i < need.length; i += 100) {
+    const chunk = need.slice(i, i + 100);
+    const { data, error } = await client.storage.from('unit-photos').createSignedUrls(chunk, 3600);
+    if (error) throw error;
     for (const row of data || []) {
-      if (row?.path && row.signedUrl && !row.error) out[row.path] = row.signedUrl;
+      if (row?.path && row.signedUrl && !row.error) {
+        out[row.path] = row.signedUrl;
+        cacheSet(row.path, row.signedUrl);
+      }
     }
   }
   return out;
