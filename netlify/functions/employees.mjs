@@ -1,4 +1,4 @@
-import { staffFromEvent, serviceClient, json, corsHeaders } from "../lib/server.mjs";
+import { connectionAdminFromEvent, staffFromEvent, serviceClient, json, corsHeaders } from "../lib/server.mjs";
 import { wrapHandler, asNetlifyFunction } from "../lib/floor-log.mjs";
 import { randomBytes } from "node:crypto";
 
@@ -13,15 +13,33 @@ import { randomBytes } from "node:crypto";
  */
 const ADMIN_ROLES = new Set(["owner", "manager"]);
 const ROLES = new Set(["owner", "manager", "staff"]);
+const PROTECTED_EMAIL = "admin@admin.com";
 
 async function adminFromEvent(event) {
-  const ctx = await staffFromEvent(event);
-  if (!ADMIN_ROLES.has(ctx.staff.role)) {
-    const err = new Error("not_admin");
-    err.status = 403;
-    throw err;
+  try {
+    const ctx = await staffFromEvent(event);
+    if (ADMIN_ROLES.has(ctx.staff.role)) return ctx;
+  } catch (err) {
+    if (err?.message === "not_signed_in") {
+      err.status = 401;
+      throw err;
+    }
   }
-  return ctx;
+  try {
+    const ctx = await connectionAdminFromEvent(event, ["owner", "manager"]);
+    if (ctx.staff.role === "portal_admin" || ADMIN_ROLES.has(ctx.staff.role)) return ctx;
+  } catch {
+    /* fall through */
+  }
+  const err = new Error("not_admin");
+  err.status = 403;
+  throw err;
+}
+
+async function isProtectedAccount(sb, userId) {
+  const { data } = await sb.auth.admin.getUserById(userId).catch(() => ({ data: null }));
+  const user = data?.user ?? data ?? null;
+  return String(user?.email || "").trim().toLowerCase() === PROTECTED_EMAIL;
 }
 
 function rpcErr(res) {
@@ -121,10 +139,11 @@ async function handle(event) {
   if (action === "create") {
     const name = String(body.name || "").trim();
     const email = signInEmail(body.email || body.username);
-    const role = String(body.role || "staff").toLowerCase();
+    const role = String(body.role || "staff").toLowerCase() === "admin" ? "manager" : String(body.role || "staff").toLowerCase();
     const password = String(body.password || "") || randomBytes(9).toString("base64url");
     if (!name) return json(400, { error: "name_required" });
     if (!email) return json(400, { error: "email_or_username_required" });
+    if (email === PROTECTED_EMAIL) return json(400, { error: "protected_account" });
     if (!ROLES.has(role)) return json(400, { error: "invalid_role" });
     if (password.length < 6) return json(400, { error: "password_too_short" });
     if (role === "owner" && ctx.staff.role !== "owner") return json(403, { error: "owner_only" });
@@ -159,6 +178,10 @@ async function handle(event) {
   if (!userId) return json(400, { error: "userId_required" });
   const target = await targetStaff(sb, storeId, userId);
   if (!target) return json(404, { error: "staff_not_found" });
+
+  if (await isProtectedAccount(sb, userId) && action !== "resetPassword") {
+    return json(400, { error: "protected_account" });
+  }
 
   if (action === "setRole") {
     const role = String(body.role || "").toLowerCase();
@@ -209,6 +232,7 @@ async function handle(event) {
       p_store: storeId,
     });
     if (error) throw rpcErr({ error });
+    if (await isProtectedAccount(sb, userId)) return json(400, { error: "protected_account" });
     const del = await sb.auth.admin.deleteUser(userId).catch(() => null);
     return json(200, { ok: true, authUserDeleted: !del?.error });
   }
