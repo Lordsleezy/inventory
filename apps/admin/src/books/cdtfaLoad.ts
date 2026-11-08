@@ -1,6 +1,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { PaperLine, PaperSale, PaperSigner } from './CdtfaPaper';
-import { dueOn, filingBounds, periodLabel, resolveCdtfaDollars, type CdtfaFrequency } from './cdtfaResolve';
+import { dueOn, periodLabel, resolveCdtfaDollars, type CdtfaFrequency } from './cdtfaResolve';
+import { formKind, monthsInRange, recordsStamp, spanBounds, spanFrequency } from './booksSpan';
+import { roundingNote } from './cdtfaRoundNote';
 
 export type CdtfaPrintModel = {
   lines: PaperLine[];
@@ -14,6 +16,8 @@ export type CdtfaPrintModel = {
   scheduleNote: string;
   districtMeasure: number;
   districtMeasureEdited: boolean;
+  recordsNote: string | null;
+  roundingNote: string | null;
 };
 
 type FloorLine = { id: string; label: string; dollars: number; note: string; sales?: PaperSale[] };
@@ -28,17 +32,18 @@ type Doc = {
 
 const SIGNER = ['name', 'title', 'date', 'email', 'phone', 'account'] as const;
 
-export async function loadCdtfaPrintModel(client: SupabaseClient, monthStart: string): Promise<CdtfaPrintModel | null> {
+export async function loadCdtfaPrintModel(client: SupabaseClient, periodStart: string, periodEnd: string): Promise<CdtfaPrintModel | null> {
   const filing = await client.rpc('portal_cdtfa_filing');
   if (filing.error) return null;
   const frequency = (filing.data as CdtfaFrequency) || 'quarterly';
-  const period = filingBounds(monthStart, frequency);
+  const kind = formKind(periodStart, periodEnd);
   const [result, saved] = await Promise.all([
-    client.rpc('portal_cdtfa_return', { p_start: period.start, p_end: period.end }),
-    client.rpc('portal_cdtfa_edits', { p_start: period.start, p_end: period.end }),
+    client.rpc('portal_cdtfa_return', { p_start: periodStart, p_end: periodEnd }),
+    client.rpc('portal_cdtfa_edits', { p_start: periodStart, p_end: periodEnd }),
   ]);
   if (result.error || !result.data) return null;
   const doc = result.data as Doc;
+  const roundGap = await loadRoundingNote(client, doc);
   const raw = (saved.data || {}) as Record<string, { dollars: number | null; text: string | null }>;
   const edits: Record<string, number | undefined> = {};
   const signer: PaperSigner = { name: '', title: '', date: '', email: '', phone: '', account: '' };
@@ -56,12 +61,31 @@ export async function loadCdtfaPrintModel(client: SupabaseClient, monthStart: st
     signer,
     open: doc.open,
     locked: doc.locked,
-    periodLabel: periodLabel(doc.period_start, doc.period_end, frequency, doc.due_on),
+    periodLabel: periodLabel(doc.period_start, doc.period_end, spanFrequency(kind), doc.due_on),
     periodStart: doc.period_start,
     periodEnd: doc.period_end,
     dueOn: doc.due_on || dueOn(doc.period_end),
     scheduleNote: doc.schedule_a2?.note || doc.place || '',
     districtMeasure: edits.A4 ?? 0,
     districtMeasureEdited: edits.A4 != null,
+    recordsNote: recordsStamp(kind, frequency),
+    roundingNote: roundGap,
   };
+}
+
+export async function loadCdtfaRoundingNote(client: SupabaseClient, lines: { id: string; dollars: number }[], start: string, end: string) {
+  return loadRoundingNote(client, { period_start: start, period_end: end, due_on: '', open: false, locked: false, lines: lines as Doc['lines'] });
+}
+
+async function loadRoundingNote(client: SupabaseClient, doc: Doc) {
+  const months = monthsInRange(doc.period_start, doc.period_end);
+  if (months.length < 2) return null;
+  const loaded = await Promise.all(months.map(async (month) => {
+    const bounds = spanBounds(month, 'month');
+    const result = await client.rpc('portal_cdtfa_return', { p_start: bounds.start, p_end: bounds.end });
+    if (result.error || !result.data) return null;
+    return (result.data as Doc).lines;
+  }));
+  if (loaded.some((rows) => !rows)) return null;
+  return roundingNote(doc.lines, loaded as Doc['lines'][]);
 }

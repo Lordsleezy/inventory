@@ -10,6 +10,9 @@ import { BooksLock } from './BooksLock';
 import { CdtfaPaper } from './CdtfaPaper';
 import { CdtfaReturn } from './CdtfaReturn';
 import type { CdtfaPrintModel } from './cdtfaLoad';
+import type { BooksSpan } from './booksSpan';
+import type { BooksSlice } from './combineBooks';
+import type { CdtfaFrequency } from './cdtfaResolve';
 import { BooksIconExpenses, BooksIconInventory, BooksIconPayouts, BooksIconReceived, BooksIconSales, BooksIconTax } from './reportIcons';
 
 export type Sheet = 'hub' | 'sales' | 'expenses' | 'payouts' | 'inventory' | 'received' | 'tax';
@@ -20,7 +23,7 @@ const REPORT_ROWS: { id: Sheet; title: string; sub: string; hue: string; Icon: (
   { id: 'payouts', title: 'Payouts', sub: "Store payouts, commissions, owner's take", hue: '#30d158', Icon: BooksIconPayouts },
   { id: 'inventory', title: 'Inventory', sub: 'Stock, giveaways, replacements, returns', hue: '#5ac8fa', Icon: BooksIconInventory },
   { id: 'received', title: 'Items received', sub: 'Everything inventoried this month', hue: '#bf5af2', Icon: BooksIconReceived },
-  { id: 'tax', title: 'Sales tax return', sub: 'CDTFA-401-A for this filing period', hue: '#ffffff', Icon: BooksIconTax },
+  { id: 'tax', title: 'Sales tax return', sub: 'CDTFA-401-A for this report', hue: '#ffffff', Icon: BooksIconTax },
 ];
 
 export type ViewProps = {
@@ -57,10 +60,95 @@ export type ViewProps = {
   lockedStaleMath?: boolean;
   lockedMonths?: string[];
   taxForm?: CdtfaPrintModel | null;
+  span: BooksSpan;
+  setSpan: (span: BooksSpan) => void;
+  filing: CdtfaFrequency;
+  onFiling: (frequency: CdtfaFrequency) => void;
+  spanOptions: { value: string; label: string }[];
+  spanValue: string;
+  onSpanValue: (start: string) => void;
+  slices: BooksSlice[];
+  spanWord: string;
+  showLock: boolean;
 };
 
 export function BooksViews(props: ViewProps) {
   return props.native ? <BooksNative {...props} /> : <BooksDesktop {...props} />;
+}
+
+function uiStatus(p: ViewProps) {
+  if (p.span === 'month') return periodUiStatus(p.period);
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+  if (p.period.period_end >= today) return 'in_progress' as const;
+  if (p.period.status === 'locked') return 'locked' as const;
+  return 'draft' as const;
+}
+
+function SpanSwitch({ p }: { p: ViewProps }) {
+  const choice = (id: BooksSpan, label: string) => (
+    <button key={id} type="button" className={p.span === id ? 'on' : ''} onClick={() => p.setSpan(id)}>{label}</button>
+  );
+  return (
+    <div className="books-span-switch" role="group" aria-label="Report length">
+      {choice('month', 'Month')}
+      {choice('quarter', 'Quarter')}
+      {p.filing === 'yearly' && choice('year', 'Year')}
+    </div>
+  );
+}
+
+function TaxForm({ p }: { p: ViewProps }) {
+  return (
+    <CdtfaReturn
+      client={p.client}
+      money={p.money}
+      periodStart={p.period.period_start}
+      periodEnd={p.period.period_end}
+      onPeriod={p.onSpanValue}
+      onFiling={p.onFiling}
+    />
+  );
+}
+
+function SpanParts({ p, render, compact, linesOnly, rollup }: {
+  p: ViewProps;
+  render: (workbook: BooksWorkbook, word: string) => ReactNode;
+  compact?: boolean;
+  linesOnly?: boolean;
+  rollup?: boolean;
+}) {
+  if (p.slices.length < 2) return render(p.workbook, 'month');
+  const heading = p.spanWord === 'year' ? 'Year total' : 'Quarter total';
+  const totals = p.workbook.sales.totals;
+  return (
+    <>
+      {p.slices.map((slice) => (
+        <section key={slice.label} className="books-span-part">
+          <h3 className="books-span-label">{slice.label}</h3>
+          {compact ? (
+            <p className="books-span-subtotal">
+              Commissions {p.money(slice.workbook.payouts.commission_total_cents)}
+              {' · '}Owner keeps {p.money(slice.workbook.payouts.owner.ownerKeeps)}
+              {' · '}Expenses {p.money(slice.workbook.expenses.total_cents)}
+            </p>
+          ) : render(slice.workbook, 'month')}
+        </section>
+      ))}
+      {!linesOnly && (
+        <section className="books-span-part">
+          <h3 className="books-span-label">{heading}</h3>
+          {compact && <PayoutsBody money={p.money} workbook={p.workbook} periodWord={p.spanWord} />}
+          {rollup && render(p.workbook, p.spanWord)}
+          {!compact && !rollup && (
+            <p className="books-span-subtotal">
+              Sales {p.money(totals.revenue)} · Profit {p.money(totals.profit)} · Commissions {p.money(totals.commission)} · Expenses {p.money(p.workbook.expenses.total_cents)} · Owner keeps {p.money(p.workbook.payouts.owner.ownerKeeps)}
+            </p>
+          )}
+        </section>
+      )}
+      {linesOnly && <p className="books-span-subtotal">{heading}: {p.workbook.received.length} items received</p>}
+    </>
+  );
 }
 
 function BooksNative(p: ViewProps) {
@@ -68,22 +156,23 @@ function BooksNative(p: ViewProps) {
     return (
       <div className="native-report-body books-sheet">
         {p.sheet !== 'tax' && <button type="button" className="native-report-action" aria-label="Download" disabled={!p.exportFiles} onClick={p.onExcel}>↓</button>}
-        <p className="books-sheet-period">{monthLabel(p.period.period_start)}</p>
-        {p.sheet === 'sales' && <SalesBody money={p.money} workbook={p.workbook} report={p.report} native />}
-        {p.sheet === 'expenses' && <ExpensesBody money={p.money} workbook={p.workbook} native onDuplicateDecision={p.onDuplicateDecision} />}
-        {p.sheet === 'payouts' && <PayoutsBody money={p.money} workbook={p.workbook} native />}
-        {p.sheet === 'inventory' && <InventoryBody money={p.money} inventory={p.inventory} native />}
-        {p.sheet === 'received' && <ReceivedBody money={p.money} items={p.workbook.received} native />}
-        {p.sheet === 'tax' && <CdtfaReturn client={p.client} money={p.money} monthStart={p.period.period_start} />}
+        <p className="books-sheet-period">{p.spanWord === 'month' ? monthLabel(p.period.period_start) : p.spanOptions.find((row) => row.value === p.spanValue)?.label}</p>
+        {p.sheet === 'sales' && <SpanParts p={p} render={(workbook) => <SalesBody money={p.money} workbook={workbook} report={p.report} native />} />}
+        {p.sheet === 'expenses' && <SpanParts p={p} render={(workbook) => <ExpensesBody money={p.money} workbook={workbook} native onDuplicateDecision={p.span === 'month' ? p.onDuplicateDecision : undefined} />} />}
+        {p.sheet === 'payouts' && <SpanParts p={p} render={(workbook, word) => <PayoutsBody money={p.money} workbook={workbook} native periodWord={word} />} compact />}
+        {p.sheet === 'inventory' && <SpanParts p={p} render={(workbook, word) => <InventoryBody money={p.money} inventory={workbook.inventory} native periodWord={word} />} rollup />}
+        {p.sheet === 'received' && <SpanParts p={p} render={(workbook) => <ReceivedBody money={p.money} items={workbook.received} native />} linesOnly />}
+        {p.sheet === 'tax' && <TaxForm p={p} />}
       </div>
     );
   }
-  const ui = periodUiStatus(p.period);
+  const ui = uiStatus(p);
   return (
     <div className="native-report-body books-native-hub">
+      <SpanSwitch p={p} />
       <button type="button" className="books-month-field" aria-haspopup="listbox" aria-expanded={p.pickerOpen} onClick={() => p.setPickerOpen(true)}>
-        <small>MONTH</small>
-        <span>{periodPickerLabel(p.period)}</span>
+        <small>{p.span.toUpperCase()}</small>
+        <span>{p.spanOptions.find((row) => row.value === p.spanValue)?.label || periodPickerLabel(p.period)}</span>
         <i className="native-chevron books-month-chevron" aria-hidden>›</i>
       </button>
       <SummaryCard money={p.money} totals={p.totals} native absorbFees={p.absorbFees} onlineChannels={p.onlineChannels} />
@@ -103,22 +192,24 @@ function BooksNative(p: ViewProps) {
         <button type="button" className="books-native-export" disabled={!p.exportFiles || p.exportsPreparing} onClick={p.onExcel}>Download Excel</button>
         <button type="button" className="books-native-export" disabled={!p.exportFiles || p.exportsPreparing} onClick={p.onPdf}>Print / PDF</button>
       </div>
-      <BooksLock native client={p.client} money={p.money} period={p.period} report={p.report} inventory={p.inventory} received={p.received} workbook={p.workbook} uiStatus={ui} busy={p.busy} setBusy={p.setBusy} onError={p.onError} onReload={p.onReload} lockedStaleMath={p.lockedStaleMath} />
+      {p.showLock && <BooksLock native client={p.client} money={p.money} period={p.period} report={p.report} inventory={p.inventory} received={p.received} workbook={p.workbook} uiStatus={ui} busy={p.busy} setBusy={p.setBusy} onError={p.onError} onReload={p.onReload} lockedStaleMath={p.lockedStaleMath} />}
+      {!p.showLock && <p className="native-report-footnote">Lock each month from the Month view. This {p.spanWord}'s tax form locks when every month in it is locked.</p>}
       {p.pickerOpen && <MonthPickerSheet {...p} />}
     </div>
   );
 }
 
 function BooksDesktop(p: ViewProps) {
-  const ui = periodUiStatus(p.period);
+  const ui = uiStatus(p);
   const tab = p.desktopTab === 'hub' ? 'sales' : p.desktopTab;
   return (
     <div className="books-desktop">
       <div className="books-desktop-toolbar">
+        <SpanSwitch p={p} />
         <label className="books-month-picker">
-          Month
-          <select value={p.periodId} onChange={(e) => p.setPeriodId(e.target.value)}>
-            {p.periods.map((m) => <option key={m.id} value={m.id}>{periodPickerLabel(m)}</option>)}
+          {p.span === 'month' ? 'Month' : p.span === 'year' ? 'Year' : 'Quarter'}
+          <select aria-label="Report period" value={p.spanValue} onChange={(e) => p.onSpanValue(e.target.value)}>
+            {p.spanOptions.map((row) => <option key={row.value} value={row.value}>{row.label}</option>)}
           </select>
         </label>
         <span className={`books-status-pill books-status-${ui}`}>{periodStatusLabel(ui)}</span>
@@ -137,20 +228,21 @@ function BooksDesktop(p: ViewProps) {
         ))}
       </nav>
       <div className="books-desktop-panel">
-        {tab === 'sales' && <SalesTable money={p.money} workbook={p.workbook} totals={p.totals} />}
-        {tab === 'expenses' && <ExpensesTable money={p.money} workbook={p.workbook} />}
-        {tab === 'payouts' && <PayoutsBody money={p.money} workbook={p.workbook} />}
-        {tab === 'inventory' && <InventoryBody money={p.money} inventory={p.inventory} />}
-        {tab === 'received' && <ReceivedBody money={p.money} items={p.workbook.received} />}
-        {tab === 'tax' && <CdtfaReturn client={p.client} money={p.money} monthStart={p.period.period_start} />}
+        {tab === 'sales' && <SpanParts p={p} render={(workbook) => <SalesTable money={p.money} workbook={workbook} totals={workbook.sales.totals} />} />}
+        {tab === 'expenses' && <SpanParts p={p} render={(workbook) => <ExpensesTable money={p.money} workbook={workbook} />} />}
+        {tab === 'payouts' && <SpanParts p={p} render={(workbook, word) => <PayoutsBody money={p.money} workbook={workbook} periodWord={word} />} compact />}
+        {tab === 'inventory' && <SpanParts p={p} render={(workbook, word) => <InventoryBody money={p.money} inventory={workbook.inventory} periodWord={word} />} rollup />}
+        {tab === 'received' && <SpanParts p={p} render={(workbook) => <ReceivedBody money={p.money} items={workbook.received} />} linesOnly />}
+        {tab === 'tax' && <TaxForm p={p} />}
       </div>
-      <BooksLock client={p.client} money={p.money} period={p.period} report={p.report} inventory={p.inventory} received={p.received} workbook={p.workbook} uiStatus={ui} busy={p.busy} setBusy={p.setBusy} onError={p.onError} onReload={p.onReload} lockedStaleMath={p.lockedStaleMath} />
+      {p.showLock && <BooksLock client={p.client} money={p.money} period={p.period} report={p.report} inventory={p.inventory} received={p.received} workbook={p.workbook} uiStatus={ui} busy={p.busy} setBusy={p.setBusy} onError={p.onError} onReload={p.onReload} lockedStaleMath={p.lockedStaleMath} />}
+      {!p.showLock && <p className="books-proof-audit">Lock each month from the Month view. This {p.spanWord}'s tax form locks when every month in it is locked.</p>}
       <div className="books-print-sheets" aria-hidden>
-        <section><h2>Sales</h2><SalesTable money={p.money} workbook={p.workbook} totals={p.totals} /></section>
-        <section><h2>Expenses</h2><ExpensesTable money={p.money} workbook={p.workbook} /></section>
-        <section><h2>Payouts</h2><PayoutsBody money={p.money} workbook={p.workbook} /></section>
-        <section><h2>Inventory</h2><InventoryBody money={p.money} inventory={p.inventory} /></section>
-        <section><h2>Items received</h2><ReceivedBody money={p.money} items={p.workbook.received} /></section>
+        <section><h2>Sales</h2><SpanParts p={p} render={(workbook) => <SalesTable money={p.money} workbook={workbook} totals={workbook.sales.totals} />} /></section>
+        <section><h2>Expenses</h2><SpanParts p={p} render={(workbook) => <ExpensesTable money={p.money} workbook={workbook} />} /></section>
+        <section><h2>Payouts</h2><SpanParts p={p} render={(workbook, word) => <PayoutsBody money={p.money} workbook={workbook} periodWord={word} />} compact /></section>
+        <section><h2>Inventory</h2><SpanParts p={p} render={(workbook, word) => <InventoryBody money={p.money} inventory={workbook.inventory} periodWord={word} />} rollup /></section>
+        <section><h2>Items received</h2><SpanParts p={p} render={(workbook) => <ReceivedBody money={p.money} items={workbook.received} />} linesOnly /></section>
         {p.taxForm && (
           <section>
             <h2>Sales tax return</h2>
@@ -250,33 +342,24 @@ function SummaryCard({ money, totals, native, absorbFees, onlineChannels }: { mo
 }
 
 function MonthPickerSheet(p: ViewProps) {
-  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
-  const years = [...new Set(p.periods.map((m) => m.period_start.slice(0, 4)))];
   return (
     <div className="books-picker-scrim" role="presentation" onClick={() => p.setPickerOpen(false)}>
-      <div className="books-picker-sheet" role="dialog" aria-label="Pick a month" onClick={(e) => e.stopPropagation()}>
+      <div className="books-picker-sheet" role="dialog" aria-label="Pick a period" onClick={(e) => e.stopPropagation()}>
         <div className="books-picker-head">
-          <strong>Pick a month</strong>
+          <strong>Pick a {p.span}</strong>
           <button type="button" onClick={() => p.setPickerOpen(false)}>Done</button>
         </div>
-        {years.map((y) => (
-          <div key={y}>
-            <p className="books-picker-year">{y}</p>
-            <div className="native-report-group">
-              {p.periods.filter((m) => m.period_start.startsWith(y)).map((m) => {
-                const st = periodUiStatus(m, today);
-                const selected = m.id === p.periodId;
-                return (
-                  <button key={m.id} type="button" className={`native-report-row books-picker-row${selected ? ' selected' : ''}`} onClick={() => { p.setPeriodId(m.id); p.setPickerOpen(false); }}>
-                    <span>{periodPickerLabel(m)}</span>
-                    <b className={`books-picker-status books-picker-${st}`}>{selected ? '✓ ' : ''}{periodStatusLabel(st)}</b>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        ))}
-        <p className="native-report-footnote">Only months with sales or inventory show up here.</p>
+        <div className="native-report-group">
+          {p.spanOptions.map((row) => {
+            const selected = row.value === p.spanValue;
+            return (
+              <button key={row.value} type="button" className={`native-report-row books-picker-row${selected ? ' selected' : ''}`} onClick={() => { p.onSpanValue(row.value); p.setPickerOpen(false); }}>
+                <span>{row.label}</span>
+                <b>{selected ? '✓' : ''}</b>
+              </button>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
@@ -451,7 +534,7 @@ function ExpensesBody({ money, workbook, native, onDuplicateDecision }: { money:
   return <>{head}{body}{dupes}{foot}</>;
 }
 
-function PayoutsBody({ money, workbook, native }: { money: (c: number) => string; workbook: BooksWorkbook; native?: boolean }) {
+function PayoutsBody({ money, workbook, periodWord = 'month' }: { money: (c: number) => string; workbook: BooksWorkbook; native?: boolean; periodWord?: string }) {
   const [openStore, setOpenStore] = useState<string | null>(null);
   const p = workbook.payouts;
   const section = (title: string, total: number | null, children: ReactNode) => (
@@ -464,7 +547,7 @@ function PayoutsBody({ money, workbook, native }: { money: (c: number) => string
     <>
       {section('STORE BALANCES (MONEY TAB)', p.bankPaidTotal_cents, (
         <>
-          <p className="native-report-footnote">From Safe · bank payouts and balances for this month.</p>
+          <p className="native-report-footnote">From Safe · bank payouts and balances for this {periodWord}. All-time owed is the payout ledger, counted once.</p>
           {p.stores.map((s) => (
             <div key={s.account}>
               <button type="button" className="native-report-row books-store-row" onClick={() => setOpenStore(openStore === s.account ? null : s.account)}>
@@ -528,18 +611,18 @@ function PayoutsBody({ money, workbook, native }: { money: (c: number) => string
   );
 }
 
-function InventoryBody({ money, inventory, native }: { money: (c: number) => string; inventory: InventorySummary; native?: boolean }) {
+function InventoryBody({ money, inventory, native, periodWord = 'month' }: { money: (c: number) => string; inventory: InventorySummary; native?: boolean; periodWord?: string }) {
   const o = inventory.owner;
   const v = o?.value;
   const rows = [
-    ['Start of month', inventory.start_unit_count, ''],
+    [`Start of ${periodWord}`, inventory.start_unit_count, ''],
     ['Received', inventory.received_units, '+'],
     ['Returned to stock', inventory.return_to_stock_units ?? 0, '+'],
     ['Sold', inventory.sold_units, '-'],
     ['Given away', inventory.giveaway_units, '-'],
     ['Sent as replacements', inventory.replacement_units, '-'],
     ['Moved to Defective', inventory.defective_units, '-'],
-    ['End of month', inventory.end_unit_count, ''],
+    [`End of ${periodWord}`, inventory.end_unit_count, ''],
   ] as const;
   const move = o?.movement || {};
   return (
@@ -637,7 +720,7 @@ function InventoryBody({ money, inventory, native }: { money: (c: number) => str
       <div className={`${native ? 'native-report-group' : 'books-table-wrap books-inventory-flow'}`}>
         {rows.map(([label, value, sign]) => (
           native
-            ? <div key={label} className={`native-report-row${label === 'End of month' ? ' strong' : ''}`}><span>{label}</span><b className={sign === '+' ? 'plus' : sign === '-' ? 'minus' : ''}>{sign ? `${sign}${value}` : value}</b></div>
+            ? <div key={label} className={`native-report-row${String(label).startsWith('End of') ? ' strong' : ''}`}><span>{label}</span><b className={sign === '+' ? 'plus' : sign === '-' ? 'minus' : ''}>{sign ? `${sign}${value}` : value}</b></div>
             : <div key={label} className="books-flow-row"><span>{label}</span><b>{value}</b></div>
         ))}
       </div>

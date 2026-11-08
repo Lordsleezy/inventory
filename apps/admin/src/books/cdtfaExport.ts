@@ -14,6 +14,7 @@ export async function addCdtfaExcelSheet(bytes: Uint8Array, model: CdtfaPrintMod
   const existing = book.getWorksheet(name);
   if (existing) book.removeWorksheet(existing.id);
   const sheet = book.addWorksheet(name);
+  if (model.recordsNote) sheet.addRow([model.recordsNote]);
   sheet.addRow([model.open ? 'DRAFT — PERIOD OPEN' : 'CDTFA-401-A', model.periodLabel]);
   sheet.addRow(['Period', model.periodStart, model.periodEnd, 'Due', model.dueOn]);
   sheet.addRow(['Line', 'Label', 'Amount', 'Floor calculated', 'Edited']);
@@ -26,6 +27,7 @@ export async function addCdtfaExcelSheet(bytes: Uint8Array, model: CdtfaPrintMod
   sheet.addRow(['Account', model.signer.account]);
   sheet.addRow(['Name', model.signer.name, 'Title', model.signer.title, 'Date', model.signer.date]);
   sheet.addRow(['Email', model.signer.email, 'Phone', model.signer.phone, 'Preparer', 'Floor']);
+  if (model.roundingNote) sheet.addRow([model.roundingNote]);
   const out = await book.xlsx.writeBuffer();
   return new Uint8Array(out);
 }
@@ -43,9 +45,10 @@ export async function addCdtfaPdfPages(bytes: Uint8Array, model: CdtfaPrintModel
       page = pdf.addPage([pageWidth, pageHeight]);
       y = pageHeight - 36;
     }
-    page.drawText(text.slice(0, 90), { x: 36, y, size: 9, font: strong ? bold : font, color: rgb(0, 0, 0) });
+    page.drawText(text.replace(/—/g, '-').slice(0, 110), { x: 36, y, size: 9, font: strong ? bold : font, color: rgb(0, 0, 0) });
     y -= 12;
   };
+  if (model.recordsNote) write(model.recordsNote, true);
   if (model.open) write('DRAFT — PERIOD OPEN', true);
   write('CDTFA-401-A REV. 126 (1-26)', true);
   write(model.periodLabel, true);
@@ -56,6 +59,7 @@ export async function addCdtfaPdfPages(bytes: Uint8Array, model: CdtfaPrintModel
   write(`A1  Transactions subject to tax          ${money(taxable)}`);
   write(`A2/A3 Subject only to 7.25%              ${money(taxable - model.districtMeasure)}`);
   write(`A4  Subject to district tax              ${money(model.districtMeasure)}`);
+  if (model.roundingNote) write(model.roundingNote);
   write(`Signed ${model.signer.name}  ${model.signer.title}  ${model.signer.date}`);
   write(`Email ${model.signer.email}  Phone ${model.signer.phone}  Preparer Floor`);
   return pdf.save();

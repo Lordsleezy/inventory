@@ -21,6 +21,8 @@ type Props = {
   scheduleNote: string;
   districtMeasure: number;
   districtMeasureEdited: boolean;
+  recordsNote?: string | null;
+  roundingNote?: string | null;
   money: (cents: number) => string;
   readOnly?: boolean;
   onDollars?: (id: string, dollars: number | null) => void;
@@ -124,6 +126,7 @@ export function CdtfaPaper(props: Props) {
   );
   return (
     <article className="cdtfa-paper">
+      {props.recordsNote && <p className="cdtfa-records">{props.recordsNote}</p>}
       {props.open && <p className="cdtfa-draft">DRAFT — PERIOD OPEN</p>}
       <header className="cdtfa-banner">
         <div>
@@ -174,6 +177,7 @@ export function CdtfaPaper(props: Props) {
         {field('email', 'Email')}
         {field('phone', 'Phone')}
         <p>Preparer <strong>Floor</strong>. Floor does not file this return.</p>
+        {props.roundingNote && <p className="cdtfa-round">{props.roundingNote}</p>}
       </section>
     </article>
   );
