@@ -20,3 +20,4 @@ if ('serviceWorker' in navigator) {
 }
 
 import './design/tools.css';
+import './design/bw.css';
