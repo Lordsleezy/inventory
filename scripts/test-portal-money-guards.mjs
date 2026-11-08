@@ -40,7 +40,9 @@ test("money-touching portal_* functions are admin-gated", () => {
   for (const [name, { file, body }] of defs) {
     if (!name.startsWith("portal_") || name === "portal_store_id" || name === "portal_is_admin") continue;
     if (ALLOW.has(name) || !MONEY.test(body)) continue;
-    if (!/portal_is_admin\(\)|portal_store_id\(\)|portal_assert_admin_store\(\)/.test(body)) bad.push(`${name} (${file})`);
+    if (!/portal_is_admin\(\)|portal_store_id\(\)|portal_assert_admin_store\(\)|books_require_admin\(\)/.test(body)) {
+      bad.push(`${name} (${file})`);
+    }
   }
   assert.deepEqual(bad, [], `portal_* functions returning money without an admin gate:\n${bad.join("\n")}`);
 });
