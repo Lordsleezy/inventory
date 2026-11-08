@@ -7,9 +7,10 @@ import { periodPickerLabel, periodStatusLabel, periodUiStatus } from './periodSt
 import { saleWhyLines } from './saleNotes';
 import { liveListedChannels, notListedLines } from './sheetChannels';
 import { BooksLock } from './BooksLock';
-import { BooksIconExpenses, BooksIconInventory, BooksIconPayouts, BooksIconReceived, BooksIconSales } from './reportIcons';
+import { CdtfaReturn } from './CdtfaReturn';
+import { BooksIconExpenses, BooksIconInventory, BooksIconPayouts, BooksIconReceived, BooksIconSales, BooksIconTax } from './reportIcons';
 
-export type Sheet = 'hub' | 'sales' | 'expenses' | 'payouts' | 'inventory' | 'received';
+export type Sheet = 'hub' | 'sales' | 'expenses' | 'payouts' | 'inventory' | 'received' | 'tax';
 
 const REPORT_ROWS: { id: Sheet; title: string; sub: string; hue: string; Icon: (p: { color: string }) => ReactNode }[] = [
   { id: 'sales', title: 'Sales', sub: 'Each item sold, by SKU', hue: '#0a84ff', Icon: BooksIconSales },
@@ -17,6 +18,7 @@ const REPORT_ROWS: { id: Sheet; title: string; sub: string; hue: string; Icon: (
   { id: 'payouts', title: 'Payouts', sub: "Store payouts, commissions, owner's take", hue: '#30d158', Icon: BooksIconPayouts },
   { id: 'inventory', title: 'Inventory', sub: 'Stock, giveaways, replacements, returns', hue: '#5ac8fa', Icon: BooksIconInventory },
   { id: 'received', title: 'Items received', sub: 'Everything inventoried this month', hue: '#bf5af2', Icon: BooksIconReceived },
+  { id: 'tax', title: 'Sales tax return', sub: 'CDTFA-401-A for this filing period', hue: '#ffffff', Icon: BooksIconTax },
 ];
 
 export type ViewProps = {
@@ -62,13 +64,14 @@ function BooksNative(p: ViewProps) {
   if (p.sheet !== 'hub') {
     return (
       <div className="native-report-body books-sheet">
-        <button type="button" className="native-report-action" aria-label="Download" disabled={!p.exportFiles} onClick={p.onExcel}>↓</button>
+        {p.sheet !== 'tax' && <button type="button" className="native-report-action" aria-label="Download" disabled={!p.exportFiles} onClick={p.onExcel}>↓</button>}
         <p className="books-sheet-period">{monthLabel(p.period.period_start)}</p>
         {p.sheet === 'sales' && <SalesBody money={p.money} workbook={p.workbook} report={p.report} native />}
         {p.sheet === 'expenses' && <ExpensesBody money={p.money} workbook={p.workbook} native onDuplicateDecision={p.onDuplicateDecision} />}
         {p.sheet === 'payouts' && <PayoutsBody money={p.money} workbook={p.workbook} native />}
         {p.sheet === 'inventory' && <InventoryBody money={p.money} inventory={p.inventory} native />}
         {p.sheet === 'received' && <ReceivedBody money={p.money} items={p.workbook.received} native />}
+        {p.sheet === 'tax' && <CdtfaReturn client={p.client} money={p.money} monthStart={p.period.period_start} />}
       </div>
     );
   }
@@ -136,6 +139,7 @@ function BooksDesktop(p: ViewProps) {
         {tab === 'payouts' && <PayoutsBody money={p.money} workbook={p.workbook} />}
         {tab === 'inventory' && <InventoryBody money={p.money} inventory={p.inventory} />}
         {tab === 'received' && <ReceivedBody money={p.money} items={p.workbook.received} />}
+        {tab === 'tax' && <CdtfaReturn client={p.client} money={p.money} monthStart={p.period.period_start} />}
       </div>
       <BooksLock client={p.client} money={p.money} period={p.period} report={p.report} inventory={p.inventory} received={p.received} workbook={p.workbook} uiStatus={ui} busy={p.busy} setBusy={p.setBusy} onError={p.onError} onReload={p.onReload} lockedStaleMath={p.lockedStaleMath} />
       <div className="books-print-sheets" aria-hidden>

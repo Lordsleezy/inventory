@@ -137,3 +137,40 @@ body.books-printing .books-desktop-panel,body.books-printing .books-print-sheets
 .books-print-sheets{display:none}
 body.books-printing .books-print-sheets section{break-before:page;margin-top:18px}
 body.books-printing .books-print-sheets section:first-child{break-before:auto}
+
+.cdtfa-sheet{color:#fff;max-width:860px}
+.cdtfa-kicker{color:#9a9a9a;letter-spacing:.04em;font-size:.75rem;margin:0}
+.cdtfa-head h2{margin:4px 0}
+.cdtfa-due{font-size:1.05rem}
+.cdtfa-note{color:#9a9a9a;font-size:.85rem;line-height:1.4}
+.cdtfa-freq{display:flex;gap:18px;margin:12px 0}
+.cdtfa-freq button{border:0;border-bottom:2px solid transparent;background:none;color:#9a9a9a;min-height:44px;padding:0 2px;font-size:16px}
+.cdtfa-freq button.on{color:#fff;border-bottom-color:#fff}
+.cdtfa-status{margin:8px 0}
+.cdtfa-bad,.cdtfa-bad small{color:#FF453A}
+.cdtfa-checks{list-style:none;padding:0;margin:0 0 12px}
+.cdtfa-checks li{padding:8px 0;border-bottom:1px solid #2a2a2a;font-size:.9rem}
+.cdtfa-line{border-bottom:1px solid #2a2a2a}
+.cdtfa-line-main{display:grid;grid-template-columns:3.2rem minmax(0,1fr) auto;gap:12px;width:100%;text-align:left;background:none;border:0;color:#fff;padding:12px 0;min-height:44px;align-items:start}
+.cdtfa-line-main small{display:block;color:#9a9a9a;font-weight:400;margin-top:4px;line-height:1.35}
+.cdtfa-id{color:#9a9a9a}
+.cdtfa-line-main b{font-size:1.05rem}
+.cdtfa-sales{list-style:none;margin:0 0 8px;padding:0 0 0 3.2rem}
+.cdtfa-sales li{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-top:1px solid #2a2a2a}
+.cdtfa-sales small{display:block;color:#9a9a9a}
+.cdtfa-a2,.cdtfa-sign{margin-top:22px}
+.cdtfa-sign{display:grid;grid-template-columns:1fr 1fr;gap:12px 16px}
+.cdtfa-sign h3,.cdtfa-sign p{grid-column:1/-1;margin:0}
+.cdtfa-sign label{display:grid;gap:4px;color:#9a9a9a;font-size:.85rem}
+.cdtfa-sign input{background:#000;color:#fff;border:0;border-bottom:1px solid #4a4a4a;min-height:44px;font-size:16px;padding:8px 0}
+.cdtfa-actions{display:flex;flex-wrap:wrap;gap:16px;margin:18px 0}
+.cdtfa-actions button{background:none;color:#fff;border:1px solid #4a4a4a;min-height:44px;padding:0 14px;font-size:16px}
+@media(max-width:640px){.cdtfa-sign{grid-template-columns:1fr}}
+body.cdtfa-printing{background:#fff}
+body.cdtfa-printing *{visibility:hidden}
+body.cdtfa-printing .cdtfa-sheet,body.cdtfa-printing .cdtfa-sheet *{visibility:visible}
+body.cdtfa-printing .cdtfa-sheet{position:absolute;left:0;top:0;width:100%;background:#fff;color:#000}
+body.cdtfa-printing .cdtfa-note,body.cdtfa-printing .cdtfa-id,body.cdtfa-printing .cdtfa-line-main small,body.cdtfa-printing .cdtfa-kicker{color:#333}
+body.cdtfa-printing .cdtfa-bad,body.cdtfa-printing .cdtfa-bad small{color:#b00000}
+body.cdtfa-printing .cdtfa-freq,body.cdtfa-printing .cdtfa-actions{display:none}
+body.cdtfa-printing .cdtfa-sign input{background:#fff;color:#000;border-bottom-color:#000}

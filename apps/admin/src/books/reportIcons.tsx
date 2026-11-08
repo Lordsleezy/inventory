@@ -1,5 +1,14 @@
 type IconProps = { color: string; className?: string };
 
+export function BooksIconTax({ color }: IconProps) {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden fill="none">
+      <rect width="24" height="24" rx="6" fill={color} opacity=".25" />
+      <path d="M8 7h8M8 12h8M8 17h5" stroke={color} strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export function BooksIconSales({ color }: IconProps) {
   return (
     <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden fill="none">
