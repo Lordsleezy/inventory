@@ -140,7 +140,7 @@ export function MoneyPage({ client, storeId, accessToken, money, stamp }: Props)
     who={r.by_user ? names[r.by_user] || '' : ''} client={client} onOpen={() => setSheet({ account, dir: r.direction === 'in' ? 'in' : 'out', row: r })} setError={setError} />);
 
   return <div className="money-page">
-    <header className="money-head"><h1>Money</h1><div className="money-total-label">All accounts</div>
+    <header className="money-head"><h1>Safe</h1><div className="money-total-label">All accounts</div>
       <div className="money-total">{loaded ? money(total) : '—'}</div>
       <div className="money-buttons">
         <button type="button" className="secondary" disabled={syncing || !loaded} onClick={() => void syncNow()}>{syncing ? 'Syncing…' : 'Sync now'}</button>

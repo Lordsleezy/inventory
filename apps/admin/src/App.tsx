@@ -796,7 +796,7 @@ export function App() {
     mercari: 'Mercari',
     reports: 'Reports',
     books: 'Books',
-    withdrawals: 'Money',
+    withdrawals: 'Safe',
     manifests: 'Manifests',
     locations: 'Locations',
     insights: 'Insights',
@@ -869,7 +869,7 @@ export function App() {
           {reportSubs.map(([tab, label]) => <button type="button" key={tab} className={page === 'reports' && nav.reportTab === tab ? 'active' : ''} onClick={() => goNav({ page: 'reports', reportTab: tab })}>{label}</button>)}
         </div>
       </div>
-      <button type="button" title="Money" className={page === 'withdrawals' ? 'active' : ''} onClick={() => goNav({ page: 'withdrawals' })}>Money</button>
+      <button type="button" title="Safe" className={page === 'withdrawals' ? 'active' : ''} onClick={() => goNav({ page: 'withdrawals' })}>Safe</button>
       <button type="button" title="Books" className={page === 'books' ? 'active' : ''} onClick={() => goNav({ page: 'books' })}>Books</button>
       {mainNav.filter(([id]) => id === 'cameras').map(([id, label]) => <button type="button" className={page === id ? 'active' : ''} key={id} title={label} onClick={() => goNav({ page: id })}>{label}</button>)}
       <div className={`nav-group${navGroup === 'other' ? ' open' : ''}${DESKTOP_OTHER_PAGES.includes(page) ? ' on' : ''}`}>

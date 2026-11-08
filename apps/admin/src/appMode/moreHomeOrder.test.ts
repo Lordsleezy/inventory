@@ -17,7 +17,7 @@ test('More home lists primary links in the phone order ending with Other', async
 test('Other page keeps marketplace and leftover admin links', async () => {
   const src = await readFile(path.join(root, 'AppMore.tsx'), 'utf8');
   const other = src.slice(src.indexOf('export function AppMoreOther'), src.indexOf('export function AppLiveSales'));
-  for (const label of ['eBay', 'Amazon', 'TikTok', 'Depop', 'Mercari', 'Connections & sync', 'Insights', 'Money', 'Manifests', 'Settings']) {
+  for (const label of ['eBay', 'Amazon', 'TikTok', 'Depop', 'Mercari', 'Connections & sync', 'Insights', 'Safe', 'Manifests', 'Settings']) {
     assert.match(other, new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   }
 });

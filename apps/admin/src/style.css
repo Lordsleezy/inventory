@@ -939,7 +939,7 @@ html.dark .aspect-list{background:#1c2129;color:#e8eef4;border-color:#354050}htm
 .withdrawal-counted{margin-top:10px;display:grid;gap:6px;color:#5d6b7a}
 .withdrawal-counted form{display:flex;flex-wrap:wrap;gap:8px;align-items:end}
 .link-button{background:none;border:0;color:#2f6f9f;padding:0;cursor:pointer;text-align:left;font:inherit}
-/* Money tab */
+/* Safe (withdrawals) tab */
 .money-page{display:grid;gap:14px;max-width:1100px;margin:0 auto;padding:4px 0 40px}
 .money-head h1{margin:0 0 6px}.money-total-label{font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;opacity:.65}
 .money-total{font-size:2.1rem;font-weight:750;font-variant-numeric:tabular-nums}
