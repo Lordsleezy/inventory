@@ -1,4 +1,5 @@
 import { channelTitle, computeBookTotals } from './booksMath';
+import { saleWhyText } from './saleNotes';
 import type { BooksWorkbook, ExpenseLine, InventorySummary, ReceivedItem, Report, Row, SalesLine } from './types';
 
 function promotedFeesForSale(report: Report, saleId: string | number) {
@@ -9,29 +10,6 @@ function promotedFeesForSale(report: Report, saleId: string | number) {
   }).reduce((n, f) => n + Number(f.amount_cents || 0), 0);
 }
 
-function saleProfitNotes(row: Row, report: Report) {
-  const notes: string[] = [];
-  const buyerShip = Number(row.shipping_cents || 0);
-  const label = Number(row.ship_cost_cents || 0);
-  if (label > 0 && buyerShip > label) notes.push(`Buyer paid ${((buyerShip - label) / 100).toFixed(2)} more shipping than our label cost`);
-  if (label > 0 && label > buyerShip) notes.push(`Label cost ${(label / 100).toFixed(2)} exceeds buyer shipping ${(buyerShip / 100).toFixed(2)}`);
-  if (row.cost_cents == null || Number(row.cost_cents) === 900 || ['default', 'builtin', 'estimated'].includes(String(row.cost_source))) {
-    notes.push(Number(row.cost_cents) === 900 ? 'Default $9 cost — needs real cost' : 'Sale needs a confirmed item cost');
-  }
-  if (['pending', 'none'].includes(String(row.fee_source)) && !['in_store', 'instore', 'floor', 'store', 'website'].includes(String(row.channel).toLowerCase())) {
-    notes.push('Waiting for marketplace fees');
-  }
-  const repl = (report.dispositions || []).find((d) => d.kind === 'replacement' && String(d.original_sale_id) === String(row.id));
-  if (repl) notes.push(`Replacement issued (${repl.sku})`);
-  const ret = (report.returns || []).find((r) => String(r.sale_id) === String(row.id));
-  if (ret) notes.push(`Return: ${ret.status}`);
-  if (Array.isArray(row.commission_breakdown) && row.commission_breakdown.length) {
-    const manual = (row.commission_breakdown as Row[]).some((c) => c.amount_cents == null);
-    if (manual) notes.push('Commission partially pending');
-  }
-  if (row.commission_override || row.ticket_override) notes.push('Commission manually overridden on this ticket');
-  return notes.join('; ');
-}
 
 function commissionCents(row: Row) {
   if (Array.isArray(row.commission_breakdown) && row.commission_breakdown.length) {
@@ -126,6 +104,7 @@ function salesRows(report: Report): SalesLine[] {
     const promoted = promotedFeesForSale(report, row.id as string | number);
     const marketplace = Number(row.channel_fee_cents || 0) + Number(row.final_value_fee_cents || 0) + promoted;
     return {
+      sale_id: String(row.id ?? ''),
       date: String(row.sold_at || row.date || '').slice(0, 10),
       sku: String(row.sku || ''),
       title: String(row.item_title || row.title || row.sku || ''),
@@ -141,7 +120,7 @@ function salesRows(report: Report): SalesLine[] {
       cost_cents: row.cost_cents == null ? null : Number(row.cost_cents),
       profit_cents: row.profit_cents == null ? null : Number(row.profit_cents),
       commission_cents: commissionCents(row),
-      profit_notes: saleProfitNotes(row, report),
+      profit_notes: saleWhyText(row, report),
     };
   });
 }
@@ -171,4 +150,37 @@ export function buildBooksWorkbook(report: Report, inventory: InventorySummary, 
     inventory,
     received,
   };
+}
+
+export function groupExpensesByCategory(rows: ExpenseLine[]) {
+  const groups = new Map<string, ExpenseLine[]>();
+  for (const e of rows) {
+    const list = groups.get(e.category) || [];
+    list.push(e);
+    groups.set(e.category, list);
+  }
+  return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b));
+}
+
+export function receivedMonthStats(items: ReceivedItem[]) {
+  let units = 0;
+  let costCents = 0;
+  for (const r of items) {
+    const qty = Math.max(1, Number(r.qty_on_hand || 1));
+    units += qty;
+    const unitCost = Number(r.cost_cents || 0);
+    costCents += unitCost * qty;
+  }
+  return { units, skus: items.length, cost_cents: costCents };
+}
+
+export function groupReceivedByDay(items: ReceivedItem[]) {
+  const groups = new Map<string, ReceivedItem[]>();
+  for (const r of items) {
+    const day = String(r.received_at || '').slice(0, 10);
+    const list = groups.get(day) || [];
+    list.push(r);
+    groups.set(day, list);
+  }
+  return [...groups.entries()].sort(([a], [b]) => b.localeCompare(a));
 }

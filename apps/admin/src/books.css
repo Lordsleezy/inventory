@@ -23,3 +23,76 @@
   body.books-printing .books-table-wrap{max-height:none;overflow:visible;border:0}
 }
 @media(max-width:680px){.books-period-grid{grid-template-columns:1fr}.books-period-card.hero{padding:19px}.books-detail-head{gap:6px}.books-detail-title{min-width:calc(100% - 95px);order:2}.books-back{order:1}.books-export-actions{order:3;display:flex;width:100%;min-width:0}.books-download{min-height:47px}.books-card-metrics{gap:4px}.books-card-metrics b{font-size:.98rem}.books-channel-row{grid-template-columns:70px 1fr 72px;gap:7px;font-size:.86rem}.books-check-content{align-items:flex-start!important}.books-check-content>span{font-size:.9rem}.books-fix{padding:8px 10px}.books-explain-label{padding-left:0}.books-profit{font-size:2.25rem}}
+
+/* Mockup-aligned Books hub + sheets */
+.books-mockup{color:#ecf2fb}
+.books-summary-card-v2{background:#141c29;border:1px solid #273448;border-radius:18px;padding:18px 20px;margin:12px 0 20px;color:#e9eff8}
+.books-summary-card-v2.native{background:#1c1c1e;border-color:#333336;margin:8px 0 16px}
+.books-summary-profit small{display:block;color:#97a4b6;text-transform:uppercase;letter-spacing:.05em;font-size:.72rem}
+.books-summary-profit strong{font-size:2.4rem;line-height:1.1}
+.books-summary-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:12px}
+.books-summary-grid small{color:#96a3b6;font-size:.76rem}
+.books-summary-grid b{font-size:1rem;color:#f4f7fc}
+.books-month-field{display:grid;gap:4px;width:100%;text-align:left;border:0;border-radius:14px;background:#1c1c1e;color:#fff;padding:14px 16px;margin:4px 0 10px;position:relative}
+.books-month-field small{color:#8e8e93;font-size:.68rem;font-weight:600;letter-spacing:.06em}
+.books-month-field span{font-size:1.35rem;font-weight:650}
+.books-month-field .native-chevron{position:absolute;right:14px;top:50%;transform:translateY(-50%)}
+.books-report-link{align-items:center!important;gap:10px!important;padding:12px 10px!important}
+.books-report-icon{width:34px;height:34px;border-radius:8px;display:grid;place-items:center;font-size:18px;flex:none}
+.books-native-export-row{display:flex;gap:10px;margin:18px 0 8px}
+.books-native-export{flex:1;min-height:48px;border:0;border-radius:12px;background:#2c2c2e;color:#0a84ff;font-weight:700;font-size:.95rem}
+.books-native-export:disabled{opacity:.45}
+.books-lock-foot{text-align:center;color:#8e8e93;font-size:.82rem;margin:16px 0 8px}
+.books-lock-foot.native{color:#636366}
+.books-lock-link{border:0;background:transparent;color:#0a84ff;text-decoration:underline;font:inherit;padding:0;cursor:pointer}
+.books-picker-scrim{position:fixed;inset:0;background:#0009;z-index:40;display:flex;align-items:flex-end;justify-content:center}
+.books-picker-sheet{background:#1c1c1e;border-radius:14px 14px 0 0;width:min(100%,520px);max-height:70vh;overflow:auto;padding:16px 14px 28px;color:#f5f5f7}
+.books-picker-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.books-picker-head button{border:0;background:transparent;color:#0a84ff;font-weight:600;font-size:1rem}
+.books-picker-year{color:#8e8e93;font-size:.72rem;margin:8px 4px 6px;text-transform:uppercase}
+.books-picker-status{font-size:.78rem;font-weight:600}
+.books-picker-in_progress{color:#ff9f0a}
+.books-picker-draft{color:#8e8e93}
+.books-picker-locked{color:#30d158}
+.books-sale-card{margin:10px 0;padding:0!important}
+.books-sale-head{display:flex;width:100%;gap:10px;border:0;background:transparent;color:inherit;text-align:left;padding:10px 12px 4px;align-items:flex-start}
+.books-sale-line{margin:0 12px 4px;font-size:.82rem;color:#d1d1d6}
+.books-sale-line.muted{color:#8e8e93;font-size:.76rem}
+.books-why{margin:6px 12px 0;font-size:.74rem}
+.books-why-extra{color:#30d158}
+.books-why-less{color:#ff9f0a}
+.books-why-fix{color:#ff453a}
+.books-why-info{color:#aeaeb2}
+.books-sale-detail{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 12px;padding:8px 12px 12px;border-top:1px solid #333336;margin-top:8px;font-size:.78rem}
+.books-sale-detail dt{color:#8e8e93}
+.books-expense-hero{padding:14px!important;margin:4px 0 12px}
+.books-expense-hero strong{font-size:2rem;display:block}
+.books-cat-head{display:flex!important;justify-content:space-between;padding:0 4px!important;margin-top:12px}
+.books-cat-head b{color:#ff9f0a;font-size:.82rem}
+.books-reimb{display:block;font-size:.58rem;color:#ff9f0a;font-style:normal;font-weight:800;letter-spacing:.04em}
+.books-received-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:8px 0 14px}
+.books-received-stats div{background:#1c1c1e;border-radius:10px;padding:10px;text-align:center}
+.books-received-stats small{display:block;color:#8e8e93;font-size:.68rem}
+.books-desktop-toolbar{display:flex;flex-wrap:wrap;align-items:end;gap:14px;margin-bottom:14px}
+.books-desktop-tabs{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
+.books-desktop-tabs button{border:1px solid #33445c;border-radius:999px;background:#141c29;color:#c5d0de;padding:8px 16px;font-weight:650}
+.books-desktop-tabs button.active{background:#26374b;color:#fff;border-color:#4a6286}
+.books-status-pill{border-radius:999px;padding:5px 12px;font-size:.75rem;font-weight:700}
+.books-status-in_progress{background:#3a2d16;color:#ffbd50}
+.books-status-draft{background:#2b3140;color:#aeb8c8}
+.books-status-locked{background:#10352a;color:#4bda9a}
+.books-channel-line{display:flex;flex-wrap:wrap;gap:12px 18px;color:#aeb8c8;font-size:.9rem;margin:8px 0 12px}
+.books-print-hint{color:#73808c;font-size:.78rem;text-align:right;margin-top:8px}
+.books-mockup .books-table-wrap{background:#141c29;border:1px solid #273448;color:#e9eff8}
+.books-mockup .books-table th{background:#1d2735;color:#f0f4fa}
+.books-mockup .books-table td,.books-mockup .books-table th{border-color:#2c3648;color:#e9eff8}
+.books-mockup .books-table td.fix,.fix{color:#ff6b6b!important}
+.books-mockup .books-table td.why{white-space:normal;max-width:280px}
+html.app-mode .books-mockup .books-table-wrap,html.app-mode .books-mockup .books-table{background:#1c1c1e;color:#f5f5f7;border-color:#333336}
+html.app-mode .books-mockup .books-table th{background:#2c2c2e;color:#fff}
+html.app-mode .books-mockup .books-table td,html.app-mode .books-mockup .books-table th{border-color:#333336;color:#f5f5f7}
+body.books-printing .books-desktop-tabs,body.books-printing .books-lock-foot,body.books-printing .books-print-hint,body.books-printing .books-status-pill,body.books-printing .books-picker-scrim{display:none!important}
+body.books-printing .books-desktop-panel,body.books-printing .books-print-sheets{display:block!important}
+.books-print-sheets{display:none}
+body.books-printing .books-print-sheets section{break-before:page;margin-top:18px}
+body.books-printing .books-print-sheets section:first-child{break-before:auto}

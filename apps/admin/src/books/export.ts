@@ -68,6 +68,7 @@ export async function buildBooksExcel(period: Period, wb: BooksWorkbook, label: 
     ['Received', inv.received_units, 'movements'],
     ['Giveaways', inv.giveaway_units, 'dispositions'],
     ['Replacements', inv.replacement_units, 'dispositions'],
+    ['Returned to stock', inv.return_to_stock_units ?? 0, 'stock_movements'],
     ['Returns (count)', inv.return_count, 'returns'],
     ['Defective pulls', inv.defective_units, 'stock_movements'],
   ] as const) wsI.addRow([metric, value, src]);

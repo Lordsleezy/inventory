@@ -66,7 +66,11 @@ export function normalizeReport(raw: Report): Report {
   return next;
 }
 
-/** Same rollup as the legacy Books summary tiles (fees table + ship_cost on sales lines). */
+/**
+ * Single source of truth for Books month summary (hub card, sales sheet, exports).
+ * Uses normalizeReport (Square matched card fees + ticket payment split). Older period
+ * cards summed raw sale_ledger profit_cents and overstated profit by ~$76 on Oct 2026.
+ */
 export function computeBookTotals(report: Report): BookTotals {
   const sales = report.sales || [];
   const fees = (report.fees || []).reduce((n, f) => n + Number(f.amount_cents || 0), 0);
