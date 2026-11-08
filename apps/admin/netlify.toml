@@ -30,6 +30,11 @@
   [headers.values]
     Cache-Control = "no-cache, must-revalidate"
 
+[[headers]]
+  for = "/build.json"
+  [headers.values]
+    Cache-Control = "no-cache, must-revalidate"
+
 # Same-origin proxy so the locked-down store phone (admin.openboxindustries.com only)
 # can call inventoryobi functions without opening cross-origin fetch.
 [[redirects]]

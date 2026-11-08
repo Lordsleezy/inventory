@@ -4,7 +4,7 @@ import { type WebOrder } from '../OrdersPage';
 import { LabelDialog } from '../LabelDialog';
 import { OrderStepper, OrderTimelineList } from '../OrderFulfillment';
 import { OrderFacts, OrderFindRow, OrderPhotoCarousel, OrderTitle } from '../OrderPhotos';
-import { derivativePath, listThumbPhoto, loadUnitPhotos, signPhotoUrls, type UnitPhoto } from '../unitPhotos';
+import { derivativePath, hydratePhotoUrlCache, listThumbPhoto, listThumbPathsFromPhotoMap, loadUnitPhotos, persistPhotoUrlCache, signPhotoUrls, type UnitPhoto } from '../unitPhotos';
 import { errText } from '../errText';
 import { shortError } from './shortError';
 import { loadOrderLocations, locationCompare, locationParts } from '../locationOrder';
@@ -13,6 +13,7 @@ import { openShippingLabel } from '../labelPrint';
 import { canBuyLabel, hasLabel, orderChip, orderNeedsLabel, orderStage, orderTimeline, packagedStale, shippedStale, trackingTail, type OrderStage } from '../orderStage';
 import { useVisibleInterval } from '../useVisibleInterval';
 import { ScanOutPanel } from '../ScanOutPanel';
+import { PackLabelScan } from '../PackLabelScan';
 
 type Seg = 'needsLabel' | 'toShip' | 'packaged' | 'shipped' | 'delivered' | 'canceled';
 
@@ -54,7 +55,18 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
   const [events, setEvents] = useState<TrackEvent[]>([]);
   const [locations, setLocations] = useState<Record<string, string[]>>({});
   const [photoMap, setPhotoMap] = useState<Record<string, UnitPhoto[]>>({});
-  const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({});
+  const [photoUrls, setPhotoUrls] = useState<Record<string, string>>(() => {
+    hydratePhotoUrlCache(`${storeId}:orders`);
+    return {};
+  });
+  const mergePhotoUrls = (extra: Record<string, string>) => {
+    if (!Object.keys(extra).length) return;
+    setPhotoUrls((prev) => {
+      const next = { ...prev, ...extra };
+      persistPhotoUrlCache(`${storeId}:orders`, next);
+      return next;
+    });
+  };
   const [locationOptions, setLocationOptions] = useState<{ code: string }[]>([]);
   const [busy, setBusy] = useState('');
   const [labelOpen, setLabelOpen] = useState(false);
@@ -73,9 +85,7 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
       setLocations(await loadOrderLocations(client, storeId, skus));
       const photos = await loadUnitPhotos(client, storeId, skus).catch(() => ({} as Record<string, UnitPhoto[]>));
       setPhotoMap(photos);
-      const thumbs = Object.values(photos).map((rows) => listThumbPhoto(rows)).filter((row): row is UnitPhoto => Boolean(row))
-        .map((row) => derivativePath(row.path, 400)).filter((path): path is string => Boolean(path));
-      setPhotoUrls(await signPhotoUrls(client, thumbs));
+      mergePhotoUrls(await signPhotoUrls(client, listThumbPathsFromPhotoMap(photos)));
       const { data: bins } = await client.from('store_locations').select('code').eq('store_id', storeId).order('bay_no').order('row_no').order('bin_no');
       setLocationOptions((bins || []) as { code: string }[]);
     } catch (e) {
@@ -316,6 +326,9 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
         {error && <p className="app-inline-error">{error}</p>}
         {paid && ship && stage !== 'canceled' && (
           <>
+            {stage === 'toShip' && labeled && (
+              <PackLabelScan client={client} disabled={!!busy} onDone={() => void load()} />
+            )}
             <div className="order-actions">
               {labeled && <button type="button" disabled={!!busy} onClick={() => void printLabel(open)}>{busy === 'print' ? '…' : 'Print label'}</button>}
               {!labeled && buy && !orderNeedsLabel(open) && (

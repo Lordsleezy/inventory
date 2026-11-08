@@ -10,6 +10,7 @@ import { spawnSync } from "node:child_process";
 import { git, gitOut } from "./git.mjs";
 import { sendReleaseMail } from "./mail.mjs";
 import { assessChecks, classifyDeploy, migrationsFromPushOutput, prTitlesFromLog, redact, REQUIRED_CHECK_NAMES } from "./plan.mjs";
+import { verifyAdminLive } from "./verify-live.mjs";
 import { isReleaseWindow } from "./schedule.mjs";
 import { MASTER_BRANCH, PREVIOUS_TAG, PROJECT_REF, RELEASE_BRANCH, SITES, sitesForFiles } from "./sites.mjs";
 
@@ -272,6 +273,24 @@ async function main() {
 
   if (bad.length) {
     await fail("[Floor] Release failed: Netlify deploy did not succeed", `${summary}\n\nrelease points at the new commit. Roll back release if you need the previous build. Migrations are not rolled back automatically.`);
+  }
+
+  const adminExpected = expected.some((item) => item.name === "openbox-floor-admin");
+  if (adminExpected) {
+    try {
+      const live = await verifyAdminLive(masterSha);
+      console.log(`admin live verified: ${live.sha.slice(0, 7)} (${live.builtAt || 'no date'})`);
+    } catch (err) {
+      await fail(
+        "[Floor] Release failed: admin is not serving the new build",
+        [
+          summary,
+          "",
+          redact(err?.message || err),
+          "Netlify reported success but production build.json did not match. Roll back release if needed.",
+        ].join("\n"),
+      );
+    }
   }
 
   await sendReleaseMail({ subject: `[Floor] Released ${masterSha.slice(0, 7)}`, text: summary });

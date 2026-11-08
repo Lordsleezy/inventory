@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { QuantityPicker } from './ReceiveQuantity';
+import { listThumbPathsFromOriginals, signPhotoUrls } from './unitPhotos';
 
 export type StockMatch = { sku: string; title: string; quantity: number; price_cents: number | null; condition: string | null; is_stocked: boolean; can_convert: boolean; location?: string | null; photo?: string | null };
 
@@ -8,9 +9,24 @@ export function ReceiveStockPicker({ client, matches, admin, incomingPrice, inco
   const [selected, setSelected] = useState<StockMatch | null>(null);
   const [quantity, setQuantity] = useState('1');
   const [photos, setPhotos] = useState<Record<string, string>>({});
-  useEffect(() => { setSelected(null); setQuantity('1'); const next: Record<string,string> = {}; let active=true;
-    void Promise.all(matches.filter(m=>m.photo).map(async m=>{const {data}=await client.storage.from('unit-photos').createSignedUrl(m.photo!,3600); if(data?.signedUrl)next[m.sku]=data.signedUrl;})).then(()=>{if(active)setPhotos(next);});
-    return ()=>{active=false;};
+  useEffect(() => {
+    setSelected(null);
+    setQuantity('1');
+    let active = true;
+    const withPhoto = matches.filter((m) => m.photo);
+    if (!withPhoto.length) { setPhotos({}); return () => { active = false; }; }
+    void signPhotoUrls(client, listThumbPathsFromOriginals(withPhoto.map((m) => m.photo))).then((signed) => {
+      if (!active) return;
+      const next: Record<string, string> = {};
+      for (const m of withPhoto) {
+        if (!m.photo) continue;
+        const thumb = listThumbPathsFromOriginals([m.photo])[0];
+        const url = (thumb && signed[thumb]) || signed[m.photo];
+        if (url) next[m.sku] = url;
+      }
+      setPhotos(next);
+    }).catch(() => { if (active) setPhotos({}); });
+    return () => { active = false; };
   }, [matches, client]);
   if (!matches.length) return null;
   const picked = matches.find(m=>m.sku===selected?.sku) || null;

@@ -174,3 +174,68 @@ html.dark .receive-panel.receive-v2,
   padding: 8px 0;
   border-bottom: 1px solid #333;
 }
+
+.receive-panel.receive-v2 .receive-v2-label {
+  display: block;
+  font-size: 0.92rem;
+  margin-bottom: 6px;
+}
+
+.receive-panel.receive-v2 .receive-v2-label .receive-v2-req {
+  display: inline;
+  white-space: nowrap;
+}
+
+.receive-panel.receive-v2 .receive-v2-opt {
+  color: #9a9a9a;
+  font-size: 0.85rem;
+  font-weight: 400;
+}
+
+.receive-panel.receive-v2 .receive-advanced > summary {
+  display: none;
+}
+
+.receive-panel.receive-v2 .receive-channel-card,
+.receive-panel.receive-v2 .receive-need,
+.receive-panel.receive-v2 .receive-sell-on {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  color: #fff;
+}
+
+.receive-panel.receive-v2 .receive-v2-row2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.receive-panel.receive-v2 .receive-v2-dims {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.receive-panel.receive-v2 .receive-v2-section {
+  display: block;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #9a9a9a;
+  margin: 12px 0 8px;
+}
+
+.receive-panel.receive-v2 .receive-v2-photo-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.floor-build-stamp {
+  font-size: 12px;
+  color: #9a9a9a;
+  text-align: center;
+  margin: 16px 0 0;
+  padding-bottom: env(safe-area-inset-bottom, 0);
+}
