@@ -1,0 +1,65 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { patchFromShippoStatus } from "./order-tracking.mjs";
+import { attachUploadedLabel } from "./order-label.mjs";
+
+const order = { id: "o1", shipped_at: null, delivered_at: null, packaged_at: "2026-11-07T18:00:00Z", carrier: "USPS" };
+
+test("label created does not move the order to Shipped", () => {
+  const patch = patchFromShippoStatus(order, { status: "PRE_TRANSIT", statusDate: "2026-11-07T19:00:00Z", statusDetails: "Label created" });
+  assert.equal(patch.shipped_at, undefined);
+  assert.equal(patch.delivered_at, undefined);
+  assert.equal(patch.tracking_status, "pre_transit");
+});
+
+test("first carrier scan sets shipped and clears an old exception", () => {
+  const patch = patchFromShippoStatus(
+    { ...order, tracking_exception: "old" },
+    { status: "TRANSIT", statusDate: "2026-11-08T00:31:00Z", statusDetails: "Accepted at USPS" },
+  );
+  assert.equal(patch.shipped_at, "2026-11-08T00:31:00Z");
+  assert.equal(patch.tracking_exception, null);
+  assert.equal(patch.delivered_at, undefined);
+});
+
+test("delivered sets both timestamps once", () => {
+  const patch = patchFromShippoStatus(order, { status: "DELIVERED", statusDate: "2026-11-10T15:00:00Z", statusDetails: "Delivered" });
+  assert.equal(patch.delivered_at, "2026-11-10T15:00:00Z");
+  assert.ok(patch.shipped_at);
+});
+
+test("return to sender flags the order and does not mark it delivered", () => {
+  const patch = patchFromShippoStatus(order, { status: "RETURNED", statusDate: "2026-11-09T12:00:00Z", statusDetails: "Return to sender" });
+  assert.equal(patch.tracking_exception, "Return to sender");
+  assert.equal(patch.delivered_at, undefined);
+  assert.ok(patch.shipped_at);
+});
+
+test("an uploaded Depop label stores tracking and posts no expense", async () => {
+  const updates = [];
+  const inserts = [];
+  const sb = {
+    storage: undefined,
+    from(table) {
+      const api = {
+        update(vals) { updates.push([table, vals]); return api; },
+        insert(vals) { inserts.push([table, vals]); return api; },
+        eq() { return api; },
+        select() { return api; },
+        async single() { return { data: { id: "o1", tracking_number: updates.at(-1)?.[1]?.tracking_number, store_id: "s" }, error: null }; },
+      };
+      return api;
+    },
+  };
+  const pdf = Buffer.from("%PDF-1.4\n(USPS TRACKING 9400111899001234567891) Tj\n%%EOF\n");
+  const r = await attachUploadedLabel(sb, "s", { id: "o1", store_id: "s", status: "paid", fulfillment: "ship", channel: "depop" }, {
+    bytes: pdf, name: "depop-label-00162.pdf", mime: "application/pdf",
+  }, { allowMissingStorage: true, registerTrack: async () => ({ ok: true, skipped: "test" }) });
+  assert.equal(r.ok, true);
+  assert.equal(r.expense_posted, false);
+  assert.equal(r.needs_tracking, false);
+  assert.equal(r.tracking_number, "9400111899001234567891");
+  assert.equal(inserts.length, 0);
+  assert.equal(updates[0][1].label_origin, "upload");
+  assert.equal(updates[0][1].label_cost_cents, null);
+});

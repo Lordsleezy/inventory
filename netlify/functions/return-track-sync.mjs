@@ -3,6 +3,7 @@ import { json, corsHeaders } from "../lib/server.mjs";
 import { wrapHandler, asNetlifyFunction } from "../lib/floor-log.mjs";
 import { portalAdminFromEvent } from "../lib/portal-auth.mjs";
 import { syncReturnTracking } from "../lib/return-tracking.mjs";
+import { registerPendingOrderTracks } from "../lib/order-tracking.mjs";
 import { isNetlifyScheduleEvent } from "../lib/schedule.mjs";
 import { serviceClient } from "../lib/server.mjs";
 import { STORE_DEFAULT } from "../lib/returns.mjs";
@@ -23,7 +24,8 @@ async function handle(event) {
     for (const r of rows || []) {
       results.push(await syncReturnTracking(sb, storeId, r.id));
     }
-    return json(200, { ok: true, polled: results.length, results });
+    const orders = await registerPendingOrderTracks(sb, 20).catch((err) => ({ ok: false, error: err.message }));
+    return json(200, { ok: true, polled: results.length, results, order_tracks: orders });
   }
   if (event.httpMethod !== "POST") return json(405, { error: "post_only" });
   let ctx;

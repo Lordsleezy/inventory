@@ -3,6 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { errText } from './errText';
 import { parseDollars } from './dispositions';
 import { dollarsText, payoutDefault, type DepopEntry } from './depopMath';
+import { fileToBase64, orderAdmin, sessionToken } from './orderLabel';
 
 type Money = (n: number) => string;
 type UnitHit = { sold_no_sale?: boolean; sku: string; brand: string; model: string; title: string; ask_cents: number | null; acquisition_cost_cents: number | null; state: string; condition: string | null };
@@ -25,6 +26,7 @@ export function DepopSalePanel({ client, money, variant, initialSku, initialSale
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [entries, setEntries] = useState<DepopEntry[] | null>(null);
+  const [labelFile, setLabelFile] = useState<File | null>(null);
 
   const loadEntries = useCallback(async () => {
     const { data, error: e } = await client.rpc('portal_depop_entries', { p_limit: 50 });
@@ -68,7 +70,7 @@ export function DepopSalePanel({ client, money, variant, initialSku, initialSale
   const valid = !!(unit || editing) && !!saleCents && saleCents > 0 && feeCents != null && payoutCents != null && payoutCents <= saleCents && !!day;
 
   function reset() {
-    setUnit(null); setEditing(null); setQuery(''); setSale(''); setFee(''); setPayout(''); setPayoutTouched(false); setDay(todayLA());
+    setUnit(null); setEditing(null); setQuery(''); setSale(''); setFee(''); setPayout(''); setPayoutTouched(false); setDay(todayLA()); setLabelFile(null);
   }
   function startEdit(e: DepopEntry) {
     setEditing(e); setUnit(null); setSale(dollarsText(e.sale_cents)); setFee(dollarsText(e.fee_cents));
@@ -88,10 +90,32 @@ export function DepopSalePanel({ client, money, variant, initialSku, initialSale
       } else if (unit) {
         const { data, error: e } = await client.rpc('portal_depop_record_sale', { p_sku: unit.sku, p_sale_cents: saleCents, p_fee_cents: feeCents, p_payout_cents: payoutCents, p_sold_on: day, p_note: null });
         if (e) throw e;
-        const r = data as { cost_missing: boolean };
+        const r = data as { cost_missing: boolean; order_id?: string };
+        let labelNote = ' It is in Orders → To ship.';
+        if (labelFile && r.order_id) {
+          try {
+            const token = await sessionToken(client);
+            const attached = await orderAdmin(token, {
+              action: 'attach_label',
+              id: r.order_id,
+              file_base64: await fileToBase64(labelFile),
+              file_name: labelFile.name,
+              mime: labelFile.type || (labelFile.name.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'image/jpeg'),
+            });
+            labelNote = attached.needs_tracking
+              ? ' Label saved. Type the tracking number on the order — it was not clear on the file.'
+              : ' Label is ready to print.';
+          } catch (err) {
+            labelNote = ` Sale is in To ship, but the label did not attach (${errText(err)}). Add it from the order.`;
+          }
+        } else if (labelFile && !r.order_id) {
+          labelNote = ' Add the label from the order after this update is live.';
+        } else {
+          labelNote = ' It is in Orders → To ship with Add label.';
+        }
         setNotice(r.cost_missing
-          ? `Saved. SKU ${unit.sku} is recorded, but it has no cost yet, so Paul's payout waits until you enter one.`
-          : `Saved. The Depop sale for SKU ${unit.sku} is recorded.`);
+          ? `Saved. SKU ${unit.sku} is recorded, but it has no cost yet, so Paul's payout waits until you enter one.${labelNote}`
+          : `Saved. The Depop sale for SKU ${unit.sku} is recorded.${labelNote}`);
       }
       reset();
       await loadEntries();
@@ -126,14 +150,30 @@ export function DepopSalePanel({ client, money, variant, initialSku, initialSale
         <label>Depop fee ($)<input inputMode="decimal" value={fee} onChange={e => setFee(e.target.value)} placeholder="0.00" /></label>
         <label>Payout, what Depop paid me ($)<input inputMode="decimal" value={shownPayout} onChange={e => { setPayoutTouched(true); setPayout(e.target.value); }} placeholder="0.00" /></label>
         <label>Sale date<input type="date" value={day} max={todayLA()} onChange={e => setDay(e.target.value)} /></label>
+        {!editing && <div className="depop-label-field">
+          <span>Shipping label</span>
+          {labelFile ? (
+            <div className="depop-label-file">
+              <strong>{labelFile.name}</strong>
+              <small>{labelFile.type === 'application/pdf' || labelFile.name.toLowerCase().endsWith('.pdf') ? 'Label attached · 4×6' : 'Label attached'}</small>
+              <button type="button" className="text-button" onClick={() => setLabelFile(null)}>Replace</button>
+            </div>
+          ) : (
+            <label className="depop-label-drop">
+              <span>Upload label</span>
+              <small>PDF or screenshot from Depop</small>
+              <input type="file" accept="application/pdf,image/*" onChange={e => { const f = e.target.files?.[0]; if (f) setLabelFile(f); e.target.value = ''; }} />
+            </label>
+          )}
+        </div>}
         {payoutCents != null && saleCents != null && payoutCents > saleCents && <p className="error" role="alert">The payout can&apos;t be more than the sale price.</p>}
         {(sale && saleCents == null) || (fee && feeCents == null) || (shownPayout && payoutCents == null) ? <p className="error" role="alert">Enter amounts as dollars, like 24.99.</p> : null}
-        <div className="actions"><button disabled={busy || !valid}>{busy ? 'Saving…' : editing ? 'Save changes' : 'Save sale'}</button>
+        <div className="actions"><button className="primary" disabled={busy || !valid}>{busy ? 'Saving…' : editing ? 'Save changes' : 'Record sale'}</button>
           {(editing || unit) && <button type="button" className="secondary" disabled={busy} onClick={reset}>Cancel</button>}</div>
       </form>
       {error && <p className="error" role="alert">{error}</p>}
       {notice && <p className="hint" role="status">{notice}</p>}
-      <p className="hint">Profit = payout − cost. Saving marks the unit sold, removes it from the live Depop list, and puts the order in Orders → To ship.</p>
+      <p className="hint">Goes to Orders → To ship, label ready to print. Pulled from every other channel. The label is optional — without one the order shows Add label. Depop shipping is paid by the buyer, so no label expense is posted.</p>
       {initialSku && onClose && <button type="button" className="secondary" disabled={busy} onClick={onClose}>Cancel</button>}
     </section>
     {!initialSku && <section className="panel">

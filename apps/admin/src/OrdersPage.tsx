@@ -4,14 +4,12 @@ import { floorFunctionUrl } from './floorApi';
 import { CommissionOverrideControls, CommissionOverrideMark } from './CommissionOverride';
 import { frozenCutsForTicket, type CommissionOverride, type OnlineCfg, type Rule } from './payouts';
 import { LabelDialog } from './LabelDialog';
+import { OrderStepper, OrderTimelineList } from './OrderFulfillment';
 import { errText } from './errText';
+import { fileToBase64, labelFileUrl, orderAdmin } from './orderLabel';
+import { canBuyLabel, hasLabel, orderChip, orderStage, orderTimeline, packagedStale } from './orderStage';
 import { loadOrderLocations, locationCompare, locationParts } from './locationOrder';
 import { useVisibleInterval } from './useVisibleInterval';
-
-function channelAllowsLabels(channel?: string | null) {
-  const ch = (channel || 'website').toLowerCase();
-  return ch === 'website' || ch === 'web' || ch === 'ebay' || ch === 'amazon' || ch === 'tiktok';
-}
 
 const CHANNEL_LABEL: Record<string, string> = {
   website: 'Website',
@@ -34,8 +32,12 @@ export type WebOrder = {
   item_cents: number; shipping_cents: number; tax_cents: number; total_cents: number; payment_env: string | null;
   created_at: string; paid_at: string | null; pickup_deadline: string | null; picked_up_at: string | null; picked_up_by: string | null;
   shipped_at: string | null; delivered_at: string | null;
+  packaged_at?: string | null; packaged_by?: string | null; packaged_by_name?: string | null;
   tracking_number: string | null; tracking_url: string | null; carrier: string | null; service: string | null;
   label_url: string | null; label_purchased_at: string | null; label_cost_cents: number | null;
+  label_storage_path?: string | null; label_file_name?: string | null; label_mime?: string | null;
+  label_uploaded_at?: string | null; label_origin?: 'bought' | 'upload' | null;
+  tracking_status?: string | null; tracking_exception?: string | null; tracking_needs_entry?: boolean | null;
   pack_condition?: 'ok' | 'not_as_listed' | null;
   pack_proof_photo_path?: string | null;
   pack_proof_serial?: string | null;
@@ -82,15 +84,15 @@ function otherStores(o: WebOrder) {
   return listed.filter((c) => c !== self && c !== 'website' && c !== 'ebay');
 }
 
-type OrderView = 'all' | 'toShip' | 'shipped' | 'pickup' | 'done' | 'canceled';
+type OrderView = 'all' | 'toShip' | 'packaged' | 'shipped' | 'delivered' | 'canceled';
 type StatusFilter = 'all' | 'paid' | 'canceled' | 'refunded';
 
 const VIEW_LABEL: Record<OrderView, string> = {
   all: 'All orders',
   toShip: 'To ship',
+  packaged: 'Packaged',
   shipped: 'Shipped',
-  pickup: 'Awaiting pickup',
-  done: 'Completed',
+  delivered: 'Delivered',
   canceled: 'Cancelled / refunded',
 };
 
@@ -131,6 +133,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
   const [view, setView] = useState<OrderView>('all');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [labelOrder, setLabelOrder] = useState<WebOrder | null>(null);
+  const [trackEvents, setTrackEvents] = useState<Record<string, { status?: string; status_detail?: string | null; location?: string | null; occurred_at?: string | null }[]>>({});
 
   const load = useCallback(async () => {
     // No practical date hide: cover store day-one history (portal still clamps to p_days).
@@ -155,18 +158,39 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
   useVisibleInterval(load, 60_000);
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 30000); return () => clearInterval(t); }, []);
 
-  async function markShipped(o: WebOrder) {
+  async function markPackaged(o: WebOrder) {
     const ch = (o.channel || '').toLowerCase();
     if ((ch === 'amazon' || ch === 'tiktok') && !o.pack_proof_photo_path) {
-      setError('Amazon/TikTok orders need a pack-time unit photo (and serial if any) before Mark shipped.');
+      setError('Amazon/TikTok orders need a pack photo before Packaged.');
       return;
     }
-    setBusy(o.id + 'ship'); setError('');
-    const { error: e } = await client.rpc('portal_mark_order_shipped', { p_order: o.id });
-    if (e) setError(e.message === 'pack_proof_required'
-      ? 'Upload a pack-time photo of the actual unit before marking shipped.'
-      : e.message);
+    setBusy(o.id + 'packaged'); setError('');
+    const { error: e } = await client.rpc('portal_mark_order_packaged', { p_order: o.id });
+    if (e) setError(e.message === 'pack_proof_required' ? 'Upload a pack photo of the unit before marking it packaged.' : e.message);
     await load(); setBusy(null);
+  }
+
+  async function printOrderLabel(o: WebOrder) {
+    setError('');
+    try {
+      const url = await labelFileUrl(client, o);
+      if (!url) { setError('No label file on this order yet.'); return; }
+      window.open(url, '_blank', 'noopener');
+    } catch (e) { setError(errText(e)); }
+  }
+
+  async function uploadOrderLabel(o: WebOrder, file: File) {
+    setBusy(o.id + 'upload'); setError('');
+    try {
+      const data = await orderAdmin(accessToken, {
+        action: 'attach_label', id: o.id,
+        file_base64: await fileToBase64(file), file_name: file.name,
+        mime: file.type || (file.name.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'image/jpeg'),
+      });
+      if (data.needs_tracking) setError('Label saved. Type the tracking number — it was not clear on the file.');
+      await load();
+    } catch (e) { setError(errText(e)); }
+    setBusy(null);
   }
 
   async function setPickLocation(o: WebOrder, code: string) {
@@ -205,14 +229,11 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
       setBusy(null);
     }
   }
-  async function markDelivered(o: WebOrder) {
-    setBusy(o.id + 'deliver'); setError('');
-    const { error: e } = await client.rpc('portal_mark_order_delivered', { p_order: o.id });
-    if (e) setError(e.message);
-    await load(); setBusy(null);
-  }
   async function stepBack(o: WebOrder) {
-    const step = o.delivered_at ? 'Delivered → Shipped' : o.shipped_at ? 'Shipped → To ship' : o.picked_up_at ? 'Picked up → Awaiting pickup' : '';
+    const step = o.delivered_at ? 'Delivered → Shipped'
+      : o.shipped_at ? (o.packaged_at ? 'Shipped → Packaged' : 'Shipped → To ship')
+        : o.packaged_at ? 'Packaged → To ship'
+          : o.picked_up_at ? 'Picked up → Awaiting pickup' : '';
     if (!step) { setError('There is no completed fulfillment step to undo.'); return; }
     if (!window.confirm(`Are you sure? Move this order back one step (${step}). The sale and money stay unchanged.`)) return;
     setBusy(o.id + 'step-back'); setError('');
@@ -358,20 +379,35 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
       rawCount: list.length,
       groups: {
         all: byStatus,
-        toShip: byStatus.filter(o => o.status === 'paid' && o.fulfillment === 'ship' && !o.shipped_at),
-        shipped: byStatus.filter(o => o.status === 'paid' && o.fulfillment === 'ship' && o.shipped_at && !o.delivered_at),
-        pickup: byStatus.filter(o => o.status === 'paid' && o.fulfillment === 'pickup' && !o.picked_up_at),
-        done: byStatus.filter(o => o.status === 'paid' && (o.delivered_at || o.picked_up_at)),
-        canceled: byStatus.filter(o => o.status === 'refunded' || o.status === 'canceled'),
+        toShip: byStatus.filter(o => orderStage(o) === 'toShip'),
+        packaged: byStatus.filter(o => orderStage(o) === 'packaged'),
+        shipped: byStatus.filter(o => orderStage(o) === 'shipped'),
+        delivered: byStatus.filter(o => orderStage(o) === 'delivered'),
+        canceled: byStatus.filter(o => orderStage(o) === 'canceled'),
       } as Record<OrderView, WebOrder[]>,
     };
   }, [orders, statusFilter]);
 
   const active = groups[view].slice().sort((a,b) => {
-    if (view !== 'toShip' && view !== 'pickup') return 0;
+    if (view !== 'toShip' && view !== 'packaged') return 0;
     return locationCompare(locations[a.sku]?.[0] || '99999', locations[b.sku]?.[0] || '99999');
   });
   const summary = useMemo(() => breakdown(groups[view]), [groups, view]);
+
+  useEffect(() => {
+    const ids = active.filter((o) => o.packaged_at || o.shipped_at || o.delivered_at).slice(0, 25).map((o) => o.id);
+    if (!ids.length) return;
+    let alive = true;
+    void (async () => {
+      const next: typeof trackEvents = {};
+      await Promise.all(ids.map(async (id) => {
+        const { data } = await client.rpc('portal_order_timeline', { p_order: id });
+        next[id] = (data || []) as typeof trackEvents[string];
+      }));
+      if (alive) setTrackEvents(next);
+    })();
+    return () => { alive = false; };
+  }, [client, view, orders]);
 
   const head = (o: WebOrder) => {
     const ov = o.ticket_key ? commissionOverrides.get(o.ticket_key) : null;
@@ -397,7 +433,6 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
     const skuLabel = linked ? `SKU ${o.sku}` : 'Needs SKU match';
     return <div className="ticket-items"><div>{displayTitle} <span>· {skuLabel}</span></div>
     {(() => { const code=locations[o.sku]?.[0]||''; const parts=locationParts(code); return <div className={`order-pick-location${parts?'':' missing'}`}>
-      {parts ? <><small>{parts.display}</small><strong>{parts.slot}</strong></> : <strong>BAY / None · find it, then tap to set</strong>}
       <select aria-label={`Set pick location for SKU ${o.sku}`} value={code} disabled={!!busy||!locationOptions.length} onChange={event=>void setPickLocation(o,event.target.value)}>
         <option value="">{parts?'Change location':'Tap to set location'}</option>{locationOptions.map(location=><option key={location.code} value={location.code}>{locationParts(location.code)?.display} · {locationParts(location.code)?.slot}</option>)}
       </select>
@@ -431,18 +466,25 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
   }
 
   const renderTicket = (o: WebOrder) => {
-    const isCanceled = o.status === 'canceled' || o.status === 'refunded';
-    const isToShip = o.status === 'paid' && o.fulfillment === 'ship' && !o.shipped_at;
-    const isShipped = o.status === 'paid' && o.fulfillment === 'ship' && !!o.shipped_at && !o.delivered_at;
-    const isPickup = o.status === 'paid' && o.fulfillment === 'pickup' && !o.picked_up_at;
-    const isDone = o.status === 'paid' && !!(o.delivered_at || o.picked_up_at);
-    const lateDays = o.paid_at ? Math.floor((Date.now() - new Date(o.paid_at).getTime()) / 86400000) : 0;
-    const cardStatus = isCanceled ? 'Canceled' : isDone ? o.delivered_at ? 'Delivered' : 'Picked up' : isShipped ? 'Shipped' : isPickup ? 'Ready for pickup' : lateDays > 0 ? `Late · ${lateDays} ${lateDays === 1 ? 'day' : 'days'}` : 'Ship today';
+    const stage = orderStage(o);
+    const chip = orderChip(o);
+    const isCanceled = stage === 'canceled';
+    const isToShip = stage === 'toShip';
+    const isPackaged = stage === 'packaged';
+    const isShipped = stage === 'shipped';
+    const isPickup = stage === 'pickup';
+    const isDone = stage === 'delivered';
+    const labeled = hasLabel(o);
+    const buy = canBuyLabel(o.channel);
+    const cardStatus = chip.text;
     const displayTitle = o.match_status === 'matched' || (!!o.sku && o.sku !== 'UNMATCHED' && !!o.sale_id)
       ? (o.title || o.marketplace_title || 'Item') : (o.marketplace_title || o.title || 'Marketplace sale');
     return (
       <div className="ticket order" key={o.id}>
-        <div className="order-card-summary"><span className="order-card-photo">{photoUrls[o.sku] && <img src={photoUrls[o.sku]} alt="" />}</span><div className="order-card-info"><strong className="order-card-title">{displayTitle}</strong><small>SKU {o.sku} · {money(o.item_cents)}</small><div className="order-card-tags"><b>{channelLabel(o.channel)}</b><b className={isCanceled ? 'muted' : isDone ? 'done' : isShipped ? 'shipped' : 'urgent'}>{cardStatus}</b></div></div></div>
+        <div className="order-card-summary">{photoUrls[o.sku] && <img src={photoUrls[o.sku]} alt="" width={48} height={48} style={{ objectFit: 'cover', borderRadius: 8 }} />}<div className="order-card-info"><strong className="order-card-title">{displayTitle}</strong><small>{channelLabel(o.channel)} · {money(o.item_cents)} · SKU {o.sku}</small><div className="order-card-tags"><b className={chip.tone === 'warn' ? 'badge-warn' : ''}>{cardStatus}</b></div></div></div>
+        {o.fulfillment === 'ship' && !isCanceled && <OrderStepper stage={stage} />}
+        {o.tracking_exception && <div className="alert" role="status">Carrier exception: {o.tracking_exception}</div>}
+        {(isPackaged || isShipped || isDone) && <OrderTimelineList rows={orderTimeline(o, trackEvents[o.id])} stamp={stamp} />}
         {head(o)}{item(o)}
         {isToShip && (
           <>
@@ -477,17 +519,28 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
               </div>
             )}
             <div className="actions">
-              {channelAllowsLabels(o.channel) && (
-                o.label_url
-                  ? <button type="button" disabled={!!busy} onClick={() => setLabelOrder(o)}>Download / Reprint label</button>
-                  : <button type="button" disabled={!!busy || o.pack_condition === 'not_as_listed'} onClick={() => setLabelOrder(o)}>Get label</button>
-              )}
-              <button disabled={!!busy} onClick={() => void markShipped(o)}>{busy === o.id + 'ship' ? 'Saving…' : 'Mark shipped'}</button>
-              <button className="secondary" disabled={!!busy} onClick={() => void markDelivered(o)}>{busy === o.id + 'deliver' ? 'Saving…' : 'Mark delivered'}</button>
-              <button className="secondary" disabled={!!busy || (o.label_cost_cents == null && o.pack_condition !== 'ok')} onClick={() => void recordLabelCost(o)}>{busy === o.id + 'label' ? 'Saving…' : o.label_cost_cents != null ? 'Edit label cost' : 'Record label cost'}</button>
+              {labeled && <button type="button" disabled={!!busy} onClick={() => void printOrderLabel(o)}>Print 4×6</button>}
+              {!labeled && buy && <button type="button" disabled={!!busy || o.pack_condition === 'not_as_listed'} onClick={() => setLabelOrder(o)}>Buy label</button>}
+              {!labeled && !buy && <label className="secondary" style={{ display: 'inline-flex', alignItems: 'center', padding: '10px 14px', border: '1px solid var(--btn-border)', borderRadius: 8 }}>
+                {busy === o.id + 'upload' ? 'Uploading…' : 'Add label'}
+                <input type="file" accept="application/pdf,image/*" hidden disabled={!!busy} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void uploadOrderLabel(o, f); }} />
+              </label>}
+              <button className="primary" disabled={!!busy} onClick={() => void markPackaged(o)}>{busy === o.id + 'packaged' ? 'Saving…' : 'Packaged'}</button>
+              {(o.channel || '').toLowerCase() !== 'depop' && <button className="secondary" disabled={!!busy || (o.label_cost_cents == null && o.pack_condition !== 'ok')} onClick={() => void recordLabelCost(o)}>{busy === o.id + 'label' ? 'Saving…' : o.label_cost_cents != null ? 'Edit label cost' : 'Record label cost'}</button>}
               {(!o.channel || o.channel === 'website') && <button className="text-button danger" disabled={!!busy} onClick={() => void cancel(o)}>Cancel & refund</button>}
               <button className="text-button danger" disabled={!!busy} onClick={() => void deleteOrder(o)}>{busy === o.id + 'delete' ? 'Deleting…' : 'Delete'}</button>
-            </div></>}
+            </div>
+            <p className="hint">Tap Packaged once it's boxed and labeled. Tracking takes over from there.</p></>}
+          </>
+        )}
+        {isPackaged && (
+          <>
+            <small>Packaged {o.packaged_at ? stamp(o.packaged_at) : ''}{o.packaged_by_name ? ` · ${o.packaged_by_name}` : ''}{packagedStale(o) ? ' · no carrier scan for 2 days' : ' · waiting on scan'}</small>
+            <div className="actions">
+              {labeled && <button type="button" disabled={!!busy} onClick={() => void printOrderLabel(o)}>Print 4×6</button>}
+              <button type="button" className="secondary" disabled={!!busy} onClick={() => void stepBack(o)}>Move back one step</button>
+            </div>
+            <p className="hint">Moves to Shipped on its own at the first carrier scan.</p>
           </>
         )}
         {isShipped && (
@@ -495,11 +548,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
             <small>Shipped {stamp(o.shipped_at!)}{o.tracking_number ? ` · ${o.tracking_number}` : ''}</small>
             {o.refund_requested_at ? <p className="hint">Cancel & refund in progress…</p> : <div className="actions">
               <button type="button" className="secondary" disabled={!!busy} onClick={() => void stepBack(o)}>{busy === o.id + 'step-back' ? 'Saving…' : 'Move back one step'}</button>
-              {channelAllowsLabels(o.channel) && o.label_url && (
-                <button type="button" disabled={!!busy} onClick={() => setLabelOrder(o)}>Download / Reprint label</button>
-              )}
-              <button disabled={!!busy} onClick={() => void markDelivered(o)}>{busy === o.id + 'deliver' ? 'Saving…' : 'Mark delivered'}</button>
-              <button className="secondary" disabled={!!busy} onClick={() => void recordLabelCost(o)}>{busy === o.id + 'label' ? 'Saving…' : o.label_cost_cents != null ? 'Edit label cost' : 'Record label cost'}</button>
+              {labeled && <button type="button" disabled={!!busy} onClick={() => void printOrderLabel(o)}>Print 4×6</button>}
               {(!o.channel || o.channel === 'website') && <button className="text-button danger" disabled={!!busy} onClick={() => void cancel(o)}>Cancel & refund</button>}
               <button className="text-button danger" disabled={!!busy} onClick={() => void deleteOrder(o)}>{busy === o.id + 'delete' ? 'Deleting…' : 'Delete'}</button>
             </div>}
@@ -532,7 +581,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
             </div>
           </>
         )}
-        {!isToShip && !isShipped && !isPickup && !isDone && !isCanceled && (
+        {!isToShip && !isPackaged && !isShipped && !isPickup && !isDone && !isCanceled && (
           <div className="actions">
             <button className="text-button danger" disabled={!!busy} onClick={() => void deleteOrder(o)}>{busy === o.id + 'delete' ? 'Deleting…' : 'Delete'}</button>
           </div>
@@ -545,13 +594,13 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
     <header><div><div className="eyebrow">WEBSITE AND MARKETPLACES</div><h1>Orders</h1><p>Every online order since day one. Returns, refunds, and replacements are on the Returns tab. No customer emails. Refreshes every 30 seconds.</p></div>
       <div className="actions"><button className="secondary" onClick={() => void load()}>Refresh</button></div></header>
     {error && <div className="alert" role="alert">{error}<button onClick={() => setError('')}>Dismiss</button></div>}
-    <div className="stats">
+    <div className="stats orders-stats">
       {([
         ['all', groups.all.length],
         ['toShip', groups.toShip.length],
+        ['packaged', groups.packaged.length],
         ['shipped', groups.shipped.length],
-        ['pickup', groups.pickup.length],
-        ['done', groups.done.length],
+        ['delivered', groups.delivered.length],
         ['canceled', groups.canceled.length],
       ] as const).map(([key, count]) => (
         <button key={key} type="button" className={`stat stat-button${view === key ? ' active' : ''}`} onClick={() => selectView(key)}>
@@ -618,7 +667,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
       )}
 
       {active.length === 0
-        ? <div className="empty">{view === 'all' ? 'No orders match this filter.' : view === 'toShip' ? 'Nothing to ship.' : view === 'shipped' ? 'None in transit.' : view === 'pickup' ? 'No pickups waiting.' : view === 'done' ? 'No completed orders yet.' : 'None.'}</div>
+        ? <div className="empty">{view === 'all' ? 'No orders match this filter.' : view === 'toShip' ? 'Nothing to ship.' : view === 'packaged' ? 'Nothing is waiting on a carrier scan.' : view === 'shipped' ? 'None in transit.' : view === 'delivered' ? 'No delivered orders yet.' : 'None.'}</div>
         : <div className="ticket-list">{active.map(renderTicket)}</div>}
     </section>
     {labelOrder && (
@@ -627,6 +676,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
         accessToken={accessToken}
         money={money}
         onClose={() => setLabelOrder(null)}
+        onPurchased={() => { void load(); }}
         onDone={() => { setLabelOrder(null); void load(); }}
       />
     )}

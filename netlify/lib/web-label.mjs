@@ -16,6 +16,8 @@ import {
 import { pushMarketplaceTracking } from "./shipping/marketplace-tracking.mjs";
 import { veeqoVoidLabel } from "./shipping/veeqo.mjs";
 import { tiktokVoidLabel } from "./shipping/tiktok-shipping.mjs";
+import { archiveRemoteLabel } from "./order-label.mjs";
+import { registerOrderTracking } from "./order-tracking.mjs";
 
 const num = (v) => Number(v);
 
@@ -324,7 +326,20 @@ export async function buyLabelForOrder(sb, storeId, orderId, { rateId, box, acto
     return { ok: false, status: err.status || 502, error: `Label purchase failed: ${err.message}` };
   }
 
-  const now = new Date().toISOString();
+    const now = new Date().toISOString();
+  let archived = null;
+  if (typeof sb.storage?.from === "function" && bought.label_url) {
+    try {
+      archived = await (deps.archiveLabel || archiveRemoteLabel)(sb, {
+        storeId,
+        orderId: order.id,
+        url: bought.label_url,
+        filename: "label-4x6.pdf",
+      });
+    } catch {
+      archived = null;
+    }
+  }
   try {
     const { data: label, error: labelError } = await sb
       .from("web_order_labels")
@@ -391,6 +406,11 @@ export async function buyLabelForOrder(sb, storeId, orderId, { rateId, box, acto
       pack_condition: order.pack_condition || "ok",
       pack_condition_at: order.pack_condition_at || now,
       label_buying_at: null,
+      label_origin: "bought",
+      label_file_name: archived?.fileName || "label-4x6.pdf",
+      label_mime: "application/pdf",
+      label_storage_path: archived?.path || order.label_storage_path || null,
+      tracking_needs_entry: false,
       updated_at: now,
     };
     // Tracking is pushed to the marketplace; Orders tab stays To ship until staff taps Mark shipped.
@@ -411,7 +431,7 @@ export async function buyLabelForOrder(sb, storeId, orderId, { rateId, box, acto
     const employeeId = typeof owner?.value === "string" ? owner.value : null;
     const { error: expenseError } = await sb.from("portal_expenses").insert({
       store_id: storeId,
-      description: `${bought.source} label ${order.order_no} — ${bought.carrier} ${bought.service}`,
+      description: `${bought.source} shipping label · SKU ${order.sku} · ${order.order_no} — ${bought.carrier} ${bought.service}`,
       category: "Shipping",
       amount_cents: bought.cost_cents,
       needs_reimbursement: Boolean(employeeId),
@@ -419,6 +439,7 @@ export async function buyLabelForOrder(sb, storeId, orderId, { rateId, box, acto
       source: "label",
       order_id: order.id,
       label_id: label.id,
+      sku: order.sku,
     });
     if (expenseError) throw expenseError;
 
@@ -448,6 +469,14 @@ export async function buyLabelForOrder(sb, storeId, orderId, { rateId, box, acto
 
     if (channel === "website" || channel === "web") {
       await (deps.deliver || deliverOrderEmails)(sb, order.id).catch(() => []);
+    }
+
+    if (typeof sb.storage?.from === "function") {
+      try {
+        await (deps.registerTrack || registerOrderTracking)(sb, saved);
+      } catch {
+        /* Label is saved. Tracking webhooks retry on the next register pass. */
+      }
     }
 
     return {
@@ -561,6 +590,15 @@ export async function voidLabel(sb, storeId, orderId, deps = {}) {
       label_cost_cents: null,
       label_purchased_at: null,
       label_buying_at: null,
+      label_storage_path: null,
+      label_file_name: null,
+      label_mime: null,
+      label_origin: null,
+      label_uploaded_at: null,
+      shippo_track_id: null,
+      tracking_status: null,
+      tracking_exception: null,
+      tracking_needs_entry: false,
       // Keep shipped_at — marketplace may already show shipped; operator can still re-label after void
       updated_at: now,
     })

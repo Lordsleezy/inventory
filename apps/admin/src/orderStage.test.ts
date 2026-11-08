@@ -1,0 +1,41 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { orderChip, orderStage, orderTimeline, packagedStale } from './orderStage.ts';
+
+const day = '2026-11-07T21:14:00Z';
+
+test('to-ship chips follow the label', () => {
+  assert.equal(orderChip({ status: 'paid', fulfillment: 'ship', channel: 'ebay' }).text, 'Buy label');
+  assert.equal(orderChip({ status: 'paid', fulfillment: 'ship', channel: 'depop' }).text, 'Add label');
+  assert.equal(orderChip({ status: 'paid', fulfillment: 'ship', channel: 'depop', label_storage_path: 'a/b.pdf' }).text, 'Label ready · Print');
+  assert.equal(orderChip({ status: 'paid', fulfillment: 'ship', channel: 'tiktok' }).text, 'Buy label');
+});
+
+test('packaged over two days with no scan is flagged', () => {
+  const o = { status: 'paid', fulfillment: 'ship', packaged_at: '2026-11-01T18:00:00Z' };
+  assert.equal(packagedStale(o, Date.parse('2026-11-04T18:00:01Z')), true);
+  assert.equal(orderChip(o, Date.parse('2026-11-04T18:00:01Z')).text, 'No scan · 2+ days');
+  assert.equal(orderChip({ ...o, packaged_at: day }, Date.parse('2026-11-07T22:00:00Z')).text.includes('waiting on scan'), true);
+});
+
+test('delivered replaces done, and pickup data still has a stage', () => {
+  assert.equal(orderStage({ status: 'paid', fulfillment: 'ship', delivered_at: day }), 'delivered');
+  assert.equal(orderStage({ status: 'paid', fulfillment: 'pickup' }), 'pickup');
+  assert.equal(orderStage({ status: 'paid', fulfillment: 'pickup', picked_up_at: day }), 'delivered');
+  assert.equal(orderChip({ status: 'paid', fulfillment: 'pickup', picked_up_at: day }).text, 'Picked up');
+});
+
+test('timeline order is newest first and names who packaged', () => {
+  const rows = orderTimeline({
+    label_purchased_at: '2026-11-07T18:00:00Z',
+    label_origin: 'bought',
+    carrier: 'USPS',
+    service: 'Ground Advantage',
+    label_cost_cents: 694,
+    packaged_at: '2026-11-07T20:50:00Z',
+    packaged_by_name: 'Jacob',
+  }, [{ status: 'TRANSIT', status_detail: 'Accepted at USPS', location: 'Penryn CA', occurred_at: '2026-11-07T23:31:00Z' }]);
+  assert.equal(rows[0].title, 'Accepted at USPS');
+  assert.equal(rows.find((r) => r.title === 'Packaged')?.detail, 'by Jacob');
+  assert.equal(rows.some((r) => r.title === 'Label bought'), true);
+});

@@ -1048,3 +1048,25 @@ html.app-mode .unit-edit-amber-dot{display:inline-block;width:7px;height:7px;mar
 .unit-edit-bottom-actions{display:grid;gap:10px;margin:16px 0}
 html.app-mode .aspect-suggested{color:#30d158;background:rgba(48,209,88,.18)}
 .returns-root-desktop{max-width:720px}.returns-root-desktop .returns-search{width:100%;max-width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #d0d5dd;border-radius:10px;margin-bottom:12px}.returns-root-desktop .returns-row{border:1px solid #e5e9ee;border-radius:12px;background:#fff;padding:12px 14px}.returns-root-desktop .returns-kv-group{border:1px solid #e5e9ee;border-radius:12px;background:#fff}.returns-root-desktop .returns-timeline-card{border:1px solid #e5e9ee;background:#fafbfc}.returns-title-row-desktop{display:flex;align-items:center;justify-content:space-between;gap:12px}
+
+.order-stepper{display:flex;list-style:none;margin:8px 0 12px;padding:10px;gap:8px;background:#f4f6f8;border-radius:12px}
+.order-stepper li{flex:1;display:grid;justify-items:center;gap:4px;color:#617182;font-size:12px}
+.order-stepper li span{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;background:#e5e9ee;color:#3d4450;font-size:12px;font-weight:700}
+.order-stepper li.current{color:#0a84ff}
+.order-stepper li.current span{background:#0a84ff;color:#fff}
+.order-stepper li.done span{background:#30a46c;color:#fff}
+.order-timeline{list-style:none;margin:0 0 12px;padding:0}
+.order-timeline li{display:grid;gap:2px;padding:8px 0 8px 14px;border-left:2px solid #d0d5dd}
+.order-timeline li.current{border-left-color:#0a84ff}
+.order-timeline li.ok{border-left-color:#30a46c}
+.order-timeline li.warn{border-left-color:#d97706}
+.order-timeline span{color:#617182;font-size:13px}
+.actions button.primary,.actions button.primary:hover{background:#0a84ff;color:#fff;border-color:#0a84ff}
+.badge-warn{background:#fff4e0;color:#9a6700}
+.depop-label-field{display:grid;gap:6px}
+.depop-label-drop{display:grid;gap:2px;justify-items:center;text-align:center;border:1.5px dashed #8aa0b4;border-radius:12px;padding:18px;color:#0a84ff;cursor:pointer;background:#f7fafc}
+.depop-label-drop input{display:none}
+.depop-label-drop small{color:#617182}
+.depop-label-file{display:grid;gap:2px;padding:12px 14px;border-radius:12px;background:#eef8f0}
+.depop-label-file small{color:#137333}
+.stats.orders-stats{grid-template-columns:repeat(6,minmax(0,1fr))}
