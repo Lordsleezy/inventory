@@ -58,7 +58,8 @@ select is(
 select set_config('request.jwt.claim.sub', current_setting('loc.owner'), true);
 select lives_ok($$select public.portal_set_bay(2, array[1])$$, 'admin creates the bay a clerk will shelve into');
 select set_config('request.jwt.claim.sub', current_setting('loc.worker'), true);
-select throws_ok($$select public.portal_set_bay(3, array[1])$$, '42501', 'manager_required', 'a clerk cannot edit a bay');
+select lives_ok($$select public.portal_set_bay(3, array[1])$$, 'a clerk can add a new bay');
+select throws_ok($$select public.portal_set_bay(2, array[2])$$, '42501', 'manager_required', 'a clerk cannot edit an existing bay');
 select throws_ok($$select public.portal_delete_bay(2)$$, '42501', 'manager_required', 'a clerk cannot delete a bay');
 select lives_ok($$select public.portal_location_units('2-1-1')$$, 'a clerk can read a bin');
 select lives_ok($$select public.portal_move_location_stock('96001', '2-1-1', 1, null)$$, 'a clerk can shelve into a bin');
