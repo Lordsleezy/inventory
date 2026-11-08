@@ -249,14 +249,41 @@ export function OrderTitle({ title }: { title: string }) {
   );
 }
 
-export function OrderFindRow({ sku, code, options, disabled, onChange }: {
+export function OrderFindRow({ sku, code, options, disabled, onChange, picker = 'select' }: {
   sku: string;
   code: string;
   options: { code: string }[];
   disabled?: boolean;
   onChange: (code: string) => void;
+  /** Desktop orders open a list. Phone keeps the select. */
+  picker?: 'select' | 'button';
 }) {
   const parts = locationParts(code);
+  const [openList, setOpenList] = useState(false);
+  if (picker === 'button') {
+    return (
+      <div className="order-find">
+        <div className={`order-pick-block${parts ? '' : ' missing'}`}>
+          <small>Pick from</small>
+          <button type="button" className="secondary" disabled={disabled || !options.length} aria-expanded={openList} aria-label={`Set pick location for SKU ${sku}`} onClick={() => setOpenList((v) => !v)}>
+            {parts ? `Bay ${parts.bay} · ${parts.slot}` : 'Set location'}
+          </button>
+          {openList && (
+            <div className="order-loc-list" role="listbox" aria-label={`Locations for SKU ${sku}`}>
+              {options.map((location) => {
+                const bit = locationParts(location.code);
+                return <button type="button" key={location.code} role="option" aria-selected={location.code === code} onClick={() => { onChange(location.code); setOpenList(false); }}>{bit ? `Bay ${bit.bay} · ${bit.slot}` : location.code}</button>;
+              })}
+            </div>
+          )}
+        </div>
+        <div className="order-sku-block">
+          <small>SKU</small>
+          <strong>{sku || '—'}</strong>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="order-find">
       <label className={`order-pick-block${parts ? '' : ' missing'}`}>

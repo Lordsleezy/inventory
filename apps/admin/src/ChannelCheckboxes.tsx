@@ -144,14 +144,41 @@ type Issue = {
 };
 
 /** Admin "Listing issues": failed or blocked queue jobs with the reason. */
-export function ListingIssuesPanel({ client, onOpen }: { client: SupabaseClient; onOpen?: (sku: string) => void }) {
+export function ListingIssuesPanel({ client, onOpen, variant = 'details' }: { client: SupabaseClient; onOpen?: (sku: string) => void; variant?: 'details' | 'bar' }) {
   const [issues, setIssues] = useState<Issue[] | null>(null);
+  const [reviewOpen, setReviewOpen] = useState(false);
   const load = useCallback(async () => {
     const { data, error } = await client.rpc('portal_listing_issues', { p_limit: 200 });
     setIssues(error ? null : (data as Issue[]));
   }, [client]);
   useEffect(() => { void load(); }, [load]);
   if (!issues?.length) return null;
+  if (variant === 'bar') {
+    return (
+      <div className="listing-issues-bar">
+        <span>{issues.length} listing issue{issues.length === 1 ? '' : 's'}</span>
+        <button type="button" onClick={() => setReviewOpen((v) => !v)}>{reviewOpen ? 'Hide' : 'Review'}</button>
+        {reviewOpen && (
+          <div className="listing-issues-scroll">
+            <table className="desk-table">
+              <thead><tr><th>SKU</th><th>Item</th><th>Channel</th><th>Reason</th><th /></tr></thead>
+              <tbody>
+                {issues.map((i) => (
+                  <tr key={i.id}>
+                    <td>{i.sku}</td>
+                    <td>{i.title}</td>
+                    <td>{LISTING_CHANNELS.find(([id]) => id === i.channel)?.[1] ?? i.channel}</td>
+                    <td>{String(i.issue || '').startsWith('Needs fix:') ? i.issue : i.last_error || i.issue}</td>
+                    <td>{onOpen && <button type="button" className="text-button" onClick={() => onOpen(i.sku)}>Open</button>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    );
+  }
   return (
     <details className="panel listing-issues">
       <summary>Listing issues ({issues.length})</summary>

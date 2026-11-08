@@ -787,7 +787,7 @@ html.dark .mboard-progress-bar{background:#2a3340}
 .app-mode .locations-page header h1{font-size:1.5rem}
 .app-mode .locations-page .panel{border:0;border-radius:14px;background:var(--app-group-bg,#1c1c1e);box-shadow:none;padding:16px;margin:0 0 16px}
 .app-mode .locations-page .panel h2{margin:0 0 12px}
-.locations-simple{max-width:720px;overflow-x:hidden}
+.locations-simple{overflow-x:hidden}
 .locations-simple h1{margin:0;font-size:32px}
 .loc-desk-nav{display:flex;justify-content:space-between;align-items:center;gap:12px;min-height:44px}
 .loc-desk-nav button{border:0;background:transparent;color:#0a84ff;font:inherit;font-size:16px;padding:8px 0;white-space:nowrap}
@@ -1063,7 +1063,7 @@ html.app-mode .unit-edit-amber-dot{display:inline-block;width:7px;height:7px;mar
 .unit-edit-photo-grid .unit-edit-photo-open,.unit-edit-photo-grid .unit-edit-photo-add{width:100%;height:auto;aspect-ratio:1}
 .unit-edit-bottom-actions{display:grid;gap:10px;margin:16px 0}
 html.app-mode .aspect-suggested{color:#30d158;background:rgba(48,209,88,.18)}
-.returns-root-desktop{max-width:720px;color:#111}
+.returns-root-desktop{color:inherit}
 .returns-root-desktop .returns-search{width:100%;max-width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #d0d5dd;border-radius:10px;margin-bottom:8px;background:#fff;color:#111}
 .returns-root-desktop .returns-tabs{display:flex;border-bottom:1px solid #e5e9ee;margin-bottom:4px}
 .returns-root-desktop .returns-tabs button{flex:1;border:0;background:transparent;color:#617182;font-size:15px;font-weight:500;padding:10px 4px 12px;border-bottom:2px solid transparent;margin-bottom:-1px}

@@ -1,4 +1,5 @@
 export type MainPage =
+  | 'home'
   | 'register'
   | 'sales'
   | 'orders'
@@ -83,6 +84,7 @@ const LEGACY: Record<string, { page: MainPage; tab?: ReportTab; inventoryTab?: I
 };
 
 const MAIN: MainPage[] = [
+  'home',
   'register',
   'sales',
   'orders',
@@ -136,7 +138,7 @@ export type NavState = {
   onlineChannel: OnlineChannel;
 };
 
-export function defaultNavState(page: MainPage = 'sales'): NavState {
+export function defaultNavState(page: MainPage = 'home'): NavState {
   return {
     page,
     reportTab: 'profit',
@@ -152,7 +154,7 @@ export function parseNavFromLocation(): NavState {
   const hashRaw = window.location.hash.replace(/^#/, '').trim();
   const hashQ = hashRaw.includes('=') ? new URLSearchParams(hashRaw.replace(/^\?/, '')) : null;
   const hashPage = hashRaw && !hashRaw.includes('=') ? hashRaw.split('/')[0] : '';
-  const raw = (q.get('page') || hashQ?.get('page') || hashPage || 'sales').toLowerCase();
+  const raw = (q.get('page') || hashQ?.get('page') || hashPage || 'home').toLowerCase();
   if (q.get('ebay') === '1') return { ...defaultNavState(), page: 'ebay' };
   const mapped = LEGACY[raw];
   const base = mapped ? mapped.page : MAIN.includes(raw as MainPage) ? (raw as MainPage) : 'sales';
@@ -195,6 +197,14 @@ export function parseNavFromLocation(): NavState {
       ? (onlineChannelRaw as OnlineChannel)
       : 'all',
   };
+}
+
+/** Desktop only. Reports → Sold now lives on Receipts. The phone app keeps the Sold tab. */
+export function desktopLanding(state: NavState): NavState {
+  if (state.page === 'reports' && state.reportTab === 'sold') {
+    return { ...state, page: 'receipts', reportTab: 'profit' };
+  }
+  return state;
 }
 
 export function writeNavToLocation(state: NavState) {

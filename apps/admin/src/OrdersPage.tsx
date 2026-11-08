@@ -152,6 +152,8 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
   const [busy, setBusy] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
   const [view, setView] = useState<OrderView>('all');
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [revealed, setRevealed] = useState<Set<string>>(() => new Set());
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [labelOrder, setLabelOrder] = useState<WebOrder | null>(null);
   const [trackEvents, setTrackEvents] = useState<Record<string, { status?: string; status_detail?: string | null; location?: string | null; occurred_at?: string | null }[]>>({});
@@ -466,24 +468,30 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
     const skuLabel = linked ? `SKU ${o.sku}` : 'Needs SKU match';
     return <div className="ticket-items">
     <small>{skuLabel}</small>
-    <small>{o.buyer_name}{o.buyer_email ? ` · ${o.buyer_email}` : ''}{o.buyer_phone ? ` · ${o.buyer_phone}` : ''}</small>
+    <small>{o.buyer_name || 'Buyer'}</small>
+    {(o.buyer_email || o.buyer_phone) && (revealed.has(o.id)
+      ? <small>{[o.buyer_email, o.buyer_phone].filter(Boolean).join(' · ')}</small>
+      : <button type="button" className="text-button" onClick={() => setRevealed((prev) => new Set(prev).add(o.id))}>Reveal</button>)}
     <small>Item {money(o.item_cents)}{orderFee(o) ? ` · Fees ${money(orderFee(o))}` : ''} · {o.fulfillment === 'ship' ? `Buyer ship ${money(o.shipping_cents)}` : 'Store pickup'}{o.fulfillment === 'ship' ? ` · Label ${o.label_cost_cents != null ? money(o.label_cost_cents) : '—'}` : ''} · Tax {money(o.tax_cents)}</small>
     <CommissionOverrideMark overridden={!!ov} />
     {canOverride && o.ticket_key && (
-      <CommissionOverrideControls
-        client={client}
-        ticketKey={o.ticket_key}
-        ticket={ticketLike}
-        rules={rules}
-        cfg={cfg}
-        override={ov}
-        frozenCuts={frozenCutsForTicket(frozen, o.ticket_key, cfg)}
-        personName={personName}
-        stamp={stamp}
-        money={money}
-        busy={!!busy || parentBusy}
-        onChanged={next => onCommissionChanged(o.ticket_key!, next)}
-      />
+      <details>
+        <summary>Commission split</summary>
+        <CommissionOverrideControls
+          client={client}
+          ticketKey={o.ticket_key}
+          ticket={ticketLike}
+          rules={rules}
+          cfg={cfg}
+          override={ov}
+          frozenCuts={frozenCutsForTicket(frozen, o.ticket_key, cfg)}
+          personName={personName}
+          stamp={stamp}
+          money={money}
+          busy={!!busy || parentBusy}
+          onChanged={next => onCommissionChanged(o.ticket_key!, next)}
+        />
+      </details>
     )}
     {otherStores(o).length > 0 && <div className="alert" role="status">Pull from other stores: still marked live on {otherStores(o).map(channelLabel).join(', ')}. End those listings in each marketplace app (eBay / Depop / Amazon / TikTok).</div>}
     {(o.match_status === 'unmatched' || o.match_status === 'already_sold') && <div className="alert" role="status">Needs SKU match — sale is in Orders but not linked to a Floor unit yet. <button className="secondary" disabled={!!busy} onClick={() => void matchSku(o)}>Link SKU…</button></div>}
@@ -524,7 +532,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
           <OrderTitle title={displayTitle} />
           <p>{channelLabel(o.channel)} · {money(o.item_cents)} · {o.paid_at ? stamp(o.paid_at) : stamp(o.created_at)}</p>
         </div>
-        <OrderFindRow sku={o.sku} code={locations[o.sku]?.[0] || ''} options={locationOptions} disabled={!!busy} onChange={(code) => void setPickLocation(o, code)} />
+        <OrderFindRow picker="button" sku={o.sku} code={locations[o.sku]?.[0] || ''} options={locationOptions} disabled={!!busy} onChange={(code) => void setPickLocation(o, code)} />
         <div className="order-card-summary">{thumb && <img className="app-order-thumb" src={thumb} alt="" />}<div className="order-card-info"><small>{channelLabel(o.channel)} · {money(o.item_cents)} · SKU {o.sku}</small><div className="order-card-tags"><b className={chip.tone === 'warn' ? 'badge-warn' : ''}>{cardStatus}</b></div></div></div>
         {o.fulfillment === 'ship' && !isCanceled && <OrderStepper stage={stage} />}
         <OrderFacts label={labelText} labeled={labeled} order={o} />
@@ -657,7 +665,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
     <header><div><div className="eyebrow">WEBSITE AND MARKETPLACES</div><h1>Orders</h1><p>Every online order since day one. Returns, refunds, and replacements are on the Returns tab. No customer emails. Refreshes every 30 seconds.</p></div>
       <div className="actions"><button className="secondary" onClick={() => void load()}>Refresh</button></div></header>
     {error && <div className="alert" role="alert">{error}<button onClick={() => setError('')}>Dismiss</button></div>}
-    <div className="stats orders-stats">
+    <div className="inventory-tabs" role="tablist" aria-label="Order status">
       {([
         ['all', groups.all.length],
         ['needsLabel', groups.needsLabel.length],
@@ -667,8 +675,8 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
         ['delivered', groups.delivered.length],
         ['canceled', groups.canceled.length],
       ] as const).map(([key, count]) => (
-        <button key={key} type="button" className={`stat stat-button${view === key ? ' active' : ''}`} onClick={() => selectView(key)}>
-          <span>{VIEW_LABEL[key]}</span><strong>{count}</strong><small>View details</small>
+        <button key={key} type="button" role="tab" aria-selected={view === key} className={view === key ? 'active' : ''} onClick={() => selectView(key)}>
+          {VIEW_LABEL[key]} {count}
         </button>
       ))}
     </div>
@@ -702,42 +710,37 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
         </div>
       </div>
       {summary.totals.count > 0 && (
-        <div className="table-wrap" style={{ marginBottom: 16 }}>
-          <table>
-            <thead>
-              <tr><th>Channel</th><th>Orders</th><th>Item</th><th>Fees</th><th>Shipping</th><th>Tax</th><th>Total</th></tr>
-            </thead>
-            <tbody>
-              {summary.channels.map(row => (
-                <tr key={row.channel}>
-                  <td>{channelLabel(row.channel)}</td>
-                  <td>{row.count}</td>
-                  <td>{money(row.item)}</td>
-                  <td>{money(row.fees)}</td>
-                  <td>{money(row.ship)}</td>
-                  <td>{money(row.tax)}</td>
-                  <td>{money(row.total)}</td>
-                </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr>
-                <td>Total</td>
-                <td>{summary.totals.count}</td>
-                <td>{money(summary.totals.item)}</td>
-                <td>{money(summary.totals.fees)}</td>
-                <td>{money(summary.totals.ship)}</td>
-                <td>{money(summary.totals.tax)}</td>
-                <td>{money(summary.totals.total)}</td>
-              </tr>
-            </tfoot>
-          </table>
-        </div>
+        <p className="hint">{summary.channels.map((row) => `${channelLabel(row.channel)} ${row.count}`).join(' · ')} · {money(summary.totals.total)}</p>
       )}
 
       {active.length === 0
         ? <div className="empty">{view === 'all' ? 'No orders match this filter.' : view === 'needsLabel' ? 'No orders are waiting on a label.' : view === 'toShip' ? 'Nothing to ship.' : view === 'packaged' ? 'Nothing is waiting on a carrier scan.' : view === 'shipped' ? 'None in transit.' : view === 'delivered' ? 'No delivered orders yet.' : 'None.'}</div>
-        : <div className="ticket-list">{active.map(renderTicket)}</div>}
+        : <table className="desk-table">
+            <thead><tr><th>Order</th><th>Item</th><th>Channel</th><th>Status</th><th>Total</th></tr></thead>
+            <tbody>
+              {active.map((o) => {
+                const linked = o.match_status === 'matched' || (!!o.sku && o.sku !== 'UNMATCHED' && !!o.sale_id);
+                const title = linked ? (o.title || o.marketplace_title || 'Item') : (o.marketplace_title || o.title || 'Marketplace sale');
+                const where = locations[o.sku]?.[0] || 'No location';
+                return <tr key={o.id}>
+                  <td><button type="button" className="linkish" onClick={() => setOpenId(o.id)}>{o.order_no || 'Order'}</button></td>
+                  <td>{title}<br /><small>{where}</small></td>
+                  <td>{channelLabel(o.channel)}</td>
+                  <td>{orderChip(o).text}</td>
+                  <td className="desk-num">{money(o.total_cents)}</td>
+                </tr>;
+              })}
+            </tbody>
+          </table>}
+      {openId && active.some((o) => o.id === openId) && (
+        <>
+          <button type="button" className="desk-drawer-scrim" aria-label="Close order" onClick={() => setOpenId(null)} />
+          <aside className="desk-drawer" role="dialog" aria-label="Order details">
+            <button type="button" className="text-button" onClick={() => setOpenId(null)}>Close</button>
+            {renderTicket(active.find((o) => o.id === openId)!)}
+          </aside>
+        </>
+      )}
     </section>
     {labelOrder && (
       <LabelDialog
