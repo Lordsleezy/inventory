@@ -40,13 +40,28 @@ select set_config('request.jwt.claim.sub',current_setting('depop_test.owner'),tr
 select lives_ok($q$select public.portal_depop_add_listing('93005','https://www.depop.com/products/fixture/',1000,(now() at time zone 'America/Los_Angeles')::date)$q$,'existing admin form still works');
 select is((select count(*)::int from public.portal_depop_live_listings()),3,'portal reads every canonical listed row including imports without URLs');
 select lives_ok($q$select public.portal_depop_record_sale('93001',2500,200,null,(now() at time zone 'America/Los_Angeles')::date,'fixture')$q$,'manual Depop sale works unchanged');
-select is((select status from public.listings where sku='93001'),'delisted','sale atomically removes SKU from live tracker');
-select ok((select not ('depop'=any(listed_on)) from public.units where sku='93001'),'sold SKU channel flag cleared');
-select is((select count(*)::int from public.portal_depop_live_listings()),2,'sold item disappears from portal list');
+select is((select status from public.listings where sku='93001' and channel='depop'),'listed','sale keeps the SKU on the live tracker');
+select is((select depop_needs_removal from public.listings where sku='93001' and channel='depop'),true,'sale flags the shop listing for removal');
+select ok((select 'depop'=any(listed_on) from public.units where sku='93001'),'sold SKU stays flagged on Depop until Remove');
+select is((select count(*)::int from public.portal_depop_live_listings()),3,'sold item stays on the portal list');
+select is((select sku from public.portal_depop_live_listings() limit 1),'93001','needs-removal SKU sorts first');
+select is((select needs_removal from public.portal_depop_live_listings() where sku='93001'),true,'portal exposes the removal flag');
 select is((select count(*)::int from public.sales where sku='93001'),1,'tracker introduces no duplicate sale');
-update public.listings set status='listed',delisted_at=null where sku='93001' and channel='depop';
+update public.listings set status='listed',delisted_at=null,depop_needs_removal=false where sku='93001' and channel='depop';
 select is((select status from public.listings where sku='93001' and channel='depop'),'delisted','stale import cannot revive a sold unit');
 select lives_ok($q$select public.portal_depop_remove_listing('93005')$q$,'owner can explicitly remove a confirmed listing');
 select is((select status from public.listings where sku='93005' and channel='depop'),'delisted','explicit removal is persisted');
+select is((select depop_needs_removal from public.listings where sku='93005' and channel='depop'),false,'Remove clears the removal flag');
+insert into public.sku_ledger(sku,store_id,issued_at) values('93006',current_setting('depop_test.store')::uuid,now());
+insert into public.units(sku,store_id,title,brand,state,qty_on_hand,is_stocked,received_at,updated_at,listing_specs,category)
+ values('93006',current_setting('depop_test.store')::uuid,'Stocked fixture','Acme','available',2,true,now(),now(),'{}'::jsonb,'Household');
+select lives_ok($q$select public.portal_depop_add_listing('93006','https://www.depop.com/products/stocked-fixture/',1000,(now() at time zone 'America/Los_Angeles')::date)$q$,'stocked SKU can be on the live list');
+select lives_ok($q$select public.portal_depop_record_sale('93006',1000,100,null,(now() at time zone 'America/Los_Angeles')::date,null)$q$,'selling one of a stocked SKU leaves quantity');
+select is((select qty_on_hand from public.units where sku='93006'),1,'one unit remains');
+select is((select depop_needs_removal from public.listings where sku='93006' and channel='depop'),false,'quantity left does not need the Depop listing pulled');
+select lives_ok($q$select public.portal_depop_record_sale('93006',1000,100,null,(now() at time zone 'America/Los_Angeles')::date,null)$q$,'selling the last stocked unit still records');
+select is((select qty_on_hand from public.units where sku='93006'),0,'stock is gone');
+select is((select status from public.listings where sku='93006' and channel='depop'),'listed','last sale stays on the list');
+select is((select depop_needs_removal from public.listings where sku='93006' and channel='depop'),true,'last sale flags removal');
 
 select * from finish();rollback;
