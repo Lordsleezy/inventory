@@ -87,6 +87,9 @@ async function combinedStoredBox(sb, storeId, order) {
 function eligibility(order, { allowShippedWithLabel = false } = {}) {
   if (!order || order.fulfillment !== "ship" || order.status !== "paid") return "Not a paid shipping order.";
   if (order.refund_requested_at) return "Order is being canceled.";
+  if (String(order.channel || "").toLowerCase() === "ebay") {
+    return "Buy this label in eBay, then upload the PDF on the order.";
+  }
   if (!channelAllowsLabels(order.channel)) {
     return `One-click labels are not available for ${order.channel || "this channel"}.`;
   }
@@ -636,7 +639,7 @@ export async function labelStatus(sb, storeId, orderId) {
       shipped_at: order.shipped_at,
     },
     label: label || null,
-    can_buy: !order.label_url && order.status === "paid" && order.fulfillment === "ship" && channelAllowsLabels(order.channel),
+    can_buy: !order.label_url && order.status === "paid" && order.fulfillment === "ship" && channelAllowsLabels(order.channel) && String(order.channel || "").toLowerCase() !== "ebay",
     can_void: Boolean(label && !label.voided_at && !order.delivered_at),
   };
 }

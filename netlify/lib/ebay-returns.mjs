@@ -7,7 +7,8 @@
  * https://developer.ebay.com/devzone/post-order/types/RefundFeeTypeEnum.html
  * https://www.ebay.com/help/policies/return-policy/return-policy?id=4210
  */
-import { assertEbaySellerWrite, userTokenForAccount } from "./ebay-accounts.mjs";
+import { userTokenForAccount } from "./ebay-accounts.mjs";
+import { assertEbaySellerWrite } from "./ebay-write-guard.mjs";
 import { ebayHosts } from "./ebay-env.mjs";
 import { ingestReturnRow } from "./returns.mjs";
 import { serviceClient } from "./server.mjs";

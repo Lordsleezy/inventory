@@ -87,6 +87,7 @@ export function applySaleFeeAdjustments(report: Report): Report {
   for (const f of report.fees || []) {
     const amount = Number(f.amount_cents || 0);
     if (!amount) continue;
+    if (String(f.account || '').toLowerCase() === 'pgg124-5') continue;
     const id = String(f.id || '');
     let idx: number | undefined;
     if (f.sale_id != null && byId.has(String(f.sale_id))) idx = byId.get(String(f.sale_id));
