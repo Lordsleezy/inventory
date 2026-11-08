@@ -10,8 +10,8 @@ select is(
 
 select is(
   public.allocate_line_taxes(array[1000, 379], 725),
-  array[72, 28],
-  'line floor + remainder on last equals ticket tax'
+  array[73, 27],
+  'largest remainder keeps the ticket tax and each line within a cent'
 );
 
 select ok(

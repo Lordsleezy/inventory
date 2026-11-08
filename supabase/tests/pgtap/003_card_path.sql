@@ -63,7 +63,7 @@ select set_config('request.jwt.claim.role', 'authenticated', true);
 -- Cash and card tax allocation must match for the same prices.
 select is(
   public.allocate_line_taxes(array[1000, 379], 725),
-  array[72, 28],
+  array[73, 27],
   'shared tax allocation for multi-line ticket'
 );
 
@@ -107,7 +107,7 @@ begin
   perform set_config('test.ticket_id', v_ticket::text, true);
   perform set_config('test.amount', v_charge->>'amount_cents', true);
 
-  if (v_charge->>'amount_cents')::int is distinct from 1000 + 379 + 72 + 28 then
+  if (v_charge->>'amount_cents')::int is distinct from 1000 + 379 + 73 + 27 then
     raise exception 'amount_mismatch %', v_charge->>'amount_cents';
   end if;
 

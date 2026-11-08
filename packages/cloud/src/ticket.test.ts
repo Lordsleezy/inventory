@@ -16,6 +16,18 @@ describe("applyTicketDiscount", () => {
   });
 });
 
+describe("allocateLineTaxes", () => {
+  it("keeps the ticket total and stays within a cent of each line", () => {
+    const prices = [1000, 1000, 1000, 1000, 1000, 800];
+    const taxes = allocateLineTaxes(prices, 725);
+    const ticket = Math.round((prices.reduce((a, b) => a + b, 0) * 725) / 10_000);
+    assert.equal(taxes.reduce((a, b) => a + b, 0), ticket);
+    prices.forEach((price, i) => {
+      assert.ok(Math.abs(taxes[i] - Math.round((price * 725) / 10_000)) <= 1);
+    });
+  });
+});
+
 describe("allocateLineTaxes after discount", () => {
   it("taxes discounted subtotal", () => {
     const { discounted } = applyTicketDiscount([10000], 1000);

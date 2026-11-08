@@ -36,9 +36,9 @@ const db = await boot();
 
 {
   // Two lines: 1000+379=1379; 1379*725/10000 = 99.9775 → 100
-  // floors: floor(1000*725/10000)=72, floor(379*725/10000)=27, rem on last → 28
+  // Largest remainder: 72.516 and 27.484 → 73 and 27. Ticket total stays 100.
   const { rows } = await db.query(`select public.allocate_line_taxes(array[1000, 379], 725) as t`);
-  assert.deepEqual(rows[0].t, [72, 28], `got ${JSON.stringify(rows[0].t)}`);
+  assert.deepEqual(rows[0].t, [73, 27], `got ${JSON.stringify(rows[0].t)}`);
   const sum = rows[0].t[0] + rows[0].t[1];
   assert.equal(sum, 100);
   console.log("two-line remainder ok");

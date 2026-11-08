@@ -108,24 +108,32 @@ export async function quoteTicketTotals(args: {
   return data as TicketQuote;
 }
 
-/** Client preview only — server recomputes in finalize_ticket. */
+/**
+ * Client preview only — server recomputes in finalize_ticket.
+ * Ticket tax stays round(sum × rate). Lines share that total by largest remainder,
+ * so each line is within a cent of its own rate and the lines add up to the ticket.
+ */
 export function allocateLineTaxes(prices: number[], bps: number): number[] {
   if (!prices.length) return [];
   if (!Number.isFinite(bps) || bps < 0) throw new SellError("unknown", "Tax rate is not set.");
   const sum = prices.reduce((a, b) => a + b, 0);
   const ticket = Math.round((sum * bps) / 10_000);
-  const lines: number[] = [];
-  let acc = 0;
-  for (let i = 0; i < prices.length; i++) {
-    if (i === prices.length - 1) {
-      lines.push(ticket - acc);
-    } else {
-      const line = Math.floor((prices[i] * bps) / 10_000);
-      lines.push(line);
-      acc += line;
-    }
+  if (sum <= 0 || ticket <= 0) return prices.map(() => 0);
+  const parts = prices.map((price, index) => {
+    const exact = (price * ticket) / sum;
+    const base = Math.floor(exact);
+    return { index, base, frac: exact - base };
+  });
+  let left = ticket - parts.reduce((n, part) => n + part.base, 0);
+  const order = [...parts].sort((a, b) => b.frac - a.frac || a.index - b.index);
+  for (const part of order) {
+    if (left <= 0) break;
+    part.base += 1;
+    left -= 1;
   }
-  return lines;
+  const out = prices.map(() => 0);
+  for (const part of parts) out[part.index] = part.base;
+  return out;
 }
 
 /** Prorate a cent amount across line prices; floor shares, remainder on last. */
