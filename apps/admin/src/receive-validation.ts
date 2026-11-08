@@ -1,5 +1,4 @@
-import type { AspectDef } from './aspectOptions';
-import { valueIsValid } from './aspectOptions';
+type AspectDef = { name: string; required?: boolean; allowed?: string[]; selection_only?: boolean };
 
 export type ReceiveFieldKey =
   | 'photo'
@@ -40,7 +39,8 @@ export function aspectFilled(def: AspectDef, attributes: Record<string, string>,
   if (na[def.name]) return true;
   const v = (attributes[def.name] || '').trim();
   if (!v) return false;
-  return valueIsValid(def, v);
+  if (def.selection_only && def.allowed?.length) return def.allowed.includes(v);
+  return true;
 }
 
 export function missingEbayAspects(fields: AspectDef[], attributes: Record<string, string>, na: Record<string, boolean>) {
