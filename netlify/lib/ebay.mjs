@@ -1248,6 +1248,44 @@ export async function ingestEbayOrder(storeId, order, seller = {}) {
     .eq("order_id", orderId)
     .maybeSingle();
   if (seen.data) return { skipped: true, sku, orderId };
+
+  // Dropship DS- SKUs never touch units / payouts / sold-but-listed.
+  if (/^DS-\d+$/i.test(String(rawSku || ""))) {
+    const { syncDropshipSale } = await import("./dropship/autopilot.mjs");
+    const ship = ebayShipTo(order);
+    const amounts = ebayOrderAmounts(order);
+    await sb.from("channel_orders").insert({
+      store_id: storeId,
+      provider: "ebay",
+      order_id: orderId,
+      sku: rawSku,
+      sale_id: null,
+      item_cents: amounts.itemCents || orderCents(order) || 0,
+      fee_cents: 0,
+      baked_ship_cents: 0,
+      buyer_user_id: order?.buyer?.userId || null,
+      buyer_username: order?.buyer?.username || null,
+      buyer_eias_token: order?.buyer?.eiasToken || null,
+    });
+    const drop = await syncDropshipSale(storeId, {
+      sku: rawSku,
+      channel: "ebay",
+      channel_order_id: orderId,
+      order_id: orderId,
+      buyer_name: ship.name || order?.buyer?.username || null,
+      ship_address: {
+        name: ship.name || order?.buyer?.username || "Buyer",
+        phone: ship.phone || null,
+        line1: ship.line1 || null,
+        line2: ship.line2 || null,
+        city: ship.city || null,
+        region: ship.region || null,
+        postal: ship.postal || null,
+        country: ship.country || "US",
+      },
+    });
+    return { sku: rawSku, orderId, dropship: true, ...drop };
+  }
   const paidDup = await sb
     .from("web_orders")
     .select("id")

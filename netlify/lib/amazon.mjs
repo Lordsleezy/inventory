@@ -41,6 +41,7 @@ function sellerId() {
 /** Category/title never-list (scooter, fridge, dishwasher, mattress, rug, oversized). */
 export function amazonNeverListReason(unit = {}) {
   const sku = String(unit.sku || "").trim();
+  if (/^DS-\d+$/i.test(sku)) return "Dropship DS- SKU — Amazon channel off; never list";
   if (sku && NEVER_LIST_SKUS.has(sku)) return "SKU 11284 scooter — never list online";
   const product = `${unit.title || ""} ${unit.brand || ""} ${unit.model || ""} ${unit.listing_body || ""}`.toLowerCase();
   const blob = `${unit.category || ""} ${product}`.toLowerCase();
@@ -1209,6 +1210,8 @@ export async function ingestAmazonOrder(storeId, order) {
   const item = items[0];
   const sku = item?.SellerSKU || item?.sellerSku;
   if (!orderId || !sku) return { skipped: true };
+  // Amazon sync ignores DS- dropship SKUs (channel off; never mix with Floor units).
+  if (/^DS-\d+$/i.test(String(sku))) return { skipped: true, sku, reason: "dropship_ds_sku" };
 
   const sb = serviceClient();
   const seen = await sb

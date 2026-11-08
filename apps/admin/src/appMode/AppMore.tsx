@@ -31,6 +31,7 @@ export type MoreId =
   | 'manifests'
   | 'locations'
   | 'insights'
+  | 'dropship'
   | 'settings';
 
 type Props = {
@@ -241,6 +242,10 @@ export function AppMoreOther({
 
       <p className="app-section-label">Other tools</p>
       <div className="app-group">
+        <button type="button" className="app-more-link" onClick={() => setPage('dropship')}>
+          <span className="app-more-left"><Icon tone="#8e8e93" />Dropship</span>
+          <span className="app-chevron">›</span>
+        </button>
         <button type="button" className="app-more-link" onClick={() => setPage('insights')}>
           <span className="app-more-left"><Icon tone="#5e5ce6" />Insights</span>
           <span className="app-chevron">›</span>

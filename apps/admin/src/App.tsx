@@ -13,6 +13,7 @@ import './books.css';
 import { ManifestsPage } from './ManifestsPage';
 import { LocationsPage } from './LocationsPage';
 import { InsightsPage } from './InsightsPage';
+import { DropshipPage } from './dropship/DropshipPage';
 import { LogsPage } from './LogsPage';
 import { ClientErrorReporter } from './clientLog';
 import { displayPaymentNote, effectiveCommissionSplit, frozenCommissionBase, frozenCutsForTicket, inStoreOverrideRate, isBonusCategory, isOnline, NO_ONLINE, ownerPayoutSummary, paymentAllocation, payout, payoutCardIncludesSale, profit, reimbursementStillOwed, remainingProfit, reportProfitCents, withCommissionPaymentTag, type CommissionOverride, type OnlineCfg, type Rule } from './payouts';
@@ -28,7 +29,7 @@ import { AssociateSettings } from './AssociateSettings';
 import { type MainPage, type NavState, defaultNavState, parseNavFromLocation, writeNavToLocation } from './navigation';
 
 /** Desktop sidebar only — channel tools, connections, and store ops not on the phone More tab. */
-const DESKTOP_OTHER_PAGES: MainPage[] = ['ebay', 'depop', 'amazon', 'tiktok', 'marketplaces', 'manifests', 'insights', 'locations', 'logs'];
+const DESKTOP_OTHER_PAGES: MainPage[] = ['ebay', 'depop', 'amazon', 'tiktok', 'marketplaces', 'manifests', 'insights', 'dropship', 'locations', 'logs'];
 import { formatLabelWithPending, parseShipCostSource } from './shipCostSource';
 import { errText } from './errText';
 import { isStandaloneApp, shouldShowInstallGate } from './appMode/isAppMode';
@@ -798,6 +799,7 @@ export function App() {
     manifests: 'Manifests',
     locations: 'Locations',
     insights: 'Insights',
+    dropship: 'Dropship',
     cameras: 'Cameras',
     remote: 'Remote',
     logs: 'Logs',
@@ -813,6 +815,7 @@ export function App() {
     ['marketplaces', 'Connections'],
     ['manifests', 'Manifests'],
     ['insights', 'Insights'],
+    ['dropship', 'Dropship'],
     ['locations', 'Locations'],
     ['logs', 'Logs'],
   ];
@@ -1005,6 +1008,9 @@ export function App() {
     />
   )}
   {fullAccess && page === 'insights' && <InsightsPage client={sb} money={money} />}
+  {fullAccess && page === 'dropship' && (
+    <DropshipPage client={sb} session={session} money={money} embed="desktop" />
+  )}
   {fullAccess && page === 'settings' && <SettingsPage accessToken={session.access_token} busy={busy} run={run} staff={staff} rules={rules} saveRule={setRule} reloadPeople={loadCommon} />}
   {registerOnly && page === 'settings' && <AssociateSettings client={sb} displayName={staffSession?.displayName || 'Associate'} />}
   {fullAccess && page === 'cameras' && <><header><div><div className="eyebrow">FUTURE INTEGRATION</div><h1>Cameras</h1></div></header><section className="panel"><Empty>Camera feeds coming soon</Empty></section></>}

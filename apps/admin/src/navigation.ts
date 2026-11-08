@@ -18,6 +18,7 @@ export type MainPage =
   | 'manifests'
   | 'locations'
   | 'insights'
+  | 'dropship'
   | 'cameras'
   | 'remote'
   | 'logs'
@@ -57,6 +58,7 @@ const LEGACY: Record<string, { page: MainPage; tab?: ReportTab; inventoryTab?: I
   locations: { page: 'locations' },
   projections: { page: 'insights' },
   insights: { page: 'insights' },
+  dropship: { page: 'dropship' },
   settings: { page: 'settings' },
   marketplaces: { page: 'marketplaces' },
   ebay: { page: 'ebay' },
@@ -99,6 +101,7 @@ const MAIN: MainPage[] = [
   'manifests',
   'locations',
   'insights',
+  'dropship',
   'cameras',
   'remote',
   'logs',

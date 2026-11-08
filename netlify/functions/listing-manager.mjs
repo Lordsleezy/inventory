@@ -86,8 +86,12 @@ async function handleStaff(event) {
 
   if (action === "depop_confirm") {
     if (!body.sku) return json(400, { ok: false, error: "sku_required" });
+    const depopSku = String(body.sku).trim();
+    if (/^DS-\d+$/i.test(depopSku)) {
+      return json(400, { ok: false, error: "dropship_blocked_on_depop", message: "Depop rules do not allow dropship items." });
+    }
     const result = await confirmDepopListed(storeId, {
-      sku: String(body.sku).trim(),
+      sku: depopSku,
       depopUrl: body.depop_url || body.url || null,
       markOnly: Boolean(body.mark_only),
     });
@@ -96,8 +100,12 @@ async function handleStaff(event) {
 
   if (action === "mercari_confirm") {
     if (!body.sku) return json(400, { ok: false, error: "sku_required" });
+    const mercariSku = String(body.sku).trim();
+    if (/^DS-\d+$/i.test(mercariSku)) {
+      return json(400, { ok: false, error: "dropship_blocked_on_mercari", message: "Mercari rules do not allow dropship items." });
+    }
     const result = await confirmMercariListed(storeId, {
-      sku: String(body.sku).trim(),
+      sku: mercariSku,
       mercariUrl: body.mercari_url || body.url || null,
       markOnly: Boolean(body.mark_only),
     });
@@ -118,9 +126,13 @@ async function handleStaff(event) {
   }
 
   if (action === "publish" || action === "create") {
+    const pubSku = String(body.sku || "").trim();
+    if (/^DS-\d+$/i.test(pubSku) && (channel === "depop" || channel === "mercari")) {
+      return json(400, { ok: false, error: `dropship_blocked_on_${channel}` });
+    }
     const result = await publishCreate(storeId, {
       channel,
-      sku: String(body.sku || "").trim(),
+      sku: pubSku,
       title: body.title || null,
       description: body.description || null,
       priceCents: body.price_cents != null ? Math.round(Number(body.price_cents)) : null,

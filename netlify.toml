@@ -44,6 +44,18 @@
 [functions."amazon-list"]
   timeout = 60
 
+# Dropship: light Netlify jobs only. Heavy CJ catalog import runs on GitHub Actions.
+[functions."dropship-autopilot"]
+  schedule = "*/15 * * * *"
+  timeout = 60
+
+[functions."dropship-hunter"]
+  schedule = "20 9 * * *"
+  timeout = 60
+
+[functions."dropship-admin"]
+  timeout = 60
+
 
 [functions."loyalty-email"]
   schedule = "*/5 * * * *"

@@ -142,7 +142,7 @@ async function handle(event) {
 
   // Prioritize real sales over nag spam; one digest for remaining nags.
   const rows = [...(alerts || [])];
-  const priority = { double_sell: 0, pack_condition: 0, return_decision: 0, sale_delist: 1, web_order: 2, web_shipped: 3, sale_relist: 4, delist_nag: 9 };
+  const priority = { double_sell: 0, pack_condition: 0, return_decision: 0, dropship: 1, sale_delist: 1, web_order: 2, web_shipped: 3, sale_relist: 4, delist_nag: 9 };
   rows.sort((a, b) => (priority[a.kind] ?? 5) - (priority[b.kind] ?? 5) || String(a.created_at).localeCompare(String(b.created_at)));
 
   const saleLike = rows.filter((a) => a.kind !== "delist_nag");
@@ -216,7 +216,7 @@ async function handle(event) {
       if (alert.kind === "double_sell") return u.notify_email || u.notify_push;
       if (alert.kind === "sale_delist" || alert.kind === "delist_nag") return u.delist_duty || u.role === "owner";
       if (alert.kind === "web_order") return u.role !== "staff" && u.notify_email;
-      if (alert.kind === "sale_relist" || alert.kind === "pack_condition" || alert.kind === "return_decision") {
+      if (alert.kind === "sale_relist" || alert.kind === "pack_condition" || alert.kind === "return_decision" || alert.kind === "dropship") {
         return u.role === "owner" || u.notify_email;
       }
       return false;
@@ -288,6 +288,9 @@ async function handle(event) {
         const relist = (payload.relist_on || []).filter(Boolean).map(channelName);
         subject = `RELIST – ${label ? `${label} ` : ""}(${alert.sku})${relist.length ? ` – ${relist.join(", ")}` : ""}`;
         text = `SKU ${alert.sku}${title ? ` – ${title}` : ""} may need relisting.${relist.length ? ` ${relist.join(", ")}` : ""}`;
+      } else if (alert.kind === "dropship") {
+        subject = `DROPSHIP – ${payload.kind_detail || "alert"} – (${alert.sku})`;
+        text = String(payload.message || `Dropship alert for ${alert.sku}`);
       } else {
         text = `SKU ${alert.sku}: ${alert.kind}`;
       }
