@@ -194,10 +194,10 @@ export function AppModeShell({
   useEffect(() => { if (morePage === 'reports') reportsOpenRef.current?.(); }, [morePage]);
 
   useEffect(() => {
-    document.documentElement.classList.add('app-mode');
+    document.documentElement.classList.add('app-mode', 'dark');
     document.body.classList.add('app-mode');
     return () => {
-      document.documentElement.classList.remove('app-mode');
+      document.documentElement.classList.remove('app-mode', 'dark');
       document.body.classList.remove('app-mode');
     };
   }, []);

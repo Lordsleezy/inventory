@@ -21,3 +21,4 @@ if ('serviceWorker' in navigator) {
 
 import './design/tools.css';
 import './design/bw.css';
+import './design/safe-v2.css';
