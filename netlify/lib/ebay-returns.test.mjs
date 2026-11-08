@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { deductionRefundCents, ebayRefundPlan, mapEbayReturn } from "./ebay-returns.mjs";
-import { assertEbaySellerWrite, ebayAccountFeedsFloorOrders } from "./ebay-accounts.mjs";
+import { ebayAccountFeedsFloorOrders } from "./ebay-accounts.mjs";
+import { assertEbaySellerWrite } from "./ebay-write-guard.mjs";
 
 test("a deduction cannot pass half the item price", () => {
   assert.deepEqual(deductionRefundCents(2000, 10), { refundCents: 1800, deductedCents: 200, percent: 10 });
