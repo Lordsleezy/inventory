@@ -1,5 +1,6 @@
 import type { CommissionOverride, OnlineCfg, Rule, TicketLike, TicketLineLike } from '../payouts';
 import { isOnline, payout, profit, remainingProfit } from '../payouts';
+import { shareTicketCents } from './commissionShare';
 import { effectiveCostCents } from './costTruth';
 import type { FrozenMap } from './types';
 import type { Row } from './types';
@@ -210,9 +211,12 @@ export function lineBooksCommission(
   frozen: FrozenMap | undefined,
   cfg: OnlineCfg,
 ): number | null {
-  const slice = sliceTicketLine(ticket, lineIndex);
-  if (slice.cost === null) return 0;
-  return ticketCommissionsAllRules(slice as MonthTicket, rules, frozen, cfg) ?? 0;
+  const lines = ticket.lines || [];
+  if (lines.length > 1 && lines[lineIndex]?.cost_cents == null) return 0;
+  if ((lines.length <= 1) && ticket.cost === null) return 0;
+  const total = ticketCommissionsAllRules(ticket, rules, frozen, cfg);
+  if (total == null) return 0;
+  return shareTicketCents(total, lineWeights(ticket), lineIndex);
 }
 
 export { profit, remainingProfit };

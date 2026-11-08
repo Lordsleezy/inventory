@@ -6,6 +6,7 @@ type ReturnDoc = {
   period_end: string;
   due_on: string;
   lines: Line[];
+  signer?: { name?: string; title?: string; date?: string; email?: string; phone?: string; account?: string };
 };
 
 const money = (n: number) => String(Math.round(n));
@@ -19,7 +20,7 @@ function usDate(iso: string) {
   return `${m}/${d}/${y}`;
 }
 
-/** Fill the official CDTFA-401-A (REV. 126). Signature and account number stay blank. */
+/** Fill the official CDTFA-401-A (REV. 126) with the amounts on screen, including edits. */
 export async function fillCdtfaPdf(doc: ReturnDoc): Promise<Uint8Array> {
   const res = await fetch('/cdtfa/cdtfa401a.pdf');
   if (!res.ok) throw new Error('The official CDTFA form could not be loaded.');
@@ -43,6 +44,17 @@ export async function fillCdtfaPdf(doc: ReturnDoc): Promise<Uint8Array> {
   for (const [field, id] of page3) set(field, money(line(doc, id)));
   set('38a', 'Marketplace facilitator sales (eBay, TikTok Shop, Amazon, Depop, Mercari)');
   set('PaidName', 'Floor');
+  const signer = doc.signer || {};
+  const optional: [string, string][] = [
+    ['Print Name', signer.name || ''],
+    ['Date', signer.date || ''],
+    ['Emailadd', signer.email || ''],
+    ['Telephone', signer.phone || ''],
+    ['AccountNumber', signer.account || ''],
+  ];
+  for (const [name, value] of optional) {
+    try { if (value) form.getTextField(name).setText(value); } catch { /* leave a field blank if this revision renamed it */ }
+  }
   try { form.updateFieldAppearances(); } catch { /* the official form keeps its own font */ }
   return pdf.save();
 }

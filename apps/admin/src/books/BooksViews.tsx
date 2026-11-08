@@ -7,7 +7,9 @@ import { periodPickerLabel, periodStatusLabel, periodUiStatus } from './periodSt
 import { saleWhyLines } from './saleNotes';
 import { liveListedChannels, notListedLines } from './sheetChannels';
 import { BooksLock } from './BooksLock';
+import { CdtfaPaper } from './CdtfaPaper';
 import { CdtfaReturn } from './CdtfaReturn';
+import type { CdtfaPrintModel } from './cdtfaLoad';
 import { BooksIconExpenses, BooksIconInventory, BooksIconPayouts, BooksIconReceived, BooksIconSales, BooksIconTax } from './reportIcons';
 
 export type Sheet = 'hub' | 'sales' | 'expenses' | 'payouts' | 'inventory' | 'received' | 'tax';
@@ -54,6 +56,7 @@ export type ViewProps = {
   onlineChannels?: string[];
   lockedStaleMath?: boolean;
   lockedMonths?: string[];
+  taxForm?: CdtfaPrintModel | null;
 };
 
 export function BooksViews(props: ViewProps) {
@@ -148,6 +151,12 @@ function BooksDesktop(p: ViewProps) {
         <section><h2>Payouts</h2><PayoutsBody money={p.money} workbook={p.workbook} /></section>
         <section><h2>Inventory</h2><InventoryBody money={p.money} inventory={p.inventory} /></section>
         <section><h2>Items received</h2><ReceivedBody money={p.money} items={p.workbook.received} /></section>
+        {p.taxForm && (
+          <section>
+            <h2>Sales tax return</h2>
+            <CdtfaPaper {...p.taxForm} money={p.money} readOnly />
+          </section>
+        )}
       </div>
       <p className="books-print-hint">Prints landscape · headers repeat · no sidebar</p>
     </div>

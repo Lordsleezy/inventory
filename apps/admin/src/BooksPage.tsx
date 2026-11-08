@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { BooksViews, type Sheet } from './books/BooksViews';
 import { normalizeReport } from './books/booksMath';
+import { addCdtfaExcelSheet, addCdtfaPdfPages } from './books/cdtfaExport';
+import { loadCdtfaPrintModel, type CdtfaPrintModel } from './books/cdtfaLoad';
 import { buildBooksExcel, buildBooksPdf, downloadBytes } from './books/export';
 import { loadBooksPayoutContext, loadCommissionOverrides } from './books/loadPayoutContext';
 import { computePayoutPersonBalances, loadPayoutLedgerData, BOOKS_WORKBOOK_VERSION, type PersonBalance } from './books/payoutLedger';
@@ -45,6 +47,7 @@ export function BooksPage({ client, money, native = false, onNativeNavigation }:
   const [busy, setBusy] = useState(false);
   const [exportsPreparing, setExportsPreparing] = useState(false);
   const [exportFiles, setExportFiles] = useState<{ excel: Uint8Array; pdf: Uint8Array } | null>(null);
+  const [taxForm, setTaxForm] = useState<CdtfaPrintModel | null>(null);
   const [sheet, setSheet] = useState<Sheet>('hub');
   const [desktopTab, setDesktopTab] = useState<Sheet>('sales');
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -172,11 +175,13 @@ export function BooksPage({ client, money, native = false, onNativeNavigation }:
   const lockedMonths = useMemo(() => periods.filter((p) => p.status === 'locked').map((p) => p.period_start), [periods]);
 
   useEffect(() => {
-    if (!workbook || !selected) { setExportFiles(null); return; }
+    if (!workbook || !selected) { setExportFiles(null); setTaxForm(null); return; }
     let cancelled = false;
     setExportsPreparing(true);
     void (async () => {
       try {
+        let excel: Uint8Array;
+        let pdf: Uint8Array;
         if (selected.status === 'locked') {
           const [x, pdfRpc] = await Promise.all([
             client.rpc('portal_books_frozen_export', { p_period: selected.id, p_format: 'excel' }),
@@ -185,17 +190,27 @@ export function BooksPage({ client, money, native = false, onNativeNavigation }:
           if (x.error) throw x.error;
           if (pdfRpc.error) throw pdfRpc.error;
           const decode = (value: string) => Uint8Array.from(atob(value), (c) => c.charCodeAt(0));
-          if (!cancelled) setExportFiles({ excel: decode(x.data as string), pdf: decode(pdfRpc.data as string) });
+          excel = decode(x.data as string);
+          pdf = decode(pdfRpc.data as string);
         } else {
-          const [excel, pdf] = await Promise.all([
+          const [builtExcel, builtPdf] = await Promise.all([
             buildBooksExcel(selected, workbook, selected.period_start),
             buildBooksPdf(selected, workbook, money),
           ]);
-          if (!cancelled) setExportFiles({
-            excel: excel instanceof Uint8Array ? excel : new Uint8Array(excel),
-            pdf: pdf instanceof Uint8Array ? pdf : new Uint8Array(pdf),
-          });
+          excel = builtExcel instanceof Uint8Array ? builtExcel : new Uint8Array(builtExcel);
+          pdf = builtPdf instanceof Uint8Array ? builtPdf : new Uint8Array(builtPdf);
         }
+        const tax = await loadCdtfaPrintModel(client, selected.period_start);
+        if (!cancelled) setTaxForm(tax);
+        if (tax) {
+          try {
+            excel = await addCdtfaExcelSheet(excel, tax);
+            pdf = await addCdtfaPdfPages(pdf, tax);
+          } catch (err) {
+            console.error('sales tax form export', err);
+          }
+        }
+        if (!cancelled) setExportFiles({ excel, pdf });
       } catch (e) {
         if (!cancelled) console.error('export prep', e);
       } finally { if (!cancelled) setExportsPreparing(false); }
@@ -273,6 +288,7 @@ export function BooksPage({ client, money, native = false, onNativeNavigation }:
           onlineChannels={payoutCtx?.cfg.channels || []}
           lockedStaleMath={lockedStaleMath}
           lockedMonths={lockedMonths}
+          taxForm={taxForm}
         />
       )}
     </div>
