@@ -395,6 +395,7 @@ function MoneySheet({ client, sheet, overview, people, meName, meId, money, stam
   const [payee, setPayee] = useState(editing?.reason === 'person_payout' ? editing.person_id || '' : '');
   const [note, setNote] = useState(editing?.note || '');
   const [at, setAt] = useState(localInput(editing ? new Date(editing.at) : new Date()));
+  const [performer, setPerformer] = useState(editing?.by_user || meId || '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [history, setHistory] = useState<Audit[] | null>(null);
@@ -413,10 +414,11 @@ function MoneySheet({ client, sheet, overview, people, meName, meId, money, stam
     if (!valid) { setError('Enter an amount with no more than two decimals.'); return; }
     if (!reason) { setError('Choose a reason.'); return; }
     if (reason === 'person_payout' && !payee) { setError('Choose who the payout was to.'); return; }
+    if (!performer) { setError('Pick who took it.'); return; }
     submitting.current = true; setBusy(true); setError('');
     try {
       const { error: e } = await client.rpc('portal_money_save', { p_id: editing?.id ?? null, p_account: sheet.account, p_direction: dir, p_amount_cents: cents, p_reason: reason,
-        p_note: note.trim(), p_at: new Date(at).toISOString(), p_person: reason === 'person_payout' ? payee : null, p_performer: editing?.by_user ?? null });
+        p_note: note.trim(), p_at: new Date(at).toISOString(), p_person: reason === 'person_payout' ? payee : null, p_performer: performer || null });
       if (e) throw e;
       await onDone(reason === 'person_payout' ? 'Saved. The payout was also recorded in Payouts.' : editing ? 'Saved.' : dir === 'in' ? 'Money added.' : 'Taken out.');
     } catch (err) { setError(String((err as Error).message || err)); submitting.current = false; setBusy(false); }
@@ -435,29 +437,45 @@ function MoneySheet({ client, sheet, overview, people, meName, meId, money, stam
     if (e) setError(e.message); else setHistory((data || []) as Audit[]);
   }
 
-  return <div className="money-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget && !busy) onClose(); }}>
-    <form className="money-sheet money-move" role="dialog" aria-modal="true" aria-label={`${NAMES[sheet.account]} ${dir === 'in' ? 'add money' : 'take out'}`} onSubmit={(e) => void save(e)}>
-      <div className="money-grab" aria-hidden="true" />
-      <div className="money-sheet-head"><h2>{NAMES[sheet.account]}</h2><button type="button" className="money-x" aria-label="Close" onClick={onClose}>×</button></div>
+  const takeOut = sheet.account === 'safe' && dir === 'out';
+  const choices = takeOut
+    ? [{ key: 'person_payout', label: 'Paid someone' }, { key: 'supplies', label: 'Bought supplies' }, { key: 'gave_change', label: 'Gave change' }, { key: 'bank_deposit', label: 'Bank deposit' }, { key: 'other', label: 'Other' }]
+    : available;
+  const takenByMissing = !performer;
+  return <div className="money-backdrop money-backdrop-full" onMouseDown={(e) => { if (e.target === e.currentTarget && !busy) onClose(); }}>
+    <form className="money-sheet money-move money-sheet-full" role="dialog" aria-modal="true" aria-label={`${NAMES[sheet.account]} ${dir === 'in' ? 'add money' : 'take out'}`} onSubmit={(e) => void save(e)}>
+      <div className="money-sheet-head"><button type="button" className="app-title-link" onClick={onClose}>‹ Back</button><h2>{dir === 'in' ? 'Add money' : 'Take out'}</h2></div>
       <div className="money-toggle" role="group" aria-label="Direction">
-        <button type="button" className={dir === 'in' ? 'on in' : ''} disabled={Boolean(editing) || busy} onClick={() => { setDir('in'); setReason(''); setPayee(''); }}>+ Add money</button>
-        <button type="button" className={dir === 'out' ? 'on out' : ''} disabled={Boolean(editing) || busy} onClick={() => { setDir('out'); setReason(''); setPayee(''); }}>− Take out</button>
+        <button type="button" className={dir === 'out' ? 'on' : ''} disabled={Boolean(editing) || busy} onClick={() => { setDir('out'); setReason(''); setPayee(''); }}>Take out</button>
+        <button type="button" className={dir === 'in' ? 'on' : ''} disabled={Boolean(editing) || busy} onClick={() => { setDir('in'); setReason(''); setPayee(''); }}>Add money</button>
       </div>
-      <label className="money-amount-label">Amount
-        <div className={`money-amount ${dir}`}><span>$</span><input inputMode="decimal" type="number" min="0.01" step="0.01" placeholder="0.00" autoFocus disabled={busy || auto} value={amount} onChange={(e) => setAmount(e.target.value)} /></div></label>
-      <div className="money-after">{NAMES[sheet.account]} after: {valid ? money(after) : money(overview.balance_cents)}{overview.synced ? ' (balance comes from the platform; this entry is recorded in Floor’s own number)' : ''}</div>
-      <div className="money-reason-label">Reason</div>
+      <label className="money-amount-label">Amount <span className="req">*</span>
+        <div className="money-amount"><span>$</span><input inputMode="decimal" type="number" min="0.01" step="0.01" placeholder="0.00" autoFocus disabled={busy || auto} value={amount} onChange={(e) => setAmount(e.target.value)} /></div></label>
+      <div className="money-reason-label">Reason <span className="req">*</span></div>
       <div className="money-chips" role="radiogroup" aria-label="Reason">
-        {available.map((c) => <button type="button" role="radio" aria-checked={key === c.key} key={c.key} className={key === c.key ? 'on' : ''} disabled={busy || auto}
-          onClick={() => { if (c.key.startsWith('payout:')) { setReason('person_payout'); setPayee(c.key.slice(7)); } else { setReason(c.key); setPayee(''); } }}>{c.label}</button>)}
-        {editing && reason === '' && <span className="money-chip-note">Older entry (“{REASON[editing.reason] || editing.reason}”): choose a reason to change it.</span>}
+        {choices.map((c) => <button type="button" role="radio" aria-checked={takeOut ? reason === c.key : key === c.key} key={c.key} className={(takeOut ? reason === c.key : key === c.key) ? 'on' : ''} disabled={busy || auto}
+          onClick={() => { if (c.key.startsWith('payout:')) { setReason('person_payout'); setPayee(c.key.slice(7)); } else if (c.key === 'person_payout') { setReason('person_payout'); } else { setReason(c.key); setPayee(''); } }}>{c.label}</button>)}
       </div>
+      {reason === 'person_payout' && <label>Paid to <span className="req">*</span>
+        <select value={payee} disabled={busy || auto} onChange={(e) => setPayee(e.target.value)}>
+          <option value="">Select</option>
+          {people.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+        </select>
+      </label>}
+      <label className={takenByMissing ? 'money-missing' : ''}>Taken by <span className="req">*</span>
+        <select value={performer} disabled={busy || auto} onChange={(e) => setPerformer(e.target.value)}>
+          <option value="">Select</option>
+          {meId && <option value={meId}>{meName || 'Me'}</option>}
+          {people.filter(p => p.id !== meId).map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+        </select>
+        {takenByMissing && <small>Pick who took it</small>}
+      </label>
       <label>Note (optional)<input value={note} maxLength={500} disabled={busy} placeholder="What was it for?" onChange={(e) => setNote(e.target.value)} /></label>
-      <div className="money-meta"><span>By: {editing?.by_user ? names[editing.by_user] || '—' : meName}</span>
-        <label className="money-when">When<input type="datetime-local" value={at} disabled={busy || auto} onChange={(e) => setAt(e.target.value)} /></label></div>
+      <label className="money-when">When<input type="datetime-local" value={at} disabled={busy || auto} onChange={(e) => setAt(e.target.value)} /></label>
+      <p className="hint">{NAMES[sheet.account]} after: {valid ? money(after) : money(overview.balance_cents)}</p>
       {error && <p className="alert" role="alert">{error}</p>}
       {auto ? <p className="hint">This is an Auto bank payout from {NAMES[sheet.account]}. You can delete it; it will not come back.</p>
-        : <button className={`money-go ${dir}`} disabled={busy}>{busy ? 'Saving…' : editing ? 'Save changes' : dir === 'in' ? `Add ${valid ? money(cents) : ''}` : `Take out ${valid ? money(cents) : ''}`}</button>}
+        : <button className="money-go" disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>}
       {editing && <div className="money-edit-actions"><button type="button" className="secondary" disabled={busy} onClick={() => void remove()}>Delete</button>
         <button type="button" className="secondary" onClick={() => void showHistory()}>History</button></div>}
       {history && <div className="money-history">{history.length === 0 ? <small>No history.</small> : history.map((h) => <div key={h.id}><strong>{h.action}</strong> · {stamp(h.at)}{h.actor_id && h.actor_id !== meId ? ` · ${names[h.actor_id] || ''}` : ''}{h.old_row?.amount_cents != null ? <small> was {money(h.old_row.amount_cents)}</small> : null}</div>)}</div>}

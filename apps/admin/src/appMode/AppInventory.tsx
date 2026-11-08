@@ -7,14 +7,13 @@ import { reviewReasonLabel } from '../inventoryReview';
 import { shortError } from './shortError';
 import { InventoryTotals } from '../InventoryTotals';
 import { inventoryMissingText } from '../inventoryMissing';
-import { INVENTORY_BUCKET_LABELS, inventoryBucketStatus, type InventoryBucket } from '../totalsMath';
-import { inventoryChipLabels } from '../missingCost';
+import { INVENTORY_BUCKET_LABELS, inventoryBucketStatus, type InventoryBucket, type InventoryTotalsData } from '../totalsMath';
 import { MissingCostList } from './MissingCostList';
 import { hydratePhotoUrlCache, listThumbPathsFromOriginals, persistPhotoUrlCache, signPhotoUrls } from '../unitPhotos';
 import { UnitListThumb } from '../UnitListThumb';
 
 /** Same stock subtabs as desktop Inventory. */
-type Filter = 'in_stock' | 'sold' | 'unfinished' | 'needs_check' | 'no_location' | 'missing_cost' | 'defective' | 'dns' | InventoryBucket;
+type Filter = 'in_stock' | 'sold' | 'unfinished' | 'needs_check' | 'no_location' | 'missing_cost' | 'defective' | 'dns' | 'never_list' | InventoryBucket;
 
 type Row = GroupedInventory & {
   sku: string;
@@ -116,6 +115,9 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
   const [queue, setQueue] = useState<Exclude<AttentionSection, 'all'> | null>(null);
   const [queueRefresh, setQueueRefresh] = useState(0);
   const [noLocationCount, setNoLocationCount] = useState(0);
+  const [cardTotals, setCardTotals] = useState<InventoryTotalsData | null>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const tabRowRef = useRef<HTMLDivElement>(null);
   const [missingCostCount, setMissingCostCount] = useState<number | null>(null);
   const [noLocSelecting, setNoLocSelecting] = useState(false);
   const [noLocSelected, setNoLocSelected] = useState<Set<string>>(() => new Set());
@@ -223,7 +225,7 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
       setError('');
       void (async () => {
         try {
-          const status = filter === 'unfinished' ? 'all' : filter === 'no_location' ? 'in_stock' : filter in INVENTORY_BUCKET_LABELS ? inventoryBucketStatus(filter as InventoryBucket) : filter;
+          const status = filter === 'unfinished' ? 'all' : filter === 'no_location' ? 'in_stock' : filter === 'never_list' ? 'inventory_never_list' : filter in INVENTORY_BUCKET_LABELS ? inventoryBucketStatus(filter as InventoryBucket) : filter;
           const unfinished = filter === 'unfinished';
           const { data, error: e } = await client.rpc('receive_inventory_list', {
             p_query: query, p_status: status, p_unfinished: unfinished, p_sort:'sku',
@@ -294,12 +296,13 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
 
   return (
     <div ref={scrollRef as React.RefObject<HTMLDivElement>}>
-      <div className="app-large-title"><h1>Inventory</h1></div>
+      <div className="app-large-title app-title-row"><h1>Inventory</h1><button type="button" className="app-title-link" onClick={() => searchRef.current?.focus()}>Scan</button></div>
       <label className="app-search">
         <span aria-hidden>⌕</span>
         <input
+          ref={searchRef}
           type="search"
-          placeholder="Search"
+          placeholder="Search SKU, title, UPC"
           value={query}
           enterKeyHint="search"
           onChange={(e) => {
@@ -308,18 +311,30 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
           }}
         />
       </label>
-      <InventoryTotals client={client} variant="app" refreshKey={refreshKey} selected={filter in INVENTORY_BUCKET_LABELS ? filter as InventoryBucket : undefined} onSelect={bucket => { setQuery(''); setFilterTab(bucket); setList(null); }} />
-      <div className="app-segment app-segment-scroll" role="tablist">
-        {inventoryChipLabels({ noLocation: noLocationCount, missingCost: missingCostCount, showMissingCost: fullAccess }).map(([id, label]) => (
+      <InventoryTotals client={client} variant="app" refreshKey={refreshKey} onTotals={setCardTotals} selected={filter in INVENTORY_BUCKET_LABELS ? filter as InventoryBucket : undefined} onSelect={bucket => { setQuery(''); setFilterTab(bucket); setList(null); }} />
+      <div className="app-segment app-segment-scroll" role="tablist" ref={tabRowRef}>
+        {([
+          ['in_stock', 'In stock', null],
+          ['listed', 'Listed', cardTotals?.listed],
+          ['not_ready', 'Not ready', cardTotals?.not_ready],
+          ['sold', 'Sold', null],
+          ['needs_check', 'Needs check', null],
+          ['no_location', 'No location', noLocationCount],
+          ['dns', 'DNS', cardTotals?.dns],
+          ['defective', 'Defective', cardTotals?.defective],
+          ['never_list', 'Never list', cardTotals?.never_list],
+          ...(fullAccess ? [['missing_cost', 'Missing cost', missingCostCount] as const] : []),
+        ] as [Filter, string, number | null | undefined][]).map(([id, label, count]) => (
           <button
             key={id}
             type="button"
             role="tab"
             className={filter === id ? 'active' : ''}
             aria-selected={filter === id}
-            onClick={() => setFilterTab(id as Filter)}
+            ref={el => { if (filter === id && el) el.scrollIntoView({ inline: 'nearest', block: 'nearest' }); }}
+            onClick={() => setFilterTab(id)}
           >
-            {label}
+            {label}{count != null ? <> <strong className={id === 'not_ready' ? 'inv-tab-alert' : undefined}>{count}</strong></> : null}
           </button>
         ))}
       </div>
@@ -370,7 +385,8 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
         {(list?.items || []).map((u, idx) => {
           if(u.group_id && (u.group_total || 0) > 1) return <ReceiveGroupRow key={u.group_id} item={u} client={client} admin={fullAccess} money={money} onOpen={onOpen} searchQuery={query} onChanged={()=>{setList(null);setQueueRefresh(n=>n+1)}} />;
           const warn = filter === 'dns' ? null : needs(u);
-          const missing = filter === 'not_ready' ? inventoryMissingText(u.missing || []) : null;
+          const missing = filter === 'not_ready' ? inventoryMissingText(u.missing || []).replace(/^Missing: /, 'Missing ').replace(/, /g, ' · Missing ') : null;
+          const bay = (u as Row & { locations?: string }).locations?.split(',')[0]?.trim();
           const bulkPick = filter === 'no_location' && noLocSelecting;
           const checked = noLocSelected.has(u.sku);
           return (
@@ -400,16 +416,17 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
               <span className="app-row-text">
                 <strong>{name(u)}</strong>
                 <small>
-                  {u.sku} · {u.not_for_sale ? 'Not for sale' : u.condition || 'No grade'}
+                  {u.sku} · {u.not_for_sale ? 'Not for sale' : u.condition || 'No grade'}{bay ? ` · ${bay}` : ''}
                   {filter === 'sold' && u.sold_at ? <> · Sold {stamp(u.sold_at)}</> : null}
                   {(u.is_stocked || (u.qty_on_hand ?? 1) > 1) && <b className="stock-quantity-badge">×{filter === 'sold' ? (u.sold_qty ?? 0) : u.qty_on_hand}</b>}
                   {fullAccess && u.acquisition_cost_cents === null ? <> · <span className="warn">Cost missing</span></> : null}
                   {filter !== 'not_ready' && warn ? <> · <span className="warn">{warn}</span></> : null}
                 </small>
+                {missing && <small className="inventory-missing inv-missing-line">{missing}</small>}
               </span>
               {filter === 'sold'
                 ? fullAccess && <span className="app-row-price">{u.sold_price_cents == null ? '—' : money(u.sold_price_cents)}</span>
-                : <span className="app-row-price-stack">{missing && <small className="inventory-missing">{missing}</small>}<span className="app-row-price">{u.ask_cents == null ? '—' : money(u.ask_cents)}</span></span>}
+                : <span className="app-row-price">{u.ask_cents == null ? '—' : money(u.ask_cents)}</span>}
               <span className="app-chevron" aria-hidden>›</span>
             </button>
           );

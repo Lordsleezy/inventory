@@ -686,6 +686,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     categoryId: null, path: null, fields: [], attributes: {}, na: {},
   });
   const fieldRefs = useRef<Partial<Record<ReceiveFieldKey, HTMLElement | null>>>({});
+  const channelAttrs = useRef<Record<string, string>>({});
+  const [channelMissing, setChannelMissing] = useState(0);
   const [dns, setDns] = useState(false);
   const dnsRequired = isDnsType(form);
   const doNotShip = dns || dnsRequired;
@@ -1259,7 +1261,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   const liveMissing = missingFor(parse() || { ask: null, cost: null, dims: [null, null, null, null] });
   const formValid = doNotList
     ? hasPhotoForSave() && Number(form.quantity) >= 1
-    : listingGaps(parse()).length === 0 && hasPhotoForSave() && brandReady() && Boolean(form.condition);
+    : listingGaps(parse()).length === 0 && hasPhotoForSave() && brandReady() && Boolean(form.condition) && channelMissing === 0;
 
   /* ----- finish ----- */
   async function finish(event?: React.FormEvent) {
@@ -1512,6 +1514,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       const editedAspects = { ...(photoFill?.aspects || {}),
         ...(form.variant.trim() ? { Variant: form.variant.trim() } : {}),
         ...(form.size.trim() ? { Size: form.size.trim() } : {}) };
+      const filledChannelAttrs = Object.fromEntries(Object.entries(channelAttrs.current).filter(([, v]) => v.trim()));
+      if (Object.keys(filledChannelAttrs).length) put('channel_attributes', filledChannelAttrs);
       if (Object.keys(editedAspects).length) put('ebay_aspects', {
         ...Object.fromEntries(Object.entries(m?.aspects || {}).filter(([key]) => !/^product_(height|width|depth|weight)_/i.test(key))),
         ...editedAspects,
@@ -2201,7 +2205,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         </div>
       </div>}
 
-      <details className={`receive-advanced${manual ? ' receive-manual' : ''}`} open={unifiedV2 || manual}><summary>{unifiedV2 ? 'Item details' : manual ? 'Receive details' : 'More options'}</summary><div className="unit-edit-grid receive-v2-grid">
+      <div className={`receive-advanced${manual ? ' receive-manual' : ''}`}><div className="unit-edit-grid receive-v2-grid">
         {!manual && current && unifiedV2 && <p className="receive-v2-found receive-v2-span2">Found · UPC {current.upc}</p>}
         {unifiedV2 && <div ref={el => { fieldRefs.current.photo = el; }} className={`unit-edit-wide receive-v2-span2${invalid('photo') ? ' receive-v2-invalid' : ''}`}>
           <span className="receive-v2-label">Photos<span className="receive-v2-req"> *</span></span>
@@ -2233,13 +2237,10 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         <ReceiveQuantity value={form.quantity} onChange={value => update('quantity', value)} disabled={busy} />
         <div className={`receive-cond-field${invalid('condition') ? ' receive-v2-invalid' : ''}`} role="radiogroup" aria-label="Condition">
           <span className="receive-v2-label">Condition{!doNotList && <span className="receive-v2-req"> *</span>}</span>
-          {manual
-            ? <select value={form.condition} onChange={e => update('condition', e.target.value)}>
-              <option value="">—</option>{[...new Set([...choices(options?.conditions), SCRATCH])].map(x => <option key={x} value={x}>{x}</option>)}
-            </select>
-            : <div className="receive-cond-row">{CONDITIONS.map(([value, text2]) => <label key={value} className={form.condition === value ? 'receive-chip on' : 'receive-chip'}>
-              <input type="radio" name="receive-condition" value={value} checked={form.condition === value} onChange={() => update('condition', value)} />{text2}
-            </label>)}</div>}
+          <select value={form.condition} onChange={e => update('condition', e.target.value)}>
+            <option value="">Select</option>
+            {(manual ? [...new Set([...choices(options?.conditions), SCRATCH])].map(x => [x, x] as [string, string]) : CONDITIONS).map(([value, text2]) => <option key={value} value={value}>{text2}</option>)}
+          </select>
         </div>
         </div>
         {needNoteForScratch && <label className="unit-edit-wide receive-v2-span2">Defect note<textarea rows={2} value={form.conditionNote} onChange={e => update('conditionNote', e.target.value)} /></label>}
@@ -2268,6 +2269,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
             condition: form.condition,
             upc: form.noUpc ? '' : (form.upc || current?.upc || ''),
           }}
+          onChannelValues={(next, missing) => { channelAttrs.current = next; setChannelMissing(missing); }}
           value={ebayAspects}
           onChange={next => {
             setEbayAspects(next);
@@ -2362,9 +2364,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         {unifiedV2 && <details className="receive-v2-optional receive-v2-span2">
           <summary>Optional</summary>
           <label className="unit-edit-wide">Title<input value={form.title} onChange={e => update('title', e.target.value)} placeholder="Brand + specifics" autoComplete="off" /></label>
-          {!staffMode && <label>Cost <span className="receive-v2-opt">optional</span><input inputMode="decimal" placeholder="Leave blank if unknown" value={form.cost} onChange={e => update('cost', e.target.value)} /></label>}
           <label className="unit-edit-wide">Description<textarea rows={2} value={form.description} onChange={e => update('description', e.target.value)} /></label>
-          <CategoryField label="Website category" value={form.category} options={choices(options?.categories)} onChange={v => update('category', v)} onFocus={e => { typingTarget.current = e.currentTarget; }} />
+          <CategoryField label="Store category" value={form.category} options={choices(options?.categories)} onChange={v => update('category', v)} onFocus={e => { typingTarget.current = e.currentTarget; }} />
           <div className="receive-v2-dims">
             <label>Length (in)<input inputMode="decimal" value={form.length} onChange={e => update('length', e.target.value)} /></label>
             <label>Width (in)<input inputMode="decimal" value={form.width} onChange={e => update('width', e.target.value)} /></label>
@@ -2376,7 +2377,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         </details>}
       </div>
 
-      <p className="hint receive-check">
+      {!unifiedV2 && <p className="hint receive-check">
         {doNotList
           ? (files.length
             ? 'Store-only — will receive without listing. Photo is optional.'
@@ -2387,7 +2388,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
             : channels.length
               ? `Before it can list it still needs: ${liveMissing.join(', ')}.`
               : `Missing for listing: ${liveMissing.join(', ')}. You can still receive; incomplete units land in Needs attention.`}
-      </p>
+      </p>}
       <div className="receive-v2-pin">
         <button type="submit" className="receive-v2-save" disabled={busy || photoBusy || stockPhotoBusy || photoIdBusy || (dups !== null && dups.count > 0 && !dupAck)}>
           {busy ? 'Saving…' : 'Save item'}
@@ -2395,7 +2396,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         <p className="receive-v2-footnote"><span className="receive-v2-req">*</span> Required</p>
       </div>
       {!manual && current && <button type="button" className="secondary" disabled={busy} onClick={skipCurrent}>Skip this scan</button>}
-      </details>
+      </div>
     </form>}
 
     {camera && <CameraScanner

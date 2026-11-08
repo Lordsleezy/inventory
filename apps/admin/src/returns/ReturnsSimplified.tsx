@@ -379,8 +379,8 @@ export function ReturnsSimplified({ client, storeId: _storeId, money, stamp, var
         {app ? (
           <div className="returns-title-row">
             <h1>Returns</h1>
-            <button type="button" className="returns-text-btn" onClick={openNew}>New return</button>
-            {accessToken && <button type="button" className="returns-text-btn" disabled={!!busy} onClick={() => void ebayAction('sync')}>{busy === 'sync' ? 'Checking eBay…' : 'Check eBay'}</button>}
+            <button type="button" className="returns-text-btn" onClick={openNew}>New</button>
+            {accessToken && <button type="button" className="returns-text-btn" disabled={!!busy} onClick={() => void ebayAction('sync')}>{busy === 'sync' ? '…' : 'Check eBay'}</button>}
           </div>
         ) : (
           <header>

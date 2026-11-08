@@ -197,6 +197,7 @@ export function ReceiptsPage({ client, money, stamp, variant = 'desktop' }: {
   const [error, setError] = useState('');
   const [scope, setScope] = useState<'all' | 'instore' | 'online'>('all');
   const [viewing, setViewing] = useState<Receipt | null>(null);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [editLine, setEditLine] = useState<Line | null>(null);
   const [financial, setFinancial] = useState<Financial | null>(null);
   const [history, setHistory] = useState<EditRevision[]>([]);
@@ -287,10 +288,51 @@ export function ReceiptsPage({ client, money, stamp, variant = 'desktop' }: {
         </div>
       </header>
     )}
-    {variant === 'app' && (
-      <p className="hint" style={{ margin: '0 16px 10px' }}>In person and online. Use Online to filter marketplace sales.</p>
-    )}
-    <div className="inventory-controls">
+    {variant === 'app' && (() => {
+      const net = shown.reduce((sum, r) => {
+        const marketplace = !isInStoreChannel(r.channel) && (r.channel || '').toLowerCase() !== 'website';
+        return sum + (marketplace ? depositCents(r) : r.total_cents);
+      }, 0);
+      const count = scope === 'all' && !startDate && !endDate ? total : shown.length;
+      return <>
+        <div className="app-search">
+          <input type="search" placeholder="Search receipt #, SKU, buyer" value={query} onChange={e => { setQuery(e.target.value); setOffset(0); }} />
+        </div>
+        <div className="app-segment receipt-tabs">
+          {(['all', 'instore', 'online'] as const).map(id => (
+            <button key={id} type="button" className={scope === id ? 'active' : ''} onClick={() => setScope(id)}>{id === 'all' ? 'All' : id === 'instore' ? 'In person' : 'Online'}</button>
+          ))}
+          <button type="button" className="receipt-filters-toggle" onClick={() => setFiltersOpen(v => !v)}>Filters {filtersOpen ? '▴' : '▾'}</button>
+        </div>
+        {filtersOpen && <div className="receipt-date-row">
+          <label>From<input type="date" value={startDate} onChange={e => { setStartDate(e.target.value); setOffset(0); }} /></label>
+          <label>Through<input type="date" value={endDate} onChange={e => { setEndDate(e.target.value); setOffset(0); }} /></label>
+        </div>}
+        <div className="receipt-summary"><span>{count} receipt{count === 1 ? '' : 's'}</span><strong>Net {money(net)}</strong></div>
+        {error && <div className="alert" role="alert">{error}</div>}
+        {busy && rows.length === 0 && <p className="hint">Loading receipts…</p>}
+        {!busy && shown.length === 0 && <div className="empty">No receipts match.</div>}
+        <div className="receipt-compact">
+          {shown.map(r => {
+            const instore = isInStoreChannel(r.channel);
+            const label = CHANNEL[(r.channel || '').toLowerCase()] || r.channel;
+            const marketplace = !instore && (r.channel || '').toLowerCase() !== 'website';
+            const displayTotal = marketplace ? depositCents(r) : r.total_cents;
+            const titles = r.lines.map(l => l.title).filter(Boolean);
+            const when = new Date(r.sold_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'America/Los_Angeles' });
+            return <button type="button" className="receipt-compact-row" key={r.ticket_key} onClick={() => setViewing(r)}>
+              <span>
+                <strong>{titles[0] || 'Sale'}</strong>
+                <small>{when} · {label} · {r.receipt_no}{titles.length > 1 ? ` · +${titles.length - 1} more` : ''}</small>
+              </span>
+              <b>{money(displayTotal)}</b>
+              <i>›</i>
+            </button>;
+          })}
+        </div>
+      </>;
+    })()}
+    {variant !== 'app' && <div className="inventory-controls">
       <label>Search
         <input type="search" placeholder="Receipt #, SKU, buyer, channel…"
           value={query} onChange={e => { setQuery(e.target.value); setOffset(0); }} />
@@ -302,7 +344,8 @@ export function ReceiptsPage({ client, money, stamp, variant = 'desktop' }: {
         <button type="button" className={scope === 'instore' ? undefined : 'secondary'} onClick={() => setScope('instore')}>In person</button>
         <button type="button" className={scope === 'online' ? undefined : 'secondary'} onClick={() => setScope('online')}>Online</button>
       </div>
-    </div>
+    </div>}
+    {variant !== 'app' && <>
     {error && <div className="alert" role="alert">{error}</div>}
     <div className="stats inventory-stats inventory-stats-one">
       <div className="stat"><span>Receipts</span><strong>{scope === 'all' ? total : shown.length}{scope !== 'all' ? ' shown' : ''}</strong></div>
@@ -341,12 +384,31 @@ export function ReceiptsPage({ client, money, stamp, variant = 'desktop' }: {
         })}
       </div>
     </section>
+    </>}
     {scope === 'all' && !startDate && !endDate && total > limit && <div className="inventory-pagination">
       <button type="button" className="secondary" disabled={offset === 0 || busy} onClick={() => setOffset(Math.max(0, offset - limit))}>Previous</button>
       <span>{offset + 1}–{Math.min(offset + limit, total)} of {total}</span>
       <button type="button" className="secondary" disabled={offset + limit >= total || busy} onClick={() => setOffset(offset + limit)}>Next</button>
     </div>}
-    {viewing && <div className="inventory-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) setViewing(null); }}>
+    {viewing && variant === 'app' && <div className="receipt-detail">
+      <button type="button" className="app-title-link" onClick={() => setViewing(null)}>‹ Back</button>
+      <div className="receipt-detail-head">
+        <h2>{viewing.receipt_no}</h2>
+        <button type="button" className="app-title-link" onClick={() => { if (!printReceipt(viewing, money, stamp)) setError('Could not open print dialog.'); }}>Print</button>
+      </div>
+      <p>{stamp(viewing.sold_at)} · {CHANNEL[(viewing.channel || '').toLowerCase()] || viewing.channel}</p>
+      <h3>Item</h3>
+      {viewing.lines.map(line => <div className="receipt-detail-row" key={line.id}><span>{line.title || 'Item'}{line.sku ? ` · SKU ${line.sku}` : ''}{line.qty ? ` · qty ${line.qty}` : ''}</span><strong>{money(line.price_cents || 0)}</strong></div>)}
+      <h3>Order</h3>
+      <div className="receipt-detail-row"><span>Buyer</span><strong>{viewing.buyer_name || actorLabel(viewing.channel, viewing.actor_name) || '—'}</strong></div>
+      <div className="receipt-detail-row"><span>Order</span><strong>{viewing.order_no || viewing.receipt_no}</strong></div>
+      <h3>Money</h3>
+      <div className="receipt-detail-row"><span>Sale</span><strong>{money(viewing.total_cents)}</strong></div>
+      <div className="receipt-detail-row"><span>Fees</span><strong>{money(viewing.fee_cents || 0)}</strong></div>
+      <div className="receipt-detail-row"><span>Label</span><strong>{money(viewing.label_cents || 0)}</strong></div>
+      <div className="receipt-detail-row"><span>Net deposit</span><strong>{money((() => { const marketplace = !isInStoreChannel(viewing.channel) && (viewing.channel || '').toLowerCase() !== 'website'; return marketplace ? depositCents(viewing) : viewing.total_cents; })())}</strong></div>
+    </div>}
+    {viewing && variant !== 'app' && <div className="inventory-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) setViewing(null); }}>
         <section className="inventory-detail receipt-viewer" role="dialog" aria-modal="true" aria-label={`Receipt ${viewing.receipt_no}`}>
         <div className="section-head">
           <div><div className="eyebrow">RECEIPT</div><h2>{viewing.receipt_no}</h2></div>

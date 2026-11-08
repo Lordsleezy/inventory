@@ -47,8 +47,8 @@ type Props = {
   channelContent?: React.ReactNode;
 };
 
-function Icon({ tone }: { tone: string }) {
-  return <span className="app-more-icon" style={{ background: tone }} />;
+function Icon(_props: { tone: string }) {
+  return null;
 }
 
 function laMidnight(date: string) {
