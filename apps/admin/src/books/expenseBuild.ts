@@ -1,3 +1,4 @@
+import { isBonusCategory } from '../payouts';
 import { channelTitle } from './booksMath';
 import type { DuplicateNote, ExpenseDisplayLine, ExpenseLine, Report, Row } from './types';
 
@@ -92,8 +93,9 @@ function detectDuplicates(lines: ExpenseDisplayLine[]): DuplicateNote[] {
       dup.excludeFromTotals = true;
       dup.duplicateFlag = true;
       notes.push({
-        message: `Possible duplicate: '${dup.title}' ${(dup.amount_cents / 100).toFixed(2)} on ${dup.date.slice(5, 10)} matches ${primary.title}. Hidden from the total.`,
+        message: '',
         lineIds: [primary.id, dup.id],
+        pair: { id: `${primary.id}:${dup.id}`, primary, duplicate: dup },
       });
     }
   }
@@ -118,7 +120,8 @@ export function buildExpenses(report: Report, attributedPromotedIds: Set<string>
     const sku = String(e.sku || '');
     const category = expenseCategory(String(e.category || ''), source, String(e.description || ''));
     const title = cleanTitle(String(e.description || ''), source, sku, String(e.order_id || ''));
-    const reimburse = Boolean(e.needs_reimbursement);
+    const isBonus = category === 'Bonus' || isBonusCategory(String(e.category || ''));
+    const reimburse = Boolean(e.needs_reimbursement) && !isBonus;
     rows.push({
       id: String(e.id || `${e.date}-${title}`),
       date: String(e.date ?? e.spent_on ?? ''),

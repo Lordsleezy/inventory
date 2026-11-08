@@ -19,7 +19,23 @@ export type Check = {
   explanation: string | null;
 };
 
-export type DuplicateNote = { message: string; lineIds: string[] };
+export type FrozenMap = Map<string, number | null>;
+
+export type BooksPayoutContext = {
+  rules: import('../payouts').Rule[];
+  cfg: import('../payouts').OnlineCfg;
+  frozen: FrozenMap;
+  staff: { user_id: string; display_name: string; email?: string | null }[];
+  peopleSlots: { slot: string; employee_id: string | null }[];
+};
+
+export type DuplicatePair = {
+  id: string;
+  primary: ExpenseDisplayLine;
+  duplicate: ExpenseDisplayLine;
+};
+
+export type DuplicateNote = { message: string; lineIds: string[]; pair?: DuplicatePair };
 
 export type ExpenseDisplayLine = {
   id: string;
@@ -38,27 +54,42 @@ export type ExpenseDisplayLine = {
   children?: ExpenseDisplayLine[];
 };
 
-export type StorePayoutGroup = {
-  channel: string;
-  count: number;
-  total_cents: number;
-  payouts: Row[];
+export type MoneyOverviewRow = { account: string; balance_cents: number };
+
+export type MoneyActivityRow = {
+  id: string;
+  at: string;
+  direction: 'in' | 'out' | 'none';
+  amount_cents: number;
+  reason: string;
+  note: string;
+  auto?: boolean;
+};
+
+export type StoreMoneyMonth = {
+  account: string;
+  label: string;
+  start_balance_cents: number | null;
+  money_in_cents: number;
+  paid_to_bank_cents: number;
+  end_balance_cents: number | null;
+  transfers: MoneyActivityRow[];
 };
 
 export type CommissionPayoutLine = {
   person: string;
+  role: 'staff' | 'owner';
   earned_cents: number;
   paid_cents: number;
-  owed_cents: number;
+  owed_all_time_cents: number;
 };
 
 export type PayoutsWorkbook = {
-  stores: StorePayoutGroup[];
-  notPaidYet_cents: number;
-  storePaidTotal_cents: number;
+  stores: StoreMoneyMonth[];
+  bankPaidTotal_cents: number;
   commissions: CommissionPayoutLine[];
   commission_total_cents: number;
-  stillOwed_cents: number;
+  stillOwed_all_time_cents: number;
   owner: { profit: number; commission: number; otherExpenses: number; ownerKeeps: number };
 };
 
@@ -154,7 +185,20 @@ export type SalesLine = {
   profit_notes: string;
 };
 
+export type MonthProof = {
+  revenue: number;
+  cost: number;
+  feesAndLabels: number;
+  profit: number;
+  commission: number;
+  ownerBeforeOther: number;
+  saleCount: number;
+  pendingCost: number;
+};
+
 export type BooksWorkbook = {
+  proof: MonthProof;
+  audit: { ticketKey: string; message: string }[];
   expenses: {
     rows: ExpenseDisplayLine[];
     exportRows: ExpenseLine[];

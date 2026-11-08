@@ -1,68 +1,71 @@
-import { channelTitle, computeBookTotals } from './booksMath';
+import { channelTitle } from './booksMath';
 import { buildExpenses, filterReceived } from './expenseBuild';
+import { loadCommissionOverrides } from './loadPayoutContext';
 import { buildPayouts } from './payoutsBuild';
-import { saleFeeExtras } from './saleAdjustments';
+import { computeBooksFromReport } from './payoutTotals';
 import { saleWhyText } from './saleNotes';
-import type { BooksWorkbook, ExpenseDisplayLine, InventorySummary, ReceivedItem, Report, Row, SalesLine } from './types';
+import type {
+  BooksPayoutContext,
+  BooksWorkbook,
+  ExpenseDisplayLine,
+  InventorySummary,
+  MoneyActivityRow,
+  MoneyOverviewRow,
+  ReceivedItem,
+  Report,
+} from './types';
+import type { CommissionOverride } from '../payouts';
 
-function promotedFeesForSale(report: Report, saleId: string | number) {
-  const attributed = new Set(report.books_attributed_fee_ids || []);
-  return (report.fees || []).filter((f) => {
-    if (String(f.sale_id ?? '') !== String(saleId)) return false;
-    if (attributed.has(String(f.id || ''))) return false;
-    const t = String(f.type || '').toLowerCase();
-    return t.includes('promoted') || t.includes('ad');
-  }).reduce((n, f) => n + Number(f.amount_cents || 0), 0);
-}
+export type WorkbookInput = {
+  report: Report;
+  inventory: InventorySummary;
+  received: ReceivedItem[];
+  payoutCtx: BooksPayoutContext;
+  overrides: Map<string, CommissionOverride>;
+  money: { overview: MoneyOverviewRow[]; activityByAccount: Record<string, MoneyActivityRow[]> };
+  duplicateHidden: Set<string>;
+  duplicateDecisions: Record<string, 'keep' | 'remove'>;
+};
 
-function commissionCents(row: Row) {
-  if (Array.isArray(row.commission_breakdown) && row.commission_breakdown.length) {
-    const parts = row.commission_breakdown as Row[];
-    if (parts.some((p) => p.amount_cents == null)) return null;
-    return parts.reduce((n, p) => n + Number(p.amount_cents || 0), 0);
-  }
-  const paul = row.paul_commission_cents; const jacob = row.jacob_commission_cents;
-  if (paul == null && jacob == null) return null;
-  return Number(paul || 0) + Number(jacob || 0);
-}
-
-function salesRows(report: Report): SalesLine[] {
-  return (report.sales || []).map((row) => {
-    const extra = saleFeeExtras(row);
-    const promoted = promotedFeesForSale(report, row.id as string | number) + extra.promoted_cents;
-    const marketplace = Number(row.channel_fee_cents || 0) + Number(row.final_value_fee_cents || 0) + promoted + extra.channel_extra_cents;
-    const label = Number(row.ship_cost_cents || 0);
-    return {
-      sale_id: String(row.id ?? ''),
-      date: String(row.sold_at || row.date || '').slice(0, 10),
-      sku: String(row.sku || ''),
-      title: String(row.item_title || row.title || row.sku || ''),
-      channel: channelTitle(row.channel),
-      order_no: String(row.receipt_no || row.order_id || ''),
-      qty: Number(row.qty || 1),
-      price_cents: Number(row.price_cents || 0),
-      tax_cents: Number(row.tax_collected_cents ?? row.tax_cents ?? 0),
-      marketplace_fees_cents: marketplace,
-      card_fees_cents: Number(row.processing_fee_cents || row.payment_fee_cents || 0),
-      buyer_shipping_cents: Number(row.shipping_cents || 0),
-      label_cost_cents: label,
-      cost_cents: row.cost_cents == null ? null : Number(row.cost_cents),
-      profit_cents: row.profit_cents == null ? null : Number(row.profit_cents),
-      commission_cents: commissionCents(row),
-      profit_notes: saleWhyText(row, report),
-    };
+export function visibleExpenseRows(rows: ExpenseDisplayLine[], duplicateHidden: Set<string>, decisions: Record<string, 'keep' | 'remove'>) {
+  return rows.filter((r) => {
+    if (r.excludeFromTotals && duplicateHidden.has(r.id)) {
+      return decisions[`${r.id}`] === 'keep';
+    }
+    if (r.excludeFromTotals && r.duplicateFlag) return false;
+    return true;
   });
 }
 
-export function buildBooksWorkbook(report: Report, inventory: InventorySummary, received: ReceivedItem[]): BooksWorkbook {
+export function buildBooksWorkbook(input: WorkbookInput): BooksWorkbook {
+  const { report, inventory, received, payoutCtx, overrides, money, duplicateHidden, duplicateDecisions } = input;
   const attributed = new Set(report.books_attributed_fee_ids || []);
-  const built = buildExpenses(report, attributed);
-  const sales = salesRows(report);
-  const totals = computeBookTotals(report, { salesLines: sales, otherExpensesCents: built.otherExpenses_cents });
-  const payouts = buildPayouts(report, totals);
+  let built = buildExpenses(report, attributed);
+
+  const visible = visibleExpenseRows(built.rows, duplicateHidden, duplicateDecisions);
+  const counting = visible.filter((r) => !r.excludeFromTotals || duplicateDecisions[r.id] === 'keep');
+  built = {
+    ...built,
+    rows: visible,
+    total_cents: counting.reduce((n, e) => n + e.amount_cents, 0),
+    reimburse_cents: counting.filter((r) => r.needs_reimbursement).reduce((n, r) => n + r.amount_cents, 0),
+    otherExpenses_cents: counting.filter((r) => !r.countsInProfit).reduce((n, r) => n + r.amount_cents, 0),
+    categoryTotals: [...counting.reduce((m, e) => m.set(e.category, (m.get(e.category) || 0) + e.amount_cents), new Map<string, number>())].map(([category, amount_cents]) => ({ category, amount_cents })),
+    exportRows: built.exportRows,
+  };
+
+  const computed = computeBooksFromReport(report, payoutCtx, built.otherExpenses_cents, overrides);
+  const salesLines = computed.salesLines.map((s) => ({
+    ...s,
+    channel: channelTitle(s.channel),
+    profit_notes: saleWhyText({ id: s.sale_id, profit_cents: s.profit_cents }, report),
+  }));
+
+  const totals = computed.totals;
+  const payouts = buildPayouts(report, totals, payoutCtx, money, overrides);
 
   const ch = new Map<string, { revenue_cents: number; profit_cents: number; count: number }>();
-  for (const s of sales) {
+  for (const s of salesLines) {
     const key = s.channel;
     const item = ch.get(key) || { revenue_cents: 0, profit_cents: 0, count: 0 };
     item.revenue_cents += s.price_cents + s.buyer_shipping_cents;
@@ -73,32 +76,39 @@ export function buildBooksWorkbook(report: Report, inventory: InventorySummary, 
   const channelTotals = [...ch.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([channel, v]) => ({ channel, ...v }));
 
   return {
-    expenses: {
-      rows: built.rows,
-      exportRows: built.exportRows,
-      categoryTotals: built.categoryTotals,
-      total_cents: built.total_cents,
-      reimburse_cents: built.reimburse_cents,
-      otherExpenses_cents: built.otherExpenses_cents,
-      duplicates: built.duplicates,
-    },
-    sales: { rows: sales, channelTotals, totals },
+    expenses: built,
+    sales: { rows: salesLines, channelTotals, totals },
     payouts,
     inventory,
     received: filterReceived(received) as ReceivedItem[],
+    proof: computed.proof,
+    audit: computed.audit,
   };
+}
+
+export async function loadBooksMoney(client: import('@supabase/supabase-js').SupabaseClient) {
+  const overviewRes = await client.rpc('portal_money_overview');
+  if (overviewRes.error) throw overviewRes.error;
+  const overview = ((overviewRes.data || []) as MoneyOverviewRow[]);
+  const accounts = ['ebay', 'depop', 'mercari', 'square', 'tiktok', 'amazon', 'safe'];
+  const activityByAccount: Record<string, MoneyActivityRow[]> = {};
+  await Promise.all(accounts.map(async (acct) => {
+    const { data, error } = await client.rpc('portal_money_activity', { p_account: acct, p_limit: 500, p_offset: 0 });
+    if (error) return;
+    activityByAccount[acct] = ((data as { rows: MoneyActivityRow[] })?.rows || []);
+  }));
+  return { overview, activityByAccount };
 }
 
 export function groupExpensesByCategory(rows: ExpenseDisplayLine[]) {
   const groups = new Map<string, ExpenseDisplayLine[]>();
   for (const e of rows) {
-    if (e.children?.length) continue;
-    const list = groups.get(e.category) || [];
-    list.push(e);
-    groups.set(e.category, list);
-  }
-  for (const e of rows) {
-    if (!e.children?.length) continue;
+    if (e.children?.length) {
+      const list = groups.get(e.category) || [];
+      list.push(e);
+      groups.set(e.category, list);
+      continue;
+    }
     const list = groups.get(e.category) || [];
     list.push(e);
     groups.set(e.category, list);
@@ -112,8 +122,7 @@ export function receivedMonthStats(items: ReceivedItem[]) {
   for (const r of items) {
     const qty = Math.max(1, Number(r.qty_on_hand || 1));
     units += qty;
-    const unitCost = Number(r.cost_cents || 0);
-    costCents += unitCost * qty;
+    costCents += Number(r.cost_cents || 0) * qty;
   }
   return { units, skus: items.length, cost_cents: costCents };
 }
@@ -128,3 +137,5 @@ export function groupReceivedByDay(items: ReceivedItem[]) {
   }
   return [...groups.entries()].sort(([a], [b]) => b.localeCompare(a));
 }
+
+export { loadCommissionOverrides };

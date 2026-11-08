@@ -1,8 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { buildBooksExcel, buildBooksPdf, bytesBase64 } from './export';
-import { buildBooksWorkbook } from './workbook';
 import { monthLabel } from './booksMath';
-import type { InventorySummary, Period, ReceivedItem, Report } from './types';
+import type { BooksWorkbook, InventorySummary, Period, ReceivedItem, Report } from './types';
 
 type Props = {
   client: SupabaseClient;
@@ -11,6 +10,7 @@ type Props = {
   report: Report;
   inventory: InventorySummary;
   received: ReceivedItem[];
+  workbook: BooksWorkbook | null;
   uiStatus: 'locked' | 'in_progress' | 'draft';
   busy: boolean;
   setBusy: (b: boolean) => void;
@@ -19,14 +19,14 @@ type Props = {
   native?: boolean;
 };
 
-export function BooksLock({ client, money, period, report, inventory, received, uiStatus, busy, setBusy, onError, onReload, native }: Props) {
+export function BooksLock({ client, money, period, report, inventory, received, workbook, uiStatus, busy, setBusy, onError, onReload, native }: Props) {
   const label = monthLabel(period.period_start);
 
   async function lock() {
     if (!window.confirm(`Lock ${label}? Numbers for this month will be frozen.`)) return;
     setBusy(true);
     try {
-      const workbook = buildBooksWorkbook(report, inventory, received);
+      if (!workbook) throw new Error('workbook_missing');
       const payload = { ...report, inventory_summary: inventory, items_received: received };
       const [excel, pdf] = await Promise.all([
         buildBooksExcel(period, workbook, `${period.period_start} Books`),
