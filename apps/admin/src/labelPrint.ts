@@ -7,12 +7,16 @@ export const LABEL_H = 6 * PT;
 /** Letter sheet. The label is drawn at 4×6 on it so a letter printer does not blow it up. */
 export const PAPER_W = 8.5 * PT;
 export const PAPER_H = 11 * PT;
-const TOP_GAP = 0.25 * PT;
-
 export function fitLabelBox(srcW: number, srcH: number) {
   if (!(srcW > 0) || !(srcH > 0)) throw new Error('Label has no page size.');
   const scale = Math.min(LABEL_W / srcW, LABEL_H / srcH);
   return { scale, width: srcW * scale, height: srcH * scale };
+}
+
+/** Top-left corner of the sheet. One fold takes off the right side, one fold takes off the bottom. */
+export function labelPlacement(srcW: number, srcH: number) {
+  const fit = fitLabelBox(srcW, srcH);
+  return { x: 0, y: PAPER_H - fit.height, width: fit.width, height: fit.height };
 }
 
 function isPdf(bytes: Uint8Array, mime: string) {
@@ -24,15 +28,7 @@ function isPng(bytes: Uint8Array, mime: string) {
 }
 
 function placeBox(srcW: number, srcH: number) {
-  const fit = fitLabelBox(srcW, srcH);
-  const boxX = (PAPER_W - LABEL_W) / 2;
-  const boxY = PAPER_H - TOP_GAP - LABEL_H;
-  return {
-    x: boxX + (LABEL_W - fit.width) / 2,
-    y: boxY + (LABEL_H - fit.height) / 2,
-    width: fit.width,
-    height: fit.height,
-  };
+  return labelPlacement(srcW, srcH);
 }
 
 function letterPage(out: PDFDocument) {
@@ -45,26 +41,7 @@ function letterPage(out: PDFDocument) {
   return page;
 }
 
-/** Corner ticks make the drawn area the full sheet, so a phone cannot blow the label up to fill the paper. */
-function pinSheet(page: PDFPage) {
-  const tick = 8;
-  const m = 6;
-  const marks: Array<[[number, number], [number, number]]> = [
-    [[m, m], [m + tick, m]],
-    [[m, m], [m, m + tick]],
-    [[PAPER_W - m, m], [PAPER_W - m - tick, m]],
-    [[PAPER_W - m, m], [PAPER_W - m, m + tick]],
-    [[m, PAPER_H - m], [m + tick, PAPER_H - m]],
-    [[m, PAPER_H - m], [m, PAPER_H - m - tick]],
-    [[PAPER_W - m, PAPER_H - m], [PAPER_W - m - tick, PAPER_H - m]],
-    [[PAPER_W - m, PAPER_H - m], [PAPER_W - m, PAPER_H - m - tick]],
-  ];
-  for (const [start, end] of marks) {
-    page.drawLine({ start: { x: start[0], y: start[1] }, end: { x: end[0], y: end[1] }, thickness: 0.5 });
-  }
-}
-
-/** Place every source page, scaled up or down, inside a 4×6 inch box on a letter sheet. */
+/** Place every source page, scaled up or down, in the top-left corner of a letter sheet. */
 export async function normalizeLabelPdf(input: Uint8Array | ArrayBuffer): Promise<Uint8Array> {
   const bytes = input instanceof Uint8Array ? input : new Uint8Array(input);
   const src = await PDFDocument.load(bytes, { ignoreEncryption: true });
@@ -75,7 +52,6 @@ export async function normalizeLabelPdf(input: Uint8Array | ArrayBuffer): Promis
     const embedded = await out.embedPage(srcPage);
     const page = letterPage(out);
     drawEmbedded(page, embedded, srcPage);
-    pinSheet(page);
   }
   return out.save();
 }
@@ -123,7 +99,6 @@ export async function imageToLabelPdf(bytes: Uint8Array, kind: 'png' | 'jpg'): P
   const image = kind === 'png' ? await out.embedPng(bytes) : await out.embedJpg(bytes);
   const page = letterPage(out);
   page.drawImage(image, placeBox(image.width, image.height));
-  pinSheet(page);
   return out.save();
 }
 
@@ -160,37 +135,84 @@ export async function loadPrintableLabel(url: string) {
   return new Blob([pdf.slice()], { type: 'application/pdf' });
 }
 
-export async function openShippingLabel(url: string, download = false) {
-  let blob: Blob;
-  try {
-    blob = await loadPrintableLabel(url);
-  } catch {
-    if (download) {
-      const a = document.createElement('a');
-      a.href = url;
-      a.target = '_blank';
-      a.rel = 'noreferrer';
-      a.click();
-      return;
-    }
-    window.open(url, '_blank', 'noopener');
-    return;
+const PRINT_ID = 'floor-label-print';
+const PRINT_CSS = `
+@page { size: 8.5in 11in; margin: 0; }
+@media screen {
+  #${PRINT_ID} { position: fixed !important; left: 0; top: 0; width: 8.5in; height: 11in; transform: translateX(-200vw); pointer-events: none; }
+}
+@media print {
+  html, body { margin: 0 !important; padding: 0 !important; width: 8.5in !important; height: 11in !important; background: #fff !important; }
+  body > *:not(#${PRINT_ID}) { display: none !important; }
+  #${PRINT_ID} { display: block !important; position: absolute !important; left: 0 !important; top: 0 !important; transform: none !important; width: 8.5in !important; height: 11in !important; margin: 0 !important; padding: 0 !important; }
+  #${PRINT_ID} img { width: 8.5in; height: 11in; display: block; object-fit: fill; object-position: left top; break-after: page; page-break-after: always; }
+  #${PRINT_ID} img:last-child { break-after: auto; page-break-after: auto; }
+}
+`;
+
+async function pageImages(pdfBytes: Uint8Array) {
+  const pdfjs = await import('pdfjs-dist');
+  const worker = await import('pdfjs-dist/build/pdf.worker.min.mjs?url');
+  pdfjs.GlobalWorkerOptions.workerSrc = worker.default;
+  const doc = await pdfjs.getDocument({ data: pdfBytes.slice() }).promise;
+  const urls: string[] = [];
+  for (let i = 1; i <= doc.numPages; i += 1) {
+    const page = await doc.getPage(i);
+    const viewport = page.getViewport({ scale: 200 / 72 });
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.ceil(viewport.width);
+    canvas.height = Math.ceil(viewport.height);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Could not prepare the label.');
+    await page.render({ canvasContext: ctx, viewport }).promise;
+    urls.push(canvas.toDataURL('image/png'));
   }
-  const href = URL.createObjectURL(blob);
+  return urls;
+}
+
+function waitForImage(img: HTMLImageElement) {
+  if (img.complete && img.naturalWidth > 0) return Promise.resolve();
+  return new Promise<void>((resolve, reject) => {
+    img.onload = () => resolve();
+    img.onerror = () => reject(new Error('Could not prepare the label.'));
+  });
+}
+
+/** Draw the letter sheet and open the phone print dialog. Stays in the app. No share page. */
+async function printLetterSheet(pdfBytes: Uint8Array) {
+  const urls = await pageImages(pdfBytes);
+  document.getElementById(PRINT_ID)?.remove();
+  const root = document.createElement('div');
+  root.id = PRINT_ID;
+  for (const href of urls) {
+    const img = document.createElement('img');
+    img.src = href;
+    img.alt = 'Shipping label';
+    root.appendChild(img);
+  }
+  document.body.appendChild(root);
+  let style = document.getElementById('floor-label-print-style');
+  if (!style) {
+    style = document.createElement('style');
+    style.id = 'floor-label-print-style';
+    style.textContent = PRINT_CSS;
+    document.head.appendChild(style);
+  }
+  await Promise.all(Array.from(root.querySelectorAll('img'), (img) => waitForImage(img)));
+  window.print();
+  window.setTimeout(() => root.remove(), 120_000);
+}
+
+export async function openShippingLabel(url: string, download = false) {
+  const blob = await loadPrintableLabel(url);
   if (download) {
+    const href = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = href;
     a.download = 'label-4x6.pdf';
     a.click();
-  } else {
-    const opened = window.open(href, '_blank', 'noopener');
-    if (!opened) {
-      const a = document.createElement('a');
-      a.href = href;
-      a.target = '_blank';
-      a.rel = 'noreferrer';
-      a.click();
-    }
+    window.setTimeout(() => URL.revokeObjectURL(href), 60_000);
+    return;
   }
-  window.setTimeout(() => URL.revokeObjectURL(href), 60_000);
+  await printLetterSheet(new Uint8Array(await blob.arrayBuffer()));
 }
