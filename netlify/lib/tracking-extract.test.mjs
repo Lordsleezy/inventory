@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { extractPdfText, extractTrackingFromFile, parseTracking } from "./tracking-extract.mjs";
+import { compactTracking, extractPdfText, extractTrackingFromFile, parseTracking } from "./tracking-extract.mjs";
 
 const DEPOP = "9400111899001234567891";
 
@@ -40,6 +40,11 @@ test("UPS 1Z is confident", () => {
 test("a price and a zip are not a tracking number", () => {
   const r = parseTracking("Sale $11.90\nPenryn CA 95663\nOrder 99899");
   assert.equal(r.confident, false);
+});
+
+test("a 420 ZIP wrapper is the same USPS number", () => {
+  assert.equal(compactTracking("420956639400111899001234567891"), DEPOP);
+  assert.equal(compactTracking(DEPOP), DEPOP);
 });
 
 test("PDF text extraction reads the tracking line", async () => {

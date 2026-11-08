@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { deductionRefundCents, ebayRefundPlan, mapEbayReturn } from "./ebay-returns.mjs";
-import { assertEbaySellerWrite } from "./ebay-accounts.mjs";
+import { assertEbaySellerWrite, ebayAccountFeedsFloorOrders } from "./ebay-accounts.mjs";
 
 test("a deduction cannot pass half the item price", () => {
   assert.deepEqual(deductionRefundCents(2000, 10), { refundCents: 1800, deductedCents: 200, percent: 10 });
@@ -63,4 +63,7 @@ test("a listing or policy write aimed at pgg124-5 or any non-selling account is 
     /ikonikdeals2026/,
   );
   assert.equal(assertEbaySellerWrite({ username: "ikonikdeals2026", role: "selling" }).username, "ikonikdeals2026");
+  assert.equal(ebayAccountFeedsFloorOrders({ username: "ikonikdeals2026", role: "selling" }), true);
+  assert.equal(ebayAccountFeedsFloorOrders({ username: "pgg124-5", role: "orders_only" }), false);
+  assert.equal(ebayAccountFeedsFloorOrders({ username: "pgg124-5", role: "selling" }), false);
 });

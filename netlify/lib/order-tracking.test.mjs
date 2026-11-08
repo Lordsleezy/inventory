@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { patchFromShippoStatus } from "./order-tracking.mjs";
-import { attachUploadedLabel } from "./order-label.mjs";
+import { attachUploadedLabel, resolveUploadedTracking } from "./order-label.mjs";
 
 const order = { id: "o1", shipped_at: null, delivered_at: null, packaged_at: "2026-11-07T18:00:00Z", carrier: "USPS" };
 
@@ -62,4 +62,23 @@ test("an uploaded Depop label stores tracking and posts no expense", async () =>
   assert.equal(inserts.length, 0);
   assert.equal(updates[0][1].label_origin, "upload");
   assert.equal(updates[0][1].label_cost_cents, null);
+});
+
+test("an eBay PDF that disagrees with eBay tracking is a mismatch", () => {
+  const r = resolveUploadedTracking(
+    { channel: "ebay", marketplace_tracking_number: "9400111899001234567891" },
+    { confident: true, number: "9400111899001234567800", carrier: "USPS" },
+  );
+  assert.equal(r.mismatch, true);
+  assert.match(r.exception, /does not match eBay/);
+});
+
+test("an unreadable eBay PDF keeps eBay's tracking number", () => {
+  const r = resolveUploadedTracking(
+    { channel: "ebay", marketplace_tracking_number: "9400111899001234567891", carrier: "USPS" },
+    { confident: false },
+  );
+  assert.equal(r.mismatch, false);
+  assert.equal(r.tracking, "9400111899001234567891");
+  assert.equal(r.usedEbay, true);
 });

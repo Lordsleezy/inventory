@@ -52,6 +52,15 @@ export function accountAllowsListing(account) {
 export const EBAY_SELLING_USERNAME = "ikonikdeals2026";
 export const EBAY_ORDERS_ONLY_USERNAME = "pgg124-5";
 
+/** Floor orders, Needs label, and sale records come from the Open Box selling account. */
+export function ebayAccountFeedsFloorOrders(account) {
+  const username = String(account?.username || "").trim().toLowerCase();
+  if (username === EBAY_ORDERS_ONLY_USERNAME) return false;
+  if (username === EBAY_SELLING_USERNAME) return true;
+  if (!username && String(account?.role || "") === "selling") return true;
+  return false;
+}
+
 /** Listing and policy writes are allowed only on the Open Box selling account. */
 export function assertEbaySellerWrite(account) {
   const username = String(account?.username || "").trim().toLowerCase();

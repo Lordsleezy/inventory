@@ -1069,4 +1069,4 @@ html.app-mode .aspect-suggested{color:#30d158;background:rgba(48,209,88,.18)}
 .depop-label-drop small{color:#617182}
 .depop-label-file{display:grid;gap:2px;padding:12px 14px;border-radius:12px;background:#eef8f0}
 .depop-label-file small{color:#137333}
-.stats.orders-stats{grid-template-columns:repeat(6,minmax(0,1fr))}
+.stats.orders-stats{grid-template-columns:repeat(7,minmax(0,1fr))}

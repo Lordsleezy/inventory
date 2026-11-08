@@ -110,6 +110,13 @@ export function buildExpenses(report: Report, attributedPromotedIds: Set<string>
       .filter(Boolean),
   );
   const saleIds = new Set((report.sales || []).map((s) => String(s.id)));
+  const saleOrders = new Set<string>();
+  for (const s of report.sales || []) {
+    for (const raw of [s.receipt_no, s.order_id, s.web_order_no, s.order_no]) {
+      const n = String(raw ?? '').trim().toLowerCase().replace(/[^a-z0-9-]/g, '');
+      if (n) saleOrders.add(n);
+    }
+  }
 
   for (const e of (report.expenses || []).filter((x) => !x.voided_at)) {
     const source = String(e.source || 'manual');
@@ -137,21 +144,51 @@ export function buildExpenses(report: Report, attributedPromotedIds: Set<string>
   for (const l of report.labels || []) {
     if (labelIdsInExpenses.has(String(l.id))) continue;
     if (storeCheckoutLabel({}, l)) continue;
+    if (String(l.account || '').toLowerCase() === 'pgg124-5') continue;
     const cents = Math.abs(Number(l.signed_amount_cents ?? l.cost_cents ?? 0));
     if (!cents) continue;
     const order = String(l.order_id || l.transaction_id || '');
+    const ebay = String(l.carrier || '').toLowerCase() === 'ebay';
+    const matched = ebay && saleOrders.has(order.trim().toLowerCase().replace(/[^a-z0-9-]/g, ''));
+    if (ebay && matched) continue;
     rows.push({
       id: `label:${l.id}`,
       date: String(l.date || '').slice(0, 10),
-      category: 'Out-of-pocket shipping',
-      title: String(l.carrier || '').toLowerCase() === 'ebay'
-        ? `eBay label${order ? ` · ${order}` : ''}`
+      category: ebay ? 'Unmatched shipping label' : 'Out-of-pocket shipping',
+      title: ebay
+        ? `Unmatched eBay label${order ? ` · ${order}` : ''}`
         : ['Shipping label', order].filter(Boolean).join(' · '),
       amount_cents: cents,
       sourceDisplay: channelTitle(l.carrier || 'Store'),
       sku_or_order: order,
       needs_reimbursement: false,
-      countsInProfit: true,
+      countsInProfit: !ebay,
+      kindKey: 'shipping-label',
+      excludeFromTotals: false,
+    });
+  }
+
+  const attributedFees = new Set((report.books_attributed_fee_ids || []).map(String));
+  for (const f of report.fees || []) {
+    if (String(f.account || '').toLowerCase() === 'pgg124-5') continue;
+    const blob = `${f.type || ''} ${f.memo || ''}`.toLowerCase();
+    const postage = blob.includes('postage') || blob.includes('underpaid') || blob.includes('shipping label');
+    if (!postage) continue;
+    const fid = String(f.id || '');
+    if (fid && attributedFees.has(fid)) continue;
+    const order = String(f.order_id || '');
+    const cents = Math.abs(Number(f.amount_cents || 0));
+    if (!cents) continue;
+    rows.push({
+      id: `unmatched-postage:${fid || order}`,
+      date: String(f.date || '').slice(0, 10),
+      category: 'Unmatched shipping label',
+      title: `Unmatched eBay postage${order ? ` · ${order}` : ''}`,
+      amount_cents: cents,
+      sourceDisplay: 'eBay',
+      sku_or_order: order,
+      needs_reimbursement: false,
+      countsInProfit: false,
       kindKey: 'shipping-label',
       excludeFromTotals: false,
     });
@@ -159,6 +196,7 @@ export function buildExpenses(report: Report, attributedPromotedIds: Set<string>
 
   const promotedGroups = new Map<string, { account: string; charges: ExpenseDisplayLine[]; total: number; dates: string[] }>();
   for (const f of report.fees || []) {
+    if (String(f.account || '').toLowerCase() === 'pgg124-5') continue;
     const type = String(f.type || '').toLowerCase();
     if (!type.includes('promoted') && !type.includes('ad')) continue;
     const fid = String(f.id || '');

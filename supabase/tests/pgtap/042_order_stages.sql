@@ -60,6 +60,10 @@ select ok(
   'Depop label cost stays empty so profit does not take a label'
 );
 
+update public.web_orders
+  set label_storage_path = 'labels/97021.pdf', label_origin = 'upload'
+  where sku = '97021';
+
 select set_config('request.jwt.claim.sub', current_setting('test.jacob'), true);
 select lives_ok(
   $q$select public.portal_mark_order_packaged((select id from public.web_orders where sku = '97021'))$q$,

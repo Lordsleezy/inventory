@@ -1,4 +1,4 @@
-export type OrderStage = 'toShip' | 'packaged' | 'shipped' | 'delivered' | 'canceled' | 'pickup';
+export type OrderStage = 'needsLabel' | 'toShip' | 'packaged' | 'shipped' | 'delivered' | 'canceled' | 'pickup';
 
 export type StageOrder = {
   status?: string | null;
@@ -18,6 +18,9 @@ export type StageOrder = {
   tracking_number?: string | null;
   tracking_exception?: string | null;
   tracking_status?: string | null;
+  marketplace_tracking_number?: string | null;
+  label_tracking_mismatch?: boolean | null;
+  ebay_seller_username?: string | null;
   carrier?: string | null;
   item_cents?: number | null;
   title?: string | null;
@@ -28,7 +31,26 @@ const TWO_DAYS = 2 * 86400000;
 
 export function canBuyLabel(channel?: string | null) {
   const ch = (channel || 'website').toLowerCase();
-  return ch === 'website' || ch === 'web' || ch === 'ebay' || ch === 'amazon' || ch === 'tiktok';
+  return ch === 'website' || ch === 'web' || ch === 'amazon' || ch === 'tiktok';
+}
+
+/** A printable label is on the order. A mismatch stays in Needs label. */
+export function labelReady(o: StageOrder) {
+  if (o.label_tracking_mismatch) return false;
+  if (o.label_storage_path || o.label_origin === 'upload') return true;
+  if (o.label_origin === 'bought' && (o.label_url || o.label_purchased_at)) return true;
+  if (o.label_url && o.label_origin !== 'upload') return Boolean(o.label_purchased_at || o.label_origin === 'bought');
+  return false;
+}
+
+export function orderNeedsLabel(o: StageOrder) {
+  const ch = (o.channel || '').toLowerCase();
+  if (ch !== 'ebay' && ch !== 'depop') return false;
+  if (o.status && o.status !== 'paid') return false;
+  if (o.fulfillment && o.fulfillment !== 'ship') return false;
+  if (o.packaged_at || o.shipped_at || o.delivered_at) return false;
+  if (String(o.ebay_seller_username || '').toLowerCase() === 'pgg124-5') return false;
+  return !labelReady(o);
 }
 
 export function orderStage(o: StageOrder): OrderStage {
@@ -37,6 +59,7 @@ export function orderStage(o: StageOrder): OrderStage {
   if (o.delivered_at) return 'delivered';
   if (o.shipped_at) return 'shipped';
   if (o.packaged_at) return 'packaged';
+  if (orderNeedsLabel(o)) return 'needsLabel';
   return 'toShip';
 }
 
@@ -73,6 +96,12 @@ export function orderChip(o: StageOrder, now = Date.now()): { text: string; tone
     return { text: o.picked_up_at && !o.delivered_at ? 'Picked up' : 'Delivered', tone: 'muted' };
   }
   if (stage === 'shipped') return { text: 'Shipped', tone: 'ok' };
+  if (stage === 'needsLabel') {
+    if (o.label_tracking_mismatch) return { text: "Wrong label · doesn't match eBay", tone: 'warn' };
+    const ch = (o.channel || '').toLowerCase();
+    if (ch === 'ebay' && o.marketplace_tracking_number) return { text: 'Label bought in eBay — upload PDF', tone: 'warn' };
+    return { text: 'Upload label', tone: 'warn' };
+  }
   if (stage === 'packaged') {
     if (packagedStale(o, now)) return { text: 'No scan · 2+ days', tone: 'warn' };
     const t = o.packaged_at ? clock(o.packaged_at) : '';
@@ -138,5 +167,5 @@ export function orderTimeline(o: StageOrder & {
 }
 
 export const STAGE_INDEX: Record<OrderStage, number> = {
-  toShip: 0, packaged: 1, shipped: 2, delivered: 3, canceled: -1, pickup: -1,
+  needsLabel: -1, toShip: 0, packaged: 1, shipped: 2, delivered: 3, canceled: -1, pickup: -1,
 };
