@@ -65,7 +65,7 @@ const LEGACY: Record<string, { page: MainPage; tab?: ReportTab; inventoryTab?: I
   depop: { page: 'depop' },
   mercari: { page: 'mercari' },
   cameras: { page: 'cameras' },
-  remote: { page: 'remote' },
+  remote: { page: 'sales' },
   logs: { page: 'logs' },
   sales: { page: 'sales' },
   orders: { page: 'orders' },
