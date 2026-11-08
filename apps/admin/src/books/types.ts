@@ -19,9 +19,53 @@ export type Check = {
   explanation: string | null;
 };
 
+export type DuplicateNote = { message: string; lineIds: string[] };
+
+export type ExpenseDisplayLine = {
+  id: string;
+  date: string;
+  category: string;
+  title: string;
+  amount_cents: number;
+  sourceDisplay: string;
+  sku_or_order: string;
+  needs_reimbursement: boolean;
+  countsInProfit: boolean;
+  kindKey: string;
+  excludeFromTotals: boolean;
+  duplicateFlag?: boolean;
+  meta?: string;
+  children?: ExpenseDisplayLine[];
+};
+
+export type StorePayoutGroup = {
+  channel: string;
+  count: number;
+  total_cents: number;
+  payouts: Row[];
+};
+
+export type CommissionPayoutLine = {
+  person: string;
+  earned_cents: number;
+  paid_cents: number;
+  owed_cents: number;
+};
+
+export type PayoutsWorkbook = {
+  stores: StorePayoutGroup[];
+  notPaidYet_cents: number;
+  storePaidTotal_cents: number;
+  commissions: CommissionPayoutLine[];
+  commission_total_cents: number;
+  stillOwed_cents: number;
+  owner: { profit: number; commission: number; otherExpenses: number; ownerKeeps: number };
+};
+
 export type Report = {
   period: Period;
   checks: Check[];
+  books_attributed_fee_ids?: string[];
   sales: Row[];
   fees: Row[];
   labels: Row[];
@@ -71,6 +115,12 @@ export type BookTotals = {
   commission: number;
   profit: number;
   expense: number;
+  otherExpenses: number;
+  ownerKeeps: number;
+  /** Buyer shipping above label cost (included in derived profit). */
+  shippingSurplus: number;
+  /** Ledger profit minus derived — should be ~0 after fee attribution. */
+  ledgerProfitGap: number;
 };
 
 export type ExpenseLine = {
@@ -105,8 +155,17 @@ export type SalesLine = {
 };
 
 export type BooksWorkbook = {
-  expenses: { rows: ExpenseLine[]; categoryTotals: { category: string; amount_cents: number }[]; total_cents: number };
+  expenses: {
+    rows: ExpenseDisplayLine[];
+    exportRows: ExpenseLine[];
+    categoryTotals: { category: string; amount_cents: number }[];
+    total_cents: number;
+    reimburse_cents: number;
+    otherExpenses_cents: number;
+    duplicates: DuplicateNote[];
+  };
   sales: { rows: SalesLine[]; channelTotals: { channel: string; revenue_cents: number; profit_cents: number; count: number }[]; totals: BookTotals };
+  payouts: PayoutsWorkbook;
   inventory: InventorySummary;
   received: ReceivedItem[];
 };

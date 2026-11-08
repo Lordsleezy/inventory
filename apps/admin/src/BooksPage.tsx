@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { BooksViews, type Sheet } from './books/BooksViews';
-import { computeBookTotals, formatSanityLine, normalizeReport, OCTOBER_2026_TARGETS } from './books/booksMath';
+import { formatSanityLine, normalizeReport, OCTOBER_2026_TARGETS } from './books/booksMath';
 import { buildBooksExcel, buildBooksPdf, downloadBytes } from './books/export';
 import { buildBooksWorkbook } from './books/workbook';
 import type { InventorySummary, Period, ReceivedItem, Report } from './books/types';
@@ -21,7 +21,7 @@ const emptyInventory = (): InventorySummary => ({
 });
 
 const SHEET_TITLES: Record<Sheet, string> = {
-  hub: 'Books', sales: 'Sales', expenses: 'Expenses', inventory: 'Inventory', received: 'Items received',
+  hub: 'Books', sales: 'Sales', expenses: 'Expenses', payouts: 'Payouts', inventory: 'Inventory', received: 'Items received',
 };
 
 export function BooksPage({ client, money, native = false, onNativeNavigation }: Props) {
@@ -75,7 +75,8 @@ export function BooksPage({ client, money, native = false, onNativeNavigation }:
       setInventory(inv);
       setReceived(recv);
       if (p.period_start === OCTOBER_2026_TARGETS.period_start) {
-        console.info('[Books October sanity]', formatSanityLine(computeBookTotals(next)), 'targets', OCTOBER_2026_TARGETS);
+        const wb = buildBooksWorkbook(next, inv, recv);
+        console.info('[Books October sanity]', formatSanityLine(wb.sales.totals), 'targets', OCTOBER_2026_TARGETS);
       }
     } catch (e) {
       console.error('Books load failed', e);
@@ -88,7 +89,7 @@ export function BooksPage({ client, money, native = false, onNativeNavigation }:
   useEffect(() => { setSheet('hub'); }, [periodId]);
 
   const workbook = useMemo(() => (report ? buildBooksWorkbook(report, inventory, received) : null), [report, inventory, received]);
-  const totals = useMemo(() => (report ? computeBookTotals(report) : null), [report]);
+  const totals = useMemo(() => workbook?.sales.totals ?? null, [workbook]);
 
   useEffect(() => {
     if (!workbook || !selected) { setExportFiles(null); return; }
