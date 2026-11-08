@@ -51,7 +51,7 @@ type Props = {
 };
 
 /** Clerk tab bar (max five). Admins use INVENTORY / RECEIVE / ORDERS / RETURNS / MORE. */
-const ASSOCIATE_TABS: AppTab[] = ['inventory', 'receive', 'register', 'locations', 'settings'];
+const ASSOCIATE_TABS: AppTab[] = ['inventory', 'receive', 'orders', 'register', 'locations', 'settings'];
 const ADMIN_TAB_IDS: AppTab[] = ['inventory', 'receive', 'orders', 'returns', 'more'];
 
 const TABS: { id: AppTab; label: string; icon: React.ReactNode; adminOnly?: boolean; associateOnly?: boolean }[] = [
@@ -86,7 +86,6 @@ const TABS: { id: AppTab; label: string; icon: React.ReactNode; adminOnly?: bool
   {
     id: 'orders',
     label: 'Orders',
-    adminOnly: true,
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
         <path d="M7 7h10M7 12h10M7 17h6" /><path d="M4 4h16v16H4z" />
@@ -284,19 +283,17 @@ export function AppModeShell({
           )}
         </div>
 
-        {fullAccess && (
-          <div className="app-tab-panel" data-tab="orders" hidden={tab !== 'orders'}>
-            {tab === 'orders' && (
-              <AppOrders
-                client={client}
-                storeId={storeId}
-                accessToken={session.access_token}
-                money={money}
-                stamp={stamp}
-              />
-            )}
-          </div>
-        )}
+        <div className="app-tab-panel" data-tab="orders" hidden={tab !== 'orders'}>
+          {tab === 'orders' && (
+            <AppOrders
+              client={client}
+              storeId={storeId}
+              accessToken={session.access_token}
+              money={money}
+              stamp={stamp}
+            />
+          )}
+        </div>
 
         {fullAccess && (
           <div className="app-tab-panel" data-tab="returns" hidden={tab !== 'returns'}>

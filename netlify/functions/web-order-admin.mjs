@@ -1,5 +1,5 @@
 /** Floor Admin → Orders actions: buy label, mark shipped, cancel & refund, run pickup sweep. */
-import { json, corsHeaders } from "../lib/server.mjs";
+import { json, corsHeaders, serviceClient, staffFromEvent } from "../lib/server.mjs";
 import { wrapHandler, asNetlifyFunction } from "../lib/floor-log.mjs";
 import { portalAdminFromEvent } from "../lib/portal-auth.mjs";
 import { buyLabelForOrder, labelQuote, voidLabel, labelStatus } from "../lib/web-label.mjs";
@@ -14,14 +14,30 @@ import { cancelAndRefund } from "../lib/web-payment.mjs";
 import { pickupSweep } from "../lib/web-pickup.mjs";
 import { deliverOrderEmails, ownerEmails } from "../lib/web-order-email.mjs";
 import { sendInternalAlert } from "../lib/mail.mjs";
+import { attachUploadedLabel, setOrderTrackingNumber } from "../lib/order-label.mjs";
+
+const STAFF_LABEL_ACTIONS = new Set(["attach_label", "set_tracking"]);
 
 async function handle(event) {
   if (event.httpMethod === "OPTIONS") return { statusCode: 200, headers: corsHeaders(), body: "" };
   if (event.httpMethod !== "POST") return json(405, { error: "post_only" });
   const body = JSON.parse(event.body || "{}");
   let ctx;
-  try { ctx = await portalAdminFromEvent(event, body.store_id); }
-  catch (err) { return json(err.status || 401, { error: err.message }); }
+  try {
+    if (STAFF_LABEL_ACTIONS.has(body.action)) {
+      const { staff, user } = await staffFromEvent(event);
+      ctx = {
+        sb: serviceClient(),
+        storeId: staff.store_id,
+        actor: staff.display_name || user.email || user.id,
+        userId: user.id,
+      };
+    } else {
+      ctx = await portalAdminFromEvent(event, body.store_id);
+    }
+  } catch (err) {
+    return json(err.status || 401, { error: err.message });
+  }
   const { sb, storeId, actor } = ctx;
   const id = String(body.id || "");
   if (body.action === "label_quote") {
@@ -37,6 +53,27 @@ async function handle(event) {
       selectedRate: body.selected_rate || null,
       labelFormat: body.label_format || null,
     });
+    return json(r.status, r);
+  }
+  if (body.action === "attach_label") {
+    const { data: order, error: loadError } = await sb.from("web_orders").select("*").eq("id", id).eq("store_id", storeId).maybeSingle();
+    if (loadError) return json(500, { error: loadError.message });
+    if (!order) return json(404, { error: "Order not found." });
+    let bytes;
+    try { bytes = Buffer.from(String(body.file_base64 || ""), "base64"); }
+    catch { return json(400, { error: "Could not read that file." }); }
+    const r = await attachUploadedLabel(sb, storeId, order, {
+      bytes,
+      name: body.file_name,
+      mime: body.mime || "application/pdf",
+    });
+    return json(r.status, r);
+  }
+  if (body.action === "set_tracking") {
+    const { data: order, error: loadError } = await sb.from("web_orders").select("*").eq("id", id).eq("store_id", storeId).maybeSingle();
+    if (loadError) return json(500, { error: loadError.message });
+    if (!order) return json(404, { error: "Order not found." });
+    const r = await setOrderTrackingNumber(sb, storeId, order, { tracking: body.tracking, carrier: body.carrier });
     return json(r.status, r);
   }
   if (body.action === "void_label") {

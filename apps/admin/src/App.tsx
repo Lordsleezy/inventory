@@ -37,7 +37,7 @@ import { CommissionMath } from './CommissionMath';
 import { setReplacementRows, useReplacementsForSale } from './replacementsStore';
 
 /** Store associates (Jacob / clock staff): Inventory, Register, Settings only. */
-const ASSOCIATE_PAGES: MainPage[] = ['register', 'inventory', 'settings'];
+const ASSOCIATE_PAGES: MainPage[] = ['register', 'inventory', 'orders', 'settings'];
 
 const sb = floorCloud();
 const zone = 'America/Los_Angeles';

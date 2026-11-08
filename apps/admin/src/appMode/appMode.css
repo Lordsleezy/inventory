@@ -2617,3 +2617,140 @@ html.app-mode .loc-primary {
   padding: 14px;
 }
 html.app-mode .loc-field small { color: #8e8e93; }
+
+/* Order stages, label chips, Depop upload — phone shell */
+html.app-mode .orders-segment button {
+  display: grid;
+  gap: 1px;
+  font-size: 11px;
+  line-height: 1.15;
+  padding: 7px 2px;
+  min-width: 0;
+}
+html.app-mode .orders-segment button strong { font-size: 15px; font-weight: 700; }
+html.app-mode .orders-segment button.active { background: #0a84ff; color: #fff; }
+html.app-mode .orders-seg-note { margin: -6px 16px 10px; }
+html.app-mode .app-flag {
+  margin: 0 16px 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(255, 159, 10, 0.16);
+  color: #ffd60a;
+  font-size: 13px;
+}
+html.app-mode .app-order-row { align-items: flex-start; }
+html.app-mode .app-order-location-badge {
+  width: 64px;
+  flex: none;
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 2px;
+  background: #2c2c2e;
+  border-radius: 8px;
+  padding: 8px 4px;
+  line-height: 1.05;
+}
+html.app-mode .app-order-location-badge small { font-size: 9px; letter-spacing: 0.04em; color: #8e8e93; text-transform: uppercase; }
+html.app-mode .app-order-location-badge strong { font-size: 13px; font-weight: 700; }
+html.app-mode .app-order-location-badge.missing { opacity: 0.7; }
+html.app-mode .app-order-main { flex: 1; min-width: 0; display: grid; gap: 3px; }
+html.app-mode .app-order-main > strong { font-size: 16px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+html.app-mode .app-order-main > small { color: #8e8e93; font-size: 13px; }
+html.app-mode .app-chip {
+  justify-self: start;
+  font-size: 12px;
+  font-weight: 650;
+  border-radius: 999px;
+  padding: 3px 8px;
+  background: #2c2c2e;
+  color: #fff;
+}
+html.app-mode .app-chip.warn { background: rgba(255, 159, 10, 0.18); color: #ff9f0a; }
+html.app-mode .app-chip.ok { background: rgba(48, 209, 88, 0.16); color: #30d158; }
+html.app-mode .app-chip.blue { background: rgba(10, 132, 255, 0.22); color: #64b5ff; }
+html.app-mode .app-chip.muted { color: #8e8e93; background: #2c2c2e; }
+html.app-mode .app-kv select {
+  border: 0;
+  background: transparent;
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  text-align: right;
+  max-width: 70%;
+}
+html.app-mode .app-actions.stack { grid-template-columns: 1fr; }
+html.app-mode .app-actions button.primary,
+html.app-mode .app-actions button.primary:hover {
+  background: #0a84ff;
+  color: #fff;
+}
+html.app-mode .app-actions button.secondary { color: #fff; background: #2c2c2e; }
+html.app-mode .order-stepper {
+  display: flex;
+  list-style: none;
+  margin: 0 16px 14px;
+  padding: 12px 8px;
+  gap: 4px;
+  background: #1c1c1e;
+  border-radius: 12px;
+}
+html.app-mode .order-stepper li { flex: 1; display: grid; justify-items: center; gap: 4px; color: #8e8e93; font-size: 11px; }
+html.app-mode .order-stepper li span {
+  width: 22px; height: 22px; border-radius: 50%;
+  display: grid; place-items: center;
+  background: #2c2c2e; color: #8e8e93; font-size: 12px; font-weight: 700;
+}
+html.app-mode .order-stepper li.current { color: #0a84ff; }
+html.app-mode .order-stepper li.current span { background: #0a84ff; color: #fff; }
+html.app-mode .order-stepper li.done span { background: #30d158; color: #fff; }
+html.app-mode .order-timeline { list-style: none; margin: 0; padding: 4px 14px 8px; }
+html.app-mode .order-timeline li {
+  display: grid; gap: 2px; padding: 8px 0 8px 14px;
+  border-left: 2px solid #3a3a3c;
+}
+html.app-mode .order-timeline li.current { border-left-color: #0a84ff; }
+html.app-mode .order-timeline li.ok { border-left-color: #30d158; }
+html.app-mode .order-timeline li.warn { border-left-color: #ff9f0a; }
+html.app-mode .order-timeline span { color: #8e8e93; font-size: 13px; }
+html.app-mode .app-track-box {
+  margin: 0 16px 12px;
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 12px;
+  background: #1c1c1e;
+}
+html.app-mode .app-track-box input {
+  width: 100%;
+  box-sizing: border-box;
+  background: #2c2c2e;
+  color: #fff;
+  border: 0;
+  border-radius: 10px;
+  padding: 12px;
+  font-size: 17px;
+}
+html.app-mode .depop-label-field { display: grid; gap: 6px; }
+html.app-mode .depop-label-drop {
+  display: grid; gap: 2px; justify-items: center; text-align: center;
+  border: 1.5px dashed #3a3a3c; border-radius: 12px; padding: 18px;
+  color: #0a84ff; background: #1c1c1e; cursor: pointer;
+}
+html.app-mode .depop-label-drop input { display: none; }
+html.app-mode .depop-label-drop small { color: #8e8e93; }
+html.app-mode .depop-label-file {
+  display: grid; gap: 2px; padding: 12px 14px; border-radius: 12px;
+  background: #12301c; color: #fff;
+}
+html.app-mode .depop-label-file small { color: #30d158; }
+html.app-mode .depop-form .actions button.primary {
+  background: #0a84ff;
+  color: #fff;
+  border: 0;
+  border-radius: 12px;
+  width: 100%;
+  padding: 14px;
+  font-size: 17px;
+  font-weight: 650;
+}

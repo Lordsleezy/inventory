@@ -32,6 +32,8 @@ type Props = {
   money: (n: number) => string;
   onClose: () => void;
   onDone: () => void;
+  /** Refresh the order list without leaving the print screen. */
+  onPurchased?: () => void;
   /** Compact layout for Floor app shell */
   appMode?: boolean;
 };
@@ -54,7 +56,7 @@ function newPurchaseToken() {
 }
 
 /** Packing-time label: confirm box → multi-source quote → confirm → buy → download/print. */
-export function LabelDialog({ order, accessToken, money, onClose, onDone, appMode = false }: Props) {
+export function LabelDialog({ order, accessToken, money, onClose, onDone, onPurchased, appMode = false }: Props) {
   const [box, setBox] = useState({
     l: field(order.package?.length_in),
     w: field(order.package?.width_in),
@@ -63,7 +65,7 @@ export function LabelDialog({ order, accessToken, money, onClose, onDone, appMod
   });
   const [quote, setQuote] = useState<Quote | null>(null);
   const [rateId, setRateId] = useState('');
-  const [showAllRates, setShowAllRates] = useState(false);
+  const [showAllRates, setShowAllRates] = useState(true);
   const [loading, setLoading] = useState(false);
   const [buying, setBuying] = useState(false);
   const [error, setError] = useState('');
@@ -164,10 +166,7 @@ export function LabelDialog({ order, accessToken, money, onClose, onDone, appMod
       });
       const url = r.label_url || r.order?.label_url || null;
       setBoughtUrl(url);
-      if (url) {
-        try { window.open(url, '_blank', 'noopener'); } catch { /* ignore */ }
-      }
-      onDone();
+      onPurchased?.();
     } catch (e) {
       setError(errText(e));
     } finally {
@@ -201,7 +200,7 @@ export function LabelDialog({ order, accessToken, money, onClose, onDone, appMod
         <div className="section-head">
           <div>
             <div className="eyebrow">SHIPPING LABEL</div>
-            <h2>{boughtUrl ? 'Label' : 'Get label'} · {order.order_no}</h2>
+            <h2>{boughtUrl ? 'Label' : 'Buy label'} · {order.order_no}</h2>
           </div>
           <button type="button" className="secondary" disabled={buying} onClick={onClose}>Close</button>
         </div>
@@ -209,7 +208,7 @@ export function LabelDialog({ order, accessToken, money, onClose, onDone, appMod
       {appMode && (
         <div className="app-nav">
           <button type="button" disabled={buying} onClick={onClose}>‹ Orders</button>
-          <div className="app-nav-title">{boughtUrl ? 'Label' : 'Get label'}</div>
+          <div className="app-nav-title">{boughtUrl ? 'Label' : 'Buy label'}</div>
           <button type="button" style={{ visibility: 'hidden' }}>·</button>
         </div>
       )}
@@ -242,12 +241,10 @@ export function LabelDialog({ order, accessToken, money, onClose, onDone, appMod
           </div>
           {error && <div className={appMode ? 'app-inline-error' : 'alert'} role="alert">{error}</div>}
           <div className={appMode ? 'app-actions' : 'actions'}>
-            <a className={appMode ? '' : 'button'} href={boughtUrl} target="_blank" rel="noreferrer" download>
-              Download label
+            <button type="button" onClick={() => window.open(boughtUrl, '_blank', 'noopener')}>Print 4×6</button>
+            <a className={appMode ? '' : 'button'} href={boughtUrl} target="_blank" rel="noreferrer" download="label-4x6.pdf">
+              Save PDF
             </a>
-            <button type="button" className={appMode ? 'secondary' : 'secondary'} onClick={() => window.open(boughtUrl, '_blank', 'noopener')}>
-              Print / Reprint
-            </button>
             <button type="button" className="secondary" disabled={buying} onClick={() => void voidExisting()}>
               {buying ? '…' : 'Void label'}
             </button>
@@ -390,7 +387,7 @@ export function LabelDialog({ order, accessToken, money, onClose, onDone, appMod
                   }
                   onClick={() => void buy()}
                 >
-                  {buying ? 'Buying…' : `Buy · ${money(selected.amount_cents)}`}
+                  {buying ? 'Buying…' : `Buy label · ${money(selected.amount_cents)}`}
                 </button>
               </div>
             </>
