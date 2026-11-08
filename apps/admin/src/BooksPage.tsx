@@ -159,6 +159,7 @@ export function BooksPage({ client, money, native = false, onNativeNavigation }:
       owner_gt_commission: proof.ownerBeforeOther > proof.commission,
       legacy_gap_cents: legacyCommission - proof.commission,
     });
+    if (workbook.audit.length) console.warn('[Books in-store fee audit]', workbook.audit);
   }, [workbook, report, selected, totals]);
 
   useEffect(() => {
