@@ -19,6 +19,7 @@ import {
   styleHeaderRow,
 } from './exportFormat';
 import { verifyExportTies } from './exportChecks';
+import { rollupRareCategories } from './inventoryCategories';
 import type { BooksWorkbook, ExpenseDisplayLine, Period } from './types';
 
 function tieWarning(wb: BooksWorkbook) {
@@ -255,7 +256,7 @@ export async function buildBooksExcel(period: Period, wb: BooksWorkbook, label: 
   };
   if (own) {
     writePairs('By category', ['Category', 'Units', 'Cost', 'Floor', 'Sold', 'Sell-through %'],
-      (own.categories || []).map((c) => [c.category, c.units, (c.cost_cents || 0) / 100, (c.floor_cents || 0) / 100, c.sold_units, c.sell_through]));
+      rollupRareCategories(own.categories || []).map((c) => [c.category, c.units, (c.cost_cents || 0) / 100, (c.floor_cents || 0) / 100, c.sold_units, c.sell_through]));
     writePairs('Listed by channel (an item on several channels is listed under each)', ['Channel', 'Units', 'Cost'],
       (own.listed || []).map((c) => [c.channel, c.units, (c.cost_cents || 0) / 100]));
     writePairs('Not listed', ['Reason', 'Units', 'Cost'],
