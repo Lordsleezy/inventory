@@ -108,7 +108,7 @@ async function handle(event) {
     });
   }
   if (body.action === "set_label_format") {
-    const format = body.format === "PDF" || body.format === "PDF_LETTER" ? "PDF" : "PDF_4x6";
+    const format = "PDF_4x6";
     const { error } = await sb.from("store_settings").upsert(
       { store_id: storeId, key: "label_format", value: format },
       { onConflict: "store_id,key" },

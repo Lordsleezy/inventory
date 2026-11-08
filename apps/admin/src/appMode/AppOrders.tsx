@@ -9,6 +9,7 @@ import { errText } from '../errText';
 import { shortError } from './shortError';
 import { loadOrderLocations, locationCompare, locationParts } from '../locationOrder';
 import { fileToBase64, labelFileUrl, orderAdmin } from '../orderLabel';
+import { openShippingLabel } from '../labelPrint';
 import { canBuyLabel, hasLabel, orderChip, orderNeedsLabel, orderStage, orderTimeline, packagedStale, shippedStale, trackingTail, type OrderStage } from '../orderStage';
 import { useVisibleInterval } from '../useVisibleInterval';
 
@@ -221,16 +222,7 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
     try {
       const url = await labelFileUrl(client, o);
       if (!url) { setError('No label file on this order yet.'); return; }
-      if (download) {
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = o.label_file_name || 'label-4x6.pdf';
-        a.target = '_blank';
-        a.rel = 'noreferrer';
-        a.click();
-        return;
-      }
-      window.open(url, '_blank', 'noopener');
+      await openShippingLabel(url, download);
     } catch (e) {
       setError(shortError(errText(e)));
     }

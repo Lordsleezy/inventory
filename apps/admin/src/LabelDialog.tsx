@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { WebOrder } from './OrdersPage';
 import { errText } from './errText';
+import { openShippingLabel } from './labelPrint';
 import { floorFunctionUrl } from './floorApi';
 
 type Rate = {
@@ -72,7 +73,6 @@ export function LabelDialog({ order, accessToken, money, onClose, onDone, onPurc
   const [condition, setCondition] = useState<'ok' | 'not_as_listed' | ''>(
     order.pack_condition === 'ok' || order.pack_condition === 'not_as_listed' ? order.pack_condition : '',
   );
-  const [labelFormat, setLabelFormat] = useState<'PDF_4x6' | 'PDF'>('PDF_4x6');
   const [boughtUrl, setBoughtUrl] = useState<string | null>(order.label_url || null);
   const [purchaseToken] = useState(() => newPurchaseToken());
   const channel = (order.channel || 'website').toLowerCase();
@@ -104,8 +104,6 @@ export function LabelDialog({ order, accessToken, money, onClose, onDone, onPurc
       const q = (await call({ action: 'label_quote', box: boxBody() })) as Quote;
       setQuote(q);
       setRateId(q.selected_id);
-      if (q.label_format === 'PDF' || q.label_format === 'PDF_LETTER') setLabelFormat('PDF');
-      else setLabelFormat('PDF_4x6');
     } catch (e) {
       setQuote(null);
       setError(errText(e));
@@ -155,14 +153,14 @@ export function LabelDialog({ order, accessToken, money, onClose, onDone, onPurc
       if (condition === 'ok' || !isWebsite) {
         try { await call({ action: 'pack_condition', status: 'ok' }); } catch { /* non-fatal for marketplace */ }
       }
-      await call({ action: 'set_label_format', format: labelFormat });
+      await call({ action: 'set_label_format', format: 'PDF_4x6' });
       const r = await call({
         action: 'buy_label',
         rate_id: selected.id,
         box: boxBody(),
         purchase_token: purchaseToken,
         selected_rate: selected,
-        label_format: labelFormat,
+        label_format: 'PDF_4x6',
       });
       const url = r.label_url || r.order?.label_url || null;
       setBoughtUrl(url);
@@ -241,10 +239,10 @@ export function LabelDialog({ order, accessToken, money, onClose, onDone, onPurc
           </div>
           {error && <div className={appMode ? 'app-inline-error' : 'alert'} role="alert">{error}</div>}
           <div className={appMode ? 'app-actions' : 'actions'}>
-            <button type="button" onClick={() => window.open(boughtUrl, '_blank', 'noopener')}>Print 4×6</button>
-            <a className={appMode ? '' : 'button'} href={boughtUrl} target="_blank" rel="noreferrer" download="label-4x6.pdf">
+            <button type="button" onClick={() => void openShippingLabel(boughtUrl)}>Print 4×6</button>
+            <button type="button" className={appMode ? '' : 'secondary'} onClick={() => void openShippingLabel(boughtUrl, true)}>
               Save PDF
-            </a>
+            </button>
             <button type="button" className="secondary" disabled={buying} onClick={() => void voidExisting()}>
               {buying ? '…' : 'Void label'}
             </button>
@@ -295,12 +293,6 @@ export function LabelDialog({ order, accessToken, money, onClose, onDone, onPurc
             <span className={appMode ? 'app-footer-count' : 'hint'}>
               Pre-filled from Floor. Corrected dims save to the unit when you buy.
             </span>
-          </div>
-
-          <h3>Label size</h3>
-          <div className={appMode ? 'app-actions' : 'actions'}>
-            <button type="button" className={labelFormat === 'PDF_4x6' ? '' : 'secondary'} disabled={buying} onClick={() => setLabelFormat('PDF_4x6')}>4×6 thermal</button>
-            <button type="button" className={labelFormat === 'PDF' ? '' : 'secondary'} disabled={buying} onClick={() => setLabelFormat('PDF')}>8.5×11</button>
           </div>
 
           {error && <div className={appMode ? 'app-inline-error' : 'alert'} role="alert">{error}</div>}

@@ -9,6 +9,7 @@ import { OrderFacts, OrderFindRow, OrderPhotoCarousel, OrderTitle } from './Orde
 import { derivativePath, listThumbPhoto, loadUnitPhotos, signPhotoUrls, type UnitPhoto } from './unitPhotos';
 import { errText } from './errText';
 import { fileToBase64, labelFileUrl, orderAdmin } from './orderLabel';
+import { openShippingLabel } from './labelPrint';
 import { canBuyLabel, hasLabel, orderChip, orderNeedsLabel, orderStage, orderTimeline, packagedStale, shippedStale } from './orderStage';
 import { loadOrderLocations, locationCompare } from './locationOrder';
 import { useVisibleInterval } from './useVisibleInterval';
@@ -192,7 +193,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
     try {
       const url = await labelFileUrl(client, o);
       if (!url) { setError('No label file on this order yet.'); return; }
-      window.open(url, '_blank', 'noopener');
+      await openShippingLabel(url);
     } catch (e) { setError(errText(e)); }
   }
 
