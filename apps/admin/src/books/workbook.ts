@@ -142,7 +142,7 @@ export async function loadBooksMoney(client: import('@supabase/supabase-js').Sup
   const overviewRes = await client.rpc('portal_money_overview');
   if (overviewRes.error) throw overviewRes.error;
   const overview = ((overviewRes.data || []) as MoneyOverviewRow[]);
-  const accounts = ['ebay', 'depop', 'mercari', 'square', 'tiktok', 'amazon', 'safe'];
+  const accounts = ['ebay', 'depop', 'square', 'tiktok', 'amazon', 'safe'];
   const activityByAccount: Record<string, MoneyActivityRow[]> = {};
   await Promise.all(accounts.map(async (acct) => {
     const { data, error } = await client.rpc('portal_money_activity', { p_account: acct, p_limit: 500, p_offset: 0 });

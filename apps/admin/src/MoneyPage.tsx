@@ -18,7 +18,7 @@ type Person = { id: string; label: string };
 type Props = { client: SupabaseClient; storeId: string; accessToken: string; money: (cents: number) => string; stamp: (value: string) => string };
 
 const NAMES: Record<string, string> = { safe: 'Safe cash', square: 'Square', ebay: 'eBay', ebay_pgg124_5: 'eBay · pgg124-5', depop: 'Depop', mercari: 'Mercari', amazon: 'Amazon', tiktok: 'TikTok', other: 'Other' }; // pragma: allowlist secret
-const MANUAL_SOURCES = ['depop', 'mercari', 'tiktok', 'amazon', 'other'] as const;
+const MANUAL_SOURCES = ['depop', 'tiktok', 'amazon', 'other'] as const;
 const REASON: Record<string, string> = {
   starting_cash: 'Starting cash', change_for_drawer: 'Change for drawer', moved_from_square: 'Moved from Square', moved_from_safe: 'Moved from Safe',
   owner_put_in: 'Owner put in', count_correction: 'Count correction', owner_draw: 'Owner draw', person_payout: 'Payout', bank_deposit: 'Bank deposit',
@@ -187,7 +187,7 @@ export function MoneyPage({ client, storeId, accessToken, money, stamp }: Props)
     {notice && <div className="notice" role="status">{notice}</div>}
     {!loaded && !error && <p role="status">Loading…</p>}
     {loaded && <div className="money-accord" role="list">
-      {overview.map((a) => {
+      {overview.filter((a) => a.account !== 'mercari').map((a) => {
         const open = openAcc === a.account;
         const detail = a.sync?.detail || {};
         const sub = accSubline(a);

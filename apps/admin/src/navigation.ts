@@ -63,7 +63,7 @@ const LEGACY: Record<string, { page: MainPage; tab?: ReportTab; inventoryTab?: I
   amazon: { page: 'amazon' },
   tiktok: { page: 'tiktok' },
   depop: { page: 'depop' },
-  mercari: { page: 'mercari' },
+  mercari: { page: 'online' },
   cameras: { page: 'cameras' },
   remote: { page: 'sales' },
   logs: { page: 'logs' },
@@ -93,7 +93,6 @@ const MAIN: MainPage[] = [
   'amazon',
   'tiktok',
   'depop',
-  'mercari',
   'reports',
   'books',
   'withdrawals',
@@ -120,10 +119,10 @@ const SECTIONS: AttentionSection[] = [
   'missing-description',
 ];
 const ONLINE_TABS: OnlineTab[] = ['listed', 'ready', 'not-ready', 'msc', 'reports', 'sold'];
-const ONLINE_CHANNELS: OnlineChannel[] = ['all', 'ebay', 'depop', 'mercari', 'amazon', 'tiktok', 'facebook'];
+const ONLINE_CHANNELS: OnlineChannel[] = ['all', 'ebay', 'depop', 'amazon', 'tiktok', 'facebook'];
 const ONLINE_CHANNELS_SET = new Set<string>(ONLINE_CHANNELS);
 /** Retired list targets — old bookmarks fall back to all. */
-const RETIRED_ONLINE_CHANNELS = new Set(['vendoo', 'whatnot']);
+const RETIRED_ONLINE_CHANNELS = new Set(['vendoo', 'whatnot', 'mercari']);
 
 export type NavState = {
   page: MainPage;

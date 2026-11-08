@@ -24,7 +24,7 @@ const MONEY_NAMES: Record<string, string> = {
   tiktok: 'TikTok',
 };
 
-const ACTIVE_ACCOUNTS = ['ebay', 'depop', 'mercari', 'square', 'tiktok', 'amazon', 'safe'];
+const ACTIVE_ACCOUNTS = ['ebay', 'depop', 'square', 'tiktok', 'amazon', 'safe'];
 
 function inMonth(iso: string, start: string, end: string) {
   const d = iso.slice(0, 10);

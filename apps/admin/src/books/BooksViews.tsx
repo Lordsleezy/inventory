@@ -5,6 +5,7 @@ import { groupExpensesByCategory, groupReceivedByDay, receivedMonthStats } from 
 import { monthLabel } from './booksMath';
 import { periodPickerLabel, periodStatusLabel, periodUiStatus } from './periodStatus';
 import { saleWhyLines } from './saleNotes';
+import { liveListedChannels, notListedLines } from './sheetChannels';
 import { BooksLock } from './BooksLock';
 import { BooksIconExpenses, BooksIconInventory, BooksIconPayouts, BooksIconReceived, BooksIconSales } from './reportIcons';
 
@@ -154,7 +155,7 @@ function Block({ className, children }: { className?: string; children: ReactNod
 }
 
 function feePolicyLine(absorbFees?: boolean, channels?: string[]) {
-  const ch = (channels?.length ? channels : ['website', 'ebay', 'depop', 'mercari', 'amazon', 'tiktok']).join(', ');
+  const ch = (channels?.length ? channels : ['website', 'ebay', 'depop', 'amazon', 'tiktok']).filter((c) => c.toLowerCase() !== 'mercari').join(', ');
   const owner = 'Store profit: marketplace fees on online sales are paid by the owner (in-store has none).';
   const comm = absorbFees !== false
     ? 'Commissions: store absorbs marketplace + card fees (they stay off the commission base).'
@@ -555,11 +556,11 @@ function InventoryBody({ money, inventory, native }: { money: (c: number) => str
           </div>
         </>
       )}
-      {(o?.listed || []).length > 0 && (
+      {liveListedChannels(o?.listed || []).length > 0 && (
         <>
           <p className="native-report-section">LISTED BY CHANNEL</p>
           <div className="native-report-group">
-            {o!.listed!.map((c) => (
+            {liveListedChannels(o!.listed || []).map((c) => (
               <div key={c.channel} className="native-report-row"><span>{c.channel}</span><b>{c.units} · {money(c.cost_cents)}</b></div>
             ))}
           </div>
@@ -569,9 +570,13 @@ function InventoryBody({ money, inventory, native }: { money: (c: number) => str
         <>
           <p className="native-report-section">NOT LISTED</p>
           <div className="native-report-group">
-            {o!.unlisted!.map((c) => (
-              <div key={c.reason} className="native-report-row"><span>{c.reason}</span><b>{c.units} · {money(c.cost_cents)}</b></div>
-            ))}
+            {(() => {
+              const lines = notListedLines(o!.unlisted || [], o!.defective_shelf);
+              return <>
+                <div className="native-report-row"><span>Total</span><b>{lines.units} · {money(lines.cost_cents)}</b></div>
+                <div className="native-report-row"><span>Defective</span><b>{lines.defective_units} · {money(lines.defective_cost_cents)}</b></div>
+              </>;
+            })()}
           </div>
         </>
       )}

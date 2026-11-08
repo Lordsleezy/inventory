@@ -20,6 +20,7 @@ import {
 } from './exportFormat';
 import { verifyExportTies } from './exportChecks';
 import { rollupRareCategories } from './inventoryCategories';
+import { liveListedChannels, notListedLines } from './sheetChannels';
 import type { BooksWorkbook, ExpenseDisplayLine, Period } from './types';
 
 function tieWarning(wb: BooksWorkbook) {
@@ -258,9 +259,12 @@ export async function buildBooksExcel(period: Period, wb: BooksWorkbook, label: 
     writePairs('By category', ['Category', 'Units', 'Cost', 'Floor', 'Sold', 'Sell-through %'],
       rollupRareCategories(own.categories || []).map((c) => [c.category, c.units, (c.cost_cents || 0) / 100, (c.floor_cents || 0) / 100, c.sold_units, c.sell_through]));
     writePairs('Listed by channel (an item on several channels is listed under each)', ['Channel', 'Units', 'Cost'],
-      (own.listed || []).map((c) => [c.channel, c.units, (c.cost_cents || 0) / 100]));
-    writePairs('Not listed', ['Reason', 'Units', 'Cost'],
-      (own.unlisted || []).map((c) => [c.reason, c.units, (c.cost_cents || 0) / 100]));
+      liveListedChannels(own.listed || []).map((c) => [c.channel, c.units, (c.cost_cents || 0) / 100]));
+    const unlisted = notListedLines(own.unlisted || [], own.defective_shelf);
+    writePairs('Not listed', ['', 'Units', 'Cost'], [
+      ['Total', unlisted.units, unlisted.cost_cents / 100],
+      ['Defective', unlisted.defective_units, unlisted.defective_cost_cents / 100],
+    ]);
     writePairs('Aging', ['Bucket', 'Units', 'Cost'],
       (own.aging || []).map((c) => [c.bucket, c.units, (c.cost_cents || 0) / 100]));
     const mv = own.movement || {};
