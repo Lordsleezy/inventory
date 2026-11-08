@@ -3,7 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { errText } from './errText';
 import { DepopSalePanel } from './DepopSalePanel';
 
-type Row = { sku: string; price_cents: number | null; listing_url: string | null; listed_at: string | null; unit_state: string; do_not_list: boolean; defective: boolean };
+type Row = { sku: string; price_cents: number | null; listing_url: string | null; listed_at: string | null; unit_state: string; do_not_list: boolean; defective: boolean; needs_removal?: boolean };
 type Hit = { sku: string; title: string; photo_path: string | null; unit_state: string; do_not_list: boolean; defective: boolean };
 const todayLA = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
 const startOfWeekLA = () => { const d = new Date(`${todayLA()}T12:00:00`); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return d.toLocaleDateString('en-CA'); };
@@ -38,14 +38,16 @@ export function DepopLiveListingsPanel({ client, money, variant }: { client: Sup
   const isSoldElsewhere = (row: Row) => ['sold', 'replaced', 'given_away'].includes(row.unit_state);
   const soldElsewhere = useMemo(() => (rows || []).filter(isSoldElsewhere).length, [rows]);
   const listedThisWeek = useMemo(() => (rows || []).filter(row => row.listed_at && row.listed_at.slice(0, 10) >= startOfWeekLA()).length, [rows]);
-  // Sold elsewhere (eBay etc.) first so pull-now work sits at the top of Listed.
   const shown = useMemo(() => {
     const q = search.trim().toLowerCase();
+    const rank = (row: Row) => (row.needs_removal ? 0 : isSoldElsewhere(row) ? 1 : 2);
     return (rows || [])
       .filter(row => !q || row.sku.toLowerCase().includes(q))
       .slice()
-      .sort((a, b) => Number(isSoldElsewhere(b)) - Number(isSoldElsewhere(a)) || a.sku.localeCompare(b.sku));
+      .sort((a, b) => rank(a) - rank(b) || a.sku.localeCompare(b.sku));
   }, [rows, search]);
+  const needsRemoval = shown.filter(row => row.needs_removal);
+  const rest = shown.filter(row => !row.needs_removal);
   async function add(e: React.FormEvent) {
     e.preventDefault(); if (!picked) return;
     const cents = Math.round(Number(price) * 100);
@@ -81,13 +83,20 @@ export function DepopLiveListingsPanel({ client, money, variant }: { client: Sup
       {error && <p className="error" role="alert">{error}</p>}{notice && <p className="hint" role="status">{notice}</p>}
     </section>
     {!adding && !selected && <section className="panel"><label>Search SKU<input type="search" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search SKU" /></label>
-      {rows === null ? <p className="hint">Loading Depop SKUs…</p> : shown.length === 0 ? <div className="empty">No matching live Depop SKUs.</div> : <div className="depop-sku-list">{shown.map(row => {
-        const sold = isSoldElsewhere(row);
-        return <div className={`depop-sku-row${sold ? ' sold-elsewhere' : ''}`} key={row.sku}>
-          <button type="button" className="depop-sku-open" onClick={() => { setError(''); setSelected(row); }}><strong>{row.sku}</strong>{sold && <span>Needs remove</span>}<b aria-hidden="true">›</b></button>
+      {rows === null ? <p className="hint">Loading Depop SKUs…</p> : shown.length === 0 ? <div className="empty">No matching live Depop SKUs.</div> : <>
+        {needsRemoval.length > 0 && <div className="depop-needs-head">Needs removal</div>}
+        {needsRemoval.length > 0 && <div className="depop-sku-list has-needs">{needsRemoval.map(row => <div className="depop-sku-row needs-removal" key={row.sku}>
+          <button type="button" className="depop-sku-open" onClick={() => { setError(''); setSelected(row); }}><strong>{row.sku}</strong><span>Needs removal</span><b aria-hidden="true">›</b></button>
           <button type="button" className="text-button depop-remove" disabled={busy} onClick={() => void remove(row)}>Remove</button>
-        </div>;
-      })}</div>}
+        </div>)}</div>}
+        {rest.length > 0 && <div className="depop-sku-list">{rest.map(row => {
+          const sold = isSoldElsewhere(row);
+          return <div className={`depop-sku-row${sold ? ' sold-elsewhere' : ''}`} key={row.sku}>
+            <button type="button" className="depop-sku-open" onClick={() => { setError(''); setSelected(row); }}><strong>{row.sku}</strong>{sold && <span>Needs remove</span>}<b aria-hidden="true">›</b></button>
+            <button type="button" className="text-button depop-remove" disabled={busy} onClick={() => void remove(row)}>Remove</button>
+          </div>;
+        })}</div>}
+      </>}
     </section>}
     {selected && <section className="depop-mark-sold"><button type="button" className="text-button" onClick={() => setSelected(null)}>‹ Depop SKUs</button>
       <DepopSalePanel key={selected.sku} client={client} money={money} variant={variant} initialSku={selected.sku} initialSaleCents={selected.price_cents} onClose={() => setSelected(null)} onSaved={() => { setSelected(null); void load(); }} />
