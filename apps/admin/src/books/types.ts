@@ -70,9 +70,11 @@ export type StoreMoneyMonth = {
   account: string;
   label: string;
   start_balance_cents: number | null;
+  start_balance_estimated?: boolean;
   money_in_cents: number;
   paid_to_bank_cents: number;
   end_balance_cents: number | null;
+  end_balance_estimated?: boolean;
   transfers: MoneyActivityRow[];
 };
 
@@ -96,7 +98,10 @@ export type PayoutsWorkbook = {
 export type Report = {
   period: Period;
   checks: Check[];
+  books_workbook_version?: number;
   books_attributed_fee_ids?: string[];
+  books_label_dedup_expense_ids?: string[];
+  books_label_dedup_label_ids?: string[];
   sales: Row[];
   fees: Row[];
   labels: Row[];
@@ -199,6 +204,7 @@ export type MonthProof = {
 export type BooksWorkbook = {
   proof: MonthProof;
   audit: { ticketKey: string; message: string }[];
+  integrity?: { ok: boolean; commissionGap_cents: number; ownerGap_cents: number; issues: { kind: string; message: string; cents?: number; saleId?: string }[] };
   expenses: {
     rows: ExpenseDisplayLine[];
     exportRows: ExpenseLine[];

@@ -103,6 +103,8 @@ function detectDuplicates(lines: ExpenseDisplayLine[]): DuplicateNote[] {
 }
 
 export function buildExpenses(report: Report, attributedPromotedIds: Set<string>): BuiltExpenses {
+  const onSaleExpenseIds = new Set((report.books_label_dedup_expense_ids || []).map(String));
+  const onSaleLabelIds = new Set((report.books_label_dedup_label_ids || []).map(String));
   const rows: ExpenseDisplayLine[] = [];
   const labelIdsInExpenses = new Set((report.expenses || []).map((e) => String(e.label_id || '')).filter(Boolean));
   const returnExpenseKeys = new Set(
@@ -122,6 +124,7 @@ export function buildExpenses(report: Report, attributedPromotedIds: Set<string>
     const title = cleanTitle(String(e.description || ''), source, sku, String(e.order_id || ''));
     const isBonus = category === 'Bonus' || isBonusCategory(String(e.category || ''));
     const reimburse = Boolean(e.needs_reimbursement) && !isBonus;
+    const onSale = onSaleExpenseIds.has(String(e.id || ''));
     rows.push({
       id: String(e.id || `${e.date}-${title}`),
       date: String(e.date ?? e.spent_on ?? ''),
@@ -131,7 +134,7 @@ export function buildExpenses(report: Report, attributedPromotedIds: Set<string>
       sourceDisplay: source === 'manual' ? '' : channelTitle(source) || source,
       sku_or_order: sku || String(e.order_id || e.external_id || ''),
       needs_reimbursement: reimburse,
-      countsInProfit: false,
+      countsInProfit: onSale,
       kindKey: category,
       excludeFromTotals: false,
     });
@@ -143,6 +146,7 @@ export function buildExpenses(report: Report, attributedPromotedIds: Set<string>
     const cents = Math.abs(Number(l.signed_amount_cents ?? l.cost_cents ?? 0));
     if (!cents) continue;
     const order = String(l.order_id || l.transaction_id || '');
+    const onSale = onSaleLabelIds.has(String(l.id));
     rows.push({
       id: `label:${l.id}`,
       date: String(l.date || '').slice(0, 10),
@@ -153,7 +157,7 @@ export function buildExpenses(report: Report, attributedPromotedIds: Set<string>
       amount_cents: cents,
       sourceDisplay: channelTitle(l.carrier || 'Store'),
       sku_or_order: order,
-      needs_reimbursement: false,
+      needs_reimbursement: onSale,
       countsInProfit: true,
       kindKey: 'shipping-label',
       excludeFromTotals: false,

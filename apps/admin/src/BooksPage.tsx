@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { BooksViews, type Sheet } from './books/BooksViews';
-import { normalizeReport, OCTOBER_2026_TARGETS } from './books/booksMath';
+import { normalizeReport } from './books/booksMath';
 import { buildBooksExcel, buildBooksPdf, downloadBytes } from './books/export';
 import { loadBooksPayoutContext, loadCommissionOverrides } from './books/loadPayoutContext';
-import { PAYOUT_COST_RULES_DOC } from './books/payoutTotals';
+import { computePayoutPersonBalances, loadPayoutLedgerData, BOOKS_WORKBOOK_VERSION, type PersonBalance } from './books/payoutLedger';
+import { canonicalPersonKey, mergeEmployeeIds } from './books/personMerge';
 import { buildBooksWorkbook, loadBooksMoney } from './books/workbook';
 import type { BooksPayoutContext, InventorySummary, Period, ReceivedItem, Report } from './books/types';
 import type { CommissionOverride } from './payouts';
@@ -36,6 +37,8 @@ export function BooksPage({ client, money, native = false, onNativeNavigation }:
   const [payoutCtx, setPayoutCtx] = useState<BooksPayoutContext | null>(null);
   const [overrides, setOverrides] = useState<Map<string, CommissionOverride>>(new Map());
   const [moneyData, setMoneyData] = useState<Awaited<ReturnType<typeof loadBooksMoney>> | null>(null);
+  const [ledgerBalances, setLedgerBalances] = useState<PersonBalance[] | null>(null);
+  const [staffPersonIds, setStaffPersonIds] = useState<{ paulIds: string[]; jacobIds: string[] }>({ paulIds: [], jacobIds: [] });
   const [duplicateDecisions, setDuplicateDecisions] = useState<Record<string, 'keep' | 'remove'>>({});
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -56,15 +59,35 @@ export function BooksPage({ client, money, native = false, onNativeNavigation }:
     setPeriodId((cur) => (cur && loaded.some((p) => p.id === cur) ? cur : loaded[0]?.id || ''));
   }, [client]);
 
-  const loadPayoutSide = useCallback(async (storeId: string) => {
-    const [ctx, ov, md] = await Promise.all([
-      loadBooksPayoutContext(client, storeId),
-      loadCommissionOverrides(client, storeId),
-      loadBooksMoney(client),
+  const loadPayoutSide = useCallback(async (storeId: string, periodStart: string) => {
+    const ctx = await loadBooksPayoutContext(client, storeId);
+    const ov = await loadCommissionOverrides(client, storeId);
+    const [md, ledgerRaw] = await Promise.all([
+      loadBooksMoney(client, periodStart),
+      loadPayoutLedgerData(client, storeId, ov),
     ]);
+    const balances = computePayoutPersonBalances({
+      staff: ctx.staff,
+      peopleSlots: ctx.peopleSlots,
+      rules: ctx.rules,
+      cfg: ctx.cfg,
+      frozen: ctx.frozen,
+      ...ledgerRaw,
+    });
     setPayoutCtx(ctx);
     setOverrides(ov);
     setMoneyData(md);
+    setLedgerBalances(balances);
+    const ids = mergeEmployeeIds(ctx.staff, ctx.peopleSlots);
+    const paulList: string[] = [];
+    const jacobList: string[] = [];
+    for (const s of ctx.staff) {
+      if (canonicalPersonKey(s.display_name, s.email) === 'paul') paulList.push(s.user_id);
+      if (canonicalPersonKey(s.display_name, s.email) === 'jacob') jacobList.push(s.user_id);
+    }
+    if (ids.paulId && !paulList.includes(ids.paulId)) paulList.push(ids.paulId);
+    if (ids.jacobId && !jacobList.includes(ids.jacobId)) jacobList.push(ids.jacobId);
+    setStaffPersonIds({ paulIds: paulList, jacobIds: jacobList });
   }, [client]);
 
   const loadMonth = useCallback(async (p: Period) => {
@@ -72,7 +95,7 @@ export function BooksPage({ client, money, native = false, onNativeNavigation }:
     try {
       const staffRes = await client.from('staff').select('store_id').limit(1).maybeSingle();
       const storeId = String(staffRes.data?.store_id || '');
-      if (storeId) await loadPayoutSide(storeId);
+      if (storeId) await loadPayoutSide(storeId, p.period_start);
 
       const { data: raw, error: re } = await client.rpc('portal_books_report', { p_period: p.id });
       if (re) throw re;
@@ -100,9 +123,6 @@ export function BooksPage({ client, money, native = false, onNativeNavigation }:
       const saved = localStorage.getItem(`books-dup-${p.id}`);
       if (saved) setDuplicateDecisions(JSON.parse(saved) as Record<string, 'keep' | 'remove'>);
 
-      if (p.period_start === OCTOBER_2026_TARGETS.period_start || p.period_start === '2026-11-01') {
-        console.info('[Books payout rules]', PAYOUT_COST_RULES_DOC);
-      }
     } catch (e) {
       console.error('Books load failed', e);
       setError("Couldn't load this month. Try again.");
@@ -129,38 +149,21 @@ export function BooksPage({ client, money, native = false, onNativeNavigation }:
       money: moneyData,
       duplicateHidden,
       duplicateDecisions,
+      ledgerBalances: ledgerBalances || undefined,
+      paulIds: staffPersonIds.paulIds,
+      jacobIds: staffPersonIds.jacobIds,
     });
-  }, [report, inventory, received, payoutCtx, overrides, moneyData, duplicateHidden, duplicateDecisions]);
+  }, [report, inventory, received, payoutCtx, overrides, moneyData, duplicateHidden, duplicateDecisions, ledgerBalances, staffPersonIds]);
 
   const totals = useMemo(() => workbook?.sales.totals ?? null, [workbook]);
 
-  useEffect(() => {
-    if (!workbook || !report || !selected) return;
-    const proofMonths = new Set([OCTOBER_2026_TARGETS.period_start, '2026-11-01']);
-    if (!proofMonths.has(selected.period_start)) return;
-    const legacyCommission = (report.payouts || []).reduce((n, r) => n + Number(r.amount_cents || 0), 0);
-    const lineCommission = workbook.sales.rows.reduce((n, s) => n + (s.commission_cents ?? 0), 0);
-    const { proof } = workbook;
-    const pct = proof.profit ? (proof.commission / proof.profit) * 100 : 0;
-    console.info('[Books proof]', {
-      month: selected.period_start,
-      tickets: proof.saleCount,
-      revenue_cents: proof.revenue,
-      cost_cents: proof.cost,
-      fees_labels_cents: proof.feesAndLabels,
-      profit_cents: proof.profit,
-      commission_cents: proof.commission,
-      owner_before_other_cents: proof.ownerBeforeOther,
-      other_expenses_cents: totals?.otherExpenses ?? 0,
-      owner_keeps_cents: totals?.ownerKeeps ?? 0,
-      sum_sales_line_commission_cents: lineCommission,
-      legacy_report_payouts_commission_cents: legacyCommission,
-      commission_pct_of_profit: Number(pct.toFixed(2)),
-      owner_gt_commission: proof.ownerBeforeOther > proof.commission,
-      legacy_gap_cents: legacyCommission - proof.commission,
-    });
-    if (workbook.audit.length) console.warn('[Books in-store fee audit]', workbook.audit);
-  }, [workbook, report, selected, totals]);
+  const lockedStaleMath = useMemo(() => {
+    if (!selected || selected.status !== 'locked' || !report) return false;
+    const v = Number(report.books_workbook_version || 0);
+    return v < BOOKS_WORKBOOK_VERSION;
+  }, [selected, report]);
+
+  const lockedMonths = useMemo(() => periods.filter((p) => p.status === 'locked').map((p) => p.period_start), [periods]);
 
   useEffect(() => {
     if (!workbook || !selected) { setExportFiles(null); return; }
@@ -260,6 +263,10 @@ export function BooksPage({ client, money, native = false, onNativeNavigation }:
           desktopTab={desktopTab}
           setDesktopTab={setDesktopTab}
           onDuplicateDecision={saveDuplicateDecision}
+          absorbFees={!!payoutCtx?.cfg.absorbFees}
+          onlineChannels={payoutCtx?.cfg.channels || []}
+          lockedStaleMath={lockedStaleMath}
+          lockedMonths={lockedMonths}
         />
       )}
     </div>

@@ -1,6 +1,7 @@
 import { isBonusCategory } from '../payouts';
 import { channelTitle } from './booksMath';
 import { canonicalPersonKey, canonicalPersonLabel, mergeEmployeeIds } from './personMerge';
+import { computePayoutPersonBalances, type PersonBalance } from './payoutLedger';
 import { cutCommission, frozenTickets, ticketsFromReportSales } from './payoutTickets';
 import type {
   BookTotals,
@@ -36,12 +37,14 @@ function isBankPayout(row: MoneyActivityRow) {
 }
 
 export type MoneyOverviewRow = { account: string; balance_cents: number };
+export type MoneyMonthSnapshot = { account: string; balance_cents: number };
 
 export function buildMoneyMonths(
   periodStart: string,
   periodEnd: string,
   overview: MoneyOverviewRow[],
   activityByAccount: Record<string, MoneyActivityRow[]>,
+  snapshots?: { start?: MoneyMonthSnapshot[]; end?: MoneyMonthSnapshot[] },
 ): StoreMoneyMonth[] {
   const stores: StoreMoneyMonth[] = [];
   for (const acct of ACTIVE_ACCOUNTS) {
@@ -49,16 +52,21 @@ export function buildMoneyMonths(
     const moneyIn = rows.filter((r) => r.direction === 'in').reduce((n, r) => n + r.amount_cents, 0);
     const paidOut = rows.filter((r) => isBankPayout(r)).reduce((n, r) => n + r.amount_cents, 0);
     const ov = overview.find((o) => o.account === acct);
-    const endBal = ov?.balance_cents ?? null;
-    const startBal = endBal == null ? null : endBal - moneyIn + paidOut;
+    const snapEnd = snapshots?.end?.find((s) => s.account === acct);
+    const snapStart = snapshots?.start?.find((s) => s.account === acct);
+    const endBal = snapEnd?.balance_cents ?? ov?.balance_cents ?? null;
+    const startFromSnap = snapStart?.balance_cents ?? null;
+    const startBal = startFromSnap ?? (endBal == null ? null : endBal - moneyIn + paidOut);
     const transfers = rows.filter((r) => isBankPayout(r) || r.direction === 'out');
     stores.push({
       account: acct,
       label: MONEY_NAMES[acct] || channelTitle(acct),
       start_balance_cents: startBal,
+      start_balance_estimated: startFromSnap == null && startBal != null,
       money_in_cents: moneyIn,
       paid_to_bank_cents: paidOut,
       end_balance_cents: endBal,
+      end_balance_estimated: snapEnd == null && endBal != null,
       transfers,
     });
   }
@@ -78,8 +86,9 @@ export function buildPayouts(
   report: Report,
   totals: BookTotals,
   ctx: BooksPayoutContext,
-  money: { overview: MoneyOverviewRow[]; activityByAccount: Record<string, MoneyActivityRow[]> },
+  money: { overview: MoneyOverviewRow[]; activityByAccount: Record<string, MoneyActivityRow[]>; snapshots?: { start?: MoneyMonthSnapshot[]; end?: MoneyMonthSnapshot[] } },
   overrides: Map<string, CommissionOverride>,
+  ledgerBalances?: PersonBalance[],
 ): PayoutsWorkbook {
   const period = report.period;
   const tickets = ticketsFromReportSales(report.sales || [], overrides);
@@ -123,10 +132,9 @@ export function buildPayouts(
     .reduce((n, p) => n + Number(p.amount_cents || 0), 0);
 
   const allTimeOwed = (empIds: string[]) => {
-    const earnedAll = (report.payout_balances || [])
-      .filter((b) => empIds.some((id) => canonicalPersonKey(String(b.person || ''), id) || String(b.id) === id))
-      .reduce((n, b) => n + Number(b.ending_balance_cents || 0), 0);
-    if (earnedAll) return earnedAll;
+    if (ledgerBalances?.length) {
+      return empIds.reduce((n, id) => n + (ledgerBalances.find((b) => b.user_id === id)?.commissionOwed || 0), 0);
+    }
     return Math.max(0, empIds.reduce((n, id) => {
       const row = (report.payout_balances || []).find((b) => String(b.id) === id);
       return n + Number(row?.ending_balance_cents || 0);
@@ -157,7 +165,7 @@ export function buildPayouts(
     },
   ];
 
-  const stores = buildMoneyMonths(period.period_start, period.period_end, money.overview, money.activityByAccount);
+  const stores = buildMoneyMonths(period.period_start, period.period_end, money.overview, money.activityByAccount, money.snapshots);
   const bankPaidTotal_cents = stores.reduce((n, s) => n + s.paid_to_bank_cents, 0);
 
   return {

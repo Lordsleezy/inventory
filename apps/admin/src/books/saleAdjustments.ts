@@ -93,6 +93,84 @@ export function applySaleFeeAdjustments(report: Report): Report {
   return { ...report, sales, books_attributed_fee_ids: [...attributedFeeIds] };
 }
 
+function saleIndexMaps(sales: Row[]) {
+  const byId = new Map<string, number>();
+  const byOrder = new Map<string, number>();
+  const bySku = new Map<string, number[]>();
+  sales.forEach((s, i) => {
+    byId.set(String(s.id), i);
+    for (const key of saleOrderKeys(s)) byOrder.set(key, i);
+    const sku = String(s.sku || '').trim();
+    if (sku) bySku.set(sku, [...(bySku.get(sku) || []), i]);
+  });
+  return { byId, byOrder, bySku };
+}
+
+function pickSaleIndex(
+  sales: Row[],
+  maps: ReturnType<typeof saleIndexMaps>,
+  opts: { saleId?: unknown; orderId?: unknown; sku?: unknown; channel?: string },
+): number | undefined {
+  if (opts.saleId != null && maps.byId.has(String(opts.saleId))) return maps.byId.get(String(opts.saleId));
+  const order = normOrder(opts.orderId);
+  if (order && maps.byOrder.has(order)) return maps.byOrder.get(order);
+  const sku = String(opts.sku || '').trim();
+  if (!sku) return undefined;
+  const hits = maps.bySku.get(sku) || [];
+  const ch = String(opts.channel || '').toLowerCase();
+  const filtered = ch ? hits.filter((i) => String(sales[i].channel || '').toLowerCase() === ch) : hits;
+  return filtered[0] ?? hits[0];
+}
+
+/** Attach out-of-pocket label costs to matching sales so profit and commission match other channels. */
+export function applySaleLabelCosts(report: Report): Report {
+  const sales = (report.sales || []).map((s) => ({ ...s }));
+  const maps = saleIndexMaps(sales);
+  const dedupExpenseIds = new Set<string>();
+  const dedupLabelIds = new Set<string>();
+
+  const addShip = (idx: number, cents: number) => {
+    if (cents <= 0) return;
+    sales[idx].ship_cost_cents = Number(sales[idx].ship_cost_cents || 0) + cents;
+    if (sales[idx].profit_cents != null) sales[idx].profit_cents = Number(sales[idx].profit_cents) - cents;
+  };
+
+  for (const l of report.labels || []) {
+    if (l.voided_at) continue;
+    const cents = Math.abs(Number(l.signed_amount_cents ?? l.cost_cents ?? 0));
+    if (!cents) continue;
+    const idx = pickSaleIndex(sales, maps, { orderId: l.order_id || l.transaction_id, sku: l.sku, channel: String(l.carrier || '') });
+    if (idx == null) continue;
+    const already = Number(sales[idx].ship_cost_cents || 0);
+    if (already >= cents) {
+      dedupLabelIds.add(String(l.id));
+      continue;
+    }
+    addShip(idx, cents - already);
+    dedupLabelIds.add(String(l.id));
+  }
+
+  for (const e of report.expenses || []) {
+    if (e.voided_at) continue;
+    const src = String(e.source || '').toLowerCase();
+    if (src !== 'label' && src !== 'manual_label') continue;
+    if (!e.needs_reimbursement) continue;
+    const cents = Number(e.amount_cents || 0);
+    if (!cents) continue;
+    const idx = pickSaleIndex(sales, maps, { saleId: e.sale_id, orderId: e.order_id, sku: e.sku, channel: String(e.channel || e.source || '') });
+    if (idx == null) continue;
+    if (Number(sales[idx].ship_cost_cents || 0) < cents) addShip(idx, cents - Number(sales[idx].ship_cost_cents || 0));
+    dedupExpenseIds.add(String(e.id));
+  }
+
+  return {
+    ...report,
+    sales,
+    books_label_dedup_expense_ids: [...dedupExpenseIds],
+    books_label_dedup_label_ids: [...dedupLabelIds],
+  };
+}
+
 export function promotedOnSales(report: Report): Set<string> {
   const ids = new Set<string>();
   for (const f of report.fees || []) {

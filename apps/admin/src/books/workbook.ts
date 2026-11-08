@@ -2,7 +2,9 @@ import { channelTitle } from './booksMath';
 import { buildExpenses, filterReceived } from './expenseBuild';
 import { loadCommissionOverrides } from './loadPayoutContext';
 import { buildPayouts } from './payoutsBuild';
+import { verifyBooksIntegrity, ledgerOwedFromBalances } from './booksProof';
 import { computeBooksFromReport } from './payoutTotals';
+import type { PersonBalance } from './payoutLedger';
 import { saleWhyText } from './saleNotes';
 import type {
   BooksPayoutContext,
@@ -22,9 +24,12 @@ export type WorkbookInput = {
   received: ReceivedItem[];
   payoutCtx: BooksPayoutContext;
   overrides: Map<string, CommissionOverride>;
-  money: { overview: MoneyOverviewRow[]; activityByAccount: Record<string, MoneyActivityRow[]> };
+  money: { overview: MoneyOverviewRow[]; activityByAccount: Record<string, MoneyActivityRow[]>; snapshots?: { start?: { account: string; balance_cents: number }[]; end?: { account: string; balance_cents: number }[] } };
   duplicateHidden: Set<string>;
   duplicateDecisions: Record<string, 'keep' | 'remove'>;
+  ledgerBalances?: PersonBalance[];
+  paulIds?: string[];
+  jacobIds?: string[];
 };
 
 export function visibleExpenseRows(rows: ExpenseDisplayLine[], duplicateHidden: Set<string>, decisions: Record<string, 'keep' | 'remove'>) {
@@ -38,7 +43,7 @@ export function visibleExpenseRows(rows: ExpenseDisplayLine[], duplicateHidden: 
 }
 
 export function buildBooksWorkbook(input: WorkbookInput): BooksWorkbook {
-  const { report, inventory, received, payoutCtx, overrides, money, duplicateHidden, duplicateDecisions } = input;
+  const { report, inventory, received, payoutCtx, overrides, money, duplicateHidden, duplicateDecisions, ledgerBalances, paulIds, jacobIds } = input;
   const attributed = new Set(report.books_attributed_fee_ids || []);
   let built = buildExpenses(report, attributed);
 
@@ -62,7 +67,7 @@ export function buildBooksWorkbook(input: WorkbookInput): BooksWorkbook {
   }));
 
   const totals = computed.totals;
-  const payouts = buildPayouts(report, totals, payoutCtx, money, overrides);
+  const payouts = buildPayouts(report, totals, payoutCtx, money, overrides, ledgerBalances);
 
   const ch = new Map<string, { revenue_cents: number; profit_cents: number; count: number }>();
   for (const s of salesLines) {
@@ -75,7 +80,10 @@ export function buildBooksWorkbook(input: WorkbookInput): BooksWorkbook {
   }
   const channelTotals = [...ch.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([channel, v]) => ({ channel, ...v }));
 
-  return {
+  const ledgerOwed = ledgerBalances && paulIds && jacobIds
+    ? ledgerOwedFromBalances(ledgerBalances, paulIds, jacobIds)
+    : undefined;
+  const shell: BooksWorkbook = {
     expenses: built,
     sales: { rows: salesLines, channelTotals, totals },
     payouts,
@@ -84,9 +92,37 @@ export function buildBooksWorkbook(input: WorkbookInput): BooksWorkbook {
     proof: computed.proof,
     audit: computed.audit,
   };
+  const integrity = verifyBooksIntegrity(shell, report, ledgerOwed);
+
+  return {
+    expenses: built,
+    sales: { rows: salesLines, channelTotals, totals },
+    payouts,
+    inventory,
+    received: filterReceived(received) as ReceivedItem[],
+    proof: computed.proof,
+    audit: computed.audit,
+    integrity,
+  };
 }
 
-export async function loadBooksMoney(client: import('@supabase/supabase-js').SupabaseClient) {
+function priorMonthStart(periodStart: string) {
+  const d = new Date(`${periodStart}T12:00:00Z`);
+  d.setUTCMonth(d.getUTCMonth() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
+export async function loadBooksMoneySnapshots(client: import('@supabase/supabase-js').SupabaseClient, periodStart: string) {
+  const start = priorMonthStart(periodStart);
+  const [a, b] = await Promise.all([
+    client.rpc('portal_books_money_snapshots', { p_period_start: start }),
+    client.rpc('portal_books_money_snapshots', { p_period_start: periodStart }),
+  ]);
+  const asRows = (res: typeof a) => ((res.data || []) as { account: string; balance_cents: number }[]);
+  return { start: a.error ? undefined : asRows(a), end: b.error ? undefined : asRows(b) };
+}
+
+export async function loadBooksMoney(client: import('@supabase/supabase-js').SupabaseClient, periodStart?: string) {
   const overviewRes = await client.rpc('portal_money_overview');
   if (overviewRes.error) throw overviewRes.error;
   const overview = ((overviewRes.data || []) as MoneyOverviewRow[]);
@@ -97,7 +133,8 @@ export async function loadBooksMoney(client: import('@supabase/supabase-js').Sup
     if (error) return;
     activityByAccount[acct] = ((data as { rows: MoneyActivityRow[] })?.rows || []);
   }));
-  return { overview, activityByAccount };
+  const snapshots = periodStart ? await loadBooksMoneySnapshots(client, periodStart).catch(() => undefined) : undefined;
+  return { overview, activityByAccount, snapshots };
 }
 
 export function groupExpensesByCategory(rows: ExpenseDisplayLine[]) {

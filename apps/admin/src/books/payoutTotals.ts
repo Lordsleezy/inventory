@@ -17,10 +17,7 @@ import {
 import type { BookTotals, BooksPayoutContext, FrozenMap, Report, Row, SalesLine } from './types';
 
 const channelFees = (t: MonthTicket) => Math.max(0, t.feeCents ?? 0);
-const shipCosts = (t: MonthTicket) => {
-  if ((t.channel || '').toLowerCase() === 'mercari') return 0;
-  return Math.max(0, t.shipCostCents ?? 0);
-};
+const shipCosts = (t: MonthTicket) => Math.max(0, t.shipCostCents ?? 0);
 const processing = (t: MonthTicket) => Math.max(0, t.processingFeeCents ?? 0);
 const buyerShipping = (t: MonthTicket) => Math.max(0, t.shippingCents ?? 0);
 
@@ -130,7 +127,7 @@ export function buildSalesLinesFromPayout(
     const mp = online
       ? Math.max(0, Number(row.channel_fee_cents || 0))
       : 0;
-    const label = (ch || '').toLowerCase() === 'mercari' ? 0 : Math.max(0, Number(row.ship_cost_cents || 0));
+    const label = Math.max(0, Number(row.ship_cost_cents || 0));
     const proc = Math.max(0, Number(row.processing_fee_cents || 0));
     let comm: number | null = null;
     if (ticket && !commPaid.has(key)) {
@@ -182,7 +179,7 @@ export function computeBooksFromReport(
 export const PAYOUT_COST_RULES_DOC = [
   { item: 'Marketplace fees', where: 'Online sales only', commission: 'Subtracted from commission base unless store absorbs fees', owner: 'Subtracted from store profit' },
   { item: 'Shipping labels', where: 'Online (not Mercari seller-paid)', commission: 'Subtracted from commission base', owner: 'Subtracted from store profit' },
-  { item: 'Mercari labels', where: 'Reimbursement', commission: 'Not on sale profit', owner: 'Reimbursed separately' },
+  { item: 'Out-of-pocket labels (incl. Mercari)', where: 'On sale ship cost when tied to order', commission: 'Reduces commission base like other labels', owner: 'On store profit; reimburse on Expenses only (not Other expenses)' },
   { item: 'Buyer-paid shipping', where: 'Revenue', commission: 'Added to commission base', owner: 'Added to store profit' },
   { item: 'Promoted listing fees', where: 'On sale row channel fees', commission: 'Same as marketplace fees', owner: 'Same as marketplace fees' },
   { item: 'Underpaid postage', where: 'Added to sale label cost', commission: 'Reduces commission base', owner: 'Reduces store profit' },

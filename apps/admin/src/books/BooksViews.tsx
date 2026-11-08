@@ -47,6 +47,10 @@ export type ViewProps = {
   desktopTab: Sheet;
   setDesktopTab: (s: Sheet) => void;
   onDuplicateDecision?: (lineId: string, decision: 'keep' | 'remove') => void;
+  absorbFees?: boolean;
+  onlineChannels?: string[];
+  lockedStaleMath?: boolean;
+  lockedMonths?: string[];
 };
 
 export function BooksViews(props: ViewProps) {
@@ -75,7 +79,8 @@ function BooksNative(p: ViewProps) {
         <span>{periodPickerLabel(p.period)}</span>
         <i className="native-chevron books-month-chevron" aria-hidden>›</i>
       </button>
-      <SummaryCard money={p.money} totals={p.totals} native />
+      <SummaryCard money={p.money} totals={p.totals} native absorbFees={p.absorbFees} onlineChannels={p.onlineChannels} />
+      <BooksProofBar money={p.money} workbook={p.workbook} />
       <p className="native-report-section">REPORTS</p>
       <div className="native-report-group">
         {REPORT_ROWS.map((r) => (
@@ -90,7 +95,7 @@ function BooksNative(p: ViewProps) {
         <button type="button" className="books-native-export" disabled={!p.exportFiles || p.exportsPreparing} onClick={p.onExcel}>Download Excel</button>
         <button type="button" className="books-native-export" disabled={!p.exportFiles || p.exportsPreparing} onClick={p.onPdf}>Print / PDF</button>
       </div>
-      <BooksLock native client={p.client} money={p.money} period={p.period} report={p.report} inventory={p.inventory} received={p.received} workbook={p.workbook} uiStatus={ui} busy={p.busy} setBusy={p.setBusy} onError={p.onError} onReload={p.onReload} />
+      <BooksLock native client={p.client} money={p.money} period={p.period} report={p.report} inventory={p.inventory} received={p.received} workbook={p.workbook} uiStatus={ui} busy={p.busy} setBusy={p.setBusy} onError={p.onError} onReload={p.onReload} lockedStaleMath={p.lockedStaleMath} />
       {p.pickerOpen && <MonthPickerSheet {...p} />}
     </div>
   );
@@ -115,7 +120,8 @@ function BooksDesktop(p: ViewProps) {
           <button type="button" className="books-download secondary" disabled={!p.workbook} onClick={p.onPrint}>Print</button>
         </div>
       </div>
-      <SummaryCard money={p.money} totals={p.totals} />
+      <SummaryCard money={p.money} totals={p.totals} absorbFees={p.absorbFees} onlineChannels={p.onlineChannels} />
+      <BooksProofBar money={p.money} workbook={p.workbook} />
       <nav className="books-desktop-tabs" aria-label="Books reports">
         {REPORT_ROWS.map((t) => (
           <button key={t.id} type="button" className={tab === t.id ? 'active' : ''} onClick={() => p.setDesktopTab(t.id)}>{t.title}</button>
@@ -128,7 +134,7 @@ function BooksDesktop(p: ViewProps) {
         {tab === 'inventory' && <InventoryBody money={p.money} inventory={p.inventory} />}
         {tab === 'received' && <ReceivedBody money={p.money} items={p.workbook.received} />}
       </div>
-      <BooksLock client={p.client} money={p.money} period={p.period} report={p.report} inventory={p.inventory} received={p.received} workbook={p.workbook} uiStatus={ui} busy={p.busy} setBusy={p.setBusy} onError={p.onError} onReload={p.onReload} />
+      <BooksLock client={p.client} money={p.money} period={p.period} report={p.report} inventory={p.inventory} received={p.received} workbook={p.workbook} uiStatus={ui} busy={p.busy} setBusy={p.setBusy} onError={p.onError} onReload={p.onReload} lockedStaleMath={p.lockedStaleMath} />
       <div className="books-print-sheets" aria-hidden>
         <section><h2>Sales</h2><SalesTable money={p.money} workbook={p.workbook} totals={p.totals} /></section>
         <section><h2>Expenses</h2><ExpensesTable money={p.money} workbook={p.workbook} /></section>
@@ -145,7 +151,48 @@ function Block({ className, children }: { className?: string; children: ReactNod
   return <div className={className}>{children}</div>;
 }
 
-function SummaryCard({ money, totals, native }: { money: (c: number) => string; totals: BookTotals; native?: boolean }) {
+function feePolicyLine(absorbFees?: boolean, channels?: string[]) {
+  const ch = (channels?.length ? channels : ['website', 'ebay', 'depop', 'mercari', 'amazon', 'tiktok']).join(', ');
+  const owner = 'Store profit: marketplace fees on online sales are paid by the owner (in-store has none).';
+  const comm = absorbFees !== false
+    ? 'Commissions: store absorbs marketplace + card fees (they stay off the commission base).'
+    : 'Commissions: marketplace + card fees reduce the commission base.';
+  return `${owner} ${comm} Online: ${ch}.`;
+}
+
+function BooksProofBar({ money, workbook }: { money: (c: number) => string; workbook: BooksWorkbook }) {
+  const [open, setOpen] = useState(false);
+  const integrity = workbook.integrity;
+  const auditOnly = integrity && !integrity.ok && integrity.commissionGap_cents === 0 && integrity.ownerGap_cents === 0;
+  const gap = integrity ? Math.max(Math.abs(integrity.commissionGap_cents), Math.abs(integrity.ownerGap_cents)) : 0;
+  const owedGap = integrity?.issues.find((i) => i.kind === 'owed_paul' || i.kind === 'owed_jacob');
+  if (!integrity) return null;
+  const status = integrity.ok
+    ? '✓ Ties to per-sale payouts'
+    : auditOnly
+      ? '⚠ In-store sale with marketplace fees'
+      : `✗ Off by ${money(gap || Math.abs(owedGap?.cents || 0))}`;
+  return (
+    <div className="books-proof-bar">
+      <button type="button" className={`books-proof-status${integrity.ok ? ' ok' : ' warn'}`} onClick={() => setOpen(!open)}>
+        {status}
+      </button>
+      {workbook.audit.length > 0 && integrity.ok && (
+        <p className="books-proof-audit">⚠ In-store sale with marketplace fees — tap for detail</p>
+      )}
+      {open && (
+        <div className="books-proof-detail">
+          {integrity.issues.map((i, idx) => (
+            <p key={`${i.kind}-${idx}`}>{i.message}</p>
+          ))}
+          {integrity.issues.length === 0 && <p>All ticket totals match the hub and Payouts tab balances.</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SummaryCard({ money, totals, native, absorbFees, onlineChannels }: { money: (c: number) => string; totals: BookTotals; native?: boolean; absorbFees?: boolean; onlineChannels?: string[] }) {
   const lines = [
     { label: 'Sales', value: money(totals.revenue), className: '' },
     { label: '− Fees + labels', value: money(totals.feesAndLabels), className: 'warning-text' },
@@ -168,6 +215,7 @@ function SummaryCard({ money, totals, native }: { money: (c: number) => string; 
           </div>
         ))}
       </div>
+      <p className="books-fee-policy">{feePolicyLine(absorbFees, onlineChannels)}</p>
     </div>
   );
 }
@@ -394,10 +442,10 @@ function PayoutsBody({ money, workbook, native }: { money: (c: number) => string
                 <span>
                   <strong>{s.label}</strong>
                   <small>
-                    Start {s.start_balance_cents == null ? '—' : money(s.start_balance_cents)}
+                    Start {s.start_balance_cents == null ? '—' : money(s.start_balance_cents)}{s.start_balance_estimated ? ' (est.)' : ''}
                     {' · In '}{money(s.money_in_cents)}
                     {' · To bank '}{money(s.paid_to_bank_cents)}
-                    {' · End '}{s.end_balance_cents == null ? '—' : money(s.end_balance_cents)}
+                    {' · End '}{s.end_balance_cents == null ? '—' : money(s.end_balance_cents)}{s.end_balance_estimated ? ' (est.)' : ''}
                   </small>
                 </span>
                 <i className="native-chevron">{openStore === s.account ? '⌄' : '›'}</i>
