@@ -7,7 +7,6 @@ import { ReturnsPage } from './ReturnsPage';
 import { ReceiptsPage } from './ReceiptsPage';
 import { RegisterPage } from './RegisterPage';
 import { MoneyPage } from './MoneyPage';
-import { BuildStamp } from './BuildStamp';
 import { BooksPage } from './BooksPage';
 import './books.css';
 import { ManifestsPage } from './ManifestsPage';
@@ -28,7 +27,11 @@ import { ProfitSplit } from './ProfitSplit';
 import { NativePayouts } from './NativePayouts';
 import { SettingsPage } from './SettingsPage';
 import { AssociateSettings } from './AssociateSettings';
-import { type MainPage, type NavState, defaultNavState, parseNavFromLocation, writeNavToLocation } from './navigation';
+import { type MainPage, type NavState, defaultNavState, desktopLanding, parseNavFromLocation, writeNavToLocation } from './navigation';
+import { HomePage } from './HomePage';
+import { DeskSidebar } from './DeskSidebar';
+import { emptyPulse, loadDeskPulse } from './deskPulse';
+import { firstName } from './homeGreeting';
 
 /** Desktop sidebar only — channel tools, connections, and store ops not on the phone More tab. */
 const DESKTOP_OTHER_PAGES: MainPage[] = ['ebay', 'depop', 'amazon', 'tiktok', 'marketplaces', 'manifests', 'insights', 'dropship', 'locations', 'logs'];
@@ -45,7 +48,7 @@ import { CommissionMath } from './CommissionMath';
 import { setReplacementRows, useReplacementsForSale } from './replacementsStore';
 
 /** Store associates (Jacob / clock staff): Inventory, Register, Settings only. */
-const ASSOCIATE_PAGES: MainPage[] = ['register', 'inventory', 'orders', 'settings'];
+const ASSOCIATE_PAGES: MainPage[] = ['home', 'register', 'inventory', 'orders', 'locations', 'settings'];
 
 const sb = floorCloud();
 const zone = 'America/Los_Angeles';
@@ -338,7 +341,8 @@ export function App() {
   const [fullAccess, setFullAccess] = useState(false);
   const [staffSession, setStaffSession] = useState<StaffSession | null>(null);
   const [accessReady, setAccessReady] = useState(false);
-  const [nav, setNav] = useState<NavState>(() => parseNavFromLocation());
+  const [nav, setNav] = useState<NavState>(() => desktopLanding(parseNavFromLocation()));
+  const [pulse, setPulse] = useState(emptyPulse());
   const page = nav.page;
   const go = (patch: Partial<NavState>) => setNav(n => ({ ...n, ...patch }));
   const [selectedDay, setSelectedDay] = useState(today());
@@ -372,7 +376,6 @@ export function App() {
   const [navHoverOpen, setNavHoverOpen] = useState(false);
   /** Keeps hover-peek rail open after clicking a nav group (collapsed desktop). */
   const [navPeekSticky, setNavPeekSticky] = useState(false);
-  const darkMode = true;
   const [navGroup, setNavGroup] = useState<'reports' | 'inventory' | 'other' | null>(null);
   const [showInstallGate, setShowInstallGate] = useState(() => shouldShowInstallGate());
   // Re-check on mount so store-phone Chrome / kiosk / persisted app mode win over the install coach.
@@ -385,7 +388,8 @@ export function App() {
   }, [navCollapsed]);
   useEffect(() => {
     document.documentElement.classList.add('dark');
-    return () => { document.documentElement.classList.remove('dark'); };
+    if (!isStandaloneApp()) document.documentElement.classList.add('desk');
+    return () => { document.documentElement.classList.remove('dark', 'desk'); };
   }, []);
 
   useEffect(() => {
@@ -412,7 +416,15 @@ export function App() {
   }, []);
   useEffect(() => { writeNavToLocation(nav); }, [nav]);
   useEffect(() => {
-    const onPop = () => setNav(parseNavFromLocation());
+    if (!session?.access_token || !fullAccess) return;
+    let alive = true;
+    const dayKey = today();
+    const span = range(dayKey, dayKey);
+    void loadDeskPulse(sb, session.access_token, span.p_from, span.p_to).then((next) => { if (alive) setPulse(next); });
+    return () => { alive = false; };
+  }, [session?.access_token, fullAccess]);
+  useEffect(() => {
+    const onPop = () => setNav(desktopLanding(parseNavFromLocation()));
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
   }, []);
@@ -449,16 +461,6 @@ export function App() {
     return () => mq.removeEventListener?.('change', sync);
   }, []);
   const closeMenu = () => setMenuOpen(false);
-  const desktopExpandedNav = () => {
-    try { return window.matchMedia('(min-width: 901px)').matches; } catch { return true; }
-  };
-  const openCollapsedNavGroup = (group: 'reports' | 'inventory' | 'other') => {
-    setNavGroup(group);
-    if (navCollapsed && desktopExpandedNav()) {
-      setNavHoverOpen(true);
-      setNavPeekSticky(true);
-    }
-  };
   const goNav = (patch: Partial<NavState>) => {
     go(patch);
     setEditing(null);
@@ -475,12 +477,6 @@ export function App() {
         setNavHoverOpen(false);
       }
     }
-  };
-  const pinNavManual = () => {
-    setNavHoverPeek(false);
-    setNavHoverOpen(false);
-    setNavPeekSticky(false);
-    setNavCollapsed(c => !c);
   };
   const userId = session?.user.id;
   useEffect(() => {
@@ -771,18 +767,8 @@ export function App() {
     </>;
   }
 
-  const mainNav: [MainPage, string][] = registerOnly
-    ? [['register', 'Register'], ['inventory', 'Inventory'], ['settings', 'Settings']]
-    : [
-        ['register', 'Register'],
-        ['sales', 'Live Sales'],
-        ['orders', 'Orders'],
-        ['returns', 'Returns'],
-        ['receipts', 'Receipts'],
-        ['books', 'Books'],
-        ['cameras', 'Cameras'],
-      ];
   const pageLabel = ({
+    home: 'Home',
     register: 'Register',
     sales: 'Live Sales',
     orders: 'Orders',
@@ -808,21 +794,7 @@ export function App() {
     logs: 'Logs',
     settings: 'Settings',
   } as const)[page];
-  const reportSubs: [typeof nav.reportTab, string][] = [['profit', 'Profit'], ['shipping', 'Fees'], ['expenses', 'Expenses'], ['payouts', 'Payouts'], ['returns', 'Returns'], ['sales-tax', 'Sales tax'], ['sold', 'Sold']];
-  const inventorySubs: [typeof nav.inventoryTab, string][] = [['in-stock', 'In stock'], ['sold', 'Sold'], ['needs-check', 'Needs to be checked'], ['left-store', 'Replaced / given away'], ['receive', 'Receive'], ['lookup-test', 'Lookup test'], ['products', 'Products'], ['measure-mat', 'Measure mat']];
-  const otherSubs: [MainPage, string][] = [
-    ['ebay', 'eBay'],
-    ['depop', 'Depop'],
-    ['amazon', 'Amazon'],
-    ['tiktok', 'TikTok'],
-    ['marketplaces', 'Connections'],
-    ['manifests', 'Manifests'],
-    ['insights', 'Insights'],
-    ['dropship', 'Dropship'],
-    ['locations', 'Locations'],
-    ['logs', 'Logs'],
-  ];
-  return <div className={`app${menuOpen ? ' menu-open' : ''}${navCollapsed ? ' nav-collapsed' : ''}${navCollapsed && navHoverPeek && navHoverOpen ? ' nav-peek-open' : ''}${page === 'register' ? ' register-mode' : ''}${darkMode ? ' dark' : ''}`}><ClientErrorReporter token={session.access_token} />
+  return <div className={`app${menuOpen ? ' menu-open' : ''}${page === 'register' ? ' register-mode' : ''} dark`}><ClientErrorReporter token={session.access_token} />
   <header className="mobile-top">
     <button type="button" className="hamburger" aria-label={menuOpen ? 'Close menu' : 'Open menu'} aria-expanded={menuOpen} aria-controls="admin-nav" onClick={() => setMenuOpen(o => !o)}>
       <span /><span /><span />
@@ -831,83 +803,19 @@ export function App() {
     <strong className="mobile-page">{pageLabel}</strong>
   </header>
   <button type="button" className="mobile-scrim" aria-label="Close menu" tabIndex={menuOpen ? 0 : -1} onClick={closeMenu} />
-  <aside
-    id="admin-nav"
-    onMouseEnter={() => { if (navCollapsed && navHoverPeek) setNavHoverOpen(true); }}
-    onMouseLeave={() => { if (navHoverPeek && !navPeekSticky) setNavHoverOpen(false); }}
-  >
-    <div className="aside-brand">
-      <div className="brand">OPEN BOX <span>INDUSTRIES</span></div>
-      <div className="product">Floor <b>Admin</b></div>
-      <button
-        type="button"
-        className="nav-collapse-btn"
-        aria-label={navCollapsed ? 'Expand menu' : 'Collapse menu'}
-        title={navHoverPeek
-          ? (navCollapsed ? 'Pin menu open (turns off hover)' : 'Pin menu closed (turns off hover)')
-          : (navCollapsed ? 'Expand menu' : 'Collapse menu')}
-        onClick={pinNavManual}
-      >
-        {navCollapsed ? '»' : '«'}
-      </button>
-    </div>
-    <nav>
-      {registerOnly
-        ? <>
-      <button type="button" className={page === 'register' ? 'active' : ''} key="register" title="Register" onClick={() => goNav({ page: 'register' })}>Register</button>
-      <button type="button" className={page === 'inventory' ? 'active' : ''} title="Inventory" onClick={() => goNav({ page: 'inventory', inventoryTab: 'in-stock' })}>Inventory</button>
-      <button type="button" title="Locations" className={page === 'locations' ? 'active' : ''} onClick={() => goNav({ page: 'locations' })}>Locations</button>
-      <button type="button" title="Settings" className={page === 'settings' ? 'active' : ''} onClick={() => goNav({ page: 'settings' })}>Settings</button>
-        </>
-        : <>
-      {mainNav.slice(0, 5).map(([id, label]) => <button type="button" className={page === id ? 'active' : ''} key={id} title={label} onClick={() => goNav({ page: id })}>{label}</button>)}
-      <div className={`nav-group${navGroup === 'inventory' ? ' open' : ''}${page === 'inventory' ? ' on' : ''}`}>
-        <button type="button" title="Inventory" className={`nav-parent${page === 'inventory' ? ' active' : ''}`} onClick={() => { setNavGroup(g => g === 'inventory' ? null : 'inventory'); go({ page: 'inventory' }); setEditing(null); }}>Inventory</button>
-        <div className="nav-sub">
-          {inventorySubs.map(([tab, label]) => <button type="button" key={tab} className={page === 'inventory' && nav.inventoryTab === tab ? 'active' : ''} onClick={() => goNav({ page: 'inventory', inventoryTab: tab, ...(tab === 'unfinished' ? { attentionSection: 'all' as const } : {}) })}>{label}</button>)}
-        </div>
-      </div>
-      <div className={`nav-group${navGroup === 'reports' ? ' open' : ''}${page === 'reports' ? ' on' : ''}`}>
-        <button type="button" title="Reports" className={`nav-parent${page === 'reports' ? ' active' : ''}`} onClick={() => { setNavGroup(g => g === 'reports' ? null : 'reports'); go({ page: 'reports' }); setEditing(null); }}>Reports</button>
-        <div className="nav-sub">
-          {reportSubs.map(([tab, label]) => <button type="button" key={tab} className={page === 'reports' && nav.reportTab === tab ? 'active' : ''} onClick={() => goNav({ page: 'reports', reportTab: tab })}>{label}</button>)}
-        </div>
-      </div>
-      <button type="button" title="Safe" className={page === 'withdrawals' ? 'active' : ''} onClick={() => goNav({ page: 'withdrawals' })}>Safe</button>
-      <button type="button" title="Books" className={page === 'books' ? 'active' : ''} onClick={() => goNav({ page: 'books' })}>Books</button>
-      {mainNav.filter(([id]) => id === 'cameras').map(([id, label]) => <button type="button" className={page === id ? 'active' : ''} key={id} title={label} onClick={() => goNav({ page: id })}>{label}</button>)}
-      <div className={`nav-group${navGroup === 'other' ? ' open' : ''}${DESKTOP_OTHER_PAGES.includes(page) ? ' on' : ''}`}>
-        <button
-          type="button"
-          title="Other"
-          className={`nav-parent${DESKTOP_OTHER_PAGES.includes(page) ? ' active' : ''}`}
-          onClick={() => {
-            if (navGroup === 'other') {
-              setNavGroup(null);
-              setNavPeekSticky(false);
-              if (navCollapsed && navHoverPeek) setNavHoverOpen(false);
-            } else openCollapsedNavGroup('other');
-            setEditing(null);
-          }}
-        >
-          Other
-        </button>
-        <div className="nav-sub">
-          {otherSubs.map(([id, label]) => (
-            <button type="button" key={id} className={page === id ? 'active' : ''} onClick={() => goNav({ page: id })}>{label}</button>
-          ))}
-        </div>
-      </div>
-      <button type="button" title="Settings" className={page === 'settings' ? 'active' : ''} onClick={() => goNav({ page: 'settings' })}>Settings</button>
-        </>}
-    </nav>
-    <div className="account">
-      <small>{staffSession?.displayName || session.user.email}</small>
-      <button type="button" onClick={() => { closeMenu(); void sb.auth.signOut({ scope: 'local' }); }}>Sign out</button>
-      <BuildStamp />
-    </div>
+  <aside id="admin-nav">
+    <DeskSidebar
+      page={page}
+      fullAccess={fullAccess}
+      pulse={pulse}
+      name={firstName(staffSession?.displayName, session.user.email)}
+      role={fullAccess ? 'Admin' : 'Staff'}
+      onOpen={(next) => goNav({ page: next })}
+      onSignOut={() => { closeMenu(); void sb.auth.signOut({ scope: 'local' }); }}
+    />
   </aside>
   <main className="content">{error && <div className="alert" role="alert">{error}<button onClick={() => setError('')}>Dismiss</button></div>}
+  {page === 'home' && <HomePage displayName={staffSession?.displayName || null} email={session.user.email || null} fullAccess={fullAccess} pulse={pulse} onOpen={goNav} />}
   {page === 'register' && (staffSession
     ? <RegisterPage staffSession={staffSession} onNeedFullReload={() => { void loadSales(); }} />
     : <section className="panel"><Empty>This login can view Floor Admin but is not on the Floor staff list, so it cannot ring sales. Ask an owner to add a staff row for this account.</Empty></section>)}
@@ -966,21 +874,30 @@ export function App() {
     return <><header><div><div className="eyebrow">REGISTER ACTIVITY</div><h1>Live Sales</h1><p>Click a sale for profit, fees, cost, and shipping. Online totals use the same ledger math as Reports.{unmatchedN > 0 ? ` ${unmatchedN} marketplace sale${unmatchedN === 1 ? '' : 's'} still need a Floor SKU link.` : ''}</p></div>
       {salesFilters}
     </header>
-    <div className="stats">
-      <Stat name="Sales $" hint="item + tax" value={money(salesDollars)} />
-      <Stat name="Sales" value={String(liveShown.length)} />
-      <Stat name="Profit" value={profitTotal === null ? 'Pending cost' : money(profitTotal)} />
-      <Stat name="Marketplace fees" value={money(marketplaceFees)} />
-      <Stat name="Card fees" value={money(cardFees)} />
-      <Stat name="Tax collected" value={money(taxCollected)} />
-      <Stat name="Shipping" value={formatLabelWithPending(money, shippingCost, pendingLabelCredit)} />
-      {buyerShip > 0 && <Stat name="Buyer shipping" hint="buyer pays" value={money(buyerShip)} />}
-      <Stat name="Item cost" value={itemCost === null ? 'Pending' : money(itemCost)} />
-      {salesScope !== 'online' && <Stat name="Cash sales" value={money(liveSum.cash_cents)} />}
-      {salesScope !== 'online' && <Stat name="Card sales" value={money(liveSum.card_cents)} />}
-      <Stat name="Online sales" value={String(onlineN)} />
-      <Stat name="Instore sales" value={String(instoreN)} />
-      {unmatchedN > 0 && <Stat name="Need SKU" value={String(unmatchedN)} />}
+    <div className="desk-headline">
+      <div><span>Sales</span><strong>{money(salesDollars)}</strong></div>
+      <div><span>Orders</span><strong>{liveShown.length}</strong></div>
+      <div><span>Profit</span><strong>{profitTotal === null ? 'Pending cost' : money(profitTotal)}</strong></div>
+      <div><span>Item cost</span><strong>{itemCost === null ? 'Pending' : money(itemCost)}</strong></div>
+    </div>
+    <div className="desk-groups">
+      <section><h2>Costs</h2><ul>
+        <li><span>Marketplace fees</span><b>{money(marketplaceFees)}</b></li>
+        <li><span>Card fees</span><b>{money(cardFees)}</b></li>
+        <li><span>Tax collected</span><b>{money(taxCollected)}</b></li>
+        <li><span>Shipping</span><b>{formatLabelWithPending(money, shippingCost, pendingLabelCredit)}</b></li>
+        {buyerShip > 0 && <li><span>Buyer shipping</span><b>{money(buyerShip)}</b></li>}
+      </ul></section>
+      <section><h2>Payment</h2><ul>
+        {salesScope !== 'online' && <li><span>Cash</span><b>{money(liveSum.cash_cents)}</b></li>}
+        {salesScope !== 'online' && <li><span>Card</span><b>{money(liveSum.card_cents)}</b></li>}
+        {salesScope === 'online' && <li><span>Online collected</span><b>{money(salesDollars)}</b></li>}
+      </ul></section>
+      <section><h2>Channel</h2><ul>
+        <li><span>Online</span><b>{onlineN}</b></li>
+        <li><span>In store</span><b>{instoreN}</b></li>
+        {unmatchedN > 0 && <li><span>Need SKU</span><b>{unmatchedN}</b></li>}
+      </ul></section>
     </div>
     <section className="panel"><h2>{selectedDay === today() ? 'Today’s transactions' : `Transactions · ${selectedDay}`}{salesScope !== 'all' && <small> · {salesScope === 'instore' ? 'in store' : 'online'}</small>}</h2>
       {liveShown.length === 0 ? <Empty>No {salesScope === 'all' ? '' : salesScope === 'instore' ? 'in-store ' : 'online '}sales for {selectedDay === today() ? 'today' : selectedDay}. Use the date control above to check another day.</Empty> : <div className="ticket-list">{liveShown.map(t => <LiveTicket key={t.key} t={t} money={money} stamp={stamp} rules={activeRules} cfg={onlineCfg} frozen={frozen} personName={personName} busy={busy} onCommissionChanged={setTicketOverride} onMatchSku={t.needsMatch ? () => void matchLiveSku(t) : undefined} />)}</div>}
@@ -1016,7 +933,7 @@ export function App() {
   )}
   {fullAccess && page === 'settings' && <SettingsPage accessToken={session.access_token} busy={busy} run={run} staff={staff} rules={rules} saveRule={setRule} reloadPeople={loadCommon} />}
   {registerOnly && page === 'settings' && <AssociateSettings client={sb} displayName={staffSession?.displayName || 'Associate'} />}
-  {fullAccess && page === 'cameras' && <><header><div><div className="eyebrow">FUTURE INTEGRATION</div><h1>Cameras</h1></div></header><section className="panel"><Empty>Camera feeds coming soon</Empty></section></>}
+  {fullAccess && page === 'cameras' && <><header><div><h1>Cameras</h1><p>Store camera feeds.</p></div></header><section className="desk-empty"><h2>No cameras yet</h2><p>Feeds are not connected. Add camera will show up here when a feed is available.</p></section></>}
   </main></div>;
 }
 function Stat({ name, value, hint }: { name: string; value: string; hint?: string }) {

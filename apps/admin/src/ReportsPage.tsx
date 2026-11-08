@@ -35,7 +35,7 @@ export function ReportsPage({ client, money, tab, onTab, closeouts, expenses, pa
   }, [tab, native]);
   const tabs: { id: ReportTab; label: string }[] = native
     ? [{id:'profit',label:'Profit'},{id:'shipping',label:'Fees'},{id:'expenses',label:'Expenses'},{id:'payouts',label:'Payouts'},{id:'sales-tax',label:'Tax'},{id:'sold',label:'Sold'}]
-    : [{id:'profit',label:'Profit'},{id:'shipping',label:'Fees'},{id:'expenses',label:'Expenses'},{id:'payouts',label:'Payouts'},{id:'returns',label:'Returns'},{id:'replacements',label:'Replacements'},{id:'sales-tax',label:'Sales tax'},{id:'sold',label:'Sold'}];
+    : [{id:'profit',label:'Profit'},{id:'shipping',label:'Fees'},{id:'expenses',label:'Expenses'},{id:'payouts',label:'Payouts'},{id:'returns',label:'Returns'},{id:'replacements',label:'Replacements'},{id:'sales-tax',label:'Sales tax'}];
   return <>
     {!native && <header><div><div className="eyebrow">STORE LEDGER</div><h1>Reports</h1>
       <p>Profit, shipping and fees, expenses, payouts, and period closeouts.</p></div></header>}

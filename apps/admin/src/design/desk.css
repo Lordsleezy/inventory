@@ -1,0 +1,371 @@
+/* Desktop admin. Black, white, gray, red only for problems.
+   Phone app keeps app-mode styles; this file does not apply there. */
+
+html.desk:not(.app-mode) {
+  --bw-bg: #000;
+  --bw-ink: #fff;
+  --bw-muted: #a0a0a0;
+  --bw-line: #2a2a2a;
+  --bw-field: #4a4a4a;
+  --bw-danger: #ff453a;
+  --btn-bg: #fff;
+  --btn-bg-hover: #e8e8e8;
+  --btn-bg-active: #fff;
+  --btn-text: #fff;
+  --btn-border: #fff;
+  --btn-border-strong: #fff;
+  --focus: #fff;
+  color-scheme: dark;
+  background: #000;
+  color: #fff;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+html.desk:not(.app-mode) body,
+html.desk:not(.app-mode) .app {
+  background: #000;
+  color: #fff;
+  min-height: 100vh;
+}
+
+html.desk:not(.app-mode) .app {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  align-items: stretch;
+}
+
+html.desk:not(.app-mode) .app.nav-collapsed,
+html.desk:not(.app-mode) .app.nav-peek-open {
+  grid-template-columns: 240px minmax(0, 1fr);
+}
+
+html.desk:not(.app-mode) aside {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  width: 240px;
+  overflow: auto;
+  background: #000;
+  border-right: 1px solid #2a2a2a;
+  padding: 22px 14px 16px;
+  gap: 18px;
+  z-index: 5;
+}
+
+html.desk:not(.app-mode) .brand,
+html.desk:not(.app-mode) .brand span,
+html.desk:not(.app-mode) .product,
+html.desk:not(.app-mode) .product b {
+  color: #fff;
+}
+
+html.desk:not(.app-mode) .product { font-size: 1.15rem; padding: 0; }
+html.desk:not(.app-mode) .nav-collapse-btn { display: none; }
+
+html.desk:not(.app-mode) aside nav { display: grid; gap: 16px; align-content: start; }
+html.desk:not(.app-mode) .desk-nav-group { display: grid; gap: 2px; }
+html.desk:not(.app-mode) .desk-nav-group p {
+  margin: 8px 10px 4px;
+  color: #a0a0a0;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+html.desk:not(.app-mode) aside nav > button,
+html.desk:not(.app-mode) .desk-nav-group button {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  color: #fff;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  padding: 8px 10px;
+  text-align: left;
+  white-space: nowrap;
+}
+html.desk:not(.app-mode) aside nav button.active,
+html.desk:not(.app-mode) .desk-nav-group button.active {
+  background: #fff;
+  color: #000;
+  box-shadow: none;
+  font-weight: 700;
+}
+html.desk:not(.app-mode) .desk-nav-group button small {
+  color: #a0a0a0;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+html.desk:not(.app-mode) .desk-nav-group button.active small { color: #000; }
+
+html.desk:not(.app-mode) .account strong { font-size: 0.95rem; }
+html.desk:not(.app-mode) .account small,
+html.desk:not(.app-mode) .floor-build-stamp {
+  color: #a0a0a0;
+  font-size: 13px;
+  text-align: left;
+  margin: 0;
+}
+html.desk:not(.app-mode) .content {
+  max-width: 1440px;
+  width: 100%;
+  padding: 32px 36px 64px;
+  margin: 0;
+}
+
+html.desk:not(.app-mode) h1 { color: #fff; letter-spacing: -0.03em; }
+html.desk:not(.app-mode) p,
+html.desk:not(.app-mode) .hint,
+html.desk:not(.app-mode) .eyebrow,
+html.desk:not(.app-mode) small { color: #a0a0a0; }
+
+html.desk:not(.app-mode) .panel,
+html.desk:not(.app-mode) .stat,
+html.desk:not(.app-mode) .ticket,
+html.desk:not(.app-mode) .withdrawal-card,
+html.desk:not(.app-mode) .money-card,
+html.desk:not(.app-mode) .connection-card {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+html.desk:not(.app-mode) .stats { gap: 0; }
+html.desk:not(.app-mode) .stat {
+  border-right: 1px solid #2a2a2a;
+  padding: 8px 18px 8px 0;
+}
+html.desk:not(.app-mode) .stat strong,
+html.desk:not(.app-mode) .tbl td.n,
+html.desk:not(.app-mode) .inventory-money,
+html.desk:not(.app-mode) .desk-num {
+  font-variant-numeric: tabular-nums;
+  color: #fff;
+}
+
+html.desk:not(.app-mode) button:not(nav button, .account button, .text-button, .desk-nav-group button, aside button) {
+  background: transparent;
+  color: #fff;
+  border: 1px solid #fff;
+  border-radius: 8px;
+  min-height: 36px;
+  font-weight: 600;
+}
+html.desk:not(.app-mode) button.primary {
+  background: #fff;
+  color: #000;
+  border-color: #fff;
+}
+html.desk:not(.app-mode) input,
+html.desk:not(.app-mode) select,
+html.desk:not(.app-mode) textarea {
+  background: #000;
+  color: #fff;
+  border: 1px solid #4a4a4a;
+}
+html.desk:not(.app-mode) input:focus,
+html.desk:not(.app-mode) select:focus,
+html.desk:not(.app-mode) textarea:focus,
+html.desk:not(.app-mode) button:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+html.desk:not(.app-mode) input[type="checkbox"] { accent-color: #fff; }
+
+html.desk:not(.app-mode) .tbl th,
+html.desk:not(.app-mode) .tbl td,
+html.desk:not(.app-mode) table th,
+html.desk:not(.app-mode) table td {
+  border-bottom: 1px solid #2a2a2a;
+  color: #fff;
+}
+html.desk:not(.app-mode) .tbl th,
+html.desk:not(.app-mode) table th { color: #a0a0a0; font-weight: 600; }
+
+html.desk:not(.app-mode) .badge,
+html.desk:not(.app-mode) .badge-warn,
+html.desk:not(.app-mode) .tag,
+html.desk:not(.app-mode) .tag.warn,
+html.desk:not(.app-mode) .tag.on,
+html.desk:not(.app-mode) .tag.off {
+  background: transparent;
+  color: #fff;
+  border: 1px solid #4a4a4a;
+  border-radius: 999px;
+}
+html.desk:not(.app-mode) .ok-text,
+html.desk:not(.app-mode) .bad-text,
+html.desk:not(.app-mode) .money-in,
+html.desk:not(.app-mode) .money-out { color: #fff; }
+html.desk:not(.app-mode) .text-button.danger,
+html.desk:not(.app-mode) .error,
+html.desk:not(.app-mode) .inventory-missing,
+html.desk:not(.app-mode) .is-alert strong { color: #ff453a; }
+
+html.desk:not(.app-mode) .alert {
+  background: transparent;
+  border: 1px solid #ff453a;
+  color: #fff;
+  border-radius: 8px;
+}
+html.desk:not(.app-mode) .notice { background: transparent; border: 1px solid #2a2a2a; color: #fff; }
+
+html.desk:not(.app-mode) .login,
+html.desk:not(.app-mode) .auth { background: #000; color: #fff; }
+html.desk:not(.app-mode) .login {
+  border: 1px solid #2a2a2a;
+  box-shadow: none;
+  border-radius: 12px;
+}
+html.desk:not(.app-mode) .login button { background: #fff; color: #000; border-color: #fff; }
+
+html.desk:not(.app-mode) .locations-simple,
+html.desk:not(.app-mode) .returns-root-desktop,
+html.desk:not(.app-mode) .dropship-page,
+html.desk:not(.app-mode) .money-page.safe-v2,
+html.desk:not(.app-mode) .receive-panel {
+  max-width: none;
+  margin: 0;
+  color: #fff;
+}
+
+html.desk:not(.app-mode) .connection-icon { display: none; }
+html.desk:not(.app-mode) .connections-page { background: #000; color: #fff; }
+html.desk:not(.app-mode) .connection-cards { display: grid; gap: 0; }
+html.desk:not(.app-mode) .connection-card {
+  border-top: 1px solid #2a2a2a;
+  padding: 14px 0;
+}
+
+/* Home */
+html.desk:not(.app-mode) .desk-date { margin: 0 0 8px; color: #a0a0a0; }
+html.desk:not(.app-mode) .desk-hello { font-size: clamp(2rem, 4vw, 3.2rem); margin: 0 0 28px; font-weight: 700; }
+html.desk:not(.app-mode) .desk-attention {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  border-top: 1px solid #2a2a2a;
+  border-bottom: 1px solid #2a2a2a;
+  margin-bottom: 36px;
+}
+html.desk:not(.app-mode) .desk-attention button {
+  display: grid;
+  gap: 6px;
+  text-align: left;
+  background: transparent;
+  color: #fff;
+  border: 0;
+  border-right: 1px solid #2a2a2a;
+  border-radius: 0;
+  padding: 14px 16px;
+  min-height: 0;
+}
+html.desk:not(.app-mode) .desk-attention button:last-child { border-right: 0; }
+html.desk:not(.app-mode) .desk-attention span { color: #a0a0a0; font-size: 13px; font-weight: 500; }
+html.desk:not(.app-mode) .desk-attention strong { font-size: 1.6rem; font-variant-numeric: tabular-nums; }
+html.desk:not(.app-mode) .desk-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 28px;
+}
+html.desk:not(.app-mode) .desk-grid.is-associate { grid-template-columns: minmax(0, 360px); }
+html.desk:not(.app-mode) .desk-grid h2 {
+  margin: 0 0 8px;
+  color: #a0a0a0;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+html.desk:not(.app-mode) .desk-grid section > button {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  background: transparent;
+  color: #fff;
+  border: 0;
+  border-radius: 0;
+  border-top: 1px solid #2a2a2a;
+  padding: 10px 0;
+  min-height: 0;
+  text-align: left;
+}
+html.desk:not(.app-mode) .desk-grid section > button span { color: #a0a0a0; font-weight: 400; }
+html.desk:not(.app-mode) .desk-sub { display: flex; flex-wrap: wrap; gap: 8px 12px; padding: 8px 0 4px; }
+html.desk:not(.app-mode) .desk-sub button {
+  background: transparent;
+  color: #a0a0a0;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  min-height: 0;
+  font-weight: 500;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+html.desk:not(.app-mode) .desk-headline {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-top: 1px solid #2a2a2a;
+  border-bottom: 1px solid #2a2a2a;
+  margin-bottom: 18px;
+}
+html.desk:not(.app-mode) .desk-headline div { padding: 12px 16px 12px 0; }
+html.desk:not(.app-mode) .desk-headline span { display: block; color: #a0a0a0; font-size: 13px; }
+html.desk:not(.app-mode) .desk-headline strong { font-size: 1.7rem; font-variant-numeric: tabular-nums; }
+html.desk:not(.app-mode) .desk-groups {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 24px;
+  margin-bottom: 22px;
+}
+html.desk:not(.app-mode) .desk-groups h2 { font-size: 13px; color: #a0a0a0; margin-bottom: 8px; }
+html.desk:not(.app-mode) .desk-groups li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid #2a2a2a;
+  padding: 8px 0;
+  list-style: none;
+}
+html.desk:not(.app-mode) .desk-groups ul { margin: 0; padding: 0; }
+
+html.desk:not(.app-mode) .desk-table { width: 100%; border-collapse: collapse; }
+html.desk:not(.app-mode) .desk-table th { text-align: left; color: #a0a0a0; font-weight: 600; font-size: 12px; }
+html.desk:not(.app-mode) .desk-table td, html.desk:not(.app-mode) .desk-table th { padding: 10px 8px; border-bottom: 1px solid #2a2a2a; }
+html.desk:not(.app-mode) .desk-table button.linkish {
+  background: transparent; border: 0; color: #fff; padding: 0; min-height: 0; font-weight: 650; text-align: left;
+}
+html.desk:not(.app-mode) .desk-drawer {
+  position: fixed; inset: 0 0 0 auto; width: min(460px, 100%);
+  background: #000; border-left: 1px solid #2a2a2a; z-index: 30;
+  overflow: auto; padding: 22px 20px 40px;
+}
+html.desk:not(.app-mode) .desk-drawer-scrim { position: fixed; inset: 0; background: #00000088; z-index: 29; border: 0; }
+html.desk:not(.app-mode) .desk-empty { padding: 48px 0; }
+html.desk:not(.app-mode) .desk-empty h2 { margin-bottom: 8px; }
+html.desk:not(.app-mode) .order-loc-list { display: grid; gap: 6px; margin-top: 8px; max-height: 240px; overflow: auto; }
+html.desk:not(.app-mode) .inventory-tabs { flex-wrap: wrap; }
+html.desk:not(.app-mode) .inventory-row,
+html.desk:not(.app-mode) .inventory-identity strong,
+html.desk:not(.app-mode) .inventory-money strong {
+  color: #fff !important;
+  background: transparent !important;
+}
+html.desk:not(.app-mode) .inventory-row small { color: #a0a0a0 !important; }
+html.desk:not(.app-mode) .inventory-row:hover { background: #111 !important; }
+html.desk:not(.app-mode) .inventory-missing { color: #ff453a !important; }
+html.desk:not(.app-mode) .listing-issues-bar {
+  display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 8px 12px;
+  border: 1px solid #ff453a; border-radius: 8px; padding: 10px 12px; margin-bottom: 16px;
+}
+html.desk:not(.app-mode) .listing-issues-bar .listing-issues-scroll { grid-column: 1 / -1; }
+
+@media (max-width: 1200px) {
+  html.desk:not(.app-mode) .desk-grid,
+  html.desk:not(.app-mode) .desk-attention { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  html.desk:not(.app-mode) .content { padding: 24px 20px 48px; }
+}

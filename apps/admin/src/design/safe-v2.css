@@ -3,8 +3,8 @@
 .money-page.safe-v2 {
   display: grid;
   gap: 0;
-  max-width: 560px;
-  margin: 0 auto;
+  max-width: none;
+  margin: 0;
   padding: 0 0 48px;
 }
 
