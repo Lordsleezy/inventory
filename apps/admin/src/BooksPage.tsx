@@ -25,7 +25,7 @@ const emptyInventory = (): InventorySummary => ({
 });
 
 const SHEET_TITLES: Record<Sheet, string> = {
-  hub: 'Books', sales: 'Sales', expenses: 'Expenses', payouts: 'Payouts', inventory: 'Inventory', received: 'Items received',
+  hub: 'Books', sales: 'Sales', expenses: 'Expenses', payouts: 'Payouts', inventory: 'Inventory', received: 'Items received', tax: 'Sales tax return',
 };
 
 export function BooksPage({ client, money, native = false, onNativeNavigation }: Props) {
