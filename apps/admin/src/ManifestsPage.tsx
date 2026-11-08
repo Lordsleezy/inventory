@@ -1,6 +1,6 @@
 import { ToolCard, ToolHeading, ToolIcon, ToolEmpty } from './design/Tools';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { FormEvent } from 'react';
+import type { FormEvent, RefObject } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { countManifestFile } from './manifestCount';
 import { parseManifestLines } from './manifestLines';
@@ -11,11 +11,15 @@ type Manifest = {
   count_source: string; storage_path: string; content_type?: string; received_count: number; sold_count: number;
   stock_count: number; revenue_cents: number; profit_cents: number;
 };
-type Props = { client: SupabaseClient; storeId: string; money: (cents: number) => string };
+type Props = { client: SupabaseClient; storeId: string; money: (cents: number) => string; layout?: 'desktop' };
+function manifestDate(iso: string) {
+  if (!iso) return '—';
+  return new Date(`${iso.slice(0, 10)}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+}
 const today = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
 const ALLOWED = new Set(['pdf', 'csv', 'xlsx', 'png', 'jpg', 'jpeg', 'webp', 'heic']);
 
-export function ManifestsPage({ client, storeId, money }: Props) {
+export function ManifestsPage({ client, storeId, money, layout }: Props) {
   const submitLock = useRef(false);
   const fileVersion = useRef(0);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -151,6 +155,17 @@ export function ManifestsPage({ client, storeId, money }: Props) {
     finally { submitLock.current = false; setBusy(false); }
   }
 
+  if (layout === 'desktop') {
+    return <ManifestsDesktop
+      rows={rows} loaded={loaded} error={error} notice={notice} busy={busy} counting={counting}
+      name={name} source={source} date={date} file={file} count={count} automatic={automatic}
+      bulk={bulk} bulkManifest={bulkManifest} bulkSkus={bulkSkus} fileInput={fileInput}
+      backfills={backfills} total={total} allTimeReceived={allTimeReceived} money={money}
+      setError={setError} setName={setName} setSource={setSource} setDate={setDate} setCount={setCount} setAutomatic={setAutomatic} setBulk={setBulk} setBulkManifest={setBulkManifest}
+      chooseFile={chooseFile} upload={upload} openFile={open} changeCount={changeCount} bulkTag={bulkTag} load={load}
+    />;
+  }
+
   return <div className="floor-tools manifests-page">
     <header><div><h1>Manifests</h1><p>Upload and manage your inventory manifests.</p></div></header>
     {error && <div className="alert" role="alert">{error}<button type="button" aria-label="Dismiss error" onClick={() => setError('')}>×</button></div>}
@@ -184,4 +199,150 @@ export function ManifestsPage({ client, storeId, money }: Props) {
       </form>
     </ToolCard>
   </div>;
+}
+
+function ManifestsDesktop({
+  rows, loaded, error, notice, busy, counting, name, source, date, file, count, automatic,
+  bulk, bulkManifest, bulkSkus, fileInput, backfills, total, allTimeReceived, money,
+  setError, setName, setSource, setDate, setCount, setAutomatic, setBulk, setBulkManifest,
+  chooseFile, upload, openFile, changeCount, bulkTag, load,
+}: {
+  rows: Manifest[]; loaded: boolean; error: string; notice: string; busy: boolean; counting: boolean;
+  name: string; source: string; date: string; file: File | null; count: string; automatic: boolean;
+  bulk: string; bulkManifest: string; bulkSkus: string[]; fileInput: RefObject<HTMLInputElement | null>;
+  backfills: Record<string, string>; total: number; allTimeReceived: number | null; money: (cents: number) => string;
+  setError: (v: string) => void; setName: (v: string) => void; setSource: (v: string) => void; setDate: (v: string) => void;
+  setCount: (v: string) => void; setAutomatic: (v: boolean) => void; setBulk: (v: string) => void; setBulkManifest: (v: string) => void;
+  chooseFile: (next: File | null) => Promise<void>;
+  upload: (event: FormEvent) => Promise<void>;
+  openFile: (row: Manifest) => Promise<void>;
+  changeCount: (row: Manifest) => Promise<void>;
+  bulkTag: (event: FormEvent) => Promise<void>;
+  load: () => Promise<void>;
+}) {
+  const [panel, setPanel] = useState<null | 'forms' | 'detail'>(null);
+  const [detailId, setDetailId] = useState<string | null>(null);
+  const detail = rows.find((row) => row.id === detailId) || null;
+  const accept = '.pdf,.csv,.xlsx,.png,.jpg,.jpeg,.webp,.heic,image/*';
+
+  function takeFile(next: File | null) {
+    void chooseFile(next);
+    if (next) setPanel('forms');
+  }
+
+  return (
+    <div className="manifests-desk">
+      <header className="manifests-desk-head">
+        <div>
+          <h1>Manifests</h1>
+          <p>Pallet and load paperwork.</p>
+        </div>
+        <div className="actions">
+          <button type="button" onClick={() => setPanel('forms')}>Bulk tag inventory</button>
+          <button type="button" className="primary" onClick={() => setPanel('forms')}>Add manifest</button>
+        </div>
+      </header>
+      {error && <div className="alert" role="alert">{error}<button type="button" aria-label="Dismiss error" onClick={() => setError('')}>×</button></div>}
+      {notice && <div className="notice" role="status">{notice}</div>}
+      <label
+        className="manifests-drop"
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => { e.preventDefault(); takeFile(e.dataTransfer.files?.[0] || null); }}
+      >
+        <input className="sr" disabled={busy || counting} type="file" accept={accept} onChange={(e) => takeFile(e.target.files?.[0] || null)} />
+        Drop a manifest file here, or <span>choose a file</span> · PDF, CSV, XLSX or images, up to 50 MB
+      </label>
+      {!loaded ? <p role="status">{error ? 'Could not load saved manifests.' : 'Loading manifests…'} {error && <button type="button" onClick={() => void load().catch((e) => setError(String(e.message || e)))}>Retry</button>}</p>
+        : rows.length === 0 ? <p className="hint">No manifests yet. Drop a file above or use Add manifest.</p>
+        : (
+          <table className="desk-table manifests-table">
+            <thead>
+              <tr><th>Manifest</th><th>Date</th><th>Source</th><th className="num">Items</th><th><span className="sr">Actions</span></th></tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={row.id}>
+                  <td><strong>{row.name}</strong></td>
+                  <td>{manifestDate(row.manifest_on)}</td>
+                  <td>{row.source || '—'}</td>
+                  <td className="num">{row.item_count.toLocaleString('en-US')}</td>
+                  <td className="manifests-actions">
+                    <button type="button" onClick={() => { setDetailId(row.id); setPanel('detail'); }}>Open</button>
+                    <button type="button" onClick={() => void openFile(row)}>Open file</button>
+                    <button type="button" disabled={busy} onClick={() => void changeCount(row)}>Edit count</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      {loaded && <p className="hint">Total manifested {total.toLocaleString('en-US')} · Inventoried all time {allTimeReceived == null ? '—' : allTimeReceived.toLocaleString('en-US')}</p>}
+      {panel && (
+        <>
+          <button type="button" className="desk-drawer-scrim" aria-label="Close panel" onClick={() => setPanel(null)} />
+          <aside className="desk-drawer manifests-drawer" role="dialog" aria-label={panel === 'detail' ? 'Manifest' : 'Add manifest'}>
+            <div className="manifests-drawer-head">
+              <h2>{panel === 'detail' ? (detail?.name || 'Manifest') : 'Add manifest'}</h2>
+              <button type="button" onClick={() => setPanel(null)}>Close</button>
+            </div>
+            {panel === 'detail' && detail && (
+              <div className="manifests-detail">
+                <div className="desk-headline">
+                  <div><span>Expected</span><strong>{detail.item_count.toLocaleString('en-US')}</strong></div>
+                  <div><span>Received</span><strong>{detail.received_count.toLocaleString('en-US')}</strong></div>
+                  <div><span>Difference</span><strong>{`${detail.item_count - detail.received_count >= 0 ? '+' : '−'}${Math.abs(detail.item_count - detail.received_count).toLocaleString('en-US')}`}</strong></div>
+                </div>
+                <p>{backfills[detail.id] || (detail.line_count ? `${detail.line_count} line items saved.` : isCsvManifestFile(detail) ? 'Checking stored CSV for line items…' : 'Original file retained. Upload a CSV to add line references.')}</p>
+                <ul className="manifests-metrics">
+                  <li><span>Sold</span><b>{detail.sold_count}</b></li>
+                  <li><span>In stock</span><b>{detail.stock_count}</b></li>
+                  <li><span>Revenue</span><b>{money(detail.revenue_cents)}</b></li>
+                  <li><span>Profit</span><b>{money(detail.profit_cents)}</b></li>
+                </ul>
+                <div className="actions">
+                  <button type="button" onClick={() => void openFile(detail)}>Open file</button>
+                  <button type="button" disabled={busy} onClick={() => void changeCount(detail)}>Edit count</button>
+                </div>
+              </div>
+            )}
+            {panel === 'forms' && (
+              <>
+                <form className="manifests-form" onSubmit={(e) => void upload(e)}>
+                  <label className="manifests-drop slim">
+                    <input ref={fileInput} className="sr" disabled={busy || counting} type="file" accept={accept} onChange={(e) => void chooseFile(e.target.files?.[0] || null)} />
+                    {file ? file.name : 'Choose a file · PDF, CSV, XLSX, images'}
+                  </label>
+                  {counting && <small role="status">Counting spreadsheet items…</small>}
+                  <label>Manifest name<input required disabled={busy} value={name} placeholder="e.g. October Electronics" onChange={(e) => setName(e.target.value)} /></label>
+                  <div className="manifests-form-row">
+                    <label>Date<input required disabled={busy} type="date" value={date} onChange={(e) => setDate(e.target.value)} /></label>
+                    <label>Source<input disabled={busy} value={source} placeholder="Costco, Target" onChange={(e) => setSource(e.target.value)} /></label>
+                  </div>
+                  <label>Item count · PDFs and images only<input disabled={busy || counting} type="number" min="0" step="1" value={count} onChange={(e) => { setCount(e.target.value); setAutomatic(false); }} /></label>
+                  <small>{automatic ? 'Counted from the spreadsheet. You can override it.' : 'Enter the count for PDFs and images.'}</small>
+                  <button type="submit" className="primary" disabled={busy || counting || !file}>{busy ? 'Saving…' : 'Upload'}</button>
+                </form>
+                <form className="manifests-form" onSubmit={(e) => void bulkTag(e)}>
+                  <h2>Bulk tag inventory</h2>
+                  <label>Manifest
+                    <select required disabled={busy} value={bulkManifest} onChange={(e) => setBulkManifest(e.target.value)}>
+                      <option value="">Choose a manifest</option>
+                      {rows.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}
+                    </select>
+                  </label>
+                  <label>SKUs · commas, spaces or one per line
+                    <textarea required disabled={busy} rows={4} value={bulk} placeholder="10001, 10002, 10003" onChange={(e) => setBulk(e.target.value)} />
+                  </label>
+                  <div className="manifests-form-foot">
+                    <button type="submit" className="primary" disabled={busy || !bulkManifest || !bulkSkus.length}>{busy ? 'Saving…' : 'Tag inventory'}</button>
+                    <span>{bulkSkus.length} unique SKUs</span>
+                  </div>
+                </form>
+              </>
+            )}
+          </aside>
+        </>
+      )}
+    </div>
+  );
 }

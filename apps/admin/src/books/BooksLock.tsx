@@ -19,9 +19,11 @@ type Props = {
   onReload: () => Promise<void>;
   native?: boolean;
   lockedStaleMath?: boolean;
+  /** Desktop header shows only the lock button. The phone and the locked footnote stay on the default. */
+  placement?: 'foot' | 'header';
 };
 
-export function BooksLock({ client, money, period, report, inventory, received, workbook, uiStatus, busy, setBusy, onError, onReload, native, lockedStaleMath }: Props) {
+export function BooksLock({ client, money, period, report, inventory, received, workbook, uiStatus, busy, setBusy, onError, onReload, native, lockedStaleMath, placement = 'foot' }: Props) {
   const label = monthLabel(period.period_start);
 
   async function lock() {
@@ -81,6 +83,12 @@ export function BooksLock({ client, money, period, report, inventory, received, 
     } catch {
       onError("Couldn't re-freeze this month.");
     } finally { setBusy(false); }
+  }
+
+  if (placement === 'header') {
+    if (uiStatus === 'locked') return null;
+    const short = label.replace(/\s+\d{4}$/, '');
+    return <button type="button" className="primary" disabled={busy} onClick={() => void lock()}>Lock {short}</button>;
   }
 
   if (uiStatus === 'locked') {

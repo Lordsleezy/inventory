@@ -10,7 +10,7 @@ import { BooksLock } from './BooksLock';
 import { CdtfaPaper } from './CdtfaPaper';
 import { CdtfaReturn } from './CdtfaReturn';
 import type { CdtfaPrintModel } from './cdtfaLoad';
-import type { BooksSpan } from './booksSpan';
+import { spanTitle, type BooksSpan } from './booksSpan';
 import type { BooksSlice } from './combineBooks';
 import type { CdtfaFrequency } from './cdtfaResolve';
 import { BooksIconExpenses, BooksIconInventory, BooksIconPayouts, BooksIconReceived, BooksIconSales, BooksIconTax } from './reportIcons';
@@ -204,27 +204,35 @@ function BooksNative(p: ViewProps) {
 function BooksDesktop(p: ViewProps) {
   const ui = uiStatus(p);
   const tab = p.desktopTab === 'hub' ? 'sales' : p.desktopTab;
+  const periodName = spanTitle(p.period.period_start, p.span);
   return (
     <div className="books-desktop">
-      <div className="books-desktop-toolbar">
-        <SpanSwitch p={p} />
-        <label className="books-month-picker">
-          {p.span === 'month' ? 'Month' : p.span === 'year' ? 'Year' : 'Quarter'}
-          <select aria-label="Report period" value={p.spanValue} onChange={(e) => p.onSpanValue(e.target.value)}>
-            {p.spanOptions.map((row) => <option key={row.value} value={row.value}>{row.label}</option>)}
-          </select>
-        </label>
-        <span className={`books-status-pill books-status-${ui}`}>{periodStatusLabel(ui)}</span>
-        <div className="books-export-actions">
-          <button type="button" className="books-download" disabled={!p.exportFiles || p.exportsPreparing} onClick={p.onExcel}>Download Excel</button>
-          <button type="button" className="books-download secondary" disabled={!p.exportFiles || p.exportsPreparing} onClick={p.onPdf}>PDF</button>
-          <button type="button" className="books-download secondary" disabled={!p.workbook} onClick={p.onPrint}>Print</button>
-          {p.onDownloadAll && <button type="button" className="books-download secondary" disabled={p.archiveBusy || !p.periods.length} onClick={p.onDownloadAll}>{p.archiveBusy ? 'Preparing…' : 'Download all'}</button>}
+      <header className="books-desk-head">
+        <div>
+          <h1>Books</h1>
+          <p>{periodName} · {periodStatusLabel(ui)}</p>
         </div>
-      </div>
-      <SummaryCard money={p.money} totals={p.totals} absorbFees={p.absorbFees} onlineChannels={p.onlineChannels} />
-      <BooksProofBar money={p.money} workbook={p.workbook} />
-      <BooksExportTieBar workbook={p.workbook} />
+        <div className="books-desk-actions">
+          <SpanSwitch p={p} />
+          <label className="books-month-picker">
+            <span className="sr">{p.span === 'month' ? 'Month' : p.span === 'year' ? 'Year' : 'Quarter'}</span>
+            <select aria-label="Report period" value={p.spanValue} onChange={(e) => p.onSpanValue(e.target.value)}>
+              {p.spanOptions.map((row) => <option key={row.value} value={row.value}>{row.label}</option>)}
+            </select>
+          </label>
+          <div className="books-export-actions">
+            <button type="button" disabled={!p.exportFiles || p.exportsPreparing} onClick={p.onExcel}>Excel</button>
+            <button type="button" disabled={!p.exportFiles || p.exportsPreparing} onClick={p.onPdf}>PDF</button>
+            <button type="button" disabled={!p.workbook} onClick={p.onPrint}>Print</button>
+            {p.onDownloadAll && <button type="button" disabled={p.archiveBusy || !p.periods.length} onClick={p.onDownloadAll}>{p.archiveBusy ? 'Preparing…' : 'Download all'}</button>}
+            {p.showLock && ui !== 'locked' && (
+              <BooksLock placement="header" client={p.client} money={p.money} period={p.period} report={p.report} inventory={p.inventory} received={p.received} workbook={p.workbook} uiStatus={ui} busy={p.busy} setBusy={p.setBusy} onError={p.onError} onReload={p.onReload} lockedStaleMath={p.lockedStaleMath} />
+            )}
+          </div>
+        </div>
+      </header>
+      <BooksDeskAlert workbook={p.workbook} />
+      <BooksDeskStrip money={p.money} totals={p.totals} />
       <nav className="books-desktop-tabs" aria-label="Books reports">
         {REPORT_ROWS.map((t) => (
           <button key={t.id} type="button" className={tab === t.id ? 'active' : ''} onClick={() => p.setDesktopTab(t.id)}>{t.title}</button>
@@ -238,7 +246,7 @@ function BooksDesktop(p: ViewProps) {
         {tab === 'received' && <SpanParts p={p} render={(workbook) => <ReceivedBody money={p.money} items={workbook.received} />} linesOnly />}
         {tab === 'tax' && <TaxForm p={p} />}
       </div>
-      {p.showLock && <BooksLock client={p.client} money={p.money} period={p.period} report={p.report} inventory={p.inventory} received={p.received} workbook={p.workbook} uiStatus={ui} busy={p.busy} setBusy={p.setBusy} onError={p.onError} onReload={p.onReload} lockedStaleMath={p.lockedStaleMath} />}
+      {p.showLock && ui === 'locked' && <BooksLock client={p.client} money={p.money} period={p.period} report={p.report} inventory={p.inventory} received={p.received} workbook={p.workbook} uiStatus={ui} busy={p.busy} setBusy={p.setBusy} onError={p.onError} onReload={p.onReload} lockedStaleMath={p.lockedStaleMath} />}
       {!p.showLock && <p className="books-proof-audit">Lock each month from the Month view. This {p.spanWord}'s tax form locks when every month in it is locked.</p>}
       <div className="books-print-sheets" aria-hidden>
         <section><h2>Sales</h2><SpanParts p={p} render={(workbook) => <SalesTable money={p.money} workbook={workbook} totals={workbook.sales.totals} />} /></section>
@@ -269,6 +277,28 @@ function feePolicyLine(absorbFees?: boolean, channels?: string[]) {
     ? 'Commissions: store absorbs marketplace + card fees (they stay off the commission base).'
     : 'Commissions: marketplace + card fees reduce the commission base.';
   return `${owner} ${comm} Online: ${ch}.`;
+}
+
+function BooksDeskStrip({ money, totals }: { money: (c: number) => string; totals: BookTotals }) {
+  const cells: { label: string; value: string; lead?: boolean }[] = [
+    { label: 'Owner keeps', value: money(totals.ownerKeeps), lead: true },
+    { label: 'Sales', value: money(totals.revenue) },
+    { label: 'Fees', value: `−${money(totals.feesAndLabels)}` },
+    { label: 'COGS', value: `−${money(totals.cost)}` },
+    { label: 'Profit', value: money(totals.profit) },
+    { label: 'Commissions', value: `−${money(totals.commission)}` },
+    { label: 'Other expenses', value: `−${money(totals.otherExpenses)}` },
+  ];
+  return (
+    <div className="books-desk-strip">
+      {cells.map((cell) => (
+        <div key={cell.label} className={cell.lead ? 'lead' : ''}>
+          <span>{cell.label}</span>
+          <strong>{cell.value}</strong>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function BooksExportTieBar({ workbook }: { workbook: BooksWorkbook }) {
@@ -312,6 +342,28 @@ function BooksProofBar({ money, workbook }: { money: (c: number) => string; work
           {integrity.issues.length === 0 && <p>All ticket totals match the hub and Payouts tab balances.</p>}
         </div>
       )}
+    </div>
+  );
+}
+
+function BooksDeskAlert({ workbook }: { workbook: BooksWorkbook }) {
+  const [open, setOpen] = useState(false);
+  const integrity = workbook.integrity;
+  const tie = workbook.exportTieIssues || [];
+  const issues = [
+    ...(integrity && !integrity.ok ? integrity.issues.map((i) => i.kind === 'unmatched_label' ? 'One unmatched shipping label.' : i.message) : []),
+    ...tie.map((i) => i.message),
+  ];
+  if (!issues.length) return null;
+  const n = issues.length;
+  return (
+    <div className="books-desk-alert" role="status">
+      <div>
+        <strong>{n === 1 ? '1 thing to fix before you lock' : `${n} things to fix before you lock`}</strong>
+        <p>{issues[0]}</p>
+        {open && issues.slice(1).map((line) => <p key={line}>{line}</p>)}
+      </div>
+      <button type="button" onClick={() => setOpen(!open)}>{open ? 'Hide' : 'Review'}</button>
     </div>
   );
 }
@@ -787,36 +839,66 @@ function ReceivedBody({ money, items, native }: { money: (c: number) => string; 
   );
 }
 
+function channelLabel(name: string) {
+  const n = name.toLowerCase().replace(/[_-]+/g, ' ');
+  if (n === 'ebay') return 'eBay';
+  if (n === 'depop') return 'Depop';
+  if (n === 'mercari') return 'Mercari';
+  if (n === 'amazon') return 'Amazon';
+  if (n === 'tiktok') return 'TikTok';
+  if (n === 'square' || n === 'website' || n === 'register' || n === 'in store' || n === 'instore') return 'In-store';
+  return name;
+}
+
 function SalesTable({ money, workbook, totals }: { money: (c: number) => string; workbook: BooksWorkbook; totals: BookTotals }) {
-  const headers = ['Date', 'SKU', 'Item', 'Channel', 'Order', 'Sale', 'Tax', 'Fees', 'Label', 'Buyer ship', 'Cost', 'Profit', 'Payout', 'Why'];
+  const order = ['ebay', 'in-store', 'depop', 'mercari', 'amazon', 'tiktok'];
+  const accounts = [...workbook.sales.channelTotals].sort((a, b) => {
+    const ai = order.indexOf(channelLabel(a.channel).toLowerCase());
+    const bi = order.indexOf(channelLabel(b.channel).toLowerCase());
+    return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi);
+  });
   return (
     <>
-      <p className="books-channel-line">
-        {workbook.sales.channelTotals.map((c) => <span key={c.channel}>{c.channel} {money(c.revenue_cents)}</span>)}
-      </p>
+      <div className="books-account-strip">
+        {accounts.map((c) => (
+          <div key={c.channel}><span>{channelLabel(c.channel)}</span><strong>{money(c.revenue_cents)}</strong></div>
+        ))}
+      </div>
       <div className="books-table-wrap">
-        <table className="books-table">
-          <thead><tr>{headers.map((h) => <th key={h}>{h}</th>)}</tr></thead>
+        <table className="books-table books-sales-table">
+          <thead>
+            <tr>
+              <th>Date</th><th>Item</th><th>Channel</th><th className="num">Sale</th><th className="num">Fees</th>
+              <th className="num">Label</th><th className="num">Cost</th><th className="num">Profit</th><th className="num">Payout</th>
+            </tr>
+          </thead>
           <tbody>
             {workbook.sales.rows.map((r) => (
               <tr key={r.sale_id + r.sku}>
-                <td>{shortDate(r.date)}</td><td>{r.sku}</td><td>{r.title}</td><td>{r.channel}</td><td>{r.order_no}</td>
-                <td>{money(r.price_cents)}</td><td>{money(r.tax_cents)}</td><td>{money(r.marketplace_fees_cents + r.card_fees_cents)}</td>
-                <td>{money(r.label_cost_cents)}</td><td>{money(r.buyer_shipping_cents)}</td>
-                <td className={r.cost_cents == null ? 'fix' : ''}>{r.cost_cents == null ? 'missing' : money(r.cost_cents)}</td>
-                <td>{r.profit_cents == null ? '—' : money(r.profit_cents)}</td>
-                <td>{r.commission_cents == null ? '—' : money(r.commission_cents)}</td>
-                <td className="why">{r.profit_notes}</td>
+                <td>{shortDate(r.date)}</td>
+                <td className="books-item"><strong>{r.title}</strong><small>SKU {r.sku}</small></td>
+                <td><span className="books-channel-chip">{channelLabel(r.channel)}</span></td>
+                <td className="num">{money(r.price_cents)}</td>
+                <td className="num">{money(r.marketplace_fees_cents + r.card_fees_cents)}</td>
+                <td className="num">{r.label_cost_cents ? money(r.label_cost_cents) : '—'}</td>
+                <td className={r.cost_cents == null ? 'num fix' : 'num'}>{r.cost_cents == null ? 'missing' : money(r.cost_cents)}</td>
+                <td className="num">{r.profit_cents == null ? '—' : money(r.profit_cents)}</td>
+                <td className="num">{r.commission_cents == null ? '—' : money(r.commission_cents)}</td>
               </tr>
             ))}
             <tr className="books-total-row">
-              <td colSpan={5}>Totals</td>
-              <td>{money(totals.revenue)}</td><td /><td /><td>{money(totals.labelCostsOnSales)}</td><td /><td>{money(totals.cost)}</td>
-              <td>{money(totals.profit)}</td><td>{money(totals.commission)}</td><td />
+              <td colSpan={3}>Totals</td>
+              <td className="num">{money(totals.revenue)}</td>
+              <td className="num">{money(totals.feesAndLabels)}</td>
+              <td className="num">{money(totals.labelCostsOnSales)}</td>
+              <td className="num">{money(totals.cost)}</td>
+              <td className="num">{money(totals.profit)}</td>
+              <td className="num">{money(totals.commission)}</td>
             </tr>
           </tbody>
         </table>
       </div>
+      <p className="hint">Tax and buyer shipping are in Excel and PDF.</p>
     </>
   );
 }
