@@ -41,8 +41,8 @@ insert into public.sales(store_id,sku,price_cents,tax_cents,channel,sold_at,rece
   values(current_setting('test.store')::uuid,'99801',10000,0,'ebay',now(),'BOOKS-TRAIL-1') returning id \gset books_sale_
 insert into public.channel_orders(store_id,provider,order_id,sku,sale_id,item_cents,fee_cents,fee_source,payout_cents)
   values(current_setting('test.store')::uuid,'ebay','BOOKS-ORDER-1','99801',:books_sale_id,10000,1200,'actual',8800);
-select ok((select count(*) > 0 from jsonb_array_elements(public.portal_books_list('2026-01-01',(now() at time zone 'America/Los_Angeles')::date)) as periods(item)
-  where item->>'period_type'='week'), 'Books list creates weekly cards for weeks with sales');
+select ok((select count(*) = 0 from jsonb_array_elements(public.portal_books_list('2026-01-01',(now() at time zone 'America/Los_Angeles')::date)) as periods(item)
+  where item->>'period_type'='week'), 'Books list returns months only (no weekly cards)');
 select lives_ok($$select public.portal_books_record_platform_payout('ebay','BOOKS-PAYOUT-1',8800,(now() at time zone 'America/Los_Angeles')::date,'BANK-REF-1','test payout')$$,
   'admin can record an imported payout and bank reference');
 select lives_ok(format('select public.portal_books_link_sale_payout(%s,''ebay'',''BOOKS-PAYOUT-1'',''test link'')',:books_sale_id),
