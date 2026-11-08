@@ -93,3 +93,80 @@ export async function decidePick(storeId, pickId, decision, userId = null) {
   if (error) throw error;
   return { ok: true, status: "approved", product };
 }
+
+/** Place a sample order to Paul's address — requires approval, uses supplier balance, never ships to a customer. */
+export async function orderSample(storeId, catalogItemId, address, userId) {
+  const sb = serviceClient();
+  const { data: settings } = await sb.from("dropship_settings").select("*").eq("store_id", storeId).maybeSingle();
+  if (!settings?.enabled) throw new Error("dropship_off");
+  const { data: cat } = await sb
+    .from("supplier_catalog_items")
+    .select("*")
+    .eq("id", catalogItemId)
+    .eq("store_id", storeId)
+    .maybeSingle();
+  if (!cat) throw new Error("catalog_item_not_found");
+  if (!address?.line1 || !address?.city || !address?.region || !address?.postal || !address?.name) {
+    throw new Error("sample_address_required");
+  }
+
+  const { data: sku } = await sb.rpc("next_dropship_sku");
+  const { data: product, error } = await sb
+    .from("dropship_products")
+    .insert({
+      store_id: storeId,
+      sku,
+      catalog_item_id: cat.id,
+      title: `SAMPLE · ${cat.title}`,
+      image_url: cat.image_url,
+      price_cents: Math.max(100, cat.cost_cents + cat.shipping_cents),
+      cost_cents: cat.cost_cents,
+      shipping_cents: cat.shipping_cents,
+      channel: "ebay",
+      status: "approved",
+      sample_verified: false,
+      handling_days: Math.max(1, Number(cat.processing_days) || 5) + 2,
+    })
+    .select("*")
+    .single();
+  if (error) throw error;
+
+  const { data: order, error: oerr } = await sb
+    .from("dropship_orders")
+    .insert({
+      store_id: storeId,
+      dropship_product_id: product.id,
+      sku,
+      channel: "sample",
+      channel_order_id: `sample:${product.id}`,
+      status: "awaiting_place",
+      supplier: cat.supplier,
+      buyer_name: address.name,
+      ship_address: address,
+      raw: { sample: true },
+    })
+    .select("*")
+    .single();
+  if (oerr) throw oerr;
+
+  await sb.from("dropship_products").update({ sample_order_id: order.id }).eq("id", product.id);
+
+  return {
+    ok: true,
+    product,
+    order,
+    note: "Sample order created — use Place order (counts toward manual place). Mark sample verified after inspection.",
+    actor: userId,
+  };
+}
+
+export async function markSampleVerified(storeId, productId, verified = true) {
+  const sb = serviceClient();
+  const { error } = await sb
+    .from("dropship_products")
+    .update({ sample_verified: Boolean(verified), updated_at: new Date().toISOString() })
+    .eq("id", productId)
+    .eq("store_id", storeId);
+  if (error) throw error;
+  return { ok: true, sample_verified: Boolean(verified) };
+}

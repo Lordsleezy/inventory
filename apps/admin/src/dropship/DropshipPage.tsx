@@ -10,6 +10,8 @@ type Desk = {
   settings: Record<string, unknown>;
   ebay_channel_on: boolean;
   website_channel_on: boolean;
+  tiktok_channel_on: boolean;
+  amazon_channel_on: boolean;
   daily_publish_cap: number;
   manual_place_remaining: number;
   last_supplier_order_at: string | null;
@@ -56,7 +58,14 @@ export function DropshipPage({ session, money, onBack, backLabel = 'Other', embe
   const [orders, setOrders] = useState<Array<Record<string, unknown>>>([]);
   const [apiKeyDraft, setApiKeyDraft] = useState('');
   const [confirmEnd, setConfirmEnd] = useState(false);
+  const [confirmEndTikTok, setConfirmEndTikTok] = useState(false);
   const [ebayLimit, setEbayLimit] = useState<number | null>(null);
+  const [amazonReady, setAmazonReady] = useState<{
+    items: Array<{ key: string; label: string; status: string; detail: string }>;
+    unlocked: boolean;
+    missing: string[];
+    howToUnlock: string[];
+  } | null>(null);
 
   const call = useCallback(
     async (action: string, body: Record<string, unknown> = {}) => {
@@ -97,16 +106,20 @@ export function DropshipPage({ session, money, onBack, backLabel = 'Other', embe
   }, [open, call]);
 
   useEffect(() => {
-    if (open !== 'orders' && open !== 'health') return;
-    void call('list_orders')
-      .then((r) => setOrders(r.orders || []))
-      .catch((err) => setError(err.message));
-    if (open === 'health') {
+    if (open === 'orders' || open === 'health') {
+      void call('list_orders')
+        .then((r) => setOrders(r.orders || []))
+        .catch((err) => setError(err.message));
+    }
+    if (open === 'health' || open === 'settings') {
       void call('health')
         .then((r) => {
           setEbayLimit(r.ebay?.listingLimitRemaining ?? null);
           void refresh();
         })
+        .catch(() => undefined);
+      void call('amazon_readiness')
+        .then((r) => setAmazonReady(r))
         .catch(() => undefined);
     }
   }, [open, call, refresh]);
@@ -478,7 +491,73 @@ export function DropshipPage({ session, money, onBack, backLabel = 'Other', embe
             />
             Website · Everyday deals
           </label>
-          <p className="dropship-muted">TikTok Shop and Amazon: OFF (settings only). Depop and Mercari: hard-blocked in code.</p>
+          <label className="dropship-check">
+            <input
+              type="checkbox"
+              checked={Boolean(desk?.tiktok_channel_on)}
+              onChange={(e) =>
+                void run('tiktok ch', () => call('save_settings', { tiktok_channel_on: e.target.checked }).then(() => undefined))
+              }
+            />
+            TikTok Shop (OFF until eBay is clean · US warehouse · ≤2d handling · plain pack verified)
+          </label>
+          <label className="dropship-check">
+            <input
+              type="checkbox"
+              checked={Boolean(desk?.amazon_channel_on)}
+              disabled={!amazonReady?.unlocked}
+              onChange={(e) =>
+                void run('amazon ch', () => call('save_settings', { amazon_channel_on: e.target.checked }).then(() => undefined))
+              }
+            />
+            Amazon (locked until checklist is all green)
+          </label>
+          <p className="dropship-muted">Depop and Mercari: hard-blocked in code. Free returns are a per-channel switch — flipping them on can affect sales/search; not flipped for you.</p>
+
+          {amazonReady ? (
+            <div className="dropship-supplier">
+              <div className="dropship-list-title">Amazon readiness</div>
+              {amazonReady.items.map((it) => (
+                <div key={it.key} className="dropship-muted">
+                  <b style={{ color: it.status === 'green' ? '#fff' : '#FF453A' }}>{it.status === 'green' ? '●' : it.status === 'unknown' ? '○' : '●'}</b>{' '}
+                  {it.label} — {it.detail}
+                </div>
+              ))}
+              {!amazonReady.unlocked ? (
+                <p className="dropship-muted">Missing: {(amazonReady.missing || []).join('; ') || '—'}</p>
+              ) : null}
+            </div>
+          ) : null}
+
+          <label className="dropship-check">
+            <input
+              type="checkbox"
+              checked={settings.sample_gate_required !== false}
+              onChange={(e) =>
+                void run('sample gate', () =>
+                  call('save_settings', {
+                    sample_gate_required: e.target.checked,
+                    settings: { ...settings, sample_gate_required: e.target.checked },
+                  }).then(() => undefined),
+                )
+              }
+            />
+            Sample-verified gate (default ON — publish blocked until Paul marks a sample good)
+          </label>
+          <label className="dropship-check">
+            <input
+              type="checkbox"
+              checked={settings.tiktok_plain_packaging_verified === true}
+              onChange={(e) =>
+                void run('tt pack', () =>
+                  call('save_settings', {
+                    settings: { ...settings, tiktok_plain_packaging_verified: e.target.checked },
+                  }).then(() => undefined),
+                )
+              }
+            />
+            I confirm CJ plain/unbranded packing for TikTok (no inserts, review-bait, or supplier stickers)
+          </label>
           <label className="dropship-label">
             Daily publish cap
             <input
@@ -511,9 +590,33 @@ export function DropshipPage({ session, money, onBack, backLabel = 'Other', embe
                   })
                 }
               >
-                Confirm end all
+                Confirm end all eBay
               </button>
               <button type="button" className="dropship-btn outline" onClick={() => setConfirmEnd(false)}>
+                Cancel
+              </button>
+            </div>
+          )}
+          {!confirmEndTikTok ? (
+            <button type="button" className="dropship-btn outline danger" onClick={() => setConfirmEndTikTok(true)}>
+              End all dropship listings on TikTok
+            </button>
+          ) : (
+            <div className="dropship-actions">
+              <button
+                type="button"
+                className="dropship-btn danger"
+                disabled={!!busy}
+                onClick={() =>
+                  run('end tt', async () => {
+                    await call('end_all_tiktok', { confirm: 'END_ALL_DROPSHIP_TIKTOK' });
+                    setConfirmEndTikTok(false);
+                  })
+                }
+              >
+                Confirm end all TikTok
+              </button>
+              <button type="button" className="dropship-btn outline" onClick={() => setConfirmEndTikTok(false)}>
                 Cancel
               </button>
             </div>

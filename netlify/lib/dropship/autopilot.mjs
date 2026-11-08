@@ -281,22 +281,31 @@ export async function recomputeHealth(storeId) {
   const trackingPct = (tracked / n) * 100;
   const defectPct = (defects / n) * 100;
 
+  const { count: returnLinks } = await sb
+    .from("dropship_return_links")
+    .select("id", { count: "exact", head: true })
+    .eq("store_id", storeId);
+  const returnPct = sample.length ? ((returnLinks || 0) / Math.max(sample.length, 1)) * 100 : 0;
+
   await sb.from("dropship_health").upsert({
     store_id: storeId,
     late_pct: latePct,
     tracking_pct: trackingPct,
     defect_pct: defectPct,
+    return_pct: returnPct,
     orders_sample: sample.length,
     computed_at: new Date().toISOString(),
   });
 
   const { data: settings } = await sb.from("dropship_settings").select("*").eq("store_id", storeId).maybeSingle();
   const ap = settings?.settings?.auto_pause || { late_pct: 3, tracking_pct_min: 96, defect_pct: 0.8 };
+  const returnPause = Number(settings?.settings?.return_rate_pause_pct ?? 8);
   if (settings?.enabled && sample.length >= 10) {
     let reason = null;
     if (latePct >= Number(ap.late_pct ?? 3)) reason = `late_pct ${latePct.toFixed(2)}%`;
     if (trackingPct < Number(ap.tracking_pct_min ?? 96)) reason = `tracking_pct ${trackingPct.toFixed(2)}%`;
     if (defectPct >= Number(ap.defect_pct ?? 0.8)) reason = `defect_pct ${defectPct.toFixed(2)}%`;
+    if (returnPct >= returnPause) reason = `return_pct ${returnPct.toFixed(2)}%`;
     if (reason && !settings.paused) {
       await sb
         .from("dropship_settings")

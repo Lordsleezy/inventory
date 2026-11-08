@@ -1210,8 +1210,35 @@ export async function ingestAmazonOrder(storeId, order) {
   const item = items[0];
   const sku = item?.SellerSKU || item?.sellerSku;
   if (!orderId || !sku) return { skipped: true };
-  // Amazon sync ignores DS- dropship SKUs (channel off; never mix with Floor units).
-  if (/^DS-\d+$/i.test(String(sku))) return { skipped: true, sku, reason: "dropship_ds_sku" };
+  // Amazon sync ignores DS- until dropship Amazon channel is unlocked + enabled.
+  if (/^DS-\d+$/i.test(String(sku))) {
+    try {
+      const { getAmazonReadiness, amazonShouldIngestDropship } = await import("./dropship/amazon-readiness.mjs");
+      const { data: ds } = await serviceClient()
+        .from("dropship_settings")
+        .select("*")
+        .eq("store_id", storeId)
+        .maybeSingle();
+      const readiness = await getAmazonReadiness(storeId);
+      if (!amazonShouldIngestDropship(ds, readiness)) {
+        return { skipped: true, sku, reason: "dropship_amazon_locked" };
+      }
+      const { syncDropshipSale } = await import("./dropship/autopilot.mjs");
+      return {
+        skipped: false,
+        sku,
+        dropship: true,
+        ...(await syncDropshipSale(storeId, {
+          sku: String(sku),
+          channel: "amazon",
+          channel_order_id: orderId,
+          order_id: orderId,
+        })),
+      };
+    } catch (err) {
+      return { skipped: true, sku, reason: "dropship_amazon_error", error: err.message };
+    }
+  }
 
   const sb = serviceClient();
   const seen = await sb

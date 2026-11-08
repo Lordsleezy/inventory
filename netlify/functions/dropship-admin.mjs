@@ -6,6 +6,10 @@ import { importCatalogChunk } from "../lib/dropship/catalog-import.mjs";
 import { runHunter, decidePick } from "../lib/dropship/picks.mjs";
 import { placeSupplierOrder, pullTrackingAndUpload, recomputeHealth, assertChannelAllowsDropship } from "../lib/dropship/autopilot.mjs";
 import { publishDropshipToEbay, endAllDropshipEbayListings, getEbayPrivileges } from "../lib/dropship/publish-ebay.mjs";
+import { publishDropshipToTikTok, endAllDropshipTikTokListings } from "../lib/dropship/publish-tiktok.mjs";
+import { getAmazonReadiness, updateAmazonReadiness } from "../lib/dropship/amazon-readiness.mjs";
+import { openDropshipReturnTask, receiveReturnedDropshipAsUnit } from "../lib/dropship/returns.mjs";
+import { orderSample, markSampleVerified } from "../lib/dropship/picks.mjs";
 import { DEFAULT_HUNTER } from "../lib/dropship/hunter.mjs";
 import { isDropshipSku } from "../lib/dropship/types.mjs";
 
@@ -87,8 +91,20 @@ async function handler(event) {
       "amazon_channel_on",
       "daily_publish_cap",
       "manual_place_remaining",
+      "sample_gate_required",
     ]) {
       if (body[k] != null) patch[k] = body[k];
+    }
+    // Amazon channel cannot turn on unless readiness unlocked.
+    if (patch.amazon_channel_on) {
+      const ready = await getAmazonReadiness(storeId);
+      if (!ready.unlocked) {
+        return json(400, {
+          error: "amazon_locked",
+          missing: ready.missing,
+          message: "Amazon switch is disabled until the readiness checklist is all green.",
+        });
+      }
     }
     // Hard-block: never allow depop/mercari flags even if someone sends them.
     await sb.from("dropship_settings").update(patch).eq("store_id", storeId);
@@ -164,6 +180,45 @@ async function handler(event) {
     if (body.confirm !== "END_ALL_DROPSHIP") return json(400, { error: "confirm_required" });
     const results = await endAllDropshipEbayListings(storeId);
     return json(200, { results });
+  }
+
+  if (action === "publish_tiktok") {
+    try {
+      const result = await publishDropshipToTikTok(storeId, body.product_id);
+      return json(200, result);
+    } catch (err) {
+      return json(400, { error: err.message, code: err.code });
+    }
+  }
+
+  if (action === "end_all_tiktok") {
+    if (body.confirm !== "END_ALL_DROPSHIP_TIKTOK") return json(400, { error: "confirm_required" });
+    const results = await endAllDropshipTikTokListings(storeId);
+    return json(200, { results });
+  }
+
+  if (action === "amazon_readiness") {
+    return json(200, await getAmazonReadiness(storeId));
+  }
+
+  if (action === "amazon_readiness_update") {
+    return json(200, await updateAmazonReadiness(storeId, body.patch || body));
+  }
+
+  if (action === "order_sample") {
+    return json(200, await orderSample(storeId, body.catalog_item_id, body.address, user.id));
+  }
+
+  if (action === "mark_sample_verified") {
+    return json(200, await markSampleVerified(storeId, body.product_id, body.verified !== false));
+  }
+
+  if (action === "open_return_task") {
+    return json(200, await openDropshipReturnTask(storeId, body));
+  }
+
+  if (action === "receive_returned") {
+    return json(200, await receiveReturnedDropshipAsUnit(storeId, { ...body, userId: user.id }));
   }
 
   if (action === "list_orders") {
@@ -258,8 +313,9 @@ async function assembleDesk(storeId) {
     settings: settings?.settings || DEFAULT_HUNTER,
     ebay_channel_on: settings?.ebay_channel_on ?? false,
     website_channel_on: settings?.website_channel_on ?? false,
-    tiktok_channel_on: false,
-    amazon_channel_on: false,
+    tiktok_channel_on: settings?.tiktok_channel_on ?? false,
+    amazon_channel_on: settings?.amazon_channel_on ?? false,
+    sample_gate_required: settings?.sample_gate_required ?? true,
     daily_publish_cap: settings?.daily_publish_cap ?? 5,
     manual_place_remaining: settings?.manual_place_remaining ?? 10,
     last_supplier_order_at: settings?.last_supplier_order_at ?? null,

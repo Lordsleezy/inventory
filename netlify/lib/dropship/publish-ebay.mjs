@@ -41,6 +41,9 @@ export async function publishDropshipToEbay(storeId, productId, opts = {}) {
   if (!product) throw fail("product_not_found");
   if (!isDropshipSku(product.sku)) throw fail("not_ds_sku");
   if (product.channel !== "ebay") throw fail("wrong_channel");
+  if (settings.sample_gate_required !== false && rules.sample_gate_required !== false && !product.sample_verified) {
+    throw fail("sample_gate: order a sample to yourself and mark verified before publish");
+  }
 
   const cat = product.catalog;
   if (!cat?.ships_from_us) throw fail("not_us_warehouse");
