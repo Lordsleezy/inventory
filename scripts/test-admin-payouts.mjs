@@ -6,6 +6,7 @@ import {
   paymentAppliesToCommission, withCommissionPaymentTag, displayPaymentNote, ownerPayoutSummary, ownerWeekStart, paymentAllocation,
   frozenCutsForTicket, frozenCommissionBase, frozenOwnerShare, ticketIsFrozen,
 } from "../apps/admin/src/payouts.ts";
+import { effectiveCostCents } from "../apps/admin/src/books/costTruth.ts";
 
 // Per-store payout people and SKU rates now come from store_payout_people / store_payout_sku_rates.
 const PAYOUT_PAUL_ID = "f17e6163-b10a-4fe1-a373-75c0094e5363";
@@ -372,5 +373,17 @@ test("frozen commission helpers prefer recorded sale_commissions over live label
   assert.equal(commissionProfit(live, true), 4961);
   assert.equal(Math.round(4961 * 0.3), 1488);
   assert.equal(frozenOwnerShare(live, cuts), profit(live) - 330);
+});
+
+test("Books cost truth uses live unit cost; legacy default amounts are real", () => {
+  assert.equal(effectiveCostCents({ qty: 1, unit_cost_cents: 500, cost_cents: 500, cost_source: "default" }), 500);
+  assert.equal(effectiveCostCents({ qty: 2, unit_cost_cents: 900, cost_source: "builtin" }), 1800);
+  assert.equal(effectiveCostCents({ qty: 1, unit_cost_cents: 25000, cost_source: "estimated" }), 25000);
+  assert.equal(effectiveCostCents({ qty: 1, unit_cost_cents: null, cost_cents: 30000, cost_source: "default" }), 30000);
+});
+test("Books missing cost stays null (no commission base)", () => {
+  assert.equal(effectiveCostCents({ qty: 1, unit_cost_cents: 0, cost_cents: null }), null);
+  assert.equal(effectiveCostCents({ qty: 1, unit_cost_cents: null, cost_cents: 0 }), null);
+  assert.equal(effectiveCostCents({ qty: 1, is_collectible: true, unit_cost_cents: 500 }), 0);
 });
 

@@ -202,9 +202,21 @@ export type MonthProof = {
   pendingCost: number;
 };
 
+export type CostAuditLine = {
+  sale_id: string;
+  date: string;
+  sku: string;
+  channel: string;
+  title: string;
+  ledger_cost_cents?: number | null;
+  unit_cost_cents?: number | null;
+  cost_source?: string;
+};
+
 export type BooksWorkbook = {
   proof: MonthProof;
   audit: { ticketKey: string; message: string }[];
+  costAudit?: { missing: CostAuditLine[]; flaggedDefaults: CostAuditLine[] };
   exportTieIssues?: { check: string; message: string }[];
   integrity?: { ok: boolean; commissionGap_cents: number; ownerGap_cents: number; issues: { kind: string; message: string; cents?: number; saleId?: string }[] };
   expenses: {

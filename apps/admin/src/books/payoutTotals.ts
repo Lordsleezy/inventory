@@ -126,10 +126,10 @@ export function buildSalesLinesFromPayout(
       : 0;
     const label = Math.max(0, Number(row.ship_cost_cents || 0));
     const proc = Math.max(0, Number(row.processing_fee_cents || 0));
-  const cost = effectiveCostCents(row);
     const lineIdx = ticket ? ticketLineIndex(ticket, row) : 0;
-    const comm = ticket ? lineBooksCommission(ticket, lineIdx, rules, frozen, cfg) : null;
-    const p = ticket ? lineBooksProfit(ticket, lineIdx) : null;
+    const cost = effectiveCostCents(row);
+    const comm = cost === null ? 0 : (ticket ? lineBooksCommission(ticket, lineIdx, rules, frozen, cfg) : 0);
+    const p = cost === null ? null : (ticket ? lineBooksProfit(ticket, lineIdx) : null);
     return {
       sale_id: String(row.id ?? ''),
       date: String(row.sold_at || row.date || '').slice(0, 10),

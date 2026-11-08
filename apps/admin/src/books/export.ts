@@ -4,6 +4,7 @@ import {
   MONEY_FMT,
   addReportTitle,
   bandRows,
+  fitWrappedRowHeights,
   cleanSkuOrder,
   displayPaidBy,
   excelDate,
@@ -34,7 +35,8 @@ export async function buildBooksExcel(period: Period, wb: BooksWorkbook, label: 
     'Date', 'SKU', 'Item', 'Channel', 'Order #', 'Sale price', 'Sales tax', 'Marketplace fees',
     'Card fee', 'Shipping label (we paid)', 'Buyer paid shipping', 'Item cost', 'Profit', 'Commission', 'Notes',
   ];
-  addReportTitle(wsS, 'Sales', periodLabel, generated, warn);
+  const salesCols = salesHeader.length;
+  addReportTitle(wsS, 'Sales', periodLabel, generated, salesCols, warn);
   const hS = wsS.rowCount + 1;
   wsS.addRow(salesHeader);
   styleHeaderRow(wsS, hS, salesHeader.length);
@@ -60,6 +62,8 @@ export async function buildBooksExcel(period: Period, wb: BooksWorkbook, label: 
   }
   const dataEndS = wsS.rowCount;
   bandRows(wsS, dataStartS, dataEndS);
+  const salesWidths = [13, 9, 34, 12, 14, 12, 10, 16, 11, 18, 18, 11, 10, 11, 36];
+  fitWrappedRowHeights(wsS, hS, dataEndS, salesWidths);
   for (let r = dataStartS; r <= dataEndS; r++) {
     const row = wsS.getRow(r);
     row.getCell(1).numFmt = 'mmm d, yyyy';
@@ -79,12 +83,42 @@ export async function buildBooksExcel(period: Period, wb: BooksWorkbook, label: 
   tot.font = { bold: true };
   tot.border = { top: { style: 'medium' } };
   for (const c of [7, 12, 13, 14]) tot.getCell(c).numFmt = MONEY_FMT;
-  setColumnWidths(wsS, [13, 9, 34, 12, 14, 12, 10, 12, 10, 12, 12, 10, 10, 11, 36]);
+  const audit = wb.costAudit;
+  if (audit && (audit.missing.length || audit.flaggedDefaults.length)) {
+    wsS.addRow([]);
+    if (audit.missing.length) {
+      wsS.addRow(['Sales with no unit cost (commission $0)']).font = { bold: true };
+      wsS.addRow(['Date', 'SKU', 'Channel', 'Item']);
+      styleHeaderRow(wsS, wsS.rowCount, 4);
+      for (const m of audit.missing) {
+        wsS.addRow([excelDate(m.date), m.sku, m.channel, m.title]);
+      }
+    }
+    if (audit.flaggedDefaults.length) {
+      wsS.addRow([]);
+      wsS.addRow(['Sales flagged as old default cost — verify in Inventory']).font = { bold: true };
+      wsS.addRow(['Date', 'SKU', 'Channel', 'Unit cost', 'Ledger cost', 'Source']);
+      styleHeaderRow(wsS, wsS.rowCount, 6);
+      for (const f of audit.flaggedDefaults) {
+        const row = wsS.addRow([
+          excelDate(f.date),
+          f.sku,
+          f.channel,
+          moneyCell(f.unit_cost_cents ?? null),
+          moneyCell(f.ledger_cost_cents ?? null),
+          f.cost_source || '',
+        ]);
+        row.getCell(4).numFmt = MONEY_FMT;
+        row.getCell(5).numFmt = MONEY_FMT;
+      }
+    }
+  }
+  setColumnWidths(wsS, salesWidths);
   setupPrint(wsS, hS);
 
   const wsE = x.addWorksheet('Expenses');
   const expHeader = ['Date', 'Category', 'Description', 'Amount', 'SKU / Order #', 'Paid by', 'Reimburse?'];
-  addReportTitle(wsE, 'Expenses', periodLabel, generated);
+  addReportTitle(wsE, 'Expenses', periodLabel, generated, expHeader.length);
   const hE = wsE.rowCount + 1;
   wsE.addRow(expHeader);
   styleHeaderRow(wsE, hE, expHeader.length);
@@ -128,7 +162,7 @@ export async function buildBooksExcel(period: Period, wb: BooksWorkbook, label: 
   setupPrint(wsE, hE);
 
   const wsI = x.addWorksheet('Inventory');
-  addReportTitle(wsI, 'Inventory', periodLabel, generated);
+  addReportTitle(wsI, 'Inventory', periodLabel, generated, 3);
   const inv = wb.inventory;
   const metrics: [string, number, string][] = [
     ['Units in stock at start of month', inv.start_unit_count, inv.start_source === 'snapshot' ? '' : 'Estimated'],
@@ -175,7 +209,7 @@ export async function buildBooksExcel(period: Period, wb: BooksWorkbook, label: 
   setupPrint(wsI, 5);
 
   const wsP = x.addWorksheet('Payouts');
-  addReportTitle(wsP, 'Payouts', periodLabel, generated);
+  addReportTitle(wsP, 'Payouts', periodLabel, generated, 5);
   const p = wb.payouts;
   wsP.addRow(['Money paid out to bank']).font = { bold: true, size: 12 };
   const bankHeader = ['Source', 'Starting balance', 'Money in', 'Paid to bank', 'Ending balance'];
@@ -235,7 +269,7 @@ export async function buildBooksExcel(period: Period, wb: BooksWorkbook, label: 
 
   const wsR = x.addWorksheet('Received');
   const recHeader = ['Date received', 'SKU', 'Item', 'Brand', 'Category', 'Condition', 'Qty', 'Cost', 'Floor price', 'Location', 'Received by', 'Current status'];
-  addReportTitle(wsR, 'Items received', periodLabel, generated);
+  addReportTitle(wsR, 'Items received', periodLabel, generated, recHeader.length);
   const hR = wsR.rowCount + 1;
   wsR.addRow(recHeader);
   styleHeaderRow(wsR, hR, recHeader.length);

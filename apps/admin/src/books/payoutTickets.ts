@@ -84,6 +84,7 @@ export function cutCommission(
   cfg: OnlineCfg,
   frozenSet: Set<string>,
 ): number | null {
+  if (ticket.cost === null) return null;
   if (!frozen || !frozenSet.has(key)) return payout(ticket, rule, cfg);
   const k = `${key}|${rule.employee_id}`;
   return frozen.has(k) ? frozen.get(k) ?? null : 0;
@@ -210,7 +211,8 @@ export function lineBooksCommission(
   cfg: OnlineCfg,
 ): number | null {
   const slice = sliceTicketLine(ticket, lineIndex);
-  return ticketCommissionsAllRules(slice as MonthTicket, rules, frozen, cfg);
+  if (slice.cost === null) return 0;
+  return ticketCommissionsAllRules(slice as MonthTicket, rules, frozen, cfg) ?? 0;
 }
 
 export { profit, remainingProfit };

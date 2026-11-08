@@ -6,6 +6,7 @@ import { verifyBooksIntegrity, ledgerOwedFromBalances } from './booksProof';
 import { verifyExportTies } from './exportChecks';
 import { computeBooksFromReport } from './payoutTotals';
 import type { PersonBalance } from './payoutLedger';
+import { listFlaggedDefaultCostSales, listTrulyMissingCostSales } from './costTruth';
 import { saleWhyText } from './saleNotes';
 import type {
   BooksPayoutContext,
@@ -31,6 +32,7 @@ export type WorkbookInput = {
   ledgerBalances?: PersonBalance[];
   paulIds?: string[];
   jacobIds?: string[];
+  costFlagSaleIds?: Set<string>;
 };
 
 export function visibleExpenseRows(rows: ExpenseDisplayLine[], duplicateHidden: Set<string>, decisions: Record<string, 'keep' | 'remove'>) {
@@ -44,7 +46,11 @@ export function visibleExpenseRows(rows: ExpenseDisplayLine[], duplicateHidden: 
 }
 
 export function buildBooksWorkbook(input: WorkbookInput): BooksWorkbook {
-  const { report, inventory, received, payoutCtx, overrides, money, duplicateHidden, duplicateDecisions, ledgerBalances, paulIds, jacobIds } = input;
+  const { report, inventory, received, payoutCtx, overrides, money, duplicateHidden, duplicateDecisions, ledgerBalances, paulIds, jacobIds, costFlagSaleIds } = input;
+  const costAudit = {
+    missing: listTrulyMissingCostSales(report.sales || []),
+    flaggedDefaults: listFlaggedDefaultCostSales(report.sales || [], costFlagSaleIds || new Set()),
+  };
   const attributed = new Set(report.books_attributed_fee_ids || []);
   let built = buildExpenses(report, attributed);
 
@@ -96,6 +102,7 @@ export function buildBooksWorkbook(input: WorkbookInput): BooksWorkbook {
     received: filterReceived(received) as ReceivedItem[],
     proof: computed.proof,
     audit: computed.audit,
+    costAudit,
   };
   const integrity = verifyBooksIntegrity(shell, report, ledgerOwed);
   const exportTieIssues = verifyExportTies({ ...shell, integrity, exportTieIssues: undefined });
@@ -108,6 +115,7 @@ export function buildBooksWorkbook(input: WorkbookInput): BooksWorkbook {
     received: filterReceived(received) as ReceivedItem[],
     proof: computed.proof,
     audit: computed.audit,
+    costAudit,
     integrity,
     exportTieIssues,
   };

@@ -39,6 +39,7 @@ export function BooksPage({ client, money, native = false, onNativeNavigation }:
   const [moneyData, setMoneyData] = useState<Awaited<ReturnType<typeof loadBooksMoney>> | null>(null);
   const [ledgerBalances, setLedgerBalances] = useState<PersonBalance[] | null>(null);
   const [staffPersonIds, setStaffPersonIds] = useState<{ paulIds: string[]; jacobIds: string[] }>({ paulIds: [], jacobIds: [] });
+  const [costFlagSaleIds, setCostFlagSaleIds] = useState<Set<string>>(new Set());
   const [duplicateDecisions, setDuplicateDecisions] = useState<Record<string, 'keep' | 'remove'>>({});
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -62,10 +63,12 @@ export function BooksPage({ client, money, native = false, onNativeNavigation }:
   const loadPayoutSide = useCallback(async (storeId: string, periodStart: string) => {
     const ctx = await loadBooksPayoutContext(client, storeId);
     const ov = await loadCommissionOverrides(client, storeId);
-    const [md, ledgerRaw] = await Promise.all([
+    const [md, ledgerRaw, costFlags] = await Promise.all([
       loadBooksMoney(client, periodStart),
       loadPayoutLedgerData(client, storeId, ov),
+      client.from('sale_payout_cost_flags').select('sale_id').eq('store_id', storeId),
     ]);
+    setCostFlagSaleIds(new Set((costFlags.data || []).map((f) => String(f.sale_id))));
     const balances = computePayoutPersonBalances({
       staff: ctx.staff,
       peopleSlots: ctx.peopleSlots,
@@ -152,8 +155,9 @@ export function BooksPage({ client, money, native = false, onNativeNavigation }:
       ledgerBalances: ledgerBalances || undefined,
       paulIds: staffPersonIds.paulIds,
       jacobIds: staffPersonIds.jacobIds,
+      costFlagSaleIds,
     });
-  }, [report, inventory, received, payoutCtx, overrides, moneyData, duplicateHidden, duplicateDecisions, ledgerBalances, staffPersonIds]);
+  }, [report, inventory, received, payoutCtx, overrides, moneyData, duplicateHidden, duplicateDecisions, ledgerBalances, staffPersonIds, costFlagSaleIds]);
 
   const totals = useMemo(() => workbook?.sales.totals ?? null, [workbook]);
 
