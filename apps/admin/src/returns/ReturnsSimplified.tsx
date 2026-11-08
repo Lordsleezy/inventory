@@ -63,6 +63,10 @@ export function ReturnsSimplified({ client, storeId: _storeId, money, stamp, var
   const [editLabel, setEditLabel] = useState('');
   const [editTracking, setEditTracking] = useState('');
   const [editQty, setEditQty] = useState('1');
+  const [deductPct, setDeductPct] = useState('10');
+  const [deductNote, setDeductNote] = useState('');
+  const [deductPhoto, setDeductPhoto] = useState('');
+  const [deductType, setDeductType] = useState('image/jpeg');
 
   const load = useCallback(async () => {
     const filter = seg === 'open' ? 'open' : 'closed';
@@ -244,6 +248,38 @@ export function ReturnsSimplified({ client, storeId: _storeId, money, stamp, var
     await load();
   }
 
+  async function ebayAction(action: string, extra: Record<string, unknown> = {}) {
+    if (!accessToken) return;
+    if (action !== 'sync' && !selected) return;
+    setBusy(action);
+    setError('');
+    try {
+      const res = await fetch(floorFunctionUrl('ebay-returns'), {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ action, return_id: selected?.id, ...extra }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || `eBay returns failed (${res.status})`);
+      await load();
+    } catch (err) {
+      setError(errText(err));
+    } finally {
+      setBusy('');
+    }
+  }
+
+  function readDeductPhoto(file: File | null) {
+    if (!file) { setDeductPhoto(''); return; }
+    setDeductType(file.type || 'image/jpeg');
+    const reader = new FileReader();
+    reader.onload = () => {
+      const text = String(reader.result || '');
+      setDeductPhoto(text.includes(',') ? text.slice(text.indexOf(',') + 1) : text);
+    };
+    reader.readAsDataURL(file);
+  }
+
   async function resolveDelivered(defective: boolean) {
     if (!selected) return;
     const qty = Math.max(1, Math.trunc(Number(selected.requested_qty) || 1));
@@ -277,6 +313,7 @@ export function ReturnsSimplified({ client, storeId: _storeId, money, stamp, var
           <div className="returns-title-row">
             <h1>Returns</h1>
             <button type="button" className="returns-text-btn" onClick={openNew}>New return</button>
+            {accessToken && <button type="button" className="returns-text-btn" disabled={!!busy} onClick={() => void ebayAction('sync')}>{busy === 'sync' ? 'Checking eBay…' : 'Check eBay'}</button>}
           </div>
         ) : (
           <header>
@@ -284,6 +321,7 @@ export function ReturnsSimplified({ client, storeId: _storeId, money, stamp, var
             <div className="returns-title-row returns-title-row-desktop">
               <h1>Returns</h1>
               <button type="button" className="primary" onClick={openNew}>New return</button>
+              {accessToken && <button type="button" className="secondary" disabled={!!busy} onClick={() => void ebayAction('sync')}>{busy === 'sync' ? 'Checking eBay…' : 'Check eBay'}</button>}
             </div>
             <p>Returns, refunds, and replacements. Admin only.</p>
           </header>
@@ -453,6 +491,42 @@ export function ReturnsSimplified({ client, storeId: _storeId, money, stamp, var
         <div className="returns-kv readonly"><span>Label (I paid)</span><strong>{money(selected.return_label_cents || 0)}</strong></div>
         <div className="returns-kv readonly"><span>Tracking #</span><strong>{selected.tracking_number || '—'}</strong></div>
       </div>
+      {selected.channel === 'ebay' && selected.status !== 'closed' && selected.status !== 'canceled' && (
+        <div className="returns-decide">
+          <p>eBay refund. Change-of-mind returns refund the item price only. Original shipping stays with eBay.</p>
+          <div className="returns-decide-actions">
+            <button type="button" className="returns-primary" disabled={!!busy} onClick={() => void ebayAction('refund_item', { note: 'Item price only. Buyer paid the original shipping and the return label.' })}>
+              {busy === 'refund_item' ? 'Sending…' : `Refund item ${money(selected.refund_cents || 0)}`}
+            </button>
+          </div>
+          <p>If it came back used or damaged, deduct up to 50%. A photo and a note are required. {deductPct && Number(deductPct) > 0 ? `That refunds ${money(Math.round((selected.refund_cents || 0) * (100 - Math.min(50, Number(deductPct))) / 100))}.` : ''}</p>
+          <div className="returns-kv-group">
+            <label className="returns-kv">
+              <span>Deduct %</span>
+              <input inputMode="numeric" value={deductPct} onChange={(e) => {
+                const n = e.target.value.replace(/[^\d]/g, '').slice(0, 2);
+                setDeductPct(n === '' ? '' : String(Math.min(50, Number(n))));
+              }} />
+            </label>
+            <label className="returns-kv">
+              <span>Condition note</span>
+              <input value={deductNote} onChange={(e) => setDeductNote(e.target.value)} />
+            </label>
+            <label className="returns-kv">
+              <span>Photo</span>
+              <input type="file" accept="image/*" onChange={(e) => readDeductPhoto(e.target.files?.[0] || null)} />
+            </label>
+          </div>
+          <button
+            type="button"
+            className="returns-secondary"
+            disabled={!!busy || !deductNote.trim() || !deductPhoto || !(Number(deductPct) > 0)}
+            onClick={() => void ebayAction('deduct', { percent: Math.min(50, Number(deductPct) || 0), note: deductNote.trim(), photo_base64: deductPhoto, photo_type: deductType })}
+          >
+            {busy === 'deduct' ? 'Sending…' : 'Submit deduction'}
+          </button>
+        </div>
+      )}
       {showDecide && (
         <div className="returns-decide">
           <p>Package delivered. Where does this unit go?</p>

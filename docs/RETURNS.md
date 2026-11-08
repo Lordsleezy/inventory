@@ -27,6 +27,15 @@ Full setup (redirect URL, Manage API scopes, env list): **[docs/TIKTOK_SHOP.md](
 6. Redeploy Netlify. Status: `POST .../tiktok-returns-sync` with `{"action":"status"}`.
 7. Decision clock defaults to **48 hours** (`return_settings.decision_hours.tiktok`); `ingest_channel_return` enqueues `return_decision` alerts.
 
+### eBay (ikonikdeals2026)
+
+Listings use the business policy **OBI Returns – 30 Day Buyer Pays**: returns accepted, 30 days, buyer pays return shipping. Change-of-mind refunds are the item price only. Original buyer-paid shipping is not refunded. A used or damaged return can be deducted up to 50% after a condition photo and a note.
+
+1. Admin → Returns → **Check eBay**. That pulls Post-Order return requests into the same desk as Amazon and TikTok.
+2. Open an eBay return. **Refund item** sends the item price only.
+3. For a used or damaged return, enter a deduction percent (50 max), a condition note, and a photo, then **Submit deduction**. The photo is uploaded to eBay before the partial refund is offered.
+4. The scheduled `returns-sync` function also pulls eBay. Not-as-described returns stay the seller's responsibility.
+
 ### Dropship bot branch
 
 `feat/dropship-bot` was **not** on the remote when this shipped. Use:

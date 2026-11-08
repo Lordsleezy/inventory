@@ -8,6 +8,8 @@ import { isNetlifyScheduleEvent } from "../lib/schedule.mjs";
 import { withLock } from "../lib/bg-guard.mjs";
 import { syncAmazonReturns } from "../lib/amazon-returns.mjs";
 import { syncTikTokReturns, tiktokConfigured, tiktokSetupChecklist } from "../lib/tiktok-shop.mjs";
+import { syncEbayReturns } from "../lib/ebay-returns.mjs";
+import { loadEbayAccount } from "../lib/ebay-accounts.mjs";
 import { STORE_DEFAULT } from "../lib/returns.mjs";
 
 async function handle(event) {
@@ -45,7 +47,10 @@ async function handle(event) {
         ok: false,
         error: err instanceof Error ? err.message : String(err),
       }));
-      return { amazon, tiktok };
+      const ebay = await loadEbayAccount(storeId, { username: "ikonikdeals2026" })
+        .then((account) => syncEbayReturns(storeId, account))
+        .catch((err) => ({ ok: false, error: err instanceof Error ? err.message : String(err) }));
+      return { amazon, tiktok, ebay };
     });
     return json(200, { ok: true, ...result });
   } catch (err) {

@@ -17,6 +17,7 @@ export type ReturnRow = {
   channel: string;
   status: string;
   reason: string;
+  fault?: string | null;
   external_order_id: string | null;
   buyer_name?: string | null;
   refund_cents: number;

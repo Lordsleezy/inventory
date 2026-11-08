@@ -7,7 +7,7 @@
 import { gtinIssue } from "./gtin.mjs";
 
 export const CLEARANCE_FOOTER_TEXT =
-  "Open-box clearance item. Item may show signs of use or handling, although it shouldn't. If there are any issues, please reach out to us through eBay messages before leaving feedback and we'll make it right.";
+  "Open-box clearance item. Item may show signs of use or handling, although it shouldn't. Returns are accepted within 30 days. On a change-of-mind return, the buyer pays return shipping. If anything isn't as described, contact us and we'll make it right.";
 
 export const CLEARANCE_FOOTER_MARK = "Open-box clearance item. Item may show signs of use or handling";
 
@@ -70,12 +70,20 @@ export function damageText(input = {}) {
 }
 
 export function appendClearanceFooter(description) {
-  const raw = String(description ?? "");
-  if (raw.includes(CLEARANCE_FOOTER_MARK)) return raw;
-  const trimmed = raw.replace(/\s+$/, "");
+  const trimmed = stripClearanceFooter(description);
   const html = `<div style="font-size:12px;line-height:1.35;margin-top:16px">${CLEARANCE_FOOTER_TEXT}</div>`;
   if (!trimmed) return html;
   return `${trimmed}\n${html}`;
+}
+
+/** Drop old "no returns" sentences, then put the current returns footer on the description. */
+export function descriptionWithReturns(description) {
+  const cleaned = stripClearanceFooter(description)
+    .replace(/\n*\s*Sold as-is\.\s*No returns\.\s*/gi, "\n")
+    .replace(/\bNo returns(?:\s+accepted)?\b\.?/gi, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return appendClearanceFooter(cleaned);
 }
 
 export function stripClearanceFooter(description) {
@@ -302,6 +310,7 @@ export function withCatalogMainPhoto(existingUrls, catalogImages) {
 }
 
 const FORBIDDEN_REVISE = ["Title", "StartPrice", "BuyItNowPrice", "Quantity", "PrimaryCategory", "ShippingDetails", "SellerProfiles", "ItemSpecifics", "SKU"];
+const RETURN_REVISE_FORBIDDEN = ["Title", "StartPrice", "BuyItNowPrice", "Quantity", "PrimaryCategory", "ShippingDetails", "ConditionID", "ItemSpecifics", "SKU", "PictureDetails"];
 
 export function reviseStandardsXml({ itemId, description, conditionId, pictureUrls } = {}) {
   if (!itemId) throw new Error("item id required");
@@ -316,6 +325,30 @@ export function reviseStandardsXml({ itemId, description, conditionId, pictureUr
   }
   const xml = `<Item>${parts.join("")}</Item>`;
   for (const tag of FORBIDDEN_REVISE) {
+    if (new RegExp(`<${tag}[\\s>]`, "i").test(xml)) throw new Error(`revise would change ${tag}`);
+  }
+  return xml;
+}
+
+/** Description and return profile only. Price, shipping, condition, and title stay off the revise. */
+export function reviseReturnPolicyXml({ itemId, description, returnPolicyId, paymentPolicyId, fulfillmentPolicyId } = {}) {
+  if (!itemId) throw new Error("item id required");
+  const parts = [`<ItemID>${xmlEscape(itemId)}</ItemID>`];
+  if (description != null) {
+    const safe = String(description).replace(/]]>/g, "]]]]><![CDATA[>");
+    parts.push(`<Description><![CDATA[${safe}]]></Description>`);
+  }
+  if (returnPolicyId) {
+    const payment = paymentPolicyId
+      ? `<SellerPaymentProfile><PaymentProfileID>${xmlEscape(paymentPolicyId)}</PaymentProfileID></SellerPaymentProfile>`
+      : "";
+    const shipping = fulfillmentPolicyId
+      ? `<SellerShippingProfile><ShippingProfileID>${xmlEscape(fulfillmentPolicyId)}</ShippingProfileID></SellerShippingProfile>`
+      : "";
+    parts.push(`<SellerProfiles>${payment}<SellerReturnProfile><ReturnProfileID>${xmlEscape(returnPolicyId)}</ReturnProfileID></SellerReturnProfile>${shipping}</SellerProfiles>`);
+  }
+  const xml = `<Item>${parts.join("")}</Item>`;
+  for (const tag of RETURN_REVISE_FORBIDDEN) {
     if (new RegExp(`<${tag}[\\s>]`, "i").test(xml)) throw new Error(`revise would change ${tag}`);
   }
   return xml;

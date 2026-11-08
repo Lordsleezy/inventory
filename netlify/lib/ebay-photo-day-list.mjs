@@ -104,7 +104,7 @@ function shipDescription(unit, mode) {
   const cleaned = String(base)
     .replace(/\nSold as-is\. Local pickup unless arranged\.\s*$/i, "\nSold as-is.")
     .trim();
-  return ebayDescription(`${cleaned}\n\n${shipLine}\nSold as-is. No returns.`, unit.sku);
+  return ebayDescription(`${cleaned}\n\n${shipLine}`, unit.sku);
 }
 
 function boxOf(unit) {
