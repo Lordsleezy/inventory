@@ -53,10 +53,8 @@ export async function loadShipFrom(sb, storeId) {
   return shipFrom;
 }
 
-export async function labelFormatSetting(sb, storeId) {
-  const { data } = await sb.from("store_settings").select("value").eq("store_id", storeId).eq("key", "label_format").maybeSingle();
-  const v = typeof data?.value === "string" ? data.value : data?.value;
-  return v === "PDF" || v === "PDF_LETTER" ? "PDF" : "PDF_4x6";
+export async function labelFormatSetting(_sb, _storeId) {
+  return "PDF_4x6";
 }
 
 export async function amazonPreferCents(sb, storeId) {
@@ -278,7 +276,8 @@ export async function multiSourceQuote(sb, storeId, order, box, deps = {}) {
 export async function buyFromRate(sb, storeId, order, rateId, box, { labelFormat, deps = {} } = {}) {
   const { source, remoteId } = decodeRateId(rateId);
   const useBox = cleanBox(box);
-  const format = labelFormat || (await labelFormatSetting(sb, storeId));
+  const format = "PDF_4x6";
+  void labelFormat;
 
   if (source === LABEL_SOURCES.shippo || (!source && remoteId)) {
     const shippoRateId = source === LABEL_SOURCES.shippo ? remoteId : rateId;
@@ -324,7 +323,8 @@ export async function buyFromRate(sb, storeId, order, rateId, box, { labelFormat
 }
 
 export async function buySelectedRate(storeId, order, selectedRate, box, { labelFormat, deps = {} } = {}) {
-  const format = labelFormat || "PDF_4x6";
+  const format = "PDF_4x6";
+  void labelFormat;
   const useBox = cleanBox(box);
   const source = selectedRate.source;
 

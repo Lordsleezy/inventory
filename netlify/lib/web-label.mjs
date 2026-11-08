@@ -265,7 +265,8 @@ export async function buyLabelForOrder(sb, storeId, orderId, { rateId, box, acto
   if (!rateId && !selectedRate) return { ok: false, status: 400, error: "Pick a rate first." };
   if (!validBox(box)) return { ok: false, status: 400, error: "Enter the box length, width, height (in) and weight (lb)." };
   const cb = cleanBox(box);
-  const format = labelFormat || (await labelFormatSetting(sb, storeId));
+  const format = "PDF_4x6";
+  void labelFormat;
 
   const lock = await claimBuyLock(sb, order);
   if (!lock.ok) return { ok: false, status: 409, error: "A label for this order is already being bought (or already exists)." };

@@ -128,7 +128,7 @@ export async function amazonSpapiBuyLabel(storeId, rate, { labelFormat = "PDF" }
     rateId: raw.rate_id,
     requestedDocumentSpecification: {
       format: labelFormat === "PDF_4x6" ? "PDF" : "PDF",
-      size: labelFormat === "PDF_4x6" ? { width: 4, length: 6, unit: "INCH" } : { width: 8.5, length: 11, unit: "INCH" },
+      size: { width: 4, length: 6, unit: "INCH" },
       dpi: 300,
       pageLayout: "DEFAULT",
       needFileJoining: false,

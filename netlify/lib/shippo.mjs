@@ -150,7 +150,8 @@ export async function getRate(rateId, { fetchImpl } = {}) {
 }
 
 export async function buyLabel(rateId, { fetchImpl, metadata, labelFileType = "PDF_4x6" } = {}) {
-  const fileType = labelFileType === "PDF" || labelFileType === "PDF_LETTER" ? "PDF" : "PDF_4x6";
+  const fileType = "PDF_4x6";
+  void labelFileType;
   const body = { rate: rateId, label_file_type: fileType, async: false };
   if (metadata) body.metadata = String(metadata).slice(0, 200);
   return call("/transactions/", { method: "POST", fetchImpl, body });
