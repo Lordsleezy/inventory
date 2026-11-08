@@ -845,25 +845,6 @@ export function App() {
           {inventorySubs.map(([tab, label]) => <button type="button" key={tab} className={page === 'inventory' && nav.inventoryTab === tab ? 'active' : ''} onClick={() => goNav({ page: 'inventory', inventoryTab: tab, ...(tab === 'unfinished' ? { attentionSection: 'all' as const } : {}) })}>{label}</button>)}
         </div>
       </div>
-      <div className={`nav-group${navGroup === 'other' ? ' open' : ''}${otherSubs.some(([id]) => id === page) ? ' on' : ''}`}>
-        <button
-          type="button"
-          title="Other"
-          className={`nav-parent${otherSubs.some(([id]) => id === page) ? ' active' : ''}`}
-          onClick={() => {
-            setNavGroup(g => g === 'other' ? null : 'other');
-            if (!otherSubs.some(([id]) => id === page)) go({ page: 'ebay' });
-            setEditing(null);
-          }}
-        >
-          Other
-        </button>
-        <div className="nav-sub">
-          {otherSubs.map(([id, label]) => (
-            <button type="button" key={id} className={page === id ? 'active' : ''} onClick={() => goNav({ page: id })}>{label}</button>
-          ))}
-        </div>
-      </div>
       <div className={`nav-group${navGroup === 'reports' ? ' open' : ''}${page === 'reports' ? ' on' : ''}`}>
         <button type="button" title="Reports" className={`nav-parent${page === 'reports' ? ' active' : ''}`} onClick={() => { setNavGroup(g => g === 'reports' ? null : 'reports'); go({ page: 'reports' }); setEditing(null); }}>Reports</button>
         <div className="nav-sub">
@@ -873,6 +854,21 @@ export function App() {
       <button type="button" title="Money" className={page === 'withdrawals' ? 'active' : ''} onClick={() => goNav({ page: 'withdrawals' })}>Money</button>
       <button type="button" title="Books" className={page === 'books' ? 'active' : ''} onClick={() => goNav({ page: 'books' })}>Books</button>
       {mainNav.filter(([id]) => id === 'cameras').map(([id, label]) => <button type="button" className={page === id ? 'active' : ''} key={id} title={label} onClick={() => goNav({ page: id })}>{label}</button>)}
+      <div className={`nav-group${navGroup === 'other' ? ' open' : ''}${DESKTOP_OTHER_PAGES.includes(page) ? ' on' : ''}`}>
+        <button
+          type="button"
+          title="Other"
+          className={`nav-parent${DESKTOP_OTHER_PAGES.includes(page) ? ' active' : ''}`}
+          onClick={() => { setNavGroup(g => g === 'other' ? null : 'other'); setEditing(null); }}
+        >
+          Other
+        </button>
+        <div className="nav-sub">
+          {otherSubs.map(([id, label]) => (
+            <button type="button" key={id} className={page === id ? 'active' : ''} onClick={() => goNav({ page: id })}>{label}</button>
+          ))}
+        </div>
+      </div>
       <button type="button" title="Settings" className={page === 'settings' ? 'active' : ''} onClick={() => goNav({ page: 'settings' })}>Settings</button>
         </>}
     </nav>
