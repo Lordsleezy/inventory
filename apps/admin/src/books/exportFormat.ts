@@ -32,10 +32,11 @@ export function addReportTitle(
   ws.mergeCells(1, 1, 1, colCount);
   const t1 = ws.getCell(1, 1);
   t1.font = { bold: true, size: 13 };
-  t1.alignment = { wrapText: false, vertical: 'middle' };
-  ws.getRow(1).height = 20;
-  ws.addRow([`Generated ${generated.toLocaleString('en-US', { timeZone: 'America/Los_Angeles' })}`]);
+  t1.alignment = { wrapText: true, vertical: 'middle', horizontal: 'left' };
+  ws.getRow(1).height = 22;
+  const gen = ws.addRow([`Generated ${generated.toLocaleString('en-US', { timeZone: 'America/Los_Angeles' })}`]);
   ws.mergeCells(2, 1, 2, colCount);
+  gen.getCell(1).alignment = { wrapText: true, vertical: 'middle', horizontal: 'left' };
   if (tieWarning) {
     const w = ws.addRow([`These numbers don't tie: ${tieWarning}`]);
     ws.mergeCells(w.number, 1, w.number, colCount);
@@ -63,8 +64,62 @@ export function setColumnWidths(ws: Worksheet, widths: number[]) {
   widths.forEach((w, i) => {
     const col = ws.getColumn(i + 1);
     col.width = w;
-    col.alignment = { wrapText: w >= 24, vertical: 'top' };
+    col.alignment = { wrapText: true, vertical: 'top' };
   });
+}
+
+/** Estimate wrapped line count for Excel column width (approximate character units). */
+function wrappedLines(text: string, colWidth: number) {
+  const t = String(text || '').trim();
+  if (!t) return 1;
+  const charsPerLine = Math.max(6, Math.floor(colWidth * 1.05));
+  const words = t.split(/\s+/);
+  let lines = 1;
+  let lineLen = 0;
+  for (const word of words) {
+    const wlen = word.length;
+    if (wlen > charsPerLine) {
+      lines += Math.ceil(wlen / charsPerLine);
+      lineLen = 0;
+      continue;
+    }
+    if (lineLen === 0) lineLen = wlen;
+    else if (lineLen + 1 + wlen <= charsPerLine) lineLen += 1 + wlen;
+    else {
+      lines += 1;
+      lineLen = wlen;
+    }
+  }
+  return Math.max(1, lines);
+}
+
+export function wrapDataRows(ws: Worksheet, from: number, to: number, colCount: number) {
+  for (let r = from; r <= to; r++) {
+    const row = ws.getRow(r);
+    for (let c = 1; c <= colCount; c++) {
+      const cell = row.getCell(c);
+      if (cell.value == null || cell.value === '') continue;
+      cell.alignment = { ...(cell.alignment || {}), wrapText: true, vertical: 'top' };
+    }
+  }
+}
+
+export function fitTitleRows(ws: Worksheet, colCount: number, colWidths: number[]) {
+  const mergedWidth = colWidths.slice(0, colCount).reduce((a, b) => a + b, 0);
+  for (const rowNum of [1, 2]) {
+    const row = ws.getRow(rowNum);
+    if (!row.getCell(1).text) continue;
+    row.getCell(1).alignment = { wrapText: true, vertical: 'middle', horizontal: 'left' };
+    const lines = wrappedLines(String(row.getCell(1).text), mergedWidth);
+    row.height = Math.min(72, Math.max(18, 14 * lines + 4));
+  }
+}
+
+export function mergeLabelRow(ws: Worksheet, rowNum: number, fromCol: number, toCol: number, text: string) {
+  if (toCol > fromCol) ws.mergeCells(rowNum, fromCol, rowNum, toCol);
+  const cell = ws.getCell(rowNum, fromCol);
+  cell.value = text;
+  cell.alignment = { wrapText: true, vertical: 'middle', horizontal: 'left' };
 }
 
 export function fitWrappedRowHeights(ws: Worksheet, from: number, to: number, colWidths: number[]) {
@@ -73,11 +128,9 @@ export function fitWrappedRowHeights(ws: Worksheet, from: number, to: number, co
     let lines = 1;
     row.eachCell({ includeEmpty: false }, (cell, col) => {
       const w = colWidths[col - 1] || 12;
-      const text = String(cell.text || '');
-      const est = Math.ceil(text.length / Math.max(8, w * 0.9)) || 1;
-      lines = Math.max(lines, est);
+      lines = Math.max(lines, wrappedLines(String(cell.text || ''), w));
     });
-    row.height = Math.min(72, Math.max(15, 15 * lines));
+    row.height = Math.min(120, Math.max(15, 14 * lines + (lines > 1 ? 2 : 0)));
   }
 }
 

@@ -5,6 +5,9 @@ import {
   addReportTitle,
   bandRows,
   fitWrappedRowHeights,
+  fitTitleRows,
+  mergeLabelRow,
+  wrapDataRows,
   cleanSkuOrder,
   displayPaidBy,
   excelDate,
@@ -36,7 +39,10 @@ export async function buildBooksExcel(period: Period, wb: BooksWorkbook, label: 
     'Card fee', 'Shipping label (we paid)', 'Buyer paid shipping', 'Item cost', 'Profit', 'Commission', 'Notes',
   ];
   const salesCols = salesHeader.length;
+  const salesWidths = [14, 10, 38, 14, 16, 12, 11, 18, 12, 20, 20, 11, 11, 12, 40];
+  setColumnWidths(wsS, salesWidths);
   addReportTitle(wsS, 'Sales', periodLabel, generated, salesCols, warn);
+  fitTitleRows(wsS, salesCols, salesWidths);
   const hS = wsS.rowCount + 1;
   wsS.addRow(salesHeader);
   styleHeaderRow(wsS, hS, salesHeader.length);
@@ -62,7 +68,7 @@ export async function buildBooksExcel(period: Period, wb: BooksWorkbook, label: 
   }
   const dataEndS = wsS.rowCount;
   bandRows(wsS, dataStartS, dataEndS);
-  const salesWidths = [13, 9, 34, 12, 14, 12, 10, 16, 11, 18, 18, 11, 10, 11, 36];
+  wrapDataRows(wsS, dataStartS, dataEndS, salesCols);
   fitWrappedRowHeights(wsS, hS, dataEndS, salesWidths);
   for (let r = dataStartS; r <= dataEndS; r++) {
     const row = wsS.getRow(r);
@@ -73,13 +79,15 @@ export async function buildBooksExcel(period: Period, wb: BooksWorkbook, label: 
   }
   wsS.addRow([]);
   for (const c of wb.sales.channelTotals) {
-    const row = wsS.addRow([`${c.channel} subtotal`, '', '', '', '', '', moneyCell(c.revenue_cents), '', '', '', '', '', moneyCell(c.profit_cents), '', '']);
+    const row = wsS.addRow(['', '', '', '', '', '', moneyCell(c.revenue_cents), '', '', '', '', '', moneyCell(c.profit_cents), '', '']);
+    mergeLabelRow(wsS, row.number, 1, 6, `${c.channel} subtotal`);
     row.font = { bold: true };
     row.getCell(7).numFmt = MONEY_FMT;
     row.getCell(13).numFmt = MONEY_FMT;
   }
   const t = wb.sales.totals;
-  const tot = wsS.addRow(['Period grand total', '', '', '', '', '', moneyCell(t.revenue), '', '', '', '', moneyCell(t.cost), moneyCell(t.profit), moneyCell(t.commission), '']);
+  const tot = wsS.addRow(['', '', '', '', '', '', moneyCell(t.revenue), '', '', '', '', moneyCell(t.cost), moneyCell(t.profit), moneyCell(t.commission), '']);
+  mergeLabelRow(wsS, tot.number, 1, 6, 'Period grand total');
   tot.font = { bold: true };
   tot.border = { top: { style: 'medium' } };
   for (const c of [7, 12, 13, 14]) tot.getCell(c).numFmt = MONEY_FMT;
@@ -113,12 +121,16 @@ export async function buildBooksExcel(period: Period, wb: BooksWorkbook, label: 
       }
     }
   }
-  setColumnWidths(wsS, salesWidths);
+  fitTitleRows(wsS, salesCols, salesWidths);
   setupPrint(wsS, hS);
 
   const wsE = x.addWorksheet('Expenses');
   const expHeader = ['Date', 'Category', 'Description', 'Amount', 'SKU / Order #', 'Paid by', 'Reimburse?'];
-  addReportTitle(wsE, 'Expenses', periodLabel, generated, expHeader.length);
+  const expCols = expHeader.length;
+  const expWidths = [14, 26, 48, 13, 18, 16, 12];
+  setColumnWidths(wsE, expWidths);
+  addReportTitle(wsE, 'Expenses', periodLabel, generated, expCols);
+  fitTitleRows(wsE, expCols, expWidths);
   const hE = wsE.rowCount + 1;
   wsE.addRow(expHeader);
   styleHeaderRow(wsE, hE, expHeader.length);
@@ -137,32 +149,48 @@ export async function buildBooksExcel(period: Period, wb: BooksWorkbook, label: 
     row.getCell(1).numFmt = 'mmm d, yyyy';
     row.getCell(4).numFmt = MONEY_FMT;
   }
-  bandRows(wsE, startE, wsE.rowCount);
+  const expDataEnd = wsE.rowCount;
+  bandRows(wsE, startE, expDataEnd);
+  wrapDataRows(wsE, hE, expDataEnd, expCols);
+  fitWrappedRowHeights(wsE, hE, expDataEnd, expWidths);
   wsE.addRow([]);
   for (const c of wb.expenses.categoryTotals) {
-    const row = wsE.addRow([`${c.category} subtotal`, '', '', moneyCell(c.amount_cents)]);
+    const row = wsE.addRow(['', '', '', moneyCell(c.amount_cents)]);
+    mergeLabelRow(wsE, row.number, 1, 3, `${c.category} subtotal`);
     row.font = { bold: true };
     row.getCell(4).numFmt = MONEY_FMT;
+    fitWrappedRowHeights(wsE, row.number, row.number, expWidths);
   }
-  const gt = wsE.addRow(['Grand total', '', '', moneyCell(wb.expenses.total_cents)]);
+  const gt = wsE.addRow(['', '', '', moneyCell(wb.expenses.total_cents)]);
+  mergeLabelRow(wsE, gt.number, 1, 3, 'Grand total');
   gt.font = { bold: true };
   gt.border = { top: { style: 'medium' } };
   gt.getCell(4).numFmt = MONEY_FMT;
   if (dupLines.length || wb.expenses.duplicates.length) {
     wsE.addRow([]);
-    wsE.addRow(['Possible duplicates (not counted in totals)']).font = { bold: true };
+    const dupBanner = wsE.addRow(['Possible duplicates (not counted in totals)']);
+    mergeLabelRow(wsE, dupBanner.number, 1, expCols, 'Possible duplicates (not counted in totals)');
+    dupBanner.font = { bold: true };
+    const dupH = wsE.rowCount + 1;
     wsE.addRow(['Date', 'Category', 'Description', 'Amount']);
+    styleHeaderRow(wsE, dupH, 4);
+    const dupStart = dupH + 1;
     for (const d of wb.expenses.duplicates) {
       for (const line of [d.pair?.duplicate, d.pair?.primary].filter(Boolean)) {
         wsE.addRow([line!.date, line!.category, line!.title, moneyCell(line!.amount_cents)]);
       }
     }
+    wrapDataRows(wsE, dupStart, wsE.rowCount, 4);
+    fitWrappedRowHeights(wsE, dupH, wsE.rowCount, expWidths);
   }
-  setColumnWidths(wsE, [13, 18, 40, 12, 16, 14, 11]);
+  fitTitleRows(wsE, expCols, expWidths);
   setupPrint(wsE, hE);
 
   const wsI = x.addWorksheet('Inventory');
+  const invWidths = [40, 10, 28];
+  setColumnWidths(wsI, invWidths);
   addReportTitle(wsI, 'Inventory', periodLabel, generated, 3);
+  fitTitleRows(wsI, 3, invWidths);
   const inv = wb.inventory;
   const metrics: [string, number, string][] = [
     ['Units in stock at start of month', inv.start_unit_count, inv.start_source === 'snapshot' ? '' : 'Estimated'],
@@ -179,6 +207,8 @@ export async function buildBooksExcel(period: Period, wb: BooksWorkbook, label: 
   const mStart = wsI.rowCount + 1;
   for (const [metric, value, note] of metrics) wsI.addRow([metric, value, note]);
   bandRows(wsI, mStart, wsI.rowCount);
+  wrapDataRows(wsI, mStart, wsI.rowCount, 3);
+  fitWrappedRowHeights(wsI, mStart, wsI.rowCount, invWidths);
   wsI.addRow([]);
   wsI.addRow(['Giveaways']).font = { bold: true };
   wsI.addRow(['SKU', 'Item', 'Cost', 'Given to', 'Date']);
@@ -205,11 +235,13 @@ export async function buildBooksExcel(period: Period, wb: BooksWorkbook, label: 
     row.getCell(4).numFmt = MONEY_FMT;
     row.getCell(5).numFmt = MONEY_FMT;
   }
-  setColumnWidths(wsI, [36, 10, 24, 12, 14, 12, 14]);
   setupPrint(wsI, 5);
 
   const wsP = x.addWorksheet('Payouts');
+  const payWidths = [32, 18, 18, 18, 18];
+  setColumnWidths(wsP, payWidths);
   addReportTitle(wsP, 'Payouts', periodLabel, generated, 5);
+  fitTitleRows(wsP, 5, payWidths);
   const p = wb.payouts;
   wsP.addRow(['Money paid out to bank']).font = { bold: true, size: 12 };
   const bankHeader = ['Source', 'Starting balance', 'Money in', 'Paid to bank', 'Ending balance'];
@@ -264,12 +296,17 @@ export async function buildBooksExcel(period: Period, wb: BooksWorkbook, label: 
     if (label.startsWith('=')) row.font = { bold: true };
     row.getCell(2).numFmt = MONEY_FMT;
   }
-  setColumnWidths(wsP, [28, 16, 16, 16, 16]);
+  wrapDataRows(wsP, hP, wsP.rowCount, 5);
+  fitWrappedRowHeights(wsP, hP, wsP.rowCount, payWidths);
+  fitTitleRows(wsP, 5, payWidths);
   setupPrint(wsP, hP);
 
   const wsR = x.addWorksheet('Received');
   const recHeader = ['Date received', 'SKU', 'Item', 'Brand', 'Category', 'Condition', 'Qty', 'Cost', 'Floor price', 'Location', 'Received by', 'Current status'];
+  const recWidths = [14, 10, 36, 14, 16, 12, 6, 11, 11, 14, 14, 14];
+  setColumnWidths(wsR, recWidths);
   addReportTitle(wsR, 'Items received', periodLabel, generated, recHeader.length);
+  fitTitleRows(wsR, recHeader.length, recWidths);
   const hR = wsR.rowCount + 1;
   wsR.addRow(recHeader);
   styleHeaderRow(wsR, hR, recHeader.length);
@@ -291,12 +328,14 @@ export async function buildBooksExcel(period: Period, wb: BooksWorkbook, label: 
     ]);
   }
   bandRows(wsR, rStart, wsR.rowCount);
+  wrapDataRows(wsR, hR, wsR.rowCount, recHeader.length);
+  fitWrappedRowHeights(wsR, hR, wsR.rowCount, recWidths);
   for (let r = rStart; r <= wsR.rowCount; r++) {
     wsR.getRow(r).getCell(1).numFmt = 'mmm d, yyyy';
     wsR.getRow(r).getCell(8).numFmt = MONEY_FMT;
     wsR.getRow(r).getCell(9).numFmt = MONEY_FMT;
   }
-  setColumnWidths(wsR, [14, 9, 30, 14, 16, 12, 6, 10, 10, 14, 14, 16]);
+  fitTitleRows(wsR, recHeader.length, recWidths);
   setupPrint(wsR, hR);
 
   return x.xlsx.writeBuffer();
