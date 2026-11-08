@@ -1,5 +1,6 @@
 import type { CommissionOverride, OnlineCfg, Rule, TicketLike, TicketLineLike } from '../payouts';
 import { isOnline, payout, profit, remainingProfit } from '../payouts';
+import { effectiveCostCents } from './costTruth';
 import type { FrozenMap } from './types';
 import type { Row } from './types';
 
@@ -17,10 +18,11 @@ function ticketKey(row: Row): string {
 }
 
 function lineFromSale(row: Row): TicketLineLike {
+  const cost = effectiveCostCents(row);
   return {
     sku: String(row.sku || ''),
     price_cents: Number(row.price_cents || 0),
-    cost_cents: row.cost_cents == null ? null : Number(row.cost_cents),
+    cost_cents: cost,
     shipping_cents: Number(row.shipping_cents || 0),
     channel_fee_cents: Number(row.channel_fee_cents || 0),
     ship_cost_cents: Number(row.ship_cost_cents || 0),
@@ -62,8 +64,9 @@ export function ticketsFromReportSales(sales: Row[], overrides: Map<string, Comm
     t.shipCostCents = (t.shipCostCents || 0) + (line.ship_cost_cents || 0);
     t.processingFeeCents = (t.processingFeeCents || 0) + (line.processing_fee_cents || 0);
     t.shippingCents = (t.shippingCents || 0) + (line.shipping_cents || 0);
-    if (l.cost_cents == null) t.cost = null;
-    else if (t.cost !== null) t.cost += Number(l.cost_cents);
+    const cost = effectiveCostCents(l);
+    if (cost == null) t.cost = null;
+    else if (t.cost !== null) t.cost += cost;
     t.saleIds.push(String(l.id));
   }
   return [...map.values()].sort((a, b) => b.at.localeCompare(a.at));
@@ -131,6 +134,83 @@ export function auditInStoreFees(tickets: MonthTicket[]): SaleAuditFlag[] {
     }
   }
   return out;
+}
+
+function lineWeights(ticket: MonthTicket): number[] {
+  const lines = ticket.lines || [];
+  const weights = lines.map((l) => Math.max(0, Number(l.price_cents || 0)));
+  const sum = weights.reduce((a, b) => a + b, 0);
+  if (!sum) return lines.map(() => 1 / Math.max(1, lines.length));
+  return weights.map((w) => w / sum);
+}
+
+export function ticketLineIndex(ticket: MonthTicket, row: Row): number {
+  const lines = ticket.lines || [];
+  const sku = String(row.sku || '');
+  const price = Number(row.price_cents || 0);
+  let idx = lines.findIndex((l) => l.sku === sku && Number(l.price_cents || 0) === price);
+  if (idx >= 0) return idx;
+  idx = lines.findIndex((l) => l.sku === sku);
+  if (idx >= 0) return idx;
+  const saleId = String(row.id ?? '');
+  const pos = ticket.saleIds.indexOf(saleId);
+  return pos >= 0 ? pos : 0;
+}
+
+export function sliceTicketLine(ticket: MonthTicket, lineIndex: number): MonthTicket {
+  const lines = ticket.lines || [];
+  const line = lines[lineIndex];
+  if (!line) return ticket;
+  const share = lineWeights(ticket)[lineIndex] ?? 1;
+  const ch = (ticket.channel || '').toLowerCase();
+  const inStore = IN_STORE.has(ch);
+  return {
+    ...ticket,
+    subtotal: Number(line.price_cents || 0),
+    cost: line.cost_cents == null ? null : Number(line.cost_cents),
+    shippingCents: Math.max(0, Number(line.shipping_cents || 0)),
+    feeCents: Math.round((ticket.feeCents || 0) * share),
+    shipCostCents: Math.round((ticket.shipCostCents || 0) * share),
+    processingFeeCents: inStore ? Math.max(0, Number(line.processing_fee_cents || 0)) : Math.round((ticket.processingFeeCents || 0) * share),
+    lines: [line],
+  };
+}
+
+/** Per-line store profit for Books export (in-store card fees are shown but net ~0 on profit). */
+export function lineBooksProfit(ticket: MonthTicket, lineIndex: number): number | null {
+  const slice = sliceTicketLine(ticket, lineIndex);
+  const ch = (ticket.channel || '').toLowerCase();
+  if (IN_STORE.has(ch)) {
+    if (slice.cost === null) return null;
+    return slice.subtotal + Math.max(0, slice.shippingCents || 0)
+      - Math.max(0, slice.feeCents || 0) - Math.max(0, slice.shipCostCents || 0) - slice.cost;
+  }
+  return profit(slice);
+}
+
+export function ticketBooksProfit(ticket: MonthTicket): number | null {
+  const lines = ticket.lines || [];
+  if (!lines.length) return profit(ticket);
+  let sum = 0;
+  let any = false;
+  for (let i = 0; i < lines.length; i++) {
+    const p = lineBooksProfit(ticket, i);
+    if (p === null) return null;
+    sum += p;
+    any = true;
+  }
+  return any ? sum : null;
+}
+
+export function lineBooksCommission(
+  ticket: MonthTicket,
+  lineIndex: number,
+  rules: Rule[],
+  frozen: FrozenMap | undefined,
+  cfg: OnlineCfg,
+): number | null {
+  const slice = sliceTicketLine(ticket, lineIndex);
+  return ticketCommissionsAllRules(slice as MonthTicket, rules, frozen, cfg);
 }
 
 export { profit, remainingProfit };

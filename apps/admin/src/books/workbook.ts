@@ -3,6 +3,7 @@ import { buildExpenses, filterReceived } from './expenseBuild';
 import { loadCommissionOverrides } from './loadPayoutContext';
 import { buildPayouts } from './payoutsBuild';
 import { verifyBooksIntegrity, ledgerOwedFromBalances } from './booksProof';
+import { verifyExportTies } from './exportChecks';
 import { computeBooksFromReport } from './payoutTotals';
 import type { PersonBalance } from './payoutLedger';
 import { saleWhyText } from './saleNotes';
@@ -60,11 +61,15 @@ export function buildBooksWorkbook(input: WorkbookInput): BooksWorkbook {
   };
 
   const computed = computeBooksFromReport(report, payoutCtx, built.otherExpenses_cents, overrides);
-  const salesLines = computed.salesLines.map((s) => ({
-    ...s,
-    channel: channelTitle(s.channel),
-    profit_notes: saleWhyText({ id: s.sale_id, profit_cents: s.profit_cents }, report),
-  }));
+  const saleById = new Map((report.sales || []).map((r) => [String(r.id), r]));
+  const salesLines = computed.salesLines.map((s) => {
+    const src = saleById.get(s.sale_id) || { id: s.sale_id, profit_cents: s.profit_cents, cost_cents: s.cost_cents };
+    return {
+      ...s,
+      channel: channelTitle(s.channel),
+      profit_notes: saleWhyText(src, report),
+    };
+  });
 
   const totals = computed.totals;
   const payouts = buildPayouts(report, totals, payoutCtx, money, overrides, ledgerBalances);
@@ -93,6 +98,7 @@ export function buildBooksWorkbook(input: WorkbookInput): BooksWorkbook {
     audit: computed.audit,
   };
   const integrity = verifyBooksIntegrity(shell, report, ledgerOwed);
+  const exportTieIssues = verifyExportTies({ ...shell, integrity, exportTieIssues: undefined });
 
   return {
     expenses: built,
@@ -103,6 +109,7 @@ export function buildBooksWorkbook(input: WorkbookInput): BooksWorkbook {
     proof: computed.proof,
     audit: computed.audit,
     integrity,
+    exportTieIssues,
   };
 }
 

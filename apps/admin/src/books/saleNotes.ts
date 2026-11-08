@@ -1,3 +1,4 @@
+import { isRealUnitCost } from './costTruth';
 import type { Report, Row } from './types';
 
 export type SaleWhy = { tone: 'extra' | 'less' | 'fix' | 'info'; text: string; tag?: string };
@@ -12,15 +13,12 @@ export function saleWhyLines(row: Row, report: Report): SaleWhy[] {
   if (label > 0 && label > buyerShip) {
     out.push({ tone: 'less', tag: 'Less', text: `Label cost ${(label / 100).toFixed(2)} more than buyer paid` });
   }
-  const missingCost = row.cost_cents == null
-    || Number(row.cost_cents) === 900
-    || ['default', 'builtin', 'estimated'].includes(String(row.cost_source || ''));
-  if (missingCost) {
-    out.push({
-      tone: 'fix',
-      tag: 'Fix',
-      text: Number(row.cost_cents) === 900 ? 'Default $9 cost — needs real cost' : 'No cost entered, profit not counted yet',
-    });
+  if (!isRealUnitCost(row)) {
+    const shown = row.cost_cents == null ? null : Number(row.cost_cents);
+    const text = shown != null && ['default', 'builtin', 'estimated'].includes(String(row.cost_source || ''))
+      ? `Placeholder cost $${(shown / 100).toFixed(2)} — enter real cost`
+      : 'No cost entered, profit not counted yet';
+    out.push({ tone: 'fix', tag: 'Fix', text });
   }
   if (row.voided_at) out.push({ tone: 'info', text: 'Sale voided' });
   const ret = (report.returns || []).find((r) => String(r.sale_id) === String(row.id));

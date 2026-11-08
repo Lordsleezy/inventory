@@ -286,11 +286,11 @@ export function buildExpenses(report: Report, attributedPromotedIds: Set<string>
   const reimburse_cents = counting.filter((r) => r.needs_reimbursement).reduce((n, r) => n + r.amount_cents, 0);
   const otherExpenses_cents = counting.filter((r) => !r.countsInProfit).reduce((n, r) => n + r.amount_cents, 0);
 
-  const exportRows: ExpenseLine[] = rows.map((r) => ({
+  const exportRows: ExpenseLine[] = counting.filter((r) => !r.duplicateFlag).map((r) => ({
     date: r.date,
     category: r.category,
     description: r.children?.length ? `${r.title} · ${r.meta}` : r.title,
-    amount_cents: r.excludeFromTotals ? 0 : r.amount_cents,
+    amount_cents: r.amount_cents,
     sku_or_order: r.sku_or_order,
     paid_by: r.sourceDisplay || 'Store',
     needs_reimbursement: r.needs_reimbursement ? 'Yes' : 'No',

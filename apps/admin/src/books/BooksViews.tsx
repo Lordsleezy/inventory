@@ -81,6 +81,7 @@ function BooksNative(p: ViewProps) {
       </button>
       <SummaryCard money={p.money} totals={p.totals} native absorbFees={p.absorbFees} onlineChannels={p.onlineChannels} />
       <BooksProofBar money={p.money} workbook={p.workbook} />
+      <BooksExportTieBar workbook={p.workbook} />
       <p className="native-report-section">REPORTS</p>
       <div className="native-report-group">
         {REPORT_ROWS.map((r) => (
@@ -122,6 +123,7 @@ function BooksDesktop(p: ViewProps) {
       </div>
       <SummaryCard money={p.money} totals={p.totals} absorbFees={p.absorbFees} onlineChannels={p.onlineChannels} />
       <BooksProofBar money={p.money} workbook={p.workbook} />
+      <BooksExportTieBar workbook={p.workbook} />
       <nav className="books-desktop-tabs" aria-label="Books reports">
         {REPORT_ROWS.map((t) => (
           <button key={t.id} type="button" className={tab === t.id ? 'active' : ''} onClick={() => p.setDesktopTab(t.id)}>{t.title}</button>
@@ -158,6 +160,16 @@ function feePolicyLine(absorbFees?: boolean, channels?: string[]) {
     ? 'Commissions: store absorbs marketplace + card fees (they stay off the commission base).'
     : 'Commissions: marketplace + card fees reduce the commission base.';
   return `${owner} ${comm} Online: ${ch}.`;
+}
+
+function BooksExportTieBar({ workbook }: { workbook: BooksWorkbook }) {
+  const issues = workbook.exportTieIssues || [];
+  if (!issues.length) return null;
+  return (
+    <p className="books-proof-status warn" style={{ display: 'block', margin: '8px 0' }}>
+      These numbers don&apos;t tie: {issues.map((i) => i.message).join(' · ')}
+    </p>
+  );
 }
 
 function BooksProofBar({ money, workbook }: { money: (c: number) => string; workbook: BooksWorkbook }) {

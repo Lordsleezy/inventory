@@ -156,13 +156,6 @@ export function buildPayouts(
       paid_cents: paidMonth(jacobIds),
       owed_all_time_cents: allTimeOwed(jacobIds),
     },
-    {
-      person: 'Steve',
-      role: 'owner',
-      earned_cents: totals.ownerKeeps,
-      paid_cents: 0,
-      owed_all_time_cents: 0,
-    },
   ];
 
   const stores = buildMoneyMonths(period.period_start, period.period_end, money.overview, money.activityByAccount, money.snapshots);
@@ -178,7 +171,7 @@ export function buildPayouts(
       profit: totals.profit,
       commission: totals.commission,
       otherExpenses: totals.otherExpenses,
-      ownerKeeps: totals.ownerKeeps,
+      ownerKeeps: totals.profit - totals.commission - totals.otherExpenses,
     },
   };
 }

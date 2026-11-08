@@ -1,3 +1,4 @@
+import { scrubSaleRow } from './costTruth';
 import { applySaleFeeAdjustments, applySaleLabelCosts } from './saleAdjustments';
 import { saleFeeExtras } from './saleAdjustments';
 import type { BookTotals, Report, Row, SalesLine } from './types';
@@ -62,7 +63,7 @@ export function normalizeReport(raw: Report): Report {
     next[key] = cleanBookRows((raw[key] || []) as Row[]);
   }
   next.sales = applySquareMatchedFees(
-    allocateTicketPayments((next.sales || []).map((sale) => Number(sale.cost_cents) === 900 ? { ...sale, cost_source: 'default' } : sale)),
+    allocateTicketPayments((next.sales || []).map((sale) => scrubSaleRow(sale))),
     raw.square_payments || [],
   );
   return applySaleLabelCosts(applySaleFeeAdjustments(next));

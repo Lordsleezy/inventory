@@ -373,3 +373,4 @@ test("frozen commission helpers prefer recorded sale_commissions over live label
   assert.equal(Math.round(4961 * 0.3), 1488);
   assert.equal(frozenOwnerShare(live, cuts), profit(live) - 330);
 });
+

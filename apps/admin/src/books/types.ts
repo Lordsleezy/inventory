@@ -205,6 +205,7 @@ export type MonthProof = {
 export type BooksWorkbook = {
   proof: MonthProof;
   audit: { ticketKey: string; message: string }[];
+  exportTieIssues?: { check: string; message: string }[];
   integrity?: { ok: boolean; commissionGap_cents: number; ownerGap_cents: number; issues: { kind: string; message: string; cents?: number; saleId?: string }[] };
   expenses: {
     rows: ExpenseDisplayLine[];

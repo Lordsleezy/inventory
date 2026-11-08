@@ -1,5 +1,4 @@
 import {
-  commissionBreakdown,
   isOnline,
   type OnlineCfg,
   type Rule,
@@ -9,11 +8,14 @@ import {
   auditInStoreFees,
   cutCommission,
   frozenTickets,
-  profit,
-  remainingProfit,
+  lineBooksCommission,
+  lineBooksProfit,
+  ticketBooksProfit,
+  ticketLineIndex,
   ticketsFromReportSales,
   type MonthTicket,
 } from './payoutTickets';
+import { effectiveCostCents } from './costTruth';
 import type { BookTotals, BooksPayoutContext, FrozenMap, Report, Row, SalesLine } from './types';
 
 const channelFees = (t: MonthTicket) => Math.max(0, t.feeCents ?? 0);
@@ -45,7 +47,6 @@ export function sumMonthFromPayoutTickets(
   let labelCostsOnSales = 0;
   let profitSum = 0;
   let commissionSum = 0;
-  let ownerSum = 0;
   let pendingCost = 0;
   const frozenSet = frozenTickets(frozen);
 
@@ -61,7 +62,7 @@ export function sumMonthFromPayoutTickets(
     const proc = processing(t);
     feesAndLabels += mp + lbl + proc;
     labelCostsOnSales += lbl;
-    const p = profit(t);
+    const p = ticketBooksProfit(t);
     if (p !== null) profitSum += p;
     const cuts = rules.map((r) => cutCommission(t.key, t, r, frozen, cfg, frozenSet));
     if (cuts.some((x) => x === null)) {
@@ -71,12 +72,10 @@ export function sumMonthFromPayoutTickets(
     let comm = 0;
     for (const x of cuts) comm += x || 0;
     commissionSum += comm;
-    const owner = remainingProfit(t, rules, cfg);
-    if (owner !== null) ownerSum += owner;
   }
 
   const profitFinal = profitSum;
-  const ownerKeeps = ownerSum - otherExpenses;
+  const ownerKeeps = profitFinal - commissionSum - otherExpenses;
 
   const totals: BookTotals = {
     revenue,
@@ -101,7 +100,7 @@ export function sumMonthFromPayoutTickets(
       feesAndLabels,
       profit: profitFinal,
       commission: commissionSum,
-      ownerBeforeOther: ownerSum,
+      ownerBeforeOther: profitFinal - commissionSum,
       saleCount: tickets.length,
       pendingCost,
     },
@@ -117,8 +116,6 @@ export function buildSalesLinesFromPayout(
   frozen: FrozenMap,
 ): SalesLine[] {
   const byKey = new Map(tickets.map((t) => [t.key, t]));
-  const frozenSet = frozenTickets(frozen);
-  const commPaid = new Set<string>();
   return (report.sales || []).map((row) => {
     const key = String(row.ticket_id || row.ticket_key || `sale:${row.id}`);
     const ticket = byKey.get(key);
@@ -129,25 +126,17 @@ export function buildSalesLinesFromPayout(
       : 0;
     const label = Math.max(0, Number(row.ship_cost_cents || 0));
     const proc = Math.max(0, Number(row.processing_fee_cents || 0));
-    let comm: number | null = null;
-    if (ticket && !commPaid.has(key)) {
-      const cuts = rules.map((r) => cutCommission(key, ticket, r, frozen, cfg, frozenSet));
-      if (!cuts.some((x) => x === null)) {
-        for (const x of cuts) comm = (comm || 0) + (x || 0);
-        commPaid.add(key);
-      }
-    } else if (ticket && commPaid.has(key)) {
-      comm = 0;
-    }
-    const p = ticket ? profit(ticket) : (row.cost_cents == null ? null : Number(row.profit_cents || 0));
-    const notes = ticket ? commissionBreakdown(ticket, !!cfg.absorbFees).rows.map((r) => `${r.label} ${r.cents}`).join('; ') : '';
+  const cost = effectiveCostCents(row);
+    const lineIdx = ticket ? ticketLineIndex(ticket, row) : 0;
+    const comm = ticket ? lineBooksCommission(ticket, lineIdx, rules, frozen, cfg) : null;
+    const p = ticket ? lineBooksProfit(ticket, lineIdx) : null;
     return {
       sale_id: String(row.id ?? ''),
       date: String(row.sold_at || row.date || '').slice(0, 10),
       sku: String(row.sku || ''),
       title: String(row.item_title || row.title || row.sku || ''),
       channel: channelTitle(ch),
-      order_no: String(row.receipt_no || row.order_id || ''),
+      order_no: cleanOrderNo(row),
       qty: Number(row.qty || 1),
       price_cents: Number(row.price_cents || 0),
       tax_cents: Number(row.tax_collected_cents ?? row.tax_cents ?? 0),
@@ -155,12 +144,25 @@ export function buildSalesLinesFromPayout(
       card_fees_cents: proc,
       buyer_shipping_cents: Number(row.shipping_cents || 0),
       label_cost_cents: label,
-      cost_cents: row.cost_cents == null ? null : Number(row.cost_cents),
+      cost_cents: cost,
       profit_cents: p,
       commission_cents: comm,
-      profit_notes: notes,
+      profit_notes: '',
     };
   });
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function cleanOrderNo(row: Row): string {
+  for (const raw of [row.receipt_no, row.web_order_no, row.order_no, row.order_id]) {
+    const s = String(raw ?? '').trim();
+    if (!s || UUID_RE.test(s)) continue;
+    if (/^R-\d+$/i.test(s)) return s;
+    if (/^\d{6,}$/.test(s) || /^[A-Z0-9-]{6,}$/i.test(s)) return s;
+    if (s.length <= 32) return s;
+  }
+  return '';
 }
 
 export function computeBooksFromReport(
