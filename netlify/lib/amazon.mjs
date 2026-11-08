@@ -41,6 +41,7 @@ function sellerId() {
 /** Category/title never-list (scooter, fridge, dishwasher, mattress, rug, oversized). */
 export function amazonNeverListReason(unit = {}) {
   const sku = String(unit.sku || "").trim();
+  if (/^DS-\d+$/i.test(sku)) return "Dropship DS- SKU — Amazon channel off; never list";
   if (sku && NEVER_LIST_SKUS.has(sku)) return "SKU 11284 scooter — never list online";
   const product = `${unit.title || ""} ${unit.brand || ""} ${unit.model || ""} ${unit.listing_body || ""}`.toLowerCase();
   const blob = `${unit.category || ""} ${product}`.toLowerCase();
@@ -1209,6 +1210,35 @@ export async function ingestAmazonOrder(storeId, order) {
   const item = items[0];
   const sku = item?.SellerSKU || item?.sellerSku;
   if (!orderId || !sku) return { skipped: true };
+  // Amazon sync ignores DS- until dropship Amazon channel is unlocked + enabled.
+  if (/^DS-\d+$/i.test(String(sku))) {
+    try {
+      const { getAmazonReadiness, amazonShouldIngestDropship } = await import("./dropship/amazon-readiness.mjs");
+      const { data: ds } = await serviceClient()
+        .from("dropship_settings")
+        .select("*")
+        .eq("store_id", storeId)
+        .maybeSingle();
+      const readiness = await getAmazonReadiness(storeId);
+      if (!amazonShouldIngestDropship(ds, readiness)) {
+        return { skipped: true, sku, reason: "dropship_amazon_locked" };
+      }
+      const { syncDropshipSale } = await import("./dropship/autopilot.mjs");
+      return {
+        skipped: false,
+        sku,
+        dropship: true,
+        ...(await syncDropshipSale(storeId, {
+          sku: String(sku),
+          channel: "amazon",
+          channel_order_id: orderId,
+          order_id: orderId,
+        })),
+      };
+    } catch (err) {
+      return { skipped: true, sku, reason: "dropship_amazon_error", error: err.message };
+    }
+  }
 
   const sb = serviceClient();
   const seen = await sb

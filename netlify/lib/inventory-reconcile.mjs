@@ -3,14 +3,20 @@
  * Pure shaping lives here so the scheduled function and tests share one definition.
  */
 
+function isDropshipSku(sku) {
+  return /^DS-\d+$/i.test(String(sku || "").trim());
+}
+
 export function reconcileFindings({ units = [], sales = [], orders = [], listings = [] } = {}) {
   const soldSkus = new Set();
   for (const sale of sales) {
     if (!sale?.sku || sale.voided_at) continue;
+    if (isDropshipSku(sale.sku)) continue; // DS- never in units / inventory alerts
     soldSkus.add(String(sale.sku));
   }
   for (const order of orders) {
     if (!order?.sku || order.sku === "UNMATCHED") continue;
+    if (isDropshipSku(order.sku)) continue;
     if (order.voided || order.status === "canceled" || order.status === "refunded") continue;
     soldSkus.add(String(order.sku));
   }
@@ -36,6 +42,7 @@ export function reconcileFindings({ units = [], sales = [], orders = [], listing
   const soldStillListed = [];
   for (const listing of listings) {
     if (listing?.status !== "listed") continue;
+    if (isDropshipSku(listing.sku)) continue;
     const unit = bySku.get(String(listing.sku));
     if (!unit || unit.state !== "sold") continue;
     soldStillListed.push({

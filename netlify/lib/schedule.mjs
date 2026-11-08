@@ -42,4 +42,6 @@ export const SCHEDULED_JOBS = [
   { source: "marketplace-daily-report", everyMin: 1440, cron: "0 16 * * *", label: "Marketplace daily report" },
   { source: "marketplace-sale-watch", everyMin: 5, cron: "*/5 * * * *", label: "Sale email → Orders safety net" },
   { source: "enrich-models", everyMin: 2, cron: "*/2 * * * *", label: "Model enrich" },
+  { source: "dropship-autopilot", everyMin: 15, cron: "*/15 * * * *", label: "Dropship tracking + health (no-op when OFF)" },
+  { source: "dropship-hunter", everyMin: 1440, cron: "20 9 * * *", label: "Dropship hunter (daily, no-op when OFF)" },
 ];

@@ -23,6 +23,7 @@ import {
   AppSettingsNative,
   type MoreId,
 } from './AppMore';
+import { DropshipPage } from '../dropship/DropshipPage';
 import { ReceiptsPage } from '../ReceiptsPage';
 import type { OnlineCfg, Rule, CommissionOverride } from '../payouts';
 import { parseNavFromLocation } from '../navigation';
@@ -460,6 +461,16 @@ export function AppModeShell({
           <AppReportsNative onBack={leaveMorePage} title="Insights" backLabel={moreReturnTo === 'other' ? 'Other' : 'More'}>
             <InsightsPage client={client} money={money} />
           </AppReportsNative>
+        )}
+        {fullAccess && morePage === 'dropship' && (
+          <DropshipPage
+            client={client}
+            session={session}
+            money={money}
+            embed="app"
+            onBack={leaveMorePage}
+            backLabel={moreReturnTo === 'other' ? 'Other' : 'More'}
+          />
         )}
         {fullAccess && morePage === 'depop' && (
           <AppDepopNative client={client} accessToken={session.access_token} money={money} onBack={leaveMorePage} backLabel={moreReturnTo === 'other' ? 'Other' : 'More'} />

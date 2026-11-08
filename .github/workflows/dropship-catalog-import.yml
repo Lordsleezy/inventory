@@ -1,0 +1,40 @@
+# Resumable CJ US-warehouse catalog import.
+# Runs outside Netlify to spare function minutes / time limits.
+# No-op when Dropship is OFF or CJ is disconnected. Never places orders or publishes listings.
+name: Dropship catalog import
+
+on:
+  schedule:
+    # Every 6 hours — small chunks; throttle + points budget stop early.
+    - cron: "15 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      max_pages:
+        description: "Max listV2 pages this run (default 20)"
+        required: false
+        default: "20"
+
+concurrency:
+  group: dropship-catalog-import
+  cancel-in-progress: false
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install
+        run: npm ci --omit=dev
+      - name: Import chunk
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          CONNECTIONS_KEY: ${{ secrets.CONNECTIONS_KEY }}
+          DROPSHIP_STORE_ID: ${{ secrets.DROPSHIP_STORE_ID }}
+          MAX_PAGES: ${{ github.event.inputs.max_pages || '20' }}
+        run: node scripts/dropship-catalog-import.mjs
