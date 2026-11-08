@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { displayProductTitle } from '@floor/store';
 import { decodeBarcodeFile, ReceivePanel } from '../ReceivePanel';
 import { BundleReceive } from '../BundleReceive';
 import { AppItemDetail } from './AppItemDetail';
@@ -67,7 +68,7 @@ export function AppReceive({ client, storeId, accessToken, staffMode = false, on
       if (!alive) return;
       setToday((data || []).map((u) => ({
         sku: u.sku,
-        title: [u.brand, u.model].filter(Boolean).join(' ') || u.title || u.sku,
+        title: displayProductTitle({ title: u.title, brand: u.brand, model: u.model, fallback: u.sku }),
       })));
     })();
     return () => { alive = false; };

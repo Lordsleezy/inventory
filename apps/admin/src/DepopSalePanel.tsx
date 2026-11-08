@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { displayProductTitle } from '@floor/store';
 import { errText } from './errText';
 import { parseDollars } from './dispositions';
 import { dollarsText, payoutDefault, type DepopEntry } from './depopMath';
@@ -9,7 +10,8 @@ type Money = (n: number) => string;
 type UnitHit = { sold_no_sale?: boolean; sku: string; brand: string; model: string; title: string; ask_cents: number | null; acquisition_cost_cents: number | null; state: string; condition: string | null };
 
 const todayLA = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
-const unitName = (u: Pick<UnitHit, 'brand' | 'model' | 'title'>) => [u.brand, u.model].filter(Boolean).join(' ') || u.title || 'Untitled unit';
+const unitName = (u: Pick<UnitHit, 'brand' | 'model' | 'title'>) =>
+  displayProductTitle({ title: u.title, brand: u.brand, model: u.model, fallback: 'Untitled unit' });
 
 /** Depop sales are typed in by hand: pick the unit, price, Depop fee, payout, date. Admins only (the server enforces it). */
 export function DepopSalePanel({ client, money, variant, initialSku, initialSaleCents, onClose, onSaved }: { client: SupabaseClient; money: Money; variant: 'desktop' | 'app'; initialSku?: string; initialSaleCents?: number | null; onClose?: () => void; onSaved?: () => void }) {

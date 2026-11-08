@@ -1,5 +1,6 @@
 import { ReceiveGroupRow, type GroupedInventory } from '../ReceiveGroupRow';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { displayProductTitle } from '@floor/store';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { AttentionSection } from '../navigation';
 import { ATTENTION_SECTIONS, NeedsAttentionPanel, useAttentionCounts } from '../NeedsAttentionPanel';
@@ -74,7 +75,7 @@ function writeCache(scope: string, filter: Filter, query: string, offset: number
 }
 
 function name(u: Row) {
-  return [u.brand, u.model].filter(Boolean).join(' ') || u.title || 'Untitled';
+  return displayProductTitle({ title: u.title, brand: u.brand, model: u.model });
 }
 
 const MISSING_LABEL: Record<string, string> = {

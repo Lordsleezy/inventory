@@ -1,4 +1,5 @@
 ﻿import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
+import { displayProductTitle } from '@floor/store';
 import type { RegisterUnit } from './units';
 
 export type CartLine = {
@@ -66,7 +67,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
           ? { ...l, qty: nextQty, priceCents, overrideReason, approvalId: null, bundleIncludes: opts?.bundleIncludes ?? l.bundleIncludes }
           : l));
       }
-      const title = [unit.brand, unit.model].filter(Boolean).join(' ') || unit.title;
+      const title = displayProductTitle({ title: unit.title, brand: unit.brand, model: unit.model, fallback: unit.sku });
       return [
         ...prev,
         {
