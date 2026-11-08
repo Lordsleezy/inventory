@@ -27,7 +27,7 @@
     "node": ">=22"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.119.0",
+    "@supabase/supabase-js": "^2.57.4",
     "ajv": "^8.20.0",
     "sharp": "^0.34.4"
   },
