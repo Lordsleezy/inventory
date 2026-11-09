@@ -160,7 +160,7 @@ export function InventoryPage({
     let active = true; setDetail(null);
     void (async () => {
       try {
-        const { data, error: e } = await client.rpc('portal_inventory_detail', { p_sku: selected });
+        const { data, error: e } = await client.rpc(associateBrowseOnly ? 'staff_inventory_detail' : 'portal_inventory_detail', { p_sku: selected });
         if (e) throw e;
         if (!data) throw new Error('Unit not found');
         const next = data as Detail;
@@ -172,7 +172,7 @@ export function InventoryPage({
       } catch (e) { if (active) setError(errText(e)); }
     })();
     return () => { active = false; };
-  }, [client, selected, detailKey]);
+  }, [client, selected, detailKey, associateBrowseOnly]);
 
   if (staffTabs && tab === 'receive') {
     return <>
