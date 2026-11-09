@@ -38,7 +38,7 @@ export default defineConfig(({ mode }) => {
         transformIndexHtml: {
           order: 'post',
           handler(html) {
-            const key = 'floor_shell_v17_20261109';
+            const key = 'floor_shell_v18_20261109';
             const script = `(function(){try{var k=${JSON.stringify(key)};if(localStorage.getItem(k))return;localStorage.setItem(k,"1");var done=function(){location.reload()};if(window.caches&&caches.keys){caches.keys().then(function(ks){return Promise.all(ks.map(function(x){return caches.delete(x)}))}).then(done).catch(done)}else done()}catch(e){}})();`;
             return html.replace('</body>', `<script>${script}</script></body>`);
           },

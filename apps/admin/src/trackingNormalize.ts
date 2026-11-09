@@ -1,15 +1,9 @@
-/** Mirror of public.floor_normalize_tracking (USPS 420+ZIP, UPS 1Z, FedEx 34-digit). */
+import { compactTracking } from '../../../shared/tracking-normalize.mjs';
+
+/** Every scan and typed tracking value goes through compactTracking. */
 export function normalizeTracking(raw: string | null | undefined): string | null {
-  let v = (raw || '').trim().toUpperCase().replace(/\s+/g, '');
-  if (!v) return null;
-  const usps =
-    v.match(/^420\d{5}(9[2-5]\d{18,24})$/)
-    || v.match(/^420\d{9}(9[2-5]\d{18,24})$/);
-  if (usps) v = usps[1];
-  const ups = v.match(/1Z[0-9A-Z]{16}/);
-  if (ups) return ups[0];
-  if (/^\d{34}$/.test(v)) return v.slice(-12);
-  return v;
+  const v = compactTracking(raw || '');
+  return v || null;
 }
 
 export function trackingNumbersMatch(expected: string | null | undefined, scanned: string | null | undefined): boolean {

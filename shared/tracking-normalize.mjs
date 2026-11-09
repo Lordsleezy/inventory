@@ -11,26 +11,48 @@ function bestUspsSubstring(n) {
   return hits[0];
 }
 
-/** Normalize carrier barcodes for lookup (USPS 420+ZIP wrappers, whitespace). */
+/**
+ * A 420 routing barcode is 420, then a 5- or 9-digit ZIP, then the tracking number.
+ * Keep a split only when that ending number passes the USPS check digit.
+ * If both ZIP lengths pass, prefer a normal 22- or 20-digit number.
+ */
+function uspsAfterRouting(digits) {
+  if (!digits.startsWith("420")) return null;
+  const hits = [];
+  for (const zipLen of [5, 9]) {
+    const rest = digits.slice(3 + zipLen);
+    if (/^9[1-5]/.test(rest) && uspsCheckDigitValid(rest)) hits.push(rest);
+  }
+  if (!hits.length) return null;
+  if (hits.length === 1) return hits[0];
+  const rank = (len) => {
+    const i = [22, 20, 26, 30, 34].indexOf(len);
+    return i === -1 ? 99 : i;
+  };
+  hits.sort((a, b) => rank(a.length) - rank(b.length) || b.length - a.length);
+  return hits[0];
+}
+
+/** Normalize carrier barcodes for lookup (USPS 420+ZIP wrappers, UPS 1Z, FedEx 34-digit). */
 export function compactTracking(value) {
-  let n = String(value || "").replace(/\s+/g, "").toUpperCase();
+  const n = String(value || "").replace(/[^0-9A-Za-z]/g, "").toUpperCase();
+  if (!n) return "";
   const ups = n.match(/1Z[0-9A-Z]{16}/);
   if (ups) return ups[0];
 
-  const wrapped5 = n.match(/^420\d{5}(9[2-5]\d{20,22})$/);
-  if (wrapped5 && uspsCheckDigitValid(wrapped5[1])) return wrapped5[1];
-  const wrapped9 = n.match(/^420\d{9}(9[2-5]\d{20,22})$/);
-  if (wrapped9 && uspsCheckDigitValid(wrapped9[1])) return wrapped9[1];
+  const digits = n.replace(/[A-Z]/g, "");
+  const routed = uspsAfterRouting(digits);
+  if (routed) return routed;
 
-  if (/^9[2-5]\d{18,24}$/.test(n) && uspsCheckDigitValid(n)) return n;
+  if (/^9[1-5]\d{17,32}$/.test(digits) && uspsCheckDigitValid(digits)) return digits;
 
-  const fromSub = bestUspsSubstring(n);
+  const fromSub = bestUspsSubstring(digits);
   if (fromSub) return fromSub;
 
-  const completed = completeUspsFromBody(n);
+  const completed = completeUspsFromBody(digits);
   if (completed) return completed;
 
-  if (/^\d{34}$/.test(n)) return n.slice(-12);
+  if (/^\d{34}$/.test(digits)) return digits.slice(-12);
   return n;
 }
 
