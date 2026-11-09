@@ -180,8 +180,79 @@ html.desk:not(.app-mode) .unit-edit-flags {
   flex-wrap: wrap;
   align-items: center;
   gap: 4px 18px;
-  margin: 2px 0 12px;
+  margin: 8px 0 4px;
 }
+html.desk:not(.app-mode) label.unit-edit-notes {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0 14px;
+}
+html.desk:not(.app-mode) label.unit-edit-notes textarea {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 72px;
+  margin: 0;
+}
+
+html.desk:not(.app-mode) .unit-stock-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin: 4px 0 12px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #fff;
+}
+html.desk:not(.app-mode) .unit-stock-center {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+html.desk:not(.app-mode) .unit-stock-card .unit-stock-label,
+html.desk:not(.app-mode) .unit-stock-card .unit-stock-helper,
+html.desk:not(.app-mode) .unit-stock-card p {
+  color: #a0a0a0;
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0;
+}
+html.desk:not(.app-mode) .unit-stock-card .unit-edit-quantity-display {
+  background: transparent;
+  border: 0;
+  color: #fff;
+  font-size: 18px;
+  font-weight: 700;
+  min-height: 0;
+  padding: 0 2px;
+}
+html.desk:not(.app-mode) .unit-stock-card .unit-quantity-step {
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0;
+  border: 1px solid #4a4a4a;
+  border-radius: 6px;
+  background: #000;
+  color: #fff;
+}
+html.desk:not(.app-mode) .unit-stock-card > .secondary {
+  margin-left: auto;
+  min-height: 28px;
+  padding: 0 10px;
+}
+html.desk:not(.app-mode) .unit-edit-status-row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin: 8px 0 4px;
+}
+html.desk:not(.app-mode) .unit-edit-status-row span { color: #a0a0a0; }
+html.desk:not(.app-mode) .unit-edit-status-row strong { color: #fff; font-weight: 700; }
 html.desk:not(.app-mode) .unit-edit-flag {
   display: inline-flex;
   align-items: center;
