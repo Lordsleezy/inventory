@@ -5,16 +5,16 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Print label</title>
   <style>
-    html, body { margin: 0; background: #fff; color: #111; font: 16px/1.4 -apple-system, BlinkMacSystemFont, sans-serif; }
-    .bar { display: flex; gap: 8px; padding: 12px; position: sticky; top: 0; background: #fff; z-index: 2; }
-    button, a.back { flex: 1; min-height: 52px; font-size: 18px; border-radius: 10px; border: 1px solid #111; background: #111; color: #fff; text-align: center; line-height: 52px; text-decoration: none; }
-    a.back { background: #fff; color: #111; }
-    p { margin: 0; padding: 12px; }
-    img, iframe { width: 100%; display: block; border: 0; background: #fff; }
-    iframe { height: calc(100vh - 88px); }
+    html, body { margin: 0; background: #fff; color: #111; font: 16px/1.4 sans-serif; }
+    .bar { display: flex; gap: 8px; padding: 12px; position: sticky; top: 0; background: #fff; }
+    button, a { flex: 1; min-height: 52px; font-size: 18px; border-radius: 10px; border: 1px solid #111; background: #111; color: #fff; }
+    a { background: #fff; color: #111; text-align: center; line-height: 52px; text-decoration: none; }
+    p { margin: 0; padding: 0 12px 12px; }
+    img { display: block; width: 100%; height: auto; background: #fff; }
+    @page { size: 4in 6in; margin: 0; }
     @media print {
       .bar, p { display: none !important; }
-      img { break-after: page; page-break-after: always; }
+      img { width: 4in; height: 6in; object-fit: contain; break-after: page; page-break-after: always; }
       img:last-of-type { break-after: auto; page-break-after: auto; }
     }
   </style>
@@ -22,94 +22,42 @@
 <body>
   <div class="bar">
     <button type="button" id="print">Print</button>
-    <a class="back" id="back" href="/">Back</a>
+    <a id="back" href="/">Back</a>
   </div>
-  <p id="status">Preparing the label…</p>
+  <p id="status">Opening the printer…</p>
   <script>
     (function () {
-      var job = new URLSearchParams(location.search).get('job') || '';
-      var key = 'floor-print-' + job;
+      var params = new URLSearchParams(location.search);
+      var letter = params.get('paper') === 'letter';
+      var srcs = params.getAll('src').filter(Boolean);
       var status = document.getElementById('status');
-      var shown = false;
+      if (letter) {
+        var style = document.createElement('style');
+        style.textContent = '@page { size: letter; margin: 0; } @media print { img { width: 8.5in; height: 11in; } }';
+        document.head.appendChild(style);
+      }
       document.getElementById('print').addEventListener('click', function () { window.print(); });
       document.getElementById('back').addEventListener('click', function (event) {
         if (history.length > 1) { event.preventDefault(); history.back(); }
       });
-
-      function printSoon() {
-        window.setTimeout(function () { window.print(); }, 300);
+      if (!srcs.length) {
+        status.textContent = 'The label did not come through. Go back and tap Print again.';
+        return;
       }
-
-      function show(data) {
-        if (shown || !data) return;
-        if (data.job && job && data.job !== job) return;
-        shown = true;
-        if (data.error) {
-          status.textContent = data.error;
-          return;
-        }
-        var images = data.urls || [];
-        if (images.length) {
-          var style = document.createElement('style');
-          style.textContent = '@page { size: ' + Number(data.width) + 'pt ' + Number(data.height) + 'pt; margin: 0; }';
-          document.head.appendChild(style);
-          images.forEach(function (src) {
-            var img = document.createElement('img');
-            img.alt = 'Shipping label';
-            img.src = src;
-            document.body.appendChild(img);
-          });
-          status.textContent = 'Tap Print if the printer did not open.';
-          printSoon();
-          return;
-        }
-        if (!data.pdfBase64) {
-          status.textContent = 'Could not prepare the label.';
-          shown = false;
-          return;
-        }
-        var binary = atob(data.pdfBase64);
-        var bytes = new Uint8Array(binary.length);
-        for (var i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
-        var url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
-        var frame = document.createElement('iframe');
-        frame.title = 'Shipping label';
-        frame.src = url;
-        document.body.appendChild(frame);
-        status.textContent = 'Tap Print if the printer did not open.';
-        frame.addEventListener('load', printSoon);
-      }
-
-      function take(raw) {
-        if (!raw) return false;
-        try { show(JSON.parse(raw)); }
-        catch (e) { status.textContent = 'Could not prepare the label.'; }
-        return true;
-      }
-
-      window.addEventListener('message', function (event) {
-        if (event.origin !== location.origin) return;
-        var data = event.data;
-        if (!data || data.type !== 'floor-label') return;
-        show(data);
+      var pending = srcs.length;
+      srcs.forEach(function (src) {
+        var img = document.createElement('img');
+        img.alt = 'Shipping label';
+        img.onload = function () {
+          pending -= 1;
+          if (pending <= 0) window.print();
+        };
+        img.onerror = function () {
+          status.textContent = 'The label did not load. Go back and tap Print again.';
+        };
+        img.src = src;
+        document.body.appendChild(img);
       });
-
-      function pull() {
-        var raw = localStorage.getItem(key);
-        if (!raw) return false;
-        localStorage.removeItem(key);
-        return take(raw);
-      }
-
-      if (!pull()) {
-        var timer = setInterval(function () {
-          if (pull()) clearInterval(timer);
-        }, 200);
-        setTimeout(function () {
-          clearInterval(timer);
-          if (!shown) status.textContent = 'The label did not come through. Go back and tap Print again.';
-        }, 20000);
-      }
     })();
   </script>
 </body>

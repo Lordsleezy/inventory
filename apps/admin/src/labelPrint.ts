@@ -1,14 +1,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { buildLabelPdf, imageToLabelPdf, labelPaperName, type LabelPaper } from './labelSheet';
-import { chromeLabelIntent, labelPrintKind } from './labelPrintKind';
+import { androidPrintDocument, chromeLabelIntent, labelPrintKind } from './labelPrintKind';
 
 export type AndroidPrintTab = { job: string; tab: Window | null };
-
-function pdfCopy(bytes: Uint8Array) {
-  const copy = new ArrayBuffer(bytes.byteLength);
-  new Uint8Array(copy).set(bytes);
-  return copy;
-}
 
 function writeBuilding(tab: Window) {
   tab.document.open();
@@ -108,72 +102,86 @@ function attr(value: string) {
   return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 }
 
-/** The formatted label has to live at an https address so Chrome, not this app, can open it. */
-async function uploadPrintPdf(client: SupabaseClient, bytes: Uint8Array) {
+async function labelPngs(bytes: Uint8Array) {
+  const pdfjs = await import('pdfjs-dist');
+  const worker = await import('pdfjs-dist/build/pdf.worker.min.mjs?url');
+  pdfjs.GlobalWorkerOptions.workerSrc = worker.default;
+  const doc = await pdfjs.getDocument({ data: bytes.slice() }).promise;
+  const pngs: Blob[] = [];
+  for (let i = 1; i <= doc.numPages; i += 1) {
+    const page = await doc.getPage(i);
+    const viewport = page.getViewport({ scale: 2 });
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.ceil(viewport.width);
+    canvas.height = Math.ceil(viewport.height);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Could not prepare the label.');
+    await page.render({ canvasContext: ctx, viewport }).promise;
+    const png = await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('Could not prepare the label.'))), 'image/png');
+    });
+    pngs.push(png);
+  }
+  if (!pngs.length) throw new Error('Could not prepare the label.');
+  return pngs;
+}
+
+/** The print page needs a normal image address. The installed app cannot open the printer itself. */
+async function uploadPrintPngs(client: SupabaseClient, pngs: Blob[]) {
   const { data: storeId, error } = await client.rpc('portal_store_id');
-  if (error || !storeId) throw new Error('Could not prepare the label.');
+  if (error || storeId == null || storeId === '') throw new Error('Could not prepare the label.');
   const id = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}`;
-  const path = `${storeId}/print/${id}.pdf`;
-  const body = new Blob([pdfCopy(bytes)], { type: 'application/pdf' });
-  const up = await client.storage.from('order-labels').upload(path, body, {
-    contentType: 'application/pdf',
-    upsert: false,
-  });
-  if (up.error) throw new Error('Could not prepare the label.');
-  const signed = await client.storage.from('order-labels').createSignedUrl(path, 600);
-  if (signed.error || !signed.data?.signedUrl) throw new Error('Could not prepare the label.');
-  return signed.data.signedUrl;
+  const urls: string[] = [];
+  for (let i = 0; i < pngs.length; i += 1) {
+    const path = `${storeId}/print/${id}-${i}.png`;
+    const up = await client.storage.from('order-labels').upload(path, pngs[i], {
+      contentType: 'image/png',
+      upsert: false,
+    });
+    if (up.error) throw new Error('Could not prepare the label.');
+    const signed = await client.storage.from('order-labels').createSignedUrl(path, 600);
+    if (signed.error || !signed.data?.signedUrl) throw new Error('Could not prepare the label.');
+    urls.push(signed.data.signedUrl);
+  }
+  return urls;
 }
 
-function chromePage(httpsUrl: string) {
-  const intent = chromeLabelIntent(httpsUrl);
-  const chrome = `googlechrome://navigate?url=${encodeURIComponent(httpsUrl)}`;
+function printerLinkPage(intent: string) {
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Print label</title>
-<style>html,body{margin:0;background:#fff;color:#111;font:16px sans-serif}.bar{display:flex;gap:8px;padding:12px}a{flex:1;min-height:52px;font-size:18px;border-radius:10px;border:1px solid #111;background:#111;color:#fff;text-align:center;line-height:52px;text-decoration:none}a.back{background:#fff;color:#111}p{margin:0;padding:0 12px 12px}a.open{display:block;margin:0 12px;background:#fff;color:#111}</style>
+<style>html,body{margin:0;background:#fff;color:#111;font:16px sans-serif}.bar{display:flex;gap:8px;padding:12px}a{flex:1;min-height:52px;font-size:18px;border-radius:10px;border:1px solid #111;background:#111;color:#fff;text-align:center;line-height:52px;text-decoration:none}a.back{background:#fff;color:#111}p{margin:0;padding:0 12px 12px}</style>
 </head><body>
-<div class="bar"><a id="print" href="${attr(intent || httpsUrl)}">Print</a><a class="back" id="back" href="/">Back</a></div>
-<p id="msg">Tap Print. Chrome opens the label. Then tap the printer icon.</p>
-<a class="open" id="open" href="${attr(httpsUrl)}" target="_blank" rel="noopener">Open label</a>
-<script>
-var intent = ${JSON.stringify(intent)};
-var chrome = ${JSON.stringify(chrome)};
-var btn = document.getElementById('print');
-document.getElementById('back').addEventListener('click', function (event) {
-  if (history.length > 1) { event.preventDefault(); history.back(); }
-});
-btn.addEventListener('click', function () {
-  window.setTimeout(function () {
-    var href = btn.getAttribute('href') || '';
-    if (intent && href === intent) {
-      btn.setAttribute('href', chrome);
-      document.getElementById('msg').textContent = 'Tap Print again. That opens Chrome. Then tap the printer icon.';
-      return;
-    }
-    document.getElementById('msg').textContent = 'Tap Open label, then the printer icon in Chrome.';
-  }, 1200);
-});
-</script></body></html>`;
+<div class="bar"><a id="print" href="${attr(intent)}">Print</a><a class="back" href="/">Back</a></div>
+<p>Tap Print. The phone printer list opens.</p>
+</body></html>`;
 }
 
-/** The installed app cannot open the print dialog. Open the label in Chrome, which can print it. */
+/** The installed app has no printer list. Open the label page that calls Android print. */
 async function printOnAndroid(
   bytes: Uint8Array,
   started: AndroidPrintTab | null,
-  host?: { client?: SupabaseClient; sourceUrl?: string },
+  host?: { client?: SupabaseClient; paper?: LabelPaper },
 ) {
-  let httpsUrl = '';
-  if (host?.client) {
-    try { httpsUrl = await uploadPrintPdf(host.client, bytes); } catch { httpsUrl = ''; }
-  }
-  if (!httpsUrl && host?.sourceUrl && /^https:\/\//i.test(host.sourceUrl)) httpsUrl = host.sourceUrl;
   const tab = started?.tab && !started.tab.closed ? started.tab : window.open('about:blank', '_blank');
-  if (!httpsUrl) {
+  if (!host?.client) {
     tab?.close();
     throw new Error('Could not open the printer.');
   }
-  if (!tab) throw new Error('Could not open the printer.');
+  let intent = '';
+  try {
+    const pngs = await labelPngs(bytes);
+    const urls = await uploadPrintPngs(host.client, pngs);
+    const page = androidPrintDocument(window.location.origin, urls, host.paper || 'label');
+    intent = chromeLabelIntent(page);
+  } catch (error) {
+    tab?.close();
+    throw error instanceof Error ? error : new Error('Could not prepare the label.');
+  }
+  if (!intent || !tab) {
+    tab?.close();
+    throw new Error('Could not open the printer.');
+  }
   tab.document.open();
-  tab.document.write(chromePage(httpsUrl));
+  tab.document.write(printerLinkPage(intent));
   tab.document.close();
 }
 
@@ -181,7 +189,7 @@ async function printOnAndroid(
 export async function printPdfBytes(
   bytes: Uint8Array,
   androidTab: AndroidPrintTab | null = null,
-  host?: { client?: SupabaseClient; sourceUrl?: string },
+  host?: { client?: SupabaseClient; paper?: LabelPaper },
 ) {
   const kind = labelPrintKind(navigator.userAgent || '', navigator.maxTouchPoints || 0, navigator.platform || '');
   if (kind === 'android') {
@@ -232,5 +240,5 @@ export async function openShippingLabel(url: string, download = false, client?: 
     window.setTimeout(() => URL.revokeObjectURL(href), 60_000);
     return;
   }
-  await printPdfBytes(new Uint8Array(await blob.arrayBuffer()), androidTab, { client, sourceUrl: url });
+  await printPdfBytes(new Uint8Array(await blob.arrayBuffer()), androidTab, { client, paper });
 }
