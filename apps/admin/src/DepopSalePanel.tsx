@@ -105,9 +105,11 @@ export function DepopSalePanel({ client, money, variant, initialSku, initialSale
               file_name: labelFile.name,
               mime: labelFile.type || (labelFile.name.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'image/jpeg'),
             });
-            labelNote = attached.needs_tracking
+            labelNote = attached.needs_tracking && !attached.tracking_number
               ? ' Label saved. Type the tracking number on the order — it was not clear on the file.'
-              : ' Label is ready to print.';
+              : attached.tracking_number
+                ? ` Label is ready. Tracking ${attached.tracking_number}.`
+                : ' Label is ready to print.';
           } catch (err) {
             labelNote = ` Sale is in To ship, but the label did not attach (${errText(err)}). Add it from the order.`;
           }

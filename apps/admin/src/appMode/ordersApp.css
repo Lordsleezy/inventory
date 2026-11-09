@@ -395,6 +395,29 @@ html.app-mode .app-order-track-entry {
 html.app-mode .app-order-track-entry label { display: grid; gap: 6px; }
 html.app-mode .app-order-track-entry input { width: 100%; box-sizing: border-box; }
 
+html.app-mode .label-tracking-result,
+html.app-mode .label-tracking-picker {
+  margin: 0 16px 12px;
+  padding: 12px 14px;
+  border: 1px solid #4a4a4a;
+  background: #000;
+  color: #fff;
+}
+
+html.app-mode .label-tracking-result-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+html.app-mode .label-tracking-result-line { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: baseline; margin: 8px 0; }
+html.app-mode .label-tracking-result-num { font-size: 1.05rem; font-weight: 700; letter-spacing: 0.02em; word-break: break-all; }
+html.app-mode .label-tracking-picker ul { list-style: none; padding: 0; margin: 8px 0; display: grid; gap: 8px; }
+html.app-mode .label-tracking-picker li button {
+  width: 100%;
+  text-align: left;
+  border: 1px solid #4a4a4a;
+  background: transparent;
+  color: #fff;
+  padding: 10px 12px;
+  min-height: 44px;
+}
+
 html.app-mode .app-order-log .order-timeline li {
   border-left: 0;
   padding-left: 0;

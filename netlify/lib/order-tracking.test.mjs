@@ -88,14 +88,14 @@ test("an uploaded Depop label stores tracking and posts no expense", async () =>
       return api;
     },
   };
-  const pdf = Buffer.from("%PDF-1.4\n(USPS TRACKING 9400111899001234567891) Tj\n%%EOF\n");
+  const pdf = Buffer.from("%PDF-1.4\n(USPS TRACKING 9300 1107 9340 0248 3678 94) Tj\n%%EOF\n");
   const r = await attachUploadedLabel(sb, "s", { id: "o1", store_id: "s", status: "paid", fulfillment: "ship", channel: "depop" }, {
     bytes: pdf, name: "depop-label-00162.pdf", mime: "application/pdf",
   }, { allowMissingStorage: true, registerTrack: async () => ({ ok: true, skipped: "test" }) });
   assert.equal(r.ok, true);
   assert.equal(r.expense_posted, false);
   assert.equal(r.needs_tracking, false);
-  assert.equal(r.tracking_number, "9400111899001234567891");
+  assert.equal(r.tracking_number, "9300110793400248367894");
   assert.equal(inserts.length, 0);
   assert.equal(updates[0][1].label_origin, "upload");
   assert.equal(updates[0][1].label_cost_cents, null);

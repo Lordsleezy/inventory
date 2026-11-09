@@ -15,6 +15,8 @@ import { loadOrderLocations, locationCompare } from './locationOrder';
 import { useVisibleInterval } from './useVisibleInterval';
 import { ScanOutPanel } from './ScanOutPanel';
 import { PackLabelScan } from './PackLabelScan';
+import { labelUploadUi, type LabelUploadResponse } from './labelUploadFeedback';
+import { LabelTrackingPicker, LabelTrackingResult } from './LabelTrackingResult';
 
 const CHANNEL_LABEL: Record<string, string> = {
   website: 'Website',
@@ -151,6 +153,8 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
   const [locations, setLocations] = useState<Record<string, string[]>>({});
   const [locationOptions, setLocationOptions] = useState<{ code: string }[]>([]);
   const [error, setError] = useState('');
+  const [labelHit, setLabelHit] = useState<{ orderId: string; number: string; carrier?: string | null } | null>(null);
+  const [trackingPick, setTrackingPick] = useState<{ orderId: string; candidates: NonNullable<LabelUploadResponse['tracking_candidates']> } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
   const [view, setView] = useState<OrderView>(packOnly ? 'toShip' : 'all');
@@ -227,9 +231,14 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
         action: 'attach_label', id: o.id,
         file_base64: await fileToBase64(file), file_name: file.name,
         mime: file.type || (file.name.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'image/jpeg'),
-      });
-      if (data.mismatch) setError(String(data.exception || 'That tracking number does not match eBay. The order stays in Needs label.'));
-      else if (data.needs_tracking) setError('Label saved. Type the tracking number — it was not clear on the file.');
+      }) as LabelUploadResponse;
+      const ui = labelUploadUi(data);
+      setLabelHit(null);
+      setTrackingPick(null);
+      setError('');
+      if (ui.kind === 'mismatch' || ui.kind === 'manual') setError(ui.message);
+      else if (ui.kind === 'picker') setTrackingPick({ orderId: o.id, candidates: ui.candidates });
+      else if (ui.kind === 'hit') setLabelHit({ orderId: o.id, number: ui.number, carrier: ui.carrier });
       await load();
     } catch (e) { setError(errText(e)); }
     setBusy(null);
@@ -541,6 +550,24 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
         <div className="order-card-summary">{thumb && <img className="app-order-thumb" src={thumb} alt="" />}<div className="order-card-info"><small>{channelLabel(o.channel)} · {money(o.item_cents)} · SKU {o.sku}</small><div className="order-card-tags"><b className={chip.tone === 'warn' ? 'badge-warn' : ''}>{cardStatus}</b></div></div></div>
         {o.fulfillment === 'ship' && !isCanceled && <OrderStepper stage={stage} />}
         <OrderFacts label={labelText} labeled={labeled} order={o} />
+        {labelHit?.orderId === o.id && <LabelTrackingResult hit={labelHit} onDismiss={() => setLabelHit(null)} />}
+        {trackingPick?.orderId === o.id && (
+          <LabelTrackingPicker
+            candidates={trackingPick.candidates}
+            busy={!!busy}
+            onPick={async (number, carrier) => {
+              setBusy(o.id + 'tracking');
+              try {
+                await orderAdmin(accessToken, { action: 'set_tracking', id: o.id, tracking: number, carrier: carrier || o.carrier || 'USPS' });
+                setTrackingPick(null);
+                setLabelHit({ orderId: o.id, number, carrier });
+                setError('');
+                await load();
+              } catch (e) { setError(errText(e)); } finally { setBusy(null); }
+            }}
+            onManual={() => setTrackingPick(null)}
+          />
+        )}
         {o.tracking_exception && <div className="alert" role="status">Carrier exception: {o.tracking_exception}</div>}
         {(isPackaged || isShipped || isDone) && <OrderTimelineList rows={orderTimeline(o, trackEvents[o.id])} stamp={stamp} />}
         {head(o)}{item(o)}

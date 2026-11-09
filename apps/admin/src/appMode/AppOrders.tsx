@@ -14,6 +14,8 @@ import { SEG_SHORT } from '../orderDisplay';
 import { AppOrderDetail } from './AppOrderDetail';
 import { AppOrderRow } from './AppOrderRow';
 import { floorFunctionUrl } from '../floorApi';
+import { labelUploadUi, type LabelUploadResponse } from '../labelUploadFeedback';
+import { LabelTrackingPicker, LabelTrackingResult } from '../LabelTrackingResult';
 
 type Seg = 'needsLabel' | 'toShip' | 'packaged' | 'shipped' | 'delivered' | 'canceled';
 
@@ -66,6 +68,8 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
   const [busy, setBusy] = useState('');
   const [labelOpen, setLabelOpen] = useState(false);
   const [trackingDraft, setTrackingDraft] = useState('');
+  const [labelHit, setLabelHit] = useState<{ number: string; carrier?: string | null; layer?: string | null } | null>(null);
+  const [trackingPick, setTrackingPick] = useState<LabelUploadResponse['tracking_candidates']>();
   const packProofInput = useRef<HTMLInputElement>(null);
   const labelInput = useRef<HTMLInputElement>(null);
   const tabRowRef = useRef<HTMLDivElement>(null);
@@ -256,9 +260,27 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
         file_base64: await fileToBase64(file),
         file_name: file.name,
         mime: file.type || (file.name.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'image/jpeg'),
-      });
-      if (data.mismatch) setError(String(data.exception || 'That tracking number does not match eBay. The order stays in Needs label.'));
-      else if (data.needs_tracking) setError('Label saved. Type the tracking number — it was not clear on the file.');
+      }) as LabelUploadResponse;
+      const ui = labelUploadUi(data);
+      setLabelHit(null);
+      setTrackingPick(undefined);
+      setError('');
+      if (ui.kind === 'mismatch' || ui.kind === 'manual') setError(ui.message);
+      else if (ui.kind === 'picker') setTrackingPick(ui.candidates);
+      else if (ui.kind === 'hit') {
+        setLabelHit({ number: ui.number, carrier: ui.carrier, layer: ui.layer });
+        setTrackingDraft(ui.number);
+      }
+    });
+  }
+
+  async function confirmPickedTracking(o: WebOrder, number: string, carrier?: string | null) {
+    await runAction('tracking', async () => {
+      await orderAdmin(accessToken, { action: 'set_tracking', id: o.id, tracking: number, carrier: carrier || o.carrier || 'USPS' });
+      setTrackingPick(undefined);
+      setLabelHit({ number, carrier: carrier || o.carrier });
+      setTrackingDraft(number);
+      setError('');
     });
   }
 
@@ -356,6 +378,10 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
         onUrl={(p, u) => mergePhotoUrls({ [p]: u })}
         onLabelFile={(f) => void uploadLabel(open, f)}
         onPackProofFile={(f) => void uploadPackProof(open, f)}
+        labelHit={labelHit}
+        trackingPick={trackingPick}
+        onConfirmTrackingPick={(n, c) => void confirmPickedTracking(open, n, c)}
+        onDismissLabelHit={() => setLabelHit(null)}
       />
     );
   }

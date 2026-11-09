@@ -47,7 +47,7 @@ export async function archiveRemoteLabel(sb, { storeId, orderId, url, filename, 
  */
 export function resolveUploadedTracking(order, extracted) {
   const ebay = compactTracking(order?.marketplace_tracking_number);
-  const pdf = extracted?.confident ? compactTracking(extracted.number) : "";
+  const pdf = extracted?.confident && extracted?.number ? compactTracking(extracted.number) : "";
   if (pdf && ebay && pdf !== ebay) {
     return {
       mismatch: true,
@@ -87,7 +87,10 @@ export async function attachUploadedLabel(sb, storeId, order, file, deps = {}) {
   if (!bytes.length) return { ok: false, status: 400, error: "Choose a PDF or a screenshot." };
   if (bytes.length > MAX_BYTES) return { ok: false, status: 400, error: "Label file is over 8 MB." };
   const mime = String(file.mime || "application/pdf");
-  const extracted = await (deps.extract || extractTrackingFromFile)(bytes, mime);
+  const extracted = await (deps.extract || extractTrackingFromFile)(bytes, mime, {
+    filename: file.name,
+    marketplaceTracking: order.marketplace_tracking_number,
+  });
 
   let stored = null;
   if (typeof sb.storage?.from === "function") {
@@ -136,17 +139,25 @@ export async function attachUploadedLabel(sb, storeId, order, file, deps = {}) {
       registered = { ok: false, error: err.message };
     }
   }
+  const needsManual = resolved.needsEntry && !resolved.tracking;
   return {
     ok: true,
     status: 200,
     order: saved,
-    needs_tracking: resolved.needsEntry,
+    needs_tracking: needsManual,
     mismatch: resolved.mismatch,
     exception: resolved.exception,
     tracking_number: resolved.tracking,
     carrier: resolved.carrier,
     reason: extracted.reason || null,
-    engine: extracted.engine || null,
+    engine: extracted.engine || extracted.layer || null,
+    layer: extracted.layer || null,
+    tracking_candidates: (extracted.alternatives || []).map((row) => ({
+      number: row.number,
+      carrier: row.carrier || null,
+      source: row.source || row.layer || null,
+    })),
+    needs_picker: Boolean(extracted.needsPicker && !resolved.tracking),
     registered,
     expense_posted: false,
   };
