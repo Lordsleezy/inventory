@@ -53,4 +53,5 @@ test('missing fields open the matching section', () => {
   assert.equal(receiveSectionForGap('location'), 'location');
   assert.equal(receiveSectionForGap('price'), 'price');
   assert.equal(receiveSectionForGap('brand'), 'item');
+  assert.equal(receiveSectionForGap('store category'), 'details');
 });

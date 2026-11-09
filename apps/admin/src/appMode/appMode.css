@@ -31,8 +31,10 @@ html.app-mode .app-mode-root {
   left: 0;
   display: flex;
   flex-direction: column;
-  height: var(--floor-app-h, 100dvh);
-  max-height: var(--floor-app-h, 100dvh);
+  /* Stretch to the layout viewport. A pixel height from visualViewport
+     stops above the iPhone home indicator and leaves black under the tab bar. */
+  height: auto;
+  max-height: none;
   background: #000;
   color: #fff;
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
@@ -547,10 +549,13 @@ html.app-mode .app-primary {
 }
 html.app-mode .app-primary:disabled { opacity: 0.45; }
 
-/* Bottom tabs — safe-area once inside the bar */
+/* Bottom tabs. In the column so they sit on the screen edge.
+   Home-indicator inset is padding inside the bar, so the bar background
+   reaches the glass and the labels sit above the indicator. */
 html.app-mode .app-tabbar {
   position: relative;
   flex: 0 0 auto;
+  margin-top: auto;
   left: 0;
   right: 0;
   display: flex;
@@ -558,7 +563,7 @@ html.app-mode .app-tabbar {
   overflow-x: auto;
   background: #161618;
   border-top: 0.5px solid rgba(84, 84, 88, 0.65);
-  margin: 0;
+  margin-bottom: 0;
   padding: 4px 0 env(safe-area-inset-bottom, 0px);
   z-index: 20;
   scrollbar-width: none;
