@@ -6,6 +6,12 @@ test('do not list waives the photo and the dimensions', () => {
   assert.equal(receiveMediaWaived(true, false), true);
   assert.deepEqual(receiveMissingFields({ doNotList: true, brandReady: false, hasPhoto: false, quantityOk: false, hasDimensions: false }), ['quantity']);
   assert.deepEqual(receiveMissingFields({ doNotList: true, brandReady: true, hasPhoto: false, quantityOk: true, hasDimensions: false }), []);
+  assert.deepEqual(receiveMissingFields({
+    doNotList: true, brandReady: false, hasPhoto: false, quantityOk: true, hasDimensions: false, titleOnly: true, titleReady: false,
+  }), ['title']);
+  assert.deepEqual(receiveMissingFields({
+    doNotList: true, brandReady: false, hasPhoto: false, quantityOk: true, hasDimensions: false, titleOnly: true, titleReady: true,
+  }), []);
 });
 
 test('defective alone waives the photo and the dimensions', () => {
