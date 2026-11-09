@@ -11,10 +11,12 @@ begin
   perform public.seed_store_settings(s, 'eBay category gate');
   perform public.pgtap_sync_owner_portal_admins(s);
   insert into public.sku_ledger(sku, store_id, issued_at) values ('29103', s, now()), ('29104', s, now());
-  insert into public.units(store_id,sku,brand,model,title,state,ask_cents,qty_on_hand,received_at,updated_at)
+  insert into public.units(store_id,sku,brand,model,title,state,ask_cents,acquisition_cost_cents,
+    package_length_in,package_width_in,package_height_in,package_weight_lb,shippable,fulfillment_override,
+    qty_on_hand,received_at,updated_at)
     values
-      (s,'29103','Meow','Mix','Meow Mix Original Choice Dry Cat Food','available',1999,1,now(),now()),
-      (s,'29104','Bad','Parent','Listed under a parent','available',500,1,now(),now());
+      (s,'29103','Meow','Mix','Meow Mix Original Choice Dry Cat Food','available',1999,450,1,2,3,4,true,'ship',1,now(),now()),
+      (s,'29104','Bad','Parent','Listed under a parent','available',500,100,1,2,3,4,true,'ship',1,now(),now());
   insert into public.channel_taxonomy(channel,category_id,path,leaf,active,version,aspect_fields,fields_fetched_at)
     values
       ('ebay','100','Pet Supplies',false,true,'test','[]'::jsonb,now()),
