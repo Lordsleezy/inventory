@@ -10,13 +10,14 @@ html.app-mode body {
 }
 
 html.app-mode body {
-  /* overflow:auto (not hidden) — iOS PWAs often show the accessory bar but no keyboard
-     when the document root cannot scroll. Scrolling still happens inside .app-tab-panel. */
-  overflow: auto;
+  /* The document itself must not scroll. iOS reloads the page on a short overscroll.
+     Lists scroll inside .app-tab-panel. */
+  overflow: hidden;
   position: fixed;
   inset: 0;
   width: 100%;
   height: 100%;
+  overscroll-behavior: none;
 }
 
 html.app-mode * {
@@ -76,31 +77,32 @@ html.app-mode .floor-live-build-banner {
   line-height: 1.35;
 }
 
-html.app-mode .app-pull-refresh-float {
-  position: fixed;
-  top: max(env(safe-area-inset-top, 0px), 6px);
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 120;
+html.app-mode .app-pull-sheet {
+  min-height: 100%;
+  background: #000;
+  transition: transform 0.34s cubic-bezier(.22, 1, .36, 1);
+}
+html.app-mode .app-pull-sheet.is-dragging {
+  transition: none;
+}
+html.app-mode .app-pull-indicator {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 4;
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: flex-end;
   gap: 6px;
-  padding: 10px 16px;
-  border-radius: 14px;
-  background: rgba(28, 28, 30, 0.92);
-  border: 1px solid #3a3a3c;
+  padding-bottom: 8px;
   color: #8e8e93;
   font-size: 12px;
   line-height: 1.2;
   pointer-events: none;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.45);
 }
-html.app-mode .app-pull-refresh-float.ready {
-  color: #fff;
-  border-color: #fff;
-}
-html.app-mode .app-pull-refresh-float.active {
+html.app-mode .app-pull-indicator.ready {
   color: #fff;
 }
 html.app-mode .app-pull-spinner {

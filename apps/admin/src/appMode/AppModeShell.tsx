@@ -232,14 +232,19 @@ export function AppModeShell({
     let startY = 0;
     const atTop = (target: EventTarget | null) => {
       let node = target instanceof Element ? target : null;
-      while (node && node !== document.body && node !== document.documentElement) {
+      while (node && node !== document.documentElement) {
         if (node instanceof HTMLElement) {
           const oy = getComputedStyle(node).overflowY;
-          if ((oy === 'auto' || oy === 'scroll') && node.scrollHeight > node.clientHeight + 2) return node.scrollTop <= 2;
+          if ((oy === 'auto' || oy === 'scroll') && node.scrollHeight > node.clientHeight + 2 && node.scrollTop > 2) return false;
         }
         node = node.parentElement;
       }
       return (document.scrollingElement?.scrollTop || 0) <= 2;
+    };
+    const onFocus = (e: FocusEvent) => {
+      const target = e.target;
+      if (!(target instanceof HTMLElement)) return;
+      window.setTimeout(() => target.scrollIntoView({ block: 'center', inline: 'nearest' }), 60);
     };
     const onStart = (e: TouchEvent) => {
       startX = e.touches[0]?.clientX ?? 0;
@@ -255,6 +260,7 @@ export function AppModeShell({
     };
     document.addEventListener('touchstart', onStart, { capture: true, passive: true });
     document.addEventListener('touchmove', onMove, { capture: true, passive: false });
+    document.addEventListener('focusin', onFocus);
     return () => {
       document.documentElement.classList.remove('app-mode', 'dark');
       document.body.classList.remove('app-mode');
@@ -263,6 +269,7 @@ export function AppModeShell({
       window.removeEventListener('resize', pin);
       document.removeEventListener('touchstart', onStart, { capture: true });
       document.removeEventListener('touchmove', onMove, { capture: true });
+      document.removeEventListener('focusin', onFocus);
     };
   }, []);
 
