@@ -40,11 +40,12 @@ type Props = {
   stamp: (s: string) => string;
   isAdmin?: boolean;
   refreshKey?: number;
+  onPullReady?: () => void;
 };
 
 type TrackEvent = { status?: string; status_detail?: string | null; location?: string | null; occurred_at?: string | null };
 
-export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin = false, refreshKey = 0 }: Props) {
+export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin = false, refreshKey = 0, onPullReady }: Props) {
   const [seg, setSeg] = useState<Seg>('toShip');
   const [scanOut, setScanOut] = useState(false);
   const [orders, setOrders] = useState<WebOrder[] | null>(null);
@@ -99,8 +100,8 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
 
   useEffect(() => {
     if (!refreshKey) return;
-    void load();
-  }, [refreshKey, load]);
+    void load().finally(() => onPullReady?.());
+  }, [refreshKey, load, onPullReady]);
 
   const sign = useCallback((paths: string[]) => signPhotoUrls(client, paths), [client]);
 
@@ -525,6 +526,8 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
           const tail = orderNeedsLabel(o) ? '' : trackingTail(o);
           const thumbPhoto = listThumbPhoto(photoMap[o.sku] || []);
           const thumbPath = thumbPhoto?.path || null;
+          const rowStage = orderStage(o);
+          const rowPackaged = seg === 'toShip' && rowStage === 'toShip' && hasLabel(o) && !orderNeedsLabel(o);
           return (
             <AppOrderRow
               key={o.id}
@@ -544,6 +547,9 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
               onUpload={(f) => void uploadLabel(o, f)}
               showStepBack={isAdmin && orderCanStepBack(o)}
               onStepBack={isAdmin ? () => void stepBack(o) : undefined}
+              showPackaged={rowPackaged}
+              onPackaged={() => void markPackaged(o)}
+              packagedBusy={busy === 'packaged'}
             />
           );
         })}

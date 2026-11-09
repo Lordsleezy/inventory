@@ -5,7 +5,7 @@ type Props = {
   tab: string;
   hidden?: boolean;
   className?: string;
-  onPullRefresh?: () => void;
+  onPullRefresh?: () => void | Promise<void>;
   children: ReactNode;
 };
 
@@ -17,8 +17,8 @@ export function AppTabPanel({ tab, hidden, className, onPullRefresh, children }:
   }, []);
 
   const enabled = !hidden && !!onPullRefresh;
-  const { pull, refreshing, hint, threshold } = useAppPullRefresh(el, onPullRefresh, enabled);
-  const spacer = refreshing ? 36 : pull > 0 ? Math.min(pull, 56) : 0;
+  const { pull, refreshing, hint, show, spin, pullProgress } = useAppPullRefresh(el, onPullRefresh, enabled);
+  const h = refreshing ? 52 : show ? Math.max(40, Math.min(56, pull * 0.65)) : 0;
 
   return (
     <div
@@ -27,13 +27,19 @@ export function AppTabPanel({ tab, hidden, className, onPullRefresh, children }:
       data-tab={tab}
       hidden={hidden || undefined}
     >
-      {(spacer > 0 || hint) && (
+      {show && (
         <div
-          className={`app-pull-refresh${refreshing ? ' active' : ''}${pull >= threshold ? ' ready' : ''}`}
-          style={{ height: spacer || undefined }}
+          className={`app-pull-refresh${refreshing ? ' active' : ''}${pullProgress >= 1 ? ' ready' : ''}`}
+          style={{ height: h }}
           aria-live="polite"
+          aria-busy={refreshing || undefined}
         >
-          {hint}
+          <span
+            className={`app-pull-spinner${spin ? ' spin' : ''}`}
+            style={refreshing ? undefined : { ['--pull' as string]: `${Math.round(pullProgress * 300)}deg` }}
+            aria-hidden
+          />
+          {hint && <span className="app-pull-label">{hint}</span>}
         </div>
       )}
       {children}

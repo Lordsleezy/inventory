@@ -22,11 +22,15 @@ type Props = {
   onUpload?: (file: File) => void;
   showStepBack?: boolean;
   onStepBack?: () => void;
+  showPackaged?: boolean;
+  onPackaged?: () => void;
+  packagedBusy?: boolean;
 };
 
 export function AppOrderRow({
   order, client, thumbPath, photoUrls, locationCode, money, channelName, trackingTail,
   onOpen, onPrint, onUrl, showUpload, onUpload, hideMoney = false, showStepBack, onStepBack,
+  showPackaged, onPackaged, packagedBusy,
 }: Props) {
   const loc = locationParts(locationCode);
   const chip = orderChip(order);
@@ -39,7 +43,9 @@ export function AppOrderRow({
       ? `${channelName} · ${money(order.item_cents || 0)}`
       : [channelName, money(order.item_cents || 0), trackingTail].filter(Boolean).join(' · ');
   const locLine = loc ? `${loc.display} · ${loc.slot}`.toUpperCase() : '';
-  const showActions = Boolean((hasLabel(order) && onPrint) || (showUpload && onUpload) || (showStepBack && onStepBack));
+  const showActions = Boolean(
+    (hasLabel(order) && onPrint) || (showUpload && onUpload) || (showStepBack && onStepBack) || (showPackaged && onPackaged),
+  );
 
   return (
     <div className={`app-row app-order-row-v2${needsLabel ? ' needs-label' : ''}`}>
@@ -64,6 +70,16 @@ export function AppOrderRow({
       </button>
       {showActions && (
         <div className="app-order-row-actions">
+          {showPackaged && onPackaged && (
+            <button
+              type="button"
+              className="app-order-action-primary"
+              disabled={packagedBusy}
+              onClick={(e) => { e.stopPropagation(); onPackaged(); }}
+            >
+              {packagedBusy ? '…' : 'Packaged'}
+            </button>
+          )}
           {hasLabel(order) && onPrint && (
             <button type="button" className="app-order-action-outline" onClick={(e) => { e.stopPropagation(); onPrint(); }}>Print</button>
           )}

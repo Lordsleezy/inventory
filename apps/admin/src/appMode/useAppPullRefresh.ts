@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 
 const THRESHOLD_PX = 72;
+const MIN_SPIN_MS = 450;
+
+export type PullRefreshHandler = () => void | Promise<void>;
 
 /** Pull down at scroll top to refresh (mobile app tabs). */
 export function useAppPullRefresh(
   panel: HTMLElement | null,
-  onRefresh: (() => void) | undefined,
+  onRefresh: PullRefreshHandler | undefined,
   enabled: boolean,
 ) {
   const [pull, setPull] = useState(0);
@@ -19,6 +22,7 @@ export function useAppPullRefresh(
   useEffect(() => {
     if (!panel || !enabled || !onRefresh) {
       setPull(0);
+      setRefreshing(false);
       return;
     }
 
@@ -37,25 +41,33 @@ export function useAppPullRefresh(
         return;
       }
       const y = e.touches[0]?.clientY ?? 0;
-      setPull(Math.max(0, Math.min(96, y - startY.current)));
+      setPull(Math.max(0, Math.min(88, y - startY.current)));
     };
 
     const onEnd = (e: TouchEvent) => {
       const delta = (e.changedTouches[0]?.clientY ?? 0) - startY.current;
-      setPull(0);
       if (!armed.current || panel.scrollTop > 2 || busy.current) {
         armed.current = false;
+        setPull(0);
         return;
       }
       armed.current = false;
-      if (delta < THRESHOLD_PX) return;
+      if (delta < THRESHOLD_PX) {
+        setPull(0);
+        return;
+      }
       busy.current = true;
       setRefreshing(true);
-      onRefreshRef.current?.();
-      window.setTimeout(() => {
-        busy.current = false;
-        setRefreshing(false);
-      }, 700);
+      setPull(0);
+      const started = performance.now();
+      const settle = () => {
+        const wait = Math.max(0, MIN_SPIN_MS - (performance.now() - started));
+        window.setTimeout(() => {
+          busy.current = false;
+          setRefreshing(false);
+        }, wait);
+      };
+      void Promise.resolve(onRefreshRef.current?.()).then(settle, settle);
     };
 
     const onCancel = () => {
@@ -75,13 +87,17 @@ export function useAppPullRefresh(
     };
   }, [panel, enabled, onRefresh]);
 
+  const show = pull > 6 || refreshing;
   const hint = refreshing
-    ? 'Refreshing…'
+    ? 'Refreshing'
     : pull >= THRESHOLD_PX
       ? 'Release to refresh'
-      : pull > 16
+      : pull > 6
         ? 'Pull to refresh'
         : '';
 
-  return { pull, refreshing, hint, threshold: THRESHOLD_PX };
+  const spin = refreshing || pull >= THRESHOLD_PX * 0.85;
+  const pullProgress = Math.min(1, pull / THRESHOLD_PX);
+
+  return { pull, refreshing, hint, threshold: THRESHOLD_PX, show, spin, pullProgress };
 }
