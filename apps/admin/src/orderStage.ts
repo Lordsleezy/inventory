@@ -74,6 +74,15 @@ export function hasLabel(o: StageOrder) {
   return !!(o.label_url || o.label_storage_path || o.label_uploaded_at || o.label_purchased_at);
 }
 
+/** Phone To ship list: paid ship order not yet packaged (label not required to show the button). */
+export function orderCanMarkPackaged(o: StageOrder) {
+  if (o.status !== 'paid' || o.fulfillment !== 'ship') return false;
+  if (o.packaged_at || o.shipped_at || o.delivered_at) return false;
+  if (orderNeedsLabel(o)) return false;
+  if (orderStage(o) !== 'toShip') return false;
+  return true;
+}
+
 export function packagedStale(o: StageOrder, now = Date.now()) {
   if (!o.packaged_at || o.shipped_at || o.delivered_at) return false;
   const at = new Date(o.packaged_at).getTime();

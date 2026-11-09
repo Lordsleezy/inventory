@@ -1,8 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { carrierTrackUrl, orderCanStepBack, orderChip, orderStage, orderTimeline, packagedStale, shippedStale } from './orderStage.ts';
+import { carrierTrackUrl, orderCanMarkPackaged, orderCanStepBack, orderChip, orderStage, orderTimeline, packagedStale, shippedStale } from './orderStage.ts';
 
 const day = '2026-11-07T21:14:00Z';
+
+test('orderCanMarkPackaged on paid ship orders before packaged', () => {
+  assert.equal(orderCanMarkPackaged({ status: 'paid', fulfillment: 'ship' }), true);
+  assert.equal(orderCanMarkPackaged({ status: 'paid', fulfillment: 'ship', packaged_at: '2026-01-01' }), false);
+  assert.equal(orderCanMarkPackaged({ status: 'paid', fulfillment: 'ship', channel: 'ebay' }), false);
+});
 
 test('orderCanStepBack only on paid orders with a fulfillment timestamp', () => {
   assert.equal(orderCanStepBack({ status: 'paid', fulfillment: 'ship' }), false);

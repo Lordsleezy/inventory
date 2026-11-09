@@ -5,7 +5,7 @@ import { OrderStageTabs, OrderTimelineList } from '../OrderFulfillment';
 import { OrderFacts, OrderPhotoCarousel } from '../OrderPhotos';
 import { displayOrderTitle } from '../orderDisplay';
 import { locationParts } from '../locationOrder';
-import { canBuyLabel, hasLabel, orderCanStepBack, orderNeedsLabel, orderStage, orderTimeline, type OrderStage } from '../orderStage';
+import { canBuyLabel, hasLabel, orderCanMarkPackaged, orderCanStepBack, orderNeedsLabel, orderStage, orderTimeline, type OrderStage } from '../orderStage';
 import { listThumbPhoto, photoKind, type UnitPhoto } from '../unitPhotos';
 import type { WebOrder } from '../OrdersPage';
 import { PackLabelScan } from '../PackLabelScan';
@@ -242,10 +242,21 @@ export function AppOrderDetail(props: AppOrderDetailProps) {
               )}
             </div>
           )}
-          {stage === 'toShip' && labeled && !orderNeedsLabel(order) && (
-            <button type="button" className="primary app-order-packaged-btn" disabled={!!busy} onClick={onMarkPackaged}>
-              {busy === 'packaged' ? '…' : 'Packaged'}
-            </button>
+          {orderCanMarkPackaged(order) && (
+            <>
+              {onPackCondition && order.pack_condition !== 'ok' && order.pack_condition !== 'not_as_listed' && (
+                <p className="app-order-plain">Tap <strong>Item matches listing</strong> in More below, or mark packaged if you are ready.</p>
+              )}
+              {onPackCondition && stage === 'toShip' && (
+                <div className="app-order-extra-actions">
+                  <button type="button" className="secondary" disabled={!!busy} onClick={() => onPackCondition('ok')}>Item matches listing</button>
+                  <button type="button" className="secondary" disabled={!!busy} onClick={() => onPackCondition('not_as_listed')}>Not as listed</button>
+                </div>
+              )}
+              <button type="button" className="primary app-order-packaged-btn" disabled={!!busy} onClick={onMarkPackaged}>
+                {busy === 'packaged' ? '…' : 'Packaged'}
+              </button>
+            </>
           )}
         </div>
       )}

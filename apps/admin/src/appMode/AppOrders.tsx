@@ -7,7 +7,7 @@ import { shortError } from './shortError';
 import { loadOrderLocations, locationCompare } from '../locationOrder';
 import { fileToBase64, labelFileUrl, orderAdmin } from '../orderLabel';
 import { openShippingLabel } from '../labelPrint';
-import { hasLabel, orderCanStepBack, orderNeedsLabel, orderStage, packagedStale, shippedStale, trackingTail, type OrderStage } from '../orderStage';
+import { hasLabel, orderCanMarkPackaged, orderCanStepBack, orderNeedsLabel, orderStage, packagedStale, shippedStale, trackingTail, type OrderStage } from '../orderStage';
 import { useVisibleInterval } from '../useVisibleInterval';
 import { ScanOutPanel } from '../ScanOutPanel';
 import { SEG_SHORT } from '../orderDisplay';
@@ -526,8 +526,7 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
           const tail = orderNeedsLabel(o) ? '' : trackingTail(o);
           const thumbPhoto = listThumbPhoto(photoMap[o.sku] || []);
           const thumbPath = thumbPhoto?.path || null;
-          const rowStage = orderStage(o);
-          const rowPackaged = seg === 'toShip' && rowStage === 'toShip' && hasLabel(o) && !orderNeedsLabel(o);
+          const rowPackaged = seg === 'toShip' && orderCanMarkPackaged(o);
           return (
             <AppOrderRow
               key={o.id}
