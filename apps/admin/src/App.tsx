@@ -26,6 +26,7 @@ import { ReportsPage } from './ReportsPage';
 import { ProfitSplit } from './ProfitSplit';
 import { NativePayouts } from './NativePayouts';
 import { SettingsPage } from './SettingsPage';
+import { refreshLabelPaper } from './labelPrint';
 import { AssociateSettings } from './AssociateSettings';
 import { type MainPage, type NavState, defaultNavState, desktopLanding, parseNavFromLocation, writeNavToLocation } from './navigation';
 import { HomePage } from './HomePage';
@@ -390,8 +391,9 @@ export function App() {
     return () => mq.removeEventListener?.('change', sync);
   }, []);
   useEffect(() => {
-    try { localStorage.setItem('floor_admin_nav_collapsed', navCollapsed ? '1' : '0'); } catch { /* ignore */ }
-  }, [navCollapsed]);
+    if (!session) return;
+    void refreshLabelPaper(sb);
+  }, [session]);
   useEffect(() => {
     document.documentElement.classList.add('dark');
     if (phoneAppShell) document.documentElement.classList.remove('desk');

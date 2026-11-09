@@ -1,6 +1,7 @@
 ﻿import { useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { errText } from './errText';
+import { LabelPaperSetting } from './LabelPaperSetting';
 
 type Props = {
   client: SupabaseClient;
@@ -63,5 +64,6 @@ export function AssociateSettings({ client, displayName }: Props) {
       {ok && <p className="hint">{ok}</p>}
       <p className="hint">Sign in with clock number <strong>1111</strong> and your password. No email is needed.</p>
     </section>
+    <LabelPaperSetting client={client} />
   </>;
 }

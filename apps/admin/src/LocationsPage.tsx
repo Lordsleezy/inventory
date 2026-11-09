@@ -316,9 +316,22 @@ export function LocationsPage({
 
   function printLabels() {
     setPrinting(true);
+    document.getElementById('floor-location-print-style')?.remove();
+    const style = document.createElement('style');
+    style.id = 'floor-location-print-style';
+    style.textContent = '@page{size:letter;margin:12mm}';
+    document.head.appendChild(style);
+    let closed = false;
+    const done = () => {
+      if (closed) return;
+      closed = true;
+      style.remove();
+      setPrinting(false);
+    };
+    window.addEventListener('afterprint', done, { once: true });
     window.setTimeout(() => {
       window.print();
-      setPrinting(false);
+      window.setTimeout(done, 120_000);
     }, 50);
   }
 

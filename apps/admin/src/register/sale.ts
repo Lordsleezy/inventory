@@ -219,7 +219,7 @@ export function receiptHtml(r: ReceiptPayload): string {
     ? `<div class="qr">${r.qrHeader ? `<div class="qr-head">${esc(r.qrHeader)}</div>` : ''}<img src="${qrSrc}" alt="QR code"/></div>`
     : '';
   return `<!doctype html><html><head><title>Receipt ${esc(r.receiptNo)}</title>
-<style>body{font:14px/1.45 system-ui,sans-serif;color:#111;max-width:480px;margin:24px auto;padding:0 16px}
+<style>@page{size:letter;margin:0.5in}body{font:14px/1.45 system-ui,sans-serif;color:#111;max-width:480px;margin:24px auto;padding:0 16px}
 h1{margin:0;font-size:22px}.muted{color:#666;font-size:12px}table{width:100%;border-collapse:collapse;margin-top:8px}
 td{padding:6px 0;vertical-align:top}.box{border-top:1px solid #ccc;margin-top:14px;padding-top:12px;display:grid;gap:4px}
 .legal{color:#555;font-size:12px;margin-top:22px;white-space:pre-wrap}.foot{color:#555;font-size:12px;margin-top:12px;text-align:center}

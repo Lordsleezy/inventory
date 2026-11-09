@@ -348,6 +348,7 @@ export function BooksPage({ client, storeId: storeIdProp, money, native = false,
   }
 
   function printReports() {
+    document.getElementById('floor-location-print-style')?.remove();
     document.body.classList.add('books-printing');
     window.print();
     window.setTimeout(() => document.body.classList.remove('books-printing'), 500);

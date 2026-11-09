@@ -783,6 +783,9 @@ html.dark .mboard-progress-bar{background:#2a3340}
 .location-code-list span{display:grid;gap:3px;padding:10px 4px}
 .location-code-list b{font-size:1.15rem}.location-code-list small{color:#71808d}
 .location-print-sheet{display:none}
+.label-paper-choices{display:flex;flex-wrap:wrap;gap:8px}
+.label-paper-choices button{min-height:44px;font-size:16px;padding:8px 14px}
+.label-paper-choices button[aria-pressed="true"]{outline:2px solid #fff}
 .app-mode .locations-page header{padding:6px 2px 14px;margin:0}
 .app-mode .locations-page header h1{font-size:1.5rem}
 .app-mode .locations-page .panel{border:0;border-radius:14px;background:var(--app-group-bg,#1c1c1e);box-shadow:none;padding:16px;margin:0 0 16px}
