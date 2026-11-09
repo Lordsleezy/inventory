@@ -10,6 +10,7 @@ import { listThumbPhoto, photoKind, type UnitPhoto } from '../unitPhotos';
 import type { WebOrder } from '../OrdersPage';
 import { PackLabelScan } from '../PackLabelScan';
 import { UnitListThumb } from '../UnitListThumb';
+import { LabelTrackingPicker, LabelTrackingResult } from '../LabelTrackingResult';
 
 const CHANNEL: Record<string, string> = {
   website: 'Website', ebay: 'eBay', amazon: 'Amazon', tiktok: 'TikTok', depop: 'Depop', mercari: 'Mercari',
@@ -63,6 +64,10 @@ export type AppOrderDetailProps = {
   onUrl: (path: string, url: string) => void;
   onLabelFile: (file: File) => void;
   onPackProofFile: (file: File) => void;
+  labelHit?: { number: string; carrier?: string | null; layer?: string | null } | null;
+  trackingPick?: { number: string; carrier?: string | null; source?: string | null }[] | null;
+  onConfirmTrackingPick?: (number: string, carrier?: string | null) => void;
+  onDismissLabelHit?: () => void;
 };
 
 export function AppOrderDetail(props: AppOrderDetailProps) {
@@ -74,7 +79,7 @@ export function AppOrderDetail(props: AppOrderDetailProps) {
     onStepBack, onFloorCancel, onSaveTracking, onUploadLabel, onUploadPackProof,
     onVoidLabel, onPackCondition, onRecordLabelCost,
     labelInputRef, packProofInputRef, onLabelOpen, labelOpen, onLabelClose, onReload,
-    onUrl, onLabelFile, onPackProofFile,
+    onUrl, onLabelFile, onPackProofFile, labelHit, trackingPick, onConfirmTrackingPick, onDismissLabelHit,
   } = props;
 
   const [photosOpen, setPhotosOpen] = useState(false);
@@ -186,7 +191,16 @@ export function AppOrderDetail(props: AppOrderDetailProps) {
         <p className="app-order-plain">Scanned out {stamp(order.scanned_out_at)}{order.scanned_out_by_name ? ` by ${order.scanned_out_by_name}` : ''}</p>
       )}
       {order.tracking_exception && <p className="app-inline-error">Carrier exception: {order.tracking_exception}</p>}
-      {order.tracking_needs_entry && (
+      {labelHit && <LabelTrackingResult hit={labelHit} onDismiss={onDismissLabelHit} />}
+      {trackingPick && trackingPick.length > 0 && onConfirmTrackingPick && (
+        <LabelTrackingPicker
+          candidates={trackingPick}
+          busy={!!busy}
+          onPick={(n, c) => onConfirmTrackingPick(n, c)}
+          onManual={() => onTrackingDraft('')}
+        />
+      )}
+      {order.tracking_needs_entry && !order.tracking_number && (
         <form className="app-order-track-entry" onSubmit={(e) => { e.preventDefault(); void onSaveTracking(); }}>
           <label>
             <span className="eyebrow">Tracking number</span>

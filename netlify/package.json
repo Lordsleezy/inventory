@@ -5,11 +5,14 @@
   "dependencies": {
     "@netlify/aws-lambda-compat": "^2.0.2",
     "@supabase/supabase-js": "^2.57.4",
+    "@undecaf/zbar-wasm": "^0.11.0",
     "imapflow": "^2.4.2",
     "nodemailer": "^10.1.1",
+    "pdfjs-dist": "^4.10.38",
     "postal-mime": "^2.4.3",
     "sharp": "^0.34.4",
-    "square": "^42.0.0"
+    "square": "^42.0.0",
+    "tesseract.js": "^6.0.1"
   },
   "allowScripts": {
     "sharp@0.34.4": true
