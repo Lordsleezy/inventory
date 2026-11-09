@@ -213,10 +213,27 @@ export function AppModeShell({
     if (meta && !/viewport-fit=cover/.test(meta.getAttribute('content') || '')) {
       meta.setAttribute('content', 'width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no');
     }
-    document.documentElement.style.removeProperty('--floor-app-h');
+    const pin = () => {
+      const inner = window.innerHeight;
+      const vv = window.visualViewport;
+      const keyboard = vv ? inner - vv.height - vv.offsetTop : 0;
+      const h = keyboard > 80 && vv ? Math.round(vv.offsetTop + vv.height) : inner;
+      document.documentElement.style.setProperty('--floor-app-h', `${h}px`);
+      const bar = document.querySelector<HTMLElement>('.app-tabbar');
+      if (!bar) return;
+      bar.style.transform = '';
+      const gap = Math.round(h - bar.getBoundingClientRect().bottom);
+      if (gap > 1) bar.style.transform = `translateY(${gap}px)`;
+    };
+    pin();
+    window.visualViewport?.addEventListener('resize', pin);
+    window.addEventListener('resize', pin);
     return () => {
       document.documentElement.classList.remove('app-mode', 'dark');
       document.body.classList.remove('app-mode');
+      document.documentElement.style.removeProperty('--floor-app-h');
+      window.visualViewport?.removeEventListener('resize', pin);
+      window.removeEventListener('resize', pin);
     };
   }, []);
 

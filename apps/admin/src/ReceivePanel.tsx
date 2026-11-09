@@ -770,6 +770,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   const priceRequest = useRef(0);
   const dimensionTouched = useRef(new Set<string>());
   const activeScan = useRef<string | null>(null);
+  const categoryRequest = useRef(0);
   const modalOpen = useRef(false);
   modalOpen.current = camera || dialog !== null;
 
@@ -1031,6 +1032,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     askTouched.current = false;
     titleTouched.current = false;
     categoryTouched.current = false;
+    categoryRequest.current += 1;
     setEbayAspects({ categoryId: null, path: null, fields: [], attributes: {}, na: {} });
     setForm({ ...blank, ...keepProduct });
     setFiles([]);
@@ -1062,6 +1064,72 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     setDimensionSources({});
     dimensionTouched.current.clear();
     setDimensionsError('');
+  }
+
+  /* Suggested eBay category, started with the scan so Item does not have to be opened. */
+  async function fillSuggestedCategory(scanId: string, identity: { brand: string; model: string; title: string; condition: string; upc: string }) {
+    const q = [identity.title, identity.brand].filter(Boolean).join(' ').trim();
+    if (q.length < 3) return;
+    const token = ++categoryRequest.current;
+    try {
+      const suggested = await fetch(floorFunctionUrl('ebay-specifics'), {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ store_id: storeId, action: 'suggest-for-title', title: q }),
+      });
+      const suggestion = await suggested.json().catch(() => ({}));
+      if (token !== categoryRequest.current || activeScan.current !== scanId) return;
+      if (!suggested.ok || suggestion.ok === false) return;
+      const list = (suggestion.suggestions || []) as { category_id: string; path: string; best_match?: boolean }[];
+      const choice = suggestion.preselect || list.find(item => item.best_match) || list[0];
+      if (!choice?.category_id) return;
+      const looked = await client.rpc('portal_ebay_category_form', { p_category_id: choice.category_id });
+      const row = looked.error ? null : looked.data as { path?: string; fields?: ReceiveAspectState['fields'] } | null;
+      const preview = await fetch(floorFunctionUrl('ebay-specifics'), {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          store_id: storeId,
+          action: 'preview-receive',
+          category_id: choice.category_id,
+          path: choice.path,
+          identity,
+          attributes: {},
+        }),
+      });
+      const picked = await preview.json().catch(() => ({}));
+      if (token !== categoryRequest.current || activeScan.current !== scanId) return;
+      if (!preview.ok || picked.ok === false) return;
+      const path = String(picked.path || row?.path || choice.path || '');
+      const fields = (picked.fields || row?.fields || []) as ReceiveAspectState['fields'];
+      setEbayAspects({
+        categoryId: String(choice.category_id),
+        path,
+        fields,
+        attributes: (picked.attributes || {}) as Record<string, string>,
+        na: {},
+        allowedGrades: picked.conditions || [],
+        conditionNote: String(picked.conditionNote || ''),
+      });
+      if (categoryTouched.current) return;
+      setForm(prev => {
+        if (prev.category.trim()) return prev;
+        const names = choices(options?.categories);
+        let next = matchReceiveCategory(names, {
+          category: prev.category,
+          title: [prev.title, path].filter(Boolean).join(' '),
+          brand: prev.brand,
+          model: prev.model,
+        });
+        if (!next) {
+          const leaf = path.split('>').pop()?.trim().toLowerCase() || '';
+          next = names.find(name => name.toLowerCase() === leaf) || '';
+        }
+        return next ? { ...prev, category: next } : prev;
+      });
+    } catch {
+      /* Opening Item still runs the same suggestion. */
+    }
   }
 
   /* Load the head of the queue into the form once its lookup has settled. */
@@ -1177,6 +1245,13 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     });
     setChannels([]);
     setDoNotList(false); setDns(false);
+    void fillSuggestedCategory(scanId, {
+      brand,
+      model: specifics,
+      title: initial.title,
+      condition: initial.condition,
+      upc: current.upc,
+    });
     upcInput.current?.blur();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current?.id, current?.status, manual, loadedId]);
@@ -2306,7 +2381,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
             ? (liveMissing.filter(g => receiveSectionForGap(g) === 'item').length === 1
               ? ({ category: 'Category', brand: 'Brand', 'item specifics': 'Specifics' } as Record<string, string>)[liveMissing.find(g => receiveSectionForGap(g) === 'item') || ''] || 'Required'
               : `${liveMissing.filter(g => receiveSectionForGap(g) === 'item').length} missing`)
-            : (brandReady() ? `${form.unbranded ? 'Unbranded' : form.brand}${form.category ? ` · ${form.category}` : ''}` : 'Required')}>
+            : (brandReady() ? `${form.unbranded ? 'Unbranded' : form.brand}${(form.category || ebayAspects.path?.split('>').pop()?.trim()) ? ` · ${form.category || ebayAspects.path?.split('>').pop()?.trim()}` : ''}` : 'Required')}>
         <label ref={el => { fieldRefs.current.brand = el; }} className={`receive-v2-span2${invalid('brand') ? ' receive-v2-invalid' : ''}`}>
           <span className="receive-v2-label">Brand{!doNotList && <span className="receive-v2-req"> *</span>}</span>
           <input placeholder="Type brand" value={form.unbranded ? 'Unbranded' : form.brand} disabled={form.unbranded} onChange={e => update('brand', e.target.value)} />
