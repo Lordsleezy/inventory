@@ -96,6 +96,18 @@ function fromUnit(unit: Unit): Form {
 
 function blank(v: string) { return !v.trim(); }
 
+function listedDoNotList(unit: Unit): boolean {
+  if (unit.not_for_sale === true) return true;
+  const specs = typeof unit.listing_specs === 'object' && unit.listing_specs !== null
+    ? unit.listing_specs as Record<string, unknown> : {};
+  return String(specs.do_not_list || '').toLowerCase() === 'true'
+    || String(specs.hold_reason || '') === 'do_not_list';
+}
+
+function isDefectiveCondition(condition: string): boolean {
+  return /^\s*(defective|scratch)/i.test(condition);
+}
+
 function formatRetailAsOf(raw: unknown): string {
   const s = String(raw || '').trim();
   if (!s) return '';
@@ -164,6 +176,7 @@ export function UnitEditDrawer({
   const [onlineExpanded, setOnlineExpanded] = useState(false);
   const [channelSelections, setChannelSelections] = useState<Record<ChannelChoice, boolean> | null>(null);
   const [dnsPending, setDnsPending] = useState<boolean | null>(null);
+  const [dnlOn, setDnlOn] = useState(() => listedDoNotList(unit));
   const [locationAllocations, setLocationAllocations] = useState<{ location_code: string; quantity: number }[]>([]);
   const [locationOptions, setLocationOptions] = useState<{code:string;label:string}[]>([]);
   const [locationDraft, setLocationDraft] = useState('');
@@ -212,6 +225,7 @@ export function UnitEditDrawer({
     || specificsTouched
     || (channelSelections !== null && JSON.stringify(channelSelections) !== JSON.stringify(channelBaseline.current))
     || dnsPending !== null
+    || dnlOn !== listedDoNotList(unit)
     || quantityDraft !== baselineQty
     || locationDraft !== locationBaseline.current
     || locationMoveTo.trim() !== ''
@@ -224,6 +238,7 @@ export function UnitEditDrawer({
     if (specificsDirty.current || specificsTouched) n += 1;
     if (channelSelections !== null && JSON.stringify(channelSelections) !== JSON.stringify(channelBaseline.current)) n += 1;
     if (dnsPending !== null) n += 1;
+    if (dnlOn !== listedDoNotList(unit)) n += 1;
     if (quantityDraft !== baselineQty) n += 1;
     if (locationDraft !== locationBaseline.current || locationMoveTo.trim() !== '') n += 1;
     if (upcEnrichment.current !== null) n += 1;
@@ -238,7 +253,7 @@ export function UnitEditDrawer({
     document.getElementById(`unit-edit-section-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
-  useEffect(() => { setForm(fromUnit(unit)); setStockAdjustQty(String(Number(unit.qty_on_hand ?? 1) || 0)); setQuantityDraft(String(Math.max(1,Number(unit.qty_on_hand??1)||1)));setChannelSelections(null);setDnsPending(null);channelBaseline.current=null;upcEnrichment.current=null;setMsg(''); setError(''); setCurrentMissing(missingFields); setDescExpanded(false); setLocationPickerOpen(false); }, [sku]);
+  useEffect(() => { setForm(fromUnit(unit)); setStockAdjustQty(String(Number(unit.qty_on_hand ?? 1) || 0)); setQuantityDraft(String(Math.max(1,Number(unit.qty_on_hand??1)||1)));setChannelSelections(null);setDnsPending(null);setDnlOn(listedDoNotList(unit));channelBaseline.current=null;upcEnrichment.current=null;setMsg(''); setError(''); setCurrentMissing(missingFields); setDescExpanded(false); setLocationPickerOpen(false); }, [sku]);
   useEffect(() => { setCurrentMissing(missingFields); }, [missingFields.join('|')]);
   useEffect(() => {
     let live = true;
@@ -376,6 +391,8 @@ export function UnitEditDrawer({
       setForm((prev) => ({ ...prev, title }));
     }
     setBusy(true); setError(''); setMsg('');
+    // Staff Do not list matches receive: the saved condition is Defective/non-sellable.
+    const conditionToSave = !canDelete && dnlOn ? 'Defective/non-sellable' : form.condition;
     // brand/model/title are NOT NULL — always send strings ('' ok), never null/undefined.
     const { data, error: e } = canDelete
       ? await client.rpc('portal_update_unit', {
@@ -387,7 +404,7 @@ export function UnitEditDrawer({
           p_description: latestDescription.current ?? form.description,
           p_ask_cents: ask,
           p_cost_cents: cost,
-          p_condition: form.condition,
+          p_condition: conditionToSave,
           p_test_status: form.testStatus,
           p_shippable: form.shippable,
           p_notes: form.notes,
@@ -404,7 +421,7 @@ export function UnitEditDrawer({
           p_title: title,
           p_description: latestDescription.current ?? form.description,
           p_ask_cents: ask,
-          p_condition: form.condition,
+          p_condition: conditionToSave,
           p_test_status: form.testStatus,
           p_notes: form.notes,
           p_length: dims[0],
@@ -420,6 +437,7 @@ export function UnitEditDrawer({
       if(canDelete) await specificsPersist.current?.();
       if(canDelete && channelSelections)for(const channel of CHANNELS){if(channelBaseline.current?.[channel]===channelSelections[channel])continue;const {error:channelError}=await client.rpc('portal_set_unit_channel_selection',{p_sku:sku,p_channel:channel,p_selected:channelSelections[channel]});if(channelError)throw channelError;}
       if(canDelete && dnsPending!==null){const {error:dnsError}=await client.rpc('portal_set_unit_dns',{p_sku:sku,p_dns:dnsPending});if(dnsError)throw dnsError;}
+      if(dnlOn!==listedDoNotList(unit)){const {error:dnlError}=await client.rpc('staff_set_unit_do_not_list',{p_sku:sku,p_on:dnlOn});if(dnlError)throw dnlError;}
       if(canDelete && quantityDraft.trim()){
         const target=Number(quantityDraft);
         if(target!==stockQuantity){
@@ -667,7 +685,7 @@ export function UnitEditDrawer({
   const specs = typeof unit.listing_specs === 'object' && unit.listing_specs !== null
     ? unit.listing_specs as Record<string, unknown> : {};
   const reviewReason = reviewReasonLabel(specs.ebay_review_reason);
-  const notForSale = String(specs.do_not_list || '').toLowerCase() === 'true' || String(specs.hold_reason || '') === 'do_not_list';
+  const notForSale = dnlOn;
   const unsold = ['available', 'reserved', 'repair'].includes(String(unit.state || ''));
   const orderedPhotos = [...photos].sort((a, b) => Number(b.source === 'stock') - Number(a.source === 'stock') || Number(b.is_primary) - Number(a.is_primary) || (a.sort_order ?? a.id) - (b.sort_order ?? b.id));
   const statusLabel = notForSale ? 'Not for sale' : /^\s*(defective|scratch)/i.test(String(unit.condition||'')) ? 'Defective' : String(unit.state || '').replace(/_/g, ' ').replace(/^./, c => c.toUpperCase());
@@ -949,15 +967,32 @@ export function UnitEditDrawer({
           <label>lb<input aria-label="Package weight lb" inputMode="decimal" value={form.weight} onChange={e => set('weight', e.target.value)} /></label>
         </div>
         <small className="unit-edit-wide unit-edit-helper">{appMode ? 'Packed box — L × W × H in — lb. Buyers pay shipping from the packed box.' : 'The packed box, not the product. Buyers pay shipping from this.'}</small>
-        {canDelete && appMode && (
-          <DnsCheckbox
-            client={client}
-            sku={sku}
-            pendingValue={dnsPending ?? undefined}
-            onPendingChange={setDnsPending}
-            onChanged={() => onReadinessChanged?.()}
-            variant="switch"
-          />
+        {appMode && (
+          <div className="unit-edit-flags" id="unit-edit-section-flags">
+            <label className="unit-edit-flag">
+              <input type="checkbox" checked={dnlOn} onChange={e => setDnlOn(e.target.checked)} />
+              Do not list
+            </label>
+            {canDelete && (
+              <DnsCheckbox
+                client={client}
+                sku={sku}
+                pendingValue={dnsPending ?? undefined}
+                onPendingChange={setDnsPending}
+                onChanged={() => onReadinessChanged?.()}
+                variant="row"
+              />
+            )}
+            <label className="unit-edit-flag">
+              <input
+                type="checkbox"
+                checked={isDefectiveCondition(form.condition)}
+                onChange={e => set('condition', e.target.checked ? 'Defective/non-sellable' : '')}
+              />
+              Defective
+            </label>
+            {dnlOn && <p className="unit-edit-flag-hint">{canDelete ? 'Not listed online.' : 'Not listed. Saves as Defective/non-sellable.'}</p>}
+          </div>
         )}
         {!appMode && (
           <label className="unit-edit-wide unit-edit-notes">Notes<textarea rows={3} value={form.notes} onChange={e => set('notes', e.target.value)} /></label>
