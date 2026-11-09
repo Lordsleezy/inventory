@@ -32,6 +32,7 @@ import { HomePage } from './HomePage';
 import { DeskSidebar } from './DeskSidebar';
 import { emptyPulse, loadDeskPulse } from './deskPulse';
 import { firstName } from './homeGreeting';
+import { deskAllowedPages, deskRoleLabel, resolveDeskAccess, type DeskAccess } from './deskNav';
 
 /** Desktop sidebar only — channel tools, connections, and store ops not on the phone More tab. */
 const DESKTOP_OTHER_PAGES: MainPage[] = ['ebay', 'depop', 'amazon', 'tiktok', 'marketplaces', 'manifests', 'insights', 'dropship', 'locations', 'logs'];
@@ -46,9 +47,6 @@ import { replacementAddback, replacementLine, type Disposition } from './disposi
 import { loadAllPortalExpenses } from './payoutExpenses';
 import { CommissionMath } from './CommissionMath';
 import { setReplacementRows, useReplacementsForSale } from './replacementsStore';
-
-/** Store associates (Jacob / clock staff): Inventory, Register, Settings only. */
-const ASSOCIATE_PAGES: MainPage[] = ['home', 'register', 'inventory', 'orders', 'locations', 'settings'];
 
 const sb = floorCloud();
 const zone = 'America/Los_Angeles';
@@ -338,7 +336,9 @@ async function ebayInsertionFees(storeId: string) {
 export function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [store, setStore] = useState<string | null>(null);
-  const [fullAccess, setFullAccess] = useState(false);
+  const [deskAccess, setDeskAccess] = useState<DeskAccess>('staff');
+  const fullAccess = deskAccess === 'admin';
+  const moneyAccess = deskAccess === 'admin' || deskAccess === 'owner';
   const [staffSession, setStaffSession] = useState<StaffSession | null>(null);
   const [accessReady, setAccessReady] = useState(false);
   const [nav, setNav] = useState<NavState>(() => desktopLanding(parseNavFromLocation()));
@@ -481,7 +481,7 @@ export function App() {
   const userId = session?.user.id;
   useEffect(() => {
     setStore(null);
-    setFullAccess(false);
+    setDeskAccess('staff');
     setStaffSession(null);
     setAccessReady(false);
     setLive([]); setAllSales([]); setPeople([]); setRules([]); setPayments([]); setReports([]); setExpenses([]); setOnlineCfg(NO_ONLINE); setCommissionOverrides(new Map());
@@ -497,19 +497,19 @@ export function App() {
         if (portalErr && portalErr.code !== 'PGRST116') setError(portalErr.message);
         const portalStore = portal?.store_id || null;
         const staffStore = staff?.storeId || null;
-        const isManager = staff?.role === 'owner' || staff?.role === 'manager';
-        const nextFull = Boolean(portalStore) || Boolean(isManager);
+        const nextAccess = resolveDeskAccess(staff?.role, Boolean(portalStore));
         const nextStore = portalStore || staffStore;
         if (!nextStore) {
           setStore(null);
-          setFullAccess(false);
+          setDeskAccess('staff');
           setStaffSession(null);
           return;
         }
         setStore(nextStore);
-        setFullAccess(nextFull);
+        setDeskAccess(nextAccess);
         setStaffSession(staff);
-        if (!nextFull && !ASSOCIATE_PAGES.includes(parseNavFromLocation().page)) {
+        const allowed = deskAllowedPages(nextAccess);
+        if (allowed && !allowed.includes(parseNavFromLocation().page)) {
           setNav(defaultNavState('register'));
         }
       } catch (e) {
@@ -521,9 +521,10 @@ export function App() {
     return () => { alive = false; };
   }, [userId]);
   useEffect(() => {
-    if (!accessReady || fullAccess) return;
-    if (!ASSOCIATE_PAGES.includes(page)) setNav(defaultNavState('register'));
-  }, [accessReady, fullAccess, page]);
+    if (!accessReady || deskAccess === 'admin') return;
+    const allowed = deskAllowedPages(deskAccess);
+    if (allowed && !allowed.includes(page)) setNav(defaultNavState('register'));
+  }, [accessReady, deskAccess, page]);
   const loadCommon = useCallback(async () => {
     if (!store) return;
     try {
@@ -600,17 +601,17 @@ export function App() {
     setLive(list => list.map(t => t.key === ticketKey ? { ...t, commissionOverride: next } : t));
     setAllSales(list => list.map(t => t.key === ticketKey ? { ...t, commissionOverride: next } : t));
   }, []);
-  useEffect(() => { if (fullAccess && (page === 'reports' || page === 'settings')) void loadCommon(); }, [page, fullAccess, loadCommon]);
+  useEffect(() => { if ((moneyAccess && page === 'reports') || (fullAccess && page === 'settings')) void loadCommon(); }, [page, fullAccess, moneyAccess, loadCommon]);
   useEffect(() => { if (page === 'reports' && nav.reportTab === 'payouts') void loadPayments(); }, [page, nav.reportTab, loadPayments]);
   useEffect(() => { if (page === 'sales' || (page === 'reports' && nav.reportTab === 'profit')) void loadSales(); }, [page, nav.reportTab, loadSales]);
   useEffect(() => { if (page === 'sales' && salesScope === 'voided') void loadVoided(); }, [page, salesScope, loadVoided]);
   useEffect(() => { if (page === 'reports' && nav.reportTab === 'payouts') void loadPayoutSales(); }, [page, nav.reportTab, loadPayoutSales]);
-  useEffect(() => { if (standaloneApp && fullAccess) void loadCommon(); }, [standaloneApp, fullAccess, loadCommon]);
+  useEffect(() => { if (standaloneApp && moneyAccess) void loadCommon(); }, [standaloneApp, moneyAccess, loadCommon]);
   useEffect(() => {
-    if (!standaloneApp || !fullAccess) return;
+    if (!standaloneApp || !moneyAccess) return;
     if (nav.reportTab === 'payouts') { void loadPayments(); void loadPayoutSales(); }
     if (nav.reportTab === 'profit') void loadSales();
-  }, [standaloneApp, fullAccess, nav.reportTab, loadPayments, loadPayoutSales, loadSales]);
+  }, [standaloneApp, moneyAccess, nav.reportTab, loadPayments, loadPayoutSales, loadSales]);
 
   useEffect(() => { if (page === 'orders' && fullAccess) void loadCommissionOverrides(); }, [page, fullAccess, loadCommissionOverrides]);
   useEffect(() => { if (page === 'orders' && fullAccess) void loadCommon(); }, [page, fullAccess, loadCommon]);
@@ -733,6 +734,7 @@ export function App() {
         session={session}
         storeId={store}
         fullAccess={fullAccess}
+        ownerAccess={deskAccess === 'owner'}
         staffSession={staffSession}
         money={money}
         stamp={stamp}
@@ -745,7 +747,7 @@ export function App() {
         settingsSlot={fullAccess
           ? <SettingsPage accessToken={session.access_token} busy={busy} run={run} staff={staff} rules={rules} saveRule={setRule} reloadPeople={loadCommon} />
           : <AssociateSettings client={sb} displayName={staffSession?.displayName || 'Associate'} />}
-        reportsSlot={fullAccess ? (
+        reportsSlot={moneyAccess ? (
           <ReportsPage
             client={sb}
             money={money}
@@ -807,16 +809,16 @@ export function App() {
     <DeskSidebar
       page={page}
       inventoryTab={nav.inventoryTab}
-      fullAccess={fullAccess}
+      deskAccess={deskAccess}
       pulse={pulse}
       name={firstName(staffSession?.displayName, session.user.email)}
-      role={fullAccess ? 'Admin' : 'Staff'}
+      role={deskRoleLabel(deskAccess)}
       onOpen={(link) => goNav({ page: link.page, ...(link.inventoryTab ? { inventoryTab: link.inventoryTab } : {}) })}
       onSignOut={() => { closeMenu(); void sb.auth.signOut({ scope: 'local' }); }}
     />
   </aside>
   <main className="content">{error && <div className="alert" role="alert">{error}<button onClick={() => setError('')}>Dismiss</button></div>}
-  {page === 'home' && <HomePage displayName={staffSession?.displayName || null} email={session.user.email || null} fullAccess={fullAccess} pulse={pulse} client={sb} accessToken={session.access_token} storeId={store || ''} money={money} onOpen={goNav} />}
+  {page === 'home' && <HomePage displayName={staffSession?.displayName || null} email={session.user.email || null} deskAccess={deskAccess} pulse={pulse} client={sb} accessToken={session.access_token} storeId={store || ''} money={money} onOpen={goNav} />}
   {page === 'register' && (staffSession
     ? <RegisterPage staffSession={staffSession} onNeedFullReload={() => { void loadSales(); }} />
     : <section className="panel"><Empty>This login can view Floor Admin but is not on the Floor staff list, so it cannot ring sales. Ask an owner to add a staff row for this account.</Empty></section>)}
@@ -915,10 +917,10 @@ export function App() {
   {fullAccess && page === 'depop' && <ChannelListingPage channel="depop" accessToken={session.access_token} money={money} client={sb} />}
   {fullAccess && page === 'logs' && <LogsPage accessToken={session.access_token} stamp={stamp} />}
   {(fullAccess || registerOnly) && page === 'inventory' && <InventoryPage client={sb} storeId={store} accessToken={session.access_token} money={money} stamp={stamp} tab={nav.inventoryTab} onTab={t => go({ inventoryTab: t })} attentionSection={nav.attentionSection} onAttentionSection={s => go({ attentionSection: s, inventoryTab: 'unfinished' })} canDelete={fullAccess} associateBrowseOnly={registerOnly} onCostChanged={() => { void loadPayoutSales(); void loadSales(); }} />}
-  {fullAccess && page === 'reports' && <ReportsPage client={sb} money={money} tab={nav.reportTab} onTab={t => go({ reportTab: t })} closeouts={closeouts} renderSplit={({ start, end, profitCents }) => <ProfitSplit start={start} end={end} profitCents={profitCents} sales={allSales} rules={activeRules} cfg={onlineCfg} frozen={frozen} expenses={expenses} personName={personName} money={money} />} expenses={<ExpensesPage client={sb} money={money} expenses={expenses} staff={staff} ownerId={onlineCfg.employeeId || defaultReimbursementId} onChanged={loadCommon} embedded />} payouts={<PayoutsPage allSales={allSales} ebayFees={ebayFees} staff={staff} rules={activeRules} payments={payments} adjustments={payoutAdjustments} expenses={expenses} frozen={frozen} cfg={onlineCfg} personName={personName} busy={busy} recordPayment={recordPayment} onCommissionChanged={setTicketOverride} onReload={() => { void loadPayoutSales(); }} />} />}
-  {fullAccess && page === 'withdrawals' && <MoneyPage client={sb} storeId={store} accessToken={session.access_token} money={money} stamp={stamp} />}
-  {fullAccess && page === 'books' && <BooksPage client={sb} money={money} />}
-  {fullAccess && page === 'manifests' && <ManifestsPage client={sb} storeId={store} money={money} layout="desktop" />}
+  {moneyAccess && page === 'reports' && <ReportsPage client={sb} money={money} tab={nav.reportTab} onTab={t => go({ reportTab: t })} closeouts={closeouts} renderSplit={({ start, end, profitCents }) => <ProfitSplit start={start} end={end} profitCents={profitCents} sales={allSales} rules={activeRules} cfg={onlineCfg} frozen={frozen} expenses={expenses} personName={personName} money={money} />} expenses={<ExpensesPage client={sb} money={money} expenses={expenses} staff={staff} ownerId={onlineCfg.employeeId || defaultReimbursementId} onChanged={loadCommon} embedded />} payouts={<PayoutsPage allSales={allSales} ebayFees={ebayFees} staff={staff} rules={activeRules} payments={payments} adjustments={payoutAdjustments} expenses={expenses} frozen={frozen} cfg={onlineCfg} personName={personName} busy={busy} recordPayment={recordPayment} onCommissionChanged={setTicketOverride} onReload={() => { void loadPayoutSales(); }} />} />}
+  {moneyAccess && page === 'withdrawals' && <MoneyPage client={sb} storeId={store} accessToken={session.access_token} money={money} stamp={stamp} />}
+  {moneyAccess && page === 'books' && <BooksPage client={sb} money={money} />}
+  {moneyAccess && page === 'manifests' && <ManifestsPage client={sb} storeId={store} money={money} layout="desktop" />}
   {(fullAccess || registerOnly) && page === 'locations' && (
     <LocationsPage
       client={sb}

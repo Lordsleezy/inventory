@@ -4,12 +4,12 @@ import type { DeskPulse } from './deskPulse';
 import { loadHomeDesk, type ChannelLine, type HomeDesk, type OwedPerson } from './homeDesk';
 import { dayPart, firstName } from './homeGreeting';
 import type { NavState } from './navigation';
-import { ASSOCIATE_LINKS } from './deskNav';
+import { ASSOCIATE_LINKS, OWNER_LINKS, type DeskAccess } from './deskNav';
 
 type Props = {
   displayName: string | null;
   email: string | null;
-  fullAccess: boolean;
+  deskAccess: DeskAccess;
   pulse: DeskPulse;
   client: SupabaseClient;
   accessToken: string;
@@ -50,10 +50,12 @@ function channelName(raw: string) {
   return raw || 'Sale';
 }
 
-export function HomePage({ displayName, email, fullAccess, pulse, client, accessToken, storeId, money, onOpen }: Props) {
+export function HomePage({ displayName, email, deskAccess, pulse, client, accessToken, storeId, money, onOpen }: Props) {
   const name = firstName(displayName, email);
   const [{ hello, date }] = useState(laNow);
   const [desk, setDesk] = useState<HomeDesk | null>(null);
+  const fullAccess = deskAccess === 'admin';
+  const deskLinks = deskAccess === 'owner' ? OWNER_LINKS : ASSOCIATE_LINKS;
 
   useEffect(() => {
     if (!fullAccess || !storeId) return;
@@ -103,7 +105,7 @@ export function HomePage({ displayName, email, fullAccess, pulse, client, access
           <div className="desk-grid is-associate">
             <section>
               <h2>Your desk</h2>
-              {ASSOCIATE_LINKS.map((link) => (
+              {deskLinks.map((link) => (
                 <button
                   key={link.label}
                   type="button"
