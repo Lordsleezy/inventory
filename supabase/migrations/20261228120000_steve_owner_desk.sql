@@ -84,10 +84,12 @@ begin
   if src is null then
     raise exception 'portal_money_overview missing';
   end if;
-  if position(guard in src) = 0 then
+  if position('portal_financial_access()' in src) > 0 then
+  elsif position(guard in src) > 0 then
+    execute replace(src, guard, next);
+  else
     raise exception 'portal_money_overview guard not found';
   end if;
-  execute replace(src, guard, next);
 end $patch$;
 
 -- Owner Home: sales today with prices (no cost/profit), no extra admin channels.
