@@ -967,8 +967,7 @@ export function UnitEditDrawer({
           <label>lb<input aria-label="Package weight lb" inputMode="decimal" value={form.weight} onChange={e => set('weight', e.target.value)} /></label>
         </div>
         <small className="unit-edit-wide unit-edit-helper">{appMode ? 'Packed box — L × W × H in — lb. Buyers pay shipping from the packed box.' : 'The packed box, not the product. Buyers pay shipping from this.'}</small>
-        {appMode && (
-          <div className="unit-edit-flags" id="unit-edit-section-flags">
+        <div className="unit-edit-flags" id="unit-edit-section-flags">
             <label className="unit-edit-flag">
               <input type="checkbox" checked={dnlOn} onChange={e => setDnlOn(e.target.checked)} />
               Do not list
@@ -993,7 +992,6 @@ export function UnitEditDrawer({
             </label>
             {dnlOn && <p className="unit-edit-flag-hint">{canDelete ? 'Not listed online.' : 'Not listed. Saves as Defective/non-sellable.'}</p>}
           </div>
-        )}
         {!appMode && (
           <label className="unit-edit-wide unit-edit-notes">Notes<textarea rows={3} value={form.notes} onChange={e => set('notes', e.target.value)} /></label>
         )}
@@ -1016,7 +1014,6 @@ export function UnitEditDrawer({
                   <ChannelCheckboxes key={`${sku}-app`} client={client} sku={sku} appMode={appMode} pendingSelections={{ current: channelSelections }} onPendingChange={setChannelSelections} />
                 )}
                 <EbaySpecificsPanel client={client} sku={sku} storeId={storeId} appMode={appMode} hideSaveButton hideBrandAspect={appMode} onDescription={(t) => { latestDescription.current = t; set('description', t); }} onJumpToCondition={() => jumpToGap('condition')} persistRef={specificsPersist} dirtyRef={specificsDirty} onDirtyChange={setSpecificsTouched} onSaved={onReadinessChanged} />
-                {!appMode && <DnsCheckbox client={client} sku={sku} pendingValue={dnsPending??undefined} onPendingChange={setDnsPending} onChanged={() => onReadinessChanged?.()} />}
                 {!appMode && <ChannelCheckboxes key={sku} client={client} sku={sku} appMode={appMode} pendingSelections={{current:channelSelections}} onPendingChange={setChannelSelections}/>}
               </>}
               {notForSale && <p className="hint">Not listed online (do not list).</p>}
