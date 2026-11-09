@@ -38,7 +38,7 @@ import { deskAllowedPages, deskRoleLabel, resolveDeskAccess, type DeskAccess } f
 const DESKTOP_OTHER_PAGES: MainPage[] = ['ebay', 'depop', 'amazon', 'tiktok', 'marketplaces', 'manifests', 'insights', 'dropship', 'locations', 'logs'];
 import { formatLabelWithPending, parseShipCostSource } from './shipCostSource';
 import { errText } from './errText';
-import { isStandaloneApp, shouldShowInstallGate } from './appMode/isAppMode';
+import { isStandaloneApp, shouldShowInstallGate, usePhoneAppShell } from './appMode/isAppMode';
 import { InstallGate } from './appMode/InstallGate';
 import { AppModeShell } from './appMode/AppModeShell';
 import { NeedsAttentionPanel } from './NeedsAttentionPanel';
@@ -380,17 +380,24 @@ export function App() {
   const [showInstallGate, setShowInstallGate] = useState(() => shouldShowInstallGate());
   // Re-check on mount so store-phone Chrome / kiosk / persisted app mode win over the install coach.
   const [standaloneApp, setStandaloneApp] = useState(() => isStandaloneApp());
+  const [phoneAppShell, setPhoneAppShell] = useState(() => usePhoneAppShell());
   useEffect(() => {
     if (isStandaloneApp()) setStandaloneApp(true);
+    setPhoneAppShell(usePhoneAppShell());
+    const mq = window.matchMedia('(max-width: 900px), (pointer: coarse)');
+    const sync = () => setPhoneAppShell(usePhoneAppShell());
+    mq.addEventListener?.('change', sync);
+    return () => mq.removeEventListener?.('change', sync);
   }, []);
   useEffect(() => {
     try { localStorage.setItem('floor_admin_nav_collapsed', navCollapsed ? '1' : '0'); } catch { /* ignore */ }
   }, [navCollapsed]);
   useEffect(() => {
     document.documentElement.classList.add('dark');
-    if (!isStandaloneApp()) document.documentElement.classList.add('desk');
+    if (phoneAppShell) document.documentElement.classList.remove('desk');
+    else document.documentElement.classList.add('desk');
     return () => { document.documentElement.classList.remove('dark', 'desk'); };
-  }, []);
+  }, [phoneAppShell]);
 
   useEffect(() => {
     void sb.auth.getSession().then(({ data }) => setSession((current) => current ?? data.session));
@@ -606,12 +613,12 @@ export function App() {
   useEffect(() => { if (page === 'sales' || (page === 'reports' && nav.reportTab === 'profit')) void loadSales(); }, [page, nav.reportTab, loadSales]);
   useEffect(() => { if (page === 'sales' && salesScope === 'voided') void loadVoided(); }, [page, salesScope, loadVoided]);
   useEffect(() => { if (page === 'reports' && nav.reportTab === 'payouts') void loadPayoutSales(); }, [page, nav.reportTab, loadPayoutSales]);
-  useEffect(() => { if (standaloneApp && moneyAccess) void loadCommon(); }, [standaloneApp, moneyAccess, loadCommon]);
+  useEffect(() => { if (phoneAppShell && moneyAccess) void loadCommon(); }, [phoneAppShell, moneyAccess, loadCommon]);
   useEffect(() => {
-    if (!standaloneApp || !moneyAccess) return;
+    if (!phoneAppShell || !moneyAccess) return;
     if (nav.reportTab === 'payouts') { void loadPayments(); void loadPayoutSales(); }
     if (nav.reportTab === 'profit') void loadSales();
-  }, [standaloneApp, moneyAccess, nav.reportTab, loadPayments, loadPayoutSales, loadSales]);
+  }, [phoneAppShell, moneyAccess, nav.reportTab, loadPayments, loadPayoutSales, loadSales]);
 
   useEffect(() => { if (page === 'orders' && fullAccess) void loadCommissionOverrides(); }, [page, fullAccess, loadCommissionOverrides]);
   useEffect(() => { if (page === 'orders' && fullAccess) void loadCommon(); }, [page, fullAccess, loadCommon]);
@@ -696,7 +703,6 @@ export function App() {
     return (
       <InstallGate
         onContinue={() => {
-          // Continue in the browser tab: desktop layout. The phone shell is only for the installed app.
           setShowInstallGate(false);
         }}
       />
@@ -726,7 +732,7 @@ export function App() {
 
   const registerOnly = !fullAccess;
 
-  if (standaloneApp) {
+  if (phoneAppShell) {
     return <>
       <ClientErrorReporter token={session.access_token} />
       <AppModeShell

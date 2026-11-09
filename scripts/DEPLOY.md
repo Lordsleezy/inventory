@@ -12,6 +12,10 @@ Functions that export `handler` run in Netlify's old Lambda compatibility mode. 
 
 Routine production deploys happen when `release` moves (daily at 6:00 Pacific, or Release now). Do not run a manual Netlify deploy to publish application changes. The guarded scripts below exist only for Paul-approved emergency recovery.
 
+**Admin UI vs release branch:** Netlify may skip an admin build when `apps/admin` did not change in that promotion (see `apps/admin/netlify.toml` ignore). The release job always checks `https://admin.openboxindustries.com/build.json` against the release SHA and triggers a rebuild when they disagree. **Merged to master is not enough** until Release now (or the daily job) succeeds and `build.json` matches.
+
+**Phones:** The home-screen PWA can keep an older JavaScript bundle even when `build.json` on the server is new. After a release, use **Settings → Restart app** or reinstall the icon if UI changes do not appear.
+
 For an emergency recovery, from a clean checkout of the latest `origin/master`:
 
 ```

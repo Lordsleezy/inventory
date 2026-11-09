@@ -8,7 +8,7 @@ const bundled = await build({
   entryPoints: [fileURLToPath(new URL('./appMode/isAppMode.ts', import.meta.url))],
   bundle: true, format: 'esm', write: false, platform: 'neutral',
 });
-const { isStandaloneApp } = await import(`data:text/javascript;base64,${Buffer.from(bundled.outputFiles[0].text).toString('base64')}`) as typeof import('./appMode/isAppMode');
+const { isStandaloneApp, usePhoneAppShell } = await import(`data:text/javascript;base64,${Buffer.from(bundled.outputFiles[0].text).toString('base64')}`) as typeof import('./appMode/isAppMode');
 
 type Env = { url?: string; media?: string[]; standalone?: boolean; ua?: string; stored?: string };
 
@@ -37,13 +37,19 @@ test('URL params ?app=1 / ?source=pwa alone do not switch layout', () => {
   setup({ url: 'https://admin.floor.test/?app=1' }); assert.equal(isStandaloneApp(), false);
   setup({ url: 'https://admin.floor.test/?source=pwa' }); assert.equal(isStandaloneApp(), false);
 });
-test('Android phone Chrome tab (narrow, touch): desktop layout', () => {
+test('Android phone Chrome tab (narrow, touch): still not standalone, but phone shell', () => {
   setup({ media: ['max-width: 900px', 'pointer: coarse'], ua: 'Mozilla/5.0 (Linux; Android 14; Pixel 8) Chrome/130 Mobile' });
   assert.equal(isStandaloneApp(), false);
+  assert.equal(usePhoneAppShell(), true);
 });
-test('iPhone Safari tab: desktop layout', () => {
+test('iPhone Safari tab: phone shell in browser', () => {
   setup({ media: ['max-width: 900px', 'pointer: coarse'], ua: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Safari/604.1' });
   assert.equal(isStandaloneApp(), false);
+  assert.equal(usePhoneAppShell(), true);
+});
+test('desktop Chrome tab stays desk layout', () => {
+  setup({});
+  assert.equal(usePhoneAppShell(), false);
 });
 test('installed PWA (display-mode standalone): phone shell', () => {
   setup({ media: ['display-mode: standalone'] }); assert.equal(isStandaloneApp(), true);

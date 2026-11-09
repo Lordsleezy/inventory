@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect, type ReactNode } from 'react';
+import { useCallback, useRef, useState, useEffect, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useAppPullRefresh } from './useAppPullRefresh';
 
@@ -11,10 +11,15 @@ type Props = {
 };
 
 export function AppTabPanel({ tab, hidden, className, onPullRefresh, children }: Props) {
-  const panelRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
   const [el, setEl] = useState<HTMLDivElement | null>(null);
+  const panelRefCb = useCallback((node: HTMLDivElement | null) => {
+    panelRef.current = node;
+    setEl(!hidden && node ? node : null);
+  }, [hidden]);
   useEffect(() => {
-    if (!hidden) setEl(panelRef.current);
+    if (hidden) setEl(null);
+    else if (panelRef.current) setEl(panelRef.current);
   }, [hidden]);
 
   const enabled = !hidden && !!onPullRefresh;
@@ -35,7 +40,7 @@ export function AppTabPanel({ tab, hidden, className, onPullRefresh, children }:
 
   return (
     <div
-      ref={panelRef}
+      ref={panelRefCb}
       className={className ? `app-tab-panel ${className}` : 'app-tab-panel'}
       data-tab={tab}
       hidden={hidden || undefined}
