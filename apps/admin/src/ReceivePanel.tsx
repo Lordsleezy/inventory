@@ -1194,17 +1194,6 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
 
   /* Suggestions are displayed for reference; only the person receiving enters an ask price. */
 
-  function startStaffDnl() {
-    setError(''); setWarning('');
-    if (!manual) {
-      photoSessionKey.current = manualPhotoSession(storeId);
-      setManual(true);
-    }
-    setDoNotList(true);
-    setChannels([]);
-    setForm(prev => ({ ...prev, condition: SCRATCH }));
-  }
-
   function toggleManual() {
     setError(''); setWarning('');
     if (!manual) {
@@ -2013,7 +2002,6 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         <div>
           <p>{staffMode && doNotList ? 'DNL: condition is defective. Only a title is required.' : doNotList ? 'Store-only: brand is required; all other fields and the photo are optional.' : manual ? 'Manual entry: fill listing fields, add a photo, then receive.' : 'Scan a UPC, edit the listing fields, add a photo, then receive.'}</p>
           <button type="button" className="text-button" onClick={toggleManual}>{manual ? '← Back to scan' : 'Enter manually'}</button>
-          {staffMode && !manual && <button type="button" className="text-button" onClick={startStaffDnl}>DNL — Do not list</button>}
         </div>
       )}
     </div>
@@ -2218,6 +2206,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       </div>}
 
       <div className={`receive-advanced${manual ? ' receive-manual' : ''}`}><div className="unit-edit-grid receive-v2-grid">
+        {staffMode && manual && !doNotList && <label className="rcv-check receive-v2-span2"><input type="checkbox" checked={false} onChange={() => { setDoNotList(true); setChannels([]); setForm(prev => ({ ...prev, condition: SCRATCH })); }} /> DNL — Do not list</label>}
         {staffMode && doNotList && <>
           <label className="rcv-check receive-v2-span2"><input type="checkbox" checked onChange={() => { setDoNotList(false); setForm(prev => ({ ...prev, condition: prev.condition === SCRATCH ? '' : prev.condition })); }} /> DNL — Do not list</label>
           <p className="hint receive-v2-span2">Condition is defective. Only a title is required. No photo, brand, or price.</p>
