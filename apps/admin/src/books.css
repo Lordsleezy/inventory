@@ -118,7 +118,9 @@ html.app-mode .books-native-hub .books-report-link.active{background:transparent
 .books-cat-head{display:flex!important;justify-content:space-between;padding:0 4px!important;margin-top:12px}
 .books-cat-head b{color:#ff9f0a;font-size:.82rem}
 .books-reimb{display:block;font-size:.58rem;color:#ff9f0a;font-style:normal;font-weight:800;letter-spacing:.04em}
-.books-received-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:8px 0 14px}
+.books-received-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:8px 0 0}
+.books-manifested-total{margin:8px 0 14px;color:#c5d0de;font-size:.92rem}
+.books-manifested-total b{color:#fff}
 .books-received-stats div{background:#1c1c1e;border-radius:10px;padding:10px;text-align:center}
 .books-received-stats small{display:block;color:#8e8e93;font-size:.68rem}
 .books-desktop-toolbar{display:flex;flex-wrap:wrap;align-items:end;gap:14px;margin-bottom:14px}

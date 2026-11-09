@@ -19,9 +19,8 @@ import {
   styleHeaderRow,
 } from './exportFormat';
 import { verifyExportTies } from './exportChecks';
-import { rollupRareCategories } from './inventoryCategories';
-import { liveListedChannels, notListedLines } from './sheetChannels';
-import type { BooksWorkbook, ExpenseDisplayLine, Period } from './types';
+import type { BooksWorkbook, ExpenseDisplayLine, Period, ReceivedItem } from './types';
+import { receivedSheetMetrics } from './receivedSummary';
 
 type SpanSlice = { label: string; workbook: BooksWorkbook };
 type ExportOptions = { title?: string; slices?: SpanSlice[]; word?: string };
@@ -42,11 +41,11 @@ export async function buildBooksExcel(period: Period, wb: BooksWorkbook, label: 
 
   const wsS = x.addWorksheet('Sales');
   const salesHeader = [
-    'Date', 'SKU', 'Item', 'Channel', 'Order #', 'Sale price', 'Sales tax', 'Marketplace fees',
-    'Card fee', 'Shipping label (we paid)', 'Buyer paid shipping', 'Item cost', 'Profit', 'Commission', 'Notes',
+    'Date', 'SKU', 'Item', 'Channel', 'Sale price', 'Fees', 'Item cost', 'Profit',
+    'Order #', 'Sales tax', 'Card fee', 'Shipping label (we paid)', 'Buyer paid shipping', 'Commission', 'Notes',
   ];
   const salesCols = salesHeader.length;
-  const salesWidths = [14, 10, 38, 14, 16, 12, 11, 18, 12, 20, 20, 11, 11, 12, 40];
+  const salesWidths = [12, 9, 32, 12, 12, 12, 12, 12, 14, 11, 11, 16, 16, 12, 28];
   setColumnWidths(wsS, salesWidths);
   addReportTitle(wsS, 'Sales', periodLabel, generated, salesCols);
   fitTitleRows(wsS, salesCols, salesWidths);
@@ -61,30 +60,31 @@ export async function buildBooksExcel(period: Period, wb: BooksWorkbook, label: 
       head.font = { bold: true };
     }
     for (const r of group.workbook.sales.rows) {
+    const fees = Number(r.marketplace_fees_cents || 0) + Number(r.card_fees_cents || 0) + Number(r.label_cost_cents || 0);
     wsS.addRow([
       excelDate(r.date),
       r.sku,
       r.title,
       r.channel,
-      r.order_no,
       moneyCell(r.price_cents),
+      moneyCell(fees),
+      moneyCell(r.cost_cents),
+      moneyCell(r.profit_cents),
+      r.order_no,
       moneyCell(r.tax_cents),
-      moneyCell(r.marketplace_fees_cents),
       moneyCell(r.card_fees_cents),
       moneyCell(r.label_cost_cents),
       moneyCell(r.buyer_shipping_cents),
-      moneyCell(r.cost_cents),
-      moneyCell(r.profit_cents),
       moneyCell(r.commission_cents),
       r.profit_notes,
     ]);
     }
     if (group.label) {
       const sub = group.workbook.sales.totals;
-      const row = wsS.addRow(['', '', '', '', '', '', moneyCell(sub.revenue), '', '', '', '', moneyCell(sub.cost), moneyCell(sub.profit), moneyCell(sub.commission), '']);
-      mergeLabelRow(wsS, row.number, 1, 6, `${group.label} subtotal`);
+      const row = wsS.addRow(['', '', '', '', moneyCell(sub.revenue), '', moneyCell(sub.cost), moneyCell(sub.profit), '', '', '', '', '', moneyCell(sub.commission), '']);
+      mergeLabelRow(wsS, row.number, 1, 4, `${group.label} subtotal`);
       row.font = { bold: true };
-      for (const c of [7, 12, 13, 14]) row.getCell(c).numFmt = MONEY_FMT;
+      for (const c of [5, 7, 8, 14]) row.getCell(c).numFmt = MONEY_FMT;
     }
   }
   const dataEndS = wsS.rowCount;
@@ -94,24 +94,24 @@ export async function buildBooksExcel(period: Period, wb: BooksWorkbook, label: 
   for (let r = dataStartS; r <= dataEndS; r++) {
     const row = wsS.getRow(r);
     row.getCell(1).numFmt = 'mmm d, yyyy';
-    for (const c of [6, 7, 8, 9, 10, 11, 12, 13, 14]) {
+    for (const c of [5, 6, 7, 8, 10, 11, 12, 13, 14]) {
       if (row.getCell(c).value != null) row.getCell(c).numFmt = MONEY_FMT;
     }
   }
   wsS.addRow([]);
   for (const c of wb.sales.channelTotals) {
-    const row = wsS.addRow(['', '', '', '', '', '', moneyCell(c.revenue_cents), '', '', '', '', '', moneyCell(c.profit_cents), '', '']);
-    mergeLabelRow(wsS, row.number, 1, 6, `${c.channel} subtotal`);
+    const row = wsS.addRow(['', '', '', '', moneyCell(c.revenue_cents), '', '', moneyCell(c.profit_cents)]);
+    mergeLabelRow(wsS, row.number, 1, 4, `${c.channel} subtotal`);
     row.font = { bold: true };
-    row.getCell(7).numFmt = MONEY_FMT;
-    row.getCell(13).numFmt = MONEY_FMT;
+    row.getCell(5).numFmt = MONEY_FMT;
+    row.getCell(8).numFmt = MONEY_FMT;
   }
   const t = wb.sales.totals;
-  const tot = wsS.addRow(['', '', '', '', '', '', moneyCell(t.revenue), '', '', '', '', moneyCell(t.cost), moneyCell(t.profit), moneyCell(t.commission), '']);
-  mergeLabelRow(wsS, tot.number, 1, 6, 'Period grand total');
+  const tot = wsS.addRow(['', '', '', '', moneyCell(t.revenue), '', moneyCell(t.cost), moneyCell(t.profit), '', '', '', '', '', moneyCell(t.commission), '']);
+  mergeLabelRow(wsS, tot.number, 1, 4, 'Period grand total');
   tot.font = { bold: true };
   tot.border = { top: { style: 'medium' } };
-  for (const c of [7, 12, 13, 14]) tot.getCell(c).numFmt = MONEY_FMT;
+  for (const c of [5, 7, 8, 14]) tot.getCell(c).numFmt = MONEY_FMT;
   const audit = wb.costAudit;
   if (audit && (audit.missing.length || audit.flaggedDefaults.length)) {
     wsS.addRow([]);
@@ -144,12 +144,12 @@ export async function buildBooksExcel(period: Period, wb: BooksWorkbook, label: 
   }
   fitTitleRows(wsS, salesCols, salesWidths);
   setNormalSheetView(wsS);
-  setupPrint(wsS, hS);
+  setupPrint(wsS, hS, { repeatHeader: true, printThroughColumn: 'H' });
 
   const wsE = x.addWorksheet('Expenses');
   const expHeader = ['Date', 'Category', 'Description', 'Amount', 'SKU / Order #', 'Paid by', 'Reimburse?'];
   const expCols = expHeader.length;
-  const expWidths = [16, 28, 52, 14, 18, 18, 14];
+  const expWidths = [12, 16, 32, 12, 14, 16, 12];
   setColumnWidths(wsE, expWidths);
   addReportTitle(wsE, 'Expenses', periodLabel, generated, expCols);
   fitTitleRows(wsE, expCols, expWidths);
@@ -226,145 +226,42 @@ export async function buildBooksExcel(period: Period, wb: BooksWorkbook, label: 
   }
   fitTitleRows(wsE, expCols, expWidths);
   setNormalSheetView(wsE);
-  setupPrint(wsE, hE);
+  setupPrint(wsE, hE, { repeatHeader: true });
 
   const wsI = x.addWorksheet('Inventory');
-  const invCols = 7;
-  const invWidths = [12, 28, 14, 14, 12, 14, 18];
+  const invWidths = [42, 14, 16];
   setColumnWidths(wsI, invWidths);
-  addReportTitle(wsI, 'Inventory', periodLabel, generated, invCols);
-  fitTitleRows(wsI, invCols, invWidths);
+  addReportTitle(wsI, 'Inventory', periodLabel, generated, 3);
   const inv = wb.inventory;
-  const metrics: [string, number, string][] = [
-    [`Units in stock at start of ${word}`, inv.start_unit_count, inv.start_source === 'snapshot' ? 'Snapshot' : 'Estimated from movement, because no start snapshot exists yet'],
-    ['Units received', inv.received_units, ''],
-    ['Units sold', inv.sold_units, ''],
-    ['Returned to stock', inv.return_to_stock_units ?? 0, ''],
-    ['Given away', inv.giveaway_units, ''],
-    ['Sent as replacements', inv.replacement_units, ''],
-    ['Moved to Defective', inv.defective_units, 'Units pulled into defective this month'],
-    ['Defective items on hand', inv.owner?.defective_shelf?.units ?? 0, 'Same count as Inventory → Defective'],
-    [`Units in stock at end of ${word}`, inv.end_unit_count, inv.end_source === 'snapshot' ? 'Snapshot' : 'Estimated: current on-hand count, because this period is not closed'],
-  ];
-  const hI = wsI.rowCount + 1;
-  wsI.addRow(['Metric', 'Units', 'Note']);
-  styleHeaderRow(wsI, hI, 3);
-  const mStart = hI + 1;
-  for (const [metric, value, note] of metrics) wsI.addRow([metric, value, note]);
-  bandRows(wsI, mStart, wsI.rowCount);
-  wrapDataRows(wsI, mStart, wsI.rowCount, 3);
-  fitWrappedRowHeights(wsI, mStart, wsI.rowCount, invWidths);
   const own = inv.owner;
-  if (own?.value) {
-    wsI.addRow([]);
-    const shelf = wsI.addRow(['Shelf value']);
-    mergeLabelRow(wsI, shelf.number, 1, invCols, 'Shelf value');
-    shelf.font = { bold: true };
-    wsI.addRow(['', 'Units', 'Cost', 'Floor price']);
-    const endRow = wsI.addRow(['End of month', own.value.end_units, moneyCell(own.value.end_cost_cents), moneyCell(own.value.end_floor_cents)]);
-    endRow.getCell(3).numFmt = MONEY_FMT;
-    endRow.getCell(4).numFmt = MONEY_FMT;
-    const startRow = wsI.addRow(['Start of month', own.value.start_units, moneyCell(own.value.start_cost_cents), moneyCell(own.value.start_floor_cents ?? null)]);
-    startRow.getCell(3).numFmt = MONEY_FMT;
-    if (own.value.start_floor_cents != null) startRow.getCell(4).numFmt = MONEY_FMT;
-    if (own.value.start_note) {
-      const note = wsI.addRow([own.value.start_note]);
-      mergeLabelRow(wsI, note.number, 1, invCols, own.value.start_note);
-    }
-  }
-  const writePairs = (title: string, headers: string[], rows: (string | number | null)[][]) => {
-    wsI.addRow([]);
-    const b = wsI.addRow([title]);
-    mergeLabelRow(wsI, b.number, 1, invCols, title);
-    b.font = { bold: true };
-    if (!rows.length) { wsI.addRow(['None']); return; }
-    wsI.addRow(headers);
-    for (const cells of rows) {
-      const row = wsI.addRow(cells);
-      cells.forEach((cell, i) => {
-        if (typeof cell === 'number' && headers[i]?.toLowerCase().includes('cost') || (typeof cell === 'number' && String(headers[i] || '').toLowerCase().includes('floor'))) {
-          row.getCell(i + 1).numFmt = MONEY_FMT;
-        }
-      });
-    }
+  const hI = wsI.rowCount + 1;
+  wsI.addRow(['', 'Count', 'Amount']);
+  styleHeaderRow(wsI, hI, 3);
+  const total = (label: string, count: number, cents?: number | null) => {
+    const row = wsI.addRow([label, count, cents == null ? null : moneyCell(cents)]);
+    row.height = 18;
+    row.getCell(1).alignment = { vertical: 'middle', wrapText: false };
+    if (cents != null) row.getCell(3).numFmt = MONEY_FMT;
   };
-  if (own) {
-    writePairs('By category', ['Category', 'Units', 'Cost', 'Floor', 'Sold', 'Sell-through %'],
-      rollupRareCategories(own.categories || []).map((c) => [c.category, c.units, (c.cost_cents || 0) / 100, (c.floor_cents || 0) / 100, c.sold_units, c.sell_through]));
-    writePairs('Listed by channel (an item on several channels is listed under each)', ['Channel', 'Units', 'Cost'],
-      liveListedChannels(own.listed || []).map((c) => [c.channel, c.units, (c.cost_cents || 0) / 100]));
-    const unlisted = notListedLines(own.unlisted || [], own.defective_shelf);
-    writePairs('Not listed', ['', 'Units', 'Cost'], [
-      ['Total', unlisted.units, unlisted.cost_cents / 100],
-      ['Defective', unlisted.defective_units, unlisted.defective_cost_cents / 100],
-    ]);
-    writePairs('Aging', ['Bucket', 'Units', 'Cost'],
-      (own.aging || []).map((c) => [c.bucket, c.units, (c.cost_cents || 0) / 100]));
-    const mv = own.movement || {};
-    writePairs('This month at cost', ['Movement', 'Units', 'Cost'], [
-      ['Received', mv.received_units || 0, (mv.received_cost_cents || 0) / 100],
-      ['Sold', mv.sold_units || 0, (mv.sold_cost_cents || 0) / 100],
-      ['Returned to stock', mv.return_to_stock_units || 0, (mv.return_to_stock_cost_cents || 0) / 100],
-      ['Given away', mv.giveaway_units || 0, (mv.giveaway_cost_cents || 0) / 100],
-      ['Replacements', mv.replacement_units || 0, (mv.replacement_cost_cents || 0) / 100],
-      ['Moved to Defective', mv.defective_units || 0, (mv.defective_cost_cents || 0) / 100],
-    ]);
-    writePairs('Slowest movers', ['SKU', 'Item', 'Days', 'Cost', 'Floor', 'Listed'],
-      (own.slowest || []).map((s) => [s.sku, s.title, s.days ?? '', (s.cost_cents || 0) / 100, (s.floor_cents || 0) / 100, s.listed || 'not listed']));
-  }
-  const sectionBanner = (title: string) => {
-    wsI.addRow([]);
-    const row = wsI.addRow([title]);
-    mergeLabelRow(wsI, row.number, 1, invCols, title);
-    row.font = { bold: true, size: 12 };
-  };
-  sectionBanner('Giveaways');
-  const hGive = wsI.rowCount + 1;
-  wsI.addRow(['SKU', 'Item', 'Cost', 'Given to', 'Date']);
-  styleHeaderRow(wsI, hGive, 5);
-  const giveStart = hGive + 1;
-  for (const g of inv.giveaways || []) {
-    const row = wsI.addRow([g.sku, g.title, moneyCell(Number(g.cost_cents)), g.given_to, excelDate(String(g.date || ''))]);
-    row.getCell(3).numFmt = MONEY_FMT;
-    row.getCell(5).numFmt = 'mmm d, yyyy';
-  }
-  if (!(inv.giveaways || []).length) wsI.addRow(['None this month']);
-  else {
-    wrapDataRows(wsI, giveStart, wsI.rowCount, 5);
-    fitWrappedRowHeights(wsI, hGive, wsI.rowCount, invWidths);
-  }
-  sectionBanner('Replacements');
-  const hRepl = wsI.rowCount + 1;
-  wsI.addRow(['SKU', 'Item', 'Original sale', 'Bad unit', 'Extra cost', 'Date']);
-  styleHeaderRow(wsI, hRepl, 6);
-  const replStart = hRepl + 1;
-  for (const r of inv.replacements || []) {
-    const row = wsI.addRow([r.sku, r.title, r.original_sale_id, r.bad_unit_status, moneyCell(Number(r.extra_cost_cents || 0)), excelDate(String(r.date || ''))]);
-    row.getCell(5).numFmt = MONEY_FMT;
-  }
-  if (!(inv.replacements || []).length) wsI.addRow(['None this month']);
-  else {
-    wrapDataRows(wsI, replStart, wsI.rowCount, 6);
-    fitWrappedRowHeights(wsI, hRepl, wsI.rowCount, invWidths);
-  }
-  sectionBanner('Returns');
-  const hRet = wsI.rowCount + 1;
-  wsI.addRow(['SKU', 'Order', 'Channel', 'Refund', 'Label', 'Status', 'Disposition']);
-  styleHeaderRow(wsI, hRet, invCols);
-  const retStart = hRet + 1;
-  for (const r of inv.returns || []) {
-    const row = wsI.addRow([r.sku, r.order_id, r.channel, moneyCell(Number(r.refund_cents || 0)), moneyCell(Number(r.label_cents || 0)), r.status, r.disposition || r.route_to]);
-    row.getCell(4).numFmt = MONEY_FMT;
-    row.getCell(5).numFmt = MONEY_FMT;
-  }
-  if (!(inv.returns || []).length) wsI.addRow(['None this month']);
-  else {
-    wrapDataRows(wsI, retStart, wsI.rowCount, invCols);
-    fitWrappedRowHeights(wsI, hRet, wsI.rowCount, invWidths);
-  }
-  fitTitleRows(wsI, invCols, invWidths);
+  const giveCost = (inv.giveaways || []).reduce((sum, row) => sum + Number(row.cost_cents || 0), 0);
+  const refunds = (inv.returns || []).reduce((sum, row) => sum + Number(row.refund_cents || 0), 0);
+  total(`In stock at start of ${word}`, inv.start_unit_count, own?.value?.start_cost_cents ?? null);
+  total('Received', inv.received_units, own?.movement?.received_cost_cents ?? null);
+  total('Manifested', wb.manifested_units || 0);
+  total('Sold', inv.sold_units, own?.movement?.sold_cost_cents ?? null);
+  total('Returned to stock', inv.return_to_stock_units ?? 0, own?.movement?.return_to_stock_cost_cents ?? null);
+  total('Given away', inv.giveaway_units, giveCost);
+  total('Replacements', inv.replacement_units, own?.movement?.replacement_cost_cents ?? null);
+  total('Moved to defective', inv.defective_units, own?.movement?.defective_cost_cents ?? null);
+  total('Defective on hand', own?.defective_shelf?.units ?? 0, own?.defective_shelf?.cost_cents ?? null);
+  total('Listed online', own?.listed_once?.units ?? 0, own?.listed_once?.cost_cents ?? null);
+  total(`In stock at end of ${word}`, inv.end_unit_count, own?.value?.end_cost_cents ?? null);
+  total('Floor price of stock on hand', own?.value?.end_units ?? inv.end_unit_count, own?.value?.end_floor_cents ?? null);
+  total('Returns', inv.return_count || (inv.returns || []).length, refunds);
+  bandRows(wsI, hI + 1, wsI.rowCount);
+  fitTitleRows(wsI, 3, invWidths);
   setNormalSheetView(wsI);
-  setupPrint(wsI, hI);
+  setupPrint(wsI, hI, { onePage: true });
 
   const wsP = x.addWorksheet('Payouts');
   const payWidths = [32, 18, 18, 18, 18];
@@ -470,52 +367,61 @@ export async function buildBooksExcel(period: Period, wb: BooksWorkbook, label: 
   setNormalSheetView(wsP);
   setupPrint(wsP, hP);
 
-  const wsR = x.addWorksheet('Received');
-  const recHeader = ['Date received', 'SKU', 'Item', 'Brand', 'Category', 'Condition', 'Qty', 'Cost', 'Floor price', 'Location', 'Received by', 'Current status'];
-  const recWidths = [14, 10, 36, 14, 16, 12, 6, 11, 11, 14, 14, 14];
-  setColumnWidths(wsR, recWidths);
-  addReportTitle(wsR, 'Items received', periodLabel, generated, recHeader.length);
-  fitTitleRows(wsR, recHeader.length, recWidths);
-  const hR = wsR.rowCount + 1;
-  wsR.addRow(recHeader);
-  styleHeaderRow(wsR, hR, recHeader.length);
-  const rStart = hR + 1;
-  const receivedGroups = slices || [{ label: '', workbook: wb }];
-  for (const group of receivedGroups) {
-    if (group.label) {
-      const head = wsR.addRow([group.label]);
-      head.font = { bold: true };
-    }
-    for (const r of group.workbook.received) {
-    wsR.addRow([
-      excelDate(String(r.received_at || '')),
-      r.sku,
-      r.title,
-      r.brand,
-      r.category,
-      r.condition,
-      r.qty_on_hand,
-      moneyCell(Number(r.cost_cents)),
-      moneyCell(Number(r.ask_cents)),
-      r.location,
-      r.receiver_name,
-      r.listing_status,
-    ]);
-    }
-  }
-  bandRows(wsR, rStart, wsR.rowCount);
-  wrapDataRows(wsR, hR, wsR.rowCount, recHeader.length);
-  fitWrappedRowHeights(wsR, hR, wsR.rowCount, recWidths);
-  for (let r = rStart; r <= wsR.rowCount; r++) {
-    wsR.getRow(r).getCell(1).numFmt = 'mmm d, yyyy';
-    wsR.getRow(r).getCell(8).numFmt = MONEY_FMT;
-    wsR.getRow(r).getCell(9).numFmt = MONEY_FMT;
-  }
-  fitTitleRows(wsR, recHeader.length, recWidths);
-  setNormalSheetView(wsR);
-  setupPrint(wsR, hR);
+  writeReceivedSheet(x, (slices || [{ label: '', workbook: wb }]).map((group) => ({
+    label: group.label,
+    items: group.workbook.received,
+    manifested: group.workbook.manifested_units || 0,
+  })), periodLabel, generated);
 
   return x.xlsx.writeBuffer();
+}
+
+type ReceivedGroup = { label: string; items: ReceivedItem[]; manifested: number };
+
+function writeReceivedSheet(book: ExcelJS.Workbook, groups: ReceivedGroup[], periodLabel: string, generated: Date) {
+  const ws = book.addWorksheet('Received');
+  const cols = 3;
+  const widths = [42, 14, 16];
+  setColumnWidths(ws, widths);
+  addReportTitle(ws, 'Items inventoried', periodLabel, generated, cols);
+  const note = ws.addRow(['Counts only. Each item is still listed in Books.']);
+  mergeLabelRow(ws, note.number, 1, cols, 'Counts only. Each item is still listed in Books.');
+  const headerAt = ws.rowCount + 1;
+  const writeBlock = (items: ReceivedItem[], manifested: number) => {
+    ws.addRow(['', 'Count', 'Cost']);
+    styleHeaderRow(ws, ws.rowCount, cols);
+    const start = ws.rowCount + 1;
+    for (const metric of receivedSheetMetrics(items, manifested)) {
+      const row = ws.addRow([metric.label, metric.count, metric.cents == null ? null : moneyCell(metric.cents)]);
+      row.height = 18;
+      if (metric.cents != null) row.getCell(3).numFmt = MONEY_FMT;
+    }
+    bandRows(ws, start, ws.rowCount);
+  };
+  for (const group of groups) {
+    if (group.label) {
+      ws.addRow([]);
+      const head = ws.addRow([group.label]);
+      mergeLabelRow(ws, head.number, 1, cols, group.label);
+      head.font = { bold: true, size: 12 };
+    }
+    writeBlock(group.items, group.manifested);
+  }
+  fitTitleRows(ws, cols, widths);
+  setNormalSheetView(ws);
+  setupPrint(ws, headerAt, { onePage: true });
+}
+
+/** Swap the SKU list on a locked export for the same counts, leaving the other sheets alone. */
+export async function replaceReceivedSheet(bytes: Uint8Array, items: ReceivedItem[], periodLabel: string, manifested = 0) {
+  const book = new ExcelJS.Workbook();
+  const copy = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+  await book.xlsx.load(copy);
+  const existing = book.getWorksheet('Received') || book.getWorksheet('Items received');
+  if (existing) book.removeWorksheet(existing.id);
+  writeReceivedSheet(book, [{ label: '', items, manifested }], periodLabel, new Date());
+  const out = await book.xlsx.writeBuffer();
+  return new Uint8Array(out);
 }
 
 function pdfText(value: unknown) {
@@ -574,7 +480,7 @@ export async function buildBooksPdf(period: Period, wb: BooksWorkbook, money: (c
 
   newPage('Inventory summary');
   line(`Start ${invMetric(wb.inventory.start_unit_count)} · End ${invMetric(wb.inventory.end_unit_count)}`);
-  line(`Sold ${wb.inventory.sold_units} · Received ${wb.inventory.received_units} · Giveaways ${wb.inventory.giveaway_units}`);
+  line(`Sold ${wb.inventory.sold_units} · Received ${wb.inventory.received_units} · Manifested ${wb.manifested_units || 0} · Giveaways ${wb.inventory.giveaway_units}`);
 
   newPage('Payouts');
   const bankSum = p.stores.reduce((n, s) => n + s.paid_to_bank_cents, 0);

@@ -253,14 +253,13 @@ export function BooksPage({ client, storeId: storeIdProp, money, native = false,
         const title = spanTitle(viewPeriod.period_start, span);
         const exportOptions = { title, slices, word: span === 'year' ? 'year' : span === 'quarter' ? 'quarter' : 'month' };
         if (span === 'month' && selected.status === 'locked') {
-          const [x, pdfRpc] = await Promise.all([
-            client.rpc('portal_books_frozen_export', { p_period: selected.id, p_format: 'excel' }),
+          const [builtExcel, pdfRpc] = await Promise.all([
+            buildBooksExcel(viewPeriod, workbook, title, exportOptions),
             client.rpc('portal_books_frozen_export', { p_period: selected.id, p_format: 'pdf' }),
           ]);
-          if (x.error) throw x.error;
           if (pdfRpc.error) throw pdfRpc.error;
           const decode = (value: string) => Uint8Array.from(atob(value), (c) => c.charCodeAt(0));
-          excel = decode(x.data as string);
+          excel = builtExcel instanceof Uint8Array ? builtExcel : new Uint8Array(builtExcel);
           pdf = decode(pdfRpc.data as string);
         } else {
           const [builtExcel, builtPdf] = await Promise.all([

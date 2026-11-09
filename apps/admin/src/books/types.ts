@@ -251,4 +251,6 @@ export type BooksWorkbook = {
   payouts: PayoutsWorkbook;
   inventory: InventorySummary;
   received: ReceivedItem[];
+  /** Sum of manifest item counts dated in this period. */
+  manifested_units: number;
 };

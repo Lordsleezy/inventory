@@ -8,6 +8,7 @@ import { computeBooksFromReport } from './payoutTotals';
 import type { PersonBalance } from './payoutLedger';
 import { listFlaggedDefaultCostSales, listTrulyMissingCostSales } from './costTruth';
 import { saleWhyText } from './saleNotes';
+import { manifestedItemCount } from './receivedSummary';
 import type {
   BooksPayoutContext,
   BooksWorkbook,
@@ -101,6 +102,7 @@ export function buildBooksWorkbook(input: WorkbookInput): BooksWorkbook {
     payouts,
     inventory,
     received: filterReceived(received) as ReceivedItem[],
+    manifested_units: manifestedItemCount(report.manifests),
     proof: computed.proof,
     audit: computed.audit,
     costAudit,
@@ -114,6 +116,7 @@ export function buildBooksWorkbook(input: WorkbookInput): BooksWorkbook {
     payouts,
     inventory,
     received: filterReceived(received) as ReceivedItem[],
+    manifested_units: manifestedItemCount(report.manifests),
     proof: computed.proof,
     audit: computed.audit,
     costAudit,
