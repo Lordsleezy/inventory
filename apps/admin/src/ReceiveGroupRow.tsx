@@ -31,7 +31,7 @@ export async function printUnitLabels(skus: string[], title: string) {
     page.drawImage(image, { x: 8, y: 20, width: pageW - 16, height: 34 });
     page.drawText(sku, { x: 6, y: 6, size: 11, font: bold });
   }
-  printPdfBytes(await doc.save());
+  await printPdfBytes(await doc.save());
 }
 export function ReceiveGroupRow({item,client,admin,money,onOpen,onChanged,searchQuery=''}:{item:GroupedInventory & {sku:string;title:string;brand?:string;model?:string;ask_cents:number|null;condition:string|null};client:SupabaseClient;admin:boolean;money:(n:number)=>string;onOpen:(sku:string,missing?:string[])=>void;onChanged:()=>void;searchQuery?:string}) {
   const [editing,setEditing]=useState(false);const [patch,setPatch]=useState<Record<string,string>>({});const [error,setError]=useState('');const [busy,setBusy]=useState(false);
