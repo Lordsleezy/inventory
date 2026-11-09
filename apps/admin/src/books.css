@@ -279,3 +279,21 @@ body.cdtfa-printing .cdtfa-round,body.books-printing .cdtfa-round{color:#333}
 .books-phone .cdtfa-box-name{border:0 !important;background:transparent !important;min-height:0 !important;padding:0 !important;text-align:left;font-weight:400}
 .books-phone .cdtfa-box.calculated .cdtfa-amt input{border:0;background:transparent;font-weight:750;text-align:right}
 .books-phone .cdtfa-show-all{width:100%;margin-top:12px}
+.reports-home{display:grid;gap:12px;max-width:720px;padding:8px 0 24px}
+.reports-home h1{margin:0 0 4px;font-size:1.6rem}
+.reports-picks,.reports-actions{display:flex;gap:8px}
+.reports-picks select,.reports-pick,.reports-actions button,.reports-full{min-height:48px;border-radius:12px;font:inherit}
+.reports-picks select,.reports-pick{flex:1;background:#000;color:#fff;border:1px solid #4a4a4a;padding:0 12px}
+.reports-actions button{flex:1;background:#fff;color:#000;border:1px solid #fff}
+.reports-actions button.secondary,.reports-full{background:transparent;color:#fff;border:1px solid #fff}
+.reports-note{color:#8e8e93;margin:0}
+.reports-error{color:#ff453a;margin:0}
+.reports-full{background:transparent;border:0;color:#8e8e93;padding:0;min-height:32px;text-align:left}
+.reports-sheet{position:fixed;inset:0;background:#000c;z-index:50;display:flex;flex-direction:column;justify-content:flex-end}
+.reports-sheet-back{align-self:flex-end;margin:12px;background:transparent;color:#fff;border:0;min-height:44px}
+.reports-sheet-card{background:#111;border-radius:16px 16px 0 0;max-height:75vh;overflow:auto;padding-bottom:24px}
+.reports-sheet-card p{margin:12px 16px 4px;color:#8e8e93;font-size:12px;letter-spacing:.06em;text-transform:uppercase}
+.reports-sheet-card button{display:flex;width:100%;justify-content:space-between;background:transparent;color:#fff;border:0;border-top:1px solid #2a2a2a;min-height:48px;padding:0 16px;text-align:left}
+.reports-sheet-card button[disabled]{color:#666}
+.reports-sheet-card button[aria-current=true]{font-weight:700}
+@media(max-width:800px){.reports-actions{flex-direction:column}.reports-home{padding-left:4px;padding-right:4px}}

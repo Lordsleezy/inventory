@@ -1,17 +1,19 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+﻿import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import ExcelJS from 'exceljs';
-import { BooksViews, type Sheet } from './books/BooksViews';
+import { ReportsHome } from './books/ReportsHome';
+import { choiceBounds, defaultPeriodId, periodChoices, reportFileStem, yearsFrom } from './books/reportsPeriod';
+import { showSpreadsheet } from './books/sheetView';
 import { normalizeReport } from './books/booksMath';
 import { addCdtfaExcelSheet, addCdtfaPdfPages, cdtfaPdfFileName } from './books/cdtfaExport';
 import { loadCdtfaPrintModel, type CdtfaPrintModel } from './books/cdtfaLoad';
 import { monthsInRange, parseFiling, spanBounds, spanTitle, type BooksSpan } from './books/booksSpan';
 import { addArchiveSheet, appendPdf, archivePlan, periodHasActivity, zipStore } from './books/booksArchive';
-import { fillCdtfaPdfBytes, loadCdtfaTemplate, paperToCdtfaDoc } from './books/cdtfaPdf';
+import { fillCdtfaPdfBytes, loadCdtfaTemplate, mergePdfBytes, paperToCdtfaDoc } from './books/cdtfaPdf';
 import { buildCdtfaWorksheet } from './books/cdtfaWorksheet';
 import { officialCdtfaPdf } from './books/cdtfaTrimClient';
 import { combineMonthWorkbooks, type BooksSlice } from './books/combineBooks';
-import type { CdtfaFrequency } from './books/cdtfaResolve';
+import { dueOn, type CdtfaFrequency } from './books/cdtfaResolve';
 import { monthLabel } from './books/booksMath';
 import { buildBooksExcel, buildBooksPdf, downloadBytes } from './books/export';
 import { loadBooksPayoutContext, loadCommissionOverrides } from './books/loadPayoutContext';
@@ -83,10 +85,14 @@ export function BooksPage({ client, storeId: storeIdProp, money, native = false,
   const [filing, setFiling] = useState<CdtfaFrequency | null>(null);
   const [archiveBusy, setArchiveBusy] = useState(false);
   const [parts, setParts] = useState<{ label: string; period: Period; report: Report; inventory: InventorySummary; received: ReceivedItem[]; money: Awaited<ReturnType<typeof loadBooksMoney>>; decisions: Record<string, 'keep' | 'remove'> }[]>([]);
-  const [sheet, setSheet] = useState<Sheet>('hub');
-  const [desktopTab, setDesktopTab] = useState<Sheet>('sales');
+  const [sheet, setSheet] = useState<'hub' | 'sales'>('hub');
+  const [desktopTab, setDesktopTab] = useState<'hub' | 'sales'>('sales');
   const [pickerOpen, setPickerOpen] = useState(false);
   const [loadRetry, setLoadRetry] = useState(0);
+  const [reportYear, setReportYear] = useState(() => Number(sessionStorage.getItem('floor-reports-year')) || new Date().getFullYear());
+  const [reportPick, setReportPick] = useState(() => sessionStorage.getItem('floor-reports-pick') || defaultPeriodId(new Date()));
+  const [fileBusy, setFileBusy] = useState<'' | 'sheet' | 'tax' | 'view-sheet' | 'view-tax' | 'full'>('');
+  const [fileError, setFileError] = useState('');
 
   const selected = useMemo(() => periods.find((p) => p.id === periodId) || null, [periods, periodId]);
 
@@ -279,10 +285,32 @@ export function BooksPage({ client, storeId: storeIdProp, money, native = false,
           try {
             excel = await addCdtfaExcelSheet(excel, tax);
             pdf = await addCdtfaPdfPages(pdf, tax);
-            const filled = await fillCdtfaPdfBytes(await loadCdtfaTemplate(), paperToCdtfaDoc(tax));
+            const accountRes = await client.rpc('portal_cdtfa_account');
+            const account = accountRes.error ? '' : String(accountRes.data || '');
+            const ranges = span === 'quarter'
+              ? monthsInRange(viewPeriod.period_start, viewPeriod.period_end).map((month) => spanBounds(month, 'month'))
+              : [{ start: viewPeriod.period_start, end: viewPeriod.period_end }];
+            const parts: Uint8Array[] = [];
+            for (const range of ranges) {
+              const model = range.start === tax.periodStart ? tax : await loadCdtfaPrintModel(client, range.start, range.end);
+              const source = model || tax;
+              const filled = await fillCdtfaPdfBytes(await loadCdtfaTemplate(), paperToCdtfaDoc({
+                ...source,
+                periodStart: range.start,
+                periodEnd: range.end,
+                open: false,
+                recordsNote: null,
+                optionTitle: null,
+                optionHint: null,
+                preparer: '',
+                signer: { ...source.signer, account },
+              }));
+              const district = source.lines.find((line) => line.id === '16')?.dollars ?? 0;
+              parts.push((await officialCdtfaPdf(filled, district)).bytes);
+            }
+            taxPdf = parts.length > 1 ? await mergePdfBytes(parts) : parts[0];
             const district = tax.lines.find((line) => line.id === '16')?.dollars ?? 0;
-            const ready = await officialCdtfaPdf(filled, district);
-            taxPdf = ready.bytes;
+            const ready = { pageCount: parts.length, warning: null as string | null };
             taxWorksheet = await buildCdtfaWorksheet({
               periodStart: tax.periodStart,
               periodEnd: tax.periodEnd,
@@ -307,7 +335,7 @@ export function BooksPage({ client, storeId: storeIdProp, money, native = false,
 
   useEffect(() => {
     if (!native || !onNativeNavigation) return;
-    onNativeNavigation(false, 'Books');
+    onNativeNavigation(false, 'Reports');
   }, [native, onNativeNavigation]);
 
   function saveDuplicateDecision(lineId: string, decision: 'keep' | 'remove') {
@@ -475,87 +503,109 @@ export function BooksPage({ client, storeId: storeIdProp, money, native = false,
     });
   }
 
-  if (busy && !report) {
-    return <p className={native ? 'native-report-empty' : ''}>Loading books…</p>;
+  const reportToday = new Date();
+  const firstSalesYear = periods.reduce((year, row) => Math.min(year, Number(row.period_start.slice(0, 4)) || year), reportToday.getFullYear());
+  const yearChoices = yearsFrom(firstSalesYear, reportToday);
+  const choices = periodChoices(reportYear, reportToday);
+
+  function remember(nextYear: number, nextPick: string) {
+    sessionStorage.setItem('floor-reports-year', String(nextYear));
+    sessionStorage.setItem('floor-reports-pick', nextPick);
+    const next = choiceBounds(nextYear, nextPick);
+    setSpan(next.span);
+    const match = periods.find((row) => row.period_start >= next.start && row.period_start <= next.end);
+    if (match) setPeriodId(match.id);
+  }
+
+  async function emptyWorkbook() {
+    const book = new ExcelJS.Workbook();
+    const sheet = book.addWorksheet('Sales');
+    sheet.addRow(['No sales this month']);
+    const out = await book.xlsx.writeBuffer();
+    return new Uint8Array(out);
+  }
+
+  async function taxForSelection() {
+    const bounds = choiceBounds(reportYear, reportPick);
+    const ranges = bounds.span === 'quarter' ? monthsInRange(bounds.start, bounds.end).map((month) => spanBounds(month, 'month')) : [bounds];
+    const accountRes = await client.rpc('portal_cdtfa_account');
+    const account = accountRes.error ? '' : String(accountRes.data || '');
+    const parts: Uint8Array[] = [];
+    for (const range of ranges) {
+      const model = await loadCdtfaPrintModel(client, range.start, range.end);
+      const filled = await fillCdtfaPdfBytes(await loadCdtfaTemplate(), paperToCdtfaDoc({
+        periodStart: range.start,
+        periodEnd: range.end,
+        dueOn: model?.dueOn || dueOn(range.end),
+        lines: model?.lines || [],
+        open: false,
+        preparer: '',
+        omitInterest: model?.omitInterest ?? false,
+        signer: { account },
+      }));
+      const district = model?.lines.find((line) => line.id === '16')?.dollars ?? 0;
+      parts.push((await officialCdtfaPdf(filled, district)).bytes);
+    }
+    return parts.length > 1 ? mergePdfBytes(parts) : parts[0];
+  }
+
+  async function pageCount(bytes: Uint8Array) {
+    const { PDFDocument } = await import('pdf-lib');
+    return (await PDFDocument.load(bytes)).getPageCount();
+  }
+
+  async function runFile(kind: '' | 'sheet' | 'tax' | 'view-sheet' | 'view-tax' | 'full') {
+    const view = kind === 'view-sheet' || kind === 'view-tax';
+    const popup = view ? window.open('about:blank', '_blank') : null;
+    setFileBusy(kind);
+    setFileError('');
+    try {
+      const stem = reportFileStem(reportYear, reportPick);
+      if (kind === 'full') {
+        const bytes = new Uint8Array(await loadCdtfaTemplate());
+        downloadBytes('CDTFA-401-A-full.pdf', bytes, 'application/pdf');
+        return;
+      }
+      if (kind === 'sheet' || kind === 'view-sheet') {
+        const excel = exportFiles?.excel ?? await emptyWorkbook();
+        if (kind === 'view-sheet') await showSpreadsheet(popup, excel, `${stem}.xlsx`);
+        else downloadBytes(`${stem}.xlsx`, excel, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        return;
+      }
+      const taxPdf = exportFiles?.taxPdf ?? await taxForSelection();
+      if (!taxPdf) throw new Error('missing');
+      const pages = await pageCount(taxPdf);
+      const name = `${stem}-${pages}-pages.pdf`;
+      if (kind === 'view-tax') {
+        const url = URL.createObjectURL(new Blob([new Uint8Array(taxPdf)], { type: 'application/pdf' }));
+        if (popup && !popup.closed) popup.location.href = url;
+        else window.location.href = url;
+      } else downloadBytes(name, taxPdf, 'application/pdf');
+    } catch {
+      if (popup && !popup.closed) popup.close();
+      setFileError("Couldn't build the report. Try again.");
+    } finally {
+      setFileBusy('');
+    }
   }
 
   return (
-    <div className={`books-page books-mockup${native ? ' books-native' : ''}`}>
-      {!native && (
-        <header className="books-print-only">
-          <h1>Books</h1>
-        </header>
-      )}
-      {error && (
-        <div className="books-load-error" role="alert">
-          <p>{error}</p>
-          <button type="button" className="secondary" disabled={busy} onClick={() => { setError(''); setLoadRetry((n) => n + 1); }}>Try again</button>
-        </div>
-      )}
-      {viewPeriod && selected && (report && workbook ? (
-        <BooksViews
-          native={native}
-          money={money}
-          period={viewPeriod}
-          periods={periods}
-          periodId={periodId}
-          setPeriodId={setPeriodId}
-          totals={totals}
-          workbook={workbook}
-          inventory={inventory}
-          report={report}
-          received={received}
-          sheet={sheet}
-          setSheet={setSheet}
-          pickerOpen={pickerOpen}
-          setPickerOpen={setPickerOpen}
-          exportsPreparing={exportsPreparing}
-          exportFiles={exportFiles}
-          onExcel={downloadExcel}
-          onPdf={downloadPdf}
-          onPrint={printReports}
-          client={client}
-          busy={busy}
-          setBusy={setBusy}
-          onError={setError}
-          onReload={async () => { await loadPeriods(); if (selected) await loadSpan(selected, span, periods); }}
-          desktopTab={desktopTab}
-          setDesktopTab={setDesktopTab}
-          onDuplicateDecision={saveDuplicateDecision}
-          absorbFees={!!payoutCtx?.cfg.absorbFees}
-          onlineChannels={payoutCtx?.cfg.channels || []}
-          lockedStaleMath={lockedStaleMath}
-          lockedMonths={lockedMonths}
-          taxForm={taxForm}
-          span={span}
-          setSpan={setSpan}
-          filing={filing}
-          onFiling={setFiling}
-          spanOptions={spanOptions}
-          spanValue={spanValue}
-          onSpanValue={onSpanValue}
-          slices={slices}
-          spanWord={span === 'year' ? 'year' : span === 'quarter' ? 'quarter' : 'month'}
-          showLock={span === 'month'}
-          onDownloadAll={() => void downloadAll()}
-          archiveBusy={archiveBusy}
-          onResolveLabel={(expenseId, choice) => void resolveLabel(expenseId, choice)}
-        />
-      ) : (
-        <div className={`native-report-body books-phone${native ? '' : ' books-desktop-shell'}`}>
-          <div className="books-phone-period">
-            <label>
-              <span className="sr">Report period</span>
-              <select aria-label="Report period" value={spanValue} disabled={!periods.length} onChange={(e) => onSpanValue(e.target.value)}>
-                {spanOptions.map((row) => (
-                  <option key={row.value} value={row.value}>{row.label}</option>
-                ))}
-              </select>
-            </label>
-          </div>
-          {busy && <p className="native-report-footnote">Loading books…</p>}
-        </div>
-      ))}
+    <div className={`books-page${native ? ' books-native' : ''}`}>
+      <ReportsHome
+        year={reportYear}
+        years={yearChoices}
+        onYear={(year) => { setReportYear(year); remember(year, reportPick); }}
+        pick={reportPick}
+        choices={choices}
+        onPick={(id) => { const row = choices.find((item) => item.id === id); if (row?.disabled) return; setReportPick(id); remember(reportYear, id); }}
+        busy={fileBusy || (exportsPreparing ? 'sheet' : '')}
+        error={fileError || error}
+        onSheet={() => void runFile('sheet')}
+        onTax={() => void runFile('tax')}
+        onViewSheet={() => void runFile('view-sheet')}
+        onViewTax={() => void runFile('view-tax')}
+        onFull={() => void runFile('full')}
+      />
     </div>
   );
 }

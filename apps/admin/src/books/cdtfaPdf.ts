@@ -79,11 +79,19 @@ export async function fillCdtfaPdfBytes(bytes: ArrayBuffer | Uint8Array, doc: Cd
     try { form.getTextField('29').setText(''); } catch { /* this revision renamed the interest box */ }
   }
   const preparer = doc.preparer?.trim();
-  if (preparer) set('PaidName', preparer);
+  if (preparer && preparer.toLowerCase() !== 'floor') set('PaidName', preparer);
   else {
     try { form.getTextField('PaidName').setText(''); } catch { /* leave the box blank */ }
   }
   const signer = doc.signer || {};
+  const account = signer.account || '';
+  if (account) {
+    for (const field of form.getFields()) {
+      if (/account/i.test(field.getName())) {
+        try { form.getTextField(field.getName()).setText(account); } catch { /* not a text box */ }
+      }
+    }
+  }
   const optional: [string, string][] = [
     ['Print Name', signer.name || ''],
     ['Date', signer.date || ''],
@@ -180,4 +188,15 @@ export function paperToCdtfaDoc(model: {
     omitInterest: model.omitInterest,
     preparer: model.preparer,
   };
+}
+
+/** One PDF containing several already-trimmed monthly returns. */
+export async function mergePdfBytes(parts: Uint8Array[]): Promise<Uint8Array> {
+  const out = await PDFDocument.create();
+  for (const part of parts) {
+    const src = await PDFDocument.load(part);
+    const copied = await out.copyPages(src, src.getPageIndices());
+    for (const page of copied) out.addPage(page);
+  }
+  return out.save();
 }
