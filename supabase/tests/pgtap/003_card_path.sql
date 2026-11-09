@@ -17,8 +17,8 @@ begin
     (v_owner, v_store, 'Owner', 'owner'),
     (v_staff, v_store, 'Staff', 'staff'),
     (v_mgr, v_store, 'Manager', 'manager');
-  perform public.seed_store_settings(v_store,
-  perform public.pgtap_sync_owner_portal_admins(v_store); 'Test Store');
+  perform public.seed_store_settings(v_store, 'Test Store');
+  perform public.pgtap_sync_owner_portal_admins(v_store);
   insert into public.store_settings (store_id, key, value)
   values (v_store, 'taxRateBps', '725'::jsonb),
          (v_store, 'card_fee_bps', '0'::jsonb)

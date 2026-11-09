@@ -4,8 +4,8 @@ do $$ declare s uuid; owner_id uuid:=gen_random_uuid(); clerk_id uuid:=gen_rando
  insert into auth.users(id) values(owner_id),(clerk_id);
  insert into public.stores default values returning id into s;
  insert into public.staff(user_id,store_id,display_name,role) values(owner_id,s,'Owner','owner'),(clerk_id,s,'Clerk','staff');
- perform public.seed_store_settings(s,
-  perform public.pgtap_sync_owner_portal_admins(s);'Inventory cards');
+ perform public.seed_store_settings(s, 'Inventory cards');
+  perform public.pgtap_sync_owner_portal_admins(s);
  insert into public.sku_ledger(sku,store_id,issued_at) select x,s,now() from unnest(array['95001','95002','95003','95004','95005','95006','95007','95008']) x;
  insert into public.units(sku,store_id,title,brand,model,category,condition,state,qty_on_hand,ask_cents,listing_body,package_weight_lb,package_length_in,package_width_in,package_height_in,show_on_website,received_at,updated_at)
  select x.sku,s,x.title,'Acme','Household item','Blenders',x.cond,x.state,x.qty,2500,'Open box household item',2,10,8,6,x.sku='95008',now(),now()

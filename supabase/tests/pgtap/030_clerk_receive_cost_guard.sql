@@ -7,8 +7,8 @@ begin
   insert into public.stores default values returning id into s;
   insert into public.staff(user_id,store_id,display_name,role)
     values(clerk_id,s,'Jacob','staff');
-  perform public.seed_store_settings(s,
-  perform public.pgtap_sync_owner_portal_admins(s);'Clerk receive test');
+  perform public.seed_store_settings(s, 'Clerk receive test');
+  perform public.pgtap_sync_owner_portal_admins(s);
   insert into storage.objects(bucket_id,name)
     values('unit-photos',s::text||'/10000/actual-unit.jpg');
   perform set_config('receive.clerk',clerk_id::text,true);

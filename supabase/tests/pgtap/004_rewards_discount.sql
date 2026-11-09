@@ -17,8 +17,8 @@ begin
     (v_owner, v_store, 'Owner', 'owner'),
     (v_staff, v_store, 'Staff', 'staff'),
     (v_mgr, v_store, 'Manager', 'manager');
-  perform public.seed_store_settings(v_store,
-  perform public.pgtap_sync_owner_portal_admins(v_store); 'Rewards Store');
+  perform public.seed_store_settings(v_store, 'Rewards Store');
+  perform public.pgtap_sync_owner_portal_admins(v_store);
   insert into public.store_settings (store_id, key, value)
   values (v_store, 'taxRateBps', '1000'::jsonb)  -- 10% for easy math
   on conflict (store_id, key) do update set value = excluded.value;

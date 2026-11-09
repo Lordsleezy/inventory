@@ -11,8 +11,8 @@ begin
   insert into public.stores default values returning id into v_store;
   insert into public.staff (user_id, store_id, display_name, role) values
     (v_paul, v_store, 'Paul', 'owner'), (v_jacob, v_store, 'Jacob', 'staff');
-  perform public.seed_store_settings(v_store,
-  perform public.pgtap_sync_owner_portal_admins(v_store); 'Tax void store');
+  perform public.seed_store_settings(v_store, 'Tax void store');
+  perform public.pgtap_sync_owner_portal_admins(v_store);
   insert into public.store_settings (store_id, key, value) values
     (v_store, 'commission_store_absorbs_fees', to_jsonb(true)),
     (v_store, 'online_channels', '["website","ebay","mercari"]'),
