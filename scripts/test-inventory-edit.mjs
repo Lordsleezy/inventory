@@ -8,6 +8,7 @@ const { chromium } = await import(process.env.MANIFEST_PLAYWRIGHT_PATH
 const css = await Promise.all([
   readFile('apps/admin/src/style.css', 'utf8'),
   readFile('apps/admin/src/appMode/appMode.css', 'utf8'),
+  readFile('apps/admin/src/appMode/phoneEditType.css', 'utf8'),
 ]);
 const { outputFiles } = await build({ stdin: { resolveDir: process.cwd(), loader: 'tsx', contents: `
 import React from 'react';import{createRoot}from'react-dom/client';import{UnitEditDrawer}from'./apps/admin/src/UnitEditDrawer';
@@ -42,11 +43,20 @@ try {
     assert.ok(metrics.saveVisible&&metrics.saveRight<=width,`Save stays visible at ${width}px`);
     assert.ok(metrics.deleteBottom<=metrics.tabTop,`Delete stays above tab bar at ${width}px: ${JSON.stringify(metrics)}`);
     assert.ok(metrics.notesWidth>0,`Notes field is visible at ${width}px`);
-    if(width===390)assert.equal(await page.locator('.unit-edit-grid').first().evaluate(el=>getComputedStyle(el).gridTemplateColumns.split(' ').length),1,'phone fields use one column');
+    if(width===390){
+      assert.equal(await page.locator('.unit-edit-grid').first().evaluate(el=>getComputedStyle(el).gridTemplateColumns.split(' ').length),1,'phone fields use one column');
+      assert.equal(await page.getByRole('checkbox',{name:'Do not list'}).count(),1,'admin can mark do not list');
+      assert.equal(await page.getByRole('checkbox',{name:'Do not ship'}).count(),1,'admin can mark do not ship');
+      assert.equal(await page.getByRole('checkbox',{name:'Defective'}).count(),1,'admin can mark defective');
+      const flag=await page.locator('.unit-edit-flag').first().evaluate(el=>{const r=el.getBoundingClientRect();const box=el.querySelector('input').getBoundingClientRect();return{h:r.height,w:r.width,box:box.width,overlap:box.right>r.right+1}});
+      assert.ok(flag.h<=52&&flag.h>=40,`flag row stays one line: ${JSON.stringify(flag)}`);
+      assert.ok(flag.box>=20&&flag.box<=24,`flag checkbox stays small: ${JSON.stringify(flag)}`);
+      assert.equal(flag.overlap,false,'flag checkbox stays inside the row');
+    }
     if(width>=820)assert.ok(await page.locator('.unit-edit-grid').first().evaluate(el=>getComputedStyle(el).gridTemplateColumns.split(' ').length)>=2,'tablet fields use two columns when they fit');
     await page.close();
   }
-  const clerk=await browser.newPage({viewport:{width:390,height:844}});await clerk.route('**/*',r=>r.fulfill({contentType:'text/html',body:`<!doctype html><html><head><style>${css.join('\n')}</style></head><body><div id="root"></div></body></html>`}));await clerk.goto('https://floor-inventory-edit.test');await clerk.addScriptTag({content:outputFiles[0].text});await clerk.evaluate(()=>window.renderClerk());await clerk.getByRole('dialog',{name:'Edit unit 99871'}).waitFor();assert.equal(await clerk.getByLabel('Cost',{exact:true}).count(),0,'clerk does not see cost');assert.equal(await clerk.getByRole('button',{name:'Delete item'}).count(),0,'clerk does not see admin actions');assert.equal(await clerk.locator('.channel-picker').count(),0,'clerk does not see listing channel toggles');assert.equal(await clerk.getByLabel('Shippable',{exact:true}).count(),0,'clerk does not see shippable');assert.equal(await clerk.locator('.dns-switch-row').count(),0,'clerk does not see do-not-ship');
+  const clerk=await browser.newPage({viewport:{width:390,height:844}});await clerk.route('**/*',r=>r.fulfill({contentType:'text/html',body:`<!doctype html><html><head><style>${css.join('\n')}</style></head><body><div id="root"></div></body></html>`}));await clerk.goto('https://floor-inventory-edit.test');await clerk.addScriptTag({content:outputFiles[0].text});await clerk.evaluate(()=>window.renderClerk());await clerk.getByRole('dialog',{name:'Edit unit 99871'}).waitFor();assert.equal(await clerk.getByLabel('Cost',{exact:true}).count(),0,'clerk does not see cost');assert.equal(await clerk.getByRole('button',{name:'Delete item'}).count(),0,'clerk does not see admin actions');assert.equal(await clerk.locator('.channel-picker').count(),0,'clerk does not see listing channel toggles');assert.equal(await clerk.getByLabel('Shippable',{exact:true}).count(),0,'clerk does not see shippable');assert.equal(await clerk.locator('.dns-switch-row').count(),0,'clerk does not see do-not-ship');assert.equal(await clerk.getByRole('checkbox',{name:'Do not list'}).count(),1,'clerk can mark do not list');assert.equal(await clerk.getByRole('checkbox',{name:'Defective'}).count(),1,'clerk can mark defective');assert.equal(await clerk.getByRole('checkbox',{name:'Do not ship'}).count(),0,'clerk does not see do not ship');
   await clerk.locator('#unit-edit-price input').fill('21.00');
   await clerk.locator('.app-unit-edit-nav').getByRole('button',{name:'Save',exact:true}).click();
   await clerk.waitForFunction(()=>window.clerkSaved);

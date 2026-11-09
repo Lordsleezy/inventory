@@ -11,7 +11,7 @@ export function DnsCheckbox({
   pendingValue?: boolean;
   onPendingChange?: (dns: boolean) => void;
   /** `switch` = iOS-style toggle with full explanation (item edit). */
-  variant?: 'checkbox' | 'switch';
+  variant?: 'checkbox' | 'switch' | 'row';
 }) {
   const [value, setValue] = useState<{ dns: boolean; required: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -38,6 +38,22 @@ export function DnsCheckbox({
   const on = pendingValue ?? !!value?.dns;
   const disabled = busy || !value || value.required;
   const help = `Pickup only. Hides it from eBay, Amazon, TikTok, Depop and Mercari.${value?.required ? ' Required for this oversized item type.' : ''}`;
+
+  if (variant === 'row') {
+    return (
+      <label className="unit-edit-flag">
+        <input
+          type="checkbox"
+          checked={on}
+          disabled={disabled}
+          aria-label="Do not ship"
+          onChange={(e) => void change(e.target.checked)}
+        />
+        Do not ship
+        {error && <span className="error" role="alert">{error}</span>}
+      </label>
+    );
+  }
 
   if (variant === 'switch') {
     return (

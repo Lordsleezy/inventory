@@ -195,3 +195,47 @@ html.app-mode .app-unit-edit textarea::placeholder {
   color: #8e8e93;
   font-weight: 600;
 }
+
+html.app-mode .app-unit-edit .unit-edit-flags {
+  margin: 8px 16px 0;
+}
+html.app-mode .app-unit-edit .unit-edit-flag {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  gap: 10px;
+  min-height: 44px;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-bottom: 1px solid #3a3a3c !important;
+  background: transparent !important;
+  color: #fff !important;
+  font-size: 16px !important;
+  font-weight: 700 !important;
+  line-height: 1.2 !important;
+  text-align: left !important;
+}
+html.app-mode .app-unit-edit .unit-edit-flag input[type="checkbox"] {
+  display: block !important;
+  width: 22px !important;
+  height: 22px !important;
+  min-width: 22px !important;
+  max-width: 22px !important;
+  margin: 0 !important;
+  flex: 0 0 22px;
+  accent-color: #fff;
+}
+html.app-mode .app-unit-edit .unit-edit-flag .error {
+  margin-left: auto;
+  color: #ff453a !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+}
+html.app-mode .app-unit-edit .unit-edit-flag-hint {
+  margin: 6px 0 0;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.3;
+}
