@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { displayProductTitle } from '@floor/store';
 import { UnitEditDrawer } from '../UnitEditDrawer';
@@ -6,17 +7,25 @@ import { RestoreInventoryButton } from '../RestoreInventoryButton';
 import { shortError } from './shortError';
 import { DispositionButtons } from '../DispositionDialogs';
 import { showDispositionButtons } from '../dispositions';
-import { locationPhrase } from '../locationPlace';
 import { LocationPicker } from '../LocationPicker';
 import { ReceiveWorkStatus } from '../ReceiveWorkStatus';
 import { ChannelCheckboxes } from '../ChannelCheckboxes';
 import { printUnitLabels } from '../ReceiveGroupRow';
 import { listingLink } from '../listingLink';
 import { profitAfterFeesCents } from '../scanPricing';
-import { categoryReview } from '../categoryReview';
 import { floorFunctionUrl } from '../floorApi';
+import { locationParts } from '../locationOrder';
+import { errText } from '../errText';
+import { scannerLifecycle } from '../scannerLifecycle';
+import {
+  hasUpcValue,
+  normalizeUpc,
+  upcValidationMessage,
+  upcVariants,
+  UPC_NOT_APPLICABLE,
+} from '../upcValidate';
 
-type Photo = { id: number; path: string; is_primary: boolean; sort_order?: number };
+type Photo = { id: number; path: string; is_primary: boolean; sort_order?: number; source?: string };
 type Listing = {
   channel: string;
   status: string;
@@ -42,6 +51,7 @@ type EbayInfo = {
   review_reason?: string | null;
 };
 type HistoryRow = { at: string; label: string };
+type FillOffer = { labels: string[]; apply: () => Promise<void> };
 
 type Props = {
   client: SupabaseClient;
@@ -98,6 +108,15 @@ function statusPill(status: string, channel: string, hasRow: boolean): { label: 
   return { label: 'Not listed', kind: 'none' };
 }
 
+function formatLocation(code: string) {
+  const parts = locationParts(code);
+  return parts ? `Bay ${parts.bay} · ${parts.slot}` : code;
+}
+
+function blank(v: unknown) {
+  return !String(v ?? '').trim();
+}
+
 export function AppItemDetail({
   client, storeId, accessToken, sku, money, onBack, onChanged, onSellInStore, canDelete = false, staffMode = false, scannerInputReady,
   missingFields = [],
@@ -116,13 +135,25 @@ export function AppItemDetail({
   const [history, setHistory] = useState<HistoryRow[]>([]);
   const [actionMsg, setActionMsg] = useState('');
   const [locationOpen, setLocationOpen] = useState(false);
+  const [upcEditing, setUpcEditing] = useState(false);
+  const [upcDraft, setUpcDraft] = useState('');
+  const [noUpc, setNoUpc] = useState(false);
+  const [upcError, setUpcError] = useState('');
+  const [upcBusy, setUpcBusy] = useState(false);
+  const [scanOpen, setScanOpen] = useState(false);
+  const [fillOffer, setFillOffer] = useState<FillOffer | null>(null);
+  const [zoomPhoto, setZoomPhoto] = useState<Photo | null>(null);
   const heroRef = useRef<HTMLDivElement>(null);
+  const upcInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     let alive = true;
     setDetail(null);
     setPhotoIndex(0);
     setActionMsg('');
+    setFillOffer(null);
+    setUpcEditing(false);
+    setUpcError('');
     void (async () => {
       try {
         const { data, error: e } = await client.rpc(staffMode ? 'staff_inventory_detail' : 'portal_inventory_detail', { p_sku: sku });
@@ -216,7 +247,7 @@ export function AppItemDetail({
           appMode
           initialSection={editJump}
           canDelete={canDelete}
-          locationLabel={locationCodes.length ? locationCodes.map((code) => locationPhrase(code) || code).join(', ') : 'Unassigned'}
+          locationLabel={locationCodes.length ? locationCodes.map(formatLocation).join(', ') : 'Unassigned'}
           onReadinessChanged={() => { setReload((n) => n + 1); onChanged(); }}
           onClose={() => { setEditing(false); setEditJump(undefined); }}
           onSaved={() => {
@@ -239,7 +270,7 @@ export function AppItemDetail({
   const L = unit?.package_length_in != null ? Number(unit.package_length_in) : null;
   const W = unit?.package_width_in != null ? Number(unit.package_width_in) : null;
   const H = unit?.package_height_in != null ? Number(unit.package_height_in) : null;
-  const box = L != null && W != null && H != null ? `${L} × ${W} × ${H} in` : null;
+  const box = L != null && W != null && H != null && L > 0 && W > 0 && H > 0 ? `${L} × ${W} × ${H} in` : null;
   const ask = unit?.ask_cents != null ? Number(unit.ask_cents) : null;
   const cost = !staffMode && unit?.acquisition_cost_cents != null ? Number(unit.acquisition_cost_cents) : null;
   const photos = detail?.photos || [];
@@ -247,37 +278,50 @@ export function AppItemDetail({
   const moneyHidden = !canDelete && !!unit && !inStock;
   const qty = Math.max(0, Number(unit?.qty_on_hand ?? 1) || 0);
   const isStocked = Boolean(unit?.is_stocked) || qty > 1;
-  const liveCount = CHANNELS.filter((ch) => {
+  const liveCount = !staffMode ? CHANNELS.filter((ch) => {
     const row = listingsBy.get(ch.key);
     return row && String(row.status).toLowerCase() === 'listed';
-  }).length;
+  }).length : 0;
   const locationText = locationCodes.length
-    ? locationCodes.map((code) => locationPhrase(code) || code).join(', ')
-    : String(unit?.location || unit?.bin || '');
+    ? locationCodes.map(formatLocation).join(', ')
+    : '';
   const hasLocation = Boolean(locationText.trim());
-  const attrs = ebay?.attributes || {};
-  const typeVal = attrOf(attrs, 'Type', 'Item Type', 'Style');
-  const colorVal = attrOf(attrs, 'Color', 'Colour', 'Main Color');
-  const sizeVal = attrOf(attrs, 'Size', 'Size Type', 'Dimensions');
+  const upcSet = unit ? hasUpcValue(unit as { upc?: unknown; upc_does_not_apply?: unknown; listing_specs?: unknown }) : false;
+  const upcDisplay = String(unit?.upc || '').trim();
+  const upcDna = Boolean(unit?.upc_does_not_apply) || (!upcDisplay && upcSet);
+  const aspects = (() => {
+    if (ebay?.attributes && Object.keys(ebay.attributes).length) return ebay.attributes;
+    const raw = unit?.aspects;
+    if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+      const out: Record<string, string> = {};
+      for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+        if (Array.isArray(v)) out[k] = String(v[0] ?? '');
+        else if (v != null) out[k] = String(v);
+      }
+      return out;
+    }
+    return {} as Record<string, string>;
+  })();
+  const typeVal = attrOf(aspects, 'Type', 'Item Type', 'Style');
+  const colorVal = attrOf(aspects, 'Color', 'Colour', 'Main Color');
+  const sizeVal = attrOf(aspects, 'Size', 'Size Type', 'Dimensions');
+  const categoryVal = ebay?.path || String(unit?.category || unit?.ebay_category || '').trim();
   const profit = !moneyHidden && !staffMode ? profitAfterFeesCents(ask, cost) : null;
   const shipMode = (() => {
     const o = String(unit?.fulfillment_override || '').toLowerCase();
-    if (o === 'ship') return 'Yes · Always ship';
-    if (o === 'pickup') return 'No · Pickup only';
-    return 'Yes · Automatic (rules)';
+    if (o === 'ship') return 'Always ship';
+    if (o === 'pickup') return 'Pickup only';
+    return 'Automatic (rules)';
   })();
   const ships = String(unit?.fulfillment_override || '').toLowerCase() !== 'pickup' && dns !== true;
-  const requiredFields = (ebay?.fields || []).filter((f) => f.required);
-  const recommendedFields = (ebay?.fields || []).filter((f) => !f.required && f.recommended);
-  const requiredFilled = requiredFields.filter((f) => String(attrs[f.name] || '').trim()).length;
-  const recommendedFilled = recommendedFields.filter((f) => String(attrs[f.name] || '').trim()).length;
-  const autoUnconfirmed = Boolean(ebay?.auto_picked && ebay?.category_id);
-  const review = categoryReview(ebay ? {
-    category_id: ebay.category_id,
-    auto_picked: ebay.auto_picked,
-    review_reason: ebay.review_reason,
-    missing: ebay.missing,
-  } : null);
+  const brand = String(unit?.brand || '').trim();
+  const description = String(unit?.listing_body || unit?.description || '').trim();
+  const condition = String(unit?.condition || '').trim();
+  const testStatus = String(unit?.test_status || '').trim();
+  const currentPhoto = photos[photoIndex];
+  const showAttention = inStock && (!hasLocation || !upcSet);
+  const canSetLocation = inStock; // portal_move_location_stock + portal_bay_list work via current_store_id
+  const canEditUpc = inStock;
 
   function onHeroScroll() {
     const el = heroRef.current;
@@ -299,11 +343,161 @@ export function AppItemDetail({
     }
   }
 
+  function startUpcEdit() {
+    setUpcEditing(true);
+    setNoUpc(false);
+    setUpcDraft('');
+    setUpcError('');
+    window.setTimeout(() => upcInputRef.current?.focus(), 50);
+  }
+
+  async function findDupSkus(variants: string[]) {
+    if (!variants.length) return [] as string[];
+    const table = staffMode ? 'units_pos' : 'units';
+    const { data, error: e } = await client.from(table).select('sku')
+      .eq('store_id', storeId).in('upc', variants).in('state', ['available', 'reserved', 'repair']).limit(20);
+    if (e || !data) return [];
+    return data.map((r) => String((r as { sku: string }).sku)).filter((s) => s !== sku);
+  }
+
+  async function offerFillFromLookup(upc: string) {
+    if (!unit) return;
+    try {
+      const res = await fetch(floorFunctionUrl('upc-lookup'), {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'lookup', upc, compare_upcitemdb: true }),
+      });
+      if (!res.ok) return;
+      const json = await res.json() as {
+        merged?: {
+          brand?: string; model?: string; title?: string; description?: string; category?: string;
+          package?: { length_in?: number; width_in?: number; height_in?: number; weight_lb?: number };
+          images?: string[];
+        };
+        stock_photos?: { url: string; source: string }[];
+      };
+      const m = json.merged || {};
+      const pkg = m.package || {};
+      const labels: string[] = [];
+      const patch: Record<string, unknown> = {};
+      if (blank(unit.brand) && m.brand) { patch.p_brand = m.brand; labels.push('brand'); }
+      if (blank(unit.category) && m.category) { labels.push('category'); }
+      if ((blank(unit.package_length_in) || Number(unit.package_length_in) <= 0) && pkg.length_in) {
+        patch.p_length = pkg.length_in; labels.push('size');
+      }
+      if ((blank(unit.package_width_in) || Number(unit.package_width_in) <= 0) && pkg.width_in) patch.p_width = pkg.width_in;
+      if ((blank(unit.package_height_in) || Number(unit.package_height_in) <= 0) && pkg.height_in) patch.p_height = pkg.height_in;
+      if ((blank(unit.package_weight_lb) || Number(unit.package_weight_lb) <= 0) && pkg.weight_lb) {
+        patch.p_weight = pkg.weight_lb;
+        if (!labels.includes('size')) labels.push('size');
+      }
+      const stockUrl = (json.stock_photos?.[0]?.url || m.images?.[0] || '').trim();
+      const needsPhoto = photos.length === 0 && !!stockUrl;
+      if (needsPhoto) labels.push('stock photo');
+      if (!labels.length) return;
+
+      setFillOffer({
+        labels,
+        apply: async () => {
+          const rpc = staffMode ? 'staff_update_unit' : 'portal_update_unit';
+          const args: Record<string, unknown> = {
+            p_sku: sku,
+            p_upc: String(unit.upc || upc),
+            p_brand: patch.p_brand != null ? patch.p_brand : String(unit.brand || ''),
+            p_model: String(unit.model || ''),
+            p_title: String(unit.title || titleOf(unit)),
+            p_description: String(unit.listing_body || unit.description || ''),
+            p_ask_cents: unit.ask_cents == null ? null : Number(unit.ask_cents),
+            p_condition: String(unit.condition || ''),
+            p_test_status: String(unit.test_status || ''),
+            p_notes: String(unit.defect_notes || ''),
+            p_length: patch.p_length ?? (unit.package_length_in == null ? null : Number(unit.package_length_in)),
+            p_width: patch.p_width ?? (unit.package_width_in == null ? null : Number(unit.package_width_in)),
+            p_height: patch.p_height ?? (unit.package_height_in == null ? null : Number(unit.package_height_in)),
+            p_weight: patch.p_weight ?? (unit.package_weight_lb == null ? null : Number(unit.package_weight_lb)),
+          };
+          if (!staffMode) {
+            args.p_cost_cents = unit.acquisition_cost_cents == null ? null : Number(unit.acquisition_cost_cents);
+            args.p_shippable = (() => {
+              const o = String(unit.fulfillment_override || '').toLowerCase();
+              if (o === 'ship') return 'yes';
+              if (o === 'pickup') return 'no';
+              return 'auto';
+            })();
+          }
+          const { error: updateError } = await client.rpc(rpc, args);
+          if (updateError) throw updateError;
+          if (needsPhoto && stockUrl) {
+            await fetch(floorFunctionUrl('receive-photo-identify'), {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
+              body: JSON.stringify({ action: 'add_more_stock_photo', sku, url: stockUrl, source: 'catalog' }),
+              signal: AbortSignal.timeout(45000),
+            }).catch(() => null);
+          }
+          setFillOffer(null);
+          setReload((n) => n + 1);
+          onChanged();
+        },
+      });
+    } catch {
+      /* lookup miss: stay quiet */
+    }
+  }
+
+  async function saveUpc() {
+    setUpcError('');
+    if (noUpc) {
+      setUpcBusy(true);
+      try {
+        const { error: e } = await client.rpc(staffMode ? 'staff_set_unit_upc' : 'portal_set_unit_upc', {
+          p_sku: sku, p_upc: UPC_NOT_APPLICABLE,
+        });
+        if (e) throw e;
+        setUpcEditing(false);
+        setReload((n) => n + 1);
+        onChanged();
+      } catch (err) {
+        setUpcError(errText(err));
+      } finally {
+        setUpcBusy(false);
+      }
+      return;
+    }
+    const msg = upcValidationMessage(upcDraft);
+    if (msg) { setUpcError(msg); return; }
+    const normalized = normalizeUpc(upcDraft);
+    const upc = normalized.upcA || digitsOnlySafe(upcDraft);
+    setUpcBusy(true);
+    try {
+      const dups = await findDupSkus(upcVariants(upc, normalized));
+      if (dups.length) {
+        const ok = window.confirm(
+          `UPC ${upc} is already on SKU ${dups.slice(0, 5).join(', ')}${dups.length > 5 ? '…' : ''}. Save on this item anyway?`,
+        );
+        if (!ok) { setUpcBusy(false); return; }
+      }
+      const { error: e } = await client.rpc(staffMode ? 'staff_set_unit_upc' : 'portal_set_unit_upc', {
+        p_sku: sku, p_upc: upc,
+      });
+      if (e) throw e;
+      setUpcEditing(false);
+      setReload((n) => n + 1);
+      onChanged();
+      void offerFillFromLookup(upc);
+    } catch (err) {
+      setUpcError(errText(err));
+    } finally {
+      setUpcBusy(false);
+    }
+  }
+
   return (
     <div className="app-stack app-item-detail">
       <div className="app-nav">
         <button type="button" onClick={onBack}>‹ Inventory</button>
-        <div className="app-nav-title">SKU {sku}</div>
+        <div className="app-nav-title">Item</div>
         <button
           type="button"
           onClick={() => openEdit()}
@@ -312,11 +506,6 @@ export function AppItemDetail({
         >
           Edit
         </button>
-        {scannerInputReady && (
-          <span className="app-scanner-status app-item-scanner-status ok" title="Bluetooth keyboard scanner status is not exposed to Floor.">
-            <i />Scanner input ready
-          </span>
-        )}
       </div>
 
       {error && <p className="app-footer-count" style={{ color: '#ff453a' }}>{error}</p>}
@@ -329,263 +518,321 @@ export function AppItemDetail({
       {detail && unit && (
         <>
           <div className="app-item-photo-block">
-            <div className="app-hero" ref={heroRef} onScroll={onHeroScroll}>
-              {photos.length === 0 && <div className="app-hero-empty">+</div>}
+            <div className="app-item-hero" ref={heroRef} onScroll={onHeroScroll}>
+              {photos.length === 0 && <div className="app-item-hero-empty">No photo</div>}
               {photos.map((p) => (
-                <img key={p.id} src={urls[p.path] || ''} alt="" />
-              ))}
-            </div>
-            {photos.length > 0 && (
-              <div className="app-photo-counter" aria-live="polite">{photoIndex + 1} / {photos.length}</div>
-            )}
-            <div className="app-photo-thumbs" role="list">
-              {photos.map((p, i) => (
                 <button
                   type="button"
                   key={p.id}
-                  className={`app-photo-thumb${i === photoIndex ? ' is-active' : ''}`}
-                  aria-label={`Photo ${i + 1}`}
-                  onClick={() => {
-                    setPhotoIndex(i);
-                    const el = heroRef.current;
-                    if (el) el.scrollTo({ left: i * el.clientWidth, behavior: 'smooth' });
-                  }}
+                  className="app-item-hero-slide"
+                  onClick={() => urls[p.path] && setZoomPhoto(p)}
+                  aria-label="View photo"
                 >
                   {urls[p.path] ? <img src={urls[p.path]} alt="" /> : null}
                 </button>
               ))}
-              {!staffMode && !moneyHidden && (
-                <button type="button" className="app-photo-thumb app-photo-thumb-add" onClick={() => openEdit('photos')} aria-label="Add photo">
-                  +
-                </button>
+              {currentPhoto?.source === 'stock' && photos.length > 0 && (
+                <span className="app-item-stock-tag">Stock photo · {photoIndex + 1} / {photos.length}</span>
               )}
             </div>
+            {photos.length > 1 && (
+              <div className="app-item-photo-dots" role="tablist" aria-label="Photos">
+                {photos.map((p, i) => (
+                  <button
+                    type="button"
+                    key={p.id}
+                    className={`app-item-photo-dot${i === photoIndex ? ' is-active' : ''}`}
+                    aria-label={`Photo ${i + 1}`}
+                    aria-selected={i === photoIndex}
+                    onClick={() => {
+                      setPhotoIndex(i);
+                      const el = heroRef.current;
+                      if (el) el.scrollTo({ left: i * el.clientWidth, behavior: 'smooth' });
+                    }}
+                  />
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="app-item-head">
             <h1>{titleOf(unit)}</h1>
-            <p className="meta app-item-identity">
-              {[unit.brand, unit.model, unit.upc].map((v) => String(v || '').trim()).filter(Boolean).join(' · ') || '—'}
-            </p>
-            <div className="app-item-price-row">
-              <p className="price">
-                {moneyHidden
-                  ? String(unit.state).replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase())
-                  : ask == null ? 'No price' : money(ask)}
+            <p className="app-item-sku"><span>SKU</span> <strong>{sku}</strong></p>
+            {(brand || upcDisplay) && (
+              <p className="app-item-meta">
+                {[brand, upcDisplay ? `UPC ${upcDisplay}` : ''].filter(Boolean).join(' · ')}
               </p>
-              {!moneyHidden && !staffMode && (
-                profit != null
-                  ? <span className="app-item-profit">{money(profit)} profit</span>
-                  : <button type="button" className="app-text-link warn" onClick={() => openEdit('price')}>Add cost to see profit</button>
-              )}
-            </div>
+            )}
+            <p className="app-item-price">
+              {moneyHidden
+                ? String(unit.state).replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase())
+                : ask == null ? 'No price' : money(ask)}
+            </p>
+            <p className="app-item-status">
+              <span className="app-item-status-main">
+                {inStock
+                  ? `In stock · ${qty || 1}`
+                  : String(unit.state || '').replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase()) || 'Out of stock'}
+              </span>
+              {condition ? <span className="app-item-status-side">{condition}</span> : null}
+            </p>
           </div>
 
-          <div className="app-status-chips" aria-label="Status">
-            {inStock
-              ? <span className="app-chip good">In stock · {qty || 1}</span>
-              : <span className="app-chip muted">{String(unit.state || '').replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase()) || 'Out of stock'}</span>}
-            {unit.condition ? <span className="app-chip">{String(unit.condition)}</span> : null}
-            {!hasLocation && inStock ? <span className="app-chip warn">No location</span> : null}
-            {liveCount === 0 && inStock ? <span className="app-chip warn">Not live anywhere</span> : null}
-            {dns ? <span className="app-chip warn">DNS</span> : null}
-          </div>
-
-          {inStock && !staffMode && (
-            <div className="app-quick-actions" role="group" aria-label="Quick actions">
-              {canDelete && (
-                <button type="button" onClick={() => setListSheet(true)}>List on…</button>
+          {showAttention && (
+            <div className="app-item-attention" aria-label="Needs attention">
+              {!hasLocation && (
+                <div className="app-item-attention-row">
+                  <div className="app-item-attention-copy">
+                    <span>Location</span>
+                    <strong>Not assigned</strong>
+                  </div>
+                  {canSetLocation && (
+                    <button type="button" className="app-item-btn-solid" onClick={() => setLocationOpen(true)}>
+                      Set location
+                    </button>
+                  )}
+                </div>
               )}
-              <button
-                type="button"
-                onClick={() => {
-                  window.alert('Ring the sale in Register so tax, payment, and inventory stay correct.');
-                  onSellInStore();
-                }}
-              >
-                Mark sold
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  void printUnitLabels(
-                    Array.from({ length: Math.min(Math.max(qty, 1), 1000) }, () => sku),
-                    String(unit.title || `SKU ${sku}`),
-                  ).catch((e) => setActionMsg(e instanceof Error ? e.message : String(e)));
-                }}
-              >
-                Print label
-              </button>
-              {canDelete && (
-                <button type="button" onClick={() => openEdit('stock')}>Move</button>
+              {!upcSet && (
+                <div className={`app-item-attention-row${upcEditing ? ' is-editing' : ''}`}>
+                  {!upcEditing ? (
+                    <>
+                      <div className="app-item-attention-copy">
+                        <span>UPC</span>
+                        <strong>Missing</strong>
+                      </div>
+                      {canEditUpc && (
+                        <button type="button" className="app-item-btn-solid" onClick={startUpcEdit}>
+                          Add UPC
+                        </button>
+                      )}
+                    </>
+                  ) : (
+                    <div className="app-item-upc-edit">
+                      <label className="app-item-upc-field">
+                        <span className="visually-hidden">UPC</span>
+                        <input
+                          ref={upcInputRef}
+                          inputMode="numeric"
+                          autoComplete="off"
+                          placeholder="UPC / EAN"
+                          value={noUpc ? UPC_NOT_APPLICABLE : upcDraft}
+                          disabled={noUpc || upcBusy}
+                          onChange={(e) => {
+                            setUpcDraft(e.target.value.replace(/\s+/g, ''));
+                            setUpcError('');
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              void saveUpc();
+                            }
+                          }}
+                        />
+                        <button type="button" className="app-item-upc-scan" disabled={upcBusy || noUpc} onClick={() => setScanOpen(true)}>
+                          Scan
+                        </button>
+                      </label>
+                      <label className="app-item-upc-na">
+                        <input type="checkbox" checked={noUpc} disabled={upcBusy} onChange={(e) => {
+                          setNoUpc(e.target.checked);
+                          setUpcError('');
+                          if (e.target.checked) setUpcDraft('');
+                        }} />
+                        No UPC
+                      </label>
+                      {upcError && <p className="app-item-upc-error">{upcError}</p>}
+                      <div className="app-item-upc-actions">
+                        <button type="button" className="app-item-btn-outline" disabled={upcBusy} onClick={() => { setUpcEditing(false); setUpcError(''); }}>
+                          Cancel
+                        </button>
+                        <button type="button" className="app-item-btn-solid" disabled={upcBusy} onClick={() => void saveUpc()}>
+                          Save UPC
+                        </button>
+                      </div>
+                      <p className="app-item-upc-hint">On save we look it up and offer to fill empty fields (brand, size, stock photo). Nothing is overwritten.</p>
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           )}
 
-          <div className="app-section-label">Selling on · {liveCount} live of {CHANNELS.length}</div>
-          <div className="app-group app-selling-on">
-            {CHANNELS.map((ch) => {
-              const row = listingsBy.get(ch.key);
-              const pill = statusPill(row?.status || '', ch.key, Boolean(row));
-              const price = row?.price_cents != null
-                ? Number(row.price_cents)
-                : ch.key === 'website' ? ask : null;
-              const url = pill.kind === 'live' ? listingLink(ch.key, row?.listing_id) : null;
-              return (
-                <div className="app-channel-row" key={ch.key}>
-                  <span className="app-channel-name">{ch.label}</span>
-                  <span className={`app-pill ${pill.kind}`}>{pill.label}</span>
-                  <div className="app-channel-action">
-                    {pill.kind === 'live' && (
-                      <>
-                        {price != null && !moneyHidden ? <strong>{money(price)}</strong> : null}
-                        {url ? <a href={url} target="_blank" rel="noreferrer">Open</a> : null}
-                      </>
-                    )}
-                    {pill.kind !== 'live' && ch.listable && canDelete && !staffMode && inStock && (
-                      <button type="button" className="app-text-link" onClick={() => void enableChannel(ch.key as 'ebay' | 'amazon' | 'tiktok')}>
-                        {pill.kind === 'delisted' ? 'Relist' : 'List'}
-                      </button>
-                    )}
-                    {pill.kind !== 'live' && !ch.listable && ch.key !== 'amazon' && (
-                      <span className="muted">—</span>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          <div className="app-section-label">Product</div>
-          <div className="app-group">
-            <Kv label="SKU" value={sku} />
-            <Kv label="UPC" value={String(unit.upc || '—')} />
-            <Kv label="Brand" value={String(unit.brand || '—')} />
-            <Kv label="Model" value={String(unit.model || '—')} />
-            <Kv label="Type" value={typeVal || '—'} />
-            <Kv label="Color" value={colorVal || '—'} />
-            <Kv label="Size" value={sizeVal || '—'} />
-            <Kv label="Condition" value={String(unit.condition || '—')} />
-            <Kv label="Test status" value={String(unit.test_status || 'Not set')} />
-            <div className="app-kv app-kv-stack">
-              <span>Category</span>
-              <strong>
-                {ebay?.path || String(unit.category || unit.ebay_category || '—')}
-                {autoUnconfirmed || review?.action === 'confirm' ? (
-                  <small className="app-chip warn inline">Auto-picked · not confirmed</small>
-                ) : null}
-              </strong>
+          {fillOffer && (
+            <div className="app-item-fill-offer" role="status">
+              <p>Fill from UPC: {fillOffer.labels.join(', ')}</p>
+              <div className="app-item-upc-actions">
+                <button type="button" className="app-item-btn-outline" onClick={() => setFillOffer(null)}>Skip</button>
+                <button type="button" className="app-item-btn-solid" onClick={() => void fillOffer.apply().catch((err) => setActionMsg(errText(err)))}>
+                  Fill empty fields
+                </button>
+              </div>
             </div>
-          </div>
+          )}
 
-          <div className="app-section-label">Description</div>
-          <div className="app-group app-card-body">
-            <p className="app-description-text">
-              {String(unit.listing_body || unit.description || '').trim() || 'No description yet.'}
-            </p>
-          </div>
+          {hasLocation && (
+            <div className="app-item-location">
+              <div className="app-item-location-copy">
+                <span>Location</span>
+                <strong>{locationText}</strong>
+              </div>
+              {canSetLocation && (
+                <button type="button" className="app-item-btn-outline" onClick={() => setLocationOpen(true)}>
+                  Change
+                </button>
+              )}
+            </div>
+          )}
 
-          {!moneyHidden && (
+          <Section title="Details">
+            <Kv label="Brand" value={brand} />
+            <Kv label="Condition" value={condition} />
+            <Kv label="Test status" value={testStatus || undefined} empty="Not set" showEmpty />
+            <Kv label="Category" value={categoryVal || undefined} />
+            <Kv label="Type" value={typeVal || undefined} />
+            <Kv label="Color" value={colorVal || undefined} />
+            <Kv label="Size" value={sizeVal || undefined} />
+          </Section>
+
+          {(box || weight != null) && (
+            <Section title="Size & weight">
+              <Kv label="Box" value={box || undefined} />
+              <Kv label="Weight" value={weight != null ? `${weight} lb` : undefined} />
+            </Section>
+          )}
+
+          <Section title="Description">
+            <p className="app-item-description">{description || 'No description yet.'}</p>
+          </Section>
+
+          <Section title="Record">
+            <Kv label="Received" value={unit.received_at ? stamp(String(unit.received_at)) : undefined} />
+            <Kv
+              label="UPC"
+              value={upcDna ? 'Does not apply' : (upcDisplay || undefined)}
+              warn={!upcSet && !staffMode}
+              empty={!staffMode ? 'Missing' : undefined}
+              showEmpty={!staffMode}
+            />
+            <Kv
+              label="Quantity"
+              value={`${qty || 1} · ${isStocked ? 'stocked' : 'one of one'}`}
+            />
+          </Section>
+
+          {!staffMode && (
             <>
-              <div className="app-section-label">Pricing</div>
-              <div className="app-group">
-                <Kv label="Price" value={ask == null ? '—' : money(ask)} />
-                {!staffMode && (
-                  <div className="app-kv">
+              <Section title={`Selling on · ${liveCount} live of ${CHANNELS.length}`}>
+                {CHANNELS.map((ch) => {
+                  const row = listingsBy.get(ch.key);
+                  const pill = statusPill(row?.status || '', ch.key, Boolean(row));
+                  const price = row?.price_cents != null
+                    ? Number(row.price_cents)
+                    : ch.key === 'website' ? ask : null;
+                  const url = pill.kind === 'live' ? listingLink(ch.key, row?.listing_id) : null;
+                  return (
+                    <div className="app-item-kv app-item-channel" key={ch.key}>
+                      <span>{ch.label}</span>
+                      <div className="app-item-channel-right">
+                        <strong className={pill.kind === 'live' ? 'live' : 'muted'}>{pill.label}</strong>
+                        {pill.kind === 'live' && price != null && !moneyHidden ? <strong>{money(price)}</strong> : null}
+                        {pill.kind === 'live' && url ? <a href={url} target="_blank" rel="noreferrer">Open</a> : null}
+                        {pill.kind !== 'live' && ch.listable && canDelete && inStock && (
+                          <button type="button" className="app-text-link" onClick={() => void enableChannel(ch.key as 'ebay' | 'amazon' | 'tiktok')}>
+                            {pill.kind === 'delisted' ? 'Relist' : 'List'}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </Section>
+
+              {!moneyHidden && (
+                <Section title="Pricing & cost">
+                  <Kv label="Price" value={ask == null ? undefined : money(ask)} empty="—" showEmpty />
+                  <div className="app-item-kv">
                     <span>Cost</span>
                     {cost == null
                       ? <button type="button" className="app-text-link warn" onClick={() => openEdit('price')}>Add cost</button>
                       : <strong>{money(cost)}</strong>}
                   </div>
-                )}
-                {!staffMode && (
                   <Kv
                     label="Est. profit"
-                    value={profit != null ? money(profit) : 'Needs cost'}
+                    value={profit != null ? money(profit) : undefined}
+                    empty="Needs cost"
+                    showEmpty
                     warn={profit == null}
                   />
-                )}
-              </div>
-            </>
-          )}
+                </Section>
+              )}
 
-          <div className="app-section-label">Shipping</div>
-          <div className="app-group">
-            <Kv label="Ships?" value={ships ? shipMode : 'No · Pickup only'} />
-            <Kv label="Box" value={box || '—'} warn={!box} />
-            <Kv label="Package weight" value={weight != null ? `${weight} lb` : '—'} warn={weight == null} />
-            {dns != null && <Kv label="Do not ship (DNS)" value={dns ? 'On' : 'Off'} />}
-          </div>
+              <Section title="Shipping">
+                <Kv label="Ships?" value={ships ? shipMode : 'No · Pickup only'} />
+                <Kv label="Box" value={box || undefined} empty="Missing" showEmpty warn={!box} />
+                <Kv label="Package weight" value={weight != null ? `${weight} lb` : undefined} empty="Missing" showEmpty warn={weight == null} />
+                {dns != null && <Kv label="Do not ship (DNS)" value={dns ? 'On' : 'Off'} />}
+              </Section>
 
-          {canDelete && !staffMode && ebay && (
-            <>
-              <div className="app-section-label">eBay item specifics</div>
-              <div className="app-group">
-                <Kv
-                  label="Required"
-                  value={`${requiredFilled} of ${requiredFields.length || requiredFilled}`}
-                  warn={requiredFields.length > 0 && requiredFilled < requiredFields.length}
-                />
-                <div className="app-kv">
-                  <span>Recommended</span>
-                  <button type="button" className="app-text-link" onClick={() => openEdit('ebay')}>
-                    {recommendedFilled} of {recommendedFields.length || 13} · Fill in
+              {inStock && (
+                <div className="app-item-admin-actions" role="group" aria-label="Quick actions">
+                  {canDelete && (
+                    <button type="button" className="app-item-btn-outline" onClick={() => setListSheet(true)}>List on…</button>
+                  )}
+                  <button
+                    type="button"
+                    className="app-item-btn-outline"
+                    onClick={() => {
+                      window.alert('Ring the sale in Register so tax, payment, and inventory stay correct.');
+                      onSellInStore();
+                    }}
+                  >
+                    Mark sold
+                  </button>
+                  <button
+                    type="button"
+                    className="app-item-btn-outline"
+                    onClick={() => {
+                      void printUnitLabels(
+                        Array.from({ length: Math.min(Math.max(qty, 1), 1000) }, () => sku),
+                        String(unit.title || `SKU ${sku}`),
+                      ).catch((e) => setActionMsg(e instanceof Error ? e.message : String(e)));
+                    }}
+                  >
+                    Print label
                   </button>
                 </div>
-              </div>
+              )}
+
+              {history.length > 0 && (
+                <Section title="History">
+                  {history.slice(0, 20).map((h, i) => (
+                    <div className="app-item-kv" key={`${h.at}-${i}`}>
+                      <span>{h.label}</span>
+                      <strong className="muted">{stamp(h.at)}</strong>
+                    </div>
+                  ))}
+                </Section>
+              )}
+
+              {inStock && canDelete && showDispositionButtons({ isAdmin: true, unsold: true }) && (
+                <div className="app-actions app-disposition-row">
+                  <DispositionButtons
+                    client={client}
+                    sku={sku}
+                    money={money}
+                    stamp={(s) => new Date(s).toLocaleString()}
+                    onDone={() => { onChanged(); onBack(); }}
+                  />
+                </div>
+              )}
+
+              {canDelete && unit.state === 'sold' && (
+                <div className="app-item-bottom-actions">
+                  <RestoreInventoryButton client={client} sku={sku} onDone={() => { onChanged(); onBack(); }} />
+                </div>
+              )}
             </>
-          )}
-
-          <div className="app-section-label">Stock & location</div>
-          <div className="app-group">
-            <Kv
-              label="On hand"
-              value={`${qty || 1}${isStocked ? ' · Stocked SKU' : ' · One-of-one'}`}
-            />
-            <button
-              type="button"
-              className="app-row"
-              disabled={!inStock}
-              onClick={() => inStock && setLocationOpen(true)}
-            >
-              <span className="app-row-text">
-                <strong>Location</strong>
-                <small className={hasLocation ? undefined : 'warn'}>{hasLocation ? locationText : 'Unassigned'}</small>
-              </span>
-              {inStock && <span className="app-chevron" aria-hidden="true">›</span>}
-            </button>
-          </div>
-
-          {history.length > 0 && (
-            <>
-              <div className="app-section-label">History</div>
-              <div className="app-group">
-                {history.slice(0, 20).map((h, i) => (
-                  <div className="app-kv" key={`${h.at}-${i}`}>
-                    <span>{h.label}</span>
-                    <strong className="muted">{stamp(h.at)}</strong>
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
-
-          {inStock && canDelete && !staffMode && showDispositionButtons({ isAdmin: true, unsold: true }) && (
-            <div className="app-actions app-disposition-row">
-              <DispositionButtons
-                client={client}
-                sku={sku}
-                money={money}
-                stamp={(s) => new Date(s).toLocaleString()}
-                onDone={() => { onChanged(); onBack(); }}
-              />
-            </div>
-          )}
-
-          {canDelete && !staffMode && unit.state === 'sold' && (
-            <div className="app-item-bottom-actions">
-              <RestoreInventoryButton client={client} sku={sku} onDone={() => { onChanged(); onBack(); }} />
-            </div>
           )}
 
           {listSheet && (
@@ -602,6 +849,7 @@ export function AppItemDetail({
           )}
         </>
       )}
+
       {locationOpen && inStock && (
         <LocationPicker
           client={client}
@@ -611,15 +859,57 @@ export function AppItemDetail({
           onSaved={() => { setLocationOpen(false); setReload((n) => n + 1); onChanged(); }}
         />
       )}
+
+      {scanOpen && (
+        <UpcCameraScan
+          onDetect={(code) => {
+            setScanOpen(false);
+            setNoUpc(false);
+            setUpcDraft(code.replace(/\s+/g, ''));
+            setUpcError('');
+            window.setTimeout(() => upcInputRef.current?.focus(), 50);
+          }}
+          onClose={() => setScanOpen(false)}
+        />
+      )}
+
+      {zoomPhoto && urls[zoomPhoto.path] && createPortal(
+        <div className="app-item-zoom" role="dialog" aria-modal="true" aria-label="Photo">
+          <button type="button" className="app-item-zoom-close" onClick={() => setZoomPhoto(null)}>Close</button>
+          <img src={urls[zoomPhoto.path]} alt="" />
+        </div>,
+        document.body,
+      )}
+
+      {scannerInputReady ? <span className="visually-hidden">Scanner input ready</span> : null}
     </div>
   );
 }
 
-function Kv({ label, value, warn }: { label: string; value: string; warn?: boolean }) {
+function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <div className="app-kv">
+    <section className="app-item-section">
+      <h2>{title}</h2>
+      <div className="app-item-section-body">{children}</div>
+    </section>
+  );
+}
+
+function Kv({
+  label, value, warn, empty, showEmpty,
+}: {
+  label: string;
+  value?: string;
+  warn?: boolean;
+  empty?: string;
+  showEmpty?: boolean;
+}) {
+  const text = value?.trim();
+  if (!text && !showEmpty) return null;
+  return (
+    <div className="app-item-kv">
       <span>{label}</span>
-      <strong className={warn ? 'warn' : undefined}>{value}</strong>
+      <strong className={warn ? 'warn' : undefined}>{text || empty}</strong>
     </div>
   );
 }
@@ -628,6 +918,103 @@ function channelLabel(channel: string) {
   const hit = CHANNELS.find((c) => c.key === channel.toLowerCase());
   if (hit) return hit.label;
   return channel.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
+}
+
+function digitsOnlySafe(raw: string) {
+  return String(raw || '').replace(/\D/g, '');
+}
+
+function UpcCameraScan({ onDetect, onClose }: { onDetect: (code: string) => void; onClose: () => void }) {
+  const video = useRef<HTMLVideoElement>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const done = useRef(false);
+  const detect = useRef(onDetect);
+  detect.current = onDetect;
+  const [err, setErr] = useState('');
+  useEffect(() => {
+    let stream: MediaStream | null = null;
+    let timer = 0;
+    let stopped = false;
+    type DetectorCtor = new (opts?: { formats?: string[] }) => { detect: (src: HTMLVideoElement) => Promise<{ rawValue: string }[]> };
+    const Ctor = (typeof window !== 'undefined'
+      ? (window as unknown as { BarcodeDetector?: DetectorCtor }).BarcodeDetector
+      : undefined);
+    const lifecycle = scannerLifecycle(document, window, video.current, () => {
+      stopped = true; window.clearInterval(timer); onClose();
+    });
+    void (async () => {
+      try {
+        if (!Ctor) throw new Error('This browser cannot read barcodes from the camera.');
+        if (!navigator.mediaDevices?.getUserMedia) throw new Error('Camera API unavailable.');
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: 'environment' } },
+          audio: false,
+        });
+        if (!lifecycle.attach(stream)) return;
+        const el = video.current;
+        if (!el) return;
+        el.srcObject = stream;
+        el.setAttribute('playsinline', 'true');
+        el.muted = true;
+        await el.play();
+        if (stopped || lifecycle.stopped) return;
+        const detector = new Ctor({ formats: ['upc_a', 'upc_e', 'ean_13', 'ean_8'] });
+        timer = window.setInterval(() => {
+          if (stopped || lifecycle.stopped) return;
+          void detector.detect(el).then((codes) => {
+            const raw = codes[0]?.rawValue;
+            if (raw && !stopped && !lifecycle.stopped && !done.current) {
+              done.current = true;
+              detect.current(raw);
+            }
+          }).catch(() => undefined);
+        }, 250);
+      } catch (e) {
+        setErr(errText(e) || 'Camera unavailable. Use a photo of the barcode instead.');
+      }
+    })();
+    return () => { stopped = true; window.clearInterval(timer); lifecycle.stop(); };
+  }, [onClose]);
+
+  return createPortal(
+    <div className="receive-modal receive-modal-portal" role="dialog" aria-modal="true" aria-label="Scan barcode with camera">
+      <div className="receive-modal-card">
+        <h3>Scan barcode</h3>
+        {err ? <p className="error">{err}</p> : <video ref={video} className="receive-video" playsInline muted />}
+        <div className="actions">
+          <input
+            ref={fileInput}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            hidden
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              void (async () => {
+                type DetectorCtor = new (opts?: { formats?: string[] }) => { detect: (src: ImageBitmap) => Promise<{ rawValue: string }[]> };
+                const FileCtor = (window as unknown as { BarcodeDetector?: DetectorCtor }).BarcodeDetector;
+                if (!FileCtor) { setErr('Could not read a barcode from that photo.'); return; }
+                try {
+                  const bitmap = await createImageBitmap(file);
+                  try {
+                    const codes = await new FileCtor({ formats: ['upc_a', 'upc_e', 'ean_13', 'ean_8'] }).detect(bitmap);
+                    if (codes[0]?.rawValue) onDetect(codes[0].rawValue);
+                    else setErr('Could not read a barcode from that photo.');
+                  } finally { bitmap.close(); }
+                } catch {
+                  setErr('Could not read a barcode from that photo.');
+                }
+              })();
+            }}
+          />
+          <button type="button" className="secondary" onClick={() => fileInput.current?.click()}>Take photo</button>
+          <button type="button" onClick={onClose}>Cancel</button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
 }
 
 async function fetchEbaySnapshot(
