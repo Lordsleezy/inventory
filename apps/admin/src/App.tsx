@@ -416,13 +416,13 @@ export function App() {
   }, []);
   useEffect(() => { writeNavToLocation(nav); }, [nav]);
   useEffect(() => {
-    if (!session?.access_token || !fullAccess) return;
+    if (!session?.access_token || !store) return;
     let alive = true;
     const dayKey = today();
     const span = range(dayKey, datePlus(dayKey, 1));
     void loadDeskPulse(sb, session.access_token, span.p_from, span.p_to).then((next) => { if (alive) setPulse(next); });
     return () => { alive = false; };
-  }, [session?.access_token, fullAccess]);
+  }, [session?.access_token, store]);
   useEffect(() => {
     const onPop = () => setNav(desktopLanding(parseNavFromLocation()));
     window.addEventListener('popstate', onPop);
