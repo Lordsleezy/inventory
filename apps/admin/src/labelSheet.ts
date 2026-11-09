@@ -6,8 +6,11 @@ export const LABEL_W = 4 * PT;
 export const LABEL_H = 6 * PT;
 export const LETTER_W = 8.5 * PT;
 export const LETTER_H = 11 * PT;
-/** Quiet zone when a cropped label is fitted onto the 4×6 page. */
-const CROP_MARGIN = 8;
+/** Top-left quarter of a letter sheet. 4.25in × 5.5in. */
+export const QUARTER_W = 4.25 * PT;
+export const QUARTER_H = 5.5 * PT;
+/** Kept off the edge of the paper and off the cut. */
+export const SAFE_MARGIN = 0.1 * PT;
 const NEAR = 12;
 
 export type LabelPaper = 'label' | 'letter';
@@ -193,12 +196,8 @@ async function measurePage(bytes: Uint8Array, pageIndex: number): Promise<Measur
   }
 
   const full: Box = { x0: 0, y0: 0, x1: mediaW, y1: mediaH };
-  const alreadyLabel = isLabelPage(mediaW, mediaH);
-  const pageArea = area(full);
-  const content = alreadyLabel ? pieces : pieces.filter((b) => area(b) < pageArea * 0.75);
-  const ink = largestCluster(content) || full;
-  const coversPage = area(ink) > area(full) * 0.82;
-  const box = alreadyLabel || coversPage ? full : {
+  const ink = labelFrame(pieces, full) || full;
+  const box = {
     x0: Math.max(0, ink.x0 - 2),
     y0: Math.max(0, ink.y0 - 2),
     x1: Math.min(mediaW, ink.x1 + 2),
@@ -217,6 +216,30 @@ async function measurePage(bytes: Uint8Array, pageIndex: number): Promise<Measur
 
 function isLabelPage(w: number, h: number) {
   return (nearly(w, LABEL_W) && nearly(h, LABEL_H)) || (nearly(w, LABEL_H) && nearly(h, LABEL_W));
+}
+
+/**
+ * The black outer frame of the label, not the blank letter around it.
+ * A frame is a portrait-or-landscape rectangle that is not the whole sheet.
+ * Pieces that sit on that frame (the barcode, the "G", the address) come with it.
+ */
+function labelFrame(pieces: Box[], full: Box): Box | null {
+  const pageArea = area(full);
+  const usable = pieces.filter((box) => area(box) < pageArea * 0.92);
+  const frames = usable.filter((box) => {
+    const w = box.x1 - box.x0;
+    const h = box.y1 - box.y0;
+    const ratio = w / h;
+    return area(box) > 50 * 50 && ratio > 0.55 && ratio < 1.85;
+  }).sort((a, b) => area(b) - area(a));
+  const frame = frames[0];
+  if (frame) {
+    return usable.filter((box) => overlaps(box, frame, 8)).reduce(union, frame);
+  }
+  const cluster = largestCluster(usable);
+  if (!cluster) return null;
+  if (area(cluster) > pageArea * 0.82) return full;
+  return cluster;
 }
 
 function finishPage(page: PDFPage, w: number, h: number) {
@@ -242,13 +265,11 @@ function drawUpright(
   const turned = angle === 90 || angle === 270;
   const visW = turned ? clipH : clipW;
   const visH = turned ? clipW : clipH;
-  const native = nearly(visW, LABEL_W) && nearly(visH, LABEL_H);
-  const margin = native ? 0 : CROP_MARGIN;
-  const scale = Math.min((maxW - margin * 2) / visW, (maxH - margin * 2) / visH);
+  const scale = Math.min(maxW / visW, maxH / visH);
   const dw = visW * scale;
   const dh = visH * scale;
-  const x = destX + (maxW - dw) / 2;
-  const y = destY + (maxH - dh) / 2;
+  const x = destX;
+  const y = destY + (maxH - dh);
   if (angle === 90) {
     page.drawPage(embedded, { x: x + dw, y, width: dh, height: dw, rotate: degrees(90) });
     return { x, y, width: dw, height: dh };
@@ -266,9 +287,24 @@ function drawUpright(
 }
 
 function outputSize(paper: LabelPaper) {
-  return paper === 'letter'
-    ? { pageW: LETTER_W, pageH: LETTER_H, destX: 0, destY: LETTER_H - LABEL_H, maxW: LABEL_W, maxH: LABEL_H }
-    : { pageW: LABEL_W, pageH: LABEL_H, destX: 0, destY: 0, maxW: LABEL_W, maxH: LABEL_H };
+  if (paper === 'letter') {
+    return {
+      pageW: LETTER_W,
+      pageH: LETTER_H,
+      destX: SAFE_MARGIN,
+      destY: LETTER_H - QUARTER_H + SAFE_MARGIN,
+      maxW: QUARTER_W - SAFE_MARGIN * 2,
+      maxH: QUARTER_H - SAFE_MARGIN * 2,
+    };
+  }
+  return {
+    pageW: LABEL_W,
+    pageH: LABEL_H,
+    destX: SAFE_MARGIN,
+    destY: SAFE_MARGIN,
+    maxW: LABEL_W - SAFE_MARGIN * 2,
+    maxH: LABEL_H - SAFE_MARGIN * 2,
+  };
 }
 
 /** Crop, rotate upright, and place the label. The stored file is not changed. */
@@ -301,9 +337,7 @@ function fitImage(srcW: number, srcH: number, paper: LabelPaper) {
   const visW = landscape ? srcH : srcW;
   const visH = landscape ? srcW : srcH;
   const slot = outputSize(paper);
-  const native = nearly(visW, LABEL_W) && nearly(visH, LABEL_H);
-  const margin = native ? 0 : CROP_MARGIN;
-  const scale = Math.min((slot.maxW - margin * 2) / visW, (slot.maxH - margin * 2) / visH);
+  const scale = Math.min(slot.maxW / visW, slot.maxH / visH);
   return { landscape, slot, width: visW * scale, height: visH * scale };
 }
 
@@ -313,8 +347,8 @@ export async function imageToLabelPdf(bytes: Uint8Array, kind: 'png' | 'jpg', pa
   const fit = fitImage(image.width, image.height, paper);
   const page = out.addPage([fit.slot.pageW, fit.slot.pageH]);
   finishPage(page, fit.slot.pageW, fit.slot.pageH);
-  const x = fit.slot.destX + (fit.slot.maxW - fit.width) / 2;
-  const y = fit.slot.destY + (fit.slot.maxH - fit.height) / 2;
+  const x = fit.slot.destX;
+  const y = fit.slot.destY + (fit.slot.maxH - fit.height);
   if (fit.landscape) {
     page.drawImage(image, { x: x + fit.width, y, width: fit.height, height: fit.width, rotate: degrees(90) });
   } else {

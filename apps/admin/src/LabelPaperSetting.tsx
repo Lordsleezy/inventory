@@ -25,10 +25,10 @@ export function LabelPaperSetting({ client }: { client: SupabaseClient }) {
   return (
     <section className="panel">
       <h2>Shipping labels</h2>
-      <p className="hint">4×6 label printer is the default. Letter paper prints that same label at full size in the top-left corner so it can be cut out.</p>
+      <p className="hint">4×6 label printer is the default. Letter paper prints the label large in the top-left quarter of the sheet so it can be cut out.</p>
       <div className="label-paper-choices">
         <button type="button" aria-pressed={paper === 'label'} onClick={() => void choose('label')}>4×6 label printer</button>
-        <button type="button" aria-pressed={paper === 'letter'} onClick={() => void choose('letter')}>Letter paper</button>
+        <button type="button" aria-pressed={paper === 'letter'} onClick={() => void choose('letter')}>Letter paper (quarter page)</button>
       </div>
       {note && <p className="hint">{note}</p>}
     </section>
