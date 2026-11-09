@@ -4,7 +4,8 @@ do $$ declare s uuid; owner_id uuid:=gen_random_uuid(); worker_id uuid:=gen_rand
  insert into auth.users(id) values(owner_id),(worker_id);
  insert into public.stores default values returning id into s;
  insert into public.staff(user_id,store_id,display_name,role) values(owner_id,s,'Owner','owner'),(worker_id,s,'Worker','staff');
- perform public.seed_store_settings(s,'Tools verification');
+ perform public.seed_store_settings(s, 'Tools verification');
+  perform public.pgtap_sync_owner_portal_admins(s);
  perform set_config('tools.owner',owner_id::text,true);perform set_config('tools.worker',worker_id::text,true);perform set_config('tools.store',s::text,true);
  insert into public.sku_ledger(sku,store_id,issued_at) values('94001',s,now());
  insert into public.units(sku,store_id,title,brand,state,qty_on_hand,received_at,updated_at) values('94001',s,'Acme toaster','Acme','available',3,now(),now());

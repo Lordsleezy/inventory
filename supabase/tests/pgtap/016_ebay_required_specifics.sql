@@ -12,6 +12,7 @@ begin
   insert into public.staff (user_id, store_id, display_name, role) values
     (v_owner, v_store, 'Owner', 'owner'), (v_clerk, v_store, 'Clerk', 'staff');
   perform public.seed_store_settings(v_store, 'Specifics Store');
+  perform public.pgtap_sync_owner_portal_admins(v_store);
   insert into public.sku_ledger (sku, issued_at, store_id)
   select s, now(), v_store from unnest(array['98001','98002','98003']) s;
   insert into public.units (sku, brand, model, title, category, condition, upc, listing_body, ask_cents,

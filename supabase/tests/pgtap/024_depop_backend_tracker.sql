@@ -2,7 +2,8 @@ begin;
 select no_plan();
 do $$ declare s uuid; o uuid:=gen_random_uuid(); c uuid:=gen_random_uuid();begin
  insert into auth.users(id) values(o),(c);insert into public.stores default values returning id into s;
- insert into public.staff(user_id,store_id,display_name,role) values(o,s,'Owner','owner'),(c,s,'Clerk','staff');perform public.seed_store_settings(s,'Depop backend');
+ insert into public.staff(user_id,store_id,display_name,role) values(o,s,'Owner','owner'),(c,s,'Clerk','staff');perform public.seed_store_settings(s, 'Depop backend');
+  perform public.pgtap_sync_owner_portal_admins(s);
  insert into public.sku_ledger(sku,store_id,issued_at) select x,s,now() from unnest(array['93001','93002','93003','93004','93005']) x;
  insert into public.units(sku,store_id,title,brand,state,qty_on_hand,received_at,updated_at,listing_specs,category)
  select x,s,'Fixture unit','Acme',case when x='93002' then 'sold' else 'available' end,1,now(),now(),case when x='93003' then '{"do_not_ship":true}'::jsonb else '{}'::jsonb end,case when x='93004' then 'Electronics' else 'Household' end from unnest(array['93001','93002','93003','93004','93005']) x;

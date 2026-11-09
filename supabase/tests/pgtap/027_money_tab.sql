@@ -8,6 +8,7 @@ begin
   insert into public.stores default values returning id into v_store;
   insert into public.staff (user_id, store_id, display_name, role) values (v_owner, v_store, 'Owner', 'owner'), (v_clerk, v_store, 'Clerk', 'staff'), (v_paul, v_store, 'Paul', 'staff');
   perform public.seed_store_settings(v_store, 'Money Store');
+  perform public.pgtap_sync_owner_portal_admins(v_store);
   perform set_config('test.store', v_store::text, true); perform set_config('test.owner', v_owner::text, true);
   perform set_config('test.clerk', v_clerk::text, true); perform set_config('test.paul', v_paul::text, true);
 end $$;

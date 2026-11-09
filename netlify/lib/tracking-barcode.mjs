@@ -1,5 +1,4 @@
 import sharp from "sharp";
-import { scanRGBABuffer } from "@undecaf/zbar-wasm";
 import { normalizeBarcodeTracking } from "./tracking-pdf.mjs";
 import { classifyCarrier, validateTrackingCandidate } from "../../shared/tracking-validate.mjs";
 
@@ -20,6 +19,7 @@ export async function decodeTrackingBarcodes(imageBuf) {
 
   let symbols = [];
   try {
+    const { scanRGBABuffer } = await import("@undecaf/zbar-wasm");
     symbols = await scanRGBABuffer(data, info.width, info.height);
   } catch {
     symbols = [];

@@ -7,7 +7,8 @@ begin
  insert into auth.users(id) values(clerk_id);
  insert into public.stores default values returning id into s;
  insert into public.staff(user_id,store_id,display_name,role) values(clerk_id,s,'Phone clerk','staff');
- perform public.seed_store_settings(s,'Stock photo receive test');
+ perform public.seed_store_settings(s, 'Stock photo receive test');
+  perform public.pgtap_sync_owner_portal_admins(s);
  stock_path:=s::text||'/receive/'||clerk_id::text||'/'||req::text||'/stock-test.jpg';
  insert into storage.objects(bucket_id,name) values('unit-photos',stock_path);
  perform set_config('receive.clerk',clerk_id::text,true);

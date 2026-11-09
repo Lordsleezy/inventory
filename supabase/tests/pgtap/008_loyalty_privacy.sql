@@ -14,6 +14,7 @@ begin
     (v_owner, v_store, 'Owner', 'owner'),
     (v_staff, v_store, 'Staff', 'staff');
   perform public.seed_store_settings(v_store, 'Loyalty Store');
+  perform public.pgtap_sync_owner_portal_admins(v_store);
   perform set_config('test.store_id', v_store::text, true);
   perform set_config('test.owner_id', v_owner::text, true);
   perform set_config('test.staff_id', v_staff::text, true);

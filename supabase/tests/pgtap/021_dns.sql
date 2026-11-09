@@ -4,7 +4,8 @@ do $$ declare s uuid; owner_id uuid:=gen_random_uuid(); clerk_id uuid:=gen_rando
  insert into auth.users(id) values(owner_id),(clerk_id);
  insert into public.stores default values returning id into s;
  insert into public.staff(user_id,store_id,display_name,role) values(owner_id,s,'Owner','owner'),(clerk_id,s,'Clerk','staff');
- perform public.seed_store_settings(s,'DNS test');
+ perform public.seed_store_settings(s, 'DNS test');
+  perform public.pgtap_sync_owner_portal_admins(s);
  insert into public.sku_ledger(sku,store_id,issued_at) select x,s,now() from unnest(array['96001','96002','96003','96004','96005','96006']) x;
  insert into public.units(sku,store_id,title,brand,model,state,qty_on_hand,ask_cents,shippable,received_at,updated_at)
  select x,s,case x when '96001' then 'LG refrigerator' when '96002' then 'Refrigerator water filter' else 'Acme toaster' end,'Acme','Toaster','available',case when x='96001' then 3 else 1 end,2500,true,now(),now()

@@ -8,7 +8,8 @@ begin
   insert into public.stores default values returning id into v_store;
   insert into public.staff(user_id,store_id,display_name,role) values(v_admin,v_store,'Books Admin','manager'),(v_clerk,v_store,'Books Clerk','staff');
   insert into public.portal_admins(user_id,store_id) values(v_admin,v_store);
-  perform public.seed_store_settings(v_store,'Books Test');
+  perform public.seed_store_settings(v_store, 'Books Test');
+  perform public.pgtap_sync_owner_portal_admins(v_store);
   insert into public.books_periods(store_id,period_type,period_start,period_end,status)
     values(v_store,'month','2026-09-01','2026-09-30','locked') returning id into v_period;
   insert into public.books_periods(store_id,period_type,period_start,period_end,status)

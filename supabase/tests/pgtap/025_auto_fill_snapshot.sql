@@ -6,6 +6,7 @@ declare v_store uuid;
 begin
   insert into public.stores default values returning id into v_store;
   perform public.seed_store_settings(v_store, 'Auto Store');
+  perform public.pgtap_sync_owner_portal_admins(v_store);
   insert into public.sku_ledger (sku, issued_at, store_id) select s, now(), v_store from unnest(array['90001','90002','90003','90004']) s;
   insert into public.units (sku, brand, title, category, state, store_id, received_at, updated_at, condition, listing_body, listing_specs) values
     ('90001', 'Acme', 'Acme lamp', 'Lamps', 'available', v_store, now(), now(), 'New', null, '{}'),

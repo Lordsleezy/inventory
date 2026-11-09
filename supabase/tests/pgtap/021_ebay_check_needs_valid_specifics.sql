@@ -8,6 +8,7 @@ begin
   insert into public.stores default values returning id into v_store;
   insert into public.staff (user_id, store_id, display_name, role) values (v_owner, v_store, 'Owner', 'owner');
   perform public.seed_store_settings(v_store, 'Check Store');
+  perform public.pgtap_sync_owner_portal_admins(v_store);
   insert into public.sku_ledger (sku, issued_at, store_id) values ('99837', now(), v_store);
   insert into public.units (sku, brand, title, category, state, store_id, received_at, updated_at, upc)
     values ('99837', 'Foster Grant', 'Foster Grant reading glasses', 'Glasses', 'available', v_store, now(), now(), null);
