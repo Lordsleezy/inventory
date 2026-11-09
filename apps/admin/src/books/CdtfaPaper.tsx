@@ -6,6 +6,7 @@ export type PaperSale = {
 };
 export type PaperLine = {
   id: string; label: string; note: string; dollars: number; floor: number; edited: boolean; sales: PaperSale[];
+  blank?: boolean;
 };
 export type PaperSigner = { name: string; title: string; date: string; email: string; phone: string; account: string };
 
@@ -33,7 +34,7 @@ type Props = {
   showQuiet?: boolean;
 };
 
-const CALCULATED = new Set(['3', 'A11', 'B5', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20a', '20b', '20c', '20d', '20e', '21', '22', '23', '24', '25', '26']);
+const CALCULATED = new Set(['3', 'A11', 'B5', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20a', '20b', '20c', '20d', '20e', '21', '22', '23', '24', '26']);
 
 const TOP = ['1', '2', '3'];
 const SECTION_A = ['4', '5', '6', '7', '8', '9', '10', 'A11'];
@@ -70,7 +71,7 @@ function SignerField({ label, value, disabled, onCommit }: { label: string; valu
 function Box({ line, money, readOnly, onDollars }: { line: PaperLine; money: (cents: number) => string; readOnly?: boolean; onDollars?: Props['onDollars'] }) {
   const [text, setText] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
-  const shown = text ?? dollars(line.dollars);
+  const shown = text ?? (line.blank ? '' : dollars(line.dollars));
   return (
     <div className={`cdtfa-box${line.edited ? ' edited' : ''}${CALCULATED.has(line.id) ? ' calculated' : ''}`}>
       <div className="cdtfa-box-id">{line.id}</div>
@@ -100,8 +101,8 @@ function Box({ line, money, readOnly, onDollars }: { line: PaperLine; money: (ce
           inputMode="decimal"
           aria-label={`Line ${line.id}`}
           value={shown}
-          disabled={readOnly}
-          onFocus={() => setText(String(line.dollars))}
+          disabled={readOnly && line.id !== '25'}
+          onFocus={() => setText(line.blank ? '' : String(line.dollars))}
           onChange={(e) => setText(e.target.value)}
           onBlur={() => {
             const next = parseDollars(text ?? '');
@@ -116,7 +117,7 @@ function Box({ line, money, readOnly, onDollars }: { line: PaperLine; money: (ce
 }
 
 function Block({ title, ids, lines, money, readOnly, onDollars, quiet }: { title: string; ids: string[]; lines: PaperLine[]; money: Props['money']; readOnly?: boolean; onDollars?: Props['onDollars']; quiet?: boolean }) {
-  const rows = ids.map((id) => lines.find((line) => line.id === id)).filter((line): line is PaperLine => !!line).filter((line) => !quiet || line.dollars !== 0 || line.edited);
+  const rows = ids.map((id) => lines.find((line) => line.id === id)).filter((line): line is PaperLine => !!line).filter((line) => !quiet || line.dollars !== 0 || line.edited || line.blank);
   if (!rows.length) return null;
   return (
     <section className="cdtfa-block">
@@ -149,6 +150,7 @@ export function CdtfaPaper(props: Props) {
           <SignerField label="Account number" value={props.signer.account} disabled={props.readOnly} onCommit={(value) => props.onSigner?.('account', value)} />
           <p>Period {pretty(props.periodStart)} – {pretty(props.periodEnd)}</p>
           <p>Due on or before <strong>{pretty(props.dueOn)}</strong></p>
+          <p className="cdtfa-explain">That account number is copied into every YOUR ACCOUNT NUMBER box.</p>
         </div>
       </header>
       {props.locked && <p className="cdtfa-lock">Locked with Books. The numbers and edits on this period no longer change.</p>}
@@ -189,7 +191,7 @@ export function CdtfaPaper(props: Props) {
         {field('date', 'Date')}
         {field('email', 'Email')}
         {field('phone', 'Phone')}
-        <p>Preparer <strong>Floor</strong>. Floor does not file this return.</p>
+        <p>Paid preparer is left blank unless you enter one. Floor calculates the lines. It is not the preparer, it does not file this return, and this is not tax advice.</p>
         {props.roundingNote && <p className="cdtfa-round">{props.roundingNote}</p>}
       </section>
       </>}

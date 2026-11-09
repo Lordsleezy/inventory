@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { fillCdtfaPdf, paperToCdtfaDoc } from './cdtfaPdf';
+import { fillCdtfaPdf, loadCdtfaTemplate, paperToCdtfaDoc } from './cdtfaPdf';
+import { selectCdtfaPages } from './cdtfaPages';
+import { buildCdtfaWorksheet } from './cdtfaWorksheet';
+import { cdtfaPageTexts, officialCdtfaPdf, printCdtfaPages } from './cdtfaTrimClient';
 import { CdtfaPaper, type PaperLine, type PaperSale, type PaperSigner } from './CdtfaPaper';
 import { dueOn, periodChoices, periodLabel, resolveCdtfaDollars, type CdtfaFrequency } from './cdtfaResolve';
 import { filingOption, formKind, parseFiling, recordsStamp, spanFrequency } from './booksSpan';
@@ -35,6 +38,8 @@ function emptySigner(): PaperSigner {
   return { name: '', title: '', date: '', email: '', phone: '', account: '' };
 }
 
+type Filing = { period_start: string; period_end: string; filed_on: string; paid_how: string; confirmation: string };
+
 export function CdtfaReturn({ client, money, periodStart, periodEnd, onPeriod, onFiling, layout = 'desk' }: Props) {
   const [frequency, setFrequency] = useState<CdtfaFrequency | null>(null);
   const [doc, setDoc] = useState<Doc | null>(null);
@@ -44,6 +49,14 @@ export function CdtfaReturn({ client, money, periodStart, periodEnd, onPeriod, o
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [showAll, setShowAll] = useState(false);
+  const [filings, setFilings] = useState<Filing[]>([]);
+  const [fileOn, setFileOn] = useState(() => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' }));
+  const [fileTouched, setFileTouched] = useState(false);
+  const [paidHow, setPaidHow] = useState('check');
+  const [confirmation, setConfirmation] = useState('');
+  const [preparer, setPreparer] = useState('');
+  const [pageCount, setPageCount] = useState<number | null>(null);
+  const [pageWarning, setPageWarning] = useState<string | null>(null);
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
   const kind = formKind(periodStart, periodEnd);
   const choices = periodChoices(spanFrequency(kind), today);
@@ -59,13 +72,16 @@ export function CdtfaReturn({ client, money, periodStart, periodEnd, onPeriod, o
     const raw = (saved.data || {}) as Record<string, { dollars: number | null; text: string | null }>;
     const amounts: Record<string, number | undefined> = {};
     const person = emptySigner();
+    let preparerName = '';
     for (const [field, value] of Object.entries(raw)) {
       if (SIGNER_FIELDS.includes(field as typeof SIGNER_FIELDS[number])) person[field as keyof PaperSigner] = value.text || '';
+      else if (field === 'preparer') preparerName = value.text || '';
       else if (value.dollars != null) amounts[field] = value.dollars;
     }
     setDoc(next);
     setEdits(amounts);
     setSigner(person);
+    setPreparer(preparerName);
     const gap = await loadCdtfaRoundingNote(client, next.lines, start, end);
     setRoundGap(gap);
   }, [client]);
@@ -77,27 +93,55 @@ export function CdtfaReturn({ client, money, periodStart, periodEnd, onPeriod, o
     const next = parseFiling(filing.data);
     setFrequency(next);
     onFiling?.(next);
+    const filed = await client.rpc('portal_cdtfa_filings');
+    if (!filed.error && Array.isArray(filed.data)) setFilings(filed.data as Filing[]);
     await loadPeriod(periodStart, periodEnd);
   }, [client, loadPeriod, onFiling, periodStart, periodEnd]);
 
   useEffect(() => { void load(); }, [load]);
 
+  const marked = filings.find((row) => row.period_start === doc?.period_start && row.period_end === doc?.period_end);
+  const late = !!doc && fileOn > (doc.due_on || dueOn(doc.period_end));
   const resolved = useMemo(() => {
     if (!doc) return [];
     const collected = Math.round(Number(doc.collected_cents || 0) / 100);
-    return resolveCdtfaDollars(doc.lines, edits, collected);
-  }, [doc, edits]);
+    return resolveCdtfaDollars(doc.lines, edits, collected, late);
+  }, [doc, edits, late]);
 
   const lines: PaperLine[] = useMemo(() => {
     if (!doc) return [];
     const byId = new Map(resolved.map((row) => [row.id, row]));
     return doc.lines.map((line) => {
       const row = byId.get(line.id);
-      return { ...line, dollars: row?.dollars ?? line.dollars, floor: line.dollars, edited: !!row?.edited, sales: line.sales || [] };
+      const interestBlank = line.id === '25' && late && edits['25'] == null;
+      const note = line.id === '24' && late
+        ? `${line.note} Filing date ${fileOn} is after the due date, so this is 10 percent of line 23, rounded to the nearest dollar.`
+        : line.id === '25' && late
+          ? 'Left blank. Use CDTFA’s interest calculation tool. Floor does not guess the rate, and this total does not include interest until you type it.'
+          : line.note;
+      return { ...line, dollars: row?.dollars ?? line.dollars, floor: line.dollars, edited: !!row?.edited, sales: line.sales || [], note, blank: interestBlank };
     });
-  }, [doc, resolved]);
+  }, [doc, resolved, late, fileOn, edits]);
 
   const editsLocked = !!doc?.locked;
+  const districtTax = lines.find((line) => line.id === '16')?.dollars ?? 0;
+  useEffect(() => {
+    if (fileTouched) return;
+    if (marked?.filed_on) setFileOn(marked.filed_on);
+  }, [marked?.filed_on, fileTouched]);
+  useEffect(() => {
+    let cancel = false;
+    void (async () => {
+      try {
+        const texts = await cdtfaPageTexts(new Uint8Array(await loadCdtfaTemplate()));
+        const plan = selectCdtfaPages(texts, districtTax);
+        if (cancel) return;
+        setPageCount(plan.warning ? texts.length : plan.keep.length);
+        setPageWarning(plan.warning);
+      } catch { /* the download button reports a missing template */ }
+    })();
+    return () => { cancel = true; };
+  }, [districtTax]);
   const label = doc ? periodLabel(doc.period_start, doc.period_end, spanFrequency(kind), doc.due_on) : '';
   const recordsNote = recordsStamp(kind, frequency);
   const option = filingOption(kind, frequency);
@@ -112,12 +156,16 @@ export function CdtfaReturn({ client, money, periodStart, periodEnd, onPeriod, o
   }
 
   async function save(field: string, dollars: number | null, text: string | null) {
-    if (!doc || editsLocked) return;
+    if (!doc) return;
+    if (editsLocked && field !== '25' && field !== 'preparer') return;
     setError('');
-    const result = await client.rpc('portal_set_cdtfa_edit', {
-      p_start: doc.period_start, p_end: doc.period_end, p_field: field, p_dollars: dollars, p_text: text,
-    });
-    if (result.error) { setError(result.error.message); return; }
+    if (!editsLocked) {
+      const result = await client.rpc('portal_set_cdtfa_edit', {
+        p_start: doc.period_start, p_end: doc.period_end, p_field: field, p_dollars: dollars, p_text: text,
+      });
+      if (result.error) { setError(result.error.message); return; }
+    }
+    if (field === 'preparer') { setPreparer(text || ''); return; }
     if (SIGNER_FIELDS.includes(field as typeof SIGNER_FIELDS[number])) {
       setSigner((prev) => ({ ...prev, [field]: text || '' }));
       return;
@@ -130,45 +178,121 @@ export function CdtfaReturn({ client, money, periodStart, periodEnd, onPeriod, o
     });
   }
 
-  function printSheet() {
-    document.body.classList.add('cdtfa-printing');
-    window.print();
-    window.setTimeout(() => document.body.classList.remove('cdtfa-printing'), 500);
+  function filledDoc() {
+    if (!doc) return null;
+    return paperToCdtfaDoc({
+      periodStart: doc.period_start,
+      periodEnd: doc.period_end,
+      dueOn: doc.due_on,
+      open: doc.open,
+      recordsNote,
+      optionTitle: option?.title,
+      optionHint: option?.hint,
+      districtMeasure: edits.A4 ?? 0,
+      lines,
+      signer,
+      omitInterest: late && edits['25'] == null,
+      preparer,
+    });
   }
 
-  async function downloadPdf() {
+  async function builtReturn(full: boolean) {
+    const model = filledDoc();
+    if (!model) throw new Error('The return is not loaded.');
+    const filled = await fillCdtfaPdf(model);
+    if (full) return { bytes: filled, pageCount: pageCount ?? 0, warning: null as string | null };
+    const district = lines.find((line) => line.id === '16')?.dollars ?? 0;
+    return officialCdtfaPdf(filled, district);
+  }
+
+  function saveFile(bytes: Uint8Array, name: string) {
+    const blob = new Blob([Uint8Array.from(bytes)], { type: 'application/pdf' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function downloadPdf(full = false) {
     if (!doc) return;
     setBusy(true); setError('');
     try {
-      const bytes = await fillCdtfaPdf(paperToCdtfaDoc({
-        periodStart: doc.period_start,
-        periodEnd: doc.period_end,
-        dueOn: doc.due_on,
-        open: doc.open,
-        recordsNote,
-        optionTitle: option?.title,
-        optionHint: option?.hint,
-        districtMeasure: edits.A4 ?? 0,
-        lines,
-        signer,
-      }));
-      const blob = new Blob([Uint8Array.from(bytes)], { type: 'application/pdf' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `CDTFA-401-A-${doc.period_start}.pdf`;
-      a.click();
-      URL.revokeObjectURL(url);
+      const ready = await builtReturn(full);
+      if (!full) {
+        setPageCount(ready.pageCount);
+        setPageWarning(ready.warning);
+      }
+      saveFile(ready.bytes, `CDTFA-401-A_${doc.period_start.slice(0, 7)}_Open-Box-Industries.pdf`);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not fill the CDTFA form.');
     } finally { setBusy(false); }
   }
 
+  async function printReturn() {
+    if (!doc) return;
+    setBusy(true); setError('');
+    try {
+      const ready = await builtReturn(false);
+      setPageCount(ready.pageCount);
+      setPageWarning(ready.warning);
+      await printCdtfaPages(ready.bytes);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not print the CDTFA form.');
+    } finally { setBusy(false); }
+  }
+
+  async function downloadWorksheet() {
+    if (!doc) return;
+    setBusy(true); setError('');
+    try {
+      const district = lines.find((line) => line.id === '16')?.dollars ?? 0;
+      const bytes = await buildCdtfaWorksheet({
+        periodStart: doc.period_start,
+        periodEnd: doc.period_end,
+        dueOn: doc.due_on,
+        fileOn,
+        late,
+        lines,
+        pageCount: pageCount ?? (district > 0 ? 18 : 3),
+        scheduleIncluded: district > 0 && !pageWarning,
+      });
+      saveFile(bytes, `CDTFA-worksheet_${doc.period_start.slice(0, 7)}_Open-Box-Industries.pdf`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not build the worksheet.');
+    } finally { setBusy(false); }
+  }
+
+  async function markFiled() {
+    if (!doc) return;
+    setBusy(true); setError('');
+    const result = await client.rpc('portal_mark_cdtfa_filed', {
+      p_start: doc.period_start,
+      p_end: doc.period_end,
+      p_filed_on: fileOn,
+      p_paid_how: paidHow,
+      p_confirmation: confirmation,
+    });
+    setBusy(false);
+    if (result.error) { setError(result.error.message); return; }
+    setFilings((prev) => {
+      const next = prev.filter((row) => !(row.period_start === doc.period_start && row.period_end === doc.period_end));
+      next.unshift({ period_start: doc.period_start, period_end: doc.period_end, filed_on: fileOn, paid_how: paidHow, confirmation });
+      return next;
+    });
+  }
+
   const due = lines.find((line) => line.id === '26')?.dollars ?? 0;
+  const pagesLabel = pageCount == null ? 'the return' : `${pageCount} page${pageCount === 1 ? '' : 's'}`;
+  const pastDue = !!doc && today > (doc.due_on || dueOn(doc.period_end)) && !marked;
   const actions = doc && (
     <div className="cdtfa-actions">
-      <button type="button" onClick={printSheet}>Print</button>
-      <button type="button" className="primary" onClick={() => void downloadPdf()} disabled={busy}>Download PDF</button>
+      <button type="button" className="primary" onClick={() => void printReturn()} disabled={busy}>Print {pagesLabel}</button>
+      <a href="https://onlineservices.cdtfa.ca.gov/" target="_blank" rel="noreferrer">File online at CDTFA</a>
+      <button type="button" onClick={() => void downloadPdf(false)} disabled={busy}>Download return</button>
+      <button type="button" onClick={() => void downloadWorksheet()} disabled={busy}>Download worksheet</button>
+      <button type="button" className="cdtfa-full" onClick={() => void downloadPdf(true)} disabled={busy}>Download the full form with schedule</button>
     </div>
   );
   const summary = doc && (
@@ -203,10 +327,14 @@ export function CdtfaReturn({ client, money, periodStart, periodEnd, onPeriod, o
         </div>
       </div>
       {error && <p className="cdtfa-bad" role="alert">{error}</p>}
+      {pastDue && <p className="cdtfa-pastdue" role="alert">Past due. This return was due {doc?.due_on}. It has not been marked filed. Nothing has been sent to CDTFA.</p>}
+      {marked && <p className="cdtfa-note">Marked filed {marked.filed_on}{marked.paid_how ? ` · ${marked.paid_how}` : ''}{marked.confirmation ? ` · ${marked.confirmation}` : ''}. Nothing was sent to CDTFA.</p>}
       {doc && (
         <div className="cdtfa-split">
           {layout === 'phone' && summary}
           <div className="cdtfa-form">
+            <p className="cdtfa-note">Prints only what you need: pages 1–3 of CDTFA-401-A always, and Schedule A2 only when line 16 is over $0. Instruction and example pages are left out. This return is {pagesLabel}. The template is REV. 126 (1-26); a page this version does not recognize keeps the whole file.</p>
+            {pageWarning && <p className="cdtfa-bad">{pageWarning}</p>}
             <CdtfaPaper
               lines={lines}
               signer={signer}
@@ -235,6 +363,32 @@ export function CdtfaReturn({ client, money, periodStart, periodEnd, onPeriod, o
             />
             {layout === 'phone' && !showAll && <button type="button" className="cdtfa-show-all" onClick={() => setShowAll(true)}>Show all lines</button>}
             <p className="cdtfa-note">{doc.due_note}</p>
+            <div className="cdtfa-file">
+              <label>Filing date
+                <input type="date" aria-label="Filing date" value={fileOn} onChange={(e) => { setFileTouched(true); setFileOn(e.target.value); }} />
+              </label>
+              <label>Paid preparer name
+                <input aria-label="Paid preparer name" value={preparer} autoComplete="off" placeholder="Leave blank" onChange={(e) => setPreparer(e.target.value)} onBlur={() => void save('preparer', null, preparer)} />
+              </label>
+              <p className="cdtfa-note">The account number above is copied into every YOUR ACCOUNT NUMBER box. Leave paid preparer blank unless someone else prepares the return. {late && <>Line 25 stays blank. <a href="https://cdtfa.ca.gov/taxes-and-fees/interest-calculation.htm" target="_blank" rel="noreferrer">CDTFA interest calculation tool</a>.</>}</p>
+              <label>How it was paid
+                <input aria-label="How it was paid" value={paidHow} onChange={(e) => setPaidHow(e.target.value)} />
+              </label>
+              <label>Confirmation number
+                <input aria-label="Confirmation number" value={confirmation} autoComplete="off" onChange={(e) => setConfirmation(e.target.value)} />
+              </label>
+              <button type="button" onClick={() => void markFiled()} disabled={busy || !paidHow.trim()}>Mark as filed</button>
+            </div>
+            {filings.length > 0 && (
+              <section className="cdtfa-history">
+                <h3>Filed returns</h3>
+                <ul>
+                  {filings.map((row) => (
+                    <li key={`${row.period_start}-${row.period_end}`}>{row.period_start} filed {row.filed_on}{row.paid_how ? ` · ${row.paid_how}` : ''}</li>
+                  ))}
+                </ul>
+              </section>
+            )}
             {layout === 'phone' && actions}
           </div>
           {layout === 'desk' && summary}

@@ -57,6 +57,6 @@ test('every books issue opens the screen that fixes it', () => {
 });
 
 test('excel zip names the official tax form for the same period', () => {
-  assert.equal(cdtfaPdfFileName('2026-11-01', '2026-11-30'), 'CDTFA-401-A-2026-11.pdf');
+  assert.equal(cdtfaPdfFileName('2026-11-01', '2026-11-30'), 'CDTFA-401-A_2026-11_Open-Box-Industries.pdf');
   assert.equal(cdtfaPdfFileName('2026-10-01', '2026-12-31'), 'CDTFA-401-A-2026-Q4.pdf');
 });

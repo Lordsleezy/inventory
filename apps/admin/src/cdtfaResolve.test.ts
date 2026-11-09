@@ -21,6 +21,23 @@ test('editing line 11 rebuilds taxable sales and the tax lines', () => {
   assert.equal(at('18').dollars, 0);
 });
 
+test('a late filing date adds a 10 percent penalty and leaves interest out of the total', () => {
+  const rows = resolveCdtfaDollars(floor, {}, 0, true);
+  const at = (id: string) => rows.find((row) => row.id === id)!;
+  assert.equal(at('23').dollars, 99);
+  assert.equal(at('24').dollars, 10);
+  assert.equal(at('24').edited, false);
+  assert.equal(at('25').dollars, 0);
+  assert.equal(at('26').dollars, 109);
+});
+
+test('an on-time filing date does not add a penalty', () => {
+  const rows = resolveCdtfaDollars(floor, { '24': 50 }, 0, false);
+  const at = (id: string) => rows.find((row) => row.id === id)!;
+  assert.equal(at('24').dollars, 0);
+  assert.equal(at('26').dollars, 99);
+});
+
 test('Q3 2026 is the quarter that contains September', () => {
   assert.deepEqual(filingBounds('2026-09-01', 'quarterly'), { start: '2026-07-01', end: '2026-09-30' });
   assert.equal(periodLabel('2026-07-01', '2026-09-30', 'quarterly', '2026-10-31'), 'Q3 2026 · Jul–Sep · due Oct 31');

@@ -175,6 +175,18 @@ body.books-printing .books-print-sheets section:first-child{break-before:auto}
 .cdtfa-sign input{background:#000;color:#fff;border:0;border-bottom:1px solid #4a4a4a;min-height:44px;font-size:16px;padding:8px 0}
 .cdtfa-actions{display:flex;flex-wrap:wrap;gap:16px;margin:18px 0}
 .cdtfa-actions button{background:none;color:#fff;border:1px solid #4a4a4a;min-height:44px;padding:0 14px;font-size:16px}
+.cdtfa-actions button.primary{background:#fff;color:#000;border-color:#fff}
+.cdtfa-actions a{color:#fff;min-height:44px;display:inline-flex;align-items:center;padding:0 14px;border:1px solid #4a4a4a;text-decoration:none;font-size:16px}
+.cdtfa-full{background:none;border:0;color:#9a9a9a;text-decoration:underline;min-height:44px;padding:0;font-size:16px}
+.cdtfa-pastdue{color:#FF453A;border:1px solid #FF453A;padding:10px 12px;margin:0 0 12px}
+.cdtfa-file{display:grid;gap:10px;margin:16px 0;max-width:420px}
+.cdtfa-file label{display:grid;gap:4px;color:#9a9a9a;font-size:.85rem}
+.cdtfa-file input{background:#000;color:#fff;border:1px solid #4a4a4a;min-height:44px;font-size:16px;padding:6px 8px}
+.cdtfa-history{margin-top:8px}
+.cdtfa-history h3{margin:0 0 8px;font-size:.95rem}
+.cdtfa-history ul{list-style:none;padding:0;margin:0}
+.cdtfa-history li{padding:8px 0;border-bottom:1px solid #2a2a2a}
+.cdtfa-note a{color:#fff}
 @media(max-width:640px){.cdtfa-sign{grid-template-columns:1fr}}
 body.cdtfa-printing{background:#fff}
 body.cdtfa-printing *{visibility:hidden}

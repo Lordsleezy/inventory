@@ -48,4 +48,24 @@ test('the filled CDTFA-401-A keeps line 26 on the total, not the penalty', async
   assert.equal(text('ReportingPeriod'), '11/01/2026 - 11/30/2026');
   assert.equal(text('Period Begin'), '11/01/2026');
   assert.equal(text('Period End'), '11/30/2026');
+  assert.equal(text('PaidName') ?? '', '');
+});
+
+test('interest stays blank when asked, and a preparer is the only name in that box', async () => {
+  const src = readFileSync(new URL('../public/cdtfa/cdtfa401a.pdf', import.meta.url));
+  const out = await fillCdtfaPdfBytes(src, {
+    period_start: '2026-09-01',
+    period_end: '2026-09-30',
+    due_on: '2026-10-31',
+    lines: november.map((line) => line.id === '24' ? { ...line, dollars: 11 } : line.id === '26' ? { ...line, dollars: 122 } : line),
+    omitInterest: true,
+    preparer: 'Ada',
+    signer: { account: '012-345' },
+  });
+  const pdf = await PDFDocument.load(out);
+  const form = pdf.getForm();
+  assert.equal(form.getTextField('29').getText() ?? '', '');
+  assert.equal(form.getTextField('PaidName').getText(), 'Ada');
+  assert.equal(form.getTextField('AccountNumber').getText(), '012-345');
+  assert.equal(form.getTextField('26').getText(), '11');
 });
