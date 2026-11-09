@@ -83,7 +83,7 @@ html.dark .stat,
 html.dark .ticket,
 html.dark .report-row,
 html.dark .inventory-row,
-html.dark aside,
+html.dark .app > aside,
 html.app-mode .app-row {
   border-color: #2a2a2a !important;
   box-shadow: none !important;

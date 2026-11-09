@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { floorFunctionUrl } from './floorApi';
 import { CommissionOverrideControls, CommissionOverrideMark } from './CommissionOverride';
@@ -540,7 +541,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
       ? `Uploaded · ${channelLabel(o.channel)}`
       : o.label_origin === 'bought' || o.label_purchased_at
         ? `Bought${o.label_cost_cents != null ? ` · ${money(o.label_cost_cents)}` : ''}`
-        : orderNeedsLabel(o) ? 'Upload label' : buy ? 'Buy label' : '—';
+        : orderNeedsLabel(o) ? 'Needed' : buy ? 'Buy label' : '—';
     return (
       <div className="ticket order" key={o.id}>
         <OrderPhotoCarousel photos={photoMap[o.sku] || []} urls={photoUrls} sign={sign} />
@@ -620,10 +621,10 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
             {((o.channel || '').toLowerCase() === 'amazon' || (o.channel || '').toLowerCase() === 'tiktok') && (
               <div className="actions">
                 <span className="hint">Pack proof (required)</span>
-                <label className="secondary" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 14px', border: '1px solid var(--btn-border)', borderRadius: 8, cursor: 'pointer' }}>
+                <button type="button" className="secondary" disabled={!!busy} onClick={() => document.getElementById(`order-proof-${o.id}`)?.click()}>
                   {busy === o.id + 'proof' ? 'Uploading…' : o.pack_proof_photo_path ? 'Replace unit photo' : 'Photo of unit'}
-                  <input type="file" accept="image/*" capture="environment" hidden disabled={!!busy} onChange={(e) => { const f = e.target.files?.[0]; if (f) void uploadPackProof(o, f); e.target.value = ''; }} />
-                </label>
+                </button>
+                <input id={`order-proof-${o.id}`} type="file" accept="image/*" capture="environment" hidden disabled={!!busy} onChange={(e) => { const f = e.target.files?.[0]; if (f) void uploadPackProof(o, f); e.target.value = ''; }} />
               </div>
             )}
             <div className="actions">
@@ -647,21 +648,22 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
             {((o.channel || '').toLowerCase() === 'amazon' || (o.channel || '').toLowerCase() === 'tiktok') && (
               <div className="actions">
                 <span className="hint">Pack proof (required)</span>
-                <label className="secondary" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 14px', border: '1px solid var(--btn-border)', borderRadius: 8, cursor: 'pointer' }}>
+                <button type="button" className="secondary" disabled={!!busy} onClick={() => document.getElementById(`order-proof-${o.id}`)?.click()}>
                   {busy === o.id + 'proof' ? 'Uploading…' : o.pack_proof_photo_path ? 'Replace unit photo' : 'Photo of unit'}
-                  <input
-                    type="file"
-                    accept="image/*"
-                    capture="environment"
-                    hidden
-                    disabled={!!busy}
-                    onChange={(e) => {
-                      const f = e.target.files?.[0];
-                      if (f) void uploadPackProof(o, f);
-                      e.target.value = '';
-                    }}
-                  />
-                </label>
+                </button>
+                <input
+                  id={`order-proof-${o.id}`}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  hidden
+                  disabled={!!busy}
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) void uploadPackProof(o, f);
+                    e.target.value = '';
+                  }}
+                />
                 {o.pack_proof_at && <small className="ok-text">Proof saved {stamp(o.pack_proof_at)}{o.pack_proof_serial ? ` · S/N ${o.pack_proof_serial}` : ''}</small>}
               </div>
             )}
@@ -669,10 +671,8 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
             <div className="actions">
               {labeled && <button type="button" disabled={!!busy} onClick={() => void printOrderLabel(o)}>Print 4×6</button>}
               {!labeled && buy && <button type="button" disabled={!!busy || o.pack_condition === 'not_as_listed'} onClick={() => setLabelOrder(o)}>Buy label</button>}
-              {!labeled && !buy && <label className="secondary" style={{ display: 'inline-flex', alignItems: 'center', padding: '10px 14px', border: '1px solid var(--btn-border)', borderRadius: 8 }}>
-                {busy === o.id + 'upload' ? 'Uploading…' : 'Add label'}
-                <input id={`order-label-${o.id}`} type="file" accept="application/pdf,image/*" hidden disabled={!!busy} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void uploadOrderLabel(o, f); }} />
-              </label>}
+              {!labeled && !buy && <button type="button" className="secondary" disabled={!!busy} onClick={() => document.getElementById(`order-label-${o.id}`)?.click()}>{busy === o.id + 'upload' ? 'Uploading…' : 'Add label'}</button>}
+              {!labeled && !buy && <input id={`order-label-${o.id}`} type="file" accept="application/pdf,image/*" hidden disabled={!!busy} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void uploadOrderLabel(o, f); }} />}
               <button className="primary" disabled={!!busy} onClick={() => void markPackaged(o)}>{busy === o.id + 'packaged' ? 'Saving…' : 'Packaged'}</button>
               {(o.channel || '').toLowerCase() !== 'depop' && <button className="secondary" disabled={!!busy || (o.label_cost_cents == null && o.pack_condition !== 'ok')} onClick={() => void recordLabelCost(o)}>{busy === o.id + 'label' ? 'Saving…' : o.label_cost_cents != null ? 'Edit label cost' : 'Record label cost'}</button>}
               {(!o.channel || o.channel === 'website') && <button className="text-button danger" disabled={!!busy} onClick={() => void cancel(o)}>Cancel & refund</button>}
@@ -743,10 +743,10 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
         )}
         {!packOnly && isNeeds && (
           <div className="actions">
-            <label className="primary" style={{ display: 'inline-flex', alignItems: 'center', padding: '10px 14px', borderRadius: 8, cursor: 'pointer' }}>
+            <button type="button" className="primary" disabled={!!busy} onClick={() => document.getElementById(`order-label-${o.id}`)?.click()}>
               {busy === o.id + 'upload' ? 'Uploading…' : o.label_storage_path ? 'Replace label' : 'Upload label'}
-              <input id={`order-label-${o.id}`} type="file" accept="application/pdf,image/*" hidden disabled={!!busy} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void uploadOrderLabel(o, f); }} />
-            </label>
+            </button>
+            <input id={`order-label-${o.id}`} type="file" accept="application/pdf,image/*" hidden disabled={!!busy} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void uploadOrderLabel(o, f); }} />
             {o.label_tracking_mismatch && <span className="hint">This PDF does not match the tracking number on eBay.</span>}
             {o.marketplace_tracking_number && !o.label_storage_path && <span className="hint">eBay already has tracking {o.marketplace_tracking_number}. Upload the PDF.</span>}
           </div>
@@ -857,14 +857,15 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
               })}
             </tbody>
           </table>}
-      {openId && active.some((o) => o.id === openId) && (
+      {openId && active.some((o) => o.id === openId) && createPortal(
         <>
           <button type="button" className="desk-drawer-scrim" aria-label="Close order" onClick={() => setOpenId(null)} />
-          <aside className="desk-drawer" role="dialog" aria-label="Order details">
+          <div className="desk-drawer" role="dialog" aria-modal="true" aria-label="Order details">
             <button type="button" className="text-button" onClick={() => setOpenId(null)}>Close</button>
             {renderTicket(active.find((o) => o.id === openId)!)}
-          </aside>
-        </>
+          </div>
+        </>,
+        document.body,
       )}
     </section>
     {labelOrder && (
