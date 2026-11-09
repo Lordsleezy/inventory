@@ -29,7 +29,7 @@ test('desktop nav: admin keeps channels and money, owner and staff do not', () =
   assert.ok(admin.includes('Cameras'));
   assert.ok(owner.includes('Cameras'));
   assert.equal(staff.includes('Cameras'), false);
-  assert.deepEqual(owner, ['Register', 'Orders', 'Inventory', 'Receive', 'Manifests', 'Locations', 'Reports', 'Books', 'Safe', 'Cameras', 'Settings']);
+  assert.deepEqual(owner, ['Register', 'Orders', 'Inventory', 'Receive', 'Manifests', 'Locations', 'Numbers', 'Reports', 'Safe', 'Cameras', 'Settings']);
   assert.deepEqual(staff, ['Register', 'Inventory', 'Receive', 'Orders', 'Locations', 'Settings']);
   assert.equal(deskNavGroups('admin'), DESK_GROUPS);
   assert.equal(deskAllowedPages('admin'), null);
@@ -54,8 +54,8 @@ test('phone More, inventory, orders, and item pages follow the same three desks'
   const ownerBlock = more.slice(more.indexOf('function OwnerMoreHome'), more.indexOf('export function AppMoreHome'));
   const ownerMore = [...ownerBlock.matchAll(/label: '([^']+)'/g)].map((m) => m[1]);
   const other = labelsIn(more.slice(more.indexOf('export function AppMoreOther'), more.indexOf('Rows from')));
-  assert.deepEqual(adminMore, ['Live sales', 'Receipts', 'Register', 'Safe', 'Reports', 'Books', 'Locations', 'Returns', 'Other']);
-  assert.deepEqual(ownerMore, ['Manifests', 'Locations', 'Reports', 'Books', 'Safe', 'Cameras', 'Settings']);
+  assert.deepEqual(adminMore, ['Live sales', 'Receipts', 'Register', 'Safe', 'Numbers', 'Reports', 'Locations', 'Returns', 'Other']);
+  assert.deepEqual(ownerMore, ['Manifests', 'Locations', 'Numbers', 'Reports', 'Safe', 'Cameras', 'Settings']);
   for (const label of ['eBay', 'Amazon', 'TikTok', 'Depop', 'Connections & sync', 'Dropship', 'Insights']) {
     assert.ok(other.includes(label), label);
     assert.equal(ownerMore.includes(label), false, `owner More leaked ${label}`);

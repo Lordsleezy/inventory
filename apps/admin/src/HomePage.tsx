@@ -208,7 +208,7 @@ function AdminHome({
   if (issues > 0) needs.push({ title: `${issues} listing issue${issues === 1 ? '' : 's'}`, note: 'Items that failed to list or sync', action: 'Review', patch: { page: 'inventory', inventoryTab: 'in-stock' } });
   if (missing > 0) needs.push({ title: `${missing} item${missing === 1 ? '' : 's'} missing cost`, note: 'No payout is calculated until cost is entered', action: 'Add costs', patch: { page: 'inventory', inventoryTab: 'unfinished', attentionSection: 'missing-cost' } });
   if (untracked > 0) needs.push({ title: `${untracked} open return${untracked === 1 ? '' : 's'} · no tracking`, note: 'Add tracking so status updates on its own', action: 'Open returns', patch: { page: 'returns' } });
-  if (bookCount > 0) needs.push({ title: `${bookCount} thing${bookCount === 1 ? '' : 's'} to fix before you lock ${desk?.booksIssues?.month}`, note: 'Books', action: 'Open Books', patch: { page: 'books' } });
+  if (bookCount > 0) needs.push({ title: `${bookCount} thing${bookCount === 1 ? '' : 's'} to fix before you lock ${desk?.booksIssues?.month}`, note: 'Reports', action: 'Open Reports', patch: { page: 'books' } });
 
   return (
     <>

@@ -100,8 +100,8 @@ function OwnerMoreHome({
   const links: { id: MoreId; label: string }[] = [
     { id: 'manifests', label: 'Manifests' },
     { id: 'locations', label: 'Locations' },
-    { id: 'reports', label: 'Reports' },
-    { id: 'books', label: 'Books' },
+    { id: 'reports', label: 'Numbers' },
+    { id: 'books', label: 'Reports' },
     { id: 'withdrawals', label: 'Safe' },
     { id: 'cameras', label: 'Cameras' },
     { id: 'settings', label: 'Settings' },
@@ -181,11 +181,11 @@ export function AppMoreHome({
               <span className="app-chevron">›</span>
             </button>
             <button type="button" className="app-more-link" onClick={() => setPage('reports')}>
-              <span className="app-more-left"><Icon tone="#30d158" />Reports</span>
+              <span className="app-more-left"><Icon tone="#30d158" />Numbers</span>
               <span className="app-chevron">›</span>
             </button>
             <button type="button" className="app-more-link" onClick={() => setPage('books')}>
-              <span className="app-more-left"><Icon tone="#ff9f0a" />Books</span>
+              <span className="app-more-left"><Icon tone="#ff9f0a" />Reports</span>
               <span className="app-chevron">›</span>
             </button>
             <button type="button" className="app-more-link" onClick={() => setPage('locations')}>

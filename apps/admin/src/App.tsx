@@ -751,7 +751,7 @@ export function App() {
         busy={busy}
         onCommissionChanged={setTicketOverride}
         settingsSlot={fullAccess
-          ? <SettingsPage accessToken={session.access_token} busy={busy} run={run} staff={staff} rules={rules} saveRule={setRule} reloadPeople={loadCommon} />
+          ? <SettingsPage accessToken={session.access_token} busy={busy} run={run} staff={staff} rules={rules} saveRule={setRule} reloadPeople={loadCommon} client={sb} />
           : <AssociateSettings client={sb} displayName={staffSession?.displayName || 'Associate'} />}
         reportsSlot={moneyAccess ? (
           <ReportsPage
@@ -790,8 +790,8 @@ export function App() {
     tiktok: 'TikTok',
     depop: 'Depop',
     mercari: 'Online',
-    reports: 'Reports',
-    books: 'Books',
+    reports: 'Numbers',
+    books: 'Reports',
     withdrawals: 'Safe',
     manifests: 'Manifests',
     locations: 'Locations',
@@ -941,7 +941,7 @@ export function App() {
   {fullAccess && page === 'dropship' && (
     <DropshipPage client={sb} session={session} money={money} embed="desktop" />
   )}
-  {fullAccess && page === 'settings' && <SettingsPage accessToken={session.access_token} busy={busy} run={run} staff={staff} rules={rules} saveRule={setRule} reloadPeople={loadCommon} />}
+  {fullAccess && page === 'settings' && <SettingsPage accessToken={session.access_token} busy={busy} run={run} staff={staff} rules={rules} saveRule={setRule} reloadPeople={loadCommon} client={sb} />}
   {registerOnly && page === 'settings' && <AssociateSettings client={sb} displayName={staffSession?.displayName || (deskAccess === 'owner' ? 'Owner' : 'Associate')} />}
   {moneyAccess && page === 'cameras' && <><header><div><h1>Cameras</h1><p>Store camera feeds.</p></div></header><section className="desk-empty"><h2>No cameras yet</h2><p>Feeds are not connected. Add camera will show up here when a feed is available.</p></section></>}
   </main></div>;

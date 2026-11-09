@@ -34,8 +34,8 @@ export const DESK_GROUPS: DeskGroup[] = [
   {
     label: 'Money',
     links: [
-      { page: 'reports', label: 'Reports', hint: 'Profit, fees, tax' },
-      { page: 'books', label: 'Books', hint: 'Month close' },
+      { page: 'reports', label: 'Numbers', hint: 'Profit, fees, tax' },
+      { page: 'books', label: 'Reports', hint: 'Month close' },
       { page: 'withdrawals', label: 'Safe', hint: 'Cash accounts' },
     ],
   },
@@ -82,8 +82,8 @@ export const OWNER_DESK_GROUPS: DeskGroup[] = [
   {
     label: 'Money',
     links: [
-      { page: 'reports', label: 'Reports', hint: 'Profit, fees, tax' },
-      { page: 'books', label: 'Books', hint: 'Month close' },
+      { page: 'reports', label: 'Numbers', hint: 'Profit, fees, tax' },
+      { page: 'books', label: 'Reports', hint: 'Month close' },
       { page: 'withdrawals', label: 'Safe', hint: 'Cash accounts' },
     ],
   },
@@ -97,8 +97,8 @@ export const OWNER_DESK_GROUPS: DeskGroup[] = [
 ];
 
 export const OWNER_JUMP_LINKS: DeskLink[] = [
-  { page: 'reports', label: 'Reports', hint: '' },
-  { page: 'books', label: 'Books', hint: '' },
+  { page: 'reports', label: 'Numbers', hint: '' },
+  { page: 'books', label: 'Reports', hint: '' },
   { page: 'withdrawals', label: 'Safe', hint: '' },
   { page: 'manifests', label: 'Manifests', hint: '' },
   { page: 'cameras', label: 'Cameras', hint: '' },
@@ -132,10 +132,10 @@ export const ASSOCIATE_LINKS: DeskLink[] = [
 
 /** @deprecated Use OWNER_DESK_GROUPS — kept for tests importing flat list labels. */
 export const OWNER_EXTRA_LINKS: DeskLink[] = [
-  { page: 'reports', label: 'Reports', hint: 'Profit, fees, tax' },
+  { page: 'reports', label: 'Numbers', hint: 'Profit, fees, tax' },
   { page: 'withdrawals', label: 'Safe', hint: 'Cash accounts' },
   { page: 'manifests', label: 'Manifests', hint: 'Inbound lots' },
-  { page: 'books', label: 'Books', hint: 'Month close' },
+  { page: 'books', label: 'Reports', hint: 'Month close' },
   { page: 'cameras', label: 'Cameras', hint: 'Store feeds' },
 ];
 

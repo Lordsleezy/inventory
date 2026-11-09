@@ -181,7 +181,7 @@ export function AppModeShell({
   /** When a page was opened from Other, Back returns there instead of More home. */
   const [moreReturnTo, setMoreReturnTo] = useState<MoreId | null>(null);
   const [booksDetail, setBooksDetail] = useState(false);
-  const [booksTitle, setBooksTitle] = useState('Books');
+  const [booksTitle, setBooksTitle] = useState('Reports');
   const [booksBack, setBooksBack] = useState<() => void>(() => () => setMorePage(null));
   const [channel, setChannel] = useState<'ebay' | 'amazon' | 'tiktok' | null>(null);
   const leaveMorePage = () => {
@@ -528,8 +528,8 @@ export function AppModeShell({
           />
         )}
         {moneyAccess && morePage === 'reports' && (
-          <AppReportsNative onBack={leaveMorePage} action={reportsAction} onAction={onReportsAction}>
-            {reportsSlot || <p className="app-footer-count">Reports unavailable.</p>}
+          <AppReportsNative onBack={leaveMorePage} title="Numbers" action={reportsAction} onAction={onReportsAction}>
+            {reportsSlot || <p className="app-footer-count">Numbers unavailable.</p>}
           </AppReportsNative>
         )}
         {moneyAccess && morePage === 'withdrawals' && (
@@ -538,8 +538,8 @@ export function AppModeShell({
           </AppReportsNative>
         )}
         {moneyAccess && morePage === 'books' && (
-          <AppReportsNative onBack={() => booksBack()} title={booksTitle} backLabel={booksDetail ? 'Books' : (moreReturnTo === 'other' ? 'Other' : 'More')}>
-            <BooksPage client={client} storeId={storeId} money={money} native onNativeNavigation={(detail, title, back) => { setBooksDetail(detail); setBooksTitle(detail ? (title || 'Books') : 'Books'); setBooksBack(() => back || leaveMorePage); }} />
+          <AppReportsNative onBack={() => booksBack()} title={booksTitle} backLabel={booksDetail ? 'Reports' : (moreReturnTo === 'other' ? 'Other' : 'More')}>
+            <BooksPage client={client} storeId={storeId} money={money} native onNativeNavigation={(detail, title, back) => { setBooksDetail(detail); setBooksTitle(detail ? (title || 'Reports') : 'Reports'); setBooksBack(() => back || leaveMorePage); }} />
           </AppReportsNative>
         )}
         {moneyAccess && morePage === 'manifests' && (

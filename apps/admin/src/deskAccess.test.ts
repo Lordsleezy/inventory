@@ -54,7 +54,7 @@ test('owner jump grid has six outline destinations', () => {
   assert.equal(OWNER_JUMP_LINKS.length, 6);
   assert.deepEqual(
     OWNER_JUMP_LINKS.map((l) => l.label),
-    ['Reports', 'Books', 'Safe', 'Manifests', 'Cameras', 'Locations'],
+    ['Numbers', 'Reports', 'Safe', 'Manifests', 'Cameras', 'Locations'],
   );
   assert.equal(ASSOCIATE_LINKS.length, 6);
 });

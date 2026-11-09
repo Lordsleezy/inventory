@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { floorFunctionUrl } from './floorApi';
 import { PROTECTED_ADMIN_EMAIL, peopleForCommission } from './settingsPeople';
 
@@ -21,6 +22,7 @@ type Props = {
   rules: Rule[];
   saveRule: (id: string, method: Method, rate: number) => Promise<void>;
   reloadPeople: () => Promise<void>;
+  client?: SupabaseClient;
 };
 
 const PERCENTS = Array.from({ length: 100 }, (_, i) => i + 1);
@@ -40,7 +42,7 @@ function permissionLabel(role: string) {
   return role === 'staff' ? 'Staff' : 'Admin';
 }
 
-export function SettingsPage({ accessToken, busy, run, staff, rules, saveRule, reloadPeople }: Props) {
+export function SettingsPage({ accessToken, busy, run, staff, rules, saveRule, reloadPeople, client }: Props) {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [error, setError] = useState('');
   const [adding, setAdding] = useState(false);
@@ -136,7 +138,38 @@ export function SettingsPage({ accessToken, busy, run, staff, rules, saveRule, r
         </div>;
       })}
     </section>
+    {client && <CdtfaAccount client={client} />}
   </>;
+}
+
+function CdtfaAccount({ client }: { client: SupabaseClient }) {
+  const [value, setValue] = useState('');
+  const [saved, setSaved] = useState('');
+  const [error, setError] = useState('');
+  useEffect(() => {
+    void client.rpc('portal_cdtfa_account').then((res) => {
+      if (!res.error && res.data) setValue(String(res.data));
+    });
+  }, [client]);
+  return (
+    <section className="panel">
+      <h2>Sales tax account</h2>
+      <p className="hint">CDTFA account number. It is filled onto the return and is not shown in logs.</p>
+      <form className="rule-row" onSubmit={(event) => {
+        event.preventDefault();
+        setError('');
+        void client.rpc('portal_set_cdtfa_account', { p_account: value }).then((res) => {
+          if (res.error) setError('Could not save the account number.');
+          else setSaved('Saved');
+        });
+      }}>
+        <label>Account number<input value={value} autoComplete="off" onChange={(e) => { setValue(e.target.value); setSaved(''); }} /></label>
+        <button type="submit">Save</button>
+        {saved && <span>{saved}</span>}
+      </form>
+      {error && <p className="error" role="alert">{error}</p>}
+    </section>
+  );
 }
 
 function CommissionRow({ person, rule, busy, save }: {
