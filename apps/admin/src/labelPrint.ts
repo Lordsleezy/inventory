@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { buildLabelPdf, imageToLabelPdf, labelPaperName, type LabelPaper } from './labelSheet';
-import { labelPrintKind } from './labelPrintKind';
+import { chromeLabelIntent, labelPrintKind } from './labelPrintKind';
 
 export type AndroidPrintTab = { job: string; tab: Window | null };
 
@@ -104,78 +104,88 @@ export async function loadPrintableLabel(url: string, paper: LabelPaper = cached
   return new Blob([pdf.slice()], { type: 'application/pdf' });
 }
 
-function bytesToBase64(bytes: Uint8Array) {
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const text = String(reader.result || '');
-      resolve(text.slice(text.indexOf(',') + 1));
-    };
-    reader.onerror = () => reject(new Error('Could not prepare the label.'));
-    reader.readAsDataURL(new Blob([pdfCopy(bytes)], { type: 'application/pdf' }));
+function attr(value: string) {
+  return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+}
+
+/** The formatted label has to live at an https address so Chrome, not this app, can open it. */
+async function uploadPrintPdf(client: SupabaseClient, bytes: Uint8Array) {
+  const { data: storeId, error } = await client.rpc('portal_store_id');
+  if (error || !storeId) throw new Error('Could not prepare the label.');
+  const id = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}`;
+  const path = `${storeId}/print/${id}.pdf`;
+  const body = new Blob([pdfCopy(bytes)], { type: 'application/pdf' });
+  const up = await client.storage.from('order-labels').upload(path, body, {
+    contentType: 'application/pdf',
+    upsert: false,
   });
+  if (up.error) throw new Error('Could not prepare the label.');
+  const signed = await client.storage.from('order-labels').createSignedUrl(path, 600);
+  if (signed.error || !signed.data?.signedUrl) throw new Error('Could not prepare the label.');
+  return signed.data.signedUrl;
 }
 
-async function sharePdf(bytes: Uint8Array) {
-  const file = new File([pdfCopy(bytes)], 'label.pdf', { type: 'application/pdf' });
-  if (!navigator.canShare?.({ files: [file] })) return false;
-  try {
-    await navigator.share({ files: [file], title: 'Shipping label' });
-    return true;
-  } catch (error) {
-    if (error instanceof DOMException && error.name === 'AbortError') return true;
-    return false;
-  }
-}
-
-function labelPageHtml(b64: string) {
+function chromePage(httpsUrl: string) {
+  const intent = chromeLabelIntent(httpsUrl);
+  const chrome = `googlechrome://navigate?url=${encodeURIComponent(httpsUrl)}`;
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Print label</title>
-<style>html,body{margin:0;background:#fff;color:#111;font:16px sans-serif}.bar{display:flex;gap:8px;padding:12px}button,a{flex:1;min-height:52px;font-size:18px;border-radius:10px;border:1px solid #111;background:#111;color:#fff;text-align:center;line-height:52px;text-decoration:none}a{background:#fff;color:#111}iframe{width:100%;height:calc(100vh - 88px);border:0;background:#fff}p{margin:0;padding:0 12px 8px}</style>
+<style>html,body{margin:0;background:#fff;color:#111;font:16px sans-serif}.bar{display:flex;gap:8px;padding:12px}a{flex:1;min-height:52px;font-size:18px;border-radius:10px;border:1px solid #111;background:#111;color:#fff;text-align:center;line-height:52px;text-decoration:none}a.back{background:#fff;color:#111}p{margin:0;padding:0 12px 12px}a.open{display:block;margin:0 12px;background:#fff;color:#111}</style>
 </head><body>
-<div class="bar"><button type="button" id="print">Print</button><a id="back" href="/">Back</a></div>
-<p>Tap Print and choose the printer.</p>
-<iframe id="sheet" title="Shipping label"></iframe>
+<div class="bar"><a id="print" href="${attr(intent || httpsUrl)}">Print</a><a class="back" id="back" href="/">Back</a></div>
+<p id="msg">Tap Print. Chrome opens the label. Then tap the printer icon.</p>
+<a class="open" id="open" href="${attr(httpsUrl)}" target="_blank" rel="noopener">Open label</a>
 <script>
-var b64 = ${JSON.stringify(b64)};
-var bin = atob(b64);
-var bytes = new Uint8Array(bin.length);
-for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-var blob = new Blob([bytes], { type: 'application/pdf' });
-var file = new File([blob], 'label.pdf', { type: 'application/pdf' });
-document.getElementById('sheet').src = URL.createObjectURL(blob);
+var intent = ${JSON.stringify(intent)};
+var chrome = ${JSON.stringify(chrome)};
+var btn = document.getElementById('print');
 document.getElementById('back').addEventListener('click', function (event) {
   if (history.length > 1) { event.preventDefault(); history.back(); }
 });
-document.getElementById('print').addEventListener('click', function () {
-  if (navigator.canShare && navigator.canShare({ files: [file] })) {
-    navigator.share({ files: [file], title: 'Shipping label' }).catch(function () { window.print(); });
-    return;
-  }
-  window.print();
+btn.addEventListener('click', function () {
+  window.setTimeout(function () {
+    var href = btn.getAttribute('href') || '';
+    if (intent && href === intent) {
+      btn.setAttribute('href', chrome);
+      document.getElementById('msg').textContent = 'Tap Print again. That opens Chrome. Then tap the printer icon.';
+      return;
+    }
+    document.getElementById('msg').textContent = 'Tap Open label, then the printer icon in Chrome.';
+  }, 1200);
 });
 </script></body></html>`;
 }
 
-/** The installed app ignores window.print(). Hand the file to Android, which can open the printer. */
-async function printOnAndroid(bytes: Uint8Array, started: AndroidPrintTab | null) {
-  const shared = await sharePdf(bytes);
-  if (shared) {
-    started?.tab?.close();
-    return;
+/** The installed app cannot open the print dialog. Open the label in Chrome, which can print it. */
+async function printOnAndroid(
+  bytes: Uint8Array,
+  started: AndroidPrintTab | null,
+  host?: { client?: SupabaseClient; sourceUrl?: string },
+) {
+  let httpsUrl = '';
+  if (host?.client) {
+    try { httpsUrl = await uploadPrintPdf(host.client, bytes); } catch { httpsUrl = ''; }
   }
+  if (!httpsUrl && host?.sourceUrl && /^https:\/\//i.test(host.sourceUrl)) httpsUrl = host.sourceUrl;
   const tab = started?.tab && !started.tab.closed ? started.tab : window.open('about:blank', '_blank');
+  if (!httpsUrl) {
+    tab?.close();
+    throw new Error('Could not open the printer.');
+  }
   if (!tab) throw new Error('Could not open the printer.');
-  const b64 = await bytesToBase64(bytes);
   tab.document.open();
-  tab.document.write(labelPageHtml(b64));
+  tab.document.write(chromePage(httpsUrl));
   tab.document.close();
 }
 
 /** Open the PDF itself. Its page size is 4×6 or letter, so AirPrint and desktop print at that size. */
-export async function printPdfBytes(bytes: Uint8Array, androidTab: AndroidPrintTab | null = null) {
+export async function printPdfBytes(
+  bytes: Uint8Array,
+  androidTab: AndroidPrintTab | null = null,
+  host?: { client?: SupabaseClient; sourceUrl?: string },
+) {
   const kind = labelPrintKind(navigator.userAgent || '', navigator.maxTouchPoints || 0, navigator.platform || '');
   if (kind === 'android') {
-    await printOnAndroid(bytes, androidTab);
+    await printOnAndroid(bytes, androidTab, host);
     return;
   }
   const blob = new Blob([bytes.slice()], { type: 'application/pdf' });
@@ -222,5 +232,5 @@ export async function openShippingLabel(url: string, download = false, client?: 
     window.setTimeout(() => URL.revokeObjectURL(href), 60_000);
     return;
   }
-  await printPdfBytes(new Uint8Array(await blob.arrayBuffer()), androidTab);
+  await printPdfBytes(new Uint8Array(await blob.arrayBuffer()), androidTab, { client, sourceUrl: url });
 }
