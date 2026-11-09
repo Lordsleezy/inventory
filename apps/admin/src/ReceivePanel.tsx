@@ -1279,12 +1279,25 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     const photo = personPhotoReady();
     const quantityOk = Number(form.quantity) >= 1;
     const hasDimensions = dimensionsReady();
-    if (doNotList) return receiveMissingFields({ doNotList: true, brandReady: brandReady(), hasPhoto: photo, quantityOk, defective: mediaWaived, hasDimensions, titleOnly: staffMode, titleReady: form.title.trim().length > 0 });
+    const hasLocation = Boolean(selectedLocation.trim());
+    if (doNotList) {
+      return receiveMissingFields({
+        doNotList: true,
+        brandReady: brandReady(),
+        hasPhoto: photo,
+        quantityOk,
+        defective: mediaWaived,
+        hasDimensions,
+        hasLocation: true,
+        titleOnly: staffMode,
+        titleReady: form.title.trim().length > 0,
+      });
+    }
     const gaps = listingGaps(p);
     const out = [...gaps.map(g => (g === 'ebay_category' ? 'category' : g === 'ebay_aspects' ? 'item specifics' : g))];
     if (!form.category.trim() && !out.includes('category')) out.push('category');
     if (!ebayAspects.categoryId && missingEbayAspects(ebayAspects.fields, ebayAspects.attributes, ebayAspects.na).length === 0 && !form.category.trim() && !out.includes('category')) out.push('category');
-    return receiveMissingFields({ doNotList: false, brandReady: brandReady(), otherGaps: out, hasPhoto: photo, quantityOk, defective: mediaWaived, hasDimensions });
+    return receiveMissingFields({ doNotList: false, brandReady: brandReady(), otherGaps: out, hasPhoto: photo, quantityOk, defective: mediaWaived, hasDimensions, hasLocation });
   }
   const liveMissing = missingFor(parse() || { ask: null, cost: null, dims: [null, null, null, null] });
   const formValid = liveMissing.length === 0 && (doNotList || channelMissing === 0);
@@ -2159,9 +2172,9 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
             <label>Price<ManifestReceiveReference result={manifestReference} /><input inputMode="decimal" placeholder="0.00" value={form.ask} onFocus={e => { typingTarget.current = e.currentTarget; }} onChange={e => update('ask',e.target.value)} /></label>
             {!staffMode && <label>Cost<input inputMode="decimal" placeholder="Leave blank if unknown" value={form.cost} onChange={e => update('cost',e.target.value)} /></label>}
           </div>
-          <div className="receive-location-card"><label>Location<select value={selectedLocation} onChange={e => setSelectedLocation(e.target.value)}>
+          <div className={`receive-location-card${showSaveValidation && !selectedLocation.trim() && !doNotList ? ' receive-v2-invalid' : ''}`}><label>Location{!doNotList ? ' *' : ''}<select value={selectedLocation} onChange={e => setSelectedLocation(e.target.value)}>
             <option value="">No location yet</option>{receiveLocations.map(location => <option key={location.code} value={location.code}>Bay {location.bay_no} · R{location.row_no}{location.bin_no == null ? '' : `-B${location.bin_no}`}{location.code === selectedLocation ? ' · same as last item' : ''}</option>)}
-          </select></label>{(!storePhoneMode || locationEditOpen) && <label className="receive-location-scan">Scan bin label<input inputMode={scannerInputMode()} value={locationScan} placeholder="Bay 12 · R2-B3" onChange={e => setLocationScan(e.target.value)} onKeyDown={e => {
+          </select></label>{showSaveValidation && !selectedLocation.trim() && !doNotList && <span className="receive-v2-msg">{receiveFieldMessage('location')}</span>}{(!storePhoneMode || locationEditOpen) && <label className="receive-location-scan">Scan bin label<input inputMode={scannerInputMode()} value={locationScan} placeholder="Bay 12 · R2-B3" onChange={e => setLocationScan(e.target.value)} onKeyDown={e => {
             if (e.key !== 'Enter') return; e.preventDefault();
             const parts = locationScan.trim().match(/(?:bay\s*)?(\d+)\s*[·\s-]+\s*r?(\d+)(?:\s*-\s*b?\s*(\d+))?/i);
             const code = parts ? `${parts[1]}-${parts[2]}${parts[3] ? `-${parts[3]}` : ''}` : locationScan.trim();
