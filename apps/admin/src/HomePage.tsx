@@ -4,6 +4,7 @@ import type { DeskPulse } from './deskPulse';
 import { loadHomeDesk, type ChannelLine, type HomeDesk, type OwedPerson } from './homeDesk';
 import { dayPart, firstName } from './homeGreeting';
 import type { NavState } from './navigation';
+import { ASSOCIATE_LINKS } from './deskNav';
 
 type Props = {
   displayName: string | null;
@@ -79,6 +80,46 @@ export function HomePage({ displayName, email, fullAccess, pulse, client, access
     <div className="desk-home">
       <p className="desk-date">{date}</p>
       <h1 className="desk-hello">{hello}, {name}.</h1>
+      {!fullAccess && (
+        <>
+          <div className="desk-attention">
+            <button type="button" onClick={() => onOpen({ page: 'orders' })}>
+              <span>To ship</span>
+              <strong>{pulse.toShip == null ? '…' : pulse.toShip}</strong>
+            </button>
+          </div>
+          {pulse.toShip != null && pulse.toShip > 0 && (
+            <section className="desk-staff-needs">
+              <h2>Needs you</h2>
+              <div className="desk-need">
+                <div>
+                  <strong>{pulse.toShip} order{pulse.toShip === 1 ? '' : 's'} to ship</strong>
+                  <span>Pick, label, and mark packaged</span>
+                </div>
+                <button type="button" onClick={() => onOpen({ page: 'orders' })}>Open orders</button>
+              </div>
+            </section>
+          )}
+          <div className="desk-grid is-associate">
+            <section>
+              <h2>Your desk</h2>
+              {ASSOCIATE_LINKS.map((link) => (
+                <button
+                  key={link.label}
+                  type="button"
+                  onClick={() => onOpen({
+                    page: link.page,
+                    ...(link.inventoryTab ? { inventoryTab: link.inventoryTab } : {}),
+                  })}
+                >
+                  {link.label}
+                  <span>{link.hint}</span>
+                </button>
+              ))}
+            </section>
+          </div>
+        </>
+      )}
       {fullAccess && (
         <>
           <div className="desk-home-strip">

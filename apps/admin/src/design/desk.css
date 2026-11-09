@@ -280,6 +280,14 @@ html.desk:not(.app-mode) .desk-attention button {
 html.desk:not(.app-mode) .desk-attention button:last-child { border-right: 0; }
 html.desk:not(.app-mode) .desk-attention span { color: #a0a0a0; font-size: 13px; font-weight: 500; }
 html.desk:not(.app-mode) .desk-attention strong { font-size: 1.6rem; font-variant-numeric: tabular-nums; }
+html.desk:not(.app-mode) .desk-staff-needs { margin: 0 0 28px; max-width: 520px; }
+html.desk:not(.app-mode) .desk-staff-needs h2 {
+  margin: 0 0 8px;
+  color: #a0a0a0;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
 html.desk:not(.app-mode) .desk-grid {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
