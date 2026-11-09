@@ -1,8 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { carrierTrackUrl, orderChip, orderStage, orderTimeline, packagedStale, shippedStale } from './orderStage.ts';
+import { carrierTrackUrl, orderCanStepBack, orderChip, orderStage, orderTimeline, packagedStale, shippedStale } from './orderStage.ts';
 
 const day = '2026-11-07T21:14:00Z';
+
+test('orderCanStepBack only on paid orders with a fulfillment timestamp', () => {
+  assert.equal(orderCanStepBack({ status: 'paid', fulfillment: 'ship' }), false);
+  assert.equal(orderCanStepBack({ status: 'paid', fulfillment: 'ship', packaged_at: day }), true);
+  assert.equal(orderCanStepBack({ status: 'canceled', fulfillment: 'ship', packaged_at: day }), false);
+});
 
 test('ebay and unlabeled depop wait in Needs label; other channels still buy', () => {
   assert.equal(orderStage({ status: 'paid', fulfillment: 'ship', channel: 'ebay' }), 'needsLabel');

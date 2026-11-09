@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Session, SupabaseClient } from '@supabase/supabase-js';
 import type { StaffSession } from '@floor/cloud';
 import { RegisterPage } from '../RegisterPage';
@@ -7,6 +7,7 @@ import { BooksPage } from '../BooksPage';
 import { ManifestsPage } from '../ManifestsPage';
 import { LocationsPage } from '../LocationsPage';
 import { InsightsPage } from '../InsightsPage';
+import { AppTabPanel } from './AppTabPanel';
 import { AppInventory } from './AppInventory';
 import { AppItemDetail } from './AppItemDetail';
 import { AppReceive } from './AppReceive';
@@ -190,6 +191,11 @@ export function AppModeShell({
     setMorePage(null);
   };
   const [invKey, setInvKey] = useState(0);
+  const [ordersKey, setOrdersKey] = useState(0);
+  const [locKey, setLocKey] = useState(0);
+  const pullInventory = useCallback(() => setInvKey((n) => n + 1), []);
+  const pullOrders = useCallback(() => setOrdersKey((n) => n + 1), []);
+  const pullLocations = useCallback(() => setLocKey((n) => n + 1), []);
   const scrollPos = useRef<Record<string, number>>({});
   const reportsOpenRef = useRef(onReportsOpen);
   reportsOpenRef.current = onReportsOpen;
@@ -243,7 +249,11 @@ export function AppModeShell({
   return (
     <div className="app-mode-root">
       <div className="app-mode-main">
-        <div className="app-tab-panel" data-tab="inventory" hidden={tab !== 'inventory' || !!itemSku}>
+        <AppTabPanel
+          tab="inventory"
+          hidden={tab !== 'inventory' || !!itemSku}
+          onPullRefresh={pullInventory}
+        >
           {/* Keep mounted across tab switches so returning to Inventory is instant. */}
           <AppInventory
             refreshKey={invKey}
@@ -259,7 +269,7 @@ export function AppModeShell({
               setItemSku(sku);
             }}
           />
-        </div>
+        </AppTabPanel>
 
         {itemSku && (
           <AppItemDetail
@@ -305,7 +315,7 @@ export function AppModeShell({
           )}
         </div>
 
-        <div className="app-tab-panel" data-tab="orders" hidden={tab !== 'orders'}>
+        <AppTabPanel tab="orders" hidden={tab !== 'orders'} onPullRefresh={pullOrders}>
           {tab === 'orders' && (
             <AppOrders
               client={client}
@@ -314,9 +324,10 @@ export function AppModeShell({
               money={money}
               stamp={stamp}
               isAdmin={fullAccess}
+              refreshKey={ordersKey}
             />
           )}
-        </div>
+        </AppTabPanel>
 
         {fullAccess && (
           <div className="app-tab-panel" data-tab="returns" hidden={tab !== 'returns'}>
@@ -365,7 +376,11 @@ export function AppModeShell({
             )}
           </div>
         )}
-        <div className="app-tab-panel" data-tab="locations" hidden={tab !== 'locations' || fullAccess}>
+        <AppTabPanel
+          tab="locations"
+          hidden={tab !== 'locations' || fullAccess}
+          onPullRefresh={pullLocations}
+        >
           {tab === 'locations' && !fullAccess && (
             <LocationsPage
               client={client}
@@ -375,10 +390,11 @@ export function AppModeShell({
               variant="app"
               accessToken={session.access_token}
               money={money}
+              refreshKey={locKey}
               onSellInStore={() => switchTab('register')}
             />
           )}
-        </div>
+        </AppTabPanel>
 
         {fullAccess && channel && (
           <div hidden={!!itemSku}>

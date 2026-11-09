@@ -33,6 +33,8 @@ type Props = {
   money?: (n: number) => string;
   onOpenSku?: (sku: string) => void;
   onSellInStore?: () => void;
+  /** Bump to reload bay list (mobile pull-to-refresh). */
+  refreshKey?: number;
 };
 
 function friendly(err: unknown) {
@@ -60,7 +62,7 @@ function rowsLabel(count: number) {
 
 export function LocationsPage({
   client, storeId, canManage = true, canAddBay = false, variant = 'desktop', onBack, backLabel = 'More',
-  accessToken, money, onOpenSku, onSellInStore,
+  accessToken, money, onOpenSku, onSellInStore, refreshKey = 0,
 }: Props) {
   const phone = variant === 'app';
   const [bays, setBays] = useState<Bay[]>([]);
@@ -101,6 +103,11 @@ export function LocationsPage({
     // The bay list is reloaded after each save as well.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client]);
+
+  useEffect(() => {
+    if (!refreshKey) return;
+    void refresh().catch((err) => setError(friendly(err)));
+  }, [refreshKey]);
 
   useEffect(() => {
     if (!binCode) return;

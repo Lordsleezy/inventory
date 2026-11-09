@@ -7,7 +7,7 @@ import { shortError } from './shortError';
 import { loadOrderLocations, locationCompare } from '../locationOrder';
 import { fileToBase64, labelFileUrl, orderAdmin } from '../orderLabel';
 import { openShippingLabel } from '../labelPrint';
-import { hasLabel, orderNeedsLabel, orderStage, packagedStale, shippedStale, trackingTail, type OrderStage } from '../orderStage';
+import { hasLabel, orderCanStepBack, orderNeedsLabel, orderStage, packagedStale, shippedStale, trackingTail, type OrderStage } from '../orderStage';
 import { useVisibleInterval } from '../useVisibleInterval';
 import { ScanOutPanel } from '../ScanOutPanel';
 import { SEG_SHORT } from '../orderDisplay';
@@ -39,11 +39,12 @@ type Props = {
   money: (n: number) => string;
   stamp: (s: string) => string;
   isAdmin?: boolean;
+  refreshKey?: number;
 };
 
 type TrackEvent = { status?: string; status_detail?: string | null; location?: string | null; occurred_at?: string | null };
 
-export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin = false }: Props) {
+export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin = false, refreshKey = 0 }: Props) {
   const [seg, setSeg] = useState<Seg>('toShip');
   const [scanOut, setScanOut] = useState(false);
   const [orders, setOrders] = useState<WebOrder[] | null>(null);
@@ -78,7 +79,7 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
     try {
       const { data, error: e } = await client.rpc('portal_web_orders', { p_days: 400 });
       if (e) throw e;
-      const list = (data as WebOrder[]).filter((o) => o.payment_env !== 'sandbox' && !(o.order_no || '').toLowerCase().startsWith('sandbox'));
+      const list = (Array.isArray(data) ? data as WebOrder[] : []).filter((o) => o.payment_env !== 'sandbox' && !(o.order_no || '').toLowerCase().startsWith('sandbox'));
       setOrders(list);
       setOpen((prev) => (prev ? list.find((o) => o.id === prev.id) || prev : null));
       const skus = [...new Set(list.map((o) => o.sku).filter(Boolean))];
@@ -94,6 +95,12 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
   }, [client, mergePhotoUrls, storeId]);
 
   useVisibleInterval(load, 60_000);
+
+  useEffect(() => {
+    if (!refreshKey) return;
+    void load();
+  }, [refreshKey, load]);
+
   const sign = useCallback((paths: string[]) => signPhotoUrls(client, paths), [client]);
 
   const loadEvents = useCallback(async (id: string) => {
@@ -129,9 +136,16 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
   }, [orders]);
 
   const rows = (buckets[seg] || []).slice().sort((a, b) => {
+    if (isAdmin) {
+      const at = (a.order_no || '') === 'TEST-SHIP-FLOW' ? -1 : 0;
+      const bt = (b.order_no || '') === 'TEST-SHIP-FLOW' ? -1 : 0;
+      if (at !== bt) return at - bt;
+    }
     if (seg !== 'needsLabel' && seg !== 'toShip' && seg !== 'packaged') return 0;
     return locationCompare(locations[a.sku]?.[0] || '99999', locations[b.sku]?.[0] || '99999');
   });
+
+  const hasTestOrder = Boolean(orders?.some((o) => (o.order_no || '') === 'TEST-SHIP-FLOW'));
 
   async function runAction(key: string, fn: () => Promise<void>) {
     setBusy(key);
@@ -180,6 +194,7 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
   }
 
   async function stepBack(o: WebOrder) {
+    if (!isAdmin) return;
     const step = o.delivered_at ? 'Delivered → Shipped'
       : o.shipped_at ? (o.packaged_at ? 'Shipped → Packaged' : 'Shipped → To ship')
         : o.packaged_at ? 'Packaged → To ship'
@@ -190,6 +205,23 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
       const { error: e } = await client.rpc('portal_order_step_back', { p_order: o.id });
       if (e) throw new Error(e.message === 'portal_access_denied' ? 'Only an owner or manager can move an order back.' : e.message);
     });
+  }
+
+  async function ensureTestShipOrder() {
+    if (!isAdmin) return;
+    setError('');
+    setBusy('test-order');
+    try {
+      const { error: e } = await client.rpc('portal_reset_test_ship_flow_order');
+      if (e) throw e;
+      setSeg('toShip');
+      await load();
+    } catch (e) {
+      const msg = errText(e);
+      setError(shortError(msg));
+    } finally {
+      setBusy('');
+    }
   }
 
   async function floorCancel(o: WebOrder) {
@@ -475,6 +507,15 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
         <p className="app-flag">{late > 0 ? `${late} shipped over 10 days and not marked delivered.` : 'Flags anything shipped over 10 days and not marked delivered.'}</p>
       )}
       {error && <p className="app-inline-error">{error}</p>}
+      {isAdmin && seg === 'toShip' && !hasTestOrder && (
+        <p className="app-flag">
+          No <strong>TEST-SHIP-FLOW</strong> order in this store.
+          {' '}
+          <button type="button" className="secondary" disabled={!!busy} onClick={() => void ensureTestShipOrder()}>
+            {busy === 'test-order' ? '…' : 'Add test To ship order'}
+          </button>
+        </p>
+      )}
       <div className="app-group">
         {!orders && <div className="app-empty-row">Loading…</div>}
         {orders && rows.length === 0 && <div className="app-empty-row">None right now</div>}
@@ -500,6 +541,8 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
               onUrl={(p, u) => mergePhotoUrls({ [p]: u })}
               showUpload={isAdmin && orderNeedsLabel(o)}
               onUpload={(f) => void uploadLabel(o, f)}
+              showStepBack={isAdmin && orderCanStepBack(o)}
+              onStepBack={isAdmin ? () => void stepBack(o) : undefined}
             />
           );
         })}
