@@ -1,6 +1,7 @@
 import type { CommissionOverride, OnlineCfg, Rule, TicketLike, TicketLineLike } from '../payouts';
 import { isOnline, payout, profit, remainingProfit } from '../payouts';
 import { shareTicketCents } from './commissionShare';
+import { booksCardFeeCents } from './cardFee';
 import { effectiveCostCents } from './costTruth';
 import type { FrozenMap } from './types';
 import type { Row } from './types';
@@ -27,7 +28,7 @@ function lineFromSale(row: Row): TicketLineLike {
     shipping_cents: Number(row.shipping_cents || 0),
     channel_fee_cents: Number(row.channel_fee_cents || 0),
     ship_cost_cents: Number(row.ship_cost_cents || 0),
-    processing_fee_cents: Number(row.processing_fee_cents || 0),
+    processing_fee_cents: booksCardFeeCents(row),
     tax_owed_cents: Number(row.tax_owed_cents ?? row.tax_cents ?? 0),
   };
 }

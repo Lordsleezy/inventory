@@ -19,7 +19,7 @@ import {
   styleHeaderRow,
 } from './exportFormat';
 import { verifyExportTies } from './exportChecks';
-import type { BooksWorkbook, ExpenseDisplayLine, Period, ReceivedItem } from './types';
+import type { BooksWorkbook, Period, ReceivedItem } from './types';
 import { receivedSheetMetrics } from './receivedSummary';
 
 type SpanSlice = { label: string; workbook: BooksWorkbook };
@@ -156,7 +156,6 @@ export async function buildBooksExcel(period: Period, wb: BooksWorkbook, label: 
   const hE = wsE.rowCount + 1;
   wsE.addRow(expHeader);
   styleHeaderRow(wsE, hE, expHeader.length);
-  const dupLines: ExpenseDisplayLine[] = wb.expenses.rows.filter((r) => r.duplicateFlag || (r.excludeFromTotals && r.duplicateFlag));
   const startE = hE + 1;
   const expenseGroups = slices || [{ label: '', workbook: wb }];
   for (const group of expenseGroups) {
@@ -201,29 +200,6 @@ export async function buildBooksExcel(period: Period, wb: BooksWorkbook, label: 
   gt.font = { bold: true };
   gt.border = { top: { style: 'medium' } };
   gt.getCell(4).numFmt = MONEY_FMT;
-  if (dupLines.length || wb.expenses.duplicates.length) {
-    wsE.addRow([]);
-    const dupBanner = wsE.addRow(['Possible duplicates — extra copy is not counted. The kept row stays in the list above.']);
-    mergeLabelRow(wsE, dupBanner.number, 1, expCols, 'Possible duplicates — extra copy is not counted. The kept row stays in the list above.');
-    dupBanner.font = { bold: true };
-    const dupH = wsE.rowCount + 1;
-    wsE.addRow(['', 'Date', 'Category', 'Description', 'Amount']);
-    styleHeaderRow(wsE, dupH, 5);
-    const dupStart = dupH + 1;
-    for (const d of wb.expenses.duplicates) {
-      const kept = d.pair?.primary;
-      const extra = d.pair?.duplicate;
-      if (!extra) continue;
-      const keptRow = wsE.addRow(['Kept', excelDate(String(kept?.date || '')), kept?.category || '', kept?.title || '', moneyCell(kept?.amount_cents ?? null)]);
-      keptRow.getCell(2).numFmt = 'mmm d, yyyy';
-      keptRow.getCell(5).numFmt = MONEY_FMT;
-      const extraRow = wsE.addRow(['Extra (not counted)', excelDate(String(extra.date || '')), extra.category, extra.title, moneyCell(extra.amount_cents)]);
-      extraRow.getCell(2).numFmt = 'mmm d, yyyy';
-      extraRow.getCell(5).numFmt = MONEY_FMT;
-    }
-    wrapDataRows(wsE, dupStart, wsE.rowCount, 5);
-    fitWrappedRowHeights(wsE, dupH, wsE.rowCount, expWidths);
-  }
   fitTitleRows(wsE, expCols, expWidths);
   setNormalSheetView(wsE);
   setupPrint(wsE, hE, { repeatHeader: true });

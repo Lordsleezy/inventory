@@ -1,4 +1,5 @@
 import { enrichSaleCost } from './costTruth';
+import { booksCardFeeCents } from './cardFee';
 import { applySaleFeeAdjustments, applySaleLabelCosts } from './saleAdjustments';
 import { saleFeeExtras } from './saleAdjustments';
 import type { BookTotals, Report, Row, SalesLine } from './types';
@@ -51,7 +52,9 @@ export function applySquareMatchedFees(sales: Row[], payments: Row[] = []) {
       const priorFee = Number(result[index].processing_fee_cents || 0);
       result[index].processing_fee_cents = shares[i];
       result[index].processing_fee_source = 'actual';
-      if (typeof result[index].profit_cents === 'number') result[index].profit_cents = Number(result[index].profit_cents) + priorFee - shares[i];
+      const net = booksCardFeeCents(result[index]);
+      result[index].processing_fee_cents = net;
+      if (typeof result[index].profit_cents === 'number') result[index].profit_cents = Number(result[index].profit_cents) + priorFee - net;
     });
   }
   return result;
@@ -100,7 +103,7 @@ export function computeBookTotals(report: Report, opts?: { salesLines?: SalesLin
     for (const r of report.sales || []) {
       const extra = saleFeeExtras(r);
       const mp = Number(r.channel_fee_cents || 0) + Number(r.final_value_fee_cents || 0) + extra.promoted_cents + extra.channel_extra_cents;
-      const card = Number(r.processing_fee_cents || 0);
+      const card = booksCardFeeCents(r);
       const label = Number(r.ship_cost_cents || 0);
       tally(mp, card, label, Number(r.price_cents || 0), Number(r.shipping_cents || 0), r.cost_cents == null ? null : Number(r.cost_cents), r.profit_cents == null ? null : Number(r.profit_cents));
     }
