@@ -23,7 +23,7 @@ select lives_ok(
   'admin can create TEST-SHIP-FLOW when missing'
 );
 
-select ok(
+select is(
   (select count(*)::int from public.web_orders where order_no = 'TEST-SHIP-FLOW' and packaged_at is null),
   1,
   'ensure leaves test order in to ship'
