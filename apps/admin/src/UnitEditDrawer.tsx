@@ -828,11 +828,11 @@ export function UnitEditDrawer({
           <label className={appMode ? 'unit-edit-sku-hidden' : undefined}>SKU<input value={sku} readOnly className={appMode ? 'is-locked' : undefined} /></label>
           <label data-gap-target="title" id="unit-edit-title" className={`unit-edit-wide unit-edit-title-field${currentMissing.includes('title') ? ' unit-edit-required' : ''}`}>
             <span className="unit-edit-label-line">Title <small>{form.title.length} / 80</small></span>
-            <textarea rows={appMode ? 2 : 2} maxLength={80} value={form.title} onChange={e => set('title', e.target.value)} />
+            <textarea rows={appMode ? 3 : 2} maxLength={80} value={form.title} onChange={e => set('title', e.target.value)} />
             {currentMissing.includes('title') && <small>Required</small>}
           </label>
-          <label data-gap-target="brand" id="unit-edit-brand" className={currentMissing.includes('brand') ? 'unit-edit-required' : ''}>Brand<input value={form.brand} onChange={e => set('brand', e.target.value)} />{currentMissing.includes('brand') && <small>Required</small>}{form.brand.trim() && form.brand.trim().toLowerCase() === form.title.trim().toLowerCase() && <small className="unit-edit-brand-hint">Looks like a product name, not a brand · <button type="button" onClick={() => set('brand', 'Unbranded')}>No brand</button></small>}</label>
-          <label data-gap-target="model" id="unit-edit-model" className={currentMissing.includes('model') ? 'unit-edit-required' : ''}>Model<input value={form.model} onChange={e => set('model', e.target.value)} />{currentMissing.includes('model') && <small>Required</small>}</label>
+          <label data-gap-target="brand" id="unit-edit-brand" className={currentMissing.includes('brand') ? 'unit-edit-required' : ''}>Brand{appMode ? <textarea rows={2} value={form.brand} onChange={e => set('brand', e.target.value)} /> : <input value={form.brand} onChange={e => set('brand', e.target.value)} />}{currentMissing.includes('brand') && <small>Required</small>}{form.brand.trim() && form.brand.trim().toLowerCase() === form.title.trim().toLowerCase() && <small className="unit-edit-brand-hint">Looks like a product name, not a brand · <button type="button" onClick={() => set('brand', 'Unbranded')}>No brand</button></small>}</label>
+          <label data-gap-target="model" id="unit-edit-model" className={currentMissing.includes('model') ? 'unit-edit-required' : ''}>Model{appMode ? <textarea rows={2} value={form.model} onChange={e => set('model', e.target.value)} /> : <input value={form.model} onChange={e => set('model', e.target.value)} />}{currentMissing.includes('model') && <small>Required</small>}</label>
           <label className="unit-edit-upc-row">UPC
             <div className="unit-edit-upc-fields">
               <input
