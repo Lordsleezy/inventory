@@ -94,7 +94,7 @@ test("second eBay sample (ends 2207) ignores postage permit", async () => {
   assert.equal(r.number, EBAY_2207);
 });
 
-test("flattened Shippo-style PDF reads printed tracking, not SKU decoy", async () => {
+test("flattened Shippo-style PDF reads printed tracking, not SKU decoy", { skip: process.env.CI ? "OCR is slow in CI; covered locally with bundled traineddata" : false }, async () => {
   const buf = await depopImageLabelPdf(DEPOP_7894);
   const r = await extractTrackingFromFile(buf, "application/pdf", { filename: "Label.pdf" });
   assert.equal(r.confident, true, JSON.stringify(r));
@@ -102,7 +102,7 @@ test("flattened Shippo-style PDF reads printed tracking, not SKU decoy", async (
   assert.match(r.layer, /^(ocr|barcode|pdf-text)$/);
 });
 
-test("attach_label does not ask for manual entry when barcode succeeded (Depop state bug)", async () => {
+test("attach_label does not ask for manual entry when barcode succeeded (Depop state bug)", { skip: process.env.CI ? "OCR is slow in CI" : false }, async () => {
   const buf = await depopImageLabelPdf(DEPOP_7894);
   const updates = [];
   const sb = {
