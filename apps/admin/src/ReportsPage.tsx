@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ReportTab } from './navigation';
+import { AppScrollTabs } from './appMode/AppScrollTabs';
 import { ChannelReportPage } from './ChannelReportPage';
 import { OverheadPage } from './OverheadPage';
 import { TaxReportPage } from './TaxReportPage';
@@ -26,22 +27,19 @@ type Props = {
 export function ReportsPage({ client, money, tab, onTab, closeouts, expenses, payouts, native, nativeCloseouts, onOrderLinked, renderSplit }: Props) {
   const [showSkuLinks, setShowSkuLinks] = useState(false);
   const [reportVersion, setReportVersion] = useState(0);
-  const tabsRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!native || !tabsRef.current) return;
-    const list = tabsRef.current;
-    const selected = list.querySelector<HTMLElement>('[aria-selected="true"]');
-    if (selected) list.scrollTo({ left: selected.offsetLeft - (list.clientWidth - selected.clientWidth) / 2, behavior: 'smooth' });
-  }, [tab, native]);
   const tabs: { id: ReportTab; label: string }[] = native
     ? [{id:'profit',label:'Profit'},{id:'shipping',label:'Fees'},{id:'expenses',label:'Expenses'},{id:'payouts',label:'Payouts'},{id:'sales-tax',label:'Tax'},{id:'sold',label:'Sold'}]
     : [{id:'profit',label:'Profit'},{id:'shipping',label:'Fees'},{id:'expenses',label:'Expenses'},{id:'payouts',label:'Payouts'},{id:'returns',label:'Returns'},{id:'replacements',label:'Replacements'},{id:'sales-tax',label:'Sales tax'}];
   return <>
     {!native && <header><div><div className="eyebrow">STORE LEDGER</div><h1>Reports</h1>
       <p>Profit, shipping and fees, expenses, payouts, and period closeouts.</p></div></header>}
-    <div className="inventory-tabs report-tabs" role="tablist" aria-label="Report sections" ref={tabsRef}>
-      {tabs.map(t => <button key={t.id} type="button" role="tab" aria-selected={tab === t.id} className={tab === t.id ? 'active' : ''} onClick={() => onTab(t.id)}>{t.label}</button>)}
-    </div>
+    {native ? (
+      <AppScrollTabs className="report-tabs" ariaLabel="Report sections" items={tabs} value={tab} onChange={onTab} />
+    ) : (
+      <div className="inventory-tabs report-tabs" role="tablist" aria-label="Report sections">
+        {tabs.map(t => <button key={t.id} type="button" role="tab" aria-selected={tab === t.id} className={tab === t.id ? 'active' : ''} onClick={() => onTab(t.id)}>{t.label}</button>)}
+      </div>
+    )}
     {tab === 'profit' && <>
       <ChannelReportPage key={reportVersion} client={client} money={money} embedded native={native} onLinkSku={() => setShowSkuLinks(true)} renderSplit={renderSplit} />
       {!native && closeouts}

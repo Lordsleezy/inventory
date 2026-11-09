@@ -148,12 +148,13 @@ export const OWNER_LINKS: DeskLink[] = [
 export type DeskAccess = 'admin' | 'owner' | 'staff';
 
 /** Visual order of the phone tab bar. Membership is filtered per desk. */
-export const PHONE_TAB_ORDER = ['inventory', 'receive', 'register', 'orders', 'returns', 'more', 'settings', 'locations'] as const;
+/** Catch-all tab (More or Settings) is always last. */
+export const PHONE_TAB_ORDER = ['inventory', 'receive', 'register', 'orders', 'locations', 'returns', 'more', 'settings'] as const;
 
 const PHONE_TAB_MEMBERSHIP: Record<DeskAccess, readonly string[]> = {
-  admin: ['inventory', 'receive', 'orders', 'returns', 'more'],
-  owner: ['inventory', 'receive', 'orders', 'register', 'locations', 'more'],
-  staff: ['inventory', 'receive', 'orders', 'register', 'locations', 'settings'],
+  admin: ['inventory', 'receive', 'register', 'orders', 'locations', 'more'],
+  owner: ['inventory', 'receive', 'register', 'orders', 'locations', 'more'],
+  staff: ['inventory', 'receive', 'register', 'orders', 'locations', 'settings'],
 };
 
 export function phoneTabIds(access: DeskAccess): string[] {

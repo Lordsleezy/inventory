@@ -11,10 +11,10 @@ function labelsIn(src: string): string[] {
   return [...src.matchAll(/<Icon[^/]*\/>\s*([^<]+)/g)].map((m) => m[1].trim());
 }
 
-test('phone tab bar: admin is full, owner and staff stay cut down', () => {
-  assert.deepEqual(phoneTabIds('admin'), ['inventory', 'receive', 'orders', 'returns', 'more']);
-  assert.deepEqual(phoneTabIds('owner'), ['inventory', 'receive', 'register', 'orders', 'more', 'locations']);
-  assert.deepEqual(phoneTabIds('staff'), ['inventory', 'receive', 'register', 'orders', 'settings', 'locations']);
+test('phone tab bar: catch-all last; admin and owner share register + locations', () => {
+  assert.deepEqual(phoneTabIds('admin'), ['inventory', 'receive', 'register', 'orders', 'locations', 'more']);
+  assert.deepEqual(phoneTabIds('owner'), ['inventory', 'receive', 'register', 'orders', 'locations', 'more']);
+  assert.deepEqual(phoneTabIds('staff'), ['inventory', 'receive', 'register', 'orders', 'locations', 'settings']);
 });
 
 test('desktop nav: admin keeps channels and money, owner and staff do not', () => {
