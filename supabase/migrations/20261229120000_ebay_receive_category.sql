@@ -145,12 +145,15 @@ begin
       and coalesce(u.qty_on_hand, 0) > 0
       and public.unit_not_for_sale(u.listing_specs) is not true
   )
-  select count(*) into v_count from bad where issue is not null;
-  select coalesce(jsonb_agg(jsonb_build_object('sku', sku, 'title', title, 'issue', issue) order by sku), '[]'::jsonb)
-    into v_items
-  from (
-    select sku, title, issue from bad where issue is not null order by sku limit 200
-  ) shown;
+  select
+    (select count(*)::int from bad where issue is not null),
+    (
+      select coalesce(jsonb_agg(jsonb_build_object('sku', sku, 'title', title, 'issue', issue) order by sku), '[]'::jsonb)
+      from (
+        select sku, title, issue from bad where issue is not null order by sku limit 200
+      ) limited
+    )
+  into v_count, v_items;
   return jsonb_build_object('count', v_count, 'items', v_items);
 end $$;
 
