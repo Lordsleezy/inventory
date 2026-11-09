@@ -2470,6 +2470,16 @@ html.app-mode .app-unit-edit .unit-edit-field :is(input, textarea) {
   white-space: normal !important;
   overflow-wrap: anywhere;
 }
+html.app-mode .app-unit-edit .unit-edit-grid > label > input[type="text"],
+html.app-mode .app-unit-edit .unit-edit-grid > label > input:not([type]),
+html.app-mode .app-unit-edit .unit-edit-grid > label > input[inputmode] {
+  width: 100% !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+  overflow-x: auto !important;
+}
+html.app-mode .unit-stock-label { color: #8e8e93 !important; }
+
 html.app-mode .app-unit-edit .unit-edit-grid > label,
 html.app-mode .app-unit-edit .unit-edit-field {
   display: grid;
