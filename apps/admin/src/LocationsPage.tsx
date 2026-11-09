@@ -35,6 +35,7 @@ type Props = {
   onSellInStore?: () => void;
   /** Bump to reload bay list (mobile pull-to-refresh). */
   refreshKey?: number;
+  onPullReady?: () => void;
 };
 
 function friendly(err: unknown) {
@@ -62,7 +63,7 @@ function rowsLabel(count: number) {
 
 export function LocationsPage({
   client, storeId, canManage = true, canAddBay = false, variant = 'desktop', onBack, backLabel = 'More',
-  accessToken, money, onOpenSku, onSellInStore, refreshKey = 0,
+  accessToken, money, onOpenSku, onSellInStore, refreshKey = 0, onPullReady,
 }: Props) {
   const phone = variant === 'app';
   const [bays, setBays] = useState<Bay[]>([]);
@@ -106,8 +107,10 @@ export function LocationsPage({
 
   useEffect(() => {
     if (!refreshKey) return;
-    void refresh().catch((err) => setError(friendly(err)));
-  }, [refreshKey]);
+    void refresh()
+      .catch((err) => setError(friendly(err)))
+      .finally(() => onPullReady?.());
+  }, [refreshKey, onPullReady]);
 
   useEffect(() => {
     if (!binCode) return;

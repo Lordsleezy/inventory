@@ -50,6 +50,7 @@ type Props = {
   stamp: (s: string) => string;
   onOpen: (sku: string, missingFields?: string[]) => void;
   refreshKey?: number;
+  onPullReady?: () => void;
   scrollRef?: React.RefObject<HTMLDivElement | null>;
 };
 
@@ -103,7 +104,7 @@ function needs(u: Row): string | null {
   return null;
 }
 
-export function AppInventory({ client, storeId, fullAccess, staffMode = false, money, stamp, onOpen, scrollRef, refreshKey = 0 }: Props) {
+export function AppInventory({ client, storeId, fullAccess, staffMode = false, money, stamp, onOpen, scrollRef, refreshKey = 0, onPullReady }: Props) {
   const cacheScope = `${storeId}:${staffMode ? 'staff' : 'admin'}`;
   const [filter, setFilter] = useState<Filter>('in_stock');
   const [query, setQuery] = useState('');
@@ -131,6 +132,12 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
   const counts = useAttentionCounts(client, fullAccess && filter === 'unfinished', queueRefresh);
   const urlsRef = useRef(urls);
   urlsRef.current = urls;
+  const pullReadyRef = useRef(onPullReady);
+  pullReadyRef.current = onPullReady;
+  const settlePull = useRef(false);
+  useEffect(() => {
+    if (refreshKey) settlePull.current = true;
+  }, [refreshKey]);
   useEffect(() => {
     let active = true;
     void client.rpc('portal_unassigned_inventory_count').then(({ data }) => {
@@ -249,6 +256,11 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
           setError(shortError(err));
           if (!cached) setList({ items: [], totals: { unit_count: 0 } });
           setLoading(false);
+        } finally {
+          if (alive && settlePull.current) {
+            settlePull.current = false;
+            pullReadyRef.current?.();
+          }
         }
       })();
     }, query.trim() ? 180 : 0);

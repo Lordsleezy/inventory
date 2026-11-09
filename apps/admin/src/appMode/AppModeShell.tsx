@@ -8,6 +8,7 @@ import { ManifestsPage } from '../ManifestsPage';
 import { LocationsPage } from '../LocationsPage';
 import { InsightsPage } from '../InsightsPage';
 import { AppTabPanel } from './AppTabPanel';
+import { useAwaitableRefresh } from './useAwaitableRefresh';
 import { AppInventory } from './AppInventory';
 import { AppItemDetail } from './AppItemDetail';
 import { AppReceive } from './AppReceive';
@@ -193,9 +194,12 @@ export function AppModeShell({
   const [invKey, setInvKey] = useState(0);
   const [ordersKey, setOrdersKey] = useState(0);
   const [locKey, setLocKey] = useState(0);
-  const pullInventory = useCallback(() => setInvKey((n) => n + 1), []);
-  const pullOrders = useCallback(() => setOrdersKey((n) => n + 1), []);
-  const pullLocations = useCallback(() => setLocKey((n) => n + 1), []);
+  const bumpInv = useCallback(() => setInvKey((n) => n + 1), []);
+  const bumpOrders = useCallback(() => setOrdersKey((n) => n + 1), []);
+  const bumpLoc = useCallback(() => setLocKey((n) => n + 1), []);
+  const invPull = useAwaitableRefresh(bumpInv);
+  const ordersPull = useAwaitableRefresh(bumpOrders);
+  const locPull = useAwaitableRefresh(bumpLoc);
   const scrollPos = useRef<Record<string, number>>({});
   const reportsOpenRef = useRef(onReportsOpen);
   reportsOpenRef.current = onReportsOpen;
@@ -252,11 +256,12 @@ export function AppModeShell({
         <AppTabPanel
           tab="inventory"
           hidden={tab !== 'inventory' || !!itemSku}
-          onPullRefresh={pullInventory}
+          onPullRefresh={invPull.pull}
         >
           {/* Keep mounted across tab switches so returning to Inventory is instant. */}
           <AppInventory
             refreshKey={invKey}
+            onPullReady={invPull.ready}
             client={client}
             storeId={storeId}
             fullAccess={fullAccess}
@@ -315,7 +320,7 @@ export function AppModeShell({
           )}
         </div>
 
-        <AppTabPanel tab="orders" hidden={tab !== 'orders'} onPullRefresh={pullOrders}>
+        <AppTabPanel tab="orders" hidden={tab !== 'orders'} onPullRefresh={ordersPull.pull}>
           {tab === 'orders' && (
             <AppOrders
               client={client}
@@ -325,6 +330,7 @@ export function AppModeShell({
               stamp={stamp}
               isAdmin={fullAccess}
               refreshKey={ordersKey}
+              onPullReady={ordersPull.ready}
             />
           )}
         </AppTabPanel>
@@ -379,7 +385,7 @@ export function AppModeShell({
         <AppTabPanel
           tab="locations"
           hidden={tab !== 'locations' || fullAccess}
-          onPullRefresh={pullLocations}
+          onPullRefresh={locPull.pull}
         >
           {tab === 'locations' && !fullAccess && (
             <LocationsPage
@@ -391,6 +397,7 @@ export function AppModeShell({
               accessToken={session.access_token}
               money={money}
               refreshKey={locKey}
+              onPullReady={locPull.ready}
               onSellInStore={() => switchTab('register')}
             />
           )}

@@ -242,6 +242,11 @@ export function AppOrderDetail(props: AppOrderDetailProps) {
               )}
             </div>
           )}
+          {stage === 'toShip' && labeled && !orderNeedsLabel(order) && (
+            <button type="button" className="primary app-order-packaged-btn" disabled={!!busy} onClick={onMarkPackaged}>
+              {busy === 'packaged' ? '…' : 'Packaged'}
+            </button>
+          )}
         </div>
       )}
 
