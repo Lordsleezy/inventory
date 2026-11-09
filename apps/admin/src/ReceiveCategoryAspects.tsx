@@ -1,11 +1,13 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { floorFunctionUrl } from './floorApi';
 import { AspectPicker } from './AspectPicker';
 import type { AspectDef } from './aspectOptions';
-import { valueIsValid } from './aspectOptions';
+import { missingEbayAspects } from './receive-validation';
 
-type Choice = { category_id: string; path: string };
+type Choice = { category_id: string; path: string; category_name?: string; best_match?: boolean };
+
+export type AllowedGrade = { grade: string; conditionId: string; ebayName: string };
 
 export type ReceiveAspectState = {
   categoryId: string | null;
@@ -13,6 +15,8 @@ export type ReceiveAspectState = {
   fields: AspectDef[];
   attributes: Record<string, string>;
   na: Record<string, boolean>;
+  allowedGrades?: AllowedGrade[];
+  conditionNote?: string;
 };
 
 type Props = {
@@ -32,16 +36,8 @@ type Props = {
 function categoryParts(path: string) {
   return path.split(/\s*>\s*/).map(part => part.trim()).filter(part => part && !/^root$/i.test(part));
 }
-function shortCategory(path: string) {
-  const parts = categoryParts(path);
-  return parts.slice(-2).join(' · ') || path;
-}
-
 function aspectFilled(def: AspectDef, attributes: Record<string, string>, na: Record<string, boolean>) {
-  if (na[def.name]) return true;
-  const v = (attributes[def.name] || '').trim();
-  if (!v) return false;
-  return valueIsValid(def, v);
+  return missingEbayAspects([def], attributes, na).length === 0 && Boolean((attributes[def.name] || '').trim());
 }
 
 export function ReceiveCategoryAspects({
@@ -49,32 +45,62 @@ export function ReceiveCategoryAspects({
 }: Props) {
   const [query, setQuery] = useState('');
   const [choices, setChoices] = useState<Choice[]>([]);
-  const [suggestions, setSuggestions] = useState<Choice[]>([]);
+  const [suggestions, setSuggestions] = useState<(Choice & { category_name?: string; best_match?: boolean })[]>([]);
+  const [suggestError, setSuggestError] = useState('');
+  const [fromUpc, setFromUpc] = useState<string[]>([]);
+  const [browse, setBrowse] = useState<{ category_id: string; path: string; leaf: boolean; parent_id: string | null }[]>([]);
+  const [browseParent, setBrowseParent] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const preselectUsed = useRef(false);
   const [recommendedOpen, setRecommendedOpen] = useState(false);
   const [clearedNote, setClearedNote] = useState('');
   const [channelFields, setChannelFields] = useState<{ channel: 'amazon' | 'tiktok'; name: string; label: string; allowed?: string[] }[]>([]);
   const [channelValues, setChannelValues] = useState<Record<string, string>>({});
   const [channelNote, setChannelNote] = useState('');
 
-  useEffect(() => {
-    if (!query.trim()) { setChoices([]); return; }
-    let active = true;
-    const t = window.setTimeout(() => {
-      void client.rpc('portal_category_search', { p_channel: 'ebay', p_query: query.trim(), p_limit: 40 })
-        .then(({ data, error }) => { if (active && !error) setChoices((data || []) as Choice[]); });
-    }, 200);
-    return () => { active = false; clearTimeout(t); };
-  }, [client, query]);
+  async function askEbay(title: string) {
+    const res = await fetch(floorFunctionUrl('ebay-specifics'), {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ store_id: storeId, action: 'suggest-for-title', title }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok || body.ok === false) throw new Error(body.error || 'eBay is unreachable. Retry, or browse the saved category tree. Nothing was saved.');
+    return body as { suggestions?: (Choice & { category_name?: string; best_match?: boolean })[]; preselect?: Choice | null };
+  }
 
   useEffect(() => {
-    const q = [identity.brand, identity.model, identity.title].filter(Boolean).join(' ');
-    if (!q.trim()) { setSuggestions([]); return; }
+    const typed = query.trim();
+    if (typed.length < 3) { setChoices([]); return; }
     let active = true;
-    void client.rpc('portal_category_search', { p_channel: 'ebay', p_query: q, p_limit: 3 })
-      .then(({ data }) => { if (active) setSuggestions((data || []) as Choice[]); });
-    return () => { active = false; };
-  }, [client, identity.brand, identity.model, identity.title]);
+    const t = window.setTimeout(() => {
+      void askEbay(typed).then((body) => { if (active) { setChoices(body.suggestions || []); setSuggestError(''); } })
+        .catch((error) => { if (active) { setChoices([]); setSuggestError(error instanceof Error ? error.message : 'eBay is unreachable.'); } });
+    }, 450);
+    return () => { active = false; clearTimeout(t); };
+  }, [query, accessToken, storeId]);
+
+  useEffect(() => {
+    const q = [identity.title, identity.brand].filter(Boolean).join(' ').trim();
+    if (q.length < 3 || value.categoryId) { setSuggestions([]); return; }
+    let active = true;
+    const t = window.setTimeout(() => {
+      void askEbay(q).then((body) => {
+        if (!active) return;
+        setSuggestError('');
+        setSuggestions(body.suggestions || []);
+        if (body.preselect && !preselectUsed.current && !value.categoryId) {
+          preselectUsed.current = true;
+          void pickCategory(body.preselect);
+        }
+      }).catch((error) => {
+        if (!active) return;
+        setSuggestions([]);
+        setSuggestError(error instanceof Error ? error.message : 'eBay is unreachable.');
+      });
+    }, 450);
+    return () => { active = false; clearTimeout(t); };
+  }, [identity.title, identity.brand, value.categoryId, accessToken, storeId]);
 
   useEffect(() => {
     const wantAmazon = channels.includes('amazon');
@@ -120,10 +146,8 @@ export function ReceiveCategoryAspects({
     setBusy(true);
     setClearedNote('');
     try {
-      const { data, error } = await client.rpc('portal_ebay_category_form', { p_category_id: choice.category_id });
-      if (error) throw new Error(error.message);
-      const row = data as { path?: string; fields?: AspectDef[] } | null;
-      const fields = (row?.fields || []) as AspectDef[];
+      const looked = await client.rpc('portal_ebay_category_form', { p_category_id: choice.category_id });
+      const row = looked.error ? null : looked.data as { path?: string; fields?: AspectDef[] } | null;
       const res = await fetch(floorFunctionUrl('ebay-specifics'), {
         method: 'POST',
         headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
@@ -131,25 +155,31 @@ export function ReceiveCategoryAspects({
           store_id: storeId,
           action: 'preview-receive',
           category_id: choice.category_id,
+          path: choice.path,
           identity,
           attributes: value.attributes,
         }),
       });
       const body = await res.json();
+      if (!res.ok || body.ok === false) throw new Error(body.error || 'eBay is unreachable. Retry, or browse the saved category tree. Nothing was saved.');
+      const fields = ((body.fields || row?.fields || []) as AspectDef[]);
       const attrs = (body.attributes || {}) as Record<string, string>;
       const keptNames = new Set(fields.map(f => f.name));
       const dropped = Object.keys(value.attributes).filter(k => !keptNames.has(k));
-      if (dropped.length) setClearedNote(`Category changed — dropped ${dropped.length} field${dropped.length === 1 ? '' : 's'} that don’t apply here.`);
+      if (dropped.length) setClearedNote(`Category changed — dropped ${dropped.join(', ')}.`);
+      setFromUpc(Array.isArray(body.prefilled) ? body.prefilled.map((name: unknown) => String(name)) : []);
       onChange({
         categoryId: choice.category_id,
-        path: row?.path || choice.path,
+        path: body.path || row?.path || choice.path,
         fields,
         attributes: attrs,
         na: Object.fromEntries(Object.entries(value.na).filter(([k]) => keptNames.has(k))),
+        allowedGrades: (body.conditions || []) as ReceiveAspectState['allowedGrades'],
+        conditionNote: String(body.conditionNote || ''),
       });
       setQuery('');
     } catch (e) {
-      console.warn(e);
+      setSuggestError(e instanceof Error ? e.message : 'eBay is unreachable. Retry, or browse the saved category tree. Nothing was saved.');
     } finally {
       setBusy(false);
     }
@@ -157,14 +187,6 @@ export function ReceiveCategoryAspects({
 
   function setAttr(name: string, v: string) {
     onChange({ ...value, attributes: { ...value.attributes, [name]: v }, na: { ...value.na, [name]: false } });
-  }
-
-  function setNa(name: string, on: boolean) {
-    onChange({
-      ...value,
-      na: { ...value.na, [name]: on },
-      attributes: on ? { ...value.attributes, [name]: 'Does not apply' } : { ...value.attributes, [name]: '' },
-    });
   }
 
   return (
@@ -181,55 +203,103 @@ export function ReceiveCategoryAspects({
         />
         {showErrors && !value.categoryId && <span className="receive-v2-msg">Pick a category</span>}
       </label>
-      {!value.categoryId && suggestions.length > 0 && (
-        <div className="receive-aspect-suggestions">
-          <span className="hint">Suggested</span>
+      {suggestError && <p className="rcv-note" role="status">{suggestError} <button type="button" className="text-button" onClick={() => setQuery(q => q ? `${q} ` : identity.title)}>Retry</button></p>}
+      {!value.categoryId && !query.trim() && suggestions.length > 0 && (
+        <div>
+          <span className="rcv-note">Suggested by eBay for this title</span>
           {suggestions.map(s => (
             <button key={s.category_id} type="button" className="rcv-cat" disabled={busy} onClick={() => void pickCategory(s)}>
-              <strong>{shortCategory(s.path)}</strong>
-              <small>{categoryParts(s.path).join(' › ')}</small>
+              <span className="rcv-radio" aria-hidden />
+              <strong>{s.category_name || categoryParts(s.path).slice(-1)[0]}{s.best_match ? <em>Best match</em> : null}</strong>
+              <small>{categoryParts(s.path).slice(0, -1).join(' › ')}</small>
             </button>
           ))}
         </div>
       )}
-      {choices.length > 0 && !value.categoryId && (
-        <ul className="scan-out-list">
+      {choices.length > 0 && (
+        <div>
           {choices.slice(0, 8).map(c => (
-            <li key={c.category_id}>
-              <button type="button" className="rcv-cat" disabled={busy} onClick={() => void pickCategory(c)}>
-                <strong>{shortCategory(c.path)}</strong>
-                <small>{categoryParts(c.path).join(' › ')}</small>
-              </button>
-            </li>
+            <button key={c.category_id} type="button" className="rcv-cat" disabled={busy} onClick={() => void pickCategory(c)}>
+              <strong>{c.category_name || categoryParts(c.path).slice(-1)[0]}</strong>
+              <small>{categoryParts(c.path).slice(0, -1).join(' › ')}</small>
+            </button>
           ))}
-        </ul>
+        </div>
+      )}
+      {!value.categoryId && (
+        <button type="button" className="text-button" onClick={() => {
+          setBrowseParent(null);
+          void client.from('channel_taxonomy').select('category_id,path,leaf,parent_id')
+            .eq('channel', 'ebay').eq('active', true).is('parent_id', null).order('path').limit(40)
+            .then(({ data }) => setBrowse((data || []) as typeof browse));
+        }}>Browse all categories</button>
+      )}
+      {browse.length > 0 && !value.categoryId && (
+        <div>
+          {browseParent && <button type="button" className="text-button" onClick={() => {
+            void client.from('channel_taxonomy').select('parent_id').eq('channel', 'ebay').eq('category_id', browseParent).maybeSingle()
+              .then(({ data }) => {
+                const parent = (data?.parent_id as string | null) ?? null;
+                setBrowseParent(parent);
+                const request = client.from('channel_taxonomy').select('category_id,path,leaf,parent_id').eq('channel', 'ebay').eq('active', true).order('path').limit(40);
+                void (parent ? request.eq('parent_id', parent) : request.is('parent_id', null)).then(({ data: rows }) => setBrowse((rows || []) as typeof browse));
+              });
+          }}>Back</button>}
+          {browse.map(row => (
+            <button key={row.category_id} type="button" className="rcv-cat" disabled={busy} onClick={() => {
+              if (!row.leaf) {
+                setBrowseParent(row.category_id);
+                void client.from('channel_taxonomy').select('category_id,path,leaf,parent_id')
+                  .eq('channel', 'ebay').eq('active', true).eq('parent_id', row.category_id).order('path').limit(40)
+                  .then(({ data }) => setBrowse((data || []) as typeof browse));
+                return;
+              }
+              void pickCategory({ category_id: row.category_id, path: row.path });
+            }}>
+              <strong>{categoryParts(row.path).slice(-1)[0]}{row.leaf ? '' : ' ›'}</strong>
+              <small>{row.leaf ? categoryParts(row.path).slice(0, -1).join(' › ') : 'Open'}</small>
+            </button>
+          ))}
+        </div>
       )}
       {value.categoryId && (
         <>
           <p className="receive-aspects-head">Item specifics · {filledRequired} of {required.length} required filled</p>
-          {clearedNote && <p className="hint">{clearedNote}</p>}
+          {clearedNote && <p className="rcv-note">{clearedNote}</p>}
           <div className="receive-v2-grid receive-aspects-fields">
             {required.map(def => {
               const missing = !aspectFilled(def, value.attributes, value.na);
               const showRed = showErrors || Boolean(value.categoryId);
+              const picked = (value.attributes[def.name] || '').split('|').map(part => part.trim()).filter(Boolean);
               return (
                 <div key={def.name} className={showRed && missing ? 'receive-aspect-missing' : undefined}>
-                  <AspectPicker def={def} value={value.attributes[def.name] || ''} disabled={disabled || busy || value.na[def.name]}
-                    onChange={v => setAttr(def.name, v)} />
-                  {!def.selection_only && (
-                    <label className="mboard-inline">
-                      <input type="checkbox" checked={value.na[def.name] || false} disabled={disabled}
-                        onChange={e => setNa(def.name, e.target.checked)} /> Does not apply
-                    </label>
+                  {def.multi && def.allowed?.length ? (
+                    <fieldset>
+                      <legend>{def.name}{def.required ? ' *' : ''}</legend>
+                      {def.allowed.map(option => (
+                        <label key={option} className="rcv-check">
+                          <input type="checkbox" checked={picked.includes(option)} disabled={disabled || busy}
+                            onChange={e => {
+                              const next = e.target.checked ? [...picked, option] : picked.filter(part => part !== option);
+                              setAttr(def.name, next.join('|'));
+                            }} />
+                          {option}
+                        </label>
+                      ))}
+                    </fieldset>
+                  ) : (
+                    <AspectPicker def={def} value={value.attributes[def.name] || ''} disabled={disabled || busy}
+                      onChange={v => setAttr(def.name, v)} />
                   )}
-                  {showErrors && missing && <span className="receive-v2-msg">Required</span>}
+                  {fromUpc.includes(def.name) && <small className="rcv-note">from UPC</small>}
+                  {showRed && missing && <span className="receive-v2-msg">Required by eBay for this category</span>}
                 </div>
               );
             })}
           </div>
           {recommended.length > 0 && (
             <details open={recommendedOpen} onToggle={e => setRecommendedOpen((e.target as HTMLDetailsElement).open)}>
-              <summary>More details (optional)</summary>
+              <summary>More specifics ({recommended.length} optional)</summary>
               <div className="receive-v2-grid">
                 {recommended.map(def => (
                   <AspectPicker key={def.name} def={def} value={value.attributes[def.name] || ''} disabled={disabled || busy}

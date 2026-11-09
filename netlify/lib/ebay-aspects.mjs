@@ -340,12 +340,15 @@ export function normalizeTaxonomyAspects(rows) {
       const mode = String(constraint.aspectMode || "").toUpperCase();
       const catalog = looksLikeCatalogModels(allowed);
       const selectionOnly = mode !== "FREE_TEXT" && allowed.length > 0 && !catalog;
+      const cardinality = String(constraint.itemToAspectCardinality || "").toUpperCase();
       return {
         name,
         required,
         recommended,
         allowed,
         selectionOnly,
+        multi: cardinality === "MULTI",
+        maxLength: Number(constraint.aspectMaxLength || 0) || null,
         catalog,
         sortIndex,
       };

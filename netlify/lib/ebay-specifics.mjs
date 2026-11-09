@@ -5,6 +5,7 @@
  */
 import { normalizeGtin } from "./gtin-normalize.mjs";
 import { commonSiblingValue, textSuggestions } from "./aspect-suggest.mjs";
+import { missingAspectNames } from "../../shared/ebay-category-present.mjs";
 
 const text = (value) => String(value ?? "").trim();
 
@@ -29,9 +30,7 @@ export function fillMissing(existing = {}, incoming = {}, fields = []) {
 }
 
 export function missingRequired(fields = [], attributes = {}) {
-  return (fields || []).filter((def) => def.required && (!text(attributes[def.name])
-    || ((def.selectionOnly || def.selection_only) && def.allowed?.length && !def.allowed.includes(text(attributes[def.name])))))
-    .map((def) => def.name);
+  return missingAspectNames(fields, attributes);
 }
 
 /** Store every aspect (required first, then recommended, then the rest) in a compact form. */
@@ -39,7 +38,8 @@ export function aspectFieldsFromTaxonomy(normalized = []) {
   const rank = (d) => (d.required ? 0 : d.recommended ? 1 : 2);
   return [...normalized].sort((a, b) => rank(a) - rank(b) || a.sortIndex - b.sortIndex)
     .map((d) => ({ name: d.name, required: Boolean(d.required), recommended: Boolean(d.recommended),
-      allowed: d.catalog ? [] : d.allowed || [], selection_only: Boolean(d.selectionOnly) }));
+      allowed: d.catalog ? [] : d.allowed || [], selection_only: Boolean(d.selectionOnly),
+      multi: Boolean(d.multi), maxLength: d.maxLength || null }));
 }
 
 /** Generic aspects Floor already knows from its product database. */

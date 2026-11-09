@@ -2,8 +2,7 @@
 // Staff (clerks) may use it; it never returns money fields or channel checkboxes.
 import { json, corsHeaders, serviceClient, staffFromEvent } from "../lib/server.mjs";
 import { portalAdminFromEvent } from "../lib/portal-auth.mjs";
-import { catalogProductByGtin, suggestCategories } from "../lib/ebay-catalog.mjs";
-import { rankCategorySuggestions } from "../lib/ebay-aspects.mjs";
+import { catalogProductByGtin, ensureStoredEbayLeaf, refreshCategoryConditions, suggestCategories } from "../lib/ebay-catalog.mjs";
 import { refreshChannelCategoryFields } from "../lib/category-taxonomy.mjs";
 import { autofillUnitSpecifics, fillMissing, missingRequired, productAspects, unitAspects, supabaseSpecificsDeps } from "../lib/ebay-specifics.mjs";
 import { canonicalValue, clearInvalid, countUsage, rankValues } from "../lib/aspect-suggest.mjs";
@@ -12,8 +11,51 @@ import { autoFillUnit, supabaseAutoFillDeps } from "../lib/auto-fill.mjs";
 import { pushEbayDescription } from "../lib/ebay-description-sync.mjs";
 import { normalizeGtin } from "../lib/gtin-normalize.mjs";
 import { wrapHandler, asNetlifyFunction } from "../lib/floor-log.mjs";
+import { confidentCategory, presentCategorySuggestions } from "../../shared/ebay-category-present.mjs";
+import { FLOOR_CONDITION_GRADES, mapFloorCondition } from "../lib/ebay-conditions.mjs";
 
 const FIELDS_MAX_AGE_MS = 7 * 86400000;
+const SUGGEST_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const suggestionCache = new Map();
+
+function suggestionKey(title) {
+  return String(title || "").toLowerCase().replace(/\s+/g, " ").trim().slice(0, 180);
+}
+
+async function suggestionsFor(title) {
+  const key = suggestionKey(title);
+  if (key.length < 3) return { suggestions: [], preselect: null };
+  const memory = suggestionCache.get(key);
+  if (memory && memory.until > Date.now()) return memory.payload;
+  const sb = serviceClient();
+  const cached = await sb.from("ebay_suggestion_cache").select("payload,fetched_at").eq("query_norm", key).maybeSingle()
+    .then((row) => row.data).catch(() => null);
+  if (cached?.fetched_at && Date.parse(cached.fetched_at) > Date.now() - SUGGEST_MAX_AGE_MS && cached.payload) {
+    suggestionCache.set(key, { payload: cached.payload, until: Date.now() + SUGGEST_MAX_AGE_MS });
+    return cached.payload;
+  }
+  const raw = await suggestCategories(key);
+  const payload = {
+    suggestions: presentCategorySuggestions(key, raw),
+    preselect: confidentCategory(key, raw),
+  };
+  suggestionCache.set(key, { payload, until: Date.now() + SUGGEST_MAX_AGE_MS });
+  await sb.from("ebay_suggestion_cache").upsert({ query_norm: key, payload, fetched_at: new Date().toISOString() }).then(() => {}, () => {});
+  return payload;
+}
+
+async function conditionChoices(categoryId, leafName) {
+  const live = await refreshCategoryConditions(categoryId);
+  const grades = FLOOR_CONDITION_GRADES.map((grade) => {
+    const mapped = mapFloorCondition(grade, live);
+    return mapped ? { grade, conditionId: String(mapped.conditionId), ebayName: mapped.name } : null;
+  }).filter(Boolean);
+  const onlyNew = grades.length === 1 && grades[0].grade === "New";
+  return {
+    conditions: grades,
+    conditionNote: onlyNew ? `eBay only allows New for ${leafName || "this category"}.` : "",
+  };
+}
 
 async function storeFor(event, hint) {
   try { return (await portalAdminFromEvent(event, hint)).storeId; }
@@ -60,10 +102,11 @@ async function form(sb, storeId, sku) {
   let suggestion = null;
   if (!row?.category_id) {
     const query = unit.title || [unit.brand, unit.model].filter(Boolean).join(" ");
-    for (const s of rankCategorySuggestions(await suggestCategories(query).catch(() => []), [unit.title, unit.brand, unit.model, unit.category])) {
+    const sure = (await suggestionsFor(query).catch(() => ({ preselect: null }))).preselect;
+    if (sure?.category_id) {
       const { data: t } = await sb.from("channel_taxonomy").select("category_id,path")
-        .eq("channel", "ebay").eq("category_id", s.categoryId).eq("active", true).eq("leaf", true).maybeSingle();
-      if (t) { suggestion = t; break; }
+        .eq("channel", "ebay").eq("category_id", sure.category_id).eq("active", true).eq("leaf", true).maybeSingle();
+      if (t) suggestion = t;
     }
   }
   const fields = row?.category_id ? await ebayAspectFields(storeId, row.category_id) : [];
@@ -87,6 +130,15 @@ async function handle(event) {
   try {
     const body = JSON.parse(event.body || "{}");
     const storeId = await storeFor(event, body.store_id);
+    if (body.action === "suggest-for-title") {
+      const title = String(body.title || body.query || "").trim();
+      try {
+        const payload = await suggestionsFor(title);
+        return json(200, { ok: true, ...payload });
+      } catch (error) {
+        return json(200, { ok: false, error: "eBay is unreachable. Retry, or browse the saved category tree. Nothing was saved.", detail: String(error?.message || error) });
+      }
+    }
     const sku = String(body.sku || "").trim();
     if (!sku) return json(400, { error: "sku_required" });
     const sb = serviceClient();
@@ -103,15 +155,15 @@ async function handle(event) {
       current = await form(sb, storeId, sku);
       if (!current.category_id || current.auto_picked) {
         const query = current.item?.title || [current.item?.brand, current.item?.model].filter(Boolean).join(" ");
-        for (const suggestion of rankCategorySuggestions(await suggestCategories(query).catch(() => []), [current.item?.title, current.item?.brand, current.item?.model])) {
+        const sure = (await suggestionsFor(query).catch(() => ({ preselect: null }))).preselect;
+        if (sure?.category_id) {
           const { data: tax } = await sb.from("channel_taxonomy").select("category_id,path,active,leaf")
-            .eq("channel", "ebay").eq("category_id", suggestion.categoryId).maybeSingle();
-          if (!tax?.active || !tax?.leaf) continue;
-          if (current.category_id && String(current.category_id) === String(tax.category_id)) break;
-          await ebayAspectFields(storeId, tax.category_id);
-          await deps.saveEbayRow(storeId, sku, { category_id: tax.category_id,
-            source: "auto_suggested", attributes: current.attributes || {} });
-          break;
+            .eq("channel", "ebay").eq("category_id", sure.category_id).maybeSingle();
+          if (tax?.active && tax?.leaf && String(current.category_id || "") !== String(tax.category_id)) {
+            await ebayAspectFields(storeId, tax.category_id);
+            await deps.saveEbayRow(storeId, sku, { category_id: tax.category_id,
+              source: "auto_suggested", attributes: current.attributes || {} });
+          }
         }
       }
       current = await form(sb, storeId, sku);
@@ -133,6 +185,7 @@ async function handle(event) {
     if (body.action === "preview-receive") {
       const categoryId = String(body.category_id || "").trim();
       if (!categoryId) return json(400, { error: "category_id_required" });
+      await ensureStoredEbayLeaf(categoryId, body.path || "");
       const fields = await ebayAspectFields(storeId, categoryId);
       const identity = body.identity || {};
       const seed = {
@@ -141,11 +194,14 @@ async function handle(event) {
       };
       const { attributes, filled } = fillMissing(body.attributes || {}, seed, fields);
       const { data: tax } = await sb.from("channel_taxonomy").select("path").eq("channel", "ebay").eq("category_id", categoryId).maybeSingle();
+      const leafName = String(tax?.path || "").split(">").pop()?.trim() || "";
+      const conditions = await conditionChoices(categoryId, leafName);
       return json(200, {
         ok: true, category_id: categoryId, path: tax?.path || null,
         fields: fields.filter((f) => f.required || f.recommended),
         attributes, prefilled: filled, missing: missingRequired(fields, attributes),
         usage: await usageFor(sb, storeId, categoryId, fields),
+        ...conditions,
       });
     }
     if (body.action === "preview-category") {

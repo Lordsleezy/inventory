@@ -1,4 +1,6 @@
-type AspectDef = { name: string; required?: boolean; allowed?: string[]; selection_only?: boolean };
+import { missingAspectNames } from '../../../shared/ebay-category-present.mjs';
+
+type AspectDef = { name: string; required?: boolean; allowed?: string[]; selection_only?: boolean; multi?: boolean; maxLength?: number };
 
 export type ReceiveFieldKey =
   | 'photo'
@@ -63,16 +65,12 @@ export function notForSaleBrandError(_doNotList: boolean, _brandReady: boolean):
   return null;
 }
 
-export function aspectFilled(def: AspectDef, attributes: Record<string, string>, na: Record<string, boolean>) {
-  if (na[def.name]) return true;
-  const v = (attributes[def.name] || '').trim();
-  if (!v) return false;
-  if (def.selection_only && def.allowed?.length) return def.allowed.includes(v);
-  return true;
+export function aspectFilled(def: AspectDef, attributes: Record<string, string>, _na: Record<string, boolean> = {}) {
+  return !missingAspectNames([def], attributes).length && Boolean((attributes[def.name] || '').trim());
 }
 
-export function missingEbayAspects(fields: AspectDef[], attributes: Record<string, string>, na: Record<string, boolean>) {
-  return fields.filter(f => f.required && !aspectFilled(f, attributes, na)).map(f => f.name);
+export function missingEbayAspects(fields: AspectDef[], attributes: Record<string, string>, _na: Record<string, boolean> = {}) {
+  return missingAspectNames(fields, attributes);
 }
 
 export function upcRequired(channels: string[]) {

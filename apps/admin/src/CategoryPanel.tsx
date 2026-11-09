@@ -94,14 +94,30 @@ export function CategoryPanel({ client, storeId, initialSku, onSaved }: Props) {
   useEffect(() => {
     let active = true;
     const timer = setTimeout(() => { void (async () => {
+      if (channel === 'ebay') {
+        if (search.trim().length < 3) { if (active) setChoices((old) => ({ ...old, ebay: [] })); return; }
+        const { data: session } = await client.auth.getSession();
+        const token = session.session?.access_token;
+        if (!token) return;
+        const res = await fetch(floorFunctionUrl('ebay-specifics'), {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ store_id: storeId, action: 'suggest-for-title', title: search.trim() }),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!active) return;
+        if (!res.ok || body.ok === false) setError(body.error || 'eBay is unreachable. Retry.');
+        else setChoices((old) => ({ ...old, ebay: ((body.suggestions || []) as { category_id: string; path: string }[]).map((row) => ({ ...row, required_fields: [] })) }));
+        return;
+      }
       const { data, error: e } = await client.rpc('portal_category_search', { p_channel: channel, p_query: search, p_limit: 40 });
       if (active) {
         if (e) setError(e.message);
         else setChoices((old) => ({ ...old, [channel]: (data || []) as Choice[] }));
       }
-    })(); }, 150);
+    })(); }, channel === 'ebay' ? 450 : 150);
     return () => { active = false; clearTimeout(timer); };
-  }, [client, channel, search, reload]);
+  }, [client, storeId, channel, search, reload]);
 
   useEffect(() => {
     const value = categories[channel];

@@ -19,6 +19,7 @@ import {
   ungradedCardPayload,
 } from "./ebay-conditions.mjs";
 import { clearanceCondition, isCollectible } from "./ebay-listing-standards.mjs";
+import { missingAspectNames } from "../../shared/ebay-category-present.mjs";
 
 /**
  * Convenience Floor→eBay leaf IDs (appliances etc.). Not an allowlist — anything else
@@ -388,11 +389,12 @@ export async function ebayCategoriesForGtin(gtin) {
 }
 
 const taxonomyCache = new Map();
+const TAXONOMY_CACHE_MS = 24 * 60 * 60 * 1000;
 async function cachedTaxonomy(key, load) {
   const prior = taxonomyCache.get(key);
   if (prior && prior.until > Date.now()) return prior.promise;
   const promise = load();
-  taxonomyCache.set(key, { promise, until: Date.now() + 10 * 60_000 });
+  taxonomyCache.set(key, { promise, until: Date.now() + TAXONOMY_CACHE_MS });
   try { return await promise; }
   catch (error) { taxonomyCache.delete(key); throw error; }
 }
@@ -420,6 +422,26 @@ export async function categoryInfo(categoryId) {
 
 export async function categoryName(categoryId) {
   return (await categoryInfo(categoryId)).name;
+}
+
+/** A suggestion eBay returned has to be a stored leaf before aspects can be fetched. */
+export async function ensureStoredEbayLeaf(categoryId, hintPath = "") {
+  const id = String(categoryId || "").trim();
+  if (!/^\d+$/.test(id)) throw new Error("That eBay category is not in the category tree. Pick it again.");
+  const sb = serviceClient();
+  const { data: existing, error } = await sb.from("channel_taxonomy").select("category_id,active,leaf,path")
+    .eq("channel", "ebay").eq("category_id", id).maybeSingle();
+  if (error) throw new Error(error.message);
+  if (existing?.active && existing.leaf) return existing;
+  const info = await categoryInfo(id);
+  if (!info.leaf) throw new Error("That eBay category is not a leaf. Pick a specific category.");
+  const { data: sample } = await sb.from("channel_taxonomy").select("version").eq("channel", "ebay").eq("active", true).limit(1).maybeSingle();
+  const path = String(hintPath || existing?.path || info.name || id);
+  const { error: writeError } = await sb.from("channel_taxonomy").upsert({
+    channel: "ebay", category_id: id, path, leaf: true, active: true, version: sample?.version || "ebay-live",
+  }, { onConflict: "channel,category_id" });
+  if (writeError) throw new Error(writeError.message);
+  return { category_id: id, path, leaf: true, active: true };
 }
 
 export async function suggestCategories(query) {
@@ -668,7 +690,9 @@ export async function prepareUnitAspects({ storeId, unit, liveCheck = false }) {
     title: unit?.title,
   });
   const ui = visibleDefs(filled.filled);
-  const missingRequired = ui.filter((row) => row.required && !row.value).map((row) => row.name);
+  const missingRequired = missingAspectNames(ui.map((row) => ({
+    name: row.name, required: row.required, allowed: row.allowed, selectionOnly: row.selectionOnly, maxLength: row.maxLength,
+  })), Object.fromEntries(ui.map((row) => [row.name, row.value || ''])));
   const missingRecommended = ui.filter((row) => row.recommended && !row.value).map((row) => row.name);
   return {
     floor,
