@@ -25,7 +25,8 @@ export function ReceiveGroupRow({item,client,admin,money,onOpen,onChanged,search
     const current=item.group_members||[];
     if(current.length===item.group_total)return;
     setBusy(true);
-    const results=await Promise.all(skus.map(async sku=>{const {data,error:e}=await client.rpc('portal_inventory_detail',{p_sku:sku});if(e||!data)return null;const d=data as {unit?:Record<string,unknown>};const u=d.unit||{};return {sku,title:String(u.title||''),state:String(u.state||''),condition:u.condition==null?null:String(u.condition),ask_cents:u.ask_cents==null?null:Number(u.ask_cents),sold_price_cents:u.sold_price_cents==null?undefined:Number(u.sold_price_cents),missing:Array.isArray(u.missing)?u.missing.map(String):[],defective:Boolean(u.defective),not_for_sale:Boolean(u.not_for_sale)} as GroupMember;}));
+    const detailRpc=admin?'portal_inventory_detail':'staff_inventory_detail';
+    const results=await Promise.all(skus.map(async sku=>{const {data,error:e}=await client.rpc(detailRpc,{p_sku:sku});if(e||!data)return null;const d=data as {unit?:Record<string,unknown>};const u=d.unit||{};return {sku,title:String(u.title||''),state:String(u.state||''),condition:u.condition==null?null:String(u.condition),ask_cents:u.ask_cents==null?null:Number(u.ask_cents),sold_price_cents:u.sold_price_cents==null?undefined:Number(u.sold_price_cents),missing:Array.isArray(u.missing)?u.missing.map(String):[],defective:Boolean(u.defective),not_for_sale:Boolean(u.not_for_sale)} as GroupMember;}));
     setMembers(results.filter((x):x is GroupMember=>Boolean(x)));setBusy(false);
   }
   async function apply(){

@@ -86,6 +86,8 @@ test('phone More, inventory, orders, and item pages follow the same three desks'
 
   const item = await readFile(path.join(root, 'appMode', 'AppItemDetail.tsx'), 'utf8');
   assert.match(item, /staffMode \? 'staff_inventory_detail' : 'portal_inventory_detail'/);
+  const deskInventory = await readFile(path.join(root, 'InventoryPage.tsx'), 'utf8');
+  assert.match(deskInventory, /associateBrowseOnly \? 'staff_inventory_detail' : 'portal_inventory_detail'/);
   assert.match(item, /const cost = !staffMode && unit\?\.acquisition_cost_cents/);
   assert.match(item, /const profit = !moneyHidden && !staffMode \? profitAfterFeesCents/);
 
