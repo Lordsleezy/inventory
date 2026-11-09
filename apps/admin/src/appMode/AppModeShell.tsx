@@ -35,6 +35,8 @@ type Props = {
   session: Session;
   storeId: string;
   fullAccess: boolean;
+  /** Owner desk: staff floor tabs plus Reports / Safe / Manifests / Books under More. */
+  ownerAccess?: boolean;
   staffSession: StaffSession | null;
   money: (n: number) => string;
   stamp: (s: string) => string;
@@ -54,6 +56,8 @@ type Props = {
 
 /** Clerk tab bar (max five). Admins use INVENTORY / RECEIVE / ORDERS / RETURNS / MORE. */
 const ASSOCIATE_TABS: AppTab[] = ['inventory', 'receive', 'orders', 'register', 'locations', 'settings'];
+/** Owner keeps the staff floor tabs; money pages live under More. */
+const OWNER_TAB_IDS: AppTab[] = ['inventory', 'receive', 'orders', 'register', 'locations', 'more'];
 const ADMIN_TAB_IDS: AppTab[] = ['inventory', 'receive', 'orders', 'returns', 'more'];
 
 const TABS: { id: AppTab; label: string; icon: React.ReactNode; adminOnly?: boolean; associateOnly?: boolean }[] = [
@@ -142,6 +146,7 @@ export function AppModeShell({
   session,
   storeId,
   fullAccess,
+  ownerAccess = false,
   staffSession,
   money,
   stamp,
@@ -163,16 +168,17 @@ export function AppModeShell({
   void _personName;
   void _busy;
   void _onCommissionChanged;
+  const moneyAccess = fullAccess || ownerAccess;
   const [tab, setTab] = useState<AppTab>(() => {
-    if (!fullAccess) return 'inventory';
+    if (!fullAccess && !ownerAccess) return 'inventory';
     const page = parseNavFromLocation().page;
-    if (page === 'returns') return 'returns';
-    if (page === 'reports' || page === 'books') return 'more';
+    if (fullAccess && page === 'returns') return 'returns';
+    if (moneyAccess && ['reports', 'books', 'withdrawals', 'manifests'].includes(page)) return 'more';
     return 'inventory';
   });
   const [itemSku, setItemSku] = useState<string | null>(null);
   const [itemMissing, setItemMissing] = useState<string[]>([]);
-  const [morePage, setMorePage] = useState<MoreId | null>(() => fullAccess && ['reports','books'].includes(parseNavFromLocation().page) ? parseNavFromLocation().page as MoreId : null);
+  const [morePage, setMorePage] = useState<MoreId | null>(() => moneyAccess && ['reports', 'books', 'withdrawals', 'manifests'].includes(parseNavFromLocation().page) ? parseNavFromLocation().page as MoreId : null);
   /** When a page was opened from Other, Back returns there instead of More home. */
   const [moreReturnTo, setMoreReturnTo] = useState<MoreId | null>(null);
   const [booksDetail, setBooksDetail] = useState(false);
@@ -218,7 +224,8 @@ export function AppModeShell({
   }, [itemSku, morePage, moreReturnTo, channel]);
 
   function switchTab(next: AppTab) {
-    if (!fullAccess && !ASSOCIATE_TABS.includes(next)) next = 'inventory';
+    const allowed = fullAccess ? ADMIN_TAB_IDS : ownerAccess ? OWNER_TAB_IDS : ASSOCIATE_TABS;
+    if (!allowed.includes(next)) next = 'inventory';
     const panel = document.querySelector('.app-tab-panel:not([hidden])') as HTMLElement | null;
     if (panel && tab) scrollPos.current[tab] = panel.scrollTop;
     setTab(next);
@@ -232,7 +239,7 @@ export function AppModeShell({
     });
   }
 
-  const tabs = TABS.filter((t) => (fullAccess ? ADMIN_TAB_IDS : ASSOCIATE_TABS).includes(t.id));
+  const tabs = TABS.filter((t) => (fullAccess ? ADMIN_TAB_IDS : ownerAccess ? OWNER_TAB_IDS : ASSOCIATE_TABS).includes(t.id));
   const stackOpen = !!(itemSku || morePage || channel);
 
   return (
@@ -321,13 +328,14 @@ export function AppModeShell({
           </div>
         )}
 
-        {fullAccess && (
+        {(fullAccess || ownerAccess) && (
           <div className="app-tab-panel" data-tab="more" hidden={tab !== 'more' || stackOpen}>
             {tab === 'more' && !morePage && !channel && (
               <AppMoreHome
                 client={client}
                 session={session}
                 fullAccess={fullAccess}
+                ownerAccess={ownerAccess}
                 staffSession={staffSession}
                 money={money}
                 setPage={(p) => {
@@ -345,7 +353,7 @@ export function AppModeShell({
           </div>
         )}
 
-        {!fullAccess && (
+        {!fullAccess && !ownerAccess && (
           <div className="app-tab-panel" data-tab="settings" hidden={tab !== 'settings'}>
             {tab === 'settings' && (
               <AppSettingsNative
@@ -364,6 +372,7 @@ export function AppModeShell({
               client={client}
               storeId={storeId}
               canManage={false}
+              canAddBay
               variant="app"
               accessToken={session.access_token}
               money={money}
@@ -424,22 +433,22 @@ export function AppModeShell({
             backLabel={moreReturnTo === 'other' ? 'Other' : 'More'}
           />
         )}
-        {fullAccess && morePage === 'reports' && (
+        {moneyAccess && morePage === 'reports' && (
           <AppReportsNative onBack={leaveMorePage} action={reportsAction} onAction={onReportsAction}>
             {reportsSlot || <p className="app-footer-count">Reports unavailable.</p>}
           </AppReportsNative>
         )}
-        {fullAccess && morePage === 'withdrawals' && (
+        {moneyAccess && morePage === 'withdrawals' && (
           <AppReportsNative onBack={leaveMorePage} title="Safe">
             <MoneyPage client={client} storeId={storeId} accessToken={session.access_token} money={money} stamp={stamp} />
           </AppReportsNative>
         )}
-        {fullAccess && morePage === 'books' && (
+        {moneyAccess && morePage === 'books' && (
           <AppReportsNative onBack={() => booksBack()} title={booksTitle} backLabel={booksDetail ? 'Books' : (moreReturnTo === 'other' ? 'Other' : 'More')}>
             <BooksPage client={client} money={money} native onNativeNavigation={(detail, title, back) => { setBooksDetail(detail); setBooksTitle(detail ? (title || 'Books') : 'Books'); setBooksBack(() => back || leaveMorePage); }} />
           </AppReportsNative>
         )}
-        {fullAccess && morePage === 'manifests' && (
+        {moneyAccess && morePage === 'manifests' && (
           <AppReportsNative onBack={leaveMorePage} title="Manifests" backLabel={moreReturnTo === 'other' ? 'Other' : 'More'}>
             <ManifestsPage client={client} storeId={storeId} money={money} />
           </AppReportsNative>
@@ -482,7 +491,7 @@ export function AppModeShell({
               : <p className="app-footer-count">This login can’t ring sales. Ask an owner to add a staff row.</p>}
           </AppReportsNative>
         )}
-        {fullAccess && morePage === 'settings' && (
+        {(fullAccess || ownerAccess) && morePage === 'settings' && (
           <AppSettingsNative
             client={client}
             fullAccess={fullAccess}

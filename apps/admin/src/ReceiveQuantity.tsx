@@ -1,6 +1,6 @@
 import { useState } from 'react';
 
-export function QuantityPicker({ value, onChange, disabled = false, minimum = 1, maximum = 999, label = 'Quantity' }: { value: number | string; onChange: (n: string) => void; disabled?: boolean; minimum?: number; maximum?: number; label?: string }) {
+export function QuantityPicker({ value, onChange, disabled = false, minimum = 1, maximum = 999, label = 'Quantity', showHint = true }: { value: number | string; onChange: (n: string) => void; disabled?: boolean; minimum?: number; maximum?: number; label?: string; showHint?: boolean }) {
   const parsed = Number(value);
   const valid = Number.isInteger(parsed) && parsed >= minimum && parsed <= maximum;
   const [typing, setTyping] = useState(false);
@@ -10,12 +10,12 @@ export function QuantityPicker({ value, onChange, disabled = false, minimum = 1,
     </select>
     <button type="button" className="secondary" disabled={disabled} aria-pressed={typing} onClick={() => setTyping(v => !v)}>{typing ? 'Use list' : 'Type quantity'}</button>
     {typing && <input aria-label={`${label} typed value`} type="number" inputMode="numeric" min={minimum} max={maximum} step={1} value={value} disabled={disabled} onChange={e => onChange(e.target.value)} onBlur={e => { const n = Number(e.target.value); if (!Number.isInteger(n) || n < minimum || n > maximum) onChange(String(minimum)); }} />}
-  </div><small>Choose 1–100 or type a whole number up to {maximum}.</small></label>;
+  </div>{showHint && <small>Choose 1–100 or type a whole number up to {maximum}.</small>}</label>;
 }
 
 export function ReceiveQuantity({ value, onChange, disabled = false }: { value: string; onChange: (n: string) => void; disabled?: boolean }) {
   return <div className="receive-quantity">
-    <QuantityPicker value={value} onChange={onChange} disabled={disabled} label="Quantity" />
+    <QuantityPicker value={value} onChange={onChange} disabled={disabled} label="Quantity" showHint={false} />
     <small className="rcv-note">Price and cost are per unit. Use photos representative of every unit.</small>
   </div>;
 }

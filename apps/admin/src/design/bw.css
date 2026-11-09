@@ -285,3 +285,105 @@ html.dark .order-stepper li.current { color: #fff; }
 html.dark .order-stepper li.current span { background: #fff; color: #000; }
 html.dark .unit-edit-segmented button.is-active { border-color: #fff; color: #fff; background: transparent; }
 html.dark .depop-label-drop { background: transparent; color: #fff; border-color: #4a4a4a; }
+
+/* Phone rows and the Receive form. Later than app-mode so the flat mockup wins. */
+html.app-mode .app-row-title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  white-space: normal;
+  line-height: 1.25;
+  font-size: 16px;
+}
+html.app-mode .app-sku-line { display: block; color: #9a9a9a; font-size: 13px; }
+html.app-mode .app-sku-line .lbl { color: #9a9a9a; font-weight: 500; margin-right: 4px; }
+html.app-mode .app-sku-line strong { color: #fff; font-weight: 700; }
+html.app-mode .app-row-cond, html.app-mode .app-row-when, html.app-mode .app-day-head {
+  color: #9a9a9a; font-size: 13px;
+}
+html.app-mode .app-day-head {
+  margin: 14px 16px 4px; font-size: 12px; letter-spacing: 0.02em;
+}
+html.app-mode .app-row-when { margin-left: auto; white-space: nowrap; font-variant-numeric: tabular-nums; }
+html.app-mode .rcv-ready { margin: 0 16px 8px; color: #9a9a9a; font-size: 13px; }
+html.app-mode .rcv-home-scan {
+  display: flex; align-items: center; gap: 8px; margin: 0 16px 12px;
+  border: 1px solid #4a4a4a; border-radius: 10px; min-height: 48px; padding: 0 8px 0 12px;
+  min-width: 0; max-width: 100%; box-sizing: border-box;
+}
+html.app-mode .rcv-home-scan input {
+  flex: 1; min-width: 0; border: 0; background: transparent; min-height: 44px; padding: 0;
+}
+html.app-mode .rcv-home-scan button {
+  border: 0; background: transparent; color: #fff; font-weight: 700; min-height: 44px; padding: 0 8px;
+}
+html.app-mode .rcv-home-actions {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 0 16px 12px;
+}
+html.app-mode .rcv-bundle { margin: 0 16px 8px; }
+html.app-mode .receive-panel.receive-v2,
+html.app-mode .receive-panel.receive-v2 .receive-v2-grid,
+html.app-mode .receive-panel.receive-v2 .unit-edit-grid {
+  display: block; min-width: 0; max-width: 100%; overflow-x: hidden;
+}
+html.app-mode .receive-panel.receive-v2 .rcv-sec {
+  border: 0 !important; border-radius: 0 !important; background: transparent !important;
+  box-shadow: none !important; margin: 0 !important; padding: 0 !important;
+  border-bottom: 1px solid #2a2a2a !important;
+}
+html.app-mode .receive-panel.receive-v2 .rcv-sec-btn {
+  border: 0 !important; border-radius: 0 !important; background: transparent !important;
+  box-shadow: none !important; min-height: 48px; padding: 12px 0 !important;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; width: 100%;
+}
+html.app-mode .receive-panel.receive-v2 .rcv-sec-btn strong { font-size: 17px; white-space: nowrap; }
+html.app-mode .receive-panel.receive-v2 .rcv-status { font-size: 14px; font-style: normal; overflow: hidden; text-overflow: ellipsis; max-width: 42vw; }
+html.app-mode .receive-panel.receive-v2 .receive-v2-label,
+html.app-mode .receive-panel.receive-v2 .rcv-sec-body label { font-size: 13px !important; color: #9a9a9a; }
+html.app-mode .receive-panel.receive-v2 .rcv-note,
+html.app-mode .receive-panel.receive-v2 .quantity-picker > small { font-size: 12px; color: #9a9a9a; }
+html.app-mode .receive-panel.receive-v2 .rcv-needed {
+  border: 0 !important; background: none !important; box-shadow: none !important;
+  border-radius: 0 !important; color: #FF453A !important; font-size: 13px; text-align: center;
+}
+html.app-mode .receive-panel.receive-v2 .rcv-upc-field,
+html.app-mode .receive-panel.receive-v2 .rcv-found,
+html.app-mode .receive-panel.receive-v2 .rcv-miss { min-width: 0; }
+html.app-mode .receive-panel.receive-v2 .rcv-upc-field {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  border: 1px solid #4a4a4a; border-radius: 10px; min-height: 44px; padding: 0 12px; margin-bottom: 8px;
+}
+html.app-mode .receive-panel.receive-v2 .rcv-found strong,
+html.app-mode .receive-panel.receive-v2 .rcv-miss strong {
+  display: block; font-size: 17px; white-space: normal; overflow-wrap: anywhere;
+}
+html.app-mode .receive-panel.receive-v2 .rcv-found small,
+html.app-mode .receive-panel.receive-v2 .rcv-miss small { color: #9a9a9a; font-size: 13px; }
+html.app-mode .receive-panel.receive-v2 .rcv-miss-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+html.app-mode .receive-panel.receive-v2 .receive-v2-row2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
+html.app-mode .receive-store-phone .receive-advanced { display: block !important; }
+html.app-mode .loc-new-bay { margin: 0 16px 12px; width: calc(100% - 32px); }
+
+html.app-mode .nr-cashier-chip { background: transparent; border-radius: 0; padding: 0; font-size: 17px; }
+html.app-mode .nr-search {
+  background: transparent; border: 1px solid #4a4a4a; border-radius: 10px; margin: 0 16px 12px;
+}
+html.app-mode .nr-search input { min-width: 0; }
+html.app-mode .nr-scan-btn { background: transparent; color: #fff; font-size: 15px; font-weight: 700; }
+html.app-mode .nr-line { background: transparent; }
+html.app-mode .nr-line-main { background: transparent; }
+html.app-mode .nr-line-text strong {
+  white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
+}
+html.app-mode .nr-cash, html.app-mode .nr-card {
+  min-height: 56px; border-radius: 10px; display: grid; place-items: center; justify-items: center;
+}
+html.app-mode .nr-cash { background: #fff !important; color: #000 !important; }
+html.app-mode .nr-card { background: transparent !important; color: #fff !important; border: 1px solid #fff !important; }
+html.app-mode .nr-cash:disabled, html.app-mode .nr-card:disabled { opacity: 0.45; }
+html.app-mode .nr-links { display: flex; justify-content: space-between; gap: 12px; margin-top: 8px; }
+html.app-mode .nr-links button {
+  border: 0; background: transparent; color: #fff; font-size: 15px; min-height: 44px; padding: 0;
+}
+html.app-mode .nr-empty { padding: 18px 0; text-align: left; }

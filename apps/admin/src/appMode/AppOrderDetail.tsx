@@ -104,7 +104,7 @@ export function AppOrderDetail(props: AppOrderDetailProps) {
   const labelText = order.label_origin === 'upload'
     ? `Uploaded · ${CHANNEL[ch] || order.channel || 'Label'}`
   : order.label_origin === 'bought' || order.label_purchased_at
-    ? `Bought${order.label_cost_cents != null ? ` · ${money(order.label_cost_cents)}` : ''}`
+    ? `Bought${isAdmin && order.label_cost_cents != null ? ` · ${money(order.label_cost_cents)}` : ''}`
     : orderNeedsLabel(order) ? 'Upload label' : buy ? 'Buy label' : '—';
 
   const shipTo = useMemo(() => (
@@ -161,7 +161,7 @@ export function AppOrderDetail(props: AppOrderDetailProps) {
         <div className="app-order-hero-copy">
           <h2 className="app-order-hero-title">{displayOrderTitle(order.title || order.marketplace_title)}</h2>
           <p className="app-order-hero-sku"><span className="lbl">SKU</span> <strong>{order.sku || '—'}</strong></p>
-          <p className="app-order-hero-meta">{CHANNEL[ch] || order.channel} · {money(order.item_cents || 0)} · {when(order.paid_at || order.created_at)}</p>
+          <p className="app-order-hero-meta">{isAdmin ? `${CHANNEL[ch] || order.channel} · ${money(order.item_cents || 0)} · ` : ''}{when(order.paid_at || order.created_at)}</p>
         </div>
       </div>
 
@@ -191,6 +191,7 @@ export function AppOrderDetail(props: AppOrderDetailProps) {
         </label>
       </section>
 
+      {!isAdmin && shipTo && <p className="app-order-plain"><span className="eyebrow">Ship to</span> {shipTo}</p>}
       {ship && stage !== 'canceled' && <OrderStageTabs stage={stage as OrderStage} />}
       <OrderFacts layout="app" label={labelText} labeled={labeled} order={order} />
 

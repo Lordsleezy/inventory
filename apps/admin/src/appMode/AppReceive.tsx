@@ -35,7 +35,8 @@ export function AppReceive({ client, storeId, accessToken, staffMode = false, on
   const [pendingUpc, setPendingUpc] = useState<string | null>(null);
   const [cameraError, setCameraError] = useState('');
   const [nextSku, setNextSku] = useState<string | null>(null);
-  const [today, setToday] = useState<{ sku: string; title: string }[]>([]);
+  const [today, setToday] = useState<{ sku: string; title: string; location: string; at: string }[]>([]);
+  const scanRef = useRef<HTMLInputElement>(null);
   const [editSku, setEditSku] = useState<string | null>(null);
   const homeCamera = useRef<HTMLInputElement>(null);
 
@@ -60,7 +61,7 @@ export function AppReceive({ client, storeId, accessToken, staffMode = false, on
       start.setHours(0, 0, 0, 0);
       const { data } = await client
         .from(staffMode ? 'units_pos' : 'units')
-        .select('sku, title, brand, model, received_at')
+        .select('sku, title, brand, model, received_at, location')
         .eq('store_id', storeId)
         .gte('received_at', start.toISOString())
         .order('received_at', { ascending: false })
@@ -69,6 +70,8 @@ export function AppReceive({ client, storeId, accessToken, staffMode = false, on
       setToday((data || []).map((u) => ({
         sku: u.sku,
         title: displayProductTitle({ title: u.title, brand: u.brand, model: u.model, fallback: u.sku }),
+        location: u.location || '',
+        at: u.received_at,
       })));
     })();
     return () => { alive = false; };
@@ -117,16 +120,12 @@ export function AppReceive({ client, storeId, accessToken, staffMode = false, on
     <>
       <div className="app-large-title app-receive-title">
         <h1>Receive</h1>
-        <span className="app-scanner-status ok" title="Bluetooth keyboard scanner status is not exposed to Floor. Scan into the barcode field to test it.">
-          <i />
-          Scanner input ready
-        </span>
       </div>
-
-      <button type="button" className="app-scan-card" onClick={() => openForm(false)}>
-        <strong>Scan a barcode</strong>
-        <span>Next SKU {nextSku || '…'}</span>
-      </button>
+      <p className="rcv-ready">Scanner ready · Next SKU {nextSku || '…'}</p>
+      <form className="rcv-home-scan" onSubmit={(e) => { e.preventDefault(); const code = scanRef.current?.value.trim(); if (code) { setPendingUpc(code); openForm(false); } else openForm(false); }}>
+        <input ref={scanRef} placeholder="Scan or type a barcode" autoComplete="off" enterKeyHint="go" inputMode="text" />
+        <button type="submit">Go</button>
+      </form>
 
       <input
         ref={homeCamera}
@@ -153,12 +152,12 @@ export function AppReceive({ client, storeId, accessToken, staffMode = false, on
         }}
       />
 
-      <div className="app-actions" style={{ paddingTop: 0 }}>
+      <div className="rcv-home-actions">
         {/* Must open the file picker in this tap — deferred clicks are blocked on iOS. */}
-        <button type="button" onClick={() => homeCamera.current?.click()}>Use camera</button>
-        <button type="button" onClick={() => openForm(true)}>No barcode</button>
-        {!staffMode && <button type="button" className="bundle-entry" onClick={() => setPhase('bundle')}>Bundle items</button>}
+        <button type="button" className="secondary" onClick={() => homeCamera.current?.click()}>Use camera</button>
+        <button type="button" className="secondary" onClick={() => openForm(true)}>No barcode</button>
       </div>
+      {!staffMode && <button type="button" className="text-button rcv-bundle" onClick={() => setPhase('bundle')}>Bundle items</button>}
       {cameraError && <p className="app-inline-error">{cameraError}</p>}
       <ReceiveWorkStatus client={client} accessToken={accessToken} />
 
@@ -168,9 +167,10 @@ export function AppReceive({ client, storeId, accessToken, staffMode = false, on
         {today.map((u) => (
           <button key={u.sku} type="button" className="app-row" onClick={() => setEditSku(u.sku)}>
             <span className="app-row-text">
-              <strong>{u.title}</strong>
-              <small>{u.sku}</small>
+              <strong className="app-row-title">{u.title}</strong>
+              <small className="app-sku-line"><span className="lbl">SKU</span> <strong>{u.sku}</strong>{u.location ? ` · ${u.location}` : ''}</small>
             </span>
+            <span className="app-row-when">{u.at ? new Date(u.at).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) : ''}</span>
           </button>
         ))}
       </div>

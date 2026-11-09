@@ -271,7 +271,7 @@ export function NativeRegisterCart(props: NativeRegisterProps) {
           <span className="nr-search-icon" aria-hidden>⌕</span>
           <input
             ref={searchRef}
-            placeholder="Scan or search SKU, title"
+            placeholder="Scan or search SKU or title"
             value={q}
             onChange={e => {
               setQ(e.target.value);
@@ -346,17 +346,15 @@ export function NativeRegisterCart(props: NativeRegisterProps) {
                     </span>
                     <span className="nr-line-text">
                       <strong>{line.title}</strong>
-                      <small>SKU {line.sku}{line.condition ? ` · ${line.condition}` : ''}</small>
+                      <small className="app-sku-line"><span className="lbl">SKU</span> <strong>{line.sku}</strong>{line.condition ? ` · ${line.condition}` : ''}</small>
                       {line.bundleIncludes?.map(part => (
                         <small key={part.sku}>FREE {part.quantity * line.qty} × {part.title} · SKU {part.sku}</small>
                       ))}
-                      {line.qtyOnHand > 1 ? (
-                        <span className="nr-stepper">
-                          <button type="button" disabled={!idle || cashOpen || line.qty <= 1} onClick={() => setQty(line.sku, line.qty - 1)}>−</button>
-                          <span>{line.qty}</span>
-                          <button type="button" disabled={!idle || cashOpen || line.qty >= line.qtyOnHand} onClick={() => setQty(line.sku, line.qty + 1)}>+</button>
-                        </span>
-                      ) : null}
+                      <span className="nr-stepper">
+                        <button type="button" disabled={!idle || cashOpen || line.qty <= 1} onClick={() => setQty(line.sku, line.qty - 1)}>−</button>
+                        <span>{line.qty}</span>
+                        <button type="button" disabled={!idle || cashOpen || line.qty >= line.qtyOnHand} onClick={() => setQty(line.sku, line.qty + 1)}>+</button>
+                      </span>
                     </span>
                     <span className="nr-line-price">
                       {editingSku === line.sku ? (
@@ -415,13 +413,6 @@ export function NativeRegisterCart(props: NativeRegisterProps) {
         </div>
 
         <div className="nr-tools">
-          <button
-            type="button"
-            disabled={!idle || cashOpen}
-            onClick={() => { setDiscountDraft(String(discountPct || '')); setDiscountOpen(true); }}
-          >
-            {discountPct > 0 ? `${discountPct}% off` : 'Discount'}
-          </button>
           <button type="button" disabled={!idle || cashOpen} onClick={() => setCustomerOpen(true)}>
             {customer?.name || customer?.phone || 'Customer'}
           </button>
@@ -450,17 +441,20 @@ export function NativeRegisterCart(props: NativeRegisterProps) {
           <>
             <div className="nr-pay">
               <button type="button" className="nr-cash" disabled={busy || !lines.length || cashOpen} onClick={() => void startPay('cash')}>
-                <span>Cash</span>
-                <strong>{formatCentsTotal(total)}</strong>
+                Cash
               </button>
               <button type="button" className="nr-card" disabled={busy || !lines.length || cashOpen} onClick={() => void startPay('card')}>
-                <span>Card</span>
-                <strong>{formatCentsTotal(cardTotal)}</strong>
+                Card
               </button>
             </div>
-            <button type="button" className="nr-split" disabled={busy || !lines.length || cashOpen} onClick={() => void startPay('split')}>
-              Split cash + card
-            </button>
+            <div className="nr-links">
+              <button type="button" className="nr-split" disabled={busy || !lines.length || cashOpen} onClick={() => void startPay('split')}>
+                Split cash + card
+              </button>
+              <button type="button" disabled={!idle || cashOpen} onClick={() => { setDiscountDraft(String(discountPct || '')); setDiscountOpen(true); }}>
+                {discountPct > 0 ? `${discountPct}% off` : '% Off'}
+              </button>
+            </div>
           </>
         )}
       </div>

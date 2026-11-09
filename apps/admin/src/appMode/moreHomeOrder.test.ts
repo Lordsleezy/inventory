@@ -9,9 +9,17 @@ const root = path.dirname(fileURLToPath(import.meta.url));
 test('More home lists primary links in the phone order ending with Other', async () => {
   const src = await readFile(path.join(root, 'AppMore.tsx'), 'utf8');
   const home = src.slice(src.indexOf('export function AppMoreHome'), src.indexOf('export function AppMoreOther'));
-  const admin = home.slice(home.indexOf('{fullAccess ? ('), home.indexOf(') : staffSession ? ('));
+  const admin = home.slice(home.indexOf('{fullAccess ? ('), home.indexOf(') : ownerAccess ? ('));
   const labels = [...admin.matchAll(/Icon tone="[^"]+" \/>([^<]+)</g)].map((m) => m[1].trim());
   assert.deepEqual(labels, ['Live sales', 'Receipts', 'Register', 'Safe', 'Reports', 'Books', 'Locations', 'Other']);
+});
+
+test('Owner More lists Reports, Safe, Manifests, Books, Settings', async () => {
+  const src = await readFile(path.join(root, 'AppMore.tsx'), 'utf8');
+  const home = src.slice(src.indexOf('export function AppMoreHome'), src.indexOf('export function AppMoreOther'));
+  const owner = home.slice(home.indexOf(') : ownerAccess ? ('), home.indexOf(') : staffSession ? ('));
+  const labels = [...owner.matchAll(/Icon tone="[^"]+" \/>([^<]+)</g)].map((m) => m[1].trim());
+  assert.deepEqual(labels, ['Reports', 'Safe', 'Manifests', 'Books', 'Settings']);
 });
 
 test('Other page keeps marketplace and leftover admin links', async () => {

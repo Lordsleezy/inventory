@@ -10,5 +10,5 @@ test('staff Home renders associate desk when not fullAccess', async () => {
   const src = await readFile(path.join(root, 'HomePage.tsx'), 'utf8');
   assert.match(src, /!fullAccess &&/);
   assert.match(src, /desk-grid is-associate/);
-  assert.match(src, /ASSOCIATE_LINKS/);
+  assert.match(src, /deskAccess === 'owner' \? OWNER_LINKS : ASSOCIATE_LINKS/);
 });

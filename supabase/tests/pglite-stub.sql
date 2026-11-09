@@ -3,7 +3,8 @@ create schema if not exists auth;
 create schema if not exists storage;
 
 create table if not exists auth.users (
-  id uuid primary key default gen_random_uuid()
+  id uuid primary key default gen_random_uuid(),
+  email text
 );
 
 -- Match Supabase: read JWT sub when present (tests set request.jwt.claim.sub).

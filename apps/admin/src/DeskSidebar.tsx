@@ -1,12 +1,12 @@
 import { BuildStamp } from './BuildStamp';
-import { DESK_GROUPS, ASSOCIATE_LINKS, type DeskLink } from './deskNav';
+import { deskNavGroups, type DeskAccess, type DeskLink } from './deskNav';
 import type { DeskPulse } from './deskPulse';
 import type { InventoryTab, MainPage } from './navigation';
 
 type Props = {
   page: MainPage;
   inventoryTab?: InventoryTab;
-  fullAccess: boolean;
+  deskAccess: DeskAccess;
   pulse: DeskPulse;
   name: string;
   role: string;
@@ -14,8 +14,8 @@ type Props = {
   onSignOut: () => void;
 };
 
-export function DeskSidebar({ page, inventoryTab, fullAccess, pulse, name, role, onOpen, onSignOut }: Props) {
-  const groups = fullAccess ? DESK_GROUPS : [{ label: 'Your desk', links: ASSOCIATE_LINKS }];
+export function DeskSidebar({ page, inventoryTab, deskAccess, pulse, name, role, onOpen, onSignOut }: Props) {
+  const groups = deskNavGroups(deskAccess);
   return (
     <>
       <div className="aside-brand">

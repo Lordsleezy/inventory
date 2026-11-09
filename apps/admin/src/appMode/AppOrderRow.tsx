@@ -16,6 +16,7 @@ type Props = {
   trackingTail: string;
   onOpen: () => void;
   onPrint?: () => void;
+  hideMoney?: boolean;
   onUrl: (path: string, url: string) => void;
   showUpload?: boolean;
   onUpload?: (file: File) => void;
@@ -23,16 +24,18 @@ type Props = {
 
 export function AppOrderRow({
   order, client, thumbPath, photoUrls, locationCode, money, channelName, trackingTail,
-  onOpen, onPrint, onUrl, showUpload, onUpload,
+  onOpen, onPrint, onUrl, showUpload, onUpload, hideMoney = false,
 }: Props) {
   const loc = locationParts(locationCode);
   const chip = orderChip(order);
   const needsLabel = orderNeedsLabel(order);
   const problem = needsLabel || chip.tone === 'warn';
   const title = displayOrderTitle(order.title || order.marketplace_title);
-  const meta = needsLabel
-    ? `${channelName} · ${money(order.item_cents || 0)}`
-    : [channelName, money(order.item_cents || 0), trackingTail].filter(Boolean).join(' · ');
+  const meta = hideMoney
+    ? [trackingTail].filter(Boolean).join(' · ')
+    : needsLabel
+      ? `${channelName} · ${money(order.item_cents || 0)}`
+      : [channelName, money(order.item_cents || 0), trackingTail].filter(Boolean).join(' · ');
   const locLine = loc ? `${loc.display} · ${loc.slot}`.toUpperCase() : '';
   const showActions = Boolean((hasLabel(order) && onPrint) || (showUpload && onUpload));
 
