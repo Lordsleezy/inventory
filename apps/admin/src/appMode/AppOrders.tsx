@@ -300,7 +300,7 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
     try {
       const url = await labelFileUrl(client, o);
       if (!url) { setError('No label file on this order yet.'); return; }
-      await openShippingLabel(url, download);
+      await openShippingLabel(url, download, client);
     } catch (e) {
       setError(shortError(errText(e)));
     } finally {

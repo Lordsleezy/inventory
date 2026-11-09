@@ -221,7 +221,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
     try {
       const url = await labelFileUrl(client, o);
       if (!url) { setError('No label file on this order yet.'); return; }
-      await openShippingLabel(url);
+      await openShippingLabel(url, false, client);
     } catch (e) { setError(errText(e)); }
     finally { setBusy(''); }
   }

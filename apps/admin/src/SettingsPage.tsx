@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { floorFunctionUrl } from './floorApi';
+import { LabelPaperSetting } from './LabelPaperSetting';
 import { PROTECTED_ADMIN_EMAIL, peopleForCommission } from './settingsPeople';
 
 type Person = { user_id: string; display_name: string; kind: string };
@@ -138,6 +139,7 @@ export function SettingsPage({ accessToken, busy, run, staff, rules, saveRule, r
         </div>;
       })}
     </section>
+    {client && <LabelPaperSetting client={client} />}
     {client && <CdtfaAccount client={client} />}
   </>;
 }

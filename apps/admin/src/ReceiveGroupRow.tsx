@@ -6,12 +6,32 @@ export type GroupMember = { sku: string; title: string; state: string; condition
 export type GroupedInventory = { group_id?: string | null; group_total?: number; group_in_stock?: number; group_skus?: string[]; group_members?: GroupMember[] };
 const EDIT_FIELDS = [['title','Title'],['brand','Brand'],['model','Model'],['category','Category'],['listing_body','Description'],['condition','Condition'],['ask_cents','Price ($)'],['package_length_in','Package length (in)'],['package_width_in','Package width (in)'],['package_height_in','Package height (in)'],['package_weight_lb','Package weight (lb)'],['upc','UPC']] as const;
 export async function printUnitLabels(skus: string[], title: string) {
-  const sheet = window.open('', '_blank');
-  if (!sheet) throw new Error('Allow the print window and try again.');
-  const doc=sheet.document;doc.title='Floor SKU labels';
-  const style=doc.createElement('style');style.textContent='@page{size:2in 1in;margin:0}body{margin:0;font-family:Arial}section{box-sizing:border-box;width:2in;height:1in;padding:.08in;page-break-after:always;overflow:hidden;text-align:center}svg{width:1.8in;height:.45in}small{font-size:9px;display:block}b{font-size:15px}';doc.head.append(style);
-  for(const sku of skus){const label=doc.createElement('section');const caption=doc.createElement('small');caption.textContent=title;label.append(caption);const barcode=doc.createElement('div');barcode.innerHTML=bwipjs.toSVG({bcid:'code128',text:sku,scale:2,height:10,includetext:false});label.append(barcode);const id=doc.createElement('b');id.textContent=sku;label.append(id);doc.body.append(label)}
-  sheet.focus();sheet.print();
+  const { PDFDocument, StandardFonts } = await import('pdf-lib');
+  const { printPdfBytes } = await import('./labelPrint');
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const pageW = 2 * 72;
+  const pageH = 1 * 72;
+  for (const sku of skus) {
+    const page = doc.addPage([pageW, pageH]);
+    page.setMediaBox(0, 0, pageW, pageH);
+    page.setCropBox(0, 0, pageW, pageH);
+    page.setBleedBox(0, 0, pageW, pageH);
+    page.setTrimBox(0, 0, pageW, pageH);
+    page.setArtBox(0, 0, pageW, pageH);
+    const canvas = document.createElement('canvas');
+    bwipjs.toCanvas(canvas, { bcid: 'code128', text: sku, scale: 3, height: 8, includetext: false });
+    const png = await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('Could not draw the barcode.'))), 'image/png');
+    });
+    const image = await doc.embedPng(new Uint8Array(await png.arrayBuffer()));
+    const caption = title.length > 42 ? `${title.slice(0, 41)}…` : title;
+    page.drawText(caption, { x: 6, y: pageH - 14, size: 7, font, maxWidth: pageW - 12 });
+    page.drawImage(image, { x: 8, y: 20, width: pageW - 16, height: 34 });
+    page.drawText(sku, { x: 6, y: 6, size: 11, font: bold });
+  }
+  printPdfBytes(await doc.save());
 }
 export function ReceiveGroupRow({item,client,admin,money,onOpen,onChanged,searchQuery=''}:{item:GroupedInventory & {sku:string;title:string;brand?:string;model?:string;ask_cents:number|null;condition:string|null};client:SupabaseClient;admin:boolean;money:(n:number)=>string;onOpen:(sku:string,missing?:string[])=>void;onChanged:()=>void;searchQuery?:string}) {
   const [editing,setEditing]=useState(false);const [patch,setPatch]=useState<Record<string,string>>({});const [error,setError]=useState('');const [busy,setBusy]=useState(false);
