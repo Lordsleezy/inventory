@@ -174,6 +174,13 @@ export function InventoryPage({
     return () => { active = false; };
   }, [client, selected, detailKey]);
 
+  if (staffTabs && tab === 'receive') {
+    return <>
+      <header><div><div className="eyebrow">RECEIVE</div><h1>Receive</h1><p>Scan a UPC to look up product data, then receive with a real photo.</p></div></header>
+      <ReceivePanel client={client} storeId={storeId} accessToken={accessToken} staffMode onSaved={() => setRefresh(n => n + 1)} />
+    </>;
+  }
+
   const change = (set: () => void) => { set(); setOffset(0); setList(null); };
   const pickTab = (t: InventoryTab) => { setOffset(0); setList(null); onTab(t); };
   const total = list?.totals.row_count ?? list?.totals.unit_count ?? 0;
@@ -188,9 +195,9 @@ export function InventoryPage({
       setQuery(''); setLocation('all');
       pickTab(bucket === 'not_listed' ? 'not-listed' : bucket === 'not_ready' ? 'not-ready' : bucket);
     }} />
-    <div className="inventory-tabs">
-      {(staffTabs ? ([['in-stock', 'In stock'], ['receive', 'Receive']] as [InventoryTab, string][]) : [...LIST_TABS, ...TOOL_TABS]).map(([id, text]) => <button type="button" key={id} className={(listTab ?? tab) === id ? 'active' : ''} onClick={() => pickTab(id)}>{text}{id === 'no-location' && <small className="inventory-tab-count">{noLocationCount}</small>}</button>)}
-    </div>
+    {!staffTabs && <div className="inventory-tabs">
+      {[...LIST_TABS, ...TOOL_TABS].map(([id, text]) => <button type="button" key={id} className={(listTab ?? tab) === id ? 'active' : ''} onClick={() => pickTab(id)}>{text}{id === 'no-location' && <small className="inventory-tab-count">{noLocationCount}</small>}</button>)}
+    </div>}
     {listTab === 'unfinished' && !associateBrowseOnly && (
       <div className="inventory-tabs report-tabs online-channel-tabs">
         <button type="button" className={!queue ? 'active' : ''} onClick={() => { setOffset(0); setList(null); onAttentionSection('all'); }}>All unfinished</button>

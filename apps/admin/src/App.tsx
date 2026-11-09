@@ -767,7 +767,7 @@ export function App() {
     </>;
   }
 
-  const pageLabel = ({
+  const pageLabel = (registerOnly && page === 'inventory' && nav.inventoryTab === 'receive' ? 'Receive' : ({
     home: 'Home',
     register: 'Register',
     sales: 'Live Sales',
@@ -793,7 +793,7 @@ export function App() {
     remote: 'Remote',
     logs: 'Logs',
     settings: 'Settings',
-  } as const)[page];
+  } as const)[page]);
   return <div className={`app${menuOpen ? ' menu-open' : ''}${page === 'register' ? ' register-mode' : ''} dark`}><ClientErrorReporter token={session.access_token} />
   <header className="mobile-top">
     <button type="button" className="hamburger" aria-label={menuOpen ? 'Close menu' : 'Open menu'} aria-expanded={menuOpen} aria-controls="admin-nav" onClick={() => setMenuOpen(o => !o)}>
@@ -806,11 +806,12 @@ export function App() {
   <aside id="admin-nav">
     <DeskSidebar
       page={page}
+      inventoryTab={nav.inventoryTab}
       fullAccess={fullAccess}
       pulse={pulse}
       name={firstName(staffSession?.displayName, session.user.email)}
       role={fullAccess ? 'Admin' : 'Staff'}
-      onOpen={(next) => goNav({ page: next })}
+      onOpen={(link) => goNav({ page: link.page, ...(link.inventoryTab ? { inventoryTab: link.inventoryTab } : {}) })}
       onSignOut={() => { closeMenu(); void sb.auth.signOut({ scope: 'local' }); }}
     />
   </aside>
