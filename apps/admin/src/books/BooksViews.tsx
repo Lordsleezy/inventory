@@ -99,6 +99,20 @@ function SpanSwitch({ p }: { p: ViewProps }) {
   );
 }
 
+function ExportMenu({ p }: { p: ViewProps }) {
+  return (
+    <details className="books-export">
+      <summary>Export</summary>
+      <div>
+        <button type="button" disabled={!p.exportFiles || p.exportsPreparing} onClick={p.onExcel}>Excel</button>
+        <button type="button" disabled={!p.exportFiles || p.exportsPreparing} onClick={p.onPdf}>PDF</button>
+        <button type="button" disabled={!p.workbook} onClick={p.onPrint}>Print</button>
+        {p.onDownloadAll && <button type="button" disabled={p.archiveBusy || !p.periods.length} onClick={p.onDownloadAll}>{p.archiveBusy ? 'Preparing…' : 'Download all periods'}</button>}
+      </div>
+    </details>
+  );
+}
+
 function TaxForm({ p }: { p: ViewProps }) {
   return (
     <CdtfaReturn
@@ -108,6 +122,7 @@ function TaxForm({ p }: { p: ViewProps }) {
       periodEnd={p.period.period_end}
       onPeriod={p.onSpanValue}
       onFiling={p.onFiling}
+      layout={p.native ? 'phone' : 'desk'}
     />
   );
 }
@@ -153,50 +168,95 @@ function SpanParts({ p, render, compact, linesOnly, rollup }: {
   );
 }
 
+const PHONE_TABS: { id: Sheet; title: string }[] = [
+  { id: 'sales', title: 'Sales' },
+  { id: 'expenses', title: 'Expenses' },
+  { id: 'payouts', title: 'Payouts' },
+  { id: 'inventory', title: 'Stock' },
+  { id: 'received', title: 'Received' },
+  { id: 'tax', title: 'Tax' },
+];
+
 function BooksNative(p: ViewProps) {
-  if (p.sheet !== 'hub') {
-    return (
-      <div className="native-report-body books-sheet">
-        {p.sheet !== 'tax' && <button type="button" className="native-report-action" aria-label="Download" disabled={!p.exportFiles} onClick={p.onExcel}>↓</button>}
-        <p className="books-sheet-period">{p.spanWord === 'month' ? monthLabel(p.period.period_start) : p.spanOptions.find((row) => row.value === p.spanValue)?.label}</p>
-        {p.sheet === 'sales' && <SpanParts p={p} render={(workbook) => <SalesBody money={p.money} workbook={workbook} report={p.report} native />} />}
-        {p.sheet === 'expenses' && <SpanParts p={p} render={(workbook) => <ExpensesBody money={p.money} workbook={workbook} native onDuplicateDecision={p.span === 'month' ? p.onDuplicateDecision : undefined} />} />}
-        {p.sheet === 'payouts' && <SpanParts p={p} render={(workbook, word) => <PayoutsBody money={p.money} workbook={workbook} native periodWord={word} />} compact />}
-        {p.sheet === 'inventory' && <SpanParts p={p} render={(workbook, word) => <InventoryBody money={p.money} inventory={workbook.inventory} native periodWord={word} />} rollup />}
-        {p.sheet === 'received' && <SpanParts p={p} render={(workbook) => <ReceivedBody money={p.money} items={workbook.received} native />} linesOnly />}
-        {p.sheet === 'tax' && <TaxForm p={p} />}
-      </div>
-    );
-  }
   const ui = uiStatus(p);
+  const tab: Sheet = p.sheet === 'hub' ? 'sales' : p.sheet;
+  const issues = bookIssues(p.workbook);
+  const [review, setReview] = useState(false);
   return (
-    <div className="native-report-body books-native-hub">
-      <SpanSwitch p={p} />
-      <button type="button" className="books-month-field" aria-haspopup="listbox" aria-expanded={p.pickerOpen} onClick={() => p.setPickerOpen(true)}>
-        <small>{p.span.toUpperCase()}</small>
-        <span>{p.spanOptions.find((row) => row.value === p.spanValue)?.label || periodPickerLabel(p.period)}</span>
-        <i className="native-chevron books-month-chevron" aria-hidden>›</i>
-      </button>
-      <SummaryCard money={p.money} totals={p.totals} native absorbFees={p.absorbFees} onlineChannels={p.onlineChannels} />
-      <BooksProofBar money={p.money} workbook={p.workbook} />
-      <BooksExportTieBar workbook={p.workbook} />
-      <p className="native-report-section">REPORTS</p>
-      <div className="native-report-group">
-        {REPORT_ROWS.map((r) => (
-          <button key={r.id} type="button" className="native-report-row books-report-link" onClick={() => p.setSheet(r.id)}>
-            <span className="books-report-icon" aria-hidden><r.Icon color="#ffffff" /></span>
-            <span>{r.title}<small>{r.sub}</small></span>
-            <i className="native-chevron">›</i>
+    <div className="native-report-body books-phone">
+      <div className="books-phone-period">
+        <SpanSwitch p={p} />
+        <label>
+          <span className="sr">Report period</span>
+          <select aria-label="Report period" value={p.spanValue} onChange={(e) => p.onSpanValue(e.target.value)}>
+            {p.spanOptions.map((row) => (
+              <option key={row.value} value={row.value}>{row.value === p.spanValue ? `${row.label} · ${periodStatusLabel(ui)}` : row.label}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+      {issues.length > 0 && (
+        <div className="books-phone-alert">
+          <button type="button" onClick={() => setReview(!review)}>
+            <strong>{issues.length === 1 ? '1 thing to fix before you lock' : `${issues.length} things to fix before you lock`}</strong>
+            <span>{review ? 'Hide' : 'Review'}</span>
           </button>
+          {review && issues.map((line) => <p key={line}>{line}</p>)}
+        </div>
+      )}
+      <BooksDeskStrip money={p.money} totals={p.totals} />
+      <nav className="books-phone-tabs" aria-label="Books reports">
+        {PHONE_TABS.map((item) => (
+          <button key={item.id} type="button" className={tab === item.id ? 'on' : ''} onClick={() => p.setSheet(item.id)}>{item.title}</button>
         ))}
+      </nav>
+      {tab === 'sales' && <PhoneSales money={p.money} workbook={p.workbook} />}
+      {tab === 'expenses' && <SpanParts p={p} render={(workbook) => <ExpensesBody money={p.money} workbook={workbook} native onDuplicateDecision={p.span === 'month' ? p.onDuplicateDecision : undefined} />} />}
+      {tab === 'payouts' && <SpanParts p={p} render={(workbook, word) => <PayoutsBody money={p.money} workbook={workbook} native periodWord={word} />} compact />}
+      {tab === 'inventory' && <SpanParts p={p} render={(workbook, word) => <InventoryBody money={p.money} inventory={workbook.inventory} native periodWord={word} />} rollup />}
+      {tab === 'received' && <SpanParts p={p} render={(workbook) => <ReceivedBody money={p.money} items={workbook.received} native />} linesOnly />}
+      {tab === 'tax' && <TaxForm p={p} />}
+      <div className="books-phone-actions">
+        <ExportMenu p={p} />
+        {p.showLock && ui !== 'locked' && (
+          <BooksLock placement="header" client={p.client} money={p.money} period={p.period} report={p.report} inventory={p.inventory} received={p.received} workbook={p.workbook} uiStatus={ui} busy={p.busy} setBusy={p.setBusy} onError={p.onError} onReload={p.onReload} lockedStaleMath={p.lockedStaleMath} />
+        )}
       </div>
-      <div className="books-native-export-row">
-        <button type="button" className="books-native-export" disabled={!p.exportFiles || p.exportsPreparing} onClick={p.onExcel}>Download Excel</button>
-        <button type="button" className="books-native-export" disabled={!p.exportFiles || p.exportsPreparing} onClick={p.onPdf}>Print / PDF</button>
-      </div>
-      {p.showLock && <BooksLock native client={p.client} money={p.money} period={p.period} report={p.report} inventory={p.inventory} received={p.received} workbook={p.workbook} uiStatus={ui} busy={p.busy} setBusy={p.setBusy} onError={p.onError} onReload={p.onReload} lockedStaleMath={p.lockedStaleMath} />}
+      {p.showLock && ui === 'locked' && <BooksLock native client={p.client} money={p.money} period={p.period} report={p.report} inventory={p.inventory} received={p.received} workbook={p.workbook} uiStatus={ui} busy={p.busy} setBusy={p.setBusy} onError={p.onError} onReload={p.onReload} lockedStaleMath={p.lockedStaleMath} />}
       {!p.showLock && <p className="native-report-footnote">Lock each month from the Month view. This {p.spanWord}'s tax form locks when every month in it is locked.</p>}
-      {p.pickerOpen && <MonthPickerSheet {...p} />}
+    </div>
+  );
+}
+
+function bookIssues(workbook: BooksWorkbook) {
+  const integrity = workbook.integrity;
+  const tie = workbook.exportTieIssues || [];
+  return [
+    ...(integrity && !integrity.ok ? integrity.issues.map((i) => i.kind === 'unmatched_label' ? 'One unmatched shipping label.' : i.message) : []),
+    ...tie.map((i) => i.message),
+  ];
+}
+
+function PhoneSales({ money, workbook }: { money: (c: number) => string; workbook: BooksWorkbook }) {
+  const order = ['ebay', 'in-store', 'depop', 'mercari', 'amazon', 'tiktok'];
+  const accounts = [...workbook.sales.channelTotals].sort((a, b) => order.indexOf(channelLabel(a.channel).toLowerCase()) - order.indexOf(channelLabel(b.channel).toLowerCase()));
+  return (
+    <div className="books-phone-sales">
+      <p className="books-account-line">
+        {accounts.map((c) => <span key={c.channel}><b>{channelLabel(c.channel)}</b> {money(c.revenue_cents)}</span>)}
+      </p>
+      {workbook.sales.rows.map((row) => (
+        <div key={row.sale_id + row.sku} className="books-phone-sale">
+          <div>
+            <strong>{row.title}</strong>
+            <small>{shortDate(row.date)} · SKU {row.sku} · {channelLabel(row.channel)}</small>
+          </div>
+          <div>
+            <b>{money(row.price_cents)}</b>
+            <small>{row.profit_cents == null ? '' : `profit ${money(row.profit_cents)}`}</small>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -220,11 +280,8 @@ function BooksDesktop(p: ViewProps) {
               {p.spanOptions.map((row) => <option key={row.value} value={row.value}>{row.label}</option>)}
             </select>
           </label>
+          <ExportMenu p={p} />
           <div className="books-export-actions">
-            <button type="button" disabled={!p.exportFiles || p.exportsPreparing} onClick={p.onExcel}>Excel</button>
-            <button type="button" disabled={!p.exportFiles || p.exportsPreparing} onClick={p.onPdf}>PDF</button>
-            <button type="button" disabled={!p.workbook} onClick={p.onPrint}>Print</button>
-            {p.onDownloadAll && <button type="button" disabled={p.archiveBusy || !p.periods.length} onClick={p.onDownloadAll}>{p.archiveBusy ? 'Preparing…' : 'Download all'}</button>}
             {p.showLock && ui !== 'locked' && (
               <BooksLock placement="header" client={p.client} money={p.money} period={p.period} report={p.report} inventory={p.inventory} received={p.received} workbook={p.workbook} uiStatus={ui} busy={p.busy} setBusy={p.setBusy} onError={p.onError} onReload={p.onReload} lockedStaleMath={p.lockedStaleMath} />
             )}
@@ -287,7 +344,7 @@ function BooksDeskStrip({ money, totals }: { money: (c: number) => string; total
     { label: 'COGS', value: `−${money(totals.cost)}` },
     { label: 'Profit', value: money(totals.profit) },
     { label: 'Commissions', value: `−${money(totals.commission)}` },
-    { label: 'Other expenses', value: `−${money(totals.otherExpenses)}` },
+    { label: 'Other exp.', value: `−${money(totals.otherExpenses)}` },
   ];
   return (
     <div className="books-desk-strip">
@@ -347,7 +404,6 @@ function BooksProofBar({ money, workbook }: { money: (c: number) => string; work
 }
 
 function BooksDeskAlert({ workbook }: { workbook: BooksWorkbook }) {
-  const [open, setOpen] = useState(false);
   const integrity = workbook.integrity;
   const tie = workbook.exportTieIssues || [];
   const issues = [
@@ -360,10 +416,9 @@ function BooksDeskAlert({ workbook }: { workbook: BooksWorkbook }) {
     <div className="books-desk-alert" role="status">
       <div>
         <strong>{n === 1 ? '1 thing to fix before you lock' : `${n} things to fix before you lock`}</strong>
-        <p>{issues[0]}</p>
-        {open && issues.slice(1).map((line) => <p key={line}>{line}</p>)}
+        {issues.map((line) => <p key={line}>{line}</p>)}
       </div>
-      <button type="button" onClick={() => setOpen(!open)}>{open ? 'Hide' : 'Review'}</button>
+      <button type="button">Review</button>
     </div>
   );
 }
@@ -859,11 +914,9 @@ function SalesTable({ money, workbook, totals }: { money: (c: number) => string;
   });
   return (
     <>
-      <div className="books-account-strip">
-        {accounts.map((c) => (
-          <div key={c.channel}><span>{channelLabel(c.channel)}</span><strong>{money(c.revenue_cents)}</strong></div>
-        ))}
-      </div>
+      <p className="books-account-line">
+        {accounts.map((c) => <span key={c.channel}><b>{channelLabel(c.channel)}</b> {money(c.revenue_cents)}</span>)}
+      </p>
       <div className="books-table-wrap">
         <table className="books-table books-sales-table">
           <thead>
@@ -898,7 +951,7 @@ function SalesTable({ money, workbook, totals }: { money: (c: number) => string;
           </tbody>
         </table>
       </div>
-      <p className="hint">Tax and buyer shipping are in Excel and PDF.</p>
+      <p className="hint">Export has Excel, PDF, Print and Download all periods. Tax and buyer shipping stay in Excel and PDF.</p>
     </>
   );
 }

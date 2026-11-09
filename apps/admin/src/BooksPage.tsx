@@ -57,10 +57,6 @@ const emptyInventory = (): InventorySummary => ({
   giveaways: [], replacements: [], returns: [], defective_moves: [],
 });
 
-const SHEET_TITLES: Record<Sheet, string> = {
-  hub: 'Books', sales: 'Sales', expenses: 'Expenses', payouts: 'Payouts', inventory: 'Inventory', received: 'Items received', tax: 'Sales tax return',
-};
-
 export function BooksPage({ client, money, native = false, onNativeNavigation }: Props) {
   const [periods, setPeriods] = useState<Period[]>([]);
   const [periodId, setPeriodId] = useState('');
@@ -279,9 +275,8 @@ export function BooksPage({ client, money, native = false, onNativeNavigation }:
 
   useEffect(() => {
     if (!native || !onNativeNavigation) return;
-    if (sheet === 'hub') onNativeNavigation(false, 'Books');
-    else onNativeNavigation(true, SHEET_TITLES[sheet], () => setSheet('hub'));
-  }, [native, onNativeNavigation, sheet]);
+    onNativeNavigation(false, 'Books');
+  }, [native, onNativeNavigation]);
 
   function saveDuplicateDecision(lineId: string, decision: 'keep' | 'remove') {
     if (!selected) return;
@@ -432,7 +427,7 @@ export function BooksPage({ client, money, native = false, onNativeNavigation }:
           slices={slices}
           spanWord={span === 'year' ? 'year' : span === 'quarter' ? 'quarter' : 'month'}
           showLock={span === 'month'}
-          onDownloadAll={native ? undefined : () => void downloadAll()}
+          onDownloadAll={() => void downloadAll()}
           archiveBusy={archiveBusy}
         />
       )}

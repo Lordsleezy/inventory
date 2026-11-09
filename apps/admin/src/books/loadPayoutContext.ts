@@ -36,7 +36,7 @@ export async function loadBooksPayoutContext(client: SupabaseClient, storeId: st
     client.rpc('portal_payout_config'),
     client.from('portal_payout_rules').select('employee_id,method,rate').eq('store_id', storeId),
     client.from('store_payout_people').select('slot,employee_id').eq('store_id', storeId),
-    client.from('staff').select('user_id,display_name,email').eq('store_id', storeId),
+    client.from('staff').select('user_id,display_name').eq('store_id', storeId),
     loadFrozenCommissions(client),
   ]);
   if (cfgRes.error) throw cfgRes.error;
@@ -50,6 +50,7 @@ export async function loadBooksPayoutContext(client: SupabaseClient, storeId: st
     slots,
     absorbFees: cfgRaw.absorb_fees !== false,
   };
+  if (staffRes.error) throw staffRes.error;
   const rules = (rulesRes.data || []) as Rule[];
   const staff = (staffRes.data || []) as { user_id: string; display_name: string; email?: string | null }[];
   const peopleSlots = (peopleRes.data || []) as { slot: string; employee_id: string | null }[];

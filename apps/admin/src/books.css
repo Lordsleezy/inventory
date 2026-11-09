@@ -19,6 +19,8 @@
 .books-close-panel{margin:24px 0 8px}
 .books-close-toggle{border:0;background:transparent;color:#59a8ff;font-weight:700;padding:8px 0;cursor:pointer}
 .books-close-body{margin-top:10px}
+.books-print-only{display:none}
+body.books-printing .books-print-only{display:block}
 @media print{
   @page{size:landscape;margin:12mm}
   body.books-printing nav,body.books-printing aside,body.books-printing header:not(.books-print-only),body.books-printing .books-close-panel,body.books-printing .books-export-actions,body.books-printing .alert{display:none!important}
@@ -129,13 +131,13 @@ html.app-mode .books-native-hub .books-report-link.active{background:transparent
 .books-status-locked{background:#10352a;color:#4bda9a}
 .books-channel-line{display:flex;flex-wrap:wrap;gap:12px 18px;color:#aeb8c8;font-size:.9rem;margin:8px 0 12px}
 .books-print-hint{color:#73808c;font-size:.78rem;text-align:right;margin-top:8px}
-.books-mockup .books-table-wrap{background:#141c29;border:1px solid #273448;color:#e9eff8}
-.books-mockup .books-table th{background:#1d2735;color:#f0f4fa}
+.books-mockup .books-table-wrap{background:transparent;border:0;color:inherit}
+.books-mockup .books-table th{background:transparent;color:#a0a0a0}
 .books-mockup .books-table td,.books-mockup .books-table th{border-color:#2c3648;color:#e9eff8}
 .books-mockup .books-table td.fix,.fix{color:#ff6b6b!important}
 .books-mockup .books-table td.why{white-space:normal;max-width:280px}
-html.app-mode .books-mockup .books-table-wrap,html.app-mode .books-mockup .books-table{background:#1c1c1e;color:#f5f5f7;border-color:#333336}
-html.app-mode .books-mockup .books-table th{background:#2c2c2e;color:#fff}
+html.app-mode .books-mockup .books-table-wrap,html.app-mode .books-mockup .books-table{background:transparent;color:#f5f5f7;border-color:#333336}
+html.app-mode .books-mockup .books-table th{background:transparent;color:#a0a0a0}
 html.app-mode .books-mockup .books-table td,html.app-mode .books-mockup .books-table th{border-color:#333336;color:#f5f5f7}
 body.books-printing .books-desktop-tabs,body.books-printing .books-lock-foot,body.books-printing .books-print-hint,body.books-printing .books-status-pill,body.books-printing .books-picker-scrim{display:none!important}
 body.books-printing .books-desktop-panel,body.books-printing .books-print-sheets{display:block!important}
@@ -216,3 +218,39 @@ body.cdtfa-printing .cdtfa-round,body.books-printing .cdtfa-round{color:#333}
 .cdtfa-a2line b{text-align:right}
 .cdtfa-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
 @media(max-width:640px){.cdtfa-banner{flex-direction:column}.cdtfa-box{grid-template-columns:2.4rem minmax(0,1fr)}}
+
+.books-phone .books-phone-period{display:flex;gap:8px;align-items:center;margin-bottom:12px}
+.books-phone .books-span-switch{display:flex;border:1px solid #fff;border-radius:8px;overflow:hidden}
+.books-phone .books-span-switch button{border:0;border-radius:0;background:transparent;color:#fff;min-height:32px;padding:0 10px}
+.books-phone .books-span-switch button.on{background:#fff;color:#000}
+.books-phone .books-phone-period select{background:#000;color:#fff;border:1px solid #4a4a4a;border-radius:8px;min-height:32px;padding:0 8px}
+.books-phone .books-phone-alert{color:#ff453a;margin:8px 0 12px}
+.books-phone .books-phone-alert button{display:flex;width:100%;justify-content:space-between;border:0;background:transparent;color:#ff453a;padding:0;min-height:0}
+.books-phone .books-desk-strip{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px 12px;margin:8px 0 14px}
+.books-phone .books-desk-strip .lead{grid-column:1 / -1}
+.books-phone .books-desk-strip span{display:block;color:#a0a0a0;font-size:12px}
+.books-phone .books-desk-strip strong{color:#fff;font-variant-numeric:tabular-nums}
+.books-phone .books-desk-strip .lead strong{font-size:2rem}
+.books-phone .books-phone-tabs{display:flex;gap:14px;overflow:auto;border-bottom:1px solid #2a2a2a;margin-bottom:10px}
+.books-phone .books-phone-tabs button{border:0;border-bottom:2px solid transparent;background:transparent;color:#a0a0a0;border-radius:0;min-height:0;padding:8px 0}
+.books-phone .books-phone-tabs button.on{color:#fff;border-bottom-color:#fff}
+.books-phone .books-phone-sale{display:flex;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid #2a2a2a}
+.books-phone .books-phone-sale strong,.books-phone .books-phone-sale b{display:block;color:#fff}
+.books-phone .books-phone-sale small{color:#a0a0a0}
+.books-phone .books-phone-sale b,.books-phone .books-phone-sale small{text-align:right}
+.books-phone .books-account-line{color:#a0a0a0;display:flex;flex-wrap:wrap;gap:6px 10px}
+.books-phone .books-account-line b{color:#fff}
+.books-phone .books-phone-actions{display:flex;gap:8px;margin-top:16px}
+.books-phone .books-phone-actions .primary{background:#fff;color:#000;border-color:#fff;flex:1}
+.books-phone .books-export{position:relative;flex:1}
+.books-phone .books-export summary{list-style:none;border:1px solid #fff;border-radius:8px;text-align:center;padding:10px;cursor:pointer}
+.books-phone .books-export summary::after{content:' ▾'}
+.books-phone .books-export div{position:absolute;left:0;right:0;bottom:calc(100% + 6px);background:#000;border:1px solid #2a2a2a;border-radius:8px;display:grid;z-index:4}
+.books-phone .cdtfa-summary{border:1px solid #2a2a2a;border-radius:12px;padding:14px;margin-bottom:14px}
+.books-phone .cdtfa-draft{display:none}
+.books-phone .cdtfa-actions button{background:transparent;color:#fff;border:1px solid #fff;border-radius:8px;min-height:44px}
+.books-phone .cdtfa-actions button.primary{background:#fff;color:#000}
+.books-phone .cdtfa-due-figure{display:block;font-size:2.4rem}
+.books-phone .cdtfa-box-name{border:0 !important;background:transparent !important;min-height:0 !important;padding:0 !important;text-align:left;font-weight:400}
+.books-phone .cdtfa-box.calculated .cdtfa-amt input{border:0;background:transparent;font-weight:750;text-align:right}
+.books-phone .cdtfa-show-all{width:100%;margin-top:12px}

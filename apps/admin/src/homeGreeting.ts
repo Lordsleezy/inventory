@@ -1,3 +1,5 @@
+import { canonicalPersonKey, canonicalPersonLabel } from './books/personMerge.ts';
+
 export type DayPart = 'morning' | 'afternoon' | 'evening';
 
 /** Morning until noon, afternoon until 5pm, evening after. Hour is local (0–23). */
@@ -13,13 +15,15 @@ export const GREETINGS: Record<DayPart, readonly string[]> = {
   evening: ['Good evening', 'Welcome back', 'Back at it', 'Evening'],
 };
 
-/** First name from the account. Email local-part when there is no display name. */
+const ROLE_LABEL = /^(admin|owner|manager|staff)$/i;
+
+/** First name from the account. A role label such as Admin uses the person this login already maps to. */
 export function firstName(displayName: string | null | undefined, email: string | null | undefined): string {
   const raw = (displayName || '').trim();
-  if (raw && !raw.includes('@')) {
-    const first = raw.split(/\s+/)[0];
-    if (first) return first;
-  }
+  const first = raw.split(/\s+/)[0] || '';
+  if (raw && !raw.includes('@') && !ROLE_LABEL.test(first)) return first;
+  const known = canonicalPersonKey(raw, email);
+  if (known) return canonicalPersonLabel(known);
   const local = (email || '').split('@')[0] || '';
   const bit = local.split(/[.+_-]/)[0] || local;
   if (!bit) return 'there';

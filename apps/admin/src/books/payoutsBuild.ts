@@ -129,7 +129,7 @@ export function buildPayouts(
 
   const allTimeOwed = (empIds: string[]) => {
     if (ledgerBalances?.length) {
-      return empIds.reduce((n, id) => n + (ledgerBalances.find((b) => b.user_id === id)?.commissionOwed || 0), 0);
+      return empIds.reduce((n, id) => n + (ledgerBalances.find((b) => b.user_id === id)?.balance || 0), 0);
     }
     return Math.max(0, empIds.reduce((n, id) => {
       const row = (report.payout_balances || []).find((b) => String(b.id) === id);
