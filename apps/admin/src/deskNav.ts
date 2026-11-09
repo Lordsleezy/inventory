@@ -84,3 +84,42 @@ export const ASSOCIATE_LINKS: DeskLink[] = [
   { page: 'locations', label: 'Locations', hint: 'Bays & bins' },
   { page: 'settings', label: 'Settings', hint: 'Your account' },
 ];
+
+/** Owner (Steve): same floor desk as staff, plus money/stock extras. */
+export const OWNER_EXTRA_LINKS: DeskLink[] = [
+  { page: 'reports', label: 'Reports', hint: 'Profit, fees, tax' },
+  { page: 'withdrawals', label: 'Safe', hint: 'Cash accounts' },
+  { page: 'manifests', label: 'Manifests', hint: 'Inbound lots' },
+  { page: 'books', label: 'Books', hint: 'Month close' },
+];
+
+export const OWNER_LINKS: DeskLink[] = [...ASSOCIATE_LINKS, ...OWNER_EXTRA_LINKS];
+
+export type DeskAccess = 'admin' | 'owner' | 'staff';
+
+/** Owner role wins over portal_admins so Steve does not get the full admin channel dump. */
+export function resolveDeskAccess(staffRole: string | null | undefined, portalAdmin: boolean): DeskAccess {
+  if (staffRole === 'owner') return 'owner';
+  if (staffRole === 'manager' || portalAdmin) return 'admin';
+  return 'staff';
+}
+
+export function deskNavGroups(access: DeskAccess): DeskGroup[] {
+  if (access === 'admin') return DESK_GROUPS;
+  if (access === 'owner') return [{ label: 'Your desk', links: OWNER_LINKS }];
+  return [{ label: 'Your desk', links: ASSOCIATE_LINKS }];
+}
+
+export function deskAllowedPages(access: DeskAccess): MainPage[] | null {
+  if (access === 'admin') return null;
+  if (access === 'owner') {
+    return ['home', 'register', 'inventory', 'orders', 'locations', 'settings', 'reports', 'withdrawals', 'manifests', 'books'];
+  }
+  return ['home', 'register', 'inventory', 'orders', 'locations', 'settings'];
+}
+
+export function deskRoleLabel(access: DeskAccess): string {
+  if (access === 'admin') return 'Admin';
+  if (access === 'owner') return 'Owner';
+  return 'Staff';
+}

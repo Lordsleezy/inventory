@@ -39,6 +39,7 @@ type Props = {
   session: Session;
   storeId: string;
   fullAccess: boolean;
+  ownerAccess?: boolean;
   staffSession: StaffSession | null;
   money: (n: number) => string;
   stamp: (s: string) => string;
@@ -69,8 +70,8 @@ function addDays(date: string, amount: number) {
 }
 
 export function AppMoreHome({
-  client, fullAccess, staffSession, session, money, setPage, onOpenChannel,
-}: Pick<Props, 'client' | 'fullAccess' | 'staffSession' | 'session' | 'money' | 'setPage' | 'onOpenChannel'>) {
+  client, fullAccess, ownerAccess = false, staffSession, session, money, setPage, onOpenChannel,
+}: Pick<Props, 'client' | 'fullAccess' | 'ownerAccess' | 'staffSession' | 'session' | 'money' | 'setPage' | 'onOpenChannel'>) {
   void onOpenChannel;
   void money;
   const [salesToday, setSalesToday] = useState<number | null>(null);
@@ -136,6 +137,29 @@ export function AppMoreHome({
             </button>
           </div>
         </>
+      ) : ownerAccess ? (
+        <div className="app-group">
+          <button type="button" className="app-more-link" onClick={() => setPage('reports')}>
+            <span className="app-more-left"><Icon tone="#30d158" />Reports</span>
+            <span className="app-chevron">›</span>
+          </button>
+          <button type="button" className="app-more-link" onClick={() => setPage('withdrawals')}>
+            <span className="app-more-left"><Icon tone="#8e8e93" />Safe</span>
+            <span className="app-chevron">›</span>
+          </button>
+          <button type="button" className="app-more-link" onClick={() => setPage('manifests')}>
+            <span className="app-more-left"><Icon tone="#64d2ff" />Manifests</span>
+            <span className="app-chevron">›</span>
+          </button>
+          <button type="button" className="app-more-link" onClick={() => setPage('books')}>
+            <span className="app-more-left"><Icon tone="#ff9f0a" />Books</span>
+            <span className="app-chevron">›</span>
+          </button>
+          <button type="button" className="app-more-link" onClick={() => setPage('settings')}>
+            <span className="app-more-left"><Icon tone="#8e8e93" />Settings</span>
+            <span className="app-chevron">›</span>
+          </button>
+        </div>
       ) : staffSession ? (
         <div className="app-group">
           <button type="button" className="app-more-link" onClick={() => setPage('register')}>
