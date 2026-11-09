@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { PDFDocument, degrees, rgb, StandardFonts } from 'pdf-lib';
 import bwipjs from 'bwip-js';
 import sharp from 'sharp';
@@ -9,7 +10,7 @@ import { decodeTrackingBarcodes } from '../../../netlify/lib/tracking-barcode.mj
 import { LABEL_H, LABEL_W, LETTER_H, LETTER_W, buildLabelPdf } from './labelSheet.ts';
 
 const TRACK = '9400108106244728534798';
-const OUT = 'C:/Users/pgg12/AppData/Local/Temp';
+const OUT = tmpdir();
 
 async function scan(png: Buffer) {
   const trimmed = await sharp(png).trim({ threshold: 15 }).png().toBuffer();
