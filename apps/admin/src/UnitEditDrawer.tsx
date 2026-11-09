@@ -248,7 +248,8 @@ export function UnitEditDrawer({
         canQueryTables?client.from('unit_location_stock').select('location_code,quantity').eq('store_id',storeId).eq('sku',sku):Promise.resolve({data:[]}),
         canQueryTables?client.from('unit_pick_locations').select('location_code').eq('store_id',storeId).eq('sku',sku).maybeSingle():Promise.resolve({data:null}),
         canQueryTables?client.from('store_locations').select('code').eq('store_id',storeId).order('code'):Promise.resolve({data:[]}),
-        client.rpc('portal_unit_channel_selections',{p_sku:sku}), client.rpc('portal_unit_dns',{p_sku:sku}),
+        canDelete ? client.rpc('portal_unit_channel_selections',{p_sku:sku}) : Promise.resolve({data:null,error:null}),
+        canDelete ? client.rpc('portal_unit_dns',{p_sku:sku}) : Promise.resolve({data:null,error:null}),
       ]);
       if (!live) return;
       const allocations=(stock.data||[]).map(row=>({location_code:String(row.location_code),quantity:Number(row.quantity)||0}));
@@ -262,12 +263,12 @@ export function UnitEditDrawer({
       setLocationOptions((bins.data||[]).map(row=>{const code=String(row.code);const parts=locationParts(code);return {code,label:parts?`${parts.display} · ${parts.slot}`:code};}));
       if(!selection.error&&selection.data){const src=selection.data as Record<string,{selected:boolean}>;channelBaseline.current=Object.fromEntries(CHANNELS.map(ch=>[ch,Boolean(src[ch]?.selected)])) as Record<ChannelChoice,boolean>;}
     })();return()=>{live=false;};
-  },[client,storeId,sku]);
+  },[client,storeId,sku,canDelete]);
   useEffect(() => {
-    void client.rpc('portal_receive_options').then(({ data, error: e }) => {
+    void client.rpc(canDelete ? 'portal_receive_options' : 'staff_receive_options').then(({ data, error: e }) => {
       if (!e && data) setOptions(data as Options);
     });
-  }, [client]);
+  }, [client, canDelete]);
 
   /** Fill only blank fields from a UPC lookup; never overwrite typed values. */
   async function attachUpc(raw: string) {
@@ -351,7 +352,7 @@ export function UnitEditDrawer({
     const ask = cents(form.price);
     const cost = cents(form.cost);
     if (ask === undefined) { setError('Price must look like 24.99 (blank = no price).'); return; }
-    if (cost === undefined) { setError('Cost must look like 9.00 (blank = unknown).'); return; }
+    if (canDelete && cost === undefined) { setError('Cost must look like 9.00 (blank = unknown).'); return; }
     const dims = [form.length, form.width, form.height, form.weight].map(v => {
       const t = v.trim();
       if (!t) return null;
@@ -376,36 +377,54 @@ export function UnitEditDrawer({
     }
     setBusy(true); setError(''); setMsg('');
     // brand/model/title are NOT NULL — always send strings ('' ok), never null/undefined.
-    const { data, error: e } = await client.rpc('portal_update_unit', {
-      p_sku: sku,
-      p_upc: form.upc.trim(),
-      p_brand: form.brand.trim(),
-      p_model: form.model.trim(),
-      p_title: title,
-      p_description: latestDescription.current ?? form.description,
-      p_ask_cents: ask,
-      p_cost_cents: canDelete ? cost : (unit.acquisition_cost_cents == null ? null : Number(unit.acquisition_cost_cents)),
-      p_condition: form.condition,
-      p_test_status: form.testStatus,
-      p_shippable: canDelete ? form.shippable : shipMode(unit),
-      p_notes: form.notes,
-      p_length: dims[0],
-      p_width: dims[1],
-      p_height: dims[2],
-      p_weight: dims[3],
-    });
+    const { data, error: e } = canDelete
+      ? await client.rpc('portal_update_unit', {
+          p_sku: sku,
+          p_upc: form.upc.trim(),
+          p_brand: form.brand.trim(),
+          p_model: form.model.trim(),
+          p_title: title,
+          p_description: latestDescription.current ?? form.description,
+          p_ask_cents: ask,
+          p_cost_cents: cost,
+          p_condition: form.condition,
+          p_test_status: form.testStatus,
+          p_shippable: form.shippable,
+          p_notes: form.notes,
+          p_length: dims[0],
+          p_width: dims[1],
+          p_height: dims[2],
+          p_weight: dims[3],
+        })
+      : await client.rpc('staff_update_unit', {
+          p_sku: sku,
+          p_upc: form.upc.trim(),
+          p_brand: form.brand.trim(),
+          p_model: form.model.trim(),
+          p_title: title,
+          p_description: latestDescription.current ?? form.description,
+          p_ask_cents: ask,
+          p_condition: form.condition,
+          p_test_status: form.testStatus,
+          p_notes: form.notes,
+          p_length: dims[0],
+          p_width: dims[1],
+          p_height: dims[2],
+          p_weight: dims[3],
+        });
     if (e) { setBusy(false);setError(e.message); return; }
     const saved = data as Record<string, unknown>;
     try {
-      if(upcEnrichment.current){const payload=upcEnrichment.current;const {error:enrichError}=await client.rpc('portal_enrich_received_unit',{p_sku:sku,p_specs:payload.specs,p_msrp_cents:payload.msrp,p_brand:payload.brand,p_model:payload.model,p_title:payload.title,p_description:payload.description});if(enrichError)throw enrichError;upcEnrichment.current=null;}
-      await specificsPersist.current?.();
-      if(channelSelections)for(const channel of CHANNELS){if(channelBaseline.current?.[channel]===channelSelections[channel])continue;const {error:channelError}=await client.rpc('portal_set_unit_channel_selection',{p_sku:sku,p_channel:channel,p_selected:channelSelections[channel]});if(channelError)throw channelError;}
-      if(dnsPending!==null){const {error:dnsError}=await client.rpc('portal_set_unit_dns',{p_sku:sku,p_dns:dnsPending});if(dnsError)throw dnsError;}
-      if(quantityDraft.trim()){
+      if(upcEnrichment.current && canDelete){const payload=upcEnrichment.current;const {error:enrichError}=await client.rpc('portal_enrich_received_unit',{p_sku:sku,p_specs:payload.specs,p_msrp_cents:payload.msrp,p_brand:payload.brand,p_model:payload.model,p_title:payload.title,p_description:payload.description});if(enrichError)throw enrichError;upcEnrichment.current=null;}
+      else { upcEnrichment.current = null; }
+      if(canDelete) await specificsPersist.current?.();
+      if(canDelete && channelSelections)for(const channel of CHANNELS){if(channelBaseline.current?.[channel]===channelSelections[channel])continue;const {error:channelError}=await client.rpc('portal_set_unit_channel_selection',{p_sku:sku,p_channel:channel,p_selected:channelSelections[channel]});if(channelError)throw channelError;}
+      if(canDelete && dnsPending!==null){const {error:dnsError}=await client.rpc('portal_set_unit_dns',{p_sku:sku,p_dns:dnsPending});if(dnsError)throw dnsError;}
+      if(canDelete && quantityDraft.trim()){
         const target=Number(quantityDraft);
         if(target!==stockQuantity){
           if(isStocked){const {error:qtyError}=await client.rpc('portal_stock_adjust',{p_sku:sku,p_mode:'set',p_quantity:target,p_reason:'count_correction'});if(qtyError)throw qtyError;}
-          else if(canDelete&&target>1){const {error:qtyError}=await client.rpc('portal_stock_add',{p_sku:sku,p_quantity:target-stockQuantity,p_cost_cents:null});if(qtyError)throw qtyError;}
+          else if(target>1){const {error:qtyError}=await client.rpc('portal_stock_add',{p_sku:sku,p_quantity:target-stockQuantity,p_cost_cents:null});if(qtyError)throw qtyError;}
         }
       }
       const onHand=Math.max(1,Number(stockQuantity)||1);
@@ -448,7 +467,7 @@ export function UnitEditDrawer({
       title: saved.title,
       listing_body: saved.description,
       ask_cents: saved.ask_cents,
-      acquisition_cost_cents: saved.cost_cents,
+      acquisition_cost_cents: canDelete ? saved.cost_cents : unit.acquisition_cost_cents,
       condition: saved.condition,
       test_status: saved.test_status,
       defect_notes: saved.notes,
@@ -515,7 +534,7 @@ export function UnitEditDrawer({
           upsert: false,
         });
         if (upload.error) throw upload.error;
-        const linked = await client.rpc('portal_add_unit_photo', { p_sku: sku, p_path: path });
+        const linked = await client.rpc(canDelete ? 'portal_add_unit_photo' : 'staff_add_unit_photo', { p_sku: sku, p_path: path });
         if (linked.error) throw linked.error;
       } catch { failed++; }
     }
