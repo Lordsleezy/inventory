@@ -462,7 +462,7 @@ html.desk:not(.app-mode) .books-desk-strip strong,
 html.desk:not(.app-mode) .books-account-strip strong { color: #fff; font-variant-numeric: tabular-nums; font-size: 1.15rem; }
 html.desk:not(.app-mode) .books-desk-strip .lead strong { font-size: 1.7rem; }
 html.desk:not(.app-mode) .books-desk-alert {
-  display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px;
   border: 1px solid #ff453a; border-radius: 8px; padding: 10px 12px; margin: 14px 0;
 }
 html.desk:not(.app-mode) .books-desk-alert strong,
@@ -576,7 +576,7 @@ html.desk:not(.app-mode) .desk-need span { display: block; }
 html.desk:not(.app-mode) .desk-need span,
 html.desk:not(.app-mode) .desk-quiet { color: #a0a0a0; margin: 0; }
 html.desk:not(.app-mode) .desk-need button,
-html.desk:not(.app-mode) .books-export summary {
+html.desk:not(.app-mode) .books-export-summary {
   border: 1px solid #fff !important; background: transparent !important; color: #fff !important;
   min-height: 32px !important; border-radius: 8px !important; padding: 0 12px !important;
 }
@@ -593,14 +593,18 @@ html.desk:not(.app-mode) .desk-channels-title { margin-top: 28px; }
 html.desk:not(.app-mode) .books-account-line { display: flex; flex-wrap: wrap; gap: 8px 16px; color: #a0a0a0; }
 html.desk:not(.app-mode) .books-account-line b { color: #fff; font-weight: 650; }
 html.desk:not(.app-mode) .books-export { position: relative; }
-html.desk:not(.app-mode) .books-export summary { list-style: none; cursor: pointer; }
-html.desk:not(.app-mode) .books-export summary::after { content: ' ▾'; }
-html.desk:not(.app-mode) .books-export summary::-webkit-details-marker { display: none; }
-html.desk:not(.app-mode) .books-export div {
-  position: absolute; right: 0; top: calc(100% + 6px); z-index: 6; background: #000;
-  border: 1px solid #2a2a2a; border-radius: 8px; display: grid; min-width: 200px; padding: 6px;
+html.desk:not(.app-mode) .books-export-summary { list-style: none; cursor: pointer; }
+html.desk:not(.app-mode) .books-export-summary::after { content: ' ▾'; }
+html.desk:not(.app-mode) .books-export-list {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; background: #111;
+  border: 1px solid #2a2a2a; display: grid; min-width: 220px; padding: 4px 0;
 }
-html.desk:not(.app-mode) .books-export div button { justify-content: flex-start; }
+html.desk:not(.app-mode) .books-export-item {
+  display: block; width: 100%; text-align: left; background: transparent !important;
+  border: 0 !important; border-radius: 0 !important; box-shadow: none !important;
+  color: #fff !important; min-height: 36px !important; padding: 8px 14px !important;
+}
+html.desk:not(.app-mode) .books-export-item:hover:not(:disabled) { background: #2a2a2a !important; }
 html.desk:not(.app-mode) .books-desktop .books-table-wrap { background: transparent !important; border: 0 !important; box-shadow: none !important; }
 html.desk:not(.app-mode) .cdtfa-split { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 28px; align-items: start; }
 html.desk:not(.app-mode) .cdtfa-form { grid-column: 1; grid-row: 1; min-width: 0; }

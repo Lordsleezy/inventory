@@ -54,14 +54,14 @@ export function verifyBooksIntegrity(
   if (commissionGap !== 0) {
     issues.push({
       kind: 'commission',
-      message: `Sales sheet commission ${(lineComm / 100).toFixed(2)} vs hub ${(totals.commission / 100).toFixed(2)}`,
+      message: `Commissions: sale rows add up to ${dollars(lineComm)} but the summary says ${dollars(totals.commission)} (${dollars(Math.abs(commissionGap))} off)`,
       cents: commissionGap,
     });
   }
   if (ownerGap !== 0) {
     issues.push({
       kind: 'owner',
-      message: `Owner before other ${(proof.ownerBeforeOther / 100).toFixed(2)} vs line rollup ${(ownerFromLines / 100).toFixed(2)}`,
+      message: `Owner's share before other expenses: sale rows add up to ${dollars(ownerFromLines)} but the summary says ${dollars(proof.ownerBeforeOther)} (${dollars(Math.abs(ownerGap))} off)`,
       cents: ownerGap,
     });
   }
@@ -69,11 +69,7 @@ export function verifyBooksIntegrity(
   if (report) {
     const legacy = (report.payouts || []).reduce((n, r) => n + Number(r.amount_cents || 0), 0);
     if (legacy !== totals.commission) {
-      issues.push({
-        kind: 'commission',
-        message: `Legacy report.payouts ${(legacy / 100).toFixed(2)} (not used) vs tickets ${(totals.commission / 100).toFixed(2)}`,
-        cents: legacy - totals.commission,
-      });
+      console.info(`Books legacy report.payouts ${dollars(legacy)} is not used. Ticket commissions are ${dollars(totals.commission)}.`);
     }
   }
 
@@ -87,7 +83,7 @@ export function verifyBooksIntegrity(
       if (owedPaulGap !== 0) {
         issues.push({
           kind: 'owed_paul',
-          message: `Paul owed doesn't match: Books ${dollars(paulRow.owed_all_time_cents)} · Payouts tab ${dollars(ledger.paulOwed)}`,
+          message: `Paul's balance: Books says ${dollars(paulRow.owed_all_time_cents)} but Payouts says ${dollars(ledger.paulOwed)} (${dollars(Math.abs(owedPaulGap))} off)`,
           cents: owedPaulGap,
         });
       }
@@ -97,7 +93,7 @@ export function verifyBooksIntegrity(
       if (owedJacobGap !== 0) {
         issues.push({
           kind: 'owed_jacob',
-          message: `Jacob owed doesn't match: Books ${dollars(jacobRow.owed_all_time_cents)} · Payouts tab ${dollars(ledger.jacobOwed)}`,
+          message: `Jacob's balance: Books says ${dollars(jacobRow.owed_all_time_cents)} but Payouts says ${dollars(ledger.jacobOwed)} (${dollars(Math.abs(owedJacobGap))} off)`,
           cents: owedJacobGap,
         });
       }
@@ -112,8 +108,9 @@ export function verifyBooksIntegrity(
   for (const u of unmatched) {
     issues.push({
       kind: 'unmatched_label',
-      message: `Label not matched to a sale — ${u.title} — ${u.date} — $${(u.amount_cents / 100).toFixed(2)}`,
+      message: `Shipping label not matched to a sale: ${u.title}, ${u.date}, ${dollars(u.amount_cents)}`,
       cents: u.amount_cents,
+      saleId: u.id,
     });
   }
 

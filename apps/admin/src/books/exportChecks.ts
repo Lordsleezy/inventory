@@ -4,9 +4,18 @@ export type ExportTieIssue = { check: string; message: string };
 
 const MIN_CENTS = 1; // $0.01
 
+function dollars(cents: number) {
+  const sign = cents < 0 ? '-' : '';
+  return `${sign}$${(Math.abs(cents) / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function off(left: number, right: number, leftName: string, rightName: string, what: string) {
+  const gap = Math.abs(left - right);
+  return `${what}: ${leftName} add up to ${dollars(left)} but ${rightName} says ${dollars(right)} (${dollars(gap)} off)`;
+}
+
 export function verifyExportTies(wb: BooksWorkbook): ExportTieIssue[] {
   const issues: ExportTieIssue[] = [];
-  const money = (cents: number) => cents / 100;
   const sales = wb.sales.rows;
   const sumRev = sales.reduce((n, r) => n + r.price_cents + r.buyer_shipping_cents, 0);
   const sumCost = sales.reduce((n, r) => n + (r.cost_cents ?? 0), 0);
@@ -15,34 +24,34 @@ export function verifyExportTies(wb: BooksWorkbook): ExportTieIssue[] {
   const t = wb.sales.totals;
 
   if (Math.abs(sumRev - t.revenue) >= MIN_CENTS) {
-    issues.push({ check: 'sales_revenue', message: `Sales revenue: rows $${money(sumRev).toFixed(2)} vs summary $${money(t.revenue).toFixed(2)}` });
+    issues.push({ check: 'sales_revenue', message: off(sumRev, t.revenue, 'sale rows', 'the summary', 'Sales') });
   }
   if (Math.abs(sumCost - t.cost) >= MIN_CENTS) {
-    issues.push({ check: 'sales_cogs', message: `COGS: rows $${money(sumCost).toFixed(2)} vs summary $${money(t.cost).toFixed(2)}` });
+    issues.push({ check: 'sales_cogs', message: off(sumCost, t.cost, 'sale rows', 'the summary', 'Cost of goods') });
   }
   if (Math.abs(sumProfit - t.profit) >= MIN_CENTS) {
-    issues.push({ check: 'sales_profit', message: `Profit: rows $${money(sumProfit).toFixed(2)} vs summary $${money(t.profit).toFixed(2)}` });
+    issues.push({ check: 'sales_profit', message: off(sumProfit, t.profit, 'sale rows', 'the summary', 'Profit') });
   }
   if (Math.abs(sumComm - t.commission) >= MIN_CENTS) {
-    issues.push({ check: 'sales_commission', message: `Commission: rows $${money(sumComm).toFixed(2)} vs summary $${money(t.commission).toFixed(2)}` });
+    issues.push({ check: 'sales_commission', message: off(sumComm, t.commission, 'sale rows', 'the summary', 'Commissions') });
   }
 
   const expRows = wb.expenses.exportRows.filter((r) => r.amount_cents > 0);
   const expSum = expRows.reduce((n, r) => n + r.amount_cents, 0);
   if (Math.abs(expSum - wb.expenses.total_cents) >= MIN_CENTS) {
-    issues.push({ check: 'expenses_total', message: `Expenses: rows $${money(expSum).toFixed(2)} vs total $${money(wb.expenses.total_cents).toFixed(2)}` });
+    issues.push({ check: 'expenses_total', message: off(expSum, wb.expenses.total_cents, 'expense rows', 'the total', 'Expenses') });
   }
 
   const bankSum = wb.payouts.stores.reduce((n, s) => n + s.paid_to_bank_cents, 0);
   if (Math.abs(bankSum - wb.payouts.bankPaidTotal_cents) >= MIN_CENTS) {
-    issues.push({ check: 'bank_payouts', message: `Paid to bank: lines $${money(bankSum).toFixed(2)} vs total $${money(wb.payouts.bankPaidTotal_cents).toFixed(2)}` });
+    issues.push({ check: 'bank_payouts', message: off(bankSum, wb.payouts.bankPaidTotal_cents, 'payout lines', 'the total', 'Paid to the bank') });
   }
 
   const ownerCalc = t.profit - t.commission - t.otherExpenses;
   if (Math.abs(ownerCalc - wb.payouts.owner.ownerKeeps) >= MIN_CENTS) {
     issues.push({
       check: 'owner_keeps',
-      message: `Owner keeps: profit − commission − other = $${money(ownerCalc).toFixed(2)} vs $${money(wb.payouts.owner.ownerKeeps).toFixed(2)}`,
+      message: `Owner keeps: profit minus commissions minus other expenses is ${dollars(ownerCalc)}, but the summary says ${dollars(wb.payouts.owner.ownerKeeps)} (${dollars(Math.abs(ownerCalc - wb.payouts.owner.ownerKeeps))} off)`,
     });
   }
 
@@ -52,12 +61,12 @@ export function verifyExportTies(wb: BooksWorkbook): ExportTieIssue[] {
   if (Math.abs(flow - inv.end_unit_count) >= 1) {
     issues.push({
       check: 'inventory_flow',
-      message: `Inventory: start ${inv.start_unit_count} + in ${inv.received_units} − out ≈ ${flow}, end ${inv.end_unit_count}`,
+      message: `Inventory count doesn't tie: starting stock plus units in, minus units out, comes to ${flow}, but the ending count is ${inv.end_unit_count}`,
     });
   }
 
   if (wb.proof && Math.abs(wb.proof.profit - t.profit) >= MIN_CENTS) {
-    issues.push({ check: 'hub_profit', message: `Books hub profit $${money(wb.proof.profit).toFixed(2)} vs export $${money(t.profit).toFixed(2)}` });
+    issues.push({ check: 'hub_profit', message: `Profit: the summary says ${dollars(wb.proof.profit)} but the export total says ${dollars(t.profit)} (${dollars(Math.abs(wb.proof.profit - t.profit))} off)` });
   }
 
   return issues;
