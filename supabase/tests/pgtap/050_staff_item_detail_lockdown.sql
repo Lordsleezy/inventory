@@ -1,13 +1,14 @@
 begin;
 select no_plan();
 do $$
-declare s uuid; clerk_id uuid := gen_random_uuid(); admin_id uuid := gen_random_uuid();
+declare s uuid; clerk_id uuid := gen_random_uuid();
 begin
-  insert into auth.users(id) values(clerk_id),(admin_id);
+  insert into auth.users(id) values(clerk_id);
   insert into public.stores default values returning id into s;
   insert into public.staff(user_id,store_id,display_name,role)
-    values(clerk_id,s,'Jacob','staff'),(admin_id,s,'Paul','admin');
+    values(clerk_id,s,'Jacob','staff');
   perform public.seed_store_settings(s,'Clerk item lockdown');
+  insert into public.sku_ledger(sku, store_id, issued_at) values ('10002', s, now());
   insert into public.units(store_id,sku,brand,model,title,state,ask_cents,acquisition_cost_cents,
     package_length_in,package_width_in,package_height_in,package_weight_lb,shippable,fulfillment_override,
     qty_on_hand,received_at,updated_at,upc)
@@ -16,7 +17,6 @@ begin
   insert into public.listings(store_id,sku,channel,status,listing_id)
     values(s,'10002','ebay','listed','123');
   perform set_config('receive.clerk',clerk_id::text,true);
-  perform set_config('receive.admin',admin_id::text,true);
   perform set_config('receive.store',s::text,true);
 end $$;
 
