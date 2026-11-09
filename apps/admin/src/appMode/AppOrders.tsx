@@ -6,7 +6,7 @@ import { errText } from '../errText';
 import { shortError } from './shortError';
 import { loadOrderLocations, locationCompare } from '../locationOrder';
 import { fileToBase64, labelFileUrl, orderAdmin } from '../orderLabel';
-import { openShippingLabel } from '../labelPrint';
+import { openShippingLabel, startAndroidPrint } from '../labelPrint';
 import { hasLabel, orderCanMarkPackaged, orderCanStepBack, orderNeedsLabel, orderStage, packagedStale, shippedStale, trackingTail, type OrderStage } from '../orderStage';
 import { useVisibleInterval } from '../useVisibleInterval';
 import { ScanOutPanel } from '../ScanOutPanel';
@@ -295,13 +295,19 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
   }
 
   async function printLabel(o: WebOrder, download = false) {
+    const androidTab = download ? null : startAndroidPrint();
     setBusy(download ? 'save-label' : 'print');
     setError('');
     try {
       const url = await labelFileUrl(client, o);
-      if (!url) { setError('No label file on this order yet.'); return; }
-      await openShippingLabel(url, download, client);
+      if (!url) {
+        androidTab?.tab?.close();
+        setError('No label file on this order yet.');
+        return;
+      }
+      await openShippingLabel(url, download, client, androidTab);
     } catch (e) {
+      androidTab?.tab?.close();
       setError(shortError(errText(e)));
     } finally {
       setBusy('');

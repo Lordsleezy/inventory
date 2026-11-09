@@ -31,6 +31,11 @@
     Cache-Control = "no-cache, must-revalidate"
 
 [[headers]]
+  for = "/label-print.html"
+  [headers.values]
+    Cache-Control = "no-cache, must-revalidate"
+
+[[headers]]
   for = "/build.json"
   [headers.values]
     Cache-Control = "no-cache, must-revalidate"
