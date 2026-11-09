@@ -1,17 +1,30 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { buildLabelPdf, imageToLabelPdf, labelPaperName, type LabelPaper } from './labelSheet';
-import { androidPrintPath, labelPrintKind } from './labelPrintKind';
+import { labelPrintKind } from './labelPrintKind';
 
 export type AndroidPrintTab = { job: string; tab: Window | null };
 
-const PRINT_PREFIX = 'floor-print-';
+function pdfCopy(bytes: Uint8Array) {
+  const copy = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(copy).set(bytes);
+  return copy;
+}
+
+function writeBuilding(tab: Window) {
+  tab.document.open();
+  tab.document.write('<!doctype html><title>Label</title><body style="margin:0;font:18px sans-serif;padding:24px">Building the label…</body>');
+  tab.document.close();
+}
 
 /** Call this in the tap handler, before any await. The installed Android app cannot print itself. */
 export function startAndroidPrint(): AndroidPrintTab | null {
   if (typeof navigator === 'undefined') return null;
   if (labelPrintKind(navigator.userAgent || '', navigator.maxTouchPoints || 0, navigator.platform || '') !== 'android') return null;
   const job = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-  const tab = window.open(androidPrintPath(job), '_blank');
+  const tab = window.open('about:blank', '_blank');
+  if (tab) {
+    try { writeBuilding(tab); } catch { /* filled in when the label is ready */ }
+  }
   return { job, tab };
 }
 
@@ -91,65 +104,71 @@ export async function loadPrintableLabel(url: string, paper: LabelPaper = cached
   return new Blob([pdf.slice()], { type: 'application/pdf' });
 }
 
-async function labelPageImages(bytes: Uint8Array) {
-  const pdfjs = await import('pdfjs-dist');
-  const worker = await import('pdfjs-dist/build/pdf.worker.min.mjs?url');
-  pdfjs.GlobalWorkerOptions.workerSrc = worker.default;
-  const doc = await pdfjs.getDocument({ data: bytes.slice() }).promise;
-  const urls: string[] = [];
-  let width = 288;
-  let height = 432;
-  for (let i = 1; i <= doc.numPages; i += 1) {
-    const page = await doc.getPage(i);
-    const natural = page.getViewport({ scale: 1 });
-    if (i === 1) {
-      width = natural.width;
-      height = natural.height;
-    }
-    const viewport = page.getViewport({ scale: 2 });
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.ceil(viewport.width);
-    canvas.height = Math.ceil(viewport.height);
-    const ctx = canvas.getContext('2d');
-    if (!ctx) throw new Error('Could not prepare the label.');
-    await page.render({ canvasContext: ctx, viewport }).promise;
-    urls.push(canvas.toDataURL('image/png'));
-  }
-  return { urls, width, height };
-}
-
 function bytesToBase64(bytes: Uint8Array) {
-  let binary = '';
-  const size = 0x8000;
-  for (let i = 0; i < bytes.length; i += size) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + size));
-  }
-  return btoa(binary);
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const text = String(reader.result || '');
+      resolve(text.slice(text.indexOf(',') + 1));
+    };
+    reader.onerror = () => reject(new Error('Could not prepare the label.'));
+    reader.readAsDataURL(new Blob([pdfCopy(bytes)], { type: 'application/pdf' }));
+  });
 }
 
-function deliverLabel(tab: Window | null | undefined, job: string, payload: Record<string, unknown>) {
-  try { localStorage.setItem(PRINT_PREFIX + job, JSON.stringify(payload)); } catch { /* the open page also gets a message */ }
-  const send = () => {
-    try { tab?.postMessage(payload, location.origin); } catch { /* the page reads local storage */ }
-  };
-  send();
-  window.setTimeout(send, 400);
-  window.setTimeout(send, 1200);
-}
-
-/** Hand the label to the page opened by the tap. That page calls the phone printer. */
-async function printOnAndroid(bytes: Uint8Array, started: AndroidPrintTab | null) {
-  const job = started?.job || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-  const tab = started?.tab && !started.tab.closed ? started.tab : window.open(androidPrintPath(job), '_blank');
-  let payload: Record<string, unknown> = { type: 'floor-label', job, pdfBase64: bytesToBase64(bytes) };
+async function sharePdf(bytes: Uint8Array) {
+  const file = new File([pdfCopy(bytes)], 'label.pdf', { type: 'application/pdf' });
+  if (!navigator.canShare?.({ files: [file] })) return false;
   try {
-    const images = await Promise.race([
-      labelPageImages(bytes),
-      new Promise<null>((resolve) => window.setTimeout(() => resolve(null), 4000)),
-    ]);
-    if (images?.urls.length) payload = { type: 'floor-label', job, urls: images.urls, width: images.width, height: images.height };
-  } catch { /* the print page can still show the PDF */ }
-  deliverLabel(tab, job, payload);
+    await navigator.share({ files: [file], title: 'Shipping label' });
+    return true;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') return true;
+    return false;
+  }
+}
+
+function labelPageHtml(b64: string) {
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Print label</title>
+<style>html,body{margin:0;background:#fff;color:#111;font:16px sans-serif}.bar{display:flex;gap:8px;padding:12px}button,a{flex:1;min-height:52px;font-size:18px;border-radius:10px;border:1px solid #111;background:#111;color:#fff;text-align:center;line-height:52px;text-decoration:none}a{background:#fff;color:#111}iframe{width:100%;height:calc(100vh - 88px);border:0;background:#fff}p{margin:0;padding:0 12px 8px}</style>
+</head><body>
+<div class="bar"><button type="button" id="print">Print</button><a id="back" href="/">Back</a></div>
+<p>Tap Print and choose the printer.</p>
+<iframe id="sheet" title="Shipping label"></iframe>
+<script>
+var b64 = ${JSON.stringify(b64)};
+var bin = atob(b64);
+var bytes = new Uint8Array(bin.length);
+for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+var blob = new Blob([bytes], { type: 'application/pdf' });
+var file = new File([blob], 'label.pdf', { type: 'application/pdf' });
+document.getElementById('sheet').src = URL.createObjectURL(blob);
+document.getElementById('back').addEventListener('click', function (event) {
+  if (history.length > 1) { event.preventDefault(); history.back(); }
+});
+document.getElementById('print').addEventListener('click', function () {
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    navigator.share({ files: [file], title: 'Shipping label' }).catch(function () { window.print(); });
+    return;
+  }
+  window.print();
+});
+</script></body></html>`;
+}
+
+/** The installed app ignores window.print(). Hand the file to Android, which can open the printer. */
+async function printOnAndroid(bytes: Uint8Array, started: AndroidPrintTab | null) {
+  const shared = await sharePdf(bytes);
+  if (shared) {
+    started?.tab?.close();
+    return;
+  }
+  const tab = started?.tab && !started.tab.closed ? started.tab : window.open('about:blank', '_blank');
+  if (!tab) throw new Error('Could not open the printer.');
+  const b64 = await bytesToBase64(bytes);
+  tab.document.open();
+  tab.document.write(labelPageHtml(b64));
+  tab.document.close();
 }
 
 /** Open the PDF itself. Its page size is 4×6 or letter, so AirPrint and desktop print at that size. */
