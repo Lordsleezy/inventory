@@ -669,7 +669,7 @@ html.app-mode .app-unit-edit .unit-edit-notes textarea { display:block; box-sizi
 html.app-mode .app-unit-edit .unit-edit-gap-links { display:flex; flex-wrap:wrap; gap:5px 12px; }
 html.app-mode .app-unit-edit .unit-edit-gap-links .text-button { color:#fff; }
 html.app-mode .app-unit-edit .receive-group-match { outline:2px solid #fff; outline-offset:-2px; }
-html.app-mode .app-unit-edit .unit-edit-dimensions { grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr)); padding:0; background:transparent; }
+html.app-mode .app-unit-edit .unit-edit-dimensions:not(.unit-edit-dim-row) { grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr)); padding:0; background:transparent; }
 html.app-mode .app-unit-edit .unit-edit-delete { margin-bottom:18px; }
 html.app-mode .app-unit-edit .inventory-detail > h3 { margin:20px 0 8px; color:#8e8e93; font-size:12px; font-weight:500; text-transform:uppercase; }
 html.app-mode .unit-edit-status { display:flex; justify-content:space-between; gap:12px; margin:12px 0; padding:10px 12px; border-radius:12px; background:#1c1c1e; color:#8e8e93; }
@@ -2439,10 +2439,36 @@ html.app-mode .app-unit-edit .inventory-detail {
 }
 html.app-mode .app-unit-edit .unit-edit-grid {
   display: grid;
-  grid-template-columns: 1fr !important;
   gap: 0;
   padding: 0 12px;
   margin: 0;
+  background: transparent !important;
+  border-radius: 0 !important;
+}
+@media (max-width: 759px) {
+  html.app-mode .app-unit-edit .unit-edit-grid {
+    grid-template-columns: 1fr !important;
+  }
+  html.app-mode .app-unit-edit .unit-edit-dim-row.unit-edit-dimensions {
+    display: grid !important;
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+    gap: 8px !important;
+    padding: 0 12px !important;
+    background: transparent !important;
+  }
+}
+html.app-mode .app-unit-edit .unit-edit-photo-tools button,
+html.app-mode .app-unit-edit .unit-edit-upc-row .unit-edit-upc-fields button,
+html.app-mode .app-unit-edit .unit-edit-show-all,
+html.app-mode .ebay-category-actions button {
+  color: #9a9a9a !important;
+}
+html.app-mode .app-unit-edit .unit-edit-grid > label > :is(input, textarea),
+html.app-mode .app-unit-edit .unit-edit-field :is(input, textarea) {
+  overflow: visible !important;
+  text-overflow: clip !important;
+  white-space: normal !important;
+  overflow-wrap: anywhere;
 }
 html.app-mode .app-unit-edit .unit-edit-grid > label,
 html.app-mode .app-unit-edit .unit-edit-field {
