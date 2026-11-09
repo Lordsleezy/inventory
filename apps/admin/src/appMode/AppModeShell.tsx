@@ -213,18 +213,10 @@ export function AppModeShell({
     if (meta && !/viewport-fit=cover/.test(meta.getAttribute('content') || '')) {
       meta.setAttribute('content', 'width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no');
     }
-    const pin = () => {
-      const h = window.visualViewport?.height || window.innerHeight;
-      document.documentElement.style.setProperty('--floor-app-h', `${Math.round(h)}px`);
-    };
-    pin();
-    window.visualViewport?.addEventListener('resize', pin);
-    window.addEventListener('resize', pin);
+    document.documentElement.style.removeProperty('--floor-app-h');
     return () => {
       document.documentElement.classList.remove('app-mode', 'dark');
       document.body.classList.remove('app-mode');
-      window.visualViewport?.removeEventListener('resize', pin);
-      window.removeEventListener('resize', pin);
     };
   }, []);
 

@@ -103,5 +103,6 @@ export function receiveSectionForGap(gap: string): string {
   if (key.includes('location')) return 'location';
   if (key.includes('price') || key.includes('condition') || key.includes('quantity')) return 'price';
   if (key.includes('upc')) return 'upc';
+  if (key === 'store category') return 'details';
   return 'item';
 }

@@ -58,6 +58,8 @@ export function ReceiveCategoryAspects({
   const [browseParent, setBrowseParent] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const preselectUsed = useRef(false);
+  const suggestFor = useRef('');
+  const pickGen = useRef(0);
   const [recommendedOpen, setRecommendedOpen] = useState(false);
   const [clearedNote, setClearedNote] = useState('');
   const [channelFields, setChannelFields] = useState<{ channel: 'amazon' | 'tiktok'; name: string; label: string; allowed?: string[] }[]>([]);
@@ -88,16 +90,24 @@ export function ReceiveCategoryAspects({
 
   useEffect(() => {
     const q = [identity.title, identity.brand].filter(Boolean).join(' ').trim();
+    if (suggestFor.current !== q) {
+      suggestFor.current = q;
+      preselectUsed.current = false;
+      pickGen.current += 1;
+    }
+    const gen = pickGen.current;
     if (q.length < 3 || value.categoryId) { setSuggestions([]); return; }
     let active = true;
     const t = window.setTimeout(() => {
       void askEbay(q).then((body) => {
         if (!active) return;
         setSuggestError('');
-        setSuggestions(body.suggestions || []);
-        if (body.preselect && !preselectUsed.current && !value.categoryId) {
+        const list = body.suggestions || [];
+        setSuggestions(list);
+        const suggested = body.preselect || list.find(choice => choice.best_match) || list[0] || null;
+        if (suggested && !preselectUsed.current && !value.categoryId) {
           preselectUsed.current = true;
-          void pickCategory(body.preselect);
+          void pickCategory(suggested, gen);
         }
       }).catch((error) => {
         if (!active) return;
@@ -148,7 +158,7 @@ export function ReceiveCategoryAspects({
   const recommended = useMemo(() => value.fields.filter(f => !f.required && f.recommended), [value.fields]);
   const filledRequired = required.filter(f => aspectFilled(f, value.attributes, value.na)).length;
 
-  async function pickCategory(choice: Choice) {
+  async function pickCategory(choice: Choice, gen?: number) {
     setBusy(true);
     setClearedNote('');
     try {
@@ -174,6 +184,7 @@ export function ReceiveCategoryAspects({
       const dropped = Object.keys(value.attributes).filter(k => !keptNames.has(k));
       if (dropped.length) setClearedNote(`Category changed — dropped ${dropped.join(', ')}.`);
       setFromUpc(Array.isArray(body.prefilled) ? body.prefilled.map((name: unknown) => String(name)) : []);
+      if (gen !== undefined && gen !== pickGen.current) return;
       onChange({
         categoryId: choice.category_id,
         path: body.path || row?.path || choice.path,

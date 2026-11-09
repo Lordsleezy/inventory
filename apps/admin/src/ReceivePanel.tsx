@@ -1031,6 +1031,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     askTouched.current = false;
     titleTouched.current = false;
     categoryTouched.current = false;
+    setEbayAspects({ categoryId: null, path: null, fields: [], attributes: {}, na: {} });
     setForm({ ...blank, ...keepProduct });
     setFiles([]);
     setStockPhotoPath('');
@@ -1119,6 +1120,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         .map(key => [key, m?.aspects?.[key] ? (r?.floor_product ? 'Floor' : 'Amazon') : '']),
     ].filter(([, source]) => source)));
     setForm(initial);
+    setEbayAspects({ categoryId: null, path: null, fields: [], attributes: {}, na: {} });
     const miss = current.status === 'ready' || current.status === 'error'
       ? (current.status === 'error' ? null : catalogMissMessage(r))
       : null;
@@ -1189,12 +1191,19 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       const accessory = isMattressAccessory(`${m?.category || ''} ${prev.title} ${prev.brand} ${prev.model}`);
       const already = list.some(name => name.toLowerCase() === prev.category.trim().toLowerCase());
       if (already && !(accessory && /^mattress(?:es)?$/i.test(prev.category.trim()))) return prev;
-      const next = matchReceiveCategory(list, {
-        category: m?.category || prev.category, title: prev.title, brand: prev.brand, model: prev.model,
+      let next = matchReceiveCategory(list, {
+        category: m?.category || prev.category,
+        title: [prev.title, ebayAspects.path].filter(Boolean).join(' '),
+        brand: prev.brand,
+        model: prev.model,
       });
+      if (!next && ebayAspects.path) {
+        const leaf = ebayAspects.path.split('>').pop()?.trim().toLowerCase() || '';
+        next = list.find(name => name.toLowerCase() === leaf) || '';
+      }
       return next !== prev.category ? { ...prev, category: next } : prev;
     });
-  }, [options, loadedId, manual, current?.id, current?.status]);
+  }, [options, loadedId, manual, current?.id, current?.status, ebayAspects.path]);
 
   /* Suggestions are displayed for reference; only the person receiving enters an ask price. */
 
@@ -1287,9 +1296,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       });
     }
     const gaps = listingGaps(p);
-    const out = [...gaps.map(g => (g === 'ebay_category' ? 'category' : g === 'ebay_aspects' ? 'item specifics' : g))];
-    if (!form.category.trim() && !out.includes('category')) out.push('category');
-    if (!ebayAspects.categoryId && missingEbayAspects(ebayAspects.fields, ebayAspects.attributes, ebayAspects.na).length === 0 && !form.category.trim() && !out.includes('category')) out.push('category');
+    const out: string[] = [...gaps.map(g => (g === 'ebay_category' ? 'category' : g === 'ebay_aspects' ? 'item specifics' : g))];
+    if (!form.category.trim() && !out.includes('store category')) out.push('store category');
     return receiveMissingFields({ doNotList: false, brandReady: brandReady(), otherGaps: out, hasPhoto: photo, quantityOk, defective: mediaWaived, hasDimensions, hasLocation });
   }
   const liveMissing = missingFor(parse() || { ask: null, cost: null, dims: [null, null, null, null] });
@@ -2292,7 +2300,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         </div>
         </ReceiveSection>}
 
-        {!(staffMode && doNotList) && <ReceiveSection id="item" title="Item" required={!doNotList} open={openSec === 'item'} onOpen={toggleSection}
+        {!(staffMode && doNotList) && <ReceiveSection id="item" title="Item" required={!doNotList} keepMounted open={openSec === 'item'} onOpen={toggleSection}
           tone={liveMissing.some(g => receiveSectionForGap(g) === 'item') ? 'bad' : 'muted'}
           status={liveMissing.filter(g => receiveSectionForGap(g) === 'item').length
             ? (liveMissing.filter(g => receiveSectionForGap(g) === 'item').length === 1
@@ -2433,8 +2441,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         </ReceiveSection>}
 
         {!(staffMode && doNotList) && <ReceiveSection id="details" title="Details" open={openSec === 'details'} onOpen={toggleSection}
-          tone={ebayCheck.ready ? 'muted' : 'bad'}
-          status={ebayCheck.text}>
+          tone={liveMissing.includes('store category') || !ebayCheck.ready ? 'bad' : 'muted'}
+          status={liveMissing.includes('store category') ? 'Store category' : ebayCheck.text}>
           <p className="rcv-note">eBay check</p>
           <strong>{ebayCheck.ready ? 'All required fields set' : 'Still missing a required eBay field'}</strong>
           <div className="rcv-ebay-rows">
