@@ -107,7 +107,16 @@ test("an eBay PDF that disagrees with eBay tracking is a mismatch", () => {
     { confident: true, number: "9400111899001234567800", carrier: "USPS" },
   );
   assert.equal(r.mismatch, true);
-  assert.match(r.exception, /does not match eBay/);
+  assert.match(r.exception, /^label_mismatch\|/);
+});
+
+test("a truncated USPS body matches eBay tracking", () => {
+  const r = resolveUploadedTracking(
+    { channel: "ebay", marketplace_tracking_number: "9434608106244728542207" },
+    { confident: true, number: "34608106244728542207", carrier: "FedEx" },
+  );
+  assert.equal(r.mismatch, false);
+  assert.equal(r.tracking, "9434608106244728542207");
 });
 
 test("an unreadable eBay PDF keeps eBay's tracking number", () => {

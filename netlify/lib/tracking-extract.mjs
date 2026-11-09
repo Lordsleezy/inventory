@@ -8,6 +8,7 @@ import {
   validateTrackingCandidate,
   digitsOnly,
   alphaNumOnly,
+  completeUspsFromBody,
 } from "../../shared/tracking-validate.mjs";
 import { compactTracking } from "../../shared/tracking-normalize.mjs";
 import {
@@ -76,6 +77,11 @@ function collectCandidatesFromText(text, { nearTracking = false, blocked = [] } 
   for (const m of corpus.matchAll(/\b420\d{5}(9[2-5]\d{18,24})\b/gi)) add(m[1], 5, "barcode-text");
   for (const m of corpus.matchAll(/\b420\d{9}(9[2-5]\d{18,24})\b/gi)) add(m[1], 5, "barcode-text");
   for (const m of corpus.matchAll(/\b(9[2-5]\d{18,24})\b/g)) add(m[1], 0, "text");
+  for (const m of corpus.matchAll(/\b(\d{18,20})\b/g)) {
+    if (/^9[2-5]/.test(m[1])) continue;
+    const completed = completeUspsFromBody(m[1]);
+    if (completed) add(completed, 3, "text-body");
+  }
   for (const m of corpus.matchAll(/\b(1Z[0-9A-Z]{16})\b/gi)) add(m[1], 1, "text");
   if (/fedex/i.test(corpus)) {
     for (const m of corpus.matchAll(/\b(\d{12}|\d{15}|\d{20})\b/g)) {
@@ -137,7 +143,10 @@ export async function ocrImage(bytes) {
   } catch {
     return { text: "", engine: "none" };
   }
-  const worker = await createWorker("eng", 1, { errorHandler: () => {} });
+  const { fileURLToPath } = await import("node:url");
+  const { dirname, join } = await import("node:path");
+  const langPath = join(dirname(fileURLToPath(import.meta.url)), "..", "traineddata");
+  const worker = await createWorker("eng", 1, { langPath, errorHandler: () => {} });
   try {
     const sharp = (await import("sharp")).default;
     const bottom = await sharp(bytes).metadata().then(async (meta) => {

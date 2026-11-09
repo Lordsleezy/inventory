@@ -14,9 +14,21 @@ import { cancelAndRefund } from "../lib/web-payment.mjs";
 import { pickupSweep } from "../lib/web-pickup.mjs";
 import { deliverOrderEmails, ownerEmails } from "../lib/web-order-email.mjs";
 import { sendInternalAlert } from "../lib/mail.mjs";
-import { attachUploadedLabel, setOrderTrackingNumber } from "../lib/order-label.mjs";
+import {
+  acceptLabelTracking,
+  acceptMarketplaceTracking,
+  attachUploadedLabel,
+  retryLabelExtract,
+  setOrderTrackingNumber,
+} from "../lib/order-label.mjs";
 
-const STAFF_LABEL_ACTIONS = new Set(["attach_label", "set_tracking"]);
+const STAFF_LABEL_ACTIONS = new Set([
+  "attach_label",
+  "set_tracking",
+  "accept_marketplace_tracking",
+  "accept_label_tracking",
+  "retry_label_extract",
+]);
 
 async function handle(event) {
   if (event.httpMethod === "OPTIONS") return { statusCode: 200, headers: corsHeaders(), body: "" };
@@ -74,6 +86,27 @@ async function handle(event) {
     if (loadError) return json(500, { error: loadError.message });
     if (!order) return json(404, { error: "Order not found." });
     const r = await setOrderTrackingNumber(sb, storeId, order, { tracking: body.tracking, carrier: body.carrier });
+    return json(r.status, r);
+  }
+  if (body.action === "accept_marketplace_tracking") {
+    const { data: order, error: loadError } = await sb.from("web_orders").select("*").eq("id", id).eq("store_id", storeId).maybeSingle();
+    if (loadError) return json(500, { error: loadError.message });
+    if (!order) return json(404, { error: "Order not found." });
+    const r = await acceptMarketplaceTracking(sb, storeId, order);
+    return json(r.status, r);
+  }
+  if (body.action === "accept_label_tracking") {
+    const { data: order, error: loadError } = await sb.from("web_orders").select("*").eq("id", id).eq("store_id", storeId).maybeSingle();
+    if (loadError) return json(500, { error: loadError.message });
+    if (!order) return json(404, { error: "Order not found." });
+    const r = await acceptLabelTracking(sb, storeId, order, { tracking: body.tracking, carrier: body.carrier });
+    return json(r.status, r);
+  }
+  if (body.action === "retry_label_extract") {
+    const { data: order, error: loadError } = await sb.from("web_orders").select("*").eq("id", id).eq("store_id", storeId).maybeSingle();
+    if (loadError) return json(500, { error: loadError.message });
+    if (!order) return json(404, { error: "Order not found." });
+    const r = await retryLabelExtract(sb, storeId, order);
     return json(r.status, r);
   }
   if (body.action === "void_label") {
