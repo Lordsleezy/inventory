@@ -112,6 +112,30 @@ test('a letter page with a sideways corner label becomes an upright 4x6', async 
   assert.ok(mark.top >= 8 && mark.top + mark.dh <= shot.height - 8, JSON.stringify(mark));
 });
 
+test('a full 4x6 label keeps the address instead of cropping to the barcode', async () => {
+  const png = await barcodePng();
+  const src = await PDFDocument.create();
+  const page = src.addPage([LABEL_W, LABEL_H]);
+  const font = await src.embedFont(StandardFonts.Helvetica);
+  const image = await src.embedPng(png);
+  page.drawText('SHIP TO', { x: 24, y: 400, size: 12, font });
+  page.drawText('RICE COOKER', { x: 24, y: 376, size: 14, font });
+  page.drawText('123 MAIN ST', { x: 24, y: 352, size: 12, font });
+  page.drawImage(image, { x: 24, y: 40, width: 240, height: 80 });
+  const outBytes = await buildLabelPdf(await src.save(), 'label');
+  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const doc = await pdfjs.getDocument({ data: outBytes.slice(), verbosity: 0 }).promise;
+  const text = await doc.getPage(1).then((printed) => printed.getTextContent());
+  const line = text.items.map((item) => ('str' in item ? item.str : '')).join(' ');
+  assert.match(line, /RICE COOKER/);
+  assert.match(line, /SHIP TO/);
+  const shot = await renderPng(outBytes);
+  const mark = shot.images[0];
+  assert.ok(mark, 'barcode missing');
+  assert.ok(mark.top > shot.height * 0.45, JSON.stringify(mark));
+  assert.ok(mark.dh < shot.height * 0.4, JSON.stringify(mark));
+});
+
 test('a label already at 4x6 stays 4x6 and the barcode still scans', async () => {
   const png = await barcodePng();
   const src = await PDFDocument.create();
