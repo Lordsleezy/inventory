@@ -13,7 +13,8 @@ begin
     package_length_in,package_width_in,package_height_in,package_weight_lb,shippable,fulfillment_override,
     qty_on_hand,received_at,updated_at)
     values(s,'10001','Brand','Model','Brand Model','available',1999,450,1,2,3,4,true,'ship',
-    1,now(),now());
+    0,now(),now());
+  update public.units set qty_on_hand = 1 where store_id = s and sku = '10001';
   perform set_config('receive.clerk',clerk_id::text,true);
   perform set_config('receive.store',s::text,true);
 end $$;
