@@ -231,9 +231,10 @@ body.cdtfa-printing .cdtfa-round,body.books-printing .cdtfa-round{color:#333}
 .books-phone .books-desk-strip span{display:block;color:#a0a0a0;font-size:12px}
 .books-phone .books-desk-strip strong{color:#fff;font-variant-numeric:tabular-nums}
 .books-phone .books-desk-strip .lead strong{font-size:2rem}
-.books-phone .books-phone-tabs{display:flex;gap:14px;overflow:auto;border-bottom:1px solid #2a2a2a;margin-bottom:10px}
-.books-phone .books-phone-tabs button{border:0;border-bottom:2px solid transparent;background:transparent;color:#a0a0a0;border-radius:0;min-height:0;padding:8px 0}
-.books-phone .books-phone-tabs button.on{color:#fff;border-bottom-color:#fff}
+.books-phone .books-phone-tabs{margin-bottom:10px}
+.books-load-error{border-top:1px solid #2a2a2a;border-bottom:1px solid #2a2a2a;padding:12px;margin:0 0 8px;color:#fff;background:#000}
+.books-load-error p{margin:0 0 10px;color:#ff453a;font-size:13px;line-height:1.4}
+.books-load-error button{width:100%}
 .books-phone .books-phone-sale{display:flex;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid #2a2a2a}
 .books-phone .books-phone-sale strong,.books-phone .books-phone-sale b{display:block;color:#fff}
 .books-phone .books-phone-sale small{color:#a0a0a0}

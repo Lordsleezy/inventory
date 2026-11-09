@@ -27,6 +27,7 @@ import { DropshipPage } from '../dropship/DropshipPage';
 import { ReceiptsPage } from '../ReceiptsPage';
 import type { OnlineCfg, Rule, CommissionOverride } from '../payouts';
 import { parseNavFromLocation } from '../navigation';
+import { phoneTabIds } from '../deskNav';
 
 export type AppTab = 'inventory' | 'receive' | 'register' | 'orders' | 'returns' | 'more' | 'settings' | 'locations';
 
@@ -55,11 +56,6 @@ type Props = {
 };
 
 /** Clerk tab bar (max five). Admins use INVENTORY / RECEIVE / ORDERS / RETURNS / MORE. */
-const ASSOCIATE_TABS: AppTab[] = ['inventory', 'receive', 'orders', 'register', 'locations', 'settings'];
-/** Owner keeps the staff floor tabs; money pages live under More. */
-const OWNER_TAB_IDS: AppTab[] = ['inventory', 'receive', 'orders', 'register', 'locations', 'more'];
-const ADMIN_TAB_IDS: AppTab[] = ['inventory', 'receive', 'orders', 'returns', 'more'];
-
 const TABS: { id: AppTab; label: string; icon: React.ReactNode; adminOnly?: boolean; associateOnly?: boolean }[] = [
   {
     id: 'inventory',
@@ -223,8 +219,10 @@ export function AppModeShell({
     return () => window.removeEventListener('popstate', onPop);
   }, [itemSku, morePage, moreReturnTo, channel]);
 
+  const deskKind = fullAccess ? 'admin' : ownerAccess ? 'owner' : 'staff';
+
   function switchTab(next: AppTab) {
-    const allowed = fullAccess ? ADMIN_TAB_IDS : ownerAccess ? OWNER_TAB_IDS : ASSOCIATE_TABS;
+    const allowed = phoneTabIds(deskKind);
     if (!allowed.includes(next)) next = 'inventory';
     const panel = document.querySelector('.app-tab-panel:not([hidden])') as HTMLElement | null;
     if (panel && tab) scrollPos.current[tab] = panel.scrollTop;
@@ -239,7 +237,7 @@ export function AppModeShell({
     });
   }
 
-  const tabs = TABS.filter((t) => (fullAccess ? ADMIN_TAB_IDS : ownerAccess ? OWNER_TAB_IDS : ASSOCIATE_TABS).includes(t.id));
+  const tabs = phoneTabIds(deskKind).map((id) => TABS.find((t) => t.id === id)).filter((t): t is (typeof TABS)[number] => !!t);
   const stackOpen = !!(itemSku || morePage || channel);
 
   return (
@@ -446,7 +444,7 @@ export function AppModeShell({
         )}
         {moneyAccess && morePage === 'books' && (
           <AppReportsNative onBack={() => booksBack()} title={booksTitle} backLabel={booksDetail ? 'Books' : (moreReturnTo === 'other' ? 'Other' : 'More')}>
-            <BooksPage client={client} money={money} native onNativeNavigation={(detail, title, back) => { setBooksDetail(detail); setBooksTitle(detail ? (title || 'Books') : 'Books'); setBooksBack(() => back || leaveMorePage); }} />
+            <BooksPage client={client} storeId={storeId} money={money} native onNativeNavigation={(detail, title, back) => { setBooksDetail(detail); setBooksTitle(detail ? (title || 'Books') : 'Books'); setBooksBack(() => back || leaveMorePage); }} />
           </AppReportsNative>
         )}
         {moneyAccess && morePage === 'manifests' && (
