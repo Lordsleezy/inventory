@@ -228,12 +228,41 @@ export function AppModeShell({
     pin();
     window.visualViewport?.addEventListener('resize', pin);
     window.addEventListener('resize', pin);
+    let startX = 0;
+    let startY = 0;
+    const atTop = (target: EventTarget | null) => {
+      let node = target instanceof Element ? target : null;
+      while (node && node !== document.body && node !== document.documentElement) {
+        if (node instanceof HTMLElement) {
+          const oy = getComputedStyle(node).overflowY;
+          if ((oy === 'auto' || oy === 'scroll') && node.scrollHeight > node.clientHeight + 2) return node.scrollTop <= 2;
+        }
+        node = node.parentElement;
+      }
+      return (document.scrollingElement?.scrollTop || 0) <= 2;
+    };
+    const onStart = (e: TouchEvent) => {
+      startX = e.touches[0]?.clientX ?? 0;
+      startY = e.touches[0]?.clientY ?? 0;
+    };
+    const onMove = (e: TouchEvent) => {
+      const x = e.touches[0]?.clientX ?? startX;
+      const y = e.touches[0]?.clientY ?? startY;
+      const dx = x - startX;
+      const dy = y - startY;
+      if (dy < 12 || Math.abs(dx) > Math.abs(dy) || !atTop(e.target)) return;
+      if (e.cancelable) e.preventDefault();
+    };
+    document.addEventListener('touchstart', onStart, { capture: true, passive: true });
+    document.addEventListener('touchmove', onMove, { capture: true, passive: false });
     return () => {
       document.documentElement.classList.remove('app-mode', 'dark');
       document.body.classList.remove('app-mode');
       document.documentElement.style.removeProperty('--floor-app-h');
       window.visualViewport?.removeEventListener('resize', pin);
       window.removeEventListener('resize', pin);
+      document.removeEventListener('touchstart', onStart, { capture: true });
+      document.removeEventListener('touchmove', onMove, { capture: true });
     };
   }, []);
 
