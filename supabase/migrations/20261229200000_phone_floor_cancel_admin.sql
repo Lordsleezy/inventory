@@ -1,5 +1,4 @@
--- Phone Mark shipped: clerks must scan matching tracking; admins may override missing tracking with a reason.
--- Floor cancel: admin-only (matches phone UI).
+-- Floor cancel from the phone app: admin-only (matches phone UI).
 
 begin;
 
