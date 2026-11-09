@@ -10,7 +10,7 @@ import { derivativePath, hydratePhotoUrlCache, listThumbPhoto, listThumbPathsFro
 import { errText } from './errText';
 import { fileToBase64, labelFileUrl, orderAdmin } from './orderLabel';
 import { openShippingLabel } from './labelPrint';
-import { canBuyLabel, hasLabel, orderChip, orderNeedsLabel, orderStage, orderTimeline, packagedStale, shippedStale } from './orderStage';
+import { canBuyLabel, hasLabel, orderCanStepBack, orderChip, orderNeedsLabel, orderStage, orderTimeline, packagedStale, shippedStale } from './orderStage';
 import { loadOrderLocations, locationCompare } from './locationOrder';
 import { useVisibleInterval } from './useVisibleInterval';
 import { ScanOutPanel } from './ScanOutPanel';
@@ -170,8 +170,9 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
     // No practical date hide: cover store day-one history (portal still clamps to p_days).
     const { data, error: e } = await client.rpc('portal_web_orders', { p_days: 400 });
     if (e) { setError(e.message); return; }
-    setOrders(data as WebOrder[]);
-    const skus = [...new Set((data as WebOrder[]).map(o => o.sku).filter(Boolean))];
+    const list = Array.isArray(data) ? data as WebOrder[] : [];
+    setOrders(list);
+    const skus = [...new Set(list.map(o => o.sku).filter(Boolean))];
     setLocations(await loadOrderLocations(client, storeId, skus));
     const { data: bins } = await client.from('store_locations').select('code').eq('store_id',storeId).order('bay_no').order('row_no').order('bin_no');
     setLocationOptions((bins || []) as {code:string}[]);
@@ -785,6 +786,25 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
         </button>
       ))}
     </div>
+    {!packOnly && view === 'toShip' && !orders?.some((o) => o.order_no === 'TEST-SHIP-FLOW') && (
+      <div className="actions" style={{ marginBottom: 12 }}>
+        <button
+          type="button"
+          className="secondary"
+          disabled={!!busy}
+          onClick={async () => {
+            setBusy('test-order');
+            setError('');
+            const { error: e } = await client.rpc('portal_reset_test_ship_flow_order');
+            if (e) setError(errText(e));
+            else await load();
+            setBusy(null);
+          }}
+        >
+          {busy === 'test-order' ? '…' : 'Add test To ship order (TEST-SHIP-FLOW)'}
+        </button>
+      </div>
+    )}
     {!packOnly && <div className="actions" style={{ marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
       <label>Status{' '}
         <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as StatusFilter)} aria-label="Order status filter">

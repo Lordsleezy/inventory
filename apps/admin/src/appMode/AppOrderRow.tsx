@@ -20,11 +20,13 @@ type Props = {
   onUrl: (path: string, url: string) => void;
   showUpload?: boolean;
   onUpload?: (file: File) => void;
+  showStepBack?: boolean;
+  onStepBack?: () => void;
 };
 
 export function AppOrderRow({
   order, client, thumbPath, photoUrls, locationCode, money, channelName, trackingTail,
-  onOpen, onPrint, onUrl, showUpload, onUpload, hideMoney = false,
+  onOpen, onPrint, onUrl, showUpload, onUpload, hideMoney = false, showStepBack, onStepBack,
 }: Props) {
   const loc = locationParts(locationCode);
   const chip = orderChip(order);
@@ -37,7 +39,7 @@ export function AppOrderRow({
       ? `${channelName} · ${money(order.item_cents || 0)}`
       : [channelName, money(order.item_cents || 0), trackingTail].filter(Boolean).join(' · ');
   const locLine = loc ? `${loc.display} · ${loc.slot}`.toUpperCase() : '';
-  const showActions = Boolean((hasLabel(order) && onPrint) || (showUpload && onUpload));
+  const showActions = Boolean((hasLabel(order) && onPrint) || (showUpload && onUpload) || (showStepBack && onStepBack));
 
   return (
     <div className={`app-row app-order-row-v2${needsLabel ? ' needs-label' : ''}`}>
@@ -70,6 +72,15 @@ export function AppOrderRow({
               Upload
               <input type="file" accept="application/pdf,image/*" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) onUpload(f); }} />
             </label>
+          )}
+          {showStepBack && onStepBack && (
+            <button
+              type="button"
+              className="app-order-action-outline"
+              onClick={(e) => { e.stopPropagation(); onStepBack(); }}
+            >
+              Step back
+            </button>
           )}
         </div>
       )}

@@ -5,7 +5,7 @@ import { OrderStageTabs, OrderTimelineList } from '../OrderFulfillment';
 import { OrderFacts, OrderPhotoCarousel } from '../OrderPhotos';
 import { displayOrderTitle } from '../orderDisplay';
 import { locationParts } from '../locationOrder';
-import { canBuyLabel, hasLabel, orderNeedsLabel, orderStage, orderTimeline, type OrderStage } from '../orderStage';
+import { canBuyLabel, hasLabel, orderCanStepBack, orderNeedsLabel, orderStage, orderTimeline, type OrderStage } from '../orderStage';
 import { listThumbPhoto, photoKind, type UnitPhoto } from '../unitPhotos';
 import type { WebOrder } from '../OrdersPage';
 import { PackLabelScan } from '../PackLabelScan';
@@ -275,10 +275,15 @@ export function AppOrderDetail(props: AppOrderDetailProps) {
               {order.pack_proof_photo_path ? 'Replace pack photo' : 'Add pack photo'}
             </button>
           )}
-          {(order.delivered_at || order.shipped_at || order.packaged_at) && (
-            <button type="button" className="secondary" disabled={!!busy} onClick={onStepBack}>Move back one step</button>
-          )}
         </details>
+      )}
+
+      {isAdmin && orderCanStepBack(order) && paid && ship && stage !== 'canceled' && (
+        <div className="app-order-extra-actions">
+          <button type="button" className="secondary" disabled={!!busy} onClick={onStepBack}>
+            {busy === 'step-back' ? '…' : 'Step back one fulfillment step'}
+          </button>
+        </div>
       )}
 
       {!order.delivered_at && !order.picked_up_at && paid && (

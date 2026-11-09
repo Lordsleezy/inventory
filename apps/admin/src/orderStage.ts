@@ -54,6 +54,12 @@ export function orderNeedsLabel(o: StageOrder) {
   return !labelReady(o);
 }
 
+/** Admin-only undo: at least one fulfillment timestamp is set (ship or pickup). */
+export function orderCanStepBack(o: StageOrder) {
+  if (o.status && o.status !== 'paid') return false;
+  return !!(o.delivered_at || o.shipped_at || o.packaged_at || o.picked_up_at);
+}
+
 export function orderStage(o: StageOrder): OrderStage {
   if (o.status === 'canceled' || o.status === 'refunded') return 'canceled';
   if (o.fulfillment === 'pickup') return o.picked_up_at ? 'delivered' : 'pickup';
