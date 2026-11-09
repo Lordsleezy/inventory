@@ -19,13 +19,17 @@ test('owner desk groups match Sell / Stock / Money / System', () => {
   assert.ok(!pages.includes('sales'));
 });
 
-test('resolveDeskAccess: owner beats portal admin', () => {
-  assert.equal(resolveDeskAccess('owner', true), 'owner');
+test('resolveDeskAccess: portal_admins is the explicit admin grant', () => {
+  assert.equal(resolveDeskAccess('owner', true), 'admin');
+  assert.equal(resolveDeskAccess('staff', true), 'admin');
+  assert.equal(resolveDeskAccess('manager', true), 'admin');
+  assert.equal(resolveDeskAccess(null, true), 'admin');
   assert.equal(resolveDeskAccess('owner', false), 'owner');
   assert.equal(resolveDeskAccess('manager', false), 'admin');
-  assert.equal(resolveDeskAccess('staff', true), 'admin');
   assert.equal(resolveDeskAccess('staff', false), 'staff');
   assert.equal(resolveDeskAccess(null, false), 'staff');
+  assert.equal(resolveDeskAccess('', false), 'staff');
+  assert.equal(resolveDeskAccess('clerk', false), 'staff');
 });
 
 test('owner nav uses grouped sidebar', () => {

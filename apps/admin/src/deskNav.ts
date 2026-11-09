@@ -147,10 +147,30 @@ export const OWNER_LINKS: DeskLink[] = [
 
 export type DeskAccess = 'admin' | 'owner' | 'staff';
 
-/** Owner role wins over portal_admins so Steve does not get the full admin channel dump. */
+/** Visual order of the phone tab bar. Membership is filtered per desk. */
+export const PHONE_TAB_ORDER = ['inventory', 'receive', 'register', 'orders', 'returns', 'more', 'settings', 'locations'] as const;
+
+const PHONE_TAB_MEMBERSHIP: Record<DeskAccess, readonly string[]> = {
+  admin: ['inventory', 'receive', 'orders', 'returns', 'more'],
+  owner: ['inventory', 'receive', 'orders', 'register', 'locations', 'more'],
+  staff: ['inventory', 'receive', 'orders', 'register', 'locations', 'settings'],
+};
+
+export function phoneTabIds(access: DeskAccess): string[] {
+  const allowed = PHONE_TAB_MEMBERSHIP[access];
+  return PHONE_TAB_ORDER.filter((id) => allowed.includes(id));
+}
+
+/**
+ * Explicit admin membership is a portal_admins row. It wins over staff.role,
+ * so a store owner who is also the real admin keeps the full desk.
+ * staff.role = owner with no portal_admins row is the restricted owner desk.
+ * Missing, blank, or unknown roles are staff. Never default to admin.
+ */
 export function resolveDeskAccess(staffRole: string | null | undefined, portalAdmin: boolean): DeskAccess {
+  if (portalAdmin) return 'admin';
   if (staffRole === 'owner') return 'owner';
-  if (staffRole === 'manager' || portalAdmin) return 'admin';
+  if (staffRole === 'manager') return 'admin';
   return 'staff';
 }
 
