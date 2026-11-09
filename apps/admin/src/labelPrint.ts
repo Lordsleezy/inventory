@@ -151,7 +151,8 @@ export async function printPdfBytes(bytes: Uint8Array, androidTab: AndroidPrintT
     return;
   }
   const blob = new Blob([bytes.slice()], { type: 'application/pdf' });
-  const href = URL.createObjectURL(blob);
+  const url = URL.createObjectURL(blob);
+  const href = `${url}#zoom=100`;
   if (kind === 'ios') {
     const opened = window.open(href, '_blank');
     if (!opened) {
@@ -161,7 +162,7 @@ export async function printPdfBytes(bytes: Uint8Array, androidTab: AndroidPrintT
       link.rel = 'noopener';
       link.click();
     }
-    window.setTimeout(() => URL.revokeObjectURL(href), 120_000);
+    window.setTimeout(() => URL.revokeObjectURL(url), 120_000);
     return;
   }
   const frame = document.createElement('iframe');
@@ -177,7 +178,7 @@ export async function printPdfBytes(bytes: Uint8Array, androidTab: AndroidPrintT
   document.body.appendChild(frame);
   window.setTimeout(() => {
     frame.remove();
-    URL.revokeObjectURL(href);
+    URL.revokeObjectURL(url);
   }, 120_000);
 }
 

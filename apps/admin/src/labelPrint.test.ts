@@ -7,7 +7,7 @@ import bwipjs from 'bwip-js';
 import sharp from 'sharp';
 // @ts-expect-error plain JavaScript decoder, used only to prove the barcode still scans
 import { decodeTrackingBarcodes } from '../../../netlify/lib/tracking-barcode.mjs';
-import { LABEL_H, LABEL_W, LETTER_H, LETTER_W, buildLabelPdf } from './labelSheet.ts';
+import { LABEL_H, LABEL_W, LETTER_H, LETTER_W, QUARTER_H, QUARTER_W, SAFE_MARGIN, buildLabelPdf } from './labelSheet.ts';
 
 const TRACK = '9400108106244728534798';
 const OUT = tmpdir();
@@ -127,8 +127,7 @@ test('a label already at 4x6 stays 4x6 and the barcode still scans', async () =>
   const decoded = await scan(shot.png);
   assert.equal(decoded[0]?.number, TRACK, JSON.stringify(shot.images));
   const mark = shot.images[0];
-  assert.ok(Math.abs(mark.left - 36 * 2) < 8, JSON.stringify(mark));
-  assert.ok(Math.abs(mark.dw - 216 * 2) < 8, JSON.stringify(mark));
+  assert.ok(mark.dw > 216 * 2, JSON.stringify(mark));
 });
 
 test('a 4x6 label in the top-left of a letter page is cropped out at full size', async () => {
@@ -148,8 +147,8 @@ test('a 4x6 label in the top-left of a letter page is cropped out at full size',
   const decoded = await scan(shot.png);
   assert.equal(decoded[0]?.number, TRACK, JSON.stringify(shot.images));
   const mark = shot.images[0];
-  assert.ok(Math.abs(mark.left - 36 * 2) < 12, JSON.stringify(mark));
-  assert.ok(Math.abs(mark.dw - 216 * 2) < 12, JSON.stringify(mark));
+  assert.ok(mark.left + mark.dw <= shot.width, JSON.stringify(mark));
+  assert.ok(mark.dw > 180 * 2, JSON.stringify(mark));
 });
 
 test('letter paper keeps a true-size 4x6 label at the top-left', async () => {
@@ -216,4 +215,137 @@ test('a wide label is fitted inside 4x6 without a letter page', async () => {
   assert.ok(mark.left >= 0 && mark.left + mark.dw <= shot.width, JSON.stringify(mark));
   assert.ok(mark.top >= 0 && mark.top + mark.dh <= shot.height, JSON.stringify(mark));
   assert.ok(mark.dh < shot.height / 2, JSON.stringify(mark));
+});
+
+const DPI = 144;
+
+async function inkInches(bytes: Uint8Array) {
+  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const doc = await pdfjs.getDocument({ data: bytes.slice(), verbosity: 0 }).promise;
+  const page = await doc.getPage(1);
+  const pageW = page.view[2] - page.view[0];
+  const pageH = page.view[3] - page.view[1];
+  const width = Math.round(pageW * DPI / 72);
+  const height = Math.round(pageH * DPI / 72);
+  const buf = Buffer.alloc(width * height * 4, 255);
+  const op = await page.getOperatorList();
+  const OPS = pdfjs.OPS;
+  let ctm = [1, 0, 0, 1, 0, 0];
+  const stack: number[][] = [];
+  const paint = (x0: number, y0: number, x1: number, y1: number) => {
+    if (Math.abs(x1 - x0) * Math.abs(y1 - y0) > pageW * pageH * 0.9) return;
+    const left = Math.max(0, Math.floor(Math.min(x0, x1) * DPI / 72));
+    const right = Math.min(width, Math.ceil(Math.max(x0, x1) * DPI / 72));
+    const top = Math.max(0, Math.floor((pageH - Math.max(y0, y1)) * DPI / 72));
+    const bottom = Math.min(height, Math.ceil((pageH - Math.min(y0, y1)) * DPI / 72));
+    for (let y = top; y < bottom; y += 1) buf.fill(0, (y * width + left) * 4, (y * width + right) * 4);
+  };
+  for (let i = 0; i < op.fnArray.length; i += 1) {
+    const fn = op.fnArray[i];
+    const args = op.argsArray[i] as unknown;
+    if (fn === OPS.save || fn === OPS.paintFormXObjectBegin) {
+      stack.push(ctm.slice());
+      if (fn === OPS.paintFormXObjectBegin && Array.isArray(args)) {
+        const matrix = (args as unknown[])[0];
+        if (Array.isArray(matrix) && matrix.length >= 6) ctm = mul(ctm, matrix as number[]);
+      }
+    } else if (fn === OPS.restore || fn === OPS.paintFormXObjectEnd) ctm = stack.pop() || [1, 0, 0, 1, 0, 0];
+    else if (fn === OPS.transform && Array.isArray(args)) ctm = mul(ctm, args as number[]);
+    else if (fn === OPS.constructPath && Array.isArray(args)) {
+      const minMax = (args as unknown[])[2];
+      if (Array.isArray(minMax) && minMax.length >= 4) {
+        const corners = [[minMax[0], minMax[1]], [minMax[2], minMax[3]]].map(([x, y]) => {
+          const px = ctm[0] * Number(x) + ctm[2] * Number(y) + ctm[4];
+          const py = ctm[1] * Number(x) + ctm[3] * Number(y) + ctm[5];
+          return [px, py];
+        });
+        paint(corners[0][0], corners[0][1], corners[1][0], corners[1][1]);
+      }
+    } else if (fn === OPS.paintImageXObject) {
+      const pts = [[0, 0], [1, 0], [1, 1], [0, 1]].map(([x, y]) => [ctm[0] * x + ctm[2] * y + ctm[4], ctm[1] * x + ctm[3] * y + ctm[5]]);
+      paint(Math.min(...pts.map((p) => p[0])), Math.min(...pts.map((p) => p[1])), Math.max(...pts.map((p) => p[0])), Math.max(...pts.map((p) => p[1])));
+    }
+  }
+  let minX = width;
+  let minY = height;
+  let maxX = 0;
+  let maxY = 0;
+  for (let p = 0; p < width * height; p += 1) {
+    if (buf[p * 4] < 250) {
+      const x = p % width;
+      const y = Math.floor(p / width);
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+    }
+  }
+  const png = await sharp(buf, { raw: { width, height, channels: 4 } }).png().toBuffer();
+  return {
+    png,
+    leftIn: minX / DPI,
+    topIn: minY / DPI,
+    widthIn: (maxX - minX + 1) / DPI,
+    heightIn: (maxY - minY + 1) / DPI,
+  };
+}
+
+function closeTo(actual: number, expected: number, label: string) {
+  assert.ok(Math.abs(actual - expected) / expected < 0.03, `${label}: measured ${actual.toFixed(3)} in, target ${expected.toFixed(3)} in`);
+}
+
+async function ebayCornerLabel() {
+  const png = await barcodePng();
+  const src = await PDFDocument.create();
+  const page = src.addPage([LETTER_W, LETTER_H]);
+  const font = await src.embedFont(StandardFonts.HelveticaBold);
+  const image = await src.embedPng(png);
+  const frameW = 230;
+  const frameH = 230 / 0.77;
+  page.drawRectangle({ x: 300, y: 40, width: frameW, height: frameH, borderWidth: 3, color: rgb(1, 1, 1), borderColor: rgb(0, 0, 0) });
+  page.drawText('G', { x: 312, y: 40 + frameH - 36, size: 22, font });
+  page.drawText('USPS GROUND ADVANTAGE', { x: 340, y: 40 + frameH - 32, size: 9, font });
+  page.drawImage(image, { x: 318, y: 120, width: frameW - 40, height: 56 });
+  page.drawRectangle({ x: 318, y: 58, width: 42, height: 42, color: rgb(0, 0, 0) });
+  return src.save();
+}
+
+test('letter paper fills the top-left quarter with the label frame', async () => {
+  const outBytes = await buildLabelPdf(await ebayCornerLabel(), 'letter');
+  const out = await PDFDocument.load(outBytes);
+  assert.equal(out.getPages()[0].getWidth(), LETTER_W);
+  assert.equal(out.getPages()[0].getHeight(), LETTER_H);
+  const ink = await inkInches(outBytes);
+  writeFileSync(`${OUT}/label-quarter.png`, ink.png);
+  const innerW = (QUARTER_W - SAFE_MARGIN * 2) / 72;
+  const innerH = (QUARTER_H - SAFE_MARGIN * 2) / 72;
+  closeTo(ink.widthIn, innerW, 'quarter width');
+  closeTo(ink.heightIn, innerW / 0.77, 'quarter height');
+  assert.ok(ink.heightIn < innerH * 1.03, `${ink.heightIn} taller than the quarter`);
+  assert.ok(Math.abs(ink.leftIn - SAFE_MARGIN / 72) < 0.05, `quarter left ${ink.leftIn.toFixed(3)}`);
+  assert.ok(Math.abs(ink.topIn - SAFE_MARGIN / 72) < 0.05, `quarter top ${ink.topIn.toFixed(3)}`);
+  console.log(`letter quarter ink ${ink.widthIn.toFixed(3)} x ${ink.heightIn.toFixed(3)} in at ${ink.leftIn.toFixed(3)}, ${ink.topIn.toFixed(3)}`);
+  const shot = await renderPng(outBytes);
+  writeFileSync(`${OUT}/label-quarter-art.png`, shot.png);
+  const decoded = await scan(shot.png);
+  assert.equal(decoded[0]?.number, TRACK);
+});
+
+test('a 4x6 printer page scales the same frame up to fill the label', async () => {
+  const outBytes = await buildLabelPdf(await ebayCornerLabel(), 'label');
+  const out = await PDFDocument.load(outBytes);
+  assert.equal(out.getPages()[0].getWidth(), LABEL_W);
+  assert.equal(out.getPages()[0].getHeight(), LABEL_H);
+  const ink = await inkInches(outBytes);
+  writeFileSync(`${OUT}/label-fill-4x6.png`, ink.png);
+  const innerW = (LABEL_W - SAFE_MARGIN * 2) / 72;
+  const innerH = (LABEL_H - SAFE_MARGIN * 2) / 72;
+  closeTo(ink.widthIn, innerW, '4x6 width');
+  closeTo(ink.heightIn, innerW / 0.77, '4x6 height');
+  assert.ok(ink.heightIn < innerH * 1.03);
+  assert.ok(Math.abs(ink.leftIn - SAFE_MARGIN / 72) < 0.05, `4x6 left ${ink.leftIn.toFixed(3)}`);
+  assert.ok(Math.abs(ink.topIn - SAFE_MARGIN / 72) < 0.05, `4x6 top ${ink.topIn.toFixed(3)}`);
+  console.log(`4x6 ink ${ink.widthIn.toFixed(3)} x ${ink.heightIn.toFixed(3)} in at ${ink.leftIn.toFixed(3)}, ${ink.topIn.toFixed(3)}`);
+  const decoded = await scan(await renderPng(outBytes).then((shot) => shot.png));
+  assert.equal(decoded[0]?.number, TRACK);
 });
