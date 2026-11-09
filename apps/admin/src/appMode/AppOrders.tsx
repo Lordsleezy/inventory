@@ -170,10 +170,27 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
     });
   }
 
-  async function markShipped(o: WebOrder) {
+  async function markShipped(o: WebOrder, barcode: string, overrideReason?: string) {
     await runAction('shipped', async () => {
-      const { error: e } = await client.rpc('portal_mark_order_shipped', { p_order: o.id });
-      if (e) throw new Error(e.message === 'order_not_packaged' ? 'Tap Packaged before marking it shipped.' : e.message);
+      const { error: e } = await client.rpc('portal_mark_order_shipped', {
+        p_order: o.id,
+        p_barcode: barcode || null,
+        p_override_reason: overrideReason || null,
+      });
+      if (e) {
+        const msg = e.message === 'order_not_packaged'
+          ? 'Tap Packaged before marking it shipped.'
+          : e.message === 'tracking_mismatch'
+            ? "Doesn't match this order — check the package"
+            : e.message === 'tracking_required'
+              ? 'Scan or type the tracking number on the label.'
+              : e.message === 'override_reason_required'
+                ? 'An admin note is required when there is no tracking on file.'
+                : e.message === 'portal_access_denied'
+                  ? 'Only an admin can override a missing tracking number.'
+                  : e.message;
+        throw new Error(msg);
+      }
     });
   }
 
@@ -435,7 +452,7 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
         onSetLocation={(code) => void setPickLocation(open, code)}
         onPrintLabel={(dl) => void printLabel(open, dl)}
         onMarkPackaged={() => void markPackaged(open)}
-        onMarkShipped={() => void markShipped(open)}
+        onMarkShipped={(barcode, reason) => void markShipped(open, barcode, reason)}
         onMarkDelivered={() => void markDelivered(open)}
         onStepBack={() => void stepBack(open)}
         onFloorCancel={() => void floorCancel(open)}
@@ -443,7 +460,6 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
         onUploadLabel={() => labelInput.current?.click()}
         onUploadPackProof={() => packProofInput.current?.click()}
         onVoidLabel={() => void voidLabel(open)}
-        onPackCondition={(status) => void setPackCondition(open, status)}
         onRecordLabelCost={isAdmin ? () => void recordLabelCost(open) : undefined}
         labelInputRef={labelInput}
         packProofInputRef={packProofInput}
@@ -516,6 +532,12 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
           <button type="button" className="secondary" disabled={!!busy} onClick={() => void ensureTestShipOrder()}>
             {busy === 'test-order' ? '…' : 'Add test To ship order'}
           </button>
+        </p>
+      )}
+      {!isAdmin && seg === 'toShip' && orders && rows.length === 0 && (
+        <p className="app-flag subtle">
+          Nothing in <strong>To ship</strong> on the associate desk. eBay/Depop waiting on a label stay on the admin desk only.
+          {hasTestOrder ? ' Pull down to refresh if you expect TEST-SHIP-FLOW.' : ' Ask an admin to add TEST-SHIP-FLOW or finish a labeled order.'}
         </p>
       )}
       <div className="app-group">

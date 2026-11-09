@@ -116,6 +116,49 @@ async function netlifyDeploys(siteId) {
   return res.json();
 }
 
+async function triggerNetlifyBuild(siteId) {
+  const token = process.env.NETLIFY_AUTH_TOKEN;
+  if (!token) throw new Error("NETLIFY_AUTH_TOKEN is not set");
+  const res = await fetch(`https://api.netlify.com/api/v1/sites/${siteId}/builds`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ clear_cache: true }),
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`netlify build trigger ${res.status}: ${redact(body).slice(0, 400)}`);
+  }
+  return res.json();
+}
+
+/** Admin must always publish master after release — Netlify may skip when apps/admin did not change. */
+async function ensureAdminLive(sha, startedMs) {
+  const adminSite = SITES.find((site) => site.name === "openbox-floor-admin");
+  if (!adminSite) throw new Error("openbox-floor-admin is not configured");
+  try {
+    return await verifyAdminLive(sha);
+  } catch (first) {
+    console.log(`admin build.json does not match ${sha.slice(0, 7)}; triggering Netlify rebuild`);
+    await triggerNetlifyBuild(adminSite.id);
+    const deadline = Date.now() + NETLIFY_WAIT_MS;
+    while (Date.now() < deadline) {
+      await sleep(20_000);
+      try {
+        return await verifyAdminLive(sha);
+      } catch {
+        const deploys = await netlifyDeploys(adminSite.id);
+        const deploy = matchingDeploy(deploys, sha, startedMs);
+        const kind = classifyDeploy(deploy);
+        if (kind === "failed") {
+          throw new Error(`admin rebuild failed after live mismatch: ${redact(first.message)}`);
+        }
+        if (kind !== "deployed") continue;
+      }
+    }
+    throw first;
+  }
+}
+
 function matchingDeploy(deploys, sha, notBeforeMs) {
   return (deploys || []).find((deploy) => {
     if (deploy.context && deploy.context !== "production") return false;
@@ -275,22 +318,21 @@ async function main() {
     await fail("[Floor] Release failed: Netlify deploy did not succeed", `${summary}\n\nrelease points at the new commit. Roll back release if you need the previous build. Migrations are not rolled back automatically.`);
   }
 
-  const adminExpected = expected.some((item) => item.name === "openbox-floor-admin");
-  if (adminExpected) {
-    try {
-      const live = await verifyAdminLive(masterSha);
-      console.log(`admin live verified: ${live.sha.slice(0, 7)} (${live.builtAt || 'no date'})`);
-    } catch (err) {
-      await fail(
-        "[Floor] Release failed: admin is not serving the new build",
-        [
-          summary,
-          "",
-          redact(err?.message || err),
-          "Netlify reported success but production build.json did not match. Roll back release if needed.",
-        ].join("\n"),
-      );
-    }
+  try {
+    const live = await ensureAdminLive(masterSha, pushedAt);
+    console.log(`admin live verified: ${live.sha.slice(0, 7)} (${live.builtAt || "no date"})`);
+  } catch (err) {
+    await fail(
+      "[Floor] Release failed: admin is not serving the new build",
+      [
+        summary,
+        "",
+        redact(err?.message || err),
+        "release moved but admin.openboxindustries.com is not on this commit.",
+        "Phones can still show an older bundle until the PWA updates — Restart app in Settings after admin matches.",
+        "Roll back release if needed.",
+      ].join("\n"),
+    );
   }
 
   await sendReleaseMail({ subject: `[Floor] Released ${masterSha.slice(0, 7)}`, text: summary });

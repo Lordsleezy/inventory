@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
-const THRESHOLD_PX = 64;
+const THRESHOLD_PX = 112;
+const HINT_START_PX = 40;
 const MIN_SPIN_MS = 450;
 
 export type PullRefreshHandler = () => void | Promise<void>;
@@ -56,8 +57,10 @@ export function useAppPullRefresh(
       }
       const y = e.touches[0]?.clientY ?? 0;
       const d = y - startY.current;
-      if (d > 0) setPull(Math.min(96, d));
-      else setPull(0);
+      if (d > 0) {
+        e.preventDefault();
+        setPull(Math.min(96, d));
+      } else setPull(0);
     };
 
     const onEnd = (e: TouchEvent) => {
@@ -91,25 +94,27 @@ export function useAppPullRefresh(
       setPull(0);
     };
 
-    const opts = { passive: true, capture: true } as const;
-    panel.addEventListener('touchstart', onStart, opts);
-    panel.addEventListener('touchmove', onMove, opts);
-    panel.addEventListener('touchend', onEnd, opts);
-    panel.addEventListener('touchcancel', onCancel, opts);
+    const cap = { capture: true } as const;
+    const passive = { ...cap, passive: true };
+    const active = { ...cap, passive: false };
+    panel.addEventListener('touchstart', onStart, passive);
+    panel.addEventListener('touchmove', onMove, active);
+    panel.addEventListener('touchend', onEnd, passive);
+    panel.addEventListener('touchcancel', onCancel, passive);
     return () => {
-      panel.removeEventListener('touchstart', onStart, opts);
-      panel.removeEventListener('touchmove', onMove, opts);
-      panel.removeEventListener('touchend', onEnd, opts);
-      panel.removeEventListener('touchcancel', onCancel, opts);
+      panel.removeEventListener('touchstart', onStart, passive);
+      panel.removeEventListener('touchmove', onMove, active);
+      panel.removeEventListener('touchend', onEnd, passive);
+      panel.removeEventListener('touchcancel', onCancel, passive);
     };
   }, [panel, enabled, onRefresh]);
 
-  const show = pull > 4 || refreshing;
+  const show = pull >= HINT_START_PX || refreshing;
   const hint = refreshing
     ? 'Refreshing'
     : pull >= THRESHOLD_PX
       ? 'Release to refresh'
-      : pull > 4
+      : pull >= HINT_START_PX
         ? 'Pull to refresh'
         : '';
   const spin = refreshing || pull >= THRESHOLD_PX * 0.7;

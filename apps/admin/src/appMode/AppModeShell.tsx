@@ -29,7 +29,8 @@ import { DropshipPage } from '../dropship/DropshipPage';
 import { ReceiptsPage } from '../ReceiptsPage';
 import type { OnlineCfg, Rule, CommissionOverride } from '../payouts';
 import { parseNavFromLocation } from '../navigation';
-import { phoneTabIds } from '../deskNav';
+import { deskRoleLabel, phoneTabIds } from '../deskNav';
+import { LiveBuildBanner } from '../LiveBuildBanner';
 
 export type AppTab = 'inventory' | 'receive' | 'register' | 'orders' | 'returns' | 'more' | 'settings' | 'locations';
 
@@ -252,6 +253,7 @@ export function AppModeShell({
 
   return (
     <div className="app-mode-root">
+      <LiveBuildBanner />
       <div className="app-mode-main">
         <AppTabPanel
           tab="inventory"
@@ -377,6 +379,7 @@ export function AppModeShell({
                 fullAccess={false}
                 staffSession={staffSession}
                 session={session}
+                deskLabel={deskRoleLabel(deskKind)}
                 settingsSlot={settingsSlot || <p className="app-footer-count">Settings unavailable.</p>}
               />
             )}

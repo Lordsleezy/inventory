@@ -1,13 +1,15 @@
 /* Floor admin shell — cache static assets only; never cache live inventory/API data. */
-const SHELL = 'floor-shell-v5';
+const SHELL = 'floor-shell-v6';
 const SHELL_URLS = [
-  '/',
-  '/index.html',
   '/manifest.webmanifest',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
   '/icons/apple-touch-icon.png',
 ];
+
+self.addEventListener('message', (event) => {
+  if (event.data?.type === 'SKIP_WAITING') void self.skipWaiting();
+});
 
 self.addEventListener('install', (event) => {
   event.waitUntil(

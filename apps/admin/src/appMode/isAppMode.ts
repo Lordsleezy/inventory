@@ -22,10 +22,9 @@ export function enableAppShell(): void {
 }
 
 /**
- * True only when Floor was launched as an installed app: home-screen PWA (iOS/Android, display-mode
+ * True when Floor was launched as an installed app: home-screen PWA (iOS/Android, display-mode
  * standalone/fullscreen or navigator.standalone), the store-phone kiosk WebView, or Capacitor.
- * Desktop and ordinary mobile-browser tabs always get the desktop layout — regardless of width,
- * role, URL params or anything saved earlier.
+ * URL params and saved flags do not force this.
  */
 export function isStandaloneApp(): boolean {
   if (typeof window === 'undefined') return false;
@@ -36,6 +35,15 @@ export function isStandaloneApp(): boolean {
     if (window.matchMedia('(display-mode: fullscreen)').matches) return true;
   } catch { /* ignore */ }
   return (window.navigator as Navigator & { standalone?: boolean }).standalone === true;
+}
+
+/**
+ * Tab bar + pull-to-refresh shell (AppModeShell): installed/kiosk, or a phone-sized mobile-browser tab.
+ * Desktop layout remains for laptop browsers even when the window is narrow.
+ */
+export function usePhoneAppShell(): boolean {
+  if (typeof window === 'undefined') return false;
+  return isStandaloneApp() || isPhoneViewport();
 }
 
 /** Rough phone / small-tablet viewport — used for the install gate only. */

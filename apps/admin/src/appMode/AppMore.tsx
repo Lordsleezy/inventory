@@ -154,7 +154,11 @@ export function AppMoreHome({
 
   return (
     <>
-      <div className="app-large-title"><h1>More</h1></div>
+      <div className="app-nav app-more-nav">
+        <span style={{ width: 48 }} aria-hidden />
+        <div className="app-nav-title">More</div>
+        <span style={{ width: 48 }} aria-hidden />
+      </div>
 
       {fullAccess ? (
         <>
@@ -539,7 +543,7 @@ export function AppMercariNative({ client, accessToken, money, onBack, backLabel
 }
 
 export function AppSettingsNative({
-  client, fullAccess, staffSession, session, settingsSlot, onBack, backLabel = 'More',
+  client, fullAccess, staffSession, session, settingsSlot, onBack, backLabel = 'More', deskLabel,
 }: {
   client: SupabaseClient;
   fullAccess: boolean;
@@ -549,6 +553,7 @@ export function AppSettingsNative({
   /** Omit when Settings is a root tab (associates). */
   onBack?: () => void;
   backLabel?: string;
+  deskLabel?: string;
 }) {
   void fullAccess;
   return (
@@ -572,7 +577,8 @@ export function AppSettingsNative({
       >
         Sign out
       </button>
-      <p className="app-footer-count">{staffSession?.displayName || session.user.email}</p>
+      <p className="app-footer-count">{staffSession?.displayName || session.user.email}{deskLabel ? ` · ${deskLabel}` : ''}</p>
+      <BuildStamp />
     </div>
   );
 }

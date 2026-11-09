@@ -54,8 +54,10 @@ function App() {
   const [clerk, setClerk] = useState(location.hash === '#clerk');
   window.__setClerk = (on) => { location.hash = on ? '#clerk' : ''; setClerk(on); };
   return (
-    <>
-      <LocationsPage client={client} storeId="s" canManage={!clerk} variant="app" onBack={() => {}} backLabel="More" accessToken="t" money={(n) => '$' + (n / 100).toFixed(2)} />
+    <div className="app-mode-root">
+      <main className="app-mode-main">
+        <LocationsPage client={client} storeId="s" canManage={!clerk} variant="app" onBack={() => {}} backLabel="More" accessToken="t" money={(n) => '$' + (n / 100).toFixed(2)} />
+      </main>
       <nav className="app-tabbar" aria-label="App">
         <button type="button">Inventory</button>
         <button type="button">Receive</button>
@@ -63,7 +65,7 @@ function App() {
         <button type="button">Returns</button>
         <button type="button" className="active">More</button>
       </nav>
-    </>
+    </div>
   );
 }
 
