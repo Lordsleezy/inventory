@@ -11,8 +11,8 @@ function labelsIn(src: string): string[] {
   return [...src.matchAll(/<Icon[^/]*\/>\s*([^<]+)/g)].map((m) => m[1].trim());
 }
 
-test('phone tab bar: catch-all last; admin and owner share register + locations', () => {
-  assert.deepEqual(phoneTabIds('admin'), ['inventory', 'receive', 'register', 'orders', 'locations', 'more']);
+test('phone tab bar: admin keeps Returns, owner and staff stay on the floor bar', () => {
+  assert.deepEqual(phoneTabIds('admin'), ['inventory', 'receive', 'orders', 'returns', 'more']);
   assert.deepEqual(phoneTabIds('owner'), ['inventory', 'receive', 'register', 'orders', 'locations', 'more']);
   assert.deepEqual(phoneTabIds('staff'), ['inventory', 'receive', 'register', 'orders', 'locations', 'settings']);
 });
