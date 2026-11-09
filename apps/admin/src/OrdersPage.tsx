@@ -17,6 +17,7 @@ import { ScanOutPanel } from './ScanOutPanel';
 import { PackLabelScan } from './PackLabelScan';
 import { labelUploadUi, type LabelUploadResponse } from './labelUploadFeedback';
 import { LabelTrackingPicker, LabelTrackingResult } from './LabelTrackingResult';
+import { LabelTrackingProblem } from './LabelTrackingProblem';
 
 const CHANNEL_LABEL: Record<string, string> = {
   website: 'Website',
@@ -236,7 +237,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
       setLabelHit(null);
       setTrackingPick(null);
       setError('');
-      if (ui.kind === 'mismatch' || ui.kind === 'manual') setError(ui.message);
+      if (ui.kind === 'manual') setError(ui.message);
       else if (ui.kind === 'picker') setTrackingPick({ orderId: o.id, candidates: ui.candidates });
       else if (ui.kind === 'hit') setLabelHit({ orderId: o.id, number: ui.number, carrier: ui.carrier });
       await load();
@@ -568,7 +569,48 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
             onManual={() => setTrackingPick(null)}
           />
         )}
-        {o.tracking_exception && <div className="alert" role="status">Carrier exception: {o.tracking_exception}</div>}
+        {(o.label_tracking_mismatch || o.tracking_exception || (o.tracking_needs_entry && !o.tracking_number)) && (
+          <LabelTrackingProblem
+            order={o}
+            busy={!!busy}
+            onUseMarketplace={async () => {
+              setBusy(o.id + 'ebay-track');
+              try {
+                await orderAdmin(accessToken, { action: 'accept_marketplace_tracking', id: o.id });
+                setError('');
+                await load();
+              } catch (e) { setError(errText(e)); } finally { setBusy(null); }
+            }}
+            onUseLabel={async (number, carrier) => {
+              setBusy(o.id + 'label-track');
+              try {
+                await orderAdmin(accessToken, { action: 'accept_label_tracking', id: o.id, tracking: number, carrier });
+                setError('');
+                await load();
+              } catch (e) { setError(errText(e)); } finally { setBusy(null); }
+            }}
+            onManual={async (number, carrier) => {
+              setBusy(o.id + 'tracking');
+              try {
+                await orderAdmin(accessToken, { action: 'set_tracking', id: o.id, tracking: number, carrier });
+                setError('');
+                await load();
+              } catch (e) { setError(errText(e)); } finally { setBusy(null); }
+            }}
+            onRetry={async () => {
+              setBusy(o.id + 'retry');
+              try {
+                await orderAdmin(accessToken, { action: 'retry_label_extract', id: o.id });
+                setError('');
+                await load();
+              } catch (e) { setError(errText(e)); } finally { setBusy(null); }
+            }}
+            onReplace={() => {
+              const input = document.getElementById(`order-label-${o.id}`) as HTMLInputElement | null;
+              input?.click();
+            }}
+          />
+        )}
         {(isPackaged || isShipped || isDone) && <OrderTimelineList rows={orderTimeline(o, trackEvents[o.id])} stamp={stamp} />}
         {head(o)}{item(o)}
         {isToShip && packOnly && (
@@ -628,7 +670,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
               {!labeled && buy && <button type="button" disabled={!!busy || o.pack_condition === 'not_as_listed'} onClick={() => setLabelOrder(o)}>Buy label</button>}
               {!labeled && !buy && <label className="secondary" style={{ display: 'inline-flex', alignItems: 'center', padding: '10px 14px', border: '1px solid var(--btn-border)', borderRadius: 8 }}>
                 {busy === o.id + 'upload' ? 'Uploading…' : 'Add label'}
-                <input type="file" accept="application/pdf,image/*" hidden disabled={!!busy} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void uploadOrderLabel(o, f); }} />
+                <input id={`order-label-${o.id}`} type="file" accept="application/pdf,image/*" hidden disabled={!!busy} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void uploadOrderLabel(o, f); }} />
               </label>}
               <button className="primary" disabled={!!busy} onClick={() => void markPackaged(o)}>{busy === o.id + 'packaged' ? 'Saving…' : 'Packaged'}</button>
               {(o.channel || '').toLowerCase() !== 'depop' && <button className="secondary" disabled={!!busy || (o.label_cost_cents == null && o.pack_condition !== 'ok')} onClick={() => void recordLabelCost(o)}>{busy === o.id + 'label' ? 'Saving…' : o.label_cost_cents != null ? 'Edit label cost' : 'Record label cost'}</button>}
@@ -702,7 +744,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
           <div className="actions">
             <label className="primary" style={{ display: 'inline-flex', alignItems: 'center', padding: '10px 14px', borderRadius: 8, cursor: 'pointer' }}>
               {busy === o.id + 'upload' ? 'Uploading…' : o.label_storage_path ? 'Replace label' : 'Upload label'}
-              <input type="file" accept="application/pdf,image/*" hidden disabled={!!busy} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void uploadOrderLabel(o, f); }} />
+              <input id={`order-label-${o.id}`} type="file" accept="application/pdf,image/*" hidden disabled={!!busy} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void uploadOrderLabel(o, f); }} />
             </label>
             {o.label_tracking_mismatch && <span className="hint">This PDF does not match the tracking number on eBay.</span>}
             {o.marketplace_tracking_number && !o.label_storage_path && <span className="hint">eBay already has tracking {o.marketplace_tracking_number}. Upload the PDF.</span>}

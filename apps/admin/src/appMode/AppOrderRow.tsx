@@ -27,13 +27,17 @@ export function AppOrderRow({
 }: Props) {
   const loc = locationParts(locationCode);
   const chip = orderChip(order);
-  const problem = orderNeedsLabel(order) || chip.tone === 'warn';
+  const needsLabel = orderNeedsLabel(order);
+  const problem = needsLabel || chip.tone === 'warn';
   const title = displayOrderTitle(order.title || order.marketplace_title);
-  const meta = [channelName, money(order.item_cents || 0), trackingTail].filter(Boolean).join(' · ');
+  const meta = needsLabel
+    ? `${channelName} · ${money(order.item_cents || 0)}`
+    : [channelName, money(order.item_cents || 0), trackingTail].filter(Boolean).join(' · ');
   const locLine = loc ? `${loc.display} · ${loc.slot}`.toUpperCase() : '';
+  const showActions = Boolean((hasLabel(order) && onPrint) || (showUpload && onUpload));
 
   return (
-    <div className="app-row app-order-row-v2">
+    <div className={`app-row app-order-row-v2${needsLabel ? ' needs-label' : ''}`}>
       <button type="button" className="app-order-open-v2" onClick={onOpen}>
         <UnitListThumb
           client={client}
@@ -49,18 +53,22 @@ export function AppOrderRow({
           <span className="app-order-meta">{meta}</span>
           <span className={`app-order-loc${loc ? '' : ' missing'}`}>{locLine || 'NO LOCATION'}</span>
           {problem && (
-            <span className="app-order-problem">{orderNeedsLabel(order) ? 'Needs label' : chip.text}</span>
+            <span className="app-order-problem">{needsLabel ? 'Needs label' : chip.text}</span>
           )}
         </span>
       </button>
-      {hasLabel(order) && onPrint && (
-        <button type="button" className="app-order-print-v2" onClick={(e) => { e.stopPropagation(); onPrint(); }}>Print</button>
-      )}
-      {showUpload && onUpload && (
-        <label className="app-order-upload-v2" onClick={(e) => e.stopPropagation()}>
-          Upload
-          <input type="file" accept="application/pdf,image/*" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) onUpload(f); }} />
-        </label>
+      {showActions && (
+        <div className="app-order-row-actions">
+          {hasLabel(order) && onPrint && (
+            <button type="button" className="app-order-action-outline" onClick={(e) => { e.stopPropagation(); onPrint(); }}>Print</button>
+          )}
+          {showUpload && onUpload && (
+            <label className="app-order-action-outline app-order-upload-v2" onClick={(e) => e.stopPropagation()}>
+              Upload
+              <input type="file" accept="application/pdf,image/*" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) onUpload(f); }} />
+            </label>
+          )}
+        </div>
       )}
     </div>
   );

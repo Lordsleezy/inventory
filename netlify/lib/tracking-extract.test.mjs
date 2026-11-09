@@ -190,6 +190,21 @@ test("eBay PDF that disagrees with eBay tracking is a mismatch", () => {
   assert.equal(r.mismatch, true);
 });
 
+test("20-digit IMpb body from barcode completes to 9434…2207 (Paul SKU 99860)", () => {
+  const r = parseTracking("USPS TRACKING #\n34608106244728542207");
+  assert.equal(r.confident, true);
+  assert.equal(r.number, EBAY_2207);
+});
+
+test("resolveUploadedTracking treats truncated body as same as eBay", () => {
+  const r = resolveUploadedTracking(
+    { channel: "ebay", marketplace_tracking_number: EBAY_2207 },
+    { confident: true, number: "34608106244728542207", carrier: "USPS" },
+  );
+  assert.equal(r.mismatch, false);
+  assert.equal(r.tracking, EBAY_2207);
+});
+
 test("unreadable eBay PDF keeps eBay tracking", () => {
   const r = resolveUploadedTracking(
     { channel: "ebay", marketplace_tracking_number: DEPOP_7894, carrier: "USPS" },

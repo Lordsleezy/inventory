@@ -19,7 +19,7 @@ export type LabelUploadUi =
 
 export function labelUploadUi(data: LabelUploadResponse): LabelUploadUi {
   if (data.mismatch) {
-    return { kind: 'mismatch', message: String(data.exception || 'That tracking number does not match eBay.') };
+    return { kind: 'mismatch', message: "The label we read doesn't match eBay's tracking number." };
   }
   if (data.tracking_number) {
     return { kind: 'hit', number: data.tracking_number, carrier: data.carrier, layer: data.layer };

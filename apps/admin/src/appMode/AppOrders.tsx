@@ -265,7 +265,8 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
       setLabelHit(null);
       setTrackingPick(undefined);
       setError('');
-      if (ui.kind === 'mismatch' || ui.kind === 'manual') setError(ui.message);
+      if (ui.kind === 'manual') setError(ui.message);
+      else if (ui.kind === 'mismatch') setError('');
       else if (ui.kind === 'picker') setTrackingPick(ui.candidates);
       else if (ui.kind === 'hit') {
         setLabelHit({ number: ui.number, carrier: ui.carrier, layer: ui.layer });
@@ -287,6 +288,47 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
   async function saveTracking(o: WebOrder) {
     await runAction('tracking', async () => {
       await orderAdmin(accessToken, { action: 'set_tracking', id: o.id, tracking: trackingDraft, carrier: o.carrier || '' });
+    });
+  }
+
+  async function useMarketplaceTracking(o: WebOrder) {
+    await runAction('ebay-track', async () => {
+      const data = await orderAdmin(accessToken, { action: 'accept_marketplace_tracking', id: o.id });
+      const ord = data.order as WebOrder | undefined;
+      if (ord?.tracking_number) {
+        setTrackingDraft(ord.tracking_number);
+        setLabelHit({ number: ord.tracking_number, carrier: ord.carrier });
+      }
+      setError('');
+    });
+  }
+
+  async function useLabelTracking(o: WebOrder, number: string, carrier: string) {
+    await runAction('label-track', async () => {
+      const data = await orderAdmin(accessToken, { action: 'accept_label_tracking', id: o.id, tracking: number, carrier });
+      const ord = data.order as WebOrder | undefined;
+      if (ord?.tracking_number) setTrackingDraft(ord.tracking_number);
+      setError('');
+    });
+  }
+
+  async function retryLabelExtract(o: WebOrder) {
+    await runAction('retry-extract', async () => {
+      const data = await orderAdmin(accessToken, { action: 'retry_label_extract', id: o.id });
+      if (data.tracking_number) {
+        setLabelHit({ number: String(data.tracking_number), carrier: data.carrier as string, layer: data.layer as string });
+        setTrackingDraft(String(data.tracking_number));
+      }
+      if (data.mismatch) setError('');
+      else setError('');
+    });
+  }
+
+  async function manualTracking(o: WebOrder, number: string, carrier: string) {
+    await runAction('tracking', async () => {
+      await orderAdmin(accessToken, { action: 'set_tracking', id: o.id, tracking: number, carrier });
+      setTrackingDraft(number);
+      setError('');
     });
   }
 
@@ -382,6 +424,10 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
         trackingPick={trackingPick}
         onConfirmTrackingPick={(n, c) => void confirmPickedTracking(open, n, c)}
         onDismissLabelHit={() => setLabelHit(null)}
+        onUseMarketplaceTracking={() => void useMarketplaceTracking(open)}
+        onUseLabelTracking={(n, c) => void useLabelTracking(open, n, c)}
+        onRetryLabelExtract={() => void retryLabelExtract(open)}
+        onManualTracking={(n, c) => void manualTracking(open, n, c)}
       />
     );
   }
@@ -415,7 +461,7 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
           </button>
         ))}
       </div>
-      <p className="orders-seg-note">{SEG_NOTE[seg]}</p>
+      {seg === 'needsLabel' ? <p className="orders-seg-note subtle">{SEG_NOTE[seg]}</p> : <p className="orders-seg-note">{SEG_NOTE[seg]}</p>}
       {seg === 'packaged' && (
         <>
           <p className="app-flag">{stale > 0 ? `${stale} packaged over 2 days and not marked shipped.` : 'Flags anything packaged over 2 days and not marked shipped.'}</p>
@@ -431,7 +477,7 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
         {orders && rows.length === 0 && <div className="app-empty-row">None right now</div>}
         {rows.map((o) => {
           const chName = CHANNEL[(o.channel || 'website').toLowerCase()] || o.channel || 'Website';
-          const tail = trackingTail(o);
+          const tail = orderNeedsLabel(o) ? '' : trackingTail(o);
           const thumbPhoto = listThumbPhoto(photoMap[o.sku] || []);
           const thumbPath = thumbPhoto?.path || null;
           return (
