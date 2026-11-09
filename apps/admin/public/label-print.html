@@ -6,11 +6,12 @@
   <title>Print label</title>
   <style>
     html, body { margin: 0; background: #fff; color: #111; font: 16px/1.4 -apple-system, BlinkMacSystemFont, sans-serif; }
-    .bar { display: flex; gap: 8px; padding: 12px; position: sticky; top: 0; background: #fff; }
+    .bar { display: flex; gap: 8px; padding: 12px; position: sticky; top: 0; background: #fff; z-index: 2; }
     button, a.back { flex: 1; min-height: 52px; font-size: 18px; border-radius: 10px; border: 1px solid #111; background: #111; color: #fff; text-align: center; line-height: 52px; text-decoration: none; }
     a.back { background: #fff; color: #111; }
     p { margin: 0; padding: 12px; }
-    img { width: 100%; height: auto; display: block; }
+    img, iframe { width: 100%; display: block; border: 0; background: #fff; }
+    iframe { height: calc(100vh - 88px); }
     @media print {
       .bar, p { display: none !important; }
       img { break-after: page; page-break-after: always; }
@@ -29,72 +30,85 @@
       var job = new URLSearchParams(location.search).get('job') || '';
       var key = 'floor-print-' + job;
       var status = document.getElementById('status');
-      var printed = false;
+      var shown = false;
       document.getElementById('print').addEventListener('click', function () { window.print(); });
       document.getElementById('back').addEventListener('click', function (event) {
         if (history.length > 1) { event.preventDefault(); history.back(); }
       });
 
-      var standalone = window.matchMedia('(display-mode: standalone)').matches;
-      if (standalone && !sessionStorage.getItem('floor-print-left-app')) {
-        sessionStorage.setItem('floor-print-left-app', '1');
-        var path = location.host + location.pathname + location.search;
-        var fallback = location.origin + location.pathname + location.search;
-        location.replace('intent://' + path + '#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=' + encodeURIComponent(fallback) + ';end');
-        return;
+      function printSoon() {
+        window.setTimeout(function () { window.print(); }, 300);
       }
 
       function show(data) {
-        if (!data || data.error) {
-          status.textContent = (data && data.error) || 'Could not prepare the label.';
+        if (shown || !data) return;
+        if (data.job && job && data.job !== job) return;
+        shown = true;
+        if (data.error) {
+          status.textContent = data.error;
           return;
         }
-        var style = document.createElement('style');
-        style.textContent = '@page { size: ' + Number(data.width) + 'pt ' + Number(data.height) + 'pt; margin: 0; }';
-        document.head.appendChild(style);
         var images = data.urls || [];
-        images.forEach(function (src) {
-          var img = document.createElement('img');
-          img.alt = 'Shipping label';
-          img.src = src;
-          document.body.appendChild(img);
-        });
-        status.textContent = 'If the printer did not open, tap Print.';
-        var pending = images.length;
-        function ready() {
-          pending -= 1;
-          if (pending <= 0 && !printed) {
-            printed = true;
-            window.print();
-          }
+        if (images.length) {
+          var style = document.createElement('style');
+          style.textContent = '@page { size: ' + Number(data.width) + 'pt ' + Number(data.height) + 'pt; margin: 0; }';
+          document.head.appendChild(style);
+          images.forEach(function (src) {
+            var img = document.createElement('img');
+            img.alt = 'Shipping label';
+            img.src = src;
+            document.body.appendChild(img);
+          });
+          status.textContent = 'Tap Print if the printer did not open.';
+          printSoon();
+          return;
         }
-        Array.prototype.forEach.call(document.images, function (img) {
-          if (img.complete) ready();
-          else {
-            img.addEventListener('load', ready, { once: true });
-            img.addEventListener('error', ready, { once: true });
-          }
-        });
-        if (!images.length) status.textContent = 'This label has no pages.';
+        if (!data.pdfBase64) {
+          status.textContent = 'Could not prepare the label.';
+          shown = false;
+          return;
+        }
+        var binary = atob(data.pdfBase64);
+        var bytes = new Uint8Array(binary.length);
+        for (var i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+        var url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+        var frame = document.createElement('iframe');
+        frame.title = 'Shipping label';
+        frame.src = url;
+        document.body.appendChild(frame);
+        status.textContent = 'Tap Print if the printer did not open.';
+        frame.addEventListener('load', printSoon);
       }
 
-      function take() {
-        var raw = localStorage.getItem(key);
+      function take(raw) {
         if (!raw) return false;
-        localStorage.removeItem(key);
         try { show(JSON.parse(raw)); }
         catch (e) { status.textContent = 'Could not prepare the label.'; }
         return true;
       }
 
-      if (!take()) {
+      window.addEventListener('message', function (event) {
+        if (event.origin !== location.origin) return;
+        var data = event.data;
+        if (!data || data.type !== 'floor-label') return;
+        show(data);
+      });
+
+      function pull() {
+        var raw = localStorage.getItem(key);
+        if (!raw) return false;
+        localStorage.removeItem(key);
+        return take(raw);
+      }
+
+      if (!pull()) {
         var timer = setInterval(function () {
-          if (take()) clearInterval(timer);
+          if (pull()) clearInterval(timer);
         }, 200);
         setTimeout(function () {
           clearInterval(timer);
-          if (!document.images.length) status.textContent = 'The label did not come through. Go back and tap Print again.';
-        }, 30000);
+          if (!shown) status.textContent = 'The label did not come through. Go back and tap Print again.';
+        }, 20000);
       }
     })();
   </script>

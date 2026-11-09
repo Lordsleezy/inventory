@@ -118,29 +118,38 @@ async function labelPageImages(bytes: Uint8Array) {
   return { urls, width, height };
 }
 
-/** The installed Floor app cannot open Android's print dialog. A Chrome tab can. */
-async function printOnAndroid(bytes: Uint8Array, started: AndroidPrintTab | null) {
-  const images = await labelPageImages(bytes);
-  const job = started?.job || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-  try {
-    localStorage.setItem(PRINT_PREFIX + job, JSON.stringify(images));
-  } catch {
-    started?.tab?.close();
-    throw new Error('Could not prepare the label for printing.');
+function bytesToBase64(bytes: Uint8Array) {
+  let binary = '';
+  const size = 0x8000;
+  for (let i = 0; i < bytes.length; i += size) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + size));
   }
-  const tab = started?.tab;
-  if (tab && !tab.closed) return;
-  const opened = window.open(androidPrintPath(job), '_blank');
-  if (opened) return;
-  const path = `${location.host}${androidPrintPath(job)}`;
-  const fallback = `${location.origin}${androidPrintPath(job)}`;
-  const link = document.createElement('a');
-  link.href = `intent://${path}#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=${encodeURIComponent(fallback)};end`;
-  link.target = '_blank';
-  link.rel = 'noopener';
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
+  return btoa(binary);
+}
+
+function deliverLabel(tab: Window | null | undefined, job: string, payload: Record<string, unknown>) {
+  try { localStorage.setItem(PRINT_PREFIX + job, JSON.stringify(payload)); } catch { /* the open page also gets a message */ }
+  const send = () => {
+    try { tab?.postMessage(payload, location.origin); } catch { /* the page reads local storage */ }
+  };
+  send();
+  window.setTimeout(send, 400);
+  window.setTimeout(send, 1200);
+}
+
+/** Hand the label to the page opened by the tap. That page calls the phone printer. */
+async function printOnAndroid(bytes: Uint8Array, started: AndroidPrintTab | null) {
+  const job = started?.job || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const tab = started?.tab && !started.tab.closed ? started.tab : window.open(androidPrintPath(job), '_blank');
+  let payload: Record<string, unknown> = { type: 'floor-label', job, pdfBase64: bytesToBase64(bytes) };
+  try {
+    const images = await Promise.race([
+      labelPageImages(bytes),
+      new Promise<null>((resolve) => window.setTimeout(() => resolve(null), 4000)),
+    ]);
+    if (images?.urls.length) payload = { type: 'floor-label', job, urls: images.urls, width: images.width, height: images.height };
+  } catch { /* the print page can still show the PDF */ }
+  deliverLabel(tab, job, payload);
 }
 
 /** Open the PDF itself. Its page size is 4×6 or letter, so AirPrint and desktop print at that size. */

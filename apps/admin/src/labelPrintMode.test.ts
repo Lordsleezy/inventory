@@ -15,6 +15,6 @@ test('android print leaves the installed app for a page that calls the phone pri
   const page = readFileSync(new URL('../public/label-print.html', import.meta.url), 'utf8');
   assert.match(page, /window\.print\(\)/);
   assert.match(page, /floor-print-/);
-  assert.match(page, /display-mode: standalone/);
-  assert.doesNotMatch(page, /application\/pdf/);
+  assert.match(page, /floor-label/);
+  assert.doesNotMatch(page, /location\.replace\('intent:/);
 });
