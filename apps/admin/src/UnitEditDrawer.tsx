@@ -895,7 +895,7 @@ export function UnitEditDrawer({
           </div>
         )}
         <div className="unit-edit-grid">
-          <label>Test status{currentMissing.includes('test_status')&&!form.testStatus&&<i className="unit-edit-amber-dot"/>}
+          <label className={appMode ? 'unit-edit-chevron-row' : undefined}>Test status{currentMissing.includes('test_status')&&!form.testStatus&&<i className="unit-edit-amber-dot"/>}
             <select value={form.testStatus} onChange={e => set('testStatus', e.target.value)}>
               <option value="">Not set</option>
               {tests.map(c => <option key={c} value={c}>{c}</option>)}
@@ -933,7 +933,7 @@ export function UnitEditDrawer({
         <h3 id="unit-edit-section-shipping">{appMode ? 'Shipping' : 'Shipping box'}</h3>
         {canDelete && (
           <div className="unit-edit-grid">
-            <label>Shippable
+            <label className={appMode ? 'unit-edit-chevron-row' : undefined}>Shippable
               <select value={form.shippable} onChange={e => set('shippable', e.target.value)}>
                 <option value="auto">Automatic (rules)</option>
                 <option value="ship">Yes — can ship</option>
@@ -1040,7 +1040,7 @@ export function UnitEditDrawer({
               </button>
               {locationPickerOpen && (
                 singleBinOrUnassigned(locationAllocations, Math.max(1, Number(stockQuantity) || 1)) ? (
-                  <label className="unit-edit-location-picker">Location<select value={locationDraft} onChange={(e) => { setLocationDraft(e.target.value); setLocationPickerOpen(false); }}>
+                  <label className="unit-edit-location-picker">Bay<select value={locationDraft} onChange={(e) => { setLocationDraft(e.target.value); setLocationPickerOpen(false); }}>
                     <option value="">Unassigned</option>
                     {locationOptions.map((o) => <option key={o.code} value={o.code}>{o.label}</option>)}
                   </select></label>

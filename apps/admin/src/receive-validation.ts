@@ -100,7 +100,7 @@ export function receiveSectionForGap(gap: string): string {
   const key = gap.toLowerCase();
   if (key.includes('photo')) return 'photos';
   if (key.includes('dimension') || key === 'spec' || key.includes('weight') || key.includes('size')) return 'size';
-  if (key.includes('location')) return 'size';
+  if (key.includes('location')) return 'location';
   if (key.includes('price') || key.includes('condition') || key.includes('quantity')) return 'price';
   if (key.includes('upc')) return 'upc';
   return 'item';

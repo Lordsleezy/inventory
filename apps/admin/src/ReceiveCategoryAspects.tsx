@@ -33,6 +33,12 @@ type Props = {
   onChannelValues?: (values: Record<string, string>, missing: number) => void;
 };
 
+function plainCategoryError(error: unknown) {
+  const raw = error instanceof Error ? error.message : String(error || '');
+  if (!raw || /_|sku_required|category_id|not_allowed/i.test(raw) || raw.length > 90) return "Couldn't load categories";
+  return raw;
+}
+
 function categoryParts(path: string) {
   return path.split(/\s*>\s*/).map(part => part.trim()).filter(part => part && !/^root$/i.test(part));
 }
@@ -75,7 +81,7 @@ export function ReceiveCategoryAspects({
     let active = true;
     const t = window.setTimeout(() => {
       void askEbay(typed).then((body) => { if (active) { setChoices(body.suggestions || []); setSuggestError(''); } })
-        .catch((error) => { if (active) { setChoices([]); setSuggestError(error instanceof Error ? error.message : 'eBay is unreachable.'); } });
+        .catch((error) => { if (active) { setChoices([]); setSuggestError(plainCategoryError(error)); } });
     }, 450);
     return () => { active = false; clearTimeout(t); };
   }, [query, accessToken, storeId]);
@@ -96,7 +102,7 @@ export function ReceiveCategoryAspects({
       }).catch((error) => {
         if (!active) return;
         setSuggestions([]);
-        setSuggestError(error instanceof Error ? error.message : 'eBay is unreachable.');
+        setSuggestError(plainCategoryError(error));
       });
     }, 450);
     return () => { active = false; clearTimeout(t); };
@@ -179,7 +185,7 @@ export function ReceiveCategoryAspects({
       });
       setQuery('');
     } catch (e) {
-      setSuggestError(e instanceof Error ? e.message : 'eBay is unreachable. Retry, or browse the saved category tree. Nothing was saved.');
+      setSuggestError(plainCategoryError(e));
     } finally {
       setBusy(false);
     }
@@ -208,7 +214,7 @@ export function ReceiveCategoryAspects({
         <div>
           <span className="rcv-note">Suggested by eBay for this title</span>
           {suggestions.map(s => (
-            <button key={s.category_id} type="button" className="rcv-cat" disabled={busy} onClick={() => void pickCategory(s)}>
+            <button key={s.category_id} type="button" className={`rcv-cat${value.categoryId === s.category_id ? ' is-on' : ''}`} disabled={busy} onClick={() => void pickCategory(s)}>
               <span className="rcv-radio" aria-hidden />
               <strong>{s.category_name || categoryParts(s.path).slice(-1)[0]}{s.best_match ? <em>Best match</em> : null}</strong>
               <small>{categoryParts(s.path).slice(0, -1).join(' › ')}</small>
@@ -232,7 +238,7 @@ export function ReceiveCategoryAspects({
           void client.from('channel_taxonomy').select('category_id,path,leaf,parent_id')
             .eq('channel', 'ebay').eq('active', true).is('parent_id', null).order('path').limit(40)
             .then(({ data }) => setBrowse((data || []) as typeof browse));
-        }}>Browse all categories</button>
+        }}>Browse all categories ›</button>
       )}
       {browse.length > 0 && !value.categoryId && (
         <div>
@@ -257,7 +263,7 @@ export function ReceiveCategoryAspects({
               void pickCategory({ category_id: row.category_id, path: row.path });
             }}>
               <strong>{categoryParts(row.path).slice(-1)[0]}{row.leaf ? '' : ' ›'}</strong>
-              <small>{row.leaf ? categoryParts(row.path).slice(0, -1).join(' › ') : 'Open'}</small>
+              {row.leaf ? <small>{categoryParts(row.path).slice(0, -1).join(' › ')}</small> : null}
             </button>
           ))}
         </div>
