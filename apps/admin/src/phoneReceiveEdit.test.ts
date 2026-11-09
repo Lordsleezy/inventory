@@ -33,6 +33,9 @@ test('phone item edit keeps the desktop drawer on the desktop path', async () =>
   assert.match(typeCss, /font-weight: 700 !important/);
   assert.match(drawer, /staff_set_unit_do_not_list/);
   assert.match(drawer, /className="unit-edit-flags"/);
-  assert.match(drawer, /\{!appMode && <DnsCheckbox/);
+  assert.match(drawer, /\{!appMode && <ChannelCheckboxes/);
+  assert.doesNotMatch(drawer, /\{appMode && \(\s*<div className="unit-edit-flags"/);
+  const desk = await readFile(path.join(root, 'design/desk.css'), 'utf8');
+  assert.match(desk, /html\.desk:not\(\.app-mode\) \.unit-edit-flags/);
   assert.match(typeCss, /html\.app-mode \.app-unit-edit \.unit-edit-flag input\[type="checkbox"\]/);
 });
