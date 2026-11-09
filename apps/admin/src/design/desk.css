@@ -180,7 +180,19 @@ html.desk:not(.app-mode) .unit-edit-flags {
   flex-wrap: wrap;
   align-items: center;
   gap: 4px 18px;
-  margin: 2px 0 12px;
+  margin: 8px 0 4px;
+}
+html.desk:not(.app-mode) label.unit-edit-notes {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0 14px;
+}
+html.desk:not(.app-mode) label.unit-edit-notes textarea {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 72px;
+  margin: 0;
 }
 html.desk:not(.app-mode) .unit-edit-flag {
   display: inline-flex;
