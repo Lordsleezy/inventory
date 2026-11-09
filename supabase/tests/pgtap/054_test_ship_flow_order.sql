@@ -20,7 +20,7 @@ begin
     item_cents, total_cents, match_status, marketplace_title,
     label_storage_path, label_origin, tracking_number, carrier, packaged_at, shipped_at
   ) values (
-    v_store, '90088', 'paid', 'mercari', 'ship', 'TEST-SHIP-FLOW', now(),
+    v_store, '90088', 'paid', 'website', 'ship', 'TEST-SHIP-FLOW', now(),
     1000, 1000, 'matched', 'TEST — ship flow (do not ship)',
     'labels/test.pdf', 'upload', '9400111899223344556601', 'USPS', now(), now()
   );
