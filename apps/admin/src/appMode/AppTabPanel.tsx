@@ -1,5 +1,4 @@
 import { useCallback, useRef, useState, useEffect, type ReactNode } from 'react';
-import { createPortal } from 'react-dom';
 import { useAppPullRefresh } from './useAppPullRefresh';
 
 type Props = {
@@ -23,20 +22,8 @@ export function AppTabPanel({ tab, hidden, className, onPullRefresh, children }:
   }, [hidden]);
 
   const enabled = !hidden && !!onPullRefresh;
-  const { refreshing, hint, show, spin, pullProgress } = useAppPullRefresh(el, onPullRefresh, enabled);
-
-  const overlay = show && typeof document !== 'undefined' ? createPortal(
-    <div
-      className={`app-pull-refresh-float${refreshing ? ' active' : ''}${pullProgress >= 1 ? ' ready' : ''}`}
-      data-tab={tab}
-      aria-live="polite"
-      aria-busy={refreshing || undefined}
-    >
-      <span className={`app-pull-spinner${spin ? ' spin' : ''}`} aria-hidden />
-      {hint && <span className="app-pull-label">{hint}</span>}
-    </div>,
-    document.body,
-  ) : null;
+  const { offset, dragging, refreshing, hint, show, spin, ready } = useAppPullRefresh(el, onPullRefresh, enabled);
+  const gap = show ? offset : 0;
 
   return (
     <div
@@ -45,8 +32,24 @@ export function AppTabPanel({ tab, hidden, className, onPullRefresh, children }:
       data-tab={tab}
       hidden={hidden || undefined}
     >
-      {overlay}
-      {children}
+      {show && (
+        <div
+          className={`app-pull-indicator${ready || refreshing ? ' ready' : ''}`}
+          style={{ height: gap }}
+          data-tab={tab}
+          aria-live="polite"
+          aria-busy={refreshing || undefined}
+        >
+          <span className={`app-pull-spinner${spin ? ' spin' : ''}`} aria-hidden />
+          {hint ? <span className="app-pull-label">{hint}</span> : null}
+        </div>
+      )}
+      <div
+        className={`app-pull-sheet${dragging ? ' is-dragging' : ''}`}
+        style={{ transform: gap ? `translateY(${gap}px)` : undefined }}
+      >
+        {children}
+      </div>
     </div>
   );
 }
