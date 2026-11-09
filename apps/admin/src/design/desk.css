@@ -39,7 +39,7 @@ html.desk:not(.app-mode) .app.nav-peek-open {
   grid-template-columns: 240px minmax(0, 1fr);
 }
 
-html.desk:not(.app-mode) aside {
+html.desk:not(.app-mode) .app > aside {
   position: sticky;
   top: 0;
   height: 100vh;
@@ -146,7 +146,7 @@ html.desk:not(.app-mode) .desk-num {
   color: #fff;
 }
 
-html.desk:not(.app-mode) button:not(nav button, .account button, .text-button, .desk-nav-group button, aside button) {
+html.desk:not(.app-mode) button:not(nav button, .account button, .text-button, .desk-nav-group button, .app > aside button, .desk-drawer button) {
   background: transparent;
   color: #fff;
   border: 1px solid #fff;
@@ -478,11 +478,30 @@ html.desk:not(.app-mode) .desk-table button.linkish {
   background: transparent; border: 0; color: #fff; padding: 0; min-height: 0; font-weight: 650; text-align: left;
 }
 html.desk:not(.app-mode) .desk-drawer {
-  position: fixed; inset: 0 0 0 auto; width: min(460px, 100%);
-  background: #000; border-left: 1px solid #2a2a2a; z-index: 30;
-  overflow: auto; padding: 22px 20px 40px;
+  position: fixed; top: 0; right: 0; bottom: 0; left: auto;
+  width: min(440px, 100vw); height: 100vh; height: 100dvh; margin: 0;
+  background: #111 !important; color: #fff;
+  border-left: 1px solid #2a2a2a; z-index: 40;
+  overflow: auto; overscroll-behavior: contain;
+  padding: 18px 18px 48px;
+  box-shadow: -20px 0 48px rgba(0, 0, 0, 0.65);
 }
-html.desk:not(.app-mode) .desk-drawer-scrim { position: fixed; inset: 0; background: #00000088; z-index: 29; border: 0; }
+html.desk:not(.app-mode) .desk-drawer-scrim { position: fixed; inset: 0; background: #000000aa; z-index: 39; border: 0; }
+html.desk:not(.app-mode) .desk-drawer .ticket { background: transparent !important; color: #fff; }
+html.desk:not(.app-mode) .desk-drawer .order-facts,
+html.desk:not(.app-mode) .desk-drawer .order-facts strong,
+html.desk:not(.app-mode) .desk-drawer .order-sku-block,
+html.desk:not(.app-mode) .desk-drawer .order-sku-block strong { color: #111; }
+html.desk:not(.app-mode) .desk-drawer .order-facts span,
+html.desk:not(.app-mode) .desk-drawer .order-sku-block small { color: #617182; }
+html.desk:not(.app-mode) .desk-drawer .order-facts strong.warn { color: #9a6700; }
+html.desk:not(.app-mode) .desk-drawer .order-facts strong.ok { color: #137333; }
+html.desk:not(.app-mode) .desk-drawer .actions > button:not(.text-button) {
+  background: transparent; color: #fff; border: 1px solid #fff; border-radius: 10px; min-height: 44px; font-weight: 650;
+}
+html.desk:not(.app-mode) .desk-drawer .actions > button.primary {
+  background: #fff !important; color: #000 !important; border-color: #fff !important;
+}
 html.desk:not(.app-mode) .desk-empty { padding: 48px 0; }
 html.desk:not(.app-mode) .desk-empty h2 { margin-bottom: 8px; }
 html.desk:not(.app-mode) .order-loc-list { display: grid; gap: 6px; margin-top: 8px; max-height: 240px; overflow: auto; }
@@ -510,10 +529,10 @@ html.desk:not(.app-mode) .listing-issues-bar .listing-issues-scroll { grid-colum
 
 html.desk:not(.app-mode) .mobile-top,
 html.desk:not(.app-mode) .mobile-scrim { display: none; }
-html.desk:not(.app-mode) aside { grid-column: 1; grid-row: 1; transform: none; left: auto; }
+html.desk:not(.app-mode) .app > aside { grid-column: 1; grid-row: 1; transform: none; left: auto; }
 html.desk:not(.app-mode) .content { grid-column: 2; grid-row: 1; min-width: 0; }
 html.desk:not(.app-mode) button.desk-drawer-scrim {
-  border: 0 !important; border-radius: 0 !important; min-height: 0 !important; background: #00000088 !important;
+  border: 0 !important; border-radius: 0 !important; min-height: 0 !important; background: #000000aa !important;
 }
 
 html.desk:not(.app-mode) .manifests-desk-head,
