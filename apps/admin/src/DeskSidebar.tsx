@@ -30,8 +30,8 @@ export function DeskSidebar({ page, inventoryTab, deskAccess, pulse, name, role,
             {group.links.map((link) => (
               <button type="button" key={link.label} className={(link.inventoryTab ? page === link.page && inventoryTab === link.inventoryTab : page === link.page) ? 'active' : ''} onClick={() => onOpen(link)}>
                 <span>{link.label}</span>
-                {link.page === 'orders' && pulse.toShip != null && pulse.toShip > 0 && <small>{pulse.toShip}</small>}
-                {link.page === 'returns' && pulse.openReturns != null && pulse.openReturns > 0 && <small>{pulse.openReturns}</small>}
+                {deskAccess !== 'owner' && link.page === 'orders' && pulse.toShip != null && pulse.toShip > 0 && <small>{pulse.toShip}</small>}
+                {deskAccess !== 'owner' && link.page === 'returns' && pulse.openReturns != null && pulse.openReturns > 0 && <small>{pulse.openReturns}</small>}
               </button>
             ))}
           </div>

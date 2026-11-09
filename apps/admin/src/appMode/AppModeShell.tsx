@@ -334,6 +334,7 @@ export function AppModeShell({
               <AppMoreHome
                 client={client}
                 session={session}
+                storeId={storeId}
                 fullAccess={fullAccess}
                 ownerAccess={ownerAccess}
                 staffSession={staffSession}
@@ -452,6 +453,24 @@ export function AppModeShell({
           <AppReportsNative onBack={leaveMorePage} title="Manifests" backLabel={moreReturnTo === 'other' ? 'Other' : 'More'}>
             <ManifestsPage client={client} storeId={storeId} money={money} />
           </AppReportsNative>
+        )}
+        {ownerAccess && morePage === 'cameras' && (
+          <AppReportsNative onBack={leaveMorePage} title="Cameras">
+            <section className="desk-empty"><h2>No cameras yet</h2><p>Feeds are not connected.</p></section>
+          </AppReportsNative>
+        )}
+        {ownerAccess && morePage === 'locations' && (
+          <LocationsPage
+            client={client}
+            storeId={storeId}
+            canManage={false}
+            canAddBay
+            variant="app"
+            onBack={leaveMorePage}
+            accessToken={session.access_token}
+            money={money}
+            onSellInStore={() => switchTab('register')}
+          />
         )}
         {fullAccess && morePage === 'locations' && (
           <LocationsPage

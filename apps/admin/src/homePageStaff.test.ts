@@ -8,7 +8,8 @@ const root = path.dirname(fileURLToPath(import.meta.url));
 
 test('staff Home renders associate desk when not fullAccess', async () => {
   const src = await readFile(path.join(root, 'HomePage.tsx'), 'utf8');
-  assert.match(src, /!fullAccess &&/);
+  assert.match(src, /deskAccess === 'staff'/);
   assert.match(src, /desk-grid is-associate/);
-  assert.match(src, /deskAccess === 'owner' \? OWNER_LINKS : ASSOCIATE_LINKS/);
+  assert.match(src, /deskAccess === 'owner'/);
+  assert.match(src, /OWNER_JUMP_LINKS/);
 });

@@ -26,6 +26,7 @@ export const DESK_GROUPS: DeskGroup[] = [
     label: 'Stock',
     links: [
       { page: 'inventory', label: 'Inventory', hint: 'Units on hand' },
+      { page: 'inventory', label: 'Receive', hint: 'Add a unit', inventoryTab: 'receive' },
       { page: 'manifests', label: 'Manifests', hint: 'Inbound lots' },
       { page: 'locations', label: 'Locations', hint: 'Bays & bins' },
     ],
@@ -60,6 +61,50 @@ export const DESK_GROUPS: DeskGroup[] = [
   },
 ];
 
+/** Steve / owner desk: grouped like admin, without channels or ops noise. */
+export const OWNER_DESK_GROUPS: DeskGroup[] = [
+  {
+    label: 'Sell',
+    links: [
+      { page: 'register', label: 'Register', hint: 'Point of sale' },
+      { page: 'orders', label: 'Orders', hint: 'Ship & track' },
+    ],
+  },
+  {
+    label: 'Stock',
+    links: [
+      { page: 'inventory', label: 'Inventory', hint: 'Units on hand', inventoryTab: 'in-stock' },
+      { page: 'inventory', label: 'Receive', hint: 'Add a unit', inventoryTab: 'receive' },
+      { page: 'manifests', label: 'Manifests', hint: 'Inbound lots' },
+      { page: 'locations', label: 'Locations', hint: 'Bays & bins' },
+    ],
+  },
+  {
+    label: 'Money',
+    links: [
+      { page: 'reports', label: 'Reports', hint: 'Profit, fees, tax' },
+      { page: 'books', label: 'Books', hint: 'Month close' },
+      { page: 'withdrawals', label: 'Safe', hint: 'Cash accounts' },
+    ],
+  },
+  {
+    label: 'System',
+    links: [
+      { page: 'cameras', label: 'Cameras', hint: 'Store feeds' },
+      { page: 'settings', label: 'Settings', hint: 'Your account' },
+    ],
+  },
+];
+
+export const OWNER_JUMP_LINKS: DeskLink[] = [
+  { page: 'reports', label: 'Reports', hint: '' },
+  { page: 'books', label: 'Books', hint: '' },
+  { page: 'withdrawals', label: 'Safe', hint: '' },
+  { page: 'manifests', label: 'Manifests', hint: '' },
+  { page: 'cameras', label: 'Cameras', hint: '' },
+  { page: 'locations', label: 'Locations', hint: '' },
+];
+
 export const HOME_INVENTORY_LINKS: DeskLink[] = [
   { page: 'inventory', label: 'In stock', hint: '', inventoryTab: 'in-stock' },
   { page: 'inventory', label: 'Receive', hint: '', inventoryTab: 'receive' },
@@ -85,15 +130,20 @@ export const ASSOCIATE_LINKS: DeskLink[] = [
   { page: 'settings', label: 'Settings', hint: 'Your account' },
 ];
 
-/** Owner (Steve): same floor desk as staff, plus money/stock extras. */
+/** @deprecated Use OWNER_DESK_GROUPS — kept for tests importing flat list labels. */
 export const OWNER_EXTRA_LINKS: DeskLink[] = [
   { page: 'reports', label: 'Reports', hint: 'Profit, fees, tax' },
   { page: 'withdrawals', label: 'Safe', hint: 'Cash accounts' },
   { page: 'manifests', label: 'Manifests', hint: 'Inbound lots' },
   { page: 'books', label: 'Books', hint: 'Month close' },
+  { page: 'cameras', label: 'Cameras', hint: 'Store feeds' },
 ];
 
-export const OWNER_LINKS: DeskLink[] = [...ASSOCIATE_LINKS, ...OWNER_EXTRA_LINKS];
+export const OWNER_LINKS: DeskLink[] = [
+  ...ASSOCIATE_LINKS.filter((l) => l.page !== 'settings'),
+  ...OWNER_EXTRA_LINKS,
+  { page: 'settings', label: 'Settings', hint: 'Your account' },
+];
 
 export type DeskAccess = 'admin' | 'owner' | 'staff';
 
@@ -106,14 +156,14 @@ export function resolveDeskAccess(staffRole: string | null | undefined, portalAd
 
 export function deskNavGroups(access: DeskAccess): DeskGroup[] {
   if (access === 'admin') return DESK_GROUPS;
-  if (access === 'owner') return [{ label: 'Your desk', links: OWNER_LINKS }];
+  if (access === 'owner') return OWNER_DESK_GROUPS;
   return [{ label: 'Your desk', links: ASSOCIATE_LINKS }];
 }
 
 export function deskAllowedPages(access: DeskAccess): MainPage[] | null {
   if (access === 'admin') return null;
   if (access === 'owner') {
-    return ['home', 'register', 'inventory', 'orders', 'locations', 'settings', 'reports', 'withdrawals', 'manifests', 'books'];
+    return ['home', 'register', 'inventory', 'orders', 'locations', 'settings', 'reports', 'withdrawals', 'manifests', 'books', 'cameras'];
   }
   return ['home', 'register', 'inventory', 'orders', 'locations', 'settings'];
 }

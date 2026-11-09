@@ -121,18 +121,19 @@ select throws_ok(
 
 select set_config('request.jwt.claim.sub', current_setting('test.owner'), true);
 
-select is(
-  (select i->>'sold_price_cents'
-     from jsonb_array_elements(public.receive_inventory_list('11877', 'sold', false, 'date', 0, 20, 'all')->'items') i
-    where i->>'sku' = '11877'),
-  '4000',
-  'admin still receives the sold price'
+select ok(
+  not exists (
+    select 1
+    from jsonb_array_elements(public.receive_inventory_list('11877', 'sold', false, 'date', 0, 20, 'all')->'items') i
+    where i ? 'sold_price_cents' or i ? 'ask_cents'
+  ),
+  'owner desk sold list hides prices like clerk'
 );
 
 select is(
   (select count(*) from jsonb_array_elements(public.portal_web_orders(30)) o where o->>'order_no' = 'J-SHIP')::int,
-  1,
-  'admin still receives the shipped order'
+  0,
+  'owner desk cannot read the shipped order list'
 );
 
 select finish();

@@ -14,12 +14,11 @@ test('More home lists primary links in the phone order ending with Other', async
   assert.deepEqual(labels, ['Live sales', 'Receipts', 'Register', 'Safe', 'Reports', 'Books', 'Locations', 'Other']);
 });
 
-test('Owner More lists Reports, Safe, Manifests, Books, Settings', async () => {
+test('Owner More lists money and system extras', async () => {
   const src = await readFile(path.join(root, 'AppMore.tsx'), 'utf8');
-  const home = src.slice(src.indexOf('export function AppMoreHome'), src.indexOf('export function AppMoreOther'));
-  const owner = home.slice(home.indexOf(') : ownerAccess ? ('), home.indexOf(') : staffSession ? ('));
-  const labels = [...owner.matchAll(/Icon tone="[^"]+" \/>([^<]+)</g)].map((m) => m[1].trim());
-  assert.deepEqual(labels, ['Reports', 'Safe', 'Manifests', 'Books', 'Settings']);
+  const owner = src.slice(src.indexOf('function OwnerMoreHome'), src.indexOf('export function AppMoreHome'));
+  const labels = [...owner.matchAll(/label: '([^']+)'/g)].map((m) => m[1]);
+  assert.deepEqual(labels, ['Manifests', 'Locations', 'Reports', 'Books', 'Safe', 'Cameras', 'Settings']);
 });
 
 test('Other page keeps marketplace and leftover admin links', async () => {

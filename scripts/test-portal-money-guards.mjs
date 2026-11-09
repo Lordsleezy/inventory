@@ -29,10 +29,14 @@ const ALLOW = new Set([
   "portal_vendoo_export", // retired stub, returns no rows
 ]);
 
-test("portal_store_id() embeds portal_is_admin()", () => {
+test("portal_store_id() is financial-gated", () => {
   const d = defs.get("portal_store_id");
   assert.ok(d, "portal_store_id defined");
-  assert.match(d.body, /portal_is_admin\(\)/, `newest portal_store_id (${d.file}) must check portal_is_admin()`);
+  assert.match(
+    d.body,
+    /portal_is_admin\(\)|portal_financial_access\(\)/,
+    `newest portal_store_id (${d.file}) must check portal_is_admin() or portal_financial_access()`,
+  );
 });
 
 test("money-touching portal_* functions are admin-gated", () => {

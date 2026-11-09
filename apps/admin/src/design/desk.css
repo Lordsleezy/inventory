@@ -542,6 +542,19 @@ html.desk:not(.app-mode) .desk-home-strip {
   display: grid; grid-template-columns: 1.3fr repeat(4, minmax(0, 1fr));
   border-top: 1px solid #2a2a2a; border-bottom: 1px solid #2a2a2a; margin: 18px 0 22px;
 }
+html.desk:not(.app-mode) .desk-owner-strip {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+html.desk:not(.app-mode) .desk-owner-jump { margin-top: 32px; }
+html.desk:not(.app-mode) .desk-owner-jump-grid {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px 12px; margin-top: 12px;
+}
+html.desk:not(.app-mode) .desk-jump-btn {
+  border: 1px solid #fff !important; background: transparent !important; color: #fff !important;
+  min-height: 44px !important; border-radius: 8px !important; font-size: 15px !important;
+}
+html.desk:not(.app-mode) .desk-owner-sales .desk-sale strong { color: #fff; }
+html.desk:not(.app-mode) .desk-channel-tag { border: 1px solid #4a4a4a; border-radius: 999px; padding: 1px 8px; font-style: normal; font-size: 12px; color: #fff; }
 html.desk:not(.app-mode) .desk-home-strip div { padding: 12px 16px 12px 0; border-right: 1px solid #2a2a2a; }
 html.desk:not(.app-mode) .desk-home-strip div:last-child { border-right: 0; }
 html.desk:not(.app-mode) .desk-home-strip span,

@@ -12,6 +12,8 @@ import { isInStoreChannel } from '../channels';
 import { errText } from '../errText';
 import { shortError } from './shortError';
 import { BuildStamp } from '../BuildStamp';
+import { loadOwnerHome } from '../ownerHome';
+import { dayPart, firstName } from '../homeGreeting';
 
 /** Needs attention moved to Inventory → Unfinished; it is not a More page. */
 export type MoreId =
@@ -32,6 +34,7 @@ export type MoreId =
   | 'locations'
   | 'insights'
   | 'dropship'
+  | 'cameras'
   | 'settings';
 
 type Props = {
@@ -69,9 +72,62 @@ function addDays(date: string, amount: number) {
   return d.toISOString().slice(0, 10);
 }
 
+function OwnerMoreHome({
+  client, session, storeId, staffSession, money, setPage,
+}: {
+  client: SupabaseClient;
+  session: Session;
+  storeId: string;
+  staffSession: StaffSession | null;
+  money: (n: number) => string;
+  setPage: (p: MoreId) => void;
+}) {
+  const [summary, setSummary] = useState<Awaited<ReturnType<typeof loadOwnerHome>> | null>(null);
+  const name = firstName(staffSession?.displayName, session.user.email);
+  const hour = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', hour: 'numeric', hourCycle: 'h23' }).format(new Date()));
+  const hello = dayPart(hour) === 'morning' ? 'Good morning' : dayPart(hour) === 'afternoon' ? 'Good afternoon' : 'Good evening';
+
+  useEffect(() => {
+    if (!storeId) return;
+    let alive = true;
+    void loadOwnerHome(client, session.access_token, storeId).then((next) => {
+      if (alive) setSummary(next);
+    }).catch(() => undefined);
+    return () => { alive = false; };
+  }, [client, session.access_token, storeId]);
+
+  const links: { id: MoreId; label: string }[] = [
+    { id: 'manifests', label: 'Manifests' },
+    { id: 'locations', label: 'Locations' },
+    { id: 'reports', label: 'Reports' },
+    { id: 'books', label: 'Books' },
+    { id: 'withdrawals', label: 'Safe' },
+    { id: 'cameras', label: 'Cameras' },
+    { id: 'settings', label: 'Settings' },
+  ];
+
+  return (
+    <>
+      <p className="app-owner-hello">{hello}, {name}.</p>
+      <div className="app-owner-stats">
+        <div><span>Sales today</span><strong>{summary ? money(summary.salesTodayCents) : '…'}</strong></div>
+        <div><span>In the safe</span><strong>{summary?.safeCents == null ? '…' : money(summary.safeCents)}</strong></div>
+      </div>
+      <div className="app-group">
+        {links.map((link) => (
+          <button key={link.id} type="button" className="app-more-link" onClick={() => setPage(link.id)}>
+            <span className="app-more-left"><Icon tone="#fff" />{link.label}</span>
+            <span className="app-chevron">›</span>
+          </button>
+        ))}
+      </div>
+    </>
+  );
+}
+
 export function AppMoreHome({
-  client, fullAccess, ownerAccess = false, staffSession, session, money, setPage, onOpenChannel,
-}: Pick<Props, 'client' | 'fullAccess' | 'ownerAccess' | 'staffSession' | 'session' | 'money' | 'setPage' | 'onOpenChannel'>) {
+  client, fullAccess, ownerAccess = false, staffSession, session, storeId, money, setPage, onOpenChannel,
+}: Pick<Props, 'client' | 'fullAccess' | 'ownerAccess' | 'staffSession' | 'session' | 'storeId' | 'money' | 'setPage' | 'onOpenChannel'>) {
   void onOpenChannel;
   void money;
   const [salesToday, setSalesToday] = useState<number | null>(null);
@@ -138,28 +194,14 @@ export function AppMoreHome({
           </div>
         </>
       ) : ownerAccess ? (
-        <div className="app-group">
-          <button type="button" className="app-more-link" onClick={() => setPage('reports')}>
-            <span className="app-more-left"><Icon tone="#30d158" />Reports</span>
-            <span className="app-chevron">›</span>
-          </button>
-          <button type="button" className="app-more-link" onClick={() => setPage('withdrawals')}>
-            <span className="app-more-left"><Icon tone="#8e8e93" />Safe</span>
-            <span className="app-chevron">›</span>
-          </button>
-          <button type="button" className="app-more-link" onClick={() => setPage('manifests')}>
-            <span className="app-more-left"><Icon tone="#64d2ff" />Manifests</span>
-            <span className="app-chevron">›</span>
-          </button>
-          <button type="button" className="app-more-link" onClick={() => setPage('books')}>
-            <span className="app-more-left"><Icon tone="#ff9f0a" />Books</span>
-            <span className="app-chevron">›</span>
-          </button>
-          <button type="button" className="app-more-link" onClick={() => setPage('settings')}>
-            <span className="app-more-left"><Icon tone="#8e8e93" />Settings</span>
-            <span className="app-chevron">›</span>
-          </button>
-        </div>
+        <OwnerMoreHome
+          client={client}
+          session={session}
+          storeId={storeId}
+          staffSession={staffSession}
+          money={money}
+          setPage={setPage}
+        />
       ) : staffSession ? (
         <div className="app-group">
           <button type="button" className="app-more-link" onClick={() => setPage('register')}>

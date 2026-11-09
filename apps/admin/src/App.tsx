@@ -510,7 +510,7 @@ export function App() {
         setStaffSession(staff);
         const allowed = deskAllowedPages(nextAccess);
         if (allowed && !allowed.includes(parseNavFromLocation().page)) {
-          setNav(defaultNavState('register'));
+          setNav(defaultNavState('home'));
         }
       } catch (e) {
         if (alive) setError(errText(e));
@@ -523,7 +523,7 @@ export function App() {
   useEffect(() => {
     if (!accessReady || deskAccess === 'admin') return;
     const allowed = deskAllowedPages(deskAccess);
-    if (allowed && !allowed.includes(page)) setNav(defaultNavState('register'));
+    if (allowed && !allowed.includes(page)) setNav(defaultNavState('home'));
   }, [accessReady, deskAccess, page]);
   const loadCommon = useCallback(async () => {
     if (!store) return;
@@ -936,8 +936,8 @@ export function App() {
     <DropshipPage client={sb} session={session} money={money} embed="desktop" />
   )}
   {fullAccess && page === 'settings' && <SettingsPage accessToken={session.access_token} busy={busy} run={run} staff={staff} rules={rules} saveRule={setRule} reloadPeople={loadCommon} />}
-  {registerOnly && page === 'settings' && <AssociateSettings client={sb} displayName={staffSession?.displayName || 'Associate'} />}
-  {fullAccess && page === 'cameras' && <><header><div><h1>Cameras</h1><p>Store camera feeds.</p></div></header><section className="desk-empty"><h2>No cameras yet</h2><p>Feeds are not connected. Add camera will show up here when a feed is available.</p></section></>}
+  {registerOnly && page === 'settings' && <AssociateSettings client={sb} displayName={staffSession?.displayName || (deskAccess === 'owner' ? 'Owner' : 'Associate')} />}
+  {moneyAccess && page === 'cameras' && <><header><div><h1>Cameras</h1><p>Store camera feeds.</p></div></header><section className="desk-empty"><h2>No cameras yet</h2><p>Feeds are not connected. Add camera will show up here when a feed is available.</p></section></>}
   </main></div>;
 }
 function Stat({ name, value, hint }: { name: string; value: string; hint?: string }) {

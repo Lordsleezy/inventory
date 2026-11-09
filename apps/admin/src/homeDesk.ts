@@ -104,7 +104,7 @@ export async function loadHomeDesk(client: SupabaseClient, token: string, storeI
       const rows = ((res.data as { rows?: ReturnRow[] })?.rows || []);
       return rows.filter((row) => !isReplacementReturn(row) && !isBuyerKeeps(row) && !String(row.tracking_number || '').trim()).length;
     }),
-    loadOwed(client, storeId),
+    loadOwedPeople(client, storeId),
     catalog(token, 'ebay').catch(() => null),
     catalog(token, 'amazon').catch(() => null),
     catalog(token, 'tiktok').catch(() => null),
@@ -128,7 +128,7 @@ export async function loadHomeDesk(client: SupabaseClient, token: string, storeI
   return { missingCost: missing, returnsUntracked: returns, owed, channels, booksIssues: books };
 }
 
-async function loadOwed(client: SupabaseClient, storeId: string): Promise<OwedPerson[]> {
+export async function loadOwedPeople(client: SupabaseClient, storeId: string): Promise<OwedPerson[]> {
   const [ctx, overrides] = await Promise.all([
     loadBooksPayoutContext(client, storeId),
     loadCommissionOverrides(client, storeId),
