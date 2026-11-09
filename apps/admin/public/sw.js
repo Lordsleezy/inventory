@@ -1,5 +1,5 @@
 /* Floor admin shell — cache static assets only; never cache live inventory/API data. */
-const SHELL = 'floor-shell-v16';
+const SHELL = 'floor-shell-v17';
 const SHELL_URLS = [
   '/manifest.webmanifest',
   '/icons/icon-192.png',

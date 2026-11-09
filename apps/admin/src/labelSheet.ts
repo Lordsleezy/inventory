@@ -196,7 +196,12 @@ async function measurePage(bytes: Uint8Array, pageIndex: number): Promise<Measur
   }
 
   const full: Box = { x0: 0, y0: 0, x1: mediaW, y1: mediaH };
-  const ink = labelFrame(pieces, full) || full;
+  const content = pieces.filter(okBox).reduce<Box | null>((acc, box) => (acc ? union(acc, box) : box), null);
+  const spansPage = !!content
+    && content.x1 - content.x0 > mediaW * 0.5
+    && content.y1 - content.y0 > mediaH * 0.5;
+  // A 4×6 or letter file that already holds the whole label. Don't clip it down to the barcode.
+  const ink = spansPage ? full : (labelFrame(pieces, full) || full);
   const box = {
     x0: Math.max(0, ink.x0 - 2),
     y0: Math.max(0, ink.y0 - 2),
@@ -225,12 +230,16 @@ function isLabelPage(w: number, h: number) {
  */
 function labelFrame(pieces: Box[], full: Box): Box | null {
   const pageArea = area(full);
+  const pageW = full.x1 - full.x0;
+  const pageH = full.y1 - full.y0;
   const usable = pieces.filter((box) => area(box) < pageArea * 0.92);
   const frames = usable.filter((box) => {
     const w = box.x1 - box.x0;
     const h = box.y1 - box.y0;
     const ratio = w / h;
-    return area(box) > 50 * 50 && ratio > 0.55 && ratio < 1.85;
+    // A barcode is wide and short. The label border covers a real share of the sheet.
+    const labelSized = w > pageW * 0.32 && h > pageH * 0.32;
+    return labelSized && area(box) > 50 * 50 && ratio > 0.55 && ratio < 1.85;
   }).sort((a, b) => area(b) - area(a));
   const frame = frames[0];
   if (frame) {
