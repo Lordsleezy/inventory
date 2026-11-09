@@ -303,12 +303,28 @@ const rest = all.filter((f) => f.name > "0005_private_photos.sql");
   );
   assert.deepEqual(nfsStaffUnit[0], { do_not_list: 'true', show_on_website: false, gaps: [] },
     "staff not-for-sale Receive persists hidden with only a brand and no listing gaps");
+  const { rows: titleOnlyRows } = await db.query(
+    `select public.receive_commit($1,$2,ARRAY[]::text[],$3) as result`,
+    ['00000000-0000-4000-8000-000000000604', JSON.stringify({ ...nfsFields, p_brand: '' }), JSON.stringify(nfsExtras)],
+  );
+  const titleOnlySku = titleOnlyRows[0].result.skus[0];
+  const { rows: titleOnlyUnit } = await db.query(
+    `select condition, listing_specs->>'do_not_list' as do_not_list, show_on_website,
+            public.unit_listing_gaps(u) as gaps
+       from public.units u where store_id = $1 and sku = $2`, [storeId, titleOnlySku],
+  );
+  assert.deepEqual(titleOnlyUnit[0], {
+    condition: 'Defective/non-sellable',
+    do_not_list: 'true',
+    show_on_website: false,
+    gaps: [],
+  }, "staff not-for-sale with only a title is defective and hidden");
   await assert.rejects(
     db.query(`select public.receive_commit($1,$2,ARRAY[]::text[],$3)`, [
-      '00000000-0000-4000-8000-000000000604', JSON.stringify({ ...nfsFields, p_brand: '' }), JSON.stringify(nfsExtras),
+      '00000000-0000-4000-8000-000000000608', JSON.stringify({ ...nfsFields, p_brand: '', p_title: '  ' }), JSON.stringify(nfsExtras),
     ]),
-    /Brand required/,
-    "staff not-for-sale commit rejects a missing brand",
+    /Title required/,
+    "staff not-for-sale commit rejects a missing title when there is no brand",
   );
   await db.query(`select set_config('request.jwt.claim.sub',$1,false)`, [adminId]);
   await assert.rejects(

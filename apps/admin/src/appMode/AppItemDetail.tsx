@@ -307,8 +307,8 @@ export function AppItemDetail({
         <button
           type="button"
           onClick={() => openEdit()}
-          disabled={!detail || staffMode}
-          style={moneyHidden || staffMode ? { visibility: 'hidden' } : undefined}
+          disabled={!detail}
+          style={moneyHidden ? { visibility: 'hidden' } : undefined}
         >
           Edit
         </button>

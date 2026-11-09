@@ -68,7 +68,11 @@ begin
       case when u.state in ('available', 'reserved', 'repair') then u.ask_cents end,
       'state', u.state, 'show_on_website', u.show_on_website, 'received_at', u.received_at, 'updated_at', u.updated_at,
       'package_weight_lb', u.package_weight_lb, 'package_length_in', u.package_length_in,
-      'package_width_in', u.package_width_in, 'package_height_in', u.package_height_in, 'upc', u.upc),
+      'package_width_in', u.package_width_in, 'package_height_in', u.package_height_in, 'upc', u.upc,
+      'listing_body', u.listing_body, 'defect_notes', u.defect_notes,
+      'qty_on_hand', u.qty_on_hand, 'is_stocked', u.is_stocked,
+      'shippable', u.shippable, 'fulfillment_override', u.fulfillment_override,
+      'listing_specs', u.listing_specs),
     'photos', coalesce((select jsonb_agg(jsonb_build_object('id', p.id, 'path', p.path, 'is_primary', p.is_primary)
       order by p.is_primary desc, p.id) from public.photos p where p.store_id = u.store_id and p.sku = u.sku), '[]'::jsonb),
     'listings', coalesce((select jsonb_agg(jsonb_build_object('channel', l.channel, 'status', l.status, 'listing_id', l.listing_id)

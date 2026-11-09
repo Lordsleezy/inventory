@@ -132,6 +132,7 @@ export function AppOrderDetail(props: AppOrderDetailProps) {
 
   return (
     <div className="app-stack app-order-detail-stack">
+      <div className="app-order-detail-scroll">
       <div className="app-nav">
         <button type="button" onClick={onBack}>‹ Orders</button>
         <div className="app-nav-title">Order</div>
@@ -267,9 +268,10 @@ export function AppOrderDetail(props: AppOrderDetailProps) {
       {!order.delivered_at && !order.picked_up_at && paid && (
         <button type="button" className="app-order-cancel" disabled={!!busy} onClick={onFloorCancel}>Cancel in Floor</button>
       )}
+      </div>
 
       {primary && (
-        <div className="app-order-sticky">
+        <div className="app-order-dock">
           <button
             type="button"
             className="primary"
