@@ -209,9 +209,22 @@ export function AppModeShell({
   useEffect(() => {
     document.documentElement.classList.add('app-mode', 'dark');
     document.body.classList.add('app-mode');
+    const meta = document.querySelector('meta[name="viewport"]');
+    if (meta && !/viewport-fit=cover/.test(meta.getAttribute('content') || '')) {
+      meta.setAttribute('content', 'width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no');
+    }
+    const pin = () => {
+      const h = window.visualViewport?.height || window.innerHeight;
+      document.documentElement.style.setProperty('--floor-app-h', `${Math.round(h)}px`);
+    };
+    pin();
+    window.visualViewport?.addEventListener('resize', pin);
+    window.addEventListener('resize', pin);
     return () => {
       document.documentElement.classList.remove('app-mode', 'dark');
       document.body.classList.remove('app-mode');
+      window.visualViewport?.removeEventListener('resize', pin);
+      window.removeEventListener('resize', pin);
     };
   }, []);
 
@@ -314,8 +327,8 @@ export function AppModeShell({
           )}
         </div>
 
-        <div className="app-tab-panel app-register" data-tab="register" hidden={tab !== 'register' || fullAccess}>
-          {tab === 'register' && !fullAccess && (
+        <div className="app-tab-panel app-register" data-tab="register" hidden={tab !== 'register'}>
+          {tab === 'register' && (
             staffSession
               ? <RegisterPage staffSession={staffSession} variant="app" />
               : <p className="app-footer-count">This login can’t ring sales. Ask an owner to add a staff row.</p>
@@ -331,6 +344,7 @@ export function AppModeShell({
               money={money}
               stamp={stamp}
               isAdmin={fullAccess}
+              seeTracking={fullAccess || ownerAccess}
               refreshKey={ordersKey}
               onPullReady={ordersPull.ready}
             />
@@ -387,14 +401,14 @@ export function AppModeShell({
         )}
         <AppTabPanel
           tab="locations"
-          hidden={tab !== 'locations' || fullAccess}
+          hidden={tab !== 'locations'}
           onPullRefresh={locPull.pull}
         >
-          {tab === 'locations' && !fullAccess && (
+          {tab === 'locations' && (
             <LocationsPage
               client={client}
               storeId={storeId}
-              canManage={false}
+              canManage={fullAccess}
               canAddBay
               variant="app"
               accessToken={session.access_token}
@@ -422,6 +436,16 @@ export function AppModeShell({
           </div>
         )}
 
+        {fullAccess && morePage === 'returns' && (
+          <div className="app-stack">
+            <div className="app-nav">
+              <button type="button" onClick={leaveMorePage}>More</button>
+              <div className="app-nav-title">Returns</div>
+              <span />
+            </div>
+            <ReturnsPage client={client} storeId={storeId} money={money} stamp={stamp} variant="app" accessToken={session.access_token} />
+          </div>
+        )}
         {fullAccess && morePage === 'sales' && (
           <AppLiveSales client={client} money={money} stamp={stamp} onBack={leaveMorePage} />
         )}

@@ -35,7 +35,8 @@ export type MoreId =
   | 'insights'
   | 'dropship'
   | 'cameras'
-  | 'settings';
+  | 'settings'
+  | 'returns';
 
 type Props = {
   client: SupabaseClient;
@@ -189,6 +190,10 @@ export function AppMoreHome({
             </button>
             <button type="button" className="app-more-link" onClick={() => setPage('locations')}>
               <span className="app-more-left"><Icon tone="#30d158" />Locations</span>
+              <span className="app-chevron">›</span>
+            </button>
+            <button type="button" className="app-more-link" onClick={() => setPage('returns')}>
+              <span className="app-more-left"><Icon tone="#8e8e93" />Returns</span>
               <span className="app-chevron">›</span>
             </button>
             <button type="button" className="app-more-link" onClick={() => setPage('other')}>
