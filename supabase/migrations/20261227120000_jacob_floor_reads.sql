@@ -71,12 +71,12 @@ begin
       'package_width_in', u.package_width_in, 'package_height_in', u.package_height_in, 'upc', u.upc,
       'listing_body', u.listing_body, 'defect_notes', u.defect_notes,
       'qty_on_hand', u.qty_on_hand, 'is_stocked', u.is_stocked,
-      'shippable', u.shippable, 'fulfillment_override', u.fulfillment_override,
-      'listing_specs', u.listing_specs),
-    'photos', coalesce((select jsonb_agg(jsonb_build_object('id', p.id, 'path', p.path, 'is_primary', p.is_primary)
+      'upc_does_not_apply', public.unit_upc_does_not_apply(u.listing_specs),
+      'aspects', coalesce(u.listing_specs->'ebay_aspects', '{}'::jsonb)),
+    'photos', coalesce((select jsonb_agg(jsonb_build_object(
+        'id', p.id, 'path', p.path, 'is_primary', p.is_primary, 'source', p.source)
       order by p.is_primary desc, p.id) from public.photos p where p.store_id = u.store_id and p.sku = u.sku), '[]'::jsonb),
-    'listings', coalesce((select jsonb_agg(jsonb_build_object('channel', l.channel, 'status', l.status, 'listing_id', l.listing_id)
-      order by l.channel) from public.listings l where l.store_id = u.store_id and l.sku = u.sku), '[]'::jsonb)
+    'listings', '[]'::jsonb
   ) into v_result from public.units u where u.store_id = v_store and u.sku = p_sku;
   if v_result is null then raise exception 'unit_not_found' using errcode = 'P0001'; end if;
   if (v_result #>> '{unit,state}') = 'sold' then
