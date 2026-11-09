@@ -364,6 +364,7 @@ export function AppModeShell({
               client={client}
               storeId={storeId}
               canManage={false}
+              canAddBay
               variant="app"
               accessToken={session.access_token}
               money={money}

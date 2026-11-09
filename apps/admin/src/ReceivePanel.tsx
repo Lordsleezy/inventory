@@ -1928,7 +1928,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   const invalid = (key: ReceiveFieldKey) => showSaveValidation && liveMissing.includes(
     key === 'ebay_category' ? 'category' : key === 'ebay_aspects' ? 'item specifics' : key === 'upc' ? 'UPC' : key,
   );
-  return <section className={`panel receive-panel receive-v2${appChrome ? ' receive-app' : ''}${storePhoneMode ? ' receive-store-phone' : ''}`}>
+  return <section className={`panel receive-panel receive-v2${appChrome ? ' receive-app' : ''}`}>
     {(appChrome || storePhoneMode) && <button type="button" className="receive-keyboard-trigger" onClick={() => setTypingOpen(open => !open)} aria-expanded={typingOpen}>
       {typingOpen ? 'Hide Floor keyboard' : '⌨ Floor keyboard'}
     </button>}
@@ -1943,16 +1943,16 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       <div className="app-nav receive-app-nav">
         <button type="button" onClick={() => { onAppCancel?.(); }}>Cancel</button>
         <div className="app-nav-title">Receive<small>Unit {options?.next_sku || '…'} · {manual ? 'manual' : 'scanned'}</small></div>
-        {storePhoneMode ? <span className="receive-phone-scanner"><i />Scanner</span> : <button type="button" className={formValid ? '' : 'is-dim'} disabled={busy} onClick={() => {
+        <button type="button" className={formValid ? '' : 'is-dim'} disabled={busy || !formValid} onClick={() => {
           const formEl = document.getElementById('receive-app-form') as HTMLFormElement | null;
           formEl?.requestSubmit();
-        }}>Save</button>}
+        }}>Save</button>
       </div>
     )}
     <div className="receive-next">
       <div className="receive-sku-block">
         <div><div className="eyebrow">NEXT AVAILABLE SKU</div><strong>{options?.next_sku || 'Loading…'}</strong></div>
-        {!manual && <label className="receive-upc">Scan UPC
+        {!manual && !showForm && <label className="receive-upc">Scan UPC
           <input
             ref={upcInput}
             value={draft || (!manual && showForm && current?.upc) || ''}
@@ -2033,7 +2033,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         <button type="button" onClick={() => retry(current)}>Retry</button>
       </div>}
 
-      {catalogMiss && current && <div className="alert" role="alert">
+      {catalogMiss && current && !unifiedV2 && <div className="alert" role="alert">
         <span>{catalogMiss}</span>
         {trueMiss && (
           <button type="button" disabled={photoIdBusy} onClick={() => {
@@ -2192,13 +2192,26 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       </div>}
 
       <div className={`receive-advanced${manual ? ' receive-manual' : ''}`}><div className="unit-edit-grid receive-v2-grid">
-        {!manual && current && <div className="rcv-found">
+        {!manual && current && (trueMiss ? <div className="rcv-miss">
+          <strong>No match for this UPC</strong>
+          <small>Take one photo and we’ll fill in the rest</small>
+          <div className="rcv-miss-actions">
+            <button type="button" className="secondary" disabled={photoIdBusy} onClick={() => {
+              try { sessionStorage.removeItem(`floor:receive-photo-dismissed:${storeId}:${current.upc}`); } catch { /* reopen still works */ }
+              setDialog('miss-photo');
+            }}>Scan with photo</button>
+            <button type="button" className="secondary" onClick={toggleManual}>Enter manually</button>
+          </div>
+        </div> : <div className="rcv-found">
+          <label className="rcv-upc-field">{current.upc}
+            <button type="button" className="text-button" disabled={busy} onClick={() => retry(current)}>Rescan</button>
+          </label>
           <strong>{merged?.title || form.title || 'Item'}</strong>
           <small>Found by UPC · filled in for you</small>
-        </div>}
+        </div>)}
         {unifiedV2 && <ReceiveSection id="photos" title="Photos" required={!mediaWaived} open={openSec === 'photos'} onOpen={setOpenSec}
           tone={!personPhotoReady() && !mediaWaived ? 'bad' : 'muted'}
-          status={personPhotoReady() ? `${files.length || stagedPhotoPaths.length} photo${(files.length || stagedPhotoPaths.length) === 1 ? '' : 's'}` : mediaWaived ? (doNotList ? 'Optional (not listed)' : 'Optional (defective)') : 'Required'}>
+          status={personPhotoReady() ? `${files.length || stagedPhotoPaths.length} photo${(files.length || stagedPhotoPaths.length) === 1 ? '' : 's'}${(stockPhotoPath || hasCatalogPhoto) ? ' + stock' : ''}` : mediaWaived ? (doNotList ? 'Optional (not listed)' : 'Optional (defective)') : 'Required'}>
         <div ref={el => { fieldRefs.current.photo = el; }} className={invalid('photo') ? 'receive-v2-invalid' : undefined}>
           <div className="receive-v2-photo-actions">
             <input ref={takePhotoFile} type="file" accept="image/*" capture="environment" className="sr-only" aria-hidden tabIndex={-1}
@@ -2235,7 +2248,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
             ? (liveMissing.filter(g => receiveSectionForGap(g) === 'item').length === 1
               ? liveMissing.find(g => receiveSectionForGap(g) === 'item') || 'Required'
               : `${liveMissing.filter(g => receiveSectionForGap(g) === 'item').length} missing`)
-            : (brandReady() ? `${form.unbranded ? 'Unbranded' : form.brand}${ebayAspects.path ? ' · set' : ''}` : 'Required')}>
+            : (brandReady() ? `${form.unbranded ? 'Unbranded' : form.brand}${form.category ? ` · ${form.category}` : ''}` : 'Required')}>
         <label ref={el => { fieldRefs.current.brand = el; }} className={`receive-v2-span2${invalid('brand') ? ' receive-v2-invalid' : ''}`}>
           <span className="receive-v2-label">Brand{!doNotList && <span className="receive-v2-req"> *</span>}</span>
           <input placeholder="Type brand" value={form.unbranded ? 'Unbranded' : form.brand} disabled={form.unbranded} onChange={e => update('brand', e.target.value)} />
@@ -2296,7 +2309,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
 
         <ReceiveSection id="size" title="Size & weight" required={!mediaWaived} open={openSec === 'size'} onOpen={setOpenSec}
           tone={!dimensionsReady() && !mediaWaived ? 'bad' : 'muted'}
-          status={dimensionsReady() ? `${form.length} × ${form.width} × ${form.height} in · ${form.weight} lb` : mediaWaived ? (doNotList ? 'Optional (not listed)' : 'Optional (defective)') : 'Required'}>
+          status={dimensionsReady() ? (!manual && current && !trueMiss ? 'From UPC' : `${form.length} × ${form.width} × ${form.height} in · ${form.weight} lb`) : mediaWaived ? (doNotList ? 'Optional (not listed)' : 'Optional (defective)') : 'Required'}>
           <div className="receive-v2-dims">
             <label>Length (in)<input inputMode="decimal" value={form.length} onChange={e => update('length', e.target.value)} /></label>
             <label>Width (in)<input inputMode="decimal" value={form.width} onChange={e => update('width', e.target.value)} /></label>
@@ -2400,10 +2413,10 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         {liveMissing.length > 0 && <button type="button" className="rcv-needed" onClick={() => { setShowSaveValidation(true); setOpenSec(receiveSectionForGap(liveMissing[0])); }}>
           Still needed: {liveMissing.join(', ')}
         </button>}
-        <button type="submit" className={`receive-v2-save${formValid ? '' : ' is-dim'}`} disabled={busy || photoBusy}>
+        <button type="submit" className={`receive-v2-save${formValid ? '' : ' is-dim'}`} disabled={busy || photoBusy || !formValid}>
           {busy ? 'Saving…' : 'Save item'}
         </button>
-        {!manual && <button type="submit" className="secondary rcv-scan-next" disabled={busy || photoBusy}>Save and scan next</button>}
+        {!manual && <button type="submit" className={`secondary rcv-scan-next${formValid ? '' : ' is-dim'}`} disabled={busy || photoBusy || !formValid}>Save and scan next</button>}
       </div>
       {!manual && current && <button type="button" className="secondary" disabled={busy} onClick={skipCurrent}>Skip this scan</button>}
       </div>

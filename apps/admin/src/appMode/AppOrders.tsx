@@ -395,14 +395,17 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
     <>
       <p className="orders-screen-eyebrow">Orders · {SEG_SHORT[seg]}</p>
       <div className="app-segment app-segment-scroll orders-segment" role="tablist" ref={tabRowRef}>
-        {([
-          ...(isAdmin ? [['needsLabel', 'Needs label', buckets.needsLabel.length] as const] : []),
+        {((isAdmin ? [
+          ['needsLabel', 'Needs label', buckets.needsLabel.length],
           ['toShip', 'To ship', buckets.toShip.length],
           ['packaged', 'Packaged', buckets.packaged.length],
           ['shipped', 'Shipped', buckets.shipped.length],
           ['delivered', 'Delivered', buckets.delivered.length],
           ['canceled', 'Canceled', buckets.canceled.length],
-        ] as const).map(([id, label, n]) => (
+        ] : [
+          ['toShip', 'To ship', buckets.toShip.length],
+          ['packaged', 'Packaged', buckets.packaged.length],
+        ]) as [Seg, string, number][]).map(([id, label, n]) => (
           <button
             key={id}
             type="button"
@@ -419,7 +422,7 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
       {seg === 'packaged' && (
         <>
           <p className="app-flag">{stale > 0 ? `${stale} packaged over 2 days and not marked shipped.` : 'Flags anything packaged over 2 days and not marked shipped.'}</p>
-          <button type="button" className="secondary" onClick={() => setScanOut(true)}>Scan out pickup</button>
+          <button type="button" className="secondary" onClick={() => setScanOut(true)}>Scan out</button>
         </>
       )}
       {seg === 'shipped' && (
@@ -443,6 +446,7 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
               photoUrls={photoUrls}
               locationCode={locations[o.sku]?.[0]}
               money={money}
+              hideMoney={!isAdmin}
               channelName={chName}
               trackingTail={tail}
               onOpen={() => setOpen(o)}

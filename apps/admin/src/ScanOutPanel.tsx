@@ -1,17 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
-function compactTracking(value: string) {
-  let n = String(value || '').replace(/\s+/g, '').toUpperCase();
-  const wrapped = n.match(/^420\d{5}(9[2-5]\d{18,24})$/) || n.match(/^420\d{9}(9[2-5]\d{18,24})$/);
-  if (wrapped) n = wrapped[1];
-  const ups = n.match(/1Z[0-9A-Z]{16}/);
-  if (ups) return ups[0];
-  if (/^\d{34}$/.test(n)) return n.slice(-12);
-  return n;
-}
 import { errText } from './errText';
+import { decodeBarcodeFile } from './ReceivePanel';
 
-type Stats = { packaged: number; scanned_today: number; day?: string };
 type TodayRow = {
   id: string; order_id: string; sku?: string; title?: string; tracking_normalized: string;
   scanned_at: string; scanned_by_name?: string; scan_mode: string;
@@ -25,6 +16,14 @@ type LookupOk = {
   order: { id: string; order_no?: string; sku?: string; title?: string; packaged_at?: string; shipped_at?: string };
 };
 type LookupErr = { ok: false; error: string; scanned_at?: string; scanned_by_name?: string; order_id?: string; can_mark_packaged?: boolean };
+
+function scanOutMessage(error?: string) {
+  if (error === 'not_found') return { title: 'No matching order', sub: 'Nothing was changed.' };
+  if (error === 'not_packaged') return { title: 'Not packaged yet', sub: 'Nothing was changed.' };
+  if (error === 'already_shipped' || error === 'already_scanned') return { title: 'Already shipped', sub: 'Nothing was changed.' };
+  if (error === 'not_shippable') return { title: 'Cancelled or returned', sub: 'Nothing was changed.' };
+  return { title: error || 'Scan failed', sub: 'Nothing was changed.' };
+}
 
 function beep(ok: boolean) {
   try {
@@ -53,7 +52,8 @@ type Props = {
 
 export function ScanOutPanel({ client, stamp = (s) => s, appMode, mode = 'ship', onClose }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const [stats, setStats] = useState<Stats | null>(null);
+  const cameraRef = useRef<HTMLInputElement>(null);
+  const [session, setSession] = useState<{ title: string; sku: string }[]>([]);
   const [today, setToday] = useState<TodayRow[]>([]);
   const [open, setOpen] = useState<OpenRow[]>([]);
   const [barcode, setBarcode] = useState('');
@@ -63,12 +63,10 @@ export function ScanOutPanel({ client, stamp = (s) => s, appMode, mode = 'ship',
   const [closing, setClosing] = useState(false);
 
   const refresh = useCallback(async () => {
-    const [s, t, o] = await Promise.all([
-      client.rpc('portal_scan_out_stats'),
+    const [t, o] = await Promise.all([
       client.rpc('portal_scan_out_today'),
       client.rpc('portal_scan_out_packaged_open'),
     ]);
-    if (!s.error) setStats(s.data as Stats);
     if (!t.error) setToday((t.data || []) as TodayRow[]);
     if (!o.error) setOpen((o.data || []) as OpenRow[]);
   }, [client]);
@@ -83,12 +81,6 @@ export function ScanOutPanel({ client, stamp = (s) => s, appMode, mode = 'ship',
     inputRef.current?.focus();
   }, []);
 
-  const counter = useMemo(() => {
-    const scanned = stats?.scanned_today ?? 0;
-    const packaged = stats?.packaged ?? 0;
-    return `${scanned} scanned / ${packaged} packaged`;
-  }, [stats]);
-
   async function commitScan(raw: string) {
     const code = raw.trim();
     if (!code || busy) return;
@@ -101,49 +93,51 @@ export function ScanOutPanel({ client, stamp = (s) => s, appMode, mode = 'ship',
       if (lookup.error) throw new Error(lookup.error.message);
       if (!row || row.ok === false) {
         const err = row as LookupErr;
-        if (err.error === 'already_scanned') {
-          beep(false);
-          setFlash({ tone: 'err', title: 'Already scanned out', sub: `${stamp(err.scanned_at || '')}${err.scanned_by_name ? ` by ${err.scanned_by_name}` : ''}` });
-        } else if (err.error === 'not_found') {
-          beep(false);
-          setFlash({ tone: 'err', title: 'Not found', sub: compactTracking(code) });
-        } else if (err.error === 'not_shippable') {
-          beep(false);
-          setFlash({ tone: 'err', title: 'Order cancelled or returned' });
-        } else {
-          beep(false);
-          setFlash({ tone: 'err', title: err.error || 'Scan failed' });
-        }
+        beep(false);
+        setFlash({ tone: 'err', ...scanOutMessage(err.error) });
         return;
       }
       const commit = await client.rpc('portal_scan_out_commit', { p_barcode: code, p_mode: mode });
       if (commit.error) throw new Error(commit.error.message);
-      const body = commit.data as { ok?: boolean; error?: string; order_id?: string; can_mark_packaged?: boolean };
+      const body = commit.data as { ok?: boolean; error?: string; order_id?: string; sku?: string; title?: string };
       if (body?.ok === false) {
-        if (body.error === 'not_packaged' && body.can_mark_packaged) {
-          beep(false);
-          setFlash({ tone: 'err', title: 'Not packaged yet', sub: 'Mark packaged first, or scan at packing.' });
-        } else if (body.error === 'already_scanned') {
-          beep(false);
-          setFlash({ tone: 'err', title: 'Already scanned' });
-        } else {
-          beep(false);
-          setFlash({ tone: 'err', title: body.error || 'Could not record scan' });
-        }
+        beep(false);
+        setFlash({ tone: 'err', ...scanOutMessage(body.error) });
         return;
       }
       const order = (row as LookupOk).order;
+      const title = body.title || order.title || 'Item';
+      const sku = body.sku || order.sku || '';
       beep(true);
-      setFlash({
-        tone: 'ok',
-        title: order.title || `Order ${order.order_no || ''}`.trim(),
-        sub: order.sku ? `SKU ${order.sku}` : undefined,
-      });
+      setFlash({ tone: 'ok', title: `Shipped: ${title}${sku ? `, SKU ${sku}` : ''}` });
+      setSession((prev) => [{ title, sku }, ...prev]);
       setBarcode('');
       await refresh();
     } catch (e) {
       setError(errText(e));
       beep(false);
+    } finally {
+      setBusy(false);
+      inputRef.current?.focus();
+    }
+  }
+
+  async function undoLast() {
+    setBusy(true);
+    setError('');
+    try {
+      const { data, error: e } = await client.rpc('portal_scan_out_undo');
+      if (e) throw new Error(e.message);
+      const body = data as { ok?: boolean; error?: string; title?: string; sku?: string };
+      if (!body?.ok) {
+        setFlash({ tone: 'err', title: 'Could not undo', sub: 'Nothing was changed.' });
+        return;
+      }
+      setSession((prev) => prev.slice(1));
+      setFlash({ tone: 'ok', title: `Undone: ${body.title || 'last scan'}${body.sku ? `, SKU ${body.sku}` : ''}` });
+      await refresh();
+    } catch (err) {
+      setError(errText(err));
     } finally {
       setBusy(false);
       inputRef.current?.focus();
@@ -174,8 +168,8 @@ export function ScanOutPanel({ client, stamp = (s) => s, appMode, mode = 'ship',
         </div>
       )}
       <header className="scan-out-head">
-        <p className="scan-out-counter" role="status">{counter}</p>
-        <p className="hint">Scan the shipping label barcode. USPS 420+ZIP wrappers normalize automatically.</p>
+        <p className="scan-out-counter" role="status">Scanned out today: {session.length}</p>
+        <p className="hint">Scan the shipping label or the SKU. The field stays ready for the next one.</p>
       </header>
       {flash && (
         <div className={`scan-out-flash scan-out-flash--${flash.tone}`} role="status">
@@ -184,6 +178,9 @@ export function ScanOutPanel({ client, stamp = (s) => s, appMode, mode = 'ship',
             {flash.title}
             {flash.sub ? <><br /><span className="hint">{flash.sub}</span></> : null}
           </p>
+          {flash.tone === 'ok' && session.length > 0 && (
+            <button type="button" className="text-button" disabled={busy} onClick={() => void undoLast()}>Undo</button>
+          )}
           <button type="button" className="text-button" onClick={() => setFlash(null)}>Dismiss</button>
         </div>
       )}
@@ -202,13 +199,32 @@ export function ScanOutPanel({ client, stamp = (s) => s, appMode, mode = 'ship',
           }}
           autoComplete="off"
           inputMode="text"
-          placeholder="Scan or type tracking number"
+          placeholder="Scan tracking or SKU"
           disabled={busy}
         />
       </label>
       <button type="button" className="scan-out-commit secondary" disabled={busy || !barcode.trim()} onClick={() => void commitScan(barcode)}>
         {busy ? '…' : 'Record scan'}
       </button>
+      <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="sr-only" aria-hidden tabIndex={-1}
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = '';
+          if (!file) return;
+          void decodeBarcodeFile(file).then((code) => {
+            if (code) void commitScan(code);
+            else setFlash({ tone: 'err', title: 'Could not read that photo', sub: 'Nothing was changed.' });
+          });
+        }} />
+      <button type="button" className="secondary" disabled={busy} onClick={() => cameraRef.current?.click()}>Use camera</button>
+      {session.length > 0 && (
+        <div>
+          <p className="app-section-label">This session</p>
+          <ul className="scan-out-list">
+            {session.map((row, i) => <li key={`${row.sku}-${i}`}><strong>{row.title}</strong>{row.sku ? <> · SKU {row.sku}</> : null}</li>)}
+          </ul>
+        </div>
+      )}
 
       {mode === 'ship' && (
         <>

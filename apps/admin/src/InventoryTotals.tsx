@@ -3,7 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { totalsBalance, type InventoryBucket, type InventoryTotalsData } from './totalsMath';
 
 /** Unit counts above the Inventory subtabs. Counts only (no money), so clerks see them too. */
-export function InventoryTotals({ client, variant, refreshKey = 0, selected, onSelect, onTotals, totalOnly = false }: { client: SupabaseClient; variant: 'desktop' | 'app'; refreshKey?: number; selected?: InventoryBucket; onSelect: (bucket: InventoryBucket) => void; onTotals?: (t: InventoryTotalsData) => void; totalOnly?: boolean }) {
+export function InventoryTotals({ client, variant, refreshKey = 0, selected, onSelect, onTotals, totalOnly = false, plain = false }: { client: SupabaseClient; variant: 'desktop' | 'app'; refreshKey?: number; selected?: InventoryBucket; onSelect: (bucket: InventoryBucket) => void; onTotals?: (t: InventoryTotalsData) => void; totalOnly?: boolean; plain?: boolean }) {
   const [totals, setTotals] = useState<InventoryTotalsData | null>(null);
   const [failed, setFailed] = useState(false);
   useEffect(() => {
@@ -24,12 +24,12 @@ export function InventoryTotals({ client, variant, refreshKey = 0, selected, onS
     <div>
       <span>Total inventory</span>
       <strong>{n(totals?.total)}</strong>
-      <small>{n(totals?.listed)} listed</small>
+      {!plain && <small>{n(totals?.listed)} listed</small>}
     </div>
     {!totalOnly && <div>
       <span>Ready to list</span>
       <strong>{n(totals?.not_listed)}</strong>
-      <small className="inv-pair-alert">{n(totals?.not_ready)} not ready</small>
+      {!plain && <small className="inv-pair-alert">{n(totals?.not_ready)} not ready</small>}
     </div>}
   </div>;
 }

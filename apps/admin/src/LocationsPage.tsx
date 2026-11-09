@@ -531,10 +531,14 @@ export function LocationsPage({
 
   return (
     <>
-      {frame('Locations', undefined, (canManage || canAddBay) ? (
+      {frame('Locations', undefined, phone ? null : ((canManage || canAddBay) ? (
         <button type="button" className="loc-action" disabled={!loaded || busy} onClick={startCreate}>New bay</button>
-      ) : null, (
-        loaded && bays.length === 0 ? (
+      ) : null), (
+        <>
+        {phone && (canManage || canAddBay) && (
+          <button type="button" className="secondary loc-new-bay" disabled={!loaded || busy} onClick={startCreate}>New bay</button>
+        )}
+        {loaded && bays.length === 0 ? (
           <p className={phone ? 'app-footer-count' : 'hint'}>No bays yet.{(canManage || canAddBay) ? ' Tap New bay to add the first one.' : ''}</p>
         ) : (
           <div className={group}>
@@ -546,7 +550,8 @@ export function LocationsPage({
               () => openBay(item.bay_no),
             ))}
           </div>
-        )
+        )}
+        </>
       ), onBack, backLabel)}
     </>
   );

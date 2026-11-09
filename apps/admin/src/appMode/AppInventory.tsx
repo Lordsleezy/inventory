@@ -1,5 +1,5 @@
 import { ReceiveGroupRow, type GroupedInventory } from '../ReceiveGroupRow';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { displayProductTitle } from '@floor/store';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { AttentionSection } from '../navigation';
@@ -229,7 +229,8 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
           const status = filter === 'unfinished' ? 'all' : filter === 'no_location' ? 'in_stock' : filter === 'never_list' ? 'inventory_never_list' : filter in INVENTORY_BUCKET_LABELS ? inventoryBucketStatus(filter as InventoryBucket) : filter;
           const unfinished = filter === 'unfinished';
           const { data, error: e } = await client.rpc('receive_inventory_list', {
-            p_query: query, p_status: status, p_unfinished: unfinished, p_sort:'sku',
+            p_query: query, p_status: status, p_unfinished: unfinished,
+            p_sort: staffMode && filter === 'sold' ? 'date' : 'sku',
             p_offset:offset,p_limit:PAGE,p_location:filter==='no_location'?'unassigned':'all',
           });
           if (e) throw e;
@@ -312,9 +313,12 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
           }}
         />
       </label>
-      <InventoryTotals client={client} variant="app" refreshKey={refreshKey} onTotals={setCardTotals} selected={filter in INVENTORY_BUCKET_LABELS ? filter as InventoryBucket : undefined} onSelect={bucket => { setQuery(''); setFilterTab(bucket); setList(null); }} />
+      <InventoryTotals client={client} variant="app" refreshKey={refreshKey} plain={staffMode} onTotals={setCardTotals} selected={filter in INVENTORY_BUCKET_LABELS ? filter as InventoryBucket : undefined} onSelect={bucket => { setQuery(''); setFilterTab(bucket); setList(null); }} />
       <div className="app-segment app-segment-scroll" role="tablist" ref={tabRowRef}>
-        {([
+        {((staffMode ? [
+          ['in_stock', 'In stock', null],
+          ['sold', 'Sold', null],
+        ] : [
           ['in_stock', 'In stock', null],
           ['listed', 'Listed', cardTotals?.listed],
           ['not_ready', 'Not ready', cardTotals?.not_ready],
@@ -325,7 +329,7 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
           ['defective', 'Defective', cardTotals?.defective],
           ['never_list', 'Never list', cardTotals?.never_list],
           ...(fullAccess ? [['missing_cost', 'Missing cost', missingCostCount] as const] : []),
-        ] as [Filter, string, number | null | undefined][]).map(([id, label, count]) => (
+        ]) as [Filter, string, number | null | undefined][]).map(([id, label, count]) => (
           <button
             key={id}
             type="button"
@@ -383,15 +387,19 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
       {filter !== 'missing_cost' && loading && list ? <p className="app-footer-count">Updating…</p> : null}
 
       {filter !== 'missing_cost' && <div className="app-group">
-        {(list?.items || []).map((u, idx) => {
-          if(u.group_id && (u.group_total || 0) > 1) return <ReceiveGroupRow key={u.group_id} item={u} client={client} admin={fullAccess} money={money} onOpen={onOpen} searchQuery={query} onChanged={()=>{setList(null);setQueueRefresh(n=>n+1)}} />;
+        {(list?.items || []).map((u, idx, arr) => {
+          if(u.group_id && (u.group_total || 0) > 1 && !staffMode) return <ReceiveGroupRow key={u.group_id} item={u} client={client} admin={fullAccess} money={money} onOpen={onOpen} searchQuery={query} onChanged={()=>{setList(null);setQueueRefresh(n=>n+1)}} />;
           const warn = filter === 'dns' ? null : needs(u);
           const missing = filter === 'not_ready' ? inventoryMissingText(u.missing || []).replace(/^Missing: /, 'Missing ').replace(/, /g, ' · Missing ') : null;
           const bay = (u as Row & { locations?: string }).locations?.split(',')[0]?.trim();
           const bulkPick = filter === 'no_location' && noLocSelecting;
           const checked = noLocSelected.has(u.sku);
+          const soldDay = u.sold_at ? new Date(u.sold_at).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }) : '';
+          const prevDay = arr[idx - 1]?.sold_at ? new Date(arr[idx - 1].sold_at as string).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }) : '';
           return (
-            <button type="button" className={`app-row${bulkPick && checked ? ' is-selected' : ''}`} key={u.sku} onClick={() => {
+            <Fragment key={u.sku}>
+            {staffMode && filter === 'sold' && soldDay !== prevDay && <p className="app-day-head">{soldDay || 'Unknown day'}</p>}
+            <button type="button" className={`app-row${bulkPick && checked ? ' is-selected' : ''}`} onClick={() => {
               if (bulkPick) {
                 setNoLocSelected((prev) => {
                   const next = new Set(prev);
@@ -415,21 +423,31 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
                 />
               </span>
               <span className="app-row-text">
-                <strong>{name(u)}</strong>
-                <small>
-                  {u.sku} · {u.not_for_sale ? 'Not for sale' : u.condition || 'No grade'}{bay ? ` · ${bay}` : ''}
-                  {filter === 'sold' && u.sold_at ? <> · Sold {stamp(u.sold_at)}</> : null}
-                  {(u.is_stocked || (u.qty_on_hand ?? 1) > 1) && <b className="stock-quantity-badge">×{filter === 'sold' ? (u.sold_qty ?? 0) : u.qty_on_hand}</b>}
-                  {fullAccess && u.acquisition_cost_cents === null ? <> · <span className="warn">Cost missing</span></> : null}
-                  {filter !== 'not_ready' && warn ? <> · <span className="warn">{warn}</span></> : null}
-                </small>
-                {missing && <small className="inventory-missing inv-missing-line">{missing}</small>}
+                <strong className={staffMode ? 'app-row-title' : undefined}>{name(u)}</strong>
+                {staffMode ? (
+                  <>
+                    <small className="app-sku-line"><span className="lbl">SKU</span> <strong>{u.sku}</strong></small>
+                    {filter !== 'sold' && <small className="app-row-cond">{u.not_for_sale ? 'Not for sale' : u.condition || 'No grade'}{bay ? ` · ${bay}` : ''}</small>}
+                  </>
+                ) : (
+                  <small>
+                    {u.sku} · {u.not_for_sale ? 'Not for sale' : u.condition || 'No grade'}{bay ? ` · ${bay}` : ''}
+                    {filter === 'sold' && u.sold_at ? <> · Sold {stamp(u.sold_at)}</> : null}
+                    {(u.is_stocked || (u.qty_on_hand ?? 1) > 1) && <b className="stock-quantity-badge">×{filter === 'sold' ? (u.sold_qty ?? 0) : u.qty_on_hand}</b>}
+                    {fullAccess && u.acquisition_cost_cents === null ? <> · <span className="warn">Cost missing</span></> : null}
+                    {filter !== 'not_ready' && warn ? <> · <span className="warn">{warn}</span></> : null}
+                  </small>
+                )}
+                {missing && !staffMode && <small className="inventory-missing inv-missing-line">{missing}</small>}
               </span>
-              {filter === 'sold'
+              {staffMode && filter === 'sold' && u.sold_at
+                ? <span className="app-row-when">{new Date(u.sold_at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>
+                : filter === 'sold'
                 ? fullAccess && <span className="app-row-price">{u.sold_price_cents == null ? '—' : money(u.sold_price_cents)}</span>
                 : <span className="app-row-price">{u.ask_cents == null ? '—' : money(u.ask_cents)}</span>}
-              <span className="app-chevron" aria-hidden>›</span>
+              {!staffMode && <span className="app-chevron" aria-hidden>›</span>}
             </button>
+            </Fragment>
           );
         })}
         {!loading && list && list.items.length === 0 && (
