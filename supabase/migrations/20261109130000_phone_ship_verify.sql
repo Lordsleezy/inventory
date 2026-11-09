@@ -3,6 +3,9 @@
 
 begin;
 
+-- Single 3-arg signature (defaults) replaces the old uuid-only overload so RPC calls stay unambiguous.
+drop function if exists public.portal_mark_order_shipped(uuid);
+
 create or replace function public.portal_floor_cancel_order(p_order uuid, p_reason text default null)
 returns void
 language plpgsql
