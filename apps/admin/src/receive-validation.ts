@@ -26,6 +26,8 @@ export function receiveMissingFields({
   quantityOk = true,
   defective = false,
   hasDimensions = true,
+  titleOnly = false,
+  titleReady = true,
 }: {
   doNotList: boolean;
   brandReady: boolean;
@@ -34,11 +36,15 @@ export function receiveMissingFields({
   quantityOk?: boolean;
   defective?: boolean;
   hasDimensions?: boolean;
+  /** Staff DNL: a title is the only field. */
+  titleOnly?: boolean;
+  titleReady?: boolean;
 }): string[] {
   void brandReady;
   const waive = receiveMediaWaived(doNotList, defective);
   if (doNotList) {
     const out: string[] = [];
+    if (titleOnly && !titleReady) out.push('title');
     if (!quantityOk) out.push('quantity');
     return out;
   }
