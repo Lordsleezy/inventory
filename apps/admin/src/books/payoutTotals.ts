@@ -3,6 +3,7 @@ import {
   type OnlineCfg,
   type Rule,
 } from '../payouts';
+import { booksCardFeeCents } from './cardFee';
 import { channelTitle } from './booksMath';
 import {
   auditInStoreFees,
@@ -125,7 +126,7 @@ export function buildSalesLinesFromPayout(
       ? Math.max(0, Number(row.channel_fee_cents || 0))
       : 0;
     const label = Math.max(0, Number(row.ship_cost_cents || 0));
-    const proc = Math.max(0, Number(row.processing_fee_cents || 0));
+    const proc = booksCardFeeCents(row);
     const lineIdx = ticket ? ticketLineIndex(ticket, row) : 0;
     const cost = effectiveCostCents(row);
     const comm = cost === null ? 0 : (ticket ? lineBooksCommission(ticket, lineIdx, rules, frozen, cfg) : 0);
@@ -185,7 +186,7 @@ export const PAYOUT_COST_RULES_DOC = [
   { item: 'Buyer-paid shipping', where: 'Revenue', commission: 'Added to commission base', owner: 'Added to store profit' },
   { item: 'Promoted listing fees', where: 'On sale row channel fees', commission: 'Same as marketplace fees', owner: 'Same as marketplace fees' },
   { item: 'Underpaid postage', where: 'Added to sale label cost', commission: 'Reduces commission base', owner: 'Reduces store profit' },
-  { item: 'Card processing', where: 'In-store card', commission: 'Net fee after customer surcharge (nets ~0)', owner: 'Net fee after surcharge' },
+  { item: 'Card processing', where: 'In-store card', commission: 'Customer surcharge is on top of the price, so it is not a fee', owner: '0 when the customer paid the surcharge on top' },
   { item: 'Sales tax', where: 'Pass-through', commission: 'Not in commission base', owner: 'Not in store profit' },
   { item: 'Return costs', where: 'Adjustments ledger', commission: 'Via payout adjustments', owner: 'Via adjustments' },
   { item: 'Supplies / bonus', where: 'Expenses page', commission: 'Bonus not in Books commission total', owner: 'Other expenses → owner only' },

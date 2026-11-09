@@ -228,7 +228,7 @@ function BooksNative(p: ViewProps) {
       <BooksDeskStrip money={p.money} totals={p.totals} />
       <AppScrollTabs ariaLabel="Books reports" className="books-phone-tabs" items={PHONE_TABS.map((item) => ({ id: item.id, label: item.title }))} value={tab} onChange={(id) => p.setSheet(id)} />
       {tab === 'sales' && <PhoneSales money={p.money} workbook={p.workbook} focusIds={focusIds} />}
-      {tab === 'expenses' && <SpanParts p={p} render={(workbook) => <ExpensesBody money={p.money} workbook={workbook} native onDuplicateDecision={p.span === 'month' ? p.onDuplicateDecision : undefined} />} />}
+      {tab === 'expenses' && <SpanParts p={p} render={(workbook) => <ExpensesBody money={p.money} workbook={workbook} native />} />}
       {tab === 'payouts' && <SpanParts p={p} render={(workbook, word) => <PayoutsBody money={p.money} workbook={workbook} native periodWord={word} />} compact />}
       {tab === 'inventory' && <SpanParts p={p} render={(workbook, word) => <InventoryBody money={p.money} inventory={workbook.inventory} manifested={workbook.manifested_units || 0} native periodWord={word} />} rollup />}
       {tab === 'received' && <SpanParts p={p} render={(workbook) => <ReceivedBody money={p.money} items={workbook.received} manifested={workbook.manifested_units || 0} native />} linesOnly />}
@@ -535,7 +535,7 @@ function SaleTitle({ label, sub }: { label: string; sub: string }) {
   return <div><strong>{label}</strong><small>{sub}</small></div>;
 }
 
-function ExpensesBody({ money, workbook, native, onDuplicateDecision }: { money: (c: number) => string; workbook: BooksWorkbook; native?: boolean; onDuplicateDecision?: (lineId: string, decision: 'keep' | 'remove') => void }) {
+function ExpensesBody({ money, workbook, native }: { money: (c: number) => string; workbook: BooksWorkbook; native?: boolean }) {
   const [openPromo, setOpenPromo] = useState<string | null>(null);
   const groups = groupExpensesByCategory(workbook.expenses.rows);
   const head = native ? (
@@ -582,31 +582,15 @@ function ExpensesBody({ money, workbook, native, onDuplicateDecision }: { money:
         <b className="cat-total">{money(rows.filter((r) => !r.excludeFromTotals).reduce((n, r) => n + r.amount_cents, 0))}</b>
       </div>
       <div className="native-report-group">
-        {rows.map((r) => (
+        {rows.filter((r) => !(r.excludeFromTotals && r.duplicateFlag)).map((r) => (
           <Fragment key={r.id}>
             {rowList(r)}
-            {r.children?.length && openPromo === r.id ? r.children.map((c) => rowList(c)) : null}
+            {r.children?.length && openPromo === r.id ? r.children.filter((c) => !(c.excludeFromTotals && c.duplicateFlag)).map((c) => rowList(c)) : null}
           </Fragment>
         ))}
       </div>
     </div>
   ));
-
-  const dupes = workbook.expenses.duplicates.filter((d) => d.pair).map((d) => {
-    const a = d.pair!.primary;
-    const b = d.pair!.duplicate;
-    return (
-      <div key={d.lineIds.join('-')} className="books-dup-card">
-        <p className="books-dup-title">Possible duplicate</p>
-        <p>{a.title} · {shortDate(a.date)} · {money(a.amount_cents)}</p>
-        <p>{b.title} · {shortDate(b.date)} · {money(b.amount_cents)}</p>
-        <div className="books-dup-actions">
-          <button type="button" onClick={() => onDuplicateDecision?.(b.id, 'keep')}>Keep both</button>
-          <button type="button" onClick={() => onDuplicateDecision?.(b.id, 'remove')}>Remove duplicate</button>
-        </div>
-      </div>
-    );
-  });
 
   const foot = <p className="native-report-footnote">Labels bought through eBay, TikTok or Amazon live in Sales, not here.</p>;
 
@@ -621,7 +605,7 @@ function ExpensesBody({ money, workbook, native, onDuplicateDecision }: { money:
               <table className="books-table">
                 <thead><tr><th>Date</th><th>Description</th><th>SKU / order</th><th>Source</th><th>Reimb?</th><th>Amount</th></tr></thead>
                 <tbody>
-                  {rows.map((r) => (
+                  {rows.filter((r) => !(r.excludeFromTotals && r.duplicateFlag)).map((r) => (
                     <tr key={r.id} className={r.duplicateFlag ? 'dimmed' : ''}>
                       <td>{shortDate(r.date)}</td><td>{r.title}{r.meta ? ` · ${r.meta}` : ''}</td><td>{r.sku_or_order}</td><td>{r.sourceDisplay}</td><td>{r.needs_reimbursement ? 'Yes' : ''}</td><td>{r.excludeFromTotals ? '—' : money(r.amount_cents)}</td>
                     </tr>
@@ -632,12 +616,11 @@ function ExpensesBody({ money, workbook, native, onDuplicateDecision }: { money:
             </div>
           </section>
         ))}
-        {dupes}
         {foot}
       </>
     );
   }
-  return <>{head}{body}{dupes}{foot}</>;
+  return <>{head}{body}{foot}</>;
 }
 
 function PayoutsBody({ money, workbook, periodWord = 'month' }: { money: (c: number) => string; workbook: BooksWorkbook; native?: boolean; periodWord?: string }) {
