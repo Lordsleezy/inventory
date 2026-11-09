@@ -4,6 +4,8 @@
  */
 import { compactTracking, extractTrackingFromFile, trackingUrlFor } from "./tracking-extract.mjs";
 import { registerOrderTracking } from "./order-tracking.mjs";
+import { trackingNumbersEquivalent } from "../../shared/tracking-reconcile.mjs";
+import { classifyCarrier } from "../../shared/tracking-validate.mjs";
 
 const MAX_BYTES = 8_000_000;
 
@@ -48,14 +50,21 @@ export async function archiveRemoteLabel(sb, { storeId, orderId, url, filename, 
 export function resolveUploadedTracking(order, extracted) {
   const ebay = compactTracking(order?.marketplace_tracking_number);
   const pdf = extracted?.confident && extracted?.number ? compactTracking(extracted.number) : "";
-  if (pdf && ebay && pdf !== ebay) {
+  if (pdf && ebay && !trackingNumbersEquivalent(pdf, ebay)) {
+    const ch = String(order?.channel || "").toLowerCase();
+    const market = ch === "ebay" ? "eBay" : ch === "depop" ? "Depop" : "marketplace";
     return {
       mismatch: true,
-      tracking: pdf,
-      carrier: extracted.carrier || null,
+      labelTracking: pdf,
+      marketplaceTracking: ebay,
+      tracking: null,
+      carrier: extracted.carrier || classifyCarrier(pdf) || null,
       needsEntry: false,
-      exception: `Uploaded label ${pdf} does not match eBay ${ebay}`,
+      exception: `label_mismatch|${pdf}|${ebay}`,
     };
+  }
+  if (pdf && ebay && trackingNumbersEquivalent(pdf, ebay)) {
+    return { mismatch: false, tracking: ebay, carrier: order.carrier || extracted.carrier || classifyCarrier(ebay) || "USPS", needsEntry: false, exception: null, usedEbay: true };
   }
   if (pdf) {
     return { mismatch: false, tracking: pdf, carrier: extracted.carrier || null, needsEntry: false, exception: null };
@@ -123,10 +132,14 @@ export async function attachUploadedLabel(sb, storeId, order, file, deps = {}) {
     updated_at: now,
   };
   if (String(order.channel || "").toLowerCase() !== "ebay") patch.label_cost_cents = null;
-  if (resolved.tracking) {
+  if (resolved.tracking && !resolved.mismatch) {
     patch.tracking_number = resolved.tracking;
     patch.carrier = resolved.carrier;
     patch.tracking_url = trackingUrlFor(resolved.carrier, resolved.tracking);
+  }
+  if (resolved.mismatch) {
+    patch.tracking_number = order.tracking_number || null;
+    patch.tracking_needs_entry = false;
   }
   const { data: saved, error } = await sb.from("web_orders").update(patch).eq("id", order.id).eq("store_id", storeId).select("*").single();
   if (error) return { ok: false, status: 500, error: error.message };
@@ -147,7 +160,9 @@ export async function attachUploadedLabel(sb, storeId, order, file, deps = {}) {
     needs_tracking: needsManual,
     mismatch: resolved.mismatch,
     exception: resolved.exception,
-    tracking_number: resolved.tracking,
+    label_tracking: resolved.labelTracking || null,
+    marketplace_tracking: resolved.marketplaceTracking || compactTracking(order?.marketplace_tracking_number) || null,
+    tracking_number: resolved.mismatch ? null : resolved.tracking,
     carrier: resolved.carrier,
     reason: extracted.reason || null,
     engine: extracted.engine || extracted.layer || null,
@@ -174,6 +189,8 @@ export async function setOrderTrackingNumber(sb, storeId, order, { tracking, car
     carrier: car,
     tracking_url: trackingUrlFor(car, number),
     tracking_needs_entry: false,
+    label_tracking_mismatch: false,
+    tracking_exception: null,
     updated_at: now,
   }).eq("id", order.id).eq("store_id", storeId).select("*").single();
   if (error) return { ok: false, status: 500, error: error.message };
@@ -184,4 +201,87 @@ export async function setOrderTrackingNumber(sb, storeId, order, { tracking, car
     registered = { ok: false, error: err.message };
   }
   return { ok: true, status: 200, order: saved, registered, expense_posted: false };
+}
+
+async function loadLabelBytes(sb, order) {
+  const path = order?.label_storage_path;
+  if (!path || typeof sb.storage?.from !== "function") return null;
+  const { data, error } = await sb.storage.from("order-labels").download(path);
+  if (error || !data) return null;
+  return Buffer.from(await data.arrayBuffer());
+}
+
+/** Save marketplace tracking on an uploaded label after a mismatch. */
+export async function acceptMarketplaceTracking(sb, storeId, order, deps = {}) {
+  if (!order) return { ok: false, status: 404, error: "Order not found." };
+  const number = compactTracking(order.marketplace_tracking_number);
+  if (!number) return { ok: false, status: 400, error: "This order has no marketplace tracking number." };
+  const carrier = order.carrier || classifyCarrier(number) || "USPS";
+  return setOrderTrackingNumber(sb, storeId, order, { tracking: number, carrier }, deps);
+}
+
+/** Save a label-read number (after user confirms). */
+export async function acceptLabelTracking(sb, storeId, order, { tracking, carrier } = {}, deps = {}) {
+  if (!order) return { ok: false, status: 404, error: "Order not found." };
+  const number = compactTracking(tracking);
+  if (!number || number.length < 8) return { ok: false, status: 400, error: "Enter a valid tracking number." };
+  const car = carrier || classifyCarrier(number) || "USPS";
+  return setOrderTrackingNumber(sb, storeId, order, { tracking: number, carrier: car }, deps);
+}
+
+/** Re-run extraction on the stored label PDF. */
+export async function retryLabelExtract(sb, storeId, order, deps = {}) {
+  if (!order) return { ok: false, status: 404, error: "Order not found." };
+  const bytes = await loadLabelBytes(sb, order);
+  if (!bytes?.length) return { ok: false, status: 400, error: "No label file is stored on this order." };
+  const mime = order.label_mime || "application/pdf";
+  const extracted = await (deps.extract || extractTrackingFromFile)(bytes, mime, {
+    filename: order.label_file_name,
+    marketplaceTracking: order.marketplace_tracking_number,
+  });
+  const resolved = resolveUploadedTracking(order, extracted);
+  const now = new Date().toISOString();
+  const patch = {
+    label_tracking_mismatch: resolved.mismatch,
+    tracking_exception: resolved.exception,
+    tracking_needs_entry: resolved.needsEntry,
+    updated_at: now,
+  };
+  if (resolved.tracking && !resolved.mismatch) {
+    patch.tracking_number = resolved.tracking;
+    patch.carrier = resolved.carrier || classifyCarrier(resolved.tracking);
+    patch.tracking_url = trackingUrlFor(patch.carrier, resolved.tracking);
+    patch.label_tracking_mismatch = false;
+    patch.tracking_exception = null;
+    patch.tracking_needs_entry = false;
+  }
+  const { data: saved, error } = await sb.from("web_orders").update(patch).eq("id", order.id).eq("store_id", storeId).select("*").single();
+  if (error) return { ok: false, status: 500, error: error.message };
+  let registered = null;
+  if (patch.tracking_number && !resolved.mismatch) {
+    try {
+      registered = await (deps.registerTrack || registerOrderTracking)(sb, saved);
+    } catch (err) {
+      registered = { ok: false, error: err.message };
+    }
+  }
+  return {
+    ok: true,
+    status: 200,
+    order: saved,
+    mismatch: resolved.mismatch,
+    exception: resolved.exception,
+    label_tracking: resolved.labelTracking || (extracted.confident ? compactTracking(extracted.number) : null),
+    marketplace_tracking: compactTracking(order.marketplace_tracking_number) || null,
+    tracking_number: resolved.mismatch ? null : resolved.tracking,
+    carrier: resolved.carrier,
+    layer: extracted.layer || null,
+    needs_picker: Boolean(extracted.needsPicker),
+    tracking_candidates: (extracted.alternatives || []).map((row) => ({
+      number: row.number,
+      carrier: row.carrier || null,
+      source: row.source || row.layer || null,
+    })),
+    registered,
+  };
 }

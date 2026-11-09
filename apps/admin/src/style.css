@@ -1186,3 +1186,10 @@ html.app-mode .aspect-suggested{color:#30d158;background:rgba(48,209,88,.18)}
 .label-tracking-result-num{font-size:15px;font-weight:700;word-break:break-all}
 .label-tracking-picker ul{list-style:none;padding:0;margin:8px 0;display:grid;gap:8px}
 .label-tracking-picker li button{width:100%;text-align:left}
+.label-tracking-problem{margin:10px 0;padding:12px 14px;border:1px solid #c62828;background:#fff;border-radius:8px}
+.label-tracking-problem-title{margin:0 0 10px;color:#c62828;font-size:15px;line-height:1.35}
+.label-tracking-problem-nums p{margin:0 0 8px}
+.label-tracking-problem-nums strong{display:block;font-size:17px;letter-spacing:.04em}
+.label-tracking-problem-actions{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}
+.label-tracking-problem-actions small{display:block;margin-top:4px;color:#617182;font-size:12px}
+.label-tracking-problem-warn{color:#617182;font-size:12px}

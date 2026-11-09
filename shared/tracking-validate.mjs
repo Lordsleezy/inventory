@@ -53,11 +53,29 @@ export function ups1ZValid(value) {
   return check === Number(chars[17]);
 }
 
+const USPS_PREFIXES = ["91", "92", "93", "94", "95"];
+
+/** Turn an 18–20 digit body missing the leading 91–95 into a valid USPS number when possible. */
+export function completeUspsFromBody(digits) {
+  const d = digitsOnly(digits);
+  if (!d || d.length < 18 || d.length > 20) return null;
+  if (/^9[2-5]\d{18,24}$/.test(d) && uspsCheckDigitValid(d)) return d;
+  const out = [];
+  for (const prefix of USPS_PREFIXES) {
+    const full = `${prefix}${d}`;
+    if (full.length >= 20 && full.length <= 22 && uspsCheckDigitValid(full)) out.push(full);
+  }
+  if (!out.length) return null;
+  out.sort((a, b) => b.length - a.length);
+  return out[0];
+}
+
 /** Common FedEx door-tag / tracking lengths — mod 11 on 15-digit subset when applicable. */
 export function fedExValid(value) {
   const d = digitsOnly(value);
   if (!/^\d{12}$|^\d{15}$|^\d{20}$|^\d{22}$/.test(d)) return false;
   if (/^9[2-5]/.test(d) && d.length >= 20) return false;
+  if ((d.length === 18 || d.length === 20) && completeUspsFromBody(d)) return false;
   if (d.length === 15) {
     let sum = 0;
     for (let i = 0; i < 14; i += 1) {
@@ -98,6 +116,10 @@ export function validateTrackingCandidate(number, { nearTrackingLabel = false } 
   if (/^9[2-5]\d{18,24}$/.test(usps)) {
     if (!uspsCheckDigitValid(usps)) return null;
     return { number: usps, carrier: "USPS", score: 4 + (nearTrackingLabel ? 10 : 0) };
+  }
+  const completed = completeUspsFromBody(usps);
+  if (completed) {
+    return { number: completed, carrier: "USPS", score: 5 + (nearTrackingLabel ? 11 : 0) };
   }
   if (/^\d{12}$|^\d{15}$|^\d{20}$/.test(usps) && fedExValid(usps)) {
     return { number: usps, carrier: "FedEx", score: 2 + (nearTrackingLabel ? 6 : 0) };

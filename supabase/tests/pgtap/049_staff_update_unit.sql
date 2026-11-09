@@ -8,6 +8,7 @@ begin
   insert into public.staff(user_id,store_id,display_name,role)
     values(clerk_id,s,'Jacob','staff');
   perform public.seed_store_settings(s,'Clerk edit test');
+  insert into public.sku_ledger(sku, store_id, issued_at) values ('10001', s, now());
   insert into public.units(store_id,sku,brand,model,title,state,ask_cents,acquisition_cost_cents,
     package_length_in,package_width_in,package_height_in,package_weight_lb,shippable,fulfillment_override,
     qty_on_hand,received_at,updated_at)

@@ -11,6 +11,7 @@ import type { WebOrder } from '../OrdersPage';
 import { PackLabelScan } from '../PackLabelScan';
 import { UnitListThumb } from '../UnitListThumb';
 import { LabelTrackingPicker, LabelTrackingResult } from '../LabelTrackingResult';
+import { LabelTrackingProblem } from '../LabelTrackingProblem';
 
 const CHANNEL: Record<string, string> = {
   website: 'Website', ebay: 'eBay', amazon: 'Amazon', tiktok: 'TikTok', depop: 'Depop', mercari: 'Mercari',
@@ -68,6 +69,10 @@ export type AppOrderDetailProps = {
   trackingPick?: { number: string; carrier?: string | null; source?: string | null }[] | null;
   onConfirmTrackingPick?: (number: string, carrier?: string | null) => void;
   onDismissLabelHit?: () => void;
+  onUseMarketplaceTracking?: () => void;
+  onUseLabelTracking?: (number: string, carrier: string) => void;
+  onRetryLabelExtract?: () => void;
+  onManualTracking?: (number: string, carrier: string) => void;
 };
 
 export function AppOrderDetail(props: AppOrderDetailProps) {
@@ -80,6 +85,7 @@ export function AppOrderDetail(props: AppOrderDetailProps) {
     onVoidLabel, onPackCondition, onRecordLabelCost,
     labelInputRef, packProofInputRef, onLabelOpen, labelOpen, onLabelClose, onReload,
     onUrl, onLabelFile, onPackProofFile, labelHit, trackingPick, onConfirmTrackingPick, onDismissLabelHit,
+    onUseMarketplaceTracking, onUseLabelTracking, onRetryLabelExtract, onManualTracking,
   } = props;
 
   const [photosOpen, setPhotosOpen] = useState(false);
@@ -191,7 +197,17 @@ export function AppOrderDetail(props: AppOrderDetailProps) {
       {order.scanned_out_at && (
         <p className="app-order-plain">Scanned out {stamp(order.scanned_out_at)}{order.scanned_out_by_name ? ` by ${order.scanned_out_by_name}` : ''}</p>
       )}
-      {order.tracking_exception && <p className="app-inline-error">Carrier exception: {order.tracking_exception}</p>}
+      {(order.label_tracking_mismatch || order.tracking_exception || (order.tracking_needs_entry && !order.tracking_number)) && (
+        <LabelTrackingProblem
+          order={order}
+          busy={!!busy}
+          onUseMarketplace={() => onUseMarketplaceTracking?.()}
+          onUseLabel={(n, c) => onUseLabelTracking?.(n, c)}
+          onManual={(n, c) => onManualTracking?.(n, c)}
+          onRetry={() => onRetryLabelExtract?.()}
+          onReplace={onUploadLabel}
+        />
+      )}
       {labelHit && <LabelTrackingResult hit={labelHit} onDismiss={onDismissLabelHit} />}
       {trackingPick && trackingPick.length > 0 && onConfirmTrackingPick && (
         <LabelTrackingPicker
