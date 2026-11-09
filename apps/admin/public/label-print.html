@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Print label</title>
+  <style>
+    html, body { margin: 0; background: #fff; color: #111; font: 16px/1.4 -apple-system, BlinkMacSystemFont, sans-serif; }
+    .bar { display: flex; gap: 8px; padding: 12px; position: sticky; top: 0; background: #fff; }
+    button, a.back { flex: 1; min-height: 52px; font-size: 18px; border-radius: 10px; border: 1px solid #111; background: #111; color: #fff; text-align: center; line-height: 52px; text-decoration: none; }
+    a.back { background: #fff; color: #111; }
+    p { margin: 0; padding: 12px; }
+    img { width: 100%; height: auto; display: block; }
+    @media print {
+      .bar, p { display: none !important; }
+      img { break-after: page; page-break-after: always; }
+      img:last-of-type { break-after: auto; page-break-after: auto; }
+    }
+  </style>
+</head>
+<body>
+  <div class="bar">
+    <button type="button" id="print">Print</button>
+    <a class="back" id="back" href="/">Back</a>
+  </div>
+  <p id="status">Preparing the label…</p>
+  <script>
+    (function () {
+      var job = new URLSearchParams(location.search).get('job') || '';
+      var key = 'floor-print-' + job;
+      var status = document.getElementById('status');
+      var printed = false;
+      document.getElementById('print').addEventListener('click', function () { window.print(); });
+      document.getElementById('back').addEventListener('click', function (event) {
+        if (history.length > 1) { event.preventDefault(); history.back(); }
+      });
+
+      var standalone = window.matchMedia('(display-mode: standalone)').matches;
+      if (standalone && !sessionStorage.getItem('floor-print-left-app')) {
+        sessionStorage.setItem('floor-print-left-app', '1');
+        var path = location.host + location.pathname + location.search;
+        var fallback = location.origin + location.pathname + location.search;
+        location.replace('intent://' + path + '#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=' + encodeURIComponent(fallback) + ';end');
+        return;
+      }
+
+      function show(data) {
+        if (!data || data.error) {
+          status.textContent = (data && data.error) || 'Could not prepare the label.';
+          return;
+        }
+        var style = document.createElement('style');
+        style.textContent = '@page { size: ' + Number(data.width) + 'pt ' + Number(data.height) + 'pt; margin: 0; }';
+        document.head.appendChild(style);
+        var images = data.urls || [];
+        images.forEach(function (src) {
+          var img = document.createElement('img');
+          img.alt = 'Shipping label';
+          img.src = src;
+          document.body.appendChild(img);
+        });
+        status.textContent = 'If the printer did not open, tap Print.';
+        var pending = images.length;
+        function ready() {
+          pending -= 1;
+          if (pending <= 0 && !printed) {
+            printed = true;
+            window.print();
+          }
+        }
+        Array.prototype.forEach.call(document.images, function (img) {
+          if (img.complete) ready();
+          else {
+            img.addEventListener('load', ready, { once: true });
+            img.addEventListener('error', ready, { once: true });
+          }
+        });
+        if (!images.length) status.textContent = 'This label has no pages.';
+      }
+
+      function take() {
+        var raw = localStorage.getItem(key);
+        if (!raw) return false;
+        localStorage.removeItem(key);
+        try { show(JSON.parse(raw)); }
+        catch (e) { status.textContent = 'Could not prepare the label.'; }
+        return true;
+      }
+
+      if (!take()) {
+        var timer = setInterval(function () {
+          if (take()) clearInterval(timer);
+        }, 200);
+        setTimeout(function () {
+          clearInterval(timer);
+          if (!document.images.length) status.textContent = 'The label did not come through. Go back and tap Print again.';
+        }, 30000);
+      }
+    })();
+  </script>
+</body>
+</html>
