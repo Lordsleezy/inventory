@@ -45,8 +45,11 @@ test('item editor stages UPC, category, listing switches, quantity, and location
   const controls = await source('UnitEditDrawer.tsx');
   const locationStock = await source('locationStock.ts');
   const specifics = await source('EbaySpecificsPanel.tsx');
+  const detail = await source('appMode/AppItemDetail.tsx');
   assert.match(controls, /upcEnrichment\.current =/);
-  assert.match(controls, /if\(upcEnrichment\.current\).*portal_enrich_received_unit/s);
+  assert.match(controls, /if\(upcEnrichment\.current && canDelete\).*portal_enrich_received_unit/s);
+  assert.match(controls, /staff_update_unit/);
+  assert.match(controls, /canDelete \? 'portal_add_unit_photo' : 'staff_add_unit_photo'/);
   assert.match(controls, /onClick=\{\(\)\s*=>\s*void save\(\)\}/);
   assert.match(controls, /window\.confirm\('Discard unsaved changes\?'\)/);
   assert.match(controls, /applySimpleLocationChange|applyPartialLocationMove/);
@@ -55,4 +58,8 @@ test('item editor stages UPC, category, listing switches, quantity, and location
   assert.match(specifics, /pendingCategory\.current =/);
   assert.match(specifics, /Category and answers will be saved with the item/);
   assert.match(specifics, /dirtyRef\?\.current/);
+  assert.match(detail, /onClick=\{\(\) => openEdit\(\)\}/);
+  assert.match(detail, /disabled=\{!detail\}/);
+  assert.doesNotMatch(detail, /disabled=\{!detail \|\| staffMode\}/);
+  assert.doesNotMatch(detail, /moneyHidden \|\| staffMode/);
 });
