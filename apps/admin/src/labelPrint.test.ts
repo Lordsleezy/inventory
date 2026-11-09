@@ -373,3 +373,69 @@ test('a 4x6 printer page scales the same frame up to fill the label', async () =
   const decoded = await scan(await renderPng(outBytes).then((shot) => shot.png));
   assert.equal(decoded[0]?.number, TRACK);
 });
+
+function onPage(ink: { leftIn: number; topIn: number; widthIn: number; heightIn: number }, pageW: number, pageH: number) {
+  assert.ok(ink.leftIn >= -0.02, `left ${ink.leftIn}`);
+  assert.ok(ink.topIn >= -0.02, `top ${ink.topIn}`);
+  assert.ok(ink.leftIn + ink.widthIn <= pageW + 0.05, `right ${ink.leftIn + ink.widthIn}`);
+  assert.ok(ink.topIn + ink.heightIn <= pageH + 0.05, `bottom ${ink.topIn + ink.heightIn}`);
+}
+
+test('a 4x6 label on letter paper fills the quarter instead of shrinking to 3x5', async () => {
+  const png = await barcodePng();
+  const src = await PDFDocument.create();
+  const page = src.addPage([LABEL_W, LABEL_H]);
+  const font = await src.embedFont(StandardFonts.Helvetica);
+  const image = await src.embedPng(png);
+  page.drawRectangle({ x: 8, y: 8, width: LABEL_W - 16, height: LABEL_H - 16, borderWidth: 2, borderColor: rgb(0, 0, 0) });
+  page.drawText('SHIP TO', { x: 24, y: 400, size: 12, font });
+  page.drawText('PURA MINI', { x: 24, y: 376, size: 14, font });
+  page.drawImage(image, { x: 24, y: 40, width: 240, height: 70 });
+  const outBytes = await buildLabelPdf(await src.save(), 'letter');
+  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const doc = await pdfjs.getDocument({ data: outBytes.slice(), verbosity: 0 }).promise;
+  const text = await doc.getPage(1).then((printed) => printed.getTextContent());
+  const line = text.items.map((item) => ('str' in item ? item.str : '')).join(' ');
+  assert.match(line, /PURA MINI/);
+  assert.match(line, /SHIP TO/);
+  const ink = await inkInches(outBytes);
+  writeFileSync(`${OUT}/label-4x6-on-letter.png`, ink.png);
+  onPage(ink, LETTER_W / 72, LETTER_H / 72);
+  assert.ok(ink.widthIn > 3.9, `width ${ink.widthIn.toFixed(3)} still about 3in`);
+  assert.ok(ink.heightIn > 5.7, `height ${ink.heightIn.toFixed(3)} still about 5in`);
+  const decoded = await scan(await renderPng(outBytes).then((shot) => shot.png));
+  assert.equal(decoded[0]?.number, TRACK);
+});
+
+test('a letter label keeps the address under the barcode instead of cutting it off', async () => {
+  const png = await barcodePng();
+  const src = await PDFDocument.create();
+  const page = src.addPage([LETTER_W, LETTER_H]);
+  const font = await src.embedFont(StandardFonts.HelveticaBold);
+  const image = await src.embedPng(png);
+  const top = LETTER_H - 36;
+  page.drawImage(image, { x: 36, y: top - 80, width: 220, height: 64 });
+  page.drawText('S', { x: 280, y: top - 70, size: 28, font });
+  page.drawText('FEDEX TRACKING', { x: 36, y: top - 100, size: 10, font });
+  page.drawText('JENNIFER HILL', { x: 36, y: top - 280, size: 14, font });
+  page.drawText('5306 N POLAND', { x: 36, y: top - 302, size: 12, font });
+  page.drawImage(image, { x: 36, y: top - 400, width: 240, height: 70 });
+  const outBytes = await buildLabelPdf(await src.save(), 'letter');
+  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const doc = await pdfjs.getDocument({ data: outBytes.slice(), verbosity: 0 }).promise;
+  const text = await doc.getPage(1).then((printed) => printed.getTextContent());
+  const line = text.items.map((item) => ('str' in item ? item.str : '')).join(' ');
+  assert.match(line, /JENNIFER HILL/);
+  assert.match(line, /5306 N POLAND/);
+  assert.match(line, /FEDEX TRACKING/);
+  const ink = await inkInches(outBytes);
+  writeFileSync(`${OUT}/label-fedex-column.png`, ink.png);
+  onPage(ink, LETTER_W / 72, LETTER_H / 72);
+  assert.ok(ink.heightIn > 4.5, `cropped to ${ink.heightIn.toFixed(3)} in, address was cut off`);
+  const shot = await renderPng(outBytes);
+  assert.equal(shot.images.length, 2, 'one of the barcodes was cropped off');
+  for (const mark of shot.images) {
+    assert.ok(mark.left >= 0 && mark.left + mark.dw <= shot.width + 2, JSON.stringify(mark));
+    assert.ok(mark.top >= 0 && mark.top + mark.dh <= shot.height + 2, JSON.stringify(mark));
+  }
+});

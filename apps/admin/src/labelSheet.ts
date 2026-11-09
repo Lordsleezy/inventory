@@ -79,24 +79,45 @@ function union(a: Box, b: Box): Box {
   };
 }
 
-/** The biggest clump of ink. Instructions sitting alone on the sheet stay out. */
-function largestCluster(boxes: Box[]): Box | null {
-  let clusters = boxes.filter(okBox);
-  if (!clusters.length) return null;
+function clusterBoxes(boxes: Box[], gap: number): Box[] {
+  const items = boxes.filter(okBox);
+  const parent = items.map((_, i) => i);
+  const find = (i: number): number => {
+    if (parent[i] !== i) parent[i] = find(parent[i]);
+    return parent[i];
+  };
+  for (let i = 0; i < items.length; i += 1) {
+    for (let j = i + 1; j < items.length; j += 1) {
+      if (overlaps(items[i], items[j], gap)) parent[find(i)] = find(j);
+    }
+  }
+  const groups = new Map<number, Box>();
+  items.forEach((box, i) => {
+    const id = find(i);
+    const prev = groups.get(id);
+    groups.set(id, prev ? union(prev, box) : box);
+  });
+  return [...groups.values()].sort((a, b) => area(b) - area(a));
+}
+
+/** Pull address blocks that sit under a barcode instead of leaving them off the page. */
+function expandColumn(seed: Box, pieces: Box[]): Box {
+  let cluster = seed;
   let changed = true;
   while (changed) {
     changed = false;
-    const next: Box[] = [];
-    for (const box of clusters) {
-      const hit = next.findIndex((c) => overlaps(c, box, 36));
-      if (hit >= 0) {
-        next[hit] = union(next[hit], box);
+    for (const box of pieces) {
+      const xOverlap = !(cluster.x1 + 24 < box.x0 || box.x1 + 24 < cluster.x0);
+      const yNear = !(cluster.y1 + 252 < box.y0 || box.y1 + 252 < cluster.y0);
+      if (!xOverlap || !yNear) continue;
+      const next = union(cluster, box);
+      if (area(next) > area(cluster) + 1) {
+        cluster = next;
         changed = true;
-      } else next.push(box);
+      }
     }
-    clusters = next;
   }
-  return clusters.sort((a, b) => area(b) - area(a))[0] || null;
+  return cluster;
 }
 
 function nearly(a: number, b: number) {
@@ -196,12 +217,11 @@ async function measurePage(bytes: Uint8Array, pageIndex: number): Promise<Measur
   }
 
   const full: Box = { x0: 0, y0: 0, x1: mediaW, y1: mediaH };
-  const content = pieces.filter(okBox).reduce<Box | null>((acc, box) => (acc ? union(acc, box) : box), null);
-  const spansPage = !!content
-    && content.x1 - content.x0 > mediaW * 0.5
-    && content.y1 - content.y0 > mediaH * 0.5;
-  // A 4×6 or letter file that already holds the whole label. Don't clip it down to the barcode.
-  const ink = spansPage ? full : (labelFrame(pieces, full) || full);
+  const usable = pieces.filter((box) => okBox(box) && area(box) < area(full) * 0.88);
+  // A 4×6 file is the label. Keep every mark on it so the address is not cropped off.
+  const ink = isLabelPage(mediaW, mediaH)
+    ? (usable.reduce<Box | null>((acc, box) => (acc ? union(acc, box) : box), null) || full)
+    : (labelFrame(usable, full) || full);
   const box = {
     x0: Math.max(0, ink.x0 - 2),
     y0: Math.max(0, ink.y0 - 2),
@@ -223,32 +243,35 @@ function isLabelPage(w: number, h: number) {
   return (nearly(w, LABEL_W) && nearly(h, LABEL_H)) || (nearly(w, LABEL_H) && nearly(h, LABEL_W));
 }
 
+function isFullLabel(box: Box) {
+  const w = box.x1 - box.x0;
+  const h = box.y1 - box.y0;
+  return Math.min(w, h) >= 3.2 * 72 && Math.max(w, h) >= 4.5 * 72;
+}
+
 /**
- * The black outer frame of the label, not the blank letter around it.
- * A frame is a portrait-or-landscape rectangle that is not the whole sheet.
- * Pieces that sit on that frame (the barcode, the "G", the address) come with it.
+ * The label on a letter sheet, not the blank paper around it and not the barcode alone.
+ * A real label border wins. A short header still picks up the address underneath it.
  */
 function labelFrame(pieces: Box[], full: Box): Box | null {
   const pageArea = area(full);
   const pageW = full.x1 - full.x0;
   const pageH = full.y1 - full.y0;
-  const usable = pieces.filter((box) => area(box) < pageArea * 0.92);
-  const frames = usable.filter((box) => {
+  if (!pieces.length) return null;
+  const frames = pieces.filter((box) => {
     const w = box.x1 - box.x0;
     const h = box.y1 - box.y0;
-    const ratio = w / h;
-    // A barcode is wide and short. The label border covers a real share of the sheet.
-    const labelSized = w > pageW * 0.32 && h > pageH * 0.32;
-    return labelSized && area(box) > 50 * 50 && ratio > 0.55 && ratio < 1.85;
+    const ratio = w / Math.max(h, 1);
+    const labelSized = w > pageW * 0.28 && h > pageH * 0.28;
+    return labelSized && area(box) > 50 * 50 && ratio > 0.45 && ratio < 1.85;
   }).sort((a, b) => area(b) - area(a));
-  const frame = frames[0];
-  if (frame) {
-    return usable.filter((box) => overlaps(box, frame, 8)).reduce(union, frame);
-  }
-  const cluster = largestCluster(usable);
-  if (!cluster) return null;
-  if (area(cluster) > pageArea * 0.82) return full;
-  return cluster;
+  let chosen = frames[0] || null;
+  if (chosen) chosen = pieces.filter((box) => overlaps(box, chosen as Box, 8)).reduce(union, chosen);
+  else chosen = clusterBoxes(pieces, 48)[0] || null;
+  if (!chosen) return null;
+  if (!isFullLabel(chosen)) chosen = expandColumn(chosen, pieces);
+  if (area(chosen) > pageArea * 0.82) return full;
+  return chosen;
 }
 
 function finishPage(page: PDFPage, w: number, h: number) {
@@ -259,61 +282,60 @@ function finishPage(page: PDFPage, w: number, h: number) {
   page.setArtBox(0, 0, w, h);
 }
 
+type Placed = { pageW: number; pageH: number; x: number; y: number; dw: number; dh: number };
+
+/**
+ * Letter: a full label fills the top-left quarter and may run past 5.5in
+ * so a 4×6 is not squeezed down to about 3.5×5.3. It still stays on the sheet.
+ * 4×6: fit the label on the label page without clipping.
+ */
+function placement(visW: number, visH: number, paper: LabelPaper): Placed {
+  const margin = SAFE_MARGIN;
+  if (paper === 'letter') {
+    const quarterW = QUARTER_W - margin * 2;
+    const quarterH = QUARTER_H - margin * 2;
+    const pageInnerW = LETTER_W - margin * 2;
+    const pageInnerH = LETTER_H - margin * 2;
+    const contain = Math.min(quarterW / visW, quarterH / visH);
+    const cover = Math.max(quarterW / visW, quarterH / visH);
+    const fitPage = Math.min(pageInnerW / visW, pageInnerH / visH);
+    const fullLabel = Math.min(visW, visH) >= 2.5 * 72 && Math.max(visW, visH) >= 3.5 * 72;
+    const scale = Math.min(fullLabel ? cover : contain, fitPage);
+    const dw = visW * scale;
+    const dh = visH * scale;
+    return { pageW: LETTER_W, pageH: LETTER_H, x: margin, y: LETTER_H - margin - dh, dw, dh };
+  }
+  const maxW = LABEL_W - margin * 2;
+  const maxH = LABEL_H - margin * 2;
+  const scale = Math.min(maxW / visW, maxH / visH);
+  const dw = visW * scale;
+  const dh = visH * scale;
+  return { pageW: LABEL_W, pageH: LABEL_H, x: margin, y: margin + (maxH - dh), dw, dh };
+}
+
 function drawUpright(
   page: PDFPage,
   embedded: PDFEmbeddedPage,
   clipW: number,
   clipH: number,
   rotate: number,
-  destX: number,
-  destY: number,
-  maxW: number,
-  maxH: number,
+  placed: Placed,
 ) {
   const angle = ((rotate % 360) + 360) % 360;
-  const turned = angle === 90 || angle === 270;
-  const visW = turned ? clipH : clipW;
-  const visH = turned ? clipW : clipH;
-  const scale = Math.min(maxW / visW, maxH / visH);
-  const dw = visW * scale;
-  const dh = visH * scale;
-  const x = destX;
-  const y = destY + (maxH - dh);
+  const { x, y, dw, dh } = placed;
   if (angle === 90) {
     page.drawPage(embedded, { x: x + dw, y, width: dh, height: dw, rotate: degrees(90) });
-    return { x, y, width: dw, height: dh };
+    return;
   }
   if (angle === 270) {
     page.drawPage(embedded, { x, y: y + dh, width: dh, height: dw, rotate: degrees(-90) });
-    return { x, y, width: dw, height: dh };
+    return;
   }
   if (angle === 180) {
     page.drawPage(embedded, { x: x + dw, y: y + dh, width: dw, height: dh, rotate: degrees(180) });
-    return { x, y, width: dw, height: dh };
+    return;
   }
   page.drawPage(embedded, { x, y, width: dw, height: dh });
-  return { x, y, width: dw, height: dh };
-}
-
-function outputSize(paper: LabelPaper) {
-  if (paper === 'letter') {
-    return {
-      pageW: LETTER_W,
-      pageH: LETTER_H,
-      destX: SAFE_MARGIN,
-      destY: LETTER_H - QUARTER_H + SAFE_MARGIN,
-      maxW: QUARTER_W - SAFE_MARGIN * 2,
-      maxH: QUARTER_H - SAFE_MARGIN * 2,
-    };
-  }
-  return {
-    pageW: LABEL_W,
-    pageH: LABEL_H,
-    destX: SAFE_MARGIN,
-    destY: SAFE_MARGIN,
-    maxW: LABEL_W - SAFE_MARGIN * 2,
-    maxH: LABEL_H - SAFE_MARGIN * 2,
-  };
 }
 
 /** Crop, rotate upright, and place the label. The stored file is not changed. */
@@ -323,7 +345,6 @@ export async function buildLabelPdf(input: Uint8Array | ArrayBuffer, paper: Labe
   const pages = src.getPages();
   if (!pages.length) throw new Error('Label PDF has no pages.');
   const out = await PDFDocument.create();
-  const slot = outputSize(paper);
   for (let i = 0; i < pages.length; i += 1) {
     const srcPage = pages[i];
     const measured = await measurePage(bytes, i);
@@ -334,34 +355,29 @@ export async function buildLabelPdf(input: Uint8Array | ArrayBuffer, paper: Labe
       right: measured.box.x1,
       top: measured.box.y1,
     });
-    const page = out.addPage([slot.pageW, slot.pageH]);
-    finishPage(page, slot.pageW, slot.pageH);
-    drawUpright(page, embedded, measured.width, measured.height, rotate, slot.destX, slot.destY, slot.maxW, slot.maxH);
+    const angle = ((rotate % 360) + 360) % 360;
+    const turned = angle === 90 || angle === 270;
+    const placed = placement(turned ? measured.height : measured.width, turned ? measured.width : measured.height, paper);
+    const page = out.addPage([placed.pageW, placed.pageH]);
+    finishPage(page, placed.pageW, placed.pageH);
+    drawUpright(page, embedded, measured.width, measured.height, rotate, placed);
   }
   return out.save();
-}
-
-function fitImage(srcW: number, srcH: number, paper: LabelPaper) {
-  const landscape = srcW > srcH * 1.05;
-  const visW = landscape ? srcH : srcW;
-  const visH = landscape ? srcW : srcH;
-  const slot = outputSize(paper);
-  const scale = Math.min(slot.maxW / visW, slot.maxH / visH);
-  return { landscape, slot, width: visW * scale, height: visH * scale };
 }
 
 export async function imageToLabelPdf(bytes: Uint8Array, kind: 'png' | 'jpg', paper: LabelPaper = 'label'): Promise<Uint8Array> {
   const out = await PDFDocument.create();
   const image = kind === 'png' ? await out.embedPng(bytes) : await out.embedJpg(bytes);
-  const fit = fitImage(image.width, image.height, paper);
-  const page = out.addPage([fit.slot.pageW, fit.slot.pageH]);
-  finishPage(page, fit.slot.pageW, fit.slot.pageH);
-  const x = fit.slot.destX;
-  const y = fit.slot.destY + (fit.slot.maxH - fit.height);
-  if (fit.landscape) {
-    page.drawImage(image, { x: x + fit.width, y, width: fit.height, height: fit.width, rotate: degrees(90) });
+  const landscape = image.width > image.height * 1.05;
+  const visW = landscape ? image.height : image.width;
+  const visH = landscape ? image.width : image.height;
+  const fit = placement(visW, visH, paper);
+  const page = out.addPage([fit.pageW, fit.pageH]);
+  finishPage(page, fit.pageW, fit.pageH);
+  if (landscape) {
+    page.drawImage(image, { x: fit.x + fit.dw, y: fit.y, width: fit.dh, height: fit.dw, rotate: degrees(90) });
   } else {
-    page.drawImage(image, { x, y, width: fit.width, height: fit.height });
+    page.drawImage(image, { x: fit.x, y: fit.y, width: fit.dw, height: fit.dh });
   }
   return out.save();
 }
