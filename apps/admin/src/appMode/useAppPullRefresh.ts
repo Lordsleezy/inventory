@@ -1,9 +1,23 @@
 import { useEffect, useRef, useState } from 'react';
 
-const THRESHOLD_PX = 72;
+const THRESHOLD_PX = 64;
 const MIN_SPIN_MS = 450;
 
 export type PullRefreshHandler = () => void | Promise<void>;
+
+function scrollerAtTop(root: HTMLElement, target: EventTarget | null) {
+  if (root.scrollTop > 2) return false;
+  let node = target instanceof Element ? target : null;
+  while (node && root.contains(node)) {
+    if (node instanceof HTMLElement && node !== root) {
+      const scrollable = node.scrollHeight > node.clientHeight + 2;
+      if (scrollable && node.scrollTop > 2) return false;
+    }
+    if (node === root) break;
+    node = node.parentElement;
+  }
+  return true;
+}
 
 /** Pull down at scroll top to refresh (mobile app tabs). */
 export function useAppPullRefresh(
@@ -27,7 +41,7 @@ export function useAppPullRefresh(
     }
 
     const onStart = (e: TouchEvent) => {
-      if (panel.scrollTop > 2) {
+      if (!scrollerAtTop(panel, e.target)) {
         armed.current = false;
         return;
       }
@@ -36,23 +50,25 @@ export function useAppPullRefresh(
     };
 
     const onMove = (e: TouchEvent) => {
-      if (!armed.current || panel.scrollTop > 2) {
+      if (!armed.current || !scrollerAtTop(panel, e.target)) {
         setPull(0);
         return;
       }
       const y = e.touches[0]?.clientY ?? 0;
-      setPull(Math.max(0, Math.min(88, y - startY.current)));
+      const d = y - startY.current;
+      if (d > 0) setPull(Math.min(96, d));
+      else setPull(0);
     };
 
     const onEnd = (e: TouchEvent) => {
       const delta = (e.changedTouches[0]?.clientY ?? 0) - startY.current;
-      if (!armed.current || panel.scrollTop > 2 || busy.current) {
+      if (!armed.current || busy.current) {
         armed.current = false;
         setPull(0);
         return;
       }
       armed.current = false;
-      if (delta < THRESHOLD_PX) {
+      if (delta < THRESHOLD_PX || !scrollerAtTop(panel, e.target)) {
         setPull(0);
         return;
       }
@@ -75,28 +91,28 @@ export function useAppPullRefresh(
       setPull(0);
     };
 
-    panel.addEventListener('touchstart', onStart, { passive: true });
-    panel.addEventListener('touchmove', onMove, { passive: true });
-    panel.addEventListener('touchend', onEnd, { passive: true });
-    panel.addEventListener('touchcancel', onCancel, { passive: true });
+    const opts = { passive: true, capture: true } as const;
+    panel.addEventListener('touchstart', onStart, opts);
+    panel.addEventListener('touchmove', onMove, opts);
+    panel.addEventListener('touchend', onEnd, opts);
+    panel.addEventListener('touchcancel', onCancel, opts);
     return () => {
-      panel.removeEventListener('touchstart', onStart);
-      panel.removeEventListener('touchmove', onMove);
-      panel.removeEventListener('touchend', onEnd);
-      panel.removeEventListener('touchcancel', onCancel);
+      panel.removeEventListener('touchstart', onStart, opts);
+      panel.removeEventListener('touchmove', onMove, opts);
+      panel.removeEventListener('touchend', onEnd, opts);
+      panel.removeEventListener('touchcancel', onCancel, opts);
     };
   }, [panel, enabled, onRefresh]);
 
-  const show = pull > 6 || refreshing;
+  const show = pull > 4 || refreshing;
   const hint = refreshing
     ? 'Refreshing'
     : pull >= THRESHOLD_PX
       ? 'Release to refresh'
-      : pull > 6
+      : pull > 4
         ? 'Pull to refresh'
         : '';
-
-  const spin = refreshing || pull >= THRESHOLD_PX * 0.85;
+  const spin = refreshing || pull >= THRESHOLD_PX * 0.7;
   const pullProgress = Math.min(1, pull / THRESHOLD_PX);
 
   return { pull, refreshing, hint, threshold: THRESHOLD_PX, show, spin, pullProgress };

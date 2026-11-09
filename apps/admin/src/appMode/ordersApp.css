@@ -108,7 +108,9 @@ html.app-mode .app-order-row-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  padding: 8px 0 0 80px;
+  padding: 10px 0 4px;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 html.app-mode .app-order-action-primary {

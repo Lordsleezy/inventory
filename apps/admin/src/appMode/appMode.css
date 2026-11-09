@@ -57,29 +57,32 @@ html.app-mode .app-tab-panel[hidden] {
   display: none !important;
 }
 
-html.app-mode .app-pull-refresh {
+html.app-mode .app-pull-refresh-float {
+  position: fixed;
+  top: max(env(safe-area-inset-top, 0px), 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 120;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: flex-end;
   gap: 6px;
-  overflow: hidden;
+  padding: 10px 16px;
+  border-radius: 14px;
+  background: rgba(28, 28, 30, 0.92);
+  border: 1px solid #3a3a3c;
   color: #8e8e93;
   font-size: 12px;
   line-height: 1.2;
-  padding-bottom: 8px;
   pointer-events: none;
-  flex-shrink: 0;
-  position: sticky;
-  top: 0;
-  z-index: 3;
-  background: linear-gradient(to bottom, #000 70%, transparent);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.45);
 }
-html.app-mode .app-pull-refresh.ready {
+html.app-mode .app-pull-refresh-float.ready {
   color: #fff;
+  border-color: #fff;
 }
-html.app-mode .app-pull-refresh.active {
-  color: #8e8e93;
+html.app-mode .app-pull-refresh-float.active {
+  color: #fff;
 }
 html.app-mode .app-pull-spinner {
   width: 22px;

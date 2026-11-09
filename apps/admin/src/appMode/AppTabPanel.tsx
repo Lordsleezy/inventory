@@ -1,4 +1,5 @@
 import { useRef, useState, useEffect, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { useAppPullRefresh } from './useAppPullRefresh';
 
 type Props = {
@@ -13,12 +14,24 @@ export function AppTabPanel({ tab, hidden, className, onPullRefresh, children }:
   const panelRef = useRef<HTMLDivElement>(null);
   const [el, setEl] = useState<HTMLDivElement | null>(null);
   useEffect(() => {
-    setEl(panelRef.current);
-  }, []);
+    if (!hidden) setEl(panelRef.current);
+  }, [hidden]);
 
   const enabled = !hidden && !!onPullRefresh;
-  const { pull, refreshing, hint, show, spin, pullProgress } = useAppPullRefresh(el, onPullRefresh, enabled);
-  const h = refreshing ? 52 : show ? Math.max(40, Math.min(56, pull * 0.65)) : 0;
+  const { refreshing, hint, show, spin, pullProgress } = useAppPullRefresh(el, onPullRefresh, enabled);
+
+  const overlay = show && typeof document !== 'undefined' ? createPortal(
+    <div
+      className={`app-pull-refresh-float${refreshing ? ' active' : ''}${pullProgress >= 1 ? ' ready' : ''}`}
+      data-tab={tab}
+      aria-live="polite"
+      aria-busy={refreshing || undefined}
+    >
+      <span className={`app-pull-spinner${spin ? ' spin' : ''}`} aria-hidden />
+      {hint && <span className="app-pull-label">{hint}</span>}
+    </div>,
+    document.body,
+  ) : null;
 
   return (
     <div
@@ -27,21 +40,7 @@ export function AppTabPanel({ tab, hidden, className, onPullRefresh, children }:
       data-tab={tab}
       hidden={hidden || undefined}
     >
-      {show && (
-        <div
-          className={`app-pull-refresh${refreshing ? ' active' : ''}${pullProgress >= 1 ? ' ready' : ''}`}
-          style={{ height: h }}
-          aria-live="polite"
-          aria-busy={refreshing || undefined}
-        >
-          <span
-            className={`app-pull-spinner${spin ? ' spin' : ''}`}
-            style={refreshing ? undefined : { ['--pull' as string]: `${Math.round(pullProgress * 300)}deg` }}
-            aria-hidden
-          />
-          {hint && <span className="app-pull-label">{hint}</span>}
-        </div>
-      )}
+      {overlay}
       {children}
     </div>
   );
