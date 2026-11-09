@@ -20,6 +20,9 @@ export type CdtfaPrintModel = {
   optionTitle: string | null;
   optionHint: string | null;
   roundingNote: string | null;
+  late: boolean;
+  omitInterest: boolean;
+  preparer: string;
 };
 
 type FloorLine = { id: string; label: string; dollars: number; note: string; sales?: PaperSale[] };
@@ -54,7 +57,10 @@ export async function loadCdtfaPrintModel(client: SupabaseClient, periodStart: s
     else if (value.dollars != null) edits[field] = value.dollars;
   }
   const collected = Math.round(Number(doc.collected_cents || 0) / 100);
-  const resolved = new Map(resolveCdtfaDollars(doc.lines, edits, collected).map((row) => [row.id, row]));
+  const due = doc.due_on || dueOn(doc.period_end);
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+  const late = today > due;
+  const resolved = new Map(resolveCdtfaDollars(doc.lines, edits, collected, late).map((row) => [row.id, row]));
   return {
     lines: doc.lines.map((line) => {
       const row = resolved.get(line.id);
@@ -66,7 +72,7 @@ export async function loadCdtfaPrintModel(client: SupabaseClient, periodStart: s
     periodLabel: periodLabel(doc.period_start, doc.period_end, spanFrequency(kind), doc.due_on),
     periodStart: doc.period_start,
     periodEnd: doc.period_end,
-    dueOn: doc.due_on || dueOn(doc.period_end),
+    dueOn: due,
     scheduleNote: doc.schedule_a2?.note || doc.place || '',
     districtMeasure: edits.A4 ?? 0,
     districtMeasureEdited: edits.A4 != null,
@@ -74,6 +80,9 @@ export async function loadCdtfaPrintModel(client: SupabaseClient, periodStart: s
     optionTitle: filingOption(kind, frequency)?.title ?? null,
     optionHint: filingOption(kind, frequency)?.hint ?? null,
     roundingNote: roundGap,
+    late,
+    omitInterest: late && edits['25'] == null,
+    preparer: raw.preparer?.text || '',
   };
 }
 

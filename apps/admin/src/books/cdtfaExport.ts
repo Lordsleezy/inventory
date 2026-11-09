@@ -21,7 +21,7 @@ const FORM_BLOCKS: [string, string[]][] = [
 export function cdtfaPdfFileName(periodStart: string, periodEnd: string) {
   const startMonth = periodStart.slice(0, 7);
   const endMonth = periodEnd.slice(0, 7);
-  if (startMonth === endMonth) return `CDTFA-401-A-${startMonth}.pdf`;
+  if (startMonth === endMonth) return `CDTFA-401-A_${startMonth}_Open-Box-Industries.pdf`;
   const start = Number(periodStart.slice(5, 7));
   const end = Number(periodEnd.slice(5, 7));
   if (end - start === 2) return `CDTFA-401-A-${periodStart.slice(0, 4)}-Q${Math.floor((start - 1) / 3) + 1}.pdf`;
@@ -105,6 +105,6 @@ export async function addCdtfaPdfPages(bytes: Uint8Array, model: CdtfaPrintModel
   write(`A4  Subject to district tax              ${money(model.districtMeasure)}`);
   if (model.roundingNote) write(model.roundingNote);
   write(`Signed ${model.signer.name}  ${model.signer.title}  ${model.signer.date}`);
-  write(`Email ${model.signer.email}  Phone ${model.signer.phone}  Preparer Floor`);
+  write(`Email ${model.signer.email}  Phone ${model.signer.phone}  Paid preparer ${model.preparer || 'blank'}`);
   return pdf.save();
 }

@@ -17,10 +17,12 @@ export function resolveCdtfaDollars(
   floor: { id: string; dollars: number }[],
   edits: Record<string, number | undefined>,
   _collectedDollars = 0,
+  late = false,
 ): { id: string; dollars: number; floor: number; edited: boolean }[] {
   const floorOf = new Map(floor.map((row) => [row.id, row.dollars]));
   const seen = new Set<string>();
   const value = (id: string): number => {
+    if (id === '24') return late ? roundDollars(value('23') * 0.1) : 0;
     if (seen.has(id)) return floorOf.get(id) ?? 0;
     if (edits[id] != null && Number.isFinite(edits[id])) return edits[id] as number;
     seen.add(id);
@@ -50,7 +52,7 @@ export function resolveCdtfaDollars(
     id: row.id,
     dollars: value(row.id),
     floor: row.dollars,
-    edited: edits[row.id] != null && edits[row.id] !== row.dollars,
+    edited: row.id !== '24' && edits[row.id] != null && edits[row.id] !== row.dollars,
   }));
 }
 

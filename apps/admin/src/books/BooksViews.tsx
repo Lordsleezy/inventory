@@ -186,7 +186,7 @@ function SpanParts({ p, render, compact, linesOnly, rollup }: {
           )}
         </section>
       )}
-      {linesOnly && <p className="books-span-subtotal">{heading}: {p.workbook.received.length} items received</p>}
+      {linesOnly && <p className="books-span-subtotal">{heading}: {p.workbook.received.length} items received · {p.workbook.manifested_units || 0} manifested</p>}
     </>
   );
 }
@@ -230,8 +230,8 @@ function BooksNative(p: ViewProps) {
       {tab === 'sales' && <PhoneSales money={p.money} workbook={p.workbook} focusIds={focusIds} />}
       {tab === 'expenses' && <SpanParts p={p} render={(workbook) => <ExpensesBody money={p.money} workbook={workbook} native onDuplicateDecision={p.span === 'month' ? p.onDuplicateDecision : undefined} />} />}
       {tab === 'payouts' && <SpanParts p={p} render={(workbook, word) => <PayoutsBody money={p.money} workbook={workbook} native periodWord={word} />} compact />}
-      {tab === 'inventory' && <SpanParts p={p} render={(workbook, word) => <InventoryBody money={p.money} inventory={workbook.inventory} native periodWord={word} />} rollup />}
-      {tab === 'received' && <SpanParts p={p} render={(workbook) => <ReceivedBody money={p.money} items={workbook.received} native />} linesOnly />}
+      {tab === 'inventory' && <SpanParts p={p} render={(workbook, word) => <InventoryBody money={p.money} inventory={workbook.inventory} manifested={workbook.manifested_units || 0} native periodWord={word} />} rollup />}
+      {tab === 'received' && <SpanParts p={p} render={(workbook) => <ReceivedBody money={p.money} items={workbook.received} manifested={workbook.manifested_units || 0} native />} linesOnly />}
       {tab === 'tax' && <TaxForm p={p} />}
       <div className="books-phone-actions">
         <ExportMenu p={p} />
@@ -315,8 +315,8 @@ function BooksDesktop(p: ViewProps) {
         {tab === 'sales' && <SpanParts p={p} render={(workbook) => <SalesTable money={p.money} workbook={workbook} totals={workbook.sales.totals} focusIds={focusIds} />} />}
         {tab === 'expenses' && <SpanParts p={p} render={(workbook) => <ExpensesTable money={p.money} workbook={workbook} />} />}
         {tab === 'payouts' && <SpanParts p={p} render={(workbook, word) => <PayoutsBody money={p.money} workbook={workbook} periodWord={word} />} compact />}
-        {tab === 'inventory' && <SpanParts p={p} render={(workbook, word) => <InventoryBody money={p.money} inventory={workbook.inventory} periodWord={word} />} rollup />}
-        {tab === 'received' && <SpanParts p={p} render={(workbook) => <ReceivedBody money={p.money} items={workbook.received} />} linesOnly />}
+        {tab === 'inventory' && <SpanParts p={p} render={(workbook, word) => <InventoryBody money={p.money} inventory={workbook.inventory} manifested={workbook.manifested_units || 0} periodWord={word} />} rollup />}
+        {tab === 'received' && <SpanParts p={p} render={(workbook) => <ReceivedBody money={p.money} items={workbook.received} manifested={workbook.manifested_units || 0} />} linesOnly />}
         {tab === 'tax' && <TaxForm p={p} />}
       </div>
       {p.showLock && ui === 'locked' && <BooksLock client={p.client} money={p.money} period={p.period} report={p.report} inventory={p.inventory} received={p.received} workbook={p.workbook} uiStatus={ui} busy={p.busy} setBusy={p.setBusy} onError={p.onError} onReload={p.onReload} lockedStaleMath={p.lockedStaleMath} />}
@@ -325,8 +325,8 @@ function BooksDesktop(p: ViewProps) {
         <section><h2>Sales</h2><SpanParts p={p} render={(workbook) => <SalesTable money={p.money} workbook={workbook} totals={workbook.sales.totals} />} /></section>
         <section><h2>Expenses</h2><SpanParts p={p} render={(workbook) => <ExpensesTable money={p.money} workbook={workbook} />} /></section>
         <section><h2>Payouts</h2><SpanParts p={p} render={(workbook, word) => <PayoutsBody money={p.money} workbook={workbook} periodWord={word} />} compact /></section>
-        <section><h2>Inventory</h2><SpanParts p={p} render={(workbook, word) => <InventoryBody money={p.money} inventory={workbook.inventory} periodWord={word} />} rollup /></section>
-        <section><h2>Items received</h2><SpanParts p={p} render={(workbook) => <ReceivedBody money={p.money} items={workbook.received} />} linesOnly /></section>
+        <section><h2>Inventory</h2><SpanParts p={p} render={(workbook, word) => <InventoryBody money={p.money} inventory={workbook.inventory} manifested={workbook.manifested_units || 0} periodWord={word} />} rollup /></section>
+        <section><h2>Items received</h2><SpanParts p={p} render={(workbook) => <ReceivedBody money={p.money} items={workbook.received} manifested={workbook.manifested_units || 0} />} linesOnly /></section>
         {p.taxForm && (
           <section>
             <h2>Sales tax return</h2>
@@ -717,7 +717,7 @@ function PayoutsBody({ money, workbook, periodWord = 'month' }: { money: (c: num
   );
 }
 
-function InventoryBody({ money, inventory, native, periodWord = 'month' }: { money: (c: number) => string; inventory: InventorySummary; native?: boolean; periodWord?: string }) {
+function InventoryBody({ money, inventory, manifested = 0, native, periodWord = 'month' }: { money: (c: number) => string; inventory: InventorySummary; manifested?: number; native?: boolean; periodWord?: string }) {
   const o = inventory.owner;
   const v = o?.value;
   const rows = [
@@ -824,11 +824,16 @@ function InventoryBody({ money, inventory, native, periodWord = 'month' }: { mon
         </>
       )}
       <div className={`${native ? 'native-report-group' : 'books-table-wrap books-inventory-flow'}`}>
-        {rows.map(([label, value, sign]) => (
-          native
+        {rows.flatMap(([label, value, sign]) => {
+          const row = native
             ? <div key={label} className={`native-report-row${String(label).startsWith('End of') ? ' strong' : ''}`}><span>{label}</span><b className={sign === '+' ? 'plus' : sign === '-' ? 'minus' : ''}>{sign ? `${sign}${value}` : value}</b></div>
-            : <div key={label} className="books-flow-row"><span>{label}</span><b>{value}</b></div>
-        ))}
+            : <div key={label} className="books-flow-row"><span>{label}</span><b>{value}</b></div>;
+          if (label !== 'Received') return [row];
+          const manifestedRow = native
+            ? <div key="manifested" className="native-report-row"><span>Manifested</span><b>{manifested}</b></div>
+            : <div key="manifested" className="books-flow-row"><span>Manifested</span><b>{manifested}</b></div>;
+          return [row, manifestedRow];
+        })}
       </div>
       <DetailBlock title="GIVEN AWAY" items={(inventory.giveaways || []).map((g) => ({ t: String(g.title), s: `${shortDate(String(g.date))} · SKU ${g.sku} · ${g.given_to}`, r: money(Number(g.cost_cents || 0)) }))} />
       <DetailBlock title="REPLACEMENTS" items={(inventory.replacements || []).map((r) => ({ t: String(r.title), s: `Sale #${r.original_sale_id} · SKU ${r.sku}`, r: r.bad_unit_status === 'returned' ? 'Bad unit back' : String(r.bad_unit_status || '—') }))} />
@@ -854,7 +859,7 @@ function DetailBlock({ title, items }: { title: string; items: { t: string; s: s
   );
 }
 
-function ReceivedBody({ money, items, native }: { money: (c: number) => string; items: ReceivedItem[]; native?: boolean }) {
+function ReceivedBody({ money, items, manifested = 0, native }: { money: (c: number) => string; items: ReceivedItem[]; manifested?: number; native?: boolean }) {
   const stats = receivedMonthStats(items);
   const groups = groupReceivedByDay(items);
   return (
@@ -864,6 +869,7 @@ function ReceivedBody({ money, items, native }: { money: (c: number) => string; 
         <div><small>SKUs</small><b>{stats.skus}</b></div>
         <div><small>Total cost</small><b>{money(stats.cost_cents)}</b></div>
       </div>
+      <p className="books-manifested-total">Manifested <b>{manifested}</b></p>
       {groups.map(([day, rows]) => (
         <div key={day}>
           <p className="native-report-section">{dayHeader(day)}</p>

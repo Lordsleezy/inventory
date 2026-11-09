@@ -1,4 +1,4 @@
-import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
+import { PDFDocument, PDFRef, StandardFonts, rgb } from 'pdf-lib';
 
 type Line = { id: string; dollars: number };
 export type CdtfaPdfDoc = {
@@ -13,6 +13,10 @@ export type CdtfaPdfDoc = {
   recordsNote?: string | null;
   optionTitle?: string | null;
   optionHint?: string | null;
+  /** Leave line 25 blank so a person can copy CDTFA's interest figure. */
+  omitInterest?: boolean;
+  /** Paid preparer. Blank unless a person types one. Floor is not the preparer. */
+  preparer?: string;
 };
 
 /**
@@ -71,7 +75,14 @@ export async function fillCdtfaPdfBytes(bytes: ArrayBuffer | Uint8Array, doc: Cd
   set('A2-A4', money(taxable - district));
   set('A5', money(district));
   set('38a', 'Marketplace facilitator sales (eBay, TikTok Shop, Amazon, Depop, Mercari)');
-  set('PaidName', 'Floor');
+  if (doc.omitInterest) {
+    try { form.getTextField('29').setText(''); } catch { /* this revision renamed the interest box */ }
+  }
+  const preparer = doc.preparer?.trim();
+  if (preparer) set('PaidName', preparer);
+  else {
+    try { form.getTextField('PaidName').setText(''); } catch { /* leave the box blank */ }
+  }
   const signer = doc.signer || {};
   const optional: [string, string][] = [
     ['Print Name', signer.name || ''],
@@ -94,6 +105,36 @@ export async function fillCdtfaPdfBytes(bytes: ArrayBuffer | Uint8Array, doc: Cd
       y -= 11;
     }
     if (doc.open) page.drawText('DRAFT - PERIOD OPEN', { x: 28, y, size: 8, font, color: rgb(0, 0, 0) });
+  }
+  return pdf.save();
+}
+
+/** Drop pages that are not in `keep`, and drop fields that only lived on those pages. */
+export async function trimCdtfaPdfBytes(bytes: Uint8Array, keep: number[]): Promise<Uint8Array> {
+  const pdf = await PDFDocument.load(bytes);
+  const keepSet = new Set(keep);
+  const pages = pdf.getPages();
+  const keepRefs = new Set(keep.map((index) => pages[index]?.ref).filter((ref) => ref != null));
+  const form = pdf.getForm();
+  for (const field of [...form.getFields()]) {
+    const acro = field.acroField;
+    const widgets = acro.getWidgets();
+    const kids = acro.Kids();
+    let kept = 0;
+    for (let i = widgets.length - 1; i >= 0; i -= 1) {
+      const pageRef = widgets[i].P();
+      if (pageRef && keepRefs.has(pageRef)) { kept += 1; continue; }
+      if (!kids) continue;
+      const ref = kids.get(i);
+      const page = pages.find((item) => item.ref === pageRef);
+      if (page && ref instanceof PDFRef) page.node.removeAnnot(ref);
+      acro.removeWidget(i);
+      if (ref instanceof PDFRef) pdf.context.delete(ref);
+    }
+    if (kept === 0) form.removeField(field);
+  }
+  for (let i = pdf.getPageCount() - 1; i >= 0; i -= 1) {
+    if (!keepSet.has(i)) pdf.removePage(i);
   }
   return pdf.save();
 }
@@ -122,6 +163,8 @@ export function paperToCdtfaDoc(model: {
   recordsNote?: string | null;
   optionTitle?: string | null;
   optionHint?: string | null;
+  omitInterest?: boolean;
+  preparer?: string;
 }): CdtfaPdfDoc {
   return {
     period_start: model.periodStart,
@@ -134,5 +177,7 @@ export function paperToCdtfaDoc(model: {
     recordsNote: model.recordsNote,
     optionTitle: model.optionTitle,
     optionHint: model.optionHint,
+    omitInterest: model.omitInterest,
+    preparer: model.preparer,
   };
 }

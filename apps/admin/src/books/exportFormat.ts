@@ -126,7 +126,7 @@ export function fitWrappedRowHeights(ws: Worksheet, from: number, to: number, co
       const w = colWidths[col - 1] || 12;
       lines = Math.max(lines, wrappedLines(String(cell.text || ''), w));
     });
-    row.height = Math.min(120, Math.max(15, 14 * lines + (lines > 1 ? 2 : 0)));
+    row.height = Math.min(32, Math.max(16, 15 * lines));
   }
 }
 
@@ -147,15 +147,22 @@ export function applyMoney(cells: { getCell: (n: number) => { numFmt?: string; v
   }
 }
 
-export function setupPrint(ws: Worksheet, headerRow: number) {
+export function setupPrint(ws: Worksheet, headerRow: number, options?: { repeatHeader?: boolean; onePage?: boolean; printThroughColumn?: string }) {
+  const last = Math.max(ws.rowCount, headerRow);
   ws.pageSetup = {
     orientation: 'landscape',
     fitToPage: true,
     fitToWidth: 1,
-    fitToHeight: 0,
+    fitToHeight: options?.onePage ? 1 : 0,
+    horizontalCentered: true,
     showGridLines: false,
-    printTitlesRow: `${headerRow}:${headerRow}`,
+    ...(options?.repeatHeader ? { printTitlesRow: `${headerRow}:${headerRow}` } : {}),
+    ...(options?.printThroughColumn ? { printArea: `A1:${options.printThroughColumn}${last}` } : {}),
   };
+  ws.pageSetup.fitToWidth = 1;
+  ws.pageSetup.fitToHeight = options?.onePage ? 1 : 0;
+  if (options?.printThroughColumn) ws.pageSetup.printArea = `A1:${options.printThroughColumn}${last}`;
+  ws.headerFooter = { oddFooter: 'Page &P of &N', evenFooter: 'Page &P of &N' };
 }
 
 export function displayPaidBy(raw: string) {

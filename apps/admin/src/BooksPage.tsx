@@ -8,6 +8,8 @@ import { loadCdtfaPrintModel, type CdtfaPrintModel } from './books/cdtfaLoad';
 import { monthsInRange, parseFiling, spanBounds, spanTitle, type BooksSpan } from './books/booksSpan';
 import { addArchiveSheet, appendPdf, archivePlan, periodHasActivity, zipStore } from './books/booksArchive';
 import { fillCdtfaPdfBytes, loadCdtfaTemplate, paperToCdtfaDoc } from './books/cdtfaPdf';
+import { buildCdtfaWorksheet } from './books/cdtfaWorksheet';
+import { officialCdtfaPdf } from './books/cdtfaTrimClient';
 import { combineMonthWorkbooks, type BooksSlice } from './books/combineBooks';
 import type { CdtfaFrequency } from './books/cdtfaResolve';
 import { monthLabel } from './books/booksMath';
@@ -75,7 +77,7 @@ export function BooksPage({ client, storeId: storeIdProp, money, native = false,
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [exportsPreparing, setExportsPreparing] = useState(false);
-  const [exportFiles, setExportFiles] = useState<{ excel: Uint8Array; pdf: Uint8Array; taxPdf: Uint8Array | null } | null>(null);
+  const [exportFiles, setExportFiles] = useState<{ excel: Uint8Array; pdf: Uint8Array; taxPdf: Uint8Array | null; worksheet: Uint8Array | null } | null>(null);
   const [taxForm, setTaxForm] = useState<CdtfaPrintModel | null>(null);
   const [span, setSpan] = useState<BooksSpan>('month');
   const [filing, setFiling] = useState<CdtfaFrequency | null>(null);
@@ -253,14 +255,13 @@ export function BooksPage({ client, storeId: storeIdProp, money, native = false,
         const title = spanTitle(viewPeriod.period_start, span);
         const exportOptions = { title, slices, word: span === 'year' ? 'year' : span === 'quarter' ? 'quarter' : 'month' };
         if (span === 'month' && selected.status === 'locked') {
-          const [x, pdfRpc] = await Promise.all([
-            client.rpc('portal_books_frozen_export', { p_period: selected.id, p_format: 'excel' }),
+          const [builtExcel, pdfRpc] = await Promise.all([
+            buildBooksExcel(viewPeriod, workbook, title, exportOptions),
             client.rpc('portal_books_frozen_export', { p_period: selected.id, p_format: 'pdf' }),
           ]);
-          if (x.error) throw x.error;
           if (pdfRpc.error) throw pdfRpc.error;
           const decode = (value: string) => Uint8Array.from(atob(value), (c) => c.charCodeAt(0));
-          excel = decode(x.data as string);
+          excel = builtExcel instanceof Uint8Array ? builtExcel : new Uint8Array(builtExcel);
           pdf = decode(pdfRpc.data as string);
         } else {
           const [builtExcel, builtPdf] = await Promise.all([
@@ -273,16 +274,30 @@ export function BooksPage({ client, storeId: storeIdProp, money, native = false,
         const tax = await loadCdtfaPrintModel(client, viewPeriod.period_start, viewPeriod.period_end);
         if (!cancelled) setTaxForm(tax);
         let taxPdf: Uint8Array | null = null;
+        let taxWorksheet: Uint8Array | null = null;
         if (tax) {
           try {
             excel = await addCdtfaExcelSheet(excel, tax);
             pdf = await addCdtfaPdfPages(pdf, tax);
-            taxPdf = await fillCdtfaPdfBytes(await loadCdtfaTemplate(), paperToCdtfaDoc(tax));
+            const filled = await fillCdtfaPdfBytes(await loadCdtfaTemplate(), paperToCdtfaDoc(tax));
+            const district = tax.lines.find((line) => line.id === '16')?.dollars ?? 0;
+            const ready = await officialCdtfaPdf(filled, district);
+            taxPdf = ready.bytes;
+            taxWorksheet = await buildCdtfaWorksheet({
+              periodStart: tax.periodStart,
+              periodEnd: tax.periodEnd,
+              dueOn: tax.dueOn,
+              fileOn: tax.late ? new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' }) : tax.dueOn,
+              late: tax.late,
+              lines: tax.lines,
+              pageCount: ready.pageCount,
+              scheduleIncluded: district > 0 && !ready.warning,
+            });
           } catch (err) {
             console.error('sales tax form export', err);
           }
         }
-        if (!cancelled) setExportFiles({ excel, pdf, taxPdf });
+        if (!cancelled) setExportFiles({ excel, pdf, taxPdf, worksheet: taxWorksheet });
       } catch (e) {
         if (!cancelled) console.error('export prep', e);
       } finally { if (!cancelled) setExportsPreparing(false); }
@@ -371,10 +386,24 @@ export function BooksPage({ client, storeId: storeIdProp, money, native = false,
           word: item.kind === 'quarter' ? 'quarter' : 'month',
         });
         const reportPdf = built instanceof Uint8Array ? built : new Uint8Array(built);
-        const formPdf = await fillCdtfaPdfBytes(template, paperToCdtfaDoc(tax));
+        const filled = await fillCdtfaPdfBytes(template, paperToCdtfaDoc(tax));
+        const district = tax.lines.find((line) => line.id === '16')?.dollars ?? 0;
+        const ready = await officialCdtfaPdf(filled, district);
+        const formPdf = ready.bytes;
+        const worksheet = await buildCdtfaWorksheet({
+          periodStart: tax.periodStart,
+          periodEnd: tax.periodEnd,
+          dueOn: tax.dueOn,
+          fileOn: tax.late ? new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' }) : tax.dueOn,
+          late: tax.late,
+          lines: tax.lines,
+          pageCount: ready.pageCount,
+          scheduleIncluded: district > 0 && !ready.warning,
+        });
         const pdf = await appendPdf(reportPdf, formPdf);
         files.push({ name: `${item.title.replace(/\s+/g, '-')}.pdf`, bytes: pdf });
         files.push({ name: cdtfaPdfFileName(item.start, item.end), bytes: formPdf });
+        files.push({ name: `CDTFA-worksheet_${item.start.slice(0, 7)}_Open-Box-Industries.pdf`, bytes: worksheet });
         addArchiveSheet(book, item.title, workbook, tax);
       }
     } catch (e) {
@@ -389,10 +418,12 @@ export function BooksPage({ client, storeId: storeIdProp, money, native = false,
     if (!exportFiles) return;
     const xlsx = { name: `Books-${fileStem}.xlsx`, bytes: exportFiles.excel };
     if (exportFiles.taxPdf && viewPeriod) {
-      downloadBytes(`Books-${fileStem}.zip`, zipStore([
+      const files = [
         xlsx,
         { name: cdtfaPdfFileName(viewPeriod.period_start, viewPeriod.period_end), bytes: exportFiles.taxPdf },
-      ]), 'application/zip');
+      ];
+      if (exportFiles.worksheet) files.push({ name: `CDTFA-worksheet_${viewPeriod.period_start.slice(0, 7)}_Open-Box-Industries.pdf`, bytes: exportFiles.worksheet });
+      downloadBytes(`Books-${fileStem}.zip`, zipStore(files), 'application/zip');
       return;
     }
     downloadBytes(xlsx.name, xlsx.bytes, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');

@@ -67,6 +67,7 @@ export function combineMonthWorkbooks(slices: BooksSlice[]): BooksWorkbook {
     payouts: combinePayouts(books.map((book) => book.payouts), totals),
     inventory: combineInventory(first.inventory, last.inventory, books.map((book) => book.inventory)),
     received: books.flatMap((book) => book.received),
+    manifested_units: books.reduce((n, book) => n + (book.manifested_units || 0), 0),
   };
 }
 
