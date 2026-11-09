@@ -114,7 +114,7 @@ export function ReceiveCategoryAspects({
         setSuggestions([]);
         setSuggestError(plainCategoryError(error));
       });
-    }, 450);
+    }, 0);
     return () => { active = false; clearTimeout(t); };
   }, [identity.title, identity.brand, value.categoryId, accessToken, storeId]);
 
