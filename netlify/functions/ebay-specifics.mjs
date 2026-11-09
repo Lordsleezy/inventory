@@ -140,7 +140,8 @@ async function handle(event) {
       }
     }
     const sku = String(body.sku || "").trim();
-    if (!sku) return json(400, { error: "sku_required" });
+    // Receive can search and preview a category before a unit row exists.
+    if (!sku && body.action !== "preview-receive") return json(400, { error: "sku_required" });
     const sb = serviceClient();
     const deps = supabaseSpecificsDeps(sb, { catalog: catalogProductByGtin, aspectFields: (id) => ebayAspectFields(storeId, id),
       loadLive: (sid, s) => liveSpecificsForUnit(sid, s) });

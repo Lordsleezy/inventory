@@ -417,3 +417,111 @@ html.app-mode .nr-links button {
   border: 0; background: transparent; color: #fff; font-size: 15px; min-height: 44px; padding: 0;
 }
 html.app-mode .nr-empty { padding: 18px 0; text-align: left; }
+
+/* Phone item edit and phone receive only. Desktop has no html.app-mode. */
+html.app-mode .receive-panel.receive-v2 {
+  padding-bottom: calc(170px + env(safe-area-inset-bottom, 0px));
+}
+html.app-mode .app-edit-section-chips button,
+html.app-mode .app-edit-section-chips button.is-active {
+  background: transparent !important;
+  color: #9a9a9a !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+html.app-mode .app-edit-section-chips button.is-active {
+  color: #fff !important;
+  border-bottom: 2px solid #fff !important;
+}
+html.app-mode .app-unit-edit .unit-edit-grid:not(.unit-edit-price-pair) {
+  grid-template-columns: minmax(0, 1fr) !important;
+  background: transparent !important;
+}
+html.app-mode .app-unit-edit .unit-edit-grid > label {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) !important;
+  justify-content: stretch !important;
+  align-items: stretch !important;
+  height: auto !important;
+  overflow: visible !important;
+}
+html.app-mode .app-unit-edit .unit-edit-grid label input,
+html.app-mode .app-unit-edit .unit-edit-grid label textarea,
+html.app-mode .app-unit-edit .unit-edit-upc-fields input {
+  width: 100% !important;
+  max-width: 100% !important;
+  text-align: left !important;
+  color: #fff !important;
+}
+html.app-mode .app-unit-edit .unit-edit-cost-empty input { border-color: #4a4a4a !important; }
+html.app-mode .app-unit-edit .unit-stock-stepper,
+html.app-mode .app-unit-edit .unit-stock-stepper button,
+html.app-mode .app-unit-edit .unit-edit-quantity-display {
+  color: #fff !important;
+  background: transparent !important;
+  border-color: #fff;
+}
+html.app-mode .aspect-suggested { display: none !important; }
+html.app-mode .app-unit-edit .unit-edit-chevron-row {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 12px !important;
+}
+html.app-mode .unit-edit-chevron-row select {
+  width: auto !important;
+  max-width: 60% !important;
+  text-align: right !important;
+  background: transparent !important;
+  border: 0 !important;
+  color: #fff !important;
+}
+html.app-mode .receive-panel.receive-v2 .rcv-sec-btn {
+  grid-template-columns: minmax(0, 1fr) auto auto !important;
+}
+html.app-mode .receive-panel.receive-v2 .rcv-sec-btn strong { white-space: normal !important; }
+html.app-mode .receive-panel.receive-v2 .rcv-status {
+  overflow: visible !important;
+  text-overflow: clip !important;
+  white-space: nowrap !important;
+}
+html.app-mode .receive-panel.receive-v2 .receive-v2-pin {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+html.app-mode .receive-panel.receive-v2 .rcv-needed { grid-column: 1 / -1; margin: 0; }
+html.app-mode .receive-panel.receive-v2 .receive-v2-pin button.receive-v2-save,
+html.app-mode .receive-panel.receive-v2 .receive-v2-pin button.rcv-scan-next {
+  width: 100%;
+  margin: 0;
+  min-height: 44px;
+}
+html.app-mode .receive-panel.receive-v2 .receive-v2-pin button:disabled,
+html.app-mode .receive-panel.receive-v2 .receive-v2-pin button.is-dim {
+  background: transparent !important;
+  color: #9a9a9a !important;
+  border: 1px solid #4a4a4a !important;
+  opacity: 1 !important;
+}
+html.app-mode .receive-panel.receive-v2 .rcv-dnl,
+html.app-mode .receive-panel.receive-v2 .rcv-dnl label {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) !important;
+  height: auto !important;
+  max-height: none !important;
+  overflow: visible !important;
+}
+html.app-mode .receive-panel.receive-v2 .rcv-dnl input {
+  display: block !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  min-height: 48px !important;
+  color: #fff !important;
+  background: #000 !important;
+}
+html.app-mode .receive-panel.receive-v2 .rcv-cat.is-on .rcv-radio {
+  background: #fff;
+  border-color: #fff;
+}

@@ -50,7 +50,7 @@ test('not-for-sale brand is not a separate gate anymore', () => {
 test('missing fields open the matching section', () => {
   assert.equal(receiveSectionForGap('photo'), 'photos');
   assert.equal(receiveSectionForGap('dimensions'), 'size');
-  assert.equal(receiveSectionForGap('location'), 'size');
+  assert.equal(receiveSectionForGap('location'), 'location');
   assert.equal(receiveSectionForGap('price'), 'price');
   assert.equal(receiveSectionForGap('brand'), 'item');
 });
