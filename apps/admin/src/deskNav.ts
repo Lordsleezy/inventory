@@ -78,7 +78,8 @@ export const HOME_REPORT_LINKS: DeskLink[] = [
 
 export const ASSOCIATE_LINKS: DeskLink[] = [
   { page: 'register', label: 'Register', hint: 'Point of sale' },
-  { page: 'inventory', label: 'Inventory', hint: 'Units on hand' },
+  { page: 'inventory', label: 'Inventory', hint: 'Units on hand', inventoryTab: 'in-stock' },
+  { page: 'inventory', label: 'Receive', hint: 'Add a unit', inventoryTab: 'receive' },
   { page: 'orders', label: 'Orders', hint: 'Ship & track' },
   { page: 'locations', label: 'Locations', hint: 'Bays & bins' },
   { page: 'settings', label: 'Settings', hint: 'Your account' },
