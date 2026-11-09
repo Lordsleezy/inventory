@@ -79,7 +79,8 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
     try {
       const { data, error: e } = await client.rpc('portal_web_orders', { p_days: 400 });
       if (e) throw e;
-      const list = (Array.isArray(data) ? data as WebOrder[] : []).filter((o) => o.payment_env !== 'sandbox' && !(o.order_no || '').toLowerCase().startsWith('sandbox'));
+      const raw = Array.isArray(data) ? (data as WebOrder[]) : [];
+      const list = raw.filter((o) => o.payment_env !== 'sandbox' && !(o.order_no || '').toLowerCase().startsWith('sandbox'));
       setOrders(list);
       setOpen((prev) => (prev ? list.find((o) => o.id === prev.id) || prev : null));
       const skus = [...new Set(list.map((o) => o.sku).filter(Boolean))];
