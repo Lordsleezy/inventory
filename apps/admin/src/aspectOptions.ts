@@ -1,6 +1,6 @@
 // What the eBay item-specific picker shows. Pure so it can be tested: allowed values, most used in Floor first, live filtering,
 // and the "Use '<typed>'" option only where eBay allows free text.
-export type AspectDef = { name: string; required?: boolean; recommended?: boolean; allowed?: string[]; selection_only?: boolean };
+export type AspectDef = { name: string; required?: boolean; recommended?: boolean; allowed?: string[]; selection_only?: boolean; multi?: boolean; maxLength?: number };
 
 export const MAX_SHOWN = 60;
 

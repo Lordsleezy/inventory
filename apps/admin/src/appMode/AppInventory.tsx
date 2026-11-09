@@ -14,7 +14,9 @@ import { hydratePhotoUrlCache, listThumbPathsFromOriginals, persistPhotoUrlCache
 import { UnitListThumb } from '../UnitListThumb';
 
 /** Same stock subtabs as desktop Inventory. */
-type Filter = 'in_stock' | 'sold' | 'unfinished' | 'needs_check' | 'no_location' | 'missing_cost' | 'defective' | 'dns' | 'never_list' | InventoryBucket;
+type Filter = 'in_stock' | 'sold' | 'unfinished' | 'needs_check' | 'no_location' | 'missing_cost' | 'ebay_fix' | 'defective' | 'dns' | 'never_list' | InventoryBucket;
+
+type EbayFix = { count: number; items: { sku: string; title: string; issue: string }[] };
 
 type Row = GroupedInventory & {
   sku: string;
@@ -120,6 +122,7 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
   const searchRef = useRef<HTMLInputElement>(null);
   const tabRowRef = useRef<HTMLDivElement>(null);
   const [missingCostCount, setMissingCostCount] = useState<number | null>(null);
+  const [ebayFix, setEbayFix] = useState<EbayFix | null>(null);
   const [noLocSelecting, setNoLocSelecting] = useState(false);
   const [noLocSelected, setNoLocSelected] = useState<Set<string>>(() => new Set());
   const [noLocBins, setNoLocBins] = useState<string[]>([]);
@@ -209,7 +212,7 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
     const apply = (extra: Record<string, string>) => {
       if (alive) mergeUrls(extra);
     };
-    if (filter === 'missing_cost') {
+    if (filter === 'missing_cost' || filter === 'ebay_fix') {
       setLoading(false);
       return;
     }
@@ -255,6 +258,16 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
     };
   }, [client, filter, query, offset, staffMode, cacheScope, refreshKey, queueRefresh]);
 
+  useEffect(() => {
+    let alive = true;
+    void client.rpc('portal_ebay_needs_fix').then(({ data, error: e }) => {
+      if (!alive) return;
+      if (e) setError(e.message);
+      else setEbayFix((data || { count: 0, items: [] }) as EbayFix);
+    });
+    return () => { alive = false; };
+  }, [client, refreshKey]);
+
   const total = list?.totals.unit_count ?? 0;
   // Physical pieces (a row of 12 bottles counts 12); falls back to rows until the DB returns piece_count.
   const pageRows = list?.totals.row_count ?? total;
@@ -266,11 +279,12 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
     if (filter === 'needs_check') return `${pieces} units need to be checked${rowsNote}`;
     if (filter === 'no_location') return `${pieces} in-stock units need a location${rowsNote}`;
     if (filter === 'missing_cost') return `${missingCostCount ?? 0} units missing a cost`;
+    if (filter === 'ebay_fix') return `${ebayFix?.count ?? 0} need an eBay fix`;
     if (filter === 'sold') return `${pieces} units sold${rowsNote}`;
     if (filter === 'dns') return `${pieces} units DNS / Do not ship${rowsNote}`;
     if (filter === 'defective') return `${pieces} units defective / not for sale${rowsNote}`;
     return `${pieces} units in stock${rowsNote}`;
-  }, [filter, total, pieces, rowsNote, missingCostCount]);
+  }, [filter, total, pieces, rowsNote, missingCostCount, ebayFix?.count]);
 
   function setFilterTab(next: Filter) {
     setFilter(next);
@@ -318,6 +332,7 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
         {((staffMode ? [
           ['in_stock', 'In stock', null],
           ['sold', 'Sold', null],
+          ['ebay_fix', 'Needs eBay fix', ebayFix?.count],
         ] : [
           ['in_stock', 'In stock', null],
           ['listed', 'Listed', cardTotals?.listed],
@@ -328,6 +343,7 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
           ['dns', 'DNS', cardTotals?.dns],
           ['defective', 'Defective', cardTotals?.defective],
           ['never_list', 'Never list', cardTotals?.never_list],
+          ['ebay_fix', 'Needs eBay fix', ebayFix?.count],
           ...(fullAccess ? [['missing_cost', 'Missing cost', missingCostCount] as const] : []),
         ]) as [Filter, string, number | null | undefined][]).map(([id, label, count]) => (
           <button
@@ -371,6 +387,25 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
         </>
       )}
 
+      {filter === 'ebay_fix' && error && <p className="app-inline-error">{error}</p>}
+      {filter === 'ebay_fix' && (
+        <div className="app-group">
+          {(ebayFix?.items || []).filter((row) => {
+            const q = query.trim().toLowerCase();
+            return !q || row.title.toLowerCase().includes(q) || row.sku.toLowerCase().includes(q) || row.issue.toLowerCase().includes(q);
+          }).map((row) => (
+            <button key={row.sku} type="button" className="app-row" onClick={() => onOpen(row.sku)}>
+              <span className="app-row-text">
+                <strong className="app-row-title">{row.title}</strong>
+                <small className="app-sku-line"><span className="lbl">SKU</span> <strong>{row.sku}</strong></small>
+                <small className="warn">{row.issue}</small>
+              </span>
+            </button>
+          ))}
+          {ebayFix && ebayFix.items.length === 0 && <div className="app-empty-row">Nothing needs an eBay fix.</div>}
+        </div>
+      )}
+
       {filter === 'missing_cost' && fullAccess && (
         <MissingCostList
           client={client}
@@ -382,11 +417,11 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
         />
       )}
 
-      {filter !== 'missing_cost' && error && <p className="app-inline-error">{error}</p>}
-      {filter !== 'missing_cost' && loading && !list && <p className="app-footer-count">Loading…</p>}
-      {filter !== 'missing_cost' && loading && list ? <p className="app-footer-count">Updating…</p> : null}
+      {filter !== 'missing_cost' && filter !== 'ebay_fix' && error && <p className="app-inline-error">{error}</p>}
+      {filter !== 'missing_cost' && filter !== 'ebay_fix' && loading && !list && <p className="app-footer-count">Loading…</p>}
+      {filter !== 'missing_cost' && filter !== 'ebay_fix' && loading && list ? <p className="app-footer-count">Updating…</p> : null}
 
-      {filter !== 'missing_cost' && <div className="app-group">
+      {filter !== 'missing_cost' && filter !== 'ebay_fix' && <div className="app-group">
         {(list?.items || []).map((u, idx, arr) => {
           if(u.group_id && (u.group_total || 0) > 1 && !staffMode) return <ReceiveGroupRow key={u.group_id} item={u} client={client} admin={fullAccess} money={money} onOpen={onOpen} searchQuery={query} onChanged={()=>{setList(null);setQueueRefresh(n=>n+1)}} />;
           const warn = filter === 'dns' ? null : needs(u);
@@ -457,7 +492,7 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
         )}
       </div>}
 
-      {filter !== 'missing_cost' && noLocSelecting && noLocSelected.size > 0 && (
+      {filter !== 'missing_cost' && filter !== 'ebay_fix' && noLocSelecting && noLocSelected.size > 0 && (
         <div className="app-bulk-bar">
           <select value={noLocBin} onChange={(e) => setNoLocBin(e.target.value)} aria-label="Assign location">
             <option value="">Choose location…</option>
@@ -470,8 +505,9 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
         </div>
       )}
 
-      {filter !== 'missing_cost' && <div className="app-footer-count">{footer}</div>}
-      {filter !== 'missing_cost' && pageRows > PAGE && (
+      {filter !== 'missing_cost' && filter !== 'ebay_fix' && <div className="app-footer-count">{footer}</div>}
+      {filter === 'ebay_fix' && <div className="app-footer-count">{footer}</div>}
+      {filter !== 'missing_cost' && filter !== 'ebay_fix' && pageRows > PAGE && (
         <div className="app-actions" style={{ gridTemplateColumns: '1fr 1fr' }}>
           <button type="button" disabled={offset === 0 || loading} onClick={() => setOffset(Math.max(0, offset - PAGE))}>Previous</button>
           <button type="button" disabled={offset + PAGE >= pageRows || loading} onClick={() => setOffset(offset + PAGE)}>Next</button>

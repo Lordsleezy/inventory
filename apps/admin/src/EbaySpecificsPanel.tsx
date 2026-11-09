@@ -83,25 +83,36 @@ export function EbaySpecificsPanel({ client, sku, storeId, appMode = false, onSa
     return () => { active = false; };
   }, [client, sku]);
 
+  async function suggestTitle(title: string) {
+    const result = await call('suggest-for-title', { title });
+    if (result.ok === false) throw new Error(String(result.error || 'eBay is unreachable. Retry. Nothing was saved.'));
+    return ((result.suggestions || []) as Choice[]).map((row) => ({
+      category_id: String((row as Choice & { category_id?: string }).category_id || ''),
+      path: String(row.path || ''),
+    })).filter((row) => row.category_id);
+  }
+
   useEffect(() => {
-    if (!canPick || !query.trim()) { setChoices([]); return; }
+    if (!canPick || query.trim().length < 3) { setChoices([]); return; }
     let active = true;
     const timer = setTimeout(() => {
-      void client.rpc('portal_category_search', { p_channel: 'ebay', p_query: query.trim(), p_limit: 60 })
-        .then(({ data, error: e }) => { if (active) { if (e) setError(e.message); else setChoices((data || []) as Choice[]); } });
-    }, 200);
+      void suggestTitle(query.trim())
+        .then((rows) => { if (active) setChoices(rows); })
+        .catch((e) => { if (active) setError(e instanceof Error ? e.message : String(e)); });
+    }, 450);
     return () => { active = false; clearTimeout(timer); };
-  }, [client, canPick, query]);
+  }, [canPick, query]);
 
   useEffect(() => {
     if (!canPick || !form?.item) { setSuggestions([]); return; }
     let active = true;
-    const itemQuery = [form.item.brand, form.item.model, form.item.title].filter(Boolean).join(' ');
-    if (!itemQuery.trim()) { setSuggestions([]); return; }
-    void client.rpc('portal_category_search', { p_channel: 'ebay', p_query: itemQuery, p_limit: 3 })
-      .then(({ data, error: e }) => { if (active) setSuggestions(e ? [] : (data || []) as Choice[]); });
+    const itemQuery = [form.item.title, form.item.brand].filter(Boolean).join(' ');
+    if (itemQuery.trim().length < 3) { setSuggestions([]); return; }
+    void suggestTitle(itemQuery)
+      .then((rows) => { if (active) setSuggestions(rows); })
+      .catch(() => { if (active) setSuggestions([]); });
     return () => { active = false; };
-  }, [client, canPick, form?.item?.brand, form?.item?.model, form?.item?.title]);
+  }, [canPick, form?.item?.brand, form?.item?.title]);
 
   const visibleFields = useMemo(
     () => (form?.fields || []).filter((f) => !(hideBrandAspect && /^brand$/i.test(f.name))),

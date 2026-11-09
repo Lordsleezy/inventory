@@ -335,12 +335,42 @@ html.app-mode .receive-panel.receive-v2 .rcv-sec {
 html.app-mode .receive-panel.receive-v2 .rcv-sec-btn {
   border: 0 !important; border-radius: 0 !important; background: transparent !important;
   box-shadow: none !important; min-height: 48px; padding: 12px 0 !important;
-  display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; width: 100%;
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; width: 100%;
 }
-html.app-mode .receive-panel.receive-v2 .rcv-sec-btn strong { font-size: 17px; white-space: nowrap; }
-html.app-mode .receive-panel.receive-v2 .rcv-status { font-size: 14px; font-style: normal; overflow: hidden; text-overflow: ellipsis; max-width: 42vw; }
+html.app-mode .receive-panel.receive-v2 .rcv-sec-btn strong { font-size: 17px; white-space: nowrap; overflow: visible; }
+html.app-mode .receive-panel.receive-v2 .rcv-status {
+  font-size: 14px; font-style: normal; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; min-width: 0; text-align: right;
+}
 html.app-mode .receive-panel.receive-v2 .receive-v2-label,
 html.app-mode .receive-panel.receive-v2 .rcv-sec-body label { font-size: 13px !important; color: #9a9a9a; }
+html.app-mode .receive-panel.receive-v2 .rcv-sec-body input[type=checkbox] { width: 22px; height: 22px; flex: 0 0 22px; }
+html.app-mode .receive-panel.receive-v2 .rcv-check { display: flex; align-items: center; gap: 8px; min-height: 44px; white-space: nowrap; }
+html.app-mode .receive-panel.receive-v2 .rcv-cat {
+  display: grid; width: 100%; text-align: left; background: none; border: 0; border-bottom: 1px solid #2a2a2a;
+  color: #fff; padding: 10px 0; border-radius: 0; box-shadow: none;
+}
+html.app-mode .receive-panel.receive-v2 .rcv-cat strong { font-size: 16px; font-weight: 700; }
+html.app-mode .receive-panel.receive-v2 .rcv-cat small { display: block; color: #9a9a9a; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+html.app-mode .receive-panel.receive-v2 .rcv-stock { display: flex; gap: 10px; align-items: center; }
+html.app-mode .receive-panel.receive-v2 .rcv-stock img,
+html.app-mode .receive-panel.receive-v2 .rcv-stock-miss { width: 56px; height: 56px; object-fit: cover; border-radius: 6px; background: #1c1c1e; color: #9a9a9a; font-size: 11px; display: grid; place-items: center; text-align: center; }
+html.app-mode .receive-panel.receive-v2 .rcv-stock figcaption { display: grid; gap: 2px; }
+html.app-mode .receive-panel.receive-v2 .rcv-stock figcaption strong { font-size: 14px; }
+html.app-mode .receive-panel.receive-v2 .rcv-stock figcaption small,
+html.app-mode .receive-panel.receive-v2 .rcv-note { color: #9a9a9a; font-size: 12px; }
+html.app-mode .receive-panel.receive-v2 .receive-v2-pin {
+  position: sticky; bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+  z-index: 25; background: #000; padding: 8px 0 12px;
+}
+html.app-mode .receive-panel.receive-v2 .receive-v2-pin button.receive-v2-save:disabled,
+html.app-mode .receive-panel.receive-v2 .receive-v2-save.is-dim {
+  opacity: 1; background: transparent; color: #9a9a9a; border: 1px solid #4a4a4a;
+}
+html.app-mode .receive-panel.receive-v2 .receive-v2-pin button.rcv-scan-next:disabled,
+html.app-mode .receive-panel.receive-v2 .rcv-scan-next.is-dim {
+  opacity: 1; color: #9a9a9a; border-color: #4a4a4a;
+}
 html.app-mode .receive-panel.receive-v2 .rcv-note,
 html.app-mode .receive-panel.receive-v2 .quantity-picker > small { font-size: 12px; color: #9a9a9a; }
 html.app-mode .receive-panel.receive-v2 .rcv-needed {

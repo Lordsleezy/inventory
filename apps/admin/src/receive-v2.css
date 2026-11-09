@@ -78,8 +78,12 @@ html.dark .receive-panel.receive-v2,
   font-weight: 600;
 }
 
-.receive-panel.receive-v2 .receive-v2-pin button.receive-v2-save:disabled {
-  opacity: 0.35;
+.receive-panel.receive-v2 .receive-v2-pin button.receive-v2-save:disabled,
+.receive-v2-save.is-dim {
+  opacity: 1;
+  background: transparent;
+  color: #9a9a9a;
+  border: 1px solid #4a4a4a;
 }
 
 .receive-panel.receive-v2 .receive-v2-footnote {
@@ -268,13 +272,12 @@ html.app-mode .receive-panel fieldset { max-width: 100%; min-width: 0; box-sizin
 html.app-mode .quantity-picker-controls { flex-wrap: wrap; }
 html.app-mode .quantity-picker-controls select,
 html.app-mode .quantity-picker-controls input { min-width: 0; width: 100%; max-width: 100%; }
-html.app-mode .receive-app-nav button.is-dim,
-.receive-v2-save.is-dim { opacity: 0.35; }
+html.app-mode .receive-app-nav button.is-dim { opacity: 1; color: #9a9a9a; }
 
 .rcv-sec { border-bottom: 1px solid #2a2a2a; }
 .rcv-sec-btn {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 8px;
   align-items: center;
   width: 100%;
@@ -286,14 +289,20 @@ html.app-mode .receive-app-nav button.is-dim,
   text-align: left;
   font: inherit;
 }
-.rcv-sec-btn strong { font-size: 16px; }
+.rcv-sec-btn strong { font-size: 16px; white-space: nowrap; }
 .rcv-star, .rcv-status.bad, .rcv-needed { color: #FF453A; }
-.rcv-status { font-style: normal; color: #9a9a9a; font-size: 14px; }
+.rcv-status { font-style: normal; color: #9a9a9a; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; text-align: right; }
 .rcv-sec-body { display: grid; gap: 12px; padding: 0 0 14px; min-width: 0; }
 .rcv-sec-body input, .rcv-sec-body select, .rcv-sec-body textarea { width: 100%; box-sizing: border-box; }
+.rcv-sec-body input[type=checkbox] { width: 22px; height: 22px; flex: 0 0 22px; }
 .rcv-found { display: grid; gap: 2px; padding: 8px 0 12px; }
 .rcv-found small, .rcv-note, .rcv-cat small, .rcv-cat-full, .rcv-stock figcaption { color: #9a9a9a; font-size: 13px; }
-.rcv-cat { display: grid; width: 100%; text-align: left; background: none; border: 0; color: #fff; padding: 8px 0; min-height: 44px; }
+.rcv-cat { display: grid; grid-template-columns: 18px minmax(0, 1fr); column-gap: 8px; width: 100%; text-align: left; background: none; border: 0; border-bottom: 1px solid #2a2a2a; color: #fff; padding: 8px 0; min-height: 44px; }
+.rcv-radio { grid-row: span 2; width: 16px; height: 16px; border: 1px solid #4a4a4a; border-radius: 50%; align-self: center; }
+.rcv-cat em { margin-left: 8px; color: #9a9a9a; font-style: normal; font-size: 13px; font-weight: 500; }
+.rcv-ebay-rows p { display: flex; justify-content: space-between; gap: 12px; margin: 0; padding: 8px 0; border-bottom: 1px solid #2a2a2a; }
+.rcv-ebay-rows span { color: #9a9a9a; }
+.rcv-ebay-rows strong { text-align: right; }
 .rcv-cat small, .rcv-cat-full { white-space: normal; overflow-wrap: anywhere; }
 .rcv-check { display: flex; align-items: center; gap: 10px; min-height: 44px; }
 .rcv-check input { width: 22px; height: 22px; accent-color: #fff; }

@@ -16,6 +16,7 @@ import { ManifestReceiveReference, useManifestReceiveReference } from './Manifes
 import { BundleReceive } from './BundleReceive';
 const MeasureOnMat = lazy(() => import('./MeasureOnMat').then(module => ({ default: module.MeasureOnMat })));
 import { receiveSpecifics, receiveVariant } from '../../../shared/receive-specifics.mjs';
+import { ebayDetailsStatus } from '../../../shared/ebay-category-present.mjs';
 import { filterCategoryOptions, isMattressAccessory, matchReceiveCategory } from '../../../shared/receive-category.mjs';
 import { notForSaleBrandError, receiveMissingFields, missingEbayAspects, upcRequired, receiveFieldMessage, receiveSectionForGap, type ReceiveFieldKey } from './receive-validation';
 import { ReceiveSection } from './ReceiveSection';
@@ -656,6 +657,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   const [stockPhotoUrls, setStockPhotoUrls] = useState<{ url: string; source: string }[]>([]);
   const [stockPhotoBusy, setStockPhotoBusy] = useState(false);
   const [stockPhotoError, setStockPhotoError] = useState('');
+  const [stockPhotoBroken, setStockPhotoBroken] = useState(false);
   const [manual, setManual] = useState(!!initialManual);
   const [draft, setDraft] = useState('');
   const [queue, setQueue] = useState<Scan[]>([]);
@@ -922,7 +924,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || typeof data.path !== 'string') throw new Error(data.message || 'Stock photo unavailable');
-      if (activeScan.current === scanId) { setStockPhotoPath(data.path); setStockPhotoSourceUrl(url); }
+      if (activeScan.current === scanId) { setStockPhotoPath(data.path); setStockPhotoSourceUrl(url); setStockPhotoBroken(false); }
       return data.path;
     } catch {
       if (activeScan.current === scanId) setStockPhotoError('Stock photo could not be saved. Tap the save button to retry, or add a unit photo.');
@@ -1128,6 +1130,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     setStagedPhotoPaths([]);
     setStockPhotoPath('');
     setStockPhotoSourceUrl('');
+    setStockPhotoBroken(false);
     setStockPhotoUrls((r?.stock_photos || m?.images?.map(url => ({ url: String(url), source: 'catalog' })) || []).slice(0, 6));
     setStockPhotoError('');
     // Instant miss popup (photo fallback). Do not re-prompt the same scan id.
@@ -1289,6 +1292,12 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     return receiveMissingFields({ doNotList: false, brandReady: brandReady(), otherGaps: out, hasPhoto: photo, quantityOk, defective: mediaWaived, hasDimensions, hasLocation });
   }
   const liveMissing = missingFor(parse() || { ask: null, cost: null, dims: [null, null, null, null] });
+  const ebayCheck = ebayDetailsStatus({
+    categoryId: ebayAspects.categoryId || '',
+    fields: ebayAspects.fields,
+    attributes: ebayAspects.attributes,
+    conditionAllowed: Boolean(form.condition) && (ebayAspects.allowedGrades || []).some(grade => grade.grade === form.condition || (isDefectiveCondition(form.condition) && grade.grade === 'For parts')),
+  });
   const formValid = liveMissing.length === 0 && (doNotList || channelMissing === 0);
 
   /* ----- finish ----- */
@@ -1387,6 +1396,9 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           dns: !staffMode && doNotShip, do_not_list: doNotList, defective: isDefectiveCondition(form.condition),
           channels: staffMode ? [] : channels, enrichment,
           stock_photo_paths: acceptedStockPhotoPath ? [acceptedStockPhotoPath] : [],
+          ebay_category_id: doNotList ? null : ebayAspects.categoryId,
+          ebay_attributes: doNotList ? {} : ebayAspects.attributes,
+          ebay_condition_id: doNotList ? null : (ebayAspects.allowedGrades || []).find(grade => grade.grade === form.condition)?.conditionId || null,
           photo_identity_confirmed: photoTitleConfirmed,
           photo_identity_type: photoTitleConfirmed ? text(photoIdentity?.item_type) : '' },
       });
@@ -1402,7 +1414,9 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
               attributes: ebayAspects.attributes,
             }),
           });
-        } catch { /* receive succeeded; specifics can be finished in item edit */ }
+        } catch (categoryError) {
+          setWarning(`Item saved, but the eBay category did not stick: ${errText(categoryError)}`);
+        }
       }
       if (acceptedStockPhotoPath && stockPhotoSourceUrl) {
         void attachStockPhotoSources(skus, String(form.upc || current?.upc || ''), acceptedStockPhotoPath,
@@ -2234,7 +2248,14 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         </div>)}
         {unifiedV2 && !(staffMode && doNotList) && <ReceiveSection id="photos" title="Photos" required={!mediaWaived} open={openSec === 'photos'} onOpen={setOpenSec}
           tone={!personPhotoReady() && !mediaWaived ? 'bad' : 'muted'}
-          status={personPhotoReady() ? `${files.length || stagedPhotoPaths.length} photo${(files.length || stagedPhotoPaths.length) === 1 ? '' : 's'}${(stockPhotoPath || hasCatalogPhoto) ? ' + stock' : ''}` : mediaWaived ? (doNotList ? 'Optional (not listed)' : 'Optional (defective)') : 'Required'}>
+          status={(() => {
+            const count = files.length || stagedPhotoPaths.length;
+            const stock = Boolean(stockPhotoPath || stockPhotoSourceUrl || merged?.images?.[0]);
+            if (mediaWaived) return doNotList ? 'Optional (not listed)' : 'Optional (defective)';
+            if (count > 0) return `${count} photo${count === 1 ? '' : 's'}${stock ? ' + stock' : ''}`;
+            if (stock) return 'Needs your photo';
+            return 'Required';
+          })()}>
         <div ref={el => { fieldRefs.current.photo = el; }} className={invalid('photo') ? 'receive-v2-invalid' : undefined}>
           <div className="receive-v2-photo-actions">
             <input ref={takePhotoFile} type="file" accept="image/*" capture="environment" className="sr-only" aria-hidden tabIndex={-1}
@@ -2257,10 +2278,15 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
               });
             }}>Remove</button>
           </figure>)}</div>}
-          {(stockPhotoSourceUrl || merged?.images?.[0]) && <figure className="rcv-stock">
-            <img src={stockPhotoSourceUrl || String(merged?.images?.[0] || '')} alt="" />
-            <figcaption>Stock photo (from UPC)</figcaption>
-          </figure>}
+          {(stockPhotoSourceUrl || merged?.images?.[0]) ? <figure className="rcv-stock">
+            {stockPhotoBroken
+              ? <div className="rcv-stock-miss">Stock photo unavailable</div>
+              : <img src={stockPhotoSourceUrl || String(merged?.images?.[0] || '')} alt="" onError={() => setStockPhotoBroken(true)} />}
+            <figcaption>
+              <strong>Stock photo</strong>
+              <small>Pulled from the UPC and saved with the item. You still need to add your own photo.</small>
+            </figcaption>
+          </figure> : (!manual && current && !trueMiss && !stockPhotoBusy ? <p className="rcv-note">No stock photo found</p> : null)}
           {invalid('photo') && <span className="receive-v2-msg">{receiveFieldMessage('photo')}</span>}
         </div>
         </ReceiveSection>}
@@ -2269,14 +2295,14 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           tone={liveMissing.some(g => receiveSectionForGap(g) === 'item') ? 'bad' : 'muted'}
           status={liveMissing.filter(g => receiveSectionForGap(g) === 'item').length
             ? (liveMissing.filter(g => receiveSectionForGap(g) === 'item').length === 1
-              ? liveMissing.find(g => receiveSectionForGap(g) === 'item') || 'Required'
+              ? ({ category: 'Category', brand: 'Brand', 'item specifics': 'Specifics' } as Record<string, string>)[liveMissing.find(g => receiveSectionForGap(g) === 'item') || ''] || 'Required'
               : `${liveMissing.filter(g => receiveSectionForGap(g) === 'item').length} missing`)
             : (brandReady() ? `${form.unbranded ? 'Unbranded' : form.brand}${form.category ? ` · ${form.category}` : ''}` : 'Required')}>
         <label ref={el => { fieldRefs.current.brand = el; }} className={`receive-v2-span2${invalid('brand') ? ' receive-v2-invalid' : ''}`}>
           <span className="receive-v2-label">Brand{!doNotList && <span className="receive-v2-req"> *</span>}</span>
           <input placeholder="Type brand" value={form.unbranded ? 'Unbranded' : form.brand} disabled={form.unbranded} onChange={e => update('brand', e.target.value)} />
         </label>
-        <label className="mboard-inline receive-v2-span2">
+        <label className="rcv-check receive-v2-span2">
           <input type="checkbox" checked={form.unbranded} onChange={e => setForm(p => ({ ...p, unbranded: e.target.checked, title: composeListingTitle(p.brand, p.model, e.target.checked) }))} />
           No brand
         </label>
@@ -2300,6 +2326,10 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           value={ebayAspects}
           onChange={next => {
             setEbayAspects(next);
+            const grades = next.allowedGrades || [];
+            const stillAllowed = !form.condition || grades.length === 0 || grades.some(grade => grade.grade === form.condition) || isDefectiveCondition(form.condition);
+            if (!stillAllowed) update('condition', grades.length === 1 ? grades[0].grade : '');
+            else if (grades.length === 1 && !form.condition) update('condition', grades[0].grade);
             const modelGuess = next.attributes.Model || next.attributes.Type || next.attributes['Model Number'] || '';
             if (modelGuess && !form.model.trim()) update('model', modelGuess);
           }}
@@ -2322,10 +2352,14 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         </div>
         <div className={invalid('condition') ? 'receive-v2-invalid' : undefined}>
           <span className="receive-v2-label">Condition{!doNotList && <span className="receive-v2-req"> *</span>}</span>
-          <select value={form.condition} onChange={e => update('condition', e.target.value)}>
-            <option value="">Select</option>
-            {(manual ? [...new Set([...choices(options?.conditions), SCRATCH])].map(x => [x, x] as [string, string]) : CONDITIONS).map(([value, text2]) => <option key={value} value={value}>{text2}</option>)}
-          </select>
+          {(ebayAspects.allowedGrades || []).length === 0
+            ? <p className="rcv-note">Pick a category first. eBay decides which conditions this category allows.</p>
+            : <div className="receive-chip-row" role="radiogroup" aria-label="Condition">
+              {(ebayAspects.allowedGrades || []).map(grade => (
+                <button type="button" key={grade.grade} className={`receive-chip${form.condition === grade.grade ? ' on' : ''}`} onClick={() => update('condition', grade.grade)}>{grade.grade}</button>
+              ))}
+            </div>}
+          {ebayAspects.conditionNote ? <p className="rcv-note">{ebayAspects.conditionNote}</p> : null}
         </div>
         <ReceiveQuantity value={form.quantity} onChange={value => update('quantity', value)} disabled={busy} />
         </ReceiveSection>}
@@ -2382,7 +2416,19 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           {needNoteForScratch && <label>Defect note<textarea rows={2} value={form.conditionNote} onChange={e => update('conditionNote', e.target.value)} /></label>}
         </ReceiveSection>}
 
-        {!(staffMode && doNotList) && <ReceiveSection id="details" title="Details" open={openSec === 'details'} onOpen={setOpenSec} status={form.title.trim() ? 'Filled' : 'Optional'}>
+        {!(staffMode && doNotList) && <ReceiveSection id="details" title="Details" open={openSec === 'details'} onOpen={setOpenSec}
+          tone={ebayCheck.ready ? 'muted' : 'bad'}
+          status={ebayCheck.text}>
+          <p className="rcv-note">eBay check</p>
+          <strong>{ebayCheck.ready ? 'All required fields set' : 'Still missing a required eBay field'}</strong>
+          <div className="rcv-ebay-rows">
+            <p><span>Category</span><strong>{ebayAspects.path ? ebayAspects.path.split('>').slice(-2).join(' · ') : 'Not set'}</strong></p>
+            <p><span>Condition</span><strong>{form.condition || 'Not set'}</strong></p>
+            {ebayAspects.fields.filter(field => field.required).map(field => (
+              <p key={field.name}><span>{field.name}</span><strong>{ebayAspects.attributes[field.name] || 'Missing'}</strong></p>
+            ))}
+            {form.description ? <p><span>Description</span><strong>From UPC</strong></p> : null}
+          </div>
           <label>Title<input value={form.title} onChange={e => update('title', e.target.value)} placeholder="Brand + specifics" autoComplete="off" /></label>
           <label>Description<textarea rows={2} value={form.description} onChange={e => update('description', e.target.value)} /></label>
           <CategoryField label="Store category" value={form.category} options={choices(options?.categories)} onChange={v => update('category', v)} onFocus={e => { typingTarget.current = e.currentTarget; }} />
