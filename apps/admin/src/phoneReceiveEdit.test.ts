@@ -23,4 +23,12 @@ test('phone item edit keeps the desktop drawer on the desktop path', async () =>
   const css = await readFile(path.join(root, 'design/bw.css'), 'utf8');
   assert.match(css, /html\.app-mode \.app-edit-section-chips button\.is-active/);
   assert.doesNotMatch(css, /(?<!html\.app-mode )\.app-edit-section-chips button\.is-active \{[^}]*background:\s*#fff/);
+  assert.match(drawer, /appMode \? <textarea rows=\{2\} value=\{form\.brand\}/);
+  assert.match(drawer, /: <input value=\{form\.brand\}/);
+  const main = await readFile(path.join(root, 'main.tsx'), 'utf8');
+  const typeCss = await readFile(path.join(root, 'appMode/phoneEditType.css'), 'utf8');
+  assert.match(main, /import '\.\/design\/desk\.css';\r?\nimport '\.\/appMode\/phoneEditType\.css';/);
+  assert.match(typeCss, /html\.app-mode \.app-unit-edit/);
+  assert.match(typeCss, /text-align: left !important/);
+  assert.match(typeCss, /font-weight: 700 !important/);
 });
