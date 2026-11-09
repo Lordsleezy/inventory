@@ -305,7 +305,7 @@ export function OrderFindRow({ sku, code, options, disabled, onChange, picker = 
   );
 }
 
-export function OrderFacts({ label, labeled, order }: { label: string; labeled: boolean; order: StageOrder }) {
+export function OrderFacts({ label, labeled, order, layout = 'desktop' }: { label: string; labeled: boolean; order: StageOrder; layout?: 'desktop' | 'app' }) {
   const [copied, setCopied] = useState(false);
   const href = carrierTrackUrl(order.tracking_number, order.carrier);
   const tail = trackingTail(order);
@@ -324,6 +324,30 @@ export function OrderFacts({ label, labeled, order }: { label: string; labeled: 
     }
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1200);
+  }
+  if (layout === 'app') {
+    return (
+      <div className="order-facts order-facts-app">
+        <div className="order-facts-row">
+          <span>Label</span>
+          <strong className={labeled ? '' : 'warn'}>{label}</strong>
+        </div>
+        <div className="order-facts-row order-facts-track">
+          <span>Tracking</span>
+          <div className="order-facts-track-body">
+            <strong>{tail || '—'}</strong>
+            {order.tracking_number && (
+              <span className="order-facts-track-actions">
+                <button type="button" className="order-mini-btn" onClick={() => void copy()}>{copied ? 'Copied' : 'Copy'}</button>
+                {href && (
+                  <a className="order-mini-btn" href={href} target="_blank" rel="noreferrer">Track</a>
+                )}
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+    );
   }
   return (
     <div className="order-facts">

@@ -1,19 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { type WebOrder } from '../OrdersPage';
-import { LabelDialog } from '../LabelDialog';
-import { OrderStepper, OrderTimelineList } from '../OrderFulfillment';
-import { OrderFacts, OrderFindRow, OrderPhotoCarousel, OrderTitle } from '../OrderPhotos';
-import { derivativePath, hydratePhotoUrlCache, listThumbPhoto, listThumbPathsFromPhotoMap, loadUnitPhotos, persistPhotoUrlCache, signPhotoUrls, type UnitPhoto } from '../unitPhotos';
+import { hydratePhotoUrlCache, listThumbPhoto, listThumbPathsFromPhotoMap, loadUnitPhotos, persistPhotoUrlCache, signPhotoUrls, type UnitPhoto } from '../unitPhotos';
 import { errText } from '../errText';
 import { shortError } from './shortError';
-import { loadOrderLocations, locationCompare, locationParts } from '../locationOrder';
+import { loadOrderLocations, locationCompare } from '../locationOrder';
 import { fileToBase64, labelFileUrl, orderAdmin } from '../orderLabel';
 import { openShippingLabel } from '../labelPrint';
-import { canBuyLabel, hasLabel, orderChip, orderNeedsLabel, orderStage, orderTimeline, packagedStale, shippedStale, trackingTail, type OrderStage } from '../orderStage';
+import { hasLabel, orderNeedsLabel, orderStage, packagedStale, shippedStale, trackingTail, type OrderStage } from '../orderStage';
 import { useVisibleInterval } from '../useVisibleInterval';
 import { ScanOutPanel } from '../ScanOutPanel';
-import { PackLabelScan } from '../PackLabelScan';
+import { SEG_SHORT } from '../orderDisplay';
+import { AppOrderDetail } from './AppOrderDetail';
+import { AppOrderRow } from './AppOrderRow';
+import { floorFunctionUrl } from '../floorApi';
 
 type Seg = 'needsLabel' | 'toShip' | 'packaged' | 'shipped' | 'delivered' | 'canceled';
 
@@ -41,11 +41,6 @@ type Props = {
 
 type TrackEvent = { status?: string; status_detail?: string | null; location?: string | null; occurred_at?: string | null };
 
-function when(iso?: string | null) {
-  if (!iso) return '';
-  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'America/Los_Angeles' });
-}
-
 export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin = false }: Props) {
   const [seg, setSeg] = useState<Seg>('toShip');
   const [scanOut, setScanOut] = useState(false);
@@ -59,20 +54,21 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
     hydratePhotoUrlCache(`${storeId}:orders`);
     return {};
   });
-  const mergePhotoUrls = (extra: Record<string, string>) => {
+  const mergePhotoUrls = useCallback((extra: Record<string, string>) => {
     if (!Object.keys(extra).length) return;
     setPhotoUrls((prev) => {
       const next = { ...prev, ...extra };
       persistPhotoUrlCache(`${storeId}:orders`, next);
       return next;
     });
-  };
+  }, [storeId]);
   const [locationOptions, setLocationOptions] = useState<{ code: string }[]>([]);
   const [busy, setBusy] = useState('');
   const [labelOpen, setLabelOpen] = useState(false);
   const [trackingDraft, setTrackingDraft] = useState('');
   const packProofInput = useRef<HTMLInputElement>(null);
   const labelInput = useRef<HTMLInputElement>(null);
+  const tabRowRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
     try {
@@ -91,7 +87,7 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
     } catch (e) {
       setError(shortError(errText(e)));
     }
-  }, [client, storeId]);
+  }, [client, mergePhotoUrls, storeId]);
 
   useVisibleInterval(load, 60_000);
   const sign = useCallback((paths: string[]) => signPhotoUrls(client, paths), [client]);
@@ -107,6 +103,13 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
     setTrackingDraft(open.tracking_number || '');
     void loadEvents(open.id);
   }, [open?.id, loadEvents]);
+
+  useEffect(() => {
+    const root = tabRowRef.current;
+    if (!root) return;
+    const active = root.querySelector('button.active');
+    if (active instanceof HTMLElement) active.scrollIntoView({ inline: 'nearest', block: 'nearest' });
+  }, [seg]);
 
   const buckets = useMemo(() => {
     const list = orders || [];
@@ -272,117 +275,88 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
     });
   }
 
-  if (open) {
-    const stage = orderStage(open);
-    const ch = (open.channel || 'website').toLowerCase();
-    const paid = open.status === 'paid';
-    const ship = open.fulfillment === 'ship';
-    const buy = canBuyLabel(ch);
-    const labeled = hasLabel(open);
-    const timeline = orderTimeline(open, events);
-    if (labelOpen && buy && ship && paid) {
-      return (
-        <LabelDialog
-          order={open}
-          accessToken={accessToken}
-          money={money}
-          appMode
-          onClose={() => { setLabelOpen(false); void load(); }}
-          onPurchased={() => { void load(); }}
-          onDone={() => { setLabelOpen(false); void load(); }}
-        />
-      );
+  async function setPackCondition(o: WebOrder, status: 'ok' | 'not_as_listed') {
+    await runAction('pack', async () => {
+      const res = await fetch(floorFunctionUrl('web-order-admin'), {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'pack_condition', id: o.id, status }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || body.ok === false) {
+        const { error: rpcErr } = await client.rpc('portal_set_pack_condition', { p_order: o.id, p_status: status });
+        if (rpcErr) throw new Error(body.error || rpcErr.message);
+      }
+      if (status === 'not_as_listed') setError(`SKU ${o.sku} marked not as listed. The owner is alerted. Do not buy a label.`);
+    });
+  }
+
+  async function recordLabelCost(o: WebOrder) {
+    if (o.pack_condition !== 'ok') {
+      setError('Confirm the item matches the listing before recording a label cost.');
+      return;
     }
-    const labelText = open.label_origin === 'upload'
-      ? `Uploaded · ${CHANNEL[ch] || open.channel || 'Label'}`
-      : open.label_origin === 'bought' || open.label_purchased_at
-        ? `Bought${open.label_cost_cents != null ? ` · ${money(open.label_cost_cents)}` : ''}`
-        : orderNeedsLabel(open) ? 'Upload label' : buy ? 'Buy label' : '—';
+    const current = o.label_cost_cents != null ? (o.label_cost_cents / 100).toFixed(2) : '';
+    const raw = window.prompt(
+      `Label cost for ${CHANNEL[(o.channel || 'website').toLowerCase()] || o.channel} order ${o.order_no || o.id} (USD).`,
+      current,
+    );
+    if (raw == null) return;
+    const cents = Math.round(Number(String(raw).replace(/[$,\s]/g, '')) * 100);
+    if (!Number.isFinite(cents) || cents < 0 || cents > 50000) {
+      setError('Enter a valid label cost between $0 and $500.');
+      return;
+    }
+    await runAction('label-cost', async () => {
+      const { error: e } = await client.rpc('portal_set_order_label_cost', { p_order: o.id, p_label_cents: cents });
+      if (e) throw e;
+    });
+  }
+
+  if (open) {
     return (
-      <div className="app-stack">
-        <div className="app-nav">
-          <button type="button" onClick={() => setOpen(null)}>‹ Orders</button>
-          <div className="app-nav-title">Order</div>
-          <button type="button" style={{ visibility: 'hidden' }}>·</button>
-        </div>
-        <OrderPhotoCarousel photos={photoMap[open.sku] || []} urls={photoUrls} sign={sign} />
-        <div className="order-detail-copy">
-          <OrderTitle title={open.title || 'Item'} />
-          <p>{CHANNEL[ch] || open.channel} · {money(open.item_cents || 0)} · {when(open.paid_at || open.created_at)}</p>
-        </div>
-        <OrderFindRow sku={open.sku} code={locations[open.sku]?.[0] || ''} options={locationOptions} disabled={!!busy} onChange={(code) => void setPickLocation(open, code)} />
-        {ship && stage !== 'canceled' && <OrderStepper stage={stage} />}
-        <OrderFacts label={labelText} labeled={labeled} order={open} />
-        {open.scanned_out_at && <p className="app-footer-count">Scanned out {stamp(open.scanned_out_at)}{open.scanned_out_by_name ? ` by ${open.scanned_out_by_name}` : ''}</p>}
-        {open.tracking_exception && <p className="app-inline-error">Carrier exception: {open.tracking_exception}</p>}
-        {open.tracking_needs_entry && (
-          <form className="app-track-box" onSubmit={(e) => { e.preventDefault(); void saveTracking(open); }}>
-            <label>Tracking number
-              <input value={trackingDraft} onChange={(e) => setTrackingDraft(e.target.value)} placeholder="From the label" autoComplete="off" />
-            </label>
-            <button type="submit" disabled={!!busy || trackingDraft.trim().length < 8}>{busy === 'tracking' ? 'Saving…' : 'Save tracking'}</button>
-          </form>
-        )}
-        {error && <p className="app-inline-error">{error}</p>}
-        {paid && ship && stage !== 'canceled' && (
-          <>
-            {stage === 'toShip' && labeled && (
-              <PackLabelScan client={client} disabled={!!busy} onDone={() => void load()} />
-            )}
-            <div className="order-actions">
-              {labeled && <button type="button" disabled={!!busy} onClick={() => void printLabel(open)}>{busy === 'print' ? '…' : 'Print label'}</button>}
-              {!labeled && buy && !orderNeedsLabel(open) && (
-                <button type="button" disabled={!!busy || open.pack_condition === 'not_as_listed'} onClick={() => setLabelOpen(true)}>Buy label</button>
-              )}
-              {orderNeedsLabel(open) && (
-                <button type="button" className="primary" disabled={!!busy} onClick={() => labelInput.current?.click()}>{busy === 'upload-label' ? '…' : open.label_storage_path ? 'Replace label' : 'Upload label'}</button>
-              )}
-              {stage === 'toShip' && (
-                <button type="button" className="primary" disabled={!!busy} onClick={() => void markPackaged(open)}>
-                  {busy === 'packaged' ? '…' : 'Packaged'}
-                </button>
-              )}
-              {stage === 'packaged' && (
-                <button type="button" className="primary" disabled={!!busy} onClick={() => void markShipped(open)}>
-                  {busy === 'shipped' ? '…' : 'Mark shipped'}
-                </button>
-              )}
-              {stage === 'shipped' && isAdmin && (
-                <button type="button" className="primary" disabled={!!busy} onClick={() => void markDelivered(open)}>
-                  {busy === 'delivered' ? '…' : 'Mark delivered'}
-                </button>
-              )}
-            </div>
-            <div className="order-actions more">
-              {labeled && <button type="button" className="secondary" disabled={!!busy} onClick={() => void printLabel(open, true)}>Save PDF</button>}
-              {open.label_origin === 'bought' && !open.delivered_at && (
-                <button type="button" className="secondary" disabled={!!busy} onClick={() => void voidLabel(open)}>{busy === 'void' ? '…' : 'Void label'}</button>
-              )}
-              {(ch === 'amazon' || ch === 'tiktok') && !open.delivered_at && (
-                <button type="button" className="secondary" disabled={!!busy} onClick={() => packProofInput.current?.click()}>
-                  {open.pack_proof_photo_path ? 'Replace pack photo' : 'Add pack photo'}
-                </button>
-              )}
-              {(open.delivered_at || open.shipped_at || open.packaged_at) && (
-                <button type="button" className="secondary" disabled={!!busy} onClick={() => void stepBack(open)}>Move back one step</button>
-              )}
-              {!open.delivered_at && !open.picked_up_at && (
-                <button type="button" className="secondary" disabled={!!busy} onClick={() => void floorCancel(open)}>Cancel in Floor</button>
-              )}
-            </div>
-            <input ref={labelInput} className="sr-only" type="file" accept="application/pdf,image/*" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void uploadLabel(open, f); }} />
-            <input ref={packProofInput} type="file" accept="image/*" capture="environment" className="sr-only" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void uploadPackProof(open, f); }} />
-          </>
-        )}
-        {timeline.length > 0 && (
-          <div className="app-group order-timeline-wrap">
-            <OrderTimelineList rows={timeline} stamp={stamp} />
-          </div>
-        )}
-        {stage === 'toShip' && <p className="app-footer-count">Tap once it's boxed and labeled.</p>}
-        {stage === 'packaged' && <p className="app-footer-count">Tap Mark shipped when it leaves. That records who and when.</p>}
-        {stage === 'shipped' && <p className="app-footer-count">{isAdmin ? 'Tap Mark delivered when it arrives.' : 'An admin marks this delivered.'}</p>}
-      </div>
+      <AppOrderDetail
+        client={client}
+        storeId={storeId}
+        accessToken={accessToken}
+        order={open}
+        money={money}
+        stamp={stamp}
+        isAdmin={isAdmin}
+        busy={busy}
+        error={error}
+        locationCode={locations[open.sku]?.[0] || ''}
+        locationOptions={locationOptions}
+        photos={photoMap[open.sku] || []}
+        photoUrls={photoUrls}
+        sign={sign}
+        events={events}
+        trackingDraft={trackingDraft}
+        onTrackingDraft={setTrackingDraft}
+        onBack={() => setOpen(null)}
+        onSetLocation={(code) => void setPickLocation(open, code)}
+        onPrintLabel={(dl) => void printLabel(open, dl)}
+        onMarkPackaged={() => void markPackaged(open)}
+        onMarkShipped={() => void markShipped(open)}
+        onMarkDelivered={() => void markDelivered(open)}
+        onStepBack={() => void stepBack(open)}
+        onFloorCancel={() => void floorCancel(open)}
+        onSaveTracking={() => void saveTracking(open)}
+        onUploadLabel={() => labelInput.current?.click()}
+        onUploadPackProof={() => packProofInput.current?.click()}
+        onVoidLabel={() => void voidLabel(open)}
+        onPackCondition={(status) => void setPackCondition(open, status)}
+        onRecordLabelCost={isAdmin ? () => void recordLabelCost(open) : undefined}
+        labelInputRef={labelInput}
+        packProofInputRef={packProofInput}
+        onLabelOpen={() => setLabelOpen(true)}
+        labelOpen={labelOpen}
+        onLabelClose={() => setLabelOpen(false)}
+        onReload={load}
+        onUrl={(p, u) => mergePhotoUrls({ [p]: u })}
+        onLabelFile={(f) => void uploadLabel(open, f)}
+        onPackProofFile={(f) => void uploadPackProof(open, f)}
+      />
     );
   }
 
@@ -393,8 +367,8 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
   }
   return (
     <>
-      <div className="app-large-title orders-app-title"><h1>Orders</h1></div>
-      <div className="app-segment app-segment-scroll orders-segment">
+      <p className="orders-screen-eyebrow">Orders · {SEG_SHORT[seg]}</p>
+      <div className="app-segment app-segment-scroll orders-segment" role="tablist" ref={tabRowRef}>
         {([
           ...(isAdmin ? [['needsLabel', 'Needs label', buckets.needsLabel.length] as const] : []),
           ['toShip', 'To ship', buckets.toShip.length],
@@ -403,12 +377,19 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
           ['delivered', 'Delivered', buckets.delivered.length],
           ['canceled', 'Canceled', buckets.canceled.length],
         ] as const).map(([id, label, n]) => (
-          <button key={id} type="button" className={seg === id ? 'active' : ''} onClick={() => setSeg(id)}>
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={seg === id}
+            className={seg === id ? 'active' : ''}
+            onClick={() => setSeg(id)}
+          >
             {label} {n}
           </button>
         ))}
       </div>
-      <p className="app-footer-count orders-seg-note">{SEG_NOTE[seg]}</p>
+      <p className="orders-seg-note">{SEG_NOTE[seg]}</p>
       {seg === 'packaged' && (
         <>
           <p className="app-flag">{stale > 0 ? `${stale} packaged over 2 days and not marked shipped.` : 'Flags anything packaged over 2 days and not marked shipped.'}</p>
@@ -423,35 +404,27 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
         {!orders && <div className="app-empty-row">Loading…</div>}
         {orders && rows.length === 0 && <div className="app-empty-row">None right now</div>}
         {rows.map((o) => {
-          const chip = orderChip(o);
           const chName = CHANNEL[(o.channel || 'website').toLowerCase()] || o.channel || 'Website';
-          const loc = locationParts(locations[o.sku]?.[0]);
           const tail = trackingTail(o);
           const thumbPhoto = listThumbPhoto(photoMap[o.sku] || []);
-          const thumbPath = thumbPhoto ? derivativePath(thumbPhoto.path, 400) : null;
-          const thumb = thumbPath ? photoUrls[thumbPath] : '';
-          const problem = orderNeedsLabel(o) || chip.tone === 'warn';
+          const thumbPath = thumbPhoto?.path || null;
           return (
-            <div key={o.id} className="app-row app-order-row">
-            <button type="button" className="app-order-open" onClick={() => setOpen(o)}>
-              {thumb ? <img className="app-order-thumb" src={thumb} alt="" /> : <span className="app-order-thumb empty" aria-hidden="true" />}
-              <span className="app-order-main">
-                <strong>{o.title || 'Item'}</strong>
-                <small>{chName} · {money(o.item_cents || 0)}{tail ? ` · ${tail}` : ''}</small>
-                <strong className={loc ? 'app-order-bay' : 'app-order-bay missing'}>{loc ? `${loc.display} · ${loc.slot}` : 'NO LOCATION'}</strong>
-                {problem && <small className="app-order-problem">{orderNeedsLabel(o) ? 'Needs label' : chip.text}</small>}
-              </span>
-            </button>
-            {hasLabel(o) && (
-              <button type="button" className="app-order-print" onClick={() => void printLabel(o)}>Print</button>
-            )}
-            {isAdmin && orderNeedsLabel(o) && (
-              <label className="app-row-upload" onClick={(e) => e.stopPropagation()}>
-                Upload
-                <input type="file" accept="application/pdf,image/*" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void uploadLabel(o, f); }} />
-              </label>
-            )}
-            </div>
+            <AppOrderRow
+              key={o.id}
+              order={o}
+              client={client}
+              thumbPath={thumbPath}
+              photoUrls={photoUrls}
+              locationCode={locations[o.sku]?.[0]}
+              money={money}
+              channelName={chName}
+              trackingTail={tail}
+              onOpen={() => setOpen(o)}
+              onPrint={hasLabel(o) ? () => void printLabel(o) : undefined}
+              onUrl={(p, u) => mergePhotoUrls({ [p]: u })}
+              showUpload={isAdmin && orderNeedsLabel(o)}
+              onUpload={(f) => void uploadLabel(o, f)}
+            />
           );
         })}
       </div>

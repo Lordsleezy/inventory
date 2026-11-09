@@ -3,6 +3,26 @@ import { STAGE_INDEX, carrierTrackUrl } from './orderStage';
 
 const STEPS = ['To ship', 'Packaged', 'Shipped', 'Delivered'] as const;
 
+/** Phone app — plain text tabs with underline on current stage. */
+export function OrderStageTabs({ stage }: { stage: OrderStage }) {
+  const current = STAGE_INDEX[stage] ?? -1;
+  if (current < 0) return null;
+  return (
+    <div className="order-stage-tabs" role="tablist" aria-label="Order progress">
+      {STEPS.map((label, i) => (
+        <span
+          key={label}
+          role="tab"
+          aria-selected={i === current}
+          className={i === current ? 'on' : i < current ? 'done' : ''}
+        >
+          {label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 export function OrderStepper({ stage }: { stage: OrderStage }) {
   const current = STAGE_INDEX[stage] ?? -1;
   if (current < 0) return null;
