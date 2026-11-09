@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { buildLabelPdf, imageToLabelPdf, labelPaperName, type LabelPaper } from './labelSheet';
+import { labelPrintKind } from './labelPrintKind';
 
 const PAPER_KEY = 'floor-label-paper';
 
@@ -77,16 +78,82 @@ export async function loadPrintableLabel(url: string, paper: LabelPaper = cached
   return new Blob([pdf.slice()], { type: 'application/pdf' });
 }
 
-function isIos() {
-  const ua = navigator.userAgent || '';
-  return /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const LABEL_PRINT_ID = 'floor-label-print';
+
+async function labelPageImages(bytes: Uint8Array) {
+  const pdfjs = await import('pdfjs-dist');
+  const worker = await import('pdfjs-dist/build/pdf.worker.min.mjs?url');
+  pdfjs.GlobalWorkerOptions.workerSrc = worker.default;
+  const doc = await pdfjs.getDocument({ data: bytes.slice() }).promise;
+  const urls: string[] = [];
+  let width = 288;
+  let height = 432;
+  for (let i = 1; i <= doc.numPages; i += 1) {
+    const page = await doc.getPage(i);
+    const natural = page.getViewport({ scale: 1 });
+    if (i === 1) {
+      width = natural.width;
+      height = natural.height;
+    }
+    const viewport = page.getViewport({ scale: 2 });
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.ceil(viewport.width);
+    canvas.height = Math.ceil(viewport.height);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Could not prepare the label.');
+    await page.render({ canvasContext: ctx, viewport }).promise;
+    urls.push(canvas.toDataURL('image/png'));
+  }
+  return { urls, width, height };
+}
+
+/** Draw the label and open the phone's print dialog. A PDF frame never reaches that dialog on Android. */
+async function printOnAndroid(bytes: Uint8Array) {
+  const { urls, width, height } = await labelPageImages(bytes);
+  document.getElementById(LABEL_PRINT_ID)?.remove();
+  const root = document.createElement('div');
+  root.id = LABEL_PRINT_ID;
+  for (const src of urls) {
+    const img = document.createElement('img');
+    img.src = src;
+    img.alt = 'Shipping label';
+    root.appendChild(img);
+  }
+  document.body.appendChild(root);
+  let style = document.getElementById('floor-label-print-style');
+  if (!style) {
+    style = document.createElement('style');
+    style.id = 'floor-label-print-style';
+    document.head.appendChild(style);
+  }
+  style.textContent = `
+    #${LABEL_PRINT_ID} { display: none; }
+    @media print {
+      @page { size: ${width}pt ${height}pt; margin: 0; }
+      html, body { margin: 0 !important; padding: 0 !important; background: #fff !important; overflow: visible !important; height: auto !important; }
+      body > *:not(#${LABEL_PRINT_ID}) { display: none !important; }
+      #${LABEL_PRINT_ID} { display: block !important; }
+      #${LABEL_PRINT_ID} img { width: ${width}pt; height: ${height}pt; display: block; object-fit: contain; break-after: page; page-break-after: always; }
+      #${LABEL_PRINT_ID} img:last-child { break-after: auto; page-break-after: auto; }
+    }
+  `;
+  await Promise.all(Array.from(root.querySelectorAll('img'), (img) => img.decode().catch(() => undefined)));
+  const remove = () => root.remove();
+  window.addEventListener('afterprint', remove, { once: true });
+  window.print();
+  window.setTimeout(remove, 120_000);
 }
 
 /** Open the PDF itself. Its page size is 4×6 or letter, so AirPrint and desktop print at that size. */
-export function printPdfBytes(bytes: Uint8Array) {
+export async function printPdfBytes(bytes: Uint8Array) {
+  const kind = labelPrintKind(navigator.userAgent || '', navigator.maxTouchPoints || 0, navigator.platform || '');
+  if (kind === 'android') {
+    await printOnAndroid(bytes);
+    return;
+  }
   const blob = new Blob([bytes.slice()], { type: 'application/pdf' });
   const href = URL.createObjectURL(blob);
-  if (isIos()) {
+  if (kind === 'ios') {
     const opened = window.open(href, '_blank');
     if (!opened) {
       const link = document.createElement('a');
@@ -127,5 +194,5 @@ export async function openShippingLabel(url: string, download = false, client?: 
     window.setTimeout(() => URL.revokeObjectURL(href), 60_000);
     return;
   }
-  printPdfBytes(new Uint8Array(await blob.arrayBuffer()));
+  await printPdfBytes(new Uint8Array(await blob.arrayBuffer()));
 }
