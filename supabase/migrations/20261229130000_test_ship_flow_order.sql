@@ -94,7 +94,7 @@ begin
     store_id, sku, price_cents, tax_cents, channel, payment_method, sold_at,
     receipt_no, qty
   ) values (
-    v_store, v_sku, 1999, 0, 'mercari', 'card', now(), 'TEST-SHIP-1', 1
+    v_store, v_sku, 1999, 0, 'website', 'card', now(), 'TEST-SHIP-1', 1
   )
   returning id into v_sale;
 
@@ -106,7 +106,7 @@ begin
     label_storage_path, label_origin, label_file_name, label_uploaded_at,
     tracking_number, carrier, service, label_cost_cents
   ) values (
-    v_store, v_sku, v_sale, 'paid', 'mercari', 'ship', 'TEST-SHIP-FLOW', now(),
+    v_store, v_sku, v_sale, 'paid', 'website', 'ship', 'TEST-SHIP-FLOW', now(),
     'Test Buyer', '123 Test St', 'Los Angeles', 'CA', '90001',
     1999, 0, 0, 1999,
     'matched', 'production',
