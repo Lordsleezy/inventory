@@ -1,0 +1,67 @@
+import type { SupabaseClient } from '@supabase/supabase-js';
+import type { WebOrder } from '../OrdersPage';
+import { displayOrderTitle } from '../orderDisplay';
+import { locationParts } from '../locationOrder';
+import { hasLabel, orderNeedsLabel, orderChip } from '../orderStage';
+import { UnitListThumb } from '../UnitListThumb';
+
+type Props = {
+  order: WebOrder;
+  client: SupabaseClient;
+  thumbPath: string | null;
+  photoUrls: Record<string, string>;
+  locationCode: string | undefined;
+  money: (n: number) => string;
+  channelName: string;
+  trackingTail: string;
+  onOpen: () => void;
+  onPrint?: () => void;
+  onUrl: (path: string, url: string) => void;
+  showUpload?: boolean;
+  onUpload?: (file: File) => void;
+};
+
+export function AppOrderRow({
+  order, client, thumbPath, photoUrls, locationCode, money, channelName, trackingTail,
+  onOpen, onPrint, onUrl, showUpload, onUpload,
+}: Props) {
+  const loc = locationParts(locationCode);
+  const chip = orderChip(order);
+  const problem = orderNeedsLabel(order) || chip.tone === 'warn';
+  const title = displayOrderTitle(order.title || order.marketplace_title);
+  const meta = [channelName, money(order.item_cents || 0), trackingTail].filter(Boolean).join(' · ');
+  const locLine = loc ? `${loc.display} · ${loc.slot}`.toUpperCase() : '';
+
+  return (
+    <div className="app-row app-order-row-v2">
+      <button type="button" className="app-order-open-v2" onClick={onOpen}>
+        <UnitListThumb
+          client={client}
+          photoPath={thumbPath}
+          urls={photoUrls}
+          onUrl={onUrl}
+          className="app-order-thumb-v2"
+          placeholder={<span className="app-order-thumb-v2 no-photo">No photo</span>}
+        />
+        <span className="app-order-copy">
+          <span className="app-order-title">{title}</span>
+          <span className="app-order-sku-line"><span className="lbl">SKU</span> <strong>{order.sku || '—'}</strong></span>
+          <span className="app-order-meta">{meta}</span>
+          <span className={`app-order-loc${loc ? '' : ' missing'}`}>{locLine || 'NO LOCATION'}</span>
+          {problem && (
+            <span className="app-order-problem">{orderNeedsLabel(order) ? 'Needs label' : chip.text}</span>
+          )}
+        </span>
+      </button>
+      {hasLabel(order) && onPrint && (
+        <button type="button" className="app-order-print-v2" onClick={(e) => { e.stopPropagation(); onPrint(); }}>Print</button>
+      )}
+      {showUpload && onUpload && (
+        <label className="app-order-upload-v2" onClick={(e) => e.stopPropagation()}>
+          Upload
+          <input type="file" accept="application/pdf,image/*" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) onUpload(f); }} />
+        </label>
+      )}
+    </div>
+  );
+}

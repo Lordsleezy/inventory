@@ -21,6 +21,7 @@ if ('serviceWorker' in navigator) {
 
 import './design/tools.css';
 import './design/bw.css';
+import './appMode/ordersApp.css';
 import './design/safe-v2.css';
 /* After appMode/bw so phone Reports styles win the cascade (App pulls reports.css too early). */
 import './reports.css';
