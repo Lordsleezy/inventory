@@ -1,5 +1,6 @@
 import ExcelJS from 'exceljs';
 import { PDFDocument } from 'pdf-lib';
+import { fillCdtfaSheet } from './cdtfaExport';
 import type { CdtfaPrintModel } from './cdtfaLoad';
 import type { BooksWorkbook } from './types';
 
@@ -29,13 +30,8 @@ export function addArchiveSheet(book: ExcelJS.Workbook, title: string, workbook:
   sheet.addRow(['Expenses', dollars(totals.expense)]);
   sheet.addRow(['Owner keeps', dollars(totals.ownerKeeps)]);
   sheet.addRow([]);
-  sheet.addRow(['Line', 'Label', 'Dollars']);
-  for (const line of tax.lines) sheet.addRow([line.id, line.label, line.dollars]);
-  const taxable = tax.lines.find((line) => line.id === '12')?.dollars ?? 0;
-  sheet.addRow(['A1', 'Transactions subject to tax', taxable]);
-  sheet.addRow(['A2/A3', 'Subject only to 7.25%', taxable - tax.districtMeasure]);
-  sheet.addRow(['A4', 'Subject to district tax', tax.districtMeasure]);
-  if (tax.roundingNote) sheet.addRow([tax.roundingNote]);
+  sheet.addRow([]);
+  fillCdtfaSheet(sheet, tax);
 }
 
 export async function appendPdf(reportPdf: Uint8Array, formPdf: Uint8Array) {

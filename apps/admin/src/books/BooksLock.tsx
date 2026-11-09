@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { buildBooksExcel, buildBooksPdf, bytesBase64 } from './export';
 import { BOOKS_WORKBOOK_VERSION } from './payoutLedger';
 import { monthLabel } from './booksMath';
+import { listBookIssues } from './booksReview';
 import type { BooksWorkbook, InventorySummary, Period, ReceivedItem, Report } from './types';
 
 type Props = {
@@ -25,6 +26,7 @@ type Props = {
 
 export function BooksLock({ client, money, period, report, inventory, received, workbook, uiStatus, busy, setBusy, onError, onReload, native, lockedStaleMath, placement = 'foot' }: Props) {
   const label = monthLabel(period.period_start);
+  const blocking = workbook && report ? listBookIssues(workbook, report).length : 0;
 
   async function lock() {
     if (!window.confirm(`Lock ${label}? Numbers for this month will be frozen.`)) return;
@@ -88,7 +90,7 @@ export function BooksLock({ client, money, period, report, inventory, received, 
   if (placement === 'header') {
     if (uiStatus === 'locked') return null;
     const short = label.replace(/\s+\d{4}$/, '');
-    return <button type="button" className="primary" disabled={busy} onClick={() => void lock()}>Lock {short}</button>;
+    return <button type="button" className="primary" disabled={busy || blocking > 0} onClick={() => void lock()}>Lock {short}</button>;
   }
 
   if (uiStatus === 'locked') {
@@ -113,7 +115,7 @@ export function BooksLock({ client, money, period, report, inventory, received, 
     <p className={`books-lock-foot${native ? ' native' : ''}`}>
       {uiStatus === 'in_progress' ? 'In progress' : 'Draft'}
       {' · '}
-      <button type="button" className="books-lock-link" disabled={busy} onClick={() => void lock()}>Lock {label}</button>
+      <button type="button" className="books-lock-link" disabled={busy || blocking > 0} onClick={() => void lock()}>Lock {label}</button>
     </p>
   );
 }

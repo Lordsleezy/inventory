@@ -244,9 +244,19 @@ body.cdtfa-printing .cdtfa-round,body.books-printing .cdtfa-round{color:#333}
 .books-phone .books-phone-actions{display:flex;gap:8px;margin-top:16px}
 .books-phone .books-phone-actions .primary{background:#fff;color:#000;border-color:#fff;flex:1}
 .books-phone .books-export{position:relative;flex:1}
-.books-phone .books-export summary{list-style:none;border:1px solid #fff;border-radius:8px;text-align:center;padding:10px;cursor:pointer}
-.books-phone .books-export summary::after{content:' ▾'}
-.books-phone .books-export div{position:absolute;left:0;right:0;bottom:calc(100% + 6px);background:#000;border:1px solid #2a2a2a;border-radius:8px;display:grid;z-index:4}
+.books-phone .books-export-summary{list-style:none;border:1px solid #fff;border-radius:8px;text-align:center;padding:10px;cursor:pointer;width:100%;background:transparent;color:#fff}
+.books-phone .books-export-summary::after{content:' ▾'}
+.books-phone .books-export-list{position:absolute;left:0;right:0;bottom:calc(100% + 6px);top:auto;background:#111;border:1px solid #2a2a2a;display:grid;z-index:20;padding:4px 0}
+.books-phone .books-export-item{display:block;width:100%;text-align:left;background:transparent;border:0;border-radius:0;color:#fff;min-height:44px;padding:10px 14px}
+.books-phone .books-export-item:hover:not(:disabled){background:#2a2a2a}
+.books-review-list{flex:1 0 100%;display:grid;gap:12px}
+.books-review-item{border-top:1px solid #3a2020;padding-top:10px;color:#fff}
+.books-review-label{display:grid;grid-template-columns:140px 1fr;gap:4px 8px;margin:8px 0}
+.books-review-label dt{color:#a0a0a0}
+.books-review-sales{list-style:none;padding:0;margin:8px 0;display:grid;gap:6px}
+.books-review-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:end}
+.books-review-actions select{background:#111;color:#fff;border:1px solid #2a2a2a;min-height:44px;font-size:16px}
+.books-sale-focus{outline:1px solid #ff453a}
 .books-phone .cdtfa-summary{border:1px solid #2a2a2a;border-radius:12px;padding:14px;margin-bottom:14px}
 .books-phone .cdtfa-draft{display:none}
 .books-phone .cdtfa-actions button{background:transparent;color:#fff;border:1px solid #fff;border-radius:8px;min-height:44px}

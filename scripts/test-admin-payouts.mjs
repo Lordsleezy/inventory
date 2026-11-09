@@ -384,6 +384,7 @@ test("Books cost truth uses live unit cost; legacy default amounts are real", ()
 test("Books missing cost stays null (no commission base)", () => {
   assert.equal(effectiveCostCents({ qty: 1, unit_cost_cents: 0, cost_cents: null }), null);
   assert.equal(effectiveCostCents({ qty: 1, unit_cost_cents: null, cost_cents: 0 }), null);
+  assert.equal(effectiveCostCents({ qty: 1, unit_cost_cents: 0, cost_cents: 0, cost_source: "unit" }), 0);
   assert.equal(effectiveCostCents({ qty: 1, is_collectible: true, unit_cost_cents: 500 }), 0);
 });
 

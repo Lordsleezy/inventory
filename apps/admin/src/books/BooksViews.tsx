@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { BookTotals, BooksWorkbook, ExpenseDisplayLine, InventorySummary, Period, ReceivedItem, Report, Row, SalesLine } from './types';
 import { groupExpensesByCategory, groupReceivedByDay, receivedMonthStats } from './workbook';
@@ -15,6 +15,7 @@ import type { BooksSlice } from './combineBooks';
 import type { CdtfaFrequency } from './cdtfaResolve';
 import { BooksIconExpenses, BooksIconInventory, BooksIconPayouts, BooksIconReceived, BooksIconSales, BooksIconTax } from './reportIcons';
 import { AppScrollTabs } from '../appMode/AppScrollTabs';
+import { BooksReview } from './BooksReviewPanel';
 
 export type Sheet = 'hub' | 'sales' | 'expenses' | 'payouts' | 'inventory' | 'received' | 'tax';
 
@@ -73,6 +74,7 @@ export type ViewProps = {
   slices: BooksSlice[];
   spanWord: string;
   showLock: boolean;
+  onResolveLabel?: (expenseId: string, choice: { saleId?: string; asExpense?: boolean }) => void;
 };
 
 export function BooksViews(props: ViewProps) {
@@ -101,16 +103,36 @@ function SpanSwitch({ p }: { p: ViewProps }) {
 }
 
 function ExportMenu({ p }: { p: ViewProps }) {
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpen(false); };
+    const onPointer = (event: MouseEvent) => {
+      if (root.current && !root.current.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener('keydown', onKey);
+    document.addEventListener('mousedown', onPointer);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('mousedown', onPointer);
+    };
+  }, [open]);
+  const item = (label: string, disabled: boolean, run: () => void) => (
+    <button type="button" role="menuitem" className="books-export-item" disabled={disabled} onClick={() => { setOpen(false); run(); }}>{label}</button>
+  );
   return (
-    <details className="books-export">
-      <summary>Export</summary>
-      <div>
-        <button type="button" disabled={!p.exportFiles || p.exportsPreparing} onClick={p.onExcel}>Excel</button>
-        <button type="button" disabled={!p.exportFiles || p.exportsPreparing} onClick={p.onPdf}>PDF</button>
-        <button type="button" disabled={!p.workbook} onClick={p.onPrint}>Print</button>
-        {p.onDownloadAll && <button type="button" disabled={p.archiveBusy || !p.periods.length} onClick={p.onDownloadAll}>{p.archiveBusy ? 'Preparing…' : 'Download all periods'}</button>}
-      </div>
-    </details>
+    <div className="books-export" ref={root}>
+      <button type="button" className="books-export-summary" aria-expanded={open} onClick={() => setOpen((value) => !value)}>Export</button>
+      {open && (
+        <div className="books-export-list" role="menu">
+          {item('Excel', !p.exportFiles || p.exportsPreparing, p.onExcel)}
+          {item('PDF', !p.exportFiles || p.exportsPreparing, p.onPdf)}
+          {item('Print', !p.workbook, p.onPrint)}
+          {p.onDownloadAll && item(p.archiveBusy ? 'Preparing…' : 'Download all periods', !!p.archiveBusy || !p.periods.length, p.onDownloadAll)}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -181,8 +203,7 @@ const PHONE_TABS: { id: Sheet; title: string }[] = [
 function BooksNative(p: ViewProps) {
   const ui = uiStatus(p);
   const tab: Sheet = p.sheet === 'hub' ? 'sales' : p.sheet;
-  const issues = bookIssues(p.workbook);
-  const [review, setReview] = useState(false);
+  const [focusIds, setFocusIds] = useState<string[]>([]);
   return (
     <div className="native-report-body books-phone">
       <div className="books-phone-period">
@@ -196,18 +217,17 @@ function BooksNative(p: ViewProps) {
           </select>
         </label>
       </div>
-      {issues.length > 0 && (
-        <div className="books-phone-alert">
-          <button type="button" onClick={() => setReview(!review)}>
-            <strong>{issues.length === 1 ? '1 thing to fix before you lock' : `${issues.length} things to fix before you lock`}</strong>
-            <span>{review ? 'Hide' : 'Review'}</span>
-          </button>
-          {review && issues.map((line) => <p key={line}>{line}</p>)}
-        </div>
-      )}
+      <BooksReview
+        workbook={p.workbook}
+        report={p.report}
+        money={p.money}
+        client={p.client}
+        onResolveLabel={p.onResolveLabel}
+        onOpen={(sheet, ids) => { p.setSheet(sheet); setFocusIds(ids); }}
+      />
       <BooksDeskStrip money={p.money} totals={p.totals} />
       <AppScrollTabs ariaLabel="Books reports" className="books-phone-tabs" items={PHONE_TABS.map((item) => ({ id: item.id, label: item.title }))} value={tab} onChange={(id) => p.setSheet(id)} />
-      {tab === 'sales' && <PhoneSales money={p.money} workbook={p.workbook} />}
+      {tab === 'sales' && <PhoneSales money={p.money} workbook={p.workbook} focusIds={focusIds} />}
       {tab === 'expenses' && <SpanParts p={p} render={(workbook) => <ExpensesBody money={p.money} workbook={workbook} native onDuplicateDecision={p.span === 'month' ? p.onDuplicateDecision : undefined} />} />}
       {tab === 'payouts' && <SpanParts p={p} render={(workbook, word) => <PayoutsBody money={p.money} workbook={workbook} native periodWord={word} />} compact />}
       {tab === 'inventory' && <SpanParts p={p} render={(workbook, word) => <InventoryBody money={p.money} inventory={workbook.inventory} native periodWord={word} />} rollup />}
@@ -225,16 +245,7 @@ function BooksNative(p: ViewProps) {
   );
 }
 
-function bookIssues(workbook: BooksWorkbook) {
-  const integrity = workbook.integrity;
-  const tie = workbook.exportTieIssues || [];
-  return [
-    ...(integrity && !integrity.ok ? integrity.issues.map((i) => i.kind === 'unmatched_label' ? 'One unmatched shipping label.' : i.message) : []),
-    ...tie.map((i) => i.message),
-  ];
-}
-
-function PhoneSales({ money, workbook }: { money: (c: number) => string; workbook: BooksWorkbook }) {
+function PhoneSales({ money, workbook, focusIds }: { money: (c: number) => string; workbook: BooksWorkbook; focusIds?: string[] }) {
   const order = ['ebay', 'in-store', 'depop', 'mercari', 'amazon', 'tiktok'];
   const accounts = [...workbook.sales.channelTotals].sort((a, b) => order.indexOf(channelLabel(a.channel).toLowerCase()) - order.indexOf(channelLabel(b.channel).toLowerCase()));
   return (
@@ -243,7 +254,7 @@ function PhoneSales({ money, workbook }: { money: (c: number) => string; workboo
         {accounts.map((c) => <span key={c.channel}><b>{channelLabel(c.channel)}</b> {money(c.revenue_cents)}</span>)}
       </p>
       {workbook.sales.rows.map((row) => (
-        <div key={row.sale_id + row.sku} className="books-phone-sale">
+        <div key={row.sale_id + row.sku} id={`books-sale-${row.sale_id}`} className={`books-phone-sale${focusIds?.includes(row.sale_id) ? ' books-sale-focus' : ''}`}>
           <div>
             <strong>{row.title}</strong>
             <small>{shortDate(row.date)} · SKU {row.sku} · {channelLabel(row.channel)}</small>
@@ -262,6 +273,7 @@ function BooksDesktop(p: ViewProps) {
   const ui = uiStatus(p);
   const tab = p.desktopTab === 'hub' ? 'sales' : p.desktopTab;
   const periodName = spanTitle(p.period.period_start, p.span);
+  const [focusIds, setFocusIds] = useState<string[]>([]);
   return (
     <div className="books-desktop">
       <header className="books-desk-head">
@@ -285,7 +297,14 @@ function BooksDesktop(p: ViewProps) {
           </div>
         </div>
       </header>
-      <BooksDeskAlert workbook={p.workbook} />
+      <BooksReview
+        workbook={p.workbook}
+        report={p.report}
+        money={p.money}
+        client={p.client}
+        onResolveLabel={p.onResolveLabel}
+        onOpen={(sheet, ids) => { p.setDesktopTab(sheet); setFocusIds(ids); }}
+      />
       <BooksDeskStrip money={p.money} totals={p.totals} />
       <nav className="books-desktop-tabs" aria-label="Books reports">
         {REPORT_ROWS.map((t) => (
@@ -293,7 +312,7 @@ function BooksDesktop(p: ViewProps) {
         ))}
       </nav>
       <div className="books-desktop-panel">
-        {tab === 'sales' && <SpanParts p={p} render={(workbook) => <SalesTable money={p.money} workbook={workbook} totals={workbook.sales.totals} />} />}
+        {tab === 'sales' && <SpanParts p={p} render={(workbook) => <SalesTable money={p.money} workbook={workbook} totals={workbook.sales.totals} focusIds={focusIds} />} />}
         {tab === 'expenses' && <SpanParts p={p} render={(workbook) => <ExpensesTable money={p.money} workbook={workbook} />} />}
         {tab === 'payouts' && <SpanParts p={p} render={(workbook, word) => <PayoutsBody money={p.money} workbook={workbook} periodWord={word} />} compact />}
         {tab === 'inventory' && <SpanParts p={p} render={(workbook, word) => <InventoryBody money={p.money} inventory={workbook.inventory} periodWord={word} />} rollup />}
@@ -396,26 +415,6 @@ function BooksProofBar({ money, workbook }: { money: (c: number) => string; work
           {integrity.issues.length === 0 && <p>All ticket totals match the hub and Payouts tab balances.</p>}
         </div>
       )}
-    </div>
-  );
-}
-
-function BooksDeskAlert({ workbook }: { workbook: BooksWorkbook }) {
-  const integrity = workbook.integrity;
-  const tie = workbook.exportTieIssues || [];
-  const issues = [
-    ...(integrity && !integrity.ok ? integrity.issues.map((i) => i.kind === 'unmatched_label' ? 'One unmatched shipping label.' : i.message) : []),
-    ...tie.map((i) => i.message),
-  ];
-  if (!issues.length) return null;
-  const n = issues.length;
-  return (
-    <div className="books-desk-alert" role="status">
-      <div>
-        <strong>{n === 1 ? '1 thing to fix before you lock' : `${n} things to fix before you lock`}</strong>
-        {issues.map((line) => <p key={line}>{line}</p>)}
-      </div>
-      <button type="button">Review</button>
     </div>
   );
 }
@@ -902,7 +901,12 @@ function channelLabel(name: string) {
   return name;
 }
 
-function SalesTable({ money, workbook, totals }: { money: (c: number) => string; workbook: BooksWorkbook; totals: BookTotals }) {
+function SalesTable({ money, workbook, totals, focusIds }: { money: (c: number) => string; workbook: BooksWorkbook; totals: BookTotals; focusIds?: string[] }) {
+  useEffect(() => {
+    const id = focusIds?.[0];
+    if (!id) return;
+    document.getElementById(`books-sale-${id}`)?.scrollIntoView({ block: 'center' });
+  }, [focusIds]);
   const order = ['ebay', 'in-store', 'depop', 'mercari', 'amazon', 'tiktok'];
   const accounts = [...workbook.sales.channelTotals].sort((a, b) => {
     const ai = order.indexOf(channelLabel(a.channel).toLowerCase());
@@ -924,7 +928,7 @@ function SalesTable({ money, workbook, totals }: { money: (c: number) => string;
           </thead>
           <tbody>
             {workbook.sales.rows.map((r) => (
-              <tr key={r.sale_id + r.sku}>
+              <tr key={r.sale_id + r.sku} id={`books-sale-${r.sale_id}`} className={focusIds?.includes(r.sale_id) ? 'books-sale-focus' : undefined}>
                 <td>{shortDate(r.date)}</td>
                 <td className="books-item"><strong>{r.title}</strong><small>SKU {r.sku}</small></td>
                 <td><span className="books-channel-chip">{channelLabel(r.channel)}</span></td>

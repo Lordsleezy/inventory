@@ -10,9 +10,12 @@ export function effectiveCostCents(row: Row): number | null {
     ? Number(row.unit_cost_cents)
     : null;
   if (unit != null && unit > 0) return unit * qty;
+  // A unit cost of $0 is a recorded cost (a free pack, a gift). A blank 0 with no source is still missing.
+  if (src === 'unit' && unit === 0) return 0;
 
   const ledger = row.cost_cents != null && row.cost_cents !== '' ? Number(row.cost_cents) : null;
   if (ledger != null && ledger > 0) return ledger;
+  if (src === 'unit' && ledger === 0) return 0;
 
   return null;
 }

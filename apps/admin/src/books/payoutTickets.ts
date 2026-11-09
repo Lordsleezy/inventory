@@ -125,6 +125,10 @@ export function ticketCommissionsAllRules(
 
 export type SaleAuditFlag = { ticketKey: string; message: string };
 
+function dollars(cents: number) {
+  return (cents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+}
+
 export function auditInStoreFees(tickets: MonthTicket[]): SaleAuditFlag[] {
   const out: SaleAuditFlag[] = [];
   for (const t of tickets) {
@@ -132,7 +136,7 @@ export function auditInStoreFees(tickets: MonthTicket[]): SaleAuditFlag[] {
     if (!IN_STORE.has(ch)) continue;
     const fee = Math.max(0, t.feeCents ?? 0);
     if (fee > 0) {
-      out.push({ ticketKey: t.key, message: `In-store sale ${t.key} has marketplace fee ${fee}¢ on the ledger — payouts tab may differ; not changed.` });
+      out.push({ ticketKey: t.key, message: `An in-store sale includes a marketplace fee of ${dollars(fee)}.` });
     }
   }
   return out;
@@ -148,15 +152,15 @@ function lineWeights(ticket: MonthTicket): number[] {
 
 export function ticketLineIndex(ticket: MonthTicket, row: Row): number {
   const lines = ticket.lines || [];
+  const saleId = String(row.id ?? '');
+  const pos = ticket.saleIds.indexOf(saleId);
+  if (pos >= 0 && pos < lines.length) return pos;
   const sku = String(row.sku || '');
   const price = Number(row.price_cents || 0);
   let idx = lines.findIndex((l) => l.sku === sku && Number(l.price_cents || 0) === price);
   if (idx >= 0) return idx;
   idx = lines.findIndex((l) => l.sku === sku);
-  if (idx >= 0) return idx;
-  const saleId = String(row.id ?? '');
-  const pos = ticket.saleIds.indexOf(saleId);
-  return pos >= 0 ? pos : 0;
+  return idx >= 0 ? idx : 0;
 }
 
 export function sliceTicketLine(ticket: MonthTicket, lineIndex: number): MonthTicket {

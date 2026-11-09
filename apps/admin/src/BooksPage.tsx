@@ -3,7 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import ExcelJS from 'exceljs';
 import { BooksViews, type Sheet } from './books/BooksViews';
 import { normalizeReport } from './books/booksMath';
-import { addCdtfaExcelSheet, addCdtfaPdfPages } from './books/cdtfaExport';
+import { addCdtfaExcelSheet, addCdtfaPdfPages, cdtfaPdfFileName } from './books/cdtfaExport';
 import { loadCdtfaPrintModel, type CdtfaPrintModel } from './books/cdtfaLoad';
 import { monthsInRange, parseFiling, spanBounds, spanTitle, type BooksSpan } from './books/booksSpan';
 import { addArchiveSheet, appendPdf, archivePlan, periodHasActivity, zipStore } from './books/booksArchive';
@@ -16,7 +16,7 @@ import { loadBooksPayoutContext, loadCommissionOverrides } from './books/loadPay
 import { computePayoutPersonBalances, loadPayoutLedgerData, BOOKS_WORKBOOK_VERSION, type PersonBalance } from './books/payoutLedger';
 import { canonicalPersonKey, mergeEmployeeIds } from './books/personMerge';
 import { buildBooksWorkbook, loadBooksMoney } from './books/workbook';
-import type { BooksPayoutContext, InventorySummary, Period, ReceivedItem, Report } from './books/types';
+import type { BooksPayoutContext, InventorySummary, Period, ReceivedItem, Report, Row } from './books/types';
 import type { CommissionOverride } from './payouts';
 import { loadErrorMessage } from './booksLoadErrors';
 
@@ -75,7 +75,7 @@ export function BooksPage({ client, storeId: storeIdProp, money, native = false,
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [exportsPreparing, setExportsPreparing] = useState(false);
-  const [exportFiles, setExportFiles] = useState<{ excel: Uint8Array; pdf: Uint8Array } | null>(null);
+  const [exportFiles, setExportFiles] = useState<{ excel: Uint8Array; pdf: Uint8Array; taxPdf: Uint8Array | null } | null>(null);
   const [taxForm, setTaxForm] = useState<CdtfaPrintModel | null>(null);
   const [span, setSpan] = useState<BooksSpan>('month');
   const [filing, setFiling] = useState<CdtfaFrequency | null>(null);
@@ -272,15 +272,17 @@ export function BooksPage({ client, storeId: storeIdProp, money, native = false,
         }
         const tax = await loadCdtfaPrintModel(client, viewPeriod.period_start, viewPeriod.period_end);
         if (!cancelled) setTaxForm(tax);
+        let taxPdf: Uint8Array | null = null;
         if (tax) {
           try {
             excel = await addCdtfaExcelSheet(excel, tax);
             pdf = await addCdtfaPdfPages(pdf, tax);
+            taxPdf = await fillCdtfaPdfBytes(await loadCdtfaTemplate(), paperToCdtfaDoc(tax));
           } catch (err) {
             console.error('sales tax form export', err);
           }
         }
-        if (!cancelled) setExportFiles({ excel, pdf });
+        if (!cancelled) setExportFiles({ excel, pdf, taxPdf });
       } catch (e) {
         if (!cancelled) console.error('export prep', e);
       } finally { if (!cancelled) setExportsPreparing(false); }
@@ -372,6 +374,7 @@ export function BooksPage({ client, storeId: storeIdProp, money, native = false,
         const formPdf = await fillCdtfaPdfBytes(template, paperToCdtfaDoc(tax));
         const pdf = await appendPdf(reportPdf, formPdf);
         files.push({ name: `${item.title.replace(/\s+/g, '-')}.pdf`, bytes: pdf });
+        files.push({ name: cdtfaPdfFileName(item.start, item.end), bytes: formPdf });
         addArchiveSheet(book, item.title, workbook, tax);
       }
     } catch (e) {
@@ -382,8 +385,64 @@ export function BooksPage({ client, storeId: storeIdProp, money, native = false,
   }
 
   const fileStem = viewPeriod ? spanTitle(viewPeriod.period_start, span).replace(/\s+/g, '-') : 'Books';
-  const downloadExcel = () => exportFiles && downloadBytes(`Books-${fileStem}.xlsx`, exportFiles.excel, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  const downloadExcel = () => {
+    if (!exportFiles) return;
+    const xlsx = { name: `Books-${fileStem}.xlsx`, bytes: exportFiles.excel };
+    if (exportFiles.taxPdf && viewPeriod) {
+      downloadBytes(`Books-${fileStem}.zip`, zipStore([
+        xlsx,
+        { name: cdtfaPdfFileName(viewPeriod.period_start, viewPeriod.period_end), bytes: exportFiles.taxPdf },
+      ]), 'application/zip');
+      return;
+    }
+    downloadBytes(xlsx.name, xlsx.bytes, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  };
   const downloadPdf = () => exportFiles && downloadBytes(`Books-${fileStem}.pdf`, exportFiles.pdf, 'application/pdf');
+
+  function patchReports(patcher: (current: Report) => Report) {
+    setParts((prev) => prev.map((part) => ({ ...part, report: patcher(part.report) })));
+    setReport((prev) => (prev ? patcher(prev) : prev));
+  }
+
+  async function resolveLabel(expenseId: string, choice: { saleId?: string; asExpense?: boolean }) {
+    const { error: rpcError } = await client.rpc('portal_books_resolve_label', {
+      p_expense: expenseId,
+      p_sale_id: choice.saleId ? Number(choice.saleId) : null,
+      p_as_expense: !!choice.asExpense,
+    });
+    if (rpcError) {
+      setError(rpcError.message || 'Could not update that label.');
+      return;
+    }
+    patchReports((current) => {
+      const sales = (current.sales || []).map((row) => ({ ...row }));
+      const expenses = (current.expenses || []).map((row) => {
+        if (String(row.id) !== expenseId) return row;
+        if (choice.asExpense) return { ...row, source: 'manual', sale_id: null };
+        const sale = sales.find((item) => String(item.id) === String(choice.saleId));
+        return { ...row, sku: sale?.sku || row.sku, sale_id: choice.saleId };
+      });
+      if (!choice.asExpense) {
+        const expense = (current.expenses || []).find((row) => String(row.id) === expenseId);
+        const cents = Number(expense?.amount_cents || 0);
+        const idx = sales.findIndex((row) => String(row.id) === String(choice.saleId));
+        if (idx >= 0 && cents > 0) {
+          const already = Number(sales[idx].ship_cost_cents || 0);
+          if (already < cents) {
+            const added = cents - already;
+            sales[idx].ship_cost_cents = already + added;
+            if (sales[idx].profit_cents != null) sales[idx].profit_cents = Number(sales[idx].profit_cents) - added;
+          }
+        }
+      }
+      return {
+        ...current,
+        sales: sales as Row[],
+        expenses,
+        books_unmatched_labels: (current.books_unmatched_labels || []).filter((row) => row.id !== expenseId),
+      };
+    });
+  }
 
   if (busy && !report) {
     return <p className={native ? 'native-report-empty' : ''}>Loading books…</p>;
@@ -449,6 +508,7 @@ export function BooksPage({ client, storeId: storeIdProp, money, native = false,
           showLock={span === 'month'}
           onDownloadAll={() => void downloadAll()}
           archiveBusy={archiveBusy}
+          onResolveLabel={(expenseId, choice) => void resolveLabel(expenseId, choice)}
         />
       ) : (
         <div className={`native-report-body books-phone${native ? '' : ' books-desktop-shell'}`}>
