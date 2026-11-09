@@ -17,6 +17,8 @@ test('desktop order sheet is an opaque panel and upload is a real button', async
   assert.match(desk, /html\.desk:not\(\.app-mode\) \.app > aside \{/);
   assert.match(desk, /\.desk-drawer \{[\s\S]*background: #111 !important/);
   assert.match(desk, /\.desk-drawer-scrim \{ position: fixed; inset: 0; background: #000000aa; z-index: 39/);
+  assert.match(desk, /\.desk-drawer button\.order-title,\s*\nhtml\.desk:not\(\.app-mode\) \.desk-drawer \.order-photo-slide[\s\S]*background: transparent !important;\s*\n\s*color: #fff !important;/);
+  assert.match(desk, /\.desk-drawer \.order-photo-thumbs button \{[\s\S]*background: #2a2a2a !important/);
   assert.match(orders, /createPortal\(/);
   assert.match(orders, /className="desk-drawer"/);
   assert.doesNotMatch(orders, /<aside className="desk-drawer"/);
