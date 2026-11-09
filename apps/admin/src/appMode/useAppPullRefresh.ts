@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
-const THRESHOLD_PX = 112;
-const HINT_START_PX = 40;
+const THRESHOLD_PX = 240;
+const HINT_START_PX = 96;
 const MIN_SPIN_MS = 450;
 
 export type PullRefreshHandler = () => void | Promise<void>;
@@ -57,9 +57,9 @@ export function useAppPullRefresh(
       }
       const y = e.touches[0]?.clientY ?? 0;
       const d = y - startY.current;
-      if (d > 0) {
-        e.preventDefault();
-        setPull(Math.min(96, d));
+      if (d > 8) {
+        if (e.cancelable) e.preventDefault();
+        setPull(Math.min(THRESHOLD_PX, d));
       } else setPull(0);
     };
 

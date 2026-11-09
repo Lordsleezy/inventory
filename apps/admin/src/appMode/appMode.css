@@ -56,7 +56,7 @@ html.app-mode .app-tab-panel {
   inset: 0;
   overflow: auto;
   -webkit-overflow-scrolling: touch;
-  overscroll-behavior-y: contain;
+  overscroll-behavior: none;
   touch-action: pan-y;
   padding-bottom: 52px;
 }
