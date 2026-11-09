@@ -42,6 +42,7 @@ export type AppOrderDetailProps = {
   money: (n: number) => string;
   stamp: (s: string) => string;
   isAdmin: boolean;
+  showTracking?: boolean;
   busy: string;
   error: string;
   locationCode: string;
@@ -56,7 +57,7 @@ export type AppOrderDetailProps = {
   onSetLocation: (code: string) => void;
   onPrintLabel: (download?: boolean) => void;
   onMarkPackaged: () => void;
-  onMarkShipped: (barcode: string, overrideReason?: string) => void;
+  onMarkShipped: (barcode: string, overrideReason?: string) => void | Promise<boolean>;
   onMarkDelivered: () => void;
   onStepBack: () => void;
   onFloorCancel: () => void;
@@ -86,7 +87,7 @@ export type AppOrderDetailProps = {
 
 export function AppOrderDetail(props: AppOrderDetailProps) {
   const {
-    client, accessToken, order, isAdmin, busy, error,
+    client, accessToken, order, isAdmin, showTracking = false, busy, error,
     locationCode, locationOptions, photos, photoUrls,
     trackingDraft, onTrackingDraft, onBack, onSetLocation,
     onPrintLabel, onMarkPackaged, onMarkShipped, onMarkDelivered,
@@ -111,7 +112,7 @@ export function AppOrderDetail(props: AppOrderDetailProps) {
   const heroPath = thumbPhoto?.path || null;
   const channelName = CHANNEL[ch] || order.channel || 'Website';
   const metaLine = `SKU ${order.sku || '—'} · ${channelName} · ${shortDate(order.paid_at || order.created_at)}`;
-  const trackNo = order.tracking_number || order.marketplace_tracking_number;
+  const trackNo = showTracking ? (order.tracking_number || order.marketplace_tracking_number) : '';
   const trackHref = carrierTrackUrl(trackNo, order.carrier);
 
   const labelMeta = useMemo(() => {
@@ -396,10 +397,11 @@ export function AppOrderDetail(props: AppOrderDetailProps) {
           order={order}
           isAdmin={isAdmin}
           busy={busy === 'shipped'}
+          error={error}
           onClose={() => setVerifyShip(false)}
-          onConfirm={(barcode, reason) => {
-            onMarkShipped(barcode, reason);
-            setVerifyShip(false);
+          onConfirm={async (barcode, reason) => {
+            const ok = await onMarkShipped(barcode, reason);
+            if (ok) setVerifyShip(false);
           }}
         />
       )}

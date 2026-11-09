@@ -11,7 +11,7 @@ test('More home lists primary links in the phone order ending with Other', async
   const home = src.slice(src.indexOf('export function AppMoreHome'), src.indexOf('export function AppMoreOther'));
   const admin = home.slice(home.indexOf('{fullAccess ? ('), home.indexOf(') : ownerAccess ? ('));
   const labels = [...admin.matchAll(/Icon tone="[^"]+" \/>([^<]+)</g)].map((m) => m[1].trim());
-  assert.deepEqual(labels, ['Live sales', 'Receipts', 'Register', 'Safe', 'Reports', 'Books', 'Locations', 'Other']);
+  assert.deepEqual(labels, ['Live sales', 'Receipts', 'Register', 'Safe', 'Reports', 'Books', 'Locations', 'Returns', 'Other']);
 });
 
 test('Owner More lists money and system extras', async () => {

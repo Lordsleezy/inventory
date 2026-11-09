@@ -13,6 +13,7 @@ import { ScanOutPanel } from '../ScanOutPanel';
 import { SEG_SHORT } from '../orderDisplay';
 import { AppOrderDetail } from './AppOrderDetail';
 import { AppOrderRow } from './AppOrderRow';
+import { AppOrderShipVerifySheet } from './AppOrderShipVerifySheet';
 import { floorFunctionUrl } from '../floorApi';
 import { labelUploadUi, type LabelUploadResponse } from '../labelUploadFeedback';
 import { LabelTrackingPicker, LabelTrackingResult } from '../LabelTrackingResult';
@@ -39,14 +40,17 @@ type Props = {
   money: (n: number) => string;
   stamp: (s: string) => string;
   isAdmin?: boolean;
+  /** Admin and owner see tracking digits. Staff do not. */
+  seeTracking?: boolean;
   refreshKey?: number;
   onPullReady?: () => void;
 };
 
 type TrackEvent = { status?: string; status_detail?: string | null; location?: string | null; occurred_at?: string | null };
 
-export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin = false, refreshKey = 0, onPullReady }: Props) {
+export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin = false, seeTracking = false, refreshKey = 0, onPullReady }: Props) {
   const [seg, setSeg] = useState<Seg>('toShip');
+  const [shipTarget, setShipTarget] = useState<WebOrder | null>(null);
   const [scanOut, setScanOut] = useState(false);
   const [orders, setOrders] = useState<WebOrder[] | null>(null);
   const [error, setError] = useState('');
@@ -171,6 +175,7 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
   }
 
   async function markShipped(o: WebOrder, barcode: string, overrideReason?: string) {
+    let ok = false;
     await runAction('shipped', async () => {
       const { error: e } = await client.rpc('portal_mark_order_shipped', {
         p_order: o.id,
@@ -191,7 +196,9 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
                   : e.message;
         throw new Error(msg);
       }
+      ok = true;
     });
+    return ok;
   }
 
   async function markDelivered(o: WebOrder) {
@@ -452,7 +459,8 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
         onSetLocation={(code) => void setPickLocation(open, code)}
         onPrintLabel={(dl) => void printLabel(open, dl)}
         onMarkPackaged={() => void markPackaged(open)}
-        onMarkShipped={(barcode, reason) => void markShipped(open, barcode, reason)}
+        onMarkShipped={(barcode, reason) => markShipped(open, barcode, reason)}
+        showTracking={seeTracking}
         onMarkDelivered={() => void markDelivered(open)}
         onStepBack={() => void stepBack(open)}
         onFloorCancel={() => void floorCancel(open)}
@@ -489,6 +497,7 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
   }
   return (
     <>
+      <div className="orders-sticky-head">
       <p className="orders-screen-eyebrow">Orders · {SEG_SHORT[seg]}</p>
       <div className="app-segment app-segment-scroll orders-segment" role="tablist" ref={tabRowRef}>
         {((isAdmin ? [
@@ -514,11 +523,12 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
           </button>
         ))}
       </div>
+      </div>
       {seg === 'needsLabel' ? <p className="orders-seg-note subtle">{SEG_NOTE[seg]}</p> : <p className="orders-seg-note">{SEG_NOTE[seg]}</p>}
       {seg === 'packaged' && (
         <>
           <p className="app-flag">{stale > 0 ? `${stale} packaged over 2 days and not marked shipped.` : 'Flags anything packaged over 2 days and not marked shipped.'}</p>
-          <button type="button" className="secondary" onClick={() => setScanOut(true)}>Scan out</button>
+          <button type="button" className="secondary orders-scan-out" onClick={() => setScanOut(true)}>Scan out</button>
         </>
       )}
       {seg === 'shipped' && (
@@ -545,7 +555,7 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
         {orders && rows.length === 0 && <div className="app-empty-row">None right now</div>}
         {rows.map((o) => {
           const chName = CHANNEL[(o.channel || 'website').toLowerCase()] || o.channel || 'Website';
-          const tail = orderNeedsLabel(o) ? '' : trackingTail(o);
+          const tail = seeTracking && !orderNeedsLabel(o) ? trackingTail(o) : '';
           const thumbPhoto = listThumbPhoto(photoMap[o.sku] || []);
           const thumbPath = thumbPhoto?.path || null;
           const rowPackaged = seg === 'toShip' && orderCanMarkPackaged(o);
@@ -571,10 +581,25 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
               showPackaged={rowPackaged}
               onPackaged={() => void markPackaged(o)}
               packagedBusy={busy === 'packaged'}
+              showMarkShipped={seg === 'packaged'}
+              onMarkShipped={() => { setError(''); setShipTarget(o); }}
             />
           );
         })}
       </div>
+      {shipTarget && (
+        <AppOrderShipVerifySheet
+          order={shipTarget}
+          isAdmin={isAdmin}
+          busy={busy === 'shipped'}
+          error={error}
+          onClose={() => { setShipTarget(null); setError(''); }}
+          onConfirm={async (barcode, reason) => {
+            const ok = await markShipped(shipTarget, barcode, reason);
+            if (ok) setShipTarget(null);
+          }}
+        />
+      )}
     </>
   );
 }

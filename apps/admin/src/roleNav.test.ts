@@ -11,8 +11,8 @@ function labelsIn(src: string): string[] {
   return [...src.matchAll(/<Icon[^/]*\/>\s*([^<]+)/g)].map((m) => m[1].trim());
 }
 
-test('phone tab bar: admin keeps Returns, owner and staff stay on the floor bar', () => {
-  assert.deepEqual(phoneTabIds('admin'), ['inventory', 'receive', 'orders', 'returns', 'more']);
+test('phone tab bar: admin, owner, and staff floor tabs', () => {
+  assert.deepEqual(phoneTabIds('admin'), ['inventory', 'receive', 'register', 'orders', 'locations', 'more']);
   assert.deepEqual(phoneTabIds('owner'), ['inventory', 'receive', 'register', 'orders', 'locations', 'more']);
   assert.deepEqual(phoneTabIds('staff'), ['inventory', 'receive', 'register', 'orders', 'locations', 'settings']);
 });
@@ -54,7 +54,7 @@ test('phone More, inventory, orders, and item pages follow the same three desks'
   const ownerBlock = more.slice(more.indexOf('function OwnerMoreHome'), more.indexOf('export function AppMoreHome'));
   const ownerMore = [...ownerBlock.matchAll(/label: '([^']+)'/g)].map((m) => m[1]);
   const other = labelsIn(more.slice(more.indexOf('export function AppMoreOther'), more.indexOf('Rows from')));
-  assert.deepEqual(adminMore, ['Live sales', 'Receipts', 'Register', 'Safe', 'Reports', 'Books', 'Locations', 'Other']);
+  assert.deepEqual(adminMore, ['Live sales', 'Receipts', 'Register', 'Safe', 'Reports', 'Books', 'Locations', 'Returns', 'Other']);
   assert.deepEqual(ownerMore, ['Manifests', 'Locations', 'Reports', 'Books', 'Safe', 'Cameras', 'Settings']);
   for (const label of ['eBay', 'Amazon', 'TikTok', 'Depop', 'Connections & sync', 'Dropship', 'Insights']) {
     assert.ok(other.includes(label), label);

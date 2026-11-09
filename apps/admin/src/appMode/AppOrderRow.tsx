@@ -25,12 +25,14 @@ type Props = {
   showPackaged?: boolean;
   onPackaged?: () => void;
   packagedBusy?: boolean;
+  showMarkShipped?: boolean;
+  onMarkShipped?: () => void;
 };
 
 export function AppOrderRow({
   order, client, thumbPath, photoUrls, locationCode, money, channelName, trackingTail,
   onOpen, onPrint, onUrl, showUpload, onUpload, hideMoney = false, showStepBack, onStepBack,
-  showPackaged, onPackaged, packagedBusy,
+  showPackaged, onPackaged, packagedBusy, showMarkShipped, onMarkShipped,
 }: Props) {
   const loc = locationParts(locationCode);
   const chip = orderChip(order);
@@ -44,7 +46,7 @@ export function AppOrderRow({
       : [channelName, money(order.item_cents || 0), trackingTail].filter(Boolean).join(' · ');
   const locLine = loc ? `${loc.display} · ${loc.slot}`.toUpperCase() : '';
   const showActions = Boolean(
-    (hasLabel(order) && onPrint) || (showUpload && onUpload) || (showStepBack && onStepBack) || (showPackaged && onPackaged),
+    (hasLabel(order) && onPrint) || (showUpload && onUpload) || (showStepBack && onStepBack) || (showPackaged && onPackaged) || (showMarkShipped && onMarkShipped),
   );
 
   return (
@@ -96,6 +98,15 @@ export function AppOrderRow({
               onClick={(e) => { e.stopPropagation(); onStepBack(); }}
             >
               Step back
+            </button>
+          )}
+          {showMarkShipped && onMarkShipped && (
+            <button
+              type="button"
+              className="app-order-action-primary app-order-mark-ship"
+              onClick={(e) => { e.stopPropagation(); onMarkShipped(); }}
+            >
+              Mark shipped
             </button>
           )}
         </div>
