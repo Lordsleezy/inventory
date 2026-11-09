@@ -8,7 +8,8 @@ begin
   insert into auth.users (id) values (v_owner), (v_clerk);
   insert into public.stores default values returning id into v_store;
   insert into public.staff (user_id, store_id, display_name, role) values (v_owner, v_store, 'Owner', 'owner'), (v_clerk, v_store, 'Clerk', 'staff');
-  perform public.seed_store_settings(v_store, 'Totals Store');
+  perform public.seed_store_settings(v_store,
+  perform public.pgtap_sync_owner_portal_admins(v_store); 'Totals Store');
   insert into public.sku_ledger (sku, issued_at, store_id)
     select s, now(), v_store from unnest(array['98001','98002','98003','98004','98005','98006','98007','98008']) s;
   insert into public.units (sku, brand, model, title, category, condition, upc, listing_body, ask_cents, qty_on_hand, show_on_website,

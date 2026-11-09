@@ -14,7 +14,8 @@ begin
   insert into public.stores default values returning id into v_store;
   insert into public.staff (user_id, store_id, display_name, role) values
     (v_owner, v_store, 'Owner', 'owner');
-  perform public.seed_store_settings(v_store, 'Fee Store');
+  perform public.seed_store_settings(v_store,
+  perform public.pgtap_sync_owner_portal_admins(v_store); 'Fee Store');
   insert into public.store_settings (store_id, key, value)
   values (v_store, 'taxRateBps', '1000'::jsonb),
          (v_store, 'card_fee_bps', '250'::jsonb)

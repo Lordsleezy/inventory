@@ -8,7 +8,8 @@ begin
   insert into auth.users(id) values(clerk_id);
   insert into public.stores default values returning id into s;
   insert into public.staff(user_id,store_id,display_name,role) values(clerk_id,s,'Jacob','staff');
-  perform public.seed_store_settings(s,'Regular SKU range test');
+  perform public.seed_store_settings(s,
+  perform public.pgtap_sync_owner_portal_admins(s);'Regular SKU range test');
   insert into public.sku_ledger(store_id,sku,issued_at,label,fate) values
     (s,'10041',now(),'regular unit','issued'),
     (s,'99961',now(),'legacy 9xxxx unit','issued'),

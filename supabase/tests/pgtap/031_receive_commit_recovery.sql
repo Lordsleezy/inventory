@@ -8,7 +8,8 @@ do $$ declare st uuid; own uuid:=gen_random_uuid(); clerk uuid:=gen_random_uuid(
  insert into public.stores default values returning id into st;
  insert into public.staff(user_id,store_id,display_name,role) values(own,st,'Receive owner','owner'),(clerk,st,'Receive clerk','staff');
  insert into public.portal_admins(user_id,store_id) values(own,st);
- perform public.seed_store_settings(st,'Receive recovery');
+ perform public.seed_store_settings(st,
+  perform public.pgtap_sync_owner_portal_admins(st);'Receive recovery');
  perform set_config('receive_test.store',st::text,true);perform set_config('receive_test.owner',own::text,true);perform set_config('receive_test.clerk',clerk::text,true);
  perform set_config('receive_test.request',req::text,true);perform set_config('receive_test.clerk_request',creq::text,true);
  perform set_config('receive_test.photo',st::text||'/receive/'||own::text||'/'||req::text||'/actual.jpg',true);

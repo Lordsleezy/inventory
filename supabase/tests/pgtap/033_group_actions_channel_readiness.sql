@@ -8,7 +8,8 @@ begin
   insert into public.stores default values returning id into st;
   insert into public.staff(user_id,store_id,display_name,role) values
     (owner_id,st,'Owner','owner'),(clerk_id,st,'Clerk','staff');
-  perform public.seed_store_settings(st,'Group actions');
+  perform public.seed_store_settings(st,
+  perform public.pgtap_sync_owner_portal_admins(st);'Group actions');
   insert into public.sku_ledger(sku,issued_at,store_id) values('99501',now(),st),('99502',now(),st);
   insert into public.units(sku,brand,model,title,condition,ask_cents,state,store_id,received_at,updated_at)
     values('99501','Acme','A','Acme A','Open box',1000,'available',st,now(),now()),

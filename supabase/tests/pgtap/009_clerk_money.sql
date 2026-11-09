@@ -38,11 +38,11 @@ select is((select msrp_cents from public.units_pos where sku = '91002'), null::i
 select is((select count(*)::int from public.sale_receipts), 0, 'clerk sees no sale receipts');
 select is(public.portal_store_id(), null::uuid, 'portal_store_id is null for clerk');
 
--- Owner
+-- Owner desk (staff.role owner): clerk floor lockdown, financial store scope.
 select set_config('request.jwt.claim.sub', current_setting('test.owner_id'), true);
-select is((select ask_cents from public.units_pos where sku = '91002'), 2000, 'owner sees ask on sold unit');
-select is((select count(*)::int from public.sale_receipts), 1, 'owner sees sale receipts');
-select isnt(public.portal_store_id(), null::uuid, 'portal_store_id set for owner');
+select is((select ask_cents from public.units_pos where sku = '91002'), null::int, 'owner desk hides ask on sold unit');
+select is((select count(*)::int from public.sale_receipts), 0, 'owner desk sees no sale receipts');
+select isnt(public.portal_store_id(), null::uuid, 'portal_store_id set for owner financial pages');
 
 select * from finish();
 rollback;

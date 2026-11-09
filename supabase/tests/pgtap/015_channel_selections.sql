@@ -12,7 +12,8 @@ begin
   insert into public.stores default values returning id into v_store;
   insert into public.staff (user_id, store_id, display_name, role) values
     (v_owner, v_store, 'Owner', 'owner'), (v_clerk, v_store, 'Clerk', 'staff');
-  perform public.seed_store_settings(v_store, 'Channel Store');
+  perform public.seed_store_settings(v_store,
+  perform public.pgtap_sync_owner_portal_admins(v_store); 'Channel Store');
   insert into public.listing_never_rules (store_id, channel, rule_type, value, note)
   values (v_store, null, 'pattern', '\mrefrigerators?\M', 'Refrigerators'),
          (v_store, null, 'defective', '', 'Everything in Defective'),

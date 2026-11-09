@@ -10,7 +10,8 @@ begin
   insert into public.stores default values returning id into v_store;
   insert into public.staff (user_id, store_id, display_name, role) values (v_paul, v_store, 'Paul', 'owner');
   insert into public.portal_admins (user_id, store_id) values (v_paul, v_store);
-  perform public.seed_store_settings(v_store, 'eBay payout');
+  perform public.seed_store_settings(v_store,
+  perform public.pgtap_sync_owner_portal_admins(v_store); 'eBay payout');
   insert into public.store_settings (store_id, key, value) values
     (v_store, 'online_channels', '["ebay","amazon","depop","website"]'),
     (v_store, 'online_payout_pct', '30'),

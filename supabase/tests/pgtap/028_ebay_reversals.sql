@@ -6,7 +6,8 @@ do $$ declare s uuid; owner_id uuid:=gen_random_uuid(); clerk_id uuid:=gen_rando
  insert into public.stores default values returning id into s;
  insert into public.staff(user_id,store_id,display_name,role) values(owner_id,s,'Owner','owner'),(clerk_id,s,'Clerk','staff');
  insert into public.portal_admins(user_id,store_id) values(owner_id,s);
- perform public.seed_store_settings(s,'eBay reversal test');
+ perform public.seed_store_settings(s,
+  perform public.pgtap_sync_owner_portal_admins(s);'eBay reversal test');
  insert into public.store_settings(store_id,key,value) values(s,'online_payout_pct','30'),(s,'online_payout_employee_id',to_jsonb(owner_id::text)) on conflict(store_id,key) do update set value=excluded.value;
  insert into public.store_payout_people(store_id,slot,employee_id) values(s,'paul',owner_id),(s,'jacob',clerk_id);
  insert into public.portal_payout_rules(store_id,employee_id,method,rate) values(s,owner_id,'percent_profit',20),(s,clerk_id,'percent_profit',10);

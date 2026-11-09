@@ -7,7 +7,8 @@ do $$ declare st uuid; own uuid:=gen_random_uuid(); clerk uuid:=gen_random_uuid(
  insert into public.stores default values returning id into st;
  insert into public.staff(user_id,store_id,display_name,role) values(own,st,'Group owner','owner'),(clerk,st,'Group clerk','staff');
  insert into public.portal_admins(user_id,store_id) values(own,st);
- perform public.seed_store_settings(st,'Groups');
+ perform public.seed_store_settings(st,
+  perform public.pgtap_sync_owner_portal_admins(st);'Groups');
  perform set_config('groups.store',st::text,true);perform set_config('groups.owner',own::text,true);perform set_config('groups.clerk',clerk::text,true);perform set_config('groups.request',req::text,true);
  perform set_config('groups.photo',st::text||'/receive/'||clerk::text||'/'||req::text||'/actual.jpg',true);
  insert into storage.objects(bucket_id,name) values('unit-photos',current_setting('groups.photo'));

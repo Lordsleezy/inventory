@@ -12,7 +12,8 @@ begin
   insert into public.stores default values returning id into v_store;
   insert into public.staff (user_id, store_id, display_name, role) values
     (v_paul, v_store, 'Paul', 'owner');
-  perform public.seed_store_settings(v_store, 'CDTFA test');
+  perform public.seed_store_settings(v_store,
+  perform public.pgtap_sync_owner_portal_admins(v_store); 'CDTFA test');
   insert into public.sku_ledger (sku, issued_at, store_id)
   select s, now(), v_store from unnest(array['94701','94702','94703','94704','94705']) s;
   insert into public.units (sku, brand, title, ask_cents, acquisition_cost_cents, state, store_id, received_at, updated_at)

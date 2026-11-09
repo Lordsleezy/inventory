@@ -23,7 +23,7 @@ as $$
   );
 $$;
 
--- Manager-only helpers (cost on receive, delete unit, etc.). Owner desk matches clerk floor.
+-- Manager helpers still include business owners on staff; portal_is_admin is the channel gate.
 create or replace function public.is_manager()
 returns boolean
 language sql
@@ -31,7 +31,7 @@ stable
 security definer
 set search_path = public
 as $$
-  select public.staff_role() = 'manager';
+  select public.staff_role() in ('owner', 'manager');
 $$;
 
 -- Financial pages: portal admins, managers, and owner desk staff.
@@ -160,6 +160,25 @@ end $$;
 
 revoke all on function public.portal_owner_home() from public, anon;
 grant execute on function public.portal_owner_home() to authenticated;
+
+-- pgTAP still models “full admin” through portal_admins; owner desk staff stay off that row.
+create or replace function public.pgtap_sync_owner_portal_admins(p_store uuid)
+returns void
+language sql
+security definer
+set search_path = public
+as $$
+  insert into public.portal_admins (user_id, store_id)
+  select s.user_id, p_store
+  from public.staff s
+  where s.store_id = p_store
+    and s.role = 'owner'
+    and s.deactivated_at is null
+  on conflict do nothing;
+$$;
+
+revoke all on function public.pgtap_sync_owner_portal_admins(uuid) from public, anon;
+grant execute on function public.pgtap_sync_owner_portal_admins(uuid) to authenticated, service_role;
 
 -- Assign Steve when the auth user exists; never grant portal_admins from here.
 do $$

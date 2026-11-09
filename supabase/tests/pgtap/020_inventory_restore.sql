@@ -7,7 +7,8 @@ begin
  insert into auth.users(id) values(v_owner),(v_clerk);
  insert into public.stores default values returning id into v_store;
  insert into public.staff(user_id,store_id,display_name,role) values(v_owner,v_store,'Owner','owner'),(v_clerk,v_store,'Clerk','staff');
- perform public.seed_store_settings(v_store,'Restore test');
+ perform public.seed_store_settings(v_store,
+  perform public.pgtap_sync_owner_portal_admins(v_store);'Restore test');
  insert into public.sku_ledger(sku,store_id,issued_at) select s,v_store,now() from unnest(array['97001','97002','97003','97004','97005']) s;
  insert into public.units(sku,store_id,title,state,qty_on_hand,ask_cents,acquisition_cost_cents,show_on_website,received_at,updated_at)
  select s,v_store,'Test unit',case when s='97005' then 'available' else 'sold' end,case when s in ('97002','97005') then 1 else 0 end,5000,1000,true,now(),now()

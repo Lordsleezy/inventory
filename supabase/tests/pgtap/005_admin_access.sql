@@ -19,7 +19,8 @@ begin
     (v_owner, v_store, 'Owner', 'owner'),
     (v_mgr, v_store, 'Manager', 'manager'),
     (v_staff, v_store, 'Staff', 'staff');
-  perform public.seed_store_settings(v_store, 'Report Store');
+  perform public.seed_store_settings(v_store,
+  perform public.pgtap_sync_owner_portal_admins(v_store); 'Report Store');
 
   insert into public.sku_ledger (sku, issued_at, store_id) values
     ('90001', now(), v_store),

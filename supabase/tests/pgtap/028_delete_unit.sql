@@ -4,7 +4,8 @@ do $$ declare s uuid; owner_id uuid:=gen_random_uuid(); begin
  insert into auth.users(id) values(owner_id);
  insert into public.stores default values returning id into s;
  insert into public.staff(user_id,store_id,display_name,role) values(owner_id,s,'Owner','owner');
- perform public.seed_store_settings(s,'delete unit test');
+ perform public.seed_store_settings(s,
+  perform public.pgtap_sync_owner_portal_admins(s);'delete unit test');
  perform set_config('tools.store',s::text,true);
  perform set_config('request.jwt.claim.sub',owner_id::text,true);
  perform set_config('request.jwt.claim.role','authenticated',true);

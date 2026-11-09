@@ -6,7 +6,8 @@ do $$ declare s uuid; owner_id uuid := gen_random_uuid(); worker_id uuid := gen_
   insert into public.staff(user_id, store_id, display_name, role) values
     (owner_id, s, 'Owner', 'owner'),
     (worker_id, s, 'Jacob', 'staff');
-  perform public.seed_store_settings(s, 'Location counts');
+  perform public.seed_store_settings(s,
+  perform public.pgtap_sync_owner_portal_admins(s); 'Location counts');
   perform set_config('loc.owner', owner_id::text, true);
   perform set_config('loc.worker', worker_id::text, true);
   perform set_config('loc.store', s::text, true);
