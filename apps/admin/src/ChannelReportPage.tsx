@@ -186,7 +186,7 @@ export function ChannelReportPage({ client, money, embedded, mode = 'full', nati
     const overhead = (channel === 'all' || channel === 'ebay') ? ebayOverhead : 0;
     const gapLabel = overhead > 0 && gap === overhead ? 'eBay insertion & subscription' : gap < 0 ? 'Other' : 'Other deductions';
     return <div className="native-report-body">
-      <ReportsRange range={range} label={rangeLabel(start, end)} onPick={preset} />
+      <ReportsRange range={range} label={rangeLabel(start, end)} onPick={preset} native />
       <button type="button" className="native-report-period" onClick={() => setShowDates(v => !v)} aria-expanded={showDates}>{period} ▾</button>
       {showDates && <div className="native-report-dates"><label>From<input type="date" value={start} onChange={e => { setRange('custom'); setStart(e.target.value); }} /></label><label>To<input type="date" value={end} onChange={e => { setRange('custom'); setEnd(e.target.value); }} /></label></div>}
       {error && <div className="alert" role="alert">{error}</div>}

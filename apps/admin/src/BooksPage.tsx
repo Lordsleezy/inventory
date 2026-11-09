@@ -18,9 +18,11 @@ import { canonicalPersonKey, mergeEmployeeIds } from './books/personMerge';
 import { buildBooksWorkbook, loadBooksMoney } from './books/workbook';
 import type { BooksPayoutContext, InventorySummary, Period, ReceivedItem, Report } from './books/types';
 import type { CommissionOverride } from './payouts';
+import { loadErrorMessage } from './booksLoadErrors';
 
 type Props = {
   client: SupabaseClient;
+  storeId?: string;
   money: (cents: number) => string;
   native?: boolean;
   onNativeNavigation?: (inReport: boolean, title?: string, back?: () => void) => void;
@@ -57,7 +59,7 @@ const emptyInventory = (): InventorySummary => ({
   giveaways: [], replacements: [], returns: [], defective_moves: [],
 });
 
-export function BooksPage({ client, money, native = false, onNativeNavigation }: Props) {
+export function BooksPage({ client, storeId: storeIdProp, money, native = false, onNativeNavigation }: Props) {
   const [periods, setPeriods] = useState<Period[]>([]);
   const [periodId, setPeriodId] = useState('');
   const [report, setReport] = useState<Report | null>(null);
@@ -82,8 +84,22 @@ export function BooksPage({ client, money, native = false, onNativeNavigation }:
   const [sheet, setSheet] = useState<Sheet>('hub');
   const [desktopTab, setDesktopTab] = useState<Sheet>('sales');
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [loadRetry, setLoadRetry] = useState(0);
 
   const selected = useMemo(() => periods.find((p) => p.id === periodId) || null, [periods, periodId]);
+
+  const resolveStoreId = useCallback(async () => {
+    if (storeIdProp) return storeIdProp;
+    const uid = (await client.auth.getUser()).data.user?.id;
+    if (!uid) throw new Error('Not signed in');
+    const { data, error: staffErr } = await client.from('staff').select('store_id').eq('user_id', uid).maybeSingle();
+    if (staffErr) throw staffErr;
+    const fromStaff = String(data?.store_id || '');
+    if (fromStaff) return fromStaff;
+    const admins = await client.from('portal_admins').select('store_id').eq('user_id', uid).maybeSingle();
+    if (admins.error) throw admins.error;
+    return String(admins.data?.store_id || '');
+  }, [client, storeIdProp]);
 
   const loadPeriods = useCallback(async () => {
     const { data, error: e } = await client.rpc('portal_books_list', { p_from: '2026-01-01', p_to: asDate(new Date()) });
@@ -130,8 +146,7 @@ export function BooksPage({ client, money, native = false, onNativeNavigation }:
   const loadSpan = useCallback(async (p: Period, nextSpan: BooksSpan, known: Period[]) => {
     setBusy(true); setError(''); setExportFiles(null);
     try {
-      const staffRes = await client.from('staff').select('store_id').limit(1).maybeSingle();
-      const storeId = String(staffRes.data?.store_id || '');
+      const storeId = await resolveStoreId();
       const bounds = spanBounds(p.period_start, nextSpan);
       const covered = known.filter((row) => row.period_start >= bounds.start && row.period_start <= bounds.end);
       const targets = (covered.length ? covered : [p]).slice().sort((a, b) => a.period_start.localeCompare(b.period_start));
@@ -152,12 +167,12 @@ export function BooksPage({ client, money, native = false, onNativeNavigation }:
       setDuplicateDecisions(anchor.decisions);
     } catch (e) {
       console.error('Books load failed', e);
-      setError(nextSpan === 'month' ? "Couldn't load this month. Try again." : "Couldn't load this report. Try again.");
+      setError(loadErrorMessage(e, nextSpan));
     } finally { setBusy(false); }
-  }, [client, loadPayoutSide]);
+  }, [client, loadPayoutSide, resolveStoreId]);
 
-  useEffect(() => { void loadPeriods().catch(() => setError("Couldn't load periods")); }, [loadPeriods]);
-  useEffect(() => { if (selected) void loadSpan(selected, span, periods); }, [selected, span, periods, loadSpan]);
+  useEffect(() => { void loadPeriods().catch((e) => setError(loadErrorMessage(e, 'month'))); }, [loadPeriods]);
+  useEffect(() => { if (selected) void loadSpan(selected, span, periods); }, [selected, span, periods, loadSpan, loadRetry]);
   useEffect(() => { setSheet('hub'); }, [periodId]);
 
   const builtSlices = useMemo(() => {
@@ -381,8 +396,13 @@ export function BooksPage({ client, money, native = false, onNativeNavigation }:
           <h1>Books</h1>
         </header>
       )}
-      {error && <div className="alert" role="alert">{error}<button type="button" onClick={() => setError('')}>Dismiss</button></div>}
-      {totals && viewPeriod && selected && workbook && report && (
+      {error && (
+        <div className="books-load-error" role="alert">
+          <p>{error}</p>
+          <button type="button" className="secondary" disabled={busy} onClick={() => { setError(''); setLoadRetry((n) => n + 1); }}>Try again</button>
+        </div>
+      )}
+      {viewPeriod && selected && (report && workbook ? (
         <BooksViews
           native={native}
           money={money}
@@ -430,7 +450,21 @@ export function BooksPage({ client, money, native = false, onNativeNavigation }:
           onDownloadAll={() => void downloadAll()}
           archiveBusy={archiveBusy}
         />
-      )}
+      ) : (
+        <div className={`native-report-body books-phone${native ? '' : ' books-desktop-shell'}`}>
+          <div className="books-phone-period">
+            <label>
+              <span className="sr">Report period</span>
+              <select aria-label="Report period" value={spanValue} disabled={!periods.length} onChange={(e) => onSpanValue(e.target.value)}>
+                {spanOptions.map((row) => (
+                  <option key={row.value} value={row.value}>{row.label}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+          {busy && <p className="native-report-footnote">Loading books…</p>}
+        </div>
+      ))}
     </div>
   );
 }

@@ -14,6 +14,7 @@ import { spanTitle, type BooksSpan } from './booksSpan';
 import type { BooksSlice } from './combineBooks';
 import type { CdtfaFrequency } from './cdtfaResolve';
 import { BooksIconExpenses, BooksIconInventory, BooksIconPayouts, BooksIconReceived, BooksIconSales, BooksIconTax } from './reportIcons';
+import { AppScrollTabs } from '../appMode/AppScrollTabs';
 
 export type Sheet = 'hub' | 'sales' | 'expenses' | 'payouts' | 'inventory' | 'received' | 'tax';
 
@@ -205,11 +206,7 @@ function BooksNative(p: ViewProps) {
         </div>
       )}
       <BooksDeskStrip money={p.money} totals={p.totals} />
-      <nav className="books-phone-tabs" aria-label="Books reports">
-        {PHONE_TABS.map((item) => (
-          <button key={item.id} type="button" className={tab === item.id ? 'on' : ''} onClick={() => p.setSheet(item.id)}>{item.title}</button>
-        ))}
-      </nav>
+      <AppScrollTabs ariaLabel="Books reports" className="books-phone-tabs" items={PHONE_TABS.map((item) => ({ id: item.id, label: item.title }))} value={tab} onChange={(id) => p.setSheet(id)} />
       {tab === 'sales' && <PhoneSales money={p.money} workbook={p.workbook} />}
       {tab === 'expenses' && <SpanParts p={p} render={(workbook) => <ExpensesBody money={p.money} workbook={workbook} native onDuplicateDecision={p.span === 'month' ? p.onDuplicateDecision : undefined} />} />}
       {tab === 'payouts' && <SpanParts p={p} render={(workbook, word) => <PayoutsBody money={p.money} workbook={workbook} native periodWord={word} />} compact />}

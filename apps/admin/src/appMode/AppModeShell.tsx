@@ -237,7 +237,7 @@ export function AppModeShell({
     });
   }
 
-  const tabs = TABS.filter((t) => phoneTabIds(deskKind).includes(t.id));
+  const tabs = phoneTabIds(deskKind).map((id) => TABS.find((t) => t.id === id)).filter((t): t is (typeof TABS)[number] => !!t);
   const stackOpen = !!(itemSku || morePage || channel);
 
   return (
@@ -444,7 +444,7 @@ export function AppModeShell({
         )}
         {moneyAccess && morePage === 'books' && (
           <AppReportsNative onBack={() => booksBack()} title={booksTitle} backLabel={booksDetail ? 'Books' : (moreReturnTo === 'other' ? 'Other' : 'More')}>
-            <BooksPage client={client} money={money} native onNativeNavigation={(detail, title, back) => { setBooksDetail(detail); setBooksTitle(detail ? (title || 'Books') : 'Books'); setBooksBack(() => back || leaveMorePage); }} />
+            <BooksPage client={client} storeId={storeId} money={money} native onNativeNavigation={(detail, title, back) => { setBooksDetail(detail); setBooksTitle(detail ? (title || 'Books') : 'Books'); setBooksBack(() => back || leaveMorePage); }} />
           </AppReportsNative>
         )}
         {moneyAccess && morePage === 'manifests' && (

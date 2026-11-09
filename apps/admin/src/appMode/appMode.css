@@ -1043,39 +1043,58 @@ html.app-mode .app-embed-soft .rpt-links input {
   color: #fff;
 }
 
-/* Reports subtabs: plain text + underline (not iOS pills). */
-html.app-mode .app-reports .inventory-tabs.report-tabs {
+/* Horizontally scrolling phone tab strips (Reports, Books, etc.). */
+html.app-mode .app-scroll-tabs {
   display: flex;
   flex-wrap: nowrap;
-  gap: 0;
-  overflow-x: hidden;
-  padding: 4px 8px 8px;
+  gap: 20px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  min-width: 0;
+  max-width: 100%;
+  padding: 4px 12px 8px;
   margin: 0;
   border: 0;
-  scrollbar-width: none;
+  border-bottom: 1px solid #2a2a2a;
 }
-html.app-mode .app-reports .inventory-tabs.report-tabs::-webkit-scrollbar { display: none; }
-html.app-mode .app-reports .inventory-tabs.report-tabs button {
-  flex: 1 1 0;
-  min-width: 0;
+html.app-mode .app-scroll-tabs::-webkit-scrollbar { display: none; }
+html.app-mode .app-scroll-tabs button {
+  flex: 0 0 auto;
   min-height: 36px;
-  border: 0 !important;
-  border-radius: 0 !important;
-  border-bottom: 2px solid transparent !important;
-  background: transparent !important;
-  color: #9a9a9a !important;
+  border: 0;
+  border-radius: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: #9a9a9a;
   font-size: 13px;
   font-weight: 600;
-  padding: 8px 2px !important;
+  padding: 8px 4px;
   white-space: nowrap;
 }
-html.app-mode .app-reports .inventory-tabs.report-tabs button.active {
-  background: transparent !important;
-  color: #fff !important;
-  border-bottom-color: #fff !important;
+html.app-mode .app-scroll-tabs button.on,
+html.app-mode .app-scroll-tabs button.active {
+  color: #fff;
+  border-bottom-color: #fff;
 }
-html.app-mode .app-reports .inventory-tabs.report-tabs button:hover {
-  color: #fff !important;
+html.app-mode .app-reports .rpt-range-native {
+  display: block;
+  padding: 0 0 4px;
+  min-width: 0;
+}
+html.app-mode .app-reports .rpt-range-native .app-scroll-tabs {
+  gap: 14px;
+  border-bottom: 0;
+  padding: 0 0 4px;
+}
+html.app-mode .app-reports .rpt-range-label {
+  margin: 0;
+  padding: 0 12px 8px;
+  color: #8e8e93;
+  font-size: 11px;
+  line-height: 1.3;
 }
 
 /* Reports in the standalone phone shell. Desktop Reports keeps its own layout. */
