@@ -27,12 +27,17 @@ type Props = {
   packagedBusy?: boolean;
   showMarkShipped?: boolean;
   onMarkShipped?: () => void;
+  selectMode?: boolean;
+  selected?: boolean;
+  onToggleSelect?: () => void;
+  suggestHint?: string;
 };
 
 export function AppOrderRow({
   order, client, thumbPath, photoUrls, locationCode, money, channelName, trackingTail,
   onOpen, onPrint, onUrl, showUpload, onUpload, hideMoney = false, showStepBack, onStepBack,
   showPackaged, onPackaged, packagedBusy, showMarkShipped, onMarkShipped,
+  selectMode = false, selected = false, onToggleSelect, suggestHint,
 }: Props) {
   const loc = locationParts(locationCode);
   const chip = orderChip(order);
@@ -50,28 +55,41 @@ export function AppOrderRow({
   );
 
   return (
-    <div className={`app-row app-order-row-v2${needsLabel ? ' needs-label' : ''}`}>
-      <button type="button" className="app-order-open-v2" onClick={onOpen}>
-        <UnitListThumb
-          client={client}
-          photoPath={thumbPath}
-          urls={photoUrls}
-          onUrl={onUrl}
-          className="app-order-thumb-v2"
-          placeholder={<span className="app-order-thumb-v2 no-photo">No photo</span>}
-        />
-        <span className="app-order-copy">
-          <span className="app-order-title">{title}</span>
-          <span className="app-order-sku-line"><span className="lbl">SKU</span> <strong>{order.sku || '—'}</strong></span>
-          <span className="app-order-meta">{meta}</span>
-          <span className={`app-order-loc${loc ? '' : ' missing'}`}>{locLine || 'NO LOCATION'}</span>
-          {problem && (
-            <span className="app-order-problem">{needsLabel ? 'Needs label' : chip.text}</span>
-          )}
-        </span>
-      </button>
+    <div className={`app-row app-order-row-v2${needsLabel ? ' needs-label' : ''}${selected ? ' selected' : ''}`}>
+      <div className="app-order-row-mainline">
+        {selectMode && (
+          <label className="app-order-check">
+            <input
+              type="checkbox"
+              checked={selected}
+              onChange={() => onToggleSelect?.()}
+              aria-label={`Select SKU ${order.sku}`}
+            />
+          </label>
+        )}
+        <button type="button" className="app-order-open-v2" onClick={onOpen}>
+          <UnitListThumb
+            client={client}
+            photoPath={thumbPath}
+            urls={photoUrls}
+            onUrl={onUrl}
+            className="app-order-thumb-v2"
+            placeholder={<span className="app-order-thumb-v2 no-photo">No photo</span>}
+          />
+          <span className="app-order-copy">
+            <span className="app-order-title">{title}</span>
+            <span className="app-order-sku-line"><span className="lbl">SKU</span> <strong>{order.sku || '—'}</strong></span>
+            <span className="app-order-meta">{meta}</span>
+            <span className={`app-order-loc${loc ? '' : ' missing'}`}>{locLine || 'NO LOCATION'}</span>
+            {suggestHint && <span className="app-order-suggest">{suggestHint}</span>}
+            {problem && (
+              <span className="app-order-problem">{needsLabel ? 'Needs label' : chip.text}</span>
+            )}
+          </span>
+        </button>
+      </div>
       {showActions && (
-        <div className="app-order-row-actions">
+        <div className={`app-order-row-actions${selectMode ? ' with-check' : ''}`}>
           {showPackaged && onPackaged && (
             <button
               type="button"
