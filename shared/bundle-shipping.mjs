@@ -288,7 +288,10 @@ export function groupOpenOrders(orders, opts = {}) {
     buckets.set(key, list);
   }
   for (const list of buckets.values()) {
-    for (let i = 1; i < list.length; i += 1) union(list[0].id, list[i].id);
+    for (const cluster of clustersWithinWindow(list)) {
+      if (cluster.length < 2) continue;
+      for (let i = 1; i < cluster.length; i += 1) union(cluster[0].id, cluster[i].id);
+    }
   }
   const byId = new Map(open.map((order) => [String(order.id), order]));
   for (const link of links) {
@@ -361,9 +364,10 @@ function clustersWithinWindow(list) {
  */
 export function groupBundleReviews(orders, opts = {}) {
   const applied = new Set((opts.appliedIds || []).map(String));
+  const split = new Set((opts.splitIds || []).map(String));
   const rates = opts.rates || DEFAULT_RATES;
   const eligible = (orders || []).filter((order) => {
-    if (!order || applied.has(String(order.id))) return false;
+    if (!order || applied.has(String(order.id)) || split.has(String(order.id))) return false;
     if (order.canceled_at || String(order.status || "").toLowerCase() === "canceled") return false;
     if (String(order.fulfillment || "ship") === "pickup") return false;
     const paid = order.paid_at || String(order.status || "").toLowerCase() === "paid";
@@ -399,6 +403,90 @@ export function groupBundleReviews(orders, opts = {}) {
     }
   }
   return groups;
+}
+
+function holdbackReason(list) {
+  if (list.some((order) => String(order.fulfillment || "ship") === "pickup")) {
+    return "Pickup orders stay separate.";
+  }
+  const shipped = list.filter((order) => order.shipped_at || order.delivered_at);
+  const waiting = list.filter((order) => !order.shipped_at && !order.delivered_at);
+  if (shipped.length && waiting.length) {
+    return "One order is already shipped and one is still open, so nothing is sent.";
+  }
+  const stamps = list.map(paidStamp).filter(Boolean).sort((a, b) => a - b);
+  if (stamps.length >= 2 && stamps[stamps.length - 1] - stamps[0] > COMBINE_WINDOW_MS) {
+    return "Outside the 30-day combine window.";
+  }
+  const quote = quoteBundle(list);
+  if (!quote.ok) return "These do not fit in one Ground Advantage box.";
+  const money = bundleMoneyPlan(list, quote);
+  if (money.action === "mixed") return "Some are paid and some are not, so nothing is sent.";
+  if (money.action === "refund" && money.refund_cents <= 0) {
+    return "The one-box price is not lower than the shipping they already paid.";
+  }
+  if (shipped.length === list.length) return "Already shipped, and a combined invoice is no longer available.";
+  return "Not offered.";
+}
+
+/**
+ * Same-buyer eBay orders that look like a bundle but are not offered.
+ * Offered groups stay on the approve row. This only explains the ones left out.
+ */
+export function bundleHoldbacks(orders, opts = {}) {
+  const offered = new Set();
+  for (const group of groupOpenOrders(orders, opts)) {
+    for (const item of group.items) offered.add(String(item.id));
+  }
+  for (const group of groupBundleReviews(orders, opts)) {
+    for (const item of group.items) offered.add(String(item.id));
+  }
+  const applied = new Set((opts.appliedIds || []).map(String));
+  const split = new Set((opts.splitIds || []).map(String));
+  const rows = (orders || []).filter((order) => {
+    if (!order || applied.has(String(order.id)) || split.has(String(order.id))) return false;
+    if (order.canceled_at || String(order.status || "").toLowerCase() === "canceled") return false;
+    if (norm(order.channel) && norm(order.channel) !== "ebay") return false;
+    return true;
+  });
+  const byBuyer = new Map();
+  for (const order of rows) {
+    const buyer = buyerKey(order);
+    if (!buyer) continue;
+    const list = byBuyer.get(buyer) || [];
+    list.push(order);
+    byBuyer.set(buyer, list);
+  }
+  const holdbacks = [];
+  for (const list of byBuyer.values()) {
+    if (list.length < 2) continue;
+    const addresses = new Map();
+    for (const order of list) {
+      const key = addressKey(order) || "missing";
+      const bucket = addresses.get(key) || [];
+      bucket.push(order);
+      addresses.set(key, bucket);
+    }
+    if (addresses.size > 1) {
+      const pending = list.filter((order) => !offered.has(String(order.id)));
+      if (pending.length) {
+        holdbacks.push({
+          buyer: list[0].buyer_name || list[0].buyer_email || "",
+          reason: "Different ship-to addresses, so these stay separate.",
+          items: list,
+        });
+      }
+      continue;
+    }
+    const left = list.filter((order) => !offered.has(String(order.id)));
+    if (left.length < 2) continue;
+    holdbacks.push({
+      buyer: left[0].buyer_name || left[0].buyer_email || "",
+      reason: holdbackReason(left),
+      items: left,
+    });
+  }
+  return holdbacks;
 }
 
 export function assertBundleConfirm(confirm) {
