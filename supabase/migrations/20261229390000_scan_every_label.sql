@@ -1,6 +1,7 @@
 -- A label barcode is 420, a ZIP, then the tracking number.
 -- Read that number even when a scanner adds ]C1, and do not turn it into a FedEx last-12.
 -- The first complete label wins when two barcodes are still glued together.
+-- Version 20261229380000 is the Large Items bay. This file is the next number.
 
 create or replace function public.floor_normalize_tracking(p_raw text)
 returns text
