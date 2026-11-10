@@ -15,6 +15,7 @@ import { SEG_SHORT } from '../orderDisplay';
 import { AppOrderDetail } from './AppOrderDetail';
 import { AppOrderRow } from './AppOrderRow';
 import { AppShipmentCard, type ShipmentView } from './AppShipmentCard';
+import { AppShipmentDetail } from './AppShipmentDetail';
 import { AppOrderShipVerifySheet } from './AppOrderShipVerifySheet';
 import { floorFunctionUrl } from '../floorApi';
 import { shipBundleRest } from '../bundleShip';
@@ -56,6 +57,7 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
   const [orders, setOrders] = useState<WebOrder[] | null>(null);
   const [error, setError] = useState('');
   const [open, setOpen] = useState<WebOrder | null>(null);
+  const [openShipmentId, setOpenShipmentId] = useState<string | null>(null);
   const [events, setEvents] = useState<TrackEvent[]>([]);
   const [locations, setLocations] = useState<Record<string, string[]>>({});
   const [bundleNote, setBundleNote] = useState('');
@@ -95,6 +97,7 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
       const list = dedupeOrders(raw.filter((o) => o.payment_env !== 'sandbox' && !(o.order_no || '').toLowerCase().startsWith('sandbox'))) as WebOrder[];
       setOrders(list);
       setOpen((prev) => (prev ? list.find((o) => o.id === prev.id) || prev : null));
+      // Keep shipment detail open across reload when the bundle still exists.
       const skus = [...new Set(list.map((o) => o.sku).filter(Boolean))];
       setLocations(await loadOrderLocations(client, storeId, skus));
       const photos = await loadUnitPhotos(client, storeId, skus).catch(() => ({} as Record<string, UnitPhoto[]>));
@@ -190,6 +193,17 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
   }, [buckets, bundleOpts, isAdmin, locations]);
 
   const shipments = shipmentBuckets[seg] || [];
+  const openShipment = useMemo(() => {
+    if (!openShipmentId) return null;
+    for (const key of Object.keys(shipmentBuckets) as Seg[]) {
+      const hit = shipmentBuckets[key].find((row) => row.id === openShipmentId);
+      if (hit) return hit;
+    }
+    return null;
+  }, [openShipmentId, shipmentBuckets]);
+  useEffect(() => {
+    if (openShipmentId && !openShipment) setOpenShipmentId(null);
+  }, [openShipmentId, openShipment]);
   const selectMode = isAdmin && (seg === 'needsLabel' || seg === 'toShip');
   const selectedOrders = useMemo(() => {
     const ids = new Set(selectedIds);
@@ -264,6 +278,16 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
     await runAction('delivered', async () => {
       const { error: e } = await client.rpc('portal_mark_order_delivered', { p_order: o.id });
       if (e) throw new Error(e.message === 'portal_access_denied' ? 'Only an admin can mark an order delivered.' : e.message);
+    });
+  }
+
+  async function markShipmentDelivered(shipment: ShipmentView) {
+    await runAction('delivered', async () => {
+      for (const order of shipment.items) {
+        if (order.delivered_at) continue;
+        const { error: e } = await client.rpc('portal_mark_order_delivered', { p_order: order.id });
+        if (e) throw new Error(e.message === 'portal_access_denied' ? 'Only an admin can mark an order delivered.' : e.message);
+      }
     });
   }
 
@@ -350,6 +374,23 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
     });
   }
 
+  async function stepBackShipment(shipment: ShipmentView) {
+    if (!isAdmin) return;
+    const lead = shipment.lead;
+    const step = lead.delivered_at ? 'Delivered → Shipped'
+      : lead.shipped_at ? (lead.packaged_at ? 'Shipped → Packaged' : 'Shipped → To ship')
+        : lead.packaged_at ? 'Packaged → To ship'
+          : '';
+    if (!step) { setError('There is no completed fulfillment step to undo.'); return; }
+    if (!window.confirm(`Are you sure? Move this whole shipment back one step (${step}). The sale and money stay unchanged.`)) return;
+    await runAction('step-back', async () => {
+      for (const order of shipment.items) {
+        const { error: e } = await client.rpc('portal_order_step_back', { p_order: order.id });
+        if (e) throw new Error(e.message === 'portal_access_denied' ? 'Only an owner or manager can move an order back.' : e.message);
+      }
+    });
+  }
+
   async function floorCancel(o: WebOrder) {
     const ok = window.confirm(
       `Cancel ${CHANNEL[(o.channel || 'website').toLowerCase()] || o.channel} order ${o.order_no || o.id.slice(0, 8)} in Floor?\n\n`
@@ -411,6 +452,18 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
     }
   }
 
+  function openOrderOrShipment(o: WebOrder) {
+    const ship = listShipments(orders || [], { links: bundleLinks, splitIds: bundleSplits, rates: bundleRates as never[] })
+      .find((row) => row.items.some((item: WebOrder) => item.id === o.id));
+    if (ship?.bundled) {
+      setOpen(null);
+      setOpenShipmentId(ship.id);
+    } else {
+      setOpenShipmentId(null);
+      setOpen(o);
+    }
+  }
+
   async function uploadLabel(o: WebOrder, file: File) {
     const okType = file.type === 'application/pdf' || file.type.startsWith('image/') || /\.(pdf|png|jpe?g|webp)$/i.test(file.name);
     if (!okType) { setError('Use a PDF or a screenshot.'); return; }
@@ -426,10 +479,17 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
       setLabelHit(null);
       setTrackingPick(undefined);
       setError('');
-      if (ui.kind === 'manual') setError(ui.message);
-      else if (ui.kind === 'mismatch') setError('');
-      else if (ui.kind === 'picker') setTrackingPick(ui.candidates);
-      else if (ui.kind === 'hit') {
+      if (ui.kind === 'manual') {
+        // Open the detail page so the tracking field is actually on screen.
+        openOrderOrShipment(o);
+        setError('');
+      } else if (ui.kind === 'mismatch') {
+        openOrderOrShipment(o);
+        setError('');
+      } else if (ui.kind === 'picker') {
+        openOrderOrShipment(o);
+        setTrackingPick(ui.candidates);
+      } else if (ui.kind === 'hit') {
         setLabelHit({ number: ui.number, carrier: ui.carrier, layer: ui.layer });
         setTrackingDraft(ui.number);
       }
@@ -536,6 +596,52 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
       const { error: e } = await client.rpc('portal_set_order_label_cost', { p_order: o.id, p_label_cents: cents });
       if (e) throw e;
     });
+  }
+
+  if (openShipment) {
+    const lead = openShipment.lead;
+    const unbundleOk = canUnbundle(openShipment.items).ok;
+    return (
+      <AppShipmentDetail
+        client={client}
+        shipment={openShipment}
+        money={money}
+        isAdmin={isAdmin}
+        showTracking={seeTracking}
+        busy={busy}
+        error={error}
+        locations={locations}
+        locationOptions={locationOptions}
+        photoMap={photoMap}
+        photoUrls={photoUrls}
+        trackingDraft={trackingDraft}
+        onTrackingDraft={setTrackingDraft}
+        onBack={() => setOpenShipmentId(null)}
+        onSetLocation={(order, code) => void setPickLocation(order, code)}
+        onPrintLabel={(dl) => void printLabel(lead, dl)}
+        onMarkPackaged={() => void markShipmentPackaged(openShipment)}
+        onMarkShipped={(barcode, reason) => markShipped(lead, barcode, reason)}
+        onMarkDelivered={() => void markShipmentDelivered(openShipment)}
+        onStepBack={() => void stepBackShipment(openShipment)}
+        onSaveTracking={() => void saveTracking(lead)}
+        onUploadLabel={() => labelInput.current?.click()}
+        onVoidLabel={() => void voidLabel(lead)}
+        labelInputRef={labelInput}
+        onUrl={(p, u) => mergePhotoUrls({ [p]: u })}
+        onLabelFile={(f) => void uploadLabel(lead, f)}
+        labelHit={labelHit}
+        trackingPick={trackingPick}
+        onConfirmTrackingPick={(n, c) => void confirmPickedTracking(lead, n, c)}
+        onDismissLabelHit={() => setLabelHit(null)}
+        onUseMarketplaceTracking={() => void useMarketplaceTracking(lead)}
+        onUseLabelTracking={(n, c) => void useLabelTracking(lead, n, c)}
+        onRetryLabelExtract={() => void retryLabelExtract(lead)}
+        onManualTracking={(n, c) => void manualTracking(lead, n, c)}
+        showUnbundle={isAdmin && unbundleOk}
+        onUnbundle={() => void unbundleShipment(openShipment).then(() => setOpenShipmentId(null))}
+        unbundleBusy={busy === 'unbundle'}
+      />
+    );
   }
 
   if (open) {
@@ -660,7 +766,8 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
                 hideMoney={!isAdmin}
                 channelName={chName}
                 trackingTail={tail}
-                onOpen={(o) => setOpen(o)}
+                onOpen={(o) => { setOpenShipmentId(null); setOpen(o); }}
+                onOpenShipment={() => { setOpen(null); setOpenShipmentId(shipment.id); }}
                 onUrl={(p, u) => mergePhotoUrls({ [p]: u })}
                 showUpload={isAdmin && orderNeedsLabel(lead)}
                 onUpload={(f) => void uploadLabel(lead, f)}

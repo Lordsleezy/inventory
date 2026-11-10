@@ -1,5 +1,6 @@
 import type { OrderStage, TimelineRow } from './orderStage';
 import { STAGE_INDEX, carrierTrackUrl } from './orderStage';
+import { formatTrackingDisplay } from './trackingNormalize';
 
 const STEPS = ['To ship', 'Packaged', 'Shipped', 'Delivered'] as const;
 
@@ -46,7 +47,7 @@ export function OrderTrackLine({ order }: { order: { tracking_number?: string | 
   if (!order.tracking_number) return null;
   return (
     <p className="hint">
-      {order.carrier ? `${order.carrier} ` : ''}{order.tracking_number}
+      {formatTrackingDisplay(order.carrier, order.tracking_number)}
       {href && <> · <a href={href} target="_blank" rel="noreferrer">Track</a></>}
     </p>
   );

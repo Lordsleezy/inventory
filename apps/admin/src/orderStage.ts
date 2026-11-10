@@ -1,3 +1,5 @@
+import { compactTracking } from '../../../shared/tracking-normalize.mjs';
+
 export type OrderStage = 'needsLabel' | 'toShip' | 'packaged' | 'shipped' | 'delivered' | 'canceled' | 'pickup';
 
 export type StageOrder = {
@@ -99,7 +101,7 @@ export function shippedStale(o: StageOrder, now = Date.now()) {
 
 /** Public carrier page. A person opens it. Floor does not call a tracking API. */
 export function carrierTrackUrl(tracking?: string | null, carrier?: string | null) {
-  const raw = String(tracking || '').replace(/\s+/g, '');
+  const raw = compactTracking(tracking || '') || String(tracking || '').replace(/\s+/g, '');
   if (raw.length < 8) return null;
   const n = encodeURIComponent(raw);
   const t = raw.toUpperCase();
@@ -115,7 +117,7 @@ export function carrierTrackUrl(tracking?: string | null, carrier?: string | nul
 }
 
 export function trackingTail(o: StageOrder) {
-  const n = String(o.tracking_number || '').replace(/\s+/g, '');
+  const n = compactTracking(o.tracking_number || '') || String(o.tracking_number || '').replace(/\s+/g, '');
   if (n.length < 4) return '';
   const carrier = (o.carrier || 'USPS').split(' ')[0];
   return `${carrier} …${n.slice(-4)}`;

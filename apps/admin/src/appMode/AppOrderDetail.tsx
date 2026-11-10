@@ -335,7 +335,7 @@ export function AppOrderDetail(props: AppOrderDetailProps) {
           </div>
         )}
 
-        {isAdmin && (order.label_tracking_mismatch || order.tracking_exception) && (
+        {isAdmin && (order.label_tracking_mismatch || order.tracking_exception || (order.tracking_needs_entry && !order.tracking_number)) && (
           <LabelTrackingProblem
             order={order}
             busy={!!busy}
@@ -355,7 +355,7 @@ export function AppOrderDetail(props: AppOrderDetailProps) {
             onManual={() => onTrackingDraft('')}
           />
         )}
-        {isAdmin && order.tracking_needs_entry && !order.tracking_number && (
+        {isAdmin && order.tracking_needs_entry && !order.tracking_number && !(order.label_tracking_mismatch || order.tracking_exception) && !onManualTracking && (
           <form className="app-order-track-entry" onSubmit={(e) => { e.preventDefault(); void onSaveTracking(); }}>
             <label>
               <span className="eyebrow">Tracking number</span>

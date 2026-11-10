@@ -16,6 +16,7 @@ test('Orders screens no longer mount proposed-refund / Apply bundle price chrome
   assert.doesNotMatch(desk, /Proposed refund|Apply bundle price/);
   assert.match(bar, /return null/);
   assert.match(app, /portal_bundle_orders|orders-bundle-bar|AppShipmentCard/);
+  assert.match(app, /AppShipmentDetail|onOpenShipment/);
 });
 
 test('phone Orders heading is solid white, not gray', async () => {

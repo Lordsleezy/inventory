@@ -251,9 +251,12 @@ export async function attachUploadedLabel(sb, storeId, order, file, deps = {}) {
 
 export async function setOrderTrackingNumber(sb, storeId, order, { tracking, carrier } = {}, deps = {}) {
   if (!order) return { ok: false, status: 404, error: "Order not found." };
-  const number = String(tracking || "").replace(/\s+/g, "").toUpperCase();
-  if (number.length < 8 || number.length > 40) return { ok: false, status: 400, error: "Enter the tracking number from the label." };
-  const car = String(carrier || "").trim() || (number.startsWith("1Z") ? "UPS" : "USPS");
+  // Compact FedEx 34-digit door tags / USPS 420 wrappers before save.
+  const number = compactTracking(tracking);
+  if (!number || number.length < 8 || number.length > 40) {
+    return { ok: false, status: 400, error: "Enter the tracking number from the label." };
+  }
+  const car = String(carrier || "").trim() || classifyCarrier(number) || (number.startsWith("1Z") ? "UPS" : "USPS");
   const now = new Date().toISOString();
   const { data: saved, error } = await sb.from("web_orders").update({
     tracking_number: number,

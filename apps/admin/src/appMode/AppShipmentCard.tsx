@@ -26,6 +26,8 @@ type Props = {
   channelName: string;
   trackingTail: string;
   onOpen: (order: WebOrder) => void;
+  /** Open the full shipment detail page (preferred over expand-only). */
+  onOpenShipment?: () => void;
   onUrl: (path: string, url: string) => void;
   showUpload?: boolean;
   onUpload?: (file: File) => void;
@@ -46,7 +48,7 @@ type Props = {
 /** Compact card for a manually bundled shipment only. No checkboxes. */
 export function AppShipmentCard({
   shipment, client, photoMap, photoUrls, locations, money, channelName, trackingTail,
-  onOpen, onUrl, showUpload, onUpload, onPrint, showPackaged, onPackaged, packagedBusy,
+  onOpen, onOpenShipment, onUrl, showUpload, onUpload, onPrint, showPackaged, onPackaged, packagedBusy,
   showMarkShipped, onMarkShipped, showUnbundle, onUnbundle, unbundleBusy,
   expanded, onToggleExpand, hideMoney = false,
 }: Props) {
@@ -71,7 +73,14 @@ export function AppShipmentCard({
 
   return (
     <div className={`app-row app-shipment-card compact${needsLabel ? ' needs-label' : ''}`}>
-      <button type="button" className="app-order-open-v2" onClick={onToggleExpand}>
+      <button
+        type="button"
+        className="app-order-open-v2"
+        onClick={() => {
+          if (onOpenShipment) onOpenShipment();
+          else onToggleExpand();
+        }}
+      >
         <span className="app-shipment-thumbs compact">
           {shipment.items.slice(0, 3).map((order) => {
             const photo = listThumbPhoto(photoMap[order.sku] || []);
@@ -99,6 +108,9 @@ export function AppShipmentCard({
           )}
           <span className={`app-order-loc${loc ? '' : ' missing'}`}>{locLine || 'NO LOCATION'}</span>
           {needsLabel && <span className="app-order-problem">Needs label</span>}
+          {lead.tracking_needs_entry && !lead.tracking_number && (
+            <span className="app-order-problem">Tracking needed — open to enter</span>
+          )}
         </span>
       </button>
       {expanded && (

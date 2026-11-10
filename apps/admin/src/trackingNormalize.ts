@@ -36,7 +36,7 @@ export function matchesOrderTracking(
 
 export function formatTrackingDisplay(carrier: string | null | undefined, number: string | null | undefined): string {
   if (!number) return '';
-  const core = number.replace(/\s+/g, '');
+  const core = normalizeTracking(number) || String(number).replace(/\s+/g, '');
   const grouped = core.replace(/(.{4})/g, '$1 ').trim();
   const c = (carrier || '').trim();
   return c ? `${c} ${grouped}` : grouped;

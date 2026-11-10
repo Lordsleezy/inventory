@@ -826,3 +826,15 @@ html.desk:not(.app-mode) .cdtfa-box.calculated .cdtfa-amt input {
   border: 0 !important; background: transparent !important; font-weight: 750; text-align: right; box-shadow: none !important;
 }
 html.desk:not(.app-mode) .cdtfa-amt input { text-align: right; max-width: 120px; margin-left: auto; }
+
+/* Bundled shipment lines in the desk order drawer */
+html.desk:not(.app-mode) .desk-bundle-lines {
+  display: grid;
+  gap: 12px;
+  margin: 8px 0 12px;
+}
+html.desk:not(.app-mode) .desk-bundle-line {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
