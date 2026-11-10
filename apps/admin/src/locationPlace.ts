@@ -95,12 +95,20 @@ export function addBulkSkus(existing: string[], raw: string): string[] {
   return next;
 }
 
+/** Location code for a chosen bay, row, and bin. A floor row has no bin number. */
+export function slotTagCode(bayNo: number, rowNo: number, binCount: number, binNo: number | null): string {
+  if (!Number.isInteger(bayNo) || bayNo < 1) throw new Error('Choose a bay.');
+  if (!Number.isInteger(rowNo) || rowNo < 1) throw new Error('Choose a row.');
+  if (binCount === 0) return `${bayNo}-${rowNo}`;
+  if (binNo == null || !Number.isInteger(binNo) || binNo < 1 || binNo > binCount) throw new Error('Choose a bin.');
+  return `${bayNo}-${rowNo}-${binNo}`;
+}
+
 /** First slot in the bay. A floor row has no bins, so the code is bay-row. */
 export function bayTagCode(bayNo: number, rowBins: number[]): string {
-  if (!Number.isInteger(bayNo) || bayNo < 1) throw new Error('Choose a bay.');
   if (!rowBins.length) throw new Error('That bay has no rows.');
-  if (rowBins[0] === 0) return `${bayNo}-1`;
-  return `${bayNo}-1-1`;
+  const bins = rowBins[0];
+  return slotTagCode(bayNo, 1, bins, bins === 0 ? null : 1);
 }
 
 /** A smaller layout is refused while a removed slot still holds units. */
