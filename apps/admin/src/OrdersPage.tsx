@@ -924,8 +924,6 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
                 const title = ship.bundled
                   ? `${ship.itemCount} items · ${o.buyer_name || 'Buyer'}`
                   : linked ? (o.title || o.marketplace_title || 'Item') : (o.marketplace_title || o.title || 'Marketplace sale');
-                const where = locations[o.sku]?.[0] || 'No location';
-                const rowPhoto = listThumbPhoto(photoMap[o.sku] || []);
                 const selected = ship.items.every((row) => selectedIds.includes(row.id));
                 const unbundleOk = ship.bundled && canUnbundle(ship.items).ok;
                 return <tr key={ship.id}>
@@ -959,16 +957,27 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
                     ) : null}
                   </td>
                   <td>
-                    <div className="desk-order-item">
-                      <UnitListThumb
-                        client={client}
-                        photoPath={rowPhoto?.path}
-                        urls={photoUrls}
-                        onUrl={(path, url) => mergePhotoUrls({ [path]: url })}
-                        className="desk-order-thumb"
-                        placeholder={<span className="desk-order-thumb empty" aria-hidden="true" />}
-                      />
-                      <div>{title}<br /><small>{where}</small></div>
+                    <div className="desk-order-lines">
+                      {ship.items.map((row) => {
+                        const linePhoto = listThumbPhoto(photoMap[row.sku] || []);
+                        const lineWhere = locations[row.sku]?.[0] || 'No location';
+                        const lineTitle = ship.bundled
+                          ? (row.title || row.marketplace_title || 'Item')
+                          : title;
+                        return (
+                          <div key={row.id} className="desk-order-item">
+                            <UnitListThumb
+                              client={client}
+                              photoPath={linePhoto?.path}
+                              urls={photoUrls}
+                              onUrl={(path, url) => mergePhotoUrls({ [path]: url })}
+                              className="desk-order-thumb"
+                              placeholder={<span className="desk-order-thumb empty" aria-hidden="true" />}
+                            />
+                            <div>{lineTitle}<br /><small>{ship.bundled ? `SKU ${row.sku} · ` : ''}{lineWhere}</small></div>
+                          </div>
+                        );
+                      })}
                     </div>
                   </td>
                   <td>{channelLabel(o.channel)}</td>

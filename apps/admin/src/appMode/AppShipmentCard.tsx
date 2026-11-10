@@ -106,15 +106,16 @@ export function AppShipmentCard({
               Box {pkg.length_in}×{pkg.width_in}×{pkg.height_in} in · {pkg.weight_lb} lb
             </span>
           )}
-          <span className={`app-order-loc${loc ? '' : ' missing'}`}>{locLine || 'NO LOCATION'}</span>
+          {shipment.itemCount < 2 && (
+            <span className={`app-order-loc${loc ? '' : ' missing'}`}>{locLine || 'NO LOCATION'}</span>
+          )}
           {needsLabel && <span className="app-order-problem">Needs label</span>}
           {lead.tracking_needs_entry && !lead.tracking_number && (
             <span className="app-order-problem">Tracking needed — open to enter</span>
           )}
         </span>
       </button>
-      {expanded && (
-        <div className="app-shipment-lines compact">
+      <div className="app-shipment-lines compact" data-open={expanded ? 'true' : 'true'}>
           {shipment.items.map((order) => {
             const lineLoc = locationParts(locations[order.sku]?.[0]);
             const photo = listThumbPhoto(photoMap[order.sku] || []);
@@ -144,7 +145,6 @@ export function AppShipmentCard({
             );
           })}
         </div>
-      )}
       {showActions && (
         <div className="app-order-row-actions">
           {showPackaged && onPackaged && (
