@@ -82,3 +82,15 @@ export function trackingSuffix(value) {
   const c = compactTracking(value);
   return c.length >= 12 ? c.slice(-12) : c;
 }
+
+/**
+ * Parentheses are labels around digits, not a break in the number.
+ * The saved tracking number has to be long enough that a ZIP, a SKU,
+ * or a 12-digit tail cannot hit a different package.
+ */
+export function scanContainsTracking(scanned, stored) {
+  const track = compactTracking(stored);
+  if (!track || track.length < 18) return false;
+  const scan = String(scanned || "").replace(/[^0-9A-Za-z]/g, "").toUpperCase();
+  return scan.length >= track.length && scan.includes(track);
+}

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { formatTrackingDisplay, matchesOrderTracking, normalizeTracking, trackingExpectTail } from './trackingNormalize.ts';
+import { formatTrackingDisplay, matchesOrderTracking, normalizeTracking, soleTrackingMatch, trackingExpectTail } from './trackingNormalize.ts';
 
 test('normalizeTracking keeps core USPS number', () => {
   assert.equal(normalizeTracking('9400111899223344556601'), '9400111899223344556601');
@@ -40,6 +40,22 @@ test('a (420) ZIP and (94) barcode is the tracking number on the order', () => {
   assert.equal(normalizeTracking('(420)890113784(94)34608106245773021655'), stored);
   assert.equal(matchesOrderTracking({ tracking_number: stored }, '(420)890113784(94)34608106245773021655'), true);
   assert.equal(normalizeTracking('(420)890113784(94)34608106245773021665'), '9434608106245773021665');
+});
+
+test('parentheses do not split a tracking number that is inside the scan', () => {
+  const stored = '9434608106245773021655';
+  const other = '9400111899223344556601';
+  assert.equal(matchesOrderTracking({ tracking_number: stored }, `(99)42089011(3784)(94)${stored.slice(2)}extra`), true);
+  assert.equal(matchesOrderTracking({ tracking_number: other }, `(420)890113784(94)${stored.slice(2)}`), false);
+  assert.equal(matchesOrderTracking({ tracking_number: stored.slice(-12) }, `(420)890113784(94)${stored.slice(2)}`), false);
+  assert.equal(soleTrackingMatch(`${stored}${other}`, [
+    { tracking_number: stored },
+    { tracking_number: other },
+  ]), null);
+  assert.equal(soleTrackingMatch(`(420)11(94)${stored.slice(2)}`, [
+    { tracking_number: stored },
+    { tracking_number: other },
+  ])?.tracking_number, stored);
 });
 
 test('a FedEx 34-digit barcode keeps its tracking number', () => {
