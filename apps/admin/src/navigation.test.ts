@@ -56,6 +56,17 @@ test('Reports → Sold opens Receipts on the desktop', () => {
   assert.equal(new URLSearchParams(location.search).get('tab'), null);
 });
 
+test('Reports → Shipping check stays on that tab', () => {
+  const history = { replaceState: (_: unknown, __: string, next: string) => { location = new URL(next, location); } };
+  let location = new URL('https://floor.test/?page=reports&tab=ship-audit');
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: { get location() { return location; }, history } });
+  const state = parseNavFromLocation();
+  assert.equal(state.page, 'reports');
+  assert.equal(state.reportTab, 'ship-audit');
+  writeNavToLocation(state);
+  assert.equal(new URLSearchParams(location.search).get('tab'), 'ship-audit');
+});
+
 test('Reports → Overhead bookmark opens Overhead (not Profit)', () => {
   const history = { replaceState: (_: unknown, __: string, next: string) => { location = new URL(next, location); } };
   let location = new URL('https://floor.test/?page=reports&tab=overhead');

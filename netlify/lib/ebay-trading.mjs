@@ -575,6 +575,44 @@ export async function reviseFixedPriceStandards(token, change, account) {
  * When fulfillmentPolicyId is set, payment + return profile IDs should also be provided
  * (eBay expects the SellerProfiles block as a set).
  */
+/** Revise only the calculated-shipping package. No price, title, policy, or returns fields. */
+export function tradingPackageReviseXml(change) {
+  const itemId = String(change.itemId || "").trim();
+  if (!/^\d+$/.test(itemId)) throw new Error("package revise needs a numeric item id");
+  const sides = [change.lengthIn, change.widthIn, change.heightIn].map((n) => Math.round(Number(n) * 100) / 100).sort((a, b) => b - a);
+  if (sides.some((n) => !(n > 0))) throw new Error("package revise needs dimensions");
+  const weight = Number(change.weightLb);
+  if (!(weight > 0)) throw new Error("package revise needs weight");
+  const major = Math.floor(weight + 1e-9);
+  let minor = Math.round((weight - major) * 16);
+  if (minor === 16) return tradingPackageReviseXml({ ...change, weightLb: major + 1 });
+  const profiles = change.fulfillmentPolicyId && change.paymentPolicyId && change.returnPolicyId
+    ? `<SellerProfiles>
+      <SellerPaymentProfile><PaymentProfileID>${xmlEsc(change.paymentPolicyId)}</PaymentProfileID></SellerPaymentProfile>
+      <SellerReturnProfile><ReturnProfileID>${xmlEsc(change.returnPolicyId)}</ReturnProfileID></SellerReturnProfile>
+      <SellerShippingProfile><ShippingProfileID>${xmlEsc(change.fulfillmentPolicyId)}</ShippingProfileID></SellerShippingProfile>
+    </SellerProfiles>`
+    : "";
+  return `<WarningLevel>High</WarningLevel>
+  <Item>
+    <ItemID>${xmlEsc(itemId)}</ItemID>
+    <ShippingPackageDetails>
+      <MeasurementUnit>English</MeasurementUnit>
+      <PackageLength>${sides[0]}</PackageLength>
+      <PackageWidth>${sides[1]}</PackageWidth>
+      <PackageDepth>${sides[2]}</PackageDepth>
+      <WeightMajor>${major}</WeightMajor>
+      <WeightMinor>${minor}</WeightMinor>
+    </ShippingPackageDetails>
+    ${profiles}
+  </Item>`;
+}
+
+export async function reviseFixedPricePackage(token, change, account) {
+  const xml = await tradingCall(token, "ReviseFixedPriceItem", tradingPackageReviseXml(change), account);
+  return { itemId: String(change.itemId), ack: xmlTag(xml, "Ack"), xml };
+}
+
 export async function reviseFixedPricePriceAndShipping(token, change, account) {
   const itemId = String(change.itemId || "").trim();
   if (!/^\d+$/.test(itemId)) throw new Error("revise price/shipping needs a numeric item id");

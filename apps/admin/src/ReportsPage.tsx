@@ -9,6 +9,7 @@ import { ReturnsReportPanel } from './ReturnsReportPanel';
 import { TaxPage } from './TaxPage';
 import { DispositionsPanel } from './DispositionDialogs';
 import { ReceiptsPage } from './ReceiptsPage';
+import { ShippingAuditPage } from './ShippingAuditPage';
 
 type Props = {
   client: SupabaseClient;
@@ -29,7 +30,7 @@ export function ReportsPage({ client, money, tab, onTab, closeouts, expenses, pa
   const [reportVersion, setReportVersion] = useState(0);
   const tabs: { id: ReportTab; label: string }[] = native
     ? [{id:'profit',label:'Profit'},{id:'shipping',label:'Fees'},{id:'expenses',label:'Expenses'},{id:'payouts',label:'Payouts'},{id:'sales-tax',label:'Tax'},{id:'sold',label:'Sold'}]
-    : [{id:'profit',label:'Profit'},{id:'shipping',label:'Fees'},{id:'expenses',label:'Expenses'},{id:'payouts',label:'Payouts'},{id:'returns',label:'Returns'},{id:'replacements',label:'Replacements'},{id:'sales-tax',label:'Sales tax'}];
+    : [{id:'profit',label:'Profit'},{id:'shipping',label:'Fees'},{id:'expenses',label:'Expenses'},{id:'payouts',label:'Payouts'},{id:'returns',label:'Returns'},{id:'replacements',label:'Replacements'},{id:'sales-tax',label:'Sales tax'},{id:'ship-audit',label:'Shipping check'}];
   return <>
     {!native && <header><div><div className="eyebrow">STORE LEDGER</div><h1>Numbers</h1>
       <p>Profit, shipping and fees, expenses, payouts, and period closeouts.</p></div></header>}
@@ -55,6 +56,7 @@ export function ReportsPage({ client, money, tab, onTab, closeouts, expenses, pa
     {tab === 'returns' && <ReturnsReportPanel client={client} money={money} />}
     {tab === 'replacements' && <DispositionsPanel client={client} money={money} stamp={s => new Date(s).toLocaleDateString()} kind="replacement" title="Replacements" hint="Units sent to customers to replace a bad one. Each replacement's cost comes off the original sale's profit and commission." />}
     {tab === 'sold' && <ReceiptsPage client={client} money={money} stamp={s => new Date(s).toLocaleDateString()} variant={native ? 'app' : 'desktop'} />}
+    {tab === 'ship-audit' && <ShippingAuditPage />}
     {native && showSkuLinks && <LinkSkuSheet client={client} money={money} onClose={() => setShowSkuLinks(false)} onLinked={() => { setReportVersion(v => v + 1); onOrderLinked?.(); }} />}
   </>;
 }
