@@ -8,7 +8,7 @@ import { scannerInputMode } from './kiosk';
 import { AppItemDetail } from './appMode/AppItemDetail';
 import { UnitEditDrawer } from './UnitEditDrawer';
 import { rpcMoveLocationStock } from './locationStock';
-import { addBulkSkus, bayTitle, layoutBlocked, locationPhrase, parseBulkSkus, planPlaceInBin, resolveLocationCode, slotTagCode, unitsLabel, upcScanKeys, type LocationAllocation, type ScanCandidate } from './locationPlace';
+import { addBulkSkus, bayTitle, layoutBlocked, loadBulkTagDraft, locationPhrase, parseBulkSkus, planPlaceInBin, resolveLocationCode, saveBulkTagDraft, skuMissingUpc, slotTagCode, unitsLabel, upcScanKeys, upcToStore, type BulkTagDraft, type BulkUpcAsk, type LocationAllocation, type ScanCandidate } from './locationPlace';
 
 type Bay = { bay_no: number; row_bins: number[]; name?: string | null };
 type Location = { code: string; bay_no: number; row_no: number; bin_no: number | null; stock: number };
@@ -78,21 +78,39 @@ export function LocationsPage({
   const [creating, setCreating] = useState(false);
   const [editNo, setEditNo] = useState('1');
   const [editRows, setEditRows] = useState<number[]>([3]);
-  const [bulkDraft, setBulkDraft] = useState('');
-  const [bulkBay, setBulkBay] = useState('');
-  const [bulkRow, setBulkRow] = useState('1');
-  const [bulkBin, setBulkBin] = useState('1');
-  const [bulkSkus, setBulkSkus] = useState<string[]>([]);
+  const [restoredBulk] = useState(() => loadBulkTagDraft());
+  const [bulkDraft, setBulkDraft] = useState(restoredBulk?.draft ?? '');
+  const [bulkBay, setBulkBay] = useState(restoredBulk?.bay ?? '');
+  const [bulkRow, setBulkRow] = useState(restoredBulk?.row ?? '1');
+  const [bulkBin, setBulkBin] = useState(restoredBulk?.bin ?? '1');
+  const [bulkSkus, setBulkSkus] = useState<string[]>(restoredBulk?.skus ?? []);
   const [scanValue, setScanValue] = useState('');
   const [pending, setPending] = useState<FoundUnit | null>(null);
   const [scanQty, setScanQty] = useState('1');
   const [upcPick, setUpcPick] = useState<{ code: string; choices: ScanCandidate[]; target: 'scan' | 'bulk' } | null>(null);
+  const [upcAsk, setUpcAsk] = useState<BulkUpcAsk | null>(restoredBulk?.ask ?? null);
+  const [upcAskError, setUpcAskError] = useState('');
   const [printing, setPrinting] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const scanRef = useRef<HTMLInputElement>(null);
   const lock = useRef(false);
+  const bulkRef = useRef<BulkTagDraft>({ draft: bulkDraft, bay: bulkBay, row: bulkRow, bin: bulkBin, skus: bulkSkus, ask: upcAsk });
+  bulkRef.current = { draft: bulkDraft, bay: bulkBay, row: bulkRow, bin: bulkBin, skus: bulkSkus, ask: upcAsk };
+
+  useEffect(() => {
+    const flush = () => saveBulkTagDraft(bulkRef.current);
+    flush();
+    const hide = () => { if (document.visibilityState === 'hidden') flush(); };
+    window.addEventListener('pagehide', flush);
+    document.addEventListener('visibilitychange', hide);
+    return () => {
+      flush();
+      window.removeEventListener('pagehide', flush);
+      document.removeEventListener('visibilitychange', hide);
+    };
+  }, [bulkDraft, bulkBay, bulkRow, bulkBin, bulkSkus, upcAsk]);
 
   async function refresh() {
     const { data, error: rpcError } = await client.rpc('portal_bay_list');
@@ -403,7 +421,8 @@ export function LocationsPage({
     setBusy(true);
     setError('');
     try {
-      const decision = resolveLocationCode(parts[0], await scanCandidates(parts[0]));
+      const candidates = await scanCandidates(parts[0]);
+      const decision = resolveLocationCode(parts[0], candidates);
       if (decision.action === 'pick') {
         setUpcPick({ code: parts[0], choices: decision.choices, target: 'bulk' });
         setBulkDraft('');
@@ -413,9 +432,44 @@ export function LocationsPage({
         setError('No in-stock item with that UPC.');
         return;
       }
+      const missing = skuMissingUpc(parts[0], candidates);
+      if (missing) {
+        setUpcAsk({ ...missing, value: '' });
+        setUpcAskError('');
+        setBulkDraft('');
+        return;
+      }
       rememberSku(decision.action === 'use' ? decision.sku : parts[0]);
     } catch (err) {
       setError(friendly(err));
+    } finally {
+      lock.current = false;
+      setBusy(false);
+    }
+  }
+
+  async function saveAskedUpc(raw?: string) {
+    if (!upcAsk || lock.current) return;
+    const typed = raw ?? upcAsk.value;
+    const stored = upcToStore(typed);
+    if (!stored.ok) {
+      setUpcAskError(stored.message);
+      return;
+    }
+    lock.current = true;
+    setBusy(true);
+    setUpcAskError('');
+    try {
+      const { error: rpcError } = await client.rpc(canManage ? 'portal_set_unit_upc' : 'staff_set_unit_upc', {
+        p_sku: upcAsk.sku,
+        p_upc: stored.upc,
+      });
+      if (rpcError) throw rpcError;
+      const sku = upcAsk.sku;
+      setUpcAsk(null);
+      rememberSku(sku);
+    } catch (err) {
+      setUpcAskError(friendly(err));
     } finally {
       lock.current = false;
       setBusy(false);
@@ -480,6 +534,8 @@ export function LocationsPage({
         }
       }
       setBulkSkus(left);
+      if (!left.length) setBulkDraft('');
+      saveBulkTagDraft({ ...bulkRef.current, skus: left, draft: left.length ? bulkRef.current.draft : '' });
       if (placed) setNotice(`${placed} tagged in ${locationPhrase(code)}.`);
       if (failed.length) setError(failed.join(' · '));
       await refresh();
@@ -748,7 +804,15 @@ export function LocationsPage({
           </div>
         )}
         {phone && (
-          <form className="loc-bulk" onSubmit={(event) => { event.preventDefault(); queueBulk(); }}>
+          <form className="loc-bulk" onSubmit={(event) => {
+            event.preventDefault();
+            const active = document.activeElement;
+            if (active instanceof HTMLInputElement && active.getAttribute('aria-label') === 'UPC') {
+              void saveAskedUpc(active.value);
+              return;
+            }
+            void queueBulk();
+          }}>
             <div className={section}>TAG SKUS</div>
             <label className="loc-field">SKU or UPC
               <span className="loc-scan-line">
@@ -765,6 +829,34 @@ export function LocationsPage({
               </span>
             </label>
             {upcPicker('bulk')}
+            {upcAsk && (
+              <div className="loc-upc-pick" role="dialog" aria-label="Enter UPC">
+                <p className={phone ? 'loc-notice' : 'hint'}>SKU {upcAsk.sku}{upcAsk.title ? ` · ${upcAsk.title}` : ''} has no UPC. Scan or type it.</p>
+                <label className="loc-field">UPC
+                  <span className="loc-scan-line">
+                    <input
+                      value={upcAsk.value}
+                      disabled={busy}
+                      autoFocus
+                      inputMode={scannerInputMode()}
+                      placeholder="Scan or type a UPC"
+                      aria-label="UPC"
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      onChange={(event) => { setUpcAsk({ ...upcAsk, value: event.target.value }); setUpcAskError(''); }}
+                      onKeyDown={(event) => {
+                        if (event.key !== 'Enter') return;
+                        event.preventDefault();
+                        void saveAskedUpc(event.currentTarget.value);
+                      }}
+                    />
+                    <button type="button" disabled={busy} onClick={() => void saveAskedUpc()}>Save</button>
+                  </span>
+                </label>
+                {upcAskError && <p className="loc-error" role="alert">{upcAskError}</p>}
+                <button type="button" className="loc-upc-cancel" disabled={busy} onClick={() => { setUpcAsk(null); setUpcAskError(''); setBulkDraft(upcAsk.sku); }}>Cancel</button>
+              </div>
+            )}
             <label className="loc-field">Bay
               <select value={bulkBay} disabled={busy || !bays.length} aria-label="Bay" onChange={(event) => { setBulkBay(event.target.value); setBulkRow('1'); setBulkBin('1'); }}>
                 {[...bays].sort((a, b) => Number(Boolean(b.name?.trim())) - Number(Boolean(a.name?.trim())) || a.bay_no - b.bay_no).map((item) => <option key={item.bay_no} value={String(item.bay_no)}>{bayTitle(item.bay_no, item.name)}</option>)}
