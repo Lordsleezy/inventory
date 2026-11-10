@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { addBulkSkus, bayTagCode, layoutBlocked, locationPhrase, parseBulkSkus, planPlaceInBin, planUnassign, unitsLabel } from './locationPlace.ts';
+import { addBulkSkus, bayTagCode, layoutBlocked, locationPhrase, parseBulkSkus, planPlaceInBin, planUnassign, slotTagCode, unitsLabel } from './locationPlace.ts';
 
 describe('location phrases', () => {
   it('reads a bin and a floor spot the way the bay screen does', () => {
@@ -77,5 +77,11 @@ describe('bulk bay tag', () => {
     assert.equal(bayTagCode(4, [3, 2]), '4-1-1');
     assert.equal(bayTagCode(4, [0]), '4-1');
     assert.throws(() => bayTagCode(0, [1]), /Choose a bay/);
+  });
+
+  it('builds a code from the bay, row, and bin the menus picked', () => {
+    assert.equal(slotTagCode(4, 2, 3, 2), '4-2-2');
+    assert.equal(slotTagCode(4, 3, 0, null), '4-3');
+    assert.throws(() => slotTagCode(4, 2, 3, null), /Choose a bin/);
   });
 });

@@ -8,7 +8,7 @@ import { scannerInputMode } from './kiosk';
 import { AppItemDetail } from './appMode/AppItemDetail';
 import { UnitEditDrawer } from './UnitEditDrawer';
 import { rpcMoveLocationStock } from './locationStock';
-import { addBulkSkus, bayTagCode, layoutBlocked, locationPhrase, planPlaceInBin, unitsLabel, type LocationAllocation } from './locationPlace';
+import { addBulkSkus, layoutBlocked, locationPhrase, planPlaceInBin, slotTagCode, unitsLabel, type LocationAllocation } from './locationPlace';
 
 type Bay = { bay_no: number; row_bins: number[] };
 type Location = { code: string; bay_no: number; row_no: number; bin_no: number | null; stock: number };
@@ -80,6 +80,8 @@ export function LocationsPage({
   const [editRows, setEditRows] = useState<number[]>([3]);
   const [bulkDraft, setBulkDraft] = useState('');
   const [bulkBay, setBulkBay] = useState('');
+  const [bulkRow, setBulkRow] = useState('1');
+  const [bulkBin, setBulkBin] = useState('1');
   const [bulkSkus, setBulkSkus] = useState<string[]>([]);
   const [scanValue, setScanValue] = useState('');
   const [pending, setPending] = useState<FoundUnit | null>(null);
@@ -351,15 +353,24 @@ export function LocationsPage({
     setBulkDraft('');
   }
 
+  function bulkSlot() {
+    const bay = bays.find((row) => String(row.bay_no) === bulkBay) || null;
+    const rowCount = bay?.row_bins.length || 0;
+    const rowNo = Math.min(Math.max(Number(bulkRow) || 1, 1), Math.max(rowCount, 1));
+    const binCount = bay ? Number(bay.row_bins[rowNo - 1] ?? 0) : 0;
+    const binNo = binCount === 0 ? null : Math.min(Math.max(Number(bulkBin) || 1, 1), binCount);
+    return { bay, rowCount, rowNo, binCount, binNo };
+  }
+
   async function submitBulk() {
-    const bay = bays.find((row) => String(row.bay_no) === bulkBay);
-    if (!bay) { setError('Choose a bay.'); return; }
+    const slot = bulkSlot();
+    if (!slot.bay) { setError('Choose a bay.'); return; }
     if (!bulkSkus.length) { setError('Add at least one SKU.'); return; }
     let code = '';
     try {
-      code = bayTagCode(bay.bay_no, bay.row_bins);
+      code = slotTagCode(slot.bay.bay_no, slot.rowNo, slot.binCount, slot.binNo);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Choose a bay.');
+      setError(err instanceof Error ? err.message : 'Choose a bin.');
       return;
     }
     if (lock.current) return;
@@ -654,8 +665,24 @@ export function LocationsPage({
               </span>
             </label>
             <label className="loc-field">Bay
-              <select value={bulkBay} disabled={busy || !bays.length} aria-label="Bay" onChange={(event) => setBulkBay(event.target.value)}>
+              <select value={bulkBay} disabled={busy || !bays.length} aria-label="Bay" onChange={(event) => { setBulkBay(event.target.value); setBulkRow('1'); setBulkBin('1'); }}>
                 {bays.map((item) => <option key={item.bay_no} value={String(item.bay_no)}>Bay {item.bay_no}</option>)}
+              </select>
+            </label>
+            <label className="loc-field">Row
+              <select value={String(bulkSlot().rowNo)} disabled={busy || !bulkSlot().rowCount} aria-label="Row" onChange={(event) => { setBulkRow(event.target.value); setBulkBin('1'); }}>
+                {Array.from({ length: bulkSlot().rowCount }, (_, index) => (
+                  <option key={index + 1} value={String(index + 1)}>Row {index + 1}</option>
+                ))}
+              </select>
+            </label>
+            <label className="loc-field">Bin
+              <select value={bulkSlot().binNo == null ? '' : String(bulkSlot().binNo)} disabled={busy || !bulkSlot().bay} aria-label="Bin" onChange={(event) => setBulkBin(event.target.value)}>
+                {bulkSlot().binCount === 0
+                  ? <option value="">Floor</option>
+                  : Array.from({ length: bulkSlot().binCount }, (_, index) => (
+                    <option key={index + 1} value={String(index + 1)}>Bin {index + 1}</option>
+                  ))}
               </select>
             </label>
             <ul className="loc-bulk-list" aria-label="SKUs to tag">
