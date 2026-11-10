@@ -1,6 +1,6 @@
-import { compactTracking, scanContainsTracking } from '../../../shared/tracking-normalize.mjs';
+import { compactTracking, scanContainsTracking, takeLabelScans } from '../../../shared/tracking-normalize.mjs';
 
-export { scanContainsTracking };
+export { scanContainsTracking, takeLabelScans };
 
 /** Every scan and typed tracking value goes through compactTracking. */
 export function normalizeTracking(raw: string | null | undefined): string | null {

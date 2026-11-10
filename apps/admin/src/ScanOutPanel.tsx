@@ -4,6 +4,7 @@ import { errText } from './errText';
 import { decodeBarcodeFile } from './ReceivePanel';
 import { shouldQueueScan } from './scanQueue';
 import { shipBundleRest } from './bundleShip';
+import { formatTrackingDisplay, normalizeTracking, takeLabelScans } from './trackingNormalize';
 
 type TodayRow = {
   id: string; order_id: string; sku?: string; title?: string;
@@ -19,11 +20,17 @@ type Lookup = {
   order?: { id: string; sku?: string; title?: string; shipped_at?: string };
 };
 
-function scanMessage(row: Lookup) {
+function scanMessage(row: Lookup, code = '') {
   const title = row.title || row.order?.title || '';
   const sku = row.sku || row.order?.sku || '';
   const who = [title, sku ? `SKU ${sku}` : ''].filter(Boolean).join(' · ');
-  if (row.error === 'not_found') return 'No packaged order matches that scan. Nothing was changed.';
+  if (row.error === 'not_found') {
+    const number = normalizeTracking(code);
+    const shown = number && number.length >= 12 ? formatTrackingDisplay('', number) : '';
+    return shown
+      ? `No order has ${shown}. Nothing was changed.`
+      : 'No packaged order matches that scan. Nothing was changed.';
+  }
   if (row.error === 'not_packaged') return `Not packaged yet${who ? `. ${who} is still in To ship. Pack it first.` : '. Pack it first.'}`;
   if (row.error === 'scanned_twice' || (row.error === 'already_shipped' && row.scanned_out_at && Date.now() - new Date(row.scanned_out_at).getTime() < 120_000)) {
     return `Scanned twice. ${who || 'That package'} was already scanned out a moment ago.`;
@@ -65,6 +72,7 @@ export function ScanOutPanel({ client, stamp = (s) => s, appMode, mode = 'ship',
   const cameraRef = useRef<HTMLInputElement>(null);
   const queue = useRef<string[]>([]);
   const last = useRef<{ code: string; at: number } | null>(null);
+  const heldRouting = useRef('');
   const running = useRef(false);
   const [today, setToday] = useState<TodayRow[]>([]);
   const [open, setOpen] = useState<OpenRow[]>([]);
@@ -117,7 +125,7 @@ export function ScanOutPanel({ client, stamp = (s) => s, appMode, mode = 'ship',
         buzz(false);
         setFlash('err');
         setNoteTone('err');
-        setNote(scanMessage(row || { error: 'not_found' }));
+        setNote(scanMessage(row || { error: 'not_found' }, code));
         setConfirm(null);
         return;
       }
@@ -139,7 +147,11 @@ export function ScanOutPanel({ client, stamp = (s) => s, appMode, mode = 'ship',
       setConfirm({ title, sku });
       const extra = mode === 'ship' && body.order_id ? await shipBundleRest(client, body.order_id, code) : '';
       setNote(extra);
-      setBarcode('');
+      setBarcode((current) => {
+        if (current.trim() && current.trim() !== code) return current;
+        heldRouting.current = '';
+        return '';
+      });
       await refresh();
     } catch (e) {
       setError(errText(e));
@@ -168,6 +180,7 @@ export function ScanOutPanel({ client, stamp = (s) => s, appMode, mode = 'ship',
 
   function enqueue(raw: string) {
     const code = raw.trim();
+    if (!code) return;
     const now = Date.now();
     if (!shouldQueueScan(code, last.current, now)) {
       setNoteTone('err');
@@ -177,8 +190,18 @@ export function ScanOutPanel({ client, stamp = (s) => s, appMode, mode = 'ship',
     }
     last.current = { code, at: now };
     queue.current.push(code);
-    setBarcode('');
     void drain();
+  }
+
+  function acceptScan(raw: string) {
+    const taken = takeLabelScans(raw, heldRouting.current);
+    heldRouting.current = taken.held;
+    setBarcode(taken.held);
+    for (const scan of taken.scans) enqueue(scan);
+  }
+
+  function submitField() {
+    acceptScan(inputRef.current?.value ?? barcode);
   }
 
   async function undoLast() {
@@ -236,14 +259,14 @@ export function ScanOutPanel({ client, stamp = (s) => s, appMode, mode = 'ship',
 
       {camera ? (
         <ScanCamera
-          onCode={(code) => enqueue(code)}
+          onCode={(code) => acceptScan(code)}
           onClose={() => setCamera(false)}
           confirm={confirm}
           onUndo={() => void undoLast()}
         />
       ) : (
         <>
-          <form className="scan-out-field" onSubmit={(e) => { e.preventDefault(); enqueue(barcode); }}>
+          <form className="scan-out-field" onSubmit={(e) => { e.preventDefault(); submitField(); }}>
             <input
               ref={inputRef}
               value={barcode}
@@ -265,7 +288,7 @@ export function ScanOutPanel({ client, stamp = (s) => s, appMode, mode = 'ship',
               e.target.value = '';
               if (!file) return;
               void decodeBarcodeFile(file).then((code) => {
-                if (code) enqueue(code);
+                if (code) acceptScan(code);
                 else { setNoteTone('err'); setNote('Could not read that photo. Nothing was changed.'); buzz(false); }
               });
             }} />
