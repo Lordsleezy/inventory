@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { type WebOrder } from '../OrdersPage';
-import { hydratePhotoUrlCache, listThumbOriginalPaths, loadUnitPhotos, persistPhotoUrlCache, signListThumbs, signPhotoUrls, type UnitPhoto } from '../unitPhotos';
+import { hydratePhotoUrlCache, listThumbOriginalPaths, listThumbPhoto, loadUnitPhotos, persistPhotoUrlCache, signListThumbs, signPhotoUrls, type UnitPhoto } from '../unitPhotos';
 import { errText } from '../errText';
 import { shortError } from './shortError';
 import { loadOrderLocations, locationCompare } from '../locationOrder';
@@ -13,6 +13,7 @@ import { useVisibleInterval } from '../useVisibleInterval';
 import { ScanOutPanel } from '../ScanOutPanel';
 import { SEG_SHORT } from '../orderDisplay';
 import { AppOrderDetail } from './AppOrderDetail';
+import { AppOrderRow } from './AppOrderRow';
 import { AppShipmentCard, type ShipmentView } from './AppShipmentCard';
 import { AppOrderShipVerifySheet } from './AppOrderShipVerifySheet';
 import { floorFunctionUrl } from '../floorApi';
@@ -22,7 +23,9 @@ import { LabelTrackingPicker, LabelTrackingResult } from '../LabelTrackingResult
 import {
   canManualBundle,
   canUnbundle,
+  dedupeOrders,
   listShipments,
+  suggestBundleGroups,
 } from '../orderShipments';
 
 type Seg = 'needsLabel' | 'toShip' | 'packaged' | 'shipped' | 'delivered' | 'canceled';
@@ -89,7 +92,7 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
       const { data, error: e } = await client.rpc('portal_web_orders', { p_days: 400 });
       if (e) throw e;
       const raw = Array.isArray(data) ? (data as WebOrder[]) : [];
-      const list = raw.filter((o) => o.payment_env !== 'sandbox' && !(o.order_no || '').toLowerCase().startsWith('sandbox'));
+      const list = dedupeOrders(raw.filter((o) => o.payment_env !== 'sandbox' && !(o.order_no || '').toLowerCase().startsWith('sandbox'))) as WebOrder[];
       setOrders(list);
       setOpen((prev) => (prev ? list.find((o) => o.id === prev.id) || prev : null));
       const skus = [...new Set(list.map((o) => o.sku).filter(Boolean))];
@@ -193,6 +196,19 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
     return (orders || []).filter((o) => ids.has(o.id));
   }, [orders, selectedIds]);
   const bundleReady = canManualBundle(selectedOrders);
+  const suggestions = useMemo(() => {
+    if (!selectMode) return [] as { id: string; buyer: string; itemCount: number; ids: string[] }[];
+    const lines = (seg === 'needsLabel' ? buckets.needsLabel : buckets.toShip) || [];
+    return suggestBundleGroups(lines, bundleOpts) as { id: string; buyer: string; itemCount: number; ids: string[] }[];
+  }, [selectMode, seg, buckets, bundleOpts]);
+  const suggestById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const group of suggestions) {
+      const hint = `Same buyer: Bundle? (${group.itemCount})`;
+      for (const id of group.ids) map.set(id, hint);
+    }
+    return map;
+  }, [suggestions]);
 
   async function runAction(key: string, fn: () => Promise<void>) {
     setBusy(key);
@@ -314,13 +330,10 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
     });
   }
 
-  function toggleSelectShipment(shipment: ShipmentView) {
-    const ids = shipment.items.map((o) => o.id);
-    setSelectedIds((prev) => {
-      const allOn = ids.every((id) => prev.includes(id));
-      if (allOn) return prev.filter((id) => !ids.includes(id));
-      return [...new Set([...prev, ...ids])];
-    });
+  function toggleSelectOrder(order: WebOrder) {
+    setSelectedIds((prev) => (
+      prev.includes(order.id) ? prev.filter((id) => id !== order.id) : [...prev, order.id]
+    ));
   }
 
   async function stepBack(o: WebOrder) {
@@ -632,41 +645,69 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
           const lead = shipment.lead;
           const chName = CHANNEL[(lead.channel || 'website').toLowerCase()] || lead.channel || 'Website';
           const tail = seeTracking && !orderNeedsLabel(lead) ? trackingTail(lead) : '';
-          const selected = shipment.items.every((o) => selectedIds.includes(o.id));
-          const rowPackaged = seg === 'toShip' && shipment.items.every((o) => orderCanMarkPackaged(o) || o.packaged_at);
-          const unbundleOk = shipment.bundled && canUnbundle(shipment.items).ok;
+          if (shipment.bundled) {
+            const rowPackaged = seg === 'toShip' && shipment.items.every((o) => orderCanMarkPackaged(o) || o.packaged_at);
+            const unbundleOk = canUnbundle(shipment.items).ok;
+            return (
+              <AppShipmentCard
+                key={shipment.id}
+                shipment={shipment}
+                client={client}
+                photoMap={photoMap}
+                photoUrls={photoUrls}
+                locations={locations}
+                money={money}
+                hideMoney={!isAdmin}
+                channelName={chName}
+                trackingTail={tail}
+                onOpen={(o) => setOpen(o)}
+                onUrl={(p, u) => mergePhotoUrls({ [p]: u })}
+                showUpload={isAdmin && orderNeedsLabel(lead)}
+                onUpload={(f) => void uploadLabel(lead, f)}
+                onPrint={hasLabel(lead) ? () => void printLabel(lead) : undefined}
+                showPackaged={rowPackaged && shipment.items.some((o) => orderCanMarkPackaged(o))}
+                onPackaged={() => void markShipmentPackaged(shipment)}
+                packagedBusy={busy === 'packaged'}
+                showMarkShipped={seg === 'packaged'}
+                onMarkShipped={() => { setError(''); setShipTarget(lead); }}
+                showUnbundle={isAdmin && unbundleOk}
+                onUnbundle={() => void unbundleShipment(shipment)}
+                unbundleBusy={busy === 'unbundle'}
+                expanded={expandedIds.includes(shipment.id)}
+                onToggleExpand={() => setExpandedIds((prev) => (
+                  prev.includes(shipment.id) ? prev.filter((id) => id !== shipment.id) : [...prev, shipment.id]
+                ))}
+              />
+            );
+          }
+          const o = lead;
+          const thumbPhoto = listThumbPhoto(photoMap[o.sku] || []);
           return (
-            <AppShipmentCard
-              key={shipment.id}
-              shipment={shipment}
+            <AppOrderRow
+              key={o.id}
+              order={o}
               client={client}
-              photoMap={photoMap}
+              thumbPath={thumbPhoto?.path || null}
               photoUrls={photoUrls}
-              locations={locations}
+              locationCode={locations[o.sku]?.[0]}
               money={money}
               hideMoney={!isAdmin}
               channelName={chName}
               trackingTail={tail}
-              selected={selected}
-              selectMode={selectMode}
-              onToggleSelect={() => toggleSelectShipment(shipment)}
-              onOpen={(o) => setOpen(o)}
+              onOpen={() => setOpen(o)}
+              onPrint={hasLabel(o) ? () => void printLabel(o) : undefined}
               onUrl={(p, u) => mergePhotoUrls({ [p]: u })}
-              showUpload={isAdmin && orderNeedsLabel(lead)}
-              onUpload={(f) => void uploadLabel(lead, f)}
-              onPrint={hasLabel(lead) ? () => void printLabel(lead) : undefined}
-              showPackaged={rowPackaged && shipment.items.some((o) => orderCanMarkPackaged(o))}
-              onPackaged={() => void markShipmentPackaged(shipment)}
+              showUpload={isAdmin && orderNeedsLabel(o)}
+              onUpload={(f) => void uploadLabel(o, f)}
+              showPackaged={seg === 'toShip' && orderCanMarkPackaged(o)}
+              onPackaged={() => void markPackaged(o)}
               packagedBusy={busy === 'packaged'}
               showMarkShipped={seg === 'packaged'}
-              onMarkShipped={() => { setError(''); setShipTarget(lead); }}
-              showUnbundle={isAdmin && unbundleOk}
-              onUnbundle={() => void unbundleShipment(shipment)}
-              unbundleBusy={busy === 'unbundle'}
-              expanded={expandedIds.includes(shipment.id)}
-              onToggleExpand={() => setExpandedIds((prev) => (
-                prev.includes(shipment.id) ? prev.filter((id) => id !== shipment.id) : [...prev, shipment.id]
-              ))}
+              onMarkShipped={() => { setError(''); setShipTarget(o); }}
+              selectMode={selectMode}
+              selected={selectedIds.includes(o.id)}
+              onToggleSelect={() => toggleSelectOrder(o)}
+              suggestHint={suggestById.get(o.id)}
             />
           );
         })}

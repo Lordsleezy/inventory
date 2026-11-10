@@ -4,8 +4,10 @@ import {
   canManualBundle,
   canUnbundle,
   countShipments,
+  dedupeOrders,
   listShipments,
   shipmentLead,
+  suggestBundleGroups,
 } from '../../../shared/order-shipments.mjs';
 import { ebayLineRepair, planEbayOrderLines, trackingUploads } from '../../../shared/ebay-order-lines.mjs';
 
@@ -22,7 +24,7 @@ const base = {
   package: { length_in: 8, width_in: 6, height_in: 4, weight_lb: 1 },
 };
 
-test('one eBay order with three lines is one shipment card and one tracking upload', () => {
+test('three lines stay three rows until staff bundles; tracking upload still one per eBay order', () => {
   const plan = planEbayOrderLines({
     orderId: '11-22-33',
     pricingSummary: { deliveryCost: { value: '12.00' }, priceSubtotal: { value: '45.00' } },
@@ -44,10 +46,9 @@ test('one eBay order with three lines is one shipment card and one tracking uplo
     length_in: 8, width_in: 6, height_in: 4, weight_lb: i + 1,
   }));
   const ships = listShipments(rows);
-  assert.equal(ships.length, 1);
-  assert.equal(ships[0].bundled, true);
-  assert.equal(ships[0].itemCount, 3);
-  assert.equal(countShipments(rows), 1);
+  assert.equal(ships.length, 3);
+  assert.equal(ships.every((ship) => !ship.bundled), true);
+  assert.equal(countShipments(rows), 3);
   assert.equal(trackingUploads(rows).length, 1);
   const again = ebayLineRepair(plan.plans, rows.map((r) => ({
     sku: r.sku, payment_id: r.payment_id, shipping_cents: r.shipping_cents, status: 'paid',
@@ -76,18 +77,38 @@ test('repair path after a single-line import only inserts the missing lines once
   assert.equal(second.inserts.length, 0);
 });
 
-test('two separate eBay checkouts to the same buyer and address are one shipment', () => {
+test('same buyer/address is a suggestion, not an automatic merge', () => {
   const rows = [
     { id: 'a', sku: '99763', order_no: '04-15422-45863', shipping_cents: 133, item_cents: 1699, ...base, weight_lb: 1, length_in: 6, width_in: 4, height_in: 3 },
     { id: 'b', sku: '99874', order_no: '04-15422-45863', shipping_cents: 265, item_cents: 1980, ...base, weight_lb: 2, length_in: 10, width_in: 8, height_in: 6 },
     { id: 'c', sku: '99871', order_no: '04-15422-45862', shipping_cents: 1208, item_cents: 2090, ...base, weight_lb: 3, length_in: 8, width_in: 8, height_in: 8 },
   ];
-  const ships = listShipments(rows);
-  assert.equal(ships.length, 1);
-  assert.equal(ships[0].itemCount, 3);
-  assert.equal(shipmentLead(ships[0].items)?.sku, '99763');
-  assert.ok(ships[0].package);
-  assert.equal(ships[0].package?.weight_lb, 6);
+  assert.equal(listShipments(rows).length, 3);
+  const tips = suggestBundleGroups(rows);
+  assert.equal(tips.length, 1);
+  assert.equal(tips[0].itemCount, 3);
+  assert.equal(tips[0].buyer, 'Ann Du');
+});
+
+test('manual links collapse to one shipment; duplicates in the portal list are dropped', () => {
+  const rows = [
+    { id: 'a', sku: '99763', order_no: '1', shipping_cents: 133, item_cents: 1699, ...base, weight_lb: 1, length_in: 6, width_in: 4, height_in: 3 },
+    { id: 'a', sku: '99763', order_no: '1', shipping_cents: 133, item_cents: 1699, ...base, weight_lb: 1, length_in: 6, width_in: 4, height_in: 3 },
+    { id: 'b', sku: '99874', order_no: '1', shipping_cents: 265, item_cents: 1980, ...base, weight_lb: 2, length_in: 10, width_in: 8, height_in: 6 },
+    { id: 'c', sku: '99871', order_no: '2', shipping_cents: 1208, item_cents: 2090, ...base, weight_lb: 3, length_in: 8, width_in: 8, height_in: 8 },
+  ];
+  assert.equal(dedupeOrders(rows).length, 3);
+  const linked = listShipments(rows, {
+    links: [
+      { order_id: 'a', peer_id: 'b' },
+      { order_id: 'b', peer_id: 'c' },
+      { order_id: 'a', peer_id: 'c' },
+    ],
+  });
+  assert.equal(linked.length, 1);
+  assert.equal(linked[0].bundled, true);
+  assert.equal(linked[0].itemCount, 3);
+  assert.equal(shipmentLead(linked[0].items)?.sku, '99763');
 });
 
 test('manual bundle blocks different buyers and a labeled shipment', () => {
@@ -105,21 +126,22 @@ test('manual bundle blocks different buyers and a labeled shipment', () => {
   assert.equal(canUnbundle([a, { id: '4', sku: '4', ...base }]).ok, true);
 });
 
-test('tab counts count shipments, not lines', () => {
+test('tab counts count unbundled lines until a manual bundle exists', () => {
   const rows = [
     { id: 'a', sku: '99763', order_no: '1', shipping_cents: 100, item_cents: 1000, ...base },
     { id: 'b', sku: '99874', order_no: '1', shipping_cents: 100, item_cents: 1000, ...base },
     { id: 'c', sku: '99999', order_no: '2', shipping_cents: 100, item_cents: 1000, ...base, buyer_name: 'Someone Else', ship_line1: '1 Other St' },
   ];
-  assert.equal(countShipments(rows), 2);
+  assert.equal(countShipments(rows), 3);
+  assert.equal(countShipments(rows, { links: [{ order_id: 'a', peer_id: 'b' }] }), 2);
 });
 
-test('books keep per-line sale amounts; shipping is not duplicated on the shipment card count', () => {
+test('books keep per-line sale amounts after a manual bundle', () => {
   const rows = [
     { id: 'a', sku: '99763', order_no: '1', shipping_cents: 133, item_cents: 1699, ...base, weight_lb: 1, length_in: 6, width_in: 4, height_in: 3 },
     { id: 'b', sku: '99874', order_no: '1', shipping_cents: 265, item_cents: 1980, ...base, weight_lb: 2, length_in: 10, width_in: 8, height_in: 6 },
   ];
-  const ship = listShipments(rows)[0];
+  const ship = listShipments(rows, { links: [{ order_id: 'a', peer_id: 'b' }] })[0];
   const itemTotal = ship.items.reduce((n: number, row: { item_cents?: number }) => n + Number(row.item_cents || 0), 0);
   const shipTotal = ship.items.reduce((n: number, row: { shipping_cents?: number }) => n + Number(row.shipping_cents || 0), 0);
   assert.equal(itemTotal, 1699 + 1980);

@@ -20,7 +20,7 @@ import { PackLabelScan } from './PackLabelScan';
 import { labelUploadUi, type LabelUploadResponse } from './labelUploadFeedback';
 import { LabelTrackingPicker, LabelTrackingResult } from './LabelTrackingResult';
 import { LabelTrackingProblem } from './LabelTrackingProblem';
-import { canManualBundle, canUnbundle, listShipments } from './orderShipments';
+import { canManualBundle, canUnbundle, dedupeOrders, listShipments } from './orderShipments';
 
 const CHANNEL_LABEL: Record<string, string> = {
   website: 'Website',
@@ -178,7 +178,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
     // No practical date hide: cover store day-one history (portal still clamps to p_days).
     const { data, error: e } = await client.rpc('portal_web_orders', { p_days: 400 });
     if (e) { setError(e.message); return; }
-    const list = Array.isArray(data) ? data as WebOrder[] : [];
+    const list = dedupeOrders(Array.isArray(data) ? data as WebOrder[] : []) as WebOrder[];
     setOrders(list);
     const skus = [...new Set(list.map(o => o.sku).filter(Boolean))];
     setLocations(await loadOrderLocations(client, storeId, skus));
