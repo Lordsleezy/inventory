@@ -7,6 +7,7 @@ import { wrapHandler, asNetlifyFunction, floorLog } from "../lib/floor-log.mjs";
 import { ebayDisabled } from "../lib/ebay-env.mjs";
 import { sendInternalAlert, filterDeliverableEmails } from "../lib/mail.mjs";
 import { EBAY_SYNC_LOCK_SECONDS, syncCompletedAt, syncNeedsStallEmail } from "../lib/ebay-sync-health.mjs";
+import { maybeRevertTempFlat } from "../lib/temp-flat-shipping.mjs";
 
 const STORE_ID = "5487ca47-6147-4fe8-bc6d-46b6472726ba";
 
@@ -23,6 +24,12 @@ async function handle(event) {
     const sb = serviceClient();
     // A run that is still going blocks the next one instead of piling on.
     const result = await withLock("ebay-sync", EBAY_SYNC_LOCK_SECONDS, async () => {
+      let tempFlat = { skipped: true };
+      try {
+        tempFlat = await maybeRevertTempFlat(sb, STORE_ID);
+      } catch (err) {
+        tempFlat = { skipped: true, error: err instanceof Error ? err.message : String(err) };
+      }
       // Orders first. The offer scan and open delist tasks used to burn the whole
       // timeout, so the run was killed and the next fire only logged "already running".
       const orders = await pollAllStores();
@@ -44,7 +51,7 @@ async function handle(event) {
         pickupListDispatch = [{ ok: false, error: err instanceof Error ? err.message : String(err) }];
       }
       const withdrawn = await withdrawOpenEbayTasks();
-      return { withdrawn, orders, migrationDispatch, pickupListDispatch, completed: polled };
+      return { withdrawn, orders, migrationDispatch, pickupListDispatch, completed: polled, tempFlat };
     }, sb);
     if (result?.skipped || result?.completed === false) await emailIfSyncStalled(sb);
     return json(200, result);
