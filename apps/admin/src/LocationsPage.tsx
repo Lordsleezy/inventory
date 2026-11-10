@@ -9,7 +9,7 @@ import { scannerInputMode } from './kiosk';
 import { AppItemDetail } from './appMode/AppItemDetail';
 import { UnitEditDrawer } from './UnitEditDrawer';
 import { rpcMoveLocationStock } from './locationStock';
-import { addBulkSkus, bayTitle, layoutBlocked, loadBulkTagDraft, locationPhrase, parseBulkSkus, planPlaceInBin, resolveLocationCode, saveBulkTagDraft, skuMissingUpc, slotTagCode, unitsLabel, upcScanKeys, upcToStore, type BulkTagDraft, type BulkUpcAsk, type LocationAllocation, type ScanCandidate } from './locationPlace';
+import { addBulkSkus, bayTitle, layoutBlocked, loadBulkTagDraft, locationPhrase, parseBulkSkus, planPlaceInBin, resolveLocationCode, saveBulkTagDraft, shouldAskForUpc, slotTagCode, unitsLabel, upcScanKeys, upcToStore, type BulkTagDraft, type BulkUpcAsk, type LocationAllocation, type ScanCandidate } from './locationPlace';
 
 type Bay = { bay_no: number; row_bins: number[]; name?: string | null };
 type Location = { code: string; bay_no: number; row_no: number; bin_no: number | null; stock: number };
@@ -298,15 +298,27 @@ export function LocationsPage({
     return rows;
   }
 
+  async function upcOnItem(sku: string): Promise<{ status: 'missing' | 'set' | 'unknown'; title: string }> {
+    const rpcs = canManage
+      ? ['portal_inventory_detail', 'staff_inventory_detail']
+      : ['staff_inventory_detail', 'portal_inventory_detail'];
+    for (const rpc of rpcs) {
+      const marked = await client.rpc(rpc, { p_sku: sku });
+      if (marked.error || !marked.data || typeof marked.data !== 'object') continue;
+      const unit = (marked.data as { unit?: { title?: unknown; upc?: unknown; upc_does_not_apply?: unknown; listing_specs?: unknown } | null }).unit;
+      if (!unit) continue;
+      return { status: hasUpcValue(unit) ? 'set' : 'missing', title: String(unit.title || '') };
+    }
+    return { status: 'unknown', title: '' };
+  }
+
   async function holdForUpc(raw: string, candidates: ScanCandidate[], target: 'scan' | 'bulk') {
-    const missing = skuMissingUpc(raw, candidates);
-    if (!missing) return false;
-    const marked = await client.rpc(canManage ? 'portal_inventory_detail' : 'staff_inventory_detail', { p_sku: missing.sku });
-    const unit = marked.data && typeof marked.data === 'object'
-      ? (marked.data as { unit?: { upc?: unknown; upc_does_not_apply?: unknown; listing_specs?: unknown } }).unit
-      : null;
-    if (!marked.error && unit && hasUpcValue(unit)) return false;
-    setUpcAsk({ sku: missing.sku, title: missing.title, value: '', target });
+    const code = raw.trim();
+    const exact = candidates.find((row) => row.sku === code);
+    if (!exact && upcScanKeys(code).length) return false;
+    const detail = await upcOnItem(exact?.sku || code);
+    if (!shouldAskForUpc(code, candidates, detail.status)) return false;
+    setUpcAsk({ sku: exact?.sku || code, title: exact?.title || detail.title, value: '', target });
     setUpcAskError('');
     if (target === 'bulk') setBulkDraft('');
     else { setScanValue(''); setPending(null); }
