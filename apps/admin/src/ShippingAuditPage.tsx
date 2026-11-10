@@ -41,7 +41,9 @@ export function ShippingAuditPage() {
         from {SHIPPING_AUDIT.origin}, priced at zone {SHIPPING_AUDIT.zone} ({SHIPPING_AUDIT.zoneRule}).
         The charge covers that label after a {Math.round(SHIPPING_AUDIT.feeRate * 1000) / 10}% eBay fee
         and stays at least $6. A listing in the $10–$12.50 band is left alone unless it is more than $4 high.
-        Nothing on this page changes a listing. Two listings were corrected on November 9, 2026; their rows say what changed.
+        Nothing on this page changes a listing. The Ground column is the price buyers see first.
+        On November 10, 2026 the copied boxes were corrected and Ground Advantage was moved ahead of Priority
+        on the calculated policies. Rows that changed say so.
       </p>
       <div className="tabs" role="tablist">
         {FILTERS.map(([id, label]) => (

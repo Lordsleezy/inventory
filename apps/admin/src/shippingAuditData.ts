@@ -21,7 +21,7 @@ export const SHIPPING_AUDIT: {
   counts: Record<string, number>;
   rows: ShippingAuditRow[];
 } = {
-  "computedAt": "2026-11-10T02:04:05.875Z",
+  "computedAt": "2026-11-10T03:59:24.493Z",
   "origin": "95663",
   "zone": 7,
   "zoneRule": "65th percentile of shipped eBay destinations, else zone 6",
@@ -376,12 +376,12 @@ export const SHIPPING_AUDIT: {
       "sku": "11225",
       "title": "Brock lesnar WWE halloween costume 4-6x",
       "price": 100,
-      "ga": 42.15,
-      "pm": 63.33,
-      "shouldBe": 51.5,
-      "difference": -9.35,
+      "ga": 8.6,
+      "pm": 10.23,
+      "shouldBe": 15,
+      "difference": -6.4,
       "verdict": "too_low",
-      "why": "zone 7 Ground Advantage card $43.82 on 18.2 billable lb; length over 30 in; eBay package 36x28x3 8lb; calculated",
+      "why": "zone 7 Ground Advantage card $12.55 on 1.5 billable lb; eBay package 14x12x3 1.5lb; calculated; package is an estimate, corrected November 10 from the rug box; Ground Advantage is the first service",
       "source": "usps-commercial-zone-7"
     },
     {
@@ -1845,12 +1845,12 @@ export const SHIPPING_AUDIT: {
       "sku": "99099",
       "title": "HOTO Flexi Cordless Spin Scrubber with Extension Rod and 6 Scrubber Heads",
       "price": 19.99,
-      "ga": 42.15,
-      "pm": 63.33,
-      "shouldBe": 51.5,
-      "difference": -9.35,
+      "ga": 28.78,
+      "pm": 48.28,
+      "shouldBe": 35,
+      "difference": -6.22,
       "verdict": "too_low",
-      "why": "zone 7 Ground Advantage card $43.82 on 18.2 billable lb; length over 30 in; eBay package 36x28x3 8lb; calculated",
+      "why": "zone 7 Ground Advantage card $29.36 on 5.4 billable lb; eBay package 37.8x7.9x5.1 5.4lb; calculated; package corrected November 10 from the rug box; length over 30 in; Ground Advantage is the first service",
       "source": "usps-commercial-zone-7"
     },
     {
@@ -2084,7 +2084,7 @@ export const SHIPPING_AUDIT: {
       "shouldBe": 69,
       "difference": -18.95,
       "verdict": "too_low",
-      "why": "zone 7 Priority Mail card $58.30 on 12.3 billable lb; Priority only, Ground Advantage is not offered; length over 30 in; eBay package 32x8x8 8lb; calculated",
+      "why": "zone 7 Priority Mail card $58.30 on 12.3 billable lb; Ground Advantage is now the first service; length over 30 in; eBay package 32x8x8 8lb; calculated",
       "source": "usps-commercial-zone-7"
     },
     {
@@ -2209,12 +2209,12 @@ export const SHIPPING_AUDIT: {
       "sku": "11489",
       "title": "thermoflask insulated coffee mug 12fl oz 2 set",
       "price": 22.99,
-      "ga": 62.9,
-      "pm": 83.88,
-      "shouldBe": 108,
-      "difference": -45.1,
+      "ga": 8.6,
+      "pm": 10.23,
+      "shouldBe": 15,
+      "difference": -6.4,
       "verdict": "too_low",
-      "why": "zone 7 Ground Advantage card $91.61 on 24.3 billable lb; volume over 2 cubic feet; eBay package 18x16x14 20lb; calculated",
+      "why": "zone 7 Ground Advantage card $12.55 on 1.5 billable lb; eBay package 10x6x5 1.5lb; calculated; package is an estimate, corrected November 10 from the 20 lb carton; Ground Advantage is the first service",
       "source": "usps-commercial-zone-7"
     },
     {
@@ -3782,12 +3782,12 @@ export const SHIPPING_AUDIT: {
       "sku": "11411",
       "title": "Infiniti pro InfinitiPRO Ionic Ceramic Hair Dryer",
       "price": 19.99,
-      "ga": 42.15,
-      "pm": 63.33,
-      "shouldBe": 51.5,
-      "difference": -9.35,
+      "ga": 9.85,
+      "pm": 12.43,
+      "shouldBe": 18,
+      "difference": -8.15,
       "verdict": "too_low",
-      "why": "zone 7 Ground Advantage card $43.82 on 18.2 billable lb; length over 30 in; eBay package 36x28x3 8lb; calculated",
+      "why": "zone 7 Ground Advantage card $14.91 on 2.4 billable lb; eBay package 12.4x9.4x4.1 2.36lb; calculated; package corrected November 10 from the rug box; Ground Advantage is the first service",
       "source": "usps-commercial-zone-7"
     },
     {
@@ -4268,7 +4268,7 @@ export const SHIPPING_AUDIT: {
       "shouldBe": 65.5,
       "difference": -18.02,
       "verdict": "too_low",
-      "why": "zone 7 Priority Mail card $55.46 on 15.2 billable lb; Priority only, Ground Advantage is not offered; eBay package 18x14x10 3lb; calculated",
+      "why": "zone 7 Priority Mail card $55.46 on 15.2 billable lb; Ground Advantage is now the first service; eBay package 18x14x10 3lb; calculated",
       "source": "usps-commercial-zone-7"
     },
     {
@@ -4302,12 +4302,12 @@ export const SHIPPING_AUDIT: {
       "sku": "99091",
       "title": "Miu France Vegetable Chopper and Slicer, 11-Piece Set",
       "price": 11.99,
-      "ga": "",
-      "pm": 63.33,
-      "shouldBe": 86.5,
-      "difference": -23.17,
+      "ga": 11.15,
+      "pm": 15.25,
+      "shouldBe": 20.5,
+      "difference": -9.35,
       "verdict": "too_low",
-      "why": "zone 7 Priority Mail card $73.21 on 18.2 billable lb; Priority only, Ground Advantage is not offered; length over 30 in; eBay package 36x28x3 8lb; calculated",
+      "why": "zone 7 Ground Advantage card $17.24 on 3.7 billable lb; eBay package 11.5x9x6 3.7lb; calculated; package corrected November 10 from the rug box; Ground Advantage added as the first service",
       "source": "usps-commercial-zone-7"
     },
     {
@@ -4320,7 +4320,7 @@ export const SHIPPING_AUDIT: {
       "shouldBe": 68.5,
       "difference": -17.35,
       "verdict": "too_low",
-      "why": "zone 7 Priority Mail card $58.25 on 16.9 billable lb; Priority only, Ground Advantage is not offered; eBay package 20x14x10 4lb; calculated",
+      "why": "zone 7 Priority Mail card $58.25 on 16.9 billable lb; Ground Advantage is now the first service; eBay package 20x14x10 4lb; calculated",
       "source": "usps-commercial-zone-7"
     },
     {
@@ -4762,7 +4762,7 @@ export const SHIPPING_AUDIT: {
       "shouldBe": 71.5,
       "difference": -17.35,
       "verdict": "too_low",
-      "why": "zone 7 Priority Mail card $60.44 on 13.9 billable lb; Priority only, Ground Advantage is not offered; length over 30 in; eBay package 36x8x8 12lb; calculated",
+      "why": "zone 7 Priority Mail card $60.44 on 13.9 billable lb; Ground Advantage is now the first service; length over 30 in; eBay package 36x8x8 12lb; calculated",
       "source": "usps-commercial-zone-7"
     },
     {
@@ -4892,7 +4892,7 @@ export const SHIPPING_AUDIT: {
       "shouldBe": 71.5,
       "difference": -17.35,
       "verdict": "too_low",
-      "why": "zone 7 Priority Mail card $60.44 on 13.9 billable lb; Priority only, Ground Advantage is not offered; length over 30 in; eBay package 36x8x8 12lb; calculated",
+      "why": "zone 7 Priority Mail card $60.44 on 13.9 billable lb; Ground Advantage is now the first service; length over 30 in; eBay package 36x8x8 12lb; calculated",
       "source": "usps-commercial-zone-7"
     },
     {
@@ -4905,7 +4905,7 @@ export const SHIPPING_AUDIT: {
       "shouldBe": 65.5,
       "difference": -18.02,
       "verdict": "too_low",
-      "why": "zone 7 Priority Mail card $55.46 on 15.2 billable lb; Priority only, Ground Advantage is not offered; eBay package 18x14x10 3lb; calculated",
+      "why": "zone 7 Priority Mail card $55.46 on 15.2 billable lb; Ground Advantage is now the first service; eBay package 18x14x10 3lb; calculated",
       "source": "usps-commercial-zone-7"
     },
     {
@@ -5191,7 +5191,7 @@ export const SHIPPING_AUDIT: {
       "shouldBe": 65.5,
       "difference": -18.02,
       "verdict": "too_low",
-      "why": "zone 7 Priority Mail card $55.46 on 15.2 billable lb; Priority only, Ground Advantage is not offered; eBay package 18x14x10 3lb; calculated",
+      "why": "zone 7 Priority Mail card $55.46 on 15.2 billable lb; Ground Advantage is now the first service; eBay package 18x14x10 3lb; calculated",
       "source": "usps-commercial-zone-7"
     },
     {
@@ -5308,7 +5308,7 @@ export const SHIPPING_AUDIT: {
       "shouldBe": 72.5,
       "difference": -26.77,
       "verdict": "too_low",
-      "why": "zone 7 Priority Mail card $61.53 on 18.0 billable lb; Priority only, Ground Advantage is not offered; eBay package 20x10x8 18lb; calculated",
+      "why": "zone 7 Priority Mail card $61.53 on 18.0 billable lb; Ground Advantage is now the first service; eBay package 20x10x8 18lb; calculated",
       "source": "usps-commercial-zone-7"
     },
     {
@@ -5477,7 +5477,7 @@ export const SHIPPING_AUDIT: {
       "shouldBe": 71.5,
       "difference": -17.35,
       "verdict": "too_low",
-      "why": "zone 7 Priority Mail card $60.44 on 13.9 billable lb; Priority only, Ground Advantage is not offered; length over 30 in; eBay package 36x8x8 12lb; calculated; same model has different boxes, kept this listing's own number",
+      "why": "zone 7 Priority Mail card $60.44 on 13.9 billable lb; Ground Advantage is now the first service; length over 30 in; eBay package 36x8x8 12lb; calculated; same model has different boxes, kept this listing's own number",
       "source": "usps-commercial-zone-7"
     },
     {
@@ -5516,7 +5516,7 @@ export const SHIPPING_AUDIT: {
       "shouldBe": 167,
       "difference": -83.12,
       "verdict": "too_low",
-      "why": "zone 7 Priority Mail card $141.75 on 30.0 billable lb; Priority only, Ground Advantage is not offered; volume over 2 cubic feet; eBay package 18x14x14 30lb; calculated",
+      "why": "zone 7 Priority Mail card $141.75 on 30.0 billable lb; Ground Advantage is now the first service; volume over 2 cubic feet; eBay package 18x14x14 30lb; calculated",
       "source": "usps-commercial-zone-7"
     },
     {
@@ -5529,7 +5529,7 @@ export const SHIPPING_AUDIT: {
       "shouldBe": 65.5,
       "difference": -18.02,
       "verdict": "too_low",
-      "why": "zone 7 Priority Mail card $55.46 on 15.2 billable lb; Priority only, Ground Advantage is not offered; eBay package 18x14x10 3lb; calculated",
+      "why": "zone 7 Priority Mail card $55.46 on 15.2 billable lb; Ground Advantage is now the first service; eBay package 18x14x10 3lb; calculated",
       "source": "usps-commercial-zone-7"
     },
     {
@@ -6153,7 +6153,7 @@ export const SHIPPING_AUDIT: {
       "shouldBe": 157,
       "difference": -70.8,
       "verdict": "too_low",
-      "why": "zone 7 Priority Mail card $133.57 on 25.8 billable lb; Priority only, Ground Advantage is not offered; volume over 2 cubic feet; same-model label $20.10 zone 7 scales to $20.10; eBay package 20x16x13 20lb; calculated",
+      "why": "zone 7 Priority Mail card $133.57 on 25.8 billable lb; Ground Advantage is now the first service; volume over 2 cubic feet; same-model label $20.10 zone 7 scales to $20.10; eBay package 20x16x13 20lb; calculated",
       "source": "usps-commercial-zone-7"
     },
     {
@@ -6205,7 +6205,7 @@ export const SHIPPING_AUDIT: {
       "shouldBe": 71.5,
       "difference": -17.35,
       "verdict": "too_low",
-      "why": "zone 7 Priority Mail card $60.44 on 13.9 billable lb; Priority only, Ground Advantage is not offered; length over 30 in; eBay package 36x8x8 12lb; calculated",
+      "why": "zone 7 Priority Mail card $60.44 on 13.9 billable lb; Ground Advantage is now the first service; length over 30 in; eBay package 36x8x8 12lb; calculated",
       "source": "usps-commercial-zone-7"
     },
     {
@@ -6348,7 +6348,7 @@ export const SHIPPING_AUDIT: {
       "shouldBe": 45.5,
       "difference": -19.75,
       "verdict": "too_low",
-      "why": "zone 7 Priority Mail card $38.51 on 4.0 billable lb; Priority only, Ground Advantage is not offered; length over 30 in; eBay package 42x20x0 4lb; calculated; same model has different boxes, kept this listing's own number",
+      "why": "zone 7 Priority Mail card $38.51 on 4.0 billable lb; Ground Advantage is now the first service; length over 30 in; eBay package 42x20x0 4lb; calculated; same model has different boxes, kept this listing's own number",
       "source": "usps-commercial-zone-7"
     },
     {
@@ -6361,7 +6361,7 @@ export const SHIPPING_AUDIT: {
       "shouldBe": 45.5,
       "difference": -19.75,
       "verdict": "too_low",
-      "why": "zone 7 Priority Mail card $38.51 on 4.0 billable lb; Priority only, Ground Advantage is not offered; length over 30 in; eBay package 42x20x0 4lb; calculated; same model has different boxes, kept this listing's own number",
+      "why": "zone 7 Priority Mail card $38.51 on 4.0 billable lb; Ground Advantage is now the first service; length over 30 in; eBay package 42x20x0 4lb; calculated; same model has different boxes, kept this listing's own number",
       "source": "usps-commercial-zone-7"
     },
     {
@@ -6452,7 +6452,7 @@ export const SHIPPING_AUDIT: {
       "shouldBe": 138,
       "difference": -52.97,
       "verdict": "too_low",
-      "why": "zone 7 Priority Mail card $117.13 on 23.1 billable lb; Priority only, Ground Advantage is not offered; length over 22 in; volume over 2 cubic feet; eBay package 23x15x11 10lb; calculated; same model has different boxes, kept this listing's own number",
+      "why": "zone 7 Priority Mail card $117.13 on 23.1 billable lb; Ground Advantage is now the first service; length over 22 in; volume over 2 cubic feet; eBay package 23x15x11 10lb; calculated; same model has different boxes, kept this listing's own number",
       "source": "usps-commercial-zone-7"
     },
     {
@@ -6465,7 +6465,7 @@ export const SHIPPING_AUDIT: {
       "shouldBe": 78.5,
       "difference": -29.07,
       "verdict": "too_low",
-      "why": "zone 7 Priority Mail card $66.68 on 20.0 billable lb; Priority only, Ground Advantage is not offered; eBay package 15x10x1 20lb; calculated",
+      "why": "zone 7 Priority Mail card $66.68 on 20.0 billable lb; Ground Advantage is now the first service; eBay package 15x10x1 20lb; calculated",
       "source": "usps-commercial-zone-7"
     },
     {
@@ -6946,7 +6946,7 @@ export const SHIPPING_AUDIT: {
       "shouldBe": 57,
       "difference": -13.35,
       "verdict": "too_low",
-      "why": "zone 7 Priority Mail card $48.30 on 13.0 billable lb; Priority only, Ground Advantage is not offered; eBay package 22x20x4 7lb; calculated",
+      "why": "zone 7 Priority Mail card $48.30 on 13.0 billable lb; Ground Advantage is now the first service; eBay package 22x20x4 7lb; calculated",
       "source": "usps-commercial-zone-7"
     },
     {
@@ -8064,7 +8064,7 @@ export const SHIPPING_AUDIT: {
       "shouldBe": 34,
       "difference": -18.75,
       "verdict": "too_low",
-      "why": "zone 7 Priority Mail card $28.51 on 3.5 billable lb; Priority only, Ground Advantage is not offered; eBay package 16x12x3 3.5lb; calculated",
+      "why": "zone 7 Priority Mail card $28.51 on 3.5 billable lb; Ground Advantage is now the first service; eBay package 16x12x3 3.5lb; calculated",
       "source": "usps-commercial-zone-7"
     },
     {
@@ -8402,7 +8402,7 @@ export const SHIPPING_AUDIT: {
       "shouldBe": 65.5,
       "difference": -16.07,
       "verdict": "too_low",
-      "why": "zone 7 Priority Mail card $55.46 on 15.2 billable lb; Priority only, Ground Advantage is not offered; eBay package 17x14x9 9.3125lb; calculated",
+      "why": "zone 7 Priority Mail card $55.46 on 15.2 billable lb; Ground Advantage is now the first service; eBay package 17x14x9 9.3125lb; calculated",
       "source": "usps-commercial-zone-7"
     },
     {
@@ -8415,7 +8415,7 @@ export const SHIPPING_AUDIT: {
       "shouldBe": 57,
       "difference": -17.45,
       "verdict": "too_low",
-      "why": "zone 7 Priority Mail card $48.30 on 12.1 billable lb; Priority only, Ground Advantage is not offered; eBay package 18x14x8 5lb; calculated",
+      "why": "zone 7 Priority Mail card $48.30 on 12.1 billable lb; Ground Advantage is now the first service; eBay package 18x14x8 5lb; calculated",
       "source": "usps-commercial-zone-7"
     },
     {
@@ -8428,7 +8428,7 @@ export const SHIPPING_AUDIT: {
       "shouldBe": 57,
       "difference": -17.45,
       "verdict": "too_low",
-      "why": "zone 7 Priority Mail card $48.30 on 12.1 billable lb; Priority only, Ground Advantage is not offered; eBay package 18x14x8 5lb; calculated",
+      "why": "zone 7 Priority Mail card $48.30 on 12.1 billable lb; Ground Advantage is now the first service; eBay package 18x14x8 5lb; calculated",
       "source": "usps-commercial-zone-7"
     },
     {
@@ -8584,7 +8584,7 @@ export const SHIPPING_AUDIT: {
       "shouldBe": 138,
       "difference": -54.15,
       "verdict": "too_low",
-      "why": "zone 7 Priority Mail card $117.13 on 23.1 billable lb; Priority only, Ground Advantage is not offered; length over 22 in; volume over 2 cubic feet; eBay package 24x16x10 12lb; calculated",
+      "why": "zone 7 Priority Mail card $117.13 on 23.1 billable lb; Ground Advantage is now the first service; length over 22 in; volume over 2 cubic feet; eBay package 24x16x10 12lb; calculated",
       "source": "usps-commercial-zone-7"
     },
     {
@@ -8597,7 +8597,7 @@ export const SHIPPING_AUDIT: {
       "shouldBe": 138,
       "difference": -54.15,
       "verdict": "too_low",
-      "why": "zone 7 Priority Mail card $117.13 on 23.1 billable lb; Priority only, Ground Advantage is not offered; length over 22 in; volume over 2 cubic feet; eBay package 24x16x10 12lb; calculated",
+      "why": "zone 7 Priority Mail card $117.13 on 23.1 billable lb; Ground Advantage is now the first service; length over 22 in; volume over 2 cubic feet; eBay package 24x16x10 12lb; calculated",
       "source": "usps-commercial-zone-7"
     },
     {
@@ -8610,7 +8610,7 @@ export const SHIPPING_AUDIT: {
       "shouldBe": 57,
       "difference": -17.45,
       "verdict": "too_low",
-      "why": "zone 7 Priority Mail card $48.30 on 12.1 billable lb; Priority only, Ground Advantage is not offered; eBay package 18x14x8 5lb; calculated",
+      "why": "zone 7 Priority Mail card $48.30 on 12.1 billable lb; Ground Advantage is now the first service; eBay package 18x14x8 5lb; calculated",
       "source": "usps-commercial-zone-7"
     },
     {
@@ -8653,4 +8653,4 @@ export const SHIPPING_AUDIT: {
       "source": "usps-commercial-zone-7"
     }
   ]
-};
+}

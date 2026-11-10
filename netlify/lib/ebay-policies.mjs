@@ -3,13 +3,8 @@
  * Required: Calculated Shipping – Buyer Pays (no free shipping, no local pickup),
  * 30-day returns with the buyer paying return shipping, and a payment policy.
  */
-import { assertEbaySellerWrite, ebayFetchAccount, markAccountPolicies, userTokenForAccount } from "./ebay-accounts.mjs";
+import { assertEbaySellerWrite, ebayFetchAccount, markAccountPolicies } from "./ebay-accounts.mjs";
 import { marketplaceIdFromEnv } from "./ebay-env.mjs";
-import {
-  compactShippingCatalog,
-  getShippingServiceDetails,
-  pickApplianceShipping,
-} from "./ebay-trading.mjs";
 
 const POLICY_NAMES = {
   payment: "OBI Payments",
@@ -108,7 +103,19 @@ async function ensureBuyerPaysReturns(account, market, existing) {
   return String(created.returnPolicyId || created.id);
 }
 
-function calculatedBuyerPaysBody(market, service) {
+function calculatedService(code, sortOrder) {
+  return {
+    sortOrder,
+    shippingCarrierCode: "USPS",
+    shippingServiceCode: code,
+    freeShipping: false,
+    buyerResponsibleForShipping: false,
+    buyerResponsibleForPickup: false,
+  };
+}
+
+/** Ground Advantage first, then Priority and Express. A later reconnect must not put Priority back first. */
+export function calculatedBuyerPaysBody(market) {
   return {
     name: POLICY_NAMES.fulfillment,
     marketplaceId: market,
@@ -122,55 +129,30 @@ function calculatedBuyerPaysBody(market, service) {
       {
         optionType: "DOMESTIC",
         costType: "CALCULATED",
+        packageHandlingCost: { value: "0.0", currency: "USD" },
         shippingServices: [
-          {
-            sortOrder: 1,
-            shippingServiceCode: service.shippingService,
-            ...(service.shippingCarrier ? { shippingCarrierCode: service.shippingCarrier } : {}),
-            freeShipping: false,
-            buyerResponsibleForShipping: true,
-            buyerResponsibleForPickup: false,
-          },
+          calculatedService("USPSParcel", 1),
+          calculatedService("USPSPriority", 2),
+          calculatedService("USPSExpressMail", 3),
         ],
       },
     ],
   };
 }
 
-async function pickCalculatedService(account) {
-  const token = await userTokenForAccount(account);
-  const catalog = await getShippingServiceDetails(token);
-  const usable = (catalog || []).filter((row) => {
-    if (!row?.validForSellingFlow || row.international) return false;
-    const blob = `${row.shippingService} ${row.description} ${row.shippingCategory}`;
-    if (/pickup|freight/i.test(blob)) return false;
-    const types = row.serviceTypes || [];
-    return types.some((t) => /calculated/i.test(t)) || /usps|ups|fedex|parcel|priority|ground/i.test(blob);
-  });
-  const preferred =
-    usable.find((r) => /USPSPriority/i.test(r.shippingService)) ||
-    usable.find((r) => /usps/i.test(r.shippingService)) ||
-    usable.find((r) => /UPSGround/i.test(r.shippingService)) ||
-    usable[0] ||
-    pickApplianceShipping(catalog);
-  console.log(
-    "ebay_policy_shipping_services",
-    JSON.stringify({ picked: preferred, services: compactShippingCatalog(usable).slice(0, 40) }),
-  );
-  if (!preferred) {
-    throw new Error("eBay returned no valid calculated domestic shipping service for the buyer-pays policy.");
-  }
-  return preferred;
-}
-
 async function ensureFulfillment(account, market, existing) {
   const named = findNamed(existing, "fulfillment", POLICY_NAMES.fulfillment) || null;
   const id = policyIdOf(named, "fulfillment");
-  const service = await pickCalculatedService(account);
-  const body = calculatedBuyerPaysBody(market, service);
+  const body = calculatedBuyerPaysBody(market);
   if (id) {
-    const updated = await ebayFetchAccount(account, "PUT", `/sell/account/v1/fulfillment_policy/${id}`, body);
-    return String(updated.fulfillmentPolicyId || updated.id || id);
+    try {
+      const updated = await ebayFetchAccount(account, "PUT", `/sell/account/v1/fulfillment_policy/${id}`, body);
+      return String(updated.fulfillmentPolicyId || updated.id || id);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (/same as in the system|20403/i.test(message)) return String(id);
+      throw err;
+    }
   }
   const created = await ebayFetchAccount(account, "POST", "/sell/account/v1/fulfillment_policy", body);
   return String(created.fulfillmentPolicyId || created.id);
