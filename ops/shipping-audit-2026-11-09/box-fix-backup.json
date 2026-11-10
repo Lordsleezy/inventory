@@ -1,0 +1,702 @@
+{
+  "createdAt": "2026-11-10T02:46:30.747Z",
+  "rows": [
+    {
+      "sku": "11411",
+      "listingId": "820244178464",
+      "lengthIn": 12.4,
+      "widthIn": 9.4,
+      "heightIn": 4.1,
+      "weightLb": 2.36,
+      "ebay": true,
+      "floorBefore": {
+        "sku": "11411",
+        "title": "Infiniti pro InfinitiPRO Ionic Ceramic Hair Dryer",
+        "package_length_in": 36,
+        "package_width_in": 28,
+        "package_height_in": 3,
+        "package_weight_lb": 8
+      },
+      "title": "Infiniti pro Ionic ceramic dryer — New",
+      "price": "22.99",
+      "policy": "267792814017",
+      "originalPackage": {
+        "lengthIn": 36,
+        "widthIn": 28,
+        "heightIn": 3,
+        "weightLb": 8
+      },
+      "before": [
+        {
+          "zip": "95814",
+          "error": "",
+          "services": [
+            {
+              "service": "USPSPriority",
+              "cost": 27.18
+            },
+            {
+              "service": "USPSParcel",
+              "cost": 19.9
+            }
+          ]
+        },
+        {
+          "zip": "64101",
+          "error": "",
+          "services": [
+            {
+              "service": "USPSPriority",
+              "cost": 63.33
+            },
+            {
+              "service": "USPSParcel",
+              "cost": 42.15
+            }
+          ]
+        }
+      ],
+      "appliedEbay": true,
+      "appliedFloor": true,
+      "via": "inventory",
+      "error": "",
+      "originalInventoryPackage": {
+        "dimensions": {
+          "width": 28,
+          "length": 36,
+          "height": 3,
+          "unit": "INCH"
+        },
+        "weight": {
+          "value": 8,
+          "unit": "POUND"
+        },
+        "shippingIrregular": false
+      },
+      "afterItem": {
+        "error": "",
+        "title": "Infiniti pro Ionic ceramic dryer — New",
+        "price": "22.99",
+        "policy": "267792814017",
+        "box": {
+          "lengthIn": 12.4,
+          "widthIn": 9.4,
+          "heightIn": 4.1,
+          "weightLb": 2.3125
+        }
+      },
+      "after": [
+        {
+          "zip": "95814",
+          "error": "",
+          "services": [
+            {
+              "service": "USPSPriority",
+              "cost": 6.48
+            },
+            {
+              "service": "USPSParcel",
+              "cost": 5.9
+            }
+          ]
+        },
+        {
+          "zip": "64101",
+          "error": "",
+          "services": [
+            {
+              "service": "USPSPriority",
+              "cost": 12.43
+            },
+            {
+              "service": "USPSParcel",
+              "cost": 9.85
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sku": "11225",
+      "listingId": "820244205252",
+      "lengthIn": 14,
+      "widthIn": 12,
+      "heightIn": 3,
+      "weightLb": 1.5,
+      "ebay": true,
+      "floorBefore": {
+        "sku": "11225",
+        "title": "Brock lesnar WWE halloween costume 4-6x",
+        "package_length_in": 36,
+        "package_width_in": 28,
+        "package_height_in": 3,
+        "package_weight_lb": 8
+      },
+      "title": "jakks pacific Brock lesnar WWE costume — Open box",
+      "price": "100.0",
+      "policy": "267792814017",
+      "originalPackage": {
+        "lengthIn": 36,
+        "widthIn": 28,
+        "heightIn": 3,
+        "weightLb": 8
+      },
+      "before": [
+        {
+          "zip": "95814",
+          "error": "",
+          "services": [
+            {
+              "service": "USPSPriority",
+              "cost": 27.18
+            },
+            {
+              "service": "USPSParcel",
+              "cost": 19.9
+            }
+          ]
+        },
+        {
+          "zip": "64101",
+          "error": "",
+          "services": [
+            {
+              "service": "USPSPriority",
+              "cost": 63.33
+            },
+            {
+              "service": "USPSParcel",
+              "cost": 42.15
+            }
+          ]
+        }
+      ],
+      "appliedEbay": true,
+      "appliedFloor": true,
+      "via": "inventory",
+      "error": "",
+      "originalInventoryPackage": {
+        "dimensions": {
+          "width": 28,
+          "length": 36,
+          "height": 3,
+          "unit": "INCH"
+        },
+        "packageType": "PACKAGE_THICK_ENVELOPE",
+        "weight": {
+          "value": 8,
+          "unit": "POUND"
+        },
+        "shippingIrregular": false
+      },
+      "afterItem": {
+        "error": "",
+        "title": "jakks pacific Brock lesnar WWE costume — Open box",
+        "price": "100.0",
+        "policy": "267792814017",
+        "box": {
+          "lengthIn": 14,
+          "widthIn": 12,
+          "heightIn": 3,
+          "weightLb": 1.5
+        }
+      },
+      "after": [
+        {
+          "zip": "95814",
+          "error": "",
+          "services": [
+            {
+              "service": "USPSPriority",
+              "cost": 6.23
+            },
+            {
+              "service": "USPSParcel",
+              "cost": 5.65
+            }
+          ]
+        },
+        {
+          "zip": "64101",
+          "error": "",
+          "services": [
+            {
+              "service": "USPSPriority",
+              "cost": 10.23
+            },
+            {
+              "service": "USPSParcel",
+              "cost": 8.6
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sku": "99099",
+      "listingId": "820244222666",
+      "lengthIn": 37.8,
+      "widthIn": 7.9,
+      "heightIn": 5.1,
+      "weightLb": 5.4,
+      "ebay": true,
+      "floorBefore": {
+        "sku": "99099",
+        "title": "HOTO Flexi Cordless Spin Scrubber with Extension Rod and 6 Scrubber Heads",
+        "package_length_in": 36,
+        "package_width_in": 28,
+        "package_height_in": 3,
+        "package_weight_lb": 8
+      },
+      "title": "HOTO Flexi Cordless Spin Scrubber with Extension Rod 5 Angle Settings QWQJA08",
+      "price": "22.99",
+      "policy": "267792814017",
+      "originalPackage": {
+        "lengthIn": 36,
+        "widthIn": 28,
+        "heightIn": 3,
+        "weightLb": 8
+      },
+      "before": [
+        {
+          "zip": "95814",
+          "error": "",
+          "services": [
+            {
+              "service": "USPSPriority",
+              "cost": 27.18
+            },
+            {
+              "service": "USPSParcel",
+              "cost": 19.9
+            }
+          ]
+        },
+        {
+          "zip": "64101",
+          "error": "",
+          "services": [
+            {
+              "service": "USPSPriority",
+              "cost": 63.33
+            },
+            {
+              "service": "USPSParcel",
+              "cost": 42.15
+            }
+          ]
+        }
+      ],
+      "appliedEbay": true,
+      "appliedFloor": true,
+      "via": "inventory",
+      "error": "",
+      "originalInventoryPackage": {
+        "dimensions": {
+          "width": 28,
+          "length": 36,
+          "height": 3,
+          "unit": "INCH"
+        },
+        "weight": {
+          "value": 8,
+          "unit": "POUND"
+        },
+        "shippingIrregular": false
+      },
+      "afterItem": {
+        "error": "",
+        "title": "HOTO Flexi Cordless Spin Scrubber with Extension Rod 5 Angle Settings QWQJA08",
+        "price": "22.99",
+        "policy": "267792814017",
+        "box": {
+          "lengthIn": 37.8,
+          "widthIn": 7.9,
+          "heightIn": 5.1,
+          "weightLb": 5.375
+        }
+      },
+      "after": [
+        {
+          "zip": "95814",
+          "error": "",
+          "services": [
+            {
+              "service": "USPSPriority",
+              "cost": 21.73
+            },
+            {
+              "service": "USPSParcel",
+              "cost": 15.1
+            }
+          ]
+        },
+        {
+          "zip": "64101",
+          "error": "",
+          "services": [
+            {
+              "service": "USPSPriority",
+              "cost": 48.28
+            },
+            {
+              "service": "USPSParcel",
+              "cost": 28.78
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sku": "99091",
+      "listingId": "820256317725",
+      "lengthIn": 11.5,
+      "widthIn": 9,
+      "heightIn": 6,
+      "weightLb": 3.7,
+      "ebay": true,
+      "floorBefore": {
+        "sku": "99091",
+        "title": "Miu France Vegetable Chopper and Slicer, 11-Piece Set",
+        "package_length_in": 36,
+        "package_width_in": 28,
+        "package_height_in": 3,
+        "package_weight_lb": 8
+      },
+      "title": "MIU France 11-Piece Vegetable Chopper Slicer Spiralizer Food Prep Set",
+      "price": "16.99",
+      "policy": "267755796017",
+      "originalPackage": {
+        "lengthIn": 36,
+        "widthIn": 28,
+        "heightIn": 3,
+        "weightLb": 8
+      },
+      "before": [
+        {
+          "zip": "95814",
+          "error": "",
+          "services": [
+            {
+              "service": "USPSPriority",
+              "cost": 27.18
+            },
+            {
+              "service": "USPSExpressMail",
+              "cost": 58.35
+            }
+          ]
+        },
+        {
+          "zip": "64101",
+          "error": "",
+          "services": [
+            {
+              "service": "USPSPriority",
+              "cost": 63.33
+            },
+            {
+              "service": "USPSExpressMail",
+              "cost": 124.68
+            }
+          ]
+        }
+      ],
+      "appliedEbay": true,
+      "appliedFloor": true,
+      "via": "inventory",
+      "error": "",
+      "originalInventoryPackage": {
+        "dimensions": {
+          "width": 28,
+          "length": 36,
+          "height": 3,
+          "unit": "INCH"
+        },
+        "weight": {
+          "value": 8,
+          "unit": "POUND"
+        },
+        "shippingIrregular": false
+      },
+      "afterItem": {
+        "error": "",
+        "title": "MIU France 11-Piece Vegetable Chopper Slicer Spiralizer Food Prep Set",
+        "price": "16.99",
+        "policy": "267755796017",
+        "box": {
+          "lengthIn": 11.5,
+          "widthIn": 9,
+          "heightIn": 6,
+          "weightLb": 3.6875
+        }
+      },
+      "after": [
+        {
+          "zip": "95814",
+          "error": "",
+          "services": [
+            {
+              "service": "USPSPriority",
+              "cost": 7.13
+            },
+            {
+              "service": "USPSExpressMail",
+              "cost": 19.83
+            }
+          ]
+        },
+        {
+          "zip": "64101",
+          "error": "",
+          "services": [
+            {
+              "service": "USPSPriority",
+              "cost": 15.25
+            },
+            {
+              "service": "USPSExpressMail",
+              "cost": 47.4
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sku": "11489",
+      "listingId": "820244238978",
+      "lengthIn": 10,
+      "widthIn": 6,
+      "heightIn": 5,
+      "weightLb": 1.5,
+      "ebay": true,
+      "floorBefore": {
+        "sku": "11489",
+        "title": "thermoflask insulated coffee mug 12fl oz 2 set",
+        "package_length_in": 18,
+        "package_width_in": 16,
+        "package_height_in": 14,
+        "package_weight_lb": 20
+      },
+      "title": "thermoflask insulated coffee mug 12fl oz 2 set",
+      "price": "22.99",
+      "policy": "267792814017",
+      "originalPackage": {
+        "lengthIn": 18,
+        "widthIn": 16,
+        "heightIn": 14,
+        "weightLb": 20
+      },
+      "before": [
+        {
+          "zip": "95814",
+          "error": "",
+          "services": [
+            {
+              "service": "USPSPriority",
+              "cost": 40.43
+            },
+            {
+              "service": "USPSParcel",
+              "cost": 31.08
+            }
+          ]
+        },
+        {
+          "zip": "64101",
+          "error": "",
+          "services": [
+            {
+              "service": "USPSPriority",
+              "cost": 83.88
+            },
+            {
+              "service": "USPSParcel",
+              "cost": 62.9
+            }
+          ]
+        }
+      ],
+      "appliedEbay": true,
+      "appliedFloor": true,
+      "via": "inventory",
+      "error": "",
+      "originalInventoryPackage": {
+        "dimensions": {
+          "width": 16,
+          "length": 18,
+          "height": 14,
+          "unit": "INCH"
+        },
+        "packageType": "PACKAGE_THICK_ENVELOPE",
+        "weight": {
+          "value": 20,
+          "unit": "POUND"
+        },
+        "shippingIrregular": false
+      },
+      "afterItem": {
+        "error": "",
+        "title": "thermoflask insulated coffee mug 12fl oz 2 set",
+        "price": "22.99",
+        "policy": "267792814017",
+        "box": {
+          "lengthIn": 10,
+          "widthIn": 6,
+          "heightIn": 5,
+          "weightLb": 1.5
+        }
+      },
+      "after": [
+        {
+          "zip": "95814",
+          "error": "",
+          "services": [
+            {
+              "service": "USPSPriority",
+              "cost": 6.23
+            },
+            {
+              "service": "USPSParcel",
+              "cost": 5.65
+            }
+          ]
+        },
+        {
+          "zip": "64101",
+          "error": "",
+          "services": [
+            {
+              "service": "USPSPriority",
+              "cost": 10.23
+            },
+            {
+              "service": "USPSParcel",
+              "cost": 8.6
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sku": "99698",
+      "listingId": "820253037114",
+      "lengthIn": 12,
+      "widthIn": 9,
+      "heightIn": 4,
+      "weightLb": 2,
+      "ebay": false,
+      "floorBefore": {
+        "sku": "99698",
+        "title": "Philips Sonicare C3 Premium Plaque Control 8-pack",
+        "package_length_in": 12,
+        "package_width_in": 12,
+        "package_height_in": 3,
+        "package_weight_lb": 0.05
+      },
+      "title": "philips Sonicare C3 Premium Plaque Control 8-pack — Open box | SKU 99698",
+      "price": "47.99",
+      "policy": "268528931017",
+      "originalPackage": {
+        "lengthIn": 12,
+        "widthIn": 9,
+        "heightIn": 4,
+        "weightLb": 2
+      },
+      "before": [
+        {
+          "zip": "95814",
+          "error": "",
+          "services": [
+            {
+              "service": "USPSPriority",
+              "cost": 10.73
+            },
+            {
+              "service": "USPSParcel",
+              "cost": 10.15
+            }
+          ]
+        },
+        {
+          "zip": "64101",
+          "error": "",
+          "services": [
+            {
+              "service": "USPSPriority",
+              "cost": 14.73
+            },
+            {
+              "service": "USPSParcel",
+              "cost": 13.1
+            }
+          ]
+        }
+      ],
+      "appliedEbay": false,
+      "appliedFloor": true,
+      "via": "",
+      "error": ""
+    },
+    {
+      "sku": "11169",
+      "listingId": "820244299631",
+      "lengthIn": 24,
+      "widthIn": 20,
+      "heightIn": 12,
+      "weightLb": 38,
+      "ebay": false,
+      "floorBefore": {
+        "sku": "11169",
+        "title": "Bathroom mirror cabinet",
+        "package_length_in": 11.5,
+        "package_width_in": 28.5,
+        "package_height_in": 35,
+        "package_weight_lb": 38
+      },
+      "title": "Home Depot Bathroom mirror cabinet — New",
+      "price": "40.99",
+      "policy": "267792814017",
+      "originalPackage": {
+        "lengthIn": 24,
+        "widthIn": 20,
+        "heightIn": 12,
+        "weightLb": 38
+      },
+      "before": [
+        {
+          "zip": "95814",
+          "error": "",
+          "services": [
+            {
+              "service": "USPSPriority",
+              "cost": 48.28
+            },
+            {
+              "service": "USPSParcel",
+              "cost": 38.28
+            }
+          ]
+        },
+        {
+          "zip": "64101",
+          "error": "",
+          "services": [
+            {
+              "service": "USPSPriority",
+              "cost": 99.5
+            },
+            {
+              "service": "USPSParcel",
+              "cost": 79.63
+            }
+          ]
+        }
+      ],
+      "appliedEbay": false,
+      "appliedFloor": true,
+      "via": "",
+      "error": ""
+    }
+  ]
+}
