@@ -189,13 +189,16 @@ test("per-sale override replaces defaults for Paul and Jacob", () => {
   assert.equal(remainingProfit(t, [rPaul, rJacob], cfg), 6000 - 600 - 1200);
 });
 
-test("custom override on online sale can pay Jacob (defaults only pay Paul)", () => {
+test("custom override on online sale can pay Jacob (default is Paul 25% and Jacob 5%)", () => {
   const rPaul = { employee_id: PAYOUT_PAUL_ID, method: "percent_profit", rate: 20 };
   const rJacob = { employee_id: PAYOUT_JACOB_ID, method: "percent_profit", rate: 10 };
-  const onlineCfg = { channels: ["website"], pct: 30, employeeId: PAYOUT_PAUL_ID, slots, skuRates };
+  const onlineCfg = { channels: ["website"], pct: 25, jacobPct: 5, employeeId: PAYOUT_PAUL_ID, slots, skuRates };
   const base = { subtotal: 10000, cost: 4000, channel: "website" };
-  assert.equal(payout(base, rPaul, onlineCfg), 1800);
-  assert.equal(payout(base, rJacob, onlineCfg), 0);
+  assert.equal(payout(base, rPaul, onlineCfg), 1500);
+  assert.equal(payout(base, rJacob, onlineCfg), 300);
+  const old = { ...base, frozenOnline: { paulPct: 30, jacobPct: 0 } };
+  assert.equal(payout(old, rPaul, onlineCfg), 1800);
+  assert.equal(payout(old, rJacob, onlineCfg), 0);
   const flipped = { ...base, commissionOverride: { paulPct: 0, jacobPct: 30 } };
   assert.equal(payout(flipped, rPaul, onlineCfg), 0);
   assert.equal(payout(flipped, rJacob, onlineCfg), 1800);

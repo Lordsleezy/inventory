@@ -73,6 +73,8 @@ type Props = {
   rules: Rule[]; cfg: OnlineCfg; commissionOverrides: Map<string, CommissionOverride>;
   /** `${ticket_key}|${employee_id}` → frozen commission cents from sale_commissions. */
   frozen?: Map<string, number | null>;
+  /** Online rates frozen on the ticket. Past sales keep these instead of the live 25/5. */
+  frozenOnlineRates?: Map<string, { paulPct: number; jacobPct: number }>;
   personName: (id: string) => string; busy: boolean;
   onCommissionChanged: (ticketKey: string, next: CommissionOverride | null) => void;
   /** Staff desk: To ship and Packaged only. Mark packaged, print a label, scan out. */
@@ -137,7 +139,7 @@ function breakdown(rows: WebOrder[]) {
   };
 }
 
-export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, cfg, commissionOverrides, frozen, personName, busy: parentBusy, onCommissionChanged, packOnly = false }: Props) {
+export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, cfg, commissionOverrides, frozen, frozenOnlineRates, personName, busy: parentBusy, onCommissionChanged, packOnly = false }: Props) {
   const [orders, setOrders] = useState<WebOrder[] | null>(null);
   const [photoMap, setPhotoMap] = useState<Record<string, UnitPhoto[]>>({});
   const [photoUrls, setPhotoUrls] = useState<Record<string, string>>(() => {
@@ -477,6 +479,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
       channel: (o.channel || 'website').toLowerCase(),
       shippingCents: o.shipping_cents || 0,
       commissionOverride: ov,
+      frozenOnline: o.ticket_key ? frozenOnlineRates?.get(o.ticket_key) : undefined,
       lines: [{ sku: o.sku, price_cents: o.item_cents, cost_cents: o.cost_cents ?? null }],
     };
     const canOverride = !!o.ticket_key && (o.status === 'paid' || !!o.paid_at);

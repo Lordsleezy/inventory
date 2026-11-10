@@ -43,9 +43,13 @@ export type TicketLike = {
   lines?: TicketLineLike[];
   /** Admin per-sale commission split override (Paul / Jacob). */
   commissionOverride?: CommissionOverride | null;
+  /** Rates frozen on this online ticket. Absent on a sale that is not frozen yet. */
+  frozenOnline?: { paulPct: number; jacobPct: number } | null;
 };
 export type OnlineCfg = {
   channels: string[]; pct: number; employeeId: string | null;
+  /** Jacob's share of online commission profit. Past tickets use frozenOnline instead. */
+  jacobPct?: number;
   /** Who fills the Paul / Jacob per-sale override columns (store_payout_people). */
   slots?: { paul?: string | null; jacob?: string | null };
   /** Store absorbs channel + card fees: they are not subtracted from the profit commissions are paid on. Labels still are. */
@@ -129,11 +133,13 @@ export function lineCommissionProfit(l: TicketLineLike, absorbFees = false): num
 
 /**
  * Channel defaults for Paul/Jacob when no per-sale override is set.
- * Online → online pct / 0. In-store → rule rates (SKU line overrides ignored here).
+ * Online → Paul's online pct and Jacob's online pct. A frozen ticket keeps the
+ * rates written when it sold. In-store → rule rates (SKU line overrides ignored here).
  */
 export function defaultCommissionSplit(t: TicketLike, rules: Rule[], cfg: OnlineCfg): CommissionOverride {
   if (isOnline(t, cfg)) {
-    return { paulPct: Number(cfg.pct) || 0, jacobPct: 0 };
+    if (t.frozenOnline) return { paulPct: Number(t.frozenOnline.paulPct) || 0, jacobPct: Number(t.frozenOnline.jacobPct) || 0 };
+    return { paulPct: Number(cfg.pct) || 0, jacobPct: Number(cfg.jacobPct) || 0 };
   }
   const paul = rules.find(r => r.employee_id === cfg.slots?.paul);
   const jacob = rules.find(r => r.employee_id === cfg.slots?.jacob);
@@ -170,9 +176,15 @@ export function payout(t: TicketLike, rule: Rule | undefined, cfg: OnlineCfg): n
     return overridePayout(t, rule.employee_id, t.commissionOverride, cfg);
   }
   if (isOnline(t, cfg)) {
-    if (rule.employee_id !== cfg.employeeId) return 0;
     const p = commissionProfit(t, !!cfg.absorbFees);
-    return p === null ? null : Math.round(Math.max(0, p) * cfg.pct / 100);
+    if (p === null) return null;
+    const paulPct = t.frozenOnline ? Number(t.frozenOnline.paulPct) || 0 : Number(cfg.pct) || 0;
+    const jacobPct = t.frozenOnline ? Number(t.frozenOnline.jacobPct) || 0 : Number(cfg.jacobPct) || 0;
+    if (cfg.slots?.jacob && rule.employee_id === cfg.slots.jacob && rule.employee_id !== cfg.employeeId) {
+      return Math.round(Math.max(0, p) * jacobPct / 100);
+    }
+    if (rule.employee_id !== cfg.employeeId) return 0;
+    return Math.round(Math.max(0, p) * paulPct / 100);
   }
   if (rule.method === 'flat_ticket') return Math.round(Number(rule.rate) * 100);
   if (rule.method === 'percent_profit') {
