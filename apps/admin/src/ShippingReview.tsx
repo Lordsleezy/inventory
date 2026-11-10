@@ -38,7 +38,7 @@ export function ShippingReview() {
 
   const shown = rows.filter((row) => filter === 'all' || row.class === filter);
   return (
-    <section style={{ background: '#000', color: '#fff', padding: '8px 0 24px' }}>
+    <section style={{ background: '#000', color: '#fff', padding: '8px 16px 24px' }}>
       <h2 style={{ fontSize: 18, fontWeight: 600 }}>Shipping review</h2>
       <p style={{ color: '#9a9a9a' }}>{note} Compared with received package size at zone 6. A matching package was left as it is.</p>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '12px 0' }}>

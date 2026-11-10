@@ -16,7 +16,6 @@ import { AppOrderDetail } from './AppOrderDetail';
 import { AppOrderRow } from './AppOrderRow';
 import { AppOrderShipVerifySheet } from './AppOrderShipVerifySheet';
 import { floorFunctionUrl } from '../floorApi';
-import { BundleBar } from '../BundleBar';
 import { shipBundleRest } from '../bundleShip';
 import { labelUploadUi, type LabelUploadResponse } from '../labelUploadFeedback';
 import { LabelTrackingPicker, LabelTrackingResult } from '../LabelTrackingResult';
@@ -25,15 +24,6 @@ type Seg = 'needsLabel' | 'toShip' | 'packaged' | 'shipped' | 'delivered' | 'can
 
 const CHANNEL: Record<string, string> = {
   website: 'Website', ebay: 'eBay', amazon: 'Amazon', tiktok: 'TikTok', depop: 'Depop', mercari: 'Mercari',
-};
-
-const SEG_NOTE: Record<Seg, string> = {
-  needsLabel: 'Buy the eBay label in eBay, or grab the Depop label, then upload the PDF. The warehouse sees it after that.',
-  toShip: 'Pick it, print the label, then tap Packaged.',
-  packaged: 'Boxed. Tap Mark shipped when it leaves.',
-  shipped: 'On the way. An admin taps Mark delivered when it arrives.',
-  delivered: 'Carrier confirmed, or picked up before the store closed.',
-  canceled: 'Canceled in Floor. Marketplace refunds stay manual.',
 };
 
 type Props = {
@@ -60,7 +50,6 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
   const [open, setOpen] = useState<WebOrder | null>(null);
   const [events, setEvents] = useState<TrackEvent[]>([]);
   const [locations, setLocations] = useState<Record<string, string[]>>({});
-  const [bundleIds, setBundleIds] = useState<string[]>([]);
   const [bundleNote, setBundleNote] = useState('');
   const [photoMap, setPhotoMap] = useState<Record<string, UnitPhoto[]>>({});
   const [photoUrls, setPhotoUrls] = useState<Record<string, string>>(() => {
@@ -146,7 +135,7 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
     };
   }, [orders]);
 
-  const rows = (buckets[seg] || []).filter((o) => !bundleIds.includes(o.id)).slice().sort((a, b) => {
+  const rows = (buckets[seg] || []).slice().sort((a, b) => {
     if (isAdmin) {
       const at = (a.order_no || '') === 'TEST-SHIP-FLOW' ? -1 : 0;
       const bt = (b.order_no || '') === 'TEST-SHIP-FLOW' ? -1 : 0;
@@ -155,8 +144,6 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
     if (seg !== 'needsLabel' && seg !== 'toShip' && seg !== 'packaged') return 0;
     return locationCompare(locations[a.sku]?.[0] || '99999', locations[b.sku]?.[0] || '99999');
   });
-
-  const hasTestOrder = Boolean(orders?.some((o) => (o.order_no || '') === 'TEST-SHIP-FLOW'));
 
   async function runAction(key: string, fn: () => Promise<void>) {
     setBusy(key);
@@ -238,23 +225,6 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
       const { error: e } = await client.rpc('portal_order_step_back', { p_order: o.id });
       if (e) throw new Error(e.message === 'portal_access_denied' ? 'Only an owner or manager can move an order back.' : e.message);
     });
-  }
-
-  async function ensureTestShipOrder() {
-    if (!isAdmin) return;
-    setError('');
-    setBusy('test-order');
-    try {
-      const { error: e } = await client.rpc('portal_reset_test_ship_flow_order');
-      if (e) throw e;
-      setSeg('toShip');
-      await load();
-    } catch (e) {
-      const msg = errText(e);
-      setError(shortError(msg));
-    } finally {
-      setBusy('');
-    }
   }
 
   async function floorCancel(o: WebOrder) {
@@ -534,51 +504,20 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
         ))}
       </div>
       </div>
-      {seg === 'needsLabel' ? <p className="orders-seg-note subtle">{SEG_NOTE[seg]}</p> : <p className="orders-seg-note">{SEG_NOTE[seg]}</p>}
       {seg === 'packaged' && (
         <>
-          <p className="app-flag">{stale > 0 ? `${stale} packaged over 2 days and not marked shipped.` : 'Flags anything packaged over 2 days and not marked shipped.'}</p>
+          {stale > 0 ? <p className="app-flag">{stale} packaged over 2 days and not marked shipped.</p> : null}
           <button type="button" className="secondary orders-scan-out" onClick={() => setScanOut(true)}>Scan out</button>
         </>
       )}
-      {seg === 'shipped' && (
-        <p className="app-flag">{late > 0 ? `${late} shipped over 10 days and not marked delivered.` : 'Flags anything shipped over 10 days and not marked delivered.'}</p>
+      {seg === 'shipped' && late > 0 && (
+        <p className="app-flag">{late} shipped over 10 days and not marked delivered.</p>
       )}
       {error && <p className="app-inline-error">{error}</p>}
       {bundleNote && <p className="app-flag">{bundleNote}</p>}
-      {orders && (
-        <BundleBar
-          client={client}
-          accessToken={accessToken}
-          orders={orders}
-          segmentIds={(buckets[seg] || []).map((o) => o.id)}
-          locations={locations}
-          photoUrls={photoUrls}
-          photoMap={photoMap}
-          money={money}
-          isAdmin={isAdmin}
-          onRefresh={() => void load()}
-          onMembers={setBundleIds}
-        />
-      )}
-      {isAdmin && seg === 'toShip' && !hasTestOrder && (
-        <p className="app-flag">
-          No <strong>TEST-SHIP-FLOW</strong> order in this store.
-          {' '}
-          <button type="button" className="secondary" disabled={!!busy} onClick={() => void ensureTestShipOrder()}>
-            {busy === 'test-order' ? '…' : 'Add test To ship order'}
-          </button>
-        </p>
-      )}
-      {!isAdmin && seg === 'toShip' && orders && rows.length === 0 && bundleIds.length === 0 && (
-        <p className="app-flag subtle">
-          Nothing in <strong>To ship</strong> on the associate desk. eBay/Depop waiting on a label stay on the admin desk only.
-          {hasTestOrder ? ' Pull down to refresh if you expect TEST-SHIP-FLOW.' : ' Ask an admin to add TEST-SHIP-FLOW or finish a labeled order.'}
-        </p>
-      )}
       <div className="app-group">
         {!orders && <div className="app-empty-row">Loading…</div>}
-        {orders && rows.length === 0 && bundleIds.length === 0 && <div className="app-empty-row">None right now</div>}
+        {orders && rows.length === 0 && <div className="app-empty-row">None right now</div>}
         {rows.map((o) => {
           const chName = CHANNEL[(o.channel || 'website').toLowerCase()] || o.channel || 'Website';
           const tail = seeTracking && !orderNeedsLabel(o) ? trackingTail(o) : '';

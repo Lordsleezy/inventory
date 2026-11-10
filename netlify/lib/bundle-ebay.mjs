@@ -23,6 +23,7 @@ import {
   sendInvoiceInnerXml,
 } from "../../shared/bundle-shipping.mjs";
 import { trackingUploads } from "../../shared/ebay-order-lines.mjs";
+import { bundlePriceApplyEnabled, BUNDLE_PRICE_APPLY_OFF_MESSAGE } from "../../shared/bundle-apply-gate.mjs";
 
 const SELLING = "ikonikdeals2026";
 
@@ -129,6 +130,9 @@ export async function previewBundle(sb, storeId, orderIds) {
 }
 
 export async function applyBundlePrice(sb, storeId, orderIds, { confirm, confirmCents } = {}) {
+  if (!bundlePriceApplyEnabled()) {
+    return { ok: false, error: BUNDLE_PRICE_APPLY_OFF_MESSAGE };
+  }
   assertBundleConfirm(confirm);
   const preview = await previewBundle(sb, storeId, orderIds);
   if (!preview.ok) return preview;
@@ -243,6 +247,9 @@ async function rememberCombinedWeight(sb, storeId, duration) {
 }
 
 export async function enableCombinedWeight(sb, storeId, { confirm } = {}) {
+  if (!bundlePriceApplyEnabled()) {
+    return { ok: false, error: BUNDLE_PRICE_APPLY_OFF_MESSAGE };
+  }
   assertBundleConfirm(confirm);
   const account = await loadEbayAccount(storeId, { username: SELLING });
   let policyId = "";

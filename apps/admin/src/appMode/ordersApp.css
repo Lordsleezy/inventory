@@ -11,17 +11,13 @@ html.app-mode .orders-sticky-head {
 html.app-mode .orders-screen-eyebrow {
   margin: 8px 16px 4px;
   background: #000;
-  font-size: 12px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: #9a9a9a;
-}
-
-html.app-mode .orders-seg-note {
-  margin: 0 16px 12px;
-  text-align: left;
   font-size: 13px;
-  color: #9a9a9a;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #fff;
+  opacity: 1;
+  -webkit-font-smoothing: antialiased;
 }
 
 /* --- List row --- */
