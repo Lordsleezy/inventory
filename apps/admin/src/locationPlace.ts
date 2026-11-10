@@ -96,6 +96,22 @@ export function skuMissingUpc(raw: string, candidates: ScanCandidate[]) {
   return { sku: row.sku, title: row.title || '' };
 }
 
+/**
+ * Ask before the SKU is put in a bay.
+ * `missing` means the inventory item was found and its UPC is blank, even when the
+ * quick list did not return the row. `unknown` only asks when that list already showed a blank UPC.
+ */
+export function shouldAskForUpc(raw: string, candidates: ScanCandidate[], detail: 'missing' | 'set' | 'unknown') {
+  const code = String(raw ?? '').trim();
+  if (!code) return false;
+  const exact = candidates.find((row) => row.sku === code);
+  if (exact && String(exact.upc || '').trim()) return false;
+  if (detail === 'set') return false;
+  if (detail === 'missing') return true;
+  if (!exact && upcScanKeys(code).length) return false;
+  return Boolean(exact && !String(exact.upc || '').trim());
+}
+
 /** Barcode to store on the item. A bad scan stays on the prompt. No UPC is a real choice. */
 export function upcToStore(raw: string, none = false): { ok: true; upc: string } | { ok: false; message: string } {
   if (none) return { ok: true, upc: UPC_NOT_APPLICABLE };

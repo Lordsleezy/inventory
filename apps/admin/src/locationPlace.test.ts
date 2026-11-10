@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { addBulkSkus, bayTagCode, bayTitle, layoutBlocked, locationMenuLabel, locationPhrase, parseBulkSkus, planPlaceInBin, planUnassign, readBulkTagDraft, resolveLocationCode, skuMissingUpc, slotTagCode, sortLocationChoices, unitsLabel, upcScanKeys, upcToStore, writeBulkTagDraft } from './locationPlace.ts';
+import { addBulkSkus, bayTagCode, bayTitle, layoutBlocked, locationMenuLabel, locationPhrase, parseBulkSkus, planPlaceInBin, planUnassign, readBulkTagDraft, resolveLocationCode, shouldAskForUpc, skuMissingUpc, slotTagCode, sortLocationChoices, unitsLabel, upcScanKeys, upcToStore, writeBulkTagDraft } from './locationPlace.ts';
 
 describe('location phrases', () => {
   it('reads a bin and a floor spot the way the bay screen does', () => {
@@ -165,6 +165,14 @@ describe('sku missing a upc', () => {
 
   it('asks when the typed SKU has no barcode', () => {
     assert.deepEqual(skuMissingUpc('11921', [cereal]), { sku: '11921', title: 'Cereal' });
+  });
+
+  it('asks when inventory has the SKU and the quick list did not', () => {
+    assert.equal(shouldAskForUpc('11921', [], 'missing'), true);
+    assert.equal(shouldAskForUpc('11921', [{ ...cereal, upc: '036000291452' }], 'missing'), false);
+    assert.equal(shouldAskForUpc('11921', [], 'set'), false);
+    assert.equal(shouldAskForUpc('11921', [], 'unknown'), false);
+    assert.equal(shouldAskForUpc('036000291452', [], 'unknown'), false);
   });
 
   it('stays quiet when the SKU already has a UPC or the scan was a UPC', () => {
