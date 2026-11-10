@@ -111,7 +111,7 @@ test('manual links collapse to one shipment; duplicates in the portal list are d
   assert.equal(shipmentLead(linked[0].items)?.sku, '99763');
 });
 
-test('manual bundle blocks different buyers and a labeled shipment', () => {
+test('manual bundle blocks different buyers; labeled open lines are allowed (clears for one upload)', () => {
   const a = { id: '1', sku: '1', ...base };
   const b = { id: '2', sku: '2', ...base, buyer_name: 'Other Person' };
   const blocked = canManualBundle([a, b]);
@@ -120,10 +120,14 @@ test('manual bundle blocks different buyers and a labeled shipment', () => {
 
   const labeled = { id: '3', sku: '3', ...base, label_uploaded_at: '2026-11-10T13:00:00.000Z' };
   const withLabel = canManualBundle([a, labeled]);
-  assert.equal(withLabel.ok, false);
-  assert.equal(withLabel.reason, 'label_exists');
+  assert.equal(withLabel.ok, true);
+  assert.equal(withLabel.clearsLabels, true);
+  assert.match(String(withLabel.message || ''), /one shared label/i);
   assert.equal(canUnbundle([a, labeled]).ok, false);
   assert.equal(canUnbundle([a, { id: '4', sku: '4', ...base }]).ok, true);
+
+  const packaged = { id: '5', sku: '5', ...base, packaged_at: '2026-11-10T14:00:00.000Z' };
+  assert.equal(canManualBundle([a, packaged]).ok, false);
 });
 
 test('tab counts count unbundled lines until a manual bundle exists', () => {
