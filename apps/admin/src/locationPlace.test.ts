@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { addBulkSkus, bayTagCode, bayTitle, layoutBlocked, locationMenuLabel, locationPhrase, parseBulkSkus, planPlaceInBin, planUnassign, readBulkTagDraft, resolveLocationCode, shouldAskForUpc, skuMissingUpc, slotTagCode, sortLocationChoices, unitsLabel, upcScanKeys, upcToStore, writeBulkTagDraft } from './locationPlace.ts';
+import { addBulkSkus, barcodeOnUnit, bayTagCode, bayTitle, layoutBlocked, locationMenuLabel, locationPhrase, parseBulkSkus, planPlaceInBin, planUnassign, readBulkTagDraft, resolveLocationCode, shouldAskForUpc, skuMissingUpc, slotTagCode, sortLocationChoices, unitsLabel, upcScanKeys, upcToStore, writeBulkTagDraft } from './locationPlace.ts';
 
 describe('location phrases', () => {
   it('reads a bin and a floor spot the way the bay screen does', () => {
@@ -175,6 +175,13 @@ describe('sku missing a upc', () => {
     assert.equal(shouldAskForUpc('11921', [], 'set'), false);
     assert.equal(shouldAskForUpc('11921', [], 'unknown'), false);
     assert.equal(shouldAskForUpc('036000291452', [], 'unknown'), false);
+  });
+
+  it('still asks when the item is only marked Does not apply', () => {
+    assert.equal(barcodeOnUnit({ upc: null }), 'missing');
+    assert.equal(barcodeOnUnit({ upc: 'Does not apply' }), 'missing');
+    assert.equal(barcodeOnUnit({ upc: '036000291452' }), 'set');
+    assert.equal(shouldAskForUpc('11709', [{ sku: '11709', title: 'Gloves', upc: null }], 'missing'), true);
   });
 
   it('stays quiet when the SKU already has a UPC or the scan was a UPC', () => {
