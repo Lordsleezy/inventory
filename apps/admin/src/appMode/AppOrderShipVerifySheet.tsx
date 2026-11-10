@@ -61,10 +61,28 @@ export function AppOrderShipVerifySheet({ order, isAdmin, busy, error, onClose, 
           }} />
         {error && <p className="scan-out-err" role="alert">{error}</p>}
         {isAdmin && (
-          <label className="app-order-verify-override">
-            <span className="eyebrow">Admin override, only if there is no tracking on file</span>
-            <input value={overrideReason} onChange={(e) => setOverrideReason(e.target.value)} placeholder="Why there is no tracking" disabled={busy} />
-          </label>
+          <div className="app-order-verify-override">
+            <label>
+              <span className="eyebrow">Admin override, only if there is no tracking on file</span>
+              <input
+                value={overrideReason}
+                onChange={(e) => setOverrideReason(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); submit(); } }}
+                placeholder="Why there is no tracking"
+                aria-label="Why there is no tracking"
+                enterKeyHint="go"
+                disabled={busy}
+              />
+            </label>
+            <button
+              type="button"
+              className="primary app-order-verify-ship"
+              disabled={busy || overrideReason.trim().length < 4}
+              onClick={() => submit()}
+            >
+              Mark shipped
+            </button>
+          </div>
         )}
         <button type="button" className="scan-out-quiet" disabled={busy} onClick={onClose}>Cancel</button>
       </div>
