@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { floorFunctionUrl } from './floorApi';
 import { LabelPaperSetting } from './LabelPaperSetting';
+import { ShippingReview } from './ShippingReview';
 import { PROTECTED_ADMIN_EMAIL, peopleForCommission } from './settingsPeople';
 
 type Person = { user_id: string; display_name: string; kind: string };
@@ -140,6 +141,11 @@ export function SettingsPage({ accessToken, busy, run, staff, rules, saveRule, r
       })}
     </section>
     {client && <LabelPaperSetting client={client} />}
+    <section className="panel">
+      <h2>Shipping</h2>
+      <p className="hint">Website tiers are $10 up to 5 lb, $16 up to 15 lb, $28 up to 30 lb, $40 up to 50 lb, and $52 up to 70 lb. eBay combined weight is on: calculated packages use COMBINED_ITEM_WEIGHT for 30 days, with no handling fee added.</p>
+    </section>
+    <ShippingReview />
     {client && <CdtfaAccount client={client} />}
   </>;
 }

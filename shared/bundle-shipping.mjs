@@ -1,13 +1,10 @@
 /**
  * One-box bundle price for orders that share a buyer and a ship-to address.
  *
- * The dollar table starts from Floor's website weight tiers
- * (store_settings ship_tier_5/15/30_cents: $20 / $32 / $50). Those tiers stop
- * at 30 lb. The 50 lb and 70 lb rows continue the same $18 step that already
- * sits between 15 lb and 30 lb ($32 → $50). Every size class is filled with
- * the same prices; an admin can raise a larger class later. Nothing here adds
- * a packaging allowance — the website tiers and the calculated eBay policy do
- * not add one.
+ * The dollar table is the zone-6 label cost from past shipments, plus about 15%
+ * so a light box is not double the label. Larger size classes cost more.
+ * A big box is also billed at its dimensional weight (length × width × height
+ * ÷ 166) when that is above one cubic foot and above the actual weight.
  *
  * The looked-up price is then clamped to [most expensive item's own shipping,
  * sum of the separate shipping charges].
@@ -17,18 +14,17 @@ export const USPS_GA_MAX_LB = 70;
 export const USPS_GA_MAX_LENGTH_IN = 108;
 export const USPS_GA_MAX_LENGTH_PLUS_GIRTH = 130;
 
-const BRACKETS = [
-  [5, 2000],
-  [15, 3200],
-  [30, 5000],
-  [50, 6800],
-  [70, 8600],
-];
+const BRACKETS = {
+  small: [[5, 1000], [15, 1600], [30, 2800], [50, 4000], [70, 5200]],
+  medium: [[5, 1150], [15, 1840], [30, 3220], [50, 4600], [70, 5980]],
+  large: [[5, 1300], [15, 2080], [30, 3640], [50, 5200], [70, 6760]],
+  oversize: [[5, 1600], [15, 2560], [30, 4480], [50, 6400], [70, 8320]],
+};
 
 const SIZE_CLASSES = ["small", "medium", "large", "oversize"];
 
 export const DEFAULT_RATES = SIZE_CLASSES.flatMap((size_class) =>
-  BRACKETS.map(([max_lb, price_cents]) => ({ max_lb, size_class, price_cents })),
+  BRACKETS[size_class].map(([max_lb, price_cents]) => ({ max_lb, size_class, price_cents })),
 );
 
 function cents(value) {
@@ -164,8 +160,11 @@ export function quoteBundle(items, rates = DEFAULT_RATES) {
       max_single_cents: maxSingle, flag: true, package: box, length_in: length, girth_in: girth,
     };
   }
+  const cubic = sides[0] * sides[1] * sides[2];
+  const dim = cubic > 1728 ? cubic / 166 : 0;
+  const billed = Math.max(weight, dim);
   const klass = sizeClass(length);
-  const tier = lookupRateCents(weight, klass, rates);
+  const tier = lookupRateCents(billed, klass, rates);
   let price = tier == null ? maxSingle : tier;
   price = Math.min(separate, Math.max(maxSingle, price));
   return {
@@ -178,6 +177,7 @@ export function quoteBundle(items, rates = DEFAULT_RATES) {
     size_class: klass,
     flag: false,
     package: box,
+    billed_lb: Math.round(billed * 100) / 100,
     length_in: length,
     girth_in: girth,
   };
@@ -367,8 +367,11 @@ export function sendInvoiceInnerXml(orderId) {
 }
 
 export function calculatedCombinedWeightBody(existingDuration) {
+  // eBay requires a handling rule type on this call. INDIVIDUAL_HANDLING_FEE
+  // with no amount keeps the policy's current handling (none) and adds no fee.
   return {
     calculatedShippingRule: { combinedShippingRuleType: "COMBINED_ITEM_WEIGHT" },
+    calculatedHandlingRule: { combinedShippingRuleType: "INDIVIDUAL_HANDLING_FEE" },
     combinedDuration: existingDuration || "DAYS_30",
   };
 }

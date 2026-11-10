@@ -44,6 +44,7 @@ export type BundleQuote = {
   size_class?: string;
   flag: boolean;
   package?: { length_in: number; width_in: number; height_in: number; weight_lb: number };
+  billed_lb?: number;
   length_in?: number;
   girth_in?: number;
 };
@@ -100,9 +101,10 @@ export function addOrderInnerXml(input: {
 export function sendInvoiceInnerXml(orderId: string): string;
 export function calculatedCombinedWeightBody(existingDuration?: string): {
   calculatedShippingRule: { combinedShippingRuleType: string };
+  calculatedHandlingRule: { combinedShippingRuleType: string };
   combinedDuration: string;
 };
 export function combinedWeightDecision(policy: { shippingOptions?: { costType?: string }[] } | null, rules: {
   calculatedShippingRule?: { combinedShippingRuleType?: string };
   combinedDuration?: string;
-} | null): { write: boolean; reason: string; body?: { calculatedShippingRule: { combinedShippingRuleType: string }; combinedDuration: string } };
+} | null): { write: boolean; reason: string; body?: { calculatedShippingRule: { combinedShippingRuleType: string }; calculatedHandlingRule: { combinedShippingRuleType: string; orderHandlingAmount?: unknown }; combinedDuration: string } };

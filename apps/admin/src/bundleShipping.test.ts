@@ -44,8 +44,8 @@ test('two items use the biggest box and the summed weight, then the tier', () =>
   assert.equal(quote.package?.length_in, 12);
   assert.equal(quote.package?.weight_lb, 7);
   assert.equal(quote.size_class, 'small');
-  assert.equal(quote.tier_cents, 3200);
-  assert.equal(quote.price_cents, 3200);
+  assert.equal(quote.tier_cents, 1600);
+  assert.equal(quote.price_cents, 2000);
   assert.ok(quote.price_cents >= 2000);
   assert.ok(quote.price_cents <= 3200);
 });
@@ -57,7 +57,7 @@ test('three items clamp up to the most expensive single and down to the sum', ()
     box('c', { weight_lb: 1, shipping_cents: 700, length_in: 5, width_in: 5, height_in: 4 }),
   ];
   const up = quoteBundle(high);
-  assert.equal(up.tier_cents, 2000);
+  assert.equal(up.tier_cents, 1000);
   assert.equal(up.price_cents, 4000);
 
   const low = [
@@ -68,7 +68,7 @@ test('three items clamp up to the most expensive single and down to the sum', ()
   const down = quoteBundle(low);
   assert.equal(down.package?.weight_lb, 32);
   assert.equal(down.size_class, 'medium');
-  assert.equal(down.tier_cents, 6800);
+  assert.equal(down.tier_cents, 4600);
   assert.equal(down.price_cents, 3000);
   assert.equal(down.separate_cents, 3000);
 });
@@ -190,5 +190,18 @@ test('a flat policy is not written; calculated shipping gets combined item weigh
   assert.equal(decision.write, true);
   assert.equal(decision.body?.calculatedShippingRule.combinedShippingRuleType, 'COMBINED_ITEM_WEIGHT');
   assert.equal(decision.body?.combinedDuration, 'DAYS_7');
-  assert.equal('calculatedHandlingRule' in (decision.body || {}), false);
+  assert.equal(decision.body?.calculatedHandlingRule.combinedShippingRuleType, 'INDIVIDUAL_HANDLING_FEE');
+  assert.equal(decision.body?.calculatedHandlingRule.orderHandlingAmount, undefined);
+});
+
+test('a light item in a big box is billed at dimensional weight', () => {
+  const items = [
+    box('a', { length_in: 30, width_in: 20, height_in: 10, weight_lb: 2, shipping_cents: 5000 }),
+    box('b', { length_in: 8, width_in: 6, height_in: 4, weight_lb: 1, shipping_cents: 1000 }),
+  ];
+  const quote = quoteBundle(items);
+  assert.equal(quote.package?.weight_lb, 3);
+  assert.ok(Number(quote.billed_lb) > 20);
+  assert.equal(quote.size_class, 'oversize');
+  assert.ok(Number(quote.tier_cents) > 1600);
 });
