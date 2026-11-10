@@ -68,7 +68,16 @@ export function sameBuyerAndAddress(a, b) {
   }
   const addrA = addressKey(a);
   const addrB = addressKey(b);
-  if (!addrA || !addrB) return { ok: false, reason: "missing_address", message: "Both orders need a full ship-to address." };
+  if (!addrA || !addrB) {
+    const depop = norm(a.channel) === "depop" || norm(b.channel) === "depop";
+    return {
+      ok: false,
+      reason: "missing_address",
+      message: depop
+        ? "These Depop sales have no ship-to yet. Enter the buyer address below, then Bundle."
+        : "Both orders need a full ship-to address. Enter it below, then Bundle.",
+    };
+  }
   if (addrA !== addrB) {
     return {
       ok: false,

@@ -20,6 +20,7 @@ import { PackLabelScan } from './PackLabelScan';
 import { labelUploadUi, type LabelUploadResponse } from './labelUploadFeedback';
 import { LabelTrackingPicker, LabelTrackingResult } from './LabelTrackingResult';
 import { LabelTrackingProblem } from './LabelTrackingProblem';
+import { BundleShipToForm, emptyShipTo, shipToReady, type ShipToDraft } from './BundleShipToForm';
 import { canManualBundle, canUnbundle, dedupeOrders, listShipments } from './orderShipments';
 
 const CHANNEL_LABEL: Record<string, string> = {
@@ -173,6 +174,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
   const [bundleLinks, setBundleLinks] = useState<{ order_id: string; peer_id: string }[]>([]);
   const [bundleSplits, setBundleSplits] = useState<string[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [shipToDraft, setShipToDraft] = useState<ShipToDraft>(() => emptyShipTo());
 
   const load = useCallback(async () => {
     // No practical date hide: cover store day-one history (portal still clamps to p_days).
@@ -486,6 +488,16 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
     return (orders || []).filter((o) => ids.has(o.id));
   }, [orders, selectedIds]);
   const bundleReady = canManualBundle(selectedOrders);
+  useEffect(() => {
+    if (selectedOrders.length < 2) return;
+    setShipToDraft((prev) => {
+      if (prev.ship_line1 || prev.ship_city || prev.ship_postal) return prev;
+      const buyer = selectedOrders.find((o) => o.buyer_name && !/^depop buyer$/i.test(o.buyer_name))?.buyer_name
+        || selectedOrders[0]?.buyer_name
+        || '';
+      return emptyShipTo(buyer);
+    });
+  }, [selectedIds.join('|')]); // eslint-disable-line react-hooks/exhaustive-deps -- reset draft when selection set changes
 
   useEffect(() => {
     const ids = active.filter((o) => o.packaged_at || o.shipped_at || o.delivered_at).slice(0, 25).map((o) => o.id);
@@ -962,30 +974,74 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
           </table>}
       {selectMode && selectedIds.length >= 2 && (
         <div className="orders-bundle-bar desk-bundle-bar">
+          {bundleReady.reason === 'missing_address' && (
+            <BundleShipToForm
+              draft={shipToDraft}
+              onChange={setShipToDraft}
+              hint={bundleReady.message}
+            />
+          )}
           <button
             type="button"
             className="orders-bundle-btn"
-            disabled={!!busy || !bundleReady.ok}
+            disabled={
+              !!busy
+              || (!bundleReady.ok && bundleReady.reason !== 'missing_address')
+              || (bundleReady.reason === 'missing_address' && !shipToReady(shipToDraft))
+            }
             onClick={() => void (async () => {
-              if (!bundleReady.ok) { setError(bundleReady.message || 'Cannot bundle.'); return; }
+              const needsShipTo = !bundleReady.ok && bundleReady.reason === 'missing_address';
+              if (!bundleReady.ok && !needsShipTo) { setError(bundleReady.message || 'Cannot bundle.'); return; }
+              if (needsShipTo && !shipToReady(shipToDraft)) {
+                setError('Enter street, city, state, and ZIP, then Bundle.');
+                return;
+              }
+              const buyerLabel = (needsShipTo ? shipToDraft.buyer_name : selectedOrders[0].buyer_name) || 'this buyer';
               const clearNote = bundleReady.clearsLabels
                 ? '\n\nAny existing labels/tracking on these lines will be cleared so you can upload ONE shared label for the box.'
                 : '\n\nNext: upload one shipping label for the whole box.';
-              if (!window.confirm(`Bundle ${selectedOrders.length} items for ${selectedOrders[0].buyer_name || 'this buyer'} into one shipment?${clearNote}`)) return;
+              if (!window.confirm(`Bundle ${selectedOrders.length} items for ${buyerLabel} into one shipment?${clearNote}`)) return;
               setBusy('bundle'); setError('');
-              const { error: e } = await client.rpc('portal_bundle_orders', { p_ids: selectedOrders.map((row) => row.id) });
+              const ids = selectedOrders.map((row) => row.id);
+              if (needsShipTo) {
+                const { error: shipErr } = await client.rpc('portal_set_order_ship_to', {
+                  p_ids: ids,
+                  p_buyer_name: shipToDraft.buyer_name.trim() || null,
+                  p_line1: shipToDraft.ship_line1.trim(),
+                  p_line2: shipToDraft.ship_line2.trim() || null,
+                  p_city: shipToDraft.ship_city.trim(),
+                  p_region: shipToDraft.ship_region.trim(),
+                  p_postal: shipToDraft.ship_postal.trim(),
+                  p_country: 'US',
+                });
+                if (shipErr) {
+                  setError(shipErr.message === 'missing_address' ? 'Enter street, city, state, and ZIP.' : shipErr.message);
+                  setBusy(null);
+                  return;
+                }
+              }
+              const { error: e } = await client.rpc('portal_bundle_orders', { p_ids: ids });
               if (e) {
                 setError(e.message === 'different_buyer' ? 'Different buyers — cannot bundle.'
                   : e.message === 'different_address' ? 'Ship-to addresses do not match — cannot bundle.'
                     : e.message === 'not_open' ? 'One of those is already packaged or shipped.'
                       : e.message);
-              } else setSelectedIds([]);
+              } else {
+                setSelectedIds([]);
+                setShipToDraft(emptyShipTo());
+              }
               await load(); setBusy(null);
             })}
           >
-            {busy === 'bundle' ? 'Bundling…' : `Bundle ${selectedIds.length}`}
+            {busy === 'bundle'
+              ? 'Bundling…'
+              : bundleReady.reason === 'missing_address'
+                ? `Save address & Bundle ${selectedIds.length}`
+                : `Bundle ${selectedIds.length}`}
           </button>
-          {bundleReady.message ? <p className="orders-bundle-hint">{bundleReady.message}</p> : null}
+          {bundleReady.message && bundleReady.reason !== 'missing_address'
+            ? <p className="orders-bundle-hint">{bundleReady.message}</p>
+            : null}
         </div>
       )}
       {openId && active.some((o) => o.id === openId) && createPortal(

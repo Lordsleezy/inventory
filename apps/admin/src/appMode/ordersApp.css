@@ -1346,12 +1346,19 @@ html.app-mode .app-group.has-bundle-bar {
   /* tab bar 56 + bundle bar ~68 + breathing room so Upload isn't covered */
   padding-bottom: calc(140px + env(safe-area-inset-bottom, 0px));
 }
+html.app-mode .app-group.has-bundle-bar.has-ship-to {
+  /* taller bar when address fields are open */
+  padding-bottom: calc(420px + env(safe-area-inset-bottom, 0px));
+}
 html.app-mode .orders-bundle-bar {
   position: fixed;
   left: 0;
   right: 0;
   bottom: calc(56px + env(safe-area-inset-bottom, 0px));
   z-index: 6;
+  max-height: min(70vh, 480px);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   padding: 10px 16px;
   background: #000;
   border-top: 0.5px solid #2a2a2a;
@@ -1375,6 +1382,31 @@ html.app-mode .orders-bundle-hint {
   margin: 8px 0 0;
   color: #9a9a9a;
   font-size: 13px;
+}
+html.app-mode .orders-bundle-ship-to {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+html.app-mode .orders-bundle-ship-to label {
+  display: grid;
+  gap: 4px;
+  text-align: left;
+}
+html.app-mode .orders-bundle-ship-to input {
+  width: 100%;
+  box-sizing: border-box;
+  background: #111;
+  border: 1px solid #3a3a3c;
+  color: #fff;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 16px;
+}
+html.app-mode .orders-bundle-ship-to-row {
+  display: grid;
+  grid-template-columns: 1.4fr 0.7fr 0.9fr;
+  gap: 8px;
 }
 html.app-mode .app-order-row-v2.selected,
 html.app-mode .app-shipment-card.selected {

@@ -130,6 +130,21 @@ test('manual bundle blocks different buyers; labeled open lines are allowed (cle
   assert.equal(canManualBundle([a, packaged]).ok, false);
 });
 
+test('missing ship-to blocks Bundle with a clear Depop message', () => {
+  const a = {
+    id: 'd1', sku: '11332', buyer_name: 'Depop buyer', channel: 'depop', status: 'paid', fulfillment: 'ship',
+    ship_line1: null, ship_city: null, ship_region: null, ship_postal: null,
+  };
+  const b = {
+    id: 'd2', sku: '11372', buyer_name: 'Depop buyer', channel: 'depop', status: 'paid', fulfillment: 'ship',
+    ship_line1: null, ship_city: null, ship_region: null, ship_postal: null,
+  };
+  const blocked = canManualBundle([a, b]);
+  assert.equal(blocked.ok, false);
+  assert.equal(blocked.reason, 'missing_address');
+  assert.match(String(blocked.message || ''), /Depop|ship-to|address/i);
+});
+
 test('tab counts count unbundled lines until a manual bundle exists', () => {
   const rows = [
     { id: 'a', sku: '99763', order_no: '1', shipping_cents: 100, item_cents: 1000, ...base },
