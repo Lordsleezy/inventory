@@ -52,9 +52,14 @@ function uspsAfterRouting(digits) {
   return null;
 }
 
+/** `]C1` / `]d2` symbology prefixes become a leading letter before the barcode. */
+function withoutAimPrefix(value) {
+  return String(value || "").replace(/^[A-Z]\d?(?=420|9[1-5]|1Z)/, "");
+}
+
 /** Normalize carrier barcodes for lookup (USPS 420+ZIP wrappers, UPS 1Z, FedEx 34-digit). */
 export function compactTracking(value) {
-  const n = String(value || "").replace(/[^0-9A-Za-z]/g, "").toUpperCase();
+  const n = withoutAimPrefix(String(value || "").replace(/[^0-9A-Za-z]/g, "").toUpperCase());
   if (!n) return "";
   const ups = n.match(/1Z[0-9A-Z]{16}/);
   if (ups) return ups[0];
@@ -93,4 +98,60 @@ export function scanContainsTracking(scanned, stored) {
   if (!track || track.length < 18) return false;
   const scan = String(scanned || "").replace(/[^0-9A-Za-z]/g, "").toUpperCase();
   return scan.length >= track.length && scan.includes(track);
+}
+
+function routingOnly(value) {
+  const digits = String(value || "").replace(/\D/g, "");
+  return /^420\d{5}$/.test(digits) || /^420\d{9}$/.test(digits) || /^420\d{11}$/.test(digits);
+}
+
+/**
+ * One physical label. ZIP+4 (9) is tried before a 5-digit ZIP so the next
+ * barcode's digits are not swallowed into this tracking number.
+ */
+function matchLabelBarcode(after) {
+  for (const zipLen of [9, 5, 11]) {
+    for (const trackLen of [22, 20, 26, 30, 34]) {
+      const payload = trackLen - 2;
+      const re = new RegExp(`^\\(?420\\)?\\d{${zipLen}}\\(?9[1-5]\\)?\\d{${payload}}(?!\\d)`, "i");
+      const hit = after.match(re);
+      if (hit) return hit[0];
+    }
+  }
+  return null;
+}
+
+function extractLabelBarcodes(text) {
+  const flat = String(text || "").replace(/[\u001d\u001e\r\n]/g, "");
+  const scans = [];
+  const start = /\(?420\)?/gi;
+  let mark;
+  while ((mark = start.exec(flat))) {
+    const raw = matchLabelBarcode(flat.slice(mark.index));
+    if (!raw) continue;
+    scans.push(raw);
+    start.lastIndex = mark.index + raw.length;
+  }
+  return { flat, scans };
+}
+
+/**
+ * A scanner may send the ZIP, then Enter, then the tracking number.
+ * It may also leave the previous label in the box. Each returned scan is one label.
+ * `held` is a ZIP that is still waiting for its tracking number.
+ */
+export function takeLabelScans(raw, held = "") {
+  const incoming = String(raw || "").replace(/[\u001d\u001e]/g, "");
+  const own = extractLabelBarcodes(incoming);
+  if (own.scans.length) {
+    const tail = own.flat.slice(own.flat.lastIndexOf(own.scans[own.scans.length - 1]) + own.scans[own.scans.length - 1].length);
+    return { scans: own.scans, held: routingOnly(tail) ? tail : "" };
+  }
+  const text = `${held || ""}${incoming}`;
+  const joined = extractLabelBarcodes(text);
+  if (joined.scans.length) return { scans: joined.scans, held: "" };
+  if (routingOnly(text)) return { scans: [], held: text };
+  const trimmed = text.trim();
+  if (!trimmed) return { scans: [], held: "" };
+  return { scans: [trimmed], held: "" };
 }

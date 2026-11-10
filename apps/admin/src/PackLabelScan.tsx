@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { errText } from './errText';
+import { takeLabelScans } from './trackingNormalize';
 type Props = {
   client: SupabaseClient;
   disabled?: boolean;
@@ -15,7 +16,10 @@ export function PackLabelScan({ client, disabled, onDone }: Props) {
   const [err, setErr] = useState('');
 
   async function commit() {
-    const raw = code.trim();
+    const live = inputRef.current?.value ?? code;
+    const taken = takeLabelScans(live);
+    const raw = (taken.scans[0] || '').trim();
+    setCode(taken.held);
     if (raw.length < 8) return;
     setBusy(true); setErr(''); setMsg('');
     try {

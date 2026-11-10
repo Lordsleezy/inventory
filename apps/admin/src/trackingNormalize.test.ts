@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { formatTrackingDisplay, matchesOrderTracking, normalizeTracking, soleTrackingMatch, trackingExpectTail } from './trackingNormalize.ts';
+import { formatTrackingDisplay, matchesOrderTracking, normalizeTracking, soleTrackingMatch, takeLabelScans, trackingExpectTail } from './trackingNormalize.ts';
 
 test('normalizeTracking keeps core USPS number', () => {
   assert.equal(normalizeTracking('9400111899223344556601'), '9400111899223344556601');
@@ -68,6 +68,35 @@ test('FedEx door-tag with parentheses collapses to the last 12 digits', () => {
   const raw = '962208043(0000000000)000384592279027';
   assert.equal(normalizeTracking(raw), '384592279027');
   assert.equal(formatTrackingDisplay('FedEx', raw), 'FedEx 3845 9227 9027');
+});
+
+const RAQUEL_A = '(420)347621423(93)34620845500057475261';
+const RAQUEL_B = '(420)347621423(93)34610793404041063832';
+const TRACK_A = '9334620845500057475261';
+const TRACK_B = '9334610793404041063832';
+
+test('a (93) routing barcode is the tracking number printed under it', () => {
+  assert.equal(normalizeTracking(RAQUEL_A), TRACK_A);
+  assert.equal(normalizeTracking(RAQUEL_B), TRACK_B);
+  assert.equal(normalizeTracking(`]C1${RAQUEL_A}`), TRACK_A);
+  assert.equal(normalizeTracking(RAQUEL_A.replace(/[()]/g, '')), TRACK_A);
+  assert.equal(matchesOrderTracking({ tracking_number: TRACK_A }, RAQUEL_A), true);
+  assert.equal(matchesOrderTracking({ tracking_number: TRACK_B }, RAQUEL_A), false);
+  assert.equal(matchesOrderTracking({ tracking_number: '9334 6208 4550 0057 4752 61' }, RAQUEL_A), true);
+});
+
+test('each label in a scanner dump is its own scan', () => {
+  assert.deepEqual(takeLabelScans(`${RAQUEL_A}\n${RAQUEL_B}`).scans, [RAQUEL_A, RAQUEL_B]);
+  assert.deepEqual(takeLabelScans(`${RAQUEL_A}${RAQUEL_B}`).scans, [RAQUEL_A, RAQUEL_B]);
+  const zip = takeLabelScans('(420)347621423');
+  assert.deepEqual(zip.scans, []);
+  assert.equal(zip.held, '(420)347621423');
+  const rest = takeLabelScans('(93)34620845500057475261', zip.held);
+  assert.deepEqual(rest.scans, ['(420)347621423(93)34620845500057475261']);
+  assert.equal(rest.held, '');
+  const split = takeLabelScans(`(420)347621423\u001d(93)34620845500057475261`);
+  assert.equal(normalizeTracking(split.scans[0]), TRACK_A);
+  assert.equal(takeLabelScans('11332').scans[0], '11332');
 });
 
 test('scan-out ships the order whose tracking number the routing barcode ends with', () => {
