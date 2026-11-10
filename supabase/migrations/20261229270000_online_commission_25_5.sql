@@ -55,9 +55,11 @@ begin
   select * into t from public.sale_payout_tickets where store_id = p_store and ticket_key = p_ticket;
   if not found then return; end if;
   delete from public.sale_commissions where store_id = p_store and ticket_key = p_ticket;
-  select sum(price_cents), sum(commission_base_cents + case when v_absorb then coalesce(fees_cents, 0) else 0 end), bool_or(cost_cents is null)
+  select sum(l.price_cents),
+    sum(l.commission_base_cents + case when v_absorb then coalesce((to_jsonb(l)->>'fees_cents')::int, 0) else 0 end),
+    bool_or(l.cost_cents is null)
     into v_sub, v_base, v_cost_null
-  from public.sale_payout_lines where store_id = p_store and ticket_key = p_ticket;
+  from public.sale_payout_lines l where l.store_id = p_store and l.ticket_key = p_ticket;
   if v_sub is null then return; end if;
   if v_cost_null then v_base := null; end if;
   select * into v_ov from public.portal_commission_overrides where store_id = p_store and ticket_key = p_ticket;
@@ -99,7 +101,7 @@ begin
         else
           insert into public.sale_commissions (sale_id, store_id, ticket_key, employee_id, amount_cents)
           select l.sale_id, p_store, p_ticket, v_emp,
-            public.payout_js_round(greatest(0, l.commission_base_cents + case when v_absorb then coalesce(l.fees_cents, 0) else 0 end)::float8
+            public.payout_js_round(greatest(0, l.commission_base_cents + case when v_absorb then coalesce((to_jsonb(l)->>'fees_cents')::int, 0) else 0 end)::float8
               * coalesce((t.sku_rates->l.sku->>v_emp::text)::numeric, v_rate)::float8 / 100)
           from public.sale_payout_lines l where l.store_id = p_store and l.ticket_key = p_ticket;
           continue;
@@ -124,7 +126,7 @@ begin
         row_number() over (order by l.sale_id) rn
       from public.sale_payout_lines l
       cross join lateral (select case
-        when v_has_ov or t.online or v_method = 'percent_profit' then greatest(0, coalesce(l.commission_base_cents + case when v_absorb then coalesce(l.fees_cents, 0) else 0 end, 0))
+        when v_has_ov or t.online or v_method = 'percent_profit' then greatest(0, coalesce(l.commission_base_cents + case when v_absorb then coalesce((to_jsonb(l)->>'fees_cents')::int, 0) else 0 end, 0))
         when v_method = 'flat_ticket' then 1
         else greatest(0, l.price_cents) end::numeric weight) x
       where l.store_id = p_store and l.ticket_key = p_ticket
