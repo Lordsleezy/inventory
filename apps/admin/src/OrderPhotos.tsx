@@ -2,15 +2,49 @@ import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } f
 import { createPortal } from 'react-dom';
 import { locationParts } from './locationOrder';
 import { carrierTrackUrl, trackingTail, type StageOrder } from './orderStage';
-import { derivativePath, photoKind, type UnitPhoto } from './unitPhotos';
+import { derivativePath, photoDisplayUrl, photoKind, type UnitPhoto } from './unitPhotos';
 
 type Sign = (paths: string[]) => Promise<Record<string, string>>;
 
 function srcFor(photo: UnitPhoto, urls: Record<string, string>, full: boolean) {
-  const thumb = derivativePath(photo.path, 400);
-  const detail = derivativePath(photo.path, 1200);
-  if (full) return (detail && urls[detail]) || urls[photo.path] || (thumb && urls[thumb]) || '';
-  return (thumb && urls[thumb]) || '';
+  return photoDisplayUrl(photo.path, urls, full ? 1200 : 400);
+}
+
+function OrderPhotoImg({ photo, urls, full, sign, eager }: {
+  photo: UnitPhoto;
+  urls: Record<string, string>;
+  full: boolean;
+  sign: Sign;
+  eager?: boolean;
+}) {
+  const preferred = srcFor(photo, urls, full);
+  const [src, setSrc] = useState(preferred);
+  const [gaveUp, setGaveUp] = useState(false);
+  useEffect(() => {
+    setSrc(preferred);
+    setGaveUp(false);
+  }, [preferred, photo.path]);
+  if (!src) return <span className="order-photo-wait">Loading photo…</span>;
+  return (
+    <img
+      src={src}
+      alt=""
+      loading={eager ? 'eager' : 'lazy'}
+      onError={() => {
+        if (gaveUp) return;
+        const original = urls[photo.path];
+        if (original && original !== src) {
+          setSrc(original);
+          return;
+        }
+        void sign([photo.path]).then((next) => {
+          const url = next[photo.path];
+          if (url && url !== src) setSrc(url);
+          else setGaveUp(true);
+        });
+      }}
+    />
+  );
 }
 
 export function OrderPhotoCarousel({ photos, urls, sign }: { photos: UnitPhoto[]; urls: Record<string, string>; sign: Sign }) {
@@ -30,18 +64,31 @@ export function OrderPhotoCarousel({ photos, urls, sign }: { photos: UnitPhoto[]
   }, [photoKey]);
 
   useEffect(() => {
-    const thumbs = photos
-      .map((photo) => derivativePath(photo.path, 400))
-      .filter((path): path is string => path != null && !checked.current.has(path) && !urls[path]);
-    if (!thumbs.length) {
+    const pending = photos.filter((photo) => {
+      const thumb = derivativePath(photo.path, 400);
+      const have = Boolean((thumb && urls[thumb]) || urls[photo.path]);
+      return !have && !checked.current.has(photo.path);
+    });
+    if (!pending.length) {
       setSettled((n) => n || 1);
       return;
     }
     let alive = true;
-    void sign(thumbs).then((next) => {
+    const thumbs = pending
+      .map((photo) => derivativePath(photo.path, 400))
+      .filter((path): path is string => path != null);
+    void sign(thumbs).then(async (next) => {
       if (!alive) return;
-      for (const path of thumbs) checked.current.add(path);
-      setExtra((prev) => ({ ...prev, ...next }));
+      const still = pending
+        .filter((photo) => {
+          const thumb = derivativePath(photo.path, 400);
+          return !(thumb && next[thumb]);
+        })
+        .map((photo) => photo.path);
+      const originals = still.length ? await sign(still) : {};
+      if (!alive) return;
+      for (const photo of pending) checked.current.add(photo.path);
+      setExtra((prev) => ({ ...prev, ...next, ...originals }));
       setSettled((n) => n + 1);
     });
     return () => { alive = false; };
@@ -91,14 +138,11 @@ export function OrderPhotoCarousel({ photos, urls, sign }: { photos: UnitPhoto[]
     <div className="order-photos">
       <div className="order-photo-frame">
         <div className="order-photo-scroller" ref={scroller} onScroll={onScroll}>
-          {photos.map((photo, i) => {
-            const src = srcFor(photo, known, false) || (i === index ? srcFor(photo, known, true) : '');
-            return (
-              <button key={photo.id} type="button" className="order-photo-slide" onClick={() => { setIndex(i); setFull(true); }} aria-label={`Open ${photoKind(photo)} ${i + 1}`}>
-                {src ? <img src={src} alt="" loading={i === index ? 'eager' : 'lazy'} /> : <span className="order-photo-wait">Loading photo…</span>}
-              </button>
-            );
-          })}
+          {photos.map((photo, i) => (
+            <button key={photo.id} type="button" className="order-photo-slide" onClick={() => { setIndex(i); setFull(true); }} aria-label={`Open ${photoKind(photo)} ${i + 1}`}>
+              <OrderPhotoImg photo={photo} urls={known} full={i === index && !srcFor(photo, known, false)} sign={sign} eager={i === index} />
+            </button>
+          ))}
         </div>
         <span className="order-photo-tag">{photoKind(current)}</span>
         <span className="order-photo-count">{index + 1} / {photos.length}</span>
@@ -113,14 +157,11 @@ export function OrderPhotoCarousel({ photos, urls, sign }: { photos: UnitPhoto[]
         </div>
       </div>
       <div className="order-photo-thumbs" role="list">
-        {photos.map((photo, i) => {
-          const src = srcFor(photo, known, false);
-          return (
-            <button key={photo.id} type="button" role="listitem" className={i === index ? 'on' : ''} aria-label={`${photoKind(photo)} ${i + 1}`} onClick={() => go(i)}>
-              {src ? <img src={src} alt="" loading="lazy" /> : <span />}
-            </button>
-          );
-        })}
+        {photos.map((photo, i) => (
+          <button key={photo.id} type="button" role="listitem" className={i === index ? 'on' : ''} aria-label={`${photoKind(photo)} ${i + 1}`} onClick={() => go(i)}>
+            <OrderPhotoImg photo={photo} urls={known} full={false} sign={sign} />
+          </button>
+        ))}
       </div>
       {full && createPortal(
         <OrderPhotoFull
@@ -217,7 +258,13 @@ function OrderPhotoFull({ photos, index, urls, onIndex, onClose }: {
         onPointerCancel={pointerUp}
         onDoubleClick={() => { setScale((s) => (s > 1 ? 1 : 2)); setPan({ x: 0, y: 0 }); }}
       >
-        {src ? <img src={src} alt="" draggable={false} style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})` }} /> : <span>Loading photo…</span>}
+        {src ? <img src={src} alt="" draggable={false} style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})` }} onError={(e) => {
+          const img = e.currentTarget;
+          const original = photo ? urls[photo.path] : '';
+          if (!original || img.dataset.fallback === '1' || img.src === original) return;
+          img.dataset.fallback = '1';
+          img.src = original;
+        }} /> : <span>Loading photo…</span>}
         {photos.length > 1 && scale === 1 && (
           <>
             <button type="button" className="order-photo-arrow prev" aria-label="Previous photo" onClick={() => onIndex(index - 1)}>‹</button>
@@ -231,7 +278,13 @@ function OrderPhotoFull({ photos, index, urls, onIndex, onClose }: {
           const thumb = srcFor(item, urls, false) || (i === index ? srcFor(item, urls, true) : '');
           return (
             <button key={item.id} type="button" className={i === index ? 'on' : ''} aria-label={`${photoKind(item)} ${i + 1}`} onClick={() => onIndex(i)}>
-              {thumb ? <img src={thumb} alt="" /> : <span />}
+              {thumb ? <img src={thumb} alt="" onError={(e) => {
+                const img = e.currentTarget;
+                const original = urls[item.path];
+                if (!original || img.dataset.fallback === '1' || img.src === original) return;
+                img.dataset.fallback = '1';
+                img.src = original;
+              }} /> : <span />}
             </button>
           );
         })}

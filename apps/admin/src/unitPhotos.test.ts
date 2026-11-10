@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { derivativePath, isStockPhoto, listThumbPhoto, orderScreenPhotos, photoKind } from './unitPhotos.ts';
+import { derivativePath, isStockPhoto, listThumbPhoto, orderScreenPhotos, photoDisplayUrl, photoKind } from './unitPhotos.ts';
 
 const rows = [
   { id: 2, source: 'stock', sort_order: 0, path: 's' },
@@ -22,6 +22,16 @@ test('stock photos are the manufacturer shots; camera and other sources are the 
   assert.equal(isStockPhoto({ source: null }), false);
   assert.equal(photoKind({ source: 'stock' }), 'Stock photo');
   assert.equal(photoKind({ source: 'camera' }), 'Real photo');
+});
+
+test('order photos use the original file when the small web copy was not signed', () => {
+  const original = '5487ca47-6147-4fe8-bc6d-46b6472726ba/11716/capture.jpg';
+  const web = derivativePath(original, 400);
+  assert.equal(photoDisplayUrl(original, { [original]: 'https://files.example/original.jpg' }), 'https://files.example/original.jpg');
+  assert.equal(
+    photoDisplayUrl(original, { [original]: 'https://files.example/original.jpg', [web || '']: 'https://files.example/thumb.webp' }),
+    'https://files.example/thumb.webp',
+  );
 });
 
 test('thumbnail and detail keys stay on the web derivatives, not the original file', () => {
