@@ -454,7 +454,7 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
 
   function openOrderOrShipment(o: WebOrder) {
     const ship = listShipments(orders || [], { links: bundleLinks, splitIds: bundleSplits, rates: bundleRates as never[] })
-      .find((row) => row.items.some((item) => item.id === o.id));
+      .find((row) => row.items.some((item: WebOrder) => item.id === o.id));
     if (ship?.bundled) {
       setOpen(null);
       setOpenShipmentId(ship.id);
