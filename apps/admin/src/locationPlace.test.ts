@@ -177,4 +177,8 @@ describe('sku missing a upc', () => {
     assert.deepEqual(upcToStore('036000291452'), { ok: true, upc: '036000291452' });
     assert.equal(upcToStore('123').ok, false);
   });
+
+  it('lets the prompt mark the item as having no UPC', () => {
+    assert.deepEqual(upcToStore('', true), { ok: true, upc: 'Does not apply' });
+  });
 });

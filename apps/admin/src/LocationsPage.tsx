@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import bwipjs from 'bwip-js/browser';
 import { scanBarcode } from './barcodeCamera';
+import { hasUpcValue } from './upcValidate';
 import { errText } from './errText';
 import { scannerInputMode } from './kiosk';
 import { AppItemDetail } from './appMode/AppItemDetail';
@@ -434,6 +435,12 @@ export function LocationsPage({
       }
       const missing = skuMissingUpc(parts[0], candidates);
       if (missing) {
+        const marked = await client.rpc(canManage ? 'portal_inventory_detail' : 'staff_inventory_detail', { p_sku: missing.sku });
+        const unit = marked.data && typeof marked.data === 'object' ? (marked.data as { unit?: { upc?: unknown; upc_does_not_apply?: unknown; listing_specs?: unknown } }).unit : null;
+        if (!marked.error && unit && hasUpcValue(unit)) {
+          rememberSku(missing.sku);
+          return;
+        }
         setUpcAsk({ ...missing, value: '' });
         setUpcAskError('');
         setBulkDraft('');
@@ -448,10 +455,10 @@ export function LocationsPage({
     }
   }
 
-  async function saveAskedUpc(raw?: string) {
+  async function saveAskedUpc(raw?: string, none = false) {
     if (!upcAsk || lock.current) return;
     const typed = raw ?? upcAsk.value;
-    const stored = upcToStore(typed);
+    const stored = upcToStore(typed, none);
     if (!stored.ok) {
       setUpcAskError(stored.message);
       return;
@@ -854,6 +861,7 @@ export function LocationsPage({
                   </span>
                 </label>
                 {upcAskError && <p className="loc-error" role="alert">{upcAskError}</p>}
+                <button type="button" className="loc-upc-none" disabled={busy} onClick={() => void saveAskedUpc('', true)}>No UPC</button>
                 <button type="button" className="loc-upc-cancel" disabled={busy} onClick={() => { setUpcAsk(null); setUpcAskError(''); setBulkDraft(upcAsk.sku); }}>Cancel</button>
               </div>
             )}
