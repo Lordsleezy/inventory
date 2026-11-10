@@ -1761,18 +1761,26 @@ html.app-mode .nr-steps {
   font-size: 15px;
 }
 html.app-mode .nr-open-square {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  box-sizing: border-box;
   min-height: 44px;
   border-radius: 12px !important;
   background: #2c2c2e !important;
   color: #fff !important;
   border: 0 !important;
+  text-decoration: none;
+  font-size: 16px;
+  font-weight: 600;
 }
 html.app-mode .nr-card-finish {
   border: 0;
   border-radius: 14px;
   min-height: 52px;
-  background: #fff; color: #000;
-  color: #fff;
+  background: #fff;
+  color: #000;
   font-size: 17px;
   font-weight: 700;
   width: 100%;

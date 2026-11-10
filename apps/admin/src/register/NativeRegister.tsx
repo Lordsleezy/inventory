@@ -18,6 +18,7 @@ import { unitThumbUrl } from './units';
 import type { ReceiptPayload } from './sale';
 import { downloadReceiptText, printReceiptHtml, receiptHtml } from './sale';
 import { formatPoints } from './CustomerAttach';
+import { squareLaunchUrl } from './squareLaunch';
 
 const moneyEntry = /^\d*(?:\.\d{0,2})?$/;
 const SALE_OVERRIDE = 'Sale price';
@@ -31,14 +32,6 @@ export function tenderSuggestions(dueCents: number): number[] {
   const next100 = Math.ceil(dueCents / 10000) * 10000;
   return [...new Set([exact, nextDollar, next5, next20, next100].filter(v => v >= dueCents))];
 }
-
-function openSquareApp() {
-  const tried = window.open('squareup://', '_blank');
-  if (!tried) {
-    window.location.href = 'https://squareup.com/dashboard';
-  }
-}
-
 
 type ManualPayment = {
   quote: TicketQuote;
@@ -660,7 +653,7 @@ export function NativePaySheets(p: NativeSheetsProps) {
               <li>Confirm here after Square says paid</li>
             </ol>
             {p.error ? <p className="error">{p.error}</p> : null}
-            <button type="button" className="secondary nr-open-square" onClick={openSquareApp}>Open Square</button>
+            <a className="secondary nr-open-square" href={squareLaunchUrl(navigator.userAgent)}>Open Square</a>
             <button type="button" className="nr-card-finish" disabled={p.busy} onClick={() => p.completeManualCard()}>
               {p.busy ? 'Recording sale…' : 'Card approved — finish sale'}
             </button>
