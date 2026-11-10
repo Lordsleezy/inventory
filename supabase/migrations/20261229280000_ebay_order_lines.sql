@@ -1,10 +1,16 @@
 begin;
 
--- One eBay order can have several Floor rows. The old key was one row per order id.
+-- One eBay order can have several Floor rows. The old channel key was one row per order id.
+-- web_orders.order_no stays the eBay order number; uniqueness is per SKU so the other lines fit.
 alter table public.channel_orders add column if not exists line_item_id text not null default '';
 alter table public.channel_orders drop constraint if exists channel_orders_pkey;
 alter table public.channel_orders add constraint channel_orders_pkey
   primary key (store_id, provider, order_id, line_item_id);
+
+drop index if exists public.web_orders_order_no_key;
+create unique index if not exists web_orders_order_no_sku_key
+  on public.web_orders (order_no, sku)
+  where order_no is not null;
 
 -- A refund eBay names on one line voids that line only.
 create or replace function public.floor_reconcile_ebay_line_refund(
