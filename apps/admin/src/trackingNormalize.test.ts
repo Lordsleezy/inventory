@@ -35,6 +35,13 @@ test('a routing barcode is the tracking number printed under it', () => {
   assert.equal(normalizeTracking('9434 6081 0624 4728 5422 07'), RICE);
 });
 
+test('a (420) ZIP and (94) barcode is the tracking number on the order', () => {
+  const stored = '9434608106245773021655';
+  assert.equal(normalizeTracking('(420)890113784(94)34608106245773021655'), stored);
+  assert.equal(matchesOrderTracking({ tracking_number: stored }, '(420)890113784(94)34608106245773021655'), true);
+  assert.equal(normalizeTracking('(420)890113784(94)34608106245773021665'), '9434608106245773021665');
+});
+
 test('a FedEx 34-digit barcode keeps its tracking number', () => {
   const barcode = '1111111111111111111111222222222222';
   assert.equal(barcode.length, 34);
