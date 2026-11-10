@@ -241,7 +241,7 @@ export async function getShippingServiceDetails(token) {
 }
 
 function tradingCallWrites(callName) {
-  return /^(Revise|End|Add|Set|Upload|Relist|VerifyAdd|CompleteSale)/i.test(String(callName || ""));
+  return /^(Revise|End|Add|Set|Upload|Relist|VerifyAdd|CompleteSale|Send)/i.test(String(callName || ""));
 }
 
 async function tradingCall(token, callName, innerXml, account) {
@@ -979,6 +979,10 @@ export async function addFixedPriceItem(token, item, account) {
     }
     throw err;
   }
+}
+
+export async function ebayTradingCall(token, callName, innerXml, account) {
+  return tradingCall(token, callName, innerXml, account);
 }
 
 /** True when the active listing should not be ended (open sale activity). */

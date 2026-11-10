@@ -15,6 +15,7 @@ import { canBuyLabel, hasLabel, orderCanStepBack, orderChip, orderNeedsLabel, or
 import { loadOrderLocations, locationCompare } from './locationOrder';
 import { useVisibleInterval } from './useVisibleInterval';
 import { ScanOutPanel } from './ScanOutPanel';
+import { BundleBar } from './BundleBar';
 import { PackLabelScan } from './PackLabelScan';
 import { labelUploadUi, type LabelUploadResponse } from './labelUploadFeedback';
 import { LabelTrackingPicker, LabelTrackingResult } from './LabelTrackingResult';
@@ -153,6 +154,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
     });
   };
   const [locations, setLocations] = useState<Record<string, string[]>>({});
+  const [bundleIds, setBundleIds] = useState<string[]>([]);
   const [locationOptions, setLocationOptions] = useState<{ code: string }[]>([]);
   const [error, setError] = useState('');
   const [labelHit, setLabelHit] = useState<{ orderId: string; number: string; carrier?: string | null } | null>(null);
@@ -838,12 +840,27 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
         <p className="hint">{summary.channels.map((row) => `${channelLabel(row.channel)} ${row.count}`).join(' · ')} · {money(summary.totals.total)}</p>
       )}
 
-      {active.length === 0
-        ? <div className="empty">{view === 'all' ? 'No orders match this filter.' : view === 'needsLabel' ? 'No orders are waiting on a label.' : view === 'toShip' ? 'Nothing to ship.' : view === 'packaged' ? 'Nothing is waiting on a carrier scan.' : view === 'shipped' ? 'None in transit.' : view === 'delivered' ? 'No delivered orders yet.' : 'None.'}</div>
+      {orders && (
+        <BundleBar
+          client={client}
+          accessToken={accessToken}
+          orders={orders}
+          segmentIds={active.map((o) => o.id)}
+          locations={locations}
+          photoUrls={photoUrls}
+          photoMap={photoMap}
+          money={money}
+          isAdmin={!packOnly}
+          onRefresh={() => void load()}
+          onMembers={setBundleIds}
+        />
+      )}
+      {active.filter((o) => !bundleIds.includes(o.id)).length === 0
+        ? (active.some((o) => bundleIds.includes(o.id)) ? null : <div className="empty">{view === 'all' ? 'No orders match this filter.' : view === 'needsLabel' ? 'No orders are waiting on a label.' : view === 'toShip' ? 'Nothing to ship.' : view === 'packaged' ? 'Nothing is waiting on a carrier scan.' : view === 'shipped' ? 'None in transit.' : view === 'delivered' ? 'No delivered orders yet.' : 'None.'}</div>)
         : <table className="desk-table">
             <thead><tr><th>Order</th><th>Item</th><th>Channel</th><th>Status</th><th>Total</th></tr></thead>
             <tbody>
-              {active.map((o) => {
+              {active.filter((o) => !bundleIds.includes(o.id)).map((o) => {
                 const linked = o.match_status === 'matched' || (!!o.sku && o.sku !== 'UNMATCHED' && !!o.sale_id);
                 const title = linked ? (o.title || o.marketplace_title || 'Item') : (o.marketplace_title || o.title || 'Marketplace sale');
                 const where = locations[o.sku]?.[0] || 'No location';
