@@ -4,7 +4,7 @@ import type { WebOrder } from './OrdersPage';
 import { listThumbPhoto, type UnitPhoto } from './unitPhotos';
 import { errText } from './errText';
 import { floorFunctionUrl } from './floorApi';
-import { DEFAULT_RATES, groupOpenOrders, type BundleGroup, type BundleItem, type BundleRate } from '../../../shared/bundle-shipping.mjs';
+import { DEFAULT_RATES, groupBundleReviews, groupOpenOrders, type BundleGroup, type BundleItem, type BundleRate } from '../../../shared/bundle-shipping.mjs';
 
 type Link = { order_id: string; peer_id: string };
 
@@ -65,14 +65,16 @@ export function BundleBar({ client, accessToken, orders, segmentIds, locations, 
   const [busy, setBusy] = useState(false);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [combined, setCombined] = useState('eBay combined weight has not been confirmed.');
+  const [appliedIds, setAppliedIds] = useState<string[]>([]);
 
   async function loadState() {
     const { data, error } = await client.rpc('portal_bundle_state');
     if (error || !data) return;
-    const body = data as { rates?: BundleRate[]; splits?: string[]; links?: Link[]; combined_weight?: { active?: boolean; rule?: string } };
+    const body = data as { rates?: BundleRate[]; splits?: string[]; links?: Link[]; combined_weight?: { active?: boolean; rule?: string }; applied_order_ids?: string[] };
     if (body.rates?.length) setRates(body.rates);
     setSplits((body.splits || []).map(String));
     setLinks(body.links || []);
+    setAppliedIds((body.applied_order_ids || []).map(String));
     setCombined(body.combined_weight?.active
       ? `eBay combined weight is on (${body.combined_weight.rule || 'COMBINED_ITEM_WEIGHT'}).`
       : 'eBay combined weight is off.');
@@ -86,6 +88,10 @@ export function BundleBar({ client, accessToken, orders, segmentIds, locations, 
     [items, splits, links, rates],
   );
   const visible = groups.filter((group) => group.items.some((item) => segmentIds.includes(item.id)));
+  const reviews = useMemo(
+    () => groupBundleReviews(items, { rates, appliedIds }),
+    [items, rates, appliedIds],
+  );
   const memberIds = groups.flatMap((group) => group.items.map((item) => item.id)).join(',');
 
   useEffect(() => { onMembers(memberIds ? memberIds.split(',') : []); }, [memberIds]);
@@ -124,17 +130,27 @@ export function BundleBar({ client, accessToken, orders, segmentIds, locations, 
       confirm_cents: amount,
       order_ids: group.items.map((item) => item.id),
     });
+    if (json?.ok) setAppliedIds((prev) => [...prev, ...group.items.map((item) => item.id)]);
     if (json?.needs_confirm && json.preview?.money) {
       const next = json.preview.money.action === 'invoice' ? json.preview.money.invoice_cents : json.preview.money.refund_cents;
       setNote(`The price changed to ${money(next)}. Tap Apply bundle price again to send that amount.`);
     }
   }
 
-  if (!visible.length && !open && !isAdmin) return null;
+  if (!visible.length && !reviews.length && !open && !isAdmin) return null;
 
   return (
     <div>
       {isAdmin && <p style={{ color: '#9a9a9a', margin: '8px 0' }}>{combined}</p>}
+      {isAdmin && reviews.map((group) => (
+        <button key={group.id} type="button" onClick={() => { setOpen(group); setNote(''); }} style={{ ...rowStyle, display: 'block', width: '100%', textAlign: 'left', background: '#000' }}>
+          <strong>Proposed refund {money(group.money.refund_cents)}</strong>
+          <div style={{ color: '#9a9a9a', marginTop: 4 }}>{group.buyer} · shipped · {group.items.length} orders</div>
+          <div style={{ color: '#9a9a9a', marginTop: 4 }}>
+            Paid {money(group.money.separate_cents)} shipping. One-box price {money(group.money.bundle_cents)}. Nothing is sent until you tap Apply bundle price.
+          </div>
+        </button>
+      ))}
       {visible.map((group) => {
         const box = group.quote.package;
         return (

@@ -7,6 +7,7 @@ import {
   assertBundleConfirm,
   bundleMoneyPlan,
   combinedWeightDecision,
+  groupBundleReviews,
   groupOpenOrders,
   issueRefundBody,
   quoteBundle,
@@ -122,6 +123,49 @@ test('grouping keeps the same buyer and address, and drops other addresses and s
   );
   assert.equal(linked.length, 1);
   assert.equal(linked[0].items.length, 2);
+});
+
+test('a shipped pair stays on the approval list and an open pair does not', () => {
+  const shipped = [
+    box('06-15380-28307', {
+      buyer_name: 'gary walczak',
+      ship_line1: '1 Oak St',
+      ship_postal: '95663',
+      paid_at: '2026-11-01T18:25:17Z',
+      shipped_at: '2026-11-02T16:00:00Z',
+      length_in: 42,
+      width_in: 20,
+      height_in: 0.86,
+      weight_lb: 4,
+      shipping_cents: 3862,
+    }),
+    box('07-15378-29650', {
+      buyer_name: 'gary walczak',
+      ship_line1: '1 Oak St',
+      ship_postal: '95663',
+      paid_at: '2026-11-01T18:30:17Z',
+      shipped_at: '2026-11-02T16:00:00Z',
+      length_in: 42,
+      width_in: 20,
+      height_in: 0.86,
+      weight_lb: 4,
+      shipping_cents: 3862,
+    }),
+    box('open-a', {}),
+    box('open-b', {}),
+  ];
+  const reviews = groupBundleReviews(shipped);
+  assert.equal(reviews.length, 1);
+  assert.equal(reviews[0].buyer, 'gary walczak');
+  assert.equal(reviews[0].money.action, 'refund');
+  assert.equal(reviews[0].money.separate_cents, 7724);
+  assert.equal(reviews[0].quote.tier_cents, 2560);
+  assert.equal(reviews[0].money.bundle_cents, 3862);
+  assert.equal(reviews[0].money.refund_cents, 3862);
+  assert.equal(groupOpenOrders(shipped).length, 1);
+
+  const hidden = groupBundleReviews(shipped, { appliedIds: ['06-15380-28307'] });
+  assert.equal(hidden.length, 0);
 });
 
 test('shipping and label cost split by weight and add back to one box', () => {
