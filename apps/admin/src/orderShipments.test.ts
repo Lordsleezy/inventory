@@ -6,7 +6,7 @@ import {
   countShipments,
   listShipments,
   shipmentLead,
-} from './orderShipments';
+} from '../../../shared/order-shipments.mjs';
 import { ebayLineRepair, planEbayOrderLines, trackingUploads } from '../../../shared/ebay-order-lines.mjs';
 
 const base = {
