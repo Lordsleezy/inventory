@@ -20,6 +20,7 @@ import { PackLabelScan } from './PackLabelScan';
 import { labelUploadUi, type LabelUploadResponse } from './labelUploadFeedback';
 import { LabelTrackingPicker, LabelTrackingResult } from './LabelTrackingResult';
 import { LabelTrackingProblem } from './LabelTrackingProblem';
+import { canManualBundle, canUnbundle, listShipments } from './orderShipments';
 
 const CHANNEL_LABEL: Record<string, string> = {
   website: 'Website',
@@ -169,6 +170,9 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
   const [labelOrder, setLabelOrder] = useState<WebOrder | null>(null);
   const [trackEvents, setTrackEvents] = useState<Record<string, { status?: string; status_detail?: string | null; location?: string | null; occurred_at?: string | null }[]>>({});
   const [scanOut, setScanOut] = useState(false);
+  const [bundleLinks, setBundleLinks] = useState<{ order_id: string; peer_id: string }[]>([]);
+  const [bundleSplits, setBundleSplits] = useState<string[]>([]);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   const load = useCallback(async () => {
     // No practical date hide: cover store day-one history (portal still clamps to p_days).
@@ -185,6 +189,10 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
       setPhotoMap(photos);
       mergePhotoUrls(await signListThumbs(client, listThumbOriginalPaths(photos)));
     }
+    const { data: bundleState } = await client.rpc('portal_bundle_state');
+    const state = (bundleState || {}) as { links?: { order_id: string; peer_id: string }[]; splits?: string[] };
+    setBundleLinks(Array.isArray(state.links) ? state.links : []);
+    setBundleSplits((state.splits || []).map(String));
   }, [client, storeId]);
   const sign = useCallback((paths: string[]) => signPhotoUrls(client, paths), [client]);
   useEffect(() => {
@@ -426,31 +434,57 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
     setBusy(null);
   }
 
-  const { groups, rawCount } = useMemo(() => {
+  const { groups, rawCount, shipmentCounts } = useMemo(() => {
     // Sandbox / test rows are not real customer orders — keep them out of the counts.
     const list = (orders || []).filter(o => o.payment_env !== 'sandbox' && !(o.order_no || '').toLowerCase().startsWith('sandbox'));
     const byStatus = statusFilter === 'all'
       ? list
       : list.filter(o => o.status === statusFilter);
+    const next = {
+      all: byStatus,
+      needsLabel: byStatus.filter(o => orderStage(o) === 'needsLabel'),
+      toShip: byStatus.filter(o => orderStage(o) === 'toShip'),
+      packaged: byStatus.filter(o => orderStage(o) === 'packaged'),
+      shipped: byStatus.filter(o => orderStage(o) === 'shipped'),
+      delivered: byStatus.filter(o => orderStage(o) === 'delivered'),
+      canceled: byStatus.filter(o => orderStage(o) === 'canceled'),
+    } as Record<OrderView, WebOrder[]>;
+    const opts = { links: bundleLinks, splitIds: bundleSplits };
     return {
       rawCount: list.length,
-      groups: {
-        all: byStatus,
-        needsLabel: byStatus.filter(o => orderStage(o) === 'needsLabel'),
-        toShip: byStatus.filter(o => orderStage(o) === 'toShip'),
-        packaged: byStatus.filter(o => orderStage(o) === 'packaged'),
-        shipped: byStatus.filter(o => orderStage(o) === 'shipped'),
-        delivered: byStatus.filter(o => orderStage(o) === 'delivered'),
-        canceled: byStatus.filter(o => orderStage(o) === 'canceled'),
-      } as Record<OrderView, WebOrder[]>,
+      groups: next,
+      shipmentCounts: {
+        all: next.all.length,
+        needsLabel: listShipments(next.needsLabel, opts).length,
+        toShip: listShipments(next.toShip, opts).length,
+        packaged: listShipments(next.packaged, opts).length,
+        shipped: next.shipped.length,
+        delivered: next.delivered.length,
+        canceled: next.canceled.length,
+      } as Record<OrderView, number>,
     };
-  }, [orders, statusFilter]);
+  }, [orders, statusFilter, bundleLinks, bundleSplits]);
 
-  const active = groups[view].slice().sort((a,b) => {
-    if (view !== 'needsLabel' && view !== 'toShip' && view !== 'packaged') return 0;
-    return locationCompare(locations[a.sku]?.[0] || '99999', locations[b.sku]?.[0] || '99999');
-  });
+  type DeskShipment = { id: string; bundled: boolean; itemCount: number; items: WebOrder[]; lead: WebOrder };
+  const activeShipments = useMemo((): DeskShipment[] => {
+    if (view !== 'needsLabel' && view !== 'toShip' && view !== 'packaged') {
+      return groups[view].map((o) => ({ id: o.id, bundled: false, itemCount: 1, items: [o], lead: o }));
+    }
+    const ships = listShipments(groups[view], { links: bundleLinks, splitIds: bundleSplits }) as DeskShipment[];
+    return ships.slice().sort((a: DeskShipment, b: DeskShipment) => locationCompare(
+      locations[a.lead.sku]?.[0] || '99999',
+      locations[b.lead.sku]?.[0] || '99999',
+    ));
+  }, [groups, view, bundleLinks, bundleSplits, locations]);
+
+  const active = activeShipments.flatMap((ship: DeskShipment) => ship.items);
   const summary = useMemo(() => breakdown(groups[view]), [groups, view]);
+  const selectMode = view === 'needsLabel' || view === 'toShip';
+  const selectedOrders = useMemo(() => {
+    const ids = new Set(selectedIds);
+    return (orders || []).filter((o) => ids.has(o.id));
+  }, [orders, selectedIds]);
+  const bundleReady = canManualBundle(selectedOrders);
 
   useEffect(() => {
     const ids = active.filter((o) => o.packaged_at || o.shipped_at || o.delivered_at).slice(0, 25).map((o) => o.id);
@@ -772,18 +806,18 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
     {error && <div className="alert" role="alert">{error}<button onClick={() => setError('')}>Dismiss</button></div>}
     <div className="inventory-tabs" role="tablist" aria-label="Order status">
       {(packOnly ? [
-        ['toShip', groups.toShip.length],
-        ['packaged', groups.packaged.length],
+        ['toShip', shipmentCounts.toShip],
+        ['packaged', shipmentCounts.packaged],
       ] as const : [
-        ['all', groups.all.length],
-        ['needsLabel', groups.needsLabel.length],
-        ['toShip', groups.toShip.length],
-        ['packaged', groups.packaged.length],
-        ['shipped', groups.shipped.length],
-        ['delivered', groups.delivered.length],
-        ['canceled', groups.canceled.length],
+        ['all', shipmentCounts.all],
+        ['needsLabel', shipmentCounts.needsLabel],
+        ['toShip', shipmentCounts.toShip],
+        ['packaged', shipmentCounts.packaged],
+        ['shipped', shipmentCounts.shipped],
+        ['delivered', shipmentCounts.delivered],
+        ['canceled', shipmentCounts.canceled],
       ] as const).map(([key, count]) => (
-        <button key={key} type="button" role="tab" aria-selected={view === key} className={view === key ? 'active' : ''} onClick={() => selectView(key)}>
+        <button key={key} type="button" role="tab" aria-selected={view === key} className={view === key ? 'active' : ''} onClick={() => { selectView(key); setSelectedIds([]); }}>
           {VIEW_LABEL[key]} {count}
         </button>
       ))}
@@ -821,18 +855,51 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
         <p className="hint">{summary.channels.map((row) => `${channelLabel(row.channel)} ${row.count}`).join(' · ')} · {money(summary.totals.total)}</p>
       )}
 
-      {active.length === 0
+      {activeShipments.length === 0
         ? <div className="empty">{view === 'all' ? 'No orders match this filter.' : view === 'needsLabel' ? 'No orders are waiting on a label.' : view === 'toShip' ? 'Nothing to ship.' : view === 'packaged' ? 'Nothing is waiting on a carrier scan.' : view === 'shipped' ? 'None in transit.' : view === 'delivered' ? 'No delivered orders yet.' : 'None.'}</div>
         : <table className="desk-table">
-            <thead><tr><th>Order</th><th>Item</th><th>Channel</th><th>Status</th><th>Total</th></tr></thead>
+            <thead><tr>{selectMode ? <th aria-label="Select" /> : null}<th>Order</th><th>Item</th><th>Channel</th><th>Status</th><th>Total</th></tr></thead>
             <tbody>
-              {active.map((o) => {
+              {activeShipments.map((ship) => {
+                const o = ship.lead;
                 const linked = o.match_status === 'matched' || (!!o.sku && o.sku !== 'UNMATCHED' && !!o.sale_id);
-                const title = linked ? (o.title || o.marketplace_title || 'Item') : (o.marketplace_title || o.title || 'Marketplace sale');
+                const title = ship.bundled
+                  ? `${ship.itemCount} items · ${o.buyer_name || 'Buyer'}`
+                  : linked ? (o.title || o.marketplace_title || 'Item') : (o.marketplace_title || o.title || 'Marketplace sale');
                 const where = locations[o.sku]?.[0] || 'No location';
                 const rowPhoto = listThumbPhoto(photoMap[o.sku] || []);
-                return <tr key={o.id}>
-                  <td><button type="button" className="linkish" onClick={() => setOpenId(o.id)}>{o.order_no || 'Order'}</button></td>
+                const selected = ship.items.every((row) => selectedIds.includes(row.id));
+                const unbundleOk = ship.bundled && canUnbundle(ship.items).ok;
+                return <tr key={ship.id}>
+                  {selectMode ? (
+                    <td>
+                      <input
+                        type="checkbox"
+                        checked={selected}
+                        aria-label={`Select ${ship.itemCount} item shipment`}
+                        onChange={() => {
+                          const ids = ship.items.map((row) => row.id);
+                          setSelectedIds((prev) => {
+                            const allOn = ids.every((id) => prev.includes(id));
+                            if (allOn) return prev.filter((id) => !ids.includes(id));
+                            return [...new Set([...prev, ...ids])];
+                          });
+                        }}
+                      />
+                    </td>
+                  ) : null}
+                  <td>
+                    <button type="button" className="linkish" onClick={() => setOpenId(o.id)}>{ship.bundled ? `${ship.itemCount} items` : (o.order_no || 'Order')}</button>
+                    {unbundleOk ? (
+                      <div><button type="button" className="text-button" onClick={() => void (async () => {
+                        if (!window.confirm(`Split these ${ship.itemCount} items back into separate rows?`)) return;
+                        setBusy('unbundle'); setError('');
+                        const { error: e } = await client.rpc('portal_unbundle_orders', { p_ids: ship.items.map((row) => row.id) });
+                        if (e) setError(e.message === 'label_exists' ? 'Void the label first, then unbundle.' : e.message);
+                        await load(); setBusy(null);
+                      })()}>Unbundle</button></div>
+                    ) : null}
+                  </td>
                   <td>
                     <div className="desk-order-item">
                       <UnitListThumb
@@ -848,11 +915,36 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
                   </td>
                   <td>{channelLabel(o.channel)}</td>
                   <td>{orderChip(o).text}</td>
-                  <td className="desk-num">{money(o.total_cents)}</td>
+                  <td className="desk-num">{money(ship.items.reduce((n, row) => n + Number(row.total_cents || 0), 0))}</td>
                 </tr>;
               })}
             </tbody>
           </table>}
+      {selectMode && selectedIds.length >= 2 && (
+        <div className="orders-bundle-bar desk-bundle-bar">
+          <button
+            type="button"
+            className="orders-bundle-btn"
+            disabled={!!busy || !bundleReady.ok}
+            onClick={() => void (async () => {
+              if (!bundleReady.ok) { setError(bundleReady.message || 'Cannot bundle.'); return; }
+              if (!window.confirm(`Bundle ${selectedOrders.length} items for ${selectedOrders[0].buyer_name || 'this buyer'} into one shipment / one label?`)) return;
+              setBusy('bundle'); setError('');
+              const { error: e } = await client.rpc('portal_bundle_orders', { p_ids: selectedOrders.map((row) => row.id) });
+              if (e) {
+                setError(e.message === 'different_buyer' ? 'Different buyers — cannot bundle.'
+                  : e.message === 'different_address' ? 'Ship-to addresses do not match — cannot bundle.'
+                    : e.message === 'label_exists' ? 'Void the label first, then bundle.'
+                      : e.message);
+              } else setSelectedIds([]);
+              await load(); setBusy(null);
+            })}
+          >
+            {busy === 'bundle' ? 'Bundling…' : `Bundle ${selectedIds.length}`}
+          </button>
+          {!bundleReady.ok && bundleReady.message ? <p className="orders-bundle-hint">{bundleReady.message}</p> : null}
+        </div>
+      )}
       {openId && active.some((o) => o.id === openId) && createPortal(
         <>
           <button type="button" className="desk-drawer-scrim" aria-label="Close order" onClick={() => setOpenId(null)} />

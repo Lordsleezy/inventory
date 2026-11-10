@@ -9,6 +9,70 @@ import { classifyCarrier } from "../../shared/tracking-validate.mjs";
 
 const MAX_BYTES = 8_000_000;
 
+function normAddr(value) {
+  return String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+/** Copy lead label + tracking onto open peers in the same one-box shipment. */
+export async function mirrorShipmentLabel(sb, storeId, lead) {
+  if (!lead?.id || !storeId) return { ok: true, mirrored: 0, skus: [] };
+  if (!lead.label_storage_path && !lead.label_uploaded_at && !lead.tracking_number) {
+    return { ok: true, mirrored: 0, skus: [] };
+  }
+  const { data: peers, error } = await sb
+    .from("web_orders")
+    .select("*")
+    .eq("store_id", storeId)
+    .eq("channel", lead.channel)
+    .eq("status", "paid")
+    .eq("fulfillment", "ship")
+    .is("shipped_at", null)
+    .is("canceled_at", null)
+    .neq("id", lead.id);
+  if (error) return { ok: false, error: error.message, mirrored: 0, skus: [] };
+  const { data: splits } = await sb.from("bundle_splits").select("order_id").eq("store_id", storeId);
+  const splitIds = new Set((splits || []).map((row) => String(row.order_id)));
+  const { data: links } = await sb.from("bundle_links").select("order_id, peer_id").eq("store_id", storeId);
+  const linked = new Set();
+  for (const link of links || []) {
+    if (String(link.order_id) === String(lead.id)) linked.add(String(link.peer_id));
+    if (String(link.peer_id) === String(lead.id)) linked.add(String(link.order_id));
+  }
+  const buyer = normAddr(lead.buyer_name);
+  const sameAddress = (peer) =>
+    buyer
+    && buyer === normAddr(peer.buyer_name)
+    && normAddr(lead.ship_line1)
+    && normAddr(lead.ship_line1) === normAddr(peer.ship_line1)
+    && normAddr(lead.ship_line2) === normAddr(peer.ship_line2)
+    && normAddr(lead.ship_city) === normAddr(peer.ship_city)
+    && normAddr(lead.ship_region) === normAddr(peer.ship_region)
+    && normAddr(lead.ship_postal) === normAddr(peer.ship_postal);
+  const skus = [];
+  for (const peer of peers || []) {
+    if (splitIds.has(String(peer.id))) continue;
+    if (!linked.has(String(peer.id)) && !sameAddress(peer)) continue;
+    const { error: upErr } = await sb.from("web_orders").update({
+      label_storage_path: lead.label_storage_path || peer.label_storage_path,
+      label_file_name: lead.label_file_name || peer.label_file_name,
+      label_mime: lead.label_mime || peer.label_mime,
+      label_uploaded_at: lead.label_uploaded_at || peer.label_uploaded_at,
+      label_purchased_at: lead.label_purchased_at || peer.label_purchased_at,
+      label_origin: lead.label_origin || peer.label_origin,
+      label_url: lead.label_url || peer.label_url,
+      tracking_number: lead.tracking_number || peer.tracking_number,
+      carrier: lead.carrier || peer.carrier,
+      tracking_url: lead.tracking_url || peer.tracking_url,
+      tracking_needs_entry: lead.tracking_needs_entry,
+      label_tracking_mismatch: lead.label_tracking_mismatch,
+      tracking_exception: lead.tracking_exception,
+      updated_at: new Date().toISOString(),
+    }).eq("id", peer.id).eq("store_id", storeId);
+    if (!upErr) skus.push(peer.sku);
+  }
+  return { ok: true, mirrored: skus.length, skus };
+}
+
 export function safeLabelName(name, fallback = "label.pdf") {
   const base = String(name || fallback).split(/[/\\]/).pop() || fallback;
   const clean = base.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80);
@@ -152,6 +216,12 @@ export async function attachUploadedLabel(sb, storeId, order, file, deps = {}) {
       registered = { ok: false, error: err.message };
     }
   }
+  let mirrored = null;
+  try {
+    mirrored = await (deps.mirrorShipment || mirrorShipmentLabel)(sb, storeId, saved);
+  } catch (err) {
+    mirrored = { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
   const needsManual = resolved.needsEntry && !resolved.tracking;
   return {
     ok: true,
@@ -174,6 +244,7 @@ export async function attachUploadedLabel(sb, storeId, order, file, deps = {}) {
     })),
     needs_picker: Boolean(extracted.needsPicker && !resolved.tracking),
     registered,
+    mirrored,
     expense_posted: false,
   };
 }
@@ -200,7 +271,13 @@ export async function setOrderTrackingNumber(sb, storeId, order, { tracking, car
   } catch (err) {
     registered = { ok: false, error: err.message };
   }
-  return { ok: true, status: 200, order: saved, registered, expense_posted: false };
+  let mirrored = null;
+  try {
+    mirrored = await (deps.mirrorShipment || mirrorShipmentLabel)(sb, storeId, saved);
+  } catch (err) {
+    mirrored = { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+  return { ok: true, status: 200, order: saved, registered, mirrored, expense_posted: false };
 }
 
 async function loadLabelBytes(sb, order) {

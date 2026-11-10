@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { floorFunctionUrl } from './floorApi';
 import { orderStage, type StageOrder } from './orderStage';
 import { isReplacementReturn, type ReturnRow } from './returns/returnsShared';
+import { countShipments } from './orderShipments';
 
 export type DeskPulse = {
   toShip: number | null;
@@ -61,8 +62,8 @@ export async function loadDeskPulse(
       const row = o as StageOrder & { payment_env?: string | null; order_no?: string | null };
       return row.payment_env !== 'sandbox' && !(row.order_no || '').toLowerCase().startsWith('sandbox');
     });
-    pulse.toShip = rows.filter((o) => orderStage(o) === 'toShip').length;
-    pulse.needsLabel = rows.filter((o) => orderStage(o) === 'needsLabel').length;
+    pulse.toShip = countShipments(rows.filter((o) => orderStage(o) === 'toShip'));
+    pulse.needsLabel = countShipments(rows.filter((o) => orderStage(o) === 'needsLabel'));
   }
   if (returns.status === 'fulfilled' && !returns.value.error) {
     const body = (returns.value.data || {}) as { rows?: ReturnRow[] };
