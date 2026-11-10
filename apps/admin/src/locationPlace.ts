@@ -1,4 +1,4 @@
-import { digitsOnly, normalizeUpc, upcVariants } from './upcValidate.ts';
+import { digitsOnly, normalizeUpc, upcValidationMessage, upcVariants } from './upcValidate.ts';
 
 export type LocationAllocation = { location_code: string; quantity: number };
 export type LocationMovePlan = { from: string | null; to: string | null; quantity: number };
@@ -85,6 +85,23 @@ export function resolveLocationCode(raw: string, candidates: ScanCandidate[]) {
   if (choices.length === 1) return { action: 'use' as const, sku: choices[0].sku };
   if (choices.length > 1) return { action: 'pick' as const, choices };
   return { action: 'miss' as const, upc: true };
+}
+
+/** A typed SKU with no barcode yet. A scanned UPC is already the barcode, so it does not ask. */
+export function skuMissingUpc(raw: string, candidates: ScanCandidate[]) {
+  const code = String(raw ?? '').trim();
+  if (!code || upcScanKeys(code).length) return null;
+  const row = candidates.find((item) => item.sku === code);
+  if (!row || String(row.upc || '').trim()) return null;
+  return { sku: row.sku, title: row.title || '' };
+}
+
+/** Barcode to store on the item. A bad scan stays on the prompt. */
+export function upcToStore(raw: string): { ok: true; upc: string } | { ok: false; message: string } {
+  const message = upcValidationMessage(raw);
+  if (message) return { ok: false, message };
+  const normalized = normalizeUpc(raw);
+  return { ok: true, upc: normalized.upcA || digitsOnly(raw) };
 }
 
 export function unitsLabel(count: number) {
@@ -187,6 +204,100 @@ export function bayTagCode(bayNo: number, rowBins: number[]): string {
   if (!rowBins.length) throw new Error('That bay has no rows.');
   const bins = rowBins[0];
   return slotTagCode(bayNo, 1, bins, bins === 0 ? null : 1);
+}
+
+export type BulkUpcAsk = { sku: string; title: string; value: string };
+
+export type BulkTagDraft = {
+  draft: string;
+  bay: string;
+  row: string;
+  bin: string;
+  skus: string[];
+  ask: BulkUpcAsk | null;
+};
+
+export type BulkTagMemory = {
+  session: string | null;
+  local: string | null;
+  /** Session cookie still present. A full app restart drops it. */
+  sessionLive: boolean;
+};
+
+function parseBulkTagDraft(raw: string | null): BulkTagDraft | null {
+  if (!raw) return null;
+  try {
+    const body = JSON.parse(raw) as Partial<BulkTagDraft>;
+    const skus = Array.isArray(body.skus) ? body.skus.map((sku) => String(sku).trim()).filter(Boolean) : [];
+    const draft = String(body.draft ?? '');
+    const bay = String(body.bay ?? '');
+    const row = String(body.row || '1');
+    const bin = String(body.bin || '1');
+    const askBody = body.ask;
+    const ask = askBody && String(askBody.sku || '').trim()
+      ? { sku: String(askBody.sku).trim(), title: String(askBody.title || ''), value: String(askBody.value || '') }
+      : null;
+    if (!skus.length && !draft.trim() && !bay && !ask) return null;
+    return { draft, bay, row, bin, skus, ask };
+  } catch {
+    return null;
+  }
+}
+
+/** The open tab wins. After a phone reload, the copy survives only for this app session. */
+export function readBulkTagDraft(memory: BulkTagMemory): BulkTagDraft | null {
+  const fromSession = parseBulkTagDraft(memory.session);
+  if (fromSession) return fromSession;
+  if (!memory.sessionLive) return null;
+  return parseBulkTagDraft(memory.local);
+}
+
+/** An empty form drops both copies. Anything typed keeps a session copy and a reload copy. */
+export function writeBulkTagDraft(memory: BulkTagMemory, draft: BulkTagDraft): BulkTagMemory {
+  const saved = parseBulkTagDraft(JSON.stringify(draft));
+  if (!saved) return { session: null, local: null, sessionLive: memory.sessionLive };
+  const raw = JSON.stringify(saved);
+  return { session: raw, local: raw, sessionLive: true };
+}
+
+const BULK_TAG_KEY = 'floor:location-bulk-tag';
+const BULK_TAG_COOKIE = 'floor_loc_bulk_session';
+
+function bulkTagMemory(): BulkTagMemory {
+  return {
+    session: sessionStorage.getItem(BULK_TAG_KEY),
+    local: localStorage.getItem(BULK_TAG_KEY),
+    sessionLive: document.cookie.split(';').some((part) => part.trim().startsWith(`${BULK_TAG_COOKIE}=`)),
+  };
+}
+
+function storeBulkTagMemory(memory: BulkTagMemory) {
+  if (memory.session == null) sessionStorage.removeItem(BULK_TAG_KEY);
+  else sessionStorage.setItem(BULK_TAG_KEY, memory.session);
+  if (memory.local == null) localStorage.removeItem(BULK_TAG_KEY);
+  else localStorage.setItem(BULK_TAG_KEY, memory.local);
+  if (memory.sessionLive && !document.cookie.split(';').some((part) => part.trim().startsWith(`${BULK_TAG_COOKIE}=`))) {
+    document.cookie = `${BULK_TAG_COOKIE}=1; Path=/; SameSite=Lax`;
+  }
+}
+
+export function loadBulkTagDraft(): BulkTagDraft | null {
+  try {
+    const memory = bulkTagMemory();
+    const draft = readBulkTagDraft(memory);
+    if (!memory.sessionLive) localStorage.removeItem(BULK_TAG_KEY);
+    return draft;
+  } catch {
+    return null;
+  }
+}
+
+export function saveBulkTagDraft(draft: BulkTagDraft) {
+  try {
+    storeBulkTagMemory(writeBulkTagDraft(bulkTagMemory(), draft));
+  } catch {
+    /* private mode still keeps the form until this page closes */
+  }
 }
 
 /** A smaller layout is refused while a removed slot still holds units. */

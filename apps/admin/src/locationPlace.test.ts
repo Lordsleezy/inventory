@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { addBulkSkus, bayTagCode, bayTitle, layoutBlocked, locationMenuLabel, locationPhrase, parseBulkSkus, planPlaceInBin, planUnassign, resolveLocationCode, slotTagCode, sortLocationChoices, unitsLabel, upcScanKeys } from './locationPlace.ts';
+import { addBulkSkus, bayTagCode, bayTitle, layoutBlocked, locationMenuLabel, locationPhrase, parseBulkSkus, planPlaceInBin, planUnassign, readBulkTagDraft, resolveLocationCode, skuMissingUpc, slotTagCode, sortLocationChoices, unitsLabel, upcScanKeys, upcToStore, writeBulkTagDraft } from './locationPlace.ts';
 
 describe('location phrases', () => {
   it('reads a bin and a floor spot the way the bay screen does', () => {
@@ -125,5 +125,56 @@ describe('upc scan into a location', () => {
       { sku: upc, title: 'The SKU itself', upc: null },
       { sku: '11921', title: 'Other', upc },
     ]), { action: 'use', sku: upc });
+  });
+});
+
+describe('bulk tag draft', () => {
+  const draft = { draft: '119', bay: '4', row: '2', bin: '3', skus: ['11921', '11944'], ask: null as null };
+  const blank = { session: null, local: null, sessionLive: false };
+
+  it('keeps the list for this session and for a reload that still has the session', () => {
+    const saved = writeBulkTagDraft(blank, draft);
+    assert.equal(saved.sessionLive, true);
+    assert.deepEqual(readBulkTagDraft({ ...blank, session: saved.session }), draft);
+    assert.deepEqual(readBulkTagDraft({ ...blank, sessionLive: true, local: saved.local }), draft);
+  });
+
+  it('drops a leftover list after the app session is gone', () => {
+    const saved = writeBulkTagDraft(blank, draft);
+    assert.equal(readBulkTagDraft({ ...blank, local: saved.local, sessionLive: false }), null);
+  });
+
+  it('clears both copies when the form is empty', () => {
+    const saved = writeBulkTagDraft(blank, draft);
+    assert.deepEqual(writeBulkTagDraft(saved, { draft: '  ', bay: '', row: '1', bin: '1', skus: [], ask: null }), {
+      session: null,
+      local: null,
+      sessionLive: true,
+    });
+  });
+
+  it('keeps an open UPC prompt with whatever was already scanned into it', () => {
+    const asking = { ...draft, draft: '', skus: ['11944'], ask: { sku: '11921', title: 'Cereal', value: '036000' } };
+    const saved = writeBulkTagDraft(blank, asking);
+    assert.deepEqual(readBulkTagDraft({ ...blank, session: saved.session }), asking);
+  });
+});
+
+describe('sku missing a upc', () => {
+  const cereal = { sku: '11921', title: 'Cereal', upc: null };
+
+  it('asks when the typed SKU has no barcode', () => {
+    assert.deepEqual(skuMissingUpc('11921', [cereal]), { sku: '11921', title: 'Cereal' });
+  });
+
+  it('stays quiet when the SKU already has a UPC or the scan was a UPC', () => {
+    assert.equal(skuMissingUpc('11921', [{ ...cereal, upc: '036000291452' }]), null);
+    assert.equal(skuMissingUpc('036000291452', [cereal]), null);
+    assert.equal(skuMissingUpc('11921', []), null);
+  });
+
+  it('stores a scanned UPC and rejects a bad one', () => {
+    assert.deepEqual(upcToStore('036000291452'), { ok: true, upc: '036000291452' });
+    assert.equal(upcToStore('123').ok, false);
   });
 });
