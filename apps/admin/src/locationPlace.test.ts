@@ -14,6 +14,8 @@ describe('location phrases', () => {
     assert.equal(bayTitle(21, 'Rugs and Mats'), 'Rugs and Mats');
     assert.equal(bayTitle(4, '  '), 'Bay 4');
     assert.equal(locationMenuLabel({ code: '21-1', bay_no: 21, row_no: 1, bin_no: null, bay_name: 'Rugs and Mats' }), 'Rugs and Mats');
+    assert.equal(locationMenuLabel({ code: '22-1-1', bay_no: 22, row_no: 1, bin_no: 1, bay_name: 'Large Items' }), 'Large Items · R1-B1');
+    assert.equal(locationMenuLabel({ code: '22-1-2', bay_no: 22, row_no: 1, bin_no: 2, bay_name: 'Large Items' }), 'Large Items · R1-B2');
     assert.equal(locationMenuLabel({ code: '4-2-2', bay_no: 4, row_no: 2, bin_no: 2 }), 'Bay 4 · R2-B2');
     assert.equal(sortLocationChoices([
       { code: '2-1-1', bay_no: 2, row_no: 1, bin_no: 1 },
