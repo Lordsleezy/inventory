@@ -14,6 +14,7 @@ import { fileToBase64, labelFileUrl, orderAdmin } from './orderLabel';
 import { openShippingLabel } from './labelPrint';
 import { canBuyLabel, hasLabel, orderCanStepBack, orderChip, orderNeedsLabel, orderStage, orderTimeline, packagedStale, shippedStale } from './orderStage';
 import { loadOrderLocations, locationCompare } from './locationOrder';
+import { sortLocationChoices, type LocationChoice } from './locationPlace';
 import { useVisibleInterval } from './useVisibleInterval';
 import { ScanOutPanel } from './ScanOutPanel';
 import { PackLabelScan } from './PackLabelScan';
@@ -158,7 +159,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
     });
   };
   const [locations, setLocations] = useState<Record<string, string[]>>({});
-  const [locationOptions, setLocationOptions] = useState<{ code: string }[]>([]);
+  const [locationOptions, setLocationOptions] = useState<LocationChoice[]>([]);
   const [error, setError] = useState('');
   const [labelHit, setLabelHit] = useState<{ orderId: string; number: string; carrier?: string | null } | null>(null);
   const [trackingPick, setTrackingPick] = useState<{ orderId: string; candidates: NonNullable<LabelUploadResponse['tracking_candidates']> } | null>(null);
@@ -184,8 +185,13 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
     setOrders(list);
     const skus = [...new Set(list.map(o => o.sku).filter(Boolean))];
     setLocations(await loadOrderLocations(client, storeId, skus));
-    const { data: bins } = await client.from('store_locations').select('code').eq('store_id',storeId).order('bay_no').order('row_no').order('bin_no');
-    setLocationOptions((bins || []) as {code:string}[]);
+    const { data: bayList } = await client.rpc('portal_bay_list');
+    const spots = sortLocationChoices(((bayList as { locations?: LocationChoice[] } | null)?.locations) || []);
+    if (spots.length) setLocationOptions(spots);
+    else {
+      const { data: bins } = await client.from('store_locations').select('code,bay_no,row_no,bin_no').eq('store_id',storeId).order('bay_no').order('row_no').order('bin_no');
+      setLocationOptions((bins || []) as LocationChoice[]);
+    }
     if (skus.length) {
       const photos = await loadUnitPhotos(client, storeId, skus).catch(() => ({} as Record<string, UnitPhoto[]>));
       setPhotoMap(photos);

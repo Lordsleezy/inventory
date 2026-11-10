@@ -2,9 +2,9 @@ import { useEffect, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { errText } from './errText';
 import { rpcMoveLocationStock } from './locationStock';
-import { locationPhrase, planPlaceInBin, planUnassign, unitsLabel, type LocationAllocation } from './locationPlace';
+import { bayTitle, locationPhrase, planPlaceInBin, planUnassign, unitsLabel, type LocationAllocation } from './locationPlace';
 
-type Bay = { bay_no: number; row_bins: number[] };
+type Bay = { bay_no: number; row_bins: number[]; name?: string | null };
 type Spot = { code: string; bay_no: number; row_no: number; bin_no: number | null };
 type UnitLoc = {
   sku: string;
@@ -106,19 +106,20 @@ export function LocationPicker({
           <span className="app-chevron" aria-hidden="true">›</span>
         </button>
       </div>
-      {bays.map((bay) => (
+      {[...bays].sort((a, b) => Number(Boolean(b.name?.trim())) - Number(Boolean(a.name?.trim())) || a.bay_no - b.bay_no).map((bay) => (
         <div key={bay.bay_no}>
-          <div className="app-section-label">BAY {bay.bay_no}</div>
+          <div className="app-section-label">{bayTitle(bay.bay_no, bay.name)}</div>
           <div className="app-group">
             {bay.row_bins.flatMap((bins, index) => {
               const rowNo = index + 1;
+              const namedFloor = Boolean(bay.name?.trim()) && bins === 0 && rowNo === 1;
               if (bins === 0) {
                 const code = `${bay.bay_no}-${rowNo}`;
                 return [(
                   <button type="button" className="app-row" key={code} disabled={busy} onClick={() => void choose(code)}>
                     <span className="app-row-text">
-                      <strong>Floor</strong>
-                      <small>{locationPhrase(code)}{here.has(code) ? ' · Here' : ''}</small>
+                      <strong>{namedFloor ? bay.name?.trim() : 'Floor'}</strong>
+                      <small>{namedFloor ? (here.has(code) ? 'Here' : 'Floor') : `${locationPhrase(code)}${here.has(code) ? ' · Here' : ''}`}</small>
                     </span>
                     <span className="app-chevron" aria-hidden="true">›</span>
                   </button>

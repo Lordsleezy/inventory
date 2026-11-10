@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { locationParts } from './locationOrder';
+import { locationMenuLabel, type LocationChoice } from './locationPlace';
 import { carrierTrackUrl, trackingTail, type StageOrder } from './orderStage';
 import { derivativePath, photoDisplayUrl, photoKind, type UnitPhoto } from './unitPhotos';
 
@@ -305,13 +306,15 @@ export function OrderTitle({ title }: { title: string }) {
 export function OrderFindRow({ sku, code, options, disabled, onChange, picker = 'select' }: {
   sku: string;
   code: string;
-  options: { code: string }[];
+  options: LocationChoice[];
   disabled?: boolean;
   onChange: (code: string) => void;
   /** Desktop orders open a list. Phone keeps the select. */
   picker?: 'select' | 'button';
 }) {
   const parts = locationParts(code);
+  const current = options.find((location) => location.code === code);
+  const currentLabel = current ? locationMenuLabel(current) : (parts ? `Bay ${parts.bay} · ${parts.slot}` : '');
   const [openList, setOpenList] = useState(false);
   if (picker === 'button') {
     return (
@@ -319,14 +322,13 @@ export function OrderFindRow({ sku, code, options, disabled, onChange, picker = 
         <div className={`order-pick-block${parts ? '' : ' missing'}`}>
           <small>Pick from</small>
           <button type="button" className="secondary" disabled={disabled || !options.length} aria-expanded={openList} aria-label={`Set pick location for SKU ${sku}`} onClick={() => setOpenList((v) => !v)}>
-            {parts ? `Bay ${parts.bay} · ${parts.slot}` : 'Set location'}
+            {currentLabel || 'Set location'}
           </button>
           {openList && (
             <div className="order-loc-list" role="listbox" aria-label={`Locations for SKU ${sku}`}>
-              {options.map((location) => {
-                const bit = locationParts(location.code);
-                return <button type="button" key={location.code} role="option" aria-selected={location.code === code} onClick={() => { onChange(location.code); setOpenList(false); }}>{bit ? `Bay ${bit.bay} · ${bit.slot}` : location.code}</button>;
-              })}
+              {options.map((location) => (
+                <button type="button" key={location.code} role="option" aria-selected={location.code === code} onClick={() => { onChange(location.code); setOpenList(false); }}>{locationMenuLabel(location)}</button>
+              ))}
             </div>
           )}
         </div>
@@ -341,13 +343,12 @@ export function OrderFindRow({ sku, code, options, disabled, onChange, picker = 
     <div className="order-find">
       <label className={`order-pick-block${parts ? '' : ' missing'}`}>
         <small>Pick from</small>
-        <strong>{parts ? `Bay ${parts.bay} · ${parts.slot}` : 'Set location'}</strong>
+        <strong>{currentLabel || 'Set location'}</strong>
         <select aria-label={`Set pick location for SKU ${sku}`} value={code} disabled={disabled || !options.length} onChange={(e) => onChange(e.target.value)}>
-          <option value="">{parts ? 'Change location' : 'Set location'}</option>
-          {options.map((location) => {
-            const bit = locationParts(location.code);
-            return <option key={location.code} value={location.code}>{bit ? `Bay ${bit.bay} · ${bit.slot}` : location.code}</option>;
-          })}
+          <option value="">{currentLabel ? 'Change location' : 'Set location'}</option>
+          {options.map((location) => (
+            <option key={location.code} value={location.code}>{locationMenuLabel(location)}</option>
+          ))}
         </select>
       </label>
       <div className="order-sku-block">

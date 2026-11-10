@@ -12,6 +12,7 @@ import { floorFunctionUrl } from './floorApi';
 import { reportClientError } from './clientLog';
 import { priceFloorCents } from './scanPricing';
 import { errText } from './errText';
+import { locationMenuLabel, sortLocationChoices } from './locationPlace';
 import { ManifestReceiveReference, useManifestReceiveReference } from './ManifestReceiveReference';
 import { BundleReceive } from './BundleReceive';
 const MeasureOnMat = lazy(() => import('./MeasureOnMat').then(module => ({ default: module.MeasureOnMat })));
@@ -141,7 +142,7 @@ async function clearPendingPhotos(key: string): Promise<void> {
  * ---------------------------------------------------------------------------------------------- */
 
 type Options = { next_sku: string | null; categories?: unknown; conditions: unknown; test_statuses: unknown };
-type ReceiveLocation = { code: string; bay_no: number; row_no: number; bin_no: number | null };
+type ReceiveLocation = { code: string; bay_no: number; row_no: number; bin_no: number | null; bay_name?: string | null };
 type Props = {
   client: SupabaseClient;
   storeId: string;
@@ -906,7 +907,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     void Promise.resolve(client.rpc('portal_bay_list')).then(({ data, error: e }) => {
       if (e) throw e;
       if (!alive) return;
-      const locations = (data?.locations || []) as ReceiveLocation[];
+      const locations = sortLocationChoices((data?.locations || []) as ReceiveLocation[]);
       setReceiveLocations(locations);
       setSelectedLocation(previous => locations.some(location => location.code === previous)
         ? previous : '');
@@ -2259,18 +2260,19 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
             {!staffMode && <label>Cost<input inputMode="decimal" placeholder="Leave blank if unknown" value={form.cost} onChange={e => update('cost',e.target.value)} /></label>}
           </div>
           <div className={`receive-location-card${showSaveValidation && !selectedLocation.trim() && !doNotList ? ' receive-v2-invalid' : ''}`}><label>Location{!doNotList ? ' *' : ''}<select value={selectedLocation} onChange={e => setSelectedLocation(e.target.value)}>
-            <option value="">No location yet</option>{receiveLocations.map(location => <option key={location.code} value={location.code}>Bay {location.bay_no} · R{location.row_no}{location.bin_no == null ? '' : `-B${location.bin_no}`}{location.code === selectedLocation ? ' · same as last item' : ''}</option>)}
+            <option value="">No location yet</option>{receiveLocations.map(location => <option key={location.code} value={location.code}>{locationMenuLabel(location)}{location.code === selectedLocation ? ' · same as last item' : ''}</option>)}
           </select></label>{showSaveValidation && !selectedLocation.trim() && !doNotList && <span className="receive-v2-msg">{receiveFieldMessage('location')}</span>}{(!storePhoneMode || locationEditOpen) && <label className="receive-location-scan">Scan bin label<input inputMode={scannerInputMode()} value={locationScan} placeholder="Bay 12 · R2-B3" onChange={e => setLocationScan(e.target.value)} onKeyDown={e => {
             if (e.key !== 'Enter') return; e.preventDefault();
             const parts = locationScan.trim().match(/(?:bay\s*)?(\d+)\s*[·\s-]+\s*r?(\d+)(?:\s*-\s*b?\s*(\d+))?/i);
             const code = parts ? `${parts[1]}-${parts[2]}${parts[3] ? `-${parts[3]}` : ''}` : locationScan.trim();
-            const match = receiveLocations.find(location => location.code === code || `Bay ${location.bay_no} · R${location.row_no}${location.bin_no == null ? '' : `-B${location.bin_no}`}`.toLowerCase() === locationScan.trim().toLowerCase());
+            const typed = locationScan.trim().toLowerCase();
+            const match = receiveLocations.find(location => location.code === code || locationMenuLabel(location).toLowerCase() === typed || `Bay ${location.bay_no} · R${location.row_no}${location.bin_no == null ? '' : `-B${location.bin_no}`}`.toLowerCase() === typed);
             if (match) { setSelectedLocation(match.code); setLocationScan(''); setLocationEditOpen(false); } else setError('That barcode does not match a configured bay, row and bin.');
           }} /></label>}<button type="button" className="text-button" onClick={() => {
             if (storePhoneMode) setLocationEditOpen(value => !value);
             else { setSelectedLocation(''); setLocationScan(''); }
           }}>{storePhoneMode ? locationEditOpen ? 'Done' : 'Change' : 'Change'}</button></div>
-          {selectedLocation && <small className="receive-last-location">Bay {receiveLocations.find(l => l.code === selectedLocation)?.bay_no} · same as last item</small>}
+          {selectedLocation && <small className="receive-last-location">{locationMenuLabel(receiveLocations.find(l => l.code === selectedLocation) || { code: selectedLocation })} · same as last item</small>}
           {storePhoneMode && <details className="receive-phone-fold"><summary>More options</summary>
           <div className="receive-channel-card">
             {!staffMode && <ChannelPicker value={channels} onChange={setChannels} disabled={doNotList || doNotShip} upc={form.noUpc ? '' : (form.upc || current?.upc || '')} />}
@@ -2462,13 +2464,13 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         {!(staffMode && doNotList) && <ReceiveSection id="location" title="Location" required={!doNotList} open={openSec === 'location'} onOpen={toggleSection}
           tone={!selectedLocation.trim() && !doNotList ? 'bad' : 'muted'}
           status={selectedLocation
-            ? `Bay ${receiveLocations.find(l => l.code === selectedLocation)?.bay_no ?? selectedLocation}`
+            ? locationMenuLabel(receiveLocations.find(l => l.code === selectedLocation) || { code: selectedLocation })
             : (doNotList ? 'Optional' : 'Required')}>
           <label className={!selectedLocation.trim() && !doNotList && showSaveValidation ? 'receive-v2-invalid' : undefined}>
             <span className="receive-v2-label">Bay{!doNotList ? <span className="receive-v2-req"> *</span> : null}</span>
             <select value={selectedLocation} onChange={e => setSelectedLocation(e.target.value)}>
               <option value="">Choose a bay</option>
-              {receiveLocations.map(location => <option key={location.code} value={location.code}>Bay {location.bay_no} · R{location.row_no}{location.bin_no == null ? '' : `-B${location.bin_no}`}</option>)}
+              {receiveLocations.map(location => <option key={location.code} value={location.code}>{locationMenuLabel(location)}</option>)}
             </select>
           </label>
           {!selectedLocation.trim() && !doNotList && showSaveValidation && <span className="receive-v2-msg">{receiveFieldMessage('location')}</span>}

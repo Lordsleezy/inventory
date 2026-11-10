@@ -5,6 +5,7 @@ import { hydratePhotoUrlCache, listThumbOriginalPaths, listThumbPhoto, loadUnitP
 import { errText } from '../errText';
 import { shortError } from './shortError';
 import { loadOrderLocations, locationCompare } from '../locationOrder';
+import { sortLocationChoices, type LocationChoice } from '../locationPlace';
 import { fileToBase64, labelFileUrl, orderAdmin } from '../orderLabel';
 import { openShippingLabel } from '../labelPrint';
 import { hasLabel, orderCanMarkPackaged, orderNeedsLabel, orderStage, packagedStale, shippedStale, trackingTail, type OrderStage } from '../orderStage';
@@ -80,7 +81,7 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
       return next;
     });
   }, [storeId]);
-  const [locationOptions, setLocationOptions] = useState<{ code: string }[]>([]);
+  const [locationOptions, setLocationOptions] = useState<LocationChoice[]>([]);
   const [busy, setBusy] = useState('');
   const [labelOpen, setLabelOpen] = useState(false);
   const [trackingDraft, setTrackingDraft] = useState('');
@@ -110,8 +111,13 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
       const photos = await loadUnitPhotos(client, storeId, skus).catch(() => ({} as Record<string, UnitPhoto[]>));
       setPhotoMap(photos);
       mergePhotoUrls(await signListThumbs(client, listThumbOriginalPaths(photos)));
-      const { data: bins } = await client.from('store_locations').select('code').eq('store_id', storeId).order('bay_no').order('row_no').order('bin_no');
-      setLocationOptions((bins || []) as { code: string }[]);
+      const { data: bayList } = await client.rpc('portal_bay_list');
+      const spots = sortLocationChoices(((bayList as { locations?: LocationChoice[] } | null)?.locations) || []);
+      if (spots.length) setLocationOptions(spots);
+      else {
+        const { data: bins } = await client.from('store_locations').select('code,bay_no,row_no,bin_no').eq('store_id', storeId).order('bay_no').order('row_no').order('bin_no');
+        setLocationOptions((bins || []) as LocationChoice[]);
+      }
       const { data: bundleState } = await client.rpc('portal_bundle_state');
       const state = (bundleState || {}) as { links?: { order_id: string; peer_id: string }[]; splits?: string[]; rates?: unknown[] };
       setBundleLinks(Array.isArray(state.links) ? state.links : []);

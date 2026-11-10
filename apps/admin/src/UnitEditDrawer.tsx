@@ -14,7 +14,7 @@ import { reviewReasonLabel } from './inventoryReview';
 import { DispositionButtons } from './DispositionDialogs';
 import { QuantityPicker } from './ReceiveQuantity';
 import { printUnitLabels } from './ReceiveGroupRow';
-import { locationParts } from './locationOrder';
+import { locationMenuLabel, sortLocationChoices, type LocationChoice } from './locationPlace';
 import {
   applyPartialLocationMove,
   applySimpleLocationChange,
@@ -262,7 +262,7 @@ export function UnitEditDrawer({
       const [stock, pick, bins, selection, dns] = await Promise.all([
         canQueryTables?client.from('unit_location_stock').select('location_code,quantity').eq('store_id',storeId).eq('sku',sku):Promise.resolve({data:[]}),
         canQueryTables?client.from('unit_pick_locations').select('location_code').eq('store_id',storeId).eq('sku',sku).maybeSingle():Promise.resolve({data:null}),
-        canQueryTables?client.from('store_locations').select('code').eq('store_id',storeId).order('code'):Promise.resolve({data:[]}),
+        client.rpc('portal_bay_list'),
         canDelete ? client.rpc('portal_unit_channel_selections',{p_sku:sku}) : Promise.resolve({data:null,error:null}),
         canDelete ? client.rpc('portal_unit_dns',{p_sku:sku}) : Promise.resolve({data:null,error:null}),
       ]);
@@ -275,7 +275,8 @@ export function UnitEditDrawer({
       setLocationMoveQty('1');
       setLocationMoveFrom(allocations[0]?.location_code || '__unassigned__');
       setLocationMoveTo('');
-      setLocationOptions((bins.data||[]).map(row=>{const code=String(row.code);const parts=locationParts(code);return {code,label:parts?`${parts.display} · ${parts.slot}`:code};}));
+      const spots = sortLocationChoices((((bins.data as { locations?: LocationChoice[] } | null)?.locations) || []));
+      setLocationOptions(spots.map((row) => ({ code: row.code, label: locationMenuLabel(row) })));
       if(!selection.error&&selection.data){const src=selection.data as Record<string,{selected:boolean}>;channelBaseline.current=Object.fromEntries(CHANNELS.map(ch=>[ch,Boolean(src[ch]?.selected)])) as Record<ChannelChoice,boolean>;}
     })();return()=>{live=false;};
   },[client,storeId,sku,canDelete]);
@@ -693,6 +694,9 @@ export function UnitEditDrawer({
   const locationSummary = locationDraft
     ? formatLocationSummary(Math.max(1, Number(stockQuantity) || 1), locationAllocations.length ? locationAllocations : [{ location_code: locationDraft, quantity: Math.max(1, Number(stockQuantity) || 1) }])
     : (locationLabel || '');
+  const showLocation = (text: string) => [...locationOptions]
+    .sort((a, b) => b.code.length - a.code.length)
+    .reduce((label, option) => label.split(option.code).join(option.label), text);
   const locationEmpty = !(locationDraft || locationLabel || '').trim() || /unassigned/i.test(locationDraft || locationLabel || '');
 
   useEffect(() => {
@@ -1067,7 +1071,7 @@ export function UnitEditDrawer({
               <button type="button" className="unit-edit-location-row" onClick={() => setLocationPickerOpen((v) => !v)}>
                 <span>Location</span>
                 <strong className={locationEmpty ? 'warn' : undefined}>
-                  {locationEmpty ? 'Unassigned ›' : `${locationSummary || locationDraft} ›`}
+                  {locationEmpty ? 'Unassigned ›' : `${showLocation(locationSummary || locationDraft)} ›`}
                 </strong>
               </button>
               {locationPickerOpen && (
@@ -1081,7 +1085,7 @@ export function UnitEditDrawer({
                     <label>Move quantity<input inputMode="numeric" type="number" min="1" step="1" value={locationMoveQty} onChange={(e) => setLocationMoveQty(e.target.value)} /></label>
                     <label>From<select value={locationMoveFrom} onChange={(e) => setLocationMoveFrom(e.target.value)}>
                       {unassignedQty(Math.max(1, Number(stockQuantity) || 1), locationAllocations) > 0 && <option value="__unassigned__">Unassigned</option>}
-                      {locationAllocations.map((row) => <option key={row.location_code} value={row.location_code}>{row.location_code} · {row.quantity}</option>)}
+                      {locationAllocations.map((row) => <option key={row.location_code} value={row.location_code}>{showLocation(row.location_code)} · {row.quantity}</option>)}
                     </select></label>
                     <label>To<select value={locationMoveTo} onChange={(e) => setLocationMoveTo(e.target.value)}>
                       <option value="">—</option>
@@ -1096,7 +1100,7 @@ export function UnitEditDrawer({
             <div id="unit-edit-location" className="unit-edit-wide unit-edit-location">
               <span>Location</span>
               <p className={locationEmpty ? 'warn' : undefined}>
-                {locationEmpty ? 'Unassigned' : formatLocationSummary(Math.max(1, Number(stockQuantity) || 1), locationAllocations)}
+                {locationEmpty ? 'Unassigned' : showLocation(formatLocationSummary(Math.max(1, Number(stockQuantity) || 1), locationAllocations))}
                 {locationEmpty ? ' · Assign' : ''}
               </p>
               {singleBinOrUnassigned(locationAllocations, Math.max(1, Number(stockQuantity) || 1)) ? (
@@ -1109,7 +1113,7 @@ export function UnitEditDrawer({
                   <label>Move quantity<input inputMode="numeric" type="number" min="1" step="1" value={locationMoveQty} onChange={(e) => setLocationMoveQty(e.target.value)} /></label>
                   <label>From<select value={locationMoveFrom} onChange={(e) => setLocationMoveFrom(e.target.value)}>
                     {unassignedQty(Math.max(1, Number(stockQuantity) || 1), locationAllocations) > 0 && <option value="__unassigned__">Unassigned</option>}
-                    {locationAllocations.map((row) => <option key={row.location_code} value={row.location_code}>{row.location_code} · {row.quantity}</option>)}
+                    {locationAllocations.map((row) => <option key={row.location_code} value={row.location_code}>{showLocation(row.location_code)} · {row.quantity}</option>)}
                   </select></label>
                   <label>To<select value={locationMoveTo} onChange={(e) => setLocationMoveTo(e.target.value)}>
                     <option value="">—</option>

@@ -22,6 +22,7 @@ import { StockMergePage } from './StockMergePage';
 import { FixTitlesPage } from './FixTitlesPage';
 import { hydratePhotoUrlCache, listThumbPathsFromOriginals, persistPhotoUrlCache, signPhotoUrls } from './unitPhotos';
 import { UnitListThumb } from './UnitListThumb';
+import { locationMenuLabel, sortLocationChoices, type LocationChoice } from './locationPlace';
 
 type Row = GroupedInventory & {
   sku: string; brand: string; model: string; title: string; condition: string | null;
@@ -74,7 +75,7 @@ export function InventoryPage({
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState('in_stock');
   const [location, setLocation] = useState('all');
-  const [locationOptions, setLocationOptions] = useState<{ code: string }[]>([]);
+  const [locationOptions, setLocationOptions] = useState<LocationChoice[]>([]);
   const [sort, setSort] = useState('sku');
   const [offset, setOffset] = useState(0);
   const [list, setList] = useState<List | null>(null);
@@ -124,10 +125,9 @@ export function InventoryPage({
 
   useEffect(() => {
     let active = true;
-    void client.from('store_locations').select('code').eq('store_id', storeId).order('bay_no')
-      .order('row_no').order('bin_no').then(({ data }) => {
-        if (active) setLocationOptions(data || []);
-      });
+    void client.rpc('portal_bay_list').then(({ data }) => {
+      if (active) setLocationOptions(sortLocationChoices(((data as { locations?: LocationChoice[] } | null)?.locations) || []));
+    });
     return () => { active = false; };
   }, [client, storeId]);
 
@@ -216,7 +216,7 @@ export function InventoryPage({
       </select></label>}
       <label>Location<select value={location} onChange={e => change(() => setLocation(e.target.value))}>
         <option value="all">All locations</option><option value="unassigned">Unassigned stock</option>
-        {locationOptions.map((item) => <option key={item.code} value={item.code}>{item.code}</option>)}
+        {locationOptions.map((item) => <option key={item.code} value={item.code}>{locationMenuLabel(item)}</option>)}
       </select></label>
       <label>Sort<select value={sort} onChange={e => change(() => setSort(e.target.value))}>
         <option value="sku">SKU (newest)</option>{!hideMoney && <option value="price">Price (low to high)</option>}
@@ -237,7 +237,7 @@ export function InventoryPage({
         <span className="inventory-photo"><UnitListThumb client={client} photoPath={u.photo_path} urls={urls} onUrl={(p, url) => mergeUrls({ [p]: url })} eager={idx < 16} placeholder="No photo" /></span>
         <span className="inventory-identity"><strong>{name(u)}</strong><small>SKU {u.sku}{u.title && u.title !== name(u) ? ` · ${u.title}` : ''}</small></span>
         <span className="inventory-meta">{u.condition || 'No grade'}<small>{u.not_for_sale ? 'Not for sale' : listTab === 'sold' && u.sold_at ? `Sold ${stamp(u.sold_at)}` : label(u.state)}{(u.is_stocked || (u.qty_on_hand ?? 1) > 1) && <b className="stock-quantity-badge">×{listTab === 'sold' ? (u.sold_qty ?? 0) : u.qty_on_hand}</b>}</small>{listTab === 'unfinished' && !!u.missing?.length && <small className="inventory-missing">{missingText(u.missing)}</small>}</span>
-        <span className="inventory-location">{u.locations || 'Unassigned'}</span>
+        <span className="inventory-location">{u.locations ? [...locationOptions].sort((a, b) => b.code.length - a.code.length).reduce((text, location) => text.split(location.code).join(locationMenuLabel(location)), u.locations) : 'Unassigned'}</span>
         {hideMoney ? <span className="inventory-money" /> : listTab === 'sold'
           ? <span className="inventory-money"><strong>{u.sold_price_cents == null ? '—' : money(u.sold_price_cents)}</strong><small className={u.acquisition_cost_cents == null ? 'inventory-missing' : undefined}>{u.acquisition_cost_cents == null ? 'Cost missing' : `Cost ${money(u.acquisition_cost_cents)}`}</small></span>
           : <span className="inventory-money">{listTab === 'not-ready' && !!u.missing?.length && <small className="inventory-missing">{inventoryMissingText(u.missing)}</small>}<strong>{u.ask_cents == null ? 'No price' : money(u.ask_cents)}</strong>{!associateBrowseOnly && <small className={u.acquisition_cost_cents == null ? 'inventory-missing' : undefined}>{u.acquisition_cost_cents == null ? 'Cost missing' : `Cost ${money(u.acquisition_cost_cents)}`}</small>}</span>}

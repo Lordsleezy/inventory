@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { addBulkSkus, bayTagCode, layoutBlocked, locationPhrase, parseBulkSkus, planPlaceInBin, planUnassign, slotTagCode, unitsLabel } from './locationPlace.ts';
+import { addBulkSkus, bayTagCode, bayTitle, layoutBlocked, locationMenuLabel, locationPhrase, parseBulkSkus, planPlaceInBin, planUnassign, slotTagCode, sortLocationChoices, unitsLabel } from './locationPlace.ts';
 
 describe('location phrases', () => {
   it('reads a bin and a floor spot the way the bay screen does', () => {
@@ -8,6 +8,17 @@ describe('location phrases', () => {
     assert.equal(locationPhrase('1-3'), 'Bay 1 · Row 3 · Floor');
     assert.equal(unitsLabel(1), '1 unit');
     assert.equal(unitsLabel(0), '0 units');
+  });
+
+  it('shows a named floor area as its name', () => {
+    assert.equal(bayTitle(21, 'Rugs and Mats'), 'Rugs and Mats');
+    assert.equal(bayTitle(4, '  '), 'Bay 4');
+    assert.equal(locationMenuLabel({ code: '21-1', bay_no: 21, row_no: 1, bin_no: null, bay_name: 'Rugs and Mats' }), 'Rugs and Mats');
+    assert.equal(locationMenuLabel({ code: '4-2-2', bay_no: 4, row_no: 2, bin_no: 2 }), 'Bay 4 · R2-B2');
+    assert.equal(sortLocationChoices([
+      { code: '2-1-1', bay_no: 2, row_no: 1, bin_no: 1 },
+      { code: '21-1', bay_no: 21, row_no: 1, bin_no: null, bay_name: 'Rugs and Mats' },
+    ])[0].code, '21-1');
   });
 });
 
