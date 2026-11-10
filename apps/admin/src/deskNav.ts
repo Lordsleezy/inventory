@@ -5,7 +5,7 @@ export type DeskLink = {
   label: string;
   hint: string;
   inventoryTab?: 'in-stock' | 'receive' | 'lookup-test' | 'merge-duplicates' | 'fix-titles';
-  reportTab?: 'profit' | 'shipping' | 'expenses' | 'payouts' | 'returns' | 'replacements' | 'sales-tax';
+  reportTab?: 'profit' | 'shipping' | 'expenses' | 'payouts' | 'returns' | 'replacements' | 'sales-tax' | 'ship-audit';
 };
 
 export type DeskGroup = { label: string; links: DeskLink[] };
@@ -119,6 +119,7 @@ export const HOME_REPORT_LINKS: DeskLink[] = [
   { page: 'reports', label: 'Expenses', hint: '', reportTab: 'expenses' },
   { page: 'reports', label: 'Payouts', hint: '', reportTab: 'payouts' },
   { page: 'reports', label: 'Sales tax', hint: '', reportTab: 'sales-tax' },
+  { page: 'reports', label: 'Shipping check', hint: '', reportTab: 'ship-audit' },
 ];
 
 export const ASSOCIATE_LINKS: DeskLink[] = [

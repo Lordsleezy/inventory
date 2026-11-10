@@ -1,6 +1,34 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { xmlEsc, tradingConditionId, parseShippingServiceDetails, pickApplianceShipping, parseTradingOrders, tradingOrderIsSale, tradingOrderToIngest, attachListingSku } from "./ebay-trading.mjs";
+import { xmlEsc, tradingConditionId, parseShippingServiceDetails, pickApplianceShipping, parseTradingOrders, tradingOrderIsSale, tradingOrderToIngest, attachListingSku, tradingPackageReviseXml } from "./ebay-trading.mjs";
+
+test("a package revise sends dimensions and weight only", () => {
+  const xml = tradingPackageReviseXml({ itemId: "820244179489", lengthIn: 12, widthIn: 10, heightIn: 4, weightLb: 8 });
+  assert.match(xml, /<ItemID>820244179489<\/ItemID>/);
+  assert.match(xml, /<PackageLength>12<\/PackageLength>/);
+  assert.match(xml, /<PackageWidth>10<\/PackageWidth>/);
+  assert.match(xml, /<PackageDepth>4<\/PackageDepth>/);
+  assert.match(xml, /<WeightMajor>8<\/WeightMajor>/);
+  assert.match(xml, /<WeightMinor>0<\/WeightMinor>/);
+  assert.equal(xml.includes("StartPrice"), false);
+  assert.equal(xml.includes("Title"), false);
+  assert.equal(xml.includes("SellerProfiles"), false);
+  assert.equal(xml.includes("Description"), false);
+  assert.equal(xml.includes("ReturnPolicy"), false);
+  const withPolicy = tradingPackageReviseXml({
+    itemId: "820249925445",
+    lengthIn: 12,
+    widthIn: 10,
+    heightIn: 6,
+    weightLb: 2,
+    fulfillmentPolicyId: "new-policy",
+    paymentPolicyId: "267755794017",
+    returnPolicyId: "267755795017",
+  });
+  assert.match(withPolicy, /<ShippingProfileID>new-policy<\/ShippingProfileID>/);
+  assert.match(withPolicy, /<PaymentProfileID>267755794017<\/PaymentProfileID>/);
+  assert.equal(withPolicy.includes("StartPrice"), false);
+});
 
 test("xmlEsc encodes markup so Trading API XML stays well-formed", () => {
   assert.equal(xmlEsc(`A & B <C>`), "A &amp; B &lt;C&gt;");

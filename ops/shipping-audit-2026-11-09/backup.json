@@ -1,0 +1,360 @@
+{
+  "createdAt": "2026-11-10T01:59:03.504Z",
+  "rows": [
+    {
+      "listingId": "820244179489",
+      "sku": "11250",
+      "title": "2023-24 panini nba hoops winter blaster box Open box Unused",
+      "price": "90.0",
+      "offerId": "320883211011",
+      "listingType": "FixedPriceItem",
+      "status": "Active",
+      "bestOffers": 0,
+      "fulfillmentPolicyId": "267792814017",
+      "paymentPolicyId": "267755794017",
+      "returnPolicyId": "267755795017",
+      "originalPackage": {
+        "lengthIn": 36,
+        "widthIn": 28,
+        "heightIn": 3,
+        "weightLb": 8
+      },
+      "floor": {
+        "lengthIn": 12,
+        "widthIn": 10,
+        "heightIn": 4,
+        "weightLb": 8
+      },
+      "before": [
+        {
+          "zip": "95814",
+          "ack": "Success",
+          "services": [
+            {
+              "service": "USPSPriority",
+              "cost": 27.18
+            },
+            {
+              "service": "USPSParcel",
+              "cost": 19.9
+            }
+          ],
+          "lengthIn": 36,
+          "widthIn": 28,
+          "heightIn": 3,
+          "weightLb": 8,
+          "error": ""
+        },
+        {
+          "zip": "64101",
+          "ack": "Success",
+          "services": [
+            {
+              "service": "USPSPriority",
+              "cost": 63.33
+            },
+            {
+              "service": "USPSParcel",
+              "cost": 42.15
+            }
+          ],
+          "lengthIn": 36,
+          "widthIn": 28,
+          "heightIn": 3,
+          "weightLb": 8,
+          "error": ""
+        },
+        {
+          "zip": "10001",
+          "ack": "Success",
+          "services": [
+            {
+              "service": "USPSPriority",
+              "cost": 71.58
+            },
+            {
+              "service": "USPSParcel",
+              "cost": 48.65
+            }
+          ],
+          "lengthIn": 36,
+          "widthIn": 28,
+          "heightIn": 3,
+          "weightLb": 8,
+          "error": ""
+        }
+      ],
+      "applied": true,
+      "via": "inventory",
+      "after": [
+        {
+          "zip": "95814",
+          "ack": "Success",
+          "services": [
+            {
+              "service": "USPSPriority",
+              "cost": 8.53
+            },
+            {
+              "service": "USPSParcel",
+              "cost": 7.7
+            }
+          ],
+          "lengthIn": 12,
+          "widthIn": 10,
+          "heightIn": 4,
+          "weightLb": 8,
+          "error": ""
+        },
+        {
+          "zip": "64101",
+          "ack": "Success",
+          "services": [
+            {
+              "service": "USPSPriority",
+              "cost": 23.73
+            },
+            {
+              "service": "USPSParcel",
+              "cost": 14.93
+            }
+          ],
+          "lengthIn": 12,
+          "widthIn": 10,
+          "heightIn": 4,
+          "weightLb": 8,
+          "error": ""
+        },
+        {
+          "zip": "10001",
+          "ack": "Success",
+          "services": [
+            {
+              "service": "USPSPriority",
+              "cost": 26.9
+            },
+            {
+              "service": "USPSParcel",
+              "cost": 17.28
+            }
+          ],
+          "lengthIn": 12,
+          "widthIn": 10,
+          "heightIn": 4,
+          "weightLb": 8,
+          "error": ""
+        }
+      ],
+      "publicPage": {
+        "status": 403,
+        "costs": [],
+        "blocked": true
+      },
+      "error": "",
+      "originalInventoryPackage": {
+        "dimensions": {
+          "width": 28,
+          "length": 36,
+          "height": 3,
+          "unit": "INCH"
+        },
+        "packageType": "PACKAGE_THICK_ENVELOPE",
+        "weight": {
+          "value": 8,
+          "unit": "POUND"
+        },
+        "shippingIrregular": false
+      },
+      "afterItem": {
+        "title": "2023-24 panini nba hoops winter blaster box Open box Unused",
+        "price": "90.0",
+        "package": {
+          "lengthIn": 12,
+          "widthIn": 10,
+          "heightIn": 4,
+          "weightLb": 8
+        }
+      },
+      "attachedPolicyId": "268664687017",
+      "finalPolicyId": "268664687017"
+    },
+    {
+      "listingId": "820249925445",
+      "sku": "11500",
+      "title": "foster grant design optics full rim metal 3 reading glasses +2.50 — open_box ...",
+      "price": "21.0",
+      "offerId": "316245735011",
+      "listingType": "FixedPriceItem",
+      "status": "Active",
+      "bestOffers": 0,
+      "fulfillmentPolicyId": "267792814017",
+      "paymentPolicyId": "267755794017",
+      "returnPolicyId": "267755795017",
+      "originalPackage": {
+        "lengthIn": 32,
+        "widthIn": 10,
+        "heightIn": 6,
+        "weightLb": 2
+      },
+      "floor": {
+        "lengthIn": 12,
+        "widthIn": 10,
+        "heightIn": 6,
+        "weightLb": 2
+      },
+      "before": [
+        {
+          "zip": "95814",
+          "ack": "Success",
+          "services": [
+            {
+              "service": "USPSPriority",
+              "cost": 21.73
+            },
+            {
+              "service": "USPSParcel",
+              "cost": 15.1
+            }
+          ],
+          "lengthIn": 32,
+          "widthIn": 10,
+          "heightIn": 6,
+          "weightLb": 2,
+          "error": ""
+        },
+        {
+          "zip": "64101",
+          "ack": "Success",
+          "services": [
+            {
+              "service": "USPSPriority",
+              "cost": 48.28
+            },
+            {
+              "service": "USPSParcel",
+              "cost": 28.78
+            }
+          ],
+          "lengthIn": 32,
+          "widthIn": 10,
+          "heightIn": 6,
+          "weightLb": 2,
+          "error": ""
+        },
+        {
+          "zip": "10001",
+          "ack": "Success",
+          "services": [
+            {
+              "service": "USPSPriority",
+              "cost": 53.55
+            },
+            {
+              "service": "USPSParcel",
+              "cost": 33.83
+            }
+          ],
+          "lengthIn": 32,
+          "widthIn": 10,
+          "heightIn": 6,
+          "weightLb": 2,
+          "error": ""
+        }
+      ],
+      "applied": true,
+      "via": "inventory",
+      "after": [
+        {
+          "zip": "95814",
+          "ack": "Success",
+          "services": [
+            {
+              "service": "USPSPriority",
+              "cost": 6.23
+            },
+            {
+              "service": "USPSParcel",
+              "cost": 5.65
+            }
+          ],
+          "lengthIn": 12,
+          "widthIn": 10,
+          "heightIn": 6,
+          "weightLb": 2,
+          "error": ""
+        },
+        {
+          "zip": "64101",
+          "ack": "Success",
+          "services": [
+            {
+              "service": "USPSPriority",
+              "cost": 10.23
+            },
+            {
+              "service": "USPSParcel",
+              "cost": 8.6
+            }
+          ],
+          "lengthIn": 12,
+          "widthIn": 10,
+          "heightIn": 6,
+          "weightLb": 2,
+          "error": ""
+        },
+        {
+          "zip": "10001",
+          "ack": "Success",
+          "services": [
+            {
+              "service": "USPSPriority",
+              "cost": 11.28
+            },
+            {
+              "service": "USPSParcel",
+              "cost": 9.9
+            }
+          ],
+          "lengthIn": 12,
+          "widthIn": 10,
+          "heightIn": 6,
+          "weightLb": 2,
+          "error": ""
+        }
+      ],
+      "publicPage": {
+        "status": 403,
+        "costs": [],
+        "blocked": true
+      },
+      "error": "",
+      "originalInventoryPackage": {
+        "dimensions": {
+          "width": 10,
+          "length": 32,
+          "height": 6,
+          "unit": "INCH"
+        },
+        "packageType": "PACKAGE_THICK_ENVELOPE",
+        "weight": {
+          "value": 2,
+          "unit": "POUND"
+        },
+        "shippingIrregular": false
+      },
+      "afterItem": {
+        "title": "foster grant design optics full rim metal 3 reading glasses +2.50 — open_box ...",
+        "price": "21.0",
+        "package": {
+          "lengthIn": 12,
+          "widthIn": 10,
+          "heightIn": 6,
+          "weightLb": 2
+        }
+      },
+      "attachedPolicyId": "268664687017",
+      "finalPolicyId": "268665088017"
+    }
+  ],
+  "policyId": "268664687017"
+}
