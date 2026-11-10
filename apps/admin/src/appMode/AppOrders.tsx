@@ -9,7 +9,6 @@ import { sortLocationChoices, type LocationChoice } from '../locationPlace';
 import { fileToBase64, labelFileUrl, orderAdmin } from '../orderLabel';
 import { openShippingLabel } from '../labelPrint';
 import { hasLabel, orderCanMarkPackaged, orderNeedsLabel, orderStage, packagedStale, shippedStale, trackingTail, type OrderStage } from '../orderStage';
-import { normalizeTracking } from '../trackingNormalize';
 import { useVisibleInterval } from '../useVisibleInterval';
 import { ScanOutPanel } from '../ScanOutPanel';
 import { SEG_SHORT } from '../orderDisplay';
@@ -273,7 +272,7 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
     await runAction('shipped', async () => {
       const { error: e } = await client.rpc('portal_mark_order_shipped', {
         p_order: o.id,
-        p_barcode: normalizeTracking(barcode) || null,
+        p_barcode: barcode.trim() || null,
         p_override_reason: overrideReason || null,
       });
       if (e) {

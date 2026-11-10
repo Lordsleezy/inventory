@@ -1,12 +1,10 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { floorFunctionUrl } from './floorApi';
-import { normalizeTracking } from './trackingNormalize';
-
 type PeerResult = { ok?: boolean; shipped?: number; skus?: string[]; left_unpackaged?: string[]; error?: string };
 
 /** After one verified scan, ship the rest of the box. The tracking number is not shown. */
 export async function shipBundleRest(client: SupabaseClient, leadId: string, barcode: string): Promise<string> {
-  const code = normalizeTracking(barcode) || barcode.trim();
+  const code = barcode.trim();
   if (!leadId || !code) return '';
   const { data, error } = await client.rpc('portal_bundle_ship_peers', { p_order: leadId, p_barcode: code });
   if (error) return '';

@@ -3,7 +3,6 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { errText } from './errText';
 import { decodeBarcodeFile } from './ReceivePanel';
 import { shouldQueueScan } from './scanQueue';
-import { normalizeTracking } from './trackingNormalize';
 import { shipBundleRest } from './bundleShip';
 
 type TodayRow = {
@@ -105,7 +104,8 @@ export function ScanOutPanel({ client, stamp = (s) => s, appMode, mode = 'ship',
   useEffect(() => { if (!camera) inputRef.current?.focus(); }, [camera, busy]);
 
   async function commitOne(raw: string) {
-    const code = normalizeTracking(raw) || raw.trim();
+    const code = raw.trim();
+    if (!code) return;
     setBusy(true);
     setError('');
     setFlash(null);
