@@ -143,7 +143,7 @@ export function SettingsPage({ accessToken, busy, run, staff, rules, saveRule, r
     {client && <LabelPaperSetting client={client} />}
     <section className="panel">
       <h2>Shipping</h2>
-      <p className="hint">Website tiers are $10 up to 5 lb, $16 up to 15 lb, $28 up to 30 lb, $40 up to 50 lb, and $52 up to 70 lb. eBay combined weight is on: calculated packages use COMBINED_ITEM_WEIGHT for 30 days, with no handling fee added.</p>
+      <p className="hint">Website tiers are $10 up to 5 lb, $16 up to 15 lb, $28 up to 30 lb, $40 up to 50 lb, and $52 up to 70 lb.</p>
     </section>
     <ShippingReview />
     {client && <CdtfaAccount client={client} />}

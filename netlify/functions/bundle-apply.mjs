@@ -2,6 +2,7 @@
 import { json, corsHeaders, serviceClient } from "../lib/server.mjs";
 import { wrapHandler, asNetlifyFunction } from "../lib/floor-log.mjs";
 import { applyBundlePrice, enableCombinedWeight, previewBundle, pushBundleTracking } from "../lib/bundle-ebay.mjs";
+import { bundlePriceApplyEnabled, BUNDLE_PRICE_APPLY_OFF_MESSAGE } from "../../shared/bundle-apply-gate.mjs";
 
 async function actorFromEvent(event) {
   const token = (event.headers?.authorization || event.headers?.Authorization || "").replace(/^Bearer\s+/i, "");
@@ -35,11 +36,17 @@ async function handle(event) {
   const ids = Array.isArray(body.order_ids) ? body.order_ids.map(String) : [];
 
   try {
-    if (body.action === "preview") {
-      return json(200, await previewBundle(actor.sb, storeId, ids));
-    }
+    // Multi-item box tracking upload stays on. Refund / invoice / enable stay gated OFF.
     if (body.action === "tracking") {
       return json(200, await pushBundleTracking(actor.sb, storeId, body.order_id));
+    }
+    if (body.action === "preview" || body.action === "enable" || body.action === "apply") {
+      if (!bundlePriceApplyEnabled()) {
+        return json(403, { ok: false, error: BUNDLE_PRICE_APPLY_OFF_MESSAGE });
+      }
+    }
+    if (body.action === "preview") {
+      return json(200, await previewBundle(actor.sb, storeId, ids));
     }
     if (!actor.isAdmin) return json(403, { error: "Admin access required" });
     if (body.action === "enable") {
