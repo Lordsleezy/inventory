@@ -322,6 +322,85 @@ export function groupOpenOrders(orders, opts = {}) {
   return groups;
 }
 
+const COMBINE_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+
+function paidStamp(order) {
+  const n = Date.parse(order?.paid_at || "");
+  return Number.isFinite(n) ? n : 0;
+}
+
+function clustersWithinWindow(list) {
+  const sorted = [...list].sort((a, b) => paidStamp(a) - paidStamp(b));
+  const clusters = [];
+  let current = [];
+  let start = 0;
+  for (const order of sorted) {
+    const stamp = paidStamp(order);
+    if (!current.length) {
+      current = [order];
+      start = stamp || 0;
+      continue;
+    }
+    if (stamp && start && stamp - start > COMBINE_WINDOW_MS) {
+      clusters.push(current);
+      current = [order];
+      start = stamp;
+    } else {
+      current.push(order);
+      if (!start && stamp) start = stamp;
+    }
+  }
+  if (current.length) clusters.push(current);
+  return clusters;
+}
+
+/**
+ * Paid orders that already shipped as separate checkouts, same buyer and
+ * address, inside eBay's 30-day combine window. Open unshipped orders stay
+ * on groupOpenOrders. Nothing here sends a refund.
+ */
+export function groupBundleReviews(orders, opts = {}) {
+  const applied = new Set((opts.appliedIds || []).map(String));
+  const rates = opts.rates || DEFAULT_RATES;
+  const eligible = (orders || []).filter((order) => {
+    if (!order || applied.has(String(order.id))) return false;
+    if (order.canceled_at || String(order.status || "").toLowerCase() === "canceled") return false;
+    if (String(order.fulfillment || "ship") === "pickup") return false;
+    const paid = order.paid_at || String(order.status || "").toLowerCase() === "paid";
+    return Boolean(paid) && Boolean(order.shipped_at);
+  });
+  const buckets = new Map();
+  for (const order of eligible) {
+    const buyer = buyerKey(order);
+    const address = addressKey(order);
+    const channel = norm(order.channel);
+    if (!buyer || !address || !channel) continue;
+    const key = `${channel}|${buyer}|${address}`;
+    const list = buckets.get(key) || [];
+    list.push(order);
+    buckets.set(key, list);
+  }
+  const groups = [];
+  for (const list of buckets.values()) {
+    for (const cluster of clustersWithinWindow(list)) {
+      if (cluster.length < 2) continue;
+      const quote = quoteBundle(cluster, rates);
+      const money = bundleMoneyPlan(cluster, quote);
+      if (money.action !== "refund" || money.refund_cents <= 0) continue;
+      groups.push({
+        id: cluster.map((order) => String(order.id)).sort().join(":"),
+        channel: norm(cluster[0].channel),
+        buyer: cluster[0].buyer_name || cluster[0].buyer_email || "",
+        items: cluster,
+        quote,
+        money,
+        review: true,
+      });
+    }
+  }
+  return groups;
+}
+
 export function assertBundleConfirm(confirm) {
   if (confirm !== true) {
     const err = new Error("confirm_required");

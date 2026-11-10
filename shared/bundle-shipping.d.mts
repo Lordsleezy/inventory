@@ -85,6 +85,10 @@ export function groupOpenOrders(orders: BundleItem[], opts?: {
   links?: { order_id: string; peer_id: string }[];
   rates?: BundleRate[];
 }): BundleGroup[];
+export function groupBundleReviews(orders: BundleItem[], opts?: {
+  appliedIds?: string[];
+  rates?: BundleRate[];
+}): BundleGroup[];
 export function assertBundleConfirm(confirm: boolean): void;
 export function dollars(centsValue: number): string;
 export function issueRefundBody(refundCents: number, comment?: string): {
