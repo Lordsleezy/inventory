@@ -64,14 +64,18 @@ export function BundleBar({ client, accessToken, orders, segmentIds, locations, 
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [combined, setCombined] = useState('eBay combined weight has not been confirmed.');
 
   async function loadState() {
     const { data, error } = await client.rpc('portal_bundle_state');
     if (error || !data) return;
-    const body = data as { rates?: BundleRate[]; splits?: string[]; links?: Link[] };
+    const body = data as { rates?: BundleRate[]; splits?: string[]; links?: Link[]; combined_weight?: { active?: boolean; rule?: string } };
     if (body.rates?.length) setRates(body.rates);
     setSplits((body.splits || []).map(String));
     setLinks(body.links || []);
+    setCombined(body.combined_weight?.active
+      ? `eBay combined weight is on (${body.combined_weight.rule || 'COMBINED_ITEM_WEIGHT'}).`
+      : 'eBay combined weight is off.');
   }
 
   useEffect(() => { void loadState(); }, [client]);
@@ -126,10 +130,11 @@ export function BundleBar({ client, accessToken, orders, segmentIds, locations, 
     }
   }
 
-  if (!visible.length && !open) return null;
+  if (!visible.length && !open && !isAdmin) return null;
 
   return (
     <div>
+      {isAdmin && <p style={{ color: '#9a9a9a', margin: '8px 0' }}>{combined}</p>}
       {visible.map((group) => {
         const box = group.quote.package;
         return (
@@ -191,7 +196,7 @@ export function BundleBar({ client, accessToken, orders, segmentIds, locations, 
             {isAdmin && (
               <details style={{ marginTop: 16 }}>
                 <summary>Shipping rate table</summary>
-                <p style={{ color: '#9a9a9a' }}>Filled from the website tiers: $20, $32, and $50. The 50 lb and 70 lb rows continue the $18 step. Every size starts at the same price.</p>
+                <p style={{ color: '#9a9a9a' }}>Zone 6 label cost plus about 15%. A larger box costs more, and a big box is billed at its dimensional weight. The price never drops below the most expensive item and never exceeds the separate charges.</p>
                 {rates.map((rate) => {
                   const key = `${rate.size_class}-${rate.max_lb}`;
                   return (

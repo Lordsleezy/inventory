@@ -29,6 +29,7 @@ import { listingMeasures, prepareUnitAspects, prepareUnitCondition } from "./eba
 import { floorLog, redact, setTrace } from "./floor-log.mjs";
 import { sendResend } from "./receipt.mjs";
 import { ebayFeeCents, ebayOrderAmounts, ebayOrderIsLocalPickup, ebayShipTo } from "./ebay-price.mjs";
+import { ebayLineRepair, planEbayOrderLines, refundScope } from "../../shared/ebay-order-lines.mjs";
 import { fulfillmentPath, ordersWithShipment, trackingPatch } from "./ebay-shipment.mjs";
 import { compactTracking } from "./tracking-extract.mjs";
 
@@ -1234,9 +1235,151 @@ export async function cancelEbayOrderForSoldElsewhere(storeId, orderId, reason =
   }
 }
 
+async function ingestMultiEbayOrder(storeId, order, seller = {}) {
+  const orderId = String(order.orderId);
+  const sb = serviceClient();
+  if (order.orderPaymentStatus && !ebayOrderState(order).paid) {
+    return { skipped: true, orderId, reason: "not_a_paid_live_order" };
+  }
+  const { data: settingRows } = await sb.from("store_settings").select("key,value").eq("store_id", storeId)
+    .in("key", ["ebay_fee_pct", "ebay_per_order_cents", "pickup_hold_hours"]);
+  const setting = Object.fromEntries((settingRows || []).map((row) => [row.key, row.value]));
+  const skus = (order.lineItems || []).map((line) => line?.sku).filter(Boolean).map(String);
+  const { data: units } = skus.length
+    ? await sb.from("units").select("sku,state,package_weight_lb").eq("store_id", storeId).in("sku", skus)
+    : { data: [] };
+  const weights = Object.fromEntries((units || []).map((unit) => [unit.sku, Number(unit.package_weight_lb) || 0]));
+  const planned = planEbayOrderLines(order, {
+    feePct: Number(setting.ebay_fee_pct ?? 13.25),
+    perOrderCents: Number(setting.ebay_per_order_cents ?? 40),
+    weights,
+  });
+  const { data: existing, error: existingError } = await sb.from("web_orders")
+    .select("id, sku, payment_id, shipping_cents, item_cents, sale_id, status")
+    .eq("store_id", storeId).eq("channel", "ebay").eq("order_no", orderId);
+  if (existingError) throw new Error(existingError.message);
+  const repair = ebayLineRepair(planned.plans, existing || []);
+  const ship = ebayShipTo(order);
+  const isPickup = ebayOrderIsLocalPickup(order);
+  const unitBySku = new Map((units || []).map((unit) => [unit.sku, unit]));
+  const created = [];
+  for (const plan of repair.inserts) {
+    const sku = plan.sku || "UNMATCHED";
+    const unit = plan.sku ? unitBySku.get(plan.sku) : null;
+    let sale = null;
+    let matchStatus = plan.sku ? "unmatched" : "unmatched";
+    if (unit && (unit.state === "available" || unit.state === "reserved") && !/^DS-\d+$/i.test(sku)) {
+      const { data, error } = await sb.rpc("finalize_sale_qty", {
+        p_sku: sku,
+        p_channel: "ebay",
+        p_price_cents: plan.itemCents,
+        p_qty: plan.qty,
+        p_payment_method: "ebay",
+        p_payment_id: plan.paymentId,
+        p_note: isPickup ? "eBay LOCAL PICKUP" : "eBay order",
+        p_tax_cents: 0,
+        p_approval_id: null,
+      });
+      if (error) {
+        if (/unit_not_sellable|duplicate key|23505/i.test(error.message)) matchStatus = "already_sold";
+        else throw new Error(error.message);
+      } else {
+        sale = data;
+        matchStatus = "matched";
+      }
+    } else if (unit) {
+      matchStatus = "already_sold";
+    }
+    const webStatus = matchStatus === "already_sold" ? "canceled" : "paid";
+    const { error: channelError } = await sb.from("channel_orders").insert({
+      store_id: storeId,
+      provider: "ebay",
+      order_id: orderId,
+      line_item_id: plan.lineItemId,
+      sku,
+      sale_id: sale?.id ?? null,
+      item_cents: plan.itemCents,
+      fee_cents: plan.feeCents,
+      baked_ship_cents: 0,
+      buyer_user_id: order?.buyer?.userId || null,
+      buyer_username: order?.buyer?.username || null,
+      buyer_eias_token: order?.buyer?.eiasToken || null,
+    });
+    if (channelError && !/duplicate key|23505/i.test(channelError.message)) throw new Error(channelError.message);
+    const { error: orderError } = await sb.from("web_orders").insert({
+      store_id: storeId,
+      sku,
+      sale_id: sale?.id ?? null,
+      status: webStatus,
+      channel: "ebay",
+      fulfillment: isPickup ? "pickup" : "ship",
+      order_no: orderId,
+      paid_at: new Date().toISOString(),
+      buyer_name: ship.name || order?.buyer?.username || null,
+      buyer_email: ship.email || null,
+      buyer_phone: ship.phone || null,
+      ship_line1: isPickup ? null : ship.line1 || null,
+      ship_line2: isPickup ? null : ship.line2 || null,
+      ship_city: isPickup ? null : ship.city || null,
+      ship_region: isPickup ? null : ship.region || null,
+      ship_postal: isPickup ? null : ship.postal || null,
+      item_cents: plan.itemCents,
+      shipping_cents: isPickup ? 0 : plan.shipCents,
+      tax_cents: 0,
+      total_cents: plan.itemCents + (isPickup ? 0 : plan.shipCents),
+      payment_id: plan.paymentId,
+      payment_env: process.env.EBAY_ENV === "production" ? "production" : "sandbox",
+      ebay_seller_username: seller.username || null,
+      match_status: matchStatus,
+      marketplace_fee_cents: plan.feeCents,
+      marketplace_title: String(plan.title || `eBay order ${orderId}`).slice(0, 250),
+      ...(webStatus === "canceled" ? {
+        canceled_at: new Date().toISOString(),
+        cancel_source: "sold_in_store",
+        cancel_reason: "This line was already sold. The other lines on the eBay order were left alone.",
+      } : {}),
+    });
+    if (orderError) throw new Error(orderError.message);
+    created.push({ sku, matchStatus, saleId: sale?.id ?? null, lineItemId: plan.lineItemId });
+    if (plan.sku) {
+      await sb.from("events").insert({
+        store_id: storeId, sku: plan.sku, kind: "ebay_line_repair", actor: "eBay sync",
+        note: `Recorded line ${plan.lineItemId} on eBay order ${orderId}`,
+      }).then(() => undefined, () => undefined);
+    }
+  }
+  for (const change of repair.shipping) {
+    if (!change.id) continue;
+    const row = (existing || []).find((item) => item.id === change.id);
+    const itemCents = Number(row?.item_cents) || 0;
+    await sb.from("web_orders").update({
+      shipping_cents: change.shipping_cents,
+      total_cents: itemCents + change.shipping_cents,
+      updated_at: new Date().toISOString(),
+    }).eq("id", change.id);
+    if (row?.sale_id) {
+      await sb.from("sales").update({ shipping_cents: change.shipping_cents }).eq("id", row.sale_id);
+    }
+    await sb.from("events").insert({
+      store_id: storeId, sku: change.sku, kind: "ebay_line_repair", actor: "eBay sync",
+      field: "shipping_cents", old_value: String(change.from_cents), new_value: String(change.shipping_cents),
+      note: `Split eBay order ${orderId} shipping across its line items`,
+    }).then(() => undefined, () => undefined);
+  }
+  return {
+    orderId,
+    multi: true,
+    lines: planned.plans.map((plan) => plan.sku),
+    created,
+    shippingAdjusted: repair.shipping.map((change) => ({ sku: change.sku, from: change.from_cents, to: change.shipping_cents })),
+    shipment: orderId,
+  };
+}
+
 export async function ingestEbayOrder(storeId, order, seller = {}) {
   const orderId = order?.orderId;
   if (!orderId) return { skipped: true, reason: "missing_order_id" };
+  if ((order?.lineItems || []).length > 1) return ingestMultiEbayOrder(storeId, order, seller);
   const rawSku = orderSku(order);
   const sku = rawSku || "UNMATCHED";
   const sb = serviceClient();
@@ -1601,7 +1744,22 @@ export async function reconcileCanceledEbayOrders(storeId, hint = {}, orders = n
     path => ebayFetch(storeId, "GET", path, undefined, hint), fulfillmentOrdersPath());
   const out = [];
   for (const order of rows) {
-    if (!order?.orderId || !ebayOrderState(order).reversed) continue;
+    if (!order?.orderId || !ebayOrderState(order).reversed) {
+      const scope = order?.orderId ? refundScope(order) : { scope: "none", skus: [] };
+      if (scope.scope === "lines") {
+        for (const sku of scope.skus) {
+          const { error } = await sb.rpc("floor_reconcile_ebay_line_refund", {
+            p_store: storeId,
+            p_order: String(order.orderId),
+            p_sku: sku,
+            p_evidence: order,
+          });
+          if (error) console.log("ebay_line_refund", JSON.stringify({ orderId: order.orderId, sku, error: error.message }));
+          else out.push({ orderId: order.orderId, sku, partial: true });
+        }
+      }
+      continue;
+    }
     const { data, error } = await sb.rpc("floor_reconcile_ebay_reversal", {
       p_store: storeId, p_order: String(order.orderId), p_evidence: order,
     });

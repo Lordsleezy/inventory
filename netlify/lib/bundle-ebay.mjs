@@ -22,6 +22,7 @@ import {
   quoteBundle,
   sendInvoiceInnerXml,
 } from "../../shared/bundle-shipping.mjs";
+import { trackingUploads } from "../../shared/ebay-order-lines.mjs";
 
 const SELLING = "ikonikdeals2026";
 
@@ -233,6 +234,14 @@ async function writeShares(sb, preview) {
   }
 }
 
+async function rememberCombinedWeight(sb, storeId, duration) {
+  await sb.from("store_settings").upsert({
+    store_id: storeId,
+    key: "ebay_combined_weight",
+    value: { active: true, rule: "COMBINED_ITEM_WEIGHT", duration: duration || "DAYS_30" },
+  }, { onConflict: "store_id,key" });
+}
+
 export async function enableCombinedWeight(sb, storeId, { confirm } = {}) {
   assertBundleConfirm(confirm);
   const account = await loadEbayAccount(storeId, { username: SELLING });
@@ -264,6 +273,7 @@ export async function enableCombinedWeight(sb, storeId, { confirm } = {}) {
     body: { policy, rules, preferences, decision: decision.reason },
   });
   if (!decision.write) {
+    if (decision.reason === "already_on") await rememberCombinedWeight(sb, storeId, rules?.combinedDuration);
     return {
       ok: true,
       skipped: true,
@@ -282,6 +292,7 @@ export async function enableCombinedWeight(sb, storeId, { confirm } = {}) {
       combinedPaymentPreferences: { combinedPaymentOption: "DISCOUNT_SPECIFIED" },
     });
   }
+  await rememberCombinedWeight(sb, storeId, decision.body?.combinedDuration);
   return {
     ok: true,
     policy_id: policyId,
@@ -301,7 +312,7 @@ export async function pushBundleTracking(sb, storeId, leadId) {
     .eq("channel", lead.channel)
     .eq("buyer_name", lead.buyer_name)
     .not("shipped_at", "is", null);
-  const rows = (peers || []).filter((row) => row.tracking_number && row.tracking_number === lead.tracking_number);
+  const rows = trackingUploads((peers || []).filter((row) => row.tracking_number && row.tracking_number === lead.tracking_number).map((row) => ({ ...row, channel: row.channel || lead.channel })));
   const results = [];
   for (const row of rows) {
     const pushed = await pushMarketplaceTracking(storeId, row, {

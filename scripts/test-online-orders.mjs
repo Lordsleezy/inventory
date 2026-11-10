@@ -44,7 +44,7 @@ async function unit(sku, weight, shippable=true, shipping=null) {
 async function begin(sku) {
  return (await db.query('select public.begin_shipping_checkout($1,$2,$3::jsonb,0) q',[store,sku,buyer])).rows[0].q;
 }
-for (const [sku,weight,ship] of [['92001',5,2000],['92002',15,3200],['92003',30,5000]]) {
+for (const [sku,weight,ship] of [['92001',5,1000],['92002',15,1600],['92003',30,2800]]) {
  await unit(sku,weight);
  const b=await begin(sku);
  assert.equal(b.quote.shipping_cents,ship);
@@ -54,7 +54,7 @@ for (const [sku,weight,ship] of [['92001',5,2000],['92002',15,3200],['92003',30,
  await db.query('select public.release_shipping_checkout($1,$2)',[store,b.reservation_id]);
  assert.equal((await db.query('select state from public.units where sku=$1',[sku])).rows[0].state,'available');
 }
-for (const [sku,weight,ship] of [['92004',31,true],['92005',null,true],['92006',2,false]]) {
+for (const [sku,weight,ship] of [['92004',71,true],['92005',null,true],['92006',2,false]]) {
  await unit(sku,weight,ship);
  await assert.rejects(begin(sku),/held_or_unavailable/);
 }
