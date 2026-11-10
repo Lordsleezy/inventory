@@ -1,6 +1,9 @@
 /**
  * Put the calculated shipping policies back to the discount profile they had
  * before the combined-weight profile was attached.
+ * This keeps the service order from that first backup. For the later batch
+ * that left Ground Advantage where it was, use
+ * node scripts/rollback-discount-profile-batch.mjs instead.
  * One command: node scripts/rollback-combined-discount.mjs
  */
 const SITE = "458b95f4-4adb-4721-97bc-400f8bb97597";
