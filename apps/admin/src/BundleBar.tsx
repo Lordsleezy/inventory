@@ -4,7 +4,7 @@ import type { WebOrder } from './OrdersPage';
 import { listThumbPhoto, type UnitPhoto } from './unitPhotos';
 import { errText } from './errText';
 import { floorFunctionUrl } from './floorApi';
-import { DEFAULT_RATES, groupBundleReviews, groupOpenOrders, type BundleGroup, type BundleItem, type BundleRate } from '../../../shared/bundle-shipping.mjs';
+import { DEFAULT_RATES, bundleHoldbacks, groupBundleReviews, groupOpenOrders, type BundleGroup, type BundleItem, type BundleRate } from '../../../shared/bundle-shipping.mjs';
 
 type Link = { order_id: string; peer_id: string };
 
@@ -64,7 +64,7 @@ export function BundleBar({ client, accessToken, orders, segmentIds, locations, 
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
-  const [combined, setCombined] = useState('eBay combined weight has not been confirmed.');
+  const [combined, setCombined] = useState('Checking whether eBay combine requests are handled here.');
   const [appliedIds, setAppliedIds] = useState<string[]>([]);
 
   async function loadState() {
@@ -75,9 +75,10 @@ export function BundleBar({ client, accessToken, orders, segmentIds, locations, 
     setSplits((body.splits || []).map(String));
     setLinks(body.links || []);
     setAppliedIds((body.applied_order_ids || []).map(String));
-    setCombined(body.combined_weight?.active
-      ? `eBay combined weight is on (${body.combined_weight.rule || 'COMBINED_ITEM_WEIGHT'}).`
-      : 'eBay combined weight is off.');
+    const ruleOn = !!body.combined_weight?.active;
+    setCombined(ruleOn
+      ? 'eBay combined weight is on, and the cart still adds each item’s shipping. A buyer’s Request combined shipping shows in Seller Hub under Orders, Awaiting payment, as Send invoice. Floor prices one box on this screen. Nothing is sent until you tap Apply bundle price.'
+      : 'eBay combined weight is off. A buyer’s Request combined shipping shows in Seller Hub under Orders, Awaiting payment, as Send invoice. Nothing is sent until you tap Apply bundle price.');
   }
 
   useEffect(() => { void loadState(); }, [client]);
@@ -89,8 +90,12 @@ export function BundleBar({ client, accessToken, orders, segmentIds, locations, 
   );
   const visible = groups.filter((group) => group.items.some((item) => segmentIds.includes(item.id)));
   const reviews = useMemo(
-    () => groupBundleReviews(items, { rates, appliedIds }),
-    [items, rates, appliedIds],
+    () => groupBundleReviews(items, { rates, appliedIds, splitIds: splits }),
+    [items, rates, appliedIds, splits],
+  );
+  const holdbacks = useMemo(
+    () => bundleHoldbacks(items, { rates, appliedIds, splitIds: splits, links }),
+    [items, rates, appliedIds, splits, links],
   );
   const memberIds = groups.flatMap((group) => group.items.map((item) => item.id)).join(',');
 
@@ -122,6 +127,25 @@ export function BundleBar({ client, accessToken, orders, segmentIds, locations, 
     }
   }
 
+  async function skip(group: BundleGroup) {
+    setBusy(true);
+    setNote('');
+    try {
+      for (const item of group.items) {
+        const { error } = await client.rpc('portal_bundle_split', { p_order: item.id, p_split: true });
+        if (error) throw new Error(error.message);
+      }
+      setOpen(null);
+      setNote('Skipped. Nothing was sent.');
+      await loadState();
+      onRefresh();
+    } catch (err) {
+      setNote(errText(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function apply(group: BundleGroup) {
     const amount = group.money.action === 'invoice' ? group.money.invoice_cents : group.money.refund_cents;
     const json = await call({
@@ -142,6 +166,12 @@ export function BundleBar({ client, accessToken, orders, segmentIds, locations, 
   return (
     <div>
       {isAdmin && <p style={{ color: '#9a9a9a', margin: '8px 0' }}>{combined}</p>}
+      {isAdmin && holdbacks.map((hold) => (
+        <div key={`hold-${hold.items.map((item) => item.id).join(':')}`} style={rowStyle}>
+          <strong>{hold.buyer || 'Buyer'}</strong>
+          <div style={{ color: '#9a9a9a', marginTop: 4 }}>Not offered. {hold.reason}</div>
+        </div>
+      ))}
       {isAdmin && reviews.map((group) => (
         <button key={group.id} type="button" onClick={() => { setOpen(group); setNote(''); }} style={{ ...rowStyle, display: 'block', width: '100%', textAlign: 'left', background: '#000' }}>
           <strong>Proposed refund {money(group.money.refund_cents)}</strong>
@@ -172,7 +202,11 @@ export function BundleBar({ client, accessToken, orders, segmentIds, locations, 
               <strong>{open.buyer}</strong>
               <button type="button" style={outline} onClick={() => setOpen(null)}>Close</button>
             </div>
-            <p style={{ color: '#9a9a9a' }}>{open.items.length} items in one box. Separate shipping {money(open.money.separate_cents)}. One-box price {money(open.quote.price_cents)}.</p>
+            <p style={{ color: '#9a9a9a' }}>
+              {open.items.length} items in one box. They paid {money(open.money.separate_cents)} shipping.
+              One-box price {money(open.money.bundle_cents)}.
+              Difference {money(Math.max(0, open.money.separate_cents - open.money.bundle_cents))}.
+            </p>
             {open.quote.flag && <p style={{ color: '#FF453A' }}>These stay as separate shipments.</p>}
             {open.items.map((item) => {
               const order = orders.find((row) => row.id === item.id);
@@ -196,12 +230,17 @@ export function BundleBar({ client, accessToken, orders, segmentIds, locations, 
                 </div>
               );
             })}
-            {isAdmin && open.money.action === 'refund' && <p>Refund {money(open.money.refund_cents)}. This does not send until you tap the button.</p>}
-            {isAdmin && open.money.action === 'invoice' && <p>Unpaid. Combined invoice shipping {money(open.money.invoice_cents)}.</p>}
+            {isAdmin && open.money.action === 'refund' && <p>Method: shipping refund of {money(open.money.refund_cents)}. This does not send until you tap Apply bundle price.</p>}
+            {isAdmin && open.money.action === 'invoice' && <p>Method: combined invoice. Shipping on the invoice is {money(open.money.invoice_cents)}. This does not send until you tap Apply bundle price.</p>}
             {isAdmin && open.money.action === 'mixed' && <p style={{ color: '#FF453A' }}>Some are paid and some are not. Nothing will be sent.</p>}
             {isAdmin && !open.quote.flag && open.money.action !== 'mixed' && (
               <button type="button" style={button} disabled={busy} onClick={() => void apply(open)}>
                 {busy ? '…' : 'Apply bundle price'}
+              </button>
+            )}
+            {isAdmin && (
+              <button type="button" style={outline} disabled={busy} onClick={() => void skip(open)}>
+                Skip
               </button>
             )}
             {isAdmin && (

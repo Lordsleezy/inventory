@@ -7,6 +7,7 @@ import {
   assertBundleConfirm,
   bundleMoneyPlan,
   combinedWeightDecision,
+  bundleHoldbacks,
   groupBundleReviews,
   groupOpenOrders,
   issueRefundBody,
@@ -236,6 +237,33 @@ test('a flat policy is not written; calculated shipping gets combined item weigh
   assert.equal(decision.body?.combinedDuration, 'DAYS_7');
   assert.equal(decision.body?.calculatedHandlingRule.combinedShippingRuleType, 'INDIVIDUAL_HANDLING_FEE');
   assert.equal(decision.body?.calculatedHandlingRule.orderHandlingAmount, undefined);
+});
+
+test('orders outside the window, at different addresses, or already at the one-box price are not offered', () => {
+  const early = box('old-a', { paid_at: '2026-09-01T00:00:00Z', shipping_cents: 2000 });
+  const late = box('old-b', { paid_at: '2026-11-01T00:00:00Z', shipping_cents: 2000 });
+  assert.equal(groupOpenOrders([early, late]).length, 0);
+  const window = bundleHoldbacks([early, late]);
+  assert.equal(window.length, 1);
+  assert.match(window[0].reason, /30-day/);
+
+  const other = box('addr', { ship_line1: '9 Other Rd', ship_postal: '10001', shipping_cents: 2000 });
+  const here = box('here', { shipping_cents: 2000 });
+  const places = bundleHoldbacks([here, other]);
+  assert.equal(places.length, 1);
+  assert.match(places[0].reason, /ship-to/);
+
+  const even = [
+    box('even-a', { shipped_at: '2026-11-02T00:00:00Z', weight_lb: 20, shipping_cents: 1500, length_in: 16, width_in: 12, height_in: 8 }),
+    box('even-b', { shipped_at: '2026-11-02T00:00:00Z', weight_lb: 8, shipping_cents: 900, length_in: 10, width_in: 8, height_in: 4 }),
+  ];
+  assert.equal(groupBundleReviews(even).length, 0);
+  const priced = bundleHoldbacks(even);
+  assert.equal(priced.length, 1);
+  assert.match(priced[0].reason, /not lower/);
+
+  const skipped = bundleHoldbacks([early, late], { splitIds: ['old-a'] });
+  assert.equal(skipped.length, 0);
 });
 
 test('a light item in a big box is billed at dimensional weight', () => {
