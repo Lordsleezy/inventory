@@ -195,14 +195,46 @@ export async function revertTempFlat(sb, { storeId, force = false, now = Date.no
       offerId: item.offer_id,
       fulfillmentPolicyId: item.from_policy_id,
     });
-    const after = await readListingSnapshot(account, item.listing_id);
-    if (String(after.policy_id) !== String(item.from_policy_id)) {
-      throw new Error(`SKU ${item.sku} is still on policy ${after.policy_id}, expected ${item.from_policy_id}`);
+    // Sold / UNPUBLISHED offers keep the restored policy on the offer, but
+    // GetItem can still report the temp ShippingProfileID frozen at sale time.
+    // Prefer the live offer policy; fall back to GetItem for published listings.
+    let policyId = null;
+    let offerStatus = null;
+    try {
+      const offer = await ebayFetchAccount(account, "GET", `/sell/inventory/v1/offer/${moved.offerId}`);
+      policyId = offer?.listingPolicies?.fulfillmentPolicyId || null;
+      offerStatus = String(offer?.status || "");
+    } catch {
+      policyId = null;
     }
-    if (item.price && String(after.price) !== String(item.price)) {
+    const after = await readListingSnapshot(account, item.listing_id).catch(() => null);
+    const ended = /UNPUBLISHED|ENDED|INACTIVE/i.test(offerStatus) || /Completed|Ended/i.test(String(after?.shipping_type || ""));
+    if (String(policyId) === String(item.from_policy_id)) {
+      // Offer already (or now) points at the original calculated policy.
+    } else if (after && String(after.policy_id) === String(item.from_policy_id)) {
+      policyId = after.policy_id;
+    } else if (ended && String(policyId || after?.policy_id) === String(hold.policy_id)) {
+      // Last resort for a sold listing stuck on the temp profile id in GetItem:
+      // the inventory offer already has the original id from switchListingPolicy,
+      // or switch reported unchanged because offer matched. Accept offer truth.
+      if (String(moved.before || policyId) === String(item.from_policy_id) || moved.unchanged) {
+        policyId = item.from_policy_id;
+      } else {
+        throw new Error(`SKU ${item.sku} is still on policy ${policyId || after?.policy_id}, expected ${item.from_policy_id}`);
+      }
+    } else {
+      throw new Error(`SKU ${item.sku} is still on policy ${policyId || after?.policy_id}, expected ${item.from_policy_id}`);
+    }
+    if (!ended && item.price && after?.price && String(after.price) !== String(item.price)) {
       throw new Error(`SKU ${item.sku} price changed from ${item.price} to ${after.price}`);
     }
-    restored.push({ sku: item.sku, listing_id: item.listing_id, policy_id: after.policy_id, offer_id: moved.offerId });
+    restored.push({
+      sku: item.sku,
+      listing_id: item.listing_id,
+      policy_id: String(policyId || item.from_policy_id),
+      offer_id: moved.offerId,
+      offer_status: offerStatus,
+    });
   }
   const next = {
     ...hold,

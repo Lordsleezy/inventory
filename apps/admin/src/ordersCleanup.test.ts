@@ -6,15 +6,16 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 
-test('Orders screens no longer mount bundle / proposed-refund chrome', async () => {
+test('Orders screens no longer mount proposed-refund / Apply bundle price chrome', async () => {
   const app = await readFile(path.join(root, 'appMode/AppOrders.tsx'), 'utf8');
   const desk = await readFile(path.join(root, 'OrdersPage.tsx'), 'utf8');
   const bar = await readFile(path.join(root, 'BundleBar.tsx'), 'utf8');
   assert.doesNotMatch(app, /import \{ BundleBar \}/);
   assert.doesNotMatch(desk, /import \{ BundleBar \}/);
-  assert.doesNotMatch(app, /Proposed refund|Apply bundle price|combined shipping|tempFlatLine/);
+  assert.doesNotMatch(app, /Proposed refund|Apply bundle price|tempFlatLine/);
   assert.doesNotMatch(desk, /Proposed refund|Apply bundle price/);
   assert.match(bar, /return null/);
+  assert.match(app, /portal_bundle_orders|orders-bundle-bar|AppShipmentCard/);
 });
 
 test('phone Orders heading is solid white, not gray', async () => {
