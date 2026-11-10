@@ -85,7 +85,7 @@ type VoidedLine = {
   processing_fee_cents: number | null; profit_cents: number | null;
   shipping_cents: number | null; order_no: string | null; buyer_name: string | null;
 };
-type Ticket = { key: string; at: string; lines: Line[]; subtotal: number; tax: number; fee: number; total: number; cash: number; card: number; method: string; actorId: string | null; actor: string; cost: number | null; channel: string; ebayFeeCents: number; bakedShipCents: number; feeCents: number; shipCostCents: number; pendingLabelCreditCents: number; processingFeeCents: number; shippingCents: number; costEstimated: boolean; taxOwedCents: number; taxCollectedCents: number; varianceCents: number | null; profitCents: number | null; commissionOverride: CommissionOverride | null; needsMatch?: boolean; webOrderId?: string; orderNo?: string | null; buyerName?: string | null };
+type Ticket = { key: string; at: string; lines: Line[]; subtotal: number; tax: number; fee: number; total: number; cash: number; card: number; method: string; actorId: string | null; actor: string; cost: number | null; channel: string; ebayFeeCents: number; bakedShipCents: number; feeCents: number; shipCostCents: number; pendingLabelCreditCents: number; processingFeeCents: number; shippingCents: number; costEstimated: boolean; taxOwedCents: number; taxCollectedCents: number; varianceCents: number | null; profitCents: number | null; commissionOverride: CommissionOverride | null; frozenOnline?: { paulPct: number; jacobPct: number } | null; needsMatch?: boolean; webOrderId?: string; orderNo?: string | null; buyerName?: string | null };
 type UnmatchedOrder = {
   id: string; ticket_key: string; order_no: string | null; sku: string; title: string;
   channel: string; at: string; price_cents: number; tax_cents: number; shipping_cents: number;
@@ -270,15 +270,19 @@ async function storedReports(storeId: string) {
     if (batch.length < 1000) return reports;
   }
 }
-async function frozenCommissions(): Promise<FrozenMap> {
-  const map: FrozenMap = new Map();
+async function frozenCommissions(): Promise<{ amounts: FrozenMap; onlineRates: Map<string, { paulPct: number; jacobPct: number }> }> {
+  const amounts: FrozenMap = new Map();
+  const onlineRates = new Map<string, { paulPct: number; jacobPct: number }>();
   for (let offset = 0;; offset += 1000) {
     const res = await sb.rpc('portal_payout_commissions').range(offset, offset + 999);
     // Before the payout migration is applied the RPC does not exist: fall back to browser math.
-    if (res.error) { if (/portal_payout_commissions|PGRST202|404|does not exist/i.test(res.error.message)) return map; throw new Error(res.error.message); }
-    const batch = (res.data || []) as { ticket_key: string; employee_id: string; amount_cents: number | null }[];
-    for (const row of batch) map.set(`${row.ticket_key}|${row.employee_id}`, row.amount_cents);
-    if (batch.length < 1000) return map;
+    if (res.error) { if (/portal_payout_commissions|PGRST202|404|does not exist/i.test(res.error.message)) return { amounts, onlineRates }; throw new Error(res.error.message); }
+    const batch = (res.data || []) as { ticket_key: string; employee_id: string; amount_cents: number | null; online?: boolean; online_pct?: number | null; online_jacob_pct?: number | null }[];
+    for (const row of batch) {
+      amounts.set(`${row.ticket_key}|${row.employee_id}`, row.amount_cents);
+      if (row.online) onlineRates.set(row.ticket_key, { paulPct: Number(row.online_pct) || 0, jacobPct: Number(row.online_jacob_pct) || 0 });
+    }
+    if (batch.length < 1000) return { amounts, onlineRates };
   }
 }
 async function storedPayments(storeId: string) {
@@ -362,6 +366,7 @@ export function App() {
   const [onlineCfg, setOnlineCfg] = useState<OnlineCfg>(NO_ONLINE);
   const [commissionOverrides, setCommissionOverrides] = useState<OverrideMap>(new Map());
   const [frozen, setFrozen] = useState<FrozenMap>(new Map());
+  const [frozenOnlineRates, setFrozenOnlineRates] = useState<Map<string, { paulPct: number; jacobPct: number }>>(new Map());
   const [editing, setEditing] = useState<Report | 'daily' | 'weekly' | null>(null);
   const [reportReadOnly, setReportReadOnly] = useState(false);
   const [email, setEmail] = useState(''); const [password, setPassword] = useState('');
@@ -546,11 +551,11 @@ export function App() {
         sb.from('store_payout_sku_rates').select('sku,employee_id,rate').eq('store_id', store),
       ]);
       setPeople(check<Person[]>(p)); setRules(check<Rule[]>(r)); setReports(a); setExpenses(x);
-      const cfg = check<{ online_channels: string[]; online_payout_pct: number; online_payout_employee_id: string | null; absorb_fees?: boolean }>(c);
+      const cfg = check<{ online_channels: string[]; online_payout_pct: number; online_jacob_pct?: number; online_payout_employee_id: string | null; absorb_fees?: boolean }>(c);
       const slots = Object.fromEntries(((sp.data || []) as { slot: string; employee_id: string }[]).map(x => [x.slot, x.employee_id]));
       const skuRates: Record<string, Record<string, number>> = {};
       for (const x of (sr.data || []) as { sku: string; employee_id: string; rate: number }[]) (skuRates[x.sku] ||= {})[x.employee_id] = Number(x.rate);
-      setOnlineCfg({ channels: (cfg.online_channels || []).map(s => String(s).toLowerCase()), pct: Number(cfg.online_payout_pct) || 0, employeeId: cfg.online_payout_employee_id, slots, skuRates, absorbFees: cfg.absorb_fees !== false });
+      setOnlineCfg({ channels: (cfg.online_channels || []).map(s => String(s).toLowerCase()), pct: Number(cfg.online_payout_pct) || 0, jacobPct: Number(cfg.online_jacob_pct) || 0, employeeId: cfg.online_payout_employee_id, slots, skuRates, absorbFees: cfg.absorb_fees !== false });
       setError('');
       // Non-fatal: shows "Replacement sent" on the original sale rows.
       void Promise.resolve(sb.rpc('portal_dispositions_list', { p_kind: 'replacement' })).then(({ data, error: e }) => { if (!e && Array.isArray(data)) setReplacementRows(data as Disposition[]); });
@@ -594,14 +599,18 @@ export function App() {
     try {
       const overrides = await storedCommissionOverrides(store);
       setCommissionOverrides(overrides);
-      const [salesRows, fees, frozen] = await Promise.all([payoutSales(overrides), ebayInsertionFees(store), frozenCommissions()]);
-      setAllSales(salesRows);
-      setFrozen(frozen);
+      const [salesRows, fees, frozenBundle] = await Promise.all([payoutSales(overrides), ebayInsertionFees(store), frozenCommissions()]);
+      setAllSales(salesRows.map(t => {
+        const rate = frozenBundle.onlineRates.get(t.key);
+        return rate ? { ...t, frozenOnline: rate } : t;
+      }));
+      setFrozen(frozenBundle.amounts);
+      setFrozenOnlineRates(frozenBundle.onlineRates);
       setEbayFees(fees);
     } catch (e) { setError(errText(e)); }
   }, [store]);
   const setTicketOverride = useCallback((ticketKey: string, next: CommissionOverride | null) => {
-    void frozenCommissions().then(setFrozen).catch(() => undefined);
+    void frozenCommissions().then(b => { setFrozen(b.amounts); setFrozenOnlineRates(b.onlineRates); }).catch(() => undefined);
     setCommissionOverrides(prev => {
       const map = new Map(prev);
       if (next) map.set(ticketKey, next); else map.delete(ticketKey);
@@ -628,7 +637,7 @@ export function App() {
   useEffect(() => {
     if (!store || !fullAccess) return;
     if (page !== 'sales' && page !== 'orders') return;
-    void frozenCommissions().then(setFrozen).catch(() => undefined);
+    void frozenCommissions().then(b => { setFrozen(b.amounts); setFrozenOnlineRates(b.onlineRates); }).catch(() => undefined);
   }, [store, fullAccess, page]);
   useEffect(() => {
     if (!store || !['sales', 'reports'].includes(page)) return;
@@ -911,10 +920,10 @@ export function App() {
       </ul></section>
     </div>
     <section className="panel"><h2>{selectedDay === today() ? 'Today’s transactions' : `Transactions · ${selectedDay}`}{salesScope !== 'all' && <small> · {salesScope === 'instore' ? 'in store' : 'online'}</small>}</h2>
-      {liveShown.length === 0 ? <Empty>No {salesScope === 'all' ? '' : salesScope === 'instore' ? 'in-store ' : 'online '}sales for {selectedDay === today() ? 'today' : selectedDay}. Use the date control above to check another day.</Empty> : <div className="ticket-list">{liveShown.map(t => <LiveTicket key={t.key} t={t} money={money} stamp={stamp} rules={activeRules} cfg={onlineCfg} frozen={frozen} personName={personName} busy={busy} onCommissionChanged={setTicketOverride} onMatchSku={t.needsMatch ? () => void matchLiveSku(t) : undefined} />)}</div>}
+      {liveShown.length === 0 ? <Empty>No {salesScope === 'all' ? '' : salesScope === 'instore' ? 'in-store ' : 'online '}sales for {selectedDay === today() ? 'today' : selectedDay}. Use the date control above to check another day.</Empty> : <div className="ticket-list">{liveShown.map(t => { const rate = frozenOnlineRates.get(t.key); const shown = rate ? { ...t, frozenOnline: rate } : t; return <LiveTicket key={t.key} t={shown} money={money} stamp={stamp} rules={activeRules} cfg={onlineCfg} frozen={frozen} personName={personName} busy={busy} onCommissionChanged={setTicketOverride} onMatchSku={t.needsMatch ? () => void matchLiveSku(t) : undefined} />; })}</div>}
     </section></>;
   })()}
-  {(fullAccess || registerOnly) && page === 'orders' && store && <OrdersPage client={sb} accessToken={session.access_token} storeId={store} money={money} stamp={stamp} rules={activeRules} cfg={onlineCfg} commissionOverrides={commissionOverrides} frozen={frozen} personName={personName} busy={busy} onCommissionChanged={setTicketOverride} packOnly={registerOnly} />}
+  {(fullAccess || registerOnly) && page === 'orders' && store && <OrdersPage client={sb} accessToken={session.access_token} storeId={store} money={money} stamp={stamp} rules={activeRules} cfg={onlineCfg} commissionOverrides={commissionOverrides} frozen={frozen} frozenOnlineRates={frozenOnlineRates} personName={personName} busy={busy} onCommissionChanged={setTicketOverride} packOnly={registerOnly} />}
   {fullAccess && page === 'returns' && store && <ReturnsPage client={sb} storeId={store} money={money} stamp={stamp} accessToken={session.access_token} />}
   {fullAccess && page === 'receipts' && <ReceiptsPage client={sb} money={money} stamp={stamp} />}
   {fullAccess && page === 'online' && <OnlinePage storeId={store} accessToken={session.access_token} client={sb} money={money} tab={nav.onlineTab} onTab={t => go({ onlineTab: t, page: 'online' })} channel={nav.onlineChannel} onChannel={c => go({ onlineChannel: c, onlineTab: 'listed', page: 'online' })} onInventory={() => goNav({ page: 'inventory', inventoryTab: 'in-stock' })} />}
@@ -1114,7 +1123,11 @@ function PayoutsPage({allSales,ebayFees,staff,rules,payments,adjustments,expense
       if (!payoutCardIncludesSale(amount)) return [];
       // Default online: only the online recipient. Override: anyone with a non-zero cut.
       // A missing cost stays on the card as Needs cost and is not added to the balance.
-      if (online && !t.commissionOverride && person.user_id !== cfg.employeeId) return [];
+      if (online && !t.commissionOverride && person.user_id !== cfg.employeeId) {
+        const jacobPct = t.frozenOnline ? t.frozenOnline.jacobPct : (cfg.jacobPct || 0);
+        const jacobShare = person.user_id === cfg.slots?.jacob && jacobPct > 0;
+        if (!jacobShare || amount === 0) return [];
+      }
       if (online && t.commissionOverride && person.user_id !== cfg.employeeId) {
         const rate = person.user_id === cfg.slots?.paul ? t.commissionOverride.paulPct
           : person.user_id === cfg.slots?.jacob ? t.commissionOverride.jacobPct
@@ -1137,7 +1150,7 @@ function PayoutsPage({allSales,ebayFees,staff,rules,payments,adjustments,expense
         detail: t.lines.map(l => l.sku).join(', '),
         ticketKey: t.key, ticket: t, overridden: !!t.commissionOverride,
         note: online
-          ? `${t.channel}${t.costEstimated ? ' · cost est.' : ''} · ${t.commissionOverride ? rateLabel : `${cfg.pct}% of commission profit`}`
+          ? `${t.channel}${t.costEstimated ? ' · cost est.' : ''} · ${t.commissionOverride ? rateLabel : `Paul ${t.frozenOnline ? t.frozenOnline.paulPct : cfg.pct}% / Jacob ${t.frozenOnline ? t.frozenOnline.jacobPct : (cfg.jacobPct || 0)}% of commission profit`}`
           : `${t.channel || 'in-store'} · ${rateLabel} · Owner share ${rp === null ? 'pending' : money(rp)}`
       }];
     });

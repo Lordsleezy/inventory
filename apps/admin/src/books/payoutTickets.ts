@@ -104,8 +104,16 @@ export function ticketCommissions(
   let sum = 0;
   for (const x of amounts) sum += x || 0;
   if (isOnline(ticket, cfg) && !ticket.commissionOverride) {
-    sum = amounts.find((_, i) => rules[i].employee_id === cfg.employeeId) ?? 0;
-    if (typeof sum !== 'number') sum = 0;
+    let onlineSum = 0;
+    for (let i = 0; i < rules.length; i++) {
+      const id = rules[i].employee_id;
+      const isPaul = id === cfg.employeeId;
+      const isJacob = !!cfg.slots?.jacob && id === cfg.slots.jacob;
+      if (!isPaul && !isJacob) continue;
+      if (amounts[i] == null) return null;
+      onlineSum += amounts[i] || 0;
+    }
+    return onlineSum;
   }
   return sum;
 }

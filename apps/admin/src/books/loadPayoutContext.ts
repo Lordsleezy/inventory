@@ -41,11 +41,12 @@ export async function loadBooksPayoutContext(client: SupabaseClient, storeId: st
   ]);
   if (cfgRes.error) throw cfgRes.error;
   if (rulesRes.error) throw rulesRes.error;
-  const cfgRaw = cfgRes.data as { online_channels: string[]; online_payout_pct: number; online_payout_employee_id: string | null; absorb_fees?: boolean };
+  const cfgRaw = cfgRes.data as { online_channels: string[]; online_payout_pct: number; online_jacob_pct?: number; online_payout_employee_id: string | null; absorb_fees?: boolean };
   const slots = Object.fromEntries(((peopleRes.data || []) as { slot: string; employee_id: string }[]).map((x) => [x.slot, x.employee_id]));
   const cfg: OnlineCfg = {
     channels: (cfgRaw.online_channels || []).map((s) => String(s).toLowerCase()),
     pct: Number(cfgRaw.online_payout_pct) || 0,
+    jacobPct: Number(cfgRaw.online_jacob_pct) || 0,
     employeeId: cfgRaw.online_payout_employee_id,
     slots,
     absorbFees: cfgRaw.absorb_fees !== false,

@@ -50,7 +50,7 @@ const s = `store_id=eq.${store}`;
 const [lines, rules, settings, overrides, people, skuRows] = await Promise.all([
   rest(`sale_ledger?${s}&voided_at=is.null&select=id,ticket_id,sku,price_cents,cost_cents,channel,shipping_cents,channel_fee_cents,ship_cost_cents,processing_fee_cents,tax_collected_cents,tax_owed_cents&order=id`),
   rest(`portal_payout_rules?${s}&select=employee_id,method,rate`),
-  rest(`store_settings?${s}&key=in.(online_channels,online_payout_pct,online_payout_employee_id)&select=key,value`),
+  rest(`store_settings?${s}&key=in.(online_channels,online_payout_pct,online_jacob_pct,online_payout_employee_id)&select=key,value`),
   rest(`portal_commission_overrides?${s}&select=ticket_key,paul_pct,jacob_pct`),
   rest(`store_payout_people?${s}&select=slot,employee_id`, { optional: true }),
   rest(`store_payout_sku_rates?${s}&select=sku,employee_id,rate`, { optional: true }),
@@ -62,7 +62,8 @@ if (skuRows) for (const r of skuRows) (skuRates[r.sku] ||= {})[r.employee_id] = 
 else for (const [sku, m] of Object.entries(LEGACY_SKU)) for (const [slot, rate] of Object.entries(m)) (skuRates[sku] ||= {})[LEGACY_SLOTS[slot]] = rate;
 const cfg = {
   channels: (setting("online_channels", ["website"]) || []).map((c) => String(c).toLowerCase()),
-  pct: Number(setting("online_payout_pct", 30)) || 0,
+  pct: Number(setting("online_payout_pct", 25)) || 0,
+  jacobPct: Number(setting("online_jacob_pct", 0)) || 0,
   employeeId: setting("online_payout_employee_id", null),
   slots, skuRates,
 };
@@ -89,6 +90,7 @@ for (const l of lines) {
 }
 const people_ = [...rules];
 if (cfg.employeeId && !people_.some((r) => r.employee_id === cfg.employeeId)) people_.push({ employee_id: cfg.employeeId, method: "percent_sale", rate: 0 });
+if (cfg.slots?.jacob && !people_.some((r) => r.employee_id === cfg.slots.jacob)) people_.push({ employee_id: cfg.slots.jacob, method: "percent_profit", rate: 0 });
 
 const browser = {}, pending = {}, perTicket = new Map();
 for (const t of tickets.values()) for (const r of people_) {
@@ -114,8 +116,11 @@ if (snap) {
     const prev = frozen.has(k) ? frozen.get(k) : 0;
     frozen.set(k, prev === null || c.amount_cents === null ? null : prev + c.amount_cents);
   }
+  const frozenTickets = new Set([...frozen.keys()].map((k) => k.slice(0, k.lastIndexOf("|"))));
   const diffs = [];
-  for (const [k, a] of perTicket) {
+  for (const [k, liveAmt] of perTicket) {
+    const ticketKey = k.slice(0, k.lastIndexOf("|"));
+    const a = frozenTickets.has(ticketKey) ? (frozen.has(k) ? frozen.get(k) : 0) : liveAmt;
     const f = frozen.has(k) ? frozen.get(k) : 0;
     if ((a ?? null) !== (f ?? null) && !(a === 0 && f === undefined)) diffs.push({ key: k, screen: a, frozen: f });
   }

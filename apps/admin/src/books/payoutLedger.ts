@@ -215,7 +215,11 @@ export function computePayoutPersonBalances(input: {
         const ticket = { ...t, commissionOverride: t.commissionOverride ?? null };
         const amount = cutCommission(t.key, ticket, rule, frozen, cfg, frozenSet);
         if (!payoutCardIncludesSale(amount)) continue;
-        if (online && !t.commissionOverride && person.user_id !== cfg.employeeId) continue;
+        if (online && !t.commissionOverride && person.user_id !== cfg.employeeId) {
+          const jacobPct = t.frozenOnline ? t.frozenOnline.jacobPct : (cfg.jacobPct || 0);
+          const jacobShare = person.user_id === cfg.slots?.jacob && jacobPct > 0;
+          if (!jacobShare || amount === 0) continue;
+        }
         if (online && t.commissionOverride && person.user_id !== cfg.employeeId) {
           const rate = person.user_id === cfg.slots?.paul ? t.commissionOverride.paulPct
             : person.user_id === cfg.slots?.jacob ? t.commissionOverride.jacobPct
