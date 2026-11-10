@@ -1,7 +1,14 @@
 export function dedupeOrders(orders: any[]): any[];
 export function shipmentLead(items: any[]): any;
 export function sameBuyerAndAddress(a: any, b: any): { ok: boolean; reason?: string; message?: string };
-export function canManualBundle(orders: any[]): { ok: boolean; reason?: string; message?: string; lead?: any; items?: any[] };
+export function canManualBundle(orders: any[]): {
+  ok: boolean;
+  reason?: string;
+  message?: string | null;
+  lead?: any;
+  items?: any[];
+  clearsLabels?: boolean;
+};
 export function canUnbundle(items: any[]): { ok: boolean; reason?: string; message?: string };
 export function withPackageDims(order: any): any;
 export function listShipments(orders: any[], opts?: any): any[];

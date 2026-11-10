@@ -968,13 +968,16 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
             disabled={!!busy || !bundleReady.ok}
             onClick={() => void (async () => {
               if (!bundleReady.ok) { setError(bundleReady.message || 'Cannot bundle.'); return; }
-              if (!window.confirm(`Bundle ${selectedOrders.length} items for ${selectedOrders[0].buyer_name || 'this buyer'} into one shipment / one label?`)) return;
+              const clearNote = bundleReady.clearsLabels
+                ? '\n\nAny existing labels/tracking on these lines will be cleared so you can upload ONE shared label for the box.'
+                : '\n\nNext: upload one shipping label for the whole box.';
+              if (!window.confirm(`Bundle ${selectedOrders.length} items for ${selectedOrders[0].buyer_name || 'this buyer'} into one shipment?${clearNote}`)) return;
               setBusy('bundle'); setError('');
               const { error: e } = await client.rpc('portal_bundle_orders', { p_ids: selectedOrders.map((row) => row.id) });
               if (e) {
                 setError(e.message === 'different_buyer' ? 'Different buyers — cannot bundle.'
                   : e.message === 'different_address' ? 'Ship-to addresses do not match — cannot bundle.'
-                    : e.message === 'label_exists' ? 'Void the label first, then bundle.'
+                    : e.message === 'not_open' ? 'One of those is already packaged or shipped.'
                       : e.message);
               } else setSelectedIds([]);
               await load(); setBusy(null);
@@ -982,7 +985,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
           >
             {busy === 'bundle' ? 'Bundling…' : `Bundle ${selectedIds.length}`}
           </button>
-          {!bundleReady.ok && bundleReady.message ? <p className="orders-bundle-hint">{bundleReady.message}</p> : null}
+          {bundleReady.message ? <p className="orders-bundle-hint">{bundleReady.message}</p> : null}
         </div>
       )}
       {openId && active.some((o) => o.id === openId) && createPortal(

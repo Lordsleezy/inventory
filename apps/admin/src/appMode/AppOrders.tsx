@@ -322,13 +322,18 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
       setError(check.message || 'Cannot bundle those orders.');
       return;
     }
-    if (!window.confirm(`Bundle ${selectedOrders.length} items for ${selectedOrders[0].buyer_name || 'this buyer'} into one shipment / one label?`)) return;
+    const clearNote = check.clearsLabels
+      ? '\n\nAny existing labels/tracking on these lines will be cleared so you can upload ONE shared label for the box.'
+      : '\n\nNext: upload one shipping label for the whole box.';
+    if (!window.confirm(
+      `Bundle ${selectedOrders.length} items for ${selectedOrders[0].buyer_name || 'this buyer'} into one shipment?${clearNote}`,
+    )) return;
     await runAction('bundle', async () => {
       const { error: e } = await client.rpc('portal_bundle_orders', { p_ids: selectedOrders.map((o) => o.id) });
       if (e) {
         const msg = e.message === 'different_buyer' ? 'Different buyers — cannot bundle.'
           : e.message === 'different_address' ? 'Ship-to addresses do not match — cannot bundle.'
-            : e.message === 'label_exists' ? 'One of those already has a label. Void it first.'
+            : e.message === 'not_open' ? 'One of those is already packaged or shipped.'
               : e.message === 'different_channel' ? 'Those orders are on different channels.'
                 : e.message;
         throw new Error(msg);
@@ -829,7 +834,7 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
           >
             {busy === 'bundle' ? 'Bundling…' : `Bundle ${selectedIds.length}`}
           </button>
-          {!bundleReady.ok && bundleReady.message && (
+          {bundleReady.message && (
             <p className="orders-bundle-hint">{bundleReady.message}</p>
           )}
         </div>

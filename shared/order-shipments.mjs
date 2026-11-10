@@ -85,24 +85,27 @@ export function sameBuyerAndAddress(a, b) {
 export function canManualBundle(orders) {
   const list = dedupeOrders(orders || []).filter(Boolean);
   if (list.length < 2) return { ok: false, reason: "need_two", message: "Select at least two orders." };
+  let clearsLabels = false;
   for (const order of list) {
-    if (hasLabel(order)) {
-      return {
-        ok: false,
-        reason: "label_exists",
-        message: `SKU ${order.sku} already has a label. Void the label first, then bundle.`,
-      };
-    }
-    if (order.shipped_at || order.canceled_at || String(order.status || "").toLowerCase() === "canceled") {
+    if (order.shipped_at || order.packaged_at || order.canceled_at || String(order.status || "").toLowerCase() === "canceled") {
       return { ok: false, reason: "not_open", message: `SKU ${order.sku} is not waiting to ship.` };
     }
+    if (hasLabel(order) || order.tracking_number) clearsLabels = true;
   }
   const lead = list[0];
   for (let i = 1; i < list.length; i += 1) {
     const check = sameBuyerAndAddress(lead, list[i]);
     if (!check.ok) return check;
   }
-  return { ok: true, lead, items: list };
+  return {
+    ok: true,
+    lead,
+    items: list,
+    clearsLabels,
+    message: clearsLabels
+      ? "These already have a label or tracking. Bundle will clear them so you can upload one shared label for the box."
+      : null,
+  };
 }
 
 export function canUnbundle(items) {
