@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { layoutBlocked, locationPhrase, planPlaceInBin, planUnassign, unitsLabel } from './locationPlace.ts';
+import { addBulkSkus, bayTagCode, layoutBlocked, locationPhrase, parseBulkSkus, planPlaceInBin, planUnassign, unitsLabel } from './locationPlace.ts';
 
 describe('location phrases', () => {
   it('reads a bin and a floor spot the way the bay screen does', () => {
@@ -64,5 +64,18 @@ describe('layoutBlocked', () => {
     assert.equal(layoutBlocked(1, [3], [
       { bay_no: 1, row_no: 1, bin_no: 3, code: '1-1-3', stock: 4 },
     ]), null);
+  });
+});
+
+describe('bulk bay tag', () => {
+  it('keeps unique SKUs from a pasted list', () => {
+    assert.deepEqual(parseBulkSkus(' 99763\n99871, 99763 99874 '), ['99763', '99871', '99874']);
+    assert.deepEqual(addBulkSkus(['99763'], '99871, 99763'), ['99763', '99871']);
+  });
+
+  it('tags into the first bin, or the floor when row 1 has no bins', () => {
+    assert.equal(bayTagCode(4, [3, 2]), '4-1-1');
+    assert.equal(bayTagCode(4, [0]), '4-1');
+    assert.throws(() => bayTagCode(0, [1]), /Choose a bay/);
   });
 });
