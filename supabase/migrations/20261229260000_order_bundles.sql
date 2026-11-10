@@ -90,6 +90,13 @@ security definer
 set search_path = public
 as $$
 begin
+  if p_store is null
+     or (
+       p_store is distinct from coalesce(public.portal_store_id(), public.current_store_id())
+       and current_setting('request.jwt.claim.role', true) is distinct from 'service_role'
+     ) then
+    raise exception 'portal_access_denied' using errcode = '42501';
+  end if;
   insert into public.bundle_ship_rates (store_id, max_lb, size_class, price_cents)
   select p_store, r.max_lb, r.size_class, r.price_cents
   from (values
