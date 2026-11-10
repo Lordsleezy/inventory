@@ -1,4 +1,4 @@
-import { digitsOnly, normalizeUpc, upcValidationMessage, upcVariants } from './upcValidate.ts';
+import { digitsOnly, normalizeUpc, UPC_NOT_APPLICABLE, upcValidationMessage, upcVariants } from './upcValidate.ts';
 
 export type LocationAllocation = { location_code: string; quantity: number };
 export type LocationMovePlan = { from: string | null; to: string | null; quantity: number };
@@ -96,8 +96,9 @@ export function skuMissingUpc(raw: string, candidates: ScanCandidate[]) {
   return { sku: row.sku, title: row.title || '' };
 }
 
-/** Barcode to store on the item. A bad scan stays on the prompt. */
-export function upcToStore(raw: string): { ok: true; upc: string } | { ok: false; message: string } {
+/** Barcode to store on the item. A bad scan stays on the prompt. No UPC is a real choice. */
+export function upcToStore(raw: string, none = false): { ok: true; upc: string } | { ok: false; message: string } {
+  if (none) return { ok: true, upc: UPC_NOT_APPLICABLE };
   const message = upcValidationMessage(raw);
   if (message) return { ok: false, message };
   const normalized = normalizeUpc(raw);
