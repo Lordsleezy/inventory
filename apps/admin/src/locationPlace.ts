@@ -9,6 +9,51 @@ export function locationPhrase(code?: string | null) {
   return `Bay ${bay} · Row ${row} · Bin ${bin}`;
 }
 
+export type LocationChoice = {
+  code: string;
+  bay_no?: number;
+  row_no?: number;
+  bin_no?: number | null;
+  bay_name?: string | null;
+};
+
+/** A named bay keeps its name. Numbered bays stay "Bay 4". */
+export function bayTitle(bayNo: number, name?: string | null) {
+  const trimmed = (name || '').trim();
+  return trimmed || `Bay ${bayNo}`;
+}
+
+/** Menu text. A named floor spot is just the name. */
+export function locationMenuLabel(loc: LocationChoice): string {
+  const name = loc.bay_name?.trim();
+  const row = loc.row_no;
+  const bin = loc.bin_no;
+  if (name && row === 1 && bin == null) return name;
+  if (name && row != null) {
+    if (bin == null) return `${name} · Row ${row} · Floor`;
+    return `${name} · R${row}-B${bin}`;
+  }
+  if (loc.bay_no != null && row != null) {
+    return `Bay ${loc.bay_no} · R${row}${bin == null ? '' : `-B${bin}`}`;
+  }
+  return locationPhrase(loc.code) || loc.code;
+}
+
+/** Named areas first, then walking order. */
+export function sortLocationChoices<T extends LocationChoice>(rows: T[]): T[] {
+  return [...rows].sort((a, b) => {
+    const named = Number(Boolean(b.bay_name?.trim())) - Number(Boolean(a.bay_name?.trim()));
+    if (named) return named;
+    const left = a.code.split('-').map(Number);
+    const right = b.code.split('-').map(Number);
+    for (let i = 0; i < 3; i += 1) {
+      const diff = (left[i] || 0) - (right[i] || 0);
+      if (diff) return diff;
+    }
+    return 0;
+  });
+}
+
 export function unitsLabel(count: number) {
   const n = Math.max(0, Number(count) || 0);
   return `${n} unit${n === 1 ? '' : 's'}`;

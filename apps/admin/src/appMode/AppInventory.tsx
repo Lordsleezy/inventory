@@ -12,6 +12,7 @@ import { INVENTORY_BUCKET_LABELS, inventoryBucketStatus, type InventoryBucket, t
 import { MissingCostList } from './MissingCostList';
 import { hydratePhotoUrlCache, listThumbPathsFromOriginals, persistPhotoUrlCache, signPhotoUrls } from '../unitPhotos';
 import { UnitListThumb } from '../UnitListThumb';
+import { locationMenuLabel, sortLocationChoices, type LocationChoice } from '../locationPlace';
 
 /** Same stock subtabs as desktop Inventory. */
 type Filter = 'in_stock' | 'sold' | 'unfinished' | 'needs_check' | 'no_location' | 'missing_cost' | 'ebay_fix' | 'defective' | 'dns' | 'never_list' | InventoryBucket;
@@ -126,7 +127,7 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
   const [ebayFix, setEbayFix] = useState<EbayFix | null>(null);
   const [noLocSelecting, setNoLocSelecting] = useState(false);
   const [noLocSelected, setNoLocSelected] = useState<Set<string>>(() => new Set());
-  const [noLocBins, setNoLocBins] = useState<string[]>([]);
+  const [noLocBins, setNoLocBins] = useState<LocationChoice[]>([]);
   const [noLocBin, setNoLocBin] = useState('');
   const [noLocBulkBusy, setNoLocBulkBusy] = useState(false);
   const counts = useAttentionCounts(client, fullAccess && filter === 'unfinished', queueRefresh);
@@ -161,16 +162,17 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
     if (filter !== 'no_location') {
       setNoLocSelecting(false);
       setNoLocSelected(new Set());
-      return;
     }
+  }, [filter]);
+
+  useEffect(() => {
     let active = true;
     void client.rpc('portal_bay_list').then(({ data, error: e }) => {
       if (!active || e) return;
-      const codes = ((data?.locations || []) as { code: string }[]).map((row) => row.code).sort();
-      setNoLocBins(codes);
+      setNoLocBins(sortLocationChoices((data?.locations || []) as LocationChoice[]));
     });
     return () => { active = false; };
-  }, [client, filter]);
+  }, [client]);
 
   async function bulkAssignNoLocation() {
     const skus = [...noLocSelected];
@@ -438,7 +440,10 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
           if(u.group_id && (u.group_total || 0) > 1 && !staffMode) return <ReceiveGroupRow key={u.group_id} item={u} client={client} admin={fullAccess} money={money} onOpen={onOpen} searchQuery={query} onChanged={()=>{setList(null);setQueueRefresh(n=>n+1)}} />;
           const warn = filter === 'dns' ? null : needs(u);
           const missing = filter === 'not_ready' ? inventoryMissingText(u.missing || []).replace(/^Missing: /, 'Missing ').replace(/, /g, ' · Missing ') : null;
-          const bay = (u as Row & { locations?: string }).locations?.split(',')[0]?.trim();
+          const rawLocation = (u as Row & { locations?: string }).locations || '';
+          const bay = [...noLocBins].sort((a, b) => b.code.length - a.code.length)
+            .reduce((text, location) => text.split(location.code).join(locationMenuLabel(location)), rawLocation)
+            .split(',')[0]?.trim();
           const bulkPick = filter === 'no_location' && noLocSelecting;
           const checked = noLocSelected.has(u.sku);
           const soldDay = u.sold_at ? new Date(u.sold_at).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }) : '';
@@ -508,7 +513,7 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
         <div className="app-bulk-bar">
           <select value={noLocBin} onChange={(e) => setNoLocBin(e.target.value)} aria-label="Assign location">
             <option value="">Choose location…</option>
-            {noLocBins.map((code) => <option key={code} value={code}>{code}</option>)}
+            {noLocBins.map((location) => <option key={location.code} value={location.code}>{locationMenuLabel(location)}</option>)}
           </select>
           <button type="button" disabled={noLocBulkBusy || !noLocBin.trim()} onClick={() => void bulkAssignNoLocation()}>
             {noLocBulkBusy ? 'Assigning…' : 'Assign location'}

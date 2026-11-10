@@ -3,6 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { LabelDialog } from '../LabelDialog';
 import { displayOrderTitle } from '../orderDisplay';
 import { locationParts } from '../locationOrder';
+import { locationMenuLabel, type LocationChoice } from '../locationPlace';
 import {
   canBuyLabel, hasLabel, orderCanMarkPackaged, orderCanStepBack, orderNeedsLabel, orderStage,
   carrierTrackUrl, type OrderStage,
@@ -46,7 +47,7 @@ export type AppOrderDetailProps = {
   busy: string;
   error: string;
   locationCode: string;
-  locationOptions: { code: string }[];
+  locationOptions: LocationChoice[];
   photos: UnitPhoto[];
   photoUrls: Record<string, string>;
   sign: Sign;
@@ -227,7 +228,7 @@ export function AppOrderDetail(props: AppOrderDetailProps) {
                 <div className="app-order-step-body">
                   <span className="app-order-step-label">Pick from</span>
                   <label className={`app-order-pick-loc-v2${parts ? '' : ' missing'}`}>
-                    <strong>{parts ? `Bay ${parts.bay} · ${parts.slot}` : 'No location'}</strong>
+                    <strong>{(() => { const hit = locationOptions.find((location) => location.code === locationCode); return hit ? locationMenuLabel(hit) : (parts ? `Bay ${parts.bay} · ${parts.slot}` : 'No location'); })()}</strong>
                     <select
                       aria-label={`Set pick location for SKU ${order.sku}`}
                       value={locationCode}
@@ -235,10 +236,9 @@ export function AppOrderDetail(props: AppOrderDetailProps) {
                       onChange={(e) => onSetLocation(e.target.value)}
                     >
                       <option value="">{parts ? 'Change location' : 'Set location'}</option>
-                      {locationOptions.map((location) => {
-                        const bit = locationParts(location.code);
-                        return <option key={location.code} value={location.code}>{bit ? `Bay ${bit.bay} · ${bit.slot}` : location.code}</option>;
-                      })}
+                      {locationOptions.map((location) => (
+                        <option key={location.code} value={location.code}>{locationMenuLabel(location)}</option>
+                      ))}
                     </select>
                   </label>
                 </div>

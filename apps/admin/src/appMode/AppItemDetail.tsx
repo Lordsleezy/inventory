@@ -15,6 +15,7 @@ import { listingLink } from '../listingLink';
 import { profitAfterFeesCents } from '../scanPricing';
 import { floorFunctionUrl } from '../floorApi';
 import { locationParts } from '../locationOrder';
+import { locationMenuLabel, type LocationChoice } from '../locationPlace';
 import { errText } from '../errText';
 import { scannerLifecycle } from '../scannerLifecycle';
 import {
@@ -128,6 +129,7 @@ export function AppItemDetail({
   const [editJump, setEditJump] = useState<string | undefined>();
   const [reload, setReload] = useState(0);
   const [locationCodes, setLocationCodes] = useState<string[]>([]);
+  const [locationChoices, setLocationChoices] = useState<LocationChoice[]>([]);
   const [photoIndex, setPhotoIndex] = useState(0);
   const [listSheet, setListSheet] = useState(false);
   const [dns, setDns] = useState<boolean | null>(null);
@@ -160,7 +162,7 @@ export function AppItemDetail({
         if (e) throw e;
         if (!data) throw new Error('Unit not found');
         const next = data as Detail;
-        const [stock, pick, dnsRow, ebayRow, hist] = await Promise.all([
+        const [stock, pick, dnsRow, ebayRow, hist, bayList] = await Promise.all([
           client.from('unit_location_stock').select('location_code').eq('store_id', storeId).eq('sku', sku),
           client.from('unit_pick_locations').select('location_code').eq('store_id', storeId).eq('sku', sku).maybeSingle(),
           canDelete && !staffMode ? client.rpc('portal_unit_dns', { p_sku: sku }) : Promise.resolve({ data: null, error: null }),
@@ -170,6 +172,7 @@ export function AppItemDetail({
           canDelete && !staffMode
             ? client.rpc('portal_unit_history', { p_sku: sku })
             : Promise.resolve({ data: [], error: null }),
+          client.rpc('portal_bay_list'),
         ]);
         const codes = (stock.data || []).map((row) => row.location_code as string);
         if (!codes.length && pick.data?.location_code) codes.push(pick.data.location_code as string);
@@ -183,6 +186,7 @@ export function AppItemDetail({
         if (!alive) return;
         setDetail(next);
         setLocationCodes(codes);
+        setLocationChoices(((bayList.data as { locations?: LocationChoice[] } | null)?.locations) || []);
         setUrls(signed);
         if (dnsRow.data && typeof dnsRow.data === 'object' && 'dns' in (dnsRow.data as object)) {
           setDns(Boolean((dnsRow.data as { dns: boolean }).dns));
@@ -231,6 +235,10 @@ export function AppItemDetail({
     setEditJump(jump);
     setEditing(true);
   };
+  const namedLocation = (code: string) => {
+    const hit = locationChoices.find((row) => row.code === code);
+    return hit ? locationMenuLabel(hit) : formatLocation(code);
+  };
 
   if (editing && detail) {
     return (
@@ -247,7 +255,7 @@ export function AppItemDetail({
           appMode
           initialSection={editJump}
           canDelete={canDelete}
-          locationLabel={locationCodes.length ? locationCodes.map(formatLocation).join(', ') : 'Unassigned'}
+          locationLabel={locationCodes.length ? locationCodes.map(namedLocation).join(', ') : 'Unassigned'}
           onReadinessChanged={() => { setReload((n) => n + 1); onChanged(); }}
           onClose={() => { setEditing(false); setEditJump(undefined); }}
           onSaved={() => {
@@ -283,7 +291,7 @@ export function AppItemDetail({
     return row && String(row.status).toLowerCase() === 'listed';
   }).length : 0;
   const locationText = locationCodes.length
-    ? locationCodes.map(formatLocation).join(', ')
+    ? locationCodes.map(namedLocation).join(', ')
     : '';
   const hasLocation = Boolean(locationText.trim());
   const upcSet = unit ? hasUpcValue(unit as { upc?: unknown; upc_does_not_apply?: unknown; listing_specs?: unknown }) : false;

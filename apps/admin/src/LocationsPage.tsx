@@ -8,9 +8,9 @@ import { scannerInputMode } from './kiosk';
 import { AppItemDetail } from './appMode/AppItemDetail';
 import { UnitEditDrawer } from './UnitEditDrawer';
 import { rpcMoveLocationStock } from './locationStock';
-import { addBulkSkus, layoutBlocked, locationPhrase, planPlaceInBin, slotTagCode, unitsLabel, type LocationAllocation } from './locationPlace';
+import { addBulkSkus, bayTitle, layoutBlocked, locationPhrase, planPlaceInBin, slotTagCode, unitsLabel, type LocationAllocation } from './locationPlace';
 
-type Bay = { bay_no: number; row_bins: number[] };
+type Bay = { bay_no: number; row_bins: number[]; name?: string | null };
 type Location = { code: string; bay_no: number; row_no: number; bin_no: number | null; stock: number };
 type BinItem = { sku: string; title: string; quantity: number; qty_on_hand: number; is_stocked: boolean };
 type FoundUnit = {
@@ -156,6 +156,10 @@ export function LocationsPage({
 
   const bay = bays.find((row) => row.bay_no === bayNo) || null;
   const bayStock = (no: number) => locations.filter((row) => row.bay_no === no).reduce((sum, row) => sum + Number(row.stock || 0), 0);
+  const titleForBay = (no: number | null | undefined) => {
+    const found = bays.find((row) => row.bay_no === no);
+    return found ? bayTitle(found.bay_no, found.name) : (no ? `Bay ${no}` : 'Locations');
+  };
   const spot = locations.find((row) => row.code === binCode) || null;
 
   function openBay(no: number) {
@@ -541,7 +545,7 @@ export function LocationsPage({
         {blocked && <p className={phone ? 'loc-error' : 'error'}>{blocked}</p>}
         {!creating && bayStock(no) > 0 && <p className={phone ? 'loc-notice' : 'hint'}>Move the {unitsLabel(bayStock(no))} out before deleting this bay.</p>}
       </>
-    ), () => { setError(''); setScreen(creating ? 'list' : 'bay'); }, creating ? 'Locations' : `Bay ${editNo}`);
+    ), () => { setError(''); setScreen(creating ? 'list' : 'bay'); }, creating ? 'Locations' : titleForBay(Number(editNo)));
   }
 
   if (screen === 'scan' && binCode) {
@@ -591,11 +595,11 @@ export function LocationsPage({
           ))}
         </div>
       ) : <p className={phone ? 'app-footer-count' : 'hint'}>Nothing in this bin yet.</p>
-    ), () => { setBinCode(null); setScreen('bay'); }, `Bay ${spot?.bay_no ?? bayNo ?? ''}`);
+    ), () => { setBinCode(null); setScreen('bay'); }, titleForBay(spot?.bay_no ?? bayNo));
   }
 
   if (screen === 'bay' && bay) {
-    return frame(`Bay ${bay.bay_no}`, `${unitsLabel(bayStock(bay.bay_no))} · ${rowsLabel(bay.row_bins.length)}`, canManage ? (
+    return frame(titleForBay(bay.bay_no), `${unitsLabel(bayStock(bay.bay_no))} · ${rowsLabel(bay.row_bins.length)}`, canManage ? (
       <button type="button" className="loc-action" onClick={startEdit}>Edit</button>
     ) : null, (
       <>
@@ -639,8 +643,8 @@ export function LocationsPage({
         ) : (
           <div className={group}>
             {bays.map((item) => rowButton(
-              `Bay ${item.bay_no}, ${rowsLabel(item.row_bins.length)}, ${unitsLabel(bayStock(item.bay_no))}`,
-              `Bay ${item.bay_no}`,
+              `${titleForBay(item.bay_no)}, ${rowsLabel(item.row_bins.length)}, ${unitsLabel(bayStock(item.bay_no))}`,
+              titleForBay(item.bay_no),
               rowsLabel(item.row_bins.length),
               unitsLabel(bayStock(item.bay_no)),
               () => openBay(item.bay_no),
@@ -666,7 +670,7 @@ export function LocationsPage({
             </label>
             <label className="loc-field">Bay
               <select value={bulkBay} disabled={busy || !bays.length} aria-label="Bay" onChange={(event) => { setBulkBay(event.target.value); setBulkRow('1'); setBulkBin('1'); }}>
-                {bays.map((item) => <option key={item.bay_no} value={String(item.bay_no)}>Bay {item.bay_no}</option>)}
+                {[...bays].sort((a, b) => Number(Boolean(b.name?.trim())) - Number(Boolean(a.name?.trim())) || a.bay_no - b.bay_no).map((item) => <option key={item.bay_no} value={String(item.bay_no)}>{bayTitle(item.bay_no, item.name)}</option>)}
               </select>
             </label>
             <label className="loc-field">Row
