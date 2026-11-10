@@ -16,6 +16,8 @@ import { AppOrderDetail } from './AppOrderDetail';
 import { AppOrderRow } from './AppOrderRow';
 import { AppOrderShipVerifySheet } from './AppOrderShipVerifySheet';
 import { floorFunctionUrl } from '../floorApi';
+import { BundleBar } from '../BundleBar';
+import { shipBundleRest } from '../bundleShip';
 import { labelUploadUi, type LabelUploadResponse } from '../labelUploadFeedback';
 import { LabelTrackingPicker, LabelTrackingResult } from '../LabelTrackingResult';
 
@@ -58,6 +60,8 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
   const [open, setOpen] = useState<WebOrder | null>(null);
   const [events, setEvents] = useState<TrackEvent[]>([]);
   const [locations, setLocations] = useState<Record<string, string[]>>({});
+  const [bundleIds, setBundleIds] = useState<string[]>([]);
+  const [bundleNote, setBundleNote] = useState('');
   const [photoMap, setPhotoMap] = useState<Record<string, UnitPhoto[]>>({});
   const [photoUrls, setPhotoUrls] = useState<Record<string, string>>(() => {
     hydratePhotoUrlCache(`${storeId}:orders`);
@@ -142,7 +146,7 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
     };
   }, [orders]);
 
-  const rows = (buckets[seg] || []).slice().sort((a, b) => {
+  const rows = (buckets[seg] || []).filter((o) => !bundleIds.includes(o.id)).slice().sort((a, b) => {
     if (isAdmin) {
       const at = (a.order_no || '') === 'TEST-SHIP-FLOW' ? -1 : 0;
       const bt = (b.order_no || '') === 'TEST-SHIP-FLOW' ? -1 : 0;
@@ -198,6 +202,8 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
         throw new Error(msg);
       }
       ok = true;
+      const extra = await shipBundleRest(client, o.id, barcode);
+      if (extra) setBundleNote(extra);
     });
     return ok;
   }
@@ -539,6 +545,22 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
         <p className="app-flag">{late > 0 ? `${late} shipped over 10 days and not marked delivered.` : 'Flags anything shipped over 10 days and not marked delivered.'}</p>
       )}
       {error && <p className="app-inline-error">{error}</p>}
+      {bundleNote && <p className="app-flag">{bundleNote}</p>}
+      {orders && (
+        <BundleBar
+          client={client}
+          accessToken={accessToken}
+          orders={orders}
+          segmentIds={(buckets[seg] || []).map((o) => o.id)}
+          locations={locations}
+          photoUrls={photoUrls}
+          photoMap={photoMap}
+          money={money}
+          isAdmin={isAdmin}
+          onRefresh={() => void load()}
+          onMembers={setBundleIds}
+        />
+      )}
       {isAdmin && seg === 'toShip' && !hasTestOrder && (
         <p className="app-flag">
           No <strong>TEST-SHIP-FLOW</strong> order in this store.
@@ -548,7 +570,7 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
           </button>
         </p>
       )}
-      {!isAdmin && seg === 'toShip' && orders && rows.length === 0 && (
+      {!isAdmin && seg === 'toShip' && orders && rows.length === 0 && bundleIds.length === 0 && (
         <p className="app-flag subtle">
           Nothing in <strong>To ship</strong> on the associate desk. eBay/Depop waiting on a label stay on the admin desk only.
           {hasTestOrder ? ' Pull down to refresh if you expect TEST-SHIP-FLOW.' : ' Ask an admin to add TEST-SHIP-FLOW or finish a labeled order.'}
@@ -556,7 +578,7 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
       )}
       <div className="app-group">
         {!orders && <div className="app-empty-row">Loading…</div>}
-        {orders && rows.length === 0 && <div className="app-empty-row">None right now</div>}
+        {orders && rows.length === 0 && bundleIds.length === 0 && <div className="app-empty-row">None right now</div>}
         {rows.map((o) => {
           const chName = CHANNEL[(o.channel || 'website').toLowerCase()] || o.channel || 'Website';
           const tail = seeTracking && !orderNeedsLabel(o) ? trackingTail(o) : '';

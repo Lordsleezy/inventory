@@ -1,0 +1,194 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  allocateBundleShipping,
+  allocateByWeight,
+  addOrderInnerXml,
+  assertBundleConfirm,
+  bundleMoneyPlan,
+  combinedWeightDecision,
+  groupOpenOrders,
+  issueRefundBody,
+  quoteBundle,
+  sendInvoiceInnerXml,
+} from '../../../shared/bundle-shipping.mjs';
+
+const box = (id: string, extra: Record<string, unknown>) => ({
+  id,
+  channel: 'ebay',
+  buyer_name: 'Ada Buyer',
+  ship_line1: '1 Main St',
+  ship_city: 'Penryn',
+  ship_region: 'CA',
+  ship_postal: '95663',
+  status: 'paid',
+  paid_at: '2026-11-09T00:00:00Z',
+  fulfillment: 'ship',
+  length_in: 10,
+  width_in: 8,
+  height_in: 4,
+  weight_lb: 2,
+  shipping_cents: 2000,
+  item_cents: 1500,
+  order_no: id,
+  ...extra,
+});
+
+test('two items use the biggest box and the summed weight, then the tier', () => {
+  const items = [
+    box('a', { length_in: 12, width_in: 10, height_in: 6, weight_lb: 4, shipping_cents: 2000 }),
+    box('b', { length_in: 8, width_in: 8, height_in: 4, weight_lb: 3, shipping_cents: 1200 }),
+  ];
+  const quote = quoteBundle(items);
+  assert.equal(quote.ok, true);
+  assert.equal(quote.package?.length_in, 12);
+  assert.equal(quote.package?.weight_lb, 7);
+  assert.equal(quote.size_class, 'small');
+  assert.equal(quote.tier_cents, 3200);
+  assert.equal(quote.price_cents, 3200);
+  assert.ok(quote.price_cents >= 2000);
+  assert.ok(quote.price_cents <= 3200);
+});
+
+test('three items clamp up to the most expensive single and down to the sum', () => {
+  const high = [
+    box('a', { weight_lb: 1, shipping_cents: 4000, length_in: 10, width_in: 8, height_in: 4 }),
+    box('b', { weight_lb: 1, shipping_cents: 800, length_in: 6, width_in: 6, height_in: 4 }),
+    box('c', { weight_lb: 1, shipping_cents: 700, length_in: 5, width_in: 5, height_in: 4 }),
+  ];
+  const up = quoteBundle(high);
+  assert.equal(up.tier_cents, 2000);
+  assert.equal(up.price_cents, 4000);
+
+  const low = [
+    box('a', { weight_lb: 20, shipping_cents: 1500, length_in: 16, width_in: 12, height_in: 8 }),
+    box('b', { weight_lb: 8, shipping_cents: 900, length_in: 10, width_in: 8, height_in: 4 }),
+    box('c', { weight_lb: 4, shipping_cents: 600, length_in: 8, width_in: 6, height_in: 4 }),
+  ];
+  const down = quoteBundle(low);
+  assert.equal(down.package?.weight_lb, 32);
+  assert.equal(down.size_class, 'medium');
+  assert.equal(down.tier_cents, 6800);
+  assert.equal(down.price_cents, 3000);
+  assert.equal(down.separate_cents, 3000);
+});
+
+test('biggest package breaks a volume tie by the longest side', () => {
+  const items = [
+    box('a', { length_in: 20, width_in: 5, height_in: 2, weight_lb: 2, shipping_cents: 2000 }),
+    box('b', { length_in: 10, width_in: 10, height_in: 2, weight_lb: 2, shipping_cents: 2000 }),
+  ];
+  const quote = quoteBundle(items);
+  assert.equal(quote.package?.length_in, 20);
+});
+
+test('over the Ground Advantage limit falls back to separate shipping', () => {
+  const heavy = quoteBundle([
+    box('a', { weight_lb: 40, shipping_cents: 5000 }),
+    box('b', { weight_lb: 31, shipping_cents: 4000 }),
+  ]);
+  assert.equal(heavy.ok, false);
+  assert.equal(heavy.reason, 'usps_limit');
+  assert.equal(heavy.flag, true);
+  assert.equal(heavy.price_cents, 9000);
+
+  const long = quoteBundle([
+    box('a', { length_in: 40, width_in: 30, height_in: 20, weight_lb: 5, shipping_cents: 2000 }),
+    box('b', { length_in: 8, width_in: 8, height_in: 4, weight_lb: 2, shipping_cents: 1000 }),
+  ]);
+  assert.equal(long.reason, 'usps_limit');
+  assert.equal(long.price_cents, 3000);
+});
+
+test('grouping keeps the same buyer and address, and drops other addresses and shipped orders', () => {
+  const orders = [
+    box('a', {}),
+    box('b', { ship_line2: 'Apt 2' }),
+    box('c', { buyer_name: 'Other Person' }),
+    box('d', { shipped_at: '2026-11-01T00:00:00Z' }),
+    box('e', { channel: 'depop' }),
+    box('f', {}),
+  ];
+  const groups = groupOpenOrders(orders);
+  assert.equal(groups.length, 1);
+  assert.deepEqual(groups[0].items.map((item) => item.id).sort(), ['a', 'f']);
+
+  const split = groupOpenOrders(orders, { splitIds: ['a'] });
+  assert.equal(split.length, 0);
+
+  const linked = groupOpenOrders(
+    [box('a', {}), box('g', { ship_line1: '99 Other Rd', ship_postal: '10001' })],
+    { links: [{ order_id: 'a', peer_id: 'g' }] },
+  );
+  assert.equal(linked.length, 1);
+  assert.equal(linked[0].items.length, 2);
+});
+
+test('shipping and label cost split by weight and add back to one box', () => {
+  const items = [
+    box('a', { weight_lb: 1, shipping_cents: 2000, label_cost_cents: 800 }),
+    box('b', { weight_lb: 1, shipping_cents: 2000 }),
+    box('c', { weight_lb: 2, shipping_cents: 2000 }),
+  ];
+  const quote = quoteBundle(items);
+  const money = bundleMoneyPlan(items, quote);
+  const allocated = Object.values(money.allocations).reduce((n, v) => n + v, 0);
+  assert.equal(allocated, quote.price_cents);
+  assert.ok(quote.price_cents <= 6000);
+  assert.ok(quote.price_cents >= 2000);
+  const labels = allocateByWeight(items, 800);
+  assert.equal(Object.values(labels).reduce((n, v) => n + v, 0), 800);
+  assert.equal(labels.c, 400);
+});
+
+test('a partial cancel leaves the other items as their own bundle', () => {
+  const live = [
+    box('a', { weight_lb: 4, shipping_cents: 2200 }),
+    box('b', { weight_lb: 4, shipping_cents: 1800 }),
+  ];
+  const canceled = box('c', { canceled_at: '2026-11-09T00:00:00Z', weight_lb: 10, shipping_cents: 9000 });
+  const groups = groupOpenOrders([...live, canceled]);
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].items.some((item) => item.id === 'c'), false);
+  const again = quoteBundle(live);
+  assert.equal(again.ok, true);
+  assert.equal(live[0].item_cents, 1500);
+  assert.equal(canceled.item_cents, 1500);
+});
+
+test('refund and invoice amounts match the one-box price, and confirm is required', () => {
+  const paid = [box('a', { shipping_cents: 2000, weight_lb: 2 }), box('b', { shipping_cents: 2000, weight_lb: 2 })];
+  const paidPlan = bundleMoneyPlan(paid, quoteBundle(paid));
+  assert.equal(paidPlan.action, 'refund');
+  assert.equal(paidPlan.refund_cents, paidPlan.separate_cents - paidPlan.bundle_cents);
+  assert.equal(paidPlan.refunds.reduce((n, row) => n + row.refund_cents, 0), paidPlan.refund_cents);
+  const body = issueRefundBody(paidPlan.refund_cents);
+  assert.equal(body.reasonForRefund, 'SHIPPING_DISCOUNT');
+  assert.equal(body.orderLevelRefundAmount.value, (paidPlan.refund_cents / 100).toFixed(2));
+
+  const unpaid = paid.map((item) => ({ ...item, paid_at: null, status: 'pending' }));
+  const invoice = bundleMoneyPlan(unpaid, quoteBundle(unpaid));
+  assert.equal(invoice.action, 'invoice');
+  assert.equal(invoice.invoice_cents, invoice.bundle_cents);
+  const xml = addOrderInnerXml({
+    lineItems: [{ legacyItemId: '111', transactionId: '222' }, { legacyItemId: '333', transactionId: '444' }],
+    shippingCents: invoice.invoice_cents,
+  });
+  assert.match(xml, new RegExp(`<ShippingServiceCost currencyID="USD">${(invoice.invoice_cents / 100).toFixed(2)}</ShippingServiceCost>`));
+  assert.match(sendInvoiceInnerXml('12-34'), /<OrderID>12-34<\/OrderID>/);
+
+  assert.throws(() => assertBundleConfirm(false), /confirm_required/);
+  assert.doesNotThrow(() => assertBundleConfirm(true));
+});
+
+test('a flat policy is not written; calculated shipping gets combined item weight', () => {
+  assert.equal(combinedWeightDecision({ shippingOptions: [{ costType: 'FLAT_RATE' }] }, null).write, false);
+  assert.equal(combinedWeightDecision({ shippingOptions: [{ costType: 'CALCULATED' }] }, {
+    calculatedShippingRule: { combinedShippingRuleType: 'COMBINED_ITEM_WEIGHT' },
+  }).reason, 'already_on');
+  const decision = combinedWeightDecision({ shippingOptions: [{ costType: 'CALCULATED' }] }, { combinedDuration: 'DAYS_7' });
+  assert.equal(decision.write, true);
+  assert.equal(decision.body?.calculatedShippingRule.combinedShippingRuleType, 'COMBINED_ITEM_WEIGHT');
+  assert.equal(decision.body?.combinedDuration, 'DAYS_7');
+  assert.equal('calculatedHandlingRule' in (decision.body || {}), false);
+});

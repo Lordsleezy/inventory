@@ -4,6 +4,7 @@ import { errText } from './errText';
 import { decodeBarcodeFile } from './ReceivePanel';
 import { shouldQueueScan } from './scanQueue';
 import { normalizeTracking } from './trackingNormalize';
+import { shipBundleRest } from './bundleShip';
 
 type TodayRow = {
   id: string; order_id: string; sku?: string; title?: string;
@@ -122,7 +123,7 @@ export function ScanOutPanel({ client, stamp = (s) => s, appMode, mode = 'ship',
       }
       const commit = await client.rpc('portal_scan_out_commit', { p_barcode: code, p_mode: mode });
       if (commit.error) throw new Error(commit.error.message);
-      const body = commit.data as { ok?: boolean; error?: string; sku?: string; title?: string; shipped_at?: string; scanned_out_at?: string };
+      const body = commit.data as { ok?: boolean; error?: string; sku?: string; title?: string; order_id?: string; shipped_at?: string; scanned_out_at?: string };
       if (body?.ok === false) {
         buzz(false);
         setFlash('err');
@@ -136,7 +137,8 @@ export function ScanOutPanel({ client, stamp = (s) => s, appMode, mode = 'ship',
       buzz(true);
       setFlash('ok');
       setConfirm({ title, sku });
-      setNote('');
+      const extra = mode === 'ship' && body.order_id ? await shipBundleRest(client, body.order_id, code) : '';
+      setNote(extra);
       setBarcode('');
       await refresh();
     } catch (e) {
