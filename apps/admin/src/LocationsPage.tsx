@@ -3,13 +3,13 @@ import type { ReactNode } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import bwipjs from 'bwip-js/browser';
 import { scanBarcode } from './barcodeCamera';
-import { hasUpcValue, UPC_NOT_APPLICABLE } from './upcValidate';
+import { UPC_NOT_APPLICABLE } from './upcValidate';
 import { errText } from './errText';
 import { scannerInputMode } from './kiosk';
 import { AppItemDetail } from './appMode/AppItemDetail';
 import { UnitEditDrawer } from './UnitEditDrawer';
 import { rpcMoveLocationStock } from './locationStock';
-import { addBulkSkus, bayTitle, layoutBlocked, loadBulkTagDraft, locationPhrase, parseBulkSkus, planPlaceInBin, resolveLocationCode, saveBulkTagDraft, shouldAskForUpc, slotTagCode, unitsLabel, upcScanKeys, upcToStore, type BulkTagDraft, type BulkUpcAsk, type LocationAllocation, type ScanCandidate } from './locationPlace';
+import { addBulkSkus, barcodeOnUnit, bayTitle, layoutBlocked, loadBulkTagDraft, locationPhrase, parseBulkSkus, planPlaceInBin, resolveLocationCode, saveBulkTagDraft, shouldAskForUpc, slotTagCode, unitsLabel, upcScanKeys, upcToStore, type BulkTagDraft, type BulkUpcAsk, type LocationAllocation, type ScanCandidate } from './locationPlace';
 
 type Bay = { bay_no: number; row_bins: number[]; name?: string | null };
 type Location = { code: string; bay_no: number; row_no: number; bin_no: number | null; stock: number };
@@ -307,7 +307,7 @@ export function LocationsPage({
       if (marked.error || !marked.data || typeof marked.data !== 'object') continue;
       const unit = (marked.data as { unit?: { title?: unknown; upc?: unknown; upc_does_not_apply?: unknown; listing_specs?: unknown } | null }).unit;
       if (!unit) continue;
-      return { status: hasUpcValue(unit) ? 'set' : 'missing', title: String(unit.title || '') };
+      return { status: barcodeOnUnit(unit), title: String(unit.title || '') };
     }
     return { status: 'unknown', title: '' };
   }

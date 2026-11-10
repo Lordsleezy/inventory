@@ -96,20 +96,28 @@ export function skuMissingUpc(raw: string, candidates: ScanCandidate[]) {
   return { sku: row.sku, title: row.title || '' };
 }
 
+/** A real barcode on the item. "Does not apply" is not a barcode, so the location box still asks. */
+export function barcodeOnUnit(unit: { upc?: unknown } | null | undefined): 'missing' | 'set' {
+  const upc = String(unit?.upc ?? '').trim();
+  if (!upc || /^(does not apply|n\/?a)$/i.test(upc)) return 'missing';
+  return 'set';
+}
+
 /**
  * Ask before the SKU is put in a bay.
- * `missing` means the inventory item was found and its UPC is blank, even when the
- * quick list did not return the row. `unknown` only asks when that list already showed a blank UPC.
+ * `missing` means the inventory item was found and no barcode is stored on it, even when
+ * the quick list missed the row or the item is marked Does not apply. `unknown` only asks
+ * when that list already showed a blank UPC.
  */
 export function shouldAskForUpc(raw: string, candidates: ScanCandidate[], detail: 'missing' | 'set' | 'unknown') {
   const code = String(raw ?? '').trim();
   if (!code) return false;
   const exact = candidates.find((row) => row.sku === code);
-  if (exact && String(exact.upc || '').trim()) return false;
+  if (exact && barcodeOnUnit(exact) === 'set') return false;
   if (detail === 'set') return false;
   if (detail === 'missing') return true;
   if (!exact && upcScanKeys(code).length) return false;
-  return Boolean(exact && !String(exact.upc || '').trim());
+  return Boolean(exact && barcodeOnUnit(exact) === 'missing');
 }
 
 /** Barcode to store on the item. A bad scan stays on the prompt. No UPC is a real choice. */
