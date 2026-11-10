@@ -8,7 +8,7 @@ import { scannerInputMode } from './kiosk';
 import { AppItemDetail } from './appMode/AppItemDetail';
 import { UnitEditDrawer } from './UnitEditDrawer';
 import { rpcMoveLocationStock } from './locationStock';
-import { addBulkSkus, bayTitle, layoutBlocked, locationPhrase, planPlaceInBin, slotTagCode, unitsLabel, type LocationAllocation } from './locationPlace';
+import { addBulkSkus, bayTitle, layoutBlocked, locationPhrase, parseBulkSkus, planPlaceInBin, resolveLocationCode, slotTagCode, unitsLabel, upcScanKeys, type LocationAllocation, type ScanCandidate } from './locationPlace';
 
 type Bay = { bay_no: number; row_bins: number[]; name?: string | null };
 type Location = { code: string; bay_no: number; row_no: number; bin_no: number | null; stock: number };
@@ -86,6 +86,7 @@ export function LocationsPage({
   const [scanValue, setScanValue] = useState('');
   const [pending, setPending] = useState<FoundUnit | null>(null);
   const [scanQty, setScanQty] = useState('1');
+  const [upcPick, setUpcPick] = useState<{ code: string; choices: ScanCandidate[]; target: 'scan' | 'bulk' } | null>(null);
   const [printing, setPrinting] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -260,10 +261,36 @@ export function LocationsPage({
     onOpenSku?.(sku);
   }
 
+  async function scanCandidates(raw: string): Promise<ScanCandidate[]> {
+    const code = raw.trim();
+    const keys = upcScanKeys(code);
+    const rows: ScanCandidate[] = [];
+    const skuQuery = await client.from('units_pos').select('sku,title,upc')
+      .eq('sku', code).in('state', ['available', 'reserved', 'repair']).gt('qty_on_hand', 0).limit(5);
+    if (skuQuery.error) throw skuQuery.error;
+    rows.push(...((skuQuery.data || []) as ScanCandidate[]));
+    if (keys.length) {
+      const upcQuery = await client.from('units_pos').select('sku,title,upc')
+        .in('upc', keys).in('state', ['available', 'reserved', 'repair']).gt('qty_on_hand', 0).limit(40);
+      if (upcQuery.error) throw upcQuery.error;
+      rows.push(...((upcQuery.data || []) as ScanCandidate[]));
+    }
+    return rows;
+  }
+
   async function lookup(raw: string) {
     const code = raw.trim();
     if (!code || !binCode) return;
-    const { data, error: rpcError } = await client.rpc('portal_location_unit', { p_sku: code });
+    const decision = resolveLocationCode(code, await scanCandidates(code));
+    if (decision.action === 'pick') {
+      setUpcPick({ code, choices: decision.choices, target: 'scan' });
+      setPending(null);
+      setScanValue('');
+      return;
+    }
+    if (decision.action === 'miss' && decision.upc) throw new Error('No in-stock item with that UPC.');
+    const sku = decision.action === 'use' ? decision.sku : code;
+    const { data, error: rpcError } = await client.rpc('portal_location_unit', { p_sku: sku });
     if (rpcError) throw rpcError;
     if (!data) throw new Error('No in-stock item with that SKU.');
     const unit = data as FoundUnit;
@@ -346,15 +373,65 @@ export function LocationsPage({
     }, 50);
   }
 
-  function queueBulk() {
-    const next = addBulkSkus(bulkSkus, bulkDraft);
+  function rememberSku(sku: string) {
+    const next = addBulkSkus(bulkSkus, sku);
     if (next.length === bulkSkus.length) {
-      setError(bulkDraft.trim() ? 'That SKU is already on the list.' : 'Type a SKU first.');
+      setError('That SKU is already on the list.');
       return;
     }
     setError('');
     setBulkSkus(next);
     setBulkDraft('');
+  }
+
+  async function queueBulk() {
+    const raw = bulkDraft.trim();
+    const parts = parseBulkSkus(raw);
+    if (parts.length !== 1) {
+      const next = addBulkSkus(bulkSkus, raw);
+      if (next.length === bulkSkus.length) {
+        setError(raw ? 'That SKU is already on the list.' : 'Type a SKU first.');
+        return;
+      }
+      setError('');
+      setBulkSkus(next);
+      setBulkDraft('');
+      return;
+    }
+    if (lock.current) return;
+    lock.current = true;
+    setBusy(true);
+    setError('');
+    try {
+      const decision = resolveLocationCode(parts[0], await scanCandidates(parts[0]));
+      if (decision.action === 'pick') {
+        setUpcPick({ code: parts[0], choices: decision.choices, target: 'bulk' });
+        setBulkDraft('');
+        return;
+      }
+      if (decision.action === 'miss' && decision.upc) {
+        setError('No in-stock item with that UPC.');
+        return;
+      }
+      rememberSku(decision.action === 'use' ? decision.sku : parts[0]);
+    } catch (err) {
+      setError(friendly(err));
+    } finally {
+      lock.current = false;
+      setBusy(false);
+    }
+  }
+
+  async function chooseUpc(sku: string) {
+    const target = upcPick?.target;
+    setUpcPick(null);
+    setError('');
+    if (target === 'bulk') {
+      rememberSku(sku);
+      return;
+    }
+    setScanValue(sku);
+    await submitScan(sku);
   }
 
   function bulkSlot() {
@@ -466,6 +543,24 @@ export function LocationsPage({
   const sideCls = phone ? 'app-row-price' : 'loc-row-side';
   const chevron = phone ? 'app-chevron' : 'loc-chevron';
 
+  function upcPicker(target: 'scan' | 'bulk') {
+    if (upcPick?.target !== target) return null;
+    return (
+      <div className="loc-upc-pick" role="dialog" aria-label="Which SKU">
+        <p className={phone ? 'loc-notice' : 'hint'}>UPC {upcPick.code} is on more than one SKU. Which one?</p>
+        <div className={group}>
+          {upcPick.choices.map((choice) => (
+            <button key={choice.sku} type="button" className={rowCls} disabled={busy} onClick={() => void chooseUpc(choice.sku)}>
+              <span className={textCls}><strong>SKU {choice.sku}</strong><small>{choice.title || 'No title'}</small></span>
+              <span className={chevron} aria-hidden="true">›</span>
+            </button>
+          ))}
+        </div>
+        <button type="button" className="loc-upc-cancel" disabled={busy} onClick={() => setUpcPick(null)}>Cancel</button>
+      </div>
+    );
+  }
+
   function frame(title: string, subtitle: string | undefined, action: ReactNode, body: ReactNode, back?: () => void, backText?: string) {
     const nav = (
       <div className={phone ? 'app-nav' : 'loc-desk-nav'}>
@@ -551,20 +646,21 @@ export function LocationsPage({
   if (screen === 'scan' && binCode) {
     return frame('Scan items here', locationPhrase(binCode), null, (
       <>
-        <label className="loc-field">SKU
+        <label className="loc-field">SKU or UPC
           <span className="loc-scan-line">
             <input
               ref={scanRef}
               value={scanValue}
               inputMode={scannerInputMode()}
               disabled={busy}
-              placeholder="Scan or type a SKU"
-              onChange={(event) => { setScanValue(event.target.value); setPending(null); }}
+              placeholder="Scan a SKU or UPC"
+              onChange={(event) => { setScanValue(event.target.value); setPending(null); setUpcPick((pick) => pick?.target === 'scan' ? null : pick); }}
               onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void submitScan(); } }}
             />
             <button type="button" disabled={busy} onClick={() => void camera()}>Scan</button>
           </span>
         </label>
+        {upcPicker('scan')}
         {pending && (
           <label className="loc-field">How many are going into this bin
             <input inputMode="numeric" type="number" min={1} step={1} value={scanQty} disabled={busy} onChange={(event) => setScanQty(event.target.value)} />
@@ -572,7 +668,7 @@ export function LocationsPage({
           </label>
         )}
         <button type="button" className="loc-primary" disabled={busy || (!pending && !scanValue.trim())} onClick={() => void submitScan()}>
-          {busy ? 'Saving…' : pending ? 'Put them here' : 'Look up SKU'}
+          {busy ? 'Saving…' : pending ? 'Put them here' : 'Look up'}
         </button>
       </>
     ), () => { setPending(null); setError(''); setScreen('bin'); }, spot?.bin_no == null ? 'Floor' : `Bin ${binCode}`);
@@ -654,20 +750,21 @@ export function LocationsPage({
         {phone && (
           <form className="loc-bulk" onSubmit={(event) => { event.preventDefault(); queueBulk(); }}>
             <div className={section}>TAG SKUS</div>
-            <label className="loc-field">SKU
+            <label className="loc-field">SKU or UPC
               <span className="loc-scan-line">
                 <input
                   value={bulkDraft}
                   disabled={busy}
-                  placeholder="Type or paste SKUs"
+                  placeholder="Scan a SKU or UPC"
                   autoCapitalize="none"
                   autoCorrect="off"
-                  aria-label="SKUs to tag"
-                  onChange={(event) => setBulkDraft(event.target.value)}
+                  aria-label="SKU or UPC to tag"
+                  onChange={(event) => { setBulkDraft(event.target.value); setUpcPick((pick) => pick?.target === 'bulk' ? null : pick); }}
                 />
                 <button type="submit" disabled={busy}>Enter</button>
               </span>
             </label>
+            {upcPicker('bulk')}
             <label className="loc-field">Bay
               <select value={bulkBay} disabled={busy || !bays.length} aria-label="Bay" onChange={(event) => { setBulkBay(event.target.value); setBulkRow('1'); setBulkBin('1'); }}>
                 {[...bays].sort((a, b) => Number(Boolean(b.name?.trim())) - Number(Boolean(a.name?.trim())) || a.bay_no - b.bay_no).map((item) => <option key={item.bay_no} value={String(item.bay_no)}>{bayTitle(item.bay_no, item.name)}</option>)}

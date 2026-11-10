@@ -3145,12 +3145,23 @@ html.app-mode .loc-primary {
   margin: 8px 16px 16px;
   border: 0;
   border-radius: 12px;
-  background: #fff; color: #000;
-  color: #fff;
+  background: #fff;
+  color: #000;
   font: inherit;
   font-size: 17px;
   font-weight: 600;
   padding: 14px;
+}
+html.app-mode .loc-upc-pick { margin: 0 0 12px; }
+html.app-mode .loc-upc-pick .loc-notice { margin: 0 16px 8px; }
+html.app-mode .loc-upc-cancel {
+  display: block;
+  margin: 8px auto 0;
+  border: 0;
+  background: transparent;
+  color: #8e8e93;
+  font-size: 16px;
+  min-height: 44px;
 }
 html.app-mode .loc-field small { color: #8e8e93; }
 html.app-mode .loc-field select {

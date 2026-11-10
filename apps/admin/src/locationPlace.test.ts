@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { addBulkSkus, bayTagCode, bayTitle, layoutBlocked, locationMenuLabel, locationPhrase, parseBulkSkus, planPlaceInBin, planUnassign, slotTagCode, sortLocationChoices, unitsLabel } from './locationPlace.ts';
+import { addBulkSkus, bayTagCode, bayTitle, layoutBlocked, locationMenuLabel, locationPhrase, parseBulkSkus, planPlaceInBin, planUnassign, resolveLocationCode, slotTagCode, sortLocationChoices, unitsLabel, upcScanKeys } from './locationPlace.ts';
 
 describe('location phrases', () => {
   it('reads a bin and a floor spot the way the bay screen does', () => {
@@ -94,5 +94,36 @@ describe('bulk bay tag', () => {
     assert.equal(slotTagCode(4, 2, 3, 2), '4-2-2');
     assert.equal(slotTagCode(4, 3, 0, null), '4-3');
     assert.throws(() => slotTagCode(4, 2, 3, null), /Choose a bin/);
+  });
+});
+
+describe('upc scan into a location', () => {
+  const upc = '036000291452';
+
+  it('leaves a short SKU alone', () => {
+    assert.deepEqual(upcScanKeys('11921'), []);
+    assert.deepEqual(resolveLocationCode('11921', []), { action: 'miss', upc: false });
+  });
+
+  it('uses the only SKU on that UPC, including the leading-zero form', () => {
+    assert.deepEqual(resolveLocationCode(upc, [
+      { sku: '11921', title: 'Cereal', upc: '0036000291452' },
+    ]), { action: 'use', sku: '11921' });
+  });
+
+  it('asks which SKU when the UPC is on more than one', () => {
+    const result = resolveLocationCode(upc, [
+      { sku: '200', title: 'Second', upc },
+      { sku: '100', title: 'First', upc },
+    ]);
+    assert.equal(result.action, 'pick');
+    if (result.action === 'pick') assert.deepEqual(result.choices.map((row) => row.sku), ['100', '200']);
+  });
+
+  it('keeps an exact SKU when those digits are also a UPC', () => {
+    assert.deepEqual(resolveLocationCode(upc, [
+      { sku: upc, title: 'The SKU itself', upc: null },
+      { sku: '11921', title: 'Other', upc },
+    ]), { action: 'use', sku: upc });
   });
 });

@@ -1,3 +1,5 @@
+import { digitsOnly, normalizeUpc, upcVariants } from './upcValidate.ts';
+
 export type LocationAllocation = { location_code: string; quantity: number };
 export type LocationMovePlan = { from: string | null; to: string | null; quantity: number };
 
@@ -52,6 +54,37 @@ export function sortLocationChoices<T extends LocationChoice>(rows: T[]): T[] {
     }
     return 0;
   });
+}
+
+export type ScanCandidate = { sku: string; title: string; upc?: string | null };
+
+/** Barcode forms to try when the location box is handed a UPC. A short SKU stays a SKU. */
+export function upcScanKeys(raw: string): string[] {
+  const code = String(raw ?? '').trim();
+  if (!code || /\s/.test(code)) return [];
+  const normalized = normalizeUpc(code);
+  if (normalized.ok) return upcVariants(normalized.upcA || digitsOnly(code), normalized);
+  const digits = digitsOnly(code);
+  if (digits.length >= 8 && digits === code) return [digits];
+  return [];
+}
+
+/** One in-stock SKU is used. Several SKUs on the same UPC have to be picked. An exact SKU wins. */
+export function resolveLocationCode(raw: string, candidates: ScanCandidate[]) {
+  const code = String(raw ?? '').trim();
+  const exact = candidates.find((row) => row.sku === code);
+  if (exact) return { action: 'use' as const, sku: exact.sku };
+  const keys = new Set(upcScanKeys(code));
+  if (!keys.size) return { action: 'miss' as const, upc: false };
+  const hits = new Map<string, ScanCandidate>();
+  for (const row of candidates) {
+    const upc = String(row.upc || '').trim();
+    if (upc && keys.has(upc)) hits.set(row.sku, row);
+  }
+  const choices = [...hits.values()].sort((a, b) => a.sku.localeCompare(b.sku, undefined, { numeric: true }));
+  if (choices.length === 1) return { action: 'use' as const, sku: choices[0].sku };
+  if (choices.length > 1) return { action: 'pick' as const, choices };
+  return { action: 'miss' as const, upc: true };
 }
 
 export function unitsLabel(count: number) {
