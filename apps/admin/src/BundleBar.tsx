@@ -5,6 +5,7 @@ import { listThumbPhoto, type UnitPhoto } from './unitPhotos';
 import { errText } from './errText';
 import { floorFunctionUrl } from './floorApi';
 import { DEFAULT_RATES, bundleHoldbacks, groupBundleReviews, groupOpenOrders, type BundleGroup, type BundleItem, type BundleRate } from '../../../shared/bundle-shipping.mjs';
+import { tempFlatLine, type TempFlatHold } from '../../../shared/temp-flat-shipping.mjs';
 
 type Link = { order_id: string; peer_id: string };
 
@@ -65,6 +66,7 @@ export function BundleBar({ client, accessToken, orders, segmentIds, locations, 
   const [busy, setBusy] = useState(false);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [combined, setCombined] = useState('Checking whether eBay combine requests are handled here.');
+  const [tempFlat, setTempFlat] = useState<TempFlatHold | null>(null);
   const [appliedIds, setAppliedIds] = useState<string[]>([]);
 
   async function loadState() {
@@ -75,6 +77,9 @@ export function BundleBar({ client, accessToken, orders, segmentIds, locations, 
     setSplits((body.splits || []).map(String));
     setLinks(body.links || []);
     setAppliedIds((body.applied_order_ids || []).map(String));
+    const { data: tempRows } = await client.from('store_settings').select('value').eq('key', 'ebay_temp_flat_shipping').limit(1);
+    const raw = tempRows?.[0]?.value;
+    setTempFlat(raw && typeof raw === 'object' ? raw as TempFlatHold : null);
     const ruleOn = !!body.combined_weight?.active;
     setCombined(ruleOn
       ? 'eBay combined weight is on, and the cart still adds each item’s shipping. A buyer’s Request combined shipping shows in Seller Hub under Orders, Awaiting payment, as Send invoice. Floor prices one box on this screen. Nothing is sent until you tap Apply bundle price.'
@@ -166,6 +171,9 @@ export function BundleBar({ client, accessToken, orders, segmentIds, locations, 
   return (
     <div>
       {isAdmin && <p style={{ color: '#9a9a9a', margin: '8px 0' }}>{combined}</p>}
+      {isAdmin && tempFlatLine(tempFlat) && (
+        <p style={{ color: '#fff', margin: '0 0 12px', borderTop: '1px solid #2a2a2a', paddingTop: 12 }}>{tempFlatLine(tempFlat)}</p>
+      )}
       {isAdmin && holdbacks.map((hold) => (
         <div key={`hold-${hold.items.map((item) => item.id).join(':')}`} style={rowStyle}>
           <strong>{hold.buyer || 'Buyer'}</strong>
