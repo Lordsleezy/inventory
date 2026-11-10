@@ -102,7 +102,11 @@ export function upcToStore(raw: string, none = false): { ok: true; upc: string }
   const message = upcValidationMessage(raw);
   if (message) return { ok: false, message };
   const normalized = normalizeUpc(raw);
-  return { ok: true, upc: normalized.upcA || digitsOnly(raw) };
+  const digits = digitsOnly(raw);
+  const upc = digits.length === 13 ? normalized.ean13
+    : digits.length === 14 ? normalized.gtin14
+    : normalized.upcA;
+  return { ok: true, upc: upc || digits };
 }
 
 export function unitsLabel(count: number) {
@@ -207,7 +211,7 @@ export function bayTagCode(bayNo: number, rowBins: number[]): string {
   return slotTagCode(bayNo, 1, bins, bins === 0 ? null : 1);
 }
 
-export type BulkUpcAsk = { sku: string; title: string; value: string };
+export type BulkUpcAsk = { sku: string; title: string; value: string; target?: 'scan' | 'bulk' };
 
 export type BulkTagDraft = {
   draft: string;
@@ -235,8 +239,10 @@ function parseBulkTagDraft(raw: string | null): BulkTagDraft | null {
     const row = String(body.row || '1');
     const bin = String(body.bin || '1');
     const askBody = body.ask;
-    const ask = askBody && String(askBody.sku || '').trim()
-      ? { sku: String(askBody.sku).trim(), title: String(askBody.title || ''), value: String(askBody.value || '') }
+    const askSku = askBody && String(askBody.sku || '').trim();
+    const askTarget = askBody?.target === 'scan' || askBody?.target === 'bulk' ? askBody.target : undefined;
+    const ask = askSku
+      ? { sku: askSku, title: String(askBody?.title || ''), value: String(askBody?.value || ''), ...(askTarget ? { target: askTarget } : {}) }
       : null;
     if (!skus.length && !draft.trim() && !bay && !ask) return null;
     return { draft, bay, row, bin, skus, ask };

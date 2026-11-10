@@ -176,6 +176,9 @@ describe('sku missing a upc', () => {
   it('stores a scanned UPC and rejects a bad one', () => {
     assert.deepEqual(upcToStore('036000291452'), { ok: true, upc: '036000291452' });
     assert.equal(upcToStore('123').ok, false);
+    const ean = upcToStore('4006381333931');
+    assert.equal(ean.ok, true);
+    if (ean.ok) assert.equal(ean.upc, '4006381333931');
   });
 
   it('lets the prompt mark the item as having no UPC', () => {

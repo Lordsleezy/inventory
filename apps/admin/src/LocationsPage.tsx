@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import bwipjs from 'bwip-js/browser';
 import { scanBarcode } from './barcodeCamera';
-import { hasUpcValue } from './upcValidate';
+import { hasUpcValue, UPC_NOT_APPLICABLE } from './upcValidate';
 import { errText } from './errText';
 import { scannerInputMode } from './kiosk';
 import { AppItemDetail } from './appMode/AppItemDetail';
@@ -96,6 +96,7 @@ export function LocationsPage({
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const scanRef = useRef<HTMLInputElement>(null);
+  const upcInputRef = useRef<HTMLInputElement>(null);
   const lock = useRef(false);
   const bulkRef = useRef<BulkTagDraft>({ draft: bulkDraft, bay: bulkBay, row: bulkRow, bin: bulkBin, skus: bulkSkus, ask: upcAsk });
   bulkRef.current = { draft: bulkDraft, bay: bulkBay, row: bulkRow, bin: bulkBin, skus: bulkSkus, ask: upcAsk };
@@ -297,10 +298,40 @@ export function LocationsPage({
     return rows;
   }
 
+  async function holdForUpc(raw: string, candidates: ScanCandidate[], target: 'scan' | 'bulk') {
+    const missing = skuMissingUpc(raw, candidates);
+    if (!missing) return false;
+    const marked = await client.rpc(canManage ? 'portal_inventory_detail' : 'staff_inventory_detail', { p_sku: missing.sku });
+    const unit = marked.data && typeof marked.data === 'object'
+      ? (marked.data as { unit?: { upc?: unknown; upc_does_not_apply?: unknown; listing_specs?: unknown } }).unit
+      : null;
+    if (!marked.error && unit && hasUpcValue(unit)) return false;
+    setUpcAsk({ sku: missing.sku, title: missing.title, value: '', target });
+    setUpcAskError('');
+    if (target === 'bulk') setBulkDraft('');
+    else { setScanValue(''); setPending(null); }
+    return true;
+  }
+
+  async function writeUnitUpc(sku: string, upc: string) {
+    const first = canManage ? 'portal_set_unit_upc' : 'staff_set_unit_upc';
+    const second = canManage ? 'staff_set_unit_upc' : 'portal_set_unit_upc';
+    const denied = (error: { message?: string; code?: string } | null) =>
+      Boolean(error && /42501|access_denied/i.test(`${error.code || ''} ${error.message || ''}`));
+    let result = await client.rpc(first, { p_sku: sku, p_upc: upc });
+    if (denied(result.error)) result = await client.rpc(second, { p_sku: sku, p_upc: upc });
+    if (result.error) throw result.error;
+    if (upc === UPC_NOT_APPLICABLE) return;
+    const check = await client.from('units_pos').select('upc').eq('sku', sku).limit(1);
+    const row = (check.data || [])[0] as { upc?: string | null } | undefined;
+    if (row && !String(row.upc || '').trim()) throw new Error('That UPC did not save on the item.');
+  }
+
   async function lookup(raw: string) {
     const code = raw.trim();
     if (!code || !binCode) return;
-    const decision = resolveLocationCode(code, await scanCandidates(code));
+    const candidates = await scanCandidates(code);
+    const decision = resolveLocationCode(code, candidates);
     if (decision.action === 'pick') {
       setUpcPick({ code, choices: decision.choices, target: 'scan' });
       setPending(null);
@@ -309,6 +340,7 @@ export function LocationsPage({
     }
     if (decision.action === 'miss' && decision.upc) throw new Error('No in-stock item with that UPC.');
     const sku = decision.action === 'use' ? decision.sku : code;
+    if (await holdForUpc(code, candidates, 'scan')) return;
     const { data, error: rpcError } = await client.rpc('portal_location_unit', { p_sku: sku });
     if (rpcError) throw rpcError;
     if (!data) throw new Error('No in-stock item with that SKU.');
@@ -433,19 +465,7 @@ export function LocationsPage({
         setError('No in-stock item with that UPC.');
         return;
       }
-      const missing = skuMissingUpc(parts[0], candidates);
-      if (missing) {
-        const marked = await client.rpc(canManage ? 'portal_inventory_detail' : 'staff_inventory_detail', { p_sku: missing.sku });
-        const unit = marked.data && typeof marked.data === 'object' ? (marked.data as { unit?: { upc?: unknown; upc_does_not_apply?: unknown; listing_specs?: unknown } }).unit : null;
-        if (!marked.error && unit && hasUpcValue(unit)) {
-          rememberSku(missing.sku);
-          return;
-        }
-        setUpcAsk({ ...missing, value: '' });
-        setUpcAskError('');
-        setBulkDraft('');
-        return;
-      }
+      if (await holdForUpc(parts[0], candidates, 'bulk')) return;
       rememberSku(decision.action === 'use' ? decision.sku : parts[0]);
     } catch (err) {
       setError(friendly(err));
@@ -457,29 +477,32 @@ export function LocationsPage({
 
   async function saveAskedUpc(raw?: string, none = false) {
     if (!upcAsk || lock.current) return;
-    const typed = raw ?? upcAsk.value;
+    const typed = raw ?? upcInputRef.current?.value ?? upcAsk.value;
     const stored = upcToStore(typed, none);
     if (!stored.ok) {
       setUpcAskError(stored.message);
       return;
     }
+    const ask = upcAsk;
     lock.current = true;
     setBusy(true);
     setUpcAskError('');
+    let placeSku: string | null = null;
     try {
-      const { error: rpcError } = await client.rpc(canManage ? 'portal_set_unit_upc' : 'staff_set_unit_upc', {
-        p_sku: upcAsk.sku,
-        p_upc: stored.upc,
-      });
-      if (rpcError) throw rpcError;
-      const sku = upcAsk.sku;
+      await writeUnitUpc(ask.sku, stored.upc);
       setUpcAsk(null);
-      rememberSku(sku);
+      setNotice(none ? `SKU ${ask.sku} marked no UPC.` : `UPC saved on SKU ${ask.sku}.`);
+      if ((ask.target || 'bulk') === 'bulk') rememberSku(ask.sku);
+      else placeSku = ask.sku;
     } catch (err) {
       setUpcAskError(friendly(err));
     } finally {
       lock.current = false;
       setBusy(false);
+    }
+    if (placeSku) {
+      setScanValue(placeSku);
+      await submitScan(placeSku);
     }
   }
 
@@ -624,6 +647,42 @@ export function LocationsPage({
     );
   }
 
+  function upcAskDialog() {
+    if (!upcAsk) return null;
+    return (
+      <div className="loc-upc-modal" role="dialog" aria-label="Enter UPC">
+        <form className="loc-upc-sheet" onSubmit={(event) => { event.preventDefault(); void saveAskedUpc(upcInputRef.current?.value); }}>
+          <p className="loc-upc-title">Enter or scan UPC</p>
+          <p className={phone ? 'loc-notice' : 'hint'}>SKU {upcAsk.sku}{upcAsk.title ? ` · ${upcAsk.title}` : ''} has no UPC in inventory.</p>
+          <label className="loc-field">UPC
+            <input
+              ref={upcInputRef}
+              defaultValue={upcAsk.value}
+              disabled={busy}
+              autoFocus
+              inputMode={scannerInputMode()}
+              placeholder="Scan or type a UPC"
+              aria-label="UPC"
+              autoCapitalize="none"
+              autoCorrect="off"
+              onChange={() => setUpcAskError('')}
+            />
+          </label>
+          {upcAskError && <p className="loc-error" role="alert">{upcAskError}</p>}
+          <button type="submit" className="loc-upc-save" disabled={busy}>Save</button>
+          <button type="button" className="loc-upc-none" disabled={busy} onClick={() => void saveAskedUpc('', true)}>No UPC</button>
+          <button type="button" className="loc-upc-cancel" disabled={busy} onClick={() => {
+            const sku = upcAsk.sku;
+            setUpcAsk(null);
+            setUpcAskError('');
+            if ((upcAsk.target || 'bulk') === 'bulk') setBulkDraft(sku);
+            else setScanValue(sku);
+          }}>Cancel</button>
+        </form>
+      </div>
+    );
+  }
+
   function frame(title: string, subtitle: string | undefined, action: ReactNode, body: ReactNode, back?: () => void, backText?: string) {
     const nav = (
       <div className={phone ? 'app-nav' : 'loc-desk-nav'}>
@@ -731,8 +790,9 @@ export function LocationsPage({
           </label>
         )}
         <button type="button" className="loc-primary" disabled={busy || (!pending && !scanValue.trim())} onClick={() => void submitScan()}>
-          {busy ? 'Saving…' : pending ? 'Put them here' : 'Look up'}
+          {busy ? 'Saving…' : pending ? 'Put them here' : 'Save'}
         </button>
+        {upcAskDialog()}
       </>
     ), () => { setPending(null); setError(''); setScreen('bin'); }, spot?.bin_no == null ? 'Floor' : `Bin ${binCode}`);
   }
@@ -811,15 +871,7 @@ export function LocationsPage({
           </div>
         )}
         {phone && (
-          <form className="loc-bulk" onSubmit={(event) => {
-            event.preventDefault();
-            const active = document.activeElement;
-            if (active instanceof HTMLInputElement && active.getAttribute('aria-label') === 'UPC') {
-              void saveAskedUpc(active.value);
-              return;
-            }
-            void queueBulk();
-          }}>
+          <form className="loc-bulk" onSubmit={(event) => { event.preventDefault(); if (!upcAsk) void queueBulk(); }}>
             <div className={section}>TAG SKUS</div>
             <label className="loc-field">SKU or UPC
               <span className="loc-scan-line">
@@ -832,39 +884,10 @@ export function LocationsPage({
                   aria-label="SKU or UPC to tag"
                   onChange={(event) => { setBulkDraft(event.target.value); setUpcPick((pick) => pick?.target === 'bulk' ? null : pick); }}
                 />
-                <button type="submit" disabled={busy}>Enter</button>
+                <button type="submit" disabled={busy}>Save</button>
               </span>
             </label>
             {upcPicker('bulk')}
-            {upcAsk && (
-              <div className="loc-upc-pick" role="dialog" aria-label="Enter UPC">
-                <p className={phone ? 'loc-notice' : 'hint'}>SKU {upcAsk.sku}{upcAsk.title ? ` · ${upcAsk.title}` : ''} has no UPC. Scan or type it.</p>
-                <label className="loc-field">UPC
-                  <span className="loc-scan-line">
-                    <input
-                      value={upcAsk.value}
-                      disabled={busy}
-                      autoFocus
-                      inputMode={scannerInputMode()}
-                      placeholder="Scan or type a UPC"
-                      aria-label="UPC"
-                      autoCapitalize="none"
-                      autoCorrect="off"
-                      onChange={(event) => { setUpcAsk({ ...upcAsk, value: event.target.value }); setUpcAskError(''); }}
-                      onKeyDown={(event) => {
-                        if (event.key !== 'Enter') return;
-                        event.preventDefault();
-                        void saveAskedUpc(event.currentTarget.value);
-                      }}
-                    />
-                    <button type="button" disabled={busy} onClick={() => void saveAskedUpc()}>Save</button>
-                  </span>
-                </label>
-                {upcAskError && <p className="loc-error" role="alert">{upcAskError}</p>}
-                <button type="button" className="loc-upc-none" disabled={busy} onClick={() => void saveAskedUpc('', true)}>No UPC</button>
-                <button type="button" className="loc-upc-cancel" disabled={busy} onClick={() => { setUpcAsk(null); setUpcAskError(''); setBulkDraft(upcAsk.sku); }}>Cancel</button>
-              </div>
-            )}
             <label className="loc-field">Bay
               <select value={bulkBay} disabled={busy || !bays.length} aria-label="Bay" onChange={(event) => { setBulkBay(event.target.value); setBulkRow('1'); setBulkBin('1'); }}>
                 {[...bays].sort((a, b) => Number(Boolean(b.name?.trim())) - Number(Boolean(a.name?.trim())) || a.bay_no - b.bay_no).map((item) => <option key={item.bay_no} value={String(item.bay_no)}>{bayTitle(item.bay_no, item.name)}</option>)}
@@ -901,6 +924,7 @@ export function LocationsPage({
             </button>
           </form>
         )}
+        {upcAskDialog()}
         </>
       ), onBack, backLabel)}
     </>

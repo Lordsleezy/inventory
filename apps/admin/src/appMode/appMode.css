@@ -3152,6 +3152,47 @@ html.app-mode .loc-primary {
   font-weight: 600;
   padding: 14px;
 }
+html.app-mode .loc-upc-modal,
+.loc-upc-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.72);
+  padding: 16px;
+}
+html.app-mode .loc-upc-sheet,
+.loc-upc-sheet {
+  box-sizing: border-box;
+  width: min(390px, 100%);
+  border-radius: 16px;
+  background: #000;
+  padding: 20px 0 12px;
+}
+html.app-mode .loc-upc-title,
+.loc-upc-title {
+  margin: 0 16px 8px;
+  color: #fff;
+  font-size: 20px;
+  font-weight: 700;
+}
+html.app-mode .loc-upc-save,
+.loc-upc-save {
+  display: block;
+  box-sizing: border-box;
+  width: calc(100% - 32px);
+  margin: 4px 16px 8px;
+  border: 0;
+  border-radius: 12px;
+  background: #fff;
+  color: #000;
+  font: inherit;
+  font-size: 17px;
+  font-weight: 600;
+  min-height: 48px;
+}
 html.app-mode .loc-upc-pick { margin: 0 0 12px; }
 html.app-mode .loc-upc-pick .loc-notice { margin: 0 16px 8px; }
 html.app-mode .loc-upc-none {
