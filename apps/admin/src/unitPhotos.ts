@@ -105,6 +105,21 @@ export function listThumbPathsFromPhotoMap(photos: Record<string, UnitPhoto[]>):
   );
 }
 
+export function listThumbOriginalPaths(photos: Record<string, UnitPhoto[]>): string[] {
+  return [...new Set(
+    Object.values(photos).map((rows) => listThumbPhoto(rows)?.path).filter((path): path is string => Boolean(path)),
+  )];
+}
+
+/** Prefer the 400px derivative. Use the original file when that derivative was not signed. */
+export function photoDisplayUrl(path: string | null | undefined, urls: Record<string, string>, size: 400 | 1200 = 400): string {
+  if (!path) return '';
+  const thumb = derivativePath(path, 400);
+  const detail = derivativePath(path, 1200);
+  if (size === 1200) return (detail && urls[detail]) || urls[path] || (thumb && urls[thumb]) || '';
+  return (thumb && urls[thumb]) || urls[path] || '';
+}
+
 export async function loadUnitPhotos(client: SupabaseClient, storeId: string, skus: string[]) {
   const unique = [...new Set(skus.filter((sku) => sku && sku !== 'UNMATCHED'))];
   const grouped: Record<string, UnitPhoto[]> = {};
@@ -132,6 +147,21 @@ export async function signOnePhotoUrl(client: SupabaseClient, path: string) {
   const url = data?.signedUrl || null;
   if (url) cacheSet(path, url);
   return url;
+}
+
+/**
+ * List thumbs. Signs the 400px WebP, then the original file for any photo
+ * whose derivative is missing. Older unit photos were never given a WebP.
+ */
+export async function signListThumbs(client: SupabaseClient, originalPaths: (string | null | undefined)[]) {
+  const originals = [...new Set(originalPaths.filter((path): path is string => Boolean(path)))];
+  const signed = await signPhotoUrls(client, originals.map((path) => listThumbStoragePath(path) || path));
+  const missing = originals.filter((path) => {
+    const thumb = listThumbStoragePath(path);
+    return !(thumb && signed[thumb]) && !signed[path];
+  });
+  if (missing.length) Object.assign(signed, await signPhotoUrls(client, missing));
+  return signed;
 }
 
 /** Signed URLs for storage paths that exist. Uses an in-memory cache so tabs do not re-sign every navigation. */

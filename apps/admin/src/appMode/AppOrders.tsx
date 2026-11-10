@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { type WebOrder } from '../OrdersPage';
-import { hydratePhotoUrlCache, listThumbPhoto, listThumbPathsFromPhotoMap, loadUnitPhotos, persistPhotoUrlCache, signPhotoUrls, type UnitPhoto } from '../unitPhotos';
+import { hydratePhotoUrlCache, listThumbOriginalPaths, listThumbPhoto, loadUnitPhotos, persistPhotoUrlCache, signListThumbs, signPhotoUrls, type UnitPhoto } from '../unitPhotos';
 import { errText } from '../errText';
 import { shortError } from './shortError';
 import { loadOrderLocations, locationCompare } from '../locationOrder';
@@ -86,7 +86,7 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
       setLocations(await loadOrderLocations(client, storeId, skus));
       const photos = await loadUnitPhotos(client, storeId, skus).catch(() => ({} as Record<string, UnitPhoto[]>));
       setPhotoMap(photos);
-      mergePhotoUrls(await signPhotoUrls(client, listThumbPathsFromPhotoMap(photos)));
+      mergePhotoUrls(await signListThumbs(client, listThumbOriginalPaths(photos)));
       const { data: bins } = await client.from('store_locations').select('code').eq('store_id', storeId).order('bay_no').order('row_no').order('bin_no');
       setLocationOptions((bins || []) as { code: string }[]);
     } catch (e) {

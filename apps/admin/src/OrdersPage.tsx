@@ -7,7 +7,8 @@ import { frozenCutsForTicket, type CommissionOverride, type OnlineCfg, type Rule
 import { LabelDialog } from './LabelDialog';
 import { OrderStepper, OrderTimelineList } from './OrderFulfillment';
 import { OrderFacts, OrderFindRow, OrderPhotoCarousel, OrderTitle } from './OrderPhotos';
-import { derivativePath, hydratePhotoUrlCache, listThumbPhoto, listThumbPathsFromPhotoMap, loadUnitPhotos, persistPhotoUrlCache, signPhotoUrls, type UnitPhoto } from './unitPhotos';
+import { UnitListThumb } from './UnitListThumb';
+import { hydratePhotoUrlCache, listThumbOriginalPaths, listThumbPhoto, loadUnitPhotos, persistPhotoUrlCache, signListThumbs, signPhotoUrls, type UnitPhoto } from './unitPhotos';
 import { errText } from './errText';
 import { fileToBase64, labelFileUrl, orderAdmin } from './orderLabel';
 import { openShippingLabel } from './labelPrint';
@@ -182,7 +183,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
     if (skus.length) {
       const photos = await loadUnitPhotos(client, storeId, skus).catch(() => ({} as Record<string, UnitPhoto[]>));
       setPhotoMap(photos);
-      mergePhotoUrls(await signPhotoUrls(client, listThumbPathsFromPhotoMap(photos)));
+      mergePhotoUrls(await signListThumbs(client, listThumbOriginalPaths(photos)));
     }
   }, [client, storeId]);
   const sign = useCallback((paths: string[]) => signPhotoUrls(client, paths), [client]);
@@ -538,8 +539,6 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
     const displayTitle = o.match_status === 'matched' || (!!o.sku && o.sku !== 'UNMATCHED' && !!o.sale_id)
       ? (o.title || o.marketplace_title || 'Item') : (o.marketplace_title || o.title || 'Marketplace sale');
     const thumbPhoto = listThumbPhoto(photoMap[o.sku] || []);
-    const thumbPath = thumbPhoto ? derivativePath(thumbPhoto.path, 400) : null;
-    const thumb = thumbPath ? photoUrls[thumbPath] : '';
     const labelText = o.label_origin === 'upload'
       ? `Uploaded · ${channelLabel(o.channel)}`
       : o.label_origin === 'bought' || o.label_purchased_at
@@ -553,7 +552,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
           <p>{channelLabel(o.channel)} · {money(o.item_cents)} · {o.paid_at ? stamp(o.paid_at) : stamp(o.created_at)}</p>
         </div>
         <OrderFindRow picker="button" sku={o.sku} code={locations[o.sku]?.[0] || ''} options={locationOptions} disabled={!!busy || packOnly} onChange={(code) => void setPickLocation(o, code)} />
-        <div className="order-card-summary">{thumb && <img className="app-order-thumb" src={thumb} alt="" />}<div className="order-card-info"><small>{channelLabel(o.channel)} · {money(o.item_cents)} · SKU {o.sku}</small><div className="order-card-tags"><b className={chip.tone === 'warn' ? 'badge-warn' : ''}>{cardStatus}</b></div></div></div>
+        <div className="order-card-summary">{thumbPhoto && <UnitListThumb client={client} photoPath={thumbPhoto.path} urls={photoUrls} onUrl={(path, url) => mergePhotoUrls({ [path]: url })} className="app-order-thumb" placeholder={null} />}<div className="order-card-info"><small>{channelLabel(o.channel)} · {money(o.item_cents)} · SKU {o.sku}</small><div className="order-card-tags"><b className={chip.tone === 'warn' ? 'badge-warn' : ''}>{cardStatus}</b></div></div></div>
         {o.fulfillment === 'ship' && !isCanceled && <OrderStepper stage={stage} />}
         <OrderFacts label={labelText} labeled={labeled} order={o} />
         {labelHit?.orderId === o.id && <LabelTrackingResult hit={labelHit} onDismiss={() => setLabelHit(null)} />}
@@ -831,9 +830,22 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
                 const linked = o.match_status === 'matched' || (!!o.sku && o.sku !== 'UNMATCHED' && !!o.sale_id);
                 const title = linked ? (o.title || o.marketplace_title || 'Item') : (o.marketplace_title || o.title || 'Marketplace sale');
                 const where = locations[o.sku]?.[0] || 'No location';
+                const rowPhoto = listThumbPhoto(photoMap[o.sku] || []);
                 return <tr key={o.id}>
                   <td><button type="button" className="linkish" onClick={() => setOpenId(o.id)}>{o.order_no || 'Order'}</button></td>
-                  <td>{title}<br /><small>{where}</small></td>
+                  <td>
+                    <div className="desk-order-item">
+                      <UnitListThumb
+                        client={client}
+                        photoPath={rowPhoto?.path}
+                        urls={photoUrls}
+                        onUrl={(path, url) => mergePhotoUrls({ [path]: url })}
+                        className="desk-order-thumb"
+                        placeholder={<span className="desk-order-thumb empty" aria-hidden="true" />}
+                      />
+                      <div>{title}<br /><small>{where}</small></div>
+                    </div>
+                  </td>
                   <td>{channelLabel(o.channel)}</td>
                   <td>{orderChip(o).text}</td>
                   <td className="desk-num">{money(o.total_cents)}</td>
