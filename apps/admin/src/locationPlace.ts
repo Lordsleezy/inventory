@@ -68,6 +68,41 @@ export function planUnassign(allocations: LocationAllocation[], quantity: number
   return moves;
 }
 
+/** Split a typed or pasted list into unique SKUs, keeping the first spelling. */
+export function parseBulkSkus(raw: string): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const part of raw.split(/[\s,]+/)) {
+    const sku = part.trim();
+    if (!sku) continue;
+    const key = sku.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(sku);
+  }
+  return out;
+}
+
+export function addBulkSkus(existing: string[], raw: string): string[] {
+  const seen = new Set(existing.map((sku) => sku.toLowerCase()));
+  const next = [...existing];
+  for (const sku of parseBulkSkus(raw)) {
+    const key = sku.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    next.push(sku);
+  }
+  return next;
+}
+
+/** First slot in the bay. A floor row has no bins, so the code is bay-row. */
+export function bayTagCode(bayNo: number, rowBins: number[]): string {
+  if (!Number.isInteger(bayNo) || bayNo < 1) throw new Error('Choose a bay.');
+  if (!rowBins.length) throw new Error('That bay has no rows.');
+  if (rowBins[0] === 0) return `${bayNo}-1`;
+  return `${bayNo}-1-1`;
+}
+
 /** A smaller layout is refused while a removed slot still holds units. */
 export function layoutBlocked(
   bayNo: number,

@@ -8,7 +8,7 @@ import { scannerInputMode } from './kiosk';
 import { AppItemDetail } from './appMode/AppItemDetail';
 import { UnitEditDrawer } from './UnitEditDrawer';
 import { rpcMoveLocationStock } from './locationStock';
-import { layoutBlocked, locationPhrase, planPlaceInBin, unitsLabel, type LocationAllocation } from './locationPlace';
+import { addBulkSkus, bayTagCode, layoutBlocked, locationPhrase, planPlaceInBin, unitsLabel, type LocationAllocation } from './locationPlace';
 
 type Bay = { bay_no: number; row_bins: number[] };
 type Location = { code: string; bay_no: number; row_no: number; bin_no: number | null; stock: number };
@@ -78,6 +78,9 @@ export function LocationsPage({
   const [creating, setCreating] = useState(false);
   const [editNo, setEditNo] = useState('1');
   const [editRows, setEditRows] = useState<number[]>([3]);
+  const [bulkDraft, setBulkDraft] = useState('');
+  const [bulkBay, setBulkBay] = useState('');
+  const [bulkSkus, setBulkSkus] = useState<string[]>([]);
   const [scanValue, setScanValue] = useState('');
   const [pending, setPending] = useState<FoundUnit | null>(null);
   const [scanQty, setScanQty] = useState('1');
@@ -92,7 +95,9 @@ export function LocationsPage({
     const { data, error: rpcError } = await client.rpc('portal_bay_list');
     if (rpcError) throw rpcError;
     const body = (data || {}) as { bays?: Bay[]; locations?: Location[] };
-    setBays(body.bays || []);
+    const nextBays = body.bays || [];
+    setBays(nextBays);
+    setBulkBay((current) => (current && nextBays.some((row) => String(row.bay_no) === current) ? current : (nextBays[0] ? String(nextBays[0].bay_no) : '')));
     setLocations(body.locations || []);
     setLoaded(true);
   }
@@ -335,6 +340,63 @@ export function LocationsPage({
     }, 50);
   }
 
+  function queueBulk() {
+    const next = addBulkSkus(bulkSkus, bulkDraft);
+    if (next.length === bulkSkus.length) {
+      setError(bulkDraft.trim() ? 'That SKU is already on the list.' : 'Type a SKU first.');
+      return;
+    }
+    setError('');
+    setBulkSkus(next);
+    setBulkDraft('');
+  }
+
+  async function submitBulk() {
+    const bay = bays.find((row) => String(row.bay_no) === bulkBay);
+    if (!bay) { setError('Choose a bay.'); return; }
+    if (!bulkSkus.length) { setError('Add at least one SKU.'); return; }
+    let code = '';
+    try {
+      code = bayTagCode(bay.bay_no, bay.row_bins);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Choose a bay.');
+      return;
+    }
+    if (lock.current) return;
+    lock.current = true;
+    setBusy(true);
+    setError('');
+    setNotice('');
+    const failed: string[] = [];
+    const left: string[] = [];
+    let placed = 0;
+    try {
+      for (const sku of bulkSkus) {
+        try {
+          const { data, error: rpcError } = await client.rpc('portal_location_unit', { p_sku: sku });
+          if (rpcError) throw rpcError;
+          if (!data) throw new Error('No in-stock item with that SKU.');
+          const unit = data as FoundUnit;
+          unit.allocations = unit.allocations || [];
+          const moves = planPlaceInBin(Number(unit.qty_on_hand), unit.allocations, code, 1);
+          for (const move of moves) await rpcMoveLocationStock(client, unit.sku, move.quantity, move.from, move.to);
+          placed += 1;
+        } catch (err) {
+          const message = err instanceof Error && !('code' in err) ? err.message : friendly(err);
+          failed.push(`SKU ${sku}: ${message}`);
+          left.push(sku);
+        }
+      }
+      setBulkSkus(left);
+      if (placed) setNotice(`${placed} tagged in ${locationPhrase(code)}.`);
+      if (failed.length) setError(failed.join(' · '));
+      await refresh();
+    } finally {
+      lock.current = false;
+      setBusy(false);
+    }
+  }
+
   if (itemSku && !phone) {
     if (!deskDetail) return <p className="hint">Loading item…</p>;
     return (
@@ -573,6 +635,43 @@ export function LocationsPage({
               () => openBay(item.bay_no),
             ))}
           </div>
+        )}
+        {phone && (
+          <form className="loc-bulk" onSubmit={(event) => { event.preventDefault(); queueBulk(); }}>
+            <div className={section}>TAG SKUS</div>
+            <label className="loc-field">SKU
+              <span className="loc-scan-line">
+                <input
+                  value={bulkDraft}
+                  disabled={busy}
+                  placeholder="Type or paste SKUs"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  aria-label="SKUs to tag"
+                  onChange={(event) => setBulkDraft(event.target.value)}
+                />
+                <button type="submit" disabled={busy}>Enter</button>
+              </span>
+            </label>
+            <label className="loc-field">Bay
+              <select value={bulkBay} disabled={busy || !bays.length} aria-label="Bay" onChange={(event) => setBulkBay(event.target.value)}>
+                {bays.map((item) => <option key={item.bay_no} value={String(item.bay_no)}>Bay {item.bay_no}</option>)}
+              </select>
+            </label>
+            <ul className="loc-bulk-list" aria-label="SKUs to tag">
+              {bulkSkus.length === 0
+                ? <li className="empty">Nothing tagged yet.</li>
+                : bulkSkus.map((sku) => (
+                  <li key={sku}>
+                    <span>SKU {sku}</span>
+                    <button type="button" disabled={busy} onClick={() => setBulkSkus((rows) => rows.filter((row) => row !== sku))}>Remove</button>
+                  </li>
+                ))}
+            </ul>
+            <button type="button" className="loc-bulk-submit" disabled={busy || !bulkSkus.length || !bulkBay} onClick={() => void submitBulk()}>
+              {busy ? 'Saving…' : 'Submit'}
+            </button>
+          </form>
         )}
         </>
       ), onBack, backLabel)}
