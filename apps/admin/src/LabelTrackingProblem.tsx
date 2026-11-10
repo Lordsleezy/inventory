@@ -14,10 +14,7 @@ type Props = {
 };
 
 function carrierFor(number: string) {
-  const u = number.toUpperCase();
-  if (u.startsWith('1Z')) return 'UPS';
-  if (/^9[2-5]/.test(u.replace(/\D/g, ''))) return 'USPS';
-  return 'USPS';
+  return classifyCarrierHint(number).carrier || 'USPS';
 }
 
 export function LabelTrackingProblem({

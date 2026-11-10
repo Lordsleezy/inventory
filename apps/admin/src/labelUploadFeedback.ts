@@ -28,7 +28,7 @@ export function labelUploadUi(data: LabelUploadResponse): LabelUploadUi {
     return { kind: 'picker', candidates: data.tracking_candidates };
   }
   if (data.needs_tracking) {
-    return { kind: 'manual', message: "Couldn't read tracking from this label. Enter it below." };
+    return { kind: 'manual', message: "Couldn't read tracking from this label. Enter it on the order page." };
   }
   return { kind: 'ok' };
 }

@@ -250,9 +250,10 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
       setLabelHit(null);
       setTrackingPick(null);
       setError('');
-      if (ui.kind === 'manual') setError(ui.message);
-      else if (ui.kind === 'picker') setTrackingPick({ orderId: o.id, candidates: ui.candidates });
-      else if (ui.kind === 'hit') setLabelHit({ orderId: o.id, number: ui.number, carrier: ui.carrier });
+      if (ui.kind === 'manual' || ui.kind === 'mismatch' || ui.kind === 'picker') {
+        setOpenId(o.id);
+        if (ui.kind === 'picker') setTrackingPick({ orderId: o.id, candidates: ui.candidates });
+      } else if (ui.kind === 'hit') setLabelHit({ orderId: o.id, number: ui.number, carrier: ui.carrier });
       await load();
     } catch (e) { setError(errText(e)); }
     setBusy(null);
@@ -570,8 +571,11 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
     const labeled = hasLabel(o);
     const buy = canBuyLabel(o.channel);
     const cardStatus = chip.text;
-    const displayTitle = o.match_status === 'matched' || (!!o.sku && o.sku !== 'UNMATCHED' && !!o.sale_id)
-      ? (o.title || o.marketplace_title || 'Item') : (o.marketplace_title || o.title || 'Marketplace sale');
+    const bundleShip = activeShipments.find((ship) => ship.bundled && ship.items.some((row) => row.id === o.id));
+    const displayTitle = bundleShip
+      ? `${bundleShip.itemCount} items · ${o.buyer_name || 'Buyer'}`
+      : o.match_status === 'matched' || (!!o.sku && o.sku !== 'UNMATCHED' && !!o.sale_id)
+        ? (o.title || o.marketplace_title || 'Item') : (o.marketplace_title || o.title || 'Marketplace sale');
     const thumbPhoto = listThumbPhoto(photoMap[o.sku] || []);
     const labelText = o.label_origin === 'upload'
       ? `Uploaded · ${channelLabel(o.channel)}`
@@ -585,8 +589,44 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
           <OrderTitle title={displayTitle} />
           <p>{channelLabel(o.channel)} · {money(o.item_cents)} · {o.paid_at ? stamp(o.paid_at) : stamp(o.created_at)}</p>
         </div>
-        <OrderFindRow picker="button" sku={o.sku} code={locations[o.sku]?.[0] || ''} options={locationOptions} disabled={!!busy || packOnly} onChange={(code) => void setPickLocation(o, code)} />
-        <div className="order-card-summary">{thumbPhoto && <UnitListThumb client={client} photoPath={thumbPhoto.path} urls={photoUrls} onUrl={(path, url) => mergePhotoUrls({ [path]: url })} className="app-order-thumb" placeholder={null} />}<div className="order-card-info"><small>{channelLabel(o.channel)} · {money(o.item_cents)} · SKU {o.sku}</small><div className="order-card-tags"><b className={chip.tone === 'warn' ? 'badge-warn' : ''}>{cardStatus}</b></div></div></div>
+        {bundleShip ? (
+          <div className="desk-bundle-lines">
+            {bundleShip.items.map((row) => {
+              const rowPhoto = listThumbPhoto(photoMap[row.sku] || []);
+              const where = locations[row.sku]?.[0] || 'No location';
+              return (
+                <div key={row.id} className="desk-bundle-line">
+                  <UnitListThumb
+                    client={client}
+                    photoPath={rowPhoto?.path}
+                    urls={photoUrls}
+                    onUrl={(path, url) => mergePhotoUrls({ [path]: url })}
+                    className="desk-order-thumb"
+                    placeholder={<span className="desk-order-thumb empty" aria-hidden="true" />}
+                  />
+                  <div>
+                    <strong>{row.title || row.marketplace_title || 'Item'}</strong>
+                    <br />
+                    <small>SKU {row.sku} · {where}</small>
+                    <div>
+                      <OrderFindRow
+                        picker="button"
+                        sku={row.sku}
+                        code={locations[row.sku]?.[0] || ''}
+                        options={locationOptions}
+                        disabled={!!busy || packOnly}
+                        onChange={(code) => void setPickLocation(row, code)}
+                      />
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <OrderFindRow picker="button" sku={o.sku} code={locations[o.sku]?.[0] || ''} options={locationOptions} disabled={!!busy || packOnly} onChange={(code) => void setPickLocation(o, code)} />
+        )}
+        <div className="order-card-summary">{thumbPhoto && <UnitListThumb client={client} photoPath={thumbPhoto.path} urls={photoUrls} onUrl={(path, url) => mergePhotoUrls({ [path]: url })} className="app-order-thumb" placeholder={null} />}<div className="order-card-info"><small>{channelLabel(o.channel)} · {money(bundleShip ? bundleShip.items.reduce((n, row) => n + Number(row.total_cents || 0), 0) : o.item_cents)} · {bundleShip ? `${bundleShip.itemCount} items` : `SKU ${o.sku}`}</small><div className="order-card-tags"><b className={chip.tone === 'warn' ? 'badge-warn' : ''}>{cardStatus}</b></div></div></div>
         {o.fulfillment === 'ship' && !isCanceled && <OrderStepper stage={stage} />}
         <OrderFacts label={labelText} labeled={labeled} order={o} />
         {labelHit?.orderId === o.id && <LabelTrackingResult hit={labelHit} onDismiss={() => setLabelHit(null)} />}

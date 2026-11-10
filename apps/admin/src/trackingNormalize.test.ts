@@ -41,6 +41,12 @@ test('a FedEx 34-digit barcode keeps its tracking number', () => {
   assert.equal(normalizeTracking(barcode), '222222222222');
 });
 
+test('FedEx door-tag with parentheses collapses to the last 12 digits', () => {
+  const raw = '962208043(0000000000)000384592279027';
+  assert.equal(normalizeTracking(raw), '384592279027');
+  assert.equal(formatTrackingDisplay('FedEx', raw), 'FedEx 3845 9227 9027');
+});
+
 test('scan-out ships the order whose tracking number the routing barcode ends with', () => {
   const orders = [
     { id: 'other', tracking_number: OTHER, stage: 'packaged' },

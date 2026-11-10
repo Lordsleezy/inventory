@@ -176,6 +176,7 @@ test("a 420 ZIP wrapper is the same USPS number", () => {
   assert.equal(compactTracking("(420)442362125(94)34608106244728542207"), EBAY_2207);
   assert.equal(compactTracking("4204423621259434608106244728542207"), EBAY_2207);
   assert.equal(compactTracking(`42044236${EBAY_2207}`), EBAY_2207);
+  assert.equal(compactTracking("962208043(0000000000)000384592279027"), "384592279027");
 });
 
 test("filename order digits are not chosen as tracking", async () => {

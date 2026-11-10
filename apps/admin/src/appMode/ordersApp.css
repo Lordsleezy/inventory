@@ -1380,3 +1380,63 @@ html.app-mode .app-order-row-v2.selected,
 html.app-mode .app-shipment-card.selected {
   background: #141414;
 }
+
+/* --- Bundled shipment detail --- */
+html.app-mode .app-shipment-detail-thumbs {
+  display: flex;
+  flex: 0 0 auto;
+  width: 72px;
+  height: 72px;
+}
+html.app-mode .app-shipment-detail-thumb {
+  width: 72px;
+  height: 72px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: #111;
+  margin-left: -28px;
+}
+html.app-mode .app-shipment-detail-thumb:first-child {
+  margin-left: 0;
+}
+html.app-mode .app-shipment-detail-thumb.empty {
+  display: block;
+  border: 1px solid #4a4a4a;
+}
+html.app-mode .app-shipment-items {
+  margin: 8px 16px 16px;
+}
+html.app-mode .app-shipment-item-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+html.app-mode .app-shipment-item-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  min-width: 0;
+}
+html.app-mode .app-shipment-item-thumb {
+  width: 52px;
+  height: 52px;
+  flex: 0 0 52px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: #111;
+}
+html.app-mode .app-shipment-item-thumb.no-photo {
+  display: grid;
+  place-items: center;
+  border: 1px solid #4a4a4a;
+  color: #9a9a9a;
+  font-size: 11px;
+}
+html.app-mode .app-shipment-item-copy {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
