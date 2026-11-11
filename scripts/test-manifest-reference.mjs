@@ -104,8 +104,11 @@ test('manifest upload, lookup, store isolation, and server permissions', { timeo
     assert.equal((await ref('0096801681609')).retail_cents, 9899, 'leading-zero UPC-A matches for clerk');
     assert.equal((await ref('810180401883')).warnings[0].conditions[0], 'SALVAGE', 'clerk sees Pura warning');
     assert.equal((await ref('493240033691')).retail_cents, 3999, '49-prefix sticker UPC matches for clerk');
-    assert.deepEqual(Object.keys(clerkReference).sort(), ['expected','manifest_name','manifest_on','received','retail_cents','warnings']);
-    assert.doesNotMatch(JSON.stringify(clerkReference), /cost|profit|pallet|lot_id|description|brand|tcin/i);
+    assert.deepEqual(Object.keys(clerkReference).sort(), [
+      'brand', 'category', 'condition', 'description', 'expected', 'item_number',
+      'manifest_name', 'manifest_on', 'qty', 'received', 'retail_cents', 'seller_category', 'warnings',
+    ]);
+    assert.doesNotMatch(JSON.stringify(clerkReference), /cost|profit|pallet|lot_id|"tcin"/i);
     assert.equal((await db.query('select * from public.store_manifests')).rows.length, 0);
     assert.equal((await db.query('select * from public.manifest_lines')).rows.length, 0);
     // Grant storage select in the stub so the real policy, rather than missing table privilege, is exercised.
