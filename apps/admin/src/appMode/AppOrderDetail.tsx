@@ -1,12 +1,12 @@
-import { useMemo, useRef, useState, type RefObject } from 'react';
+import { useEffect, useMemo, useState, type RefObject } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { LabelDialog } from '../LabelDialog';
 import { displayOrderTitle } from '../orderDisplay';
 import { locationParts } from '../locationOrder';
 import { locationMenuLabel, type LocationChoice } from '../locationPlace';
 import {
-  canBuyLabel, hasLabel, orderCanMarkPackaged, orderCanStepBack, orderNeedsLabel, orderStage,
-  carrierTrackUrl, type OrderStage,
+  canBuyLabel, hasLabel, onFileWeightLb, orderCanMarkPackaged, orderCanStepBack, orderNeedsLabel,
+  orderStage, weightChanged, carrierTrackUrl, type OrderStage,
 } from '../orderStage';
 import { listThumbPhoto, type UnitPhoto } from '../unitPhotos';
 import type { WebOrder } from '../OrdersPage';
@@ -58,6 +58,7 @@ export type AppOrderDetailProps = {
   onSetLocation: (code: string) => void;
   onPrintLabel: (download?: boolean) => void;
   onMarkPackaged: () => void;
+  onVerifyWeight: (weightLb: number, confirmed?: boolean) => void;
   onMarkShipped: (barcode: string, overrideReason?: string) => void | Promise<boolean>;
   onMarkDelivered: () => void;
   onStepBack: () => void;
@@ -91,7 +92,7 @@ export function AppOrderDetail(props: AppOrderDetailProps) {
     client, accessToken, order, isAdmin, showTracking = false, busy, error,
     locationCode, locationOptions, photos, photoUrls,
     trackingDraft, onTrackingDraft, onBack, onSetLocation,
-    onPrintLabel, onMarkPackaged, onMarkShipped, onMarkDelivered,
+    onPrintLabel, onMarkPackaged, onVerifyWeight, onMarkShipped, onMarkDelivered,
     onStepBack, onFloorCancel, onSaveTracking, onUploadLabel,
     onVoidLabel, onRecordLabelCost,
     labelInputRef, packProofInputRef, onLabelOpen, labelOpen, onLabelClose, onReload,
@@ -102,6 +103,11 @@ export function AppOrderDetail(props: AppOrderDetailProps) {
   const [photosOpen, setPhotosOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [verifyShip, setVerifyShip] = useState(false);
+  const onFileLb = onFileWeightLb(order);
+  const [weightDraft, setWeightDraft] = useState(() => (onFileLb != null ? String(onFileLb) : ''));
+  useEffect(() => {
+    setWeightDraft(onFileLb != null ? String(onFileLb) : '');
+  }, [order.id, onFileLb]);
   const stage = orderStage(order);
   const ch = (order.channel || 'website').toLowerCase();
   const paid = order.status === 'paid';
@@ -115,6 +121,7 @@ export function AppOrderDetail(props: AppOrderDetailProps) {
   const metaLine = `SKU ${order.sku || '—'} · ${channelName} · ${shortDate(order.paid_at || order.created_at)}`;
   const trackNo = showTracking ? (order.tracking_number || order.marketplace_tracking_number) : '';
   const trackHref = carrierTrackUrl(trackNo, order.carrier);
+  const changed = weightChanged(order);
 
   const labelMeta = useMemo(() => {
     if (order.label_file_name) return order.label_file_name;
@@ -143,6 +150,18 @@ export function AppOrderDetail(props: AppOrderDetailProps) {
 
   const dock = (() => {
     if (!paid || !ship || stage === 'canceled' || stage === 'delivered') return null;
+    if (stage === 'verifyWeight') {
+      return {
+        kicker: 'Next step',
+        label: 'Confirm unpacked weight',
+        action: () => {
+          const lb = Number(String(weightDraft || '').trim());
+          if (!Number.isFinite(lb) || lb <= 0 || lb >= 200) return;
+          onVerifyWeight(lb, false);
+        },
+        primary: busy === 'weight' ? '…' : 'Save weight',
+      };
+    }
     if (orderNeedsLabel(order) && isAdmin) {
       return { kicker: 'Next step', label: 'Upload label', action: onUploadLabel, primary: 'Upload label' };
     }
@@ -217,7 +236,59 @@ export function AppOrderDetail(props: AppOrderDetailProps) {
           </div>
         </div>
 
-        {ship && stage !== 'canceled' && <AppOrderStageLine stage={stage as OrderStage} />}
+        {ship && stage !== 'canceled' && stage !== 'verifyWeight' && stage !== 'needsLabel' && (
+          <AppOrderStageLine stage={stage as OrderStage} />
+        )}
+
+        {stage === 'verifyWeight' && paid && ship && (
+          <section className="app-order-ready">
+            <h3 className="app-order-ready-head">Verify weight</h3>
+            <p className="app-order-status-sub" style={{ margin: '0 0 12px' }}>
+              Weigh the unpacked item. Saving updates the unit so remaining qty stays correct.
+            </p>
+            <label className="app-order-weight-field">
+              <span className="app-order-step-label">Item weight (lb)</span>
+              <input
+                type="number"
+                inputMode="decimal"
+                min={0.01}
+                max={199.99}
+                step={0.01}
+                value={weightDraft}
+                disabled={!!busy}
+                onChange={(e) => setWeightDraft(e.target.value)}
+              />
+            </label>
+            {onFileLb != null && (
+              <p className="app-order-status-sub" style={{ marginTop: 10 }}>
+                On file: {onFileLb} lb
+                {' · '}
+                <button
+                  type="button"
+                  className="app-order-text-link"
+                  disabled={!!busy}
+                  onClick={() => {
+                    setWeightDraft(String(onFileLb));
+                    onVerifyWeight(onFileLb, true);
+                  }}
+                >
+                  Confirm on file
+                </button>
+              </p>
+            )}
+          </section>
+        )}
+
+        {(stage === 'needsLabel' || stage === 'toShip') && order.weight_verified_lb != null && (
+          <div className="app-order-status-card">
+            <p className="app-order-status-title">Weight {order.weight_verified_lb} lb</p>
+            {changed && order.weight_on_file_lb != null && (
+              <p className="app-order-status-sub">
+                Was <span className="app-order-weight-old">{order.weight_on_file_lb} lb</span>
+              </p>
+            )}
+          </div>
+        )}
 
         {stage === 'toShip' && paid && ship && (
           <section className="app-order-ready">

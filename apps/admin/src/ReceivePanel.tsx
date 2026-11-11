@@ -14,6 +14,8 @@ import { priceFloorCents } from './scanPricing';
 import { errText } from './errText';
 import { locationMenuLabel, sortLocationChoices } from './locationPlace';
 import { ManifestReceiveReference, useManifestReceiveReference } from './ManifestReceiveReference';
+import { ManifestSearchBox } from './ManifestSearchBox';
+import type { ManifestSearchLine } from './manifestReference';
 import { BundleReceive } from './BundleReceive';
 const MeasureOnMat = lazy(() => import('./MeasureOnMat').then(module => ({ default: module.MeasureOnMat })));
 import { receiveSpecifics, receiveVariant } from '../../../shared/receive-specifics.mjs';
@@ -790,6 +792,37 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     return () => { active = false; };
   }, [client, manual, formOpen, form.upc, form.noUpc, form.title, form.brand, form.model, form.ask, form.condition, doNotList, current?.upc]);
   const manifestReference = useManifestReceiveReference(client, manual ? form.upc : current?.upc || '');
+
+  /* Manifest is IDENTITY only. Prefill brand/title/category when catalog lookup is thin — never ask/cost. */
+  useEffect(() => {
+    const reference = manifestReference?.reference;
+    if (!reference || !formOpen) return;
+    const brand = String(reference.brand || '').trim();
+    const description = String(reference.description || '').trim();
+    const category = String(reference.category || '').trim();
+    if (!brand && !description && !category) return;
+    setForm(prev => {
+      const next = { ...prev };
+      let changed = false;
+      if (brand && !prev.brand.trim() && !prev.unbranded) {
+        next.brand = brand;
+        changed = true;
+      }
+      if (description && !prev.title.trim()) {
+        next.title = next.brand ? `${next.brand} ${description}` : description;
+        if (!prev.description.trim()) next.description = description;
+        changed = true;
+      } else if (description && !prev.description.trim()) {
+        next.description = description;
+        changed = true;
+      }
+      if (category && !prev.category.trim() && !categoryTouched.current) {
+        next.category = category;
+        changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [manifestReference, formOpen, loadedId]);
   const result = current?.result;
   const merged = result?.merged;
   const A = result?.amazon;
@@ -1005,16 +1038,49 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     });
   }
 
-  function enqueue(raw: string) {
-    const upc = raw.replace(/\s+/g, '');
+  function enqueue(raw: string, seed?: Partial<Form>) {
+    const upc = raw.replace(/[\s,-]/g, '');
     if (!upc) return;
     setDraft('');
     if (!/^\d{8,14}$/.test(upc)) { setError(`"${raw.trim()}" does not look like a UPC/EAN (8–14 digits). Scan again or use Enter manually.`); focusUpc(); return; }
     setError('');
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    setQueue(q => [...q, { id, upc, status: 'loading' }]);
+    setQueue(q => [...q, { id, upc, status: 'loading', seed }]);
     runLookup(id, upc);
     focusUpc();
+  }
+
+  /** Manifest identity only — never ask/cost/condition from the sheet. */
+  function identitySeedFromManifest(line: Pick<ManifestSearchLine, 'brand' | 'description' | 'category' | 'upc_normalized'>): Partial<Form> {
+    const brand = String(line.brand || '').trim();
+    const description = String(line.description || '').trim();
+    const category = String(line.category || '').trim();
+    return {
+      ...(brand ? { brand, unbranded: false } : {}),
+      ...(description ? { title: brand ? `${brand} ${description}` : description, description } : {}),
+      ...(category ? { category } : {}),
+      ...(line.upc_normalized ? { upc: line.upc_normalized, noUpc: false } : {}),
+    };
+  }
+
+  function pickManifestLine(line: ManifestSearchLine) {
+    const upc = String(line.upc_normalized || '').replace(/[\s,-]/g, '');
+    const seed = identitySeedFromManifest(line);
+    if (dialog === 'miss-photo') setDialog(null);
+    if (manual || formOpen) {
+      setForm(prev => ({
+        ...prev,
+        upc: upc || prev.upc,
+        noUpc: upc ? false : prev.noUpc,
+        brand: (prev.brand.trim() || prev.unbranded) ? prev.brand : (seed.brand || prev.brand),
+        unbranded: (prev.brand.trim() || prev.unbranded) ? prev.unbranded : false,
+        title: prev.title.trim() ? prev.title : (seed.title || ''),
+        category: prev.category.trim() ? prev.category : (seed.category || ''),
+        description: prev.description.trim() ? prev.description : (seed.description || ''),
+      }));
+      return;
+    }
+    if (upc) enqueue(upc, seed);
   }
 
   useEffect(() => {
@@ -2096,6 +2162,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
             if (f) void decodeFile(f).then(code => { if (code) enqueue(code); else { setError('This browser cannot read barcodes from photos. Type the digits under the barcode instead.'); focusUpc(); } });
           }} />
         </div>}
+        {(!formOpen || manual) && <ManifestSearchBox client={client} onPick={pickManifestLine} disabled={busy} />}
       </div>
       {!appChrome && (
         <div>
@@ -2413,9 +2480,12 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           onChange={next => {
             setEbayAspects(next);
             const grades = next.allowedGrades || [];
+            const onlyGrade = grades.length === 1 ? grades[0].grade : '';
+            // Costco returns are USED_GOOD — do not auto-pick New / Brand New when that is the only allowed grade.
+            const autoNew = /^brand\s*new$/i.test(onlyGrade) || onlyGrade === NEW;
             const stillAllowed = !form.condition || grades.length === 0 || grades.some(grade => grade.grade === form.condition) || isDefectiveCondition(form.condition);
-            if (!stillAllowed) update('condition', grades.length === 1 ? grades[0].grade : '');
-            else if (grades.length === 1 && !form.condition) update('condition', grades[0].grade);
+            if (!stillAllowed) update('condition', grades.length === 1 && !autoNew ? onlyGrade : '');
+            else if (grades.length === 1 && !form.condition && !autoNew) update('condition', onlyGrade);
             const modelGuess = next.attributes.Model || next.attributes.Type || next.attributes['Model Number'] || '';
             if (modelGuess && !form.model.trim()) update('model', modelGuess);
           }}
@@ -2457,8 +2527,10 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
             <label>Length (in)<input inputMode="decimal" value={form.length} onChange={e => update('length', e.target.value)} /></label>
             <label>Width (in)<input inputMode="decimal" value={form.width} onChange={e => update('width', e.target.value)} /></label>
             <label>Height (in)<input inputMode="decimal" value={form.height} onChange={e => update('height', e.target.value)} /></label>
-            <label>Weight (lb)<input inputMode="decimal" value={form.weight} onChange={e => update('weight', e.target.value)} /></label>
+            <label>Box weight (lb)<input inputMode="decimal" value={form.weight} onChange={e => update('weight', e.target.value)} /></label>
+            <label>Item weight (lb)<input inputMode="decimal" value={form.productWeight} onChange={e => update('productWeight', e.target.value)} placeholder="From catalog when known" /></label>
           </div>
+          <p className="rcv-note">Box weight is the packaged ship weight. Item weight is the product itself.</p>
         </ReceiveSection>}
 
         {!(staffMode && doNotList) && <ReceiveSection id="location" title="Location" required={!doNotList} open={openSec === 'location'} onOpen={toggleSection}
@@ -2637,6 +2709,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         <h3 id="miss-photo-title">{photoCandidate ? 'Confirm product from photo' : photoNeed ? 'More product details needed' : 'Can\'t find this item. Scan with camera?'}</h3>
         <p>{photoCandidate ? photoConflictText : `${photoNeed || 'Take one clear photo of the box or label.'} We\'ll identify the product and show asking prices so you can set the price.`}</p>
         <ManifestReceiveReference result={manifestReference} />
+        <ManifestSearchBox client={client} onPick={pickManifestLine} disabled={busy || photoIdBusy} />
         {previews[0] && <img src={previews[0]} alt="Photo being identified" style={{ maxWidth: '100%', maxHeight: 180, objectFit: 'contain' }} />}
         {photoIdBusy && <p role="status">{photoIdStatus || 'Identifying product…'}</p>}
         {photoIdError && <p className="alert" role="alert">{photoIdError}</p>}

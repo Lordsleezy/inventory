@@ -902,6 +902,27 @@ html.app-mode .app-order-status-sub {
   line-height: 1.35;
 }
 
+html.app-mode .app-order-weight-field {
+  display: grid;
+  gap: 6px;
+}
+
+html.app-mode .app-order-weight-field input {
+  width: 100%;
+  max-width: 160px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #3a3a3c;
+  background: #000;
+  color: #fff;
+  font-size: 17px;
+}
+
+html.app-mode .app-order-weight-old {
+  color: #ff453a;
+  font-weight: 600;
+}
+
 html.app-mode .app-order-text-back {
   display: block;
   margin: 0 16px 24px;

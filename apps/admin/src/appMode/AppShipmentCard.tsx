@@ -2,7 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { WebOrder } from '../OrdersPage';
 import { displayOrderTitle } from '../orderDisplay';
 import { locationParts } from '../locationOrder';
-import { hasLabel, orderNeedsLabel } from '../orderStage';
+import { hasLabel, orderNeedsLabel, orderNeedsWeightVerify } from '../orderStage';
 import { UnitListThumb } from '../UnitListThumb';
 import { listThumbPhoto } from '../unitPhotos';
 import type { UnitPhoto } from '../unitPhotos';
@@ -54,6 +54,7 @@ export function AppShipmentCard({
 }: Props) {
   const lead = shipment.lead;
   const needsLabel = orderNeedsLabel(lead);
+  const needsWeight = orderNeedsWeightVerify(lead);
   const loc = locationParts(locations[lead.sku]?.[0]);
   const titles = shipment.items
     .map((order) => displayOrderTitle(order.title || order.marketplace_title))
@@ -61,7 +62,7 @@ export function AppShipmentCard({
   const summary = titles.slice(0, 2).join(' · ');
   const meta = hideMoney
     ? [trackingTail].filter(Boolean).join(' · ')
-    : needsLabel
+    : needsLabel || needsWeight
       ? `${channelName} · ${shipment.itemCount} items`
       : [channelName, `${shipment.itemCount} items`, trackingTail].filter(Boolean).join(' · ');
   const locLine = loc ? `${loc.display} · ${loc.slot}`.toUpperCase() : '';
@@ -72,7 +73,7 @@ export function AppShipmentCard({
   );
 
   return (
-    <div className={`app-row app-shipment-card compact${needsLabel ? ' needs-label' : ''}`}>
+    <div className={`app-row app-shipment-card compact${needsLabel || needsWeight ? ' needs-label' : ''}`}>
       <button
         type="button"
         className="app-order-open-v2"
@@ -109,7 +110,8 @@ export function AppShipmentCard({
           {shipment.itemCount < 2 && (
             <span className={`app-order-loc${loc ? '' : ' missing'}`}>{locLine || 'NO LOCATION'}</span>
           )}
-          {needsLabel && <span className="app-order-problem">Needs label</span>}
+          {needsWeight && <span className="app-order-problem">Verify weight</span>}
+          {!needsWeight && needsLabel && <span className="app-order-problem">Needs label</span>}
           {lead.tracking_needs_entry && !lead.tracking_number && (
             <span className="app-order-problem">Tracking needed — open to enter</span>
           )}

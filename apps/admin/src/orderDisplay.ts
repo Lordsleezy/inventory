@@ -6,6 +6,7 @@ export function displayOrderTitle(title: string | null | undefined): string {
 }
 
 export const SEG_SHORT: Record<string, string> = {
+  verifyWeight: 'Verify weight',
   needsLabel: 'Needs label',
   toShip: 'To ship',
   packaged: 'Packaged',

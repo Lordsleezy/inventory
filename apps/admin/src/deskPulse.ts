@@ -6,6 +6,7 @@ import { countShipments } from './orderShipments';
 
 export type DeskPulse = {
   toShip: number | null;
+  verifyWeight: number | null;
   needsLabel: number | null;
   openReturns: number | null;
   listingIssues: number | null;
@@ -20,6 +21,7 @@ export type DeskPulse = {
 export function emptyPulse(): DeskPulse {
   return {
     toShip: null,
+    verifyWeight: null,
     needsLabel: null,
     openReturns: null,
     listingIssues: null,
@@ -62,6 +64,7 @@ export async function loadDeskPulse(
       const row = o as StageOrder & { payment_env?: string | null; order_no?: string | null };
       return row.payment_env !== 'sandbox' && !(row.order_no || '').toLowerCase().startsWith('sandbox');
     });
+    pulse.verifyWeight = countShipments(rows.filter((o) => orderStage(o) === 'verifyWeight'));
     pulse.toShip = countShipments(rows.filter((o) => orderStage(o) === 'toShip'));
     pulse.needsLabel = countShipments(rows.filter((o) => orderStage(o) === 'needsLabel'));
   }

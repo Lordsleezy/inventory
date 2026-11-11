@@ -1,6 +1,6 @@
 import { compactTracking } from '../../../shared/tracking-normalize.mjs';
 
-export type OrderStage = 'needsLabel' | 'toShip' | 'packaged' | 'shipped' | 'delivered' | 'canceled' | 'pickup';
+export type OrderStage = 'verifyWeight' | 'needsLabel' | 'toShip' | 'packaged' | 'shipped' | 'delivered' | 'canceled' | 'pickup';
 
 export type StageOrder = {
   status?: string | null;
@@ -27,6 +27,17 @@ export type StageOrder = {
   item_cents?: number | null;
   title?: string | null;
   sku?: string | null;
+  weight_verified_at?: string | null;
+  weight_verified_lb?: number | null;
+  weight_on_file_lb?: number | null;
+  weight_verified_by_name?: string | null;
+  package?: {
+    length_in?: number | null;
+    width_in?: number | null;
+    height_in?: number | null;
+    weight_lb?: number | null;
+    product_weight_lb?: number | null;
+  } | null;
 };
 
 const TWO_DAYS = 2 * 86400000;
@@ -52,8 +63,32 @@ export function orderNeedsLabel(o: StageOrder) {
   if (o.status && o.status !== 'paid') return false;
   if (o.fulfillment && o.fulfillment !== 'ship') return false;
   if (o.packaged_at || o.shipped_at || o.delivered_at) return false;
-  if (String(o.ebay_seller_username || '').toLowerCase() === 'pgg124-5') return false;
+  if (String(o.ebay_seller_username || '').toLowerCase() === '[REDACTED]') return false;
   return !labelReady(o);
+}
+
+/** Paid ship order still waiting on unpacked item weight. */
+export function orderNeedsWeightVerify(o: StageOrder) {
+  if (o.status && o.status !== 'paid') return false;
+  if (o.fulfillment && o.fulfillment !== 'ship') return false;
+  if (o.packaged_at || o.shipped_at || o.delivered_at) return false;
+  if (o.weight_verified_at) return false;
+  return true;
+}
+
+export function weightChanged(o: StageOrder) {
+  if (o.weight_on_file_lb == null || o.weight_verified_lb == null) return false;
+  return Math.abs(Number(o.weight_on_file_lb) - Number(o.weight_verified_lb)) > 0.01;
+}
+
+/** On-file item weight before / without verify (product first, then package). */
+export function onFileWeightLb(o: StageOrder) {
+  const product = o.package?.product_weight_lb;
+  if (product != null && Number(product) > 0) return Number(product);
+  const pack = o.package?.weight_lb;
+  if (pack != null && Number(pack) > 0) return Number(pack);
+  if (o.weight_on_file_lb != null && Number(o.weight_on_file_lb) > 0) return Number(o.weight_on_file_lb);
+  return null;
 }
 
 /** Admin-only undo: at least one fulfillment timestamp is set (ship or pickup). */
@@ -68,6 +103,8 @@ export function orderStage(o: StageOrder): OrderStage {
   if (o.delivered_at) return 'delivered';
   if (o.shipped_at) return 'shipped';
   if (o.packaged_at) return 'packaged';
+  // Verify weight before Needs label so eBay/Depop land with Jacob first.
+  if (orderNeedsWeightVerify(o)) return 'verifyWeight';
   if (orderNeedsLabel(o)) return 'needsLabel';
   return 'toShip';
 }
@@ -80,6 +117,7 @@ export function hasLabel(o: StageOrder) {
 export function orderCanMarkPackaged(o: StageOrder) {
   if (o.status !== 'paid' || o.fulfillment !== 'ship') return false;
   if (o.packaged_at || o.shipped_at || o.delivered_at) return false;
+  if (orderNeedsWeightVerify(o)) return false;
   if (orderNeedsLabel(o)) return false;
   if (orderStage(o) !== 'toShip') return false;
   return true;
@@ -141,6 +179,7 @@ export function orderChip(o: StageOrder, now = Date.now()): { text: string; tone
     if (shippedStale(o, now)) return { text: 'Not delivered · 10+ days', tone: 'warn' };
     return { text: 'Shipped', tone: 'ok' };
   }
+  if (stage === 'verifyWeight') return { text: 'Verify weight', tone: 'warn' };
   if (stage === 'needsLabel') {
     if (o.label_tracking_mismatch) return { text: "Wrong label · doesn't match eBay", tone: 'warn' };
     const ch = (o.channel || '').toLowerCase();
@@ -167,6 +206,14 @@ export function orderTimeline(o: StageOrder & {
   service?: string | null;
 }, events: { status?: string; status_detail?: string | null; location?: string | null; occurred_at?: string | null }[] = []): TimelineRow[] {
   const rows: TimelineRow[] = [];
+  if (o.weight_verified_at) {
+    const lb = o.weight_verified_lb != null ? `${o.weight_verified_lb} lb` : '';
+    rows.push({
+      title: 'Weight verified',
+      detail: [lb, o.weight_verified_by_name ? `by ${o.weight_verified_by_name}` : ''].filter(Boolean).join(' · '),
+      at: o.weight_verified_at,
+    });
+  }
   if (o.label_purchased_at && o.label_origin !== 'upload') {
     const cost = o.label_cost_cents != null ? `$${(o.label_cost_cents / 100).toFixed(2)}` : '';
     rows.push({
@@ -236,5 +283,5 @@ export function orderTimeline(o: StageOrder & {
 }
 
 export const STAGE_INDEX: Record<OrderStage, number> = {
-  needsLabel: -1, toShip: 0, packaged: 1, shipped: 2, delivered: 3, canceled: -1, pickup: -1,
+  verifyWeight: -1, needsLabel: -1, toShip: 0, packaged: 1, shipped: 2, delivered: 3, canceled: -1, pickup: -1,
 };

@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { normalizeManifestUpc } from './manifestLines';
-import { manifestDefectWarnings, type ManifestReference } from './manifestReference';
+import { manifestDefectWarnings, manifestIdentityLine, type ManifestReference } from './manifestReference';
 
-/** Read-only sidecar. Never participates in catalog lookup or writes to the receive form. */
+/**
+ * Manifest identity may prefill brand/title/category on a thin catalog lookup.
+ * Still never writes ask or cost from the manifest.
+ */
 export function useManifestReceiveReference(client: SupabaseClient, upc: string) {
   const code = normalizeManifestUpc(upc);
   const [result, setResult] = useState<{ code: string; reference: ManifestReference | null; failed?: boolean } | null>(null);
@@ -26,7 +29,9 @@ export function ManifestReceiveReference({ result }: { result: ReturnType<typeof
   if (result.failed) return <small role="status">Manifest reference unavailable. Keep receiving or retry the scan.</small>;
   if (!result.reference) return null;
   const reference = result.reference;
+  const identity = manifestIdentityLine(reference);
   return <span className="manifest-receive-reference">
+    {identity ? <span className="manifest-receive-identity" role="status">{identity}</span> : null}
     <span style={{ display: 'block', fontWeight: 700 }} role="status">
       Manifest retail: {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(reference.retail_cents / 100)}
       <small style={{ display: 'block', fontWeight: 400 }}>from {reference.manifest_name} · {reference.manifest_on}</small>

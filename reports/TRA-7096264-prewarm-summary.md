@@ -1,0 +1,426 @@
+wrote summary 425
+warm summary
+
+Generated: 2026-11-11T20:51:56.372Z
+
+## Hit rate (primary source, 432 lines)
+- Amazon: 129
+- UPCitemdb: 64
+- Costco.com: 7
+- eBay Browse/Taxonomy (incl. Costco.com blocked fallback): 232
+- Manifest identity only: 0
+- Nothing: 0
+- Fully listing-ready (title/brand/description/images/category/required aspects/dims/weight): 48
+- Still missing something: 384
+
+## Still missing (compact)
+- 041333051543 · 1806358 · DURACELL AA POWER BOOST · aspects:Type
+- 195711272324 · 1806317 · KOHLER ASSERT HANDSHWR BN · dims, weight
+- 810156211614 · 1938108 · INFINITY UNDER CABINET · dims, weight
+- 754502055371 · 1941315 · COPPER FIT COMPRESSION · images, aspects:Type, dims, weight
+- 840397526697 · 2949962 · SI ROLLING MASSAGER · brand, aspects:Brand|Type, dims, weight
+- 840010309300 · 1937993 · KODA 5000L SECURITY LIGHT · aspects:Type, dims, weight
+- 499993873522 · 2027861 · PUMA UNLIMITED BACKPACK · aspects:Color|Department|Material|Style, dims, weight
+- 840147885203 · 1901761 · MESA 2 TIER ORGANIZER · aspects:Item Height|Item Length|Item Width|Number of Shelves|Type, dims, weight
+- 192995048065 · 1601306 · LICENSED GLOW IN THE DARK · images, dims, weight
+- 069055143988 · 4610583 · ORAL-B IO BRUSHHEADS 9CT · aspects:Type, dims, weight
+- 499993873539 · 2027860 · PUMA UNLIMITED BACKPACK · aspects:Color|Department|Material|Style, dims, weight
+- 074108522832 · 4543452 · CONAIR GARMENT STEAMER · aspects:Type, dims, weight
+- 810125974625 · 2049359 · LIQUID IV SF RING POP · images, dims, weight
+- 079400536761 · 2067097 · DEGREE MAX PROTECTION · dims, weight
+- 840397518234 · 3816330 · SI COMPRESSION BOOTS · brand, images, aspects:Brand|Type, dims, weight
+- 075020108296 · 3858210 · SONICARE ADVANCED CLEAN · aspects:Type, dims, weight
+- 069055135471 · 3610583 · ORAL-B BRUSH HEADS 10 CT · aspects:Type
+- 840147850829 · 1759358 · MESA POP N' LOAD LAUNDRY · images, aspects:Item Height|Item Length|Item Width|Type, dims, weight
+- 194029193529 · 1851623 · 1:14TH ELITE RED BULL RC · dims, weight
+- 075020114662 · 5952050 · SONICARE PRO CLEAN+ HANDL · aspects:Type, dims, weight
+- 075020113351 · 3640860 · PHILIPS NORELCO SHAVER · aspects:Type, dims, weight
+- 028907638751 · 1733535 · ALLSPACE RECHARGEABLE · brand, images, aspects:Brand, dims, weight
+- 499995353916 · 2354207 · WOOZOO OSCILLATING GLOBE · dims, weight
+- 199287176642 · 2027859 · PUMA UNLIMITED BACKPACK · aspects:Material
+- 195711096838 · 1731394 · KOHLER LAYNE QR ELONGATED · aspects:Type
+- 801310377765 · 1929782 · DIECAST 2.5IN FIGURE 4PK · aspects:Type
+- 010343965430 · 1644561 · EPSON ECOTANK ET2850SE · aspects:Type
+- 195711178039 · 1848535 · KOHLER TERZET WIDE BNCKEL · images, dims, weight
+- 198384105722 · 1872100 · HEATED VEST 32 DEGREE · aspects:Size Type|Size|Type|Style|Outer Shell Material|Department|Color, dims, weight
+- 074108525291 · 2006955 · CONAIR HIGH SPEED DIGITAL · aspects:Type, dims, weight
+- 846979055456 · 1938018 · ARTIKA BOWEN SOLAR · aspects:Type
+- 810126663870 · 2056983 · FORCE FACTOR HAIR GROWTH · images, dims, weight
+- 851770008563 · 1372659 · ORGAIN SIMPLE PEANUT BUTR · dims, weight
+- 061282219788 · 1872254 · TITAN PRO LUNCH PACK · aspects:Item Height|Item Width
+- 754502056460 · 2067889 · COPPER FIT PRO BACK · images, aspects:Stove Type Compatibility, dims, weight
+- 754502056552 · 2067903 · COPPER FIT PRO AIR KNEE · aspects:Type, dims, weight
+- 041333051574 · 1806373 · DURACELL C ALKALINE · aspects:Type, dims, weight
+- 046677609573 · 1938101 · PHILIPS 5/6" RETROFIT · aspects:Type, dims, weight
+- 762016485218 · 1410571 · IRIS 12.9QT BUCKLE UP 4PK · aspects:Item Height|Item Length|Item Width|Type
+- 689122003313 · 2043903 · BLUEAIR 2PK AIR PURIFIER · aspects:Type, dims, weight
+- 075020111838 · 2858210 · SONICARE OPTIMAL CLEAN · aspects:Type, dims, weight
+- 8809891183791 · 2049319 · BIODANCE CERANOL · aspects:Type, dims, weight
+- 075020118677 · 7161149 · PHILIPS NORELCO ALL IN · aspects:Type, dims, weight
+- 075609219603 · 2043018 · OLAY VIT C MOISTURIZER · aspects:Type, dims, weight
+- 810125974731 · 2049358 · LIQUID IV SF VPACK RL/WP · images, dims, weight
+- 810156211775 · 1937959 · INFINITY POWER FAILURE · aspects:Type
+- 193033762615 · 1908290 · 666 CLSS RECTANGLE +3.00 · brand, images, aspects:Brand|Department|Frame Color|Type, dims, weight
+- 737839834246 · 2062277 · GREENMADE 45QT INSTAVIEW · images, aspects:Stove Type Compatibility, dims, weight
+- 810009377344 · 2037045 · THINKSPORT SUNSCREENSPF50 · aspects:Type, dims, weight
+- 198390000943 · 1943678 · EPSON ET-3958 PRINTER · aspects:Type
+- 075020104205 · 3239377 · SONICARE DIAMONDCLEAN · aspects:Type
+- 075020107350 · 4952050 · SONICARE PROFESSIONAL · aspects:Type, dims, weight
+- 075020120533 · 4640862 · PHILIPS NORELCO SHAVER · aspects:Type, dims, weight
+- 075020116314 · 1901990 · SONICARE WATERFLOSSER 2PK · aspects:Type, dims, weight
+- 499994560896 · 4333009 · SHARPER IMAGE HOT/COLD · images, aspects:Type, dims, weight
+- 762016498683 · 1747373 · WOOZOO PEDESTAL AIR · aspects:Type, dims, weight
+- 810181280562 · 1910772 · DREO OMNI DIRECTIONAL · images, dims, weight
+- 075020115874 · 2860427 · SONICARE TWO-IN-ONE · aspects:Type, dims, weight
+- 023108971409 · 1975346 · ROWENTA PRO STEAM IRON · aspects:Type, dims, weight
+- 074108478856 · 2543452 · CONAIR HANDHELD · aspects:Type, dims, weight
+- 192897459488 · 1812528 · 23" TULIP ARRANGEMENT · dims, weight
+- 803954310351 · 1909829 · DR GROOT SCALP SHAMPOO · aspects:Type, dims, weight
+- 810156211645 · 1938087 · INFINITY X1 10000L LUMEN · dims, weight
+- 799288265224 · 1601252 · TEETOT ADVENTURE FACTORY · images, aspects:Game Name|Platform, dims, weight
+- 192995273399 · 1601277 · LICENSED COSTUME ASSORT · dims, weight
+- 017641175929 · 1901746 · SEVILLE DRAWER ORGANIZERS · aspects:Item Height|Item Length|Item Width|Type
+- 8803463015039 · 1959187 · VT REEDLE SHOT 100 ESSENC · brand, aspects:Brand|Type, dims, weight
+- 081806608591 · 1468555 · ECLIPSE DUOTECH 2PK CURTA · aspects:Type|Color, dims, weight
+- 810156211553 · 1985324 · DURACELL 5000L LANTERN · dims, weight
+- 856318008326 · 1718605 · INFINITY 2PK RECHARGEABLE · brand, images, aspects:Brand|Type, dims, weight
+- 017801771268 · 1938000 · FEIT 15" FLAT PANEL · aspects:Type
+- 196633795946 · 2030640 · KS 2.0 NITRILE GLOVE SM · aspects:Type, dims, weight
+- 193033762271 · 1908250 · 668 METAL SQUARE +1.25 · brand, images, aspects:Brand|Department|Frame Color|Type, dims, weight
+- 810182224213 · 1929849 · 10IN SQUISHY LAMP ASSORT · aspects:Type, dims, weight
+- 041333051581 · 1806386 · DURACELL D ALKALINE · aspects:Type, dims, weight
+- 197424179044 · 1901882 · MIKASA CANDLE WARMER PLUG · aspects:Type, dims, weight
+- 079400513656 · 1800413 · DOVE ADVANCED CARE APDO · dims, weight
+- 096619055418 · 133839 · KS BLUE MICROFIBER 36PK · images, aspects:Type, dims, weight
+- 035000463760 · 1285702 · COLGATE TOTAL TPST · aspects:Type
+- 079400527660 · 1939944 · DOVE INTENSIVE REPAIR SET · aspects:Type, dims, weight
+- 196633828606 · 1931211 · KS FACIAL WIPE (NEW) · aspects:Type, dims, weight
+- 809407190822 · 1890404 · PI BATH MAT BLUE/TAN · aspects:Type|Color|Material, dims, weight
+- 823621030122 · 1901547 · COTTON WOVEN BATHMAT · brand, aspects:Type|Color|Material|Brand, dims, weight
+- 075020116185 · 4239377 · SONICARE DIAMONDCLEAN · aspects:Type, dims, weight
+- 075020120007 · 5239377 · SONICARE DIAMONDCLEANN · aspects:Type, dims, weight
+- 886389191108 · 1539810 · NEST LEARNING THERMOSTAT · dims, weight
+- 195711329325 · 1937994 · KOHLER DAMARA SEMI-PRO · dims, weight
+- 840397513369 · 2816330 · SHARPER IMAGE FLEX AIR · images, aspects:Type, dims, weight
+- 850036402282 · 1998778 · JOLIE FILTERED SHOWERHEAD · dims, weight
+- 499997403619 · 1476815 · KOHLER PUREWASH MANUAL · dims, weight
+- 689122029917 · 1896710 · BLUEAIR MINI MAX · aspects:Type
+- 195205207276 · 1922000 · DELTA RINNA WIDESPREAD · dims, weight
+- 047871332755 · 2013077 · KIDDE RING SMOKE DETECTOR · aspects:Type
+- 843479155945 · 2437599 · SHARPER IMAGE PRO · aspects:Type, dims, weight
+- 618842575640 · 2003467 · IPACK KIDS LUGGAGE · brand, aspects:Brand, dims, weight
+- 046013264091 · 2009879 · LASKO SUPER FAN · aspects:Type, dims, weight
+- 075020115416 · 6161149 · PHILIPS NORELCO TRIMMER · aspects:Type
+- 029927605501 · 1604521 · SUNZERO PRATT BEIGE B/O · images, aspects:Type|Color, dims, weight
+- 069055137857 · 3392702 · ORAL-B FLOSS BH · aspects:Type, dims, weight
+- 499995127944 · 1583883 · SHARPER IMAGE COMPACT · images, aspects:Type, dims, weight
+- 499993770722 · 2042991 · CLEVERMADE LAUNDRY HAULER · aspects:Type, dims, weight
+- 869361000322 · 2101353 · HUILE PRODIGIEUSE SHIMMER · brand, aspects:Brand|Type, dims, weight
+- 060258359916 · 987554 · BRITA FILTERS 10 PK. FOR · aspects:Compatible Model
+- 840281715039 · 1872228 · EASTPOINT HUGE YAHTZEE · dims, weight
+- 499993717482 · 1000190 · STANDBY SHOE BOX 4PK · brand, images, aspects:Brand|Item Height|Item Length|Item Width|Type, dims, weight
+- 875380001202 · 1806336 · ACACIA WOOD SHELVES 2PK · aspects:Item Height|Item Length|Item Width|Type, dims, weight
+- 809407190860 · 1890408 · PI BATH MAT TAN 2PK · aspects:Type|Color|Material, dims, weight
+- 840103217253 · 2026112 · ROC DAY OR NIGHT CREAM · dims, weight
+- 8806173497331 · 2016978 · VITAPAIR C PDRN SERUM · brand, aspects:Brand|Type, dims, weight
+- 810156211454 · 1872247 · INFINITY 2000L CAMP LIGHT · aspects:Type, dims, weight
+- 810090752365 · 1972488 · OATS OVERNIGHT 30G CC+FB · dims, weight
+- 310158359166 · 1810859 · SENSODYNE TRI ACTION TPST · dims, weight
+- 841887141888 · 1740016 · DISNEY 13.5" HALLOWEEN · aspects:Type
+- 681147151451 · 1785136 · 4D PUZZLE ASSORTMENT · aspects:Type, dims, weight
+- 845473069051 · 1937995 · LUTEC 3000L SOLAR · aspects:Type, dims, weight
+- 021664376485 · 1784870 · GAZILLION ULTIMATE BUBBLE · dims, weight
+- 041333051567 · 1806329 · DURACELL AAA POWER BOOST · aspects:Type, dims, weight
+- 754502052561 · 1740615 · COPPER FIT KNEE SLEEVE · aspects:Type
+- 193033762363 · 1908259 · 811 FASHION CATEYE +1.75 · brand, images, aspects:Brand|Department|Frame Color|Type, dims, weight
+- 193033762387 · 1908267 · 811 FASHION CATEYE +2.50 · brand, images, aspects:Brand|Department|Frame Color|Type, dims, weight
+- 193033762509 · 1908279 · 809 CLASSIC ROUND +1.75 · brand, images, aspects:Brand|Department|Frame Color|Type, dims, weight
+- 193033762547 · 1908283 · 809 CLASSIC ROUND +3.00 · brand, images, aspects:Brand|Department|Frame Color|Type, dims, weight
+- 193033762578 · 1908286 · 666 CLSS RECTANGLE +1.75 · brand, images, aspects:Brand|Department|Frame Color|Type, dims, weight
+- 091806302122 · 1985390 · SHEDRAIN 2PK COMPACT · images, dims, weight
+- 800881901010 · 2017461 · COASTAL CULTURE EVERYDAY · brand, images, aspects:Brand|Exterior Material|Style|Exterior Color|Department, dims, weight
+- 193033827222 · 2027851 · 669 UPSWEEP +2.50 · brand, images, aspects:Brand|Type, dims, weight
+- 199073133750 · 2056254 · WILSON NBA BASKETBALL · dims, weight
+- 843021002024 · 1901852 · EDIFICE MESH BASKET 2PK · images, aspects:Item Height|Item Length|Item Width|Type, dims, weight
+- 077784049198 · 1901753 · TAYLOR SMART BATH SCALE · images, aspects:Type, dims, weight
+- 075486151485 · 1982330 · HAWAIIAN TROPIC ST LOTION · aspects:Type, dims, weight
+- 840797188136 · 2074477 · HAIRITAGE BIOTIN INFUSED · brand, aspects:Brand|Type, dims, weight
+- 041333032269 · 720376 · DURACELL "AAA"-32PK · images, aspects:Type, dims, weight
+- 810049660598 · 1666020 · MURPHY'S NATURALS · aspects:Type|EPA Registration Number
+- 199293455465 · 1974982 · WC26 CAPS · dims, weight
+- 885830163077 · 1796319 · SCROLL FOAM BATH MAT · brand, aspects:Type|Color|Material|Brand, dims, weight
+- 017801162028 · 1975773 · LED FEIT 100W GLASS A21 5 · dims, weight
+- 047218426857 · 1973213 · I/O DECO PILLOW · dims, weight
+- 840773100183 · 1193759 · 50PK FLOCKED HANGERS · aspects:Type|Item Height|Item Length|Item Width
+- 850023885401 · 2083880 · GOURMET KINGDOM FLVR CORN · brand, images, aspects:Brand|Product, dims, weight
+- 096619042326 · 1281762 · KS MOISTURE SHAMPOO · aspects:Type
+- 079238004531 · 1426548 · 17" MICHELIN HYBRID BLADE · images, dims, weight
+- 070942008631 · 1968803 · GUM FLOSS PICKS 450 CT · aspects:Type, dims, weight
+- 195711175601 · 1912207 · KOHLER E875 PUREWASH RD · images, aspects:Type, dims, weight
+- 739268417564 · 1988220 · TOTO KC2 BIDET SEAT RND · aspects:Type
+- 075020091871 · 2239377 · SONICARE DIAMONDCLEAN · aspects:Type, dims, weight
+- 031262122834 · 3849544 · HOMEDICS REDLIGHT SAUNA · images, aspects:Type, dims, weight
+- 031262117984 · 2849555 · HOMEDICS STEAM SAUNA BLK · aspects:Type
+- 195161016202 · 1895383 · HP INK 218A CMY 3PK · aspects:Type
+- 010343940888 · 1207724 · EPSON ECOTANK ET3750SE · aspects:Type, dims, weight
+- 689122032269 · 1944160 · BLUEAIR BLUE PURE 311+ · aspects:Type, dims, weight
+- 190781024798 · 1178015 · HP ENVY 7858 AIO · aspects:Type
+- 193015033894 · 1323639 · HP OJ PRO 9018 AIO · aspects:Type
+- 810075943252 · 1770963 · NUFACE MINI ON-THE-GO · images, aspects:Type, dims, weight
+- 841487134389 · 2027501 · BIG AGNES SLEEPING BAG · aspects:Type|Insect Repellent Treated
+- 010343953994 · 1392455 · EPSON ECOTANK ET-2720 SE · aspects:Type, dims, weight
+- 810091142219 · 2072441 · CHIRP HALO BUNDLE · aspects:Type, dims, weight
+- 195711173270 · 1806260 · KOHLER GUILD PULL-DOWN · dims, weight
+- 838810022147 · 1284362 · SIMPLE HUMAN VANITY 8" · aspects:Type, dims, weight
+- 050375028406 · 1795875 · INSINKERATOR C3000 · dims, weight
+- 840397533909 · 3816332 · SI COMPRESS BOOTS LG GRAY · brand, images, aspects:Brand|US Shoe Size|Style|Color|Department|Upper Material, dims, weight
+- 499994004437 · 1998770 · JOLIE FILTERED SHOWER MB · images, dims, weight
+- 194721022394 · 1470635 · HP ENVY PRO 6458 AIO WIFI · aspects:Type, dims
+- 841887148733 · 1784954 · DISNEY GINGERBREAD · brand, aspects:Type, dims, weight
+- 841887149884 · 1851532 · DISNEY HALLOWEEN VILLAGE · brand, dims, weight
+- 754502055425 · 1954413 · NAUTILUS VIBRATONE · images, dims, weight
+- 846979053834 · 1806313 · ARTIKA SUNNYVALE 28" FAN · aspects:Type, dims, weight
+- 850017219083 · 1544949 · CROC PREMIUM INFRARED · aspects:Type
+- 499994339157 · 1940218 · SHARPER IMAGE HOT/COLD · images, aspects:Type, dims, weight
+- 499997957310 · 3333009 · SHARPER IMAGE HOT/COLD · images, aspects:Type, dims, weight
+- 883349000722 · 1978242 · T3 T3 HAIR DRYER W/BRUSH · images, aspects:Type, dims, weight
+- 199284406087 · 1979508 · ALOGFIRE PORTABLE · brand, images, aspects:Type|Brand, dims, weight
+- 850064399202 · 1999118 · GLO24K SKIN REJUVENATION · aspects:Type, dims, weight
+- 031262113849 · 2748527 · HOMEDICS SERENE DIFFUSER · dims, weight
+- 748091024603 · 1793201 · MOTOROLA T600 TWO-WAY · aspects:Type
+- 195205149811 · 1920099 · DELTA IN2ITION+PRO CLEAN · images, dims, weight
+- 195711272751 · 1938077 · KOHLER ASSERT FLTRD BN · dims, weight
+- 840309313797 · 1970803 · SELKIRK SLK FURY PADDLE · dims, weight
+- 810181282917 · 1998534 · DREO PEDESTAL FAN · aspects:Type, dims, weight
+- 031262109101 · 1714078 · HOMEDICS WARM/COOL MIST · aspects:Type, dims, weight
+- 810091141717 · 1966298 · CHIRP WHEEL BUNDLE · dims, weight
+- 199874785615 · 1985388 · TERRAFORM 3 PC SET · brand, images, aspects:Brand, dims, weight
+- 031262114235 · 3333014 · HOMEDICS WARM/COOL MIST · aspects:Type
+- 810996012822 · 1856257 · TEAKHAUS TEAK BENCH · aspects:Color|Item Height|Item Length|Item Width|Type, dims, weight
+- 499994896360 · 1851439 · REAL FX DISNEY STITCH · dims, weight
+- 031262118615 · 1925706 · HOMEDICS 2G WARM/COOL · aspects:Type, dims, weight
+- 028399527038 · 1929679 · HALLOWEEN STITCH STATUE · brand, images, dims, weight
+- 8720077370883 · 1929829 · HARDWOOD CHESS+CHECKERS · brand, dims, weight
+- 075020117274 · 2904854 · SONICARE BRILLIANT CLEAN · aspects:Type, dims, weight
+- 846647006834 · 1238575 · STATIC V LUXE EXTRA LARGE · aspects:Type
+- 195711149169 · 1788404 · KOHLER TERZET MATTE BLACK · aspects:Color|Material, dims, weight
+- 028399526994 · 1929670 · 14" STITCH ELF STATUE · brand, images, dims, weight
+- 028399527199 · 1929677 · 15" HELLO KITTY TREE · brand, aspects:Brand|Product, dims, weight
+- 075020095657 · 3860427 · SONICARE DCLEAN BRUSH HDS · aspects:Type, dims
+- 643334563881 · 1172833 · LITHIUM JUMP STARTER · aspects:MPN, dims, weight
+- 643334567896 · 1253313 · WINPLUS PORTABLE JUMP KIT · aspects:MPN, dims, weight
+- 628319698826 · 1740612 · TITAN ZIPPERLESS COOLER · aspects:Type, dims, weight
+- 630996191699 · 1785081 · BLUEY'S 3IN1 PLANE SET · aspects:Type
+- 499994520326 · 1913662 · HEATED VEST MEDIUM · aspects:Size Type|Size|Type|Style|Outer Shell Material|Department|Color, dims, weight
+- 9008606389438 · 1938055 · EGLO KINGSLEY PENDANT · brand, images, aspects:Style|Brand|Type, dims, weight
+- 073796760069 · 1954600 · OMRON EVOLV BP MONITOR · aspects:Type, dims, weight
+- 046013264015 · 2365634 · LASKO SOLAIRE SUPER FAN · aspects:Type, dims, weight
+- 717844000553 · 122113 · PUREBLUE 5PK REPLACEMENT · aspects:Compatible Model
+- 197381319170 · 2039912 · 49ERS STADIUM SEAT · dims, weight
+- 028225998551 · 1933197 · MIKASA HOME ACCENTS 10PC · aspects:MPN
+- 765206384575 · 2065557 · KENSINGTON STARS W/ BORDR · brand, images, aspects:Brand|Type, dims, weight
+- 499993648168 · 2065561 · KENSINGTON WEAVE BLK 2PK · brand, images, aspects:Brand|Color|Material, dims, weight
+- 720354375912 · 2008481 · STYLECRAFT LED LAMPS 2PK · images, aspects:Type, dims, weight
+- 069055137840 · 3392701 · ORAL-B CROSS BH - WHITE · aspects:Type, dims, weight
+- 076308427313 · 1773678 · 3M 2500 SERIES 14X25X1 · aspects:Type, dims, weight
+- 014501165526 · 1332086 · ROWENTA PRO STEAM IRON · aspects:Type
+- 074108435736 · 1543452 · CONAIR HANDHELD STEAMER · aspects:Type
+- 069055130025 · 1610583 · ORALB BRUSH HEADS 9 CT · aspects:Type, dims, weight
+- 846979036691 · 1759998 · ARTIKA VITORO BLACK · images, aspects:Color|Material, dims, weight
+- 721427043639 · 1830758 · SWISSGEAR BACKPACK · brand, aspects:Brand|Insect Repellent Treated, dims, weight
+- 093764604508 · 1899977 · A+D UPPER ARM BP MONITOR · aspects:Type
+- 091141460051 · 1957606 · GLOTECH CALYPSO MIRROR · images, dims, weight
+- 810156211522 · 1985328 · INFINITY MISTING FAN · aspects:Type, dims, weight
+- 061172896662 · 1985400 · HUNTER STOWAWAY WEEKENDER · brand, images, aspects:Brand, dims, weight
+- 812066032525 · 1993007 · SAVIOR MINI RANGE BAG · brand, aspects:Type|Brand, dims, weight
+- 499993513480 · 2087931 · DELSEY EVERYDAY TOTE · dims, weight
+- 499993513473 · 2087932 · DELSEY EVERYDAY TOTE · dims, weight
+- 074108502056 · 3543452 · CONAIR HANDHELD STEAMER · aspects:Type, dims, weight
+- 050227112505 · 1929806 · MARIO KART TABLETOP · dims, weight
+- 850064383539 · 2059604 · KUDOS ORG DIAPER S4 104CT · brand, aspects:Brand, dims, weight
+- 850064383546 · 2059605 · KUDOS ORG DIAPER S5 88CT · brand, aspects:Brand, dims, weight
+- 076308426873 · 1744667 · 3M 2500 SERIES 14X20X1 · aspects:Type, dims, weight
+- 076308426897 · 1744669 · 3M 2500 SERIES 14X24X1 · images, aspects:Type, dims, weight
+- 850052848590 · 1967950 · NOODLE + BOO SUPER SOFT · aspects:Product, dims, weight
+- 059283032352 · 1929696 · BOO LIGHT UP · brand, images, aspects:Brand|Type, dims, weight
+- 075609216381 · 1938952 · OLAY REGENERIST 10 · aspects:Type, dims, weight
+- 075609217579 · 1966263 · OLAY EVERY NIGHT RETINOL · aspects:Type, dims, weight
+- 198715310078 · 2080840 · GIVE HUGZ 12" MANTA RAY · brand, images, aspects:Format|Movie/TV Title, dims, weight
+- 809407187846 · 1856859 · TRELLIS BATH MAT TAN · brand, aspects:Type|Color|Material|Brand, dims, weight
+- 843567166822 · 2009895 · SILK HOME VELVET OATMEAL · images, aspects:Type|Color, dims, weight
+- 762016474526 · 1354207 · WOOZOO 5 SPEED GLOBE FAN · aspects:Type, dims, weight
+- 688432821853 · 1600074 · TRIPLE HEAD LED · aspects:Type
+- 850026256277 · 1835870 · MAD HIPPIE VITAMIN C · images, aspects:Type, dims, weight
+- 810031067442 · 1851632 · WAVE MASTER BOAT · aspects:Type, dims, weight
+- 194735402472 · 1851637 · HOT WHEELS MONSTER TRUCK · dims, weight
+- 192897499255 · 1862027 · WHITE 12" HYDRANGEA · aspects:Product, dims, weight
+- 074108512062 · 1903630 · CONAIR PERFORMA DRYER · aspects:Type
+- 4050368901576 · 1939190 · DISNEY LORCANA PIXAR · brand, aspects:Game|Set, dims, weight
+- 8809454983189 · 1991789 · TYF RICE TINTED MINERAL · aspects:Type
+- 075609216732 · 1999423 · OLAY SUPER SERUM 8IN1 · aspects:Type, dims, weight
+- 192833352507 · 2016280 · YANKEE APOTHECARY 60OZ · aspects:Type, dims, weight
+- 850075780594 · 2060424 · BOKA ELA MINT WHITENING · aspects:Type, dims, weight
+- 499993602443 · 2074116 · BLUE PRINCESS 5/6 · brand, images, aspects:Brand|Material|Type, dims, weight
+- 499993602412 · 2074120 · GREEN WITCH 5/6 · brand, images, dims, weight
+- 190488000712 · 2080683 · ELROEL PANG PANG · brand, images, aspects:Brand|Type, dims, weight
+- 074108390905 · 2170516 · CONAIR HANDHELD STEAMER · aspects:Type
+- 850056802734 · 2789239 · JISULIFE NECK FAN 2PK · aspects:Type
+- 810080494435 · 1654502 · CARBON FIBER TREKKING · images, aspects:Sport/Activity, dims, weight
+- 820645013315 · 1781782 · CAROL'S DAUGHTER · brand, images, aspects:Author|Book Title|Language, dims, weight
+- 8809859321586 · 2016900 · PURCELL PIXCELL BIOM · aspects:Type, dims, weight
+- 041167412435 · 1481822 · ALLEGRA ALLERGY 180 MG · aspects:Dosage|Type|Expiration Date
+- 060258507232 · 1603325 · BRITA ELITE FILTER 4PK · aspects:Compatible Model
+- 850049867979 · 1806387 · SOL-R-BRITE SOLAR LIGHT · aspects:Type, dims, weight
+- 071249717899 · 2049636 · REVITALIFT TRIPLE POWER · brand, images, aspects:Brand|Type, dims, weight
+- 070074673066 · 1293571 · GLUCERNA STRAWBERRY NUTR · dims, weight
+- 499993948787 · 2010154 · PI RUNNER 24X72 WHITE · images, aspects:Type, dims, weight
+- 8809669502823 · 1761190 · DR. FORHAIR ANTI-THIN SH · images, aspects:Type, dims, weight
+- 4260747380308 · 1851648 · SPYRAGO WATER BLASTER · aspects:Type
+- 499994244963 · 1960345 · MYTAGALONGS TORONTO · images, aspects:Exterior Material|Style|Exterior Color|Department, dims, weight
+- 810080495593 · 1985289 · CMT PADDED STADIUM SEAT · dims, weight
+- 850059767665 · 1995727 · NELLO SUPERCALM · images, dims, weight
+- 061282553431 · 2622167 · TITAN 50 CAN COLLAPSIBLE · dims, weight
+- 191726728160 · 1601275 · MARVEL LICENSED COSTUME · dims, weight
+- 792882339025 · 1601410 · TEETOT PRINCESS FACTORY · images, dims, weight
+- 499993938672 · 2012350 · SUNGBOON COLLAGEN CREAM · aspects:Type, dims, weight
+- 843567174148 · 2021120 · ALISO SHEER CURTAINS 96" · brand, aspects:Brand|Type|Color, dims, weight
+- 847502003890 · 1055778 · INTEK SWAN LAMP W/2 USBS · aspects:Type
+- 745883745524 · 1068540 · WEMO MINI 2-PK SMART PLUG · aspects:Type
+- 017801722086 · 1358986 · FEIT 2PK OUTDOOR PLUG · aspects:Type
+- 857167006280 · 1374447 · ZIPFIZZ ENERGY DRINK · dims, weight
+- 810080493759 · 1425530 · PADDED STADIUM SEAT · aspects:Type|Item Length|Item Height|Item Width, dims, weight
+- 840010300048 · 1435543 · KODA 15" SLIM MOUNT CCT · aspects:Type
+- 817387026130 · 1691233 · PR HEATING PAD TAN · aspects:Type
+- 605592007996 · 1692422 · NEXXUS ADVANCED THERAPPE · aspects:Type, dims
+- 628319955660 · 1740589 · TITAN 40-CAN COOLER · aspects:Type, dims, weight
+- 195711113238 · 1778700 · KOHLER LAYNE QR ROUND · aspects:Type, dims, weight
+- 030878829847 · 1785039 · ENBRIGHTEN BUBBLE LIGHTS · aspects:Type, dims, weight
+- 801946644132 · 1796178 · EVERGREEN LED 3PK CUBES · aspects:Type, dims, weight
+- 783048324719 · 1796285 · PIPER B/O CURTAIN · aspects:Type|Color, dims, weight
+- 810156210471 · 1806321 · INFINITY X1 5000L · brand, images, aspects:Brand|Type, dims, weight
+- 8809936742013 · 1821473 · MEDIHEAL · brand, images, aspects:Brand|Type, dims, weight
+- 191726399476 · 1851483 · POKEMON FIGURINE 1.10TH · aspects:Type
+- 008965008901 · 1854295 · CAT BATTERY NECK LIGHT · aspects:Type, dims, weight
+- 840103215099 · 1875033 · ROC HYDRATE WATER CREAM · aspects:Type
+- 810009377771 · 1908209 · THINK BABY MINERAL SPF · images, aspects:Type, dims, weight
+- 605592009372 · 1913820 · NEXXUS COLOR ASSURE · aspects:Type
+- 810645039422 · 1929664 · 6' ORNAMENT BALL GARLAND · brand, aspects:Brand|Product, dims, weight
+- 4895213827454 · 1929682 · 12PK PLUSH ORNAMENT · brand, aspects:Brand|Type, dims, weight
+- 193052107930 · 1929716 · MINI BRANDS MINI VINYLS · aspects:Type
+- 8809676156972 · 1988969 · D'ALBA TRUFFLE SPRAY 2-PK · aspects:Type, dims, weight
+- 844040076874 · 2009175 · HIGHLAND TACTICAL EXPO · aspects:Type
+- 810156211515 · 2015637 · KC UNDERHOOD AUTOLIGHT · images, aspects:Type, dims, weight
+- 850024571709 · 2035819 · 18.21 MAN MADE BODY WASH · brand, images, aspects:Brand|Type, dims, weight
+- 499993633294 · 2068386 · COPPER FIT PRO BACK · images, aspects:Stove Type Compatibility, dims, weight
+- 810171721204 · 2070008 · NIGHT FACE WASH SHEETS · images, aspects:Type, dims, weight
+- 020424226817 · 2080827 · EMERGENCY SURVIVAL KIT · brand, aspects:Type|Brand, dims, weight
+- 810125973093 · 1967470 · LIQUID IV SUGAR FREE NRG · dims, weight
+- 846979042869 · 1806274 · ARTIKA HEMISPHERE BN · aspects:Type
+- 845473053029 · 1806398 · LUTEC SOLAR SECURITY · images, aspects:Type, dims, weight
+- 028332874021 · 1901552 · WASHLUXE DECO PILLOW · brand, images, aspects:Type|Brand, dims, weight
+- 850068674121 · 2011724 · NAUTILUS WEIGHTED VEST · dims, weight
+- 194735386536 · 1739952 · HOT WHEELS DUAL SCALE 2PK · dims, weight
+- 840147866196 · 1901740 · MESA XXL RECTANGLE WICKER · images, aspects:Type|Item Length|Item Height|Item Width, dims, weight
+- 8809730959839 · 2037431 · MA:NYO CLEANSING OIL 2PK · brand, aspects:Brand|Type, dims, weight
+- 822985552707 · 1937952 · ENERGETIC LIGHTING 14 IN · aspects:Type, dims, weight
+- 195711291912 · 1938012 · KOHLER 8L BATH CAN · aspects:Item Height|Item Length|Item Width|Type, dims, weight
+- 8809962542359 · 2012101 · ROUND LAB DOKDO CLEANSER · aspects:Type, dims, weight
+- 199124317900 · 2034983 · PEANUTS TOTE + TOWELS 1 · aspects:Type|Color|Material|Size, dims, weight
+- 810210624213 · 2074246 · DR.SQUATCH BAR SOAP · brand, aspects:Brand, dims, weight
+- 193052103055 · 1851471 · XSHOT MOTOR SOAKERS 2PK · images, aspects:Type|Color, dims, weight
+- 681421020220 · 681421 · DULCOLAX LAXATIVE TABLET · aspects:Dosage|Type|Expiration Date
+- 810042482555 · 2063496 · CORA BLADDER LINER 120CT · images, aspects:Type, dims, weight
+- 376660002983 · 2078565 · DOWNY UNLIMITED 2/21.1Z · images, aspects:Type, dims, weight
+- 022164379204 · 1796087 · TRESSA BLACKOUT CURTAIN · aspects:Type
+- 030878835152 · 1806369 · ULTRAPRO POWER STRIP · aspects:Type, dims, weight
+- 197381415131 · 2039734 · FRESNO STATE COOLER BAG · brand, aspects:Brand|Type, dims, weight
+- 499994134912 · 1943393 · COPPER FIT ELITE · images, aspects:Stove Type Compatibility, dims, weight
+- 850018808873 · 9669663 · BEURER BR90 BITE HEALER · aspects:Type|EPA Registration Number
+- 4897026912051 · 1193814 · DURACELL FLASHLIGHT 500LM · aspects:Type, dims, weight
+- 078300033202 · 1319053 · DIAPER GENIE CIRCLE-1080 · dims, weight
+- 499995988934 · 1654528 · DURACELL 2000L LANTERN · dims, weight
+- 193052059475 · 1742786 · BUNCH O BUBBLES BLASTER · aspects:Type
+- 193033762288 · 1908251 · 668 METAL SQUARE +1.50 · brand, images, aspects:Brand|Department|Frame Color|Type, dims, weight
+- 193033762295 · 1908252 · 668 METAL SQUARE +1.75 · brand, images, aspects:Brand|Department|Frame Color|Type, dims, weight
+- 193033762301 · 1908253 · 668 METAL SQUARE +2.00 · brand, images, aspects:Brand|Department|Frame Color|Type, dims, weight
+- 193033762318 · 1908254 · 668 METAL SQUARE +2.50 · brand, images, aspects:Brand, dims, weight
+- 193033762400 · 1908269 · 811 FASHION CATEYE +3.00 · brand, images, aspects:Brand|Department|Frame Color|Type, dims, weight
+- 193033762417 · 1908270 · 815 CLASSIC SQUARE +1.25 · brand, images, aspects:Brand|Department|Frame Color|Type, dims, weight
+- 193033762424 · 1908271 · 815 CLASSIC SQUARE +1.50 · brand, images, aspects:Brand|Department|Frame Color|Type, dims, weight
+- 193033762431 · 1908272 · 815 CLASSIC SQUARE +1.75 · brand, images, aspects:Brand|Department|Frame Color|Type, dims, weight
+- 193033762523 · 1908281 · 809 CLASSIC ROUND +2.50 · brand, images, aspects:Brand|Department|Frame Color|Type, dims, weight
+- 193033762592 · 1908288 · 666 CLSS RECTANGLE +2.50 · brand, images, aspects:Brand|Department|Frame Color|Type, dims, weight
+- 193033765333 · 1919226 · 5015886-200.CSC · brand, images, aspects:Brand|Type, dims, weight
+- 193033765432 · 1919236 · 5015887-300.CSC · brand, images, aspects:Brand|Type, dims, weight
+- 193033765579 · 1919251 · 5015889-300.CSC · brand, images, aspects:Brand|Type, dims, weight
+- 681147129993 · 1929762 · HEX BOT WALL CRAWLING · brand, images, dims, weight
+- 855267008388 · 1938489 · BELLEVUE EMBOSSED 12OZ · aspects:Type
+- 198654180169 · 2015869 · HUNTER INTREPID GLOVES · brand, aspects:Brand|Type, dims, weight
+- 193033827185 · 2027845 · 669 UPSWEEP +1.25 · brand, images, aspects:Brand|Department|Frame Color|Type, dims, weight
+- 193033827239 · 2027853 · 669 UPSWEEP +3.00 · brand, images, aspects:Brand|Type, dims, weight
+- 855267008487 · 2028273 · BELLEVUE 11OZ CANDLES 4PK · aspects:Type
+- 754502056439 · 2063352 · COPPER FIT INSOLES 2PK · aspects:Color|Department|Type, dims, weight
+- 193033460665 · 1618384 · FGX MCKAY +3.00 2PK · brand, images, aspects:Brand, dims, weight
+- 810042481725 · 1665377 · CORA ORG LINER- 160CT · images, aspects:Type, dims, weight
+- 197424179020 · 1901759 · MIKASA CANDLE WARMER PLUG · aspects:Type, dims, weight
+- 602870201008 · 1901861 · WATER HYACINTH BASKET · brand, aspects:Brand|Item Height|Item Length|Item Width|Type, dims, weight
+- 887853006119 · 1999233 · SCEPTER 5 GAL GAS CAN · dims, weight
+- 737839592290 · 1397108 · GREENMADE INSTAVIEW 3PK · aspects:Item Height|Item Length|Item Width|Type, dims, weight
+- 196633942418 · 713160 · KS YELLOW MICROFIBER 36PK · images, aspects:Type, dims, weight
+- 193033393307 · 1504933 · FGX DAX +1.75 PLASTIC · brand, images, aspects:Sport, dims, weight
+- 193033460399 · 1618385 · FGX LYDEN +1.25 MENS 3PK · aspects:Department|Frame Color|Type, dims, weight
+- 193033460436 · 1618389 · FGX LYDEN +2.50 MENS 3PK · aspects:Department|Frame Color|Type, dims, weight
+- 827854003670 · 1689295 · COLGATE TOTAL TBRUSH · aspects:Type
+- 197424242618 · 1934151 · MIKASA KEEPSAKE FRAMES · aspects:Item Height|Item Length|Item Width|Type, dims, weight
+- 638060657713 · 1370476 · 3M Command Products · aspects:Type
+- 076308422509 · 1781495 · 3M MEDIUM DESIGNER HOOK · aspects:Type, dims, weight
+- 646760291861 · 1796329 · NOODLE JACQUARD BATH RUG · aspects:Type|Color|Material, dims, weight
+- 068060268648 · 1944870 · 3M COMMAND CLEAR WIRE · aspects:Type, dims, weight
+- 810080493155 · 1654567 · CMT HEAT PRO TOE WARMERS · aspects:Type
+- 017801722871 · 1718603 · FEIT 3-OUTLET OUTDOOR · aspects:Type
+- 827854023074 · 1797240 · TOM'S OF MAINE TPST · aspects:Type, dims, weight
+- 068060335432 · 2040218 · COMMAND BACK TO SCHOOL · aspects:Type
+- 040773110278 · 1732950 · MICROPOLY BMAT BLUE/GREEN · images, aspects:Type|Color|Material, dims, weight
+- 086093172312 · 1796316 · MOHAWK KITCHEN MAT · aspects:Type, dims, weight
+- 718976070599 · 1811557 · HEAD MEN'S RUNNING SM · dims, weight
+- 023185000245 · 1930184 · WIPE N CLEAR LENS WIPES · aspects:Type
+- 037700382860 · 519964 · CHINET CUT CRYSTAL CUPS · aspects:Type
+- 079238003053 · 1426555 · 19" MICHELIN HYBRID BLADE · images, dims, weight
+- 079238003077 · 1426563 · 21" MICHELIN HYBRID BLADE · images, dims, weight
+- 079238003084 · 1426568 · 22" MICHELIN HYBRID BLADE · images, dims, weight
+- 079238003107 · 1426573 · 26" MICHELIN HYBRID BLADE · images, dims, weight
+- 810016855422 · 1806244 · WRAP-IT STORAGE PACK 24PC · aspects:Type
+- 810170140099 · 1896208 · Q-TIPS CTN.SWABS - 1875CT · aspects:Type
+- 047218435859 · 2054962 · PENGUIN + G BREAD PILLOW · brand, images, aspects:Type|Brand, dims, weight
+- 737839850079 · 7181000 · GREENMADE MINI BIN 10 PK · aspects:Item Height|Item Length|Item Width|Type, dims, weight
+- 096619042319 · 1418060 · KS CONDITIONER 33.8 FL OZ · aspects:Type, dims
+- 737839826487 · 1975791 · INSTAVIEW 13QT BIN 4PK · dims, weight
+- 196633795403 · 175504 · KS WIRE EDGE RIBBON · aspects:Type, dims, weight
+- 850045609658 · 2069312 · ORG MASA FLOURS 3/1# · brand, images, aspects:Type|Brand, dims, weight
+- 884389199971 · 667196 · CURAD ALCOHOL PREP PADS · aspects:Type
+
+## Costco-internal 4999 codes (24)
+- 499993873522 · item 2027861 · Puma PUMA UNLIMITED BACKPACK · mfr UPC: not found · via ebay · gaps: aspects:Color|Department|Material|Style, dims, weight
+- 499993873539 · item 2027860 · Puma PUMA UNLIMITED BACKPACK · mfr UPC: not found · via ebay · gaps: aspects:Color|Department|Material|Style, dims, weight
+- 499995353916 · item 2354207 · Woozoo WOOZOO OSCILLATING GLOBE · mfr UPC: not found · via ebay · gaps: dims, weight
+- 499994560896 · item 4333009 · Sharper Image SHARPER IMAGE HOT/COLD · mfr UPC: not found · via ebay · gaps: images, aspects:Type, dims, weight
+- 499997403619 · item 1476815 · Kohler KOHLER PUREWASH MANUAL · mfr UPC: not found · via costco · gaps: dims, weight
+- 499995127944 · item 1583883 · Sharper Image SHARPER IMAGE COMPACT · mfr UPC: not found · via ebay · gaps: images, aspects:Type, dims, weight
+- 499993770722 · item 2042991 · Clevermade CLEVERMADE LAUNDRY HAULER · mfr UPC: not found · via ebay · gaps: aspects:Type, dims, weight
+- 499993717482 · item 1000190 ·  STANDBY SHOE BOX 4PK · mfr UPC: not found · via ebay · gaps: brand, images, aspects:Brand|Item Height|Item Length|Item Width|Type, dims, weight
+- 499994004437 · item 1998770 · Jolie JOLIE FILTERED SHOWER MB · mfr UPC: not found · via ebay · gaps: images, dims, weight
+- 499994339157 · item 1940218 · Sharper Image SHARPER IMAGE HOT/COLD · mfr UPC: not found · via ebay · gaps: images, aspects:Type, dims, weight
+- 499997957310 · item 3333009 · Sharper Image SHARPER IMAGE HOT/COLD · mfr UPC: not found · via ebay · gaps: images, aspects:Type, dims, weight
+- 499994896360 · item 1851439 · Disney REAL FX DISNEY STITCH · mfr UPC: not found · via ebay · gaps: dims, weight
+- 499994520326 · item 1913662 · 32 Degrees HEATED VEST MEDIUM · mfr UPC: not found · via ebay · gaps: aspects:Size Type|Size|Type|Style|Outer Shell Material|Department|Color, dims, weight
+- 499993648168 · item 2065561 ·  KENSINGTON WEAVE BLK 2PK · mfr UPC: not found · via ebay · gaps: brand, images, aspects:Brand|Color|Material, dims, weight
+- 499993513480 · item 2087931 · Delsey DELSEY EVERYDAY TOTE · mfr UPC: not found · via ebay · gaps: dims, weight
+- 499993513473 · item 2087932 · Delsey DELSEY EVERYDAY TOTE · mfr UPC: not found · via ebay · gaps: dims, weight
+- 499993602443 · item 2074116 ·  BLUE PRINCESS 5/6 · mfr UPC: not found · via ebay · gaps: brand, images, aspects:Brand|Material|Type, dims, weight
+- 499993602412 · item 2074120 ·  GREEN WITCH 5/6 · mfr UPC: not found · via ebay · gaps: brand, images, dims, weight
+- 499993948787 · item 2010154 · Purely Indulgent PI RUNNER 24X72 WHITE · mfr UPC: not found · via ebay · gaps: images, aspects:Type, dims, weight
+- 499994244963 · item 1960345 · Mytagalongs MYTAGALONGS TORONTO · mfr UPC: not found · via ebay · gaps: images, aspects:Exterior Material|Style|Exterior Color|Department, dims, weight
+- 499993938672 · item 2012350 · Sungboon Editor SUNGBOON COLLAGEN CREAM · mfr UPC: not found · via ebay · gaps: aspects:Type, dims, weight
+- 499993633294 · item 2068386 · Copper Fit COPPER FIT PRO BACK · mfr UPC: not found · via ebay · gaps: images, aspects:Stove Type Compatibility, dims, weight
+- 499994134912 · item 1943393 · Copper Fit COPPER FIT ELITE · mfr UPC: not found · via ebay · gaps: images, aspects:Stove Type Compatibility, dims, weight
+- 499995988934 · item 1654528 · Duracell DURACELL 2000L LANTERN · mfr UPC: not found · via ebay · gaps: dims, weight

@@ -138,20 +138,35 @@ export function HomePage({ displayName, email, deskAccess, pulse, client, access
         <>
           <div className="desk-attention">
             <button type="button" onClick={() => onOpen({ page: 'orders' })}>
+              <span>Verify weight</span>
+              <strong>{pulse.verifyWeight == null ? '…' : pulse.verifyWeight}</strong>
+            </button>
+            <button type="button" onClick={() => onOpen({ page: 'orders' })}>
               <span>To ship</span>
               <strong>{pulse.toShip == null ? '…' : pulse.toShip}</strong>
             </button>
           </div>
-          {pulse.toShip != null && pulse.toShip > 0 && (
+          {((pulse.verifyWeight || 0) + (pulse.toShip || 0)) > 0 && (
             <section className="desk-staff-needs">
               <h2>Needs you</h2>
-              <div className="desk-need">
-                <div>
-                  <strong>{pulse.toShip} order{pulse.toShip === 1 ? '' : 's'} to ship</strong>
-                  <span>Pick, label, and mark packaged</span>
+              {(pulse.verifyWeight || 0) > 0 && (
+                <div className="desk-need">
+                  <div>
+                    <strong>{pulse.verifyWeight} order{pulse.verifyWeight === 1 ? '' : 's'} need weight</strong>
+                    <span>Confirm unpacked item weight</span>
+                  </div>
+                  <button type="button" onClick={() => onOpen({ page: 'orders' })}>Open orders</button>
                 </div>
-                <button type="button" onClick={() => onOpen({ page: 'orders' })}>Open orders</button>
-              </div>
+              )}
+              {(pulse.toShip || 0) > 0 && (
+                <div className="desk-need">
+                  <div>
+                    <strong>{pulse.toShip} order{pulse.toShip === 1 ? '' : 's'} to ship</strong>
+                    <span>Pick, label, and mark packaged</span>
+                  </div>
+                  <button type="button" onClick={() => onOpen({ page: 'orders' })}>Open orders</button>
+                </div>
+              )}
             </section>
           )}
           <div className="desk-grid is-associate">
@@ -199,11 +214,13 @@ function AdminHome({
   const owed = desk?.owed || [];
   const owedTotal = owed.reduce((n, row) => n + row.cents, 0);
   const needs: { title: string; note: string; action: string; patch: Partial<NavState> }[] = [];
+  const verify = pulse.verifyWeight || 0;
   const labels = pulse.needsLabel || 0;
   const issues = pulse.listingIssues || 0;
   const missing = desk?.missingCost || 0;
   const untracked = desk?.returnsUntracked || 0;
   const bookCount = desk?.booksIssues?.count || 0;
+  if (verify > 0) needs.push({ title: `${verify} order${verify === 1 ? '' : 's'} need${verify === 1 ? 's' : ''} a weight check`, note: 'Confirm unpacked item weight before labels', action: 'Open orders', patch: { page: 'orders' } });
   if (labels > 0) needs.push({ title: `${labels} order${labels === 1 ? '' : 's'} need${labels === 1 ? 's' : ''} a label`, note: 'Buy or upload labels before they ship late', action: 'Open orders', patch: { page: 'orders' } });
   if (issues > 0) needs.push({ title: `${issues} listing issue${issues === 1 ? '' : 's'}`, note: 'Items that failed to list or sync', action: 'Review', patch: { page: 'inventory', inventoryTab: 'in-stock' } });
   if (missing > 0) needs.push({ title: `${missing} item${missing === 1 ? '' : 's'} missing cost`, note: 'No payout is calculated until cost is entered', action: 'Add costs', patch: { page: 'inventory', inventoryTab: 'unfinished', attentionSection: 'missing-cost' } });
@@ -217,6 +234,10 @@ function AdminHome({
           <span>Sales today</span>
           <strong>{pulse.salesCents == null ? '…' : money(pulse.salesCents)}</strong>
           <small>{pulse.salesToday == null ? '' : `${pulse.salesToday} sale${pulse.salesToday === 1 ? '' : 's'}`}</small>
+        </div>
+        <div className={(pulse.verifyWeight || 0) > 0 ? 'is-alert' : ''}>
+          <span>Verify weight</span>
+          <strong>{pulse.verifyWeight == null ? '…' : pulse.verifyWeight}</strong>
         </div>
         <div>
           <span>To ship</span>
