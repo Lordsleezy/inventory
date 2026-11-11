@@ -87,6 +87,10 @@ async function combinedStoredBox(sb, storeId, order) {
 function eligibility(order, { allowShippedWithLabel = false } = {}) {
   if (!order || order.fulfillment !== "ship" || order.status !== "paid") return "Not a paid shipping order.";
   if (order.refund_requested_at) return "Order is being canceled.";
+  // Verify Weight stage must finish before buy_label (admin can call portal_verify_order_weight first).
+  if (!order.weight_verified_at) {
+    return "Verify the item weight before buying a label.";
+  }
   if (String(order.channel || "").toLowerCase() === "ebay") {
     return "Buy this label in eBay, then upload the PDF on the order.";
   }

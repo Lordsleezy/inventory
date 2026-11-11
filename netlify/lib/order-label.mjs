@@ -156,6 +156,10 @@ export async function attachUploadedLabel(sb, storeId, order, file, deps = {}) {
   if (order.status !== "paid" || order.fulfillment !== "ship") {
     return { ok: false, status: 400, error: "This order is not waiting to ship." };
   }
+  // Verify Weight stage must finish before attach_label (call portal_verify_order_weight first).
+  if (!order.weight_verified_at) {
+    return { ok: false, status: 400, error: "Verify the item weight before uploading a label." };
+  }
   const bytes = Buffer.isBuffer(file?.bytes) ? file.bytes : Buffer.from(file?.bytes || []);
   if (!bytes.length) return { ok: false, status: 400, error: "Choose a PDF or a screenshot." };
   if (bytes.length > MAX_BYTES) return { ok: false, status: 400, error: "Label file is over 8 MB." };

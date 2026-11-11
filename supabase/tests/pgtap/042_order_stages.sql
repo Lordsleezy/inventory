@@ -1,6 +1,6 @@
 -- Packaged stage, Depop order id, and no label expense on a manual Depop sale.
 begin;
-select plan(13);
+select plan(14);
 set constraints all immediate;
 
 do $$
@@ -66,6 +66,10 @@ update public.web_orders
   where sku = '97021';
 
 select set_config('request.jwt.claim.sub', current_setting('test.jacob'), true);
+select lives_ok(
+  $q$select public.portal_verify_order_weight((select id from public.web_orders where sku = '97021'), 1.5, false)$q$,
+  'clerk verifies weight before packaging'
+);
 select lives_ok(
   $q$select public.portal_mark_order_packaged((select id from public.web_orders where sku = '97021'))$q$,
   'clerk can mark the order packaged'

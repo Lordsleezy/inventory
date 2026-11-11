@@ -1,6 +1,7 @@
 -- Needs label orders are visible to an owner and hidden from a clerk.
+-- Before weight verify, clerks still see the order under Verify weight.
 begin;
-select plan(4);
+select plan(5);
 set constraints all immediate;
 
 do $$
@@ -39,16 +40,20 @@ select ok(
     select 1 from jsonb_array_elements(public.portal_web_orders(30)) o
     where o->>'sku' = '97022'
   ),
-  'admin order list includes Needs label'
+  'admin order list includes the order'
 );
 
 select set_config('request.jwt.claim.sub', current_setting('test.jacob'), true);
+select lives_ok(
+  $q$select public.portal_verify_order_weight((select id from public.web_orders where sku = '97022'), 1.25, false)$q$,
+  'clerk verifies weight first'
+);
 select ok(
   not exists (
     select 1 from jsonb_array_elements(public.portal_web_orders(30)) o
     where o->>'sku' = '97022'
   ),
-  'clerk order list hides Needs label'
+  'clerk order list hides Needs label after weight verify'
 );
 
 update public.web_orders

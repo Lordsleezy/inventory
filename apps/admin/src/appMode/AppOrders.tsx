@@ -35,7 +35,7 @@ import {
   suggestBundleGroups,
 } from '../orderShipments';
 
-type Seg = 'needsLabel' | 'toShip' | 'packaged' | 'shipped' | 'delivered' | 'canceled';
+type Seg = 'verifyWeight' | 'needsLabel' | 'toShip' | 'packaged' | 'shipped' | 'delivered' | 'canceled';
 
 const CHANNEL: Record<string, string> = {
   website: 'Website', ebay: 'eBay', amazon: 'Amazon', tiktok: 'TikTok', depop: 'Depop', mercari: 'Mercari',
@@ -57,7 +57,7 @@ type Props = {
 type TrackEvent = { status?: string; status_detail?: string | null; location?: string | null; occurred_at?: string | null };
 
 export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin = false, seeTracking = false, refreshKey = 0, onPullReady }: Props) {
-  const [seg, setSeg] = useState<Seg>('toShip');
+  const [seg, setSeg] = useState<Seg>('verifyWeight');
   const [shipTarget, setShipTarget] = useState<WebOrder | null>(null);
   const [scanOut, setScanOut] = useState(false);
   const [orders, setOrders] = useState<WebOrder[] | null>(null);
@@ -159,6 +159,7 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
     const list = orders || [];
     const put = (stage: OrderStage) => list.filter((o) => orderStage(o) === stage);
     return {
+      verifyWeight: put('verifyWeight'),
       needsLabel: put('needsLabel'),
       toShip: put('toShip'),
       packaged: put('packaged'),
@@ -175,9 +176,9 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
   }), [bundleLinks, bundleSplits, bundleRates]);
 
   const shipmentBuckets = useMemo(() => {
-    const groupSegs: Seg[] = ['needsLabel', 'toShip', 'packaged'];
+    const groupSegs: Seg[] = ['verifyWeight', 'needsLabel', 'toShip', 'packaged'];
     const out: Record<Seg, ShipmentView[]> = {
-      needsLabel: [], toShip: [], packaged: [], shipped: [], delivered: [], canceled: [],
+      verifyWeight: [], needsLabel: [], toShip: [], packaged: [], shipped: [], delivered: [], canceled: [],
     };
     for (const key of Object.keys(buckets) as Seg[]) {
       const lines = buckets[key];
@@ -319,6 +320,21 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
       if (e) {
         throw new Error(e.message === 'pack_proof_required'
           ? 'Upload a pack photo of the unit before marking it packaged.'
+          : e.message === 'weight_required'
+            ? 'Verify the item weight before packaging.'
+            : e.message);
+      }
+    });
+  }
+
+  async function verifyOrderWeight(o: WebOrder, weightLb: number, confirmed = false) {
+    await runAction('weight', async () => {
+      const { error: e } = await client.rpc('portal_verify_order_weight', {
+        p_order: o.id, p_weight_lb: weightLb, p_confirmed: confirmed,
+      });
+      if (e) {
+        throw new Error(e.message === 'invalid_weight'
+          ? 'Enter a weight greater than 0 and under 200 lb.'
           : e.message);
       }
     });
@@ -720,6 +736,7 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
         onSetLocation={(code) => void setPickLocation(open, code)}
         onPrintLabel={(dl) => void printLabel(open, dl)}
         onMarkPackaged={() => void markPackaged(open)}
+        onVerifyWeight={(lb, confirmed) => void verifyOrderWeight(open, lb, confirmed)}
         onMarkShipped={(barcode, reason) => markShipped(open, barcode, reason)}
         showTracking={seeTracking}
         onMarkDelivered={() => void markDelivered(open)}
@@ -762,6 +779,7 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
       <p className="orders-screen-eyebrow">Orders · {SEG_SHORT[seg]}</p>
       <div className="app-segment app-segment-scroll orders-segment" role="tablist" ref={tabRowRef}>
         {((isAdmin ? [
+          ['verifyWeight', 'Verify weight', shipmentBuckets.verifyWeight.length],
           ['needsLabel', 'Needs label', shipmentBuckets.needsLabel.length],
           ['toShip', 'To ship', shipmentBuckets.toShip.length],
           ['packaged', 'Packaged', shipmentBuckets.packaged.length],
@@ -769,6 +787,7 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
           ['delivered', 'Delivered', buckets.delivered.length],
           ['canceled', 'Canceled', buckets.canceled.length],
         ] : [
+          ['verifyWeight', 'Verify weight', shipmentBuckets.verifyWeight.length],
           ['toShip', 'To ship', shipmentBuckets.toShip.length],
           ['packaged', 'Packaged', shipmentBuckets.packaged.length],
         ]) as [Seg, string, number][]).map(([id, label, n]) => (

@@ -14,6 +14,9 @@ test('B-Stock fixture preserves every line, text UPCs, cents, and CSV escapes', 
   assert.equal(lines.reduce((sum, line) => sum + line.qty, 0), 15);
   assert.equal(lines[0].unit_retail_cents, 4999);
   assert.equal(lines[0].tcin, '94688426');
+  assert.equal(lines[0].item_number, 'LPLA898718');
+  assert.equal(lines[0].category, 'MIXED_HOME_AND_GARDEN');
+  assert.equal(lines[0].seller_category, 'HEARTH AND HAND');
   assert.equal(lines[0].pallet_id, 'PTBP40668');
   assert.equal(lines[0].lot_id, 'irc_mixed_20261007_067_p');
   assert.equal(lines[2].upc_raw, '096801681609');
@@ -39,6 +42,33 @@ test('normalization preserves significant leading zeros and Target 49 stickers',
   assert.equal(normalizeManifestUpc('491234567890'), '491234567890');
   assert.equal(normalizeManifestUpc('199268613418'), '199268613418');
   assert.equal(normalizeManifestUpc('1.99268613418e11'), '');
+});
+
+test('trailing-comma UPC cells normalize to digits (B-Stock quote quirk)', () => {
+  assert.equal(normalizeManifestUpc('041333051543,'), '041333051543');
+  assert.equal(normalizeManifestUpc('"041333051543,"'.replaceAll('"', '')), '041333051543');
+  const lines = parseManifestLines('UPC,Qty,Unit Retail,Condition\n"041333051543,",1,12.99,USED_GOOD');
+  assert.equal(lines[0].upc_normalized, '041333051543');
+  assert.equal(lines[0].upc_raw, '041333051543,');
+});
+
+test('Item # maps into tcin when TCIN is absent; identity columns are captured', () => {
+  const lines = parseManifestLines(
+    'Item #,Seller Category,Item Description,Qty,Unit Retail,Brand,UPC,Category,Condition\n'
+    + '1789654,ELECTRONICS,Costco Speaker Kit,2,89.99,Bose,041333051543,SPEAKERS,USED_GOOD\n',
+  );
+  assert.equal(lines[0].tcin, '1789654');
+  assert.equal(lines[0].item_number, '1789654');
+  assert.equal(lines[0].brand, 'Bose');
+  assert.equal(lines[0].description, 'Costco Speaker Kit');
+  assert.equal(lines[0].category, 'SPEAKERS');
+  assert.equal(lines[0].seller_category, 'ELECTRONICS');
+});
+
+test('trailing empty cells do not fail column-count checks', () => {
+  const lines = parseManifestLines('UPC,Qty,Unit Retail,Condition\n096801681609,1,20.00,NEW,,\n');
+  assert.equal(lines.length, 1);
+  assert.equal(lines[0].upc_normalized, '096801681609');
 });
 
 test('defect warnings describe all-defective and mixed-condition quantities', () => {

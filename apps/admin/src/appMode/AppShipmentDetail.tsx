@@ -4,7 +4,7 @@ import { displayOrderTitle } from '../orderDisplay';
 import { locationParts } from '../locationOrder';
 import { locationMenuLabel, type LocationChoice } from '../locationPlace';
 import {
-  hasLabel, orderCanMarkPackaged, orderCanStepBack, orderNeedsLabel, orderStage,
+  hasLabel, orderCanMarkPackaged, orderCanStepBack, orderNeedsLabel, orderNeedsWeightVerify, orderStage,
   carrierTrackUrl, type OrderStage,
 } from '../orderStage';
 import { listThumbPhoto, type UnitPhoto } from '../unitPhotos';
@@ -114,6 +114,9 @@ export function AppShipmentDetail(props: AppShipmentDetailProps) {
 
   const dock = (() => {
     if (!paid || !ship || stage === 'canceled' || stage === 'delivered') return null;
+    if (stage === 'verifyWeight' || shipment.items.some((o) => orderNeedsWeightVerify(o))) {
+      return null;
+    }
     if (orderNeedsLabel(lead) && isAdmin) {
       return { kicker: 'Next step', label: 'Upload label', action: onUploadLabel, primary: 'Upload label' };
     }

@@ -58,6 +58,8 @@
     "listing-manager-background",
     "loyalty-email",
     "loyalty-web",
+    "manifest-prewarm",
+    "manifest-prewarm-background",
     "marketplace-daily-report",
     "marketplace-email",
     "marketplace-prices",

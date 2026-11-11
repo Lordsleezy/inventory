@@ -313,3 +313,74 @@ html.app-mode .receive-app-nav button.is-dim { opacity: 1; color: #9a9a9a; }
 .rcv-scan-next { width: 100%; min-height: 44px; margin-top: 8px; background: transparent; color: #fff; border: 1px solid #fff; border-radius: 10px; }
 .receive-v2-dims { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 .receive-quantity, .channel-picker { border: 0; background: transparent; padding: 0; margin: 0; min-width: 0; }
+
+/* Manifest identity search — plain black/white, phone-sized tap targets. */
+.manifest-search-box {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  min-width: min(100%, 280px);
+  margin-top: 10px;
+}
+.manifest-search-label {
+  display: grid;
+  gap: 6px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #fff;
+}
+.manifest-search-label input {
+  min-height: 48px;
+  width: 100%;
+  font-size: 16px;
+  padding: 12px 14px;
+  border: 1px solid #fff;
+  border-radius: 0;
+  background: #000;
+  color: #fff;
+}
+.manifest-search-status { color: #9a9a9a; }
+.manifest-search-attention { color: #ff4d4d; font-weight: 700; }
+.manifest-search-results {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+  max-height: 280px;
+  overflow: auto;
+}
+.manifest-search-result {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  text-align: left;
+  min-height: 56px;
+  padding: 12px 14px;
+  border: 1px solid #fff;
+  border-radius: 0;
+  background: #000;
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+.manifest-search-result strong { font-weight: 700; color: #fff; }
+.manifest-search-result span { color: #9a9a9a; font-size: 0.85rem; }
+.manifest-receive-identity {
+  display: block;
+  color: #fff;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+html:not(.app-mode) .manifest-search-label,
+html:not(.app-mode) .manifest-search-label input,
+html:not(.app-mode) .manifest-search-result,
+html:not(.app-mode) .manifest-search-result strong,
+html:not(.app-mode) .manifest-receive-identity {
+  color: #111;
+}
+html:not(.app-mode) .manifest-search-label input,
+html:not(.app-mode) .manifest-search-result {
+  background: #fff;
+  border-color: #111;
+}

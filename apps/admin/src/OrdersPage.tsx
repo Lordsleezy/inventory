@@ -12,7 +12,10 @@ import { hydratePhotoUrlCache, listThumbOriginalPaths, listThumbPhoto, loadUnitP
 import { errText } from './errText';
 import { fileToBase64, labelFileUrl, orderAdmin } from './orderLabel';
 import { openShippingLabel } from './labelPrint';
-import { canBuyLabel, hasLabel, orderCanStepBack, orderChip, orderNeedsLabel, orderStage, orderTimeline, packagedStale, shippedStale } from './orderStage';
+import {
+  canBuyLabel, hasLabel, onFileWeightLb, orderCanStepBack, orderChip, orderNeedsLabel,
+  orderStage, orderTimeline, packagedStale, shippedStale, weightChanged,
+} from './orderStage';
 import { loadOrderLocations, locationCompare } from './locationOrder';
 import { sortLocationChoices, type LocationChoice } from './locationPlace';
 import { useVisibleInterval } from './useVisibleInterval';
@@ -60,7 +63,15 @@ export type WebOrder = {
   pack_proof_at?: string | null;
   refund_requested_at: string | null; cancel_source: string | null; cancel_reason: string | null; canceled_at: string | null;
   shipping_rate: { source?: string; days?: number | null } | null;
-  package: { length_in: number | null; width_in: number | null; height_in: number | null; weight_lb: number | null };
+  package: {
+    length_in: number | null; width_in: number | null; height_in: number | null; weight_lb: number | null;
+    product_weight_lb?: number | null;
+  };
+  weight_verified_at?: string | null;
+  weight_verified_by?: string | null;
+  weight_verified_by_name?: string | null;
+  weight_on_file_lb?: number | null;
+  weight_verified_lb?: number | null;
   match_status?: string | null;
   marketplace_title?: string | null;
   marketplace_fee_cents?: number | null;
@@ -81,7 +92,7 @@ type Props = {
   frozenOnlineRates?: Map<string, { paulPct: number; jacobPct: number }>;
   personName: (id: string) => string; busy: boolean;
   onCommissionChanged: (ticketKey: string, next: CommissionOverride | null) => void;
-  /** Staff desk: To ship and Packaged only. Mark packaged, print a label, scan out. */
+  /** Staff desk: Verify weight, To ship, Packaged. Mark packaged, print a label, scan out. */
   packOnly?: boolean;
 };
 
@@ -104,11 +115,12 @@ function otherStores(o: WebOrder) {
   return listed.filter((c) => c !== self && c !== 'website' && c !== 'ebay');
 }
 
-type OrderView = 'all' | 'needsLabel' | 'toShip' | 'packaged' | 'shipped' | 'delivered' | 'canceled';
+type OrderView = 'all' | 'verifyWeight' | 'needsLabel' | 'toShip' | 'packaged' | 'shipped' | 'delivered' | 'canceled';
 type StatusFilter = 'all' | 'paid' | 'canceled' | 'refunded';
 
 const VIEW_LABEL: Record<OrderView, string> = {
   all: 'All orders',
+  verifyWeight: 'Verify weight',
   needsLabel: 'Needs label',
   toShip: 'To ship',
   packaged: 'Packaged',
@@ -165,7 +177,8 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
   const [trackingPick, setTrackingPick] = useState<{ orderId: string; candidates: NonNullable<LabelUploadResponse['tracking_candidates']> } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
-  const [view, setView] = useState<OrderView>(packOnly ? 'toShip' : 'all');
+  const [view, setView] = useState<OrderView>(packOnly ? 'verifyWeight' : 'all');
+  const [weightDrafts, setWeightDrafts] = useState<Record<string, string>>({});
   const [openId, setOpenId] = useState<string | null>(null);
   const [revealed, setRevealed] = useState<Set<string>>(() => new Set());
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
@@ -204,10 +217,35 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
   }, [client, storeId]);
   const sign = useCallback((paths: string[]) => signPhotoUrls(client, paths), [client]);
   useEffect(() => {
-    if (packOnly && view !== 'toShip' && view !== 'packaged') setView('toShip');
+    if (packOnly && view !== 'verifyWeight' && view !== 'toShip' && view !== 'packaged') setView('verifyWeight');
   }, [packOnly, view]);
   useVisibleInterval(load, 60_000);
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 30000); return () => clearInterval(t); }, []);
+
+  async function verifyWeight(o: WebOrder, confirmed = false, overrideLb?: number) {
+    const onFile = onFileWeightLb(o);
+    const lb = overrideLb != null
+      ? Number(overrideLb)
+      : Number(String(weightDrafts[o.id] ?? (onFile != null ? String(onFile) : '')).trim());
+    if (!Number.isFinite(lb) || lb <= 0 || lb >= 200) {
+      setError('Enter the unpacked item weight in pounds (greater than 0, under 200).');
+      return;
+    }
+    setBusy(o.id + 'weight'); setError('');
+    const { error: e } = await client.rpc('portal_verify_order_weight', {
+      p_order: o.id, p_weight_lb: lb, p_confirmed: confirmed,
+    });
+    if (e) setError(e.message);
+    else {
+      setWeightDrafts((prev) => {
+        const next = { ...prev };
+        delete next[o.id];
+        return next;
+      });
+      await load();
+    }
+    setBusy(null);
+  }
 
   async function markPackaged(o: WebOrder) {
     const ch = (o.channel || '').toLowerCase();
@@ -451,6 +489,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
       : list.filter(o => o.status === statusFilter);
     const next = {
       all: byStatus,
+      verifyWeight: byStatus.filter(o => orderStage(o) === 'verifyWeight'),
       needsLabel: byStatus.filter(o => orderStage(o) === 'needsLabel'),
       toShip: byStatus.filter(o => orderStage(o) === 'toShip'),
       packaged: byStatus.filter(o => orderStage(o) === 'packaged'),
@@ -464,6 +503,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
       groups: next,
       shipmentCounts: {
         all: next.all.length,
+        verifyWeight: listShipments(next.verifyWeight, opts).length,
         needsLabel: listShipments(next.needsLabel, opts).length,
         toShip: listShipments(next.toShip, opts).length,
         packaged: listShipments(next.packaged, opts).length,
@@ -476,7 +516,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
 
   type DeskShipment = { id: string; bundled: boolean; itemCount: number; items: WebOrder[]; lead: WebOrder };
   const activeShipments = useMemo((): DeskShipment[] => {
-    if (view !== 'needsLabel' && view !== 'toShip' && view !== 'packaged') {
+    if (view !== 'verifyWeight' && view !== 'needsLabel' && view !== 'toShip' && view !== 'packaged') {
       return groups[view].map((o) => ({ id: o.id, bundled: false, itemCount: 1, items: [o], lead: o }));
     }
     const ships = listShipments(groups[view], { links: bundleLinks, splitIds: bundleSplits }) as DeskShipment[];
@@ -580,6 +620,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
     const stage = orderStage(o);
     const chip = orderChip(o);
     const isCanceled = stage === 'canceled';
+    const isVerify = stage === 'verifyWeight';
     const isNeeds = stage === 'needsLabel';
     const isToShip = stage === 'toShip';
     const isPackaged = stage === 'packaged';
@@ -589,6 +630,9 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
     const labeled = hasLabel(o);
     const buy = canBuyLabel(o.channel);
     const cardStatus = chip.text;
+    const onFileLb = onFileWeightLb(o);
+    const weightValue = weightDrafts[o.id] ?? (onFileLb != null ? String(onFileLb) : '');
+    const changed = weightChanged(o);
     const bundleShip = activeShipments.find((ship) => ship.bundled && ship.items.some((row) => row.id === o.id));
     const displayTitle = bundleShip
       ? `${bundleShip.itemCount} items · ${o.buyer_name || 'Buyer'}`
@@ -709,6 +753,43 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
         )}
         {(isPackaged || isShipped || isDone) && <OrderTimelineList rows={orderTimeline(o, trackEvents[o.id])} stamp={stamp} />}
         {head(o)}{item(o)}
+        {isVerify && (
+          <>
+            <p className="hint">Confirm the unpacked item weight. Saving updates the unit for remaining qty.</p>
+            <div className="actions" style={{ alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+              <label>
+                Weight (lb){' '}
+                <input
+                  type="number"
+                  min={0.01}
+                  max={199.99}
+                  step={0.01}
+                  value={weightValue}
+                  disabled={!!busy}
+                  onChange={(e) => setWeightDrafts((prev) => ({ ...prev, [o.id]: e.target.value }))}
+                  style={{ width: 96 }}
+                />
+              </label>
+              {onFileLb != null && <span className="hint">On file: {onFileLb} lb</span>}
+              <button type="button" className="primary" disabled={!!busy} onClick={() => void verifyWeight(o, false)}>
+                {busy === o.id + 'weight' ? 'Saving…' : 'Save weight'}
+              </button>
+              {onFileLb != null && (
+                <button type="button" className="secondary" disabled={!!busy} onClick={() => void verifyWeight(o, true, onFileLb)}>
+                  Confirm on file
+                </button>
+              )}
+            </div>
+          </>
+        )}
+        {(isNeeds || isToShip) && o.weight_verified_lb != null && (
+          <p className="hint">
+            Verified weight {o.weight_verified_lb} lb
+            {changed && o.weight_on_file_lb != null && (
+              <> · was <span className="bad-text">{o.weight_on_file_lb} lb</span></>
+            )}
+          </p>
+        )}
         {isToShip && packOnly && (
           <>
             <div className="order-address">{[o.buyer_name, o.ship_line1, o.ship_line2, [o.ship_city, o.ship_region, o.ship_postal].filter(Boolean).join(', ')].filter(Boolean).join(' · ')}</div>
@@ -845,7 +926,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
             {o.marketplace_tracking_number && !o.label_storage_path && <span className="hint">eBay already has tracking {o.marketplace_tracking_number}. Upload the PDF.</span>}
           </div>
         )}
-        {!packOnly && !isNeeds && !isToShip && !isPackaged && !isShipped && !isPickup && !isDone && !isCanceled && (
+        {!packOnly && !isVerify && !isNeeds && !isToShip && !isPackaged && !isShipped && !isPickup && !isDone && !isCanceled && (
           <div className="actions">
             <button className="text-button danger" disabled={!!busy} onClick={() => void deleteOrder(o)}>{busy === o.id + 'delete' ? 'Deleting…' : 'Delete'}</button>
           </div>
@@ -859,15 +940,17 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
   }
 
   return <>
-    <header><div><div className="eyebrow">WEBSITE AND MARKETPLACES</div><h1>Orders</h1><p>{packOnly ? 'To ship and packaged only. Mark packaged, print the label, then scan out when the packages are picked up.' : 'Every online order since day one. Returns, refunds, and replacements are on the Returns tab. No customer emails. Refreshes every 30 seconds.'}</p></div>
+    <header><div><div className="eyebrow">WEBSITE AND MARKETPLACES</div><h1>Orders</h1><p>{packOnly ? 'Verify weight, package, and scan out. No money or Needs label.' : 'Every online order since day one. Returns, refunds, and replacements are on the Returns tab. No customer emails. Refreshes every 30 seconds.'}</p></div>
       <div className="actions"><button className="secondary" onClick={() => void load()}>Refresh</button></div></header>
     {error && <div className="alert" role="alert">{error}<button onClick={() => setError('')}>Dismiss</button></div>}
     <div className="inventory-tabs" role="tablist" aria-label="Order status">
       {(packOnly ? [
+        ['verifyWeight', shipmentCounts.verifyWeight],
         ['toShip', shipmentCounts.toShip],
         ['packaged', shipmentCounts.packaged],
       ] as const : [
         ['all', shipmentCounts.all],
+        ['verifyWeight', shipmentCounts.verifyWeight],
         ['needsLabel', shipmentCounts.needsLabel],
         ['toShip', shipmentCounts.toShip],
         ['packaged', shipmentCounts.packaged],
@@ -914,7 +997,7 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
       )}
 
       {activeShipments.length === 0
-        ? <div className="empty">{view === 'all' ? 'No orders match this filter.' : view === 'needsLabel' ? 'No orders are waiting on a label.' : view === 'toShip' ? 'Nothing to ship.' : view === 'packaged' ? 'Nothing is waiting on a carrier scan.' : view === 'shipped' ? 'None in transit.' : view === 'delivered' ? 'No delivered orders yet.' : 'None.'}</div>
+        ? <div className="empty">{view === 'all' ? 'No orders match this filter.' : view === 'verifyWeight' ? 'No orders are waiting on a weight check.' : view === 'needsLabel' ? 'No orders are waiting on a label.' : view === 'toShip' ? 'Nothing to ship.' : view === 'packaged' ? 'Nothing is waiting on a carrier scan.' : view === 'shipped' ? 'None in transit.' : view === 'delivered' ? 'No delivered orders yet.' : 'None.'}</div>
         : <table className="desk-table">
             <thead><tr>{selectMode ? <th aria-label="Select" /> : null}<th>Order</th><th>Item</th><th>Channel</th><th>Status</th><th>Total</th></tr></thead>
             <tbody>

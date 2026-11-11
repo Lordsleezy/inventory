@@ -57,7 +57,7 @@ const paidOrder = {
   id: "o1", order_no: "OB-1001", sku: "11", status: "paid", fulfillment: "ship", payment_env: "sandbox", shipping_cents: 900,
   shipping_rate: { carrier: "USPS", service: "Ground Advantage", days: 5, source: "shippo" },
   buyer_name: "A", ship_line1: "1 St", ship_city: "NYC", ship_region: "NY", ship_postal: "10001", tracking_number: null, label_url: null,
-  pack_condition: "ok",
+  pack_condition: "ok", weight_verified_at: "2026-11-07T12:00:00Z", weight_verified_lb: 4,
 };
 
 test("label quote re-quotes with the corrected (bigger, heavier) box and pre-selects per the speed rule", async () => {

@@ -1,0 +1,4552 @@
+{
+  "total": 432,
+  "amazon": 129,
+  "upcitemdb": 64,
+  "costco": 7,
+  "ebay": 232,
+  "manifest_only": 0,
+  "nothing": 0,
+  "listing_ready": 48,
+  "missing": [
+    {
+      "upc": "041333051543",
+      "item_number": "1806358",
+      "description": "DURACELL AA POWER BOOST",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "195711272324",
+      "item_number": "1806317",
+      "description": "KOHLER ASSERT HANDSHWR BN",
+      "missing": [
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "810156211614",
+      "item_number": "1938108",
+      "description": "INFINITY UNDER CABINET",
+      "missing": [
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "754502055371",
+      "item_number": "1941315",
+      "description": "COPPER FIT COMPRESSION",
+      "missing": [
+        "images",
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "840397526697",
+      "item_number": "2949962",
+      "description": "SI ROLLING MASSAGER",
+      "missing": [
+        "brand",
+        "aspects:Brand|Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "840010309300",
+      "item_number": "1937993",
+      "description": "KODA 5000L SECURITY LIGHT",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "499993873522",
+      "item_number": "2027861",
+      "description": "PUMA UNLIMITED BACKPACK",
+      "missing": [
+        "aspects:Color|Department|Material|Style",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "840147885203",
+      "item_number": "1901761",
+      "description": "MESA 2 TIER ORGANIZER",
+      "missing": [
+        "aspects:Item Height|Item Length|Item Width|Number of Shelves|Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "192995048065",
+      "item_number": "1601306",
+      "description": "LICENSED GLOW IN THE DARK",
+      "missing": [
+        "images",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "069055143988",
+      "item_number": "4610583",
+      "description": "ORAL-B IO BRUSHHEADS 9CT",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "499993873539",
+      "item_number": "2027860",
+      "description": "PUMA UNLIMITED BACKPACK",
+      "missing": [
+        "aspects:Color|Department|Material|Style",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "074108522832",
+      "item_number": "4543452",
+      "description": "CONAIR GARMENT STEAMER",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "810125974625",
+      "item_number": "2049359",
+      "description": "LIQUID IV SF RING POP",
+      "missing": [
+        "images",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "079400536761",
+      "item_number": "2067097",
+      "description": "DEGREE MAX PROTECTION",
+      "missing": [
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "840397518234",
+      "item_number": "3816330",
+      "description": "SI COMPRESSION BOOTS",
+      "missing": [
+        "brand",
+        "images",
+        "aspects:Brand|Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "075020108296",
+      "item_number": "3858210",
+      "description": "SONICARE ADVANCED CLEAN",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "069055135471",
+      "item_number": "3610583",
+      "description": "ORAL-B BRUSH HEADS 10 CT",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "840147850829",
+      "item_number": "1759358",
+      "description": "MESA POP N' LOAD LAUNDRY",
+      "missing": [
+        "images",
+        "aspects:Item Height|Item Length|Item Width|Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "194029193529",
+      "item_number": "1851623",
+      "description": "1:14TH ELITE RED BULL RC",
+      "missing": [
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "075020114662",
+      "item_number": "5952050",
+      "description": "SONICARE PRO CLEAN+ HANDL",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "075020113351",
+      "item_number": "3640860",
+      "description": "PHILIPS NORELCO SHAVER",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "028907638751",
+      "item_number": "1733535",
+      "description": "ALLSPACE RECHARGEABLE",
+      "missing": [
+        "brand",
+        "images",
+        "aspects:Brand",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "499995353916",
+      "item_number": "2354207",
+      "description": "WOOZOO OSCILLATING GLOBE",
+      "missing": [
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "199287176642",
+      "item_number": "2027859",
+      "description": "PUMA UNLIMITED BACKPACK",
+      "missing": [
+        "aspects:Material"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "195711096838",
+      "item_number": "1731394",
+      "description": "KOHLER LAYNE QR ELONGATED",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "801310377765",
+      "item_number": "1929782",
+      "description": "DIECAST 2.5IN FIGURE 4PK",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "010343965430",
+      "item_number": "1644561",
+      "description": "EPSON ECOTANK ET2850SE",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "195711178039",
+      "item_number": "1848535",
+      "description": "KOHLER TERZET WIDE BNCKEL",
+      "missing": [
+        "images",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "198384105722",
+      "item_number": "1872100",
+      "description": "HEATED VEST 32 DEGREE",
+      "missing": [
+        "aspects:Size Type|Size|Type|Style|Outer Shell Material|Department|Color",
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "074108525291",
+      "item_number": "2006955",
+      "description": "CONAIR HIGH SPEED DIGITAL",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "846979055456",
+      "item_number": "1938018",
+      "description": "ARTIKA BOWEN SOLAR",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "810126663870",
+      "item_number": "2056983",
+      "description": "FORCE FACTOR HAIR GROWTH",
+      "missing": [
+        "images",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "851770008563",
+      "item_number": "1372659",
+      "description": "ORGAIN SIMPLE PEANUT BUTR",
+      "missing": [
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "061282219788",
+      "item_number": "1872254",
+      "description": "TITAN PRO LUNCH PACK",
+      "missing": [
+        "aspects:Item Height|Item Width"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "754502056460",
+      "item_number": "2067889",
+      "description": "COPPER FIT PRO BACK",
+      "missing": [
+        "images",
+        "aspects:Stove Type Compatibility",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "754502056552",
+      "item_number": "2067903",
+      "description": "COPPER FIT PRO AIR KNEE",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "041333051574",
+      "item_number": "1806373",
+      "description": "DURACELL C ALKALINE",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "046677609573",
+      "item_number": "1938101",
+      "description": "PHILIPS 5/6\" RETROFIT",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "762016485218",
+      "item_number": "1410571",
+      "description": "IRIS 12.9QT BUCKLE UP 4PK",
+      "missing": [
+        "aspects:Item Height|Item Length|Item Width|Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "689122003313",
+      "item_number": "2043903",
+      "description": "BLUEAIR 2PK AIR PURIFIER",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "075020111838",
+      "item_number": "2858210",
+      "description": "SONICARE OPTIMAL CLEAN",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "8809891183791",
+      "item_number": "2049319",
+      "description": "BIODANCE CERANOL",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "075020118677",
+      "item_number": "7161149",
+      "description": "PHILIPS NORELCO ALL IN",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "075609219603",
+      "item_number": "2043018",
+      "description": "OLAY VIT C MOISTURIZER",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "810125974731",
+      "item_number": "2049358",
+      "description": "LIQUID IV SF VPACK RL/WP",
+      "missing": [
+        "images",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "810156211775",
+      "item_number": "1937959",
+      "description": "INFINITY POWER FAILURE",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "193033762615",
+      "item_number": "1908290",
+      "description": "666 CLSS RECTANGLE +3.00",
+      "missing": [
+        "brand",
+        "images",
+        "aspects:Brand|Department|Frame Color|Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "737839834246",
+      "item_number": "2062277",
+      "description": "GREENMADE 45QT INSTAVIEW",
+      "missing": [
+        "images",
+        "aspects:Stove Type Compatibility",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "810009377344",
+      "item_number": "2037045",
+      "description": "THINKSPORT SUNSCREENSPF50",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "198390000943",
+      "item_number": "1943678",
+      "description": "EPSON ET-3958 PRINTER",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "075020104205",
+      "item_number": "3239377",
+      "description": "SONICARE DIAMONDCLEAN",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "075020107350",
+      "item_number": "4952050",
+      "description": "SONICARE PROFESSIONAL",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "075020120533",
+      "item_number": "4640862",
+      "description": "PHILIPS NORELCO SHAVER",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "075020116314",
+      "item_number": "1901990",
+      "description": "SONICARE WATERFLOSSER 2PK",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "499994560896",
+      "item_number": "4333009",
+      "description": "SHARPER IMAGE HOT/COLD",
+      "missing": [
+        "images",
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "762016498683",
+      "item_number": "1747373",
+      "description": "WOOZOO PEDESTAL AIR",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "810181280562",
+      "item_number": "1910772",
+      "description": "DREO OMNI DIRECTIONAL",
+      "missing": [
+        "images",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "075020115874",
+      "item_number": "2860427",
+      "description": "SONICARE TWO-IN-ONE",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "023108971409",
+      "item_number": "1975346",
+      "description": "ROWENTA PRO STEAM IRON",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "074108478856",
+      "item_number": "2543452",
+      "description": "CONAIR HANDHELD",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "192897459488",
+      "item_number": "1812528",
+      "description": "23\" TULIP ARRANGEMENT",
+      "missing": [
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "803954310351",
+      "item_number": "1909829",
+      "description": "DR GROOT SCALP SHAMPOO",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "costco"
+    },
+    {
+      "upc": "810156211645",
+      "item_number": "1938087",
+      "description": "INFINITY X1 10000L LUMEN",
+      "missing": [
+        "dims",
+        "weight"
+      ],
+      "primary": "costco"
+    },
+    {
+      "upc": "799288265224",
+      "item_number": "1601252",
+      "description": "TEETOT ADVENTURE FACTORY",
+      "missing": [
+        "images",
+        "aspects:Game Name|Platform",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "192995273399",
+      "item_number": "1601277",
+      "description": "LICENSED COSTUME ASSORT",
+      "missing": [
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "017641175929",
+      "item_number": "1901746",
+      "description": "SEVILLE DRAWER ORGANIZERS",
+      "missing": [
+        "aspects:Item Height|Item Length|Item Width|Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "8803463015039",
+      "item_number": "1959187",
+      "description": "VT REEDLE SHOT 100 ESSENC",
+      "missing": [
+        "brand",
+        "aspects:Brand|Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "081806608591",
+      "item_number": "1468555",
+      "description": "ECLIPSE DUOTECH 2PK CURTA",
+      "missing": [
+        "aspects:Type|Color",
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "810156211553",
+      "item_number": "1985324",
+      "description": "DURACELL 5000L LANTERN",
+      "missing": [
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "856318008326",
+      "item_number": "1718605",
+      "description": "INFINITY 2PK RECHARGEABLE",
+      "missing": [
+        "brand",
+        "images",
+        "aspects:Brand|Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "017801771268",
+      "item_number": "1938000",
+      "description": "FEIT 15\" FLAT PANEL",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "196633795946",
+      "item_number": "2030640",
+      "description": "KS 2.0 NITRILE GLOVE SM",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "193033762271",
+      "item_number": "1908250",
+      "description": "668 METAL SQUARE +1.25",
+      "missing": [
+        "brand",
+        "images",
+        "aspects:Brand|Department|Frame Color|Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "810182224213",
+      "item_number": "1929849",
+      "description": "10IN SQUISHY LAMP ASSORT",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "041333051581",
+      "item_number": "1806386",
+      "description": "DURACELL D ALKALINE",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "197424179044",
+      "item_number": "1901882",
+      "description": "MIKASA CANDLE WARMER PLUG",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "079400513656",
+      "item_number": "1800413",
+      "description": "DOVE ADVANCED CARE APDO",
+      "missing": [
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "096619055418",
+      "item_number": "133839",
+      "description": "KS BLUE MICROFIBER 36PK",
+      "missing": [
+        "images",
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "035000463760",
+      "item_number": "1285702",
+      "description": "COLGATE TOTAL TPST",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "079400527660",
+      "item_number": "1939944",
+      "description": "DOVE INTENSIVE REPAIR SET",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "196633828606",
+      "item_number": "1931211",
+      "description": "KS FACIAL WIPE (NEW)",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "809407190822",
+      "item_number": "1890404",
+      "description": "PI BATH MAT BLUE/TAN",
+      "missing": [
+        "aspects:Type|Color|Material",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "823621030122",
+      "item_number": "1901547",
+      "description": "COTTON WOVEN BATHMAT",
+      "missing": [
+        "brand",
+        "aspects:Type|Color|Material|Brand",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "075020116185",
+      "item_number": "4239377",
+      "description": "SONICARE DIAMONDCLEAN",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "075020120007",
+      "item_number": "5239377",
+      "description": "SONICARE DIAMONDCLEANN",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "886389191108",
+      "item_number": "1539810",
+      "description": "NEST LEARNING THERMOSTAT",
+      "missing": [
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "195711329325",
+      "item_number": "1937994",
+      "description": "KOHLER DAMARA SEMI-PRO",
+      "missing": [
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "840397513369",
+      "item_number": "2816330",
+      "description": "SHARPER IMAGE FLEX AIR",
+      "missing": [
+        "images",
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "850036402282",
+      "item_number": "1998778",
+      "description": "JOLIE FILTERED SHOWERHEAD",
+      "missing": [
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "499997403619",
+      "item_number": "1476815",
+      "description": "KOHLER PUREWASH MANUAL",
+      "missing": [
+        "dims",
+        "weight"
+      ],
+      "primary": "costco"
+    },
+    {
+      "upc": "689122029917",
+      "item_number": "1896710",
+      "description": "BLUEAIR MINI MAX",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "195205207276",
+      "item_number": "1922000",
+      "description": "DELTA RINNA WIDESPREAD",
+      "missing": [
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "047871332755",
+      "item_number": "2013077",
+      "description": "KIDDE RING SMOKE DETECTOR",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "843479155945",
+      "item_number": "2437599",
+      "description": "SHARPER IMAGE PRO",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "618842575640",
+      "item_number": "2003467",
+      "description": "IPACK KIDS LUGGAGE",
+      "missing": [
+        "brand",
+        "aspects:Brand",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "046013264091",
+      "item_number": "2009879",
+      "description": "LASKO SUPER FAN",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "075020115416",
+      "item_number": "6161149",
+      "description": "PHILIPS NORELCO TRIMMER",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "029927605501",
+      "item_number": "1604521",
+      "description": "SUNZERO PRATT BEIGE B/O",
+      "missing": [
+        "images",
+        "aspects:Type|Color",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "069055137857",
+      "item_number": "3392702",
+      "description": "ORAL-B FLOSS BH",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "499995127944",
+      "item_number": "1583883",
+      "description": "SHARPER IMAGE COMPACT",
+      "missing": [
+        "images",
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "499993770722",
+      "item_number": "2042991",
+      "description": "CLEVERMADE LAUNDRY HAULER",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "869361000322",
+      "item_number": "2101353",
+      "description": "HUILE PRODIGIEUSE SHIMMER",
+      "missing": [
+        "brand",
+        "aspects:Brand|Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "060258359916",
+      "item_number": "987554",
+      "description": "BRITA FILTERS 10 PK. FOR",
+      "missing": [
+        "aspects:Compatible Model"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "840281715039",
+      "item_number": "1872228",
+      "description": "EASTPOINT HUGE YAHTZEE",
+      "missing": [
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "499993717482",
+      "item_number": "1000190",
+      "description": "STANDBY SHOE BOX 4PK",
+      "missing": [
+        "brand",
+        "images",
+        "aspects:Brand|Item Height|Item Length|Item Width|Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "875380001202",
+      "item_number": "1806336",
+      "description": "ACACIA WOOD SHELVES 2PK",
+      "missing": [
+        "aspects:Item Height|Item Length|Item Width|Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "809407190860",
+      "item_number": "1890408",
+      "description": "PI BATH MAT TAN 2PK",
+      "missing": [
+        "aspects:Type|Color|Material",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "840103217253",
+      "item_number": "2026112",
+      "description": "ROC DAY OR NIGHT CREAM",
+      "missing": [
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "8806173497331",
+      "item_number": "2016978",
+      "description": "VITAPAIR C PDRN SERUM",
+      "missing": [
+        "brand",
+        "aspects:Brand|Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "810156211454",
+      "item_number": "1872247",
+      "description": "INFINITY 2000L CAMP LIGHT",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "810090752365",
+      "item_number": "1972488",
+      "description": "OATS OVERNIGHT 30G CC+FB",
+      "missing": [
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "310158359166",
+      "item_number": "1810859",
+      "description": "SENSODYNE TRI ACTION TPST",
+      "missing": [
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "841887141888",
+      "item_number": "1740016",
+      "description": "DISNEY 13.5\" HALLOWEEN",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "681147151451",
+      "item_number": "1785136",
+      "description": "4D PUZZLE ASSORTMENT",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "845473069051",
+      "item_number": "1937995",
+      "description": "LUTEC 3000L SOLAR",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "021664376485",
+      "item_number": "1784870",
+      "description": "GAZILLION ULTIMATE BUBBLE",
+      "missing": [
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "041333051567",
+      "item_number": "1806329",
+      "description": "DURACELL AAA POWER BOOST",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "754502052561",
+      "item_number": "1740615",
+      "description": "COPPER FIT KNEE SLEEVE",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "193033762363",
+      "item_number": "1908259",
+      "description": "811 FASHION CATEYE +1.75",
+      "missing": [
+        "brand",
+        "images",
+        "aspects:Brand|Department|Frame Color|Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "193033762387",
+      "item_number": "1908267",
+      "description": "811 FASHION CATEYE +2.50",
+      "missing": [
+        "brand",
+        "images",
+        "aspects:Brand|Department|Frame Color|Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "193033762509",
+      "item_number": "1908279",
+      "description": "809 CLASSIC ROUND +1.75",
+      "missing": [
+        "brand",
+        "images",
+        "aspects:Brand|Department|Frame Color|Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "193033762547",
+      "item_number": "1908283",
+      "description": "809 CLASSIC ROUND +3.00",
+      "missing": [
+        "brand",
+        "images",
+        "aspects:Brand|Department|Frame Color|Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "193033762578",
+      "item_number": "1908286",
+      "description": "666 CLSS RECTANGLE +1.75",
+      "missing": [
+        "brand",
+        "images",
+        "aspects:Brand|Department|Frame Color|Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "091806302122",
+      "item_number": "1985390",
+      "description": "SHEDRAIN 2PK COMPACT",
+      "missing": [
+        "images",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "800881901010",
+      "item_number": "2017461",
+      "description": "COASTAL CULTURE EVERYDAY",
+      "missing": [
+        "brand",
+        "images",
+        "aspects:Brand|Exterior Material|Style|Exterior Color|Department",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "193033827222",
+      "item_number": "2027851",
+      "description": "669 UPSWEEP +2.50",
+      "missing": [
+        "brand",
+        "images",
+        "aspects:Brand|Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "199073133750",
+      "item_number": "2056254",
+      "description": "WILSON NBA BASKETBALL",
+      "missing": [
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "843021002024",
+      "item_number": "1901852",
+      "description": "EDIFICE MESH BASKET 2PK",
+      "missing": [
+        "images",
+        "aspects:Item Height|Item Length|Item Width|Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "077784049198",
+      "item_number": "1901753",
+      "description": "TAYLOR SMART BATH SCALE",
+      "missing": [
+        "images",
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "075486151485",
+      "item_number": "1982330",
+      "description": "HAWAIIAN TROPIC ST LOTION",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "840797188136",
+      "item_number": "2074477",
+      "description": "HAIRITAGE BIOTIN INFUSED",
+      "missing": [
+        "brand",
+        "aspects:Brand|Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "041333032269",
+      "item_number": "720376",
+      "description": "DURACELL \"AAA\"-32PK",
+      "missing": [
+        "images",
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "810049660598",
+      "item_number": "1666020",
+      "description": "MURPHY'S NATURALS",
+      "missing": [
+        "aspects:Type|EPA Registration Number"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "199293455465",
+      "item_number": "1974982",
+      "description": "WC26 CAPS",
+      "missing": [
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "885830163077",
+      "item_number": "1796319",
+      "description": "SCROLL FOAM BATH MAT",
+      "missing": [
+        "brand",
+        "aspects:Type|Color|Material|Brand",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "017801162028",
+      "item_number": "1975773",
+      "description": "LED FEIT 100W GLASS A21 5",
+      "missing": [
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "047218426857",
+      "item_number": "1973213",
+      "description": "I/O DECO PILLOW",
+      "missing": [
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "840773100183",
+      "item_number": "1193759",
+      "description": "50PK FLOCKED HANGERS",
+      "missing": [
+        "aspects:Type|Item Height|Item Length|Item Width"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "850023885401",
+      "item_number": "2083880",
+      "description": "GOURMET KINGDOM FLVR CORN",
+      "missing": [
+        "brand",
+        "images",
+        "aspects:Brand|Product",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "096619042326",
+      "item_number": "1281762",
+      "description": "KS MOISTURE SHAMPOO",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "079238004531",
+      "item_number": "1426548",
+      "description": "17\" MICHELIN HYBRID BLADE",
+      "missing": [
+        "images",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "070942008631",
+      "item_number": "1968803",
+      "description": "GUM FLOSS PICKS 450 CT",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "195711175601",
+      "item_number": "1912207",
+      "description": "KOHLER E875 PUREWASH RD",
+      "missing": [
+        "images",
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "739268417564",
+      "item_number": "1988220",
+      "description": "TOTO KC2 BIDET SEAT RND",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "075020091871",
+      "item_number": "2239377",
+      "description": "SONICARE DIAMONDCLEAN",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "031262122834",
+      "item_number": "3849544",
+      "description": "HOMEDICS REDLIGHT SAUNA",
+      "missing": [
+        "images",
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "031262117984",
+      "item_number": "2849555",
+      "description": "HOMEDICS STEAM SAUNA BLK",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "195161016202",
+      "item_number": "1895383",
+      "description": "HP INK 218A CMY 3PK",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "010343940888",
+      "item_number": "1207724",
+      "description": "EPSON ECOTANK ET3750SE",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "689122032269",
+      "item_number": "1944160",
+      "description": "BLUEAIR BLUE PURE 311+",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "costco"
+    },
+    {
+      "upc": "190781024798",
+      "item_number": "1178015",
+      "description": "HP ENVY 7858 AIO",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "193015033894",
+      "item_number": "1323639",
+      "description": "HP OJ PRO 9018 AIO",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "810075943252",
+      "item_number": "1770963",
+      "description": "NUFACE MINI ON-THE-GO",
+      "missing": [
+        "images",
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "841487134389",
+      "item_number": "2027501",
+      "description": "BIG AGNES SLEEPING BAG",
+      "missing": [
+        "aspects:Type|Insect Repellent Treated"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "010343953994",
+      "item_number": "1392455",
+      "description": "EPSON ECOTANK ET-2720 SE",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "810091142219",
+      "item_number": "2072441",
+      "description": "CHIRP HALO BUNDLE",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "costco"
+    },
+    {
+      "upc": "195711173270",
+      "item_number": "1806260",
+      "description": "KOHLER GUILD PULL-DOWN",
+      "missing": [
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "838810022147",
+      "item_number": "1284362",
+      "description": "SIMPLE HUMAN VANITY 8\"",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "050375028406",
+      "item_number": "1795875",
+      "description": "INSINKERATOR C3000",
+      "missing": [
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "840397533909",
+      "item_number": "3816332",
+      "description": "SI COMPRESS BOOTS LG GRAY",
+      "missing": [
+        "brand",
+        "images",
+        "aspects:Brand|US Shoe Size|Style|Color|Department|Upper Material",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "499994004437",
+      "item_number": "1998770",
+      "description": "JOLIE FILTERED SHOWER MB",
+      "missing": [
+        "images",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "194721022394",
+      "item_number": "1470635",
+      "description": "HP ENVY PRO 6458 AIO WIFI",
+      "missing": [
+        "aspects:Type",
+        "dims"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "841887148733",
+      "item_number": "1784954",
+      "description": "DISNEY GINGERBREAD",
+      "missing": [
+        "brand",
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "841887149884",
+      "item_number": "1851532",
+      "description": "DISNEY HALLOWEEN VILLAGE",
+      "missing": [
+        "brand",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "754502055425",
+      "item_number": "1954413",
+      "description": "NAUTILUS VIBRATONE",
+      "missing": [
+        "images",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "846979053834",
+      "item_number": "1806313",
+      "description": "ARTIKA SUNNYVALE 28\" FAN",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "850017219083",
+      "item_number": "1544949",
+      "description": "CROC PREMIUM INFRARED",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "499994339157",
+      "item_number": "1940218",
+      "description": "SHARPER IMAGE HOT/COLD",
+      "missing": [
+        "images",
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "499997957310",
+      "item_number": "3333009",
+      "description": "SHARPER IMAGE HOT/COLD",
+      "missing": [
+        "images",
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "883349000722",
+      "item_number": "1978242",
+      "description": "T3 T3 HAIR DRYER W/BRUSH",
+      "missing": [
+        "images",
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "199284406087",
+      "item_number": "1979508",
+      "description": "ALOGFIRE PORTABLE",
+      "missing": [
+        "brand",
+        "images",
+        "aspects:Type|Brand",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "850064399202",
+      "item_number": "1999118",
+      "description": "GLO24K SKIN REJUVENATION",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "031262113849",
+      "item_number": "2748527",
+      "description": "HOMEDICS SERENE DIFFUSER",
+      "missing": [
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "748091024603",
+      "item_number": "1793201",
+      "description": "MOTOROLA T600 TWO-WAY",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "195205149811",
+      "item_number": "1920099",
+      "description": "DELTA IN2ITION+PRO CLEAN",
+      "missing": [
+        "images",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "195711272751",
+      "item_number": "1938077",
+      "description": "KOHLER ASSERT FLTRD BN",
+      "missing": [
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "840309313797",
+      "item_number": "1970803",
+      "description": "SELKIRK SLK FURY PADDLE",
+      "missing": [
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "810181282917",
+      "item_number": "1998534",
+      "description": "DREO PEDESTAL FAN",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "031262109101",
+      "item_number": "1714078",
+      "description": "HOMEDICS WARM/COOL MIST",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "810091141717",
+      "item_number": "1966298",
+      "description": "CHIRP WHEEL BUNDLE",
+      "missing": [
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "199874785615",
+      "item_number": "1985388",
+      "description": "TERRAFORM 3 PC SET",
+      "missing": [
+        "brand",
+        "images",
+        "aspects:Brand",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "031262114235",
+      "item_number": "3333014",
+      "description": "HOMEDICS WARM/COOL MIST",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "810996012822",
+      "item_number": "1856257",
+      "description": "TEAKHAUS TEAK BENCH",
+      "missing": [
+        "aspects:Color|Item Height|Item Length|Item Width|Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "499994896360",
+      "item_number": "1851439",
+      "description": "REAL FX DISNEY STITCH",
+      "missing": [
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "031262118615",
+      "item_number": "1925706",
+      "description": "HOMEDICS 2G WARM/COOL",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "028399527038",
+      "item_number": "1929679",
+      "description": "HALLOWEEN STITCH STATUE",
+      "missing": [
+        "brand",
+        "images",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "8720077370883",
+      "item_number": "1929829",
+      "description": "HARDWOOD CHESS+CHECKERS",
+      "missing": [
+        "brand",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "075020117274",
+      "item_number": "2904854",
+      "description": "SONICARE BRILLIANT CLEAN",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "846647006834",
+      "item_number": "1238575",
+      "description": "STATIC V LUXE EXTRA LARGE",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "195711149169",
+      "item_number": "1788404",
+      "description": "KOHLER TERZET MATTE BLACK",
+      "missing": [
+        "aspects:Color|Material",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "028399526994",
+      "item_number": "1929670",
+      "description": "14\" STITCH ELF STATUE",
+      "missing": [
+        "brand",
+        "images",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "028399527199",
+      "item_number": "1929677",
+      "description": "15\" HELLO KITTY TREE",
+      "missing": [
+        "brand",
+        "aspects:Brand|Product",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "075020095657",
+      "item_number": "3860427",
+      "description": "SONICARE DCLEAN BRUSH HDS",
+      "missing": [
+        "aspects:Type",
+        "dims"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "643334563881",
+      "item_number": "1172833",
+      "description": "LITHIUM JUMP STARTER",
+      "missing": [
+        "aspects:MPN",
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "643334567896",
+      "item_number": "1253313",
+      "description": "WINPLUS PORTABLE JUMP KIT",
+      "missing": [
+        "aspects:MPN",
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "628319698826",
+      "item_number": "1740612",
+      "description": "TITAN ZIPPERLESS COOLER",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "630996191699",
+      "item_number": "1785081",
+      "description": "BLUEY'S 3IN1 PLANE SET",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "499994520326",
+      "item_number": "1913662",
+      "description": "HEATED VEST MEDIUM",
+      "missing": [
+        "aspects:Size Type|Size|Type|Style|Outer Shell Material|Department|Color",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "9008606389438",
+      "item_number": "1938055",
+      "description": "EGLO KINGSLEY PENDANT",
+      "missing": [
+        "brand",
+        "images",
+        "aspects:Style|Brand|Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "073796760069",
+      "item_number": "1954600",
+      "description": "OMRON EVOLV BP MONITOR",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "costco"
+    },
+    {
+      "upc": "046013264015",
+      "item_number": "2365634",
+      "description": "LASKO SOLAIRE SUPER FAN",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "717844000553",
+      "item_number": "122113",
+      "description": "PUREBLUE 5PK REPLACEMENT",
+      "missing": [
+        "aspects:Compatible Model"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "197381319170",
+      "item_number": "2039912",
+      "description": "49ERS STADIUM SEAT",
+      "missing": [
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "028225998551",
+      "item_number": "1933197",
+      "description": "MIKASA HOME ACCENTS 10PC",
+      "missing": [
+        "aspects:MPN"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "765206384575",
+      "item_number": "2065557",
+      "description": "KENSINGTON STARS W/ BORDR",
+      "missing": [
+        "brand",
+        "images",
+        "aspects:Brand|Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "499993648168",
+      "item_number": "2065561",
+      "description": "KENSINGTON WEAVE BLK 2PK",
+      "missing": [
+        "brand",
+        "images",
+        "aspects:Brand|Color|Material",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "720354375912",
+      "item_number": "2008481",
+      "description": "STYLECRAFT LED LAMPS 2PK",
+      "missing": [
+        "images",
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "069055137840",
+      "item_number": "3392701",
+      "description": "ORAL-B CROSS BH - WHITE",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "076308427313",
+      "item_number": "1773678",
+      "description": "3M 2500 SERIES 14X25X1",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "014501165526",
+      "item_number": "1332086",
+      "description": "ROWENTA PRO STEAM IRON",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "074108435736",
+      "item_number": "1543452",
+      "description": "CONAIR HANDHELD STEAMER",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "069055130025",
+      "item_number": "1610583",
+      "description": "ORALB BRUSH HEADS 9 CT",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "846979036691",
+      "item_number": "1759998",
+      "description": "ARTIKA VITORO BLACK",
+      "missing": [
+        "images",
+        "aspects:Color|Material",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "721427043639",
+      "item_number": "1830758",
+      "description": "SWISSGEAR BACKPACK",
+      "missing": [
+        "brand",
+        "aspects:Brand|Insect Repellent Treated",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "093764604508",
+      "item_number": "1899977",
+      "description": "A+D UPPER ARM BP MONITOR",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "091141460051",
+      "item_number": "1957606",
+      "description": "GLOTECH CALYPSO MIRROR",
+      "missing": [
+        "images",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "810156211522",
+      "item_number": "1985328",
+      "description": "INFINITY MISTING FAN",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "061172896662",
+      "item_number": "1985400",
+      "description": "HUNTER STOWAWAY WEEKENDER",
+      "missing": [
+        "brand",
+        "images",
+        "aspects:Brand",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "812066032525",
+      "item_number": "1993007",
+      "description": "SAVIOR MINI RANGE BAG",
+      "missing": [
+        "brand",
+        "aspects:Type|Brand",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "499993513480",
+      "item_number": "2087931",
+      "description": "DELSEY EVERYDAY TOTE",
+      "missing": [
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "499993513473",
+      "item_number": "2087932",
+      "description": "DELSEY EVERYDAY TOTE",
+      "missing": [
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "074108502056",
+      "item_number": "3543452",
+      "description": "CONAIR HANDHELD STEAMER",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "050227112505",
+      "item_number": "1929806",
+      "description": "MARIO KART TABLETOP",
+      "missing": [
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "850064383539",
+      "item_number": "2059604",
+      "description": "KUDOS ORG DIAPER S4 104CT",
+      "missing": [
+        "brand",
+        "aspects:Brand",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "850064383546",
+      "item_number": "2059605",
+      "description": "KUDOS ORG DIAPER S5 88CT",
+      "missing": [
+        "brand",
+        "aspects:Brand",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "076308426873",
+      "item_number": "1744667",
+      "description": "3M 2500 SERIES 14X20X1",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "076308426897",
+      "item_number": "1744669",
+      "description": "3M 2500 SERIES 14X24X1",
+      "missing": [
+        "images",
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "850052848590",
+      "item_number": "1967950",
+      "description": "NOODLE + BOO SUPER SOFT",
+      "missing": [
+        "aspects:Product",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "059283032352",
+      "item_number": "1929696",
+      "description": "BOO LIGHT UP",
+      "missing": [
+        "brand",
+        "images",
+        "aspects:Brand|Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "075609216381",
+      "item_number": "1938952",
+      "description": "OLAY REGENERIST 10",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "075609217579",
+      "item_number": "1966263",
+      "description": "OLAY EVERY NIGHT RETINOL",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "198715310078",
+      "item_number": "2080840",
+      "description": "GIVE HUGZ 12\" MANTA RAY",
+      "missing": [
+        "brand",
+        "images",
+        "aspects:Format|Movie/TV Title",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "809407187846",
+      "item_number": "1856859",
+      "description": "TRELLIS BATH MAT TAN",
+      "missing": [
+        "brand",
+        "aspects:Type|Color|Material|Brand",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "843567166822",
+      "item_number": "2009895",
+      "description": "SILK HOME VELVET OATMEAL",
+      "missing": [
+        "images",
+        "aspects:Type|Color",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "762016474526",
+      "item_number": "1354207",
+      "description": "WOOZOO 5 SPEED GLOBE FAN",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "688432821853",
+      "item_number": "1600074",
+      "description": "TRIPLE HEAD LED",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "850026256277",
+      "item_number": "1835870",
+      "description": "MAD HIPPIE VITAMIN C",
+      "missing": [
+        "images",
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "810031067442",
+      "item_number": "1851632",
+      "description": "WAVE MASTER BOAT",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "194735402472",
+      "item_number": "1851637",
+      "description": "HOT WHEELS MONSTER TRUCK",
+      "missing": [
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "192897499255",
+      "item_number": "1862027",
+      "description": "WHITE 12\" HYDRANGEA",
+      "missing": [
+        "aspects:Product",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "074108512062",
+      "item_number": "1903630",
+      "description": "CONAIR PERFORMA DRYER",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "4050368901576",
+      "item_number": "1939190",
+      "description": "DISNEY LORCANA PIXAR",
+      "missing": [
+        "brand",
+        "aspects:Game|Set",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "8809454983189",
+      "item_number": "1991789",
+      "description": "TYF RICE TINTED MINERAL",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "075609216732",
+      "item_number": "1999423",
+      "description": "OLAY SUPER SERUM 8IN1",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "192833352507",
+      "item_number": "2016280",
+      "description": "YANKEE APOTHECARY 60OZ",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "850075780594",
+      "item_number": "2060424",
+      "description": "BOKA ELA MINT WHITENING",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "499993602443",
+      "item_number": "2074116",
+      "description": "BLUE PRINCESS 5/6",
+      "missing": [
+        "brand",
+        "images",
+        "aspects:Brand|Material|Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "499993602412",
+      "item_number": "2074120",
+      "description": "GREEN WITCH 5/6",
+      "missing": [
+        "brand",
+        "images",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "190488000712",
+      "item_number": "2080683",
+      "description": "ELROEL PANG PANG",
+      "missing": [
+        "brand",
+        "images",
+        "aspects:Brand|Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "074108390905",
+      "item_number": "2170516",
+      "description": "CONAIR HANDHELD STEAMER",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "850056802734",
+      "item_number": "2789239",
+      "description": "JISULIFE NECK FAN 2PK",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "810080494435",
+      "item_number": "1654502",
+      "description": "CARBON FIBER TREKKING",
+      "missing": [
+        "images",
+        "aspects:Sport/Activity",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "820645013315",
+      "item_number": "1781782",
+      "description": "CAROL'S DAUGHTER",
+      "missing": [
+        "brand",
+        "images",
+        "aspects:Author|Book Title|Language",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "8809859321586",
+      "item_number": "2016900",
+      "description": "PURCELL PIXCELL BIOM",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "costco"
+    },
+    {
+      "upc": "041167412435",
+      "item_number": "1481822",
+      "description": "ALLEGRA ALLERGY 180 MG",
+      "missing": [
+        "aspects:Dosage|Type|Expiration Date"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "060258507232",
+      "item_number": "1603325",
+      "description": "BRITA ELITE FILTER 4PK",
+      "missing": [
+        "aspects:Compatible Model"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "850049867979",
+      "item_number": "1806387",
+      "description": "SOL-R-BRITE SOLAR LIGHT",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "071249717899",
+      "item_number": "2049636",
+      "description": "REVITALIFT TRIPLE POWER",
+      "missing": [
+        "brand",
+        "images",
+        "aspects:Brand|Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "070074673066",
+      "item_number": "1293571",
+      "description": "GLUCERNA STRAWBERRY NUTR",
+      "missing": [
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "499993948787",
+      "item_number": "2010154",
+      "description": "PI RUNNER 24X72 WHITE",
+      "missing": [
+        "images",
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "8809669502823",
+      "item_number": "1761190",
+      "description": "DR. FORHAIR ANTI-THIN SH",
+      "missing": [
+        "images",
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "4260747380308",
+      "item_number": "1851648",
+      "description": "SPYRAGO WATER BLASTER",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "499994244963",
+      "item_number": "1960345",
+      "description": "MYTAGALONGS TORONTO",
+      "missing": [
+        "images",
+        "aspects:Exterior Material|Style|Exterior Color|Department",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "810080495593",
+      "item_number": "1985289",
+      "description": "CMT PADDED STADIUM SEAT",
+      "missing": [
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "850059767665",
+      "item_number": "1995727",
+      "description": "NELLO SUPERCALM",
+      "missing": [
+        "images",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "061282553431",
+      "item_number": "2622167",
+      "description": "TITAN 50 CAN COLLAPSIBLE",
+      "missing": [
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "191726728160",
+      "item_number": "1601275",
+      "description": "MARVEL LICENSED COSTUME",
+      "missing": [
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "792882339025",
+      "item_number": "1601410",
+      "description": "TEETOT PRINCESS FACTORY",
+      "missing": [
+        "images",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "499993938672",
+      "item_number": "2012350",
+      "description": "SUNGBOON COLLAGEN CREAM",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "843567174148",
+      "item_number": "2021120",
+      "description": "ALISO SHEER CURTAINS 96\"",
+      "missing": [
+        "brand",
+        "aspects:Brand|Type|Color",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "847502003890",
+      "item_number": "1055778",
+      "description": "INTEK SWAN LAMP W/2 USBS",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "745883745524",
+      "item_number": "1068540",
+      "description": "WEMO MINI 2-PK SMART PLUG",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "017801722086",
+      "item_number": "1358986",
+      "description": "FEIT 2PK OUTDOOR PLUG",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "857167006280",
+      "item_number": "1374447",
+      "description": "ZIPFIZZ ENERGY DRINK",
+      "missing": [
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "810080493759",
+      "item_number": "1425530",
+      "description": "PADDED STADIUM SEAT",
+      "missing": [
+        "aspects:Type|Item Length|Item Height|Item Width",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "840010300048",
+      "item_number": "1435543",
+      "description": "KODA 15\" SLIM MOUNT CCT",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "817387026130",
+      "item_number": "1691233",
+      "description": "PR HEATING PAD TAN",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "605592007996",
+      "item_number": "1692422",
+      "description": "NEXXUS ADVANCED THERAPPE",
+      "missing": [
+        "aspects:Type",
+        "dims"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "628319955660",
+      "item_number": "1740589",
+      "description": "TITAN 40-CAN COOLER",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "195711113238",
+      "item_number": "1778700",
+      "description": "KOHLER LAYNE QR ROUND",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "030878829847",
+      "item_number": "1785039",
+      "description": "ENBRIGHTEN BUBBLE LIGHTS",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "801946644132",
+      "item_number": "1796178",
+      "description": "EVERGREEN LED 3PK CUBES",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "783048324719",
+      "item_number": "1796285",
+      "description": "PIPER B/O CURTAIN",
+      "missing": [
+        "aspects:Type|Color",
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "810156210471",
+      "item_number": "1806321",
+      "description": "INFINITY X1 5000L",
+      "missing": [
+        "brand",
+        "images",
+        "aspects:Brand|Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "8809936742013",
+      "item_number": "1821473",
+      "description": "MEDIHEAL",
+      "missing": [
+        "brand",
+        "images",
+        "aspects:Brand|Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "191726399476",
+      "item_number": "1851483",
+      "description": "POKEMON FIGURINE 1.10TH",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "008965008901",
+      "item_number": "1854295",
+      "description": "CAT BATTERY NECK LIGHT",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "840103215099",
+      "item_number": "1875033",
+      "description": "ROC HYDRATE WATER CREAM",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "810009377771",
+      "item_number": "1908209",
+      "description": "THINK BABY MINERAL SPF",
+      "missing": [
+        "images",
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "605592009372",
+      "item_number": "1913820",
+      "description": "NEXXUS COLOR ASSURE",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "810645039422",
+      "item_number": "1929664",
+      "description": "6' ORNAMENT BALL GARLAND",
+      "missing": [
+        "brand",
+        "aspects:Brand|Product",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "4895213827454",
+      "item_number": "1929682",
+      "description": "12PK PLUSH ORNAMENT",
+      "missing": [
+        "brand",
+        "aspects:Brand|Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "193052107930",
+      "item_number": "1929716",
+      "description": "MINI BRANDS MINI VINYLS",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "8809676156972",
+      "item_number": "1988969",
+      "description": "D'ALBA TRUFFLE SPRAY 2-PK",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "844040076874",
+      "item_number": "2009175",
+      "description": "HIGHLAND TACTICAL EXPO",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "810156211515",
+      "item_number": "2015637",
+      "description": "KC UNDERHOOD AUTOLIGHT",
+      "missing": [
+        "images",
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "850024571709",
+      "item_number": "2035819",
+      "description": "18.21 MAN MADE BODY WASH",
+      "missing": [
+        "brand",
+        "images",
+        "aspects:Brand|Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "499993633294",
+      "item_number": "2068386",
+      "description": "COPPER FIT PRO BACK",
+      "missing": [
+        "images",
+        "aspects:Stove Type Compatibility",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "810171721204",
+      "item_number": "2070008",
+      "description": "NIGHT FACE WASH SHEETS",
+      "missing": [
+        "images",
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "020424226817",
+      "item_number": "2080827",
+      "description": "EMERGENCY SURVIVAL KIT",
+      "missing": [
+        "brand",
+        "aspects:Type|Brand",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "810125973093",
+      "item_number": "1967470",
+      "description": "LIQUID IV SUGAR FREE NRG",
+      "missing": [
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "846979042869",
+      "item_number": "1806274",
+      "description": "ARTIKA HEMISPHERE BN",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "845473053029",
+      "item_number": "1806398",
+      "description": "LUTEC SOLAR SECURITY",
+      "missing": [
+        "images",
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "028332874021",
+      "item_number": "1901552",
+      "description": "WASHLUXE DECO PILLOW",
+      "missing": [
+        "brand",
+        "images",
+        "aspects:Type|Brand",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "850068674121",
+      "item_number": "2011724",
+      "description": "NAUTILUS WEIGHTED VEST",
+      "missing": [
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "194735386536",
+      "item_number": "1739952",
+      "description": "HOT WHEELS DUAL SCALE 2PK",
+      "missing": [
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "840147866196",
+      "item_number": "1901740",
+      "description": "MESA XXL RECTANGLE WICKER",
+      "missing": [
+        "images",
+        "aspects:Type|Item Length|Item Height|Item Width",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "8809730959839",
+      "item_number": "2037431",
+      "description": "MA:NYO CLEANSING OIL 2PK",
+      "missing": [
+        "brand",
+        "aspects:Brand|Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "822985552707",
+      "item_number": "1937952",
+      "description": "ENERGETIC LIGHTING 14 IN",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "195711291912",
+      "item_number": "1938012",
+      "description": "KOHLER 8L BATH CAN",
+      "missing": [
+        "aspects:Item Height|Item Length|Item Width|Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "8809962542359",
+      "item_number": "2012101",
+      "description": "ROUND LAB DOKDO CLEANSER",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "199124317900",
+      "item_number": "2034983",
+      "description": "PEANUTS TOTE + TOWELS 1",
+      "missing": [
+        "aspects:Type|Color|Material|Size",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "810210624213",
+      "item_number": "2074246",
+      "description": "DR.SQUATCH BAR SOAP",
+      "missing": [
+        "brand",
+        "aspects:Brand",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "193052103055",
+      "item_number": "1851471",
+      "description": "XSHOT MOTOR SOAKERS 2PK",
+      "missing": [
+        "images",
+        "aspects:Type|Color",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "681421020220",
+      "item_number": "681421",
+      "description": "DULCOLAX LAXATIVE TABLET",
+      "missing": [
+        "aspects:Dosage|Type|Expiration Date"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "810042482555",
+      "item_number": "2063496",
+      "description": "CORA BLADDER LINER 120CT",
+      "missing": [
+        "images",
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "376660002983",
+      "item_number": "2078565",
+      "description": "DOWNY UNLIMITED 2/21.1Z",
+      "missing": [
+        "images",
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "022164379204",
+      "item_number": "1796087",
+      "description": "TRESSA BLACKOUT CURTAIN",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "030878835152",
+      "item_number": "1806369",
+      "description": "ULTRAPRO POWER STRIP",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "197381415131",
+      "item_number": "2039734",
+      "description": "FRESNO STATE COOLER BAG",
+      "missing": [
+        "brand",
+        "aspects:Brand|Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "499994134912",
+      "item_number": "1943393",
+      "description": "COPPER FIT ELITE",
+      "missing": [
+        "images",
+        "aspects:Stove Type Compatibility",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "850018808873",
+      "item_number": "9669663",
+      "description": "BEURER BR90 BITE HEALER",
+      "missing": [
+        "aspects:Type|EPA Registration Number"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "4897026912051",
+      "item_number": "1193814",
+      "description": "DURACELL FLASHLIGHT 500LM",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "078300033202",
+      "item_number": "1319053",
+      "description": "DIAPER GENIE CIRCLE-1080",
+      "missing": [
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "499995988934",
+      "item_number": "1654528",
+      "description": "DURACELL 2000L LANTERN",
+      "missing": [
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "193052059475",
+      "item_number": "1742786",
+      "description": "BUNCH O BUBBLES BLASTER",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "193033762288",
+      "item_number": "1908251",
+      "description": "668 METAL SQUARE +1.50",
+      "missing": [
+        "brand",
+        "images",
+        "aspects:Brand|Department|Frame Color|Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "193033762295",
+      "item_number": "1908252",
+      "description": "668 METAL SQUARE +1.75",
+      "missing": [
+        "brand",
+        "images",
+        "aspects:Brand|Department|Frame Color|Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "193033762301",
+      "item_number": "1908253",
+      "description": "668 METAL SQUARE +2.00",
+      "missing": [
+        "brand",
+        "images",
+        "aspects:Brand|Department|Frame Color|Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "193033762318",
+      "item_number": "1908254",
+      "description": "668 METAL SQUARE +2.50",
+      "missing": [
+        "brand",
+        "images",
+        "aspects:Brand",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "193033762400",
+      "item_number": "1908269",
+      "description": "811 FASHION CATEYE +3.00",
+      "missing": [
+        "brand",
+        "images",
+        "aspects:Brand|Department|Frame Color|Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "193033762417",
+      "item_number": "1908270",
+      "description": "815 CLASSIC SQUARE +1.25",
+      "missing": [
+        "brand",
+        "images",
+        "aspects:Brand|Department|Frame Color|Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "193033762424",
+      "item_number": "1908271",
+      "description": "815 CLASSIC SQUARE +1.50",
+      "missing": [
+        "brand",
+        "images",
+        "aspects:Brand|Department|Frame Color|Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "193033762431",
+      "item_number": "1908272",
+      "description": "815 CLASSIC SQUARE +1.75",
+      "missing": [
+        "brand",
+        "images",
+        "aspects:Brand|Department|Frame Color|Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "193033762523",
+      "item_number": "1908281",
+      "description": "809 CLASSIC ROUND +2.50",
+      "missing": [
+        "brand",
+        "images",
+        "aspects:Brand|Department|Frame Color|Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "193033762592",
+      "item_number": "1908288",
+      "description": "666 CLSS RECTANGLE +2.50",
+      "missing": [
+        "brand",
+        "images",
+        "aspects:Brand|Department|Frame Color|Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "193033765333",
+      "item_number": "1919226",
+      "description": "5015886-200.CSC",
+      "missing": [
+        "brand",
+        "images",
+        "aspects:Brand|Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "193033765432",
+      "item_number": "1919236",
+      "description": "5015887-300.CSC",
+      "missing": [
+        "brand",
+        "images",
+        "aspects:Brand|Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "193033765579",
+      "item_number": "1919251",
+      "description": "5015889-300.CSC",
+      "missing": [
+        "brand",
+        "images",
+        "aspects:Brand|Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "681147129993",
+      "item_number": "1929762",
+      "description": "HEX BOT WALL CRAWLING",
+      "missing": [
+        "brand",
+        "images",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "855267008388",
+      "item_number": "1938489",
+      "description": "BELLEVUE EMBOSSED 12OZ",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "198654180169",
+      "item_number": "2015869",
+      "description": "HUNTER INTREPID GLOVES",
+      "missing": [
+        "brand",
+        "aspects:Brand|Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "193033827185",
+      "item_number": "2027845",
+      "description": "669 UPSWEEP +1.25",
+      "missing": [
+        "brand",
+        "images",
+        "aspects:Brand|Department|Frame Color|Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "193033827239",
+      "item_number": "2027853",
+      "description": "669 UPSWEEP +3.00",
+      "missing": [
+        "brand",
+        "images",
+        "aspects:Brand|Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "855267008487",
+      "item_number": "2028273",
+      "description": "BELLEVUE 11OZ CANDLES 4PK",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "754502056439",
+      "item_number": "2063352",
+      "description": "COPPER FIT INSOLES 2PK",
+      "missing": [
+        "aspects:Color|Department|Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "193033460665",
+      "item_number": "1618384",
+      "description": "FGX MCKAY +3.00 2PK",
+      "missing": [
+        "brand",
+        "images",
+        "aspects:Brand",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "810042481725",
+      "item_number": "1665377",
+      "description": "CORA ORG LINER- 160CT",
+      "missing": [
+        "images",
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "197424179020",
+      "item_number": "1901759",
+      "description": "MIKASA CANDLE WARMER PLUG",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "602870201008",
+      "item_number": "1901861",
+      "description": "WATER HYACINTH BASKET",
+      "missing": [
+        "brand",
+        "aspects:Brand|Item Height|Item Length|Item Width|Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "887853006119",
+      "item_number": "1999233",
+      "description": "SCEPTER 5 GAL GAS CAN",
+      "missing": [
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "737839592290",
+      "item_number": "1397108",
+      "description": "GREENMADE INSTAVIEW 3PK",
+      "missing": [
+        "aspects:Item Height|Item Length|Item Width|Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "196633942418",
+      "item_number": "713160",
+      "description": "KS YELLOW MICROFIBER 36PK",
+      "missing": [
+        "images",
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "193033393307",
+      "item_number": "1504933",
+      "description": "FGX DAX +1.75 PLASTIC",
+      "missing": [
+        "brand",
+        "images",
+        "aspects:Sport",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "193033460399",
+      "item_number": "1618385",
+      "description": "FGX LYDEN +1.25 MENS 3PK",
+      "missing": [
+        "aspects:Department|Frame Color|Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "193033460436",
+      "item_number": "1618389",
+      "description": "FGX LYDEN +2.50 MENS 3PK",
+      "missing": [
+        "aspects:Department|Frame Color|Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "827854003670",
+      "item_number": "1689295",
+      "description": "COLGATE TOTAL TBRUSH",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "197424242618",
+      "item_number": "1934151",
+      "description": "MIKASA KEEPSAKE FRAMES",
+      "missing": [
+        "aspects:Item Height|Item Length|Item Width|Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "638060657713",
+      "item_number": "1370476",
+      "description": "3M Command Products",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "076308422509",
+      "item_number": "1781495",
+      "description": "3M MEDIUM DESIGNER HOOK",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "646760291861",
+      "item_number": "1796329",
+      "description": "NOODLE JACQUARD BATH RUG",
+      "missing": [
+        "aspects:Type|Color|Material",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "068060268648",
+      "item_number": "1944870",
+      "description": "3M COMMAND CLEAR WIRE",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "810080493155",
+      "item_number": "1654567",
+      "description": "CMT HEAT PRO TOE WARMERS",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "017801722871",
+      "item_number": "1718603",
+      "description": "FEIT 3-OUTLET OUTDOOR",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "827854023074",
+      "item_number": "1797240",
+      "description": "TOM'S OF MAINE TPST",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "068060335432",
+      "item_number": "2040218",
+      "description": "COMMAND BACK TO SCHOOL",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "040773110278",
+      "item_number": "1732950",
+      "description": "MICROPOLY BMAT BLUE/GREEN",
+      "missing": [
+        "images",
+        "aspects:Type|Color|Material",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "086093172312",
+      "item_number": "1796316",
+      "description": "MOHAWK KITCHEN MAT",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "718976070599",
+      "item_number": "1811557",
+      "description": "HEAD MEN'S RUNNING SM",
+      "missing": [
+        "dims",
+        "weight"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "023185000245",
+      "item_number": "1930184",
+      "description": "WIPE N CLEAR LENS WIPES",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "037700382860",
+      "item_number": "519964",
+      "description": "CHINET CUT CRYSTAL CUPS",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "079238003053",
+      "item_number": "1426555",
+      "description": "19\" MICHELIN HYBRID BLADE",
+      "missing": [
+        "images",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "079238003077",
+      "item_number": "1426563",
+      "description": "21\" MICHELIN HYBRID BLADE",
+      "missing": [
+        "images",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "079238003084",
+      "item_number": "1426568",
+      "description": "22\" MICHELIN HYBRID BLADE",
+      "missing": [
+        "images",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "079238003107",
+      "item_number": "1426573",
+      "description": "26\" MICHELIN HYBRID BLADE",
+      "missing": [
+        "images",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "810016855422",
+      "item_number": "1806244",
+      "description": "WRAP-IT STORAGE PACK 24PC",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "810170140099",
+      "item_number": "1896208",
+      "description": "Q-TIPS CTN.SWABS - 1875CT",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    },
+    {
+      "upc": "047218435859",
+      "item_number": "2054962",
+      "description": "PENGUIN + G BREAD PILLOW",
+      "missing": [
+        "brand",
+        "images",
+        "aspects:Type|Brand",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "737839850079",
+      "item_number": "7181000",
+      "description": "GREENMADE MINI BIN 10 PK",
+      "missing": [
+        "aspects:Item Height|Item Length|Item Width|Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "096619042319",
+      "item_number": "1418060",
+      "description": "KS CONDITIONER 33.8 FL OZ",
+      "missing": [
+        "aspects:Type",
+        "dims"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "737839826487",
+      "item_number": "1975791",
+      "description": "INSTAVIEW 13QT BIN 4PK",
+      "missing": [
+        "dims",
+        "weight"
+      ],
+      "primary": "upcitemdb"
+    },
+    {
+      "upc": "196633795403",
+      "item_number": "175504",
+      "description": "KS WIRE EDGE RIBBON",
+      "missing": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "850045609658",
+      "item_number": "2069312",
+      "description": "ORG MASA FLOURS 3/1#",
+      "missing": [
+        "brand",
+        "images",
+        "aspects:Type|Brand",
+        "dims",
+        "weight"
+      ],
+      "primary": "ebay"
+    },
+    {
+      "upc": "884389199971",
+      "item_number": "667196",
+      "description": "CURAD ALCOHOL PREP PADS",
+      "missing": [
+        "aspects:Type"
+      ],
+      "primary": "amazon"
+    }
+  ],
+  "internal4999": [
+    {
+      "upc": "499993873522",
+      "item_number": "2027861",
+      "description": "PUMA UNLIMITED BACKPACK",
+      "brand": "Puma",
+      "manufacturer_upc": null,
+      "primary": "ebay",
+      "title": "Puma PUMA UNLIMITED BACKPACK",
+      "gaps": [
+        "aspects:Color|Department|Material|Style",
+        "dims",
+        "weight"
+      ]
+    },
+    {
+      "upc": "499993873539",
+      "item_number": "2027860",
+      "description": "PUMA UNLIMITED BACKPACK",
+      "brand": "Puma",
+      "manufacturer_upc": null,
+      "primary": "ebay",
+      "title": "Puma PUMA UNLIMITED BACKPACK",
+      "gaps": [
+        "aspects:Color|Department|Material|Style",
+        "dims",
+        "weight"
+      ]
+    },
+    {
+      "upc": "499995353916",
+      "item_number": "2354207",
+      "description": "WOOZOO OSCILLATING GLOBE",
+      "brand": "Woozoo",
+      "manufacturer_upc": null,
+      "primary": "ebay",
+      "title": "Woozoo WOOZOO OSCILLATING GLOBE",
+      "gaps": [
+        "dims",
+        "weight"
+      ]
+    },
+    {
+      "upc": "499994560896",
+      "item_number": "4333009",
+      "description": "SHARPER IMAGE HOT/COLD",
+      "brand": "Sharper Image",
+      "manufacturer_upc": null,
+      "primary": "ebay",
+      "title": "Sharper Image SHARPER IMAGE HOT/COLD",
+      "gaps": [
+        "images",
+        "aspects:Type",
+        "dims",
+        "weight"
+      ]
+    },
+    {
+      "upc": "499997403619",
+      "item_number": "1476815",
+      "description": "KOHLER PUREWASH MANUAL",
+      "brand": "Kohler",
+      "manufacturer_upc": null,
+      "primary": "costco",
+      "title": "Kohler KOHLER PUREWASH MANUAL",
+      "gaps": [
+        "dims",
+        "weight"
+      ]
+    },
+    {
+      "upc": "499995127944",
+      "item_number": "1583883",
+      "description": "SHARPER IMAGE COMPACT",
+      "brand": "Sharper Image",
+      "manufacturer_upc": null,
+      "primary": "ebay",
+      "title": "Sharper Image SHARPER IMAGE COMPACT",
+      "gaps": [
+        "images",
+        "aspects:Type",
+        "dims",
+        "weight"
+      ]
+    },
+    {
+      "upc": "499993770722",
+      "item_number": "2042991",
+      "description": "CLEVERMADE LAUNDRY HAULER",
+      "brand": "Clevermade",
+      "manufacturer_upc": null,
+      "primary": "ebay",
+      "title": "Clevermade CLEVERMADE LAUNDRY HAULER",
+      "gaps": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ]
+    },
+    {
+      "upc": "499993717482",
+      "item_number": "1000190",
+      "description": "STANDBY SHOE BOX 4PK",
+      "brand": "",
+      "manufacturer_upc": null,
+      "primary": "ebay",
+      "title": "STANDBY SHOE BOX 4PK",
+      "gaps": [
+        "brand",
+        "images",
+        "aspects:Brand|Item Height|Item Length|Item Width|Type",
+        "dims",
+        "weight"
+      ]
+    },
+    {
+      "upc": "499994004437",
+      "item_number": "1998770",
+      "description": "JOLIE FILTERED SHOWER MB",
+      "brand": "Jolie",
+      "manufacturer_upc": null,
+      "primary": "ebay",
+      "title": "Jolie JOLIE FILTERED SHOWER MB",
+      "gaps": [
+        "images",
+        "dims",
+        "weight"
+      ]
+    },
+    {
+      "upc": "499994339157",
+      "item_number": "1940218",
+      "description": "SHARPER IMAGE HOT/COLD",
+      "brand": "Sharper Image",
+      "manufacturer_upc": null,
+      "primary": "ebay",
+      "title": "Sharper Image SHARPER IMAGE HOT/COLD",
+      "gaps": [
+        "images",
+        "aspects:Type",
+        "dims",
+        "weight"
+      ]
+    },
+    {
+      "upc": "499997957310",
+      "item_number": "3333009",
+      "description": "SHARPER IMAGE HOT/COLD",
+      "brand": "Sharper Image",
+      "manufacturer_upc": null,
+      "primary": "ebay",
+      "title": "Sharper Image SHARPER IMAGE HOT/COLD",
+      "gaps": [
+        "images",
+        "aspects:Type",
+        "dims",
+        "weight"
+      ]
+    },
+    {
+      "upc": "499994896360",
+      "item_number": "1851439",
+      "description": "REAL FX DISNEY STITCH",
+      "brand": "Disney",
+      "manufacturer_upc": null,
+      "primary": "ebay",
+      "title": "Disney REAL FX DISNEY STITCH",
+      "gaps": [
+        "dims",
+        "weight"
+      ]
+    },
+    {
+      "upc": "499994520326",
+      "item_number": "1913662",
+      "description": "HEATED VEST MEDIUM",
+      "brand": "32 Degrees",
+      "manufacturer_upc": null,
+      "primary": "ebay",
+      "title": "32 Degrees HEATED VEST MEDIUM",
+      "gaps": [
+        "aspects:Size Type|Size|Type|Style|Outer Shell Material|Department|Color",
+        "dims",
+        "weight"
+      ]
+    },
+    {
+      "upc": "499993648168",
+      "item_number": "2065561",
+      "description": "KENSINGTON WEAVE BLK 2PK",
+      "brand": "",
+      "manufacturer_upc": null,
+      "primary": "ebay",
+      "title": "KENSINGTON WEAVE BLK 2PK",
+      "gaps": [
+        "brand",
+        "images",
+        "aspects:Brand|Color|Material",
+        "dims",
+        "weight"
+      ]
+    },
+    {
+      "upc": "499993513480",
+      "item_number": "2087931",
+      "description": "DELSEY EVERYDAY TOTE",
+      "brand": "Delsey",
+      "manufacturer_upc": null,
+      "primary": "ebay",
+      "title": "Delsey DELSEY EVERYDAY TOTE",
+      "gaps": [
+        "dims",
+        "weight"
+      ]
+    },
+    {
+      "upc": "499993513473",
+      "item_number": "2087932",
+      "description": "DELSEY EVERYDAY TOTE",
+      "brand": "Delsey",
+      "manufacturer_upc": null,
+      "primary": "ebay",
+      "title": "Delsey DELSEY EVERYDAY TOTE",
+      "gaps": [
+        "dims",
+        "weight"
+      ]
+    },
+    {
+      "upc": "499993602443",
+      "item_number": "2074116",
+      "description": "BLUE PRINCESS 5/6",
+      "brand": "",
+      "manufacturer_upc": null,
+      "primary": "ebay",
+      "title": "BLUE PRINCESS 5/6",
+      "gaps": [
+        "brand",
+        "images",
+        "aspects:Brand|Material|Type",
+        "dims",
+        "weight"
+      ]
+    },
+    {
+      "upc": "499993602412",
+      "item_number": "2074120",
+      "description": "GREEN WITCH 5/6",
+      "brand": "",
+      "manufacturer_upc": null,
+      "primary": "ebay",
+      "title": "GREEN WITCH 5/6",
+      "gaps": [
+        "brand",
+        "images",
+        "dims",
+        "weight"
+      ]
+    },
+    {
+      "upc": "499993948787",
+      "item_number": "2010154",
+      "description": "PI RUNNER 24X72 WHITE",
+      "brand": "Purely Indulgent",
+      "manufacturer_upc": null,
+      "primary": "ebay",
+      "title": "Purely Indulgent PI RUNNER 24X72 WHITE",
+      "gaps": [
+        "images",
+        "aspects:Type",
+        "dims",
+        "weight"
+      ]
+    },
+    {
+      "upc": "499994244963",
+      "item_number": "1960345",
+      "description": "MYTAGALONGS TORONTO",
+      "brand": "Mytagalongs",
+      "manufacturer_upc": null,
+      "primary": "ebay",
+      "title": "Mytagalongs MYTAGALONGS TORONTO",
+      "gaps": [
+        "images",
+        "aspects:Exterior Material|Style|Exterior Color|Department",
+        "dims",
+        "weight"
+      ]
+    },
+    {
+      "upc": "499993938672",
+      "item_number": "2012350",
+      "description": "SUNGBOON COLLAGEN CREAM",
+      "brand": "Sungboon Editor",
+      "manufacturer_upc": null,
+      "primary": "ebay",
+      "title": "Sungboon Editor SUNGBOON COLLAGEN CREAM",
+      "gaps": [
+        "aspects:Type",
+        "dims",
+        "weight"
+      ]
+    },
+    {
+      "upc": "499993633294",
+      "item_number": "2068386",
+      "description": "COPPER FIT PRO BACK",
+      "brand": "Copper Fit",
+      "manufacturer_upc": null,
+      "primary": "ebay",
+      "title": "Copper Fit COPPER FIT PRO BACK",
+      "gaps": [
+        "images",
+        "aspects:Stove Type Compatibility",
+        "dims",
+        "weight"
+      ]
+    },
+    {
+      "upc": "499994134912",
+      "item_number": "1943393",
+      "description": "COPPER FIT ELITE",
+      "brand": "Copper Fit",
+      "manufacturer_upc": null,
+      "primary": "ebay",
+      "title": "Copper Fit COPPER FIT ELITE",
+      "gaps": [
+        "images",
+        "aspects:Stove Type Compatibility",
+        "dims",
+        "weight"
+      ]
+    },
+    {
+      "upc": "499995988934",
+      "item_number": "1654528",
+      "description": "DURACELL 2000L LANTERN",
+      "brand": "Duracell",
+      "manufacturer_upc": null,
+      "primary": "ebay",
+      "title": "Duracell DURACELL 2000L LANTERN",
+      "gaps": [
+        "dims",
+        "weight"
+      ]
+    }
+  ],
+  "errors": [],
+  "started_at": "2026-11-11T20:29:31.654Z",
+  "finished_at": "2026-11-11T20:51:56.372Z"
+}

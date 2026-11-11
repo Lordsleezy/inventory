@@ -640,10 +640,60 @@ export async function lookupUpc(storeId, rawCode, opts = {}) {
     found: false,
     skipped: amazon?.found ? "unrelated_product" : amazon?.skipped,
   };
+
+  // Costco club packs / 4999 stickers: fill gaps Amazon + UPCitemdb missed.
+  let costco = null;
+  const needsCostco =
+    opts.costco !== false &&
+    (!amazonAccepted || !amazon.found || !merged.title || !merged.images?.length || /^4999/.test(gtin.upcA || ""));
+  if (needsCostco && (opts.costcoItemNumber || opts.costcoBrand || opts.costcoDescription || merged.title || merged.brand)) {
+    try {
+      const { resolveCostcoPack } = await import("./costco-lookup.mjs");
+      costco = await resolveCostcoPack({
+        itemNumber: opts.costcoItemNumber || null,
+        brand: opts.costcoBrand || merged.brand,
+        description: opts.costcoDescription || merged.title,
+        title: merged.title,
+        upc: gtin.upcA || gtin.ean13,
+      });
+      if (costco?.found) {
+        if (!merged.title && costco.title) {
+          merged.title = costco.title;
+          fieldCoverage.title = costco.via || "costco";
+        }
+        if (!merged.brand && costco.brand) {
+          merged.brand = costco.brand;
+          fieldCoverage.brand = costco.via || "costco";
+        }
+        if (!merged.model && costco.model) {
+          merged.model = costco.model;
+          fieldCoverage.model = costco.via || "costco";
+        }
+        if (!merged.description && costco.description) {
+          merged.description = costco.description;
+          fieldCoverage.description = costco.via || "costco";
+        }
+        if ((!merged.images || !merged.images.length) && costco.images?.length) {
+          merged.images = costco.images;
+          fieldCoverage.images = costco.via || "costco";
+        }
+        if (costco.aspects && typeof costco.aspects === "object") {
+          merged.aspects = { ...costco.aspects, ...(merged.aspects || {}) };
+          if (!fieldCoverage.aspects) fieldCoverage.aspects = costco.via || "costco";
+        }
+        merged.not_found = !(merged.title || merged.brand);
+        if (costco.manufacturer_upc) merged.manufacturer_upc = costco.manufacturer_upc;
+      }
+    } catch {
+      costco = { found: false, raw_error: "costco_lookup_failed" };
+    }
+  }
+
   const photoRows = [
     ...(ebayCatalog?.epid ? (ebayCatalog.imageUrls || []).map((url) => ({ url, source: "ebay_catalog" })) : []),
     ...(acceptedAmazon.found ? (acceptedAmazon.images || []).map((url) => ({ url, source: "amazon" })) : []),
     ...(upcitemdb.images || []).map((url) => ({ url, source: "upcitemdb" })),
+    ...(costco?.found ? (costco.images || []).map((url) => ({ url, source: costco.via || "costco" })) : []),
   ];
   const seenPhotoUrls = new Set();
   const stock_photos = photoRows.filter((row) => {
@@ -673,6 +723,7 @@ export async function lookupUpc(storeId, rawCode, opts = {}) {
     upcitemdb,
     ebay,
     ebay_catalog: ebayCatalog,
+    costco,
     stock_photos,
     merged,
     fieldCoverage,
@@ -680,7 +731,8 @@ export async function lookupUpc(storeId, rawCode, opts = {}) {
   };
 
   // True miss → log for paid-DB evaluation / photo fallback. Transient errors skipped.
-  if (!amazon.found && !upcitemdb.found) {
+  const catalogHit = Boolean((amazonAccepted && amazon.found) || upcitemdb.found || costco?.found);
+  if (!amazon.found && !upcitemdb.found && !costco?.found) {
     const missId = await logUpcMiss(sb, {
       gtin,
       rawCode,
@@ -692,15 +744,15 @@ export async function lookupUpc(storeId, rawCode, opts = {}) {
     if (missId) result.miss_id = missId;
     result.true_miss = !amazon.raw_error && !upcitemdb.raw_error;
   } else if (!preserveContradictedSave && (merged.title || merged.brand)) {
-    const src = amazonAccepted && amazon.found ? "amazon" : "upcitemdb";
+    const src = amazonAccepted && amazon.found ? "amazon" : upcitemdb.found ? "upcitemdb" : "lookup";
     await saveFloorProduct(sb, gtin, merged, { source: src });
   }
 
   // Don't cache hard failures. Pricing rate-limits are OK to cache catalog without price
   // (price_pending) so the next scan still gets title/dims instantly.
-  const hardFail = Boolean(amazon.raw_error && !amazon.found) || Boolean(upcitemdb.raw_error && !upcitemdb.found && !amazon.found);
+  const hardFail = Boolean(amazon.raw_error && !amazon.found) || Boolean(upcitemdb.raw_error && !upcitemdb.found && !amazon.found && !costco?.found);
   const pricingOnlyPending = Boolean(amazon.price_pending || amazon.price_error === "amazon_pricing_rate_limited");
-  if (!preserveContradictedSave && !hardFail && (amazon.found || upcitemdb.found)) {
+  if (!preserveContradictedSave && !hardFail && catalogHit) {
     if (pricingOnlyPending && !amazon.price_cents) {
       // Cache catalog; leave price null so a later force can refresh pricing.
       const toCache = {
@@ -709,12 +761,12 @@ export async function lookupUpc(storeId, rawCode, opts = {}) {
         merged: { ...merged, retail_cents: merged.retail_cents || upcitemdb.price_cents || null },
       };
       await writeCache(sb, gtin.gtin14, toCache);
-    } else if (!amazon.price_error || pricingOnlyPending) {
+    } else if (!amazon.price_error || pricingOnlyPending || costco?.found) {
       await writeCache(sb, gtin.gtin14, result);
     } else {
       result.cache_skipped = "transient_error";
     }
-  } else {
+  } else if (!catalogHit) {
     result.cache_skipped = "transient_error";
   }
 

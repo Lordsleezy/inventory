@@ -125,7 +125,7 @@ test("attach_label does not ask for manual entry when barcode succeeded (Depop s
   const r = await attachUploadedLabel(
     sb,
     "s",
-    { id: "o1", store_id: "s", status: "paid", fulfillment: "ship", channel: "depop" },
+    { id: "o1", store_id: "s", status: "paid", fulfillment: "ship", channel: "depop", weight_verified_at: "2026-11-07T12:00:00Z" },
     { bytes: buf, name: "Label.pdf", mime: "application/pdf" },
     { allowMissingStorage: true, registerTrack: async () => ({ ok: true, skipped: "test" }) },
   );

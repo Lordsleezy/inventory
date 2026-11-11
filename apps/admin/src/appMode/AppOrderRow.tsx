@@ -2,7 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { WebOrder } from '../OrdersPage';
 import { displayOrderTitle } from '../orderDisplay';
 import { locationParts } from '../locationOrder';
-import { hasLabel, orderNeedsLabel, orderChip } from '../orderStage';
+import { hasLabel, orderNeedsLabel, orderNeedsWeightVerify, orderChip } from '../orderStage';
 import { UnitListThumb } from '../UnitListThumb';
 
 type Props = {
@@ -42,20 +42,22 @@ export function AppOrderRow({
   const loc = locationParts(locationCode);
   const chip = orderChip(order);
   const needsLabel = orderNeedsLabel(order);
-  const problem = needsLabel || chip.tone === 'warn';
+  const needsWeight = orderNeedsWeightVerify(order);
+  const problem = needsWeight || needsLabel || chip.tone === 'warn';
   const title = displayOrderTitle(order.title || order.marketplace_title);
   const meta = hideMoney
     ? [trackingTail].filter(Boolean).join(' · ')
-    : needsLabel
+    : needsLabel || needsWeight
       ? `${channelName} · ${money(order.item_cents || 0)}`
       : [channelName, money(order.item_cents || 0), trackingTail].filter(Boolean).join(' · ');
   const locLine = loc ? `${loc.display} · ${loc.slot}`.toUpperCase() : '';
   const showActions = Boolean(
     (hasLabel(order) && onPrint) || (showUpload && onUpload) || (showStepBack && onStepBack) || (showPackaged && onPackaged) || (showMarkShipped && onMarkShipped),
   );
+  const problemText = needsWeight ? 'Verify weight' : needsLabel ? 'Needs label' : chip.text;
 
   return (
-    <div className={`app-row app-order-row-v2${needsLabel ? ' needs-label' : ''}${selected ? ' selected' : ''}`}>
+    <div className={`app-row app-order-row-v2${needsLabel || needsWeight ? ' needs-label' : ''}${selected ? ' selected' : ''}`}>
       <div className="app-order-row-mainline">
         {selectMode && (
           <label className="app-order-check">
@@ -83,7 +85,7 @@ export function AppOrderRow({
             <span className={`app-order-loc${loc ? '' : ' missing'}`}>{locLine || 'NO LOCATION'}</span>
             {suggestHint && <span className="app-order-suggest">{suggestHint}</span>}
             {problem && (
-              <span className="app-order-problem">{needsLabel ? 'Needs label' : chip.text}</span>
+              <span className="app-order-problem">{problemText}</span>
             )}
           </span>
         </button>
