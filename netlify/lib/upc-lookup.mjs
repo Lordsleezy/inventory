@@ -11,6 +11,7 @@
  */
 import { serviceClient } from "./server.mjs";
 import { normalizeGtin } from "./gtin-normalize.mjs";
+import { keepStockPhoto } from "./stock-photo.mjs";
 import { isStoreLabelBarcode } from "../../shared/store-barcode.mjs";
 import {
   catalogItemByIdentifier,
@@ -488,9 +489,7 @@ async function readCache(sb, gtin14) {
   try {
     const { data, error } = await sb.from("upc_lookup_cache").select("*").eq("gtin14", gtin14).maybeSingle();
     if (error || !data?.payload) return null;
-    // A negative result may reflect temporary catalog coverage or a trial-tier gap.
-    // Recheck sources on the next scan instead of pinning a miss indefinitely.
-    if (!data.payload.amazon?.found && !data.payload.upcitemdb?.found) return null;
+    // A stored lookup is the result. A later scan does not spend another paid call.
     return data;
   } catch {
     return null;
@@ -697,7 +696,7 @@ export async function lookupUpc(storeId, rawCode, opts = {}) {
   ];
   const seenPhotoUrls = new Set();
   const stock_photos = photoRows.filter((row) => {
-    if (!row.url || seenPhotoUrls.has(row.url)) return false;
+    if (!row.url || seenPhotoUrls.has(row.url) || !keepStockPhoto(row)) return false;
     seenPhotoUrls.add(row.url);
     return true;
   }).slice(0, 6);

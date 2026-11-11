@@ -181,24 +181,14 @@ export async function ebayEnrichFromIdentity(identity = {}) {
     if (!items.length) return emptyCostco({ raw_error: "ebay_no_matches", item_number: itemNumber });
 
     const top = items[0];
-    const images = [top.image?.imageUrl, ...(top.additionalImages || []).map((i) => i?.imageUrl)]
-      .filter((u) => typeof u === "string" && /^https?:/i.test(u));
+    // Browse hits are other sellers' photos. Never keep them.
     let manufacturer_upc = null;
     const gtinAspect = (top.localizedAspects || []).find((a) =>
       /upc|ean|gtin|isbn/i.test(String(a?.name || "")),
     );
-    if (gtinAspect?.value && /^\d{8,14}$/.test(String(gtinAspect.value).replace(/\D/g, ""))) {
-      manufacturer_upc = String(gtinAspect.value).replace(/\D/g, "");
-    }
-    // Scan a few titles for embedded 12-digit UPCs that aren't Costco 4999 stickers.
-    if (!manufacturer_upc) {
-      for (const it of items.slice(0, 8)) {
-        const m = String(it.title || "").match(/\b(\d{12,13})\b/);
-        if (m && !/^4999/.test(m[1])) {
-          manufacturer_upc = m[1];
-          break;
-        }
-      }
+    if (gtinAspect?.value) {
+      const digits = String(gtinAspect.value).replace(/\D/g, "");
+      if (/^\d{12,14}$/.test(digits) && !/^4999/.test(digits)) manufacturer_upc = digits;
     }
     const aspects = {};
     for (const a of top.localizedAspects || []) {
@@ -214,7 +204,7 @@ export async function ebayEnrichFromIdentity(identity = {}) {
       description: null,
       features: [],
       aspects,
-      images,
+      images: [],
       package: { length_in: null, width_in: null, height_in: null, weight_lb: null },
       manufacturer_upc,
       item_number: itemNumber || null,

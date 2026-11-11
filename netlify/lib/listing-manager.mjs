@@ -4,6 +4,7 @@
  * Admin-only (portalAdminFromEvent at the function layer). Never marks units sold on end.
  */
 import { serviceClient } from "./server.mjs";
+import { marketplaceGtin } from "./gtin.mjs";
 import { assertBundlePush, bundleMainSku } from "./bundle-gate.mjs";
 import { ebayNeverList, ebayReviewReason } from "./ebay-exclusion.mjs";
 import {
@@ -1325,7 +1326,7 @@ export async function prefillCreate(storeId, { channel, sku } = {}) {
     condition: unit.condition,
     condition_note: unit.defect_notes || "",
     price_cents: unit.ask_cents,
-    upc: unit.upc,
+    upc: marketplaceGtin(unit.upc) || null,
     photos: photos.urls,
     photo_paths: photos.paths,
   };

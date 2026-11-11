@@ -10,6 +10,7 @@ import { assertBundlePush } from "./bundle-gate.mjs";
 import { sendInternalAlert, gmailConfigured } from "./mail.mjs";
 import { isMattressAccessory } from "../../shared/receive-category.mjs";
 import { orderLineQty } from "./channel-qty-sync.mjs";
+import { marketplaceGtin } from "./gtin.mjs";
 
 const LWA_TOKEN = "https://api.amazon.com/auth/o2/token";
 /** US marketplace — not a secret; keep out of Netlify env to save Lambda budget / clutter. */
@@ -355,7 +356,7 @@ export async function getFeesEstimate(storeId, { asin, priceCents, isAmazonFulfi
 
 export async function searchCatalogAsin(storeId, unit) {
   const mp = marketplaceId();
-  const upc = String(unit.upc || unit.listing_specs?.gtin || unit.listing_specs?.upc || "").replace(/\D/g, "");
+  const upc = marketplaceGtin(unit.upc || unit.listing_specs?.gtin || unit.listing_specs?.upc);
   const asinHint = String(unit.listing_specs?.asin || "").trim().toUpperCase();
   if (/^B0[A-Z0-9]{8}$/i.test(asinHint)) {
     return { asin: asinHint, title: unit.title || null, source: "unit_asin", confidence: "high" };

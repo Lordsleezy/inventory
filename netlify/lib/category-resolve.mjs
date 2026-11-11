@@ -1,5 +1,6 @@
 import { serviceClient } from './server.mjs';
 import { normalizeGtin } from './gtin-normalize.mjs';
+import { marketplaceGtin } from './gtin.mjs';
 import { catalogItemByIdentifier } from './amazon.mjs';
 import { ebayCategoriesForGtin, suggestCategories } from './ebay-catalog.mjs';
 import { tiktokApiFetch } from './tiktok-shop.mjs';
@@ -50,7 +51,7 @@ async function categoryRows(sb, ids) {
 function supportedAttributes(defs, product, unit) {
   const known = { Brand: unit.brand || product?.brand, brand: unit.brand || product?.brand,
     Model: unit.model || product?.model, model_number: unit.model || product?.model,
-    MPN: unit.model || product?.model, UPC: unit.upc,
+    MPN: unit.model || product?.model, UPC: marketplaceGtin(unit.upc) || undefined,
     item_name: unit.title || product?.title, merchant_suggested_asin: unit.listing_specs?.asin || product?.asin };
   const sources = [known, product?.aspects || {}, unit.listing_specs?.amazon_aspects || {},
     unit.listing_specs?.ebay_aspects || {}, unit.ebay_item_specifics || {}];

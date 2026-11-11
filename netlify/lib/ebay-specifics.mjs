@@ -4,6 +4,7 @@
  * Never overwrites a value that is already set; never changes an existing category.
  */
 import { normalizeGtin } from "./gtin-normalize.mjs";
+import { marketplaceGtin } from "./gtin.mjs";
 import { commonSiblingValue, textSuggestions } from "./aspect-suggest.mjs";
 import { missingAspectNames } from "../../shared/ebay-category-present.mjs";
 
@@ -55,8 +56,8 @@ export function unitAspects(unit = {}) {
   if (unit.brand) incoming.Brand = unit.brand;
   if (unit.model) { incoming.Model = unit.model; incoming.MPN = unit.model; }
   if (unit.condition) incoming.Condition = unit.condition;
-  const upc = text(unit.upc).replace(/\D/g, "");
-  if (upc.length >= 8) incoming.UPC = upc;
+  const upc = marketplaceGtin(unit.upc);
+  if (upc) incoming.UPC = upc;
   return incoming;
 }
 

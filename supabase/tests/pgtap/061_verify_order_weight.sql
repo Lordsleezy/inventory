@@ -37,6 +37,14 @@ select ok(
   'paid ship with no verify needs weight'
 );
 select ok(
+  not public.order_needs_weight_verify('paid', 'ship', null, null, null, null, null, '9334620845500057475261', null, null),
+  'a tracking number already on the order skips verify weight'
+);
+select ok(
+  not public.order_needs_weight_verify('paid', 'ship', null, null, null, null, null, null, 'labels/x.pdf', null),
+  'an uploaded label skips verify weight'
+);
+select ok(
   not public.order_needs_weight_verify('paid', 'pickup', null, null, null, null, null),
   'pickup skips weight verify'
 );

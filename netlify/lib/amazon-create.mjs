@@ -4,6 +4,7 @@
  * Never use Generic/unbranded for a branded Floor unit. Never AI images.
  */
 import { serviceClient } from "./server.mjs";
+import { marketplaceGtin } from "./gtin.mjs";
 import { assertBundlePush } from "./bundle-gate.mjs";
 import {
   STORE_DEFAULT,
@@ -37,7 +38,7 @@ export function buildStringLightAttributes(unit, { listCents, retailCents } = {}
   if (/^generic$/i.test(brand)) throw new Error("brand_generic_forbidden");
 
   const model = String(unit.model || specs.model || "").trim() || "UNKNOWN";
-  const upc = String(unit.upc || specs.upc || specs.gtin || "").replace(/\D/g, "");
+  const upc = marketplaceGtin(unit.upc || specs.upc || specs.gtin);
   const cond = amazonConditionFromUnit(unit);
   const title = String(unit.title || "").slice(0, 200);
   const lengthFt = Number(specs.lighted_length_ft || specs.cable_length_ft || 24) || 24;

@@ -19,7 +19,10 @@ create or replace function public.order_needs_weight_verify(
   p_shipped_at timestamptz,
   p_delivered_at timestamptz,
   p_canceled_at timestamptz,
-  p_weight_verified_at timestamptz
+  p_weight_verified_at timestamptz,
+  p_tracking text default null,
+  p_label_path text default null,
+  p_label_at timestamptz default null
 ) returns boolean
 language sql immutable as $$
   select p_status = 'paid'
@@ -28,17 +31,25 @@ language sql immutable as $$
     and p_packaged_at is null
     and p_shipped_at is null
     and p_delivered_at is null
-    and p_weight_verified_at is null;
+    and p_weight_verified_at is null
+    and nullif(btrim(coalesce(p_tracking, '')), '') is null
+    and nullif(btrim(coalesce(p_label_path, '')), '') is null
+    and p_label_at is null;
 $$;
 
-revoke all on function public.order_needs_weight_verify(text, text, timestamptz, timestamptz, timestamptz, timestamptz, timestamptz) from public, anon;
-grant execute on function public.order_needs_weight_verify(text, text, timestamptz, timestamptz, timestamptz, timestamptz, timestamptz) to authenticated, service_role;
+revoke all on function public.order_needs_weight_verify(text, text, timestamptz, timestamptz, timestamptz, timestamptz, timestamptz, text, text, timestamptz) from public, anon;
+grant execute on function public.order_needs_weight_verify(text, text, timestamptz, timestamptz, timestamptz, timestamptz, timestamptz, text, text, timestamptz) to authenticated, service_role;
 
--- In-flight packaged / shipped / labeled orders stay past Verify weight.
+-- Already packed, shipped, or labeled orders never go back to Verify weight.
 update public.web_orders
-  set weight_verified_at = coalesce(packaged_at, shipped_at, delivered_at, label_purchased_at, label_uploaded_at)
+  set weight_verified_at = coalesce(packaged_at, shipped_at, delivered_at, label_purchased_at, label_uploaded_at, now())
   where weight_verified_at is null
-    and coalesce(packaged_at, shipped_at, delivered_at, label_purchased_at, label_uploaded_at) is not null;
+    and (
+      coalesce(packaged_at, shipped_at, delivered_at, label_purchased_at, label_uploaded_at) is not null
+      or nullif(btrim(coalesce(tracking_number, '')), '') is not null
+      or nullif(btrim(coalesce(marketplace_tracking_number, '')), '') is not null
+      or nullif(btrim(coalesce(label_storage_path, '')), '') is not null
+    );
 
 -- Units already weighed (dims_source=verified) auto-verify open ship orders.
 update public.web_orders o
@@ -172,7 +183,9 @@ begin
   select * into o from public.web_orders where id = p_order and store_id = v_store for update;
   if not found then raise exception 'order_not_found' using errcode = 'P0001'; end if;
   if public.order_needs_weight_verify(
-    o.status, o.fulfillment, o.packaged_at, o.shipped_at, o.delivered_at, o.canceled_at, o.weight_verified_at
+    o.status, o.fulfillment, o.packaged_at, o.shipped_at, o.delivered_at, o.canceled_at, o.weight_verified_at,
+    coalesce(o.tracking_number, o.marketplace_tracking_number), o.label_storage_path,
+    coalesce(o.label_uploaded_at, o.label_purchased_at)
   ) then
     raise exception 'weight_required' using errcode = 'P0001';
   end if;
@@ -326,7 +339,9 @@ begin
           and (
             public.order_needs_weight_verify(
               o.status, o.fulfillment, o.packaged_at, o.shipped_at, o.delivered_at,
-              o.canceled_at, o.weight_verified_at
+              o.canceled_at, o.weight_verified_at,
+              coalesce(o.tracking_number, o.marketplace_tracking_number), o.label_storage_path,
+              coalesce(o.label_uploaded_at, o.label_purchased_at)
             )
             or not public.order_needs_label(
               o.status, o.channel, o.fulfillment, o.packaged_at, o.shipped_at, o.delivered_at,

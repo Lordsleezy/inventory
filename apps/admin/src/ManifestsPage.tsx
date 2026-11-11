@@ -5,6 +5,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { countManifestFile } from './manifestCount';
 import { parseManifestLines } from './manifestLines';
 import { backfillManifestFiles, isCsvManifestFile } from './manifestBackfill';
+import { floorFunctionUrl } from './floorApi';
 
 type Manifest = {
   line_count: number; id: string; name: string; source: string; manifest_on: string; item_count: number;
@@ -101,6 +102,17 @@ export function ManifestsPage({ client, storeId, money, layout }: Props) {
         ...(lines ? { p_lines: lines } : {}),
       });
       if (rpcError) throw rpcError;
+      if (lines?.length) {
+        const { data: session } = await client.auth.getSession();
+        const token = session.session?.access_token;
+        if (token) {
+          void fetch(floorFunctionUrl('manifest-prewarm'), {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+            body: JSON.stringify({ store_id: storeId, action: 'start', lines }),
+          }).catch(() => {});
+        }
+      }
       setName(''); setSource(''); setFile(null); setCount('0'); setAutomatic(false); if (fileInput.current) fileInput.current.value = '';
       setNotice(lines ? `Manifest saved with ${lines.length} lines for receive retail and defect warnings.` : 'Manifest saved. Line references require a CSV upload.');
       await load();

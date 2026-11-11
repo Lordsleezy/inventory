@@ -36,6 +36,16 @@ test('verify weight comes before needs label and package', () => {
     label_storage_path: 'a/b.pdf', label_tracking_mismatch: true,
   }).text, "Wrong label · doesn't match eBay");
   assert.equal(orderStage({ status: 'paid', fulfillment: 'ship', channel: 'depop' }), 'verifyWeight');
+  assert.equal(orderNeedsWeightVerify({
+    status: 'paid', fulfillment: 'ship', tracking_number: '9334620845500057475261',
+  }), false);
+  assert.equal(orderStage({
+    status: 'paid', fulfillment: 'ship', channel: 'depop', packaged_at: day,
+  }), 'packaged');
+  assert.equal(orderStage({
+    status: 'paid', fulfillment: 'ship', channel: 'depop',
+    label_storage_path: 'labels/depop.pdf', label_origin: 'upload',
+  }), 'toShip');
   assert.equal(orderStage({ status: 'paid', fulfillment: 'ship', channel: 'depop', ...verified }), 'needsLabel');
   assert.equal(orderChip({
     status: 'paid', fulfillment: 'ship', channel: 'depop', ...verified,

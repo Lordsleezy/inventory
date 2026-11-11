@@ -67,11 +67,20 @@ export function orderNeedsLabel(o: StageOrder) {
   return !labelReady(o);
 }
 
+/** A label or tracking number means the box is already closed. */
+export function orderAlreadyLabeled(o: StageOrder) {
+  if (o.packaged_at || o.shipped_at || o.delivered_at) return true;
+  if (o.label_storage_path || o.label_uploaded_at || o.label_purchased_at) return true;
+  if (o.label_origin === 'upload' || o.label_origin === 'bought') return true;
+  if (String(o.tracking_number || '').trim() || String(o.marketplace_tracking_number || '').trim()) return true;
+  return false;
+}
+
 /** Paid ship order still waiting on unpacked item weight. */
 export function orderNeedsWeightVerify(o: StageOrder) {
   if (o.status && o.status !== 'paid') return false;
   if (o.fulfillment && o.fulfillment !== 'ship') return false;
-  if (o.packaged_at || o.shipped_at || o.delivered_at) return false;
+  if (orderAlreadyLabeled(o)) return false;
   if (o.weight_verified_at) return false;
   return true;
 }

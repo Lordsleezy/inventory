@@ -40,6 +40,8 @@ async function handle(event) {
         force: body.force === true,
         limit: body.limit || 0,
         offset: body.offset || 0,
+        lines: Array.isArray(body.lines) ? body.lines : undefined,
+        csv_text: typeof body.csv_text === "string" ? body.csv_text : undefined,
       }),
     }).catch(() => {});
   }
