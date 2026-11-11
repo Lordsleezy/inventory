@@ -82,14 +82,12 @@ const CHANNELS: { key: Exclude<OnlineChannel, 'all'>; label: string }[] = [
   { key: 'facebook', label: 'Facebook' },
 ];
 
-/** Report platforms — includes retired sale channels for sold history. */
 const REPORT_CHANNELS: { key: string; label: string }[] = [
   { key: 'ebay', label: 'eBay' },
   { key: 'depop', label: 'Depop' },
   { key: 'amazon', label: 'Amazon' },
   { key: 'tiktok', label: 'TikTok' },
   { key: 'website', label: 'Website' },
-  { key: 'whatnot', label: 'Whatnot' },
   { key: 'facebook', label: 'Facebook' },
 ];
 
@@ -263,7 +261,7 @@ export function OnlinePage({
     });
     // Any other online channels returned by the API (keep totals honest).
     for (const row of fromApi) {
-      if (row.channel === 'mercari') continue;
+      if (row.channel === 'mercari' || row.channel === 'whatnot') continue;
       if (!base.some(b => b.channel === row.channel)) base.push(row);
     }
     return base;

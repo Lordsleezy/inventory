@@ -307,17 +307,6 @@ export const DEFAULT_CHANNEL_RULES = {
     blocked_categories: [],
     notes: "eBay: block prohibited goods and AI images. Size/shipping gates stay in ebay-eligibility.",
   },
-  whatnot: {
-    enabled: true,
-    block_requires_power: false,
-    block_ai_images: true,
-    block_stock_photos: false,
-    review_if_power_unknown: false,
-    prohibited_keywords: ["firearm", "ammunition", "ammo", "alcohol", "tobacco"],
-    blocked_keywords: [],
-    blocked_categories: [],
-    notes: "Whatnot: block clearly prohibited goods and AI images.",
-  },
   facebook: {
     enabled: true,
     block_requires_power: false,
