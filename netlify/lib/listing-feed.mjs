@@ -4,6 +4,7 @@
  */
 import { createHash, timingSafeEqual } from "node:crypto";
 import { isMattressAccessory } from "../../shared/receive-category.mjs";
+import { marketplaceGtin } from "./gtin.mjs";
 
 export const PHOTO_TTL_SECONDS = 3600;
 export const DEFAULT_LIMIT = 25;
@@ -258,7 +259,7 @@ export function shapeUnit(unit, { photos, listings, accounts, onWebsite, signed,
     title: String(unit.title || "").trim(),
     brand: unit.brand || "",
     model: unit.model || "",
-    upc: unit.upc || null,
+    upc: marketplaceGtin(unit.upc) || null,
     category: unit.category || null,
     condition: unit.condition || null,
     condition_notes: unit.defect_notes || null,

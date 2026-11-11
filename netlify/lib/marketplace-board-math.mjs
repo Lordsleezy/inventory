@@ -5,6 +5,8 @@
  * sale in the window has a label.
  */
 
+import { marketplaceGtin } from "./gtin.mjs";
+
 const ZONE = "America/Los_Angeles";
 const SPANS = ["Jan–Mar", "Apr–Jun", "Jul–Sep", "Oct–Dec"];
 
@@ -165,7 +167,7 @@ export function buildNotListed(units, { liveSkus = [], photoBySku = {}, blockedB
       sku,
       title: unit.title || `SKU ${sku}`,
       condition: unit.condition || null,
-      upc: unit.upc || null,
+      upc: marketplaceGtin(unit.upc) || null,
       asin: unit.asin || null,
       price_cents: unit.ask_cents ?? null,
       floor_ask_cents: unit.ask_cents ?? null,

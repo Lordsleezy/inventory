@@ -3,6 +3,8 @@
  * Never sets cost/ask. Never publishes channel listings.
  */
 import { normalizeGtin } from "./gtin-normalize.mjs";
+import { isCostcoInternalCode } from "./gtin.mjs";
+import { keepStockPhoto } from "./stock-photo.mjs";
 import { lookupUpc } from "./upc-lookup.mjs";
 import { saveFloorProduct } from "./floor-products.mjs";
 import { resolveCostcoPack } from "./costco-lookup.mjs";
@@ -69,7 +71,7 @@ export function linesFromCleanCsv(text) {
       seller_category: get(row, ["seller_category", "seller category"]),
       upc_type: get(row, ["upc_type"]) || (/^4999/.test(upc) ? "costco_internal" : upc.length === 13 ? "ean13" : "upc_a"),
       tcin: get(row, ["costco_item_number", "item_number", "tcin"]),
-      lot_id: "TRA-7096264",
+      lot_id: get(row, ["lot_id", "lot id"]) || null,
     };
   }).filter((l) => /^\d{8,14}$/.test(l.upc_normalized));
 }
@@ -109,6 +111,11 @@ async function enrichEbay(merged, upc) {
   return out;
 }
 
+function packCount(text) {
+  const match = String(text || "").match(/\b(\d+)\s*(?:ct|count|pack|pk)\b/i);
+  return match ? Number(match[1]) : null;
+}
+
 function gapsOf(merged, ebay) {
   const missing = [];
   if (!merged?.title) missing.push("title");
@@ -141,6 +148,7 @@ export async function prewarmManifestLines(storeId, lines, {
     listing_ready: 0,
     missing: [],
     internal4999: [],
+    conflicts: [],
     errors: [],
   };
 
@@ -150,8 +158,45 @@ export async function prewarmManifestLines(storeId, lines, {
     try {
       const gtin = normalizeGtin(line.upc_normalized);
       if (!gtin.ok) {
-        report.nothing++;
-        report.errors.push({ upc: line.upc_normalized, error: gtin.issue });
+        if (isInternal) {
+          const costco = await resolveCostcoPack({
+            itemNumber: line.item_number || line.tcin,
+            brand: line.brand,
+            description: line.description,
+            title: line.description,
+            upc: null,
+          });
+          const manufacturerUpc = costco.manufacturer_upc && !isCostcoInternalCode(costco.manufacturer_upc) && costco.via === "costco"
+            ? costco.manufacturer_upc
+            : null;
+          report.internal4999.push({
+            upc: line.upc_normalized,
+            item_number: line.item_number || line.tcin,
+            description: line.description,
+            brand: line.brand,
+            manufacturer_upc: manufacturerUpc,
+            candidate: Boolean(manufacturerUpc),
+            primary: "costco_item_number",
+            title: costco.title || [line.brand, line.description].filter(Boolean).join(" ") || null,
+            gaps: manufacturerUpc ? [] : ["candidate_gtin"],
+          });
+          if (!dryRun && manufacturerUpc) {
+            const real = normalizeGtin(manufacturerUpc);
+            if (real.ok) {
+              await saveFloorProduct(sb, real, {
+                title: costco.title || line.description,
+                brand: costco.brand || line.brand,
+                description: costco.description || line.description,
+                images: (costco.images || []).filter((url) => keepStockPhoto(url)),
+                aspects: { costco_item_number: line.item_number || line.tcin, candidate_gtin: true },
+                package: costco.package || {},
+              }, { source: "lookup" });
+            }
+          }
+        } else {
+          report.nothing++;
+          report.errors.push({ upc: line.upc_normalized, error: gtin.issue });
+        }
         continue;
       }
       let result = null;
@@ -194,6 +239,19 @@ export async function prewarmManifestLines(storeId, lines, {
           if (costco.aspects) merged.aspects = { ...costco.aspects, ...(merged.aspects || {}) };
           if (primary === "nothing") primary = costco.via === "costco" ? "costco" : "ebay";
         }
+      }
+
+      const manifestPack = packCount(line.description);
+      const catalogPack = packCount(merged.title);
+      if (manifestPack && catalogPack && manifestPack !== catalogPack) {
+        report.conflicts.push({
+          upc: line.upc_normalized,
+          item_number: line.item_number || line.tcin,
+          manifest_pack: manifestPack,
+          catalog_pack: catalogPack,
+        });
+        merged.title = [line.brand, line.description].filter(Boolean).join(" ");
+        merged.aspects = { ...(merged.aspects || {}), pack_conflict: true };
       }
 
       if (primary === "nothing" && (merged.title || merged.brand)) primary = "manifest_only";
@@ -239,12 +297,15 @@ export async function prewarmManifestLines(storeId, lines, {
         });
       }
 
-      if (!dryRun && (merged.title || merged.brand)) {
+      merged.images = (merged.images || []).filter((url) => keepStockPhoto({ url, source: "amazon" }) || keepStockPhoto(url));
+      if (!dryRun && !isInternal && (merged.title || merged.brand)) {
         const saveSource = primary === "amazon" ? "amazon" : primary === "upcitemdb" ? "upcitemdb" : "lookup";
-        await saveFloorProduct(sb, gtin, merged, { source: saveSource });
-        if (manufacturerUpc && manufacturerUpc !== line.upc_normalized) {
+        if (!isCostcoInternalCode(line.upc_normalized)) {
+          await saveFloorProduct(sb, gtin, merged, { source: saveSource });
+        }
+        if (manufacturerUpc && costco.via === "costco" && manufacturerUpc !== line.upc_normalized && !isCostcoInternalCode(manufacturerUpc)) {
           const real = normalizeGtin(manufacturerUpc);
-          if (real.ok) await saveFloorProduct(sb, real, merged, { source: saveSource });
+          if (real.ok) await saveFloorProduct(sb, real, { ...merged, aspects: { ...(merged.aspects || {}), candidate_gtin: true, costco_item_number: line.item_number || line.tcin } }, { source: saveSource });
         }
         const payload = {
           gtin: { gtin14: gtin.gtin14, upcA: gtin.upcA, ean13: gtin.ean13 },
@@ -255,7 +316,7 @@ export async function prewarmManifestLines(storeId, lines, {
           merged,
           fieldCoverage: result?.fieldCoverage || {},
           looked_up_at: new Date().toISOString(),
-          prewarm: { lot: "TRA-7096264", item_number: line.item_number || line.tcin },
+          prewarm: { lot: line.lot_id || null, item_number: line.item_number || line.tcin },
         };
         await sb.from("upc_lookup_cache").upsert({
           gtin14: gtin.gtin14,

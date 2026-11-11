@@ -26,3 +26,9 @@ test("reject bad check digit", () => {
   const r = normalizeGtin("012345678901");
   assert.equal(r.ok, false);
 });
+
+test("a Costco 4999 item number is not a GTIN", () => {
+  const r = normalizeGtin("499993873522");
+  assert.equal(r.ok, false);
+  assert.equal(r.issue, "costco internal item number");
+});

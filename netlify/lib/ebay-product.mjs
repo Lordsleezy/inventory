@@ -18,7 +18,8 @@ export function ebayIdentifiers(unit = {}, aspects = {}) {
   const pick = (...values) => values.map((value) => String(value ?? "").trim()).find(Boolean) || "";
   const brand = pick(aspects.Brand, unit.brand);
   const rawMpn = pick(aspects.MPN, unit.model);
-  const rawUpc = Object.hasOwn(aspects, "UPC") ? String(aspects.UPC ?? "").trim() : String(unit.upc ?? "").trim();
+  const pickedUpc = Object.hasOwn(aspects, "UPC") ? String(aspects.UPC ?? "").trim() : String(unit.upc ?? "").trim();
+  const rawUpc = /^4999\d{4,10}$/.test(pickedUpc.replace(/\D/g, "")) ? "" : pickedUpc;
   const normalize = (value) => !value || /^does\s+not\s+apply$/i.test(value) ? NOT_APPLICABLE : value;
   const upcIssue = /^does\s+not\s+apply$/i.test(rawUpc) ? null : gtinIssue(rawUpc);
   return {
