@@ -2416,7 +2416,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           {!staffMode && photoPrice?.listings?.[0] && <a className="receive-confirm-source" href={photoPrice.listings[0].url} target="_blank" rel="noreferrer">
             {photoPrice.listings[0].store} · {money(photoPrice.listings[0].price_cents)} · source ↗</a>}
           <div className="receive-confirm-bottom-row">
-            <label>Price<ManifestReceiveReference result={manifestReference} showMoney={!staffMode} /><input inputMode="decimal" placeholder="0.00" value={form.ask} onFocus={e => { typingTarget.current = e.currentTarget; }} onChange={e => update('ask',e.target.value)} /></label>
+            <label>Price<ManifestReceiveReference result={manifestReference} /><input inputMode="decimal" placeholder="0.00" value={form.ask} onFocus={e => { typingTarget.current = e.currentTarget; }} onChange={e => update('ask',e.target.value)} /></label>
             {!staffMode && <label>Cost<input inputMode="decimal" placeholder="Leave blank if unknown" value={form.cost} onChange={e => update('cost',e.target.value)} /></label>}
           </div>
           <div className={`receive-location-card${showSaveValidation && !selectedLocation.trim() && !doNotList ? ' receive-v2-invalid' : ''}`}><label>Location{!doNotList ? ' *' : ''}<select value={selectedLocation} onChange={e => setSelectedLocation(e.target.value)}>
@@ -2591,7 +2591,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         <div className="receive-v2-row2">
         <label className={invalid('price') ? 'receive-v2-invalid' : undefined}>
           <span className="receive-v2-label">Price{!doNotList && <span className="receive-v2-req"> *</span>}</span>
-          <ManifestReceiveReference result={manifestReference} showMoney={!staffMode} />
+          <ManifestReceiveReference result={manifestReference} />
           <input inputMode="decimal" placeholder="0.00" value={form.ask} onChange={e => update('ask', e.target.value)} autoComplete="off" />
         </label>
         {!staffMode && <label>
@@ -2801,7 +2801,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       <div className="receive-modal-card">
         <h3 id="miss-photo-title">{photoCandidate ? 'Confirm product from photo' : photoNeed ? 'More product details needed' : 'Can\'t find this item. Scan with camera?'}</h3>
         <p>{photoCandidate ? photoConflictText : `${photoNeed || 'Take one clear photo of the box or label.'} We\'ll identify the product and show asking prices so you can set the price.`}</p>
-        <ManifestReceiveReference result={manifestReference} showMoney={!staffMode} />
+        <ManifestReceiveReference result={manifestReference} />
         <ManifestSearchBox client={client} onPick={pickManifestLine} disabled={busy || photoIdBusy} />
         {previews[0] && <img src={previews[0]} alt="Photo being identified" style={{ maxWidth: '100%', maxHeight: 180, objectFit: 'contain' }} />}
         {photoIdBusy && <p role="status">{photoIdStatus || 'Identifying product…'}</p>}
