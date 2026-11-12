@@ -26,11 +26,19 @@ returns table (
   reason text,
   source text
 )
-language sql
+language plpgsql
 stable
 security definer
 set search_path = public
 as $fn$
+begin
+  if public.portal_store_id() is null
+     or p_store is distinct from public.portal_store_id()
+     or not public.portal_is_admin() then
+    raise exception 'portal_access_denied' using errcode = '42501';
+  end if;
+
+  return query
   with return_rows as (
     select
       ret.id::text as row_id,
@@ -138,6 +146,7 @@ as $fn$
   select * from return_rows
   union all
   select * from delivered_voids;
+end;
 $fn$;
 
 revoke all on function public.portal_true_return_refund_rows(uuid, timestamptz, timestamptz) from public, anon;
