@@ -203,6 +203,20 @@ type Lookup = {
     not_found?: boolean;
   };
   fieldCoverage?: { package?: string | null; price?: string | null };
+  prewarmed?: boolean;
+  receive?: {
+    bucket?: 'ready' | 'picker' | 'manifest' | 'search';
+    item_number?: string;
+    pack_count?: number | null;
+    condition_hint?: string;
+    manifest_retail_cents?: number | null;
+    conflict?: { field: string; note: string; values?: string[]; saved?: string | null } | null;
+    candidates?: { title: string; color?: string; size?: string; photo?: string | null }[];
+    matches?: { item_number: string; title: string; brand: string; code: string }[];
+    photo?: boolean;
+    internal?: boolean;
+    ebay_category_id?: string | null;
+  };
 };
 
 type PhotoPriceInfo = {
@@ -703,6 +717,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   const [photoIdStatus, setPhotoIdStatus] = useState('');
   const [photoIdError, setPhotoIdError] = useState('');
   const [photoNeed, setPhotoNeed] = useState('');
+  const [pickerBusy, setPickerBusy] = useState(false);
+  const [boxCheck, setBoxCheck] = useState('');
   const [photoPrice, setPhotoPrice] = useState<PhotoPriceInfo | null>(null);
   const [photoPriceError, setPhotoPriceError] = useState('');
   const [photoPriceBusy, setPhotoPriceBusy] = useState(false);
@@ -1042,7 +1058,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     const upc = raw.replace(/[\s,-]/g, '');
     if (!upc) return;
     setDraft('');
-    if (!/^\d{8,14}$/.test(upc)) { setError(`"${raw.trim()}" does not look like a UPC/EAN (8–14 digits). Scan again or use Enter manually.`); focusUpc(); return; }
+    if (!/^\d{4,14}$/.test(upc)) { setError(`"${raw.trim()}" is not a barcode or Costco item number. Scan again, or search the manifest.`); focusUpc(); return; }
     setError('');
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     setQueue(q => [...q, { id, upc, status: 'loading', seed }]);
@@ -1050,37 +1066,76 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     focusUpc();
   }
 
-  /** Manifest identity only — never ask/cost/condition from the sheet. */
-  function identitySeedFromManifest(line: Pick<ManifestSearchLine, 'brand' | 'description' | 'category' | 'upc_normalized'>): Partial<Form> {
-    const brand = String(line.brand || '').trim();
-    const description = String(line.description || '').trim();
-    const category = String(line.category || '').trim();
-    return {
-      ...(brand ? { brand, unbranded: false } : {}),
-      ...(description ? { title: brand ? `${brand} ${description}` : description, description } : {}),
-      ...(category ? { category } : {}),
-      ...(line.upc_normalized ? { upc: line.upc_normalized, noUpc: false } : {}),
+  function replaceScan(code: string) {
+    setManual(false);
+    setLoadedId(null);
+    setQueue([]);
+    enqueue(code);
+  }
+
+  async function chooseVariant(title: string) {
+    if (!current || pickerBusy) return;
+    setPickerBusy(true);
+    setError('');
+    try {
+      const response = await fetch(floorFunctionUrl('upc-lookup'), {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          action: 'pin_variant',
+          upc: current.upc,
+          title,
+          item_number: current.result?.receive?.item_number || '',
+        }),
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(json.error || json.message || 'That variant could not be saved');
+      setLoadedId(null);
+      setQueue(q => q.map(s => (s.id === current.id ? { ...s, status: 'ready', result: json as Lookup } : s)));
+    } catch (error) {
+      setError(errText(error) || 'That variant could not be saved. Choose none of these and photograph the box.');
+    } finally {
+      setPickerBusy(false);
+    }
+  }
+
+  function noneOfThese() {
+    if (!current?.result) return;
+    const next: Lookup = {
+      ...current.result,
+      receive: { ...current.result.receive, bucket: 'manifest', photo: true, candidates: [] },
     };
+    setLoadedId(null);
+    setQueue(q => q.map(s => (s.id === current.id ? { ...s, result: next } : s)));
+  }
+
+  async function saveBoxCheck(field: string, value: string) {
+    const entered = value.trim();
+    if (!current || !field || !entered) return;
+    setForm(prev => ({
+      ...prev,
+      notes: prev.notes.toLowerCase().includes(entered.toLowerCase()) ? prev.notes : [prev.notes, `${field}: ${entered}`].filter(Boolean).join('\n'),
+    }));
+    try {
+      await fetch(floorFunctionUrl('upc-lookup'), {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          action: 'save_correction',
+          upc: current.upc,
+          item_number: current.result?.receive?.item_number || '',
+          field,
+          value: entered,
+        }),
+      });
+    } catch { /* The note is still on this unit if the catalog write fails. */ }
   }
 
   function pickManifestLine(line: ManifestSearchLine) {
-    const upc = String(line.upc_normalized || '').replace(/[\s,-]/g, '');
-    const seed = identitySeedFromManifest(line);
+    const upc = String(line.upc_normalized || line.item_number || '').replace(/[\s,-]/g, '');
     if (dialog === 'miss-photo') setDialog(null);
-    if (manual || formOpen) {
-      setForm(prev => ({
-        ...prev,
-        upc: upc || prev.upc,
-        noUpc: upc ? false : prev.noUpc,
-        brand: (prev.brand.trim() || prev.unbranded) ? prev.brand : (seed.brand || prev.brand),
-        unbranded: (prev.brand.trim() || prev.unbranded) ? prev.unbranded : false,
-        title: prev.title.trim() ? prev.title : (seed.title || ''),
-        category: prev.category.trim() ? prev.category : (seed.category || ''),
-        description: prev.description.trim() ? prev.description : (seed.description || ''),
-      }));
-      return;
-    }
-    if (upc) enqueue(upc, seed);
+    if (!upc) return;
+    replaceScan(upc);
   }
 
   useEffect(() => {
@@ -1128,6 +1183,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     setMatOpen(false);
     setPhotoPriceError('');
     setPhotoPrice(null);
+    setBoxCheck('');
     setDimensionSources({});
     dimensionTouched.current.clear();
     setDimensionsError('');
@@ -1241,6 +1297,16 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       ...(current.seed || {}),
       costEstimate: false,
     };
+    if (r?.receive?.internal) {
+      initial.upc = '';
+      initial.noUpc = true;
+      if (r.receive.item_number) initial.notes = `Costco item ${r.receive.item_number}`;
+    }
+    if (r?.receive?.condition_hint && !initial.condition) initial.condition = r.receive.condition_hint;
+    if (r?.receive?.pack_count && !/pack|count|\bct\b/i.test(`${initial.title} ${initial.model} ${initial.variant}`)) {
+      initial.variant = [initial.variant, `${r.receive.pack_count} pack`].filter(Boolean).join(' ');
+    }
+    setBoxCheck(r?.receive?.conflict?.saved || '');
     // Seed may override brand/model — keep title in sync.
     if (!initial.title) initial.title = composeListingTitle(initial.brand, initial.model, initial.unbranded);
     askTouched.current = Boolean(current.seed && 'ask' in current.seed);
@@ -1274,7 +1340,9 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     // Instant miss popup (photo fallback). Do not re-prompt the same scan id.
     const identityNeeds = missingIdentityFields(r);
     setPhotoPrice(null);
-    if (!identityNeeds.length && m?.title && m?.brand) {
+    const prewarmed = Boolean(r?.prewarmed);
+    const picking = r?.receive?.bucket === 'picker' || r?.receive?.bucket === 'search';
+    if (!staffMode && !prewarmed && !identityNeeds.length && m?.title && m?.brand) {
       const priceIdentity = { title: m.title, brand: m.brand, model: m.model || '',
         variant: initial.variant, size: initial.size, unit_count: 1 };
       setPhotoIdentity(priceIdentity);
@@ -1284,7 +1352,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       try { return sessionStorage.getItem(`floor:receive-photo-dismissed:${storeId}:${current.upc}`) === '1'; }
       catch { return false; }
     })();
-    if ((isTrueCatalogMiss(r) || identityNeeds.length > 0) && missPromptedFor.current !== current.id && !photoDismissed) {
+    if (!picking && (r?.receive?.photo || isTrueCatalogMiss(r) || identityNeeds.length > 0) && missPromptedFor.current !== current.id && !photoDismissed) {
       missPromptedFor.current = current.id;
       setPhotoNeed(r?.store_label ? storeLabelWarning()
         : identityNeeds.length ? `Need: ${identityNeeds.join(', ')}. Take a photo of the product label.`
@@ -1300,8 +1368,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     setLoadedId(current.id);
     activeScan.current = current.id;
     const scanId = current.id;
-    if (!r?.store_label && m?.images?.[0]) void stageStockPhoto(String(m.images[0]), current.upc, scanId);
-    if (!r?.store_label && !isTrueCatalogMiss(r) && [initial.length, initial.width, initial.height, initial.weight,
+    if (!r?.store_label && !r?.receive?.internal && m?.images?.[0]) void stageStockPhoto(String(m.images[0]), current.upc, scanId);
+    if (!prewarmed && !r?.store_label && !isTrueCatalogMiss(r) && [initial.length, initial.width, initial.height, initial.weight,
       initial.productHeight, initial.productWidth, initial.productDepth, initial.productWeight].some(v => !v))
       void findPhotoDimensions(current.upc, scanId, {title:m?.title,brand:m?.brand,model:m?.model,size:initial.size});
     void findDups(upcVariants(current.upc, r)).then(d => { if (mounted.current && activeScan.current === scanId) setDups(d); });
@@ -1457,6 +1525,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     event?.preventDefault();
     setError(''); setWarning(''); setSaved([]);
     if (!manual && !current) { setError('Scan a UPC first, or use Enter manually.'); return; }
+    if (!manual && current?.result?.receive?.bucket === 'picker') { setError('Tap the variant on the box, or none of these.'); return; }
+    if (!manual && current?.result?.receive?.bucket === 'search') { setError('Tap the manifest line that matches the box.'); return; }
     const brandError = notForSaleBrandError(doNotList, brandReady());
     if (brandError) { setError(brandError); return; }
     if (!doNotList && photoVerifyPending) { setError('Choose whether the photo or barcode product is correct before saving.'); setDialog('miss-photo'); return; }
@@ -2150,7 +2220,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
             inputMode={scannerInputMode()}
             autoComplete="off"
             enterKeyHint="done"
-            placeholder={isKioskShell() ? 'Scan barcode' : 'Scan or type · Enter'}
+            placeholder={isKioskShell() ? 'Scan barcode' : 'Scan barcode or item #'}
             disabled={!accessToken || formOpen}
           />
         </label>}
@@ -2195,6 +2265,29 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     {!manual && current?.status === 'loading' && <div className="empty">Looking up {current.upc}…</div>}
 
     {showForm && <form id={appChrome ? 'receive-app-form' : undefined} onSubmit={e => void finish(e)}>
+      {result?.receive?.bucket === 'picker' && <div className="receive-picker" role="listbox" aria-label="Which variant is on the box">
+        <p><strong>Which one is on the box?</strong></p>
+        {(result.receive.candidates || []).map(candidate => {
+          const detail = [candidate.color, candidate.size].filter(Boolean).join(' · ');
+          return <button type="button" key={candidate.title} className="receive-picker-row" disabled={pickerBusy} onClick={() => void chooseVariant(candidate.title)}>
+            {candidate.photo ? <img src={candidate.photo} alt="" /> : null}
+            <span><strong>{candidate.title}</strong>{detail ? <small>{detail}</small> : null}</span>
+          </button>;
+        })}
+        <button type="button" className="receive-picker-none" disabled={pickerBusy} onClick={noneOfThese}>{pickerBusy ? 'Saving that one…' : 'None of these'}</button>
+      </div>}
+      {result?.receive?.bucket === 'search' && <div className="receive-picker" role="listbox" aria-label="Manifest matches">
+        <p><strong>Which manifest line?</strong></p>
+        {(result.receive.matches || []).map(match => <button type="button" key={`${match.item_number}-${match.code}`} className="receive-picker-row" onClick={() => replaceScan(match.code || match.item_number)}>
+          <span><strong>{[match.brand, match.title].filter(Boolean).join(' ')}</strong><small>#{match.item_number}</small></span>
+        </button>)}
+      </div>}
+      {result?.receive?.conflict && <div className="receive-v2-banner" role="alert">
+        <strong>{result.receive.conflict.note}</strong>
+        <label>{result.receive.conflict.field}
+          <input value={boxCheck} onChange={e => setBoxCheck(e.target.value)} onBlur={() => void saveBoxCheck(result.receive?.conflict?.field || '', boxCheck)} />
+        </label>
+      </div>}
       {!unifiedV2 && <ReceiveQuantity value={form.quantity} onChange={value=>update('quantity',value)} disabled={busy} />}
       {stockMatches.length > 0 && <div className="receive-dup" role="status"><strong>Matching inventory</strong>{stockMatches.map(match => <p key={match.sku}>{match.title} · SKU {match.sku} · {match.quantity} on hand · {match.condition || 'condition unset'}{match.is_stocked
         ? <> <button type="button" disabled={busy} onClick={() => setSelectedStockMatch(match)}>{selectedStockMatch?.sku === match.sku ? 'Selected' : 'Add to this SKU'}</button></>
@@ -2313,17 +2406,17 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         }} /></Suspense>}
 
         <div className="receive-confirm-bottom">
-          <details className="receive-confirm-prices" open={storePhoneMode}><summary>{photoPriceBusy ? 'Searching prices...' : !photoIdentity ? 'Price reference unavailable' : photoPriceError ? 'Price search incomplete' : photoPrice?.median_cents != null
+          {!staffMode && <details className="receive-confirm-prices" open={storePhoneMode}><summary>{photoPriceBusy ? 'Searching prices...' : !photoIdentity ? 'Price reference unavailable' : photoPriceError ? 'Price search incomplete' : photoPrice?.median_cents != null
             ? `Online asking price ~${money(photoPrice.median_cents)} (${photoPrice.count} listings, ${money(photoPrice.low_cents)}–${money(photoPrice.high_cents)})`
             : photoPrice?.count ? `Online price ${money(photoPrice.low_cents)}${photoPrice.count > 1 ? `–${money(photoPrice.high_cents)}` : ''}` : 'Price reference unavailable'}</summary>
             {photoPrice?.listings?.map(listing => <a key={listing.url} href={listing.url} target="_blank" rel="noreferrer">{listing.store} · {money(listing.price_cents)} · {listing.product_name}</a>)}
             {photoPrice?.highest_retail && <small>Highest retail seen: {photoPrice.highest_retail.store} · {money(photoPrice.highest_retail.price_cents)}</small>}
             {photoPriceError && <><span>{photoPriceError}</span>{photoIdentity && <button type="button" className="secondary" onClick={() => void findPhotoPrices(photoIdentity)}>Retry prices</button>}</>}
-          </details>
-          {photoPrice?.listings?.[0] && <a className="receive-confirm-source" href={photoPrice.listings[0].url} target="_blank" rel="noreferrer">
+          </details>}
+          {!staffMode && photoPrice?.listings?.[0] && <a className="receive-confirm-source" href={photoPrice.listings[0].url} target="_blank" rel="noreferrer">
             {photoPrice.listings[0].store} · {money(photoPrice.listings[0].price_cents)} · source ↗</a>}
           <div className="receive-confirm-bottom-row">
-            <label>Price<ManifestReceiveReference result={manifestReference} /><input inputMode="decimal" placeholder="0.00" value={form.ask} onFocus={e => { typingTarget.current = e.currentTarget; }} onChange={e => update('ask',e.target.value)} /></label>
+            <label>Price<ManifestReceiveReference result={manifestReference} showMoney={!staffMode} /><input inputMode="decimal" placeholder="0.00" value={form.ask} onFocus={e => { typingTarget.current = e.currentTarget; }} onChange={e => update('ask',e.target.value)} /></label>
             {!staffMode && <label>Cost<input inputMode="decimal" placeholder="Leave blank if unknown" value={form.cost} onChange={e => update('cost',e.target.value)} /></label>}
           </div>
           <div className={`receive-location-card${showSaveValidation && !selectedLocation.trim() && !doNotList ? ' receive-v2-invalid' : ''}`}><label>Location{!doNotList ? ' *' : ''}<select value={selectedLocation} onChange={e => setSelectedLocation(e.target.value)}>
@@ -2498,7 +2591,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         <div className="receive-v2-row2">
         <label className={invalid('price') ? 'receive-v2-invalid' : undefined}>
           <span className="receive-v2-label">Price{!doNotList && <span className="receive-v2-req"> *</span>}</span>
-          <ManifestReceiveReference result={manifestReference} />
+          <ManifestReceiveReference result={manifestReference} showMoney={!staffMode} />
           <input inputMode="decimal" placeholder="0.00" value={form.ask} onChange={e => update('ask', e.target.value)} autoComplete="off" />
         </label>
         {!staffMode && <label>
@@ -2708,7 +2801,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       <div className="receive-modal-card">
         <h3 id="miss-photo-title">{photoCandidate ? 'Confirm product from photo' : photoNeed ? 'More product details needed' : 'Can\'t find this item. Scan with camera?'}</h3>
         <p>{photoCandidate ? photoConflictText : `${photoNeed || 'Take one clear photo of the box or label.'} We\'ll identify the product and show asking prices so you can set the price.`}</p>
-        <ManifestReceiveReference result={manifestReference} />
+        <ManifestReceiveReference result={manifestReference} showMoney={!staffMode} />
         <ManifestSearchBox client={client} onPick={pickManifestLine} disabled={busy || photoIdBusy} />
         {previews[0] && <img src={previews[0]} alt="Photo being identified" style={{ maxWidth: '100%', maxHeight: 180, objectFit: 'contain' }} />}
         {photoIdBusy && <p role="status">{photoIdStatus || 'Identifying product…'}</p>}
