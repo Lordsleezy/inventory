@@ -6,13 +6,16 @@ import { countManifestFile } from './manifestCount';
 import { parseManifestLines } from './manifestLines';
 import { backfillManifestFiles, isCsvManifestFile } from './manifestBackfill';
 import { floorFunctionUrl } from './floorApi';
+import { formatCentsAsDollars, manifestUnitCostCents, parseLotCostCents } from './manifestLotCost';
 
 type Manifest = {
   line_count: number; id: string; name: string; source: string; manifest_on: string; item_count: number;
   count_source: string; storage_path: string; content_type?: string; received_count: number; sold_count: number;
   stock_count: number; revenue_cents: number; profit_cents: number;
+  total_cost_cents?: number | null; unit_cost_cents?: number | null;
 };
 type Props = { client: SupabaseClient; storeId: string; money: (cents: number) => string; layout?: 'desktop' };
+const LOT_COST_ENTRY = /^\d*(?:\.\d{0,2})?$/;
 function manifestDate(iso: string) {
   if (!iso) return '—';
   return new Date(`${iso.slice(0, 10)}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
@@ -40,6 +43,8 @@ export function ManifestsPage({ client, storeId, money, layout }: Props) {
   const [notice, setNotice] = useState('');
   const [loaded, setLoaded] = useState(false);
   const [backfills, setBackfills] = useState<Record<string, string>>({});
+  const [lotDrafts, setLotDrafts] = useState<Record<string, string>>({});
+  const [lotOverwrite, setLotOverwrite] = useState<Record<string, boolean>>({});
 
   const load = useCallback(async () => {
     const [manifestResult, receivedResult] = await Promise.all([
@@ -142,6 +147,61 @@ export function ManifestsPage({ client, storeId, money, layout }: Props) {
     finally { submitLock.current = false; setBusy(false); }
   }
 
+  function lotDraftFor(row: Manifest) {
+    if (Object.prototype.hasOwnProperty.call(lotDrafts, row.id)) return lotDrafts[row.id];
+    return row.total_cost_cents != null ? formatCentsAsDollars(row.total_cost_cents) : '';
+  }
+
+  function setLotDraft(id: string, value: string) {
+    if (!LOT_COST_ENTRY.test(value)) return;
+    setLotDrafts((prev) => ({ ...prev, [id]: value }));
+  }
+
+  async function saveLotCost(row: Manifest) {
+    if (submitLock.current) return;
+    const cents = parseLotCostCents(lotDraftFor(row));
+    if (cents == null) { setError('Enter the lot cost like 1250.00 (0 is allowed).'); return; }
+    if (row.item_count <= 0) { setError('Set the item count before saving lot cost.'); return; }
+    const each = manifestUnitCostCents(cents, row.item_count);
+    if (each == null) { setError('Could not divide that cost by the item count.'); return; }
+    const overwrite = !!lotOverwrite[row.id];
+    const applyNote = row.received_count > 0
+      ? `\n\nThis sets ${money(each)} on each unit tagged to this manifest${overwrite ? ' (including units that already have a cost)' : ' that are still missing cost'}.`
+      : '\n\nNo units are tagged yet — the cost is saved and will apply when you tag or receive against this manifest.';
+    if (!window.confirm(
+      `Save lot cost ${money(cents)} ÷ ${row.item_count.toLocaleString('en-US')} items = ${money(each)} each?${applyNote}`,
+    )) return;
+    submitLock.current = true; setBusy(true); setError(''); setNotice('');
+    try {
+      const { data, error: rpcError } = await client.rpc('portal_set_manifest_lot_cost', {
+        p_id: row.id,
+        p_total_cents: cents,
+        p_overwrite: overwrite,
+      });
+      if (rpcError) {
+        const msg = rpcError.message === 'manifest_count_required' ? 'Set the item count before saving lot cost.'
+          : rpcError.message === 'cost_must_not_be_negative' ? 'Lot cost cannot be negative.'
+            : rpcError.message;
+        throw new Error(msg);
+      }
+      const result = (data || {}) as { updated?: number; skipped?: number; unit_cost_cents?: number };
+      const updated = Number(result.updated || 0);
+      const skipped = Number(result.skipped || 0);
+      setLotDrafts((prev) => {
+        const next = { ...prev };
+        delete next[row.id];
+        return next;
+      });
+      if (updated > 0) {
+        setNotice(`Lot cost saved · ${money(Number(result.unit_cost_cents ?? each))} each · updated ${updated} unit${updated === 1 ? '' : 's'}${skipped ? ` · left ${skipped} unchanged` : ''}.`);
+      } else {
+        setNotice(`Lot cost saved · ${money(Number(result.unit_cost_cents ?? each))} each. Tag or receive units to apply it${skipped ? ` (${skipped} already had a cost)` : ''}.`);
+      }
+      await load();
+    } catch (e) { setError(String((e as Error).message || e)); }
+    finally { submitLock.current = false; setBusy(false); }
+  }
+
   async function bulkTag(event: FormEvent) {
     event.preventDefault();
     if (submitLock.current) return;
@@ -173,6 +233,8 @@ export function ManifestsPage({ client, storeId, money, layout }: Props) {
       name={name} source={source} date={date} file={file} count={count} automatic={automatic}
       bulk={bulk} bulkManifest={bulkManifest} bulkSkus={bulkSkus} fileInput={fileInput}
       backfills={backfills} total={total} allTimeReceived={allTimeReceived} money={money}
+      lotDraftFor={lotDraftFor} setLotDraft={setLotDraft} lotOverwrite={lotOverwrite} setLotOverwrite={setLotOverwrite}
+      saveLotCost={saveLotCost}
       setError={setError} setName={setName} setSource={setSource} setDate={setDate} setCount={setCount} setAutomatic={setAutomatic} setBulk={setBulk} setBulkManifest={setBulkManifest}
       chooseFile={chooseFile} upload={upload} openFile={open} changeCount={changeCount} bulkTag={bulkTag} load={load}
     />;
@@ -195,7 +257,7 @@ export function ManifestsPage({ client, storeId, money, layout }: Props) {
       {!loaded ? <p role="status">{error ? 'Could not load saved manifests.' : 'Loading manifests…'} {error && <button type="button" className="secondary" onClick={() => void load().catch(e => setError(String(e.message || e)))}>Retry</button>}</p> : rows.length === 0 ? <ToolEmpty icon="file" title="No manifests uploaded yet."><p>Upload a manifest above to start tracking inventory and manage your manifests here.</p></ToolEmpty>
         : <div className="manifest-list">{rows.map(row => <details className="manifest-row" key={row.id}>
           <summary><span><strong>{row.name}</strong><small>{row.manifest_on}{row.source ? ` · ${row.source}` : ''}</small></span><b>{row.item_count} items <span aria-hidden="true">›</span></b></summary>
-          <div className="manifest-detail"><p>{backfills[row.id] || (row.line_count ? `${row.line_count} line items saved.` : isCsvManifestFile(row) ? 'Checking stored CSV for line items…' : 'Original file retained. Upload a CSV to add line references.')}</p><div className="manifest-metrics"><span>Received<b>{row.received_count}</b></span><span>Sold<b>{row.sold_count}</b></span><span>In stock<b>{row.stock_count}</b></span><span>Revenue<b>{money(row.revenue_cents)}</b></span><span>Profit<b>{money(row.profit_cents)}</b></span></div><div className="actions"><button type="button" className="secondary" onClick={() => void open(row)}>Open file</button><button type="button" className="secondary" disabled={busy} onClick={() => void changeCount(row)}>Edit item count</button></div></div>
+          <div className="manifest-detail"><p>{backfills[row.id] || (row.line_count ? `${row.line_count} line items saved.` : isCsvManifestFile(row) ? 'Checking stored CSV for line items…' : 'Original file retained. Upload a CSV to add line references.')}</p><div className="manifest-metrics"><span>Received<b>{row.received_count}</b></span><span>Sold<b>{row.sold_count}</b></span><span>In stock<b>{row.stock_count}</b></span><span>Revenue<b>{money(row.revenue_cents)}</b></span><span>Profit<b>{money(row.profit_cents)}</b></span>{row.total_cost_cents != null ? <span>Lot cost<b>{money(row.total_cost_cents)}</b></span> : null}{row.unit_cost_cents != null ? <span>Each<b>{money(row.unit_cost_cents)}</b></span> : null}</div><ManifestLotCostForm row={row} busy={busy} money={money} draft={lotDraftFor(row)} overwrite={!!lotOverwrite[row.id]} onDraft={(v) => setLotDraft(row.id, v)} onOverwrite={(v) => setLotOverwrite((prev) => ({ ...prev, [row.id]: v }))} onSave={() => void saveLotCost(row)} /><div className="actions"><button type="button" className="secondary" onClick={() => void open(row)}>Open file</button><button type="button" className="secondary" disabled={busy} onClick={() => void changeCount(row)}>Edit item count</button></div></div>
         </details>)}</div>}
       <div className="tool-total-row"><span>Total manifested items</span><strong>{loaded ? total : '—'}</strong></div>
       <div className="tool-total-row"><span>Total inventoried (all time)</span><strong>{allTimeReceived == null ? '—' : allTimeReceived}</strong></div>
@@ -213,9 +275,50 @@ export function ManifestsPage({ client, storeId, money, layout }: Props) {
   </div>;
 }
 
+function ManifestLotCostForm({
+  row, busy, money, draft, overwrite, onDraft, onOverwrite, onSave,
+}: {
+  row: Manifest; busy: boolean; money: (cents: number) => string; draft: string; overwrite: boolean;
+  onDraft: (value: string) => void; onOverwrite: (value: boolean) => void; onSave: () => void;
+}) {
+  const cents = parseLotCostCents(draft);
+  const each = cents != null ? manifestUnitCostCents(cents, row.item_count) : null;
+  return (
+    <div className="manifest-lot-cost">
+      <label>
+        Lot cost ($)
+        <input
+          inputMode="decimal"
+          disabled={busy}
+          value={draft}
+          placeholder="e.g. 1250.00"
+          aria-label={`Lot cost for ${row.name}`}
+          onChange={(e) => onDraft(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); onSave(); } }}
+        />
+      </label>
+      <small>
+        {row.item_count <= 0
+          ? 'Set the item count first, then enter what you paid for the whole load.'
+          : each != null
+            ? `${money(cents!)} ÷ ${row.item_count.toLocaleString('en-US')} items = ${money(each)} each`
+            : 'Enter what you paid for the whole load. We divide by item count and set unit costs.'}
+      </small>
+      <label className="manifest-lot-overwrite">
+        <input type="checkbox" disabled={busy} checked={overwrite} onChange={(e) => onOverwrite(e.target.checked)} />
+        Also replace units that already have a cost
+      </label>
+      <button type="button" className="secondary" disabled={busy || cents == null || row.item_count <= 0} onClick={onSave}>
+        {busy ? 'Saving…' : 'Save lot cost'}
+      </button>
+    </div>
+  );
+}
+
 function ManifestsDesktop({
   rows, loaded, error, notice, busy, counting, name, source, date, file, count, automatic,
   bulk, bulkManifest, bulkSkus, fileInput, backfills, total, allTimeReceived, money,
+  lotDraftFor, setLotDraft, lotOverwrite, setLotOverwrite, saveLotCost,
   setError, setName, setSource, setDate, setCount, setAutomatic, setBulk, setBulkManifest,
   chooseFile, upload, openFile, changeCount, bulkTag, load,
 }: {
@@ -223,6 +326,11 @@ function ManifestsDesktop({
   name: string; source: string; date: string; file: File | null; count: string; automatic: boolean;
   bulk: string; bulkManifest: string; bulkSkus: string[]; fileInput: RefObject<HTMLInputElement | null>;
   backfills: Record<string, string>; total: number; allTimeReceived: number | null; money: (cents: number) => string;
+  lotDraftFor: (row: Manifest) => string;
+  setLotDraft: (id: string, value: string) => void;
+  lotOverwrite: Record<string, boolean>;
+  setLotOverwrite: (updater: (prev: Record<string, boolean>) => Record<string, boolean>) => void;
+  saveLotCost: (row: Manifest) => Promise<void>;
   setError: (v: string) => void; setName: (v: string) => void; setSource: (v: string) => void; setDate: (v: string) => void;
   setCount: (v: string) => void; setAutomatic: (v: boolean) => void; setBulk: (v: string) => void; setBulkManifest: (v: string) => void;
   chooseFile: (next: File | null) => Promise<void>;
@@ -269,7 +377,7 @@ function ManifestsDesktop({
         : (
           <table className="desk-table manifests-table">
             <thead>
-              <tr><th>Manifest</th><th>Date</th><th>Source</th><th className="num">Items</th><th><span className="sr">Actions</span></th></tr>
+              <tr><th>Manifest</th><th>Date</th><th>Source</th><th className="num">Items</th><th className="num">Lot cost</th><th className="num">Each</th><th><span className="sr">Actions</span></th></tr>
             </thead>
             <tbody>
               {rows.map((row) => (
@@ -278,6 +386,8 @@ function ManifestsDesktop({
                   <td>{manifestDate(row.manifest_on)}</td>
                   <td>{row.source || '—'}</td>
                   <td className="num">{row.item_count.toLocaleString('en-US')}</td>
+                  <td className="num">{row.total_cost_cents != null ? money(row.total_cost_cents) : '—'}</td>
+                  <td className="num">{row.unit_cost_cents != null ? money(row.unit_cost_cents) : '—'}</td>
                   <td className="manifests-actions">
                     <button type="button" onClick={() => { setDetailId(row.id); setPanel('detail'); }}>Open</button>
                     <button type="button" onClick={() => void openFile(row)}>Open file</button>
@@ -310,7 +420,19 @@ function ManifestsDesktop({
                   <li><span>In stock</span><b>{detail.stock_count}</b></li>
                   <li><span>Revenue</span><b>{money(detail.revenue_cents)}</b></li>
                   <li><span>Profit</span><b>{money(detail.profit_cents)}</b></li>
+                  <li><span>Lot cost</span><b>{detail.total_cost_cents != null ? money(detail.total_cost_cents) : '—'}</b></li>
+                  <li><span>Each</span><b>{detail.unit_cost_cents != null ? money(detail.unit_cost_cents) : '—'}</b></li>
                 </ul>
+                <ManifestLotCostForm
+                  row={detail}
+                  busy={busy}
+                  money={money}
+                  draft={lotDraftFor(detail)}
+                  overwrite={!!lotOverwrite[detail.id]}
+                  onDraft={(v) => setLotDraft(detail.id, v)}
+                  onOverwrite={(v) => setLotOverwrite((prev) => ({ ...prev, [detail.id]: v }))}
+                  onSave={() => void saveLotCost(detail)}
+                />
                 <div className="actions">
                   <button type="button" onClick={() => void openFile(detail)}>Open file</button>
                   <button type="button" disabled={busy} onClick={() => void changeCount(detail)}>Edit count</button>
