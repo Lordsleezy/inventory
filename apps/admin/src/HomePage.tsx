@@ -94,10 +94,10 @@ export function HomePage({ displayName, email, deskAccess, pulse, client, access
           <h1 className="desk-hello">{hello}, {name}.</h1>
         </div>
         {isJacob && (
-          <aside className="desk-payout-due">
+          <div className="desk-payout-due">
             <span>Current payout due</span>
             <strong>{payoutDue == null ? '…' : money(payoutDue)}</strong>
-          </aside>
+          </div>
         )}
       </div>
 
