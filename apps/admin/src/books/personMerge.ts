@@ -13,6 +13,11 @@ export function canonicalPersonKey(name: string, email?: string | null): Canonic
   return null;
 }
 
+/** Desktop home payout box is only for Jacob. */
+export function viewerIsJacob(displayName: string | null | undefined, email: string | null | undefined): boolean {
+  return canonicalPersonKey(displayName || '', email) === 'jacob';
+}
+
 export function canonicalPersonLabel(key: CanonicalPerson): string {
   return ({ paul: 'Paul', jacob: 'Jacob', steve: 'Steve' } as const)[key];
 }

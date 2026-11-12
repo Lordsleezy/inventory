@@ -12,4 +12,6 @@ test('staff Home renders associate desk when not fullAccess', async () => {
   assert.match(src, /desk-grid is-associate/);
   assert.match(src, /deskAccess === 'owner'/);
   assert.match(src, /OWNER_JUMP_LINKS/);
+  assert.match(src, /Current payout due/);
+  assert.match(src, /viewerIsJacob/);
 });

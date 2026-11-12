@@ -371,8 +371,21 @@ html.desk:not(.app-mode) .connection-card {
 }
 
 /* Home */
+html.desk:not(.app-mode) .desk-home-top {
+  display: flex; justify-content: space-between; align-items: flex-start; gap: 24px;
+}
 html.desk:not(.app-mode) .desk-date { margin: 0 0 8px; color: #a0a0a0; }
 html.desk:not(.app-mode) .desk-hello { font-size: clamp(2rem, 4vw, 3.2rem); margin: 0 0 28px; font-weight: 700; }
+html.desk:not(.app-mode) .desk-payout-due { margin: 4px 0 0; text-align: right; flex: 0 0 auto; }
+html.desk:not(.app-mode) .desk-payout-due span {
+  display: block; margin: 0 0 8px; color: #a0a0a0; font-size: 11px;
+  letter-spacing: .06em; text-transform: uppercase;
+}
+html.desk:not(.app-mode) .desk-payout-due strong {
+  display: block; min-width: 148px; box-sizing: border-box;
+  border: 1px solid #fff; border-radius: 8px; padding: 12px 16px;
+  color: #fff; background: #000; font-size: 1.7rem; font-variant-numeric: tabular-nums; text-align: center;
+}
 html.desk:not(.app-mode) .desk-attention {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
