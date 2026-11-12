@@ -14,4 +14,6 @@ test('staff Home renders associate desk when not fullAccess', async () => {
   assert.match(src, /OWNER_JUMP_LINKS/);
   assert.match(src, /Current payout due/);
   assert.match(src, /viewerIsJacob/);
+  assert.match(src, /desk-attention/);
+  assert.match(src, /<div className="desk-payout-due">/);
 });
