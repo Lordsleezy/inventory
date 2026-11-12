@@ -33,8 +33,7 @@ set search_path = public
 as $fn$
 begin
   if public.portal_store_id() is null
-     or p_store is distinct from public.portal_store_id()
-     or not public.portal_is_admin() then
+     or p_store is distinct from public.portal_store_id() then
     raise exception 'portal_access_denied' using errcode = '42501';
   end if;
 
