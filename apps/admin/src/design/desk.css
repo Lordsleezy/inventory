@@ -650,6 +650,10 @@ html.desk:not(.app-mode) .manifests-drop.slim { margin: 0 0 12px; padding: 14px;
 html.desk:not(.app-mode) .manifests-table th { text-transform: uppercase; letter-spacing: .06em; font-size: 11px; }
 html.desk:not(.app-mode) .manifests-table td.num,
 html.desk:not(.app-mode) .manifests-table th.num { text-align: right; font-variant-numeric: tabular-nums; }
+html.desk:not(.app-mode) .manifests-cost input {
+  width: 7.2rem; min-height: 32px; padding: 4px 8px; text-align: right;
+  font-variant-numeric: tabular-nums;
+}
 html.desk:not(.app-mode) .manifests-actions { display: flex; gap: 6px; justify-content: flex-end; white-space: nowrap; }
 html.desk:not(.app-mode) .manifests-actions button {
   min-height: 28px !important; padding: 2px 10px !important; font-size: 13px;
