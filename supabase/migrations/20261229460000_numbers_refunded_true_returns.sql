@@ -1,5 +1,7 @@
 -- Numbers → Profit "Refunded": true post-delivery returns/refunds only.
 -- Excludes cancel-before-ship voids (and other non-return voids).
+-- Version 20261229450000 is the manifest lot cost. This file is 20261229460000 so it does not collide.
+-- Callers only see portal_store_id(); a passed store id cannot read another store.
 
 begin;
 
@@ -82,6 +84,7 @@ as $fn$
       limit 1
     ) wo on true
     where ret.store_id = p_store
+      and p_store = public.portal_store_id()
       and lower(coalesce(ret.status, '')) not in ('canceled', 'cancelled', 'denied')
       and coalesce(ret.refunded_at, ret.closed_at, ret.created_at) >= p_from
       and coalesce(ret.refunded_at, ret.closed_at, ret.created_at) < p_to
@@ -121,6 +124,7 @@ as $fn$
     ) wo on true
     left join public.units u on u.store_id = l.store_id and u.sku = l.sku
     where l.store_id = p_store
+      and p_store = public.portal_store_id()
       and l.voided_at is not null
       and l.voided_at >= p_from
       and l.voided_at < p_to
