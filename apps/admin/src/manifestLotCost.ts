@@ -8,6 +8,13 @@ export function parseLotCostCents(raw: string): number | null {
   return cents;
 }
 
+/** Per-unit $ × item_count → the lot total to store (cents). */
+export function manifestTotalFromEachCents(eachCents: number, itemCount: number): number | null {
+  if (!Number.isFinite(eachCents) || eachCents < 0) return null;
+  if (!Number.isInteger(itemCount) || itemCount <= 0) return null;
+  return eachCents * itemCount;
+}
+
 /** Total lot $ ÷ item_count → per-unit acquisition cost (cents). */
 export function manifestUnitCostCents(totalCents: number, itemCount: number): number | null {
   if (!Number.isFinite(totalCents) || totalCents < 0) return null;

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { formatCentsAsDollars, manifestUnitCostCents, parseLotCostCents } from './manifestLotCost.ts';
+import { formatCentsAsDollars, manifestTotalFromEachCents, manifestUnitCostCents, parseLotCostCents } from './manifestLotCost.ts';
 
 test('parseLotCostCents accepts dollars and rejects junk', () => {
   assert.equal(parseLotCostCents('100'), 10000);
@@ -19,6 +19,12 @@ test('manifestUnitCostCents divides the lot by item count', () => {
   assert.equal(manifestUnitCostCents(0, 50), 0);
   assert.equal(manifestUnitCostCents(500, 0), null);
   assert.equal(manifestUnitCostCents(-1, 10), null);
+});
+
+test('manifestTotalFromEachCents multiplies the unit cost by item count', () => {
+  assert.equal(manifestTotalFromEachCents(111, 909), 100899);
+  assert.equal(manifestTotalFromEachCents(0, 6), 0);
+  assert.equal(manifestTotalFromEachCents(100, 0), null);
 });
 
 test('formatCentsAsDollars is fixed to two places', () => {
