@@ -1,5 +1,6 @@
 -- Lot purchase cost on a saved manifest: divide by item_count and set unit costs.
 -- Used from the Manifests tab for already-entered loads.
+-- Version 20261229360000 is the Rugs and Mats bay. This file is 20261229450000 so it does not collide.
 
 begin;
 
