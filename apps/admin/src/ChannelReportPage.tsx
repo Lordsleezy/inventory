@@ -37,7 +37,7 @@ const METRIC_LABELS: Record<MetricKey, string> = {
   expenses: 'Expenses',
   label_expenses: 'Labels & return labels',
   tax_collected: 'Sales tax collected',
-  refunds: 'Refunded',
+  refunds: 'Refunded (after ship)',
 };
 
 const day = (d: Date) => d.toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
@@ -222,7 +222,7 @@ export function ChannelReportPage({ client, money, embedded, mode = 'full', nati
           <Stat name="Item cost" value={money(totals.cost)} onClick={() => setDrill('cost')} active={drill === 'cost'} />
           <Stat name="Profit" value={money(totals.profit)} onClick={() => setDrill('profit')} active={drill === 'profit'} />
         </>}
-        {mode === 'full' && refundTotal > 0 && <Stat name="Refunded" value={money(refundTotal)} onClick={() => setDrill('refunds')} active={drill === 'refunds'} />}
+        {mode === 'full' && refundTotal > 0 && <Stat name="Refunded" value={money(refundTotal)} onClick={() => setDrill('refunds')} active={drill === 'refunds'} note="Returns after ship — not cancel-before-ship" />}
         {mode === 'fees' && channel === 'all' && report.label_expense_cents > 0 && <Stat name="Label expenses (ledger)" value={money(report.label_expense_cents)} onClick={() => setDrill('label_expenses')} active={drill === 'label_expenses'} note={(report.return_label_expense_cents || 0) > 0 ? `includes ${money(report.return_label_expense_cents || 0)} return labels` : undefined} />}
       </div>
       {mode === 'full' && (() => {
