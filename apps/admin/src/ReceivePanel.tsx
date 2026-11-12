@@ -2201,7 +2201,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     <div className="receive-next">
       <div className="receive-sku-block">
         <div><div className="eyebrow">NEXT AVAILABLE SKU</div><strong>{options?.next_sku || 'Loading…'}</strong></div>
-        {!manual && !showForm && <label className="receive-upc">Scan UPC
+        {!manual && !showForm && <label className="receive-upc">Scan UPC or item #
           <input
             ref={upcInput}
             value={draft || (!manual && showForm && current?.upc) || ''}
@@ -2220,7 +2220,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
             inputMode={scannerInputMode()}
             autoComplete="off"
             enterKeyHint="done"
-            placeholder={isKioskShell() ? 'Scan barcode' : 'Scan barcode or item #'}
+            placeholder={isKioskShell() ? 'Scan barcode' : 'Scan or type · Enter'}
             disabled={!accessToken || formOpen}
           />
         </label>}
