@@ -762,6 +762,13 @@ html.dark .mboard-progress-bar{background:#2a3340}
 .manifest-total-divider{border:0;border-top:1px solid var(--tool-border,#394454);margin:10px 0}
 .manifest-metrics{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
 .manifest-metrics span{border:1px solid #e5e9ee;border-radius:8px;padding:8px 10px;font-size:.8rem}
+.manifest-lot-cost{display:grid;gap:8px;margin:0 0 12px;padding:12px;border:1px solid #e5e9ee;border-radius:10px}
+.manifest-lot-cost label{display:grid;gap:4px;font-size:.85rem;font-weight:650}
+.manifest-lot-cost input[type="text"],.manifest-lot-cost input:not([type]),.manifest-lot-cost input[inputmode]{min-height:44px}
+.manifest-lot-cost small{color:#71808d;font-weight:400;line-height:1.35}
+.manifest-lot-overwrite{display:flex!important;align-items:center;gap:8px;font-weight:500!important}
+.manifest-lot-overwrite input{width:auto;min-height:0}
+.manifest-lot-cost > button{justify-self:start}
 .manifest-bulk{display:grid;gap:10px}.manifest-bulk button{justify-self:start}
 @media(max-width:750px){.manifest-form{grid-template-columns:1fr 1fr}}
 @media(max-width:500px){.manifest-form{grid-template-columns:1fr}}
