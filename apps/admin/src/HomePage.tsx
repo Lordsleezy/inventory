@@ -4,6 +4,7 @@ import type { DeskPulse } from './deskPulse';
 import { dayPart, firstName } from './homeGreeting';
 import type { NavState } from './navigation';
 import { ASSOCIATE_LINKS, OWNER_JUMP_LINKS, type DeskAccess } from './deskNav';
+import { loadMyPayoutDue, viewerIsJacob } from './homeDesk';
 import { loadOwnerHome, type OwnerHomePayload } from './ownerHome';
 
 type Props = {
@@ -59,8 +60,10 @@ export function HomePage({ displayName, email, deskAccess, pulse, client, access
   const name = firstName(displayName, email);
   const [{ hello, date }] = useState(laNow);
   const [ownerHome, setOwnerHome] = useState<OwnerHomePayload | null>(null);
+  const [payoutDue, setPayoutDue] = useState<number | null>(null);
   const fullAccess = deskAccess === 'admin';
   const isOwner = deskAccess === 'owner';
+  const isJacob = viewerIsJacob(displayName, email);
   const deskLinks = ASSOCIATE_LINKS;
 
   useEffect(() => {
@@ -72,12 +75,31 @@ export function HomePage({ displayName, email, deskAccess, pulse, client, access
     return () => { alive = false; };
   }, [isOwner, storeId, client, accessToken]);
 
+  useEffect(() => {
+    if (!isJacob) return;
+    let alive = true;
+    void loadMyPayoutDue(client)
+      .then((cents) => { if (alive) setPayoutDue(cents); })
+      .catch(() => { if (alive) setPayoutDue(null); });
+    return () => { alive = false; };
+  }, [isJacob, client]);
+
   const owedTotal = ownerHome?.owed.reduce((n, row) => n + row.cents, 0) ?? 0;
 
   return (
     <div className="desk-home">
-      <p className="desk-date">{date}</p>
-      <h1 className="desk-hello">{hello}, {name}.</h1>
+      <div className="desk-home-top">
+        <div>
+          <p className="desk-date">{date}</p>
+          <h1 className="desk-hello">{hello}, {name}.</h1>
+        </div>
+        {isJacob && (
+          <aside className="desk-payout-due">
+            <span>Current payout due</span>
+            <strong>{payoutDue == null ? '…' : money(payoutDue)}</strong>
+          </aside>
+        )}
+      </div>
 
       {isOwner && (
         <>

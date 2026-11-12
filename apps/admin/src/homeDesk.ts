@@ -1,7 +1,9 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { normalizeReport, monthLabel } from './books/booksMath';
 import { loadBooksPayoutContext, loadCommissionOverrides } from './books/loadPayoutContext';
-import { canonicalPersonKey, mergeEmployeeIds } from './books/personMerge';
+import { canonicalPersonKey, mergeEmployeeIds, viewerIsJacob } from './books/personMerge';
+
+export { viewerIsJacob };
 import { computePayoutPersonBalances, loadPayoutLedgerData } from './books/payoutLedger';
 import type { InventorySummary, Period, ReceivedItem, Report } from './books/types';
 import { buildBooksWorkbook, loadBooksMoney } from './books/workbook';
@@ -126,6 +128,14 @@ export async function loadHomeDesk(client: SupabaseClient, token: string, storeI
     { name: 'Dropship', detail: pulse.dropship || '—', when: '—' },
   ];
   return { missingCost: missing, returnsUntracked: returns, owed, channels, booksIssues: books };
+}
+
+/** Jacob's current payout due. Null when this login is not Jacob. */
+export async function loadMyPayoutDue(client: SupabaseClient): Promise<number | null> {
+  const res = await client.rpc('portal_my_payout_due');
+  if (res.error) throw res.error;
+  if (res.data == null) return null;
+  return Number(res.data);
 }
 
 export async function loadOwedPeople(client: SupabaseClient, storeId: string): Promise<OwedPerson[]> {
