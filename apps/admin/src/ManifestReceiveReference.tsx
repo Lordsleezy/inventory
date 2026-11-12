@@ -24,7 +24,7 @@ export function useManifestReceiveReference(client: SupabaseClient, upc: string)
   return code && result?.code === code ? result : null;
 }
 
-export function ManifestReceiveReference({ result }: { result: ReturnType<typeof useManifestReceiveReference> }) {
+export function ManifestReceiveReference({ result, showMoney = true }: { result: ReturnType<typeof useManifestReceiveReference>; showMoney?: boolean }) {
   if (!result) return null;
   if (result.failed) return <small role="status">Manifest reference unavailable. Keep receiving or retry the scan.</small>;
   if (!result.reference) return null;
@@ -32,12 +32,12 @@ export function ManifestReceiveReference({ result }: { result: ReturnType<typeof
   const identity = manifestIdentityLine(reference);
   return <span className="manifest-receive-reference">
     {identity ? <span className="manifest-receive-identity" role="status">{identity}</span> : null}
-    <span style={{ display: 'block', fontWeight: 700 }} role="status">
+    {showMoney && reference.retail_cents != null && <span style={{ display: 'block', fontWeight: 700 }} role="status">
       Manifest retail: {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(reference.retail_cents / 100)}
       <small style={{ display: 'block', fontWeight: 400 }}>from {reference.manifest_name} · {reference.manifest_on}</small>
-    </span>
+    </span>}
     {reference.expected != null && <small style={{display:'block'}}>{reference.received || 0} of {reference.expected} received for this UPC</small>}
-    {manifestDefectWarnings(reference).map((warning, i) => <span key={i} role="alert" style={{ display: 'block', color: '#b45309', background: '#fff3cd', padding: 10, borderRadius: 8, margin: '6px 0' }}>
+    {manifestDefectWarnings(reference).map((warning, i) => <span key={i} role="alert" style={{ display: 'block', color: '#e5484d', padding: '6px 0' }}>
       {warning}{reference.warnings.length > 1 ? ` (${reference.warnings[i].manifest_name})` : ''}
     </span>)}
   </span>;

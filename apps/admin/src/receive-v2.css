@@ -384,3 +384,30 @@ html:not(.app-mode) .manifest-search-result {
   background: #fff;
   border-color: #111;
 }
+
+.receive-panel.receive-v2 .receive-picker {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 16px;
+}
+.receive-panel.receive-v2 .receive-picker-row,
+.receive-panel.receive-v2 .receive-picker-none {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 64px;
+  padding: 12px 14px;
+  text-align: left;
+  background: #000;
+  color: #fff;
+  border: 1px solid #555;
+  border-radius: 10px;
+  font: inherit;
+}
+.receive-panel.receive-v2 .receive-picker-row strong { display: block; font-weight: 700; }
+.receive-panel.receive-v2 .receive-picker-row small { display: block; color: #aaa; }
+.receive-panel.receive-v2 .receive-picker-row img { width: 56px; height: 56px; object-fit: contain; background: #111; }
+.receive-panel.receive-v2 .receive-picker-none { justify-content: center; font-weight: 700; }
+.receive-panel.receive-v2 .receive-v2-banner label { display: block; margin-top: 8px; }
+.receive-panel.receive-v2 .receive-v2-banner input { width: 100%; }

@@ -9,6 +9,7 @@ import { receiveAccessFromEvent } from "../lib/receive-auth.mjs";
 import { netlifyHandler, floorLog } from "../lib/floor-log.mjs";
 import { lookupUpc } from "../lib/upc-lookup.mjs";
 import { normalizeGtin } from "../lib/gtin-normalize.mjs";
+import { costcoReceiveLookup, pinCostcoVariant, saveCostcoCorrection } from "../lib/costco-receive.mjs";
 
 const BATCH_MAX = 100;
 
@@ -20,6 +21,8 @@ async function actions(event, ctx) {
     const upc = String(body.upc ?? "").trim();
     if (!upc) return json(400, { ok: false, error: "upc_required" });
     try {
+      const prewarmed = await costcoReceiveLookup(ctx.sb, ctx.storeId, upc, { stripMoney: ctx.isAdmin !== true });
+      if (prewarmed) return json(200, prewarmed);
       const result = await lookupUpc(ctx.storeId, upc, {
         force: body.force === true,
         compareUpcitemdb: body.compare_upcitemdb === true,
@@ -35,6 +38,33 @@ async function actions(event, ctx) {
       });
       if (err.code === "invalid_gtin") return json(400, { ok: false, error: "invalid_gtin", message: err.message });
       throw err;
+    }
+  }
+
+  if (action === "pin_variant") {
+    try {
+      const card = await pinCostcoVariant(ctx.sb, ctx.storeId, {
+        code: body.upc,
+        title: body.title,
+        itemNumber: body.item_number,
+      }, { stripMoney: ctx.isAdmin !== true });
+      return json(200, card);
+    } catch (err) {
+      return json(err.status || 500, { ok: false, error: err.message || "pin_failed" });
+    }
+  }
+
+  if (action === "save_correction") {
+    try {
+      const saved = await saveCostcoCorrection(ctx.sb, ctx.storeId, {
+        code: body.upc,
+        itemNumber: body.item_number,
+        field: body.field,
+        value: body.value,
+      });
+      return json(200, saved);
+    } catch (err) {
+      return json(err.status || 500, { ok: false, error: err.message || "correction_failed" });
     }
   }
 
